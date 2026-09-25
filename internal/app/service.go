@@ -170,6 +170,9 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if in.Origin.ChatID != "" && (out.State == "complete" || out.State == "partial" || out.State == "failed") {
 			return s.Enqueue(ctx, tx, tenant, sid, "deliver")
 		}
+		if in.Origin.ChatID != "" {
+			return s.Enqueue(ctx, tx, tenant, sid, "status")
+		}
 		return nil
 	})
 	return

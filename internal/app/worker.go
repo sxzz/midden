@@ -45,6 +45,8 @@ func (w *Worker) Work(ctx context.Context, j *river.Job[store.Task]) error {
 		e = w.S.download(ctx, j.Args)
 	case "deliver":
 		e = w.S.deliver(ctx, j.Args)
+	case "status":
+		e = w.S.submissionStatus(ctx, j.Args)
 	case "inbox":
 		e = w.S.processInbox(ctx, j.Args)
 	case "reply":

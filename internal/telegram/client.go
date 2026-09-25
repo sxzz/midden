@@ -1,17 +1,18 @@
 package telegram
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf16"
+
+	tg "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"monitor/internal/blob"
 	"monitor/internal/domain"
@@ -23,66 +24,58 @@ type Client struct {
 	HTTP  *http.Client
 	Blobs blob.Storage
 }
-
 type APIError struct {
 	Code       int
 	RetryAfter time.Duration
 }
 
 func (e *APIError) Error() string { return fmt.Sprintf("telegram API error %d", e.Code) }
-func (c *Client) endpoint(method string) string {
+
+// Attach cancellation to SDK requests and never expose token-bearing transport errors.
+type contextClient struct {
+	ctx    context.Context
+	client *http.Client
+}
+
+func (c contextClient) Do(r *http.Request) (*http.Response, error) {
+	if r.Body != nil {
+		defer r.Body.Close()
+	}
+	return c.client.Do(r.WithContext(c.ctx))
+}
+
+func (c *Client) sdk(ctx context.Context) *tg.BotAPI {
+	client := c.HTTP
+	if client == nil {
+		client = &http.Client{Timeout: 75 * time.Second}
+	}
+	b := &tg.BotAPI{Token: c.Token, Client: contextClient{ctx, client}}
 	base := c.Base
 	if base == "" {
 		base = "https://api.telegram.org"
 	}
-	return base + "/bot" + c.Token + "/" + method
+	b.SetAPIEndpoint(base + "/bot%s/%s")
+	return b
 }
 
-func (c *Client) call(ctx context.Context, method string, in any, out any) error {
-	b, e := json.Marshal(in)
-	if e != nil {
-		return e
+func apiError(err error) error {
+	if err == nil {
+		return nil
 	}
-	r, e := http.NewRequestWithContext(ctx, "POST", c.endpoint(method), bytes.NewReader(b))
-	if e != nil {
-		return fmt.Errorf("telegram request failed")
+	var existing *APIError
+	if errors.As(err, &existing) {
+		return existing
 	}
-	r.Header.Set("Content-Type", "application/json")
-	res, e := c.HTTP.Do(r)
-	if e != nil {
-		return fmt.Errorf("telegram transport failed")
+	var e *tg.Error
+	if errors.As(err, &e) {
+		return &APIError{e.Code, time.Duration(e.RetryAfter) * time.Second}
 	}
-	defer res.Body.Close()
-	return decode(res.Body, out)
-}
-
-func decode(r io.Reader, out any) error {
-	var env struct {
-		OK     bool            `json:"ok"`
-		Result json.RawMessage `json:"result"`
-		Code   int             `json:"error_code"`
-		Params struct {
-			Retry int `json:"retry_after"`
-		} `json:"parameters"`
-	}
-	if e := json.NewDecoder(io.LimitReader(r, 8<<20)).Decode(&env); e != nil {
-		return fmt.Errorf("invalid telegram response")
-	}
-	if !env.OK {
-		return &APIError{env.Code, time.Duration(env.Params.Retry) * time.Second}
-	}
-	if out != nil {
-		return json.Unmarshal(env.Result, out)
-	}
-	return nil
+	return fmt.Errorf("telegram transport failed")
 }
 
 func (c *Client) Me(ctx context.Context) (string, error) {
-	var out struct {
-		ID int64 `json:"id"`
-	}
-	e := c.call(ctx, "getMe", map[string]any{}, &out)
-	return strconv.FormatInt(out.ID, 10), e
+	u, e := c.sdk(ctx).GetMe()
+	return strconv.FormatInt(u.ID, 10), apiError(e)
 }
 
 type Entity struct {
@@ -109,84 +102,208 @@ type Message struct {
 }
 
 type Update struct {
-	ID      int64    `json:"update_id"`
+	ID       int64     `json:"update_id"`
+	Message  *Message  `json:"message"`
+	Callback *Callback `json:"callback_query,omitempty"`
+}
+
+type Callback struct {
+	ID   string `json:"id"`
+	From struct {
+		ID  int64 `json:"id"`
+		Bot bool  `json:"is_bot"`
+	} `json:"from"`
 	Message *Message `json:"message"`
+	Data    string   `json:"data"`
+}
+
+// PrivateMessage derives identity from the actor, never from callback data.
+func (u Update) PrivateMessage() *Message {
+	m := u.Message
+	if u.Callback != nil {
+		q := u.Callback
+		if q.Message == nil || q.From.Bot || q.Message.Chat.ID != q.From.ID {
+			return nil
+		}
+		copy := *q.Message
+		copy.From.ID = q.From.ID
+		copy.From.Bot = q.From.Bot
+		m = &copy
+	}
+	if m == nil || m.Chat.Type != "private" || m.From.Bot || m.Chat.ID != m.From.ID {
+		return nil
+	}
+	return m
 }
 
 func (c *Client) Updates(ctx context.Context, offset int64) ([]Update, error) {
+	cfg := tg.NewUpdate(int(offset))
+	cfg.Timeout = 30
+	cfg.Limit = 100
+	cfg.AllowedUpdates = []string{"message", "callback_query"}
+	updates, e := c.sdk(ctx).GetUpdates(cfg)
+	if e != nil {
+		return nil, apiError(e)
+	}
+	raw, e := json.Marshal(updates)
+	if e != nil {
+		return nil, e
+	}
 	var out []Update
-	e := c.call(ctx, "getUpdates", map[string]any{"offset": offset, "timeout": 30, "limit": 100, "allowed_updates": []string{"message"}}, &out)
+	e = json.Unmarshal(raw, &out)
 	return out, e
 }
 
+type Button struct {
+	Text string `json:"text"`
+	Data string `json:"callback_data,omitempty"`
+	URL  string `json:"url,omitempty"`
+}
+type Keyboard [][]Button
+
+func markup(buttons Keyboard) tg.InlineKeyboardMarkup {
+	rows := make([][]tg.InlineKeyboardButton, 0, len(buttons))
+	for _, row := range buttons {
+		r := []tg.InlineKeyboardButton{}
+		for _, b := range row {
+			if b.URL != "" {
+				r = append(r, tg.NewInlineKeyboardButtonURL(b.Text, b.URL))
+			} else {
+				r = append(r, tg.NewInlineKeyboardButtonData(b.Text, b.Data))
+			}
+		}
+		rows = append(rows, r)
+	}
+	return tg.NewInlineKeyboardMarkup(rows...)
+}
+
 func (c *Client) Send(ctx context.Context, chat, text string, previous int64) (int64, error) {
-	method := "sendMessage"
-	in := map[string]any{"chat_id": chat, "text": text, "link_preview_options": map[string]bool{"is_disabled": true}}
+	return c.SendInteractive(ctx, chat, text, previous, nil)
+}
+
+func (c *Client) SendInteractive(ctx context.Context, chat, text string, previous int64, buttons Keyboard) (int64, error) {
+	id, e := strconv.ParseInt(chat, 10, 64)
+	if e != nil {
+		return 0, fmt.Errorf("invalid chat")
+	}
+	b := c.sdk(ctx)
 	if previous != 0 {
-		method = "editMessageText"
-		in["message_id"] = previous
+		cfg := tg.NewEditMessageTextAndMarkup(id, int(previous), text, markup(buttons))
+		cfg.DisableWebPagePreview = true
+		m, err := b.Send(cfg)
+		if err == nil {
+			return int64(m.MessageID), nil
+		}
+		var a *tg.Error
+		if errors.As(err, &a) && a.Code == 400 {
+			if strings.Contains(a.Message, "message is not modified") {
+				return previous, nil
+			}
+			if strings.Contains(a.Message, "message to edit not found") || strings.Contains(a.Message, "message can't be edited") {
+				return c.SendInteractive(ctx, chat, text, 0, buttons)
+			}
+		}
+		return 0, apiError(err)
 	}
-	var out struct {
-		ID int64 `json:"message_id"`
+	cfg := tg.NewMessage(id, text)
+	cfg.DisableWebPagePreview = true
+	cfg.ReplyMarkup = markup(buttons)
+	m, e := b.Send(cfg)
+	return int64(m.MessageID), apiError(e)
+}
+
+func (c *Client) Action(ctx context.Context, chat, action string) error {
+	id, e := strconv.ParseInt(chat, 10, 64)
+	if e != nil {
+		return e
 	}
-	e := c.call(ctx, method, in, &out)
-	if a, ok := e.(*APIError); ok && a.Code == 400 && previous != 0 { // Verify an ambiguous edit by sending a new status; duplicate delivery is permitted.
-		return c.Send(ctx, chat, text, 0)
-	}
-	return out.ID, e
+	_, e = c.sdk(ctx).Request(tg.NewChatAction(id, action))
+	return apiError(e)
+}
+
+func (c *Client) Answer(ctx context.Context, id string) error {
+	_, e := c.sdk(ctx).Request(tg.NewCallback(id, ""))
+	return apiError(e)
 }
 
 func (c *Client) Image(ctx context.Context, chat string, a domain.Asset) (int64, error) {
-	id, e := c.upload(ctx, "sendPhoto", "photo", chat, a)
-	if x, ok := e.(*APIError); ok && x.Code == 400 {
-		return c.upload(ctx, "sendDocument", "document", chat, a)
+	id, e := c.upload(ctx, chat, a, false)
+	var x *APIError
+	if errors.As(e, &x) && x.Code == 400 {
+		return c.upload(ctx, chat, a, true)
 	}
 	return id, e
 }
 
-func (c *Client) upload(ctx context.Context, method, field, chat string, a domain.Asset) (int64, error) {
+func (c *Client) upload(ctx context.Context, chat string, a domain.Asset, document bool) (int64, error) {
+	id, e := strconv.ParseInt(chat, 10, 64)
+	if e != nil {
+		return 0, e
+	}
 	r, e := c.Blobs.Get(ctx, a.Key)
 	if e != nil {
 		return 0, fmt.Errorf("archived image unavailable")
 	}
 	defer r.Close()
-	reader, writer := io.Pipe()
-	multi := multipart.NewWriter(writer)
-	done := make(chan error, 1)
-	go func() {
-		err := multi.WriteField("chat_id", chat)
-		if err == nil {
-			var part io.Writer
-			part, err = multi.CreateFormFile(field, a.Hash+extension(a.MIME))
-			if err == nil {
-				_, err = io.Copy(part, r)
-			}
+	file := tg.FileReader{Name: a.Hash + extension(a.MIME), Reader: r}
+	var cfg tg.Chattable = tg.NewPhoto(id, file)
+	if document {
+		cfg = tg.NewDocument(id, file)
+	}
+	var m tg.Message
+	e = c.request(ctx, cfg, &m)
+	return int64(m.MessageID), e
+}
+
+func (c *Client) Images(ctx context.Context, chat string, assets []domain.Asset) (int64, error) {
+	if len(assets) == 1 {
+		return c.Image(ctx, chat, assets[0])
+	}
+	if len(assets) < 2 || len(assets) > 10 {
+		return 0, fmt.Errorf("invalid album size")
+	}
+	id, e := c.album(ctx, chat, assets, false)
+	var x *APIError
+	if errors.As(e, &x) && x.Code == 400 {
+		return c.album(ctx, chat, assets, true)
+	}
+	return id, e
+}
+
+func (c *Client) album(ctx context.Context, chat string, assets []domain.Asset, document bool) (int64, error) {
+	id, e := strconv.ParseInt(chat, 10, 64)
+	if e != nil {
+		return 0, e
+	}
+	files := []interface{}{}
+	var readers []io.ReadCloser
+	defer func() {
+		for _, r := range readers {
+			r.Close()
 		}
-		if err == nil {
-			err = multi.Close()
-		}
-		writer.CloseWithError(err)
-		done <- err
 	}()
-	req, e := http.NewRequestWithContext(ctx, "POST", c.endpoint(method), reader)
+	for _, a := range assets {
+		r, e := c.Blobs.Get(ctx, a.Key)
+		if e != nil {
+			return 0, fmt.Errorf("archived image unavailable")
+		}
+		readers = append(readers, r)
+		file := tg.FileReader{Name: a.Hash + extension(a.MIME), Reader: r}
+		if document {
+			files = append(files, tg.NewInputMediaDocument(file))
+		} else {
+			files = append(files, tg.NewInputMediaPhoto(file))
+		}
+	}
+	var messages []tg.Message
+	e = c.request(ctx, tg.NewMediaGroup(id, files), &messages)
 	if e != nil {
-		reader.Close()
-		<-done
-		return 0, fmt.Errorf("telegram request failed")
+		return 0, apiError(e)
 	}
-	req.Header.Set("Content-Type", multi.FormDataContentType())
-	res, e := c.HTTP.Do(req)
-	reader.Close()
-	<-done
-	if e != nil {
-		return 0, fmt.Errorf("telegram upload failed")
+	if len(messages) == 0 {
+		return 0, fmt.Errorf("empty telegram album response")
 	}
-	defer res.Body.Close()
-	var out struct {
-		ID int64 `json:"message_id"`
-	}
-	e = decode(res.Body, &out)
-	return out.ID, e
+	return int64(messages[0].MessageID), nil
 }
 
 func extension(m string) string {
@@ -250,79 +367,28 @@ func Split(s string) []string {
 	return out
 }
 
-// Images sends one album (2–10 items), with a document-album fallback.
-func (c *Client) Images(ctx context.Context, chat string, assets []domain.Asset) (int64, error) {
-	if len(assets) == 1 {
-		return c.Image(ctx, chat, assets[0])
+// v5.5.1 omits Error.Code on uploads; retain it from the SDK response envelope.
+func (c *Client) request(ctx context.Context, cfg tg.Chattable, out any) error {
+	response, err := c.sdk(ctx).Request(cfg)
+	if err != nil {
+		if response != nil && response.ErrorCode != 0 {
+			retry := time.Duration(0)
+			if response.Parameters != nil {
+				retry = time.Duration(response.Parameters.RetryAfter) * time.Second
+			}
+			return &APIError{response.ErrorCode, retry}
+		}
+		return apiError(err)
 	}
-	if len(assets) < 2 || len(assets) > 10 {
-		return 0, fmt.Errorf("invalid album size")
+	if err = json.Unmarshal(response.Result, out); err != nil {
+		return fmt.Errorf("invalid telegram response")
 	}
-	id, e := c.album(ctx, chat, assets, "photo")
-	if a, ok := e.(*APIError); ok && a.Code == 400 {
-		return c.album(ctx, chat, assets, "document")
-	}
-	return id, e
+	return nil
 }
 
-func (c *Client) album(ctx context.Context, chat string, assets []domain.Asset, kind string) (int64, error) {
-	reader, writer := io.Pipe()
-	multi := multipart.NewWriter(writer)
-	done := make(chan error, 1)
-	go func() {
-		err := multi.WriteField("chat_id", chat)
-		media := make([]map[string]string, len(assets))
-		for i := range assets {
-			media[i] = map[string]string{"type": kind, "media": fmt.Sprintf("attach://file%d", i)}
-		}
-		encoded, _ := json.Marshal(media)
-		if err == nil {
-			err = multi.WriteField("media", string(encoded))
-		}
-		for i, a := range assets {
-			if err != nil {
-				break
-			}
-			var r io.ReadCloser
-			r, err = c.Blobs.Get(ctx, a.Key)
-			if err != nil {
-				break
-			}
-			var part io.Writer
-			part, err = multi.CreateFormFile(fmt.Sprintf("file%d", i), a.Hash+extension(a.MIME))
-			if err == nil {
-				_, err = io.Copy(part, r)
-			}
-			r.Close()
-		}
-		if err == nil {
-			err = multi.Close()
-		}
-		writer.CloseWithError(err)
-		done <- err
-	}()
-	req, e := http.NewRequestWithContext(ctx, "POST", c.endpoint("sendMediaGroup"), reader)
-	if e != nil {
-		reader.Close()
-		<-done
-		return 0, fmt.Errorf("telegram request failed")
-	}
-	req.Header.Set("Content-Type", multi.FormDataContentType())
-	res, e := c.HTTP.Do(req)
-	reader.Close()
-	<-done
-	if e != nil {
-		return 0, fmt.Errorf("telegram album upload failed")
-	}
-	defer res.Body.Close()
-	var messages []struct {
-		ID int64 `json:"message_id"`
-	}
-	if e = decode(res.Body, &messages); e != nil {
-		return 0, e
-	}
-	if len(messages) == 0 {
-		return 0, fmt.Errorf("empty telegram album response")
-	}
-	return messages[0].ID, nil
+type Command = tg.BotCommand
+
+func (c *Client) ConfigureCommands(ctx context.Context, commands []Command) error {
+	_, err := c.sdk(ctx).Request(tg.NewSetMyCommands(commands...))
+	return apiError(err)
 }

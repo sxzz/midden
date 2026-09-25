@@ -206,6 +206,9 @@ CREATE TABLE IF NOT EXISTS inbox (
     UNIQUE (tenant_id, id)
 );
 
+ALTER TABLE submissions
+    ADD COLUMN IF NOT EXISTS status_text text NOT NULL DEFAULT '';
+
 CREATE TABLE IF NOT EXISTS replies (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
@@ -216,6 +219,9 @@ CREATE TABLE IF NOT EXISTS replies (
     message_id bigint NOT NULL DEFAULT 0,
     FOREIGN KEY (tenant_id, inbox_id) REFERENCES inbox (tenant_id, id)
 );
+
+ALTER TABLE replies
+    ADD COLUMN IF NOT EXISTS buttons jsonb NOT NULL DEFAULT '[]';
 
 DO $$
 DECLARE

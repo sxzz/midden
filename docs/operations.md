@@ -69,4 +69,22 @@ monitorctl token-revoke <token-uuid>
 monitorctl channel-create <stable-channel-uuid> <bot-numeric-id>
 ```
 
-所有命令使用 `ADMIN_DATABASE_URL`。已有租户的 quota_bytes 可由管理员在核对租户 ID 后更新；更改默认 TENANT_QUOTA_BYTES 仅影响之后新建的租户。多渠道身份关联及账号 Connection 的管理尚未开放，不通过未经验证的用户名、昵称或任意客户端 tenant_id 执行绑定。
+所有命令使用 `ADMIN_DATABASE_URL`。已有租户的 quota_bytes 可由管理员在核对租户 ID 后更新；更改默认 TENANT_QUOTA_BYTES 仅影响之后新建的租户。
+
+## 限额与并发配置
+
+下列变量由核心读取。使用 Docker Compose 时，将所需变量加入 `core.environment` 后重建核心容器。
+
+| 环境变量             | 默认值       | 用途                 |
+| -------------------- | ------------ | -------------------- |
+| `TENANT_QUOTA_BYTES` | `1073741824` | 新租户存储额度       |
+| `CAPTURE_RATE`       | `10`         | 每租户每分钟新采集数 |
+| `TENANT_CONCURRENCY` | `2`          | 每租户同时执行的采集 |
+| `CAPTURE_WORKERS`    | `4`          | 采集 worker 数       |
+| `DOWNLOAD_WORKERS`   | `8`          | 图片下载 worker 数   |
+| `MAX_IMAGE_BYTES`    | `20971520`   | 单图最大字节数       |
+| `MAX_IMAGES`         | `20`         | 每帖最多图片数       |
+
+修改默认存储额度不影响已有租户，已有租户使用 `tenants.quota_bytes`。读取归档不受剩余额度限制。
+
+增加 worker 数时，按核心启动时的连接池校验要求调整 `DATABASE_URL` 中的 `pool_max_conns`，给持锁任务、业务事务和 API 留出连接余量。Adapter 跨主机部署时，可设置服务端 `ADAPTER_TLS_CERT`、`ADAPTER_TLS_KEY` 和核心 `ADAPTER_TLS_CA`。
