@@ -92,6 +92,16 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
   /v1/archives/{id}:
+    delete:
+      summary: Remove this tenant's collection reference and release its logical usage
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses:
+        "204":
+          {
+            description: Collection reference removed; other tenants are unaffected,
+          }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
     get:
       summary: Read the current retained revision
       parameters: [{ $ref: "#/components/parameters/ID" }]

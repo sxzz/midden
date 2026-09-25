@@ -153,6 +153,7 @@ func archiveButtons(id, url string) telegram.Keyboard {
 	return telegram.Keyboard{
 		{{Text: "查看归档", Data: "/show " + id}, {Text: "重新抓取", Data: "/refresh " + id}},
 		{{Text: "原帖", URL: url}, {Text: "最近归档", Data: "/recent"}},
+		{{Text: "取消收藏", Data: "/forget " + id}},
 	}
 }
 

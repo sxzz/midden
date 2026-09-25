@@ -183,7 +183,7 @@ func TestPublicSharing(t *testing.T) {
 	if objects != 1 {
 		t.Fatal("duplicate stored images", objects)
 	}
-	// A third subscriber reuses content without storage charges or another fetch.
+	// Each subscriber is charged for its references, without another physical copy or fetch.
 	before := fake.calls.Load()
 	reuse, e := s.Submit(ctx, c, domain.CaptureInput{URL: target})
 	must(t, e)
@@ -192,9 +192,53 @@ func TestPublicSharing(t *testing.T) {
 	}
 	u, e := s.Usage(ctx, c)
 	must(t, e)
-	if u.Used != 0 || u.Reserved != 0 {
-		t.Fatal("duplicate storage charge")
+	ua, e := s.Usage(ctx, a)
+	must(t, e)
+	ub, e := s.Usage(ctx, b)
+	must(t, e)
+	if u.Used <= 0 || u.Used != ua.Used || u.Used != ub.Used || u.Reserved != 0 {
+		t.Fatal("logical usage differs", ua, ub, u)
 	}
+	// Removing the original subscriber releases only that tenant's references.
+	must(t, s.Forget(ctx, a, j.ArchiveID))
+	ua, e = s.Usage(ctx, a)
+	must(t, e)
+	ub, e = s.Usage(ctx, b)
+	must(t, e)
+	if ua.Used != 0 || ub.Used != u.Used {
+		t.Fatal("forget changed another subscriber's usage", ua, ub)
+	}
+	_, e = s.Archive(ctx, b, j.ArchiveID)
+	must(t, e)
+	// Existing shared content cannot be added when the tenant lacks logical quota.
+	_, e = admin.Pool.Exec(ctx, `UPDATE tenants SET quota_bytes=1 WHERE id=$1`, a)
+	must(t, e)
+	if _, e = s.Submit(ctx, a, domain.CaptureInput{URL: target}); e != domain.ErrQuota {
+		t.Fatal("reused content bypassed quota", e)
+	}
+	_, e = admin.Pool.Exec(ctx, `UPDATE tenants SET quota_bytes=$2 WHERE id=$1`, c, u.Used)
+	must(t, e)
+	fake.set("larger shared update", h.URL)
+	next, e := s.Submit(ctx, b, domain.CaptureInput{RefreshID: j.ArchiveID})
+	must(t, e)
+	complete(next)
+	over, e := s.Usage(ctx, c)
+	must(t, e)
+	if over.Used <= over.Limit {
+		t.Fatal("shared update not charged", over)
+	}
+	if _, e = s.Submit(ctx, c, domain.CaptureInput{URL: "https://x.com/a/status/91000000009"}); e != domain.ErrQuota {
+		t.Fatal("over-quota tenant started new work", e)
+	}
+	must(t, s.Forget(ctx, c, j.ArchiveID))
+	empty, e := s.Usage(ctx, c)
+	must(t, e)
+	if empty.Used != 0 {
+		t.Fatal("forget did not release logical usage", empty)
+	}
+	_, e = admin.Pool.Exec(ctx, `UPDATE tenants SET quota_bytes=1073741824 WHERE id=$1`, a)
+	must(t, e)
+
 	// Same target and image under a private provider are isolated from public and other tenants.
 	private := *s
 	private.Adapter = &fakeAdapter{text: "secret", urls: []string{h.URL}}
@@ -247,6 +291,69 @@ func TestPublicSharing(t *testing.T) {
 	})
 	if e == nil {
 		t.Fatal("private submission link accepted")
+	}
+	// The same tenant pays once for a Blob shared by multiple archived posts.
+	beforeUsage, e := s.Usage(ctx, b)
+	must(t, e)
+	second, e := s.Submit(ctx, b, domain.CaptureInput{URL: "https://x.com/a/status/91000000003"})
+	must(t, e)
+	complete(second)
+	var textBytes int64
+	must(t, admin.Pool.QueryRow(ctx, `SELECT sum(content_bytes) FROM revisions WHERE archive_id=$1`, second.ArchiveID).Scan(&textBytes))
+	afterUsage, e := s.Usage(ctx, b)
+	must(t, e)
+	if afterUsage.Used-beforeUsage.Used != textBytes {
+		t.Fatal("image counted twice across the tenant's collections", beforeUsage, afterUsage, textBytes)
+	}
+	secondArchive, e := s.Archive(ctx, b, second.ArchiveID)
+	must(t, e)
+	// The last removal starts delayed cleanup; other references must survive.
+	must(t, s.Forget(ctx, b, j.ArchiveID))
+	var removed int
+	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_archives(interval '24 hours')`).Scan(&removed))
+	if removed != 0 {
+		t.Fatal("archive cleaned before grace")
+	}
+	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_archives(interval '0 seconds')`).Scan(&removed))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM archives WHERE id=$1`, j.ArchiveID).Scan(&n))
+	if n != 0 {
+		t.Fatal("unreferenced archive not removed")
+	}
+	for _, tenant := range []string{a, b, c} {
+		must(t, s.Collect(ctx, tenant, 0))
+	}
+	if _, e = s.Archive(ctx, b, j.ArchiveID); e == nil {
+		t.Fatal("orphan archive remained")
+	}
+	_, e = s.Asset(ctx, a, pa.Assets[0].ID)
+	must(t, e)
+	_, e = s.Asset(ctx, b, pbArchive.Assets[0].ID)
+	must(t, e)
+	_, e = s.Asset(ctx, b, secondArchive.Assets[0].ID)
+	must(t, e)
+	if _, e = mem.Get(ctx, secondArchive.Assets[0].Key); e != nil {
+		t.Fatal("shared image removed while another archive referenced it", e)
+	}
+	must(t, s.Forget(ctx, b, second.ArchiveID))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_archives(interval '0 seconds')`).Scan(&removed))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM archives WHERE id=$1`, second.ArchiveID).Scan(&n))
+	if n != 0 {
+		t.Fatal("last shared reference not collected")
+	}
+	// Removing a collection during capture must not destroy its running task or recreate the collection.
+	inflight, e := s.Submit(ctx, a, domain.CaptureInput{URL: "https://x.com/a/status/91000000004"})
+	must(t, e)
+	must(t, s.Forget(ctx, a, inflight.ArchiveID))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_archives(interval '0 seconds')`).Scan(&removed))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM archives WHERE id=$1`, inflight.ArchiveID).Scan(&n))
+	if n != 1 {
+		t.Fatal("in-flight archive collected")
+	}
+	complete(inflight)
+	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_archives(interval '0 seconds')`).Scan(&removed))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM archives WHERE id=$1`, inflight.ArchiveID).Scan(&n))
+	if n != 0 {
+		t.Fatal("finished unreferenced archive not collected")
 	}
 	// A provider policy mismatch must fail before publishing any text or image.
 	s.Providers = []*pb.Provider{{Id: "xdown", Authentication: "none", Visibility: pb.Visibility_VISIBILITY_PUBLIC}}

@@ -83,4 +83,13 @@ func TestRESTIsolation(t *testing.T) {
 	if w = call("GET", "/v1/usage", "", "wrong"); w.Code != http.StatusUnauthorized {
 		t.Fatal(w.Code)
 	}
+	if w = call("DELETE", "/v1/archives/"+job.ArchiveID, "", b); w.Code != 404 {
+		t.Fatal("foreign collection deletion", w.Code)
+	}
+	if w = call("DELETE", "/v1/archives/"+job.ArchiveID, "", a); w.Code != 204 {
+		t.Fatal("collection deletion", w.Code, w.Body.String())
+	}
+	if w = call("DELETE", "/v1/archives/"+job.ArchiveID, "", a); w.Code != 404 {
+		t.Fatal("repeated deletion", w.Code)
+	}
 }

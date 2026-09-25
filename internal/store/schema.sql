@@ -20,7 +20,6 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 
 CREATE TABLE IF NOT EXISTS tenants (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid () CHECK (id <> '00000000-0000-0000-0000-000000000000'::uuid),
-    used_bytes bigint NOT NULL DEFAULT 0 CHECK (used_bytes >= 0),
     reserved_bytes bigint NOT NULL DEFAULT 0 CHECK (reserved_bytes >= 0),
     quota_bytes bigint NOT NULL DEFAULT 1073741824,
     rate_start timestamptz NOT NULL DEFAULT now(),
@@ -81,6 +80,7 @@ CREATE TABLE IF NOT EXISTS archives (
     provider_id text NOT NULL,
     connection_id uuid,
     current_revision uuid,
+    unreferenced_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     observed_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (data_scope, platform, scope, kind, object_scope, external_id),
@@ -504,3 +504,220 @@ $$;
 REVOKE ALL ON FUNCTION capture_deliveries (uuid) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION capture_deliveries (uuid) TO monitor_app;
+
+-- Bill the authenticated tenant's collection, independently of physical ownership.
+CREATE OR REPLACE FUNCTION tenant_usage ()
+    RETURNS bigint
+    LANGUAGE sql
+    STABLE
+    SET search_path = pg_catalog, public
+    AS $$
+    WITH owned_revisions AS MATERIALIZED (
+        SELECT
+            r.id,
+            r.capture_id,
+            r.content_bytes
+        FROM
+            public.tenant_archives ta
+            JOIN public.revisions r ON r.archive_id = ta.archive_id
+        WHERE
+            ta.tenant_id = nullif (
+                current_setting(
+                    'app.tenant_id', TRUE
+), ''
+)::uuid
+),
+    image_content AS (
+        SELECT DISTINCT
+            b.hash,
+            b.size
+        FROM
+            owned_revisions r
+            JOIN public.assets a ON a.capture_id = r.capture_id
+            JOIN public.blobs b ON b.id = a.blob_id
+)
+    SELECT
+        (coalesce((
+                SELECT
+                    sum(content_bytes)
+                FROM owned_revisions), 0) + coalesce((
+                SELECT
+                    sum(size)
+                FROM image_content), 0))::bigint
+$$;
+
+REVOKE ALL ON FUNCTION tenant_usage () FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION tenant_usage () TO monitor_app;
+
+CREATE INDEX IF NOT EXISTS revisions_archive ON revisions (archive_id);
+
+CREATE INDEX IF NOT EXISTS collection_archive ON tenant_archives (archive_id);
+
+CREATE INDEX IF NOT EXISTS assets_blob ON assets (blob_id);
+
+CREATE OR REPLACE FUNCTION mark_unreferenced (aid uuid)
+    RETURNS void
+    LANGUAGE sql
+    SECURITY DEFINER
+    SET search_path = pg_catalog, public
+    AS $$
+    UPDATE
+        public.archives a
+    SET
+        unreferenced_at = coalesce(unreferenced_at, now())
+    WHERE
+        a.id = aid
+        AND (a.visibility = 'public'
+            OR a.tenant_id = nullif (current_setting('app.tenant_id', TRUE), '')::uuid)
+        AND NOT EXISTS (
+            SELECT
+            FROM
+                public.tenant_archives ta
+            WHERE
+                ta.archive_id = a.id)
+$$;
+
+REVOKE ALL ON FUNCTION mark_unreferenced (uuid) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION mark_unreferenced (uuid) TO monitor_app;
+
+-- Bound each maintenance batch. Archive locks serialize deletion against collection creation.
+CREATE OR REPLACE FUNCTION collect_unreferenced_archives (grace interval)
+    RETURNS integer
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = pg_catalog, public
+    AS $$
+DECLARE
+    aid uuid;
+    removed integer := 0;
+    candidates uuid[] := ARRAY[]::uuid[];
+BEGIN
+    FOR aid IN
+    SELECT
+        a.id
+    FROM
+        public.archives a
+    WHERE
+        a.unreferenced_at < now() - grace
+    ORDER BY
+        a.unreferenced_at
+    LIMIT 100
+    FOR UPDATE
+        SKIP LOCKED LOOP
+            IF EXISTS (
+                SELECT
+                FROM
+                    public.tenant_archives ta
+                WHERE
+                    ta.archive_id = aid)
+                OR EXISTS (
+                    SELECT
+                    FROM
+                        public.captures c
+                    WHERE
+                        c.archive_id = aid
+                        AND c.state IN ('queued', 'downloading'))
+                OR EXISTS (
+                    SELECT
+                    FROM
+                        public.submissions s
+                        JOIN public.captures c ON c.id = s.capture_id
+                    WHERE
+                        c.archive_id = aid
+                        AND s.chat_id IS NOT NULL
+                        AND s.state = 'pending') THEN
+                CONTINUE;
+        END IF;
+    SELECT
+        candidates || coalesce(array_agg(DISTINCT a.blob_id) FILTER (WHERE a.blob_id IS NOT NULL), ARRAY[]::uuid[])
+    INTO
+        candidates
+    FROM
+        public.assets a
+        JOIN public.captures c ON c.id = a.capture_id
+    WHERE
+        c.archive_id = aid;
+    UPDATE
+        public.archives
+    SET
+        current_revision = NULL
+    WHERE
+        id = aid;
+    UPDATE
+        public.captures
+    SET
+        revision_id = NULL
+    WHERE
+        archive_id = aid;
+    DELETE FROM public.submissions
+    WHERE capture_id IN (
+            SELECT
+                id
+            FROM
+                public.captures
+            WHERE
+                archive_id = aid);
+    UPDATE
+        public.objects
+    SET
+        state = 'garbage'
+    WHERE
+        id IN (
+            SELECT
+                object_id
+            FROM
+                public.assets
+            WHERE
+                capture_id IN (
+                    SELECT
+                        id
+                    FROM
+                        public.captures
+                    WHERE
+                        archive_id = aid))
+            AND state = 'pending';
+    DELETE FROM public.assets
+    WHERE capture_id IN (
+            SELECT
+                id
+            FROM
+                public.captures
+            WHERE
+                archive_id = aid);
+    DELETE FROM public.revisions
+    WHERE archive_id = aid;
+    DELETE FROM public.captures
+    WHERE archive_id = aid;
+    DELETE FROM public.archives
+    WHERE id = aid;
+    removed := removed + 1;
+END LOOP;
+    -- Blob foreign keys also serialize this deletion against concurrent asset attachment.
+    WITH unused AS (
+        DELETE FROM public.blobs b
+        WHERE b.id = ANY (candidates)
+            AND NOT EXISTS (
+                SELECT
+                FROM
+                    public.assets a
+                WHERE
+                    a.blob_id = b.id)
+            RETURNING
+                object_key)
+    UPDATE
+        public.objects o
+    SET
+        state = 'garbage'
+    FROM
+        unused u
+    WHERE
+        o.object_key = u.object_key;
+    RETURN removed;
+END
+$$;
+
+REVOKE ALL ON FUNCTION collect_unreferenced_archives (interval) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION collect_unreferenced_archives (interval) TO monitor_app;

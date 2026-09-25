@@ -63,6 +63,16 @@ func Handler(s *app.Service) http.Handler {
 		v, e := s.Archive(r.Context(), tenant(r), r.PathValue("id"))
 		respond(w, 200, v, e)
 	})
+	mux.HandleFunc("DELETE /v1/archives/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
+			return
+		}
+		if e := s.Forget(r.Context(), tenant(r), r.PathValue("id")); e != nil {
+			respond(w, 200, nil, e)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /v1/usage", func(w http.ResponseWriter, r *http.Request) {
 		v, e := s.Usage(r.Context(), tenant(r))
 		respond(w, 200, v, e)

@@ -57,6 +57,9 @@ func (s *Service) Maintain(ctx context.Context) error {
 			return e
 		}
 	}
+	if _, e = s.DB.Pool.Exec(ctx, `SELECT collect_unreferenced_archives(interval '24 hours')`); e != nil {
+		return e
+	}
 	rows, e = s.DB.Pool.Query(ctx, `SELECT tenant_id FROM garbage_tenants()`)
 	if e != nil {
 		return e

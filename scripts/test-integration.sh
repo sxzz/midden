@@ -5,11 +5,11 @@ name="monitor-ci-$$"
 restore_dir="$(mktemp -d)"
 cleanup() {
 	rm -rf "$restore_dir"
-	docker rm -f "${name}-postgres" "${name}-s3" >/dev/null 2>&1 || true
+	docker rm -fv "${name}-postgres" "${name}-s3" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 docker run -d --name "${name}-postgres" -p 127.0.0.1::5432 -e POSTGRES_PASSWORD=monitor-test -e POSTGRES_DB=monitor postgres:17.6-alpine >/dev/null
-docker run -d --name "${name}-s3" --mount "type=bind,source=$PWD/scripts/testdata/s3.json,target=/etc/s3.json,readonly" -p 127.0.0.1::8333 chrislusf/seaweedfs:3.85 server -s3 -s3.port=8333 -dir=/data -ip=localhost -ip.bind=0.0.0.0 -s3.config=/etc/s3.json >/dev/null
+docker run -d --name "${name}-s3" --mount "type=bind,source=$PWD/scripts/testdata/s3.json,target=/etc/s3.json,readonly" -p 127.0.0.1::8333 chrislusf/seaweedfs:3.85 server -master.volumeSizeLimitMB=32 -volume.max=64 -s3 -s3.port=8333 -dir=/data -ip=localhost -ip.bind=0.0.0.0 -s3.config=/etc/s3.json >/dev/null
 for i in $(seq 1 60); do
 	if docker exec "${name}-postgres" pg_isready -U postgres -d monitor >/dev/null 2>&1; then break; fi
 	sleep 1

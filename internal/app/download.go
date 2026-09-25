@@ -54,7 +54,7 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 		}
 		if reserved == 0 {
 			var available int64
-			if e = tx.QueryRow(ctx, `SELECT quota_bytes-used_bytes-reserved_bytes FROM tenants WHERE id=$1`, t.Tenant).Scan(&available); e != nil {
+			if e = tx.QueryRow(ctx, `SELECT quota_bytes-tenant_usage()-reserved_bytes FROM tenants WHERE id=$1`, t.Tenant).Scan(&available); e != nil {
 				return e
 			}
 			reserved = min(available, s.Config.MaxImageBytes)
@@ -169,16 +169,27 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 		charge := n
 		objectState := "attached"
 		if bkey != key {
-			charge = 0
 			objectState = "garbage"
 		}
-		if _, e = tx.Exec(ctx, `UPDATE tenants SET used_bytes=used_bytes+$2,reserved_bytes=reserved_bytes-$3 WHERE id=$1`, t.Tenant, charge, reserved); e != nil {
+		var alreadyCounted bool
+		e = tx.QueryRow(ctx, `SELECT EXISTS(
+          SELECT FROM assets a JOIN revisions r ON r.capture_id=a.capture_id
+          JOIN tenant_archives ta ON ta.archive_id=r.archive_id JOIN blobs b ON b.id=a.blob_id WHERE b.hash=$1
+          UNION ALL SELECT FROM assets a JOIN blobs b ON b.id=a.blob_id WHERE a.capture_id=$2 AND b.hash=$1 AND a.state='ready'
+        )`, digest, cid).Scan(&alreadyCounted)
+		if e != nil {
+			return e
+		}
+		if alreadyCounted {
+			charge = 0
+		}
+		if _, e = tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes-$3+$2 WHERE id=$1`, t.Tenant, charge, reserved); e != nil {
 			return e
 		}
 		if _, e = tx.Exec(ctx, `UPDATE objects SET state=$2 WHERE id=$1 AND state='pending'`, oid, objectState); e != nil {
 			return e
 		}
-		if _, e = tx.Exec(ctx, `UPDATE assets SET state='ready',blob_id=$2,reserved_bytes=0 WHERE id=$1`, t.ID, bid); e != nil {
+		if _, e = tx.Exec(ctx, `UPDATE assets SET state='ready',blob_id=$2,reserved_bytes=$3 WHERE id=$1`, t.ID, bid, charge); e != nil {
 			return e
 		}
 		return s.Enqueue(ctx, tx, t.Tenant, cid, "finalize")

@@ -43,6 +43,7 @@ func init() {
 		{"show", "查看指定归档", "<归档 ID>", true, validIDArgument, (*Service).commandShow},
 		{"status", "查看采集状态", "<任务 ID>", true, validIDArgument, (*Service).commandStatus},
 		{"refresh", "重新抓取帖子", "<归档 ID>", true, validIDArgument, (*Service).commandRefresh},
+		{"forget", "取消收藏", "<归档 ID>", true, validIDArgument, (*Service).commandForget},
 		{"usage", "查看存储用量", "", true, noArgument, (*Service).commandUsage},
 		{"help", "查看使用帮助", "", true, noArgument, (*Service).commandHelp},
 	}
@@ -177,6 +178,19 @@ func (s *Service) commandRefresh(ctx context.Context, r *commandRequest) error {
 	if err != nil {
 		r.Text = submitMessage(err)
 	}
+	return nil
+}
+
+func (s *Service) commandForget(ctx context.Context, r *commandRequest) error {
+	r.Previous = 0
+	if err := s.Forget(ctx, r.Task.Tenant, r.Argument); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			r.Text = "你尚未收藏这条内容。"
+			return nil
+		}
+		return err
+	}
+	r.Text = "已取消收藏并释放对应额度，其他人的收藏不受影响。"
 	return nil
 }
 

@@ -173,7 +173,20 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if e = tx.QueryRow(ctx, `SELECT id FROM archives WHERE id=$1 FOR UPDATE`, aid).Scan(&aid); e != nil {
 			return e
 		}
-		if _, e = tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, tenant, aid); e != nil {
+		tag, e := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, tenant, aid)
+		if e != nil {
+			return e
+		}
+		if tag.RowsAffected() > 0 {
+			var within bool
+			if e = tx.QueryRow(ctx, `SELECT tenant_usage()+reserved_bytes<=quota_bytes FROM tenants WHERE id=$1`, tenant).Scan(&within); e != nil {
+				return e
+			}
+			if !within {
+				return domain.ErrQuota
+			}
+		}
+		if _, e = tx.Exec(ctx, `UPDATE archives SET unreferenced_at=NULL WHERE id=$1`, aid); e != nil {
 			return e
 		}
 
@@ -186,7 +199,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			var used, reserved, quota int64
 			var count int
 			var start time.Time
-			if e = tx.QueryRow(ctx, `SELECT used_bytes,reserved_bytes,quota_bytes,rate_count,rate_start FROM tenants WHERE id=$1`, tenant).Scan(&used, &reserved, &quota, &count, &start); e != nil {
+			if e = tx.QueryRow(ctx, `SELECT tenant_usage(),reserved_bytes,quota_bytes,rate_count,rate_start FROM tenants WHERE id=$1`, tenant).Scan(&used, &reserved, &quota, &count, &start); e != nil {
 				return e
 			}
 			if used+reserved >= quota {
@@ -231,6 +244,29 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 	return
 }
 
+// Forget removes only this tenant's collection reference. Shared content remains readable.
+func (s *Service) Forget(ctx context.Context, tenant, id string) error {
+	return s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
+		if e := lockTenant(ctx, tx, tenant); e != nil {
+			return e
+		}
+		var aid string
+		if e := tx.QueryRow(ctx, `SELECT id FROM archives WHERE id=$1 FOR UPDATE`, id).Scan(&aid); e != nil {
+			return e
+		}
+		tag, e := tx.Exec(ctx, `DELETE FROM tenant_archives WHERE tenant_id=$1 AND archive_id=$2`, tenant, id)
+		if e != nil {
+			return e
+		}
+		if tag.RowsAffected() == 0 {
+			return domain.ErrNotFound
+		}
+		// The restricted function checks references belonging to every tenant.
+		_, e = tx.Exec(ctx, `SELECT mark_unreferenced($1)`, id)
+		return e
+	})
+}
+
 func scanJob(ctx context.Context, tx pgx.Tx, id string, j *domain.Job) error {
 	return tx.QueryRow(ctx, `SELECT id,archive_id,state,error,provider_id,coalesce(connection_id::text,''),scope,created_at FROM captures WHERE id=$1 AND (tenant_id=nullif(current_setting('app.tenant_id',true),'')::uuid OR EXISTS(SELECT FROM submissions WHERE capture_id=captures.id))`, id).Scan(&j.ID, &j.ArchiveID, &j.State, &j.Error, &j.ProviderID, &j.ConnectionID, &j.AccessScope, &j.CreatedAt)
 }
@@ -242,7 +278,7 @@ func (s *Service) Job(ctx context.Context, t, id string) (j domain.Job, e error)
 
 func (s *Service) Usage(ctx context.Context, t string) (u domain.Usage, e error) {
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT used_bytes,reserved_bytes,quota_bytes FROM tenants WHERE id=$1`, t).Scan(&u.Used, &u.Reserved, &u.Limit)
+		return tx.QueryRow(ctx, `SELECT tenant_usage(),reserved_bytes,quota_bytes FROM tenants WHERE id=$1`, t).Scan(&u.Used, &u.Reserved, &u.Limit)
 	})
 	return
 }

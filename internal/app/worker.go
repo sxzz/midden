@@ -211,7 +211,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		if state != "queued" {
 			return nil
 		}
-		tag, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes+$2 WHERE id=$1 AND used_bytes+reserved_bytes+$2<=quota_bytes`, t.Tenant, len(b))
+		tag, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes+$2 WHERE id=$1 AND tenant_usage()+reserved_bytes+$2<=quota_bytes`, t.Tenant, len(b))
 		if e != nil {
 			return e
 		}
@@ -303,21 +303,22 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		if e != nil {
 			return e
 		}
-		used := int64(0)
 		revisionID := previousID
 		if previous == nil || *previous != digest {
 			var rid string
-			e = tx.QueryRow(ctx, `INSERT INTO revisions(tenant_id,archive_id,capture_id,content_hash,payload,content_bytes,visibility) SELECT $1,$2,$3,$4,$5,$6,visibility FROM captures WHERE id=$3 RETURNING id`, tenant, aid, cid, digest, raw, len(raw)).Scan(&rid)
+			e = tx.QueryRow(ctx, `INSERT INTO revisions(tenant_id,archive_id,capture_id,content_hash,payload,content_bytes,visibility) SELECT $1,$2,$3,$4,$5,$6,visibility FROM captures WHERE id=$3 RETURNING id`, tenant, aid, cid, digest, raw, reserved).Scan(&rid)
 			if e != nil {
 				return e
 			}
-			used = int64(len(raw))
 			revisionID = &rid
 			if _, e = tx.Exec(ctx, `UPDATE archives SET current_revision=$2 WHERE id=$1`, aid, rid); e != nil {
 				return e
 			}
 		}
-		if _, e = tx.Exec(ctx, `UPDATE tenants SET used_bytes=used_bytes+$2,reserved_bytes=reserved_bytes-$3 WHERE id=$1`, tenant, used, reserved); e != nil {
+		if e = releaseAssetReservations(ctx, tx, tenant, cid); e != nil {
+			return e
+		}
+		if _, e = tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes-$2 WHERE id=$1`, tenant, reserved); e != nil {
 			return e
 		}
 		state = "complete"
@@ -361,6 +362,18 @@ func (s *Service) deliveries(ctx context.Context, tx pgx.Tx, t, cid string) erro
 	return nil
 }
 
+func releaseAssetReservations(ctx context.Context, tx pgx.Tx, tenant, cid string) error {
+	var n int64
+	if e := tx.QueryRow(ctx, `SELECT coalesce(sum(reserved_bytes),0) FROM assets WHERE capture_id=$1`, cid).Scan(&n); e != nil {
+		return e
+	}
+	if _, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes-$2 WHERE id=$1`, tenant, n); e != nil {
+		return e
+	}
+	_, e := tx.Exec(ctx, `UPDATE assets SET reserved_bytes=0 WHERE capture_id=$1`, cid)
+	return e
+}
+
 func lockCaptureArchive(ctx context.Context, tx pgx.Tx, cid string) error {
 	var id string
 	return tx.QueryRow(ctx, `SELECT id FROM archives WHERE id=(SELECT archive_id FROM captures WHERE id=$1) FOR UPDATE`, cid).Scan(&id)
@@ -377,6 +390,15 @@ func (s *Service) failCaptureTx(ctx context.Context, tx pgx.Tx, t, id, msg strin
 	}
 	if state == "complete" || state == "partial" || state == "failed" {
 		return nil
+	}
+	if e := releaseAssetReservations(ctx, tx, t, id); e != nil {
+		return e
+	}
+	if _, e := tx.Exec(ctx, `UPDATE assets SET state='failed',error=$2 WHERE capture_id=$1 AND state='pending'`, id, msg); e != nil {
+		return e
+	}
+	if _, e := tx.Exec(ctx, `UPDATE objects SET state='garbage' WHERE state='pending' AND id IN(SELECT object_id FROM assets WHERE capture_id=$1)`, id); e != nil {
+		return e
 	}
 	if _, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes-$2 WHERE id=$1`, t, n); e != nil {
 		return e
