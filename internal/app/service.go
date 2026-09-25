@@ -207,6 +207,7 @@ func archive(ctx context.Context, tx pgx.Tx, id string) (a domain.Archive, e err
 	}
 	a.Text = p.Text
 	a.TextKind = p.TextKind
+	a.TextSource = p.TextSource
 	a.AdapterVersion = p.Version
 	a.Warnings = archiveWarnings(p.Warnings)
 	a.Assets, e = assets(ctx, tx, cid)
@@ -298,10 +299,12 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 }
 
 type Payload struct {
-	Text     string   `json:"text"`
-	TextKind string   `json:"text_kind"`
-	Warnings []string `json:"warnings"`
-	Version  string   `json:"adapter_version"`
+	Text       string   `json:"text"`
+	TextKind   string   `json:"text_kind"`
+	Warnings   []string `json:"warnings"`
+	Version    string   `json:"adapter_version"`
+	TextSource string   `json:"text_source,omitempty"`
+	Incomplete bool     `json:"incomplete,omitempty"`
 }
 
 // Hide the retired provider disclaimer in existing snapshots as well.
@@ -330,6 +333,7 @@ func (s *Service) CaptureArchive(ctx context.Context, t, cid string) (a domain.A
 		}
 		a.Text = p.Text
 		a.TextKind = p.TextKind
+		a.TextSource = p.TextSource
 		a.AdapterVersion = p.Version
 		a.Warnings = archiveWarnings(p.Warnings)
 		a.Assets, err = assets(ctx, tx, assetCapture)

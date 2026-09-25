@@ -338,6 +338,8 @@ type FetchResponse struct {
 	Warnings       []string               `protobuf:"bytes,5,rep,name=warnings,proto3" json:"warnings,omitempty"`
 	ProviderId     string                 `protobuf:"bytes,6,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
 	AdapterVersion string                 `protobuf:"bytes,7,opt,name=adapter_version,json=adapterVersion,proto3" json:"adapter_version,omitempty"`
+	TextSource     string                 `protobuf:"bytes,8,opt,name=text_source,json=textSource,proto3" json:"text_source,omitempty"`
+	Incomplete     bool                   `protobuf:"varint,9,opt,name=incomplete,proto3" json:"incomplete,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -421,6 +423,20 @@ func (x *FetchResponse) GetAdapterVersion() string {
 	return ""
 }
 
+func (x *FetchResponse) GetTextSource() string {
+	if x != nil {
+		return x.TextSource
+	}
+	return ""
+}
+
+func (x *FetchResponse) GetIncomplete() bool {
+	if x != nil {
+		return x.Incomplete
+	}
+	return false
+}
+
 var File_api_adapter_v1_adapter_proto protoreflect.FileDescriptor
 
 const file_api_adapter_v1_adapter_proto_rawDesc = "" +
@@ -451,7 +467,7 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"request_id\x18\x06 \x01(\tR\trequestId\"0\n" +
 	"\bResource\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x12\n" +
-	"\x04kind\x18\x02 \x01(\tR\x04kind\"\xfb\x01\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\"\xbc\x02\n" +
 	"\rFetchResponse\x12\x1f\n" +
 	"\vexternal_id\x18\x01 \x01(\tR\n" +
 	"externalId\x12\x12\n" +
@@ -461,7 +477,12 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\bwarnings\x18\x05 \x03(\tR\bwarnings\x12\x1f\n" +
 	"\vprovider_id\x18\x06 \x01(\tR\n" +
 	"providerId\x12'\n" +
-	"\x0fadapter_version\x18\a \x01(\tR\x0eadapterVersion2\x8e\x01\n" +
+	"\x0fadapter_version\x18\a \x01(\tR\x0eadapterVersion\x12\x1f\n" +
+	"\vtext_source\x18\b \x01(\tR\n" +
+	"textSource\x12\x1e\n" +
+	"\n" +
+	"incomplete\x18\t \x01(\bR\n" +
+	"incomplete2\x8e\x01\n" +
 	"\aAdapter\x12E\n" +
 	"\bDescribe\x12\x1b.adapter.v1.DescribeRequest\x1a\x1c.adapter.v1.DescribeResponse\x12<\n" +
 	"\x05Fetch\x12\x18.adapter.v1.FetchRequest\x1a\x19.adapter.v1.FetchResponseB\"Z monitor/api/adapter/v1;adapterv1b\x06proto3"

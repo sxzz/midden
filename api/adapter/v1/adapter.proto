@@ -47,4 +47,6 @@ message FetchResponse {
   repeated string warnings = 5;
   string provider_id = 6;
   string adapter_version = 7;
+  string text_source = 8;
+  bool incomplete = 9;
 }

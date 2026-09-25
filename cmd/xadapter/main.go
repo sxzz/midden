@@ -16,7 +16,7 @@ import (
 
 	pb "monitor/api/adapter/v1"
 	"monitor/internal/adapter"
-	"monitor/internal/xdown"
+	"monitor/internal/xadapter"
 )
 
 func main() {
@@ -44,7 +44,7 @@ func main() {
 		opts = append(opts, grpc.Creds(c))
 	}
 	server := grpc.NewServer(opts...)
-	pb.RegisterAdapterServer(server, &xdown.Server{Client: &http.Client{Timeout: 40 * time.Second}})
+	pb.RegisterAdapterServer(server, xadapter.New(&http.Client{Timeout: 40 * time.Second}))
 	h := health.NewServer()
 	h.SetServingStatus("", hp.HealthCheckResponse_SERVING)
 	hp.RegisterHealthServer(server, h)

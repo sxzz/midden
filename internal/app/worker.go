@@ -187,7 +187,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if len(r.Text) > 1<<20 {
 		return &PermanentError{"text exceeds archive limit"}
 	}
-	p := Payload{r.Text, r.TextKind, r.Warnings, r.AdapterVersion}
+	p := Payload{Text: r.Text, TextKind: r.TextKind, Warnings: r.Warnings, Version: r.AdapterVersion, TextSource: r.TextSource, Incomplete: r.Incomplete}
 	if len(r.Resources) > s.Config.MaxImages {
 		p.Warnings = append(p.Warnings, "图片数量超过归档限制。")
 		r.Resources = r.Resources[:s.Config.MaxImages]
@@ -263,7 +263,7 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 			return e
 		}
 		good := 0
-		partial := false
+		partial := p.Incomplete
 		type sig struct {
 			Hash  string
 			State string

@@ -19,8 +19,9 @@ flowchart LR
     end
     Core <-->|业务数据与持久化队列| PG[(PostgreSQL)]
     Core -->|gRPC：Describe / Fetch| Adapter[X Adapter]
-    Adapter -->|HTTP| Provider[xdown]
-    Provider -->|文字和图片链接| Adapter
+    Adapter -->|图片| Provider[xdown]
+    Adapter -->|正文| TextSource[FxTwitter]
+    Provider -->|图片链接| Adapter
     Core -->|HTTP 下载| Media[图片服务]
     Core <-->|图片原文件| S3[(S3 对象存储)]
 ```
@@ -28,13 +29,15 @@ flowchart LR
 | 组件           | 当前职责                                                              |
 | -------------- | --------------------------------------------------------------------- |
 | `core`         | Telegram 收发、REST、租户认证、任务调度、下载、去重、归档、额度与投递 |
-| `adapter`      | 提供 gRPC 接口，识别 X 帖子并通过 xdown 获取文字和静态图片链接        |
+| `adapter`      | 提供 gRPC 接口，识别 X 帖子，汇总 xdown 图片与 FxTwitter 正文         |
 | PostgreSQL     | 保存身份、归档、任务、资源索引、用量和 River 队列                     |
 | S3             | 保存图片二进制；本地部署使用 SeaweedFS                                |
 | `migrate`      | 一次性执行数据库迁移并配置业务数据库角色                              |
 | `storage-init` | 本地对象存储初始化：创建 bucket 并验证访问                            |
 
 Adapter 是运营者部署并认证的可信服务，Provider 和其返回的资源链接按可信输入处理。Adapter 不连接数据库或对象存储；核心负责下载和持久化。用户请求及按钮参数需要身份、权限、URL 范围和额度校验。
+
+当前 X Adapter 的 `xdown` 采集流程同时请求 xdown 图片和 FxTwitter 正文，Provider 选择仍持久化在任务中。归档的 `text_source` 记录文字实际来源，`text_kind` 区分正文与标题／摘要；文字来源失败会记录缺失并将采集标记为部分完成。
 
 ## 一次采集如何执行
 
@@ -79,13 +82,13 @@ erDiagram
 
 ### 身份与访问
 
-| 表            | 作用与关键约束                                                                                                 |
-| ------------- | -------------------------------------------------------------------------------------------------------------- |
-| `tenants`     | 数据和额度归属。保存 `used_bytes`、`reserved_bytes`、`quota_bytes`，以及每分钟采集计数                         |
-| `channels`    | Bot 等渠道实例。保存稳定 UUID、渠道类型、外部实例 ID 和 `next_offset`；`(kind, external_id)` 唯一              |
-| `identities`  | 渠道用户与租户的绑定。`(channel_id, external_id)` 唯一；一个租户可有多个身份                                   |
-| `tokens`      | REST token 的 SHA-256 摘要、租户和撤销状态                                                                     |
-| `connections` | 已存在的账号接入模型：租户、Adapter、Provider、账号标识、状态和凭据引用；当前 xdown 采集不使用此表中的账号连接 |
+| 表            | 作用与关键约束                                                                                              |
+| ------------- | ----------------------------------------------------------------------------------------------------------- |
+| `tenants`     | 数据和额度归属。保存 `used_bytes`、`reserved_bytes`、`quota_bytes`，以及每分钟采集计数                      |
+| `channels`    | Bot 等渠道实例。保存稳定 UUID、渠道类型、外部实例 ID 和 `next_offset`；`(kind, external_id)` 唯一           |
+| `identities`  | 渠道用户与租户的绑定。`(channel_id, external_id)` 唯一；一个租户可有多个身份                                |
+| `tokens`      | REST token 的 SHA-256 摘要、租户和撤销状态                                                                  |
+| `connections` | 已存在的账号接入模型：租户、Adapter、Provider、账号标识、状态和凭据引用；当前公开采集不使用此表中的账号连接 |
 
 首次 Telegram 私聊通过数据库函数 `resolve_identity` 创建个人租户与身份。事务锁保证并发首次访问不会创建多个绑定。不同渠道实例中的相同外部用户 ID 不会自动关联。
 
@@ -147,4 +150,6 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 - `internal/telegram/`：Telegram SDK 封装。
 - `internal/store/schema.sql`：表、约束、RLS 与身份解析函数。
 - `api/adapter/v1/adapter.proto`：Adapter 协议。
-- `internal/xdown/`：当前 X Provider 请求与解析。
+- `internal/xadapter/`：X 图文采集结果整合。
+- `internal/xdown/`：xdown 请求与图片解析。
+- `internal/fxtwitter/`：正文获取与帖子身份校验。

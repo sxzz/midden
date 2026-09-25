@@ -97,6 +97,7 @@ type Archive struct {
 	RevisionID     string    `json:"revision_id"`
 	Text           string    `json:"text"`
 	TextKind       string    `json:"text_kind"`
+	TextSource     string    `json:"text_source,omitempty"`
 	AdapterVersion string    `json:"adapter_version"`
 	Warnings       []string  `json:"warnings"`
 	Assets         []Asset   `json:"assets"`

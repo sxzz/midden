@@ -201,7 +201,8 @@ components:
         access_scope: { type: string }
         revision_id: { type: string, format: uuid }
         text: { type: string }
-        text_kind: { type: string, enum: [provider_summary] }
+        text_kind: { type: string, enum: [provider_summary, post_text] }
+        text_source: { type: string, description: Source of the archived text }
         adapter_version: { type: string }
         warnings: { type: array, items: { type: string } }
         assets: { type: array, items: { $ref: "#/components/schemas/Asset" } }

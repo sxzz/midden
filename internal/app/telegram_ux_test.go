@@ -78,7 +78,7 @@ func TestTelegramUXIntegration(t *testing.T) {
 	}))
 	defer h.Close()
 	sender := &telegram.Client{Token: "test", Base: h.URL, HTTP: h.Client()}
-	s := &Service{DB: db, Adapter: &fakeAdapter{text: "archived text"}, Config: Defaults(), Senders: map[string]Sender{channel: sender}}
+	s := &Service{DB: db, Adapter: &fakeAdapter{text: "archived text", textSource: "fxtwitter"}, Config: Defaults(), Senders: map[string]Sender{channel: sender}}
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &Worker{S: s})
 	queue, e := river.NewClient(riverpgxv5.New(db.Pool), &river.Config{Workers: workers, Queues: map[string]river.QueueConfig{"control": {MaxWorkers: 1}}})
@@ -97,6 +97,11 @@ func TestTelegramUXIntegration(t *testing.T) {
 	}
 	must(t, s.capture(ctx, store.Task{Tenant: identity.TenantID, ID: job.ID, Type: "capture"}))
 	must(t, s.finalize(ctx, identity.TenantID, job.ID))
+	archived, e := s.Archive(ctx, identity.TenantID, job.ArchiveID)
+	must(t, e)
+	if archived.TextSource != "fxtwitter" {
+		t.Fatal("text provenance lost")
+	}
 	// A new service instance must recover the status message ID from PostgreSQL.
 	restarted := *s
 	must(t, restarted.deliver(ctx, task))
@@ -180,6 +185,18 @@ func TestTelegramUXIntegration(t *testing.T) {
 	}))
 	if count != 1 {
 		t.Fatal("duplicate refresh", count)
+	}
+	var refreshed string
+	must(t, db.Tx(ctx, identity.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT capture_id FROM submissions WHERE idem_key=$1`, "refresh:"+iid).Scan(&refreshed)
+	}))
+	s.Adapter.(*fakeAdapter).incomplete = true
+	must(t, s.capture(ctx, store.Task{Tenant: identity.TenantID, ID: refreshed, Type: "capture"}))
+	must(t, s.finalize(ctx, identity.TenantID, refreshed))
+	partial, e := s.Job(ctx, identity.TenantID, refreshed)
+	must(t, e)
+	if partial.State != "partial" {
+		t.Fatal("source failure was not marked partial", partial)
 	}
 	// Persisted buttons survive JSON serialization without exceeding Telegram's limit.
 	b, _ := json.Marshal(archiveButtons(job.ArchiveID, "https://x.com/i/status/201"))

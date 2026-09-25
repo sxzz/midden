@@ -31,10 +31,12 @@ import (
 )
 
 type fakeAdapter struct {
-	mu    sync.Mutex
-	text  string
-	urls  []string
-	calls atomic.Int64
+	mu         sync.Mutex
+	text       string
+	textSource string
+	incomplete bool
+	urls       []string
+	calls      atomic.Int64
 }
 
 func (f *fakeAdapter) Describe(context.Context, *pb.DescribeRequest, ...grpc.CallOption) (*pb.DescribeResponse, error) {
@@ -45,7 +47,7 @@ func (f *fakeAdapter) Fetch(ctx context.Context, r *pb.FetchRequest, _ ...grpc.C
 	f.calls.Add(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	v := &pb.FetchResponse{ExternalId: r.ExternalId, ProviderId: r.ProviderId, Text: f.text, TextKind: "provider_summary", AdapterVersion: "test", Warnings: []string{"incomplete"}}
+	v := &pb.FetchResponse{ExternalId: r.ExternalId, ProviderId: r.ProviderId, Text: f.text, TextKind: "provider_summary", AdapterVersion: "test", Warnings: []string{"incomplete"}, TextSource: f.textSource, Incomplete: f.incomplete}
 	for _, u := range f.urls {
 		v.Resources = append(v.Resources, &pb.Resource{Url: u, Kind: "image"})
 	}
