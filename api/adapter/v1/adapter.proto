@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package adapter.v1;
+
+option go_package = "monitor/api/adapter/v1;adapterv1";
+
+service Adapter {
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+  rpc Fetch(FetchRequest) returns (FetchResponse);
+}
+
+message DescribeRequest {}
+
+message Provider {
+  string id = 1;
+  string authentication = 2;
+}
+
+message DescribeResponse {
+  string protocol_version = 1;
+  string adapter_id = 2;
+  string version = 3;
+  repeated string hosts = 4;
+  repeated Provider providers = 5;
+  repeated string capabilities = 6;
+}
+
+message FetchRequest {
+  string url = 1;
+  string external_id = 2;
+  string provider_id = 3;
+  string connection_id = 4;
+  string access_scope = 5;
+  string request_id = 6;
+}
+
+message Resource {
+  string url = 1;
+  string kind = 2;
+}
+
+message FetchResponse {
+  string external_id = 1;
+  string text = 2;
+  string text_kind = 3;
+  repeated Resource resources = 4;
+  repeated string warnings = 5;
+  string provider_id = 6;
+  string adapter_version = 7;
+}

@@ -1,0 +1,209 @@
+openapi: 3.0.3
+info:
+  title: Monitor Archive API
+  version: 0.1.0
+  description: Tenant-scoped archives. Account authentication providers are reserved but unsupported in this MVP.
+servers:
+  - url: http://localhost:8080
+security:
+  - bearerAuth: []
+paths:
+  /v1/captures:
+    post:
+      summary: Submit an X URL or refresh an existing archive
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          schema: { type: string, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                url: { type: string, format: uri }
+                refresh_id: { type: string, format: uuid }
+                provider_id: { type: string, default: xdown }
+                connection_id:
+                  {
+                    type: string,
+                    format: uuid,
+                    description: Reserved; account-authenticated capture returns 422.,
+                  }
+              description: Supply url for a new capture or refresh_id to re-fetch with the archive's original provider and access scope.
+      responses:
+        "202":
+          description: Capture accepted or existing capture reused
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Idempotency conflict or storage quota exceeded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Account authentication or provider unsupported
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: Tenant capture rate exceeded; Retry-After is returned
+  /v1/jobs/{id}:
+    get:
+      summary: Read capture status
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses:
+        "200":
+          description: Capture
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/archives:
+    get:
+      summary: List this tenant's archives, newest first
+      parameters:
+        - in: query
+          name: cursor
+          schema: { type: string }
+          description: Opaque cursor returned by a previous page; pages contain at most 10 archives.
+      responses:
+        "200":
+          description: Page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    {
+                      type: array,
+                      items: { $ref: "#/components/schemas/Archive" },
+                    }
+                  next_cursor: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/archives/{id}:
+    get:
+      summary: Read the current retained revision
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses:
+        "200":
+          description: Archive
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Archive" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/assets/{id}:
+    get:
+      summary: Download an authorized archived original image
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses:
+        "200":
+          description: Original bytes; private/no-store; attachment disposition
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { description: Object store unavailable }
+  /v1/usage:
+    get:
+      summary: Shared tenant storage use across all channel identities
+      responses:
+        "200":
+          description: Usage in bytes, excluding DB indexes, queue, backups and logs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [used_bytes, reserved_bytes, limit_bytes]
+                properties:
+                  used_bytes: { type: integer, format: int64 }
+                  reserved_bytes: { type: integer, format: int64 }
+                  limit_bytes: { type: integer, format: int64 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  parameters:
+    ID:
+      {
+        in: path,
+        name: id,
+        required: true,
+        schema: { type: string, format: uuid },
+      }
+  responses:
+    Unauthorized:
+      description: Missing, invalid or revoked tenant token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Resource absent or not visible to tenant
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadRequest:
+      description: Invalid input
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+    Job:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        archive_id: { type: string, format: uuid }
+        state:
+          {
+            type: string,
+            enum: [queued, downloading, complete, partial, failed],
+          }
+        error: { type: string }
+        provider_id: { type: string }
+        connection_id: { type: string, format: uuid }
+        access_scope: { type: string }
+        created_at: { type: string, format: date-time }
+    Asset:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        position: { type: integer }
+        state: { type: string, enum: [pending, ready, failed] }
+        error: { type: string }
+        sha256: { type: string }
+        mime: { type: string }
+        size: { type: integer, format: int64 }
+    Archive:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string, format: uri }
+        external_id: { type: string }
+        provider_id: { type: string }
+        access_scope: { type: string }
+        revision_id: { type: string, format: uuid }
+        text: { type: string }
+        text_kind: { type: string, enum: [provider_summary] }
+        adapter_version: { type: string }
+        warnings: { type: array, items: { type: string } }
+        assets: { type: array, items: { $ref: "#/components/schemas/Asset" } }
+        observed_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }

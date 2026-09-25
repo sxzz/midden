@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+bin/
+.tools/
+.coverage*
+*.test
+*.dump
+backup/
+
+.local/

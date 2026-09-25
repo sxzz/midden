@@ -1,0 +1,9 @@
+.git
+.env
+.env.*
+bin
+.tools
+backup
+*.dump
+
+.local/

@@ -1,0 +1,38 @@
+# Local S3 storage; enabled by COMPOSE_FILE in .env.
+services:
+  s3:
+    image: chrislusf/seaweedfs:3.85
+    command:
+      [
+        server,
+        -s3,
+        -s3.port=8333,
+        -dir=/data,
+        -ip=s3,
+        -ip.bind=0.0.0.0,
+        -s3.config=/etc/monitor-s3.json,
+      ]
+    volumes:
+      - s3-data:/data
+      - ./.local/s3.json:/etc/monitor-s3.json:ro
+    ports:
+      - "127.0.0.1:8333:8333"
+    restart: unless-stopped
+  storage-init:
+    build: .
+    entrypoint: [monitorctl, storage-init]
+    environment:
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+    depends_on:
+      s3:
+        condition: service_started
+    restart: "no"
+  core:
+    depends_on:
+      storage-init:
+        condition: service_completed_successfully
+volumes:
+  s3-data:

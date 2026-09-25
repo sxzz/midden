@@ -1,0 +1,11 @@
+{
+  "identities": [
+    {
+      "name": "integration-test",
+      "credentials": [
+        { "accessKey": "monitor-test", "secretKey": "monitor-test-secret" }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}
