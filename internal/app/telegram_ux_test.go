@@ -57,6 +57,7 @@ func TestTelegramUXIntegration(t *testing.T) {
 	must(t, e)
 	var mu sync.Mutex
 	var methods []string
+	nextMessageID := 90
 	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		must(t, r.ParseForm())
 		method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
@@ -65,12 +66,10 @@ func TestTelegramUXIntegration(t *testing.T) {
 		mu.Unlock()
 		switch method {
 		case "sendMessage":
-			w.Write([]byte(`{"ok":true,"result":{"message_id":91}}`))
+			nextMessageID++
+			fmt.Fprintf(w, `{"ok":true,"result":{"message_id":%d}}`, nextMessageID)
 		case "editMessageText":
-			if r.Form.Get("message_id") != "91" {
-				t.Error("status message was not reused")
-			}
-			w.Write([]byte(`{"ok":true,"result":{"message_id":91}}`))
+			fmt.Fprintf(w, `{"ok":true,"result":{"message_id":%s}}`, r.Form.Get("message_id"))
 		case "sendChatAction":
 			w.Write([]byte(`{"ok":true,"result":true}`))
 		default:
@@ -116,10 +115,14 @@ func TestTelegramUXIntegration(t *testing.T) {
 	mu.Unlock()
 
 	var updateID int64
-	inbox := func(tenant, user, action string) string {
+	inbox := func(tenant, user, action string, source ...int64) string {
+		sourceID := int64(91)
+		if len(source) > 0 {
+			sourceID = source[0]
+		}
 		updateID++
 		id := uuid.NewString()
-		raw := []byte(fmt.Sprintf(`{"update_id":1,"callback_query":{"id":"cb","from":{"id":%s},"message":{"message_id":91,"from":{"id":999,"is_bot":true},"chat":{"id":%s,"type":"private"}},"data":%q}}`, user, user, action))
+		raw := []byte(fmt.Sprintf(`{"update_id":1,"callback_query":{"id":"cb","from":{"id":%s},"message":{"message_id":%d,"from":{"id":999,"is_bot":true},"chat":{"id":%s,"type":"private"}},"data":%q}}`, user, sourceID, user, action))
 		must(t, db.Tx(ctx, tenant, func(tx pgx.Tx) error {
 			_, err := tx.Exec(ctx, `INSERT INTO inbox(id,tenant_id,channel_id,update_id,payload) VALUES($1,$2,$3,$4,$5)`, id, tenant, channel, updateID, raw)
 			return err
@@ -129,10 +132,35 @@ func TestTelegramUXIntegration(t *testing.T) {
 	}
 	iid := inbox(identity.TenantID, "42", "/usage")
 	var rid string
+	var previous int64
 	must(t, db.Tx(ctx, identity.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT id FROM replies WHERE inbox_id=$1`, iid).Scan(&rid)
+		return tx.QueryRow(ctx, `SELECT id,message_id FROM replies WHERE inbox_id=$1`, iid).Scan(&rid, &previous)
+	}))
+	if previous != 0 {
+		t.Fatal("callback would overwrite archived content", previous)
+	}
+	// Even replies persisted before this protection must not overwrite content.
+	must(t, db.Tx(ctx, identity.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE replies SET message_id=91 WHERE id=$1`, rid)
+		return err
 	}))
 	must(t, restarted.reply(ctx, store.Task{Tenant: identity.TenantID, ID: rid, Type: "reply"}))
+	must(t, db.Tx(ctx, identity.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT message_id FROM replies WHERE id=$1`, rid).Scan(&previous)
+	}))
+	if previous == 91 {
+		t.Fatal("delivery overwrote archived content")
+	}
+	menuID := previous
+	iid = inbox(identity.TenantID, "42", "/usage", menuID)
+	must(t, db.Tx(ctx, identity.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT id,message_id FROM replies WHERE inbox_id=$1`, iid).Scan(&rid, &previous)
+	}))
+	if previous != menuID {
+		t.Fatal("non-content menu should remain editable")
+	}
+	must(t, restarted.reply(ctx, store.Task{Tenant: identity.TenantID, ID: rid, Type: "reply"}))
+
 	// Foreign archive IDs in callbacks never create delivery or refresh submissions.
 	for _, action := range []string{"/show " + job.ArchiveID, "/refresh " + job.ArchiveID, "/recent " + base64.RawURLEncoding.EncodeToString([]byte(job.ArchiveID))} {
 		iid = inbox(other.TenantID, "43", action)
@@ -163,5 +191,20 @@ func TestTelegramUXIntegration(t *testing.T) {
 				t.Fatal(button)
 			}
 		}
+	}
+}
+
+func TestArchiveMessageHidesTechnicalMetadata(t *testing.T) {
+	a := domain.Archive{ID: uuid.NewString(), RevisionID: uuid.NewString(), Text: "原帖正文", Assets: []domain.Asset{{State: "ready"}}}
+	text := archiveMessage(a, "complete")
+	if text != "已收藏 · 1 张图片\n\n原帖正文" {
+		t.Fatal(text)
+	}
+	a.Text = ""
+	a.Warnings = []string{"视频不支持"}
+	a.Assets = append(a.Assets, domain.Asset{State: "failed", Error: "下载超时"})
+	text = archiveMessage(a, "partial")
+	if strings.Contains(text, a.ID) || !strings.Contains(text, "视频不支持") || !strings.Contains(text, "下载超时") {
+		t.Fatal(text)
 	}
 }

@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 
+	"monitor/internal/domain"
 	"monitor/internal/store"
 	"monitor/internal/telegram"
 )
@@ -107,7 +109,13 @@ func (s *Service) submissionStatus(ctx context.Context, t store.Task) error {
 	if job.State == "downloading" {
 		text = "正在保存图片…"
 	}
-	text += "\n任务 " + job.ID
+	var sourceURL string
+	if err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT url FROM archives WHERE id=$1`, job.ArchiveID).Scan(&sourceURL)
+	}); err != nil {
+		return err
+	}
+	text += "\n" + sourceURL
 	if text != last || mid == 0 {
 		buttons := telegram.Keyboard{{{Text: "查看状态", Data: "/status " + job.ID}, {Text: "最近归档", Data: "/recent"}}}
 		id, err := sendInteractive(ctx, sender, chat, text, mid, buttons)
@@ -150,4 +158,33 @@ func archiveButtons(id, url string) telegram.Keyboard {
 
 func usageText(used, reserved, limit int64) string {
 	return fmt.Sprintf("已使用 %.1f MiB / %.1f MiB\n处理中预留 %.1f MiB", float64(used)/(1<<20), float64(limit)/(1<<20), float64(reserved)/(1<<20))
+}
+
+func archiveMessage(a domain.Archive, state string) string {
+	heading := "已收藏"
+	if state == "partial" {
+		heading = "已收藏，部分内容未保存"
+	}
+	ready := 0
+	for _, asset := range a.Assets {
+		if asset.State == "ready" {
+			ready++
+		}
+	}
+	if ready > 0 {
+		heading += fmt.Sprintf(" · %d 张图片", ready)
+	}
+	parts := []string{heading}
+	if text := strings.TrimSpace(a.Text); text != "" {
+		parts = append(parts, text)
+	}
+	for _, warning := range a.Warnings {
+		parts = append(parts, warning)
+	}
+	for _, asset := range a.Assets {
+		if asset.State == "failed" {
+			parts = append(parts, "图片未保存："+asset.Error)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }

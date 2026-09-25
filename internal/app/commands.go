@@ -144,7 +144,7 @@ func (s *Service) commandStatus(ctx context.Context, r *commandRequest) error {
 		r.Text = "任务不存在或无权限。"
 		return nil
 	}
-	r.Text = fmt.Sprintf("%s\n任务 %s\n%s", jobState(j.State), j.ID, j.Error)
+	r.Text = strings.TrimSpace(jobState(j.State) + "\n" + j.Error)
 	r.Buttons = telegram.Keyboard{{{Text: "更新状态", Data: "/status " + j.ID}}}
 	if j.State == "complete" || j.State == "partial" {
 		r.Buttons = append(r.Buttons, []telegram.Button{{Text: "查看归档", Data: "/show " + j.ArchiveID}})

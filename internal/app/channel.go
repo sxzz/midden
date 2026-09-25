@@ -120,14 +120,14 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 	if u.Callback != nil {
 		input = u.Callback.Data
 		previous = m.ID
-		// Keep navigation replies separate from a still-active progress message.
-		var active bool
+		// Never replace archive content; progress messages also own their own updates.
+		var protected bool
 		if err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-			return tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM submissions WHERE channel_id=$1 AND chat_id=$2 AND message_id=$3 AND state='pending' AND progress=0)`, channel, chat, previous).Scan(&active)
+			return tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM submissions WHERE channel_id=$1 AND chat_id=$2 AND message_id=$3 )`, channel, chat, previous).Scan(&protected)
 		}); err != nil {
 			return err
 		}
-		if active {
+		if protected {
 			previous = 0
 		}
 		if !validCallback(input) {
@@ -213,6 +213,17 @@ func (s *Service) reply(ctx context.Context, t store.Task) error {
 	if e = json.Unmarshal(rawButtons, &buttons); e != nil {
 		return e
 	}
+	if mid != 0 {
+		var protected bool
+		if err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM submissions WHERE channel_id=$1 AND chat_id=$2 AND message_id=$3)`, channel, chat, mid).Scan(&protected)
+		}); err != nil {
+			return err
+		}
+		if protected {
+			mid = 0
+		}
+	}
 	id, e := sendInteractive(ctx, sender, chat, text, mid, buttons)
 	if e != nil {
 		return telegramError(e)
@@ -258,7 +269,7 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 	if j.State == "queued" || j.State == "downloading" {
 		return nil
 	}
-	text := jobState(j.State) + "\n任务 " + j.ID
+	text := jobState(j.State)
 	buttons := menuButtons()
 	var aa []domain.Asset
 	if j.State == "failed" {
@@ -269,14 +280,9 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 		if err != nil {
 			return err
 		}
-		text += "\n归档 " + a.ID + "\n" + a.URL + "\n" + a.Text + "\n" + strings.Join(a.Warnings, "\n")
+		text = archiveMessage(a, j.State)
 		aa = a.Assets
 		buttons = archiveButtons(a.ID, a.URL)
-		for _, v := range aa {
-			if v.State == "failed" {
-				text += "\n图片未归档：" + v.Error
-			}
-		}
 	}
 	sender := s.sender(channel)
 	if sender == nil {
