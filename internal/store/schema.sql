@@ -18,10 +18,68 @@ CREATE TABLE IF NOT EXISTS schema_versions (
     applied_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Global operating settings, including service credentials; administrator writes only.
+CREATE TABLE IF NOT EXISTS config (
+    key text PRIMARY KEY,
+    value text NOT NULL,
+    value_type text GENERATED ALWAYS AS ( CASE WHEN key IN ('telegram_bot_token', 'telegram_channel_id') THEN
+        'text'
+    ELSE
+        'integer'
+    END) STORED,
+    sensitive boolean GENERATED ALWAYS AS (key IN ('telegram_bot_token')) STORED,
+    updated_at timestamptz NOT NULL DEFAULT now(), CHECK (CASE WHEN key = 'telegram_bot_token' THEN
+        length(value) <= 4096 AND (value = '' OR value ~ '^[0-9]+:[A-Za-z0-9_-]+$')
+    WHEN key = 'telegram_channel_id' THEN
+        value = '' OR value ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    ELSE
+        value ~ '^[0-9]{1,16}$' AND value::numeric BETWEEN 1 AND CASE WHEN key IN ('archive_retention_days', 'object_gc_grace_hours') THEN
+            36500
+        WHEN key IN ('tenant_quota_bytes', 'max_image_bytes') THEN
+            1125899906842624
+        WHEN key IN ('capture_rate', 'tenant_concurrency', 'capture_workers', 'download_workers', 'control_workers', 'delivery_workers', 'max_images') THEN
+            1000
+        ELSE
+            0
+        END
+    END)
+);
+
+INSERT INTO config (key, value)
+VALUES
+    ('archive_retention_days', '7'),
+    ('object_gc_grace_hours', '24'),
+    ('tenant_quota_bytes', '1073741824'),
+    ('capture_rate', '10'),
+    ('tenant_concurrency', '2'),
+    ('capture_workers', '4'),
+    ('download_workers', '8'),
+    ('control_workers', '4'),
+    ('delivery_workers', '2'),
+    ('max_image_bytes', '20971520'),
+    ('max_images', '20'),
+    ('telegram_bot_token', ''),('telegram_channel_id','')
+ON CONFLICT (key)
+    DO NOTHING;
+
+CREATE OR REPLACE FUNCTION default_tenant_quota ()
+    RETURNS bigint
+    LANGUAGE sql
+    STABLE
+    SET search_path = pg_catalog, public
+    AS $$
+    SELECT
+        value::bigint
+    FROM
+        public.config
+    WHERE
+        key = 'tenant_quota_bytes'
+$$;
+
 CREATE TABLE IF NOT EXISTS tenants (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid () CHECK (id <> '00000000-0000-0000-0000-000000000000'::uuid),
     reserved_bytes bigint NOT NULL DEFAULT 0 CHECK (reserved_bytes >= 0),
-    quota_bytes bigint NOT NULL DEFAULT 1073741824,
+    quota_bytes bigint NOT NULL DEFAULT default_tenant_quota (),
     rate_start timestamptz NOT NULL DEFAULT now(),
     rate_count integer NOT NULL DEFAULT 0
 );
@@ -430,7 +488,13 @@ CREATE OR REPLACE FUNCTION garbage_tenants ()
         public.objects o
     WHERE
         o.state IN ('garbage', 'deleting')
-        AND o.created_at < now() - interval '24 hours'
+        AND o.created_at < now() - (
+            SELECT
+                value::bigint
+            FROM
+                public.config
+            WHERE
+                key = 'object_gc_grace_hours') * interval '1 hour'
     LIMIT 100
 $$;
 

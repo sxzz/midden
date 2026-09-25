@@ -40,7 +40,7 @@ aws --endpoint-url "$BACKUP_S3_ENDPOINT" s3 sync "s3://$BACKUP_S3_BUCKET/" backu
 docker compose start core
 ```
 
-备份目录含用户内容，应加密存放并限制权限。管理员/服务密钥单独保管。数据库逻辑额度不包含备份副本。S3 生命周期策略不能自行删除 `tenant/objects/` 下仍被引用的内容；业务回收器只删除已标记垃圾且经过 24 小时宽限期的对象。
+备份目录含用户内容，应加密存放并限制权限。管理员/服务密钥单独保管。数据库逻辑额度不包含备份副本。S3 生命周期策略不能自行删除 `tenant/objects/` 下仍被引用的内容；业务回收器只删除已标记垃圾且超过配置的最小存活时间（`object_gc_grace_hours`，默认 24 小时）的对象。
 
 ## 恢复到独立环境
 
@@ -69,21 +69,31 @@ monitorctl token-revoke <token-uuid>
 monitorctl channel-create <stable-channel-uuid> <bot-numeric-id>
 ```
 
-所有命令使用 `ADMIN_DATABASE_URL`。已有租户的 quota_bytes 可由管理员在核对租户 ID 后更新；更改默认 TENANT_QUOTA_BYTES 仅影响之后新建的租户。
+所有命令使用 `ADMIN_DATABASE_URL`。已有租户的 quota_bytes 可由管理员在核对租户 ID 后更新；更改默认 `tenant_quota_bytes` 仅影响之后新建的租户。
 
 ## 限额与并发配置
 
-下列变量由核心读取。使用 Docker Compose 时，将所需变量加入 `core.environment` 后重建核心容器。
+运行参数和 Telegram 凭据保存在全局 `config` 表中，仅管理员可写，核心业务角色只读。使用 `monitorctl config-list` 查看，使用 `monitorctl config-set <key> <value>` 修改；凭据推荐使用 `--stdin` 输入。数值配置必须为正整数；未知键或越界值会拒绝。归档保留天数至少为 1，不支持立即删除。配置表记录值的类型及敏感标记，CLI 列表会对敏感值脱敏。
 
-| 环境变量             | 默认值       | 用途                 |
-| -------------------- | ------------ | -------------------- |
-| `TENANT_QUOTA_BYTES` | `1073741824` | 新租户存储额度       |
-| `CAPTURE_RATE`       | `10`         | 每租户每分钟新采集数 |
-| `TENANT_CONCURRENCY` | `2`          | 每租户同时执行的采集 |
-| `CAPTURE_WORKERS`    | `4`          | 采集 worker 数       |
-| `DOWNLOAD_WORKERS`   | `8`          | 图片下载 worker 数   |
-| `MAX_IMAGE_BYTES`    | `20971520`   | 单图最大字节数       |
-| `MAX_IMAGES`         | `20`         | 每帖最多图片数       |
+| 配置键                   | 默认值       | 用途                         |
+| ------------------------ | ------------ | ---------------------------- |
+| `archive_retention_days` | `7`          | 最后一个收藏者取消后保留天数 |
+| `object_gc_grace_hours`  | `24`         | 垃圾上传对象的最小存活小时数 |
+| `tenant_quota_bytes`     | `1073741824` | 新租户存储额度               |
+| `capture_rate`           | `10`         | 每租户每分钟新采集数         |
+| `tenant_concurrency`     | `2`          | 每租户同时执行的采集         |
+| `capture_workers`        | `4`          | 采集 worker 数               |
+| `download_workers`       | `8`          | 图片下载 worker 数           |
+| `control_workers`        | `4`          | 控制任务 worker 数           |
+| `delivery_workers`       | `2`          | 消息投递 worker 数           |
+| `max_image_bytes`        | `20971520`   | 单图最大字节数               |
+| `max_images`             | `20`         | 每帖最多图片数               |
+
+两个保留期参数在下一轮维护任务生效，默认每分钟运行一次。更改归档保留期会应用于所有尚未清理的归档，时间从最后一次取消收藏开始计算；已删除内容不会恢复。其他参数由核心启动时加载，修改后执行 `docker compose restart core`。CLI 创建租户直接使用数据库中的默认额度。
+
+`telegram_bot_token` 和 `telegram_channel_id` 为文本配置，默认均为空。token 为空时不启动 Bot；启用时必须配置已注册的 Channel UUID。token 作为敏感值保存在数据库中，CLI 不回显明文。数据库备份也包含这些凭据，应沿用加密和访问限制。配置表不提供租户写接口。
+
+环境变量用于数据库、对象存储、Adapter 的启动连接配置、凭据及进程监听地址。数据库连接凭据必须在数据库外提供。
 
 修改默认存储额度不影响已有租户，已有租户使用 `tenants.quota_bytes`。读取归档不受剩余额度限制。
 

@@ -83,7 +83,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, e = m.Migrate(ctx, rivermigrate.DirectionUp, nil); e != nil {
 		return e
 	}
-	_, e = s.Pool.Exec(ctx, `GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO monitor_app; REVOKE ALL ON tokens,schema_versions FROM monitor_app; GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO monitor_app;`)
+	_, e = s.Pool.Exec(ctx, `GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO monitor_app; REVOKE ALL ON tokens,schema_versions FROM monitor_app; REVOKE INSERT,UPDATE,DELETE ON config FROM monitor_app; GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO monitor_app;`)
 	return e
 }
 

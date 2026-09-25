@@ -33,16 +33,16 @@ func main() {
 func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	cfg, e := config.Limits()
-	if e != nil {
-		return e
-	}
 	db, e := store.Open(ctx, config.Required("DATABASE_URL"))
 	if e != nil {
 		return e
 	}
 	defer db.Close()
 	if e = db.CheckRole(ctx); e != nil {
+		return e
+	}
+	cfg, e := config.Load(ctx, db)
+	if e != nil {
 		return e
 	}
 	b, e := blob.New(config.Required("S3_ENDPOINT"), config.Required("S3_ACCESS_KEY"), config.Required("S3_SECRET_KEY"), config.Required("S3_BUCKET"))
@@ -68,12 +68,12 @@ func run() error {
 	s := &app.Service{DB: db, Adapter: client, Providers: desc.Providers, Blobs: b, HTTP: &http.Client{Timeout: 60 * time.Second}, Config: cfg}
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &app.Worker{S: s})
-	q, e := river.NewClient(riverpgxv5.New(db.Pool), &river.Config{Workers: workers, Queues: map[string]river.QueueConfig{"capture": {MaxWorkers: cfg.CaptureWorkers}, "download": {MaxWorkers: cfg.DownloadWorkers}, "control": {MaxWorkers: 4}, "delivery": {MaxWorkers: 2}}, MaxAttempts: 3, RescueStuckJobsAfter: 6 * time.Minute, Logger: slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))})
+	q, e := river.NewClient(riverpgxv5.New(db.Pool), &river.Config{Workers: workers, Queues: map[string]river.QueueConfig{"capture": {MaxWorkers: cfg.CaptureWorkers}, "download": {MaxWorkers: cfg.DownloadWorkers}, "control": {MaxWorkers: cfg.ControlWorkers}, "delivery": {MaxWorkers: cfg.DeliveryWorkers}}, MaxAttempts: 3, RescueStuckJobsAfter: 6 * time.Minute, Logger: slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))})
 	if e != nil {
 		return e
 	}
 	s.Queue = q
-	if cfg.CaptureWorkers+cfg.DownloadWorkers+16 > int(db.Pool.Config().MaxConns) {
+	if 2*cfg.CaptureWorkers+cfg.DownloadWorkers+cfg.ControlWorkers+cfg.DeliveryWorkers+8 > int(db.Pool.Config().MaxConns) {
 		return &app.PermanentError{Message: "database pool too small for configured worker count"}
 	}
 	go func() {
@@ -90,10 +90,13 @@ func run() error {
 			}
 		}
 	}()
-	if token := os.Getenv("TELEGRAM_BOT_TOKEN"); token != "" {
+	token, channel, e := config.Telegram(ctx, db)
+	if e != nil {
+		return e
+	}
+	if token != "" {
 		tg := &telegram.Client{Token: token, HTTP: &http.Client{Timeout: 75 * time.Second}, Blobs: b}
 
-		channel := config.Required("TELEGRAM_CHANNEL_ID")
 		s.Senders = map[string]app.Sender{channel: tg}
 		id, e := tg.Me(ctx)
 		if e != nil {

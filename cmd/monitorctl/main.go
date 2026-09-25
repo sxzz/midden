@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -25,7 +26,7 @@ func main() {
 
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: monitorctl storage-init | migrate | tenant-create | token-create TENANT | token-revoke TOKEN_ID | channel-create UUID BOT_ID | app-password")
+		return fmt.Errorf("usage: monitorctl config-list | config-set KEY VALUE | storage-init | migrate | tenant-create | token-create TENANT | token-revoke TOKEN_ID | channel-create UUID BOT_ID | app-password")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -38,6 +39,47 @@ func run() error {
 	}
 	defer db.Close()
 	switch os.Args[1] {
+	case "config-list":
+		rows, err := db.Pool.Query(ctx, `SELECT key,CASE WHEN sensitive AND value<>'' THEN '[redacted]' ELSE value END FROM config ORDER BY key`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var key string
+			var value string
+			if err = rows.Scan(&key, &value); err != nil {
+				return err
+			}
+			fmt.Printf("%s=%s\n", key, value)
+		}
+		return rows.Err()
+	case "config-set":
+		if len(os.Args) != 4 {
+			return fmt.Errorf("config-set KEY VALUE (or --stdin) required")
+		}
+		value := os.Args[3]
+		if value == "--stdin" {
+			data, err := io.ReadAll(io.LimitReader(os.Stdin, 4097))
+			if err != nil || len(data) > 4096 {
+				return fmt.Errorf("invalid configuration input")
+			}
+			value = strings.TrimRight(string(data), "\r\n")
+		}
+		// Validate secrets before submitting SQL so constraint errors cannot include them in DB logs.
+		if os.Args[2] == "telegram_bot_token" && value != "" && (len(value) > 4096 || !regexp.MustCompile(`^[0-9]+:[A-Za-z0-9_-]+$`).MatchString(value)) {
+			return fmt.Errorf("invalid bot token format")
+		}
+
+		tag, err := db.Pool.Exec(ctx, `UPDATE config SET value=$2,updated_at=now() WHERE key=$1`, os.Args[2], value)
+		if err != nil {
+			return fmt.Errorf("invalid configuration value")
+		}
+		if tag.RowsAffected() != 1 {
+			return fmt.Errorf("unknown configuration key")
+		}
+		fmt.Println("configuration saved")
+		return nil
 	case "migrate":
 		return db.Migrate(ctx)
 	case "app-password":

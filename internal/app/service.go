@@ -25,11 +25,15 @@ type Config struct {
 	TenantConcurrency int
 	CaptureWorkers    int
 	DownloadWorkers   int
+	ControlWorkers    int
+	DeliveryWorkers   int
 	MaxImageBytes     int64
 	MaxImages         int
 }
 
-func Defaults() Config { return Config{1 << 30, 10, 2, 4, 8, 20 << 20, 20} }
+func Defaults() Config {
+	return Config{Quota: 1 << 30, Rate: 10, TenantConcurrency: 2, CaptureWorkers: 4, DownloadWorkers: 8, ControlWorkers: 4, DeliveryWorkers: 2, MaxImageBytes: 20 << 20, MaxImages: 20}
+}
 
 type Sender interface {
 	Send(context.Context, string, string, int64) (int64, error)

@@ -1,11 +1,12 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"strconv"
 
 	"monitor/internal/app"
+	"monitor/internal/store"
 )
 
 func Get(k, def string) string {
@@ -23,32 +24,47 @@ func Required(k string) string {
 	return v
 }
 
-func Limits() (app.Config, error) {
-	c := app.Defaults()
-	items := []struct {
-		k string
-		p *int
-	}{{"CAPTURE_RATE", &c.Rate}, {"TENANT_CONCURRENCY", &c.TenantConcurrency}, {"CAPTURE_WORKERS", &c.CaptureWorkers}, {"DOWNLOAD_WORKERS", &c.DownloadWorkers}, {"MAX_IMAGES", &c.MaxImages}}
-	for _, i := range items {
-		if v := os.Getenv(i.k); v != "" {
-			n, e := strconv.Atoi(v)
-			if e != nil || n < 1 || n > 1000 {
-				return c, fmt.Errorf("invalid %s", i.k)
-			}
-			*i.p = n
+// Load reads operating settings from the database; environment overrides are not supported.
+func Load(ctx context.Context, db *store.Store) (app.Config, error) {
+	var c app.Config
+	rows, e := db.Pool.Query(ctx, `SELECT key,value::bigint FROM config WHERE value_type='integer'`)
+	if e != nil {
+		return c, e
+	}
+	defer rows.Close()
+	values := map[string]int64{}
+	for rows.Next() {
+		var k string
+		var v int64
+		if e = rows.Scan(&k, &v); e != nil {
+			return c, e
+		}
+		values[k] = v
+	}
+	if e = rows.Err(); e != nil {
+		return c, e
+	}
+	for _, k := range []string{"tenant_quota_bytes", "capture_rate", "tenant_concurrency", "capture_workers", "download_workers", "control_workers", "delivery_workers", "max_image_bytes", "max_images"} {
+		if values[k] <= 0 {
+			return c, fmt.Errorf("missing or invalid config: %s", k)
 		}
 	}
-	for _, i := range []struct {
-		k string
-		p *int64
-	}{{"TENANT_QUOTA_BYTES", &c.Quota}, {"MAX_IMAGE_BYTES", &c.MaxImageBytes}} {
-		if v := os.Getenv(i.k); v != "" {
-			n, e := strconv.ParseInt(v, 10, 64)
-			if e != nil || n < 1 {
-				return c, fmt.Errorf("invalid %s", i.k)
-			}
-			*i.p = n
-		}
-	}
+	c.Quota = values["tenant_quota_bytes"]
+	c.Rate = int(values["capture_rate"])
+	c.TenantConcurrency = int(values["tenant_concurrency"])
+	c.CaptureWorkers = int(values["capture_workers"])
+	c.DownloadWorkers = int(values["download_workers"])
+	c.ControlWorkers = int(values["control_workers"])
+	c.DeliveryWorkers = int(values["delivery_workers"])
+	c.MaxImageBytes = values["max_image_bytes"]
+	c.MaxImages = int(values["max_images"])
 	return c, nil
+}
+
+func Telegram(ctx context.Context, db *store.Store) (token, channel string, err error) {
+	err = db.Pool.QueryRow(ctx, `SELECT t.value,c.value FROM config t CROSS JOIN config c WHERE t.key='telegram_bot_token' AND c.key='telegram_channel_id'`).Scan(&token, &channel)
+	if err == nil && token != "" && channel == "" {
+		err = fmt.Errorf("telegram_channel_id is required when the bot is enabled")
+	}
+	return
 }

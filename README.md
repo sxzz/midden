@@ -51,12 +51,14 @@ docker compose logs --tail=100 core adapter
    docker compose run --rm --entrypoint monitorctl migrate channel-create <channel-uuid> <bot-numeric-id>
    ```
 
-3. 在 `.env` 中填写：
+3. 将渠道 ID 和 token 保存到数据库配置。token 可通过标准输入传入，避免出现在命令参数中：
 
-   ```dotenv
-   TELEGRAM_BOT_TOKEN=<bot-token>
-   TELEGRAM_CHANNEL_ID=<channel-uuid>
+   ```sh
+   docker compose run --rm --entrypoint monitorctl migrate config-set telegram_channel_id <channel-uuid>
+   docker compose run --rm -T --entrypoint monitorctl migrate config-set telegram_bot_token --stdin
    ```
+
+   第二条命令启动后输入 token，再用 Ctrl-D 结束输入。`config-list` 会将已配置的 token 显示为 `[redacted]`。
 
 4. 更新服务：
 
@@ -109,7 +111,16 @@ curl -H "Authorization: Bearer $MONITOR_TOKEN" \
 
 存储额度按各租户收藏所引用的文字版本和图片计量，包含历史版本；同租户内重复图片只算一次。公开内容在服务器上只存一份，但每个收藏者分别计量。取消收藏只释放自己的占用，仍被自己其他收藏引用的图片继续计量。
 
-共享更新会同步增加收藏者的用量。若被动更新导致超额，仍可读取和取消收藏，但不能新增收藏或主动采集。进行中的任务会临时预留额度。无人收藏且没有采集或待发送结果的内容，取消收藏至少 24 小时后才会清理。
+共享更新会同步增加收藏者的用量。若被动更新导致超额，仍可读取和取消收藏，但不能新增收藏或主动采集。进行中的任务会临时预留额度。无人收藏的归档默认保留 7 天，到期且没有采集或待发送结果时才会清理；期间重新收藏会取消清理。
+
+保留天数、额度和并发等运行参数保存在数据库 `config` 表中。查看配置或将保留期改为 30 天：
+
+```sh
+docker compose run --rm --entrypoint monitorctl migrate config-list
+docker compose run --rm --entrypoint monitorctl migrate config-set archive_retention_days 30
+```
+
+保留期修改在下一次清理时生效，无需重启。其他运行参数及 Telegram 配置修改后重启核心。数据库、S3、Adapter 的启动连接配置和凭据通过环境变量提供。
 
 ## 管理与维护
 
