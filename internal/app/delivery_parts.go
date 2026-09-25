@@ -15,6 +15,10 @@ func deliveryParts(text string, assets []domain.Asset) []deliveryPart {
 	var ready []domain.Asset
 	for _, a := range assets {
 		if a.State == "ready" {
+			if a.Size > 50000000 {
+				text += "\n\n文件已保存，但超过 Telegram 回传大小限制，可通过 API 下载。"
+				continue
+			}
 			ready = append(ready, a)
 		}
 	}
@@ -24,7 +28,7 @@ func deliveryParts(text string, assets []domain.Asset) []deliveryPart {
 		first := true
 		for len(ready) > 0 {
 			n := min(10, len(ready))
-			part := deliveryPart{kind: "images", assets: ready[:n]}
+			part := deliveryPart{kind: "media", assets: ready[:n]}
 			if first {
 				part.text = caption
 			}

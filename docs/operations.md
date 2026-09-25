@@ -19,7 +19,7 @@
 
 `/healthz` 检查数据库。Adapter 提供带服务认证的 gRPC health；启动时 Core 还验证 Describe 契约。每租户存储使用由 `/v1/usage` 查询，避免在 Prometheus 导出无界租户标签。
 
-关注持续队列积压、provider 失败率、图片失败及 Telegram 429。失败信息对用户脱敏，不输出远端响应、token、Bot API 请求 URL。xdown 返回成功标志但没有可用内容时，采集仍然失败；不要将其判定为源帖子删除。
+关注持续队列积压、provider 失败率、图片失败及 Telegram 429。失败信息对用户脱敏，不输出远端响应、token、Bot API 请求 URL。FxTwitter 返回成功状态但没有可用图文时，采集仍然失败；不要将其判定为源帖子删除。
 
 任务最多执行三次。进程中断的 River 任务由 stuck-job rescue 恢复；达到最终尝试后被丢弃的任务由每分钟 reconciliation 转成明确业务失败并释放预留额度。图片下载预留在重试间保留，资源失败或成功时释放。业务事务与 River 入队原子提交。
 
@@ -87,7 +87,8 @@ monitorctl channel-create <stable-channel-uuid> <bot-numeric-id>
 | `control_workers`        | `4`          | 控制任务 worker 数           |
 | `delivery_workers`       | `2`          | 消息投递 worker 数           |
 | `max_image_bytes`        | `20971520`   | 单图最大字节数               |
-| `max_images`             | `20`         | 每帖最多图片数               |
+| `max_video_bytes`       | `536870912`  | 单个视频最大字节数           |
+| `max_media`             | `20`         | 每帖最多媒体数               |
 
 两个保留期参数在下一轮维护任务生效，默认每分钟运行一次。更改归档保留期会应用于所有尚未清理的归档，时间从最后一条保存记录删除时开始计算；已物理清理的内容不会恢复。其他参数由核心启动时加载，修改后执行 `docker compose restart core`。CLI 创建租户直接使用数据库中的默认额度。
 

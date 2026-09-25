@@ -29,17 +29,18 @@ type Config struct {
 	ControlWorkers    int
 	DeliveryWorkers   int
 	MaxImageBytes     int64
-	MaxImages         int
+	MaxVideoBytes     int64
+	MaxMedia          int
 }
 
 func Defaults() Config {
-	return Config{Quota: 1 << 30, Rate: 10, TenantConcurrency: 2, CaptureWorkers: 4, DownloadWorkers: 8, ControlWorkers: 4, DeliveryWorkers: 2, MaxImageBytes: 20 << 20, MaxImages: 20}
+	return Config{Quota: 1 << 30, Rate: 10, TenantConcurrency: 2, CaptureWorkers: 4, DownloadWorkers: 8, ControlWorkers: 4, DeliveryWorkers: 2, MaxImageBytes: 20 << 20, MaxVideoBytes: 512 << 20, MaxMedia: 20}
 }
 
 type Sender interface {
 	Send(context.Context, string, string, int64) (int64, error)
-	Image(context.Context, string, domain.Asset) (int64, error)
-	Images(context.Context, string, []domain.Asset, string) (int64, error)
+	MediaItem(context.Context, string, domain.Asset) (int64, error)
+	Media(context.Context, string, []domain.Asset, string) (int64, error)
 }
 
 type Service struct {
@@ -95,7 +96,7 @@ func (s *Service) providerVisibility(ctx context.Context, id string) (string, er
 
 func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureInput) (out domain.Job, err error) {
 	if in.ProviderID == "" {
-		in.ProviderID = "xdown"
+		in.ProviderID = "fxtwitter"
 	}
 	if in.Key == "" {
 		in.Key = uuid.NewString()
@@ -118,7 +119,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			}
 			return domain.ErrUnsupported
 		}
-		if in.ProviderID != "xdown" {
+		if in.ProviderID != "fxtwitter" {
 			return domain.ErrUnsupported
 		}
 		if in.Origin.IdentityID != "" {
@@ -138,7 +139,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			if e := tx.QueryRow(ctx, `SELECT id,url,scope,provider_id,coalesce(connection_id::text,''),visibility FROM archives WHERE id=$1`, in.RefreshID).Scan(&aid, &in.URL, &scope, &in.ProviderID, &connection, &visibility); e != nil {
 				return e
 			}
-			if connection != "" || in.ProviderID != "xdown" || scope != "public" {
+			if connection != "" || in.ProviderID != "fxtwitter" || scope != "public" {
 				return domain.ErrUnsupported
 			}
 		}
@@ -315,7 +316,7 @@ func (s *Service) Archive(ctx context.Context, t, id string) (a domain.Archive, 
 }
 
 func assets(ctx context.Context, tx pgx.Tx, cid string) (out []domain.Asset, e error) {
-	rows, e := tx.Query(ctx, `SELECT a.id,a.position,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,'') FROM assets a LEFT JOIN blobs b ON b.id=a.blob_id WHERE a.capture_id=$1 ORDER BY a.position`, cid)
+	rows, e := tx.Query(ctx, `SELECT a.id,a.position,a.alt_text,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,'') FROM assets a LEFT JOIN blobs b ON b.id=a.blob_id WHERE a.capture_id=$1 ORDER BY a.position`, cid)
 	if e != nil {
 		return nil, e
 	}
@@ -323,7 +324,7 @@ func assets(ctx context.Context, tx pgx.Tx, cid string) (out []domain.Asset, e e
 	out = []domain.Asset{}
 	for rows.Next() {
 		var a domain.Asset
-		if e = rows.Scan(&a.ID, &a.Position, &a.State, &a.Error, &a.Hash, &a.MIME, &a.Size, &a.Key); e != nil {
+		if e = rows.Scan(&a.ID, &a.Position, &a.AltText, &a.State, &a.Error, &a.Hash, &a.MIME, &a.Size, &a.Key); e != nil {
 			return nil, e
 		}
 		out = append(out, a)
@@ -394,12 +395,13 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 }
 
 type Payload struct {
-	Text       string   `json:"text"`
-	TextKind   string   `json:"text_kind"`
-	Warnings   []string `json:"warnings"`
-	Version    string   `json:"adapter_version"`
-	TextSource string   `json:"text_source,omitempty"`
-	Incomplete bool     `json:"incomplete,omitempty"`
+	MediaDescriptions []string `json:"media_descriptions,omitempty"`
+	Text              string   `json:"text"`
+	TextKind          string   `json:"text_kind"`
+	Warnings          []string `json:"warnings"`
+	Version           string   `json:"adapter_version"`
+	TextSource        string   `json:"text_source,omitempty"`
+	Incomplete        bool     `json:"incomplete,omitempty"`
 }
 
 // CaptureArchive pins delivery to the revision produced (or reused) by that capture.

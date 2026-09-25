@@ -56,9 +56,9 @@ func Validate(d *pb.DescribeResponse) error {
 		seen[h] = true
 	}
 	for _, p := range d.Providers {
-		if p.Id == "xdown" && p.Authentication == "none" && (p.Visibility == pb.Visibility_VISIBILITY_PUBLIC || p.Visibility == pb.Visibility_VISIBILITY_PRIVATE) {
+		if p.Id == "fxtwitter" && p.Authentication == "none" && (p.Visibility == pb.Visibility_VISIBILITY_PUBLIC || p.Visibility == pb.Visibility_VISIBILITY_PRIVATE) {
 			return nil
 		}
 	}
-	return fmt.Errorf("xdown provider unavailable")
+	return fmt.Errorf("fxtwitter provider unavailable")
 }

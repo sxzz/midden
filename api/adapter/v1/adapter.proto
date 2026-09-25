@@ -44,6 +44,9 @@ message FetchRequest {
 message Resource {
   string url = 1;
   string kind = 2;
+  // Immutable media identity including rendition, scoped by platform/provider/access.
+  string immutable_key = 3;
+  string alt_text = 4;
 }
 
 message FetchResponse {

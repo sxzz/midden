@@ -37,6 +37,9 @@ type fakeAdapter struct {
 	textSource string
 	incomplete bool
 	urls       []string
+	mediaKind  string
+	cacheKey   string
+	altText    string
 	calls      atomic.Int64
 }
 
@@ -45,7 +48,7 @@ func (f *fakeAdapter) Describe(context.Context, *pb.DescribeRequest, ...grpc.Cal
 	if f.public {
 		visibility = pb.Visibility_VISIBILITY_PUBLIC
 	}
-	return &pb.DescribeResponse{Providers: []*pb.Provider{{Id: "xdown", Authentication: "none", Visibility: visibility}}}, nil
+	return &pb.DescribeResponse{Providers: []*pb.Provider{{Id: "fxtwitter", Authentication: "none", Visibility: visibility}}}, nil
 }
 
 func (f *fakeAdapter) Fetch(ctx context.Context, r *pb.FetchRequest, _ ...grpc.CallOption) (*pb.FetchResponse, error) {
@@ -58,7 +61,12 @@ func (f *fakeAdapter) Fetch(ctx context.Context, r *pb.FetchRequest, _ ...grpc.C
 	}
 	v := &pb.FetchResponse{Visibility: visibility, ExternalId: r.ExternalId, ProviderId: r.ProviderId, Text: f.text, TextKind: "provider_summary", AdapterVersion: "test", Warnings: []string{"incomplete"}, TextSource: f.textSource, Incomplete: f.incomplete}
 	for _, u := range f.urls {
-		v.Resources = append(v.Resources, &pb.Resource{Url: u, Kind: "image"})
+		v.Resources = append(v.Resources, &pb.Resource{Url: u, ImmutableKey: f.cacheKey, AltText: f.altText, Kind: func() string {
+			if f.mediaKind != "" {
+				return f.mediaKind
+			}
+			return "image"
+		}()})
 	}
 	return v, nil
 }
@@ -123,7 +131,7 @@ func (f *fakeSender) Send(_ context.Context, chat, text string, mid int64) (int6
 	return f.count, nil
 }
 
-func (f *fakeSender) Image(ctx context.Context, chat string, a domain.Asset) (int64, error) {
+func (f *fakeSender) MediaItem(ctx context.Context, chat string, a domain.Asset) (int64, error) {
 	return f.Send(ctx, chat, a.ID, 0)
 }
 
@@ -483,6 +491,6 @@ func must(t *testing.T, e error) {
 	}
 }
 
-func (f *fakeSender) Images(ctx context.Context, chat string, aa []domain.Asset, caption string) (int64, error) {
+func (f *fakeSender) Media(ctx context.Context, chat string, aa []domain.Asset, caption string) (int64, error) {
 	return f.Send(ctx, chat, "album", 0)
 }

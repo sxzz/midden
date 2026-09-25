@@ -82,7 +82,7 @@ func TestAlbumFallback(t *testing.T) {
 	}))
 	defer h.Close()
 	c := Client{Token: "test", Base: h.URL, HTTP: h.Client(), Blobs: testBlob{}}
-	id, e := c.WithReplyTo(123).WithCode("archive-id").Images(context.Background(), "-42", []domain.Asset{{Key: "one", MIME: "image/png"}, {Key: "two", MIME: "image/png"}}, "archive-id\n正文")
+	id, e := c.WithReplyTo(123).WithCode("archive-id").Media(context.Background(), "-42", []domain.Asset{{Key: "one", MIME: "image/png"}, {Key: "two", MIME: "image/png"}}, "archive-id\n正文")
 	if e != nil || id != 7 || calls != 2 {
 		t.Fatal(id, e, calls)
 	}
@@ -204,7 +204,7 @@ func TestUploadFloodWait(t *testing.T) {
 	}))
 	defer h.Close()
 	c := Client{Token: "test", Base: h.URL, HTTP: h.Client(), Blobs: testBlob{}}
-	_, e := c.Image(context.Background(), "42", domain.Asset{Key: "one"})
+	_, e := c.MediaItem(context.Background(), "42", domain.Asset{Key: "one"})
 	a, ok := e.(*APIError)
 	if !ok || a.Code != 429 || a.RetryAfter != 19*time.Second {
 		t.Fatal(e)
@@ -239,6 +239,48 @@ func TestCodeEntityPreservesLiteralContent(t *testing.T) {
 			}
 			if c.codeText != "" {
 				t.Fatal("shared client modified")
+			}
+		})
+	}
+}
+
+func TestVideoDelivery(t *testing.T) {
+	for _, album := range []bool{false, true} {
+		t.Run(fmt.Sprint(album), func(t *testing.T) {
+			h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := r.ParseMultipartForm(1 << 20); err != nil {
+					t.Fatal(err)
+				}
+				defer r.MultipartForm.RemoveAll()
+				if r.FormValue("reply_to_message_id") != "123" {
+					t.Error("lost reply")
+				}
+				if album {
+					if !strings.HasSuffix(r.URL.Path, "sendMediaGroup") {
+						t.Error(r.URL.Path)
+					}
+					var media []map[string]any
+					json.Unmarshal([]byte(r.FormValue("media")), &media)
+					if len(media) != 2 || media[0]["type"] != "video" || media[1]["type"] != "photo" || media[0]["caption"] != "正文" {
+						t.Error(media)
+					}
+					w.Write([]byte(`{"ok":true,"result":[{"message_id":7},{"message_id":8}]}`))
+				} else {
+					if !strings.HasSuffix(r.URL.Path, "sendVideo") || r.FormValue("caption") != "正文" {
+						t.Error(r.URL.Path, r.Form)
+					}
+					w.Write([]byte(`{"ok":true,"result":{"message_id":7}}`))
+				}
+			}))
+			defer h.Close()
+			c := Client{Token: "test", Base: h.URL, HTTP: h.Client(), Blobs: testBlob{}}
+			aa := []domain.Asset{{Key: "video", MIME: "video/mp4"}}
+			if album {
+				aa = append(aa, domain.Asset{Key: "photo", MIME: "image/png"})
+			}
+			id, err := c.WithReplyTo(123).Media(context.Background(), "-42", aa, "正文")
+			if err != nil || id != 7 {
+				t.Fatal(id, err)
 			}
 		})
 	}

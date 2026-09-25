@@ -356,14 +356,14 @@ func TestPublicSharing(t *testing.T) {
 		t.Fatal("finished unreferenced archive not collected")
 	}
 	// A provider policy mismatch must fail before publishing any text or image.
-	s.Providers = []*pb.Provider{{Id: "xdown", Authentication: "none", Visibility: pb.Visibility_VISIBILITY_PUBLIC}}
+	s.Providers = []*pb.Provider{{Id: "fxtwitter", Authentication: "none", Visibility: pb.Visibility_VISIBILITY_PUBLIC}}
 	mismatch, e := s.Submit(ctx, a, domain.CaptureInput{URL: "https://x.com/a/status/91000000002"})
 	must(t, e)
 	s.Adapter = private.Adapter
 	if e = s.capture(ctx, store.Task{Tenant: a, ID: mismatch.ID}); e == nil {
 		t.Fatal("private response published as public")
 	}
-	s.Providers = []*pb.Provider{{Id: "xdown", Authentication: "none"}}
+	s.Providers = []*pb.Provider{{Id: "fxtwitter", Authentication: "none"}}
 	if _, e = s.Submit(ctx, a, domain.CaptureInput{URL: target}); e == nil {
 		t.Fatal("unspecified visibility accepted")
 	}

@@ -48,7 +48,7 @@ func TestDatabaseSettings(t *testing.T) {
 	}
 	for _, q := range []string{
 		`UPDATE config SET value=0 WHERE key='archive_retention_days'`,
-		`UPDATE config SET value=-1 WHERE key='max_images'`,
+		`UPDATE config SET value=-1 WHERE key='max_media'`,
 		`INSERT INTO config(key,value) VALUES('unknown',1)`,
 	} {
 		if _, e = admin.Pool.Exec(ctx, q); e == nil {

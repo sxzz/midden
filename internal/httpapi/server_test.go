@@ -38,7 +38,7 @@ func TestRESTIsolation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	s := &app.Service{DB: db, Queue: q, Providers: []*pb.Provider{{Id: "xdown", Authentication: "none", Visibility: pb.Visibility_VISIBILITY_PRIVATE}}, Config: app.Defaults()}
+	s := &app.Service{DB: db, Queue: q, Providers: []*pb.Provider{{Id: "fxtwitter", Authentication: "none", Visibility: pb.Visibility_VISIBILITY_PRIVATE}}, Config: app.Defaults()}
 	h := Handler(s)
 	makeToken := func() string {
 		var tenant string

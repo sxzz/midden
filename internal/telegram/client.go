@@ -22,6 +22,7 @@ type Client struct {
 	replyTo  int64
 	codeText string
 	caption  string
+	Username string
 	Token    string
 	Base     string
 	HTTP     *http.Client
@@ -78,6 +79,9 @@ func apiError(err error) error {
 
 func (c *Client) Me(ctx context.Context) (string, error) {
 	u, e := c.sdk(ctx).GetMe()
+	if e == nil {
+		c.Username = u.UserName
+	}
 	return strconv.FormatInt(u.ID, 10), apiError(e)
 }
 
@@ -279,7 +283,7 @@ func (c *Client) AnswerToast(ctx context.Context, id, text string) error {
 	return apiError(e)
 }
 
-func (c *Client) Image(ctx context.Context, chat string, a domain.Asset) (int64, error) {
+func (c *Client) MediaItem(ctx context.Context, chat string, a domain.Asset) (int64, error) {
 	id, e := c.upload(ctx, chat, a, false)
 	var x *APIError
 	if errors.As(e, &x) && x.Code == 400 {
@@ -295,7 +299,7 @@ func (c *Client) upload(ctx context.Context, chat string, a domain.Asset, docume
 	}
 	r, e := c.Blobs.Get(ctx, a.Key)
 	if e != nil {
-		return 0, fmt.Errorf("archived image unavailable")
+		return 0, fmt.Errorf("archived media unavailable")
 	}
 	defer r.Close()
 	file := tg.FileReader{Name: a.Hash + extension(a.MIME), Reader: r}
@@ -304,7 +308,15 @@ func (c *Client) upload(ctx context.Context, chat string, a domain.Asset, docume
 	photo.Caption = c.caption
 	photo.CaptionEntities = c.textEntities(c.caption)
 	var cfg tg.Chattable = photo
-	if document {
+	if a.MIME == "video/mp4" {
+		video := tg.NewVideo(id, file)
+		video.ReplyToMessageID = int(c.replyTo)
+		video.Caption = c.caption
+		video.CaptionEntities = c.textEntities(c.caption)
+		video.SupportsStreaming = true
+		cfg = video
+	}
+	if document || a.MIME == "video/webm" {
 		doc := tg.NewDocument(id, file)
 		doc.ReplyToMessageID = int(c.replyTo)
 		doc.Caption = c.caption
@@ -316,17 +328,23 @@ func (c *Client) upload(ctx context.Context, chat string, a domain.Asset, docume
 	return int64(m.MessageID), e
 }
 
-func (c *Client) Images(ctx context.Context, chat string, assets []domain.Asset, caption string) (int64, error) {
+func (c *Client) Media(ctx context.Context, chat string, assets []domain.Asset, caption string) (int64, error) {
 	copy := *c
 	copy.caption = caption
 	c = &copy
 	if len(assets) == 1 {
-		return c.Image(ctx, chat, assets[0])
+		return c.MediaItem(ctx, chat, assets[0])
 	}
 	if len(assets) < 2 || len(assets) > 10 {
 		return 0, fmt.Errorf("invalid album size")
 	}
-	id, e := c.album(ctx, chat, assets, false)
+	document := false
+	for _, a := range assets {
+		if a.MIME == "video/webm" {
+			document = true
+		}
+	}
+	id, e := c.album(ctx, chat, assets, document)
 	var x *APIError
 	if errors.As(e, &x) && x.Code == 400 {
 		return c.album(ctx, chat, assets, true)
@@ -349,12 +367,20 @@ func (c *Client) album(ctx context.Context, chat string, assets []domain.Asset, 
 	for i, a := range assets {
 		r, e := c.Blobs.Get(ctx, a.Key)
 		if e != nil {
-			return 0, fmt.Errorf("archived image unavailable")
+			return 0, fmt.Errorf("archived media unavailable")
 		}
 		readers = append(readers, r)
 		file := tg.FileReader{Name: a.Hash + extension(a.MIME), Reader: r}
 		if document {
 			media := tg.NewInputMediaDocument(file)
+			if i == 0 {
+				media.Caption = c.caption
+				media.CaptionEntities = c.textEntities(c.caption)
+			}
+			files = append(files, media)
+		} else if a.MIME == "video/mp4" {
+			media := tg.NewInputMediaVideo(file)
+			media.SupportsStreaming = true
 			if i == 0 {
 				media.Caption = c.caption
 				media.CaptionEntities = c.textEntities(c.caption)
@@ -384,6 +410,10 @@ func (c *Client) album(ctx context.Context, chat string, assets []domain.Asset, 
 
 func extension(m string) string {
 	switch m {
+	case "video/webm":
+		return ".webm"
+	case "video/mp4":
+		return ".mp4"
 	case "image/png":
 		return ".png"
 	case "image/webp":

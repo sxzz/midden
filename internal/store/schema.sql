@@ -35,9 +35,9 @@ CREATE TABLE IF NOT EXISTS config (
     ELSE
         value ~ '^[0-9]{1,16}$' AND value::numeric BETWEEN 1 AND CASE WHEN key IN ('archive_retention_days', 'object_gc_grace_hours') THEN
             36500
-        WHEN key IN ('tenant_quota_bytes', 'max_image_bytes') THEN
+        WHEN key IN ('tenant_quota_bytes', 'max_image_bytes', 'max_video_bytes') THEN
             1125899906842624
-        WHEN key IN ('capture_rate', 'tenant_concurrency', 'capture_workers', 'download_workers', 'control_workers', 'delivery_workers', 'max_images') THEN
+        WHEN key IN ('capture_rate', 'tenant_concurrency', 'capture_workers', 'download_workers', 'control_workers', 'delivery_workers', 'max_media') THEN
             1000
         ELSE
             0
@@ -57,7 +57,8 @@ VALUES
     ('control_workers', '4'),
     ('delivery_workers', '2'),
     ('max_image_bytes', '20971520'),
-    ('max_images', '20'),
+    ('max_video_bytes', '536870912'),
+    ('max_media', '20'),
     ('telegram_bot_token', ''),('telegram_channel_id','')
 ON CONFLICT (key)
     DO NOTHING;
@@ -257,6 +258,9 @@ CREATE TABLE IF NOT EXISTS assets (
     capture_id uuid NOT NULL,
     position integer NOT NULL,
     source_url text NOT NULL,
+    alt_text text NOT NULL DEFAULT '',
+    cache_key text NOT NULL DEFAULT '',
+    kind text NOT NULL CHECK (kind IN ('image', 'video')),
     state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'ready', 'failed')),
     error text NOT NULL DEFAULT '',
     blob_id uuid,
@@ -270,6 +274,10 @@ CREATE TABLE IF NOT EXISTS assets (
     FOREIGN KEY (data_scope, blob_id) REFERENCES blobs (data_scope, id),
     FOREIGN KEY (tenant_id, object_id) REFERENCES objects (tenant_id, id)
 );
+
+CREATE INDEX IF NOT EXISTS assets_cache ON assets (data_scope, cache_key)
+WHERE
+    state = 'ready' AND cache_key <> '';
 
 CREATE TABLE IF NOT EXISTS submissions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),

@@ -8,7 +8,7 @@ import (
 	"monitor/internal/domain"
 )
 
-func TestDeliveryPartsKeepTextWithImages(t *testing.T) {
+func TestDeliveryPartsKeepTextWithMedia(t *testing.T) {
 	for _, size := range []int{0, 1, 2, 10, 11, 20} {
 		for _, text := range []string{"正文", strings.Repeat("😀", 513) + "尾部", strings.Repeat("长正文", 2000)} {
 			var assets []domain.Asset
@@ -22,7 +22,7 @@ func TestDeliveryPartsKeepTextWithImages(t *testing.T) {
 			for _, part := range parts {
 				joined += part.text
 				switch part.kind {
-				case "images":
+				case "media":
 					if texts > 0 {
 						t.Fatal("image scheduled after overflow text")
 					}
@@ -39,12 +39,26 @@ func TestDeliveryPartsKeepTextWithImages(t *testing.T) {
 			if joined != text || images != size {
 				t.Fatal("lost content")
 			}
-			if size > 0 && (parts[0].kind != "images" || buttons != 1) {
+			if size > 0 && (parts[0].kind != "media" || buttons != 1) {
 				t.Fatal("media must lead with one keyboard")
 			}
 			if size > 0 && len(utf16.Encode([]rune(text))) <= 1024 && texts != 0 {
 				t.Fatal("short text sent separately")
 			}
 		}
+	}
+}
+
+func TestOversizeVideoDelivery(t *testing.T) {
+	parts := deliveryParts("正文", []domain.Asset{{State: "ready", MIME: "video/mp4", Size: 50000001}})
+	if len(parts) != 1 || parts[0].kind != "text" || !strings.Contains(parts[0].text, "文件已保存") {
+		t.Fatal(parts)
+	}
+}
+
+func TestArchiveMediaDescription(t *testing.T) {
+	text := archiveMessage(domain.Archive{ID: "archive", Assets: []domain.Asset{{State: "ready", MIME: "video/mp4", AltText: "示例视频", Position: 0}}}, "complete")
+	if !strings.Contains(text, "1 个视频") || !strings.Contains(text, "媒体 1 描述：示例视频") {
+		t.Fatal(text)
 	}
 }

@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "monitor/api/adapter/v1"
-	"monitor/internal/xdown"
+	"monitor/internal/xadapter"
 )
 
 func TestAuthenticatedProtocol(t *testing.T) {
@@ -22,7 +22,7 @@ func TestAuthenticatedProtocol(t *testing.T) {
 		t.Fatal(e)
 	}
 	srv := grpc.NewServer(grpc.UnaryInterceptor(Auth("test-token")))
-	pb.RegisterAdapterServer(srv, &xdown.Server{})
+	pb.RegisterAdapterServer(srv, &xadapter.Server{})
 	h := health.NewServer()
 	hp.RegisterHealthServer(srv, h)
 	go srv.Serve(lis)
@@ -69,7 +69,7 @@ func TestProviderRequiresExplicitVisibility(t *testing.T) {
 			ProtocolVersion: "1",
 			AdapterId:       "x",
 			Providers: []*pb.Provider{{
-				Id: "xdown", Authentication: "none", Visibility: visibility,
+				Id: "fxtwitter", Authentication: "none", Visibility: visibility,
 			}},
 		}
 		valid := visibility == pb.Visibility_VISIBILITY_PUBLIC || visibility == pb.Visibility_VISIBILITY_PRIVATE

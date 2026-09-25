@@ -140,7 +140,7 @@ func (s *Service) submissionStatus(ctx context.Context, t store.Task) error {
 	}
 	text := "正在采集帖子…"
 	if job.State == "downloading" {
-		text = "正在保存图片…"
+		text = "正在保存媒体…"
 	}
 	var sourceURL string
 	if err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
@@ -172,7 +172,7 @@ func jobState(state string) string {
 	case "queued":
 		return "正在采集"
 	case "downloading":
-		return "正在保存图片"
+		return "正在保存媒体"
 	case "complete":
 		return "归档完成"
 	case "partial":
@@ -200,26 +200,38 @@ func archiveMessage(a domain.Archive, state string) string {
 	if state == "partial" {
 		heading = "已保存，部分内容未保存"
 	}
-	ready := 0
+	ready, videos := 0, 0
 	for _, asset := range a.Assets {
 		if asset.State == "ready" {
-			ready++
+			if strings.HasPrefix(asset.MIME, "video/") {
+				videos++
+			} else {
+				ready++
+			}
 		}
 	}
 	if ready > 0 {
 		heading += fmt.Sprintf(" · %d 张图片", ready)
+	}
+	if videos > 0 {
+		heading += fmt.Sprintf(" · %d 个视频", videos)
 	}
 	parts := []string{heading}
 	parts = append(parts, a.ID)
 	if text := strings.TrimSpace(a.Text); text != "" {
 		parts = append(parts, text)
 	}
+	for _, asset := range a.Assets {
+		if alt := strings.TrimSpace(asset.AltText); alt != "" {
+			parts = append(parts, fmt.Sprintf("媒体 %d 描述：%s", asset.Position+1, alt))
+		}
+	}
 	for _, warning := range a.Warnings {
 		parts = append(parts, warning)
 	}
 	for _, asset := range a.Assets {
 		if asset.State == "failed" {
-			parts = append(parts, "图片未保存："+asset.Error)
+			parts = append(parts, "媒体未保存："+asset.Error)
 		}
 	}
 	return strings.Join(parts, "\n\n")

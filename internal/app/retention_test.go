@@ -29,7 +29,7 @@ func TestConfiguredRetention(t *testing.T) {
 	s := &Service{DB: db, Blobs: &memoryBlob{m: map[string][]byte{}}}
 	var tenant, archive string
 	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO tenants DEFAULT VALUES RETURNING id`).Scan(&tenant))
-	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO archives(tenant_id,external_id,url,provider_id) VALUES($1,$2,'https://x.com/a/status/1','xdown') RETURNING id`, tenant, uuid.NewString()).Scan(&archive))
+	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO archives(tenant_id,external_id,url,provider_id) VALUES($1,$2,'https://x.com/a/status/1','fxtwitter') RETURNING id`, tenant, uuid.NewString()).Scan(&archive))
 	_, e = admin.Pool.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id) VALUES($1,$2)`, tenant, archive)
 	must(t, e)
 	must(t, s.DeleteArchive(ctx, tenant, archive))

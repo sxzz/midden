@@ -82,7 +82,7 @@ func TestGroupReplySurvivesFallbacks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := c.Images(context.Background(), "-42", []domain.Asset{{Key: "one", MIME: "image/png"}}, "正文"); err != nil {
+	if _, err := c.Media(context.Background(), "-42", []domain.Asset{{Key: "one", MIME: "image/png"}}, "正文"); err != nil {
 		t.Fatal(err)
 	}
 	if base.replyTo != 0 {

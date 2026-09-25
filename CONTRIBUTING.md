@@ -43,6 +43,6 @@ Provider 必须在协议中明确声明 public/private，不能由用户请求�
 
 ## X 解析器
 
-图文结果组织参考 [nonebot-plugin-parser-m](https://github.com/LoCCai/nonebot-plugin-parser-m) 的 `BaseParser` / `ParseResult`，xdown 请求与 HTML 解析参考其中的 `twitter.py`。Go 实现将结果整合、图片解析和正文获取分在 `internal/xadapter`、`internal/xdown`、`internal/fxtwitter`，由核心统一下载和持久化。
+图文结果组织参考 [nonebot-plugin-parser-m](https://github.com/LoCCai/nonebot-plugin-parser-m) 的 `BaseParser` / `ParseResult`。Go 实现通过 `internal/xadapter` 调用 `internal/fxtwitter` 的 API v2 客户端，由核心统一下载和持久化图片。
 
-FxTwitter 响应结构见其 [Status Fetch API](https://github.com/FxEmbed/FxEmbed/wiki/Status-Fetch-API)。正文必须匹配请求的帖子 ID；测试使用本地固定响应，不依赖在线服务。
+FxTwitter 响应结构见其 [API v2 文档](https://docs.fxembed.com/api/twitter/operations/2statusid/)。正文必须匹配请求的帖子 ID；测试使用本地固定响应，不依赖在线服务。

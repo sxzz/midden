@@ -65,7 +65,7 @@ func run() error {
 		return e
 	}
 	// Resource URLs come from trusted adapters; allow the deployment's proxy/DNS routing.
-	s := &app.Service{DB: db, Adapter: client, Providers: desc.Providers, Blobs: b, HTTP: &http.Client{Timeout: 60 * time.Second}, Config: cfg}
+	s := &app.Service{DB: db, Adapter: client, Providers: desc.Providers, Blobs: b, HTTP: &http.Client{Timeout: 5 * time.Minute}, Config: cfg}
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &app.Worker{S: s})
 	q, e := river.NewClient(riverpgxv5.New(db.Pool), &river.Config{Workers: workers, Queues: map[string]river.QueueConfig{"capture": {MaxWorkers: cfg.CaptureWorkers}, "download": {MaxWorkers: cfg.DownloadWorkers}, "control": {MaxWorkers: cfg.ControlWorkers}, "delivery": {MaxWorkers: cfg.DeliveryWorkers}}, MaxAttempts: 3, RescueStuckJobsAfter: 6 * time.Minute, Logger: slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))})
@@ -95,7 +95,7 @@ func run() error {
 		return e
 	}
 	if token != "" {
-		tg := &telegram.Client{Token: token, HTTP: &http.Client{Timeout: 75 * time.Second}, Blobs: b}
+		tg := &telegram.Client{Token: token, HTTP: &http.Client{Timeout: 5 * time.Minute}, Blobs: b}
 
 		s.Senders = map[string]app.Sender{channel: tg}
 		id, e := tg.Me(ctx)
@@ -129,7 +129,7 @@ func run() error {
 		defer cancel()
 		q.Stop(c)
 	}()
-	api := &http.Server{Addr: config.Get("HTTP_LISTEN", ":8080"), Handler: httpapi.Handler(s), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 90 * time.Second, IdleTimeout: 60 * time.Second}
+	api := &http.Server{Addr: config.Get("HTTP_LISTEN", ":8080"), Handler: httpapi.Handler(s), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 90 * time.Second, IdleTimeout: 5 * time.Minute}
 	adminMux := http.NewServeMux()
 	adminMux.Handle("/metrics", promhttp.Handler())
 	adminMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {

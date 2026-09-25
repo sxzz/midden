@@ -49,7 +49,7 @@ func (s *Service) Poll(ctx context.Context, c *telegram.Client, channel string) 
 		}
 		for _, u := range updates {
 			m := u.ActorMessage()
-			if m != nil && m.Chat.ID < 0 && u.Callback == nil && !groupTrigger(m) {
+			if m != nil && m.Chat.ID < 0 && u.Callback == nil && !groupTrigger(m, c.Username) {
 				m = nil
 			}
 			if m == nil {
@@ -90,8 +90,15 @@ func (s *Service) Poll(ctx context.Context, c *telegram.Client, channel string) 
 	return ctx.Err()
 }
 
-func groupTrigger(m *telegram.Message) bool {
-	if fields := strings.Fields(m.Text); len(fields) > 0 {
+func groupTrigger(m *telegram.Message, username string) bool {
+	text, addressed := m.AddressedText(username)
+	if !addressed {
+		return false
+	}
+	if fields := strings.Fields(text); len(fields) > 0 {
+		if parts := strings.SplitN(fields[0], "@", 2); len(parts) == 2 && !strings.EqualFold(parts[1], username) {
+			return false
+		}
 		if _, ok := lookupCommand(strings.Split(fields[0], "@")[0]); ok {
 			return true
 		}
@@ -163,6 +170,11 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 	}
 	stopAction := keepAction(ctx, s.sender(channel), chat, "typing")
 	defer stopAction()
+	if m.Chat.ID < 0 && u.Callback == nil {
+		if c, ok := s.sender(channel).(*telegram.Client); ok {
+			input, _ = m.AddressedText(c.Username)
+		}
+	}
 	fields := strings.Fields(input)
 	cmd := ""
 	arg := ""
@@ -340,7 +352,7 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 	}
 	parts := deliveryParts(text, aa)
 	// Progress text is replaced by the new captioned media, never by editing old content.
-	if len(parts) > 0 && parts[0].kind == "images" && progress == 0 && mid != 0 {
+	if len(parts) > 0 && parts[0].kind == "media" && progress == 0 && mid != 0 {
 		if c, ok := sender.(*telegram.Client); ok {
 			if err := c.DeleteProgress(ctx, chat, mid); err != nil {
 				return telegramError(err)
@@ -368,13 +380,20 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 			} else {
 				id, e = sender.Send(ctx, chat, part.text, 0)
 			}
-		case "images":
-			stop := keepAction(ctx, sender, chat, "upload_photo")
+		case "media":
+			action := "upload_photo"
+			for _, a := range part.assets {
+				if a.MIME == "video/mp4" {
+					action = "upload_video"
+					break
+				}
+			}
+			stop := keepAction(ctx, sender, chat, action)
 			formatted := sender
 			if c, ok := sender.(*telegram.Client); ok && progress == 0 {
 				formatted = c.WithCode(j.ArchiveID)
 			}
-			id, e = formatted.Images(ctx, chat, part.assets, part.text)
+			id, e = formatted.Media(ctx, chat, part.assets, part.text)
 			stop()
 		case "buttons":
 			if c, ok := sender.(*telegram.Client); ok {

@@ -26,7 +26,7 @@ type Worker struct {
 	retry sync.Map
 }
 
-func (w *Worker) Timeout(*river.Job[store.Task]) time.Duration { return 5 * time.Minute }
+func (w *Worker) Timeout(*river.Job[store.Task]) time.Duration { return 10 * time.Minute }
 func (w *Worker) NextRetry(j *river.Job[store.Task]) time.Time {
 	if t, ok := w.retry.LoadAndDelete(j.ID); ok {
 		return t.(time.Time)
@@ -172,7 +172,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if state != "queued" {
 		return nil
 	}
-	if connection != "" || provider != "xdown" || scope != "public" {
+	if connection != "" || provider != "fxtwitter" || scope != "public" {
 		return domain.ErrUnsupported
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
@@ -195,9 +195,15 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		return &PermanentError{"text exceeds archive limit"}
 	}
 	p := Payload{Text: r.Text, TextKind: r.TextKind, Warnings: r.Warnings, Version: r.AdapterVersion, TextSource: r.TextSource, Incomplete: r.Incomplete}
-	if len(r.Resources) > s.Config.MaxImages {
-		p.Warnings = append(p.Warnings, "图片数量超过归档限制。")
-		r.Resources = r.Resources[:s.Config.MaxImages]
+	if len(r.Resources) > s.Config.MaxMedia {
+		p.Warnings = append(p.Warnings, "媒体数量超过归档限制。")
+		r.Resources = r.Resources[:s.Config.MaxMedia]
+	}
+	for _, media := range r.Resources {
+		if len(media.AltText) > 1<<20 {
+			return &PermanentError{"media description exceeds archive limit"}
+		}
+		p.MediaDescriptions = append(p.MediaDescriptions, media.AltText)
 	}
 	b, _ := json.Marshal(p)
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
@@ -224,12 +230,17 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		seen := map[string]bool{}
 		n := 0
 		for _, v := range r.Resources {
-			if v.Kind != "image" || seen[v.Url] {
+			if (v.Kind != "image" && v.Kind != "video") || seen[v.Url] {
 				continue
 			}
 			seen[v.Url] = true
 			var aid string
-			if e = tx.QueryRow(ctx, `INSERT INTO assets(tenant_id,capture_id,position,source_url,visibility) VALUES($1,$2,$3,$4,$5) RETURNING id`, t.Tenant, t.ID, n, v.Url, visibility).Scan(&aid); e != nil {
+			cacheKey := ""
+			if v.Kind == "video" && v.ImmutableKey != "" {
+				key, _ := json.Marshal([]string{"x", provider, scope, connection, v.ImmutableKey})
+				cacheKey = store.Hash(string(key))
+			}
+			if e = tx.QueryRow(ctx, `INSERT INTO assets(tenant_id,capture_id,position,source_url,visibility,kind,cache_key,alt_text) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, t.Tenant, t.ID, n, v.Url, visibility, v.Kind, cacheKey, v.AltText).Scan(&aid); e != nil {
 				return e
 			}
 			n++
@@ -275,13 +286,14 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		good := 0
 		partial := p.Incomplete
 		type sig struct {
-			Hash  string
-			State string
-			Error string
+			Hash    string
+			AltText string
+			State   string
+			Error   string
 		}
 		ss := []sig{}
 		for _, a := range aa {
-			ss = append(ss, sig{a.Hash, a.State, a.Error})
+			ss = append(ss, sig{a.Hash, a.AltText, a.State, a.Error})
 			if a.State == "ready" {
 				good++
 			} else {
@@ -289,7 +301,7 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 			}
 		}
 		if p.Text == "" && good == 0 {
-			return s.failCaptureTx(ctx, tx, tenant, cid, "no text or image could be archived")
+			return s.failCaptureTx(ctx, tx, tenant, cid, "no text or media could be archived")
 		}
 		digestData, _ := json.Marshal(struct {
 			Text, Kind string

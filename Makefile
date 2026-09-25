@@ -23,4 +23,4 @@ fmt-sql:
 fmt-config:
 	uvx ruff@0.12.12 format scripts/configure-local-storage.py
 	go run mvdan.cc/sh/v3/cmd/shfmt@v3.12.0 -w scripts/test-integration.sh
-	npx --yes prettier@3.6.2 --write compose.yaml compose.local.yaml docs/openapi.yaml .github/workflows/test.yml scripts/testdata/s3.json internal/xdown/testdata/images.html
+	npx --yes prettier@3.6.2 --write compose.yaml compose.local.yaml docs/openapi.yaml .github/workflows/test.yml scripts/testdata/s3.json

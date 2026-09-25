@@ -19,52 +19,51 @@ flowchart LR
     end
     Core <-->|业务数据与持久化队列| PG[(PostgreSQL)]
     Core -->|gRPC：Describe / Fetch| Adapter[X Adapter]
-    Adapter -->|图片| Provider[xdown]
-    Adapter -->|正文| TextSource[FxTwitter]
-    Provider -->|图片链接| Adapter
-    Core -->|HTTP 下载| Media[图片服务]
-    Core <-->|图片原文件| S3[(S3 对象存储)]
+    Adapter -->|正文与媒体| Provider[FxTwitter API v2]
+    Provider -->|媒体链接| Adapter
+    Core -->|HTTP 下载| Media[媒体服务]
+    Core <-->|媒体原文件| S3[(S3 对象存储)]
 ```
 
 | 组件           | 当前职责                                                              |
 | -------------- | --------------------------------------------------------------------- |
 | `core`         | Telegram 收发、REST、租户认证、任务调度、下载、去重、归档、额度与投递 |
-| `adapter`      | 提供 gRPC 接口，识别 X 帖子，汇总 xdown 图片与 FxTwitter 正文         |
+| `adapter`      | 提供 gRPC 接口，识别 X 帖子，通过 FxTwitter API v2 获取正文与媒体         |
 | PostgreSQL     | 保存身份、归档、任务、资源索引、用量和 River 队列                     |
-| S3             | 保存图片二进制；本地部署使用 SeaweedFS                                |
+| S3             | 保存媒体二进制；本地部署使用 SeaweedFS                                |
 | `migrate`      | 一次性执行数据库迁移并配置业务数据库角色                              |
 | `storage-init` | 本地对象存储初始化：创建 bucket 并验证访问                            |
 
 Adapter 是运营者部署并认证的可信服务，Provider 和其返回的资源链接按可信输入处理。Adapter 不连接数据库或对象存储；核心负责下载和持久化。用户请求及按钮参数需要身份、权限、URL 范围和额度校验。
 
-当前 X Adapter 的 `xdown` 采集流程同时请求 xdown 图片和 FxTwitter 正文，Provider 选择仍持久化在任务中。归档的 `text_source` 记录文字实际来源，`text_kind` 区分正文与标题／摘要；文字来源失败会记录缺失并将采集标记为部分完成。
+当前 X Adapter 使用 `fxtwitter` Provider，通过 `/2/status/{id}` 获取正文及有序媒体列表。Provider 选择持久化在任务中；归档记录来源和 adapter 版本。视频和 GIF 选择 最高分辨率、同分辨率最高码率的 MP4／WebM 下载；文章及缺失媒体会明确标记，限流和暂时不可用会重试。
 
 ## 内容可见性
 
-Provider 在 `Describe` 中声明 `visibility`（public/private），`Fetch` 响应必须与已创建任务的可见性一致。未声明或不一致时拒绝保存；用户请求不能指定可见性。当前 xdown 图文 Provider 声明 public。刷新沿用归档原本的 Provider 和可见性，不会自动改变共享范围。
+Provider 在 `Describe` 中声明 `visibility`（public/private），`Fetch` 响应必须与已创建任务的可见性一致。未声明或不一致时拒绝保存；用户请求不能指定可见性。当前 FxTwitter 图文 Provider 声明 public。刷新沿用归档原本的 Provider 和可见性，不会自动改变共享范围。
 
-`archives`、`captures`、`revisions`、`assets`、`blobs` 保存可见性，以及数据库生成的 `data_scope`：public 使用统一的全零 UUID，private 使用租户 UUID。因此公开内容在全局去重，私有内容只在同租户内去重，两者不复用版本或图片。`tenant_id` 记录创建者，用于写入权限及对象生命周期管理，不决定保存者的额度计量。创建者和可见性创建后不可修改。
+`archives`、`captures`、`revisions`、`assets`、`blobs` 保存可见性，以及数据库生成的 `data_scope`：public 使用统一的全零 UUID，private 使用租户 UUID。因此公开内容在全局去重，私有内容只在同租户内去重，两者不复用版本或媒体。`tenant_id` 记录创建者，用于写入权限及对象生命周期管理，不决定保存者的额度计量。创建者和可见性创建后不可修改。
 
 公开归档的当前版本指针全局共享，任意租户刷新成功后，所有保存者查看时得到新版本；已发送的 Telegram 内容消息不改写，也不向其他保存者广播。`tenant_archives` 记录各租户自己的保存记录。任务查询仅对执行租户或提交者开放。受限函数 `capture_deliveries` 让执行租户调度该任务各提交来源的投递，不开放其他租户的身份或会话数据。
 
-对 `tenant_archives` 按 `archive_id` 计数可得到保存该归档的租户数；同租户不同渠道不会重复计算。全局统计需要管理员或受限统计入口，普通租户查询仍受 RLS 限制，目前没有公开保存人数 API。这里的投递指向提交者发送采集结果、文字和图片，例如回复其 Telegram 私聊。
+对 `tenant_archives` 按 `archive_id` 计数可得到保存该归档的租户数；同租户不同渠道不会重复计算。全局统计需要管理员或受限统计入口，普通租户查询仍受 RLS 限制，目前没有公开保存人数 API。这里的投递指向提交者发送采集结果、文字和媒体，例如回复其 Telegram 私聊。
 
 ## 一次采集如何执行
 
 1. Telegram 接收消息或按钮回调，根据 Bot 实例和外部用户 ID 解析租户。更新写入 `inbox` 并创建处理任务后，才推进轮询 offset。REST 通过 token 摘要解析租户。
 2. 应用服务规范化帖子 URL，找到或创建 `archives`。已有归档可直接返回；同一归档进行中的采集合并到同一个 `captures`。
 3. 每次用户提交生成独立 `submissions`，记录身份、会话和幂等键。多个提交可以共享一次采集，但分别向各自来源投递。
-4. 采集 worker 调用 Adapter，保存文字、图片链接及来源信息，创建图片下载任务。
-5. 下载 worker 预留存储额度，下载并校验图片，计算 SHA-256，上传 S3。公开图片跨租户复用 Blob；私有图片仅在所属租户内复用。
+4. 采集 worker 调用 Adapter，保存文字、媒体链接及来源信息，创建媒体下载任务。
+5. 下载 worker 预留存储额度，下载并校验媒体，计算 SHA-256，上传 S3。公开媒体跨租户复用 Blob；私有媒体仅在所属租户内复用。
 6. 资源全部到达终态后，归档 worker 生成内容 hash。内容有变化则写入新 `revisions`；无变化则复用原版本并更新观察时间。
-7. 投递 worker 对纯文字结果更新原状态消息；图文结果移除临时状态消息，以带说明的图片或相册发送。已确认的消息和图片批次进度写入数据库，供重试和重启后恢复。
+7. 投递 worker 对纯文字结果更新原状态消息；图文结果移除临时状态消息，以带说明的媒体或相册发送。已确认的消息和媒体批次进度写入数据库，供重试和重启后恢复。
 
 核心使用 PostgreSQL 中的 River 队列，业务变更与任务入队在同一事务提交。远程 HTTP、gRPC 和 S3 请求不占用业务事务。
 
 | River 队列 | 任务                         | 默认 worker 数 |
 | ---------- | ---------------------------- | -------------- |
 | `capture`  | 调用 Adapter 采集            | 4              |
-| `download` | 下载图片、上传对象存储       | 8              |
+| `download` | 下载媒体、上传对象存储       | 8              |
 | `control`  | 处理渠道更新、完成归档       | 4              |
 | `delivery` | 状态更新、命令回复、图文投递 | 2              |
 
@@ -121,23 +120,23 @@ erDiagram
 
 `archives.current_revision` 指向当前版本，`captures.revision_id` 指向该次采集最终使用的版本。投递按后者读取，避免较晚的重新抓取改变此前提交的回传内容。
 
-### 图片与对象
+### 媒体与对象
 
 | 表        | 作用与关键约束                                                                   |
 | --------- | -------------------------------------------------------------------------------- |
-| `assets`  | 某次采集中的图片引用，保存顺序、来源 URL、下载状态、失败原因和 Blob／对象引用    |
-| `blobs`   | 去重后的图片内容，保存 SHA-256、对象 key、大小和 MIME；`(data_scope, hash)` 唯一 |
+| `assets`  | 某次采集中的媒体引用，保存顺序、来源 URL、下载状态、失败原因和 Blob／对象引用    |
+| `blobs`   | 去重后的媒体内容，保存 SHA-256、对象 key、大小和 MIME；`(data_scope, hash)` 唯一 |
 | `objects` | S3 对象的生命周期记录，状态为 `pending`、`attached`、`garbage` 或 `deleting`     |
 
-图片字节放在 S3，PostgreSQL 保存索引和元数据。对象 key 形如 `<tenant_id>/objects/<object_id>`。
+媒体字节放在 S3，PostgreSQL 保存索引和元数据。对象 key 形如 `<tenant_id>/objects/<object_id>`。
 
 先记录待上传对象，再执行上传和落库。内容重复时复用已有 Blob，多余对象标记为垃圾；垃圾对象超过 `config.object_gc_grace_hours` 指定的最小存活时间后清理（默认 24 小时）。这样可以处理上传成功但数据库提交前进程中断的情况。
 
-旧版本通过 `revisions.capture_id` 找到对应 `assets`。图片顺序属于引用，内容 hash 属于 Blob；不同版本可以引用同一份图片。物理存储按 Blob 去重，租户用量按其保存记录的引用分别计算。
+旧版本通过 `revisions.capture_id` 找到对应 `assets`。媒体顺序属于引用，内容 hash 属于 Blob；不同版本可以引用同一份媒体。物理存储按 Blob 去重，租户用量按其保存记录的引用分别计算。
 
-API 的 `used_bytes` 由 `tenant_usage()` 在当前租户 RLS 上下文中计算：已保存归档的全部历史版本内容字节数，加上这些版本引用的图片按 SHA-256 去重后的字节数。版本大小按规范 JSON 序列化的字节数计算。`reserved_bytes` 是执行中任务的临时预留，已下载图片保留实际新增引用的预留，直到归档终态统一释放。索引、队列、提交记录、备份及等待清理的重复上传对象不计入逻辑用量。
+API 的 `used_bytes` 由 `tenant_usage()` 在当前租户 RLS 上下文中计算：已保存归档的全部历史版本内容字节数，加上这些版本引用的媒体按 SHA-256 去重后的字节数。版本大小按规范 JSON 序列化的字节数计算。`reserved_bytes` 是执行中任务的临时预留，已下载媒体保留实际新增引用的预留，直到归档终态统一释放。索引、队列、提交记录、备份及等待清理的重复上传对象不计入逻辑用量。
 
-例如 A、B 都保存 10 MiB 图片，两人的额度分别计入 10 MiB，S3 只存一份。A 删除后释放自己的额度，B 保持计量。删除一条保存记录不会释放仍被同租户其他保存记录引用的图片。新增保存记录时，在同一事务中检查去重后的用量，不足则整体回滚。共享更新对所有保存者立即可见并计量；被动更新导致超额时保留内容，阻止新增保存与主动采集，允许读取和删除。
+例如 A、B 都保存 10 MiB 媒体，两人的额度分别计入 10 MiB，S3 只存一份。A 删除后释放自己的额度，B 保持计量。删除一条保存记录不会释放仍被同租户其他保存记录引用的媒体。新增保存记录时，在同一事务中检查去重后的用量，不足则整体回滚。共享更新对所有保存者立即可见并计量；被动更新导致超额时保留内容，阻止新增保存与主动采集，允许读取和删除。
 
 删除通过 `DELETE /v1/archives/{id}` 或 Telegram `/delete` 执行。最后一个引用删除时记录 `unreferenced_at`。维护任务在 `config.archive_retention_days` 天后（默认 7 天）锁定并检查归档，无保存记录、在途采集或待发送结果时删除内容索引；只有没有其他资源引用的 Blob 才转入对象垃圾清理。重新保存会清除清理标记。保存、用量检查和删除使用租户锁；内容清理与重新保存使用同一归档行锁。
 
@@ -155,11 +154,11 @@ API 的 `used_bytes` 由 `tenant_usage()` 在当前租户 RLS 上下文中计算
 
 ## Telegram 消息处理
 
-群聊的触发消息 ID 持久化在 `submissions.reply_to_message_id` 和 `replies.reply_to_message_id`。发送文字、图片、图片组或文件回退时均带回复目标，进度编辑保留已有回复关系。按钮操作在群内新发消息，并回复被点击的 Bot 消息。
+群聊的触发消息 ID 持久化在 `submissions.reply_to_message_id` 和 `replies.reply_to_message_id`。发送文字、媒体、媒体组或文件回退时均带回复目标，进度编辑保留已有回复关系。按钮操作在群内新发消息，并回复被点击的 Bot 消息。
 
 命令定义集中在 `internal/app/commands.go`。同一注册表驱动命令处理、参数校验、帮助文本、按钮回调校验及 SDK `setMyCommands`。启动时自动同步菜单。
 
-消息 ID 和按钮写入数据库。状态更新与最终投递共享提交级锁，避免进度消息覆盖结果；从采集状态或已完成的归档消息打开菜单时，导航回复使用独立消息，保留归档内容；菜单及状态查询消息可以原地更新。正文优先放入首图说明，限制为 1,024 个 UTF-16 单位；图片每组最多 10 张，所有图片批次先于溢出文字发送。图片发送失败时可回退为文件，保留说明与回复目标。相册发送、按钮设置和溢出文字分别记录进度，按钮设置失败后重试不会重发已确认的相册。
+消息 ID 和按钮写入数据库。状态更新与最终投递共享提交级锁，避免进度消息覆盖结果；从采集状态或已完成的归档消息打开菜单时，导航回复使用独立消息，保留归档内容；菜单及状态查询消息可以原地更新。正文优先放入首图说明，限制为 1,024 个 UTF-16 单位；媒体每组最多 10 张，所有媒体批次先于溢出文字发送。媒体发送失败时可回退为文件，保留说明与回复目标。相册发送、按钮设置和溢出文字分别记录进度，按钮设置失败后重试不会重发已确认的相册。
 
 Telegram 投递采用至少一次语义：远端成功但响应丢失时可能重复展示，归档与额度更新保持幂等。
 
@@ -172,5 +171,8 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 - `internal/store/schema.sql`：表、约束、RLS 与身份解析函数。
 - `api/adapter/v1/adapter.proto`：Adapter 协议。
 - `internal/xadapter/`：X 图文采集结果整合。
-- `internal/xdown/`：xdown 请求与图片解析。
-- `internal/fxtwitter/`：正文获取与帖子身份校验。
+- `internal/fxtwitter/`：FxTwitter API v2 请求与图文解析。
+
+媒体引用保存 `kind`、`alt_text` 和 `cache_key`。缓存键由平台、Provider、访问作用域、Connection 及 Provider 的不可变媒体标识组成，在 `data_scope` 内查找；标识包含媒体 ID 与文件规格。下载使用媒体级锁合并并发请求，命中缓存后复用 Blob 并按当前租户引用结算额度。媒体描述计入版本内容大小及变化比较，描述变化不会触发视频重新下载。缓存随媒体引用的保留和清理生命周期释放。
+
+群聊普通消息在入库和身份解析前检查 Telegram 的 mention／bot_command 实体，只有明确指向当前 Bot 用户名的消息才进入处理；图片说明中的 @ 同样适用。按钮回调沿用原权限规则，不要求再次 @。用户名通过启动时的 getMe 获取。

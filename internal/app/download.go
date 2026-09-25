@@ -38,14 +38,41 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 		return river.JobSnooze(time.Second)
 	}
 	defer release(c, t.ID, -1)
-	var source, state, key, cid, oid, visibility, dataScope string
+	var cacheKey, cacheScope string
+	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT cache_key,data_scope FROM assets WHERE id=$1`, t.ID).Scan(&cacheKey, &cacheScope)
+	})
+	if e != nil {
+		return e
+	}
+	if cacheKey != "" {
+		e = c.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext($1),-2)`, cacheScope+cacheKey).Scan(&ok)
+		if e != nil {
+			return e
+		}
+		if !ok {
+			return river.JobSnooze(time.Second)
+		}
+		defer func() {
+			unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := c.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtext($1),-2)`, cacheScope+cacheKey); err != nil {
+				c.Conn().Close(unlockCtx)
+			}
+		}()
+		hit, err := s.reuseMedia(ctx, t, cacheScope, cacheKey)
+		if err != nil || hit {
+			return err
+		}
+	}
+	var kind, source, state, key, cid, oid, visibility, dataScope string
 	var reserved int64
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, t.Tenant); e != nil {
 			return e
 		}
 		var objectID *string
-		e := tx.QueryRow(ctx, `SELECT source_url,state,reserved_bytes,capture_id,object_id,visibility,data_scope FROM assets WHERE id=$1 FOR UPDATE`, t.ID).Scan(&source, &state, &reserved, &cid, &objectID, &visibility, &dataScope)
+		e := tx.QueryRow(ctx, `SELECT kind,source_url,state,reserved_bytes,capture_id,object_id,visibility,data_scope FROM assets WHERE id=$1 FOR UPDATE`, t.ID).Scan(&kind, &source, &state, &reserved, &cid, &objectID, &visibility, &dataScope)
 		if e != nil {
 			return e
 		}
@@ -57,7 +84,11 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 			if e = tx.QueryRow(ctx, `SELECT quota_bytes-tenant_usage()-reserved_bytes FROM tenants WHERE id=$1`, t.Tenant).Scan(&available); e != nil {
 				return e
 			}
-			reserved = min(available, s.Config.MaxImageBytes)
+			limit := s.Config.MaxImageBytes
+			if kind == "video" {
+				limit = s.Config.MaxVideoBytes
+			}
+			reserved = min(available, limit)
 			if reserved <= 0 {
 				return domain.ErrQuota
 			}
@@ -88,27 +119,27 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 	}
 	u, e := url.Parse(source)
 	if e != nil || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return &PermanentError{"invalid image URL"}
+		return &PermanentError{"invalid media URL"}
 	}
 	req, e := http.NewRequestWithContext(ctx, "GET", source, nil)
 	if e != nil {
-		return &PermanentError{"invalid image URL"}
+		return &PermanentError{"invalid media URL"}
 	}
 	resp, e := s.HTTP.Do(req)
 	if e != nil {
-		return fmt.Errorf("image request failed")
+		return fmt.Errorf("media request failed")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 429 || resp.StatusCode >= 500 {
-		return &RetryError{After: parseRetry(resp.Header.Get("Retry-After")), Err: fmt.Errorf("image upstream unavailable")}
+		return &RetryError{After: parseRetry(resp.Header.Get("Retry-After")), Err: fmt.Errorf("media upstream unavailable")}
 	}
 	if resp.StatusCode != 200 {
-		return &PermanentError{"image provider rejected request"}
+		return &PermanentError{"media provider rejected request"}
 	}
 	if resp.ContentLength > reserved {
-		return &PermanentError{"image exceeds size or remaining storage limit"}
+		return &PermanentError{"media exceeds size or remaining storage limit"}
 	}
-	f, e := os.CreateTemp("", "monitor-image-*")
+	f, e := os.CreateTemp("", "monitor-media-*")
 	if e != nil {
 		return e
 	}
@@ -117,10 +148,10 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 	h := sha256.New()
 	n, e := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, reserved+1))
 	if e != nil {
-		return fmt.Errorf("image download interrupted")
+		return fmt.Errorf("media download interrupted")
 	}
 	if n > reserved {
-		return &PermanentError{"image exceeds size or remaining storage limit"}
+		return &PermanentError{"media exceeds size or remaining storage limit"}
 	}
 	if n == 0 {
 		return &PermanentError{"empty image"}
@@ -131,10 +162,8 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 	header := make([]byte, 512)
 	k, _ := f.Read(header)
 	mime := http.DetectContentType(header[:k])
-	switch mime {
-	case "image/jpeg", "image/png", "image/webp":
-	default:
-		return &PermanentError{"unsupported image format"}
+	if (kind == "video" && mime != "video/mp4" && mime != "video/webm") || (kind == "image" && mime != "image/jpeg" && mime != "image/png" && mime != "image/webp") {
+		return &PermanentError{"unsupported media format"}
 	}
 	if _, e = f.Seek(0, 0); e != nil {
 		return e

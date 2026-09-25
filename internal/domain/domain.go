@@ -79,6 +79,7 @@ type Job struct {
 }
 
 type Asset struct {
+	AltText  string `json:"alt_text,omitempty"`
 	ID       string `json:"id"`
 	Position int    `json:"position"`
 	State    string `json:"state"`
