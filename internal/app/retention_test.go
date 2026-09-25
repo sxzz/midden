@@ -32,7 +32,7 @@ func TestConfiguredRetention(t *testing.T) {
 	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO archives(tenant_id,external_id,url,provider_id) VALUES($1,$2,'https://x.com/a/status/1','xdown') RETURNING id`, tenant, uuid.NewString()).Scan(&archive))
 	_, e = admin.Pool.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id) VALUES($1,$2)`, tenant, archive)
 	must(t, e)
-	must(t, s.Forget(ctx, tenant, archive))
+	must(t, s.DeleteArchive(ctx, tenant, archive))
 	_, e = admin.Pool.Exec(ctx, `UPDATE archives SET unreferenced_at=now()-interval '2 days' WHERE id=$1`, archive)
 	must(t, e)
 	_, e = admin.Pool.Exec(ctx, `UPDATE config SET value=7 WHERE key='archive_retention_days'`)

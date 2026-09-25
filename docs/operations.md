@@ -47,7 +47,7 @@ docker compose start core
 1. 在隔离的 Docker PostgreSQL 中创建空数据库与 `monitor_app` 角色，设置新密码；本版本迁移所有者为 PostgreSQL 管理员，恢复使用同名角色或显式映射。
 2. 在不启动核心的前提下，将 SQL dump 恢复到空数据库。保留权限、函数和 RLS；不要使用会丢弃这些授权的恢复方式。
 3. 将对象同步到新的私有 bucket，保持对象 key 完全不变。
-4. 配置新数据库、bucket 和服务认证。验证原 Channel UUID、Bot ID、身份映射、归档 ID、原图 hash、历史版本、公开内容共享以及私有内容和收藏记录的租户隔离。
+4. 配置新数据库、bucket 和服务认证。验证原 Channel UUID、Bot ID、身份映射、归档 ID、原图 hash、历史版本、公开内容共享以及私有内容和保存记录的租户隔离。
 5. 原环境仍在线时，不启动第二个相同 Bot 接收者。切换前先停止原接收者。
 
 ```sh
@@ -77,7 +77,7 @@ monitorctl channel-create <stable-channel-uuid> <bot-numeric-id>
 
 | 配置键                   | 默认值       | 用途                         |
 | ------------------------ | ------------ | ---------------------------- |
-| `archive_retention_days` | `7`          | 最后一个收藏者取消后保留天数 |
+| `archive_retention_days` | `7`          | 最后一条保存记录删除后保留天数 |
 | `object_gc_grace_hours`  | `24`         | 垃圾上传对象的最小存活小时数 |
 | `tenant_quota_bytes`     | `1073741824` | 新租户存储额度               |
 | `capture_rate`           | `10`         | 每租户每分钟新采集数         |
@@ -89,7 +89,7 @@ monitorctl channel-create <stable-channel-uuid> <bot-numeric-id>
 | `max_image_bytes`        | `20971520`   | 单图最大字节数               |
 | `max_images`             | `20`         | 每帖最多图片数               |
 
-两个保留期参数在下一轮维护任务生效，默认每分钟运行一次。更改归档保留期会应用于所有尚未清理的归档，时间从最后一次取消收藏开始计算；已删除内容不会恢复。其他参数由核心启动时加载，修改后执行 `docker compose restart core`。CLI 创建租户直接使用数据库中的默认额度。
+两个保留期参数在下一轮维护任务生效，默认每分钟运行一次。更改归档保留期会应用于所有尚未清理的归档，时间从最后一条保存记录删除时开始计算；已物理清理的内容不会恢复。其他参数由核心启动时加载，修改后执行 `docker compose restart core`。CLI 创建租户直接使用数据库中的默认额度。
 
 `telegram_bot_token` 和 `telegram_channel_id` 为文本配置，默认均为空。token 为空时不启动 Bot；启用时必须配置已注册的 Channel UUID。token 作为敏感值保存在数据库中，CLI 不回显明文。数据库备份也包含这些凭据，应沿用加密和访问限制。配置表不提供租户写接口。
 

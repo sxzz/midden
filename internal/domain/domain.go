@@ -51,9 +51,10 @@ type Identity struct {
 type (
 	Connection struct{ ID, TenantID, AdapterID, ProviderID, Name, AccountID, State, CredentialRef string }
 	Origin     struct {
-		IdentityID string `json:"identity_id,omitempty"`
-		ChannelID  string `json:"channel_id,omitempty"`
-		ChatID     string `json:"chat_id,omitempty"`
+		ReplyToMessageID int64  `json:"reply_to_message_id,omitempty"`
+		IdentityID       string `json:"identity_id,omitempty"`
+		ChannelID        string `json:"channel_id,omitempty"`
+		ChatID           string `json:"chat_id,omitempty"`
 	}
 )
 

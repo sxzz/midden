@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -54,12 +55,15 @@ func TestAlbumFallback(t *testing.T) {
 			t.Error(e)
 		}
 		defer r.MultipartForm.RemoveAll()
-		var media []map[string]string
+		var media []map[string]any
 		if e := json.Unmarshal([]byte(r.FormValue("media")), &media); e != nil {
 			t.Error(e)
 		}
-		if len(media) != 2 || r.FormValue("chat_id") != "42" {
+		if len(media) != 2 || r.FormValue("chat_id") != "-42" || r.FormValue("reply_to_message_id") != "123" {
 			t.Error("wrong album")
+		}
+		if media[0]["caption"] != "archive-id\n正文" || media[1]["caption"] != nil || media[0]["caption_entities"] == nil {
+			t.Error("caption or code entity lost", media)
 		}
 		if len(r.MultipartForm.File) != 2 {
 			t.Error("missing files")
@@ -78,7 +82,7 @@ func TestAlbumFallback(t *testing.T) {
 	}))
 	defer h.Close()
 	c := Client{Token: "test", Base: h.URL, HTTP: h.Client(), Blobs: testBlob{}}
-	id, e := c.Images(context.Background(), "42", []domain.Asset{{Key: "one", MIME: "image/png"}, {Key: "two", MIME: "image/png"}})
+	id, e := c.WithReplyTo(123).WithCode("archive-id").Images(context.Background(), "-42", []domain.Asset{{Key: "one", MIME: "image/png"}, {Key: "two", MIME: "image/png"}}, "archive-id\n正文")
 	if e != nil || id != 7 || calls != 2 {
 		t.Fatal(id, e, calls)
 	}
@@ -120,6 +124,34 @@ func TestEditUnchangedDoesNotSendDuplicate(t *testing.T) {
 	}
 }
 
+func TestEmptyKeyboardUsesArray(t *testing.T) {
+	for _, previous := range []int64{0, 12} {
+		t.Run(fmt.Sprint(previous), func(t *testing.T) {
+			h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := r.ParseForm(); err != nil {
+					t.Error(err)
+				}
+				var markup map[string]json.RawMessage
+				if err := json.Unmarshal([]byte(r.Form.Get("reply_markup")), &markup); err != nil {
+					t.Error(err)
+				}
+				if string(markup["inline_keyboard"]) != "[]" {
+					t.Errorf("empty keyboard must be an array: %s", r.Form.Get("reply_markup"))
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(`{"ok":false,"error_code":400,"description":"invalid keyboard"}`))
+					return
+				}
+				w.Write([]byte(`{"ok":true,"result":{"message_id":12}}`))
+			}))
+			defer h.Close()
+			c := Client{Token: "test", Base: h.URL, HTTP: h.Client()}
+			if _, err := c.SendInteractive(context.Background(), "42", "暂无归档。", previous, nil); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestCallbackActorAndPolling(t *testing.T) {
 	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
@@ -149,7 +181,7 @@ func TestCallbackActorAndPolling(t *testing.T) {
 	if e != nil || len(updates) != 1 {
 		t.Fatal(updates, e)
 	}
-	m := updates[0].PrivateMessage()
+	m := updates[0].ActorMessage()
 	if m == nil || m.From.ID != 42 || m.From.Bot {
 		t.Fatal("wrong actor")
 	}
@@ -160,7 +192,7 @@ func TestCallbackActorAndPolling(t *testing.T) {
 		t.Fatal(e)
 	}
 	updates[0].Callback.From.ID = 43
-	if updates[0].PrivateMessage() != nil {
+	if updates[0].ActorMessage() != nil {
 		t.Fatal("accepted cross-chat callback")
 	}
 }
@@ -176,5 +208,38 @@ func TestUploadFloodWait(t *testing.T) {
 	a, ok := e.(*APIError)
 	if !ok || a.Code != 429 || a.RetryAfter != 19*time.Second {
 		t.Fatal(e)
+	}
+}
+
+func TestCodeEntityPreservesLiteralContent(t *testing.T) {
+	const id = "63fe76a6-84c0-4090-8f3e-f279948a337e"
+	text := "😀\n" + id + "\n正文 `<b>**literal**</b>`"
+	for _, previous := range []int64{0, 12} {
+		t.Run(fmt.Sprint(previous), func(t *testing.T) {
+			h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := r.ParseForm(); err != nil {
+					t.Error(err)
+				}
+				var entities []Entity
+				if err := json.Unmarshal([]byte(r.Form.Get("entities")), &entities); err != nil {
+					t.Error(err)
+				}
+				if len(entities) != 1 || entities[0].Type != "code" || entities[0].Offset != 3 || entities[0].Length != 36 {
+					t.Errorf("incorrect code entity: %+v", entities)
+				}
+				if r.Form.Get("text") != text || r.Form.Get("parse_mode") != "" {
+					t.Error("archived text changed or interpreted as markup")
+				}
+				w.Write([]byte(`{"ok":true,"result":{"message_id":12}}`))
+			}))
+			defer h.Close()
+			c := &Client{Token: "test", Base: h.URL, HTTP: h.Client()}
+			if _, err := c.WithCode(id).Send(context.Background(), "42", text, previous); err != nil {
+				t.Fatal(err)
+			}
+			if c.codeText != "" {
+				t.Fatal("shared client modified")
+			}
+		})
 	}
 }

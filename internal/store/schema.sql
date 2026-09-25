@@ -282,6 +282,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     fingerprint text NOT NULL,
     state text NOT NULL DEFAULT 'pending',
     message_id bigint NOT NULL DEFAULT 0,
+    reply_to_message_id bigint NOT NULL DEFAULT 0,
     progress integer NOT NULL DEFAULT 0,
     status_text text NOT NULL DEFAULT '',
     error text NOT NULL DEFAULT '',
@@ -312,6 +313,7 @@ CREATE TABLE IF NOT EXISTS replies (
     buttons jsonb NOT NULL DEFAULT '[]',
     state text NOT NULL DEFAULT 'pending',
     message_id bigint NOT NULL DEFAULT 0,
+    reply_to_message_id bigint NOT NULL DEFAULT 0,
     FOREIGN KEY (tenant_id, inbox_id) REFERENCES inbox (tenant_id, id)
 );
 

@@ -30,10 +30,18 @@ func TestRegisteredCommandDrivesMenuHelpAndRouting(t *testing.T) {
 			t.Error(err)
 		}
 		found := false
+		recent := false
 		for _, c := range commands {
+			if c.Command == "recent" {
+				recent = true
+			}
 			if c.Command == "probe" && c.Description == "测试注册命令" {
 				found = true
 			}
+		}
+		group := strings.Contains(r.Form.Get("scope"), "all_group_chats")
+		if recent == group {
+			t.Error("incorrect recent availability", r.Form.Get("scope"))
 		}
 		if !found {
 			t.Error("new registered command missing from Telegram menu")
@@ -42,7 +50,7 @@ func TestRegisteredCommandDrivesMenuHelpAndRouting(t *testing.T) {
 	}))
 	defer h.Close()
 	c := telegram.Client{Token: "test", Base: h.URL, HTTP: h.Client()}
-	if err := c.ConfigureCommands(context.Background(), TelegramCommands()); err != nil {
+	if err := c.ConfigureCommands(context.Background(), TelegramCommands(false), TelegramCommands(true)); err != nil {
 		t.Fatal(err)
 	}
 	command, ok := lookupCommand("/probe")
@@ -59,5 +67,12 @@ func TestRegisteredCommandDrivesMenuHelpAndRouting(t *testing.T) {
 	}
 	if !strings.Contains(request.Text, "/probe — 测试注册命令") {
 		t.Fatal("new command missing from help")
+	}
+	request.Origin.ChatID = "-42"
+	if err := service.commandHelp(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(request.Text, "/recent") || !strings.Contains(request.Text, "/show") {
+		t.Fatal("incorrect group help", request.Text)
 	}
 }

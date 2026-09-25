@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,7 +39,7 @@ func Defaults() Config {
 type Sender interface {
 	Send(context.Context, string, string, int64) (int64, error)
 	Image(context.Context, string, domain.Asset) (int64, error)
-	Images(context.Context, string, []domain.Asset) (int64, error)
+	Images(context.Context, string, []domain.Asset, string) (int64, error)
 }
 
 type Service struct {
@@ -126,7 +127,8 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			if e != nil {
 				return e
 			}
-			if channel != in.Origin.ChannelID || user != in.Origin.ChatID {
+			chatID, chatErr := strconv.ParseInt(in.Origin.ChatID, 10, 64)
+			if channel != in.Origin.ChannelID || (user != in.Origin.ChatID && !(chatErr == nil && chatID < 0 && in.Origin.ReplyToMessageID > 0)) {
 				return fmt.Errorf("invalid response destination")
 			}
 		}
@@ -230,7 +232,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			return e
 		}
 		var sid string
-		e = tx.QueryRow(ctx, `INSERT INTO submissions(tenant_id,capture_id,identity_id,channel_id,chat_id,idem_key,fingerprint) VALUES($1,$2,nullif($3,'')::uuid,nullif($4,'')::uuid,nullif($5,''),$6,$7) RETURNING id`, tenant, cid, in.Origin.IdentityID, in.Origin.ChannelID, in.Origin.ChatID, in.Key, fingerprint).Scan(&sid)
+		e = tx.QueryRow(ctx, `INSERT INTO submissions(tenant_id,capture_id,identity_id,channel_id,chat_id,idem_key,fingerprint,reply_to_message_id) VALUES($1,$2,nullif($3,'')::uuid,nullif($4,'')::uuid,nullif($5,''),$6,$7,$8) RETURNING id`, tenant, cid, in.Origin.IdentityID, in.Origin.ChannelID, in.Origin.ChatID, in.Key, fingerprint, in.Origin.ReplyToMessageID).Scan(&sid)
 		if e != nil {
 			return e
 		}
@@ -248,8 +250,8 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 	return
 }
 
-// Forget removes only this tenant's collection reference. Shared content remains readable.
-func (s *Service) Forget(ctx context.Context, tenant, id string) error {
+// DeleteArchive removes only this tenant's collection reference. Shared content remains readable.
+func (s *Service) DeleteArchive(ctx context.Context, tenant, id string) error {
 	return s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, tenant); e != nil {
 			return e

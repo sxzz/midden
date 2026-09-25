@@ -131,8 +131,8 @@ func TestPublicSharing(t *testing.T) {
 		}
 		must(t, s.deliver(ctx, store.Task{Tenant: tenant, ID: sid}))
 	}
-	if len(sender.chats) != 4 {
-		t.Fatal("expected text and image for both subscribers", sender.chats)
+	if len(sender.chats) != 2 {
+		t.Fatal("expected one captioned image for each subscriber", sender.chats)
 	}
 	old, e := s.Archive(ctx, a, j.ArchiveID)
 	must(t, e)
@@ -200,7 +200,7 @@ func TestPublicSharing(t *testing.T) {
 		t.Fatal("logical usage differs", ua, ub, u)
 	}
 	// Removing the original subscriber releases only that tenant's references.
-	must(t, s.Forget(ctx, a, j.ArchiveID))
+	must(t, s.DeleteArchive(ctx, a, j.ArchiveID))
 	ua, e = s.Usage(ctx, a)
 	must(t, e)
 	ub, e = s.Usage(ctx, b)
@@ -230,7 +230,7 @@ func TestPublicSharing(t *testing.T) {
 	if _, e = s.Submit(ctx, c, domain.CaptureInput{URL: "https://x.com/a/status/91000000009"}); e != domain.ErrQuota {
 		t.Fatal("over-quota tenant started new work", e)
 	}
-	must(t, s.Forget(ctx, c, j.ArchiveID))
+	must(t, s.DeleteArchive(ctx, c, j.ArchiveID))
 	empty, e := s.Usage(ctx, c)
 	must(t, e)
 	if empty.Used != 0 {
@@ -308,7 +308,7 @@ func TestPublicSharing(t *testing.T) {
 	secondArchive, e := s.Archive(ctx, b, second.ArchiveID)
 	must(t, e)
 	// The last removal starts delayed cleanup; other references must survive.
-	must(t, s.Forget(ctx, b, j.ArchiveID))
+	must(t, s.DeleteArchive(ctx, b, j.ArchiveID))
 	var removed int
 	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_archives(interval '24 hours')`).Scan(&removed))
 	if removed != 0 {
@@ -334,7 +334,7 @@ func TestPublicSharing(t *testing.T) {
 	if _, e = mem.Get(ctx, secondArchive.Assets[0].Key); e != nil {
 		t.Fatal("shared image removed while another archive referenced it", e)
 	}
-	must(t, s.Forget(ctx, b, second.ArchiveID))
+	must(t, s.DeleteArchive(ctx, b, second.ArchiveID))
 	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_archives(interval '0 seconds')`).Scan(&removed))
 	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM archives WHERE id=$1`, second.ArchiveID).Scan(&n))
 	if n != 0 {
@@ -343,7 +343,7 @@ func TestPublicSharing(t *testing.T) {
 	// Removing a collection during capture must not destroy its running task or recreate the collection.
 	inflight, e := s.Submit(ctx, a, domain.CaptureInput{URL: "https://x.com/a/status/91000000004"})
 	must(t, e)
-	must(t, s.Forget(ctx, a, inflight.ArchiveID))
+	must(t, s.DeleteArchive(ctx, a, inflight.ArchiveID))
 	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_archives(interval '0 seconds')`).Scan(&removed))
 	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM archives WHERE id=$1`, inflight.ArchiveID).Scan(&n))
 	if n != 1 {

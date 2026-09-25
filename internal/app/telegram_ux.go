@@ -20,11 +20,44 @@ type interactiveSender interface {
 	Answer(context.Context, string) error
 }
 
+func (s *Service) replySender(channel string, replyTo int64) Sender {
+	sender := s.sender(channel)
+	if c, ok := sender.(*telegram.Client); ok {
+		return c.WithReplyTo(replyTo)
+	}
+	return sender
+}
+
 func menuButtons() telegram.Keyboard {
 	return telegram.Keyboard{{{Text: "最近归档", Data: "/recent"}, {Text: "存储用量", Data: "/usage"}}}
 }
 
+func channelButtons(chat string, buttons telegram.Keyboard) telegram.Keyboard {
+	if strings.HasPrefix(chat, "-") {
+		var filtered telegram.Keyboard
+		for _, row := range buttons {
+			var kept []telegram.Button
+			for _, button := range row {
+				fields := strings.Fields(button.Data)
+				if len(fields) > 0 {
+					if command, ok := lookupCommand(fields[0]); ok && command.PrivateOnly {
+						continue
+					}
+				}
+				kept = append(kept, button)
+			}
+			if len(kept) > 0 {
+				filtered = append(filtered, kept)
+			}
+		}
+		buttons = filtered
+	}
+	return buttons
+}
+
 func sendInteractive(ctx context.Context, sender Sender, chat, text string, mid int64, buttons telegram.Keyboard) (int64, error) {
+	buttons = channelButtons(chat, buttons)
+
 	if c, ok := sender.(interactiveSender); ok {
 		return c.SendInteractive(ctx, chat, text, mid, buttons)
 	}
@@ -87,14 +120,14 @@ func (s *Service) submissionStatus(ctx context.Context, t store.Task) error {
 	}
 	defer unlock()
 	var cid, chat, channel, state, last string
-	var mid int64
+	var mid, replyTo int64
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT capture_id,chat_id,channel_id,state,message_id,status_text FROM submissions WHERE id=$1`, t.ID).Scan(&cid, &chat, &channel, &state, &mid, &last)
+		return tx.QueryRow(ctx, `SELECT capture_id,chat_id,channel_id,state,message_id,status_text,reply_to_message_id FROM submissions WHERE id=$1`, t.ID).Scan(&cid, &chat, &channel, &state, &mid, &last, &replyTo)
 	})
 	if e != nil || state == "sent" {
 		return e
 	}
-	sender := s.sender(channel)
+	sender := s.replySender(channel, replyTo)
 	if _, ok := sender.(interactiveSender); !ok {
 		return nil
 	}
@@ -116,6 +149,7 @@ func (s *Service) submissionStatus(ctx context.Context, t store.Task) error {
 		return err
 	}
 	text += "\n" + sourceURL
+
 	if text != last || mid == 0 {
 		buttons := telegram.Keyboard{{{Text: "查看状态", Data: "/status " + job.ID}, {Text: "最近归档", Data: "/recent"}}}
 		id, err := sendInteractive(ctx, sender, chat, text, mid, buttons)
@@ -151,9 +185,9 @@ func jobState(state string) string {
 
 func archiveButtons(id, url string) telegram.Keyboard {
 	return telegram.Keyboard{
-		{{Text: "查看归档", Data: "/show " + id}, {Text: "重新抓取", Data: "/refresh " + id}},
+		{{Text: "重新抓取", Data: "/refresh " + id}},
 		{{Text: "原帖", URL: url}, {Text: "最近归档", Data: "/recent"}},
-		{{Text: "取消收藏", Data: "/forget " + id}},
+		{{Text: "删除", Data: "/delete " + id}},
 	}
 }
 
@@ -162,9 +196,9 @@ func usageText(used, reserved, limit int64) string {
 }
 
 func archiveMessage(a domain.Archive, state string) string {
-	heading := "已收藏"
+	heading := "已保存"
 	if state == "partial" {
-		heading = "已收藏，部分内容未保存"
+		heading = "已保存，部分内容未保存"
 	}
 	ready := 0
 	for _, asset := range a.Assets {
@@ -176,6 +210,7 @@ func archiveMessage(a domain.Archive, state string) string {
 		heading += fmt.Sprintf(" · %d 张图片", ready)
 	}
 	parts := []string{heading}
+	parts = append(parts, a.ID)
 	if text := strings.TrimSpace(a.Text); text != "" {
 		parts = append(parts, text)
 	}

@@ -110,7 +110,7 @@ func run() error {
 			return &app.PermanentError{Message: "Bot identity does not match registered channel"}
 		}
 		commandsCtx, commandsCancel := context.WithTimeout(ctx, 5*time.Second)
-		if err := tg.ConfigureCommands(commandsCtx, app.TelegramCommands()); err != nil {
+		if err := tg.ConfigureCommands(commandsCtx, app.TelegramCommands(false), app.TelegramCommands(true)); err != nil {
 			slog.Warn("Telegram command menu unavailable")
 		}
 		commandsCancel()

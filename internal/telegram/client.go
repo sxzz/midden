@@ -19,10 +19,13 @@ import (
 )
 
 type Client struct {
-	Token string
-	Base  string
-	HTTP  *http.Client
-	Blobs blob.Storage
+	replyTo  int64
+	codeText string
+	caption  string
+	Token    string
+	Base     string
+	HTTP     *http.Client
+	Blobs    blob.Storage
 }
 type APIError struct {
 	Code       int
@@ -86,6 +89,9 @@ type Entity struct {
 }
 
 type Message struct {
+	SenderChat *struct {
+		ID int64 `json:"id"`
+	} `json:"sender_chat,omitempty"`
 	ID   int64 `json:"message_id"`
 	From struct {
 		ID  int64 `json:"id"`
@@ -117,20 +123,33 @@ type Callback struct {
 	Data    string   `json:"data"`
 }
 
-// PrivateMessage derives identity from the actor, never from callback data.
-func (u Update) PrivateMessage() *Message {
+// ActorMessage derives identity from the actor. Group ownership remains with the individual actor.
+func (u Update) ActorMessage() *Message {
 	m := u.Message
 	if u.Callback != nil {
 		q := u.Callback
-		if q.Message == nil || q.From.Bot || q.Message.Chat.ID != q.From.ID {
+		if q.Message == nil || q.From.Bot {
 			return nil
 		}
 		copy := *q.Message
 		copy.From.ID = q.From.ID
 		copy.From.Bot = q.From.Bot
+		copy.SenderChat = nil
 		m = &copy
 	}
-	if m == nil || m.Chat.Type != "private" || m.From.Bot || m.Chat.ID != m.From.ID {
+	if m == nil || m.From.Bot || m.From.ID <= 0 || m.SenderChat != nil {
+		return nil
+	}
+	switch m.Chat.Type {
+	case "private":
+		if m.Chat.ID != m.From.ID {
+			return nil
+		}
+	case "group", "supergroup":
+		if m.Chat.ID >= 0 {
+			return nil
+		}
+	default:
 		return nil
 	}
 	return m
@@ -174,7 +193,34 @@ func markup(buttons Keyboard) tg.InlineKeyboardMarkup {
 		}
 		rows = append(rows, r)
 	}
-	return tg.NewInlineKeyboardMarkup(rows...)
+	// The SDK helper turns an empty variadic list into nil. Telegram requires an array,
+	// including [] when editing a message to remove its inline keyboard.
+	return tg.InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+// WithReplyTo binds a copy to one request without changing the shared bot client.
+func (c *Client) WithReplyTo(messageID int64) *Client {
+	copy := *c
+	copy.replyTo = messageID
+	return &copy
+}
+
+// WithCode formats only the specified literal, leaving archived text untouched.
+func (c *Client) WithCode(text string) *Client {
+	copy := *c
+	copy.codeText = text
+	return &copy
+}
+
+func (c *Client) textEntities(text string) []tg.MessageEntity {
+	if c.codeText == "" {
+		return nil
+	}
+	offset := strings.Index(text, c.codeText)
+	if offset < 0 {
+		return nil
+	}
+	return []tg.MessageEntity{{Type: "code", Offset: len(utf16.Encode([]rune(text[:offset]))), Length: len(utf16.Encode([]rune(c.codeText)))}}
 }
 
 func (c *Client) Send(ctx context.Context, chat, text string, previous int64) (int64, error) {
@@ -189,6 +235,7 @@ func (c *Client) SendInteractive(ctx context.Context, chat, text string, previou
 	b := c.sdk(ctx)
 	if previous != 0 {
 		cfg := tg.NewEditMessageTextAndMarkup(id, int(previous), text, markup(buttons))
+		cfg.Entities = c.textEntities(text)
 		cfg.DisableWebPagePreview = true
 		m, err := b.Send(cfg)
 		if err == nil {
@@ -206,6 +253,8 @@ func (c *Client) SendInteractive(ctx context.Context, chat, text string, previou
 		return 0, apiError(err)
 	}
 	cfg := tg.NewMessage(id, text)
+	cfg.Entities = c.textEntities(text)
+	cfg.ReplyToMessageID = int(c.replyTo)
 	cfg.DisableWebPagePreview = true
 	cfg.ReplyMarkup = markup(buttons)
 	m, e := b.Send(cfg)
@@ -222,7 +271,11 @@ func (c *Client) Action(ctx context.Context, chat, action string) error {
 }
 
 func (c *Client) Answer(ctx context.Context, id string) error {
-	_, e := c.sdk(ctx).Request(tg.NewCallback(id, ""))
+	return c.AnswerToast(ctx, id, "")
+}
+
+func (c *Client) AnswerToast(ctx context.Context, id, text string) error {
+	_, e := c.sdk(ctx).Request(tg.NewCallback(id, text))
 	return apiError(e)
 }
 
@@ -246,16 +299,27 @@ func (c *Client) upload(ctx context.Context, chat string, a domain.Asset, docume
 	}
 	defer r.Close()
 	file := tg.FileReader{Name: a.Hash + extension(a.MIME), Reader: r}
-	var cfg tg.Chattable = tg.NewPhoto(id, file)
+	photo := tg.NewPhoto(id, file)
+	photo.ReplyToMessageID = int(c.replyTo)
+	photo.Caption = c.caption
+	photo.CaptionEntities = c.textEntities(c.caption)
+	var cfg tg.Chattable = photo
 	if document {
-		cfg = tg.NewDocument(id, file)
+		doc := tg.NewDocument(id, file)
+		doc.ReplyToMessageID = int(c.replyTo)
+		doc.Caption = c.caption
+		doc.CaptionEntities = c.textEntities(c.caption)
+		cfg = doc
 	}
 	var m tg.Message
 	e = c.request(ctx, cfg, &m)
 	return int64(m.MessageID), e
 }
 
-func (c *Client) Images(ctx context.Context, chat string, assets []domain.Asset) (int64, error) {
+func (c *Client) Images(ctx context.Context, chat string, assets []domain.Asset, caption string) (int64, error) {
+	copy := *c
+	copy.caption = caption
+	c = &copy
 	if len(assets) == 1 {
 		return c.Image(ctx, chat, assets[0])
 	}
@@ -282,7 +346,7 @@ func (c *Client) album(ctx context.Context, chat string, assets []domain.Asset, 
 			r.Close()
 		}
 	}()
-	for _, a := range assets {
+	for i, a := range assets {
 		r, e := c.Blobs.Get(ctx, a.Key)
 		if e != nil {
 			return 0, fmt.Errorf("archived image unavailable")
@@ -290,13 +354,25 @@ func (c *Client) album(ctx context.Context, chat string, assets []domain.Asset, 
 		readers = append(readers, r)
 		file := tg.FileReader{Name: a.Hash + extension(a.MIME), Reader: r}
 		if document {
-			files = append(files, tg.NewInputMediaDocument(file))
+			media := tg.NewInputMediaDocument(file)
+			if i == 0 {
+				media.Caption = c.caption
+				media.CaptionEntities = c.textEntities(c.caption)
+			}
+			files = append(files, media)
 		} else {
-			files = append(files, tg.NewInputMediaPhoto(file))
+			media := tg.NewInputMediaPhoto(file)
+			if i == 0 {
+				media.Caption = c.caption
+				media.CaptionEntities = c.textEntities(c.caption)
+			}
+			files = append(files, media)
 		}
 	}
 	var messages []tg.Message
-	e = c.request(ctx, tg.NewMediaGroup(id, files), &messages)
+	cfg := tg.NewMediaGroup(id, files)
+	cfg.ReplyToMessageID = int(c.replyTo)
+	e = c.request(ctx, cfg, &messages)
 	if e != nil {
 		return 0, apiError(e)
 	}
@@ -388,7 +464,53 @@ func (c *Client) request(ctx context.Context, cfg tg.Chattable, out any) error {
 
 type Command = tg.BotCommand
 
-func (c *Client) ConfigureCommands(ctx context.Context, commands []Command) error {
+func (c *Client) ConfigureCommands(ctx context.Context, commands, groupCommands []Command) error {
 	_, err := c.sdk(ctx).Request(tg.NewSetMyCommands(commands...))
+	if err != nil {
+		return apiError(err)
+	}
+	_, err = c.sdk(ctx).Request(tg.NewSetMyCommandsWithScope(tg.NewBotCommandScopeAllGroupChats(), groupCommands...))
 	return apiError(err)
+}
+
+func (c *Client) SetButtons(ctx context.Context, chat string, messageID int64, buttons Keyboard) error {
+	id, err := strconv.ParseInt(chat, 10, 64)
+	if err != nil {
+		return err
+	}
+	_, err = c.sdk(ctx).Request(tg.NewEditMessageReplyMarkup(id, int(messageID), markup(buttons)))
+	var api *tg.Error
+	if errors.As(err, &api) && api.Code == 400 && strings.Contains(api.Message, "message is not modified") {
+		return nil
+	}
+	return apiError(err)
+}
+
+func (c *Client) DeleteProgress(ctx context.Context, chat string, messageID int64) error {
+	id, err := strconv.ParseInt(chat, 10, 64)
+	if err != nil {
+		return err
+	}
+	_, err = c.sdk(ctx).Request(tg.NewDeleteMessage(id, int(messageID)))
+	var api *tg.Error
+	if errors.As(err, &api) && api.Code == 400 && strings.Contains(api.Message, "message to delete not found") {
+		return nil
+	}
+	return apiError(err)
+}
+
+// SplitCaption leaves a complete UTF-16 character at the caption boundary.
+func SplitCaption(text string) (string, string) {
+	units := 0
+	for offset, r := range text {
+		size := 1
+		if r > 0xffff {
+			size = 2
+		}
+		if units+size > 1024 {
+			return text[:offset], text[offset:]
+		}
+		units += size
+	}
+	return text, ""
 }

@@ -67,7 +67,7 @@ func Handler(s *app.Service) http.Handler {
 		if !checkID(w, r) {
 			return
 		}
-		if e := s.Forget(r.Context(), tenant(r), r.PathValue("id")); e != nil {
+		if e := s.DeleteArchive(r.Context(), tenant(r), r.PathValue("id")); e != nil {
 			respond(w, 200, nil, e)
 			return
 		}

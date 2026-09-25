@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -29,6 +30,7 @@ type channelCommand struct {
 	Description string
 	Usage       string
 	Callback    bool
+	PrivateOnly bool
 	Validate    func(string) bool
 	Handle      func(*Service, context.Context, *commandRequest) error
 }
@@ -38,20 +40,24 @@ var channelCommands []channelCommand
 
 func init() {
 	channelCommands = []channelCommand{
-		{"start", "开始收藏图文", "", false, noArgument, (*Service).commandHelp},
-		{"recent", "查看最近归档", "[游标]", true, validCursorArgument, (*Service).commandRecent},
-		{"show", "查看指定归档", "<归档 ID>", true, validIDArgument, (*Service).commandShow},
-		{"status", "查看采集状态", "<任务 ID>", true, validIDArgument, (*Service).commandStatus},
-		{"refresh", "重新抓取帖子", "<归档 ID>", true, validIDArgument, (*Service).commandRefresh},
-		{"forget", "取消收藏", "<归档 ID>", true, validIDArgument, (*Service).commandForget},
-		{"usage", "查看存储用量", "", true, noArgument, (*Service).commandUsage},
-		{"help", "查看使用帮助", "", true, noArgument, (*Service).commandHelp},
+		{"start", "开始保存图文", "", false, false, noArgument, (*Service).commandHelp},
+		{"recent", "查看最近归档", "[游标]", true, true, validCursorArgument, (*Service).commandRecent},
+		{"show", "查看指定归档", "<归档 ID>", true, false, validIDArgument, (*Service).commandShow},
+		{"status", "查看采集状态", "<任务 ID>", true, false, validIDArgument, (*Service).commandStatus},
+		{"refresh", "重新抓取帖子", "<归档 ID>", true, false, validIDArgument, (*Service).commandRefresh},
+		{"delete", "删除", "<归档 ID>", true, false, validIDArgument, (*Service).commandDelete},
+		{"delete_all", "删除全部保存记录", "[confirm]", true, false, func(s string) bool { return s == "" || s == "confirm" }, (*Service).commandDeleteAll},
+		{"usage", "查看存储用量", "", true, false, noArgument, (*Service).commandUsage},
+		{"help", "查看使用帮助", "", true, false, noArgument, (*Service).commandHelp},
 	}
 }
 
-func TelegramCommands() []telegram.Command {
+func TelegramCommands(group bool) []telegram.Command {
 	commands := make([]telegram.Command, 0, len(channelCommands))
 	for _, c := range channelCommands {
+		if group && c.PrivateOnly {
+			continue
+		}
 		commands = append(commands, telegram.Command{Command: c.Name, Description: c.Description})
 	}
 	return commands
@@ -98,8 +104,11 @@ func validCallback(data string) bool {
 
 func (s *Service) commandHelp(_ context.Context, r *commandRequest) error {
 	var b strings.Builder
-	b.WriteString("发送 X 帖子链接收藏图文（每次最多 5 个）。")
+	b.WriteString("发送 X 帖子链接保存图文（每次最多 5 个）。")
 	for _, c := range channelCommands {
+		if strings.HasPrefix(r.Origin.ChatID, "-") && c.PrivateOnly {
+			continue
+		}
 		b.WriteString("\n/" + c.Name)
 		if c.Usage != "" {
 			b.WriteString(" " + c.Usage)
@@ -127,11 +136,12 @@ func (s *Service) commandRecent(ctx context.Context, r *commandRequest) error {
 	}
 	r.Buttons = nil
 	for i, a := range p.Items {
-		r.Text += fmt.Sprintf("%d. %s\n", i+1, a.URL)
+		r.Text += fmt.Sprintf("%d. %s\n/show %s\n", i+1, a.URL, a.ID)
 		r.Buttons = append(r.Buttons, []telegram.Button{{Text: fmt.Sprintf("查看第 %d 条", i+1), Data: "/show " + a.ID}})
 	}
 	if r.Text == "" {
 		r.Text = "暂无归档。"
+		r.Buttons = menuButtons()
 	}
 	if p.NextCursor != "" {
 		r.Buttons = append(r.Buttons, []telegram.Button{{Text: "下一页 →", Data: "/recent " + p.NextCursor}})
@@ -161,7 +171,7 @@ func (s *Service) commandShow(ctx context.Context, r *commandRequest) error {
 	}
 	return s.DB.Tx(ctx, r.Task.Tenant, func(tx pgx.Tx) error {
 		var sid string
-		err := tx.QueryRow(ctx, `INSERT INTO submissions(tenant_id,capture_id,identity_id,channel_id,chat_id,idem_key,fingerprint) SELECT $1,capture_id,$3,$4,$5,$6,$6 FROM revisions WHERE id=$2 ON CONFLICT(tenant_id,idem_key) DO NOTHING RETURNING id`, r.Task.Tenant, a.RevisionID, r.Origin.IdentityID, r.Origin.ChannelID, r.Origin.ChatID, "show:"+r.Task.ID).Scan(&sid)
+		err := tx.QueryRow(ctx, `INSERT INTO submissions(tenant_id,capture_id,identity_id,channel_id,chat_id,idem_key,fingerprint,reply_to_message_id) SELECT $1,capture_id,$3,$4,$5,$6,$6,$7 FROM revisions WHERE id=$2 ON CONFLICT(tenant_id,idem_key) DO NOTHING RETURNING id`, r.Task.Tenant, a.RevisionID, r.Origin.IdentityID, r.Origin.ChannelID, r.Origin.ChatID, "show:"+r.Task.ID, r.Origin.ReplyToMessageID).Scan(&sid)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -181,16 +191,37 @@ func (s *Service) commandRefresh(ctx context.Context, r *commandRequest) error {
 	return nil
 }
 
-func (s *Service) commandForget(ctx context.Context, r *commandRequest) error {
+func (s *Service) commandDelete(ctx context.Context, r *commandRequest) error {
 	r.Previous = 0
-	if err := s.Forget(ctx, r.Task.Tenant, r.Argument); err != nil {
+	if err := s.DeleteArchive(ctx, r.Task.Tenant, r.Argument); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			r.Text = "你尚未收藏这条内容。"
+			r.Text = "你尚未保存这条内容。"
 			return nil
 		}
 		return err
 	}
-	r.Text = "已取消收藏并释放对应额度，其他人的收藏不受影响。"
+	r.Text = "已删除，并释放对应额度。"
+	return nil
+}
+
+func (s *Service) commandDeleteAll(ctx context.Context, r *commandRequest) error {
+	if r.Argument != "confirm" {
+		r.Text = "删除你保存的全部归档？删除后将释放对应额度，不影响其他用户的保存记录。"
+		r.Buttons = telegram.Keyboard{{{Text: "确认删除全部", Data: "/delete_all confirm"}, {Text: "取消", Data: "/help"}}}
+		return nil
+	}
+	var before time.Time
+	if err := s.DB.Tx(ctx, r.Task.Tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT created_at FROM inbox WHERE id=$1`, r.Task.ID).Scan(&before)
+	}); err != nil {
+		return err
+	}
+	n, err := s.DeleteAllArchives(ctx, r.Task.Tenant, before)
+	if err != nil {
+		return err
+	}
+	r.Previous = 0
+	r.Text = fmt.Sprintf("已删除 %d 条保存记录。", n)
 	return nil
 }
 
@@ -205,6 +236,9 @@ func (s *Service) submitMessageURLs(ctx context.Context, r *commandRequest, m *t
 		}
 	}
 	if len(targets) == 0 {
+		if m.Chat.ID < 0 {
+			return nil
+		}
 		r.Text = "请发送支持的 X 帖子 URL，或使用 /help。"
 		return nil
 	}

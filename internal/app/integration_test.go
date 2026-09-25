@@ -483,6 +483,6 @@ func must(t *testing.T, e error) {
 	}
 }
 
-func (f *fakeSender) Images(ctx context.Context, chat string, aa []domain.Asset) (int64, error) {
+func (f *fakeSender) Images(ctx context.Context, chat string, aa []domain.Asset, caption string) (int64, error) {
 	return f.Send(ctx, chat, "album", 0)
 }

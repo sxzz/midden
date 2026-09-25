@@ -48,7 +48,10 @@ func (s *Service) Poll(ctx context.Context, c *telegram.Client, channel string) 
 			}
 		}
 		for _, u := range updates {
-			m := u.PrivateMessage()
+			m := u.ActorMessage()
+			if m != nil && m.Chat.ID < 0 && u.Callback == nil && !groupTrigger(m) {
+				m = nil
+			}
 			if m == nil {
 				if _, e = conn.Exec(ctx, `UPDATE channels SET next_offset=$2 WHERE id=$1`, channel, u.ID+1); e != nil {
 					return e
@@ -77,7 +80,7 @@ func (s *Service) Poll(ctx context.Context, c *telegram.Client, channel string) 
 			if e != nil {
 				return e
 			}
-			if u.Callback != nil {
+			if u.Callback != nil && !sharedSaveCallback(u.Callback.Data) {
 				short, cancel := context.WithTimeout(ctx, 2*time.Second)
 				_ = c.Answer(short, u.Callback.ID)
 				cancel()
@@ -85,6 +88,20 @@ func (s *Service) Poll(ctx context.Context, c *telegram.Client, channel string) 
 		}
 	}
 	return ctx.Err()
+}
+
+func groupTrigger(m *telegram.Message) bool {
+	if fields := strings.Fields(m.Text); len(fields) > 0 {
+		if _, ok := lookupCommand(strings.Split(fields[0], "@")[0]); ok {
+			return true
+		}
+	}
+	for _, raw := range telegram.URLs(m) {
+		if _, err := domain.Normalize(raw); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) processInbox(ctx context.Context, t store.Task) error {
@@ -100,19 +117,26 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 	if e = json.Unmarshal(raw, &u); e != nil {
 		return &PermanentError{"invalid persisted update"}
 	}
-	m := u.PrivateMessage()
+	m := u.ActorMessage()
 	if m == nil {
-		return nil
+		return &PermanentError{"unsupported Telegram actor"}
 	}
 	chat := strconv.FormatInt(m.Chat.ID, 10)
+
 	var identity string
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT id FROM identities WHERE channel_id=$1 AND external_id=$2`, channel, chat).Scan(&identity)
+		return tx.QueryRow(ctx, `SELECT id FROM identities WHERE channel_id=$1 AND external_id=$2`, channel, strconv.FormatInt(m.From.ID, 10)).Scan(&identity)
 	})
 	if e != nil {
 		return e
 	}
+	if u.Callback != nil && sharedSaveCallback(u.Callback.Data) {
+		return s.saveSharedCallback(ctx, t, channel, m, u.Callback)
+	}
 	origin := domain.Origin{IdentityID: identity, ChannelID: channel, ChatID: chat}
+	if m.Chat.ID < 0 {
+		origin.ReplyToMessageID = m.ID
+	}
 	text := ""
 	buttons := menuButtons()
 	previous := int64(0)
@@ -120,6 +144,9 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 	if u.Callback != nil {
 		input = u.Callback.Data
 		previous = m.ID
+		if m.Chat.ID < 0 {
+			previous = 0
+		}
 		// Never replace archive content; progress messages also own their own updates.
 		var protected bool
 		if err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
@@ -147,8 +174,27 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 	}
 
 	request := &commandRequest{Task: t, Origin: origin, Argument: arg, Buttons: buttons, Previous: previous}
-	if command, ok := lookupCommand(cmd); ok {
-		if len(fields) > 2 || !command.Validate(arg) {
+	allowed := true
+	if m.Chat.ID < 0 && u.Callback != nil {
+		if err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT EXISTS(
+                SELECT FROM submissions WHERE channel_id=$1 AND chat_id=$2 AND message_id=$3 AND identity_id=$4
+                UNION ALL
+                SELECT FROM replies r JOIN inbox i ON i.id=r.inbox_id AND i.tenant_id=r.tenant_id
+                WHERE i.channel_id=$1 AND r.chat_id=$2 AND r.message_id=$3
+                  AND coalesce(i.payload#>>'{callback_query,from,id}',i.payload#>>'{message,from,id}')=$5
+            )`, channel, chat, m.ID, identity, strconv.FormatInt(m.From.ID, 10)).Scan(&allowed)
+		}); err != nil {
+			return err
+		}
+	}
+	if !allowed {
+		request.Text = "这条消息仅限发起者操作。"
+		request.Buttons = nil
+	} else if command, ok := lookupCommand(cmd); ok {
+		if m.Chat.ID < 0 && command.PrivateOnly {
+			request.Text = "请在私聊中使用 /recent 查看最近归档。"
+		} else if len(fields) > 2 || !command.Validate(arg) {
 			request.Text = strings.TrimSpace("用法：/" + command.Name + " " + command.Usage)
 		} else if err := command.Handle(s, ctx, request); err != nil {
 			return err
@@ -168,7 +214,7 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 			return err
 		}
 		var rid string
-		e := tx.QueryRow(ctx, `INSERT INTO replies(tenant_id,inbox_id,chat_id,text,message_id,buttons) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(inbox_id) DO NOTHING RETURNING id`, t.Tenant, t.ID, chat, text, previous, encoded).Scan(&rid)
+		e := tx.QueryRow(ctx, `INSERT INTO replies(tenant_id,inbox_id,chat_id,text,message_id,buttons,reply_to_message_id) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(inbox_id) DO NOTHING RETURNING id`, t.Tenant, t.ID, chat, text, previous, encoded, origin.ReplyToMessageID).Scan(&rid)
 		if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 			return e
 		}
@@ -197,15 +243,15 @@ func submitMessage(e error) string {
 
 func (s *Service) reply(ctx context.Context, t store.Task) error {
 	var chat, text, state, channel string
-	var mid int64
+	var mid, replyTo int64
 	var rawButtons []byte
 	e := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT r.chat_id,r.text,r.state,r.message_id,i.channel_id,r.buttons FROM replies r JOIN inbox i ON i.id=r.inbox_id AND i.tenant_id=r.tenant_id WHERE r.id=$1`, t.ID).Scan(&chat, &text, &state, &mid, &channel, &rawButtons)
+		return tx.QueryRow(ctx, `SELECT r.chat_id,r.text,r.state,r.message_id,i.channel_id,r.buttons,r.reply_to_message_id FROM replies r JOIN inbox i ON i.id=r.inbox_id AND i.tenant_id=r.tenant_id WHERE r.id=$1`, t.ID).Scan(&chat, &text, &state, &mid, &channel, &rawButtons, &replyTo)
 	})
 	if e != nil || state == "sent" {
 		return e
 	}
-	sender := s.sender(channel)
+	sender := s.replySender(channel, replyTo)
 	if sender == nil {
 		return fmt.Errorf("channel sender unavailable")
 	}
@@ -224,6 +270,7 @@ func (s *Service) reply(ctx context.Context, t store.Task) error {
 			mid = 0
 		}
 	}
+
 	id, e := sendInteractive(ctx, sender, chat, text, mid, buttons)
 	if e != nil {
 		return telegramError(e)
@@ -254,10 +301,10 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 	}
 	defer unlock()
 	var cid, chat, state, channel string
-	var mid int64
+	var mid, replyTo int64
 	var progress int
 	e := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT capture_id,chat_id,state,message_id,progress,channel_id FROM submissions WHERE id=$1`, t.ID).Scan(&cid, &chat, &state, &mid, &progress, &channel)
+		return tx.QueryRow(ctx, `SELECT capture_id,chat_id,state,message_id,progress,channel_id,reply_to_message_id FROM submissions WHERE id=$1`, t.ID).Scan(&cid, &chat, &state, &mid, &progress, &channel, &replyTo)
 	})
 	if e != nil || state == "sent" {
 		return e
@@ -283,42 +330,58 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 		text = archiveMessage(a, j.State)
 		aa = a.Assets
 		buttons = archiveButtons(a.ID, a.URL)
+		if strings.HasPrefix(chat, "-") && a.Visibility == "public" {
+			buttons = append(buttons, []telegram.Button{{Text: "我也要存", Data: "/save " + a.ID}})
+		}
 	}
-	sender := s.sender(channel)
+	sender := s.replySender(channel, replyTo)
 	if sender == nil {
 		return fmt.Errorf("channel sender unavailable")
 	}
-	chunks := telegram.Split(text)
-	ready := []domain.Asset{}
-	for _, a := range aa {
-		if a.State == "ready" {
-			ready = append(ready, a)
+	parts := deliveryParts(text, aa)
+	// Progress text is replaced by the new captioned media, never by editing old content.
+	if len(parts) > 0 && parts[0].kind == "images" && progress == 0 && mid != 0 {
+		if c, ok := sender.(*telegram.Client); ok {
+			if err := c.DeleteProgress(ctx, chat, mid); err != nil {
+				return telegramError(err)
+			}
 		}
+		if err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE submissions SET message_id=0 WHERE id=$1`, t.ID)
+			return err
+		}); err != nil {
+			return err
+		}
+		mid = 0
 	}
-	groups := [][]domain.Asset{}
-	for len(ready) > 0 {
-		n := min(10, len(ready))
-		groups = append(groups, ready[:n])
-		ready = ready[n:]
-	}
-	total := len(chunks) + len(groups)
-	for progress < total {
+	for progress < len(parts) {
+		part := parts[progress]
 		var id int64
-		if progress < len(chunks) {
-			previous := int64(0)
+		switch part.kind {
+		case "text":
 			if progress == 0 {
-				previous = mid
-			}
-			if progress == 0 {
-				id, e = sendInteractive(ctx, sender, chat, chunks[progress], previous, buttons)
+				formatted := sender
+				if c, ok := sender.(*telegram.Client); ok && j.State != "failed" {
+					formatted = c.WithCode(j.ArchiveID)
+				}
+				id, e = sendInteractive(ctx, formatted, chat, part.text, mid, buttons)
 			} else {
-				id, e = sender.Send(ctx, chat, chunks[progress], previous)
+				id, e = sender.Send(ctx, chat, part.text, 0)
 			}
-		} else {
+		case "images":
 			stop := keepAction(ctx, sender, chat, "upload_photo")
-			id, e = sender.Images(ctx, chat, groups[progress-len(chunks)])
+			formatted := sender
+			if c, ok := sender.(*telegram.Client); ok && progress == 0 {
+				formatted = c.WithCode(j.ArchiveID)
+			}
+			id, e = formatted.Images(ctx, chat, part.assets, part.text)
 			stop()
+		case "buttons":
+			if c, ok := sender.(*telegram.Client); ok {
+				e = c.SetButtons(ctx, chat, mid, channelButtons(chat, buttons))
+			}
 		}
+
 		if e != nil {
 			return telegramError(e)
 		}
