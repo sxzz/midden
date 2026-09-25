@@ -22,7 +22,7 @@ func TestParse(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if v.Text != "A & B" || len(v.Resources) != 2 || len(v.Warnings) != 2 {
+	if v.Text != "A & B" || len(v.Resources) != 2 || len(v.Warnings) != 1 {
 		t.Fatalf("unexpected %+v", v)
 	}
 	if _, e = Parse(`<img src="https://example.org/thumb.jpg">`); e == nil {
@@ -44,13 +44,19 @@ func TestProviderErrors(t *testing.T) {
 				if r.Method != "POST" {
 					t.Error("wrong method")
 				}
+				if err := r.ParseForm(); err != nil {
+					t.Fatal(err)
+				}
+				if got := r.Form.Get("q"); got != "https://x.com/i/status/20" {
+					t.Errorf("provider URL = %q", got)
+				}
 				w.Header().Set("Retry-After", "10")
 				w.WriteHeader(tc.code)
 				w.Write([]byte(tc.body))
 			}))
 			defer h.Close()
 			s := Server{Client: h.Client(), Endpoint: h.URL}
-			_, e := s.Fetch(context.Background(), &pb.FetchRequest{Url: "https://x.com/jack/status/20", ExternalId: "20", ProviderId: "xdown", AccessScope: "public"})
+			_, e := s.Fetch(context.Background(), &pb.FetchRequest{Url: "https://x.com/i/web/status/20", ExternalId: "20", ProviderId: "xdown", AccessScope: "public"})
 			if status.Code(e) != tc.want {
 				t.Fatalf("%v", e)
 			}

@@ -68,7 +68,7 @@ Provider 和 Connection 分离；Connection 属于租户、可跨渠道共享。
 - 图片流式下载到权限受限临时文件后上传，SHA-256 租户内去重。上传前持久记录对象 key，失败重用同一 key；重复及失败对象等待至少 24 小时回收。
 - 历史版本保留，临时下载 URL 变化不生成内容版本；图文结果投递绑定原采集版本。读归档不访问上游。
 - Telegram API 不提供通用幂等发送；响应丢失时可能重复回传，不能保证展示严格一次。数据库归档与扣费仍幂等。
-- 图片 URL 的每个连接/重定向都进行公共地址校验，实际拨号使用已校验 IP；不继承 HTTP_PROXY 来绕过检查。
+- Provider 及其返回的资源 URL 视为可信，不限制目标 IP；请求使用系统 DNS 和标准 HTTP 代理配置，兼容 Fake-IP 网络。图片仍校验 URL 协议、实际媒体类型、大小及超时。
 - `/metrics` 包含任务耗时、结果、队列量与最老等待时间；`/healthz` 检查数据库。监控端口只供可信运维访问。
 
 默认额度：每租户 1 GiB、10 次新采集/分钟、2 个采集并发；全局采集 4、下载 8；单图 20 MiB、单帖 20 图。可通过 `TENANT_QUOTA_BYTES`、`CAPTURE_RATE`、`TENANT_CONCURRENCY`、`CAPTURE_WORKERS`、`DOWNLOAD_WORKERS`、`MAX_IMAGE_BYTES`、`MAX_IMAGES` 配置。租户额度在创建时持久化，调整已有租户额度需管理员更新数据库。Compose 中需要添加对应环境变量才能覆盖默认值。

@@ -45,7 +45,9 @@ func (s *Server) Fetch(ctx context.Context, r *pb.FetchRequest) (*pb.FetchRespon
 	if endpoint == "" {
 		endpoint = "https://xdown.app/api/ajaxSearch"
 	}
-	req, e := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(url.Values{"q": {t.URL}, "lang": {"zh-cn"}}.Encode()))
+	// xdown rejects the archive's canonical /i/web/status URL format.
+	providerURL := "https://x.com/i/status/" + t.ExternalID
+	req, e := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(url.Values{"q": {providerURL}, "lang": {"zh-cn"}}.Encode()))
 	if e != nil {
 		return nil, status.Error(codes.Internal, "request construction failed")
 	}
@@ -106,7 +108,7 @@ func Parse(src string) (*pb.FetchResponse, error) {
 	if e != nil {
 		return nil, e
 	}
-	out := &pb.FetchResponse{TextKind: "provider_summary", Warnings: []string{"第三方来源 xdown；文字可能仅为标题或摘要，完整性未经验证。"}}
+	out := &pb.FetchResponse{TextKind: "provider_summary"}
 	seen := map[string]bool{}
 	unsupported := false
 	var text func(*html.Node) string

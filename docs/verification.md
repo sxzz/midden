@@ -16,7 +16,7 @@
 真实上游的已知限制：
 
 - 宿主机对公开示例帖子 `https://x.com/jack/status/20` 请求 xdown，返回 `status: ok`，但没有参考实现需要的 HTML `data`；没有据此报告图文归档成功。
-- 实际 adapter 容器中，当前网络将 `xdown.app` 解析为 `198.18.2.174`（fake-IP 地址）。安全 HTTP 客户端拒绝该非公共目的地址，任务最终明确失败。部署需使用返回真实公共地址的 DNS/网络，不应为抓取而解除内部地址保护。
+- 初次容器探测中，Fake-IP DNS 导致 Provider 和图片请求被旧的公网地址检查拦截；按可信 Provider 的部署要求，两条请求路径现均使用标准 HTTP 客户端，不再限制目标 IP。
 - 尚未配置真实 Telegram Bot token，因此 Telegram API 行为通过本地 HTTP 测试验证，未向真实 Telegram 用户发送消息。
 
 所有验证用容器均可移除，测试脚本自动清理自身容器。生产 S3 和 Bot 凭据需按 README 配置；未连接用户的真实平台账号。

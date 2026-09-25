@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,7 +16,6 @@ import (
 
 	pb "monitor/api/adapter/v1"
 	"monitor/internal/adapter"
-	"monitor/internal/safehttp"
 	"monitor/internal/xdown"
 )
 
@@ -44,7 +44,7 @@ func main() {
 		opts = append(opts, grpc.Creds(c))
 	}
 	server := grpc.NewServer(opts...)
-	pb.RegisterAdapterServer(server, &xdown.Server{Client: safehttp.New(40 * time.Second)})
+	pb.RegisterAdapterServer(server, &xdown.Server{Client: &http.Client{Timeout: 40 * time.Second}})
 	h := health.NewServer()
 	h.SetServingStatus("", hp.HealthCheckResponse_SERVING)
 	hp.RegisterHealthServer(server, h)

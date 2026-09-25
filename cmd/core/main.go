@@ -19,7 +19,6 @@ import (
 	"monitor/internal/blob"
 	"monitor/internal/config"
 	"monitor/internal/httpapi"
-	"monitor/internal/safehttp"
 	"monitor/internal/store"
 	"monitor/internal/telegram"
 )
@@ -65,7 +64,8 @@ func run() error {
 	if e = adapter.Validate(desc); e != nil {
 		return e
 	}
-	s := &app.Service{DB: db, Adapter: client, Blobs: b, HTTP: safehttp.New(60 * time.Second), Config: cfg}
+	// Resource URLs come from trusted adapters; allow the deployment's proxy/DNS routing.
+	s := &app.Service{DB: db, Adapter: client, Blobs: b, HTTP: &http.Client{Timeout: 60 * time.Second}, Config: cfg}
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &app.Worker{S: s})
 	q, e := river.NewClient(riverpgxv5.New(db.Pool), &river.Config{Workers: workers, Queues: map[string]river.QueueConfig{"capture": {MaxWorkers: cfg.CaptureWorkers}, "download": {MaxWorkers: cfg.DownloadWorkers}, "control": {MaxWorkers: 4}, "delivery": {MaxWorkers: 2}}, MaxAttempts: 3, RescueStuckJobsAfter: 6 * time.Minute, Logger: slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))})

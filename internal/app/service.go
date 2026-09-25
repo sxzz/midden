@@ -205,7 +205,7 @@ func archive(ctx context.Context, tx pgx.Tx, id string) (a domain.Archive, e err
 	a.Text = p.Text
 	a.TextKind = p.TextKind
 	a.AdapterVersion = p.Version
-	a.Warnings = p.Warnings
+	a.Warnings = archiveWarnings(p.Warnings)
 	a.Assets, e = assets(ctx, tx, cid)
 	return
 }
@@ -301,6 +301,17 @@ type Payload struct {
 	Version  string   `json:"adapter_version"`
 }
 
+// Hide the retired provider disclaimer in existing snapshots as well.
+func archiveWarnings(warnings []string) []string {
+	var result []string
+	for _, warning := range warnings {
+		if warning != "第三方来源 xdown；文字可能仅为标题或摘要，完整性未经验证。" {
+			result = append(result, warning)
+		}
+	}
+	return result
+}
+
 // CaptureArchive pins delivery to the revision produced (or reused) by that capture.
 func (s *Service) CaptureArchive(ctx context.Context, t, cid string) (a domain.Archive, e error) {
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
@@ -317,7 +328,7 @@ func (s *Service) CaptureArchive(ctx context.Context, t, cid string) (a domain.A
 		a.Text = p.Text
 		a.TextKind = p.TextKind
 		a.AdapterVersion = p.Version
-		a.Warnings = p.Warnings
+		a.Warnings = archiveWarnings(p.Warnings)
 		a.Assets, err = assets(ctx, tx, assetCapture)
 		return err
 	})
