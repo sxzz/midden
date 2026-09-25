@@ -31,7 +31,14 @@ func TestRegisteredCommandDrivesMenuHelpAndRouting(t *testing.T) {
 		}
 		found := false
 		recent := false
+		start, save := false, false
 		for _, c := range commands {
+			if c.Command == "start" {
+				start = true
+			}
+			if c.Command == "save" {
+				save = true
+			}
 			if c.Command == "recent" {
 				recent = true
 			}
@@ -40,6 +47,9 @@ func TestRegisteredCommandDrivesMenuHelpAndRouting(t *testing.T) {
 			}
 		}
 		group := strings.Contains(r.Form.Get("scope"), "all_group_chats")
+		if start == group || !save {
+			t.Error("incorrect start/save menu scope")
+		}
 		if recent == group {
 			t.Error("incorrect recent availability", r.Form.Get("scope"))
 		}
@@ -74,5 +84,20 @@ func TestRegisteredCommandDrivesMenuHelpAndRouting(t *testing.T) {
 	}
 	if strings.Contains(request.Text, "/recent") || !strings.Contains(request.Text, "/show") {
 		t.Fatal("incorrect group help", request.Text)
+	}
+}
+
+func TestSaveCommandGuidance(t *testing.T) {
+	c, ok := lookupCommand("/save")
+	if !ok || c.Callback || !c.Validate("https://x.com/a/status/20 https://x.com/a/status/21") {
+		t.Fatal("save registration")
+	}
+	r := &commandRequest{Message: &telegram.Message{Text: "/save"}}
+	if err := c.Handle(&Service{}, context.Background(), r); err != nil || !strings.Contains(r.Text, "帖子链接") {
+		t.Fatal(r.Text, err)
+	}
+	r = &commandRequest{Message: &telegram.Message{Text: "/save https://x.com/a/status/20 https://x.com/a/status/21 https://x.com/a/status/22 https://x.com/a/status/23 https://x.com/a/status/24 https://x.com/a/status/25"}}
+	if err := c.Handle(&Service{}, context.Background(), r); err != nil || !strings.Contains(r.Text, "最多 5 个") {
+		t.Fatal(r.Text, err)
 	}
 }

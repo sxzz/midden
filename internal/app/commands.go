@@ -17,6 +17,7 @@ import (
 )
 
 type commandRequest struct {
+	Message  *telegram.Message
 	Task     store.Task
 	Origin   domain.Origin
 	Argument string
@@ -40,7 +41,8 @@ var channelCommands []channelCommand
 
 func init() {
 	channelCommands = []channelCommand{
-		{"start", "开始保存图文", "", false, false, noArgument, (*Service).commandHelp},
+		{"start", "开始使用", "", false, true, noArgument, (*Service).commandHelp},
+		{"save", "保存帖子", "<帖子链接…>", false, false, func(string) bool { return true }, (*Service).commandSave},
 		{"recent", "查看最近归档", "[游标]", true, true, validCursorArgument, (*Service).commandRecent},
 		{"show", "查看指定归档", "<归档 ID>", true, false, validIDArgument, (*Service).commandShow},
 		{"status", "查看采集状态", "<任务 ID>", true, false, validIDArgument, (*Service).commandStatus},
@@ -252,5 +254,17 @@ func (s *Service) submitMessageURLs(ctx context.Context, r *commandRequest, m *t
 			r.Text += submitMessage(err) + "\n"
 		}
 	}
+	return nil
+}
+
+func (s *Service) commandSave(ctx context.Context, r *commandRequest) error {
+	if r.Message != nil {
+		for _, url := range telegram.URLs(r.Message) {
+			if _, err := domain.Normalize(url); err == nil {
+				return s.submitMessageURLs(ctx, r, r.Message)
+			}
+		}
+	}
+	r.Text = "请在 /save 后附上 X 帖子链接，每次最多 5 个。群聊中请使用 /save@Bot用户名。"
 	return nil
 }

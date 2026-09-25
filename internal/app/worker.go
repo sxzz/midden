@@ -204,6 +204,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 			return &PermanentError{"media description exceeds archive limit"}
 		}
 		p.MediaDescriptions = append(p.MediaDescriptions, media.AltText)
+		p.MediaSensitive = append(p.MediaSensitive, media.Sensitive)
 	}
 	b, _ := json.Marshal(p)
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
@@ -240,7 +241,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 				key, _ := json.Marshal([]string{"x", provider, scope, connection, v.ImmutableKey})
 				cacheKey = store.Hash(string(key))
 			}
-			if e = tx.QueryRow(ctx, `INSERT INTO assets(tenant_id,capture_id,position,source_url,visibility,kind,cache_key,alt_text) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, t.Tenant, t.ID, n, v.Url, visibility, v.Kind, cacheKey, v.AltText).Scan(&aid); e != nil {
+			if e = tx.QueryRow(ctx, `INSERT INTO assets(tenant_id,capture_id,position,source_url,visibility,kind,cache_key,alt_text,sensitive) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, t.Tenant, t.ID, n, v.Url, visibility, v.Kind, cacheKey, v.AltText, v.Sensitive).Scan(&aid); e != nil {
 				return e
 			}
 			n++
@@ -286,14 +287,15 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		good := 0
 		partial := p.Incomplete
 		type sig struct {
-			Hash    string
-			AltText string
-			State   string
-			Error   string
+			Hash      string
+			AltText   string
+			Sensitive bool
+			State     string
+			Error     string
 		}
 		ss := []sig{}
 		for _, a := range aa {
-			ss = append(ss, sig{a.Hash, a.AltText, a.State, a.Error})
+			ss = append(ss, sig{a.Hash, a.AltText, a.Sensitive, a.State, a.Error})
 			if a.State == "ready" {
 				good++
 			} else {

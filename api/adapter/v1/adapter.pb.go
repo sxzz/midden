@@ -341,6 +341,7 @@ type Resource struct {
 	// Immutable media identity including rendition, scoped by platform/provider/access.
 	ImmutableKey  string `protobuf:"bytes,3,opt,name=immutable_key,json=immutableKey,proto3" json:"immutable_key,omitempty"`
 	AltText       string `protobuf:"bytes,4,opt,name=alt_text,json=altText,proto3" json:"alt_text,omitempty"`
+	Sensitive     bool   `protobuf:"varint,5,opt,name=sensitive,proto3" json:"sensitive,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -401,6 +402,13 @@ func (x *Resource) GetAltText() string {
 		return x.AltText
 	}
 	return ""
+}
+
+func (x *Resource) GetSensitive() bool {
+	if x != nil {
+		return x.Sensitive
+	}
+	return false
 }
 
 type FetchResponse struct {
@@ -549,12 +557,13 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\rconnection_id\x18\x04 \x01(\tR\fconnectionId\x12!\n" +
 	"\faccess_scope\x18\x05 \x01(\tR\vaccessScope\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x06 \x01(\tR\trequestId\"p\n" +
+	"request_id\x18\x06 \x01(\tR\trequestId\"\x8e\x01\n" +
 	"\bResource\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12#\n" +
 	"\rimmutable_key\x18\x03 \x01(\tR\fimmutableKey\x12\x19\n" +
-	"\balt_text\x18\x04 \x01(\tR\aaltText\"\xf4\x02\n" +
+	"\balt_text\x18\x04 \x01(\tR\aaltText\x12\x1c\n" +
+	"\tsensitive\x18\x05 \x01(\bR\tsensitive\"\xf4\x02\n" +
 	"\rFetchResponse\x12\x1f\n" +
 	"\vexternal_id\x18\x01 \x01(\tR\n" +
 	"externalId\x12\x12\n" +

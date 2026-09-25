@@ -40,6 +40,7 @@ type fakeAdapter struct {
 	mediaKind  string
 	cacheKey   string
 	altText    string
+	sensitive  bool
 	calls      atomic.Int64
 }
 
@@ -61,7 +62,7 @@ func (f *fakeAdapter) Fetch(ctx context.Context, r *pb.FetchRequest, _ ...grpc.C
 	}
 	v := &pb.FetchResponse{Visibility: visibility, ExternalId: r.ExternalId, ProviderId: r.ProviderId, Text: f.text, TextKind: "provider_summary", AdapterVersion: "test", Warnings: []string{"incomplete"}, TextSource: f.textSource, Incomplete: f.incomplete}
 	for _, u := range f.urls {
-		v.Resources = append(v.Resources, &pb.Resource{Url: u, ImmutableKey: f.cacheKey, AltText: f.altText, Kind: func() string {
+		v.Resources = append(v.Resources, &pb.Resource{Url: u, ImmutableKey: f.cacheKey, AltText: f.altText, Sensitive: f.sensitive, Kind: func() string {
 			if f.mediaKind != "" {
 				return f.mediaKind
 			}

@@ -154,14 +154,14 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 		return &PermanentError{"media exceeds size or remaining storage limit"}
 	}
 	if n == 0 {
-		return &PermanentError{"empty image"}
+		return &PermanentError{"empty media"}
 	}
 	if _, e = f.Seek(0, 0); e != nil {
 		return e
 	}
 	header := make([]byte, 512)
 	k, _ := f.Read(header)
-	mime := http.DetectContentType(header[:k])
+	mime := mediaType(header[:k])
 	if (kind == "video" && mime != "video/mp4" && mime != "video/webm") || (kind == "image" && mime != "image/jpeg" && mime != "image/png" && mime != "image/webp") {
 		return &PermanentError{"unsupported media format"}
 	}

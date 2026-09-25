@@ -266,7 +266,7 @@ func TestTelegramUXIntegration(t *testing.T) {
 	expectedReplyTo.Store(groupMenuID)
 	must(t, restarted.deliver(ctx, store.Task{Tenant: identity.TenantID, ID: sid, Type: "deliver"}))
 	// A regular group URL also retains its destination when reusing an archive.
-	iid = groupMessage(identity.TenantID, "42", "https://x.com/i/status/201", 502)
+	iid = groupMessage(identity.TenantID, "42", "/save@OurBot https://x.com/i/status/201", 502)
 	must(t, db.Tx(ctx, identity.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT id,reply_to_message_id FROM submissions WHERE idem_key=$1`, iid+":201").Scan(&sid, &groupReplyTo)
 	}))
@@ -279,7 +279,7 @@ func TestTelegramUXIntegration(t *testing.T) {
 	must(t, db.Tx(ctx, other.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT id,text FROM replies WHERE inbox_id=$1`, iid).Scan(&rid, &groupText)
 	}))
-	if groupText != "请在私聊中使用 /recent 查看最近归档。" {
+	if groupText != "请在私聊中使用 /recent。" {
 		t.Fatal("recent must be disabled in groups", groupText)
 	}
 	expectedReplyTo.Store(503)

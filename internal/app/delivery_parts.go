@@ -27,7 +27,10 @@ func deliveryParts(text string, assets []domain.Asset) []deliveryPart {
 		caption, remainder := telegram.SplitCaption(text)
 		first := true
 		for len(ready) > 0 {
-			n := min(10, len(ready))
+			n := 1
+			for n < len(ready) && n < 10 && (ready[n].MIME == "video/webm") == (ready[0].MIME == "video/webm") {
+				n++
+			}
 			part := deliveryPart{kind: "media", assets: ready[:n]}
 			if first {
 				part.text = caption

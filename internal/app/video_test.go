@@ -35,8 +35,8 @@ func TestVideoCache(t *testing.T) {
 	must(t, e)
 	video := make([]byte, 128)
 	binary.BigEndian.PutUint32(video, 24)
-	copy(video[4:], "ftypmp42")
-	copy(video[16:], "mp42isom")
+	copy(video[4:], "ftypisom")
+	copy(video[16:], "isomiso4")
 	var downloads atomic.Int32
 	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { downloads.Add(1); w.Write(video) }))
 	defer h.Close()
@@ -101,6 +101,11 @@ func TestVideoCache(t *testing.T) {
 	changed := complete(a, 980001, first.ID)
 	if changed.RevisionID == first.RevisionID || downloads.Load() != 1 {
 		t.Fatal("description revision or cache incorrect")
+	}
+	f.sensitive = true
+	sensitive := complete(a, 980001, first.ID)
+	if !sensitive.Assets[0].Sensitive || sensitive.RevisionID == changed.RevisionID || downloads.Load() != 1 {
+		t.Fatal("sensitive flag not versioned or bypassed cache")
 	}
 	// A different rendition must not hit the old ID cache.
 	f.cacheKey = "media-id:2160p"

@@ -62,3 +62,14 @@ func TestArchiveMediaDescription(t *testing.T) {
 		t.Fatal(text)
 	}
 }
+
+func TestSensitiveDocumentDelivery(t *testing.T) {
+	parts := deliveryParts("text", []domain.Asset{{State: "ready", MIME: "video/webm", Sensitive: true}})
+	if len(parts) != 2 || parts[0].kind != "media" || len(parts[0].assets) != 1 {
+		t.Fatal(parts)
+	}
+	parts = deliveryParts("text", []domain.Asset{{State: "ready", MIME: "video/mp4", Sensitive: true}, {State: "ready", MIME: "video/webm"}})
+	if len(parts) != 3 || len(parts[0].assets) != 1 || parts[2].assets[0].MIME != "video/webm" {
+		t.Fatal("mixed document group could lose spoiler", parts)
+	}
+}

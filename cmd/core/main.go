@@ -95,7 +95,7 @@ func run() error {
 		return e
 	}
 	if token != "" {
-		tg := &telegram.Client{Token: token, HTTP: &http.Client{Timeout: 5 * time.Minute}, Blobs: b}
+		tg := &telegram.Client{Token: token, HTTP: &http.Client{Timeout: 5 * time.Minute}, Blobs: b, Cache: db}
 
 		s.Senders = map[string]app.Sender{channel: tg}
 		id, e := tg.Me(ctx)

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -79,15 +80,16 @@ type Job struct {
 }
 
 type Asset struct {
-	AltText  string `json:"alt_text,omitempty"`
-	ID       string `json:"id"`
-	Position int    `json:"position"`
-	State    string `json:"state"`
-	Error    string `json:"error,omitempty"`
-	Hash     string `json:"sha256,omitempty"`
-	MIME     string `json:"mime,omitempty"`
-	Size     int64  `json:"size"`
-	Key      string `json:"-"`
+	Sensitive bool   `json:"sensitive"`
+	AltText   string `json:"alt_text,omitempty"`
+	ID        string `json:"id"`
+	Position  int    `json:"position"`
+	State     string `json:"state"`
+	Error     string `json:"error,omitempty"`
+	Hash      string `json:"sha256,omitempty"`
+	MIME      string `json:"mime,omitempty"`
+	Size      int64  `json:"size"`
+	Key       string `json:"-"`
 }
 
 type Archive struct {
@@ -117,4 +119,11 @@ type Usage struct {
 	Used     int64 `json:"used_bytes"`
 	Reserved int64 `json:"reserved_bytes"`
 	Limit    int64 `json:"limit_bytes"`
+}
+
+// ChannelMediaCache stores opaque delivery references independently of archives.
+type ChannelMediaCache interface {
+	GetChannelMedia(context.Context, string, string, string, string) (string, error)
+	PutChannelMedia(context.Context, string, string, string, string, string) error
+	DeleteChannelMedia(context.Context, string, string, string, string, string) error
 }

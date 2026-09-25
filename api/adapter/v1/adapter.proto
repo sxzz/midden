@@ -47,6 +47,7 @@ message Resource {
   // Immutable media identity including rendition, scoped by platform/provider/access.
   string immutable_key = 3;
   string alt_text = 4;
+  bool sensitive = 5;
 }
 
 message FetchResponse {

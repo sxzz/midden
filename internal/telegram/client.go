@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,6 +21,8 @@ type Client struct {
 	replyTo  int64
 	codeText string
 	caption  string
+	BotID    string
+	Cache    domain.ChannelMediaCache
 	Username string
 	Token    string
 	Base     string
@@ -29,8 +30,9 @@ type Client struct {
 	Blobs    blob.Storage
 }
 type APIError struct {
-	Code       int
-	RetryAfter time.Duration
+	Code        int
+	RetryAfter  time.Duration
+	InvalidFile bool
 }
 
 func (e *APIError) Error() string { return fmt.Sprintf("telegram API error %d", e.Code) }
@@ -72,7 +74,7 @@ func apiError(err error) error {
 	}
 	var e *tg.Error
 	if errors.As(err, &e) {
-		return &APIError{e.Code, time.Duration(e.RetryAfter) * time.Second}
+		return &APIError{Code: e.Code, RetryAfter: time.Duration(e.RetryAfter) * time.Second, InvalidFile: invalidFileReference(e.Message)}
 	}
 	return fmt.Errorf("telegram transport failed")
 }
@@ -81,6 +83,7 @@ func (c *Client) Me(ctx context.Context) (string, error) {
 	u, e := c.sdk(ctx).GetMe()
 	if e == nil {
 		c.Username = u.UserName
+		c.BotID = strconv.FormatInt(u.ID, 10)
 	}
 	return strconv.FormatInt(u.ID, 10), apiError(e)
 }
@@ -293,38 +296,25 @@ func (c *Client) MediaItem(ctx context.Context, chat string, a domain.Asset) (in
 }
 
 func (c *Client) upload(ctx context.Context, chat string, a domain.Asset, document bool) (int64, error) {
-	id, e := strconv.ParseInt(chat, 10, 64)
-	if e != nil {
-		return 0, e
-	}
-	r, e := c.Blobs.Get(ctx, a.Key)
+	return c.uploadAttempt(ctx, chat, a, document, true)
+}
+
+func (c *Client) uploadAttempt(ctx context.Context, chat string, a domain.Asset, document, useCache bool) (int64, error) {
+	p, e := c.prepareFile(ctx, a, mediaKind(a, document), useCache)
 	if e != nil {
 		return 0, fmt.Errorf("archived media unavailable")
 	}
-	defer r.Close()
-	file := tg.FileReader{Name: a.Hash + extension(a.MIME), Reader: r}
-	photo := tg.NewPhoto(id, file)
-	photo.ReplyToMessageID = int(c.replyTo)
-	photo.Caption = c.caption
-	photo.CaptionEntities = c.textEntities(c.caption)
-	var cfg tg.Chattable = photo
-	if a.MIME == "video/mp4" {
-		video := tg.NewVideo(id, file)
-		video.ReplyToMessageID = int(c.replyTo)
-		video.Caption = c.caption
-		video.CaptionEntities = c.textEntities(c.caption)
-		video.SupportsStreaming = true
-		cfg = video
-	}
-	if document || a.MIME == "video/webm" {
-		doc := tg.NewDocument(id, file)
-		doc.ReplyToMessageID = int(c.replyTo)
-		doc.Caption = c.caption
-		doc.CaptionEntities = c.textEntities(c.caption)
-		cfg = doc
-	}
+	defer p.close()
 	var m tg.Message
-	e = c.request(ctx, cfg, &m)
+	e = c.sendMedia(ctx, chat, []domain.Asset{a}, []preparedFile{p}, &m)
+	var api *APIError
+	if errors.As(e, &api) && api.Code == 400 && api.InvalidFile && p.cachedID != "" {
+		c.forgetFile(ctx, a, p)
+		return c.uploadAttempt(ctx, chat, a, document, false)
+	}
+	if e == nil {
+		c.rememberFile(ctx, a, p.kind, m)
+	}
 	return int64(m.MessageID), e
 }
 
@@ -353,57 +343,48 @@ func (c *Client) Media(ctx context.Context, chat string, assets []domain.Asset, 
 }
 
 func (c *Client) album(ctx context.Context, chat string, assets []domain.Asset, document bool) (int64, error) {
-	id, e := strconv.ParseInt(chat, 10, 64)
-	if e != nil {
-		return 0, e
-	}
-	files := []interface{}{}
-	var readers []io.ReadCloser
+	return c.albumAttempt(ctx, chat, assets, document, true)
+}
+
+func (c *Client) albumAttempt(ctx context.Context, chat string, assets []domain.Asset, document, useCache bool) (int64, error) {
+	var prepared []preparedFile
 	defer func() {
-		for _, r := range readers {
-			r.Close()
+		for _, p := range prepared {
+			p.close()
 		}
 	}()
-	for i, a := range assets {
-		r, e := c.Blobs.Get(ctx, a.Key)
+	for _, a := range assets {
+		p, e := c.prepareFile(ctx, a, mediaKind(a, document), useCache)
 		if e != nil {
 			return 0, fmt.Errorf("archived media unavailable")
 		}
-		readers = append(readers, r)
-		file := tg.FileReader{Name: a.Hash + extension(a.MIME), Reader: r}
-		if document {
-			media := tg.NewInputMediaDocument(file)
-			if i == 0 {
-				media.Caption = c.caption
-				media.CaptionEntities = c.textEntities(c.caption)
-			}
-			files = append(files, media)
-		} else if a.MIME == "video/mp4" {
-			media := tg.NewInputMediaVideo(file)
-			media.SupportsStreaming = true
-			if i == 0 {
-				media.Caption = c.caption
-				media.CaptionEntities = c.textEntities(c.caption)
-			}
-			files = append(files, media)
-		} else {
-			media := tg.NewInputMediaPhoto(file)
-			if i == 0 {
-				media.Caption = c.caption
-				media.CaptionEntities = c.textEntities(c.caption)
-			}
-			files = append(files, media)
-		}
+		prepared = append(prepared, p)
 	}
 	var messages []tg.Message
-	cfg := tg.NewMediaGroup(id, files)
-	cfg.ReplyToMessageID = int(c.replyTo)
-	e = c.request(ctx, cfg, &messages)
+	e := c.sendMedia(ctx, chat, assets, prepared, &messages)
 	if e != nil {
+		var api *APIError
+		if errors.As(e, &api) && api.Code == 400 && api.InvalidFile {
+			cached := false
+			for i, p := range prepared {
+				if p.cachedID != "" {
+					cached = true
+					c.forgetFile(ctx, assets[i], p)
+				}
+			}
+			if cached {
+				return c.albumAttempt(ctx, chat, assets, document, false)
+			}
+		}
 		return 0, apiError(e)
 	}
 	if len(messages) == 0 {
 		return 0, fmt.Errorf("empty telegram album response")
+	}
+	if len(messages) == len(assets) {
+		for i, m := range messages {
+			c.rememberFile(ctx, assets[i], prepared[i].kind, m)
+		}
 	}
 	return int64(messages[0].MessageID), nil
 }
@@ -476,13 +457,17 @@ func Split(s string) []string {
 // v5.5.1 omits Error.Code on uploads; retain it from the SDK response envelope.
 func (c *Client) request(ctx context.Context, cfg tg.Chattable, out any) error {
 	response, err := c.sdk(ctx).Request(cfg)
+	return decodeResponse(response, err, out)
+}
+
+func decodeResponse(response *tg.APIResponse, err error, out any) error {
 	if err != nil {
 		if response != nil && response.ErrorCode != 0 {
 			retry := time.Duration(0)
 			if response.Parameters != nil {
 				retry = time.Duration(response.Parameters.RetryAfter) * time.Second
 			}
-			return &APIError{response.ErrorCode, retry}
+			return &APIError{Code: response.ErrorCode, RetryAfter: retry, InvalidFile: invalidFileReference(response.Description)}
 		}
 		return apiError(err)
 	}

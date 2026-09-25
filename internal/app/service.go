@@ -316,7 +316,7 @@ func (s *Service) Archive(ctx context.Context, t, id string) (a domain.Archive, 
 }
 
 func assets(ctx context.Context, tx pgx.Tx, cid string) (out []domain.Asset, e error) {
-	rows, e := tx.Query(ctx, `SELECT a.id,a.position,a.alt_text,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,'') FROM assets a LEFT JOIN blobs b ON b.id=a.blob_id WHERE a.capture_id=$1 ORDER BY a.position`, cid)
+	rows, e := tx.Query(ctx, `SELECT a.id,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,'') FROM assets a LEFT JOIN blobs b ON b.id=a.blob_id WHERE a.capture_id=$1 ORDER BY a.position`, cid)
 	if e != nil {
 		return nil, e
 	}
@@ -324,7 +324,7 @@ func assets(ctx context.Context, tx pgx.Tx, cid string) (out []domain.Asset, e e
 	out = []domain.Asset{}
 	for rows.Next() {
 		var a domain.Asset
-		if e = rows.Scan(&a.ID, &a.Position, &a.AltText, &a.State, &a.Error, &a.Hash, &a.MIME, &a.Size, &a.Key); e != nil {
+		if e = rows.Scan(&a.ID, &a.Position, &a.AltText, &a.Sensitive, &a.State, &a.Error, &a.Hash, &a.MIME, &a.Size, &a.Key); e != nil {
 			return nil, e
 		}
 		out = append(out, a)
@@ -395,6 +395,7 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 }
 
 type Payload struct {
+	MediaSensitive    []bool   `json:"media_sensitive,omitempty"`
 	MediaDescriptions []string `json:"media_descriptions,omitempty"`
 	Text              string   `json:"text"`
 	TextKind          string   `json:"text_kind"`

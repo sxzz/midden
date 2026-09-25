@@ -259,6 +259,7 @@ CREATE TABLE IF NOT EXISTS assets (
     position integer NOT NULL,
     source_url text NOT NULL,
     alt_text text NOT NULL DEFAULT '',
+    sensitive boolean NOT NULL DEFAULT FALSE,
     cache_key text NOT NULL DEFAULT '',
     kind text NOT NULL CHECK (kind IN ('image', 'video')),
     state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'ready', 'failed')),
@@ -795,3 +796,15 @@ $$;
 REVOKE ALL ON FUNCTION collect_unreferenced_archives (interval) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION collect_unreferenced_archives (interval) TO monitor_app;
+
+-- Channel transport metadata, not a grant of access to archived content.
+CREATE TABLE IF NOT EXISTS channel_media_cache (
+    channel_kind text NOT NULL,
+    account_id text NOT NULL,
+    hash text NOT NULL,
+    representation text NOT NULL,
+    remote_id text NOT NULL,
+    PRIMARY KEY (channel_kind, account_id, hash, representation)
+);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON channel_media_cache TO monitor_app;

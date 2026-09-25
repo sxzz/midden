@@ -23,11 +23,13 @@ type Client struct {
 	Endpoint string
 }
 type media struct {
-	ID      string `json:"id"`
-	AltText string `json:"altText"`
-	Type    string `json:"type"`
-	URL     string `json:"url"`
-	Formats []struct {
+	Sensitive         bool   `json:"sensitive"`
+	PossiblySensitive bool   `json:"possibly_sensitive"`
+	ID                string `json:"id"`
+	AltText           string `json:"altText"`
+	Type              string `json:"type"`
+	URL               string `json:"url"`
+	Formats           []struct {
 		Container string `json:"container"`
 		Codec     string `json:"codec"`
 		Width     int64  `json:"width"`
@@ -72,11 +74,12 @@ func (c *Client) Fetch(ctx context.Context, id string) (*pb.FetchResponse, error
 	var data struct {
 		Code   int `json:"code"`
 		Status *struct {
-			Type   string    `json:"type"`
-			ID     string    `json:"id"`
-			Text   *string   `json:"text"`
-			Media  *mediaSet `json:"media"`
-			Author struct {
+			PossiblySensitive bool      `json:"possibly_sensitive"`
+			Type              string    `json:"type"`
+			ID                string    `json:"id"`
+			Text              *string   `json:"text"`
+			Media             *mediaSet `json:"media"`
+			Author            struct {
 				Protected bool `json:"protected"`
 			} `json:"author"`
 			Article json.RawMessage `json:"article"`
@@ -142,7 +145,7 @@ func (c *Client) Fetch(ctx context.Context, id string) (*pb.FetchResponse, error
 					if kind == "video" && item.ID != "" {
 						key = item.ID + ":" + u.EscapedPath()
 					}
-					out.Resources = append(out.Resources, &pb.Resource{Url: item.URL, Kind: kind, ImmutableKey: key, AltText: strings.TrimSpace(item.AltText)})
+					out.Resources = append(out.Resources, &pb.Resource{Url: item.URL, Kind: kind, ImmutableKey: key, AltText: strings.TrimSpace(item.AltText), Sensitive: post.PossiblySensitive || item.Sensitive || item.PossiblySensitive})
 				}
 			default:
 				unsupported = true

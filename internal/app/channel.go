@@ -182,10 +182,10 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 		cmd = strings.Split(fields[0], "@")[0]
 	}
 	if len(fields) > 1 {
-		arg = fields[1]
+		arg = strings.Join(fields[1:], " ")
 	}
 
-	request := &commandRequest{Task: t, Origin: origin, Argument: arg, Buttons: buttons, Previous: previous}
+	request := &commandRequest{Message: m, Task: t, Origin: origin, Argument: arg, Buttons: buttons, Previous: previous}
 	allowed := true
 	if m.Chat.ID < 0 && u.Callback != nil {
 		if err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
@@ -205,8 +205,8 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 		request.Buttons = nil
 	} else if command, ok := lookupCommand(cmd); ok {
 		if m.Chat.ID < 0 && command.PrivateOnly {
-			request.Text = "请在私聊中使用 /recent 查看最近归档。"
-		} else if len(fields) > 2 || !command.Validate(arg) {
+			request.Text = "请在私聊中使用 /" + command.Name + "。"
+		} else if !command.Validate(arg) {
 			request.Text = strings.TrimSpace("用法：/" + command.Name + " " + command.Usage)
 		} else if err := command.Handle(s, ctx, request); err != nil {
 			return err

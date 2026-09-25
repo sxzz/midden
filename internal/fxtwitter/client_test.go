@@ -100,12 +100,12 @@ func TestReportedPostFixture(t *testing.T) {
 
 func TestVideoVariants(t *testing.T) {
 	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"code":200,"status":{"type":"status","id":"20","text":"","media":{"all":[{"id":"video-id","type":"gif","altText":"描述","url":"https://example.org/main.m3u8","thumbnail_url":"https://example.org/thumb.jpg","formats":[{"container":"mp4","codec":"h264","bitrate":100,"url":"https://example.org/low.mp4"},{"container":"mp4","codec":"hevc","bitrate":900,"url":"https://example.org/hevc.mp4"},{"container":"mp4","codec":"h264","bitrate":200,"url":"https://example.org/high.mp4"}]}]}}}`))
+		w.Write([]byte(`{"code":200,"status":{"type":"status","id":"20","text":"","media":{"all":[{"id":"video-id","type":"gif","sensitive":true,"altText":"描述","url":"https://example.org/main.m3u8","thumbnail_url":"https://example.org/thumb.jpg","formats":[{"container":"mp4","codec":"h264","bitrate":100,"url":"https://example.org/low.mp4"},{"container":"mp4","codec":"hevc","bitrate":900,"url":"https://example.org/hevc.mp4"},{"container":"mp4","codec":"h264","bitrate":200,"url":"https://example.org/high.mp4"}]}]}}}`))
 	}))
 	defer h.Close()
 	c := Client{HTTP: h.Client(), Endpoint: h.URL}
 	out, err := c.Fetch(context.Background(), "20")
-	if err != nil || len(out.Resources) != 1 || out.Resources[0].AltText != "描述" || out.Resources[0].ImmutableKey != "video-id:/hevc.mp4" || out.Resources[0].Kind != "video" || out.Resources[0].Url != "https://example.org/hevc.mp4" {
+	if err != nil || len(out.Resources) != 1 || !out.Resources[0].Sensitive || out.Resources[0].AltText != "描述" || out.Resources[0].ImmutableKey != "video-id:/hevc.mp4" || out.Resources[0].Kind != "video" || out.Resources[0].Url != "https://example.org/hevc.mp4" {
 		t.Fatal(out, err)
 	}
 }
@@ -119,5 +119,22 @@ func TestVideoResolutionPriority(t *testing.T) {
 	out, err := c.Fetch(context.Background(), "20")
 	if err != nil || len(out.Resources) != 1 || out.Resources[0].Url != "https://example.org/high.webm?token=temporary" || out.Resources[0].ImmutableKey != "media:/high.webm" {
 		t.Fatal(out, err)
+	}
+}
+
+func TestPostSensitivityAppliesToAllMedia(t *testing.T) {
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"code":200,"status":{"type":"status","id":"20","text":"","possibly_sensitive":true,"media":{"all":[{"type":"photo","url":"https://example.org/image.jpg"},{"type":"video","url":"https://example.org/video.mp4"}]}}}`))
+	}))
+	defer h.Close()
+	c := Client{HTTP: h.Client(), Endpoint: h.URL}
+	out, err := c.Fetch(context.Background(), "20")
+	if err != nil || len(out.Resources) != 2 {
+		t.Fatal(out, err)
+	}
+	for _, r := range out.Resources {
+		if !r.Sensitive {
+			t.Fatal("post sensitivity lost")
+		}
 	}
 }
