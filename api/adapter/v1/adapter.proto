@@ -11,9 +11,16 @@ service Adapter {
 
 message DescribeRequest {}
 
+enum Visibility {
+  VISIBILITY_UNSPECIFIED = 0;
+  VISIBILITY_PUBLIC = 1;
+  VISIBILITY_PRIVATE = 2;
+}
+
 message Provider {
   string id = 1;
   string authentication = 2;
+  Visibility visibility = 3;
 }
 
 message DescribeResponse {
@@ -49,4 +56,5 @@ message FetchResponse {
   string adapter_version = 7;
   string text_source = 8;
   bool incomplete = 9;
+  Visibility visibility = 10;
 }

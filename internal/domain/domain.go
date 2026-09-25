@@ -89,6 +89,7 @@ type Asset struct {
 }
 
 type Archive struct {
+	Visibility     string    `json:"visibility"`
 	ID             string    `json:"id"`
 	URL            string    `json:"url"`
 	ExternalID     string    `json:"external_id"`

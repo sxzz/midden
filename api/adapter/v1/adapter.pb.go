@@ -21,6 +21,55 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type Visibility int32
+
+const (
+	Visibility_VISIBILITY_UNSPECIFIED Visibility = 0
+	Visibility_VISIBILITY_PUBLIC      Visibility = 1
+	Visibility_VISIBILITY_PRIVATE     Visibility = 2
+)
+
+// Enum value maps for Visibility.
+var (
+	Visibility_name = map[int32]string{
+		0: "VISIBILITY_UNSPECIFIED",
+		1: "VISIBILITY_PUBLIC",
+		2: "VISIBILITY_PRIVATE",
+	}
+	Visibility_value = map[string]int32{
+		"VISIBILITY_UNSPECIFIED": 0,
+		"VISIBILITY_PUBLIC":      1,
+		"VISIBILITY_PRIVATE":     2,
+	}
+)
+
+func (x Visibility) Enum() *Visibility {
+	p := new(Visibility)
+	*p = x
+	return p
+}
+
+func (x Visibility) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Visibility) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_adapter_v1_adapter_proto_enumTypes[0].Descriptor()
+}
+
+func (Visibility) Type() protoreflect.EnumType {
+	return &file_api_adapter_v1_adapter_proto_enumTypes[0]
+}
+
+func (x Visibility) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Visibility.Descriptor instead.
+func (Visibility) EnumDescriptor() ([]byte, []int) {
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{0}
+}
+
 type DescribeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -61,6 +110,7 @@ type Provider struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Authentication string                 `protobuf:"bytes,2,opt,name=authentication,proto3" json:"authentication,omitempty"`
+	Visibility     Visibility             `protobuf:"varint,3,opt,name=visibility,proto3,enum=adapter.v1.Visibility" json:"visibility,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -107,6 +157,13 @@ func (x *Provider) GetAuthentication() string {
 		return x.Authentication
 	}
 	return ""
+}
+
+func (x *Provider) GetVisibility() Visibility {
+	if x != nil {
+		return x.Visibility
+	}
+	return Visibility_VISIBILITY_UNSPECIFIED
 }
 
 type DescribeResponse struct {
@@ -340,6 +397,7 @@ type FetchResponse struct {
 	AdapterVersion string                 `protobuf:"bytes,7,opt,name=adapter_version,json=adapterVersion,proto3" json:"adapter_version,omitempty"`
 	TextSource     string                 `protobuf:"bytes,8,opt,name=text_source,json=textSource,proto3" json:"text_source,omitempty"`
 	Incomplete     bool                   `protobuf:"varint,9,opt,name=incomplete,proto3" json:"incomplete,omitempty"`
+	Visibility     Visibility             `protobuf:"varint,10,opt,name=visibility,proto3,enum=adapter.v1.Visibility" json:"visibility,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -437,16 +495,26 @@ func (x *FetchResponse) GetIncomplete() bool {
 	return false
 }
 
+func (x *FetchResponse) GetVisibility() Visibility {
+	if x != nil {
+		return x.Visibility
+	}
+	return Visibility_VISIBILITY_UNSPECIFIED
+}
+
 var File_api_adapter_v1_adapter_proto protoreflect.FileDescriptor
 
 const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\n" +
 	"\x1capi/adapter/v1/adapter.proto\x12\n" +
 	"adapter.v1\"\x11\n" +
-	"\x0fDescribeRequest\"B\n" +
+	"\x0fDescribeRequest\"z\n" +
 	"\bProvider\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12&\n" +
-	"\x0eauthentication\x18\x02 \x01(\tR\x0eauthentication\"\xe4\x01\n" +
+	"\x0eauthentication\x18\x02 \x01(\tR\x0eauthentication\x126\n" +
+	"\n" +
+	"visibility\x18\x03 \x01(\x0e2\x16.adapter.v1.VisibilityR\n" +
+	"visibility\"\xe4\x01\n" +
 	"\x10DescribeResponse\x12)\n" +
 	"\x10protocol_version\x18\x01 \x01(\tR\x0fprotocolVersion\x12\x1d\n" +
 	"\n" +
@@ -467,7 +535,7 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"request_id\x18\x06 \x01(\tR\trequestId\"0\n" +
 	"\bResource\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x12\n" +
-	"\x04kind\x18\x02 \x01(\tR\x04kind\"\xbc\x02\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\"\xf4\x02\n" +
 	"\rFetchResponse\x12\x1f\n" +
 	"\vexternal_id\x18\x01 \x01(\tR\n" +
 	"externalId\x12\x12\n" +
@@ -482,7 +550,16 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"textSource\x12\x1e\n" +
 	"\n" +
 	"incomplete\x18\t \x01(\bR\n" +
-	"incomplete2\x8e\x01\n" +
+	"incomplete\x126\n" +
+	"\n" +
+	"visibility\x18\n" +
+	" \x01(\x0e2\x16.adapter.v1.VisibilityR\n" +
+	"visibility*W\n" +
+	"\n" +
+	"Visibility\x12\x1a\n" +
+	"\x16VISIBILITY_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11VISIBILITY_PUBLIC\x10\x01\x12\x16\n" +
+	"\x12VISIBILITY_PRIVATE\x10\x022\x8e\x01\n" +
 	"\aAdapter\x12E\n" +
 	"\bDescribe\x12\x1b.adapter.v1.DescribeRequest\x1a\x1c.adapter.v1.DescribeResponse\x12<\n" +
 	"\x05Fetch\x12\x18.adapter.v1.FetchRequest\x1a\x19.adapter.v1.FetchResponseB\"Z monitor/api/adapter/v1;adapterv1b\x06proto3"
@@ -499,27 +576,31 @@ func file_api_adapter_v1_adapter_proto_rawDescGZIP() []byte {
 	return file_api_adapter_v1_adapter_proto_rawDescData
 }
 
+var file_api_adapter_v1_adapter_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_api_adapter_v1_adapter_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_api_adapter_v1_adapter_proto_goTypes = []any{
-	(*DescribeRequest)(nil),  // 0: adapter.v1.DescribeRequest
-	(*Provider)(nil),         // 1: adapter.v1.Provider
-	(*DescribeResponse)(nil), // 2: adapter.v1.DescribeResponse
-	(*FetchRequest)(nil),     // 3: adapter.v1.FetchRequest
-	(*Resource)(nil),         // 4: adapter.v1.Resource
-	(*FetchResponse)(nil),    // 5: adapter.v1.FetchResponse
+	(Visibility)(0),          // 0: adapter.v1.Visibility
+	(*DescribeRequest)(nil),  // 1: adapter.v1.DescribeRequest
+	(*Provider)(nil),         // 2: adapter.v1.Provider
+	(*DescribeResponse)(nil), // 3: adapter.v1.DescribeResponse
+	(*FetchRequest)(nil),     // 4: adapter.v1.FetchRequest
+	(*Resource)(nil),         // 5: adapter.v1.Resource
+	(*FetchResponse)(nil),    // 6: adapter.v1.FetchResponse
 }
 var file_api_adapter_v1_adapter_proto_depIdxs = []int32{
-	1, // 0: adapter.v1.DescribeResponse.providers:type_name -> adapter.v1.Provider
-	4, // 1: adapter.v1.FetchResponse.resources:type_name -> adapter.v1.Resource
-	0, // 2: adapter.v1.Adapter.Describe:input_type -> adapter.v1.DescribeRequest
-	3, // 3: adapter.v1.Adapter.Fetch:input_type -> adapter.v1.FetchRequest
-	2, // 4: adapter.v1.Adapter.Describe:output_type -> adapter.v1.DescribeResponse
-	5, // 5: adapter.v1.Adapter.Fetch:output_type -> adapter.v1.FetchResponse
-	4, // [4:6] is the sub-list for method output_type
-	2, // [2:4] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	0, // 0: adapter.v1.Provider.visibility:type_name -> adapter.v1.Visibility
+	2, // 1: adapter.v1.DescribeResponse.providers:type_name -> adapter.v1.Provider
+	5, // 2: adapter.v1.FetchResponse.resources:type_name -> adapter.v1.Resource
+	0, // 3: adapter.v1.FetchResponse.visibility:type_name -> adapter.v1.Visibility
+	1, // 4: adapter.v1.Adapter.Describe:input_type -> adapter.v1.DescribeRequest
+	4, // 5: adapter.v1.Adapter.Fetch:input_type -> adapter.v1.FetchRequest
+	3, // 6: adapter.v1.Adapter.Describe:output_type -> adapter.v1.DescribeResponse
+	6, // 7: adapter.v1.Adapter.Fetch:output_type -> adapter.v1.FetchResponse
+	6, // [6:8] is the sub-list for method output_type
+	4, // [4:6] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_api_adapter_v1_adapter_proto_init() }
@@ -532,13 +613,14 @@ func file_api_adapter_v1_adapter_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_adapter_v1_adapter_proto_rawDesc), len(file_api_adapter_v1_adapter_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_api_adapter_v1_adapter_proto_goTypes,
 		DependencyIndexes: file_api_adapter_v1_adapter_proto_depIdxs,
+		EnumInfos:         file_api_adapter_v1_adapter_proto_enumTypes,
 		MessageInfos:      file_api_adapter_v1_adapter_proto_msgTypes,
 	}.Build()
 	File_api_adapter_v1_adapter_proto = out.File

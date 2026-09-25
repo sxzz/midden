@@ -47,7 +47,7 @@ docker compose start core
 1. 在隔离的 Docker PostgreSQL 中创建空数据库与 `monitor_app` 角色，设置新密码；本版本迁移所有者为 PostgreSQL 管理员，恢复使用同名角色或显式映射。
 2. 在不启动核心的前提下，将 SQL dump 恢复到空数据库。保留权限、函数和 RLS；不要使用会丢弃这些授权的恢复方式。
 3. 将对象同步到新的私有 bucket，保持对象 key 完全不变。
-4. 配置新数据库、bucket 和服务认证。验证原 Channel UUID、Bot ID、身份映射、归档 ID、原图 hash、旧版本和跨租户不可见性。
+4. 配置新数据库、bucket 和服务认证。验证原 Channel UUID、Bot ID、身份映射、归档 ID、原图 hash、历史版本、公开内容共享以及私有内容和收藏记录的租户隔离。
 5. 原环境仍在线时，不启动第二个相同 Bot 接收者。切换前先停止原接收者。
 
 ```sh

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,14 +38,14 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 		return river.JobSnooze(time.Second)
 	}
 	defer release(c, t.ID, -1)
-	var source, state, key, cid, oid string
+	var source, state, key, cid, oid, visibility, dataScope string
 	var reserved int64
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, t.Tenant); e != nil {
 			return e
 		}
 		var objectID *string
-		e := tx.QueryRow(ctx, `SELECT source_url,state,reserved_bytes,capture_id,object_id FROM assets WHERE id=$1 FOR UPDATE`, t.ID).Scan(&source, &state, &reserved, &cid, &objectID)
+		e := tx.QueryRow(ctx, `SELECT source_url,state,reserved_bytes,capture_id,object_id,visibility,data_scope FROM assets WHERE id=$1 FOR UPDATE`, t.ID).Scan(&source, &state, &reserved, &cid, &objectID, &visibility, &dataScope)
 		if e != nil {
 			return e
 		}
@@ -154,7 +155,14 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 			return nil
 		}
 		var bid, bkey string
-		e := tx.QueryRow(ctx, `INSERT INTO blobs(tenant_id,hash,object_key,size,mime) VALUES($1,$2,$3,$4,$5) ON CONFLICT(tenant_id,hash) DO UPDATE SET hash=excluded.hash RETURNING id,object_key`, t.Tenant, digest, key, n, mime).Scan(&bid, &bkey)
+		// The shared hash lock avoids updates to another tenant's immutable Blob row.
+		if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,2))`, dataScope+"|"+digest); e != nil {
+			return e
+		}
+		e := tx.QueryRow(ctx, `SELECT id,object_key FROM blobs WHERE data_scope=$1 AND hash=$2`, dataScope, digest).Scan(&bid, &bkey)
+		if errors.Is(e, pgx.ErrNoRows) {
+			e = tx.QueryRow(ctx, `INSERT INTO blobs(tenant_id,visibility,hash,object_key,size,mime) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,object_key`, t.Tenant, visibility, digest, key, n, mime).Scan(&bid, &bkey)
+		}
 		if e != nil {
 			return e
 		}

@@ -57,3 +57,24 @@ func TestAuthenticatedProtocol(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestProviderRequiresExplicitVisibility(t *testing.T) {
+	for _, visibility := range []pb.Visibility{
+		pb.Visibility_VISIBILITY_UNSPECIFIED,
+		pb.Visibility_VISIBILITY_PUBLIC,
+		pb.Visibility_VISIBILITY_PRIVATE,
+		pb.Visibility(99),
+	} {
+		d := &pb.DescribeResponse{
+			ProtocolVersion: "1",
+			AdapterId:       "x",
+			Providers: []*pb.Provider{{
+				Id: "xdown", Authentication: "none", Visibility: visibility,
+			}},
+		}
+		valid := visibility == pb.Visibility_VISIBILITY_PUBLIC || visibility == pb.Visibility_VISIBILITY_PRIVATE
+		if err := Validate(d); (err == nil) != valid {
+			t.Fatalf("visibility %v: validation error = %v", visibility, err)
+		}
+	}
+}

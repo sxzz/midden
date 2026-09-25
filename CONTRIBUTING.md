@@ -17,6 +17,12 @@ make integration
 
 修改 `api/adapter/v1/adapter.proto` 后，安装 protoc 并运行 `make generate`。
 
+## 发布前数据库变更
+
+首次发布前直接修改 `internal/store/schema.sql`，通过清空开发数据库和对象存储重新初始化验证。不维护旧数据兼容、迁移或旧 ID 映射，不因结构调整递增 schema 版本。数据库及对象存储使用 Docker。
+
+Provider 必须在协议中明确声明 public/private，不能由用户请求控制。共享内容测试使用 public Provider，隔离测试使用 private Provider。
+
 ## Telegram 命令
 
 命令在 `internal/app/commands.go` 的 `channelCommands` 中注册。每项包含名称、描述、参数说明、参数校验、是否接受按钮回调及处理函数。

@@ -32,6 +32,7 @@ import (
 
 type fakeAdapter struct {
 	mu         sync.Mutex
+	public     bool
 	text       string
 	textSource string
 	incomplete bool
@@ -40,14 +41,22 @@ type fakeAdapter struct {
 }
 
 func (f *fakeAdapter) Describe(context.Context, *pb.DescribeRequest, ...grpc.CallOption) (*pb.DescribeResponse, error) {
-	return &pb.DescribeResponse{}, nil
+	visibility := pb.Visibility_VISIBILITY_PRIVATE
+	if f.public {
+		visibility = pb.Visibility_VISIBILITY_PUBLIC
+	}
+	return &pb.DescribeResponse{Providers: []*pb.Provider{{Id: "xdown", Authentication: "none", Visibility: visibility}}}, nil
 }
 
 func (f *fakeAdapter) Fetch(ctx context.Context, r *pb.FetchRequest, _ ...grpc.CallOption) (*pb.FetchResponse, error) {
 	f.calls.Add(1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	v := &pb.FetchResponse{ExternalId: r.ExternalId, ProviderId: r.ProviderId, Text: f.text, TextKind: "provider_summary", AdapterVersion: "test", Warnings: []string{"incomplete"}, TextSource: f.textSource, Incomplete: f.incomplete}
+	visibility := pb.Visibility_VISIBILITY_PRIVATE
+	if f.public {
+		visibility = pb.Visibility_VISIBILITY_PUBLIC
+	}
+	v := &pb.FetchResponse{Visibility: visibility, ExternalId: r.ExternalId, ProviderId: r.ProviderId, Text: f.text, TextKind: "provider_summary", AdapterVersion: "test", Warnings: []string{"incomplete"}, TextSource: f.textSource, Incomplete: f.incomplete}
 	for _, u := range f.urls {
 		v.Resources = append(v.Resources, &pb.Resource{Url: u, Kind: "image"})
 	}

@@ -162,9 +162,9 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		return e
 	}
 	defer release(c, t.Tenant, slot)
-	var url, id, provider, connection, scope, state string
+	var url, id, provider, connection, scope, state, visibility string
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT a.url,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),c.scope,c.state FROM captures c JOIN archives a ON a.id=c.archive_id AND a.tenant_id=c.tenant_id WHERE c.id=$1`, t.ID).Scan(&url, &id, &provider, &connection, &scope, &state)
+		return tx.QueryRow(ctx, `SELECT a.url,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),c.scope,c.state,c.visibility FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.id=$1`, t.ID).Scan(&url, &id, &provider, &connection, &scope, &state, &visibility)
 	})
 	if e != nil {
 		return e
@@ -183,6 +183,13 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	}
 	if r.ExternalId != id || r.ProviderId != provider {
 		return &PermanentError{"adapter returned mismatched identity"}
+	}
+	expectedVisibility := pb.Visibility_VISIBILITY_PRIVATE
+	if visibility == "public" {
+		expectedVisibility = pb.Visibility_VISIBILITY_PUBLIC
+	}
+	if r.Visibility != expectedVisibility {
+		return &PermanentError{"provider visibility does not match capture policy"}
 	}
 	if len(r.Text) > 1<<20 {
 		return &PermanentError{"text exceeds archive limit"}
@@ -222,7 +229,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 			}
 			seen[v.Url] = true
 			var aid string
-			if e = tx.QueryRow(ctx, `INSERT INTO assets(tenant_id,capture_id,position,source_url) VALUES($1,$2,$3,$4) RETURNING id`, t.Tenant, t.ID, n, v.Url).Scan(&aid); e != nil {
+			if e = tx.QueryRow(ctx, `INSERT INTO assets(tenant_id,capture_id,position,source_url,visibility) VALUES($1,$2,$3,$4,$5) RETURNING id`, t.Tenant, t.ID, n, v.Url, visibility).Scan(&aid); e != nil {
 				return e
 			}
 			n++
@@ -238,6 +245,9 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 	return s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, tenant); e != nil {
+			return e
+		}
+		if e := lockCaptureArchive(ctx, tx, cid); e != nil {
 			return e
 		}
 		var aid, state string
@@ -289,7 +299,7 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		digest := store.Hash(string(digestData))
 		var previous *string
 		var previousID *string
-		e = tx.QueryRow(ctx, `SELECT r.content_hash,r.id FROM archives a LEFT JOIN revisions r ON r.id=a.current_revision AND r.tenant_id=a.tenant_id WHERE a.id=$1`, aid).Scan(&previous, &previousID)
+		e = tx.QueryRow(ctx, `SELECT r.content_hash,r.id FROM archives a LEFT JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1`, aid).Scan(&previous, &previousID)
 		if e != nil {
 			return e
 		}
@@ -297,7 +307,7 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		revisionID := previousID
 		if previous == nil || *previous != digest {
 			var rid string
-			e = tx.QueryRow(ctx, `INSERT INTO revisions(tenant_id,archive_id,capture_id,content_hash,payload,content_bytes) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, tenant, aid, cid, digest, raw, len(raw)).Scan(&rid)
+			e = tx.QueryRow(ctx, `INSERT INTO revisions(tenant_id,archive_id,capture_id,content_hash,payload,content_bytes,visibility) SELECT $1,$2,$3,$4,$5,$6,visibility FROM captures WHERE id=$3 RETURNING id`, tenant, aid, cid, digest, raw, len(raw)).Scan(&rid)
 			if e != nil {
 				return e
 			}
@@ -325,14 +335,14 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 }
 
 func (s *Service) deliveries(ctx context.Context, tx pgx.Tx, t, cid string) error {
-	rows, e := tx.Query(ctx, `SELECT id FROM submissions WHERE capture_id=$1 AND chat_id IS NOT NULL AND state='pending'`, cid)
+	rows, e := tx.Query(ctx, `SELECT tenant_id,id FROM capture_deliveries($1)`, cid)
 	if e != nil {
 		return e
 	}
-	ids := []string{}
+	ids := []store.Task{}
 	for rows.Next() {
-		var id string
-		if e = rows.Scan(&id); e != nil {
+		var id store.Task
+		if e = rows.Scan(&id.Tenant, &id.ID); e != nil {
 			rows.Close()
 			return e
 		}
@@ -344,14 +354,22 @@ func (s *Service) deliveries(ctx context.Context, tx pgx.Tx, t, cid string) erro
 		return e
 	}
 	for _, id := range ids {
-		if e = s.Enqueue(ctx, tx, t, id, "deliver"); e != nil {
+		if e = s.Enqueue(ctx, tx, id.Tenant, id.ID, "deliver"); e != nil {
 			return e
 		}
 	}
 	return nil
 }
 
+func lockCaptureArchive(ctx context.Context, tx pgx.Tx, cid string) error {
+	var id string
+	return tx.QueryRow(ctx, `SELECT id FROM archives WHERE id=(SELECT archive_id FROM captures WHERE id=$1) FOR UPDATE`, cid).Scan(&id)
+}
+
 func (s *Service) failCaptureTx(ctx context.Context, tx pgx.Tx, t, id, msg string) error {
+	if e := lockCaptureArchive(ctx, tx, id); e != nil {
+		return e
+	}
 	var n int64
 	var state string
 	if e := tx.QueryRow(ctx, `SELECT content_reserved,state FROM captures WHERE id=$1 FOR UPDATE`, id).Scan(&n, &state); e != nil {

@@ -68,7 +68,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
   /v1/archives:
     get:
-      summary: List this tenant's archives, newest first
+      summary: List this tenant's collection, newest first
       parameters:
         - in: query
           name: cursor
@@ -200,6 +200,12 @@ components:
         provider_id: { type: string }
         access_scope: { type: string }
         revision_id: { type: string, format: uuid }
+        visibility:
+          {
+            type: string,
+            enum: [public, private],
+            description: Visibility declared by the provider,
+          }
         text: { type: string }
         text_kind: { type: string, enum: [provider_summary, post_text] }
         text_source: { type: string, description: Source of the archived text }

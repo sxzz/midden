@@ -56,7 +56,7 @@ func Validate(d *pb.DescribeResponse) error {
 		seen[h] = true
 	}
 	for _, p := range d.Providers {
-		if p.Id == "xdown" && p.Authentication == "none" {
+		if p.Id == "xdown" && p.Authentication == "none" && (p.Visibility == pb.Visibility_VISIBILITY_PUBLIC || p.Visibility == pb.Visibility_VISIBILITY_PRIVATE) {
 			return nil
 		}
 	}

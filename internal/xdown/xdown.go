@@ -30,7 +30,7 @@ type Server struct {
 }
 
 func (s *Server) Describe(context.Context, *pb.DescribeRequest) (*pb.DescribeResponse, error) {
-	return &pb.DescribeResponse{ProtocolVersion: "1", AdapterId: "x", Version: Version, Hosts: []string{"x.com", "twitter.com", "www.x.com", "www.twitter.com", "mobile.x.com", "mobile.twitter.com"}, Providers: []*pb.Provider{{Id: "xdown", Authentication: "none"}}, Capabilities: []string{"fetch_url", "text", "image"}}, nil
+	return &pb.DescribeResponse{ProtocolVersion: "1", AdapterId: "x", Version: Version, Hosts: []string{"x.com", "twitter.com", "www.x.com", "www.twitter.com", "mobile.x.com", "mobile.twitter.com"}, Providers: []*pb.Provider{{Id: "xdown", Authentication: "none", Visibility: pb.Visibility_VISIBILITY_PUBLIC}}, Capabilities: []string{"fetch_url", "text", "image"}}, nil
 }
 
 func (s *Server) Fetch(ctx context.Context, r *pb.FetchRequest) (*pb.FetchResponse, error) {
@@ -89,6 +89,7 @@ func (s *Server) Fetch(ctx context.Context, r *pb.FetchRequest) (*pb.FetchRespon
 	}
 	out.ExternalId = t.ExternalID
 	out.ProviderId = "xdown"
+	out.Visibility = pb.Visibility_VISIBILITY_PUBLIC
 	out.AdapterVersion = Version
 	return out, nil
 }

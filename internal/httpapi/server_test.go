@@ -13,6 +13,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
+	pb "monitor/api/adapter/v1"
 	"monitor/internal/app"
 	"monitor/internal/domain"
 	"monitor/internal/store"
@@ -37,7 +38,7 @@ func TestRESTIsolation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	s := &app.Service{DB: db, Queue: q, Config: app.Defaults()}
+	s := &app.Service{DB: db, Queue: q, Providers: []*pb.Provider{{Id: "xdown", Authentication: "none", Visibility: pb.Visibility_VISIBILITY_PRIVATE}}, Config: app.Defaults()}
 	h := Handler(s)
 	makeToken := func() string {
 		var tenant string

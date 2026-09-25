@@ -38,14 +38,15 @@ type Sender interface {
 }
 
 type Service struct {
-	DB      *store.Store
-	Queue   *river.Client[pgx.Tx]
-	Adapter pb.AdapterClient
-	Blobs   blob.Storage
-	HTTP    *http.Client
-	Config  Config
-	Sender  Sender
-	Senders map[string]Sender
+	DB        *store.Store
+	Queue     *river.Client[pgx.Tx]
+	Adapter   pb.AdapterClient
+	Providers []*pb.Provider
+	Blobs     blob.Storage
+	HTTP      *http.Client
+	Config    Config
+	Sender    Sender
+	Senders   map[string]Sender
 }
 
 func (s *Service) Enqueue(ctx context.Context, tx pgx.Tx, tenant, id, kind string) error {
@@ -58,6 +59,35 @@ func lockTenant(ctx context.Context, tx pgx.Tx, tenant string) error {
 	return tx.QueryRow(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, tenant).Scan(&id)
 }
 
+// Provider policy is obtained from the trusted adapter, never from a user's request.
+func (s *Service) providerVisibility(ctx context.Context, id string) (string, error) {
+	providers := s.Providers
+	if providers == nil && s.Adapter != nil {
+		callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		d, err := s.Adapter.Describe(callCtx, &pb.DescribeRequest{})
+		if err != nil {
+			return "", err
+		}
+		providers = d.Providers
+	}
+	for _, p := range providers {
+		if p.Id != id {
+			continue
+		}
+		if p.Authentication != "none" {
+			return "", domain.ErrUnsupported
+		}
+		switch p.Visibility {
+		case pb.Visibility_VISIBILITY_PUBLIC:
+			return "public", nil
+		case pb.Visibility_VISIBILITY_PRIVATE:
+			return "private", nil
+		}
+	}
+	return "", domain.ErrUnsupported
+}
+
 func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureInput) (out domain.Job, err error) {
 	if in.ProviderID == "" {
 		in.ProviderID = "xdown"
@@ -67,6 +97,10 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 	}
 	if len(in.Key) > 200 {
 		return out, fmt.Errorf("idempotency key too long")
+	}
+	visibility, err := s.providerVisibility(ctx, in.ProviderID)
+	if err != nil {
+		return out, err
 	}
 	err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, tenant); e != nil {
@@ -95,7 +129,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		var aid, scope, connection string
 		scope = "public"
 		if in.RefreshID != "" {
-			if e := tx.QueryRow(ctx, `SELECT id,url,scope,provider_id,coalesce(connection_id::text,'') FROM archives WHERE id=$1 AND tenant_id=$2`, in.RefreshID, tenant).Scan(&aid, &in.URL, &scope, &in.ProviderID, &connection); e != nil {
+			if e := tx.QueryRow(ctx, `SELECT id,url,scope,provider_id,coalesce(connection_id::text,''),visibility FROM archives WHERE id=$1`, in.RefreshID).Scan(&aid, &in.URL, &scope, &in.ProviderID, &connection, &visibility); e != nil {
 				return e
 			}
 			if connection != "" || in.ProviderID != "xdown" || scope != "public" {
@@ -118,16 +152,35 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if !errors.Is(e, pgx.ErrNoRows) {
 			return e
 		}
+		// Serialize all submissions for one content identity, including different tenants.
+		dataScope := "00000000-0000-0000-0000-000000000000"
+		if visibility == "private" {
+			dataScope = tenant
+		}
+		if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1))`, dataScope+"|x|"+scope+"|post||"+target.ExternalID); e != nil {
+			return e
+		}
 		if aid == "" {
-			e = tx.QueryRow(ctx, `INSERT INTO archives(tenant_id,external_id,url,provider_id,scope) VALUES($1,$2,$3,$4,$5) ON CONFLICT(tenant_id,platform,scope,kind,object_scope,external_id) DO UPDATE SET url=archives.url RETURNING id`, tenant, target.ExternalID, target.URL, in.ProviderID, scope).Scan(&aid)
+			e = tx.QueryRow(ctx, `SELECT id FROM archives WHERE data_scope=$1 AND platform='x' AND scope=$2 AND kind='post' AND object_scope='' AND external_id=$3`, dataScope, scope, target.ExternalID).Scan(&aid)
+			if errors.Is(e, pgx.ErrNoRows) {
+				e = tx.QueryRow(ctx, `INSERT INTO archives(tenant_id,visibility,external_id,url,provider_id,scope) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, tenant, visibility, target.ExternalID, target.URL, in.ProviderID, scope).Scan(&aid)
+			}
 			if e != nil {
 				return e
 			}
 		}
+		// Hold the archive row through subscription creation so finalization cannot miss a subscriber.
+		if e = tx.QueryRow(ctx, `SELECT id FROM archives WHERE id=$1 FOR UPDATE`, aid).Scan(&aid); e != nil {
+			return e
+		}
+		if _, e = tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, tenant, aid); e != nil {
+			return e
+		}
+
 		var cid string
-		e = tx.QueryRow(ctx, `SELECT id FROM captures WHERE tenant_id=$1 AND archive_id=$2 AND state IN('queued','downloading')`, tenant, aid).Scan(&cid)
+		e = tx.QueryRow(ctx, `SELECT id FROM captures WHERE archive_id=$1 AND state IN('queued','downloading')`, aid).Scan(&cid)
 		if errors.Is(e, pgx.ErrNoRows) && in.RefreshID == "" {
-			e = tx.QueryRow(ctx, `SELECT r.capture_id FROM archives a JOIN revisions r ON r.id=a.current_revision AND r.tenant_id=a.tenant_id WHERE a.id=$1`, aid).Scan(&cid)
+			e = tx.QueryRow(ctx, `SELECT r.capture_id FROM archives a JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1`, aid).Scan(&cid)
 		}
 		if errors.Is(e, pgx.ErrNoRows) {
 			var used, reserved, quota int64
@@ -149,7 +202,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			if _, e = tx.Exec(ctx, `UPDATE tenants SET rate_count=$2,rate_start=$3 WHERE id=$1`, tenant, count+1, start); e != nil {
 				return e
 			}
-			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,archive_id,provider_id,scope) VALUES($1,$2,$3,$4) RETURNING id`, tenant, aid, in.ProviderID, scope).Scan(&cid)
+			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,archive_id,provider_id,scope,visibility) VALUES($1,$2,$3,$4,$5) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility).Scan(&cid)
 			if e != nil {
 				return e
 			}
@@ -179,7 +232,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 }
 
 func scanJob(ctx context.Context, tx pgx.Tx, id string, j *domain.Job) error {
-	return tx.QueryRow(ctx, `SELECT id,archive_id,state,error,provider_id,coalesce(connection_id::text,''),scope,created_at FROM captures WHERE id=$1`, id).Scan(&j.ID, &j.ArchiveID, &j.State, &j.Error, &j.ProviderID, &j.ConnectionID, &j.AccessScope, &j.CreatedAt)
+	return tx.QueryRow(ctx, `SELECT id,archive_id,state,error,provider_id,coalesce(connection_id::text,''),scope,created_at FROM captures WHERE id=$1 AND (tenant_id=nullif(current_setting('app.tenant_id',true),'')::uuid OR EXISTS(SELECT FROM submissions WHERE capture_id=captures.id))`, id).Scan(&j.ID, &j.ArchiveID, &j.State, &j.Error, &j.ProviderID, &j.ConnectionID, &j.AccessScope, &j.CreatedAt)
 }
 
 func (s *Service) Job(ctx context.Context, t, id string) (j domain.Job, e error) {
@@ -197,7 +250,7 @@ func (s *Service) Usage(ctx context.Context, t string) (u domain.Usage, e error)
 func archive(ctx context.Context, tx pgx.Tx, id string) (a domain.Archive, e error) {
 	var payload []byte
 	var cid string
-	e = tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,r.id,r.payload,r.capture_id,a.observed_at,a.created_at FROM archives a JOIN revisions r ON r.id=a.current_revision AND r.tenant_id=a.tenant_id WHERE a.id=$1`, id).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.RevisionID, &payload, &cid, &a.ObservedAt, &a.CreatedAt)
+	e = tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,a.visibility,r.id,r.payload,r.capture_id,a.observed_at,a.created_at FROM archives a JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1`, id).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &payload, &cid, &a.ObservedAt, &a.CreatedAt)
 	if e != nil {
 		return
 	}
@@ -209,7 +262,7 @@ func archive(ctx context.Context, tx pgx.Tx, id string) (a domain.Archive, e err
 	a.TextKind = p.TextKind
 	a.TextSource = p.TextSource
 	a.AdapterVersion = p.Version
-	a.Warnings = archiveWarnings(p.Warnings)
+	a.Warnings = p.Warnings
 	a.Assets, e = assets(ctx, tx, cid)
 	return
 }
@@ -220,7 +273,7 @@ func (s *Service) Archive(ctx context.Context, t, id string) (a domain.Archive, 
 }
 
 func assets(ctx context.Context, tx pgx.Tx, cid string) (out []domain.Asset, e error) {
-	rows, e := tx.Query(ctx, `SELECT a.id,a.position,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,'') FROM assets a LEFT JOIN blobs b ON b.id=a.blob_id AND b.tenant_id=a.tenant_id WHERE a.capture_id=$1 ORDER BY a.position`, cid)
+	rows, e := tx.Query(ctx, `SELECT a.id,a.position,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,'') FROM assets a LEFT JOIN blobs b ON b.id=a.blob_id WHERE a.capture_id=$1 ORDER BY a.position`, cid)
 	if e != nil {
 		return nil, e
 	}
@@ -238,7 +291,7 @@ func assets(ctx context.Context, tx pgx.Tx, cid string) (out []domain.Asset, e e
 
 func (s *Service) Asset(ctx context.Context, t, id string) (a domain.Asset, e error) {
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT a.id,b.object_key,b.mime,b.size,b.hash FROM assets a JOIN blobs b ON b.id=a.blob_id AND b.tenant_id=a.tenant_id WHERE a.id=$1 AND a.state='ready'`, id).Scan(&a.ID, &a.Key, &a.MIME, &a.Size, &a.Hash)
+		return tx.QueryRow(ctx, `SELECT a.id,b.object_key,b.mime,b.size,b.hash FROM assets a JOIN blobs b ON b.id=a.blob_id WHERE a.id=$1 AND a.state='ready'`, id).Scan(&a.ID, &a.Key, &a.MIME, &a.Size, &a.Hash)
 	})
 	return
 }
@@ -260,11 +313,11 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
 		if before != nil {
 			var x string
-			if err := tx.QueryRow(ctx, `SELECT id FROM archives WHERE id=$1 AND current_revision IS NOT NULL`, *before).Scan(&x); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT a.id FROM archives a JOIN tenant_archives t ON t.archive_id=a.id WHERE a.id=$1 AND a.current_revision IS NOT NULL`, *before).Scan(&x); err != nil {
 				return err
 			}
 		}
-		rows, err := tx.Query(ctx, `SELECT id FROM archives WHERE current_revision IS NOT NULL AND ($1::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM archives WHERE id=$1)) ORDER BY created_at DESC,id DESC LIMIT 11`, before)
+		rows, err := tx.Query(ctx, `SELECT a.id FROM archives a JOIN tenant_archives t ON t.archive_id=a.id WHERE a.current_revision IS NOT NULL AND ($1::uuid IS NULL OR (t.created_at,a.id)<(SELECT created_at,archive_id FROM tenant_archives WHERE archive_id=$1)) ORDER BY t.created_at DESC,a.id DESC LIMIT 11`, before)
 		if err != nil {
 			return err
 		}
@@ -307,23 +360,12 @@ type Payload struct {
 	Incomplete bool     `json:"incomplete,omitempty"`
 }
 
-// Hide the retired provider disclaimer in existing snapshots as well.
-func archiveWarnings(warnings []string) []string {
-	var result []string
-	for _, warning := range warnings {
-		if warning != "第三方来源 xdown；文字可能仅为标题或摘要，完整性未经验证。" {
-			result = append(result, warning)
-		}
-	}
-	return result
-}
-
 // CaptureArchive pins delivery to the revision produced (or reused) by that capture.
 func (s *Service) CaptureArchive(ctx context.Context, t, cid string) (a domain.Archive, e error) {
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
 		var raw []byte
 		var assetCapture string
-		err := tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,r.id,r.payload,r.capture_id,a.observed_at,a.created_at FROM captures c JOIN archives a ON a.id=c.archive_id AND a.tenant_id=c.tenant_id JOIN revisions r ON r.id=c.revision_id AND r.tenant_id=c.tenant_id WHERE c.id=$1`, cid).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.RevisionID, &raw, &assetCapture, &a.ObservedAt, &a.CreatedAt)
+		err := tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,a.visibility,r.id,r.payload,r.capture_id,a.observed_at,a.created_at FROM captures c JOIN archives a ON a.id=c.archive_id JOIN revisions r ON r.id=c.revision_id WHERE c.id=$1`, cid).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &raw, &assetCapture, &a.ObservedAt, &a.CreatedAt)
 		if err != nil {
 			return err
 		}
@@ -335,7 +377,7 @@ func (s *Service) CaptureArchive(ctx context.Context, t, cid string) (a domain.A
 		a.TextKind = p.TextKind
 		a.TextSource = p.TextSource
 		a.AdapterVersion = p.Version
-		a.Warnings = archiveWarnings(p.Warnings)
+		a.Warnings = p.Warnings
 		a.Assets, err = assets(ctx, tx, assetCapture)
 		return err
 	})
