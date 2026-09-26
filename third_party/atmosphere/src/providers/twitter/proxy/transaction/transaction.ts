@@ -136,6 +136,14 @@ export class ClientTransaction {
     return tx;
   }
 
+  // The caller supplies an authenticated page for this request's account.
+  // Never put this HTML in the shared public Worker cache.
+  static async fromHTML(html: string): Promise<ClientTransaction> {
+    const tx = new ClientTransaction(load(html));
+    await tx.init();
+    return tx;
+  }
+
   private async init(): Promise<void> {
     const [rowIndex, keyIndices] = await this.getIndices();
     this.defaultRowIndex = rowIndex;

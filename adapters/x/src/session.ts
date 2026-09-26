@@ -1,3 +1,4 @@
+import { accountBootstrap, accountUserAgent } from "./bootstrap.js";
 import { status } from "@grpc/grpc-js";
 import { fetchByRestId } from "@fxembed/atmosphere/providers/twitter/conversation";
 import { buildAPITwitterStatus } from "@fxembed/atmosphere/providers/twitter/processor";
@@ -41,6 +42,7 @@ export function accountTransport(
   fetcher: typeof fetch = fetch,
 ): TwitterBuildHost["twitterProxy"] {
   validateCredential(credential);
+  let transaction: Promise<ClientTransaction> | undefined;
   return {
     fetch: async (input, init = {}) => {
       const url = new URL(
@@ -56,10 +58,7 @@ export function accountTransport(
           "unsupported account endpoint",
         );
       const headers = new Headers(init.headers);
-      headers.set(
-        "user-agent",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-      );
+      headers.set("user-agent", accountUserAgent);
       headers.set("referer", "https://x.com/");
       headers.set("origin", "https://x.com");
       headers.set("accept", "application/json");
@@ -73,10 +72,22 @@ export function accountTransport(
       headers.set("x-twitter-active-user", "yes");
       headers.delete("x-guest-token");
       if (url.pathname.includes("/graphql/")) {
-        const transaction = await ClientTransaction.create();
+        transaction ??= accountBootstrap(credential, signal, fetcher).then(
+          ({ html }) => ClientTransaction.fromHTML(html),
+        );
+        let generator: ClientTransaction;
+        try {
+          generator = await transaction;
+        } catch (e) {
+          if (e instanceof ProviderError) throw e;
+          throw new ProviderError(
+            status.UNAVAILABLE,
+            "account request signing unavailable",
+          );
+        }
         headers.set(
           "x-client-transaction-id",
-          await transaction.generateTransactionId(
+          await generator.generateTransactionId(
             init.method ?? "GET",
             url.pathname,
           ),
@@ -201,19 +212,8 @@ export async function parseSessionResult(
 export async function checkSession(
   credential: SessionCredential,
   signal: AbortSignal,
+  fetcher: typeof fetch = fetch,
 ) {
-  const transport = accountTransport(credential, signal)!;
-  const response = await transport.fetch(
-    "https://api.x.com/1.1/account/verify_credentials.json?skip_status=true&include_entities=false",
-  );
-  const user = (await response.json()) as {
-    id_str?: string;
-    screen_name?: string;
-  };
-  if (!user.id_str || !user.screen_name)
-    throw new ProviderError(
-      status.UNAVAILABLE,
-      "invalid account verification response",
-    );
-  return { accountId: user.id_str, username: user.screen_name };
+  validateCredential(credential);
+  return (await accountBootstrap(credential, signal, fetcher)).identity;
 }

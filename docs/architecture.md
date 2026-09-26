@@ -211,3 +211,7 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 未来检索、批量读取、流式订阅分别增加 RPC 和独立能力声明，现有 Adapter 无须实现。新操作的权限范围、分页或批量上限、流的取消与背压、断线恢复游标需随该操作的契约一起定义；不能仅增加能力名称就视为支持。Go Adapter 可嵌入 `UnimplementedAdapterServer`；TypeScript 实现使用 `satisfies Pick<AdapterServer, "describe"> & Partial<AdapterServer>`，缺少的方法由 gRPC 返回 `UNIMPLEMENTED`。本版本的核心业务路由仍为 X URL，通用协议握手不代表其他平台路由已经实现。
 
 Describe 声明在核心启动时验证并缓存，能力变化需重启核心重新发现；管理 CLI 每次操作重新发现。滚动升级应先部署提供兼容旧能力的 Adapter，再升级核心，最后停用旧能力；跨 major 升级需并行部署对应版本端点。
+
+Telegram `/account_add` 在接收阶段解析 Base64 Cookie，只提取会话字段并使用租户绑定的加密密文暂存于 inbox；原始消息文字和实体在持久化前移除。队列只保存 inbox ID。处理完成或终止失败时清理暂存密文；验证通过后的长期凭据仍存放在 `account_credentials`。Connection ID 由渠道实例和 update ID 稳定生成，重复执行不会重新创建账号或恢复已撤销凭据。
+
+X 账号验证读取携带该账号 Cookie 的首页，从初始状态中的当前会话用户 ID 和对应用户实体确认身份。GraphQL 请求签名使用同一次请求所属账号的首页初始化；账号页面不进入共享缓存。登录跳转、认证拒绝、页面结构变化和上游临时故障分别处理，未知响应不视为验证成功。

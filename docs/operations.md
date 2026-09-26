@@ -111,9 +111,13 @@ docker compose up -d --force-recreate core
 
 非 Compose 部署也可通过 `CREDENTIAL_KEY_FILE` 读取 secret 文件。主密钥须单独备份，恢复数据库后仍需同一密钥才能解密；不要直接替换主密钥，否则既有凭据无法读取。更换个人账号会话使用下面的更新命令，不改变主密钥。
 
+配置好密钥后，用户可直接在 Bot 私聊发送 `/account_add <Base64 Cookie> [名称]`。Base64 解码后的格式为 `auth_token=...; ct0=...;`，允许包含其他 Cookie，但系统只提取这两个字段。命令不支持群聊。Bot 尝试删除含凭据的私聊消息，验证成功后提供“使用此账号”按钮，默认来源不会自动改变。Base64 只是编码，不是加密；请仅向你信任的 Bot 发送会话。
+
+下面是管理员 CLI 的另一种导入方式。
+
 `tenant-id` 使用 `identities` 表中对应渠道身份的 `tenant_id`，不是 Telegram user ID。管理员可按已配置的 `channel_id` 和 Telegram 用户 ID（`external_id`）精确查询。
 
-将账号浏览器会话保存为仅管理员可读的本地 JSON 文件，字段为 `auth_token` 和 `ct0`。导入时通过标准输入传入，不写入命令行参数或 Telegram：
+将账号浏览器会话保存为仅管理员可读的本地 JSON 文件，字段为 `auth_token` 和 `ct0`。导入时通过标准输入传入，不写入命令行参数：
 
 ```sh
 docker compose run --rm -T --entrypoint monitorctl migrate connection-import <tenant-id> <显示名称> - < account.json

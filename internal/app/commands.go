@@ -17,13 +17,14 @@ import (
 )
 
 type commandRequest struct {
-	Message  *telegram.Message
-	Task     store.Task
-	Origin   domain.Origin
-	Argument string
-	Text     string
-	Buttons  telegram.Keyboard
-	Previous int64
+	AccountImport *accountImport
+	Message       *telegram.Message
+	Task          store.Task
+	Origin        domain.Origin
+	Argument      string
+	Text          string
+	Buttons       telegram.Keyboard
+	Previous      int64
 }
 
 type channelCommand struct {
@@ -49,6 +50,7 @@ func init() {
 		{"refresh", "重新抓取帖子", "<归档 ID>", true, false, validIDArgument, (*Service).commandRefresh},
 		{"delete", "删除", "<归档 ID>", true, false, validIDArgument, (*Service).commandDelete},
 		{"delete_all", "删除全部保存记录", "[confirm]", true, false, func(s string) bool { return s == "" || s == "confirm" }, (*Service).commandDeleteAll},
+		{"account_add", "添加 X 采集账号", "<Base64 Cookie> [名称]", true, true, func(string) bool { return true }, (*Service).commandAccountAdd},
 		{"account", "选择采集账号", "", true, false, func(s string) bool { return s == "" || s == "public" || validIDArgument(s) }, (*Service).commandAccount},
 		{"usage", "查看存储用量", "", true, false, noArgument, (*Service).commandUsage},
 		{"help", "查看使用帮助", "", true, false, noArgument, (*Service).commandHelp},
@@ -101,6 +103,10 @@ func validCallback(data string) bool {
 	arg := ""
 	if len(fields) == 2 {
 		arg = fields[1]
+	}
+	// Account callbacks only open instructions; credentials must arrive in a private message.
+	if c.Name == "account_add" {
+		return arg == ""
 	}
 	return c.Validate(arg)
 }

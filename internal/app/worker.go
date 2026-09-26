@@ -543,7 +543,7 @@ func (s *Service) fail(ctx context.Context, t store.Task, msg string) error {
 			_, e := tx.Exec(ctx, `UPDATE submissions SET state='failed',error=$2 WHERE id=$1 AND state<>'sent'`, t.ID, msg)
 			return e
 		case "inbox":
-			_, e := tx.Exec(ctx, `UPDATE inbox SET state='failed' WHERE id=$1 AND state='pending'`, t.ID)
+			_, e := tx.Exec(ctx, `UPDATE inbox SET state='failed',payload=payload-'account_import' WHERE id=$1 AND state='pending'`, t.ID)
 			return e
 		case "reply":
 			_, e := tx.Exec(ctx, `UPDATE replies SET state='failed' WHERE id=$1 AND state='pending'`, t.ID)

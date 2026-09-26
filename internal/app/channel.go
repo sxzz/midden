@@ -62,7 +62,10 @@ func (s *Service) Poll(ctx context.Context, c *telegram.Client, channel string) 
 			if err != nil {
 				return err
 			}
-			raw, _ := json.Marshal(u)
+			raw, deleteInput, err := s.prepareUpdate(u, identity.TenantID, channel, c.Username)
+			if err != nil {
+				return err
+			}
 			e = s.DB.Tx(ctx, identity.TenantID, func(tx pgx.Tx) error {
 				var id string
 				e := tx.QueryRow(ctx, `INSERT INTO inbox(tenant_id,channel_id,update_id,payload) VALUES($1,$2,$3,$4) ON CONFLICT(channel_id,update_id) DO NOTHING RETURNING id`, identity.TenantID, channel, u.ID, raw).Scan(&id)
@@ -79,6 +82,9 @@ func (s *Service) Poll(ctx context.Context, c *telegram.Client, channel string) 
 			})
 			if e != nil {
 				return e
+			}
+			if deleteInput {
+				deleteAccountInput(ctx, c, strconv.FormatInt(m.Chat.ID, 10), m.ID)
 			}
 			if u.Callback != nil && !sharedSaveCallback(u.Callback.Data) {
 				short, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -120,7 +126,7 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 	if e != nil || state != "pending" {
 		return e
 	}
-	var u telegram.Update
+	var u persistedUpdate
 	if e = json.Unmarshal(raw, &u); e != nil {
 		return &PermanentError{"invalid persisted update"}
 	}
@@ -129,6 +135,9 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 		return &PermanentError{"unsupported Telegram actor"}
 	}
 	chat := strconv.FormatInt(m.Chat.ID, 10)
+	if u.AccountImport != nil && m.Chat.Type == "private" && (len(u.AccountImport.Ciphertext) > 0 || u.AccountImport.Error != "") {
+		deleteAccountInput(ctx, s.sender(channel), chat, m.ID)
+	}
 
 	var identity string
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
@@ -185,7 +194,7 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 		arg = strings.Join(fields[1:], " ")
 	}
 
-	request := &commandRequest{Message: m, Task: t, Origin: origin, Argument: arg, Buttons: buttons, Previous: previous}
+	request := &commandRequest{AccountImport: u.AccountImport, Message: m, Task: t, Origin: origin, Argument: arg, Buttons: buttons, Previous: previous}
 	allowed := true
 	if m.Chat.ID < 0 && u.Callback != nil {
 		if err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
@@ -218,7 +227,7 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 
 	return s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
 		if text == "" {
-			_, e := tx.Exec(ctx, `UPDATE inbox SET state='processed' WHERE id=$1`, t.ID)
+			_, e := tx.Exec(ctx, `UPDATE inbox SET state='processed',payload=payload-'account_import' WHERE id=$1`, t.ID)
 			return e
 		}
 		encoded, err := json.Marshal(buttons)
@@ -235,7 +244,7 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 				return e
 			}
 		}
-		_, e = tx.Exec(ctx, `UPDATE inbox SET state='processed' WHERE id=$1`, t.ID)
+		_, e = tx.Exec(ctx, `UPDATE inbox SET state='processed',payload=payload-'account_import' WHERE id=$1`, t.ID)
 		return e
 	})
 }

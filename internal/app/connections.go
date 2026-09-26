@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +23,10 @@ var ErrConnection = errors.New("account unavailable; choose a source or authoriz
 type Connection struct{ ID, Name, State, AccountID string }
 
 func (s *Service) ImportConnection(ctx context.Context, tenant, id, name string, c *pb.SessionCredential) (string, error) {
+	return s.importConnection(ctx, tenant, id, name, c, false)
+}
+
+func (s *Service) importConnection(ctx context.Context, tenant, id, name string, c *pb.SessionCredential, createOnly bool) (string, error) {
 	if !s.AdapterTLS || s.Vault == nil {
 		return "", fmt.Errorf("account connections require TLS and credential encryption")
 	}
@@ -47,7 +52,7 @@ func (s *Service) ImportConnection(ctx context.Context, tenant, id, name string,
 	defer cancel()
 	result, e := s.Adapter.CheckConnection(call, &pb.CheckConnectionRequest{ProviderId: "x-session", Credential: c})
 	if e != nil {
-		return "", fmt.Errorf("account verification failed: %s", safeError(e))
+		return "", fmt.Errorf("account verification failed: %w", e)
 	}
 	e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, tenant); e != nil {
@@ -56,11 +61,15 @@ func (s *Service) ImportConnection(ctx context.Context, tenant, id, name string,
 		if _, e := tx.Exec(ctx, `INSERT INTO account_credentials(id,tenant_id,ciphertext) VALUES($1,$2,$3)`, ref, tenant, encrypted); e != nil {
 			return e
 		}
-		tag, e := tx.Exec(ctx, `INSERT INTO connections(id,tenant_id,adapter_id,provider_id,name,account_id,state,credential_ref) VALUES($1,$2,'x','x-session',$3,$4,'ready',$5) ON CONFLICT(id) DO UPDATE SET name=excluded.name,account_id=excluded.account_id,state='ready',credential_ref=excluded.credential_ref,revision=connections.revision+1 WHERE connections.tenant_id=$2`, id, tenant, name, result.AccountId, ref)
+		conflict := " ON CONFLICT(id) DO UPDATE SET name=excluded.name,account_id=excluded.account_id,state='ready',credential_ref=excluded.credential_ref,revision=connections.revision+1 WHERE connections.tenant_id=$2"
+		if createOnly {
+			conflict = " ON CONFLICT(id) DO NOTHING"
+		}
+		tag, e := tx.Exec(ctx, `INSERT INTO connections(id,tenant_id,adapter_id,provider_id,name,account_id,state,credential_ref) VALUES($1,$2,'x','x-session',$3,$4,'ready',$5)`+conflict, id, tenant, name, result.AccountId, ref)
 		if e != nil {
 			return e
 		}
-		if tag.RowsAffected() != 1 {
+		if tag.RowsAffected() != 1 && !createOnly {
 			return domain.ErrNotFound
 		}
 		_, e = tx.Exec(ctx, `DELETE FROM account_credentials c WHERE c.tenant_id=$1 AND NOT EXISTS(SELECT FROM connections n WHERE n.credential_ref=c.id)`, tenant)
@@ -213,6 +222,9 @@ func (s *Service) commandAccount(ctx context.Context, r *commandRequest) error {
 				name += "（需重新授权）"
 			}
 			r.Buttons = append(r.Buttons, []telegram.Button{{Text: name, Data: "/account " + id}})
+		}
+		if !strings.HasPrefix(r.Origin.ChatID, "-") {
+			r.Buttons = append(r.Buttons, []telegram.Button{{Text: "添加账号", Data: "/account_add"}})
 		}
 		return rows.Err()
 	})
