@@ -49,6 +49,7 @@ func init() {
 		{"refresh", "重新抓取帖子", "<归档 ID>", true, false, validIDArgument, (*Service).commandRefresh},
 		{"delete", "删除", "<归档 ID>", true, false, validIDArgument, (*Service).commandDelete},
 		{"delete_all", "删除全部保存记录", "[confirm]", true, false, func(s string) bool { return s == "" || s == "confirm" }, (*Service).commandDeleteAll},
+		{"account", "选择采集账号", "", true, false, func(s string) bool { return s == "" || s == "public" || validIDArgument(s) }, (*Service).commandAccount},
 		{"usage", "查看存储用量", "", true, false, noArgument, (*Service).commandUsage},
 		{"help", "查看使用帮助", "", true, false, noArgument, (*Service).commandHelp},
 	}
@@ -248,8 +249,12 @@ func (s *Service) submitMessageURLs(ctx context.Context, r *commandRequest, m *t
 		r.Text = "一次最多 5 个不同帖子，请拆分发送。"
 		return nil
 	}
+	connection, err := s.DefaultConnection(ctx, r.Task.Tenant)
+	if err != nil {
+		return err
+	}
 	for _, target := range targets {
-		_, err := s.Submit(ctx, r.Task.Tenant, domain.CaptureInput{URL: target.URL, Key: r.Task.ID + ":" + target.ExternalID, Origin: r.Origin})
+		_, err := s.Submit(ctx, r.Task.Tenant, domain.CaptureInput{URL: target.URL, ConnectionID: connection, Key: r.Task.ID + ":" + target.ExternalID, Origin: r.Origin})
 		if err != nil {
 			r.Text += submitMessage(err) + "\n"
 		}

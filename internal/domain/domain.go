@@ -14,7 +14,7 @@ var (
 	ErrNotFound    = errors.New("not found")
 	ErrQuota       = errors.New("quota exceeded")
 	ErrRate        = errors.New("capture rate exceeded")
-	ErrUnsupported = errors.New("account authentication is not supported in this version")
+	ErrUnsupported = errors.New("provider operation is not supported")
 	ErrConflict    = errors.New("idempotency key conflicts with an earlier request")
 )
 

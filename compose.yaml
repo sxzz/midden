@@ -19,20 +19,43 @@ services:
     environment:
       ADMIN_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/monitor?sslmode=disable
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD}
+      ADAPTER_ADDRESS: adapter:9091
+      ADAPTER_TOKEN: ${ADAPTER_TOKEN}
+      ADAPTER_TLS_CA: /tls/adapter.crt
+      CREDENTIAL_KEY: ${CREDENTIAL_KEY:-}
+    volumes:
+      - adapter-tls:/tls:ro
     depends_on:
       postgres:
         condition: service_healthy
     restart: "no"
-  adapter:
+  tls-init:
     build: .
-    entrypoint: [xadapter]
+    user: "0:0"
+    entrypoint: [monitorctl, tls-init, /tls]
+    volumes:
+      - adapter-tls:/tls
+    restart: "no"
+  adapter:
+    build:
+      context: .
+      dockerfile: adapters/x/Dockerfile
     environment:
       ADAPTER_TOKEN: ${ADAPTER_TOKEN:?set ADAPTER_TOKEN}
+      ADAPTER_TLS_CERT: /tls/adapter.crt
+      ADAPTER_TLS_KEY: /tls/adapter.key
+    volumes:
+      - adapter-tls:/tls:ro
+    depends_on:
+      tls-init:
+        condition: service_completed_successfully
     restart: unless-stopped
   core:
     build: .
     environment:
       DATABASE_URL: postgres://monitor_app:${APP_DB_PASSWORD}@postgres:5432/monitor?sslmode=disable
+      ADAPTER_TLS_CA: /tls/adapter.crt
+      CREDENTIAL_KEY: ${CREDENTIAL_KEY:-}
       ADAPTER_ADDRESS: adapter:9091
       ADAPTER_TOKEN: ${ADAPTER_TOKEN}
       S3_ENDPOINT: ${S3_ENDPOINT:?set S3_ENDPOINT}
@@ -40,6 +63,8 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY}
       S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET}
       ADMIN_LISTEN: :9090
+    volumes:
+      - adapter-tls:/tls:ro
     ports:
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:9090:9090"
@@ -50,4 +75,5 @@ services:
         condition: service_started
     restart: unless-stopped
 volumes:
+  adapter-tls:
   postgres-data:

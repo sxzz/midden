@@ -25,14 +25,19 @@ paths:
               properties:
                 url: { type: string, format: uri }
                 refresh_id: { type: string, format: uuid }
-                provider_id: { type: string, default: fxtwitter }
+                provider_id:
+                  {
+                    type: string,
+                    enum: [fxtwitter, x-session],
+                    description: Inferred from connection_id when omitted.,
+                  }
                 connection_id:
                   {
                     type: string,
                     format: uuid,
-                    description: Reserved; account-authenticated capture returns 422.,
+                    description: Optional tenant-owned ready X session connection; omitted means public FxTwitter API.,
                   }
-              description: Supply url for a new capture or refresh_id to re-fetch with the archive's original provider and access scope.
+              description: Supply url for a new capture or refresh_id to re-fetch with the tenant save record's original provider and connection.
       responses:
         "202":
           description: Capture accepted or existing capture reused
@@ -180,7 +185,12 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        archive_id: { type: string, format: uuid }
+        archive_id:
+          {
+            type: string,
+            format: uuid,
+            description: Provisional while queued; read the completed job for the final shared archive ID.,
+          }
         state:
           {
             type: string,

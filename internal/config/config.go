@@ -44,7 +44,7 @@ func Load(ctx context.Context, db *store.Store) (app.Config, error) {
 	if e = rows.Err(); e != nil {
 		return c, e
 	}
-	for _, k := range []string{"tenant_quota_bytes", "capture_rate", "tenant_concurrency", "capture_workers", "download_workers", "control_workers", "delivery_workers", "max_image_bytes", "max_video_bytes", "max_media"} {
+	for _, k := range []string{"tenant_quota_bytes", "capture_rate", "tenant_concurrency", "connection_concurrency", "capture_workers", "download_workers", "control_workers", "delivery_workers", "max_image_bytes", "max_video_bytes", "max_media"} {
 		if values[k] <= 0 {
 			return c, fmt.Errorf("missing or invalid config: %s", k)
 		}
@@ -52,6 +52,7 @@ func Load(ctx context.Context, db *store.Store) (app.Config, error) {
 	c.Quota = values["tenant_quota_bytes"]
 	c.Rate = int(values["capture_rate"])
 	c.TenantConcurrency = int(values["tenant_concurrency"])
+	c.ConnectionConcurrency = int(values["connection_concurrency"])
 	c.CaptureWorkers = int(values["capture_workers"])
 	c.DownloadWorkers = int(values["download_workers"])
 	c.ControlWorkers = int(values["control_workers"])

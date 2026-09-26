@@ -1,20 +1,24 @@
 .PHONY: test integration build generate vet fmt fmt-go fmt-sql fmt-config
 build:
 	go build -o bin/core ./cmd/core
-	go build -o bin/xadapter ./cmd/xadapter
+	npm ci --ignore-scripts
+	npm run build
 	go build -o bin/monitorctl ./cmd/monitorctl
 test:
+	npm test
 	go test -race ./...
 vet:
 	go vet ./...
 integration:
 	./scripts/test-integration.sh
 generate:
+	npm run generate
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.8
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
 	PATH="$$PATH:$$(go env GOPATH)/bin" protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative api/adapter/v1/adapter.proto
 
 fmt: fmt-go fmt-sql fmt-config
+	npm run format
 fmt-go:
 	go run golang.org/x/tools/cmd/goimports@v0.36.0 -w -local monitor ./cmd ./internal
 	go run mvdan.cc/gofumpt@v0.8.0 -w ./cmd ./internal

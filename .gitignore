@@ -9,3 +9,6 @@ bin/
 backup/
 
 .local/
+
+node_modules/
+**/dist/

@@ -1,0 +1,20 @@
+{
+  "name": "@monitor/x-adapter",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "test": "node --import tsx --test src/*.test.ts"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.10.0",
+    "@fxembed/atmosphere": "*",
+    "@grpc/grpc-js": "1.14.5",
+    "protobufjs": "7.6.6"
+  },
+  "devDependencies": {
+    "tsx": "4.23.0"
+  }
+}

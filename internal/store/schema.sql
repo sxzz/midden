@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS config (
             36500
         WHEN key IN ('tenant_quota_bytes', 'max_image_bytes', 'max_video_bytes') THEN
             1125899906842624
-        WHEN key IN ('capture_rate', 'tenant_concurrency', 'capture_workers', 'download_workers', 'control_workers', 'delivery_workers', 'max_media') THEN
+        WHEN key IN ('capture_rate', 'tenant_concurrency', 'connection_concurrency', 'capture_workers', 'download_workers', 'control_workers', 'delivery_workers', 'max_media') THEN
             1000
         ELSE
             0
@@ -52,6 +52,7 @@ VALUES
     ('tenant_quota_bytes', '1073741824'),
     ('capture_rate', '10'),
     ('tenant_concurrency', '2'),
+    ('connection_concurrency', '1'),
     ('capture_workers', '4'),
     ('download_workers', '8'),
     ('control_workers', '4'),
@@ -109,6 +110,13 @@ CREATE TABLE IF NOT EXISTS tokens (
     revoked boolean NOT NULL DEFAULT FALSE
 );
 
+CREATE TABLE IF NOT EXISTS account_credentials (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
+    tenant_id uuid NOT NULL REFERENCES tenants,
+    ciphertext bytea NOT NULL,
+    UNIQUE (tenant_id, id)
+);
+
 CREATE TABLE IF NOT EXISTS connections (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
@@ -117,8 +125,16 @@ CREATE TABLE IF NOT EXISTS connections (
     name text NOT NULL,
     account_id text,
     state text NOT NULL CHECK (state IN ('pending', 'ready', 'reauth_required', 'revoked')),
-    credential_ref text,
+    credential_ref uuid,
+    revision bigint NOT NULL DEFAULT 1,
+    FOREIGN KEY (tenant_id, credential_ref) REFERENCES account_credentials (tenant_id, id),
     UNIQUE (tenant_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS tenant_preferences (
+    tenant_id uuid PRIMARY KEY REFERENCES tenants,
+    default_connection_id uuid,
+    FOREIGN KEY (tenant_id, default_connection_id) REFERENCES connections (tenant_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS archives (
@@ -137,15 +153,13 @@ CREATE TABLE IF NOT EXISTS archives (
     external_id text NOT NULL,
     url text NOT NULL,
     provider_id text NOT NULL,
-    connection_id uuid,
     current_revision uuid,
     unreferenced_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     observed_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (data_scope, platform, scope, kind, object_scope, external_id),
     UNIQUE (data_scope, id),
-    UNIQUE (tenant_id, id),
-    FOREIGN KEY (tenant_id, connection_id) REFERENCES connections (tenant_id, id)
+    UNIQUE (tenant_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS captures (
@@ -160,6 +174,8 @@ CREATE TABLE IF NOT EXISTS captures (
     archive_id uuid NOT NULL,
     provider_id text NOT NULL,
     connection_id uuid,
+    credential_revision bigint,
+    refresh_from uuid,
     scope text NOT NULL,
     state text NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'downloading', 'complete', 'partial', 'failed')),
     error text NOT NULL DEFAULT '',payload jsonb,content_reserved bigint NOT NULL DEFAULT 0,adapter_version text NOT NULL DEFAULT '',
@@ -173,7 +189,7 @@ CREATE TABLE IF NOT EXISTS captures (
     FOREIGN KEY (tenant_id, connection_id) REFERENCES connections (tenant_id, id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS one_active_capture ON captures (archive_id)
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_capture ON captures (archive_id, provider_id, (coalesce(connection_id, '00000000-0000-0000-0000-000000000000'::uuid)))
 WHERE
     state IN ('queued', 'downloading');
 
@@ -228,11 +244,12 @@ CREATE TABLE IF NOT EXISTS blobs (
     ELSE
         tenant_id
     END) STORED,
+    access_scope text NOT NULL DEFAULT 'public',
     hash text NOT NULL,
     object_key text NOT NULL UNIQUE,
     size bigint NOT NULL,
     mime text NOT NULL,
-    UNIQUE (data_scope, hash),
+    UNIQUE (data_scope, access_scope, hash),
     UNIQUE (data_scope, id),
     UNIQUE (tenant_id, id)
 );
@@ -329,6 +346,9 @@ CREATE TABLE IF NOT EXISTS replies (
 CREATE TABLE IF NOT EXISTS tenant_archives (
     tenant_id uuid NOT NULL REFERENCES tenants,
     archive_id uuid NOT NULL REFERENCES archives,
+    provider_id text NOT NULL DEFAULT 'fxtwitter',
+    connection_id uuid,
+    FOREIGN KEY (tenant_id, connection_id) REFERENCES connections (tenant_id, id),
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, archive_id)
 );
@@ -362,7 +382,7 @@ CREATE OR REPLACE FUNCTION immutable_content_owner ()
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    IF NEW.tenant_id <> OLD.tenant_id OR NEW.visibility <> OLD.visibility THEN
+    IF NEW.tenant_id <> OLD.tenant_id OR (NEW.visibility <> OLD.visibility AND NOT (TG_TABLE_NAME = 'captures' AND to_jsonb (OLD) ->> 'state' = 'queued' AND to_jsonb (OLD) ->> 'revision_id' IS NULL)) THEN
         RAISE EXCEPTION 'content owner and visibility are immutable';
     END IF;
     RETURN NEW;
@@ -383,7 +403,7 @@ DO $$
 DECLARE
     t text;
 BEGIN
-    FOREACH t IN ARRAY ARRAY['tenants', 'identities', 'tokens', 'connections', 'objects', 'submissions', 'tenant_archives', 'inbox', 'replies'] LOOP
+    FOREACH t IN ARRAY ARRAY['tenants', 'identities', 'tokens', 'connections', 'account_credentials', 'tenant_preferences', 'objects', 'submissions', 'tenant_archives', 'inbox', 'replies'] LOOP
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
         EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
         IF NOT EXISTS (

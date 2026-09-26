@@ -27,6 +27,9 @@ func (s *Service) reuseMedia(ctx context.Context, t store.Task, scope, key strin
 			hit = true
 			return nil
 		}
+		if err := validateCaptureConnection(ctx, tx, cid); err != nil {
+			return err
+		}
 		var bid, hash string
 		var size int64
 		err := tx.QueryRow(ctx, `SELECT b.id,b.hash,b.size FROM assets a JOIN blobs b ON b.id=a.blob_id WHERE a.data_scope=$1 AND a.cache_key=$2 AND a.state='ready' LIMIT 1`, scope, key).Scan(&bid, &hash, &size)

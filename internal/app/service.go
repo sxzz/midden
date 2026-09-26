@@ -15,26 +15,29 @@ import (
 	"github.com/riverqueue/river"
 
 	pb "monitor/api/adapter/v1"
+	"monitor/internal/adapter"
 	"monitor/internal/blob"
+	"monitor/internal/credentials"
 	"monitor/internal/domain"
 	"monitor/internal/store"
 )
 
 type Config struct {
-	Quota             int64
-	Rate              int
-	TenantConcurrency int
-	CaptureWorkers    int
-	DownloadWorkers   int
-	ControlWorkers    int
-	DeliveryWorkers   int
-	MaxImageBytes     int64
-	MaxVideoBytes     int64
-	MaxMedia          int
+	ConnectionConcurrency int
+	Quota                 int64
+	Rate                  int
+	TenantConcurrency     int
+	CaptureWorkers        int
+	DownloadWorkers       int
+	ControlWorkers        int
+	DeliveryWorkers       int
+	MaxImageBytes         int64
+	MaxVideoBytes         int64
+	MaxMedia              int
 }
 
 func Defaults() Config {
-	return Config{Quota: 1 << 30, Rate: 10, TenantConcurrency: 2, CaptureWorkers: 4, DownloadWorkers: 8, ControlWorkers: 4, DeliveryWorkers: 2, MaxImageBytes: 20 << 20, MaxVideoBytes: 512 << 20, MaxMedia: 20}
+	return Config{ConnectionConcurrency: 1, Quota: 1 << 30, Rate: 10, TenantConcurrency: 2, CaptureWorkers: 4, DownloadWorkers: 8, ControlWorkers: 4, DeliveryWorkers: 2, MaxImageBytes: 20 << 20, MaxVideoBytes: 512 << 20, MaxMedia: 20}
 }
 
 type Sender interface {
@@ -44,15 +47,17 @@ type Sender interface {
 }
 
 type Service struct {
-	DB        *store.Store
-	Queue     *river.Client[pgx.Tx]
-	Adapter   pb.AdapterClient
-	Providers []*pb.Provider
-	Blobs     blob.Storage
-	HTTP      *http.Client
-	Config    Config
-	Sender    Sender
-	Senders   map[string]Sender
+	Vault      *credentials.Vault
+	AdapterTLS bool
+	DB         *store.Store
+	Queue      *river.Client[pgx.Tx]
+	Adapter    pb.AdapterClient
+	Providers  []*pb.Provider
+	Blobs      blob.Storage
+	HTTP       *http.Client
+	Config     Config
+	Sender     Sender
+	Senders    map[string]Sender
 }
 
 func (s *Service) Enqueue(ctx context.Context, tx pgx.Tx, tenant, id, kind string) error {
@@ -65,38 +70,75 @@ func lockTenant(ctx context.Context, tx pgx.Tx, tenant string) error {
 	return tx.QueryRow(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, tenant).Scan(&id)
 }
 
-// Provider policy is obtained from the trusted adapter, never from a user's request.
-func (s *Service) providerVisibility(ctx context.Context, id string) (string, error) {
+// Discovery is shared by the running service and administration CLI.
+func (s *Service) requireProvider(ctx context.Context, id, capability string) (*pb.Provider, error) {
 	providers := s.Providers
 	if providers == nil && s.Adapter != nil {
 		callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		d, err := s.Adapter.Describe(callCtx, &pb.DescribeRequest{})
 		if err != nil {
-			return "", err
+			return nil, err
+		}
+		if err = adapter.Validate(d); err != nil {
+			return nil, err
 		}
 		providers = d.Providers
 	}
 	for _, p := range providers {
-		if p.Id != id {
-			continue
+		if p.GetId() == id && adapter.Supports(p, capability, 1, 0) {
+			return p, nil
 		}
-		if p.Authentication != "none" {
-			return "", domain.ErrUnsupported
-		}
-		switch p.Visibility {
-		case pb.Visibility_VISIBILITY_PUBLIC:
-			return "public", nil
-		case pb.Visibility_VISIBILITY_PRIVATE:
-			return "private", nil
-		}
+	}
+	return nil, fmt.Errorf("%w: provider does not support %s version 1", domain.ErrUnsupported, capability)
+}
+
+// Provider policy is obtained from the trusted adapter, never from a user's request.
+func (s *Service) providerVisibility(ctx context.Context, id string) (string, error) {
+	p, err := s.requireProvider(ctx, id, adapter.CaptureFetch)
+	if err != nil {
+		return "", err
+	}
+	if p.Authentication == "session" {
+		return "private", nil
+	}
+	if p.Authentication != "none" || len(p.Visibilities) != 1 {
+		return "", domain.ErrUnsupported
+	}
+	switch p.Visibilities[0] {
+	case pb.Visibility_VISIBILITY_PUBLIC:
+		return "public", nil
+	case pb.Visibility_VISIBILITY_PRIVATE:
+		return "private", nil
 	}
 	return "", domain.ErrUnsupported
 }
 
 func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureInput) (out domain.Job, err error) {
+	if in.ConnectionID != "" {
+		id, e := uuid.Parse(in.ConnectionID)
+		if e != nil {
+			return out, ErrConnection
+		}
+		in.ConnectionID = id.String()
+	}
+	if in.RefreshID != "" {
+		err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT a.url,t.provider_id,coalesce(t.connection_id::text,'') FROM tenant_archives t JOIN archives a ON a.id=t.archive_id WHERE t.archive_id=$1`, in.RefreshID).Scan(&in.URL, &in.ProviderID, &in.ConnectionID)
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return out, domain.ErrNotFound
+		}
+		if err != nil {
+			return out, err
+		}
+	}
 	if in.ProviderID == "" {
-		in.ProviderID = "fxtwitter"
+		if in.ConnectionID != "" {
+			in.ProviderID = "x-session"
+		} else {
+			in.ProviderID = "fxtwitter"
+		}
 	}
 	if in.Key == "" {
 		in.Key = uuid.NewString()
@@ -113,14 +155,15 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			return e
 		}
 		if in.ConnectionID != "" {
-			var p string
-			if e := tx.QueryRow(ctx, `SELECT provider_id FROM connections WHERE tenant_id=$1 AND id=$2`, tenant, in.ConnectionID).Scan(&p); e != nil {
-				return e
+			if !s.AdapterTLS || s.Vault == nil || in.ProviderID != "x-session" {
+				return ErrConnection
 			}
-			return domain.ErrUnsupported
-		}
-		if in.ProviderID != "fxtwitter" {
-			return domain.ErrUnsupported
+			var state string
+			if e := tx.QueryRow(ctx, `SELECT state FROM connections WHERE id=$1 AND tenant_id=$2 AND provider_id=$3 AND adapter_id='x'`, in.ConnectionID, tenant, in.ProviderID).Scan(&state); e != nil || state != "ready" {
+				return ErrConnection
+			}
+		} else if in.ProviderID != "fxtwitter" {
+			return ErrConnection
 		}
 		if in.Origin.IdentityID != "" {
 			var channel, user string
@@ -133,15 +176,13 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 				return fmt.Errorf("invalid response destination")
 			}
 		}
-		var aid, scope, connection string
-		scope = "public"
-		if in.RefreshID != "" {
-			if e := tx.QueryRow(ctx, `SELECT id,url,scope,provider_id,coalesce(connection_id::text,''),visibility FROM archives WHERE id=$1`, in.RefreshID).Scan(&aid, &in.URL, &scope, &in.ProviderID, &connection, &visibility); e != nil {
-				return e
-			}
-			if connection != "" || in.ProviderID != "fxtwitter" || scope != "public" {
-				return domain.ErrUnsupported
-			}
+		var aid string
+		scope := "public"
+		if in.ConnectionID != "" {
+			scope = "connection:" + in.ConnectionID
+		}
+		if in.RefreshID != "" && in.ConnectionID == "" {
+			aid = in.RefreshID
 		}
 		target, e := domain.Normalize(in.URL)
 		if e != nil {
@@ -167,6 +208,18 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1))`, dataScope+"|x|"+scope+"|post||"+target.ExternalID); e != nil {
 			return e
 		}
+		if aid == "" && in.ConnectionID != "" {
+			e = tx.QueryRow(ctx, `SELECT a.id FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.tenant_id=$1 AND c.connection_id=$2 AND a.external_id=$3 AND c.state IN('queued','downloading') LIMIT 1`, tenant, in.ConnectionID, target.ExternalID).Scan(&aid)
+			if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+				return e
+			}
+		}
+		if aid == "" && in.ConnectionID != "" && in.RefreshID == "" {
+			e = tx.QueryRow(ctx, `SELECT a.id FROM tenant_archives t JOIN archives a ON a.id=t.archive_id WHERE a.external_id=$1 AND t.connection_id=$2 AND a.current_revision IS NOT NULL ORDER BY t.created_at DESC LIMIT 1`, target.ExternalID, in.ConnectionID).Scan(&aid)
+			if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+				return e
+			}
+		}
 		if aid == "" {
 			e = tx.QueryRow(ctx, `SELECT id FROM archives WHERE data_scope=$1 AND platform='x' AND scope=$2 AND kind='post' AND object_scope='' AND external_id=$3`, dataScope, scope, target.ExternalID).Scan(&aid)
 			if errors.Is(e, pgx.ErrNoRows) {
@@ -180,7 +233,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if e = tx.QueryRow(ctx, `SELECT id FROM archives WHERE id=$1 FOR UPDATE`, aid).Scan(&aid); e != nil {
 			return e
 		}
-		tag, e := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, tenant, aid)
+		tag, e := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,connection_id) VALUES($1,$2,$3,nullif($4,'')::uuid) ON CONFLICT DO NOTHING`, tenant, aid, in.ProviderID, in.ConnectionID)
 		if e != nil {
 			return e
 		}
@@ -198,7 +251,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		}
 
 		var cid string
-		e = tx.QueryRow(ctx, `SELECT id FROM captures WHERE archive_id=$1 AND state IN('queued','downloading')`, aid).Scan(&cid)
+		e = tx.QueryRow(ctx, `SELECT id FROM captures WHERE archive_id=$1 AND provider_id=$2 AND coalesce(connection_id::text,'')=$3 AND state IN('queued','downloading')`, aid, in.ProviderID, in.ConnectionID).Scan(&cid)
 		if errors.Is(e, pgx.ErrNoRows) && in.RefreshID == "" {
 			e = tx.QueryRow(ctx, `SELECT r.capture_id FROM archives a JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1`, aid).Scan(&cid)
 		}
@@ -222,7 +275,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			if _, e = tx.Exec(ctx, `UPDATE tenants SET rate_count=$2,rate_start=$3 WHERE id=$1`, tenant, count+1, start); e != nil {
 				return e
 			}
-			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,archive_id,provider_id,scope,visibility) VALUES($1,$2,$3,$4,$5) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility).Scan(&cid)
+			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,archive_id,provider_id,scope,visibility,connection_id,refresh_from) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility, in.ConnectionID, in.RefreshID).Scan(&cid)
 			if e != nil {
 				return e
 			}

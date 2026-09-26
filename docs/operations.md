@@ -4,9 +4,9 @@
 
 `core` 仅使用非超级用户、非表所有者且不具备 BYPASSRLS 的 `monitor_app`。迁移和 CLI 使用管理员连接，管理员密码不注入核心或 adapter。S3 bucket 必须私有，图片经租户授权 API 读取，不暴露永久公开链接。
 
-默认 Compose 仅将 API 和监控映射到宿主机 loopback。外网访问 API 使用 TLS 反向代理。adapter 默认明文 gRPC 仅适用于可信私有网络；跨主机、不可信网络时同时设置服务端证书/密钥和客户端 CA。
+默认 Compose 仅将 API 和监控映射到宿主机 loopback。外网访问 API 使用 TLS 反向代理。默认 Compose 由 `tls-init` 生成内部证书，通过 `adapter-tls` volume 提供给 Adapter 和核心，使用带服务认证的 TLS gRPC。证书有效期两年；到期前替换证书和密钥并重启 Adapter、核心。个人账号执行禁止使用明文 RPC。
 
-同一 Bot 一个接收者通过 PostgreSQL session advisory lock 保证；租户采集槽与图片任务也使用 session lock。进程退出后锁自动释放。每个持锁 worker 需要一个池连接，执行短事务时还会获取连接；应为控制任务和 API 保留连接余量。
+同一 Bot 一个接收者通过 PostgreSQL session advisory lock 保证；租户采集槽与图片任务也使用 session lock。进程退出后锁自动释放。账号采集同时持有租户槽和 Connection 槽，各需要一个池连接，执行短事务时还会获取连接；应为控制任务和 API 保留连接余量。
 
 ## 观察与故障处理
 
@@ -14,6 +14,7 @@
 
 - `monitor_task_duration_seconds`：按任务类别的执行耗时。
 - `monitor_task_results_total`：采集、下载、投递等成功/失败次数。
+- `monitor_provider_requests_total` / `monitor_provider_duration_seconds`：按 Provider 记录 RPC 状态及耗时，不记录账号或租户标签。
 - `monitor_queue_jobs`：按队列和状态的数量，每分钟更新。
 - `monitor_queue_oldest_seconds`：最老等待任务年龄。
 
@@ -99,3 +100,31 @@ monitorctl channel-create <stable-channel-uuid> <bot-numeric-id>
 修改默认存储额度不影响已有租户，已有租户使用 `tenants.quota_bytes`。读取归档不受剩余额度限制。
 
 增加 worker 数时，按核心启动时的连接池校验要求调整 `DATABASE_URL` 中的 `pool_max_conns`，给持锁任务、业务事务和 API 留出连接余量。Adapter 跨主机部署时，可设置服务端 `ADAPTER_TLS_CERT`、`ADAPTER_TLS_KEY` 和核心 `ADAPTER_TLS_CA`。
+
+## 个人账号接入
+
+公共 FxTwitter API 不需要 X 账号，也不要求配置加密主密钥。只有启用个人账号时，才在 `.env` 设置 `CREDENTIAL_KEY` 为 32 个随机字节的 Base64 编码（可用 `openssl rand -base64 32` 生成），然后重新创建核心服务：
+
+```sh
+docker compose up -d --force-recreate core
+```
+
+非 Compose 部署也可通过 `CREDENTIAL_KEY_FILE` 读取 secret 文件。主密钥须单独备份，恢复数据库后仍需同一密钥才能解密；不要直接替换主密钥，否则既有凭据无法读取。更换个人账号会话使用下面的更新命令，不改变主密钥。
+
+`tenant-id` 使用 `identities` 表中对应渠道身份的 `tenant_id`，不是 Telegram user ID。管理员可按已配置的 `channel_id` 和 Telegram 用户 ID（`external_id`）精确查询。
+
+将账号浏览器会话保存为仅管理员可读的本地 JSON 文件，字段为 `auth_token` 和 `ct0`。导入时通过标准输入传入，不写入命令行参数或 Telegram：
+
+```sh
+docker compose run --rm -T --entrypoint monitorctl migrate connection-import <tenant-id> <显示名称> - < account.json
+docker compose run --rm --entrypoint monitorctl migrate connection-list <tenant-id>
+docker compose run --rm --entrypoint monitorctl migrate connection-check <tenant-id> <connection-id>
+docker compose run --rm -T --entrypoint monitorctl migrate connection-import <tenant-id> <显示名称> - <connection-id> < account.json
+docker compose run --rm --entrypoint monitorctl migrate connection-revoke <tenant-id> <connection-id>
+```
+
+导入验证成功后输出 Connection ID；账号列表不输出凭据。更新凭据沿用 Connection ID。撤销不会静默清除用户默认选择：用户下一次保存会收到账号不可用提示，可用 `/account` 选择公共来源。
+
+REST 新提交省略 `connection_id` 时始终调用公共 API；指定时使用 `x-session`（可省略 `provider_id` 由核心推导）。刷新使用租户保存记录中的原选择。TLS、加密主密钥或会话无效时明确拒绝账号操作，不影响公共采集。
+
+`config.connection_concurrency` 控制每 Connection 并发，默认 1；修改后重启核心。运行日志不保存会话、原始上游响应或个人账号身份。受保护帖子端到端验收需提供有访问权限的测试会话；自动测试使用固定响应。

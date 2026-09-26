@@ -65,7 +65,7 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 			return err
 		}
 	}
-	var kind, source, state, key, cid, oid, visibility, dataScope string
+	var kind, source, state, key, cid, oid, visibility, dataScope, accessScope string
 	var reserved int64
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, t.Tenant); e != nil {
@@ -74,6 +74,9 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 		var objectID *string
 		e := tx.QueryRow(ctx, `SELECT kind,source_url,state,reserved_bytes,capture_id,object_id,visibility,data_scope FROM assets WHERE id=$1 FOR UPDATE`, t.ID).Scan(&kind, &source, &state, &reserved, &cid, &objectID, &visibility, &dataScope)
 		if e != nil {
+			return e
+		}
+		if e := validateCaptureConnection(ctx, tx, cid); e != nil {
 			return e
 		}
 		if state != "pending" {
@@ -183,14 +186,20 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 		if state != "pending" {
 			return nil
 		}
-		var bid, bkey string
-		// The shared hash lock avoids updates to another tenant's immutable Blob row.
-		if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,2))`, dataScope+"|"+digest); e != nil {
+		if e := validateCaptureConnection(ctx, tx, cid); e != nil {
 			return e
 		}
-		e := tx.QueryRow(ctx, `SELECT id,object_key FROM blobs WHERE data_scope=$1 AND hash=$2`, dataScope, digest).Scan(&bid, &bkey)
+		if e := tx.QueryRow(ctx, `SELECT CASE WHEN visibility='public' THEN 'public' ELSE scope END FROM captures WHERE id=$1`, cid).Scan(&accessScope); e != nil {
+			return e
+		}
+		var bid, bkey string
+		// The shared hash lock avoids updates to another tenant's immutable Blob row.
+		if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,2))`, dataScope+"|"+accessScope+"|"+digest); e != nil {
+			return e
+		}
+		e := tx.QueryRow(ctx, `SELECT id,object_key FROM blobs WHERE data_scope=$1 AND hash=$2 AND access_scope=$3`, dataScope, digest, accessScope).Scan(&bid, &bkey)
 		if errors.Is(e, pgx.ErrNoRows) {
-			e = tx.QueryRow(ctx, `INSERT INTO blobs(tenant_id,visibility,hash,object_key,size,mime) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,object_key`, t.Tenant, visibility, digest, key, n, mime).Scan(&bid, &bkey)
+			e = tx.QueryRow(ctx, `INSERT INTO blobs(tenant_id,visibility,hash,object_key,size,mime,access_scope) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,object_key`, t.Tenant, visibility, digest, key, n, mime, accessScope).Scan(&bid, &bkey)
 		}
 		if e != nil {
 			return e

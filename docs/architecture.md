@@ -2,7 +2,7 @@
 
 ## 服务组成
 
-Monitor 由 Go 核心服务、独立 X Adapter、PostgreSQL 和 S3 兼容对象存储组成。Telegram 和 REST 是核心服务的两个入口，共用采集、归档、权限和额度逻辑。
+Monitor 由 Go 核心服务、独立 Node.js/TypeScript X Adapter、PostgreSQL 和 S3 兼容对象存储组成。Telegram 和 REST 是核心服务的两个入口，共用采集、归档、权限和额度逻辑。
 
 ```mermaid
 flowchart LR
@@ -18,9 +18,10 @@ flowchart LR
         App --> Workers
     end
     Core <-->|业务数据与持久化队列| PG[(PostgreSQL)]
-    Core -->|gRPC：Describe / Fetch| Adapter[X Adapter]
+    Core -->|TLS gRPC：Describe / Fetch / CheckConnection| Adapter[X Adapter]
     Adapter -->|正文与媒体| Provider[FxTwitter API v2]
     Provider -->|媒体链接| Adapter
+    Adapter -->|租户账号会话| X[X API，经 Atmosphere 解析]
     Core -->|HTTP 下载| Media[媒体服务]
     Core <-->|媒体原文件| S3[(S3 对象存储)]
 ```
@@ -28,7 +29,7 @@ flowchart LR
 | 组件           | 当前职责                                                              |
 | -------------- | --------------------------------------------------------------------- |
 | `core`         | Telegram 收发、REST、租户认证、任务调度、下载、去重、归档、额度与投递 |
-| `adapter`      | 提供 gRPC 接口，识别 X 帖子，通过 FxTwitter API v2 获取正文与媒体         |
+| `adapter`      | 提供 gRPC 接口，识别 X 帖子，通过公共 FxTwitter API 或租户账号获取正文与媒体         |
 | PostgreSQL     | 保存身份、归档、任务、资源索引、用量和 River 队列                     |
 | S3             | 保存媒体二进制；本地部署使用 SeaweedFS                                |
 | `migrate`      | 一次性执行数据库迁移并配置业务数据库角色                              |
@@ -36,11 +37,11 @@ flowchart LR
 
 Adapter 是运营者部署并认证的可信服务，Provider 和其返回的资源链接按可信输入处理。Adapter 不连接数据库或对象存储；核心负责下载和持久化。用户请求及按钮参数需要身份、权限、URL 范围和额度校验。
 
-当前 X Adapter 使用 `fxtwitter` Provider，通过 `/2/status/{id}` 获取正文及有序媒体列表。Provider 选择持久化在任务中；归档记录来源和 adapter 版本。视频和 GIF 选择 最高分辨率、同分辨率最高码率的 MP4／WebM 下载；文章及缺失媒体会明确标记，限流和暂时不可用会重试。
+`fxtwitter` Provider 直接调用 FxTwitter 公共实例的 `/2/status/{id}`，无需任何账号；可选 `x-session` Provider 使用指定租户的账号会话，经固定源码版本的 Atmosphere 请求并解析 X。Provider 选择持久化在任务中；归档记录来源和 adapter 版本。视频和 GIF 选择 最高分辨率、同分辨率最高码率的 MP4／WebM 下载；文章及缺失媒体会明确标记，限流和暂时不可用会重试。
 
 ## 内容可见性
 
-Provider 在 `Describe` 中声明 `visibility`（public/private），`Fetch` 响应必须与已创建任务的可见性一致。未声明或不一致时拒绝保存；用户请求不能指定可见性。当前 FxTwitter 图文 Provider 声明 public。刷新沿用归档原本的 Provider 和可见性，不会自动改变共享范围。
+Provider 在 `Describe` 中声明支持的 `visibilities`，由 `Fetch` 返回实际可见性。公共 API 只返回 public；账号任务在抓取前按租户、Connection 隔离，取得明确公开证据后才合并到公共归档，否则按 private 保存。刷新改变可见性时建立对应作用域的内容身份，成功后移动发起租户的保存引用，不改变其他租户的权限。刷新选择保存在 `tenant_archives`，共享归档不能成为借用其他租户凭据的入口。
 
 `archives`、`captures`、`revisions`、`assets`、`blobs` 保存可见性，以及数据库生成的 `data_scope`：public 使用统一的全零 UUID，private 使用租户 UUID。因此公开内容在全局去重，私有内容只在同租户内去重，两者不复用版本或媒体。`tenant_id` 记录创建者，用于写入权限及对象生命周期管理，不决定保存者的额度计量。创建者和可见性创建后不可修改。
 
@@ -67,7 +68,7 @@ Provider 在 `Describe` 中声明 `visibility`（public/private），`Fetch` 响
 | `control`  | 处理渠道更新、完成归档       | 4              |
 | `delivery` | 状态更新、命令回复、图文投递 | 2              |
 
-采集另外受每租户 2 个执行槽限制。下载受下载 worker 数限制。可重试失败最多执行 3 次；限流响应的 `Retry-After` 控制下一次重试时间。状态轮询使用 River 的延后执行机制，不消耗失败重试次数。
+采集另外受每租户 2 个执行槽、每 Connection 默认 1 个执行槽限制，分别由 `tenant_concurrency` 和 `connection_concurrency` 配置。下载受下载 worker 数限制。可重试失败最多执行 3 次；限流响应的 `Retry-After` 控制下一次重试时间。状态轮询使用 River 的延后执行机制，不消耗失败重试次数。
 
 ## 数据库关系
 
@@ -98,7 +99,7 @@ erDiagram
 | `channels`    | Bot 等渠道实例。保存稳定 UUID、渠道类型、外部实例 ID 和 `next_offset`；`(kind, external_id)` 唯一           |
 | `identities`  | 渠道用户与租户的绑定。`(channel_id, external_id)` 唯一；一个租户可有多个身份                                |
 | `tokens`      | REST token 的 SHA-256 摘要、租户和撤销状态                                                                  |
-| `connections` | 已存在的账号接入模型：租户、Adapter、Provider、账号标识、状态和凭据引用；当前公开采集不使用此表中的账号连接 |
+| `connections` | 已存在的账号接入模型：租户、Adapter、Provider、账号标识、状态和凭据引用；个人账号由管理 CLI 导入、检查及撤销，凭据引用指向加密记录 |
 
 首次 Telegram 私聊或群聊请求按发送者的 user ID，通过数据库函数 `resolve_identity` 创建个人租户与身份。事务锁保证并发首次访问不会创建多个绑定。不同渠道实例中的相同外部用户 ID 不会自动关联。群 ID 仅作为回复目的地，不作为身份。群内按钮操作还会校验原消息的发起身份，不能通过点击他人的按钮访问或更改其数据。「我也要存」是唯一例外：仅对公开归档添加当前点击者的 `tenant_archives` 引用，在租户锁和归档行锁内校验额度，不创建采集或提交记录，成功、重复和失败仅通过 callback toast 返回。
 
@@ -109,7 +110,7 @@ erDiagram
 | 表                | 作用与关键约束                                                                                                                          |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `archives`        | 帖子的长期身份与当前版本指针。唯一键为数据共享边界、平台、访问作用域、对象类型、平台对象作用域、外部 ID                                 |
-| `captures`        | 一次采集执行，保存 Provider、Connection、状态、暂存内容、预留用量、错误和最终版本引用。同一归档最多一个进行中的采集，公开归档跨租户合并 |
+| `captures`        | 一次采集执行，保存 Provider、Connection、状态、暂存内容、预留用量、错误和最终版本引用。相同归档、Provider、Connection 最多一个进行中的采集；公共 Provider 跨租户合并，账号任务不跨 Connection 合并 |
 | `revisions`       | 内容版本。保存内容 hash、文字等 JSONB 内容、内容字节数及产生该版本的采集 ID                                                             |
 | `tenant_archives` | 租户独立的保存记录；`(tenant_id, archive_id)` 唯一，列表和游标按保存时间排序                                                            |
 | `submissions`     | 一次提交及其投递。保存发起身份、渠道、会话、幂等键、状态消息 ID、状态文字和投递进度；`(tenant_id, idem_key)` 唯一                       |
@@ -125,7 +126,7 @@ erDiagram
 | 表        | 作用与关键约束                                                                   |
 | --------- | -------------------------------------------------------------------------------- |
 | `assets`  | 某次采集中的媒体引用，保存顺序、来源 URL、下载状态、失败原因和 Blob／对象引用    |
-| `blobs`   | 去重后的媒体内容，保存 SHA-256、对象 key、大小和 MIME；`(data_scope, hash)` 唯一 |
+| `blobs`   | 去重后的媒体内容，保存 SHA-256、对象 key、大小和 MIME；`(data_scope, access_scope, hash)` 唯一 |
 | `objects` | S3 对象的生命周期记录，状态为 `pending`、`attached`、`garbage` 或 `deleting`     |
 
 媒体字节放在 S3，PostgreSQL 保存索引和元数据。对象 key 形如 `<tenant_id>/objects/<object_id>`。
@@ -165,18 +166,48 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 ## 代码入口
 
 - `cmd/core/main.go`：核心进程与依赖装配。
-- `cmd/xadapter/main.go`：X Adapter 进程。
+- `adapters/x/src/server.ts`：TS X Adapter 进程。
 - `internal/app/`：业务服务、任务、命令和投递。
 - `internal/telegram/`：Telegram SDK 封装。
 - `internal/store/schema.sql`：表、约束、RLS 与身份解析函数。
 - `api/adapter/v1/adapter.proto`：Adapter 协议。
-- `internal/xadapter/`：X 图文采集结果整合。
-- `internal/fxtwitter/`：FxTwitter API v2 请求与图文解析。
+- `adapters/x/src/session.ts`：租户账号 transport 与结果可见性判定。
+- `adapters/x/src/`：公共 API 与个人账号 Provider；`third_party/atmosphere/`：固定上游版本的本地源码依赖。
 
-媒体引用保存 `kind`、`alt_text` 和 `cache_key`。缓存键由平台、Provider、访问作用域、Connection 及 Provider 的不可变媒体标识组成，在 `data_scope` 内查找；标识包含媒体 ID 与文件规格。下载使用媒体级锁合并并发请求，命中缓存后复用 Blob 并按当前租户引用结算额度。媒体描述计入版本内容大小及变化比较，描述变化不会触发视频重新下载。缓存随媒体引用的保留和清理生命周期释放。
+媒体引用保存 `kind`、`alt_text` 和 `cache_key`。缓存键由平台、最终访问作用域及不可变媒体标识组成；公开资源可跨 Provider 共享，私有作用域包含 Connection，在 `data_scope` 内查找；标识包含媒体 ID 与文件规格。下载使用媒体级锁合并并发请求，命中缓存后复用 Blob 并按当前租户引用结算额度。媒体描述计入版本内容大小及变化比较，描述变化不会触发视频重新下载。缓存随媒体引用的保留和清理生命周期释放。
 
 群聊普通消息在入库和身份解析前检查 Telegram 的 mention／bot_command 实体，只有明确指向当前 Bot 用户名的消息才进入处理；图片说明中的 @ 同样适用。按钮回调沿用原权限规则，不要求再次 @。用户名通过启动时的 getMe 获取。
 
 `channel_media_cache` 是通用渠道传输缓存，以 `(channel_kind, account_id, hash, representation)` 标识远端媒体引用 `remote_id`。这些值由渠道集成解释，归档和 Blob 不依赖 Telegram；缓存不是内容授权依据，发送前仍使用当前用户可访问的归档。Telegram 按 Bot ID 复用 `file_id`，并区分 photo、video、document。仅明确失效的引用会被条件删除并重新上传，429 等暂时错误不会清除缓存；成功发送后的缓存写入失败也不会重发消息。
 
 媒体引用上的 `sensitive` 由 Adapter 返回并计入版本比较。FxTwitter 的帖子敏感标记应用到全部媒体；Telegram 每次发送（含缓存命中）都使用当前引用的标记设置 `has_spoiler`。缓存键不包含敏感标记，改变展示标记无需重新上传。document 文件正常发送，不设置 spoiler；图片和视频发送失败时仍可回退为文件。
+
+## 账号执行与凭据
+
+`account_credentials` 保存 AES-GCM 密文，AAD 绑定租户和凭据记录 ID；`tenant_preferences` 保存租户默认 Connection。两张表均强制 RLS。主密钥由部署环境或 secret 文件提供，不写入数据库。
+
+核心解密后通过认证 TLS RPC 临时传递凭据。Adapter 不保存租户会话，不使用账号池，不匿名降级；公开 API 请求不携带账号凭据。任务记录 Provider、Connection 及实际执行的凭据修订号，执行和最终提交均校验状态；凭据替换或撤销使旧执行不能提交结果。认证失效标记 `reauth_required`，限流和临时上游故障不改变认证状态。
+
+个人账号导入需验证会话；验证失败不会替换已保存凭据。撤销会删除不再引用的加密凭据，但保留 Connection 的任务审计关联。新账号功能的真实受保护帖子访问需要使用已授权的测试账号完成验证。
+
+## Adapter 协议与能力发现
+
+`adapter.v1` 使用 `major.minor` 协议版本，当前为 `1.0`，与 Adapter 软件版本独立。核心拒绝不同 major；同 major 的 minor 只能增加可选字段和操作，旧客户端忽略未知字段。发布后改变已有字段含义、删除字段或改变现有操作语义需要新的 major 和 protobuf package。发布前不保留旧协议的兼容分支。
+
+`Describe` 是唯一必需的业务 RPC；标准 gRPC health 用于部署健康检查。核心握手不限定平台 ID，也不要求支持采集、账号或某一种媒体。每个 Provider 独立声明 `capabilities`，每项含 `name`、`major`、`minor`：
+
+| 能力 | 当前版本 | 含义 |
+| --- | --- | --- |
+| `capture.fetch` | 1.0 | 用 `Fetch` 读取单个目标 |
+| `connection.check` | 1.0 | 用 `CheckConnection` 验证账号会话 |
+| `content.text` | 1.0 | 采集结果可以包含文字 |
+| `media.image` | 1.0 | 采集结果可以包含图片 |
+| `media.video` | 1.0 | 采集结果可以包含视频 |
+
+能力表示 Provider 可以提供的功能，不保证每次结果包含所有媒体。实际归档内容仍以 Fetch 返回的数据为准。公共 FxTwitter Provider 不声明账号验证能力；个人账号 Provider 声明该能力。采集 Provider 同时声明允许的可见性，实际结果仍须遵守公私隔离规则。
+
+调用方按能力名称、相同 major、满足最低要求的 minor 选择操作；未知能力或未知能力 major 不阻止握手，也不会自动启用操作。一个能力 major 只能声明一次，需要支持多个 major 时分别声明。缺少操作能力时核心在提交或发送凭据前拒绝请求。声明了能力但实际返回 `UNIMPLEMENTED` 属于契约错误，按永久失败处理，不切换 Provider。
+
+未来检索、批量读取、流式订阅分别增加 RPC 和独立能力声明，现有 Adapter 无须实现。新操作的权限范围、分页或批量上限、流的取消与背压、断线恢复游标需随该操作的契约一起定义；不能仅增加能力名称就视为支持。Go Adapter 可嵌入 `UnimplementedAdapterServer`；TypeScript 实现使用 `satisfies Pick<AdapterServer, "describe"> & Partial<AdapterServer>`，缺少的方法由 gRPC 返回 `UNIMPLEMENTED`。本版本的核心业务路由仍为 X URL，通用协议握手不代表其他平台路由已经实现。
+
+Describe 声明在核心启动时验证并缓存，能力变化需重启核心重新发现；管理 CLI 每次操作重新发现。滚动升级应先部署提供兼容旧能力的 Adapter，再升级核心，最后停用旧能力；跨 major 升级需并行部署对应版本端点。

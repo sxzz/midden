@@ -18,6 +18,7 @@ import (
 	"monitor/internal/app"
 	"monitor/internal/blob"
 	"monitor/internal/config"
+	"monitor/internal/credentials"
 	"monitor/internal/httpapi"
 	"monitor/internal/store"
 	"monitor/internal/telegram"
@@ -64,8 +65,12 @@ func run() error {
 	if e = adapter.Validate(desc); e != nil {
 		return e
 	}
+	vault, e := credentials.FromEnv()
+	if e != nil {
+		return e
+	}
 	// Resource URLs come from trusted adapters; allow the deployment's proxy/DNS routing.
-	s := &app.Service{DB: db, Adapter: client, Providers: desc.Providers, Blobs: b, HTTP: &http.Client{Timeout: 5 * time.Minute}, Config: cfg}
+	s := &app.Service{Vault: vault, AdapterTLS: os.Getenv("ADAPTER_TLS_CA") != "", DB: db, Adapter: client, Providers: desc.Providers, Blobs: b, HTTP: &http.Client{Timeout: 5 * time.Minute}, Config: cfg}
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &app.Worker{S: s})
 	q, e := river.NewClient(riverpgxv5.New(db.Pool), &river.Config{Workers: workers, Queues: map[string]river.QueueConfig{"capture": {MaxWorkers: cfg.CaptureWorkers}, "download": {MaxWorkers: cfg.DownloadWorkers}, "control": {MaxWorkers: cfg.ControlWorkers}, "delivery": {MaxWorkers: cfg.DeliveryWorkers}}, MaxAttempts: 3, RescueStuckJobsAfter: 6 * time.Minute, Logger: slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))})
@@ -73,7 +78,7 @@ func run() error {
 		return e
 	}
 	s.Queue = q
-	if 2*cfg.CaptureWorkers+cfg.DownloadWorkers+cfg.ControlWorkers+cfg.DeliveryWorkers+8 > int(db.Pool.Config().MaxConns) {
+	if 3*cfg.CaptureWorkers+cfg.DownloadWorkers+cfg.ControlWorkers+cfg.DeliveryWorkers+8 > int(db.Pool.Config().MaxConns) {
 		return &app.PermanentError{Message: "database pool too small for configured worker count"}
 	}
 	go func() {

@@ -19,16 +19,19 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Adapter_Describe_FullMethodName = "/adapter.v1.Adapter/Describe"
-	Adapter_Fetch_FullMethodName    = "/adapter.v1.Adapter/Fetch"
+	Adapter_Describe_FullMethodName        = "/adapter.v1.Adapter/Describe"
+	Adapter_Fetch_FullMethodName           = "/adapter.v1.Adapter/Fetch"
+	Adapter_CheckConnection_FullMethodName = "/adapter.v1.Adapter/CheckConnection"
 )
 
 // AdapterClient is the client API for Adapter service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AdapterClient interface {
+	// Describe is required; all other operations are opt-in per provider.
 	Describe(ctx context.Context, in *DescribeRequest, opts ...grpc.CallOption) (*DescribeResponse, error)
 	Fetch(ctx context.Context, in *FetchRequest, opts ...grpc.CallOption) (*FetchResponse, error)
+	CheckConnection(ctx context.Context, in *CheckConnectionRequest, opts ...grpc.CallOption) (*CheckConnectionResponse, error)
 }
 
 type adapterClient struct {
@@ -59,12 +62,24 @@ func (c *adapterClient) Fetch(ctx context.Context, in *FetchRequest, opts ...grp
 	return out, nil
 }
 
+func (c *adapterClient) CheckConnection(ctx context.Context, in *CheckConnectionRequest, opts ...grpc.CallOption) (*CheckConnectionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckConnectionResponse)
+	err := c.cc.Invoke(ctx, Adapter_CheckConnection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AdapterServer is the server API for Adapter service.
 // All implementations must embed UnimplementedAdapterServer
 // for forward compatibility.
 type AdapterServer interface {
+	// Describe is required; all other operations are opt-in per provider.
 	Describe(context.Context, *DescribeRequest) (*DescribeResponse, error)
 	Fetch(context.Context, *FetchRequest) (*FetchResponse, error)
+	CheckConnection(context.Context, *CheckConnectionRequest) (*CheckConnectionResponse, error)
 	mustEmbedUnimplementedAdapterServer()
 }
 
@@ -80,6 +95,9 @@ func (UnimplementedAdapterServer) Describe(context.Context, *DescribeRequest) (*
 }
 func (UnimplementedAdapterServer) Fetch(context.Context, *FetchRequest) (*FetchResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Fetch not implemented")
+}
+func (UnimplementedAdapterServer) CheckConnection(context.Context, *CheckConnectionRequest) (*CheckConnectionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CheckConnection not implemented")
 }
 func (UnimplementedAdapterServer) mustEmbedUnimplementedAdapterServer() {}
 func (UnimplementedAdapterServer) testEmbeddedByValue()                 {}
@@ -138,6 +156,24 @@ func _Adapter_Fetch_Handler(srv interface{}, ctx context.Context, dec func(inter
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Adapter_CheckConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckConnectionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdapterServer).CheckConnection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Adapter_CheckConnection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdapterServer).CheckConnection(ctx, req.(*CheckConnectionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Adapter_ServiceDesc is the grpc.ServiceDesc for Adapter service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -152,6 +188,10 @@ var Adapter_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Fetch",
 			Handler:    _Adapter_Fetch_Handler,
+		},
+		{
+			MethodName: "CheckConnection",
+			Handler:    _Adapter_CheckConnection_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

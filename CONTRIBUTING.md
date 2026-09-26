@@ -2,7 +2,7 @@
 
 ## 开发环境
 
-使用 Go 1.27.1、Docker Compose。生成的 Protobuf Go 代码已提交，日常构建不需要 protoc。
+使用 Go 1.27.1、Node.js 24、Docker Compose。生成的 Protobuf Go/TS 代码已提交，日常构建不需要 protoc。首次运行 `npm ci --ignore-scripts` 和 `npm run build`；Go 的跨语言测试使用构建后的 TS Adapter。
 
 ```sh
 make build
@@ -21,7 +21,7 @@ make integration
 
 首次发布前直接修改 `internal/store/schema.sql`，通过清空开发数据库和对象存储重新初始化验证。不维护旧数据兼容、迁移或旧 ID 映射，不因结构调整递增 schema 版本。数据库及对象存储使用 Docker。
 
-Provider 必须在协议中明确声明 public/private，不能由用户请求控制。共享内容测试使用 public Provider，隔离测试使用 private Provider。
+Provider 必须声明支持的 public/private，并在结果中返回实际可见性，不能由用户请求控制。共享内容测试使用 public Provider，隔离测试使用 private Provider。
 
 ## Telegram 命令
 
@@ -43,6 +43,10 @@ Provider 必须在协议中明确声明 public/private，不能由用户请求�
 
 ## X 解析器
 
-图文结果组织参考 [nonebot-plugin-parser-m](https://github.com/LoCCai/nonebot-plugin-parser-m) 的 `BaseParser` / `ParseResult`。Go 实现通过 `internal/xadapter` 调用 `internal/fxtwitter` 的 API v2 客户端，由核心统一下载和持久化图片。
+图文结果组织参考 [nonebot-plugin-parser-m](https://github.com/LoCCai/nonebot-plugin-parser-m) 的 `BaseParser` / `ParseResult`。TS 实现使用公共 FxTwitter API 与可选账号 Provider，由核心统一下载和持久化媒体。Atmosphere 源码版本及本地补丁记录在 `third_party/atmosphere/UPSTREAM.md`。
 
 FxTwitter 响应结构见其 [API v2 文档](https://docs.fxembed.com/api/twitter/operations/2statusid/)。正文必须匹配请求的帖子 ID；测试使用本地固定响应，不依赖在线服务。
+
+## 协议变更
+
+Adapter 契约见 [架构文档](docs/architecture.md#adapter-协议与能力发现)。修改 proto 后运行 `make generate`，同时提交 Go 与 TypeScript 生成文件。协议 major/minor 与 Provider 能力 major/minor 独立；新增可选操作无需所有 Adapter 实现。添加操作时同时定义能力、调用前检查、未知能力处理和缺少能力时不产生副作用的测试。发布后的 protobuf 字段号不得复用；不兼容语义使用新的 major/package。当前尚未发布，不引入旧格式兼容分支，也不为纯协议变更调整数据库 schema 版本。

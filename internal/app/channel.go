@@ -242,6 +242,8 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 
 func submitMessage(e error) string {
 	switch {
+	case errors.Is(e, ErrConnection):
+		return "账号不可用，请使用 /account 选择公共来源或重新授权。"
 	case errors.Is(e, domain.ErrQuota):
 		return "存储额度不足。"
 	case errors.Is(e, domain.ErrRate):

@@ -142,6 +142,9 @@ func respond(w http.ResponseWriter, code int, v any, e error) {
 		code = 429
 		msg = "capture rate exceeded"
 		w.Header().Set("Retry-After", "60")
+	case errors.Is(e, app.ErrConnection):
+		code = 422
+		msg = "account unavailable; select a public source or authorize again"
 	case errors.Is(e, domain.ErrUnsupported):
 		code = 422
 		msg = e.Error()

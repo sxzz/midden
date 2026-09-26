@@ -9,5 +9,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.21.0
+          cache: npm
+      - run: npm ci --ignore-scripts && npm run build && npm test
       - run: go vet ./...
       - run: ./scripts/test-integration.sh

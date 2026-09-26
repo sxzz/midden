@@ -12,8 +12,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-
-	pb "monitor/api/adapter/v1"
 )
 
 func Auth(secret string) grpc.UnaryServerInterceptor {
@@ -42,23 +40,4 @@ func Dial(address, secret, ca string) (*grpc.ClientConn, error) {
 	return grpc.NewClient(address, grpc.WithTransportCredentials(c), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4<<20)), grpc.WithUnaryInterceptor(func(ctx context.Context, m string, req, reply any, cc *grpc.ClientConn, inv grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		return inv(metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+secret), m, req, reply, cc, opts...)
 	}))
-}
-
-func Validate(d *pb.DescribeResponse) error {
-	if d.ProtocolVersion != "1" || d.AdapterId != "x" {
-		return fmt.Errorf("incompatible adapter")
-	}
-	seen := map[string]bool{}
-	for _, h := range d.Hosts {
-		if seen[h] {
-			return fmt.Errorf("conflicting host rule")
-		}
-		seen[h] = true
-	}
-	for _, p := range d.Providers {
-		if p.Id == "fxtwitter" && p.Authentication == "none" && (p.Visibility == pb.Visibility_VISIBILITY_PUBLIC || p.Visibility == pb.Visibility_VISIBILITY_PRIVATE) {
-			return nil
-		}
-	}
-	return fmt.Errorf("fxtwitter provider unavailable")
 }

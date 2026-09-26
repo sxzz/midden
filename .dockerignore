@@ -7,3 +7,6 @@ backup
 *.dump
 
 .local/
+
+**/node_modules/
+**/dist/

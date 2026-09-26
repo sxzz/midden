@@ -5,8 +5,10 @@ package adapter.v1;
 option go_package = "monitor/api/adapter/v1;adapterv1";
 
 service Adapter {
+  // Describe is required; all other operations are opt-in per provider.
   rpc Describe(DescribeRequest) returns (DescribeResponse);
   rpc Fetch(FetchRequest) returns (FetchResponse);
+  rpc CheckConnection(CheckConnectionRequest) returns (CheckConnectionResponse);
 }
 
 message DescribeRequest {}
@@ -17,19 +19,27 @@ enum Visibility {
   VISIBILITY_PRIVATE = 2;
 }
 
+// Names are extensible. Unknown names/major versions are ignored by callers.
+message Capability {
+  string name = 1;
+  uint32 major = 2;
+  uint32 minor = 3;
+}
+
 message Provider {
   string id = 1;
   string authentication = 2;
-  Visibility visibility = 3;
+  repeated Visibility visibilities = 3;
+  repeated Capability capabilities = 4;
 }
 
 message DescribeResponse {
+  // Strict major.minor. Minor revisions must remain backward compatible.
   string protocol_version = 1;
   string adapter_id = 2;
   string version = 3;
   repeated string hosts = 4;
   repeated Provider providers = 5;
-  repeated string capabilities = 6;
 }
 
 message FetchRequest {
@@ -39,6 +49,7 @@ message FetchRequest {
   string connection_id = 4;
   string access_scope = 5;
   string request_id = 6;
+  SessionCredential credential = 7;
 }
 
 message Resource {
@@ -62,3 +73,8 @@ message FetchResponse {
   bool incomplete = 9;
   Visibility visibility = 10;
 }
+
+// Execution-only secrets; never persisted in task payloads or logs.
+message SessionCredential { string auth_token = 1; string csrf_token = 2; }
+message CheckConnectionRequest { string provider_id = 1; SessionCredential credential = 2; }
+message CheckConnectionResponse { string account_id = 1; string username = 2; }

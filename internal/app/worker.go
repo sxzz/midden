@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,6 +20,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "monitor/api/adapter/v1"
+	"monitor/internal/adapter"
 	"monitor/internal/domain"
 	"monitor/internal/store"
 )
@@ -65,9 +70,9 @@ func (w *Worker) Work(ctx context.Context, j *river.Job[store.Task]) error {
 		return e
 	}
 	TaskResults.WithLabelValues(j.Args.Type, "error").Inc()
-	permanent := errors.Is(e, domain.ErrQuota) || errors.Is(e, domain.ErrUnsupported) || errors.Is(e, domain.ErrNotFound)
+	permanent := errors.Is(e, domain.ErrQuota) || errors.Is(e, domain.ErrUnsupported) || errors.Is(e, domain.ErrNotFound) || errors.Is(e, ErrConnection)
 	switch status.Code(e) {
-	case codes.InvalidArgument, codes.FailedPrecondition, codes.Unimplemented:
+	case codes.InvalidArgument, codes.FailedPrecondition, codes.Unimplemented, codes.PermissionDenied, codes.Unauthenticated:
 		permanent = true
 	}
 	var p *PermanentError
@@ -111,11 +116,14 @@ func RetryDelay(e error) time.Duration {
 }
 
 func safeError(e error) string {
+	if errors.Is(e, ErrConnection) {
+		return "账号不可用，请重新授权或使用 /account 选择公共来源。"
+	}
 	if errors.Is(e, domain.ErrQuota) {
 		return "storage quota exceeded"
 	}
 	if errors.Is(e, domain.ErrUnsupported) {
-		return "account authentication unsupported"
+		return "provider operation unsupported"
 	}
 	var p *PermanentError
 	if errors.As(e, &p) {
@@ -172,13 +180,56 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if state != "queued" {
 		return nil
 	}
-	if connection != "" || provider != "fxtwitter" || scope != "public" {
+	var credential *pb.SessionCredential
+	var revision int64
+	if connection != "" {
+		lock, e := s.DB.Pool.Acquire(ctx)
+		if e != nil {
+			return e
+		}
+		var acquired bool
+		connectionSlot := 0
+		for i := 0; i < max(1, s.Config.ConnectionConcurrency); i++ {
+			connectionSlot = i
+			e = lock.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext($1),$2)`, "connection:"+connection, i).Scan(&acquired)
+			if e != nil || acquired {
+				break
+			}
+		}
+		if e != nil || !acquired {
+			lock.Release()
+			if e != nil {
+				return e
+			}
+			return river.JobSnooze(time.Second)
+		}
+		defer release(lock, "connection:"+connection, connectionSlot)
+		credential, revision, e = s.session(ctx, t.Tenant, connection)
+		if e != nil {
+			return e
+		}
+	} else if provider != "fxtwitter" || scope != "public" {
 		return domain.ErrUnsupported
+	}
+	if _, e := s.requireProvider(ctx, provider, adapter.CaptureFetch); e != nil {
+		return e
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	r, e := s.Adapter.Fetch(callCtx, &pb.FetchRequest{Url: url, ExternalId: id, ProviderId: provider, ConnectionId: connection, AccessScope: scope, RequestId: t.ID})
+	var trailer metadata.MD
+	fetchStart := time.Now()
+	r, e := s.Adapter.Fetch(callCtx, &pb.FetchRequest{Url: url, ExternalId: id, ProviderId: provider, ConnectionId: connection, AccessScope: scope, RequestId: t.ID, Credential: credential}, grpc.Trailer(&trailer))
+	ProviderDuration.WithLabelValues(provider).Observe(time.Since(fetchStart).Seconds())
+	ProviderResults.WithLabelValues(provider, status.Code(e).String()).Inc()
 	if e != nil {
+		if connection != "" && status.Code(e) == codes.Unauthenticated {
+			s.markReauth(ctx, t.Tenant, connection, revision)
+		}
+		if values := trailer.Get("retry-after"); len(values) > 0 {
+			if n, _ := strconv.Atoi(values[0]); n > 0 && n <= 86400 {
+				return &RetryError{After: time.Duration(n) * time.Second, Err: e}
+			}
+		}
 		return e
 	}
 	if r.ExternalId != id || r.ProviderId != provider {
@@ -188,8 +239,13 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if visibility == "public" {
 		expectedVisibility = pb.Visibility_VISIBILITY_PUBLIC
 	}
-	if r.Visibility != expectedVisibility {
+	if (connection == "" && r.Visibility != expectedVisibility) || (r.Visibility != pb.Visibility_VISIBILITY_PUBLIC && r.Visibility != pb.Visibility_VISIBILITY_PRIVATE) {
 		return &PermanentError{"provider visibility does not match capture policy"}
+	}
+	if r.Visibility == pb.Visibility_VISIBILITY_PUBLIC {
+		visibility = "public"
+	} else {
+		visibility = "private"
 	}
 	if len(r.Text) > 1<<20 {
 		return &PermanentError{"text exceeds archive limit"}
@@ -218,6 +274,17 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		if state != "queued" {
 			return nil
 		}
+		if e := validateExecution(ctx, tx, connection, revision); e != nil {
+			return e
+		}
+		if connection != "" {
+			if e := s.resolveCaptureScope(ctx, tx, t.Tenant, t.ID, visibility); e != nil {
+				return e
+			}
+		}
+		if _, e := tx.Exec(ctx, `UPDATE captures SET credential_revision=$2 WHERE id=$1`, t.ID, revision); e != nil {
+			return e
+		}
 		tag, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes+$2 WHERE id=$1 AND tenant_usage()+reserved_bytes+$2<=quota_bytes`, t.Tenant, len(b))
 		if e != nil {
 			return e
@@ -238,7 +305,11 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 			var aid string
 			cacheKey := ""
 			if v.Kind == "video" && v.ImmutableKey != "" {
-				key, _ := json.Marshal([]string{"x", provider, scope, connection, v.ImmutableKey})
+				mediaScope := scope
+				if visibility == "public" {
+					mediaScope = "public"
+				}
+				key, _ := json.Marshal([]string{"x", mediaScope, v.ImmutableKey})
 				cacheKey = store.Hash(string(key))
 			}
 			if e = tx.QueryRow(ctx, `INSERT INTO assets(tenant_id,capture_id,position,source_url,visibility,kind,cache_key,alt_text,sensitive) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, t.Tenant, t.ID, n, v.Url, visibility, v.Kind, cacheKey, v.AltText, v.Sensitive).Scan(&aid); e != nil {
@@ -279,6 +350,9 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 			if a.State == "pending" {
 				return nil
 			}
+		}
+		if e := validateCaptureConnection(ctx, tx, cid); e != nil {
+			return e
 		}
 		var p Payload
 		if e = json.Unmarshal(raw, &p); e != nil {
@@ -344,6 +418,18 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		}
 		if _, e = tx.Exec(ctx, `UPDATE archives SET observed_at=now() WHERE id=$1`, aid); e != nil {
 			return e
+		}
+		var previousArchive *string
+		if e = tx.QueryRow(ctx, `SELECT refresh_from FROM captures WHERE id=$1`, cid).Scan(&previousArchive); e != nil {
+			return e
+		}
+		if previousArchive != nil && *previousArchive != aid {
+			if _, e = tx.Exec(ctx, `DELETE FROM tenant_archives WHERE archive_id=$1`, *previousArchive); e != nil {
+				return e
+			}
+			if _, e = tx.Exec(ctx, `SELECT mark_unreferenced($1)`, *previousArchive); e != nil {
+				return e
+			}
 		}
 		return s.deliveries(ctx, tx, tenant, cid)
 	})

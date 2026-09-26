@@ -30,6 +30,12 @@ func run() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	if os.Args[1] == "tls-init" {
+		if len(os.Args) != 3 {
+			return fmt.Errorf("tls-init DIRECTORY")
+		}
+		return initTLS(os.Args[2])
+	}
 	if os.Args[1] == "storage-init" {
 		return initStorage(ctx)
 	}
@@ -38,6 +44,9 @@ func run() error {
 		return fmt.Errorf("admin database unavailable")
 	}
 	defer db.Close()
+	if strings.HasPrefix(os.Args[1], "connection-") {
+		return connectionCommand(ctx, db, os.Args[1:])
+	}
 	switch os.Args[1] {
 	case "config-list":
 		rows, err := db.Pool.Query(ctx, `SELECT key,CASE WHEN sensitive AND value<>'' THEN '[redacted]' ELSE value END FROM config ORDER BY key`)

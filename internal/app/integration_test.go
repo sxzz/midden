@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
@@ -49,7 +50,7 @@ func (f *fakeAdapter) Describe(context.Context, *pb.DescribeRequest, ...grpc.Cal
 	if f.public {
 		visibility = pb.Visibility_VISIBILITY_PUBLIC
 	}
-	return &pb.DescribeResponse{Providers: []*pb.Provider{{Id: "fxtwitter", Authentication: "none", Visibility: visibility}}}, nil
+	return &pb.DescribeResponse{ProtocolVersion: "1.0", AdapterId: "fixture", Providers: []*pb.Provider{{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, Authentication: "none", Visibilities: []pb.Visibility{visibility}}}}, nil
 }
 
 func (f *fakeAdapter) Fetch(ctx context.Context, r *pb.FetchRequest, _ ...grpc.CallOption) (*pb.FetchResponse, error) {
@@ -303,7 +304,7 @@ func TestIntegration(t *testing.T) {
 	if _, e = s.Submit(ctx, other.TenantID, domain.CaptureInput{URL: a.URL, ConnectionID: connection}); e == nil {
 		t.Fatal("cross tenant connection accepted")
 	}
-	if _, e = s.Submit(ctx, tenant, domain.CaptureInput{URL: a.URL, ConnectionID: connection}); e != domain.ErrUnsupported {
+	if _, e = s.Submit(ctx, tenant, domain.CaptureInput{URL: a.URL, ConnectionID: connection}); !errors.Is(e, domain.ErrUnsupported) {
 		t.Fatal(e)
 	}
 	// Image storage, interrupted upload, dedup and quota reservations.
@@ -494,4 +495,8 @@ func must(t *testing.T, e error) {
 
 func (f *fakeSender) Media(ctx context.Context, chat string, aa []domain.Asset, caption string) (int64, error) {
 	return f.Send(ctx, chat, "album", 0)
+}
+
+func (f *fakeAdapter) CheckConnection(context.Context, *pb.CheckConnectionRequest, ...grpc.CallOption) (*pb.CheckConnectionResponse, error) {
+	return &pb.CheckConnectionResponse{AccountId: "123", Username: "fixture"}, nil
 }
