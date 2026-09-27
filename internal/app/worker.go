@@ -250,19 +250,62 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if len(r.Text) > 1<<20 {
 		return &PermanentError{"text exceeds archive limit"}
 	}
-	p := Payload{Text: r.Text, TextKind: r.TextKind, Warnings: r.Warnings, Version: r.AdapterVersion, TextSource: r.TextSource, Incomplete: r.Incomplete}
-	if len(r.Resources) > s.Config.MaxMedia {
-		p.Warnings = append(p.Warnings, "媒体数量超过归档限制。")
-		r.Resources = r.Resources[:s.Config.MaxMedia]
+	graph, e := s.entityGraph(ctx, r)
+	if e != nil {
+		return e
 	}
-	for _, media := range r.Resources {
-		if len(media.AltText) > 1<<20 {
-			return &PermanentError{"media description exceeds archive limit"}
+	rawSize, e := sourceBytes(r, connection != "")
+	if e != nil {
+		return e
+	}
+	p := Payload{Graph: graph, Text: r.Text, TextKind: r.TextKind, Warnings: r.Warnings, Version: r.AdapterVersion, TextSource: r.TextSource, Incomplete: r.Incomplete}
+	// Keep resource positions stable in the graph after applying execution limits.
+	kept := []*pb.Resource{}
+	positions := map[uint32]uint32{}
+	mediaCount, extraCount := 0, 0
+	for i, v := range r.Resources {
+		if v == nil {
+			return &PermanentError{"invalid resource"}
 		}
-		p.MediaDescriptions = append(p.MediaDescriptions, media.AltText)
-		p.MediaSensitive = append(p.MediaSensitive, media.Sensitive)
+		if len(v.AltText) > 1<<20 || len(v.Purpose) > 128 {
+			return &PermanentError{"resource metadata exceeds limit"}
+		}
+		keep := v.Kind == "image" || v.Kind == "video"
+		if v.Purpose == "" {
+			mediaCount++
+			keep = keep && mediaCount <= s.Config.MaxMedia
+		} else {
+			extraCount++
+			keep = keep && extraCount <= 16
+		}
+		if !keep {
+			p.Incomplete = true
+			p.Warnings = append(p.Warnings, "resource omitted: unsupported type or resource limit")
+			continue
+		}
+		positions[uint32(i)] = uint32(len(kept))
+		kept = append(kept, v)
+		p.MediaDescriptions = append(p.MediaDescriptions, v.AltText)
+		p.MediaSensitive = append(p.MediaSensitive, v.Sensitive)
+	}
+	r.Resources = kept
+	if graph != nil {
+		for i := range graph.Entities {
+			e := &graph.Entities[i]
+			indices := []uint32{}
+			for _, old := range e.ResourceIndices {
+				if pos, ok := positions[old]; ok {
+					indices = append(indices, pos)
+				}
+			}
+			e.ResourceIndices = indices
+		}
 	}
 	b, _ := json.Marshal(p)
+	entityReserve := 0
+	if graph != nil {
+		entityReserve = len(graph.Entities) * 160
+	}
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, t.Tenant); e != nil {
 			return e
@@ -285,23 +328,21 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		if _, e := tx.Exec(ctx, `UPDATE captures SET credential_revision=$2 WHERE id=$1`, t.ID, revision); e != nil {
 			return e
 		}
-		tag, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes+$2 WHERE id=$1 AND tenant_usage()+reserved_bytes+$2<=quota_bytes`, t.Tenant, len(b))
+		if e := persistSources(ctx, tx, t.Tenant, t.ID, r); e != nil {
+			return e
+		}
+		tag, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes+$2 WHERE id=$1 AND tenant_usage()+reserved_bytes+$2<=quota_bytes`, t.Tenant, len(b)+rawSize+entityReserve)
 		if e != nil {
 			return e
 		}
 		if tag.RowsAffected() == 0 {
 			return domain.ErrQuota
 		}
-		if _, e = tx.Exec(ctx, `UPDATE captures SET state='downloading',payload=$2,adapter_version=$3,content_reserved=$4 WHERE id=$1`, t.ID, b, r.AdapterVersion, len(b)); e != nil {
+		if _, e = tx.Exec(ctx, `UPDATE captures SET state='downloading',payload=$2,adapter_version=$3,content_reserved=$4 WHERE id=$1`, t.ID, b, r.AdapterVersion, len(b)+rawSize+entityReserve); e != nil {
 			return e
 		}
-		seen := map[string]bool{}
 		n := 0
 		for _, v := range r.Resources {
-			if (v.Kind != "image" && v.Kind != "video") || seen[v.Url] {
-				continue
-			}
-			seen[v.Url] = true
 			var aid string
 			cacheKey := ""
 			if v.Kind == "video" && v.ImmutableKey != "" {
@@ -312,7 +353,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 				key, _ := json.Marshal([]string{"x", mediaScope, v.ImmutableKey})
 				cacheKey = store.Hash(string(key))
 			}
-			if e = tx.QueryRow(ctx, `INSERT INTO assets(tenant_id,capture_id,position,source_url,visibility,kind,cache_key,alt_text,sensitive) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, t.Tenant, t.ID, n, v.Url, visibility, v.Kind, cacheKey, v.AltText, v.Sensitive).Scan(&aid); e != nil {
+			if e = tx.QueryRow(ctx, `INSERT INTO assets(tenant_id,capture_id,position,source_url,visibility,kind,cache_key,alt_text,sensitive,purpose) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, t.Tenant, t.ID, n, v.Url, visibility, v.Kind, cacheKey, v.AltText, v.Sensitive, v.Purpose).Scan(&aid); e != nil {
 				return e
 			}
 			n++
@@ -361,6 +402,7 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		good := 0
 		partial := p.Incomplete
 		type sig struct {
+			Purpose   string
 			Hash      string
 			AltText   string
 			Sensitive bool
@@ -369,22 +411,32 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		}
 		ss := []sig{}
 		for _, a := range aa {
-			ss = append(ss, sig{a.Hash, a.AltText, a.Sensitive, a.State, a.Error})
+			ss = append(ss, sig{a.Purpose, a.Hash, a.AltText, a.Sensitive, a.State, a.Error})
 			if a.State == "ready" {
-				good++
+				if a.Purpose == "" {
+					good++
+				}
 			} else {
 				partial = true
 			}
 		}
-		if p.Text == "" && good == 0 {
+		if p.Text == "" && good == 0 && p.Graph == nil {
 			return s.failCaptureTx(ctx, tx, tenant, cid, "no text or media could be archived")
 		}
+		if e = persistEntities(ctx, tx, tenant, cid, &p, aa); e != nil {
+			return e
+		}
+		raw, _ = json.Marshal(p)
 		digestData, _ := json.Marshal(struct {
 			Text, Kind string
+			Graph      *domain.EntityGraph
 			Warnings   []string
 			Assets     []sig
-		}{p.Text, p.TextKind, p.Warnings, ss})
-		digest := store.Hash(string(digestData))
+		}{p.Text, p.TextKind, p.Graph, p.Warnings, ss})
+		var digest string
+		if e = tx.QueryRow(ctx, `SELECT encode(digest($1::jsonb::text,'sha256'),'hex')`, digestData).Scan(&digest); e != nil {
+			return e
+		}
 		var previous *string
 		var previousID *string
 		e = tx.QueryRow(ctx, `SELECT r.content_hash,r.id FROM archives a LEFT JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1`, aid).Scan(&previous, &previousID)
@@ -394,8 +446,11 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		revisionID := previousID
 		if previous == nil || *previous != digest {
 			var rid string
-			e = tx.QueryRow(ctx, `INSERT INTO revisions(tenant_id,archive_id,capture_id,content_hash,payload,content_bytes,visibility) SELECT $1,$2,$3,$4,$5,$6,visibility FROM captures WHERE id=$3 RETURNING id`, tenant, aid, cid, digest, raw, reserved).Scan(&rid)
+			e = tx.QueryRow(ctx, `INSERT INTO revisions(tenant_id,archive_id,capture_id,content_hash,payload,content_bytes,visibility) SELECT $1,$2,$3,$4,$5,$6,visibility FROM captures WHERE id=$3 RETURNING id`, tenant, aid, cid, digest, raw, len(raw)).Scan(&rid)
 			if e != nil {
+				return e
+			}
+			if e = linkEntities(ctx, tx, tenant, cid, rid, p.Graph); e != nil {
 				return e
 			}
 			revisionID = &rid
@@ -501,6 +556,9 @@ func (s *Service) failCaptureTx(ctx context.Context, tx pgx.Tx, t, id, msg strin
 		return e
 	}
 	if _, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes-$2 WHERE id=$1`, t, n); e != nil {
+		return e
+	}
+	if _, e := tx.Exec(ctx, `DELETE FROM source_responses WHERE capture_id=$1`, id); e != nil {
 		return e
 	}
 	if _, e := tx.Exec(ctx, `UPDATE captures SET state='failed',error=$2,content_reserved=0,payload=NULL,finished_at=now() WHERE id=$1`, id, msg); e != nil {

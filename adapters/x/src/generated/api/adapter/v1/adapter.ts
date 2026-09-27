@@ -74,6 +74,7 @@ export interface Provider {
   authentication: string;
   visibilities: Visibility[];
   capabilities: Capability[];
+  entityTypes: string[];
 }
 
 export interface DescribeResponse {
@@ -83,6 +84,7 @@ export interface DescribeResponse {
   version: string;
   hosts: string[];
   providers: Provider[];
+  entityTypes: EntityType[];
 }
 
 export interface FetchRequest {
@@ -102,10 +104,51 @@ export interface Resource {
   immutableKey: string;
   altText: string;
   sensitive: boolean;
+  /** Adapter-defined role. Empty resources appear in the generic presentation. */
+  purpose: string;
+}
+
+/** Adapter-owned JSON Schema (2020-12), bundled and self-contained. */
+export interface EntityType {
+  name: string;
+  jsonSchema: Buffer;
+}
+
+export interface Entity {
+  /** Local graph key, not a database ID. */
+  key: string;
+  type: string;
+  externalId: string;
+  dataJson: Buffer;
+  /** Indices in FetchResponse.resources. */
+  resourceIndices: number[];
+}
+
+export interface EntityRelation {
+  source: string;
+  target: string;
+  type: string;
+}
+
+export interface EntityGraph {
+  root: string;
+  entities: Entity[];
+  relations: EntityRelation[];
+}
+
+export interface SourceResponse {
+  /** Original response body, before JSON parsing or normalization. */
+  body: Buffer;
+  contentType: string;
+  /** No credentials or request headers. */
+  sourceUrl: string;
+  /** Account responses stay private even for public posts. */
+  visibility: Visibility;
 }
 
 export interface FetchResponse {
   externalId: string;
+  /** Optional generic presentation; channels do not parse entity JSON. */
   text: string;
   textKind: string;
   resources: Resource[];
@@ -115,6 +158,8 @@ export interface FetchResponse {
   textSource: string;
   incomplete: boolean;
   visibility: Visibility;
+  graph: EntityGraph | undefined;
+  sourceResponses: SourceResponse[];
 }
 
 /** Execution-only secrets; never persisted in task payloads or logs. */
@@ -277,7 +322,13 @@ export const Capability: MessageFns<Capability> = {
 };
 
 function createBaseProvider(): Provider {
-  return { id: "", authentication: "", visibilities: [], capabilities: [] };
+  return {
+    id: "",
+    authentication: "",
+    visibilities: [],
+    capabilities: [],
+    entityTypes: [],
+  };
 }
 
 export const Provider: MessageFns<Provider> = {
@@ -298,6 +349,9 @@ export const Provider: MessageFns<Provider> = {
     writer.join();
     for (const v of message.capabilities) {
       Capability.encode(v!, writer.uint32(34).fork()).join();
+    }
+    for (const v of message.entityTypes) {
+      writer.uint32(42).string(v!);
     }
     return writer;
   },
@@ -352,6 +406,14 @@ export const Provider: MessageFns<Provider> = {
           message.capabilities.push(Capability.decode(reader, reader.uint32()));
           continue;
         }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.entityTypes.push(reader.string());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -373,6 +435,9 @@ export const Provider: MessageFns<Provider> = {
       capabilities: globalThis.Array.isArray(object?.capabilities)
         ? object.capabilities.map((e: any) => Capability.fromJSON(e))
         : [],
+      entityTypes: globalThis.Array.isArray(object?.entityTypes)
+        ? object.entityTypes.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
@@ -390,6 +455,9 @@ export const Provider: MessageFns<Provider> = {
     if (message.capabilities?.length) {
       obj.capabilities = message.capabilities.map((e) => Capability.toJSON(e));
     }
+    if (message.entityTypes?.length) {
+      obj.entityTypes = message.entityTypes;
+    }
     return obj;
   },
 
@@ -403,6 +471,7 @@ export const Provider: MessageFns<Provider> = {
     message.visibilities = object.visibilities?.map((e) => e) || [];
     message.capabilities =
       object.capabilities?.map((e) => Capability.fromPartial(e)) || [];
+    message.entityTypes = object.entityTypes?.map((e) => e) || [];
     return message;
   },
 };
@@ -414,6 +483,7 @@ function createBaseDescribeResponse(): DescribeResponse {
     version: "",
     hosts: [],
     providers: [],
+    entityTypes: [],
   };
 }
 
@@ -436,6 +506,9 @@ export const DescribeResponse: MessageFns<DescribeResponse> = {
     }
     for (const v of message.providers) {
       Provider.encode(v!, writer.uint32(42).fork()).join();
+    }
+    for (const v of message.entityTypes) {
+      EntityType.encode(v!, writer.uint32(50).fork()).join();
     }
     return writer;
   },
@@ -488,6 +561,14 @@ export const DescribeResponse: MessageFns<DescribeResponse> = {
           message.providers.push(Provider.decode(reader, reader.uint32()));
           continue;
         }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.entityTypes.push(EntityType.decode(reader, reader.uint32()));
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -512,6 +593,9 @@ export const DescribeResponse: MessageFns<DescribeResponse> = {
       providers: globalThis.Array.isArray(object?.providers)
         ? object.providers.map((e: any) => Provider.fromJSON(e))
         : [],
+      entityTypes: globalThis.Array.isArray(object?.entityTypes)
+        ? object.entityTypes.map((e: any) => EntityType.fromJSON(e))
+        : [],
     };
   },
 
@@ -532,6 +616,9 @@ export const DescribeResponse: MessageFns<DescribeResponse> = {
     if (message.providers?.length) {
       obj.providers = message.providers.map((e) => Provider.toJSON(e));
     }
+    if (message.entityTypes?.length) {
+      obj.entityTypes = message.entityTypes.map((e) => EntityType.toJSON(e));
+    }
     return obj;
   },
 
@@ -546,6 +633,8 @@ export const DescribeResponse: MessageFns<DescribeResponse> = {
     message.hosts = object.hosts?.map((e) => e) || [];
     message.providers =
       object.providers?.map((e) => Provider.fromPartial(e)) || [];
+    message.entityTypes =
+      object.entityTypes?.map((e) => EntityType.fromPartial(e)) || [];
     return message;
   },
 };
@@ -740,7 +829,14 @@ export const FetchRequest: MessageFns<FetchRequest> = {
 };
 
 function createBaseResource(): Resource {
-  return { url: "", kind: "", immutableKey: "", altText: "", sensitive: false };
+  return {
+    url: "",
+    kind: "",
+    immutableKey: "",
+    altText: "",
+    sensitive: false,
+    purpose: "",
+  };
 }
 
 export const Resource: MessageFns<Resource> = {
@@ -762,6 +858,9 @@ export const Resource: MessageFns<Resource> = {
     }
     if (message.sensitive !== false) {
       writer.uint32(40).bool(message.sensitive);
+    }
+    if (message.purpose !== "") {
+      writer.uint32(50).string(message.purpose);
     }
     return writer;
   },
@@ -814,6 +913,14 @@ export const Resource: MessageFns<Resource> = {
           message.sensitive = reader.bool();
           continue;
         }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.purpose = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -834,6 +941,7 @@ export const Resource: MessageFns<Resource> = {
       sensitive: isSet(object.sensitive)
         ? globalThis.Boolean(object.sensitive)
         : false,
+      purpose: isSet(object.purpose) ? globalThis.String(object.purpose) : "",
     };
   },
 
@@ -854,6 +962,9 @@ export const Resource: MessageFns<Resource> = {
     if (message.sensitive !== false) {
       obj.sensitive = message.sensitive;
     }
+    if (message.purpose !== "") {
+      obj.purpose = message.purpose;
+    }
     return obj;
   },
 
@@ -867,6 +978,565 @@ export const Resource: MessageFns<Resource> = {
     message.immutableKey = object.immutableKey ?? "";
     message.altText = object.altText ?? "";
     message.sensitive = object.sensitive ?? false;
+    message.purpose = object.purpose ?? "";
+    return message;
+  },
+};
+
+function createBaseEntityType(): EntityType {
+  return { name: "", jsonSchema: Buffer.alloc(0) };
+}
+
+export const EntityType: MessageFns<EntityType> = {
+  encode(
+    message: EntityType,
+    writer: BinaryWriter = new BinaryWriter(),
+  ): BinaryWriter {
+    if (message.name !== "") {
+      writer.uint32(10).string(message.name);
+    }
+    if (message.jsonSchema.length !== 0) {
+      writer.uint32(18).bytes(message.jsonSchema);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): EntityType {
+    const reader =
+      input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseEntityType();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.jsonSchema = Buffer.from(reader.bytes());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): EntityType {
+    return {
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      jsonSchema: isSet(object.jsonSchema)
+        ? Buffer.from(bytesFromBase64(object.jsonSchema))
+        : Buffer.alloc(0),
+    };
+  },
+
+  toJSON(message: EntityType): unknown {
+    const obj: any = {};
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.jsonSchema.length !== 0) {
+      obj.jsonSchema = base64FromBytes(message.jsonSchema);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<EntityType>): EntityType {
+    return EntityType.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<EntityType>): EntityType {
+    const message = createBaseEntityType();
+    message.name = object.name ?? "";
+    message.jsonSchema = object.jsonSchema ?? Buffer.alloc(0);
+    return message;
+  },
+};
+
+function createBaseEntity(): Entity {
+  return {
+    key: "",
+    type: "",
+    externalId: "",
+    dataJson: Buffer.alloc(0),
+    resourceIndices: [],
+  };
+}
+
+export const Entity: MessageFns<Entity> = {
+  encode(
+    message: Entity,
+    writer: BinaryWriter = new BinaryWriter(),
+  ): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.type !== "") {
+      writer.uint32(18).string(message.type);
+    }
+    if (message.externalId !== "") {
+      writer.uint32(26).string(message.externalId);
+    }
+    if (message.dataJson.length !== 0) {
+      writer.uint32(34).bytes(message.dataJson);
+    }
+    writer.uint32(42).fork();
+    for (const v of message.resourceIndices) {
+      writer.uint32(v);
+    }
+    writer.join();
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): Entity {
+    const reader =
+      input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseEntity();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.type = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.externalId = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.dataJson = Buffer.from(reader.bytes());
+          continue;
+        }
+        case 5: {
+          if (tag === 40) {
+            message.resourceIndices.push(reader.uint32());
+
+            continue;
+          }
+
+          if (tag === 42) {
+            const end2 = reader.uint32() + reader.pos;
+            while (reader.pos < end2) {
+              message.resourceIndices.push(reader.uint32());
+            }
+
+            continue;
+          }
+
+          break;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): Entity {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      type: isSet(object.type) ? globalThis.String(object.type) : "",
+      externalId: isSet(object.externalId)
+        ? globalThis.String(object.externalId)
+        : "",
+      dataJson: isSet(object.dataJson)
+        ? Buffer.from(bytesFromBase64(object.dataJson))
+        : Buffer.alloc(0),
+      resourceIndices: globalThis.Array.isArray(object?.resourceIndices)
+        ? object.resourceIndices.map((e: any) => globalThis.Number(e))
+        : [],
+    };
+  },
+
+  toJSON(message: Entity): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.type !== "") {
+      obj.type = message.type;
+    }
+    if (message.externalId !== "") {
+      obj.externalId = message.externalId;
+    }
+    if (message.dataJson.length !== 0) {
+      obj.dataJson = base64FromBytes(message.dataJson);
+    }
+    if (message.resourceIndices?.length) {
+      obj.resourceIndices = message.resourceIndices.map((e) => Math.round(e));
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<Entity>): Entity {
+    return Entity.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<Entity>): Entity {
+    const message = createBaseEntity();
+    message.key = object.key ?? "";
+    message.type = object.type ?? "";
+    message.externalId = object.externalId ?? "";
+    message.dataJson = object.dataJson ?? Buffer.alloc(0);
+    message.resourceIndices = object.resourceIndices?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseEntityRelation(): EntityRelation {
+  return { source: "", target: "", type: "" };
+}
+
+export const EntityRelation: MessageFns<EntityRelation> = {
+  encode(
+    message: EntityRelation,
+    writer: BinaryWriter = new BinaryWriter(),
+  ): BinaryWriter {
+    if (message.source !== "") {
+      writer.uint32(10).string(message.source);
+    }
+    if (message.target !== "") {
+      writer.uint32(18).string(message.target);
+    }
+    if (message.type !== "") {
+      writer.uint32(26).string(message.type);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): EntityRelation {
+    const reader =
+      input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseEntityRelation();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.source = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.target = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.type = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): EntityRelation {
+    return {
+      source: isSet(object.source) ? globalThis.String(object.source) : "",
+      target: isSet(object.target) ? globalThis.String(object.target) : "",
+      type: isSet(object.type) ? globalThis.String(object.type) : "",
+    };
+  },
+
+  toJSON(message: EntityRelation): unknown {
+    const obj: any = {};
+    if (message.source !== "") {
+      obj.source = message.source;
+    }
+    if (message.target !== "") {
+      obj.target = message.target;
+    }
+    if (message.type !== "") {
+      obj.type = message.type;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<EntityRelation>): EntityRelation {
+    return EntityRelation.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<EntityRelation>): EntityRelation {
+    const message = createBaseEntityRelation();
+    message.source = object.source ?? "";
+    message.target = object.target ?? "";
+    message.type = object.type ?? "";
+    return message;
+  },
+};
+
+function createBaseEntityGraph(): EntityGraph {
+  return { root: "", entities: [], relations: [] };
+}
+
+export const EntityGraph: MessageFns<EntityGraph> = {
+  encode(
+    message: EntityGraph,
+    writer: BinaryWriter = new BinaryWriter(),
+  ): BinaryWriter {
+    if (message.root !== "") {
+      writer.uint32(10).string(message.root);
+    }
+    for (const v of message.entities) {
+      Entity.encode(v!, writer.uint32(18).fork()).join();
+    }
+    for (const v of message.relations) {
+      EntityRelation.encode(v!, writer.uint32(26).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): EntityGraph {
+    const reader =
+      input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseEntityGraph();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.root = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.entities.push(Entity.decode(reader, reader.uint32()));
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.relations.push(
+            EntityRelation.decode(reader, reader.uint32()),
+          );
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): EntityGraph {
+    return {
+      root: isSet(object.root) ? globalThis.String(object.root) : "",
+      entities: globalThis.Array.isArray(object?.entities)
+        ? object.entities.map((e: any) => Entity.fromJSON(e))
+        : [],
+      relations: globalThis.Array.isArray(object?.relations)
+        ? object.relations.map((e: any) => EntityRelation.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: EntityGraph): unknown {
+    const obj: any = {};
+    if (message.root !== "") {
+      obj.root = message.root;
+    }
+    if (message.entities?.length) {
+      obj.entities = message.entities.map((e) => Entity.toJSON(e));
+    }
+    if (message.relations?.length) {
+      obj.relations = message.relations.map((e) => EntityRelation.toJSON(e));
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<EntityGraph>): EntityGraph {
+    return EntityGraph.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<EntityGraph>): EntityGraph {
+    const message = createBaseEntityGraph();
+    message.root = object.root ?? "";
+    message.entities = object.entities?.map((e) => Entity.fromPartial(e)) || [];
+    message.relations =
+      object.relations?.map((e) => EntityRelation.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseSourceResponse(): SourceResponse {
+  return {
+    body: Buffer.alloc(0),
+    contentType: "",
+    sourceUrl: "",
+    visibility: 0,
+  };
+}
+
+export const SourceResponse: MessageFns<SourceResponse> = {
+  encode(
+    message: SourceResponse,
+    writer: BinaryWriter = new BinaryWriter(),
+  ): BinaryWriter {
+    if (message.body.length !== 0) {
+      writer.uint32(10).bytes(message.body);
+    }
+    if (message.contentType !== "") {
+      writer.uint32(18).string(message.contentType);
+    }
+    if (message.sourceUrl !== "") {
+      writer.uint32(26).string(message.sourceUrl);
+    }
+    if (message.visibility !== 0) {
+      writer.uint32(32).int32(message.visibility);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): SourceResponse {
+    const reader =
+      input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseSourceResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.body = Buffer.from(reader.bytes());
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.contentType = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.sourceUrl = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 32) {
+            break;
+          }
+
+          message.visibility = reader.int32() as any;
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): SourceResponse {
+    return {
+      body: isSet(object.body)
+        ? Buffer.from(bytesFromBase64(object.body))
+        : Buffer.alloc(0),
+      contentType: isSet(object.contentType)
+        ? globalThis.String(object.contentType)
+        : "",
+      sourceUrl: isSet(object.sourceUrl)
+        ? globalThis.String(object.sourceUrl)
+        : "",
+      visibility: isSet(object.visibility)
+        ? visibilityFromJSON(object.visibility)
+        : 0,
+    };
+  },
+
+  toJSON(message: SourceResponse): unknown {
+    const obj: any = {};
+    if (message.body.length !== 0) {
+      obj.body = base64FromBytes(message.body);
+    }
+    if (message.contentType !== "") {
+      obj.contentType = message.contentType;
+    }
+    if (message.sourceUrl !== "") {
+      obj.sourceUrl = message.sourceUrl;
+    }
+    if (message.visibility !== 0) {
+      obj.visibility = visibilityToJSON(message.visibility);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<SourceResponse>): SourceResponse {
+    return SourceResponse.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<SourceResponse>): SourceResponse {
+    const message = createBaseSourceResponse();
+    message.body = object.body ?? Buffer.alloc(0);
+    message.contentType = object.contentType ?? "";
+    message.sourceUrl = object.sourceUrl ?? "";
+    message.visibility = object.visibility ?? 0;
     return message;
   },
 };
@@ -883,6 +1553,8 @@ function createBaseFetchResponse(): FetchResponse {
     textSource: "",
     incomplete: false,
     visibility: 0,
+    graph: undefined,
+    sourceResponses: [],
   };
 }
 
@@ -920,6 +1592,12 @@ export const FetchResponse: MessageFns<FetchResponse> = {
     }
     if (message.visibility !== 0) {
       writer.uint32(80).int32(message.visibility);
+    }
+    if (message.graph !== undefined) {
+      EntityGraph.encode(message.graph, writer.uint32(90).fork()).join();
+    }
+    for (const v of message.sourceResponses) {
+      SourceResponse.encode(v!, writer.uint32(98).fork()).join();
     }
     return writer;
   },
@@ -1012,6 +1690,24 @@ export const FetchResponse: MessageFns<FetchResponse> = {
           message.visibility = reader.int32() as any;
           continue;
         }
+        case 11: {
+          if (tag !== 90) {
+            break;
+          }
+
+          message.graph = EntityGraph.decode(reader, reader.uint32());
+          continue;
+        }
+        case 12: {
+          if (tag !== 98) {
+            break;
+          }
+
+          message.sourceResponses.push(
+            SourceResponse.decode(reader, reader.uint32()),
+          );
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1051,6 +1747,12 @@ export const FetchResponse: MessageFns<FetchResponse> = {
       visibility: isSet(object.visibility)
         ? visibilityFromJSON(object.visibility)
         : 0,
+      graph: isSet(object.graph)
+        ? EntityGraph.fromJSON(object.graph)
+        : undefined,
+      sourceResponses: globalThis.Array.isArray(object?.sourceResponses)
+        ? object.sourceResponses.map((e: any) => SourceResponse.fromJSON(e))
+        : [],
     };
   },
 
@@ -1086,6 +1788,14 @@ export const FetchResponse: MessageFns<FetchResponse> = {
     if (message.visibility !== 0) {
       obj.visibility = visibilityToJSON(message.visibility);
     }
+    if (message.graph !== undefined) {
+      obj.graph = EntityGraph.toJSON(message.graph);
+    }
+    if (message.sourceResponses?.length) {
+      obj.sourceResponses = message.sourceResponses.map((e) =>
+        SourceResponse.toJSON(e),
+      );
+    }
     return obj;
   },
 
@@ -1105,6 +1815,12 @@ export const FetchResponse: MessageFns<FetchResponse> = {
     message.textSource = object.textSource ?? "";
     message.incomplete = object.incomplete ?? false;
     message.visibility = object.visibility ?? 0;
+    message.graph =
+      object.graph !== undefined && object.graph !== null
+        ? EntityGraph.fromPartial(object.graph)
+        : undefined;
+    message.sourceResponses =
+      object.sourceResponses?.map((e) => SourceResponse.fromPartial(e)) || [];
     return message;
   },
 };
@@ -1504,6 +2220,14 @@ export const AdapterClient = makeGenericClientConstructor(
   service: typeof AdapterService;
   serviceName: string;
 };
+
+function bytesFromBase64(b64: string): Uint8Array {
+  return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
+}
+
+function base64FromBytes(arr: Uint8Array): string {
+  return globalThis.Buffer.from(arr).toString("base64");
+}
 
 type Builtin =
   | Date

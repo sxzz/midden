@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"crypto/sha256"
-	"embed"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -11,14 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/riverdriver/riverpgxv5"
-	"github.com/riverqueue/river/rivermigrate"
 
 	"monitor/internal/domain"
 )
-
-//go:embed schema.sql
-var schema embed.FS
 
 type Store struct{ Pool *pgxpool.Pool }
 
@@ -52,39 +46,6 @@ func (s *Store) CheckRole(ctx context.Context) error {
 		return fmt.Errorf("runtime database role must not own tables, be superuser or bypass RLS")
 	}
 	return nil
-}
-
-func (s *Store) Migrate(ctx context.Context) error {
-	conn, e := s.Pool.Acquire(ctx)
-	if e != nil {
-		return e
-	}
-	defer conn.Release()
-	if _, e = conn.Exec(ctx, `SELECT pg_advisory_lock(71789122)`); e != nil {
-		return e
-	}
-	defer conn.Exec(context.Background(), `SELECT pg_advisory_unlock(71789122)`)
-	tx, e := conn.Begin(ctx)
-	if e != nil {
-		return e
-	}
-	defer tx.Rollback(ctx)
-	b, _ := schema.ReadFile("schema.sql")
-	if _, e = tx.Exec(ctx, string(b)); e != nil {
-		return e
-	}
-	if e = tx.Commit(ctx); e != nil {
-		return e
-	}
-	m, e := rivermigrate.New(riverpgxv5.New(s.Pool), nil)
-	if e != nil {
-		return e
-	}
-	if _, e = m.Migrate(ctx, rivermigrate.DirectionUp, nil); e != nil {
-		return e
-	}
-	_, e = s.Pool.Exec(ctx, `GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO monitor_app; REVOKE ALL ON tokens,schema_versions FROM monitor_app; REVOKE INSERT,UPDATE,DELETE ON config FROM monitor_app; GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO monitor_app;`)
-	return e
 }
 
 func (s *Store) Tx(ctx context.Context, tenant string, fn func(pgx.Tx) error) error {

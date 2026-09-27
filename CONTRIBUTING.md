@@ -19,7 +19,11 @@ make integration
 
 ## 发布前数据库变更
 
-首次发布前直接修改 `internal/store/schema.sql`，通过清空开发数据库和对象存储重新初始化验证。不维护旧数据兼容、迁移或旧 ID 映射，不因结构调整递增 schema 版本。数据库及对象存储使用 Docker。
+Protocol 固定为 `1.0`，schema 固定为 `1`，正式发布前不因新增字段或功能递增。当前完整结构是 `internal/store/migrations/0001_initial.sql` 基线，不保留此前的升级路径。
+
+从此基线开始，需要保留服务器数据。新增数据库变更放入 `internal/store/migrations/YYYYMMDDHHMMSS_description.sql`，按文件名排序；迁移文件名是执行顺序，不是 schema 版本号。已经部署的 SQL 不修改、不删除、不插入到已执行历史之前。迁移和校验和存入 `schema_migrations`，重复部署跳过已执行文件，修改历史或降级到缺少已执行文件的构建会报错。每个文件在一个事务中执行，不在文件内写 BEGIN/COMMIT，不使用不能在事务内执行的 DDL。需要更新已有 SQL 函数时在新文件内使用 CREATE OR REPLACE。
+
+新建配置用 INSERT ... ON CONFLICT DO NOTHING，避免覆盖运营者设置。数据修复与结构修改一起写入迁移，并测试带数据升级、重复执行、失败回滚。数据库及对象存储使用 Docker。
 
 Provider 必须声明支持的 public/private，并在结果中返回实际可见性，不能由用户请求控制。共享内容测试使用 public Provider，隔离测试使用 private Provider。
 
@@ -49,4 +53,8 @@ FxTwitter 响应结构见其 [API v2 文档](https://docs.fxembed.com/api/twitte
 
 ## 协议变更
 
-Adapter 契约见 [架构文档](docs/architecture.md#adapter-协议与能力发现)。修改 proto 后运行 `make generate`，同时提交 Go 与 TypeScript 生成文件。协议 major/minor 与 Provider 能力 major/minor 独立；新增可选操作无需所有 Adapter 实现。添加操作时同时定义能力、调用前检查、未知能力处理和缺少能力时不产生副作用的测试。发布后的 protobuf 字段号不得复用；不兼容语义使用新的 major/package。当前尚未发布，不引入旧格式兼容分支，也不为纯协议变更调整数据库 schema 版本。
+Adapter 契约见 [架构文档](docs/architecture.md#adapter-协议与能力发现)。修改 proto 后运行 `make generate`，同时提交 Go 与 TypeScript 生成文件。协议 major/minor 与 Provider 能力 major/minor 独立；新增可选操作无需所有 Adapter 实现。添加操作时同时定义能力、调用前检查、未知能力处理和缺少能力时不产生副作用的测试。发布后的 protobuf 字段号不得复用；不兼容语义使用新的 major/package。当前尚未发布，protocol 保持 `1.0`，不引入旧格式兼容分支，也不为纯协议变更调整数据库 schema 版本。
+
+## 实体结构
+
+公共 proto 只定义实体图、Schema 声明、资源引用和可选展示字段，不添加平台专属 message。新增实体类型在 Adapter 中定义 JSON Schema 2020-12，通过 Describe 声明，在 Provider 上声明 entity.graph 与支持的类型列表。Schema 使用内置定义与本地引用，不依赖外部 Schema 服务。Fetch 返回实体数据、图内关系和资源索引；核心无需增加平台字段或专用表。测试应覆盖 Schema 校验、实体身份与作用域隔离、历史快照、关系和关联资源；通用渠道展示不能解析平台 data。

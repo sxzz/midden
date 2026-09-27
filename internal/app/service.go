@@ -47,17 +47,18 @@ type Sender interface {
 }
 
 type Service struct {
-	Vault      *credentials.Vault
-	AdapterTLS bool
-	DB         *store.Store
-	Queue      *river.Client[pgx.Tx]
-	Adapter    pb.AdapterClient
-	Providers  []*pb.Provider
-	Blobs      blob.Storage
-	HTTP       *http.Client
-	Config     Config
-	Sender     Sender
-	Senders    map[string]Sender
+	EntitySchemas map[string]adapter.EntitySchema
+	Vault         *credentials.Vault
+	AdapterTLS    bool
+	DB            *store.Store
+	Queue         *river.Client[pgx.Tx]
+	Adapter       pb.AdapterClient
+	Providers     []*pb.Provider
+	Blobs         blob.Storage
+	HTTP          *http.Client
+	Config        Config
+	Sender        Sender
+	Senders       map[string]Sender
 }
 
 func (s *Service) Enqueue(ctx context.Context, tx pgx.Tx, tenant, id, kind string) error {
@@ -359,7 +360,9 @@ func archive(ctx context.Context, tx pgx.Tx, id string) (a domain.Archive, e err
 	a.TextSource = p.TextSource
 	a.AdapterVersion = p.Version
 	a.Warnings = p.Warnings
-	a.Assets, e = assets(ctx, tx, cid)
+	all, err := assets(ctx, tx, cid)
+	e = err
+	hydrateGraph(&a, p, all)
 	return
 }
 
@@ -369,7 +372,7 @@ func (s *Service) Archive(ctx context.Context, t, id string) (a domain.Archive, 
 }
 
 func assets(ctx context.Context, tx pgx.Tx, cid string) (out []domain.Asset, e error) {
-	rows, e := tx.Query(ctx, `SELECT a.id,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,'') FROM assets a LEFT JOIN blobs b ON b.id=a.blob_id WHERE a.capture_id=$1 ORDER BY a.position`, cid)
+	rows, e := tx.Query(ctx, `SELECT a.id,a.purpose,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,'') FROM assets a LEFT JOIN blobs b ON b.id=a.blob_id WHERE a.capture_id=$1 ORDER BY a.position`, cid)
 	if e != nil {
 		return nil, e
 	}
@@ -377,7 +380,7 @@ func assets(ctx context.Context, tx pgx.Tx, cid string) (out []domain.Asset, e e
 	out = []domain.Asset{}
 	for rows.Next() {
 		var a domain.Asset
-		if e = rows.Scan(&a.ID, &a.Position, &a.AltText, &a.Sensitive, &a.State, &a.Error, &a.Hash, &a.MIME, &a.Size, &a.Key); e != nil {
+		if e = rows.Scan(&a.ID, &a.Purpose, &a.Position, &a.AltText, &a.Sensitive, &a.State, &a.Error, &a.Hash, &a.MIME, &a.Size, &a.Key); e != nil {
 			return nil, e
 		}
 		out = append(out, a)
@@ -448,14 +451,15 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 }
 
 type Payload struct {
-	MediaSensitive    []bool   `json:"media_sensitive,omitempty"`
-	MediaDescriptions []string `json:"media_descriptions,omitempty"`
-	Text              string   `json:"text"`
-	TextKind          string   `json:"text_kind"`
-	Warnings          []string `json:"warnings"`
-	Version           string   `json:"adapter_version"`
-	TextSource        string   `json:"text_source,omitempty"`
-	Incomplete        bool     `json:"incomplete,omitempty"`
+	Graph             *domain.EntityGraph `json:"graph,omitempty"`
+	MediaSensitive    []bool              `json:"media_sensitive,omitempty"`
+	MediaDescriptions []string            `json:"media_descriptions,omitempty"`
+	Text              string              `json:"text"`
+	TextKind          string              `json:"text_kind"`
+	Warnings          []string            `json:"warnings"`
+	Version           string              `json:"adapter_version"`
+	TextSource        string              `json:"text_source,omitempty"`
+	Incomplete        bool                `json:"incomplete,omitempty"`
 }
 
 // CaptureArchive pins delivery to the revision produced (or reused) by that capture.
@@ -476,7 +480,8 @@ func (s *Service) CaptureArchive(ctx context.Context, t, cid string) (a domain.A
 		a.TextSource = p.TextSource
 		a.AdapterVersion = p.Version
 		a.Warnings = p.Warnings
-		a.Assets, err = assets(ctx, tx, assetCapture)
+		all, err := assets(ctx, tx, assetCapture)
+		hydrateGraph(&a, p, all)
 		return err
 	})
 	return

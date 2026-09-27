@@ -70,7 +70,11 @@ func run() error {
 		return e
 	}
 	// Resource URLs come from trusted adapters; allow the deployment's proxy/DNS routing.
-	s := &app.Service{Vault: vault, AdapterTLS: os.Getenv("ADAPTER_TLS_CA") != "", DB: db, Adapter: client, Providers: desc.Providers, Blobs: b, HTTP: &http.Client{Timeout: 5 * time.Minute}, Config: cfg}
+	entitySchemas, e := adapter.CompileEntityTypes(desc)
+	if e != nil {
+		return e
+	}
+	s := &app.Service{EntitySchemas: entitySchemas, Vault: vault, AdapterTLS: os.Getenv("ADAPTER_TLS_CA") != "", DB: db, Adapter: client, Providers: desc.Providers, Blobs: b, HTTP: &http.Client{Timeout: 5 * time.Minute}, Config: cfg}
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &app.Worker{S: s})
 	q, e := river.NewClient(riverpgxv5.New(db.Pool), &river.Config{Workers: workers, Queues: map[string]river.QueueConfig{"capture": {MaxWorkers: cfg.CaptureWorkers}, "download": {MaxWorkers: cfg.DownloadWorkers}, "control": {MaxWorkers: cfg.ControlWorkers}, "delivery": {MaxWorkers: cfg.DeliveryWorkers}}, MaxAttempts: 3, RescueStuckJobsAfter: 6 * time.Minute, Logger: slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))})

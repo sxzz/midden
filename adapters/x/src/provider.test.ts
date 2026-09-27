@@ -61,7 +61,7 @@ test("public fixture preserves text, alt text and highest quality media", () => 
     Visibility.VISIBILITY_PUBLIC,
   );
   assert.ok(result.text.includes("菌子"));
-  const video = result.resources.at(-1)!;
+  const video = result.resources.find(r => r.kind === "video")!;
   assert.equal(video.url, "https://media.test/high.mp4");
   assert.equal(video.altText, "video description");
   assert.equal(video.sensitive, true);
@@ -277,8 +277,38 @@ test("Atmosphere parses authorized protected and public GraphQL fixtures", async
   assert.equal(result.visibility, Visibility.VISIBILITY_PUBLIC);
   assert.equal(
     rawIsPublic({ __typename: "TweetWithVisibilityResults", tweet: raw }),
+    true,
+  );
+  const wrapped = {
+    __typename: "TweetWithVisibilityResults",
+    tweet: structuredClone(raw),
+    mediaVisibilityResults: {
+      blurred_image_interstitial: {
+        opacity: 1,
+        text: "Sensitive content",
+        title: "Warning",
+      },
+    },
+  };
+  assert.equal(rawIsPublic(wrapped), true);
+  assert.equal(
+    (await parseSessionResult("900123", wrapped, host)).visibility,
+    Visibility.VISIBILITY_PUBLIC,
+  );
+  assert.equal(rawIsPublic({ ...wrapped, limitedActionResults: {} }), false);
+  assert.equal(
+    rawIsPublic({
+      ...wrapped,
+      mediaVisibilityResults: { audience_restriction: {} },
+    }),
     false,
   );
+  assert.equal(
+    rawIsPublic({ ...wrapped, mediaVisibilityResults: { interstitial: {} } }),
+    false,
+  );
+  wrapped.tweet.core.user_results.result.legacy.protected = true;
+  assert.equal(rawIsPublic(wrapped), false);
   assert.equal(rawIsPublic({ ...raw, limitedActionResults: {} }), false);
   delete raw.core.user_results.result.legacy.protected;
   assert.equal(rawIsPublic(raw), false);

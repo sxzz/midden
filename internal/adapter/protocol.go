@@ -83,5 +83,6 @@ func Validate(d *pb.DescribeResponse) error {
 			seen[v] = true
 		}
 	}
-	return nil
+	_, err := CompileEntityTypes(d)
+	return err
 }

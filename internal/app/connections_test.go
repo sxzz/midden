@@ -134,6 +134,21 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	if privateBlobs != 2 {
 		t.Fatal("private blobs were merged across connections", privateBlobs)
 	}
+	fake.public = true
+	restored := complete(tenants[1], domain.CaptureInput{RefreshID: private.ArchiveID})
+	if restored.ArchiveID != public.ArchiveID {
+		t.Fatal("public refresh did not merge content identity")
+	}
+	must(t, db.Tx(ctx, tenants[1], func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM tenant_archives WHERE archive_id=$1`, private.ArchiveID).Scan(&count)
+	}))
+	if count != 0 {
+		t.Fatal("old private reference survived public refresh")
+	}
+	if _, e = s.Archive(ctx, tenants[1], another.ArchiveID); e != nil {
+		t.Fatal("unrelated private scope lost")
+	}
+	fake.public = false
 	fake.urls = nil
 	pending, e := s.Submit(ctx, tenants[1], domain.CaptureInput{URL: "https://x.com/a/status/900112", ConnectionID: second})
 	must(t, e)

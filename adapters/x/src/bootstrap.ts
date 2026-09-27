@@ -89,6 +89,13 @@ export async function accountBootstrap(
       "unexpected account verification redirect",
     );
   }
+  if (response.headers.get("cf-mitigated") === "challenge") {
+    await response.body?.cancel();
+    throw new ProviderError(
+      status.UNAVAILABLE,
+      "X requires browser verification; account validity is unknown",
+    );
+  }
   if (!response.ok)
     throw responseError(response.status, response.headers.get("retry-after"));
   const reader = response.body?.getReader();

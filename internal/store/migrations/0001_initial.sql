@@ -13,13 +13,13 @@ END IF;
 END
 $$;
 
-CREATE TABLE IF NOT EXISTS schema_versions (
+CREATE TABLE schema_versions (
     version integer PRIMARY KEY,
     applied_at timestamptz NOT NULL DEFAULT now()
 );
 
 -- Global operating settings, including service credentials; administrator writes only.
-CREATE TABLE IF NOT EXISTS config (
+CREATE TABLE config (
     key text PRIMARY KEY,
     value text NOT NULL,
     value_type text GENERATED ALWAYS AS ( CASE WHEN key IN ('telegram_bot_token', 'telegram_channel_id') THEN
@@ -64,7 +64,7 @@ VALUES
 ON CONFLICT (key)
     DO NOTHING;
 
-CREATE OR REPLACE FUNCTION default_tenant_quota ()
+CREATE FUNCTION default_tenant_quota ()
     RETURNS bigint
     LANGUAGE sql
     STABLE
@@ -78,7 +78,7 @@ CREATE OR REPLACE FUNCTION default_tenant_quota ()
         key = 'tenant_quota_bytes'
 $$;
 
-CREATE TABLE IF NOT EXISTS tenants (
+CREATE TABLE tenants (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid () CHECK (id <> '00000000-0000-0000-0000-000000000000'::uuid),
     reserved_bytes bigint NOT NULL DEFAULT 0 CHECK (reserved_bytes >= 0),
     quota_bytes bigint NOT NULL DEFAULT default_tenant_quota (),
@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     rate_count integer NOT NULL DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS channels (
+CREATE TABLE channels (
     id uuid PRIMARY KEY,
     kind text NOT NULL,
     external_id text NOT NULL,
@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS channels (
     UNIQUE (kind, external_id)
 );
 
-CREATE TABLE IF NOT EXISTS identities (
+CREATE TABLE identities (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
     channel_id uuid NOT NULL REFERENCES channels,
@@ -103,21 +103,21 @@ CREATE TABLE IF NOT EXISTS identities (
     UNIQUE (tenant_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS tokens (
+CREATE TABLE tokens (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
     digest text UNIQUE NOT NULL,
     revoked boolean NOT NULL DEFAULT FALSE
 );
 
-CREATE TABLE IF NOT EXISTS account_credentials (
+CREATE TABLE account_credentials (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
     ciphertext bytea NOT NULL,
     UNIQUE (tenant_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS connections (
+CREATE TABLE connections (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
     adapter_id text NOT NULL,
@@ -131,13 +131,13 @@ CREATE TABLE IF NOT EXISTS connections (
     UNIQUE (tenant_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS tenant_preferences (
+CREATE TABLE tenant_preferences (
     tenant_id uuid PRIMARY KEY REFERENCES tenants,
     default_connection_id uuid,
     FOREIGN KEY (tenant_id, default_connection_id) REFERENCES connections (tenant_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS archives (
+CREATE TABLE archives (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
     visibility text NOT NULL DEFAULT 'private' CHECK (visibility IN ('public', 'private')),
@@ -162,7 +162,7 @@ CREATE TABLE IF NOT EXISTS archives (
     UNIQUE (tenant_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS captures (
+CREATE TABLE captures (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
     visibility text NOT NULL DEFAULT 'private' CHECK (visibility IN ('public', 'private')),
@@ -189,13 +189,13 @@ CREATE TABLE IF NOT EXISTS captures (
     FOREIGN KEY (tenant_id, connection_id) REFERENCES connections (tenant_id, id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS one_active_capture ON captures (archive_id, provider_id, (coalesce(connection_id, '00000000-0000-0000-0000-000000000000'::uuid)))
+CREATE UNIQUE INDEX one_active_capture ON captures (archive_id, provider_id, (coalesce(connection_id, '00000000-0000-0000-0000-000000000000'::uuid)))
 WHERE
     state IN ('queued', 'downloading');
 
-CREATE INDEX IF NOT EXISTS archive_recent ON archives (tenant_id, created_at DESC, id DESC);
+CREATE INDEX archive_recent ON archives (tenant_id, created_at DESC, id DESC);
 
-CREATE TABLE IF NOT EXISTS revisions (
+CREATE TABLE revisions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
     visibility text NOT NULL DEFAULT 'private' CHECK (visibility IN ('public', 'private')),
@@ -220,22 +220,80 @@ CREATE TABLE IF NOT EXISTS revisions (
     FOREIGN KEY (tenant_id, capture_id) REFERENCES captures (tenant_id, id)
 );
 
+CREATE TABLE profiles (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
+    tenant_id uuid NOT NULL REFERENCES tenants,
+    visibility text NOT NULL CHECK (visibility IN ('public', 'private')),
+    scope text NOT NULL,
+    data_scope uuid GENERATED ALWAYS AS ( CASE WHEN visibility = 'public' THEN
+        '00000000-0000-0000-0000-000000000000'::uuid
+    ELSE
+        tenant_id
+    END) STORED,
+    platform text NOT NULL DEFAULT 'x',
+    external_id text NOT NULL,
+    observed_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (data_scope, platform, scope, external_id),
+    UNIQUE (data_scope, id)
+);
+
+CREATE TABLE profile_versions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
+    profile_id uuid NOT NULL REFERENCES profiles ON DELETE CASCADE,
+    tenant_id uuid NOT NULL REFERENCES tenants,
+    visibility text NOT NULL CHECK (visibility IN ('public', 'private')),
+    data_scope uuid GENERATED ALWAYS AS ( CASE WHEN visibility = 'public' THEN
+        '00000000-0000-0000-0000-000000000000'::uuid
+    ELSE
+        tenant_id
+    END) STORED,
+    content_hash text NOT NULL,
+    payload jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (profile_id, content_hash),
+    FOREIGN KEY (data_scope, profile_id) REFERENCES profiles (data_scope, id)
+);
+
+CREATE TABLE revision_profiles (
+    revision_id uuid PRIMARY KEY REFERENCES revisions ON DELETE CASCADE,
+    profile_version_id uuid NOT NULL REFERENCES profile_versions,
+    tenant_id uuid NOT NULL REFERENCES tenants,
+    visibility text NOT NULL CHECK (visibility IN ('public', 'private'))
+);
+
+CREATE TABLE source_responses (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
+    tenant_id uuid NOT NULL REFERENCES tenants,
+    capture_id uuid NOT NULL,
+    position integer NOT NULL,
+    visibility text NOT NULL CHECK (visibility IN ('public', 'private')),
+    body bytea NOT NULL,
+    content_type text NOT NULL,
+    source_url text NOT NULL,
+    sha256 text NOT NULL,
+    size bigint NOT NULL CHECK (size = octet_length(body)),
+    unreferenced_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (capture_id, position),
+    FOREIGN KEY (tenant_id, capture_id) REFERENCES captures (tenant_id, id) ON DELETE CASCADE
+);
+
 DO $$
+DECLARE
+    tab text;
 BEGIN
-    IF NOT EXISTS (
-        SELECT
-            1
-        FROM
-            pg_constraint
-        WHERE
-            conname = 'archive_revision_fk') THEN
-    ALTER TABLE archives
-        ADD CONSTRAINT archive_revision_fk FOREIGN KEY (id, current_revision) REFERENCES revisions (archive_id, id);
-END IF;
+    FOREACH tab IN ARRAY ARRAY['profiles', 'profile_versions', 'revision_profiles', 'source_responses'] LOOP
+        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', tab);
+        EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', tab);
+        EXECUTE format($policy$CREATE POLICY content_visibility ON %I USING (visibility='public' OR tenant_id=nullif(current_setting('app.tenant_id',true),'')::uuid) WITH CHECK (visibility='public' OR tenant_id=nullif(current_setting('app.tenant_id',true),'')::uuid)$policy$, tab);
+    END LOOP;
 END
 $$;
 
-CREATE TABLE IF NOT EXISTS blobs (
+ALTER TABLE archives
+    ADD CONSTRAINT archive_revision_fk FOREIGN KEY (id, current_revision) REFERENCES revisions (archive_id, id);
+
+CREATE TABLE blobs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
     visibility text NOT NULL DEFAULT 'private' CHECK (visibility IN ('public', 'private')),
@@ -254,7 +312,7 @@ CREATE TABLE IF NOT EXISTS blobs (
     UNIQUE (tenant_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS objects (
+CREATE TABLE objects (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
     object_key text NOT NULL UNIQUE,
@@ -263,7 +321,7 @@ CREATE TABLE IF NOT EXISTS objects (
     UNIQUE (tenant_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS assets (
+CREATE TABLE assets (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
     visibility text NOT NULL DEFAULT 'private' CHECK (visibility IN ('public', 'private')),
@@ -275,29 +333,41 @@ CREATE TABLE IF NOT EXISTS assets (
     capture_id uuid NOT NULL,
     position integer NOT NULL,
     source_url text NOT NULL,
-    alt_text text NOT NULL DEFAULT '',
-    sensitive boolean NOT NULL DEFAULT FALSE,
-    cache_key text NOT NULL DEFAULT '',
-    kind text NOT NULL CHECK (kind IN ('image', 'video')),
-    state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'ready', 'failed')),
-    error text NOT NULL DEFAULT '',
-    blob_id uuid,
-    object_id uuid,
-    reserved_bytes bigint NOT NULL DEFAULT 0,
-    UNIQUE (data_scope, id),
-    UNIQUE (tenant_id, id),
-    UNIQUE (capture_id, position),
-    FOREIGN KEY (data_scope, capture_id) REFERENCES captures (data_scope, id),
-    FOREIGN KEY (tenant_id, capture_id) REFERENCES captures (tenant_id, id),
-    FOREIGN KEY (data_scope, blob_id) REFERENCES blobs (data_scope, id),
-    FOREIGN KEY (tenant_id, object_id) REFERENCES objects (tenant_id, id)
-);
+    purpose text NOT NULL DEFAULT '' CHECK(purpose IN ('',
+    'avatar')),
+alt_text text NOT NULL DEFAULT '',
+sensitive boolean NOT NULL DEFAULT FALSE,
+cache_key text NOT NULL DEFAULT '',
+kind text NOT NULL CHECK (kind IN ('image', 'video')),
+state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'ready', 'failed')),
+error text NOT NULL DEFAULT '',
+blob_id uuid,
+object_id uuid,
+reserved_bytes bigint NOT NULL DEFAULT 0,
+UNIQUE (data_scope,
+    id),
+UNIQUE (tenant_id,
+    id),
+UNIQUE (capture_id,
+    position),
+FOREIGN KEY (data_scope,
+    capture_id)
+REFERENCES captures (data_scope, id),
+FOREIGN KEY (tenant_id,
+    capture_id)
+REFERENCES captures (tenant_id, id),
+FOREIGN KEY (data_scope,
+    blob_id)
+REFERENCES blobs (data_scope, id),
+FOREIGN KEY (tenant_id,
+    object_id)
+REFERENCES objects (tenant_id, id));
 
-CREATE INDEX IF NOT EXISTS assets_cache ON assets (data_scope, cache_key)
+CREATE INDEX assets_cache ON assets (data_scope, cache_key)
 WHERE
     state = 'ready' AND cache_key <> '';
 
-CREATE TABLE IF NOT EXISTS submissions (
+CREATE TABLE submissions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
     capture_id uuid NOT NULL,
@@ -318,7 +388,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     FOREIGN KEY (tenant_id, identity_id) REFERENCES identities (tenant_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS inbox (
+CREATE TABLE inbox (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
     channel_id uuid NOT NULL REFERENCES channels,
@@ -330,7 +400,7 @@ CREATE TABLE IF NOT EXISTS inbox (
     UNIQUE (tenant_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS replies (
+CREATE TABLE replies (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
     tenant_id uuid NOT NULL REFERENCES tenants,
     inbox_id uuid NOT NULL UNIQUE,
@@ -343,7 +413,7 @@ CREATE TABLE IF NOT EXISTS replies (
     FOREIGN KEY (tenant_id, inbox_id) REFERENCES inbox (tenant_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS tenant_archives (
+CREATE TABLE tenant_archives (
     tenant_id uuid NOT NULL REFERENCES tenants,
     archive_id uuid NOT NULL REFERENCES archives,
     provider_id text NOT NULL DEFAULT 'fxtwitter',
@@ -353,7 +423,7 @@ CREATE TABLE IF NOT EXISTS tenant_archives (
     PRIMARY KEY (tenant_id, archive_id)
 );
 
-CREATE INDEX IF NOT EXISTS collection_recent ON tenant_archives (tenant_id, created_at DESC, archive_id DESC);
+CREATE INDEX collection_recent ON tenant_archives (tenant_id, created_at DESC, archive_id DESC);
 
 -- Content has a separate sharing boundary from the tenant that paid for its creation.
 DO $$
@@ -363,9 +433,6 @@ BEGIN
     FOREACH t IN ARRAY ARRAY['archives', 'captures', 'revisions', 'assets', 'blobs'] LOOP
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
         EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
-        EXECUTE format('DROP POLICY IF EXISTS content_read ON %I', t);
-        EXECUTE format('DROP POLICY IF EXISTS content_insert ON %I', t);
-        EXECUTE format('DROP POLICY IF EXISTS content_update ON %I', t);
         EXECUTE format('CREATE POLICY content_read ON %I FOR SELECT USING (nullif(current_setting(''app.tenant_id'',true),'''') IS NOT NULL AND (visibility=''public'' OR tenant_id=nullif(current_setting(''app.tenant_id'',true),'''')::uuid))', t);
         EXECUTE format('CREATE POLICY content_insert ON %I FOR INSERT WITH CHECK (tenant_id=nullif(current_setting(''app.tenant_id'',true),'''')::uuid)', t);
         IF t = 'archives' THEN
@@ -377,7 +444,7 @@ BEGIN
 END
 $$;
 
-CREATE OR REPLACE FUNCTION immutable_content_owner ()
+CREATE FUNCTION immutable_content_owner ()
     RETURNS TRIGGER
     LANGUAGE plpgsql
     AS $$
@@ -394,7 +461,7 @@ DECLARE
     t text;
 BEGIN
     FOREACH t IN ARRAY ARRAY['archives', 'captures', 'revisions', 'assets', 'blobs'] LOOP
-        EXECUTE format('CREATE OR REPLACE TRIGGER immutable_content_owner BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION immutable_content_owner()', t);
+        EXECUTE format('CREATE TRIGGER immutable_content_owner BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION immutable_content_owner()', t);
     END LOOP;
 END
 $$;
@@ -406,13 +473,6 @@ BEGIN
     FOREACH t IN ARRAY ARRAY['tenants', 'identities', 'tokens', 'connections', 'account_credentials', 'tenant_preferences', 'objects', 'submissions', 'tenant_archives', 'inbox', 'replies'] LOOP
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
         EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
-        IF NOT EXISTS (
-            SELECT
-            FROM
-                pg_policies
-            WHERE
-                tablename = t
-                AND policyname = 'tenant_isolation') THEN
         EXECUTE format('CREATE POLICY tenant_isolation ON %I USING (%I = nullif(current_setting(''app.tenant_id'',true),'''')::uuid) WITH CHECK (%I = nullif(current_setting(''app.tenant_id'',true),'''')::uuid)', t, CASE WHEN t = 'tenants' THEN
                 'id'
             ELSE
@@ -422,8 +482,7 @@ BEGIN
             ELSE
                 'tenant_id'
             END);
-    END IF;
-END LOOP;
+    END LOOP;
 END
 $$;
 
@@ -434,7 +493,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON tenants, identities, connections, archiv
 GRANT SELECT, UPDATE ON channels TO monitor_app;
 
 -- Only these exact authentication entrypoints may operate without a tenant context.
-CREATE OR REPLACE FUNCTION resolve_identity (cid uuid, external_user text, quota bigint)
+CREATE FUNCTION resolve_identity (cid uuid, external_user text, quota bigint)
     RETURNS TABLE (
         identity_id uuid,
         tenant_id uuid)
@@ -481,7 +540,7 @@ BEGIN
 END
 $$;
 
-CREATE OR REPLACE FUNCTION authenticate_token (d text)
+CREATE FUNCTION authenticate_token (d text)
     RETURNS uuid
     LANGUAGE sql
     SECURITY DEFINER
@@ -505,7 +564,7 @@ INSERT INTO schema_versions (version)
 ON CONFLICT
     DO NOTHING;
 
-CREATE OR REPLACE FUNCTION garbage_tenants ()
+CREATE FUNCTION garbage_tenants ()
     RETURNS TABLE (
         tenant_id uuid)
     LANGUAGE sql
@@ -533,24 +592,10 @@ REVOKE ALL ON FUNCTION garbage_tenants () FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION garbage_tenants () TO monitor_app;
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT
-            1
-        FROM
-            pg_constraint
-        WHERE
-            conname = 'capture_revision_fk') THEN
-    ALTER TABLE captures
-        ADD CONSTRAINT capture_revision_fk FOREIGN KEY (archive_id, revision_id) REFERENCES revisions (archive_id, id);
-END IF;
-END
-$$;
+ALTER TABLE captures
+    ADD CONSTRAINT capture_revision_fk FOREIGN KEY (archive_id, revision_id) REFERENCES revisions (archive_id, id);
 
 -- Linking a private object requires access to that object as well as ownership of the link.
-DROP POLICY IF EXISTS submission_target ON submissions;
-
 CREATE POLICY submission_target ON submissions AS RESTRICTIVE
     FOR ALL
     USING (TRUE)
@@ -560,8 +605,6 @@ CREATE POLICY submission_target ON submissions AS RESTRICTIVE
             captures c
         WHERE
             c.id = capture_id));
-
-DROP POLICY IF EXISTS collection_target ON tenant_archives;
 
 CREATE POLICY collection_target ON tenant_archives AS RESTRICTIVE
     FOR ALL
@@ -574,7 +617,7 @@ CREATE POLICY collection_target ON tenant_archives AS RESTRICTIVE
             a.id = archive_id));
 
 -- Only the capture's executing tenant may schedule its subscribers' deliveries.
-CREATE OR REPLACE FUNCTION capture_deliveries (cid uuid)
+CREATE FUNCTION capture_deliveries (cid uuid)
     RETURNS TABLE (
         tenant_id uuid,
         id uuid)
@@ -601,7 +644,7 @@ REVOKE ALL ON FUNCTION capture_deliveries (uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION capture_deliveries (uuid) TO monitor_app;
 
 -- Bill the authenticated tenant's collection, independently of physical ownership.
-CREATE OR REPLACE FUNCTION tenant_usage ()
+CREATE FUNCTION tenant_usage ()
     RETURNS bigint
     LANGUAGE sql
     STABLE
@@ -638,20 +681,69 @@ CREATE OR REPLACE FUNCTION tenant_usage ()
                 FROM owned_revisions), 0) + coalesce((
                 SELECT
                     sum(size)
-                FROM image_content), 0))::bigint
+                FROM image_content), 0) + coalesce((
+                SELECT
+                    sum(sr.size)
+                FROM source_responses sr
+                JOIN captures c ON c.id = sr.capture_id
+                JOIN tenant_archives ta ON ta.archive_id = c.archive_id
+            WHERE
+                ta.tenant_id = nullif (current_setting('app.tenant_id', TRUE), '')::uuid
+                AND c.state IN ('complete', 'partial')
+                AND (sr.visibility = 'public'
+                    OR sr.tenant_id = ta.tenant_id)), 0))::bigint
 $$;
 
 REVOKE ALL ON FUNCTION tenant_usage () FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION tenant_usage () TO monitor_app;
 
-CREATE INDEX IF NOT EXISTS revisions_archive ON revisions (archive_id);
+CREATE INDEX revisions_archive ON revisions (archive_id);
 
-CREATE INDEX IF NOT EXISTS collection_archive ON tenant_archives (archive_id);
+CREATE INDEX collection_archive ON tenant_archives (archive_id);
 
-CREATE INDEX IF NOT EXISTS assets_blob ON assets (blob_id);
+CREATE FUNCTION mark_private_sources ()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        UPDATE
+            source_responses sr
+        SET
+            unreferenced_at = now()
+        FROM
+            captures c
+        WHERE
+            sr.capture_id = c.id
+            AND c.archive_id = OLD.archive_id
+            AND sr.tenant_id = OLD.tenant_id
+            AND sr.visibility = 'private';
+    ELSE
+        UPDATE
+            source_responses sr
+        SET
+            unreferenced_at = NULL
+        FROM
+            captures c
+        WHERE
+            sr.capture_id = c.id
+            AND c.archive_id = NEW.archive_id
+            AND sr.tenant_id = NEW.tenant_id
+            AND sr.visibility = 'private';
+    END IF;
+    RETURN NULL;
+END
+$$;
 
-CREATE OR REPLACE FUNCTION mark_unreferenced (aid uuid)
+CREATE TRIGGER private_source_retention
+    AFTER INSERT OR DELETE ON tenant_archives
+    FOR EACH ROW
+    EXECUTE FUNCTION mark_private_sources ();
+
+CREATE INDEX assets_blob ON assets (blob_id);
+
+CREATE FUNCTION mark_unreferenced (aid uuid)
     RETURNS void
     LANGUAGE sql
     SECURITY DEFINER
@@ -678,7 +770,7 @@ REVOKE ALL ON FUNCTION mark_unreferenced (uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION mark_unreferenced (uuid) TO monitor_app;
 
 -- Bound each maintenance batch. Archive locks serialize deletion against collection creation.
-CREATE OR REPLACE FUNCTION collect_unreferenced_archives (grace interval)
+CREATE FUNCTION collect_unreferenced_archives (grace interval)
     RETURNS integer
     LANGUAGE plpgsql
     SECURITY DEFINER
@@ -789,6 +881,32 @@ BEGIN
     WHERE id = aid;
     removed := removed + 1;
 END LOOP;
+    DELETE FROM public.source_responses sr USING public.captures c
+WHERE sr.capture_id = c.id
+    AND sr.visibility = 'private'
+    AND sr.unreferenced_at < now() - grace
+    AND c.state IN ('complete', 'partial', 'failed')
+    AND NOT EXISTS (
+        SELECT
+        FROM
+            public.tenant_archives ta
+        WHERE
+            ta.tenant_id = sr.tenant_id
+            AND ta.archive_id = c.archive_id);
+    DELETE FROM public.profile_versions pv
+    WHERE NOT EXISTS (
+            SELECT
+            FROM
+                public.revision_profiles rp
+            WHERE
+                rp.profile_version_id = pv.id);
+    DELETE FROM public.profiles p
+    WHERE NOT EXISTS (
+            SELECT
+            FROM
+                public.profile_versions pv
+            WHERE
+                pv.profile_id = p.id);
     -- Blob foreign keys also serialize this deletion against concurrent asset attachment.
     WITH unused AS (
         DELETE FROM public.blobs b
@@ -818,7 +936,7 @@ REVOKE ALL ON FUNCTION collect_unreferenced_archives (interval) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION collect_unreferenced_archives (interval) TO monitor_app;
 
 -- Channel transport metadata, not a grant of access to archived content.
-CREATE TABLE IF NOT EXISTS channel_media_cache (
+CREATE TABLE channel_media_cache (
     channel_kind text NOT NULL,
     account_id text NOT NULL,
     hash text NOT NULL,

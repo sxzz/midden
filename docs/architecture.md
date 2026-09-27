@@ -148,7 +148,8 @@ API 的 `used_bytes` 由 `tenant_usage()` 在当前租户 RLS 上下文中计算
 | `inbox`           | 持久化 Telegram 消息及按钮回调；`(channel_id, update_id)` 唯一，防止重复消费                 |
 | `replies`         | 命令回复的文本、按钮、消息 ID 和发送状态；每个 inbox 最多一条回复                            |
 | `config`          | 全局运行参数和服务凭据，保存键、文本值、值类型、敏感标记和更新时间；管理员写入，业务角色只读 |
-| `schema_versions` | 应用 schema 版本标记；当前迁移通过可重复执行的 schema SQL 应用                               |
+| `schema_versions` | 应用 schema 版本标记，发布前保持 `1`                               |
+| `schema_migrations` | 已执行迁移的文件名、校验和与执行时间；管理员访问 |
 | `river_*`         | River 管理的任务、队列、调度和迁移记录                                                       |
 
 业务表启用并强制执行 RLS。身份、Connection、保存记录、提交与消息按租户隔离；内容允许已认证租户读取 public 数据，private 数据仅允许所属租户读取。内容关联外键使用 `data_scope`，渠道及账号关联外键使用 `tenant_id`。核心的 `monitor_app` 角色无超级用户、表所有者或 `BYPASSRLS` 权限。River 表是内部共享调度数据，由核心访问；用户通过业务 API 查询自己的任务。
@@ -169,7 +170,7 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 - `adapters/x/src/server.ts`：TS X Adapter 进程。
 - `internal/app/`：业务服务、任务、命令和投递。
 - `internal/telegram/`：Telegram SDK 封装。
-- `internal/store/schema.sql`：表、约束、RLS 与身份解析函数。
+- `internal/store/migrations/0001_initial.sql`：表、约束、RLS 与身份解析函数。
 - `api/adapter/v1/adapter.proto`：Adapter 协议。
 - `adapters/x/src/session.ts`：租户账号 transport 与结果可见性判定。
 - `adapters/x/src/`：公共 API 与个人账号 Provider；`third_party/atmosphere/`：固定上游版本的本地源码依赖。
@@ -201,6 +202,8 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 | `capture.fetch` | 1.0 | 用 `Fetch` 读取单个目标 |
 | `connection.check` | 1.0 | 用 `CheckConnection` 验证账号会话 |
 | `content.text` | 1.0 | 采集结果可以包含文字 |
+| `entity.graph` | 1.0 | 返回由 Adapter 声明结构的实体及关系 |
+| `source.raw` | 1.0 | 完整上游响应体及其可见性 |
 | `media.image` | 1.0 | 采集结果可以包含图片 |
 | `media.video` | 1.0 | 采集结果可以包含视频 |
 
@@ -214,4 +217,26 @@ Describe 声明在核心启动时验证并缓存，能力变化需重启核心�
 
 Telegram `/account_add` 在接收阶段解析 Base64 Cookie，只提取会话字段并使用租户绑定的加密密文暂存于 inbox；原始消息文字和实体在持久化前移除。队列只保存 inbox ID。处理完成或终止失败时清理暂存密文；验证通过后的长期凭据仍存放在 `account_credentials`。Connection ID 由渠道实例和 update ID 稳定生成，重复执行不会重新创建账号或恢复已撤销凭据。
 
-X 账号验证读取携带该账号 Cookie 的首页，从初始状态中的当前会话用户 ID 和对应用户实体确认身份。GraphQL 请求签名使用同一次请求所属账号的首页初始化；账号页面不进入共享缓存。登录跳转、认证拒绝、页面结构变化和上游临时故障分别处理，未知响应不视为验证成功。
+X 账号验证使用携带该账号 Cookie 的 `Viewer` GraphQL 接口，从当前会话返回的用户实体确认账号 ID 和用户名。普通帖子和 Profile 查询直接请求 API，不依赖登录首页或请求签名。只有上游签名清单中的接口才使用该账号首页初始化签名，账号页面不进入共享缓存。浏览器验证挑战、认证拒绝、受限会话、响应结构变化和上游临时故障分别处理；未知响应不视为验证成功，也不会自动回退为访客或其他账号。
+
+## 数据库迁移
+
+`schema_migrations` 保存有序迁移文件名、SHA-256 校验和及执行时间，仅管理员访问。迁移进程持有 PostgreSQL advisory lock，先校验全部已执行历史，再按顺序应用未执行文件；每个文件的 SQL 和执行记录在同一事务内提交。完整初始结构只执行一次，后续通过独立迁移变更结构和数据。River 维护自己的迁移记录，与应用 schema 版本独立；应用迁移和 River 升级均成功后才允许启动核心。
+
+## Adapter 定义的实体与原始响应
+
+Adapter 的 `Describe.entity_types` 提供类型名与自包含 JSON Schema 2020-12。Provider 通过 `entity.graph` capability 和 `entity_types` 列表声明所支持的类型。核心在发现阶段编译 Schema，在采集阶段校验实体数据、根节点、关系端点和资源索引；未声明的类型或不符合 Schema 的数据不会入库。协议保持 `1.0`、应用 schema 保持 `1`。类型结构变化通过各版本保存的 Schema 快照区分，不由公共 proto 定义平台字段。
+
+`Fetch.graph` 包含 root、entities、relations。每个实体有图内 key、类型、外部 ID、JSON data 和资源索引；关系使用图内 key 与 Adapter 定义的关系名称。整张图继承采集结果的可见性与访问作用域，不能从图内引用其他租户或作用域的已有实体。资源的 purpose 由 Adapter 定义：空值表示加入通用展示，其余作为实体关联资源保存。核心只认识通用媒体类型，不解释 avatar 等角色。
+
+`entities` 以平台、访问作用域、类型和外部 ID 标识对象，公共实体跨租户共享，私有实体按租户隔离。`entity_versions` 保存数据、Schema 快照与内容哈希；实际资源内容参与版本比较。`revision_entities` 将归档版本关联到当时的实体版本，并标记根节点；`entity_relations` 保存该次快照的关系，端点外键包含数据作用域。`GET /v1/entities/{id}` 读取调用租户所保存归档关联的最新实体快照；归档 API 内的 graph 固定关联当时版本。
+
+X Adapter 在 `adapters/x/src/entity-schemas.ts` 定义 `x.post` 和 `x.profile`，通过 `authored_by` 关联。帖子 data 包含正文、上游发布时间、编辑时间及来源、编辑 ID 列表；Profile data 包含用户名、昵称、头像 URL 与个人资料。头像文件由 Adapter 作为关联资源返回，核心下载保存，不加入 Telegram 帖子相册。编辑时间优先采用上游明确字段，否则在存在多个编辑版本 ID 时从最新 Snowflake 推导并标记 `x_snowflake`；没有证据时省略。
+
+Fetch 的 text、text_kind 和展示媒体是可选的通用展示摘要，与 entity data 分开。Telegram 只读取这些字段，不解析 X 或其他平台的专属 JSON。正文和摘要在同一归档版本中保存。
+
+`source_responses` 保留采集接口响应体的原始字节、内容类型、请求地址、哈希、大小和采集记录关联，不保存请求 Cookie、认证头或登录首页。每次成功采集都保存原始响应，即使实体内容没有变化；原始响应变化不会单独创建内容版本。账号接口的原始响应强制为私有，不能随公开帖子向其他租户共享。其读取需要原始采集租户仍保存该帖子；删除后独立进入保留期，即使公开帖子仍被其他租户持有，也能回收该私有响应。
+
+逻辑额度包含归档版本序列化内容（包括 entity data、Schema 快照和关系）、唯一媒体文件和可访问的原始响应字节。实体索引表不重复收费；数据库索引、队列等运行开销不计入。原始响应单次合计上限 4 MiB，完整响应过大时明确失败，不静默截断。
+
+`20260928000000_adapter_entities.sql` 将既有帖子与 Profile 快照转换为通用实体，保留归档及作者实体 ID、内容历史、资源和原始响应，转换执行中的采集快照并调整预留用量。旧 Profile 专用表转换后删除，运行代码不保留旧协议或数据格式分支；初始迁移的内容和校验和不变。

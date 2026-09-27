@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -60,7 +61,7 @@ func TestTypeScriptTLSProtocol(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "localhost"}, DNSNames: []string{"localhost"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "localhost"}, DNSNames: []string{"localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	cert, e := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if e != nil {
 		t.Fatal(e)
@@ -93,7 +94,7 @@ func TestTypeScriptTLSProtocol(t *testing.T) {
 		t.Fatal("TS adapter failed to start")
 	}
 	port := strings.TrimSpace(scanner.Text())
-	conn, e := Dial("localhost:"+port, "fixture", ca)
+	conn, e := Dial("127.0.0.1:"+port, "fixture", ca)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -129,7 +130,7 @@ func TestTypeScriptTLSProtocol(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if r.Text == "" || r.Visibility != pb.Visibility_VISIBILITY_PUBLIC {
+	if r.Text == "" || r.Visibility != pb.Visibility_VISIBILITY_PUBLIC || r.Graph == nil || len(r.Graph.Entities) < 2 || len(r.SourceResponses) != 1 || string(r.SourceResponses[0].Body) != string(fixture) {
 		t.Fatal("public fixture lost over RPC")
 	}
 	var trailer metadata.MD
@@ -140,7 +141,7 @@ func TestTypeScriptTLSProtocol(t *testing.T) {
 	if _, e = client.CheckConnection(ctx, &pb.CheckConnectionRequest{ProviderId: "x-session"}); status.Code(e) != codes.InvalidArgument {
 		t.Fatal("credential validation lost over RPC", e)
 	}
-	bad, e := Dial("localhost:"+port, "wrong", ca)
+	bad, e := Dial("127.0.0.1:"+port, "wrong", ca)
 	if e != nil {
 		t.Fatal(e)
 	}

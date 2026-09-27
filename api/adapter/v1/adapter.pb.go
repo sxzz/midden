@@ -173,6 +173,7 @@ type Provider struct {
 	Authentication string                 `protobuf:"bytes,2,opt,name=authentication,proto3" json:"authentication,omitempty"`
 	Visibilities   []Visibility           `protobuf:"varint,3,rep,packed,name=visibilities,proto3,enum=adapter.v1.Visibility" json:"visibilities,omitempty"`
 	Capabilities   []*Capability          `protobuf:"bytes,4,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	EntityTypes    []string               `protobuf:"bytes,5,rep,name=entity_types,json=entityTypes,proto3" json:"entity_types,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -235,14 +236,22 @@ func (x *Provider) GetCapabilities() []*Capability {
 	return nil
 }
 
+func (x *Provider) GetEntityTypes() []string {
+	if x != nil {
+		return x.EntityTypes
+	}
+	return nil
+}
+
 type DescribeResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Strict major.minor. Minor revisions must remain backward compatible.
-	ProtocolVersion string      `protobuf:"bytes,1,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
-	AdapterId       string      `protobuf:"bytes,2,opt,name=adapter_id,json=adapterId,proto3" json:"adapter_id,omitempty"`
-	Version         string      `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
-	Hosts           []string    `protobuf:"bytes,4,rep,name=hosts,proto3" json:"hosts,omitempty"`
-	Providers       []*Provider `protobuf:"bytes,5,rep,name=providers,proto3" json:"providers,omitempty"`
+	ProtocolVersion string        `protobuf:"bytes,1,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
+	AdapterId       string        `protobuf:"bytes,2,opt,name=adapter_id,json=adapterId,proto3" json:"adapter_id,omitempty"`
+	Version         string        `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	Hosts           []string      `protobuf:"bytes,4,rep,name=hosts,proto3" json:"hosts,omitempty"`
+	Providers       []*Provider   `protobuf:"bytes,5,rep,name=providers,proto3" json:"providers,omitempty"`
+	EntityTypes     []*EntityType `protobuf:"bytes,6,rep,name=entity_types,json=entityTypes,proto3" json:"entity_types,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -308,6 +317,13 @@ func (x *DescribeResponse) GetHosts() []string {
 func (x *DescribeResponse) GetProviders() []*Provider {
 	if x != nil {
 		return x.Providers
+	}
+	return nil
+}
+
+func (x *DescribeResponse) GetEntityTypes() []*EntityType {
+	if x != nil {
+		return x.EntityTypes
 	}
 	return nil
 }
@@ -412,6 +428,7 @@ type Resource struct {
 	ImmutableKey  string `protobuf:"bytes,3,opt,name=immutable_key,json=immutableKey,proto3" json:"immutable_key,omitempty"`
 	AltText       string `protobuf:"bytes,4,opt,name=alt_text,json=altText,proto3" json:"alt_text,omitempty"`
 	Sensitive     bool   `protobuf:"varint,5,opt,name=sensitive,proto3" json:"sensitive,omitempty"`
+	Purpose       string `protobuf:"bytes,6,opt,name=purpose,proto3" json:"purpose,omitempty"` // Adapter-defined role. Empty resources appear in the generic presentation.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -481,25 +498,351 @@ func (x *Resource) GetSensitive() bool {
 	return false
 }
 
+func (x *Resource) GetPurpose() string {
+	if x != nil {
+		return x.Purpose
+	}
+	return ""
+}
+
+// Adapter-owned JSON Schema (2020-12), bundled and self-contained.
+type EntityType struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	JsonSchema    []byte                 `protobuf:"bytes,2,opt,name=json_schema,json=jsonSchema,proto3" json:"json_schema,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EntityType) Reset() {
+	*x = EntityType{}
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EntityType) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EntityType) ProtoMessage() {}
+
+func (x *EntityType) ProtoReflect() protoreflect.Message {
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EntityType.ProtoReflect.Descriptor instead.
+func (*EntityType) Descriptor() ([]byte, []int) {
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *EntityType) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *EntityType) GetJsonSchema() []byte {
+	if x != nil {
+		return x.JsonSchema
+	}
+	return nil
+}
+
+type Entity struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Key             string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"` // Local graph key, not a database ID.
+	Type            string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	ExternalId      string                 `protobuf:"bytes,3,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
+	DataJson        []byte                 `protobuf:"bytes,4,opt,name=data_json,json=dataJson,proto3" json:"data_json,omitempty"`
+	ResourceIndices []uint32               `protobuf:"varint,5,rep,packed,name=resource_indices,json=resourceIndices,proto3" json:"resource_indices,omitempty"` // Indices in FetchResponse.resources.
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *Entity) Reset() {
+	*x = Entity{}
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Entity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Entity) ProtoMessage() {}
+
+func (x *Entity) ProtoReflect() protoreflect.Message {
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Entity.ProtoReflect.Descriptor instead.
+func (*Entity) Descriptor() ([]byte, []int) {
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *Entity) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *Entity) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *Entity) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+func (x *Entity) GetDataJson() []byte {
+	if x != nil {
+		return x.DataJson
+	}
+	return nil
+}
+
+func (x *Entity) GetResourceIndices() []uint32 {
+	if x != nil {
+		return x.ResourceIndices
+	}
+	return nil
+}
+
+type EntityRelation struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Source        string                 `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"`
+	Target        string                 `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
+	Type          string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EntityRelation) Reset() {
+	*x = EntityRelation{}
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EntityRelation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EntityRelation) ProtoMessage() {}
+
+func (x *EntityRelation) ProtoReflect() protoreflect.Message {
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EntityRelation.ProtoReflect.Descriptor instead.
+func (*EntityRelation) Descriptor() ([]byte, []int) {
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *EntityRelation) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *EntityRelation) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *EntityRelation) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+type EntityGraph struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Root          string                 `protobuf:"bytes,1,opt,name=root,proto3" json:"root,omitempty"`
+	Entities      []*Entity              `protobuf:"bytes,2,rep,name=entities,proto3" json:"entities,omitempty"`
+	Relations     []*EntityRelation      `protobuf:"bytes,3,rep,name=relations,proto3" json:"relations,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EntityGraph) Reset() {
+	*x = EntityGraph{}
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EntityGraph) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EntityGraph) ProtoMessage() {}
+
+func (x *EntityGraph) ProtoReflect() protoreflect.Message {
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EntityGraph.ProtoReflect.Descriptor instead.
+func (*EntityGraph) Descriptor() ([]byte, []int) {
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *EntityGraph) GetRoot() string {
+	if x != nil {
+		return x.Root
+	}
+	return ""
+}
+
+func (x *EntityGraph) GetEntities() []*Entity {
+	if x != nil {
+		return x.Entities
+	}
+	return nil
+}
+
+func (x *EntityGraph) GetRelations() []*EntityRelation {
+	if x != nil {
+		return x.Relations
+	}
+	return nil
+}
+
+type SourceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Body          []byte                 `protobuf:"bytes,1,opt,name=body,proto3" json:"body,omitempty"` // Original response body, before JSON parsing or normalization.
+	ContentType   string                 `protobuf:"bytes,2,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
+	SourceUrl     string                 `protobuf:"bytes,3,opt,name=source_url,json=sourceUrl,proto3" json:"source_url,omitempty"`              // No credentials or request headers.
+	Visibility    Visibility             `protobuf:"varint,4,opt,name=visibility,proto3,enum=adapter.v1.Visibility" json:"visibility,omitempty"` // Account responses stay private even for public posts.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SourceResponse) Reset() {
+	*x = SourceResponse{}
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SourceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SourceResponse) ProtoMessage() {}
+
+func (x *SourceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SourceResponse.ProtoReflect.Descriptor instead.
+func (*SourceResponse) Descriptor() ([]byte, []int) {
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SourceResponse) GetBody() []byte {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+func (x *SourceResponse) GetContentType() string {
+	if x != nil {
+		return x.ContentType
+	}
+	return ""
+}
+
+func (x *SourceResponse) GetSourceUrl() string {
+	if x != nil {
+		return x.SourceUrl
+	}
+	return ""
+}
+
+func (x *SourceResponse) GetVisibility() Visibility {
+	if x != nil {
+		return x.Visibility
+	}
+	return Visibility_VISIBILITY_UNSPECIFIED
+}
+
 type FetchResponse struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	ExternalId     string                 `protobuf:"bytes,1,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
-	Text           string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
-	TextKind       string                 `protobuf:"bytes,3,opt,name=text_kind,json=textKind,proto3" json:"text_kind,omitempty"`
-	Resources      []*Resource            `protobuf:"bytes,4,rep,name=resources,proto3" json:"resources,omitempty"`
-	Warnings       []string               `protobuf:"bytes,5,rep,name=warnings,proto3" json:"warnings,omitempty"`
-	ProviderId     string                 `protobuf:"bytes,6,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
-	AdapterVersion string                 `protobuf:"bytes,7,opt,name=adapter_version,json=adapterVersion,proto3" json:"adapter_version,omitempty"`
-	TextSource     string                 `protobuf:"bytes,8,opt,name=text_source,json=textSource,proto3" json:"text_source,omitempty"`
-	Incomplete     bool                   `protobuf:"varint,9,opt,name=incomplete,proto3" json:"incomplete,omitempty"`
-	Visibility     Visibility             `protobuf:"varint,10,opt,name=visibility,proto3,enum=adapter.v1.Visibility" json:"visibility,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ExternalId      string                 `protobuf:"bytes,1,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
+	Text            string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"` // Optional generic presentation; channels do not parse entity JSON.
+	TextKind        string                 `protobuf:"bytes,3,opt,name=text_kind,json=textKind,proto3" json:"text_kind,omitempty"`
+	Resources       []*Resource            `protobuf:"bytes,4,rep,name=resources,proto3" json:"resources,omitempty"`
+	Warnings        []string               `protobuf:"bytes,5,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	ProviderId      string                 `protobuf:"bytes,6,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	AdapterVersion  string                 `protobuf:"bytes,7,opt,name=adapter_version,json=adapterVersion,proto3" json:"adapter_version,omitempty"`
+	TextSource      string                 `protobuf:"bytes,8,opt,name=text_source,json=textSource,proto3" json:"text_source,omitempty"`
+	Incomplete      bool                   `protobuf:"varint,9,opt,name=incomplete,proto3" json:"incomplete,omitempty"`
+	Visibility      Visibility             `protobuf:"varint,10,opt,name=visibility,proto3,enum=adapter.v1.Visibility" json:"visibility,omitempty"`
+	Graph           *EntityGraph           `protobuf:"bytes,11,opt,name=graph,proto3" json:"graph,omitempty"`
+	SourceResponses []*SourceResponse      `protobuf:"bytes,12,rep,name=source_responses,json=sourceResponses,proto3" json:"source_responses,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *FetchResponse) Reset() {
 	*x = FetchResponse{}
-	mi := &file_api_adapter_v1_adapter_proto_msgTypes[6]
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -511,7 +854,7 @@ func (x *FetchResponse) String() string {
 func (*FetchResponse) ProtoMessage() {}
 
 func (x *FetchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_adapter_v1_adapter_proto_msgTypes[6]
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -524,7 +867,7 @@ func (x *FetchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FetchResponse.ProtoReflect.Descriptor instead.
 func (*FetchResponse) Descriptor() ([]byte, []int) {
-	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{6}
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *FetchResponse) GetExternalId() string {
@@ -597,6 +940,20 @@ func (x *FetchResponse) GetVisibility() Visibility {
 	return Visibility_VISIBILITY_UNSPECIFIED
 }
 
+func (x *FetchResponse) GetGraph() *EntityGraph {
+	if x != nil {
+		return x.Graph
+	}
+	return nil
+}
+
+func (x *FetchResponse) GetSourceResponses() []*SourceResponse {
+	if x != nil {
+		return x.SourceResponses
+	}
+	return nil
+}
+
 // Execution-only secrets; never persisted in task payloads or logs.
 type SessionCredential struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -608,7 +965,7 @@ type SessionCredential struct {
 
 func (x *SessionCredential) Reset() {
 	*x = SessionCredential{}
-	mi := &file_api_adapter_v1_adapter_proto_msgTypes[7]
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -620,7 +977,7 @@ func (x *SessionCredential) String() string {
 func (*SessionCredential) ProtoMessage() {}
 
 func (x *SessionCredential) ProtoReflect() protoreflect.Message {
-	mi := &file_api_adapter_v1_adapter_proto_msgTypes[7]
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -633,7 +990,7 @@ func (x *SessionCredential) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionCredential.ProtoReflect.Descriptor instead.
 func (*SessionCredential) Descriptor() ([]byte, []int) {
-	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{7}
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SessionCredential) GetAuthToken() string {
@@ -660,7 +1017,7 @@ type CheckConnectionRequest struct {
 
 func (x *CheckConnectionRequest) Reset() {
 	*x = CheckConnectionRequest{}
-	mi := &file_api_adapter_v1_adapter_proto_msgTypes[8]
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -672,7 +1029,7 @@ func (x *CheckConnectionRequest) String() string {
 func (*CheckConnectionRequest) ProtoMessage() {}
 
 func (x *CheckConnectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_adapter_v1_adapter_proto_msgTypes[8]
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -685,7 +1042,7 @@ func (x *CheckConnectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckConnectionRequest.ProtoReflect.Descriptor instead.
 func (*CheckConnectionRequest) Descriptor() ([]byte, []int) {
-	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{8}
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *CheckConnectionRequest) GetProviderId() string {
@@ -712,7 +1069,7 @@ type CheckConnectionResponse struct {
 
 func (x *CheckConnectionResponse) Reset() {
 	*x = CheckConnectionResponse{}
-	mi := &file_api_adapter_v1_adapter_proto_msgTypes[9]
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -724,7 +1081,7 @@ func (x *CheckConnectionResponse) String() string {
 func (*CheckConnectionResponse) ProtoMessage() {}
 
 func (x *CheckConnectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_adapter_v1_adapter_proto_msgTypes[9]
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -737,7 +1094,7 @@ func (x *CheckConnectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckConnectionResponse.ProtoReflect.Descriptor instead.
 func (*CheckConnectionResponse) Descriptor() ([]byte, []int) {
-	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{9}
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *CheckConnectionResponse) GetAccountId() string {
@@ -765,19 +1122,21 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"Capability\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05major\x18\x02 \x01(\rR\x05major\x12\x14\n" +
-	"\x05minor\x18\x03 \x01(\rR\x05minor\"\xba\x01\n" +
+	"\x05minor\x18\x03 \x01(\rR\x05minor\"\xdd\x01\n" +
 	"\bProvider\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12&\n" +
 	"\x0eauthentication\x18\x02 \x01(\tR\x0eauthentication\x12:\n" +
 	"\fvisibilities\x18\x03 \x03(\x0e2\x16.adapter.v1.VisibilityR\fvisibilities\x12:\n" +
-	"\fcapabilities\x18\x04 \x03(\v2\x16.adapter.v1.CapabilityR\fcapabilities\"\xc0\x01\n" +
+	"\fcapabilities\x18\x04 \x03(\v2\x16.adapter.v1.CapabilityR\fcapabilities\x12!\n" +
+	"\fentity_types\x18\x05 \x03(\tR\ventityTypes\"\xfb\x01\n" +
 	"\x10DescribeResponse\x12)\n" +
 	"\x10protocol_version\x18\x01 \x01(\tR\x0fprotocolVersion\x12\x1d\n" +
 	"\n" +
 	"adapter_id\x18\x02 \x01(\tR\tadapterId\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12\x14\n" +
 	"\x05hosts\x18\x04 \x03(\tR\x05hosts\x122\n" +
-	"\tproviders\x18\x05 \x03(\v2\x14.adapter.v1.ProviderR\tproviders\"\x88\x02\n" +
+	"\tproviders\x18\x05 \x03(\v2\x14.adapter.v1.ProviderR\tproviders\x129\n" +
+	"\fentity_types\x18\x06 \x03(\v2\x16.adapter.v1.EntityTypeR\ventityTypes\"\x88\x02\n" +
 	"\fFetchRequest\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x1f\n" +
 	"\vexternal_id\x18\x02 \x01(\tR\n" +
@@ -790,13 +1149,42 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"request_id\x18\x06 \x01(\tR\trequestId\x12=\n" +
 	"\n" +
 	"credential\x18\a \x01(\v2\x1d.adapter.v1.SessionCredentialR\n" +
-	"credential\"\x8e\x01\n" +
+	"credential\"\xa8\x01\n" +
 	"\bResource\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12#\n" +
 	"\rimmutable_key\x18\x03 \x01(\tR\fimmutableKey\x12\x19\n" +
 	"\balt_text\x18\x04 \x01(\tR\aaltText\x12\x1c\n" +
-	"\tsensitive\x18\x05 \x01(\bR\tsensitive\"\xf4\x02\n" +
+	"\tsensitive\x18\x05 \x01(\bR\tsensitive\x12\x18\n" +
+	"\apurpose\x18\x06 \x01(\tR\apurpose\"A\n" +
+	"\n" +
+	"EntityType\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
+	"\vjson_schema\x18\x02 \x01(\fR\n" +
+	"jsonSchema\"\x97\x01\n" +
+	"\x06Entity\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1f\n" +
+	"\vexternal_id\x18\x03 \x01(\tR\n" +
+	"externalId\x12\x1b\n" +
+	"\tdata_json\x18\x04 \x01(\fR\bdataJson\x12)\n" +
+	"\x10resource_indices\x18\x05 \x03(\rR\x0fresourceIndices\"T\n" +
+	"\x0eEntityRelation\x12\x16\n" +
+	"\x06source\x18\x01 \x01(\tR\x06source\x12\x16\n" +
+	"\x06target\x18\x02 \x01(\tR\x06target\x12\x12\n" +
+	"\x04type\x18\x03 \x01(\tR\x04type\"\x8b\x01\n" +
+	"\vEntityGraph\x12\x12\n" +
+	"\x04root\x18\x01 \x01(\tR\x04root\x12.\n" +
+	"\bentities\x18\x02 \x03(\v2\x12.adapter.v1.EntityR\bentities\x128\n" +
+	"\trelations\x18\x03 \x03(\v2\x1a.adapter.v1.EntityRelationR\trelations\"\x9e\x01\n" +
+	"\x0eSourceResponse\x12\x12\n" +
+	"\x04body\x18\x01 \x01(\fR\x04body\x12!\n" +
+	"\fcontent_type\x18\x02 \x01(\tR\vcontentType\x12\x1d\n" +
+	"\n" +
+	"source_url\x18\x03 \x01(\tR\tsourceUrl\x126\n" +
+	"\n" +
+	"visibility\x18\x04 \x01(\x0e2\x16.adapter.v1.VisibilityR\n" +
+	"visibility\"\xea\x03\n" +
 	"\rFetchResponse\x12\x1f\n" +
 	"\vexternal_id\x18\x01 \x01(\tR\n" +
 	"externalId\x12\x12\n" +
@@ -815,7 +1203,9 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\n" +
 	"visibility\x18\n" +
 	" \x01(\x0e2\x16.adapter.v1.VisibilityR\n" +
-	"visibility\"Q\n" +
+	"visibility\x12-\n" +
+	"\x05graph\x18\v \x01(\v2\x17.adapter.v1.EntityGraphR\x05graph\x12E\n" +
+	"\x10source_responses\x18\f \x03(\v2\x1a.adapter.v1.SourceResponseR\x0fsourceResponses\"Q\n" +
 	"\x11SessionCredential\x12\x1d\n" +
 	"\n" +
 	"auth_token\x18\x01 \x01(\tR\tauthToken\x12\x1d\n" +
@@ -854,7 +1244,7 @@ func file_api_adapter_v1_adapter_proto_rawDescGZIP() []byte {
 }
 
 var file_api_adapter_v1_adapter_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_adapter_v1_adapter_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_api_adapter_v1_adapter_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_api_adapter_v1_adapter_proto_goTypes = []any{
 	(Visibility)(0),                 // 0: adapter.v1.Visibility
 	(*DescribeRequest)(nil),         // 1: adapter.v1.DescribeRequest
@@ -863,30 +1253,41 @@ var file_api_adapter_v1_adapter_proto_goTypes = []any{
 	(*DescribeResponse)(nil),        // 4: adapter.v1.DescribeResponse
 	(*FetchRequest)(nil),            // 5: adapter.v1.FetchRequest
 	(*Resource)(nil),                // 6: adapter.v1.Resource
-	(*FetchResponse)(nil),           // 7: adapter.v1.FetchResponse
-	(*SessionCredential)(nil),       // 8: adapter.v1.SessionCredential
-	(*CheckConnectionRequest)(nil),  // 9: adapter.v1.CheckConnectionRequest
-	(*CheckConnectionResponse)(nil), // 10: adapter.v1.CheckConnectionResponse
+	(*EntityType)(nil),              // 7: adapter.v1.EntityType
+	(*Entity)(nil),                  // 8: adapter.v1.Entity
+	(*EntityRelation)(nil),          // 9: adapter.v1.EntityRelation
+	(*EntityGraph)(nil),             // 10: adapter.v1.EntityGraph
+	(*SourceResponse)(nil),          // 11: adapter.v1.SourceResponse
+	(*FetchResponse)(nil),           // 12: adapter.v1.FetchResponse
+	(*SessionCredential)(nil),       // 13: adapter.v1.SessionCredential
+	(*CheckConnectionRequest)(nil),  // 14: adapter.v1.CheckConnectionRequest
+	(*CheckConnectionResponse)(nil), // 15: adapter.v1.CheckConnectionResponse
 }
 var file_api_adapter_v1_adapter_proto_depIdxs = []int32{
 	0,  // 0: adapter.v1.Provider.visibilities:type_name -> adapter.v1.Visibility
 	2,  // 1: adapter.v1.Provider.capabilities:type_name -> adapter.v1.Capability
 	3,  // 2: adapter.v1.DescribeResponse.providers:type_name -> adapter.v1.Provider
-	8,  // 3: adapter.v1.FetchRequest.credential:type_name -> adapter.v1.SessionCredential
-	6,  // 4: adapter.v1.FetchResponse.resources:type_name -> adapter.v1.Resource
-	0,  // 5: adapter.v1.FetchResponse.visibility:type_name -> adapter.v1.Visibility
-	8,  // 6: adapter.v1.CheckConnectionRequest.credential:type_name -> adapter.v1.SessionCredential
-	1,  // 7: adapter.v1.Adapter.Describe:input_type -> adapter.v1.DescribeRequest
-	5,  // 8: adapter.v1.Adapter.Fetch:input_type -> adapter.v1.FetchRequest
-	9,  // 9: adapter.v1.Adapter.CheckConnection:input_type -> adapter.v1.CheckConnectionRequest
-	4,  // 10: adapter.v1.Adapter.Describe:output_type -> adapter.v1.DescribeResponse
-	7,  // 11: adapter.v1.Adapter.Fetch:output_type -> adapter.v1.FetchResponse
-	10, // 12: adapter.v1.Adapter.CheckConnection:output_type -> adapter.v1.CheckConnectionResponse
-	10, // [10:13] is the sub-list for method output_type
-	7,  // [7:10] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	7,  // 3: adapter.v1.DescribeResponse.entity_types:type_name -> adapter.v1.EntityType
+	13, // 4: adapter.v1.FetchRequest.credential:type_name -> adapter.v1.SessionCredential
+	8,  // 5: adapter.v1.EntityGraph.entities:type_name -> adapter.v1.Entity
+	9,  // 6: adapter.v1.EntityGraph.relations:type_name -> adapter.v1.EntityRelation
+	0,  // 7: adapter.v1.SourceResponse.visibility:type_name -> adapter.v1.Visibility
+	6,  // 8: adapter.v1.FetchResponse.resources:type_name -> adapter.v1.Resource
+	0,  // 9: adapter.v1.FetchResponse.visibility:type_name -> adapter.v1.Visibility
+	10, // 10: adapter.v1.FetchResponse.graph:type_name -> adapter.v1.EntityGraph
+	11, // 11: adapter.v1.FetchResponse.source_responses:type_name -> adapter.v1.SourceResponse
+	13, // 12: adapter.v1.CheckConnectionRequest.credential:type_name -> adapter.v1.SessionCredential
+	1,  // 13: adapter.v1.Adapter.Describe:input_type -> adapter.v1.DescribeRequest
+	5,  // 14: adapter.v1.Adapter.Fetch:input_type -> adapter.v1.FetchRequest
+	14, // 15: adapter.v1.Adapter.CheckConnection:input_type -> adapter.v1.CheckConnectionRequest
+	4,  // 16: adapter.v1.Adapter.Describe:output_type -> adapter.v1.DescribeResponse
+	12, // 17: adapter.v1.Adapter.Fetch:output_type -> adapter.v1.FetchResponse
+	15, // 18: adapter.v1.Adapter.CheckConnection:output_type -> adapter.v1.CheckConnectionResponse
+	16, // [16:19] is the sub-list for method output_type
+	13, // [13:16] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_api_adapter_v1_adapter_proto_init() }
@@ -900,7 +1301,7 @@ func file_api_adapter_v1_adapter_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_adapter_v1_adapter_proto_rawDesc), len(file_api_adapter_v1_adapter_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   10,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

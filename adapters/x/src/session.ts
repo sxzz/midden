@@ -2,6 +2,7 @@ import { accountBootstrap, accountUserAgent } from "./bootstrap.js";
 import { status } from "@grpc/grpc-js";
 import { fetchByRestId } from "@fxembed/atmosphere/providers/twitter/conversation";
 import { buildAPITwitterStatus } from "@fxembed/atmosphere/providers/twitter/processor";
+import { needsTransactionId } from "@fxembed/atmosphere/providers/twitter/proxy/allowlist";
 import { ClientTransaction } from "@fxembed/atmosphere/providers/twitter/proxy/transaction/transaction";
 import {
   getTwitterProviderEnv,
@@ -10,6 +11,7 @@ import {
 import type { TwitterBuildHost } from "@fxembed/atmosphere/providers/twitter/build-host";
 import {
   SessionCredential,
+  SourceResponse,
   Visibility,
 } from "./generated/api/adapter/v1/adapter.js";
 import {
@@ -40,6 +42,7 @@ export function accountTransport(
   credential: SessionCredential,
   signal: AbortSignal,
   fetcher: typeof fetch = fetch,
+  responses?: SourceResponse[],
 ): TwitterBuildHost["twitterProxy"] {
   validateCredential(credential);
   let transaction: Promise<ClientTransaction> | undefined;
@@ -71,7 +74,8 @@ export function accountTransport(
       headers.set("x-twitter-auth-type", "OAuth2Session");
       headers.set("x-twitter-active-user", "yes");
       headers.delete("x-guest-token");
-      if (url.pathname.includes("/graphql/")) {
+      headers.delete("x-client-transaction-id");
+      if (needsTransactionId(url.toString())) {
         transaction ??= accountBootstrap(credential, signal, fetcher).then(
           ({ html }) => ClientTransaction.fromHTML(html),
         );
@@ -99,12 +103,39 @@ export function accountTransport(
         signal,
         redirect: "error",
       });
-      if (!response.ok)
+      if (response.headers.get("cf-mitigated") === "challenge") {
+        await response.body?.cancel();
+        throw new ProviderError(
+          status.UNAVAILABLE,
+          "X requires browser verification; account validity is unknown",
+        );
+      }
+      if (!response.ok) {
+        await response.body?.cancel();
         throw responseError(
           response.status,
           response.headers.get("retry-after"),
         );
-      const data = await readJSON(response);
+      }
+      const data = await readJSON(response, (body) => {
+        if (responses) {
+          if (
+            responses.reduce((n, r) => n + r.body.length, 0) + body.length >
+            4 << 20
+          )
+            throw new ProviderError(
+              status.RESOURCE_EXHAUSTED,
+              "source responses exceed limit",
+            );
+          responses.push({
+            body: Buffer.from(body),
+            contentType:
+              response.headers.get("content-type") ?? "application/json",
+            sourceUrl: url.toString(),
+            visibility: Visibility.VISIBILITY_PRIVATE,
+          });
+        }
+      });
       if (Array.isArray(data.errors) && data.errors.length) {
         const codes = data.errors.map((e: any) => e.code);
         if (codes.some((c: number) => [32, 89, 135, 215, 326].includes(c)))
@@ -134,8 +165,26 @@ export function visibilityOf(post: any): Visibility {
 // Atmosphere defaults a missing protected flag to false; inspect raw evidence first.
 export function rawIsPublic(node: any): boolean {
   if (!node || typeof node !== "object") return false;
-  // Visibility wrappers can carry audience restrictions outside the tweet itself.
-  if (node.__typename === "TweetWithVisibilityResults") return false;
+  // A sensitive-media blur changes presentation, not who may read the post.
+  // Unknown wrapper/visibility fields still require private storage.
+  if (node.__typename === "TweetWithVisibilityResults") {
+    if (
+      Object.keys(node).some(
+        (key) =>
+          !["__typename", "tweet", "mediaVisibilityResults"].includes(key),
+      )
+    )
+      return false;
+    const media = node.mediaVisibilityResults;
+    if (
+      media != null &&
+      (typeof media !== "object" ||
+        Array.isArray(media) ||
+        Object.keys(media).some((key) => key !== "blurred_image_interstitial"))
+    )
+      return false;
+    return rawIsPublic(node.tweet);
+  }
   const root = node.tweet ?? node.result ?? node;
   const author =
     root.core?.user_results?.result ?? root.core?.user_result?.result;
@@ -171,9 +220,10 @@ export async function fetchSession(
   credential: SessionCredential,
   signal: AbortSignal,
 ) {
+  const responses: SourceResponse[] = [];
   const host: TwitterBuildHost = {
     t: (key) => key,
-    twitterProxy: accountTransport(credential, signal),
+    twitterProxy: accountTransport(credential, signal, fetch, responses),
     shouldTranscodeGif: () => false,
   };
   const data = await fetchByRestId(id, host, true);
@@ -184,7 +234,9 @@ export async function fetchSession(
     raw.__typename === "TweetTombstone"
   )
     throw responseError(403);
-  return parseSessionResult(id, raw, host);
+  const result = await parseSessionResult(id, raw, host);
+  result.sourceResponses = responses;
+  return result;
 }
 export async function parseSessionResult(
   id: string,
@@ -192,6 +244,7 @@ export async function parseSessionResult(
   host: TwitterBuildHost,
 ) {
   const publicEvidence = rawIsPublic(raw);
+  const editSource = structuredClone(raw);
   const post = await buildAPITwitterStatus(
     host,
     raw,
@@ -202,12 +255,17 @@ export async function parseSessionResult(
     "root",
     id,
   );
-  return normalize(
+  const result = normalize(
     post,
     id,
     "x-session",
     publicEvidence ? visibilityOf(post) : Visibility.VISIBILITY_PRIVATE,
+    editSource,
   );
+  if (raw?.mediaVisibilityResults?.blurred_image_interstitial) {
+    for (const resource of result.resources) resource.sensitive = true;
+  }
+  return result;
 }
 export async function checkSession(
   credential: SessionCredential,
@@ -215,5 +273,53 @@ export async function checkSession(
   fetcher: typeof fetch = fetch,
 ) {
   validateCredential(credential);
-  return (await accountBootstrap(credential, signal, fetcher)).identity;
+  // Viewer identifies the authenticated session itself, not a caller-supplied
+  // user ID or the author of a publicly readable post.
+  const url = new URL(
+    "https://api.x.com/graphql/9t128XgFic52jPUEkJMf6w/Viewer",
+  );
+  url.searchParams.set(
+    "variables",
+    JSON.stringify({
+      withCommunitiesMemberships: true,
+      withSubscribedTab: true,
+      withCommunitiesCreation: true,
+    }),
+  );
+  url.searchParams.set(
+    "features",
+    JSON.stringify({
+      subscriptions_upsells_api_enabled: false,
+      profile_label_improvements_pcf_label_in_post_enabled: true,
+      responsive_web_profile_redirect_enabled: true,
+      rweb_tipjar_consumption_enabled: false,
+      verified_phone_label_enabled: false,
+      creator_subscriptions_tweet_preview_api_enabled: true,
+      responsive_web_graphql_timeline_navigation_enabled: true,
+    }),
+  );
+  const transport = accountTransport(credential, signal, fetcher)!;
+  const response = await transport.fetch(url);
+  const data = await readJSON(response);
+  const viewer = data?.data?.viewer;
+  if (viewer?.is_tfe_restricted_session === true)
+    throw new ProviderError(
+      status.PERMISSION_DENIED,
+      "account session is restricted",
+    );
+  const user = viewer?.user_results?.result;
+  const accountId = user?.rest_id;
+  const username = user?.core?.screen_name;
+  if (
+    user?.__typename !== "User" ||
+    typeof accountId !== "string" ||
+    !/^[0-9]+$/.test(accountId) ||
+    typeof username !== "string" ||
+    !/^[A-Za-z0-9_]{1,50}$/.test(username)
+  )
+    throw new ProviderError(
+      status.FAILED_PRECONDITION,
+      "account verification response format changed",
+    );
+  return { accountId, username };
 }

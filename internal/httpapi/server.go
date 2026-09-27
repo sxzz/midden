@@ -56,6 +56,34 @@ func Handler(s *app.Service) http.Handler {
 		v, e := s.Recent(r.Context(), tenant(r), r.URL.Query().Get("cursor"))
 		respond(w, 200, v, e)
 	})
+	mux.HandleFunc("GET /v1/entities/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
+			return
+		}
+		v, e := s.Entity(r.Context(), tenant(r), r.PathValue("id"))
+		respond(w, 200, v, e)
+	})
+	mux.HandleFunc("GET /v1/archives/{id}/sources", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
+			return
+		}
+		v, e := s.Sources(r.Context(), tenant(r), r.PathValue("id"))
+		respond(w, 200, v, e)
+	})
+	mux.HandleFunc("GET /v1/sources/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
+			return
+		}
+		v, e := s.Source(r.Context(), tenant(r), r.PathValue("id"))
+		if e != nil {
+			respond(w, 200, nil, e)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Write(v.Body)
+	})
 	mux.HandleFunc("GET /v1/archives/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !checkID(w, r) {
 			return

@@ -31,6 +31,7 @@ message Provider {
   string authentication = 2;
   repeated Visibility visibilities = 3;
   repeated Capability capabilities = 4;
+  repeated string entity_types = 5;
 }
 
 message DescribeResponse {
@@ -40,6 +41,7 @@ message DescribeResponse {
   string version = 3;
   repeated string hosts = 4;
   repeated Provider providers = 5;
+  repeated EntityType entity_types = 6;
 }
 
 message FetchRequest {
@@ -59,11 +61,40 @@ message Resource {
   string immutable_key = 3;
   string alt_text = 4;
   bool sensitive = 5;
+  string purpose = 6; // Adapter-defined role. Empty resources appear in the generic presentation.
 }
 
+// Adapter-owned JSON Schema (2020-12), bundled and self-contained.
+message EntityType {
+  string name = 1;
+  bytes json_schema = 2;
+}
+message Entity {
+  string key = 1; // Local graph key, not a database ID.
+  string type = 2;
+  string external_id = 3;
+  bytes data_json = 4;
+  repeated uint32 resource_indices = 5; // Indices in FetchResponse.resources.
+}
+message EntityRelation {
+  string source = 1;
+  string target = 2;
+  string type = 3;
+}
+message EntityGraph {
+  string root = 1;
+  repeated Entity entities = 2;
+  repeated EntityRelation relations = 3;
+}
+message SourceResponse {
+  bytes body = 1; // Original response body, before JSON parsing or normalization.
+  string content_type = 2;
+  string source_url = 3; // No credentials or request headers.
+  Visibility visibility = 4; // Account responses stay private even for public posts.
+}
 message FetchResponse {
   string external_id = 1;
-  string text = 2;
+  string text = 2; // Optional generic presentation; channels do not parse entity JSON.
   string text_kind = 3;
   repeated Resource resources = 4;
   repeated string warnings = 5;
@@ -72,6 +103,8 @@ message FetchResponse {
   string text_source = 8;
   bool incomplete = 9;
   Visibility visibility = 10;
+  EntityGraph graph = 11;
+  repeated SourceResponse source_responses = 12;
 }
 
 // Execution-only secrets; never persisted in task payloads or logs.

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -80,6 +81,7 @@ type Job struct {
 }
 
 type Asset struct {
+	Purpose   string `json:"purpose,omitempty"`
 	Sensitive bool   `json:"sensitive"`
 	AltText   string `json:"alt_text,omitempty"`
 	ID        string `json:"id"`
@@ -92,22 +94,57 @@ type Asset struct {
 	Key       string `json:"-"`
 }
 
-type Archive struct {
-	Visibility     string    `json:"visibility"`
+type Entity struct {
+	ID              string          `json:"id,omitempty"`
+	VersionID       string          `json:"version_id,omitempty"`
+	Key             string          `json:"key"`
+	Type            string          `json:"type"`
+	ExternalID      string          `json:"external_id"`
+	Data            json.RawMessage `json:"data"`
+	Schema          json.RawMessage `json:"schema"`
+	ResourceIndices []uint32        `json:"resource_indices,omitempty"`
+	Assets          []Asset         `json:"assets,omitempty"`
+}
+type EntityRelation struct {
+	Source string `json:"source"`
+	Target string `json:"target"`
+	Type   string `json:"type"`
+}
+type EntityGraph struct {
+	Root      string           `json:"root"`
+	Entities  []Entity         `json:"entities"`
+	Relations []EntityRelation `json:"relations"`
+}
+type SourceResponse struct {
 	ID             string    `json:"id"`
-	URL            string    `json:"url"`
-	ExternalID     string    `json:"external_id"`
+	CaptureID      string    `json:"capture_id"`
 	ProviderID     string    `json:"provider_id"`
-	AccessScope    string    `json:"access_scope"`
-	RevisionID     string    `json:"revision_id"`
-	Text           string    `json:"text"`
-	TextKind       string    `json:"text_kind"`
-	TextSource     string    `json:"text_source,omitempty"`
 	AdapterVersion string    `json:"adapter_version"`
-	Warnings       []string  `json:"warnings"`
-	Assets         []Asset   `json:"assets"`
-	ObservedAt     time.Time `json:"observed_at"`
+	Visibility     string    `json:"visibility"`
+	ContentType    string    `json:"content_type"`
+	SourceURL      string    `json:"source_url"`
+	SHA256         string    `json:"sha256"`
+	Size           int64     `json:"size"`
 	CreatedAt      time.Time `json:"created_at"`
+	Body           []byte    `json:"-"`
+}
+type Archive struct {
+	Graph          *EntityGraph `json:"graph,omitempty"`
+	Visibility     string       `json:"visibility"`
+	ID             string       `json:"id"`
+	URL            string       `json:"url"`
+	ExternalID     string       `json:"external_id"`
+	ProviderID     string       `json:"provider_id"`
+	AccessScope    string       `json:"access_scope"`
+	RevisionID     string       `json:"revision_id"`
+	Text           string       `json:"text"`
+	TextKind       string       `json:"text_kind"`
+	TextSource     string       `json:"text_source,omitempty"`
+	AdapterVersion string       `json:"adapter_version"`
+	Warnings       []string     `json:"warnings"`
+	Assets         []Asset      `json:"assets"`
+	ObservedAt     time.Time    `json:"observed_at"`
+	CreatedAt      time.Time    `json:"created_at"`
 }
 
 type Page struct {

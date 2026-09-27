@@ -1,4 +1,4 @@
-# Monitor
+# Midden
 
 将 X 帖子的文字、图片和视频保存到自己的服务器，通过 Telegram 或 REST API 提交、查看和重新抓取。
 
@@ -41,6 +41,10 @@ docker compose logs --tail=100 core adapter
 复制 `.env.example` 为 `.env`，填写随机生成的 `POSTGRES_PASSWORD`、`APP_DB_PASSWORD`、`ADAPTER_TOKEN`，以及 S3 端点、存储桶和凭据。存储桶需提前创建，凭据需要读、写和删除对象的权限。
 
 使用已有 S3 时，`.env` 中的 `COMPOSE_FILE` 应设置为 `compose.yaml`，然后运行 `docker compose up --build -d`。
+
+## 更新部署
+
+已有数据的服务运行 `./scripts/deploy.sh`：构建全部镜像、停止核心、备份数据库、执行待应用迁移，成功后启动服务。迁移失败时核心保持停止，数据库备份路径会显示在终端。详细备份和恢复步骤见 [运维文档](docs/operations.md)。
 
 ## 接入 Telegram
 
@@ -85,6 +89,8 @@ docker compose logs --tail=100 core adapter
 同一个 Bot 只运行一个接收者；若该 Bot 已配置 webhook，先通过 Telegram `deleteWebhook` 移除。更换 token 时保留原 Channel UUID。
 
 支持保存文字、JPEG／PNG／WebP 静态图片及 MP4／WebM 视频（包括 X 的 GIF 动画）。超过媒体大小或数量限制、下载失败及不支持的媒体会在结果中说明。
+
+归档同时保存作者 ID、用户名、昵称、简介等 Profile metadata、头像文件、帖子发布时间和可确定的编辑时间。完整上游 JSON 响应按每次采集保留，个人账号响应只对本人可见。历史归档需要重新抓取才能补齐新增字段；上游未提供且无法确定的信息留空。
 
 ## 可选：使用个人 X 账号
 

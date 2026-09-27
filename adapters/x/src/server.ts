@@ -1,3 +1,4 @@
+import { entityTypes } from "./entity-schemas.js";
 import {
   Server,
   ServerCredentials,
@@ -80,13 +81,17 @@ export function createServer(
         "mobile.x.com",
         "mobile.twitter.com",
       ],
+      entityTypes,
       providers: [
         {
           id: "fxtwitter",
           authentication: "none",
+          entityTypes: entityTypes.map((t) => t.name),
           capabilities: [
             "capture.fetch",
             "content.text",
+            "entity.graph",
+            "source.raw",
             "media.image",
             "media.video",
           ].map((name) => ({ name, major: 1, minor: 0 })),
@@ -95,10 +100,13 @@ export function createServer(
         {
           id: "x-session",
           authentication: "session",
+          entityTypes: entityTypes.map((t) => t.name),
           capabilities: [
             "capture.fetch",
             "connection.check",
             "content.text",
+            "entity.graph",
+            "source.raw",
             "media.image",
             "media.video",
           ].map((name) => ({ name, major: 1, minor: 0 })),

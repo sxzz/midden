@@ -37,7 +37,7 @@ func Dial(address, secret, ca string) (*grpc.ClientConn, error) {
 			return nil, e
 		}
 	}
-	return grpc.NewClient(address, grpc.WithTransportCredentials(c), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4<<20)), grpc.WithUnaryInterceptor(func(ctx context.Context, m string, req, reply any, cc *grpc.ClientConn, inv grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	return grpc.NewClient(address, grpc.WithTransportCredentials(c), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(8<<20)), grpc.WithUnaryInterceptor(func(ctx context.Context, m string, req, reply any, cc *grpc.ClientConn, inv grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		return inv(metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+secret), m, req, reply, cc, opts...)
 	}))
 }

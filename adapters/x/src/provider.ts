@@ -1,3 +1,4 @@
+import { attachEntities } from "./entities.js";
 import { status, Metadata } from "@grpc/grpc-js";
 import {
   FetchResponse,
@@ -48,7 +49,10 @@ export function responseError(
     "provider cannot access this post",
   );
 }
-export async function readJSON(response: Response): Promise<any> {
+export async function readJSON(
+  response: Response,
+  retain?: (body: Buffer) => void,
+): Promise<any> {
   const reader = response.body?.getReader();
   if (!reader)
     throw new ProviderError(status.UNAVAILABLE, "empty provider response");
@@ -62,7 +66,9 @@ export async function readJSON(response: Response): Promise<any> {
       if (size > 2 << 20) throw new Error("size");
       chunks.push(value);
     }
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const body = Buffer.concat(chunks);
+    retain?.(body);
+    return JSON.parse(body.toString("utf8"));
   } catch {
     await reader.cancel();
     throw new ProviderError(status.UNAVAILABLE, "invalid provider response");
@@ -73,6 +79,7 @@ export function normalize(
   id: string,
   provider: string,
   visibility: Visibility,
+  raw?: any,
 ): FetchResponse {
   if (post?.type === "tombstone")
     throw new ProviderError(
@@ -144,6 +151,7 @@ export function normalize(
       result.resources.push({
         url,
         kind,
+        purpose: "",
         immutableKey:
           kind === "video" && item.id ? `${item.id}:${parsed.pathname}` : "",
         altText: (item.altText ?? "").trim(),
@@ -161,6 +169,7 @@ export function normalize(
       status.FAILED_PRECONDITION,
       "provider returned no supported text or media",
     );
+  attachEntities(result, post, raw);
   return result;
 }
 export async function fetchPublic(
@@ -174,7 +183,10 @@ export async function fetchPublic(
   });
   if (!response.ok)
     throw responseError(response.status, response.headers.get("retry-after"));
-  const data = await readJSON(response);
+  let rawBody = Buffer.alloc(0);
+  const data = await readJSON(response, (body) => {
+    rawBody = Buffer.from(body);
+  });
   if (typeof data.code !== "number")
     throw new ProviderError(status.UNAVAILABLE, "invalid provider response");
   if (data.code !== 200)
@@ -184,5 +196,19 @@ export async function fetchPublic(
       status.FAILED_PRECONDITION,
       "public provider cannot archive private posts",
     );
-  return normalize(data.status, id, "fxtwitter", Visibility.VISIBILITY_PUBLIC);
+  const result = normalize(
+    data.status,
+    id,
+    "fxtwitter",
+    Visibility.VISIBILITY_PUBLIC,
+  );
+  result.sourceResponses = [
+    {
+      body: rawBody,
+      contentType: response.headers.get("content-type") ?? "application/json",
+      sourceUrl: `${endpoint}/${id}`,
+      visibility: Visibility.VISIBILITY_PUBLIC,
+    },
+  ];
+  return result;
 }

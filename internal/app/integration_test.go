@@ -24,6 +24,7 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	pb "monitor/api/adapter/v1"
 	"monitor/internal/blob"
@@ -32,17 +33,21 @@ import (
 )
 
 type fakeAdapter struct {
-	mu         sync.Mutex
-	public     bool
-	text       string
-	textSource string
-	incomplete bool
-	urls       []string
-	mediaKind  string
-	cacheKey   string
-	altText    string
-	sensitive  bool
-	calls      atomic.Int64
+	graph           *pb.EntityGraph
+	entityTypes     []*pb.EntityType
+	extraResources  []*pb.Resource
+	sourceResponses []*pb.SourceResponse
+	mu              sync.Mutex
+	public          bool
+	text            string
+	textSource      string
+	incomplete      bool
+	urls            []string
+	mediaKind       string
+	cacheKey        string
+	altText         string
+	sensitive       bool
+	calls           atomic.Int64
 }
 
 func (f *fakeAdapter) Describe(context.Context, *pb.DescribeRequest, ...grpc.CallOption) (*pb.DescribeResponse, error) {
@@ -50,7 +55,14 @@ func (f *fakeAdapter) Describe(context.Context, *pb.DescribeRequest, ...grpc.Cal
 	if f.public {
 		visibility = pb.Visibility_VISIBILITY_PUBLIC
 	}
-	return &pb.DescribeResponse{ProtocolVersion: "1.0", AdapterId: "fixture", Providers: []*pb.Provider{{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, Authentication: "none", Visibilities: []pb.Visibility{visibility}}}}, nil
+	d := &pb.DescribeResponse{EntityTypes: f.entityTypes, ProtocolVersion: "1.0", AdapterId: "fixture", Providers: []*pb.Provider{{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, Authentication: "none", Visibilities: []pb.Visibility{visibility}}}}
+	if f.graph != nil {
+		d.Providers[0].Capabilities = append(d.Providers[0].Capabilities, &pb.Capability{Name: "entity.graph", Major: 1})
+		for _, t := range f.entityTypes {
+			d.Providers[0].EntityTypes = append(d.Providers[0].EntityTypes, t.Name)
+		}
+	}
+	return d, nil
 }
 
 func (f *fakeAdapter) Fetch(ctx context.Context, r *pb.FetchRequest, _ ...grpc.CallOption) (*pb.FetchResponse, error) {
@@ -61,7 +73,16 @@ func (f *fakeAdapter) Fetch(ctx context.Context, r *pb.FetchRequest, _ ...grpc.C
 	if f.public {
 		visibility = pb.Visibility_VISIBILITY_PUBLIC
 	}
-	v := &pb.FetchResponse{Visibility: visibility, ExternalId: r.ExternalId, ProviderId: r.ProviderId, Text: f.text, TextKind: "provider_summary", AdapterVersion: "test", Warnings: []string{"incomplete"}, TextSource: f.textSource, Incomplete: f.incomplete}
+	v := &pb.FetchResponse{Graph: f.graph, SourceResponses: f.sourceResponses, Visibility: visibility, ExternalId: r.ExternalId, ProviderId: r.ProviderId, Text: f.text, TextKind: "provider_summary", AdapterVersion: "test", Warnings: []string{"incomplete"}, TextSource: f.textSource, Incomplete: f.incomplete}
+	if f.graph != nil {
+		v.Graph = proto.Clone(f.graph).(*pb.EntityGraph)
+		for _, entity := range v.Graph.Entities {
+			if entity.Key == v.Graph.Root {
+				entity.ExternalId = r.ExternalId
+			}
+		}
+	}
+	v.Resources = append(v.Resources, f.extraResources...)
 	for _, u := range f.urls {
 		v.Resources = append(v.Resources, &pb.Resource{Url: u, ImmutableKey: f.cacheKey, AltText: f.altText, Sensitive: f.sensitive, Kind: func() string {
 			if f.mediaKind != "" {
@@ -347,7 +368,9 @@ func TestIntegration(t *testing.T) {
 		t.Fatal("leaked reservation")
 	}
 	must(t, s.Collect(ctx, imageTenant, 0))
-	must(t, db.Tx(ctx, imageTenant, func(tx pgx.Tx) error { return tx.QueryRow(ctx, `SELECT count(*) FROM blobs`).Scan(&n) }))
+	must(t, db.Tx(ctx, imageTenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM blobs WHERE tenant_id=$1 AND visibility='private'`, imageTenant).Scan(&n)
+	}))
 	if n != 1 {
 		t.Fatal("file not deduplicated")
 	}

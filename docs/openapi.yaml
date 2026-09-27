@@ -118,6 +118,43 @@ paths:
               schema: { $ref: "#/components/schemas/Archive" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/entities/{id}:
+    get:
+      summary: Read the latest entity version linked to your saved archives
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses:
+        "200":
+          description: Entity snapshot including adapter schema and resources
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Entity" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/archives/{id}/sources:
+    get:
+      summary: List up to 100 latest retained upstream responses visible to this tenant
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses:
+        "200":
+          description: Raw response descriptors; personal account responses are owner-only
+          content:
+            application/json:
+              schema:
+                {
+                  type: array,
+                  items: { $ref: "#/components/schemas/SourceResponse" },
+                }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/sources/{id}:
+    get:
+      summary: Download the original upstream JSON response body without reserialization
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses:
+        "200":
+          description: Original UTF-8 response bytes, private/no-store
+          content:
+            application/json:
+              schema: {}
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/assets/{id}:
     get:
       summary: Download an authorized archived original image
@@ -204,6 +241,11 @@ components:
     Asset:
       type: object
       properties:
+        purpose:
+          {
+            type: string,
+            description: Adapter-defined role; empty means presentation media,
+          }
         id: { type: string, format: uuid }
         position: { type: integer }
         state: { type: string, enum: [pending, ready, failed] }
@@ -211,6 +253,49 @@ components:
         sha256: { type: string }
         mime: { type: string }
         size: { type: integer, format: int64 }
+    Entity:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        version_id: { type: string, format: uuid }
+        key: { type: string }
+        type: { type: string, description: Adapter-defined entity type }
+        external_id: { type: string }
+        data: { description: Adapter-defined JSON value }
+        schema:
+          {
+            type: object,
+            description: JSON Schema snapshot used to validate this version,
+          }
+        resource_indices: { type: array, items: { type: integer, minimum: 0 } }
+        assets: { type: array, items: { $ref: "#/components/schemas/Asset" } }
+    EntityGraph:
+      type: object
+      properties:
+        root: { type: string }
+        entities:
+          { type: array, items: { $ref: "#/components/schemas/Entity" } }
+        relations:
+          type: array
+          items:
+            type: object
+            properties:
+              source: { type: string }
+              target: { type: string }
+              type: { type: string }
+    SourceResponse:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        capture_id: { type: string, format: uuid }
+        provider_id: { type: string }
+        adapter_version: { type: string }
+        visibility: { type: string, enum: [public, private] }
+        content_type: { type: string }
+        source_url: { type: string, format: uri }
+        sha256: { type: string }
+        size: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
     Archive:
       type: object
       properties:
@@ -228,6 +313,7 @@ components:
           }
         text: { type: string }
         text_kind: { type: string, enum: [provider_summary, post_text] }
+        graph: { $ref: "#/components/schemas/EntityGraph" }
         text_source: { type: string, description: Source of the archived text }
         adapter_version: { type: string }
         warnings: { type: array, items: { type: string } }

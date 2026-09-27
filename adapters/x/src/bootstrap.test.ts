@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { status } from "@grpc/grpc-js";
-import { bootstrapIdentity } from "./bootstrap.js";
-import { checkSession } from "./session.js";
+import { accountBootstrap, bootstrapIdentity } from "./bootstrap.js";
 
 const credential = { authToken: "a".repeat(40), csrfToken: "b".repeat(64) };
 function page(id = "123", username = "fixture") {
@@ -15,7 +14,7 @@ test("verify the authenticated session owner from homepage bootstrap", async () 
     username: "fixture",
   });
   let calls = 0;
-  const result = await checkSession(
+  const result = await accountBootstrap(
     credential,
     AbortSignal.timeout(1000),
     async (url, init) => {
@@ -29,7 +28,7 @@ test("verify the authenticated session owner from homepage bootstrap", async () 
       return new Response(page());
     },
   );
-  assert.deepEqual(result, { accountId: "123", username: "fixture" });
+  assert.deepEqual(result.identity, { accountId: "123", username: "fixture" });
   assert.equal(calls, 1);
   for (const html of [
     "<html>login</html>",
@@ -70,7 +69,7 @@ test("verification distinguishes expired cookies, interface drift and throttling
   ] as const) {
     await assert.rejects(
       () =>
-        checkSession(
+        accountBootstrap(
           credential,
           AbortSignal.timeout(1000),
           async () => response,
@@ -90,15 +89,15 @@ test("parallel verification keeps each account's cookie and identity separate", 
     );
   };
   const results = await Promise.all([
-    checkSession(credential, AbortSignal.timeout(1000), fetcher),
-    checkSession(
+    accountBootstrap(credential, AbortSignal.timeout(1000), fetcher),
+    accountBootstrap(
       { ...credential, authToken: "c".repeat(40) },
       AbortSignal.timeout(1000),
       fetcher,
     ),
   ]);
   assert.deepEqual(
-    results.map((x) => x.accountId),
+    results.map((x) => x.identity.accountId),
     ["123", "456"],
   );
 });
