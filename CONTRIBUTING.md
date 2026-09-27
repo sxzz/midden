@@ -58,3 +58,13 @@ Adapter 契约见 [架构文档](docs/architecture.md#adapter-协议与能力发
 ## 实体结构
 
 公共 proto 只定义实体图、Schema 声明、资源引用和可选展示字段，不添加平台专属 message。新增实体类型在 Adapter 中定义 JSON Schema 2020-12，通过 Describe 声明，在 Provider 上声明 entity.graph 与支持的类型列表。Schema 使用内置定义与本地引用，不依赖外部 Schema 服务。Fetch 返回实体数据、图内关系和资源索引；核心无需增加平台字段或专用表。测试应覆盖 Schema 校验、实体身份与作用域隔离、历史快照、关系和关联资源；通用渠道展示不能解析平台 data。
+
+## 本地镜像构建
+
+生产 Compose 使用 GHCR 镜像。开发时可叠加 `compose.build.yaml`：
+
+```sh
+docker compose -f compose.yaml -f compose.local.yaml -f compose.build.yaml build core adapter
+```
+
+GitHub Actions 在 main 测试通过后发布两个架构的镜像。服务器部署使用完整提交 SHA 标签，与迁移文件保持一致。

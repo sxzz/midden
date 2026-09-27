@@ -2,7 +2,7 @@
 
 将 X 帖子的文字、图片和视频保存到自己的服务器，通过 Telegram 或 REST API 提交、查看和重新抓取。
 
-- Telegram 私聊或群聊发送链接，每条消息最多 5 个帖子。
+- Telegram 私聊或群聊发送链接，每条消息最多 200 个帖子。
 - 自动保存图片与视频，按内容去重；重复提交可直接读取已有归档。
 - 默认通过 FxTwitter 公共 API 采集，无需配置 X 账号。公开内容共享归档、媒体及后续更新，各自的保存列表和消息回复保持独立；个人账号获取的私密内容按租户隔离。
 - 采集状态实时更新，支持通过按钮查看历史、翻页和重新抓取。
@@ -15,7 +15,8 @@
 
 ```sh
 python3 scripts/configure-local-storage.py
-docker compose up --build -d
+docker compose pull
+docker compose up -d
 ```
 
 脚本生成 `.env` 和 `.local/s3.json`，配置本地数据库、服务密钥和对象存储。Compose 启动 PostgreSQL、SeaweedFS、归档服务及 X 采集服务，自动创建存储桶。
@@ -40,11 +41,12 @@ docker compose logs --tail=100 core adapter
 
 复制 `.env.example` 为 `.env`，填写随机生成的 `POSTGRES_PASSWORD`、`APP_DB_PASSWORD`、`ADAPTER_TOKEN`，以及 S3 端点、存储桶和凭据。存储桶需提前创建，凭据需要读、写和删除对象的权限。
 
-使用已有 S3 时，`.env` 中的 `COMPOSE_FILE` 应设置为 `compose.yaml`，然后运行 `docker compose up --build -d`。
+使用已有 S3 时，`.env` 中的 `COMPOSE_FILE` 应设置为 `compose.yaml`，然后运行 `docker compose pull
+docker compose up -d`。
 
 ## 更新部署
 
-已有数据的服务运行 `./scripts/deploy.sh`：构建全部镜像、停止核心、备份数据库、执行待应用迁移，成功后启动服务。迁移失败时核心保持停止，数据库备份路径会显示在终端。详细备份和恢复步骤见 [运维文档](docs/operations.md)。
+已有数据的服务运行 `./scripts/deploy.sh --pull`：更新 Git 代码、拉取对应提交的 GHCR 镜像、停止核心、备份数据库、执行待应用迁移，成功后启动服务。镜像由 GitHub Actions 在测试通过后构建，支持 amd64 和 arm64；服务器无需编译。迁移失败时核心保持停止，数据库备份路径会显示在终端。详细备份和恢复步骤见 [运维文档](docs/operations.md)。
 
 ## 接入 Telegram
 
@@ -72,7 +74,7 @@ docker compose logs --tail=100 core adapter
 
 群聊中必须 @Bot 才会响应，例如 `@Bot用户名 帖子链接` 或 `/usage@Bot用户名`；直接发送链接、无指向的命令或仅回复 Bot 消息不会触发。已有交互按钮仍可直接点击。
 
-群聊和私聊都可使用 `/save <帖子链接…>`，每次最多 5 个帖子；群聊菜单提供 `/save`，`/start` 仅用于私聊。
+群聊和私聊都可使用 `/save <帖子链接…>`，每次最多 200 个帖子；群聊菜单提供 `/save`，`/start` 仅用于私聊。
 
 启动后会自动同步 Bot 命令菜单。私聊 Bot 并发送 `/start`，随后发送 X 帖子链接即可。采集完成后，有媒体的归档以图片、视频或混合相册发送，正文作为说明；说明放不下时，先发送全部媒体，再将剩余文字另发消息。纯文字归档直接发送文字。
 
@@ -156,7 +158,8 @@ docker compose run --rm --entrypoint monitorctl migrate config-set archive_reten
 更新服务：
 
 ```sh
-docker compose up --build -d
+docker compose pull
+docker compose up -d
 ```
 
 备份应同时包含 PostgreSQL、对象存储和配置文件，具体步骤见运维文档。
@@ -166,3 +169,7 @@ docker compose up --build -d
 媒体的 `altText` 会随归档保存，并附在 Telegram 预览中。视频按平台媒体 ID 与文件规格缓存，同一作用域内刷新或其他帖子引用同一视频时直接复用；不同规格和私有访问范围分别缓存。文件仍按 SHA-256 去重。
 
 Telegram 会复用同一 Bot 已上传的媒体，减少重复上传。来源标记为敏感的图片和视频会以 spoiler 遮罩发送；文件形式正常发送，不添加遮罩。
+
+## 许可证
+
+[MIT](LICENSE)。第三方代码保留其原有许可证与版权声明。

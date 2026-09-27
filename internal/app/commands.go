@@ -113,7 +113,7 @@ func validCallback(data string) bool {
 
 func (s *Service) commandHelp(_ context.Context, r *commandRequest) error {
 	var b strings.Builder
-	b.WriteString("发送 X 帖子链接保存图文（每次最多 5 个）。")
+	b.WriteString("发送 X 帖子链接保存图文（每次最多 200 个）。")
 	for _, c := range channelCommands {
 		if strings.HasPrefix(r.Origin.ChatID, "-") && c.PrivateOnly {
 			continue
@@ -251,8 +251,8 @@ func (s *Service) submitMessageURLs(ctx context.Context, r *commandRequest, m *t
 		r.Text = "请发送支持的 X 帖子 URL，或使用 /help。"
 		return nil
 	}
-	if len(targets) > 5 {
-		r.Text = "一次最多 5 个不同帖子，请拆分发送。"
+	if len(targets) > 200 {
+		r.Text = "一次最多 200 个不同帖子，请拆分发送。"
 		return nil
 	}
 	connection, err := s.DefaultConnection(ctx, r.Task.Tenant)
@@ -276,6 +276,6 @@ func (s *Service) commandSave(ctx context.Context, r *commandRequest) error {
 			}
 		}
 	}
-	r.Text = "请在 /save 后附上 X 帖子链接，每次最多 5 个。群聊中请使用 /save@Bot用户名。"
+	r.Text = "请在 /save 后附上 X 帖子链接，每次最多 200 个。群聊中请使用 /save@Bot用户名。"
 	return nil
 }

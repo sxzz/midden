@@ -1,0 +1,16 @@
+# Optional local development builds. Production pulls published images.
+services:
+  core:
+    image: midden-core:dev
+    build: .
+  migrate:
+    image: midden-core:dev
+    build: .
+  tls-init:
+    image: midden-core:dev
+    build: .
+  adapter:
+    image: midden-adapter:dev
+    build:
+      context: .
+      dockerfile: adapters/x/Dockerfile

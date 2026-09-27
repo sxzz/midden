@@ -1,4 +1,4 @@
-FROM node:24.21.0-bookworm-slim AS dependencies
+FROM --platform=$BUILDPLATFORM node:24.21.0-bookworm-slim AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY adapters/x/package.json adapters/x/package.json

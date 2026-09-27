@@ -31,21 +31,25 @@ if [[ -e "$backup_dir/database.dump" || -e "$backup_dir/database.dump.partial" ]
 	exit 1
 fi
 
-# A small server can free worker memory while compiling; failures leave it stopped.
-if [[ "${DEPLOY_STOP_BEFORE_BUILD:-0}" == "1" ]]; then
-	docker compose stop core adapter
-fi
-COMPOSE_BAKE=false docker compose --parallel 1 build core migrate tls-init
-if docker compose config --services | grep -qx storage-init; then
-	COMPOSE_BAKE=false docker compose --parallel 1 build storage-init
-fi
-COMPOSE_BAKE=false docker compose --parallel 1 build adapter
+# Pull the exact revision just checked out; never compile on the server.
+export CORE_IMAGE="ghcr.io/sxzz/midden-core:sha-$(git rev-parse HEAD)"
+export ADAPTER_IMAGE="ghcr.io/sxzz/midden-adapter:sha-$(git rev-parse HEAD)"
+docker compose pull
 
 docker compose stop core
 docker compose exec -T postgres pg_dump -U postgres -d monitor -Fc >"$backup_dir/database.dump.partial"
 mv "$backup_dir/database.dump.partial" "$backup_dir/database.dump"
 git rev-parse HEAD >"$backup_dir/revision"
 echo "Database backup: $backup_dir/database.dump"
-docker compose run --rm --no-deps migrate
-docker compose up -d --no-deps adapter core
+docker compose run --rm --no-deps --pull never migrate
+docker compose up -d --no-deps --no-build --pull never adapter core
+# Preserve immutable image choices for subsequent restarts and operator commands.
+printf 'CORE_IMAGE=%s\nADAPTER_IMAGE=%s\n' "$CORE_IMAGE" "$ADAPTER_IMAGE" >.local/deployed-images.env
+python3 - <<'PYTHON'
+from pathlib import Path
+p=Path('.env')
+lines=[line for line in p.read_text().splitlines() if not line.startswith(('CORE_IMAGE=', 'ADAPTER_IMAGE='))]
+p.write_text('\n'.join(lines)+'\n'+Path('.local/deployed-images.env').read_text())
+p.chmod(0o600)
+PYTHON
 echo "Deployed revision: $(git rev-parse --short HEAD)"

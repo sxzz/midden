@@ -29,17 +29,17 @@ func connectionCommand(ctx context.Context, db *store.Store, args []string) erro
 	s := &app.Service{DB: db}
 	switch args[0] {
 	case "connection-list":
-		rows, e := db.Pool.Query(ctx, `SELECT id,name,state,coalesce(account_id,'') FROM connections WHERE tenant_id=$1 ORDER BY name,id`, tenant)
+		rows, e := db.Pool.Query(ctx, `SELECT id,name,state,coalesce(account_id,''),coalesce(username,'') FROM connections WHERE tenant_id=$1 ORDER BY name,id`, tenant)
 		if e != nil {
 			return e
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var c app.Connection
-			if e = rows.Scan(&c.ID, &c.Name, &c.State, &c.AccountID); e != nil {
+			if e = rows.Scan(&c.ID, &c.Name, &c.State, &c.AccountID, &c.Username); e != nil {
 				return e
 			}
-			fmt.Printf("%s\t%s\t%s\t%s\n", c.ID, c.Name, c.State, c.AccountID)
+			fmt.Printf("%s\t%s\t%s\t%s\t%s\n", c.ID, c.Name, c.State, c.AccountID, c.Username)
 		}
 		return rows.Err()
 	case "connection-revoke":

@@ -21,7 +21,7 @@ services:
       - "127.0.0.1:8333:8333"
     restart: unless-stopped
   storage-init:
-    build: .
+    image: ${CORE_IMAGE:-ghcr.io/sxzz/midden-core:latest}
     entrypoint: [monitorctl, storage-init]
     environment:
       S3_ENDPOINT: ${S3_ENDPOINT}

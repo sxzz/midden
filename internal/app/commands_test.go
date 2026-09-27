@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -96,8 +97,12 @@ func TestSaveCommandGuidance(t *testing.T) {
 	if err := c.Handle(&Service{}, context.Background(), r); err != nil || !strings.Contains(r.Text, "帖子链接") {
 		t.Fatal(r.Text, err)
 	}
-	r = &commandRequest{Message: &telegram.Message{Text: "/save https://x.com/a/status/20 https://x.com/a/status/21 https://x.com/a/status/22 https://x.com/a/status/23 https://x.com/a/status/24 https://x.com/a/status/25"}}
-	if err := c.Handle(&Service{}, context.Background(), r); err != nil || !strings.Contains(r.Text, "最多 5 个") {
+	var urls strings.Builder
+	for i := 0; i < 201; i++ {
+		fmt.Fprintf(&urls, "https://x.com/a/status/%d ", i+20)
+	}
+	r = &commandRequest{Message: &telegram.Message{Text: "/save " + urls.String()}}
+	if err := c.Handle(&Service{}, context.Background(), r); err != nil || !strings.Contains(r.Text, "最多 200 个") {
 		t.Fatal(r.Text, err)
 	}
 }

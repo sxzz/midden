@@ -20,7 +20,7 @@ import (
 
 var ErrConnection = errors.New("account unavailable; choose a source or authorize again")
 
-type Connection struct{ ID, Name, State, AccountID string }
+type Connection struct{ ID, Name, State, AccountID, Username string }
 
 func (s *Service) ImportConnection(ctx context.Context, tenant, id, name string, c *pb.SessionCredential) (string, error) {
 	return s.importConnection(ctx, tenant, id, name, c, false)
@@ -61,11 +61,11 @@ func (s *Service) importConnection(ctx context.Context, tenant, id, name string,
 		if _, e := tx.Exec(ctx, `INSERT INTO account_credentials(id,tenant_id,ciphertext) VALUES($1,$2,$3)`, ref, tenant, encrypted); e != nil {
 			return e
 		}
-		conflict := " ON CONFLICT(id) DO UPDATE SET name=excluded.name,account_id=excluded.account_id,state='ready',credential_ref=excluded.credential_ref,revision=connections.revision+1 WHERE connections.tenant_id=$2"
+		conflict := " ON CONFLICT(id) DO UPDATE SET name=excluded.name,account_id=excluded.account_id,username=excluded.username,state='ready',credential_ref=excluded.credential_ref,revision=connections.revision+1 WHERE connections.tenant_id=$2"
 		if createOnly {
 			conflict = " ON CONFLICT(id) DO NOTHING"
 		}
-		tag, e := tx.Exec(ctx, `INSERT INTO connections(id,tenant_id,adapter_id,provider_id,name,account_id,state,credential_ref) VALUES($1,$2,'x','x-session',$3,$4,'ready',$5)`+conflict, id, tenant, name, result.AccountId, ref)
+		tag, e := tx.Exec(ctx, `INSERT INTO connections(id,tenant_id,adapter_id,provider_id,name,account_id,state,credential_ref,username) VALUES($1,$2,'x','x-session',$3,$4,'ready',$5,$6)`+conflict, id, tenant, name, result.AccountId, ref, result.Username)
 		if e != nil {
 			return e
 		}
@@ -148,11 +148,20 @@ func (s *Service) CheckConnection(ctx context.Context, tenant, id string) error 
 	}
 	call, cancel := context.WithTimeout(ctx, 40*time.Second)
 	defer cancel()
-	_, e = s.Adapter.CheckConnection(call, &pb.CheckConnectionRequest{ProviderId: "x-session", Credential: c})
+	result, e := s.Adapter.CheckConnection(call, &pb.CheckConnectionRequest{ProviderId: "x-session", Credential: c})
 	if status.Code(e) == codes.Unauthenticated {
 		s.markReauth(ctx, tenant, id, revision)
 	}
-	return e
+	if e != nil {
+		return e
+	}
+	return s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE connections SET username=$4 WHERE id=$1 AND revision=$2 AND state='ready' AND account_id=$3`, id, revision, result.AccountId, result.Username)
+		if err == nil && tag.RowsAffected() != 1 {
+			return ErrConnection
+		}
+		return err
+	})
 }
 
 func (s *Service) markReauth(ctx context.Context, tenant, id string, revision int64) {
@@ -205,16 +214,17 @@ func (s *Service) commandAccount(ctx context.Context, r *commandRequest) error {
 			label = "✓ " + label
 		}
 		r.Buttons = telegram.Keyboard{{{Text: label, Data: "/account public"}}}
-		rows, e := tx.Query(ctx, `SELECT id,name,state FROM connections WHERE adapter_id='x' AND provider_id='x-session' ORDER BY name,id`)
+		rows, e := tx.Query(ctx, `SELECT id,name,state,coalesce(username,''),coalesce(account_id,'') FROM connections WHERE adapter_id='x' AND provider_id='x-session' ORDER BY name,id`)
 		if e != nil {
 			return e
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var id, name, state string
-			if e = rows.Scan(&id, &name, &state); e != nil {
+			var id, name, state, username, accountID string
+			if e = rows.Scan(&id, &name, &state, &username, &accountID); e != nil {
 				return e
 			}
+			name = connectionLabel(name, username, accountID)
 			if selected == id {
 				name = "✓ " + name
 			}
@@ -228,4 +238,18 @@ func (s *Service) commandAccount(ctx context.Context, r *commandRequest) error {
 		}
 		return rows.Err()
 	})
+}
+
+func connectionLabel(name, username, accountID string) string {
+	if username != "" {
+		label := "@" + strings.TrimPrefix(username, "@")
+		if name != "" && name != username && name != label && name != "X 账号" {
+			label += " · " + name
+		}
+		return label
+	}
+	if accountID != "" {
+		return name + " · " + accountID
+	}
+	return name
 }

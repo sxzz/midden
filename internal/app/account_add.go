@@ -124,9 +124,9 @@ func (s *Service) commandAccountAdd(ctx context.Context, r *commandRequest) erro
 			return nil
 		}
 	}
-	var state string
+	var state, name, username, accountID string
 	if err := s.DB.Tx(ctx, r.Task.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT state FROM connections WHERE id=$1`, a.ID).Scan(&state)
+		return tx.QueryRow(ctx, `SELECT state,name,coalesce(username,''),coalesce(account_id,'') FROM connections WHERE id=$1`, a.ID).Scan(&state, &name, &username, &accountID)
 	}); err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func (s *Service) commandAccountAdd(ctx context.Context, r *commandRequest) erro
 		r.Text = "此账号当前不可用，请重新添加会话。"
 		return nil
 	}
-	r.Text = "账号已添加。点击下方按钮用于后续保存，或使用 /account 切换来源。"
+	r.Text = "账号已添加：" + connectionLabel(name, username, accountID) + "。点击下方按钮用于后续保存，或使用 /account 切换来源。"
 	r.Buttons = telegram.Keyboard{{{Text: "使用此账号", Data: "/account " + a.ID}}}
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"net/http"
@@ -26,6 +27,7 @@ import (
 	"monitor/internal/credentials"
 	"monitor/internal/domain"
 	"monitor/internal/store"
+	"monitor/internal/telegram"
 )
 
 func TestAccountIsolationAndPublicMerge(t *testing.T) {
@@ -49,6 +51,25 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	must(t, e)
 	fake := &fakeAdapter{public: true, text: "same content"}
 	s := &Service{DB: db, Queue: q, Adapter: fake, Vault: vault, AdapterTLS: true, Config: Defaults(), Providers: []*pb.Provider{{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, Authentication: "none", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PUBLIC}}, {Id: "x-session", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}, {Name: "connection.check", Major: 1}}, Authentication: "session", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PRIVATE, pb.Visibility_VISIBILITY_PUBLIC}}}}
+	// A full 200-link message is accepted when the tenant's separate rate quota permits it.
+	var batchTenant string
+	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO tenants DEFAULT VALUES RETURNING id`).Scan(&batchTenant))
+	batchService := *s
+	batchService.Config.Rate = 1000
+	var batchText strings.Builder
+	for i := 0; i < 200; i++ {
+		fmt.Fprintf(&batchText, "https://x.com/i/status/%d ", 9900000000000+i)
+	}
+	batch := &commandRequest{Task: store.Task{Tenant: batchTenant, ID: batchTenant}, Message: &telegram.Message{Text: batchText.String()}}
+	must(t, batchService.submitMessageURLs(ctx, batch, batch.Message))
+	if batch.Text != "" {
+		t.Fatal(batch.Text)
+	}
+	var submitted int
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM submissions WHERE tenant_id=$1`, batchTenant).Scan(&submitted))
+	if submitted != 200 {
+		t.Fatalf("submitted %d links, want 200", submitted)
+	}
 	var imageData bytes.Buffer
 	must(t, png.Encode(&imageData, image.NewRGBA(image.Rect(0, 0, 2, 2))))
 	mediaServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(imageData.Bytes()) }))
@@ -60,6 +81,25 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	for i := range ids {
 		ids[i], e = s.ImportConnection(ctx, tenants[i], "", "fixture", secret)
 		must(t, e)
+	}
+	for i, id := range ids {
+		var username string
+		must(t, admin.Pool.QueryRow(ctx, `SELECT username FROM connections WHERE id=$1`, id).Scan(&username))
+		if username != "fixture" {
+			t.Fatalf("API username not saved: %q", username)
+		}
+		_, e = admin.Pool.Exec(ctx, `UPDATE connections SET username=NULL WHERE id=$1`, id)
+		must(t, e)
+		must(t, s.CheckConnection(ctx, tenants[i], id))
+		must(t, admin.Pool.QueryRow(ctx, `SELECT username FROM connections WHERE id=$1`, id).Scan(&username))
+		if username != "fixture" {
+			t.Fatal("account check did not refresh handle")
+		}
+		r := &commandRequest{Task: store.Task{Tenant: tenants[i]}}
+		must(t, s.commandAccount(ctx, r))
+		if !strings.Contains(r.Buttons[1][0].Text, "@fixture") {
+			t.Fatal("missing API handle in selector")
+		}
 	}
 	if _, e = s.Submit(ctx, tenants[1], domain.CaptureInput{URL: "https://x.com/a/status/900111", ConnectionID: ids[0]}); !errors.Is(e, ErrConnection) {
 		t.Fatalf("cross-tenant connection: %v", e)

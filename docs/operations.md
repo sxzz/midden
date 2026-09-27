@@ -10,15 +10,15 @@
 
 ## 服务器部署与升级
 
-首次部署按 README 配置 `.env` 和 S3，再运行 `docker compose up --build -d`。迁移服务成功退出后核心才启动。
+首次部署按 README 配置 `.env` 和 S3，再运行 `docker compose pull && docker compose up -d`。迁移服务成功退出后核心才启动。
 
-已有 Git 部署执行 `./scripts/deploy.sh --pull`，以 fast-forward 方式拉取当前分支后，从服务器上的源码构建 Docker 镜像。已更新代码时也可执行 `./scripts/deploy.sh`，可用第一个参数指定新的备份目录。脚本按顺序构建所有镜像（包括迁移镜像），停止核心后导出数据库，再执行应用与 River 迁移并更新数据库角色密码，成功后重建 Adapter 和核心。迁移失败会立即退出并保持核心停止；修复未成功的迁移后可重跑。每个迁移事务失败都会回滚，已成功提交的迁移保留，重跑不会重复执行。迁移过程需要停机窗口。
+GitHub Actions 在 main 分支测试通过后构建并发布 `ghcr.io/sxzz/midden-core` 和 `ghcr.io/sxzz/midden-adapter`，支持 amd64、arm64。镜像同时包含 `latest` 标签和不可变部署选择 `sha-<完整提交 SHA>`。
 
-私有仓库部署建议为服务器配置仅此仓库可用的只读 SSH deploy key，将私钥保存在服务器 `~/.ssh`，不要放进仓库或镜像。`.env`、本地 S3 凭据和备份不纳入 Git。
+已有部署运行 `./scripts/deploy.sh --pull`：fast-forward 拉取当前分支，下载该提交对应的镜像，停止核心后导出数据库，再执行迁移并启动 Adapter 和核心。服务器不执行镜像构建。如果 CI 尚未发布对应镜像，拉取失败，旧服务继续运行。迁移失败时保持核心停止，修复后重新部署。成功后将本次镜像标签写入 `.env`，日常重启保持相同版本。
 
-低内存服务器可使用 `DEPLOY_STOP_BEFORE_BUILD=1 ./scripts/deploy.sh --pull`，先停止核心和 Adapter 为编译腾出内存。构建或迁移失败时保持停止，排错后重新执行脚本。若进程被强制终止，确认没有部署仍在运行后可删除空目录 `.local/deploy.lock` 再重试。
+仓库及镜像公开，服务器可以匿名 HTTPS 拉取。`.env`、S3 凭据和备份不纳入 Git。若部署进程被强制终止，确认没有部署仍在运行后可删除空目录 `.local/deploy.lock` 再重试。
 
-`compose.server.yaml` 提供较低的运行内存上限，并将 API、监控、S3 映射到本机 `18080`、`19090`、`18333` 端口。使用本地 S3 的服务器可在 `.env` 设置 `COMPOSE_FILE=compose.yaml:compose.local.yaml:compose.server.yaml`。已有部署应保持原 `COMPOSE_PROJECT_NAME`，以继续使用原来的容器和数据卷。
+`compose.server.yaml` 提供较低的运行内存上限，并将 API、监控、S3 映射到本机 `18080`、`19090`、`18333`。使用本地 S3 的服务器可设置 `COMPOSE_FILE=compose.yaml:compose.local.yaml:compose.server.yaml`。已有部署保持原 `COMPOSE_PROJECT_NAME`，以继续使用原容器和数据卷。
 
 升级前还应按照下文备份对象存储，并安全保管 `.env` 中的 `CREDENTIAL_KEY` 及部署凭据。迁移脚本只自动备份数据库；账号密文恢复需要原加密密钥。备份默认写入 `.local/backups`，权限仅限当前用户，需另行复制到服务器外。
 
@@ -127,7 +127,7 @@ docker compose up -d --force-recreate core
 
 非 Compose 部署也可通过 `CREDENTIAL_KEY_FILE` 读取 secret 文件。主密钥须单独备份，恢复数据库后仍需同一密钥才能解密；不要直接替换主密钥，否则既有凭据无法读取。更换个人账号会话使用下面的更新命令，不改变主密钥。
 
-配置好密钥后，用户可直接在 Bot 私聊发送 `/account_add <Base64 Cookie> [名称]`。Base64 解码后的格式为 `auth_token=...; ct0=...;`，允许包含其他 Cookie，但系统只提取这两个字段。命令不支持群聊。Bot 尝试删除含凭据的私聊消息，验证成功后提供“使用此账号”按钮，默认来源不会自动改变。Base64 只是编码，不是加密；请仅向你信任的 Bot 发送会话。
+配置好密钥后，用户可直接在 Bot 私聊发送 `/account_add <Base64 Cookie> [名称]`。Base64 解码后的格式为 `auth_token=...; ct0=...;`，允许包含其他 Cookie，但系统只提取这两个字段。命令不支持群聊。Bot 尝试删除含凭据的私聊消息，验证通过 X Viewer API 获取账号 ID 与 handle，保存后在账号列表显示 `@handle` 和自定义名称；重新验证会更新 handle。验证成功后提供“使用此账号”按钮，默认来源不会自动改变。Base64 只是编码，不是加密；请仅向你信任的 Bot 发送会话。
 
 下面是管理员 CLI 的另一种导入方式。
 

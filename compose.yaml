@@ -13,7 +13,7 @@ services:
       timeout: 3s
       retries: 20
   migrate:
-    build: .
+    image: ${CORE_IMAGE:-ghcr.io/sxzz/midden-core:latest}
     entrypoint:
       ["/bin/sh", "-ec", "monitorctl migrate && monitorctl app-password"]
     environment:
@@ -30,16 +30,14 @@ services:
         condition: service_healthy
     restart: "no"
   tls-init:
-    build: .
+    image: ${CORE_IMAGE:-ghcr.io/sxzz/midden-core:latest}
     user: "0:0"
     entrypoint: [monitorctl, tls-init, /tls]
     volumes:
       - adapter-tls:/tls
     restart: "no"
   adapter:
-    build:
-      context: .
-      dockerfile: adapters/x/Dockerfile
+    image: ${ADAPTER_IMAGE:-ghcr.io/sxzz/midden-adapter:latest}
     environment:
       ADAPTER_TOKEN: ${ADAPTER_TOKEN:?set ADAPTER_TOKEN}
       ADAPTER_TLS_CERT: /tls/adapter.crt
@@ -51,7 +49,7 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
   core:
-    build: .
+    image: ${CORE_IMAGE:-ghcr.io/sxzz/midden-core:latest}
     environment:
       DATABASE_URL: postgres://monitor_app:${APP_DB_PASSWORD}@postgres:5432/monitor?sslmode=disable
       ADAPTER_TLS_CA: /tls/adapter.crt

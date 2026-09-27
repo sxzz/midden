@@ -85,8 +85,12 @@ func TestConcurrentMigrate(t *testing.T) {
 		})
 	}
 	wg.Wait()
+	files, err := migrations.ReadDir("migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var version, count int
-	if err = db.Pool.QueryRow(ctx, "SELECT version,(SELECT count(*) FROM schema_migrations) FROM schema_versions").Scan(&version, &count); err != nil || version != 1 || count != 2 {
+	if err = db.Pool.QueryRow(ctx, "SELECT version,(SELECT count(*) FROM schema_migrations) FROM schema_versions").Scan(&version, &count); err != nil || version != 1 || count != len(files) {
 		t.Fatal(version, count, err)
 	}
 }
