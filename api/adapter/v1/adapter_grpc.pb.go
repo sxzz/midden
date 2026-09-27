@@ -19,9 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Adapter_Describe_FullMethodName        = "/adapter.v1.Adapter/Describe"
-	Adapter_Fetch_FullMethodName           = "/adapter.v1.Adapter/Fetch"
-	Adapter_CheckConnection_FullMethodName = "/adapter.v1.Adapter/CheckConnection"
+	Adapter_Describe_FullMethodName          = "/adapter.v1.Adapter/Describe"
+	Adapter_Resolve_FullMethodName           = "/adapter.v1.Adapter/Resolve"
+	Adapter_PrepareCredential_FullMethodName = "/adapter.v1.Adapter/PrepareCredential"
+	Adapter_Fetch_FullMethodName             = "/adapter.v1.Adapter/Fetch"
+	Adapter_CheckConnection_FullMethodName   = "/adapter.v1.Adapter/CheckConnection"
 )
 
 // AdapterClient is the client API for Adapter service.
@@ -30,6 +32,8 @@ const (
 type AdapterClient interface {
 	// Describe is required; all other operations are opt-in per provider.
 	Describe(ctx context.Context, in *DescribeRequest, opts ...grpc.CallOption) (*DescribeResponse, error)
+	Resolve(ctx context.Context, in *ResolveRequest, opts ...grpc.CallOption) (*ResolveResponse, error)
+	PrepareCredential(ctx context.Context, in *PrepareCredentialRequest, opts ...grpc.CallOption) (*PrepareCredentialResponse, error)
 	Fetch(ctx context.Context, in *FetchRequest, opts ...grpc.CallOption) (*FetchResponse, error)
 	CheckConnection(ctx context.Context, in *CheckConnectionRequest, opts ...grpc.CallOption) (*CheckConnectionResponse, error)
 }
@@ -46,6 +50,26 @@ func (c *adapterClient) Describe(ctx context.Context, in *DescribeRequest, opts 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DescribeResponse)
 	err := c.cc.Invoke(ctx, Adapter_Describe_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adapterClient) Resolve(ctx context.Context, in *ResolveRequest, opts ...grpc.CallOption) (*ResolveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveResponse)
+	err := c.cc.Invoke(ctx, Adapter_Resolve_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adapterClient) PrepareCredential(ctx context.Context, in *PrepareCredentialRequest, opts ...grpc.CallOption) (*PrepareCredentialResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PrepareCredentialResponse)
+	err := c.cc.Invoke(ctx, Adapter_PrepareCredential_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +102,8 @@ func (c *adapterClient) CheckConnection(ctx context.Context, in *CheckConnection
 type AdapterServer interface {
 	// Describe is required; all other operations are opt-in per provider.
 	Describe(context.Context, *DescribeRequest) (*DescribeResponse, error)
+	Resolve(context.Context, *ResolveRequest) (*ResolveResponse, error)
+	PrepareCredential(context.Context, *PrepareCredentialRequest) (*PrepareCredentialResponse, error)
 	Fetch(context.Context, *FetchRequest) (*FetchResponse, error)
 	CheckConnection(context.Context, *CheckConnectionRequest) (*CheckConnectionResponse, error)
 	mustEmbedUnimplementedAdapterServer()
@@ -92,6 +118,12 @@ type UnimplementedAdapterServer struct{}
 
 func (UnimplementedAdapterServer) Describe(context.Context, *DescribeRequest) (*DescribeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Describe not implemented")
+}
+func (UnimplementedAdapterServer) Resolve(context.Context, *ResolveRequest) (*ResolveResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Resolve not implemented")
+}
+func (UnimplementedAdapterServer) PrepareCredential(context.Context, *PrepareCredentialRequest) (*PrepareCredentialResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PrepareCredential not implemented")
 }
 func (UnimplementedAdapterServer) Fetch(context.Context, *FetchRequest) (*FetchResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Fetch not implemented")
@@ -134,6 +166,42 @@ func _Adapter_Describe_Handler(srv interface{}, ctx context.Context, dec func(in
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AdapterServer).Describe(ctx, req.(*DescribeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Adapter_Resolve_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdapterServer).Resolve(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Adapter_Resolve_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdapterServer).Resolve(ctx, req.(*ResolveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Adapter_PrepareCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PrepareCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdapterServer).PrepareCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Adapter_PrepareCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdapterServer).PrepareCredential(ctx, req.(*PrepareCredentialRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -184,6 +252,14 @@ var Adapter_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Describe",
 			Handler:    _Adapter_Describe_Handler,
+		},
+		{
+			MethodName: "Resolve",
+			Handler:    _Adapter_Resolve_Handler,
+		},
+		{
+			MethodName: "PrepareCredential",
+			Handler:    _Adapter_PrepareCredential_Handler,
 		},
 		{
 			MethodName: "Fetch",

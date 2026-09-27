@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -94,18 +93,11 @@ func connectionCommand(ctx context.Context, db *store.Store, args []string) erro
 		if e != nil || len(raw) > 16384 {
 			return fmt.Errorf("invalid credential input")
 		}
-		var data struct {
-			AuthToken string `json:"auth_token"`
-			CSRFToken string `json:"ct0"`
-		}
-		if json.Unmarshal(raw, &data) != nil {
-			return fmt.Errorf("expected JSON with auth_token and ct0")
-		}
 		id := ""
 		if len(args) == 5 {
 			id = args[4]
 		}
-		id, e = s.ImportConnection(ctx, tenant, id, args[2], &pb.SessionCredential{AuthToken: data.AuthToken, CsrfToken: data.CSRFToken})
+		id, e = s.ImportConnection(ctx, tenant, id, args[2], &pb.Credential{Data: raw})
 		if e != nil {
 			return e
 		}

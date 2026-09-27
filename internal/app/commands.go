@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	pb "monitor/api/adapter/v1"
+	"monitor/internal/adapter"
 	"monitor/internal/domain"
 	"monitor/internal/store"
 	"monitor/internal/telegram"
@@ -60,9 +62,20 @@ func init() {
 	}
 }
 
-func TelegramCommands(group bool) []telegram.Command {
+func TelegramCommands(group bool, descriptors ...*pb.DescribeResponse) []telegram.Command {
+	accountEnabled := len(descriptors) == 0
+	for _, d := range descriptors {
+		for _, p := range d.Providers {
+			if adapter.Supports(p, adapter.ConnectionCheck, 1, 0) {
+				accountEnabled = true
+			}
+		}
+	}
 	commands := make([]telegram.Command, 0, len(channelCommands))
 	for _, c := range channelCommands {
+		if !accountEnabled && strings.HasPrefix(c.Name, "account") {
+			continue
+		}
 		if group && c.PrivateOnly {
 			continue
 		}
@@ -290,11 +303,11 @@ func (s *Service) submitMessageURLs(ctx context.Context, r *commandRequest, m *t
 	inputs := map[string]string{}
 	seen := map[string]bool{}
 	for _, url := range telegram.URLs(m) {
-		target, err := domain.Normalize(url)
-		if err == nil && !seen[target.ExternalID] {
-			seen[target.ExternalID] = true
+		target, err := s.Resolve(ctx, url)
+		if err == nil && !seen[target.Platform+"|"+target.Kind+"|"+target.ObjectScope+"|"+target.ExternalID] {
+			seen[target.Platform+"|"+target.Kind+"|"+target.ObjectScope+"|"+target.ExternalID] = true
 			targets = append(targets, target)
-			inputs[target.ExternalID] = url
+			inputs[target.URL] = url
 		}
 	}
 	if len(targets) == 0 {
@@ -313,9 +326,9 @@ func (s *Service) submitMessageURLs(ctx context.Context, r *commandRequest, m *t
 		return err
 	}
 	for _, target := range targets {
-		_, err := s.Submit(ctx, r.Task.Tenant, domain.CaptureInput{Input: inputs[target.ExternalID], URL: target.URL, ConnectionID: connection, Key: r.Task.ID + ":" + target.ExternalID, Origin: r.Origin})
+		_, err := s.Submit(ctx, r.Task.Tenant, domain.CaptureInput{Input: inputs[target.URL], URL: target.URL, ConnectionID: connection, Key: r.Task.ID + ":" + store.Hash(target.Platform+"|"+target.Kind+"|"+target.ObjectScope+"|"+target.ExternalID), Origin: r.Origin})
 		if err != nil {
-			r.Text += submitMessage(err) + "\n输入：" + inputs[target.ExternalID] + "\n\n"
+			r.Text += submitMessage(err) + "\n输入：" + inputs[target.URL] + "\n\n"
 		}
 	}
 	return nil
@@ -324,7 +337,7 @@ func (s *Service) submitMessageURLs(ctx context.Context, r *commandRequest, m *t
 func (s *Service) commandSave(ctx context.Context, r *commandRequest) error {
 	if r.Message != nil {
 		for _, url := range telegram.URLs(r.Message) {
-			if _, err := domain.Normalize(url); err == nil {
+			if _, err := s.Resolve(ctx, url); err == nil {
 				return s.submitMessageURLs(ctx, r, r.Message)
 			}
 		}

@@ -50,7 +50,7 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	vault, e := credentials.New(base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	must(t, e)
 	fake := &fakeAdapter{public: true, text: "same content"}
-	s := &Service{DB: db, Queue: q, Adapter: fake, Vault: vault, AdapterTLS: true, Config: Defaults(), Providers: []*pb.Provider{{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, Authentication: "none", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PUBLIC}}, {Id: "x-session", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}, {Name: "connection.check", Major: 1}}, Authentication: "session", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PRIVATE, pb.Visibility_VISIBILITY_PUBLIC}}}}
+	s := &Service{DB: db, Queue: q, Adapter: fake, Vault: vault, AdapterTLS: true, Config: Defaults(), Providers: []*pb.Provider{{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, DefaultProvider: true, Authentication: "none", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PUBLIC}}, {Id: "x-session", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}, {Name: "connection.check", Major: 1}, {Name: "credential.prepare", Major: 1}}, DefaultProvider: true, Authentication: "session", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PRIVATE, pb.Visibility_VISIBILITY_PUBLIC}}}}
 	// A full 200-link message is accepted when the tenant's separate rate quota permits it.
 	var batchTenant string
 	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO tenants DEFAULT VALUES RETURNING id`).Scan(&batchTenant))
@@ -76,7 +76,7 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	defer mediaServer.Close()
 	s.HTTP = mediaServer.Client()
 	s.Blobs = &memoryBlob{m: map[string][]byte{}}
-	secret := &pb.SessionCredential{AuthToken: strings.Repeat("a", 40), CsrfToken: strings.Repeat("b", 64)}
+	secret := &pb.Credential{Data: []byte("opaque-fixture-credential")}
 	ids := make([]string, 2)
 	for i := range ids {
 		ids[i], e = s.ImportConnection(ctx, tenants[i], "", "fixture", secret)
@@ -109,7 +109,7 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	}
 	var ciphertext []byte
 	must(t, admin.Pool.QueryRow(ctx, `SELECT ciphertext FROM account_credentials WHERE tenant_id=$1`, tenants[0]).Scan(&ciphertext))
-	if strings.Contains(string(ciphertext), secret.AuthToken) {
+	if strings.Contains(string(ciphertext), string(secret.Data)) {
 		t.Fatal("plaintext credential stored")
 	}
 	complete := func(tenant string, in domain.CaptureInput) domain.Job {
@@ -275,7 +275,7 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	hook := &accountHookAdapter{fakeAdapter: fake}
 	s.Adapter = hook
 	hook.after = func(ctx context.Context, r *pb.FetchRequest) error {
-		if r.Credential == nil || r.Credential.AuthToken != secret.AuthToken {
+		if r.Credential == nil || string(r.Credential.Data) != string(secret.Data) {
 			t.Fatal("execution credential missing")
 		}
 		_, err := s.ImportConnection(ctx, tenants[1], ids[1], "rotated", secret)

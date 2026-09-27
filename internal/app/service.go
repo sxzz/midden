@@ -49,6 +49,7 @@ type Sender interface {
 }
 
 type Service struct {
+	Descriptor    *pb.DescribeResponse
 	EntitySchemas map[string]adapter.EntitySchema
 	Vault         *credentials.Vault
 	AdapterTLS    bool
@@ -75,19 +76,11 @@ func lockTenant(ctx context.Context, tx pgx.Tx, tenant string) error {
 
 // Discovery is shared by the running service and administration CLI.
 func (s *Service) requireProvider(ctx context.Context, id, capability string) (*pb.Provider, error) {
-	providers := s.Providers
-	if providers == nil && s.Adapter != nil {
-		callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		d, err := s.Adapter.Describe(callCtx, &pb.DescribeRequest{})
-		if err != nil {
-			return nil, err
-		}
-		if err = adapter.Validate(d); err != nil {
-			return nil, err
-		}
-		providers = d.Providers
+	d, err := s.descriptor(ctx)
+	if err != nil {
+		return nil, err
 	}
+	providers := d.Providers
 	for _, p := range providers {
 		if p.GetId() == id && adapter.Supports(p, capability, 1, 0) {
 			return p, nil
@@ -136,13 +129,37 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			return out, err
 		}
 	}
-	if in.ProviderID == "" {
-		if in.ConnectionID != "" {
-			in.ProviderID = "x-session"
-		} else {
-			in.ProviderID = "fxtwitter"
+	if in.ConnectionID != "" {
+		_, provider, e := s.connectionProvider(ctx, tenant, in.ConnectionID)
+		if e != nil {
+			return out, e
 		}
+		if in.ProviderID != "" && in.ProviderID != provider {
+			return out, ErrConnection
+		}
+		in.ProviderID = provider
+	} else if in.ProviderID == "" {
+		p, e := s.defaultProvider(ctx, "none")
+		if e != nil {
+			return out, e
+		}
+		in.ProviderID = p.Id
 	}
+	policy, e := s.requireProvider(ctx, in.ProviderID, adapter.CaptureFetch)
+	if e != nil {
+		return out, e
+	}
+	if (in.ConnectionID == "") != (policy.Authentication == "none") {
+		return out, ErrConnection
+	}
+	target, e := s.Resolve(ctx, in.URL)
+	if e != nil {
+		return out, e
+	}
+	if in.Input == "" {
+		in.Input = in.URL
+	}
+	in.URL = target.URL
 	if in.Key == "" {
 		in.Key = uuid.NewString()
 	}
@@ -158,15 +175,13 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			return e
 		}
 		if in.ConnectionID != "" {
-			if !s.AdapterTLS || s.Vault == nil || in.ProviderID != "x-session" {
+			if !s.AdapterTLS || s.Vault == nil {
 				return ErrConnection
 			}
 			var state string
-			if e := tx.QueryRow(ctx, `SELECT state FROM connections WHERE id=$1 AND tenant_id=$2 AND provider_id=$3 AND adapter_id='x'`, in.ConnectionID, tenant, in.ProviderID).Scan(&state); e != nil || state != "ready" {
+			if e := tx.QueryRow(ctx, `SELECT state FROM connections WHERE id=$1 AND tenant_id=$2 AND provider_id=$3`, in.ConnectionID, tenant, in.ProviderID).Scan(&state); e != nil || state != "ready" {
 				return ErrConnection
 			}
-		} else if in.ProviderID != "fxtwitter" {
-			return ErrConnection
 		}
 		if in.Origin.IdentityID != "" {
 			var channel, user string
@@ -190,11 +205,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if in.Input == "" {
 			in.Input = in.URL
 		}
-		target, e := domain.Normalize(in.URL)
-		if e != nil {
-			return e
-		}
-		fingerprint := store.Hash(target.ExternalID + "|" + in.ProviderID + "|" + scope + "|" + in.RefreshID)
+		fingerprint := store.Hash(target.Platform + "|" + target.Kind + "|" + target.ObjectScope + "|" + target.ExternalID + "|" + in.ProviderID + "|" + scope + "|" + in.RefreshID)
 		var existing, f string
 		e = tx.QueryRow(ctx, `SELECT capture_id,fingerprint FROM submissions WHERE tenant_id=$1 AND idem_key=$2`, tenant, in.Key).Scan(&existing, &f)
 		if e == nil {
@@ -211,25 +222,25 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if visibility == "private" {
 			dataScope = tenant
 		}
-		if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1))`, dataScope+"|x|"+scope+"|post||"+target.ExternalID); e != nil {
+		if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1))`, dataScope+"|"+target.Platform+"|"+scope+"|"+target.Kind+"|"+target.ObjectScope+"|"+target.ExternalID); e != nil {
 			return e
 		}
 		if aid == "" && in.ConnectionID != "" {
-			e = tx.QueryRow(ctx, `SELECT a.id FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.tenant_id=$1 AND c.connection_id=$2 AND a.external_id=$3 AND c.state IN('queued','downloading') LIMIT 1`, tenant, in.ConnectionID, target.ExternalID).Scan(&aid)
+			e = tx.QueryRow(ctx, `SELECT a.id FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.tenant_id=$1 AND c.connection_id=$2 AND a.external_id=$3 AND a.platform=$4 AND a.kind=$5 AND a.object_scope=$6 AND c.state IN('queued','downloading') LIMIT 1`, tenant, in.ConnectionID, target.ExternalID, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
 			if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 				return e
 			}
 		}
 		if aid == "" && in.ConnectionID != "" && in.RefreshID == "" {
-			e = tx.QueryRow(ctx, `SELECT a.id FROM tenant_archives t JOIN archives a ON a.id=t.archive_id WHERE a.external_id=$1 AND t.connection_id=$2 AND a.current_revision IS NOT NULL ORDER BY t.created_at DESC LIMIT 1`, target.ExternalID, in.ConnectionID).Scan(&aid)
+			e = tx.QueryRow(ctx, `SELECT a.id FROM tenant_archives t JOIN archives a ON a.id=t.archive_id WHERE a.external_id=$1 AND t.connection_id=$2 AND a.platform=$3 AND a.kind=$4 AND a.object_scope=$5 AND a.current_revision IS NOT NULL ORDER BY t.created_at DESC LIMIT 1`, target.ExternalID, in.ConnectionID, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
 			if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 				return e
 			}
 		}
 		if aid == "" {
-			e = tx.QueryRow(ctx, `SELECT id FROM archives WHERE data_scope=$1 AND platform='x' AND scope=$2 AND kind='post' AND object_scope='' AND external_id=$3`, dataScope, scope, target.ExternalID).Scan(&aid)
+			e = tx.QueryRow(ctx, `SELECT id FROM archives WHERE data_scope=$1 AND platform=$4 AND scope=$2 AND kind=$5 AND object_scope=$6 AND external_id=$3`, dataScope, scope, target.ExternalID, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
 			if errors.Is(e, pgx.ErrNoRows) {
-				e = tx.QueryRow(ctx, `INSERT INTO archives(tenant_id,visibility,external_id,url,provider_id,scope) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, tenant, visibility, target.ExternalID, target.URL, in.ProviderID, scope).Scan(&aid)
+				e = tx.QueryRow(ctx, `INSERT INTO archives(tenant_id,visibility,external_id,url,provider_id,scope,platform,kind,object_scope) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, tenant, visibility, target.ExternalID, target.URL, in.ProviderID, scope, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
 			}
 			if e != nil {
 				return e

@@ -111,7 +111,7 @@ func groupTrigger(m *telegram.Message, username string) bool {
 		}
 	}
 	for _, raw := range telegram.URLs(m) {
-		if _, err := domain.Normalize(raw); err == nil {
+		if err := domain.ValidateURL(raw); err == nil {
 			return true
 		}
 	}

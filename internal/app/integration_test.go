@@ -12,7 +12,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -24,6 +26,8 @@ import (
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	pb "monitor/api/adapter/v1"
@@ -55,7 +59,7 @@ func (f *fakeAdapter) Describe(context.Context, *pb.DescribeRequest, ...grpc.Cal
 	if f.public {
 		visibility = pb.Visibility_VISIBILITY_PUBLIC
 	}
-	d := &pb.DescribeResponse{EntityTypes: f.entityTypes, ProtocolVersion: "1.0", AdapterId: "fixture", Providers: []*pb.Provider{{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, Authentication: "none", Visibilities: []pb.Visibility{visibility}}}}
+	d := &pb.DescribeResponse{EntityTypes: f.entityTypes, ProtocolVersion: "1.0", AdapterId: "fixture", Providers: []*pb.Provider{{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, DefaultProvider: true, Authentication: "none", Visibilities: []pb.Visibility{visibility}}}}
 	if f.graph != nil {
 		d.Providers[0].Capabilities = append(d.Providers[0].Capabilities, &pb.Capability{Name: "entity.graph", Major: 1})
 		for _, t := range f.entityTypes {
@@ -63,6 +67,25 @@ func (f *fakeAdapter) Describe(context.Context, *pb.DescribeRequest, ...grpc.Cal
 		}
 	}
 	return d, nil
+}
+
+func (f *fakeAdapter) Resolve(ctx context.Context, r *pb.ResolveRequest, _ ...grpc.CallOption) (*pb.ResolveResponse, error) {
+	u, err := url.Parse(r.Url)
+	if err != nil {
+		return nil, err
+	}
+	m := regexp.MustCompile(`/(?:status|entry)/([0-9]+)`).FindStringSubmatch(u.Path)
+	if len(m) != 2 {
+		return nil, status.Error(codes.InvalidArgument, "unsupported fixture URL")
+	}
+	return &pb.ResolveResponse{Url: "https://x.com/i/web/status/" + m[1], ExternalId: m[1], Platform: "x", Kind: "post"}, nil
+}
+
+func (f *fakeAdapter) PrepareCredential(ctx context.Context, r *pb.PrepareCredentialRequest, _ ...grpc.CallOption) (*pb.PrepareCredentialResponse, error) {
+	if string(r.Input) == "invalid!" {
+		return nil, status.Error(codes.InvalidArgument, "invalid fixture credential")
+	}
+	return &pb.PrepareCredentialResponse{Credential: &pb.Credential{Data: r.Input}}, nil
 }
 
 func (f *fakeAdapter) Fetch(ctx context.Context, r *pb.FetchRequest, _ ...grpc.CallOption) (*pb.FetchResponse, error) {
@@ -329,7 +352,7 @@ func TestIntegration(t *testing.T) {
 	}
 	// Connection ownership and account auth rejection.
 	var connection string
-	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO connections(tenant_id,adapter_id,provider_id,name,state) VALUES($1,'x','account','test','ready') RETURNING id`, tenant).Scan(&connection))
+	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO connections(tenant_id,adapter_id,provider_id,name,state) VALUES($1,'fixture','account','test','ready') RETURNING id`, tenant).Scan(&connection))
 	if _, e = s.Submit(ctx, other.TenantID, domain.CaptureInput{URL: a.URL, ConnectionID: connection}); e == nil {
 		t.Fatal("cross tenant connection accepted")
 	}

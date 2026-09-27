@@ -170,9 +170,9 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		return e
 	}
 	defer release(c, t.Tenant, slot)
-	var url, id, provider, connection, scope, state, visibility string
+	var url, id, provider, connection, scope, state, visibility, platform, kind, objectScope string
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT a.url,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),c.scope,c.state,c.visibility FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.id=$1`, t.ID).Scan(&url, &id, &provider, &connection, &scope, &state, &visibility)
+		return tx.QueryRow(ctx, `SELECT a.url,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),c.scope,c.state,c.visibility,a.platform,a.kind,a.object_scope FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.id=$1`, t.ID).Scan(&url, &id, &provider, &connection, &scope, &state, &visibility, &platform, &kind, &objectScope)
 	})
 	if e != nil {
 		return e
@@ -180,7 +180,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if state != "queued" {
 		return nil
 	}
-	var credential *pb.SessionCredential
+	var credential *pb.Credential
 	var revision int64
 	if connection != "" {
 		lock, e := s.DB.Pool.Acquire(ctx)
@@ -208,7 +208,18 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		if e != nil {
 			return e
 		}
-	} else if provider != "fxtwitter" || scope != "public" {
+	}
+	if connection != "" {
+		_, selected, err := s.connectionProvider(ctx, t.Tenant, connection)
+		if err != nil || selected != provider {
+			return ErrConnection
+		}
+	}
+	policy, err := s.requireProvider(ctx, provider, adapter.CaptureFetch)
+	if err != nil {
+		return err
+	}
+	if (connection == "") != (policy.Authentication == "none") {
 		return domain.ErrUnsupported
 	}
 	if _, e := s.requireProvider(ctx, provider, adapter.CaptureFetch); e != nil {
@@ -218,7 +229,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	defer cancel()
 	var trailer metadata.MD
 	fetchStart := time.Now()
-	r, e := s.Adapter.Fetch(callCtx, &pb.FetchRequest{Url: url, ExternalId: id, ProviderId: provider, ConnectionId: connection, AccessScope: scope, RequestId: t.ID, Credential: credential}, grpc.Trailer(&trailer))
+	r, e := s.Adapter.Fetch(callCtx, &pb.FetchRequest{Platform: platform, Kind: kind, ObjectScope: objectScope, Url: url, ExternalId: id, ProviderId: provider, ConnectionId: connection, AccessScope: scope, RequestId: t.ID, Credential: credential}, grpc.Trailer(&trailer))
 	ProviderDuration.WithLabelValues(provider).Observe(time.Since(fetchStart).Seconds())
 	ProviderResults.WithLabelValues(provider, status.Code(e).String()).Inc()
 	if e != nil {
@@ -350,7 +361,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 				if visibility == "public" {
 					mediaScope = "public"
 				}
-				key, _ := json.Marshal([]string{"x", mediaScope, v.ImmutableKey})
+				key, _ := json.Marshal([]string{platform, mediaScope, v.ImmutableKey})
 				cacheKey = store.Hash(string(key))
 			}
 			if e = tx.QueryRow(ctx, `INSERT INTO assets(tenant_id,capture_id,position,source_url,visibility,kind,cache_key,alt_text,sensitive,purpose) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, t.Tenant, t.ID, n, v.Url, visibility, v.Kind, cacheKey, v.AltText, v.Sensitive, v.Purpose).Scan(&aid); e != nil {

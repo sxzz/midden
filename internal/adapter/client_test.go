@@ -68,7 +68,7 @@ func TestProviderRequiresExplicitVisibility(t *testing.T) {
 			ProtocolVersion: "1.0",
 			AdapterId:       "x",
 			Providers: []*pb.Provider{{
-				Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, Authentication: "none", Visibilities: []pb.Visibility{visibility},
+				Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, DefaultProvider: true, Authentication: "none", Visibilities: []pb.Visibility{visibility},
 			}},
 		}
 		valid := visibility == pb.Visibility_VISIBILITY_PUBLIC || visibility == pb.Visibility_VISIBILITY_PRIVATE

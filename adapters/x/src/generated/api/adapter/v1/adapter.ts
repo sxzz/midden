@@ -75,6 +75,10 @@ export interface Provider {
   visibilities: Visibility[];
   capabilities: Capability[];
   entityTypes: string[];
+  /** Default within this authentication mode. */
+  defaultProvider: boolean;
+  /** Adapter-owned input instructions. */
+  credentialHelp: string;
 }
 
 export interface DescribeResponse {
@@ -94,7 +98,10 @@ export interface FetchRequest {
   connectionId: string;
   accessScope: string;
   requestId: string;
-  credential: SessionCredential | undefined;
+  credential: Credential | undefined;
+  platform: string;
+  kind: string;
+  objectScope: string;
 }
 
 export interface Resource {
@@ -169,14 +176,34 @@ export interface FetchResponse {
 }
 
 /** Execution-only secrets; never persisted in task payloads or logs. */
-export interface SessionCredential {
-  authToken: string;
-  csrfToken: string;
+export interface Credential {
+  data: Buffer;
+}
+
+export interface ResolveRequest {
+  url: string;
+}
+
+export interface ResolveResponse {
+  url: string;
+  platform: string;
+  kind: string;
+  objectScope: string;
+  externalId: string;
+}
+
+export interface PrepareCredentialRequest {
+  providerId: string;
+  input: Buffer;
+}
+
+export interface PrepareCredentialResponse {
+  credential: Credential | undefined;
 }
 
 export interface CheckConnectionRequest {
   providerId: string;
-  credential: SessionCredential | undefined;
+  credential: Credential | undefined;
 }
 
 export interface CheckConnectionResponse {
@@ -334,6 +361,8 @@ function createBaseProvider(): Provider {
     visibilities: [],
     capabilities: [],
     entityTypes: [],
+    defaultProvider: false,
+    credentialHelp: "",
   };
 }
 
@@ -358,6 +387,12 @@ export const Provider: MessageFns<Provider> = {
     }
     for (const v of message.entityTypes) {
       writer.uint32(42).string(v!);
+    }
+    if (message.defaultProvider !== false) {
+      writer.uint32(48).bool(message.defaultProvider);
+    }
+    if (message.credentialHelp !== "") {
+      writer.uint32(58).string(message.credentialHelp);
     }
     return writer;
   },
@@ -420,6 +455,22 @@ export const Provider: MessageFns<Provider> = {
           message.entityTypes.push(reader.string());
           continue;
         }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.defaultProvider = reader.bool();
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.credentialHelp = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -444,6 +495,12 @@ export const Provider: MessageFns<Provider> = {
       entityTypes: globalThis.Array.isArray(object?.entityTypes)
         ? object.entityTypes.map((e: any) => globalThis.String(e))
         : [],
+      defaultProvider: isSet(object.defaultProvider)
+        ? globalThis.Boolean(object.defaultProvider)
+        : false,
+      credentialHelp: isSet(object.credentialHelp)
+        ? globalThis.String(object.credentialHelp)
+        : "",
     };
   },
 
@@ -464,6 +521,12 @@ export const Provider: MessageFns<Provider> = {
     if (message.entityTypes?.length) {
       obj.entityTypes = message.entityTypes;
     }
+    if (message.defaultProvider !== false) {
+      obj.defaultProvider = message.defaultProvider;
+    }
+    if (message.credentialHelp !== "") {
+      obj.credentialHelp = message.credentialHelp;
+    }
     return obj;
   },
 
@@ -478,6 +541,8 @@ export const Provider: MessageFns<Provider> = {
     message.capabilities =
       object.capabilities?.map((e) => Capability.fromPartial(e)) || [];
     message.entityTypes = object.entityTypes?.map((e) => e) || [];
+    message.defaultProvider = object.defaultProvider ?? false;
+    message.credentialHelp = object.credentialHelp ?? "";
     return message;
   },
 };
@@ -654,6 +719,9 @@ function createBaseFetchRequest(): FetchRequest {
     accessScope: "",
     requestId: "",
     credential: undefined,
+    platform: "",
+    kind: "",
+    objectScope: "",
   };
 }
 
@@ -681,10 +749,16 @@ export const FetchRequest: MessageFns<FetchRequest> = {
       writer.uint32(50).string(message.requestId);
     }
     if (message.credential !== undefined) {
-      SessionCredential.encode(
-        message.credential,
-        writer.uint32(58).fork(),
-      ).join();
+      Credential.encode(message.credential, writer.uint32(58).fork()).join();
+    }
+    if (message.platform !== "") {
+      writer.uint32(66).string(message.platform);
+    }
+    if (message.kind !== "") {
+      writer.uint32(74).string(message.kind);
+    }
+    if (message.objectScope !== "") {
+      writer.uint32(82).string(message.objectScope);
     }
     return writer;
   },
@@ -750,10 +824,31 @@ export const FetchRequest: MessageFns<FetchRequest> = {
             break;
           }
 
-          message.credential = SessionCredential.decode(
-            reader,
-            reader.uint32(),
-          );
+          message.credential = Credential.decode(reader, reader.uint32());
+          continue;
+        }
+        case 8: {
+          if (tag !== 66) {
+            break;
+          }
+
+          message.platform = reader.string();
+          continue;
+        }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.kind = reader.string();
+          continue;
+        }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.objectScope = reader.string();
           continue;
         }
       }
@@ -784,8 +879,15 @@ export const FetchRequest: MessageFns<FetchRequest> = {
         ? globalThis.String(object.requestId)
         : "",
       credential: isSet(object.credential)
-        ? SessionCredential.fromJSON(object.credential)
+        ? Credential.fromJSON(object.credential)
         : undefined,
+      platform: isSet(object.platform)
+        ? globalThis.String(object.platform)
+        : "",
+      kind: isSet(object.kind) ? globalThis.String(object.kind) : "",
+      objectScope: isSet(object.objectScope)
+        ? globalThis.String(object.objectScope)
+        : "",
     };
   },
 
@@ -810,7 +912,16 @@ export const FetchRequest: MessageFns<FetchRequest> = {
       obj.requestId = message.requestId;
     }
     if (message.credential !== undefined) {
-      obj.credential = SessionCredential.toJSON(message.credential);
+      obj.credential = Credential.toJSON(message.credential);
+    }
+    if (message.platform !== "") {
+      obj.platform = message.platform;
+    }
+    if (message.kind !== "") {
+      obj.kind = message.kind;
+    }
+    if (message.objectScope !== "") {
+      obj.objectScope = message.objectScope;
     }
     return obj;
   },
@@ -828,8 +939,11 @@ export const FetchRequest: MessageFns<FetchRequest> = {
     message.requestId = object.requestId ?? "";
     message.credential =
       object.credential !== undefined && object.credential !== null
-        ? SessionCredential.fromPartial(object.credential)
+        ? Credential.fromPartial(object.credential)
         : undefined;
+    message.platform = object.platform ?? "";
+    message.kind = object.kind ?? "";
+    message.objectScope = object.objectScope ?? "";
     return message;
   },
 };
@@ -1886,29 +2000,26 @@ export const FetchResponse: MessageFns<FetchResponse> = {
   },
 };
 
-function createBaseSessionCredential(): SessionCredential {
-  return { authToken: "", csrfToken: "" };
+function createBaseCredential(): Credential {
+  return { data: Buffer.alloc(0) };
 }
 
-export const SessionCredential: MessageFns<SessionCredential> = {
+export const Credential: MessageFns<Credential> = {
   encode(
-    message: SessionCredential,
+    message: Credential,
     writer: BinaryWriter = new BinaryWriter(),
   ): BinaryWriter {
-    if (message.authToken !== "") {
-      writer.uint32(10).string(message.authToken);
-    }
-    if (message.csrfToken !== "") {
-      writer.uint32(18).string(message.csrfToken);
+    if (message.data.length !== 0) {
+      writer.uint32(10).bytes(message.data);
     }
     return writer;
   },
 
-  decode(input: BinaryReader | Uint8Array, length?: number): SessionCredential {
+  decode(input: BinaryReader | Uint8Array, length?: number): Credential {
     const reader =
       input instanceof BinaryReader ? input : new BinaryReader(input);
     const end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSessionCredential();
+    const message = createBaseCredential();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -1917,15 +2028,7 @@ export const SessionCredential: MessageFns<SessionCredential> = {
             break;
           }
 
-          message.authToken = reader.string();
-          continue;
-        }
-        case 2: {
-          if (tag !== 18) {
-            break;
-          }
-
-          message.csrfToken = reader.string();
+          message.data = Buffer.from(reader.bytes());
           continue;
         }
       }
@@ -1937,38 +2040,395 @@ export const SessionCredential: MessageFns<SessionCredential> = {
     return message;
   },
 
-  fromJSON(object: any): SessionCredential {
+  fromJSON(object: any): Credential {
     return {
-      authToken: isSet(object.authToken)
-        ? globalThis.String(object.authToken)
-        : "",
-      csrfToken: isSet(object.csrfToken)
-        ? globalThis.String(object.csrfToken)
-        : "",
+      data: isSet(object.data)
+        ? Buffer.from(bytesFromBase64(object.data))
+        : Buffer.alloc(0),
     };
   },
 
-  toJSON(message: SessionCredential): unknown {
+  toJSON(message: Credential): unknown {
     const obj: any = {};
-    if (message.authToken !== "") {
-      obj.authToken = message.authToken;
-    }
-    if (message.csrfToken !== "") {
-      obj.csrfToken = message.csrfToken;
+    if (message.data.length !== 0) {
+      obj.data = base64FromBytes(message.data);
     }
     return obj;
   },
 
-  create(base?: DeepPartial<SessionCredential>): SessionCredential {
-    return SessionCredential.fromPartial(base ?? {});
+  create(base?: DeepPartial<Credential>): Credential {
+    return Credential.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<SessionCredential>): SessionCredential {
-    const message = createBaseSessionCredential();
-    message.authToken = object.authToken ?? "";
-    message.csrfToken = object.csrfToken ?? "";
+  fromPartial(object: DeepPartial<Credential>): Credential {
+    const message = createBaseCredential();
+    message.data = object.data ?? Buffer.alloc(0);
     return message;
   },
 };
+
+function createBaseResolveRequest(): ResolveRequest {
+  return { url: "" };
+}
+
+export const ResolveRequest: MessageFns<ResolveRequest> = {
+  encode(
+    message: ResolveRequest,
+    writer: BinaryWriter = new BinaryWriter(),
+  ): BinaryWriter {
+    if (message.url !== "") {
+      writer.uint32(10).string(message.url);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ResolveRequest {
+    const reader =
+      input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseResolveRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.url = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ResolveRequest {
+    return { url: isSet(object.url) ? globalThis.String(object.url) : "" };
+  },
+
+  toJSON(message: ResolveRequest): unknown {
+    const obj: any = {};
+    if (message.url !== "") {
+      obj.url = message.url;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ResolveRequest>): ResolveRequest {
+    return ResolveRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ResolveRequest>): ResolveRequest {
+    const message = createBaseResolveRequest();
+    message.url = object.url ?? "";
+    return message;
+  },
+};
+
+function createBaseResolveResponse(): ResolveResponse {
+  return { url: "", platform: "", kind: "", objectScope: "", externalId: "" };
+}
+
+export const ResolveResponse: MessageFns<ResolveResponse> = {
+  encode(
+    message: ResolveResponse,
+    writer: BinaryWriter = new BinaryWriter(),
+  ): BinaryWriter {
+    if (message.url !== "") {
+      writer.uint32(10).string(message.url);
+    }
+    if (message.platform !== "") {
+      writer.uint32(18).string(message.platform);
+    }
+    if (message.kind !== "") {
+      writer.uint32(26).string(message.kind);
+    }
+    if (message.objectScope !== "") {
+      writer.uint32(34).string(message.objectScope);
+    }
+    if (message.externalId !== "") {
+      writer.uint32(42).string(message.externalId);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ResolveResponse {
+    const reader =
+      input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseResolveResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.url = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.platform = reader.string();
+          continue;
+        }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.kind = reader.string();
+          continue;
+        }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.objectScope = reader.string();
+          continue;
+        }
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.externalId = reader.string();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ResolveResponse {
+    return {
+      url: isSet(object.url) ? globalThis.String(object.url) : "",
+      platform: isSet(object.platform)
+        ? globalThis.String(object.platform)
+        : "",
+      kind: isSet(object.kind) ? globalThis.String(object.kind) : "",
+      objectScope: isSet(object.objectScope)
+        ? globalThis.String(object.objectScope)
+        : "",
+      externalId: isSet(object.externalId)
+        ? globalThis.String(object.externalId)
+        : "",
+    };
+  },
+
+  toJSON(message: ResolveResponse): unknown {
+    const obj: any = {};
+    if (message.url !== "") {
+      obj.url = message.url;
+    }
+    if (message.platform !== "") {
+      obj.platform = message.platform;
+    }
+    if (message.kind !== "") {
+      obj.kind = message.kind;
+    }
+    if (message.objectScope !== "") {
+      obj.objectScope = message.objectScope;
+    }
+    if (message.externalId !== "") {
+      obj.externalId = message.externalId;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ResolveResponse>): ResolveResponse {
+    return ResolveResponse.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ResolveResponse>): ResolveResponse {
+    const message = createBaseResolveResponse();
+    message.url = object.url ?? "";
+    message.platform = object.platform ?? "";
+    message.kind = object.kind ?? "";
+    message.objectScope = object.objectScope ?? "";
+    message.externalId = object.externalId ?? "";
+    return message;
+  },
+};
+
+function createBasePrepareCredentialRequest(): PrepareCredentialRequest {
+  return { providerId: "", input: Buffer.alloc(0) };
+}
+
+export const PrepareCredentialRequest: MessageFns<PrepareCredentialRequest> = {
+  encode(
+    message: PrepareCredentialRequest,
+    writer: BinaryWriter = new BinaryWriter(),
+  ): BinaryWriter {
+    if (message.providerId !== "") {
+      writer.uint32(10).string(message.providerId);
+    }
+    if (message.input.length !== 0) {
+      writer.uint32(18).bytes(message.input);
+    }
+    return writer;
+  },
+
+  decode(
+    input: BinaryReader | Uint8Array,
+    length?: number,
+  ): PrepareCredentialRequest {
+    const reader =
+      input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePrepareCredentialRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.providerId = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.input = Buffer.from(reader.bytes());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PrepareCredentialRequest {
+    return {
+      providerId: isSet(object.providerId)
+        ? globalThis.String(object.providerId)
+        : "",
+      input: isSet(object.input)
+        ? Buffer.from(bytesFromBase64(object.input))
+        : Buffer.alloc(0),
+    };
+  },
+
+  toJSON(message: PrepareCredentialRequest): unknown {
+    const obj: any = {};
+    if (message.providerId !== "") {
+      obj.providerId = message.providerId;
+    }
+    if (message.input.length !== 0) {
+      obj.input = base64FromBytes(message.input);
+    }
+    return obj;
+  },
+
+  create(
+    base?: DeepPartial<PrepareCredentialRequest>,
+  ): PrepareCredentialRequest {
+    return PrepareCredentialRequest.fromPartial(base ?? {});
+  },
+  fromPartial(
+    object: DeepPartial<PrepareCredentialRequest>,
+  ): PrepareCredentialRequest {
+    const message = createBasePrepareCredentialRequest();
+    message.providerId = object.providerId ?? "";
+    message.input = object.input ?? Buffer.alloc(0);
+    return message;
+  },
+};
+
+function createBasePrepareCredentialResponse(): PrepareCredentialResponse {
+  return { credential: undefined };
+}
+
+export const PrepareCredentialResponse: MessageFns<PrepareCredentialResponse> =
+  {
+    encode(
+      message: PrepareCredentialResponse,
+      writer: BinaryWriter = new BinaryWriter(),
+    ): BinaryWriter {
+      if (message.credential !== undefined) {
+        Credential.encode(message.credential, writer.uint32(10).fork()).join();
+      }
+      return writer;
+    },
+
+    decode(
+      input: BinaryReader | Uint8Array,
+      length?: number,
+    ): PrepareCredentialResponse {
+      const reader =
+        input instanceof BinaryReader ? input : new BinaryReader(input);
+      const end = length === undefined ? reader.len : reader.pos + length;
+      const message = createBasePrepareCredentialResponse();
+      while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1: {
+            if (tag !== 10) {
+              break;
+            }
+
+            message.credential = Credential.decode(reader, reader.uint32());
+            continue;
+          }
+        }
+        if ((tag & 7) === 4 || tag === 0) {
+          break;
+        }
+        reader.skip(tag & 7);
+      }
+      return message;
+    },
+
+    fromJSON(object: any): PrepareCredentialResponse {
+      return {
+        credential: isSet(object.credential)
+          ? Credential.fromJSON(object.credential)
+          : undefined,
+      };
+    },
+
+    toJSON(message: PrepareCredentialResponse): unknown {
+      const obj: any = {};
+      if (message.credential !== undefined) {
+        obj.credential = Credential.toJSON(message.credential);
+      }
+      return obj;
+    },
+
+    create(
+      base?: DeepPartial<PrepareCredentialResponse>,
+    ): PrepareCredentialResponse {
+      return PrepareCredentialResponse.fromPartial(base ?? {});
+    },
+    fromPartial(
+      object: DeepPartial<PrepareCredentialResponse>,
+    ): PrepareCredentialResponse {
+      const message = createBasePrepareCredentialResponse();
+      message.credential =
+        object.credential !== undefined && object.credential !== null
+          ? Credential.fromPartial(object.credential)
+          : undefined;
+      return message;
+    },
+  };
 
 function createBaseCheckConnectionRequest(): CheckConnectionRequest {
   return { providerId: "", credential: undefined };
@@ -1983,10 +2443,7 @@ export const CheckConnectionRequest: MessageFns<CheckConnectionRequest> = {
       writer.uint32(10).string(message.providerId);
     }
     if (message.credential !== undefined) {
-      SessionCredential.encode(
-        message.credential,
-        writer.uint32(18).fork(),
-      ).join();
+      Credential.encode(message.credential, writer.uint32(18).fork()).join();
     }
     return writer;
   },
@@ -2015,10 +2472,7 @@ export const CheckConnectionRequest: MessageFns<CheckConnectionRequest> = {
             break;
           }
 
-          message.credential = SessionCredential.decode(
-            reader,
-            reader.uint32(),
-          );
+          message.credential = Credential.decode(reader, reader.uint32());
           continue;
         }
       }
@@ -2036,7 +2490,7 @@ export const CheckConnectionRequest: MessageFns<CheckConnectionRequest> = {
         ? globalThis.String(object.providerId)
         : "",
       credential: isSet(object.credential)
-        ? SessionCredential.fromJSON(object.credential)
+        ? Credential.fromJSON(object.credential)
         : undefined,
     };
   },
@@ -2047,7 +2501,7 @@ export const CheckConnectionRequest: MessageFns<CheckConnectionRequest> = {
       obj.providerId = message.providerId;
     }
     if (message.credential !== undefined) {
-      obj.credential = SessionCredential.toJSON(message.credential);
+      obj.credential = Credential.toJSON(message.credential);
     }
     return obj;
   },
@@ -2062,7 +2516,7 @@ export const CheckConnectionRequest: MessageFns<CheckConnectionRequest> = {
     message.providerId = object.providerId ?? "";
     message.credential =
       object.credential !== undefined && object.credential !== null
-        ? SessionCredential.fromPartial(object.credential)
+        ? Credential.fromPartial(object.credential)
         : undefined;
     return message;
   },
@@ -2173,6 +2627,32 @@ export const AdapterService = {
     responseDeserialize: (value: Buffer): DescribeResponse =>
       DescribeResponse.decode(value),
   },
+  resolve: {
+    path: "/adapter.v1.Adapter/Resolve",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: ResolveRequest): Buffer =>
+      Buffer.from(ResolveRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): ResolveRequest =>
+      ResolveRequest.decode(value),
+    responseSerialize: (value: ResolveResponse): Buffer =>
+      Buffer.from(ResolveResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): ResolveResponse =>
+      ResolveResponse.decode(value),
+  },
+  prepareCredential: {
+    path: "/adapter.v1.Adapter/PrepareCredential",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: PrepareCredentialRequest): Buffer =>
+      Buffer.from(PrepareCredentialRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer): PrepareCredentialRequest =>
+      PrepareCredentialRequest.decode(value),
+    responseSerialize: (value: PrepareCredentialResponse): Buffer =>
+      Buffer.from(PrepareCredentialResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer): PrepareCredentialResponse =>
+      PrepareCredentialResponse.decode(value),
+  },
   fetch: {
     path: "/adapter.v1.Adapter/Fetch",
     requestStream: false,
@@ -2204,6 +2684,11 @@ export const AdapterService = {
 export interface AdapterServer extends UntypedServiceImplementation {
   /** Describe is required; all other operations are opt-in per provider. */
   describe: handleUnaryCall<DescribeRequest, DescribeResponse>;
+  resolve: handleUnaryCall<ResolveRequest, ResolveResponse>;
+  prepareCredential: handleUnaryCall<
+    PrepareCredentialRequest,
+    PrepareCredentialResponse
+  >;
   fetch: handleUnaryCall<FetchRequest, FetchResponse>;
   checkConnection: handleUnaryCall<
     CheckConnectionRequest,
@@ -2227,6 +2712,45 @@ export interface AdapterClient extends Client {
     metadata: Metadata,
     options: Partial<CallOptions>,
     callback: (error: ServiceError | null, response: DescribeResponse) => void,
+  ): ClientUnaryCall;
+  resolve(
+    request: ResolveRequest,
+    callback: (error: ServiceError | null, response: ResolveResponse) => void,
+  ): ClientUnaryCall;
+  resolve(
+    request: ResolveRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: ResolveResponse) => void,
+  ): ClientUnaryCall;
+  resolve(
+    request: ResolveRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: ResolveResponse) => void,
+  ): ClientUnaryCall;
+  prepareCredential(
+    request: PrepareCredentialRequest,
+    callback: (
+      error: ServiceError | null,
+      response: PrepareCredentialResponse,
+    ) => void,
+  ): ClientUnaryCall;
+  prepareCredential(
+    request: PrepareCredentialRequest,
+    metadata: Metadata,
+    callback: (
+      error: ServiceError | null,
+      response: PrepareCredentialResponse,
+    ) => void,
+  ): ClientUnaryCall;
+  prepareCredential(
+    request: PrepareCredentialRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (
+      error: ServiceError | null,
+      response: PrepareCredentialResponse,
+    ) => void,
   ): ClientUnaryCall;
   fetch(
     request: FetchRequest,

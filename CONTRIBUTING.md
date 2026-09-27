@@ -82,3 +82,7 @@ docker compose -f compose.yaml -f compose.local.yaml -f compose.build.yaml build
 镜像 CI 按 core/adapter 分开缓存 BuildKit 构建层；core 额外将 Go 编译缓存挂载持久化到 GitHub Actions Cache，以便源码变化时仍能复用编译结果。测试 CI 缓存 Go 模块、编译结果及 npm 下载。
 
 生产 Compose 使用 GHCR 镜像。GitHub Actions 在 main 测试通过后发布两个架构的镜像。服务器部署使用完整提交 SHA 标签，与迁移文件保持一致。
+
+## 平台逻辑边界
+
+URL 规范化、平台对象标识、Cookie 解析、上游请求和媒体缓存键由 Adapter 实现。Go 核心负责通用存储、权限、调度和不透明凭据加密，不根据平台名称或 Provider ID 分支。Telegram 渠道可提供 X 专属交互，但必须检查 Adapter 能力；更换 Adapter 不应要求修改核心。新增平台功能应同时增加非 X fixture 的回归覆盖。

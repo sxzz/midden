@@ -1,3 +1,5 @@
+import { resolveTarget } from "./resolve.js";
+import { decodeCredential, prepareCredential } from "./credential.js";
 import { entityTypes } from "./entity-schemas.js";
 import {
   Server,
@@ -16,7 +18,7 @@ import {
   Visibility,
 } from "./generated/api/adapter/v1/adapter.js";
 import { fetchPublic, ProviderError } from "./provider.js";
-import { checkSession, fetchSession, validateCredential } from "./session.js";
+import { checkSession, fetchSession } from "./session.js";
 
 export function createServer(
   secret: string,
@@ -85,6 +87,7 @@ export function createServer(
       providers: [
         {
           id: "fxtwitter",
+          defaultProvider: true,
           authentication: "none",
           entityTypes: entityTypes.map((t) => t.name),
           capabilities: [
@@ -99,11 +102,14 @@ export function createServer(
         },
         {
           id: "x-session",
+          defaultProvider: true,
+          credentialHelp: "Base64 Cookie，需包含 auth_token 和 ct0。",
           authentication: "session",
           entityTypes: entityTypes.map((t) => t.name),
           capabilities: [
             "capture.fetch",
             "connection.check",
+            "credential.prepare",
             "content.text",
             "entity.graph",
             "source.raw",
@@ -117,23 +123,32 @@ export function createServer(
         },
       ],
     })),
+    resolve: unary(async (req) => resolveTarget(req.url)),
+    prepareCredential: unary(async (req) => {
+      if (!tls)
+        throw new ProviderError(
+          status.FAILED_PRECONDITION,
+          "credential import requires TLS",
+        );
+      if (req.providerId !== "x-session")
+        throw new ProviderError(
+          status.UNIMPLEMENTED,
+          "credential import unsupported",
+        );
+      return { credential: prepareCredential(req.input) };
+    }),
     fetch: unary(async (req, signal) => {
-      let url: URL;
-      try {
-        url = new URL(req.url);
-      } catch {
-        throw new ProviderError(status.INVALID_ARGUMENT, "invalid post URL");
-      }
-      const match = url.pathname.match(
-        /^\/(?:[A-Za-z0-9_]+|i\/web)\/status\/(\d+)(?:\/photo\/\d+)?\/?$/,
-      );
+      const target = resolveTarget(req.url);
       if (
-        !["https:", "http:"].includes(url.protocol) ||
-        !/^(?:(?:www|mobile)\.)?(?:x|twitter)\.com$/.test(url.hostname) ||
-        !match ||
-        match[1] !== req.externalId
+        target.externalId !== req.externalId ||
+        target.platform !== req.platform ||
+        target.kind !== req.kind ||
+        target.objectScope !== req.objectScope
       )
-        throw new ProviderError(status.INVALID_ARGUMENT, "invalid post URL");
+        throw new ProviderError(
+          status.INVALID_ARGUMENT,
+          "invalid post identity",
+        );
       if (
         req.providerId === "fxtwitter" &&
         !req.connectionId &&
@@ -155,8 +170,11 @@ export function createServer(
           status.FAILED_PRECONDITION,
           "account execution requires TLS",
         );
-      validateCredential(req.credential);
-      return fetchSession(req.externalId, req.credential, signal);
+      return fetchSession(
+        req.externalId,
+        decodeCredential(req.credential),
+        signal,
+      );
     }),
     checkConnection: unary(async (req, signal) => {
       if (!tls)
@@ -169,8 +187,7 @@ export function createServer(
           status.INVALID_ARGUMENT,
           "unsupported account provider",
         );
-      validateCredential(req.credential);
-      return checkSession(req.credential, signal);
+      return checkSession(decodeCredential(req.credential), signal);
     }),
   } satisfies Pick<AdapterServer, "describe"> & Partial<AdapterServer>;
   server.addService(AdapterService, handlers);

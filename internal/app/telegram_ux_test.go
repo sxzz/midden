@@ -279,7 +279,7 @@ func TestTelegramUXIntegration(t *testing.T) {
 	// A regular group URL also retains its destination when reusing an archive.
 	iid = groupMessage(identity.TenantID, "42", "/save@OurBot https://x.com/i/status/201", 502)
 	must(t, db.Tx(ctx, identity.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT id,reply_to_message_id FROM submissions WHERE idem_key=$1`, iid+":201").Scan(&sid, &groupReplyTo)
+		return tx.QueryRow(ctx, `SELECT id,reply_to_message_id FROM submissions WHERE idem_key LIKE $1`, iid+":%").Scan(&sid, &groupReplyTo)
 	}))
 	if groupReplyTo != 502 {
 		t.Fatal("lost capture reply target", groupReplyTo)

@@ -168,14 +168,16 @@ func (x *Capability) GetMinor() uint32 {
 }
 
 type Provider struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Authentication string                 `protobuf:"bytes,2,opt,name=authentication,proto3" json:"authentication,omitempty"`
-	Visibilities   []Visibility           `protobuf:"varint,3,rep,packed,name=visibilities,proto3,enum=adapter.v1.Visibility" json:"visibilities,omitempty"`
-	Capabilities   []*Capability          `protobuf:"bytes,4,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
-	EntityTypes    []string               `protobuf:"bytes,5,rep,name=entity_types,json=entityTypes,proto3" json:"entity_types,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Authentication  string                 `protobuf:"bytes,2,opt,name=authentication,proto3" json:"authentication,omitempty"`
+	Visibilities    []Visibility           `protobuf:"varint,3,rep,packed,name=visibilities,proto3,enum=adapter.v1.Visibility" json:"visibilities,omitempty"`
+	Capabilities    []*Capability          `protobuf:"bytes,4,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	EntityTypes     []string               `protobuf:"bytes,5,rep,name=entity_types,json=entityTypes,proto3" json:"entity_types,omitempty"`
+	DefaultProvider bool                   `protobuf:"varint,6,opt,name=default_provider,json=defaultProvider,proto3" json:"default_provider,omitempty"` // Default within this authentication mode.
+	CredentialHelp  string                 `protobuf:"bytes,7,opt,name=credential_help,json=credentialHelp,proto3" json:"credential_help,omitempty"`     // Adapter-owned input instructions.
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Provider) Reset() {
@@ -241,6 +243,20 @@ func (x *Provider) GetEntityTypes() []string {
 		return x.EntityTypes
 	}
 	return nil
+}
+
+func (x *Provider) GetDefaultProvider() bool {
+	if x != nil {
+		return x.DefaultProvider
+	}
+	return false
+}
+
+func (x *Provider) GetCredentialHelp() string {
+	if x != nil {
+		return x.CredentialHelp
+	}
+	return ""
 }
 
 type DescribeResponse struct {
@@ -336,7 +352,10 @@ type FetchRequest struct {
 	ConnectionId  string                 `protobuf:"bytes,4,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
 	AccessScope   string                 `protobuf:"bytes,5,opt,name=access_scope,json=accessScope,proto3" json:"access_scope,omitempty"`
 	RequestId     string                 `protobuf:"bytes,6,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Credential    *SessionCredential     `protobuf:"bytes,7,opt,name=credential,proto3" json:"credential,omitempty"`
+	Credential    *Credential            `protobuf:"bytes,7,opt,name=credential,proto3" json:"credential,omitempty"`
+	Platform      string                 `protobuf:"bytes,8,opt,name=platform,proto3" json:"platform,omitempty"`
+	Kind          string                 `protobuf:"bytes,9,opt,name=kind,proto3" json:"kind,omitempty"`
+	ObjectScope   string                 `protobuf:"bytes,10,opt,name=object_scope,json=objectScope,proto3" json:"object_scope,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -413,11 +432,32 @@ func (x *FetchRequest) GetRequestId() string {
 	return ""
 }
 
-func (x *FetchRequest) GetCredential() *SessionCredential {
+func (x *FetchRequest) GetCredential() *Credential {
 	if x != nil {
 		return x.Credential
 	}
 	return nil
+}
+
+func (x *FetchRequest) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *FetchRequest) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *FetchRequest) GetObjectScope() string {
+	if x != nil {
+		return x.ObjectScope
+	}
+	return ""
 }
 
 type Resource struct {
@@ -979,28 +1019,27 @@ func (x *FetchResponse) GetPublishedAt() string {
 }
 
 // Execution-only secrets; never persisted in task payloads or logs.
-type SessionCredential struct {
+type Credential struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AuthToken     string                 `protobuf:"bytes,1,opt,name=auth_token,json=authToken,proto3" json:"auth_token,omitempty"`
-	CsrfToken     string                 `protobuf:"bytes,2,opt,name=csrf_token,json=csrfToken,proto3" json:"csrf_token,omitempty"`
+	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SessionCredential) Reset() {
-	*x = SessionCredential{}
+func (x *Credential) Reset() {
+	*x = Credential{}
 	mi := &file_api_adapter_v1_adapter_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SessionCredential) String() string {
+func (x *Credential) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SessionCredential) ProtoMessage() {}
+func (*Credential) ProtoMessage() {}
 
-func (x *SessionCredential) ProtoReflect() protoreflect.Message {
+func (x *Credential) ProtoReflect() protoreflect.Message {
 	mi := &file_api_adapter_v1_adapter_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1012,36 +1051,245 @@ func (x *SessionCredential) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SessionCredential.ProtoReflect.Descriptor instead.
-func (*SessionCredential) Descriptor() ([]byte, []int) {
+// Deprecated: Use Credential.ProtoReflect.Descriptor instead.
+func (*Credential) Descriptor() ([]byte, []int) {
 	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{12}
 }
 
-func (x *SessionCredential) GetAuthToken() string {
+func (x *Credential) GetData() []byte {
 	if x != nil {
-		return x.AuthToken
+		return x.Data
+	}
+	return nil
+}
+
+type ResolveRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Url           string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveRequest) Reset() {
+	*x = ResolveRequest{}
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveRequest) ProtoMessage() {}
+
+func (x *ResolveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveRequest.ProtoReflect.Descriptor instead.
+func (*ResolveRequest) Descriptor() ([]byte, []int) {
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ResolveRequest) GetUrl() string {
+	if x != nil {
+		return x.Url
 	}
 	return ""
 }
 
-func (x *SessionCredential) GetCsrfToken() string {
+type ResolveResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Url           string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	Platform      string                 `protobuf:"bytes,2,opt,name=platform,proto3" json:"platform,omitempty"`
+	Kind          string                 `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	ObjectScope   string                 `protobuf:"bytes,4,opt,name=object_scope,json=objectScope,proto3" json:"object_scope,omitempty"`
+	ExternalId    string                 `protobuf:"bytes,5,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveResponse) Reset() {
+	*x = ResolveResponse{}
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveResponse) ProtoMessage() {}
+
+func (x *ResolveResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[14]
 	if x != nil {
-		return x.CsrfToken
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveResponse.ProtoReflect.Descriptor instead.
+func (*ResolveResponse) Descriptor() ([]byte, []int) {
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ResolveResponse) GetUrl() string {
+	if x != nil {
+		return x.Url
 	}
 	return ""
+}
+
+func (x *ResolveResponse) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+func (x *ResolveResponse) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *ResolveResponse) GetObjectScope() string {
+	if x != nil {
+		return x.ObjectScope
+	}
+	return ""
+}
+
+func (x *ResolveResponse) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+type PrepareCredentialRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProviderId    string                 `protobuf:"bytes,1,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	Input         []byte                 `protobuf:"bytes,2,opt,name=input,proto3" json:"input,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PrepareCredentialRequest) Reset() {
+	*x = PrepareCredentialRequest{}
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PrepareCredentialRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PrepareCredentialRequest) ProtoMessage() {}
+
+func (x *PrepareCredentialRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PrepareCredentialRequest.ProtoReflect.Descriptor instead.
+func (*PrepareCredentialRequest) Descriptor() ([]byte, []int) {
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *PrepareCredentialRequest) GetProviderId() string {
+	if x != nil {
+		return x.ProviderId
+	}
+	return ""
+}
+
+func (x *PrepareCredentialRequest) GetInput() []byte {
+	if x != nil {
+		return x.Input
+	}
+	return nil
+}
+
+type PrepareCredentialResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Credential    *Credential            `protobuf:"bytes,1,opt,name=credential,proto3" json:"credential,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PrepareCredentialResponse) Reset() {
+	*x = PrepareCredentialResponse{}
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PrepareCredentialResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PrepareCredentialResponse) ProtoMessage() {}
+
+func (x *PrepareCredentialResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PrepareCredentialResponse.ProtoReflect.Descriptor instead.
+func (*PrepareCredentialResponse) Descriptor() ([]byte, []int) {
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *PrepareCredentialResponse) GetCredential() *Credential {
+	if x != nil {
+		return x.Credential
+	}
+	return nil
 }
 
 type CheckConnectionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ProviderId    string                 `protobuf:"bytes,1,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
-	Credential    *SessionCredential     `protobuf:"bytes,2,opt,name=credential,proto3" json:"credential,omitempty"`
+	Credential    *Credential            `protobuf:"bytes,2,opt,name=credential,proto3" json:"credential,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CheckConnectionRequest) Reset() {
 	*x = CheckConnectionRequest{}
-	mi := &file_api_adapter_v1_adapter_proto_msgTypes[13]
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1053,7 +1301,7 @@ func (x *CheckConnectionRequest) String() string {
 func (*CheckConnectionRequest) ProtoMessage() {}
 
 func (x *CheckConnectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_adapter_v1_adapter_proto_msgTypes[13]
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1066,7 +1314,7 @@ func (x *CheckConnectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckConnectionRequest.ProtoReflect.Descriptor instead.
 func (*CheckConnectionRequest) Descriptor() ([]byte, []int) {
-	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{13}
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *CheckConnectionRequest) GetProviderId() string {
@@ -1076,7 +1324,7 @@ func (x *CheckConnectionRequest) GetProviderId() string {
 	return ""
 }
 
-func (x *CheckConnectionRequest) GetCredential() *SessionCredential {
+func (x *CheckConnectionRequest) GetCredential() *Credential {
 	if x != nil {
 		return x.Credential
 	}
@@ -1093,7 +1341,7 @@ type CheckConnectionResponse struct {
 
 func (x *CheckConnectionResponse) Reset() {
 	*x = CheckConnectionResponse{}
-	mi := &file_api_adapter_v1_adapter_proto_msgTypes[14]
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1105,7 +1353,7 @@ func (x *CheckConnectionResponse) String() string {
 func (*CheckConnectionResponse) ProtoMessage() {}
 
 func (x *CheckConnectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_adapter_v1_adapter_proto_msgTypes[14]
+	mi := &file_api_adapter_v1_adapter_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1118,7 +1366,7 @@ func (x *CheckConnectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckConnectionResponse.ProtoReflect.Descriptor instead.
 func (*CheckConnectionResponse) Descriptor() ([]byte, []int) {
-	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{14}
+	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CheckConnectionResponse) GetAccountId() string {
@@ -1146,13 +1394,15 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"Capability\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05major\x18\x02 \x01(\rR\x05major\x12\x14\n" +
-	"\x05minor\x18\x03 \x01(\rR\x05minor\"\xdd\x01\n" +
+	"\x05minor\x18\x03 \x01(\rR\x05minor\"\xb1\x02\n" +
 	"\bProvider\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12&\n" +
 	"\x0eauthentication\x18\x02 \x01(\tR\x0eauthentication\x12:\n" +
 	"\fvisibilities\x18\x03 \x03(\x0e2\x16.adapter.v1.VisibilityR\fvisibilities\x12:\n" +
 	"\fcapabilities\x18\x04 \x03(\v2\x16.adapter.v1.CapabilityR\fcapabilities\x12!\n" +
-	"\fentity_types\x18\x05 \x03(\tR\ventityTypes\"\xfb\x01\n" +
+	"\fentity_types\x18\x05 \x03(\tR\ventityTypes\x12)\n" +
+	"\x10default_provider\x18\x06 \x01(\bR\x0fdefaultProvider\x12'\n" +
+	"\x0fcredential_help\x18\a \x01(\tR\x0ecredentialHelp\"\xfb\x01\n" +
 	"\x10DescribeResponse\x12)\n" +
 	"\x10protocol_version\x18\x01 \x01(\tR\x0fprotocolVersion\x12\x1d\n" +
 	"\n" +
@@ -1160,7 +1410,7 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12\x14\n" +
 	"\x05hosts\x18\x04 \x03(\tR\x05hosts\x122\n" +
 	"\tproviders\x18\x05 \x03(\v2\x14.adapter.v1.ProviderR\tproviders\x129\n" +
-	"\fentity_types\x18\x06 \x03(\v2\x16.adapter.v1.EntityTypeR\ventityTypes\"\x88\x02\n" +
+	"\fentity_types\x18\x06 \x03(\v2\x16.adapter.v1.EntityTypeR\ventityTypes\"\xd4\x02\n" +
 	"\fFetchRequest\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x1f\n" +
 	"\vexternal_id\x18\x02 \x01(\tR\n" +
@@ -1170,10 +1420,14 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\rconnection_id\x18\x04 \x01(\tR\fconnectionId\x12!\n" +
 	"\faccess_scope\x18\x05 \x01(\tR\vaccessScope\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x06 \x01(\tR\trequestId\x12=\n" +
+	"request_id\x18\x06 \x01(\tR\trequestId\x126\n" +
 	"\n" +
-	"credential\x18\a \x01(\v2\x1d.adapter.v1.SessionCredentialR\n" +
-	"credential\"\xa8\x01\n" +
+	"credential\x18\a \x01(\v2\x16.adapter.v1.CredentialR\n" +
+	"credential\x12\x1a\n" +
+	"\bplatform\x18\b \x01(\tR\bplatform\x12\x12\n" +
+	"\x04kind\x18\t \x01(\tR\x04kind\x12!\n" +
+	"\fobject_scope\x18\n" +
+	" \x01(\tR\vobjectScope\"\xa8\x01\n" +
 	"\bResource\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12#\n" +
@@ -1233,17 +1487,32 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\asummary\x18\r \x01(\tR\asummary\x12\x1f\n" +
 	"\vauthor_name\x18\x0e \x01(\tR\n" +
 	"authorName\x12!\n" +
-	"\fpublished_at\x18\x0f \x01(\tR\vpublishedAt\"Q\n" +
-	"\x11SessionCredential\x12\x1d\n" +
+	"\fpublished_at\x18\x0f \x01(\tR\vpublishedAt\" \n" +
 	"\n" +
-	"auth_token\x18\x01 \x01(\tR\tauthToken\x12\x1d\n" +
+	"Credential\x12\x12\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data\"\"\n" +
+	"\x0eResolveRequest\x12\x10\n" +
+	"\x03url\x18\x01 \x01(\tR\x03url\"\x97\x01\n" +
+	"\x0fResolveResponse\x12\x10\n" +
+	"\x03url\x18\x01 \x01(\tR\x03url\x12\x1a\n" +
+	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x12\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\x12!\n" +
+	"\fobject_scope\x18\x04 \x01(\tR\vobjectScope\x12\x1f\n" +
+	"\vexternal_id\x18\x05 \x01(\tR\n" +
+	"externalId\"Q\n" +
+	"\x18PrepareCredentialRequest\x12\x1f\n" +
+	"\vprovider_id\x18\x01 \x01(\tR\n" +
+	"providerId\x12\x14\n" +
+	"\x05input\x18\x02 \x01(\fR\x05input\"S\n" +
+	"\x19PrepareCredentialResponse\x126\n" +
 	"\n" +
-	"csrf_token\x18\x02 \x01(\tR\tcsrfToken\"x\n" +
+	"credential\x18\x01 \x01(\v2\x16.adapter.v1.CredentialR\n" +
+	"credential\"q\n" +
 	"\x16CheckConnectionRequest\x12\x1f\n" +
 	"\vprovider_id\x18\x01 \x01(\tR\n" +
-	"providerId\x12=\n" +
+	"providerId\x126\n" +
 	"\n" +
-	"credential\x18\x02 \x01(\v2\x1d.adapter.v1.SessionCredentialR\n" +
+	"credential\x18\x02 \x01(\v2\x16.adapter.v1.CredentialR\n" +
 	"credential\"T\n" +
 	"\x17CheckConnectionResponse\x12\x1d\n" +
 	"\n" +
@@ -1253,9 +1522,11 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"Visibility\x12\x1a\n" +
 	"\x16VISIBILITY_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11VISIBILITY_PUBLIC\x10\x01\x12\x16\n" +
-	"\x12VISIBILITY_PRIVATE\x10\x022\xea\x01\n" +
+	"\x12VISIBILITY_PRIVATE\x10\x022\x90\x03\n" +
 	"\aAdapter\x12E\n" +
-	"\bDescribe\x12\x1b.adapter.v1.DescribeRequest\x1a\x1c.adapter.v1.DescribeResponse\x12<\n" +
+	"\bDescribe\x12\x1b.adapter.v1.DescribeRequest\x1a\x1c.adapter.v1.DescribeResponse\x12B\n" +
+	"\aResolve\x12\x1a.adapter.v1.ResolveRequest\x1a\x1b.adapter.v1.ResolveResponse\x12`\n" +
+	"\x11PrepareCredential\x12$.adapter.v1.PrepareCredentialRequest\x1a%.adapter.v1.PrepareCredentialResponse\x12<\n" +
 	"\x05Fetch\x12\x18.adapter.v1.FetchRequest\x1a\x19.adapter.v1.FetchResponse\x12Z\n" +
 	"\x0fCheckConnection\x12\".adapter.v1.CheckConnectionRequest\x1a#.adapter.v1.CheckConnectionResponseB\"Z monitor/api/adapter/v1;adapterv1b\x06proto3"
 
@@ -1272,31 +1543,35 @@ func file_api_adapter_v1_adapter_proto_rawDescGZIP() []byte {
 }
 
 var file_api_adapter_v1_adapter_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_adapter_v1_adapter_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_api_adapter_v1_adapter_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_api_adapter_v1_adapter_proto_goTypes = []any{
-	(Visibility)(0),                 // 0: adapter.v1.Visibility
-	(*DescribeRequest)(nil),         // 1: adapter.v1.DescribeRequest
-	(*Capability)(nil),              // 2: adapter.v1.Capability
-	(*Provider)(nil),                // 3: adapter.v1.Provider
-	(*DescribeResponse)(nil),        // 4: adapter.v1.DescribeResponse
-	(*FetchRequest)(nil),            // 5: adapter.v1.FetchRequest
-	(*Resource)(nil),                // 6: adapter.v1.Resource
-	(*EntityType)(nil),              // 7: adapter.v1.EntityType
-	(*Entity)(nil),                  // 8: adapter.v1.Entity
-	(*EntityRelation)(nil),          // 9: adapter.v1.EntityRelation
-	(*EntityGraph)(nil),             // 10: adapter.v1.EntityGraph
-	(*SourceResponse)(nil),          // 11: adapter.v1.SourceResponse
-	(*FetchResponse)(nil),           // 12: adapter.v1.FetchResponse
-	(*SessionCredential)(nil),       // 13: adapter.v1.SessionCredential
-	(*CheckConnectionRequest)(nil),  // 14: adapter.v1.CheckConnectionRequest
-	(*CheckConnectionResponse)(nil), // 15: adapter.v1.CheckConnectionResponse
+	(Visibility)(0),                   // 0: adapter.v1.Visibility
+	(*DescribeRequest)(nil),           // 1: adapter.v1.DescribeRequest
+	(*Capability)(nil),                // 2: adapter.v1.Capability
+	(*Provider)(nil),                  // 3: adapter.v1.Provider
+	(*DescribeResponse)(nil),          // 4: adapter.v1.DescribeResponse
+	(*FetchRequest)(nil),              // 5: adapter.v1.FetchRequest
+	(*Resource)(nil),                  // 6: adapter.v1.Resource
+	(*EntityType)(nil),                // 7: adapter.v1.EntityType
+	(*Entity)(nil),                    // 8: adapter.v1.Entity
+	(*EntityRelation)(nil),            // 9: adapter.v1.EntityRelation
+	(*EntityGraph)(nil),               // 10: adapter.v1.EntityGraph
+	(*SourceResponse)(nil),            // 11: adapter.v1.SourceResponse
+	(*FetchResponse)(nil),             // 12: adapter.v1.FetchResponse
+	(*Credential)(nil),                // 13: adapter.v1.Credential
+	(*ResolveRequest)(nil),            // 14: adapter.v1.ResolveRequest
+	(*ResolveResponse)(nil),           // 15: adapter.v1.ResolveResponse
+	(*PrepareCredentialRequest)(nil),  // 16: adapter.v1.PrepareCredentialRequest
+	(*PrepareCredentialResponse)(nil), // 17: adapter.v1.PrepareCredentialResponse
+	(*CheckConnectionRequest)(nil),    // 18: adapter.v1.CheckConnectionRequest
+	(*CheckConnectionResponse)(nil),   // 19: adapter.v1.CheckConnectionResponse
 }
 var file_api_adapter_v1_adapter_proto_depIdxs = []int32{
 	0,  // 0: adapter.v1.Provider.visibilities:type_name -> adapter.v1.Visibility
 	2,  // 1: adapter.v1.Provider.capabilities:type_name -> adapter.v1.Capability
 	3,  // 2: adapter.v1.DescribeResponse.providers:type_name -> adapter.v1.Provider
 	7,  // 3: adapter.v1.DescribeResponse.entity_types:type_name -> adapter.v1.EntityType
-	13, // 4: adapter.v1.FetchRequest.credential:type_name -> adapter.v1.SessionCredential
+	13, // 4: adapter.v1.FetchRequest.credential:type_name -> adapter.v1.Credential
 	8,  // 5: adapter.v1.EntityGraph.entities:type_name -> adapter.v1.Entity
 	9,  // 6: adapter.v1.EntityGraph.relations:type_name -> adapter.v1.EntityRelation
 	0,  // 7: adapter.v1.SourceResponse.visibility:type_name -> adapter.v1.Visibility
@@ -1304,18 +1579,23 @@ var file_api_adapter_v1_adapter_proto_depIdxs = []int32{
 	0,  // 9: adapter.v1.FetchResponse.visibility:type_name -> adapter.v1.Visibility
 	10, // 10: adapter.v1.FetchResponse.graph:type_name -> adapter.v1.EntityGraph
 	11, // 11: adapter.v1.FetchResponse.source_responses:type_name -> adapter.v1.SourceResponse
-	13, // 12: adapter.v1.CheckConnectionRequest.credential:type_name -> adapter.v1.SessionCredential
-	1,  // 13: adapter.v1.Adapter.Describe:input_type -> adapter.v1.DescribeRequest
-	5,  // 14: adapter.v1.Adapter.Fetch:input_type -> adapter.v1.FetchRequest
-	14, // 15: adapter.v1.Adapter.CheckConnection:input_type -> adapter.v1.CheckConnectionRequest
-	4,  // 16: adapter.v1.Adapter.Describe:output_type -> adapter.v1.DescribeResponse
-	12, // 17: adapter.v1.Adapter.Fetch:output_type -> adapter.v1.FetchResponse
-	15, // 18: adapter.v1.Adapter.CheckConnection:output_type -> adapter.v1.CheckConnectionResponse
-	16, // [16:19] is the sub-list for method output_type
-	13, // [13:16] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	13, // 12: adapter.v1.PrepareCredentialResponse.credential:type_name -> adapter.v1.Credential
+	13, // 13: adapter.v1.CheckConnectionRequest.credential:type_name -> adapter.v1.Credential
+	1,  // 14: adapter.v1.Adapter.Describe:input_type -> adapter.v1.DescribeRequest
+	14, // 15: adapter.v1.Adapter.Resolve:input_type -> adapter.v1.ResolveRequest
+	16, // 16: adapter.v1.Adapter.PrepareCredential:input_type -> adapter.v1.PrepareCredentialRequest
+	5,  // 17: adapter.v1.Adapter.Fetch:input_type -> adapter.v1.FetchRequest
+	18, // 18: adapter.v1.Adapter.CheckConnection:input_type -> adapter.v1.CheckConnectionRequest
+	4,  // 19: adapter.v1.Adapter.Describe:output_type -> adapter.v1.DescribeResponse
+	15, // 20: adapter.v1.Adapter.Resolve:output_type -> adapter.v1.ResolveResponse
+	17, // 21: adapter.v1.Adapter.PrepareCredential:output_type -> adapter.v1.PrepareCredentialResponse
+	12, // 22: adapter.v1.Adapter.Fetch:output_type -> adapter.v1.FetchResponse
+	19, // 23: adapter.v1.Adapter.CheckConnection:output_type -> adapter.v1.CheckConnectionResponse
+	19, // [19:24] is the sub-list for method output_type
+	14, // [14:19] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_api_adapter_v1_adapter_proto_init() }
@@ -1329,7 +1609,7 @@ func file_api_adapter_v1_adapter_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_adapter_v1_adapter_proto_rawDesc), len(file_api_adapter_v1_adapter_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   15,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

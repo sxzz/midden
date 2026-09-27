@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/grpc"
+
 	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -38,7 +40,7 @@ func TestRESTIsolation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	s := &app.Service{DB: db, Queue: q, Providers: []*pb.Provider{{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, Authentication: "none", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PRIVATE}}}, Config: app.Defaults()}
+	s := &app.Service{Adapter: &fixtureAdapter{}, DB: db, Queue: q, Providers: []*pb.Provider{{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, DefaultProvider: true, Authentication: "none", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PRIVATE}}}, Config: app.Defaults()}
 	h := Handler(s)
 	makeToken := func() string {
 		var tenant string
@@ -92,4 +94,15 @@ func TestRESTIsolation(t *testing.T) {
 	if w = call("DELETE", "/v1/archives/"+job.ArchiveID, "", a); w.Code != 404 {
 		t.Fatal("repeated deletion", w.Code)
 	}
+}
+
+type fixtureAdapter struct{ pb.AdapterClient }
+
+func (*fixtureAdapter) Describe(context.Context, *pb.DescribeRequest, ...grpc.CallOption) (*pb.DescribeResponse, error) {
+	return &pb.DescribeResponse{ProtocolVersion: "1.0", AdapterId: "fixture"}, nil
+}
+
+func (*fixtureAdapter) Resolve(_ context.Context, r *pb.ResolveRequest, _ ...grpc.CallOption) (*pb.ResolveResponse, error) {
+	parts := strings.Split(r.Url, "/")
+	return &pb.ResolveResponse{Url: r.Url, Platform: "fixture", Kind: "item", ExternalId: parts[len(parts)-1]}, nil
 }

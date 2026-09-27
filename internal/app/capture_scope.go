@@ -11,8 +11,8 @@ import (
 // Resolve the final content identity before creating any resources. Account captures
 // start private, and only the trusted adapter can classify their result as public.
 func (s *Service) resolveCaptureScope(ctx context.Context, tx pgx.Tx, tenant, cid, visibility string) error {
-	var old, external, url, provider, connection, savedSource string
-	if e := tx.QueryRow(ctx, `SELECT a.id,a.external_id,a.url,c.provider_id,coalesce(c.connection_id::text,''),coalesce(c.refresh_from::text,a.id::text) FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.id=$1`, cid).Scan(&old, &external, &url, &provider, &connection, &savedSource); e != nil {
+	var old, external, url, provider, connection, savedSource, platform, kind, objectScope string
+	if e := tx.QueryRow(ctx, `SELECT a.id,a.external_id,a.url,c.provider_id,coalesce(c.connection_id::text,''),coalesce(c.refresh_from::text,a.id::text),a.platform,a.kind,a.object_scope FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.id=$1`, cid).Scan(&old, &external, &url, &provider, &connection, &savedSource, &platform, &kind, &objectScope); e != nil {
 		return e
 	}
 	scope := "public"
@@ -23,11 +23,11 @@ func (s *Service) resolveCaptureScope(ctx context.Context, tx pgx.Tx, tenant, ci
 			scope = "connection:" + connection
 		}
 	}
-	if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,1))`, dataScope+"|x|"+scope+"|post||"+external); e != nil {
+	if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,1))`, dataScope+"|"+platform+"|"+scope+"|"+kind+"|"+objectScope+"|"+external); e != nil {
 		return e
 	}
 	var target string
-	e := tx.QueryRow(ctx, `INSERT INTO archives(tenant_id,visibility,external_id,url,provider_id,scope) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(data_scope,platform,scope,kind,object_scope,external_id) DO UPDATE SET unreferenced_at=archives.unreferenced_at RETURNING id`, tenant, visibility, external, url, provider, scope).Scan(&target)
+	e := tx.QueryRow(ctx, `INSERT INTO archives(tenant_id,visibility,external_id,url,provider_id,scope,platform,kind,object_scope) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(data_scope,platform,scope,kind,object_scope,external_id) DO UPDATE SET unreferenced_at=archives.unreferenced_at RETURNING id`, tenant, visibility, external, url, provider, scope, platform, kind, objectScope).Scan(&target)
 	if e != nil {
 		return e
 	}

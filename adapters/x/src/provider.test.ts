@@ -212,6 +212,28 @@ test("gRPC authentication and zero-account Describe", async () => {
     assert.equal(result.providers[0].authentication, "none");
     assert.equal(result.providers.length, 2);
     assert.equal(result.protocolVersion, "1.0");
+    const resolved: any = await new Promise((resolve, reject) =>
+      client.resolve(
+        { url: "https://twitter.com/fixture/status/123?source=test" },
+        metadata,
+        (e, v) => (e ? reject(e) : resolve(v)),
+      ),
+    );
+    assert.equal(resolved.platform, "x");
+    assert.equal(resolved.externalId, "123");
+    assert.equal(resolved.url, "https://x.com/i/web/status/123");
+    await assert.rejects(
+      () =>
+        new Promise((resolve, reject) =>
+          client.prepareCredential(
+            { providerId: "x-session", input: Buffer.from("fixture") },
+            metadata,
+            (e, v) => (e ? reject(e) : resolve(v)),
+          ),
+        ),
+      (e: any) => e.code === status.FAILED_PRECONDITION,
+    );
+
     assert.ok(
       result.providers[0].capabilities.some(
         (c: any) => c.name === "capture.fetch" && c.major === 1,
@@ -231,7 +253,17 @@ test("gRPC authentication and zero-account Describe", async () => {
       () =>
         new Promise((resolve, reject) =>
           client.checkConnection(
-            { providerId: "x-session", credential },
+            {
+              providerId: "x-session",
+              credential: {
+                data: Buffer.from(
+                  JSON.stringify({
+                    auth_token: credential.authToken,
+                    csrf_token: credential.csrfToken,
+                  }),
+                ),
+              },
+            },
             metadata,
             (e, v) => (e ? reject(e) : resolve(v)),
           ),

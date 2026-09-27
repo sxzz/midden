@@ -126,7 +126,16 @@ func TestTypeScriptTLSProtocol(t *testing.T) {
 		t.Fatal(e)
 	}
 	id := data.Status.ID
-	r, e := client.Fetch(ctx, &pb.FetchRequest{Url: fmt.Sprintf("https://x.com/i/web/status/%s", id), ExternalId: id, ProviderId: "fxtwitter", AccessScope: "public"})
+	resolved, e := client.Resolve(ctx, &pb.ResolveRequest{Url: fmt.Sprintf("https://twitter.com/fixture/status/%s?test=1", id)})
+	if e != nil || resolved.GetExternalId() != id || resolved.GetPlatform() != "x" || resolved.GetKind() != "post" {
+		t.Fatal("target lost over RPC", e)
+	}
+	prepared, e := client.PrepareCredential(ctx, &pb.PrepareCredentialRequest{ProviderId: "x-session", Input: []byte("{\"auth_token\":\"aaaaaaaaaaaaaaaaaaaa\",\"csrf_token\":\"bbbbbbbbbbbbbbbbbbbb\"}")})
+	if e != nil || len(prepared.GetCredential().GetData()) == 0 {
+		t.Fatal("opaque credential lost over RPC", e)
+	}
+
+	r, e := client.Fetch(ctx, &pb.FetchRequest{Url: fmt.Sprintf("https://x.com/i/web/status/%s", id), ExternalId: id, Platform: "x", Kind: "post", ProviderId: "fxtwitter", AccessScope: "public"})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -134,7 +143,7 @@ func TestTypeScriptTLSProtocol(t *testing.T) {
 		t.Fatal("public fixture lost over RPC")
 	}
 	var trailer metadata.MD
-	_, e = client.Fetch(ctx, &pb.FetchRequest{Url: "https://x.com/i/web/status/99", ExternalId: "99", ProviderId: "fxtwitter", AccessScope: "public"}, grpc.Trailer(&trailer))
+	_, e = client.Fetch(ctx, &pb.FetchRequest{Url: "https://x.com/i/web/status/99", ExternalId: "99", Platform: "x", Kind: "post", ProviderId: "fxtwitter", AccessScope: "public"}, grpc.Trailer(&trailer))
 	if status.Code(e) != codes.Unavailable || len(trailer.Get("retry-after")) != 1 || trailer.Get("retry-after")[0] != "7" {
 		t.Fatal("retry-after lost over RPC", e, trailer)
 	}

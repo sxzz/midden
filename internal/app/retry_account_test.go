@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -33,13 +32,13 @@ func TestFailedCaptureButtonUsesCurrentAccount(t *testing.T) {
 	vault, err := credentials.New(base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	must(t, err)
 	s := &Service{DB: db, Queue: q, Vault: vault, AdapterTLS: true, Adapter: &fakeAdapter{public: true, text: "retry"}, Config: Defaults(), Providers: []*pb.Provider{
-		{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, Authentication: "none", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PUBLIC}},
-		{Id: "x-session", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}, {Name: "connection.check", Major: 1}}, Authentication: "session", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PUBLIC, pb.Visibility_VISIBILITY_PRIVATE}},
+		{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, DefaultProvider: true, Authentication: "none", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PUBLIC}},
+		{Id: "x-session", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}, {Name: "connection.check", Major: 1}, {Name: "credential.prepare", Major: 1}}, DefaultProvider: true, Authentication: "session", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PUBLIC, pb.Visibility_VISIBILITY_PRIVATE}},
 	}}
 	var tenant, other string
 	must(t, admin.Pool.QueryRow(ctx, "INSERT INTO tenants DEFAULT VALUES RETURNING id").Scan(&tenant))
 	must(t, admin.Pool.QueryRow(ctx, "INSERT INTO tenants DEFAULT VALUES RETURNING id").Scan(&other))
-	cookie := &pb.SessionCredential{AuthToken: strings.Repeat("a", 40), CsrfToken: strings.Repeat("b", 64)}
+	cookie := &pb.Credential{Data: []byte("opaque-fixture-credential")}
 	old, err := s.ImportConnection(ctx, tenant, "", "old", cookie)
 	must(t, err)
 	next, err := s.ImportConnection(ctx, tenant, "", "new", cookie)

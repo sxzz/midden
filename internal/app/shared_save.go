@@ -18,6 +18,10 @@ func (s *Service) SavePublicArchive(ctx context.Context, tenant, id string) (add
 	if !validIDArgument(id) {
 		return false, domain.ErrNotFound
 	}
+	p, err := s.defaultProvider(ctx, "none")
+	if err != nil {
+		return false, err
+	}
 	err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		if err := lockTenant(ctx, tx, tenant); err != nil {
 			return err
@@ -29,7 +33,7 @@ func (s *Service) SavePublicArchive(ctx context.Context, tenant, id string) (add
 			}
 			return err
 		}
-		tag, err := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, tenant, archive)
+		tag, err := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, tenant, archive, p.Id)
 		if err != nil {
 			return err
 		}

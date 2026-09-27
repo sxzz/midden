@@ -17,9 +17,10 @@ func TestUnsupportedOperationsBeforeSideEffects(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Service{Vault: vault, AdapterTLS: true, Providers: []*pb.Provider{
-		{Id: "fxtwitter", Authentication: "none", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PUBLIC}},
+		{Id: "fxtwitter", DefaultProvider: true, Authentication: "none", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PUBLIC}},
 		{Id: "x-session", Authentication: "session"},
 	}}
+	s.Descriptor = &pb.DescribeResponse{AdapterId: "fixture", Providers: s.Providers}
 	// No database or RPC client: rejection must precede persistence and credentials transmission.
 	ctx := context.Background()
 	if _, err := s.Submit(ctx, "tenant", domain.CaptureInput{URL: "https://x.com/a/status/20"}); !errors.Is(err, domain.ErrUnsupported) {

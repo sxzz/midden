@@ -1,3 +1,5 @@
+import { validateCredential, type SessionCredential } from "./credential.js";
+export { validateCredential } from "./credential.js";
 import { accountBootstrap, accountUserAgent } from "./bootstrap.js";
 import { status } from "@grpc/grpc-js";
 import { fetchByRestId } from "@fxembed/atmosphere/providers/twitter/conversation";
@@ -10,7 +12,6 @@ import {
 } from "@fxembed/atmosphere/providers/twitter-runtime";
 import type { TwitterBuildHost } from "@fxembed/atmosphere/providers/twitter/build-host";
 import {
-  SessionCredential,
   SourceResponse,
   Visibility,
 } from "./generated/api/adapter/v1/adapter.js";
@@ -28,16 +29,6 @@ setTwitterProviderEnv({
   friendlyUserAgent: "Monitor/0.4",
 });
 
-export function validateCredential(
-  c?: SessionCredential,
-): asserts c is SessionCredential {
-  if (
-    !c ||
-    !/^[A-Za-z0-9_-]{10,4096}$/.test(c.authToken) ||
-    !/^[A-Za-z0-9_-]{10,4096}$/.test(c.csrfToken)
-  )
-    throw new ProviderError(status.INVALID_ARGUMENT, "invalid account session");
-}
 export function accountTransport(
   credential: SessionCredential,
   signal: AbortSignal,

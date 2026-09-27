@@ -282,7 +282,7 @@ func TestPublicSharing(t *testing.T) {
 	}
 	// RLS rejects fabricated links even when the attacker knows a private UUID.
 	e = db.Tx(ctx, b, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id) VALUES($1,$2)`, b, pj.ArchiveID)
+		_, err := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id) VALUES($1,$2,'fixture')`, b, pj.ArchiveID)
 		return err
 	})
 	if e == nil {
@@ -359,7 +359,7 @@ func TestPublicSharing(t *testing.T) {
 		t.Fatal("finished unreferenced archive not collected")
 	}
 	// A provider policy mismatch must fail before publishing any text or image.
-	s.Providers = []*pb.Provider{{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, Authentication: "none", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PUBLIC}}}
+	s.Providers = []*pb.Provider{{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, DefaultProvider: true, Authentication: "none", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PUBLIC}}}
 	mismatch, e := s.Submit(ctx, a, domain.CaptureInput{URL: "https://x.com/a/status/91000000002"})
 	must(t, e)
 	s.Adapter = private.Adapter

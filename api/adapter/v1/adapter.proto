@@ -7,6 +7,8 @@ option go_package = "monitor/api/adapter/v1;adapterv1";
 service Adapter {
   // Describe is required; all other operations are opt-in per provider.
   rpc Describe(DescribeRequest) returns (DescribeResponse);
+  rpc Resolve(ResolveRequest) returns (ResolveResponse);
+  rpc PrepareCredential(PrepareCredentialRequest) returns (PrepareCredentialResponse);
   rpc Fetch(FetchRequest) returns (FetchResponse);
   rpc CheckConnection(CheckConnectionRequest) returns (CheckConnectionResponse);
 }
@@ -32,6 +34,9 @@ message Provider {
   repeated Visibility visibilities = 3;
   repeated Capability capabilities = 4;
   repeated string entity_types = 5;
+  bool default_provider = 6; // Default within this authentication mode.
+  string credential_help = 7; // Adapter-owned input instructions.
+
 }
 
 message DescribeResponse {
@@ -51,7 +56,10 @@ message FetchRequest {
   string connection_id = 4;
   string access_scope = 5;
   string request_id = 6;
-  SessionCredential credential = 7;
+  Credential credential = 7;
+  string platform = 8;
+  string kind = 9;
+  string object_scope = 10;
 }
 
 message Resource {
@@ -111,6 +119,17 @@ message FetchResponse {
 }
 
 // Execution-only secrets; never persisted in task payloads or logs.
-message SessionCredential { string auth_token = 1; string csrf_token = 2; }
-message CheckConnectionRequest { string provider_id = 1; SessionCredential credential = 2; }
+message Credential { bytes data = 1; } // Opaque to the core; adapter-owned format.
+message ResolveRequest { string url = 1; }
+message ResolveResponse {
+  string url = 1;
+  string platform = 2;
+  string kind = 3;
+  string object_scope = 4;
+  string external_id = 5;
+}
+message PrepareCredentialRequest { string provider_id = 1; bytes input = 2; }
+message PrepareCredentialResponse { Credential credential = 1; }
+
+message CheckConnectionRequest { string provider_id = 1; Credential credential = 2; }
 message CheckConnectionResponse { string account_id = 1; string username = 2; }

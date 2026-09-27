@@ -6,7 +6,7 @@ import (
 )
 
 // DetectContentType recognizes MP4 brands but misses ISO Base Media brands
-// emitted by X's video service. Inspect the bounded ftyp box as well.
+// used by some media encoders. Inspect the bounded ftyp box as well.
 func mediaType(header []byte) string {
 	detected := http.DetectContentType(header)
 	if detected != "application/octet-stream" || len(header) < 16 || string(header[4:8]) != "ftyp" {

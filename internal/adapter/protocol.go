@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	ProtocolVersion = "1.0"
-	CaptureFetch    = "capture.fetch"
-	ConnectionCheck = "connection.check"
+	ProtocolVersion   = "1.0"
+	CaptureFetch      = "capture.fetch"
+	ConnectionCheck   = "connection.check"
+	CredentialPrepare = "credential.prepare"
 )
 
 var protocolPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
@@ -55,11 +56,18 @@ func Validate(d *pb.DescribeResponse) error {
 		hosts[key] = true
 	}
 	providers := map[string]bool{}
+	defaults := map[string]bool{}
 	for _, p := range d.Providers {
 		if p == nil || strings.TrimSpace(p.Id) == "" || providers[p.Id] {
 			return fmt.Errorf("invalid or duplicate provider")
 		}
 		providers[p.Id] = true
+		if p.DefaultProvider {
+			if defaults[p.Authentication] {
+				return fmt.Errorf("duplicate default provider")
+			}
+			defaults[p.Authentication] = true
+		}
 		capabilities := map[string]bool{}
 		for _, c := range p.Capabilities {
 			if c == nil || strings.TrimSpace(c.Name) == "" || c.Major == 0 {

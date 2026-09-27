@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	pb "monitor/api/adapter/v1"
 	"monitor/internal/credentials"
 	"monitor/internal/telegram"
 )
@@ -51,9 +52,10 @@ func (s *Service) prepareUpdate(u telegram.Update, tenant, channel, username str
 				case s.Vault == nil || !s.AdapterTLS:
 					a.Error = "个人账号接入尚未配置，请联系服务管理员。"
 				default:
-					c, err := credentials.ParseCookie(fields[1])
+					c := &pb.Credential{Data: []byte(fields[1])}
+					err := credentials.Validate(c)
 					if err != nil {
-						a.Error = "Cookie 格式无效，请提供含 auth_token 和 ct0 的 Base64 Cookie 字符串。"
+						a.Error = "凭据输入为空或过长，请按 Adapter 的格式要求重试。"
 					} else {
 						a.Name = strings.Join(fields[2:], " ")
 						if a.Name == "" {
@@ -85,7 +87,12 @@ func (s *Service) commandAccountAdd(ctx context.Context, r *commandRequest) erro
 	a := r.AccountImport
 	if a == nil || (a.Error == "" && len(a.Ciphertext) == 0) {
 		r.Buttons = telegram.Keyboard{{{Text: "返回账号列表", Data: "/account"}}}
-		r.Text = "用法：/account_add <Base64 Cookie> [账号名称]\nCookie 需包含 auth_token 和 ct0，仅限私聊。验证通过后可用 /account 选择账号。"
+		p, err := s.defaultProvider(ctx, "session")
+		if err != nil {
+			r.Text = "当前 Adapter 不支持添加账号。"
+			return nil
+		}
+		r.Text = "用法：/account_add <凭据> [账号名称]\n" + p.CredentialHelp + " 仅限私聊。验证通过后可用 /account 选择账号。"
 		return nil
 	}
 	if a.Error != "" {
@@ -110,6 +117,8 @@ func (s *Service) commandAccountAdd(ctx context.Context, r *commandRequest) erro
 			// Adapter and SQL errors may carry arbitrary detail; never echo them to Telegram.
 			slog.Warn("account verification failed", "code", status.Code(err).String())
 			switch status.Code(err) {
+			case codes.InvalidArgument:
+				r.Text = "凭据格式无效，请按账号添加说明重试。"
 			case codes.Unauthenticated:
 				r.Text = "X 登录会话已失效，请重新登录 X 后添加新的 Cookie。"
 			case codes.PermissionDenied:

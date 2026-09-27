@@ -6,41 +6,34 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 )
 
 var (
-	ErrNotFound    = errors.New("not found")
-	ErrQuota       = errors.New("quota exceeded")
-	ErrRate        = errors.New("capture rate exceeded")
-	ErrUnsupported = errors.New("provider operation is not supported")
-	ErrConflict    = errors.New("idempotency key conflicts with an earlier request")
+	ErrInvalidTarget = errors.New("invalid or unsupported URL")
+	ErrNotFound      = errors.New("not found")
+	ErrQuota         = errors.New("quota exceeded")
+	ErrRate          = errors.New("capture rate exceeded")
+	ErrUnsupported   = errors.New("provider operation is not supported")
+	ErrConflict      = errors.New("idempotency key conflicts with an earlier request")
 )
 
 type Target struct {
-	URL        string `json:"url"`
-	ExternalID string `json:"external_id"`
+	URL         string
+	ExternalID  string
+	Platform    string
+	Kind        string
+	ObjectScope string
 }
 
-var pathRE = regexp.MustCompile(`^/(?:[A-Za-z0-9_]{1,20}|i/web)/status/([0-9]+)(?:/(?:photo|video)/[0-9]+)?/?$`)
-
-func Normalize(raw string) (Target, error) {
-	u, e := url.Parse(strings.TrimSpace(raw))
-	if e != nil || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.Port() != "" {
-		return Target{}, fmt.Errorf("invalid post URL")
+// URL transport validation is generic. Only adapters identify platform objects.
+func ValidateURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.User != nil {
+		return fmt.Errorf("invalid URL")
 	}
-	host := strings.ToLower(u.Hostname())
-	host = strings.TrimPrefix(strings.TrimPrefix(host, "www."), "mobile.")
-	if host != "x.com" && host != "twitter.com" {
-		return Target{}, fmt.Errorf("unsupported URL host")
-	}
-	m := pathRE.FindStringSubmatch(u.Path)
-	if m == nil {
-		return Target{}, fmt.Errorf("only X post URLs are supported")
-	}
-	return Target{URL: "https://x.com/i/web/status/" + m[1], ExternalID: m[1]}, nil
+	return nil
 }
 
 type Identity struct {

@@ -60,7 +60,7 @@ func TestPrepareAccountInput(t *testing.T) {
 		} else {
 			c, err := s.Vault.Open("tenant", out.AccountImport.ID, out.AccountImport.Ciphertext)
 			must(t, err)
-			if c.AuthToken != strings.Repeat("a", 40) {
+			if string(c.Data) != token {
 				t.Fatal("session lost")
 			}
 			if _, err = s.Vault.Open("other", out.AccountImport.ID, out.AccountImport.Ciphertext); err == nil {
@@ -114,7 +114,7 @@ func TestTelegramAccountImportIntegration(t *testing.T) {
 	s.Config = Defaults()
 	s.Sender = &fakeSender{}
 	s.Adapter = &fakeAdapter{}
-	s.Providers = []*pb.Provider{{Id: "x-session", Authentication: "session", Capabilities: []*pb.Capability{{Name: "connection.check", Major: 1}}}}
+	s.Providers = []*pb.Provider{{Id: "x-session", DefaultProvider: true, Authentication: "session", Capabilities: []*pb.Capability{{Name: "connection.check", Major: 1}, {Name: "credential.prepare", Major: 1}}}}
 	s.Queue, err = river.NewClient(riverpgxv5.New(db.Pool), &river.Config{})
 	must(t, err)
 	channel := uuid.NewString()
@@ -164,7 +164,7 @@ func TestTelegramAccountImportIntegration(t *testing.T) {
 	if state != "revoked" || revision != 2 {
 		t.Fatal("replay resurrected credentials")
 	}
-	for _, tc := range []struct{ kind, want string }{{"group", "请在私聊"}, {"malformed", "Cookie 格式无效"}, {"rejected", "X 登录会话已失效"}} {
+	for _, tc := range []struct{ kind, want string }{{"group", "请在私聊"}, {"malformed", "凭据格式无效"}, {"rejected", "X 登录会话已失效"}} {
 		t.Run(tc.kind, func(t *testing.T) {
 			_, update, encoded := accountFixture(t)
 			update.ID = 456

@@ -133,7 +133,7 @@ docker compose up -d --force-recreate core
 
 `tenant-id` 使用 `identities` 表中对应渠道身份的 `tenant_id`，不是 Telegram user ID。管理员可按已配置的 `channel_id` 和 Telegram 用户 ID（`external_id`）精确查询。
 
-将账号浏览器会话保存为仅管理员可读的本地 JSON 文件，字段为 `auth_token` 和 `ct0`。导入时通过标准输入传入，不写入命令行参数：
+将 Adapter 支持的凭据输入保存为仅管理员可读的本地文件。X Adapter 支持 Base64 Cookie 字符串，也支持含 `auth_token` 和 `csrf_token` 的 JSON。导入时通过标准输入传入，不写入命令行参数：
 
 ```sh
 docker compose run --rm -T --entrypoint monitorctl migrate connection-import <tenant-id> <显示名称> - < account.json

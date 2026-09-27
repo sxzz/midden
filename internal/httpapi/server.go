@@ -36,7 +36,7 @@ func Handler(s *app.Service) http.Handler {
 			return
 		}
 		if in.RefreshID == "" {
-			if _, e := domain.Normalize(in.URL); e != nil {
+			if e := domain.ValidateURL(in.URL); e != nil {
 				write(w, 400, map[string]string{"error": "unsupported URL"})
 				return
 			}
@@ -160,6 +160,9 @@ func respond(w http.ResponseWriter, code int, v any, e error) {
 	msg := "internal error"
 	code = 500
 	switch {
+	case errors.Is(e, domain.ErrInvalidTarget):
+		code = 400
+		msg = "unsupported URL"
 	case errors.Is(e, domain.ErrNotFound):
 		code = 404
 		msg = "not found"
