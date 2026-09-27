@@ -61,7 +61,10 @@ test("public fixture preserves text, alt text and highest quality media", () => 
     Visibility.VISIBILITY_PUBLIC,
   );
   assert.ok(result.text.includes("合成测试"));
-  assert.equal(result.summary, `${post.author.name}：${result.text}`);
+  assert.equal(
+    result.summary,
+    `${post.author.name}：${result.text}[图片][视频]`,
+  );
   const video = result.resources.find((r) => r.kind === "video")!;
   assert.equal(video.url, "https://media.test/high.mp4");
   assert.equal(video.altText, "video description");
@@ -315,4 +318,26 @@ test("Atmosphere parses authorized protected and public GraphQL fixtures", async
   assert.equal(rawIsPublic(raw), false);
   result = await parseSessionResult("900123", structuredClone(raw), host);
   assert.equal(result.visibility, Visibility.VISIBILITY_PRIVATE);
+});
+
+test("summary counts each media item in order, excluding author avatars", () => {
+  const post = structuredClone(fixture.status);
+  post.media.all = [
+    { type: "photo", url: "https://media.test/1.jpg" },
+    { type: "photo", url: "https://media.test/2.jpg" },
+    { type: "video", url: "https://media.test/3.mp4" },
+    { type: "gif", url: "https://media.test/4.mp4" },
+  ];
+  const result = normalize(
+    post,
+    post.id,
+    "fxtwitter",
+    Visibility.VISIBILITY_PUBLIC,
+  );
+  assert.equal(
+    result.summary,
+    `${post.author.name}：${post.text}[图片][图片][视频][视频]`,
+  );
+  assert.equal(result.authorName, post.author.name);
+  assert.equal(result.publishedAt, "2026-01-01T00:00:00.000Z");
 });

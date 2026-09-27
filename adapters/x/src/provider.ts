@@ -98,7 +98,7 @@ export function normalize(
     visibility,
     text: post.text.trim(),
     textKind: "post_text",
-    summary: `${post.author?.name?.trim() || post.author?.screen_name?.trim() || "未知作者"}：${post.text.trim()}`,
+
     textSource: provider,
     adapterVersion: "0.4.0",
   });
@@ -170,7 +170,11 @@ export function normalize(
       status.FAILED_PRECONDITION,
       "provider returned no supported text or media",
     );
+  const markers = result.resources
+    .map((r) => (r.kind === "image" ? "[图片]" : "[视频]"))
+    .join("");
   attachEntities(result, post, raw);
+  result.summary = `${result.authorName || "未知作者"}：${result.text}${markers}`;
   return result;
 }
 export async function fetchPublic(

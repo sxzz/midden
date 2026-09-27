@@ -73,7 +73,7 @@ func (f *fakeAdapter) Fetch(ctx context.Context, r *pb.FetchRequest, _ ...grpc.C
 	if f.public {
 		visibility = pb.Visibility_VISIBILITY_PUBLIC
 	}
-	v := &pb.FetchResponse{Summary: "作者：" + f.text, Graph: f.graph, SourceResponses: f.sourceResponses, Visibility: visibility, ExternalId: r.ExternalId, ProviderId: r.ProviderId, Text: f.text, TextKind: "provider_summary", AdapterVersion: "test", Warnings: []string{"incomplete"}, TextSource: f.textSource, Incomplete: f.incomplete}
+	v := &pb.FetchResponse{AuthorName: "作者", PublishedAt: "2026-04-05T03:22:33Z", Summary: "作者：" + f.text, Graph: f.graph, SourceResponses: f.sourceResponses, Visibility: visibility, ExternalId: r.ExternalId, ProviderId: r.ProviderId, Text: f.text, TextKind: "provider_summary", AdapterVersion: "test", Warnings: []string{"incomplete"}, TextSource: f.textSource, Incomplete: f.incomplete}
 	if f.graph != nil {
 		v.Graph = proto.Clone(f.graph).(*pb.EntityGraph)
 		for _, entity := range v.Graph.Entities {
@@ -254,12 +254,15 @@ func TestIntegration(t *testing.T) {
 	must(t, s.finalize(ctx, tenant, j.ID))
 	a, e := s.Archive(ctx, tenant, j.ArchiveID)
 	must(t, e)
-	if a.Text != "hello" || a.Summary != "作者：hello" {
+	if a.Text != "hello" || a.Summary != "作者：hello" || a.AuthorName != "作者" || a.PublishedAt != "2026-04-05T03:22:33Z" {
 		t.Fatal(a)
 	}
 	recent := &commandRequest{Task: store.Task{Tenant: tenant}}
 	must(t, s.commandRecent(ctx, recent))
-	if recent.Text != "1. 作者：hello" || len(recent.Buttons) != 1 || recent.Buttons[0][0].Data != "/show "+a.ID {
+	if len(recent.Entities) != 1 || recent.Entities[0].URL != a.URL || recent.Entities[0].Offset != 3 || recent.Entities[0].Length != 8 {
+		t.Fatal("missing summary source link", recent.Entities)
+	}
+	if recent.Text != "1. 作者：hello" || len(recent.Buttons) != 1 || recent.Buttons[0][0].Data != "/show "+a.ID || len(recent.Buttons[0]) != 2 || recent.Buttons[0][1].URL != a.URL {
 		t.Fatalf("unexpected recent list: %+v", recent)
 	}
 	// Reloaded app has no in-memory task state; redo persisted capture/finalize safely.
@@ -321,7 +324,7 @@ func TestIntegration(t *testing.T) {
 	}
 	pinned, e := s.CaptureArchive(ctx, tenant, j.ID)
 	must(t, e)
-	if pinned.Text != "hello" || pinned.Summary != "作者：hello" {
+	if pinned.Text != "hello" || pinned.Summary != "作者：hello" || pinned.AuthorName != "作者" || pinned.PublishedAt != "2026-04-05T03:22:33Z" {
 		t.Fatal("delivery snapshot changed")
 	}
 	// Connection ownership and account auth rejection.

@@ -162,6 +162,10 @@ export interface FetchResponse {
   sourceResponses: SourceResponse[];
   /** Adapter-provided list presentation; channels may truncate it. */
   summary: string;
+  /** Generic presentation, supplied by the adapter. */
+  authorName: string;
+  /** Original publication time in RFC 3339; empty when unknown. */
+  publishedAt: string;
 }
 
 /** Execution-only secrets; never persisted in task payloads or logs. */
@@ -1558,6 +1562,8 @@ function createBaseFetchResponse(): FetchResponse {
     graph: undefined,
     sourceResponses: [],
     summary: "",
+    authorName: "",
+    publishedAt: "",
   };
 }
 
@@ -1604,6 +1610,12 @@ export const FetchResponse: MessageFns<FetchResponse> = {
     }
     if (message.summary !== "") {
       writer.uint32(106).string(message.summary);
+    }
+    if (message.authorName !== "") {
+      writer.uint32(114).string(message.authorName);
+    }
+    if (message.publishedAt !== "") {
+      writer.uint32(122).string(message.publishedAt);
     }
     return writer;
   },
@@ -1722,6 +1734,22 @@ export const FetchResponse: MessageFns<FetchResponse> = {
           message.summary = reader.string();
           continue;
         }
+        case 14: {
+          if (tag !== 114) {
+            break;
+          }
+
+          message.authorName = reader.string();
+          continue;
+        }
+        case 15: {
+          if (tag !== 122) {
+            break;
+          }
+
+          message.publishedAt = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1768,6 +1796,12 @@ export const FetchResponse: MessageFns<FetchResponse> = {
         ? object.sourceResponses.map((e: any) => SourceResponse.fromJSON(e))
         : [],
       summary: isSet(object.summary) ? globalThis.String(object.summary) : "",
+      authorName: isSet(object.authorName)
+        ? globalThis.String(object.authorName)
+        : "",
+      publishedAt: isSet(object.publishedAt)
+        ? globalThis.String(object.publishedAt)
+        : "",
     };
   },
 
@@ -1814,6 +1848,12 @@ export const FetchResponse: MessageFns<FetchResponse> = {
     if (message.summary !== "") {
       obj.summary = message.summary;
     }
+    if (message.authorName !== "") {
+      obj.authorName = message.authorName;
+    }
+    if (message.publishedAt !== "") {
+      obj.publishedAt = message.publishedAt;
+    }
     return obj;
   },
 
@@ -1840,6 +1880,8 @@ export const FetchResponse: MessageFns<FetchResponse> = {
     message.sourceResponses =
       object.sourceResponses?.map((e) => SourceResponse.fromPartial(e)) || [];
     message.summary = object.summary ?? "";
+    message.authorName = object.authorName ?? "";
+    message.publishedAt = object.publishedAt ?? "";
     return message;
   },
 };

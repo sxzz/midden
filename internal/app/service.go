@@ -185,6 +185,9 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if in.RefreshID != "" && in.ConnectionID == "" {
 			aid = in.RefreshID
 		}
+		if in.Input == "" {
+			in.Input = in.URL
+		}
 		target, e := domain.Normalize(in.URL)
 		if e != nil {
 			return e
@@ -234,7 +237,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if e = tx.QueryRow(ctx, `SELECT id FROM archives WHERE id=$1 FOR UPDATE`, aid).Scan(&aid); e != nil {
 			return e
 		}
-		tag, e := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,connection_id) VALUES($1,$2,$3,nullif($4,'')::uuid) ON CONFLICT DO NOTHING`, tenant, aid, in.ProviderID, in.ConnectionID)
+		tag, e := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,connection_id) SELECT $1,$2,$3,nullif($4,'')::uuid WHERE $5='' OR $5=$2::uuid::text ON CONFLICT DO NOTHING`, tenant, aid, in.ProviderID, in.ConnectionID, in.RefreshID)
 		if e != nil {
 			return e
 		}
@@ -287,7 +290,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			return e
 		}
 		var sid string
-		e = tx.QueryRow(ctx, `INSERT INTO submissions(tenant_id,capture_id,identity_id,channel_id,chat_id,idem_key,fingerprint,reply_to_message_id) VALUES($1,$2,nullif($3,'')::uuid,nullif($4,'')::uuid,nullif($5,''),$6,$7,$8) RETURNING id`, tenant, cid, in.Origin.IdentityID, in.Origin.ChannelID, in.Origin.ChatID, in.Key, fingerprint, in.Origin.ReplyToMessageID).Scan(&sid)
+		e = tx.QueryRow(ctx, `INSERT INTO submissions(tenant_id,capture_id,identity_id,channel_id,chat_id,idem_key,fingerprint,reply_to_message_id,input) VALUES($1,$2,nullif($3,'')::uuid,nullif($4,'')::uuid,nullif($5,''),$6,$7,$8,$9) RETURNING id`, tenant, cid, in.Origin.IdentityID, in.Origin.ChannelID, in.Origin.ChatID, in.Key, fingerprint, in.Origin.ReplyToMessageID, in.Input).Scan(&sid)
 		if e != nil {
 			return e
 		}
@@ -355,6 +358,8 @@ func archive(ctx context.Context, tx pgx.Tx, id string) (a domain.Archive, e err
 	if e = json.Unmarshal(payload, &p); e != nil {
 		return
 	}
+	a.AuthorName = p.AuthorName
+	a.PublishedAt = p.PublishedAt
 	a.Summary = p.Summary
 	a.Text = p.Text
 	a.TextKind = p.TextKind
@@ -452,6 +457,8 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 }
 
 type Payload struct {
+	AuthorName        string              `json:"author_name,omitempty"`
+	PublishedAt       string              `json:"published_at,omitempty"`
 	Summary           string              `json:"summary,omitempty"`
 	Graph             *domain.EntityGraph `json:"graph,omitempty"`
 	MediaSensitive    []bool              `json:"media_sensitive,omitempty"`
@@ -477,6 +484,8 @@ func (s *Service) CaptureArchive(ctx context.Context, t, cid string) (a domain.A
 		if err = json.Unmarshal(raw, &p); err != nil {
 			return err
 		}
+		a.AuthorName = p.AuthorName
+		a.PublishedAt = p.PublishedAt
 		a.Summary = p.Summary
 		a.Text = p.Text
 		a.TextKind = p.TextKind

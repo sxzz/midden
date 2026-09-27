@@ -58,7 +58,7 @@ func TestOversizeVideoDelivery(t *testing.T) {
 
 func TestArchiveMediaDescription(t *testing.T) {
 	text := archiveMessage(domain.Archive{ID: "archive", Assets: []domain.Asset{{State: "ready", MIME: "video/mp4", AltText: "示例视频", Position: 0}}}, "complete")
-	if !strings.Contains(text, "1 个视频") || !strings.Contains(text, "媒体 1 描述：示例视频") {
+	if !strings.Contains(text, "媒体 1 描述：示例视频") {
 		t.Fatal(text)
 	}
 }

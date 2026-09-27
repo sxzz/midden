@@ -17,6 +17,7 @@ export function attachEntities(
   raw?: any,
 ): void {
   const author = post.author;
+  result.authorName = author?.name?.trim() || author?.screen_name?.trim() || "";
   const metadata: Record<string, unknown> = {};
   for (const key of [
     "description",
@@ -78,6 +79,7 @@ export function attachEntities(
   const data: Record<string, unknown> = { text: result.text };
   const published =
     timestamp(post.created_at) || timestamp(post.created_timestamp);
+  result.publishedAt = published;
   if (published) data.published_at = published;
   if (editedAt) {
     data.edited_at = editedAt;

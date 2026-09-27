@@ -836,7 +836,9 @@ type FetchResponse struct {
 	Visibility      Visibility             `protobuf:"varint,10,opt,name=visibility,proto3,enum=adapter.v1.Visibility" json:"visibility,omitempty"`
 	Graph           *EntityGraph           `protobuf:"bytes,11,opt,name=graph,proto3" json:"graph,omitempty"`
 	SourceResponses []*SourceResponse      `protobuf:"bytes,12,rep,name=source_responses,json=sourceResponses,proto3" json:"source_responses,omitempty"`
-	Summary         string                 `protobuf:"bytes,13,opt,name=summary,proto3" json:"summary,omitempty"` // Adapter-provided list presentation; channels may truncate it.
+	Summary         string                 `protobuf:"bytes,13,opt,name=summary,proto3" json:"summary,omitempty"`                            // Adapter-provided list presentation; channels may truncate it.
+	AuthorName      string                 `protobuf:"bytes,14,opt,name=author_name,json=authorName,proto3" json:"author_name,omitempty"`    // Generic presentation, supplied by the adapter.
+	PublishedAt     string                 `protobuf:"bytes,15,opt,name=published_at,json=publishedAt,proto3" json:"published_at,omitempty"` // Original publication time in RFC 3339; empty when unknown.
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -958,6 +960,20 @@ func (x *FetchResponse) GetSourceResponses() []*SourceResponse {
 func (x *FetchResponse) GetSummary() string {
 	if x != nil {
 		return x.Summary
+	}
+	return ""
+}
+
+func (x *FetchResponse) GetAuthorName() string {
+	if x != nil {
+		return x.AuthorName
+	}
+	return ""
+}
+
+func (x *FetchResponse) GetPublishedAt() string {
+	if x != nil {
+		return x.PublishedAt
 	}
 	return ""
 }
@@ -1192,7 +1208,7 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"source_url\x18\x03 \x01(\tR\tsourceUrl\x126\n" +
 	"\n" +
 	"visibility\x18\x04 \x01(\x0e2\x16.adapter.v1.VisibilityR\n" +
-	"visibility\"\x84\x04\n" +
+	"visibility\"\xc8\x04\n" +
 	"\rFetchResponse\x12\x1f\n" +
 	"\vexternal_id\x18\x01 \x01(\tR\n" +
 	"externalId\x12\x12\n" +
@@ -1214,7 +1230,10 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"visibility\x12-\n" +
 	"\x05graph\x18\v \x01(\v2\x17.adapter.v1.EntityGraphR\x05graph\x12E\n" +
 	"\x10source_responses\x18\f \x03(\v2\x1a.adapter.v1.SourceResponseR\x0fsourceResponses\x12\x18\n" +
-	"\asummary\x18\r \x01(\tR\asummary\"Q\n" +
+	"\asummary\x18\r \x01(\tR\asummary\x12\x1f\n" +
+	"\vauthor_name\x18\x0e \x01(\tR\n" +
+	"authorName\x12!\n" +
+	"\fpublished_at\x18\x0f \x01(\tR\vpublishedAt\"Q\n" +
 	"\x11SessionCredential\x12\x1d\n" +
 	"\n" +
 	"auth_token\x18\x01 \x01(\tR\tauthToken\x12\x1d\n" +

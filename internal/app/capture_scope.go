@@ -11,8 +11,8 @@ import (
 // Resolve the final content identity before creating any resources. Account captures
 // start private, and only the trusted adapter can classify their result as public.
 func (s *Service) resolveCaptureScope(ctx context.Context, tx pgx.Tx, tenant, cid, visibility string) error {
-	var old, external, url, provider, connection string
-	if e := tx.QueryRow(ctx, `SELECT a.id,a.external_id,a.url,c.provider_id,coalesce(c.connection_id::text,'') FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.id=$1`, cid).Scan(&old, &external, &url, &provider, &connection); e != nil {
+	var old, external, url, provider, connection, savedSource string
+	if e := tx.QueryRow(ctx, `SELECT a.id,a.external_id,a.url,c.provider_id,coalesce(c.connection_id::text,''),coalesce(c.refresh_from::text,a.id::text) FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.id=$1`, cid).Scan(&old, &external, &url, &provider, &connection, &savedSource); e != nil {
 		return e
 	}
 	scope := "public"
@@ -35,7 +35,7 @@ func (s *Service) resolveCaptureScope(ctx context.Context, tx pgx.Tx, tenant, ci
 	if _, e = tx.Exec(ctx, `UPDATE captures SET archive_id=$2,visibility=$3 WHERE id=$1`, cid, target, visibility); e != nil {
 		return e
 	}
-	if _, e = tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,connection_id) SELECT $1,$2,$3,nullif($4,'')::uuid WHERE EXISTS(SELECT FROM tenant_archives WHERE archive_id=$5) ON CONFLICT(tenant_id,archive_id) DO UPDATE SET provider_id=excluded.provider_id,connection_id=excluded.connection_id`, tenant, target, provider, connection, old); e != nil {
+	if _, e = tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,connection_id) SELECT $1,$2,$3,nullif($4,'')::uuid WHERE EXISTS(SELECT FROM tenant_archives WHERE archive_id=$5) ON CONFLICT(tenant_id,archive_id) DO UPDATE SET provider_id=excluded.provider_id,connection_id=excluded.connection_id`, tenant, target, provider, connection, savedSource); e != nil {
 		return e
 	}
 	var within bool

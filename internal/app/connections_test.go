@@ -185,6 +185,14 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	if count != 0 {
 		t.Fatal("old private reference survived public refresh")
 	}
+	// Refreshing public content must not re-save a completed private staging archive.
+	complete(tenants[1], domain.CaptureInput{RefreshID: restored.ArchiveID})
+	must(t, db.Tx(ctx, tenants[1], func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM tenant_archives WHERE archive_id=$1`, private.ArchiveID).Scan(&count)
+	}))
+	if count != 0 {
+		t.Fatal("public refresh resurrected old private archive")
+	}
 	if _, e = s.Archive(ctx, tenants[1], another.ArchiveID); e != nil {
 		t.Fatal("unrelated private scope lost")
 	}

@@ -285,3 +285,38 @@ func TestVideoDelivery(t *testing.T) {
 		})
 	}
 }
+
+func TestSourceLinksPreserveLiteralTextAndUTF16Offsets(t *testing.T) {
+	text := "1. 😀作者：<正文>\n\n2. 😀作者：<正文>"
+	links := []Entity{
+		{Type: "text_link", Offset: 3, Length: 9, URL: "https://x.com/i/status/20"},
+		{Type: "text_link", Offset: 17, Length: 9, URL: "https://x.com/i/status/21"},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		var got []Entity
+		if err := json.Unmarshal([]byte(r.Form.Get("entities")), &got); err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 2 || got[0] != links[0] || got[1] != links[1] || r.Form.Get("text") != text || r.Form.Get("parse_mode") != "" {
+			t.Errorf("lost literal source links: %+v", got)
+		}
+		w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
+	}))
+	defer server.Close()
+	c := &Client{Token: "test", Base: server.URL, HTTP: server.Client()}
+	for _, previous := range []int64{0, 1} {
+		if _, err := c.WithEntities(links).Send(context.Background(), "42", text, previous); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(c.entities) != 0 {
+		t.Fatal("shared client mutated")
+	}
+	detail := c.WithCode("id").WithEntities([]Entity{{Type: "text_link", Offset: 3, Length: 4, URL: links[0].URL}}).textEntities("id\n查看来源\n\n正文")
+	if len(detail) != 2 || detail[0].URL != links[0].URL || detail[1].Type != "code" {
+		t.Fatal(detail)
+	}
+}

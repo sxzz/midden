@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,7 @@ import (
 )
 
 type commandRequest struct {
+	Entities      []telegram.Entity
 	AccountImport *accountImport
 	Message       *telegram.Message
 	Task          store.Task
@@ -149,8 +151,11 @@ func (s *Service) commandRecent(ctx context.Context, r *commandRequest) error {
 		if i > 0 {
 			r.Text += "\n\n"
 		}
-		r.Text += fmt.Sprintf("%d. %s", i+1, archiveListSummary(a.Summary, a.Text))
-		r.Buttons = append(r.Buttons, []telegram.Button{{Text: fmt.Sprintf("查看第 %d 条", i+1), Data: "/show " + a.ID}})
+		r.Text += fmt.Sprintf("%d. ", i+1)
+		summary := archiveListSummary(a.Summary, a.Text)
+		r.Entities = append(r.Entities, telegram.Entity{Type: "text_link", Offset: len(utf16.Encode([]rune(r.Text))), Length: len(utf16.Encode([]rune(summary))), URL: a.URL})
+		r.Text += summary
+		r.Buttons = append(r.Buttons, []telegram.Button{{Text: fmt.Sprintf("查看第%d条", i+1), Data: "/show " + a.ID}, {Text: fmt.Sprintf("查看第%d条原帖", i+1), URL: a.URL}})
 	}
 	if r.Text == "" {
 		r.Text = "暂无归档。"
@@ -199,7 +204,7 @@ func (s *Service) commandRefresh(ctx context.Context, r *commandRequest) error {
 	r.Previous = 0
 	_, err := s.Submit(ctx, r.Task.Tenant, domain.CaptureInput{RefreshID: r.Argument, Key: "refresh:" + r.Task.ID, Origin: r.Origin})
 	if err != nil {
-		r.Text = submitMessage(err)
+		r.Text = submitMessage(err) + "\n输入：/refresh " + r.Argument
 	}
 	return nil
 }
@@ -240,12 +245,14 @@ func (s *Service) commandDeleteAll(ctx context.Context, r *commandRequest) error
 
 func (s *Service) submitMessageURLs(ctx context.Context, r *commandRequest, m *telegram.Message) error {
 	var targets []domain.Target
+	inputs := map[string]string{}
 	seen := map[string]bool{}
 	for _, url := range telegram.URLs(m) {
 		target, err := domain.Normalize(url)
 		if err == nil && !seen[target.ExternalID] {
 			seen[target.ExternalID] = true
 			targets = append(targets, target)
+			inputs[target.ExternalID] = url
 		}
 	}
 	if len(targets) == 0 {
@@ -264,9 +271,9 @@ func (s *Service) submitMessageURLs(ctx context.Context, r *commandRequest, m *t
 		return err
 	}
 	for _, target := range targets {
-		_, err := s.Submit(ctx, r.Task.Tenant, domain.CaptureInput{URL: target.URL, ConnectionID: connection, Key: r.Task.ID + ":" + target.ExternalID, Origin: r.Origin})
+		_, err := s.Submit(ctx, r.Task.Tenant, domain.CaptureInput{Input: inputs[target.ExternalID], URL: target.URL, ConnectionID: connection, Key: r.Task.ID + ":" + target.ExternalID, Origin: r.Origin})
 		if err != nil {
-			r.Text += submitMessage(err) + "\n"
+			r.Text += submitMessage(err) + "\n输入：" + inputs[target.ExternalID] + "\n\n"
 		}
 	}
 	return nil
@@ -296,6 +303,27 @@ func archiveListSummary(summary, text string) string {
 	const limit = 100
 	chars := []rune(summary)
 	if len(chars) > limit {
+		// Retain adapter-provided media indicators even when the text is long.
+		suffix := ""
+		prefix := summary
+		for {
+			marker := ""
+			for _, candidate := range []string{"[图片]", "[视频]"} {
+				if strings.HasSuffix(prefix, candidate) {
+					marker = candidate
+					break
+				}
+			}
+			if marker == "" {
+				break
+			}
+			suffix = marker + suffix
+			prefix = strings.TrimSuffix(prefix, marker)
+		}
+		budget := limit - len([]rune(suffix)) - 1
+		if suffix != "" && budget > 0 {
+			return string([]rune(prefix)[:budget]) + "…" + suffix
+		}
 		return string(chars[:limit-1]) + "…"
 	}
 	return summary

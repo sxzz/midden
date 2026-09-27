@@ -114,6 +114,7 @@ func TestArchiveListSummary(t *testing.T) {
 		{"", "", "无文字内容"},
 		{strings.Repeat("字", 100), "", strings.Repeat("字", 100)},
 		{strings.Repeat("🙂", 101), "", strings.Repeat("🙂", 99) + "…"},
+		{strings.Repeat("字", 120) + "[图片][视频]", "", strings.Repeat("字", 91) + "…[图片][视频]"},
 	} {
 		if got := archiveListSummary(tc.summary, tc.text); got != tc.want {
 			t.Fatalf("got %q, want %q", got, tc.want)

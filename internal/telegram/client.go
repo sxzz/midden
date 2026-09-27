@@ -20,6 +20,7 @@ import (
 type Client struct {
 	replyTo  int64
 	codeText string
+	entities []Entity
 	caption  string
 	BotID    string
 	Cache    domain.ChannelMediaCache
@@ -219,15 +220,27 @@ func (c *Client) WithCode(text string) *Client {
 	return &copy
 }
 
+// WithEntities adds literal-text formatting without interpreting user text as markup.
+func (c *Client) WithEntities(entities []Entity) *Client {
+	copy := *c
+	copy.entities = append([]Entity(nil), entities...)
+	return &copy
+}
+
 func (c *Client) textEntities(text string) []tg.MessageEntity {
-	if c.codeText == "" {
-		return nil
+	var result []tg.MessageEntity
+	size := len(utf16.Encode([]rune(text)))
+	for _, e := range c.entities {
+		if e.Offset >= 0 && e.Length > 0 && e.Offset <= size-e.Length {
+			result = append(result, tg.MessageEntity{Type: e.Type, Offset: e.Offset, Length: e.Length, URL: e.URL})
+		}
 	}
-	offset := strings.Index(text, c.codeText)
-	if offset < 0 {
-		return nil
+	if c.codeText != "" {
+		if offset := strings.Index(text, c.codeText); offset >= 0 {
+			result = append(result, tg.MessageEntity{Type: "code", Offset: len(utf16.Encode([]rune(text[:offset]))), Length: len(utf16.Encode([]rune(c.codeText)))})
+		}
 	}
-	return []tg.MessageEntity{{Type: "code", Offset: len(utf16.Encode([]rune(text[:offset]))), Length: len(utf16.Encode([]rune(c.codeText)))}}
+	return result
 }
 
 func (c *Client) Send(ctx context.Context, chat, text string, previous int64) (int64, error) {

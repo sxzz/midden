@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/jackc/pgx/v5"
 
@@ -234,8 +235,12 @@ func (s *Service) processInbox(ctx context.Context, t store.Task) error {
 		if err != nil {
 			return err
 		}
+		encodedEntities, err := json.Marshal(request.Entities)
+		if err != nil {
+			return err
+		}
 		var rid string
-		e := tx.QueryRow(ctx, `INSERT INTO replies(tenant_id,inbox_id,chat_id,text,message_id,buttons,reply_to_message_id) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(inbox_id) DO NOTHING RETURNING id`, t.Tenant, t.ID, chat, text, previous, encoded, origin.ReplyToMessageID).Scan(&rid)
+		e := tx.QueryRow(ctx, `INSERT INTO replies(tenant_id,inbox_id,chat_id,text,message_id,buttons,reply_to_message_id,entities) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(inbox_id) DO NOTHING RETURNING id`, t.Tenant, t.ID, chat, text, previous, encoded, origin.ReplyToMessageID, encodedEntities).Scan(&rid)
 		if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 			return e
 		}
@@ -267,9 +272,10 @@ func submitMessage(e error) string {
 func (s *Service) reply(ctx context.Context, t store.Task) error {
 	var chat, text, state, channel string
 	var mid, replyTo int64
-	var rawButtons []byte
+	var progress int
+	var rawButtons, rawEntities []byte
 	e := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT r.chat_id,r.text,r.state,r.message_id,i.channel_id,r.buttons,r.reply_to_message_id FROM replies r JOIN inbox i ON i.id=r.inbox_id AND i.tenant_id=r.tenant_id WHERE r.id=$1`, t.ID).Scan(&chat, &text, &state, &mid, &channel, &rawButtons, &replyTo)
+		return tx.QueryRow(ctx, `SELECT r.chat_id,r.text,r.state,r.message_id,i.channel_id,r.buttons,r.reply_to_message_id,r.entities,r.progress FROM replies r JOIN inbox i ON i.id=r.inbox_id AND i.tenant_id=r.tenant_id WHERE r.id=$1`, t.ID).Scan(&chat, &text, &state, &mid, &channel, &rawButtons, &replyTo, &rawEntities, &progress)
 	})
 	if e != nil || state == "sent" {
 		return e
@@ -277,6 +283,10 @@ func (s *Service) reply(ctx context.Context, t store.Task) error {
 	sender := s.replySender(channel, replyTo)
 	if sender == nil {
 		return fmt.Errorf("channel sender unavailable")
+	}
+	var entities []telegram.Entity
+	if e = json.Unmarshal(rawEntities, &entities); e != nil {
+		return e
 	}
 	var buttons telegram.Keyboard
 	if e = json.Unmarshal(rawButtons, &buttons); e != nil {
@@ -294,12 +304,45 @@ func (s *Service) reply(ctx context.Context, t store.Task) error {
 		}
 	}
 
-	id, e := sendInteractive(ctx, sender, chat, text, mid, buttons)
-	if e != nil {
-		return telegramError(e)
+	offset := 0
+	for i, part := range telegram.Split(text) {
+		size := len(utf16.Encode([]rune(part)))
+		if i >= progress {
+			formatted := sender
+			if c, ok := sender.(*telegram.Client); ok {
+				var partEntities []telegram.Entity
+				for _, entity := range entities {
+					if entity.Offset >= offset && entity.Offset+entity.Length <= offset+size {
+						entity.Offset -= offset
+						partEntities = append(partEntities, entity)
+					}
+				}
+				formatted = c.WithEntities(partEntities)
+			}
+			previous := int64(0)
+			var keyboard telegram.Keyboard
+			if i == 0 {
+				previous = mid
+				keyboard = buttons
+			}
+			id, err := sendInteractive(ctx, formatted, chat, part, previous, keyboard)
+			if err != nil {
+				return telegramError(err)
+			}
+			if i == 0 {
+				mid = id
+			}
+			if err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, `UPDATE replies SET progress=$2,message_id=$3 WHERE id=$1`, t.ID, i+1, mid)
+				return err
+			}); err != nil {
+				return err
+			}
+		}
+		offset += size
 	}
 	return s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		_, e := tx.Exec(ctx, `UPDATE replies SET state='sent',message_id=$2 WHERE id=$1`, t.ID, id)
+		_, e := tx.Exec(ctx, `UPDATE replies SET state='sent' WHERE id=$1`, t.ID)
 		return e
 	})
 }
@@ -323,11 +366,11 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 		return err
 	}
 	defer unlock()
-	var cid, chat, state, channel string
+	var cid, chat, state, channel, input string
 	var mid, replyTo int64
 	var progress int
 	e := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT capture_id,chat_id,state,message_id,progress,channel_id,reply_to_message_id FROM submissions WHERE id=$1`, t.ID).Scan(&cid, &chat, &state, &mid, &progress, &channel, &replyTo)
+		return tx.QueryRow(ctx, `SELECT capture_id,chat_id,state,message_id,progress,channel_id,reply_to_message_id,input FROM submissions WHERE id=$1`, t.ID).Scan(&cid, &chat, &state, &mid, &progress, &channel, &replyTo, &input)
 	})
 	if e != nil || state == "sent" {
 		return e
@@ -343,7 +386,14 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 	buttons := menuButtons()
 	var aa []domain.Asset
 	if j.State == "failed" {
-		text += "\n" + j.Error
+		if input == "" {
+			if err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
+				return tx.QueryRow(ctx, `SELECT url FROM archives WHERE id=$1`, j.ArchiveID).Scan(&input)
+			}); err != nil {
+				return err
+			}
+		}
+		text += "\n输入：" + input + "\n\n" + j.Error
 		buttons = append(telegram.Keyboard{{{Text: "重试", Data: "/refresh " + j.ArchiveID}}}, buttons...)
 	} else {
 		a, err := s.CaptureArchive(ctx, t.Tenant, cid)
@@ -362,6 +412,13 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 		return fmt.Errorf("channel sender unavailable")
 	}
 	parts := deliveryParts(text, aa)
+	headerPart := -1
+	for i, part := range parts {
+		if part.text != "" {
+			headerPart = i
+			break
+		}
+	}
 	// Progress text is replaced by the new captioned media, never by editing old content.
 	if len(parts) > 0 && parts[0].kind == "media" && progress == 0 && mid != 0 {
 		if c, ok := sender.(*telegram.Client); ok {
@@ -379,17 +436,18 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 	}
 	for progress < len(parts) {
 		part := parts[progress]
+		formatted := sender
+		if c, ok := sender.(*telegram.Client); ok && progress == headerPart && j.State != "failed" {
+			client := c.WithCode(j.ArchiveID)
+			formatted = client
+		}
 		var id int64
 		switch part.kind {
 		case "text":
 			if progress == 0 {
-				formatted := sender
-				if c, ok := sender.(*telegram.Client); ok && j.State != "failed" {
-					formatted = c.WithCode(j.ArchiveID)
-				}
 				id, e = sendInteractive(ctx, formatted, chat, part.text, mid, buttons)
 			} else {
-				id, e = sender.Send(ctx, chat, part.text, 0)
+				id, e = formatted.Send(ctx, chat, part.text, 0)
 			}
 		case "media":
 			action := "upload_photo"
@@ -400,10 +458,6 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 				}
 			}
 			stop := keepAction(ctx, sender, chat, action)
-			formatted := sender
-			if c, ok := sender.(*telegram.Client); ok && progress == 0 {
-				formatted = c.WithCode(j.ArchiveID)
-			}
 			id, e = formatted.Media(ctx, chat, part.assets, part.text)
 			stop()
 		case "buttons":

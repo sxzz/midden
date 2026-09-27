@@ -106,6 +106,8 @@ message FetchResponse {
   EntityGraph graph = 11;
   repeated SourceResponse source_responses = 12;
   string summary = 13; // Adapter-provided list presentation; channels may truncate it.
+  string author_name = 14; // Generic presentation, supplied by the adapter.
+  string published_at = 15; // Original publication time in RFC 3339; empty when unknown.
 }
 
 // Execution-only secrets; never persisted in task payloads or logs.

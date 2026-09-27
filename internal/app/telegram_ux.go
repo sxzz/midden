@@ -196,30 +196,17 @@ func usageText(used, reserved, limit int64) string {
 }
 
 func archiveMessage(a domain.Archive, state string) string {
-	heading := "已保存"
+	header := a.ID
+	author := strings.TrimSpace(a.AuthorName)
+	if author == "" {
+		author = "未知作者"
+	}
+	parts := []string{header, author + "：\n" + strings.TrimSpace(a.Text)}
+	if published, err := time.Parse(time.RFC3339, a.PublishedAt); err == nil {
+		parts = append(parts, published.In(time.FixedZone("UTC+8", 8*60*60)).Format("2006-01-02 15:04:05"))
+	}
 	if state == "partial" {
-		heading = "已保存，部分内容未保存"
-	}
-	ready, videos := 0, 0
-	for _, asset := range a.Assets {
-		if asset.State == "ready" {
-			if strings.HasPrefix(asset.MIME, "video/") {
-				videos++
-			} else {
-				ready++
-			}
-		}
-	}
-	if ready > 0 {
-		heading += fmt.Sprintf(" · %d 张图片", ready)
-	}
-	if videos > 0 {
-		heading += fmt.Sprintf(" · %d 个视频", videos)
-	}
-	parts := []string{heading}
-	parts = append(parts, a.ID)
-	if text := strings.TrimSpace(a.Text); text != "" {
-		parts = append(parts, text)
+		parts = append(parts, "部分内容未保存")
 	}
 	for _, asset := range a.Assets {
 		if alt := strings.TrimSpace(asset.AltText); alt != "" {

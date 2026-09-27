@@ -204,6 +204,17 @@ func TestTelegramUXIntegration(t *testing.T) {
 	}
 	must(t, restarted.reply(ctx, store.Task{Tenant: identity.TenantID, ID: rid, Type: "reply"}))
 
+	iid = inbox(identity.TenantID, "42", "/recent")
+	var linked []byte
+	must(t, db.Tx(ctx, identity.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT id,entities FROM replies WHERE inbox_id=$1`, iid).Scan(&rid, &linked)
+	}))
+	var links []telegram.Entity
+	must(t, json.Unmarshal(linked, &links))
+	if len(links) != 1 || links[0].Type != "text_link" || links[0].URL != archived.URL {
+		t.Fatal("source link not persisted", links)
+	}
+	must(t, restarted.reply(ctx, store.Task{Tenant: identity.TenantID, ID: rid, Type: "reply"}))
 	iid = inbox(other.TenantID, "43", "/recent")
 	var emptyText, replyState string
 	must(t, db.Tx(ctx, other.TenantID, func(tx pgx.Tx) error {
@@ -387,9 +398,9 @@ func TestTelegramUXIntegration(t *testing.T) {
 }
 
 func TestArchiveMessageIncludesOnlyArchiveID(t *testing.T) {
-	a := domain.Archive{ID: uuid.NewString(), RevisionID: uuid.NewString(), Text: "原帖正文", Assets: []domain.Asset{{State: "ready"}}}
+	a := domain.Archive{ID: uuid.NewString(), RevisionID: uuid.NewString(), Text: "原帖正文", AuthorName: "测试作者", URL: "https://x.com/i/status/20", PublishedAt: "2026-04-05T03:22:33Z", Assets: []domain.Asset{{State: "ready"}}}
 	text := archiveMessage(a, "complete")
-	if text != "已保存 · 1 张图片\n\n"+a.ID+"\n\n原帖正文" {
+	if text != a.ID+"\n\n测试作者：\n原帖正文\n\n2026-04-05 11:22:33" {
 		t.Fatal(text)
 	}
 	a.Text = ""
