@@ -11,6 +11,8 @@ import (
 )
 
 type inputMedia struct {
+	Width     int                `json:"width,omitempty"`
+	Height    int                `json:"height,omitempty"`
 	Type      string             `json:"type"`
 	Media     string             `json:"media"`
 	Caption   string             `json:"caption,omitempty"`
@@ -42,7 +44,7 @@ func (c *Client) sendMedia(ctx context.Context, chat string, assets []domain.Ass
 		} else {
 			ref = p.data.SendData()
 		}
-		m := inputMedia{Type: p.kind, Media: ref, Streaming: p.kind == "video", Spoiler: assets[i].Sensitive && p.kind != "document"}
+		m := inputMedia{Width: p.width, Height: p.height, Type: p.kind, Media: ref, Streaming: p.kind == "video", Spoiler: assets[i].Sensitive && p.kind != "document"}
 		if i == 0 {
 			m.Caption = c.caption
 			m.Entities = c.textEntities(c.caption)
@@ -69,6 +71,10 @@ func (c *Client) sendMedia(ctx context.Context, chat string, assets []domain.Ass
 		}
 		if m.Streaming {
 			params["supports_streaming"] = "true"
+			if m.Width > 0 && m.Height > 0 {
+				params["width"] = strconv.Itoa(m.Width)
+				params["height"] = strconv.Itoa(m.Height)
+			}
 		}
 		if m.Spoiler {
 			params["has_spoiler"] = "true"

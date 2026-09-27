@@ -1,7 +1,9 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,11 +38,14 @@ func TestSplit(t *testing.T) {
 	}
 }
 
+//go:embed testdata/landscape.mp4
+var testVideo []byte
+
 type testBlob struct{}
 
 func (testBlob) Put(context.Context, string, io.Reader, int64, string) error { return nil }
 func (testBlob) Get(context.Context, string) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("image-bytes")), nil
+	return io.NopCloser(bytes.NewReader(testVideo)), nil
 }
 
 func (testBlob) Delete(context.Context, string) error { return nil }
@@ -261,11 +266,17 @@ func TestVideoDelivery(t *testing.T) {
 					}
 					var media []map[string]any
 					json.Unmarshal([]byte(r.FormValue("media")), &media)
+					if media[0]["width"] != float64(192) || media[0]["height"] != float64(108) {
+						t.Error("wrong video dimensions", media[0])
+					}
 					if len(media) != 2 || media[0]["type"] != "video" || media[1]["type"] != "photo" || media[0]["caption"] != "正文" {
 						t.Error(media)
 					}
 					w.Write([]byte(`{"ok":true,"result":[{"message_id":7},{"message_id":8}]}`))
 				} else {
+					if r.FormValue("width") != "192" || r.FormValue("height") != "108" {
+						t.Error("wrong video dimensions", r.Form)
+					}
 					if !strings.HasSuffix(r.URL.Path, "sendVideo") || r.FormValue("caption") != "正文" {
 						t.Error(r.URL.Path, r.Form)
 					}

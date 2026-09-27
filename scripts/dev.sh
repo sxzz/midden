@@ -27,7 +27,7 @@ if [[ "$target" != adapter ]]; then
 	CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -o .local/dev/bin/monitorctl.next ./cmd/monitorctl
 	mv .local/dev/bin/core.next .local/dev/bin/core
 	mv .local/dev/bin/monitorctl.next .local/dev/bin/monitorctl
-	if ! docker image inspect midden-core:dev >/dev/null 2>&1; then
+	if ! docker run --rm --entrypoint ffprobe midden-core:dev -version >/dev/null 2>&1; then
 		"${build[@]}" build core
 	fi
 	"${compose[@]}" run --rm --no-deps --pull never migrate

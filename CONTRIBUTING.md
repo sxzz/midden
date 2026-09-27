@@ -2,7 +2,7 @@
 
 ## 开发环境
 
-使用 Go 1.27.1、Node.js 24、Docker Compose。生成的 Protobuf Go/TS 代码已提交，日常构建不需要 protoc。首次运行 `npm ci --ignore-scripts` 和 `npm run build`；Go 的跨语言测试使用构建后的 TS Adapter。
+使用 Go 1.27.1、Node.js 24、FFmpeg（提供 ffprobe）、Docker Compose。生成的 Protobuf Go/TS 代码已提交，日常构建不需要 protoc。首次运行 `npm ci --ignore-scripts` 和 `npm run build`；Go 的跨语言测试使用构建后的 TS Adapter。
 
 ```sh
 make build
@@ -78,5 +78,7 @@ Adapter 契约见 [架构文档](docs/architecture.md#adapter-协议与能力发
 ```sh
 docker compose -f compose.yaml -f compose.local.yaml -f compose.build.yaml build core adapter
 ```
+
+镜像 CI 按 core/adapter 分开缓存 BuildKit 构建层；core 额外将 Go 编译缓存挂载持久化到 GitHub Actions Cache，以便源码变化时仍能复用编译结果。测试 CI 缓存 Go 模块、编译结果及 npm 下载。
 
 生产 Compose 使用 GHCR 镜像。GitHub Actions 在 main 测试通过后发布两个架构的镜像。服务器部署使用完整提交 SHA 标签，与迁移文件保持一致。

@@ -302,7 +302,7 @@ func (c *Client) AnswerToast(ctx context.Context, id, text string) error {
 func (c *Client) MediaItem(ctx context.Context, chat string, a domain.Asset) (int64, error) {
 	id, e := c.upload(ctx, chat, a, false)
 	var x *APIError
-	if errors.As(e, &x) && x.Code == 400 {
+	if errors.Is(e, errVideoMetadata) || (errors.As(e, &x) && x.Code == 400) {
 		return c.upload(ctx, chat, a, true)
 	}
 	return id, e
@@ -315,6 +315,9 @@ func (c *Client) upload(ctx context.Context, chat string, a domain.Asset, docume
 func (c *Client) uploadAttempt(ctx context.Context, chat string, a domain.Asset, document, useCache bool) (int64, error) {
 	p, e := c.prepareFile(ctx, a, mediaKind(a, document), useCache)
 	if e != nil {
+		if errors.Is(e, errVideoMetadata) {
+			return 0, errVideoMetadata
+		}
 		return 0, fmt.Errorf("archived media unavailable")
 	}
 	defer p.close()
@@ -349,7 +352,7 @@ func (c *Client) Media(ctx context.Context, chat string, assets []domain.Asset, 
 	}
 	id, e := c.album(ctx, chat, assets, document)
 	var x *APIError
-	if errors.As(e, &x) && x.Code == 400 {
+	if errors.Is(e, errVideoMetadata) || (errors.As(e, &x) && x.Code == 400) {
 		return c.album(ctx, chat, assets, true)
 	}
 	return id, e
@@ -369,6 +372,9 @@ func (c *Client) albumAttempt(ctx context.Context, chat string, assets []domain.
 	for _, a := range assets {
 		p, e := c.prepareFile(ctx, a, mediaKind(a, document), useCache)
 		if e != nil {
+			if errors.Is(e, errVideoMetadata) {
+				return 0, errVideoMetadata
+			}
 			return 0, fmt.Errorf("archived media unavailable")
 		}
 		prepared = append(prepared, p)

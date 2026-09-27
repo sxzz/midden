@@ -12,10 +12,11 @@ import (
 )
 
 type preparedFile struct {
-	data     tg.RequestFileData
-	closer   io.Closer
-	kind     string
-	cachedID string
+	width, height int
+	data          tg.RequestFileData
+	closer        io.Closer
+	kind          string
+	cachedID      string
 }
 
 func mediaKind(a domain.Asset, document bool) string {
@@ -44,6 +45,10 @@ func (c *Client) prepareFile(ctx context.Context, a domain.Asset, kind string, u
 	reader, err := c.Blobs.Get(ctx, a.Key)
 	if err != nil {
 		return p, err
+	}
+	if kind == "video" {
+		defer reader.Close()
+		return prepareVideo(ctx, reader, a.Hash+extension(a.MIME))
 	}
 	p.data = tg.FileReader{Name: a.Hash + extension(a.MIME), Reader: reader}
 	p.closer = reader
