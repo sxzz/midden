@@ -61,7 +61,8 @@ test("public fixture preserves text, alt text and highest quality media", () => 
     Visibility.VISIBILITY_PUBLIC,
   );
   assert.ok(result.text.includes("菌子"));
-  const video = result.resources.find(r => r.kind === "video")!;
+  assert.equal(result.summary, `${post.author.name}：${result.text}`);
+  const video = result.resources.find((r) => r.kind === "video")!;
   assert.equal(video.url, "https://media.test/high.mp4");
   assert.equal(video.altText, "video description");
   assert.equal(video.sensitive, true);

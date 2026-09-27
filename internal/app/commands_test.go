@@ -106,3 +106,17 @@ func TestSaveCommandGuidance(t *testing.T) {
 		t.Fatal(r.Text, err)
 	}
 }
+
+func TestArchiveListSummary(t *testing.T) {
+	for _, tc := range []struct{ summary, text, want string }{
+		{"作者：第一行\n第二行", "unused", "作者：第一行 第二行"},
+		{"", "旧归档\n正文", "旧归档 正文"},
+		{"", "", "无文字内容"},
+		{strings.Repeat("字", 100), "", strings.Repeat("字", 100)},
+		{strings.Repeat("🙂", 101), "", strings.Repeat("🙂", 99) + "…"},
+	} {
+		if got := archiveListSummary(tc.summary, tc.text); got != tc.want {
+			t.Fatalf("got %q, want %q", got, tc.want)
+		}
+	}
+}

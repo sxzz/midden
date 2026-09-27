@@ -355,6 +355,7 @@ func archive(ctx context.Context, tx pgx.Tx, id string) (a domain.Archive, e err
 	if e = json.Unmarshal(payload, &p); e != nil {
 		return
 	}
+	a.Summary = p.Summary
 	a.Text = p.Text
 	a.TextKind = p.TextKind
 	a.TextSource = p.TextSource
@@ -451,6 +452,7 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 }
 
 type Payload struct {
+	Summary           string              `json:"summary,omitempty"`
 	Graph             *domain.EntityGraph `json:"graph,omitempty"`
 	MediaSensitive    []bool              `json:"media_sensitive,omitempty"`
 	MediaDescriptions []string            `json:"media_descriptions,omitempty"`
@@ -475,6 +477,7 @@ func (s *Service) CaptureArchive(ctx context.Context, t, cid string) (a domain.A
 		if err = json.Unmarshal(raw, &p); err != nil {
 			return err
 		}
+		a.Summary = p.Summary
 		a.Text = p.Text
 		a.TextKind = p.TextKind
 		a.TextSource = p.TextSource

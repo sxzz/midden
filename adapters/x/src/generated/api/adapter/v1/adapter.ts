@@ -160,6 +160,8 @@ export interface FetchResponse {
   visibility: Visibility;
   graph: EntityGraph | undefined;
   sourceResponses: SourceResponse[];
+  /** Adapter-provided list presentation; channels may truncate it. */
+  summary: string;
 }
 
 /** Execution-only secrets; never persisted in task payloads or logs. */
@@ -1555,6 +1557,7 @@ function createBaseFetchResponse(): FetchResponse {
     visibility: 0,
     graph: undefined,
     sourceResponses: [],
+    summary: "",
   };
 }
 
@@ -1598,6 +1601,9 @@ export const FetchResponse: MessageFns<FetchResponse> = {
     }
     for (const v of message.sourceResponses) {
       SourceResponse.encode(v!, writer.uint32(98).fork()).join();
+    }
+    if (message.summary !== "") {
+      writer.uint32(106).string(message.summary);
     }
     return writer;
   },
@@ -1708,6 +1714,14 @@ export const FetchResponse: MessageFns<FetchResponse> = {
           );
           continue;
         }
+        case 13: {
+          if (tag !== 106) {
+            break;
+          }
+
+          message.summary = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1753,6 +1767,7 @@ export const FetchResponse: MessageFns<FetchResponse> = {
       sourceResponses: globalThis.Array.isArray(object?.sourceResponses)
         ? object.sourceResponses.map((e: any) => SourceResponse.fromJSON(e))
         : [],
+      summary: isSet(object.summary) ? globalThis.String(object.summary) : "",
     };
   },
 
@@ -1796,6 +1811,9 @@ export const FetchResponse: MessageFns<FetchResponse> = {
         SourceResponse.toJSON(e),
       );
     }
+    if (message.summary !== "") {
+      obj.summary = message.summary;
+    }
     return obj;
   },
 
@@ -1821,6 +1839,7 @@ export const FetchResponse: MessageFns<FetchResponse> = {
         : undefined;
     message.sourceResponses =
       object.sourceResponses?.map((e) => SourceResponse.fromPartial(e)) || [];
+    message.summary = object.summary ?? "";
     return message;
   },
 };

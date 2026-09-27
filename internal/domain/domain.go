@@ -129,6 +129,7 @@ type SourceResponse struct {
 	Body           []byte    `json:"-"`
 }
 type Archive struct {
+	Summary        string       `json:"summary,omitempty"`
 	Graph          *EntityGraph `json:"graph,omitempty"`
 	Visibility     string       `json:"visibility"`
 	ID             string       `json:"id"`

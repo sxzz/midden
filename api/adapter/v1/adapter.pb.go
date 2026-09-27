@@ -836,6 +836,7 @@ type FetchResponse struct {
 	Visibility      Visibility             `protobuf:"varint,10,opt,name=visibility,proto3,enum=adapter.v1.Visibility" json:"visibility,omitempty"`
 	Graph           *EntityGraph           `protobuf:"bytes,11,opt,name=graph,proto3" json:"graph,omitempty"`
 	SourceResponses []*SourceResponse      `protobuf:"bytes,12,rep,name=source_responses,json=sourceResponses,proto3" json:"source_responses,omitempty"`
+	Summary         string                 `protobuf:"bytes,13,opt,name=summary,proto3" json:"summary,omitempty"` // Adapter-provided list presentation; channels may truncate it.
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -952,6 +953,13 @@ func (x *FetchResponse) GetSourceResponses() []*SourceResponse {
 		return x.SourceResponses
 	}
 	return nil
+}
+
+func (x *FetchResponse) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
 }
 
 // Execution-only secrets; never persisted in task payloads or logs.
@@ -1184,7 +1192,7 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"source_url\x18\x03 \x01(\tR\tsourceUrl\x126\n" +
 	"\n" +
 	"visibility\x18\x04 \x01(\x0e2\x16.adapter.v1.VisibilityR\n" +
-	"visibility\"\xea\x03\n" +
+	"visibility\"\x84\x04\n" +
 	"\rFetchResponse\x12\x1f\n" +
 	"\vexternal_id\x18\x01 \x01(\tR\n" +
 	"externalId\x12\x12\n" +
@@ -1205,7 +1213,8 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	" \x01(\x0e2\x16.adapter.v1.VisibilityR\n" +
 	"visibility\x12-\n" +
 	"\x05graph\x18\v \x01(\v2\x17.adapter.v1.EntityGraphR\x05graph\x12E\n" +
-	"\x10source_responses\x18\f \x03(\v2\x1a.adapter.v1.SourceResponseR\x0fsourceResponses\"Q\n" +
+	"\x10source_responses\x18\f \x03(\v2\x1a.adapter.v1.SourceResponseR\x0fsourceResponses\x12\x18\n" +
+	"\asummary\x18\r \x01(\tR\asummary\"Q\n" +
 	"\x11SessionCredential\x12\x1d\n" +
 	"\n" +
 	"auth_token\x18\x01 \x01(\tR\tauthToken\x12\x1d\n" +

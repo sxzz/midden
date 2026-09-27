@@ -312,6 +312,7 @@ components:
             description: Visibility declared by the provider,
           }
         text: { type: string }
+        summary: { type: string, description: Adapter-provided archive summary }
         text_kind: { type: string, enum: [provider_summary, post_text] }
         graph: { $ref: "#/components/schemas/EntityGraph" }
         text_source: { type: string, description: Source of the archived text }

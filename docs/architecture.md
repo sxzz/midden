@@ -233,7 +233,7 @@ Adapter 的 `Describe.entity_types` 提供类型名与自包含 JSON Schema 2020
 
 X Adapter 在 `adapters/x/src/entity-schemas.ts` 定义 `x.post` 和 `x.profile`，通过 `authored_by` 关联。帖子 data 包含正文、上游发布时间、编辑时间及来源、编辑 ID 列表；Profile data 包含用户名、昵称、头像 URL 与个人资料。头像文件由 Adapter 作为关联资源返回，核心下载保存，不加入 Telegram 帖子相册。编辑时间优先采用上游明确字段，否则在存在多个编辑版本 ID 时从最新 Snowflake 推导并标记 `x_snowflake`；没有证据时省略。
 
-Fetch 的 text、text_kind 和展示媒体是可选的通用展示摘要，与 entity data 分开。Telegram 只读取这些字段，不解析 X 或其他平台的专属 JSON。正文和摘要在同一归档版本中保存。
+Fetch 的 text、text_kind、summary 和展示媒体是可选的通用展示字段，与 entity data 分开。summary 由 Adapter 提供；X Adapter 使用“作者名：内容”。Telegram 列表将换行合并为空格，每条最多显示 100 个字符，超出用省略号收尾，条目间留空行。Telegram 只读取这些字段，不解析 X 或其他平台的专属 JSON。正文和摘要在同一归档版本中保存。
 
 `source_responses` 保留采集接口响应体的原始字节、内容类型、请求地址、哈希、大小和采集记录关联，不保存请求 Cookie、认证头或登录首页。每次成功采集都保存原始响应，即使实体内容没有变化；原始响应变化不会单独创建内容版本。账号接口的原始响应强制为私有，不能随公开帖子向其他租户共享。其读取需要原始采集租户仍保存该帖子；删除后独立进入保留期，即使公开帖子仍被其他租户持有，也能回收该私有响应。
 

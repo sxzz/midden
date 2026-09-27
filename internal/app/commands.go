@@ -145,7 +145,10 @@ func (s *Service) commandRecent(ctx context.Context, r *commandRequest) error {
 	}
 	r.Buttons = nil
 	for i, a := range p.Items {
-		r.Text += fmt.Sprintf("%d. %s\n/show %s\n", i+1, a.URL, a.ID)
+		if i > 0 {
+			r.Text += "\n\n"
+		}
+		r.Text += fmt.Sprintf("%d. %s", i+1, archiveListSummary(a.Summary, a.Text))
 		r.Buttons = append(r.Buttons, []telegram.Button{{Text: fmt.Sprintf("查看第 %d 条", i+1), Data: "/show " + a.ID}})
 	}
 	if r.Text == "" {
@@ -278,4 +281,21 @@ func (s *Service) commandSave(ctx context.Context, r *commandRequest) error {
 	}
 	r.Text = "请在 /save 后附上 X 帖子链接，每次最多 200 个。群聊中请使用 /save@Bot用户名。"
 	return nil
+}
+
+// Telegram keeps each list entry compact; the complete summary stays in storage.
+func archiveListSummary(summary, text string) string {
+	if strings.TrimSpace(summary) == "" {
+		summary = text
+	}
+	summary = strings.Join(strings.Fields(summary), " ")
+	if summary == "" {
+		return "无文字内容"
+	}
+	const limit = 100
+	chars := []rune(summary)
+	if len(chars) > limit {
+		return string(chars[:limit-1]) + "…"
+	}
+	return summary
 }

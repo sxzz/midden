@@ -105,6 +105,7 @@ message FetchResponse {
   Visibility visibility = 10;
   EntityGraph graph = 11;
   repeated SourceResponse source_responses = 12;
+  string summary = 13; // Adapter-provided list presentation; channels may truncate it.
 }
 
 // Execution-only secrets; never persisted in task payloads or logs.

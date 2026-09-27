@@ -258,7 +258,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if e != nil {
 		return e
 	}
-	p := Payload{Graph: graph, Text: r.Text, TextKind: r.TextKind, Warnings: r.Warnings, Version: r.AdapterVersion, TextSource: r.TextSource, Incomplete: r.Incomplete}
+	p := Payload{Summary: r.Summary, Graph: graph, Text: r.Text, TextKind: r.TextKind, Warnings: r.Warnings, Version: r.AdapterVersion, TextSource: r.TextSource, Incomplete: r.Incomplete}
 	// Keep resource positions stable in the graph after applying execution limits.
 	kept := []*pb.Resource{}
 	positions := map[uint32]uint32{}
@@ -428,11 +428,11 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		}
 		raw, _ = json.Marshal(p)
 		digestData, _ := json.Marshal(struct {
-			Text, Kind string
-			Graph      *domain.EntityGraph
-			Warnings   []string
-			Assets     []sig
-		}{p.Text, p.TextKind, p.Graph, p.Warnings, ss})
+			Text, Kind, Summary string
+			Graph               *domain.EntityGraph
+			Warnings            []string
+			Assets              []sig
+		}{p.Text, p.TextKind, p.Summary, p.Graph, p.Warnings, ss})
 		var digest string
 		if e = tx.QueryRow(ctx, `SELECT encode(digest($1::jsonb::text,'sha256'),'hex')`, digestData).Scan(&digest); e != nil {
 			return e

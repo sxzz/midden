@@ -98,6 +98,7 @@ export function normalize(
     visibility,
     text: post.text.trim(),
     textKind: "post_text",
+    summary: `${post.author?.name?.trim() || post.author?.screen_name?.trim() || "未知作者"}：${post.text.trim()}`,
     textSource: provider,
     adapterVersion: "0.4.0",
   });
