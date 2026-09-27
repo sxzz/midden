@@ -24,5 +24,7 @@ WORKDIR /app
 COPY --from=production-dependencies /app/ ./
 COPY --from=build /app/adapters/x/dist/ adapters/x/dist/
 COPY --from=build /app/third_party/atmosphere/dist/ third_party/atmosphere/dist/
+COPY LICENSE /app/LICENSE
+COPY third_party/atmosphere/LICENSE third_party/atmosphere/UPSTREAM.md /app/third_party/atmosphere/
 USER 10001:10001
 CMD ["node", "adapters/x/dist/server.js"]

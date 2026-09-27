@@ -12,5 +12,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=${TARGETO
 FROM alpine:3.23.3
 RUN apk add --no-cache ca-certificates && addgroup -g 10001 monitor && adduser -D -H -u 10001 -G monitor monitor
 COPY --from=build /out/ /usr/local/bin/
+COPY LICENSE /usr/share/licenses/midden/LICENSE
 USER 10001:10001
 ENTRYPOINT ["core"]
