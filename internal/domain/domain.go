@@ -152,8 +152,9 @@ type Archive struct {
 }
 
 type Page struct {
-	Items      []Archive `json:"items"`
-	NextCursor string    `json:"next_cursor,omitempty"`
+	Items          []Archive `json:"items"`
+	NextCursor     string    `json:"next_cursor,omitempty"`
+	PreviousCursor string    `json:"previous_cursor,omitempty"`
 }
 
 type Usage struct {

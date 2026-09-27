@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -401,28 +403,42 @@ func (s *Service) Asset(ctx context.Context, t, id string) (a domain.Asset, e er
 	return
 }
 
+func parseArchiveCursor(cursor string) (*string, bool, error) {
+	if cursor == "" {
+		return nil, false, nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return nil, false, fmt.Errorf("invalid cursor")
+	}
+	value := string(raw)
+	backwards := strings.HasPrefix(value, "p:")
+	id, err := uuid.Parse(strings.TrimPrefix(value, "p:"))
+	if err != nil {
+		return nil, false, fmt.Errorf("invalid cursor")
+	}
+	canonical := id.String()
+	return &canonical, backwards, nil
+}
+
 func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, e error) {
 	p.Items = []domain.Archive{}
-	var before *string
-	if cursor != "" {
-		b, err := base64.RawURLEncoding.DecodeString(cursor)
-		if err != nil {
-			return p, fmt.Errorf("invalid cursor")
-		}
-		id := string(b)
-		if _, err = uuid.Parse(id); err != nil {
-			return p, fmt.Errorf("invalid cursor")
-		}
-		before = &id
+	anchor, backwards, err := parseArchiveCursor(cursor)
+	if err != nil {
+		return p, err
 	}
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
-		if before != nil {
+		if anchor != nil {
 			var x string
-			if err := tx.QueryRow(ctx, `SELECT a.id FROM archives a JOIN tenant_archives t ON t.archive_id=a.id WHERE a.id=$1 AND a.current_revision IS NOT NULL`, *before).Scan(&x); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT a.id FROM archives a JOIN tenant_archives t ON t.archive_id=a.id WHERE a.id=$1 AND a.current_revision IS NOT NULL`, *anchor).Scan(&x); err != nil {
 				return err
 			}
 		}
-		rows, err := tx.Query(ctx, `SELECT a.id FROM archives a JOIN tenant_archives t ON t.archive_id=a.id WHERE a.current_revision IS NOT NULL AND ($1::uuid IS NULL OR (t.created_at,a.id)<(SELECT created_at,archive_id FROM tenant_archives WHERE archive_id=$1)) ORDER BY t.created_at DESC,a.id DESC LIMIT 11`, before)
+		comparison, order := "<", "DESC"
+		if backwards {
+			comparison, order = ">", "ASC"
+		}
+		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT a.id FROM archives a JOIN tenant_archives t ON t.archive_id=a.id WHERE a.current_revision IS NOT NULL AND ($1::uuid IS NULL OR (t.created_at,a.id)%s(SELECT created_at,archive_id FROM tenant_archives WHERE archive_id=$1)) ORDER BY t.created_at %s,a.id %s LIMIT 10`, comparison, order, order), anchor)
 		if err != nil {
 			return err
 		}
@@ -440,9 +456,23 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 		if err != nil {
 			return err
 		}
-		if len(ids) > 10 {
-			p.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(ids[9]))
-			ids = ids[:10]
+		if backwards {
+			slices.Reverse(ids)
+		}
+		if len(ids) > 0 {
+			var previous, next bool
+			err := tx.QueryRow(ctx, `SELECT
+				EXISTS(SELECT 1 FROM tenant_archives t JOIN archives a ON a.id=t.archive_id WHERE a.current_revision IS NOT NULL AND (t.created_at,a.id)>(SELECT created_at,archive_id FROM tenant_archives WHERE archive_id=$1)),
+				EXISTS(SELECT 1 FROM tenant_archives t JOIN archives a ON a.id=t.archive_id WHERE a.current_revision IS NOT NULL AND (t.created_at,a.id)<(SELECT created_at,archive_id FROM tenant_archives WHERE archive_id=$2))`, ids[0], ids[len(ids)-1]).Scan(&previous, &next)
+			if err != nil {
+				return err
+			}
+			if previous {
+				p.PreviousCursor = base64.RawURLEncoding.EncodeToString([]byte("p:" + ids[0]))
+			}
+			if next {
+				p.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(ids[len(ids)-1]))
+			}
 		}
 		for _, id := range ids {
 			a, err := archive(ctx, tx, id)

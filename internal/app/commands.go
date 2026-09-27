@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -83,11 +82,8 @@ func lookupCommand(name string) (channelCommand, bool) {
 func noArgument(s string) bool      { return s == "" }
 func validIDArgument(s string) bool { _, err := uuid.Parse(s); return err == nil }
 func validCursorArgument(s string) bool {
-	if s == "" {
-		return true
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	return err == nil && validIDArgument(string(raw))
+	_, _, err := parseArchiveCursor(s)
+	return err == nil
 }
 
 // Callback data selects an action; resource lookups use the authenticated actor's tenant.
@@ -161,8 +157,15 @@ func (s *Service) commandRecent(ctx context.Context, r *commandRequest) error {
 		r.Text = "暂无归档。"
 		r.Buttons = menuButtons()
 	}
+	var navigation []telegram.Button
+	if p.PreviousCursor != "" {
+		navigation = append(navigation, telegram.Button{Text: "← 上一页", Data: "/recent " + p.PreviousCursor})
+	}
 	if p.NextCursor != "" {
-		r.Buttons = append(r.Buttons, []telegram.Button{{Text: "下一页 →", Data: "/recent " + p.NextCursor}})
+		navigation = append(navigation, telegram.Button{Text: "下一页 →", Data: "/recent " + p.NextCursor})
+	}
+	if len(navigation) > 0 {
+		r.Buttons = append(r.Buttons, navigation)
 	}
 	return nil
 }
