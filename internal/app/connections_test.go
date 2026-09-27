@@ -193,7 +193,47 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	pending, e := s.Submit(ctx, tenants[1], domain.CaptureInput{URL: "https://x.com/a/status/900112", ConnectionID: second})
 	must(t, e)
 	must(t, s.capture(ctx, store.Task{Tenant: tenants[1], ID: pending.ID}))
-	must(t, s.RevokeConnection(ctx, tenants[1], second))
+	var deletedCredential string
+	must(t, admin.Pool.QueryRow(ctx, `SELECT credential_ref FROM connections WHERE id=$1`, second).Scan(&deletedCredential))
+	deleteRequest := &commandRequest{Task: store.Task{Tenant: tenants[0]}, Argument: "confirm:" + second}
+	must(t, s.commandAccountDelete(ctx, deleteRequest))
+	if deleteRequest.Text != "账号不存在或无权限。" {
+		t.Fatal("cross-tenant deletion allowed")
+	}
+	must(t, s.commandAccount(ctx, &commandRequest{Task: store.Task{Tenant: tenants[1]}, Argument: second}))
+	deleteRequest = &commandRequest{Task: store.Task{Tenant: tenants[1]}, Argument: second}
+	must(t, s.commandAccountDelete(ctx, deleteRequest))
+	if !strings.Contains(deleteRequest.Text, "删除采集账号") || !validCallback(deleteRequest.Buttons[0][0].Data) {
+		t.Fatal("missing delete confirmation")
+	}
+	if _, _, err := s.session(ctx, tenants[1], second); err != nil {
+		t.Fatal("confirmation revoked credentials early", err)
+	}
+	deleteRequest.Argument = "confirm:" + second
+	must(t, s.commandAccountDelete(ctx, deleteRequest))
+	must(t, s.commandAccountDelete(ctx, deleteRequest))
+	if selected, err := s.DefaultConnection(ctx, tenants[1]); err != nil || selected != "" {
+		t.Fatal("deleted default retained", err)
+	}
+	if _, _, err := s.session(ctx, tenants[1], second); !errors.Is(err, ErrConnection) {
+		t.Fatal("deleted credentials still usable", err)
+	}
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM account_credentials WHERE id=$1`, deletedCredential).Scan(&count))
+	if count != 0 {
+		t.Fatal("deleted credential retained")
+	}
+	menu := &commandRequest{Task: store.Task{Tenant: tenants[1]}}
+	must(t, s.commandAccount(ctx, menu))
+	for _, row := range menu.Buttons {
+		for _, b := range row {
+			if strings.Contains(b.Data, second) {
+				t.Fatal("deleted account remains listed")
+			}
+		}
+	}
+	if _, err := s.Archive(ctx, tenants[1], another.ArchiveID); err != nil {
+		t.Fatal("deleting account removed saved archive", err)
+	}
 	if e = s.finalize(ctx, tenants[1], pending.ID); !errors.Is(e, ErrConnection) {
 		t.Fatal("revoked execution committed", e)
 	}

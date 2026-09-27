@@ -90,6 +90,9 @@ func (s *Service) RevokeConnection(ctx context.Context, tenant, id string) error
 		if tag.RowsAffected() != 1 {
 			return domain.ErrNotFound
 		}
+		if _, e = tx.Exec(ctx, `UPDATE tenant_preferences SET default_connection_id=NULL WHERE tenant_id=$1 AND default_connection_id=$2`, tenant, id); e != nil {
+			return e
+		}
 		_, e = tx.Exec(ctx, `DELETE FROM account_credentials c WHERE c.tenant_id=$1 AND NOT EXISTS(SELECT FROM connections n WHERE n.credential_ref=c.id)`, tenant)
 		return e
 	})
@@ -214,7 +217,7 @@ func (s *Service) commandAccount(ctx context.Context, r *commandRequest) error {
 			label = "✓ " + label
 		}
 		r.Buttons = telegram.Keyboard{{{Text: label, Data: "/account public"}}}
-		rows, e := tx.Query(ctx, `SELECT id,name,state,coalesce(username,''),coalesce(account_id,'') FROM connections WHERE adapter_id='x' AND provider_id='x-session' ORDER BY name,id`)
+		rows, e := tx.Query(ctx, `SELECT id,name,state,coalesce(username,''),coalesce(account_id,'') FROM connections WHERE adapter_id='x' AND provider_id='x-session' AND state<>'revoked' ORDER BY name,id`)
 		if e != nil {
 			return e
 		}
@@ -231,7 +234,11 @@ func (s *Service) commandAccount(ctx context.Context, r *commandRequest) error {
 			if state != "ready" {
 				name += "（需重新授权）"
 			}
-			r.Buttons = append(r.Buttons, []telegram.Button{{Text: name, Data: "/account " + id}})
+			buttons := []telegram.Button{{Text: name, Data: "/account " + id}}
+			if !strings.HasPrefix(r.Origin.ChatID, "-") {
+				buttons = append(buttons, telegram.Button{Text: "删除", Data: "/account_delete " + id})
+			}
+			r.Buttons = append(r.Buttons, buttons)
 		}
 		if !strings.HasPrefix(r.Origin.ChatID, "-") {
 			r.Buttons = append(r.Buttons, []telegram.Button{{Text: "添加账号", Data: "/account_add"}})
@@ -252,4 +259,45 @@ func connectionLabel(name, username, accountID string) string {
 		return name + " · " + accountID
 	}
 	return name
+}
+
+func validAccountDeleteArgument(arg string) bool {
+	return arg == "" || validIDArgument(strings.TrimPrefix(arg, "confirm:"))
+}
+
+func (s *Service) commandAccountDelete(ctx context.Context, r *commandRequest) error {
+	if r.Argument == "" {
+		if err := s.commandAccount(ctx, r); err != nil {
+			return err
+		}
+		r.Text = "点击账号旁的删除按钮，移除采集账号。已保存的归档会保留。"
+		return nil
+	}
+	id := strings.TrimPrefix(r.Argument, "confirm:")
+	var name, username, accountID, state string
+	err := s.DB.Tx(ctx, r.Task.Tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT name,coalesce(username,''),coalesce(account_id,''),state FROM connections WHERE id=$1 AND tenant_id=$2`, id, r.Task.Tenant).Scan(&name, &username, &accountID, &state)
+	})
+	if errors.Is(err, domain.ErrNotFound) {
+		r.Text = "账号不存在或无权限。"
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	r.Buttons = telegram.Keyboard{{{Text: "返回账号列表", Data: "/account"}}}
+	if state == "revoked" {
+		r.Text = "账号已删除。"
+		return nil
+	}
+	if !strings.HasPrefix(r.Argument, "confirm:") {
+		r.Text = "删除采集账号 " + connectionLabel(name, username, accountID) + "？\n已保存的归档会保留，使用此账号的任务和重新采集将无法继续。若它是当前账号，新的保存请求将使用公共来源。"
+		r.Buttons = telegram.Keyboard{{{Text: "确认删除", Data: "/account_delete confirm:" + id}, {Text: "取消", Data: "/account"}}}
+		return nil
+	}
+	if err := s.RevokeConnection(ctx, r.Task.Tenant, id); err != nil {
+		return err
+	}
+	r.Text = "账号已删除，已保存的归档保留。"
+	return nil
 }

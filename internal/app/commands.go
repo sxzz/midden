@@ -51,6 +51,7 @@ func init() {
 		{"delete", "删除", "<归档 ID>", true, false, validIDArgument, (*Service).commandDelete},
 		{"delete_all", "删除全部保存记录", "[confirm]", true, false, func(s string) bool { return s == "" || s == "confirm" }, (*Service).commandDeleteAll},
 		{"account_add", "添加 X 采集账号", "<Base64 Cookie> [名称]", true, true, func(string) bool { return true }, (*Service).commandAccountAdd},
+		{"account_delete", "删除采集账号", "[账号 ID]", true, true, validAccountDeleteArgument, (*Service).commandAccountDelete},
 		{"account", "选择采集账号", "", true, false, func(s string) bool { return s == "" || s == "public" || validIDArgument(s) }, (*Service).commandAccount},
 		{"usage", "查看存储用量", "", true, false, noArgument, (*Service).commandUsage},
 		{"help", "查看使用帮助", "", true, false, noArgument, (*Service).commandHelp},

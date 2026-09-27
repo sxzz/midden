@@ -120,3 +120,22 @@ func TestArchiveListSummary(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountDeletionCommand(t *testing.T) {
+	id := "00000000-0000-4000-8000-000000000001"
+	for _, arg := range []string{"", id, "confirm:" + id} {
+		if !validCallback("/account_delete " + arg) {
+			t.Fatal("invalid deletion callback", arg)
+		}
+	}
+	for _, arg := range []string{"confirm:", "confirm:bad", "bad"} {
+		if validCallback("/account_delete " + arg) {
+			t.Fatal("accepted invalid deletion callback", arg)
+		}
+	}
+	for _, c := range TelegramCommands(true) {
+		if c.Command == "account_delete" {
+			t.Fatal("account deletion exposed in group menu")
+		}
+	}
+}
