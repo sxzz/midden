@@ -394,7 +394,7 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 			}
 		}
 		text += "\n输入：" + input + "\n\n" + j.Error
-		buttons = append(telegram.Keyboard{{{Text: "重试", Data: "/refresh " + j.ArchiveID}}}, buttons...)
+		buttons = append(telegram.Keyboard{{{Text: "重试", Data: "/retry " + j.ArchiveID}}}, buttons...)
 	} else {
 		a, err := s.CaptureArchive(ctx, t.Tenant, cid)
 		if err != nil {

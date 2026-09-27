@@ -48,6 +48,7 @@ func init() {
 		{"recent", "查看最近归档", "[游标]", true, true, validCursorArgument, (*Service).commandRecent},
 		{"show", "查看指定归档", "<归档 ID>", true, false, validIDArgument, (*Service).commandShow},
 		{"status", "查看采集状态", "<任务 ID>", true, false, validIDArgument, (*Service).commandStatus},
+		{"retry", "使用当前账号重试", "<归档 ID>", true, false, validIDArgument, (*Service).commandRetry},
 		{"refresh", "重新抓取帖子", "<归档 ID>", true, false, validIDArgument, (*Service).commandRefresh},
 		{"delete", "删除", "<归档 ID>", true, false, validIDArgument, (*Service).commandDelete},
 		{"delete_all", "删除全部保存记录", "[confirm]", true, false, func(s string) bool { return s == "" || s == "confirm" }, (*Service).commandDeleteAll},
@@ -205,9 +206,47 @@ func (s *Service) commandShow(ctx context.Context, r *commandRequest) error {
 
 func (s *Service) commandRefresh(ctx context.Context, r *commandRequest) error {
 	r.Previous = 0
-	_, err := s.Submit(ctx, r.Task.Tenant, domain.CaptureInput{RefreshID: r.Argument, Key: "refresh:" + r.Task.ID, Origin: r.Origin})
+	in := domain.CaptureInput{RefreshID: r.Argument, Key: "refresh:" + r.Task.ID, Origin: r.Origin}
+	var url, state string
+	err := s.DB.Tx(ctx, r.Task.Tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT a.url,coalesce((
+			SELECT c.state FROM captures c WHERE c.archive_id=a.id
+			AND (c.tenant_id=$2 OR EXISTS(SELECT FROM submissions s WHERE s.capture_id=c.id AND s.tenant_id=$2))
+			ORDER BY c.created_at DESC,c.id DESC LIMIT 1),'')
+			FROM archives a JOIN tenant_archives t ON t.archive_id=a.id WHERE a.id=$1`, r.Argument, r.Task.Tenant).Scan(&url, &state)
+	})
+	if err != nil {
+		r.Text = "归档不存在或无权限。"
+		return nil
+	}
+	if state == "failed" {
+		return s.commandRetry(ctx, r)
+	}
+	_, err = s.Submit(ctx, r.Task.Tenant, in)
 	if err != nil {
 		r.Text = submitMessage(err) + "\n输入：/refresh " + r.Argument
+	}
+	return nil
+}
+
+// Manual retries use the current selection; worker retries keep their saved connection.
+func (s *Service) commandRetry(ctx context.Context, r *commandRequest) error {
+	r.Previous = 0
+	var url string
+	err := s.DB.Tx(ctx, r.Task.Tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT a.url FROM archives a JOIN tenant_archives t ON t.archive_id=a.id WHERE a.id=$1`, r.Argument).Scan(&url)
+	})
+	if err != nil {
+		r.Text = "归档不存在或无权限。"
+		return nil
+	}
+	connection, err := s.DefaultConnection(ctx, r.Task.Tenant)
+	if err != nil {
+		return err
+	}
+	_, err = s.Submit(ctx, r.Task.Tenant, domain.CaptureInput{URL: url, Input: url, ConnectionID: connection, Key: "retry:" + r.Task.ID, Origin: r.Origin})
+	if err != nil {
+		r.Text = submitMessage(err) + "\n输入：" + url
 	}
 	return nil
 }
