@@ -127,7 +127,7 @@ docker compose up -d --force-recreate core
 
 非 Compose 部署也可通过 `CREDENTIAL_KEY_FILE` 读取 secret 文件。主密钥须单独备份，恢复数据库后仍需同一密钥才能解密；不要直接替换主密钥，否则既有凭据无法读取。更换个人账号会话使用下面的更新命令，不改变主密钥。
 
-配置好密钥后，用户可直接在 Bot 私聊发送 `/account_add <Base64 Cookie> [名称]`。Base64 解码后的格式为 `auth_token=...; ct0=...;`，允许包含其他 Cookie，但系统只提取这两个字段。命令不支持群聊。Bot 尝试删除含凭据的私聊消息，验证通过 X Viewer API 获取账号 ID 与 handle，保存后在账号列表显示 `@handle` 和自定义名称；重新验证会更新 handle。验证成功后提供“使用此账号”按钮，默认来源不会自动改变。Base64 只是编码，不是加密；请仅向你信任的 Bot 发送会话。
+配置好密钥后，用户可在 Bot 私聊发送 `/account_add`，选择平台后按提示直接发送凭据。Base64 解码后的格式为 `auth_token=...; ct0=...;`，允许包含其他 Cookie，但系统只提取这两个字段。命令不支持群聊。Bot 尝试删除含凭据的私聊消息，验证通过 X Viewer API 获取账号 ID 与 handle，保存后在账号列表显示 `@handle` 和自定义名称；重新验证会更新 handle。验证成功后提供“使用此账号”按钮，默认来源不会自动改变。Base64 只是编码，不是加密；请仅向你信任的 Bot 发送会话。
 
 下面是管理员 CLI 的另一种导入方式。
 
@@ -148,3 +148,17 @@ docker compose run --rm --entrypoint monitorctl migrate connection-revoke <tenan
 REST 新提交省略 `connection_id` 时始终调用公共 API；指定时使用 `x-session`（可省略 `provider_id` 由核心推导）。刷新使用租户保存记录中的原选择。TLS、加密主密钥或会话无效时明确拒绝账号操作，不影响公共采集。
 
 `config.connection_concurrency` 控制每 Connection 并发，默认 1；修改后重启核心。运行日志不保存会话、原始上游响应或个人账号身份。受保护帖子端到端验收需提供有访问权限的测试会话；自动测试使用固定响应。
+
+## 多 Adapter 与账号选择
+
+主 Adapter 仍由 `ADAPTER_ADDRESS`、`ADAPTER_TOKEN`、`ADAPTER_TLS_CA` 配置。其他端点存放在 config 表的 `additional_adapters`，值为 JSON 数组：
+
+```json
+[
+  {"address":"notes-adapter:9091","token":"replace-with-service-token","tls_ca":"/run/secrets/notes-ca.pem"}
+]
+```
+
+使用 `monitorctl config-set additional_adapters --stdin` 从受保护文件导入，然后重启核心。该配置按敏感值处理，`config-list` 不显示内容。TLS CA 路径需在核心容器中可读。每个 Adapter 的 ID 必须为 1–32 个字母、数字、下划线或连字符；host 声明不能重叠，Provider ID 可以相同。
+
+`/account` 按 Adapter 显示账号，各平台分别选择一个账号或公共来源。添加按钮显示该平台的凭据说明，下一条私聊消息直接发送凭据即可；只有一个平台时自动进入该平台。输入有效期为 10 分钟，可随时点击“取消添加”或发送 `/account_cancel`。同一条消息中的不同平台链接使用各自的选择。删除账号仅清除该平台的当前选择；已有任务保留原 Adapter 和账号，不自动回退。

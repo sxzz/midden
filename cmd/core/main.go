@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
+	"strings"
 	"syscall"
 	"time"
 
@@ -75,6 +79,66 @@ func run() error {
 		return e
 	}
 	s := &app.Service{Descriptor: desc, EntitySchemas: entitySchemas, Vault: vault, AdapterTLS: os.Getenv("ADAPTER_TLS_CA") != "", DB: db, Adapter: client, Providers: desc.Providers, Blobs: b, HTTP: &http.Client{Timeout: 5 * time.Minute}, Config: cfg}
+
+	s.Adapters = map[string]app.AdapterBinding{desc.AdapterId: {Client: client, Descriptor: desc, TLS: s.AdapterTLS, Schemas: entitySchemas}}
+	descriptions := []*pb.DescribeResponse{desc}
+	var endpointJSON string
+	if e = db.Pool.QueryRow(ctx, "SELECT value FROM config WHERE key='additional_adapters'").Scan(&endpointJSON); e != nil {
+		return e
+	}
+	var endpoints []struct {
+		Address string `json:"address"`
+		Token   string `json:"token"`
+		TLSCA   string `json:"tls_ca"`
+	}
+	if json.Unmarshal([]byte(endpointJSON), &endpoints) != nil {
+		return fmt.Errorf("invalid additional_adapters config")
+	}
+	hosts := map[string]bool{}
+	for _, h := range desc.Hosts {
+		hosts[strings.ToLower(h)] = true
+	}
+	for _, endpoint := range endpoints {
+		if endpoint.Address == "" || endpoint.Token == "" {
+			return fmt.Errorf("adapter address and token required")
+		}
+		connection, err := adapter.Dial(endpoint.Address, endpoint.Token, endpoint.TLSCA)
+		if err != nil {
+			return err
+		}
+		defer connection.Close()
+		rpc := pb.NewAdapterClient(connection)
+		call, stop := context.WithTimeout(ctx, 15*time.Second)
+		d, err := rpc.Describe(call, &pb.DescribeRequest{})
+		stop()
+		if err != nil {
+			return fmt.Errorf("additional adapter discovery failed")
+		}
+		if err = adapter.Validate(d); err != nil {
+			return err
+		}
+		if _, exists := s.Adapters[d.AdapterId]; exists {
+			return fmt.Errorf("duplicate adapter ID")
+		}
+		for _, h := range d.Hosts {
+			key := strings.ToLower(h)
+			if hosts[key] {
+				return fmt.Errorf("overlapping adapter host")
+			}
+			hosts[key] = true
+		}
+		schemas, err := adapter.CompileEntityTypes(d)
+		if err != nil {
+			return err
+		}
+		s.Adapters[d.AdapterId] = app.AdapterBinding{Client: rpc, Descriptor: d, TLS: endpoint.TLSCA != "", Schemas: schemas}
+		descriptions = append(descriptions, d)
+	}
+	for id := range s.Adapters {
+		if !regexp.MustCompile(`^[a-zA-Z0-9_-]{1,32}$`).MatchString(id) {
+			return fmt.Errorf("invalid adapter ID: use 1-32 letters, digits, underscores or hyphens")
+		}
+	}
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &app.Worker{S: s})
 	q, e := river.NewClient(riverpgxv5.New(db.Pool), &river.Config{Workers: workers, Queues: map[string]river.QueueConfig{"capture": {MaxWorkers: cfg.CaptureWorkers}, "download": {MaxWorkers: cfg.DownloadWorkers}, "control": {MaxWorkers: cfg.ControlWorkers}, "delivery": {MaxWorkers: cfg.DeliveryWorkers}}, MaxAttempts: 3, RescueStuckJobsAfter: 6 * time.Minute, Logger: slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))})
@@ -119,7 +183,7 @@ func run() error {
 			return &app.PermanentError{Message: "Bot identity does not match registered channel"}
 		}
 		commandsCtx, commandsCancel := context.WithTimeout(ctx, 5*time.Second)
-		if err := tg.ConfigureCommands(commandsCtx, app.TelegramCommands(false, desc), app.TelegramCommands(true, desc)); err != nil {
+		if err := tg.ConfigureCommands(commandsCtx, app.TelegramCommands(false, descriptions...), app.TelegramCommands(true, descriptions...)); err != nil {
 			slog.Warn("Telegram command menu unavailable")
 		}
 		commandsCancel()

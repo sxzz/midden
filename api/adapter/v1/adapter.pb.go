@@ -268,6 +268,7 @@ type DescribeResponse struct {
 	Hosts           []string      `protobuf:"bytes,4,rep,name=hosts,proto3" json:"hosts,omitempty"`
 	Providers       []*Provider   `protobuf:"bytes,5,rep,name=providers,proto3" json:"providers,omitempty"`
 	EntityTypes     []*EntityType `protobuf:"bytes,6,rep,name=entity_types,json=entityTypes,proto3" json:"entity_types,omitempty"`
+	DisplayName     string        `protobuf:"bytes,7,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"` // Adapter-owned user-facing name; empty means use adapter_id.
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -342,6 +343,13 @@ func (x *DescribeResponse) GetEntityTypes() []*EntityType {
 		return x.EntityTypes
 	}
 	return nil
+}
+
+func (x *DescribeResponse) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
 }
 
 type FetchRequest struct {
@@ -1402,7 +1410,7 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\fcapabilities\x18\x04 \x03(\v2\x16.adapter.v1.CapabilityR\fcapabilities\x12!\n" +
 	"\fentity_types\x18\x05 \x03(\tR\ventityTypes\x12)\n" +
 	"\x10default_provider\x18\x06 \x01(\bR\x0fdefaultProvider\x12'\n" +
-	"\x0fcredential_help\x18\a \x01(\tR\x0ecredentialHelp\"\xfb\x01\n" +
+	"\x0fcredential_help\x18\a \x01(\tR\x0ecredentialHelp\"\x9e\x02\n" +
 	"\x10DescribeResponse\x12)\n" +
 	"\x10protocol_version\x18\x01 \x01(\tR\x0fprotocolVersion\x12\x1d\n" +
 	"\n" +
@@ -1410,7 +1418,8 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12\x14\n" +
 	"\x05hosts\x18\x04 \x03(\tR\x05hosts\x122\n" +
 	"\tproviders\x18\x05 \x03(\v2\x14.adapter.v1.ProviderR\tproviders\x129\n" +
-	"\fentity_types\x18\x06 \x03(\v2\x16.adapter.v1.EntityTypeR\ventityTypes\"\xd4\x02\n" +
+	"\fentity_types\x18\x06 \x03(\v2\x16.adapter.v1.EntityTypeR\ventityTypes\x12!\n" +
+	"\fdisplay_name\x18\a \x01(\tR\vdisplayName\"\xd4\x02\n" +
 	"\fFetchRequest\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x1f\n" +
 	"\vexternal_id\x18\x02 \x01(\tR\n" +

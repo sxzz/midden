@@ -189,7 +189,7 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 
 ## 账号执行与凭据
 
-`account_credentials` 保存 AES-GCM 密文，AAD 绑定租户和凭据记录 ID；`tenant_preferences` 保存租户默认 Connection。两张表均强制 RLS。主密钥由部署环境或 secret 文件提供，不写入数据库。
+`account_credentials` 保存 AES-GCM 密文，AAD 绑定租户和凭据记录 ID；`tenant_preferences` 以 `(tenant_id, adapter_id)` 为主键，分别保存每个 Adapter 的默认 Connection，并用包含租户和 Adapter 的外键约束账号归属。两张表均强制 RLS。主密钥由部署环境或 secret 文件提供，不写入数据库。
 
 核心解密后通过认证 TLS RPC 临时传递凭据。Adapter 不保存租户会话，不使用账号池，不匿名降级；公开 API 请求不携带账号凭据。任务记录 Provider、Connection 及实际执行的凭据修订号，执行和最终提交均校验状态；凭据替换或撤销使旧执行不能提交结果。认证失效标记 `reauth_required`，限流和临时上游故障不改变认证状态。
 
@@ -216,13 +216,17 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 
 调用方按能力名称、相同 major、满足最低要求的 minor 选择操作；未知能力或未知能力 major 不阻止握手，也不会自动启用操作。一个能力 major 只能声明一次，需要支持多个 major 时分别声明。缺少操作能力时核心在提交或发送凭据前拒绝请求。声明了能力但实际返回 `UNIMPLEMENTED` 属于契约错误，按永久失败处理，不切换 Provider。
 
-未来检索、批量读取、流式订阅分别增加 RPC 和独立能力声明，现有 Adapter 无须实现。新操作的权限范围、分页或批量上限、流的取消与背压、断线恢复游标需随该操作的契约一起定义；不能仅增加能力名称就视为支持。Go Adapter 可嵌入 `UnimplementedAdapterServer`；TypeScript 实现使用 `satisfies Pick<AdapterServer, "describe"> & Partial<AdapterServer>`，缺少的方法由 gRPC 返回 `UNIMPLEMENTED`。核心通过 Adapter 的 `Resolve` 获得平台、实体类型、对象作用域、字符串 ID 和规范化 URL，不解析平台 URL。当前每个核心实例配置一个 Adapter 端点，可以替换为实现所需能力的其他 Adapter。
+未来检索、批量读取、流式订阅分别增加 RPC 和独立能力声明，现有 Adapter 无须实现。新操作的权限范围、分页或批量上限、流的取消与背压、断线恢复游标需随该操作的契约一起定义；不能仅增加能力名称就视为支持。Go Adapter 可嵌入 `UnimplementedAdapterServer`；TypeScript 实现使用 `satisfies Pick<AdapterServer, "describe"> & Partial<AdapterServer>`，缺少的方法由 gRPC 返回 `UNIMPLEMENTED`。核心通过 Adapter 的 `Resolve` 获得平台、实体类型、对象作用域、字符串 ID 和规范化 URL，不解析平台 URL。核心可同时连接多个 Adapter，按 Describe 声明的 host 路由 URL；重复 Adapter ID 和重叠 host 配置在启动时拒绝。账号选择以租户和 Adapter 为联合键，各平台独立生效。任务持久保存 Adapter ID，重试不重新路由；Provider ID 只在所属 Adapter 内解释。
+
+Adapter 在 `Describe.display_name` 声明展示名称；未提供名称时显示其 ID。界面不维护平台 ID 与名称的映射。
 
 Provider 通过 `default_provider` 声明各认证模式的默认选择，同一认证模式只能有一个默认项。任务和 Connection 保存实际 Provider，执行时校验 Adapter 归属及能力，不隐式替换。凭据格式说明由 `credential_help` 提供。Telegram 可提供 X 专属交互；账号命令菜单按 Adapter 能力启用。
 
 Describe 声明在核心启动时验证并缓存，能力变化需重启核心重新发现；管理 CLI 每次操作重新发现。滚动升级应先部署提供兼容旧能力的 Adapter，再升级核心，最后停用旧能力；跨 major 升级需并行部署对应版本端点。
 
 Telegram `/account_add` 在接收阶段将凭据输入使用租户绑定的加密密文暂存于 inbox；处理阶段通过 TLS 调用 Adapter 的 `PrepareCredential` 解析并规范化。Go 核心只处理不透明字节、加密和归属校验，不解析 Cookie 字段；原始消息文字和实体在持久化前移除。队列只保存 inbox ID。处理完成或终止失败时清理暂存密文；验证通过后的长期凭据仍存放在 `account_credentials`。Connection ID 由渠道实例和 update ID 稳定生成，重复执行不会重新创建账号或恢复已撤销凭据。
+
+账号添加采用私聊交互：选择平台后，`account_dialogs` 按租户、渠道身份和会话保存平台及 10 分钟期限。下一条非命令文本作为不透明凭据加密进入 inbox，原文不落库；取消、超时或提交结束会清理对应交互。数据库状态使核心重启后仍可继续输入。
 
 X 账号验证使用携带该账号 Cookie 的 `Viewer` GraphQL 接口，从当前会话返回的用户实体确认账号 ID 和用户名。普通帖子和 Profile 查询直接请求 API，不依赖登录首页或请求签名。只有上游签名清单中的接口才使用该账号首页初始化签名，账号页面不进入共享缓存。浏览器验证挑战、认证拒绝、受限会话、响应结构变化和上游临时故障分别处理；未知响应不视为验证成功，也不会自动回退为访客或其他账号。
 

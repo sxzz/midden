@@ -212,6 +212,7 @@ test("gRPC authentication and zero-account Describe", async () => {
     assert.equal(result.providers[0].authentication, "none");
     assert.equal(result.providers.length, 2);
     assert.equal(result.protocolVersion, "1.0");
+    assert.equal(result.displayName, "X");
     const resolved: any = await new Promise((resolve, reject) =>
       client.resolve(
         { url: "https://twitter.com/fixture/status/123?source=test" },

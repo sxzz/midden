@@ -47,6 +47,7 @@ message DescribeResponse {
   repeated string hosts = 4;
   repeated Provider providers = 5;
   repeated EntityType entity_types = 6;
+  string display_name = 7; // Adapter-owned user-facing name; empty means use adapter_id.
 }
 
 message FetchRequest {

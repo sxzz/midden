@@ -30,7 +30,7 @@ func TestConfiguredRetention(t *testing.T) {
 	var tenant, archive string
 	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO tenants DEFAULT VALUES RETURNING id`).Scan(&tenant))
 	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO archives(tenant_id,external_id,url,provider_id,platform,kind) VALUES($1,$2,'https://example.test/items/1','fixture','fixture','item') RETURNING id`, tenant, uuid.NewString()).Scan(&archive))
-	_, e = admin.Pool.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id) VALUES($1,$2,'fixture')`, tenant, archive)
+	_, e = admin.Pool.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,adapter_id) VALUES($1,$2,'fixture','fixture')`, tenant, archive)
 	must(t, e)
 	must(t, s.DeleteArchive(ctx, tenant, archive))
 	_, e = admin.Pool.Exec(ctx, `UPDATE archives SET unreferenced_at=now()-interval '2 days' WHERE id=$1`, archive)

@@ -18,6 +18,24 @@ func (s *Service) SavePublicArchive(ctx context.Context, tenant, id string) (add
 	if !validIDArgument(id) {
 		return false, domain.ErrNotFound
 	}
+	if len(s.Adapters) > 0 {
+		var raw string
+		err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, "SELECT url FROM archives WHERE id=$1 AND visibility='public'", id).Scan(&raw)
+		})
+		if err != nil {
+			return false, err
+		}
+		scoped, e := s.forURL(ctx, raw)
+		if e != nil {
+			return false, e
+		}
+		return scoped.SavePublicArchive(ctx, tenant, id)
+	}
+	d, err := s.descriptor(ctx)
+	if err != nil {
+		return false, err
+	}
 	p, err := s.defaultProvider(ctx, "none")
 	if err != nil {
 		return false, err
@@ -33,7 +51,7 @@ func (s *Service) SavePublicArchive(ctx context.Context, tenant, id string) (add
 			}
 			return err
 		}
-		tag, err := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, tenant, archive, p.Id)
+		tag, err := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,adapter_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, tenant, archive, p.Id, d.AdapterId)
 		if err != nil {
 			return err
 		}

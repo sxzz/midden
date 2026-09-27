@@ -89,6 +89,8 @@ export interface DescribeResponse {
   hosts: string[];
   providers: Provider[];
   entityTypes: EntityType[];
+  /** Adapter-owned user-facing name; empty means use adapter_id. */
+  displayName: string;
 }
 
 export interface FetchRequest {
@@ -555,6 +557,7 @@ function createBaseDescribeResponse(): DescribeResponse {
     hosts: [],
     providers: [],
     entityTypes: [],
+    displayName: "",
   };
 }
 
@@ -580,6 +583,9 @@ export const DescribeResponse: MessageFns<DescribeResponse> = {
     }
     for (const v of message.entityTypes) {
       EntityType.encode(v!, writer.uint32(50).fork()).join();
+    }
+    if (message.displayName !== "") {
+      writer.uint32(58).string(message.displayName);
     }
     return writer;
   },
@@ -640,6 +646,14 @@ export const DescribeResponse: MessageFns<DescribeResponse> = {
           message.entityTypes.push(EntityType.decode(reader, reader.uint32()));
           continue;
         }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.displayName = reader.string();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -667,6 +681,9 @@ export const DescribeResponse: MessageFns<DescribeResponse> = {
       entityTypes: globalThis.Array.isArray(object?.entityTypes)
         ? object.entityTypes.map((e: any) => EntityType.fromJSON(e))
         : [],
+      displayName: isSet(object.displayName)
+        ? globalThis.String(object.displayName)
+        : "",
     };
   },
 
@@ -690,6 +707,9 @@ export const DescribeResponse: MessageFns<DescribeResponse> = {
     if (message.entityTypes?.length) {
       obj.entityTypes = message.entityTypes.map((e) => EntityType.toJSON(e));
     }
+    if (message.displayName !== "") {
+      obj.displayName = message.displayName;
+    }
     return obj;
   },
 
@@ -706,6 +726,7 @@ export const DescribeResponse: MessageFns<DescribeResponse> = {
       object.providers?.map((e) => Provider.fromPartial(e)) || [];
     message.entityTypes =
       object.entityTypes?.map((e) => EntityType.fromPartial(e)) || [];
+    message.displayName = object.displayName ?? "";
     return message;
   },
 };

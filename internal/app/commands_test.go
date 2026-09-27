@@ -94,7 +94,7 @@ func TestSaveCommandGuidance(t *testing.T) {
 		t.Fatal("save registration")
 	}
 	r := &commandRequest{Message: &telegram.Message{Text: "/save"}}
-	if err := c.Handle(&Service{}, context.Background(), r); err != nil || !strings.Contains(r.Text, "帖子链接") {
+	if err := c.Handle(&Service{}, context.Background(), r); err != nil || !strings.Contains(r.Text, "平台链接") {
 		t.Fatal(r.Text, err)
 	}
 	var urls strings.Builder

@@ -164,7 +164,7 @@ func TestTelegramAccountImportIntegration(t *testing.T) {
 	if state != "revoked" || revision != 2 {
 		t.Fatal("replay resurrected credentials")
 	}
-	for _, tc := range []struct{ kind, want string }{{"group", "请在私聊"}, {"malformed", "凭据格式无效"}, {"rejected", "X 登录会话已失效"}} {
+	for _, tc := range []struct{ kind, want string }{{"group", "请在私聊"}, {"malformed", "凭据格式无效"}, {"rejected", "登录会话已失效"}} {
 		t.Run(tc.kind, func(t *testing.T) {
 			_, update, encoded := accountFixture(t)
 			update.ID = 456

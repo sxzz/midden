@@ -15,11 +15,14 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	pb "monitor/api/adapter/v1"
+	"monitor/internal/adapter"
 	"monitor/internal/credentials"
 	"monitor/internal/telegram"
 )
 
 type accountImport struct {
+	FlowID     string `json:"flow_id,omitempty"`
+	AdapterID  string `json:"adapter_id,omitempty"`
 	ID         string `json:"id,omitempty"`
 	Name       string `json:"name,omitempty"`
 	Ciphertext []byte `json:"ciphertext,omitempty"`
@@ -44,12 +47,33 @@ func (s *Service) prepareUpdate(u telegram.Update, tenant, channel, username str
 		if len(fields) > 0 && strings.Split(fields[0], "@")[0] == "/account_add" {
 			a := &accountImport{}
 			envelope.AccountImport = a
+			selected := s
+			if len(fields) > 1 && strings.HasPrefix(fields[1], "@") {
+				a.AdapterID = strings.TrimPrefix(fields[1], "@")
+				fields = append(fields[:1], fields[2:]...)
+				var e error
+				selected, e = s.forAdapter(a.AdapterID)
+				if e != nil {
+					a.Error = "Adapter 不可用。"
+					selected = nil
+				}
+			} else if len(s.Adapters) == 1 {
+				a.AdapterID = s.adapterIDs()[0]
+				selected, _ = s.forAdapter(a.AdapterID)
+			} else if len(s.Adapters) > 1 {
+				if len(fields) > 1 {
+					a.Error = "请先选择添加账号的平台。"
+				}
+				selected = nil
+			}
+
 			// Replace all user-controlled text/entity fields, including malformed/group input.
 			m.Text, m.Caption, m.Entities, m.CaptionEntities = "/account_add", "", nil, nil
 			envelope.Message = &m
 			if len(fields) > 1 && m.Chat.Type == "private" {
 				switch {
-				case s.Vault == nil || !s.AdapterTLS:
+				case selected == nil:
+				case selected.Vault == nil || !selected.AdapterTLS:
 					a.Error = "个人账号接入尚未配置，请联系服务管理员。"
 				default:
 					c := &pb.Credential{Data: []byte(fields[1])}
@@ -59,7 +83,7 @@ func (s *Service) prepareUpdate(u telegram.Update, tenant, channel, username str
 					} else {
 						a.Name = strings.Join(fields[2:], " ")
 						if a.Name == "" {
-							a.Name = "X 账号"
+							a.Name = "采集账号"
 						}
 						if len(a.Name) > 100 {
 							a.Error = "账号名称过长，请缩短名称后重试。"
@@ -83,22 +107,57 @@ func (s *Service) prepareUpdate(u telegram.Update, tenant, channel, username str
 }
 
 func (s *Service) commandAccountAdd(ctx context.Context, r *commandRequest) error {
+	if len(s.Adapters) > 0 {
+		id := strings.TrimPrefix(r.Argument, "@")
+		if r.AccountImport != nil {
+			id = r.AccountImport.AdapterID
+			if r.AccountImport.Error != "" {
+				r.Text = r.AccountImport.Error
+				r.Buttons = telegram.Keyboard{{{Text: "重新添加", Data: "/account_add"}}}
+				return s.finishAccountDialog(ctx, r)
+			}
+		}
+		if id == "" && len(s.Adapters) == 1 {
+			id = s.adapterIDs()[0]
+		}
+		scoped, e := s.forAdapter(id)
+		if e != nil {
+			r.Text = "请选择添加账号的平台。"
+			r.Buttons = nil
+			for _, id := range s.adapterIDs() {
+				scoped, _ := s.forAdapter(id)
+				p, err := scoped.defaultProvider(ctx, "session")
+				if err != nil || !adapter.Supports(p, adapter.CredentialPrepare, 1, 0) || !adapter.Supports(p, adapter.ConnectionCheck, 1, 0) {
+					continue
+				}
+				r.Buttons = append(r.Buttons, []telegram.Button{{Text: adapterDisplayName(s.Adapters[id].Descriptor), Data: "/account_add @" + id}})
+			}
+			return nil
+		}
+		if e = scoped.commandAccountAdd(ctx, r); e != nil {
+			return e
+		}
+		return nil
+	}
+
 	r.Buttons = nil
 	a := r.AccountImport
 	if a == nil || (a.Error == "" && len(a.Ciphertext) == 0) {
-		r.Buttons = telegram.Keyboard{{{Text: "返回账号列表", Data: "/account"}}}
-		p, err := s.defaultProvider(ctx, "session")
-		if err != nil {
-			r.Text = "当前 Adapter 不支持添加账号。"
-			return nil
-		}
-		r.Text = "用法：/account_add <凭据> [账号名称]\n" + p.CredentialHelp + " 仅限私聊。验证通过后可用 /account 选择账号。"
-		return nil
+		return s.beginAccountDialog(ctx, r)
 	}
 	if a.Error != "" {
 		r.Text = a.Error
-		return nil
+		return s.finishAccountDialog(ctx, r)
 	}
+	// Finish only this prompt; a newer platform selection remains active.
+	if err := s.finishAccountDialog(ctx, r); err != nil {
+		return err
+	}
+	d, err := s.descriptor(ctx)
+	if err != nil {
+		return err
+	}
+	r.Buttons = telegram.Keyboard{{{Text: "重新添加", Data: "/account_add @" + d.AdapterId}}}
 	// Retry after a crash must not replace credentials or resurrect a revoked connection.
 	var exists bool
 	if err := s.DB.Tx(ctx, r.Task.Tenant, func(tx pgx.Tx) error {
@@ -120,13 +179,13 @@ func (s *Service) commandAccountAdd(ctx context.Context, r *commandRequest) erro
 			case codes.InvalidArgument:
 				r.Text = "凭据格式无效，请按账号添加说明重试。"
 			case codes.Unauthenticated:
-				r.Text = "X 登录会话已失效，请重新登录 X 后添加新的 Cookie。"
+				r.Text = "登录会话已失效，请重新登录对应平台后更新凭据。"
 			case codes.PermissionDenied:
-				r.Text = "X 拒绝了账号访问，请先在浏览器中确认账号状态。"
+				r.Text = "平台拒绝了账号访问，请先在浏览器中确认账号状态。"
 			case codes.FailedPrecondition, codes.Unimplemented:
-				r.Text = "账号添加失败：X 账号验证接口暂不兼容，请联系管理员。"
+				r.Text = "账号添加失败：账号验证接口暂不兼容，请联系管理员。"
 			case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
-				r.Text = "账号添加失败：X 服务暂时不可用或请求受限，请稍后重试。"
+				r.Text = "账号添加失败：平台服务暂时不可用或请求受限，请稍后重试。"
 			default:
 				r.Text = "账号添加失败：服务暂时无法处理，请稍后重试。"
 			}

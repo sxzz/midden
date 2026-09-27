@@ -49,6 +49,7 @@ type Sender interface {
 }
 
 type Service struct {
+	Adapters      map[string]AdapterBinding
 	Descriptor    *pb.DescribeResponse
 	EntitySchemas map[string]adapter.EntitySchema
 	Vault         *credentials.Vault
@@ -111,6 +112,30 @@ func (s *Service) providerVisibility(ctx context.Context, id string) (string, er
 }
 
 func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureInput) (out domain.Job, err error) {
+	if len(s.Adapters) > 0 {
+		var scoped *Service
+		if in.RefreshID != "" {
+			var id string
+			err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
+				return tx.QueryRow(ctx, "SELECT adapter_id FROM tenant_archives WHERE archive_id=$1", in.RefreshID).Scan(&id)
+			})
+			if err != nil {
+				return out, err
+			}
+			scoped, err = s.forAdapter(id)
+		} else {
+			scoped, err = s.forURL(ctx, in.URL)
+		}
+		if err != nil {
+			return out, err
+		}
+		return scoped.Submit(ctx, tenant, in)
+	}
+	desc, err := s.descriptor(ctx)
+	if err != nil {
+		return out, err
+	}
+
 	if in.ConnectionID != "" {
 		id, e := uuid.Parse(in.ConnectionID)
 		if e != nil {
@@ -205,7 +230,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if in.Input == "" {
 			in.Input = in.URL
 		}
-		fingerprint := store.Hash(target.Platform + "|" + target.Kind + "|" + target.ObjectScope + "|" + target.ExternalID + "|" + in.ProviderID + "|" + scope + "|" + in.RefreshID)
+		fingerprint := store.Hash(desc.AdapterId + "|" + target.Platform + "|" + target.Kind + "|" + target.ObjectScope + "|" + target.ExternalID + "|" + in.ProviderID + "|" + scope + "|" + in.RefreshID)
 		var existing, f string
 		e = tx.QueryRow(ctx, `SELECT capture_id,fingerprint FROM submissions WHERE tenant_id=$1 AND idem_key=$2`, tenant, in.Key).Scan(&existing, &f)
 		if e == nil {
@@ -250,7 +275,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if e = tx.QueryRow(ctx, `SELECT id FROM archives WHERE id=$1 FOR UPDATE`, aid).Scan(&aid); e != nil {
 			return e
 		}
-		tag, e := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,connection_id) SELECT $1,$2,$3,nullif($4,'')::uuid WHERE $5='' OR $5=$2::uuid::text ON CONFLICT DO NOTHING`, tenant, aid, in.ProviderID, in.ConnectionID, in.RefreshID)
+		tag, e := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,connection_id,adapter_id) SELECT $1,$2,$3,nullif($4,'')::uuid,$6 WHERE $5='' OR $5=$2::uuid::text ON CONFLICT DO NOTHING`, tenant, aid, in.ProviderID, in.ConnectionID, in.RefreshID, desc.AdapterId)
 		if e != nil {
 			return e
 		}
@@ -268,7 +293,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		}
 
 		var cid string
-		e = tx.QueryRow(ctx, `SELECT id FROM captures WHERE archive_id=$1 AND provider_id=$2 AND coalesce(connection_id::text,'')=$3 AND state IN('queued','downloading')`, aid, in.ProviderID, in.ConnectionID).Scan(&cid)
+		e = tx.QueryRow(ctx, `SELECT id FROM captures WHERE archive_id=$1 AND provider_id=$2 AND coalesce(connection_id::text,'')=$3 AND adapter_id=$4 AND state IN('queued','downloading')`, aid, in.ProviderID, in.ConnectionID, desc.AdapterId).Scan(&cid)
 		if errors.Is(e, pgx.ErrNoRows) && in.RefreshID == "" {
 			e = tx.QueryRow(ctx, `SELECT r.capture_id FROM archives a JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1`, aid).Scan(&cid)
 		}
@@ -292,7 +317,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			if _, e = tx.Exec(ctx, `UPDATE tenants SET rate_count=$2,rate_start=$3 WHERE id=$1`, tenant, count+1, start); e != nil {
 				return e
 			}
-			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,archive_id,provider_id,scope,visibility,connection_id,refresh_from) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility, in.ConnectionID, in.RefreshID).Scan(&cid)
+			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,archive_id,provider_id,scope,visibility,connection_id,refresh_from,adapter_id) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid,$8) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility, in.ConnectionID, in.RefreshID, desc.AdapterId).Scan(&cid)
 			if e != nil {
 				return e
 			}

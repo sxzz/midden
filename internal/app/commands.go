@@ -54,9 +54,12 @@ func init() {
 		{"refresh", "重新抓取帖子", "<归档 ID>", true, false, validIDArgument, (*Service).commandRefresh},
 		{"delete", "删除", "<归档 ID>", true, false, validIDArgument, (*Service).commandDelete},
 		{"delete_all", "删除全部保存记录", "[confirm]", true, false, func(s string) bool { return s == "" || s == "confirm" }, (*Service).commandDeleteAll},
-		{"account_add", "添加 X 采集账号", "<Base64 Cookie> [名称]", true, true, func(string) bool { return true }, (*Service).commandAccountAdd},
+		{"account_add", "添加采集账号", "", true, true, func(string) bool { return true }, (*Service).commandAccountAdd},
+		{"account_cancel", "取消添加账号", "", true, true, noArgument, (*Service).commandAccountCancel},
 		{"account_delete", "删除采集账号", "[账号 ID]", true, true, validAccountDeleteArgument, (*Service).commandAccountDelete},
-		{"account", "选择采集账号", "", true, false, func(s string) bool { return s == "" || s == "public" || validIDArgument(s) }, (*Service).commandAccount},
+		{"account", "选择采集账号", "", true, false, func(s string) bool {
+			return s == "" || s == "public" || strings.HasPrefix(s, "public:") && validAdapterID(strings.TrimPrefix(s, "public:")) || validIDArgument(s)
+		}, (*Service).commandAccount},
 		{"usage", "查看存储用量", "", true, false, noArgument, (*Service).commandUsage},
 		{"help", "查看使用帮助", "", true, false, noArgument, (*Service).commandHelp},
 	}
@@ -119,14 +122,14 @@ func validCallback(data string) bool {
 	}
 	// Account callbacks only open instructions; credentials must arrive in a private message.
 	if c.Name == "account_add" {
-		return arg == ""
+		return arg == "" || strings.HasPrefix(arg, "@") && validAdapterID(strings.TrimPrefix(arg, "@"))
 	}
 	return c.Validate(arg)
 }
 
 func (s *Service) commandHelp(_ context.Context, r *commandRequest) error {
 	var b strings.Builder
-	b.WriteString("发送 X 帖子链接保存图文（每次最多 200 个）。")
+	b.WriteString("发送支持的平台链接保存内容（每次最多 200 个）。")
 	for _, c := range channelCommands {
 		if strings.HasPrefix(r.Origin.ChatID, "-") && c.PrivateOnly {
 			continue
@@ -253,7 +256,7 @@ func (s *Service) commandRetry(ctx context.Context, r *commandRequest) error {
 		r.Text = "归档不存在或无权限。"
 		return nil
 	}
-	connection, err := s.DefaultConnection(ctx, r.Task.Tenant)
+	connection, err := s.connectionForURL(ctx, r.Task.Tenant, url)
 	if err != nil {
 		return err
 	}
@@ -314,19 +317,19 @@ func (s *Service) submitMessageURLs(ctx context.Context, r *commandRequest, m *t
 		if m.Chat.ID < 0 {
 			return nil
 		}
-		r.Text = "请发送支持的 X 帖子 URL，或使用 /help。"
+		r.Text = "请发送支持的平台链接，或使用 /help。"
 		return nil
 	}
 	if len(targets) > 200 {
 		r.Text = "一次最多 200 个不同帖子，请拆分发送。"
 		return nil
 	}
-	connection, err := s.DefaultConnection(ctx, r.Task.Tenant)
-	if err != nil {
-		return err
-	}
 	for _, target := range targets {
-		_, err := s.Submit(ctx, r.Task.Tenant, domain.CaptureInput{Input: inputs[target.URL], URL: target.URL, ConnectionID: connection, Key: r.Task.ID + ":" + store.Hash(target.Platform+"|"+target.Kind+"|"+target.ObjectScope+"|"+target.ExternalID), Origin: r.Origin})
+		connection, err := s.connectionForURL(ctx, r.Task.Tenant, target.URL)
+		if err != nil {
+			return err
+		}
+		_, err = s.Submit(ctx, r.Task.Tenant, domain.CaptureInput{Input: inputs[target.URL], URL: target.URL, ConnectionID: connection, Key: r.Task.ID + ":" + store.Hash(target.Platform+"|"+target.Kind+"|"+target.ObjectScope+"|"+target.ExternalID), Origin: r.Origin})
 		if err != nil {
 			r.Text += submitMessage(err) + "\n输入：" + inputs[target.URL] + "\n\n"
 		}
@@ -342,7 +345,7 @@ func (s *Service) commandSave(ctx context.Context, r *commandRequest) error {
 			}
 		}
 	}
-	r.Text = "请在 /save 后附上 X 帖子链接，每次最多 200 个。群聊中请使用 /save@Bot用户名。"
+	r.Text = "请在 /save 后附上支持的平台链接，每次最多 200 个。群聊中请使用 /save@Bot用户名。"
 	return nil
 }
 

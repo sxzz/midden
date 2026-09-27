@@ -63,7 +63,7 @@ func (s *Service) Poll(ctx context.Context, c *telegram.Client, channel string) 
 			if err != nil {
 				return err
 			}
-			raw, deleteInput, err := s.prepareUpdate(u, identity.TenantID, channel, c.Username)
+			raw, deleteInput, err := s.prepareInteractiveUpdate(ctx, u, identity.TenantID, channel, c.Username)
 			if err != nil {
 				return err
 			}

@@ -108,11 +108,11 @@ func TestIndependentPlatformCapture(t *testing.T) {
 // Production core never interprets bundled platform protocols. Channel files
 // may provide platform-specific UX; SQL migrations retain deployed history.
 func TestCorePlatformBoundary(t *testing.T) {
-	files := []string{"service.go", "worker.go", "capture_scope.go", "discovery.go", "connections.go", "download.go", "media_cache.go", "entities.go", "sources.go", "../domain/domain.go", "../credentials/vault.go", "../../api/adapter/v1/adapter.proto"}
+	files := []string{"service.go", "worker.go", "capture_scope.go", "discovery.go", "connections.go", "account_dialog.go", "account_add.go", "telegram_accounts.go", "commands.go", "download.go", "media_cache.go", "entities.go", "sources.go", "../domain/domain.go", "../credentials/vault.go", "../../api/adapter/v1/adapter.proto"}
 	for _, file := range files {
 		data, e := os.ReadFile(file)
 		must(t, e)
-		for _, word := range []string{"fxtwitter", "x-session", "x.com", "twitter.com", "auth_token", "csrf_token", "SessionCredential"} {
+		for _, word := range []string{"fxtwitter", "x-session", "x.com", "twitter.com", "auth_token", "csrf_token", "SessionCredential", `"x"`, `"X"`, "X 帖子", "X 账号"} {
 			if strings.Contains(string(data), word) {
 				t.Errorf("%s contains platform-specific %s", file, word)
 			}

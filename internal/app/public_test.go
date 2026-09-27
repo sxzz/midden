@@ -282,7 +282,7 @@ func TestPublicSharing(t *testing.T) {
 	}
 	// RLS rejects fabricated links even when the attacker knows a private UUID.
 	e = db.Tx(ctx, b, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id) VALUES($1,$2,'fixture')`, b, pj.ArchiveID)
+		_, err := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,adapter_id) VALUES($1,$2,'fixture','fixture')`, b, pj.ArchiveID)
 		return err
 	})
 	if e == nil {

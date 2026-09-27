@@ -59,6 +59,13 @@ func (s *Service) defaultProvider(ctx context.Context, authentication string) (*
 
 func (s *Service) Resolve(ctx context.Context, raw string) (domain.Target, error) {
 	var target domain.Target
+	if len(s.Adapters) > 0 {
+		scoped, e := s.forURL(ctx, raw)
+		if e != nil {
+			return target, e
+		}
+		return scoped.Resolve(ctx, raw)
+	}
 	if err := domain.ValidateURL(raw); err != nil {
 		return target, domain.ErrInvalidTarget
 	}

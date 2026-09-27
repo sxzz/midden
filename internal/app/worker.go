@@ -165,6 +165,21 @@ func release(c *pgxpool.Conn, tenant string, slot int) {
 }
 
 func (s *Service) capture(ctx context.Context, t store.Task) error {
+	if len(s.Adapters) > 0 {
+		var id string
+		e := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, "SELECT adapter_id FROM captures WHERE id=$1", t.ID).Scan(&id)
+		})
+		if e != nil {
+			return e
+		}
+		scoped, e := s.forAdapter(id)
+		if e != nil {
+			return e
+		}
+		return scoped.capture(ctx, t)
+	}
+
 	c, slot, e := s.slot(ctx, t.Tenant)
 	if e != nil {
 		return e

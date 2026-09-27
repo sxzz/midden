@@ -74,6 +74,7 @@ export function createServer(
     describe: unary(async () => ({
       protocolVersion: "1.0",
       adapterId: "x",
+      displayName: "X",
       version: "0.4.0",
       hosts: [
         "x.com",

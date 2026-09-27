@@ -107,6 +107,9 @@ func TestTypeScriptTLSProtocol(t *testing.T) {
 	if e = Validate(d); e != nil {
 		t.Fatal(e)
 	}
+	if d.DisplayName != "X" {
+		t.Fatal("adapter display name lost over RPC")
+	}
 	if len(d.Providers) != 2 {
 		t.Fatal("missing session provider")
 	}

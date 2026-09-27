@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -80,6 +81,12 @@ func run() error {
 			return fmt.Errorf("invalid bot token format")
 		}
 
+		if os.Args[2] == "additional_adapters" {
+			var endpoints []map[string]json.RawMessage
+			if !strings.HasPrefix(strings.TrimSpace(value), "[") || json.Unmarshal([]byte(value), &endpoints) != nil {
+				return fmt.Errorf("invalid adapter configuration")
+			}
+		}
 		tag, err := db.Pool.Exec(ctx, `UPDATE config SET value=$2,updated_at=now() WHERE key=$1`, os.Args[2], value)
 		if err != nil {
 			return fmt.Errorf("invalid configuration value")

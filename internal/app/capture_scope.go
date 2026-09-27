@@ -35,7 +35,7 @@ func (s *Service) resolveCaptureScope(ctx context.Context, tx pgx.Tx, tenant, ci
 	if _, e = tx.Exec(ctx, `UPDATE captures SET archive_id=$2,visibility=$3 WHERE id=$1`, cid, target, visibility); e != nil {
 		return e
 	}
-	if _, e = tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,connection_id) SELECT $1,$2,$3,nullif($4,'')::uuid WHERE EXISTS(SELECT FROM tenant_archives WHERE archive_id=$5) ON CONFLICT(tenant_id,archive_id) DO UPDATE SET provider_id=excluded.provider_id,connection_id=excluded.connection_id`, tenant, target, provider, connection, savedSource); e != nil {
+	if _, e = tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,connection_id,adapter_id) SELECT $1,$2,$3,nullif($4,'')::uuid,(SELECT adapter_id FROM captures WHERE id=$6) WHERE EXISTS(SELECT FROM tenant_archives WHERE archive_id=$5) ON CONFLICT(tenant_id,archive_id) DO UPDATE SET provider_id=excluded.provider_id,connection_id=excluded.connection_id,adapter_id=excluded.adapter_id`, tenant, target, provider, connection, savedSource, cid); e != nil {
 		return e
 	}
 	var within bool

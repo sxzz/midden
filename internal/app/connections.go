@@ -186,6 +186,14 @@ func validateCaptureConnection(ctx context.Context, tx pgx.Tx, cid string) error
 }
 
 func (s *Service) CheckConnection(ctx context.Context, tenant, id string) error {
+	if len(s.Adapters) > 0 {
+		scoped, e := s.forConnection(ctx, tenant, id)
+		if e != nil {
+			return e
+		}
+		return scoped.CheckConnection(ctx, tenant, id)
+	}
+
 	d, err := s.descriptor(ctx)
 	if err != nil {
 		return err
@@ -237,9 +245,13 @@ func (s *Service) markReauth(ctx context.Context, tenant, id string, revision in
 }
 
 func (s *Service) DefaultConnection(ctx context.Context, tenant string) (string, error) {
+	d, e := s.descriptor(ctx)
+	if e != nil {
+		return "", e
+	}
 	var id string
-	e := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT coalesce((SELECT default_connection_id::text FROM tenant_preferences),'')`).Scan(&id)
+	e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT coalesce((SELECT default_connection_id::text FROM tenant_preferences WHERE adapter_id=$1),'')`, d.AdapterId).Scan(&id)
 	})
 	return id, e
 }
