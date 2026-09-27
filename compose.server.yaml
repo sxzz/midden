@@ -1,0 +1,18 @@
+services:
+  postgres:
+    restart: unless-stopped
+    command: ["postgres", "-c", "shared_buffers=32MB", "-c", "work_mem=2MB"]
+  core:
+    environment:
+      GOMEMLIMIT: 128MiB
+    ports: !override
+      - "127.0.0.1:18080:8080"
+      - "127.0.0.1:19090:9090"
+  adapter:
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=192"
+  s3:
+    environment:
+      GOMEMLIMIT: 128MiB
+    ports: !override
+      - "127.0.0.1:18333:8333"
