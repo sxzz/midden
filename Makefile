@@ -1,4 +1,6 @@
-.PHONY: test integration build generate vet fmt fmt-go fmt-sql fmt-config
+.PHONY: dev test integration build generate vet fmt fmt-go fmt-sql fmt-config
+dev:
+	./scripts/dev.sh
 build:
 	go build -o bin/core ./cmd/core
 	npm ci --ignore-scripts
@@ -26,5 +28,5 @@ fmt-sql:
 	pg_format --no-extra-line --inplace internal/store/migrations/*.sql
 fmt-config:
 	uvx ruff@0.12.12 format scripts/configure-local-storage.py
-	go run mvdan.cc/sh/v3/cmd/shfmt@v3.12.0 -w scripts/test-integration.sh scripts/deploy.sh
+	go run mvdan.cc/sh/v3/cmd/shfmt@v3.12.0 -w scripts/test-integration.sh scripts/deploy.sh scripts/dev.sh
 	npx --yes prettier@3.6.2 --write compose.yaml compose.local.yaml compose.server.yaml docs/openapi.yaml .github/workflows/test.yml scripts/testdata/s3.json

@@ -59,12 +59,24 @@ Adapter 契约见 [架构文档](docs/architecture.md#adapter-协议与能力发
 
 公共 proto 只定义实体图、Schema 声明、资源引用和可选展示字段，不添加平台专属 message。新增实体类型在 Adapter 中定义 JSON Schema 2020-12，通过 Describe 声明，在 Provider 上声明 entity.graph 与支持的类型列表。Schema 使用内置定义与本地引用，不依赖外部 Schema 服务。Fetch 返回实体数据、图内关系和资源索引；核心无需增加平台字段或专用表。测试应覆盖 Schema 校验、实体身份与作用域隔离、历史快照、关系和关联资源；通用渠道展示不能解析平台 data。
 
-## 本地镜像构建
+## 本地开发部署
 
-生产 Compose 使用 GHCR 镜像。开发时可叠加 `compose.build.yaml`：
+按 README 初始化本地 Docker 服务后，使用：
+
+```sh
+./scripts/dev.sh          # Go 核心：增量编译、执行迁移、重启 core
+./scripts/dev.sh adapter  # TS Adapter：缓存构建、仅重启 adapter
+./scripts/dev.sh all      # 更新两者
+```
+
+核心使用宿主机 Go 编译缓存，针对 Docker 的 Linux 架构编译到忽略提交的 `.local/dev/bin`，通过 `compose.dev.yaml` 挂载到已有运行时镜像，不需要每次重建镜像。首次缺少运行时镜像时自动构建。数据库、对象存储和配置保持原样；本地服务须已启动。修改运行时镜像依赖时需重新构建 core 镜像。
+
+后续本地更新继续使用此脚本；手动运行 Compose 时包含 `-f compose.yaml -f compose.local.yaml -f compose.dev.yaml`，以保留二进制挂载。普通 Compose 配置不包含此开发挂载。
+
+完整镜像构建仍可使用：
 
 ```sh
 docker compose -f compose.yaml -f compose.local.yaml -f compose.build.yaml build core adapter
 ```
 
-GitHub Actions 在 main 测试通过后发布两个架构的镜像。服务器部署使用完整提交 SHA 标签，与迁移文件保持一致。
+生产 Compose 使用 GHCR 镜像。GitHub Actions 在 main 测试通过后发布两个架构的镜像。服务器部署使用完整提交 SHA 标签，与迁移文件保持一致。

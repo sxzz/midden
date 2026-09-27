@@ -1,0 +1,12 @@
+# Fast local Go builds; initialize the local stack before using scripts/dev.sh.
+services:
+  core:
+    image: midden-core:dev
+    volumes:
+      - ./.local/dev/bin:/usr/local/bin:ro
+  migrate:
+    image: midden-core:dev
+    volumes:
+      - ./.local/dev/bin:/usr/local/bin:ro
+  adapter:
+    image: midden-adapter:dev
