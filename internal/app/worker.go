@@ -345,7 +345,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		for _, v := range r.Resources {
 			var aid string
 			cacheKey := ""
-			if v.Kind == "video" && v.ImmutableKey != "" {
+			if v.ImmutableKey != "" {
 				mediaScope := scope
 				if visibility == "public" {
 					mediaScope = "public"

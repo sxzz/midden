@@ -38,15 +38,15 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 		return river.JobSnooze(time.Second)
 	}
 	defer release(c, t.ID, -1)
-	var cacheKey, cacheScope string
+	var cacheKey, cacheScope, accessScope string
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT cache_key,data_scope FROM assets WHERE id=$1`, t.ID).Scan(&cacheKey, &cacheScope)
+		return tx.QueryRow(ctx, `SELECT a.cache_key,a.data_scope,CASE WHEN c.visibility='public' THEN 'public' ELSE c.scope END FROM assets a JOIN captures c ON c.id=a.capture_id WHERE a.id=$1`, t.ID).Scan(&cacheKey, &cacheScope, &accessScope)
 	})
 	if e != nil {
 		return e
 	}
 	if cacheKey != "" {
-		e = c.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext($1),-2)`, cacheScope+cacheKey).Scan(&ok)
+		e = c.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext($1),-2)`, cacheScope+"|"+accessScope+"|"+cacheKey).Scan(&ok)
 		if e != nil {
 			return e
 		}
@@ -56,16 +56,16 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 		defer func() {
 			unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if _, err := c.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtext($1),-2)`, cacheScope+cacheKey); err != nil {
+			if _, err := c.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtext($1),-2)`, cacheScope+"|"+accessScope+"|"+cacheKey); err != nil {
 				c.Conn().Close(unlockCtx)
 			}
 		}()
-		hit, err := s.reuseMedia(ctx, t, cacheScope, cacheKey)
+		hit, err := s.reuseMedia(ctx, t, cacheScope, accessScope, cacheKey)
 		if err != nil || hit {
 			return err
 		}
 	}
-	var kind, source, state, key, cid, oid, visibility, dataScope, accessScope string
+	var kind, source, state, key, cid, oid, visibility, dataScope string
 	var reserved int64
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, t.Tenant); e != nil {
@@ -171,10 +171,31 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 	if _, e = f.Seek(0, 0); e != nil {
 		return e
 	}
-	if e = s.Blobs.Put(ctx, key, f, n, mime); e != nil {
-		return fmt.Errorf("object upload failed")
-	}
 	digest := hex.EncodeToString(h.Sum(nil))
+	// Serialize the existence check and upload across tenants sharing this scope.
+	// Keep the remote upload outside a database transaction.
+	hashKey := dataScope + "|" + accessScope + "|" + digest
+	if _, e = c.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1,2))`, hashKey); e != nil {
+		return e
+	}
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := c.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended($1,2))`, hashKey); err != nil {
+			c.Conn().Close(unlockCtx)
+		}
+	}()
+	var exists bool
+	if e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM blobs WHERE data_scope=$1 AND access_scope=$2 AND hash=$3)`, dataScope, accessScope, digest).Scan(&exists)
+	}); e != nil {
+		return e
+	}
+	if !exists {
+		if e = s.Blobs.Put(ctx, key, f, n, mime); e != nil {
+			return fmt.Errorf("object upload failed")
+		}
+	}
 	return s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, t.Tenant); e != nil {
 			return e
@@ -193,12 +214,12 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 			return e
 		}
 		var bid, bkey string
-		// The shared hash lock avoids updates to another tenant's immutable Blob row.
-		if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,2))`, dataScope+"|"+accessScope+"|"+digest); e != nil {
-			return e
-		}
 		e := tx.QueryRow(ctx, `SELECT id,object_key FROM blobs WHERE data_scope=$1 AND hash=$2 AND access_scope=$3`, dataScope, digest, accessScope).Scan(&bid, &bkey)
 		if errors.Is(e, pgx.ErrNoRows) {
+			if exists {
+				// Retention GC may have removed the cached Blob after the check.
+				return fmt.Errorf("cached media expired before attachment")
+			}
 			e = tx.QueryRow(ctx, `INSERT INTO blobs(tenant_id,visibility,hash,object_key,size,mime,access_scope) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,object_key`, t.Tenant, visibility, digest, key, n, mime, accessScope).Scan(&bid, &bkey)
 		}
 		if e != nil {

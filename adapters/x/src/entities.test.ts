@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { attachEntities } from "./entities.js";
+import { attachEntities, avatarImmutableKey } from "./entities.js";
 import { FetchResponse } from "./generated/api/adapter/v1/adapter.js";
 import { fetchPublic } from "./provider.js";
 import { createServer } from "node:http";
@@ -79,4 +79,30 @@ test("public provider retains exact response bytes before parsing", async () => 
   } finally {
     server.close();
   }
+});
+
+test("X avatar cache keys track the exact image URL and rendition", () => {
+  const url = "https://pbs.twimg.com/profile_images/900001/avatar_400x400.jpg";
+  const key = avatarImmutableKey(url);
+  assert.ok(key);
+  assert.equal(avatarImmutableKey(url), key);
+  for (const changed of [
+    url.replace("900001", "900002"),
+    url.replace("400x400", "normal"),
+    url + "?v=2",
+  ]) {
+    assert.notEqual(avatarImmutableKey(changed), key);
+  }
+  assert.equal(avatarImmutableKey("https://media.test/avatar.jpg"), "");
+  assert.equal(
+    avatarImmutableKey("https://pbs.twimg.com/profile_images/default.jpg"),
+    "",
+  );
+  assert.equal(avatarImmutableKey("invalid"), "");
+  const result = FetchResponse.fromPartial({ externalId: "900001" });
+  attachEntities(result, { author: { id: "123", avatar_url: url } }, {});
+  assert.equal(
+    result.resources.find((r) => r.purpose === "avatar")?.immutableKey,
+    key,
+  );
 });

@@ -169,6 +169,9 @@ func TestPublicSharing(t *testing.T) {
 	if n != 1 {
 		t.Fatal("public blob duplication", n)
 	}
+	if mem.puts.Load() != 1 {
+		t.Fatal("unchanged images uploaded again", mem.puts.Load())
+	}
 	for _, tenant := range []string{a, b} {
 		must(t, s.Collect(ctx, tenant, 0))
 		u, err := s.Usage(ctx, tenant)

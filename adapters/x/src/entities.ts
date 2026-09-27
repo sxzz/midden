@@ -10,6 +10,25 @@ function timestamp(value: unknown): string {
   return Number.isFinite(date.getTime()) ? date.toISOString() : "";
 }
 
+// X profile image paths identify a particular image and size, not the account.
+// Keep the exact URL (including query parameters); do not cache arbitrary hosts.
+export function avatarImmutableKey(value: string): string {
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol === "https:" &&
+      url.hostname === "pbs.twimg.com" &&
+      !url.username &&
+      !url.password &&
+      !url.port &&
+      /^\/profile_images\/\d+\/[^/]+$/.test(url.pathname)
+    ) {
+      return `x:avatar:${url.href}`;
+    }
+  } catch {}
+  return "";
+}
+
 // Normalized public profile fields only; account-view relationships remain in private raw responses.
 export function attachEntities(
   result: FetchResponse,
@@ -107,6 +126,7 @@ export function attachEntities(
           url: author.avatar_url,
           kind: "image",
           purpose: "avatar",
+          immutableKey: avatarImmutableKey(author.avatar_url),
         }),
       );
     }

@@ -12,15 +12,15 @@ import (
 
 // Reuse immutable provider media within its visibility and access scope.
 // The caller holds the media advisory lock until download or reuse completes.
-func (s *Service) reuseMedia(ctx context.Context, t store.Task, scope, key string) (bool, error) {
+func (s *Service) reuseMedia(ctx context.Context, t store.Task, scope, accessScope, key string) (bool, error) {
 	hit := false
 	err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
 		if err := lockTenant(ctx, tx, t.Tenant); err != nil {
 			return err
 		}
-		var state, cid string
+		var state, cid, kind string
 		var reserved int64
-		if err := tx.QueryRow(ctx, `SELECT state,capture_id,reserved_bytes FROM assets WHERE id=$1 FOR UPDATE`, t.ID).Scan(&state, &cid, &reserved); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT state,capture_id,reserved_bytes,kind FROM assets WHERE id=$1 FOR UPDATE`, t.ID).Scan(&state, &cid, &reserved, &kind); err != nil {
 			return err
 		}
 		if state != "pending" {
@@ -32,14 +32,18 @@ func (s *Service) reuseMedia(ctx context.Context, t store.Task, scope, key strin
 		}
 		var bid, hash string
 		var size int64
-		err := tx.QueryRow(ctx, `SELECT b.id,b.hash,b.size FROM assets a JOIN blobs b ON b.id=a.blob_id WHERE a.data_scope=$1 AND a.cache_key=$2 AND a.state='ready' LIMIT 1`, scope, key).Scan(&bid, &hash, &size)
+		err := tx.QueryRow(ctx, `SELECT b.id,b.hash,b.size FROM assets a JOIN blobs b ON b.id=a.blob_id WHERE a.data_scope=$1 AND a.cache_key=$2 AND a.state='ready' AND b.access_scope=$3 LIMIT 1`, scope, key, accessScope).Scan(&bid, &hash, &size)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		if size > s.Config.MaxVideoBytes {
+		limit := s.Config.MaxImageBytes
+		if kind == "video" {
+			limit = s.Config.MaxVideoBytes
+		}
+		if size > limit {
 			return &PermanentError{"media exceeds size limit"}
 		}
 		var counted bool
