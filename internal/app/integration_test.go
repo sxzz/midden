@@ -551,6 +551,6 @@ func (f *fakeSender) Media(ctx context.Context, chat string, aa []domain.Asset, 
 	return f.Send(ctx, chat, "album", 0)
 }
 
-func (f *fakeAdapter) CheckConnection(context.Context, *pb.CheckConnectionRequest, ...grpc.CallOption) (*pb.CheckConnectionResponse, error) {
-	return &pb.CheckConnectionResponse{AccountId: "123", Username: "fixture"}, nil
+func (f *fakeAdapter) CheckConnection(_ context.Context, r *pb.CheckConnectionRequest, _ ...grpc.CallOption) (*pb.CheckConnectionResponse, error) {
+	return &pb.CheckConnectionResponse{AccountId: store.Hash(string(r.GetCredential().GetData())), Username: "fixture"}, nil
 }

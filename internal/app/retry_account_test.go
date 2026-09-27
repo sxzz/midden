@@ -41,7 +41,7 @@ func TestFailedCaptureButtonUsesCurrentAccount(t *testing.T) {
 	cookie := &pb.Credential{Data: []byte("opaque-fixture-credential")}
 	old, err := s.ImportConnection(ctx, tenant, "", "old", cookie)
 	must(t, err)
-	next, err := s.ImportConnection(ctx, tenant, "", "new", cookie)
+	next, err := s.ImportConnection(ctx, tenant, "", "new", &pb.Credential{Data: []byte("new-account")})
 	must(t, err)
 	for i, selection := range []string{"public", next} {
 		job, err := s.Submit(ctx, tenant, domain.CaptureInput{URL: []string{"https://x.com/i/status/99000201", "https://x.com/i/status/99000202"}[i], ConnectionID: old})

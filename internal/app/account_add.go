@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	pb "monitor/api/adapter/v1"
 	"monitor/internal/adapter"
 	"monitor/internal/credentials"
+	"monitor/internal/domain"
 	"monitor/internal/telegram"
 )
 
@@ -159,19 +161,17 @@ func (s *Service) commandAccountAdd(ctx context.Context, r *commandRequest) erro
 	}
 	r.Buttons = telegram.Keyboard{{{Text: "重新添加", Data: "/account_add @" + d.AdapterId}}}
 	// Retry after a crash must not replace credentials or resurrect a revoked connection.
-	var exists bool
-	if err := s.DB.Tx(ctx, r.Task.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM connections WHERE id=$1)`, a.ID).Scan(&exists)
-	}); err != nil {
-		return err
+	connectionID, lookupErr := s.importedConnection(ctx, r.Task.Tenant, a.ID)
+	if lookupErr != nil && !errors.Is(lookupErr, domain.ErrNotFound) && !errors.Is(lookupErr, pgx.ErrNoRows) {
+		return lookupErr
 	}
-	if !exists {
+	if lookupErr != nil {
 		c, err := s.Vault.Open(r.Task.Tenant, a.ID, a.Ciphertext)
 		if err != nil {
 			r.Text = "无法读取账号会话，请重新添加。"
 			return nil
 		}
-		_, err = s.importConnection(ctx, r.Task.Tenant, a.ID, a.Name, c, true)
+		connectionID, err = s.importConnection(ctx, r.Task.Tenant, a.ID, a.Name, c, true)
 		if err != nil {
 			// Adapter and SQL errors may carry arbitrary detail; never echo them to Telegram.
 			slog.Warn("account verification failed", "code", status.Code(err).String())
@@ -194,7 +194,7 @@ func (s *Service) commandAccountAdd(ctx context.Context, r *commandRequest) erro
 	}
 	var state, name, username, accountID string
 	if err := s.DB.Tx(ctx, r.Task.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT state,name,coalesce(username,''),coalesce(account_id,'') FROM connections WHERE id=$1`, a.ID).Scan(&state, &name, &username, &accountID)
+		return tx.QueryRow(ctx, `SELECT state,name,coalesce(username,''),coalesce(account_id,'') FROM connections WHERE id=$1`, connectionID).Scan(&state, &name, &username, &accountID)
 	}); err != nil {
 		return err
 	}
@@ -203,7 +203,7 @@ func (s *Service) commandAccountAdd(ctx context.Context, r *commandRequest) erro
 		return nil
 	}
 	r.Text = "账号已添加：" + connectionLabel(name, username, accountID) + "。点击下方按钮用于后续保存，或使用 /account 切换来源。"
-	r.Buttons = telegram.Keyboard{{{Text: "使用此账号", Data: "/account " + a.ID}}}
+	r.Buttons = telegram.Keyboard{{{Text: "使用此账号", Data: "/account " + connectionID}}}
 	return nil
 }
 

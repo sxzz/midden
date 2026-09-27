@@ -163,7 +163,7 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	if original.Text != "same content" {
 		t.Fatal("private refresh overwrote public content")
 	}
-	second, e := s.ImportConnection(ctx, tenants[1], "", "second", secret)
+	second, e := s.ImportConnection(ctx, tenants[1], "", "second", &pb.Credential{Data: []byte("second-account")})
 	must(t, e)
 	another := complete(tenants[1], domain.CaptureInput{URL: "https://x.com/a/status/900111", ConnectionID: second})
 	if another.ArchiveID == private.ArchiveID {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,6 +30,15 @@ func (s *Service) importConnection(ctx context.Context, tenant, id, name string,
 	if !s.AdapterTLS || s.Vault == nil {
 		return "", fmt.Errorf("account connections require TLS and credential encryption")
 	}
+	if createOnly && id != "" {
+		saved, e := s.importedConnection(ctx, tenant, id)
+		if e == nil {
+			return saved, nil
+		}
+		if !errors.Is(e, domain.ErrNotFound) && !errors.Is(e, pgx.ErrNoRows) {
+			return "", e
+		}
+	}
 	d, e := s.descriptor(ctx)
 	if e != nil {
 		return "", e
@@ -37,7 +47,7 @@ func (s *Service) importConnection(ctx context.Context, tenant, id, name string,
 	if id != "" {
 		var savedAdapter, savedProvider string
 		err := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-			return tx.QueryRow(ctx, "SELECT adapter_id,provider_id FROM connections WHERE id=$1", id).Scan(&savedAdapter, &savedProvider)
+			return tx.QueryRow(ctx, "SELECT adapter_id,provider_id FROM connections WHERE id=$1 AND tenant_id=$2", id, tenant).Scan(&savedAdapter, &savedProvider)
 		})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) && !errors.Is(err, domain.ErrNotFound) {
 			return "", err
@@ -95,24 +105,60 @@ func (s *Service) importConnection(ctx context.Context, tenant, id, name string,
 	if e != nil {
 		return "", fmt.Errorf("account verification failed: %w", e)
 	}
+	if result == nil || strings.TrimSpace(result.AccountId) == "" {
+		return "", fmt.Errorf("adapter returned no verified account identity")
+	}
+	requestID := id
 	e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, tenant); e != nil {
 			return e
 		}
+
+		if createOnly {
+			var saved string
+			err := tx.QueryRow(ctx, "SELECT connection_id FROM connection_imports WHERE request_id=$1 AND tenant_id=$2", requestID, tenant).Scan(&saved)
+			if err == nil {
+				id = saved
+				return nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+		var existingID string
+		err := tx.QueryRow(ctx, `SELECT id FROM connections WHERE adapter_id=$1 AND provider_id=$2 AND account_id=$3 AND state<>'revoked' AND tenant_id=$4`, d.AdapterId, p.Id, result.AccountId, tenant).Scan(&existingID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if existingID != "" {
+			id = existingID
+		}
+		var oldAccount string
+		err = tx.QueryRow(ctx, "SELECT coalesce(account_id,'') FROM connections WHERE id=$1 AND tenant_id=$2", id, tenant).Scan(&oldAccount)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if oldAccount != "" && oldAccount != result.AccountId {
+			return ErrConnection
+		}
 		if _, e := tx.Exec(ctx, `INSERT INTO account_credentials(id,tenant_id,ciphertext) VALUES($1,$2,$3)`, ref, tenant, encrypted); e != nil {
 			return e
 		}
-		conflict := " ON CONFLICT(id) DO UPDATE SET name=excluded.name,account_id=excluded.account_id,username=excluded.username,state='ready',credential_ref=excluded.credential_ref,revision=connections.revision+1 WHERE connections.tenant_id=$2"
-		if createOnly {
-			conflict = " ON CONFLICT(id) DO NOTHING"
-		}
-		tag, e := tx.Exec(ctx, `INSERT INTO connections(id,tenant_id,adapter_id,provider_id,name,account_id,state,credential_ref,username) VALUES($1,$2,$7,$8,$3,$4,'ready',$5,$6)`+conflict, id, tenant, name, result.AccountId, ref, result.Username, d.AdapterId, p.Id)
+		tag, e := tx.Exec(ctx, `INSERT INTO connections(id,tenant_id,adapter_id,provider_id,name,account_id,state,credential_ref,username) VALUES($1,$2,$7,$8,$3,$4,'ready',$5,$6)
+   ON CONFLICT(id) DO UPDATE SET name=excluded.name,account_id=excluded.account_id,username=excluded.username,state='ready',credential_ref=excluded.credential_ref,revision=connections.revision+1
+   WHERE connections.tenant_id=$2 AND connections.adapter_id=$7 AND connections.provider_id=$8`, id, tenant, name, result.AccountId, ref, result.Username, d.AdapterId, p.Id)
 		if e != nil {
 			return e
 		}
-		if tag.RowsAffected() != 1 && !createOnly {
+		if tag.RowsAffected() != 1 {
 			return domain.ErrNotFound
 		}
+		if createOnly {
+			if _, e = tx.Exec(ctx, "INSERT INTO connection_imports(tenant_id,request_id,connection_id) VALUES($1,$2,$3)", tenant, requestID, id); e != nil {
+				return e
+			}
+		}
+
 		_, e = tx.Exec(ctx, `DELETE FROM account_credentials c WHERE c.tenant_id=$1 AND NOT EXISTS(SELECT FROM connections n WHERE n.credential_ref=c.id)`, tenant)
 		return e
 	})
@@ -252,6 +298,14 @@ func (s *Service) DefaultConnection(ctx context.Context, tenant string) (string,
 	var id string
 	e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT coalesce((SELECT default_connection_id::text FROM tenant_preferences WHERE adapter_id=$1),'')`, d.AdapterId).Scan(&id)
+	})
+	return id, e
+}
+
+func (s *Service) importedConnection(ctx context.Context, tenant, request string) (string, error) {
+	var id string
+	e := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT connection_id FROM connection_imports WHERE request_id=$1 AND tenant_id=$2 UNION ALL SELECT id FROM connections WHERE id=$1 AND tenant_id=$2 LIMIT 1`, request, tenant).Scan(&id)
 	})
 	return id, e
 }
