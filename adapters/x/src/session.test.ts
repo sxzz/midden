@@ -4,7 +4,7 @@ import { status } from "@grpc/grpc-js";
 import { accountTransport, checkSession } from "./session.js";
 
 const credential = { authToken: "a".repeat(40), csrfToken: "b".repeat(64) };
-const viewer = (id = "1657726063806660609") => ({
+const viewer = (id = "900000000000000002") => ({
   data: {
     viewer: {
       is_tfe_restricted_session: false,
@@ -40,7 +40,7 @@ test("Viewer verifies the session owner directly, preserving large string IDs", 
     },
   );
   assert.deepEqual(result, {
-    accountId: "1657726063806660609",
+    accountId: "900000000000000002",
     username: "fixture",
   });
   assert.equal(calls, 1);

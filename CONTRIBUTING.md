@@ -49,7 +49,7 @@ Provider 必须声明支持的 public/private，并在结果中返回实际可�
 
 图文结果组织参考 [nonebot-plugin-parser-m](https://github.com/LoCCai/nonebot-plugin-parser-m) 的 `BaseParser` / `ParseResult`。TS 实现使用公共 FxTwitter API 与可选账号 Provider，由核心统一下载和持久化媒体。Atmosphere 源码版本及本地补丁记录在 `third_party/atmosphere/UPSTREAM.md`。
 
-FxTwitter 响应结构见其 [API v2 文档](https://docs.fxembed.com/api/twitter/operations/2statusid/)。正文必须匹配请求的帖子 ID；测试使用本地固定响应，不依赖在线服务。
+FxTwitter 响应结构见其 [API v2 文档](https://docs.fxembed.com/api/twitter/operations/2statusid/)。正文必须匹配请求的帖子 ID；测试使用本地固定响应，不依赖在线服务。Fixture 使用合成作者、帖子 ID 和内容，媒体地址使用 `.test` 域名；不要提交真实用户资料、帖子链接、Cookie 或诊断响应。
 
 ## 协议变更
 

@@ -45,7 +45,7 @@ test("profile metadata excludes account view state and never invents edit times"
   ]);
   const raw = {
     edit_control: {
-      edit_tweet_ids: ["2100268882581971043", "2102701165029085559"],
+      edit_tweet_ids: ["900000000000000001", "900000000000000002"],
       editable_until_msecs: "9999999999999",
     },
   };

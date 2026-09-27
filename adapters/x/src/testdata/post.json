@@ -1,46 +1,46 @@
 {
   "status": {
     "type": "status",
-    "url": "https://x.com/rocio_tofu/status/2103502762822795572",
-    "id": "2103502762822795572",
-    "text": "来云南要吃菌子嘛？",
+    "url": "https://x.com/i/web/status/900000000000000001",
+    "id": "900000000000000001",
+    "text": "这是一条合成测试帖子。",
     "raw_text": {
-      "text": "来云南要吃菌子嘛？ https://t.co/ycv6n5kIWz",
-      "display_text_range": [0, 9],
+      "text": "这是一条合成测试帖子。 https://example.test/link/fixture",
+      "display_text_range": [0, 11],
       "facets": [
         {
           "type": "media",
           "indices": [10, 33],
-          "id": "2103502752232132608",
-          "display": "pic.x.com/ycv6n5kIWz",
-          "original": "https://t.co/ycv6n5kIWz",
-          "replacement": "https://x.com/rocio_tofu/status/2103502762822795572/photo/1"
+          "id": "900000000000000002",
+          "display": "media.test/photo",
+          "original": "https://example.test/link/fixture",
+          "replacement": "https://x.com/i/web/status/900000000000000001/photo/1"
         }
       ]
     },
     "author": {
-      "screen_name": "rocio_tofu",
-      "url": "https://x.com/rocio_tofu",
-      "id": "1004911053971419136",
-      "followers": 5785,
-      "following": 4521,
-      "likes": 179994,
-      "media_count": 2297,
-      "statuses": 35973,
-      "name": "露华",
-      "description": "深圳│原 粥 铁 洛│喜欢柚木普│鈴木勝☪️单推│中文＆English＆Español＆日本語を勉強中",
+      "screen_name": "fixture_user",
+      "url": "https://example.test/profile/fixture",
+      "id": "900000000000000003",
+      "followers": 12,
+      "following": 3,
+      "likes": 24,
+      "media_count": 2,
+      "statuses": 5,
+      "name": "测试作者",
+      "description": "合成资料，仅用于离线测试。",
       "raw_description": {
-        "text": "深圳│原 粥 铁 洛│喜欢柚木普│鈴木勝☪️单推│中文＆English＆Español＆日本語を勉強中",
+        "text": "合成资料，仅用于离线测试。",
         "facets": []
       },
-      "location": "",
-      "banner_url": "https://pbs.twimg.com/profile_banners/1004911053971419136/1750125900",
-      "avatar_url": "https://pbs.twimg.com/profile_images/2076318553398190080/_7ChtJCL_200x200.jpg",
-      "joined": "Fri Jun 08 02:20:40 +0000 2018",
+      "location": "示例地点",
+      "banner_url": "https://media.test/banner.jpg",
+      "avatar_url": "https://media.test/avatar.jpg",
+      "joined": "Thu Jan 01 00:00:00 +0000 2026",
       "protected": false,
       "website": {
-        "url": "https://ngl.link/siriuswmo1",
-        "display_url": "ngl.link/siriuswmo1"
+        "url": "https://example.test",
+        "display_url": "example.test"
       },
       "verification": {
         "verified": true,
@@ -49,16 +49,16 @@
       },
       "type": "profile"
     },
-    "replies": 17,
-    "reposts": 0,
-    "likes": 81,
-    "bookmarks": 6,
-    "quotes": 0,
+    "replies": 1,
+    "reposts": 1,
+    "likes": 1,
+    "bookmarks": 1,
+    "quotes": 1,
     "embed_card": "summary_large_image",
-    "created_at": "Fri Sep 25 15:11:54 +0000 2026",
-    "created_timestamp": 1790349114,
+    "created_at": "Thu Jan 01 00:00:00 +0000 2026",
+    "created_timestamp": 1767225600,
     "possibly_sensitive": false,
-    "views": 973,
+    "views": 1,
     "is_note_tweet": false,
     "community_note": null,
     "lang": "ja",
@@ -67,8 +67,8 @@
       "all": [
         {
           "type": "photo",
-          "id": "2103502752232132608",
-          "url": "https://pbs.twimg.com/media/HTEkm7raUAAtnvf.jpg?name=orig",
+          "id": "900000000000000002",
+          "url": "https://media.test/photo.jpg?name=orig",
           "width": 1536,
           "height": 2048
         }
@@ -76,8 +76,8 @@
       "photos": [
         {
           "type": "photo",
-          "id": "2103502752232132608",
-          "url": "https://pbs.twimg.com/media/HTEkm7raUAAtnvf.jpg?name=orig",
+          "id": "900000000000000002",
+          "url": "https://media.test/photo.jpg?name=orig",
           "width": 1536,
           "height": 2048
         }
@@ -88,28 +88,28 @@
   },
   "thread": null,
   "author": {
-    "screen_name": "rocio_tofu",
-    "url": "https://x.com/rocio_tofu",
-    "id": "1004911053971419136",
-    "followers": 5785,
-    "following": 4521,
-    "likes": 179994,
-    "media_count": 2297,
-    "statuses": 35973,
-    "name": "露华",
-    "description": "深圳│原 粥 铁 洛│喜欢柚木普│鈴木勝☪️单推│中文＆English＆Español＆日本語を勉強中",
+    "screen_name": "fixture_user",
+    "url": "https://example.test/profile/fixture",
+    "id": "900000000000000003",
+    "followers": 12,
+    "following": 3,
+    "likes": 24,
+    "media_count": 2,
+    "statuses": 5,
+    "name": "测试作者",
+    "description": "合成资料，仅用于离线测试。",
     "raw_description": {
-      "text": "深圳│原 粥 铁 洛│喜欢柚木普│鈴木勝☪️单推│中文＆English＆Español＆日本語を勉強中",
+      "text": "合成资料，仅用于离线测试。",
       "facets": []
     },
-    "location": "",
-    "banner_url": "https://pbs.twimg.com/profile_banners/1004911053971419136/1750125900",
-    "avatar_url": "https://pbs.twimg.com/profile_images/2076318553398190080/_7ChtJCL_200x200.jpg",
-    "joined": "Fri Jun 08 02:20:40 +0000 2018",
+    "location": "示例地点",
+    "banner_url": "https://media.test/banner.jpg",
+    "avatar_url": "https://media.test/avatar.jpg",
+    "joined": "Thu Jan 01 00:00:00 +0000 2026",
     "protected": false,
     "website": {
-      "url": "https://ngl.link/siriuswmo1",
-      "display_url": "ngl.link/siriuswmo1"
+      "url": "https://example.test",
+      "display_url": "example.test"
     },
     "verification": {
       "verified": true,

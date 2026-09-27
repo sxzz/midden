@@ -245,7 +245,7 @@ type GraphQLUser = {
   affiliates_highlighted_label: {
     label?: {
       badge?: {
-        url?: string; // "https://pbs.twimg.com/semantic_core_img/1290392753013002240/mWq1iE5L?format=png&name=orig"
+        url?: string; // "https://media.test/fixture"
       };
       description?: string; // "United States government organization"
       url?: {
@@ -255,10 +255,10 @@ type GraphQLUser = {
     };
   };
   avatar?: {
-    image_url: string; // "https://pbs.twimg.com/profile_images/1891737564417347584/E3hSpDqx_normal.jpg"
+    image_url: string; // "https://media.test/fixture"
   };
   banner?: {
-    image_url: string; // "https://pbs.twimg.com/profile_banners/783214/1690175171"
+    image_url: string; // "https://media.test/fixture"
   };
   business_account?: {
     affiliates_count: number; // 9
@@ -285,7 +285,7 @@ type GraphQLUser = {
         urls?: {
           display_url: string; // "about.twitter.com",
           expanded_url: string; // "https://about.twitter.com/",
-          url: string; // "https://t.co/DAtOo6uuHk",
+          url: string; // "https://media.test/fixture",
           indices: [0, 23];
         }[];
       };
@@ -303,8 +303,8 @@ type GraphQLUser = {
     normal_followers_count: number; // 65669107,
     pinned_tweet_ids_str: string[]; // Array of tweet ids, usually one. Empty if no pinned tweet
     possibly_sensitive: boolean; // false,
-    profile_banner_url: string; // "https://pbs.twimg.com/profile_banners/783214/1646075315",
-    profile_image_url_https?: string; // "https://pbs.twimg.com/profile_images/1488548719062654976/u6qfBBkF_normal.jpg",
+    profile_banner_url: string; // "https://media.test/fixture",
+    profile_image_url_https?: string; // "https://media.test/fixture",
     profile_interstitial_type: string; // "",
     protected?: boolean; // false
     screen_name: string; // "Twitter",
@@ -343,7 +343,7 @@ type GraphQLUser = {
     protected: boolean; // false
   };
   professional: {
-    rest_id: string; // "1503055759638159366",
+    rest_id: string; // "900000000000000001",
     professional_type: string; // "Creator",
     category: [
       {
@@ -400,24 +400,24 @@ type GraphQLUser = {
 };
 
 type GraphQLTwitterStatusLegacy = {
-  id_str: string; // "1674824189176590336"
+  id_str: string; // "900000000000000001"
   created_at: string; // "Tue Sep 14 20:00:00 +0000 2021"
   display_text_range: [number, number]; // [20, 67]
-  conversation_id_str: string; // "1674824189176590336"
+  conversation_id_str: string; // "900000000000000001"
   bookmark_count: number; // 0
   bookmarked: boolean; // false
   favorite_count: number; // 28
   full_text: string; // "This is a test tweet"
   user_id_str?: string;
   in_reply_to_screen_name: string; // "username"
-  in_reply_to_status_id_str: string; // "1674824189176590336"
+  in_reply_to_status_id_str: string; // "900000000000000001"
   in_reply_to_user_id_str: string; // "783214"
   is_quote_status: boolean; // false
   quote_count: number; // 39
-  quoted_status_id_str: string; // "1674824189176590336"
+  quoted_status_id_str: string; // "900000000000000001"
   quoted_status_permalink: {
-    url: string; // "https://t.co/aBcDeFgHiJ"
-    expanded: string; // "https://twitter.com/username/status/1674824189176590336"
+    url: string; // "https://media.test/fixture"
+    expanded: string; // "https://example.test/post/fixture"
     display: string; // "twitter.com/username/statu…"
   };
   reply_count: number; // 1
@@ -438,10 +438,10 @@ type GraphQLTwitterStatusLegacy = {
   entities: {
     media: {
       display_url: string; // "pic.twitter.com/1X2X3X4X5X"
-      expanded_url: string; // "https://twitter.com/username/status/1674824189176590336/photo/1" "https://twitter.com/username/status/1674824189176590336/video/1"
-      id_str: string; // "1674824189176590336"
+      expanded_url: string; // "https://example.test/post/fixture" "https://example.test/post/fixture"
+      id_str: string; // "900000000000000001"
       indices: [number, number]; // [number, number]
-      media_url_https: string; // "https://pbs.twimg.com/media/FAKESCREENSHOT.jpg" With videos appears to be the thumbnail
+      media_url_https: string; // "https://media.test/fixture" With videos appears to be the thumbnail
       type: string; // "photo" Seems to be photo even with videos
     }[];
     user_mentions: MentionEntity[];
@@ -476,7 +476,7 @@ type BirdwatchEntity = {
   toIndex: number; // 154
   ref: {
     type: 'TimelineUrl';
-    url: string; // https://t.co/jxvVatCVCz
+    url: string; // https://media.test/fixture
     urlType: 'ExternalUrl';
   };
 };
@@ -498,12 +498,12 @@ type GraphQLTwitterStatus = {
   result: GraphQLTwitterStatus;
   __typename: 'Tweet' | 'TweetWithVisibilityResults' | 'TweetUnavailable';
   reason: string; // used for errors
-  rest_id: string; // "1674824189176590336",
+  rest_id: string; // "900000000000000001",
   has_birdwatch_notes: boolean;
   birdwatch_pivot: {
-    destinationUrl: string; // https://twitter.com/i/birdwatch/n/1784594925926973714
+    destinationUrl: string; // https://example.test/post/fixture
     note: {
-      rest_id: string; // 1784594925926973714
+      rest_id: string; // 900000000000000001
     };
     subtitle: {
       text: string; // "This screenshot is from Sonic 1\n\ninfo.sonicretro.org/Sonic_the_Hedg…"
@@ -649,7 +649,7 @@ type GraphQLTweetWithVisibilityResults = {
 };
 
 type GraphQLTwitterCard = {
-  rest_id?: string; // "card://1674824189176590336",
+  rest_id?: string; // "card://900000000000000001",
   /** Present on TweetDetail / TweetResultByRestId for link preview cards (e.g. `summary_large_image`). */
   name?: string;
   url?: string;
@@ -753,7 +753,7 @@ type GraphQLTimelineModule = GraphQLBaseTimeline & {
 
 type GraphQLTimelineTweetEntry = {
   /** The entryID contains the tweet ID */
-  entryId: `tweet-${number}`; // "tweet-1674824189176590336"
+  entryId: `tweet-${number}`; // "tweet-900000000000000001"
   sortIndex: string;
   content: GraphQLTimelineItem;
 };
@@ -765,7 +765,7 @@ type GraphQLModuleTweetEntry = {
 };
 
 type GraphQLConversationThread = {
-  entryId: `conversationthread-${number}`; // "conversationthread-1674824189176590336"
+  entryId: `conversationthread-${number}`; // "conversationthread-900000000000000001"
   sortIndex: string;
   content: GraphQLTimelineModule;
 };
