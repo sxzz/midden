@@ -419,7 +419,7 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 			break
 		}
 	}
-	// Progress text is replaced by the new captioned media, never by editing old content.
+	// Replace progress text with the new media delivery.
 	if len(parts) > 0 && parts[0].kind == "media" && progress == 0 && mid != 0 {
 		if c, ok := sender.(*telegram.Client); ok {
 			if err := c.DeleteProgress(ctx, chat, mid); err != nil {
@@ -444,8 +444,12 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 		var id int64
 		switch part.kind {
 		case "text":
-			if progress == 0 {
-				id, e = sendInteractive(ctx, formatted, chat, part.text, mid, buttons)
+			if progress == headerPart {
+				previous := int64(0)
+				if progress == 0 {
+					previous = mid
+				}
+				id, e = sendInteractive(ctx, formatted, chat, part.text, previous, buttons)
 			} else {
 				id, e = formatted.Send(ctx, chat, part.text, 0)
 			}
@@ -469,10 +473,10 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 		if e != nil {
 			return telegramError(e)
 		}
-		progress++
-		if progress == 1 {
+		if progress == headerPart {
 			mid = id
 		}
+		progress++
 		e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
 			_, e := tx.Exec(ctx, `UPDATE submissions SET progress=$2,message_id=$3 WHERE id=$1`, t.ID, progress, mid)
 			return e

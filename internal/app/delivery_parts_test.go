@@ -36,13 +36,16 @@ func TestDeliveryPartsKeepTextWithMedia(t *testing.T) {
 					buttons++
 				}
 			}
+			if size > 1 && (buttons != 0 || texts == 0 || parts[0].text != "") {
+				t.Fatal("albums must have separate text and no media keyboard")
+			}
 			if joined != text || images != size {
 				t.Fatal("lost content")
 			}
-			if size > 0 && (parts[0].kind != "media" || buttons != 1) {
+			if size == 1 && (parts[0].kind != "media" || buttons != 1) {
 				t.Fatal("media must lead with one keyboard")
 			}
-			if size > 0 && len(utf16.Encode([]rune(text))) <= 1024 && texts != 0 {
+			if size == 1 && len(utf16.Encode([]rune(text))) <= 1024 && texts != 0 {
 				t.Fatal("short text sent separately")
 			}
 		}
@@ -69,7 +72,7 @@ func TestSensitiveDocumentDelivery(t *testing.T) {
 		t.Fatal(parts)
 	}
 	parts = deliveryParts("text", []domain.Asset{{State: "ready", MIME: "video/mp4", Sensitive: true}, {State: "ready", MIME: "video/webm"}})
-	if len(parts) != 3 || len(parts[0].assets) != 1 || parts[2].assets[0].MIME != "video/webm" {
+	if len(parts) != 3 || len(parts[0].assets) != 1 || parts[1].assets[0].MIME != "video/webm" {
 		t.Fatal("mixed document group could lose spoiler", parts)
 	}
 }

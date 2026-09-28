@@ -23,26 +23,19 @@ func deliveryParts(text string, assets []domain.Asset) []deliveryPart {
 		}
 	}
 	var parts []deliveryPart
-	if len(ready) > 0 {
+	if len(ready) == 1 {
 		caption, remainder := telegram.SplitCaption(text)
-		first := true
+		parts = append(parts, deliveryPart{kind: "media", assets: ready, text: caption}, deliveryPart{kind: "buttons"})
+		text = remainder
+	} else if len(ready) > 1 {
 		for len(ready) > 0 {
 			n := 1
 			for n < len(ready) && n < 10 && (ready[n].MIME == "video/webm") == (ready[0].MIME == "video/webm") {
 				n++
 			}
-			part := deliveryPart{kind: "media", assets: ready[:n]}
-			if first {
-				part.text = caption
-			}
-			parts = append(parts, part)
-			if first {
-				parts = append(parts, deliveryPart{kind: "buttons"})
-				first = false
-			}
+			parts = append(parts, deliveryPart{kind: "media", assets: ready[:n]})
 			ready = ready[n:]
 		}
-		text = remainder
 	}
 	if text != "" {
 		for _, chunk := range telegram.Split(text) {

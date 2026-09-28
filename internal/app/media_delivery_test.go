@@ -47,7 +47,6 @@ func TestMediaDeliveryResumesWithoutResendingAlbum(t *testing.T) {
 	must(t, png.Encode(&img, image.NewRGBA(image.Rect(0, 0, 13, 17))))
 	var mu sync.Mutex
 	var methods []string
-	var caption string
 	var overflow []string
 	attempts := 0
 	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -74,10 +73,29 @@ func TestMediaDeliveryResumesWithoutResendingAlbum(t *testing.T) {
 			if r.FormValue("reply_to_message_id") != "123" {
 				t.Error("text lost group reply")
 			}
-			if !strings.HasPrefix(r.FormValue("text"), "正在采集") {
-				overflow = append(overflow, r.FormValue("text"))
+			if strings.HasPrefix(r.FormValue("text"), "正在采集") {
+				fmt.Fprint(w, `{"ok":true,"result":{"message_id":5}}`)
+				return
 			}
-			fmt.Fprint(w, `{"ok":true,"result":{"message_id":5}}`)
+			if len(overflow) == 0 {
+				if !strings.Contains(r.FormValue("reply_markup"), "我也要存") || strings.Contains(r.FormValue("reply_markup"), "/recent") {
+					t.Error("wrong text controls")
+				}
+				var entities []telegram.Entity
+				must(t, json.Unmarshal([]byte(r.FormValue("entities")), &entities))
+				if len(entities) != 1 || entities[0].Type != "code" {
+					t.Error("archive ID is not copyable", entities)
+				}
+				attempts++
+				if attempts == 1 {
+					fmt.Fprint(w, `{"ok":false,"error_code":500}`)
+					return
+				}
+			} else if strings.Contains(r.FormValue("reply_markup"), "/refresh") {
+				t.Error("overflow repeated controls")
+			}
+			overflow = append(overflow, r.FormValue("text"))
+			fmt.Fprintf(w, `{"ok":true,"result":{"message_id":%d}}`, 8+len(overflow))
 		case "deleteMessage":
 			if r.FormValue("message_id") != "5" {
 				t.Error("deleted something other than progress")
@@ -89,24 +107,13 @@ func TestMediaDeliveryResumesWithoutResendingAlbum(t *testing.T) {
 				Entities []telegram.Entity `json:"caption_entities"`
 			}
 			must(t, json.Unmarshal([]byte(r.FormValue("media")), &media))
-			if len(media) != 2 || len(media[0].Entities) != 1 || media[0].Entities[0].Type != "code" || media[1].Caption != "" {
+			if len(media) != 2 || len(media[0].Entities) != 0 || media[0].Caption != "" || media[1].Caption != "" {
 				t.Error("wrong album caption", media)
 			}
-			caption = media[0].Caption
 			if r.FormValue("reply_to_message_id") != "123" {
 				t.Error("album lost group reply")
 			}
 			fmt.Fprint(w, `{"ok":true,"result":[{"message_id":7},{"message_id":8}]}`)
-		case "editMessageReplyMarkup":
-			if r.FormValue("message_id") != "7" || !strings.Contains(r.FormValue("reply_markup"), "我也要存") || strings.Contains(r.FormValue("reply_markup"), "/recent") {
-				t.Error("wrong album controls")
-			}
-			attempts++
-			if attempts == 1 {
-				fmt.Fprint(w, `{"ok":false,"error_code":500}`)
-				return
-			}
-			fmt.Fprint(w, `{"ok":true,"result":{"message_id":7}}`)
 		default:
 			t.Error("unexpected method", method)
 		}
@@ -114,7 +121,7 @@ func TestMediaDeliveryResumesWithoutResendingAlbum(t *testing.T) {
 	defer h.Close()
 	blobs := &memoryBlob{m: map[string][]byte{}}
 	sender := &telegram.Client{Token: "test", Base: h.URL, HTTP: h.Client(), Blobs: blobs}
-	s := &Service{DB: db, Queue: q, Adapter: &fakeAdapter{public: true, text: strings.Repeat("长正文😀", 400), urls: []string{h.URL + "/image?1", h.URL + "/image?2"}}, Blobs: blobs, HTTP: h.Client(), Config: Defaults(), Senders: map[string]Sender{channel: sender}}
+	s := &Service{DB: db, Queue: q, Adapter: &fakeAdapter{public: true, text: strings.Repeat("长正文😀", 800), urls: []string{h.URL + "/image?1", h.URL + "/image?2"}}, Blobs: blobs, HTTP: h.Client(), Config: Defaults(), Senders: map[string]Sender{channel: sender}}
 	j, err := s.Submit(ctx, identity.TenantID, domain.CaptureInput{URL: "https://x.com/i/status/98000000088", Origin: domain.Origin{IdentityID: identity.ID, ChannelID: channel, ChatID: "-42", ReplyToMessageID: 123}})
 	must(t, err)
 	var sid string
@@ -140,12 +147,19 @@ func TestMediaDeliveryResumesWithoutResendingAlbum(t *testing.T) {
 	must(t, restarted.deliver(ctx, task))
 	a, err := s.Archive(ctx, identity.TenantID, j.ArchiveID)
 	must(t, err)
+	var mid int64
+	must(t, db.Tx(ctx, identity.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT message_id FROM submissions WHERE id=$1`, sid).Scan(&mid)
+	}))
+	if mid != 9 {
+		t.Fatalf("controls must belong to first text message, got %d", mid)
+	}
 	mu.Lock()
 	defer mu.Unlock()
-	if caption+strings.Join(overflow, "") != archiveMessage(a, "complete") {
-		t.Fatal("caption overflow lost content")
+	if strings.Join(overflow, "") != archiveMessage(a, "complete") {
+		t.Fatal("text lost content")
 	}
-	if strings.Join(methods, ",") != "sendMessage,deleteMessage,sendMediaGroup,editMessageReplyMarkup,editMessageReplyMarkup,sendMessage" {
+	if strings.Join(methods, ",") != "sendMessage,deleteMessage,sendMediaGroup,sendMessage,sendMessage,sendMessage" {
 		t.Fatal("album repeated or text sent before images", methods)
 	}
 }
