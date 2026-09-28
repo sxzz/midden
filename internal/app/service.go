@@ -294,8 +294,8 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 
 		var cid string
 		e = tx.QueryRow(ctx, `SELECT id FROM captures WHERE archive_id=$1 AND provider_id=$2 AND coalesce(connection_id::text,'')=$3 AND adapter_id=$4 AND state IN('queued','downloading')`, aid, in.ProviderID, in.ConnectionID, desc.AdapterId).Scan(&cid)
-		if errors.Is(e, pgx.ErrNoRows) && in.RefreshID == "" {
-			e = tx.QueryRow(ctx, `SELECT r.capture_id FROM archives a JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1`, aid).Scan(&cid)
+		if errors.Is(e, pgx.ErrNoRows) && in.RefreshID == "" && (in.Automatic || !target.RefreshOnSubmit) {
+			e = tx.QueryRow(ctx, `SELECT r.capture_id FROM archives a JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1 AND ($2::bigint=0 OR a.observed_at > now()-make_interval(secs=>$2::double precision))`, aid, in.RefreshAfterSeconds).Scan(&cid)
 		}
 		if errors.Is(e, pgx.ErrNoRows) {
 			var used, reserved, quota int64
@@ -317,7 +317,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			if _, e = tx.Exec(ctx, `UPDATE tenants SET rate_count=$2,rate_start=$3 WHERE id=$1`, tenant, count+1, start); e != nil {
 				return e
 			}
-			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,archive_id,provider_id,scope,visibility,connection_id,refresh_from,adapter_id) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid,$8) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility, in.ConnectionID, in.RefreshID, desc.AdapterId).Scan(&cid)
+			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,archive_id,provider_id,scope,visibility,connection_id,refresh_from,adapter_id,automatic) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid,$8,$9) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility, in.ConnectionID, in.RefreshID, desc.AdapterId, in.Automatic).Scan(&cid)
 			if e != nil {
 				return e
 			}
@@ -331,6 +331,14 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		e = tx.QueryRow(ctx, `INSERT INTO submissions(tenant_id,capture_id,identity_id,channel_id,chat_id,idem_key,fingerprint,reply_to_message_id,input) VALUES($1,$2,nullif($3,'')::uuid,nullif($4,'')::uuid,nullif($5,''),$6,$7,$8,$9) RETURNING id`, tenant, cid, in.Origin.IdentityID, in.Origin.ChannelID, in.Origin.ChatID, in.Key, fingerprint, in.Origin.ReplyToMessageID, in.Input).Scan(&sid)
 		if e != nil {
 			return e
+		}
+		if !in.Automatic && adapter.Supports(policy, adapter.CaptureRelated, 1, 0) {
+			if _, e = tx.Exec(ctx, `UPDATE submissions SET related_provider=$2,related_connection=nullif($3,'')::uuid,related_adapter=$4,related_state='pending',related_source_archive=$5 WHERE id=$1`, sid, in.ProviderID, in.ConnectionID, desc.AdapterId, aid); e != nil {
+				return e
+			}
+			if e = s.Enqueue(ctx, tx, tenant, sid, "related"); e != nil {
+				return e
+			}
 		}
 		if e = scanJob(ctx, tx, cid, &out); e != nil {
 			return e

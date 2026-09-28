@@ -61,6 +61,7 @@ message FetchRequest {
   string platform = 8;
   string kind = 9;
   string object_scope = 10;
+  bool automatic = 11; // Related captures must not recursively expand collections.
 }
 
 message Resource {
@@ -101,6 +102,11 @@ message SourceResponse {
   string source_url = 3; // No credentials or request headers.
   Visibility visibility = 4; // Account responses stay private even for public posts.
 }
+message RelatedTarget {
+  string url = 1;
+  uint32 refresh_after_seconds = 2; // Zero reuses any existing archive; positive refreshes stale data.
+}
+
 message FetchResponse {
   string external_id = 1;
   string text = 2; // Optional generic presentation; channels do not parse entity JSON.
@@ -116,6 +122,8 @@ message FetchResponse {
   repeated SourceResponse source_responses = 12;
   string summary = 13; // Adapter-provided list presentation; channels may truncate it.
   string author_name = 14; // Generic presentation, supplied by the adapter.
+  ResolveResponse canonical_target = 16; // Optional stable identity, same platform and kind.
+  repeated RelatedTarget related_targets = 17; // capture.related/1; one level, same provider/connection.
   string published_at = 15; // Original publication time in RFC 3339; empty when unknown.
 }
 
@@ -128,6 +136,7 @@ message ResolveResponse {
   string kind = 3;
   string object_scope = 4;
   string external_id = 5;
+  bool refresh_on_submit = 6; // Explicit submissions always observe this target again.
 }
 message PrepareCredentialRequest { string provider_id = 1; bytes input = 2; }
 message PrepareCredentialResponse { Credential credential = 1; }

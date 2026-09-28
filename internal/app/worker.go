@@ -44,6 +44,8 @@ func (w *Worker) Work(ctx context.Context, j *river.Job[store.Task]) error {
 	defer func() { TaskDuration.WithLabelValues(j.Args.Type).Observe(time.Since(start).Seconds()) }()
 	var e error
 	switch j.Args.Type {
+	case "related":
+		e = w.S.related(ctx, j.Args)
 	case "capture":
 		e = w.S.capture(ctx, j.Args)
 	case "download":
@@ -185,9 +187,10 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		return e
 	}
 	defer release(c, t.Tenant, slot)
+	var automatic bool
 	var url, id, provider, connection, scope, state, visibility, platform, kind, objectScope string
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT a.url,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),c.scope,c.state,c.visibility,a.platform,a.kind,a.object_scope FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.id=$1`, t.ID).Scan(&url, &id, &provider, &connection, &scope, &state, &visibility, &platform, &kind, &objectScope)
+		return tx.QueryRow(ctx, `SELECT a.url,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),c.scope,c.state,c.visibility,a.platform,a.kind,a.object_scope,c.automatic FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.id=$1`, t.ID).Scan(&url, &id, &provider, &connection, &scope, &state, &visibility, &platform, &kind, &objectScope, &automatic)
 	})
 	if e != nil {
 		return e
@@ -244,7 +247,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	defer cancel()
 	var trailer metadata.MD
 	fetchStart := time.Now()
-	r, e := s.Adapter.Fetch(callCtx, &pb.FetchRequest{Platform: platform, Kind: kind, ObjectScope: objectScope, Url: url, ExternalId: id, ProviderId: provider, ConnectionId: connection, AccessScope: scope, RequestId: t.ID, Credential: credential}, grpc.Trailer(&trailer))
+	r, e := s.Adapter.Fetch(callCtx, &pb.FetchRequest{Automatic: automatic, Platform: platform, Kind: kind, ObjectScope: objectScope, Url: url, ExternalId: id, ProviderId: provider, ConnectionId: connection, AccessScope: scope, RequestId: t.ID, Credential: credential}, grpc.Trailer(&trailer))
 	ProviderDuration.WithLabelValues(provider).Observe(time.Since(fetchStart).Seconds())
 	ProviderResults.WithLabelValues(provider, status.Code(e).String()).Inc()
 	if e != nil {
@@ -260,6 +263,9 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	}
 	if r.ExternalId != id || r.ProviderId != provider {
 		return &PermanentError{"adapter returned mismatched identity"}
+	}
+	if err := validateRelatedResult(policy, r, platform, kind, objectScope); err != nil {
+		return err
 	}
 	expectedVisibility := pb.Visibility_VISIBILITY_PRIVATE
 	if visibility == "public" {
@@ -346,12 +352,13 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		if e := validateExecution(ctx, tx, connection, revision); e != nil {
 			return e
 		}
-		if connection != "" {
-			if e := s.resolveCaptureScope(ctx, tx, t.Tenant, t.ID, visibility); e != nil {
+		if connection != "" || r.CanonicalTarget != nil {
+			if e := s.resolveCaptureScope(ctx, tx, t.Tenant, t.ID, visibility, r.CanonicalTarget); e != nil {
 				return e
 			}
 		}
-		if _, e := tx.Exec(ctx, `UPDATE captures SET credential_revision=$2 WHERE id=$1`, t.ID, revision); e != nil {
+		relatedJSON, _ := json.Marshal(r.RelatedTargets)
+		if _, e := tx.Exec(ctx, `UPDATE captures SET credential_revision=$2,related_targets=$3 WHERE id=$1`, t.ID, revision, relatedJSON); e != nil {
 			return e
 		}
 		if e := persistSources(ctx, tx, t.Tenant, t.ID, r); e != nil {
@@ -623,6 +630,9 @@ func (s *Service) fail(ctx context.Context, t store.Task, msg string) error {
 				}
 			}
 			return s.Enqueue(ctx, tx, t.Tenant, cid, "finalize")
+		case "related":
+			_, e := tx.Exec(ctx, `UPDATE submissions SET related_state='failed',related_error=$2 WHERE id=$1 AND related_state='pending'`, t.ID, msg)
+			return e
 		case "deliver":
 			_, e := tx.Exec(ctx, `UPDATE submissions SET state='failed',error=$2 WHERE id=$1 AND state<>'sent'`, t.ID, msg)
 			return e

@@ -204,6 +204,8 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 | 能力 | 当前版本 | 含义 |
 | --- | --- | --- |
 | `capture.fetch` | 1.0 | 用 `Resolve` 规范化 URL，再用 `Fetch` 读取单个目标 |
+| `capture.related` | 1.0 | 返回关联目标及最小刷新间隔；核心按提交者身份持久化执行一层关联采集 |
+| `capture.canonical` | 1.0 | Fetch 返回同平台、同类型的稳定目标身份 |
 | `credential.prepare` | 1.0 | 用 `PrepareCredential` 将用户输入转换为 Adapter 私有的凭据格式 |
 | `connection.check` | 1.0 | 用 `CheckConnection` 验证账号会话 |
 | `content.text` | 1.0 | 采集结果可以包含文字 |
@@ -255,3 +257,12 @@ Fetch 的 text、text_kind、summary、author_name、published_at 和展示媒�
 采集提交分别保留用户输入的原始链接（包括参数），不会因 URL 规范化或任务合并而覆盖。Telegram 失败通知使用对应提交的输入；旧提交优先从尚存的 inbox 恢复，无法恢复时使用归档来源 URL。较长的命令回复分段发送并持久化进度。账号采集使用私有暂存身份，但刷新已有归档不会把暂存身份自动加入保存列表；结果可见性确定后才关联最终归档。
 
 账号以租户、Adapter、Provider 和上游验证返回的账号 ID 去重。重复添加替换凭据、刷新 handle 并递增凭据版本，保留 Connection ID 和当前选择。`connection_imports` 记录渠道导入请求的结果，队列重试不重复覆盖凭据，也不恢复已撤销账号。
+
+
+### 关联目标和 Profile 采集
+
+`Resolve.refresh_on_submit` 表示显式提交需要重新观察目标。`Fetch.canonical_target` 将用户名等临时定位方式归一为稳定身份；根实体 ID 对应最终身份。`Fetch.related_targets` 返回关联 URL 和 `refresh_after_seconds`，正值表示完成观察超过间隔后才刷新，零表示复用已有归档。Go 核心不解释平台路径或 Profile 字段。
+
+每次显式提交都持久化一个关联任务及提交者的 Adapter、Provider、Connection。主采集完成后，任务在该租户上下文中逐一创建幂等子提交，共享主采集的其他租户使用各自的账号选择。子提交设置 `automatic`，不继续展开关联目标、不生成渠道投递；限流时延后执行，错误记录在提交的 `related_state` 和 `related_error`。每页最多接受 200 个关联目标，超限拒绝整页而非静默截断。
+
+X Adapter 支持帖子、用户名 Profile URL 和稳定用户 ID Profile URL。帖子返回作者 Profile 的关联目标，刷新间隔为 60 秒；Profile 显式提交始终重新读取资料并读取时间线首批响应，将其中所有帖子声明为关联目标，不请求下一页。公开账号使用公共实例，count=100；受保护账号使用所选采集账号，count=20。自动 Profile 采集只读取资料。Profile 资料始终使用 FxTwitter 公共 API，包括 protected 账号；即使用户选择了账号，公开帖文仍使用公共 API，只有受保护帖文使用该 Connection 的 Cookie。完整响应体保存在 `source_responses`，账号原始数据不随公开资料共享。Profile 头像和封面作为实体关联资源保存。

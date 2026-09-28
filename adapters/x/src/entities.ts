@@ -130,6 +130,9 @@ export function attachEntities(
         }),
       );
     }
+    result.relatedTargets = [
+      { url: `https://x.com/i/user/${author.id}`, refreshAfterSeconds: 60 },
+    ];
     graph.entities.push({
       key: "author",
       type: "x.profile",

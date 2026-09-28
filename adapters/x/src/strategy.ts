@@ -1,0 +1,212 @@
+import { status } from "@grpc/grpc-js";
+import { fetchPublic, ProviderError } from "./provider.js";
+import { fetchSession } from "./session.js";
+import {
+  fetchPublicProfile,
+  fetchPublicTimeline,
+  fetchSessionTimeline,
+} from "./profile.js";
+import type { SessionCredential } from "./credential.js";
+import {
+  FetchResponse,
+  Visibility,
+  type FetchRequest,
+} from "./generated/api/adapter/v1/adapter.js";
+
+const profileTTL = 60_000;
+const maxCachedProfiles = 1000;
+export class CaptureStrategy {
+  private profiles = new Map<string, { at: number; value: FetchResponse }>();
+  private pending = new Map<string, Promise<FetchResponse>>();
+  constructor(
+    private publicPost = fetchPublic,
+    private publicProfile = fetchPublicProfile,
+    private sessionPost = fetchSession,
+    private sessionTimeline = fetchSessionTimeline,
+    private now = Date.now,
+  ) {}
+
+  private remember(value: FetchResponse) {
+    const user = this.user(value);
+    for (const key of [
+      value.canonicalTarget!.externalId,
+      `handle:${user.screen_name.toLowerCase()}`,
+    ]) {
+      this.profiles.delete(key);
+      this.profiles.set(key, {
+        at: this.now(),
+        value: FetchResponse.fromPartial(value),
+      });
+    }
+    while (this.profiles.size > maxCachedProfiles)
+      this.profiles.delete(this.profiles.keys().next().value!);
+  }
+  private user(profile: FetchResponse): any {
+    return JSON.parse(
+      Buffer.from(
+        profile.graph!.entities.find((e) => e.key === profile.graph!.root)!
+          .dataJson,
+      ).toString(),
+    ).metadata;
+  }
+  private async profile(
+    id: string,
+    force: boolean,
+    signal: AbortSignal,
+  ): Promise<FetchResponse> {
+    const cached = this.profiles.get(id);
+    if (!force && cached && this.now() - cached.at < profileTTL)
+      return FetchResponse.fromPartial(cached.value);
+    const key = `${force ? "explicit" : "automatic"}:${id}`;
+    let promise = this.pending.get(key);
+    if (!promise) {
+      promise = this.publicProfile(id, false, signal)
+        .catch((error) => {
+          if (
+            error instanceof ProviderError &&
+            error.code === status.UNAUTHENTICATED
+          )
+            throw new ProviderError(
+              status.UNAVAILABLE,
+              "public profile service unavailable",
+            );
+          throw error;
+        })
+        .then((value) => {
+          this.remember(value);
+          return value;
+        })
+        .finally(() => this.pending.delete(key));
+      this.pending.set(key, promise);
+    }
+    return FetchResponse.fromPartial(await promise);
+  }
+  private protected(profile: FetchResponse): boolean {
+    const value = this.user(profile).protected;
+    if (typeof value !== "boolean")
+      throw new ProviderError(
+        status.UNAVAILABLE,
+        "profile protection status unavailable",
+      );
+    return value;
+  }
+  async fetch(
+    req: FetchRequest,
+    signal: AbortSignal,
+    credential?: SessionCredential,
+  ): Promise<FetchResponse> {
+    let result: FetchResponse;
+    if (req.kind === "profile") {
+      result = await this.profile(req.externalId, !req.automatic, signal);
+      result.externalId = req.externalId;
+      if (!req.automatic) {
+        if (this.protected(result)) {
+          if (credential) {
+            // The collection of protected posts is account-private, while the profile metadata is public.
+            result.visibility = Visibility.VISIBILITY_PRIVATE;
+            await this.sessionTimeline(result, credential, signal);
+          } else {
+            result.incomplete = true;
+            result.warnings.push(
+              "该账号的帖子受保护，需添加有访问权限的采集账号；Profile 已保存。",
+            );
+          }
+        } else {
+          // Fetch only the timeline here; reuse the profile response obtained above.
+          await this.timeline(result, signal);
+        }
+      }
+    } else {
+      const author = new URL(req.url).pathname.match(
+        /^\/([A-Za-z0-9_]+)\/status\//,
+      )?.[1];
+      let profile: FetchResponse | undefined;
+      let discovered: FetchResponse | undefined;
+      if (author && author !== "i")
+        profile = await this.profile(
+          `handle:${author.toLowerCase()}`,
+          false,
+          signal,
+        );
+      else {
+        // An ID-only link has no author. Discover it once before selecting the final source.
+        try {
+          discovered = await this.publicPost(req.externalId, signal);
+        } catch (error) {
+          if (
+            !credential ||
+            !(error instanceof ProviderError) ||
+            error.code !== status.UNAUTHENTICATED
+          )
+            throw error;
+          discovered = await this.sessionPost(
+            req.externalId,
+            credential,
+            signal,
+          );
+        }
+        const authorNode = discovered.graph?.entities.find(
+          (e) => e.type === "x.profile",
+        );
+        if (!authorNode)
+          throw new ProviderError(
+            status.UNAVAILABLE,
+            "post author unavailable for capture policy",
+          );
+        profile = await this.profile(authorNode.externalId, false, signal);
+      }
+      if (discovered?.providerId === "x-session") {
+        result = discovered;
+      } else if (this.protected(profile)) {
+        if (!credential)
+          throw new ProviderError(
+            status.PERMISSION_DENIED,
+            "该帖子受保护，请添加有访问权限的采集账号。",
+          );
+        result =
+          discovered?.providerId === "x-session"
+            ? discovered
+            : await this.sessionPost(req.externalId, credential, signal);
+      } else
+        result =
+          discovered?.providerId === "fxtwitter"
+            ? discovered
+            : await this.publicPost(req.externalId, signal);
+      this.attachProfile(result, profile);
+    }
+    // Execution provider remains the persisted connection choice. textSource and raw URLs record actual sources.
+    result.providerId = req.providerId;
+    if (credential)
+      for (const source of result.sourceResponses)
+        source.visibility = Visibility.VISIBILITY_PRIVATE;
+    return result;
+  }
+  timeline = fetchPublicTimeline;
+  private attachProfile(result: FetchResponse, profile: FetchResponse) {
+    const author = result.graph?.entities.find(
+      (e) =>
+        e.type === "x.profile" &&
+        e.externalId === profile.canonicalTarget!.externalId,
+    );
+    if (author) {
+      const node = profile.graph!.entities.find(
+        (e) => e.key === profile.graph!.root,
+      )!;
+      author.dataJson = node.dataJson;
+      author.resourceIndices = profile.resources.map((resource) => {
+        let i = result.resources.findIndex(
+          (r) => r.url === resource.url && r.purpose === resource.purpose,
+        );
+        if (i < 0) {
+          i = result.resources.length;
+          result.resources.push(resource);
+        }
+        return i;
+      });
+    }
+    result.sourceResponses.push(...profile.sourceResponses);
+    result.relatedTargets = [
+      { url: profile.canonicalTarget!.url, refreshAfterSeconds: 60 },
+    ];
+  }
+}

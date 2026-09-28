@@ -1,3 +1,4 @@
+import { CaptureStrategy } from "./strategy.js";
 import { resolveTarget } from "./resolve.js";
 import { decodeCredential, prepareCredential } from "./credential.js";
 import { entityTypes } from "./entity-schemas.js";
@@ -18,17 +19,18 @@ import {
   Visibility,
 } from "./generated/api/adapter/v1/adapter.js";
 import { fetchPublic, ProviderError } from "./provider.js";
-import { checkSession, fetchSession } from "./session.js";
+import { checkSession } from "./session.js";
 
 export function createServer(
   secret: string,
   tls = false,
   publicFetcher = fetchPublic,
+  strategy = new CaptureStrategy(publicFetcher),
 ): Server {
   if (!secret) throw new Error("ADAPTER_TOKEN is required");
   const server = new Server({
     "grpc.max_receive_message_length": 64 * 1024,
-    "grpc.max_send_message_length": 4 * 1024 * 1024,
+    "grpc.max_send_message_length": 8 * 1024 * 1024,
   });
   const auth = (call: ServerUnaryCall<any, any>) => {
     const values = call.metadata.get("authorization");
@@ -93,6 +95,8 @@ export function createServer(
           entityTypes: entityTypes.map((t) => t.name),
           capabilities: [
             "capture.fetch",
+            "capture.related",
+            "capture.canonical",
             "content.text",
             "entity.graph",
             "source.raw",
@@ -109,6 +113,8 @@ export function createServer(
           entityTypes: entityTypes.map((t) => t.name),
           capabilities: [
             "capture.fetch",
+            "capture.related",
+            "capture.canonical",
             "connection.check",
             "credential.prepare",
             "content.text",
@@ -148,7 +154,7 @@ export function createServer(
       )
         throw new ProviderError(
           status.INVALID_ARGUMENT,
-          "invalid post identity",
+          "invalid target identity",
         );
       if (
         req.providerId === "fxtwitter" &&
@@ -156,7 +162,7 @@ export function createServer(
         req.accessScope === "public" &&
         !req.credential
       )
-        return publicFetcher(req.externalId, signal);
+        return strategy.fetch(req, signal);
       if (
         req.providerId !== "x-session" ||
         !req.connectionId ||
@@ -171,11 +177,7 @@ export function createServer(
           status.FAILED_PRECONDITION,
           "account execution requires TLS",
         );
-      return fetchSession(
-        req.externalId,
-        decodeCredential(req.credential),
-        signal,
-      );
+      return strategy.fetch(req, signal, decodeCredential(req.credential));
     }),
     checkConnection: unary(async (req, signal) => {
       if (!tls)

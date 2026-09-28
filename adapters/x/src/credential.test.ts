@@ -40,15 +40,16 @@ test("adapter owns X target identity", () => {
   ]) {
     const r = resolveTarget(`https://${host}/fixture/status/123/photo/2?q=1`);
     assert.deepEqual(r, {
-      url: "https://x.com/i/web/status/123",
+      url: "https://x.com/fixture/status/123",
       platform: "x",
       kind: "post",
       objectScope: "",
       externalId: "123",
+      refreshOnSubmit: false,
     });
   }
   for (const input of [
-    "https://x.com/fixture",
+    "https://x.com/home",
     "https://x.com.evil.test/a/status/123",
     "https://user@x.com/a/status/123",
     "file:///a/status/123",

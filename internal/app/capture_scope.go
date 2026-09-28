@@ -5,15 +5,20 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	pb "monitor/api/adapter/v1"
 	"monitor/internal/domain"
 )
 
 // Resolve the final content identity before creating any resources. Account captures
 // start private, and only the trusted adapter can classify their result as public.
-func (s *Service) resolveCaptureScope(ctx context.Context, tx pgx.Tx, tenant, cid, visibility string) error {
+func (s *Service) resolveCaptureScope(ctx context.Context, tx pgx.Tx, tenant, cid, visibility string, canonical *pb.ResolveResponse) error {
 	var old, external, url, provider, connection, savedSource, platform, kind, objectScope string
 	if e := tx.QueryRow(ctx, `SELECT a.id,a.external_id,a.url,c.provider_id,coalesce(c.connection_id::text,''),coalesce(c.refresh_from::text,a.id::text),a.platform,a.kind,a.object_scope FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.id=$1`, cid).Scan(&old, &external, &url, &provider, &connection, &savedSource, &platform, &kind, &objectScope); e != nil {
 		return e
+	}
+	if canonical != nil {
+		external = canonical.ExternalId
+		url = canonical.Url
 	}
 	scope := "public"
 	dataScope := "00000000-0000-0000-0000-000000000000"

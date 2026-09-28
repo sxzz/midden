@@ -222,7 +222,7 @@ test("gRPC authentication and zero-account Describe", async () => {
     );
     assert.equal(resolved.platform, "x");
     assert.equal(resolved.externalId, "123");
-    assert.equal(resolved.url, "https://x.com/i/web/status/123");
+    assert.equal(resolved.url, "https://x.com/fixture/status/123");
     await assert.rejects(
       () =>
         new Promise((resolve, reject) =>

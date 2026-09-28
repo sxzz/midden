@@ -104,6 +104,8 @@ export interface FetchRequest {
   platform: string;
   kind: string;
   objectScope: string;
+  /** Related captures must not recursively expand collections. */
+  automatic: boolean;
 }
 
 export interface Resource {
@@ -155,6 +157,12 @@ export interface SourceResponse {
   visibility: Visibility;
 }
 
+export interface RelatedTarget {
+  url: string;
+  /** Zero reuses any existing archive; positive refreshes stale data. */
+  refreshAfterSeconds: number;
+}
+
 export interface FetchResponse {
   externalId: string;
   /** Optional generic presentation; channels do not parse entity JSON. */
@@ -173,6 +181,10 @@ export interface FetchResponse {
   summary: string;
   /** Generic presentation, supplied by the adapter. */
   authorName: string;
+  /** Optional stable identity, same platform and kind. */
+  canonicalTarget: ResolveResponse | undefined;
+  /** capture.related/1; one level, same provider/connection. */
+  relatedTargets: RelatedTarget[];
   /** Original publication time in RFC 3339; empty when unknown. */
   publishedAt: string;
 }
@@ -192,6 +204,8 @@ export interface ResolveResponse {
   kind: string;
   objectScope: string;
   externalId: string;
+  /** Explicit submissions always observe this target again. */
+  refreshOnSubmit: boolean;
 }
 
 export interface PrepareCredentialRequest {
@@ -743,6 +757,7 @@ function createBaseFetchRequest(): FetchRequest {
     platform: "",
     kind: "",
     objectScope: "",
+    automatic: false,
   };
 }
 
@@ -780,6 +795,9 @@ export const FetchRequest: MessageFns<FetchRequest> = {
     }
     if (message.objectScope !== "") {
       writer.uint32(82).string(message.objectScope);
+    }
+    if (message.automatic !== false) {
+      writer.uint32(88).bool(message.automatic);
     }
     return writer;
   },
@@ -872,6 +890,14 @@ export const FetchRequest: MessageFns<FetchRequest> = {
           message.objectScope = reader.string();
           continue;
         }
+        case 11: {
+          if (tag !== 88) {
+            break;
+          }
+
+          message.automatic = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -909,6 +935,9 @@ export const FetchRequest: MessageFns<FetchRequest> = {
       objectScope: isSet(object.objectScope)
         ? globalThis.String(object.objectScope)
         : "",
+      automatic: isSet(object.automatic)
+        ? globalThis.Boolean(object.automatic)
+        : false,
     };
   },
 
@@ -944,6 +973,9 @@ export const FetchRequest: MessageFns<FetchRequest> = {
     if (message.objectScope !== "") {
       obj.objectScope = message.objectScope;
     }
+    if (message.automatic !== false) {
+      obj.automatic = message.automatic;
+    }
     return obj;
   },
 
@@ -965,6 +997,7 @@ export const FetchRequest: MessageFns<FetchRequest> = {
     message.platform = object.platform ?? "";
     message.kind = object.kind ?? "";
     message.objectScope = object.objectScope ?? "";
+    message.automatic = object.automatic ?? false;
     return message;
   },
 };
@@ -1682,6 +1715,88 @@ export const SourceResponse: MessageFns<SourceResponse> = {
   },
 };
 
+function createBaseRelatedTarget(): RelatedTarget {
+  return { url: "", refreshAfterSeconds: 0 };
+}
+
+export const RelatedTarget: MessageFns<RelatedTarget> = {
+  encode(
+    message: RelatedTarget,
+    writer: BinaryWriter = new BinaryWriter(),
+  ): BinaryWriter {
+    if (message.url !== "") {
+      writer.uint32(10).string(message.url);
+    }
+    if (message.refreshAfterSeconds !== 0) {
+      writer.uint32(16).uint32(message.refreshAfterSeconds);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): RelatedTarget {
+    const reader =
+      input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseRelatedTarget();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.url = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 16) {
+            break;
+          }
+
+          message.refreshAfterSeconds = reader.uint32();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): RelatedTarget {
+    return {
+      url: isSet(object.url) ? globalThis.String(object.url) : "",
+      refreshAfterSeconds: isSet(object.refreshAfterSeconds)
+        ? globalThis.Number(object.refreshAfterSeconds)
+        : 0,
+    };
+  },
+
+  toJSON(message: RelatedTarget): unknown {
+    const obj: any = {};
+    if (message.url !== "") {
+      obj.url = message.url;
+    }
+    if (message.refreshAfterSeconds !== 0) {
+      obj.refreshAfterSeconds = Math.round(message.refreshAfterSeconds);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<RelatedTarget>): RelatedTarget {
+    return RelatedTarget.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<RelatedTarget>): RelatedTarget {
+    const message = createBaseRelatedTarget();
+    message.url = object.url ?? "";
+    message.refreshAfterSeconds = object.refreshAfterSeconds ?? 0;
+    return message;
+  },
+};
+
 function createBaseFetchResponse(): FetchResponse {
   return {
     externalId: "",
@@ -1698,6 +1813,8 @@ function createBaseFetchResponse(): FetchResponse {
     sourceResponses: [],
     summary: "",
     authorName: "",
+    canonicalTarget: undefined,
+    relatedTargets: [],
     publishedAt: "",
   };
 }
@@ -1748,6 +1865,15 @@ export const FetchResponse: MessageFns<FetchResponse> = {
     }
     if (message.authorName !== "") {
       writer.uint32(114).string(message.authorName);
+    }
+    if (message.canonicalTarget !== undefined) {
+      ResolveResponse.encode(
+        message.canonicalTarget,
+        writer.uint32(130).fork(),
+      ).join();
+    }
+    for (const v of message.relatedTargets) {
+      RelatedTarget.encode(v!, writer.uint32(138).fork()).join();
     }
     if (message.publishedAt !== "") {
       writer.uint32(122).string(message.publishedAt);
@@ -1877,6 +2003,27 @@ export const FetchResponse: MessageFns<FetchResponse> = {
           message.authorName = reader.string();
           continue;
         }
+        case 16: {
+          if (tag !== 130) {
+            break;
+          }
+
+          message.canonicalTarget = ResolveResponse.decode(
+            reader,
+            reader.uint32(),
+          );
+          continue;
+        }
+        case 17: {
+          if (tag !== 138) {
+            break;
+          }
+
+          message.relatedTargets.push(
+            RelatedTarget.decode(reader, reader.uint32()),
+          );
+          continue;
+        }
         case 15: {
           if (tag !== 122) {
             break;
@@ -1934,6 +2081,12 @@ export const FetchResponse: MessageFns<FetchResponse> = {
       authorName: isSet(object.authorName)
         ? globalThis.String(object.authorName)
         : "",
+      canonicalTarget: isSet(object.canonicalTarget)
+        ? ResolveResponse.fromJSON(object.canonicalTarget)
+        : undefined,
+      relatedTargets: globalThis.Array.isArray(object?.relatedTargets)
+        ? object.relatedTargets.map((e: any) => RelatedTarget.fromJSON(e))
+        : [],
       publishedAt: isSet(object.publishedAt)
         ? globalThis.String(object.publishedAt)
         : "",
@@ -1986,6 +2139,14 @@ export const FetchResponse: MessageFns<FetchResponse> = {
     if (message.authorName !== "") {
       obj.authorName = message.authorName;
     }
+    if (message.canonicalTarget !== undefined) {
+      obj.canonicalTarget = ResolveResponse.toJSON(message.canonicalTarget);
+    }
+    if (message.relatedTargets?.length) {
+      obj.relatedTargets = message.relatedTargets.map((e) =>
+        RelatedTarget.toJSON(e),
+      );
+    }
     if (message.publishedAt !== "") {
       obj.publishedAt = message.publishedAt;
     }
@@ -2016,6 +2177,12 @@ export const FetchResponse: MessageFns<FetchResponse> = {
       object.sourceResponses?.map((e) => SourceResponse.fromPartial(e)) || [];
     message.summary = object.summary ?? "";
     message.authorName = object.authorName ?? "";
+    message.canonicalTarget =
+      object.canonicalTarget !== undefined && object.canonicalTarget !== null
+        ? ResolveResponse.fromPartial(object.canonicalTarget)
+        : undefined;
+    message.relatedTargets =
+      object.relatedTargets?.map((e) => RelatedTarget.fromPartial(e)) || [];
     message.publishedAt = object.publishedAt ?? "";
     return message;
   },
@@ -2150,7 +2317,14 @@ export const ResolveRequest: MessageFns<ResolveRequest> = {
 };
 
 function createBaseResolveResponse(): ResolveResponse {
-  return { url: "", platform: "", kind: "", objectScope: "", externalId: "" };
+  return {
+    url: "",
+    platform: "",
+    kind: "",
+    objectScope: "",
+    externalId: "",
+    refreshOnSubmit: false,
+  };
 }
 
 export const ResolveResponse: MessageFns<ResolveResponse> = {
@@ -2172,6 +2346,9 @@ export const ResolveResponse: MessageFns<ResolveResponse> = {
     }
     if (message.externalId !== "") {
       writer.uint32(42).string(message.externalId);
+    }
+    if (message.refreshOnSubmit !== false) {
+      writer.uint32(48).bool(message.refreshOnSubmit);
     }
     return writer;
   },
@@ -2224,6 +2401,14 @@ export const ResolveResponse: MessageFns<ResolveResponse> = {
           message.externalId = reader.string();
           continue;
         }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.refreshOnSubmit = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2246,6 +2431,9 @@ export const ResolveResponse: MessageFns<ResolveResponse> = {
       externalId: isSet(object.externalId)
         ? globalThis.String(object.externalId)
         : "",
+      refreshOnSubmit: isSet(object.refreshOnSubmit)
+        ? globalThis.Boolean(object.refreshOnSubmit)
+        : false,
     };
   },
 
@@ -2266,6 +2454,9 @@ export const ResolveResponse: MessageFns<ResolveResponse> = {
     if (message.externalId !== "") {
       obj.externalId = message.externalId;
     }
+    if (message.refreshOnSubmit !== false) {
+      obj.refreshOnSubmit = message.refreshOnSubmit;
+    }
     return obj;
   },
 
@@ -2279,6 +2470,7 @@ export const ResolveResponse: MessageFns<ResolveResponse> = {
     message.kind = object.kind ?? "";
     message.objectScope = object.objectScope ?? "";
     message.externalId = object.externalId ?? "";
+    message.refreshOnSubmit = object.refreshOnSubmit ?? false;
     return message;
   },
 };

@@ -1,0 +1,214 @@
+import { status } from "@grpc/grpc-js";
+import { profileStatusesAPI } from "@fxembed/atmosphere/providers/twitter/userStatuses";
+import type { TwitterBuildHost } from "@fxembed/atmosphere/providers/twitter/build-host";
+import type { SessionCredential } from "./credential.js";
+import { accountTransport } from "./session.js";
+import { attachEntities } from "./entities.js";
+import { ProviderError, readJSON, responseError } from "./provider.js";
+import {
+  FetchResponse,
+  SourceResponse,
+  Visibility,
+} from "./generated/api/adapter/v1/adapter.js";
+
+export function normalizeProfile(
+  user: any,
+  requested: string,
+  provider: string,
+): FetchResponse {
+  if (
+    user?.type !== "profile" ||
+    typeof user.id !== "string" ||
+    !/^\d+$/.test(user.id) ||
+    typeof user.screen_name !== "string" ||
+    typeof user.name !== "string" ||
+    (!requested.startsWith("handle:") && requested !== user.id)
+  )
+    throw new ProviderError(status.UNAVAILABLE, "invalid profile response");
+  const result = FetchResponse.fromPartial({
+    externalId: requested,
+    providerId: provider,
+    adapterVersion: "0.4.0",
+    textKind: "profile",
+    textSource: provider,
+    visibility:
+      provider === "fxtwitter" || user.protected === false
+        ? Visibility.VISIBILITY_PUBLIC
+        : Visibility.VISIBILITY_PRIVATE,
+    text: [`@${user.screen_name}`, user.description || ""]
+      .filter(Boolean)
+      .join("\n"),
+    summary: `${user.name || user.screen_name}：${user.description || `@${user.screen_name}`}`,
+    canonicalTarget: {
+      url: `https://x.com/i/user/${user.id}`,
+      externalId: user.id,
+      platform: "x",
+      kind: "profile",
+      refreshOnSubmit: true,
+    },
+  });
+  // Reuse the public field projection; account-view fields remain exclusively in private raw responses.
+  attachEntities(result, { author: user });
+  result.graph!.root = "author";
+  result.graph!.entities = result.graph!.entities.filter(
+    (e) => e.key === "author",
+  );
+  result.graph!.relations = [];
+  result.relatedTargets = [];
+  const entity = result.graph!.entities[0];
+  const data = JSON.parse(Buffer.from(entity.dataJson).toString());
+  if (provider === "fxtwitter") data.metadata = user;
+  for (const key of ["raw_description", "birthday", "about_account"]) {
+    // Public API fields are retained completely; the original account response is private.
+    if (provider === "fxtwitter" && user[key] !== undefined)
+      data.metadata[key] = user[key];
+  }
+  entity.dataJson = Buffer.from(JSON.stringify(data));
+  if (typeof user.banner_url === "string" && user.banner_url) {
+    entity.resourceIndices.push(result.resources.length);
+    result.resources.push({
+      url: user.banner_url,
+      kind: "image",
+      purpose: "banner",
+      immutableKey: "",
+      altText: "",
+      sensitive: false,
+    });
+  }
+  return result;
+}
+
+export function attachTimeline(result: FetchResponse, timeline: any): void {
+  if (timeline?.code !== 200 || !Array.isArray(timeline.results))
+    throw new ProviderError(
+      status.UNAVAILABLE,
+      "invalid profile timeline response",
+    );
+  const ids = new Set<string>();
+  for (const post of timeline.results) {
+    if (
+      post?.type === "status" &&
+      typeof post.id === "string" &&
+      /^\d+$/.test(post.id)
+    )
+      ids.add(post.id);
+  }
+  if (ids.size > 200)
+    throw new ProviderError(
+      status.RESOURCE_EXHAUSTED,
+      "profile timeline exceeds capture page limit",
+    );
+  result.relatedTargets = [...ids].map((id) => ({
+    url: `https://x.com/i/web/status/${id}`,
+    refreshAfterSeconds: 0,
+  }));
+}
+
+async function publicJSON(
+  url: string,
+  signal: AbortSignal,
+  responses: SourceResponse[],
+  fetcher: typeof fetch = fetch,
+): Promise<any> {
+  const response = await fetcher(url, {
+    signal,
+    headers: { Accept: "application/json", "User-Agent": "Monitor/0.4" },
+  });
+  if (!response.ok)
+    throw responseError(response.status, response.headers.get("retry-after"));
+  const data = await readJSON(response, (body) =>
+    responses.push({
+      body,
+      contentType: response.headers.get("content-type") ?? "application/json",
+      sourceUrl: url,
+      visibility: Visibility.VISIBILITY_PUBLIC,
+    }),
+  );
+  if (data?.code !== 200)
+    throw responseError(typeof data?.code === "number" ? data.code : 502);
+  return data;
+}
+export async function fetchPublicTimeline(
+  result: FetchResponse,
+  signal: AbortSignal,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  try {
+    attachTimeline(
+      result,
+      await publicJSON(
+        `https://api.fxtwitter.com/2/profile/id:${result.canonicalTarget!.externalId}/statuses?count=100`,
+        signal,
+        result.sourceResponses,
+        fetcher,
+      ),
+    );
+  } catch {
+    result.incomplete = true;
+    result.warnings.push(
+      "最近帖子获取失败；Profile 已保存，请重新提交 Profile 链接重试。",
+    );
+  }
+}
+
+export async function fetchPublicProfile(
+  id: string,
+  expand: boolean,
+  signal: AbortSignal,
+  endpoint = "https://api.fxtwitter.com/2/profile",
+  fetcher: typeof fetch = fetch,
+): Promise<FetchResponse> {
+  const responses: SourceResponse[] = [];
+  const get = (url: string) => publicJSON(url, signal, responses, fetcher);
+  const handle = id.startsWith("handle:") ? id.slice(7) : `id:${id}`;
+  const data = await get(
+    `${endpoint}/${encodeURIComponent(handle)}?about_account=1`,
+  );
+  const result = normalizeProfile(data.user, id, "fxtwitter");
+  if (expand) {
+    try {
+      attachTimeline(
+        result,
+        await get(`${endpoint}/id:${data.user.id}/statuses?count=100`),
+      );
+    } catch {
+      result.incomplete = true;
+      result.warnings.push(
+        "最近帖子获取失败；Profile 已保存，请重新提交 Profile 链接重试。",
+      );
+    }
+  }
+  result.sourceResponses = responses;
+  return result;
+}
+
+export async function fetchSessionTimeline(
+  result: FetchResponse,
+  credential: SessionCredential,
+  signal: AbortSignal,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  const responses: SourceResponse[] = [];
+  const host: TwitterBuildHost = {
+    t: (key) => key,
+    twitterProxy: accountTransport(credential, signal, fetcher, responses),
+    shouldTranscodeGif: () => false,
+  };
+  try {
+    attachTimeline(
+      result,
+      await profileStatusesAPI(
+        { type: "userId", value: result.canonicalTarget!.externalId },
+        20,
+        null,
+        host,
+      ),
+    );
+  } catch {
+    result.incomplete = true;
+    result.warnings.push(
+      "最近帖子获取失败；Profile 已保存，请重新提交 Profile 链接重试。",
+    );
+  }
+  result.sourceResponses.push(...responses);
+}

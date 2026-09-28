@@ -20,11 +20,12 @@ var (
 )
 
 type Target struct {
-	URL         string
-	ExternalID  string
-	Platform    string
-	Kind        string
-	ObjectScope string
+	RefreshOnSubmit bool
+	URL             string
+	ExternalID      string
+	Platform        string
+	Kind            string
+	ObjectScope     string
 }
 
 // URL transport validation is generic. Only adapters identify platform objects.
@@ -54,13 +55,15 @@ type (
 )
 
 type CaptureInput struct {
-	Input        string `json:"-"`
-	URL          string `json:"url"`
-	ProviderID   string `json:"provider_id,omitempty"`
-	ConnectionID string `json:"connection_id,omitempty"`
-	RefreshID    string `json:"refresh_id,omitempty"`
-	Key          string `json:"-"`
-	Origin       Origin `json:"-"`
+	Automatic           bool   `json:"-"`
+	RefreshAfterSeconds uint32 `json:"-"`
+	Input               string `json:"-"`
+	URL                 string `json:"url"`
+	ProviderID          string `json:"provider_id,omitempty"`
+	ConnectionID        string `json:"connection_id,omitempty"`
+	RefreshID           string `json:"refresh_id,omitempty"`
+	Key                 string `json:"-"`
+	Origin              Origin `json:"-"`
 }
 
 type Job struct {

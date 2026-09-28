@@ -12,6 +12,8 @@ import (
 const (
 	ProtocolVersion   = "1.0"
 	CaptureFetch      = "capture.fetch"
+	CaptureRelated    = "capture.related"
+	CaptureCanonical  = "capture.canonical"
 	ConnectionCheck   = "connection.check"
 	CredentialPrepare = "credential.prepare"
 )

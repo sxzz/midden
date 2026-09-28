@@ -19,6 +19,10 @@ func (s *Service) entityGraph(ctx context.Context, r *pb.FetchResponse) (*domain
 	if r.Graph == nil {
 		return nil, nil
 	}
+	rootID := r.ExternalId
+	if r.CanonicalTarget != nil {
+		rootID = r.CanonicalTarget.ExternalId
+	}
 	g := r.Graph
 	if len(g.Entities) == 0 || len(g.Entities) > 32 || len(g.Relations) > 128 {
 		return nil, &PermanentError{"invalid entity graph size"}
@@ -77,7 +81,7 @@ func (s *Service) entityGraph(ctx context.Context, r *pb.FetchResponse) (*domain
 			seen[i] = true
 		}
 		out.Entities = append(out.Entities, domain.Entity{Key: e.Key, Type: e.Type, ExternalID: e.ExternalId, Data: data, Schema: schema.JSON, ResourceIndices: e.ResourceIndices})
-		if e.Key == g.Root && e.ExternalId != r.ExternalId {
+		if e.Key == g.Root && e.ExternalId != rootID {
 			return nil, &PermanentError{"entity root does not match capture identity"}
 		}
 	}
