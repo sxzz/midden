@@ -21,8 +21,8 @@ generate:
 	PATH="$$PATH:$$(go env GOPATH)/bin" protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative api/adapter/v1/adapter.proto
 
 fmt:
-	python3 scripts/format.py --write
+	node scripts/format.mjs --write
 fmt-check:
-	python3 scripts/format.py --check
+	node scripts/format.mjs --check
 install-hooks:
 	node scripts/install-hooks.mjs
