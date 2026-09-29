@@ -168,8 +168,7 @@ const writeDataPoint = (
     void 0;
 
     const cf = host.request?.cf as
-      | { colo?: string; country?: string }
-      | undefined;
+      { colo?: string; country?: string } | undefined;
     host.analyticsEngine?.writeDataPoint({
       blobs: [
         cf?.colo as string /* Datacenter location */,
@@ -1001,12 +1000,10 @@ const fetchSingleStatus = async (
           validator: (response: unknown) => {
             const r = (response as TweetResultsByIdsResponse)?.data
               ?.tweet_results?.[0]?.result as
-              | GraphQLTwitterStatus
-              | TweetStub
-              | undefined;
+              GraphQLTwitterStatus | TweetStub | undefined;
             return Boolean(
               (r as GraphQLTwitterStatus)?.__typename ||
-                (r as TweetStub)?.reason,
+              (r as TweetStub)?.reason,
             );
           },
         },
@@ -1019,12 +1016,10 @@ const fetchSingleStatus = async (
           validator: (response: unknown) => {
             const r = (response as TweetResultsByRestIdsResponse)?.data
               ?.tweetResult?.[0]?.result as
-              | GraphQLTwitterStatus
-              | TweetStub
-              | undefined;
+              GraphQLTwitterStatus | TweetStub | undefined;
             return Boolean(
               (r as GraphQLTwitterStatus)?.__typename ||
-                (r as TweetStub)?.reason,
+              (r as TweetStub)?.reason,
             );
           },
         },

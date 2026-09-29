@@ -719,9 +719,7 @@ type GraphQLTimelineTweet = {
   __typename: "TimelineTweet";
   tweet_results: {
     result:
-      | GraphQLTwitterStatus
-      | TweetTombstone
-      | GraphQLTweetWithVisibilityResults;
+      GraphQLTwitterStatus | TweetTombstone | GraphQLTweetWithVisibilityResults;
   };
 };
 
@@ -774,9 +772,7 @@ type GraphQLConversationThread = {
 };
 
 type GraphQLTimelineEntry =
-  | GraphQLTimelineTweetEntry
-  | GraphQLConversationThread
-  | unknown;
+  GraphQLTimelineTweetEntry | GraphQLConversationThread | unknown;
 
 type TimelineInstruction =
   | TimelineAddEntriesInstruction

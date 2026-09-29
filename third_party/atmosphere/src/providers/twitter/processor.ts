@@ -743,7 +743,8 @@ export const buildAPITwitterStatus = async (
         status.author_community_relationship.community_results.result
           .description,
       created_at: new Date(
-        status.author_community_relationship.community_results.result.created_at,
+        status.author_community_relationship.community_results.result
+          .created_at,
       ).toISOString(),
       search_tags:
         status.author_community_relationship.community_results.result

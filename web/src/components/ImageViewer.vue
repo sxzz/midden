@@ -1,75 +1,76 @@
 <script setup vapor lang="ts">
 import {
   computed,
-  onMounted,
   onBeforeUnmount,
+  onMounted,
   shallowRef,
   useTemplateRef,
   watch,
-} from "vue";
-import { assetURL, type Asset } from "../api";
-import LoadingImage from "./ui/LoadingImage.vue";
-const props = defineProps<{ images: Asset[]; initialId: string }>();
-const emit = defineEmits<{ close: [] }>();
+} from 'vue'
+import { assetURL, type Asset } from '../api'
+import LoadingImage from './ui/LoadingImage.vue'
+const props = defineProps<{ images: Asset[]; initialId: string }>()
+const emit = defineEmits<{ close: [] }>()
 const index = shallowRef(
   Math.max(
     0,
     props.images.findIndex((a) => a.id === props.initialId),
   ),
-);
-const selected = computed(() => props.images[index.value]);
-const dialog = useTemplateRef<HTMLDialogElement>("viewer");
-let previousOverflow = "";
-let opener: HTMLElement | null = null;
-let start: { x: number; y: number } | undefined;
+)
+const selected = computed(() => props.images[index.value])
+const dialog = useTemplateRef<HTMLDialogElement>('viewer')
+let previousOverflow = ''
+let opener: HTMLElement | null = null
+let start: { x: number; y: number } | undefined
 onMounted(() => {
   opener =
     document.activeElement instanceof HTMLElement
       ? document.activeElement
-      : null;
-  previousOverflow = document.body.style.overflow;
-  document.body.style.overflow = "hidden";
-  dialog.value?.showModal();
-});
+      : null
+  previousOverflow = document.body.style.overflow
+  document.body.style.overflow = 'hidden'
+  dialog.value?.showModal()
+})
 onBeforeUnmount(() => {
-  dialog.value?.close();
-  document.body.style.overflow = previousOverflow;
-  if (opener?.isConnected) opener.focus({ preventScroll: true });
-});
+  dialog.value?.close()
+  document.body.style.overflow = previousOverflow
+  if (opener?.isConnected) opener.focus({ preventScroll: true })
+})
 watch(
   () => props.images,
-  () => emit("close"),
-);
+  () => emit('close'),
+)
 function move(delta: number) {
   index.value = Math.max(
     0,
     Math.min(props.images.length - 1, index.value + delta),
-  );
+  )
 }
 function touchStart(event: TouchEvent) {
-  const touch = event.touches[0];
+  const touch = event.touches[0]
   start =
     event.touches.length === 1 && touch
       ? { x: touch.clientX, y: touch.clientY }
-      : undefined;
+      : undefined
 }
 function touchEnd(event: TouchEvent) {
-  const touch = event.changedTouches[0];
+  const touch = event.changedTouches[0]
   if (start && touch) {
-    const dx = touch.clientX - start.x,
-      dy = touch.clientY - start.y;
+    const dx = touch.clientX - start.x
+    const dy = touch.clientY - start.y
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5)
-      move(dx < 0 ? 1 : -1);
+      move(dx < 0 ? 1 : -1)
   }
-  start = undefined;
+  start = undefined
 }
 function keydown(event: KeyboardEvent) {
-  if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-    event.preventDefault();
-    move(event.key === "ArrowLeft" ? -1 : 1);
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    event.preventDefault()
+    move(event.key === 'ArrowLeft' ? -1 : 1)
   }
 }
 </script>
+
 <template>
   <dialog
     ref="viewer"
@@ -116,6 +117,7 @@ function keydown(event: KeyboardEvent) {
     </div>
   </dialog>
 </template>
+
 <style scoped>
 .viewer {
   position: fixed;
@@ -163,7 +165,7 @@ function keydown(event: KeyboardEvent) {
   background-color: #171717;
   object-fit: contain;
 }
-.stage :deep(.image-shell[aria-busy="true"]) {
+.stage :deep(.image-shell[aria-busy='true']) {
   width: 100%;
   height: 60dvh;
 }

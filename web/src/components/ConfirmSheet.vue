@@ -1,25 +1,26 @@
 <script setup vapor lang="ts">
-import { useTemplateRef, watch } from "vue";
+import { useTemplateRef, watch } from 'vue'
 const props = defineProps<{
-  open: boolean;
-  title: string;
-  description?: string;
-  confirmLabel: string;
-  busy?: boolean;
-}>();
-const emit = defineEmits<{ confirm: []; cancel: [] }>();
-const dialog = useTemplateRef<HTMLDialogElement>("sheet");
+  open: boolean
+  title: string
+  description?: string
+  confirmLabel: string
+  busy?: boolean
+}>()
+const emit = defineEmits<{ confirm: []; cancel: [] }>()
+const dialog = useTemplateRef<HTMLDialogElement>('sheet')
 watch(
   () => props.open,
   (open) => {
-    if (open) dialog.value?.showModal();
-    else dialog.value?.close();
+    if (open) dialog.value?.showModal()
+    else dialog.value?.close()
   },
-);
+)
 function backdrop(event: MouseEvent) {
-  if (event.target === dialog.value) emit("cancel");
+  if (event.target === dialog.value) emit('cancel')
 }
 </script>
+
 <template>
   <dialog
     ref="sheet"
@@ -47,6 +48,7 @@ function backdrop(event: MouseEvent) {
     </button>
   </dialog>
 </template>
+
 <style scoped>
 .sheet {
   width: 100%;

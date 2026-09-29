@@ -77,8 +77,7 @@ export function groupConsecutiveSelfReplies(
       const olderDid = older.post?.author?.did;
       if (!newerDid || newerDid !== olderDid) break;
       const rec = newer.post?.record as
-        | { reply?: { parent?: { uri?: string } } }
-        | undefined;
+        { reply?: { parent?: { uri?: string } } } | undefined;
       const parentUri = rec?.reply?.parent?.uri;
       if (parentUri !== older.post?.uri) break;
       j++;
@@ -119,8 +118,7 @@ async function feedViewPostsToGroupedTimeline(
       continue;
     }
     const newestRec = g[0].post?.record as
-      | { reply?: { root?: { uri?: string } } }
-      | undefined;
+      { reply?: { root?: { uri?: string } } } | undefined;
     const rootUri = newestRec?.reply?.root?.uri;
     const conversation_id =
       rkeyFromPostAtUri(rootUri) ?? built[built.length - 1].id;

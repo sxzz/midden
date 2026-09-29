@@ -1,39 +1,40 @@
 <script setup vapor lang="ts">
-import { shallowRef, onMounted, onUnmounted } from "vue";
-import { api, errorText } from "./api";
-import { host, setupHost } from "./host";
-import CollectionSkeleton from "./components/ui/CollectionSkeleton.vue";
-import CollectionLibrary from "./components/CollectionLibrary.vue";
-const ready = shallowRef(false),
-  error = shallowRef(""),
-  loading = shallowRef(true);
-let cleanup = () => {};
+import { onMounted, onUnmounted, shallowRef } from 'vue'
+import { api, errorText } from './api'
+import CollectionLibrary from './components/CollectionLibrary.vue'
+import CollectionSkeleton from './components/ui/CollectionSkeleton.vue'
+import { host, setupHost } from './host'
+const ready = shallowRef(false)
+const error = shallowRef('')
+const loading = shallowRef(true)
+let cleanup = () => {}
 onMounted(async () => {
-  cleanup = setupHost();
+  cleanup = setupHost()
   try {
-    await api("/session");
-    ready.value = true;
+    await api('/session')
+    ready.value = true
   } catch {
-    const data = host()?.initData;
+    const data = host()?.initData
     if (!data) {
-      error.value = "请从 Telegram Bot 的「打开」进入。";
+      error.value = '请从 Telegram Bot 的「打开」进入。'
     } else {
       try {
-        await api("/auth/telegram", {
-          method: "POST",
+        await api('/auth/telegram', {
+          method: 'POST',
           body: JSON.stringify({ init_data: data }),
-        });
-        ready.value = true;
+        })
+        ready.value = true
       } catch (e) {
-        error.value = errorText(e);
+        error.value = errorText(e)
       }
     }
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-});
-onUnmounted(() => cleanup());
+})
+onUnmounted(() => cleanup())
 </script>
+
 <template>
   <CollectionLibrary v-if="ready" />
   <main v-else class="gate">
@@ -41,6 +42,7 @@ onUnmounted(() => cleanup());
     <p v-else role="status">{{ error }}</p>
   </main>
 </template>
+
 <style scoped>
 .gate {
   display: grid;

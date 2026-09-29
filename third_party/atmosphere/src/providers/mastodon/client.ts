@@ -45,8 +45,7 @@ const isRedirectStatus = (s: number): boolean =>
  * result object, giving callers `ok: true` with `data: undefined`.
  */
 type MastodonRedirectResult =
-  | { redirected: true; res: Response }
-  | MastodonFetchErr;
+  { redirected: true; res: Response } | MastodonFetchErr;
 
 /** Single same-host hop (e.g. trailing slash / canonical URL) without following cross-origin redirects. */
 async function resolveMastodonRedirectIfNeeded(

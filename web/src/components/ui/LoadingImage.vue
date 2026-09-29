@@ -1,17 +1,18 @@
 <script setup vapor lang="ts">
-import { shallowRef, watch } from "vue";
+import { shallowRef, watch } from 'vue'
 const props = withDefaults(
-  defineProps<{ src: string; alt: string; loading?: "lazy" | "eager" }>(),
-  { loading: "lazy" },
-);
-const state = shallowRef<"loading" | "ready" | "error">("loading");
+  defineProps<{ src: string; alt: string; loading?: 'lazy' | 'eager' }>(),
+  { loading: 'lazy' },
+)
+const state = shallowRef<'loading' | 'ready' | 'error'>('loading')
 watch(
   () => props.src,
   () => {
-    state.value = "loading";
+    state.value = 'loading'
   },
-);
+)
 </script>
+
 <template>
   <span
     class="image-shell"
@@ -33,6 +34,7 @@ watch(
     >
   </span>
 </template>
+
 <style scoped>
 .image-shell {
   position: relative;

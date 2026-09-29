@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
-defineProps<{ title?: string; footnote?: string; plain?: boolean }>();
+defineProps<{ title?: string; footnote?: string; plain?: boolean }>()
 </script>
+
 <template>
   <section class="section">
     <h2 v-if="title" class="section-title">{{ title }}</h2>
@@ -8,6 +9,7 @@ defineProps<{ title?: string; footnote?: string; plain?: boolean }>();
     <p v-if="footnote" class="section-footnote">{{ footnote }}</p>
   </section>
 </template>
+
 <style scoped>
 .section {
   margin: 0 0 22px;

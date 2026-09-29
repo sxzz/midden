@@ -204,9 +204,7 @@ declare type BlueskyFeedBlockedPost = {
 };
 
 declare type BlueskyThreadParent =
-  | BlueskyThread
-  | BlueskyFeedNotFoundPost
-  | BlueskyFeedBlockedPost;
+  BlueskyThread | BlueskyFeedNotFoundPost | BlueskyFeedBlockedPost;
 
 declare type BlueskyThread = {
   $type?: string;
@@ -362,9 +360,7 @@ declare type BlueskyGetTrendingTopicsResponse = {
 
 /** `app.bsky.feed.getAuthorFeed` `filter` lexicon values used by FxBluesky. */
 declare type BlueskyAuthorFeedFilter =
-  | "posts_no_replies"
-  | "posts_with_replies"
-  | "posts_with_media";
+  "posts_no_replies" | "posts_with_replies" | "posts_with_media";
 
 interface BlueskyProcessBucket {
   posts: BlueskyPost[];

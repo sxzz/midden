@@ -120,8 +120,7 @@ export const processTimelineInstructions = (
       (instruction as TimelineAddEntriesInstruction).entries?.forEach(
         (_entry) => {
           const entry = _entry as
-            | GraphQLTimelineTweetEntry
-            | GraphQLConversationThread;
+            GraphQLTimelineTweetEntry | GraphQLConversationThread;
           const content = (entry as GraphQLTimelineTweetEntry)?.content;
 
           if (typeof content === "undefined") return;
@@ -342,8 +341,7 @@ export const processGroupedTimelineInstructions = (
       (instruction as TimelineAddEntriesInstruction).entries?.forEach(
         (_entry) => {
           const entry = _entry as
-            | GraphQLTimelineTweetEntry
-            | GraphQLConversationThread;
+            GraphQLTimelineTweetEntry | GraphQLConversationThread;
           const content = entry.content as
             | GraphQLTimelineItem
             | GraphQLTimelineCursor
@@ -457,8 +455,7 @@ const processUserRelationshipTimelineInstructionsImpl = (
       (instruction as TimelineAddEntriesInstruction).entries?.forEach(
         (_entry) => {
           const entry = _entry as
-            | GraphQLTimelineTweetEntry
-            | GraphQLConversationThread;
+            GraphQLTimelineTweetEntry | GraphQLConversationThread;
           const content = (entry as GraphQLTimelineTweetEntry)?.content;
 
           if (typeof content === "undefined") return;

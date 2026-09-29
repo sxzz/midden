@@ -309,8 +309,7 @@ export function fullUserFromWebProfile(
   const edgeFollowed = rec.edge_followed_by as { count?: number } | undefined;
   const edgeFollow = rec.edge_follow as { count?: number } | undefined;
   const edgeMedia = rec.edge_owner_to_timeline_media as
-    | { count?: number }
-    | undefined;
+    { count?: number } | undefined;
   const pic =
     typeof rec.profile_pic_url_hd === "string"
       ? rec.profile_pic_url_hd

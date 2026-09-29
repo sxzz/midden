@@ -1,27 +1,27 @@
 <script setup vapor lang="ts">
-import { computed, reactive, shallowRef } from "vue";
-const props = defineProps<{ query: string }>();
-const emit = defineEmits<{ search: [query: string] }>();
-const initial = new URLSearchParams(props.query);
+import { computed, reactive, shallowRef } from 'vue'
+const props = defineProps<{ query: string }>()
+const emit = defineEmits<{ search: [query: string] }>()
+const initial = new URLSearchParams(props.query)
 const form = reactive({
-  q: initial.get("q") || "",
-  media: initial.get("media_type") || "",
-  visibility: initial.get("visibility") || "",
-  from: initial.get("from_date") || "",
-  to: initial.get("to_date") || "",
-});
+  q: initial.get('q') || '',
+  media: initial.get('media_type') || '',
+  visibility: initial.get('visibility') || '',
+  from: initial.get('from_date') || '',
+  to: initial.get('to_date') || '',
+})
 const mediaNames: Record<string, string> = {
-  image: "图片",
-  video: "视频",
-  text: "纯文字",
-};
+  image: '图片',
+  video: '视频',
+  text: '纯文字',
+}
 const visibilityNames: Record<string, string> = {
-  public: "公开",
-  private: "私密",
-};
+  public: '公开',
+  private: '私密',
+}
 const open = shallowRef(
   !!(form.media || form.visibility || form.from || form.to),
-);
+)
 const active = computed(() =>
   [
     mediaNames[form.media],
@@ -32,28 +32,29 @@ const active = computed(() =>
         ? `${form.from} 起`
         : form.to
           ? `${form.to} 前`
-          : "",
+          : '',
   ]
     .filter(Boolean)
-    .join(" · "),
-);
+    .join(' · '),
+)
 function search() {
-  const q = new URLSearchParams();
+  const q = new URLSearchParams()
   for (const [k, v] of [
-    ["q", form.q],
-    ["media_type", form.media],
-    ["visibility", form.visibility],
-    ["from_date", form.from],
-    ["to_date", form.to],
+    ['q', form.q],
+    ['media_type', form.media],
+    ['visibility', form.visibility],
+    ['from_date', form.from],
+    ['to_date', form.to],
   ])
-    if (v) q.set(k, v);
-  emit("search", q.toString());
+    if (v) q.set(k, v)
+  emit('search', q.toString())
 }
 function clear() {
-  Object.assign(form, { q: "", media: "", visibility: "", from: "", to: "" });
-  emit("search", "");
+  Object.assign(form, { q: '', media: '', visibility: '', from: '', to: '' })
+  emit('search', '')
 }
 </script>
+
 <template>
   <form class="filters" @submit.prevent="search">
     <div class="bar">
@@ -111,6 +112,7 @@ function clear() {
     </div>
   </form>
 </template>
+
 <style scoped>
 .filters {
   padding: 10px var(--gutter) 6px;
@@ -204,7 +206,7 @@ function clear() {
 }
 .option + .option::before,
 .panel-actions::before {
-  content: "";
+  content: '';
   position: absolute;
   inset: 0 0 auto var(--inset);
   height: 1px;

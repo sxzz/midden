@@ -1,47 +1,48 @@
 <script setup vapor lang="ts">
-import LoadingImage from "./ui/LoadingImage.vue";
-import { computed, shallowRef, watch } from "vue";
-import ImageViewer from "./ImageViewer.vue";
-import { assetURL, type Asset } from "../api";
-import { mediaNotice } from "../presentation";
-const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>();
-const selected = shallowRef<Asset>();
+import { computed, shallowRef, watch } from 'vue'
+import { assetURL, type Asset } from '../api'
+import { mediaNotice } from '../presentation'
+import ImageViewer from './ImageViewer.vue'
+import LoadingImage from './ui/LoadingImage.vue'
+const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>()
+const selected = shallowRef<Asset>()
 function view(asset: Asset) {
-  selected.value = asset;
+  selected.value = asset
 }
-const revealed = shallowRef<string[]>([]);
+const revealed = shallowRef<string[]>([])
 watch(
   () => props.showSensitive,
   (show) => {
     if (!show) {
-      revealed.value = [];
+      revealed.value = []
       if (selected.value?.sensitive) {
-        selected.value = undefined;
+        selected.value = undefined
       }
     }
   },
-);
+)
 function reveal(id: string) {
-  revealed.value = [...revealed.value, id];
+  revealed.value = [...revealed.value, id]
 }
 const images = computed(() =>
   props.assets.filter(
     (asset) =>
-      asset.state === "ready" &&
-      asset.mime?.startsWith("image/") &&
+      asset.state === 'ready' &&
+      asset.mime?.startsWith('image/') &&
       (!asset.sensitive ||
         props.showSensitive ||
         revealed.value.includes(asset.id)),
   ),
-);
+)
 watch(
   () => props.assets,
   () => {
-    selected.value = undefined;
-    revealed.value = [];
+    selected.value = undefined
+    revealed.value = []
   },
-);
+)
 </script>
+
 <template>
   <div v-if="assets.length" class="media">
     <figure v-for="asset in assets" :key="asset.id" class="item">
@@ -67,7 +68,7 @@ watch(
         <video
           v-else-if="asset.mime?.startsWith('video/')"
           class="blurred"
-          :src="assetURL(asset) + '#t=0.1'"
+          :src="`${assetURL(asset)}#t=0.1`"
           muted
           playsinline
           preload="metadata"
@@ -112,6 +113,7 @@ watch(
     @close="selected = undefined"
   />
 </template>
+
 <style scoped>
 .media {
   display: grid;

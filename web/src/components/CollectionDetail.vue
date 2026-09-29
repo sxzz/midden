@@ -1,23 +1,23 @@
 <script setup vapor lang="ts">
-import { computed } from "vue";
-import { safeURL, type Collection } from "../api";
-import { date } from "../presentation";
-import { useCollectionDetail } from "../composables/useCollectionDetail";
-import CollectionSkeleton from "./ui/CollectionSkeleton.vue";
-import CollectionPost from "./CollectionPost.vue";
-import RevisionList from "./RevisionList.vue";
-import ConfirmSheet from "./ConfirmSheet.vue";
-import ListSection from "./ui/ListSection.vue";
-import ListButton from "./ui/ListButton.vue";
+import { computed } from 'vue'
+import { safeURL, type Collection } from '../api'
+import { useCollectionDetail } from '../composables/useCollectionDetail'
+import { date } from '../presentation'
+import CollectionPost from './CollectionPost.vue'
+import ConfirmSheet from './ConfirmSheet.vue'
+import RevisionList from './RevisionList.vue'
+import CollectionSkeleton from './ui/CollectionSkeleton.vue'
+import ListButton from './ui/ListButton.vue'
+import ListSection from './ui/ListSection.vue'
 const props = defineProps<{
-  id: string;
-  savedAt?: string;
-  showSensitive?: boolean;
-}>();
+  id: string
+  savedAt?: string
+  showSensitive?: boolean
+}>()
 const emit = defineEmits<{
-  deleted: [id: string];
-  updated: [collection: Collection];
-}>();
+  deleted: [id: string]
+  updated: [collection: Collection]
+}>()
 const {
   collection,
   error,
@@ -41,17 +41,18 @@ const {
   checkAvailability,
 } = useCollectionDetail(
   () => props.id,
-  (id) => emit("deleted", id),
-  (collection) => emit("updated", collection),
-);
-const saved = computed(() => date(props.savedAt || collection.value?.saved_at));
-const link = computed(() => collection.value && safeURL(collection.value.url));
+  (id) => emit('deleted', id),
+  (collection) => emit('updated', collection),
+)
+const saved = computed(() => date(props.savedAt || collection.value?.saved_at))
+const link = computed(() => collection.value && safeURL(collection.value.url))
 const version = computed(() =>
   collection.value
-    ? `${historical.value ? "历史" : "最新"}版本抓取于 ${date(collection.value.observed_at)}`
-    : "",
-);
+    ? `${historical.value ? '历史' : '最新'}版本抓取于 ${date(collection.value.observed_at)}`
+    : '',
+)
 </script>
+
 <template>
   <ListSection v-if="error" plain>
     <p class="banner" role="alert">{{ error }}</p>
@@ -121,6 +122,7 @@ const version = computed(() =>
     />
   </template>
 </template>
+
 <style scoped>
 .banner {
   margin: 0;

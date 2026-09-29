@@ -26,10 +26,7 @@ export type InstagramWebInfoPage =
       pathUsed: string;
       comments: PolarisMediaBundle["comments"];
       source:
-        | "account-proxy"
-        | "polaris-graphql"
-        | "polaris-html"
-        | "web-info-html";
+        "account-proxy" | "polaris-graphql" | "polaris-html" | "web-info-html";
       /** Session/doc LSD for GraphQL comment pagination (Polaris GraphQL has no HTML to parse). */
       lsd: string | null;
     }

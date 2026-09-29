@@ -1,44 +1,46 @@
 <script setup vapor lang="ts">
-import { computed } from "vue";
-import type { Collection, Usage } from "../api";
-import { groupCollections } from "../presentation";
-import CollectionSkeleton from "./ui/CollectionSkeleton.vue";
-import CollectionFilters from "./CollectionFilters.vue";
-import CollectionRow from "./CollectionRow.vue";
-import ListSection from "./ui/ListSection.vue";
-import ListButton from "./ui/ListButton.vue";
+import { computed } from 'vue'
+import { groupCollections } from '../presentation'
+import CollectionFilters from './CollectionFilters.vue'
+import CollectionRow from './CollectionRow.vue'
+import CollectionSkeleton from './ui/CollectionSkeleton.vue'
+import ListButton from './ui/ListButton.vue'
+import ListSection from './ui/ListSection.vue'
+import type { Collection, Usage } from '../api'
 const props = defineProps<{
-  items: Collection[];
-  showSensitive?: boolean;
-  query: string;
-  loading: boolean;
-  error: string;
-  next: string;
-  usage?: Usage;
-}>();
+  items: Collection[]
+  showSensitive?: boolean
+  query: string
+  loading: boolean
+  error: string
+  next: string
+  usage?: Usage
+}>()
 defineEmits<{
-  search: [query: string];
-  open: [id: string];
-  more: [];
-  retry: [];
-}>();
-const groups = computed(() => groupCollections(props.items));
+  search: [query: string]
+  open: [id: string]
+  more: []
+  retry: []
+}>()
+const groups = computed(() => groupCollections(props.items))
 const empty = computed(
   () => !props.loading && !props.error && !props.items.length,
-);
+)
 const size = (n: number) =>
   n >= 1073741824
-    ? (n / 1073741824).toFixed(1) + " GB"
-    : (n / 1048576).toFixed(0) + " MB";
+    ? `${(n / 1073741824).toFixed(1)} GB`
+    : `${(n / 1048576).toFixed(0)} MB`
 const storage = computed(() =>
   props.usage
-    ? `已用 ${size(props.usage.used_bytes)}，共 ${size(props.usage.limit_bytes)}` +
-      (props.usage.reserved_bytes
-        ? `，${size(props.usage.reserved_bytes)} 正在保存`
-        : "")
-    : "",
-);
+    ? `已用 ${size(props.usage.used_bytes)}，共 ${size(props.usage.limit_bytes)}${
+        props.usage.reserved_bytes
+          ? `，${size(props.usage.reserved_bytes)} 正在保存`
+          : ''
+      }`
+    : '',
+)
 </script>
+
 <template>
   <CollectionFilters
     :key="query"
@@ -61,8 +63,8 @@ const storage = computed(() =>
   <p v-if="empty" class="empty">
     {{
       query
-        ? "没有匹配的收藏。换个关键词，或清除筛选。"
-        : "这里还是空的。在对话里把链接发给机器人，就会保存到这里。"
+        ? '没有匹配的收藏。换个关键词，或清除筛选。'
+        : '这里还是空的。在对话里把链接发给机器人，就会保存到这里。'
     }}
   </p>
   <ListSection v-if="loading"><CollectionSkeleton /></ListSection>
@@ -76,6 +78,7 @@ const storage = computed(() =>
 
   <p v-if="storage" class="footnote">{{ storage }}</p>
 </template>
+
 <style scoped>
 .banner {
   margin: 0;

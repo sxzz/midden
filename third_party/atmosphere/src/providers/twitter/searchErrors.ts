@@ -4,9 +4,7 @@ import type { ApiQueryError } from "../../types/api-schemas.js";
 export const TWITTER_SEARCH_RAW_QUERY_MAX_LENGTH = 512;
 
 export type SearchTimelineClientErrorKind =
-  | "empty_query"
-  | "blocklisted"
-  | "query_too_long";
+  "empty_query" | "blocklisted" | "query_too_long";
 
 const QUERY_TOO_LONG_RE = /Raw query length \d+ exceeds max allowed \d+/i;
 

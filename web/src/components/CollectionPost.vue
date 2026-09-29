@@ -1,16 +1,17 @@
 <script setup vapor lang="ts">
-import LoadingImage from "./ui/LoadingImage.vue";
-import { computed } from "vue";
-import { assetURL, type Collection } from "../api";
-import { present, shortDate, warningList } from "../presentation";
-import MediaGallery from "./MediaGallery.vue";
+import { computed } from 'vue'
+import { assetURL, type Collection } from '../api'
+import { present, shortDate, warningList } from '../presentation'
+import MediaGallery from './MediaGallery.vue'
+import LoadingImage from './ui/LoadingImage.vue'
 const props = defineProps<{
-  collection: Collection;
-  showSensitive?: boolean;
-}>();
-const view = computed(() => present(props.collection));
-const warnings = computed(() => warningList(props.collection.warnings));
+  collection: Collection
+  showSensitive?: boolean
+}>()
+const view = computed(() => present(props.collection))
+const warnings = computed(() => warningList(props.collection.warnings))
 </script>
+
 <template>
   <article class="post">
     <header class="author">
@@ -43,6 +44,7 @@ const warnings = computed(() => warningList(props.collection.warnings));
     </p>
   </article>
 </template>
+
 <style scoped>
 .post {
   padding: 14px var(--inset) 16px;

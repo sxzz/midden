@@ -109,8 +109,7 @@ export interface SocialThread {
 /** Thread + replies with cursor-based pagination for the conversation endpoint. */
 export interface SocialConversation extends SocialThread {
   replies:
-    | (APIStatus | APITwitterStatus | APIThreadsStatus | APISubstatus)[]
-    | null;
+    (APIStatus | APITwitterStatus | APIThreadsStatus | APISubstatus)[] | null;
   cursor: {
     bottom: string | null;
   } | null;

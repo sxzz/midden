@@ -43,8 +43,7 @@ function connection(
   page_info: { has_next_page: boolean; end_cursor: string | null };
 } {
   const raw = user[key] as
-    | { edges?: unknown[]; page_info?: Record<string, unknown> }
-    | undefined;
+    { edges?: unknown[]; page_info?: Record<string, unknown> } | undefined;
   const edges = raw?.edges ?? [];
   const pi = raw?.page_info;
   return {
@@ -129,8 +128,7 @@ function nodeShowsVideoInGrid(
     }
   }
   const edgeSide = n.edge_sidecar_to_children as
-    | { edges?: unknown[] }
-    | undefined;
+    { edges?: unknown[] } | undefined;
   if (Array.isArray(edgeSide?.edges)) {
     for (const e of edgeSide.edges) {
       const nodeCh = (e as { node?: unknown })?.node;

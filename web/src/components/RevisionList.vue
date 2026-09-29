@@ -1,17 +1,18 @@
 <script setup vapor lang="ts">
-import type { Revision } from "../api";
-import { date } from "../presentation";
-import ListButton from "./ui/ListButton.vue";
+import { date } from '../presentation'
+import ListButton from './ui/ListButton.vue'
+import type { Revision } from '../api'
 defineProps<{
-  revisions: Revision[];
-  next: string;
-  busy?: boolean;
-  loading?: boolean;
-  selectedId: string;
-  latestId: string;
-}>();
-defineEmits<{ select: [id: string]; more: [] }>();
+  revisions: Revision[]
+  next: string
+  busy?: boolean
+  loading?: boolean
+  selectedId: string
+  latestId: string
+}>()
+defineEmits<{ select: [id: string]; more: [] }>()
 </script>
+
 <template>
   <div class="revisions">
     <ListButton
@@ -39,6 +40,7 @@ defineEmits<{ select: [id: string]; more: [] }>();
     />
   </div>
 </template>
+
 <style scoped>
 .revisions {
   border-top: 1px solid var(--separator);

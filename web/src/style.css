@@ -13,8 +13,8 @@
   --inset: 16px;
   --gutter: 16px;
   font-family:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
-    "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto,
+    'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', sans-serif;
   font-size: 16px;
   line-height: 1.45;
   color: var(--text);
@@ -36,7 +36,7 @@
     color-scheme: dark;
   }
 }
-:root[data-theme="dark"] {
+:root[data-theme='dark'] {
   --page: #17212b;
   --card: #222d3b;
   --fill: #2b3848;

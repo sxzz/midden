@@ -1,14 +1,15 @@
 <script setup vapor lang="ts">
-import LoadingImage from "./ui/LoadingImage.vue";
-import { computed } from "vue";
-import { assetURL, type Asset } from "../api";
-import { readyMedia } from "../presentation";
-const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>();
-const LIMIT = 4;
-const media = computed(() => readyMedia(props.assets));
-const tiles = computed(() => media.value.slice(0, LIMIT));
-const overflow = computed(() => media.value.length - tiles.value.length);
+import { computed } from 'vue'
+import { assetURL, type Asset } from '../api'
+import { readyMedia } from '../presentation'
+import LoadingImage from './ui/LoadingImage.vue'
+const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>()
+const LIMIT = 4
+const media = computed(() => readyMedia(props.assets))
+const tiles = computed(() => media.value.slice(0, LIMIT))
+const overflow = computed(() => media.value.length - tiles.value.length)
 </script>
+
 <template>
   <span v-if="tiles.length" class="thumbs" aria-hidden="true">
     <span
@@ -26,7 +27,7 @@ const overflow = computed(() => media.value.length - tiles.value.length);
       />
       <video
         v-else-if="asset.mime?.startsWith('video/')"
-        :src="assetURL(asset) + '#t=0.1'"
+        :src="`${assetURL(asset)}#t=0.1`"
         muted
         playsinline
         preload="metadata"
@@ -41,6 +42,7 @@ const overflow = computed(() => media.value.length - tiles.value.length);
     </span>
   </span>
 </template>
+
 <style scoped>
 .thumbs {
   display: flex;

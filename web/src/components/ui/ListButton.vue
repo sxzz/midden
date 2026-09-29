@@ -1,18 +1,19 @@
 <script setup vapor lang="ts">
 withDefaults(
   defineProps<{
-    label: string;
-    hint?: string;
-    trailing?: string;
-    href?: string;
-    chevron?: boolean;
-    disabled?: boolean;
-    variant?: "link" | "plain" | "destructive";
+    label: string
+    hint?: string
+    trailing?: string
+    href?: string
+    chevron?: boolean
+    disabled?: boolean
+    variant?: 'link' | 'plain' | 'destructive'
   }>(),
-  { variant: "link" },
-);
-defineEmits<{ select: [] }>();
+  { variant: 'link' },
+)
+defineEmits<{ select: [] }>()
 </script>
+
 <template>
   <a
     v-if="href"
@@ -40,6 +41,7 @@ defineEmits<{ select: [] }>();
     >
   </button>
 </template>
+
 <style scoped>
 .row {
   position: relative;
@@ -54,7 +56,7 @@ defineEmits<{ select: [] }>();
   color: var(--link);
 }
 .row + .row::before {
-  content: "";
+  content: '';
   position: absolute;
   inset: 0 0 auto var(--inset);
   height: 1px;

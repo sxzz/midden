@@ -37,7 +37,7 @@ export function hasInstagramAccountProxy(
 ): boolean {
   return Boolean(
     ctx?.credentialKey?.trim() &&
-      getInstagramProxyRuntime().hasBundledEncryptedCredentials(),
+    getInstagramProxyRuntime().hasBundledEncryptedCredentials(),
   );
 }
 

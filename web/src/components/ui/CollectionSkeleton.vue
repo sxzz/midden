@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
-withDefaults(defineProps<{ detail?: boolean; rows?: number }>(), { rows: 3 });
+withDefaults(defineProps<{ detail?: boolean; rows?: number }>(), { rows: 3 })
 </script>
+
 <template>
   <div role="status" aria-label="正在加载收藏" aria-busy="true">
     <div
@@ -19,6 +20,7 @@ withDefaults(defineProps<{ detail?: boolean; rows?: number }>(), { rows: 3 });
     </div>
   </div>
 </template>
+
 <style scoped>
 .placeholder {
   padding: 16px var(--inset);

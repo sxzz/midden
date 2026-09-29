@@ -13,7 +13,7 @@ export function hasTwitterAccountProxy(
     typeof env?.TwitterProxy !== "undefined" ||
     Boolean(
       env?.CREDENTIAL_KEY?.trim() &&
-        getTwitterProxyRuntime().hasBundledEncryptedCredentials(),
+      getTwitterProxyRuntime().hasBundledEncryptedCredentials(),
     )
   );
 }

@@ -1,26 +1,27 @@
 <script setup vapor lang="ts">
-import LoadingImage from "./ui/LoadingImage.vue";
-import { computed } from "vue";
-import { assetURL, type Collection } from "../api";
-import { excerpt, mediaSummary, present, shortDate } from "../presentation";
-import MediaThumbs from "./MediaThumbs.vue";
+import { computed } from 'vue'
+import { assetURL, type Collection } from '../api'
+import { excerpt, mediaSummary, present, shortDate } from '../presentation'
+import MediaThumbs from './MediaThumbs.vue'
+import LoadingImage from './ui/LoadingImage.vue'
 const props = defineProps<{
-  collection: Collection;
-  showSensitive?: boolean;
-}>();
-defineEmits<{ open: [id: string] }>();
-const view = computed(() => present(props.collection));
-const preview = computed(() => excerpt(view.value.body));
+  collection: Collection
+  showSensitive?: boolean
+}>()
+defineEmits<{ open: [id: string] }>()
+const view = computed(() => present(props.collection))
+const preview = computed(() => excerpt(view.value.body))
 const meta = computed(() =>
   [
-    view.value.handle && "@" + view.value.handle,
-    props.collection.visibility === "private" && "私密",
+    view.value.handle && `@${view.value.handle}`,
+    props.collection.visibility === 'private' && '私密',
     mediaSummary(props.collection.assets),
   ]
     .filter(Boolean)
-    .join(" · "),
-);
+    .join(' · '),
+)
 </script>
+
 <template>
   <button type="button" class="row" @click="$emit('open', collection.id)">
     <LoadingImage
@@ -48,6 +49,7 @@ const meta = computed(() =>
     </span>
   </button>
 </template>
+
 <style scoped>
 .row {
   position: relative;
@@ -58,7 +60,7 @@ const meta = computed(() =>
   background: none;
 }
 .row + .row::before {
-  content: "";
+  content: '';
   position: absolute;
   inset: 0 0 auto calc(var(--inset) + 52px);
   height: 1px;

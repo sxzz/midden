@@ -34,10 +34,7 @@ function asUnknownRecord(value: unknown): Record<string, unknown> | undefined {
 /** Normalize `data.user.result` vs `data.user_results.{rest_id,result}`. */
 export function extractUserResultNode(
   response:
-    | GraphQLUserResponse
-    | UserResultByScreenNameResponse
-    | null
-    | undefined,
+    GraphQLUserResponse | UserResultByScreenNameResponse | null | undefined,
 ): { restId?: string; result: unknown } | null {
   if (!response) {
     return null;
@@ -301,8 +298,7 @@ export const mergeAboutAccountData = (
 };
 
 export type ProfileHandleOrId =
-  | { type: "screenName"; value: string }
-  | { type: "userId"; value: string };
+  { type: "screenName"; value: string } | { type: "userId"; value: string };
 
 /**
  * Parses API v2 profile `{handle}`: plain screen name or `id:<numeric rest id>`.
@@ -438,8 +434,7 @@ const fetchUser = async (
   // Extract user response
   const userData = results.user?.success
     ? (results.user.data as
-        | GraphQLUserResponse
-        | UserResultByScreenNameResponse)
+        GraphQLUserResponse | UserResultByScreenNameResponse)
     : null;
 
   // Extract about account response
@@ -504,8 +499,7 @@ const fetchUserById = async (
 
   const userData = results.user?.success
     ? (results.user.data as
-        | GraphQLUserResponse
-        | UserResultByScreenNameResponse)
+        GraphQLUserResponse | UserResultByScreenNameResponse)
     : null;
 
   const aboutProfileData = results.aboutProfile?.success

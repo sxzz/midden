@@ -220,8 +220,7 @@ function mediaContainerFromThreadsPost(post: Record<string, unknown>): {
       const s = slide as Record<string, unknown>;
       if (s.is_video || s.video_url) {
         const vu = s.video_versions as
-          | { url?: string; width?: number; height?: number }[]
-          | undefined;
+          { url?: string; width?: number; height?: number }[] | undefined;
         const url =
           (typeof s.video_url === "string" && s.video_url) ||
           vu?.[0]?.url ||
@@ -259,8 +258,7 @@ function mediaContainerFromThreadsPost(post: Record<string, unknown>): {
     }
   } else if (isVideo) {
     const vv = post.video_versions as
-      | { url?: string; width?: number; height?: number }[]
-      | undefined;
+      { url?: string; width?: number; height?: number }[] | undefined;
     const url =
       (typeof post.video_url === "string" && post.video_url) ||
       vv?.[0]?.url ||
