@@ -16,7 +16,7 @@ jobs:
           install: false
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm format:check
-      - run: node --test scripts/test-deploy.mjs scripts/test-configure-local-storage.mjs scripts/test-format.mjs
+      - run: node --test scripts/test-deploy.mjs scripts/test-configure-local-storage.mjs scripts/test-format.mjs scripts/test-cloudflare-tunnel.mjs
       - run: pnpm --filter @midden/web lint
       - run: pnpm build && pnpm test
       - run: pnpm --filter @midden/web exec playwright install --with-deps chromium
