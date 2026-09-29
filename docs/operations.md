@@ -186,6 +186,16 @@ REST 新提交省略 `connection_id` 时始终调用公共 API；指定时使用
 
 core 镜像包含网页静态产物。反向代理须同时转发同域的 `/app/` 和 `/v1/`，保留 `Origin`、Cookie、Range 和响应 Content-Range；认证与媒体响应禁止共享缓存。设置数据库配置 `web_app_url` 为完整 HTTPS `/app/` 地址并重启 core 和已启用的 telegram 服务以同步私聊入口。不要把 Bot token 放入网页环境变量。
 
+确认公开地址可以访问后，使用当前部署镜像设置地址：
+
+```sh
+docker compose run --rm --no-deps --entrypoint monitorctl migrate config-set web_app_url https://example.com/app/
+docker compose restart core
+docker compose --profile telegram restart telegram
+```
+
+「打开」是 Bot 私聊的菜单按钮，由 Telegram channel 启动时同步。没有按钮时先检查 `web_app_url` 是否为空，再检查 telegram 服务启动日志；仅部署网页或重启 core 不会同步菜单。手机上的 `localhost` 指向手机本身，正式入口必须使用客户端可访问的 HTTPS 地址。
+
 关闭入口：将 `web_app_url` 设为空字符串并重启，Cookie 登录随之停用。已有 REST token 不受影响。会话过期后由维护任务清理；更换域名会使旧 Origin 无法进行 Cookie 写操作。
 
 Adapter 不可达时仍可浏览、搜索和删除已有收藏。后台每轮发现结束后等待 15 秒重试，日志记录可用性变化；`/healthz` 仍表示数据库及核心读取服务健康。配置或协议错误会终止进程。网页刷新是否可用由对应收藏的 availability 接口给出。
