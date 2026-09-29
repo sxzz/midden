@@ -15,7 +15,7 @@ make integration
 
 `make integration` 启动独立的 Docker PostgreSQL 和 SeaweedFS，使用随机本地端口，结束后删除测试容器。测试覆盖租户隔离、身份并发、版本与配额、Telegram 交互、River 队列和数据库／对象存储恢复。缺少测试数据库环境变量时，数据库测试会跳过。
 
-`pnpm format`（或 `make fmt`）统一运行 goimports、gofumpt、pgFormatter、Ruff、shfmt 和 Prettier；`pnpm format:check` 只检查。需要 Go、Node/pnpm、Python 3、uv 和 Git；格式化工具固定版本，缺少时自动安装到忽略提交的 `.tools/format/`。
+`pnpm format`（或 `make fmt`）统一运行 goimports、gofumpt、pgFormatter、shfmt 和 Prettier；`pnpm format:check` 只检查。需要 Go、Node/pnpm、Git 和 Perl（pgFormatter 运行时）；格式化工具固定版本，缺少时自动安装到忽略提交的 `.tools/format/`。
 
 执行 `node scripts/install-hooks.mjs` 为当前克隆启用 `.githooks/pre-commit`（正常 `pnpm install` 的 prepare 也会安装；使用 `--ignore-scripts` 时请显式执行）。每次提交检查暂存区的实际内容，格式不正确就阻止提交，不改写工作区或扩大暂存范围。运行 `pnpm format`，检查并重新暂存后再提交。CI 同样执行格式检查。SQL、生成源码和 vendored 源码均参与检查；pnpm 锁文件由包管理器维护。
 
