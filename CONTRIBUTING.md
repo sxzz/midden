@@ -17,13 +17,13 @@ make integration
 
 `pnpm format`（或 `make fmt`）统一运行 goimports、gofumpt、pgFormatter、Ruff、shfmt 和 Prettier；`pnpm format:check` 只检查。需要 Go、Node/pnpm、Python 3、uv 和 Git；格式化工具固定版本，缺少时自动安装到忽略提交的 `.tools/format/`。
 
-执行 `node scripts/install-hooks.mjs` 为当前克隆启用 `.githooks/pre-commit`（正常 `pnpm install` 的 prepare 也会安装；使用 `--ignore-scripts` 时请显式执行）。每次提交检查暂存区的实际内容，格式不正确就阻止提交，不改写工作区或扩大暂存范围。运行 `pnpm format`，检查并重新暂存后再提交。CI 同样执行格式检查。生成源码和 vendored 源码参与检查；pnpm 锁文件由包管理器维护。现有历史迁移暂不改写，基线合并后纳入 SQL 格式检查。
+执行 `node scripts/install-hooks.mjs` 为当前克隆启用 `.githooks/pre-commit`（正常 `pnpm install` 的 prepare 也会安装；使用 `--ignore-scripts` 时请显式执行）。每次提交检查暂存区的实际内容，格式不正确就阻止提交，不改写工作区或扩大暂存范围。运行 `pnpm format`，检查并重新暂存后再提交。CI 同样执行格式检查。SQL、生成源码和 vendored 源码均参与检查；pnpm 锁文件由包管理器维护。
 
 修改 `api/adapter/v1/adapter.proto` 后，安装 protoc 并运行 `make generate`。
 
 ## 发布前数据库变更
 
-Protocol 固定为 `1.0`，schema 固定为 `1`，正式发布前不因新增字段或功能递增。当前完整结构是 `internal/store/migrations/0001_initial.sql` 基线，不保留此前的升级路径。
+Protocol 固定为 `1.0`，schema 固定为 `1`，正式发布前不因新增字段或功能递增。当前完整结构是 `internal/store/migrations/0001_initial.sql` 基线，包含收藏命名、网页会话、unlimited 权限和独立 Telegram 队列，不保留此前的升级路径。
 
 从此基线开始，需要保留服务器数据。新增数据库变更放入 `internal/store/migrations/YYYYMMDDHHMMSS_description.sql`，按文件名排序；迁移文件名是执行顺序，不是 schema 版本号。已经部署的 SQL 不修改、不删除、不插入到已执行历史之前。迁移和校验和存入 `schema_migrations`，重复部署跳过已执行文件，修改历史或降级到缺少已执行文件的构建会报错。每个文件在一个事务中执行，不在文件内写 BEGIN/COMMIT，不使用不能在事务内执行的 DDL。需要更新已有 SQL 函数时在新文件内使用 CREATE OR REPLACE。
 

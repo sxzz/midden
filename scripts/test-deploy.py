@@ -30,7 +30,7 @@ elif 'migrate' in args and os.environ.get('MOCK_MIGRATE_FAIL') == '1':
 elif 'port' in args:
     print('127.0.0.1:' + args[-1])
 elif args[0] == 'inspect':
-    print('0' if args[-2] == '{{.RestartCount}}' else os.environ.get('MOCK_CONTAINER_STATE', 'true 0'))
+    print('0' if args[-2] == '{{.RestartCount}}' else os.environ.get('MOCK_CONTAINER_STATE', 'true false 0'))
 """
 
 
@@ -129,8 +129,16 @@ class DeploymentTest(unittest.TestCase):
         self.assertNotEqual(self.deploy(MOCK_HEALTH_FAIL="1").returncode, 0)
         self.assertFalse(self.starts_telegram())
 
+    def test_telegram_restart_backoff_is_not_healthy(self):
+        self.assertNotEqual(
+            self.deploy(MOCK_CONTAINER_STATE="true true 0").returncode, 0
+        )
+        self.assertEqual(self.calls()[-1][-2:], ["stop", "telegram"])
+
     def test_telegram_crash_loop_fails_and_stops_poller(self):
-        self.assertNotEqual(self.deploy(MOCK_CONTAINER_STATE="true 1").returncode, 0)
+        self.assertNotEqual(
+            self.deploy(MOCK_CONTAINER_STATE="true false 1").returncode, 0
+        )
         self.assertEqual(self.calls()[-1][-2:], ["stop", "telegram"])
 
 

@@ -31,11 +31,11 @@ chmod +x ~/deploy-midden.sh
 
 仓库及镜像公开，服务器可以匿名 HTTPS 拉取。`.env`、S3 凭据和备份不纳入 Git。若部署进程被强制终止，确认没有部署仍在运行后可删除空目录 `.local/deploy.lock` 再重试。`.local/deploy-telegram-state` 保留未完成部署的渠道启用状态，重试时读取，成功后自动删除。
 
-`compose.server.yaml` 提供较低的运行内存上限，并将 API、监控、S3 映射到本机 `18080`、`19090`、`18333`。使用本地 S3 的服务器可设置 `COMPOSE_FILE=compose.yaml:compose.local.yaml:compose.server.yaml`。已有部署保持原 `COMPOSE_PROJECT_NAME`，以继续管理原容器；数据通过项目下的 `.local/` 目录挂载，移动项目时需同步迁移该目录，并保留文件权限和所有者。旧版命名卷部署需先按 README 迁移数据。
+`compose.server.yaml` 提供较低的运行内存上限，并将 API、监控、S3 映射到本机 `18080`、`19090`、`18333`。使用本地 S3 的服务器可设置 `COMPOSE_FILE=compose.yaml:compose.local.yaml:compose.server.yaml`。已有部署保持原 `COMPOSE_PROJECT_NAME`，以继续管理原容器；默认数据通过项目下的 `.local/` 目录挂载，移动项目时需同步迁移该目录，并保留文件权限和所有者。继续使用既有 Docker 命名卷的部署，应在服务器私有 Compose override 中按挂载目标指定 `external: true` 和准确卷名，并将 override 追加到 `COMPOSE_FILE`；恢复时须同时保留该文件与这些卷，不能切换到空的默认目录。
 
 升级前还应按照下文备份对象存储，并安全保管 `.env` 中的 `CREDENTIAL_KEY` 及部署凭据。迁移脚本自动备份数据库、原 `.env` 和容器镜像信息，并记录目标提交号；不自动备份媒体对象。账号密文恢复需要原加密密钥。备份默认写入 `.local/backups`，权限仅限当前用户，需另行复制到服务器外。
 
-当前基线已经包含全部现有字段。从此基线部署或恢复的数据库都携带 `schema_migrations`；不支持从更早的开发 schema 自动升级。协议保持 `1.0`、schema 保持 `1`，迁移记录单独管理。已执行迁移的校验和不允许改变；旧构建缺少数据库已执行的迁移时拒绝迁移，不做自动降级。需要退回版本时，应恢复升级前数据库及配套对象备份，再运行匹配的旧构建。
+当前单文件基线 `0001_initial.sql` 包含收藏结构、网页会话、unlimited 权限和独立 Telegram 队列。从此基线部署或恢复的数据库都携带 `schema_migrations`；不支持从更早的开发 schema 自动升级，也不自动重写旧迁移记录。协议保持 `1.0`、schema 保持 `1`，迁移记录单独管理。已执行迁移的校验和不允许改变；旧构建缺少数据库已执行的迁移时拒绝迁移，不做自动降级。需要退回版本时，应恢复升级前数据库及配套对象备份，再运行匹配的旧构建。
 
 ## 观察与故障处理
 
@@ -198,10 +198,8 @@ Adapter 不可达时仍可浏览、搜索和删除已有收藏。后台每轮发
 
 Compose 默认不启动 Telegram，需 `docker compose --profile telegram up -d telegram`。内部端口 8081 仅供受信任的本机或容器网络使用，不映射、不代理到公网；公共 8080 的 Bearer/Web 会话认证保持不变。关闭 channel 后，待发任务留在 core，重新启动继续领取；同一个 Bot 只部署一个轮询实例。
 
-从合并进程升级时，先停止旧 core 与已存在的 telegram 服务，再备份、执行迁移、启动新 core，最后按需启用 telegram。迁移保留未处理 inbox、待发回复和投递批次进度，并取消旧 River 渠道任务。不要让旧 core 和新 channel 同时处理队列。渠道交付为至少一次：Telegram 接收成功但确认丢失时可能重复；已有确认的批次会跳过。
+渠道交付为至少一次：Telegram 接收成功但确认丢失时可能重复；已有确认的批次会跳过。当前基线直接创建独立渠道队列，不包含旧合并进程的迁移逻辑。
 
-### 收藏命名迁移
+### 收藏命名
 
-`20260930030000_collection_naming.sql` 原地重命名内容表、关联字段与回收函数，保留 ID、租户归属、RLS 和内容；保留期限配置改为 `collection_retention_days`。升级前停止旧 core 和 Telegram channel，备份数据库，再执行迁移并启动新版本。
-
-REST 客户端同步改用 `/v1/collections` 和 `collection_id`；Web 详情路由为 `#/collection/{id}`。旧路径不保留别名，core、Web 和 Telegram channel 应一起升级。历史迁移文件保持原样，以便校验已有数据库。
+REST 使用 `/v1/collections` 和 `collection_id`；Web 详情路由为 `#/collection/{id}`，保留期限配置为 `collection_retention_days`。基线直接创建收藏表，不包含旧命名升级逻辑或旧 API 路径别名。Core、Web 和 Telegram channel 应一起升级。

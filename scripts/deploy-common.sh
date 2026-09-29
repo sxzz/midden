@@ -114,8 +114,8 @@ deploy_revision() {
 		container=$(docker compose --profile telegram ps --all -q telegram)
 		before=$(docker inspect --format '{{.RestartCount}}' "$container")
 		sleep 10
-		after=$(docker inspect --format '{{.State.Running}} {{.RestartCount}}' "$container")
-		if [[ "$after" != "true $before" ]]; then
+		after=$(docker inspect --format '{{.State.Running}} {{.State.Restarting}} {{.RestartCount}}' "$container")
+		if [[ "$after" != "true false $before" ]]; then
 			echo 'Telegram exited or restarted during startup. Inspect its logs.' >&2
 			return 1
 		fi

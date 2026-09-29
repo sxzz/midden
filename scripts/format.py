@@ -50,9 +50,6 @@ def kind(path):
     # pnpm owns its lockfile's formatting; generated source remains checked.
     if path.name == "pnpm-lock.yaml":
         return None
-    # Existing migration checksums are immutable until the baseline is replaced.
-    if path.parent.as_posix() == "internal/store/migrations":
-        return None
     suffix = path.suffix.lower()
     if suffix in PRETTIER_EXTENSIONS:
         return "prettier"
