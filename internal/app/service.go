@@ -49,6 +49,8 @@ type Sender interface {
 }
 
 type Service struct {
+	Registry      *AdapterRegistry
+	WebURL        string
 	Adapters      map[string]AdapterBinding
 	Descriptor    *pb.DescribeResponse
 	EntitySchemas map[string]adapter.EntitySchema
@@ -112,7 +114,7 @@ func (s *Service) providerVisibility(ctx context.Context, id string) (string, er
 }
 
 func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureInput) (out domain.Job, err error) {
-	if len(s.Adapters) > 0 {
+	if s.Registry != nil || len(s.adapterBindings()) > 0 {
 		var scoped *Service
 		if in.RefreshID != "" {
 			var id string

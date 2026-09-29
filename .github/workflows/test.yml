@@ -14,6 +14,8 @@ jobs:
           cache: true
           install: false
       - run: pnpm install --frozen-lockfile --ignore-scripts && pnpm build && pnpm test
+      - run: pnpm --filter @midden/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @midden/web test:e2e
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: go vet ./...
       - run: ./scripts/test-integration.sh

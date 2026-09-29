@@ -2,8 +2,11 @@
 services:
   core:
     image: midden-core:dev
+    environment:
+      WEB_DIST: /opt/midden/web
     volumes:
       - ./.local/dev/bin:/usr/local/bin:ro
+      - ./web/dist:/opt/midden/web:ro
   migrate:
     image: midden-core:dev
     volumes:

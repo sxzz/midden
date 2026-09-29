@@ -101,6 +101,21 @@ Profile 资料始终从公共实例获取。采集帖子前先读取作者 Profi
 
 归档同时保存作者 ID、用户名、昵称、简介等 Profile metadata、头像文件、帖子发布时间和可确定的编辑时间。完整上游 JSON 响应按每次采集保留，个人账号响应只对本人可见。历史归档需要重新抓取才能补齐新增字段；上游未提供且无法确定的信息留空。
 
+## Telegram 归档网页
+
+归档网页使用 Vue Vapor，提供手机帖子流、正文与作者搜索、媒体和可见性筛选、保存日期范围、历史版本、重新抓取、删除及存储用量。首次登录从 Telegram 进入，与 Bot 共用保存记录和额度；独立浏览器登录暂未开放。
+
+将 core 的 8080 端口通过 HTTPS 反向代理公开，网页 `/app/` 与 API `/v1/` 必须同域。设置公开地址后重启 core：
+
+```sh
+docker compose run --rm --entrypoint monitorctl migrate config-set web_app_url https://archive.example.com/app/
+docker compose up -d --force-recreate core
+```
+
+Bot 私聊菜单和 `/start` 消息会提供「打开归档库」。在 BotFather 中按客户端要求配置该 HTTPS 域名。将 `web_app_url` 设置为空字符串并重启可关闭网页登录和入口，恢复命令菜单。会话有效期 12 小时，到期后从 Bot 重新打开。
+
+图片在网页内放大查看，视频支持分段读取；浏览器无法播放的原文件可下载。日期筛选使用设备本地日期，筛选的是保存时间。网页只访问自己的收藏；删除后不能继续通过网页访问其历史和媒体。
+
 ## 可选：使用个人 X 账号
 
 不配置个人账号也能使用全部公共归档功能，无需运营者准备账号池或自部署 FxEmbed。

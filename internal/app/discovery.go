@@ -16,6 +16,9 @@ import (
 )
 
 func (s *Service) descriptor(ctx context.Context) (*pb.DescribeResponse, error) {
+	if s.Registry != nil {
+		return nil, ErrAdapterUnavailable
+	}
 	if s.Descriptor != nil {
 		return s.Descriptor, nil
 	}
@@ -59,7 +62,7 @@ func (s *Service) defaultProvider(ctx context.Context, authentication string) (*
 
 func (s *Service) Resolve(ctx context.Context, raw string) (domain.Target, error) {
 	var target domain.Target
-	if len(s.Adapters) > 0 {
+	if s.Registry != nil || len(s.adapterBindings()) > 0 {
 		scoped, e := s.forURL(ctx, raw)
 		if e != nil {
 			return target, e

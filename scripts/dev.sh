@@ -17,6 +17,7 @@ compose=(docker compose -f compose.yaml -f compose.local.yaml -f compose.dev.yam
 build=(docker compose -f compose.yaml -f compose.local.yaml -f compose.build.yaml)
 
 if [[ "$target" != adapter ]]; then
+ pnpm --filter @midden/web build
 	case "$(docker info --format '{{.Architecture}}')" in
 	aarch64 | arm64) arch=arm64 ;;
 	x86_64 | amd64) arch=amd64 ;;

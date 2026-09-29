@@ -1,0 +1,101 @@
+export interface Asset {
+  id: string;
+  purpose?: string;
+  state: string;
+  mime?: string;
+  alt_text?: string;
+  sensitive: boolean;
+  error?: string;
+}
+export interface Entity {
+  key: string;
+  type: string;
+  data: Record<string, unknown>;
+  assets?: Asset[];
+}
+export interface Archive {
+  id: string;
+  url: string;
+  text: string;
+  summary?: string;
+  author_name?: string;
+  published_at?: string;
+  saved_at?: string;
+  observed_at: string;
+  visibility: string;
+  revision_id: string;
+  assets: Asset[];
+  warnings?: string[];
+  graph?: {
+    root: string;
+    entities: Entity[];
+    relations: { source: string; target: string; type: string }[];
+  };
+}
+export interface Page<T> {
+  items: T[];
+  next_cursor?: string;
+}
+export interface Revision {
+  id: string;
+  created_at: string;
+}
+export interface Job {
+  id: string;
+  archive_id: string;
+  state: string;
+  error?: string;
+}
+export interface Usage {
+  used_bytes: number;
+  reserved_bytes: number;
+  limit_bytes: number;
+}
+export class APIError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+export async function api<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const response = await fetch("/v1" + path, {
+    ...options,
+    credentials: "same-origin",
+    headers: {
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...options.headers,
+    },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new APIError(response.status, body.error || "服务暂时不可用");
+  }
+  return response.status === 204 ? (undefined as T) : response.json();
+}
+export function errorText(e: unknown) {
+  if (e instanceof APIError) {
+    if (e.status === 400 && e.message === "invalid archive filters")
+      return "筛选条件无效，请检查关键词和日期范围。";
+    if (e.status === 401) return "会话已失效，请关闭后从 Telegram 重新打开。";
+    if (e.status === 404) return "归档不存在或已从收藏中删除。";
+    if (e.status === 409) return "存储空间不足或操作冲突，请检查用量后重试。";
+    if (e.status === 429) return "操作太频繁，请稍后重试。";
+    if (e.status === 503) return "采集服务暂时不可用，请稍后重试。";
+  }
+  return e instanceof Error ? e.message : "加载失败，请重试。";
+}
+export const assetURL = (a: Asset, inline = true) =>
+  `/v1/assets/${encodeURIComponent(a.id)}${inline ? "?inline=1" : ""}`;
+export function safeURL(value: string) {
+  try {
+    const u = new URL(value);
+    return ["https:", "http:"].includes(u.protocol) ? u.href : undefined;
+  } catch {
+    return undefined;
+  }
+}

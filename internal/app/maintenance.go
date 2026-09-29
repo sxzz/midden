@@ -21,6 +21,9 @@ func init() { prometheus.MustRegister(QueueDepth, QueueAge) }
 
 // Reconcile terminal River jobs, including processes killed during their final attempt.
 func (s *Service) Maintain(ctx context.Context) error {
+	if _, e := s.DB.Pool.Exec(ctx, `SELECT cleanup_web_sessions()`); e != nil {
+		return e
+	}
 	rows, e := s.DB.Pool.Query(ctx, `SELECT id,args FROM river_job WHERE kind='monitor_task' AND state IN('discarded','cancelled') AND NOT (metadata @> '{"reconciled":true}') ORDER BY id LIMIT 100`)
 	if e != nil {
 		return e

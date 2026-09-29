@@ -18,7 +18,7 @@ func (s *Service) SavePublicArchive(ctx context.Context, tenant, id string) (add
 	if !validIDArgument(id) {
 		return false, domain.ErrNotFound
 	}
-	if len(s.Adapters) > 0 {
+	if s.Registry != nil || len(s.adapterBindings()) > 0 {
 		var raw string
 		err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx, "SELECT url FROM archives WHERE id=$1 AND visibility='public'", id).Scan(&raw)

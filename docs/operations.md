@@ -173,3 +173,13 @@ REST 新提交省略 `connection_id` 时始终调用公共 API；指定时使用
 使用 `monitorctl config-set additional_adapters --stdin` 从受保护文件导入，然后重启核心。该配置按敏感值处理，`config-list` 不显示内容。TLS CA 路径需在核心容器中可读。每个 Adapter 的 ID 必须为 1–32 个字母、数字、下划线或连字符；host 声明不能重叠，Provider ID 可以相同。
 
 `/account` 按 Adapter 显示账号，各平台分别选择一个账号或公共来源。添加按钮显示该平台的凭据说明，下一条私聊消息直接发送凭据即可；只有一个平台时自动进入该平台。输入有效期为 10 分钟，可随时点击“取消添加”或发送 `/account_cancel`。同一条消息中的不同平台链接使用各自的选择。删除账号仅清除该平台的当前选择；已有任务保留原 Adapter 和账号，不自动回退。
+
+## Mini App 部署
+
+core 镜像包含网页静态产物。反向代理须同时转发同域的 `/app/` 和 `/v1/`，保留 `Origin`、Cookie、Range 和响应 Content-Range；认证与媒体响应禁止共享缓存。设置数据库配置 `web_app_url` 为完整 HTTPS `/app/` 地址并重启 core，Bot 会同步私聊入口。不要把 Bot token 放入网页环境变量。
+
+关闭入口：将 `web_app_url` 设为空字符串并重启，Cookie 登录随之停用。已有 REST token 不受影响。会话过期后由维护任务清理；更换域名会使旧 Origin 无法进行 Cookie 写操作。
+
+Adapter 不可达时仍可浏览、搜索和删除已有归档。后台每轮发现结束后等待 15 秒重试，日志记录可用性变化；`/healthz` 仍表示数据库及核心读取服务健康。配置或协议错误会终止进程。网页刷新是否可用由对应归档的 availability 接口给出。
+
+上线验收需在 Telegram iOS、Android 和 Desktop 检查入口、会话、主题、返回和视频拖动。Telegram Web 内嵌页面若被浏览器禁止第三方 Cookie，可能无法保持会话；可使用原生 Telegram 客户端。

@@ -88,3 +88,19 @@ docker compose -f compose.yaml -f compose.local.yaml -f compose.build.yaml build
 ## 平台逻辑边界
 
 URL 规范化、平台对象标识、Cookie 解析、上游请求和媒体缓存键由 Adapter 实现。Go 核心负责通用存储、权限、调度和不透明凭据加密，不根据平台名称或 Provider ID 分支。Telegram 渠道可提供 X 专属交互，但必须检查 Adapter 能力；更换 Adapter 不应要求修改核心。新增平台功能应同时增加非 X fixture 的回归覆盖。
+
+## 归档网页开发
+
+`web/` 是独立 pnpm 工作区，使用锁定版本的 Vue 3.6 RC Vapor、TypeScript 和 Vite。组件使用 `<script setup vapor lang="ts">`，不依赖 VDOM 互操作；平台展示逻辑放在前端展示器中，公共 API 客户端和数据类型不依赖 Telegram SDK。
+
+```sh
+pnpm --filter @midden/web dev
+pnpm --filter @midden/web build
+pnpm --filter @midden/web test
+pnpm --filter @midden/web exec playwright install chromium
+pnpm --filter @midden/web test:e2e
+```
+
+Vite 将 `/v1` 代理到本地 core。真实 Telegram 登录需要同域 HTTPS；浏览器测试使用合成数据和模拟 API，不需要生产凭据。可用 `PLAYWRIGHT_CHANNEL=chrome` 使用已安装的 Chrome。Vitest 显式加载 Vue bundler 运行时，避免 Node 入口缺少 Vapor 导出。
+
+`pnpm build` 包含网页构建。core 从 `WEB_DIST` 读取静态文件，未设置时使用 `web/dist`；发布镜像自带前端产物。`scripts/dev.sh` 会构建并挂载本地网页。前端产物和浏览器测试输出不提交。

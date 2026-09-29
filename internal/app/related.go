@@ -108,7 +108,7 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		return err
 	}
 	scoped := s
-	if len(s.Adapters) > 0 {
+	if s.Registry != nil || len(s.adapterBindings()) > 0 {
 		scoped, err = s.forAdapter(adapterID)
 		if err != nil {
 			return err

@@ -143,6 +143,10 @@ func (s *Service) commandStart(ctx context.Context, r *commandRequest) error {
 	version := buildinfo.Version()
 	r.Entities = append(r.Entities, telegram.Entity{Type: "code", Offset: len(utf16.Encode([]rune(r.Text))), Length: len(utf16.Encode([]rune(version)))})
 	r.Text += version
+	if s.WebURL != "" {
+		r.Previous = 0
+		r.Buttons = append(r.Buttons, []telegram.Button{{Text: "打开归档库", WebApp: &telegram.WebAppInfo{URL: s.WebURL}}})
+	}
 	return nil
 }
 

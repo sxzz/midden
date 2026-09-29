@@ -59,10 +59,10 @@ func (s *Service) prepareUpdate(u telegram.Update, tenant, channel, username str
 					a.Error = "Adapter 不可用。"
 					selected = nil
 				}
-			} else if len(s.Adapters) == 1 {
+			} else if len(s.adapterBindings()) == 1 {
 				a.AdapterID = s.adapterIDs()[0]
 				selected, _ = s.forAdapter(a.AdapterID)
-			} else if len(s.Adapters) > 1 {
+			} else if len(s.adapterBindings()) > 1 {
 				if len(fields) > 1 {
 					a.Error = "请先选择添加账号的平台。"
 				}
@@ -109,7 +109,7 @@ func (s *Service) prepareUpdate(u telegram.Update, tenant, channel, username str
 }
 
 func (s *Service) commandAccountAdd(ctx context.Context, r *commandRequest) error {
-	if len(s.Adapters) > 0 {
+	if len(s.adapterBindings()) > 0 {
 		id := strings.TrimPrefix(r.Argument, "@")
 		if r.AccountImport != nil {
 			id = r.AccountImport.AdapterID
@@ -119,7 +119,7 @@ func (s *Service) commandAccountAdd(ctx context.Context, r *commandRequest) erro
 				return s.finishAccountDialog(ctx, r)
 			}
 		}
-		if id == "" && len(s.Adapters) == 1 {
+		if id == "" && len(s.adapterBindings()) == 1 {
 			id = s.adapterIDs()[0]
 		}
 		scoped, e := s.forAdapter(id)
@@ -132,7 +132,7 @@ func (s *Service) commandAccountAdd(ctx context.Context, r *commandRequest) erro
 				if err != nil || !adapter.Supports(p, adapter.CredentialPrepare, 1, 0) || !adapter.Supports(p, adapter.ConnectionCheck, 1, 0) {
 					continue
 				}
-				r.Buttons = append(r.Buttons, []telegram.Button{{Text: adapterDisplayName(s.Adapters[id].Descriptor), Data: "/account_add @" + id}})
+				r.Buttons = append(r.Buttons, []telegram.Button{{Text: adapterDisplayName(s.adapterBindings()[id].Descriptor), Data: "/account_add @" + id}})
 			}
 			return nil
 		}

@@ -13,11 +13,11 @@ import (
 )
 
 func (s *Service) commandAccount(ctx context.Context, r *commandRequest) error {
-	if len(s.Adapters) > 0 {
+	if len(s.adapterBindings()) > 0 {
 		if r.Argument != "" {
 			var scoped *Service
 			var err error
-			if r.Argument == "public" && len(s.Adapters) == 1 {
+			if r.Argument == "public" && len(s.adapterBindings()) == 1 {
 				scoped, err = s.forAdapter(s.adapterIDs()[0])
 			} else if strings.HasPrefix(r.Argument, "public:") {
 				scoped, err = s.forAdapter(strings.TrimPrefix(r.Argument, "public:"))
@@ -50,7 +50,7 @@ func (s *Service) commandAccount(ctx context.Context, r *commandRequest) error {
 			}
 			for _, row := range section.Buttons {
 				for i := range row {
-					row[i].Text = adapterDisplayName(s.Adapters[id].Descriptor) + " · " + row[i].Text
+					row[i].Text = adapterDisplayName(s.adapterBindings()[id].Descriptor) + " · " + row[i].Text
 					if row[i].Data == "/account public" {
 						row[i].Data = "/account public:" + id
 					}

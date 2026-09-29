@@ -181,10 +181,15 @@ func (c *Client) Updates(ctx context.Context, offset int64) ([]Update, error) {
 	return out, e
 }
 
+type WebAppInfo struct {
+	URL string `json:"url"`
+}
+
 type Button struct {
-	Text string `json:"text"`
-	Data string `json:"callback_data,omitempty"`
-	URL  string `json:"url,omitempty"`
+	WebApp *WebAppInfo `json:"web_app,omitempty"`
+	Text   string      `json:"text"`
+	Data   string      `json:"callback_data,omitempty"`
+	URL    string      `json:"url,omitempty"`
 }
 type Keyboard [][]Button
 
@@ -277,6 +282,13 @@ func (c *Client) SendInteractive(ctx context.Context, chat, text string, previou
 	cfg.ReplyToMessageID = int(c.replyTo)
 	cfg.DisableWebPagePreview = true
 	cfg.ReplyMarkup = markup(buttons)
+	for _, row := range buttons {
+		for _, button := range row {
+			if button.WebApp != nil {
+				cfg.ReplyMarkup = map[string]any{"inline_keyboard": buttons}
+			}
+		}
+	}
 	m, e := b.Send(cfg)
 	return int64(m.MessageID), apiError(e)
 }
@@ -547,4 +559,18 @@ func SplitCaption(text string) (string, string) {
 		units += size
 	}
 	return text, ""
+}
+
+// ConfigureWebMenu changes only the private-chat menu, leaving commands available.
+func (c *Client) ConfigureWebMenu(ctx context.Context, address string) error {
+	menu := map[string]any{"type": "commands"}
+	if address != "" {
+		menu = map[string]any{"type": "web_app", "text": "打开归档库", "web_app": map[string]string{"url": address}}
+	}
+	raw, e := json.Marshal(menu)
+	if e != nil {
+		return e
+	}
+	_, e = c.sdk(ctx).MakeRequest("setChatMenuButton", tg.Params{"menu_button": string(raw)})
+	return apiError(e)
 }
