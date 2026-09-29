@@ -96,6 +96,7 @@ export function createServer(
           capabilities: [
             "capture.fetch",
             "capture.related",
+            "capture.page",
             "capture.canonical",
             "content.text",
             "entity.graph",
@@ -114,6 +115,7 @@ export function createServer(
           capabilities: [
             "capture.fetch",
             "capture.related",
+            "capture.page",
             "capture.canonical",
             "connection.check",
             "credential.prepare",

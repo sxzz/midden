@@ -78,13 +78,13 @@ func TestMediaDeliveryResumesWithoutResendingAlbum(t *testing.T) {
 				return
 			}
 			if len(overflow) == 0 {
-				if !strings.Contains(r.FormValue("reply_markup"), "我也要存") || strings.Contains(r.FormValue("reply_markup"), "/recent") {
+				if !strings.Contains(r.FormValue("reply_markup"), "我也要存") || strings.Contains(r.FormValue("reply_markup"), "/list") {
 					t.Error("wrong text controls")
 				}
 				var entities []telegram.Entity
 				must(t, json.Unmarshal([]byte(r.FormValue("entities")), &entities))
-				if len(entities) != 1 || entities[0].Type != "code" {
-					t.Error("archive ID is not copyable", entities)
+				if len(entities) != 2 || entities[0].Type != "code" || entities[1].Type != "blockquote" {
+					t.Error("archive ID or body formatting missing", entities)
 				}
 				attempts++
 				if attempts == 1 {

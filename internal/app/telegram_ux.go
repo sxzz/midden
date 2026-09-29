@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
@@ -29,7 +30,7 @@ func (s *Service) replySender(channel string, replyTo int64) Sender {
 }
 
 func menuButtons() telegram.Keyboard {
-	return telegram.Keyboard{{{Text: "最近归档", Data: "/recent"}, {Text: "存储用量", Data: "/usage"}}}
+	return telegram.Keyboard{{{Text: "归档列表", Data: "/list"}, {Text: "存储用量", Data: "/usage"}}}
 }
 
 func channelButtons(chat string, buttons telegram.Keyboard) telegram.Keyboard {
@@ -127,6 +128,9 @@ func (s *Service) submissionStatus(ctx context.Context, t store.Task) error {
 	if e != nil || state == "sent" {
 		return e
 	}
+	if handled, err := s.collectionProgress(ctx, t); handled || err != nil {
+		return err
+	}
 	sender := s.replySender(channel, replyTo)
 	if _, ok := sender.(interactiveSender); !ok {
 		return nil
@@ -151,7 +155,7 @@ func (s *Service) submissionStatus(ctx context.Context, t store.Task) error {
 	text += "\n" + sourceURL
 
 	if text != last || mid == 0 {
-		buttons := telegram.Keyboard{{{Text: "查看状态", Data: "/status " + job.ID}, {Text: "最近归档", Data: "/recent"}}}
+		buttons := telegram.Keyboard{{{Text: "查看状态", Data: "/status " + job.ID}, {Text: "归档列表", Data: "/list"}}}
 		id, err := sendInteractive(ctx, sender, chat, text, mid, buttons)
 		if err != nil {
 			return telegramError(err)
@@ -185,9 +189,9 @@ func jobState(state string) string {
 
 func archiveButtons(id, url string) telegram.Keyboard {
 	return telegram.Keyboard{
-		{{Text: "重新抓取", Data: "/refresh " + id}},
-		{{Text: "原帖", URL: url}, {Text: "最近归档", Data: "/recent"}},
+		{{Text: "原帖", URL: url}, {Text: "重新抓取", Data: "/refresh " + id}},
 		{{Text: "删除", Data: "/delete " + id}},
+		{{Text: "归档列表", Data: "/list"}},
 	}
 }
 
@@ -201,9 +205,13 @@ func archiveMessage(a domain.Archive, state string) string {
 	if author == "" {
 		author = "未知作者"
 	}
-	parts := []string{header, author + "：\n" + strings.TrimSpace(a.Text)}
-	if published, err := time.Parse(time.RFC3339, a.PublishedAt); err == nil {
-		parts = append(parts, published.In(time.FixedZone("UTC+8", 8*60*60)).Format("2006-01-02 15:04:05"))
+	body := strings.TrimSpace(a.Text)
+	if body == "" {
+		body = "空"
+	}
+	parts := []string{header, author + "：\n" + body}
+	if text, _, _, ok := telegram.ProfilePresentation(a); ok {
+		parts = []string{text}
 	}
 	if state == "partial" {
 		parts = append(parts, "部分内容未保存")
@@ -222,4 +230,23 @@ func archiveMessage(a domain.Archive, state string) string {
 		}
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+func archiveMessageEntities(a domain.Archive) []telegram.Entity {
+	if _, entities, _, ok := telegram.ProfilePresentation(a); ok {
+		return entities
+	}
+	size := func(s string) int { return len(utf16.Encode([]rune(s))) }
+	author := strings.TrimSpace(a.AuthorName)
+	if author == "" {
+		author = "未知作者"
+	}
+	entities := []telegram.Entity{{Type: "code", Offset: 0, Length: size(a.ID)}}
+	if url := telegram.ArchiveAuthorURL(a); url != "" {
+		entities = append(entities, telegram.Entity{Type: "text_link", Offset: size(a.ID + "\n\n"), Length: size(author), URL: url})
+	}
+	if body := strings.TrimSpace(a.Text); body != "" {
+		entities = append(entities, telegram.Entity{Type: "blockquote", Offset: size(a.ID + "\n\n" + author + "：\n"), Length: size(body)})
+	}
+	return entities
 }

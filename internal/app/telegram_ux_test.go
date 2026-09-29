@@ -26,12 +26,12 @@ import (
 
 func TestCallbackValidation(t *testing.T) {
 	id := uuid.NewString()
-	for _, value := range []string{"/recent", "/usage", "/show " + id, "/refresh " + id, "/recent " + base64.RawURLEncoding.EncodeToString([]byte(id))} {
+	for _, value := range []string{"/list", "/usage", "/show " + id, "/refresh " + id, "/list " + base64.RawURLEncoding.EncodeToString([]byte(id))} {
 		if !validCallback(value) {
 			t.Fatal(value)
 		}
 	}
-	for _, value := range []string{"", "/refresh", "/show bad", "/recent bad", "/start", strings.Repeat("x", 65)} {
+	for _, value := range []string{"", "/refresh", "/show bad", "/list bad", "/start", strings.Repeat("x", 65)} {
 		if validCallback(value) {
 			t.Fatal(value)
 		}
@@ -88,7 +88,7 @@ func TestTelegramUXIntegration(t *testing.T) {
 			mu.Unlock()
 			fmt.Fprint(w, `{"ok":true,"result":true}`)
 		case "sendMessage":
-			if strings.HasPrefix(r.Form.Get("chat_id"), "-") && strings.Contains(r.Form.Get("reply_markup"), "/recent") {
+			if strings.HasPrefix(r.Form.Get("chat_id"), "-") && strings.Contains(r.Form.Get("reply_markup"), "/list") {
 				t.Error("group keyboard exposed recent")
 			}
 			if strings.Contains(r.Form.Get("reply_markup"), "我也要存") {
@@ -204,7 +204,7 @@ func TestTelegramUXIntegration(t *testing.T) {
 	}
 	must(t, restarted.reply(ctx, store.Task{Tenant: identity.TenantID, ID: rid, Type: "reply"}))
 
-	iid = inbox(identity.TenantID, "42", "/recent")
+	iid = inbox(identity.TenantID, "42", "/list")
 	var linked []byte
 	must(t, db.Tx(ctx, identity.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT id,entities FROM replies WHERE inbox_id=$1`, iid).Scan(&rid, &linked)
@@ -215,7 +215,7 @@ func TestTelegramUXIntegration(t *testing.T) {
 		t.Fatal("source link not persisted", links)
 	}
 	must(t, restarted.reply(ctx, store.Task{Tenant: identity.TenantID, ID: rid, Type: "reply"}))
-	iid = inbox(other.TenantID, "43", "/recent")
+	iid = inbox(other.TenantID, "43", "/list")
 	var emptyText, replyState string
 	must(t, db.Tx(ctx, other.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT id,text FROM replies WHERE inbox_id=$1`, iid).Scan(&rid, &emptyText)
@@ -259,7 +259,7 @@ func TestTelegramUXIntegration(t *testing.T) {
 		return tx.QueryRow(ctx, `SELECT message_id FROM replies WHERE id=$1`, rid).Scan(&groupMenuID)
 	}))
 	// Another member cannot interact with the initiating user's buttons.
-	iid = inboxChat(other.TenantID, "43", "-42", "/recent", groupMenuID)
+	iid = inboxChat(other.TenantID, "43", "-42", "/list", groupMenuID)
 	must(t, db.Tx(ctx, other.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT text FROM replies WHERE inbox_id=$1`, iid).Scan(&groupText)
 	}))
@@ -286,18 +286,18 @@ func TestTelegramUXIntegration(t *testing.T) {
 	}
 	expectedReplyTo.Store(502)
 	must(t, restarted.deliver(ctx, store.Task{Tenant: identity.TenantID, ID: sid, Type: "deliver"}))
-	iid = groupMessage(other.TenantID, "43", "/recent", 503)
+	iid = groupMessage(other.TenantID, "43", "/list", 503)
 	must(t, db.Tx(ctx, other.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT id,text FROM replies WHERE inbox_id=$1`, iid).Scan(&rid, &groupText)
 	}))
-	if groupText != "请在私聊中使用 /recent。" {
+	if groupText != "请在私聊中使用 /list。" {
 		t.Fatal("recent must be disabled in groups", groupText)
 	}
 	expectedReplyTo.Store(503)
 	must(t, restarted.reply(ctx, store.Task{Tenant: other.TenantID, ID: rid, Type: "reply"}))
 
 	// Foreign archive IDs in callbacks never create delivery or refresh submissions.
-	for _, action := range []string{"/show " + job.ArchiveID, "/refresh " + job.ArchiveID, "/recent " + base64.RawURLEncoding.EncodeToString([]byte(job.ArchiveID))} {
+	for _, action := range []string{"/show " + job.ArchiveID, "/refresh " + job.ArchiveID, "/list " + base64.RawURLEncoding.EncodeToString([]byte(job.ArchiveID))} {
 		iid = inbox(other.TenantID, "43", action)
 		var text string
 		must(t, db.Tx(ctx, other.TenantID, func(tx pgx.Tx) error {
@@ -400,7 +400,7 @@ func TestTelegramUXIntegration(t *testing.T) {
 func TestArchiveMessageIncludesOnlyArchiveID(t *testing.T) {
 	a := domain.Archive{ID: uuid.NewString(), RevisionID: uuid.NewString(), Text: "原帖正文", AuthorName: "测试作者", URL: "https://x.com/i/status/20", PublishedAt: "2026-04-05T03:22:33Z", Assets: []domain.Asset{{State: "ready"}}}
 	text := archiveMessage(a, "complete")
-	if text != a.ID+"\n\n测试作者：\n原帖正文\n\n2026-04-05 11:22:33" {
+	if text != a.ID+"\n\n测试作者：\n原帖正文" {
 		t.Fatal(text)
 	}
 	a.Text = ""

@@ -180,11 +180,12 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [used_bytes, reserved_bytes, limit_bytes]
+                required: [used_bytes, reserved_bytes, limit_bytes, unlimited]
                 properties:
                   used_bytes: { type: integer, format: int64 }
                   reserved_bytes: { type: integer, format: int64 }
-                  limit_bytes: { type: integer, format: int64 }
+                  limit_bytes: { type: integer, format: int64, description: "Configured quota; not enforced when unlimited is true" }
+                  unlimited: { type: boolean }
         "401": { $ref: "#/components/responses/Unauthorized" }
 components:
   securitySchemes:

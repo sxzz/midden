@@ -27,7 +27,7 @@ func main() {
 
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: monitorctl config-list | config-set KEY VALUE | storage-init | migrate | tenant-create | token-create TENANT | token-revoke TOKEN_ID | channel-create UUID BOT_ID | app-password")
+		return fmt.Errorf("usage: monitorctl config-list | config-set KEY VALUE | storage-init | migrate | tenant-create | tenant-unlimited TENANT on|off | token-create TENANT | token-revoke TOKEN_ID | channel-create UUID BOT_ID | app-password")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -49,6 +49,20 @@ func run() error {
 		return connectionCommand(ctx, db, os.Args[1:])
 	}
 	switch os.Args[1] {
+	case "tenant-unlimited":
+		if len(os.Args) != 4 || (os.Args[3] != "on" && os.Args[3] != "off") {
+			return fmt.Errorf("tenant-unlimited TENANT on|off")
+		}
+		if _, err := uuid.Parse(os.Args[2]); err != nil {
+			return fmt.Errorf("invalid tenant ID")
+		}
+		_, err := db.Pool.Exec(ctx, "INSERT INTO tenant_entitlements(tenant_id,unlimited) VALUES($1,$2) ON CONFLICT(tenant_id) DO UPDATE SET unlimited=excluded.unlimited", os.Args[2], os.Args[3] == "on")
+		if err != nil {
+			return err
+		}
+		fmt.Println("tenant entitlement updated")
+		return nil
+
 	case "config-list":
 		rows, err := db.Pool.Query(ctx, `SELECT key,CASE WHEN sensitive AND value<>'' THEN '[redacted]' ELSE value END FROM config ORDER BY key`)
 		if err != nil {

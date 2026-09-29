@@ -17,6 +17,9 @@ import (
 )
 
 func validateRelatedResult(policy *pb.Provider, r *pb.FetchResponse, platform, kind, scope string) error {
+	if len(r.NextPageCursor) > 4096 || r.MaxBatchSize > 1000 || ((r.NextPageCursor != "" || r.MaxBatchSize > 0) && !adapter.Supports(policy, adapter.CapturePage, 1, 0)) {
+		return &PermanentError{"undeclared or invalid page continuation"}
+	}
 	if c := r.CanonicalTarget; c != nil {
 		if !adapter.Supports(policy, adapter.CaptureCanonical, 1, 0) || c.Platform != platform || c.Kind != kind || c.ObjectScope != scope || c.ExternalId == "" || domain.ValidateURL(c.Url) != nil {
 			return &PermanentError{"invalid canonical target"}
@@ -41,10 +44,10 @@ func validateRelatedResult(policy *pb.Provider, r *pb.FetchResponse, platform, k
 // Child submissions do not expand again and do not send unsolicited channel messages.
 func (s *Service) related(ctx context.Context, task store.Task) error {
 	var state, parent, provider, connection, adapterID, parentURL string
-	var automatic bool
+	var automatic, stopped bool
 	var raw []byte
 	err := s.DB.Tx(ctx, task.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT s.related_state,c.state,s.related_provider,coalesce(s.related_connection::text,''),s.related_adapter,c.related_targets,c.automatic,a.url FROM submissions s JOIN captures c ON c.id=s.capture_id JOIN archives a ON a.id=c.archive_id WHERE s.id=$1`, task.ID).Scan(&state, &parent, &provider, &connection, &adapterID, &raw, &automatic, &parentURL)
+		return tx.QueryRow(ctx, `SELECT s.related_state,c.state,s.related_provider,coalesce(s.related_connection::text,''),s.related_adapter,c.related_targets,c.automatic,a.url,s.collection_stopped FROM submissions s JOIN captures c ON c.id=s.capture_id JOIN archives a ON a.id=c.archive_id WHERE s.id=$1`, task.ID).Scan(&state, &parent, &provider, &connection, &adapterID, &raw, &automatic, &parentURL, &stopped)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
@@ -52,7 +55,7 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 	if err != nil {
 		return err
 	}
-	if state != "pending" {
+	if state != "pending" || stopped {
 		return nil
 	}
 	if parent == "queued" || parent == "downloading" {
@@ -85,7 +88,7 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 			return err
 		}
 		var within bool
-		if err := tx.QueryRow(ctx, `SELECT tenant_usage()+reserved_bytes<=quota_bytes FROM tenants WHERE id=$1`, task.Tenant).Scan(&within); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT tenant_unlimited() OR tenant_usage()+reserved_bytes<=quota_bytes FROM tenants WHERE id=$1`, task.Tenant).Scan(&within); err != nil {
 			return err
 		}
 		if !within {
@@ -118,7 +121,10 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		}
 		if target.RefreshOnSubmit {
 			// An explicit request joining an automatic capture still needs collection expansion.
-			_, err = scoped.Submit(ctx, task.Tenant, domain.CaptureInput{URL: parentURL, ProviderID: provider, ConnectionID: connection, Key: "related-expand:" + task.ID})
+			_, err = scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: parentURL, ProviderID: provider, ConnectionID: connection, Key: "related-expand:" + task.ID})
+			if errors.Is(err, errCollectionStopped) {
+				return nil
+			}
 			if errors.Is(err, domain.ErrRate) {
 				return river.JobSnooze(time.Minute)
 			}
@@ -129,7 +135,10 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		}
 	}
 	for i, target := range targets {
-		_, err = scoped.Submit(ctx, task.Tenant, domain.CaptureInput{URL: target.Url, ProviderID: provider, ConnectionID: connection, Automatic: true, RefreshAfterSeconds: target.RefreshAfterSeconds, Key: fmt.Sprintf("related:%s:%d", task.ID, i)})
+		_, err = scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: target.Url, ProviderID: provider, ConnectionID: connection, Automatic: true, RefreshAfterSeconds: target.RefreshAfterSeconds, Key: fmt.Sprintf("related:%s:%d", task.ID, i)})
+		if errors.Is(err, errCollectionStopped) {
+			return nil
+		}
 		if errors.Is(err, domain.ErrRate) {
 			return river.JobSnooze(time.Minute)
 		}
@@ -137,8 +146,35 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 			return err
 		}
 	}
+
+	var limit uint32
+	var next string
+	if err := s.DB.Tx(ctx, task.Tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT s.collection_limit,c.next_page_cursor FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1`, task.ID).Scan(&limit, &next)
+	}); err != nil {
+		return err
+	}
+	if limit > uint32(len(targets)) && len(targets) > 0 && next != "" {
+		remaining := limit - uint32(len(targets))
+		_, err := scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: parentURL, ProviderID: provider, ConnectionID: connection, PageCursor: next, PageSize: remaining, CollectionLimit: remaining, Key: "batch:" + task.ID})
+		if errors.Is(err, errCollectionStopped) {
+			return nil
+		}
+		if errors.Is(err, domain.ErrRate) {
+			return river.JobSnooze(time.Minute)
+		}
+		if err != nil {
+			return err
+		}
+		if err = s.DB.Tx(ctx, task.Tenant, func(tx pgx.Tx) error {
+			_, e := tx.Exec(ctx, `UPDATE submissions SET next_submission=(SELECT id FROM submissions WHERE idem_key=$2) WHERE id=$1`, task.ID, "batch:"+task.ID)
+			return e
+		}); err != nil {
+			return err
+		}
+	}
 	return s.DB.Tx(ctx, task.Tenant, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE submissions SET related_state='complete' WHERE id=$1`, task.ID)
+		_, err := tx.Exec(ctx, `UPDATE submissions SET related_state='complete' WHERE id=$1 AND NOT collection_stopped`, task.ID)
 		return err
 	})
 }

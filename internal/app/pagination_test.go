@@ -67,7 +67,7 @@ func TestRecentBidirectionalPagination(t *testing.T) {
 			if cursor == "" {
 				continue
 			}
-			if !validCallback("/recent " + cursor) {
+			if !validCallback("/list " + cursor) {
 				t.Fatal("invalid Telegram callback", cursor)
 			}
 			if _, err := s.Recent(ctx, other.TenantID, cursor); err == nil {
@@ -86,9 +86,9 @@ func TestRecentBidirectionalPagination(t *testing.T) {
 		t.Fatal("first page differs after return")
 	}
 	r := &commandRequest{Task: store.Task{Tenant: owner.TenantID}, Argument: first.NextCursor}
-	must(t, s.commandRecent(ctx, r))
+	must(t, s.commandList(ctx, r))
 	navigation := r.Buttons[len(r.Buttons)-1]
-	if len(navigation) != 2 || navigation[0].Data != "/recent "+second.PreviousCursor || navigation[1].Data != "/recent "+second.NextCursor {
+	if len(navigation) != 2 || navigation[0].Data != "/list "+second.PreviousCursor || navigation[1].Data != "/list "+second.NextCursor {
 		t.Fatal("missing bidirectional buttons", navigation)
 	}
 }

@@ -375,6 +375,9 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 	if e != nil || state == "sent" {
 		return e
 	}
+	if handled, err := s.collectionProgress(ctx, t); handled || err != nil {
+		return err
+	}
 	j, e := s.Job(ctx, t.Tenant, cid)
 	if e != nil {
 		return e
@@ -385,6 +388,7 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 	text := jobState(j.State)
 	buttons := menuButtons()
 	var aa []domain.Asset
+	var entities []telegram.Entity
 	if j.State == "failed" {
 		if input == "" {
 			if err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
@@ -401,8 +405,15 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 			return err
 		}
 		text = archiveMessage(a, j.State)
+		entities = archiveMessageEntities(a)
 		aa = a.Assets
+		if _, _, assets, ok := telegram.ProfilePresentation(a); ok {
+			aa = assets
+		}
 		buttons = archiveButtons(a.ID, a.URL)
+		if telegram.IsProfileArchive(a) {
+			buttons[0][0].Text = "查看主页"
+		}
 		if strings.HasPrefix(chat, "-") && a.Visibility == "public" {
 			buttons = append(buttons, []telegram.Button{{Text: "我也要存", Data: "/save " + a.ID}})
 		}
@@ -412,6 +423,7 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 		return fmt.Errorf("channel sender unavailable")
 	}
 	parts := deliveryParts(text, aa)
+	formatDeliveryParts(parts, entities)
 	headerPart := -1
 	for i, part := range parts {
 		if part.text != "" {
@@ -437,9 +449,8 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 	for progress < len(parts) {
 		part := parts[progress]
 		formatted := sender
-		if c, ok := sender.(*telegram.Client); ok && progress == headerPart && j.State != "failed" {
-			client := c.WithCode(j.ArchiveID)
-			formatted = client
+		if c, ok := sender.(*telegram.Client); ok {
+			formatted = c.WithEntities(part.entities)
 		}
 		var id int64
 		switch part.kind {

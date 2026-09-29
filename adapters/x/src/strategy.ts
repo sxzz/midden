@@ -1,3 +1,4 @@
+import { preferOriginalAvatars } from "./avatar.js";
 import { status } from "@grpc/grpc-js";
 import { fetchPublic, ProviderError } from "./provider.js";
 import { fetchSession } from "./session.js";
@@ -96,15 +97,49 @@ export class CaptureStrategy {
     credential?: SessionCredential,
   ): Promise<FetchResponse> {
     let result: FetchResponse;
+    if (req.pageCursor && (req.kind !== "profile" || req.automatic))
+      throw new ProviderError(
+        status.INVALID_ARGUMENT,
+        "invalid collection continuation",
+      );
     if (req.kind === "profile") {
       result = await this.profile(req.externalId, !req.automatic, signal);
       result.externalId = req.externalId;
       if (!req.automatic) {
+        const mode = this.protected(result) ? "private" : "public";
+        result.maxBatchSize = mode === "public" ? 1000 : 0;
+        let cursor = "";
+        if (req.pageCursor) {
+          try {
+            const page = JSON.parse(req.pageCursor);
+            if (
+              page.user !== result.canonicalTarget!.externalId ||
+              page.mode !== mode ||
+              typeof page.cursor !== "string" ||
+              !page.cursor ||
+              req.pageCursor.length > 4096
+            )
+              throw new Error();
+            cursor = page.cursor;
+          } catch {
+            throw new ProviderError(
+              status.FAILED_PRECONDITION,
+              "collection changed; start again from the profile link",
+            );
+          }
+        }
         if (this.protected(result)) {
           if (credential) {
             // The collection of protected posts is account-private, while the profile metadata is public.
             result.visibility = Visibility.VISIBILITY_PRIVATE;
-            await this.sessionTimeline(result, credential, signal);
+            await this.sessionTimeline(
+              result,
+              credential,
+              signal,
+              undefined,
+              cursor,
+              req.pageSize,
+            );
           } else {
             result.incomplete = true;
             result.warnings.push(
@@ -113,7 +148,7 @@ export class CaptureStrategy {
           }
         } else {
           // Fetch only the timeline here; reuse the profile response obtained above.
-          await this.timeline(result, signal);
+          await this.timeline(result, signal, undefined, cursor, req.pageSize);
         }
       }
     } else {
@@ -174,11 +209,23 @@ export class CaptureStrategy {
             : await this.publicPost(req.externalId, signal);
       this.attachProfile(result, profile);
     }
+    if (req.kind === "profile" && result.nextPageCursor) {
+      const previous = req.pageCursor ? JSON.parse(req.pageCursor).cursor : "";
+      result.nextPageCursor =
+        result.nextPageCursor === previous && !result.incomplete
+          ? ""
+          : JSON.stringify({
+              user: result.canonicalTarget!.externalId,
+              mode: this.protected(result) ? "private" : "public",
+              cursor: result.nextPageCursor,
+            });
+    }
     // Execution provider remains the persisted connection choice. textSource and raw URLs record actual sources.
     result.providerId = req.providerId;
     if (credential)
       for (const source of result.sourceResponses)
         source.visibility = Visibility.VISIBILITY_PRIVATE;
+    await preferOriginalAvatars(result, signal);
     return result;
   }
   timeline = fetchPublicTimeline;

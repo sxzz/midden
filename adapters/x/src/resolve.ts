@@ -22,6 +22,7 @@ export function resolveTarget(raw: string) {
         objectScope: "",
         externalId: match[1],
         refreshOnSubmit: false,
+        collection: false,
       };
     const id = url.pathname.match(/^\/i\/user\/(\d+)\/?$/);
     const handle = url.pathname
@@ -55,6 +56,7 @@ export function resolveTarget(raw: string) {
         objectScope: "",
         externalId: id ? id[1] : `handle:${handle}`,
         refreshOnSubmit: true,
+        collection: true,
       };
     throw new Error();
   } catch {

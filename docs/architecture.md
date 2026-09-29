@@ -205,6 +205,7 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 | --- | --- | --- |
 | `capture.fetch` | 1.0 | 用 `Resolve` 规范化 URL，再用 `Fetch` 读取单个目标 |
 | `capture.related` | 1.0 | 返回关联目标及最小刷新间隔；核心按提交者身份持久化执行一层关联采集 |
+| `capture.page` | 1.0 | `Fetch.page_cursor` / `next_page_cursor` 为不透明分页游标；沿用原 Provider、Connection，空返回表示末页 |
 | `capture.canonical` | 1.0 | Fetch 返回同平台、同类型的稳定目标身份 |
 | `credential.prepare` | 1.0 | 用 `PrepareCredential` 将用户输入转换为 Adapter 私有的凭据格式 |
 | `connection.check` | 1.0 | 用 `CheckConnection` 验证账号会话 |
@@ -265,4 +266,8 @@ Fetch 的 text、text_kind、summary、author_name、published_at 和展示媒�
 
 每次显式提交都持久化一个关联任务及提交者的 Adapter、Provider、Connection。主采集完成后，任务在该租户上下文中逐一创建幂等子提交，共享主采集的其他租户使用各自的账号选择。子提交设置 `automatic`，不继续展开关联目标、不生成渠道投递；限流时延后执行，错误记录在提交的 `related_state` 和 `related_error`。每页最多接受 200 个关联目标，超限拒绝整页而非静默截断。
 
-X Adapter 支持帖子、用户名 Profile URL 和稳定用户 ID Profile URL。帖子返回作者 Profile 的关联目标，刷新间隔为 60 秒；Profile 显式提交始终重新读取资料并读取时间线首批响应，将其中所有帖子声明为关联目标，不请求下一页。公开账号使用公共实例，count=100；受保护账号使用所选采集账号，count=20。自动 Profile 采集只读取资料。Profile 资料始终使用 FxTwitter 公共 API，包括 protected 账号；即使用户选择了账号，公开帖文仍使用公共 API，只有受保护帖文使用该 Connection 的 Cookie。完整响应体保存在 `source_responses`，账号原始数据不随公开资料共享。Profile 头像和封面作为实体关联资源保存。
+X Adapter 支持帖子、用户名 Profile URL 和稳定用户 ID Profile URL。帖子返回作者 Profile 的关联目标，刷新间隔为 60 秒；Profile 显式提交始终重新读取资料并连续读取时间线，将累计约 100 条帖子声明为关联目标，并返回下一页游标供用户通过「抓取更多」继续采集。公开账号使用公共实例，count=100；受保护账号使用所选采集账号，count=100。自动 Profile 采集只读取资料。Profile 资料始终使用 FxTwitter 公共 API，包括 protected 账号；即使用户选择了账号，公开帖文仍使用公共 API，只有受保护帖文使用该 Connection 的 Cookie。完整响应体保存在 `source_responses`，账号原始数据不随公开资料共享。Profile 头像和封面作为实体关联资源保存。
+
+`Resolve.collection` 标记显式提交会展开关联内容的集合。集合采集的游标、下一页游标和标记保存在 captures；活跃任务按游标及自动采集标记区分，显式请求不会复用跳过展开的自动采集。Telegram 按提交者的子任务统计进度，完成后提供下一页按钮；回调只携带提交 ID，租户校验通过后由服务读取游标和账号选择。重复点击同一下一页按钮幂等，子任务仍不逐条投递。分页能力为可选扩展，协议保持 1.0。
+
+`Fetch.page_size` 是可选目标数量，允许完整保留最后一页而超出目标。X Adapter 对公开和受保护时间线均连续翻页，累计至少目标数量（默认 100）或到达末尾；跨页去重，保留每页原始响应及最后的游标。单次最多处理 20 页，达到执行边界或部分失败时保留进度供继续抓取。`max_batch_size` 声明批量能力，公开 Profile 为 1000，受保护 Profile 不提供批量按钮。采集进度提供「中止」按钮，`submissions.collection_stopped` 持久化中止状态，`parent_submission` 记录派发关系。中止与子任务提交共用租户事务锁，阻止中止后继续派发；已提交任务完成收尾，保留已有归档，不取消其他提交共享的采集。批量任务用 `submissions.next_submission` 持久化页面链，每页仍独立请求和重试；`collection_limit` 保存剩余条数，子任务不单独向渠道发消息，根提交汇总整条链的进度。

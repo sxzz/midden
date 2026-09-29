@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
@@ -42,6 +43,13 @@ func (w *Worker) NextRetry(j *river.Job[store.Task]) time.Time {
 func (w *Worker) Work(ctx context.Context, j *river.Job[store.Task]) error {
 	start := time.Now()
 	defer func() { TaskDuration.WithLabelValues(j.Args.Type).Observe(time.Since(start).Seconds()) }()
+	paused, err := w.S.taskPaused(ctx, j.Args)
+	if err != nil {
+		return err
+	}
+	if paused {
+		return river.JobSnooze(time.Minute)
+	}
 	var e error
 	switch j.Args.Type {
 	case "related":
@@ -72,6 +80,8 @@ func (w *Worker) Work(ctx context.Context, j *river.Job[store.Task]) error {
 		return e
 	}
 	TaskResults.WithLabelValues(j.Args.Type, "error").Inc()
+	fields := []any{"job_id", j.ID, "task_id", j.Args.ID, "task_type", j.Args.Type, "attempt", j.Attempt, "max_attempts", j.MaxAttempts, "elapsed_ms", time.Since(start).Milliseconds(), "retry_after_ms", RetryDelay(e).Milliseconds()}
+	slog.WarnContext(ctx, "task execution failed", append(fields, diagnosticError(e)...)...)
 	permanent := errors.Is(e, domain.ErrQuota) || errors.Is(e, domain.ErrUnsupported) || errors.Is(e, domain.ErrNotFound) || errors.Is(e, ErrConnection)
 	switch status.Code(e) {
 	case codes.InvalidArgument, codes.FailedPrecondition, codes.Unimplemented, codes.PermissionDenied, codes.Unauthenticated:
@@ -139,6 +149,16 @@ func safeError(e error) string {
 
 // PostgreSQL session locks provide crash-safe tenant slots without a network call in a transaction.
 func (s *Service) slot(ctx context.Context, tenant string) (*pgxpool.Conn, int, error) {
+	var unlimited bool
+	if err := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, "SELECT tenant_unlimited()").Scan(&unlimited)
+	}); err != nil {
+		return nil, 0, err
+	}
+	if unlimited {
+		return nil, 0, nil
+	}
+
 	c, e := s.DB.Pool.Acquire(ctx)
 	if e != nil {
 		return nil, 0, e
@@ -158,6 +178,9 @@ func (s *Service) slot(ctx context.Context, tenant string) (*pgxpool.Conn, int, 
 }
 
 func release(c *pgxpool.Conn, tenant string, slot int) {
+	if c == nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, e := c.Exec(ctx, `SELECT pg_advisory_unlock(hashtext($1),$2)`, tenant, slot); e != nil {
@@ -188,9 +211,10 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	}
 	defer release(c, t.Tenant, slot)
 	var automatic bool
-	var url, id, provider, connection, scope, state, visibility, platform, kind, objectScope string
+	var pageSize uint32
+	var url, id, provider, connection, scope, state, visibility, platform, kind, objectScope, pageCursor string
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT a.url,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),c.scope,c.state,c.visibility,a.platform,a.kind,a.object_scope,c.automatic FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.id=$1`, t.ID).Scan(&url, &id, &provider, &connection, &scope, &state, &visibility, &platform, &kind, &objectScope, &automatic)
+		return tx.QueryRow(ctx, `SELECT a.url,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),c.scope,c.state,c.visibility,a.platform,a.kind,a.object_scope,c.automatic,c.page_cursor,c.page_size FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.id=$1`, t.ID).Scan(&url, &id, &provider, &connection, &scope, &state, &visibility, &platform, &kind, &objectScope, &automatic, &pageCursor, &pageSize)
 	})
 	if e != nil {
 		return e
@@ -247,7 +271,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	defer cancel()
 	var trailer metadata.MD
 	fetchStart := time.Now()
-	r, e := s.Adapter.Fetch(callCtx, &pb.FetchRequest{Automatic: automatic, Platform: platform, Kind: kind, ObjectScope: objectScope, Url: url, ExternalId: id, ProviderId: provider, ConnectionId: connection, AccessScope: scope, RequestId: t.ID, Credential: credential}, grpc.Trailer(&trailer))
+	r, e := s.Adapter.Fetch(callCtx, &pb.FetchRequest{PageCursor: pageCursor, PageSize: pageSize, Automatic: automatic, Platform: platform, Kind: kind, ObjectScope: objectScope, Url: url, ExternalId: id, ProviderId: provider, ConnectionId: connection, AccessScope: scope, RequestId: t.ID, Credential: credential}, grpc.Trailer(&trailer))
 	ProviderDuration.WithLabelValues(provider).Observe(time.Since(fetchStart).Seconds())
 	ProviderResults.WithLabelValues(provider, status.Code(e).String()).Inc()
 	if e != nil {
@@ -358,13 +382,13 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 			}
 		}
 		relatedJSON, _ := json.Marshal(r.RelatedTargets)
-		if _, e := tx.Exec(ctx, `UPDATE captures SET credential_revision=$2,related_targets=$3 WHERE id=$1`, t.ID, revision, relatedJSON); e != nil {
+		if _, e := tx.Exec(ctx, `UPDATE captures SET credential_revision=$2,related_targets=$3,next_page_cursor=$4,max_batch_size=$5 WHERE id=$1`, t.ID, revision, relatedJSON, r.NextPageCursor, r.MaxBatchSize); e != nil {
 			return e
 		}
 		if e := persistSources(ctx, tx, t.Tenant, t.ID, r); e != nil {
 			return e
 		}
-		tag, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes+$2 WHERE id=$1 AND tenant_usage()+reserved_bytes+$2<=quota_bytes`, t.Tenant, len(b)+rawSize+entityReserve)
+		tag, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes+$2 WHERE id=$1 AND (tenant_unlimited() OR tenant_usage()+reserved_bytes+$2<=quota_bytes)`, t.Tenant, len(b)+rawSize+entityReserve)
 		if e != nil {
 			return e
 		}
@@ -645,4 +669,21 @@ func (s *Service) fail(ctx context.Context, t store.Task, msg string) error {
 		}
 		return nil
 	})
+}
+
+func (s *Service) taskPaused(ctx context.Context, t store.Task) (bool, error) {
+	var query string
+	switch t.Type {
+	case "capture", "finalize":
+		query = `SELECT EXISTS(SELECT FROM captures WHERE id=$1 AND paused)`
+	case "download":
+		query = `SELECT EXISTS(SELECT FROM assets a JOIN captures c ON c.id=a.capture_id WHERE a.id=$1 AND c.paused)`
+	case "related", "status", "deliver":
+		query = `SELECT EXISTS(SELECT FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1 AND c.paused)`
+	default:
+		return false, nil
+	}
+	var paused bool
+	err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error { return tx.QueryRow(ctx, query, t.ID).Scan(&paused) })
+	return paused, err
 }

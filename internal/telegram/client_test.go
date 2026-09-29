@@ -116,14 +116,14 @@ func TestEditUnchangedDoesNotSendDuplicate(t *testing.T) {
 		if err := r.ParseForm(); err != nil {
 			t.Error(err)
 		}
-		if r.Form.Get("message_id") != "12" || !strings.Contains(r.Form.Get("reply_markup"), "/recent") {
+		if r.Form.Get("message_id") != "12" || !strings.Contains(r.Form.Get("reply_markup"), "/list") {
 			t.Error("missing edit or keyboard")
 		}
 		w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: message is not modified"}`))
 	}))
 	defer h.Close()
 	c := Client{Token: "test", Base: h.URL, HTTP: h.Client()}
-	id, err := c.SendInteractive(context.Background(), "42", "done", 12, Keyboard{{{Text: "最近归档", Data: "/recent"}}})
+	id, err := c.SendInteractive(context.Background(), "42", "done", 12, Keyboard{{{Text: "归档列表", Data: "/list"}}})
 	if err != nil || id != 12 || calls != 1 {
 		t.Fatal(id, err, calls)
 	}
@@ -165,7 +165,7 @@ func TestCallbackActorAndPolling(t *testing.T) {
 			if r.Form.Get("offset") != "123" || !strings.Contains(r.Form.Get("allowed_updates"), "callback_query") {
 				t.Error("polling configuration")
 			}
-			w.Write([]byte(`{"ok":true,"result":[{"update_id":123,"callback_query":{"id":"cb","from":{"id":42},"message":{"message_id":7,"from":{"id":999,"is_bot":true},"chat":{"id":42,"type":"private"}},"data":"/recent"}}]}`))
+			w.Write([]byte(`{"ok":true,"result":[{"update_id":123,"callback_query":{"id":"cb","from":{"id":42},"message":{"message_id":7,"from":{"id":999,"is_bot":true},"chat":{"id":42,"type":"private"}},"data":"/list"}}]}`))
 		case strings.HasSuffix(r.URL.Path, "answerCallbackQuery"):
 			if r.Form.Get("callback_query_id") != "cb" {
 				t.Error("callback id")

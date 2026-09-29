@@ -49,7 +49,11 @@ func TestMultiAdapterAccounts(t *testing.T) {
 		must(t, e)
 		accounts[id], e = scoped.ImportConnection(ctx, tenant, "", id, &pb.Credential{Data: []byte(id + "-credential")})
 		must(t, e)
-		must(t, s.commandAccount(ctx, &commandRequest{Task: store.Task{Tenant: tenant}, Argument: accounts[id]}))
+		selected, err := scoped.DefaultConnection(ctx, tenant)
+		must(t, err)
+		if selected != accounts[id] {
+			t.Fatal("import did not select account for adapter", id)
+		}
 	}
 	for _, id := range []string{"notes", "photos"} {
 		raw := "https://" + id + ".test/entry/item-A"

@@ -45,6 +45,7 @@ export function normalizeProfile(
       platform: "x",
       kind: "profile",
       refreshOnSubmit: true,
+      collection: true,
     },
   });
   // Reuse the public field projection; account-view fields remain exclusively in private raw responses.
@@ -98,6 +99,10 @@ export function attachTimeline(result: FetchResponse, timeline: any): void {
       status.RESOURCE_EXHAUSTED,
       "profile timeline exceeds capture page limit",
     );
+  result.nextPageCursor =
+    ids.size && typeof timeline.cursor?.bottom === "string"
+      ? timeline.cursor.bottom
+      : "";
   result.relatedTargets = [...ids].map((id) => ({
     url: `https://x.com/i/web/status/${id}`,
     refreshAfterSeconds: 0,
@@ -128,25 +133,65 @@ async function publicJSON(
     throw responseError(typeof data?.code === "number" ? data.code : 502);
   return data;
 }
+// Keep whole upstream pages: the requested size is a target, never a truncation boundary.
+export async function collectTimeline(
+  result: FetchResponse,
+  fetchPage: (cursor: string) => Promise<any>,
+  cursor = "",
+  pageSize = 0,
+): Promise<void> {
+  const target = Math.min(pageSize || 100, 100);
+  const targets = new Map(result.relatedTargets.map((t) => [t.url, t]));
+  const visited = new Set<string>();
+  result.nextPageCursor = cursor;
+  while (targets.size < target) {
+    if (visited.has(cursor)) {
+      result.nextPageCursor = "";
+      break;
+    }
+    if (visited.size >= 20) {
+      result.incomplete = true;
+      result.warnings.push("连续翻页已达单次处理上限，可继续抓取剩余帖子。");
+      break;
+    }
+    visited.add(cursor);
+    const page = FetchResponse.fromPartial({});
+    // Advance the checkpoint only after successfully parsing the entire page.
+    attachTimeline(page, await fetchPage(cursor));
+    for (const item of page.relatedTargets) targets.set(item.url, item);
+    result.relatedTargets = [...targets.values()];
+    const next = page.nextPageCursor;
+    result.nextPageCursor = visited.has(next) ? "" : next;
+    if (!result.nextPageCursor) break;
+    cursor = result.nextPageCursor;
+  }
+}
+
 export async function fetchPublicTimeline(
   result: FetchResponse,
   signal: AbortSignal,
   fetcher: typeof fetch = fetch,
+  cursor = "",
+  pageSize = 0,
 ): Promise<void> {
+  signal = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
   try {
-    attachTimeline(
+    await collectTimeline(
       result,
-      await publicJSON(
-        `https://api.fxtwitter.com/2/profile/id:${result.canonicalTarget!.externalId}/statuses?count=100`,
-        signal,
-        result.sourceResponses,
-        fetcher,
-      ),
+      (next) =>
+        publicJSON(
+          `https://api.fxtwitter.com/2/profile/id:${result.canonicalTarget!.externalId}/statuses?count=${Math.min(pageSize || 100, 100)}${next ? `&cursor=${encodeURIComponent(next)}` : ""}`,
+          signal,
+          result.sourceResponses,
+          fetcher,
+        ),
+      cursor,
+      pageSize,
     );
   } catch {
     result.incomplete = true;
     result.warnings.push(
-      "最近帖子获取失败；Profile 已保存，请重新提交 Profile 链接重试。",
+      "帖子获取中断；已获取的帖子会继续保存，可重试或继续抓取。",
     );
   }
 }
@@ -174,7 +219,7 @@ export async function fetchPublicProfile(
     } catch {
       result.incomplete = true;
       result.warnings.push(
-        "最近帖子获取失败；Profile 已保存，请重新提交 Profile 链接重试。",
+        "帖子获取中断；已获取的帖子会继续保存，可重试或继续抓取。",
       );
     }
   }
@@ -187,7 +232,10 @@ export async function fetchSessionTimeline(
   credential: SessionCredential,
   signal: AbortSignal,
   fetcher: typeof fetch = fetch,
+  cursor = "",
+  pageSize = 0,
 ): Promise<void> {
+  signal = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
   const responses: SourceResponse[] = [];
   const host: TwitterBuildHost = {
     t: (key) => key,
@@ -195,19 +243,22 @@ export async function fetchSessionTimeline(
     shouldTranscodeGif: () => false,
   };
   try {
-    attachTimeline(
+    await collectTimeline(
       result,
-      await profileStatusesAPI(
-        { type: "userId", value: result.canonicalTarget!.externalId },
-        20,
-        null,
-        host,
-      ),
+      (next) =>
+        profileStatusesAPI(
+          { type: "userId", value: result.canonicalTarget!.externalId },
+          Math.min(pageSize || 100, 100),
+          next || null,
+          host,
+        ),
+      cursor,
+      pageSize,
     );
   } catch {
     result.incomplete = true;
     result.warnings.push(
-      "最近帖子获取失败；Profile 已保存，请重新提交 Profile 链接重试。",
+      "帖子获取中断；已获取的帖子会继续保存，可重试或继续抓取。",
     );
   }
   result.sourceResponses.push(...responses);

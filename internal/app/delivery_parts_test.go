@@ -76,3 +76,47 @@ func TestSensitiveDocumentDelivery(t *testing.T) {
 		t.Fatal("mixed document group could lose spoiler", parts)
 	}
 }
+
+func TestArchiveEntitiesSurviveCaptionAndTextSplits(t *testing.T) {
+	for _, body := range []string{"", " \n ", strings.Repeat("😀正文\n", 1800)} {
+		for _, media := range []int{0, 1, 2} {
+			a := domain.Archive{ID: "archive-id", AuthorName: "😀作者", Text: body, Graph: &domain.EntityGraph{
+				Root: "post", Entities: []domain.Entity{{Key: "author", Type: "x.profile", Data: []byte(`{"username":"fixture"}`)}},
+				Relations: []domain.EntityRelation{{Source: "post", Target: "author", Type: "authored_by"}},
+			}}
+			for i := 0; i < media; i++ {
+				a.Assets = append(a.Assets, domain.Asset{State: "ready"})
+			}
+			text := archiveMessage(a, "complete")
+			parts := deliveryParts(text, a.Assets)
+			formatDeliveryParts(parts, archiveMessageEntities(a))
+			var quoted, author, code string
+			for _, part := range parts {
+				units := utf16.Encode([]rune(part.text))
+				for _, e := range part.entities {
+					if e.Offset < 0 || e.Length <= 0 || e.Offset+e.Length > len(units) {
+						t.Fatal("invalid entity", e)
+					}
+					content := string(utf16.Decode(units[e.Offset : e.Offset+e.Length]))
+					switch e.Type {
+					case "blockquote":
+						quoted += content
+					case "text_link":
+						author += content
+						if e.URL != "https://x.com/fixture" {
+							t.Fatal(e.URL)
+						}
+					case "code":
+						code += content
+					}
+				}
+			}
+			if code != a.ID || author != a.AuthorName || quoted != strings.TrimSpace(body) {
+				t.Fatal("formatting lost across split", media)
+			}
+			if strings.TrimSpace(body) == "" && text != a.ID+"\n\n"+a.AuthorName+"：\n空" {
+				t.Fatal(text)
+			}
+		}
+	}
+}

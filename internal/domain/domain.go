@@ -20,6 +20,7 @@ var (
 )
 
 type Target struct {
+	Collection      bool
 	RefreshOnSubmit bool
 	URL             string
 	ExternalID      string
@@ -55,6 +56,10 @@ type (
 )
 
 type CaptureInput struct {
+	PageCursor          string `json:"-"`
+	PageSize            uint32 `json:"-"`
+	ParentSubmission    string `json:"-"`
+	CollectionLimit     uint32 `json:"-"`
 	Automatic           bool   `json:"-"`
 	RefreshAfterSeconds uint32 `json:"-"`
 	Input               string `json:"-"`
@@ -154,9 +159,10 @@ type Page struct {
 }
 
 type Usage struct {
-	Used     int64 `json:"used_bytes"`
-	Reserved int64 `json:"reserved_bytes"`
-	Limit    int64 `json:"limit_bytes"`
+	Unlimited bool  `json:"unlimited"`
+	Used      int64 `json:"used_bytes"`
+	Reserved  int64 `json:"reserved_bytes"`
+	Limit     int64 `json:"limit_bytes"`
 }
 
 // ChannelMediaCache stores opaque delivery references independently of archives.

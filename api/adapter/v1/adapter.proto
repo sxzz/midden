@@ -61,6 +61,8 @@ message FetchRequest {
   string platform = 8;
   string kind = 9;
   string object_scope = 10;
+  uint32 page_size = 13; // Optional target size; adapter may exceed it to preserve whole upstream pages.
+  string page_cursor = 12; // Opaque capture.page/1 continuation, same provider and connection.
   bool automatic = 11; // Related captures must not recursively expand collections.
 }
 
@@ -124,6 +126,8 @@ message FetchResponse {
   string author_name = 14; // Generic presentation, supplied by the adapter.
   ResolveResponse canonical_target = 16; // Optional stable identity, same platform and kind.
   repeated RelatedTarget related_targets = 17; // capture.related/1; one level, same provider/connection.
+  uint32 max_batch_size = 19; // Optional collection batch limit; zero disables batch actions.
+  string next_page_cursor = 18; // Empty at end of collection; capture.page/1.
   string published_at = 15; // Original publication time in RFC 3339; empty when unknown.
 }
 
@@ -136,6 +140,7 @@ message ResolveResponse {
   string kind = 3;
   string object_scope = 4;
   string external_id = 5;
+  bool collection = 7; // Explicit capture expands a collection of related targets.
   bool refresh_on_submit = 6; // Explicit submissions always observe this target again.
 }
 message PrepareCredentialRequest { string provider_id = 1; bytes input = 2; }

@@ -16,7 +16,7 @@ services:
         -s3.config=/etc/monitor-s3.json,
       ]
     volumes:
-      - s3-data:/data
+      - ${S3_DATA_PATH:-s3-data}:/data
       - ./.local/s3.json:/etc/monitor-s3.json:ro
     ports:
       - "127.0.0.1:8333:8333"
