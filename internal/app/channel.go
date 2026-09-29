@@ -385,6 +385,7 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 	text := jobState(j.State)
 	buttons := menuButtons()
 	var aa []domain.Asset
+	var entities []telegram.Entity
 	if j.State == "failed" {
 		if input == "" {
 			if err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
@@ -401,6 +402,7 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 			return err
 		}
 		text = archiveMessage(a, j.State)
+		entities = archiveMessageEntities(a)
 		aa = a.Assets
 		buttons = archiveButtons(a.ID, a.URL)
 		if strings.HasPrefix(chat, "-") && a.Visibility == "public" {
@@ -412,6 +414,7 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 		return fmt.Errorf("channel sender unavailable")
 	}
 	parts := deliveryParts(text, aa)
+	formatDeliveryParts(parts, entities)
 	headerPart := -1
 	for i, part := range parts {
 		if part.text != "" {
@@ -437,9 +440,8 @@ func (s *Service) deliver(ctx context.Context, t store.Task) error {
 	for progress < len(parts) {
 		part := parts[progress]
 		formatted := sender
-		if c, ok := sender.(*telegram.Client); ok && progress == headerPart && j.State != "failed" {
-			client := c.WithCode(j.ArchiveID)
-			formatted = client
+		if c, ok := sender.(*telegram.Client); ok {
+			formatted = c.WithEntities(part.entities)
 		}
 		var id int64
 		switch part.kind {

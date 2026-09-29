@@ -281,7 +281,7 @@ func TestIntegration(t *testing.T) {
 		t.Fatal(a)
 	}
 	recent := &commandRequest{Task: store.Task{Tenant: tenant}}
-	must(t, s.commandRecent(ctx, recent))
+	must(t, s.commandList(ctx, recent))
 	if len(recent.Entities) != 1 || recent.Entities[0].URL != a.URL || recent.Entities[0].Offset != 3 || recent.Entities[0].Length != 8 {
 		t.Fatal("missing summary source link", recent.Entities)
 	}

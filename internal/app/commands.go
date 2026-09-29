@@ -48,7 +48,7 @@ func init() {
 	channelCommands = []channelCommand{
 		{"start", "开始使用", "", false, true, noArgument, (*Service).commandStart},
 		{"save", "保存帖子", "<帖子链接…>", false, false, func(string) bool { return true }, (*Service).commandSave},
-		{"recent", "查看最近归档", "[游标]", true, true, validCursorArgument, (*Service).commandRecent},
+		{"list", "查看归档列表", "[游标]", true, true, validCursorArgument, (*Service).commandList},
 		{"show", "查看指定归档", "<归档 ID>", true, false, validIDArgument, (*Service).commandShow},
 		{"status", "查看采集状态", "<任务 ID>", true, false, validIDArgument, (*Service).commandStatus},
 		{"retry", "使用当前账号重试", "<归档 ID>", true, false, validIDArgument, (*Service).commandRetry},
@@ -165,7 +165,7 @@ func (s *Service) commandUsage(ctx context.Context, r *commandRequest) error {
 	return nil
 }
 
-func (s *Service) commandRecent(ctx context.Context, r *commandRequest) error {
+func (s *Service) commandList(ctx context.Context, r *commandRequest) error {
 	p, err := s.Recent(ctx, r.Task.Tenant, r.Argument)
 	if err != nil {
 		r.Text = "无效游标或无权限。"
@@ -188,10 +188,10 @@ func (s *Service) commandRecent(ctx context.Context, r *commandRequest) error {
 	}
 	var navigation []telegram.Button
 	if p.PreviousCursor != "" {
-		navigation = append(navigation, telegram.Button{Text: "← 上一页", Data: "/recent " + p.PreviousCursor})
+		navigation = append(navigation, telegram.Button{Text: "← 上一页", Data: "/list " + p.PreviousCursor})
 	}
 	if p.NextCursor != "" {
-		navigation = append(navigation, telegram.Button{Text: "下一页 →", Data: "/recent " + p.NextCursor})
+		navigation = append(navigation, telegram.Button{Text: "下一页 →", Data: "/list " + p.NextCursor})
 	}
 	if len(navigation) > 0 {
 		r.Buttons = append(r.Buttons, navigation)

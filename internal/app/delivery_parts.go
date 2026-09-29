@@ -3,12 +3,14 @@ package app
 import (
 	"monitor/internal/domain"
 	"monitor/internal/telegram"
+	"unicode/utf16"
 )
 
 type deliveryPart struct {
-	kind   string
-	text   string
-	assets []domain.Asset
+	kind     string
+	text     string
+	assets   []domain.Asset
+	entities []telegram.Entity
 }
 
 func deliveryParts(text string, assets []domain.Asset) []deliveryPart {
@@ -43,4 +45,21 @@ func deliveryParts(text string, assets []domain.Asset) []deliveryPart {
 		}
 	}
 	return parts
+}
+
+// Entity offsets use UTF-16 and must follow the exact caption/text split,
+// including when resuming a partially delivered archive.
+func formatDeliveryParts(parts []deliveryPart, entities []telegram.Entity) {
+	offset := 0
+	for i := range parts {
+		size := len(utf16.Encode([]rune(parts[i].text)))
+		for _, entity := range entities {
+			start, end := max(offset, entity.Offset), min(offset+size, entity.Offset+entity.Length)
+			if start < end {
+				entity.Offset, entity.Length = start-offset, end-start
+				parts[i].entities = append(parts[i].entities, entity)
+			}
+		}
+		offset += size
+	}
 }

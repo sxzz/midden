@@ -43,7 +43,7 @@ func TestRegisteredCommandDrivesMenuHelpAndRouting(t *testing.T) {
 			if c.Command == "save" {
 				save = true
 			}
-			if c.Command == "recent" {
+			if c.Command == "list" {
 				recent = true
 			}
 			if c.Command == "probe" && c.Description == "测试注册命令" {
@@ -86,7 +86,7 @@ func TestRegisteredCommandDrivesMenuHelpAndRouting(t *testing.T) {
 	if err := service.commandHelp(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(request.Text, "/recent") || !strings.Contains(request.Text, "/show") {
+	if strings.Contains(request.Text, "/list") || !strings.Contains(request.Text, "/show") {
 		t.Fatal("incorrect group help", request.Text)
 	}
 }
