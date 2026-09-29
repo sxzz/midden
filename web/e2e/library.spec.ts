@@ -93,7 +93,7 @@ test("ordinary browser explains Telegram entry", async ({ page }) => {
   );
   await page.goto("/app/");
   await expect(
-    page.getByText("请从 Telegram Bot 的「打开收藏库」进入。"),
+    page.getByText("请从 Telegram Bot 的「打开」进入。"),
   ).toBeVisible();
 });
 

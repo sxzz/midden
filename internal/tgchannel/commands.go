@@ -52,7 +52,7 @@ func (r *Runner) command(ctx context.Context, w channelapi.Work, event channelap
 		}
 		if op == "start" && r.Config.WebURL != "" {
 			out.Previous = 0
-			out.Buttons = append(out.Buttons, []telegram.Button{{Text: "打开收藏库", WebApp: &telegram.WebAppInfo{URL: r.Config.WebURL}}})
+			out.Buttons = append(out.Buttons, []telegram.Button{{Text: "打开", WebApp: &telegram.WebAppInfo{URL: r.Config.WebURL}}})
 		}
 		return out, nil
 	}

@@ -571,7 +571,7 @@ func SplitCaption(text string) (string, string) {
 func (c *Client) ConfigureWebMenu(ctx context.Context, address string) error {
 	menu := map[string]any{"type": "commands"}
 	if address != "" {
-		menu = map[string]any{"type": "web_app", "text": "打开收藏库", "web_app": map[string]string{"url": address}}
+		menu = map[string]any{"type": "web_app", "text": "打开", "web_app": map[string]string{"url": address}}
 	}
 	raw, e := json.Marshal(menu)
 	if e != nil {

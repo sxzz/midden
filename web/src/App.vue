@@ -15,7 +15,7 @@ onMounted(async () => {
   } catch {
     const data = host()?.initData;
     if (!data) {
-      error.value = "请从 Telegram Bot 的「打开收藏库」进入。";
+      error.value = "请从 Telegram Bot 的「打开」进入。";
     } else {
       try {
         await api("/auth/telegram", {

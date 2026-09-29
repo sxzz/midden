@@ -48,7 +48,7 @@ func TestMiniAppEntrySerialization(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	if id, e := c.SendInteractive(context.Background(), "1", "打开", 0, Keyboard{{{Text: "打开收藏库", WebApp: &WebAppInfo{URL: "https://collection.test/app/"}}}}); e != nil || id != 42 {
+	if id, e := c.SendInteractive(context.Background(), "1", "打开", 0, Keyboard{{{Text: "打开", WebApp: &WebAppInfo{URL: "https://collection.test/app/"}}}}); e != nil || id != 42 {
 		t.Fatal(id, e)
 	}
 }
