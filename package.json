@@ -2,14 +2,10 @@
   "name": "monitor-adapters",
   "private": true,
   "type": "module",
-  "workspaces": [
-    "adapters/x",
-    "third_party/atmosphere"
-  ],
   "scripts": {
     "generate": "protoc --plugin=protoc-gen-ts_proto=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=adapters/x/src/generated --ts_proto_opt=outputServices=grpc-js,env=node,forceLong=string,useExactTypes=false api/adapter/v1/adapter.proto",
-    "build": "npm run build -w @fxembed/atmosphere && npm run build -w @monitor/x-adapter",
-    "test": "npm run test -w @monitor/x-adapter",
+    "build": "pnpm --filter @monitor/x-adapter... --recursive run build",
+    "test": "pnpm --filter @monitor/x-adapter test",
     "format": "prettier --write adapters/x/src adapters/x/package.json package.json"
   },
   "devDependencies": {
@@ -17,5 +13,17 @@
     "ts-proto": "2.7.7",
     "@types/node": "24.13.6",
     "prettier": "3.6.2"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.6.0",
+      "onFail": "download"
+    },
+    "runtime": {
+      "name": "node",
+      "version": "24.21.0",
+      "onFail": "download"
+    }
   }
 }

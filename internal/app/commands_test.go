@@ -8,6 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf16"
+
+	"monitor/internal/buildinfo"
 
 	"monitor/internal/telegram"
 )
@@ -138,5 +141,31 @@ func TestAccountDeletionCommand(t *testing.T) {
 		if c.Command == "account_delete" {
 			t.Fatal("account deletion exposed in group menu")
 		}
+	}
+}
+
+func TestStartShowsBuildRevision(t *testing.T) {
+	original := buildinfo.Revision
+	t.Cleanup(func() { buildinfo.Revision = original })
+	buildinfo.Revision = "0123456789abcdef0123456789abcdef01234567"
+	command, ok := lookupCommand("/start")
+	if !ok {
+		t.Fatal("start command missing")
+	}
+	var service Service
+	r := &commandRequest{}
+	if err := command.Handle(&service, context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(r.Text, "版本："+buildinfo.Revision) || !strings.Contains(r.Text, "/save") {
+		t.Fatal("missing revision or help", r.Text)
+	}
+	if len(r.Entities) != 1 {
+		t.Fatal("missing copyable revision")
+	}
+	entity := r.Entities[0]
+	text := utf16.Encode([]rune(r.Text))
+	if entity.Type != "code" || string(utf16.Decode(text[entity.Offset:entity.Offset+entity.Length])) != buildinfo.Revision {
+		t.Fatal("incorrect revision entity", entity)
 	}
 }

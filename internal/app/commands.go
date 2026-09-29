@@ -13,6 +13,7 @@ import (
 
 	pb "monitor/api/adapter/v1"
 	"monitor/internal/adapter"
+	"monitor/internal/buildinfo"
 	"monitor/internal/domain"
 	"monitor/internal/store"
 	"monitor/internal/telegram"
@@ -45,7 +46,7 @@ var channelCommands []channelCommand
 
 func init() {
 	channelCommands = []channelCommand{
-		{"start", "开始使用", "", false, true, noArgument, (*Service).commandHelp},
+		{"start", "开始使用", "", false, true, noArgument, (*Service).commandStart},
 		{"save", "保存帖子", "<帖子链接…>", false, false, func(string) bool { return true }, (*Service).commandSave},
 		{"recent", "查看最近归档", "[游标]", true, true, validCursorArgument, (*Service).commandRecent},
 		{"show", "查看指定归档", "<归档 ID>", true, false, validIDArgument, (*Service).commandShow},
@@ -125,6 +126,17 @@ func validCallback(data string) bool {
 		return arg == "" || strings.HasPrefix(arg, "@") && validAdapterID(strings.TrimPrefix(arg, "@"))
 	}
 	return c.Validate(arg)
+}
+
+func (s *Service) commandStart(ctx context.Context, r *commandRequest) error {
+	if err := s.commandHelp(ctx, r); err != nil {
+		return err
+	}
+	r.Text += "\n\n版本："
+	version := buildinfo.Version()
+	r.Entities = append(r.Entities, telegram.Entity{Type: "code", Offset: len(utf16.Encode([]rune(r.Text))), Length: len(utf16.Encode([]rune(version)))})
+	r.Text += version
+	return nil
 }
 
 func (s *Service) commandHelp(_ context.Context, r *commandRequest) error {

@@ -2,6 +2,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 target="${1:-core}"
+export MIDDEN_BUILD_REVISION="$(git rev-parse HEAD)"
+if [[ -n "$(git status --porcelain)" ]]; then
+	MIDDEN_BUILD_REVISION+="-dirty"
+fi
 case "$target" in
 core | adapter | all) ;;
 *)

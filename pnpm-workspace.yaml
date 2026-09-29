@@ -1,0 +1,3 @@
+packages:
+  - adapters/x
+  - third_party/atmosphere

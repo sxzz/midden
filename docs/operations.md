@@ -14,6 +14,17 @@
 
 GitHub Actions 在 main 分支测试通过后构建并发布 `ghcr.io/sxzz/midden-core` 和 `ghcr.io/sxzz/midden-adapter`，支持 amd64、arm64。镜像同时包含 `latest` 标签和不可变部署选择 `sha-<完整提交 SHA>`。
 
+服务器可安装独立的一键更新脚本：
+
+```sh
+cp scripts/deploy-latest.sh ~/deploy-midden.sh
+chmod +x ~/deploy-midden.sh
+~/deploy-midden.sh --check  # 检查最新镜像，不切换服务
+~/deploy-midden.sh          # 部署最新已发布版本
+```
+
+脚本默认使用 `~/monitor`，可通过 `MIDDEN_DIR` 指定仓库目录。它从 GHCR Core 的 `latest` 读取提交号，确认同一提交的 Core、Adapter 镜像均可用，再将干净仓库切换到该提交、备份数据库、执行迁移并更新应用。仓库会处于 detached HEAD；以后继续运行仓库外的脚本即可。最终以健康检查成功为部署完成。镜像发布尚未齐全时会在停止服务前退出，稍后重试即可。该脚本更新 Core 和 Adapter，数据库及对象存储容器的配置调整由运营者另行执行。
+
 已有部署运行 `./scripts/deploy.sh --pull`：fast-forward 拉取当前分支，下载该提交对应的镜像，停止核心后导出数据库，再执行迁移并启动 Adapter 和核心。服务器不执行镜像构建。如果 CI 尚未发布对应镜像，拉取失败，旧服务继续运行。迁移失败时保持核心停止，修复后重新部署。成功后将本次镜像标签写入 `.env`，日常重启保持相同版本。
 
 仓库及镜像公开，服务器可以匿名 HTTPS 拉取。`.env`、S3 凭据和备份不纳入 Git。若部署进程被强制终止，确认没有部署仍在运行后可删除空目录 `.local/deploy.lock` 再重试。

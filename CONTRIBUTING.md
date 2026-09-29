@@ -2,7 +2,9 @@
 
 ## 开发环境
 
-使用 Go 1.27.1、Node.js 24、FFmpeg（提供 ffprobe）、Docker Compose。生成的 Protobuf Go/TS 代码已提交，日常构建不需要 protoc。首次运行 `npm ci --ignore-scripts` 和 `npm run build`；Go 的跨语言测试使用构建后的 TS Adapter。
+使用 Go 1.27.1、pnpm 12、Node.js 24、FFmpeg（提供 ffprobe）、Docker Compose。生成的 Protobuf Go/TS 代码已提交，日常构建不需要 protoc。首次运行 `pnpm install --frozen-lockfile --ignore-scripts` 和 `pnpm build`；Go 的跨语言测试使用构建后的 TS Adapter。
+
+包管理器和 Node.js 版本由根目录 `package.json` 的 `devEngines` 声明，解析结果及校验和保存在 `pnpm-lock.yaml`。工作区在 `pnpm-workspace.yaml` 定义，内部依赖使用 `workspace:` 协议。CI 和 Docker 使用冻结锁文件安装。升级 pnpm 时需同步更新 `scripts/install-pnpm.mjs` 中官方 Linux 发布包的 SHA-256；升级 Node.js 时需同步 Docker 基础镜像版本。
 
 ```sh
 make build
@@ -13,7 +15,7 @@ make integration
 
 `make integration` 启动独立的 Docker PostgreSQL 和 SeaweedFS，使用随机本地端口，结束后删除测试容器。测试覆盖租户隔离、身份并发、版本与配额、Telegram 交互、River 队列和数据库／对象存储恢复。缺少测试数据库环境变量时，数据库测试会跳过。
 
-`make fmt` 运行 goimports、gofumpt、pgFormatter、Ruff、shfmt 和 Prettier。需要 Go、Node/npm、uv 和 `pg_format`。
+`make fmt` 运行 goimports、gofumpt、pgFormatter、Ruff、shfmt 和 Prettier。需要 Go、Node/pnpm、uv 和 `pg_format`。
 
 修改 `api/adapter/v1/adapter.proto` 后，安装 protoc 并运行 `make generate`。
 
@@ -79,7 +81,7 @@ Adapter 契约见 [架构文档](docs/architecture.md#adapter-协议与能力发
 docker compose -f compose.yaml -f compose.local.yaml -f compose.build.yaml build core adapter
 ```
 
-镜像 CI 按 core/adapter 分开缓存 BuildKit 构建层；core 额外将 Go 编译缓存挂载持久化到 GitHub Actions Cache，以便源码变化时仍能复用编译结果。测试 CI 缓存 Go 模块、编译结果及 npm 下载。
+镜像 CI 按 core/adapter 分开缓存 BuildKit 构建层；core 额外将 Go 编译缓存挂载持久化到 GitHub Actions Cache，以便源码变化时仍能复用编译结果。测试 CI 缓存 Go 模块、编译结果及 pnpm 下载。
 
 生产 Compose 使用 GHCR 镜像。GitHub Actions 在 main 测试通过后发布两个架构的镜像。服务器部署使用完整提交 SHA 标签，与迁移文件保持一致。
 

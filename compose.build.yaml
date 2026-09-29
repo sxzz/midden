@@ -2,13 +2,22 @@
 services:
   core:
     image: midden-core:dev
-    build: .
+    build:
+      context: .
+      args:
+        VCS_REF: ${MIDDEN_BUILD_REVISION:-}
   migrate:
     image: midden-core:dev
-    build: .
+    build:
+      context: .
+      args:
+        VCS_REF: ${MIDDEN_BUILD_REVISION:-}
   tls-init:
     image: midden-core:dev
-    build: .
+    build:
+      context: .
+      args:
+        VCS_REF: ${MIDDEN_BUILD_REVISION:-}
   adapter:
     image: midden-adapter:dev
     build:

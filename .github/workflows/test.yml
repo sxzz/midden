@@ -9,11 +9,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v4
+      - uses: pnpm/setup@v3
         with:
-          node-version: 24.21.0
-          cache: npm
-      - run: npm ci --ignore-scripts && npm run build && npm test
+          cache: true
+          install: false
+      - run: pnpm install --frozen-lockfile --ignore-scripts && pnpm build && pnpm test
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: go vet ./...
       - run: ./scripts/test-integration.sh

@@ -1,23 +1,26 @@
 FROM --platform=$BUILDPLATFORM node:24.21.0-bookworm-slim AS dependencies
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY scripts/install-pnpm.mjs /tmp/install-pnpm.mjs
+RUN node /tmp/install-pnpm.mjs
 COPY adapters/x/package.json adapters/x/package.json
 COPY third_party/atmosphere/package.json third_party/atmosphere/package.json
-RUN npm ci --ignore-scripts --no-audit --no-fund
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 FROM dependencies AS build
 ENV NODE_OPTIONS="--max-old-space-size=384"
 COPY adapters/x adapters/x
 COPY third_party/atmosphere third_party/atmosphere
-RUN node node_modules/typescript/bin/tsc -p third_party/atmosphere/tsconfig.json && \
-    node node_modules/typescript/bin/tsc -p adapters/x/tsconfig.json
+RUN pnpm build
 
 FROM node:24.21.0-bookworm-slim AS production-dependencies
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY scripts/install-pnpm.mjs /tmp/install-pnpm.mjs
+RUN node /tmp/install-pnpm.mjs
 COPY adapters/x/package.json adapters/x/package.json
 COPY third_party/atmosphere/package.json third_party/atmosphere/package.json
-RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+RUN pnpm install --prod --frozen-lockfile --ignore-scripts
 
 FROM node:24.21.0-bookworm-slim
 WORKDIR /app
