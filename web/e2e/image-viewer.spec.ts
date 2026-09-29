@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { swipeImage } from './touch'
 
 const collection = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -74,62 +75,34 @@ test('icon controls, keyboard navigation and native image context menu', async (
   ).toBeFocused()
 })
 
-test('a stationary long press and cancelled multi-touch do not change the image', async ({
+test('touch swipe animates and long press keeps the current image', async ({
   page,
 }) => {
-  const stage = page.locator('.stage')
-  const first = { identifier: 1, clientX: 280, clientY: 350 }
-  await stage.dispatchEvent('touchstart', { touches: [first] })
-  await page.waitForTimeout(600) // Exercise the long-press duration without a drag.
-  await stage.dispatchEvent('touchend', {
-    touches: [],
-    changedTouches: [first],
+  await expect(page.locator('.pswp')).toHaveCSS('opacity', '1')
+  const client = await page.context().newCDPSession(page)
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x: 200, y: 350 }],
   })
-  await expect(page.getByRole('dialog').getByRole('status').first()).toHaveText(
-    '1 / 3',
-  )
-  await stage.dispatchEvent('touchstart', { touches: [first] })
-  await stage.dispatchEvent('touchmove', {
-    touches: [{ ...first, clientX: 150 }],
+  await page.waitForTimeout(600) // Real long-press duration without movement.
+  await client.send('Input.dispatchTouchEvent', {
+    type: 'touchEnd',
+    touchPoints: [],
   })
-  const track = page.locator('.track')
-  await expect
-    .poll(() =>
-      track.evaluate(
-        (element) =>
-          new DOMMatrixReadOnly(getComputedStyle(element).transform).m41,
-      ),
-    )
-    .toBeLessThan(-100)
-
-  await stage.dispatchEvent('touchstart', {
-    touches: [first, { identifier: 2, clientX: 300, clientY: 450 }],
-  })
-  await stage.dispatchEvent('touchcancel', {
-    touches: [],
-    changedTouches: [first],
-  })
-  await expect(page.getByRole('dialog').getByRole('status').first()).toHaveText(
-    '1 / 3',
-  )
-  await expect(track).not.toHaveClass(/held/)
-  await expect(track).toHaveCSS('transition-duration', '0.42s')
-  await expect
-    .poll(() =>
-      track.evaluate(
-        (element) =>
-          new DOMMatrixReadOnly(getComputedStyle(element).transform).m41,
-      ),
-    )
-    .toBe(0)
+  await client.detach()
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('1 / 3')
+  await swipeImage(page)
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('2 / 3')
+  await expect(page.getByRole('dialog').getByAltText('风景 2')).toBeVisible()
   await page.screenshot({ path: 'test-results/glass-viewer-mobile.png' })
 })
 
-test('reduced motion removes the slide animation', async ({ page }) => {
+test('reduced motion keeps button navigation immediate', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.getByRole('dialog').getByRole('button', { name: '下一张' }).click()
-  await expect(page.getByRole('dialog').getByRole('status').first()).toHaveText(
-    '2 / 3',
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('2 / 3')
+  await expect(page.locator('.dot').first()).toHaveCSS(
+    'transition-property',
+    'none',
   )
-  await expect(page.locator('.track')).toHaveCSS('transition-property', 'none')
 })

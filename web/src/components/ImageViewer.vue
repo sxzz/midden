@@ -1,4 +1,5 @@
 <script setup vapor lang="ts">
+import PhotoSwipe from 'photoswipe'
 import {
   computed,
   onBeforeUnmount,
@@ -8,52 +9,41 @@ import {
   watch,
 } from 'vue'
 import { assetURL, type Asset } from '../api'
-import { useImageSwipe } from '../composables/useImageSwipe'
-import LoadingImage from './ui/LoadingImage.vue'
+import 'photoswipe/style.css'
 const props = defineProps<{ images: Asset[]; initialId: string }>()
 const emit = defineEmits<{ close: [] }>()
 const index = shallowRef(
   Math.max(
     0,
-    props.images.findIndex((a) => a.id === props.initialId),
+    props.images.findIndex((image) => image.id === props.initialId),
   ),
 )
 const selected = computed(() => props.images[index.value])
 const dialog = useTemplateRef<HTMLDialogElement>('viewer')
-const track = useTemplateRef<HTMLDivElement>('track')
-// Every page sits on the track, but only the pages we have reached request
-// their asset, so opening a long album never fetches all of it at once.
-const loaded = shallowRef<string[]>([])
-watch(
-  index,
-  (at) => {
-    const near = props.images
-      .slice(Math.max(0, at - 1), at + 2)
-      .map((image) => image.id)
-      .filter((id) => !loaded.value.includes(id))
-    if (near.length) loaded.value = [...loaded.value, ...near]
-  },
-  { immediate: true },
-)
-function move(delta: number) {
-  index.value = Math.max(
-    0,
-    Math.min(props.images.length - 1, index.value + delta),
-  )
-}
-const { offset, dragging, moved, start, drag, end, cancel } = useImageSwipe({
-  count: () => props.images.length,
-  index,
-  track: () => track.value,
-  commit: move,
-})
-// Percentages resolve against the track, which is exactly one page wide.
-const trackStyle = computed(() => ({
-  transform: `translate3d(calc(${index.value * -100}% + ${offset.value}px), 0, 0)`,
-}))
+const stage = useTemplateRef<HTMLDivElement>('stage')
+let photoSwipe: PhotoSwipe | undefined
 let previousOverflow = ''
 let opener: HTMLElement | null = null
+let disposed = false
+let closeRequested = false
+function close() {
+  closeRequested = true
+  photoSwipe?.close()
+}
+function move(delta: number) {
+  photoSwipe?.mainScroll.moveIndexBy(
+    delta,
+    !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  )
+}
+function keydown(event: KeyboardEvent) {
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    event.preventDefault()
+    move(event.key === 'ArrowLeft' ? -1 : 1)
+  }
+}
 onMounted(() => {
+  if (!stage.value) return
   opener =
     document.activeElement instanceof HTMLElement
       ? document.activeElement
@@ -61,8 +51,92 @@ onMounted(() => {
   previousOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
   dialog.value?.showModal()
+  const previews = [
+    ...document.querySelectorAll<HTMLImageElement>('.media img'),
+  ]
+  const dataSource = props.images.map((image) => {
+    const src = assetURL(image)
+    const preview = previews.find(
+      (img) => img.src === new URL(src, location.href).href && img.naturalWidth,
+    )
+    return {
+      src,
+      alt: image.alt_text || '收藏图片',
+      width: preview?.naturalWidth || 1600,
+      height: preview?.naturalHeight || 1200,
+    }
+  })
+  const pswp = new PhotoSwipe({
+    dataSource,
+    index: index.value,
+    appendToEl: stage.value,
+    loop: false,
+    preload: [1, 1],
+    bgOpacity: 1,
+    close: false,
+    zoom: false,
+    counter: false,
+    arrowPrev: false,
+    arrowNext: false,
+    // The outer native dialog owns focus, keyboard navigation and Vue controls.
+    trapFocus: false,
+    returnFocus: false,
+    escKey: false,
+    arrowKeys: false,
+    showHideAnimationType: 'fade',
+    showAnimationDuration: 180,
+    hideAnimationDuration: 180,
+    imageClickAction: 'zoom',
+    tapAction: false,
+    doubleTapAction: 'zoom',
+    errorMsg: '图片加载失败，请关闭后重试',
+  })
+  photoSwipe = pswp
+  pswp.on('openingAnimationEnd', () => {
+    if (disposed) pswp.destroy()
+    else if (closeRequested) pswp.close()
+  })
+  pswp.on('change', () => {
+    index.value = pswp.currIndex
+  })
+  pswp.on('afterInit', () => {
+    pswp.element?.removeAttribute('role')
+    pswp.element?.removeAttribute('aria-modal')
+  })
+  // The API does not expose dimensions yet. Use existing thumbnails immediately,
+  // then resolve uncached slides from the library's own image load (no extra fetch).
+  pswp.on('contentLoadImage', ({ content }) => {
+    const image = content.element
+    if (!(image instanceof HTMLImageElement)) return
+    image.addEventListener(
+      'load',
+      () => {
+        if (
+          disposed ||
+          !image.naturalWidth ||
+          (content.width === image.naturalWidth &&
+            content.height === image.naturalHeight)
+        )
+          return
+        content.data.width = content.width = image.naturalWidth
+        content.data.height = content.height = image.naturalHeight
+        if (content.slide)
+          queueMicrotask(() => {
+            if (!disposed && pswp.isOpen)
+              pswp.refreshSlideContent(content.index)
+          })
+      },
+      { once: true },
+    )
+  })
+  pswp.on('destroy', () => {
+    if (!disposed) emit('close')
+  })
+  pswp.init()
 })
 onBeforeUnmount(() => {
+  disposed = true
+  photoSwipe?.destroy()
   dialog.value?.close()
   document.body.style.overflow = previousOverflow
   if (opener?.isConnected) opener.focus({ preventScroll: true })
@@ -71,16 +145,6 @@ watch(
   () => props.images,
   () => emit('close'),
 )
-function keydown(event: KeyboardEvent) {
-  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-    event.preventDefault()
-    move(event.key === 'ArrowLeft' ? -1 : 1)
-  }
-}
-// Tapping the matte beside the photo closes it; the tail of a drag must not.
-function dismiss() {
-  if (!moved.value) emit('close')
-}
 </script>
 
 <template>
@@ -88,39 +152,11 @@ function dismiss() {
     ref="viewer"
     class="viewer"
     aria-label="图片预览"
-    @cancel.prevent="emit('close')"
+    @cancel.prevent="close"
     @close="emit('close')"
     @keydown="keydown"
   >
-    <div
-      class="stage"
-      @touchstart.passive="start"
-      @touchmove="drag"
-      @touchend.passive="end"
-      @touchcancel.passive="cancel"
-    >
-      <div
-        ref="track"
-        class="track"
-        :class="{ held: dragging }"
-        :style="trackStyle"
-      >
-        <div
-          v-for="(image, slot) in images"
-          :key="image.id"
-          class="slide"
-          :aria-hidden="slot !== index"
-          @click.self="dismiss"
-        >
-          <LoadingImage
-            v-if="loaded.includes(image.id)"
-            :src="assetURL(image)"
-            :alt="image.alt_text || '收藏图片'"
-            loading="eager"
-          />
-        </div>
-      </div>
-    </div>
+    <div ref="stage" class="stage" />
 
     <div class="chrome chrome-top">
       <button
@@ -128,7 +164,7 @@ function dismiss() {
         class="glass close"
         autofocus
         aria-label="关闭图片"
-        @click="emit('close')"
+        @click="close"
       >
         <svg
           class="icon"
@@ -245,48 +281,25 @@ function dismiss() {
   overflow: hidden;
   touch-action: pan-y pinch-zoom;
 }
-.track {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  transition: transform 420ms cubic-bezier(0.32, 0.72, 0, 1);
-  will-change: transform;
+.stage :deep(.pswp) {
+  position: absolute;
+  z-index: 0;
 }
-/* While a finger owns the track it must follow, not chase. */
-.track.held {
-  transition: none;
-}
-.slide {
-  display: grid;
-  flex: 0 0 100%;
-  place-items: center;
-  min-width: 0;
-}
-.slide :deep(.image-shell) {
-  display: grid;
-  place-items: center;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  background-color: transparent;
-  /* The matte belongs to the slide, so taps beside the photo reach it. */
-  pointer-events: none;
-}
-.slide :deep(.image-shell[aria-busy='true']) {
-  width: min(76vw, 440px);
-  height: 42dvh;
-  border-radius: 16px;
-  background-color: var(--fill);
-}
-.slide :deep(.image-shell img) {
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  pointer-events: auto;
-  /* Keep the native long-press "save image" sheet reachable on iOS. */
+.stage :deep(.pswp__img) {
+  max-width: none;
   -webkit-touch-callout: default;
+}
+.stage :deep(.pswp__img--placeholder) {
+  background: linear-gradient(100deg, #1c1c1e 25%, #2c2c2e 45%, #1c1c1e 65%);
+  background-size: 240% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+.stage :deep(.pswp__preloader) {
+  display: none;
+}
+.stage :deep(.pswp__error-msg) {
+  color: var(--subtle);
+  font-size: 14px;
 }
 
 .chrome {
@@ -437,7 +450,6 @@ function dismiss() {
 
 /* style.css already neutralises durations; restated so the intent is local. */
 @media (prefers-reduced-motion: reduce) {
-  .track,
   .dot,
   .nav,
   .close {

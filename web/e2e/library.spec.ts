@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { expect, test } from '@playwright/test'
+import { swipeImage } from './touch'
 const id = '11111111-1111-4111-8111-111111111111'
 const collection = {
   id,
@@ -237,16 +238,7 @@ test('loading skeletons, one revision and touch image navigation', async ({
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('status')).toHaveText('1 / 2')
   await expect(dialog.getByRole('button', { name: '上一张' })).toBeDisabled()
-  await page.locator('.stage').dispatchEvent('touchstart', {
-    touches: [{ identifier: 1, clientX: 320, clientY: 300 }],
-  })
-  await page.locator('.stage').dispatchEvent('touchmove', {
-    touches: [{ identifier: 1, clientX: 60, clientY: 305 }],
-  })
-  await page.locator('.stage').dispatchEvent('touchend', {
-    touches: [],
-    changedTouches: [{ identifier: 1, clientX: 60, clientY: 305 }],
-  })
+  await swipeImage(page)
   await expect(dialog.getByRole('status')).toHaveText('2 / 2')
   await expect(dialog.getByRole('button', { name: '下一张' })).toBeDisabled()
   await expect(dialog.getByAltText('图片2')).toHaveCSS('opacity', '1')
