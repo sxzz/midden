@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Local-only frontend preview against an already running core/Postgres stack.
 import { createHash, randomBytes } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { isIP } from "node:net";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolve } from "node:path";
@@ -24,9 +25,52 @@ export function localURL(value) {
   return url.origin;
 }
 
-export function allowedRequest(req) {
+export function splitArguments(args) {
+  const boundary = args.indexOf("--");
+  return boundary < 0
+    ? { own: args, vite: [] }
+    : { own: args.slice(0, boundary), vite: args.slice(boundary + 1) };
+}
+
+// The wrapper config adds authentication while loading any user-selected config.
+// All other arguments are parsed by Vite itself, including optional --host.
+export function previewArguments(args) {
+  const forwarded = [];
+  let config;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--config" || args[i] === "-c") {
+      config = args[++i];
+      if (!config || config.startsWith("-"))
+        throw new Error("Missing Vite config path");
+    } else if (args[i].startsWith("--config=")) {
+      config = args[i].slice("--config=".length);
+      if (!config) throw new Error("Missing Vite config path");
+    } else forwarded.push(args[i]);
+  }
+  return { forwarded, config };
+}
+
+export function allowedRequest(req, host = "127.0.0.1") {
   try {
-    const origin = localURL(`http://${req.headers.host}`);
+    const url = new URL(`http://${req.headers.host}`);
+    const origin = url.origin;
+    if (
+      !req.headers.host ||
+      url.username ||
+      url.password ||
+      url.pathname !== "/" ||
+      url.search ||
+      url.hash
+    )
+      return false;
+    const hostname = url.hostname.replace(/^\[|\]$/g, "");
+    const allInterfaces = host === true || host === "0.0.0.0" || host === "::";
+    if (
+      !["127.0.0.1", "localhost", "::1"].includes(hostname) &&
+      !(allInterfaces && isIP(hostname)) &&
+      hostname !== host
+    )
+      return false;
     return (
       (!req.headers.origin || req.headers.origin === origin) &&
       (!req.headers["sec-fetch-site"] ||
@@ -38,7 +82,9 @@ export function allowedRequest(req) {
 }
 
 async function main() {
+  const args = splitArguments(process.argv.slice(2));
   const { values } = parseArgs({
+    args: args.own,
     options: {
       help: { type: "boolean", short: "h" },
       port: { type: "string", default: "5174" },
@@ -49,14 +95,38 @@ async function main() {
   });
   if (values.help) {
     console.log(`Usage: pnpm dev:web [--port 5174] [--core http://127.0.0.1:8080]
-                    [--postgres CONTAINER] [--tenant UUID]
+                    [--postgres CONTAINER] [--tenant UUID] [-- VITE_ARGS...]
 
-Uses the running core API and Docker Postgres. Starts only Vite on 127.0.0.1.
+Examples: pnpm dev:web -- --host
+          pnpm dev:web -- --host 0.0.0.0 --port 5180 --strictPort
+
+Uses the running core API and Docker Postgres. Starts only Vite (127.0.0.1 by default).
+--host exposes this authenticated preview to other devices on your network.
 Auto-selects a sole Postgres container and tenant; otherwise asks for an explicit choice.
 The temporary session stays in memory, renews while running, and is revoked on exit.
 If the requested port is occupied, Vite selects the next free port.`);
     return;
   }
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const webRoot = resolve(root, "web");
+  const webRequire = createRequire(resolve(webRoot, "package.json"));
+  const viteCLI = resolve(
+    webRequire.resolve("vite/package.json"),
+    "../bin/vite.js",
+  );
+  if (
+    args.vite.some((arg) => ["--help", "-h", "--version", "-v"].includes(arg))
+  ) {
+    const help = spawn(process.execPath, [viteCLI, ...args.vite], {
+      cwd: webRoot,
+      stdio: "inherit",
+    });
+    help.on("exit", (code) => {
+      process.exitCode = code ?? 1;
+    });
+    return;
+  }
+  const { forwarded, config } = previewArguments(args.vite);
   const core = localURL(values.core);
   const port = Number(values.port);
   if (!Number.isInteger(port) || port < 1024 || port > 65535)
@@ -125,7 +195,7 @@ If the requested port is occupied, Vite selects the next free port.`);
   const origin = new URL(webURL).origin;
   const session = randomBytes(32).toString("base64url");
   const digest = createHash("sha256").update(session).digest("hex");
-  let server,
+  let child,
     renewal,
     stopping = false,
     registered = false;
@@ -134,7 +204,7 @@ If the requested port is occupied, Vite selects the next free port.`);
     stopping = true;
     clearInterval(renewal);
     revoke();
-    await server?.close();
+    child?.kill("SIGTERM");
     process.exitCode = code;
   };
   function revoke() {
@@ -148,7 +218,7 @@ If the requested port is occupied, Vite selects the next free port.`);
       );
     }
   }
-  // Vite also handles termination; synchronous cleanup covers its exit path.
+  // Keep synchronous cleanup as a fallback for unexpected parent exit.
   process.once("exit", revoke);
   process.once("SIGINT", () => void stop());
   process.once("SIGTERM", () => void stop());
@@ -165,43 +235,35 @@ If the requested port is occupied, Vite selects the next free port.`);
       throw new Error(
         "Preview session rejected: verify --core and --postgres refer to the same stack.",
       );
-    const root = fileURLToPath(new URL("../", import.meta.url));
-    const webRequire = createRequire(resolve(root, "web/package.json"));
-    const { createServer } = await import(
-      pathToFileURL(webRequire.resolve("vite")).href
-    );
-    server = await createServer({
-      root: resolve(root, "web"),
-      configFile: resolve(root, "web/vite.config.ts"),
-      plugins: [
-        {
-          name: "local-preview-access",
-          configureServer(vite) {
-            vite.middlewares.use((req, res, next) => {
-              if (!allowedRequest(req)) {
-                res.statusCode = 403;
-                res.end("Local preview only");
-                return;
-              }
-              next();
-            });
-          },
-        },
+    child = spawn(
+      process.execPath,
+      [
+        viteCLI,
+        "--port",
+        String(port),
+        ...forwarded,
+        "--config",
+        resolve(root, "scripts/dev-web-vite.config.mjs"),
       ],
-      server: {
-        host: "127.0.0.1",
-        port,
-        strictPort: false,
-        cors: false,
-        proxy: {
-          "/v1": {
-            target: core,
-            headers: { Cookie: `__Host-midden=${session}`, Origin: origin },
-          },
+      {
+        cwd: webRoot,
+        stdio: "inherit",
+        env: {
+          ...process.env,
+          MIDDEN_PREVIEW_SESSION: session,
+          MIDDEN_PREVIEW_ORIGIN: origin,
+          MIDDEN_PREVIEW_CORE: core,
+          MIDDEN_PREVIEW_CONFIG: resolve(webRoot, config || "vite.config.ts"),
         },
       },
+    );
+    child.on("error", () => {
+      console.error("Could not start Vite");
+      void stop(1);
     });
-    await server.listen();
+    child.on("exit", (code) => {
+      void stop(code ?? 1);
+    });
     renewal = setInterval(
       () => {
         try {
@@ -220,7 +282,6 @@ If the requested port is occupied, Vite selects the next free port.`);
     console.log(
       `\nLocal preview · tenant ${tenant} · core ${core}\nUsing real data. Ctrl+C stops the frontend and revokes its temporary session.`,
     );
-    server.printUrls();
   } catch (error) {
     // Never print a subprocess error object: it could contain credential-bearing input.
     console.error(
