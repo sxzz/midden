@@ -13,6 +13,7 @@ const (
 	ProtocolVersion   = "1.0"
 	CaptureFetch      = "capture.fetch"
 	CaptureRelated    = "capture.related"
+	CapturePage       = "capture.page"
 	CaptureCanonical  = "capture.canonical"
 	ConnectionCheck   = "connection.check"
 	CredentialPrepare = "credential.prepare"

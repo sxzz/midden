@@ -48,6 +48,10 @@ func init() {
 	channelCommands = []channelCommand{
 		{"start", "开始使用", "", false, true, noArgument, (*Service).commandStart},
 		{"save", "保存帖子", "<帖子链接…>", false, false, func(string) bool { return true }, (*Service).commandSave},
+		{"more1000", "抓取1000条", "<采集记录 ID>", true, false, validIDArgument, (*Service).commandMore1000},
+		{"more", "抓取更多帖子", "<采集记录 ID>", true, false, validIDArgument, (*Service).commandMore},
+		{"collection_stop", "中止抓取", "<采集记录 ID>", true, false, validIDArgument, (*Service).commandCollectionStop},
+		{"page_retry", "重试本页", "<采集记录 ID>", true, false, validIDArgument, (*Service).commandPageRetry},
 		{"list", "查看归档列表", "[游标]", true, true, validCursorArgument, (*Service).commandList},
 		{"show", "查看指定归档", "<归档 ID>", true, false, validIDArgument, (*Service).commandShow},
 		{"status", "查看采集状态", "<任务 ID>", true, false, validIDArgument, (*Service).commandStatus},
@@ -77,6 +81,9 @@ func TelegramCommands(group bool, descriptors ...*pb.DescribeResponse) []telegra
 	}
 	commands := make([]telegram.Command, 0, len(channelCommands))
 	for _, c := range channelCommands {
+		if c.Name == "more" || c.Name == "more1000" || c.Name == "page_retry" || c.Name == "collection_stop" {
+			continue
+		}
 		if !accountEnabled && strings.HasPrefix(c.Name, "account") {
 			continue
 		}
@@ -143,6 +150,9 @@ func (s *Service) commandHelp(_ context.Context, r *commandRequest) error {
 	var b strings.Builder
 	b.WriteString("发送支持的平台链接保存内容（每次最多 200 个）。")
 	for _, c := range channelCommands {
+		if c.Name == "more" || c.Name == "more1000" || c.Name == "page_retry" || c.Name == "collection_stop" {
+			continue
+		}
 		if strings.HasPrefix(r.Origin.ChatID, "-") && c.PrivateOnly {
 			continue
 		}
@@ -162,6 +172,9 @@ func (s *Service) commandUsage(ctx context.Context, r *commandRequest) error {
 		return err
 	}
 	r.Text = usageText(v.Used, v.Reserved, v.Limit)
+	if v.Unlimited {
+		r.Text = fmt.Sprintf("身份：不限额\n已使用 %.1f MiB / 无上限\n处理中预留 %.1f MiB", float64(v.Used)/(1<<20), float64(v.Reserved)/(1<<20))
+	}
 	return nil
 }
 
@@ -180,7 +193,11 @@ func (s *Service) commandList(ctx context.Context, r *commandRequest) error {
 		summary := archiveListSummary(a.Summary, a.Text)
 		r.Entities = append(r.Entities, telegram.Entity{Type: "text_link", Offset: len(utf16.Encode([]rune(r.Text))), Length: len(utf16.Encode([]rune(summary))), URL: a.URL})
 		r.Text += summary
-		r.Buttons = append(r.Buttons, []telegram.Button{{Text: fmt.Sprintf("查看第%d条", i+1), Data: "/show " + a.ID}, {Text: fmt.Sprintf("查看第%d条原帖", i+1), URL: a.URL}})
+		source := "原帖"
+		if telegram.IsProfileArchive(a) {
+			source = "主页"
+		}
+		r.Buttons = append(r.Buttons, []telegram.Button{{Text: fmt.Sprintf("查看第%d条", i+1), Data: "/show " + a.ID}, {Text: fmt.Sprintf("查看第%d条%s", i+1, source), URL: a.URL}})
 	}
 	if r.Text == "" {
 		r.Text = "暂无归档。"

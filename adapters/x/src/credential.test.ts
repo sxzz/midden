@@ -46,6 +46,7 @@ test("adapter owns X target identity", () => {
       objectScope: "",
       externalId: "123",
       refreshOnSubmit: false,
+      collection: false,
     });
   }
   for (const input of [

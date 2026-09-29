@@ -3,11 +3,14 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"strconv"
@@ -21,7 +24,19 @@ import (
 	"monitor/internal/store"
 )
 
-func (s *Service) download(ctx context.Context, t store.Task) error {
+func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) {
+	started := time.Now()
+	stage := "lock_asset"
+	log := slog.Default().With("task_id", t.ID, "tenant_id", t.Tenant)
+	defer func() {
+		fields := []any{"stage", stage, "elapsed_ms", time.Since(started).Milliseconds()}
+		if resultErr != nil {
+			log.WarnContext(ctx, "media task failed", append(fields, diagnosticError(resultErr)...)...)
+		} else {
+			log.InfoContext(ctx, "media task finished", fields...)
+		}
+	}()
+
 	// A per-asset lock also protects against overlap during job rescue.
 	c, e := s.DB.Pool.Acquire(ctx)
 	if e != nil {
@@ -60,13 +75,16 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 				c.Conn().Close(unlockCtx)
 			}
 		}()
+		stage = "cache_lookup"
 		hit, err := s.reuseMedia(ctx, t, cacheScope, accessScope, cacheKey)
 		if err != nil || hit {
+			log.InfoContext(ctx, "media cache lookup", "hit", hit)
 			return err
 		}
 	}
 	var kind, source, state, key, cid, oid, visibility, dataScope string
 	var reserved int64
+	stage = "reserve_storage"
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, t.Tenant); e != nil {
 			return e
@@ -84,13 +102,14 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 		}
 		if reserved == 0 {
 			var available int64
-			if e = tx.QueryRow(ctx, `SELECT quota_bytes-tenant_usage()-reserved_bytes FROM tenants WHERE id=$1`, t.Tenant).Scan(&available); e != nil {
+			if e = tx.QueryRow(ctx, `SELECT CASE WHEN tenant_unlimited() THEN 9223372036854775807 ELSE quota_bytes-tenant_usage()-reserved_bytes END FROM tenants WHERE id=$1`, t.Tenant).Scan(&available); e != nil {
 				return e
 			}
 			limit := s.Config.MaxImageBytes
 			if kind == "video" {
 				limit = s.Config.MaxVideoBytes
 			}
+			log.InfoContext(ctx, "media storage reservation", "capture_id", cid, "available_bytes", available, "requested_bytes", limit)
 			reserved = min(available, limit)
 			if reserved <= 0 {
 				return domain.ErrQuota
@@ -124,15 +143,34 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 	if e != nil || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return &PermanentError{"invalid media URL"}
 	}
-	req, e := http.NewRequestWithContext(ctx, "GET", source, nil)
+	log = log.With("capture_id", cid, "media_kind", kind, "source_host", u.Hostname(), "reserved_bytes", reserved)
+	stage = "http_request"
+	log.InfoContext(ctx, "media request started", "client_timeout_ms", s.HTTP.Timeout.Milliseconds())
+	trace := &httptrace.ClientTrace{
+		DNSDone: func(info httptrace.DNSDoneInfo) {
+			log.InfoContext(ctx, "media network phase", append([]any{"phase", "dns", "elapsed_ms", time.Since(started).Milliseconds()}, diagnosticError(info.Err)...)...)
+		},
+		ConnectDone: func(network, _ string, err error) {
+			log.InfoContext(ctx, "media network phase", append([]any{"phase", "connect", "network", network, "elapsed_ms", time.Since(started).Milliseconds()}, diagnosticError(err)...)...)
+		},
+		TLSHandshakeDone: func(_ tls.ConnectionState, err error) {
+			log.InfoContext(ctx, "media network phase", append([]any{"phase", "tls", "elapsed_ms", time.Since(started).Milliseconds()}, diagnosticError(err)...)...)
+		},
+		GotFirstResponseByte: func() {
+			log.InfoContext(ctx, "media network phase", "phase", "first_byte", "elapsed_ms", time.Since(started).Milliseconds())
+		},
+	}
+	req, e := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), "GET", source, nil)
 	if e != nil {
 		return &PermanentError{"invalid media URL"}
 	}
 	resp, e := s.HTTP.Do(req)
 	if e != nil {
-		return fmt.Errorf("media request failed")
+		return fmt.Errorf("media request failed: %w", e)
 	}
 	defer resp.Body.Close()
+	log.InfoContext(ctx, "media response headers", "http_status", resp.StatusCode, "content_length", resp.ContentLength, "retry_after_ms", parseRetry(resp.Header.Get("Retry-After")).Milliseconds(), "elapsed_ms", time.Since(started).Milliseconds())
+	stage = "validate_response"
 	if resp.StatusCode == 429 || resp.StatusCode >= 500 {
 		return &RetryError{After: parseRetry(resp.Header.Get("Retry-After")), Err: fmt.Errorf("media upstream unavailable")}
 	}
@@ -149,10 +187,12 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 	defer os.Remove(f.Name())
 	defer f.Close()
 	h := sha256.New()
+	stage = "read_body"
 	n, e := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, reserved+1))
 	if e != nil {
-		return fmt.Errorf("media download interrupted")
+		return fmt.Errorf("media download interrupted: %w", e)
 	}
+	log.InfoContext(ctx, "media body received", "bytes", n, "elapsed_ms", time.Since(started).Milliseconds())
 	if n > reserved {
 		return &PermanentError{"media exceeds size or remaining storage limit"}
 	}
@@ -174,6 +214,7 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 	digest := hex.EncodeToString(h.Sum(nil))
 	// Serialize the existence check and upload across tenants sharing this scope.
 	// Keep the remote upload outside a database transaction.
+	stage = "dedup_lock"
 	hashKey := dataScope + "|" + accessScope + "|" + digest
 	if _, e = c.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1,2))`, hashKey); e != nil {
 		return e
@@ -191,11 +232,15 @@ func (s *Service) download(ctx context.Context, t store.Task) error {
 	}); e != nil {
 		return e
 	}
+	log.InfoContext(ctx, "media blob lookup", "hit", exists, "bytes", n)
 	if !exists {
+		stage = "object_upload"
+		log.InfoContext(ctx, "media object upload started", "bytes", n)
 		if e = s.Blobs.Put(ctx, key, f, n, mime); e != nil {
-			return fmt.Errorf("object upload failed")
+			return fmt.Errorf("object upload failed: %w", e)
 		}
 	}
+	stage = "commit_asset"
 	return s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, t.Tenant); e != nil {
 			return e

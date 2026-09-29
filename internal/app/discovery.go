@@ -95,7 +95,7 @@ func (s *Service) Resolve(ctx context.Context, raw string) (domain.Target, error
 	if r == nil || domain.ValidateURL(r.Url) != nil || strings.TrimSpace(r.Platform) == "" || strings.TrimSpace(r.Kind) == "" || strings.TrimSpace(r.ExternalId) == "" {
 		return target, fmt.Errorf("adapter returned invalid target")
 	}
-	return domain.Target{URL: r.Url, ExternalID: r.ExternalId, Platform: r.Platform, Kind: r.Kind, ObjectScope: r.ObjectScope, RefreshOnSubmit: r.RefreshOnSubmit}, nil
+	return domain.Target{URL: r.Url, ExternalID: r.ExternalId, Platform: r.Platform, Kind: r.Kind, ObjectScope: r.ObjectScope, RefreshOnSubmit: r.RefreshOnSubmit, Collection: r.Collection}, nil
 }
 
 func (s *Service) connectionProvider(ctx context.Context, tenant, id string) (string, string, error) {

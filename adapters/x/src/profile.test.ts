@@ -134,3 +134,99 @@ test("profile visibility is conservative and account view fields stay out of pub
   });
   assert.equal(r.relatedTargets.length, 1);
 });
+
+test("public pagination sends opaque cursor and count 100 without credentials", async () => {
+  const { fetchPublicTimeline } = await import("./profile.js");
+  const result = normalizeProfile(user, user.id, "fxtwitter");
+  await fetchPublicTimeline(
+    result,
+    AbortSignal.timeout(1000),
+    async (input, init) => {
+      const url = new URL(String(input));
+      assert.equal(url.searchParams.get("cursor"), "next/+ =");
+      assert.equal(url.searchParams.get("count"), "100");
+      assert.equal(new Headers(init?.headers).has("cookie"), false);
+      return new Response(
+        JSON.stringify({
+          code: 200,
+          results: Array.from({ length: 100 }, (_, i) => ({
+            type: "status",
+            id: String(i + 1),
+          })),
+          cursor: { bottom: "third" },
+        }),
+      );
+    },
+    "next/+ =",
+    1000,
+  );
+  assert.equal(result.nextPageCursor, "third");
+  assert.equal(result.relatedTargets.length, 100);
+  attachTimeline(result, {
+    code: 200,
+    results: [],
+    cursor: { bottom: "stale" },
+  });
+  assert.equal(result.nextPageCursor, "");
+});
+
+test("timeline collection keeps whole pages, deduplicates and resumes after the last page", async () => {
+  const { collectTimeline } = await import("./profile.js");
+  const result = normalizeProfile(user, user.id, "fxtwitter");
+  const cursors: string[] = [];
+  await collectTimeline(result, async (cursor) => {
+    cursors.push(cursor);
+    const page = cursors.length;
+    return {
+      code: 200,
+      results: Array.from({ length: 18 }, (_, i) => ({
+        type: "status",
+        id: i === 0 ? "1" : String(page * 100 + i),
+      })),
+      cursor: { bottom: `page-${page + 1}` },
+    };
+  });
+  assert.equal(cursors.length, 6);
+  assert.equal(result.relatedTargets.length, 103);
+  assert.equal(result.nextPageCursor, "page-7");
+});
+
+test("timeline collection preserves progress when a later request fails", async () => {
+  const { collectTimeline } = await import("./profile.js");
+  const result = normalizeProfile(user, user.id, "fxtwitter");
+  await assert.rejects(
+    collectTimeline(result, async (cursor) => {
+      if (cursor) throw new Error("upstream unavailable");
+      return {
+        code: 200,
+        results: [{ type: "status", id: "1" }],
+        cursor: { bottom: "retry-here" },
+      };
+    }),
+  );
+  assert.equal(result.relatedTargets.length, 1);
+  assert.equal(result.nextPageCursor, "retry-here");
+});
+
+test("timeline collection stops at end or a cursor cycle without dropping posts", async () => {
+  const { collectTimeline } = await import("./profile.js");
+  for (const bottom of ["", "start"]) {
+    const result = normalizeProfile(user, user.id, "fxtwitter");
+    let calls = 0;
+    await collectTimeline(
+      result,
+      async () => {
+        calls++;
+        return {
+          code: 200,
+          results: [{ type: "status", id: "1" }],
+          cursor: { bottom },
+        };
+      },
+      "start",
+    );
+    assert.equal(calls, 1);
+    assert.equal(result.relatedTargets.length, 1);
+    assert.equal(result.nextPageCursor, "");
+  }
+});

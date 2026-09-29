@@ -128,6 +128,9 @@ func (s *Service) submissionStatus(ctx context.Context, t store.Task) error {
 	if e != nil || state == "sent" {
 		return e
 	}
+	if handled, err := s.collectionProgress(ctx, t); handled || err != nil {
+		return err
+	}
 	sender := s.replySender(channel, replyTo)
 	if _, ok := sender.(interactiveSender); !ok {
 		return nil
@@ -207,6 +210,9 @@ func archiveMessage(a domain.Archive, state string) string {
 		body = "空"
 	}
 	parts := []string{header, author + "：\n" + body}
+	if text, _, _, ok := telegram.ProfilePresentation(a); ok {
+		parts = []string{text}
+	}
 	if state == "partial" {
 		parts = append(parts, "部分内容未保存")
 	}
@@ -227,6 +233,9 @@ func archiveMessage(a domain.Archive, state string) string {
 }
 
 func archiveMessageEntities(a domain.Archive) []telegram.Entity {
+	if _, entities, _, ok := telegram.ProfilePresentation(a); ok {
+		return entities
+	}
 	size := func(s string) int { return len(utf16.Encode([]rune(s))) }
 	author := strings.TrimSpace(a.AuthorName)
 	if author == "" {

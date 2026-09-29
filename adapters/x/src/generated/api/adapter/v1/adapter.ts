@@ -104,6 +104,10 @@ export interface FetchRequest {
   platform: string;
   kind: string;
   objectScope: string;
+  /** Optional target size; adapter may exceed it to preserve whole upstream pages. */
+  pageSize: number;
+  /** Opaque capture.page/1 continuation, same provider and connection. */
+  pageCursor: string;
   /** Related captures must not recursively expand collections. */
   automatic: boolean;
 }
@@ -185,6 +189,10 @@ export interface FetchResponse {
   canonicalTarget: ResolveResponse | undefined;
   /** capture.related/1; one level, same provider/connection. */
   relatedTargets: RelatedTarget[];
+  /** Optional collection batch limit; zero disables batch actions. */
+  maxBatchSize: number;
+  /** Empty at end of collection; capture.page/1. */
+  nextPageCursor: string;
   /** Original publication time in RFC 3339; empty when unknown. */
   publishedAt: string;
 }
@@ -204,6 +212,8 @@ export interface ResolveResponse {
   kind: string;
   objectScope: string;
   externalId: string;
+  /** Explicit capture expands a collection of related targets. */
+  collection: boolean;
   /** Explicit submissions always observe this target again. */
   refreshOnSubmit: boolean;
 }
@@ -757,6 +767,8 @@ function createBaseFetchRequest(): FetchRequest {
     platform: "",
     kind: "",
     objectScope: "",
+    pageSize: 0,
+    pageCursor: "",
     automatic: false,
   };
 }
@@ -795,6 +807,12 @@ export const FetchRequest: MessageFns<FetchRequest> = {
     }
     if (message.objectScope !== "") {
       writer.uint32(82).string(message.objectScope);
+    }
+    if (message.pageSize !== 0) {
+      writer.uint32(104).uint32(message.pageSize);
+    }
+    if (message.pageCursor !== "") {
+      writer.uint32(98).string(message.pageCursor);
     }
     if (message.automatic !== false) {
       writer.uint32(88).bool(message.automatic);
@@ -890,6 +908,22 @@ export const FetchRequest: MessageFns<FetchRequest> = {
           message.objectScope = reader.string();
           continue;
         }
+        case 13: {
+          if (tag !== 104) {
+            break;
+          }
+
+          message.pageSize = reader.uint32();
+          continue;
+        }
+        case 12: {
+          if (tag !== 98) {
+            break;
+          }
+
+          message.pageCursor = reader.string();
+          continue;
+        }
         case 11: {
           if (tag !== 88) {
             break;
@@ -935,6 +969,10 @@ export const FetchRequest: MessageFns<FetchRequest> = {
       objectScope: isSet(object.objectScope)
         ? globalThis.String(object.objectScope)
         : "",
+      pageSize: isSet(object.pageSize) ? globalThis.Number(object.pageSize) : 0,
+      pageCursor: isSet(object.pageCursor)
+        ? globalThis.String(object.pageCursor)
+        : "",
       automatic: isSet(object.automatic)
         ? globalThis.Boolean(object.automatic)
         : false,
@@ -973,6 +1011,12 @@ export const FetchRequest: MessageFns<FetchRequest> = {
     if (message.objectScope !== "") {
       obj.objectScope = message.objectScope;
     }
+    if (message.pageSize !== 0) {
+      obj.pageSize = Math.round(message.pageSize);
+    }
+    if (message.pageCursor !== "") {
+      obj.pageCursor = message.pageCursor;
+    }
     if (message.automatic !== false) {
       obj.automatic = message.automatic;
     }
@@ -997,6 +1041,8 @@ export const FetchRequest: MessageFns<FetchRequest> = {
     message.platform = object.platform ?? "";
     message.kind = object.kind ?? "";
     message.objectScope = object.objectScope ?? "";
+    message.pageSize = object.pageSize ?? 0;
+    message.pageCursor = object.pageCursor ?? "";
     message.automatic = object.automatic ?? false;
     return message;
   },
@@ -1815,6 +1861,8 @@ function createBaseFetchResponse(): FetchResponse {
     authorName: "",
     canonicalTarget: undefined,
     relatedTargets: [],
+    maxBatchSize: 0,
+    nextPageCursor: "",
     publishedAt: "",
   };
 }
@@ -1874,6 +1922,12 @@ export const FetchResponse: MessageFns<FetchResponse> = {
     }
     for (const v of message.relatedTargets) {
       RelatedTarget.encode(v!, writer.uint32(138).fork()).join();
+    }
+    if (message.maxBatchSize !== 0) {
+      writer.uint32(152).uint32(message.maxBatchSize);
+    }
+    if (message.nextPageCursor !== "") {
+      writer.uint32(146).string(message.nextPageCursor);
     }
     if (message.publishedAt !== "") {
       writer.uint32(122).string(message.publishedAt);
@@ -2024,6 +2078,22 @@ export const FetchResponse: MessageFns<FetchResponse> = {
           );
           continue;
         }
+        case 19: {
+          if (tag !== 152) {
+            break;
+          }
+
+          message.maxBatchSize = reader.uint32();
+          continue;
+        }
+        case 18: {
+          if (tag !== 146) {
+            break;
+          }
+
+          message.nextPageCursor = reader.string();
+          continue;
+        }
         case 15: {
           if (tag !== 122) {
             break;
@@ -2087,6 +2157,12 @@ export const FetchResponse: MessageFns<FetchResponse> = {
       relatedTargets: globalThis.Array.isArray(object?.relatedTargets)
         ? object.relatedTargets.map((e: any) => RelatedTarget.fromJSON(e))
         : [],
+      maxBatchSize: isSet(object.maxBatchSize)
+        ? globalThis.Number(object.maxBatchSize)
+        : 0,
+      nextPageCursor: isSet(object.nextPageCursor)
+        ? globalThis.String(object.nextPageCursor)
+        : "",
       publishedAt: isSet(object.publishedAt)
         ? globalThis.String(object.publishedAt)
         : "",
@@ -2147,6 +2223,12 @@ export const FetchResponse: MessageFns<FetchResponse> = {
         RelatedTarget.toJSON(e),
       );
     }
+    if (message.maxBatchSize !== 0) {
+      obj.maxBatchSize = Math.round(message.maxBatchSize);
+    }
+    if (message.nextPageCursor !== "") {
+      obj.nextPageCursor = message.nextPageCursor;
+    }
     if (message.publishedAt !== "") {
       obj.publishedAt = message.publishedAt;
     }
@@ -2183,6 +2265,8 @@ export const FetchResponse: MessageFns<FetchResponse> = {
         : undefined;
     message.relatedTargets =
       object.relatedTargets?.map((e) => RelatedTarget.fromPartial(e)) || [];
+    message.maxBatchSize = object.maxBatchSize ?? 0;
+    message.nextPageCursor = object.nextPageCursor ?? "";
     message.publishedAt = object.publishedAt ?? "";
     return message;
   },
@@ -2323,6 +2407,7 @@ function createBaseResolveResponse(): ResolveResponse {
     kind: "",
     objectScope: "",
     externalId: "",
+    collection: false,
     refreshOnSubmit: false,
   };
 }
@@ -2346,6 +2431,9 @@ export const ResolveResponse: MessageFns<ResolveResponse> = {
     }
     if (message.externalId !== "") {
       writer.uint32(42).string(message.externalId);
+    }
+    if (message.collection !== false) {
+      writer.uint32(56).bool(message.collection);
     }
     if (message.refreshOnSubmit !== false) {
       writer.uint32(48).bool(message.refreshOnSubmit);
@@ -2401,6 +2489,14 @@ export const ResolveResponse: MessageFns<ResolveResponse> = {
           message.externalId = reader.string();
           continue;
         }
+        case 7: {
+          if (tag !== 56) {
+            break;
+          }
+
+          message.collection = reader.bool();
+          continue;
+        }
         case 6: {
           if (tag !== 48) {
             break;
@@ -2431,6 +2527,9 @@ export const ResolveResponse: MessageFns<ResolveResponse> = {
       externalId: isSet(object.externalId)
         ? globalThis.String(object.externalId)
         : "",
+      collection: isSet(object.collection)
+        ? globalThis.Boolean(object.collection)
+        : false,
       refreshOnSubmit: isSet(object.refreshOnSubmit)
         ? globalThis.Boolean(object.refreshOnSubmit)
         : false,
@@ -2454,6 +2553,9 @@ export const ResolveResponse: MessageFns<ResolveResponse> = {
     if (message.externalId !== "") {
       obj.externalId = message.externalId;
     }
+    if (message.collection !== false) {
+      obj.collection = message.collection;
+    }
     if (message.refreshOnSubmit !== false) {
       obj.refreshOnSubmit = message.refreshOnSubmit;
     }
@@ -2470,6 +2572,7 @@ export const ResolveResponse: MessageFns<ResolveResponse> = {
     message.kind = object.kind ?? "";
     message.objectScope = object.objectScope ?? "";
     message.externalId = object.externalId ?? "";
+    message.collection = object.collection ?? false;
     message.refreshOnSubmit = object.refreshOnSubmit ?? false;
     return message;
   },

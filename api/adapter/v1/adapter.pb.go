@@ -364,7 +364,9 @@ type FetchRequest struct {
 	Platform      string                 `protobuf:"bytes,8,opt,name=platform,proto3" json:"platform,omitempty"`
 	Kind          string                 `protobuf:"bytes,9,opt,name=kind,proto3" json:"kind,omitempty"`
 	ObjectScope   string                 `protobuf:"bytes,10,opt,name=object_scope,json=objectScope,proto3" json:"object_scope,omitempty"`
-	Automatic     bool                   `protobuf:"varint,11,opt,name=automatic,proto3" json:"automatic,omitempty"` // Related captures must not recursively expand collections.
+	PageSize      uint32                 `protobuf:"varint,13,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`      // Optional target size; adapter may exceed it to preserve whole upstream pages.
+	PageCursor    string                 `protobuf:"bytes,12,opt,name=page_cursor,json=pageCursor,proto3" json:"page_cursor,omitempty"` // Opaque capture.page/1 continuation, same provider and connection.
+	Automatic     bool                   `protobuf:"varint,11,opt,name=automatic,proto3" json:"automatic,omitempty"`                    // Related captures must not recursively expand collections.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -465,6 +467,20 @@ func (x *FetchRequest) GetKind() string {
 func (x *FetchRequest) GetObjectScope() string {
 	if x != nil {
 		return x.ObjectScope
+	}
+	return ""
+}
+
+func (x *FetchRequest) GetPageSize() uint32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *FetchRequest) GetPageCursor() string {
+	if x != nil {
+		return x.PageCursor
 	}
 	return ""
 }
@@ -948,6 +964,8 @@ type FetchResponse struct {
 	AuthorName      string                 `protobuf:"bytes,14,opt,name=author_name,json=authorName,proto3" json:"author_name,omitempty"`                // Generic presentation, supplied by the adapter.
 	CanonicalTarget *ResolveResponse       `protobuf:"bytes,16,opt,name=canonical_target,json=canonicalTarget,proto3" json:"canonical_target,omitempty"` // Optional stable identity, same platform and kind.
 	RelatedTargets  []*RelatedTarget       `protobuf:"bytes,17,rep,name=related_targets,json=relatedTargets,proto3" json:"related_targets,omitempty"`    // capture.related/1; one level, same provider/connection.
+	MaxBatchSize    uint32                 `protobuf:"varint,19,opt,name=max_batch_size,json=maxBatchSize,proto3" json:"max_batch_size,omitempty"`       // Optional collection batch limit; zero disables batch actions.
+	NextPageCursor  string                 `protobuf:"bytes,18,opt,name=next_page_cursor,json=nextPageCursor,proto3" json:"next_page_cursor,omitempty"`  // Empty at end of collection; capture.page/1.
 	PublishedAt     string                 `protobuf:"bytes,15,opt,name=published_at,json=publishedAt,proto3" json:"published_at,omitempty"`             // Original publication time in RFC 3339; empty when unknown.
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
@@ -1095,6 +1113,20 @@ func (x *FetchResponse) GetRelatedTargets() []*RelatedTarget {
 	return nil
 }
 
+func (x *FetchResponse) GetMaxBatchSize() uint32 {
+	if x != nil {
+		return x.MaxBatchSize
+	}
+	return 0
+}
+
+func (x *FetchResponse) GetNextPageCursor() string {
+	if x != nil {
+		return x.NextPageCursor
+	}
+	return ""
+}
+
 func (x *FetchResponse) GetPublishedAt() string {
 	if x != nil {
 		return x.PublishedAt
@@ -1198,6 +1230,7 @@ type ResolveResponse struct {
 	Kind            string                 `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
 	ObjectScope     string                 `protobuf:"bytes,4,opt,name=object_scope,json=objectScope,proto3" json:"object_scope,omitempty"`
 	ExternalId      string                 `protobuf:"bytes,5,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
+	Collection      bool                   `protobuf:"varint,7,opt,name=collection,proto3" json:"collection,omitempty"`                                    // Explicit capture expands a collection of related targets.
 	RefreshOnSubmit bool                   `protobuf:"varint,6,opt,name=refresh_on_submit,json=refreshOnSubmit,proto3" json:"refresh_on_submit,omitempty"` // Explicit submissions always observe this target again.
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
@@ -1266,6 +1299,13 @@ func (x *ResolveResponse) GetExternalId() string {
 		return x.ExternalId
 	}
 	return ""
+}
+
+func (x *ResolveResponse) GetCollection() bool {
+	if x != nil {
+		return x.Collection
+	}
+	return false
 }
 
 func (x *ResolveResponse) GetRefreshOnSubmit() bool {
@@ -1503,7 +1543,7 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\x05hosts\x18\x04 \x03(\tR\x05hosts\x122\n" +
 	"\tproviders\x18\x05 \x03(\v2\x14.adapter.v1.ProviderR\tproviders\x129\n" +
 	"\fentity_types\x18\x06 \x03(\v2\x16.adapter.v1.EntityTypeR\ventityTypes\x12!\n" +
-	"\fdisplay_name\x18\a \x01(\tR\vdisplayName\"\xf2\x02\n" +
+	"\fdisplay_name\x18\a \x01(\tR\vdisplayName\"\xb0\x03\n" +
 	"\fFetchRequest\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x1f\n" +
 	"\vexternal_id\x18\x02 \x01(\tR\n" +
@@ -1520,7 +1560,10 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\bplatform\x18\b \x01(\tR\bplatform\x12\x12\n" +
 	"\x04kind\x18\t \x01(\tR\x04kind\x12!\n" +
 	"\fobject_scope\x18\n" +
-	" \x01(\tR\vobjectScope\x12\x1c\n" +
+	" \x01(\tR\vobjectScope\x12\x1b\n" +
+	"\tpage_size\x18\r \x01(\rR\bpageSize\x12\x1f\n" +
+	"\vpage_cursor\x18\f \x01(\tR\n" +
+	"pageCursor\x12\x1c\n" +
 	"\tautomatic\x18\v \x01(\bR\tautomatic\"\xa8\x01\n" +
 	"\bResource\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x12\n" +
@@ -1559,7 +1602,7 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"visibility\"U\n" +
 	"\rRelatedTarget\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x122\n" +
-	"\x15refresh_after_seconds\x18\x02 \x01(\rR\x13refreshAfterSeconds\"\xd4\x05\n" +
+	"\x15refresh_after_seconds\x18\x02 \x01(\rR\x13refreshAfterSeconds\"\xa4\x06\n" +
 	"\rFetchResponse\x12\x1f\n" +
 	"\vexternal_id\x18\x01 \x01(\tR\n" +
 	"externalId\x12\x12\n" +
@@ -1585,20 +1628,25 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\vauthor_name\x18\x0e \x01(\tR\n" +
 	"authorName\x12F\n" +
 	"\x10canonical_target\x18\x10 \x01(\v2\x1b.adapter.v1.ResolveResponseR\x0fcanonicalTarget\x12B\n" +
-	"\x0frelated_targets\x18\x11 \x03(\v2\x19.adapter.v1.RelatedTargetR\x0erelatedTargets\x12!\n" +
+	"\x0frelated_targets\x18\x11 \x03(\v2\x19.adapter.v1.RelatedTargetR\x0erelatedTargets\x12$\n" +
+	"\x0emax_batch_size\x18\x13 \x01(\rR\fmaxBatchSize\x12(\n" +
+	"\x10next_page_cursor\x18\x12 \x01(\tR\x0enextPageCursor\x12!\n" +
 	"\fpublished_at\x18\x0f \x01(\tR\vpublishedAt\" \n" +
 	"\n" +
 	"Credential\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\"\"\n" +
 	"\x0eResolveRequest\x12\x10\n" +
-	"\x03url\x18\x01 \x01(\tR\x03url\"\xc3\x01\n" +
+	"\x03url\x18\x01 \x01(\tR\x03url\"\xe3\x01\n" +
 	"\x0fResolveResponse\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x1a\n" +
 	"\bplatform\x18\x02 \x01(\tR\bplatform\x12\x12\n" +
 	"\x04kind\x18\x03 \x01(\tR\x04kind\x12!\n" +
 	"\fobject_scope\x18\x04 \x01(\tR\vobjectScope\x12\x1f\n" +
 	"\vexternal_id\x18\x05 \x01(\tR\n" +
-	"externalId\x12*\n" +
+	"externalId\x12\x1e\n" +
+	"\n" +
+	"collection\x18\a \x01(\bR\n" +
+	"collection\x12*\n" +
 	"\x11refresh_on_submit\x18\x06 \x01(\bR\x0frefreshOnSubmit\"Q\n" +
 	"\x18PrepareCredentialRequest\x12\x1f\n" +
 	"\vprovider_id\x18\x01 \x01(\tR\n" +

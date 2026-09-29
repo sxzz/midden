@@ -181,6 +181,12 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 	if e != nil {
 		return out, e
 	}
+	if in.CollectionLimit > 1000 || in.PageSize > 1000 {
+		return out, domain.ErrUnsupported
+	}
+	if len(in.PageCursor) > 4096 || ((in.PageCursor != "" || in.CollectionLimit > 0 || in.PageSize > 0) && (in.Automatic || !target.Collection || !adapter.Supports(policy, adapter.CapturePage, 1, 0))) {
+		return out, domain.ErrUnsupported
+	}
 	if in.Input == "" {
 		in.Input = in.URL
 	}
@@ -198,6 +204,15 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 	err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, tenant); e != nil {
 			return e
+		}
+		if in.ParentSubmission != "" {
+			var stopped bool
+			if e := tx.QueryRow(ctx, `SELECT collection_stopped FROM submissions WHERE id=$1`, in.ParentSubmission).Scan(&stopped); e != nil {
+				return e
+			}
+			if stopped {
+				return errCollectionStopped
+			}
 		}
 		if in.ConnectionID != "" {
 			if !s.AdapterTLS || s.Vault == nil {
@@ -230,7 +245,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if in.Input == "" {
 			in.Input = in.URL
 		}
-		fingerprint := store.Hash(desc.AdapterId + "|" + target.Platform + "|" + target.Kind + "|" + target.ObjectScope + "|" + target.ExternalID + "|" + in.ProviderID + "|" + scope + "|" + in.RefreshID)
+		fingerprint := store.Hash(desc.AdapterId + "|" + target.Platform + "|" + target.Kind + "|" + target.ObjectScope + "|" + target.ExternalID + "|" + in.ProviderID + "|" + scope + "|" + in.RefreshID + "|" + in.PageCursor + fmt.Sprintf("|%d|%d", in.PageSize, in.CollectionLimit))
 		var existing, f string
 		e = tx.QueryRow(ctx, `SELECT capture_id,fingerprint FROM submissions WHERE tenant_id=$1 AND idem_key=$2`, tenant, in.Key).Scan(&existing, &f)
 		if e == nil {
@@ -281,7 +296,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		}
 		if tag.RowsAffected() > 0 {
 			var within bool
-			if e = tx.QueryRow(ctx, `SELECT tenant_usage()+reserved_bytes<=quota_bytes FROM tenants WHERE id=$1`, tenant).Scan(&within); e != nil {
+			if e = tx.QueryRow(ctx, `SELECT tenant_unlimited() OR tenant_usage()+reserved_bytes<=quota_bytes FROM tenants WHERE id=$1`, tenant).Scan(&within); e != nil {
 				return e
 			}
 			if !within {
@@ -293,31 +308,32 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		}
 
 		var cid string
-		e = tx.QueryRow(ctx, `SELECT id FROM captures WHERE archive_id=$1 AND provider_id=$2 AND coalesce(connection_id::text,'')=$3 AND adapter_id=$4 AND state IN('queued','downloading')`, aid, in.ProviderID, in.ConnectionID, desc.AdapterId).Scan(&cid)
-		if errors.Is(e, pgx.ErrNoRows) && in.RefreshID == "" && (in.Automatic || !target.RefreshOnSubmit) {
+		e = tx.QueryRow(ctx, `SELECT id FROM captures WHERE archive_id=$1 AND provider_id=$2 AND coalesce(connection_id::text,'')=$3 AND adapter_id=$4 AND state IN('queued','downloading') AND page_cursor=$5 AND (NOT $6 OR NOT automatic) AND page_size=$7`, aid, in.ProviderID, in.ConnectionID, desc.AdapterId, in.PageCursor, target.Collection && !in.Automatic, in.PageSize).Scan(&cid)
+		if errors.Is(e, pgx.ErrNoRows) && in.PageCursor == "" && in.RefreshID == "" && (in.Automatic || !target.RefreshOnSubmit) {
 			e = tx.QueryRow(ctx, `SELECT r.capture_id FROM archives a JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1 AND ($2::bigint=0 OR a.observed_at > now()-make_interval(secs=>$2::double precision))`, aid, in.RefreshAfterSeconds).Scan(&cid)
 		}
 		if errors.Is(e, pgx.ErrNoRows) {
+			var unlimited bool
 			var used, reserved, quota int64
 			var count int
 			var start time.Time
-			if e = tx.QueryRow(ctx, `SELECT tenant_usage(),reserved_bytes,quota_bytes,rate_count,rate_start FROM tenants WHERE id=$1`, tenant).Scan(&used, &reserved, &quota, &count, &start); e != nil {
+			if e = tx.QueryRow(ctx, `SELECT tenant_unlimited(),tenant_usage(),reserved_bytes,quota_bytes,rate_count,rate_start FROM tenants WHERE id=$1`, tenant).Scan(&unlimited, &used, &reserved, &quota, &count, &start); e != nil {
 				return e
 			}
-			if used+reserved >= quota {
+			if !unlimited && used+reserved >= quota {
 				return domain.ErrQuota
 			}
 			if time.Since(start) >= time.Minute {
 				count = 0
 				start = time.Now()
 			}
-			if count >= s.Config.Rate {
+			if !unlimited && count >= s.Config.Rate {
 				return domain.ErrRate
 			}
 			if _, e = tx.Exec(ctx, `UPDATE tenants SET rate_count=$2,rate_start=$3 WHERE id=$1`, tenant, count+1, start); e != nil {
 				return e
 			}
-			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,archive_id,provider_id,scope,visibility,connection_id,refresh_from,adapter_id,automatic) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid,$8,$9) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility, in.ConnectionID, in.RefreshID, desc.AdapterId, in.Automatic).Scan(&cid)
+			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,archive_id,provider_id,scope,visibility,connection_id,refresh_from,adapter_id,automatic,page_cursor,is_collection,page_size) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid,$8,$9,$10,$11,$12) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility, in.ConnectionID, in.RefreshID, desc.AdapterId, in.Automatic, in.PageCursor, target.Collection && !in.Automatic, in.PageSize).Scan(&cid)
 			if e != nil {
 				return e
 			}
@@ -328,7 +344,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			return e
 		}
 		var sid string
-		e = tx.QueryRow(ctx, `INSERT INTO submissions(tenant_id,capture_id,identity_id,channel_id,chat_id,idem_key,fingerprint,reply_to_message_id,input) VALUES($1,$2,nullif($3,'')::uuid,nullif($4,'')::uuid,nullif($5,''),$6,$7,$8,$9) RETURNING id`, tenant, cid, in.Origin.IdentityID, in.Origin.ChannelID, in.Origin.ChatID, in.Key, fingerprint, in.Origin.ReplyToMessageID, in.Input).Scan(&sid)
+		e = tx.QueryRow(ctx, `INSERT INTO submissions(tenant_id,capture_id,identity_id,channel_id,chat_id,idem_key,fingerprint,reply_to_message_id,input,collection_limit,parent_submission) VALUES($1,$2,nullif($3,'')::uuid,nullif($4,'')::uuid,nullif($5,''),$6,$7,$8,$9,$10,nullif($11,'')::uuid) RETURNING id`, tenant, cid, in.Origin.IdentityID, in.Origin.ChannelID, in.Origin.ChatID, in.Key, fingerprint, in.Origin.ReplyToMessageID, in.Input, in.CollectionLimit, in.ParentSubmission).Scan(&sid)
 		if e != nil {
 			return e
 		}
@@ -388,7 +404,7 @@ func (s *Service) Job(ctx context.Context, t, id string) (j domain.Job, e error)
 
 func (s *Service) Usage(ctx context.Context, t string) (u domain.Usage, e error) {
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT tenant_usage(),reserved_bytes,quota_bytes FROM tenants WHERE id=$1`, t).Scan(&u.Used, &u.Reserved, &u.Limit)
+		return tx.QueryRow(ctx, `SELECT tenant_usage(),reserved_bytes,quota_bytes,tenant_unlimited() FROM tenants WHERE id=$1`, t).Scan(&u.Used, &u.Reserved, &u.Limit, &u.Unlimited)
 	})
 	return
 }

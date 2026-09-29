@@ -46,7 +46,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if _, err = m.Migrate(ctx, rivermigrate.DirectionUp, nil); err != nil {
 		return err
 	}
-	_, err = conn.Exec(ctx, `GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO monitor_app; REVOKE ALL ON tokens,schema_versions,schema_migrations FROM monitor_app; REVOKE INSERT,UPDATE,DELETE ON config FROM monitor_app; GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO monitor_app;`)
+	_, err = conn.Exec(ctx, `GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO monitor_app; REVOKE ALL ON tokens,schema_versions,schema_migrations FROM monitor_app; REVOKE INSERT,UPDATE,DELETE ON config,tenant_entitlements FROM monitor_app; GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO monitor_app;`)
 	return err
 }
 

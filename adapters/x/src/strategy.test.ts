@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { CaptureStrategy } from "./strategy.js";
-import { normalizeProfile, fetchSessionTimeline } from "./profile.js";
+import {
+  normalizeProfile,
+  fetchSessionTimeline,
+  fetchPublicTimeline,
+} from "./profile.js";
 import {
   FetchRequest,
   FetchResponse,
@@ -186,7 +190,7 @@ test("ID-only posts discover their author, then refresh profile without fetching
   );
   assert.deepEqual(calls, ["post-discovery", "profile"]);
 });
-test("private timeline requests count 20 and retains raw response privately", async () => {
+test("private timeline requests count 100 and retains raw response privately", async () => {
   const urls: string[] = [];
   const raw = JSON.stringify({
     data: {
@@ -201,7 +205,7 @@ test("private timeline requests count 20 and retains raw response privately", as
     async (input, init) => {
       const url = new URL(String(input));
       urls.push(url.href);
-      assert.equal(JSON.parse(url.searchParams.get("variables")!).count, 20);
+      assert.equal(JSON.parse(url.searchParams.get("variables")!).count, 100);
       assert.ok(new Headers(init?.headers).get("cookie"));
       return new Response(raw, {
         headers: { "content-type": "application/json" },
@@ -266,4 +270,173 @@ test("ID-only public 401 falls back to selected account then refreshes profile p
     );
     assert.equal(privateCalls, 0);
   }
+});
+
+test("profile continuation is bound to user and public/private source", async () => {
+  const strategy = new CaptureStrategy(undefined, async (id) =>
+    normalizeProfile(user, id, "fxtwitter"),
+  );
+  const cursors: string[] = [];
+  strategy.timeline = async (result, _signal, _fetcher, cursor = "") => {
+    cursors.push(cursor);
+    result.nextPageCursor = cursor ? "" : "page-two";
+  };
+  const first = await strategy.fetch(
+    request("profile"),
+    AbortSignal.timeout(1000),
+    credential,
+  );
+  const second = await strategy.fetch(
+    { ...request("profile"), pageCursor: first.nextPageCursor },
+    AbortSignal.timeout(1000),
+    credential,
+  );
+  assert.deepEqual(cursors, ["", "page-two"]);
+  assert.equal(first.maxBatchSize, 1000);
+  assert.equal(second.nextPageCursor, "");
+  for (const token of [
+    "invalid",
+    JSON.stringify({ user: "other", mode: "public", cursor: "page-two" }),
+    JSON.stringify({ user: "123", mode: "private", cursor: "page-two" }),
+  ]) {
+    await assert.rejects(
+      strategy.fetch(
+        { ...request("profile"), pageCursor: token },
+        AbortSignal.timeout(1000),
+        credential,
+      ),
+    );
+  }
+  strategy.timeline = async (result) => {
+    result.nextPageCursor = "page-two";
+  };
+  assert.equal(
+    (
+      await strategy.fetch(
+        { ...request("profile"), pageCursor: first.nextPageCursor },
+        AbortSignal.timeout(1000),
+        credential,
+      )
+    ).nextPageCursor,
+    "",
+  );
+});
+
+test("protected continuation requests 100 and never advertises bulk collection", async () => {
+  const strategy = new CaptureStrategy(
+    undefined,
+    async (id) =>
+      normalizeProfile({ ...user, protected: true }, id, "fxtwitter"),
+    undefined,
+    async (
+      result,
+      _credential,
+      signal,
+      _fetcher,
+      cursor = "",
+      pageSize = 0,
+    ) => {
+      await fetchSessionTimeline(
+        result,
+        credential,
+        signal,
+        async (input) => {
+          const variables = JSON.parse(
+            new URL(String(input)).searchParams.get("variables")!,
+          );
+          assert.equal(variables.count, 100);
+          assert.equal(variables.cursor, "protected-next");
+          return new Response(
+            JSON.stringify({
+              data: {
+                user: {
+                  result: { timeline_v2: { timeline: { instructions: [] } } },
+                },
+              },
+            }),
+          );
+        },
+        cursor,
+        pageSize,
+      );
+    },
+  );
+  const result = await strategy.fetch(
+    {
+      ...request("profile"),
+      pageCursor: JSON.stringify({
+        user: "123",
+        mode: "private",
+        cursor: "protected-next",
+      }),
+    },
+    AbortSignal.timeout(2000),
+    credential,
+  );
+  assert.equal(result.maxBatchSize, 0);
+});
+
+test("public timeline always uses FxTwitter public instance with a selected account", async () => {
+  let privateCalls = 0;
+  const strategy = new CaptureStrategy(
+    undefined,
+    async (id) => normalizeProfile(user, id, "fxtwitter"),
+    undefined,
+    async () => {
+      privateCalls++;
+    },
+  );
+  let responseStatus = 200;
+  const requests: URL[] = [];
+  strategy.timeline = async (result, signal, _fetcher, cursor, pageSize) => {
+    await fetchPublicTimeline(
+      result,
+      signal,
+      async (input, init) => {
+        const url = new URL(String(input));
+        requests.push(url);
+        assert.equal(url.origin, "https://api.fxtwitter.com");
+        assert.equal(url.pathname, "/2/profile/id:123/statuses");
+        assert.equal(url.searchParams.get("count"), "100");
+        assert.equal(new Headers(init?.headers).has("cookie"), false);
+        return new Response(
+          JSON.stringify({
+            code: 200,
+            results: Array.from({ length: 100 }, (_, i) => ({
+              type: "status",
+              id: String(i + 1),
+            })),
+            cursor: { bottom: "next" },
+          }),
+          { status: responseStatus },
+        );
+      },
+      cursor,
+      pageSize,
+    );
+  };
+  const first = await strategy.fetch(
+    request("profile"),
+    AbortSignal.timeout(1000),
+    credential,
+  );
+  for (const pageSize of [0, 1000]) {
+    await strategy.fetch(
+      { ...request("profile"), pageCursor: first.nextPageCursor, pageSize },
+      AbortSignal.timeout(1000),
+      credential,
+    );
+  }
+  responseStatus = 401;
+  const failed = await strategy.fetch(
+    request("profile"),
+    AbortSignal.timeout(1000),
+    credential,
+  );
+  assert.equal(failed.incomplete, true);
+  assert.deepEqual(
+    requests.map((url) => url.searchParams.get("cursor")),
+    [null, "next", "next", null],
+  );
+  assert.equal(privateCalls, 0);
 });
