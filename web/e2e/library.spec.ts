@@ -98,7 +98,7 @@ test("ordinary browser explains Telegram entry", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("sensitive image stays unloaded until revealed and opens inside the page", async ({
+test("sensitive image stays blurred until revealed and opens inside the page", async ({
   page,
 }) => {
   let requests = 0;
@@ -141,9 +141,9 @@ test("sensitive image stays unloaded until revealed and opens inside the page", 
     await r.fulfill({ json: body });
   });
   await page.goto("/app/");
-  // The collection row previews media without touching sensitive bytes.
+  // Sensitive thumbnails and detail previews must remain blurred until revealed.
   await expect(page.getByText("1 张图片")).toBeVisible();
-  expect(requests).toBe(0);
+  await expect(page.locator(".thumbs img")).toHaveCSS("filter", "blur(8px)");
   await page
     .getByRole("button", { name: /测试作者/ })
     .first()
@@ -151,9 +151,13 @@ test("sensitive image stays unloaded until revealed and opens inside the page", 
   await expect(
     page.getByRole("button", { name: "敏感内容 · 点按显示" }),
   ).toBeVisible();
-  expect(requests).toBe(0);
+  await expect(page.locator(".sensitive img")).toHaveCSS(
+    "filter",
+    "blur(18px)",
+  );
   await page.getByRole("button", { name: "敏感内容 · 点按显示" }).click();
   await expect(page.getByAltText("合成测试图片")).toBeVisible();
+  await expect(page.getByAltText("合成测试图片")).toHaveCSS("filter", "none");
   await page.getByRole("button", { name: "放大图片" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.getByRole("button", { name: "关闭图片" }).click();

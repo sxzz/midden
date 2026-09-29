@@ -6,7 +6,9 @@
     "generate": "protoc --plugin=protoc-gen-ts_proto=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=adapters/x/src/generated --ts_proto_opt=outputServices=grpc-js,env=node,forceLong=string,useExactTypes=false api/adapter/v1/adapter.proto",
     "build": "pnpm --filter @monitor/x-adapter... --recursive run build && pnpm --filter @midden/web build",
     "test": "pnpm --filter @monitor/x-adapter test && pnpm --filter @midden/web test",
-    "format": "prettier --write adapters/x/src adapters/x/package.json package.json"
+    "format": "python3 scripts/format.py --write",
+    "format:check": "python3 scripts/format.py --check",
+    "prepare": "node scripts/install-hooks.mjs"
   },
   "devDependencies": {
     "typescript": "6.0.3",

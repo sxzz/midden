@@ -26,6 +26,7 @@ type (
 		ID, Filter string
 	}
 )
+
 type CollectionItem struct {
 	domain.Collection
 	SavedAt time.Time `json:"saved_at"`

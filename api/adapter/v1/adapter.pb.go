@@ -7,11 +7,12 @@
 package adapterv1
 
 import (
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -1690,31 +1691,34 @@ func file_api_adapter_v1_adapter_proto_rawDescGZIP() []byte {
 	return file_api_adapter_v1_adapter_proto_rawDescData
 }
 
-var file_api_adapter_v1_adapter_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_adapter_v1_adapter_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
-var file_api_adapter_v1_adapter_proto_goTypes = []any{
-	(Visibility)(0),                   // 0: adapter.v1.Visibility
-	(*DescribeRequest)(nil),           // 1: adapter.v1.DescribeRequest
-	(*Capability)(nil),                // 2: adapter.v1.Capability
-	(*Provider)(nil),                  // 3: adapter.v1.Provider
-	(*DescribeResponse)(nil),          // 4: adapter.v1.DescribeResponse
-	(*FetchRequest)(nil),              // 5: adapter.v1.FetchRequest
-	(*Resource)(nil),                  // 6: adapter.v1.Resource
-	(*EntityType)(nil),                // 7: adapter.v1.EntityType
-	(*Entity)(nil),                    // 8: adapter.v1.Entity
-	(*EntityRelation)(nil),            // 9: adapter.v1.EntityRelation
-	(*EntityGraph)(nil),               // 10: adapter.v1.EntityGraph
-	(*SourceResponse)(nil),            // 11: adapter.v1.SourceResponse
-	(*RelatedTarget)(nil),             // 12: adapter.v1.RelatedTarget
-	(*FetchResponse)(nil),             // 13: adapter.v1.FetchResponse
-	(*Credential)(nil),                // 14: adapter.v1.Credential
-	(*ResolveRequest)(nil),            // 15: adapter.v1.ResolveRequest
-	(*ResolveResponse)(nil),           // 16: adapter.v1.ResolveResponse
-	(*PrepareCredentialRequest)(nil),  // 17: adapter.v1.PrepareCredentialRequest
-	(*PrepareCredentialResponse)(nil), // 18: adapter.v1.PrepareCredentialResponse
-	(*CheckConnectionRequest)(nil),    // 19: adapter.v1.CheckConnectionRequest
-	(*CheckConnectionResponse)(nil),   // 20: adapter.v1.CheckConnectionResponse
-}
+var (
+	file_api_adapter_v1_adapter_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+	file_api_adapter_v1_adapter_proto_msgTypes  = make([]protoimpl.MessageInfo, 20)
+	file_api_adapter_v1_adapter_proto_goTypes   = []any{
+		(Visibility)(0),                   // 0: adapter.v1.Visibility
+		(*DescribeRequest)(nil),           // 1: adapter.v1.DescribeRequest
+		(*Capability)(nil),                // 2: adapter.v1.Capability
+		(*Provider)(nil),                  // 3: adapter.v1.Provider
+		(*DescribeResponse)(nil),          // 4: adapter.v1.DescribeResponse
+		(*FetchRequest)(nil),              // 5: adapter.v1.FetchRequest
+		(*Resource)(nil),                  // 6: adapter.v1.Resource
+		(*EntityType)(nil),                // 7: adapter.v1.EntityType
+		(*Entity)(nil),                    // 8: adapter.v1.Entity
+		(*EntityRelation)(nil),            // 9: adapter.v1.EntityRelation
+		(*EntityGraph)(nil),               // 10: adapter.v1.EntityGraph
+		(*SourceResponse)(nil),            // 11: adapter.v1.SourceResponse
+		(*RelatedTarget)(nil),             // 12: adapter.v1.RelatedTarget
+		(*FetchResponse)(nil),             // 13: adapter.v1.FetchResponse
+		(*Credential)(nil),                // 14: adapter.v1.Credential
+		(*ResolveRequest)(nil),            // 15: adapter.v1.ResolveRequest
+		(*ResolveResponse)(nil),           // 16: adapter.v1.ResolveResponse
+		(*PrepareCredentialRequest)(nil),  // 17: adapter.v1.PrepareCredentialRequest
+		(*PrepareCredentialResponse)(nil), // 18: adapter.v1.PrepareCredentialResponse
+		(*CheckConnectionRequest)(nil),    // 19: adapter.v1.CheckConnectionRequest
+		(*CheckConnectionResponse)(nil),   // 20: adapter.v1.CheckConnectionResponse
+	}
+)
+
 var file_api_adapter_v1_adapter_proto_depIdxs = []int32{
 	0,  // 0: adapter.v1.Provider.visibilities:type_name -> adapter.v1.Visibility
 	2,  // 1: adapter.v1.Provider.capabilities:type_name -> adapter.v1.Capability

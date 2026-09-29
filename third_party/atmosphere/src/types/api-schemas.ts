@@ -44,32 +44,22 @@ export const APIPollSchema = z.object({
 /** Parent post / account context when this status is a reply (FxTwitter, FxBluesky, Mastodon APIs). */
 export const APIReplyingToSchema = z
   .object({
-    screen_name: z
-      .string()
-      .openapi({
-        description: "Handle or account id used in permalinks (@user on X).",
-      }),
-    status: z
-      .string()
-      .openapi({
-        description: "Parent post id (X: snowflake; Bluesky: record key).",
-      }),
+    screen_name: z.string().openapi({
+      description: "Handle or account id used in permalinks (@user on X).",
+    }),
+    status: z.string().openapi({
+      description: "Parent post id (X: snowflake; Bluesky: record key).",
+    }),
     url: z
       .string()
       .optional()
       .openapi({ description: "Permalink to the parent post when known." }),
-    profile_url: z
-      .string()
-      .optional()
-      .openapi({
-        description: "Permalink to the parent author profile when known.",
-      }),
-    display_name: z
-      .string()
-      .optional()
-      .openapi({
-        description: "Display name of the parent author when known.",
-      }),
+    profile_url: z.string().optional().openapi({
+      description: "Permalink to the parent author profile when known.",
+    }),
+    display_name: z.string().optional().openapi({
+      description: "Display name of the parent author when known.",
+    }),
   })
   .openapi("APIReplyingTo");
 
@@ -498,11 +488,9 @@ export type APITombstoneReason = z.infer<typeof APITombstoneReasonSchema>;
 
 export const APIStatusTombstoneSchema = z
   .object({
-    type: z
-      .literal("tombstone")
-      .openapi({
-        description: "Placeholder for an unavailable post (quote/thread).",
-      }),
+    type: z.literal("tombstone").openapi({
+      description: "Placeholder for an unavailable post (quote/thread).",
+    }),
     provider: z.enum([
       "twitter",
       "bluesky",
@@ -570,11 +558,9 @@ export type APITwitterStatus = {
 export const APITwitterStatusSchema: z.ZodType<APITwitterStatus> = z.lazy(() =>
   z
     .object({
-      type: z
-        .literal("status")
-        .openapi({
-          description: "Discriminator: single post/status (API v2).",
-        }),
+      type: z.literal("status").openapi({
+        description: "Discriminator: single post/status (API v2).",
+      }),
       id: z.string(),
       url: z.string(),
       text: z.string(),
@@ -697,12 +683,9 @@ export const UserAPIResponseSchema = z
         "Set to `suspended` when the user is suspended; omitted for plain not found.",
     }),
     /** X `rest_id` when known (e.g. from `user_results.rest_id` on suspended lookups). */
-    id: z
-      .string()
-      .optional()
-      .openapi({
-        description: "Numeric user id when the upstream payload includes it.",
-      }),
+    id: z.string().optional().openapi({
+      description: "Numeric user id when the upstream payload includes it.",
+    }),
   })
   .openapi("UserAPIResponse");
 
@@ -754,12 +737,9 @@ export const APIBlueskyNotificationSchema = z
     id: z.string().openapi({ description: "Notification record CID" }),
     at_uri: z.string(),
     reason: APIBlueskyNotificationReasonSchema,
-    reason_subject: z
-      .string()
-      .optional()
-      .openapi({
-        description: "AT-URI the reason refers to (e.g. liked post)",
-      }),
+    reason_subject: z.string().optional().openapi({
+      description: "AT-URI the reason refers to (e.g. liked post)",
+    }),
     actor: APIUserSchema,
     is_read: z.boolean(),
     created_at: z.string(),
@@ -879,11 +859,9 @@ export const APIMastodonStatusSchema: z.ZodType<APIMastodonStatus> = z.lazy(
   () =>
     z
       .object({
-        type: z
-          .literal("status")
-          .openapi({
-            description: "Discriminator: single post/status (API v2).",
-          }),
+        type: z.literal("status").openapi({
+          description: "Discriminator: single post/status (API v2).",
+        }),
         id: z.string(),
         url: z.string(),
         text: z.string(),
@@ -923,11 +901,9 @@ export const APIMastodonStatusSchema: z.ZodType<APIMastodonStatus> = z.lazy(
 /** Mastodon `GET /2/mastodon/{domain}/status/{id}` — matches FxTwitter `GET /2/status/{id}` (no `thread`). */
 export const SocialStatusMastodonSchema = z
   .object({
-    code: z
-      .number()
-      .openapi({
-        description: "HTTP-style status; mirrors response status code",
-      }),
+    code: z.number().openapi({
+      description: "HTTP-style status; mirrors response status code",
+    }),
     status: APIMastodonStatusSchema.nullable(),
     author: APIUserSchema.nullable(),
   })
@@ -937,11 +913,9 @@ export type SocialStatusMastodon = z.infer<typeof SocialStatusMastodonSchema>;
 
 export const SocialThreadMastodonSchema = z
   .object({
-    code: z
-      .number()
-      .openapi({
-        description: "HTTP-style status; mirrors response status code",
-      }),
+    code: z.number().openapi({
+      description: "HTTP-style status; mirrors response status code",
+    }),
     status: APIMastodonStatusSchema.nullable(),
     thread: z
       .array(z.union([APIMastodonStatusSchema, APIStatusTombstoneSchema]))
@@ -954,11 +928,9 @@ export type SocialThreadMastodon = z.infer<typeof SocialThreadMastodonSchema>;
 
 export const SocialConversationMastodonSchema = z
   .object({
-    code: z
-      .number()
-      .openapi({
-        description: "HTTP-style status; mirrors response status code",
-      }),
+    code: z.number().openapi({
+      description: "HTTP-style status; mirrors response status code",
+    }),
     status: APIMastodonStatusSchema.nullable(),
     thread: z
       .array(z.union([APIMastodonStatusSchema, APIStatusTombstoneSchema]))
@@ -1011,17 +983,12 @@ export type APISubstatus = {
 export const APISubstatusSchema: z.ZodType<APISubstatus> = z.lazy(() =>
   z
     .object({
-      type: z
-        .literal("substatus")
-        .openapi({
-          description:
-            "Discriminator: child of a parent status (e.g. comment).",
-        }),
-      parent_id: z
-        .string()
-        .openapi({
-          description: "Parent post id (e.g. Instagram shortcode / media key).",
-        }),
+      type: z.literal("substatus").openapi({
+        description: "Discriminator: child of a parent status (e.g. comment).",
+      }),
+      parent_id: z.string().openapi({
+        description: "Parent post id (e.g. Instagram shortcode / media key).",
+      }),
       id: z.string(),
       url: z.string(),
       text: z.string(),
@@ -1286,11 +1253,9 @@ export const APITikTokStatusSchema: z.ZodType<APITikTokStatus> = z.lazy(() =>
 
 export const SocialThreadTikTokSchema = z
   .object({
-    code: z
-      .number()
-      .openapi({
-        description: "HTTP-style status; mirrors response status code",
-      }),
+    code: z.number().openapi({
+      description: "HTTP-style status; mirrors response status code",
+    }),
     status: APITikTokStatusSchema.nullable(),
     thread: z
       .array(z.union([APITikTokStatusSchema, APIStatusTombstoneSchema]))
@@ -1367,11 +1332,9 @@ export const SocialConversationReplyItemSchema = z.union([
 
 export const SocialThreadSchema = z
   .object({
-    code: z
-      .number()
-      .openapi({
-        description: "HTTP-style status; mirrors response status code",
-      }),
+    code: z.number().openapi({
+      description: "HTTP-style status; mirrors response status code",
+    }),
     status: SocialThreadStatusItemSchema.nullable().openapi({
       description: "Focal post, or a tombstone when the post is unavailable",
     }),
@@ -1382,11 +1345,9 @@ export const SocialThreadSchema = z
 
 export const SocialConversationSchema = z
   .object({
-    code: z
-      .number()
-      .openapi({
-        description: "HTTP-style status; mirrors response status code",
-      }),
+    code: z.number().openapi({
+      description: "HTTP-style status; mirrors response status code",
+    }),
     status: SocialThreadStatusItemSchema.nullable(),
     thread: z.array(SocialThreadStatusItemSchema).nullable(),
     replies: z.array(SocialConversationReplyItemSchema).nullable(),
@@ -1401,11 +1362,9 @@ export const SocialConversationSchema = z
 
 export const SocialThreadInstagramSchema = z
   .object({
-    code: z
-      .number()
-      .openapi({
-        description: "HTTP-style status; mirrors response status code",
-      }),
+    code: z.number().openapi({
+      description: "HTTP-style status; mirrors response status code",
+    }),
     status: APIInstagramStatusSchema.nullable(),
     thread: z
       .array(z.union([APIInstagramStatusSchema, APIStatusTombstoneSchema]))
@@ -1418,11 +1377,9 @@ export type SocialThreadInstagram = z.infer<typeof SocialThreadInstagramSchema>;
 
 export const SocialConversationInstagramSchema = z
   .object({
-    code: z
-      .number()
-      .openapi({
-        description: "HTTP-style status; mirrors response status code",
-      }),
+    code: z.number().openapi({
+      description: "HTTP-style status; mirrors response status code",
+    }),
     status: APIInstagramStatusSchema.nullable(),
     thread: z
       .array(z.union([APIInstagramStatusSchema, APIStatusTombstoneSchema]))

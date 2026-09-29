@@ -1,4 +1,4 @@
-.PHONY: dev test integration build generate vet fmt fmt-go fmt-sql fmt-config
+.PHONY: dev test integration build generate vet fmt fmt-check install-hooks
 dev:
 	./scripts/dev.sh
 build:
@@ -20,14 +20,9 @@ generate:
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
 	PATH="$$PATH:$$(go env GOPATH)/bin" protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative api/adapter/v1/adapter.proto
 
-fmt: fmt-go fmt-sql fmt-config
-	pnpm run format
-fmt-go:
-	go run golang.org/x/tools/cmd/goimports@v0.36.0 -w -local monitor ./cmd ./internal
-	go run mvdan.cc/gofumpt@v0.8.0 -w ./cmd ./internal
-fmt-sql:
-	pg_format --no-extra-line --inplace internal/store/migrations/*.sql
-fmt-config:
-	uvx ruff@0.12.12 format scripts/configure-local-storage.py
-	go run mvdan.cc/sh/v3/cmd/shfmt@v3.12.0 -w scripts/test-integration.sh scripts/deploy.sh scripts/dev.sh
-	pnpm exec prettier --write compose.yaml compose.local.yaml compose.server.yaml docs/openapi.yaml .github/workflows/test.yml scripts/testdata/s3.json
+fmt:
+	python3 scripts/format.py --write
+fmt-check:
+	python3 scripts/format.py --check
+install-hooks:
+	node scripts/install-hooks.mjs

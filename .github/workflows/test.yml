@@ -3,17 +3,23 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+      - uses: astral-sh/setup-uv@v6
       - uses: pnpm/setup@v3
         with:
           cache: true
           install: false
-      - run: pnpm install --frozen-lockfile --ignore-scripts && pnpm build && pnpm test
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm format:check
+      - run: python3 scripts/test-deploy.py
+      - run: python3 scripts/test-format.py
+      - run: pnpm build && pnpm test
       - run: pnpm --filter @midden/web exec playwright install --with-deps chromium
       - run: pnpm --filter @midden/web test:e2e
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
