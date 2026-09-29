@@ -240,6 +240,9 @@ test('loading skeletons, one revision and touch image navigation', async ({
   await page.locator('.stage').dispatchEvent('touchstart', {
     touches: [{ identifier: 1, clientX: 320, clientY: 300 }],
   })
+  await page.locator('.stage').dispatchEvent('touchmove', {
+    touches: [{ identifier: 1, clientX: 60, clientY: 305 }],
+  })
   await page.locator('.stage').dispatchEvent('touchend', {
     touches: [],
     changedTouches: [{ identifier: 1, clientX: 60, clientY: 305 }],
