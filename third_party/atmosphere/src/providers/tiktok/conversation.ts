@@ -1,9 +1,16 @@
-import { withTimeout } from '../../helpers/with-timeout.js';
-import { generateUserAgent } from '../../helpers/user-agent.js';
-import type { SocialThread } from '../../types/api-status.js';
-import { fetchEmbedVideo, fetchMobileApiVideo, fetchVideoPage } from './client.js';
-import { TIKTOK_SHORT_HOST, TIKTOK_WEB_HOST } from './constants.js';
-import { buildAPITikTokStatus, buildAPITikTokStatusFromEmbedVideo } from './processor.js';
+import { withTimeout } from "../../helpers/with-timeout.js";
+import { generateUserAgent } from "../../helpers/user-agent.js";
+import type { SocialThread } from "../../types/api-status.js";
+import {
+  fetchEmbedVideo,
+  fetchMobileApiVideo,
+  fetchVideoPage,
+} from "./client.js";
+import { TIKTOK_SHORT_HOST, TIKTOK_WEB_HOST } from "./constants.js";
+import {
+  buildAPITikTokStatus,
+  buildAPITikTokStatusFromEmbedVideo,
+} from "./processor.js";
 
 /**
  * Result from resolving a short URL
@@ -27,16 +34,18 @@ export interface TikTokFetchResult {
  *
  * @param shortCode - Either just the code (e.g., "ZP8yxgATu") or a full shorthand URL
  */
-export const resolveShortUrl = async (shortCode: string): Promise<ResolvedTikTokUrl | null> => {
+export const resolveShortUrl = async (
+  shortCode: string,
+): Promise<ResolvedTikTokUrl | null> => {
   // Determine if we need to construct a URL or if one was provided
   let shortUrl: string;
 
-  if (shortCode.startsWith('http://') || shortCode.startsWith('https://')) {
+  if (shortCode.startsWith("http://") || shortCode.startsWith("https://")) {
     // Full URL provided
     shortUrl = shortCode;
-  } else if (shortCode.includes('/')) {
+  } else if (shortCode.includes("/")) {
     // Relative path provided (e.g., "/t/ZP8yxgATu/")
-    shortUrl = `${TIKTOK_WEB_HOST}${shortCode.startsWith('/') ? shortCode : '/' + shortCode}`;
+    shortUrl = `${TIKTOK_WEB_HOST}${shortCode.startsWith("/") ? shortCode : "/" + shortCode}`;
   } else {
     // Just a code, use vm.tiktok.com (legacy format)
     shortUrl = `${TIKTOK_SHORT_HOST}/${shortCode}`;
@@ -49,19 +58,19 @@ export const resolveShortUrl = async (shortCode: string): Promise<ResolvedTikTok
     // Use redirect: 'manual' to capture the redirect location without following it
     const response = await withTimeout((signal: AbortSignal) =>
       fetch(shortUrl, {
-        method: 'HEAD',
+        method: "HEAD",
         headers: {
-          'User-Agent': userAgent,
-          'sec-ch-ua': secChUa,
-          'Accept': 'text/html'
+          "User-Agent": userAgent,
+          "sec-ch-ua": secChUa,
+          Accept: "text/html",
         },
-        redirect: 'manual',
-        signal
-      })
+        redirect: "manual",
+        signal,
+      }),
     );
 
     // Check for redirect (301, 302, 303, 307, 308)
-    const location = response.headers.get('location');
+    const location = response.headers.get("location");
     if (location) {
       return parseVideoUrl(location);
     }
@@ -72,13 +81,13 @@ export const resolveShortUrl = async (shortCode: string): Promise<ResolvedTikTok
       const getResponse = await withTimeout((signal: AbortSignal) =>
         fetch(shortUrl, {
           headers: {
-            'User-Agent': userAgent,
-            'sec-ch-ua': secChUa,
-            'Accept': 'text/html'
+            "User-Agent": userAgent,
+            "sec-ch-ua": secChUa,
+            Accept: "text/html",
           },
-          redirect: 'follow',
-          signal
-        })
+          redirect: "follow",
+          signal,
+        }),
       );
       return parseVideoUrl(getResponse.url);
     }
@@ -114,7 +123,7 @@ export const parseVideoUrl = (url: string): ResolvedTikTokUrl | null => {
     const userVideoMatch = pathname.match(/\/@([^/]+)\/(?:video|photo)\/(\d+)/);
     if (userVideoMatch) {
       return {
-        videoId: userVideoMatch[2]
+        videoId: userVideoMatch[2],
       };
     }
 
@@ -122,7 +131,7 @@ export const parseVideoUrl = (url: string): ResolvedTikTokUrl | null => {
     const videoMatch = pathname.match(/\/(?:video|photo)\/(\d+)/);
     if (videoMatch) {
       return {
-        videoId: videoMatch[1]
+        videoId: videoMatch[1],
       };
     }
 
@@ -130,15 +139,15 @@ export const parseVideoUrl = (url: string): ResolvedTikTokUrl | null => {
     const mobileMatch = pathname.match(/\/v\/(\d+)/);
     if (mobileMatch) {
       return {
-        videoId: mobileMatch[1]
+        videoId: mobileMatch[1],
       };
     }
 
     // Check if video ID is in query parameters (some redirects include it there)
-    const itemId = urlObj.searchParams.get('item_id');
+    const itemId = urlObj.searchParams.get("item_id");
     if (itemId) {
       return {
-        videoId: itemId
+        videoId: itemId,
       };
     }
 
@@ -164,13 +173,17 @@ export const isShortCode = (identifier: string): boolean => {
  * Turns anything that identifies a post into a numeric video id: a bare id, a `/t/` or
  * `vm.tiktok.com` short code, or a full post URL.
  */
-export const resolveTikTokVideoId = async (input: string): Promise<string | null> => {
+export const resolveTikTokVideoId = async (
+  input: string,
+): Promise<string | null> => {
   const value = input.trim();
   if (!value) return null;
   if (!isShortCode(value)) return value;
 
   const parsed = parseVideoUrl(
-    /^https?:\/\//i.test(value) ? value : `${TIKTOK_WEB_HOST}/${value.replace(/^\/+/, '')}`
+    /^https?:\/\//i.test(value)
+      ? value
+      : `${TIKTOK_WEB_HOST}/${value.replace(/^\/+/, "")}`,
   );
   if (parsed) return parsed.videoId;
 
@@ -183,7 +196,9 @@ export const resolveTikTokVideoId = async (input: string): Promise<string | null
  * Tries multiple methods in order of preference
  * Returns cookies needed for video proxy
  */
-export const fetchTikTokVideo = async (videoId: string): Promise<TikTokThread> => {
+export const fetchTikTokVideo = async (
+  videoId: string,
+): Promise<TikTokThread> => {
   void 0;
 
   // Try web page extraction first (most reliable for basic data)
@@ -193,7 +208,7 @@ export const fetchTikTokVideo = async (videoId: string): Promise<TikTokThread> =
       video: webResult.data,
       author: webResult.data.author ?? null,
       cookies: webResult.cookies,
-      code: 200
+      code: 200,
     };
   }
 
@@ -206,7 +221,7 @@ export const fetchTikTokVideo = async (videoId: string): Promise<TikTokThread> =
       video: mobileData,
       author: mobileData.author ?? null,
       cookies: webResult.cookies, // Use cookies from web fetch attempt
-      code: 200
+      code: 200,
     };
   }
 
@@ -219,7 +234,7 @@ export const fetchTikTokVideo = async (videoId: string): Promise<TikTokThread> =
       embed: embedResult.data,
       author: null,
       cookies: webResult.cookies ?? embedResult.cookies,
-      code: 200
+      code: 200,
     };
   }
 
@@ -229,7 +244,7 @@ export const fetchTikTokVideo = async (videoId: string): Promise<TikTokThread> =
     video: null,
     author: null,
     cookies: null,
-    code: 404
+    code: 404,
   };
 };
 
@@ -237,7 +252,9 @@ export const fetchTikTokVideo = async (videoId: string): Promise<TikTokThread> =
  * Fetch TikTok video from a short URL (vm.tiktok.com)
  * Resolves the short URL first, then fetches the video data
  */
-export const fetchTikTokVideoFromShortUrl = async (shortCode: string): Promise<TikTokThread> => {
+export const fetchTikTokVideoFromShortUrl = async (
+  shortCode: string,
+): Promise<TikTokThread> => {
   void 0;
 
   const resolved = await resolveShortUrl(shortCode);
@@ -247,7 +264,7 @@ export const fetchTikTokVideoFromShortUrl = async (shortCode: string): Promise<T
       video: null,
       author: null,
       cookies: null,
-      code: 404
+      code: 404,
     };
   }
 
@@ -265,13 +282,13 @@ export const fetchTikTokVideoFromShortUrl = async (shortCode: string): Promise<T
 export const constructTikTokVideo = async (
   id: string,
   proxyBase: string | null = null,
-  userAgent?: string
+  userAgent?: string,
 ): Promise<SocialThread> => {
   const notFound: SocialThread = {
     status: null,
     thread: [],
     author: null,
-    code: 404
+    code: 404,
   };
 
   const videoId = await resolveTikTokVideoId(id);
@@ -285,9 +302,18 @@ export const constructTikTokVideo = async (
   }
 
   const status = video.video
-    ? await buildAPITikTokStatus(video.video, video.cookies, proxyBase, userAgent)
+    ? await buildAPITikTokStatus(
+        video.video,
+        video.cookies,
+        proxyBase,
+        userAgent,
+      )
     : video.embed
-      ? buildAPITikTokStatusFromEmbedVideo(video.embed, video.cookies, proxyBase)
+      ? buildAPITikTokStatusFromEmbedVideo(
+          video.embed,
+          video.cookies,
+          proxyBase,
+        )
       : null;
 
   if (!status) {
@@ -298,6 +324,6 @@ export const constructTikTokVideo = async (
     status: status,
     thread: [],
     author: status.author,
-    code: 200
+    code: 200,
   };
 };

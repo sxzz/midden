@@ -2,16 +2,25 @@ import type {
   APITypeaheadResponse,
   APITypeaheadTopic,
   APIUser,
-  APIUserListResults
-} from '../../types/api-schemas.js';
-import { resolveInstagramAccounts, type InstagramRequestContext } from './account-proxy.js';
-import { fetchPrivateTypeahead, fetchPrivateUserSearch } from './private-api.js';
-import { userFromPrivateRecord, usersFromPrivateList } from './private-processor.js';
+  APIUserListResults,
+} from "../../types/api-schemas.js";
+import {
+  resolveInstagramAccounts,
+  type InstagramRequestContext,
+} from "./account-proxy.js";
+import {
+  fetchPrivateTypeahead,
+  fetchPrivateUserSearch,
+} from "./private-api.js";
+import {
+  userFromPrivateRecord,
+  usersFromPrivateList,
+} from "./private-processor.js";
 
 const emptyUserList = (code: number): APIUserListResults => ({
   code,
   results: [],
-  cursor: { top: null, bottom: null }
+  cursor: { top: null, bottom: null },
 });
 
 const emptyTypeahead = (code: number, query: string): APITypeaheadResponse => ({
@@ -20,7 +29,7 @@ const emptyTypeahead = (code: number, query: string): APITypeaheadResponse => ({
   num_results: 0,
   users: [],
   topics: [],
-  events: []
+  events: [],
 });
 
 /**
@@ -31,27 +40,34 @@ const emptyTypeahead = (code: number, query: string): APITypeaheadResponse => ({
  */
 export async function constructInstagramUserSearch(
   query: string,
-  options: { count: number; ctx?: InstagramRequestContext }
+  options: { count: number; ctx?: InstagramRequestContext },
 ): Promise<APIUserListResults> {
   const count = Math.min(50, Math.max(1, Math.floor(options.count)));
   const accounts = await resolveInstagramAccounts(options.ctx);
   if (!accounts.length) {
     return emptyUserList(501);
   }
-  const res = await fetchPrivateUserSearch(query, options.ctx, { accounts, count });
+  const res = await fetchPrivateUserSearch(query, options.ctx, {
+    accounts,
+    count,
+  });
   if (!res.ok) {
     return emptyUserList(500);
   }
   return {
     code: 200,
     results: usersFromPrivateList(res.json).slice(0, count),
-    cursor: { top: null, bottom: null }
+    cursor: { top: null, bottom: null },
   };
 }
 
 type TypeaheadEntry = {
   user?: Record<string, unknown>;
-  hashtag?: { name?: string; media_count?: number; formatted_media_count?: string };
+  hashtag?: {
+    name?: string;
+    media_count?: number;
+    formatted_media_count?: string;
+  };
   place?: {
     location?: { name?: string; city?: string; short_name?: string };
     title?: string;
@@ -60,10 +76,12 @@ type TypeaheadEntry = {
 };
 
 function typeaheadEntries(json: unknown): TypeaheadEntry[] {
-  if (!json || typeof json !== 'object') return [];
+  if (!json || typeof json !== "object") return [];
   const list = (json as { list?: unknown }).list;
   if (!Array.isArray(list)) return [];
-  return list.filter((e): e is TypeaheadEntry => Boolean(e) && typeof e === 'object');
+  return list.filter(
+    (e): e is TypeaheadEntry => Boolean(e) && typeof e === "object",
+  );
 }
 
 /**
@@ -73,13 +91,16 @@ function typeaheadEntries(json: unknown): TypeaheadEntry[] {
  */
 export async function constructInstagramTypeahead(
   query: string,
-  options: { ctx?: InstagramRequestContext; count?: number } = {}
+  options: { ctx?: InstagramRequestContext; count?: number } = {},
 ): Promise<APITypeaheadResponse> {
   const accounts = await resolveInstagramAccounts(options.ctx);
   if (!accounts.length) {
     return emptyTypeahead(501, query);
   }
-  const res = await fetchPrivateTypeahead(query, options.ctx, { accounts, count: options.count });
+  const res = await fetchPrivateTypeahead(query, options.ctx, {
+    accounts,
+    count: options.count,
+  });
   if (!res.ok) {
     return emptyTypeahead(500, query);
   }
@@ -102,8 +123,8 @@ export async function constructInstagramTypeahead(
             ? `${tag.formatted_media_count} posts`
             : undefined,
           redirect_url: `https://www.instagram.com/explore/tags/${encodeURIComponent(tagName)}/`,
-          types: [{ type: 'hashtag' }]
-        }
+          types: [{ type: "hashtag" }],
+        },
       });
       continue;
     }
@@ -114,8 +135,8 @@ export async function constructInstagramTypeahead(
         topic: placeName,
         result_context: {
           display_string: place?.subtitle ?? place?.location?.city,
-          types: [{ type: 'place' }]
-        }
+          types: [{ type: "place" }],
+        },
       });
     }
   }
@@ -126,6 +147,6 @@ export async function constructInstagramTypeahead(
     num_results: users.length + topics.length,
     users,
     topics,
-    events: []
+    events: [],
   };
 }

@@ -130,6 +130,7 @@ func (f *registryFixture) Describe(ctx context.Context, r *pb.DescribeRequest, o
 	}
 	return f.fakeAdapter.Describe(ctx, r, o...)
 }
+
 func TestAdapterRegistryRecovery(t *testing.T) {
 	ctx := context.Background()
 	f := &registryFixture{fakeAdapter: &fakeAdapter{}, offline: true}

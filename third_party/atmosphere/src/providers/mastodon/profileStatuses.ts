@@ -1,20 +1,23 @@
-import type { APIMastodonStatus, APISearchResultsMastodon } from '../../types/api-schemas.js';
+import type {
+  APIMastodonStatus,
+  APISearchResultsMastodon,
+} from "../../types/api-schemas.js";
 import {
   assertSafeMastodonDomain,
   fetchAccountStatuses,
   lookupAccount,
-  nextMaxIdFromLinkHeader
-} from './client.js';
-import { buildAPIMastodonPost } from './processor.js';
-import type { MastodonBuildHost } from './build-host.js';
+  nextMaxIdFromLinkHeader,
+} from "./client.js";
+import { buildAPIMastodonPost } from "./processor.js";
+import type { MastodonBuildHost } from "./build-host.js";
 
 const decodeCursorMaxId = (cursor: string | null): string | undefined => {
   if (!cursor) return undefined;
   try {
-    let b64 = cursor.replace(/-/g, '+').replace(/_/g, '/');
-    while (b64.length % 4) b64 += '=';
+    let b64 = cursor.replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
     const o = JSON.parse(atob(b64)) as { v?: number; max_id?: string };
-    if (o.v !== 1 || typeof o.max_id !== 'string') return undefined;
+    if (o.v !== 1 || typeof o.max_id !== "string") return undefined;
     return o.max_id;
   } catch {
     return undefined;
@@ -24,7 +27,7 @@ const decodeCursorMaxId = (cursor: string | null): string | undefined => {
 const encodeCursorMaxId = (maxId: string): string => {
   const json = JSON.stringify({ v: 1, max_id: maxId });
   const b64 = btoa(json);
-  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 };
 
 const unixTimestampParamToMs = (unix: number): number =>
@@ -40,7 +43,7 @@ export const mastodonProfileStatusesAPI = async (
     language?: string;
     since?: number;
   },
-  host: MastodonBuildHost
+  host: MastodonBuildHost,
 ): Promise<APISearchResultsMastodon | { noContent: true }> => {
   try {
     assertSafeMastodonDomain(domain);
@@ -48,7 +51,7 @@ export const mastodonProfileStatusesAPI = async (
     return { code: 400, results: [], cursor: { top: null, bottom: null } };
   }
 
-  const acct = username.includes('@')
+  const acct = username.includes("@")
     ? username
     : `${username}@${assertSafeMastodonDomain(domain)}`;
   const looked = await lookupAccount(domain, acct);
@@ -60,7 +63,7 @@ export const mastodonProfileStatusesAPI = async (
   const result = await fetchAccountStatuses(domain, looked.data.id, {
     limit: options.count,
     max_id: maxId,
-    exclude_replies: !options.withReplies
+    exclude_replies: !options.withReplies,
   });
 
   if (!result.ok) {
@@ -72,29 +75,30 @@ export const mastodonProfileStatusesAPI = async (
 
   const statuses = result.data ?? [];
   const nextMax = nextMaxIdFromLinkHeader(result.link);
-  const bottom = nextMax && statuses.length > 0 ? encodeCursorMaxId(nextMax) : null;
+  const bottom =
+    nextMax && statuses.length > 0 ? encodeCursorMaxId(nextMax) : null;
 
   const built = await Promise.all(
-    statuses.map(async raw => {
+    statuses.map(async (raw) => {
       try {
         return (await buildAPIMastodonPost(
           host,
           raw,
           domain,
-          options.language
+          options.language,
         )) as APIMastodonStatus;
       } catch (e) {
         void 0;
         return null;
       }
-    })
+    }),
   );
 
   const results = built.filter((s): s is APIMastodonStatus => s !== null);
 
   if (options.since !== undefined && !options.cursor) {
     const sinceMs = unixTimestampParamToMs(options.since);
-    const hasNewer = results.some(s => {
+    const hasNewer = results.some((s) => {
       const tMs = s.created_timestamp * 1000;
       return Number.isFinite(tMs) && tMs > sinceMs;
     });
@@ -106,7 +110,7 @@ export const mastodonProfileStatusesAPI = async (
   return {
     code: 200,
     results,
-    cursor: { top: null, bottom }
+    cursor: { top: null, bottom },
   };
 };
 
@@ -114,7 +118,7 @@ export const mastodonProfileMediaAPI = async (
   username: string,
   domain: string,
   options: { count: number; cursor: string | null; language?: string },
-  host: MastodonBuildHost
+  host: MastodonBuildHost,
 ): Promise<APISearchResultsMastodon> => {
   try {
     assertSafeMastodonDomain(domain);
@@ -122,7 +126,7 @@ export const mastodonProfileMediaAPI = async (
     return { code: 400, results: [], cursor: { top: null, bottom: null } };
   }
 
-  const acct = username.includes('@')
+  const acct = username.includes("@")
     ? username
     : `${username}@${assertSafeMastodonDomain(domain)}`;
   const looked = await lookupAccount(domain, acct);
@@ -135,7 +139,7 @@ export const mastodonProfileMediaAPI = async (
     limit: options.count,
     max_id: maxId,
     only_media: true,
-    exclude_replies: true
+    exclude_replies: true,
   });
 
   if (!result.ok) {
@@ -147,27 +151,28 @@ export const mastodonProfileMediaAPI = async (
 
   const statuses = result.data ?? [];
   const nextMax = nextMaxIdFromLinkHeader(result.link);
-  const bottom = nextMax && statuses.length > 0 ? encodeCursorMaxId(nextMax) : null;
+  const bottom =
+    nextMax && statuses.length > 0 ? encodeCursorMaxId(nextMax) : null;
 
   const built = await Promise.all(
-    statuses.map(async raw => {
+    statuses.map(async (raw) => {
       try {
         return (await buildAPIMastodonPost(
           host,
           raw,
           domain,
-          options.language
+          options.language,
         )) as APIMastodonStatus;
       } catch (e) {
         void 0;
         return null;
       }
-    })
+    }),
   );
 
   return {
     code: 200,
     results: built.filter((s): s is APIMastodonStatus => s !== null),
-    cursor: { top: null, bottom }
+    cursor: { top: null, bottom },
   };
 };

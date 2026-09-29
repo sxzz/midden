@@ -1,8 +1,13 @@
-import { DataProvider } from '../../types/data-provider.js';
-import type { APIPhoto, APIUser, APIVideo, APIVideoFormat } from '../../types/api-schemas.js';
-import type { APITikTokStatus } from '../../types/api-status.js';
+import { DataProvider } from "../../types/data-provider.js";
+import type {
+  APIPhoto,
+  APIUser,
+  APIVideo,
+  APIVideoFormat,
+} from "../../types/api-schemas.js";
+import type { APITikTokStatus } from "../../types/api-status.js";
 
-import { TIKTOK_WEB_HOST } from './constants.js';
+import { TIKTOK_WEB_HOST } from "./constants.js";
 
 const TIKTOK_ROOT = TIKTOK_WEB_HOST;
 
@@ -10,15 +15,19 @@ const TIKTOK_ROOT = TIKTOK_WEB_HOST;
  * Type guard to check if video data is from web API (TikTokItemInfo)
  * Note: createTime can be either a number or string depending on TikTok's A/B testing
  */
-const isWebApiData = (video: TikTokItemInfo | TikTokAwemeDetail): video is TikTokItemInfo => {
-  return 'createTime' in video && video.createTime !== undefined;
+const isWebApiData = (
+  video: TikTokItemInfo | TikTokAwemeDetail,
+): video is TikTokItemInfo => {
+  return "createTime" in video && video.createTime !== undefined;
 };
 
 /**
  * Type guard to check if video data is from mobile API (TikTokAwemeDetail)
  */
-const isMobileApiData = (video: TikTokItemInfo | TikTokAwemeDetail): video is TikTokAwemeDetail => {
-  return 'create_time' in video || 'aweme_id' in video;
+const isMobileApiData = (
+  video: TikTokItemInfo | TikTokAwemeDetail,
+): video is TikTokAwemeDetail => {
+  return "create_time" in video || "aweme_id" in video;
 };
 
 /**
@@ -37,26 +46,26 @@ const scoreVideoUrl = (url: string): number => {
 
     // Regional CDNs are preferred (most reliable)
     if (
-      hostname.includes('.us.') ||
-      hostname.includes('.eu.') ||
-      hostname.includes('useast') ||
-      hostname.includes('uswest')
+      hostname.includes(".us.") ||
+      hostname.includes(".eu.") ||
+      hostname.includes("useast") ||
+      hostname.includes("uswest")
     ) {
       score += 10;
     }
 
     // aweme URLs are less reliable
-    if (pathname.includes('aweme/v1')) {
+    if (pathname.includes("aweme/v1")) {
       score -= 5;
     }
 
     // Maliva CDN often 403s
-    if (hostname.includes('maliva')) {
+    if (hostname.includes("maliva")) {
       score -= 8;
     }
 
     // Prefer webapp URLs
-    if (hostname.includes('webapp')) {
+    if (hostname.includes("webapp")) {
       score += 3;
     }
 
@@ -83,7 +92,9 @@ interface VideoVariant extends APIVideoFormat {
  * Extract all available video variants with metadata
  * Returns an array of variants sorted by reliability score (highest first)
  */
-const extractVideoVariants = (video: TikTokItemInfo | TikTokAwemeDetail): VideoVariant[] => {
+const extractVideoVariants = (
+  video: TikTokItemInfo | TikTokAwemeDetail,
+): VideoVariant[] => {
   let variants: VideoVariant[] = [];
 
   if (isWebApiData(video)) {
@@ -96,10 +107,10 @@ const extractVideoVariants = (video: TikTokItemInfo | TikTokAwemeDetail): VideoV
             bitrate: format.Bitrate,
             size: parseInt(format.PlayAddr.DataSize, 10) ?? undefined,
             container: format.Format,
-            codec: format.CodecType === 'h265_hvc1' ? 'hevc' : 'h264',
+            codec: format.CodecType === "h265_hvc1" ? "hevc" : "h264",
             width: format.PlayAddr.Width,
             height: format.PlayAddr.Height,
-            score: scoreVideoUrl(format.PlayAddr.UrlList[0])
+            score: scoreVideoUrl(format.PlayAddr.UrlList[0]),
           });
         }
       }
@@ -108,30 +119,31 @@ const extractVideoVariants = (video: TikTokItemInfo | TikTokAwemeDetail): VideoV
     if (video.video?.playAddr) {
       variants.push({
         url: video.video.playAddr,
-        container: video.video.format as 'mp4' | 'webm' | 'm3u8' | undefined,
-        codec: video.video.codecType === 'h265_hvc1' ? 'hevc' : 'h264',
+        container: video.video.format as "mp4" | "webm" | "m3u8" | undefined,
+        codec: video.video.codecType === "h265_hvc1" ? "hevc" : "h264",
         bitrate: video.video.bitrate,
-        size: parseInt(video.video.size || '0', 10) ?? undefined,
+        size: parseInt(video.video.size || "0", 10) ?? undefined,
         width: video.video.width,
         height: video.video.height,
-        score: scoreVideoUrl(video.video.playAddr)
+        score: scoreVideoUrl(video.video.playAddr),
       });
     }
     if (video.video?.downloadAddr) {
       variants.push({
         url: video.video.downloadAddr,
-        container: video.video.format as 'mp4' | 'webm' | 'm3u8' | undefined,
-        codec: video.video.codecType === 'h265_hvc1' ? 'hevc' : 'h264',
+        container: video.video.format as "mp4" | "webm" | "m3u8" | undefined,
+        codec: video.video.codecType === "h265_hvc1" ? "hevc" : "h264",
         bitrate: video.video.bitrate,
-        size: parseInt(video.video.size || '0', 10) ?? undefined,
+        size: parseInt(video.video.size || "0", 10) ?? undefined,
         width: video.video.width,
         height: video.video.height,
-        score: scoreVideoUrl(video.video.downloadAddr)
+        score: scoreVideoUrl(video.video.downloadAddr),
       });
     }
     // Deduplicate based on url
     variants = variants.filter(
-      (variant, index, self) => index === self.findIndex(v => v.url === variant.url)
+      (variant, index, self) =>
+        index === self.findIndex((v) => v.url === variant.url),
     );
   } else if (isMobileApiData(video)) {
     // Mobile API format - collect all URLs from bit_rate variants
@@ -144,12 +156,12 @@ const extractVideoVariants = (video: TikTokItemInfo | TikTokAwemeDetail): VideoV
               url: url,
               size: rate.play_addr.data_size,
               // TODO: Check API manually to see if we can get the container and codec
-              container: 'mp4',
-              codec: 'h264',
+              container: "mp4",
+              codec: "h264",
               bitrate: rate.bit_rate,
               width: rate.play_addr.width,
               height: rate.play_addr.height,
-              score: scoreVideoUrl(url)
+              score: scoreVideoUrl(url),
             });
           }
         }
@@ -161,11 +173,11 @@ const extractVideoVariants = (video: TikTokItemInfo | TikTokAwemeDetail): VideoV
         variants.push({
           url: url,
           size: video.video.play_addr.data_size,
-          container: 'mp4',
-          codec: 'h264',
+          container: "mp4",
+          codec: "h264",
           width: video.video.play_addr.width,
           height: video.video.play_addr.height,
-          score: scoreVideoUrl(url)
+          score: scoreVideoUrl(url),
         });
       }
     }
@@ -174,11 +186,11 @@ const extractVideoVariants = (video: TikTokItemInfo | TikTokAwemeDetail): VideoV
         variants.push({
           url: url,
           size: video.video.download_addr.data_size,
-          container: 'mp4',
-          codec: 'h264',
+          container: "mp4",
+          codec: "h264",
           width: video.video.download_addr.width,
           height: video.video.download_addr.height,
-          score: scoreVideoUrl(url)
+          score: scoreVideoUrl(url),
         });
       }
     }
@@ -186,7 +198,8 @@ const extractVideoVariants = (video: TikTokItemInfo | TikTokAwemeDetail): VideoV
 
   // Remove duplicates based on URL
   const uniqueVariants = variants.filter(
-    (variant, index, self) => index === self.findIndex(v => v.url === variant.url)
+    (variant, index, self) =>
+      index === self.findIndex((v) => v.url === variant.url),
   );
 
   // Sort by score (highest first)
@@ -199,7 +212,10 @@ const extractVideoVariants = (video: TikTokItemInfo | TikTokAwemeDetail): VideoV
  * @param maxFilesize - Maximum file size in bytes (e.g., 20MB for Telegram)
  * @returns The best variant that fits the constraints
  */
-const selectBestVariant = (variants: VideoVariant[], maxFilesize?: number): VideoVariant | null => {
+const selectBestVariant = (
+  variants: VideoVariant[],
+  maxFilesize?: number,
+): VideoVariant | null => {
   if (variants.length === 0) return null;
 
   // If no size constraint, return the highest scored variant
@@ -208,11 +224,13 @@ const selectBestVariant = (variants: VideoVariant[], maxFilesize?: number): Vide
   }
 
   // Filter variants that fit within the size limit
-  const fittingVariants = variants.filter(v => !v.size || v.size <= maxFilesize);
+  const fittingVariants = variants.filter(
+    (v) => !v.size || v.size <= maxFilesize,
+  );
 
   if (fittingVariants.length === 0) {
     // No variants fit, return the smallest one we have
-    const withSize = variants.filter(v => v.size);
+    const withSize = variants.filter((v) => v.size);
     if (withSize.length > 0) {
       return withSize.sort((a, b) => (a.size || 0) - (b.size || 0))[0];
     }
@@ -238,35 +256,42 @@ const selectBestVariant = (variants: VideoVariant[], maxFilesize?: number): Vide
 /**
  * Extract thumbnail URL from video data
  */
-const extractThumbnailUrl = (video: TikTokItemInfo | TikTokAwemeDetail): string => {
+const extractThumbnailUrl = (
+  video: TikTokItemInfo | TikTokAwemeDetail,
+): string => {
   if (isWebApiData(video)) {
-    return video.video?.originCover || video.video?.cover || video.video?.dynamicCover || '';
+    return (
+      video.video?.originCover ||
+      video.video?.cover ||
+      video.video?.dynamicCover ||
+      ""
+    );
   } else if (isMobileApiData(video)) {
     return (
       video.video?.origin_cover?.url_list?.[0] ||
       video.video?.cover?.url_list?.[0] ||
       video.video?.dynamic_cover?.url_list?.[0] ||
-      ''
+      ""
     );
   }
-  return '';
+  return "";
 };
 
 /**
  * Extract video dimensions
  */
 const extractVideoDimensions = (
-  video: TikTokItemInfo | TikTokAwemeDetail
+  video: TikTokItemInfo | TikTokAwemeDetail,
 ): { width: number; height: number } => {
   if (isWebApiData(video)) {
     return {
       width: video.video?.width || 720,
-      height: video.video?.height || 1280
+      height: video.video?.height || 1280,
     };
   } else if (isMobileApiData(video)) {
     return {
       width: video.video?.width || 720,
-      height: video.video?.height || 1280
+      height: video.video?.height || 1280,
     };
   }
   return { width: 720, height: 1280 };
@@ -292,81 +317,87 @@ const extractAuthor = (video: TikTokItemInfo | TikTokAwemeDetail): APIUser => {
   if (isWebApiData(video)) {
     const author = video.author;
     return {
-      id: author?.id || author?.secUid || '',
-      name: author?.nickname || author?.uniqueId || '',
-      screen_name: author?.uniqueId || '',
-      avatar_url: author?.avatarLarger || author?.avatarMedium || author?.avatarThumb || null,
+      id: author?.id || author?.secUid || "",
+      name: author?.nickname || author?.uniqueId || "",
+      screen_name: author?.uniqueId || "",
+      avatar_url:
+        author?.avatarLarger ||
+        author?.avatarMedium ||
+        author?.avatarThumb ||
+        null,
       banner_url: null,
-      description: author?.signature || '',
-      raw_description: { text: author?.signature || '', facets: [] },
-      location: '',
+      description: author?.signature || "",
+      raw_description: { text: author?.signature || "", facets: [] },
+      location: "",
       followers: video.authorStats?.followerCount || 0,
       following: video.authorStats?.followingCount || 0,
       media_count: video.authorStats?.videoCount || 0,
       likes: video.authorStats?.heartCount || 0,
-      url: `${TIKTOK_ROOT}/@${author?.uniqueId || ''}`,
+      url: `${TIKTOK_ROOT}/@${author?.uniqueId || ""}`,
       protected: author?.privateAccount || false,
       statuses: video.authorStats?.videoCount || 0,
       // Doesn't work with webapp.reflow.video.detail
-      joined: author?.createTime ? new Date(author.createTime * 1000).toISOString() : '',
+      joined: author?.createTime
+        ? new Date(author.createTime * 1000).toISOString()
+        : "",
       birthday: null,
       website: null,
       verification: {
         verified: author?.verified || false,
         type: null,
         verified_at: null,
-        identity_verified: false
+        identity_verified: false,
       },
-      type: 'profile'
+      type: "profile",
     };
   } else if (isMobileApiData(video)) {
     const author = video.author;
     return {
-      id: author?.uid || author?.sec_uid || '',
-      name: author?.nickname || author?.unique_id || '',
-      screen_name: author?.unique_id || '',
+      id: author?.uid || author?.sec_uid || "",
+      name: author?.nickname || author?.unique_id || "",
+      screen_name: author?.unique_id || "",
       avatar_url:
         author?.avatar_larger?.url_list?.[0] ||
         author?.avatar_medium?.url_list?.[0] ||
         author?.avatar_thumb?.url_list?.[0] ||
         null,
       banner_url: null,
-      description: author?.signature || '',
-      raw_description: { text: author?.signature || '', facets: [] },
-      location: '',
+      description: author?.signature || "",
+      raw_description: { text: author?.signature || "", facets: [] },
+      location: "",
       followers: author?.follower_count || 0,
       following: author?.following_count || 0,
       media_count: author?.aweme_count || 0,
       likes: author?.total_favorited || 0,
-      url: `${TIKTOK_ROOT}/@${author?.unique_id || ''}`,
+      url: `${TIKTOK_ROOT}/@${author?.unique_id || ""}`,
       protected: false,
       statuses: author?.aweme_count || 0,
-      joined: '',
+      joined: "",
       birthday: null,
       website: null,
-      type: 'profile'
+      type: "profile",
     };
   }
   return {
-    id: '',
-    name: '',
-    screen_name: '',
+    id: "",
+    name: "",
+    screen_name: "",
     avatar_url: null,
     banner_url: null,
-    description: '',
-    raw_description: { text: '', facets: [] },
-    location: '',
+    description: "",
+    raw_description: { text: "", facets: [] },
+    location: "",
     followers: 0,
     following: 0,
     media_count: 0,
     likes: 0,
-    url: '',
+    url: "",
     protected: false,
     statuses: 0,
-    joined: '',
+    joined: "",
     birthday: { day: 0, month: 0, year: 0 },
     website: null,
-    type: 'profile'
+    type: "profile",
   };
 };
 
@@ -379,14 +410,14 @@ const extractStats = (video: TikTokItemInfo | TikTokAwemeDetail) => {
       likes: video.stats?.diggCount || 0,
       reposts: video.stats?.shareCount || 0,
       replies: video.stats?.commentCount || 0,
-      views: video.stats?.playCount || 0
+      views: video.stats?.playCount || 0,
     };
   } else if (isMobileApiData(video)) {
     return {
       likes: video.statistics?.digg_count || 0,
       reposts: video.statistics?.share_count || 0,
       replies: video.statistics?.comment_count || 0,
-      views: video.statistics?.play_count || 0
+      views: video.statistics?.play_count || 0,
     };
   }
   return { likes: 0, reposts: 0, replies: 0, views: 0 };
@@ -397,37 +428,41 @@ const extractStats = (video: TikTokItemInfo | TikTokAwemeDetail) => {
  */
 const extractVideoId = (video: TikTokItemInfo | TikTokAwemeDetail): string => {
   if (isWebApiData(video)) {
-    return video.id || '';
+    return video.id || "";
   } else if (isMobileApiData(video)) {
-    return video.aweme_id || '';
+    return video.aweme_id || "";
   }
-  return '';
+  return "";
 };
 
 /**
  * Extract description/text
  */
-const extractDescription = (video: TikTokItemInfo | TikTokAwemeDetail): string => {
+const extractDescription = (
+  video: TikTokItemInfo | TikTokAwemeDetail,
+): string => {
   if (isWebApiData(video)) {
     // Check for contents array first (newer format)
     if (video.contents && video.contents.length > 0) {
-      return video.contents.map(c => c.desc).join(' ');
+      return video.contents.map((c) => c.desc).join(" ");
     }
-    return video.desc || '';
+    return video.desc || "";
   } else if (isMobileApiData(video)) {
-    return video.desc || '';
+    return video.desc || "";
   }
-  return '';
+  return "";
 };
 
 /**
  * Extract creation timestamp
  */
-const extractCreatedAt = (video: TikTokItemInfo | TikTokAwemeDetail): number => {
+const extractCreatedAt = (
+  video: TikTokItemInfo | TikTokAwemeDetail,
+): number => {
   if (isWebApiData(video)) {
     // createTime can be a number or string
     const ct = video.createTime;
-    return typeof ct === 'string' ? parseInt(ct, 10) || 0 : ct || 0;
+    return typeof ct === "string" ? parseInt(ct, 10) || 0 : ct || 0;
   } else if (isMobileApiData(video)) {
     return video.create_time || 0;
   }
@@ -441,7 +476,9 @@ const isImagePost = (video: TikTokItemInfo | TikTokAwemeDetail): boolean => {
   if (isWebApiData(video)) {
     return !!(video.imagePost?.images && video.imagePost.images.length > 0);
   } else if (isMobileApiData(video)) {
-    return !!(video.image_post_info?.images && video.image_post_info.images.length > 0);
+    return !!(
+      video.image_post_info?.images && video.image_post_info.images.length > 0
+    );
   }
   return false;
 };
@@ -449,20 +486,22 @@ const isImagePost = (video: TikTokItemInfo | TikTokAwemeDetail): boolean => {
 /**
  * Extract images from slideshow post
  */
-const extractImages = (video: TikTokItemInfo | TikTokAwemeDetail): APIPhoto[] => {
+const extractImages = (
+  video: TikTokItemInfo | TikTokAwemeDetail,
+): APIPhoto[] => {
   if (isWebApiData(video) && video.imagePost?.images) {
-    return video.imagePost.images.map(img => ({
-      type: 'photo' as const,
-      url: img.imageURL?.urlList?.[0] || '',
+    return video.imagePost.images.map((img) => ({
+      type: "photo" as const,
+      url: img.imageURL?.urlList?.[0] || "",
       width: img.imageWidth || 0,
-      height: img.imageHeight || 0
+      height: img.imageHeight || 0,
     }));
   } else if (isMobileApiData(video) && video.image_post_info?.images) {
-    return video.image_post_info.images.map(img => ({
-      type: 'photo' as const,
-      url: img.display_image?.url_list?.[0] || '',
+    return video.image_post_info.images.map((img) => ({
+      type: "photo" as const,
+      url: img.display_image?.url_list?.[0] || "",
       width: img.display_image?.width || 0,
-      height: img.display_image?.height || 0
+      height: img.display_image?.height || 0,
     }));
   }
   return [];
@@ -472,17 +511,17 @@ const extractImages = (video: TikTokItemInfo | TikTokAwemeDetail): APIPhoto[] =>
  * Extract music/audio information
  */
 const extractMusic = (
-  video: TikTokItemInfo | TikTokAwemeDetail
+  video: TikTokItemInfo | TikTokAwemeDetail,
 ): { title: string; author: string } | null => {
   if (isWebApiData(video) && video.music) {
     return {
-      title: video.music.title || '',
-      author: video.music.authorName || ''
+      title: video.music.title || "",
+      author: video.music.authorName || "",
     };
   } else if (isMobileApiData(video) && video.music) {
     return {
-      title: video.music.title || '',
-      author: video.music.author || ''
+      title: video.music.title || "",
+      author: video.music.author || "",
     };
   }
   return null;
@@ -496,15 +535,15 @@ const generateProxyUrl = (
   videoUrl: string,
   cookies: string | null,
   proxyBase: string,
-  videoId: string
+  videoId: string,
 ): string => {
   const params = new URLSearchParams({ url: videoUrl });
   if (cookies) {
-    params.set('cookies', cookies);
+    params.set("cookies", cookies);
   }
   // Include videoId so proxy can fetch fresh data if URL fails
   if (videoId) {
-    params.set('videoId', videoId);
+    params.set("videoId", videoId);
   }
   return `${proxyBase}/proxy?${params.toString()}`;
 };
@@ -520,7 +559,7 @@ export const buildAPITikTokStatus = async (
   video: TikTokItemInfo | TikTokAwemeDetail,
   cookies: string | null = null,
   proxyBase: string | null = null,
-  userAgent?: string
+  userAgent?: string,
 ): Promise<APITikTokStatus> => {
   const videoId = extractVideoId(video);
   const author = extractAuthor(video);
@@ -543,15 +582,15 @@ export const buildAPITikTokStatus = async (
     media: {},
     raw_text: {
       text: description,
-      facets: []
+      facets: [],
     },
     lang: null, // TikTok doesn't provide language info directly
     possibly_sensitive: false,
     replying_to: null,
-    source: music ? `♪ ${music.title} - ${music.author}` : 'TikTok',
-    embed_card: 'tweet',
+    source: music ? `♪ ${music.title} - ${music.author}` : "TikTok",
+    embed_card: "tweet",
     provider: DataProvider.TikTok,
-    type: 'status'
+    type: "status",
   };
 
   // Handle video posts first (prioritize videos over images)
@@ -567,13 +606,13 @@ export const buildAPITikTokStatus = async (
     if (allVariants.length > 0) {
       // Telegram has a 20 MiB size limit so we should try to find the best video within that size limit
       // TODO: Maybe limit non-Telegram/Discord to only h264 and 20 MiB?
-      const isTelegram = userAgent?.toLowerCase().includes('telegram') || false;
+      const isTelegram = userAgent?.toLowerCase().includes("telegram") || false;
       const TELEGRAM_MAX_SIZE = 20 * 1024 * 1024; // 20 MB in bytes
 
       // Select the best variant based on constraints
       const selectedVariant = selectBestVariant(
         allVariants,
-        isTelegram ? TELEGRAM_MAX_SIZE : undefined
+        isTelegram ? TELEGRAM_MAX_SIZE : undefined,
       );
 
       if (selectedVariant) {
@@ -586,26 +625,28 @@ export const buildAPITikTokStatus = async (
         }
 
         // Build formats array with proxied URLs
-        const formats: APIVideoFormat[] = allVariants.map(v => ({
-          url: proxyBase ? generateProxyUrl(v.url, cookies, proxyBase, videoId) : v.url,
+        const formats: APIVideoFormat[] = allVariants.map((v) => ({
+          url: proxyBase
+            ? generateProxyUrl(v.url, cookies, proxyBase, videoId)
+            : v.url,
           bitrate: v.bitrate,
           container: v.container,
           codec: v.codec,
           size: v.size,
           width: v.width,
-          height: v.height
+          height: v.height,
         }));
 
         const videoMedia: APIVideo = {
-          type: 'video',
+          type: "video",
           url: videoUrl,
           thumbnail_url: thumbnailUrl,
           width: selectedVariant.width || dimensions.width,
           height: selectedVariant.height || dimensions.height,
           duration: duration,
-          format: 'video/mp4',
+          format: "video/mp4",
           filesize: selectedVariant.size,
-          formats: formats
+          formats: formats,
         };
 
         if (isTelegram && selectedVariant.size) {
@@ -614,7 +655,7 @@ export const buildAPITikTokStatus = async (
 
         apiStatus.media.videos = [videoMedia];
         apiStatus.media.all = [videoMedia];
-        apiStatus.embed_card = 'player';
+        apiStatus.embed_card = "player";
       }
     }
   } else {
@@ -623,7 +664,7 @@ export const buildAPITikTokStatus = async (
     if (images.length > 0) {
       apiStatus.media.photos = images;
       apiStatus.media.all = images;
-      apiStatus.embed_card = 'summary_large_image';
+      apiStatus.embed_card = "summary_large_image";
     }
   }
 
@@ -645,18 +686,21 @@ export const tiktokIdToTimestamp = (id: string): number => {
 };
 
 /** Verification badge shape shared by the profile builders. */
-const tiktokVerification = (verified: boolean | undefined, isOrganization?: number) => ({
+const tiktokVerification = (
+  verified: boolean | undefined,
+  isOrganization?: number,
+) => ({
   verified: Boolean(verified),
   /* TikTok's public payloads only say "verified"; `isOrganization` is the one hint at the kind. */
-  type: verified && isOrganization ? ('organization' as const) : null,
+  type: verified && isOrganization ? ("organization" as const) : null,
   verified_at: null,
-  identity_verified: false
+  identity_verified: false,
 });
 
-const bioWebsite = (link: string | undefined): APIUser['website'] => {
+const bioWebsite = (link: string | undefined): APIUser["website"] => {
   if (!link) return null;
   const url = /^https?:\/\//.test(link) ? link : `https://${link}`;
-  return { url, display_url: link.replace(/^https?:\/\//, '') };
+  return { url, display_url: link.replace(/^https?:\/\//, "") };
 };
 
 /**
@@ -667,40 +711,58 @@ const bioWebsite = (link: string | undefined): APIUser['website'] => {
 export const buildAPITikTokUser = (
   user: TikTokAuthor,
   stats?: TikTokAuthorStats,
-  statsV2?: TikTokAuthorStatsV2
+  statsV2?: TikTokAuthorStatsV2,
 ): APIUser => {
-  const count = (exact: string | undefined, rounded: number | undefined): number => {
+  const count = (
+    exact: string | undefined,
+    rounded: number | undefined,
+  ): number => {
     const parsed = exact !== undefined ? parseInt(exact, 10) : NaN;
     return Number.isFinite(parsed) ? parsed : (rounded ?? 0);
   };
 
-  const followers = count(statsV2?.followerCount, stats?.followerCount ?? user.followerCount);
-  const following = count(statsV2?.followingCount, stats?.followingCount ?? user.followingCount);
-  const videos = count(statsV2?.videoCount, stats?.videoCount ?? user.videoCount);
-  const hearts = count(statsV2?.heartCount, stats?.heartCount ?? user.heartCount);
+  const followers = count(
+    statsV2?.followerCount,
+    stats?.followerCount ?? user.followerCount,
+  );
+  const following = count(
+    statsV2?.followingCount,
+    stats?.followingCount ?? user.followingCount,
+  );
+  const videos = count(
+    statsV2?.videoCount,
+    stats?.videoCount ?? user.videoCount,
+  );
+  const hearts = count(
+    statsV2?.heartCount,
+    stats?.heartCount ?? user.heartCount,
+  );
 
   return {
-    id: user.id || user.secUid || '',
-    name: user.nickname || user.uniqueId || '',
-    screen_name: user.uniqueId || '',
-    avatar_url: user.avatarLarger || user.avatarMedium || user.avatarThumb || null,
+    id: user.id || user.secUid || "",
+    name: user.nickname || user.uniqueId || "",
+    screen_name: user.uniqueId || "",
+    avatar_url:
+      user.avatarLarger || user.avatarMedium || user.avatarThumb || null,
     /* TikTok profiles have no banner image. */
     banner_url: null,
-    description: user.signature || '',
-    raw_description: { text: user.signature || '', facets: [] },
-    location: '',
+    description: user.signature || "",
+    raw_description: { text: user.signature || "", facets: [] },
+    location: "",
     followers,
     following,
     media_count: videos,
     statuses: videos,
     likes: hearts,
-    url: `${TIKTOK_ROOT}/@${user.uniqueId || ''}`,
+    url: `${TIKTOK_ROOT}/@${user.uniqueId || ""}`,
     protected: Boolean(user.privateAccount),
-    joined: user.createTime ? new Date(user.createTime * 1000).toISOString() : '',
+    joined: user.createTime
+      ? new Date(user.createTime * 1000).toISOString()
+      : "",
     birthday: null,
     website: bioWebsite(user.bioLink?.link),
     verification: tiktokVerification(user.verified, user.isOrganization),
-    type: 'profile'
+    type: "profile",
   };
 };
 
@@ -709,28 +771,30 @@ export const buildAPITikTokUser = (
  * {@link buildAPITikTokUser} — the embed app omits `secUid`, the video count and the join date —
  * so it is marked `profile_embed` for clients that want to know to re-fetch.
  */
-export const buildAPITikTokUserFromEmbed = (user: TikTokEmbedUserInfo): APIUser => ({
-  id: user.id || '',
-  name: user.nickname || user.uniqueId || '',
-  screen_name: user.uniqueId || '',
+export const buildAPITikTokUserFromEmbed = (
+  user: TikTokEmbedUserInfo,
+): APIUser => ({
+  id: user.id || "",
+  name: user.nickname || user.uniqueId || "",
+  screen_name: user.uniqueId || "",
   avatar_url: user.avatarThumbUrl || null,
   banner_url: null,
-  description: user.signature || '',
-  raw_description: { text: user.signature || '', facets: [] },
-  location: '',
+  description: user.signature || "",
+  raw_description: { text: user.signature || "", facets: [] },
+  location: "",
   followers: user.followerCount ?? 0,
   following: user.followingCount ?? 0,
   media_count: 0,
   statuses: 0,
   likes: user.heartCount ?? 0,
-  url: `${TIKTOK_ROOT}/@${user.uniqueId || ''}`,
+  url: `${TIKTOK_ROOT}/@${user.uniqueId || ""}`,
   protected: Boolean(user.privateAccount),
-  joined: '',
+  joined: "",
   birthday: null,
   website: null,
   verification: tiktokVerification(user.verified),
-  type: 'profile',
-  profile_embed: true
+  type: "profile",
+  profile_embed: true,
 });
 
 /**
@@ -738,14 +802,14 @@ export const buildAPITikTokUserFromEmbed = (user: TikTokEmbedUserInfo): APIUser 
  * timelines mix creators, and the rows carry nothing but the handle.
  */
 export const buildAPITikTokHandleAuthor = (handle: string): APIUser => ({
-  id: '',
+  id: "",
   name: handle,
   screen_name: handle,
   avatar_url: null,
   banner_url: null,
-  description: '',
-  raw_description: { text: '', facets: [] },
-  location: '',
+  description: "",
+  raw_description: { text: "", facets: [] },
+  location: "",
   followers: 0,
   following: 0,
   media_count: 0,
@@ -753,11 +817,11 @@ export const buildAPITikTokHandleAuthor = (handle: string): APIUser => ({
   likes: 0,
   url: `${TIKTOK_ROOT}/@${handle}`,
   protected: false,
-  joined: '',
+  joined: "",
   birthday: null,
   website: null,
-  type: 'profile',
-  profile_embed: true
+  type: "profile",
+  profile_embed: true,
 });
 
 /**
@@ -771,10 +835,10 @@ export const buildAPITikTokStatusFromEmbedItem = (
   item: TikTokEmbedItem,
   author: APIUser,
   proxyBase: string | null = null,
-  cookies: string | null = null
+  cookies: string | null = null,
 ): APITikTokStatus => {
   const explicitCreatedAt =
-    typeof item.createTime === 'string'
+    typeof item.createTime === "string"
       ? parseInt(item.createTime, 10) || 0
       : (item.createTime ?? 0);
   /* Embed rows carry no timestamp, so fall back to the one baked into the id. */
@@ -782,13 +846,15 @@ export const buildAPITikTokStatusFromEmbedItem = (
   const handle = item.authorUniqueId || author.screen_name;
   /* Hashtag and sound pages mix creators, so only reuse the page author when it is theirs. */
   const rowAuthor =
-    handle && handle !== author.screen_name ? buildAPITikTokHandleAuthor(handle) : author;
+    handle && handle !== author.screen_name
+      ? buildAPITikTokHandleAuthor(handle)
+      : author;
 
   const status: APITikTokStatus = {
     id: item.id,
     url: `${TIKTOK_ROOT}/@${handle}/video/${item.id}`,
-    text: item.desc || '',
-    created_at: createdAt ? new Date(createdAt * 1000).toISOString() : '',
+    text: item.desc || "",
+    created_at: createdAt ? new Date(createdAt * 1000).toISOString() : "",
     created_timestamp: createdAt,
     /* The embed rows carry views only; the other counters are simply absent, not zero. */
     likes: 0,
@@ -797,14 +863,14 @@ export const buildAPITikTokStatusFromEmbedItem = (
     views: item.playCount ?? 0,
     author: rowAuthor,
     media: {},
-    raw_text: { text: item.desc || '', facets: [] },
+    raw_text: { text: item.desc || "", facets: [] },
     lang: null,
     possibly_sensitive: false,
     replying_to: null,
-    source: 'TikTok',
-    embed_card: 'tweet',
+    source: "TikTok",
+    embed_card: "tweet",
     provider: DataProvider.TikTok,
-    type: 'status'
+    type: "status",
   };
 
   if (item.playAddr) {
@@ -814,26 +880,26 @@ export const buildAPITikTokStatusFromEmbedItem = (
       ? generateProxyUrl(item.playAddr, cookies, proxyBase, item.id)
       : item.playAddr;
     const video: APIVideo = {
-      type: 'video',
+      type: "video",
       url,
-      thumbnail_url: item.originCoverUrl || item.coverUrl || '',
+      thumbnail_url: item.originCoverUrl || item.coverUrl || "",
       width: item.width || 720,
       height: item.height || 1280,
       duration: 0,
-      format: 'video/mp4',
+      format: "video/mp4",
       formats: [
         {
           url,
-          container: 'mp4',
-          codec: 'h264',
+          container: "mp4",
+          codec: "h264",
           width: item.width || 720,
-          height: item.height || 1280
-        }
-      ]
+          height: item.height || 1280,
+        },
+      ],
     };
     status.media.videos = [video];
     status.media.all = [video];
-    status.embed_card = 'player';
+    status.embed_card = "player";
   }
 
   return status;
@@ -850,7 +916,7 @@ export const buildAPITikTokStatusFromEmbedItem = (
 export const buildAPITikTokStatusFromEmbedVideo = (
   data: TikTokEmbedVideoData,
   cookies: string | null = null,
-  proxyBase: string | null = null
+  proxyBase: string | null = null,
 ): APITikTokStatus | null => {
   const item = data.itemInfos;
   if (!item?.id) return null;
@@ -858,36 +924,36 @@ export const buildAPITikTokStatusFromEmbedVideo = (
   const a = data.authorInfos;
   const stats = data.authorStats;
   const heart =
-    typeof stats?.heartCount === 'string'
+    typeof stats?.heartCount === "string"
       ? parseInt(stats.heartCount, 10) || 0
       : (stats?.heartCount ?? 0);
 
   const author: APIUser = {
-    id: a?.userId || item.authorId || '',
-    name: a?.nickName || a?.uniqueId || '',
-    screen_name: a?.uniqueId || '',
+    id: a?.userId || item.authorId || "",
+    name: a?.nickName || a?.uniqueId || "",
+    screen_name: a?.uniqueId || "",
     avatar_url: a?.covers?.[0] ?? null,
     banner_url: null,
-    description: a?.signature || '',
-    raw_description: { text: a?.signature || '', facets: [] },
-    location: '',
+    description: a?.signature || "",
+    raw_description: { text: a?.signature || "", facets: [] },
+    location: "",
     followers: stats?.followerCount ?? 0,
     following: stats?.followingCount ?? 0,
     media_count: stats?.videoCount ?? 0,
     statuses: stats?.videoCount ?? 0,
     likes: heart,
-    url: `${TIKTOK_ROOT}/@${a?.uniqueId || ''}`,
+    url: `${TIKTOK_ROOT}/@${a?.uniqueId || ""}`,
     protected: false,
-    joined: '',
+    joined: "",
     birthday: null,
     website: null,
     verification: {
       verified: Boolean(a?.verified),
       type: null,
       verified_at: null,
-      identity_verified: false
+      identity_verified: false,
     },
-    type: 'profile'
+    type: "profile",
   };
 
   const createdAt = parseInt(item.createTime, 10) || 0;
@@ -895,9 +961,9 @@ export const buildAPITikTokStatusFromEmbedVideo = (
 
   const status: APITikTokStatus = {
     id: item.id,
-    url: `${TIKTOK_ROOT}/@${a?.uniqueId || ''}/video/${item.id}`,
-    text: item.text || '',
-    created_at: createdAt ? new Date(createdAt * 1000).toISOString() : '',
+    url: `${TIKTOK_ROOT}/@${a?.uniqueId || ""}/video/${item.id}`,
+    text: item.text || "",
+    created_at: createdAt ? new Date(createdAt * 1000).toISOString() : "",
     created_timestamp: createdAt,
     likes: item.diggCount ?? 0,
     reposts: item.shareCount ?? 0,
@@ -905,14 +971,14 @@ export const buildAPITikTokStatusFromEmbedVideo = (
     views: item.playCount ?? 0,
     author,
     media: {},
-    raw_text: { text: item.text || '', facets: [] },
+    raw_text: { text: item.text || "", facets: [] },
     lang: null,
     possibly_sensitive: false,
     replying_to: null,
-    source: music?.musicName ? `♪ ${music.musicName}` : 'TikTok',
-    embed_card: 'tweet',
+    source: music?.musicName ? `♪ ${music.musicName}` : "TikTok",
+    embed_card: "tweet",
     provider: DataProvider.TikTok,
-    type: 'status'
+    type: "status",
   };
 
   const images = data.imagePostInfo?.images ?? [];
@@ -920,38 +986,40 @@ export const buildAPITikTokStatusFromEmbedVideo = (
   const meta = item.video?.videoMeta;
 
   if (playUrl) {
-    const url = proxyBase ? generateProxyUrl(playUrl, cookies, proxyBase, item.id) : playUrl;
+    const url = proxyBase
+      ? generateProxyUrl(playUrl, cookies, proxyBase, item.id)
+      : playUrl;
     const video: APIVideo = {
-      type: 'video',
+      type: "video",
       url,
-      thumbnail_url: item.coversOrigin?.[0] || item.covers?.[0] || '',
+      thumbnail_url: item.coversOrigin?.[0] || item.covers?.[0] || "",
       width: meta?.width || 720,
       height: meta?.height || 1280,
       duration: meta?.duration || 0,
-      format: 'video/mp4',
+      format: "video/mp4",
       formats: [
         {
           url,
-          container: 'mp4',
-          codec: 'h264',
+          container: "mp4",
+          codec: "h264",
           width: meta?.width || 720,
-          height: meta?.height || 1280
-        }
-      ]
+          height: meta?.height || 1280,
+        },
+      ],
     };
     status.media.videos = [video];
     status.media.all = [video];
-    status.embed_card = 'player';
+    status.embed_card = "player";
   } else if (images.length > 0) {
-    const photos: APIPhoto[] = images.map(img => ({
-      type: 'photo' as const,
-      url: img.imageURL?.urlList?.[0] || '',
+    const photos: APIPhoto[] = images.map((img) => ({
+      type: "photo" as const,
+      url: img.imageURL?.urlList?.[0] || "",
       width: img.imageWidth || 0,
-      height: img.imageHeight || 0
+      height: img.imageHeight || 0,
     }));
     status.media.photos = photos;
     status.media.all = photos;
-    status.embed_card = 'summary_large_image';
+    status.embed_card = "summary_large_image";
   }
 
   return status;

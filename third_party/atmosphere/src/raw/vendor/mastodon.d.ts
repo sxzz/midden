@@ -40,13 +40,18 @@ interface MastodonAccount {
 
 interface MastodonMediaAttachment {
   id: string;
-  type: 'unknown' | 'image' | 'gifv' | 'video' | 'audio';
+  type: "unknown" | "image" | "gifv" | "video" | "audio";
   url: string;
   preview_url: string;
   remote_url: string | null;
   text_url?: string | null;
   meta?: {
-    original?: { width?: number; height?: number; duration?: number; frame_rate?: string };
+    original?: {
+      width?: number;
+      height?: number;
+      duration?: number;
+      frame_rate?: string;
+    };
     small?: { width?: number; height?: number };
   };
   description: string | null;

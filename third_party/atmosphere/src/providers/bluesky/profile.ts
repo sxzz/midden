@@ -1,19 +1,21 @@
-import { getBlueskyProviderEnv } from '../bluesky-runtime.js';
-import { linkFixerBluesky } from '../../helpers/link-fixer.js';
-import type { APIUser, UserAPIResponse } from '../../types/api-schemas.js';
-import { blueskyFacetsToApiFacets } from './facets.js';
-import { detectBlueskyDescriptionFacets } from './detectDescriptionFacets.js';
-import { fetchActorProfile } from './client.js';
-import { blueskyVerificationToApiUserVerification } from './verification.js';
+import { getBlueskyProviderEnv } from "../bluesky-runtime.js";
+import { linkFixerBluesky } from "../../helpers/link-fixer.js";
+import type { APIUser, UserAPIResponse } from "../../types/api-schemas.js";
+import { blueskyFacetsToApiFacets } from "./facets.js";
+import { detectBlueskyDescriptionFacets } from "./detectDescriptionFacets.js";
+import { fetchActorProfile } from "./client.js";
+import { blueskyVerificationToApiUserVerification } from "./verification.js";
 
-export const blueskyProfileToApiUser = (profile: BlueskyProfileViewDetailed): APIUser => {
+export const blueskyProfileToApiUser = (
+  profile: BlueskyProfileViewDetailed,
+): APIUser => {
   const handle = profile.handle;
-  const rawText = profile.description ?? '';
+  const rawText = profile.description ?? "";
   const facets = profile.descriptionFacets?.length
     ? profile.descriptionFacets
     : detectBlueskyDescriptionFacets(rawText);
   const description = linkFixerBluesky(facets, rawText);
-  const joined = profile.createdAt ?? profile.indexedAt ?? '';
+  const joined = profile.createdAt ?? profile.indexedAt ?? "";
 
   const apiUser: APIUser = {
     id: handle,
@@ -24,9 +26,9 @@ export const blueskyProfileToApiUser = (profile: BlueskyProfileViewDetailed): AP
     description,
     raw_description: {
       text: rawText,
-      facets: blueskyFacetsToApiFacets(rawText, facets)
+      facets: blueskyFacetsToApiFacets(rawText, facets),
     },
-    location: '',
+    location: "",
     url: `${getBlueskyProviderEnv().webRoot}/profile/${handle}`,
     protected: false,
     followers: profile.followersCount ?? 0,
@@ -38,7 +40,7 @@ export const blueskyProfileToApiUser = (profile: BlueskyProfileViewDetailed): AP
     birthday: { day: 0, month: 0, year: 0 },
     website: null,
     profile_embed: false,
-    type: 'profile'
+    type: "profile",
   };
 
   const v = blueskyVerificationToApiUserVerification(profile.verification);
@@ -49,21 +51,23 @@ export const blueskyProfileToApiUser = (profile: BlueskyProfileViewDetailed): AP
 
 export const blueskyUserProfileAPI = async (
   actor: string,
-  opts?: { credentialKey?: string }
+  opts?: { credentialKey?: string },
 ): Promise<UserAPIResponse> => {
-  const result = await fetchActorProfile(actor, { credentialKey: opts?.credentialKey });
+  const result = await fetchActorProfile(actor, {
+    credentialKey: opts?.credentialKey,
+  });
   if (!result.ok) {
     if (result.status === 400 || result.status === 404) {
-      return { code: 404, message: 'User not found' };
+      return { code: 404, message: "User not found" };
     }
-    return { code: 500, message: 'Bluesky profile request failed' };
+    return { code: 500, message: "Bluesky profile request failed" };
   }
   if (!result.data?.handle) {
-    return { code: 404, message: 'User not found' };
+    return { code: 404, message: "User not found" };
   }
   return {
     code: 200,
-    message: 'OK',
-    user: blueskyProfileToApiUser(result.data)
+    message: "OK",
+    user: blueskyProfileToApiUser(result.data),
   };
 };

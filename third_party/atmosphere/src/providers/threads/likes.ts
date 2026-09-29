@@ -1,13 +1,19 @@
-import type { APIUserListResults } from '../../types/api-schemas.js';
-import { resolveThreadsAccounts, type ThreadsRequestContext } from './account-proxy.js';
-import { fetchThreadsMediaLikers } from './private-api.js';
-import { usersFromThreadsList } from './private-processor.js';
-import { normalizeThreadsPostId, threadsShortcodeToMediaId } from './shortcode.js';
+import type { APIUserListResults } from "../../types/api-schemas.js";
+import {
+  resolveThreadsAccounts,
+  type ThreadsRequestContext,
+} from "./account-proxy.js";
+import { fetchThreadsMediaLikers } from "./private-api.js";
+import { usersFromThreadsList } from "./private-processor.js";
+import {
+  normalizeThreadsPostId,
+  threadsShortcodeToMediaId,
+} from "./shortcode.js";
 
 const empty = (code: number): APIUserListResults => ({
   code,
   results: [],
-  cursor: { top: null, bottom: null }
+  cursor: { top: null, bottom: null },
 });
 
 /**
@@ -18,7 +24,7 @@ const empty = (code: number): APIUserListResults => ({
  */
 export async function constructThreadsStatusLikes(
   rawId: string,
-  options: { count: number; ctx?: ThreadsRequestContext }
+  options: { count: number; ctx?: ThreadsRequestContext },
 ): Promise<APIUserListResults> {
   const count = Math.min(100, Math.max(1, Math.floor(options.count)));
   const accounts = await resolveThreadsAccounts(options.ctx);
@@ -34,13 +40,16 @@ export async function constructThreadsStatusLikes(
     return empty(400);
   }
 
-  const res = await fetchThreadsMediaLikers(mediaId, options.ctx, { accounts, shortcode });
+  const res = await fetchThreadsMediaLikers(mediaId, options.ctx, {
+    accounts,
+    shortcode,
+  });
   if (!res.ok) {
     return empty(res.status === 404 ? 404 : 500);
   }
   return {
     code: 200,
     results: usersFromThreadsList(res.json).slice(0, count),
-    cursor: { top: null, bottom: null }
+    cursor: { top: null, bottom: null },
   };
 }

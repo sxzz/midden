@@ -1,4 +1,5 @@
-const ENCODING_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+const ENCODING_CHARS =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /**
  * Decode Instagram shortcode to numeric media pk (first segment before `_` in media id).
@@ -29,5 +30,5 @@ export function normalizeInstagramPostId(raw: string): string {
   if (p?.[1]) return p[1];
   const tv = t.match(/instagram\.com\/(?:[^/]+\/)?tv\/([^/?#]+)/i);
   if (tv?.[1]) return tv[1];
-  return t.replace(/^\/+|\/+$/g, '');
+  return t.replace(/^\/+|\/+$/g, "");
 }

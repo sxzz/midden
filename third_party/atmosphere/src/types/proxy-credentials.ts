@@ -36,7 +36,7 @@ export type InstagramCredentials = {
   /** Screen name, for logging only. */
   username?: string;
   /** Which client fingerprint to present. Defaults to `web`. */
-  platform?: 'web' | 'android';
+  platform?: "web" | "android";
 };
 
 /** Per-provider credential buckets. */

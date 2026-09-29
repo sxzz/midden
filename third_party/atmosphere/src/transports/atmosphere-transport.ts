@@ -1,6 +1,6 @@
-import type { AuthProvider } from './auth-provider.js';
-import type { AtmosphereSocialProvider } from '../types/social-provider.js';
-import type { BlueskyProxyCredentials } from '../types/proxy-credentials.js';
+import type { AuthProvider } from "./auth-provider.js";
+import type { AtmosphereSocialProvider } from "../types/social-provider.js";
+import type { BlueskyProxyCredentials } from "../types/proxy-credentials.js";
 
 /**
  * - **public** — unauthenticated (AppView / public HTTP).
@@ -9,9 +9,9 @@ import type { BlueskyProxyCredentials } from '../types/proxy-credentials.js';
  * - **authenticated** — user or app OAuth (see {@link AuthProvider}).
  */
 export type AtmosphereTransport<P extends AtmosphereSocialProvider> =
-  | { kind: 'public' }
+  | { kind: "public" }
   | {
-      kind: 'anonymous-proxy';
+      kind: "anonymous-proxy";
       /**
        * Bluesky: shuffled list of PDS accounts for XRPC proxy fallback.
        * Twitter / others: use provider-specific fields when added to the package.
@@ -19,10 +19,10 @@ export type AtmosphereTransport<P extends AtmosphereSocialProvider> =
       bluesky?: { accounts: BlueskyProxyCredentials[]; credentialKey?: string };
     }
   | {
-      kind: 'proxy-relay';
+      kind: "proxy-relay";
       baseUrl: string;
       userAgent: string;
       /** Optional for hosted relay APIs that require a key */
       apiKey?: string;
     }
-  | { kind: 'authenticated'; auth: AuthProvider<P> };
+  | { kind: "authenticated"; auth: AuthProvider<P> };

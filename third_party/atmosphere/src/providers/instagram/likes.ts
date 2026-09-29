@@ -1,13 +1,16 @@
-import type { APIUserListResults } from '../../types/api-schemas.js';
-import { resolveInstagramAccounts, type InstagramRequestContext } from './account-proxy.js';
-import { fetchPrivateMediaLikers } from './private-api.js';
-import { usersFromPrivateList } from './private-processor.js';
-import { instagramShortcodeToPk } from './shortcode.js';
+import type { APIUserListResults } from "../../types/api-schemas.js";
+import {
+  resolveInstagramAccounts,
+  type InstagramRequestContext,
+} from "./account-proxy.js";
+import { fetchPrivateMediaLikers } from "./private-api.js";
+import { usersFromPrivateList } from "./private-processor.js";
+import { instagramShortcodeToPk } from "./shortcode.js";
 
 const empty = (code: number): APIUserListResults => ({
   code,
   results: [],
-  cursor: { top: null, bottom: null }
+  cursor: { top: null, bottom: null },
 });
 
 /**
@@ -18,7 +21,7 @@ const empty = (code: number): APIUserListResults => ({
  */
 export async function constructInstagramStatusLikes(
   shortcode: string,
-  options: { count: number; ctx?: InstagramRequestContext }
+  options: { count: number; ctx?: InstagramRequestContext },
 ): Promise<APIUserListResults> {
   const count = Math.min(100, Math.max(1, Math.floor(options.count)));
   const accounts = await resolveInstagramAccounts(options.ctx);
@@ -33,13 +36,16 @@ export async function constructInstagramStatusLikes(
     return empty(400);
   }
 
-  const res = await fetchPrivateMediaLikers(mediaId, options.ctx, { accounts, shortcode });
+  const res = await fetchPrivateMediaLikers(mediaId, options.ctx, {
+    accounts,
+    shortcode,
+  });
   if (!res.ok) {
     return empty(res.status === 404 ? 404 : 500);
   }
   return {
     code: 200,
     results: usersFromPrivateList(res.json).slice(0, count),
-    cursor: { top: null, bottom: null }
+    cursor: { top: null, bottom: null },
   };
 }

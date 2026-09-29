@@ -3,7 +3,10 @@ import { computed } from "vue";
 import { assetURL, type Collection } from "../api";
 import { excerpt, mediaSummary, present, shortDate } from "../presentation";
 import MediaThumbs from "./MediaThumbs.vue";
-const props = defineProps<{ collection: Collection; showSensitive?: boolean }>();
+const props = defineProps<{
+  collection: Collection;
+  showSensitive?: boolean;
+}>();
 defineEmits<{ open: [id: string] }>();
 const view = computed(() => present(props.collection));
 const preview = computed(() => excerpt(view.value.body));

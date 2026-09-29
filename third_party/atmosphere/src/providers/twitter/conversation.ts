@@ -1,33 +1,42 @@
-import { getTwitterProviderEnv } from '../twitter-runtime.js';
-import { hasTwitterAccountProxy } from './accountProxy.js';
-import { buildLanguageHeaders } from '../../helpers/language.js';
-import { isGraphQLTwitterStatus } from '../../helpers/graphql-twitter.js';
-import type { APIStatusTombstone, APITwitterStatus } from '../../types/api-schemas.js';
-import type { FetchResults } from '../../types/fetch-results.js';
-import { isTombstone, stripTombstones } from '../../helpers/tombstone.js';
-import { buildAPITwitterStatus, twitterTweetTombstoneFromGraphQL } from './processor.js';
-import type { TwitterBuildHost } from './build-host.js';
-import { InputFlags } from '../../types/input-flags.js';
-import type { SocialThread, SocialConversation } from '../../types/api-status.js';
+import { getTwitterProviderEnv } from "../twitter-runtime.js";
+import { hasTwitterAccountProxy } from "./accountProxy.js";
+import { buildLanguageHeaders } from "../../helpers/language.js";
+import { isGraphQLTwitterStatus } from "../../helpers/graphql-twitter.js";
+import type {
+  APIStatusTombstone,
+  APITwitterStatus,
+} from "../../types/api-schemas.js";
+import type { FetchResults } from "../../types/fetch-results.js";
+import { isTombstone, stripTombstones } from "../../helpers/tombstone.js";
+import {
+  buildAPITwitterStatus,
+  twitterTweetTombstoneFromGraphQL,
+} from "./processor.js";
+import type { TwitterBuildHost } from "./build-host.js";
+import { InputFlags } from "../../types/input-flags.js";
+import type {
+  SocialThread,
+  SocialConversation,
+} from "../../types/api-status.js";
 import {
   ConversationTimelineQuery,
   TweetDetailQuery,
   TweetResultByIdQuery,
   TweetResultByRestIdQuery,
   TweetResultsByIdsQuery,
-  TweetResultsByRestIdsQuery
-} from './graphql/queries.js';
-import { graphqlRequest } from './graphql/request.js';
-import { graphQLOrchestrator } from './graphql/orchestrator.js';
-import { isTwitterNumericStatusId } from '../../helpers/snowflake.js';
+  TweetResultsByRestIdsQuery,
+} from "./graphql/queries.js";
+import { graphqlRequest } from "./graphql/request.js";
+import { graphQLOrchestrator } from "./graphql/orchestrator.js";
+import { isTwitterNumericStatusId } from "../../helpers/snowflake.js";
 
 type TwitterTimelinePiece = GraphQLTwitterStatus | APIStatusTombstone;
 
 /** Some clients send `itemType: TimelineTweet` without `__typename`. */
 const isTimelineTweetItem = (itemContent: unknown): boolean => {
-  if (!itemContent || typeof itemContent !== 'object') return false;
+  if (!itemContent || typeof itemContent !== "object") return false;
   const o = itemContent as { __typename?: string; itemType?: string };
-  return o.__typename === 'TimelineTweet' || o.itemType === 'TimelineTweet';
+  return o.__typename === "TimelineTweet" || o.itemType === "TimelineTweet";
 };
 
 /**
@@ -40,10 +49,10 @@ const isTimelineTweetItem = (itemContent: unknown): boolean => {
 const mergeTimelineOrderPreservingTombstones = (
   ordered: TwitterTimelinePiece[],
   chainTweets: GraphQLTwitterStatus[],
-  timelineTweetSources?: GraphQLTwitterStatus[]
+  timelineTweetSources?: GraphQLTwitterStatus[],
 ): TwitterTimelinePiece[] => {
   const chainIds = new Set(
-    chainTweets.map(t => t.rest_id ?? t.legacy?.id_str ?? '').filter(Boolean)
+    chainTweets.map((t) => t.rest_id ?? t.legacy?.id_str ?? "").filter(Boolean),
   );
   const boundaryIds = new Set<string>();
   if (timelineTweetSources?.length) {
@@ -58,10 +67,12 @@ const mergeTimelineOrderPreservingTombstones = (
     .map((e, i) => ({ e, i }))
     .filter(({ e }) => {
       if (isTombstone(e)) return false;
-      const id = (e as GraphQLTwitterStatus).rest_id ?? (e as GraphQLTwitterStatus).legacy?.id_str;
+      const id =
+        (e as GraphQLTwitterStatus).rest_id ??
+        (e as GraphQLTwitterStatus).legacy?.id_str;
       return isBracketAnchorId(id);
     })
-    .map(x => x.i);
+    .map((x) => x.i);
   if (tweetIndices.length === 0) return [...chainTweets];
   let minI = Math.min(...tweetIndices);
   let maxI = Math.max(...tweetIndices);
@@ -78,7 +89,9 @@ const mergeTimelineOrderPreservingTombstones = (
   return ordered.filter((e, i) => {
     if (i < minI || i > maxI) return false;
     if (isTombstone(e)) return true;
-    const id = (e as GraphQLTwitterStatus).rest_id ?? (e as GraphQLTwitterStatus).legacy?.id_str;
+    const id =
+      (e as GraphQLTwitterStatus).rest_id ??
+      (e as GraphQLTwitterStatus).legacy?.id_str;
     return !!id && chainIds.has(id);
   });
 };
@@ -86,9 +99,9 @@ const mergeTimelineOrderPreservingTombstones = (
 /** Position in TweetDetail timeline order (used to pick one branch when several replies share a parent). */
 const timelineIndexOfGraphQLTweet = (
   tweet: GraphQLTwitterStatus,
-  ordered: TwitterTimelinePiece[]
+  ordered: TwitterTimelinePiece[],
 ): number => {
-  const tid = tweet.rest_id ?? tweet.legacy?.id_str ?? '';
+  const tid = tweet.rest_id ?? tweet.legacy?.id_str ?? "";
   if (!tid) return Number.POSITIVE_INFINITY;
   for (let i = 0; i < ordered.length; i++) {
     const piece = ordered[i];
@@ -110,7 +123,7 @@ const timelineIndexOfGraphQLTweet = (
 const mergeWalkedChainWithThreadRootFromOrdered = (
   ordered: TwitterTimelinePiece[],
   walkedChain: GraphQLTwitterStatus[],
-  focal: GraphQLTwitterStatus
+  focal: GraphQLTwitterStatus,
 ): GraphQLTwitterStatus[] => {
   const authorId = focal.core?.user_results?.result?.rest_id;
   const conv = focal.legacy?.conversation_id_str;
@@ -143,28 +156,31 @@ const writeDataPoint = (
   language: string | undefined,
   nsfw: boolean | null,
   returnCode: string,
-  flags?: InputFlags
+  flags?: InputFlags,
 ) => {
   void 0;
-  if (typeof host.analyticsEngine !== 'undefined') {
+  if (typeof host.analyticsEngine !== "undefined") {
     const flagString =
       Object.keys(flags || {})
         // @ts-expect-error - TypeScript doesn't like iterating over the keys, but that's OK
-        .filter(flag => flags?.[flag])[0] || 'standard';
+        .filter((flag) => flags?.[flag])[0] || "standard";
 
     void 0;
 
-    const cf = host.request?.cf as { colo?: string; country?: string } | undefined;
+    const cf = host.request?.cf as
+      | { colo?: string; country?: string }
+      | undefined;
     host.analyticsEngine?.writeDataPoint({
       blobs: [
         cf?.colo as string /* Datacenter location */,
         cf?.country as string /* Country code */,
-        host.request?.userAgent ?? '' /* User agent (for aggregating bots calling) */,
+        host.request?.userAgent ??
+          "" /* User agent (for aggregating bots calling) */,
         returnCode /* Return code */,
         flagString /* Type of request */,
-        language ?? '' /* For translate feature */
+        language ?? "" /* For translate feature */,
       ],
-      doubles: [nsfw ? 1 : 0 /* NSFW media = 1, No NSFW Media = 0 */]
+      doubles: [nsfw ? 1 : 0 /* NSFW media = 1, No NSFW Media = 0 */],
     });
   }
 };
@@ -176,18 +192,24 @@ const getResultFromResponse = (
     | TweetResultsByIdsResponse
     | TweetResultByIdResponse
     | TweetDetailResponse
-    | null
+    | null,
 ) => {
   if ((response as TweetResultByRestIdResponse)?.data?.tweetResult?.result) {
     return (response as TweetResultByRestIdResponse)?.data?.tweetResult
       ?.result as GraphQLTwitterStatus;
-  } else if ((response as TweetResultsByRestIdsResponse)?.data?.tweetResult?.[0]?.result) {
+  } else if (
+    (response as TweetResultsByRestIdsResponse)?.data?.tweetResult?.[0]?.result
+  ) {
     return (response as TweetResultsByRestIdsResponse)?.data?.tweetResult?.[0]
       ?.result as GraphQLTwitterStatus;
-  } else if ((response as TweetResultsByIdsResponse)?.data?.tweet_results?.[0]?.result) {
+  } else if (
+    (response as TweetResultsByIdsResponse)?.data?.tweet_results?.[0]?.result
+  ) {
     return (response as TweetResultsByIdsResponse)?.data?.tweet_results?.[0]
       ?.result as GraphQLTwitterStatus;
-  } else if ((response as TweetResultByIdResponse)?.data?.tweet_result?.result) {
+  } else if (
+    (response as TweetResultByIdResponse)?.data?.tweet_result?.result
+  ) {
     return (response as TweetResultByIdResponse)?.data?.tweet_result
       ?.result as GraphQLTwitterStatus;
   }
@@ -196,18 +218,21 @@ const getResultFromResponse = (
 
 const isTweetUnavailable = (response: unknown): response is TweetStub => {
   return (
-    typeof response === 'object' &&
+    typeof response === "object" &&
     response !== null &&
-    '__typename' in response &&
-    (response as { __typename?: string }).__typename === 'TweetUnavailable'
+    "__typename" in response &&
+    (response as { __typename?: string }).__typename === "TweetUnavailable"
   );
 };
 
-export type TweetDetailRankingMode = 'Relevance' | 'Recency' | 'Likes';
+export type TweetDetailRankingMode = "Relevance" | "Recency" | "Likes";
 
-const validateThreadedConversationResponse = (_conversation: unknown): boolean => {
+const validateThreadedConversationResponse = (
+  _conversation: unknown,
+): boolean => {
   const conversation = _conversation as TweetDetailResponse;
-  const instructions = conversation?.data?.threaded_conversation_with_injections_v2?.instructions;
+  const instructions =
+    conversation?.data?.threaded_conversation_with_injections_v2?.instructions;
   if (Array.isArray(instructions)) {
     return true;
   }
@@ -224,39 +249,39 @@ export const fetchTweetDetail = async (
   status: string,
   cursor: string | null = null,
   rankingMode?: TweetDetailRankingMode,
-  language?: string
+  language?: string,
 ): Promise<TweetDetailResponse> => {
   const langHeaders = buildLanguageHeaders(language);
   const results = await graphQLOrchestrator(host, [
     {
-      key: 'threadedConversation',
+      key: "threadedConversation",
       methods: [
         {
-          name: 'ConversationTimeline',
+          name: "ConversationTimeline",
           query: ConversationTimelineQuery,
           weight: 150,
           validator: validateThreadedConversationResponse,
           variables: {
             focal_tweet_id: status,
             cursor,
-            ...(rankingMode ? { ranking_mode: rankingMode } : {})
-          }
+            ...(rankingMode ? { ranking_mode: rankingMode } : {}),
+          },
         },
         {
-          name: 'TweetDetail',
+          name: "TweetDetail",
           query: TweetDetailQuery,
           weight: 150,
           validator: validateThreadedConversationResponse,
           variables: {
             focalTweetId: status,
             cursor,
-            ...(rankingMode ? { rankingMode } : {})
-          }
-        }
+            ...(rankingMode ? { rankingMode } : {}),
+          },
+        },
       ],
       required: true,
-      headers: langHeaders
-    }
+      headers: langHeaders,
+    },
   ]);
 
   const entry = results.threadedConversation;
@@ -271,14 +296,14 @@ export const fetchByRestId = async (
   host: TwitterBuildHost,
   useElongator = hasTwitterAccountProxy({
     TwitterProxy: host.twitterProxy,
-    CREDENTIAL_KEY: host.credentialKey
+    CREDENTIAL_KEY: host.credentialKey,
   }),
-  language?: string
+  language?: string,
 ): Promise<TweetResultByRestIdResponse> => {
   return graphqlRequest(host, {
     query: TweetResultByRestIdQuery,
     variables: {
-      tweetId: status
+      tweetId: status,
     },
     useElongator: useElongator,
     headers: buildLanguageHeaders(language),
@@ -292,27 +317,33 @@ export const fetchByRestId = async (
       void 0;
       if (
         !tweet &&
-        typeof conversation.data?.tweetResult === 'object' &&
+        typeof conversation.data?.tweetResult === "object" &&
         Object.keys(conversation.data?.tweetResult || {}).length === 0
       ) {
         void 0;
         return true;
       }
-      if (tweet?.__typename === 'TweetUnavailable' && tweet.reason === 'NsfwLoggedOut') {
+      if (
+        tweet?.__typename === "TweetUnavailable" &&
+        tweet.reason === "NsfwLoggedOut"
+      ) {
         void 0;
         return true;
       }
-      if (tweet?.__typename === 'TweetUnavailable' && tweet.reason === 'Protected') {
+      if (
+        tweet?.__typename === "TweetUnavailable" &&
+        tweet.reason === "Protected"
+      ) {
         void 0;
         return true;
       }
-      if (tweet?.__typename === 'TweetUnavailable') {
+      if (tweet?.__typename === "TweetUnavailable") {
         void 0;
         return true;
       }
       // Final clause for checking if it's valid is if there's errors
       return Array.isArray(conversation.errors);
-    }
+    },
   }) as Promise<TweetResultByRestIdResponse>;
 };
 
@@ -321,14 +352,14 @@ export const fetchByRestIds = async (
   host: TwitterBuildHost,
   useElongator = hasTwitterAccountProxy({
     TwitterProxy: host.twitterProxy,
-    CREDENTIAL_KEY: host.credentialKey
+    CREDENTIAL_KEY: host.credentialKey,
   }),
-  language?: string
+  language?: string,
 ): Promise<TweetResultsByRestIdsResponse> => {
   return graphqlRequest(host, {
     query: TweetResultsByRestIdsQuery,
     variables: {
-      tweetIds: statuses
+      tweetIds: statuses,
     },
     useElongator: useElongator,
     headers: buildLanguageHeaders(language),
@@ -342,27 +373,33 @@ export const fetchByRestIds = async (
       void 0;
       if (
         !tweet &&
-        typeof conversation.data?.tweetResult === 'object' &&
+        typeof conversation.data?.tweetResult === "object" &&
         Object.keys(conversation.data?.tweetResult || {}).length === 0
       ) {
         void 0;
         return true;
       }
-      if (tweet?.__typename === 'TweetUnavailable' && tweet.reason === 'NsfwLoggedOut') {
+      if (
+        tweet?.__typename === "TweetUnavailable" &&
+        tweet.reason === "NsfwLoggedOut"
+      ) {
         void 0;
         return true;
       }
-      if (tweet?.__typename === 'TweetUnavailable' && tweet.reason === 'Protected') {
+      if (
+        tweet?.__typename === "TweetUnavailable" &&
+        tweet.reason === "Protected"
+      ) {
         void 0;
         return true;
       }
-      if (tweet?.__typename === 'TweetUnavailable') {
+      if (tweet?.__typename === "TweetUnavailable") {
         void 0;
         return true;
       }
       // Final clause for checking if it's valid is if there's errors
       return Array.isArray(conversation.errors);
-    }
+    },
   }) as Promise<TweetResultsByRestIdsResponse>;
 };
 
@@ -377,14 +414,23 @@ const enrichArticleWithFullContent = async (
   tweetRestId: string,
   language: string | undefined,
   legacyAPI: boolean,
-  manualTranslationFallback = true
+  manualTranslationFallback = true,
 ): Promise<APITwitterStatus> => {
-  if (!status.article || (status.article.content?.blocks?.length ?? 0) > 0 || !tweetRestId) {
+  if (
+    !status.article ||
+    (status.article.content?.blocks?.length ?? 0) > 0 ||
+    !tweetRestId
+  ) {
     return status;
   }
 
   void 0;
-  const articleResponse = await fetchByRestIds([tweetRestId], host, undefined, language);
+  const articleResponse = await fetchByRestIds(
+    [tweetRestId],
+    host,
+    undefined,
+    language,
+  );
   const raw = articleResponse?.data?.tweetResult?.[0]?.result;
   if (!raw || !isGraphQLTwitterStatus(raw)) {
     return status;
@@ -396,7 +442,7 @@ const enrichArticleWithFullContent = async (
     language,
     null,
     legacyAPI,
-    manualTranslationFallback
+    manualTranslationFallback,
   );
 
   if (isTombstone(rebuilt) || (rebuilt as FetchResults)?.status || !rebuilt) {
@@ -404,7 +450,10 @@ const enrichArticleWithFullContent = async (
   }
 
   const enriched = rebuilt as APITwitterStatus;
-  if (!enriched.article || (enriched.article.content?.blocks?.length ?? 0) === 0) {
+  if (
+    !enriched.article ||
+    (enriched.article.content?.blocks?.length ?? 0) === 0
+  ) {
     return status;
   }
 
@@ -416,14 +465,14 @@ export const fetchByIds = async (
   host: TwitterBuildHost,
   useElongator = hasTwitterAccountProxy({
     TwitterProxy: host.twitterProxy,
-    CREDENTIAL_KEY: host.credentialKey
+    CREDENTIAL_KEY: host.credentialKey,
   }),
-  language?: string
+  language?: string,
 ): Promise<TweetResultsByIdsResponse> => {
   return graphqlRequest(host, {
     query: TweetResultsByIdsQuery,
     variables: {
-      rest_ids: statuses
+      rest_ids: statuses,
     },
     useElongator: useElongator,
     headers: buildLanguageHeaders(language),
@@ -437,17 +486,17 @@ export const fetchByIds = async (
       void 0;
       if (
         !status &&
-        typeof conversation.data?.tweet_results === 'object' &&
+        typeof conversation.data?.tweet_results === "object" &&
         Object.keys(conversation.data?.tweet_results || {}).length === 0
       ) {
         void 0;
         return true;
       }
-      if (isTweetUnavailable(status) && status.reason === 'NsfwLoggedOut') {
+      if (isTweetUnavailable(status) && status.reason === "NsfwLoggedOut") {
         void 0;
         return true;
       }
-      if (isTweetUnavailable(status) && status.reason === 'Protected') {
+      if (isTweetUnavailable(status) && status.reason === "Protected") {
         void 0;
         return true;
       }
@@ -457,7 +506,7 @@ export const fetchByIds = async (
       }
       // Final clause for checking if it's valid is if there's errors
       return Array.isArray(conversation.errors);
-    }
+    },
   }) as Promise<TweetResultsByIdsResponse>;
 };
 
@@ -466,14 +515,14 @@ export const fetchById = async (
   host: TwitterBuildHost,
   useElongator = hasTwitterAccountProxy({
     TwitterProxy: host.twitterProxy,
-    CREDENTIAL_KEY: host.credentialKey
+    CREDENTIAL_KEY: host.credentialKey,
   }),
-  language?: string
+  language?: string,
 ): Promise<TweetResultByIdResponse> => {
   return graphqlRequest(host, {
     query: TweetResultByIdQuery,
     variables: {
-      rest_id: status
+      rest_id: status,
     },
     useElongator: useElongator,
     headers: buildLanguageHeaders(language),
@@ -487,7 +536,7 @@ export const fetchById = async (
       void 0;
       if (
         !tweet &&
-        typeof conversation.data?.tweet_result === 'object' &&
+        typeof conversation.data?.tweet_result === "object" &&
         Object.keys(conversation.data?.tweet_result || {}).length === 0
       ) {
         void 0;
@@ -495,7 +544,7 @@ export const fetchById = async (
       }
       // Final clause for checking if it's valid is if there's errors
       return Array.isArray(conversation.errors);
-    }
+    },
   }) as Promise<TweetResultByIdResponse>;
 };
 
@@ -507,9 +556,11 @@ export const fetchById = async (
  */
 const getItemContent = (obj: any): any => obj?.itemContent ?? obj?.content;
 
-const getEntryId = (obj: any): string | undefined => obj?.entryId ?? obj?.entry_id;
+const getEntryId = (obj: any): string | undefined =>
+  obj?.entryId ?? obj?.entry_id;
 
-const getInstructionType = (obj: any): string | undefined => obj?.type ?? obj?.__typename;
+const getInstructionType = (obj: any): string | undefined =>
+  obj?.type ?? obj?.__typename;
 
 const normalizeCursor = (raw: any): GraphQLTimelineCursor => {
   if (raw.cursorType) return raw as GraphQLTimelineCursor;
@@ -533,75 +584,84 @@ const pushTweetFromContent = (
     | GraphQLTweetWithVisibilityResults,
   bucket: GraphQLProcessBucket,
   entryId?: string,
-  language?: string
+  language?: string,
 ) => {
   if (!isTimelineTweetItem(itemContent)) return;
   const result = (itemContent as GraphQLTimelineTweet).tweet_results?.result;
   const entryType = result?.__typename;
-  if (entryType === 'Tweet') {
+  if (entryType === "Tweet") {
     const tw = result as GraphQLTwitterStatus;
     bucket.statuses.push(tw);
     bucket.ordered.push(tw);
-  } else if (entryType === 'TweetWithVisibilityResults') {
+  } else if (entryType === "TweetWithVisibilityResults") {
     const tw = (result as GraphQLTweetWithVisibilityResults).tweet;
     bucket.statuses.push(tw);
     bucket.ordered.push(tw);
-  } else if (entryType === 'TweetTombstone') {
+  } else if (entryType === "TweetTombstone") {
     const idHint = entryId?.match(/^tweet-(\d+)$/)?.[1];
     bucket.ordered.push(
-      twitterTweetTombstoneFromGraphQL(result as TweetTombstone, idHint, language)
+      twitterTweetTombstoneFromGraphQL(
+        result as TweetTombstone,
+        idHint,
+        language,
+      ),
     );
   }
 };
 
 const processResponse = (
   instructions: TimelineInstruction[],
-  language?: string
+  language?: string,
 ): GraphQLProcessBucket => {
   const bucket: GraphQLProcessBucket = {
     ordered: [],
     statuses: [],
     allStatuses: [],
-    cursors: []
+    cursors: [],
   };
-  instructions?.forEach?.(instruction => {
+  instructions?.forEach?.((instruction) => {
     const itype = getInstructionType(instruction);
-    if (itype === 'TimelineAddEntries' || itype === 'TimelineAddToModule') {
+    if (itype === "TimelineAddEntries" || itype === "TimelineAddToModule") {
       (
         (instruction as TimelineAddEntriesInstruction)?.entries ??
         (instruction as TimelineAddModulesInstruction)?.moduleItems
-      )?.forEach(_entry => {
+      )?.forEach((_entry) => {
         const entry = _entry as
-          GraphQLTimelineTweetEntry | GraphQLConversationThread | GraphQLModuleTweetEntry;
+          | GraphQLTimelineTweetEntry
+          | GraphQLConversationThread
+          | GraphQLModuleTweetEntry;
         const content =
-          (entry as GraphQLModuleTweetEntry)?.item ?? (entry as GraphQLTimelineTweetEntry)?.content;
+          (entry as GraphQLModuleTweetEntry)?.item ??
+          (entry as GraphQLTimelineTweetEntry)?.content;
 
-        if (typeof content === 'undefined') {
+        if (typeof content === "undefined") {
           return;
         }
 
         const typename = (content as { __typename: string }).__typename;
         const entryId = getEntryId(entry);
 
-        if (typename === 'TimelineTimelineCursor') {
+        if (typename === "TimelineTimelineCursor") {
           bucket.cursors.push(normalizeCursor(content));
-        } else if (typename === 'TimelineTimelineItem') {
+        } else if (typename === "TimelineTimelineItem") {
           const itemContent = getItemContent(content);
           if (isTimelineTweetItem(itemContent)) {
             pushTweetFromContent(itemContent, bucket, entryId, language);
-          } else if (itemContent?.__typename === 'TimelineTimelineCursor') {
+          } else if (itemContent?.__typename === "TimelineTimelineCursor") {
             bucket.cursors.push(normalizeCursor(itemContent));
           }
-        } else if (typename === 'TimelineTimelineModule') {
+        } else if (typename === "TimelineTimelineModule") {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (content as any).items?.forEach((item: { item: Record<string, unknown> }) => {
-            const itemContent = getItemContent(item.item);
-            if (isTimelineTweetItem(itemContent)) {
-              pushTweetFromContent(itemContent, bucket, entryId, language);
-            } else if (itemContent?.__typename === 'TimelineTimelineCursor') {
-              bucket.cursors.push(normalizeCursor(itemContent));
-            }
-          });
+          (content as any).items?.forEach(
+            (item: { item: Record<string, unknown> }) => {
+              const itemContent = getItemContent(item.item);
+              if (isTimelineTweetItem(itemContent)) {
+                pushTweetFromContent(itemContent, bucket, entryId, language);
+              } else if (itemContent?.__typename === "TimelineTimelineCursor") {
+                bucket.cursors.push(normalizeCursor(itemContent));
+              }
+            },
+          );
         }
       });
     }
@@ -626,33 +686,37 @@ const pushConversationTimelineTweet = (
     | GraphQLTimelineCursor
     | GraphQLTweetWithVisibilityResults,
   bucket: GraphQLConversationBucket,
-  target: 'chain' | 'reply',
+  target: "chain" | "reply",
   entryId?: string,
-  language?: string
+  language?: string,
 ) => {
   if (!isTimelineTweetItem(itemContent)) return;
   const result = (itemContent as GraphQLTimelineTweet).tweet_results?.result;
   const entryType = result?.__typename;
-  if (entryType === 'Tweet') {
+  if (entryType === "Tweet") {
     const tw = result as GraphQLTwitterStatus;
-    if (target === 'chain') {
+    if (target === "chain") {
       bucket.chainTweets.push(tw);
       bucket.chainOrdered.push(tw);
     } else {
       bucket.replyStatuses.push(tw);
     }
-  } else if (entryType === 'TweetWithVisibilityResults') {
+  } else if (entryType === "TweetWithVisibilityResults") {
     const tw = (result as GraphQLTweetWithVisibilityResults).tweet;
-    if (target === 'chain') {
+    if (target === "chain") {
       bucket.chainTweets.push(tw);
       bucket.chainOrdered.push(tw);
     } else {
       bucket.replyStatuses.push(tw);
     }
-  } else if (entryType === 'TweetTombstone' && target === 'chain') {
+  } else if (entryType === "TweetTombstone" && target === "chain") {
     const idHint = entryId?.match(/^tweet-(\d+)$/)?.[1];
     bucket.chainOrdered.push(
-      twitterTweetTombstoneFromGraphQL(result as TweetTombstone, idHint, language)
+      twitterTweetTombstoneFromGraphQL(
+        result as TweetTombstone,
+        idHint,
+        language,
+      ),
     );
   }
 };
@@ -664,59 +728,70 @@ const pushConversationTimelineTweet = (
  */
 const processConversationResponse = (
   instructions: TimelineInstruction[],
-  language?: string
+  language?: string,
 ): GraphQLConversationBucket => {
   const bucket: GraphQLConversationBucket = {
     chainOrdered: [],
     chainTweets: [],
     replyStatuses: [],
-    cursors: []
+    cursors: [],
   };
 
-  instructions?.forEach?.(instruction => {
+  instructions?.forEach?.((instruction) => {
     const itype = getInstructionType(instruction);
-    if (itype === 'TimelineAddEntries' || itype === 'TimelineAddToModule') {
+    if (itype === "TimelineAddEntries" || itype === "TimelineAddToModule") {
       (
         (instruction as TimelineAddEntriesInstruction)?.entries ??
         (instruction as TimelineAddModulesInstruction)?.moduleItems
-      )?.forEach(_entry => {
+      )?.forEach((_entry) => {
         const entry = _entry as
-          GraphQLTimelineTweetEntry | GraphQLConversationThread | GraphQLModuleTweetEntry;
+          | GraphQLTimelineTweetEntry
+          | GraphQLConversationThread
+          | GraphQLModuleTweetEntry;
         const entryId = getEntryId(entry);
-        const isReplyEntry = entryId?.startsWith('conversationthread-');
+        const isReplyEntry = entryId?.startsWith("conversationthread-");
 
         const content =
-          (entry as GraphQLModuleTweetEntry)?.item ?? (entry as GraphQLTimelineTweetEntry)?.content;
+          (entry as GraphQLModuleTweetEntry)?.item ??
+          (entry as GraphQLTimelineTweetEntry)?.content;
 
-        if (typeof content === 'undefined') return;
+        if (typeof content === "undefined") return;
 
         const typename = (content as { __typename: string }).__typename;
 
-        if (typename === 'TimelineTimelineCursor') {
+        if (typename === "TimelineTimelineCursor") {
           bucket.cursors.push(normalizeCursor(content));
-        } else if (typename === 'TimelineTimelineItem') {
+        } else if (typename === "TimelineTimelineItem") {
           const itemContent = getItemContent(content);
           if (isTimelineTweetItem(itemContent)) {
             pushConversationTimelineTweet(
               itemContent,
               bucket,
-              isReplyEntry ? 'reply' : 'chain',
+              isReplyEntry ? "reply" : "chain",
               entryId,
-              language
+              language,
             );
-          } else if (itemContent?.__typename === 'TimelineTimelineCursor') {
+          } else if (itemContent?.__typename === "TimelineTimelineCursor") {
             bucket.cursors.push(normalizeCursor(itemContent));
           }
-        } else if (typename === 'TimelineTimelineModule') {
+        } else if (typename === "TimelineTimelineModule") {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (content as any).items?.forEach((item: { item: Record<string, unknown> }) => {
-            const itemContent = getItemContent(item.item);
-            if (isTimelineTweetItem(itemContent)) {
-              pushConversationTimelineTweet(itemContent, bucket, 'reply', entryId, language);
-            } else if (itemContent?.__typename === 'TimelineTimelineCursor') {
-              bucket.cursors.push(normalizeCursor(itemContent));
-            }
-          });
+          (content as any).items?.forEach(
+            (item: { item: Record<string, unknown> }) => {
+              const itemContent = getItemContent(item.item);
+              if (isTimelineTweetItem(itemContent)) {
+                pushConversationTimelineTweet(
+                  itemContent,
+                  bucket,
+                  "reply",
+                  entryId,
+                  language,
+                );
+              } else if (itemContent?.__typename === "TimelineTimelineCursor") {
+                bucket.cursors.push(normalizeCursor(itemContent));
+              }
+            },
+          );
         }
       });
     }
@@ -728,10 +803,11 @@ const processConversationResponse = (
 /** Focal tweet from TweetDetail: real tweet in `statuses`, or a `TweetTombstone` row (only in `ordered`). */
 const findFocalInBucket = (
   id: string,
-  bucket: GraphQLProcessBucket
+  bucket: GraphQLProcessBucket,
 ): GraphQLTwitterStatus | APIStatusTombstone | null => {
-  const fromStatuses = bucket.statuses.find(s => (s.rest_id ?? s.legacy?.id_str) === id) as
-    GraphQLTwitterStatus | undefined;
+  const fromStatuses = bucket.statuses.find(
+    (s) => (s.rest_id ?? s.legacy?.id_str) === id,
+  ) as GraphQLTwitterStatus | undefined;
   if (fromStatuses) {
     return fromStatuses;
   }
@@ -757,42 +833,56 @@ const findNextStatus = (id: string, bucket: GraphQLProcessBucket): number => {
     const ai = timelineIndexOfGraphQLTweet(bucket.statuses[a], bucket.ordered);
     const bi = timelineIndexOfGraphQLTweet(bucket.statuses[b], bucket.ordered);
     if (ai !== bi) return ai - bi;
-    const ida = bucket.statuses[a].rest_id ?? bucket.statuses[a].legacy?.id_str ?? '0';
-    const idb = bucket.statuses[b].rest_id ?? bucket.statuses[b].legacy?.id_str ?? '0';
+    const ida =
+      bucket.statuses[a].rest_id ?? bucket.statuses[a].legacy?.id_str ?? "0";
+    const idb =
+      bucket.statuses[b].rest_id ?? bucket.statuses[b].legacy?.id_str ?? "0";
     return ida.localeCompare(idb, undefined, { numeric: true });
   });
   return indices[0];
 };
 
-const findPreviousStatus = (id: string, bucket: GraphQLProcessBucket): number => {
+const findPreviousStatus = (
+  id: string,
+  bucket: GraphQLProcessBucket,
+): number => {
   const status = bucket.allStatuses.find(
-    status => (status.rest_id ?? status.legacy?.id_str ?? status.legacy?.conversation_id_str) === id
+    (status) =>
+      (status.rest_id ??
+        status.legacy?.id_str ??
+        status.legacy?.conversation_id_str) === id,
   );
   if (!status) {
     void 0;
     return -1;
   }
   if (
-    (status.rest_id ?? status.legacy?.id_str ?? status.legacy?.conversation_id_str) ===
+    (status.rest_id ??
+      status.legacy?.id_str ??
+      status.legacy?.conversation_id_str) ===
     status.legacy?.in_reply_to_status_id_str
   ) {
     void 0;
     return 0;
   }
   return bucket.allStatuses.findIndex(
-    _status =>
-      (_status.rest_id ?? _status.legacy?.id_str ?? _status.legacy?.conversation_id_str) ===
-      status.legacy?.in_reply_to_status_id_str
+    (_status) =>
+      (_status.rest_id ??
+        _status.legacy?.id_str ??
+        _status.legacy?.conversation_id_str) ===
+      status.legacy?.in_reply_to_status_id_str,
   );
 };
 
 const consolidateCursors = (
   oldCursors: GraphQLTimelineCursor[],
-  newCursors: GraphQLTimelineCursor[]
+  newCursors: GraphQLTimelineCursor[],
 ): GraphQLTimelineCursor[] => {
   /* Update the Bottom/Top cursor with the new one if applicable. Otherwise, keep the old one */
-  return oldCursors.map(cursor => {
-    const newCursor = newCursors.find(_cursor => _cursor.cursorType === cursor.cursorType);
+  return oldCursors.map((cursor) => {
+    const newCursor = newCursors.find(
+      (_cursor) => _cursor.cursorType === cursor.cursorType,
+    );
     if (newCursor) {
       return newCursor;
     }
@@ -800,10 +890,14 @@ const consolidateCursors = (
   });
 };
 
-const filterBucketStatuses = (tweets: GraphQLTwitterStatus[], original: GraphQLTwitterStatus) => {
+const filterBucketStatuses = (
+  tweets: GraphQLTwitterStatus[],
+  original: GraphQLTwitterStatus,
+) => {
   return tweets.filter(
-    tweet =>
-      tweet.core?.user_results?.result?.rest_id === original.core?.user_results?.result?.rest_id
+    (tweet) =>
+      tweet.core?.user_results?.result?.rest_id ===
+      original.core?.user_results?.result?.rest_id,
   );
 };
 
@@ -818,7 +912,7 @@ const fetchSingleStatus = async (
   id: string,
   host: TwitterBuildHost,
   processThread = false,
-  language?: string
+  language?: string,
 ): Promise<
   | TweetDetailResponse
   | TweetResultByRestIdResponse
@@ -829,7 +923,7 @@ const fetchSingleStatus = async (
   // Determine weights based on context
   const isApiHost = (() => {
     try {
-      const url = new URL(host.request?.url ?? 'https://localhost/');
+      const url = new URL(host.request?.url ?? "https://localhost/");
       return getTwitterProviderEnv().apiHostList.includes(url.hostname);
     } catch (e) {
       void 0;
@@ -839,7 +933,7 @@ const fetchSingleStatus = async (
 
   const hasElongator = hasTwitterAccountProxy({
     TwitterProxy: host.twitterProxy,
-    CREDENTIAL_KEY: host.credentialKey
+    CREDENTIAL_KEY: host.credentialKey,
   });
 
   const langHeaders = buildLanguageHeaders(language);
@@ -856,11 +950,11 @@ const fetchSingleStatus = async (
   // Build methods with dynamic weights
   const results = await graphQLOrchestrator(host, [
     {
-      key: 'status',
+      key: "status",
       headers: langHeaders,
       methods: [
         {
-          name: 'TweetDetail',
+          name: "TweetDetail",
           query: TweetDetailQuery,
           weight: 150,
           fallbackOnly: !processThread,
@@ -868,12 +962,13 @@ const fetchSingleStatus = async (
           validator: (response: unknown) => {
             const conversation = response as TweetDetailResponse;
             const instructions =
-              conversation?.data?.threaded_conversation_with_injections_v2?.instructions;
+              conversation?.data?.threaded_conversation_with_injections_v2
+                ?.instructions;
             return Boolean(instructions && Array.isArray(instructions));
-          }
+          },
         },
         {
-          name: 'ConversationTimeline',
+          name: "ConversationTimeline",
           query: ConversationTimelineQuery,
           weight: 150,
           fallbackOnly: !processThread,
@@ -881,12 +976,13 @@ const fetchSingleStatus = async (
           validator: (response: unknown) => {
             const conversation = response as TweetDetailResponse;
             const instructions =
-              conversation?.data?.threaded_conversation_with_injections_v2?.instructions;
+              conversation?.data?.threaded_conversation_with_injections_v2
+                ?.instructions;
             return Boolean(instructions && Array.isArray(instructions));
-          }
+          },
         },
         {
-          name: 'TweetResultByRestId',
+          name: "TweetResultByRestId",
           query: TweetResultByRestIdQuery,
           weight: 500,
           fallbackOnly: processThread,
@@ -894,35 +990,47 @@ const fetchSingleStatus = async (
           validator: (response: unknown) => {
             const r = response as TweetResultByRestIdResponse;
             return Boolean(r?.data?.tweetResult?.result?.__typename);
-          }
+          },
         },
         {
-          name: 'TweetResultsByIdsQuery',
+          name: "TweetResultsByIdsQuery",
           query: TweetResultsByIdsQuery,
           weight: 500,
           fallbackOnly: processThread || isApiHost,
           variables: { rest_ids: [id] },
           validator: (response: unknown) => {
-            const r = (response as TweetResultsByIdsResponse)?.data?.tweet_results?.[0]?.result as
-              GraphQLTwitterStatus | TweetStub | undefined;
-            return Boolean((r as GraphQLTwitterStatus)?.__typename || (r as TweetStub)?.reason);
-          }
+            const r = (response as TweetResultsByIdsResponse)?.data
+              ?.tweet_results?.[0]?.result as
+              | GraphQLTwitterStatus
+              | TweetStub
+              | undefined;
+            return Boolean(
+              (r as GraphQLTwitterStatus)?.__typename ||
+                (r as TweetStub)?.reason,
+            );
+          },
         },
         {
-          name: 'TweetResultsByRestIds',
+          name: "TweetResultsByRestIds",
           query: TweetResultsByRestIdsQuery,
           weight: 500,
           fallbackOnly: processThread,
           variables: { tweetIds: [id] },
           validator: (response: unknown) => {
-            const r = (response as TweetResultsByRestIdsResponse)?.data?.tweetResult?.[0]
-              ?.result as GraphQLTwitterStatus | TweetStub | undefined;
-            return Boolean((r as GraphQLTwitterStatus)?.__typename || (r as TweetStub)?.reason);
-          }
-        }
+            const r = (response as TweetResultsByRestIdsResponse)?.data
+              ?.tweetResult?.[0]?.result as
+              | GraphQLTwitterStatus
+              | TweetStub
+              | undefined;
+            return Boolean(
+              (r as GraphQLTwitterStatus)?.__typename ||
+                (r as TweetStub)?.reason,
+            );
+          },
+        },
       ],
-      required: true
-    }
+      required: true,
+    },
   ]);
 
   return results.status?.success
@@ -940,10 +1048,10 @@ export const constructTwitterThread = async (
   processThread = false,
   host: TwitterBuildHost,
   language: string | undefined,
-  legacyAPI = false
+  legacyAPI = false,
 ): Promise<SocialThread> => {
   if (!isTwitterNumericStatusId(id)) {
-    writeDataPoint(host, language, null, '404');
+    writeDataPoint(host, language, null, "404");
     return { status: null, thread: null, author: null, code: 404 };
   }
 
@@ -958,7 +1066,7 @@ export const constructTwitterThread = async (
   let status: APITwitterStatus;
 
   if (!response) {
-    writeDataPoint(host, language, null, '404');
+    writeDataPoint(host, language, null, "404");
     return { status: null, thread: null, author: null, code: 404 };
   }
 
@@ -973,13 +1081,13 @@ export const constructTwitterThread = async (
       | TweetResultsByRestIdsResponse
       | TweetResultsByIdsResponse
       | TweetResultByIdResponse
-      | null
+      | null,
   ) => {
     return (
       resp &&
-      'data' in resp &&
+      "data" in resp &&
       resp.data !== null &&
-      'threaded_conversation_with_injections_v2' in (resp.data || {})
+      "threaded_conversation_with_injections_v2" in (resp.data || {})
     );
   };
 
@@ -987,7 +1095,7 @@ export const constructTwitterThread = async (
     const result = getResultFromResponse(response);
 
     if (!result) {
-      writeDataPoint(host, language, null, '404');
+      writeDataPoint(host, language, null, "404");
       return { status: null, thread: null, author: null, code: 404 };
     }
 
@@ -998,25 +1106,31 @@ export const constructTwitterThread = async (
       null,
       legacyAPI,
       true,
-      'root',
-      id
+      "root",
+      id,
     );
 
     if (isTombstone(buildStatus)) {
-      writeDataPoint(host, language, null, '404');
+      writeDataPoint(host, language, null, "404");
       return {
-        status: await (host.withLocalizedTombstone ?? (async (t, _l) => t))(buildStatus, language),
+        status: await (host.withLocalizedTombstone ?? (async (t, _l) => t))(
+          buildStatus,
+          language,
+        ),
         thread: null,
         author: null,
-        code: 404
+        code: 404,
       };
     }
 
     if ((buildStatus as FetchResults)?.status === 401) {
-      writeDataPoint(host, language, null, '401');
+      writeDataPoint(host, language, null, "401");
       return { status: null, thread: null, author: null, code: 401 };
-    } else if (buildStatus === null || (buildStatus as FetchResults)?.status === 404) {
-      writeDataPoint(host, language, null, '404');
+    } else if (
+      buildStatus === null ||
+      (buildStatus as FetchResults)?.status === 404
+    ) {
+      writeDataPoint(host, language, null, "404");
       return { status: null, thread: null, author: null, code: 404 };
     }
 
@@ -1026,102 +1140,135 @@ export const constructTwitterThread = async (
       id,
       language,
       legacyAPI,
-      true
+      true,
     );
 
     // If not processing thread, return single tweet
     if (!processThread) {
-      writeDataPoint(host, language, status.possibly_sensitive, '200');
+      writeDataPoint(host, language, status.possibly_sensitive, "200");
       return { status: status, thread: null, author: status.author, code: 200 };
     } // If we need thread but have TweetResultByRestId response, try TweetDetail
     else if (
       hasTwitterAccountProxy({
         TwitterProxy: host.twitterProxy,
-        CREDENTIAL_KEY: host.credentialKey
+        CREDENTIAL_KEY: host.credentialKey,
       })
     ) {
       void 0;
       if (host.tweetDetailApi) {
-        const threadResponse = await fetchTweetDetail(host, id, null, undefined, language);
+        const threadResponse = await fetchTweetDetail(
+          host,
+          id,
+          null,
+          undefined,
+          language,
+        );
         if (threadResponse?.data) {
           response = threadResponse;
         }
       }
       // Return single tweet if TweetDetail fails; otherwise fall through to thread processing
       if (!isTweetDetailResponse(response)) {
-        writeDataPoint(host, language, status.possibly_sensitive, '200');
-        return { status: status, thread: null, author: status.author, code: 200 };
+        writeDataPoint(host, language, status.possibly_sensitive, "200");
+        return {
+          status: status,
+          thread: null,
+          author: status.author,
+          code: 200,
+        };
       }
     } else if (processThread) {
       // Can't process thread without TweetDetail
-      writeDataPoint(host, language, status.possibly_sensitive, '200');
+      writeDataPoint(host, language, status.possibly_sensitive, "200");
       return { status: status, thread: null, author: status.author, code: 200 };
     }
   }
 
   // Process TweetDetail response for thread data
   if (response && !isTweetDetailResponse(response)) {
-    writeDataPoint(host, language, null, '404');
+    writeDataPoint(host, language, null, "404");
     return { status: null, thread: null, author: null, code: 404 };
   }
 
   const bucket = processResponse(
-    (response as TweetDetailResponse).data?.threaded_conversation_with_injections_v2
-      ?.instructions ?? [],
-    language
+    (response as TweetDetailResponse).data
+      ?.threaded_conversation_with_injections_v2?.instructions ?? [],
+    language,
   );
   const originalPiece = findFocalInBucket(id, bucket);
 
   if (originalPiece === null) {
-    writeDataPoint(host, language, null, '404');
+    writeDataPoint(host, language, null, "404");
     return { status: null, thread: null, author: null, code: 404 };
   }
 
   if (isTombstone(originalPiece)) {
-    writeDataPoint(host, language, null, '404');
+    writeDataPoint(host, language, null, "404");
     return {
-      status: await (host.withLocalizedTombstone ?? (async (t, _l) => t))(originalPiece, language),
+      status: await (host.withLocalizedTombstone ?? (async (t, _l) => t))(
+        originalPiece,
+        language,
+      ),
       thread: null,
       author: null,
-      code: 404
+      code: 404,
     };
   }
 
   const originalStatus = originalPiece as GraphQLTwitterStatus;
-  const builtFocal = await buildAPITwitterStatus(host, originalStatus, language, null, legacyAPI);
+  const builtFocal = await buildAPITwitterStatus(
+    host,
+    originalStatus,
+    language,
+    null,
+    legacyAPI,
+  );
 
   if ((builtFocal as FetchResults)?.status === 401) {
-    writeDataPoint(host, language, null, '401');
+    writeDataPoint(host, language, null, "401");
     return { status: null, thread: null, author: null, code: 401 };
   }
   if (builtFocal === null || (builtFocal as FetchResults)?.status === 404) {
-    writeDataPoint(host, language, null, '404');
+    writeDataPoint(host, language, null, "404");
     return { status: null, thread: null, author: null, code: 404 };
   }
-  if (typeof builtFocal === 'object' && typeof (builtFocal as FetchResults).status === 'number') {
-    writeDataPoint(host, language, null, '404');
+  if (
+    typeof builtFocal === "object" &&
+    typeof (builtFocal as FetchResults).status === "number"
+  ) {
+    writeDataPoint(host, language, null, "404");
     return { status: null, thread: null, author: null, code: 404 };
   }
 
   if (isTombstone(builtFocal)) {
-    writeDataPoint(host, language, null, '404');
+    writeDataPoint(host, language, null, "404");
     return {
-      status: await (host.withLocalizedTombstone ?? (async (t, _l) => t))(builtFocal, language),
+      status: await (host.withLocalizedTombstone ?? (async (t, _l) => t))(
+        builtFocal,
+        language,
+      ),
       thread: null,
       author: null,
-      code: 404
+      code: 404,
     };
   }
 
   status = builtFocal as APITwitterStatus;
 
-  status = await enrichArticleWithFullContent(host, status, id, language, legacyAPI, true);
+  status = await enrichArticleWithFullContent(
+    host,
+    status,
+    id,
+    language,
+    legacyAPI,
+    true,
+  );
 
   const author = status.author;
 
   /* If we're not processing threads, let's be done here */
   if (!processThread) {
-    writeDataPoint(host, language, status.possibly_sensitive, '200');
+    writeDataPoint(host, language, status.possibly_sensitive, "200");
     return { status: status, thread: null, author: author, code: 200 };
   }
 
@@ -1150,7 +1297,8 @@ export const constructTwitterThread = async (
     if (index >= bucket.statuses.length - 1) {
       /* See if we have a cursor to fetch more statuses */
       const cursor = bucket.cursors.find(
-        cursor => cursor.cursorType === 'Bottom' || cursor.cursorType === 'ShowMore'
+        (cursor) =>
+          cursor.cursorType === "Bottom" || cursor.cursorType === "ShowMore",
       );
       void 0;
       if (!cursor) {
@@ -1162,11 +1310,17 @@ export const constructTwitterThread = async (
       let loadCursor: TweetDetailResponse;
 
       try {
-        loadCursor = await fetchTweetDetail(host, id, cursor.value, undefined, language);
+        loadCursor = await fetchTweetDetail(
+          host,
+          id,
+          cursor.value,
+          undefined,
+          language,
+        );
 
         if (
-          typeof loadCursor?.data?.threaded_conversation_with_injections_v2?.instructions ===
-          'undefined'
+          typeof loadCursor?.data?.threaded_conversation_with_injections_v2
+            ?.instructions === "undefined"
         ) {
           void 0;
           break;
@@ -1177,11 +1331,12 @@ export const constructTwitterThread = async (
       }
 
       const cursorResponse = processResponse(
-        loadCursor?.data?.threaded_conversation_with_injections_v2?.instructions ?? [],
-        language
+        loadCursor?.data?.threaded_conversation_with_injections_v2
+          ?.instructions ?? [],
+        language,
       );
       bucket.statuses = bucket.statuses.concat(
-        filterBucketStatuses(cursorResponse.statuses, originalStatus)
+        filterBucketStatuses(cursorResponse.statuses, originalStatus),
       );
       bucket.ordered = bucket.ordered.concat(cursorResponse.ordered);
       /* Remove old cursor and add new bottom cursor if necessary */
@@ -1198,7 +1353,9 @@ export const constructTwitterThread = async (
     const index = findPreviousStatus(currentId, bucket);
     const status = bucket.allStatuses[index];
     const newCurrentId =
-      status.rest_id ?? status.legacy?.id_str ?? status.legacy?.conversation_id_str;
+      status.rest_id ??
+      status.legacy?.id_str ??
+      status.legacy?.conversation_id_str;
 
     void 0;
 
@@ -1209,7 +1366,8 @@ export const constructTwitterThread = async (
     if (index === 0) {
       /* See if we have a cursor to fetch more statuses */
       const cursor = bucket.cursors.find(
-        cursor => cursor.cursorType === 'Top' || cursor.cursorType === 'ShowMore'
+        (cursor) =>
+          cursor.cursorType === "Top" || cursor.cursorType === "ShowMore",
       );
       void 0;
       if (!cursor) {
@@ -1221,11 +1379,17 @@ export const constructTwitterThread = async (
       let loadCursor: TweetDetailResponse;
 
       try {
-        loadCursor = await fetchTweetDetail(host, id, cursor.value, undefined, language);
+        loadCursor = await fetchTweetDetail(
+          host,
+          id,
+          cursor.value,
+          undefined,
+          language,
+        );
 
         if (
-          typeof loadCursor?.data?.threaded_conversation_with_injections_v2?.instructions ===
-          'undefined'
+          typeof loadCursor?.data?.threaded_conversation_with_injections_v2
+            ?.instructions === "undefined"
         ) {
           void 0;
           break;
@@ -1235,11 +1399,12 @@ export const constructTwitterThread = async (
         break;
       }
       const cursorResponse = processResponse(
-        loadCursor?.data?.threaded_conversation_with_injections_v2?.instructions ?? [],
-        language
+        loadCursor?.data?.threaded_conversation_with_injections_v2
+          ?.instructions ?? [],
+        language,
       );
       bucket.statuses = cursorResponse.statuses.concat(
-        filterBucketStatuses(bucket.statuses, originalStatus)
+        filterBucketStatuses(bucket.statuses, originalStatus),
       );
       bucket.ordered = cursorResponse.ordered.concat(bucket.ordered);
       /* Remove old cursor and add new top cursor if necessary */
@@ -1256,27 +1421,28 @@ export const constructTwitterThread = async (
     status: status,
     thread: [],
     author: author,
-    code: 200
+    code: 200,
   };
 
   const chainForMerge = mergeWalkedChainWithThreadRootFromOrdered(
     bucket.ordered,
     threadStatuses,
-    originalStatus
+    originalStatus,
   );
   const mergedTimeline = mergeTimelineOrderPreservingTombstones(
     bucket.ordered,
     chainForMerge,
-    bucket.allStatuses
+    bucket.allStatuses,
   );
 
   const mergedThreadResults = await Promise.all(
-    mergedTimeline.map(async piece => {
+    mergedTimeline.map(async (piece) => {
       if (isTombstone(piece)) {
         return piece;
       }
       const graphqlStatus = piece as GraphQLTwitterStatus;
-      const tweetId = graphqlStatus.rest_id ?? graphqlStatus.legacy?.id_str ?? '';
+      const tweetId =
+        graphqlStatus.rest_id ?? graphqlStatus.legacy?.id_str ?? "";
       if (tweetId === id) {
         return status;
       }
@@ -1287,7 +1453,7 @@ export const constructTwitterThread = async (
         author,
         legacyAPI,
         true,
-        'thread'
+        "thread",
       );
       if (isTombstone(built)) {
         return built;
@@ -1302,10 +1468,10 @@ export const constructTwitterThread = async (
         tweetId,
         language,
         legacyAPI,
-        true
+        true,
       );
       return builtStatus;
-    })
+    }),
   );
 
   for (const entry of mergedThreadResults) {
@@ -1325,71 +1491,132 @@ export const constructTwitterThread = async (
 export const constructTwitterConversation = async (
   id: string,
   host: TwitterBuildHost,
-  rankingMode: TweetDetailRankingMode = 'Likes',
+  rankingMode: TweetDetailRankingMode = "Likes",
   cursor: string | null = null,
-  language?: string
+  language?: string,
 ): Promise<SocialConversation> => {
   if (!isTwitterNumericStatusId(id)) {
-    return { status: null, thread: null, replies: null, author: null, cursor: null, code: 404 };
+    return {
+      status: null,
+      thread: null,
+      replies: null,
+      author: null,
+      cursor: null,
+      code: 404,
+    };
   }
 
-  const response = await fetchTweetDetail(host, id, cursor, rankingMode, language);
+  const response = await fetchTweetDetail(
+    host,
+    id,
+    cursor,
+    rankingMode,
+    language,
+  );
 
   if (!response?.data?.threaded_conversation_with_injections_v2?.instructions) {
-    return { status: null, thread: null, replies: null, author: null, cursor: null, code: 404 };
+    return {
+      status: null,
+      thread: null,
+      replies: null,
+      author: null,
+      cursor: null,
+      code: 404,
+    };
   }
 
   const bucket = processConversationResponse(
     response.data.threaded_conversation_with_injections_v2.instructions,
-    language
+    language,
   );
 
-  const fromChain = bucket.chainTweets.find(s => (s.rest_id ?? s.legacy?.id_str) === id) ?? null;
+  const fromChain =
+    bucket.chainTweets.find((s) => (s.rest_id ?? s.legacy?.id_str) === id) ??
+    null;
   const fromOrderedTomb =
     fromChain === null
-      ? (bucket.chainOrdered.find((p): p is APIStatusTombstone => isTombstone(p) && p.id === id) ??
-        null)
+      ? (bucket.chainOrdered.find(
+          (p): p is APIStatusTombstone => isTombstone(p) && p.id === id,
+        ) ?? null)
       : null;
 
   if (fromOrderedTomb) {
     return {
       status: await (host.withLocalizedTombstone ?? (async (t, _l) => t))(
         fromOrderedTomb,
-        language
+        language,
       ),
       thread: null,
       replies: null,
       author: null,
       cursor: null,
-      code: 404
+      code: 404,
     };
   }
 
   if (fromChain === null) {
-    return { status: null, thread: null, replies: null, author: null, cursor: null, code: 404 };
-  }
-
-  const originalStatus = fromChain;
-  const built = await buildAPITwitterStatus(host, originalStatus, language, null, false, false);
-  if (isTombstone(built)) {
     return {
-      status: await (host.withLocalizedTombstone ?? (async (t, _l) => t))(built, language),
+      status: null,
       thread: null,
       replies: null,
       author: null,
       cursor: null,
-      code: 404
+      code: 404,
+    };
+  }
+
+  const originalStatus = fromChain;
+  const built = await buildAPITwitterStatus(
+    host,
+    originalStatus,
+    language,
+    null,
+    false,
+    false,
+  );
+  if (isTombstone(built)) {
+    return {
+      status: await (host.withLocalizedTombstone ?? (async (t, _l) => t))(
+        built,
+        language,
+      ),
+      thread: null,
+      replies: null,
+      author: null,
+      cursor: null,
+      code: 404,
     };
   }
   if ((built as FetchResults)?.status === 401) {
-    return { status: null, thread: null, replies: null, author: null, cursor: null, code: 401 };
+    return {
+      status: null,
+      thread: null,
+      replies: null,
+      author: null,
+      cursor: null,
+      code: 401,
+    };
   }
   if (built === null || (built as FetchResults)?.status === 404) {
-    return { status: null, thread: null, replies: null, author: null, cursor: null, code: 404 };
+    return {
+      status: null,
+      thread: null,
+      replies: null,
+      author: null,
+      cursor: null,
+      code: 404,
+    };
   }
 
   let status = built as APITwitterStatus;
-  status = await enrichArticleWithFullContent(host, status, id, language, false, false);
+  status = await enrichArticleWithFullContent(
+    host,
+    status,
+    id,
+    language,
+    false,
+    false,
+  );
 
   const author = status.author;
 
@@ -1399,7 +1626,10 @@ export const constructTwitterConversation = async (
    */
   const threadPieces: TwitterTimelinePiece[] = cursor
     ? [originalStatus]
-    : mergeTimelineOrderPreservingTombstones(bucket.chainOrdered, bucket.chainTweets);
+    : mergeTimelineOrderPreservingTombstones(
+        bucket.chainOrdered,
+        bucket.chainTweets,
+      );
 
   /* Build the thread */
   const socialConversation: SocialConversation = {
@@ -1408,20 +1638,28 @@ export const constructTwitterConversation = async (
     replies: [],
     author: author,
     cursor: null,
-    code: 200
+    code: 200,
   };
 
   const conversationThreadResults = await Promise.all(
-    threadPieces.map(async piece => {
+    threadPieces.map(async (piece) => {
       if (isTombstone(piece)) {
         return piece;
       }
       const s = piece as GraphQLTwitterStatus;
-      const tweetId = s.rest_id ?? s.legacy?.id_str ?? '';
+      const tweetId = s.rest_id ?? s.legacy?.id_str ?? "";
       if (tweetId === id) {
         return status;
       }
-      const built = await buildAPITwitterStatus(host, s, language, author, false, false, 'thread');
+      const built = await buildAPITwitterStatus(
+        host,
+        s,
+        language,
+        author,
+        false,
+        false,
+        "thread",
+      );
       if (isTombstone(built)) {
         return built;
       }
@@ -1435,10 +1673,10 @@ export const constructTwitterConversation = async (
         tweetId,
         language,
         false,
-        false
+        false,
       );
       return builtStatus;
-    })
+    }),
   );
 
   for (const entry of conversationThreadResults) {
@@ -1449,15 +1687,15 @@ export const constructTwitterConversation = async (
 
   /* Build the replies (from conversationthread-* modules) */
   await Promise.all(
-    bucket.replyStatuses.map(async s => {
-      const tweetId = s.rest_id ?? s.legacy?.id_str ?? '';
+    bucket.replyStatuses.map(async (s) => {
+      const tweetId = s.rest_id ?? s.legacy?.id_str ?? "";
       let builtStatus = (await buildAPITwitterStatus(
         host,
         s,
         language,
         null,
         false,
-        false
+        false,
       )) as APITwitterStatus;
       if (builtStatus) {
         builtStatus = await enrichArticleWithFullContent(
@@ -1466,16 +1704,16 @@ export const constructTwitterConversation = async (
           tweetId,
           language,
           false,
-          false
+          false,
         );
         socialConversation.replies?.push(builtStatus);
       }
-    })
+    }),
   );
 
   /* Expose the bottom cursor for reply pagination */
   const bottomCursor = bucket.cursors.find(
-    c => c.cursorType === 'Bottom' || c.cursorType === 'ShowMore'
+    (c) => c.cursorType === "Bottom" || c.cursorType === "ShowMore",
   );
   if (bottomCursor) {
     socialConversation.cursor = { bottom: bottomCursor.value };

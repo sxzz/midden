@@ -1,8 +1,11 @@
-import type { APIFacet } from '../../types/api-schemas.js';
-import { UnicodeString } from '../../helpers/unicode-string.js';
+import type { APIFacet } from "../../types/api-schemas.js";
+import { UnicodeString } from "../../helpers/unicode-string.js";
 
 /** Map UTF-8 byte offset in `text` to UTF-16 code unit index (Bluesky facets use UTF-8 bytes). */
-const utf8ByteOffsetToUtf16Index = (text: string, byteOffset: number): number => {
+const utf8ByteOffsetToUtf16Index = (
+  text: string,
+  byteOffset: number,
+): number => {
   const u = new UnicodeString(text);
   let i = 0;
   while (i <= text.length && u.utf16IndexToUtf8Index(i) < byteOffset) {
@@ -13,7 +16,7 @@ const utf8ByteOffsetToUtf16Index = (text: string, byteOffset: number): number =>
 
 export const blueskyFacetsToApiFacets = (
   text: string,
-  facets: BlueskyFacet[] | undefined | null
+  facets: BlueskyFacet[] | undefined | null,
 ): APIFacet[] => {
   if (!facets?.length || !text) return [];
   const out: APIFacet[] = [];
@@ -22,27 +25,33 @@ export const blueskyFacetsToApiFacets = (
     const end = utf8ByteOffsetToUtf16Index(text, facet.index.byteEnd);
     if (end <= start) continue;
     for (const feature of facet.features) {
-      if (feature.$type === 'app.bsky.richtext.facet#link' && feature.uri) {
+      if (feature.$type === "app.bsky.richtext.facet#link" && feature.uri) {
         out.push({
-          type: 'url',
+          type: "url",
           indices: [start, end],
           display: text.slice(start, end),
-          replacement: feature.uri
+          replacement: feature.uri,
         });
       }
-      if (feature.$type === 'app.bsky.richtext.facet#mention' && (feature.did || feature.handle)) {
+      if (
+        feature.$type === "app.bsky.richtext.facet#mention" &&
+        (feature.did || feature.handle)
+      ) {
         out.push({
-          type: 'mention',
+          type: "mention",
           indices: [start, end],
           display: text.slice(start, end),
-          id: feature.did ?? feature.handle
+          id: feature.did ?? feature.handle,
         });
       }
-      if (feature.$type === 'app.bsky.richtext.facet#tag' && feature.tag != null) {
+      if (
+        feature.$type === "app.bsky.richtext.facet#tag" &&
+        feature.tag != null
+      ) {
         out.push({
-          type: 'hashtag',
+          type: "hashtag",
           indices: [start, end],
-          display: text.slice(start, end)
+          display: text.slice(start, end),
         });
       }
     }

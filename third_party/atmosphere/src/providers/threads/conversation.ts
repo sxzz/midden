@@ -1,26 +1,40 @@
-import type { SocialConversation } from '../../types/api-status.js';
-import { resolveThreadsAccounts, type ThreadsRequestContext } from './account-proxy.js';
-import { fetchThreadsPostPage, fetchThreadsSession, type ThreadsSession } from './client.js';
-import { decodeThreadsConversationCursor, encodeThreadsConversationCursor } from './cursors.js';
-import { fetchThreadsPostReplies } from './private-api.js';
+import type { SocialConversation } from "../../types/api-status.js";
+import {
+  resolveThreadsAccounts,
+  type ThreadsRequestContext,
+} from "./account-proxy.js";
+import {
+  fetchThreadsPostPage,
+  fetchThreadsSession,
+  type ThreadsSession,
+} from "./client.js";
+import {
+  decodeThreadsConversationCursor,
+  encodeThreadsConversationCursor,
+} from "./cursors.js";
+import { fetchThreadsPostReplies } from "./private-api.js";
 import {
   containingThreadChain,
   nextTokenFromThreadsFeed,
-  replyRowsFromThreadsReplies
-} from './private-processor.js';
+  replyRowsFromThreadsReplies,
+} from "./private-processor.js";
 import {
   buildThreadsTombstone,
   threadsPostToStatus,
-  xdtThreadEdgeToSubstatus
-} from './processor.js';
-import { normalizeThreadsPostId, threadsShortcodeToMediaId } from './shortcode.js';
+  xdtThreadEdgeToSubstatus,
+} from "./processor.js";
+import {
+  normalizeThreadsPostId,
+  threadsShortcodeToMediaId,
+} from "./shortcode.js";
 
 function extractPostPage(json: unknown): {
   edges: { node?: Record<string, unknown>; cursor?: string }[];
   page_info: { has_next_page?: boolean; end_cursor?: string | null };
 } {
-  const data = (json as { data?: { data?: Record<string, unknown> } })?.data?.data;
-  if (!data || typeof data !== 'object') {
+  const data = (json as { data?: { data?: Record<string, unknown> } })?.data
+    ?.data;
+  if (!data || typeof data !== "object") {
     return { edges: [], page_info: {} };
   }
   const edges = Array.isArray(data.edges)
@@ -31,8 +45,8 @@ function extractPostPage(json: unknown): {
     edges,
     page_info: {
       has_next_page: Boolean(pi?.has_next_page),
-      end_cursor: typeof pi?.end_cursor === 'string' ? pi.end_cursor : null
-    }
+      end_cursor: typeof pi?.end_cursor === "string" ? pi.end_cursor : null,
+    },
   };
 }
 
@@ -46,7 +60,7 @@ const conversationError = (code: number): SocialConversation => ({
   thread: null,
   replies: null,
   author: null,
-  cursor: null
+  cursor: null,
 });
 
 /**
@@ -59,20 +73,20 @@ async function proxiedConversation(params: {
   mediaId: string;
   shortcode: string;
   count: number;
-  sortOrder: 'top' | 'recent';
+  sortOrder: "top" | "recent";
   pagingToken: string | null;
   ctx: ThreadsRequestContext;
 }): Promise<SocialConversation | null> {
   const accounts = await resolveThreadsAccounts(params.ctx);
   if (!accounts.length) return null;
 
-  const sortOrder = params.sortOrder === 'recent' ? 'all' : 'top';
+  const sortOrder = params.sortOrder === "recent" ? "all" : "top";
   const res = await fetchThreadsPostReplies(params.mediaId, params.ctx, {
     accounts,
     sortOrder,
     count: params.count,
     pagingToken: params.pagingToken,
-    shortcode: params.shortcode
+    shortcode: params.shortcode,
   });
   if (!res.ok) {
     return res.status === 404 ? conversationError(404) : null;
@@ -83,28 +97,37 @@ async function proxiedConversation(params: {
 
   const owner = chain[0]?.user as Record<string, unknown> | undefined;
   const ownerFb = {
-    id: String(owner?.pk ?? owner?.id ?? ''),
-    username: String(owner?.username ?? ''),
-    fullName: typeof owner?.full_name === 'string' ? owner.full_name : undefined,
-    pic: typeof owner?.profile_pic_url === 'string' ? owner.profile_pic_url : null
+    id: String(owner?.pk ?? owner?.id ?? ""),
+    username: String(owner?.username ?? ""),
+    fullName:
+      typeof owner?.full_name === "string" ? owner.full_name : undefined,
+    pic:
+      typeof owner?.profile_pic_url === "string" ? owner.profile_pic_url : null,
   };
 
   const chainStatuses = chain
-    .map(post => threadsPostToStatus(post, ownerFb))
+    .map((post) => threadsPostToStatus(post, ownerFb))
     .filter((s): s is NonNullable<typeof s> => Boolean(s));
   if (!chainStatuses.length) {
     return {
       ...conversationError(404),
-      status: buildThreadsTombstone('unavailable', { id: params.shortcode })
+      status: buildThreadsTombstone("unavailable", { id: params.shortcode }),
     };
   }
 
   const status = chainStatuses[chainStatuses.length - 1]!;
-  const threadPrefix = chainStatuses.length > 1 ? chainStatuses.slice(0, -1) : [];
+  const threadPrefix =
+    chainStatuses.length > 1 ? chainStatuses.slice(0, -1) : [];
 
   const replies = replyRowsFromThreadsReplies(res.json)
     .slice(0, params.count)
-    .map(row => xdtThreadEdgeToSubstatus({ node: row }, params.shortcode, ownerFb.username))
+    .map((row) =>
+      xdtThreadEdgeToSubstatus(
+        { node: row },
+        params.shortcode,
+        ownerFb.username,
+      ),
+    )
     .filter((r): r is NonNullable<typeof r> => Boolean(r));
 
   const nextToken = nextTokenFromThreadsFeed(res.json);
@@ -113,10 +136,10 @@ async function proxiedConversation(params: {
         v: 1,
         postId: params.mediaId,
         shortcode: params.shortcode,
-        sort: params.sortOrder === 'recent' ? 'RECENT' : 'TOP',
+        sort: params.sortOrder === "recent" ? "RECENT" : "TOP",
         after: nextToken,
         count: params.count,
-        src: 'proxy'
+        src: "proxy",
       })
     : null;
 
@@ -126,7 +149,7 @@ async function proxiedConversation(params: {
     thread: threadPrefix.length ? threadPrefix : [status],
     replies,
     author: status.author,
-    cursor: { bottom }
+    cursor: { bottom },
   };
 }
 
@@ -135,47 +158,66 @@ export async function constructThreadsConversation(
   options: {
     cursor: string | null;
     count: number;
-    sortOrder: 'top' | 'recent';
+    sortOrder: "top" | "recent";
     userAgent?: string;
     ctx?: ThreadsRequestContext;
-  }
+  },
 ): Promise<ThreadsConversationResult> {
   const shortcode = normalizeThreadsPostId(rawId);
   let mediaId: string;
   try {
     mediaId = threadsShortcodeToMediaId(shortcode);
   } catch {
-    return { ok: false, message: 'Invalid post id' };
+    return { ok: false, message: "Invalid post id" };
   }
 
   const count = Math.min(100, Math.max(1, Math.floor(options.count)));
-  const sortGraphql: 'TOP' | 'RECENT' = options.sortOrder === 'recent' ? 'RECENT' : 'TOP';
+  const sortGraphql: "TOP" | "RECENT" =
+    options.sortOrder === "recent" ? "RECENT" : "TOP";
 
-  const decodedCursor = options.cursor ? decodeThreadsConversationCursor(options.cursor) : null;
-  if (options.cursor && (!decodedCursor || decodedCursor.shortcode !== shortcode)) {
-    return { ok: false, message: 'Invalid cursor', data: conversationError(400) };
+  const decodedCursor = options.cursor
+    ? decodeThreadsConversationCursor(options.cursor)
+    : null;
+  if (
+    options.cursor &&
+    (!decodedCursor || decodedCursor.shortcode !== shortcode)
+  ) {
+    return {
+      ok: false,
+      message: "Invalid cursor",
+      data: conversationError(400),
+    };
   }
 
   // A proxy cursor can only be replayed against the proxy, and vice versa.
-  if (decodedCursor?.src !== 'gql') {
+  if (decodedCursor?.src !== "gql") {
     const proxied = await proxiedConversation({
       mediaId,
       shortcode,
       count,
       sortOrder: options.sortOrder,
       pagingToken: decodedCursor?.after ?? null,
-      ctx: { ...options.ctx, userAgent: options.ctx?.userAgent ?? options.userAgent }
+      ctx: {
+        ...options.ctx,
+        userAgent: options.ctx?.userAgent ?? options.userAgent,
+      },
     });
     if (proxied) {
       return { ok: true, data: proxied };
     }
-    if (decodedCursor?.src === 'proxy') {
+    if (decodedCursor?.src === "proxy") {
       // The cursor belongs to a source this request can no longer reach.
-      return { ok: false, message: 'Invalid cursor', data: conversationError(400) };
+      return {
+        ok: false,
+        message: "Invalid cursor",
+        data: conversationError(400),
+      };
     }
   }
 
-  const session: ThreadsSession | null = await fetchThreadsSession(options.userAgent);
+  const session: ThreadsSession | null = await fetchThreadsSession(
+    options.userAgent,
+  );
   if (!session) {
     return {
       ok: true,
@@ -185,8 +227,8 @@ export async function constructThreadsConversation(
         thread: null,
         replies: null,
         author: null,
-        cursor: null
-      }
+        cursor: null,
+      },
     };
   }
 
@@ -198,7 +240,7 @@ export async function constructThreadsConversation(
     after,
     first: count + 1,
     session,
-    userAgent: options.userAgent
+    userAgent: options.userAgent,
   });
 
   if (!res.ok || res.json == null) {
@@ -210,8 +252,8 @@ export async function constructThreadsConversation(
         thread: null,
         replies: null,
         author: null,
-        cursor: null
-      }
+        cursor: null,
+      },
     };
   }
 
@@ -225,8 +267,8 @@ export async function constructThreadsConversation(
         thread: null,
         replies: null,
         author: null,
-        cursor: null
-      }
+        cursor: null,
+      },
     };
   }
 
@@ -235,14 +277,16 @@ export async function constructThreadsConversation(
   const firstPost = (items[0] as { post?: Record<string, unknown> })?.post;
   const owner = firstPost?.user as Record<string, unknown> | undefined;
   const ownerFb = {
-    id: String(owner?.pk ?? owner?.id ?? ''),
-    username: String(owner?.username ?? ''),
-    fullName: typeof owner?.full_name === 'string' ? owner.full_name : undefined,
-    pic: typeof owner?.profile_pic_url === 'string' ? owner.profile_pic_url : null
+    id: String(owner?.pk ?? owner?.id ?? ""),
+    username: String(owner?.username ?? ""),
+    fullName:
+      typeof owner?.full_name === "string" ? owner.full_name : undefined,
+    pic:
+      typeof owner?.profile_pic_url === "string" ? owner.profile_pic_url : null,
   };
 
   const chainStatuses = items
-    .map(it => {
+    .map((it) => {
       const p = (it as { post?: Record<string, unknown> }).post;
       return p ? threadsPostToStatus(p, ownerFb) : null;
     })
@@ -253,29 +297,37 @@ export async function constructThreadsConversation(
       ok: true,
       data: {
         code: 404,
-        status: buildThreadsTombstone('unavailable', { id: shortcode }),
+        status: buildThreadsTombstone("unavailable", { id: shortcode }),
         thread: null,
         replies: null,
         author: null,
-        cursor: null
-      }
+        cursor: null,
+      },
     };
   }
 
   const status = chainStatuses[chainStatuses.length - 1]!;
   const threadPrefix =
-    chainStatuses.length > 1 ? chainStatuses.slice(0, -1) : ([] as typeof chainStatuses);
+    chainStatuses.length > 1
+      ? chainStatuses.slice(0, -1)
+      : ([] as typeof chainStatuses);
 
   const replyEdgesAll = edges.slice(1);
   const truncated = replyEdgesAll.length > count;
   const replyEdges = replyEdgesAll.slice(0, count);
   const replies = replyEdges
-    .map(e => xdtThreadEdgeToSubstatus(e as Record<string, unknown>, shortcode, ownerFb.username))
+    .map((e) =>
+      xdtThreadEdgeToSubstatus(
+        e as Record<string, unknown>,
+        shortcode,
+        ownerFb.username,
+      ),
+    )
     .filter((r): r is NonNullable<typeof r> => Boolean(r));
 
   const lastSurfacedEdge = replyEdges[replyEdges.length - 1];
   const lastSurfacedCursor =
-    lastSurfacedEdge && typeof lastSurfacedEdge.cursor === 'string'
+    lastSurfacedEdge && typeof lastSurfacedEdge.cursor === "string"
       ? lastSurfacedEdge.cursor
       : null;
 
@@ -297,7 +349,7 @@ export async function constructThreadsConversation(
         sort: sortGraphql,
         after: afterForBottom,
         count,
-        src: 'gql'
+        src: "gql",
       })
     : null;
 
@@ -309,7 +361,7 @@ export async function constructThreadsConversation(
       thread: threadPrefix.length ? threadPrefix : [status],
       replies,
       author: status.author,
-      cursor: { bottom }
-    }
+      cursor: { bottom },
+    },
   };
 }

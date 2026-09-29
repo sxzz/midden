@@ -35,11 +35,13 @@ func channelTestEvent(t *testing.T, s *Service, tenant string, event channelapi.
 	v, err := s.ChannelAction(ctx, channel, channelapi.Action{WorkID: w.ID, Lease: w.Lease, Name: event.Command})
 	return v, w, err
 }
+
 func channelTestAction(t *testing.T, s *Service, tenant, op, argument string) (channelapi.Result, error) {
 	t.Helper()
 	v, _, err := channelTestEvent(t, s, tenant, channelapi.Event{Command: op, Argument: argument})
 	return v, err
 }
+
 func selectTestAccount(t *testing.T, s *Service, tenant, argument string) {
 	t.Helper()
 	_, err := channelTestAction(t, s, tenant, "account", argument)

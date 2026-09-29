@@ -2,15 +2,19 @@ import type {
   APIBlueskyStatus,
   APISearchResultsBluesky,
   APITypeaheadResponse,
-  APIUserListResults
-} from '../../types/api-schemas.js';
-import { buildAPIBlueskyPost } from './processor.js';
-import { fetchSearchActors, fetchSearchActorsTypeahead, fetchSearchPosts } from './client.js';
-import { blueskyProfileViewToApiUser } from './profileFollowers.js';
-import { isBlueskyGalleryEmbed } from './gallery.js';
-import type { BlueskyBuildHost } from './build-host.js';
+  APIUserListResults,
+} from "../../types/api-schemas.js";
+import { buildAPIBlueskyPost } from "./processor.js";
+import {
+  fetchSearchActors,
+  fetchSearchActorsTypeahead,
+  fetchSearchPosts,
+} from "./client.js";
+import { blueskyProfileViewToApiUser } from "./profileFollowers.js";
+import { isBlueskyGalleryEmbed } from "./gallery.js";
+import type { BlueskyBuildHost } from "./build-host.js";
 
-export type BlueskySearchFeed = 'latest' | 'top' | 'media';
+export type BlueskySearchFeed = "latest" | "top" | "media";
 
 function normalizePostView(post: BlueskyPost): BlueskyPost {
   return {
@@ -18,38 +22,42 @@ function normalizePostView(post: BlueskyPost): BlueskyPost {
     labels: post.labels ?? [],
     likeCount: post.likeCount ?? 0,
     repostCount: post.repostCount ?? 0,
-    indexedAt: post.indexedAt ?? ''
+    indexedAt: post.indexedAt ?? "",
   };
 }
 
 function embedHasVisualMedia(embed: BlueskyEmbed | undefined): boolean {
-  if (!embed || typeof embed !== 'object') return false;
+  if (!embed || typeof embed !== "object") return false;
   if (isBlueskyGalleryEmbed(embed)) return true;
   if (Array.isArray(embed.images) && embed.images.length > 0) return true;
-  if (embed.video || embed.$type?.includes('video')) return true;
+  if (embed.video || embed.$type?.includes("video")) return true;
   if (embed.external) return true;
-  if (embed.media && (embed.media.images?.length || embed.media.video || embed.media.external))
+  if (
+    embed.media &&
+    (embed.media.images?.length || embed.media.video || embed.media.external)
+  )
     return true;
   const rec = embed.record;
-  if (rec && typeof rec === 'object') {
+  if (rec && typeof rec === "object") {
     const v = rec as BlueskyEmbedViewRecord;
     if (embedHasVisualMedia(v.embed as BlueskyEmbed | undefined)) return true;
-    if (v.embeds?.some(e => embedHasVisualMedia(e as BlueskyEmbed))) return true;
+    if (v.embeds?.some((e) => embedHasVisualMedia(e as BlueskyEmbed)))
+      return true;
   }
   return false;
 }
 
 function postHasVisualMedia(post: BlueskyPost): boolean {
   if (embedHasVisualMedia(post.embed)) return true;
-  if (post.embeds?.some(e => embedHasVisualMedia(e))) return true;
+  if (post.embeds?.some((e) => embedHasVisualMedia(e))) return true;
   const rec = post.record ?? post.value;
   if (rec?.embed) return embedHasVisualMedia(rec.embed);
   return false;
 }
 
-const feedToSort = (feed: BlueskySearchFeed): 'latest' | 'top' => {
-  if (feed === 'top') return 'top';
-  return 'latest';
+const feedToSort = (feed: BlueskySearchFeed): "latest" | "top" => {
+  if (feed === "top") return "top";
+  return "latest";
 };
 
 export const blueskySearchAPI = async (
@@ -60,7 +68,7 @@ export const blueskySearchAPI = async (
     count: number;
     cursor: string | null;
     language?: string;
-  }
+  },
 ): Promise<APISearchResultsBluesky> => {
   const sort = feedToSort(options.feed);
   const result = await fetchSearchPosts(
@@ -68,9 +76,9 @@ export const blueskySearchAPI = async (
       q: options.q,
       sort,
       limit: options.count,
-      cursor: options.cursor ?? undefined
+      cursor: options.cursor ?? undefined,
     },
-    { credentialKey: host.credentialKey }
+    { credentialKey: host.credentialKey },
   );
 
   if (!result.ok) {
@@ -81,21 +89,25 @@ export const blueskySearchAPI = async (
   }
 
   let posts = result.data.posts ?? [];
-  if (options.feed === 'media') {
+  if (options.feed === "media") {
     posts = posts.filter(postHasVisualMedia);
   }
 
   const built = await Promise.all(
-    posts.map(async raw => {
+    posts.map(async (raw) => {
       if (!raw?.uri || !raw.cid) return null;
       const post = normalizePostView(raw);
       try {
-        return (await buildAPIBlueskyPost(host, post, options.language)) as APIBlueskyStatus;
+        return (await buildAPIBlueskyPost(
+          host,
+          post,
+          options.language,
+        )) as APIBlueskyStatus;
       } catch (err) {
         void 0;
         return null;
       }
-    })
+    }),
   );
 
   const results = built.filter((s): s is APIBlueskyStatus => s !== null);
@@ -104,7 +116,7 @@ export const blueskySearchAPI = async (
   return {
     code: 200,
     results,
-    cursor: { top: null, bottom: nextCursor }
+    cursor: { top: null, bottom: nextCursor },
   };
 };
 
@@ -121,15 +133,15 @@ export const blueskySearchUsersAPI = async (
     count: number;
     cursor: string | null;
   },
-  opts?: { credentialKey?: string }
+  opts?: { credentialKey?: string },
 ): Promise<APIUserListResults> => {
   const result = await fetchSearchActors(
     {
       q: options.q,
       limit: options.count,
-      cursor: options.cursor ?? undefined
+      cursor: options.cursor ?? undefined,
     },
-    { credentialKey: opts?.credentialKey }
+    { credentialKey: opts?.credentialKey },
   );
 
   if (!result.ok) {
@@ -144,7 +156,7 @@ export const blueskySearchUsersAPI = async (
   return {
     code: 200,
     results: actors.map(blueskyProfileViewToApiUser),
-    cursor: { top: null, bottom: result.data.cursor ?? null }
+    cursor: { top: null, bottom: result.data.cursor ?? null },
   };
 };
 
@@ -160,7 +172,7 @@ export const blueskyTypeaheadAPI = async (
     q: string;
     count: number;
   },
-  opts?: { credentialKey?: string }
+  opts?: { credentialKey?: string },
 ): Promise<APITypeaheadResponse> => {
   const empty = (code: number): APITypeaheadResponse => ({
     code,
@@ -168,12 +180,12 @@ export const blueskyTypeaheadAPI = async (
     num_results: 0,
     users: [],
     topics: [],
-    events: []
+    events: [],
   });
 
   const result = await fetchSearchActorsTypeahead(
     { q: options.q, limit: options.count },
-    { credentialKey: opts?.credentialKey }
+    { credentialKey: opts?.credentialKey },
   );
 
   if (!result.ok) {
@@ -188,6 +200,6 @@ export const blueskyTypeaheadAPI = async (
     num_results: users.length,
     users,
     topics: [],
-    events: []
+    events: [],
   };
 };

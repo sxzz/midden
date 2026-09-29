@@ -2,7 +2,7 @@
  * Hand-written status / thread shapes (provider variants).
  * Twitter API v2 tweet payloads use `APITwitterStatus` from Zod in `api-schemas.ts`.
  */
-import { DataProvider } from './data-provider.js';
+import { DataProvider } from "./data-provider.js";
 import type {
   APIBlueskyNotification,
   APIBlueskyStatus,
@@ -21,8 +21,8 @@ import type {
   APIUser,
   APIVideo,
   APIMosaicPhoto,
-  APIStatusTombstone
-} from './api-schemas.js';
+  APIStatusTombstone,
+} from "./api-schemas.js";
 
 export type { APIStatusTombstone };
 
@@ -65,7 +65,7 @@ export interface APIStatus {
 
   source: string | null;
 
-  embed_card: 'tweet' | 'summary' | 'summary_large_image' | 'player';
+  embed_card: "tweet" | "summary" | "summary_large_image" | "player";
   provider: DataProvider;
 
   /** ATProto commit CID (Bluesky only); `id` is the public web record key (rkey). */
@@ -73,7 +73,7 @@ export interface APIStatus {
   /** `at://…/app.bsky.feed.post/…` (Bluesky only). */
   at_uri?: string;
   /** Discriminator: single post/status (non-Twitter providers; Twitter uses `APITwitterStatus`). */
-  type: 'status';
+  type: "status";
 }
 
 export type {
@@ -81,7 +81,7 @@ export type {
   APIInstagramStatus,
   APIThreadsStatus,
   APITikTokStatus,
-  APISubstatus
+  APISubstatus,
 };
 
 export interface SocialPost {
@@ -108,7 +108,9 @@ export interface SocialThread {
 
 /** Thread + replies with cursor-based pagination for the conversation endpoint. */
 export interface SocialConversation extends SocialThread {
-  replies: (APIStatus | APITwitterStatus | APIThreadsStatus | APISubstatus)[] | null;
+  replies:
+    | (APIStatus | APITwitterStatus | APIThreadsStatus | APISubstatus)[]
+    | null;
   cursor: {
     bottom: string | null;
   } | null;

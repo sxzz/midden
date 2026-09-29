@@ -3,7 +3,10 @@ import { computed } from "vue";
 import { assetURL, type Collection } from "../api";
 import { present, shortDate, warningList } from "../presentation";
 import MediaGallery from "./MediaGallery.vue";
-const props = defineProps<{ collection: Collection; showSensitive?: boolean }>();
+const props = defineProps<{
+  collection: Collection;
+  showSensitive?: boolean;
+}>();
 const view = computed(() => present(props.collection));
 const warnings = computed(() => warningList(props.collection.warnings));
 </script>
@@ -23,7 +26,9 @@ const warnings = computed(() => warningList(props.collection.warnings));
         <small class="meta"
           ><span v-if="view.handle">@{{ view.handle }} · </span
           >{{ shortDate(collection.published_at) || view.kind
-          }}<span v-if="collection.visibility === 'private'"> · 私密</span></small
+          }}<span v-if="collection.visibility === 'private'">
+            · 私密</span
+          ></small
         >
       </div>
     </header>

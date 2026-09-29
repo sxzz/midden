@@ -1,45 +1,45 @@
-import { convertToApiUser } from './profile.js';
-import { RetweetersQuery, RetweetersTimelineQuery } from './graphql/queries.js';
-import { graphQLOrchestrator } from './graphql/orchestrator.js';
+import { convertToApiUser } from "./profile.js";
+import { RetweetersQuery, RetweetersTimelineQuery } from "./graphql/queries.js";
+import { graphQLOrchestrator } from "./graphql/orchestrator.js";
 import {
   getRetweetersTimelineInstructions,
-  validateRetweetersTimelineResponse
-} from './graphql/validators.js';
-import { processRetweetersUserTimelineInstructions } from './search.js';
-import type { APIUserListResults } from '../../types/api-schemas.js';
-import type { TwitterBuildHost } from './build-host.js';
+  validateRetweetersTimelineResponse,
+} from "./graphql/validators.js";
+import { processRetweetersUserTimelineInstructions } from "./search.js";
+import type { APIUserListResults } from "../../types/api-schemas.js";
+import type { TwitterBuildHost } from "./build-host.js";
 
 export const statusRepostsAPI = async (
   statusId: string,
   count: number,
   cursor: string | null,
-  host: TwitterBuildHost
+  host: TwitterBuildHost,
 ): Promise<APIUserListResults> => {
   const orchestration = await graphQLOrchestrator(host, [
     {
-      key: 'reposts',
+      key: "reposts",
       required: true,
       methods: [
         {
-          name: 'Retweeters',
+          name: "Retweeters",
           query: RetweetersQuery,
           weight: 500,
-          validator: validateRetweetersTimelineResponse
+          validator: validateRetweetersTimelineResponse,
         },
         {
-          name: 'RetweetersTimeline',
+          name: "RetweetersTimeline",
           query: RetweetersTimelineQuery,
           weight: 500,
-          validator: validateRetweetersTimelineResponse
-        }
+          validator: validateRetweetersTimelineResponse,
+        },
       ],
       variables: {
         tweetId: statusId,
         tweet_id: statusId,
         count,
-        cursor: cursor ?? null
-      }
-    }
+        cursor: cursor ?? null,
+      },
+    },
   ]);
 
   if (!orchestration.reposts?.success) {
@@ -47,23 +47,28 @@ export const statusRepostsAPI = async (
     return { code: 500, results: [], cursor: { top: null, bottom: null } };
   }
 
-  const instructions = getRetweetersTimelineInstructions(orchestration.reposts.data);
+  const instructions = getRetweetersTimelineInstructions(
+    orchestration.reposts.data,
+  );
   if (!instructions) {
     return { code: 404, results: [], cursor: { top: null, bottom: null } };
   }
 
-  const { users, cursors } = processRetweetersUserTimelineInstructions(instructions);
-  const topCursor = cursors.find(cur => cur.cursorType === 'Top')?.value ?? null;
-  const bottomCursor = cursors.find(cur => cur.cursorType === 'Bottom')?.value ?? null;
+  const { users, cursors } =
+    processRetweetersUserTimelineInstructions(instructions);
+  const topCursor =
+    cursors.find((cur) => cur.cursorType === "Top")?.value ?? null;
+  const bottomCursor =
+    cursors.find((cur) => cur.cursorType === "Bottom")?.value ?? null;
 
-  const results = users.map(user => convertToApiUser(user));
+  const results = users.map((user) => convertToApiUser(user));
 
   return {
     code: 200,
     results,
     cursor: {
       top: topCursor,
-      bottom: bottomCursor
-    }
+      bottom: bottomCursor,
+    },
   };
 };

@@ -1,25 +1,31 @@
-import { getTwitterProviderEnv } from '../twitter-runtime.js';
-import { linkFixer } from '../../helpers/link-fixer.js';
+import { getTwitterProviderEnv } from "../twitter-runtime.js";
+import { linkFixer } from "../../helpers/link-fixer.js";
 import type {
   APIFacet,
   APIUser,
   ProfileAboutAPIResponse,
-  UserAPIResponse
-} from '../../types/api-schemas.js';
-import type { TwitterBuildHost } from './build-host.js';
+  UserAPIResponse,
+} from "../../types/api-schemas.js";
+import type { TwitterBuildHost } from "./build-host.js";
 import {
   UserByScreenNameQuery,
   UserResultByScreenNameQuery,
   AboutAccountQuery,
   UserByRestIdQuery,
   UserResultByRestIdQuery,
-  UserProfileAboutQuery
-} from './graphql/queries.js';
-import { validateAboutAccountQuery, validateUserProfileAboutQuery } from './graphql/validators.js';
-import { graphQLOrchestrator, type GraphQLOrchestratorRequest } from './graphql/orchestrator.js';
+  UserProfileAboutQuery,
+} from "./graphql/queries.js";
+import {
+  validateAboutAccountQuery,
+  validateUserProfileAboutQuery,
+} from "./graphql/validators.js";
+import {
+  graphQLOrchestrator,
+  type GraphQLOrchestratorRequest,
+} from "./graphql/orchestrator.js";
 
 function asUnknownRecord(value: unknown): Record<string, unknown> | undefined {
-  if (value !== null && typeof value === 'object') {
+  if (value !== null && typeof value === "object") {
     return value as Record<string, unknown>;
   }
   return undefined;
@@ -27,7 +33,11 @@ function asUnknownRecord(value: unknown): Record<string, unknown> | undefined {
 
 /** Normalize `data.user.result` vs `data.user_results.{rest_id,result}`. */
 export function extractUserResultNode(
-  response: GraphQLUserResponse | UserResultByScreenNameResponse | null | undefined
+  response:
+    | GraphQLUserResponse
+    | UserResultByScreenNameResponse
+    | null
+    | undefined,
 ): { restId?: string; result: unknown } | null {
   if (!response) {
     return null;
@@ -36,22 +46,26 @@ export function extractUserResultNode(
   if (!d) {
     return null;
   }
-  const user = asUnknownRecord(d['user']);
-  if (user && 'result' in user) {
-    const restId = typeof user['rest_id'] === 'string' ? user['rest_id'] : undefined;
-    return { restId, result: user['result'] };
+  const user = asUnknownRecord(d["user"]);
+  if (user && "result" in user) {
+    const restId =
+      typeof user["rest_id"] === "string" ? user["rest_id"] : undefined;
+    return { restId, result: user["result"] };
   }
-  const userResults = asUnknownRecord(d['user_results']);
-  if (userResults && 'result' in userResults) {
-    const restId = typeof userResults['rest_id'] === 'string' ? userResults['rest_id'] : undefined;
-    return { restId, result: userResults['result'] };
+  const userResults = asUnknownRecord(d["user_results"]);
+  if (userResults && "result" in userResults) {
+    const restId =
+      typeof userResults["rest_id"] === "string"
+        ? userResults["rest_id"]
+        : undefined;
+    return { restId, result: userResults["result"] };
   }
   return null;
 }
 
 export function isUserUnavailableResult(result: unknown): boolean {
   const r = asUnknownRecord(result);
-  return r?.['__typename'] === 'UserUnavailable';
+  return r?.["__typename"] === "UserUnavailable";
 }
 
 export function isSuspendedUserUnavailable(result: unknown): boolean {
@@ -60,8 +74,8 @@ export function isSuspendedUserUnavailable(result: unknown): boolean {
   }
   const r = asUnknownRecord(result)!;
   const reason =
-    `${r['unavailable_reason'] ?? ''} ${r['reason'] ?? ''} ${r['message'] ?? ''}`.toLowerCase();
-  return reason.includes('suspend');
+    `${r["unavailable_reason"] ?? ""} ${r["reason"] ?? ""} ${r["message"] ?? ""}`.toLowerCase();
+  return reason.includes("suspend");
 }
 
 function userByScreenNameResultValid(result: unknown): boolean {
@@ -69,10 +83,10 @@ function userByScreenNameResultValid(result: unknown): boolean {
   if (!r) {
     return false;
   }
-  if (r['__typename'] === 'UserUnavailable') {
+  if (r["__typename"] === "UserUnavailable") {
     return true;
   }
-  return r['__typename'] === 'User' || Boolean(r['rest_id'] || r['core']);
+  return r["__typename"] === "User" || Boolean(r["rest_id"] || r["core"]);
 }
 
 function userResultByScreenNameResultValid(result: unknown): boolean {
@@ -80,88 +94,102 @@ function userResultByScreenNameResultValid(result: unknown): boolean {
   if (!r) {
     return false;
   }
-  if (r['__typename'] === 'UserUnavailable') {
+  if (r["__typename"] === "UserUnavailable") {
     return true;
   }
-  return r['__typename'] === 'User' && Boolean(r['legacy'] || r['rest_id']);
+  return r["__typename"] === "User" && Boolean(r["legacy"] || r["rest_id"]);
 }
 
 function descriptionEntitiesToFacets(
-  entities: UserProfileBioDescriptionEntities | undefined
+  entities: UserProfileBioDescriptionEntities | undefined,
 ): APIFacet[] {
   if (!entities) {
     return [];
   }
   const facets: APIFacet[] = [];
-  entities.hashtags?.forEach(hashtag => {
+  entities.hashtags?.forEach((hashtag) => {
     facets.push({
-      type: 'hashtag',
+      type: "hashtag",
       indices: hashtag.indices,
-      original: hashtag.text
+      original: hashtag.text,
     });
   });
-  entities.symbols?.forEach(symbol => {
+  entities.symbols?.forEach((symbol) => {
     facets.push({
-      type: 'symbol',
+      type: "symbol",
       indices: symbol.indices,
-      original: symbol.text
+      original: symbol.text,
     });
   });
-  entities.urls?.forEach(url => {
+  entities.urls?.forEach((url) => {
     facets.push({
-      type: 'url',
+      type: "url",
       indices: url.indices,
       original: url.url,
       replacement: url.expanded_url,
-      display: url.display_url
+      display: url.display_url,
     });
   });
-  entities.user_mentions?.forEach(mention => {
+  entities.user_mentions?.forEach((mention) => {
     facets.push({
-      type: 'mention',
+      type: "mention",
       indices: mention.indices,
       original: mention.screen_name,
-      id: mention.id_str
+      id: mention.id_str,
     });
   });
   facets.sort((a, b) => a.indices[0] - b.indices[0]);
   return facets;
 }
 
-export const convertToApiUser = (user: GraphQLUser, legacyAPI = false): APIUser => {
+export const convertToApiUser = (
+  user: GraphQLUser,
+  legacyAPI = false,
+): APIUser => {
   const apiUser = {} as APIUser;
-  apiUser.screen_name = user.core?.screen_name ?? user.legacy?.screen_name ?? '';
+  apiUser.screen_name =
+    user.core?.screen_name ?? user.legacy?.screen_name ?? "";
   /* Populating a lot of the basics */
   apiUser.url = `${getTwitterProviderEnv().webRoot}/${apiUser.screen_name}`;
   apiUser.id = user.rest_id;
-  apiUser.followers = user.relationship_counts?.followers ?? user.legacy?.followers_count ?? 0;
-  apiUser.following = user.relationship_counts?.following ?? user.legacy?.friends_count ?? 0;
-  apiUser.likes = user.action_counts?.favorites_count ?? user.legacy?.favourites_count ?? 0;
-  apiUser.media_count = user.tweet_counts?.media_tweets ?? user.legacy?.media_count ?? 0;
+  apiUser.followers =
+    user.relationship_counts?.followers ?? user.legacy?.followers_count ?? 0;
+  apiUser.following =
+    user.relationship_counts?.following ?? user.legacy?.friends_count ?? 0;
+  apiUser.likes =
+    user.action_counts?.favorites_count ?? user.legacy?.favourites_count ?? 0;
+  apiUser.media_count =
+    user.tweet_counts?.media_tweets ?? user.legacy?.media_count ?? 0;
   if (legacyAPI) {
     // @ts-expect-error Use tweets for legacy API
     apiUser.tweets = user.tweet_counts?.tweets ?? user.legacy?.statuses_count;
   } else {
     apiUser.statuses = user.tweet_counts?.tweets ?? user.legacy?.statuses_count;
   }
-  apiUser.name = user.core?.name ?? user.legacy?.name ?? '';
-  const rawDescriptionText = user.profile_bio?.description ?? user.legacy?.description ?? '';
+  apiUser.name = user.core?.name ?? user.legacy?.name ?? "";
+  const rawDescriptionText =
+    user.profile_bio?.description ?? user.legacy?.description ?? "";
   const descriptionUrlEntities =
-    user.legacy?.entities?.description?.urls ?? user.profile_bio?.entities?.description?.urls;
+    user.legacy?.entities?.description?.urls ??
+    user.profile_bio?.entities?.description?.urls;
   apiUser.description = rawDescriptionText
     ? linkFixer(descriptionUrlEntities, rawDescriptionText)
-    : '';
+    : "";
   const descriptionEntities =
-    user.legacy?.entities?.description ?? user.profile_bio?.entities?.description;
+    user.legacy?.entities?.description ??
+    user.profile_bio?.entities?.description;
   apiUser.raw_description = {
     text: rawDescriptionText,
-    facets: descriptionEntitiesToFacets(descriptionEntities)
+    facets: descriptionEntitiesToFacets(descriptionEntities),
   };
-  apiUser.location = user.location?.location ?? user.legacy?.location ?? '';
-  apiUser.banner_url = user.banner?.image_url ?? user.legacy?.profile_banner_url ?? null;
-  apiUser.avatar_url = user.avatar?.image_url ?? user.legacy?.profile_image_url_https ?? null;
-  apiUser.joined = user.core?.created_at ?? user.legacy?.created_at ?? '';
-  apiUser.protected = user.privacy?.protected ?? user.legacy?.protected ?? false;
+  apiUser.location = user.location?.location ?? user.legacy?.location ?? "";
+  apiUser.banner_url =
+    user.banner?.image_url ?? user.legacy?.profile_banner_url ?? null;
+  apiUser.avatar_url =
+    user.avatar?.image_url ?? user.legacy?.profile_image_url_https ?? null;
+  apiUser.joined = user.core?.created_at ?? user.legacy?.created_at ?? "";
+  apiUser.protected =
+    user.privacy?.protected ?? user.legacy?.protected ?? false;
   // if (user.legacy_extended_profile?.birthdate) {
   //   const { birthdate } = user.legacy_extended_profile;
   //   apiUser.birthday = {};
@@ -170,12 +198,13 @@ export const convertToApiUser = (user: GraphQLUser, legacyAPI = false): APIUser 
   //   if (typeof birthdate.year === 'number') apiUser.birthday.year = birthdate.year;
   // }
   const website =
-    user.profile_bio?.entities?.url?.urls?.[0] ?? user.legacy?.entities?.url?.urls?.[0];
+    user.profile_bio?.entities?.url?.urls?.[0] ??
+    user.legacy?.entities?.url?.urls?.[0];
 
   if (website) {
     apiUser.website = {
       url: website.expanded_url,
-      display_url: website.display_url
+      display_url: website.display_url,
     };
   } else {
     apiUser.website = null;
@@ -191,16 +220,16 @@ export const convertToApiUser = (user: GraphQLUser, legacyAPI = false): APIUser 
     apiUser.verification = {
       verified: true,
       verified_at: null,
-      type: 'individual'
+      type: "individual",
     };
-    if (user.verification?.verified_type === 'Business') {
-      apiUser.verification.type = 'organization';
-    } else if (user.verification?.verified_type === 'Government') {
-      apiUser.verification.type = 'government';
+    if (user.verification?.verified_type === "Business") {
+      apiUser.verification.type = "organization";
+    } else if (user.verification?.verified_type === "Government") {
+      apiUser.verification.type = "government";
     }
     if (user.verification_info?.verified_since_msec) {
       apiUser.verification.verified_at = new Date(
-        Number(user.verification_info.verified_since_msec)
+        Number(user.verification_info.verified_since_msec),
       ).toISOString();
     }
     /* TODO: figure out why one of the user endpoints doesn't have this  */
@@ -211,12 +240,12 @@ export const convertToApiUser = (user: GraphQLUser, legacyAPI = false): APIUser 
     apiUser.verification = {
       verified: false,
       verified_at: null,
-      type: null
+      type: null,
     };
   }
 
   if (!legacyAPI) {
-    apiUser.type = 'profile';
+    apiUser.type = "profile";
   }
 
   return apiUser;
@@ -227,7 +256,7 @@ export const convertToApiUser = (user: GraphQLUser, legacyAPI = false): APIUser 
  */
 export const mergeAboutAccountData = (
   user: APIUser,
-  aboutAccount: AboutAccountQueryResponse
+  aboutAccount: AboutAccountQueryResponse,
 ): APIUser => {
   const result = aboutAccount?.data?.user_result_by_screen_name?.result;
 
@@ -236,18 +265,20 @@ export const mergeAboutAccountData = (
   }
 
   if (result.about_profile) {
-    user.about_account = user.about_account ?? ({} as APIUser['about_account']);
+    user.about_account = user.about_account ?? ({} as APIUser["about_account"]);
 
     if (result.about_profile?.account_based_in) {
       user.about_account!.based_in = result.about_profile.account_based_in;
     }
 
     if (result.about_profile?.location_accurate) {
-      user.about_account!.location_accurate = result.about_profile.location_accurate;
+      user.about_account!.location_accurate =
+        result.about_profile.location_accurate;
     }
 
     if (result.about_profile?.created_country_accurate) {
-      user.about_account!.created_country_accurate = result.about_profile.created_country_accurate;
+      user.about_account!.created_country_accurate =
+        result.about_profile.created_country_accurate;
     }
 
     if (result.about_profile?.source) {
@@ -258,10 +289,10 @@ export const mergeAboutAccountData = (
     if (result.about_profile?.username_changes) {
       const usernameChanges = result.about_profile.username_changes;
       user.about_account!.username_changes = {
-        count: parseInt(usernameChanges.count || '0', 10),
+        count: parseInt(usernameChanges.count || "0", 10),
         last_changed_at: usernameChanges.last_changed_at_msec
           ? new Date(Number(usernameChanges.last_changed_at_msec)).toISOString()
-          : null
+          : null,
       };
     }
   }
@@ -270,7 +301,8 @@ export const mergeAboutAccountData = (
 };
 
 export type ProfileHandleOrId =
-  { type: 'screenName'; value: string } | { type: 'userId'; value: string };
+  | { type: "screenName"; value: string }
+  | { type: "userId"; value: string };
 
 /**
  * Parses API v2 profile `{handle}`: plain screen name or `id:<numeric rest id>`.
@@ -279,9 +311,9 @@ export const parseHandleOrId = (handle: string): ProfileHandleOrId => {
   const trimmed = handle.trim();
   const m = /^id:([0-9]+)$/i.exec(trimmed);
   if (m) {
-    return { type: 'userId', value: m[1] };
+    return { type: "userId", value: m[1] };
   }
-  return { type: 'screenName', value: trimmed };
+  return { type: "screenName", value: trimmed };
 };
 
 /**
@@ -289,7 +321,7 @@ export const parseHandleOrId = (handle: string): ProfileHandleOrId => {
  */
 export const mergeUserProfileAboutData = (
   user: APIUser,
-  aboutResponse: UserProfileAboutResponse
+  aboutResponse: UserProfileAboutResponse,
 ): APIUser => {
   const result =
     aboutResponse?.data?.user_result_by_rest_id?.result ??
@@ -300,18 +332,20 @@ export const mergeUserProfileAboutData = (
   }
 
   if (result.about_profile) {
-    user.about_account = user.about_account ?? ({} as APIUser['about_account']);
+    user.about_account = user.about_account ?? ({} as APIUser["about_account"]);
 
     if (result.about_profile?.account_based_in) {
       user.about_account!.based_in = result.about_profile.account_based_in;
     }
 
     if (result.about_profile?.location_accurate) {
-      user.about_account!.location_accurate = result.about_profile.location_accurate;
+      user.about_account!.location_accurate =
+        result.about_profile.location_accurate;
     }
 
     if (result.about_profile?.created_country_accurate) {
-      user.about_account!.created_country_accurate = result.about_profile.created_country_accurate;
+      user.about_account!.created_country_accurate =
+        result.about_profile.created_country_accurate;
     }
 
     if (result.about_profile?.source) {
@@ -321,10 +355,10 @@ export const mergeUserProfileAboutData = (
     if (result.about_profile?.username_changes) {
       const usernameChanges = result.about_profile.username_changes;
       user.about_account!.username_changes = {
-        count: parseInt(usernameChanges.count || '0', 10),
+        count: parseInt(usernameChanges.count || "0", 10),
         last_changed_at: usernameChanges.last_changed_at_msec
           ? new Date(Number(usernameChanges.last_changed_at_msec)).toISOString()
-          : null
+          : null,
       };
     }
   }
@@ -336,12 +370,12 @@ export const mergeUserProfileAboutData = (
    and using it to create FxTwitter's streamlined API responses */
 const populateUserProperties = async (
   response: GraphQLUserResponse | UserResultByScreenNameResponse,
-  legacyAPI = false
+  legacyAPI = false,
 ): Promise<APIUser | null> => {
   const user =
     (response as GraphQLUserResponse).data?.user?.result ??
     (response as UserResultByScreenNameResponse).data?.user_results?.result;
-  if (user && (user as GraphQLUser).__typename === 'User') {
+  if (user && (user as GraphQLUser).__typename === "User") {
     return convertToApiUser(user as GraphQLUser, legacyAPI);
   }
 
@@ -355,55 +389,57 @@ const populateUserProperties = async (
 const fetchUser = async (
   host: TwitterBuildHost,
   screenName: string,
-  includeAboutAccount = false
+  includeAboutAccount = false,
 ): Promise<{
   userResponse: GraphQLUserResponse | UserResultByScreenNameResponse | null;
   aboutAccountResponse: AboutAccountQueryResponse | null;
 }> => {
   const userRequest: GraphQLOrchestratorRequest = {
-    key: 'user',
+    key: "user",
     methods: [
       {
-        name: 'UserByScreenName',
+        name: "UserByScreenName",
         query: UserByScreenNameQuery,
         weight: 150,
         validator: (response: unknown) => {
           const userResponse = response as GraphQLUserResponse;
           const result = userResponse?.data?.user?.result;
           return userByScreenNameResultValid(result);
-        }
+        },
       },
       {
-        name: 'UserResultByScreenName',
+        name: "UserResultByScreenName",
         query: UserResultByScreenNameQuery,
         weight: 500,
         validator: (response: unknown) => {
           const userResponse = response as UserResultByScreenNameResponse;
           const result = userResponse?.data?.user_results?.result;
           return userResultByScreenNameResultValid(result);
-        }
-      }
+        },
+      },
     ],
     variables: { screen_name: screenName },
-    required: true
+    required: true,
   };
 
   const aboutAccountRequest: GraphQLOrchestratorRequest = {
-    key: 'aboutAccount',
+    key: "aboutAccount",
     query: AboutAccountQuery,
     variables: { screenName },
     validator: validateAboutAccountQuery,
-    required: false
+    required: false,
   };
 
   const results = await graphQLOrchestrator(
     host,
-    includeAboutAccount ? [userRequest, aboutAccountRequest] : [userRequest]
+    includeAboutAccount ? [userRequest, aboutAccountRequest] : [userRequest],
   );
 
   // Extract user response
   const userData = results.user?.success
-    ? (results.user.data as GraphQLUserResponse | UserResultByScreenNameResponse)
+    ? (results.user.data as
+        | GraphQLUserResponse
+        | UserResultByScreenNameResponse)
     : null;
 
   // Extract about account response
@@ -413,61 +449,63 @@ const fetchUser = async (
 
   return {
     userResponse: userData,
-    aboutAccountResponse: aboutAccountData
+    aboutAccountResponse: aboutAccountData,
   };
 };
 
 const fetchUserById = async (
   host: TwitterBuildHost,
   userId: string,
-  includeAboutAccount = false
+  includeAboutAccount = false,
 ): Promise<{
   userResponse: GraphQLUserResponse | UserResultByScreenNameResponse | null;
   aboutProfileResponse: UserProfileAboutResponse | null;
 }> => {
   const userRequest: GraphQLOrchestratorRequest = {
-    key: 'user',
+    key: "user",
     methods: [
       {
-        name: 'UserByRestId',
+        name: "UserByRestId",
         query: UserByRestIdQuery,
         weight: 500,
         validator: (response: unknown) => {
           const userResponse = response as GraphQLUserResponse;
           const result = userResponse?.data?.user?.result;
           return userByScreenNameResultValid(result);
-        }
+        },
       },
       {
-        name: 'UserResultByRestId',
+        name: "UserResultByRestId",
         query: UserResultByRestIdQuery,
         weight: 50,
         validator: (response: unknown) => {
           const userResponse = response as UserResultByScreenNameResponse;
           const result = userResponse?.data?.user_results?.result;
           return userResultByScreenNameResultValid(result);
-        }
-      }
+        },
+      },
     ],
     variables: { userId, rest_id: userId },
-    required: true
+    required: true,
   };
 
   const aboutProfileRequest: GraphQLOrchestratorRequest = {
-    key: 'aboutProfile',
+    key: "aboutProfile",
     query: UserProfileAboutQuery,
     variables: { rest_id: userId },
     validator: validateUserProfileAboutQuery,
-    required: false
+    required: false,
   };
 
   const results = await graphQLOrchestrator(
     host,
-    includeAboutAccount ? [userRequest, aboutProfileRequest] : [userRequest]
+    includeAboutAccount ? [userRequest, aboutProfileRequest] : [userRequest],
   );
 
   const userData = results.user?.success
-    ? (results.user.data as GraphQLUserResponse | UserResultByScreenNameResponse)
+    ? (results.user.data as
+        | GraphQLUserResponse
+        | UserResultByScreenNameResponse)
     : null;
 
   const aboutProfileData = results.aboutProfile?.success
@@ -476,7 +514,7 @@ const fetchUserById = async (
 
   return {
     userResponse: userData,
-    aboutProfileResponse: aboutProfileData
+    aboutProfileResponse: aboutProfileData,
   };
 };
 
@@ -487,7 +525,7 @@ const fetchUserById = async (
  */
 export async function fetchTwitterGraphQLUserByRestId(
   host: TwitterBuildHost,
-  userId: string
+  userId: string,
 ): Promise<GraphQLUser | null> {
   const trimmed = userId.trim();
   if (!trimmed) {
@@ -499,7 +537,7 @@ export async function fetchTwitterGraphQLUserByRestId(
     return null;
   }
   const user = node.result as GraphQLUser;
-  if ((user as { __typename?: string }).__typename !== 'User') {
+  if ((user as { __typename?: string }).__typename !== "User") {
     return null;
   }
   return user;
@@ -508,7 +546,7 @@ export async function fetchTwitterGraphQLUserByRestId(
 /** Resolve rest_id for timeline queries (e.g. UserTweets, ProfileTimeline) */
 export const getTwitterUserRestIdByScreenName = async (
   host: TwitterBuildHost,
-  screenName: string
+  screenName: string,
 ): Promise<string | null> => {
   const { userResponse } = await fetchUser(host, screenName, false);
   if (!userResponse) {
@@ -528,18 +566,18 @@ export const userAPI = async (
   username: string,
   host: TwitterBuildHost,
   legacyApiUserCounts = false,
-  includeAboutAccount = false
+  includeAboutAccount = false,
 ): Promise<UserAPIResponse> => {
   const { userResponse, aboutAccountResponse } = await fetchUser(
     host,
     username,
-    includeAboutAccount
+    includeAboutAccount,
   );
 
   if (!userResponse || !Object.keys(userResponse).length) {
     return {
       code: 404,
-      message: 'User not found'
+      message: "User not found",
     };
   }
 
@@ -547,32 +585,38 @@ export const userAPI = async (
   if (!node) {
     return {
       code: 404,
-      message: 'User not found'
+      message: "User not found",
     };
   }
   if (isSuspendedUserUnavailable(node.result)) {
     const id = node.restId;
     return {
       code: 404,
-      message: 'User is suspended',
-      reason: 'suspended',
-      ...(id ? { id } : {})
+      message: "User is suspended",
+      reason: "suspended",
+      ...(id ? { id } : {}),
     };
   }
   if (isUserUnavailableResult(node.result)) {
     return {
       code: 404,
-      message: 'User not found'
+      message: "User not found",
     };
   }
 
   /* Creating the response objects */
-  const response: UserAPIResponse = { code: 200, message: 'OK' } as UserAPIResponse;
-  const apiUser = await populateUserProperties(userResponse, legacyApiUserCounts);
+  const response: UserAPIResponse = {
+    code: 200,
+    message: "OK",
+  } as UserAPIResponse;
+  const apiUser = await populateUserProperties(
+    userResponse,
+    legacyApiUserCounts,
+  );
   if (!apiUser) {
     return {
       code: 404,
-      message: 'User not found'
+      message: "User not found",
     };
   }
   let mergedUser: APIUser = apiUser;
@@ -593,42 +637,43 @@ export const userAPI = async (
  */
 export const profileAboutAPI = async (
   handle: string,
-  host: TwitterBuildHost
+  host: TwitterBuildHost,
 ): Promise<ProfileAboutAPIResponse> => {
   const parsed = parseHandleOrId(handle);
 
   const request: GraphQLOrchestratorRequest =
-    parsed.type === 'screenName'
+    parsed.type === "screenName"
       ? {
-          key: 'aboutAccount',
+          key: "aboutAccount",
           query: AboutAccountQuery,
           variables: { screenName: parsed.value },
           validator: validateAboutAccountQuery,
-          required: true
+          required: true,
         }
       : {
-          key: 'aboutProfile',
+          key: "aboutProfile",
           query: UserProfileAboutQuery,
           variables: { rest_id: parsed.value },
           validator: validateUserProfileAboutQuery,
-          required: true
+          required: true,
         };
 
   const results = await graphQLOrchestrator(host, [request]);
-  const bucket = parsed.type === 'screenName' ? results.aboutAccount : results.aboutProfile;
+  const bucket =
+    parsed.type === "screenName" ? results.aboutAccount : results.aboutProfile;
 
   if (!bucket?.success || bucket.data == null) {
-    return { code: 404, message: 'User not found' };
+    return { code: 404, message: "User not found" };
   }
 
   const stub = {} as APIUser;
-  if (parsed.type === 'screenName') {
+  if (parsed.type === "screenName") {
     mergeAboutAccountData(stub, bucket.data as AboutAccountQueryResponse);
   } else {
     mergeUserProfileAboutData(stub, bucket.data as UserProfileAboutResponse);
   }
 
-  const response: ProfileAboutAPIResponse = { code: 200, message: 'OK' };
+  const response: ProfileAboutAPIResponse = { code: 200, message: "OK" };
   if (stub.about_account !== undefined) {
     response.about_account = stub.about_account;
   }
@@ -639,18 +684,18 @@ export const userAPIById = async (
   userId: string,
   host: TwitterBuildHost,
   legacyApiUserCounts = false,
-  includeAboutAccount = false
+  includeAboutAccount = false,
 ): Promise<UserAPIResponse> => {
   const { userResponse, aboutProfileResponse } = await fetchUserById(
     host,
     userId,
-    includeAboutAccount
+    includeAboutAccount,
   );
 
   if (!userResponse || !Object.keys(userResponse).length) {
     return {
       code: 404,
-      message: 'User not found'
+      message: "User not found",
     };
   }
 
@@ -658,31 +703,37 @@ export const userAPIById = async (
   if (!node) {
     return {
       code: 404,
-      message: 'User not found'
+      message: "User not found",
     };
   }
   if (isSuspendedUserUnavailable(node.result)) {
     const id = node.restId ?? userId;
     return {
       code: 404,
-      message: 'User is suspended',
-      reason: 'suspended',
-      ...(id ? { id } : {})
+      message: "User is suspended",
+      reason: "suspended",
+      ...(id ? { id } : {}),
     };
   }
   if (isUserUnavailableResult(node.result)) {
     return {
       code: 404,
-      message: 'User not found'
+      message: "User not found",
     };
   }
 
-  const response: UserAPIResponse = { code: 200, message: 'OK' } as UserAPIResponse;
-  const apiUser = await populateUserProperties(userResponse, legacyApiUserCounts);
+  const response: UserAPIResponse = {
+    code: 200,
+    message: "OK",
+  } as UserAPIResponse;
+  const apiUser = await populateUserProperties(
+    userResponse,
+    legacyApiUserCounts,
+  );
   if (!apiUser) {
     return {
       code: 404,
-      message: 'User not found'
+      message: "User not found",
     };
   }
   let mergedUser: APIUser = apiUser;

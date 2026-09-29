@@ -9,14 +9,16 @@ export type MastodonProviderEnv = {
 };
 
 const defaultEnv: MastodonProviderEnv = {
-  userAgent: 'FxEmbed',
+  userAgent: "FxEmbed",
   mosaicDomainList: [],
-  polyglotDomainList: []
+  polyglotDomainList: [],
 };
 
 let env: MastodonProviderEnv = { ...defaultEnv };
 
-export function setMastodonProviderEnv(partial: Partial<MastodonProviderEnv>): void {
+export function setMastodonProviderEnv(
+  partial: Partial<MastodonProviderEnv>,
+): void {
   env = { ...env, ...partial };
 }
 

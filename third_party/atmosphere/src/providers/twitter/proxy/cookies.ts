@@ -1,20 +1,23 @@
 function parseCookies(cookieHeader: string): Record<string, string> {
-  const cookieList = cookieHeader.split(';');
+  const cookieList = cookieHeader.split(";");
   return cookieList.reduce(
     (map, cookie) => {
-      const [name, value] = cookie.trim().split('=');
+      const [name, value] = cookie.trim().split("=");
       if (name) {
         map[name] = value;
       }
       return map;
     },
-    {} as Record<string, string>
+    {} as Record<string, string>,
   );
 }
 
-export function mergeCookies(existingCookies?: string, newCookie?: string): string {
+export function mergeCookies(
+  existingCookies?: string,
+  newCookie?: string,
+): string {
   if (!existingCookies) {
-    return newCookie ?? '';
+    return newCookie ?? "";
   }
 
   if (!newCookie) {
@@ -25,7 +28,7 @@ export function mergeCookies(existingCookies?: string, newCookie?: string): stri
   const newCookieMap = parseCookies(newCookie);
   const mergedCookieMap = { ...existingCookieMap, ...newCookieMap };
   const mergedCookieList = Object.entries(mergedCookieMap).map(
-    ([name, value]) => `${name}=${value}`
+    ([name, value]) => `${name}=${value}`,
   );
-  return mergedCookieList.join('; ');
+  return mergedCookieList.join("; ");
 }

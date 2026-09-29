@@ -1,22 +1,28 @@
-import type { APITrend, APITrendsResponse } from '../../types/api-schemas.js';
-import { fetchTrendingTopics } from './client.js';
-import type { BlueskyFetchOpts } from './client.js';
+import type { APITrend, APITrendsResponse } from "../../types/api-schemas.js";
+import { fetchTrendingTopics } from "./client.js";
+import type { BlueskyFetchOpts } from "./client.js";
 
-export type BlueskyTrendsFeedKind = 'trending' | 'suggested';
+export type BlueskyTrendsFeedKind = "trending" | "suggested";
 
-export const BLUESKY_TRENDS_FEED_KINDS: BlueskyTrendsFeedKind[] = ['trending', 'suggested'];
+export const BLUESKY_TRENDS_FEED_KINDS: BlueskyTrendsFeedKind[] = [
+  "trending",
+  "suggested",
+];
 
-const BS_APP_ORIGIN = 'https://bsky.app';
+const BS_APP_ORIGIN = "https://bsky.app";
 
 function topicLinkAsContext(link: string | undefined): string | null {
-  if (!link || typeof link !== 'string') {
+  if (!link || typeof link !== "string") {
     return null;
   }
-  const path = link.startsWith('/') ? link : `/${link}`;
+  const path = link.startsWith("/") ? link : `/${link}`;
   return `${BS_APP_ORIGIN}${path}`;
 }
 
-function buildContext(linkContext: string | null, label: string | null): string | null {
+function buildContext(
+  linkContext: string | null,
+  label: string | null,
+): string | null {
   if (label && linkContext) {
     return `${label} · ${linkContext}`;
   }
@@ -26,16 +32,16 @@ function buildContext(linkContext: string | null, label: string | null): string 
 function rowToApiTrend(
   row: BlueskyTrendingTopicRow,
   oneBasedRank: number,
-  contextLabel: string | null
+  contextLabel: string | null,
 ): APITrend | null {
   const name = row.topic;
-  if (!name || typeof name !== 'string') {
+  if (!name || typeof name !== "string") {
     return null;
   }
   return {
     name,
     rank: String(oneBasedRank),
-    context: buildContext(topicLinkAsContext(row.link), contextLabel)
+    context: buildContext(topicLinkAsContext(row.link), contextLabel),
   };
 }
 
@@ -47,14 +53,14 @@ function rowToApiTrend(
 export const blueskyTrendsAPI = async (
   kind: BlueskyTrendsFeedKind,
   count: number,
-  fetchOpts?: BlueskyFetchOpts
+  fetchOpts?: BlueskyFetchOpts,
 ): Promise<APITrendsResponse> => {
   const cappedCount = Math.min(50, Math.max(1, count));
   const upstreamLimit = Math.min(25, Math.max(1, cappedCount));
 
   const result = await fetchTrendingTopics(
     { limit: upstreamLimit },
-    { credentialKey: fetchOpts?.credentialKey }
+    { credentialKey: fetchOpts?.credentialKey },
   );
   if (!result.ok) {
     return {
@@ -64,20 +70,24 @@ export const blueskyTrendsAPI = async (
       cursor: { top: null, bottom: null },
       message:
         result.status === 404
-          ? 'Trending topics unavailable'
-          : 'Failed to load trending topics from Bluesky'
+          ? "Trending topics unavailable"
+          : "Failed to load trending topics from Bluesky",
     };
   }
 
-  const safeTopics = Array.isArray(result.data.topics) ? result.data.topics : [];
-  const safeSuggested = Array.isArray(result.data.suggested) ? result.data.suggested : [];
+  const safeTopics = Array.isArray(result.data.topics)
+    ? result.data.topics
+    : [];
+  const safeSuggested = Array.isArray(result.data.suggested)
+    ? result.data.suggested
+    : [];
 
   const trends: APITrend[] = [];
 
-  if (kind === 'suggested') {
+  if (kind === "suggested") {
     let rank = 0;
     for (const row of safeSuggested) {
-      const t = rowToApiTrend(row, rank + 1, 'Suggested feed');
+      const t = rowToApiTrend(row, rank + 1, "Suggested feed");
       if (t) {
         trends.push(t);
         rank += 1;
@@ -96,7 +106,7 @@ export const blueskyTrendsAPI = async (
     }
     for (const row of safeSuggested) {
       if (rank >= cappedCount) break;
-      const t = rowToApiTrend(row, rank + 1, 'Suggested feed');
+      const t = rowToApiTrend(row, rank + 1, "Suggested feed");
       if (t) {
         trends.push(t);
         rank += 1;
@@ -110,7 +120,7 @@ export const blueskyTrendsAPI = async (
       timeline_type: kind,
       trends: [],
       cursor: { top: null, bottom: null },
-      message: 'No trending topics in upstream response'
+      message: "No trending topics in upstream response",
     };
   }
 
@@ -118,6 +128,6 @@ export const blueskyTrendsAPI = async (
     code: 200,
     timeline_type: kind,
     trends,
-    cursor: { top: null, bottom: null }
+    cursor: { top: null, bottom: null },
   };
 };

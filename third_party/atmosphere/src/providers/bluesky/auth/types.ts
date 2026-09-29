@@ -79,7 +79,7 @@ export type BlueskyOAuthClientConfig = {
   /** Default requested scopes (space-separated), e.g. `atproto transition:generic`. */
   scope: string;
   /** `web` or `native` per ATProto OAuth client metadata. */
-  applicationType?: 'web' | 'native';
+  applicationType?: "web" | "native";
   clientName?: string;
   clientUri?: string;
   logoUri?: string;

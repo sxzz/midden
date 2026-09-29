@@ -1,21 +1,21 @@
-import { getBlueskyProviderEnv } from '../bluesky-runtime.js';
+import { getBlueskyProviderEnv } from "../bluesky-runtime.js";
 import type {
   APIBlueskyStatus,
   APIRepostedBy,
   APIGroupedSearchResultsBluesky,
   APISearchResultsBluesky,
   TimelineEntryBluesky,
-  TimelineThreadBluesky
-} from '../../types/api-schemas.js';
-import { buildAPIBlueskyPost } from './processor.js';
-import { fetchActorLikes, fetchAuthorFeed } from './client.js';
-import { rkeyFromPostAtUri } from './uris.js';
-import type { BlueskyBuildHost } from './build-host.js';
+  TimelineThreadBluesky,
+} from "../../types/api-schemas.js";
+import { buildAPIBlueskyPost } from "./processor.js";
+import { fetchActorLikes, fetchAuthorFeed } from "./client.js";
+import { rkeyFromPostAtUri } from "./uris.js";
+import type { BlueskyBuildHost } from "./build-host.js";
 
-const REASON_REPOST = 'app.bsky.feed.defs#reasonRepost';
+const REASON_REPOST = "app.bsky.feed.defs#reasonRepost";
 
 function repostedByFromFeedReason(reason: unknown): APIRepostedBy | undefined {
-  if (!reason || typeof reason !== 'object') return undefined;
+  if (!reason || typeof reason !== "object") return undefined;
   const r = reason as BlueskyFeedReasonRepost;
   if (r.$type !== REASON_REPOST || !r.by) return undefined;
   const b = r.by;
@@ -25,7 +25,7 @@ function repostedByFromFeedReason(reason: unknown): APIRepostedBy | undefined {
     name: (b.displayName?.trim() || handle) as string,
     screen_name: handle,
     avatar_url: b.avatar ?? null,
-    url: `${getBlueskyProviderEnv().webRoot}/profile/${handle}`
+    url: `${getBlueskyProviderEnv().webRoot}/profile/${handle}`,
   };
 }
 
@@ -35,14 +35,14 @@ function normalizePostView(post: BlueskyPost): BlueskyPost {
     labels: post.labels ?? [],
     likeCount: post.likeCount ?? 0,
     repostCount: post.repostCount ?? 0,
-    indexedAt: post.indexedAt ?? ''
+    indexedAt: post.indexedAt ?? "",
   };
 }
 
 async function buildStatusFromFeedItem(
   host: BlueskyBuildHost,
   item: BlueskyFeedViewPost,
-  language?: string
+  language?: string,
 ): Promise<APIBlueskyStatus | null> {
   const raw = item.post;
   if (!raw?.uri || !raw.cid) return null;
@@ -58,7 +58,9 @@ async function buildStatusFromFeedItem(
 }
 
 /** Consecutive rows where each post replies to the previous (same author), feed order newest-first. */
-export function groupConsecutiveSelfReplies(feed: BlueskyFeedViewPost[]): BlueskyFeedViewPost[][] {
+export function groupConsecutiveSelfReplies(
+  feed: BlueskyFeedViewPost[],
+): BlueskyFeedViewPost[][] {
   const groups: BlueskyFeedViewPost[][] = [];
   let i = 0;
   while (i < feed.length) {
@@ -74,7 +76,9 @@ export function groupConsecutiveSelfReplies(feed: BlueskyFeedViewPost[]): Bluesk
       const newerDid = newer.post?.author?.did;
       const olderDid = older.post?.author?.did;
       if (!newerDid || newerDid !== olderDid) break;
-      const rec = newer.post?.record as { reply?: { parent?: { uri?: string } } } | undefined;
+      const rec = newer.post?.record as
+        | { reply?: { parent?: { uri?: string } } }
+        | undefined;
       const parentUri = rec?.reply?.parent?.uri;
       if (parentUri !== older.post?.uri) break;
       j++;
@@ -93,7 +97,7 @@ export function groupConsecutiveSelfReplies(feed: BlueskyFeedViewPost[]): Bluesk
 async function feedViewPostsToGroupedTimeline(
   host: BlueskyBuildHost,
   feed: BlueskyFeedViewPost[],
-  language?: string
+  language?: string,
 ): Promise<TimelineEntryBluesky[]> {
   const groups = groupConsecutiveSelfReplies(feed);
   const out: TimelineEntryBluesky[] = [];
@@ -105,22 +109,27 @@ async function feedViewPostsToGroupedTimeline(
       continue;
     }
     const built = (
-      await Promise.all(g.map(item => buildStatusFromFeedItem(host, item, language)))
+      await Promise.all(
+        g.map((item) => buildStatusFromFeedItem(host, item, language)),
+      )
     ).filter((s): s is APIBlueskyStatus => s !== null);
     if (built.length === 0) continue;
     if (built.length === 1) {
       out.push(built[0]);
       continue;
     }
-    const newestRec = g[0].post?.record as { reply?: { root?: { uri?: string } } } | undefined;
+    const newestRec = g[0].post?.record as
+      | { reply?: { root?: { uri?: string } } }
+      | undefined;
     const rootUri = newestRec?.reply?.root?.uri;
-    const conversation_id = rkeyFromPostAtUri(rootUri) ?? built[built.length - 1].id;
+    const conversation_id =
+      rkeyFromPostAtUri(rootUri) ?? built[built.length - 1].id;
     const chronological = [...built].reverse();
     out.push({
-      type: 'thread',
+      type: "thread",
       conversation_id,
       statuses: chronological,
-      truncated: false
+      truncated: false,
     });
   }
   return out;
@@ -129,9 +138,11 @@ async function feedViewPostsToGroupedTimeline(
 async function feedViewPostsToTimeline(
   host: BlueskyBuildHost,
   feed: BlueskyFeedViewPost[],
-  language?: string
+  language?: string,
 ): Promise<APIBlueskyStatus[]> {
-  const built = await Promise.all(feed.map(item => buildStatusFromFeedItem(host, item, language)));
+  const built = await Promise.all(
+    feed.map((item) => buildStatusFromFeedItem(host, item, language)),
+  );
   return built.filter((s): s is APIBlueskyStatus => s !== null);
 }
 
@@ -144,16 +155,16 @@ async function blueskyAuthorFeedSearchPage(
     language?: string;
     groupThreads?: boolean;
   },
-  host: BlueskyBuildHost
+  host: BlueskyBuildHost,
 ): Promise<APISearchResultsBluesky | APIGroupedSearchResultsBluesky> {
   const result = await fetchAuthorFeed(
     {
       actor,
       limit: options.count,
       cursor: options.cursor ?? undefined,
-      filter: options.filter
+      filter: options.filter,
     },
-    { credentialKey: host.credentialKey }
+    { credentialKey: host.credentialKey },
   );
 
   if (!result.ok) {
@@ -172,7 +183,7 @@ async function blueskyAuthorFeedSearchPage(
   return {
     code: 200,
     results,
-    cursor: { top: null, bottom: nextCursor }
+    cursor: { top: null, bottom: nextCursor },
   };
 }
 
@@ -185,11 +196,11 @@ export const blueskyProfileStatusesAPI = async (
     language?: string;
     groupThreads?: boolean;
   },
-  host: BlueskyBuildHost
+  host: BlueskyBuildHost,
 ): Promise<APISearchResultsBluesky | APIGroupedSearchResultsBluesky> => {
   const filter: BlueskyAuthorFeedFilter = options.withReplies
-    ? 'posts_with_replies'
-    : 'posts_no_replies';
+    ? "posts_with_replies"
+    : "posts_no_replies";
 
   return blueskyAuthorFeedSearchPage(
     actor,
@@ -198,26 +209,26 @@ export const blueskyProfileStatusesAPI = async (
       cursor: options.cursor,
       filter,
       language: options.language,
-      groupThreads: options.groupThreads
+      groupThreads: options.groupThreads,
     },
-    host
+    host,
   );
 };
 
 export const blueskyProfileMediaAPI = async (
   actor: string,
   options: { count: number; cursor: string | null; language?: string },
-  host: BlueskyBuildHost
+  host: BlueskyBuildHost,
 ): Promise<APISearchResultsBluesky> =>
   blueskyAuthorFeedSearchPage(
     actor,
     {
       count: options.count,
       cursor: options.cursor,
-      filter: 'posts_with_media',
-      language: options.language
+      filter: "posts_with_media",
+      language: options.language,
     },
-    host
+    host,
   );
 
 /** Max author-feed pages to merge for RSS (aligns with Twitter profile feed pagination). */
@@ -227,8 +238,10 @@ const BLUESKY_PROFILE_FEED_PER_PAGE = 100;
 
 const BLUESKY_PROFILE_FEED_TARGET_CAP = 100;
 
-function isBlueskyFlatStatus(r: APIBlueskyStatus | TimelineThreadBluesky): r is APIBlueskyStatus {
-  return r.type === 'status';
+function isBlueskyFlatStatus(
+  r: APIBlueskyStatus | TimelineThreadBluesky,
+): r is APIBlueskyStatus {
+  return r.type === "status";
 }
 
 /**
@@ -241,13 +254,19 @@ export const blueskyProfileStatusesAPIPaginated = async (
   maxTotal: number,
   host: BlueskyBuildHost,
   withReplies = false,
-  language?: string
+  language?: string,
 ): Promise<APISearchResultsBluesky> => {
-  const target = Math.min(BLUESKY_PROFILE_FEED_TARGET_CAP, Math.max(1, maxTotal));
+  const target = Math.min(
+    BLUESKY_PROFILE_FEED_TARGET_CAP,
+    Math.max(1, maxTotal),
+  );
   const merged: APIBlueskyStatus[] = [];
   const seenIds = new Set<string>();
   let cursor: string | null = null;
-  let lastCursors: APISearchResultsBluesky['cursor'] = { top: null, bottom: null };
+  let lastCursors: APISearchResultsBluesky["cursor"] = {
+    top: null,
+    bottom: null,
+  };
   let pages = 0;
   let anySuccessfulPage = false;
 
@@ -260,9 +279,9 @@ export const blueskyProfileStatusesAPIPaginated = async (
         cursor,
         withReplies,
         language,
-        groupThreads: false
+        groupThreads: false,
       },
-      host
+      host,
     );
 
     if (page.code === 404) {
@@ -274,7 +293,11 @@ export const blueskyProfileStatusesAPIPaginated = async (
 
     if (page.code !== 200) {
       if (merged.length === 0) {
-        return { code: page.code, results: [], cursor: { top: null, bottom: null } };
+        return {
+          code: page.code,
+          results: [],
+          cursor: { top: null, bottom: null },
+        };
       }
       break;
     }
@@ -311,7 +334,7 @@ export const blueskyProfileStatusesAPIPaginated = async (
   return {
     code: 200,
     results: merged.slice(0, target),
-    cursor: lastCursors
+    cursor: lastCursors,
   };
 };
 
@@ -323,13 +346,19 @@ export const blueskyProfileMediaAPIPaginated = async (
   actor: string,
   maxTotal: number,
   host: BlueskyBuildHost,
-  language?: string
+  language?: string,
 ): Promise<APISearchResultsBluesky> => {
-  const target = Math.min(BLUESKY_PROFILE_FEED_TARGET_CAP, Math.max(1, maxTotal));
+  const target = Math.min(
+    BLUESKY_PROFILE_FEED_TARGET_CAP,
+    Math.max(1, maxTotal),
+  );
   const merged: APIBlueskyStatus[] = [];
   const seenIds = new Set<string>();
   let cursor: string | null = null;
-  let lastCursors: APISearchResultsBluesky['cursor'] = { top: null, bottom: null };
+  let lastCursors: APISearchResultsBluesky["cursor"] = {
+    top: null,
+    bottom: null,
+  };
   let pages = 0;
   let anySuccessfulPage = false;
 
@@ -338,7 +367,7 @@ export const blueskyProfileMediaAPIPaginated = async (
     const page = await blueskyProfileMediaAPI(
       actor,
       { count: BLUESKY_PROFILE_FEED_PER_PAGE, cursor, language },
-      host
+      host,
     );
 
     if (page.code === 404) {
@@ -350,7 +379,11 @@ export const blueskyProfileMediaAPIPaginated = async (
 
     if (page.code !== 200) {
       if (merged.length === 0) {
-        return { code: page.code, results: [], cursor: { top: null, bottom: null } };
+        return {
+          code: page.code,
+          results: [],
+          cursor: { top: null, bottom: null },
+        };
       }
       break;
     }
@@ -386,22 +419,22 @@ export const blueskyProfileMediaAPIPaginated = async (
   return {
     code: 200,
     results: merged.slice(0, target),
-    cursor: lastCursors
+    cursor: lastCursors,
   };
 };
 
 export const blueskyProfileLikesAPI = async (
   actor: string,
   options: { count: number; cursor: string | null; language?: string },
-  host: BlueskyBuildHost
+  host: BlueskyBuildHost,
 ): Promise<APISearchResultsBluesky> => {
   const result = await fetchActorLikes(
     {
       actor,
       limit: options.count,
-      cursor: options.cursor ?? undefined
+      cursor: options.cursor ?? undefined,
     },
-    { credentialKey: host.credentialKey }
+    { credentialKey: host.credentialKey },
   );
 
   if (!result.ok) {
@@ -421,6 +454,6 @@ export const blueskyProfileLikesAPI = async (
   return {
     code: 200,
     results,
-    cursor: { top: null, bottom: nextCursor }
+    cursor: { top: null, bottom: nextCursor },
   };
 };

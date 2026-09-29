@@ -1,11 +1,14 @@
-import { renderCard } from './card.js';
-import { getTwitterProviderEnv } from '../twitter-runtime.js';
-import { linkFixer } from '../../helpers/link-fixer.js';
-import { handleMosaic } from '../../helpers/mosaic.js';
-import { unescapeText } from '../../helpers/unescape-text.js';
-import { processMedia, convertFormatToVariant } from '../../helpers/media.js';
-import { convertToApiUser, fetchTwitterGraphQLUserByRestId } from './profile.js';
-import { DataProvider } from '../../types/data-provider.js';
+import { renderCard } from "./card.js";
+import { getTwitterProviderEnv } from "../twitter-runtime.js";
+import { linkFixer } from "../../helpers/link-fixer.js";
+import { handleMosaic } from "../../helpers/mosaic.js";
+import { unescapeText } from "../../helpers/unescape-text.js";
+import { processMedia, convertFormatToVariant } from "../../helpers/media.js";
+import {
+  convertToApiUser,
+  fetchTwitterGraphQLUserByRestId,
+} from "./profile.js";
+import { DataProvider } from "../../types/data-provider.js";
 import type {
   APIFacet,
   APIPhoto,
@@ -14,89 +17,117 @@ import type {
   APITombstoneReason,
   APITwitterStatus,
   APIUser,
-  APIVideo
-} from '../../types/api-schemas.js';
-import type { FetchResults } from '../../types/fetch-results.js';
-import { isTombstone, tombstoneMessageForReason } from '../../helpers/tombstone.js';
-import { translateStatusGrok } from '../../helpers/translate-grok.js';
+  APIVideo,
+} from "../../types/api-schemas.js";
+import type { FetchResults } from "../../types/fetch-results.js";
+import {
+  isTombstone,
+  tombstoneMessageForReason,
+} from "../../helpers/tombstone.js";
+import { translateStatusGrok } from "../../helpers/translate-grok.js";
 import {
   normalizeLanguage,
   isTranslatableLanguageCode,
-  translationDestinationMatches
-} from '../../helpers/language.js';
-import { tcoResolver } from './tcoResolver.js';
-import type { TwitterBuildHost } from './build-host.js';
+  translationDestinationMatches,
+} from "../../helpers/language.js";
+import { tcoResolver } from "./tcoResolver.js";
+import type { TwitterBuildHost } from "./build-host.js";
 
 /** GraphQL sometimes nests the Tweet under `tweet` (ProfileTimeline / other v2 shapes). Merge before retweet logic. */
 function mergeTweetShellIntoStatus(status: GraphQLTwitterStatus): void {
-  if (typeof status.core === 'undefined' && typeof status.tweet?.core !== 'undefined') {
+  if (
+    typeof status.core === "undefined" &&
+    typeof status.tweet?.core !== "undefined"
+  ) {
     status.core = status.tweet.core;
   }
-  if (typeof status.legacy === 'undefined' && typeof status.tweet?.legacy !== 'undefined') {
+  if (
+    typeof status.legacy === "undefined" &&
+    typeof status.tweet?.legacy !== "undefined"
+  ) {
     status.legacy = status.tweet.legacy;
   }
-  if (typeof status.views === 'undefined' && typeof status?.tweet?.views !== 'undefined') {
+  if (
+    typeof status.views === "undefined" &&
+    typeof status?.tweet?.views !== "undefined"
+  ) {
     status.views = status?.tweet?.views;
   }
   if (
-    typeof status.view_count_info === 'undefined' &&
-    typeof status?.tweet?.view_count_info !== 'undefined'
+    typeof status.view_count_info === "undefined" &&
+    typeof status?.tweet?.view_count_info !== "undefined"
   ) {
     status.views = status?.tweet?.view_count_info;
   }
-  if (typeof status.views === 'undefined' && typeof status?.view_count_info !== 'undefined') {
+  if (
+    typeof status.views === "undefined" &&
+    typeof status?.view_count_info !== "undefined"
+  ) {
     status.views = status?.view_count_info;
   }
   const nested = status.tweet as Partial<GraphQLTwitterStatus> | undefined;
-  if (typeof status.card === 'undefined' && nested?.card) {
+  if (typeof status.card === "undefined" && nested?.card) {
     status.card = nested.card;
   }
-  if (typeof status.tweet_card === 'undefined' && nested && 'tweet_card' in nested) {
-    const nc = (nested as { tweet_card?: GraphQLTwitterStatus['tweet_card'] }).tweet_card;
+  if (
+    typeof status.tweet_card === "undefined" &&
+    nested &&
+    "tweet_card" in nested
+  ) {
+    const nc = (nested as { tweet_card?: GraphQLTwitterStatus["tweet_card"] })
+      .tweet_card;
     if (nc) status.tweet_card = nc;
   }
   if (
-    typeof status.reply_to_user_results === 'undefined' &&
-    typeof nested?.reply_to_user_results !== 'undefined'
+    typeof status.reply_to_user_results === "undefined" &&
+    typeof nested?.reply_to_user_results !== "undefined"
   ) {
     status.reply_to_user_results = nested.reply_to_user_results;
   }
   if (
-    typeof status.grok_translated_post_with_availability === 'undefined' &&
-    typeof nested?.grok_translated_post_with_availability !== 'undefined'
+    typeof status.grok_translated_post_with_availability === "undefined" &&
+    typeof nested?.grok_translated_post_with_availability !== "undefined"
   ) {
-    status.grok_translated_post_with_availability = nested.grok_translated_post_with_availability;
+    status.grok_translated_post_with_availability =
+      nested.grok_translated_post_with_availability;
   }
 }
 
-function retweeterUserFromStatus(status: GraphQLTwitterStatus): GraphQLUser | undefined {
-  return (status.core?.user_results?.result ?? status.core?.user_result?.result) as
-    GraphQLUser | undefined;
+function retweeterUserFromStatus(
+  status: GraphQLTwitterStatus,
+): GraphQLUser | undefined {
+  return (status.core?.user_results?.result ??
+    status.core?.user_result?.result) as GraphQLUser | undefined;
 }
 
 /** Card `card_url` is usually a t.co short link; tweet URL entities carry the expanded destination. */
 function expandedCardUrl(
   cardUrl: string,
-  urlEntities: GraphQLTwitterStatus['legacy']['entities']['urls'] | undefined
+  urlEntities: GraphQLTwitterStatus["legacy"]["entities"]["urls"] | undefined,
 ): string {
   if (!urlEntities?.length) return cardUrl;
-  const match = urlEntities.find(e => e.url === cardUrl);
+  const match = urlEntities.find((e) => e.url === cardUrl);
   const expanded = match?.expanded_url;
-  return typeof expanded === 'string' && expanded.length > 0 ? expanded : cardUrl;
+  return typeof expanded === "string" && expanded.length > 0
+    ? expanded
+    : cardUrl;
 }
 
-function birdwatchEntitiesToFacets(entities: BirdwatchEntity[], noteText: string): APIFacet[] {
+function birdwatchEntitiesToFacets(
+  entities: BirdwatchEntity[],
+  noteText: string,
+): APIFacet[] {
   const facets: APIFacet[] = [];
   for (const entity of entities) {
-    if (entity?.ref?.type !== 'TimelineUrl') {
+    if (entity?.ref?.type !== "TimelineUrl") {
       continue;
     }
     const { fromIndex, toIndex } = entity;
     facets.push({
-      type: 'url',
+      type: "url",
       indices: [fromIndex, toIndex],
       display: noteText.substring(fromIndex, toIndex),
-      replacement: entity.ref.url
+      replacement: entity.ref.url,
     });
   }
   facets.sort((a, b) => a.indices[0] - b.indices[0]);
@@ -104,15 +135,17 @@ function birdwatchEntitiesToFacets(entities: BirdwatchEntity[], noteText: string
 }
 
 /** TweetDetail includes `legacy.in_reply_to_screen_name`; ConversationTimeline uses `reply_to_user_results` only. */
-function replyTargetScreenNameFromGraphQL(status: GraphQLTwitterStatus): string | undefined {
+function replyTargetScreenNameFromGraphQL(
+  status: GraphQLTwitterStatus,
+): string | undefined {
   const fromLegacy = status.legacy?.in_reply_to_screen_name;
-  if (typeof fromLegacy === 'string' && fromLegacy.length > 0) {
+  if (typeof fromLegacy === "string" && fromLegacy.length > 0) {
     return fromLegacy;
   }
   const user = status.reply_to_user_results?.result;
-  if (user?.__typename === 'User') {
+  if (user?.__typename === "User") {
     const sn = user.core?.screen_name ?? user.legacy?.screen_name;
-    if (typeof sn === 'string' && sn.length > 0) {
+    if (typeof sn === "string" && sn.length > 0) {
       return sn;
     }
   }
@@ -120,41 +153,47 @@ function replyTargetScreenNameFromGraphQL(status: GraphQLTwitterStatus): string 
 }
 
 /** Display name for the replied-to author when GraphQL includes `reply_to_user_results` (User). */
-function replyTargetDisplayNameFromGraphQL(status: GraphQLTwitterStatus): string | undefined {
+function replyTargetDisplayNameFromGraphQL(
+  status: GraphQLTwitterStatus,
+): string | undefined {
   const user = status.reply_to_user_results?.result;
-  if (user?.__typename !== 'User') {
+  if (user?.__typename !== "User") {
     return undefined;
   }
   const name = user.core?.name ?? user.legacy?.name;
-  if (typeof name === 'string' && name.length > 0) {
+  if (typeof name === "string" && name.length > 0) {
     return name;
   }
   return undefined;
 }
 
-function repostedByFromGraphQLUser(user: GraphQLUser | undefined): APIRepostedBy | null {
-  if (!user || typeof user.rest_id !== 'string' || user.rest_id.length === 0) {
+function repostedByFromGraphQLUser(
+  user: GraphQLUser | undefined,
+): APIRepostedBy | null {
+  if (!user || typeof user.rest_id !== "string" || user.rest_id.length === 0) {
     return null;
   }
-  const screenName = user.core?.screen_name ?? user.legacy?.screen_name ?? '';
+  const screenName = user.core?.screen_name ?? user.legacy?.screen_name ?? "";
   return {
     id: user.rest_id,
-    name: user.core?.name ?? user.legacy?.name ?? '',
+    name: user.core?.name ?? user.legacy?.name ?? "",
     screen_name: screenName,
     avatar_url:
-      user.avatar?.image_url?.replace?.('_normal', '_200x200') ??
-      user.legacy?.profile_image_url_https?.replace?.('_normal', '_200x200') ??
+      user.avatar?.image_url?.replace?.("_normal", "_200x200") ??
+      user.legacy?.profile_image_url_https?.replace?.("_normal", "_200x200") ??
       null,
-    url: screenName ? `${getTwitterProviderEnv().webRoot}/${screenName}` : undefined
+    url: screenName
+      ? `${getTwitterProviderEnv().webRoot}/${screenName}`
+      : undefined,
   };
 }
 
 /** Unwrap `TweetWithVisibilityResults` to the embedded `tweet` when present. */
 function asGraphQLTweetNode(
-  node: GraphQLTwitterStatus | undefined
+  node: GraphQLTwitterStatus | undefined,
 ): GraphQLTwitterStatus | undefined {
   if (!node) return undefined;
-  if (node.__typename === 'TweetWithVisibilityResults') {
+  if (node.__typename === "TweetWithVisibilityResults") {
     const inner = (node as { tweet?: GraphQLTwitterStatus }).tweet;
     if (inner) return inner;
   }
@@ -166,7 +205,7 @@ function asGraphQLTweetNode(
  * or `retweeted_status_results` (ProfileTimeline / newer — mirrors `tweet_results` naming).
  */
 function getRetweetedOriginalFromLegacy(
-  legacy: GraphQLTwitterStatus['legacy'] | undefined
+  legacy: GraphQLTwitterStatus["legacy"] | undefined,
 ): GraphQLTwitterStatus | undefined {
   if (!legacy) return undefined;
   const singular = legacy.retweeted_status_result?.result;
@@ -178,127 +217,138 @@ function getRetweetedOriginalFromLegacy(
 
 /** Retweet card with no embed we can unwrap (rare); infer from text / legacy id. */
 function isRetweetWithoutNestedOriginal(
-  legacy: GraphQLTwitterStatus['legacy'] | undefined
+  legacy: GraphQLTwitterStatus["legacy"] | undefined,
 ): boolean {
   if (!legacy) return false;
   if (getRetweetedOriginalFromLegacy(legacy)) return false;
   if (
-    typeof legacy.retweeted_status_id_str === 'string' &&
+    typeof legacy.retweeted_status_id_str === "string" &&
     legacy.retweeted_status_id_str.length > 0
   ) {
     return true;
   }
-  const text = legacy.full_text || '';
+  const text = legacy.full_text || "";
   return /^\s*RT @\S+/u.test(text);
 }
 
 /** Where `buildAPITwitterStatus` is used: root post vs nested quote/thread (affects unavailable handling). */
-export type TwitterStatusBuildContext = 'root' | 'quote' | 'thread';
+export type TwitterStatusBuildContext = "root" | "quote" | "thread";
 
 const twitterTombstone = (
   reason: APITombstoneReason,
-  partial: { id?: string; url?: string; author?: Partial<APIUser> } = {}
+  partial: { id?: string; url?: string; author?: Partial<APIUser> } = {},
 ): APIStatusTombstone => ({
-  type: 'tombstone',
-  provider: 'twitter',
+  type: "tombstone",
+  provider: "twitter",
   reason,
   message: tombstoneMessageForReason(reason),
-  ...partial
+  ...partial,
 });
 
-const reasonFromTombstoneEntityScan = (entities: unknown): APITombstoneReason | null => {
+const reasonFromTombstoneEntityScan = (
+  entities: unknown,
+): APITombstoneReason | null => {
   if (!Array.isArray(entities)) return null;
   for (const raw of entities) {
-    if (!raw || typeof raw !== 'object') continue;
+    if (!raw || typeof raw !== "object") continue;
     const o = raw as Record<string, unknown>;
     const fromObj = (v: unknown): string | null =>
-      typeof v === 'string' && v.length > 0 ? v.toLowerCase() : null;
+      typeof v === "string" && v.length > 0 ? v.toLowerCase() : null;
     const hint =
       fromObj(o.reason) ??
       fromObj(o.tombstoneReason) ??
       fromObj(o.tweetUnavailableReason) ??
       fromObj(o.visibilityReason);
     if (!hint) continue;
-    if (/suspend|withheld/i.test(hint)) return 'suspended';
-    if (/delete|remove/i.test(hint)) return 'deleted';
-    if (/protect|private|nsfw|limit|age|login|restricted/i.test(hint)) return 'private';
-    if (/block|author/i.test(hint)) return 'blocked';
+    if (/suspend|withheld/i.test(hint)) return "suspended";
+    if (/delete|remove/i.test(hint)) return "deleted";
+    if (/protect|private|nsfw|limit|age|login|restricted/i.test(hint))
+      return "private";
+    if (/block|author/i.test(hint)) return "blocked";
   }
   return null;
 };
 
-const reasonFromTweetTombstoneText = (text: string, language?: string): APITombstoneReason => {
+const reasonFromTweetTombstoneText = (
+  text: string,
+  language?: string,
+): APITombstoneReason => {
   const t = text.toLowerCase();
-  const rawPrimary = (language ?? 'en').split(/[,\s;]+/)[0]?.trim() ?? 'en';
-  const lang = normalizeLanguage(rawPrimary.toLowerCase()).split('-')[0] ?? 'en';
+  const rawPrimary = (language ?? "en").split(/[,\s;]+/)[0]?.trim() ?? "en";
+  const lang =
+    normalizeLanguage(rawPrimary.toLowerCase()).split("-")[0] ?? "en";
 
   // This is an extremely horrible, terrible, no-good hack, but Twitter genuinely does not provide
   // any other way to determine the state of an unavailable post.
 
   // It is not going to be perfect. But there isn't a better way to do it right now.
   const suspendedRe =
-    lang === 'es'
+    lang === "es"
       ? /cuenta suspendida|suspendid[oa]/i
-      : lang === 'ja'
+      : lang === "ja"
         ? /アカウントが停止|アカウントは停止|アカウントを停止/i
-        : lang === 'de'
+        : lang === "de"
           ? /gesperrt|suspendiert/i
-          : lang === 'fr'
+          : lang === "fr"
             ? /compte suspendu|suspendu/i
-            : lang === 'pt'
+            : lang === "pt"
               ? /conta suspensa|suspens[oa]/i
-              : lang === 'ko'
+              : lang === "ko"
                 ? /계정.*정지|일시적으로.*이용/i
-                : lang === 'zh'
+                : lang === "zh"
                   ? /账号.*停用|账号.*冻结|暂停/i
                   : /suspended account|account suspended|account has been suspended/i;
 
   const deletedRe =
-    lang === 'ja'
+    lang === "ja"
       ? /削除/
-      : lang === 'es'
+      : lang === "es"
         ? /eliminad[oa]|borrad[oa]/
-        : lang === 'fr'
+        : lang === "fr"
           ? /supprim/
-          : lang === 'de'
+          : lang === "de"
             ? /gelöscht/
-            : lang === 'pt'
+            : lang === "pt"
               ? /excluíd[oa]|apagad[oa]/
               : /\bdeleted\b|no longer available/i;
 
   const privateRe =
-    lang === 'ja'
+    lang === "ja"
       ? /非公開|表示できません|鍵/
-      : lang === 'es'
+      : lang === "es"
         ? /privad[oa]|quién puede ver|protegid[oa]/i
-        : lang === 'fr'
+        : lang === "fr"
           ? /privé|limite qui peut voir/i
-          : lang === 'de'
+          : lang === "de"
             ? /privat|geschützt|eingeschränkt/i
-            : lang === 'pt'
+            : lang === "pt"
               ? /privad[oa]|protegid[oa]/i
-              : lang === 'ko'
+              : lang === "ko"
                 ? /비공개|볼 수 없습니다/i
-                : lang === 'zh'
+                : lang === "zh"
                   ? /私密|无法查看|限制/
                   : /private account|limits who can view|limit who can view|their tweets|protected/i;
 
-  if (suspendedRe.test(t)) return 'suspended';
-  if (deletedRe.test(t)) return 'deleted';
-  if (privateRe.test(t) || (t.includes('limit') && t.includes('view'))) return 'private';
-  return 'unavailable';
+  if (suspendedRe.test(t)) return "suspended";
+  if (deletedRe.test(t)) return "deleted";
+  if (privateRe.test(t) || (t.includes("limit") && t.includes("view")))
+    return "private";
+  return "unavailable";
 };
 
-const reasonFromTweetTombstone = (tomb: TweetTombstone, language?: string): APITombstoneReason => {
+const reasonFromTweetTombstone = (
+  tomb: TweetTombstone,
+  language?: string,
+): APITombstoneReason => {
   const structured =
     reasonFromTombstoneEntityScan(tomb.tombstone?.text?.entities) ??
     reasonFromTombstoneEntityScan(tomb.tombstone?.richText?.entities);
   if (structured) return structured;
 
   const text = [tomb.tombstone?.richText?.text, tomb.tombstone?.text?.text]
-    .filter((s): s is string => typeof s === 'string' && s.length > 0)
-    .join('\n');
-  if (!text) return 'unavailable';
+    .filter((s): s is string => typeof s === "string" && s.length > 0)
+    .join("\n");
+  if (!text) return "unavailable";
   return reasonFromTweetTombstoneText(text, language);
 };
 
@@ -306,54 +356,57 @@ const reasonFromTweetTombstone = (tomb: TweetTombstone, language?: string): APIT
 export const twitterTweetTombstoneFromGraphQL = (
   tomb: TweetTombstone,
   idHint?: string,
-  language?: string
+  language?: string,
 ): APIStatusTombstone => {
   const reason = reasonFromTweetTombstone(tomb, language);
   const id = idHint;
   return twitterTombstone(reason, {
     id,
-    url: id ? `${getTwitterProviderEnv().webRoot}/i/status/${id}` : undefined
+    url: id ? `${getTwitterProviderEnv().webRoot}/i/status/${id}` : undefined,
   });
 };
 
 const tweetUnavailableToTombstone = (
   status: TweetStub | GraphQLTwitterStatus,
   idHint?: string,
-  urlHint?: string
+  urlHint?: string,
 ): APIStatusTombstone => {
   const id =
     idHint ??
-    (typeof (status as GraphQLTwitterStatus).rest_id === 'string'
+    (typeof (status as GraphQLTwitterStatus).rest_id === "string"
       ? (status as GraphQLTwitterStatus).rest_id
       : undefined) ??
     (status as GraphQLTwitterStatus).legacy?.id_str;
-  const url = urlHint ?? (id ? `${getTwitterProviderEnv().webRoot}/i/status/${id}` : undefined);
+  const url =
+    urlHint ??
+    (id ? `${getTwitterProviderEnv().webRoot}/i/status/${id}` : undefined);
   const meta = { id, url };
 
-  if ((status as TweetStub).__typename !== 'TweetUnavailable') {
-    return twitterTombstone('unavailable', meta);
+  if ((status as TweetStub).__typename !== "TweetUnavailable") {
+    return twitterTombstone("unavailable", meta);
   }
   const stub = status as TweetStub;
   switch (stub.reason) {
-    case 'Protected':
-      return twitterTombstone('private', meta);
-    case 'NsfwLoggedOut':
-      return twitterTombstone('unavailable', meta);
-    case 'Suspended':
-      return twitterTombstone('suspended', meta);
-    case 'Deleted':
-      return twitterTombstone('deleted', meta);
+    case "Protected":
+      return twitterTombstone("private", meta);
+    case "NsfwLoggedOut":
+      return twitterTombstone("unavailable", meta);
+    case "Suspended":
+      return twitterTombstone("suspended", meta);
+    case "Deleted":
+      return twitterTombstone("deleted", meta);
     default:
-      return twitterTombstone('unavailable', meta);
+      return twitterTombstone("unavailable", meta);
   }
 };
 
 /** Unwrap `quoted_*` GraphQL wrappers to an inner tweet node (or empty object). */
 const unwrapQuoteGraphql = (quote: unknown): unknown => {
-  if (!quote || typeof quote !== 'object') return quote;
+  if (!quote || typeof quote !== "object") return quote;
   let q: Record<string, unknown> = quote as Record<string, unknown>;
-  if ('result' in q && q.result !== undefined) q = q.result as Record<string, unknown>;
-  if (q.__typename === 'TweetWithVisibilityResults' && q.tweet) {
+  if ("result" in q && q.result !== undefined)
+    q = q.result as Record<string, unknown>;
+  if (q.__typename === "TweetWithVisibilityResults" && q.tweet) {
     q = q.tweet as Record<string, unknown>;
   }
   return q;
@@ -367,8 +420,8 @@ export const buildAPITwitterStatus = async (
   legacyAPI = false,
   /** When false (timelines, search, conversation), only use GraphQL inline translation — no Grok/Polyglot/AI calls. */
   manualTranslationFallback = true,
-  buildContext: TwitterStatusBuildContext = 'root',
-  tombstoneIdHint?: string
+  buildContext: TwitterStatusBuildContext = "root",
+  tombstoneIdHint?: string,
 ): Promise<APITwitterStatus | APIStatusTombstone | FetchResults | null> => {
   const apiStatus = {} as APITwitterStatus;
   let repostedBy: APIRepostedBy | null = null;
@@ -376,7 +429,10 @@ export const buildAPITwitterStatus = async (
   /* Sometimes, Twitter returns a different kind of type called 'TweetWithVisibilityResults'.
      It has slightly different attributes from the regular 'Tweet' type. We fix that up here. */
 
-  if (typeof status.core === 'undefined' && typeof status.result !== 'undefined') {
+  if (
+    typeof status.core === "undefined" &&
+    typeof status.result !== "undefined"
+  ) {
     status = status.result;
   }
 
@@ -384,7 +440,7 @@ export const buildAPITwitterStatus = async (
 
   /* Retweet: use embedded original when present (`retweeted_status_result` or `retweeted_status_results`). */
   const retweetOriginal = getRetweetedOriginalFromLegacy(status.legacy);
-  if (typeof retweetOriginal !== 'undefined') {
+  if (typeof retweetOriginal !== "undefined") {
     repostedBy = repostedByFromGraphQLUser(retweeterUserFromStatus(status));
     status = retweetOriginal;
     mergeTweetShellIntoStatus(status);
@@ -392,43 +448,54 @@ export const buildAPITwitterStatus = async (
     repostedBy = repostedByFromGraphQLUser(retweeterUserFromStatus(status));
   }
 
-  if ((status as unknown as { __typename?: string }).__typename === 'TweetTombstone') {
+  if (
+    (status as unknown as { __typename?: string }).__typename ===
+    "TweetTombstone"
+  ) {
     if (legacyAPI) return null;
     return twitterTweetTombstoneFromGraphQL(
       status as unknown as TweetTombstone,
       tombstoneIdHint ?? status.rest_id,
-      language
+      language,
     );
   }
 
-  if (typeof status.core === 'undefined') {
+  if (typeof status.core === "undefined") {
     void 0;
-    if (buildContext !== 'root' && !legacyAPI) {
-      if ((status as unknown as TweetStub).__typename === 'TweetUnavailable') {
+    if (buildContext !== "root" && !legacyAPI) {
+      if ((status as unknown as TweetStub).__typename === "TweetUnavailable") {
         const g = status as GraphQLTwitterStatus;
         const id = tombstoneIdHint ?? g.rest_id ?? g.legacy?.id_str;
         return tweetUnavailableToTombstone(
           status as TweetStub,
           id,
-          id ? `${getTwitterProviderEnv().webRoot}/i/status/${id}` : undefined
+          id ? `${getTwitterProviderEnv().webRoot}/i/status/${id}` : undefined,
         );
       }
       const id = tombstoneIdHint ?? status.rest_id;
-      return twitterTombstone('unavailable', {
+      return twitterTombstone("unavailable", {
         id,
-        url: id ? `${getTwitterProviderEnv().webRoot}/i/status/${id}` : undefined
+        url: id
+          ? `${getTwitterProviderEnv().webRoot}/i/status/${id}`
+          : undefined,
       });
     }
-    if (status.__typename === 'TweetUnavailable' && status.reason === 'Protected') {
+    if (
+      status.__typename === "TweetUnavailable" &&
+      status.reason === "Protected"
+    ) {
       return { status: 401 };
     }
-    if (!legacyAPI && (status as unknown as TweetStub).__typename === 'TweetUnavailable') {
+    if (
+      !legacyAPI &&
+      (status as unknown as TweetStub).__typename === "TweetUnavailable"
+    ) {
       const g = status as GraphQLTwitterStatus;
       const id = tombstoneIdHint ?? g.rest_id ?? g.legacy?.id_str;
       return tweetUnavailableToTombstone(
         status as TweetStub,
         id,
-        id ? `${getTwitterProviderEnv().webRoot}/i/status/${id}` : undefined
+        id ? `${getTwitterProviderEnv().webRoot}/i/status/${id}` : undefined,
       );
     }
     return { status: 404 };
@@ -436,11 +503,14 @@ export const buildAPITwitterStatus = async (
 
   // console.log('status', JSON.stringify(status));
 
-  let graphQLUser = (status.core.user_results?.result ?? status.core.user_result?.result) as
-    GraphQLUser | undefined;
-  if (!graphQLUser && typeof status.legacy?.user_id_str === 'string') {
+  let graphQLUser = (status.core.user_results?.result ??
+    status.core.user_result?.result) as GraphQLUser | undefined;
+  if (!graphQLUser && typeof status.legacy?.user_id_str === "string") {
     graphQLUser =
-      (await fetchTwitterGraphQLUserByRestId(host, status.legacy.user_id_str)) ?? undefined;
+      (await fetchTwitterGraphQLUserByRestId(
+        host,
+        status.legacy.user_id_str,
+      )) ?? undefined;
   }
   if (!graphQLUser) {
     void 0;
@@ -449,24 +519,28 @@ export const buildAPITwitterStatus = async (
   const apiUser = convertToApiUser(graphQLUser, legacyAPI);
 
   /* Sometimes, `rest_id` is undefined for some reason. Inconsistent behavior. See: https://github.com/FxEmbed/FxEmbed/issues/416 */
-  const id = status.rest_id ?? status.legacy.id_str ?? status.legacy?.conversation_id_str;
+  const id =
+    status.rest_id ??
+    status.legacy.id_str ??
+    status.legacy?.conversation_id_str;
 
   if (status.legacy.entities?.urls) {
     status.legacy.entities.urls = status.legacy.entities.urls.filter(
       /* Yes this uses http:// not https://. Don't know why. Hesitant to also include https
          because we just want to get rid of the extraneous article url at the end, not eliminate all article urls */
-      url => url.expanded_url.match(/^http:\/\/x\.com\/i\/article\/\w+/g) === null
+      (url) =>
+        url.expanded_url.match(/^http:\/\/x\.com\/i\/article\/\w+/g) === null,
     );
   }
 
   /* Populating a lot of the basics */
   if (!legacyAPI) {
-    apiStatus.type = 'status';
+    apiStatus.type = "status";
   }
   apiStatus.url = `${getTwitterProviderEnv().webRoot}/${apiUser.screen_name}/status/${id}`;
   apiStatus.id = id;
   apiStatus.text = unescapeText(
-    linkFixer(status.legacy.entities?.urls, status.legacy.full_text || '')
+    linkFixer(status.legacy.entities?.urls, status.legacy.full_text || ""),
   );
   // If article linked and that's the only thing in the status, use the article preview instead
   // if (status.article && status.legacy.full_text.length < 25) {
@@ -475,13 +549,13 @@ export const buildAPITwitterStatus = async (
   apiStatus.raw_text = {
     text: status.legacy.full_text,
     display_text_range: status.legacy.display_text_range,
-    facets: []
+    facets: [],
   };
   // if (threadAuthor && threadAuthor.id !== apiUser.id) {
   apiStatus.author = apiUser;
   if (apiStatus.author.avatar_url) {
     apiStatus.author.avatar_url =
-      apiStatus.author.avatar_url.replace?.('_normal', '_200x200') ?? null;
+      apiStatus.author.avatar_url.replace?.("_normal", "_200x200") ?? null;
   }
   // }
   apiStatus.replies = status.legacy.reply_count;
@@ -503,14 +577,15 @@ export const buildAPITwitterStatus = async (
   apiStatus.likes = status.legacy.favorite_count;
   apiStatus.bookmarks = status.legacy.bookmark_count;
   apiStatus.quotes = status.legacy.quote_count;
-  apiStatus.embed_card = 'tweet';
+  apiStatus.embed_card = "tweet";
   apiStatus.created_at = status.legacy.created_at;
-  apiStatus.created_timestamp = new Date(status.legacy.created_at).getTime() / 1000;
+  apiStatus.created_timestamp =
+    new Date(status.legacy.created_at).getTime() / 1000;
 
   apiStatus.possibly_sensitive = status.legacy.possibly_sensitive;
 
-  if (status.views?.state === 'EnabledWithCount') {
-    apiStatus.views = parseInt(status.views.count || '0') ?? null;
+  if (status.views?.state === "EnabledWithCount") {
+    apiStatus.views = parseInt(status.views.count || "0") ?? null;
   } else {
     apiStatus.views = null;
   }
@@ -520,7 +595,8 @@ export const buildAPITwitterStatus = async (
     apiStatus.raw_text.text = noteTweetText;
     // Note tweets don't have this and don't need it since they already exclude preceding mentions etc
     apiStatus.raw_text.display_text_range = [0, noteTweetText.length];
-    status.legacy.entities.urls = status.note_tweet?.note_tweet_results?.result?.entity_set.urls;
+    status.legacy.entities.urls =
+      status.note_tweet?.note_tweet_results?.result?.entity_set.urls;
     status.legacy.entities.hashtags =
       status.note_tweet?.note_tweet_results?.result?.entity_set.hashtags;
     status.legacy.entities.symbols =
@@ -528,106 +604,117 @@ export const buildAPITwitterStatus = async (
     status.legacy.entities.user_mentions =
       status.note_tweet?.note_tweet_results?.result?.entity_set.user_mentions;
 
-    apiStatus.text = unescapeText(linkFixer(status.legacy.entities.urls, noteTweetText));
+    apiStatus.text = unescapeText(
+      linkFixer(status.legacy.entities.urls, noteTweetText),
+    );
     apiStatus.is_note_tweet = true;
   } else {
     apiStatus.is_note_tweet = false;
   }
 
   if (status.note_tweet?.note_tweet_results?.result?.richtext?.richtext_tags) {
-    status.note_tweet.note_tweet_results.result.richtext.richtext_tags.forEach(richtext => {
-      richtext.richtext_types.forEach(type => {
-        let facetType: string = '';
-        switch (type) {
-          case 'Bold':
-            facetType = 'bold';
-            break;
-          case 'Italic':
-            facetType = 'italic';
-            break;
-          case 'Underline':
-            facetType = 'underline';
-            break;
-          case 'Strikethrough':
-            facetType = 'strikethrough';
-            break;
-        }
+    status.note_tweet.note_tweet_results.result.richtext.richtext_tags.forEach(
+      (richtext) => {
+        richtext.richtext_types.forEach((type) => {
+          let facetType: string = "";
+          switch (type) {
+            case "Bold":
+              facetType = "bold";
+              break;
+            case "Italic":
+              facetType = "italic";
+              break;
+            case "Underline":
+              facetType = "underline";
+              break;
+            case "Strikethrough":
+              facetType = "strikethrough";
+              break;
+          }
 
-        if (facetType) {
-          apiStatus.raw_text.facets.push({
-            type: facetType,
-            indices: [richtext.from_index, richtext.to_index]
-          });
-        }
-      });
-    });
+          if (facetType) {
+            apiStatus.raw_text.facets.push({
+              type: facetType,
+              indices: [richtext.from_index, richtext.to_index],
+            });
+          }
+        });
+      },
+    );
   }
   if (status.note_tweet?.note_tweet_results?.result?.media?.inline_media) {
-    status.note_tweet.note_tweet_results.result.media.inline_media.forEach(inlineMedia => {
-      apiStatus.raw_text.facets.push({
-        type: 'inline_media',
-        indices: [inlineMedia.index, inlineMedia.index + inlineMedia.media_id.length]
-      });
-    });
+    status.note_tweet.note_tweet_results.result.media.inline_media.forEach(
+      (inlineMedia) => {
+        apiStatus.raw_text.facets.push({
+          type: "inline_media",
+          indices: [
+            inlineMedia.index,
+            inlineMedia.index + inlineMedia.media_id.length,
+          ],
+        });
+      },
+    );
   }
   if (status.legacy?.entities) {
-    status.legacy.entities.hashtags?.forEach(hashtag => {
+    status.legacy.entities.hashtags?.forEach((hashtag) => {
       apiStatus.raw_text.facets.push({
-        type: 'hashtag',
+        type: "hashtag",
         indices: hashtag.indices,
-        original: hashtag.text
+        original: hashtag.text,
       });
     });
-    status.legacy.entities.symbols?.forEach(symbol => {
+    status.legacy.entities.symbols?.forEach((symbol) => {
       apiStatus.raw_text.facets.push({
-        type: 'symbol',
+        type: "symbol",
         indices: symbol.indices,
-        original: symbol.text
+        original: symbol.text,
       });
     });
-    status.legacy.entities.urls?.forEach(url => {
+    status.legacy.entities.urls?.forEach((url) => {
       apiStatus.raw_text.facets.push({
-        type: 'url',
+        type: "url",
         indices: url.indices,
         original: url.url,
         replacement: url.expanded_url,
-        display: url.display_url
+        display: url.display_url,
       });
     });
-    status.legacy.entities.user_mentions?.forEach(mention => {
+    status.legacy.entities.user_mentions?.forEach((mention) => {
       apiStatus.raw_text.facets.push({
-        type: 'mention',
+        type: "mention",
         indices: mention.indices,
         original: mention.screen_name,
-        id: mention.id_str
+        id: mention.id_str,
       });
     });
   }
 
   if (status.birdwatch_pivot?.subtitle?.text) {
-    const noteText = unescapeText(status.birdwatch_pivot.subtitle.text ?? '');
+    const noteText = unescapeText(status.birdwatch_pivot.subtitle.text ?? "");
     const rawEntities = status.birdwatch_pivot.subtitle.entities ?? [];
 
     if (legacyAPI) {
       apiStatus.community_note = {
         text: noteText,
-        entities: rawEntities
+        entities: rawEntities,
       };
     } else {
       const facets = birdwatchEntitiesToFacets(rawEntities, noteText);
       const tcoList = [
         ...new Set(
-          facets.flatMap(f =>
-            f.type === 'url' && typeof f.replacement === 'string' ? [f.replacement] : []
-          )
-        )
+          facets.flatMap((f) =>
+            f.type === "url" && typeof f.replacement === "string"
+              ? [f.replacement]
+              : [],
+          ),
+        ),
       ];
       if (tcoList.length > 0) {
         const resolved = await tcoResolver(tcoList);
         for (const f of facets) {
-          if (f.type === 'url' && typeof f.replacement === 'string') {
+          if (f.type === "url" && typeof f.replacement === "string") {
             const expanded = resolved[f.replacement];
-            if (typeof expanded === 'string') {
+            if (typeof expanded === "string") {
               f.replacement = expanded;
             }
           }
@@ -635,7 +722,7 @@ export const buildAPITwitterStatus = async (
       }
       apiStatus.community_note = {
         text: noteText,
-        facets
+        facets,
       };
     }
   } else {
@@ -652,32 +739,50 @@ export const buildAPITwitterStatus = async (
     apiStatus.community = {
       id: status.author_community_relationship.community_results.result.id_str,
       name: status.author_community_relationship.community_results.result.name,
-      description: status.author_community_relationship.community_results.result.description,
+      description:
+        status.author_community_relationship.community_results.result
+          .description,
       created_at: new Date(
-        status.author_community_relationship.community_results.result.created_at
+        status.author_community_relationship.community_results.result.created_at,
       ).toISOString(),
-      search_tags: status.author_community_relationship.community_results.result.search_tags,
-      is_nsfw: status.author_community_relationship.community_results.result.is_nsfw,
+      search_tags:
+        status.author_community_relationship.community_results.result
+          .search_tags,
+      is_nsfw:
+        status.author_community_relationship.community_results.result.is_nsfw,
       topic:
-        status.author_community_relationship.community_results.result.primary_community_topic
-          ?.topic_name ?? null,
-      join_policy: status.author_community_relationship.community_results.result.join_policy,
-      invites_policy: status.author_community_relationship.community_results.result.invites_policy,
-      is_pinned: status.author_community_relationship.community_results.result.is_pinned,
+        status.author_community_relationship.community_results.result
+          .primary_community_topic?.topic_name ?? null,
+      join_policy:
+        status.author_community_relationship.community_results.result
+          .join_policy,
+      invites_policy:
+        status.author_community_relationship.community_results.result
+          .invites_policy,
+      is_pinned:
+        status.author_community_relationship.community_results.result.is_pinned,
       admin: null,
-      creator: null
+      creator: null,
     };
 
-    if (status.author_community_relationship.community_results.result.admin_results?.result) {
+    if (
+      status.author_community_relationship.community_results.result
+        .admin_results?.result
+    ) {
       apiStatus.community.admin = convertToApiUser(
-        status.author_community_relationship.community_results.result.admin_results.result,
-        legacyAPI
+        status.author_community_relationship.community_results.result
+          .admin_results.result,
+        legacyAPI,
       );
     }
-    if (status.author_community_relationship.community_results.result.creator_results?.result) {
+    if (
+      status.author_community_relationship.community_results.result
+        .creator_results?.result
+    ) {
       apiStatus.community.creator = convertToApiUser(
-        status.author_community_relationship.community_results.result.creator_results.result,
-        legacyAPI
+        status.author_community_relationship.community_results.result
+          .creator_results.result,
+        legacyAPI,
       );
     }
   }
@@ -697,7 +802,7 @@ export const buildAPITwitterStatus = async (
       status: replyStatusId,
       url: `${getTwitterProviderEnv().webRoot}/${replyScreenName}/status/${replyStatusId}`,
       profile_url: `${getTwitterProviderEnv().webRoot}/${replyScreenName}`,
-      ...(displayName ? { display_name: displayName } : {})
+      ...(displayName ? { display_name: displayName } : {}),
     };
   } else {
     apiStatus.replying_to = null;
@@ -714,20 +819,26 @@ export const buildAPITwitterStatus = async (
   if (quote) {
     const unwrapped = unwrapQuoteGraphql(quote) as Record<string, unknown>;
     const isEmptyUnwrapped =
-      unwrapped && typeof unwrapped === 'object' && Object.keys(unwrapped).length === 0;
+      unwrapped &&
+      typeof unwrapped === "object" &&
+      Object.keys(unwrapped).length === 0;
     const qid = status.legacy?.quoted_status_id_str;
     const qPerm = status.legacy?.quoted_status_permalink?.expanded;
 
     if (isEmptyUnwrapped && !legacyAPI) {
-      apiStatus.quote = twitterTombstone('unavailable', {
+      apiStatus.quote = twitterTombstone("unavailable", {
         id: qid,
-        url: qPerm ?? (qid ? `${getTwitterProviderEnv().webRoot}/i/status/${qid}` : undefined)
+        url:
+          qPerm ??
+          (qid
+            ? `${getTwitterProviderEnv().webRoot}/i/status/${qid}`
+            : undefined),
       });
-    } else if (unwrapped?.__typename === 'TweetTombstone' && !legacyAPI) {
+    } else if (unwrapped?.__typename === "TweetTombstone" && !legacyAPI) {
       apiStatus.quote = twitterTweetTombstoneFromGraphQL(
         unwrapped as unknown as TweetTombstone,
         qid,
-        language
+        language,
       );
     } else if (!isEmptyUnwrapped) {
       const buildQuote = await buildAPITwitterStatus(
@@ -737,14 +848,14 @@ export const buildAPITwitterStatus = async (
         threadAuthor,
         legacyAPI,
         manualTranslationFallback,
-        'quote',
-        qid
+        "quote",
+        qid,
       );
       if (buildQuote == null) {
         if (!legacyAPI && qid) {
-          apiStatus.quote = twitterTombstone('unavailable', {
+          apiStatus.quote = twitterTombstone("unavailable", {
             id: qid,
-            url: qPerm ?? `${getTwitterProviderEnv().webRoot}/i/status/${qid}`
+            url: qPerm ?? `${getTwitterProviderEnv().webRoot}/i/status/${qid}`,
           });
         } else {
           apiStatus.quote = undefined;
@@ -753,9 +864,9 @@ export const buildAPITwitterStatus = async (
         apiStatus.quote = buildQuote;
       } else if ((buildQuote as FetchResults).status) {
         if (!legacyAPI && qid) {
-          apiStatus.quote = twitterTombstone('unavailable', {
+          apiStatus.quote = twitterTombstone("unavailable", {
             id: qid,
-            url: qPerm ?? `${getTwitterProviderEnv().webRoot}/i/status/${qid}`
+            url: qPerm ?? `${getTwitterProviderEnv().webRoot}/i/status/${qid}`,
           });
         } else {
           apiStatus.quote = undefined;
@@ -766,39 +877,48 @@ export const buildAPITwitterStatus = async (
     }
 
     /* Only override the embed_card if it's a basic status, since media always takes precedence  */
-    if (apiStatus.embed_card === 'tweet' && apiStatus.quote && !isTombstone(apiStatus.quote)) {
+    if (
+      apiStatus.embed_card === "tweet" &&
+      apiStatus.quote &&
+      !isTombstone(apiStatus.quote)
+    ) {
       apiStatus.embed_card = apiStatus.quote.embed_card;
     }
   }
 
   const mediaList = Array.from(
-    status.legacy.extended_entities?.media || status.legacy.entities?.media || []
+    status.legacy.extended_entities?.media ||
+      status.legacy.entities?.media ||
+      [],
   );
 
   /* Populate status media */
-  mediaList.forEach(media => {
+  mediaList.forEach((media) => {
     apiStatus.raw_text.facets.push({
-      type: 'media',
+      type: "media",
       indices: media.indices,
       id: media.id_str,
       display: media.display_url,
       original: media.url,
-      replacement: media.expanded_url
+      replacement: media.expanded_url,
     });
     const mediaObject = processMedia(host, media);
     if (mediaObject) {
       apiStatus.media.all = apiStatus.media?.all ?? [];
       const shouldTranscodeGifs = host.shouldTranscodeGif?.() ?? false;
       apiStatus.media?.all?.push(mediaObject);
-      if (mediaObject.type === 'photo' || (mediaObject.type === 'gif' && shouldTranscodeGifs)) {
-        apiStatus.embed_card = 'summary_large_image';
+      if (
+        mediaObject.type === "photo" ||
+        (mediaObject.type === "gif" && shouldTranscodeGifs)
+      ) {
+        apiStatus.embed_card = "summary_large_image";
         apiStatus.media.photos = apiStatus.media?.photos ?? [];
         apiStatus.media.photos?.push(mediaObject as APIPhoto);
       } else if (
-        mediaObject.type === 'video' ||
-        (mediaObject.type === 'gif' && !shouldTranscodeGifs)
+        mediaObject.type === "video" ||
+        (mediaObject.type === "gif" && !shouldTranscodeGifs)
       ) {
-        apiStatus.embed_card = 'player';
+        apiStatus.embed_card = "player";
         apiStatus.media.videos = apiStatus.media?.videos ?? [];
         apiStatus.media.videos?.push(mediaObject as APIVideo);
       } else {
@@ -821,20 +941,25 @@ export const buildAPITwitterStatus = async (
     getTwitterProviderEnv().mosaicDomainList.length > 0
   ) {
     const twEnv = getTwitterProviderEnv();
-    const mosaic = await handleMosaic(apiStatus.media?.photos || [], id, DataProvider.Twitter, {
-      twitterLikeDomains: twEnv.mosaicDomainList,
-      blueskyDomains: twEnv.mosaicBskyDomainList
-    });
-    if (typeof apiStatus.media !== 'undefined' && mosaic !== null) {
+    const mosaic = await handleMosaic(
+      apiStatus.media?.photos || [],
+      id,
+      DataProvider.Twitter,
+      {
+        twitterLikeDomains: twEnv.mosaicDomainList,
+        blueskyDomains: twEnv.mosaicBskyDomainList,
+      },
+    );
+    if (typeof apiStatus.media !== "undefined" && mosaic !== null) {
       apiStatus.media.mosaic = mosaic;
     }
   }
 
   // Add source but remove the link HTML tag
   if (status.source) {
-    apiStatus.source = (status.source || '').replace(
+    apiStatus.source = (status.source || "").replace(
       /<a href="(.+?)" rel="nofollow">(.+?)<\/a>/,
-      '$2'
+      "$2",
     );
   }
 
@@ -843,46 +968,48 @@ export const buildAPITwitterStatus = async (
   if (status.card ?? status.tweet_card) {
     const card = await renderCard(host, status.card ?? status.tweet_card);
     if (card.external_media) {
-      apiStatus.embed_card = 'player';
+      apiStatus.embed_card = "player";
       apiStatus.media.external = card.external_media;
-      if (apiStatus.media.external?.url.match('https://www.youtube.com/embed/')) {
+      if (
+        apiStatus.media.external?.url.match("https://www.youtube.com/embed/")
+      ) {
         /* Add YouTube thumbnail URL */
         apiStatus.media.external.thumbnail_url = `https://img.youtube.com/vi/${apiStatus.media.external.url.replace(
-          'https://www.youtube.com/embed/',
-          ''
+          "https://www.youtube.com/embed/",
+          "",
         )}/maxresdefault.jpg`;
       }
     }
     if (card.broadcast && host.broadcastStreamApi) {
       apiStatus.media = apiStatus.media ?? { all: [] };
-      apiStatus.embed_card = 'player';
+      apiStatus.embed_card = "player";
       apiStatus.media.broadcast = card.broadcast;
       apiStatus.media.videos = apiStatus.media?.videos ?? [];
       void 0;
       apiStatus.media.videos?.push({
-        type: 'video',
+        type: "video",
         url: `https://stream-test.fxembed.com/download.mp4?url=${encodeURIComponent(
-          card.broadcast.stream?.url ?? ''
+          card.broadcast.stream?.url ?? "",
         )}`,
         thumbnail_url: card.broadcast.thumbnail.original.url,
-        format: 'video/mp4',
+        format: "video/mp4",
         width: card.broadcast.width,
         height: card.broadcast.height,
         duration: 0,
-        formats: []
+        formats: [],
       });
       apiStatus.media.all = apiStatus.media?.all ?? [];
       apiStatus.media.all?.push({
-        type: 'video',
+        type: "video",
         url: `https://stream-test.fxembed.com/download.mp4?url=${encodeURIComponent(
-          card.broadcast.stream?.url ?? ''
+          card.broadcast.stream?.url ?? "",
         )}`,
         thumbnail_url: card.broadcast.thumbnail.original.url,
-        format: 'video/mp4',
+        format: "video/mp4",
         width: card.broadcast.width,
         height: card.broadcast.height,
         duration: 0,
-        formats: []
+        formats: [],
       } as APIVideo);
     }
     if (card.poll) {
@@ -891,7 +1018,7 @@ export const buildAPITwitterStatus = async (
     /* TODO: Right now, we push them after native photos and videos but should we prepend them instead? */
     if (card.media) {
       if (card.media.videos) {
-        card.media.videos.forEach(video => {
+        card.media.videos.forEach((video) => {
           const mediaObject = processMedia(host, video) as APIVideo;
           if (mediaObject) {
             apiStatus.media.all = apiStatus.media?.all ?? [];
@@ -902,7 +1029,7 @@ export const buildAPITwitterStatus = async (
         });
       }
       if (card.media.photos) {
-        card.media.photos.forEach(photo => {
+        card.media.photos.forEach((photo) => {
           const mediaObject = processMedia(host, photo) as APIPhoto;
           if (mediaObject) {
             apiStatus.media.all = apiStatus.media?.all ?? [];
@@ -925,36 +1052,37 @@ export const buildAPITwitterStatus = async (
           width: wc.image?.width,
           height: wc.image?.height,
           url: wc.image?.url,
-          alt: wc.image?.alt
-        }
+          alt: wc.image?.alt,
+        },
       };
     }
   } else {
     /* Determine if the status contains a YouTube link (either youtube.com or youtu.be) so we can include it */
-    const youtubeIdRegex = /(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)([^\s&]+)/;
+    const youtubeIdRegex =
+      /(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)([^\s&]+)/;
     const matches = apiStatus.text.match(youtubeIdRegex);
 
     const youtubeId = matches ? matches[4] : null;
 
     if (youtubeId) {
       apiStatus.media.external = {
-        type: 'video',
+        type: "video",
         url: `https://www.youtube.com/embed/${youtubeId}`,
         thumbnail_url: `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`,
         width: 1280,
-        height: 720
+        height: 720,
       };
 
-      apiStatus.embed_card = 'player';
+      apiStatus.embed_card = "player";
     }
   }
 
   if (
     apiStatus.media?.videos &&
     apiStatus.media?.videos.length > 0 &&
-    apiStatus.embed_card !== 'player'
+    apiStatus.embed_card !== "player"
   ) {
-    apiStatus.embed_card = 'player';
+    apiStatus.embed_card = "player";
   }
 
   if (language) {
@@ -964,32 +1092,37 @@ export const buildAPITwitterStatus = async (
   if (status.article) {
     apiStatus.article = {
       created_at: new Date(
-        (status.article.article_results?.result?.metadata?.first_published_at_secs ?? 0) * 1000
+        (status.article.article_results?.result?.metadata
+          ?.first_published_at_secs ?? 0) * 1000,
       ).toISOString(),
       modified_at: new Date(
-        (status.article.article_results?.result?.lifecycle_state?.modified_at_secs ?? 0) * 1000
+        (status.article.article_results?.result?.lifecycle_state
+          ?.modified_at_secs ?? 0) * 1000,
       ).toISOString(),
-      id: status.article.article_results?.result?.rest_id ?? '',
-      title: status.article.article_results?.result?.title ?? '',
-      preview_text: status.article.article_results?.result?.preview_text ?? '',
-      cover_media: status.article.article_results?.result?.cover_media ?? ({} as TwitterApiMedia),
+      id: status.article.article_results?.result?.rest_id ?? "",
+      title: status.article.article_results?.result?.title ?? "",
+      preview_text: status.article.article_results?.result?.preview_text ?? "",
+      cover_media:
+        status.article.article_results?.result?.cover_media ??
+        ({} as TwitterApiMedia),
       content: status.article.article_results?.result?.content_state ?? {
         blocks: [],
-        entityMap: []
+        entityMap: [],
       },
       media_entities:
-        status.article.article_results?.result?.media_entities ?? ([] as TwitterApiMedia[])
+        status.article.article_results?.result?.media_entities ??
+        ([] as TwitterApiMedia[]),
     };
   }
 
   /* If a language is specified in API or by user, let's try translating it! */
   const normalizedTarget =
-    typeof language === 'string' ? normalizeLanguage(language) : '';
+    typeof language === "string" ? normalizeLanguage(language) : "";
   if (
-    typeof language === 'string' &&
+    typeof language === "string" &&
     (normalizedTarget.length === 2 || normalizedTarget.length === 5) && // ISO 639-1 or regional (e.g. zh-tw)
     isTranslatableLanguageCode(status.legacy?.lang) &&
-    normalizedTarget !== normalizeLanguage(status.legacy?.lang || '') &&
+    normalizedTarget !== normalizeLanguage(status.legacy?.lang || "") &&
     apiStatus.text.length > 1 // Don't translate if the status text is too short
   ) {
     void 0;
@@ -998,36 +1131,55 @@ export const buildAPITwitterStatus = async (
     if (
       inline?.is_available === true &&
       inline.data &&
-      typeof inline.data.translation === 'string' &&
+      typeof inline.data.translation === "string" &&
       inline.data.translation.trim().length > 0 &&
-      translationDestinationMatches(inline.data.destination_language, normalizedTarget)
+      translationDestinationMatches(
+        inline.data.destination_language,
+        normalizedTarget,
+      )
     ) {
-      const srcLang = (inline.data.source_language || apiStatus.lang || 'en').toLowerCase();
+      const srcLang = (
+        inline.data.source_language ||
+        apiStatus.lang ||
+        "en"
+      ).toLowerCase();
       apiStatus.translation = {
         text: unescapeText(
-          linkFixer(status.legacy?.entities?.urls, inline.data.translation.trim())
+          linkFixer(
+            status.legacy?.entities?.urls,
+            inline.data.translation.trim(),
+          ),
         ),
         source_lang: srcLang,
         target_lang: normalizedTarget,
-        source_lang_en: host.t(`language_${srcLang}`, { lng: 'en' }),
-        provider: 'grok'
+        source_lang_en: host.t(`language_${srcLang}`, { lng: "en" }),
+        provider: "grok",
       };
       didTranslate = true;
     }
     if (manualTranslationFallback) {
       try {
         if (!didTranslate) {
-          const translateGrok = await translateStatusGrok(apiStatus, language, host);
+          const translateGrok = await translateStatusGrok(
+            apiStatus,
+            language,
+            host,
+          );
           void 0;
           if (translateGrok !== null) {
             apiStatus.translation = {
               text: unescapeText(
-                linkFixer(status.legacy?.entities?.urls, translateGrok?.result?.text || '')
+                linkFixer(
+                  status.legacy?.entities?.urls,
+                  translateGrok?.result?.text || "",
+                ),
               ),
-              source_lang: apiStatus.lang ?? 'en',
+              source_lang: apiStatus.lang ?? "en",
               target_lang: normalizedTarget,
-              source_lang_en: host.t(`language_${apiStatus.lang ?? 'en'}`, { lng: 'en' }),
-              provider: 'grok'
+              source_lang_en: host.t(`language_${apiStatus.lang ?? "en"}`, {
+                lng: "en",
+              }),
+              provider: "grok",
             };
             didTranslate = true;
           }
@@ -1036,22 +1188,31 @@ export const buildAPITwitterStatus = async (
         void 0;
       }
 
-      if (getTwitterProviderEnv().polyglotDomainList.length > 0 && !didTranslate) {
-        const translatePolyglot = await host.translatePolyglot?.(apiStatus, language);
+      if (
+        getTwitterProviderEnv().polyglotDomainList.length > 0 &&
+        !didTranslate
+      ) {
+        const translatePolyglot = await host.translatePolyglot?.(
+          apiStatus,
+          language,
+        );
         if (translatePolyglot != null) {
           apiStatus.translation = {
             text: unescapeText(
-              linkFixer(status.legacy?.entities?.urls, translatePolyglot?.translated_text || '')
+              linkFixer(
+                status.legacy?.entities?.urls,
+                translatePolyglot?.translated_text || "",
+              ),
             ),
-            source_lang: (translatePolyglot?.source_lang ?? 'en').toLowerCase(),
+            source_lang: (translatePolyglot?.source_lang ?? "en").toLowerCase(),
             target_lang: normalizedTarget,
             source_lang_en: host.t(
-              `language_${(translatePolyglot?.source_lang ?? 'en').toLowerCase()}`,
+              `language_${(translatePolyglot?.source_lang ?? "en").toLowerCase()}`,
               {
-                lng: 'en'
-              }
+                lng: "en",
+              },
             ),
-            provider: translatePolyglot?.provider ?? 'polyglot'
+            provider: translatePolyglot?.provider ?? "polyglot",
           };
           didTranslate = true;
         }
@@ -1062,12 +1223,17 @@ export const buildAPITwitterStatus = async (
         if (translateAPI !== null && translateAPI?.translated_text) {
           apiStatus.translation = {
             text: unescapeText(
-              linkFixer(status.legacy?.entities?.urls, translateAPI?.translated_text || '')
+              linkFixer(
+                status.legacy?.entities?.urls,
+                translateAPI?.translated_text || "",
+              ),
             ),
-            source_lang: apiStatus.lang ?? 'en',
+            source_lang: apiStatus.lang ?? "en",
             target_lang: normalizedTarget,
-            source_lang_en: host.t(`language_${apiStatus.lang ?? 'en'}`, { lng: 'en' }),
-            provider: 'llm'
+            source_lang_en: host.t(`language_${apiStatus.lang ?? "en"}`, {
+              lng: "en",
+            }),
+            provider: "llm",
           };
           didTranslate = true;
         }
@@ -1092,7 +1258,7 @@ export const buildAPITwitterStatus = async (
 
     // Populate variants from formats for legacy API compatibility
     if (apiStatus.media?.videos) {
-      apiStatus.media.videos.forEach(video => {
+      apiStatus.media.videos.forEach((video) => {
         if (video.formats && video.formats.length > 0) {
           // @ts-expect-error Part of legacy API that is deprecated
           video.variants = video.formats.map(convertFormatToVariant);
@@ -1100,8 +1266,8 @@ export const buildAPITwitterStatus = async (
       });
     }
     if (apiStatus.media?.all) {
-      apiStatus.media.all.forEach(media => {
-        if (media.type === 'video' || media.type === 'gif') {
+      apiStatus.media.all.forEach((media) => {
+        if (media.type === "video" || media.type === "gif") {
           const video = media as APIVideo;
           if (video.formats && video.formats.length > 0) {
             // @ts-expect-error Part of legacy API that is deprecated
@@ -1110,17 +1276,25 @@ export const buildAPITwitterStatus = async (
         }
       });
     }
-    if (apiStatus.quote && !isTombstone(apiStatus.quote) && apiStatus.quote.media?.videos) {
-      apiStatus.quote.media.videos.forEach(video => {
+    if (
+      apiStatus.quote &&
+      !isTombstone(apiStatus.quote) &&
+      apiStatus.quote.media?.videos
+    ) {
+      apiStatus.quote.media.videos.forEach((video) => {
         if (video.formats && video.formats.length > 0) {
           // @ts-expect-error Part of legacy API that is deprecated
           video.variants = video.formats.map(convertFormatToVariant);
         }
       });
     }
-    if (apiStatus.quote && !isTombstone(apiStatus.quote) && apiStatus.quote.media?.all) {
-      apiStatus.quote.media.all.forEach(media => {
-        if (media.type === 'video' || media.type === 'gif') {
+    if (
+      apiStatus.quote &&
+      !isTombstone(apiStatus.quote) &&
+      apiStatus.quote.media?.all
+    ) {
+      apiStatus.quote.media.all.forEach((media) => {
+        if (media.type === "video" || media.type === "gif") {
           const video = media as APIVideo;
           if (video.formats && video.formats.length > 0) {
             // @ts-expect-error Part of legacy API that is deprecated

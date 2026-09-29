@@ -1,6 +1,10 @@
-import type { AuthServerMetadata, DpopKeypairJwk } from './types.js';
-import { signDpopProof } from './dpop.js';
-import { formEncode, readDpopNonceFromResponse, responseRequestsDpopNonce } from './oauth-http.js';
+import type { AuthServerMetadata, DpopKeypairJwk } from "./types.js";
+import { signDpopProof } from "./dpop.js";
+import {
+  formEncode,
+  readDpopNonceFromResponse,
+  responseRequestsDpopNonce,
+} from "./oauth-http.js";
 
 export type PushParParams = {
   metadata: AuthServerMetadata;
@@ -26,7 +30,7 @@ export type PushParResult = {
  * If `pushed_authorization_request_endpoint` is missing from metadata, returns null (caller may use direct redirect).
  */
 export async function pushAuthorizationRequest(
-  params: PushParParams
+  params: PushParParams,
 ): Promise<PushParResult | null> {
   const parUrl = params.metadata.pushed_authorization_request_endpoint;
   if (!parUrl) return null;
@@ -38,27 +42,27 @@ export async function pushAuthorizationRequest(
     scope: params.scope,
     state: params.state,
     code_challenge: params.pkceChallenge,
-    code_challenge_method: 'S256',
-    response_type: 'code'
+    code_challenge_method: "S256",
+    response_type: "code",
   };
   if (params.loginHint) body.login_hint = params.loginHint;
 
   const attempt = async (nonce?: string) => {
     const proof = await signDpopProof({
       keypair: params.dpop,
-      htm: 'POST',
+      htm: "POST",
       htu: parUrl,
-      nonce
+      nonce,
     });
     const res = await fetchImpl(parUrl, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json',
-        'DPoP': proof,
-        ...(nonce ? { 'DPoP-Nonce': nonce } : {})
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+        DPoP: proof,
+        ...(nonce ? { "DPoP-Nonce": nonce } : {}),
       },
-      body: formEncode(body)
+      body: formEncode(body),
     });
     return res;
   };
@@ -77,11 +81,12 @@ export async function pushAuthorizationRequest(
   try {
     j = JSON.parse(text) as Record<string, unknown>;
   } catch {
-    throw new Error('PAR: response is not JSON');
+    throw new Error("PAR: response is not JSON");
   }
-  const requestUri = typeof j.request_uri === 'string' ? j.request_uri : undefined;
-  if (!requestUri) throw new Error('PAR: missing request_uri');
-  const expiresIn = typeof j.expires_in === 'number' ? j.expires_in : undefined;
+  const requestUri =
+    typeof j.request_uri === "string" ? j.request_uri : undefined;
+  if (!requestUri) throw new Error("PAR: missing request_uri");
+  const expiresIn = typeof j.expires_in === "number" ? j.expires_in : undefined;
   const dpopNonce = readDpopNonceFromResponse(res);
   return { requestUri, expiresIn, dpopNonce };
 }
@@ -97,17 +102,17 @@ export function buildAuthorizationUrl(params: {
   requestUri?: string;
 }): string {
   const u = new URL(params.metadata.authorization_endpoint);
-  u.searchParams.set('client_id', params.clientId);
-  u.searchParams.set('redirect_uri', params.redirectUri);
-  u.searchParams.set('scope', params.scope);
-  u.searchParams.set('state', params.state);
-  u.searchParams.set('response_type', 'code');
+  u.searchParams.set("client_id", params.clientId);
+  u.searchParams.set("redirect_uri", params.redirectUri);
+  u.searchParams.set("scope", params.scope);
+  u.searchParams.set("state", params.state);
+  u.searchParams.set("response_type", "code");
   if (params.requestUri) {
-    u.searchParams.set('request_uri', params.requestUri);
+    u.searchParams.set("request_uri", params.requestUri);
   } else {
-    u.searchParams.set('code_challenge', params.pkceChallenge);
-    u.searchParams.set('code_challenge_method', 'S256');
+    u.searchParams.set("code_challenge", params.pkceChallenge);
+    u.searchParams.set("code_challenge_method", "S256");
   }
-  if (params.loginHint) u.searchParams.set('login_hint', params.loginHint);
+  if (params.loginHint) u.searchParams.set("login_hint", params.loginHint);
   return u.toString();
 }

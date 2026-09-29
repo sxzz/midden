@@ -1,11 +1,14 @@
-import { isTombstone } from '../../helpers/tombstone.js';
-import type { APIUser } from '../../types/api-schemas.js';
-import type { SocialThread } from '../../types/api-status.js';
-import { AboutAccountQuery } from './graphql/queries.js';
-import { validateAboutAccountQuery } from './graphql/validators.js';
-import { graphQLOrchestrator, GraphQLOrchestratorResult } from './graphql/orchestrator.js';
-import { mergeAboutAccountData } from './profile.js';
-import type { TwitterBuildHost } from './build-host.js';
+import { isTombstone } from "../../helpers/tombstone.js";
+import type { APIUser } from "../../types/api-schemas.js";
+import type { SocialThread } from "../../types/api-status.js";
+import { AboutAccountQuery } from "./graphql/queries.js";
+import { validateAboutAccountQuery } from "./graphql/validators.js";
+import {
+  graphQLOrchestrator,
+  GraphQLOrchestratorResult,
+} from "./graphql/orchestrator.js";
+import { mergeAboutAccountData } from "./profile.js";
+import type { TwitterBuildHost } from "./build-host.js";
 
 const collectScreenNames = (response: SocialThread): Map<string, string> => {
   const screenNames = new Map<string, string>();
@@ -28,7 +31,7 @@ const collectScreenNames = (response: SocialThread): Map<string, string> => {
     addScreenName(response.status.author as APIUser);
   }
 
-  response.thread?.forEach(status => {
+  response.thread?.forEach((status) => {
     if (!isTombstone(status)) {
       addScreenName(status.author as APIUser);
     }
@@ -37,7 +40,10 @@ const collectScreenNames = (response: SocialThread): Map<string, string> => {
   return screenNames;
 };
 
-const applyAboutAccountData = (response: SocialThread, results: GraphQLOrchestratorResult) => {
+const applyAboutAccountData = (
+  response: SocialThread,
+  results: GraphQLOrchestratorResult,
+) => {
   const apply = (author?: APIUser | null) => {
     if (!author?.screen_name) {
       return;
@@ -53,14 +59,14 @@ const applyAboutAccountData = (response: SocialThread, results: GraphQLOrchestra
 
   apply(response.author as APIUser);
   apply(response.status?.author as APIUser);
-  response.thread?.forEach(status => {
+  response.thread?.forEach((status) => {
     if (!isTombstone(status)) apply(status.author as APIUser);
   });
 };
 
 export const attachAboutAccountData = async (
   host: TwitterBuildHost,
-  response: SocialThread
+  response: SocialThread,
 ): Promise<SocialThread> => {
   const screenNames = collectScreenNames(response);
 
@@ -73,7 +79,7 @@ export const attachAboutAccountData = async (
     query: AboutAccountQuery,
     variables: { screenName },
     validator: validateAboutAccountQuery,
-    required: false
+    required: false,
   }));
 
   const results = await graphQLOrchestrator(host, requests);

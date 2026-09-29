@@ -1,19 +1,31 @@
-import type { APIInstagramStatus, APISearchResultsInstagram } from '../../types/api-schemas.js';
-import { resolveInstagramAccounts, type InstagramRequestContext } from './account-proxy.js';
-import { fetchPrivateReelsMedia } from './private-api.js';
-import { instagramNodeToStatus } from './processor.js';
-import { resolveInstagramUser } from './resolve-user.js';
+import type {
+  APIInstagramStatus,
+  APISearchResultsInstagram,
+} from "../../types/api-schemas.js";
+import {
+  resolveInstagramAccounts,
+  type InstagramRequestContext,
+} from "./account-proxy.js";
+import { fetchPrivateReelsMedia } from "./private-api.js";
+import { instagramNodeToStatus } from "./processor.js";
+import { resolveInstagramUser } from "./resolve-user.js";
 
 const empty = (code: number): APISearchResultsInstagram => ({
   code,
   results: [],
-  cursor: { top: null, bottom: null }
+  cursor: { top: null, bottom: null },
 });
 
 /** `feed/reels_media/` answers with `reels` keyed by pk and/or a `reels_media` array. */
-function storyItemsFromReelsResponse(json: unknown, userId: string): Record<string, unknown>[] {
-  if (!json || typeof json !== 'object') return [];
-  const root = json as { reels?: Record<string, unknown>; reels_media?: unknown[] };
+function storyItemsFromReelsResponse(
+  json: unknown,
+  userId: string,
+): Record<string, unknown>[] {
+  if (!json || typeof json !== "object") return [];
+  const root = json as {
+    reels?: Record<string, unknown>;
+    reels_media?: unknown[];
+  };
   const trays: unknown[] = [];
   const keyed = root.reels?.[userId];
   if (keyed) trays.push(keyed);
@@ -22,13 +34,13 @@ function storyItemsFromReelsResponse(json: unknown, userId: string): Record<stri
   const out: Record<string, unknown>[] = [];
   const seen = new Set<string>();
   for (const tray of trays) {
-    if (!tray || typeof tray !== 'object') continue;
+    if (!tray || typeof tray !== "object") continue;
     const items = (tray as { items?: unknown }).items;
     if (!Array.isArray(items)) continue;
     for (const item of items) {
-      if (!item || typeof item !== 'object') continue;
+      if (!item || typeof item !== "object") continue;
       const rec = item as Record<string, unknown>;
-      const key = String(rec.pk ?? rec.id ?? '');
+      const key = String(rec.pk ?? rec.id ?? "");
       if (key && seen.has(key)) continue;
       if (key) seen.add(key);
       out.push(rec);
@@ -43,14 +55,16 @@ function storyItemsFromReelsResponse(json: unknown, userId: string): Record<stri
  */
 export async function constructInstagramProfileStories(
   username: string,
-  options: { ctx?: InstagramRequestContext } = {}
+  options: { ctx?: InstagramRequestContext } = {},
 ): Promise<APISearchResultsInstagram> {
   const accounts = await resolveInstagramAccounts(options.ctx);
   if (!accounts.length) {
     return empty(501);
   }
 
-  const resolved = await resolveInstagramUser(username, options.ctx, { accounts });
+  const resolved = await resolveInstagramUser(username, options.ctx, {
+    accounts,
+  });
   if (resolved.code !== 200 || !resolved.user) {
     return empty(resolved.code);
   }
@@ -65,12 +79,12 @@ export async function constructInstagramProfileStories(
     id: userId,
     username,
     fullName: resolved.user.name,
-    pic: resolved.user.avatar_url
+    pic: resolved.user.avatar_url,
   };
   const results: APIInstagramStatus[] = [];
   for (const item of storyItemsFromReelsResponse(res.json, userId)) {
     const status = instagramNodeToStatus(item, ownerFallback, {
-      userAgent: options.ctx?.userAgent
+      userAgent: options.ctx?.userAgent,
     });
     if (status) results.push(status);
   }

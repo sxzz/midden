@@ -19,11 +19,13 @@ import (
 
 var ErrInvalidFilter = errors.New("invalid collection filters")
 
-type CollectionFilter struct{ Q, Media, Visibility, From, Before string }
-type collectionCursor struct {
-	Time       time.Time
-	ID, Filter string
-}
+type (
+	CollectionFilter struct{ Q, Media, Visibility, From, Before string }
+	collectionCursor struct {
+		Time       time.Time
+		ID, Filter string
+	}
+)
 type CollectionItem struct {
 	domain.Collection
 	SavedAt time.Time `json:"saved_at"`
@@ -167,6 +169,7 @@ func (s *Service) Revisions(ctx context.Context, t, id, cursor string) (p Revisi
 	}
 	return
 }
+
 func (s *Service) Revision(ctx context.Context, t, id, rid string) (a domain.Collection, e error) {
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
 		var raw []byte

@@ -1,4 +1,4 @@
-import type { InstagramCredentials } from '../types/proxy-credentials.js';
+import type { InstagramCredentials } from "../types/proxy-credentials.js";
 
 /**
  * Configurable Instagram web/private-API roots.
@@ -14,14 +14,16 @@ export type InstagramProviderEnv = {
 };
 
 const defaultEnv: InstagramProviderEnv = {
-  webRoot: 'https://www.instagram.com',
-  apiRoot: 'https://i.instagram.com',
-  friendlyUserAgent: 'FxEmbed'
+  webRoot: "https://www.instagram.com",
+  apiRoot: "https://i.instagram.com",
+  friendlyUserAgent: "FxEmbed",
 };
 
 let env: InstagramProviderEnv = { ...defaultEnv };
 
-export function setInstagramProviderEnv(partial: Partial<InstagramProviderEnv>): void {
+export function setInstagramProviderEnv(
+  partial: Partial<InstagramProviderEnv>,
+): void {
   env = { ...env, ...partial };
 }
 
@@ -45,7 +47,7 @@ const noopProxy: InstagramProxyRuntime = {
   initCredentials: async () => {},
   hasBundledEncryptedCredentials: () => false,
   hasInstagramProxyAccounts: () => false,
-  getShuffledInstagramAccounts: () => []
+  getShuffledInstagramAccounts: () => [],
 };
 
 let proxy: InstagramProxyRuntime | null = null;

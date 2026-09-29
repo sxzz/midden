@@ -31,7 +31,8 @@ test("browse, filter, history, refresh and remove a saved post", async ({
       };
     else if (path === "/v1/collections")
       body = {
-        items: deleted || u.searchParams.get("q") === "不存在" ? [] : [collection],
+        items:
+          deleted || u.searchParams.get("q") === "不存在" ? [] : [collection],
       };
     else if (path.endsWith("/availability")) body = { available: true };
     else if (path.endsWith("/revisions"))

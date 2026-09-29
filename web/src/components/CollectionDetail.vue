@@ -41,7 +41,9 @@ const {
 const saved = computed(() => date(props.savedAt || collection.value?.saved_at));
 const link = computed(() => collection.value && safeURL(collection.value.url));
 const version = computed(() =>
-  collection.value ? `当前版本抓取于 ${date(collection.value.observed_at)}` : "",
+  collection.value
+    ? `当前版本抓取于 ${date(collection.value.observed_at)}`
+    : "",
 );
 </script>
 <template>
@@ -60,7 +62,10 @@ const version = computed(() =>
       />
     </ListSection>
     <ListSection :footnote="saved ? `保存于 ${saved}` : undefined">
-      <CollectionPost :collection="collection" :show-sensitive="showSensitive" />
+      <CollectionPost
+        :collection="collection"
+        :show-sensitive="showSensitive"
+      />
     </ListSection>
     <ListSection :footnote="version">
       <ListButton v-if="link" label="打开原文" :href="link" />

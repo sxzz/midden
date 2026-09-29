@@ -1,13 +1,19 @@
-import { dpopAthFromAccessToken, signDpopProof } from './dpop.js';
-import type { BlueskyAuthSession } from './types.js';
-import { refreshBlueskyTokens } from './tokens.js';
-import { BlueskyAuthError } from '../../../transports/errors.js';
-import { readDpopNonceFromResponse, responseRequestsDpopNonce } from './oauth-http.js';
+import { dpopAthFromAccessToken, signDpopProof } from "./dpop.js";
+import type { BlueskyAuthSession } from "./types.js";
+import { refreshBlueskyTokens } from "./tokens.js";
+import { BlueskyAuthError } from "../../../transports/errors.js";
+import {
+  readDpopNonceFromResponse,
+  responseRequestsDpopNonce,
+} from "./oauth-http.js";
 
-type BlueskyXrpcParams = Record<string, string | number | boolean | undefined | string[]>;
+type BlueskyXrpcParams = Record<
+  string,
+  string | number | boolean | undefined | string[]
+>;
 
 function trimBaseUrl(base: string): string {
-  return base.replace(/\/$/, '');
+  return base.replace(/\/$/, "");
 }
 
 function paramsToSearchString(params: BlueskyXrpcParams): string {
@@ -23,16 +29,20 @@ function paramsToSearchString(params: BlueskyXrpcParams): string {
   return qs.toString();
 }
 
-function buildXrpcUrl(baseUrl: string, lexiconMethod: string, params: BlueskyXrpcParams): string {
+function buildXrpcUrl(
+  baseUrl: string,
+  lexiconMethod: string,
+  params: BlueskyXrpcParams,
+): string {
   const qs = paramsToSearchString(params);
-  const q = qs ? `?${qs}` : '';
+  const q = qs ? `?${qs}` : "";
   return `${trimBaseUrl(baseUrl)}/xrpc/${lexiconMethod}${q}`;
 }
 
 async function ensureFreshAccess(
   session: BlueskyAuthSession,
   skewMs: number,
-  fetchImpl: typeof fetch
+  fetchImpl: typeof fetch,
 ): Promise<BlueskyAuthSession> {
   if (session.accessExpiresAtMs <= Date.now() + skewMs) {
     return refreshBlueskyTokens({ session, fetchImpl });
@@ -45,7 +55,7 @@ export type AuthenticatedXrpcOptions = {
   /** Defaults to `session.pdsOrigin`. */
   baseUrl?: string;
   lexiconMethod: string;
-  method?: 'GET' | 'POST';
+  method?: "GET" | "POST";
   query?: BlueskyXrpcParams;
   body?: unknown;
   fetchImpl?: typeof fetch;
@@ -57,18 +67,24 @@ export type AuthenticatedXrpcOptions = {
  * Call an XRPC method on the user's PDS with `Authorization: DPoP <access_token>` + `DPoP` proof
  * (`ath` = SHA256 of access token). Retries once on `use_dpop_nonce`; on 401 refreshes once then retries.
  */
-export async function authenticatedXrpc<T>(opts: AuthenticatedXrpcOptions): Promise<{
+export async function authenticatedXrpc<T>(
+  opts: AuthenticatedXrpcOptions,
+): Promise<{
   data: T;
   session: BlueskyAuthSession;
 }> {
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const method = opts.method ?? 'GET';
+  const method = opts.method ?? "GET";
   const base = trimBaseUrl(opts.baseUrl ?? opts.session.pdsOrigin);
   const query = opts.query ?? {};
   const url = buildXrpcUrl(base, opts.lexiconMethod, query);
-  const htu = url.includes('?') ? url.slice(0, url.indexOf('?')) : url;
+  const htu = url.includes("?") ? url.slice(0, url.indexOf("?")) : url;
 
-  let session = await ensureFreshAccess(opts.session, opts.refreshSkewMs ?? 120_000, fetchImpl);
+  let session = await ensureFreshAccess(
+    opts.session,
+    opts.refreshSkewMs ?? 120_000,
+    fetchImpl,
+  );
 
   const sendOnce = async (nonce: string | undefined): Promise<Response> => {
     const proof = await signDpopProof({
@@ -76,23 +92,23 @@ export async function authenticatedXrpc<T>(opts: AuthenticatedXrpcOptions): Prom
       htm: method,
       htu,
       nonce,
-      ath: await dpopAthFromAccessToken(session.accessToken)
+      ath: await dpopAthFromAccessToken(session.accessToken),
     });
     const headers: Record<string, string> = {
-      Accept: 'application/json',
+      Accept: "application/json",
       Authorization: `DPoP ${session.accessToken}`,
-      DPoP: proof
+      DPoP: proof,
     };
-    if (nonce) headers['DPoP-Nonce'] = nonce;
-    if (method === 'POST') {
-      headers['Content-Type'] = 'application/json';
+    if (nonce) headers["DPoP-Nonce"] = nonce;
+    if (method === "POST") {
+      headers["Content-Type"] = "application/json";
       return fetchImpl(url, {
-        method: 'POST',
+        method: "POST",
         headers,
-        body: JSON.stringify(opts.body ?? {})
+        body: JSON.stringify(opts.body ?? {}),
       });
     }
-    return fetchImpl(url, { method: 'GET', headers });
+    return fetchImpl(url, { method: "GET", headers });
   };
 
   const sendWithNonceRetry = async (): Promise<Response> => {
@@ -116,23 +132,26 @@ export async function authenticatedXrpc<T>(opts: AuthenticatedXrpcOptions): Prom
   const text = await res.text();
   if (!res.ok) {
     throw new BlueskyAuthError(
-      'invalid_request',
+      "invalid_request",
       `XRPC ${opts.lexiconMethod} failed: ${res.status}`,
       {
         status: res.status,
-        body: text
-      }
+        body: text,
+      },
     );
   }
   let data: T;
   try {
     data = JSON.parse(text) as T;
   } catch {
-    throw new BlueskyAuthError('network', 'XRPC invalid JSON', { status: res.status, body: text });
+    throw new BlueskyAuthError("network", "XRPC invalid JSON", {
+      status: res.status,
+      body: text,
+    });
   }
   const dpopNonce = readDpopNonceFromResponse(res);
   return {
     data,
-    session: dpopNonce ? { ...session, dpopNonce } : session
+    session: dpopNonce ? { ...session, dpopNonce } : session,
   };
 }

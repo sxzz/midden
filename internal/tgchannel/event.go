@@ -166,6 +166,7 @@ func groupTrigger(m *telegram.Message, username string) bool {
 	}
 	return false
 }
+
 func validCallback(data string) bool {
 	if len(data) > 64 {
 		return false

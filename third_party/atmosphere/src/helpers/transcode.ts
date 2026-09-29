@@ -1,5 +1,8 @@
 /** Pick a video transcode host from `domains` using a stable hash of `id` (Twitter snowflake). */
-export const getVideoTranscodeDomain = (twitterId: string, domains: string[]): string | null => {
+export const getVideoTranscodeDomain = (
+  twitterId: string,
+  domains: string[],
+): string | null => {
   if (domains.length === 0) {
     return null;
   }
@@ -15,7 +18,7 @@ export const getVideoTranscodeDomain = (twitterId: string, domains: string[]): s
 /** Pick a Bluesky-oriented transcode host from `domains` using a hash of `blueskyDid`. */
 export const getVideoTranscodeDomainBluesky = (
   blueskyDid: string,
-  domains: string[]
+  domains: string[],
 ): string | null => {
   if (domains.length === 0) {
     return null;

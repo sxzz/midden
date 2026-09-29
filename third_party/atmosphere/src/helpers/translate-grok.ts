@@ -1,12 +1,12 @@
-import type { APITwitterStatus } from '../types/api-schemas.js';
-import { normalizeLanguage } from './language.js';
-import { getTwitterProviderEnv } from '../providers/twitter-runtime.js';
-import { twitterFetch } from '../providers/twitter/fetch.js';
-import type { TwitterBuildHost } from '../providers/twitter/build-host.js';
+import type { APITwitterStatus } from "../types/api-schemas.js";
+import { normalizeLanguage } from "./language.js";
+import { getTwitterProviderEnv } from "../providers/twitter-runtime.js";
+import { twitterFetch } from "../providers/twitter/fetch.js";
+import type { TwitterBuildHost } from "../providers/twitter/build-host.js";
 
 type GrokTranslation = {
   result: {
-    content_type: 'POST';
+    content_type: "POST";
     text: string;
     entities: { [key: string]: string };
   };
@@ -16,22 +16,22 @@ type GrokTranslation = {
 export const translateStatusGrok = async (
   status: APITwitterStatus,
   _language: string,
-  host: TwitterBuildHost
+  host: TwitterBuildHost,
 ): Promise<GrokTranslation | null> => {
   const language = normalizeLanguage(_language);
   const { apiRoot } = getTwitterProviderEnv();
   const response = await twitterFetch(host, {
     url: `${apiRoot}/2/grok/translation.json`,
-    method: 'POST',
+    method: "POST",
     body: JSON.stringify({
-      content_type: 'POST',
+      content_type: "POST",
       id: status.id,
       dst_lang: language,
-      include_polls: true
+      include_polls: true,
     }),
     headers: {
-      'Content-Type': 'application/json'
-    }
+      "Content-Type": "application/json",
+    },
   });
   void 0;
   return response as GrokTranslation | null;

@@ -141,9 +141,12 @@ export function useCollectionDetail(
     } else {
       busy.value = false;
       if (job.state !== "failed") {
-        collection.value = await api<Collection>("/collections/" + job.collection_id, {
-          signal: controller.signal,
-        });
+        collection.value = await api<Collection>(
+          "/collections/" + job.collection_id,
+          {
+            signal: controller.signal,
+          },
+        );
         if (job.collection_id !== id())
           location.hash = "/collection/" + job.collection_id;
         historical.value = false;

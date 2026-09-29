@@ -86,13 +86,13 @@ export const TWITTER_GRAPHQL_FEATURES = {
   unified_cards_destination_url_params_enabled: true,
   verified_phone_label_enabled: false,
   view_counts_everywhere_api_enabled: true,
-  x_jetfuel_enable_frames_on_posts: true
+  x_jetfuel_enable_frames_on_posts: true,
 } as const;
 
 export type TwitterGqlFeatureKey = keyof typeof TWITTER_GRAPHQL_FEATURES;
 
 export function pickTwitterGqlFeatures(
-  keys: readonly TwitterGqlFeatureKey[]
+  keys: readonly TwitterGqlFeatureKey[],
 ): Record<string, boolean> {
   const result: Record<string, boolean> = {};
   for (const key of keys) {

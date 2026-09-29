@@ -6,10 +6,10 @@
  */
 
 const TARGET_KEYS = new Set([
-  'xig_polaris_media',
-  'xdt_api__v1__media__shortcode__web_info',
-  'xdt_api__v1__media__media_id__comments__connection',
-  'xdt_api__v1__profile_timeline'
+  "xig_polaris_media",
+  "xdt_api__v1__media__shortcode__web_info",
+  "xdt_api__v1__media__media_id__comments__connection",
+  "xdt_api__v1__profile_timeline",
 ]);
 
 export function extractDataSjsScriptBodies(html: string): string[] {
@@ -36,11 +36,11 @@ export function collectDeepByKey(
   key: string,
   out: unknown[],
   currentDepth = 0,
-  seen: WeakSet<object> = new WeakSet()
+  seen: WeakSet<object> = new WeakSet(),
 ): void {
   if (currentDepth >= COLLECT_MAX_DEPTH) return;
   if (obj === null || obj === undefined) return;
-  if (typeof obj !== 'object') return;
+  if (typeof obj !== "object") return;
   if (Array.isArray(obj)) {
     for (const item of obj) {
       collectDeepByKey(item, key, out, currentDepth + 1, seen);
@@ -62,11 +62,13 @@ export function collectDeepByKey(
  * LSD from homepage `__eqmc` JSON (`{"l":"..."}`), preferred by yt-dlp for logged-out GraphQL.
  */
 export function extractLsdFromEqmc(html: string): string | null {
-  const m = html.match(/<script\b[^>]*\bid=["']__eqmc["'][^>]*>([\s\S]*?)<\/script>/i);
+  const m = html.match(
+    /<script\b[^>]*\bid=["']__eqmc["'][^>]*>([\s\S]*?)<\/script>/i,
+  );
   if (!m?.[1]) return null;
   try {
     const eqmc = JSON.parse(m[1]) as { l?: unknown };
-    if (typeof eqmc.l === 'string' && eqmc.l.length > 0) return eqmc.l;
+    if (typeof eqmc.l === "string" && eqmc.l.length > 0) return eqmc.l;
   } catch {
     /* ignore */
   }
@@ -90,14 +92,14 @@ export function extractLsdFromHtml(html: string): string | null {
     } catch {
       continue;
     }
-    for (const k of ['LSD', 'lsd'] as const) {
+    for (const k of ["LSD", "lsd"] as const) {
       const acc: unknown[] = [];
       collectDeepByKey(parsed, k, acc);
       for (const v of acc) {
-        if (typeof v === 'string' && v.length > 0) return v;
-        if (v && typeof v === 'object' && 'token' in (v as object)) {
+        if (typeof v === "string" && v.length > 0) return v;
+        if (v && typeof v === "object" && "token" in (v as object)) {
           const t = (v as { token?: unknown }).token;
-          if (typeof t === 'string' && t.length > 0) return t;
+          if (typeof t === "string" && t.length > 0) return t;
         }
       }
     }
@@ -117,7 +119,10 @@ export function findRelayBlobs(html: string): unknown[] {
   return blobs;
 }
 
-export function extractFromHtmlByKeys(html: string, keys: string[]): Map<string, unknown[]> {
+export function extractFromHtmlByKeys(
+  html: string,
+  keys: string[],
+): Map<string, unknown[]> {
   const map = new Map<string, unknown[]>();
   for (const k of keys) map.set(k, []);
   const blobs = findRelayBlobs(html);
@@ -143,39 +148,50 @@ export type PolarisMediaBundle = {
  * Logged-out post payload introduced mid-2026 (`xig_polaris_media`).
  * Returns the ungated product media used for video/photo URLs.
  */
-export function extractPolarisMediaBundle(html: string): PolarisMediaBundle | null {
-  const map = extractFromHtmlByKeys(html, ['xig_polaris_media']);
-  const vals = map.get('xig_polaris_media') ?? [];
+export function extractPolarisMediaBundle(
+  html: string,
+): PolarisMediaBundle | null {
+  const map = extractFromHtmlByKeys(html, ["xig_polaris_media"]);
+  const vals = map.get("xig_polaris_media") ?? [];
   for (const v of vals) {
-    if (!v || typeof v !== 'object') continue;
+    if (!v || typeof v !== "object") continue;
     const polaris = v as Record<string, unknown>;
     const product = polaris.if_not_gated_logged_out;
-    if (!product || typeof product !== 'object') continue;
+    if (!product || typeof product !== "object") continue;
     const commentsRaw = polaris.comments_connection;
     const comments =
-      commentsRaw && typeof commentsRaw === 'object'
-        ? (commentsRaw as { edges?: unknown[]; page_info?: Record<string, unknown> })
+      commentsRaw && typeof commentsRaw === "object"
+        ? (commentsRaw as {
+            edges?: unknown[];
+            page_info?: Record<string, unknown>;
+          })
         : null;
     return {
       product: product as Record<string, unknown>,
       comments,
-      polaris
+      polaris,
     };
   }
   return null;
 }
 
 /** Convenience: product media only. */
-export function extractPolarisProductMedia(html: string): Record<string, unknown> | null {
+export function extractPolarisProductMedia(
+  html: string,
+): Record<string, unknown> | null {
   return extractPolarisMediaBundle(html)?.product ?? null;
 }
 
 /** Legacy shortcode web_info (pre-polaris). Kept as a fallback. */
-export function extractShortcodeWebInfo(html: string): Record<string, unknown> | null {
-  const map = extractFromHtmlByKeys(html, ['xdt_api__v1__media__shortcode__web_info']);
-  const vals = map.get('xdt_api__v1__media__shortcode__web_info') ?? [];
+export function extractShortcodeWebInfo(
+  html: string,
+): Record<string, unknown> | null {
+  const map = extractFromHtmlByKeys(html, [
+    "xdt_api__v1__media__shortcode__web_info",
+  ]);
+  const vals = map.get("xdt_api__v1__media__shortcode__web_info") ?? [];
   for (const v of vals) {
-    if (v && typeof v === 'object') {
+    if (v && typeof v === "object") {
       const items = (v as Record<string, unknown>).items;
       if (Array.isArray(items) && items.length > 0) {
         return (items[0] as Record<string, unknown>) ?? null;
@@ -188,7 +204,9 @@ export function extractShortcodeWebInfo(html: string): Record<string, unknown> |
 /**
  * Prefer polaris product media; fall back to legacy web_info `items[0]`.
  */
-export function extractPostMediaItem(html: string): Record<string, unknown> | null {
+export function extractPostMediaItem(
+  html: string,
+): Record<string, unknown> | null {
   return extractPolarisProductMedia(html) ?? extractShortcodeWebInfo(html);
 }
 
@@ -199,10 +217,13 @@ export function extractCommentsConnection(html: string): {
   const polaris = extractPolarisMediaBundle(html);
   if (polaris?.comments) return polaris.comments;
 
-  const map = extractFromHtmlByKeys(html, ['xdt_api__v1__media__media_id__comments__connection']);
-  const vals = map.get('xdt_api__v1__media__media_id__comments__connection') ?? [];
+  const map = extractFromHtmlByKeys(html, [
+    "xdt_api__v1__media__media_id__comments__connection",
+  ]);
+  const vals =
+    map.get("xdt_api__v1__media__media_id__comments__connection") ?? [];
   for (const v of vals) {
-    if (v && typeof v === 'object') {
+    if (v && typeof v === "object") {
       return v as { edges?: unknown[]; page_info?: Record<string, unknown> };
     }
   }
@@ -211,10 +232,10 @@ export function extractCommentsConnection(html: string): {
 
 /** Optional related grid on post pages (mixed items). */
 export function extractProfileTimelineSnippet(html: string): unknown[] | null {
-  const map = extractFromHtmlByKeys(html, ['xdt_api__v1__profile_timeline']);
-  const vals = map.get('xdt_api__v1__profile_timeline') ?? [];
+  const map = extractFromHtmlByKeys(html, ["xdt_api__v1__profile_timeline"]);
+  const vals = map.get("xdt_api__v1__profile_timeline") ?? [];
   for (const v of vals) {
-    if (v && typeof v === 'object') {
+    if (v && typeof v === "object") {
       const items = (v as Record<string, unknown>).items;
       if (Array.isArray(items)) return items;
     }
@@ -223,7 +244,8 @@ export function extractProfileTimelineSnippet(html: string): unknown[] | null {
 }
 
 export function hasUsefulRelayData(html: string): boolean {
-  if (extractPolarisProductMedia(html) || extractShortcodeWebInfo(html)) return true;
+  if (extractPolarisProductMedia(html) || extractShortcodeWebInfo(html))
+    return true;
   const map = extractFromHtmlByKeys(html, [...TARGET_KEYS]);
   for (const [, arr] of map) {
     if (arr.length > 0) return true;
@@ -234,12 +256,16 @@ export function hasUsefulRelayData(html: string): boolean {
 /**
  * Parse `mediaPresentationDuration` from an Instagram DASH MPD string (e.g. `PT0H0M4.967S`).
  */
-export function parseDashPresentationDurationSec(manifest: string | null | undefined): number {
-  if (!manifest || typeof manifest !== 'string') return Number.NaN;
+export function parseDashPresentationDurationSec(
+  manifest: string | null | undefined,
+): number {
+  if (!manifest || typeof manifest !== "string") return Number.NaN;
   const m = manifest.match(/mediaPresentationDuration=["']([^"']+)["']/);
   if (!m?.[1]) return Number.NaN;
   const iso = m[1];
-  const parts = iso.match(/^PT(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?$/i);
+  const parts = iso.match(
+    /^PT(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?$/i,
+  );
   if (!parts) return Number.NaN;
   const h = parts[1] ? Number(parts[1]) : 0;
   const min = parts[2] ? Number(parts[2]) : 0;
@@ -253,20 +279,25 @@ export function parseDashPresentationDurationSec(manifest: string | null | undef
  * Attribute order varies; we only keep the highest bandwidth seen for each height.
  */
 export function parseDashBandwidthByHeight(
-  manifest: string | null | undefined
+  manifest: string | null | undefined,
 ): Map<number, number> {
   const out = new Map<number, number>();
-  if (!manifest || typeof manifest !== 'string') return out;
+  if (!manifest || typeof manifest !== "string") return out;
   const re = /<Representation\b([^>]*)>/gi;
   let match: RegExpExecArray | null;
   while ((match = re.exec(manifest))) {
-    const attrs = match[1] ?? '';
+    const attrs = match[1] ?? "";
     const bw = attrs.match(/\bbandwidth=["'](\d+)["']/i);
     const h = attrs.match(/\bheight=["'](\d+)["']/i);
     if (!bw?.[1] || !h?.[1]) continue;
     const bandwidth = Number(bw[1]);
     const height = Number(h[1]);
-    if (!Number.isFinite(bandwidth) || bandwidth <= 0 || !Number.isFinite(height) || height <= 0) {
+    if (
+      !Number.isFinite(bandwidth) ||
+      bandwidth <= 0 ||
+      !Number.isFinite(height) ||
+      height <= 0
+    ) {
       continue;
     }
     const prev = out.get(height) ?? 0;
@@ -279,19 +310,28 @@ export function parseDashBandwidthByHeight(
  * Pull product media from a Polaris GraphQL JSON response
  * (`data.xig_polaris_media.if_not_gated_logged_out`).
  */
-export function extractPolarisProductFromGraphqlJson(json: unknown): PolarisMediaBundle | null {
-  if (!json || typeof json !== 'object') return null;
+export function extractPolarisProductFromGraphqlJson(
+  json: unknown,
+): PolarisMediaBundle | null {
+  if (!json || typeof json !== "object") return null;
   const data = (json as { data?: unknown }).data;
-  if (!data || typeof data !== 'object') return null;
+  if (!data || typeof data !== "object") return null;
   const polaris = (data as { xig_polaris_media?: unknown }).xig_polaris_media;
-  if (!polaris || typeof polaris !== 'object') return null;
+  if (!polaris || typeof polaris !== "object") return null;
   const rec = polaris as Record<string, unknown>;
   const product = rec.if_not_gated_logged_out;
-  if (!product || typeof product !== 'object') return null;
+  if (!product || typeof product !== "object") return null;
   const commentsRaw = rec.comments_connection;
   const comments =
-    commentsRaw && typeof commentsRaw === 'object'
-      ? (commentsRaw as { edges?: unknown[]; page_info?: Record<string, unknown> })
+    commentsRaw && typeof commentsRaw === "object"
+      ? (commentsRaw as {
+          edges?: unknown[];
+          page_info?: Record<string, unknown>;
+        })
       : null;
-  return { product: product as Record<string, unknown>, comments, polaris: rec };
+  return {
+    product: product as Record<string, unknown>,
+    comments,
+    polaris: rec,
+  };
 }

@@ -1,4 +1,4 @@
-import type { APIStatus } from '../../types/api-status.js';
+import type { APIStatus } from "../../types/api-status.js";
 
 export type PolyglotLikeTranslation = {
   translated_text?: string;
@@ -15,7 +15,10 @@ export type MastodonBuildHost = {
   t: (key: string, options?: { lng?: string; [k: string]: unknown }) => string;
   translatePolyglot?: (
     status: APIStatus,
-    targetLang: string
+    targetLang: string,
   ) => Promise<PolyglotLikeTranslation | null>;
-  translateAI?: (status: APIStatus, targetLang: string) => Promise<PolyglotLikeTranslation | null>;
+  translateAI?: (
+    status: APIStatus,
+    targetLang: string,
+  ) => Promise<PolyglotLikeTranslation | null>;
 };

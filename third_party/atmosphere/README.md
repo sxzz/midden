@@ -19,28 +19,32 @@ OAuth + DPoP + PKCE + PAR (when the auth server advertises it) live under **`@fx
 ```ts
 import {
   createBlueskyOAuthClient,
-  DEFAULT_BLUESKY_OAUTH_SCOPE
-} from '@fxembed/atmosphere/providers/bluesky/auth';
-import { fetchBlueskyHomeFeed } from '@fxembed/atmosphere/providers/bluesky/home-feed';
+  DEFAULT_BLUESKY_OAUTH_SCOPE,
+} from "@fxembed/atmosphere/providers/bluesky/auth";
+import { fetchBlueskyHomeFeed } from "@fxembed/atmosphere/providers/bluesky/home-feed";
 
 const oauth = createBlueskyOAuthClient({
-  clientId: 'https://myapp.com/.well-known/oauth-client-metadata.json',
-  redirectUris: ['https://myapp.com/auth/callback'],
+  clientId: "https://myapp.com/.well-known/oauth-client-metadata.json",
+  redirectUris: ["https://myapp.com/auth/callback"],
   scope: DEFAULT_BLUESKY_OAUTH_SCOPE,
-  redirectUri: 'https://myapp.com/auth/callback',
-  clientName: 'MyApp'
+  redirectUri: "https://myapp.com/auth/callback",
+  clientName: "MyApp",
 });
 
-const { authUrl, transientState } = await oauth.startAuthorization('user.bsky.social');
+const { authUrl, transientState } =
+  await oauth.startAuthorization("user.bsky.social");
 // redirect user to authUrl; persist transientState until callback
 
-const { session } = await oauth.completeAuthorization(callbackUrl, transientState);
+const { session } = await oauth.completeAuthorization(
+  callbackUrl,
+  transientState,
+);
 // persist session
 
 const { response, session: next } = await fetchBlueskyHomeFeed({
   session,
-  host: { t: k => k },
-  limit: 30
+  host: { t: (k) => k },
+  limit: 30,
 });
 // persist next (tokens / DPoP nonce may rotate)
 ```

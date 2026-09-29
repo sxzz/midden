@@ -105,20 +105,20 @@ monitorctl channel-create <stable-channel-uuid> <bot-numeric-id>
 
 运行参数和 Telegram 凭据保存在全局 `config` 表中，仅管理员可写，核心业务角色只读。使用 `monitorctl config-list` 查看，使用 `monitorctl config-set <key> <value>` 修改；凭据推荐使用 `--stdin` 输入。数值配置必须为正整数；未知键或越界值会拒绝。收藏保留天数至少为 1，不支持立即删除。配置表记录值的类型及敏感标记，CLI 列表会对敏感值脱敏。
 
-| 配置键                   | 默认值       | 用途                         |
-| ------------------------ | ------------ | ---------------------------- |
-| `collection_retention_days` | `7`          | 最后一条保存记录删除后保留天数 |
-| `object_gc_grace_hours`  | `24`         | 垃圾上传对象的最小存活小时数 |
-| `tenant_quota_bytes`     | `1073741824` | 新租户存储额度               |
-| `capture_rate`           | `10`         | 每租户每分钟新采集数         |
-| `tenant_concurrency`     | `2`          | 每租户同时执行的采集         |
-| `capture_workers`        | `4`          | 采集 worker 数               |
-| `download_workers`       | `8`          | 图片下载 worker 数           |
-| `control_workers`        | `4`          | 控制任务 worker 数           |
-| `delivery_workers`       | `2`          | 旧投递 worker 配置，独立 channel 不使用           |
-| `max_image_bytes`        | `20971520`   | 单图最大字节数               |
-| `max_video_bytes`       | `536870912`  | 单个视频最大字节数           |
-| `max_media`             | `20`         | 每帖最多媒体数               |
+| 配置键                      | 默认值       | 用途                                    |
+| --------------------------- | ------------ | --------------------------------------- |
+| `collection_retention_days` | `7`          | 最后一条保存记录删除后保留天数          |
+| `object_gc_grace_hours`     | `24`         | 垃圾上传对象的最小存活小时数            |
+| `tenant_quota_bytes`        | `1073741824` | 新租户存储额度                          |
+| `capture_rate`              | `10`         | 每租户每分钟新采集数                    |
+| `tenant_concurrency`        | `2`          | 每租户同时执行的采集                    |
+| `capture_workers`           | `4`          | 采集 worker 数                          |
+| `download_workers`          | `8`          | 图片下载 worker 数                      |
+| `control_workers`           | `4`          | 控制任务 worker 数                      |
+| `delivery_workers`          | `2`          | 旧投递 worker 配置，独立 channel 不使用 |
+| `max_image_bytes`           | `20971520`   | 单图最大字节数                          |
+| `max_video_bytes`           | `536870912`  | 单个视频最大字节数                      |
+| `max_media`                 | `20`         | 每帖最多媒体数                          |
 
 两个保留期参数在下一轮维护任务生效，默认每分钟运行一次。更改收藏保留期会应用于所有尚未清理的收藏，时间从最后一条保存记录删除时开始计算；已物理清理的内容不会恢复。其他参数由核心启动时加载，修改后执行 `docker compose restart core`。CLI 创建租户直接使用数据库中的默认额度。
 
@@ -168,7 +168,11 @@ REST 新提交省略 `connection_id` 时始终调用公共 API；指定时使用
 
 ```json
 [
-  {"address":"notes-adapter:9091","token":"replace-with-service-token","tls_ca":"/run/secrets/notes-ca.pem"}
+  {
+    "address": "notes-adapter:9091",
+    "token": "replace-with-service-token",
+    "tls_ca": "/run/secrets/notes-ca.pem"
+  }
 ]
 ```
 

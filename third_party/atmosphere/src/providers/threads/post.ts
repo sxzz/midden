@@ -1,10 +1,16 @@
-import type { SocialThread } from '../../types/api-status.js';
-import { resolveThreadsAccounts, type ThreadsRequestContext } from './account-proxy.js';
-import { fetchThreadsPostPage, fetchThreadsSession } from './client.js';
-import { fetchThreadsSingleThread } from './private-api.js';
-import { containingThreadChain } from './private-processor.js';
-import { buildThreadsTombstone, threadsPostToStatus } from './processor.js';
-import { normalizeThreadsPostId, threadsShortcodeToMediaId } from './shortcode.js';
+import type { SocialThread } from "../../types/api-status.js";
+import {
+  resolveThreadsAccounts,
+  type ThreadsRequestContext,
+} from "./account-proxy.js";
+import { fetchThreadsPostPage, fetchThreadsSession } from "./client.js";
+import { fetchThreadsSingleThread } from "./private-api.js";
+import { containingThreadChain } from "./private-processor.js";
+import { buildThreadsTombstone, threadsPostToStatus } from "./processor.js";
+import {
+  normalizeThreadsPostId,
+  threadsShortcodeToMediaId,
+} from "./shortcode.js";
 
 function extractPostPageEdges(json: unknown): {
   edges: { node?: Record<string, unknown>; cursor?: string }[];
@@ -12,10 +18,17 @@ function extractPostPageEdges(json: unknown): {
   const root = json as { data?: { data?: { edges?: unknown[] } } };
   const edges = root?.data?.data?.edges;
   if (!Array.isArray(edges)) return { edges: [] };
-  return { edges: edges as { node?: Record<string, unknown>; cursor?: string }[] };
+  return {
+    edges: edges as { node?: Record<string, unknown>; cursor?: string }[],
+  };
 }
 
-const notFound = (): SocialThread => ({ code: 404, status: null, thread: null, author: null });
+const notFound = (): SocialThread => ({
+  code: 404,
+  status: null,
+  thread: null,
+  author: null,
+});
 
 /** Owner details to fall back on for posts whose `user` block is trimmed down. */
 function ownerFallbackFrom(chain: Record<string, unknown>[]): {
@@ -26,10 +39,12 @@ function ownerFallbackFrom(chain: Record<string, unknown>[]): {
 } {
   const owner = chain[0]?.user as Record<string, unknown> | undefined;
   return {
-    id: String(owner?.pk ?? owner?.id ?? ''),
-    username: String(owner?.username ?? ''),
-    fullName: typeof owner?.full_name === 'string' ? owner.full_name : undefined,
-    pic: typeof owner?.profile_pic_url === 'string' ? owner.profile_pic_url : null
+    id: String(owner?.pk ?? owner?.id ?? ""),
+    username: String(owner?.username ?? ""),
+    fullName:
+      typeof owner?.full_name === "string" ? owner.full_name : undefined,
+    pic:
+      typeof owner?.profile_pic_url === "string" ? owner.profile_pic_url : null,
   };
 }
 
@@ -37,18 +52,21 @@ function ownerFallbackFrom(chain: Record<string, unknown>[]): {
  * A post's own self-reply chain becomes `thread`, with the last entry as the focal `status` —
  * the same convention the logged-out path has always used.
  */
-function threadFromChain(chain: Record<string, unknown>[], shortcode: string): SocialThread {
+function threadFromChain(
+  chain: Record<string, unknown>[],
+  shortcode: string,
+): SocialThread {
   const ownerFb = ownerFallbackFrom(chain);
   const statuses = chain
-    .map(post => threadsPostToStatus(post, ownerFb))
+    .map((post) => threadsPostToStatus(post, ownerFb))
     .filter((s): s is NonNullable<typeof s> => Boolean(s));
 
   if (!statuses.length) {
     return {
       code: 404,
-      status: buildThreadsTombstone('unavailable', { id: shortcode }),
+      status: buildThreadsTombstone("unavailable", { id: shortcode }),
       thread: null,
-      author: null
+      author: null,
     };
   }
 
@@ -58,7 +76,7 @@ function threadFromChain(chain: Record<string, unknown>[], shortcode: string): S
     code: 200,
     status,
     thread: prefix.length ? prefix : [status],
-    author: status.author
+    author: status.author,
   };
 }
 
@@ -73,7 +91,7 @@ function threadFromChain(chain: Record<string, unknown>[], shortcode: string): S
 export async function constructThreadsPost(
   rawId: string,
   userAgent: string | undefined,
-  ctx?: ThreadsRequestContext
+  ctx?: ThreadsRequestContext,
 ): Promise<SocialThread> {
   const shortcode = normalizeThreadsPostId(rawId);
   let mediaId: string;
@@ -83,10 +101,15 @@ export async function constructThreadsPost(
     return { code: 400, status: null, thread: null, author: null };
   }
 
-  const requestCtx: ThreadsRequestContext = { ...ctx, userAgent: ctx?.userAgent ?? userAgent };
+  const requestCtx: ThreadsRequestContext = {
+    ...ctx,
+    userAgent: ctx?.userAgent ?? userAgent,
+  };
   const accounts = await resolveThreadsAccounts(requestCtx);
   if (accounts.length) {
-    const proxied = await fetchThreadsSingleThread(mediaId, requestCtx, { accounts });
+    const proxied = await fetchThreadsSingleThread(mediaId, requestCtx, {
+      accounts,
+    });
     if (proxied.ok) {
       const chain = containingThreadChain(proxied.json);
       if (chain.length) {
@@ -105,14 +128,19 @@ export async function constructThreadsPost(
 
   const res = await fetchThreadsPostPage({
     mediaId,
-    sortOrder: 'TOP',
+    sortOrder: "TOP",
     after: null,
     first: null,
     session,
-    userAgent
+    userAgent,
   });
   if (!res.ok || res.json == null) {
-    return { code: res.status === 404 ? 404 : 500, status: null, thread: null, author: null };
+    return {
+      code: res.status === 404 ? 404 : 500,
+      status: null,
+      thread: null,
+      author: null,
+    };
   }
 
   const { edges } = extractPostPageEdges(res.json);
@@ -127,7 +155,7 @@ export async function constructThreadsPost(
   }
 
   const chain = items
-    .map(it => (it as { post?: Record<string, unknown> })?.post)
+    .map((it) => (it as { post?: Record<string, unknown> })?.post)
     .filter((p): p is Record<string, unknown> => Boolean(p));
   if (!chain.length) {
     return notFound();

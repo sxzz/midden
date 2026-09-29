@@ -1,27 +1,36 @@
-import { getBlueskyProviderEnv } from '../bluesky-runtime.js';
-import { linkFixerBluesky } from '../../helpers/link-fixer.js';
-import type { APIProfileRelationshipList, APIUser } from '../../types/api-schemas.js';
-import { fetchFollowers, fetchFollows, fetchProfilesDetailedBatched } from './client.js';
-import { blueskyProfileToApiUser } from './profile.js';
-import { blueskyVerificationToApiUserVerification } from './verification.js';
+import { getBlueskyProviderEnv } from "../bluesky-runtime.js";
+import { linkFixerBluesky } from "../../helpers/link-fixer.js";
+import type {
+  APIProfileRelationshipList,
+  APIUser,
+} from "../../types/api-schemas.js";
+import {
+  fetchFollowers,
+  fetchFollows,
+  fetchProfilesDetailedBatched,
+} from "./client.js";
+import { blueskyProfileToApiUser } from "./profile.js";
+import { blueskyVerificationToApiUserVerification } from "./verification.js";
 
 const relationshipListNotFound = (): APIProfileRelationshipList => ({
   code: 404,
   results: [],
-  cursor: { top: null, bottom: null }
+  cursor: { top: null, bottom: null },
 });
 
 const relationshipListUpstreamError = (): APIProfileRelationshipList => ({
   code: 500,
   results: [],
-  cursor: { top: null, bottom: null }
+  cursor: { top: null, bottom: null },
 });
 
-export const blueskyProfileViewToApiUser = (view: BlueskyProfileView): APIUser => {
+export const blueskyProfileViewToApiUser = (
+  view: BlueskyProfileView,
+): APIUser => {
   const handle = view.handle;
-  const rawText = view.description ?? '';
+  const rawText = view.description ?? "";
   const description = linkFixerBluesky([], rawText);
-  const joined = view.createdAt ?? view.indexedAt ?? '';
+  const joined = view.createdAt ?? view.indexedAt ?? "";
 
   const apiUser: APIUser = {
     id: handle,
@@ -32,9 +41,9 @@ export const blueskyProfileViewToApiUser = (view: BlueskyProfileView): APIUser =
     description,
     raw_description: {
       text: rawText,
-      facets: []
+      facets: [],
     },
-    location: '',
+    location: "",
     url: `${getBlueskyProviderEnv().webRoot}/profile/${handle}`,
     protected: false,
     followers: 0,
@@ -46,7 +55,7 @@ export const blueskyProfileViewToApiUser = (view: BlueskyProfileView): APIUser =
     birthday: { day: 0, month: 0, year: 0 },
     website: null,
     profile_embed: false,
-    type: 'profile'
+    type: "profile",
   };
 
   const v = blueskyVerificationToApiUserVerification(view.verification);
@@ -58,16 +67,16 @@ export const blueskyProfileViewToApiUser = (view: BlueskyProfileView): APIUser =
 export const blueskyProfileFollowersAPI = async (
   actor: string,
   options: { count: number; cursor: string | null },
-  opts?: { credentialKey?: string }
+  opts?: { credentialKey?: string },
 ): Promise<APIProfileRelationshipList> => {
   const fetchOpts = { credentialKey: opts?.credentialKey };
   const result = await fetchFollowers(
     {
       actor,
       limit: options.count,
-      cursor: options.cursor ?? undefined
+      cursor: options.cursor ?? undefined,
     },
-    fetchOpts
+    fetchOpts,
   );
 
   if (!result.ok) {
@@ -94,23 +103,23 @@ export const blueskyProfileFollowersAPI = async (
   return {
     code: 200,
     results,
-    cursor: { top: null, bottom: nextCursor }
+    cursor: { top: null, bottom: nextCursor },
   };
 };
 
 export const blueskyProfileFollowingAPI = async (
   actor: string,
   options: { count: number; cursor: string | null },
-  opts?: { credentialKey?: string }
+  opts?: { credentialKey?: string },
 ): Promise<APIProfileRelationshipList> => {
   const fetchOpts = { credentialKey: opts?.credentialKey };
   const result = await fetchFollows(
     {
       actor,
       limit: options.count,
-      cursor: options.cursor ?? undefined
+      cursor: options.cursor ?? undefined,
     },
-    fetchOpts
+    fetchOpts,
   );
 
   if (!result.ok) {
@@ -137,6 +146,6 @@ export const blueskyProfileFollowingAPI = async (
   return {
     code: 200,
     results,
-    cursor: { top: null, bottom: nextCursor }
+    cursor: { top: null, bottom: nextCursor },
   };
 };

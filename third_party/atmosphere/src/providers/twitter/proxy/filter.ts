@@ -4,8 +4,8 @@
 export const filterObject = (obj: unknown, filter: string): unknown => {
   if (!filter) return obj;
 
-  if (obj === null || typeof obj !== 'object') {
-    if (typeof obj === 'string' && obj.includes(filter)) return undefined;
+  if (obj === null || typeof obj !== "object") {
+    if (typeof obj === "string" && obj.includes(filter)) return undefined;
     return obj;
   }
 
@@ -28,10 +28,11 @@ export const filterObject = (obj: unknown, filter: string): unknown => {
   }
 
   for (const v of Object.values(result)) {
-    if (typeof v === 'string' && v.includes(filter)) return undefined;
+    if (typeof v === "string" && v.includes(filter)) return undefined;
   }
 
-  if (originalKeys.length > 0 && Object.keys(result).length === 0) return undefined;
+  if (originalKeys.length > 0 && Object.keys(result).length === 0)
+    return undefined;
 
   return result;
 };

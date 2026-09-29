@@ -21,8 +21,10 @@ import (
 	"monitor/internal/store"
 )
 
-type WebConfig struct{ URL, Token, Channel string }
-type sessionKey struct{}
+type (
+	WebConfig  struct{ URL, Token, Channel string }
+	sessionKey struct{}
+)
 
 const sessionCookie = "__Host-midden"
 
@@ -76,6 +78,7 @@ func telegramUser(raw, token string, now time.Time) (string, error) {
 	}
 	return strconv.FormatInt(user.ID, 10), nil
 }
+
 func webOrigin(c WebConfig) string {
 	u, e := url.Parse(c.URL)
 	if e != nil {
@@ -83,9 +86,11 @@ func webOrigin(c WebConfig) string {
 	}
 	return u.Scheme + "://" + u.Host
 }
+
 func cookie(w http.ResponseWriter, value string, age int) {
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: value, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteNoneMode, MaxAge: age})
 }
+
 func login(s *app.Service, c WebConfig, w http.ResponseWriter, r *http.Request) {
 	if c.URL == "" {
 		http.NotFound(w, r)
@@ -129,6 +134,7 @@ func login(s *app.Service, c WebConfig, w http.ResponseWriter, r *http.Request) 
 	cookie(w, value, 43200)
 	write(w, 200, map[string]string{"tenant_id": id.TenantID})
 }
+
 func authenticate(s *app.Service, c WebConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")

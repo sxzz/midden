@@ -1,4 +1,4 @@
-import type { ProxyEnv } from '../../../types/proxy-credentials.js';
+import type { ProxyEnv } from "../../../types/proxy-credentials.js";
 
 /** Discord embed field values max out at 1024 chars. */
 const DISCORD_FIELD_TRUNCATE = 1000;
@@ -11,7 +11,7 @@ const DISCORD_FIELD_TRUNCATE = 1000;
  */
 function truncateForDiscordField(s: string): string {
   if (s.length <= DISCORD_FIELD_TRUNCATE) return s;
-  return s.slice(0, DISCORD_FIELD_TRUNCATE) + '…';
+  return s.slice(0, DISCORD_FIELD_TRUNCATE) + "…";
 }
 
 /**
@@ -19,10 +19,10 @@ function truncateForDiscordField(s: string): string {
  * `operationName` so the embed stays readable (matches test harness path parsing in test/helpers/harness.ts).
  */
 function formatProxyEndpointForDiscord(pathname: string): string {
-  const trimmed = (pathname ?? '').replace(/^\//, '');
-  if (!trimmed) return 'idk';
-  const parts = trimmed.split('/').filter(Boolean);
-  const graphqlIdx = parts.indexOf('graphql');
+  const trimmed = (pathname ?? "").replace(/^\//, "");
+  if (!trimmed) return "idk";
+  const parts = trimmed.split("/").filter(Boolean);
+  const graphqlIdx = parts.indexOf("graphql");
   if (graphqlIdx >= 0 && parts[graphqlIdx + 2]) {
     return parts[graphqlIdx + 2]!;
   }
@@ -38,11 +38,11 @@ function formatProxyEndpointForDiscord(pathname: string): string {
 function variablesCodeBlock(variablesDisplay: string): string {
   const trimmed = variablesDisplay.trim();
   if (trimmed.length === 0) {
-    return '_(no GraphQL `variables` param and empty query string)_';
+    return "_(no GraphQL `variables` param and empty query string)_";
   }
-  const lang = trimmed.startsWith('{') || trimmed.startsWith('[') ? 'json' : '';
+  const lang = trimmed.startsWith("{") || trimmed.startsWith("[") ? "json" : "";
   const bounded = truncateForDiscordField(trimmed);
-  return '```' + lang + (lang ? '\n' : '') + bounded + '\n```';
+  return "```" + lang + (lang ? "\n" : "") + bounded + "\n```";
 }
 
 /**
@@ -61,48 +61,50 @@ export async function sendDiscordAlert(
   username: string,
   requestPath: string,
   errors: unknown,
-  variablesDisplay: string
+  variablesDisplay: string,
 ): Promise<void> {
   if (!env.EXCEPTION_DISCORD_WEBHOOK) return;
 
   void 0;
-  const endpointDisplay = truncateForDiscordField(formatProxyEndpointForDiscord(requestPath ?? ''));
+  const endpointDisplay = truncateForDiscordField(
+    formatProxyEndpointForDiscord(requestPath ?? ""),
+  );
   const body = JSON.stringify({
     content: `@everyone`,
     embeds: [
       {
-        title: 'Request Failed',
+        title: "Request Failed",
         color: 0xff0000,
         fields: [
           {
-            name: 'Account',
+            name: "Account",
             value: `||${username}||`,
-            inline: true
+            inline: true,
           },
           {
-            name: 'Endpoint',
+            name: "Endpoint",
             value: endpointDisplay,
-            inline: true
+            inline: true,
           },
           {
-            name: 'Errors',
-            value: '```json\n' + JSON.stringify(errors, null, 2) + '\n```',
-            inline: false
+            name: "Errors",
+            value: "```json\n" + JSON.stringify(errors, null, 2) + "\n```",
+            inline: false,
           },
           {
-            name: 'Variables',
+            name: "Variables",
             value: variablesCodeBlock(variablesDisplay),
-            inline: false
-          }
-        ]
-      }
-    ]
+            inline: false,
+          },
+        ],
+      },
+    ],
   });
   void 0;
   const discordResponse = await fetch(env.EXCEPTION_DISCORD_WEBHOOK, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body
-  }).catch(err => void 0);
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+  }).catch((err) => void 0);
   void 0;
 }

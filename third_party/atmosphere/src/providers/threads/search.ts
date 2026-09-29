@@ -2,32 +2,38 @@ import type {
   APISearchResultsThreads,
   APITypeaheadResponse,
   APITypeaheadTopic,
-  APIUserListResults
-} from '../../types/api-schemas.js';
-import { resolveThreadsAccounts, type ThreadsRequestContext } from './account-proxy.js';
-import { decodeThreadsSearchCursor, encodeThreadsSearchCursor } from './cursors.js';
+  APIUserListResults,
+} from "../../types/api-schemas.js";
+import {
+  resolveThreadsAccounts,
+  type ThreadsRequestContext,
+} from "./account-proxy.js";
+import {
+  decodeThreadsSearchCursor,
+  encodeThreadsSearchCursor,
+} from "./cursors.js";
 import {
   fetchThreadsKeywordSearch,
   fetchThreadsSearchSerp,
-  fetchThreadsUserSearch
-} from './private-api.js';
+  fetchThreadsUserSearch,
+} from "./private-api.js";
 import {
   nextTokenFromThreadsFeed,
   rankTokenFromThreadsSearch,
   statusesFromThreadsFeed,
-  usersFromThreadsList
-} from './private-processor.js';
+  usersFromThreadsList,
+} from "./private-processor.js";
 
 const emptySearch = (code: number): APISearchResultsThreads => ({
   code,
   results: [],
-  cursor: { top: null, bottom: null }
+  cursor: { top: null, bottom: null },
 });
 
 const emptyUserList = (code: number): APIUserListResults => ({
   code,
   results: [],
-  cursor: { top: null, bottom: null }
+  cursor: { top: null, bottom: null },
 });
 
 /**
@@ -42,9 +48,9 @@ export async function constructThreadsSearch(
   options: {
     count: number;
     cursor: string | null;
-    sortOrder?: 'top' | 'recent';
+    sortOrder?: "top" | "recent";
     ctx?: ThreadsRequestContext;
-  }
+  },
 ): Promise<APISearchResultsThreads> {
   const count = Math.min(100, Math.max(1, Math.floor(options.count)));
   const q = query.trim();
@@ -56,7 +62,7 @@ export async function constructThreadsSearch(
     return emptySearch(501);
   }
 
-  let recent = options.sortOrder === 'recent';
+  let recent = options.sortOrder === "recent";
   let pageToken: string | null = null;
   let rankToken: string | null = null;
   let pageNum = 0;
@@ -79,16 +85,17 @@ export async function constructThreadsSearch(
     recent,
     pageToken,
     rankToken,
-    pageNum: pageNum > 0 ? pageNum : undefined
+    pageNum: pageNum > 0 ? pageNum : undefined,
   });
   if (!res.ok) {
     return emptySearch(res.status === 404 ? 404 : 500);
   }
 
-  const results = statusesFromThreadsFeed(res.json, { id: '', username: '', pic: null }).slice(
-    0,
-    count
-  );
+  const results = statusesFromThreadsFeed(res.json, {
+    id: "",
+    username: "",
+    pic: null,
+  }).slice(0, count);
 
   const nextToken = nextTokenFromThreadsFeed(res.json);
   const bottom = nextToken
@@ -99,7 +106,7 @@ export async function constructThreadsSearch(
         t: nextToken,
         rt: rankTokenFromThreadsSearch(res.json) ?? rankToken,
         p: pageNum + 1,
-        c: count
+        c: count,
       })
     : null;
 
@@ -114,7 +121,7 @@ export async function constructThreadsSearch(
  */
 export async function constructThreadsUserSearch(
   query: string,
-  options: { count: number; ctx?: ThreadsRequestContext }
+  options: { count: number; ctx?: ThreadsRequestContext },
 ): Promise<APIUserListResults> {
   const count = Math.min(50, Math.max(1, Math.floor(options.count)));
   const q = query.trim();
@@ -126,11 +133,17 @@ export async function constructThreadsUserSearch(
     return emptyUserList(501);
   }
   // Ask for extra rows because the Threads filter drops Instagram-only accounts.
-  const res = await fetchThreadsUserSearch(q, options.ctx, { accounts, count: count * 2 });
+  const res = await fetchThreadsUserSearch(q, options.ctx, {
+    accounts,
+    count: count * 2,
+  });
   if (!res.ok) {
     return emptyUserList(500);
   }
-  const results = usersFromThreadsList(res.json, { threadsOnly: true }).slice(0, count);
+  const results = usersFromThreadsList(res.json, { threadsOnly: true }).slice(
+    0,
+    count,
+  );
   return { code: 200, results, cursor: { top: null, bottom: null } };
 }
 
@@ -140,11 +153,11 @@ const emptyTypeahead = (code: number, query: string): APITypeaheadResponse => ({
   num_results: 0,
   users: [],
   topics: [],
-  events: []
+  events: [],
 });
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
-  Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+  Boolean(v) && typeof v === "object" && !Array.isArray(v);
 
 /**
  * Keyword suggestions out of `fbsearch/text_app/keyword/search/`.
@@ -162,18 +175,18 @@ function topicsFromKeywordSearch(json: unknown): APITypeaheadTopic[] {
     if (!isRecord(raw)) continue;
     const rec = isRecord(raw.keyword) ? raw.keyword : raw;
     const name =
-      typeof rec.keyword_text === 'string'
+      typeof rec.keyword_text === "string"
         ? rec.keyword_text
-        : typeof rec.name === 'string'
+        : typeof rec.name === "string"
           ? rec.name
-          : typeof rec.keyword === 'string'
+          : typeof rec.keyword === "string"
             ? rec.keyword
-            : '';
+            : "";
     if (!name) continue;
     const context =
-      typeof rec.keyword_context === 'string'
+      typeof rec.keyword_context === "string"
         ? rec.keyword_context
-        : typeof rec.search_result_subtitle === 'string'
+        : typeof rec.search_result_subtitle === "string"
           ? rec.search_result_subtitle
           : undefined;
     topics.push({
@@ -181,8 +194,8 @@ function topicsFromKeywordSearch(json: unknown): APITypeaheadTopic[] {
       result_context: {
         ...(context ? { display_string: context } : {}),
         redirect_url: `https://www.threads.com/search?q=${encodeURIComponent(name)}`,
-        types: [{ type: 'keyword' }]
-      }
+        types: [{ type: "keyword" }],
+      },
     });
   }
   return topics;
@@ -195,7 +208,7 @@ function topicsFromKeywordSearch(json: unknown): APITypeaheadTopic[] {
  */
 export async function constructThreadsTypeahead(
   query: string,
-  options: { count?: number; ctx?: ThreadsRequestContext } = {}
+  options: { count?: number; ctx?: ThreadsRequestContext } = {},
 ): Promise<APITypeaheadResponse> {
   const q = query.trim();
   if (!q) {
@@ -209,14 +222,17 @@ export async function constructThreadsTypeahead(
 
   const [userRes, keywordRes] = await Promise.all([
     fetchThreadsUserSearch(q, options.ctx, { accounts, count: count * 2 }),
-    fetchThreadsKeywordSearch(q, options.ctx, { accounts })
+    fetchThreadsKeywordSearch(q, options.ctx, { accounts }),
   ]);
   // Users are the half people actually navigate with, so only a failure there is fatal.
   if (!userRes.ok) {
     return emptyTypeahead(500, q);
   }
 
-  const users = usersFromThreadsList(userRes.json, { threadsOnly: true }).slice(0, count);
+  const users = usersFromThreadsList(userRes.json, { threadsOnly: true }).slice(
+    0,
+    count,
+  );
   const topics = keywordRes.ok ? topicsFromKeywordSearch(keywordRes.json) : [];
   return {
     code: 200,
@@ -224,6 +240,6 @@ export async function constructThreadsTypeahead(
     num_results: users.length + topics.length,
     users,
     topics,
-    events: []
+    events: [],
   };
 }

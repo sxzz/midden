@@ -2,37 +2,47 @@ import type {
   APIMastodonStatus,
   SocialConversationMastodon,
   SocialStatusMastodon,
-  SocialThreadMastodon
-} from '../../types/api-schemas.js';
-import { fetchStatus, fetchStatusContext } from './client.js';
-import { buildAPIMastodonPost } from './processor.js';
-import type { MastodonBuildHost } from './build-host.js';
+  SocialThreadMastodon,
+} from "../../types/api-schemas.js";
+import { fetchStatus, fetchStatusContext } from "./client.js";
+import { buildAPIMastodonPost } from "./processor.js";
+import type { MastodonBuildHost } from "./build-host.js";
 
 const CURSOR_V = 1 as const;
 type ConversationCursorPayload = {
   v: typeof CURSOR_V;
   focalId: string;
-  mode: 'likes' | 'recency';
+  mode: "likes" | "recency";
   skip: number;
   count: number;
 };
 
-const encodeConversationCursor = (payload: ConversationCursorPayload): string => {
+const encodeConversationCursor = (
+  payload: ConversationCursorPayload,
+): string => {
   const json = JSON.stringify(payload);
   const b64 = btoa(json);
-  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 };
 
-const decodeConversationCursor = (raw: string): ConversationCursorPayload | null => {
+const decodeConversationCursor = (
+  raw: string,
+): ConversationCursorPayload | null => {
   try {
-    let b64 = raw.replace(/-/g, '+').replace(/_/g, '/');
-    while (b64.length % 4) b64 += '=';
+    let b64 = raw.replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
     const json = atob(b64);
     const o = JSON.parse(json) as Partial<ConversationCursorPayload>;
-    if (o.v !== CURSOR_V || typeof o.focalId !== 'string') return null;
-    if (o.mode !== 'likes' && o.mode !== 'recency') return null;
-    if (typeof o.skip !== 'number' || !Number.isFinite(o.skip) || o.skip < 0) return null;
-    if (typeof o.count !== 'number' || !Number.isFinite(o.count) || o.count < 1 || o.count > 100) {
+    if (o.v !== CURSOR_V || typeof o.focalId !== "string") return null;
+    if (o.mode !== "likes" && o.mode !== "recency") return null;
+    if (typeof o.skip !== "number" || !Number.isFinite(o.skip) || o.skip < 0)
+      return null;
+    if (
+      typeof o.count !== "number" ||
+      !Number.isFinite(o.count) ||
+      o.count < 1 ||
+      o.count > 100
+    ) {
       return null;
     }
     return {
@@ -40,18 +50,19 @@ const decodeConversationCursor = (raw: string): ConversationCursorPayload | null
       focalId: o.focalId,
       mode: o.mode,
       skip: o.skip,
-      count: o.count
+      count: o.count,
     };
   } catch {
     return null;
   }
 };
 
-const unwrapCore = (s: MastodonStatus): MastodonStatus => (s.reblog ? s.reblog : s);
+const unwrapCore = (s: MastodonStatus): MastodonStatus =>
+  s.reblog ? s.reblog : s;
 
 const collectSelfChainFromDescendants = (
   focal: MastodonStatus,
-  descendants: MastodonStatus[]
+  descendants: MastodonStatus[],
 ): MastodonStatus[] => {
   const focalCore = unwrapCore(focal);
   const authorId = focalCore.account.id;
@@ -62,7 +73,10 @@ const collectSelfChainFromDescendants = (
   while (true) {
     const candidates = pool
       .filter(
-        d => d.in_reply_to_id === currentId && unwrapCore(d).account.id === authorId && !d.reblog
+        (d) =>
+          d.in_reply_to_id === currentId &&
+          unwrapCore(d).account.id === authorId &&
+          !d.reblog,
       )
       .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
     const next = candidates[0];
@@ -75,19 +89,21 @@ const collectSelfChainFromDescendants = (
 
 const findSelfBranchFirstReplyChild = (
   focalCore: MastodonStatus,
-  descendants: MastodonStatus[]
+  descendants: MastodonStatus[],
 ): MastodonStatus | undefined => {
-  const direct = descendants.filter(d => d.in_reply_to_id === focalCore.id);
-  return direct.find(d => unwrapCore(d).account.id === focalCore.account.id && !d.reblog);
+  const direct = descendants.filter((d) => d.in_reply_to_id === focalCore.id);
+  return direct.find(
+    (d) => unwrapCore(d).account.id === focalCore.account.id && !d.reblog,
+  );
 };
 
 const collectDirectReplyPosts = (
   focalCore: MastodonStatus,
-  descendants: MastodonStatus[]
+  descendants: MastodonStatus[],
 ): MastodonStatus[] => {
   const selfChild = findSelfBranchFirstReplyChild(focalCore, descendants);
   const selfId = selfChild?.id;
-  return descendants.filter(d => {
+  return descendants.filter((d) => {
     if (d.in_reply_to_id !== focalCore.id) return false;
     if (selfId && d.id === selfId) return false;
     return true;
@@ -96,10 +112,10 @@ const collectDirectReplyPosts = (
 
 const sortDirectReplies = (
   posts: MastodonStatus[],
-  mode: 'likes' | 'recency'
+  mode: "likes" | "recency",
 ): MastodonStatus[] => {
   const sorted = [...posts];
-  if (mode === 'recency') {
+  if (mode === "recency") {
     sorted.sort((a, b) => {
       const tb = b.created_at.localeCompare(a.created_at);
       if (tb !== 0) return tb;
@@ -122,7 +138,7 @@ export const constructMastodonThread = async (
   domain: string,
   processThread: boolean,
   host: MastodonBuildHost,
-  language: string | undefined
+  language: string | undefined,
 ): Promise<SocialStatusMastodon | SocialThreadMastodon> => {
   const st = await fetchStatus(domain, id);
   if (!st.ok || !st.data) {
@@ -140,12 +156,12 @@ export const constructMastodonThread = async (
       host,
       focal,
       domain,
-      language
+      language,
     )) as APIMastodonStatus;
     return {
       code: 200,
       status: consumed,
-      author: consumed.author
+      author: consumed.author,
     };
   }
 
@@ -155,13 +171,13 @@ export const constructMastodonThread = async (
       host,
       focal,
       domain,
-      language
+      language,
     )) as APIMastodonStatus;
     return {
       code: 200,
       status: consumed,
       thread: [consumed],
-      author: consumed.author
+      author: consumed.author,
     };
   }
 
@@ -171,7 +187,7 @@ export const constructMastodonThread = async (
   const chain: MastodonStatus[] = [...ancestors, focal, ...selfChain];
 
   const consumedPosts = (await Promise.all(
-    chain.map(s => buildAPIMastodonPost(host, s, domain, language))
+    chain.map((s) => buildAPIMastodonPost(host, s, domain, language)),
   )) as APIMastodonStatus[];
 
   const focalIndex = ancestors.length;
@@ -181,34 +197,35 @@ export const constructMastodonThread = async (
     code: 200,
     status: focalConsumed,
     thread: consumedPosts,
-    author: focalConsumed.author
+    author: focalConsumed.author,
   };
 };
 
 export type MastodonConversationResult =
-  { ok: true; data: SocialConversationMastodon } | { ok: false; message: string };
+  | { ok: true; data: SocialConversationMastodon }
+  | { ok: false; message: string };
 
 export const constructMastodonConversation = async (
   id: string,
   domain: string,
   host: MastodonBuildHost,
   options: {
-    rankingMode: 'likes' | 'recency';
+    rankingMode: "likes" | "recency";
     cursor: string | null;
     count: number;
     language?: string;
-  }
+  },
 ): Promise<MastodonConversationResult> => {
   const count = Math.min(100, Math.max(1, Math.floor(options.count)));
   let focalId: string;
-  let mode: 'likes' | 'recency';
+  let mode: "likes" | "recency";
   let skip: number;
   let pageCount: number;
 
   if (options.cursor) {
     const decoded = decodeConversationCursor(options.cursor);
     if (!decoded) {
-      return { ok: false, message: 'Invalid cursor' };
+      return { ok: false, message: "Invalid cursor" };
     }
     focalId = decoded.focalId;
     mode = decoded.mode;
@@ -231,8 +248,8 @@ export const constructMastodonConversation = async (
         thread: null,
         replies: null,
         author: null,
-        cursor: null
-      }
+        cursor: null,
+      },
     };
   }
 
@@ -245,7 +262,7 @@ export const constructMastodonConversation = async (
       host,
       focal,
       domain,
-      options.language
+      options.language,
     )) as APIMastodonStatus;
     return {
       ok: true,
@@ -255,8 +272,8 @@ export const constructMastodonConversation = async (
         thread: [consumed],
         replies: [],
         author: consumed.author,
-        cursor: { bottom: null }
-      }
+        cursor: { bottom: null },
+      },
     };
   }
 
@@ -270,16 +287,21 @@ export const constructMastodonConversation = async (
   const pageSlice = sorted.slice(skip, skip + pageCount);
 
   const threadApi = (await Promise.all(
-    threadStatuses.map(s => buildAPIMastodonPost(host, s, domain, options.language))
+    threadStatuses.map((s) =>
+      buildAPIMastodonPost(host, s, domain, options.language),
+    ),
   )) as APIMastodonStatus[];
 
   const repliesApi = (await Promise.all(
-    pageSlice.map(s => buildAPIMastodonPost(host, s, domain, options.language))
+    pageSlice.map((s) =>
+      buildAPIMastodonPost(host, s, domain, options.language),
+    ),
   )) as APIMastodonStatus[];
 
   const focalIndex = ancestors.length;
   const consumedStatus =
-    threadApi[focalIndex] ?? (await buildAPIMastodonPost(host, focal, domain, options.language));
+    threadApi[focalIndex] ??
+    (await buildAPIMastodonPost(host, focal, domain, options.language));
 
   const nextSkip = skip + pageSlice.length;
   const hasMore = nextSkip < sorted.length;
@@ -289,7 +311,7 @@ export const constructMastodonConversation = async (
         focalId: focalCore.id,
         mode,
         skip: nextSkip,
-        count: pageCount
+        count: pageCount,
       })
     : null;
 
@@ -301,7 +323,7 @@ export const constructMastodonConversation = async (
       thread: threadApi,
       replies: repliesApi,
       author: (consumedStatus as APIMastodonStatus).author,
-      cursor: { bottom: bottomCursor }
-    }
+      cursor: { bottom: bottomCursor },
+    },
   };
 };

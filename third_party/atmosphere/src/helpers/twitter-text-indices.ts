@@ -30,7 +30,10 @@ export function utf16IndexAfterNextCodePoint(text: string, i: number): number {
 /**
  * UTF-16 string index of the start of the Unicode scalar at offset `unicodeOffset` (0 = start).
  */
-export function utf16IndexFromUnicodeScalarOffset(text: string, unicodeOffset: number): number {
+export function utf16IndexFromUnicodeScalarOffset(
+  text: string,
+  unicodeOffset: number,
+): number {
   if (unicodeOffset <= 0) {
     return 0;
   }
@@ -47,7 +50,7 @@ export function utf16IndexFromUnicodeScalarOffset(text: string, unicodeOffset: n
 export function unicodeScalarRangeToUtf16Range(
   text: string,
   startUnicode: number,
-  endUnicode: number
+  endUnicode: number,
 ): [number, number] {
   const s = utf16IndexFromUnicodeScalarOffset(text, startUnicode);
   const e = utf16IndexFromUnicodeScalarOffset(text, endUnicode);
@@ -73,7 +76,10 @@ function alignUtf16StartToScalarBoundary(text: string, i: number): number {
  * If exclusive end sits between a surrogate pair, extend to include the low surrogate
  * (defensive when offsets are slightly misaligned).
  */
-function alignUtf16ExclusiveEndToScalarBoundary(text: string, exclusiveEnd: number): number {
+function alignUtf16ExclusiveEndToScalarBoundary(
+  text: string,
+  exclusiveEnd: number,
+): number {
   const len = text.length;
   if (exclusiveEnd <= 0 || exclusiveEnd >= len) {
     return Math.max(0, Math.min(len, exclusiveEnd));
@@ -92,7 +98,7 @@ function alignUtf16ExclusiveEndToScalarBoundary(text: string, exclusiveEnd: numb
 export function normalizeUtf16EntityRange(
   text: string,
   start: number,
-  end: number
+  end: number,
 ): [number, number] {
   const len = text.length;
   let s = Math.max(0, Math.min(len, start));
@@ -110,7 +116,11 @@ export function normalizeUtf16EntityRange(
   return [s, e];
 }
 
-export function sliceByUtf16EntityIndices(text: string, start: number, end: number): string {
+export function sliceByUtf16EntityIndices(
+  text: string,
+  start: number,
+  end: number,
+): string {
   const [s, e] = normalizeUtf16EntityRange(text, start, end);
   return text.slice(s, e);
 }
@@ -118,7 +128,7 @@ export function sliceByUtf16EntityIndices(text: string, start: number, end: numb
 export function facetUtf16RangeOnPlainText(
   plainText: string,
   facet: { indices: [number, number] },
-  noteTweetUnicodeScalarFacets: boolean
+  noteTweetUnicodeScalarFacets: boolean,
 ): [number, number] {
   const [a, b] = facet.indices;
   if (noteTweetUnicodeScalarFacets) {

@@ -1,14 +1,21 @@
 import type {
   APIBlueskyStatus,
   APIStatusTombstone,
-  APITombstoneReason
-} from '../../types/api-schemas.js';
-import type { SocialConversation, SocialThread } from '../../types/api-status.js';
-import { isTombstone } from '../../helpers/tombstone.js';
-import { type BlueskyFetchOpts, fetchPostThread, fetchPostThreadResult } from './client.js';
-import { buildAPIBlueskyPost, buildBlueskyTombstone } from './processor.js';
-import { atUriForFeedPost } from './uris.js';
-import type { BlueskyBuildHost } from './build-host.js';
+  APITombstoneReason,
+} from "../../types/api-schemas.js";
+import type {
+  SocialConversation,
+  SocialThread,
+} from "../../types/api-status.js";
+import { isTombstone } from "../../helpers/tombstone.js";
+import {
+  type BlueskyFetchOpts,
+  fetchPostThread,
+  fetchPostThreadResult,
+} from "./client.js";
+import { buildAPIBlueskyPost, buildBlueskyTombstone } from "./processor.js";
+import { atUriForFeedPost } from "./uris.js";
+import type { BlueskyBuildHost } from "./build-host.js";
 
 const THREAD_FETCH_DEPTH = 10;
 const THREAD_PARENT_HEIGHT_FIRST_PAGE = 80;
@@ -19,19 +26,20 @@ const CURSOR_V = 1 as const;
 type ConversationCursorPayload = {
   v: typeof CURSOR_V;
   uri: string;
-  mode: 'likes' | 'recency';
+  mode: "likes" | "recency";
   skip: number;
   count: number;
 };
 
 export type BlueskyConversationResult =
-  { ok: true; data: SocialConversation } | { ok: false; message: string };
+  | { ok: true; data: SocialConversation }
+  | { ok: false; message: string };
 
 export const fetchBlueskyThread = async (
   post: string,
   author: string,
   processThread = false,
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<BlueskyThreadResponse | null> => {
   if (!author || !post) {
     return null;
@@ -45,21 +53,21 @@ type BlueskyThreadBucketItem = BlueskyPost | APIStatusTombstone;
 
 /** Match `quoteCandidateFromEmbedRecord` / `isDetachedOuterEmbed` for thread parent stubs. */
 const blueskyThreadStubTombstoneReason = (
-  node: BlueskyFeedNotFoundPost | BlueskyFeedBlockedPost
+  node: BlueskyFeedNotFoundPost | BlueskyFeedBlockedPost,
 ): APITombstoneReason => {
-  if ((node as BlueskyFeedNotFoundPost).notFound === true) return 'deleted';
-  if ((node as BlueskyFeedBlockedPost).blocked === true) return 'blocked';
-  const rawType = (node as { $type?: string }).$type ?? '';
+  if ((node as BlueskyFeedNotFoundPost).notFound === true) return "deleted";
+  if ((node as BlueskyFeedBlockedPost).blocked === true) return "blocked";
+  const rawType = (node as { $type?: string }).$type ?? "";
   if (
     (node as { detached?: boolean }).detached === true ||
-    rawType.includes('viewDetached') ||
-    rawType.includes('Detached')
+    rawType.includes("viewDetached") ||
+    rawType.includes("Detached")
   ) {
-    return 'blocked';
+    return "blocked";
   }
   const pt = rawType.toLowerCase();
-  if (pt.includes('blocked')) return 'blocked';
-  return 'deleted';
+  if (pt.includes("blocked")) return "blocked";
+  return "deleted";
 };
 
 const followReplyChain = (thread: BlueskyThread): BlueskyPost[] => {
@@ -67,7 +75,7 @@ const followReplyChain = (thread: BlueskyThread): BlueskyPost[] => {
   const parentCid = thread.post.cid;
 
   for (const child of thread.replies) {
-    if (!('post' in child)) continue;
+    if (!("post" in child)) continue;
     const post = child.post;
     if (!post?.author || post.author.did !== thread.post.author?.did) {
       continue;
@@ -86,21 +94,21 @@ const followReplyChain = (thread: BlueskyThread): BlueskyPost[] => {
 const collectProcessedThreadPosts = async (
   thread: BlueskyThread,
   author: string,
-  fetchOpts?: BlueskyFetchOpts
+  fetchOpts?: BlueskyFetchOpts,
 ): Promise<BlueskyThreadBucketItem[]> => {
   const bucket: BlueskyThreadBucketItem[] = [];
 
   if (thread.parent) {
     let parentNode: BlueskyThreadParent | undefined = thread.parent;
     while (parentNode) {
-      if ('post' in parentNode && (parentNode as BlueskyThread).post) {
+      if ("post" in parentNode && (parentNode as BlueskyThread).post) {
         const th = parentNode as BlueskyThread;
         bucket.unshift(th.post);
         parentNode = th.parent;
-      } else if ('uri' in parentNode && !('post' in parentNode)) {
+      } else if ("uri" in parentNode && !("post" in parentNode)) {
         const uri = (parentNode as BlueskyFeedNotFoundPost).uri;
         const reason = blueskyThreadStubTombstoneReason(
-          parentNode as BlueskyFeedNotFoundPost | BlueskyFeedBlockedPost
+          parentNode as BlueskyFeedNotFoundPost | BlueskyFeedBlockedPost,
         );
         bucket.unshift(buildBlueskyTombstone(reason, uri));
         break;
@@ -118,7 +126,7 @@ const collectProcessedThreadPosts = async (
 
     while (chain.length > 0) {
       const last = chain[chain.length - 1];
-      const nextId = last.uri?.match(/(?<=post\/)([^/]+)/)?.[1] ?? '';
+      const nextId = last.uri?.match(/(?<=post\/)([^/]+)/)?.[1] ?? "";
       if (!nextId) break;
 
       const more = await fetchBlueskyThread(nextId, author, true, fetchOpts);
@@ -139,12 +147,14 @@ const collectProcessedThreadPosts = async (
 };
 
 /** First direct child that continues the author's self-thread under `focal`. */
-const findSelfBranchFirstReplyChild = (focal: BlueskyThread): BlueskyThread | undefined => {
+const findSelfBranchFirstReplyChild = (
+  focal: BlueskyThread,
+): BlueskyThread | undefined => {
   const parentCid = focal.post.cid;
   const focalAuthorDid = focal.post.author?.did;
   if (!parentCid || !focalAuthorDid) return undefined;
   for (const child of focal.replies ?? []) {
-    if (!('post' in child)) continue;
+    if (!("post" in child)) continue;
     const post = child.post;
     if (!post?.author || post.author.did !== focalAuthorDid) continue;
     if (post.record?.reply?.parent?.cid === parentCid) return child;
@@ -158,49 +168,62 @@ const collectDirectReplyPosts = (focal: BlueskyThread): BlueskyPost[] => {
   const selfUri = selfChild?.post?.uri;
   const out: BlueskyPost[] = [];
   for (const child of focal.replies ?? []) {
-    if (!('post' in child) || !child.post?.uri) continue;
+    if (!("post" in child) || !child.post?.uri) continue;
     if (selfUri && child.post.uri === selfUri) continue;
     out.push(child.post);
   }
   return out;
 };
 
-const sortDirectReplies = (posts: BlueskyPost[], mode: 'likes' | 'recency'): BlueskyPost[] => {
+const sortDirectReplies = (
+  posts: BlueskyPost[],
+  mode: "likes" | "recency",
+): BlueskyPost[] => {
   const sorted = [...posts];
-  if (mode === 'recency') {
+  if (mode === "recency") {
     sorted.sort((a, b) => {
-      const tb = (b.indexedAt ?? '').localeCompare(a.indexedAt ?? '');
+      const tb = (b.indexedAt ?? "").localeCompare(a.indexedAt ?? "");
       if (tb !== 0) return tb;
-      return (b.uri ?? '').localeCompare(a.uri ?? '');
+      return (b.uri ?? "").localeCompare(a.uri ?? "");
     });
   } else {
     sorted.sort((a, b) => {
       const lb = (b.likeCount ?? 0) - (a.likeCount ?? 0);
       if (lb !== 0) return lb;
-      const tb = (b.indexedAt ?? '').localeCompare(a.indexedAt ?? '');
+      const tb = (b.indexedAt ?? "").localeCompare(a.indexedAt ?? "");
       if (tb !== 0) return tb;
-      return (b.uri ?? '').localeCompare(a.uri ?? '');
+      return (b.uri ?? "").localeCompare(a.uri ?? "");
     });
   }
   return sorted;
 };
 
-const encodeConversationCursor = (payload: ConversationCursorPayload): string => {
+const encodeConversationCursor = (
+  payload: ConversationCursorPayload,
+): string => {
   const json = JSON.stringify(payload);
   const b64 = btoa(json);
-  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 };
 
-const decodeConversationCursor = (raw: string): ConversationCursorPayload | null => {
+const decodeConversationCursor = (
+  raw: string,
+): ConversationCursorPayload | null => {
   try {
-    let b64 = raw.replace(/-/g, '+').replace(/_/g, '/');
-    while (b64.length % 4) b64 += '=';
+    let b64 = raw.replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
     const json = atob(b64);
     const o = JSON.parse(json) as Partial<ConversationCursorPayload>;
-    if (o.v !== CURSOR_V || typeof o.uri !== 'string') return null;
-    if (o.mode !== 'likes' && o.mode !== 'recency') return null;
-    if (typeof o.skip !== 'number' || !Number.isFinite(o.skip) || o.skip < 0) return null;
-    if (typeof o.count !== 'number' || !Number.isFinite(o.count) || o.count < 1 || o.count > 100) {
+    if (o.v !== CURSOR_V || typeof o.uri !== "string") return null;
+    if (o.mode !== "likes" && o.mode !== "recency") return null;
+    if (typeof o.skip !== "number" || !Number.isFinite(o.skip) || o.skip < 0)
+      return null;
+    if (
+      typeof o.count !== "number" ||
+      !Number.isFinite(o.count) ||
+      o.count < 1 ||
+      o.count > 100
+    ) {
       return null;
     }
     return {
@@ -208,7 +231,7 @@ const decodeConversationCursor = (raw: string): ConversationCursorPayload | null
       uri: o.uri,
       mode: o.mode,
       skip: o.skip,
-      count: o.count
+      count: o.count,
     };
   } catch {
     return null;
@@ -222,21 +245,26 @@ export const constructBlueskyThread = async (
   host: BlueskyBuildHost,
   language: string | undefined,
   extraFetchOpts?: BlueskyFetchOpts,
-  out?: { pdsHostHint?: string }
+  out?: { pdsHostHint?: string },
 ): Promise<SocialThread> => {
   const credentialKey = host.credentialKey;
   const fetchOpts: BlueskyFetchOpts = { credentialKey, ...extraFetchOpts };
 
   const uri = atUriForFeedPost(author, id);
   const depth = processThread ? THREAD_FETCH_DEPTH : 1;
-  const threadFetch = await fetchPostThreadResult(uri, depth, undefined, fetchOpts);
+  const threadFetch = await fetchPostThreadResult(
+    uri,
+    depth,
+    undefined,
+    fetchOpts,
+  );
 
   if (!threadFetch.ok) {
     return {
       status: null,
       thread: [],
       author: null,
-      code: threadFetch.notFound ? 404 : 503
+      code: threadFetch.notFound ? 404 : 503,
     };
   }
 
@@ -248,7 +276,7 @@ export const constructBlueskyThread = async (
       status: null,
       thread: [],
       author: null,
-      code: 404
+      code: 404,
     };
   }
 
@@ -266,21 +294,21 @@ export const constructBlueskyThread = async (
     thread.post,
     language,
     0,
-    fetchOpts
+    fetchOpts,
   )) as APIBlueskyStatus;
   const consumedPosts = (await Promise.all(
-    bucket.map(item =>
+    bucket.map((item) =>
       isTombstone(item)
         ? Promise.resolve(item)
-        : buildAPIBlueskyPost(host, item, language, 0, fetchOpts)
-    )
+        : buildAPIBlueskyPost(host, item, language, 0, fetchOpts),
+    ),
   )) as (APIBlueskyStatus | APIStatusTombstone)[];
 
   return {
     status: consumedPost,
     thread: consumedPosts,
     author: consumedPost.author,
-    code: 200
+    code: 200,
   };
 };
 
@@ -289,15 +317,15 @@ export const constructBlueskyConversation = async (
   rkey: string,
   host: BlueskyBuildHost,
   options: {
-    rankingMode: 'likes' | 'recency';
+    rankingMode: "likes" | "recency";
     cursor: string | null;
     count: number;
     language?: string;
-  }
+  },
 ): Promise<BlueskyConversationResult> => {
   const count = Math.min(100, Math.max(1, Math.floor(options.count)));
   let focalUri: string;
-  let mode: 'likes' | 'recency';
+  let mode: "likes" | "recency";
   let skip: number;
   let pageCount: number;
   let isContinuation: boolean;
@@ -305,7 +333,7 @@ export const constructBlueskyConversation = async (
   if (options.cursor) {
     const decoded = decodeConversationCursor(options.cursor);
     if (!decoded) {
-      return { ok: false, message: 'Invalid cursor' };
+      return { ok: false, message: "Invalid cursor" };
     }
     focalUri = decoded.uri;
     mode = decoded.mode;
@@ -322,8 +350,8 @@ export const constructBlueskyConversation = async (
           thread: null,
           replies: null,
           author: null,
-          cursor: null
-        }
+          cursor: null,
+        },
       };
     }
     focalUri = atUriForFeedPost(author, rkey);
@@ -333,19 +361,21 @@ export const constructBlueskyConversation = async (
     isContinuation = false;
   }
 
-  const convoFetchOpts: BlueskyFetchOpts = { credentialKey: host.credentialKey };
+  const convoFetchOpts: BlueskyFetchOpts = {
+    credentialKey: host.credentialKey,
+  };
   const rawResult = isContinuation
     ? await fetchPostThreadResult(
         focalUri,
         CONVERSATION_PAGE_DEPTH,
         CONVERSATION_PAGE_PARENT_HEIGHT,
-        convoFetchOpts
+        convoFetchOpts,
       )
     : await fetchPostThreadResult(
         focalUri,
         THREAD_FETCH_DEPTH,
         THREAD_PARENT_HEIGHT_FIRST_PAGE,
-        convoFetchOpts
+        convoFetchOpts,
       );
 
   if (!rawResult.ok) {
@@ -357,8 +387,8 @@ export const constructBlueskyConversation = async (
         thread: null,
         replies: null,
         author: null,
-        cursor: null
-      }
+        cursor: null,
+      },
     };
   }
 
@@ -373,8 +403,8 @@ export const constructBlueskyConversation = async (
         thread: null,
         replies: null,
         author: null,
-        cursor: null
-      }
+        cursor: null,
+      },
     };
   }
 
@@ -395,15 +425,17 @@ export const constructBlueskyConversation = async (
     statusPost,
     lang,
     0,
-    convoFetchOpts
+    convoFetchOpts,
   )) as APIBlueskyStatus;
   const threadApi = (await Promise.all(
-    threadPosts.map(p =>
-      isTombstone(p) ? Promise.resolve(p) : buildAPIBlueskyPost(host, p, lang, 0, convoFetchOpts)
-    )
+    threadPosts.map((p) =>
+      isTombstone(p)
+        ? Promise.resolve(p)
+        : buildAPIBlueskyPost(host, p, lang, 0, convoFetchOpts),
+    ),
   )) as (APIBlueskyStatus | APIStatusTombstone)[];
   const repliesApi = (await Promise.all(
-    pageSlice.map(p => buildAPIBlueskyPost(host, p, lang, 0, convoFetchOpts))
+    pageSlice.map((p) => buildAPIBlueskyPost(host, p, lang, 0, convoFetchOpts)),
   )) as APIBlueskyStatus[];
 
   const canonicalUri = statusPost.uri ?? focalUri;
@@ -415,7 +447,7 @@ export const constructBlueskyConversation = async (
         uri: canonicalUri,
         mode,
         skip: nextSkip,
-        count: pageCount
+        count: pageCount,
       })
     : null;
 
@@ -425,9 +457,9 @@ export const constructBlueskyConversation = async (
       code: 200,
       status: consumedStatus,
       thread: threadApi,
-      replies: repliesApi as SocialConversation['replies'],
+      replies: repliesApi as SocialConversation["replies"],
       author: consumedStatus.author,
-      cursor: { bottom: bottomCursor }
-    } as SocialConversation
+      cursor: { bottom: bottomCursor },
+    } as SocialConversation,
   };
 };

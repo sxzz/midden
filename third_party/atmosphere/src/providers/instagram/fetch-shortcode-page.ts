@@ -1,18 +1,21 @@
-import { resolveInstagramAccounts, type InstagramRequestContext } from './account-proxy.js';
+import {
+  resolveInstagramAccounts,
+  type InstagramRequestContext,
+} from "./account-proxy.js";
 import {
   fetchInstagramHtml,
   fetchInstagramSession,
   fetchPolarisPostGraphql,
-  fetchRulingForContent
-} from './client.js';
-import { fetchPrivateMediaInfo } from './private-api.js';
+  fetchRulingForContent,
+} from "./client.js";
+import { fetchPrivateMediaInfo } from "./private-api.js";
 import {
   extractLsdFromHtml,
   extractPolarisProductFromGraphqlJson,
   extractPostMediaItem,
-  type PolarisMediaBundle
-} from './extractors.js';
-import { instagramShortcodeToPk } from './shortcode.js';
+  type PolarisMediaBundle,
+} from "./extractors.js";
+import { instagramShortcodeToPk } from "./shortcode.js";
 
 export type InstagramWebInfoPage =
   | {
@@ -21,8 +24,12 @@ export type InstagramWebInfoPage =
       html: string;
       item: Record<string, unknown>;
       pathUsed: string;
-      comments: PolarisMediaBundle['comments'];
-      source: 'account-proxy' | 'polaris-graphql' | 'polaris-html' | 'web-info-html';
+      comments: PolarisMediaBundle["comments"];
+      source:
+        | "account-proxy"
+        | "polaris-graphql"
+        | "polaris-html"
+        | "web-info-html";
       /** Session/doc LSD for GraphQL comment pagination (Polaris GraphQL has no HTML to parse). */
       lsd: string | null;
     }
@@ -39,18 +46,20 @@ export type InstagramWebInfoPage =
 
 /** `media/{pk}/info/` answers with a one-element `items` array. */
 function firstMediaItem(json: unknown): Record<string, unknown> | null {
-  if (!json || typeof json !== 'object') return null;
+  if (!json || typeof json !== "object") return null;
   const items = (json as { items?: unknown }).items;
   if (!Array.isArray(items) || items.length === 0) return null;
   const first = items[0];
-  return first && typeof first === 'object' ? (first as Record<string, unknown>) : null;
+  return first && typeof first === "object"
+    ? (first as Record<string, unknown>)
+    : null;
 }
 
 function isLoginRedirect(finalUrl: string | undefined): boolean {
   if (!finalUrl) return false;
   try {
     const path = new URL(finalUrl).pathname;
-    return path.startsWith('/accounts/login') || path === '/';
+    return path.startsWith("/accounts/login") || path === "/";
   } catch {
     return false;
   }
@@ -74,7 +83,7 @@ export async function fetchInstagramPageWithWebInfo(
   shortcode: string,
   userAgent: string | undefined,
   ctx?: InstagramRequestContext,
-  options?: { skipAccountProxy?: boolean }
+  options?: { skipAccountProxy?: boolean },
 ): Promise<InstagramWebInfoPage> {
   let mediaIdForProxy: string | null;
   try {
@@ -86,18 +95,21 @@ export async function fetchInstagramPageWithWebInfo(
   if (mediaIdForProxy && !options?.skipAccountProxy) {
     const accounts = await resolveInstagramAccounts(ctx);
     if (accounts.length) {
-      const info = await fetchPrivateMediaInfo(mediaIdForProxy, ctx, { accounts, shortcode });
+      const info = await fetchPrivateMediaInfo(mediaIdForProxy, ctx, {
+        accounts,
+        shortcode,
+      });
       const item = info.ok ? firstMediaItem(info.json) : null;
       if (item) {
         return {
           ok: true,
           status: info.status,
-          html: '',
+          html: "",
           item,
           pathUsed: `/p/${encodeURIComponent(shortcode)}/`,
           comments: null,
-          source: 'account-proxy',
-          lsd: null
+          source: "account-proxy",
+          lsd: null,
         };
       }
       /*
@@ -109,7 +121,7 @@ export async function fetchInstagramPageWithWebInfo(
   }
 
   const session = await fetchInstagramSession(userAgent);
-  const cookies = session?.cookieHeader ?? '';
+  const cookies = session?.cookieHeader ?? "";
   const htmlOpts = cookies ? { cookies } : undefined;
 
   const mediaId = mediaIdForProxy;
@@ -121,7 +133,7 @@ export async function fetchInstagramPageWithWebInfo(
       mediaId,
       session,
       userAgent,
-      refererPath
+      refererPath,
     });
     // yt-dlp only sends CSRF when ruling grants access; we still try GraphQL either way.
     if (ruling.granted || session.csrf) {
@@ -129,19 +141,21 @@ export async function fetchInstagramPageWithWebInfo(
         mediaId,
         session,
         userAgent,
-        refererUrl: `https://www.instagram.com${refererPath}`
+        refererUrl: `https://www.instagram.com${refererPath}`,
       });
-      const bundle = gql.ok ? extractPolarisProductFromGraphqlJson(gql.json) : null;
+      const bundle = gql.ok
+        ? extractPolarisProductFromGraphqlJson(gql.json)
+        : null;
       if (bundle?.product) {
         return {
           ok: true,
           status: gql.status,
-          html: '',
+          html: "",
           item: bundle.product,
           pathUsed: refererPath,
           comments: bundle.comments,
-          source: 'polaris-graphql',
-          lsd: session.lsd
+          source: "polaris-graphql",
+          lsd: session.lsd,
         };
       }
     }
@@ -149,15 +163,20 @@ export async function fetchInstagramPageWithWebInfo(
 
   const paths = [
     `/p/${encodeURIComponent(shortcode)}/`,
-    `/reel/${encodeURIComponent(shortcode)}/`
+    `/reel/${encodeURIComponent(shortcode)}/`,
   ] as const;
 
   let last: { ok: boolean; status: number; html: string; finalUrl?: string } = {
     ok: false,
     status: 500,
-    html: ''
+    html: "",
   };
-  let bestAttempt: { ok: boolean; status: number; html: string; finalUrl?: string } | null = null;
+  let bestAttempt: {
+    ok: boolean;
+    status: number;
+    html: string;
+    finalUrl?: string;
+  } | null = null;
   const attempts: {
     path: string;
     httpOk: boolean;
@@ -174,16 +193,17 @@ export async function fetchInstagramPageWithWebInfo(
     const item = r.ok && !loginRedirect ? extractPostMediaItem(r.html) : null;
     const looksPolaris =
       Boolean(item) &&
-      (typeof item!.__typename === 'string'
-        ? item!.__typename.startsWith('XIGPolaris')
-        : typeof item!.media_type === 'number' || Array.isArray(item!.video_versions));
+      (typeof item!.__typename === "string"
+        ? item!.__typename.startsWith("XIGPolaris")
+        : typeof item!.media_type === "number" ||
+          Array.isArray(item!.video_versions));
     attempts.push({
       path,
       httpOk: r.ok,
       status: r.status,
       hasPolaris: Boolean(item && looksPolaris),
       hasWebInfo: Boolean(item && !looksPolaris),
-      loginRedirect
+      loginRedirect,
     });
 
     if (r.ok && !loginRedirect && item) {
@@ -194,8 +214,8 @@ export async function fetchInstagramPageWithWebInfo(
         item,
         pathUsed: path,
         comments: null,
-        source: looksPolaris ? 'polaris-html' : 'web-info-html',
-        lsd: extractLsdFromHtml(r.html) ?? session?.lsd ?? null
+        source: looksPolaris ? "polaris-html" : "web-info-html",
+        lsd: extractLsdFromHtml(r.html) ?? session?.lsd ?? null,
       };
     }
 
@@ -226,6 +246,6 @@ export async function fetchInstagramPageWithWebInfo(
     pathUsed: null,
     comments: null,
     source: null,
-    lsd: null
+    lsd: null,
   };
 }

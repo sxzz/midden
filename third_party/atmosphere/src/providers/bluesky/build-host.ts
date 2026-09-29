@@ -1,4 +1,4 @@
-import type { APIStatus } from '../../types/api-status.js';
+import type { APIStatus } from "../../types/api-status.js";
 
 /**
  * Translation / i18n / feature flags passed from the worker (Hono) or another host into Bluesky processing.
@@ -16,7 +16,10 @@ export type BlueskyBuildHost = {
   t: (key: string, options?: { lng?: string; [k: string]: unknown }) => string;
   translatePolyglot?: (
     status: APIStatus,
-    targetLang: string
+    targetLang: string,
   ) => Promise<PolyglotLikeTranslation | null>;
-  translateAI?: (status: APIStatus, targetLang: string) => Promise<PolyglotLikeTranslation | null>;
+  translateAI?: (
+    status: APIStatus,
+    targetLang: string,
+  ) => Promise<PolyglotLikeTranslation | null>;
 };

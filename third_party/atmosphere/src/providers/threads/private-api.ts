@@ -1,14 +1,14 @@
 import {
   threadsPrivateApiRequest,
   type ThreadsPrivateApiResult,
-  type ThreadsRequestContext
-} from './account-proxy.js';
-import type { InstagramCredentials } from '../../types/proxy-credentials.js';
+  type ThreadsRequestContext,
+} from "./account-proxy.js";
+import type { InstagramCredentials } from "../../types/proxy-credentials.js";
 import {
   THREADS_ORIGIN,
   THREADS_SEARCH_SURFACE_RECENT,
-  THREADS_SEARCH_SURFACE_TOP
-} from './constants.js';
+  THREADS_SEARCH_SURFACE_TOP,
+} from "./constants.js";
 
 /*
  * Endpoint paths and parameter names below are the ones the Threads Android app itself calls
@@ -26,16 +26,17 @@ export type ThreadsApiOptions = {
   accounts?: InstagramCredentials[];
 };
 
-const profileReferer = (username: string) => `${THREADS_ORIGIN}/@${encodeURIComponent(username)}`;
+const profileReferer = (username: string) =>
+  `${THREADS_ORIGIN}/@${encodeURIComponent(username)}`;
 
 /** Which profile tab to read. The app models these as four sibling routes, not one parameter. */
-export type ThreadsProfileTab = 'threads' | 'replies' | 'reposts' | 'media';
+export type ThreadsProfileTab = "threads" | "replies" | "reposts" | "media";
 
 const PROFILE_TAB_PATHS: Record<ThreadsProfileTab, string> = {
-  threads: 'text_feed/{user_id}/profile/',
-  replies: 'text_feed/{user_id}/profile/replies/',
-  reposts: 'text_feed/{user_id}/profile/reposts/',
-  media: 'text_feed/{user_id}/profile/media/'
+  threads: "text_feed/{user_id}/profile/",
+  replies: "text_feed/{user_id}/profile/replies/",
+  reposts: "text_feed/{user_id}/profile/reposts/",
+  media: "text_feed/{user_id}/profile/media/",
 };
 
 /**
@@ -52,7 +53,7 @@ export function fetchThreadsProfileFeed(
     maxId?: string | null;
     count?: number;
     username?: string;
-  } = {}
+  } = {},
 ): Promise<ThreadsPrivateApiResult> {
   return threadsPrivateApiRequest(PROFILE_TAB_PATHS[tab], ctx, {
     pathParams: { user_id: userId },
@@ -60,10 +61,10 @@ export function fetchThreadsProfileFeed(
       user_id: userId,
       count: options.count,
       max_id: options.maxId ?? undefined,
-      is_app_start: false
+      is_app_start: false,
     },
     referer: options.username ? profileReferer(options.username) : undefined,
-    accounts: options.accounts
+    accounts: options.accounts,
   });
 }
 
@@ -74,25 +75,25 @@ export function fetchThreadsPostReplies(
   options: ThreadsApiOptions & {
     pagingToken?: string | null;
     count?: number;
-    sortOrder?: 'top' | 'all';
+    sortOrder?: "top" | "all";
     shortcode?: string;
     username?: string;
-  } = {}
+  } = {},
 ): Promise<ThreadsPrivateApiResult> {
-  return threadsPrivateApiRequest('text_feed/{post_id}/replies/', ctx, {
+  return threadsPrivateApiRequest("text_feed/{post_id}/replies/", ctx, {
     pathParams: { post_id: postId },
     query: {
       post_id: postId,
-      sort_order: options.sortOrder ?? 'top',
+      sort_order: options.sortOrder ?? "top",
       count: options.count,
       paging_token: options.pagingToken ?? undefined,
-      check_for_unavailable_replies: true
+      check_for_unavailable_replies: true,
     },
     referer:
       options.username && options.shortcode
         ? `${profileReferer(options.username)}/post/${encodeURIComponent(options.shortcode)}`
         : undefined,
-    accounts: options.accounts
+    accounts: options.accounts,
   });
 }
 
@@ -100,12 +101,12 @@ export function fetchThreadsPostReplies(
 export function fetchThreadsSingleThread(
   postId: string,
   ctx: ThreadsRequestContext | undefined,
-  options: ThreadsApiOptions = {}
+  options: ThreadsApiOptions = {},
 ): Promise<ThreadsPrivateApiResult> {
-  return threadsPrivateApiRequest('text_feed/{post_id}/single_thread/', ctx, {
+  return threadsPrivateApiRequest("text_feed/{post_id}/single_thread/", ctx, {
     pathParams: { post_id: postId },
     query: { post_id: postId },
-    accounts: options.accounts
+    accounts: options.accounts,
   });
 }
 
@@ -124,37 +125,39 @@ export function fetchThreadsSearchSerp(
     pageNum?: number | null;
     rankToken?: string | null;
     tagId?: string | null;
-  } = {}
+  } = {},
 ): Promise<ThreadsPrivateApiResult> {
   const recent = options.recent === true;
-  return threadsPrivateApiRequest('fbsearch/text_app/serp/', ctx, {
+  return threadsPrivateApiRequest("fbsearch/text_app/serp/", ctx, {
     query: {
       query,
-      search_surface: recent ? THREADS_SEARCH_SURFACE_RECENT : THREADS_SEARCH_SURFACE_TOP,
-      recent: recent ? '1' : '0',
-      is_from_pull_to_refresh: '0',
+      search_surface: recent
+        ? THREADS_SEARCH_SURFACE_RECENT
+        : THREADS_SEARCH_SURFACE_TOP,
+      recent: recent ? "1" : "0",
+      is_from_pull_to_refresh: "0",
       tag_id: options.tagId ?? undefined,
       page_token: options.pageToken ?? undefined,
       page_num: options.pageNum ?? undefined,
-      rank_token: options.rankToken ?? undefined
+      rank_token: options.rankToken ?? undefined,
     },
     referer: `${THREADS_ORIGIN}/search?q=${encodeURIComponent(query)}`,
-    accounts: options.accounts
+    accounts: options.accounts,
   });
 }
 
 /** `fbsearch/text_app/trends/` — the Threads trending topic list. */
 export function fetchThreadsTrends(
   ctx: ThreadsRequestContext | undefined,
-  options: ThreadsApiOptions & { first?: number } = {}
+  options: ThreadsApiOptions & { first?: number } = {},
 ): Promise<ThreadsPrivateApiResult> {
-  return threadsPrivateApiRequest('fbsearch/text_app/trends/', ctx, {
+  return threadsPrivateApiRequest("fbsearch/text_app/trends/", ctx, {
     query: {
       first: options.first ?? undefined,
       serp_prefetch: false,
-      should_fetch_related_communities: false
+      should_fetch_related_communities: false,
     },
-    accounts: options.accounts
+    accounts: options.accounts,
   });
 }
 
@@ -162,12 +165,12 @@ export function fetchThreadsTrends(
 export function fetchThreadsLikedPosts(
   userId: string,
   ctx: ThreadsRequestContext | undefined,
-  options: ThreadsApiOptions & { maxId?: string | null } = {}
+  options: ThreadsApiOptions & { maxId?: string | null } = {},
 ): Promise<ThreadsPrivateApiResult> {
-  return threadsPrivateApiRequest('text_feed/{user_id}/liked_posts/', ctx, {
+  return threadsPrivateApiRequest("text_feed/{user_id}/liked_posts/", ctx, {
     pathParams: { user_id: userId },
     query: { user_id: userId, max_id: options.maxId ?? undefined },
-    accounts: options.accounts
+    accounts: options.accounts,
   });
 }
 
@@ -175,64 +178,92 @@ export function fetchThreadsLikedPosts(
 export function fetchThreadsMediaLikers(
   mediaId: string,
   ctx: ThreadsRequestContext | undefined,
-  options: ThreadsApiOptions & { shortcode?: string; username?: string } = {}
+  options: ThreadsApiOptions & { shortcode?: string; username?: string } = {},
 ): Promise<ThreadsPrivateApiResult> {
-  return threadsPrivateApiRequest(`media/${encodeURIComponent(mediaId)}/likers/`, ctx, {
-    referer:
-      options.username && options.shortcode
-        ? `${profileReferer(options.username)}/post/${encodeURIComponent(options.shortcode)}`
-        : undefined,
-    acceptHint: 'user_list',
-    accounts: options.accounts
-  });
+  return threadsPrivateApiRequest(
+    `media/${encodeURIComponent(mediaId)}/likers/`,
+    ctx,
+    {
+      referer:
+        options.username && options.shortcode
+          ? `${profileReferer(options.username)}/post/${encodeURIComponent(options.shortcode)}`
+          : undefined,
+      acceptHint: "user_list",
+      accounts: options.accounts,
+    },
+  );
 }
 
 /** `friendships/{pk}/followers/` — follower list page (shared Instagram graph). */
 export function fetchThreadsFollowers(
   userId: string,
   ctx: ThreadsRequestContext | undefined,
-  options: ThreadsApiOptions & { maxId?: string | null; count?: number; username?: string } = {}
+  options: ThreadsApiOptions & {
+    maxId?: string | null;
+    count?: number;
+    username?: string;
+  } = {},
 ): Promise<ThreadsPrivateApiResult> {
-  return threadsPrivateApiRequest(`friendships/${encodeURIComponent(userId)}/followers/`, ctx, {
-    query: {
-      count: options.count,
-      max_id: options.maxId ?? undefined,
-      search_surface: 'follow_list_page'
+  return threadsPrivateApiRequest(
+    `friendships/${encodeURIComponent(userId)}/followers/`,
+    ctx,
+    {
+      query: {
+        count: options.count,
+        max_id: options.maxId ?? undefined,
+        search_surface: "follow_list_page",
+      },
+      referer: options.username
+        ? `${profileReferer(options.username)}/followers`
+        : undefined,
+      acceptHint: "user_list",
+      accounts: options.accounts,
     },
-    referer: options.username ? `${profileReferer(options.username)}/followers` : undefined,
-    acceptHint: 'user_list',
-    accounts: options.accounts
-  });
+  );
 }
 
 /** `friendships/{pk}/following/` — following list page (shared Instagram graph). */
 export function fetchThreadsFollowing(
   userId: string,
   ctx: ThreadsRequestContext | undefined,
-  options: ThreadsApiOptions & { maxId?: string | null; count?: number; username?: string } = {}
+  options: ThreadsApiOptions & {
+    maxId?: string | null;
+    count?: number;
+    username?: string;
+  } = {},
 ): Promise<ThreadsPrivateApiResult> {
-  return threadsPrivateApiRequest(`friendships/${encodeURIComponent(userId)}/following/`, ctx, {
-    query: {
-      count: options.count,
-      max_id: options.maxId ?? undefined,
-      search_surface: 'follow_list_page'
+  return threadsPrivateApiRequest(
+    `friendships/${encodeURIComponent(userId)}/following/`,
+    ctx,
+    {
+      query: {
+        count: options.count,
+        max_id: options.maxId ?? undefined,
+        search_surface: "follow_list_page",
+      },
+      referer: options.username
+        ? `${profileReferer(options.username)}/following`
+        : undefined,
+      acceptHint: "user_list",
+      accounts: options.accounts,
     },
-    referer: options.username ? `${profileReferer(options.username)}/following` : undefined,
-    acceptHint: 'user_list',
-    accounts: options.accounts
-  });
+  );
 }
 
 /** `users/search/` — user search, filtered to Threads-active accounts by the caller. */
 export function fetchThreadsUserSearch(
   query: string,
   ctx: ThreadsRequestContext | undefined,
-  options: ThreadsApiOptions & { count?: number } = {}
+  options: ThreadsApiOptions & { count?: number } = {},
 ): Promise<ThreadsPrivateApiResult> {
-  return threadsPrivateApiRequest('users/search/', ctx, {
-    query: { q: query, count: options.count, search_surface: 'user_search_page' },
-    acceptHint: 'user_list',
-    accounts: options.accounts
+  return threadsPrivateApiRequest("users/search/", ctx, {
+    query: {
+      q: query,
+      count: options.count,
+      search_surface: "user_search_page",
+    },
+    acceptHint: "user_list",
+    accounts: options.accounts,
   });
 }
 
@@ -240,23 +271,27 @@ export function fetchThreadsUserSearch(
 export function fetchThreadsUserByUsername(
   username: string,
   ctx: ThreadsRequestContext | undefined,
-  options: ThreadsApiOptions = {}
+  options: ThreadsApiOptions = {},
 ): Promise<ThreadsPrivateApiResult> {
-  return threadsPrivateApiRequest(`users/${encodeURIComponent(username)}/usernameinfo/`, ctx, {
-    referer: profileReferer(username),
-    accounts: options.accounts
-  });
+  return threadsPrivateApiRequest(
+    `users/${encodeURIComponent(username)}/usernameinfo/`,
+    ctx,
+    {
+      referer: profileReferer(username),
+      accounts: options.accounts,
+    },
+  );
 }
 
 /** `fbsearch/text_app/keyword/search/` — keyword suggestions behind the search box. */
 export function fetchThreadsKeywordSearch(
   query: string,
   ctx: ThreadsRequestContext | undefined,
-  options: ThreadsApiOptions = {}
+  options: ThreadsApiOptions = {},
 ): Promise<ThreadsPrivateApiResult> {
-  return threadsPrivateApiRequest('fbsearch/text_app/keyword/search/', ctx, {
+  return threadsPrivateApiRequest("fbsearch/text_app/keyword/search/", ctx, {
     query: { query },
     referer: `${THREADS_ORIGIN}/search?q=${encodeURIComponent(query)}`,
-    accounts: options.accounts
+    accounts: options.accounts,
   });
 }

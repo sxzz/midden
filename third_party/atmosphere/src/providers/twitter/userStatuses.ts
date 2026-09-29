@@ -1,4 +1,4 @@
-import { buildAPITwitterStatus } from './processor.js';
+import { buildAPITwitterStatus } from "./processor.js";
 import {
   FollowersByUserIDTimelineQuery,
   FollowersQuery,
@@ -10,9 +10,9 @@ import {
   UserArticlesTweetsQuery,
   UserMediaQuery,
   UserTweetsAndRepliesQuery,
-  UserTweetsQuery
-} from './graphql/queries.js';
-import { graphQLOrchestrator } from './graphql/orchestrator.js';
+  UserTweetsQuery,
+} from "./graphql/queries.js";
+import { graphQLOrchestrator } from "./graphql/orchestrator.js";
 import {
   getFollowersFollowingInstructions,
   getProfileArticlesTimelineInstructions,
@@ -24,29 +24,29 @@ import {
   validateProfileWithRepliesTimelineResponse,
   validateUserArticlesTweetsResponse,
   validateUserMediaTimelineResponse,
-  validateUserTweetsTimeline
-} from './graphql/validators.js';
-import { buildLanguageHeaders } from '../../helpers/language.js';
-import { isTombstone } from '../../helpers/tombstone.js';
+  validateUserTweetsTimeline,
+} from "./graphql/validators.js";
+import { buildLanguageHeaders } from "../../helpers/language.js";
+import { isTombstone } from "../../helpers/tombstone.js";
 import {
   convertToApiUser,
   getTwitterUserRestIdByScreenName,
-  type ProfileHandleOrId
-} from './profile.js';
+  type ProfileHandleOrId,
+} from "./profile.js";
 import {
   processTimelineInstructions,
   processGroupedTimelineInstructions,
-  processUserRelationshipTimelineInstructions
-} from './search.js';
-import type { FetchResults } from '../../types/fetch-results.js';
-import type { TwitterBuildHost } from './build-host.js';
+  processUserRelationshipTimelineInstructions,
+} from "./search.js";
+import type { FetchResults } from "../../types/fetch-results.js";
+import type { TwitterBuildHost } from "./build-host.js";
 import type {
   APIProfileRelationshipList,
   APIGroupedSearchResults,
   APISearchResults,
   APITwitterStatus,
-  TimelineEntryTwitter
-} from '../../types/api-schemas.js';
+  TimelineEntryTwitter,
+} from "../../types/api-schemas.js";
 
 export const profileStatusesAPI = async (
   handleOrId: ProfileHandleOrId,
@@ -55,10 +55,10 @@ export const profileStatusesAPI = async (
   host: TwitterBuildHost,
   withReplies = false,
   language?: string,
-  groupThreads = false
+  groupThreads = false,
 ): Promise<APISearchResults | APIGroupedSearchResults> => {
   const userId =
-    handleOrId.type === 'userId'
+    handleOrId.type === "userId"
       ? handleOrId.value
       : await getTwitterUserRestIdByScreenName(host, handleOrId.value);
   if (!userId) {
@@ -67,45 +67,45 @@ export const profileStatusesAPI = async (
 
   const results = await graphQLOrchestrator(host, [
     {
-      key: 'tweets',
+      key: "tweets",
       required: true,
       headers: buildLanguageHeaders(language),
       methods: withReplies
         ? [
             {
-              name: 'ProfileWithRepliesTimeline',
+              name: "ProfileWithRepliesTimeline",
               query: ProfileWithRepliesTimelineQuery,
               weight: 10,
-              validator: validateProfileWithRepliesTimelineResponse
+              validator: validateProfileWithRepliesTimelineResponse,
             },
             {
-              name: 'UserTweetsAndReplies',
+              name: "UserTweetsAndReplies",
               query: UserTweetsAndRepliesQuery,
               weight: 1,
-              validator: validateUserTweetsTimeline
-            }
+              validator: validateUserTweetsTimeline,
+            },
           ]
         : [
             {
-              name: 'ProfileTimeline',
+              name: "ProfileTimeline",
               query: ProfileTimelineQuery,
               weight: 10,
-              validator: validateProfileTimelineResponse
+              validator: validateProfileTimelineResponse,
             },
             {
-              name: 'UserTweets',
+              name: "UserTweets",
               query: UserTweetsQuery,
               weight: 1,
-              validator: validateUserTweetsTimeline
-            }
+              validator: validateUserTweetsTimeline,
+            },
           ],
       variables: {
         userId,
         rest_id: userId,
         count,
-        cursor: cursor ?? null
-      }
-    }
+        cursor: cursor ?? null,
+      },
+    },
   ]);
 
   if (!results.tweets?.success) {
@@ -113,64 +113,82 @@ export const profileStatusesAPI = async (
     return { code: 500, results: [], cursor: { top: null, bottom: null } };
   }
 
-  const instructions = getProfileStatusesTimelineInstructions(results.tweets.data);
+  const instructions = getProfileStatusesTimelineInstructions(
+    results.tweets.data,
+  );
   if (!instructions) {
     return { code: 404, results: [], cursor: { top: null, bottom: null } };
   }
 
   if (groupThreads) {
-    const { entries, cursors } = processGroupedTimelineInstructions(instructions);
-    const topCursor = cursors.find(cur => cur.cursorType === 'Top')?.value ?? null;
-    const bottomCursor = cursors.find(cur => cur.cursorType === 'Bottom')?.value ?? null;
+    const { entries, cursors } =
+      processGroupedTimelineInstructions(instructions);
+    const topCursor =
+      cursors.find((cur) => cur.cursorType === "Top")?.value ?? null;
+    const bottomCursor =
+      cursors.find((cur) => cur.cursorType === "Bottom")?.value ?? null;
 
     const builtResults = (
       await Promise.all(
         entries.map(async (e): Promise<TimelineEntryTwitter | null> => {
-          if (e.kind === 'status') {
+          if (e.kind === "status") {
             const s = await buildAPITwitterStatus(
               host,
               e.status,
               language,
               null,
               false,
-              false
-            ).catch(err => {
+              false,
+            ).catch((err) => {
               void 0;
               return null;
             });
-            return s !== null && !isTombstone(s) && !(s as FetchResults)?.status ? s : null;
+            return s !== null && !isTombstone(s) && !(s as FetchResults)?.status
+              ? s
+              : null;
           }
           const built = (
             await Promise.all(
-              e.statuses.map(st =>
-                buildAPITwitterStatus(host, st, language, null, false, false).catch(err => {
+              e.statuses.map((st) =>
+                buildAPITwitterStatus(
+                  host,
+                  st,
+                  language,
+                  null,
+                  false,
+                  false,
+                ).catch((err) => {
                   void 0;
                   return null;
-                })
-              )
+                }),
+              ),
             )
           ).filter(
             (s): s is APITwitterStatus =>
-              s !== null && !isTombstone(s) && !(s as FetchResults)?.status
+              s !== null && !isTombstone(s) && !(s as FetchResults)?.status,
           );
 
           if (built.length === 0) return null;
 
-          if (built.length === 1 && (!e.all_status_ids || e.all_status_ids.length <= 1)) {
+          if (
+            built.length === 1 &&
+            (!e.all_status_ids || e.all_status_ids.length <= 1)
+          ) {
             return built[0];
           }
 
           const allIds = e.all_status_ids;
-          const truncated = allIds !== undefined && allIds.length > built.length;
+          const truncated =
+            allIds !== undefined && allIds.length > built.length;
 
           return {
-            type: 'thread' as const,
+            type: "thread" as const,
             conversation_id: e.conversation_id,
             statuses: built,
             truncated,
-            ...(allIds && allIds.length > 0 ? { all_status_ids: allIds } : {})
+            ...(allIds && allIds.length > 0 ? { all_status_ids: allIds } : {}),
           };
-        })
+        }),
       )
     ).filter((x): x is TimelineEntryTwitter => x !== null);
 
@@ -179,26 +197,31 @@ export const profileStatusesAPI = async (
       results: builtResults,
       cursor: {
         top: topCursor,
-        bottom: bottomCursor
-      }
+        bottom: bottomCursor,
+      },
     };
   }
 
   const { statuses, cursors } = processTimelineInstructions(instructions);
-  const topCursor = cursors.find(cur => cur.cursorType === 'Top')?.value ?? null;
-  const bottomCursor = cursors.find(cur => cur.cursorType === 'Bottom')?.value ?? null;
+  const topCursor =
+    cursors.find((cur) => cur.cursorType === "Top")?.value ?? null;
+  const bottomCursor =
+    cursors.find((cur) => cur.cursorType === "Bottom")?.value ?? null;
 
   const builtStatuses = (
     await Promise.all(
-      statuses.map(status =>
-        buildAPITwitterStatus(host, status, language, null, false, false).catch(err => {
-          void 0;
-          return null;
-        })
-      )
+      statuses.map((status) =>
+        buildAPITwitterStatus(host, status, language, null, false, false).catch(
+          (err) => {
+            void 0;
+            return null;
+          },
+        ),
+      ),
     )
   ).filter(
-    (s): s is APITwitterStatus => s !== null && !isTombstone(s) && !(s as FetchResults)?.status
+    (s): s is APITwitterStatus =>
+      s !== null && !isTombstone(s) && !(s as FetchResults)?.status,
   );
 
   return {
@@ -206,8 +229,8 @@ export const profileStatusesAPI = async (
     results: builtStatuses,
     cursor: {
       top: topCursor,
-      bottom: bottomCursor
-    }
+      bottom: bottomCursor,
+    },
   };
 };
 
@@ -220,12 +243,12 @@ const PROFILE_STATUSES_FEED_TARGET_CAP = 100;
 async function paginateAndMerge(
   fetchPage: (cursor: string | null) => Promise<APISearchResults>,
   target: number,
-  maxPages = PROFILE_STATUSES_FEED_MAX_PAGES
+  maxPages = PROFILE_STATUSES_FEED_MAX_PAGES,
 ): Promise<APISearchResults> {
   const merged: APITwitterStatus[] = [];
   const seenIds = new Set<string>();
   let cursor: string | null = null;
-  let lastCursors: APISearchResults['cursor'] = { top: null, bottom: null };
+  let lastCursors: APISearchResults["cursor"] = { top: null, bottom: null };
   let pages = 0;
   let anySuccessfulPage = false;
 
@@ -278,7 +301,7 @@ async function paginateAndMerge(
   return {
     code: 200,
     results: merged.slice(0, target),
-    cursor: lastCursors
+    cursor: lastCursors,
   };
 }
 
@@ -292,20 +315,23 @@ export const profileStatusesAPIPaginated = async (
   maxTotal: number,
   host: TwitterBuildHost,
   withReplies = false,
-  language?: string
+  language?: string,
 ): Promise<APISearchResults> => {
-  const target = Math.min(PROFILE_STATUSES_FEED_TARGET_CAP, Math.max(1, maxTotal));
+  const target = Math.min(
+    PROFILE_STATUSES_FEED_TARGET_CAP,
+    Math.max(1, maxTotal),
+  );
   return paginateAndMerge(
-    cursor =>
+    (cursor) =>
       profileStatusesAPI(
         handleOrId,
         PROFILE_STATUSES_FEED_PER_PAGE,
         cursor,
         host,
         withReplies,
-        language
+        language,
       ),
-    target
+    target,
   );
 };
 
@@ -314,10 +340,10 @@ export const profileArticlesAPI = async (
   count: number,
   cursor: string | null,
   host: TwitterBuildHost,
-  language?: string
+  language?: string,
 ): Promise<APISearchResults> => {
   const userId =
-    handleOrId.type === 'userId'
+    handleOrId.type === "userId"
       ? handleOrId.value
       : await getTwitterUserRestIdByScreenName(host, handleOrId.value);
   if (!userId) {
@@ -326,30 +352,30 @@ export const profileArticlesAPI = async (
 
   const results = await graphQLOrchestrator(host, [
     {
-      key: 'articles',
+      key: "articles",
       required: true,
       headers: buildLanguageHeaders(language),
       methods: [
         {
-          name: 'ProfileArticlesTimeline',
+          name: "ProfileArticlesTimeline",
           query: ProfileArticlesTimelineQuery,
           weight: 500,
-          validator: validateProfileArticlesTimelineResponse
+          validator: validateProfileArticlesTimelineResponse,
         },
         {
-          name: 'UserArticlesTweets',
+          name: "UserArticlesTweets",
           query: UserArticlesTweetsQuery,
           weight: 500,
-          validator: validateUserArticlesTweetsResponse
-        }
+          validator: validateUserArticlesTweetsResponse,
+        },
       ],
       variables: {
         userId,
         rest_id: userId,
         count,
-        cursor: cursor ?? null
-      }
-    }
+        cursor: cursor ?? null,
+      },
+    },
   ]);
 
   if (!results.articles?.success) {
@@ -357,26 +383,33 @@ export const profileArticlesAPI = async (
     return { code: 500, results: [], cursor: { top: null, bottom: null } };
   }
 
-  const instructions = getProfileArticlesTimelineInstructions(results.articles.data);
+  const instructions = getProfileArticlesTimelineInstructions(
+    results.articles.data,
+  );
   if (!instructions) {
     return { code: 404, results: [], cursor: { top: null, bottom: null } };
   }
 
   const { statuses, cursors } = processTimelineInstructions(instructions);
-  const topCursor = cursors.find(cur => cur.cursorType === 'Top')?.value ?? null;
-  const bottomCursor = cursors.find(cur => cur.cursorType === 'Bottom')?.value ?? null;
+  const topCursor =
+    cursors.find((cur) => cur.cursorType === "Top")?.value ?? null;
+  const bottomCursor =
+    cursors.find((cur) => cur.cursorType === "Bottom")?.value ?? null;
 
   const builtStatuses = (
     await Promise.all(
-      statuses.map(status =>
-        buildAPITwitterStatus(host, status, language, null, false, false).catch(err => {
-          void 0;
-          return null;
-        })
-      )
+      statuses.map((status) =>
+        buildAPITwitterStatus(host, status, language, null, false, false).catch(
+          (err) => {
+            void 0;
+            return null;
+          },
+        ),
+      ),
     )
   ).filter(
-    (s): s is APITwitterStatus => s !== null && !isTombstone(s) && !(s as FetchResults)?.status
+    (s): s is APITwitterStatus =>
+      s !== null && !isTombstone(s) && !(s as FetchResults)?.status,
   );
 
   return {
@@ -384,8 +417,8 @@ export const profileArticlesAPI = async (
     results: builtStatuses,
     cursor: {
       top: topCursor,
-      bottom: bottomCursor
-    }
+      bottom: bottomCursor,
+    },
   };
 };
 
@@ -394,10 +427,10 @@ export const profileMediaAPI = async (
   count: number,
   cursor: string | null,
   host: TwitterBuildHost,
-  language?: string
+  language?: string,
 ): Promise<APISearchResults> => {
   const userId =
-    handleOrId.type === 'userId'
+    handleOrId.type === "userId"
       ? handleOrId.value
       : await getTwitterUserRestIdByScreenName(host, handleOrId.value);
   if (!userId) {
@@ -406,7 +439,7 @@ export const profileMediaAPI = async (
 
   const results = await graphQLOrchestrator(host, [
     {
-      key: 'media',
+      key: "media",
       required: true,
       headers: buildLanguageHeaders(language),
       query: UserMediaQuery,
@@ -414,9 +447,9 @@ export const profileMediaAPI = async (
       variables: {
         userId,
         count,
-        cursor: cursor ?? null
-      }
-    }
+        cursor: cursor ?? null,
+      },
+    },
   ]);
 
   if (!results.media?.success) {
@@ -424,26 +457,33 @@ export const profileMediaAPI = async (
     return { code: 500, results: [], cursor: { top: null, bottom: null } };
   }
 
-  const instructions = getProfileStatusesTimelineInstructions(results.media.data);
+  const instructions = getProfileStatusesTimelineInstructions(
+    results.media.data,
+  );
   if (!instructions) {
     return { code: 404, results: [], cursor: { top: null, bottom: null } };
   }
 
   const { statuses, cursors } = processTimelineInstructions(instructions);
-  const topCursor = cursors.find(cur => cur.cursorType === 'Top')?.value ?? null;
-  const bottomCursor = cursors.find(cur => cur.cursorType === 'Bottom')?.value ?? null;
+  const topCursor =
+    cursors.find((cur) => cur.cursorType === "Top")?.value ?? null;
+  const bottomCursor =
+    cursors.find((cur) => cur.cursorType === "Bottom")?.value ?? null;
 
   const builtStatuses = (
     await Promise.all(
-      statuses.map(status =>
-        buildAPITwitterStatus(host, status, language, null, false, false).catch(err => {
-          void 0;
-          return null;
-        })
-      )
+      statuses.map((status) =>
+        buildAPITwitterStatus(host, status, language, null, false, false).catch(
+          (err) => {
+            void 0;
+            return null;
+          },
+        ),
+      ),
     )
   ).filter(
-    (s): s is APITwitterStatus => s !== null && !isTombstone(s) && !(s as FetchResults)?.status
+    (s): s is APITwitterStatus =>
+      s !== null && !isTombstone(s) && !(s as FetchResults)?.status,
   );
 
   return {
@@ -451,8 +491,8 @@ export const profileMediaAPI = async (
     results: builtStatuses,
     cursor: {
       top: topCursor,
-      bottom: bottomCursor
-    }
+      bottom: bottomCursor,
+    },
   };
 };
 
@@ -463,25 +503,35 @@ export const profileMediaAPIPaginated = async (
   handleOrId: ProfileHandleOrId,
   maxTotal: number,
   host: TwitterBuildHost,
-  language?: string
+  language?: string,
 ): Promise<APISearchResults> => {
-  const target = Math.min(PROFILE_STATUSES_FEED_TARGET_CAP, Math.max(1, maxTotal));
+  const target = Math.min(
+    PROFILE_STATUSES_FEED_TARGET_CAP,
+    Math.max(1, maxTotal),
+  );
   return paginateAndMerge(
-    cursor => profileMediaAPI(handleOrId, PROFILE_STATUSES_FEED_PER_PAGE, cursor, host, language),
-    target
+    (cursor) =>
+      profileMediaAPI(
+        handleOrId,
+        PROFILE_STATUSES_FEED_PER_PAGE,
+        cursor,
+        host,
+        language,
+      ),
+    target,
   );
 };
 
 const relationshipListUserNotFound = (): APIProfileRelationshipList => ({
   code: 404,
   results: [],
-  cursor: { top: null, bottom: null }
+  cursor: { top: null, bottom: null },
 });
 
 const emptySuccessRelationshipList = (): APIProfileRelationshipList => ({
   code: 200,
   results: [],
-  cursor: { top: null, bottom: null }
+  cursor: { top: null, bottom: null },
 });
 
 const profileRelationshipListAPI = async (
@@ -489,10 +539,10 @@ const profileRelationshipListAPI = async (
   count: number,
   cursor: string | null,
   host: TwitterBuildHost,
-  kind: 'followers' | 'following'
+  kind: "followers" | "following",
 ): Promise<APIProfileRelationshipList> => {
   const userId =
-    handleOrId.type === 'userId'
+    handleOrId.type === "userId"
       ? handleOrId.value
       : await getTwitterUserRestIdByScreenName(host, handleOrId.value);
   if (!userId) {
@@ -500,48 +550,48 @@ const profileRelationshipListAPI = async (
   }
 
   const methods =
-    kind === 'followers'
+    kind === "followers"
       ? [
           {
-            name: 'Followers',
+            name: "Followers",
             query: FollowersQuery,
             weight: 500,
-            validator: validateUserTweetsTimeline
+            validator: validateUserTweetsTimeline,
           },
           {
-            name: 'FollowersByUserIDTimeline',
+            name: "FollowersByUserIDTimeline",
             query: FollowersByUserIDTimelineQuery,
             weight: 500,
-            validator: validateFollowersByUserIDTimelineResponse
-          }
+            validator: validateFollowersByUserIDTimelineResponse,
+          },
         ]
       : [
           {
-            name: 'Following',
+            name: "Following",
             query: FollowingQuery,
             weight: 500,
-            validator: validateUserTweetsTimeline
+            validator: validateUserTweetsTimeline,
           },
           {
-            name: 'FollowingByUserIDTimeline',
+            name: "FollowingByUserIDTimeline",
             query: FollowingByUserIDTimelineQuery,
             weight: 500,
-            validator: validateFollowingByUserIDTimelineResponse
-          }
+            validator: validateFollowingByUserIDTimelineResponse,
+          },
         ];
 
   const results = await graphQLOrchestrator(host, [
     {
-      key: 'list',
+      key: "list",
       required: true,
       methods,
       variables: {
         userId,
         rest_id: userId,
         count,
-        cursor: cursor ?? null
-      }
-    }
+        cursor: cursor ?? null,
+      },
+    },
   ]);
 
   if (!results.list?.success) {
@@ -549,21 +599,27 @@ const profileRelationshipListAPI = async (
     return {
       code: 500,
       results: [],
-      cursor: { top: null, bottom: null }
+      cursor: { top: null, bottom: null },
     };
   }
 
-  const instructions = getFollowersFollowingInstructions(results.list.data, kind);
+  const instructions = getFollowersFollowingInstructions(
+    results.list.data,
+    kind,
+  );
   if (!instructions) {
     return emptySuccessRelationshipList();
   }
 
-  const { users, cursors } = processUserRelationshipTimelineInstructions(instructions);
-  const topCursor = cursors.find(cur => cur.cursorType === 'Top')?.value ?? null;
-  const bottomCursor = cursors.find(cur => cur.cursorType === 'Bottom')?.value ?? null;
+  const { users, cursors } =
+    processUserRelationshipTimelineInstructions(instructions);
+  const topCursor =
+    cursors.find((cur) => cur.cursorType === "Top")?.value ?? null;
+  const bottomCursor =
+    cursors.find((cur) => cur.cursorType === "Bottom")?.value ?? null;
 
   const builtUsers = users
-    .map(u => {
+    .map((u) => {
       try {
         return convertToApiUser(u, false);
       } catch (err) {
@@ -578,8 +634,8 @@ const profileRelationshipListAPI = async (
     results: builtUsers,
     cursor: {
       top: topCursor,
-      bottom: bottomCursor
-    }
+      bottom: bottomCursor,
+    },
   };
 };
 
@@ -587,14 +643,14 @@ export const profileFollowersAPI = async (
   handleOrId: ProfileHandleOrId,
   count: number,
   cursor: string | null,
-  host: TwitterBuildHost
+  host: TwitterBuildHost,
 ): Promise<APIProfileRelationshipList> =>
-  profileRelationshipListAPI(handleOrId, count, cursor, host, 'followers');
+  profileRelationshipListAPI(handleOrId, count, cursor, host, "followers");
 
 export const profileFollowingAPI = async (
   handleOrId: ProfileHandleOrId,
   count: number,
   cursor: string | null,
-  host: TwitterBuildHost
+  host: TwitterBuildHost,
 ): Promise<APIProfileRelationshipList> =>
-  profileRelationshipListAPI(handleOrId, count, cursor, host, 'following');
+  profileRelationshipListAPI(handleOrId, count, cursor, host, "following");

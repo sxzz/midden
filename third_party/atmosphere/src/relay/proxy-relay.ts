@@ -12,13 +12,20 @@ export type RelayFetchOptions = {
 
 /** Returns a `fetch`-compatible function that prefixes `baseUrl` and adds UA / optional API key. */
 export function createRelayFetch(opts: RelayFetchOptions): typeof fetch {
-  const base = opts.baseUrl.replace(/\/$/, '');
+  const base = opts.baseUrl.replace(/\/$/, "");
   return async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const target = url.startsWith('http') ? url : `${base}${url.startsWith('/') ? '' : '/'}${url}`;
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    const target = url.startsWith("http")
+      ? url
+      : `${base}${url.startsWith("/") ? "" : "/"}${url}`;
     const headers = new Headers(init?.headers);
-    headers.set('User-Agent', opts.userAgent);
-    if (opts.apiKey) headers.set('Authorization', `Bearer ${opts.apiKey}`);
+    headers.set("User-Agent", opts.userAgent);
+    if (opts.apiKey) headers.set("Authorization", `Bearer ${opts.apiKey}`);
     return fetch(target, { ...init, headers });
   };
 }

@@ -218,5 +218,4 @@ func TestCollectionProgressAndMore(t *testing.T) {
 	if paused {
 		t.Fatal("unrelated capture paused")
 	}
-
 }

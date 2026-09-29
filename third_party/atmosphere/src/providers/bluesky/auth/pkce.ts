@@ -8,10 +8,10 @@ function randomBase64Url(byteLength: number): string {
 }
 
 function base64UrlEncode(buf: Uint8Array): string {
-  let bin = '';
+  let bin = "";
   for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]!);
   const b64 = btoa(bin);
-  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 /** RFC 7636: 43–128 chars URL-safe base64 (we use 64 random bytes → ~86 chars). */
@@ -20,9 +20,11 @@ export function generatePkceVerifier(): string {
   return randomBase64Url(len);
 }
 
-export async function pkceChallengeFromVerifier(verifier: string): Promise<string> {
+export async function pkceChallengeFromVerifier(
+  verifier: string,
+): Promise<string> {
   const enc = new TextEncoder().encode(verifier);
-  const digest = await crypto.subtle.digest('SHA-256', enc);
+  const digest = await crypto.subtle.digest("SHA-256", enc);
   return base64UrlEncode(new Uint8Array(digest));
 }
 

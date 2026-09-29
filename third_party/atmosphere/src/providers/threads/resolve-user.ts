@@ -1,10 +1,16 @@
-import type { APIUser } from '../../types/api-schemas.js';
-import type { InstagramCredentials } from '../../types/proxy-credentials.js';
-import { resolveThreadsAccounts, type ThreadsRequestContext } from './account-proxy.js';
-import { fetchThreadsSession, fetchThreadsUserByUsername as fetchWebUser } from './client.js';
-import { fetchThreadsUserByUsername } from './private-api.js';
-import { threadsUserFromPrivateRecord } from './private-processor.js';
-import { userFromThreadsProfilePayload } from './processor.js';
+import type { APIUser } from "../../types/api-schemas.js";
+import type { InstagramCredentials } from "../../types/proxy-credentials.js";
+import {
+  resolveThreadsAccounts,
+  type ThreadsRequestContext,
+} from "./account-proxy.js";
+import {
+  fetchThreadsSession,
+  fetchThreadsUserByUsername as fetchWebUser,
+} from "./client.js";
+import { fetchThreadsUserByUsername } from "./private-api.js";
+import { threadsUserFromPrivateRecord } from "./private-processor.js";
+import { userFromThreadsProfilePayload } from "./processor.js";
 
 export type ResolvedThreadsUser = {
   code: 200 | 404 | 500;
@@ -21,17 +27,19 @@ export type ResolvedThreadsUser = {
 export async function resolveThreadsUser(
   username: string,
   ctx: ThreadsRequestContext | undefined,
-  options: { accounts?: InstagramCredentials[] } = {}
+  options: { accounts?: InstagramCredentials[] } = {},
 ): Promise<ResolvedThreadsUser> {
-  const handle = username.replace(/^@/, '');
+  const handle = username.replace(/^@/, "");
   const accounts = options.accounts ?? (await resolveThreadsAccounts(ctx));
 
   if (accounts.length) {
     const res = await fetchThreadsUserByUsername(handle, ctx, { accounts });
-    if (res.ok && res.json && typeof res.json === 'object') {
+    if (res.ok && res.json && typeof res.json === "object") {
       const rec = (res.json as { user?: unknown }).user;
-      if (rec && typeof rec === 'object') {
-        const user = threadsUserFromPrivateRecord(rec as Record<string, unknown>);
+      if (rec && typeof rec === "object") {
+        const user = threadsUserFromPrivateRecord(
+          rec as Record<string, unknown>,
+        );
         if (user) return { code: 200, user, accounts };
       }
     }
@@ -44,14 +52,20 @@ export async function resolveThreadsUser(
   if (!session) {
     return { code: 500, user: null, accounts };
   }
-  const hover = await fetchWebUser({ username: handle, session, userAgent: ctx?.userAgent });
+  const hover = await fetchWebUser({
+    username: handle,
+    session,
+    userAgent: ctx?.userAgent,
+  });
   if (!hover.ok || hover.json == null) {
     return { code: hover.status === 404 ? 404 : 500, user: null, accounts };
   }
   const rec = (hover.json as { data?: { user?: unknown } })?.data?.user;
-  if (!rec || typeof rec !== 'object') {
+  if (!rec || typeof rec !== "object") {
     return { code: 404, user: null, accounts };
   }
   const user = userFromThreadsProfilePayload(rec as Record<string, unknown>);
-  return user ? { code: 200, user, accounts } : { code: 404, user: null, accounts };
+  return user
+    ? { code: 200, user, accounts }
+    : { code: 404, user: null, accounts };
 }

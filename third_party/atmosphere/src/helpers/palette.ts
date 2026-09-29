@@ -2,7 +2,7 @@
 
 const componentToHex = (component: number) => {
   const hex = component.toString(16);
-  return hex.length === 1 ? '0' + hex : hex;
+  return hex.length === 1 ? "0" + hex : hex;
 };
 
 const rgbToHex = (r: number, g: number, b: number) =>
@@ -11,11 +11,17 @@ const rgbToHex = (r: number, g: number, b: number) =>
 /**
  * Picks a vibrant color from a Twitter `MediaPlaceholderColor` palette, or `fallbackHex` (e.g. `#1b2836`).
  */
-export const colorFromPalette = (palette: MediaPlaceholderColor[], fallbackHex: string) => {
+export const colorFromPalette = (
+  palette: MediaPlaceholderColor[],
+  fallbackHex: string,
+) => {
   for (let i = 0; i < palette.length; i++) {
     const rgb = palette[i].rgb;
 
-    if (rgb.red + rgb.green + rgb.blue < 120 || rgb.red + rgb.green + rgb.blue > 240 * 3) {
+    if (
+      rgb.red + rgb.green + rgb.blue < 120 ||
+      rgb.red + rgb.green + rgb.blue > 240 * 3
+    ) {
       continue;
     }
 
@@ -23,7 +29,11 @@ export const colorFromPalette = (palette: MediaPlaceholderColor[], fallbackHex: 
   }
 
   if (palette?.[0]?.rgb) {
-    return rgbToHex(palette[0].rgb.red, palette[0].rgb.green, palette[0].rgb.blue);
+    return rgbToHex(
+      palette[0].rgb.red,
+      palette[0].rgb.green,
+      palette[0].rgb.blue,
+    );
   }
 
   return fallbackHex;

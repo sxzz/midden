@@ -1,1 +1,1 @@
-export { extractLsdFromHtml } from '../instagram/extractors.js';
+export { extractLsdFromHtml } from "../instagram/extractors.js";

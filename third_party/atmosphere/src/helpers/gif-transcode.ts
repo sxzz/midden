@@ -1,5 +1,8 @@
 /** Pick a GIF transcode host from `domains` using a stable hash of `twitterId`. */
-export const getGIFTranscodeDomain = (twitterId: string, domains: string[]): string | null => {
+export const getGIFTranscodeDomain = (
+  twitterId: string,
+  domains: string[],
+): string | null => {
   if (domains.length === 0) {
     return null;
   }

@@ -1,22 +1,22 @@
-import { filterObject } from './filter.js';
-import { ClientTransaction } from './transaction/transaction.js';
-import { getTwitterProxyRuntime } from '../../twitter-runtime.js';
-import { mergeCookies } from './cookies.js';
-import { needsTransactionId } from './allowlist.js';
+import { filterObject } from "./filter.js";
+import { ClientTransaction } from "./transaction/transaction.js";
+import { getTwitterProxyRuntime } from "../../twitter-runtime.js";
+import { mergeCookies } from "./cookies.js";
+import { needsTransactionId } from "./allowlist.js";
 import {
   classifyAPIErrors,
   isSearchTimelineClientErrorResponse,
   jsonError,
   jsonHasTruthyErrorsProperty,
-  twitterResponseLooksEmpty
-} from './errors.js';
-import { sendDiscordAlert } from './discord.js';
-import type { ProxyEnv } from '../../../types/proxy-credentials.js';
+  twitterResponseLooksEmpty,
+} from "./errors.js";
+import { sendDiscordAlert } from "./discord.js";
+import type { ProxyEnv } from "../../../types/proxy-credentials.js";
 
 const redactUsername = false;
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (value !== null && typeof value === 'object') {
+  if (value !== null && typeof value === "object") {
     return value as Record<string, unknown>;
   }
   return undefined;
@@ -31,15 +31,18 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
  * @param env - Environment/configuration values used by the proxy (for example webhook and feature flags)
  * @returns The response returned to the caller reflecting the proxied api.x.com response (status, headers, and possibly transformed body) or an error response when retries are exhausted
  */
-export async function proxyTwitterRequest(request: Request, env: ProxyEnv): Promise<Response> {
+export async function proxyTwitterRequest(
+  request: Request,
+  env: ProxyEnv,
+): Promise<Response> {
   const url = new URL(request.url);
   const apiUrl = `https://api.x.com${url.pathname}${url.search}`;
-  const requestPath = url.pathname.split('?')[0];
+  const requestPath = url.pathname.split("?")[0];
 
   const headers = new Headers(request.headers);
-  headers.delete('x-guest-token');
+  headers.delete("x-guest-token");
 
-  let existingCookies = request.headers.get('Cookie');
+  let existingCookies = request.headers.get("Cookie");
 
   const newRequestInit: RequestInit = {
     method: request.method,
@@ -47,10 +50,10 @@ export async function proxyTwitterRequest(request: Request, env: ProxyEnv): Prom
     body: request.body,
     redirect: request.redirect,
     integrity: request.integrity,
-    signal: request.signal
+    signal: request.signal,
   };
 
-  const textDecoder = new TextDecoder('utf-8');
+  const textDecoder = new TextDecoder("utf-8");
 
   let response!: Response;
   let json: unknown;
@@ -60,10 +63,14 @@ export async function proxyTwitterRequest(request: Request, env: ProxyEnv): Prom
 
   do {
     errors = false;
-    const { authToken, csrfToken, username } = getTwitterProxyRuntime().getRandomTwitterAccount();
-    const graphql = apiUrl.includes('graphql');
-    const authValid = typeof authToken === 'string' && authToken.trim().length > 0;
-    const csrfValid = !graphql || (typeof csrfToken === 'string' && csrfToken.trim().length > 0);
+    const { authToken, csrfToken, username } =
+      getTwitterProxyRuntime().getRandomTwitterAccount();
+    const graphql = apiUrl.includes("graphql");
+    const authValid =
+      typeof authToken === "string" && authToken.trim().length > 0;
+    const csrfValid =
+      !graphql ||
+      (typeof csrfToken === "string" && csrfToken.trim().length > 0);
 
     if (!authValid || !csrfValid) {
       void 0;
@@ -71,27 +78,27 @@ export async function proxyTwitterRequest(request: Request, env: ProxyEnv): Prom
     } else {
       let newCookies = `auth_token=${authToken}`;
       if (graphql) {
-        existingCookies = existingCookies?.replace(/ct0=(.+?);/, '') || '';
+        existingCookies = existingCookies?.replace(/ct0=(.+?);/, "") || "";
         newCookies = `auth_token=${authToken}; ct0=${csrfToken}; `;
-        headers.set('x-csrf-token', csrfToken);
+        headers.set("x-csrf-token", csrfToken);
       }
       const cookies = mergeCookies(existingCookies?.toString(), newCookies);
 
-      headers.set('Cookie', cookies);
-      headers.delete('Accept-Encoding');
+      headers.set("Cookie", cookies);
+      headers.delete("Accept-Encoding");
 
-      headers.delete('x-client-transaction-id');
+      headers.delete("x-client-transaction-id");
       if (needsTransactionId(apiUrl)) {
         try {
           const transaction = await ClientTransaction.create(attempts > 1);
           const transactionId = await transaction.generateTransactionId(
             request.method,
-            requestPath
+            requestPath,
           );
           void 0;
-          headers.set('x-client-transaction-id', transactionId);
+          headers.set("x-client-transaction-id", transactionId);
         } catch (e) {
-          headers.delete('x-client-transaction-id');
+          headers.delete("x-client-transaction-id");
           void 0;
         }
       }
@@ -105,11 +112,12 @@ export async function proxyTwitterRequest(request: Request, env: ProxyEnv): Prom
       void 0;
 
       const rawBody = textDecoder.decode(await response.arrayBuffer());
-      decodedBody = rawBody.match(/\{[\s\S]+\}/gm)?.[0] || '{}';
+      decodedBody = rawBody.match(/\{[\s\S]+\}/gm)?.[0] || "{}";
 
-      const rateLimitRemaining = response.headers.get('x-rate-limit-remaining') ?? 'N/A';
+      const rateLimitRemaining =
+        response.headers.get("x-rate-limit-remaining") ?? "N/A";
       void 0;
-      const rateLimitReset = response.headers.get('x-rate-limit-reset') ?? '0';
+      const rateLimitReset = response.headers.get("x-rate-limit-reset") ?? "0";
       const rateLimitResetDate = new Date(Number(rateLimitReset) * 1000);
       void 0;
 
@@ -123,20 +131,24 @@ export async function proxyTwitterRequest(request: Request, env: ProxyEnv): Prom
           decodedBody.includes('"reason":"NsfwViewerIsUnderage"')
         ) {
           const outcome = classifyAPIErrors(json, decodedBody, response.status);
-          if (outcome.action === 'respond') {
+          if (outcome.action === "respond") {
             return outcome.response;
           }
-          if (outcome.action === 'ignore') {
+          if (outcome.action === "ignore") {
             errors = false;
           } else {
             errors = true;
           }
         }
 
-        let variablesDisplay = url.searchParams.get('variables') ?? '';
+        let variablesDisplay = url.searchParams.get("variables") ?? "";
         try {
           if (variablesDisplay) {
-            variablesDisplay = JSON.stringify(JSON.parse(variablesDisplay), null, 2);
+            variablesDisplay = JSON.stringify(
+              JSON.parse(variablesDisplay),
+              null,
+              2,
+            );
           }
         } catch {
           variablesDisplay = url.search;
@@ -151,15 +163,18 @@ export async function proxyTwitterRequest(request: Request, env: ProxyEnv): Prom
               env,
               username,
               requestPath,
-              asRecord(json)?.['errors'],
-              variablesDisplay
+              asRecord(json)?.["errors"],
+              variablesDisplay,
             );
           } catch (alertErr) {
             void 0;
           }
         }
 
-        if (twitterResponseLooksEmpty(json) && !isSearchTimelineClientErrorResponse(json)) {
+        if (
+          twitterResponseLooksEmpty(json) &&
+          !isSearchTimelineClientErrorResponse(json)
+        ) {
           void 0;
           errors = true;
         }
@@ -173,7 +188,10 @@ export async function proxyTwitterRequest(request: Request, env: ProxyEnv): Prom
         errors = true;
       }
 
-      if (apiUrl.includes('translation.json') || apiUrl.includes('live_video_stream')) {
+      if (
+        apiUrl.includes("translation.json") ||
+        apiUrl.includes("live_video_stream")
+      ) {
         decodedBody = rawBody;
       }
     }
@@ -183,7 +201,7 @@ export async function proxyTwitterRequest(request: Request, env: ProxyEnv): Prom
       attempts++;
       if (attempts > 4) {
         void 0;
-        return jsonError('Maximum failed attempts reached', 502);
+        return jsonError("Maximum failed attempts reached", 502);
       }
     }
   } while (errors);
@@ -191,7 +209,7 @@ export async function proxyTwitterRequest(request: Request, env: ProxyEnv): Prom
   const decodedResponse = new Response(decodedBody, {
     status: response.status,
     statusText: response.statusText,
-    headers: response.headers
+    headers: response.headers,
   });
 
   void 0;

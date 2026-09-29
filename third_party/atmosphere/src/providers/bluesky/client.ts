@@ -1,5 +1,8 @@
-import { getBlueskyProviderEnv, getBlueskyProxyRuntime } from '../bluesky-runtime.js';
-import { getBlueskyAccessJwt, invalidateBlueskySession } from './session.js';
+import {
+  getBlueskyProviderEnv,
+  getBlueskyProxyRuntime,
+} from "../bluesky-runtime.js";
+import { getBlueskyAccessJwt, invalidateBlueskySession } from "./session.js";
 
 /** Per-upstream request cap for public AppView (fail fast, then try proxy PDS). */
 export const BLUESKY_UPSTREAM_TIMEOUT_MS = 3_000;
@@ -20,7 +23,7 @@ export type XrpcErrorBody = {
 type BlueskyXrpcParams = Record<string, string | number | undefined | string[]>;
 
 function trimBaseUrl(base: string): string {
-  return base.replace(/\/$/, '');
+  return base.replace(/\/$/, "");
 }
 
 function paramsToSearchString(params: BlueskyXrpcParams): string {
@@ -36,7 +39,11 @@ function paramsToSearchString(params: BlueskyXrpcParams): string {
   return qs.toString();
 }
 
-function buildXrpcUrl(baseUrl: string, path: string, params: BlueskyXrpcParams): string {
+function buildXrpcUrl(
+  baseUrl: string,
+  path: string,
+  params: BlueskyXrpcParams,
+): string {
   const qs = paramsToSearchString(params);
   return `${trimBaseUrl(baseUrl)}/xrpc/${path}?${qs}`;
 }
@@ -54,14 +61,14 @@ async function fetchXrpcOnce<T>(
   baseUrl: string,
   path: string,
   params: BlueskyXrpcParams,
-  options: { authorization?: string; timeoutMs: number }
+  options: { authorization?: string; timeoutMs: number },
 ): Promise<XrpcAttemptOk<T> | XrpcAttemptFail> {
   const url = buildXrpcUrl(baseUrl, path, params);
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), options.timeoutMs);
   try {
-    const headers: Record<string, string> = { Accept: 'application/json' };
-    if (options.authorization) headers['Authorization'] = options.authorization;
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (options.authorization) headers["Authorization"] = options.authorization;
     const res = await fetch(url, { signal: ac.signal, headers });
     const body = await res.text();
     if (!res.ok) {
@@ -70,13 +77,15 @@ async function fetchXrpcOnce<T>(
     try {
       return { ok: true, data: JSON.parse(body) as T };
     } catch {
-      return { ok: false, status: 502, body: 'invalid JSON from Bluesky' };
+      return { ok: false, status: 502, body: "invalid JSON from Bluesky" };
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const aborted =
-      (e instanceof Error && e.name === 'AbortError') ||
-      (typeof DOMException !== 'undefined' && e instanceof DOMException && e.name === 'AbortError');
+      (e instanceof Error && e.name === "AbortError") ||
+      (typeof DOMException !== "undefined" &&
+        e instanceof DOMException &&
+        e.name === "AbortError");
     return { ok: false, status: 504, body: msg, aborted };
   } finally {
     clearTimeout(t);
@@ -87,18 +96,23 @@ function isNotFoundError(status: number, body: string): boolean {
   if (status === 404) return true;
   try {
     const j = JSON.parse(body) as { error?: string };
-    const err = j.error ?? '';
-    if (err === 'NotFound' || err === 'RecordNotFound') return true;
+    const err = j.error ?? "";
+    if (err === "NotFound" || err === "RecordNotFound") return true;
   } catch {
     /* ignore */
   }
   return false;
 }
 
-function isFallbackEligible(status: number, body: string, aborted?: boolean): boolean {
+function isFallbackEligible(
+  status: number,
+  body: string,
+  aborted?: boolean,
+): boolean {
   if (isNotFoundError(status, body)) return false;
   if (aborted) return true;
-  if (status === 429 || status === 502 || status === 503 || status === 504) return true;
+  if (status === 429 || status === 502 || status === 503 || status === 504)
+    return true;
   if (status === 401) return true;
   return false;
 }
@@ -106,9 +120,10 @@ function isFallbackEligible(status: number, body: string, aborted?: boolean): bo
 async function executeBlueskyXrpc<T>(
   path: string,
   params: BlueskyXrpcParams,
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<
-  { ok: true; data: T; proxyHostHint?: string } | { ok: false; status: number; body: string }
+  | { ok: true; data: T; proxyHostHint?: string }
+  | { ok: false; status: number; body: string }
 > {
   const credentialKey = opts?.credentialKey;
   const px = getBlueskyProxyRuntime();
@@ -116,7 +131,9 @@ async function executeBlueskyXrpc<T>(
   const publicTimeoutMs = BLUESKY_UPSTREAM_TIMEOUT_MS;
   const proxyTimeoutMs = BLUESKY_PROXY_UPSTREAM_TIMEOUT_MS;
 
-  const first = await fetchXrpcOnce<T>(publicBase, path, params, { timeoutMs: publicTimeoutMs });
+  const first = await fetchXrpcOnce<T>(publicBase, path, params, {
+    timeoutMs: publicTimeoutMs,
+  });
   const publicUpstreamTimedOut = !first.ok && Boolean(first.aborted);
   if (first.ok) {
     return { ok: true, data: first.data };
@@ -151,23 +168,30 @@ async function executeBlueskyXrpc<T>(
     return h || undefined;
   };
 
-  const proxyAccounts = px.getShuffledBlueskyAccounts(opts?.preferredProxyServiceHost);
+  const proxyAccounts = px.getShuffledBlueskyAccounts(
+    opts?.preferredProxyServiceHost,
+  );
   for (const cred of proxyAccounts) {
     const accessJwt = await getBlueskyAccessJwt(cred);
     if (!accessJwt) continue;
 
-    const proxyHost = px.blueskyProxyServiceHostname(cred.service) || trimBaseUrl(cred.service);
+    const proxyHost =
+      px.blueskyProxyServiceHostname(cred.service) || trimBaseUrl(cred.service);
     if (publicUpstreamTimedOut) {
       void 0;
     }
 
     let attempt = await fetchXrpcOnce<T>(cred.service, path, params, {
       authorization: `Bearer ${accessJwt}`,
-      timeoutMs: proxyTimeoutMs
+      timeoutMs: proxyTimeoutMs,
     });
 
     if (attempt.ok) {
-      return { ok: true, data: attempt.data, proxyHostHint: proxyHostHintFor(cred.service) };
+      return {
+        ok: true,
+        data: attempt.data,
+        proxyHostHint: proxyHostHintFor(cred.service),
+      };
     }
 
     // Public already failed with a non-NotFound error (outage, timeout, etc.); do not let a
@@ -187,11 +211,15 @@ async function executeBlueskyXrpc<T>(
       if (freshJwt) {
         attempt = await fetchXrpcOnce<T>(cred.service, path, params, {
           authorization: `Bearer ${freshJwt}`,
-          timeoutMs: proxyTimeoutMs
+          timeoutMs: proxyTimeoutMs,
         });
         if (attempt.ok) {
           void 0;
-          return { ok: true, data: attempt.data, proxyHostHint: proxyHostHintFor(cred.service) };
+          return {
+            ok: true,
+            data: attempt.data,
+            proxyHostHint: proxyHostHintFor(cred.service),
+          };
         }
         if (isNotFoundError(attempt.status, attempt.body)) {
           continue;
@@ -213,7 +241,7 @@ async function executeBlueskyXrpc<T>(
 async function executeBlueskyGetJson<T>(
   path: string,
   params: BlueskyXrpcParams,
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<T | null> {
   const r = await executeBlueskyXrpc<T>(path, params, opts);
   if (!r.ok) return null;
@@ -228,21 +256,27 @@ export const fetchPostThreadResult = async (
   atUri: string,
   depth = 10,
   parentHeight?: number,
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<FetchPostThreadResult> => {
   const result = await executeBlueskyXrpc<BlueskyThreadResponse>(
-    'app.bsky.feed.getPostThread',
+    "app.bsky.feed.getPostThread",
     {
       uri: atUri,
       depth,
-      parentHeight
+      parentHeight,
     },
-    opts
+    opts,
   );
   if (!result.ok) {
     const notFound = isNotFoundError(result.status, result.body);
     void 0;
-    return { ok: false, data: null, notFound, status: result.status, body: result.body };
+    return {
+      ok: false,
+      data: null,
+      notFound,
+      status: result.status,
+      body: result.body,
+    };
   }
   return { ok: true, data: result.data, proxyHostHint: result.proxyHostHint };
 };
@@ -251,7 +285,7 @@ export const fetchPostThread = async (
   atUri: string,
   depth = 10,
   parentHeight?: number,
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<BlueskyThreadResponse | null> => {
   const r = await fetchPostThreadResult(atUri, depth, parentHeight, opts);
   return r.ok ? r.data : null;
@@ -260,22 +294,27 @@ export const fetchPostThread = async (
 /** Batch-resolve post views (quotes not hydrated in thread, etc.). */
 export const fetchPostsByUris = async (
   uris: string[],
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<BlueskyPost[]> => {
   if (!uris.length) return [];
   const j = await executeBlueskyGetJson<{ posts?: BlueskyPost[] }>(
-    'app.bsky.feed.getPosts',
+    "app.bsky.feed.getPosts",
     { uris },
-    opts
+    opts,
   );
   return j?.posts ?? [];
 };
 
 export const fetchProfilesByActors = async (
   actors: string[],
-  opts?: BlueskyFetchOpts
-): Promise<Map<string, { handle: string; displayName?: string; avatar?: string }>> => {
-  const out = new Map<string, { handle: string; displayName?: string; avatar?: string }>();
+  opts?: BlueskyFetchOpts,
+): Promise<
+  Map<string, { handle: string; displayName?: string; avatar?: string }>
+> => {
+  const out = new Map<
+    string,
+    { handle: string; displayName?: string; avatar?: string }
+  >();
   if (!actors.length) return out;
   const j = await executeBlueskyGetJson<{
     profiles?: {
@@ -284,23 +323,28 @@ export const fetchProfilesByActors = async (
       displayName?: string;
       avatar?: string;
     }[];
-  }>('app.bsky.actor.getProfiles', { actors }, opts);
+  }>("app.bsky.actor.getProfiles", { actors }, opts);
   for (const p of j?.profiles ?? []) {
-    out.set(p.did, { handle: p.handle, displayName: p.displayName, avatar: p.avatar });
+    out.set(p.did, {
+      handle: p.handle,
+      displayName: p.displayName,
+      avatar: p.avatar,
+    });
   }
   return out;
 };
 
 export const fetchActorProfile = async (
   actor: string,
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<
-  { ok: true; data: BlueskyProfileViewDetailed } | { ok: false; status: number; body: string }
+  | { ok: true; data: BlueskyProfileViewDetailed }
+  | { ok: false; status: number; body: string }
 > => {
   const result = await executeBlueskyXrpc<BlueskyProfileViewDetailed>(
-    'app.bsky.actor.getProfile',
+    "app.bsky.actor.getProfile",
     { actor },
-    opts
+    opts,
   );
   if (!result.ok) {
     void 0;
@@ -315,19 +359,20 @@ export const fetchAuthorFeed = async (
     cursor?: string;
     filter: BlueskyAuthorFeedFilter;
   },
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<
-  { ok: true; data: BlueskyAuthorFeedResponse } | { ok: false; status: number; body: string }
+  | { ok: true; data: BlueskyAuthorFeedResponse }
+  | { ok: false; status: number; body: string }
 > => {
   const result = await executeBlueskyXrpc<BlueskyAuthorFeedResponse>(
-    'app.bsky.feed.getAuthorFeed',
+    "app.bsky.feed.getAuthorFeed",
     {
       actor: params.actor,
       limit: params.limit,
       cursor: params.cursor,
-      filter: params.filter
+      filter: params.filter,
     },
-    opts
+    opts,
   );
   if (!result.ok) {
     void 0;
@@ -341,18 +386,19 @@ export const fetchActorLikes = async (
     limit: number;
     cursor?: string;
   },
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<
-  { ok: true; data: BlueskyGetActorLikesResponse } | { ok: false; status: number; body: string }
+  | { ok: true; data: BlueskyGetActorLikesResponse }
+  | { ok: false; status: number; body: string }
 > => {
   const result = await executeBlueskyXrpc<BlueskyGetActorLikesResponse>(
-    'app.bsky.feed.getActorLikes',
+    "app.bsky.feed.getActorLikes",
     {
       actor: params.actor,
       limit: params.limit,
-      cursor: params.cursor
+      cursor: params.cursor,
     },
-    opts
+    opts,
   );
   if (!result.ok) {
     void 0;
@@ -364,23 +410,24 @@ export const fetchActorLikes = async (
 export const fetchSearchPosts = async (
   params: {
     q: string;
-    sort: 'latest' | 'top';
+    sort: "latest" | "top";
     limit: number;
     cursor?: string;
   },
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<
-  { ok: true; data: BlueskySearchPostsResponse } | { ok: false; status: number; body: string }
+  | { ok: true; data: BlueskySearchPostsResponse }
+  | { ok: false; status: number; body: string }
 > => {
   const result = await executeBlueskyXrpc<BlueskySearchPostsResponse>(
-    'app.bsky.feed.searchPosts',
+    "app.bsky.feed.searchPosts",
     {
       q: params.q,
       sort: params.sort,
       limit: params.limit,
-      cursor: params.cursor
+      cursor: params.cursor,
     },
-    opts
+    opts,
   );
   if (!result.ok) {
     void 0;
@@ -398,18 +445,19 @@ export const fetchSearchActors = async (
     limit: number;
     cursor?: string;
   },
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<
-  { ok: true; data: BlueskySearchActorsResponse } | { ok: false; status: number; body: string }
+  | { ok: true; data: BlueskySearchActorsResponse }
+  | { ok: false; status: number; body: string }
 > => {
   const result = await executeBlueskyXrpc<BlueskySearchActorsResponse>(
-    'app.bsky.actor.searchActors',
+    "app.bsky.actor.searchActors",
     {
       q: params.q,
       limit: params.limit,
-      cursor: params.cursor
+      cursor: params.cursor,
     },
-    opts
+    opts,
   );
   if (!result.ok) {
     void 0;
@@ -426,18 +474,18 @@ export const fetchSearchActorsTypeahead = async (
     q: string;
     limit: number;
   },
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<
   | { ok: true; data: BlueskySearchActorsTypeaheadResponse }
   | { ok: false; status: number; body: string }
 > => {
   const result = await executeBlueskyXrpc<BlueskySearchActorsTypeaheadResponse>(
-    'app.bsky.actor.searchActorsTypeahead',
+    "app.bsky.actor.searchActorsTypeahead",
     {
       q: params.q,
-      limit: params.limit
+      limit: params.limit,
     },
-    opts
+    opts,
   );
   if (!result.ok) {
     void 0;
@@ -450,7 +498,7 @@ const GET_PROFILES_MAX_ACTORS = 25;
 /** Batch `app.bsky.actor.getProfiles` (max 25 actors per request per lexicon). */
 export const fetchProfilesDetailedBatched = async (
   actors: string[],
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<Map<string, BlueskyProfileViewDetailed>> => {
   const out = new Map<string, BlueskyProfileViewDetailed>();
   if (!actors.length) return out;
@@ -458,11 +506,9 @@ export const fetchProfilesDetailedBatched = async (
 
   for (let i = 0; i < unique.length; i += GET_PROFILES_MAX_ACTORS) {
     const chunk = unique.slice(i, i + GET_PROFILES_MAX_ACTORS);
-    const j = await executeBlueskyGetJson<{ profiles?: BlueskyProfileViewDetailed[] }>(
-      'app.bsky.actor.getProfiles',
-      { actors: chunk },
-      opts
-    );
+    const j = await executeBlueskyGetJson<{
+      profiles?: BlueskyProfileViewDetailed[];
+    }>("app.bsky.actor.getProfiles", { actors: chunk }, opts);
     for (const p of j?.profiles ?? []) {
       if (p?.did) out.set(p.did, p);
     }
@@ -477,18 +523,19 @@ export const fetchFollowers = async (
     limit: number;
     cursor?: string;
   },
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<
-  { ok: true; data: BlueskyGetFollowersResponse } | { ok: false; status: number; body: string }
+  | { ok: true; data: BlueskyGetFollowersResponse }
+  | { ok: false; status: number; body: string }
 > => {
   const result = await executeBlueskyXrpc<BlueskyGetFollowersResponse>(
-    'app.bsky.graph.getFollowers',
+    "app.bsky.graph.getFollowers",
     {
       actor: params.actor,
       limit: params.limit,
-      cursor: params.cursor
+      cursor: params.cursor,
     },
-    opts
+    opts,
   );
   if (!result.ok) {
     void 0;
@@ -502,18 +549,19 @@ export const fetchFollows = async (
     limit: number;
     cursor?: string;
   },
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<
-  { ok: true; data: BlueskyGetFollowsResponse } | { ok: false; status: number; body: string }
+  | { ok: true; data: BlueskyGetFollowsResponse }
+  | { ok: false; status: number; body: string }
 > => {
   const result = await executeBlueskyXrpc<BlueskyGetFollowsResponse>(
-    'app.bsky.graph.getFollows',
+    "app.bsky.graph.getFollows",
     {
       actor: params.actor,
       limit: params.limit,
-      cursor: params.cursor
+      cursor: params.cursor,
     },
-    opts
+    opts,
   );
   if (!result.ok) {
     void 0;
@@ -528,19 +576,20 @@ export const fetchRepostedBy = async (
     cursor?: string;
     cid?: string;
   },
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<
-  { ok: true; data: BlueskyGetRepostedByResponse } | { ok: false; status: number; body: string }
+  | { ok: true; data: BlueskyGetRepostedByResponse }
+  | { ok: false; status: number; body: string }
 > => {
   const result = await executeBlueskyXrpc<BlueskyGetRepostedByResponse>(
-    'app.bsky.feed.getRepostedBy',
+    "app.bsky.feed.getRepostedBy",
     {
       uri: params.uri,
       limit: params.limit,
       cursor: params.cursor,
-      cid: params.cid
+      cid: params.cid,
     },
-    opts
+    opts,
   );
   if (!result.ok) {
     void 0;
@@ -555,19 +604,20 @@ export const fetchGetLikes = async (
     cursor?: string;
     cid?: string;
   },
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<
-  { ok: true; data: BlueskyGetLikesResponse } | { ok: false; status: number; body: string }
+  | { ok: true; data: BlueskyGetLikesResponse }
+  | { ok: false; status: number; body: string }
 > => {
   const result = await executeBlueskyXrpc<BlueskyGetLikesResponse>(
-    'app.bsky.feed.getLikes',
+    "app.bsky.feed.getLikes",
     {
       uri: params.uri,
       limit: params.limit,
       cursor: params.cursor,
-      cid: params.cid
+      cid: params.cid,
     },
-    opts
+    opts,
   );
   if (!result.ok) {
     void 0;
@@ -578,14 +628,15 @@ export const fetchGetLikes = async (
 /** Public AppView (with optional proxy fallback); `limit` is typically 1–25 per upstream. */
 export const fetchTrendingTopics = async (
   params: { limit: number },
-  opts?: BlueskyFetchOpts
+  opts?: BlueskyFetchOpts,
 ): Promise<
-  { ok: true; data: BlueskyGetTrendingTopicsResponse } | { ok: false; status: number; body: string }
+  | { ok: true; data: BlueskyGetTrendingTopicsResponse }
+  | { ok: false; status: number; body: string }
 > => {
   const result = await executeBlueskyXrpc<BlueskyGetTrendingTopicsResponse>(
-    'app.bsky.unspecced.getTrendingTopics',
+    "app.bsky.unspecced.getTrendingTopics",
     { limit: params.limit },
-    opts
+    opts,
   );
   if (!result.ok) {
     void 0;

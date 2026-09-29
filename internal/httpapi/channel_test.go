@@ -356,6 +356,7 @@ func (channelAccountAdapter) PrepareCredential(_ context.Context, r *pb.PrepareC
 	}
 	return &pb.PrepareCredentialResponse{Credential: &pb.Credential{Data: r.Input}}, nil
 }
+
 func (channelAccountAdapter) CheckConnection(_ context.Context, r *pb.CheckConnectionRequest, _ ...grpc.CallOption) (*pb.CheckConnectionResponse, error) {
 	return &pb.CheckConnectionResponse{AccountId: store.Hash(string(r.Credential.Data)), Username: "fixture"}, nil
 }

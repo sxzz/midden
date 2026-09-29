@@ -39,7 +39,7 @@ type TimelineBlobPartial = {
 type TweetMediaSize = {
   w: number;
   h: number;
-  resize: 'crop' | 'fit';
+  resize: "crop" | "fit";
 };
 
 type TweetMediaVariant = {
@@ -91,7 +91,7 @@ type TweetMedia = {
     medium: TweetMediaSize;
     small: TweetMediaSize;
   };
-  type: 'photo' | 'video' | 'animated_gif';
+  type: "photo" | "video" | "animated_gif";
   url: string;
   video_info?: {
     aspect_ratio: [number, number];
@@ -101,7 +101,7 @@ type TweetMedia = {
 };
 
 type CardValue = {
-  type: 'BOOLEAN' | 'STRING';
+  type: "BOOLEAN" | "STRING";
   boolean_value: boolean;
   string_value: string;
 };
@@ -140,7 +140,7 @@ type TweetEntities = {
    Legacy Tweets use Enabled but have no count, while newer tweets have EnabledWithCount
    and count is populated with a string. */
 type ExtViews = {
-  state: 'Enabled' | 'EnabledWithCount';
+  state: "Enabled" | "EnabledWithCount";
   count?: string;
 };
 
@@ -193,17 +193,17 @@ type MediaPlaceholderColor = {
 
 type TranslationPartial = {
   id_str: string;
-  translationState: 'Success'; // TODO: figure out other values
+  translationState: "Success"; // TODO: figure out other values
   sourceLanguage: string;
   localizedSourceLanguage: string;
   destinationLanguage: string;
-  translationSource: 'Google';
+  translationSource: "Google";
   translation: string;
   entities: TweetEntities;
 };
 
 type GraphQLUserUnavailable = {
-  __typename: 'UserUnavailable';
+  __typename: "UserUnavailable";
   message?: string;
   unavailable_reason?: string;
   reason?: string;
@@ -236,7 +236,7 @@ type UserResultByScreenNameResponse = {
 };
 
 type GraphQLUser = {
-  __typename: 'User';
+  __typename: "User";
   id: string; // "VXNlcjo3ODMyMTQ="
   rest_id: string; // "783214",
   action_counts: {
@@ -312,7 +312,7 @@ type GraphQLUser = {
     translator_type: string; // "regular"
     want_retweets: boolean; // false
     verified?: boolean; // false
-    verified_type?: 'Business' | 'Government';
+    verified_type?: "Business" | "Government";
     withheld_in_countries: string[];
   };
   legacy_extended_profile: {
@@ -350,7 +350,7 @@ type GraphQLUser = {
         id: number; // 354,
         name: string; // "Community",
         icon_name: string; // "IconBriefcaseStroke"
-      }
+      },
     ];
   };
   profile_bio: {
@@ -362,7 +362,7 @@ type GraphQLUser = {
       };
     };
   };
-  profile_image_shape: 'Circle' | 'Square' | 'Hexagon'; // "Circle",
+  profile_image_shape: "Circle" | "Square" | "Hexagon"; // "Circle",
   relationship_counts?: {
     following: number; // 0
     followers: number; // 0
@@ -377,7 +377,7 @@ type GraphQLUser = {
   verification?: {
     is_blue_verified?: boolean; // false,
     verified: boolean; // false
-    verified_type?: 'Business' | 'Government' | null;
+    verified_type?: "Business" | "Government" | null;
   };
   verification_info: {
     is_identity_verified: boolean; // false,
@@ -475,9 +475,9 @@ type BirdwatchEntity = {
   fromIndex: number; // 119
   toIndex: number; // 154
   ref: {
-    type: 'TimelineUrl';
+    type: "TimelineUrl";
     url: string; // https://media.test/fixture
-    urlType: 'ExternalUrl';
+    urlType: "ExternalUrl";
   };
 };
 
@@ -496,7 +496,7 @@ type GrokTranslatedPostWithAvailability = {
 type GraphQLTwitterStatus = {
   // Workaround
   result: GraphQLTwitterStatus;
-  __typename: 'Tweet' | 'TweetWithVisibilityResults' | 'TweetUnavailable';
+  __typename: "Tweet" | "TweetWithVisibilityResults" | "TweetUnavailable";
   reason: string; // used for errors
   rest_id: string; // "900000000000000001",
   has_birdwatch_notes: boolean;
@@ -599,7 +599,7 @@ type GraphQLTwitterStatus = {
   };
   community_results?: {
     result?: {
-      __typename: 'Community';
+      __typename: "Community";
       id_str: string;
     };
   };
@@ -612,7 +612,7 @@ type GraphQLTwitterStatus = {
   author_community_relationship?: {
     community_results?: {
       result?: {
-        __typename: 'Community';
+        __typename: "Community";
         id_str: string;
         name: string;
         description: string;
@@ -630,8 +630,8 @@ type GraphQLTwitterStatus = {
         creator_results?: {
           result?: GraphQLUser;
         };
-        join_policy: 'Open'; // TODO: What other values are there?
-        invites_policy: 'MemberInvitesAllowed'; // TODO: What other values are there?
+        join_policy: "Open"; // TODO: What other values are there?
+        invites_policy: "MemberInvitesAllowed"; // TODO: What other values are there?
         is_pinned: boolean;
       };
     };
@@ -644,7 +644,7 @@ type GraphQLTwitterStatus = {
 };
 
 type GraphQLTweetWithVisibilityResults = {
-  __typename: 'TweetWithVisibilityResults';
+  __typename: "TweetWithVisibilityResults";
   tweet: GraphQLTwitterStatus;
 };
 
@@ -657,50 +657,50 @@ type GraphQLTwitterCard = {
     binding_values: {
       key:
         | `choice${1 | 2 | 3 | 4}_label`
-        | 'counts_are_final'
+        | "counts_are_final"
         | `choice${1 | 2 | 3 | 4}_count`
-        | 'last_updated_datetime_utc'
-        | 'duration_minutes'
-        | 'api'
-        | 'card_url'
-        | 'unified_card'
-        | 'broadcast_url'
-        | 'broadcast_width'
-        | 'broadcast_height'
-        | 'broadcast_state'
-        | 'broadcast_title'
-        | 'broadcast_source'
-        | 'broadcast_orientation'
-        | 'broadcast_id'
-        | 'broadcast_media_id'
-        | 'broadcast_media_key'
-        | 'broadcast_is_high_latency'
-        | 'broadcaster_username'
-        | 'broadcaster_display_name'
-        | 'broadcast_thumbnail'
-        | 'broadcast_thumbnail_small'
-        | 'broadcast_thumbnail_large'
-        | 'broadcast_thumbnail_x_large'
-        | 'broadcast_thumbnail_original'
-        | 'broadcast_thumbnail_color'
-        | 'broadcaster_twitter_id';
+        | "last_updated_datetime_utc"
+        | "duration_minutes"
+        | "api"
+        | "card_url"
+        | "unified_card"
+        | "broadcast_url"
+        | "broadcast_width"
+        | "broadcast_height"
+        | "broadcast_state"
+        | "broadcast_title"
+        | "broadcast_source"
+        | "broadcast_orientation"
+        | "broadcast_id"
+        | "broadcast_media_id"
+        | "broadcast_media_key"
+        | "broadcast_is_high_latency"
+        | "broadcaster_username"
+        | "broadcaster_display_name"
+        | "broadcast_thumbnail"
+        | "broadcast_thumbnail_small"
+        | "broadcast_thumbnail_large"
+        | "broadcast_thumbnail_x_large"
+        | "broadcast_thumbnail_original"
+        | "broadcast_thumbnail_color"
+        | "broadcaster_twitter_id";
       value:
         | {
             string_value: string; // "Option text"
-            type: 'STRING';
+            type: "STRING";
           }
         | {
             boolean_value: boolean; // true
-            type: 'BOOLEAN';
+            type: "BOOLEAN";
           };
     }[];
   };
 };
 
 type TweetTombstone = {
-  __typename: 'TweetTombstone';
+  __typename: "TweetTombstone";
   tombstone: {
-    __typename: 'TextTombstone';
+    __typename: "TextTombstone";
     text: {
       rtl: boolean; // false;
       text: string; // "You’re unable to view this Tweet because this account owner limits who can view their Tweets. Learn more"
@@ -715,19 +715,22 @@ type TweetTombstone = {
 };
 
 type GraphQLTimelineTweet = {
-  item: 'TimelineTweet';
-  __typename: 'TimelineTweet';
+  item: "TimelineTweet";
+  __typename: "TimelineTweet";
   tweet_results: {
-    result: GraphQLTwitterStatus | TweetTombstone | GraphQLTweetWithVisibilityResults;
+    result:
+      | GraphQLTwitterStatus
+      | TweetTombstone
+      | GraphQLTweetWithVisibilityResults;
   };
 };
 
 type GraphQLTimelineCursor = {
-  cursorType?: 'Top' | 'Bottom' | 'ShowMoreThreadsPrompt' | 'ShowMore';
-  cursor_type?: 'Top' | 'Bottom' | 'ShowMoreThreadsPrompt' | 'ShowMore';
-  itemType?: 'TimelineTimelineCursor';
+  cursorType?: "Top" | "Bottom" | "ShowMoreThreadsPrompt" | "ShowMore";
+  cursor_type?: "Top" | "Bottom" | "ShowMoreThreadsPrompt" | "ShowMore";
+  itemType?: "TimelineTimelineCursor";
   value: string;
-  __typename: 'TimelineTimelineCursor';
+  __typename: "TimelineTimelineCursor";
 };
 
 interface GraphQLBaseTimeline {
@@ -736,15 +739,15 @@ interface GraphQLBaseTimeline {
 }
 
 type GraphQLTimelineItem = GraphQLBaseTimeline & {
-  entryType?: 'TimelineTimelineItem';
-  __typename: 'TimelineTimelineItem';
+  entryType?: "TimelineTimelineItem";
+  __typename: "TimelineTimelineItem";
   itemContent?: GraphQLTimelineTweet | GraphQLTimelineCursor;
   content?: GraphQLTimelineTweet | GraphQLTimelineCursor;
 };
 
 type GraphQLTimelineModule = GraphQLBaseTimeline & {
-  entryType: 'TimelineTimelineModule';
-  __typename: 'TimelineTimelineModule';
+  entryType: "TimelineTimelineModule";
+  __typename: "TimelineTimelineModule";
   items: {
     entryId: `conversationthread-${number}-tweet-${number}`;
     item: GraphQLTimelineItem;
@@ -770,7 +773,10 @@ type GraphQLConversationThread = {
   content: GraphQLTimelineModule;
 };
 
-type GraphQLTimelineEntry = GraphQLTimelineTweetEntry | GraphQLConversationThread | unknown;
+type GraphQLTimelineEntry =
+  | GraphQLTimelineTweetEntry
+  | GraphQLConversationThread
+  | unknown;
 
 type TimelineInstruction =
   | TimelineAddEntriesInstruction
@@ -779,29 +785,29 @@ type TimelineInstruction =
   | TimelineReplaceEntryInstruction;
 
 type TimelineReplaceEntryInstruction = {
-  type?: 'TimelineReplaceEntry';
-  __typename?: 'TimelineReplaceEntry';
+  type?: "TimelineReplaceEntry";
+  __typename?: "TimelineReplaceEntry";
   entry?: {
     content?: GraphQLTimelineCursor;
   };
 };
 
 type TimelineAddEntriesInstruction = {
-  type?: 'TimelineAddEntries';
-  __typename?: 'TimelineAddEntries';
+  type?: "TimelineAddEntries";
+  __typename?: "TimelineAddEntries";
   entries: GraphQLTimelineEntry[];
 };
 
 type TimelineAddModulesInstruction = {
-  type?: 'TimelineAddToModule';
-  __typename?: 'TimelineAddToModule';
+  type?: "TimelineAddToModule";
+  __typename?: "TimelineAddToModule";
   moduleItems: GraphQLTimelineEntry[];
 };
 
 type TimelineTerminateTimelineInstruction = {
-  type?: 'TimelineTerminateTimeline';
-  __typename?: 'TimelineTerminateTimeline';
-  direction: 'Top';
+  type?: "TimelineTerminateTimeline";
+  __typename?: "TimelineTerminateTimeline";
+  direction: "Top";
 };
 type GraphQLTwitterStatusNotFoundResponse = {
   errors: [
@@ -825,7 +831,7 @@ type GraphQLTwitterStatusNotFoundResponse = {
       tracing: {
         trace_id: string; // "2e39ff747de237db"
       };
-    }
+    },
   ];
   data: Record<string, never>;
 };
@@ -875,8 +881,8 @@ type TweetResultByIdResponse = {
 };
 
 type TweetStub = {
-  __typename: 'TweetUnavailable';
-  reason: 'NsfwLoggedOut' | 'Protected' | 'Suspended' | 'Deleted';
+  __typename: "TweetUnavailable";
+  reason: "NsfwLoggedOut" | "Protected" | "Suspended" | "Deleted";
 };
 
 interface GraphQLProcessBucket {
@@ -952,7 +958,7 @@ type TwitterApiMedia = {
 };
 
 type TwitterApiImage = {
-  __typename: 'ApiImage';
+  __typename: "ApiImage";
   original_img_height: number;
   original_img_width: number;
   original_img_url: string;
@@ -965,8 +971,8 @@ type TwitterApiImage = {
 };
 
 type TwitterApiVideo = {
-  __typename: 'ApiVideo' | 'ApiGif';
-  type: 'video' | 'animated_gif';
+  __typename: "ApiVideo" | "ApiGif";
+  type: "video" | "animated_gif";
   id: string;
   id_str: string;
   ext_alt_text: string | null;
@@ -988,7 +994,7 @@ type TwitterApiVideo = {
   sizes: {
     original: {
       h: number;
-      resize: 'fit';
+      resize: "fit";
       w: number;
     };
   };
@@ -1029,8 +1035,8 @@ type TwitterArticleEntityMapEntry =
   | {
       key: string;
       value: {
-        type: 'MARKDOWN';
-        mutability: 'Mutable';
+        type: "MARKDOWN";
+        mutability: "Mutable";
         data: {
           entityKey: string;
           markdown: string;
@@ -1040,8 +1046,8 @@ type TwitterArticleEntityMapEntry =
   | {
       key: string;
       value: {
-        type: 'MEDIA';
-        mutability: 'Immutable';
+        type: "MEDIA";
+        mutability: "Immutable";
         data: {
           entityKey: string;
           mediaItems: Array<{
@@ -1055,8 +1061,8 @@ type TwitterArticleEntityMapEntry =
   | {
       key: string;
       value: {
-        type: 'TWEET';
-        mutability: 'Immutable';
+        type: "TWEET";
+        mutability: "Immutable";
         data: {
           tweetId: string;
         };

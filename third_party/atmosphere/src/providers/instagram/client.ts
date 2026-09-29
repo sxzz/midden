@@ -1,4 +1,4 @@
-import { withTimeout } from '../../helpers/with-timeout.js';
+import { withTimeout } from "../../helpers/with-timeout.js";
 import {
   INSTAGRAM_ASBD_ID,
   INSTAGRAM_COMMENT_PAGINATION_DOC_ID,
@@ -6,27 +6,27 @@ import {
   INSTAGRAM_POST_ROOT_DOC_ID,
   INSTAGRAM_POST_ROOT_FRIENDLY_NAME,
   INSTAGRAM_TIMELINE_QUERY_HASH,
-  INSTAGRAM_WEB_APP_ID
-} from './constants.js';
-import { extractLsdFromHtml } from './extractors.js';
+  INSTAGRAM_WEB_APP_ID,
+} from "./constants.js";
+import { extractLsdFromHtml } from "./extractors.js";
 
 const DEFAULT_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 export function readSetCookieNames(headers: Headers): Map<string, string> {
   const map = new Map<string, string>();
   const h = headers as Headers & { getSetCookie?: () => string[] };
   const parts =
-    typeof h.getSetCookie === 'function'
+    typeof h.getSetCookie === "function"
       ? h.getSetCookie()
       : (() => {
-          const single = headers.get('set-cookie');
+          const single = headers.get("set-cookie");
           return single ? [single] : [];
         })();
   for (const line of parts) {
-    const first = line.split(';')[0]?.trim();
-    if (!first?.includes('=')) continue;
-    const eq = first.indexOf('=');
+    const first = line.split(";")[0]?.trim();
+    if (!first?.includes("=")) continue;
+    const eq = first.indexOf("=");
     map.set(first.slice(0, eq), first.slice(eq + 1));
   }
   return map;
@@ -34,9 +34,9 @@ export function readSetCookieNames(headers: Headers): Map<string, string> {
 
 function cookieHeaderToMap(cookie: string): Map<string, string> {
   const m = new Map<string, string>();
-  for (const part of cookie.split(';')) {
+  for (const part of cookie.split(";")) {
     const t = part.trim();
-    const i = t.indexOf('=');
+    const i = t.indexOf("=");
     if (i <= 0) continue;
     m.set(t.slice(0, i), t.slice(i + 1));
   }
@@ -44,11 +44,14 @@ function cookieHeaderToMap(cookie: string): Map<string, string> {
 }
 
 function mapToCookieHeader(map: Map<string, string>): string {
-  return [...map.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
+  return [...map.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
-function mergeCookieHeader(existing: string | undefined, headers: Headers): string {
-  const m = cookieHeaderToMap(existing ?? '');
+function mergeCookieHeader(
+  existing: string | undefined,
+  headers: Headers,
+): string {
+  const m = cookieHeaderToMap(existing ?? "");
   for (const [k, v] of readSetCookieNames(headers)) {
     m.set(k, v);
   }
@@ -62,23 +65,23 @@ export type InstagramSession = {
 };
 
 export async function fetchInstagramCsrfToken(
-  userAgent: string | undefined
+  userAgent: string | undefined,
 ): Promise<string | null> {
   try {
-    const res = await withTimeout(signal =>
+    const res = await withTimeout((signal) =>
       fetch(`${INSTAGRAM_ORIGIN}/`, {
-        method: 'GET',
-        redirect: 'follow',
+        method: "GET",
+        redirect: "follow",
         signal,
         headers: {
-          'User-Agent': userAgent ?? DEFAULT_UA,
-          'Accept': 'text/html,application/xhtml+xml',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'X-IG-App-ID': INSTAGRAM_WEB_APP_ID
-        }
-      })
+          "User-Agent": userAgent ?? DEFAULT_UA,
+          Accept: "text/html,application/xhtml+xml",
+          "Accept-Language": "en-US,en;q=0.9",
+          "X-IG-App-ID": INSTAGRAM_WEB_APP_ID,
+        },
+      }),
     );
-    return readSetCookieNames(res.headers).get('csrftoken') ?? null;
+    return readSetCookieNames(res.headers).get("csrftoken") ?? null;
   } catch (err) {
     void 0;
     return null;
@@ -90,33 +93,33 @@ export async function fetchInstagramCsrfToken(
  * plus LSD from `__eqmc` (required for Polaris GraphQL, matching yt-dlp).
  */
 export async function fetchInstagramSession(
-  userAgent: string | undefined
+  userAgent: string | undefined,
 ): Promise<InstagramSession | null> {
   try {
-    const res = await withTimeout(signal =>
+    const res = await withTimeout((signal) =>
       fetch(`${INSTAGRAM_ORIGIN}/`, {
-        method: 'GET',
-        redirect: 'follow',
+        method: "GET",
+        redirect: "follow",
         signal,
         headers: {
-          'User-Agent': userAgent ?? DEFAULT_UA,
-          'Accept':
-            'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'X-IG-App-ID': INSTAGRAM_WEB_APP_ID,
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-          'Sec-Fetch-Site': 'none',
-          'Sec-Fetch-User': '?1',
-          'Upgrade-Insecure-Requests': '1'
-        }
-      })
+          "User-Agent": userAgent ?? DEFAULT_UA,
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          "X-IG-App-ID": INSTAGRAM_WEB_APP_ID,
+          "Sec-Fetch-Dest": "document",
+          "Sec-Fetch-Mode": "navigate",
+          "Sec-Fetch-Site": "none",
+          "Sec-Fetch-User": "?1",
+          "Upgrade-Insecure-Requests": "1",
+        },
+      }),
     );
     const html = await res.text();
     const cookies = readSetCookieNames(res.headers);
     const cookieHeader = mapToCookieHeader(cookies);
-    const csrf = cookies.get('csrftoken') ?? '';
-    const lsd = extractLsdFromHtml(html) ?? '';
+    const csrf = cookies.get("csrftoken") ?? "";
+    const lsd = extractLsdFromHtml(html) ?? "";
     if (!cookieHeader || !csrf || !lsd) {
       void 0;
       // Still return partial session when cookies exist — HTML scrape can succeed without LSD.
@@ -135,10 +138,10 @@ export async function fetchInstagramSession(
  * only need a Cookie header string.
  */
 export async function fetchInstagramLoggedOutSession(
-  userAgent: string | undefined
+  userAgent: string | undefined,
 ): Promise<string> {
   const session = await fetchInstagramSession(userAgent);
-  return session?.cookieHeader ?? '';
+  return session?.cookieHeader ?? "";
 }
 
 export type FetchInstagramHtmlOptions = {
@@ -149,39 +152,39 @@ export type FetchInstagramHtmlOptions = {
 export async function fetchInstagramHtml(
   path: string,
   userAgent: string | undefined,
-  options?: FetchInstagramHtmlOptions
+  options?: FetchInstagramHtmlOptions,
 ): Promise<{ ok: boolean; status: number; html: string; finalUrl?: string }> {
   try {
     const cookieHeader = options?.cookies;
     const headers: Record<string, string> = {
-      'User-Agent': userAgent ?? DEFAULT_UA,
-      'Accept':
-        'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Referer': `${INSTAGRAM_ORIGIN}/`,
-      'X-IG-App-ID': INSTAGRAM_WEB_APP_ID
+      "User-Agent": userAgent ?? DEFAULT_UA,
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      Referer: `${INSTAGRAM_ORIGIN}/`,
+      "X-IG-App-ID": INSTAGRAM_WEB_APP_ID,
     };
     if (cookieHeader) {
-      headers['Cookie'] = cookieHeader;
-      headers['Sec-Fetch-Dest'] = 'document';
-      headers['Sec-Fetch-Mode'] = 'navigate';
-      headers['Sec-Fetch-Site'] = 'same-origin';
-      headers['Sec-Fetch-User'] = '?1';
-      headers['Upgrade-Insecure-Requests'] = '1';
+      headers["Cookie"] = cookieHeader;
+      headers["Sec-Fetch-Dest"] = "document";
+      headers["Sec-Fetch-Mode"] = "navigate";
+      headers["Sec-Fetch-Site"] = "same-origin";
+      headers["Sec-Fetch-User"] = "?1";
+      headers["Upgrade-Insecure-Requests"] = "1";
     }
-    const res = await withTimeout(signal =>
-      fetch(`${INSTAGRAM_ORIGIN}${path.startsWith('/') ? path : `/${path}`}`, {
-        method: 'GET',
-        redirect: 'follow',
+    const res = await withTimeout((signal) =>
+      fetch(`${INSTAGRAM_ORIGIN}${path.startsWith("/") ? path : `/${path}`}`, {
+        method: "GET",
+        redirect: "follow",
         signal,
-        headers
-      })
+        headers,
+      }),
     );
     const html = await res.text();
     return { ok: res.ok, status: res.status, html, finalUrl: res.url };
   } catch (err) {
     void 0;
-    return { ok: false, status: 500, html: '' };
+    return { ok: false, status: 500, html: "" };
   }
 }
 
@@ -194,30 +197,40 @@ export async function fetchRulingForContent(params: {
   session: InstagramSession;
   userAgent: string | undefined;
   refererPath: string;
-}): Promise<{ ok: boolean; status: number; granted: boolean; json: unknown | null }> {
+}): Promise<{
+  ok: boolean;
+  status: number;
+  granted: boolean;
+  json: unknown | null;
+}> {
   try {
-    const url = new URL(`${INSTAGRAM_ORIGIN}/api/v1/web/get_ruling_for_content/`);
-    url.searchParams.set('content_type', 'MEDIA');
-    url.searchParams.set('target_id', params.mediaId);
-    const res = await withTimeout(signal =>
+    const url = new URL(
+      `${INSTAGRAM_ORIGIN}/api/v1/web/get_ruling_for_content/`,
+    );
+    url.searchParams.set("content_type", "MEDIA");
+    url.searchParams.set("target_id", params.mediaId);
+    const res = await withTimeout((signal) =>
       fetch(url.toString(), {
-        method: 'GET',
+        method: "GET",
         signal,
         headers: {
-          'User-Agent': params.userAgent ?? DEFAULT_UA,
-          'Accept': '*/*',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Origin': INSTAGRAM_ORIGIN,
-          'Referer': `${INSTAGRAM_ORIGIN}${params.refererPath.startsWith('/') ? params.refererPath : `/${params.refererPath}`}`,
-          'X-IG-App-ID': INSTAGRAM_WEB_APP_ID,
-          'X-ASBD-ID': INSTAGRAM_ASBD_ID,
-          'X-IG-WWW-Claim': '0',
-          'Cookie': params.session.cookieHeader
-        }
-      })
+          "User-Agent": params.userAgent ?? DEFAULT_UA,
+          Accept: "*/*",
+          "Accept-Language": "en-US,en;q=0.9",
+          Origin: INSTAGRAM_ORIGIN,
+          Referer: `${INSTAGRAM_ORIGIN}${params.refererPath.startsWith("/") ? params.refererPath : `/${params.refererPath}`}`,
+          "X-IG-App-ID": INSTAGRAM_WEB_APP_ID,
+          "X-ASBD-ID": INSTAGRAM_ASBD_ID,
+          "X-IG-WWW-Claim": "0",
+          Cookie: params.session.cookieHeader,
+        },
+      }),
     );
-    params.session.cookieHeader = mergeCookieHeader(params.session.cookieHeader, res.headers);
-    const nextCsrf = readSetCookieNames(res.headers).get('csrftoken');
+    params.session.cookieHeader = mergeCookieHeader(
+      params.session.cookieHeader,
+      res.headers,
+    );
+    const nextCsrf = readSetCookieNames(res.headers).get("csrftoken");
     if (nextCsrf) params.session.csrf = nextCsrf;
     if (!res.ok) {
       return { ok: false, status: res.status, granted: false, json: null };
@@ -226,8 +239,8 @@ export async function fetchRulingForContent(params: {
     return {
       ok: true,
       status: res.status,
-      granted: json?.status === 'ok',
-      json
+      granted: json?.status === "ok",
+      json,
     };
   } catch (err) {
     void 0;
@@ -251,51 +264,58 @@ export async function fetchPolarisPostGraphql(params: {
   }
   const body = new URLSearchParams({
     lsd: params.session.lsd,
-    fb_api_caller_class: 'RelayModern',
+    fb_api_caller_class: "RelayModern",
     fb_api_req_friendly_name: INSTAGRAM_POST_ROOT_FRIENDLY_NAME,
-    server_timestamps: 'true',
+    server_timestamps: "true",
     variables: JSON.stringify({ media_id: params.mediaId }),
-    doc_id: INSTAGRAM_POST_ROOT_DOC_ID
+    doc_id: INSTAGRAM_POST_ROOT_DOC_ID,
   });
   try {
     const headers: Record<string, string> = {
-      'User-Agent': params.userAgent ?? DEFAULT_UA,
-      'Accept': '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Origin': INSTAGRAM_ORIGIN,
-      'Referer': params.refererUrl,
-      'X-IG-App-ID': INSTAGRAM_WEB_APP_ID,
-      'X-ASBD-ID': INSTAGRAM_ASBD_ID,
-      'X-IG-WWW-Claim': '0',
-      'X-FB-Friendly-Name': INSTAGRAM_POST_ROOT_FRIENDLY_NAME,
-      'X-FB-LSD': params.session.lsd,
-      'X-Requested-With': 'XMLHttpRequest',
-      'Cookie': params.session.cookieHeader
+      "User-Agent": params.userAgent ?? DEFAULT_UA,
+      Accept: "*/*",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Content-Type": "application/x-www-form-urlencoded",
+      Origin: INSTAGRAM_ORIGIN,
+      Referer: params.refererUrl,
+      "X-IG-App-ID": INSTAGRAM_WEB_APP_ID,
+      "X-ASBD-ID": INSTAGRAM_ASBD_ID,
+      "X-IG-WWW-Claim": "0",
+      "X-FB-Friendly-Name": INSTAGRAM_POST_ROOT_FRIENDLY_NAME,
+      "X-FB-LSD": params.session.lsd,
+      "X-Requested-With": "XMLHttpRequest",
+      Cookie: params.session.cookieHeader,
     };
     if (params.session.csrf) {
-      headers['X-CSRFToken'] = params.session.csrf;
+      headers["X-CSRFToken"] = params.session.csrf;
     }
-    const res = await withTimeout(signal =>
+    const res = await withTimeout((signal) =>
       fetch(`${INSTAGRAM_ORIGIN}/api/graphql`, {
-        method: 'POST',
+        method: "POST",
         signal,
         headers,
-        body: body.toString()
-      })
+        body: body.toString(),
+      }),
     );
-    params.session.cookieHeader = mergeCookieHeader(params.session.cookieHeader, res.headers);
+    params.session.cookieHeader = mergeCookieHeader(
+      params.session.cookieHeader,
+      res.headers,
+    );
     const text = await res.text();
     if (!res.ok) {
       return { ok: false, status: res.status, json: null };
     }
     // Without TLS impersonation Instagram often returns an HTML document here.
     const trimmed = text.trim();
-    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+    if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
       return { ok: false, status: res.status, json: null };
     }
     try {
-      return { ok: true, status: res.status, json: JSON.parse(text) as unknown };
+      return {
+        ok: true,
+        status: res.status,
+        json: JSON.parse(text) as unknown,
+      };
     } catch {
       return { ok: false, status: res.status, json: null };
     }
@@ -307,28 +327,32 @@ export async function fetchPolarisPostGraphql(params: {
 
 export async function fetchWebProfileInfo(
   username: string,
-  userAgent: string | undefined
+  userAgent: string | undefined,
 ): Promise<{ ok: boolean; status: number; json: unknown | null }> {
   try {
     const url = new URL(`${INSTAGRAM_ORIGIN}/api/v1/users/web_profile_info/`);
-    url.searchParams.set('username', username);
-    const res = await withTimeout(signal =>
+    url.searchParams.set("username", username);
+    const res = await withTimeout((signal) =>
       fetch(url, {
-        method: 'GET',
+        method: "GET",
         signal,
         headers: {
-          'User-Agent': userAgent ?? DEFAULT_UA,
-          'Accept': 'application/json',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Referer': `${INSTAGRAM_ORIGIN}/${encodeURIComponent(username)}/`,
-          'X-IG-App-ID': INSTAGRAM_WEB_APP_ID
-        }
-      })
+          "User-Agent": userAgent ?? DEFAULT_UA,
+          Accept: "application/json",
+          "Accept-Language": "en-US,en;q=0.9",
+          Referer: `${INSTAGRAM_ORIGIN}/${encodeURIComponent(username)}/`,
+          "X-IG-App-ID": INSTAGRAM_WEB_APP_ID,
+        },
+      }),
     );
     if (!res.ok) {
       return { ok: false, status: res.status, json: null };
     }
-    return { ok: true, status: res.status, json: (await res.json()) as unknown };
+    return {
+      ok: true,
+      status: res.status,
+      json: (await res.json()) as unknown,
+    };
   } catch (err) {
     void 0;
     return { ok: false, status: 500, json: null };
@@ -346,34 +370,38 @@ export async function fetchTimelineGraphqlPage(params: {
   const variables = {
     id: params.userId,
     first: params.first,
-    ...(params.after ? { after: params.after } : {})
+    ...(params.after ? { after: params.after } : {}),
   };
   const url = new URL(`${INSTAGRAM_ORIGIN}/graphql/query/`);
-  url.searchParams.set('query_hash', INSTAGRAM_TIMELINE_QUERY_HASH);
-  url.searchParams.set('variables', JSON.stringify(variables));
+  url.searchParams.set("query_hash", INSTAGRAM_TIMELINE_QUERY_HASH);
+  url.searchParams.set("variables", JSON.stringify(variables));
   try {
     const headers: Record<string, string> = {
-      'User-Agent': params.userAgent ?? DEFAULT_UA,
-      'Accept': '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Referer': `${INSTAGRAM_ORIGIN}/${encodeURIComponent(params.refererUsername)}/`,
-      'Origin': INSTAGRAM_ORIGIN,
-      'X-IG-App-ID': INSTAGRAM_WEB_APP_ID
+      "User-Agent": params.userAgent ?? DEFAULT_UA,
+      Accept: "*/*",
+      "Accept-Language": "en-US,en;q=0.9",
+      Referer: `${INSTAGRAM_ORIGIN}/${encodeURIComponent(params.refererUsername)}/`,
+      Origin: INSTAGRAM_ORIGIN,
+      "X-IG-App-ID": INSTAGRAM_WEB_APP_ID,
     };
     if (params.csrfToken) {
-      headers['X-CSRFToken'] = params.csrfToken;
+      headers["X-CSRFToken"] = params.csrfToken;
     }
-    const res = await withTimeout(signal =>
+    const res = await withTimeout((signal) =>
       fetch(url.toString(), {
-        method: 'GET',
+        method: "GET",
         signal,
-        headers
-      })
+        headers,
+      }),
     );
     if (!res.ok) {
       return { ok: false, status: res.status, json: null };
     }
-    return { ok: true, status: res.status, json: (await res.json()) as unknown };
+    return {
+      ok: true,
+      status: res.status,
+      json: (await res.json()) as unknown,
+    };
   } catch (err) {
     void 0;
     return { ok: false, status: 500, json: null };
@@ -384,7 +412,7 @@ export async function fetchCommentPageGraphql(params: {
   mediaId: string;
   after: string | null;
   first: number;
-  sortOrder: 'popular' | 'recent';
+  sortOrder: "popular" | "recent";
   refererPath: string;
   userAgent: string | undefined;
   csrfToken: string | null;
@@ -396,43 +424,47 @@ export async function fetchCommentPageGraphql(params: {
     last: null,
     before: null,
     sort_order: params.sortOrder,
-    __relay_internal__pv__PolarisIsLoggedInrelayprovider: false
+    __relay_internal__pv__PolarisIsLoggedInrelayprovider: false,
   };
   if (params.after) {
     variables.after = params.after;
   }
   const body = new URLSearchParams({
     lsd: params.lsd,
-    fb_api_req_friendly_name: 'PolarisPostCommentsPaginationQuery',
+    fb_api_req_friendly_name: "PolarisPostCommentsPaginationQuery",
     variables: JSON.stringify(variables),
-    doc_id: INSTAGRAM_COMMENT_PAGINATION_DOC_ID
+    doc_id: INSTAGRAM_COMMENT_PAGINATION_DOC_ID,
   });
   try {
     const headers: Record<string, string> = {
-      'User-Agent': params.userAgent ?? DEFAULT_UA,
-      'Accept': '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Origin': INSTAGRAM_ORIGIN,
-      'Referer': `${INSTAGRAM_ORIGIN}${params.refererPath.startsWith('/') ? params.refererPath : `/${params.refererPath}`}`,
-      'X-IG-App-ID': INSTAGRAM_WEB_APP_ID,
-      'X-FB-LSD': params.lsd
+      "User-Agent": params.userAgent ?? DEFAULT_UA,
+      Accept: "*/*",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Content-Type": "application/x-www-form-urlencoded",
+      Origin: INSTAGRAM_ORIGIN,
+      Referer: `${INSTAGRAM_ORIGIN}${params.refererPath.startsWith("/") ? params.refererPath : `/${params.refererPath}`}`,
+      "X-IG-App-ID": INSTAGRAM_WEB_APP_ID,
+      "X-FB-LSD": params.lsd,
     };
     if (params.csrfToken) {
-      headers['X-CSRFToken'] = params.csrfToken;
+      headers["X-CSRFToken"] = params.csrfToken;
     }
-    const res = await withTimeout(signal =>
+    const res = await withTimeout((signal) =>
       fetch(`${INSTAGRAM_ORIGIN}/api/graphql`, {
-        method: 'POST',
+        method: "POST",
         signal,
         headers,
-        body: body.toString()
-      })
+        body: body.toString(),
+      }),
     );
     if (!res.ok) {
       return { ok: false, status: res.status, json: null };
     }
-    return { ok: true, status: res.status, json: (await res.json()) as unknown };
+    return {
+      ok: true,
+      status: res.status,
+      json: (await res.json()) as unknown,
+    };
   } catch (err) {
     void 0;
     return { ok: false, status: 500, json: null };

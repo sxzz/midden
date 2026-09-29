@@ -1,7 +1,10 @@
-import { getTwitterProviderEnv } from '../../twitter-runtime.js';
-import { twitterFetch } from '../fetch.js';
-import { pickTwitterGqlFeatures, type TwitterGqlFeatureKey } from './features.js';
-import type { TwitterBuildHost } from '../build-host.js';
+import { getTwitterProviderEnv } from "../../twitter-runtime.js";
+import { twitterFetch } from "../fetch.js";
+import {
+  pickTwitterGqlFeatures,
+  type TwitterGqlFeatureKey,
+} from "./features.js";
+import type { TwitterBuildHost } from "../build-host.js";
 
 export interface GraphQLQuery {
   httpMethod: string;
@@ -24,7 +27,7 @@ interface GraphQLRequest {
 
 export const graphqlRequest = async (
   host: TwitterBuildHost,
-  request: GraphQLRequest
+  request: GraphQLRequest,
 ): Promise<unknown> => {
   const { query, validator, variables, headers: requestHeaders } = request;
   void 0;
@@ -42,9 +45,9 @@ export const graphqlRequest = async (
   }
   return twitterFetch(host, {
     url,
-    method: 'GET',
+    method: "GET",
     headers: requestHeaders,
     validateFunction: validator,
-    elongatorRequired: query.requiresAccount
+    elongatorRequired: query.requiresAccount,
   });
 };

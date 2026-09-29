@@ -1,5 +1,5 @@
-import type { AtmosphereTransport } from './atmosphere-transport.js';
-import type { AtmosphereSocialProvider } from '../types/social-provider.js';
+import type { AtmosphereTransport } from "./atmosphere-transport.js";
+import type { AtmosphereSocialProvider } from "../types/social-provider.js";
 
 /** Optional Cache API–like adapter (Workers Cache, in-memory, etc.) */
 export type CacheAdapter = {
@@ -20,7 +20,7 @@ export type Logger = {
  */
 export type Translate = (
   key: string,
-  options?: Record<string, string | number | boolean>
+  options?: Record<string, string | number | boolean>,
 ) => string;
 
 /** Base options for provider clients (Bluesky, Twitter, …). */

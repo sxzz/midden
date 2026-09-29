@@ -22,13 +22,13 @@
  */
 
 /** Public web origin; source for SSR pages, embeds and oEmbed. */
-export const TIKTOK_WEB_HOST = 'https://www.tiktok.com';
+export const TIKTOK_WEB_HOST = "https://www.tiktok.com";
 
 /** Short-link origin (`vm.tiktok.com/ZP8yxgATu`). */
-export const TIKTOK_SHORT_HOST = 'https://vm.tiktok.com';
+export const TIKTOK_SHORT_HOST = "https://vm.tiktok.com";
 
 /** Android app API origin. See the signing note above before adding endpoints here. */
-export const TIKTOK_API_HOST = 'https://api16-normal-c-useast1a.tiktokv.com';
+export const TIKTOK_API_HOST = "https://api16-normal-c-useast1a.tiktokv.com";
 
 /**
  * App fingerprint from the decompiled `com.zhiliaoapp.musically` 46.7.2 build
@@ -36,15 +36,15 @@ export const TIKTOK_API_HOST = 'https://api16-normal-c-useast1a.tiktokv.com';
  * `aid` 1233 is `musical_ly` (1180 = trill, 1128 = aweme).
  */
 export const TIKTOK_APP_CONFIG = {
-  appName: 'musical_ly',
-  appVersion: '46.7.2',
-  manifestVersion: '2024607020',
-  aid: '1233',
-  deviceType: 'Pixel 8',
-  deviceBrand: 'Google',
-  osVersion: '14',
-  osApi: '34',
-  buildId: 'UP1A.231005.007'
+  appName: "musical_ly",
+  appVersion: "46.7.2",
+  manifestVersion: "2024607020",
+  aid: "1233",
+  deviceType: "Pixel 8",
+  deviceBrand: "Google",
+  osVersion: "14",
+  osApi: "34",
+  buildId: "UP1A.231005.007",
 } as const;
 
 /** `User-Agent` the app sends on API requests; must stay in sync with {@link TIKTOK_APP_CONFIG}. */
@@ -60,51 +60,51 @@ export const TIKTOK_MOBILE_UA =
  */
 export const TIKTOK_API_PATHS = {
   /** Unsigned-friendly. `?aweme_id=` */
-  awemeDetail: '/aweme/v1/aweme/detail/',
+  awemeDetail: "/aweme/v1/aweme/detail/",
   /** Unsigned-friendly. POST `aweme_ids=[id]&request_source=0` */
-  multiAwemeDetail: '/aweme/v1/multi/aweme/detail/',
+  multiAwemeDetail: "/aweme/v1/multi/aweme/detail/",
   /** Signed. `?unique_id=` / `?sec_user_id=` / `?user_id=` */
-  userProfileOther: '/aweme/v1/user/profile/other/',
+  userProfileOther: "/aweme/v1/user/profile/other/",
   /** Signed. `?sec_user_id=&max_cursor=&count=` */
-  awemePost: '/aweme/v1/aweme/post/',
+  awemePost: "/aweme/v1/aweme/post/",
   /** Signed. `?sec_user_id=&max_cursor=&count=` */
-  awemeFavorite: '/aweme/v1/aweme/favorite/',
+  awemeFavorite: "/aweme/v1/aweme/favorite/",
   /** Signed. `?aweme_id=&cursor=&count=` */
-  commentList: '/aweme/v2/comment/list/',
+  commentList: "/aweme/v2/comment/list/",
   /** Signed. `?comment_id=&item_id=&cursor=&count=` */
-  commentReplyList: '/aweme/v1/comment/list/reply/',
+  commentReplyList: "/aweme/v1/comment/list/reply/",
   /** Signed + logged in (answers `status_code: 8, "Login expired"` as a guest). */
-  diggList: '/aweme/v1/digg/list/',
+  diggList: "/aweme/v1/digg/list/",
   /** Signed. `?sec_user_id=&max_time=&count=` */
-  followerList: '/aweme/v1/user/follower/list/',
+  followerList: "/aweme/v1/user/follower/list/",
   /** Signed. `?sec_user_id=&max_time=&count=` */
-  followingList: '/aweme/v1/user/following/list/',
+  followingList: "/aweme/v1/user/following/list/",
   /** Signed. `?keyword=&offset=&count=` */
-  searchItem: '/aweme/v1/search/item/',
+  searchItem: "/aweme/v1/search/item/",
   /** Signed. `?keyword=&cursor=&count=&type=` */
-  discoverSearch: '/aweme/v1/discover/search/',
+  discoverSearch: "/aweme/v1/discover/search/",
   /** Signed. `?keyword=&source=&count=` */
-  searchSug: '/aweme/v1/search/sug/',
+  searchSug: "/aweme/v1/search/sug/",
   /** Signed. `?detail_list=1` */
-  hotSearchList: '/aweme/v1/hot/search/list/',
+  hotSearchList: "/aweme/v1/hot/search/list/",
   /** Signed. `?hashtag_name=&query_type=1` (or `?ch_id=&query_type=0`) */
-  challengeDetail: '/aweme/v1/challenge/detail/',
+  challengeDetail: "/aweme/v1/challenge/detail/",
   /** Signed. `?music_id=` */
-  musicDetail: '/aweme/v1/music/detail/'
+  musicDetail: "/aweme/v1/music/detail/",
 } as const;
 
 /** Browser `User-Agent` for the public web surfaces. TikTok 403s known crawler UAs. */
 export const TIKTOK_WEB_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ' +
-  'Chrome/131.0.0.0 Safari/537.36';
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+  "Chrome/131.0.0.0 Safari/537.36";
 
 /** Cookies worth forwarding to the video proxy; `tt_chain_token` is the one the CDN checks. */
 export const TIKTOK_PROXY_COOKIES = [
-  'tt_chain_token',
-  'sid_tt',
-  'sessionid',
-  'tt_csrf_token',
-  'odin_tt'
+  "tt_chain_token",
+  "sid_tt",
+  "sessionid",
+  "tt_csrf_token",
+  "odin_tt",
 ] as const;
 
 /**

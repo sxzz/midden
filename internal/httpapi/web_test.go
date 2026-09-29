@@ -44,6 +44,7 @@ func signedData(token string, at int64) string {
 	v.Set("hash", hex.EncodeToString(mac.Sum(nil)))
 	return v.Encode()
 }
+
 func TestTelegramLoginValidation(t *testing.T) {
 	now := time.Unix(1800000000, 0)
 	token := "123:test"
@@ -58,6 +59,7 @@ func TestTelegramLoginValidation(t *testing.T) {
 		}
 	}
 }
+
 func TestWebConfig(t *testing.T) {
 	for _, address := range []string{"http://example.test/app/", "https://u:p@example.test/app/", "https://example.test/app/?foo=bar"} {
 		if ValidateWebConfig(WebConfig{address, "token", "channel"}) == nil {
@@ -78,6 +80,7 @@ type mediaStorage struct{ blob.Storage }
 func (mediaStorage) Open(context.Context, string) (blob.ReadSeekCloser, error) {
 	return seekReader{bytes.NewReader([]byte("0123456789"))}, nil
 }
+
 func TestMediaRanges(t *testing.T) {
 	for _, tc := range []struct {
 		method, rangeHeader string
@@ -98,6 +101,7 @@ func TestMediaRanges(t *testing.T) {
 		})
 	}
 }
+
 func TestWebSessions(t *testing.T) {
 	if os.Getenv("TEST_DATABASE_URL") == "" {
 		t.Skip("Docker database required")
@@ -183,7 +187,7 @@ func TestWebSessions(t *testing.T) {
 
 func TestStaticWeb(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("web fixture"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("web fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("WEB_DIST", dir)

@@ -1,7 +1,9 @@
-import type { AtmosphereTransport } from './atmosphere-transport.js';
-import type { AtmosphereSocialProvider } from '../types/social-provider.js';
+import type { AtmosphereTransport } from "./atmosphere-transport.js";
+import type { AtmosphereSocialProvider } from "../types/social-provider.js";
 
-type AttemptResult<T> = { ok: true; value: T } | { ok: false; retriable: boolean; err: unknown };
+type AttemptResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; retriable: boolean; err: unknown };
 
 /**
  * Run `op(transport, index)` for the primary then each fallback until a successful result.
@@ -10,7 +12,7 @@ type AttemptResult<T> = { ok: true; value: T } | { ok: false; retriable: boolean
 export async function runWithTransports<P extends AtmosphereSocialProvider, T>(
   primary: AtmosphereTransport<P>,
   fallbacks: AtmosphereTransport<P>[] | undefined,
-  op: (t: AtmosphereTransport<P>, index: number) => Promise<AttemptResult<T>>
+  op: (t: AtmosphereTransport<P>, index: number) => Promise<AttemptResult<T>>,
 ): Promise<T> {
   const chain = [primary, ...(fallbacks ?? [])];
   let lastErr: unknown;

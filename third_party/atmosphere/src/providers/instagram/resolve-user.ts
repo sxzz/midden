@@ -1,10 +1,13 @@
-import type { APIUser } from '../../types/api-schemas.js';
-import type { InstagramCredentials } from '../../types/proxy-credentials.js';
-import { resolveInstagramAccounts, type InstagramRequestContext } from './account-proxy.js';
-import { fetchWebProfileInfo } from './client.js';
-import { fetchPrivateUserByUsername } from './private-api.js';
-import { fullUserFromWebProfile } from './processor.js';
-import { userFromPrivateUserResponse } from './private-processor.js';
+import type { APIUser } from "../../types/api-schemas.js";
+import type { InstagramCredentials } from "../../types/proxy-credentials.js";
+import {
+  resolveInstagramAccounts,
+  type InstagramRequestContext,
+} from "./account-proxy.js";
+import { fetchWebProfileInfo } from "./client.js";
+import { fetchPrivateUserByUsername } from "./private-api.js";
+import { fullUserFromWebProfile } from "./processor.js";
+import { userFromPrivateUserResponse } from "./private-processor.js";
 
 export type ResolvedInstagramUser = {
   code: 200 | 404 | 500;
@@ -20,7 +23,7 @@ export type ResolvedInstagramUser = {
 export async function resolveInstagramUser(
   username: string,
   ctx: InstagramRequestContext | undefined,
-  options: { accounts?: InstagramCredentials[] } = {}
+  options: { accounts?: InstagramCredentials[] } = {},
 ): Promise<ResolvedInstagramUser> {
   const accounts = options.accounts ?? (await resolveInstagramAccounts(ctx));
 

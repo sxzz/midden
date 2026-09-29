@@ -30,11 +30,11 @@ declare type BlueskyExternalEmbed = {
 };
 
 declare type BlueskyVideo = {
-  $type: 'app.bsky.embed.video#view';
+  $type: "app.bsky.embed.video#view";
   ref: {
     $link: string;
   };
-  mimeType: 'video/mp4';
+  mimeType: "video/mp4";
   size: number;
 };
 
@@ -113,7 +113,7 @@ declare type BlueskyEmbed = {
 declare type BlueskyAuthor = {
   associated: {
     chat: {
-      allowIncoming: 'all'; // TODO: figure out other values
+      allowIncoming: "all"; // TODO: figure out other values
     };
   };
   avatar: string;
@@ -203,7 +203,10 @@ declare type BlueskyFeedBlockedPost = {
   detached?: boolean;
 };
 
-declare type BlueskyThreadParent = BlueskyThread | BlueskyFeedNotFoundPost | BlueskyFeedBlockedPost;
+declare type BlueskyThreadParent =
+  | BlueskyThread
+  | BlueskyFeedNotFoundPost
+  | BlueskyFeedBlockedPost;
 
 declare type BlueskyThread = {
   $type?: string;
@@ -234,7 +237,12 @@ declare type BlueskyProfileViewDetailed = {
   verification?: {
     verifiedStatus?: string;
     trustedVerifierStatus?: string;
-    verifications?: { issuer?: string; isValid?: boolean; uri?: string; createdAt?: string }[];
+    verifications?: {
+      issuer?: string;
+      isValid?: boolean;
+      uri?: string;
+      createdAt?: string;
+    }[];
   };
 };
 
@@ -251,7 +259,12 @@ declare type BlueskyProfileView = {
   verification?: {
     verifiedStatus?: string;
     trustedVerifierStatus?: string;
-    verifications?: { issuer?: string; isValid?: boolean; uri?: string; createdAt?: string }[];
+    verifications?: {
+      issuer?: string;
+      isValid?: boolean;
+      uri?: string;
+      createdAt?: string;
+    }[];
   };
 };
 
@@ -349,7 +362,9 @@ declare type BlueskyGetTrendingTopicsResponse = {
 
 /** `app.bsky.feed.getAuthorFeed` `filter` lexicon values used by FxBluesky. */
 declare type BlueskyAuthorFeedFilter =
-  'posts_no_replies' | 'posts_with_replies' | 'posts_with_media';
+  | "posts_no_replies"
+  | "posts_with_replies"
+  | "posts_with_media";
 
 interface BlueskyProcessBucket {
   posts: BlueskyPost[];

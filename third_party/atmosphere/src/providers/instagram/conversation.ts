@@ -1,36 +1,42 @@
-import type { APISubstatus, SocialConversationInstagram } from '../../types/api-schemas.js';
-import { resolveInstagramAccounts, type InstagramRequestContext } from './account-proxy.js';
-import { fetchCommentPageGraphql, fetchInstagramCsrfToken } from './client.js';
-import { decodeCommentCursor, encodeCommentCursor } from './cursors.js';
-import { extractCommentsConnection } from './extractors.js';
-import { fetchInstagramPageWithWebInfo } from './fetch-shortcode-page.js';
-import { fetchPrivateMediaComments } from './private-api.js';
-import { nextMaxIdFromPrivateResponse } from './private-processor.js';
+import type {
+  APISubstatus,
+  SocialConversationInstagram,
+} from "../../types/api-schemas.js";
+import {
+  resolveInstagramAccounts,
+  type InstagramRequestContext,
+} from "./account-proxy.js";
+import { fetchCommentPageGraphql, fetchInstagramCsrfToken } from "./client.js";
+import { decodeCommentCursor, encodeCommentCursor } from "./cursors.js";
+import { extractCommentsConnection } from "./extractors.js";
+import { fetchInstagramPageWithWebInfo } from "./fetch-shortcode-page.js";
+import { fetchPrivateMediaComments } from "./private-api.js";
+import { nextMaxIdFromPrivateResponse } from "./private-processor.js";
 import {
   commentRecordToSubstatus,
   extractCommentsFromGraphqlJson,
   instagramNodeToStatus,
-  mapCommentEdges
-} from './processor.js';
+  mapCommentEdges,
+} from "./processor.js";
 
 /** `media/{pk}/comments/` returns a flat `comments` array rather than GraphQL edges. */
 function substatusesFromPrivateComments(
   json: unknown,
   shortcode: string,
   parentAuthor: string,
-  limit: number
+  limit: number,
 ): APISubstatus[] {
-  if (!json || typeof json !== 'object') return [];
+  if (!json || typeof json !== "object") return [];
   const comments = (json as { comments?: unknown }).comments;
   if (!Array.isArray(comments)) return [];
   const out: APISubstatus[] = [];
   for (const comment of comments) {
     if (out.length >= limit) break;
-    if (!comment || typeof comment !== 'object') continue;
+    if (!comment || typeof comment !== "object") continue;
     const mapped = commentRecordToSubstatus(
       comment as Record<string, unknown>,
       shortcode,
-      parentAuthor
+      parentAuthor,
     );
     if (mapped) out.push(mapped);
   }
@@ -46,18 +52,22 @@ export async function constructInstagramConversation(
   options: {
     cursor: string | null;
     count: number;
-    sortOrder: 'popular' | 'recent';
+    sortOrder: "popular" | "recent";
     userAgent?: string;
     credentialKey?: string;
-  }
+  },
 ): Promise<InstagramConversationResult> {
   const count = Math.min(100, Math.max(1, Math.floor(options.count)));
   const ctx: InstagramRequestContext = {
     userAgent: options.userAgent,
-    credentialKey: options.credentialKey
+    credentialKey: options.credentialKey,
   };
   const accounts = await resolveInstagramAccounts(ctx);
-  const page = await fetchInstagramPageWithWebInfo(shortcode, options.userAgent, ctx);
+  const page = await fetchInstagramPageWithWebInfo(
+    shortcode,
+    options.userAgent,
+    ctx,
+  );
   if (!page.ok) {
     return {
       ok: true,
@@ -67,8 +77,8 @@ export async function constructInstagramConversation(
         thread: null,
         replies: null,
         author: null,
-        cursor: null
-      }
+        cursor: null,
+      },
     };
   }
   const item = page.item;
@@ -76,26 +86,37 @@ export async function constructInstagramConversation(
     (item.user as Record<string, unknown> | undefined) ??
     (item.owner as Record<string, unknown> | undefined);
   const fb = {
-    id: String(owner?.pk ?? owner?.id ?? ''),
-    username: String(owner?.username ?? ''),
-    fullName: typeof owner?.full_name === 'string' ? owner.full_name : undefined,
+    id: String(owner?.pk ?? owner?.id ?? ""),
+    username: String(owner?.username ?? ""),
+    fullName:
+      typeof owner?.full_name === "string" ? owner.full_name : undefined,
     pic:
-      (typeof owner?.profile_pic_url === 'string' && owner.profile_pic_url) ||
-      (typeof owner?.profile_image_uri === 'string' && owner.profile_image_uri) ||
-      null
+      (typeof owner?.profile_pic_url === "string" && owner.profile_pic_url) ||
+      (typeof owner?.profile_image_uri === "string" &&
+        owner.profile_image_uri) ||
+      null,
   };
-  const status = instagramNodeToStatus(item, fb, { userAgent: options.userAgent });
+  const status = instagramNodeToStatus(item, fb, {
+    userAgent: options.userAgent,
+  });
   if (!status) {
     return {
       ok: true,
-      data: { code: 404, status: null, thread: null, replies: null, author: null, cursor: null }
+      data: {
+        code: 404,
+        status: null,
+        thread: null,
+        replies: null,
+        author: null,
+        cursor: null,
+      },
     };
   }
   const mediaPk =
     status.media_pk ??
-    (typeof item.pk === 'string' || typeof item.pk === 'number'
-      ? String(item.pk).split('_')[0]
-      : '');
+    (typeof item.pk === "string" || typeof item.pk === "number"
+      ? String(item.pk).split("_")[0]
+      : "");
   /*
    * With an account proxy, comments come from `media/{pk}/comments/`: it paginates past the ~24
    * comments the embedded page carries and works on posts whose logged-out page has no comment
@@ -109,9 +130,9 @@ export async function constructInstagramConversation(
         !decoded ||
         decoded.shortcode !== shortcode ||
         decoded.mediaId !== mediaPk ||
-        decoded.src !== 'proxy'
+        decoded.src !== "proxy"
       ) {
-        return { ok: false, message: 'Invalid cursor' };
+        return { ok: false, message: "Invalid cursor" };
       }
       maxId = decoded.after;
     }
@@ -120,10 +141,15 @@ export async function constructInstagramConversation(
       maxId,
       count,
       sortOrder: options.sortOrder,
-      shortcode
+      shortcode,
     });
     if (res.ok) {
-      const replies = substatusesFromPrivateComments(res.json, shortcode, fb.username, count);
+      const replies = substatusesFromPrivateComments(
+        res.json,
+        shortcode,
+        fb.username,
+        count,
+      );
       const nextMaxId = nextMaxIdFromPrivateResponse(res.json);
       const bottom = nextMaxId
         ? encodeCommentCursor({
@@ -133,7 +159,7 @@ export async function constructInstagramConversation(
             sort: options.sortOrder,
             after: nextMaxId,
             count,
-            src: 'proxy'
+            src: "proxy",
           })
         : null;
       return {
@@ -144,8 +170,8 @@ export async function constructInstagramConversation(
           thread: [status],
           replies,
           author: status.author,
-          cursor: { bottom }
-        }
+          cursor: { bottom },
+        },
       };
     }
   }
@@ -153,15 +179,26 @@ export async function constructInstagramConversation(
   let htmlBody = page.html;
   let commentsConn = page.comments;
   let pageLsd = page.lsd;
-  let refererForGraphql = page.pathUsed ?? `/p/${encodeURIComponent(shortcode)}/`;
+  let refererForGraphql =
+    page.pathUsed ?? `/p/${encodeURIComponent(shortcode)}/`;
   /*
    * Proxy media has no HTML/LSD. If comments also failed, refetch logged-out so the first page
    * is not an empty 200 and later GraphQL pages still have a session token.
    */
-  if (accounts.length && mediaPk && !options.cursor && page.source === 'account-proxy') {
-    const loggedOut = await fetchInstagramPageWithWebInfo(shortcode, options.userAgent, ctx, {
-      skipAccountProxy: true
-    });
+  if (
+    accounts.length &&
+    mediaPk &&
+    !options.cursor &&
+    page.source === "account-proxy"
+  ) {
+    const loggedOut = await fetchInstagramPageWithWebInfo(
+      shortcode,
+      options.userAgent,
+      ctx,
+      {
+        skipAccountProxy: true,
+      },
+    );
     if (loggedOut.ok) {
       htmlBody = loggedOut.html;
       commentsConn = loggedOut.comments;
@@ -176,10 +213,10 @@ export async function constructInstagramConversation(
     Boolean((pageInfo as { has_next_page?: boolean }).has_next_page) ||
     Boolean((pageInfo as { hasNextPage?: boolean }).hasNextPage);
   const endCursor =
-    (typeof (pageInfo as { end_cursor?: string }).end_cursor === 'string'
+    (typeof (pageInfo as { end_cursor?: string }).end_cursor === "string"
       ? (pageInfo as { end_cursor: string }).end_cursor
       : null) ??
-    (typeof (pageInfo as { endCursor?: string }).endCursor === 'string'
+    (typeof (pageInfo as { endCursor?: string }).endCursor === "string"
       ? (pageInfo as { endCursor: string }).endCursor
       : null);
 
@@ -197,7 +234,7 @@ export async function constructInstagramConversation(
             sort: options.sortOrder,
             after: endCursor,
             count,
-            src: 'gql'
+            src: "gql",
           })
         : null;
     return {
@@ -208,8 +245,8 @@ export async function constructInstagramConversation(
         thread: [status],
         replies,
         author: status.author,
-        cursor: { bottom }
-      }
+        cursor: { bottom },
+      },
     };
   }
 
@@ -218,9 +255,9 @@ export async function constructInstagramConversation(
     !decoded ||
     decoded.shortcode !== shortcode ||
     decoded.mediaId !== mediaPk ||
-    decoded.src === 'proxy'
+    decoded.src === "proxy"
   ) {
-    return { ok: false, message: 'Invalid cursor' };
+    return { ok: false, message: "Invalid cursor" };
   }
 
   // Prefer LSD preserved on the page result (required for polaris-graphql, which has empty HTML).
@@ -228,15 +265,15 @@ export async function constructInstagramConversation(
   if (!lsd) {
     return {
       ok: false,
-      message: 'Instagram comment fetch failed',
+      message: "Instagram comment fetch failed",
       data: {
         code: 500,
         status,
         thread: [status],
         replies: [],
         author: status.author,
-        cursor: { bottom: options.cursor }
-      }
+        cursor: { bottom: options.cursor },
+      },
     };
   }
   const csrf = await fetchInstagramCsrfToken(options.userAgent);
@@ -248,22 +285,22 @@ export async function constructInstagramConversation(
     refererPath: refererForGraphql,
     userAgent: options.userAgent,
     csrfToken: csrf,
-    lsd
+    lsd,
   });
 
   if (!gql.ok || !gql.json) {
     void 0;
     return {
       ok: false,
-      message: 'Instagram comment fetch failed',
+      message: "Instagram comment fetch failed",
       data: {
         code: 500,
         status,
         thread: [status],
         replies: [],
         author: status.author,
-        cursor: { bottom: options.cursor }
-      }
+        cursor: { bottom: options.cursor },
+      },
     };
   }
 
@@ -272,15 +309,15 @@ export async function constructInstagramConversation(
     void 0;
     return {
       ok: false,
-      message: 'Instagram comment response parse failed',
+      message: "Instagram comment response parse failed",
       data: {
         code: 500,
         status,
         thread: [status],
         replies: [],
         author: status.author,
-        cursor: { bottom: options.cursor }
-      }
+        cursor: { bottom: options.cursor },
+      },
     };
   }
 
@@ -295,7 +332,7 @@ export async function constructInstagramConversation(
           sort: decoded.sort,
           after: pi.end_cursor,
           count: decoded.count,
-          src: 'gql'
+          src: "gql",
         })
       : null;
 
@@ -307,7 +344,7 @@ export async function constructInstagramConversation(
       thread: [status],
       replies,
       author: status.author,
-      cursor: { bottom: nextBottom }
-    }
+      cursor: { bottom: nextBottom },
+    },
   };
 }

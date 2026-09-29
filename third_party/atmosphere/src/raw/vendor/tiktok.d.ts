@@ -54,8 +54,8 @@ declare interface TikTokVideoFormat {
   QualityType: number;
   BitrateFPS: number;
   GearName: string;
-  Format: 'mp4';
-  CodecType: 'h264' | 'h265_hvc1';
+  Format: "mp4";
+  CodecType: "h264" | "h265_hvc1";
   PlayAddr: {
     DataSize: string;
     Width: number;
@@ -243,15 +243,15 @@ declare interface TikTokReflowVideoDetail {
 }
 
 declare interface TikTokUniversalData {
-  'webapp.video-detail'?: {
+  "webapp.video-detail"?: {
     itemInfo?: {
       itemStruct?: TikTokItemInfo;
     };
     statusCode?: number;
   };
-  'webapp.reflow.video.detail'?: TikTokReflowVideoDetail;
-  'webapp.user-detail'?: TikTokUserDetail;
-  '__DEFAULT_SCOPE__'?: TikTokUniversalData;
+  "webapp.reflow.video.detail"?: TikTokReflowVideoDetail;
+  "webapp.user-detail"?: TikTokUserDetail;
+  __DEFAULT_SCOPE__?: TikTokUniversalData;
 }
 
 /* `/embed/…` pages (Frontity app). Server-rendered, unsigned, and keyed by request path. */

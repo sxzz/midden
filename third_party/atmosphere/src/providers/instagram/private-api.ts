@@ -1,10 +1,10 @@
 import {
   instagramPrivateApiRequest,
   type InstagramPrivateApiResult,
-  type InstagramRequestContext
-} from './account-proxy.js';
-import type { InstagramCredentials } from '../../types/proxy-credentials.js';
-import { INSTAGRAM_ORIGIN } from './constants.js';
+  type InstagramRequestContext,
+} from "./account-proxy.js";
+import type { InstagramCredentials } from "../../types/proxy-credentials.js";
+import { INSTAGRAM_ORIGIN } from "./constants.js";
 
 /*
  * Endpoint paths below are the ones the Instagram Android app itself calls
@@ -19,43 +19,56 @@ export type InstagramApiOptions = {
   accounts?: InstagramCredentials[];
 };
 
-const profileReferer = (username: string) => `${INSTAGRAM_ORIGIN}/${encodeURIComponent(username)}/`;
+const profileReferer = (username: string) =>
+  `${INSTAGRAM_ORIGIN}/${encodeURIComponent(username)}/`;
 
 /** `users/{username}/usernameinfo/` — profile by handle. */
 export function fetchPrivateUserByUsername(
   username: string,
   ctx: InstagramRequestContext | undefined,
-  options: InstagramApiOptions = {}
+  options: InstagramApiOptions = {},
 ): Promise<InstagramPrivateApiResult> {
-  return instagramPrivateApiRequest(`/users/${encodeURIComponent(username)}/usernameinfo/`, ctx, {
-    referer: profileReferer(username),
-    accounts: options.accounts
-  });
+  return instagramPrivateApiRequest(
+    `/users/${encodeURIComponent(username)}/usernameinfo/`,
+    ctx,
+    {
+      referer: profileReferer(username),
+      accounts: options.accounts,
+    },
+  );
 }
 
 /** `users/{pk}/info/` — profile by numeric id. */
 export function fetchPrivateUserById(
   userId: string,
   ctx: InstagramRequestContext | undefined,
-  options: InstagramApiOptions = {}
+  options: InstagramApiOptions = {},
 ): Promise<InstagramPrivateApiResult> {
-  return instagramPrivateApiRequest(`/users/${encodeURIComponent(userId)}/info/`, ctx, {
-    accounts: options.accounts
-  });
+  return instagramPrivateApiRequest(
+    `/users/${encodeURIComponent(userId)}/info/`,
+    ctx,
+    {
+      accounts: options.accounts,
+    },
+  );
 }
 
 /** `media/{pk}/info/` — full media object, including video versions Instagram hides logged-out. */
 export function fetchPrivateMediaInfo(
   mediaId: string,
   ctx: InstagramRequestContext | undefined,
-  options: InstagramApiOptions & { shortcode?: string } = {}
+  options: InstagramApiOptions & { shortcode?: string } = {},
 ): Promise<InstagramPrivateApiResult> {
-  return instagramPrivateApiRequest(`/media/${encodeURIComponent(mediaId)}/info/`, ctx, {
-    referer: options.shortcode
-      ? `${INSTAGRAM_ORIGIN}/p/${encodeURIComponent(options.shortcode)}/`
-      : undefined,
-    accounts: options.accounts
-  });
+  return instagramPrivateApiRequest(
+    `/media/${encodeURIComponent(mediaId)}/info/`,
+    ctx,
+    {
+      referer: options.shortcode
+        ? `${INSTAGRAM_ORIGIN}/p/${encodeURIComponent(options.shortcode)}/`
+        : undefined,
+      accounts: options.accounts,
+    },
+  );
 }
 
 /** `media/{pk}/comments/` — comment page. `minId`/`maxId` are the app's cursor params. */
@@ -66,24 +79,28 @@ export function fetchPrivateMediaComments(
     maxId?: string | null;
     minId?: string | null;
     count?: number;
-    sortOrder?: 'popular' | 'recent';
+    sortOrder?: "popular" | "recent";
     shortcode?: string;
-  } = {}
+  } = {},
 ): Promise<InstagramPrivateApiResult> {
-  return instagramPrivateApiRequest(`/media/${encodeURIComponent(mediaId)}/comments/`, ctx, {
-    query: {
-      can_support_threading: 'true',
-      permalink_enabled: 'false',
-      sort_order: options.sortOrder ?? 'popular',
-      count: options.count,
-      max_id: options.maxId ?? undefined,
-      min_id: options.minId ?? undefined
+  return instagramPrivateApiRequest(
+    `/media/${encodeURIComponent(mediaId)}/comments/`,
+    ctx,
+    {
+      query: {
+        can_support_threading: "true",
+        permalink_enabled: "false",
+        sort_order: options.sortOrder ?? "popular",
+        count: options.count,
+        max_id: options.maxId ?? undefined,
+        min_id: options.minId ?? undefined,
+      },
+      referer: options.shortcode
+        ? `${INSTAGRAM_ORIGIN}/p/${encodeURIComponent(options.shortcode)}/`
+        : undefined,
+      accounts: options.accounts,
     },
-    referer: options.shortcode
-      ? `${INSTAGRAM_ORIGIN}/p/${encodeURIComponent(options.shortcode)}/`
-      : undefined,
-    accounts: options.accounts
-  });
+  );
 }
 
 /**
@@ -93,14 +110,18 @@ export function fetchPrivateMediaComments(
 export function fetchPrivateMediaLikers(
   mediaId: string,
   ctx: InstagramRequestContext | undefined,
-  options: InstagramApiOptions & { shortcode?: string } = {}
+  options: InstagramApiOptions & { shortcode?: string } = {},
 ): Promise<InstagramPrivateApiResult> {
-  return instagramPrivateApiRequest(`/media/${encodeURIComponent(mediaId)}/likers/`, ctx, {
-    referer: options.shortcode
-      ? `${INSTAGRAM_ORIGIN}/p/${encodeURIComponent(options.shortcode)}/`
-      : undefined,
-    accounts: options.accounts
-  });
+  return instagramPrivateApiRequest(
+    `/media/${encodeURIComponent(mediaId)}/likers/`,
+    ctx,
+    {
+      referer: options.shortcode
+        ? `${INSTAGRAM_ORIGIN}/p/${encodeURIComponent(options.shortcode)}/`
+        : undefined,
+      accounts: options.accounts,
+    },
+  );
 }
 
 /**
@@ -111,71 +132,113 @@ export function fetchPrivateMediaLikers(
 export function fetchPrivateUserFeed(
   userId: string,
   ctx: InstagramRequestContext | undefined,
-  options: InstagramApiOptions & { maxId?: string | null; count?: number; username?: string } = {}
+  options: InstagramApiOptions & {
+    maxId?: string | null;
+    count?: number;
+    username?: string;
+  } = {},
 ): Promise<InstagramPrivateApiResult> {
-  return instagramPrivateApiRequest(`/feed/user/${encodeURIComponent(userId)}/`, ctx, {
-    query: { count: options.count, max_id: options.maxId ?? undefined },
-    referer: options.username ? profileReferer(options.username) : undefined,
-    accounts: options.accounts
-  });
+  return instagramPrivateApiRequest(
+    `/feed/user/${encodeURIComponent(userId)}/`,
+    ctx,
+    {
+      query: { count: options.count, max_id: options.maxId ?? undefined },
+      referer: options.username ? profileReferer(options.username) : undefined,
+      accounts: options.accounts,
+    },
+  );
 }
 
 /** `usertags/{pk}/feed/` — posts the account is tagged in. */
 export function fetchPrivateUserTaggedFeed(
   userId: string,
   ctx: InstagramRequestContext | undefined,
-  options: InstagramApiOptions & { maxId?: string | null; count?: number; username?: string } = {}
+  options: InstagramApiOptions & {
+    maxId?: string | null;
+    count?: number;
+    username?: string;
+  } = {},
 ): Promise<InstagramPrivateApiResult> {
-  return instagramPrivateApiRequest(`/usertags/${encodeURIComponent(userId)}/feed/`, ctx, {
-    query: { count: options.count, max_id: options.maxId ?? undefined },
-    referer: options.username ? `${profileReferer(options.username)}tagged/` : undefined,
-    accounts: options.accounts
-  });
+  return instagramPrivateApiRequest(
+    `/usertags/${encodeURIComponent(userId)}/feed/`,
+    ctx,
+    {
+      query: { count: options.count, max_id: options.maxId ?? undefined },
+      referer: options.username
+        ? `${profileReferer(options.username)}tagged/`
+        : undefined,
+      accounts: options.accounts,
+    },
+  );
 }
 
 /** `friendships/{pk}/followers/` — follower list page. */
 export function fetchPrivateFollowers(
   userId: string,
   ctx: InstagramRequestContext | undefined,
-  options: InstagramApiOptions & { maxId?: string | null; count?: number; username?: string } = {}
+  options: InstagramApiOptions & {
+    maxId?: string | null;
+    count?: number;
+    username?: string;
+  } = {},
 ): Promise<InstagramPrivateApiResult> {
-  return instagramPrivateApiRequest(`/friendships/${encodeURIComponent(userId)}/followers/`, ctx, {
-    query: {
-      count: options.count,
-      max_id: options.maxId ?? undefined,
-      search_surface: 'follow_list_page'
+  return instagramPrivateApiRequest(
+    `/friendships/${encodeURIComponent(userId)}/followers/`,
+    ctx,
+    {
+      query: {
+        count: options.count,
+        max_id: options.maxId ?? undefined,
+        search_surface: "follow_list_page",
+      },
+      referer: options.username
+        ? `${profileReferer(options.username)}followers/`
+        : undefined,
+      accounts: options.accounts,
     },
-    referer: options.username ? `${profileReferer(options.username)}followers/` : undefined,
-    accounts: options.accounts
-  });
+  );
 }
 
 /** `friendships/{pk}/following/` — following list page. */
 export function fetchPrivateFollowing(
   userId: string,
   ctx: InstagramRequestContext | undefined,
-  options: InstagramApiOptions & { maxId?: string | null; count?: number; username?: string } = {}
+  options: InstagramApiOptions & {
+    maxId?: string | null;
+    count?: number;
+    username?: string;
+  } = {},
 ): Promise<InstagramPrivateApiResult> {
-  return instagramPrivateApiRequest(`/friendships/${encodeURIComponent(userId)}/following/`, ctx, {
-    query: {
-      count: options.count,
-      max_id: options.maxId ?? undefined,
-      search_surface: 'follow_list_page'
+  return instagramPrivateApiRequest(
+    `/friendships/${encodeURIComponent(userId)}/following/`,
+    ctx,
+    {
+      query: {
+        count: options.count,
+        max_id: options.maxId ?? undefined,
+        search_surface: "follow_list_page",
+      },
+      referer: options.username
+        ? `${profileReferer(options.username)}following/`
+        : undefined,
+      accounts: options.accounts,
     },
-    referer: options.username ? `${profileReferer(options.username)}following/` : undefined,
-    accounts: options.accounts
-  });
+  );
 }
 
 /** `users/search/` — user search. */
 export function fetchPrivateUserSearch(
   query: string,
   ctx: InstagramRequestContext | undefined,
-  options: InstagramApiOptions & { count?: number } = {}
+  options: InstagramApiOptions & { count?: number } = {},
 ): Promise<InstagramPrivateApiResult> {
-  return instagramPrivateApiRequest('/users/search/', ctx, {
-    query: { q: query, count: options.count, search_surface: 'user_search_page' },
-    accounts: options.accounts
+  return instagramPrivateApiRequest("/users/search/", ctx, {
+    query: {
+      q: query,
+      count: options.count,
+      search_surface: "user_search_page",
+    },
+    accounts: options.accounts,
   });
 }
 
@@ -183,11 +246,11 @@ export function fetchPrivateUserSearch(
 export function fetchPrivateTypeahead(
   query: string,
   ctx: InstagramRequestContext | undefined,
-  options: InstagramApiOptions & { count?: number } = {}
+  options: InstagramApiOptions & { count?: number } = {},
 ): Promise<InstagramPrivateApiResult> {
-  return instagramPrivateApiRequest('/fbsearch/ig_typeahead/', ctx, {
-    query: { query, count: options.count, search_surface: 'top_search_page' },
-    accounts: options.accounts
+  return instagramPrivateApiRequest("/fbsearch/ig_typeahead/", ctx, {
+    query: { query, count: options.count, search_surface: "top_search_page" },
+    accounts: options.accounts,
   });
 }
 
@@ -195,14 +258,14 @@ export function fetchPrivateTypeahead(
 export function fetchPrivateReelsMedia(
   userIds: string[],
   ctx: InstagramRequestContext | undefined,
-  options: InstagramApiOptions = {}
+  options: InstagramApiOptions = {},
 ): Promise<InstagramPrivateApiResult> {
-  return instagramPrivateApiRequest('/feed/reels_media/', ctx, {
-    method: 'POST',
+  return instagramPrivateApiRequest("/feed/reels_media/", ctx, {
+    method: "POST",
     body: new URLSearchParams({
       user_ids: JSON.stringify(userIds),
-      source: 'profile'
+      source: "profile",
     }).toString(),
-    accounts: options.accounts
+    accounts: options.accounts,
   });
 }

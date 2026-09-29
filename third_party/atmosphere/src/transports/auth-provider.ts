@@ -1,4 +1,4 @@
-import type { AtmosphereSocialProvider } from '../types/social-provider.js';
+import type { AtmosphereSocialProvider } from "../types/social-provider.js";
 
 /**
  * Pluggable auth for the `authenticated` transport (OAuth, app passwords, etc.).

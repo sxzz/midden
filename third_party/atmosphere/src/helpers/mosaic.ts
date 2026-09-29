@@ -1,5 +1,5 @@
-import { DataProvider } from '../types/data-provider.js';
-import type { APIPhoto, APIMosaicPhoto } from '../types/api-schemas.js';
+import { DataProvider } from "../types/data-provider.js";
+import type { APIPhoto, APIMosaicPhoto } from "../types/api-schemas.js";
 
 export type MosaicDomainConfig = {
   /** Domains used for Twitter and Mastodon mosaics */
@@ -11,7 +11,7 @@ export type MosaicDomainConfig = {
 const pickDomain = (
   id: string,
   provider: DataProvider,
-  config: MosaicDomainConfig
+  config: MosaicDomainConfig,
 ): string | null => {
   let mosaicDomains: string[] = [];
   if (provider === DataProvider.Twitter || provider === DataProvider.Mastodon) {
@@ -36,7 +36,7 @@ export const handleMosaic = async (
   mediaList: APIPhoto[],
   id: string,
   provider: DataProvider,
-  config: MosaicDomainConfig
+  config: MosaicDomainConfig,
 ): Promise<APIMosaicPhoto | null> => {
   const selectedDomain: string | null = pickDomain(id, provider, config);
 
@@ -46,15 +46,15 @@ export const handleMosaic = async (
   let mosaicMedia: string[] = [];
   if (provider === DataProvider.Twitter) {
     mosaicMedia = mediaList.map(
-      media => media.url?.match(/(?<=\/media\/)[\w-]+(?=[.?])/g)?.[0] || ''
+      (media) => media.url?.match(/(?<=\/media\/)[\w-]+(?=[.?])/g)?.[0] || "",
     );
   } else if (provider === DataProvider.Bluesky) {
-    mosaicMedia = mediaList.map(media =>
-      (media.url?.match(/did:plc:[\w/]+/g)?.[0] || '').replace('/', '_')
+    mosaicMedia = mediaList.map((media) =>
+      (media.url?.match(/did:plc:[\w/]+/g)?.[0] || "").replace("/", "_"),
     );
   } else if (provider === DataProvider.Mastodon) {
-    mosaicMedia = mediaList.map(media => {
-      const u = media.url || '';
+    mosaicMedia = mediaList.map((media) => {
+      const u = media.url || "";
       let h = 0;
       for (let i = 0; i < u.length; i++) {
         h = (h << 5) - h + u.charCodeAt(i);
@@ -63,19 +63,19 @@ export const handleMosaic = async (
     });
   }
   const baseUrl = `https://${selectedDomain}/`;
-  let path = '';
+  let path = "";
 
   for (let j = 0; j < 4; j++) {
-    if (typeof mosaicMedia[j] === 'string') {
+    if (typeof mosaicMedia[j] === "string") {
       path += `/${mosaicMedia[j]}`;
     }
   }
 
   return {
-    type: 'mosaic_photo',
+    type: "mosaic_photo",
     formats: {
       jpeg: `${baseUrl}jpeg/${id}${path}`,
-      webp: `${baseUrl}webp/${id}${path}`
-    }
+      webp: `${baseUrl}webp/${id}${path}`,
+    },
   };
 };

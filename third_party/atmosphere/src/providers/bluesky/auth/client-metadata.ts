@@ -1,4 +1,4 @@
-import type { BlueskyOAuthClientConfig } from './types.js';
+import type { BlueskyOAuthClientConfig } from "./types.js";
 
 /** ATProto OAuth client metadata (served as JSON at `client_id` URL). */
 export type BlueskyClientMetadataJson = {
@@ -22,9 +22,9 @@ export type BlueskyClientMetadataJson = {
  * given as `clientId` (that URL is the OAuth `client_id`).
  */
 export function buildBlueskyClientMetadata(
-  config: BlueskyOAuthClientConfig
+  config: BlueskyOAuthClientConfig,
 ): BlueskyClientMetadataJson {
-  const applicationType = config.applicationType ?? 'native';
+  const applicationType = config.applicationType ?? "native";
   return {
     client_id: config.clientId,
     client_name: config.clientName,
@@ -34,10 +34,10 @@ export function buildBlueskyClientMetadata(
     tos_uri: config.tosUri,
     redirect_uris: [...config.redirectUris],
     scope: config.scope,
-    grant_types: ['authorization_code', 'refresh_token'],
-    response_types: ['code'],
-    token_endpoint_auth_method: 'none',
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+    token_endpoint_auth_method: "none",
     application_type: applicationType,
-    dpop_bound_access_tokens: true
+    dpop_bound_access_tokens: true,
   };
 }

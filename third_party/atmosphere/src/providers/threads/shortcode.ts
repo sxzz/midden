@@ -1,4 +1,4 @@
-import { instagramShortcodeToPk } from '../instagram/shortcode.js';
+import { instagramShortcodeToPk } from "../instagram/shortcode.js";
 
 /** Decode Threads post shortcode to numeric `postID` for Barcelona GraphQL. */
 export function threadsShortcodeToMediaId(shortcode: string): string {
@@ -15,5 +15,5 @@ export function normalizeThreadsPostId(raw: string): string {
     t.match(/threads\.(?:com|net)\/(?:@[^/]+\/)?post\/([^/?#]+)/i) ??
     t.match(/threads\.(?:com|net)\/t\/([^/?#]+)/i);
   if (mPost?.[1]) return mPost[1];
-  return t.replace(/^\/+|\/+$/g, '');
+  return t.replace(/^\/+|\/+$/g, "");
 }

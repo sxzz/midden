@@ -35,17 +35,20 @@ type AdapterRegistry struct {
 func NewAdapterRegistry(endpoints []AdapterEndpoint) *AdapterRegistry {
 	return &AdapterRegistry{bindings: map[string]AdapterBinding{}, available: map[string]bool{}, ids: map[int]string{}, Endpoints: endpoints}
 }
+
 func (r *AdapterRegistry) snapshot() map[string]AdapterBinding {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.bindings
 }
+
 func (s *Service) adapterBindings() map[string]AdapterBinding {
 	if s.Registry != nil {
 		return s.Registry.snapshot()
 	}
 	return s.Adapters
 }
+
 func (r *AdapterRegistry) Refresh(ctx context.Context) error {
 	r.mu.RLock()
 	bindings := map[string]AdapterBinding{}
@@ -116,6 +119,7 @@ func (r *AdapterRegistry) Refresh(ctx context.Context) error {
 	r.mu.Unlock()
 	return nil
 }
+
 func (s *Service) CaptureAvailable(ctx context.Context, tenant, id string) (bool, error) {
 	var adapterID string
 	e := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {

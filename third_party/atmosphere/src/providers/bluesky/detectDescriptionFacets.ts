@@ -1,21 +1,23 @@
-import { UnicodeString } from '../../helpers/unicode-string.js';
+import { UnicodeString } from "../../helpers/unicode-string.js";
 
 /** UTF-16 code unit range → UTF-8 byte range (Bluesky facet indices). */
 function utf16RangeToUtf8Bytes(
   text: string,
   startUtf16: number,
-  endUtf16: number
+  endUtf16: number,
 ): { byteStart: number; byteEnd: number } {
   const u = new UnicodeString(text);
   return {
     byteStart: u.utf16IndexToUtf8Index(startUtf16),
-    byteEnd: u.utf16IndexToUtf8Index(endUtf16)
+    byteEnd: u.utf16IndexToUtf8Index(endUtf16),
   };
 }
 
 /** Drop overlapping facets (by UTF-8 byte range); earlier byteStart wins. */
 function dedupeFacetsByByteRange(facets: BlueskyFacet[]): BlueskyFacet[] {
-  const sorted = [...facets].sort((a, b) => a.index.byteStart - b.index.byteStart);
+  const sorted = [...facets].sort(
+    (a, b) => a.index.byteStart - b.index.byteStart,
+  );
   const out: BlueskyFacet[] = [];
   let lastEnd = -1;
   for (const f of sorted) {
@@ -28,7 +30,7 @@ function dedupeFacetsByByteRange(facets: BlueskyFacet[]): BlueskyFacet[] {
 
 function isProbableHandle(handle: string): boolean {
   if (handle.length < 2 || handle.length > 253) return false;
-  if (handle.includes('.')) {
+  if (handle.includes(".")) {
     return /^[a-z0-9._-]+$/i.test(handle) && /[a-z]/i.test(handle);
   }
   return /^[a-z][a-z0-9_-]*$/i.test(handle);
@@ -55,7 +57,7 @@ export function detectBlueskyDescriptionFacets(text: string): BlueskyFacet[] {
       const { byteStart, byteEnd } = utf16RangeToUtf8Bytes(text, start, end);
       facets.push({
         index: { byteStart, byteEnd },
-        features: [{ $type: 'app.bsky.richtext.facet#mention', handle }]
+        features: [{ $type: "app.bsky.richtext.facet#mention", handle }],
       });
     }
   }
@@ -70,9 +72,9 @@ export function detectBlueskyDescriptionFacets(text: string): BlueskyFacet[] {
       const start = m.index + lead.length;
       let end = start + linkText.length;
 
-      linkText = linkText.replace(/[.,;:!?)]+$/, trail => {
+      linkText = linkText.replace(/[.,;:!?)]+$/, (trail) => {
         end -= trail.length;
-        return '';
+        return "";
       });
       if (!linkText) continue;
 
@@ -81,13 +83,14 @@ export function detectBlueskyDescriptionFacets(text: string): BlueskyFacet[] {
         uri = `https://${linkText}`;
       }
 
-      const host = linkText.replace(/^https?:\/\//i, '').split(/[/\s#?]/)[0] ?? '';
-      if (!host.includes('.') || !/^[a-z0-9.-]+$/i.test(host)) continue;
+      const host =
+        linkText.replace(/^https?:\/\//i, "").split(/[/\s#?]/)[0] ?? "";
+      if (!host.includes(".") || !/^[a-z0-9.-]+$/i.test(host)) continue;
 
       const { byteStart, byteEnd } = utf16RangeToUtf8Bytes(text, start, end);
       facets.push({
         index: { byteStart, byteEnd },
-        features: [{ $type: 'app.bsky.richtext.facet#link', uri }]
+        features: [{ $type: "app.bsky.richtext.facet#link", uri }],
       });
     }
   }
@@ -99,15 +102,15 @@ export function detectBlueskyDescriptionFacets(text: string): BlueskyFacet[] {
       const leadLen = m[1].length;
       const start = m.index + leadLen;
       let raw = m[2];
-      raw = raw.replace(/\p{P}+$/gu, '');
+      raw = raw.replace(/\p{P}+$/gu, "");
       const end = start + raw.length;
       if (raw.length < 2) continue;
-      const tag = raw.startsWith('#') ? raw.slice(1) : raw;
+      const tag = raw.startsWith("#") ? raw.slice(1) : raw;
       if (!tag || tag.length > 640) continue;
       const { byteStart, byteEnd } = utf16RangeToUtf8Bytes(text, start, end);
       facets.push({
         index: { byteStart, byteEnd },
-        features: [{ $type: 'app.bsky.richtext.facet#tag', tag }]
+        features: [{ $type: "app.bsky.richtext.facet#tag", tag }],
       });
     }
   }

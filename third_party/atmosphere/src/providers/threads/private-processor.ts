@@ -1,5 +1,5 @@
-import type { APIThreadsStatus, APIUser } from '../../types/api-schemas.js';
-import { threadsPostToStatus } from './processor.js';
+import type { APIThreadsStatus, APIUser } from "../../types/api-schemas.js";
+import { threadsPostToStatus } from "./processor.js";
 
 /**
  * Normalizers for the Threads slice of `i.instagram.com/api/v1`.
@@ -11,7 +11,7 @@ import { threadsPostToStatus } from './processor.js';
  */
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
-  Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+  Boolean(v) && typeof v === "object" && !Array.isArray(v);
 
 /**
  * Rows arrive under a handful of keys depending on the surface: `items` on profile tabs,
@@ -20,7 +20,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  */
 function feedRows(json: unknown): Record<string, unknown>[] {
   if (!isRecord(json)) return [];
-  for (const key of ['items', 'reply_threads', 'media', 'results', 'threads']) {
+  for (const key of ["items", "reply_threads", "media", "results", "threads"]) {
     const value = json[key];
     if (Array.isArray(value)) {
       return value.filter(isRecord);
@@ -34,7 +34,9 @@ function feedRows(json: unknown): Record<string, unknown>[] {
  * the last item is the one the app renders as the row (earlier items are the "show more" context),
  * matching how the logged-out timeline path already picks its status.
  */
-function postFromRow(row: Record<string, unknown>): Record<string, unknown> | null {
+function postFromRow(
+  row: Record<string, unknown>,
+): Record<string, unknown> | null {
   const items = row.thread_items;
   if (Array.isArray(items) && items.length > 0) {
     for (let i = items.length - 1; i >= 0; i--) {
@@ -46,13 +48,17 @@ function postFromRow(row: Record<string, unknown>): Record<string, unknown> | nu
   if (isRecord(row.post)) return row.post;
   if (isRecord(row.media)) return row.media;
   // Search rows can be bare media objects.
-  return typeof row.code === 'string' || typeof row.pk === 'string' || typeof row.pk === 'number'
+  return typeof row.code === "string" ||
+    typeof row.pk === "string" ||
+    typeof row.pk === "number"
     ? row
     : null;
 }
 
 /** Every `post` in a thread row, oldest first — the self-reply chain above a focal post. */
-export function threadChainFromRow(row: Record<string, unknown>): Record<string, unknown>[] {
+export function threadChainFromRow(
+  row: Record<string, unknown>,
+): Record<string, unknown>[] {
   const items = row.thread_items;
   if (!Array.isArray(items)) {
     const single = postFromRow(row);
@@ -68,7 +74,12 @@ export function threadChainFromRow(row: Record<string, unknown>): Record<string,
 /** Map a private-API Threads feed page to statuses, dropping rows that can't be rendered. */
 export function statusesFromThreadsFeed(
   json: unknown,
-  ownerFallback: { id: string; username: string; fullName?: string; pic?: string | null }
+  ownerFallback: {
+    id: string;
+    username: string;
+    fullName?: string;
+    pic?: string | null;
+  },
 ): APIThreadsStatus[] {
   const out: APIThreadsStatus[] = [];
   for (const row of feedRows(json)) {
@@ -81,10 +92,12 @@ export function statusesFromThreadsFeed(
 }
 
 /** Thread rows with their chains intact, for surfaces that render context above the row. */
-export function threadRowsFromThreadsFeed(json: unknown): Record<string, unknown>[][] {
+export function threadRowsFromThreadsFeed(
+  json: unknown,
+): Record<string, unknown>[][] {
   return feedRows(json)
     .map(threadChainFromRow)
-    .filter(chain => chain.length > 0);
+    .filter((chain) => chain.length > 0);
 }
 
 /**
@@ -101,12 +114,17 @@ export function nextTokenFromThreadsFeed(json: unknown): string | null {
   const pagingTokens = json.paging_tokens;
   if (isRecord(pagingTokens)) {
     const down = pagingTokens.downwards;
-    if (typeof down === 'string' && down.length > 0) return down;
+    if (typeof down === "string" && down.length > 0) return down;
   }
-  for (const key of ['next_max_id', 'page_token', 'next_page_token', 'paging_token']) {
+  for (const key of [
+    "next_max_id",
+    "page_token",
+    "next_page_token",
+    "paging_token",
+  ]) {
     const raw = json[key];
-    if (typeof raw === 'string' && raw.length > 0) return raw;
-    if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw);
+    if (typeof raw === "string" && raw.length > 0) return raw;
+    if (typeof raw === "number" && Number.isFinite(raw)) return String(raw);
   }
   return null;
 }
@@ -115,7 +133,7 @@ export function nextTokenFromThreadsFeed(json: unknown): string | null {
 export function rankTokenFromThreadsSearch(json: unknown): string | null {
   if (!isRecord(json)) return null;
   const raw = json.rank_token;
-  return typeof raw === 'string' && raw.length > 0 ? raw : null;
+  return typeof raw === "string" && raw.length > 0 ? raw : null;
 }
 
 /**
@@ -125,7 +143,7 @@ export function rankTokenFromThreadsSearch(json: unknown): string | null {
  */
 export function usersFromThreadsList(
   json: unknown,
-  options: { threadsOnly?: boolean } = {}
+  options: { threadsOnly?: boolean } = {},
 ): APIUser[] {
   if (!isRecord(json)) return [];
   const users = json.users;
@@ -142,13 +160,16 @@ export function usersFromThreadsList(
 
 /** Whether an Instagram user record belongs to someone who actually uses Threads. */
 export function isThreadsUser(rec: Record<string, unknown>): boolean {
-  return Boolean(rec.is_active_on_text_post_app) || Boolean(rec.has_onboarded_to_text_post_app);
+  return (
+    Boolean(rec.is_active_on_text_post_app) ||
+    Boolean(rec.has_onboarded_to_text_post_app)
+  );
 }
 
 const num = (...vals: unknown[]): number => {
   for (const v of vals) {
-    if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v);
-    if (typeof v === 'string' && v.trim() !== '') {
+    if (typeof v === "number" && Number.isFinite(v)) return Math.trunc(v);
+    if (typeof v === "string" && v.trim() !== "") {
       const n = Number(v);
       if (Number.isFinite(n)) return Math.trunc(n);
     }
@@ -158,30 +179,39 @@ const num = (...vals: unknown[]): number => {
 
 const str = (...vals: unknown[]): string => {
   for (const v of vals) {
-    if (typeof v === 'string' && v.length > 0) return v;
+    if (typeof v === "string" && v.length > 0) return v;
   }
-  return '';
+  return "";
 };
 
 /** Map one private-API user record to an {@link APIUser} pointing at Threads. */
-export function threadsUserFromPrivateRecord(rec: Record<string, unknown>): APIUser | null {
-  const id = str(rec.pk_id, typeof rec.pk === 'number' ? String(rec.pk) : rec.pk, rec.id);
+export function threadsUserFromPrivateRecord(
+  rec: Record<string, unknown>,
+): APIUser | null {
+  const id = str(
+    rec.pk_id,
+    typeof rec.pk === "number" ? String(rec.pk) : rec.pk,
+    rec.id,
+  );
   const username = str(rec.username);
   if (!id || !username) return null;
-  const bio = typeof rec.biography === 'string' ? rec.biography : '';
+  const bio = typeof rec.biography === "string" ? rec.biography : "";
   const isVerified = Boolean(rec.is_verified);
   const externalUrl = str(rec.external_url);
-  const hdProfilePic = (rec.hd_profile_pic_url_info as { url?: string } | undefined)?.url;
+  const hdProfilePic = (
+    rec.hd_profile_pic_url_info as { url?: string } | undefined
+  )?.url;
   return {
-    type: 'profile',
+    type: "profile",
     id,
     name: str(rec.full_name) || username,
     screen_name: username,
-    avatar_url: str(hdProfilePic, rec.profile_pic_url, rec.profile_pic_url_hd) || null,
+    avatar_url:
+      str(hdProfilePic, rec.profile_pic_url, rec.profile_pic_url_hd) || null,
     banner_url: null,
     description: bio,
     raw_description: { text: bio, facets: [] },
-    location: '',
+    location: "",
     url: `https://www.threads.com/@${encodeURIComponent(username)}/`,
     // Threads privacy is its own flag; `is_private` is the Instagram account's.
     protected: Boolean(rec.text_post_app_is_private ?? rec.is_private),
@@ -190,15 +220,18 @@ export function threadsUserFromPrivateRecord(rec: Record<string, unknown>): APIU
     statuses: 0,
     media_count: 0,
     likes: 0,
-    joined: '1970-01-01T00:00:00.000Z',
+    joined: "1970-01-01T00:00:00.000Z",
     website: externalUrl
-      ? { url: externalUrl, display_url: externalUrl.replace(/^https?:\/\//, '') }
+      ? {
+          url: externalUrl,
+          display_url: externalUrl.replace(/^https?:\/\//, ""),
+        }
       : null,
     profile_embed: true,
     verification: {
       verified: isVerified,
-      type: isVerified ? 'individual' : null
-    }
+      type: isVerified ? "individual" : null,
+    },
   };
 }
 
@@ -208,7 +241,9 @@ export function threadsUserFromPrivateRecord(rec: Record<string, unknown>): APIU
  * Both routes wrap the post being viewed in `containing_thread`; older payloads put it first in
  * `items` instead, so that is the fallback.
  */
-export function containingThreadChain(json: unknown): Record<string, unknown>[] {
+export function containingThreadChain(
+  json: unknown,
+): Record<string, unknown>[] {
   if (!isRecord(json)) return [];
   const containing = json.containing_thread;
   if (isRecord(containing)) {
@@ -220,7 +255,9 @@ export function containingThreadChain(json: unknown): Record<string, unknown>[] 
 }
 
 /** Reply thread rows out of a `text_feed/{post_id}/replies/` response, newest page first. */
-export function replyRowsFromThreadsReplies(json: unknown): Record<string, unknown>[] {
+export function replyRowsFromThreadsReplies(
+  json: unknown,
+): Record<string, unknown>[] {
   if (!isRecord(json)) return [];
   const replies = json.reply_threads;
   if (Array.isArray(replies)) return replies.filter(isRecord);

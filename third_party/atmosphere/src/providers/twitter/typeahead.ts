@@ -1,12 +1,12 @@
-import { getTwitterProviderEnv } from '../twitter-runtime.js';
-import { twitterFetch } from './fetch.js';
+import { getTwitterProviderEnv } from "../twitter-runtime.js";
+import { twitterFetch } from "./fetch.js";
 import type {
   APITypeaheadEvent,
   APITypeaheadResponse,
   APITypeaheadTopic,
-  APIUser
-} from '../../types/api-schemas.js';
-import type { TwitterBuildHost } from './build-host.js';
+  APIUser,
+} from "../../types/api-schemas.js";
+import type { TwitterBuildHost } from "./build-host.js";
 
 /** Upstream `1.1/search/typeahead.json` user entry (partial). */
 interface TwitterTypeaheadUser {
@@ -59,40 +59,45 @@ interface TwitterTypeaheadRaw {
   errors?: { code?: number; message?: string }[];
 }
 
-const defaultResultTypes = 'events,users,topics';
-const ALLOWED_RESULT_TYPES = new Set(['events', 'users', 'topics']);
+const defaultResultTypes = "events,users,topics";
+const ALLOWED_RESULT_TYPES = new Set(["events", "users", "topics"]);
 
 const normalizeResultTypeParam = (s: string | undefined): string => {
   if (!s?.trim()) return defaultResultTypes;
   const parts = s
-    .split(',')
-    .map(p => p.trim().toLowerCase())
-    .filter((p): p is 'events' | 'users' | 'topics' => ALLOWED_RESULT_TYPES.has(p));
+    .split(",")
+    .map((p) => p.trim().toLowerCase())
+    .filter((p): p is "events" | "users" | "topics" =>
+      ALLOWED_RESULT_TYPES.has(p),
+    );
   const unique = [...new Set(parts)];
-  return unique.length > 0 ? unique.join(',') : defaultResultTypes;
+  return unique.length > 0 ? unique.join(",") : defaultResultTypes;
 };
 
 const isObjectPayload = (r: unknown): r is TwitterTypeaheadRaw =>
-  typeof r === 'object' && r !== null;
+  typeof r === "object" && r !== null;
 
-export const typeaheadUserToApiUser = (u: TwitterTypeaheadUser): APIUser | null => {
-  const id = String(u.id_str ?? u.id ?? '').trim();
-  const screen_name = (u.screen_name ?? '').trim();
+export const typeaheadUserToApiUser = (
+  u: TwitterTypeaheadUser,
+): APIUser | null => {
+  const id = String(u.id_str ?? u.id ?? "").trim();
+  const screen_name = (u.screen_name ?? "").trim();
   if (!id || !screen_name) return null;
 
   const avatar =
-    (typeof u.profile_image_url_https === 'string' && u.profile_image_url_https) ||
-    (typeof u.profile_image_url === 'string' && u.profile_image_url) ||
+    (typeof u.profile_image_url_https === "string" &&
+      u.profile_image_url_https) ||
+    (typeof u.profile_image_url === "string" && u.profile_image_url) ||
     null;
 
-  let verification: APIUser['verification'];
+  let verification: APIUser["verification"];
   const blue = u.ext_is_blue_verified === true;
   const legacyVerified = u.verified === true;
   if (blue) {
     const vt = u.ext_verified_type;
-    let type: NonNullable<APIUser['verification']>['type'] = 'individual';
-    if (vt === 'Business') type = 'organization';
-    else if (vt === 'Government') type = 'government';
+    let type: NonNullable<APIUser["verification"]>["type"] = "individual";
+    if (vt === "Business") type = "organization";
+    else if (vt === "Government") type = "government";
     verification = { verified: true, verified_at: null, type };
   } else if (legacyVerified) {
     verification = { verified: true, verified_at: null, type: null };
@@ -102,13 +107,13 @@ export const typeaheadUserToApiUser = (u: TwitterTypeaheadUser): APIUser | null 
 
   return {
     id,
-    name: u.name ?? '',
+    name: u.name ?? "",
     screen_name,
     avatar_url: avatar,
     banner_url: null,
-    description: '',
-    raw_description: { text: '', facets: [] },
-    location: typeof u.location === 'string' ? u.location : '',
+    description: "",
+    raw_description: { text: "", facets: [] },
+    location: typeof u.location === "string" ? u.location : "",
     url: `${getTwitterProviderEnv().webRoot}/${screen_name}`,
     protected: u.is_protected === true,
     followers: 0,
@@ -116,25 +121,25 @@ export const typeaheadUserToApiUser = (u: TwitterTypeaheadUser): APIUser | null 
     statuses: 0,
     media_count: 0,
     likes: 0,
-    joined: '',
+    joined: "",
     website: null,
     verification,
-    type: 'profile'
+    type: "profile",
   };
 };
 
 export const typeaheadAPI = async (
   q: string,
   host: TwitterBuildHost,
-  options?: { resultType?: string; src?: string }
+  options?: { resultType?: string; src?: string },
 ): Promise<APITypeaheadResponse> => {
   const params = new URLSearchParams({
-    include_ext_is_blue_verified: '1',
-    include_ext_verified_type: '1',
-    include_ext_profile_image_shape: '1',
+    include_ext_is_blue_verified: "1",
+    include_ext_verified_type: "1",
+    include_ext_profile_image_shape: "1",
     q,
-    src: options?.src?.trim() || 'search_box',
-    result_type: normalizeResultTypeParam(options?.resultType)
+    src: options?.src?.trim() || "search_box",
+    result_type: normalizeResultTypeParam(options?.resultType),
   });
 
   const { apiRoot } = getTwitterProviderEnv();
@@ -142,8 +147,8 @@ export const typeaheadAPI = async (
 
   const raw = await twitterFetch(host, {
     url,
-    method: 'GET',
-    validateFunction: isObjectPayload
+    method: "GET",
+    validateFunction: isObjectPayload,
   });
 
   if (raw === null || !isObjectPayload(raw)) {
@@ -153,7 +158,7 @@ export const typeaheadAPI = async (
       num_results: 0,
       users: [],
       topics: [],
-      events: []
+      events: [],
     };
   }
 
@@ -164,7 +169,7 @@ export const typeaheadAPI = async (
       num_results: 0,
       users: [],
       topics: [],
-      events: []
+      events: [],
     };
   }
 
@@ -174,17 +179,19 @@ export const typeaheadAPI = async (
 
   const topics: APITypeaheadTopic[] = (raw.topics ?? [])
     .map((t): APITypeaheadTopic | null => {
-      const topic = typeof t.topic === 'string' ? t.topic : '';
+      const topic = typeof t.topic === "string" ? t.topic : "";
       if (!topic) return null;
       const out: APITypeaheadTopic = { topic };
       const rc = t.result_context;
-      if (rc && typeof rc === 'object') {
-        const ctx: NonNullable<APITypeaheadTopic['result_context']> = {};
-        if (typeof rc.display_string === 'string') ctx.display_string = rc.display_string;
-        if (typeof rc.redirect_url === 'string') ctx.redirect_url = rc.redirect_url;
+      if (rc && typeof rc === "object") {
+        const ctx: NonNullable<APITypeaheadTopic["result_context"]> = {};
+        if (typeof rc.display_string === "string")
+          ctx.display_string = rc.display_string;
+        if (typeof rc.redirect_url === "string")
+          ctx.redirect_url = rc.redirect_url;
         if (Array.isArray(rc.types)) {
           ctx.types = rc.types
-            .map(x => (typeof x?.type === 'string' ? { type: x.type } : null))
+            .map((x) => (typeof x?.type === "string" ? { type: x.type } : null))
             .filter((x): x is { type: string } => x !== null);
         }
         if (Object.keys(ctx).length > 0) out.result_context = ctx;
@@ -195,17 +202,18 @@ export const typeaheadAPI = async (
 
   const events: APITypeaheadEvent[] = (raw.events ?? [])
     .map((e): APITypeaheadEvent | null => {
-      const topic = typeof e.topic === 'string' ? e.topic : '';
+      const topic = typeof e.topic === "string" ? e.topic : "";
       if (!topic) return null;
       const out: APITypeaheadEvent = { topic };
-      if (typeof e.url === 'string') out.url = e.url;
-      if (typeof e.supporting_text === 'string') out.supporting_text = e.supporting_text;
+      if (typeof e.url === "string") out.url = e.url;
+      if (typeof e.supporting_text === "string")
+        out.supporting_text = e.supporting_text;
       const info = e.primary_image?.original_info;
-      if (info && typeof info.url === 'string') {
+      if (info && typeof info.url === "string") {
         out.primary_image = {
           url: info.url,
-          width: typeof info.width === 'number' ? info.width : undefined,
-          height: typeof info.height === 'number' ? info.height : undefined
+          width: typeof info.width === "number" ? info.width : undefined,
+          height: typeof info.height === "number" ? info.height : undefined,
         };
       }
       return out;
@@ -213,16 +221,16 @@ export const typeaheadAPI = async (
     .filter((e): e is APITypeaheadEvent => e !== null);
 
   const num_results =
-    typeof raw.num_results === 'number'
+    typeof raw.num_results === "number"
       ? raw.num_results
       : users.length + topics.length + events.length;
 
   return {
     code: 200,
-    query: typeof raw.query === 'string' ? raw.query : q,
+    query: typeof raw.query === "string" ? raw.query : q,
     num_results,
     users,
     topics,
-    events
+    events,
   };
 };

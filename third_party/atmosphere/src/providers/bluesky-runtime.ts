@@ -1,4 +1,4 @@
-import type { BlueskyProxyCredentials } from '../types/proxy-credentials.js';
+import type { BlueskyProxyCredentials } from "../types/proxy-credentials.js";
 
 /**
  * Configurable Bluesky web/API roots and feature domain lists.
@@ -13,16 +13,18 @@ export type BlueskyProviderEnv = {
 };
 
 const defaultEnv: BlueskyProviderEnv = {
-  apiRoot: 'https://public.api.bsky.app',
-  webRoot: 'https://bsky.app',
-  videoBase: 'https://video.bsky.app',
+  apiRoot: "https://public.api.bsky.app",
+  webRoot: "https://bsky.app",
+  videoBase: "https://video.bsky.app",
   mosaicBskyDomainList: [],
-  polyglotDomainList: []
+  polyglotDomainList: [],
 };
 
 let env: BlueskyProviderEnv = { ...defaultEnv };
 
-export function setBlueskyProviderEnv(partial: Partial<BlueskyProviderEnv>): void {
+export function setBlueskyProviderEnv(
+  partial: Partial<BlueskyProviderEnv>,
+): void {
   env = { ...env, ...partial };
 }
 
@@ -37,7 +39,9 @@ export type BlueskyProxyRuntime = {
   initCredentials: (key: string | undefined) => Promise<void>;
   hasBundledEncryptedCredentials: () => boolean;
   hasBlueskyProxyAccounts: () => boolean;
-  getShuffledBlueskyAccounts: (preferredHostname?: string) => BlueskyProxyCredentials[];
+  getShuffledBlueskyAccounts: (
+    preferredHostname?: string,
+  ) => BlueskyProxyCredentials[];
   blueskyProxyServiceHostname: (service: string) => string;
 };
 
@@ -49,7 +53,7 @@ const noopProxy: BlueskyProxyRuntime = {
   hasBundledEncryptedCredentials: () => false,
   hasBlueskyProxyAccounts: () => false,
   getShuffledBlueskyAccounts: () => [],
-  blueskyProxyServiceHostname: () => ''
+  blueskyProxyServiceHostname: () => "",
 };
 
 export function setBlueskyProxyRuntime(r: BlueskyProxyRuntime): void {

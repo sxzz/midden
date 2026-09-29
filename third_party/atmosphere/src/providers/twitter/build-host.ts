@@ -1,4 +1,7 @@
-import type { APIStatusTombstone, APITwitterStatus } from '../../types/api-schemas.js';
+import type {
+  APIStatusTombstone,
+  APITwitterStatus,
+} from "../../types/api-schemas.js";
 
 export type TwitterPolyglotLikeTranslation = {
   translated_text?: string;
@@ -15,18 +18,20 @@ export type TwitterBuildHost = {
   t: (key: string, options?: { lng?: string; [k: string]: unknown }) => string;
   translatePolyglot?: (
     status: APITwitterStatus,
-    targetLang: string
+    targetLang: string,
   ) => Promise<TwitterPolyglotLikeTranslation | null>;
   translateAI?: (
     status: APITwitterStatus,
-    targetLang: string
+    targetLang: string,
   ) => Promise<TwitterPolyglotLikeTranslation | null>;
   /** Worker supplies i18n tombstone messages (see `src/helpers/tombstone.ts`). */
   withLocalizedTombstone?: (
     t: APIStatusTombstone,
-    language: string | undefined
+    language: string | undefined,
   ) => Promise<APIStatusTombstone>;
-  twitterProxy?: { fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> };
+  twitterProxy?: {
+    fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  };
   analyticsEngine?: { writeDataPoint: (data: unknown) => void };
   waitUntil?: (p: Promise<unknown> | unknown) => void;
   exceptionWebhookUrl?: string;

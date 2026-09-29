@@ -38,6 +38,7 @@ func TestCollectionMessageIncludesOnlyCollectionID(t *testing.T) {
 		t.Fatal(text)
 	}
 }
+
 func TestCollectionListSummary(t *testing.T) {
 	for _, tc := range []struct{ summary, text, want string }{
 		{"作者：第一行\n第二行", "unused", "作者：第一行 第二行"},

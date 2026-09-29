@@ -1,4 +1,4 @@
-import type { TwitterCredentials } from '../types/proxy-credentials.js';
+import type { TwitterCredentials } from "../types/proxy-credentials.js";
 
 /**
  * Twitter / X web/API configuration. The FxEmbed worker calls {@link setTwitterProviderEnv} at startup.
@@ -22,25 +22,27 @@ export type TwitterProviderEnv = {
 };
 
 const defaultEnv: TwitterProviderEnv = {
-  apiRoot: 'https://api.x.com',
-  webRoot: 'https://x.com',
-  friendlyUserAgent: 'FxEmbed',
-  guestBearerToken: '',
+  apiRoot: "https://api.x.com",
+  webRoot: "https://x.com",
+  friendlyUserAgent: "FxEmbed",
+  guestBearerToken: "",
   baseHeaders: {},
   guestTokenMaxAge: 3600,
   mosaicDomainList: [],
   mosaicBskyDomainList: [],
   polyglotDomainList: [],
   apiHostList: [],
-  videoBase: 'https://video.twimg.com',
+  videoBase: "https://video.twimg.com",
   gifTranscodeDomainList: [],
   oldEmbedDomains: [],
-  blueskyApiHostList: []
+  blueskyApiHostList: [],
 };
 
 let env: TwitterProviderEnv = { ...defaultEnv };
 
-export function setTwitterProviderEnv(partial: Partial<TwitterProviderEnv>): void {
+export function setTwitterProviderEnv(
+  partial: Partial<TwitterProviderEnv>,
+): void {
   env = { ...env, ...partial };
 }
 
@@ -68,7 +70,7 @@ export function setTwitterProxyRuntime(r: TwitterProxyRuntime): void {
 export function getTwitterProxyRuntime(): TwitterProxyRuntime {
   if (!twitterProxy) {
     throw new Error(
-      'Twitter proxy runtime not configured: call setTwitterProxyRuntime() from the FxEmbed worker (see worker.ts)'
+      "Twitter proxy runtime not configured: call setTwitterProxyRuntime() from the FxEmbed worker (see worker.ts)",
     );
   }
   return twitterProxy;

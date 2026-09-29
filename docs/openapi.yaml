@@ -336,7 +336,12 @@ paths:
                 properties:
                   used_bytes: { type: integer, format: int64 }
                   reserved_bytes: { type: integer, format: int64 }
-                  limit_bytes: { type: integer, format: int64, description: "Configured quota; not enforced when unlimited is true" }
+                  limit_bytes:
+                    {
+                      type: integer,
+                      format: int64,
+                      description: "Configured quota; not enforced when unlimited is true",
+                    }
                   unlimited: { type: boolean }
         "401": { $ref: "#/components/responses/Unauthorized" }
 components:
@@ -479,7 +484,8 @@ components:
             description: Visibility declared by the provider,
           }
         text: { type: string }
-        summary: { type: string, description: Adapter-provided collection summary }
+        summary:
+          { type: string, description: Adapter-provided collection summary }
         author_name: { type: string }
         published_at: { type: string, format: date-time }
         text_kind: { type: string, enum: [provider_summary, post_text] }
