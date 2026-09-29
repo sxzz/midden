@@ -11,10 +11,10 @@
 
 ## 快速启动
 
-需要 Docker Compose 和 Python 3。在项目目录执行：
+需要 Docker Compose 和 Node.js。在项目目录执行：
 
 ```sh
-python3 scripts/configure-local-storage.py
+node scripts/configure-local-storage.mjs
 docker compose pull
 docker compose up -d
 ```

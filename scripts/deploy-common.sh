@@ -2,20 +2,17 @@
 # Sourced by both deployment entry points while holding .local/deploy.lock.
 
 record_deployment_config() {
-	python3 - <<'PY'
-import os
-from pathlib import Path
-
-p = Path('.env')
-keys = ('CORE_IMAGE', 'ADAPTER_IMAGE', 'TELEGRAM_CHANNEL_ID')
-lines = p.read_text().splitlines() if p.exists() else []
-lines = [line for line in lines if not line.startswith(tuple(k + '=' for k in keys))]
-lines.extend(f'{key}={os.environ[key]}' for key in keys)
-tmp = p.with_name('.env.new')
-tmp.write_text('\n'.join(lines) + '\n')
-tmp.chmod(0o600)
-tmp.replace(p)
-PY
+	local temporary
+	temporary=$(mktemp .env.XXXXXX)
+	if [[ -f .env ]]; then
+		if ! awk '!/^(CORE_IMAGE|ADAPTER_IMAGE|TELEGRAM_CHANNEL_ID)=/' .env >"$temporary"; then
+			rm -f "$temporary"
+			return 1
+		fi
+	fi
+	printf 'CORE_IMAGE=%s\nADAPTER_IMAGE=%s\nTELEGRAM_CHANNEL_ID=%s\n' "$CORE_IMAGE" "$ADAPTER_IMAGE" "$TELEGRAM_CHANNEL_ID" >>"$temporary"
+	chmod 600 "$temporary"
+	mv "$temporary" .env
 }
 
 wait_for_http() {
