@@ -18,6 +18,7 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	pb "monitor/api/adapter/v1"
+	"monitor/internal/channelapi"
 	"monitor/internal/domain"
 	"monitor/internal/store"
 )
@@ -50,8 +51,7 @@ func TestPublicSharing(t *testing.T) {
 	defer h.Close()
 	fake := &fakeAdapter{public: true, text: "original", urls: []string{h.URL}}
 	mem := &memoryBlob{m: map[string][]byte{}}
-	sender := &fakeSender{}
-	s := &Service{DB: db, Queue: q, Adapter: fake, Config: Defaults(), Blobs: mem, HTTP: http.DefaultClient, Sender: sender}
+	s := &Service{DB: db, Queue: q, Adapter: fake, Config: Defaults(), Blobs: mem, HTTP: http.DefaultClient}
 	target := "https://x.com/a/status/91000000001"
 	jobs := make([]domain.Job, 2)
 	var wg sync.WaitGroup
@@ -72,7 +72,7 @@ func TestPublicSharing(t *testing.T) {
 		t.FailNow()
 	}
 	j := jobs[0]
-	if j.ID != jobs[1].ID || j.ArchiveID != jobs[1].ArchiveID {
+	if j.ID != jobs[1].ID || j.CollectionID != jobs[1].CollectionID {
 		t.Fatal("public submissions did not coalesce")
 	}
 	complete := func(job domain.Job) {
@@ -91,7 +91,7 @@ func TestPublicSharing(t *testing.T) {
 		t.Fatal("duplicate fetch")
 	}
 	for _, tenant := range []string{a, b, c} {
-		ar, err := s.Archive(ctx, tenant, j.ArchiveID)
+		ar, err := s.Collection(ctx, tenant, j.CollectionID)
 		must(t, err)
 		if ar.Text != "original" || ar.Visibility != "public" {
 			t.Fatal(ar)
@@ -111,7 +111,7 @@ func TestPublicSharing(t *testing.T) {
 	if len(page.Items) != 0 {
 		t.Fatal("other tenant's collection exposed")
 	}
-	if _, e = s.Recent(ctx, c, base64.RawURLEncoding.EncodeToString([]byte(j.ArchiveID))); e == nil {
+	if _, e = s.Recent(ctx, c, base64.RawURLEncoding.EncodeToString([]byte(j.CollectionID))); e == nil {
 		t.Fatal("foreign collection cursor accepted")
 	}
 	for _, tenant := range []string{a, b} {
@@ -125,43 +125,52 @@ func TestPublicSharing(t *testing.T) {
 			return tx.QueryRow(ctx, `SELECT id FROM submissions WHERE capture_id=$1`, j.ID).Scan(&sid)
 		}))
 		var n int
-		must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE args->>'type'='deliver' AND args->>'tenant'=$1 AND args->>'id'=$2`, tenant, sid).Scan(&n))
+		must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM channel_work WHERE kind='delivery' AND tenant_id=$1 AND resource=$2`, tenant, sid).Scan(&n))
 		if n != 1 {
 			t.Fatal("delivery not scheduled for subscriber", tenant, n)
 		}
-		must(t, s.deliver(ctx, store.Task{Tenant: tenant, ID: sid}))
 	}
-	if len(sender.chats) != 2 {
-		t.Fatal("expected one captioned image for each subscriber", sender.chats)
+	for {
+		w, err := s.ClaimChannel(ctx, channel)
+		must(t, err)
+		if w == nil {
+			break
+		}
+		data, err := s.ChannelDelivery(ctx, channel, w.ID, w.Lease)
+		must(t, err)
+		if data.Collection == nil {
+			t.Fatal("missing shared delivery collection")
+		}
+		must(t, s.AckChannel(ctx, channel, w.ID, channelapi.Ack{Lease: w.Lease, Done: true}))
 	}
-	old, e := s.Archive(ctx, a, j.ArchiveID)
+	old, e := s.Collection(ctx, a, j.CollectionID)
 	must(t, e)
-	refresh, e := s.Submit(ctx, b, domain.CaptureInput{RefreshID: j.ArchiveID})
+	refresh, e := s.Submit(ctx, b, domain.CaptureInput{RefreshID: j.CollectionID})
 	must(t, e)
 	complete(refresh)
-	unchanged, e := s.Archive(ctx, a, j.ArchiveID)
+	unchanged, e := s.Collection(ctx, a, j.CollectionID)
 	must(t, e)
 	if unchanged.RevisionID != old.RevisionID {
 		t.Fatal("unchanged shared refresh duplicated revision")
 	}
 	fake.set("edited", h.URL)
-	refresh, e = s.Submit(ctx, b, domain.CaptureInput{RefreshID: j.ArchiveID})
+	refresh, e = s.Submit(ctx, b, domain.CaptureInput{RefreshID: j.CollectionID})
 	must(t, e)
 	complete(refresh)
 	for _, tenant := range []string{a, b} {
-		ar, err := s.Archive(ctx, tenant, j.ArchiveID)
+		ar, err := s.Collection(ctx, tenant, j.CollectionID)
 		must(t, err)
 		if ar.Text != "edited" || ar.RevisionID == old.RevisionID {
 			t.Fatal("shared update missing")
 		}
 	}
-	pinned, e := s.CaptureArchive(ctx, a, j.ID)
+	pinned, e := s.CaptureCollection(ctx, a, j.ID)
 	must(t, e)
 	if pinned.Text != "original" {
 		t.Fatal("old delivery overwritten")
 	}
 	var n int
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM revisions WHERE archive_id=$1`, j.ArchiveID).Scan(&n))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM revisions WHERE collection_id=$1`, j.CollectionID).Scan(&n))
 	if n != 2 {
 		t.Fatal("revision duplication", n)
 	}
@@ -190,7 +199,7 @@ func TestPublicSharing(t *testing.T) {
 	before := fake.calls.Load()
 	reuse, e := s.Submit(ctx, c, domain.CaptureInput{URL: target})
 	must(t, e)
-	if reuse.ArchiveID != j.ArchiveID || fake.calls.Load() != before {
+	if reuse.CollectionID != j.CollectionID || fake.calls.Load() != before {
 		t.Fatal("public reuse failed")
 	}
 	u, e := s.Usage(ctx, c)
@@ -203,7 +212,7 @@ func TestPublicSharing(t *testing.T) {
 		t.Fatal("logical usage differs", ua, ub, u)
 	}
 	// Removing the original subscriber releases only that tenant's references.
-	must(t, s.DeleteArchive(ctx, a, j.ArchiveID))
+	must(t, s.DeleteCollection(ctx, a, j.CollectionID))
 	ua, e = s.Usage(ctx, a)
 	must(t, e)
 	ub, e = s.Usage(ctx, b)
@@ -211,7 +220,7 @@ func TestPublicSharing(t *testing.T) {
 	if ua.Used != 0 || ub.Used != u.Used {
 		t.Fatal("forget changed another subscriber's usage", ua, ub)
 	}
-	_, e = s.Archive(ctx, b, j.ArchiveID)
+	_, e = s.Collection(ctx, b, j.CollectionID)
 	must(t, e)
 	// Existing shared content cannot be added when the tenant lacks logical quota.
 	_, e = admin.Pool.Exec(ctx, `UPDATE tenants SET quota_bytes=1 WHERE id=$1`, a)
@@ -222,7 +231,7 @@ func TestPublicSharing(t *testing.T) {
 	_, e = admin.Pool.Exec(ctx, `UPDATE tenants SET quota_bytes=$2 WHERE id=$1`, c, u.Used)
 	must(t, e)
 	fake.set("larger shared update", h.URL)
-	next, e := s.Submit(ctx, b, domain.CaptureInput{RefreshID: j.ArchiveID})
+	next, e := s.Submit(ctx, b, domain.CaptureInput{RefreshID: j.CollectionID})
 	must(t, e)
 	complete(next)
 	over, e := s.Usage(ctx, c)
@@ -233,7 +242,7 @@ func TestPublicSharing(t *testing.T) {
 	if _, e = s.Submit(ctx, c, domain.CaptureInput{URL: "https://x.com/a/status/91000000009"}); e != domain.ErrQuota {
 		t.Fatal("over-quota tenant started new work", e)
 	}
-	must(t, s.DeleteArchive(ctx, c, j.ArchiveID))
+	must(t, s.DeleteCollection(ctx, c, j.CollectionID))
 	empty, e := s.Usage(ctx, c)
 	must(t, e)
 	if empty.Used != 0 {
@@ -247,19 +256,19 @@ func TestPublicSharing(t *testing.T) {
 	private.Adapter = &fakeAdapter{text: "secret", urls: []string{h.URL}}
 	pj, e := private.Submit(ctx, a, domain.CaptureInput{URL: target})
 	must(t, e)
-	if pj.ArchiveID == j.ArchiveID {
+	if pj.CollectionID == j.CollectionID {
 		t.Fatal("private/public merged")
 	}
 	s.Adapter = private.Adapter
 	complete(pj)
 	s.Adapter = fake
-	pa, e := s.Archive(ctx, a, pj.ArchiveID)
+	pa, e := s.Collection(ctx, a, pj.CollectionID)
 	must(t, e)
 	if pa.Visibility != "private" {
 		t.Fatal(pa)
 	}
-	if _, e = s.Archive(ctx, b, pj.ArchiveID); e == nil {
-		t.Fatal("private archive exposed")
+	if _, e = s.Collection(ctx, b, pj.CollectionID); e == nil {
+		t.Fatal("private collection exposed")
 	}
 	if _, e = s.Asset(ctx, b, pa.Assets[0].ID); e == nil {
 		t.Fatal("private asset exposed")
@@ -269,20 +278,20 @@ func TestPublicSharing(t *testing.T) {
 	}
 	p2, e := private.Submit(ctx, b, domain.CaptureInput{URL: target})
 	must(t, e)
-	if p2.ArchiveID == pj.ArchiveID {
+	if p2.CollectionID == pj.CollectionID {
 		t.Fatal("private tenants merged")
 	}
 	s.Adapter = private.Adapter
 	complete(p2)
 	s.Adapter = fake
-	pbArchive, e := s.Archive(ctx, b, p2.ArchiveID)
+	pbCollection, e := s.Collection(ctx, b, p2.CollectionID)
 	must(t, e)
-	if pbArchive.Assets[0].Key == pa.Assets[0].Key {
+	if pbCollection.Assets[0].Key == pa.Assets[0].Key {
 		t.Fatal("private image shared across tenants")
 	}
 	// RLS rejects fabricated links even when the attacker knows a private UUID.
 	e = db.Tx(ctx, b, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,adapter_id) VALUES($1,$2,'fixture','fixture')`, b, pj.ArchiveID)
+		_, err := tx.Exec(ctx, `INSERT INTO tenant_collections(tenant_id,collection_id,provider_id,adapter_id) VALUES($1,$2,'fixture','fixture')`, b, pj.CollectionID)
 		return err
 	})
 	if e == nil {
@@ -295,68 +304,68 @@ func TestPublicSharing(t *testing.T) {
 	if e == nil {
 		t.Fatal("private submission link accepted")
 	}
-	// The same tenant pays once for a Blob shared by multiple archived posts.
+	// The same tenant pays once for a Blob shared by multiple saved posts.
 	beforeUsage, e := s.Usage(ctx, b)
 	must(t, e)
 	second, e := s.Submit(ctx, b, domain.CaptureInput{URL: "https://x.com/a/status/91000000003"})
 	must(t, e)
 	complete(second)
 	var textBytes int64
-	must(t, admin.Pool.QueryRow(ctx, `SELECT sum(content_bytes) FROM revisions WHERE archive_id=$1`, second.ArchiveID).Scan(&textBytes))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT sum(content_bytes) FROM revisions WHERE collection_id=$1`, second.CollectionID).Scan(&textBytes))
 	afterUsage, e := s.Usage(ctx, b)
 	must(t, e)
 	if afterUsage.Used-beforeUsage.Used != textBytes {
 		t.Fatal("image counted twice across the tenant's collections", beforeUsage, afterUsage, textBytes)
 	}
-	secondArchive, e := s.Archive(ctx, b, second.ArchiveID)
+	secondCollection, e := s.Collection(ctx, b, second.CollectionID)
 	must(t, e)
 	// The last removal starts delayed cleanup; other references must survive.
-	must(t, s.DeleteArchive(ctx, b, j.ArchiveID))
+	must(t, s.DeleteCollection(ctx, b, j.CollectionID))
 	var removed int
-	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_archives(interval '24 hours')`).Scan(&removed))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_collections(interval '24 hours')`).Scan(&removed))
 	if removed != 0 {
-		t.Fatal("archive cleaned before grace")
+		t.Fatal("collection cleaned before grace")
 	}
-	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_archives(interval '0 seconds')`).Scan(&removed))
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM archives WHERE id=$1`, j.ArchiveID).Scan(&n))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_collections(interval '0 seconds')`).Scan(&removed))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM collections WHERE id=$1`, j.CollectionID).Scan(&n))
 	if n != 0 {
-		t.Fatal("unreferenced archive not removed")
+		t.Fatal("unreferenced collection not removed")
 	}
 	for _, tenant := range []string{a, b, c} {
 		must(t, s.Collect(ctx, tenant, 0))
 	}
-	if _, e = s.Archive(ctx, b, j.ArchiveID); e == nil {
-		t.Fatal("orphan archive remained")
+	if _, e = s.Collection(ctx, b, j.CollectionID); e == nil {
+		t.Fatal("orphan collection remained")
 	}
 	_, e = s.Asset(ctx, a, pa.Assets[0].ID)
 	must(t, e)
-	_, e = s.Asset(ctx, b, pbArchive.Assets[0].ID)
+	_, e = s.Asset(ctx, b, pbCollection.Assets[0].ID)
 	must(t, e)
-	_, e = s.Asset(ctx, b, secondArchive.Assets[0].ID)
+	_, e = s.Asset(ctx, b, secondCollection.Assets[0].ID)
 	must(t, e)
-	if _, e = mem.Get(ctx, secondArchive.Assets[0].Key); e != nil {
-		t.Fatal("shared image removed while another archive referenced it", e)
+	if _, e = mem.Get(ctx, secondCollection.Assets[0].Key); e != nil {
+		t.Fatal("shared image removed while another collection referenced it", e)
 	}
-	must(t, s.DeleteArchive(ctx, b, second.ArchiveID))
-	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_archives(interval '0 seconds')`).Scan(&removed))
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM archives WHERE id=$1`, second.ArchiveID).Scan(&n))
+	must(t, s.DeleteCollection(ctx, b, second.CollectionID))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_collections(interval '0 seconds')`).Scan(&removed))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM collections WHERE id=$1`, second.CollectionID).Scan(&n))
 	if n != 0 {
 		t.Fatal("last shared reference not collected")
 	}
 	// Removing a collection during capture must not destroy its running task or recreate the collection.
 	inflight, e := s.Submit(ctx, a, domain.CaptureInput{URL: "https://x.com/a/status/91000000004"})
 	must(t, e)
-	must(t, s.DeleteArchive(ctx, a, inflight.ArchiveID))
-	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_archives(interval '0 seconds')`).Scan(&removed))
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM archives WHERE id=$1`, inflight.ArchiveID).Scan(&n))
+	must(t, s.DeleteCollection(ctx, a, inflight.CollectionID))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_collections(interval '0 seconds')`).Scan(&removed))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM collections WHERE id=$1`, inflight.CollectionID).Scan(&n))
 	if n != 1 {
-		t.Fatal("in-flight archive collected")
+		t.Fatal("in-flight collection collected")
 	}
 	complete(inflight)
-	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_archives(interval '0 seconds')`).Scan(&removed))
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM archives WHERE id=$1`, inflight.ArchiveID).Scan(&n))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_collections(interval '0 seconds')`).Scan(&removed))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM collections WHERE id=$1`, inflight.CollectionID).Scan(&n))
 	if n != 0 {
-		t.Fatal("finished unreferenced archive not collected")
+		t.Fatal("finished unreferenced collection not collected")
 	}
 	// A provider policy mismatch must fail before publishing any text or image.
 	s.Providers = []*pb.Provider{{Id: "fxtwitter", Capabilities: []*pb.Capability{{Name: "capture.fetch", Major: 1}}, DefaultProvider: true, Authentication: "none", Visibilities: []pb.Visibility{pb.Visibility_VISIBILITY_PUBLIC}}}

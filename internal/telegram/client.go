@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,9 +14,14 @@ import (
 
 	tg "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
-	"monitor/internal/blob"
 	"monitor/internal/domain"
 )
+
+// MediaSource supplies authorized bytes; the Telegram transport knows nothing
+// about databases, object-store credentials, or where those bytes are stored.
+type MediaSource interface {
+	Get(context.Context, string) (io.ReadCloser, error)
+}
 
 type Client struct {
 	replyTo  int64
@@ -28,7 +34,7 @@ type Client struct {
 	Token    string
 	Base     string
 	HTTP     *http.Client
-	Blobs    blob.Storage
+	Blobs    MediaSource
 }
 type APIError struct {
 	Code        int
@@ -181,10 +187,15 @@ func (c *Client) Updates(ctx context.Context, offset int64) ([]Update, error) {
 	return out, e
 }
 
+type WebAppInfo struct {
+	URL string `json:"url"`
+}
+
 type Button struct {
-	Text string `json:"text"`
-	Data string `json:"callback_data,omitempty"`
-	URL  string `json:"url,omitempty"`
+	WebApp *WebAppInfo `json:"web_app,omitempty"`
+	Text   string      `json:"text"`
+	Data   string      `json:"callback_data,omitempty"`
+	URL    string      `json:"url,omitempty"`
 }
 type Keyboard [][]Button
 
@@ -213,7 +224,7 @@ func (c *Client) WithReplyTo(messageID int64) *Client {
 	return &copy
 }
 
-// WithCode formats only the specified literal, leaving archived text untouched.
+// WithCode formats only the specified literal, leaving saved text untouched.
 func (c *Client) WithCode(text string) *Client {
 	copy := *c
 	copy.codeText = text
@@ -277,6 +288,13 @@ func (c *Client) SendInteractive(ctx context.Context, chat, text string, previou
 	cfg.ReplyToMessageID = int(c.replyTo)
 	cfg.DisableWebPagePreview = true
 	cfg.ReplyMarkup = markup(buttons)
+	for _, row := range buttons {
+		for _, button := range row {
+			if button.WebApp != nil {
+				cfg.ReplyMarkup = map[string]any{"inline_keyboard": buttons}
+			}
+		}
+	}
 	m, e := b.Send(cfg)
 	return int64(m.MessageID), apiError(e)
 }
@@ -318,7 +336,7 @@ func (c *Client) uploadAttempt(ctx context.Context, chat string, a domain.Asset,
 		if errors.Is(e, errVideoMetadata) {
 			return 0, errVideoMetadata
 		}
-		return 0, fmt.Errorf("archived media unavailable")
+		return 0, fmt.Errorf("saved media unavailable")
 	}
 	defer p.close()
 	var m tg.Message
@@ -375,7 +393,7 @@ func (c *Client) albumAttempt(ctx context.Context, chat string, assets []domain.
 			if errors.Is(e, errVideoMetadata) {
 				return 0, errVideoMetadata
 			}
-			return 0, fmt.Errorf("archived media unavailable")
+			return 0, fmt.Errorf("saved media unavailable")
 		}
 		prepared = append(prepared, p)
 	}
@@ -547,4 +565,18 @@ func SplitCaption(text string) (string, string) {
 		units += size
 	}
 	return text, ""
+}
+
+// ConfigureWebMenu changes only the private-chat menu, leaving commands available.
+func (c *Client) ConfigureWebMenu(ctx context.Context, address string) error {
+	menu := map[string]any{"type": "commands"}
+	if address != "" {
+		menu = map[string]any{"type": "web_app", "text": "打开收藏库", "web_app": map[string]string{"url": address}}
+	}
+	raw, e := json.Marshal(menu)
+	if e != nil {
+		return e
+	}
+	_, e = c.sdk(ctx).MakeRequest("setChatMenuButton", tg.Params{"menu_button": string(raw)})
+	return apiError(e)
 }

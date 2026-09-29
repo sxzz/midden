@@ -101,7 +101,7 @@ func TestRelatedCaptures(t *testing.T) {
 	first := complete(a, submit(a, domain.CaptureInput{URL: "https://notes.test/entry/root"}))
 	related(a, first.ID)
 	var childID string
-	must(t, admin.Pool.QueryRow(ctx, `SELECT c.id FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.tenant_id=$1 AND a.kind='collection'`, a).Scan(&childID))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT c.id FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.tenant_id=$1 AND a.kind='collection'`, a).Scan(&childID))
 	child := complete(a, domain.Job{ID: childID})
 	var count int
 	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM submissions WHERE capture_id=$1 AND related_state='pending'`, childID).Scan(&count))
@@ -110,15 +110,15 @@ func TestRelatedCaptures(t *testing.T) {
 	}
 	second := complete(a, submit(a, domain.CaptureInput{URL: "https://notes.test/entry/next"}))
 	related(a, second.ID)
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM captures WHERE archive_id=$1`, child.ArchiveID).Scan(&count))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM captures WHERE collection_id=$1`, child.CollectionID).Scan(&count))
 	if count != 1 {
 		t.Fatal("fresh related target fetched again", count)
 	}
-	_, e = admin.Pool.Exec(ctx, `UPDATE archives SET observed_at=now()-interval '61 minutes' WHERE id=$1`, child.ArchiveID)
+	_, e = admin.Pool.Exec(ctx, `UPDATE collections SET observed_at=now()-interval '61 minutes' WHERE id=$1`, child.CollectionID)
 	must(t, e)
 	third := complete(a, submit(a, domain.CaptureInput{URL: "https://notes.test/entry/third"}))
 	related(a, third.ID)
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM captures WHERE archive_id=$1`, child.ArchiveID).Scan(&count))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM captures WHERE collection_id=$1`, child.CollectionID).Scan(&count))
 	if count != 2 {
 		t.Fatal("stale related target not refreshed", count)
 	}
@@ -134,13 +134,13 @@ func TestRelatedCaptures(t *testing.T) {
 	related(b, jb.ID)
 	for _, tenant := range tenants {
 		must(t, db.Tx(ctx, tenant, func(tx pgx.Tx) error {
-			return tx.QueryRow(ctx, `SELECT count(*) FROM tenant_archives t JOIN archives a ON a.id=t.archive_id WHERE a.kind='entry' AND a.external_id LIKE 'shared-%'`).Scan(&count)
+			return tx.QueryRow(ctx, `SELECT count(*) FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE a.kind='entry' AND a.external_id LIKE 'shared-%'`).Scan(&count)
 		}))
 		if count != 13 {
 			t.Fatal("first page lost entries", count)
 		}
 		must(t, db.Tx(ctx, tenant, func(tx pgx.Tx) error {
-			return tx.QueryRow(ctx, `SELECT count(*) FROM tenant_archives WHERE archive_id=$1`, ja.ArchiveID).Scan(&count)
+			return tx.QueryRow(ctx, `SELECT count(*) FROM tenant_collections WHERE collection_id=$1`, ja.CollectionID).Scan(&count)
 		}))
 		if count != 1 {
 			t.Fatal("canonical ref not retained")
@@ -152,7 +152,7 @@ func TestRelatedCaptures(t *testing.T) {
 		t.Fatal("explicit collection reused old capture")
 	}
 	next = complete(a, next)
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM revisions WHERE archive_id=$1`, next.ArchiveID).Scan(&count))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM revisions WHERE collection_id=$1`, next.CollectionID).Scan(&count))
 	if count != 1 {
 		t.Fatal("unchanged content created another revision", count)
 	}
@@ -165,10 +165,10 @@ func TestRelatedCaptures(t *testing.T) {
 	complete(a, implicit)
 	related(a, explicit.ID)
 	var expandedID string
-	must(t, admin.Pool.QueryRow(ctx, `SELECT c.id FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.tenant_id=$1 AND a.external_id='joined' AND NOT c.automatic AND c.state='queued'`, a).Scan(&expandedID))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT c.id FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.tenant_id=$1 AND a.external_id='joined' AND NOT c.automatic AND c.state='queued'`, a).Scan(&expandedID))
 	complete(a, domain.Job{ID: expandedID})
 	related(a, expandedID)
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM tenant_archives t JOIN archives a ON a.id=t.archive_id WHERE t.tenant_id=$1 AND a.external_id LIKE 'joined-%'`, a).Scan(&count))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE t.tenant_id=$1 AND a.external_id LIKE 'joined-%'`, a).Scan(&count))
 	if count != 13 {
 		t.Fatal("explicit request lost collection expansion", count)
 	}

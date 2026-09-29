@@ -6,11 +6,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	pb "monitor/api/adapter/v1"
+	"monitor/internal/channelapi"
 	"monitor/internal/credentials"
 	"monitor/internal/domain"
 	"monitor/internal/store"
@@ -47,18 +47,15 @@ func TestFailedCaptureButtonUsesCurrentAccount(t *testing.T) {
 		job, err := s.Submit(ctx, tenant, domain.CaptureInput{URL: []string{"https://x.com/i/status/99000201", "https://x.com/i/status/99000202"}[i], ConnectionID: old})
 		must(t, err)
 		must(t, s.fail(ctx, store.Task{Tenant: tenant, ID: job.ID, Type: "capture"}, "account session expired"))
-		must(t, s.commandAccount(ctx, &commandRequest{Task: store.Task{Tenant: tenant}, Argument: selection}))
-		r := &commandRequest{Task: store.Task{Tenant: tenant, ID: uuid.NewString()}, Argument: job.ArchiveID}
+		selectTestAccount(t, s, tenant, selection)
+		op := "retry"
 		if i == 0 {
-			must(t, s.commandRefresh(ctx, r)) // Existing failure buttons still work.
-		} else {
-			must(t, s.commandRetry(ctx, r))
+			op = "refresh"
 		}
-		if r.Text != "" {
-			t.Fatal(r.Text)
-		}
+		_, work, err := channelTestEvent(t, s, tenant, channelapi.Event{Command: op, Argument: job.CollectionID})
+		must(t, err)
 		var got, provider string
-		must(t, admin.Pool.QueryRow(ctx, `SELECT coalesce(c.connection_id::text,''),c.provider_id FROM captures c JOIN submissions s ON s.capture_id=c.id WHERE s.tenant_id=$1 AND s.idem_key=$2`, tenant, "retry:"+r.Task.ID).Scan(&got, &provider))
+		must(t, admin.Pool.QueryRow(ctx, `SELECT coalesce(c.connection_id::text,''),c.provider_id FROM captures c JOIN submissions s ON s.capture_id=c.id WHERE s.tenant_id=$1 AND s.idem_key=$2`, tenant, "retry:"+work.ID).Scan(&got, &provider))
 		want := selection
 		if selection == "public" {
 			want = ""
@@ -71,10 +68,9 @@ func TestFailedCaptureButtonUsesCurrentAccount(t *testing.T) {
 		if original.ConnectionID != old {
 			t.Fatal("changed original capture connection")
 		}
-		foreign := &commandRequest{Task: store.Task{Tenant: other, ID: uuid.NewString()}, Argument: job.ArchiveID}
-		must(t, s.commandRefresh(ctx, foreign))
-		if foreign.Text != "归档不存在或无权限。" {
+		if _, err := channelTestAction(t, s, other, "refresh", job.CollectionID); err == nil {
 			t.Fatal("foreign retry permitted")
 		}
+
 	}
 }

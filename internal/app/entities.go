@@ -114,7 +114,7 @@ func persistEntities(ctx context.Context, tx pgx.Tx, tenant, cid string, p *Payl
 		return nil
 	}
 	var visibility, scope, platform string
-	if err := tx.QueryRow(ctx, `SELECT c.visibility,a.scope,a.platform FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.id=$1`, cid).Scan(&visibility, &scope, &platform); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT c.visibility,a.scope,a.platform FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.id=$1`, cid).Scan(&visibility, &scope, &platform); err != nil {
 		return err
 	}
 	for i := range p.Graph.Entities {
@@ -160,7 +160,7 @@ func linkEntities(ctx context.Context, tx pgx.Tx, tenant, cid, rid string, g *do
 	return nil
 }
 
-func hydrateGraph(a *domain.Archive, p Payload, all []domain.Asset) {
+func hydrateGraph(a *domain.Collection, p Payload, all []domain.Asset) {
 	a.Graph = p.Graph
 	a.Assets = []domain.Asset{}
 	for _, asset := range all {
@@ -184,7 +184,7 @@ func (s *Service) Entity(ctx context.Context, tenant, id string) (v domain.Entit
 	err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		var body []byte
 		var cid, version string
-		if err := tx.QueryRow(ctx, `SELECT r.payload,r.capture_id,ev.id FROM entity_versions ev JOIN revision_entities re ON re.entity_version_id=ev.id JOIN revisions r ON r.id=re.revision_id JOIN tenant_archives ta ON ta.archive_id=r.archive_id WHERE ev.entity_id=$1 ORDER BY ev.created_at DESC,r.created_at DESC,r.id DESC LIMIT 1`, id).Scan(&body, &cid, &version); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT r.payload,r.capture_id,ev.id FROM entity_versions ev JOIN revision_entities re ON re.entity_version_id=ev.id JOIN revisions r ON r.id=re.revision_id JOIN tenant_collections ta ON ta.collection_id=r.collection_id WHERE ev.entity_id=$1 ORDER BY ev.created_at DESC,r.created_at DESC,r.id DESC LIMIT 1`, id).Scan(&body, &cid, &version); err != nil {
 			return err
 		}
 		var p Payload
@@ -195,7 +195,7 @@ func (s *Service) Entity(ctx context.Context, tenant, id string) (v domain.Entit
 		if err != nil {
 			return err
 		}
-		var a domain.Archive
+		var a domain.Collection
 		hydrateGraph(&a, p, aa)
 		if a.Graph != nil {
 			for _, e := range a.Graph.Entities {

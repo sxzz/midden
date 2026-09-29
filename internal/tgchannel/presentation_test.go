@@ -1,0 +1,54 @@
+package tgchannel
+
+import (
+	"encoding/base64"
+	"strings"
+	"testing"
+
+	"github.com/google/uuid"
+
+	"monitor/internal/domain"
+)
+
+func TestCallbackValidation(t *testing.T) {
+	id := uuid.NewString()
+	for _, value := range []string{"/list", "/usage", "/show " + id, "/refresh " + id, "/list " + base64.RawURLEncoding.EncodeToString([]byte(id))} {
+		if !validCallback(value) {
+			t.Fatal(value)
+		}
+	}
+	for _, value := range []string{"", "/refresh", "/show bad", "/list bad", "/start", strings.Repeat("x", 65)} {
+		if validCallback(value) {
+			t.Fatal(value)
+		}
+	}
+}
+
+func TestCollectionMessageIncludesOnlyCollectionID(t *testing.T) {
+	a := domain.Collection{ID: uuid.NewString(), RevisionID: uuid.NewString(), Text: "原帖正文", AuthorName: "测试作者", URL: "https://x.com/i/status/20", PublishedAt: "2026-04-05T03:22:33Z", Assets: []domain.Asset{{State: "ready"}}}
+	text := collectionMessage(a, "complete")
+	if text != a.ID+"\n\n测试作者：\n原帖正文" {
+		t.Fatal(text)
+	}
+	a.Text = ""
+	a.Warnings = []string{"视频不支持"}
+	a.Assets = append(a.Assets, domain.Asset{State: "failed", Error: "下载超时"})
+	text = collectionMessage(a, "partial")
+	if !strings.Contains(text, a.ID) || strings.Contains(text, "/show") || strings.Contains(text, a.RevisionID) || !strings.Contains(text, "视频不支持") || !strings.Contains(text, "下载超时") {
+		t.Fatal(text)
+	}
+}
+func TestCollectionListSummary(t *testing.T) {
+	for _, tc := range []struct{ summary, text, want string }{
+		{"作者：第一行\n第二行", "unused", "作者：第一行 第二行"},
+		{"", "旧收藏\n正文", "旧收藏 正文"},
+		{"", "", "无文字内容"},
+		{strings.Repeat("字", 100), "", strings.Repeat("字", 100)},
+		{strings.Repeat("🙂", 101), "", strings.Repeat("🙂", 99) + "…"},
+		{strings.Repeat("字", 120) + "[图片][视频]", "", strings.Repeat("字", 91) + "…[图片][视频]"},
+	} {
+		if got := collectionListSummary(tc.summary, tc.text); got != tc.want {
+			t.Fatalf("got %q, want %q", got, tc.want)
+		}
+	}
+}

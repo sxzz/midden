@@ -1,16 +1,116 @@
 openapi: 3.0.3
 info:
-  title: Monitor Archive API
+  title: Monitor Collection API
   version: 0.1.0
-  description: Tenant-scoped archives. Account authentication providers are reserved but unsupported in this MVP.
+  description: Tenant-scoped collections. Telegram Mini App sessions browse saved content only; Bearer clients retain existing public-content access.
 servers:
   - url: http://localhost:8080
 security:
   - bearerAuth: []
+  - webSession: []
 paths:
+  /v1/auth/telegram:
+    post:
+      summary: Exchange signed Telegram initData for a 12-hour HttpOnly session
+      description: Requires configured web_app_url, matching Origin, valid bot signature and auth_date within five minutes (30 seconds future tolerance). Resolves the same tenant as the Bot.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [init_data]
+              properties:
+                init_data: { type: string }
+      responses:
+        "200":
+          description: Session created; sets __Host-midden cookie (Secure, HttpOnly, SameSite=None, Path=/)
+          content:
+            application/json:
+              schema:
+                {
+                  type: object,
+                  properties: { tenant_id: { type: string, format: uuid } },
+                }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: Origin does not match web_app_url }
+        "404": { description: Mini App disabled }
+  /v1/session:
+    get:
+      summary: Read the authenticated tenant
+      responses:
+        "200":
+          description: Current identity
+          content:
+            application/json:
+              schema:
+                {
+                  type: object,
+                  properties: { tenant_id: { type: string, format: uuid } },
+                }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    delete:
+      summary: Revoke the current browser session and clear its cookie
+      responses:
+        "204": { description: Session revoked }
+        "403": { description: Invalid Origin for a cookie-authenticated write }
+  /v1/collections/{id}/availability:
+    get:
+      summary: Read capture availability for this saved collection's adapter
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses:
+        "200":
+          description: Background discovery status (may lag by 15 seconds plus discovery time)
+          content:
+            application/json:
+              schema:
+                { type: object, properties: { available: { type: boolean } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/collections/{id}/revisions:
+    get:
+      summary: List retained versions of a saved collection, newest first
+      parameters:
+        - { $ref: "#/components/parameters/ID" }
+        - { in: query, name: cursor, schema: { type: string } }
+      responses:
+        "200":
+          description: At most 20 versions; next_cursor is omitted at the end
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        created_at: { type: string, format: date-time }
+                  next_cursor: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/collections/{id}/revisions/{revision_id}:
+    get:
+      summary: Read one retained version with its original entity and media snapshots
+      parameters:
+        - { $ref: "#/components/parameters/ID" }
+        - {
+            in: path,
+            name: revision_id,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+      responses:
+        "200":
+          description: Saved collection version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Collection" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/captures:
     post:
-      summary: Submit an X URL or refresh an existing archive
+      summary: Submit an X URL or refresh an existing collection
       parameters:
         - in: header
           name: Idempotency-Key
@@ -71,14 +171,45 @@ paths:
               schema: { $ref: "#/components/schemas/Job" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
-  /v1/archives:
+  /v1/collections:
     get:
       summary: List this tenant's collection, newest first
+      description: Cookie sessions always use filtered collection pagination. Bearer requests with no filter parameters retain legacy cursor semantics. Filtered cursors are bound to the filter values and include their own sorting anchor.
       parameters:
+        - {
+            in: query,
+            name: q,
+            schema: { type: string, maxLength: 500 },
+            description: Literal case-insensitive substring in current text,
+            summary or author name.,
+          }
+        - {
+            in: query,
+            name: media_type,
+            schema: { type: string, enum: [image, video, text] },
+            description: Mixed posts match image and video; avatar resources are excluded.,
+          }
+        - {
+            in: query,
+            name: visibility,
+            schema: { type: string, enum: [public, private] },
+          }
+        - {
+            in: query,
+            name: saved_from,
+            schema: { type: string, format: date-time },
+            description: Inclusive saved time.,
+          }
+        - {
+            in: query,
+            name: saved_before,
+            schema: { type: string, format: date-time },
+            description: Exclusive saved time.,
+          }
         - in: query
           name: cursor
           schema: { type: string }
-          description: Opaque cursor returned by a previous page; pages contain at most 10 archives.
+          description: Opaque cursor returned by a previous page; pages contain at most 10 collections.
       responses:
         "200":
           description: Page
@@ -90,14 +221,14 @@ paths:
                   items:
                     {
                       type: array,
-                      items: { $ref: "#/components/schemas/Archive" },
+                      items: { $ref: "#/components/schemas/Collection" },
                     }
                   next_cursor: { type: string }
                   previous_cursor: { type: string }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
-  /v1/archives/{id}:
+  /v1/collections/{id}:
     delete:
       summary: Remove this tenant's collection reference and release its logical usage
       parameters: [{ $ref: "#/components/parameters/ID" }]
@@ -113,15 +244,15 @@ paths:
       parameters: [{ $ref: "#/components/parameters/ID" }]
       responses:
         "200":
-          description: Archive
+          description: Collection
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Archive" }
+              schema: { $ref: "#/components/schemas/Collection" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
   /v1/entities/{id}:
     get:
-      summary: Read the latest entity version linked to your saved archives
+      summary: Read the latest entity version linked to your saved collections
       parameters: [{ $ref: "#/components/parameters/ID" }]
       responses:
         "200":
@@ -130,7 +261,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Entity" }
         "404": { $ref: "#/components/responses/NotFound" }
-  /v1/archives/{id}/sources:
+  /v1/collections/{id}/sources:
     get:
       summary: List up to 100 latest retained upstream responses visible to this tenant
       parameters: [{ $ref: "#/components/parameters/ID" }]
@@ -157,9 +288,28 @@ paths:
               schema: {}
         "404": { $ref: "#/components/responses/NotFound" }
   /v1/assets/{id}:
-    get:
-      summary: Download an authorized archived original image
+    head:
+      summary: Read authorized media headers without a body
       parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses:
+        "200": { description: Media headers including size and Accept-Ranges }
+        "404": { $ref: "#/components/responses/NotFound" }
+    get:
+      summary: Download or preview authorized saved original media
+      parameters:
+        - { $ref: "#/components/parameters/ID" }
+        - {
+            in: query,
+            name: inline,
+            schema: { type: string, enum: ["1"] },
+            description: Inline display for supported image and video MIME types.,
+          }
+        - {
+            in: header,
+            name: Range,
+            schema: { type: string },
+            description: Single byte range only.,
+          }
       responses:
         "200":
           description: Original bytes; private/no-store; attachment disposition
@@ -169,6 +319,8 @@ paths:
             image/webp: { schema: { type: string, format: binary } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "206": { description: Partial media bytes with Content-Range }
+        "416": { description: Invalid or multiple ranges }
         "503": { description: Object store unavailable }
   /v1/usage:
     get:
@@ -189,6 +341,13 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
 components:
   securitySchemes:
+    webSession:
+      {
+        type: apiKey,
+        in: cookie,
+        name: __Host-midden,
+        description: Cookie write requests require matching Origin. Explicit invalid Bearer credentials never fall back to a cookie.,
+      }
     bearerAuth: { type: http, scheme: bearer }
   parameters:
     ID:
@@ -224,11 +383,11 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        archive_id:
+        collection_id:
           {
             type: string,
             format: uuid,
-            description: Provisional while queued; read the completed job for the final shared archive ID.,
+            description: Provisional while queued; read the completed job for the final shared collection ID.,
           }
         state:
           {
@@ -298,9 +457,15 @@ components:
         sha256: { type: string }
         size: { type: integer, format: int64 }
         created_at: { type: string, format: date-time }
-    Archive:
+    Collection:
       type: object
       properties:
+        saved_at:
+          {
+            type: string,
+            format: date-time,
+            description: Included in filtered collection results.,
+          }
         id: { type: string, format: uuid }
         url: { type: string, format: uri }
         external_id: { type: string }
@@ -314,12 +479,12 @@ components:
             description: Visibility declared by the provider,
           }
         text: { type: string }
-        summary: { type: string, description: Adapter-provided archive summary }
+        summary: { type: string, description: Adapter-provided collection summary }
         author_name: { type: string }
         published_at: { type: string, format: date-time }
         text_kind: { type: string, enum: [provider_summary, post_text] }
         graph: { $ref: "#/components/schemas/EntityGraph" }
-        text_source: { type: string, description: Source of the archived text }
+        text_source: { type: string, description: Source of the saved text }
         adapter_version: { type: string }
         warnings: { type: array, items: { type: string } }
         assets: { type: array, items: { $ref: "#/components/schemas/Asset" } }

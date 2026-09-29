@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"os"
-	"strings"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
@@ -15,7 +13,6 @@ import (
 	"monitor/internal/credentials"
 	"monitor/internal/domain"
 	"monitor/internal/store"
-	"monitor/internal/telegram"
 )
 
 func TestMultiAdapterAccounts(t *testing.T) {
@@ -71,23 +68,18 @@ func TestMultiAdapterAccounts(t *testing.T) {
 			t.Fatal("credential sent to wrong adapter")
 		}
 	}
-	menu := &commandRequest{Task: store.Task{Tenant: tenant}}
-	must(t, s.commandAccount(ctx, menu))
+	menu, e := s.channelAccounts(ctx, tenant)
+	must(t, e)
 	checked := 0
-	for _, row := range menu.Buttons {
-		for _, b := range row {
-			if strings.Contains(b.Text, "✓") {
-				checked++
-			}
-			if !validCallback(b.Data) {
-				t.Fatal("invalid callback", b.Data)
-			}
+	for _, a := range menu.Accounts {
+		if a.Selected {
+			checked++
 		}
 	}
 	if checked != 2 {
 		t.Fatal("both adapters should be selected", checked)
 	}
-	must(t, s.commandAccount(ctx, &commandRequest{Task: store.Task{Tenant: tenant}, Argument: "public:notes"}))
+	selectTestAccount(t, s, tenant, "public:notes")
 	c, e := s.connectionForURL(ctx, tenant, "https://notes.test/entry/a")
 	must(t, e)
 	if c != "" {
@@ -109,13 +101,5 @@ func TestMultiAdapterAccounts(t *testing.T) {
 	must(t, e)
 	if c != accounts["photos"] {
 		t.Fatal("deletion affected other adapter")
-	}
-	// Adapter identity survives durable Telegram input, without plaintext credentials.
-	msg := &telegram.Message{ID: 1, Text: "/account_add @photos fixture-secret New"}
-	msg.Chat.Type = "private"
-	raw, _, e := s.prepareUpdate(telegram.Update{ID: 1, Message: msg}, tenant, uuid.NewString(), "")
-	must(t, e)
-	if strings.Contains(string(raw), "fixture-secret") || !strings.Contains(string(raw), "\"adapter_id\":\"photos\"") {
-		t.Fatal("unsafe account envelope")
 	}
 }

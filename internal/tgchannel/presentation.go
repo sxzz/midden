@@ -1,0 +1,127 @@
+package tgchannel
+
+import (
+	"fmt"
+	"strings"
+	"unicode/utf16"
+
+	"monitor/internal/domain"
+	"monitor/internal/telegram"
+)
+
+func jobState(state string) string {
+	switch state {
+	case "queued":
+		return "正在采集"
+	case "downloading":
+		return "正在保存媒体"
+	case "complete":
+		return "收藏完成"
+	case "partial":
+		return "已收藏，部分资源缺失"
+	case "failed":
+		return "收藏失败"
+	}
+	return state
+}
+
+func collectionButtons(id, url string) telegram.Keyboard {
+	return telegram.Keyboard{
+		{{Text: "原帖", URL: url}, {Text: "重新抓取", Data: "/refresh " + id}},
+		{{Text: "删除", Data: "/delete " + id}},
+		{{Text: "收藏列表", Data: "/list"}},
+	}
+}
+
+func usageText(used, reserved, limit int64) string {
+	return fmt.Sprintf("已使用 %.1f MiB / %.1f MiB\n处理中预留 %.1f MiB", float64(used)/(1<<20), float64(limit)/(1<<20), float64(reserved)/(1<<20))
+}
+
+func collectionMessage(a domain.Collection, state string) string {
+	header := a.ID
+	author := strings.TrimSpace(a.AuthorName)
+	if author == "" {
+		author = "未知作者"
+	}
+	body := strings.TrimSpace(a.Text)
+	if body == "" {
+		body = "空"
+	}
+	parts := []string{header, author + "：\n" + body}
+	if text, _, _, ok := telegram.ProfilePresentation(a); ok {
+		parts = []string{text}
+	}
+	if state == "partial" {
+		parts = append(parts, "部分内容未保存")
+	}
+	for _, asset := range a.Assets {
+		if alt := strings.TrimSpace(asset.AltText); alt != "" {
+			parts = append(parts, fmt.Sprintf("媒体 %d 描述：%s", asset.Position+1, alt))
+		}
+	}
+	for _, warning := range a.Warnings {
+		parts = append(parts, warning)
+	}
+	for _, asset := range a.Assets {
+		if asset.State == "failed" {
+			parts = append(parts, "媒体未保存："+asset.Error)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func collectionMessageEntities(a domain.Collection) []telegram.Entity {
+	if _, entities, _, ok := telegram.ProfilePresentation(a); ok {
+		return entities
+	}
+	size := func(s string) int { return len(utf16.Encode([]rune(s))) }
+	author := strings.TrimSpace(a.AuthorName)
+	if author == "" {
+		author = "未知作者"
+	}
+	entities := []telegram.Entity{{Type: "code", Offset: 0, Length: size(a.ID)}}
+	if url := telegram.CollectionAuthorURL(a); url != "" {
+		entities = append(entities, telegram.Entity{Type: "text_link", Offset: size(a.ID + "\n\n"), Length: size(author), URL: url})
+	}
+	if body := strings.TrimSpace(a.Text); body != "" {
+		entities = append(entities, telegram.Entity{Type: "blockquote", Offset: size(a.ID + "\n\n" + author + "：\n"), Length: size(body)})
+	}
+	return entities
+}
+
+func collectionListSummary(summary, text string) string {
+	if strings.TrimSpace(summary) == "" {
+		summary = text
+	}
+	summary = strings.Join(strings.Fields(summary), " ")
+	if summary == "" {
+		return "无文字内容"
+	}
+	const limit = 100
+	chars := []rune(summary)
+	if len(chars) > limit {
+		// Retain adapter-provided media indicators even when the text is long.
+		suffix := ""
+		prefix := summary
+		for {
+			marker := ""
+			for _, candidate := range []string{"[图片]", "[视频]"} {
+				if strings.HasSuffix(prefix, candidate) {
+					marker = candidate
+					break
+				}
+			}
+			if marker == "" {
+				break
+			}
+			suffix = marker + suffix
+			prefix = strings.TrimSuffix(prefix, marker)
+		}
+		budget := limit - len([]rune(suffix)) - 1
+		if suffix != "" && budget > 0 {
+			return string([]rune(prefix)[:budget]) + "…" + suffix
+		}
+		return string(chars[:limit-1]) + "…"
+	}
+	return summary
+}

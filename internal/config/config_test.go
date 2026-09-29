@@ -47,7 +47,7 @@ func TestDatabaseSettings(t *testing.T) {
 		t.Fatal("runtime can delete settings")
 	}
 	for _, q := range []string{
-		`UPDATE config SET value=0 WHERE key='archive_retention_days'`,
+		`UPDATE config SET value=0 WHERE key='collection_retention_days'`,
 		`UPDATE config SET value=-1 WHERE key='max_media'`,
 		`INSERT INTO config(key,value) VALUES('unknown',1)`,
 	} {

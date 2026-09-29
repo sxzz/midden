@@ -69,7 +69,7 @@ func TestFileCacheReuseAndInvalidation(t *testing.T) {
 						t.Error("wrong cached reference", r.Form)
 					}
 				}
-				if r.FormValue("caption") != "archive" || r.FormValue("reply_to_message_id") != "12" {
+				if r.FormValue("caption") != "collection" || r.FormValue("reply_to_message_id") != "12" {
 					t.Error("lost caption/reply")
 				}
 				if tc.kind != "document" && r.FormValue("has_spoiler") != "true" {
@@ -90,7 +90,7 @@ func TestFileCacheReuseAndInvalidation(t *testing.T) {
 			send := func(bot string) {
 				t.Helper()
 				c := Client{Token: "test", BotID: bot, Cache: cache, Blobs: blobs, HTTP: h.Client(), Base: h.URL}
-				_, err := c.WithReplyTo(12).Media(ctx, "-42", []domain.Asset{{Key: "object", Hash: "hash", MIME: tc.mime, Sensitive: tc.kind != "document"}}, "archive")
+				_, err := c.WithReplyTo(12).Media(ctx, "-42", []domain.Asset{{Key: "object", Hash: "hash", MIME: tc.mime, Sensitive: tc.kind != "document"}}, "collection")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -111,7 +111,7 @@ func TestFileCacheReuseAndInvalidation(t *testing.T) {
 			}
 			rateLimit = true
 			c := Client{Token: "test", BotID: "bot1", Cache: cache, Blobs: blobs, HTTP: h.Client(), Base: h.URL}
-			_, err := c.WithReplyTo(12).Media(ctx, "-42", []domain.Asset{{Key: "object", Hash: "hash", MIME: tc.mime, Sensitive: tc.kind != "document"}}, "archive")
+			_, err := c.WithReplyTo(12).Media(ctx, "-42", []domain.Asset{{Key: "object", Hash: "hash", MIME: tc.mime, Sensitive: tc.kind != "document"}}, "collection")
 			if err == nil || blobs.reads != 3 || cache["telegram:bot1:hash:"+tc.kind] != "remote" {
 				t.Fatal("transient error invalidated cache")
 			}

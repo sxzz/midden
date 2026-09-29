@@ -236,7 +236,7 @@ func validateCaptureConnection(ctx context.Context, tx pgx.Tx, cid string) error
 }
 
 func (s *Service) CheckConnection(ctx context.Context, tenant, id string) error {
-	if len(s.Adapters) > 0 {
+	if s.Registry != nil || len(s.adapterBindings()) > 0 {
 		scoped, e := s.forConnection(ctx, tenant, id)
 		if e != nil {
 			return e

@@ -43,8 +43,8 @@ func TestRecentBidirectionalPagination(t *testing.T) {
 		must(t, s.capture(ctx, store.Task{Tenant: owner.TenantID, ID: job.ID}))
 		must(t, s.finalize(ctx, owner.TenantID, job.ID))
 	}
-	// Equal timestamps must still paginate deterministically by archive ID.
-	_, err = admin.Pool.Exec(ctx, `UPDATE tenant_archives SET created_at='2026-01-01' WHERE tenant_id=$1`, owner.TenantID)
+	// Equal timestamps must still paginate deterministically by collection ID.
+	_, err = admin.Pool.Exec(ctx, `UPDATE tenant_collections SET created_at='2026-01-01' WHERE tenant_id=$1`, owner.TenantID)
 	must(t, err)
 	first, err := s.Recent(ctx, owner.TenantID, "")
 	must(t, err)
@@ -59,16 +59,13 @@ func TestRecentBidirectionalPagination(t *testing.T) {
 	for _, p := range []domain.Page{first, second, last} {
 		for _, a := range p.Items {
 			if seen[a.ID] {
-				t.Fatal("duplicate archive", a.ID)
+				t.Fatal("duplicate collection", a.ID)
 			}
 			seen[a.ID] = true
 		}
 		for _, cursor := range []string{p.NextCursor, p.PreviousCursor} {
 			if cursor == "" {
 				continue
-			}
-			if !validCallback("/list " + cursor) {
-				t.Fatal("invalid Telegram callback", cursor)
 			}
 			if _, err := s.Recent(ctx, other.TenantID, cursor); err == nil {
 				t.Fatal("foreign cursor accepted")
@@ -84,11 +81,5 @@ func TestRecentBidirectionalPagination(t *testing.T) {
 	must(t, err)
 	if !reflect.DeepEqual(back, first) {
 		t.Fatal("first page differs after return")
-	}
-	r := &commandRequest{Task: store.Task{Tenant: owner.TenantID}, Argument: first.NextCursor}
-	must(t, s.commandList(ctx, r))
-	navigation := r.Buttons[len(r.Buttons)-1]
-	if len(navigation) != 2 || navigation[0].Data != "/list "+second.PreviousCursor || navigation[1].Data != "/list "+second.NextCursor {
-		t.Fatal("missing bidirectional buttons", navigation)
 	}
 }

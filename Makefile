@@ -3,6 +3,7 @@ dev:
 	./scripts/dev.sh
 build:
 	go build -o bin/core ./cmd/core
+	go build -o bin/telegram ./cmd/telegram
 	pnpm install --frozen-lockfile --ignore-scripts
 	pnpm run build
 	go build -o bin/monitorctl ./cmd/monitorctl

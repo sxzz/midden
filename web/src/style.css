@@ -1,0 +1,112 @@
+/* Telegram grouped-list tokens. host.ts overrides these from themeParams;
+   without Telegram we fall back to the system colour scheme. */
+:root {
+  --page: #efeff4;
+  --card: #ffffff;
+  --fill: #e6e6ec;
+  --text: #000000;
+  --subtle: #707579;
+  --link: #3390ec;
+  --destructive: #df3f40;
+  --separator: rgba(0, 0, 0, 0.11);
+  --radius: 10px;
+  --inset: 16px;
+  --gutter: 16px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+    "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--page);
+  color-scheme: light;
+  font-synthesis: none;
+  -webkit-text-size-adjust: 100%;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --page: #17212b;
+    --card: #222d3b;
+    --fill: #2b3848;
+    --text: #f5f5f5;
+    --subtle: #8b98a5;
+    --link: #6ab7ff;
+    --destructive: #ff6a6a;
+    --separator: rgba(255, 255, 255, 0.08);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #17212b;
+  --card: #222d3b;
+  --fill: #2b3848;
+  --text: #f5f5f5;
+  --subtle: #8b98a5;
+  --link: #6ab7ff;
+  --destructive: #ff6a6a;
+  --separator: rgba(255, 255, 255, 0.08);
+  color-scheme: dark;
+}
+@media (max-width: 360px) {
+  :root {
+    --gutter: 10px;
+  }
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--page);
+  overflow-wrap: break-word;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: inherit;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+button,
+a,
+input,
+select,
+summary,
+label {
+  -webkit-tap-highlight-color: transparent;
+}
+a {
+  color: var(--link);
+  text-decoration: none;
+}
+img,
+video {
+  max-width: 100%;
+}
+:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

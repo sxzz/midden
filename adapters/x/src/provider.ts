@@ -161,10 +161,10 @@ export function normalize(
         ),
       });
     }
-    if (unsupported || post.media.external) warn("此类媒体暂不支持归档。");
+    if (unsupported || post.media.external) warn("此类媒体暂不支持收藏。");
     if (invalid) warn("部分媒体缺少有效下载地址。");
   }
-  if (post.article) warn("文章正文暂不支持归档。");
+  if (post.article) warn("文章正文暂不支持收藏。");
   if (!result.text && !result.resources.length)
     throw new ProviderError(
       status.FAILED_PRECONDITION,
@@ -199,7 +199,7 @@ export async function fetchPublic(
   if (data.status?.author?.protected)
     throw new ProviderError(
       status.FAILED_PRECONDITION,
-      "public provider cannot archive private posts",
+      "public provider cannot save private posts",
     );
   const result = normalize(
     data.status,

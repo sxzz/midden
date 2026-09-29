@@ -83,7 +83,7 @@ func TestMetadataRawIsolationAndRetention(t *testing.T) {
 	q, e := river.NewClient(riverpgxv5.New(db.Pool), &river.Config{})
 	must(t, e)
 	s := &Service{DB: db, Queue: q, Adapter: f, Config: Defaults(), HTTP: server.Client(), Blobs: &memoryBlob{m: map[string][]byte{}}}
-	finish := func(tenant string, in domain.CaptureInput) domain.Archive {
+	finish := func(tenant string, in domain.CaptureInput) domain.Collection {
 		t.Helper()
 		j, e := s.Submit(ctx, tenant, in)
 		must(t, e)
@@ -94,12 +94,12 @@ func TestMetadataRawIsolationAndRetention(t *testing.T) {
 			must(t, s.download(ctx, store.Task{Tenant: tenant, ID: a.ID}))
 		}
 		must(t, s.finalize(ctx, tenant, j.ID))
-		a, e := s.Archive(ctx, tenant, j.ArchiveID)
+		a, e := s.Collection(ctx, tenant, j.CollectionID)
 		must(t, e)
 		return a
 	}
 	a := finish(tenants[0], domain.CaptureInput{URL: "https://x.com/a/status/99190011"})
-	author := func(a domain.Archive) domain.Entity {
+	author := func(a domain.Collection) domain.Entity {
 		t.Helper()
 		if a.Graph != nil {
 			for _, e := range a.Graph.Entities {
@@ -145,7 +145,7 @@ func TestMetadataRawIsolationAndRetention(t *testing.T) {
 	_, e = s.Submit(ctx, tenants[1], domain.CaptureInput{URL: a.URL})
 	must(t, e)
 	if _, e = s.Source(ctx, tenants[1], privateID); e == nil {
-		t.Fatal("shared archive exposed account raw")
+		t.Fatal("shared collection exposed account raw")
 	}
 	list, e := s.Sources(ctx, tenants[1], a.ID)
 	must(t, e)
@@ -181,14 +181,14 @@ func TestMetadataRawIsolationAndRetention(t *testing.T) {
 		t.Fatal("profile change lost")
 	}
 	// Removing the raw owner's reference schedules private raw independently of the shared post.
-	must(t, s.DeleteArchive(ctx, tenants[0], a.ID))
+	must(t, s.DeleteCollection(ctx, tenants[0], a.ID))
 	var released int
 	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM source_responses WHERE id=$1 AND unreferenced_at IS NOT NULL`, privateID).Scan(&released))
 	if released != 1 {
 		t.Fatal("private raw retention missing")
 	}
 	var removed int
-	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_archives(interval '0 seconds')`).Scan(&removed))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT collect_unreferenced_collections(interval '0 seconds')`).Scan(&removed))
 	if _, e = s.Source(ctx, tenants[1], publicID); e != nil {
 		t.Fatal("public raw removed while saved")
 	}

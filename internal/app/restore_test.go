@@ -24,8 +24,8 @@ import (
 )
 
 type restoreRecord struct {
-	Tenant, Archive, Asset, Channel, Identity, Key, MIME, Hash string
-	Size                                                       int64
+	Tenant, Collection, Asset, Channel, Identity, Key, MIME, Hash string
+	Size                                                          int64
 }
 
 func TestBackupRestore(t *testing.T) {
@@ -73,7 +73,7 @@ func TestBackupRestore(t *testing.T) {
 		must(t, s.finalize(ctx, identity.TenantID, j.ID))
 		asset, e := s.Asset(ctx, identity.TenantID, aid)
 		must(t, e)
-		record := restoreRecord{Tenant: identity.TenantID, Archive: j.ArchiveID, Asset: aid, Channel: channel, Identity: identity.ID, Key: asset.Key, MIME: asset.MIME, Size: asset.Size, Hash: store.Hash(string(pngBytes.Bytes()))}
+		record := restoreRecord{Tenant: identity.TenantID, Collection: j.CollectionID, Asset: aid, Channel: channel, Identity: identity.ID, Key: asset.Key, MIME: asset.MIME, Size: asset.Size, Hash: store.Hash(string(pngBytes.Bytes()))}
 		raw, _ := json.Marshal(record)
 		must(t, os.WriteFile(path, raw, 0o600))
 		body, e := storage.Get(ctx, asset.Key)
@@ -97,9 +97,9 @@ func TestBackupRestore(t *testing.T) {
 	if identity.ID != record.Identity || identity.TenantID != record.Tenant {
 		t.Fatal("restored identity mismatch")
 	}
-	archive, e := s.Archive(ctx, record.Tenant, record.Archive)
+	collection, e := s.Collection(ctx, record.Tenant, record.Collection)
 	must(t, e)
-	if archive.Text != "backup restoration fixture" {
+	if collection.Text != "backup restoration fixture" {
 		t.Fatal("restored text mismatch")
 	}
 	asset, e := s.Asset(ctx, record.Tenant, record.Asset)
@@ -114,11 +114,11 @@ func TestBackupRestore(t *testing.T) {
 	}
 	var other string
 	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO tenants DEFAULT VALUES RETURNING id`).Scan(&other))
-	if _, e = s.Archive(ctx, other, record.Archive); e == nil {
+	if _, e = s.Collection(ctx, other, record.Collection); e == nil {
 		t.Fatal("restored RLS broken")
 	}
 	if _, e = s.Asset(ctx, other, record.Asset); e == nil {
 		t.Fatal("restored asset authorization broken")
 	}
-	t.Log("verified restored DB, identity, archive, isolated S3 bucket and tenant isolation")
+	t.Log("verified restored DB, identity, collection, isolated S3 bucket and tenant isolation")
 }

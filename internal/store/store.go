@@ -103,8 +103,6 @@ func (t Task) InsertOpts() river.InsertOpts {
 		q = "capture"
 	case "download":
 		q = "download"
-	case "deliver", "reply", "status":
-		q = "delivery"
 	}
 	return river.InsertOpts{Queue: q, MaxAttempts: 3}
 }

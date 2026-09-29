@@ -47,7 +47,7 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 	var automatic, stopped bool
 	var raw []byte
 	err := s.DB.Tx(ctx, task.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT s.related_state,c.state,s.related_provider,coalesce(s.related_connection::text,''),s.related_adapter,c.related_targets,c.automatic,a.url,s.collection_stopped FROM submissions s JOIN captures c ON c.id=s.capture_id JOIN archives a ON a.id=c.archive_id WHERE s.id=$1`, task.ID).Scan(&state, &parent, &provider, &connection, &adapterID, &raw, &automatic, &parentURL, &stopped)
+		return tx.QueryRow(ctx, `SELECT s.related_state,c.state,s.related_provider,coalesce(s.related_connection::text,''),s.related_adapter,c.related_targets,c.automatic,a.url,s.collection_stopped FROM submissions s JOIN captures c ON c.id=s.capture_id JOIN collections a ON a.id=c.collection_id WHERE s.id=$1`, task.ID).Scan(&state, &parent, &provider, &connection, &adapterID, &raw, &automatic, &parentURL, &stopped)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
@@ -70,21 +70,21 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		if err := lockTenant(ctx, tx, task.Tenant); err != nil {
 			return err
 		}
-		var source, archive string
-		if err := tx.QueryRow(ctx, `SELECT s.related_source_archive,c.archive_id FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1`, task.ID).Scan(&source, &archive); err != nil {
+		var source, collection string
+		if err := tx.QueryRow(ctx, `SELECT s.related_source_collection,c.collection_id FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1`, task.ID).Scan(&source, &collection); err != nil {
 			return err
 		}
 		var held bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM tenant_archives WHERE archive_id IN($1,$2))`, source, archive).Scan(&held); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM tenant_collections WHERE collection_id IN($1,$2))`, source, collection).Scan(&held); err != nil {
 			return err
 		}
 		if !held {
 			return domain.ErrNotFound
 		}
-		if source == archive {
+		if source == collection {
 			return nil
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,connection_id,adapter_id) VALUES($1,$2,$3,nullif($4,'')::uuid,$5) ON CONFLICT DO NOTHING`, task.Tenant, archive, provider, connection, adapterID); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO tenant_collections(tenant_id,collection_id,provider_id,connection_id,adapter_id) VALUES($1,$2,$3,nullif($4,'')::uuid,$5) ON CONFLICT DO NOTHING`, task.Tenant, collection, provider, connection, adapterID); err != nil {
 			return err
 		}
 		var within bool
@@ -94,7 +94,7 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		if !within {
 			return domain.ErrQuota
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM tenant_archives WHERE archive_id=$1 AND EXISTS(SELECT FROM archives WHERE id=$1 AND current_revision IS NULL)`, source); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM tenant_collections WHERE collection_id=$1 AND EXISTS(SELECT FROM collections WHERE id=$1 AND current_revision IS NULL)`, source); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `SELECT mark_unreferenced($1)`, source)
@@ -108,7 +108,7 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		return err
 	}
 	scoped := s
-	if len(s.Adapters) > 0 {
+	if s.Registry != nil || len(s.adapterBindings()) > 0 {
 		scoped, err = s.forAdapter(adapterID)
 		if err != nil {
 			return err

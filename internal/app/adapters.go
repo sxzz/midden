@@ -23,15 +23,22 @@ type AdapterBinding struct {
 }
 
 func (s *Service) forAdapter(id string) (*Service, error) {
-	if len(s.Adapters) == 0 {
+	if len(s.adapterBindings()) == 0 {
+		if s.Registry != nil {
+			return nil, ErrAdapterUnavailable
+		}
 		return s, nil
 	}
-	b, ok := s.Adapters[id]
+	b, ok := s.adapterBindings()[id]
 	if !ok {
+		if s.Registry != nil {
+			return nil, ErrAdapterUnavailable
+		}
 		return nil, domain.ErrUnsupported
 	}
 	scoped := *s
 	scoped.Adapters = nil
+	scoped.Registry = nil
 	scoped.Adapter = b.Client
 	scoped.Descriptor = b.Descriptor
 	scoped.Providers = b.Descriptor.Providers
@@ -41,8 +48,8 @@ func (s *Service) forAdapter(id string) (*Service, error) {
 }
 
 func (s *Service) adapterIDs() []string {
-	ids := make([]string, 0, len(s.Adapters))
-	for id := range s.Adapters {
+	ids := make([]string, 0, len(s.adapterBindings()))
+	for id := range s.adapterBindings() {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
@@ -50,7 +57,10 @@ func (s *Service) adapterIDs() []string {
 }
 
 func (s *Service) forURL(ctx context.Context, raw string) (*Service, error) {
-	if len(s.Adapters) == 0 {
+	if len(s.adapterBindings()) == 0 {
+		if s.Registry != nil {
+			return nil, ErrAdapterUnavailable
+		}
 		return s, nil
 	}
 	u, e := url.Parse(raw)
@@ -59,7 +69,7 @@ func (s *Service) forURL(ctx context.Context, raw string) (*Service, error) {
 	}
 	var selected *Service
 	for _, id := range s.adapterIDs() {
-		b := s.Adapters[id]
+		b := s.adapterBindings()[id]
 		for _, host := range b.Descriptor.Hosts {
 			if strings.EqualFold(u.Hostname(), host) {
 				if selected != nil {
@@ -80,7 +90,10 @@ func (s *Service) forURL(ctx context.Context, raw string) (*Service, error) {
 }
 
 func (s *Service) forConnection(ctx context.Context, tenant, id string) (*Service, error) {
-	if len(s.Adapters) == 0 {
+	if len(s.adapterBindings()) == 0 {
+		if s.Registry != nil {
+			return nil, ErrAdapterUnavailable
+		}
 		return s, nil
 	}
 	var adapterID string

@@ -11,7 +11,7 @@ FROM dependencies AS build
 ENV NODE_OPTIONS="--max-old-space-size=384"
 COPY adapters/x adapters/x
 COPY third_party/atmosphere third_party/atmosphere
-RUN pnpm build
+RUN pnpm --filter @monitor/x-adapter... --recursive run build
 
 FROM node:24.21.0-bookworm-slim AS production-dependencies
 WORKDIR /app

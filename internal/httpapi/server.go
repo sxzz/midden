@@ -1,12 +1,19 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"monitor/internal/store"
 
 	"github.com/google/uuid"
 
@@ -16,7 +23,9 @@ import (
 
 type key struct{}
 
-func Handler(s *app.Service) http.Handler {
+func Handler(s *app.Service) http.Handler { return WebHandler(s, WebConfig{}) }
+
+func WebHandler(s *app.Service, web WebConfig) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/captures", func(w http.ResponseWriter, r *http.Request) {
 		var in domain.CaptureInput
@@ -41,7 +50,28 @@ func Handler(s *app.Service) http.Handler {
 				return
 			}
 		}
+		if _, ok := r.Context().Value(sessionKey{}).(bool); ok {
+			if in.RefreshID == "" {
+				write(w, 400, map[string]string{"error": "save links through the bot"})
+				return
+			}
+			if e := s.WebAccess(r.Context(), tenant(r), "collections", in.RefreshID); e != nil {
+				respond(w, 200, nil, e)
+				return
+			}
+		}
 		in.Key = r.Header.Get("Idempotency-Key")
+		if in.RefreshID != "" {
+			available, err := s.CaptureAvailable(r.Context(), tenant(r), in.RefreshID)
+			if err != nil {
+				respond(w, 200, nil, err)
+				return
+			}
+			if !available {
+				respond(w, 200, nil, app.ErrAdapterUnavailable)
+				return
+			}
+		}
 		j, e := s.Submit(r.Context(), tenant(r), in)
 		respond(w, 202, j, e)
 	})
@@ -52,8 +82,14 @@ func Handler(s *app.Service) http.Handler {
 		v, e := s.Job(r.Context(), tenant(r), r.PathValue("id"))
 		respond(w, 200, v, e)
 	})
-	mux.HandleFunc("GET /v1/archives", func(w http.ResponseWriter, r *http.Request) {
-		v, e := s.Recent(r.Context(), tenant(r), r.URL.Query().Get("cursor"))
+	mux.HandleFunc("GET /v1/collections", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if _, ok := r.Context().Value(sessionKey{}).(bool); ok || q.Has("q") || q.Has("media_type") || q.Has("visibility") || q.Has("saved_from") || q.Has("saved_before") {
+			v, e := s.Collections(r.Context(), tenant(r), app.CollectionFilter{Q: q.Get("q"), Media: q.Get("media_type"), Visibility: q.Get("visibility"), From: q.Get("saved_from"), Before: q.Get("saved_before")}, q.Get("cursor"))
+			respond(w, 200, v, e)
+			return
+		}
+		v, e := s.Recent(r.Context(), tenant(r), q.Get("cursor"))
 		respond(w, 200, v, e)
 	})
 	mux.HandleFunc("GET /v1/entities/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +99,7 @@ func Handler(s *app.Service) http.Handler {
 		v, e := s.Entity(r.Context(), tenant(r), r.PathValue("id"))
 		respond(w, 200, v, e)
 	})
-	mux.HandleFunc("GET /v1/archives/{id}/sources", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/collections/{id}/sources", func(w http.ResponseWriter, r *http.Request) {
 		if !checkID(w, r) {
 			return
 		}
@@ -84,18 +120,23 @@ func Handler(s *app.Service) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Write(v.Body)
 	})
-	mux.HandleFunc("GET /v1/archives/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/collections/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !checkID(w, r) {
 			return
 		}
-		v, e := s.Archive(r.Context(), tenant(r), r.PathValue("id"))
+		if _, ok := r.Context().Value(sessionKey{}).(bool); ok {
+			v, e := s.SavedCollection(r.Context(), tenant(r), r.PathValue("id"))
+			respond(w, 200, v, e)
+			return
+		}
+		v, e := s.Collection(r.Context(), tenant(r), r.PathValue("id"))
 		respond(w, 200, v, e)
 	})
-	mux.HandleFunc("DELETE /v1/archives/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("DELETE /v1/collections/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !checkID(w, r) {
 			return
 		}
-		if e := s.DeleteArchive(r.Context(), tenant(r), r.PathValue("id")); e != nil {
+		if e := s.DeleteCollection(r.Context(), tenant(r), r.PathValue("id")); e != nil {
 			respond(w, 200, nil, e)
 			return
 		}
@@ -114,32 +155,92 @@ func Handler(s *app.Service) http.Handler {
 			respond(w, 200, nil, e)
 			return
 		}
-		body, e := s.Blobs.Get(r.Context(), a.Key)
-		if e != nil {
-			write(w, 503, map[string]string{"error": "resource temporarily unavailable"})
+
+		serveAsset(w, r, s.Blobs, a)
+	})
+
+	mux.HandleFunc("GET /v1/session", func(w http.ResponseWriter, r *http.Request) { write(w, 200, map[string]string{"tenant_id": tenant(r)}) })
+	mux.HandleFunc("DELETE /v1/session", func(w http.ResponseWriter, r *http.Request) {
+		if c, e := r.Cookie(sessionCookie); e == nil {
+			err := s.DB.Tx(r.Context(), tenant(r), func(tx pgx.Tx) error {
+				_, e := tx.Exec(r.Context(), `DELETE FROM web_sessions WHERE digest=$1`, store.Hash(c.Value))
+				return e
+			})
+			if err != nil {
+				respond(w, 200, nil, err)
+				return
+			}
+		}
+		cookie(w, "", -1)
+		w.WriteHeader(204)
+	})
+	mux.HandleFunc("GET /v1/collections/{id}/revisions", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
 			return
 		}
-		defer body.Close()
-		w.Header().Set("Content-Type", a.MIME)
-		w.Header().Set("Content-Disposition", "attachment")
+		v, e := s.Revisions(r.Context(), tenant(r), r.PathValue("id"), r.URL.Query().Get("cursor"))
+		respond(w, 200, v, e)
+	})
+	mux.HandleFunc("GET /v1/collections/{id}/revisions/{revision}", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
+			return
+		}
+		if !valid(r.PathValue("revision")) {
+			http.NotFound(w, r)
+			return
+		}
+		v, e := s.Revision(r.Context(), tenant(r), r.PathValue("id"), r.PathValue("revision"))
+		respond(w, 200, v, e)
+	})
+	mux.HandleFunc("GET /v1/collections/{id}/availability", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
+			return
+		}
+		v, e := s.CaptureAvailable(r.Context(), tenant(r), r.PathValue("id"))
+		respond(w, 200, map[string]bool{"available": v}, e)
+	})
+	secured := authenticate(s, web, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := r.Context().Value(sessionKey{}).(bool); ok {
+			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+			if len(parts) >= 3 && (parts[1] == "collections" || parts[1] == "assets" || parts[1] == "entities") {
+				if !valid(parts[2]) {
+					http.NotFound(w, r)
+					return
+				}
+				if e := s.WebAccess(r.Context(), tenant(r), parts[1], parts[2]); e != nil {
+					respond(w, 200, nil, e)
+					return
+				}
+			}
+			if len(parts) >= 2 && parts[1] == "sources" {
+				http.NotFound(w, r)
+				return
+			}
+		}
+		mux.ServeHTTP(w, r)
+	}))
+	root := http.NewServeMux()
+	root.Handle("/v1/", secured)
+	root.HandleFunc("GET /app/", func(w http.ResponseWriter, r *http.Request) {
+		dir := os.Getenv("WEB_DIST")
+		if dir == "" {
+			dir = "web/dist"
+		}
+		name := strings.TrimPrefix(r.URL.Path, "/app/")
+		if name == "" {
+			name = "index.html"
+		}
+		if name != filepath.Base(name) && !strings.HasPrefix(name, "assets/") {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Cache-Control", "private, no-store")
-		io.Copy(w, body)
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self' https://web.telegram.org")
+		http.ServeFile(w, r, filepath.Join(dir, filepath.Clean("/"+name)))
 	})
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		v := r.Header.Get("Authorization")
-		if !strings.HasPrefix(v, "Bearer ") {
-			write(w, 401, map[string]string{"error": "authentication required"})
-			return
-		}
-		t, e := s.DB.Authenticate(r.Context(), strings.TrimPrefix(v, "Bearer "))
-		if e != nil {
-			write(w, 401, map[string]string{"error": "invalid token"})
-			return
-		}
-		mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), key{}, t)))
-	})
+	return root
 }
 
 func tenant(r *http.Request) string { return r.Context().Value(key{}).(string) }
@@ -160,6 +261,12 @@ func respond(w http.ResponseWriter, code int, v any, e error) {
 	msg := "internal error"
 	code = 500
 	switch {
+	case errors.Is(e, app.ErrAdapterUnavailable), status.Code(e) == codes.Unavailable, status.Code(e) == codes.DeadlineExceeded:
+		code = 503
+		msg = "adapter temporarily unavailable"
+	case errors.Is(e, app.ErrInvalidFilter):
+		code = 400
+		msg = "invalid collection filters"
 	case errors.Is(e, domain.ErrInvalidTarget):
 		code = 400
 		msg = "unsupported URL"

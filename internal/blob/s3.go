@@ -50,3 +50,25 @@ func (s *S3) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 func (s *S3) Delete(ctx context.Context, key string) error {
 	return s.Client.RemoveObject(ctx, s.Bucket, key, minio.RemoveObjectOptions{})
 }
+
+// Open returns a seekable stream; minio translates seeks to ranged S3 requests.
+func (s *S3) Open(ctx context.Context, key string) (ReadSeekCloser, error) {
+	o, e := s.Client.GetObject(ctx, s.Bucket, key, minio.GetObjectOptions{})
+	if e != nil {
+		return nil, e
+	}
+	if _, e = o.Stat(); e != nil {
+		o.Close()
+		return nil, e
+	}
+	return o, nil
+}
+
+type ReadSeekCloser interface {
+	io.Reader
+	io.Seeker
+	io.Closer
+}
+type Seekable interface {
+	Open(context.Context, string) (ReadSeekCloser, error)
+}

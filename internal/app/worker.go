@@ -58,14 +58,6 @@ func (w *Worker) Work(ctx context.Context, j *river.Job[store.Task]) error {
 		e = w.S.capture(ctx, j.Args)
 	case "download":
 		e = w.S.download(ctx, j.Args)
-	case "deliver":
-		e = w.S.deliver(ctx, j.Args)
-	case "status":
-		e = w.S.submissionStatus(ctx, j.Args)
-	case "inbox":
-		e = w.S.processInbox(ctx, j.Args)
-	case "reply":
-		e = w.S.reply(ctx, j.Args)
 	case "finalize":
 		e = w.S.finalize(ctx, j.Args.Tenant, j.Args.ID)
 	default:
@@ -190,7 +182,7 @@ func release(c *pgxpool.Conn, tenant string, slot int) {
 }
 
 func (s *Service) capture(ctx context.Context, t store.Task) error {
-	if len(s.Adapters) > 0 {
+	if s.Registry != nil || len(s.adapterBindings()) > 0 {
 		var id string
 		e := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx, "SELECT adapter_id FROM captures WHERE id=$1", t.ID).Scan(&id)
@@ -214,7 +206,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	var pageSize uint32
 	var url, id, provider, connection, scope, state, visibility, platform, kind, objectScope, pageCursor string
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT a.url,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),c.scope,c.state,c.visibility,a.platform,a.kind,a.object_scope,c.automatic,c.page_cursor,c.page_size FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.id=$1`, t.ID).Scan(&url, &id, &provider, &connection, &scope, &state, &visibility, &platform, &kind, &objectScope, &automatic, &pageCursor, &pageSize)
+		return tx.QueryRow(ctx, `SELECT a.url,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),c.scope,c.state,c.visibility,a.platform,a.kind,a.object_scope,c.automatic,c.page_cursor,c.page_size FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.id=$1`, t.ID).Scan(&url, &id, &provider, &connection, &scope, &state, &visibility, &platform, &kind, &objectScope, &automatic, &pageCursor, &pageSize)
 	})
 	if e != nil {
 		return e
@@ -304,7 +296,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		visibility = "private"
 	}
 	if len(r.Text) > 1<<20 {
-		return &PermanentError{"text exceeds archive limit"}
+		return &PermanentError{"text exceeds collection limit"}
 	}
 	graph, e := s.entityGraph(ctx, r)
 	if e != nil {
@@ -428,13 +420,13 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		if e := lockTenant(ctx, tx, tenant); e != nil {
 			return e
 		}
-		if e := lockCaptureArchive(ctx, tx, cid); e != nil {
+		if e := lockCaptureCollection(ctx, tx, cid); e != nil {
 			return e
 		}
 		var aid, state string
 		var raw []byte
 		var reserved int64
-		if e := tx.QueryRow(ctx, `SELECT archive_id,state,payload,content_reserved FROM captures WHERE id=$1 FOR UPDATE`, cid).Scan(&aid, &state, &raw, &reserved); e != nil {
+		if e := tx.QueryRow(ctx, `SELECT collection_id,state,payload,content_reserved FROM captures WHERE id=$1 FOR UPDATE`, cid).Scan(&aid, &state, &raw, &reserved); e != nil {
 			return e
 		}
 		if state != "downloading" {
@@ -478,7 +470,7 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 			}
 		}
 		if p.Text == "" && good == 0 && p.Graph == nil {
-			return s.failCaptureTx(ctx, tx, tenant, cid, "no text or media could be archived")
+			return s.failCaptureTx(ctx, tx, tenant, cid, "no text or media could be saved")
 		}
 		if e = persistEntities(ctx, tx, tenant, cid, &p, aa); e != nil {
 			return e
@@ -496,14 +488,14 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		}
 		var previous *string
 		var previousID *string
-		e = tx.QueryRow(ctx, `SELECT r.content_hash,r.id FROM archives a LEFT JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1`, aid).Scan(&previous, &previousID)
+		e = tx.QueryRow(ctx, `SELECT r.content_hash,r.id FROM collections a LEFT JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1`, aid).Scan(&previous, &previousID)
 		if e != nil {
 			return e
 		}
 		revisionID := previousID
 		if previous == nil || *previous != digest {
 			var rid string
-			e = tx.QueryRow(ctx, `INSERT INTO revisions(tenant_id,archive_id,capture_id,content_hash,payload,content_bytes,visibility) SELECT $1,$2,$3,$4,$5,$6,visibility FROM captures WHERE id=$3 RETURNING id`, tenant, aid, cid, digest, raw, len(raw)).Scan(&rid)
+			e = tx.QueryRow(ctx, `INSERT INTO revisions(tenant_id,collection_id,capture_id,content_hash,payload,content_bytes,visibility) SELECT $1,$2,$3,$4,$5,$6,visibility FROM captures WHERE id=$3 RETURNING id`, tenant, aid, cid, digest, raw, len(raw)).Scan(&rid)
 			if e != nil {
 				return e
 			}
@@ -511,7 +503,7 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 				return e
 			}
 			revisionID = &rid
-			if _, e = tx.Exec(ctx, `UPDATE archives SET current_revision=$2 WHERE id=$1`, aid, rid); e != nil {
+			if _, e = tx.Exec(ctx, `UPDATE collections SET current_revision=$2 WHERE id=$1`, aid, rid); e != nil {
 				return e
 			}
 		}
@@ -528,18 +520,18 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		if _, e = tx.Exec(ctx, `UPDATE captures SET state=$2,content_reserved=0,payload=NULL,finished_at=now(),revision_id=$3 WHERE id=$1`, cid, state, revisionID); e != nil {
 			return e
 		}
-		if _, e = tx.Exec(ctx, `UPDATE archives SET observed_at=now() WHERE id=$1`, aid); e != nil {
+		if _, e = tx.Exec(ctx, `UPDATE collections SET observed_at=now() WHERE id=$1`, aid); e != nil {
 			return e
 		}
-		var previousArchive *string
-		if e = tx.QueryRow(ctx, `SELECT refresh_from FROM captures WHERE id=$1`, cid).Scan(&previousArchive); e != nil {
+		var previousCollection *string
+		if e = tx.QueryRow(ctx, `SELECT refresh_from FROM captures WHERE id=$1`, cid).Scan(&previousCollection); e != nil {
 			return e
 		}
-		if previousArchive != nil && *previousArchive != aid {
-			if _, e = tx.Exec(ctx, `DELETE FROM tenant_archives WHERE archive_id=$1`, *previousArchive); e != nil {
+		if previousCollection != nil && *previousCollection != aid {
+			if _, e = tx.Exec(ctx, `DELETE FROM tenant_collections WHERE collection_id=$1`, *previousCollection); e != nil {
 				return e
 			}
-			if _, e = tx.Exec(ctx, `SELECT mark_unreferenced($1)`, *previousArchive); e != nil {
+			if _, e = tx.Exec(ctx, `SELECT mark_unreferenced($1)`, *previousCollection); e != nil {
 				return e
 			}
 		}
@@ -586,13 +578,13 @@ func releaseAssetReservations(ctx context.Context, tx pgx.Tx, tenant, cid string
 	return e
 }
 
-func lockCaptureArchive(ctx context.Context, tx pgx.Tx, cid string) error {
+func lockCaptureCollection(ctx context.Context, tx pgx.Tx, cid string) error {
 	var id string
-	return tx.QueryRow(ctx, `SELECT id FROM archives WHERE id=(SELECT archive_id FROM captures WHERE id=$1) FOR UPDATE`, cid).Scan(&id)
+	return tx.QueryRow(ctx, `SELECT id FROM collections WHERE id=(SELECT collection_id FROM captures WHERE id=$1) FOR UPDATE`, cid).Scan(&id)
 }
 
 func (s *Service) failCaptureTx(ctx context.Context, tx pgx.Tx, t, id, msg string) error {
-	if e := lockCaptureArchive(ctx, tx, id); e != nil {
+	if e := lockCaptureCollection(ctx, tx, id); e != nil {
 		return e
 	}
 	var n int64
@@ -657,15 +649,6 @@ func (s *Service) fail(ctx context.Context, t store.Task, msg string) error {
 		case "related":
 			_, e := tx.Exec(ctx, `UPDATE submissions SET related_state='failed',related_error=$2 WHERE id=$1 AND related_state='pending'`, t.ID, msg)
 			return e
-		case "deliver":
-			_, e := tx.Exec(ctx, `UPDATE submissions SET state='failed',error=$2 WHERE id=$1 AND state<>'sent'`, t.ID, msg)
-			return e
-		case "inbox":
-			_, e := tx.Exec(ctx, `UPDATE inbox SET state='failed',payload=payload-'account_import' WHERE id=$1 AND state='pending'`, t.ID)
-			return e
-		case "reply":
-			_, e := tx.Exec(ctx, `UPDATE replies SET state='failed' WHERE id=$1 AND state='pending'`, t.ID)
-			return e
 		}
 		return nil
 	})
@@ -678,7 +661,7 @@ func (s *Service) taskPaused(ctx context.Context, t store.Task) (bool, error) {
 		query = `SELECT EXISTS(SELECT FROM captures WHERE id=$1 AND paused)`
 	case "download":
 		query = `SELECT EXISTS(SELECT FROM assets a JOIN captures c ON c.id=a.capture_id WHERE a.id=$1 AND c.paused)`
-	case "related", "status", "deliver":
+	case "related":
 		query = `SELECT EXISTS(SELECT FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1 AND c.paused)`
 	default:
 		return false, nil

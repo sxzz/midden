@@ -8,12 +8,12 @@ import (
 )
 
 // The cutoff keeps retries from deleting content saved after the user's request.
-func (s *Service) DeleteAllArchives(ctx context.Context, tenant string, before time.Time) (count int64, err error) {
+func (s *Service) DeleteAllCollections(ctx context.Context, tenant string, before time.Time) (count int64, err error) {
 	err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		if err := lockTenant(ctx, tx, tenant); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT a.id FROM archives a JOIN tenant_archives ta ON ta.archive_id=a.id WHERE ta.created_at <= $1 ORDER BY a.id FOR UPDATE OF a`, before)
+		rows, err := tx.Query(ctx, `SELECT a.id FROM collections a JOIN tenant_collections ta ON ta.collection_id=a.id WHERE ta.created_at <= $1 ORDER BY a.id FOR UPDATE OF a`, before)
 		if err != nil {
 			return err
 		}
@@ -21,7 +21,7 @@ func (s *Service) DeleteAllArchives(ctx context.Context, tenant string, before t
 		if err != nil {
 			return err
 		}
-		tag, err := tx.Exec(ctx, `DELETE FROM tenant_archives WHERE tenant_id=$1 AND created_at <= $2`, tenant, before)
+		tag, err := tx.Exec(ctx, `DELETE FROM tenant_collections WHERE tenant_id=$1 AND created_at <= $2`, tenant, before)
 		if err != nil {
 			return err
 		}

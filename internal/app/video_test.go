@@ -49,7 +49,7 @@ func TestVideoCache(t *testing.T) {
 		return id
 	}
 	a, b := newTenant(), newTenant()
-	complete := func(tenant string, post int, refresh string) domain.Archive {
+	complete := func(tenant string, post int, refresh string) domain.Collection {
 		j, e := s.Submit(ctx, tenant, domain.CaptureInput{URL: fmt.Sprintf("https://x.com/a/status/%d", post), RefreshID: refresh})
 		must(t, e)
 		must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: j.ID}))
@@ -60,7 +60,7 @@ func TestVideoCache(t *testing.T) {
 		}
 		must(t, s.download(ctx, store.Task{Tenant: tenant, ID: aa[0].ID}))
 		must(t, s.finalize(ctx, tenant, j.ID))
-		ar, e := s.Archive(ctx, tenant, j.ArchiveID)
+		ar, e := s.Collection(ctx, tenant, j.CollectionID)
 		must(t, e)
 		if len(ar.Assets) != 1 || ar.Assets[0].MIME != "video/mp4" || ar.Assets[0].Size != int64(len(video)) {
 			t.Fatal(ar)
