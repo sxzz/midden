@@ -108,6 +108,9 @@ pnpm --filter @midden/web test:e2e
 
 ```sh
 pnpm dev:web
+# -- 后的参数交给 Vite（手机在同一网络下访问终端显示的 Network 地址）
+pnpm dev:web -- --host
+pnpm dev:web -- --host 0.0.0.0 --port 5180 --strictPort
 # 等价入口
 ./scripts/dev.sh web
 # 多个数据库/租户时显式选择；端口占用时自动顺延
@@ -116,7 +119,7 @@ pnpm dev:web --postgres monitor-postgres-1 --tenant <tenant-uuid> --port 5174
 
 命令复用已运行的 core（默认 `http://127.0.0.1:8080`，可用 `--core` 指定本机地址）和 Docker Compose Postgres，只启动当前 checkout 的前端。先运行 `pnpm install --frozen-lockfile` 安装当前 worktree 的依赖；不会重新构建或重启 core。Postgres 必须包含当前 core 的数据库，且 core 已配置 `web_app_url`。仅有一个运行中的 Compose postgres 容器、一个租户时自动选择，否则输出候选项。
 
-打开终端打印的 `/app/` 地址即可，不需要从 Telegram 进入。临时会话只保存在进程内存中，12 小时有效、运行期间自动续期；按 Ctrl+C 退出时撤销，进程被强制终止时由有效期兜底。预览仅监听 `127.0.0.1`，拒绝跨站请求，凭据不会发送到浏览器或写入前端产物。它操作真实收藏，重新抓取、删除都会作用于所选租户。正式网页仍使用 Telegram 登录；原有的普通 `dev` 命令不创建调试会话。查看全部选项：`pnpm dev:web --help`。
+打开终端打印的 `/app/` 地址即可，不需要从 Telegram 进入。临时会话只保存在进程内存中，12 小时有效、运行期间自动续期；按 Ctrl+C 退出时撤销，进程被强制终止时由有效期兜底。预览默认仅监听 `127.0.0.1`；显式传入 `-- --host` 后，同一网络的设备可通过此预览访问所选租户的真实收藏。仍拒绝跨站请求，凭据不会发送到浏览器或写入前端产物。它操作真实收藏，重新抓取、删除都会作用于所选租户。正式网页仍使用 Telegram 登录；原有的普通 `dev` 命令不创建调试会话。查看调试命令选项：`pnpm dev:web --help`；查看 Vite 选项：`pnpm dev:web -- --help`。`--` 后的 `--port` 等选项优先于调试命令默认值，`--config` 会加载所选前端配置并保留临时会话代理。
 
 Vite 将 `/v1` 代理到本地 core。真实 Telegram 登录需要同域 HTTPS；浏览器测试使用合成数据和模拟 API，不需要生产凭据。可用 `PLAYWRIGHT_CHANNEL=chrome` 使用已安装的 Chrome。Vitest 显式加载 Vue bundler 运行时，避免 Node 入口缺少 Vapor 导出。
 

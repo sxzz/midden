@@ -39,3 +39,70 @@ test("preview blocks cross-site and rebound hosts before adding its session", ()
   ])
     assert.equal(allowedRequest({ headers: { ...headers, ...extra } }), false);
 });
+
+test("separator preserves Vite CLI arguments verbatim", async () => {
+  const { splitArguments, previewArguments } = await import("./dev-web.mjs");
+  assert.deepEqual(
+    splitArguments([
+      "--tenant",
+      "fixture",
+      "--",
+      "--host",
+      "--port",
+      "5180",
+      "--strictPort",
+    ]),
+    {
+      own: ["--tenant", "fixture"],
+      vite: ["--host", "--port", "5180", "--strictPort"],
+    },
+  );
+  assert.deepEqual(splitArguments(["--port", "5174"]), {
+    own: ["--port", "5174"],
+    vite: [],
+  });
+  assert.deepEqual(
+    previewArguments([
+      "--host",
+      "0.0.0.0",
+      "--config=custom.ts",
+      "--mode",
+      "test",
+      "--force",
+    ]),
+    {
+      forwarded: ["--host", "0.0.0.0", "--mode", "test", "--force"],
+      config: "custom.ts",
+    },
+  );
+  assert.throws(() => previewArguments(["--config"]));
+});
+
+test("explicit --host permits network IPs but retains same-origin protection", () => {
+  const headers = {
+    host: "192.168.1.50:5180",
+    origin: "http://192.168.1.50:5180",
+  };
+  assert.equal(allowedRequest({ headers }), false);
+  for (const host of [true, "0.0.0.0", "192.168.1.50"]) {
+    assert.equal(allowedRequest({ headers }, host), true);
+    assert.equal(
+      allowedRequest(
+        { headers: { ...headers, origin: "https://evil.test" } },
+        host,
+      ),
+      false,
+    );
+    assert.equal(
+      allowedRequest({ headers: { ...headers, host: "evil.test:5180" } }, host),
+      false,
+    );
+  }
+  assert.equal(
+    allowedRequest(
+      { headers: { host: "[fd00::1]:5180", origin: "http://[fd00::1]:5180" } },
+      "::",
+    ),
+    true,
+  );
+});
