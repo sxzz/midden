@@ -14,8 +14,8 @@ var (
 	xUserID = regexp.MustCompile(`^[0-9]+$`)
 )
 
-// X presentation belongs to the Telegram channel, not the archive store or core protocol.
-func ArchiveAuthorURL(a domain.Archive) string {
+// X presentation belongs to the Telegram channel, not the collection store or core protocol.
+func CollectionAuthorURL(a domain.Collection) string {
 	if a.Graph == nil {
 		return ""
 	}
@@ -43,7 +43,7 @@ func ArchiveAuthorURL(a domain.Archive) string {
 	return ""
 }
 
-func IsProfileArchive(a domain.Archive) bool {
+func IsProfileCollection(a domain.Collection) bool {
 	if a.Graph != nil {
 		for _, entity := range a.Graph.Entities {
 			if entity.Key == a.Graph.Root && entity.Type == "x.profile" {
@@ -55,8 +55,8 @@ func IsProfileArchive(a domain.Archive) bool {
 }
 
 // ProfilePresentation reads the adapter-owned profile entity for Telegram display.
-func ProfilePresentation(a domain.Archive) (string, []Entity, []domain.Asset, bool) {
-	if !IsProfileArchive(a) {
+func ProfilePresentation(a domain.Collection) (string, []Entity, []domain.Asset, bool) {
+	if !IsProfileCollection(a) {
 		return "", nil, nil, false
 	}
 	for _, entity := range a.Graph.Entities {
@@ -86,7 +86,7 @@ func ProfilePresentation(a domain.Archive) (string, []Entity, []domain.Asset, bo
 			text += "\n\n" + bio
 		}
 		var entities []Entity
-		if url := ArchiveAuthorURL(a); url != "" {
+		if url := CollectionAuthorURL(a); url != "" {
 			entities = append(entities, Entity{Type: "text_link", Length: len(utf16.Encode([]rune(name))), URL: url})
 		}
 		var assets []domain.Asset

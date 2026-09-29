@@ -40,7 +40,7 @@ func TestAccountUpsertAndReplay(t *testing.T) {
 	s := &Service{DB: db, Vault: vault, AdapterTLS: true, Adapter: &sameAccountAdapter{&fakeAdapter{}}, Providers: []*pb.Provider{{Id: "session", DefaultProvider: true, Authentication: "session", Capabilities: []*pb.Capability{{Name: "connection.check", Major: 1}, {Name: "credential.prepare", Major: 1}}}}}
 	first, e := s.ImportConnection(ctx, tenant, "", "first", &pb.Credential{Data: []byte("old-credential")})
 	must(t, e)
-	must(t, s.commandAccount(ctx, &commandRequest{Task: store.Task{Tenant: tenant}, Argument: first}))
+	selectTestAccount(t, s, tenant, first)
 	request := uuid.NewString()
 	second, e := s.importConnection(ctx, tenant, request, "updated", &pb.Credential{Data: []byte("new-credential")}, true)
 	must(t, e)

@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { assetURL, type Asset } from "../api";
 import { readyMedia } from "../presentation";
-const props = defineProps<{ assets: Asset[] }>();
+const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>();
 const LIMIT = 4;
 const media = computed(() => readyMedia(props.assets));
 const tiles = computed(() => media.value.slice(0, LIMIT));
@@ -10,20 +10,30 @@ const overflow = computed(() => media.value.length - tiles.value.length);
 </script>
 <template>
   <span v-if="tiles.length" class="thumbs" aria-hidden="true">
-    <span v-for="(asset, index) in tiles" :key="asset.id" class="tile">
-      <!-- Sensitive bytes are never requested from a list row. -->
-      <span v-if="asset.sensitive" class="veil">敏感</span>
+    <span
+      v-for="(asset, index) in tiles"
+      :key="asset.id"
+      class="tile"
+      :class="{ blurred: asset.sensitive && !showSensitive }"
+    >
       <img
-        v-else-if="asset.mime?.startsWith('image/')"
+        v-if="asset.mime?.startsWith('image/')"
         :src="assetURL(asset)"
         alt=""
         loading="lazy"
         decoding="async"
       />
-      <span v-else-if="asset.mime?.startsWith('video/')" class="veil play"
-        >▶</span
-      >
+      <video
+        v-else-if="asset.mime?.startsWith('video/')"
+        :src="assetURL(asset) + '#t=0.1'"
+        muted
+        playsinline
+        preload="metadata"
+      />
       <span v-else class="veil">文件</span>
+      <span v-if="asset.sensitive && !showSensitive" class="sensitive-label"
+        >敏感</span
+      >
       <span v-if="overflow && index === tiles.length - 1" class="more"
         >+{{ overflow }}</span
       >
@@ -49,10 +59,25 @@ const overflow = computed(() => media.value.length - tiles.value.length);
   overflow: hidden;
   background: var(--fill);
 }
-.tile img {
+.tile img,
+.tile video {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+.tile.blurred img,
+.tile.blurred video {
+  filter: blur(8px);
+  transform: scale(1.2);
+}
+.sensitive-label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.25);
+  color: #fff;
+  font-size: 12px;
 }
 .veil {
   font-size: 12px;

@@ -1,13 +1,14 @@
 <script setup vapor lang="ts">
 import { computed } from "vue";
-import type { Archive, Usage } from "../api";
-import { groupArchives } from "../presentation";
-import ArchiveFilters from "./ArchiveFilters.vue";
-import ArchiveRow from "./ArchiveRow.vue";
+import type { Collection, Usage } from "../api";
+import { groupCollections } from "../presentation";
+import CollectionFilters from "./CollectionFilters.vue";
+import CollectionRow from "./CollectionRow.vue";
 import ListSection from "./ui/ListSection.vue";
 import ListButton from "./ui/ListButton.vue";
 const props = defineProps<{
-  items: Archive[];
+  items: Collection[];
+  showSensitive?: boolean;
   query: string;
   loading: boolean;
   error: string;
@@ -20,7 +21,7 @@ defineEmits<{
   more: [];
   retry: [];
 }>();
-const groups = computed(() => groupArchives(props.items));
+const groups = computed(() => groupCollections(props.items));
 const empty = computed(
   () => !props.loading && !props.error && !props.items.length,
 );
@@ -38,7 +39,7 @@ const storage = computed(() =>
 );
 </script>
 <template>
-  <ArchiveFilters
+  <CollectionFilters
     :key="query"
     :query="query"
     @search="$emit('search', $event)"
@@ -48,10 +49,11 @@ const storage = computed(() =>
     <ListButton label="重试" @select="$emit('retry')" />
   </ListSection>
   <ListSection v-for="group in groups" :key="group.label" :title="group.label">
-    <ArchiveRow
+    <CollectionRow
       v-for="a in group.items"
       :key="a.id"
-      :archive="a"
+      :collection="a"
+      :show-sensitive="showSensitive"
       @open="$emit('open', $event)"
     />
   </ListSection>

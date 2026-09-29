@@ -88,7 +88,7 @@ export function applyTheme(
 }
 
 export function setupHost() {
-  // Lets the archive be reviewed in both schemes outside Telegram.
+  // Lets the collection be reviewed in both schemes outside Telegram.
   const forced = new URLSearchParams(location.search).get("theme");
   if (forced === "dark" || forced === "light") applyTheme({}, forced);
   const tg = host();

@@ -23,30 +23,30 @@ func TestConfiguredRetention(t *testing.T) {
 	must(t, e)
 	defer db.Close()
 	var days int64
-	must(t, admin.Pool.QueryRow(ctx, `SELECT value::bigint FROM config WHERE key='archive_retention_days'`).Scan(&days))
-	defer admin.Pool.Exec(ctx, `UPDATE config SET value=$1 WHERE key='archive_retention_days'`, strconv.FormatInt(days, 10))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT value::bigint FROM config WHERE key='collection_retention_days'`).Scan(&days))
+	defer admin.Pool.Exec(ctx, `UPDATE config SET value=$1 WHERE key='collection_retention_days'`, strconv.FormatInt(days, 10))
 	// Cleanup is global; use a no-op object store for unrelated garbage left by other tests.
 	s := &Service{DB: db, Blobs: &memoryBlob{m: map[string][]byte{}}}
-	var tenant, archive string
+	var tenant, collection string
 	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO tenants DEFAULT VALUES RETURNING id`).Scan(&tenant))
-	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO archives(tenant_id,external_id,url,provider_id,platform,kind) VALUES($1,$2,'https://example.test/items/1','fixture','fixture','item') RETURNING id`, tenant, uuid.NewString()).Scan(&archive))
-	_, e = admin.Pool.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,adapter_id) VALUES($1,$2,'fixture','fixture')`, tenant, archive)
+	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO collections(tenant_id,external_id,url,provider_id,platform,kind) VALUES($1,$2,'https://example.test/items/1','fixture','fixture','item') RETURNING id`, tenant, uuid.NewString()).Scan(&collection))
+	_, e = admin.Pool.Exec(ctx, `INSERT INTO tenant_collections(tenant_id,collection_id,provider_id,adapter_id) VALUES($1,$2,'fixture','fixture')`, tenant, collection)
 	must(t, e)
-	must(t, s.DeleteArchive(ctx, tenant, archive))
-	_, e = admin.Pool.Exec(ctx, `UPDATE archives SET unreferenced_at=now()-interval '2 days' WHERE id=$1`, archive)
+	must(t, s.DeleteCollection(ctx, tenant, collection))
+	_, e = admin.Pool.Exec(ctx, `UPDATE collections SET unreferenced_at=now()-interval '2 days' WHERE id=$1`, collection)
 	must(t, e)
-	_, e = admin.Pool.Exec(ctx, `UPDATE config SET value=7 WHERE key='archive_retention_days'`)
+	_, e = admin.Pool.Exec(ctx, `UPDATE config SET value=7 WHERE key='collection_retention_days'`)
 	must(t, e)
 	must(t, s.Maintain(ctx))
 	var n int
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM archives WHERE id=$1`, archive).Scan(&n))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM collections WHERE id=$1`, collection).Scan(&n))
 	if n != 1 {
-		t.Fatal("archive removed before configured retention")
+		t.Fatal("collection removed before configured retention")
 	}
-	_, e = admin.Pool.Exec(ctx, `UPDATE config SET value=1 WHERE key='archive_retention_days'`)
+	_, e = admin.Pool.Exec(ctx, `UPDATE config SET value=1 WHERE key='collection_retention_days'`)
 	must(t, e)
 	must(t, s.Maintain(ctx))
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM archives WHERE id=$1`, archive).Scan(&n))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM collections WHERE id=$1`, collection).Scan(&n))
 	if n != 0 {
 		t.Fatal("retention change did not take effect without restart")
 	}

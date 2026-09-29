@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -14,9 +13,9 @@ import (
 
 	pb "monitor/api/adapter/v1"
 	"monitor/internal/adapter"
+	"monitor/internal/channelapi"
 	"monitor/internal/domain"
 	"monitor/internal/store"
-	"monitor/internal/telegram"
 )
 
 type pageAdapter struct{ *collectionAdapter }
@@ -47,23 +46,12 @@ func (f *pageAdapter) Fetch(ctx context.Context, r *pb.FetchRequest, o ...grpc.C
 	return d, e
 }
 
-type collectionSender struct {
-	fakeSender
-	text    string
-	buttons telegram.Keyboard
-	edits   int
+func collectionData(t *testing.T, s *Service, tenant, id string) *channelapi.CollectionProgress {
+	t.Helper()
+	c, err := s.channelCollection(context.Background(), tenant, id)
+	must(t, err)
+	return c
 }
-
-func (f *collectionSender) SendInteractive(_ context.Context, _ string, text string, mid int64, b telegram.Keyboard) (int64, error) {
-	f.text = text
-	f.buttons = b
-	if mid != 0 {
-		f.edits++
-	}
-	return 101, nil
-}
-func (f *collectionSender) Action(context.Context, string, string) error { return nil }
-func (f *collectionSender) Answer(context.Context, string) error         { return nil }
 
 func TestCollectionProgressAndMore(t *testing.T) {
 	if os.Getenv("TEST_DATABASE_URL") == "" {
@@ -81,10 +69,9 @@ func TestCollectionProgressAndMore(t *testing.T) {
 	var tenant, other string
 	must(t, admin.Pool.QueryRow(ctx, "INSERT INTO tenants DEFAULT VALUES RETURNING id").Scan(&tenant))
 	must(t, admin.Pool.QueryRow(ctx, "INSERT INTO tenants DEFAULT VALUES RETURNING id").Scan(&other))
-	sender := &collectionSender{}
 	cfg := Defaults()
 	cfg.Rate = 1000
-	s := &Service{DB: db, Queue: q, Adapter: &pageAdapter{&collectionAdapter{&fakeAdapter{}}}, Config: cfg, Sender: sender}
+	s := &Service{DB: db, Queue: q, Adapter: &pageAdapter{&collectionAdapter{&fakeAdapter{}}}, Config: cfg}
 	target := "https://notes.test/collection/" + uuid.NewString()
 	// Explicit collection must not join an automatic capture that skips expansion.
 	automatic, e := s.Submit(ctx, tenant, domain.CaptureInput{URL: target, Automatic: true})
@@ -107,36 +94,27 @@ func TestCollectionProgressAndMore(t *testing.T) {
 	_, e = admin.Pool.Exec(ctx, "UPDATE submissions SET chat_id='42',channel_id=$2 WHERE id=$1", sid, channel)
 	must(t, e)
 	task := store.Task{Tenant: tenant, ID: sid}
-	if e = s.deliver(ctx, task); e == nil {
+	if collectionData(t, s, tenant, sid).Done {
 		t.Fatal("must wait for child scheduling")
 	}
 	must(t, s.related(ctx, task))
-	if e = s.deliver(ctx, task); e == nil {
+	if collectionData(t, s, tenant, sid).Done {
 		t.Fatal("must wait for child completion")
 	}
 	var child string
 	must(t, admin.Pool.QueryRow(ctx, "SELECT capture_id FROM submissions WHERE idem_key=$1", "related:"+sid+":0").Scan(&child))
 	must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: child}))
 	must(t, s.finalize(ctx, tenant, child))
-	must(t, s.deliver(ctx, task))
-	must(t, s.deliver(ctx, task))
-	if !strings.Contains(sender.text, "已保存 1") || sender.edits == 0 {
-		t.Fatal(sender.text)
+	c := collectionData(t, s, tenant, sid)
+	if !c.Done || c.Complete != 1 || c.Next != "second" {
+		t.Fatalf("progress: %+v", c)
 	}
-	found := false
-	for _, row := range sender.buttons {
-		for _, b := range row {
-			if b.Data == "/more "+sid {
-				found = true
-			}
-		}
-	}
-	if !found {
-		t.Fatal("missing next page")
-	}
-	req := &commandRequest{Task: store.Task{Tenant: tenant, ID: uuid.NewString()}, Argument: sid}
-	must(t, s.commandMore(ctx, req))
-	must(t, s.commandMore(ctx, req))
+	_, e = admin.Pool.Exec(ctx, "UPDATE submissions SET state='sent' WHERE id=$1", sid)
+	must(t, e)
+	_, e = s.channelPage(ctx, tenant, domain.Origin{}, uuid.NewString(), sid, "more")
+	must(t, e)
+	_, e = s.channelPage(ctx, tenant, domain.Origin{}, uuid.NewString(), sid, "more")
+	must(t, e)
 	var count int
 	var cursor, nextID string
 	must(t, admin.Pool.QueryRow(ctx, "SELECT count(*) FROM submissions WHERE tenant_id=$1 AND idem_key=$2", tenant, "more:"+sid).Scan(&count))
@@ -147,8 +125,7 @@ func TestCollectionProgressAndMore(t *testing.T) {
 	if cursor != "second" {
 		t.Fatal(cursor)
 	}
-	req.Task.Tenant = other
-	if s.commandMore(ctx, req) == nil {
+	if _, e = s.channelPage(ctx, other, domain.Origin{}, uuid.NewString(), sid, "more"); e == nil {
 		t.Fatal("cross tenant page access")
 	}
 	must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: nextID}))
@@ -188,22 +165,15 @@ func TestCollectionProgressAndMore(t *testing.T) {
 		if pages > 3 {
 			t.Fatal("unbounded pagination")
 		}
-		if e = s.deliver(ctx, store.Task{Tenant: tenant, ID: batchSID}); e == nil {
+		if collectionData(t, s, tenant, batchSID).Done {
 			t.Fatal("batch finished before following page")
 		}
 		currentSID = following
 		must(t, admin.Pool.QueryRow(ctx, "SELECT capture_id FROM submissions WHERE id=$1", following).Scan(&currentID))
 	}
-	must(t, s.deliver(ctx, store.Task{Tenant: tenant, ID: batchSID}))
-	if pages != 2 || !strings.Contains(sender.text, "已保存 2") {
-		t.Fatal("batch progress", pages, sender.text)
-	}
-	for _, row := range sender.buttons {
-		for _, b := range row {
-			if strings.HasPrefix(b.Data, "/more") {
-				t.Fatal("next button after end")
-			}
-		}
+	c = collectionData(t, s, tenant, batchSID)
+	if pages != 2 || !c.Done || c.Complete != 2 || c.Next != "" {
+		t.Fatalf("batch %d: %+v", pages, c)
 	}
 	// A stop is durable, tenant-scoped, and prevents any further child submissions.
 	stoppedJob, err := s.Submit(ctx, tenant, domain.CaptureInput{URL: "https://notes.test/collection/" + uuid.NewString(), Key: uuid.NewString()})
@@ -215,26 +185,13 @@ func TestCollectionProgressAndMore(t *testing.T) {
 	_, err = admin.Pool.Exec(ctx, "UPDATE submissions SET chat_id='42',channel_id=$2 WHERE id=$1", stoppedSID, channel)
 	must(t, err)
 	stoppedTask := store.Task{Tenant: tenant, ID: stoppedSID}
-	_ = s.deliver(ctx, stoppedTask)
-	hasStop := false
-	for _, row := range sender.buttons {
-		for _, b := range row {
-			if b.Data == "/collection_stop "+stoppedSID {
-				hasStop = true
-			}
-		}
-	}
-	if !hasStop {
-		t.Fatal("missing stop button")
-	}
-	if err = s.commandCollectionStop(ctx, &commandRequest{Task: store.Task{Tenant: other}, Argument: stoppedSID}); err == nil {
+	if err = s.StopCollection(ctx, other, stoppedSID); err == nil {
 		t.Fatal("cross-tenant stop allowed")
 	}
 	childJob, err := s.Submit(ctx, tenant, domain.CaptureInput{URL: "https://notes.test/entry/" + uuid.NewString(), Key: "related:" + stoppedSID + ":0", ParentSubmission: stoppedSID, Automatic: true})
 	must(t, err)
-	stopRequest := &commandRequest{Task: store.Task{Tenant: tenant}, Argument: stoppedSID}
-	must(t, s.commandCollectionStop(ctx, stopRequest))
-	must(t, s.commandCollectionStop(ctx, stopRequest))
+	must(t, s.StopCollection(ctx, tenant, stoppedSID))
+	must(t, s.StopCollection(ctx, tenant, stoppedSID))
 	must(t, s.related(ctx, stoppedTask))
 	_, err = s.Submit(ctx, tenant, domain.CaptureInput{URL: "https://notes.test/entry/" + uuid.NewString(), Key: uuid.NewString(), ParentSubmission: stoppedSID})
 	if !errors.Is(err, errCollectionStopped) {
@@ -242,21 +199,14 @@ func TestCollectionProgressAndMore(t *testing.T) {
 	}
 	must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: childJob.ID}))
 	must(t, s.finalize(ctx, tenant, childJob.ID))
-	must(t, s.deliver(ctx, stoppedTask))
-	if !strings.Contains(sender.text, "帖子抓取已中止") || !strings.Contains(sender.text, "已保存 1") {
-		t.Fatal(sender.text)
-	}
-	for _, row := range sender.buttons {
-		for _, b := range row {
-			if b.Text == "中止" {
-				t.Fatal("stop button still active")
-			}
-		}
+	c = collectionData(t, s, tenant, stoppedSID)
+	if !c.Stopped || !c.Done || c.Complete != 1 {
+		t.Fatalf("stopped: %+v", c)
 	}
 
 	_, err = admin.Pool.Exec(ctx, "UPDATE captures SET paused=true WHERE id=$1", stoppedJob.ID)
 	must(t, err)
-	for _, task := range []store.Task{{Tenant: tenant, ID: stoppedJob.ID, Type: "capture"}, {Tenant: tenant, ID: stoppedSID, Type: "related"}, {Tenant: tenant, ID: stoppedSID, Type: "status"}} {
+	for _, task := range []store.Task{{Tenant: tenant, ID: stoppedJob.ID, Type: "capture"}, {Tenant: tenant, ID: stoppedSID, Type: "related"}} {
 		paused, e := s.taskPaused(ctx, task)
 		must(t, e)
 		if !paused {

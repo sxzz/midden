@@ -41,7 +41,7 @@ func TestWebCollection(t *testing.T) {
 	must(t, e)
 	b, e := db.Resolve(ctx, channel, "b", 1<<30)
 	must(t, e)
-	fake := &fakeAdapter{public: true, text: "中文归档 100%"}
+	fake := &fakeAdapter{public: true, text: "中文收藏 100%"}
 	s := &Service{DB: db, Queue: q, Adapter: fake, Config: Defaults(), Blobs: &memoryBlob{m: map[string][]byte{}}}
 	s.Config.Rate = 1000
 	var jobs []domain.Job
@@ -52,39 +52,39 @@ func TestWebCollection(t *testing.T) {
 		must(t, s.finalize(ctx, a.TenantID, j.ID))
 		jobs = append(jobs, j)
 	}
-	page, e := s.Collection(ctx, a.TenantID, ArchiveFilter{Q: "中文", Media: "text", Visibility: "public"}, "")
+	page, e := s.Collections(ctx, a.TenantID, CollectionFilter{Q: "中文", Media: "text", Visibility: "public"}, "")
 	must(t, e)
 	if len(page.Items) != 10 || page.Next == "" {
 		t.Fatal(page)
 	}
-	must(t, s.DeleteArchive(ctx, a.TenantID, page.Items[9].ID))
-	tail, e := s.Collection(ctx, a.TenantID, ArchiveFilter{Q: "中文", Media: "text", Visibility: "public"}, page.Next)
+	must(t, s.DeleteCollection(ctx, a.TenantID, page.Items[9].ID))
+	tail, e := s.Collections(ctx, a.TenantID, CollectionFilter{Q: "中文", Media: "text", Visibility: "public"}, page.Next)
 	must(t, e)
 	if len(tail.Items) != 2 {
 		t.Fatal(tail)
 	}
-	if _, e = s.Collection(ctx, a.TenantID, ArchiveFilter{Q: "changed"}, page.Next); e == nil {
+	if _, e = s.Collections(ctx, a.TenantID, CollectionFilter{Q: "changed"}, page.Next); e == nil {
 		t.Fatal("foreign query cursor")
 	}
-	empty, e := s.Collection(ctx, b.TenantID, ArchiveFilter{}, "")
+	empty, e := s.Collections(ctx, b.TenantID, CollectionFilter{}, "")
 	must(t, e)
 	if len(empty.Items) != 0 {
 		t.Fatal("foreign saves exposed")
 	}
-	literal, e := s.Collection(ctx, a.TenantID, ArchiveFilter{Q: "100%"}, "")
+	literal, e := s.Collections(ctx, a.TenantID, CollectionFilter{Q: "100%"}, "")
 	must(t, e)
 	if len(literal.Items) == 0 {
 		t.Fatal("literal wildcard search failed")
 	}
-	empty, e = s.Collection(ctx, a.TenantID, ArchiveFilter{From: time.Now().Add(time.Hour).Format(time.RFC3339)}, "")
+	empty, e = s.Collections(ctx, a.TenantID, CollectionFilter{From: time.Now().Add(time.Hour).Format(time.RFC3339)}, "")
 	must(t, e)
 	if len(empty.Items) != 0 {
 		t.Fatal("date ignored")
 	}
-	id := jobs[0].ArchiveID
-	// Use a retained item in case the pagination anchor happened to be this archive.
+	id := jobs[0].CollectionID
+	// Use a retained item in case the pagination anchor happened to be this collection.
 	id = page.Items[0].ID
-	if !errors.Is(s.WebAccess(ctx, b.TenantID, "archives", id), domain.ErrNotFound) {
+	if !errors.Is(s.WebAccess(ctx, b.TenantID, "collections", id), domain.ErrNotFound) {
 		t.Fatal("public non-save exposed")
 	}
 	versions, e := s.Revisions(ctx, a.TenantID, id, "")
@@ -94,7 +94,7 @@ func TestWebCollection(t *testing.T) {
 	}
 	snapshot, e := s.Revision(ctx, a.TenantID, id, versions.Items[0].ID)
 	must(t, e)
-	if snapshot.Text != "中文归档 100%" {
+	if snapshot.Text != "中文收藏 100%" {
 		t.Fatal(snapshot)
 	}
 	if _, e = s.Revision(ctx, b.TenantID, id, versions.Items[0].ID); !errors.Is(e, domain.ErrNotFound) {
@@ -107,10 +107,10 @@ func TestWebCollection(t *testing.T) {
 	must(t, s.finalize(ctx, a.TenantID, job.ID))
 	snapshot, e = s.Revision(ctx, a.TenantID, id, versions.Items[0].ID)
 	must(t, e)
-	if snapshot.Text != "中文归档 100%" {
+	if snapshot.Text != "中文收藏 100%" {
 		t.Fatal("history overwritten")
 	}
-	must(t, s.DeleteArchive(ctx, a.TenantID, id))
+	must(t, s.DeleteCollection(ctx, a.TenantID, id))
 	if _, e = s.Revision(ctx, a.TenantID, id, versions.Items[0].ID); !errors.Is(e, domain.ErrNotFound) {
 		t.Fatal(e)
 	}
@@ -159,7 +159,7 @@ func TestAdapterRegistryRecovery(t *testing.T) {
 	must(t, r.Refresh(ctx))
 	wg.Wait()
 	if len(r.snapshot()) != 1 {
-		t.Fatal("lost descriptor for archived source")
+		t.Fatal("lost descriptor for saved source")
 	}
 	if r.available["fixture"] {
 		t.Fatal("offline adapter marked available")

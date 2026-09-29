@@ -1,4 +1,4 @@
-import type { Archive, Asset, Entity } from "./api";
+import type { Collection, Asset, Entity } from "./api";
 export interface Presentation {
   name: string;
   handle?: string;
@@ -6,11 +6,11 @@ export interface Presentation {
   body: string;
   kind: string;
 }
-type Presenter = (a: Archive, root?: Entity) => Presentation;
+type Presenter = (a: Collection, root?: Entity) => Presentation;
 const generic: Presenter = (a) => ({
   name: a.author_name || "已保存的内容",
   body: a.text || a.summary || "暂无正文",
-  kind: "归档",
+  kind: "收藏",
 });
 const x: Presenter = (a, root) => {
   const key = a.graph?.relations.find(
@@ -33,7 +33,7 @@ const x: Presenter = (a, root) => {
   };
 };
 const registry: Record<string, Presenter> = { "x.post": x, "x.profile": x };
-export function present(a: Archive) {
+export function present(a: Collection) {
   const root = a.graph?.entities.find((e) => e.key === a.graph?.root);
   return (registry[root?.type || ""] || generic)(a, root);
 }
@@ -80,12 +80,12 @@ export function groupLabel(value?: string, now = new Date()) {
     ? month
     : `${d.getFullYear()}年${month}`;
 }
-export interface ArchiveGroup {
+export interface CollectionGroup {
   label: string;
-  items: Archive[];
+  items: Collection[];
 }
-export function groupArchives(items: Archive[], now = new Date()) {
-  const groups: ArchiveGroup[] = [];
+export function groupCollections(items: Collection[], now = new Date()) {
+  const groups: CollectionGroup[] = [];
   for (const item of items) {
     const label = groupLabel(item.saved_at || item.observed_at, now);
     const last = groups[groups.length - 1];
@@ -128,8 +128,8 @@ const warnings: Record<string, string> = {
 export function warningText(warning: string) {
   return warnings[warning] || "部分内容没有完整保存。";
 }
-export function warningList(list: string[] = []) {
-  return [...new Set(list.map(warningText))];
+export function warningList(list?: string[] | null) {
+  return [...new Set((list ?? []).map(warningText))];
 }
 /** One-paragraph preview for a list row. */
 export function excerpt(text: string, limit = 120) {

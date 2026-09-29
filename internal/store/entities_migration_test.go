@@ -42,17 +42,18 @@ func TestEntityMigrationPreservesExistingSnapshots(t *testing.T) {
 	if err = applyMigrations(ctx, conn, fstest.MapFS{"migrations/0001_initial.sql": {Data: initial}}); err != nil {
 		t.Fatal(err)
 	}
-	tenant, archive, capture, revision, profile, pv := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	tenant, collection, capture, revision, profile, pv := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	payload := `{"text":"original","text_kind":"post_text","warnings":[],"metadata":{"published_at":"2026-01-02T03:04:05Z","author":{"external_id":"user-123","username":"u","name":"Name","metadata":{"followers":42}}}}`
+	// Seed the immutable initial schema; subsequent migrations rename these tables.
 	queries := []struct {
 		sql  string
 		args []any
 	}{
 		{`INSERT INTO tenants(id) VALUES($1)`, []any{tenant}},
-		{`INSERT INTO archives(id,tenant_id,visibility,external_id,url,provider_id) VALUES($1,$2,'private','123','https://x.com/i/web/status/123','fxtwitter')`, []any{archive, tenant}},
-		{`INSERT INTO captures(id,tenant_id,archive_id,provider_id,scope,state) VALUES($1,$2,$3,'fxtwitter','public','complete')`, []any{capture, tenant, archive}},
-		{`INSERT INTO revisions(id,tenant_id,archive_id,capture_id,content_hash,payload,content_bytes) VALUES($1,$2,$3,$4,'old',$5,100)`, []any{revision, tenant, archive, capture, payload}},
-		{`UPDATE archives SET current_revision=$2 WHERE id=$1`, []any{archive, revision}},
+		{`INSERT INTO archives(id,tenant_id,visibility,external_id,url,provider_id) VALUES($1,$2,'private','123','https://x.com/i/web/status/123','fxtwitter')`, []any{collection, tenant}},
+		{`INSERT INTO captures(id,tenant_id,archive_id,provider_id,scope,state) VALUES($1,$2,$3,'fxtwitter','public','complete')`, []any{capture, tenant, collection}},
+		{`INSERT INTO revisions(id,tenant_id,archive_id,capture_id,content_hash,payload,content_bytes) VALUES($1,$2,$3,$4,'old',$5,100)`, []any{revision, tenant, collection, capture, payload}},
+		{`UPDATE archives SET current_revision=$2 WHERE id=$1`, []any{collection, revision}},
 		{`INSERT INTO profiles(id,tenant_id,visibility,scope,external_id) VALUES($1,$2,'private','public','user-123')`, []any{profile, tenant}},
 		{`INSERT INTO profile_versions(id,profile_id,tenant_id,visibility,content_hash,payload) VALUES($1,$2,$3,'private','old','{}')`, []any{pv, profile, tenant}},
 		{`INSERT INTO revision_profiles(revision_id,profile_version_id,tenant_id,visibility) VALUES($1,$2,$3,'private')`, []any{revision, pv, tenant}},
@@ -68,6 +69,10 @@ func TestEntityMigrationPreservesExistingSnapshots(t *testing.T) {
 	}
 	if err = applyMigrations(ctx, conn, migrations); err != nil {
 		t.Fatal("repeat migration", err)
+	}
+	var preserved bool
+	if err = conn.QueryRow(ctx, `SELECT EXISTS(SELECT FROM collections c JOIN revisions r ON r.collection_id=c.id WHERE c.id=$1 AND c.current_revision=$2 AND r.id=$2) AND to_regclass('archives') IS NULL`, collection, revision).Scan(&preserved); err != nil || !preserved {
+		t.Fatal("collection rename lost content", err)
 	}
 	var raw []byte
 	if err = conn.QueryRow(ctx, `SELECT payload FROM revisions WHERE id=$1`, revision).Scan(&raw); err != nil {

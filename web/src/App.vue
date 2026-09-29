@@ -2,7 +2,7 @@
 import { shallowRef, onMounted, onUnmounted } from "vue";
 import { api, errorText } from "./api";
 import { host, setupHost } from "./host";
-import ArchiveLibrary from "./components/ArchiveLibrary.vue";
+import CollectionLibrary from "./components/CollectionLibrary.vue";
 const ready = shallowRef(false),
   error = shallowRef(""),
   loading = shallowRef(true);
@@ -15,7 +15,7 @@ onMounted(async () => {
   } catch {
     const data = host()?.initData;
     if (!data) {
-      error.value = "请从 Telegram Bot 的「打开归档库」进入。";
+      error.value = "请从 Telegram Bot 的「打开收藏库」进入。";
     } else {
       try {
         await api("/auth/telegram", {
@@ -34,7 +34,7 @@ onMounted(async () => {
 onUnmounted(() => cleanup());
 </script>
 <template>
-  <ArchiveLibrary v-if="ready" />
+  <CollectionLibrary v-if="ready" />
   <main v-else class="gate">
     <p role="status">{{ loading ? "正在打开收藏…" : error }}</p>
   </main>

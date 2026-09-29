@@ -21,6 +21,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -p 1 -trimpath -ldflags "-X monitor/internal/buildinfo.Revision=${VCS_REF}" -o /out/core ./cmd/core && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -p 1 -trimpath -ldflags "-X monitor/internal/buildinfo.Revision=${VCS_REF}" -o /out/telegram ./cmd/telegram && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -p 1 -trimpath -o /out/monitorctl ./cmd/monitorctl
 FROM alpine:3.23.3
 RUN apk add --no-cache ca-certificates ffmpeg && addgroup -g 10001 monitor && adduser -D -H -u 10001 -G monitor monitor

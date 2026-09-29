@@ -55,7 +55,7 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 				write(w, 400, map[string]string{"error": "save links through the bot"})
 				return
 			}
-			if e := s.WebAccess(r.Context(), tenant(r), "archives", in.RefreshID); e != nil {
+			if e := s.WebAccess(r.Context(), tenant(r), "collections", in.RefreshID); e != nil {
 				respond(w, 200, nil, e)
 				return
 			}
@@ -82,10 +82,10 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		v, e := s.Job(r.Context(), tenant(r), r.PathValue("id"))
 		respond(w, 200, v, e)
 	})
-	mux.HandleFunc("GET /v1/archives", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/collections", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if _, ok := r.Context().Value(sessionKey{}).(bool); ok || q.Has("q") || q.Has("media_type") || q.Has("visibility") || q.Has("saved_from") || q.Has("saved_before") {
-			v, e := s.Collection(r.Context(), tenant(r), app.ArchiveFilter{Q: q.Get("q"), Media: q.Get("media_type"), Visibility: q.Get("visibility"), From: q.Get("saved_from"), Before: q.Get("saved_before")}, q.Get("cursor"))
+			v, e := s.Collections(r.Context(), tenant(r), app.CollectionFilter{Q: q.Get("q"), Media: q.Get("media_type"), Visibility: q.Get("visibility"), From: q.Get("saved_from"), Before: q.Get("saved_before")}, q.Get("cursor"))
 			respond(w, 200, v, e)
 			return
 		}
@@ -99,7 +99,7 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		v, e := s.Entity(r.Context(), tenant(r), r.PathValue("id"))
 		respond(w, 200, v, e)
 	})
-	mux.HandleFunc("GET /v1/archives/{id}/sources", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/collections/{id}/sources", func(w http.ResponseWriter, r *http.Request) {
 		if !checkID(w, r) {
 			return
 		}
@@ -120,23 +120,23 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Write(v.Body)
 	})
-	mux.HandleFunc("GET /v1/archives/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/collections/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !checkID(w, r) {
 			return
 		}
 		if _, ok := r.Context().Value(sessionKey{}).(bool); ok {
-			v, e := s.SavedArchive(r.Context(), tenant(r), r.PathValue("id"))
+			v, e := s.SavedCollection(r.Context(), tenant(r), r.PathValue("id"))
 			respond(w, 200, v, e)
 			return
 		}
-		v, e := s.Archive(r.Context(), tenant(r), r.PathValue("id"))
+		v, e := s.Collection(r.Context(), tenant(r), r.PathValue("id"))
 		respond(w, 200, v, e)
 	})
-	mux.HandleFunc("DELETE /v1/archives/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("DELETE /v1/collections/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !checkID(w, r) {
 			return
 		}
-		if e := s.DeleteArchive(r.Context(), tenant(r), r.PathValue("id")); e != nil {
+		if e := s.DeleteCollection(r.Context(), tenant(r), r.PathValue("id")); e != nil {
 			respond(w, 200, nil, e)
 			return
 		}
@@ -174,14 +174,14 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		cookie(w, "", -1)
 		w.WriteHeader(204)
 	})
-	mux.HandleFunc("GET /v1/archives/{id}/revisions", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/collections/{id}/revisions", func(w http.ResponseWriter, r *http.Request) {
 		if !checkID(w, r) {
 			return
 		}
 		v, e := s.Revisions(r.Context(), tenant(r), r.PathValue("id"), r.URL.Query().Get("cursor"))
 		respond(w, 200, v, e)
 	})
-	mux.HandleFunc("GET /v1/archives/{id}/revisions/{revision}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/collections/{id}/revisions/{revision}", func(w http.ResponseWriter, r *http.Request) {
 		if !checkID(w, r) {
 			return
 		}
@@ -192,7 +192,7 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		v, e := s.Revision(r.Context(), tenant(r), r.PathValue("id"), r.PathValue("revision"))
 		respond(w, 200, v, e)
 	})
-	mux.HandleFunc("GET /v1/archives/{id}/availability", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/collections/{id}/availability", func(w http.ResponseWriter, r *http.Request) {
 		if !checkID(w, r) {
 			return
 		}
@@ -202,7 +202,7 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 	secured := authenticate(s, web, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := r.Context().Value(sessionKey{}).(bool); ok {
 			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-			if len(parts) >= 3 && (parts[1] == "archives" || parts[1] == "assets" || parts[1] == "entities") {
+			if len(parts) >= 3 && (parts[1] == "collections" || parts[1] == "assets" || parts[1] == "entities") {
 				if !valid(parts[2]) {
 					http.NotFound(w, r)
 					return
@@ -266,7 +266,7 @@ func respond(w http.ResponseWriter, code int, v any, e error) {
 		msg = "adapter temporarily unavailable"
 	case errors.Is(e, app.ErrInvalidFilter):
 		code = 400
-		msg = "invalid archive filters"
+		msg = "invalid collection filters"
 	case errors.Is(e, domain.ErrInvalidTarget):
 		code = 400
 		msg = "unsupported URL"

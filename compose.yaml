@@ -61,6 +61,7 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY}
       S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET}
       ADMIN_LISTEN: :9090
+      CHANNEL_LISTEN: :8081
     volumes:
       - ./.local/adapter-tls:/tls:ro
     ports:
@@ -70,3 +71,15 @@ services:
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
+  telegram:
+    image: ${CORE_IMAGE:-ghcr.io/sxzz/midden-core:latest}
+    entrypoint: [telegram]
+    profiles: [telegram]
+    environment:
+      CORE_CHANNEL_URL: http://core:8081
+      TELEGRAM_CHANNEL_ID: ${TELEGRAM_CHANNEL_ID:-}
+    depends_on:
+      core:
+        condition: service_started
+    restart: unless-stopped
+

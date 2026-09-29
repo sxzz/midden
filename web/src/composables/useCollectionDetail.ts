@@ -2,18 +2,18 @@ import { shallowRef, watch, onUnmounted } from "vue";
 import {
   api,
   errorText,
-  type Archive,
+  type Collection,
   type Revision,
   type Page,
   type Job,
 } from "../api";
-export function useArchiveDetail(
+export function useCollectionDetail(
   id: () => string,
   deleted: (id: string) => void,
-  updated: (archive: Archive) => void,
+  updated: (collection: Collection) => void,
 ) {
   const available = shallowRef(false);
-  const archive = shallowRef<Archive>(),
+  const collection = shallowRef<Collection>(),
     error = shallowRef(""),
     busy = shallowRef(false),
     status = shallowRef(""),
@@ -27,7 +27,7 @@ export function useArchiveDetail(
     try {
       available.value = (
         await api<{ available: boolean }>(
-          "/archives/" + id() + "/availability",
+          "/collections/" + id() + "/availability",
           { signal: controller.signal },
         )
       ).available;
@@ -46,19 +46,19 @@ export function useArchiveDetail(
       controller.abort();
       controller = new AbortController();
       clearTimeout(timer);
-      archive.value = undefined;
+      collection.value = undefined;
       revisions.value = [];
       showHistory.value = false;
       historical.value = false;
       error.value = "";
       busy.value = false;
       try {
-        archive.value = await api<Archive>("/archives/" + id, {
+        collection.value = await api<Collection>("/collections/" + id, {
           signal: controller.signal,
         });
         available.value = (
           await api<{ available: boolean }>(
-            "/archives/" + id + "/availability",
+            "/collections/" + id + "/availability",
             {
               signal: controller.signal,
             },
@@ -77,7 +77,7 @@ export function useArchiveDetail(
   async function historyPage(more = false) {
     try {
       const p = await api<Page<Revision>>(
-        `/archives/${id()}/revisions${more ? "?cursor=" + encodeURIComponent(next.value) : ""}`,
+        `/collections/${id()}/revisions${more ? "?cursor=" + encodeURIComponent(next.value) : ""}`,
         { signal: controller.signal },
       );
       revisions.value = more ? [...revisions.value, ...p.items] : p.items;
@@ -90,12 +90,12 @@ export function useArchiveDetail(
   async function revision(revisionID?: string) {
     const request = ++revisionRequest;
     try {
-      const result = await api<Archive>(
-        `/archives/${id()}${revisionID ? "/revisions/" + revisionID : ""}`,
+      const result = await api<Collection>(
+        `/collections/${id()}${revisionID ? "/revisions/" + revisionID : ""}`,
         { signal: controller.signal },
       );
       if (request !== revisionRequest) return;
-      archive.value = result;
+      collection.value = result;
       historical.value = !!revisionID;
     } catch (e) {
       error.value = errorText(e);
@@ -104,7 +104,7 @@ export function useArchiveDetail(
   async function remove() {
     busy.value = true;
     try {
-      await api("/archives/" + id(), {
+      await api("/collections/" + id(), {
         method: "DELETE",
         signal: controller.signal,
       });
@@ -141,13 +141,13 @@ export function useArchiveDetail(
     } else {
       busy.value = false;
       if (job.state !== "failed") {
-        archive.value = await api<Archive>("/archives/" + job.archive_id, {
+        collection.value = await api<Collection>("/collections/" + job.collection_id, {
           signal: controller.signal,
         });
-        if (job.archive_id !== id())
-          location.hash = "/archive/" + job.archive_id;
+        if (job.collection_id !== id())
+          location.hash = "/collection/" + job.collection_id;
         historical.value = false;
-        updated(archive.value);
+        updated(collection.value);
       }
     }
   }
@@ -170,7 +170,7 @@ export function useArchiveDetail(
     }
   }
   return {
-    archive,
+    collection,
     error,
     busy,
     status,

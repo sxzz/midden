@@ -1,20 +1,24 @@
 <script setup vapor lang="ts">
 import { computed } from "vue";
-import { safeURL, type Archive } from "../api";
+import { safeURL, type Collection } from "../api";
 import { date } from "../presentation";
-import { useArchiveDetail } from "../composables/useArchiveDetail";
-import ArchivePost from "./ArchivePost.vue";
+import { useCollectionDetail } from "../composables/useCollectionDetail";
+import CollectionPost from "./CollectionPost.vue";
 import RevisionList from "./RevisionList.vue";
 import ConfirmSheet from "./ConfirmSheet.vue";
 import ListSection from "./ui/ListSection.vue";
 import ListButton from "./ui/ListButton.vue";
-const props = defineProps<{ id: string; savedAt?: string }>();
+const props = defineProps<{
+  id: string;
+  savedAt?: string;
+  showSensitive?: boolean;
+}>();
 const emit = defineEmits<{
   deleted: [id: string];
-  updated: [archive: Archive];
+  updated: [collection: Collection];
 }>();
 const {
-  archive,
+  collection,
   error,
   busy,
   status,
@@ -29,23 +33,23 @@ const {
   remove,
   refresh,
   checkAvailability,
-} = useArchiveDetail(
+} = useCollectionDetail(
   () => props.id,
   (id) => emit("deleted", id),
-  (archive) => emit("updated", archive),
+  (collection) => emit("updated", collection),
 );
-const saved = computed(() => date(props.savedAt || archive.value?.saved_at));
-const link = computed(() => archive.value && safeURL(archive.value.url));
+const saved = computed(() => date(props.savedAt || collection.value?.saved_at));
+const link = computed(() => collection.value && safeURL(collection.value.url));
 const version = computed(() =>
-  archive.value ? `当前版本抓取于 ${date(archive.value.observed_at)}` : "",
+  collection.value ? `当前版本抓取于 ${date(collection.value.observed_at)}` : "",
 );
 </script>
 <template>
   <ListSection v-if="error" plain>
     <p class="banner" role="alert">{{ error }}</p>
   </ListSection>
-  <p v-if="!archive && !error" class="loading">正在打开收藏…</p>
-  <template v-if="archive">
+  <p v-if="!collection && !error" class="loading">正在打开收藏…</p>
+  <template v-if="collection">
     <ListSection v-if="historical">
       <ListButton
         label="正在查看历史版本"
@@ -56,7 +60,7 @@ const version = computed(() =>
       />
     </ListSection>
     <ListSection :footnote="saved ? `保存于 ${saved}` : undefined">
-      <ArchivePost :archive="archive" />
+      <CollectionPost :collection="collection" :show-sensitive="showSensitive" />
     </ListSection>
     <ListSection :footnote="version">
       <ListButton v-if="link" label="打开原文" :href="link" />
@@ -99,7 +103,7 @@ const version = computed(() =>
     <ConfirmSheet
       :open="confirmDelete"
       title="删除这条收藏？"
-      description="它会从你的归档库移除，别人保存的记录不受影响。"
+      description="它会从你的收藏库移除，别人保存的记录不受影响。"
       confirm-label="删除"
       :busy="busy"
       @confirm="remove"

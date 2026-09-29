@@ -897,7 +897,7 @@ func (x *SourceResponse) GetVisibility() Visibility {
 type RelatedTarget struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	Url                 string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
-	RefreshAfterSeconds uint32                 `protobuf:"varint,2,opt,name=refresh_after_seconds,json=refreshAfterSeconds,proto3" json:"refresh_after_seconds,omitempty"` // Zero reuses any existing archive; positive refreshes stale data.
+	RefreshAfterSeconds uint32                 `protobuf:"varint,2,opt,name=refresh_after_seconds,json=refreshAfterSeconds,proto3" json:"refresh_after_seconds,omitempty"` // Zero reuses any existing collection; positive refreshes stale data.
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }

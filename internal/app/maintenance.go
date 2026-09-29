@@ -60,7 +60,7 @@ func (s *Service) Maintain(ctx context.Context) error {
 			return e
 		}
 	}
-	if _, e = s.DB.Pool.Exec(ctx, `SELECT collect_unreferenced_archives((SELECT value::bigint FROM config WHERE key='archive_retention_days') * interval '1 day')`); e != nil {
+	if _, e = s.DB.Pool.Exec(ctx, `SELECT collect_unreferenced_collections((SELECT value::bigint FROM config WHERE key='collection_retention_days') * interval '1 day')`); e != nil {
 		return e
 	}
 	rows, e = s.DB.Pool.Query(ctx, `SELECT tenant_id FROM garbage_tenants()`)

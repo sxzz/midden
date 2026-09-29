@@ -48,7 +48,7 @@ func (s *Service) reuseMedia(ctx context.Context, t store.Task, scope, accessSco
 		}
 		var counted bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(
- SELECT FROM assets a JOIN revisions r ON r.capture_id=a.capture_id JOIN tenant_archives ta ON ta.archive_id=r.archive_id JOIN blobs b ON b.id=a.blob_id WHERE b.hash=$1
+ SELECT FROM assets a JOIN revisions r ON r.capture_id=a.capture_id JOIN tenant_collections ta ON ta.collection_id=r.collection_id JOIN blobs b ON b.id=a.blob_id WHERE b.hash=$1
  UNION ALL SELECT FROM assets a JOIN blobs b ON b.id=a.blob_id WHERE a.capture_id=$2 AND b.hash=$1 AND a.state='ready')`, hash, cid).Scan(&counted); err != nil {
 			return err
 		}

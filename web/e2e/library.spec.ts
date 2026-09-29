@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
 const id = "11111111-1111-4111-8111-111111111111";
-const archive = {
+const collection = {
   id,
   url: "https://example.test/post",
-  text: "这是一条保存在 Midden 的测试归档。",
+  text: "这是一条保存在 Midden 的测试收藏。",
   author_name: "测试作者",
   published_at: "2026-09-28T10:00:00Z",
   saved_at: "2026-09-29T10:00:00Z",
@@ -29,24 +29,24 @@ test("browse, filter, history, refresh and remove a saved post", async ({
         reserved_bytes: 0,
         limit_bytes: 1073741824,
       };
-    else if (path === "/v1/archives")
+    else if (path === "/v1/collections")
       body = {
-        items: deleted || u.searchParams.get("q") === "不存在" ? [] : [archive],
+        items: deleted || u.searchParams.get("q") === "不存在" ? [] : [collection],
       };
     else if (path.endsWith("/availability")) body = { available: true };
     else if (path.endsWith("/revisions"))
       body = { items: [{ id: "r0", created_at: "2026-09-27T10:00:00Z" }] };
     else if (path.endsWith("/revisions/r0"))
-      body = { ...archive, text: "历史正文" };
+      body = { ...collection, text: "历史正文" };
     else if (path === "/v1/captures")
-      body = { id: "job", archive_id: id, state: "complete" };
-    else if (path === "/v1/archives/" + id) {
+      body = { id: "job", collection_id: id, state: "complete" };
+    else if (path === "/v1/collections/" + id) {
       if (r.request().method() === "DELETE") {
         deleted = true;
         await r.fulfill({ status: 204 });
         return;
       }
-      body = archive;
+      body = collection;
     } else {
       await r.fulfill({ status: 404, json: { error: "not found" } });
       return;
@@ -59,7 +59,7 @@ test("browse, filter, history, refresh and remove a saved post", async ({
       .first()
       .click();
   await page.goto("/app/");
-  await expect(page.getByText(archive.text)).toBeVisible();
+  await expect(page.getByText(collection.text)).toBeVisible();
   await page.screenshot({
     path: "test-results/library-mobile.png",
     fullPage: true,
@@ -93,7 +93,7 @@ test("ordinary browser explains Telegram entry", async ({ page }) => {
   );
   await page.goto("/app/");
   await expect(
-    page.getByText("请从 Telegram Bot 的「打开归档库」进入。"),
+    page.getByText("请从 Telegram Bot 的「打开收藏库」进入。"),
   ).toBeVisible();
 });
 
@@ -102,7 +102,7 @@ test("sensitive image stays unloaded until revealed and opens inside the page", 
 }) => {
   let requests = 0;
   const sensitive = {
-    ...archive,
+    ...collection,
     assets: [
       {
         id: "media",
@@ -134,7 +134,7 @@ test("sensitive image stays unloaded until revealed and opens inside the page", 
           ? { used_bytes: 0, reserved_bytes: 0, limit_bytes: 1000 }
           : path.endsWith("/availability")
             ? { available: true }
-            : path === "/v1/archives/" + id
+            : path === "/v1/collections/" + id
               ? sensitive
               : { items: [sensitive] };
     await r.fulfill({ json: body });

@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: Monitor Archive API
+  title: Monitor Collection API
   version: 0.1.0
-  description: Tenant-scoped archives. Telegram Mini App sessions browse saved content only; Bearer clients retain existing public-content access.
+  description: Tenant-scoped collections. Telegram Mini App sessions browse saved content only; Bearer clients retain existing public-content access.
 servers:
   - url: http://localhost:8080
 security:
@@ -55,9 +55,9 @@ paths:
       responses:
         "204": { description: Session revoked }
         "403": { description: Invalid Origin for a cookie-authenticated write }
-  /v1/archives/{id}/availability:
+  /v1/collections/{id}/availability:
     get:
-      summary: Read capture availability for this saved archive's adapter
+      summary: Read capture availability for this saved collection's adapter
       parameters: [{ $ref: "#/components/parameters/ID" }]
       responses:
         "200":
@@ -67,9 +67,9 @@ paths:
               schema:
                 { type: object, properties: { available: { type: boolean } } }
         "404": { $ref: "#/components/responses/NotFound" }
-  /v1/archives/{id}/revisions:
+  /v1/collections/{id}/revisions:
     get:
-      summary: List retained versions of a saved archive, newest first
+      summary: List retained versions of a saved collection, newest first
       parameters:
         - { $ref: "#/components/parameters/ID" }
         - { in: query, name: cursor, schema: { type: string } }
@@ -90,7 +90,7 @@ paths:
                         created_at: { type: string, format: date-time }
                   next_cursor: { type: string }
         "404": { $ref: "#/components/responses/NotFound" }
-  /v1/archives/{id}/revisions/{revision_id}:
+  /v1/collections/{id}/revisions/{revision_id}:
     get:
       summary: Read one retained version with its original entity and media snapshots
       parameters:
@@ -103,14 +103,14 @@ paths:
           }
       responses:
         "200":
-          description: Saved archive version
+          description: Saved collection version
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Archive" }
+              schema: { $ref: "#/components/schemas/Collection" }
         "404": { $ref: "#/components/responses/NotFound" }
   /v1/captures:
     post:
-      summary: Submit an X URL or refresh an existing archive
+      summary: Submit an X URL or refresh an existing collection
       parameters:
         - in: header
           name: Idempotency-Key
@@ -171,7 +171,7 @@ paths:
               schema: { $ref: "#/components/schemas/Job" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
-  /v1/archives:
+  /v1/collections:
     get:
       summary: List this tenant's collection, newest first
       description: Cookie sessions always use filtered collection pagination. Bearer requests with no filter parameters retain legacy cursor semantics. Filtered cursors are bound to the filter values and include their own sorting anchor.
@@ -209,7 +209,7 @@ paths:
         - in: query
           name: cursor
           schema: { type: string }
-          description: Opaque cursor returned by a previous page; pages contain at most 10 archives.
+          description: Opaque cursor returned by a previous page; pages contain at most 10 collections.
       responses:
         "200":
           description: Page
@@ -221,14 +221,14 @@ paths:
                   items:
                     {
                       type: array,
-                      items: { $ref: "#/components/schemas/Archive" },
+                      items: { $ref: "#/components/schemas/Collection" },
                     }
                   next_cursor: { type: string }
                   previous_cursor: { type: string }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
-  /v1/archives/{id}:
+  /v1/collections/{id}:
     delete:
       summary: Remove this tenant's collection reference and release its logical usage
       parameters: [{ $ref: "#/components/parameters/ID" }]
@@ -244,15 +244,15 @@ paths:
       parameters: [{ $ref: "#/components/parameters/ID" }]
       responses:
         "200":
-          description: Archive
+          description: Collection
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Archive" }
+              schema: { $ref: "#/components/schemas/Collection" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
   /v1/entities/{id}:
     get:
-      summary: Read the latest entity version linked to your saved archives
+      summary: Read the latest entity version linked to your saved collections
       parameters: [{ $ref: "#/components/parameters/ID" }]
       responses:
         "200":
@@ -261,7 +261,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Entity" }
         "404": { $ref: "#/components/responses/NotFound" }
-  /v1/archives/{id}/sources:
+  /v1/collections/{id}/sources:
     get:
       summary: List up to 100 latest retained upstream responses visible to this tenant
       parameters: [{ $ref: "#/components/parameters/ID" }]
@@ -295,7 +295,7 @@ paths:
         "200": { description: Media headers including size and Accept-Ranges }
         "404": { $ref: "#/components/responses/NotFound" }
     get:
-      summary: Download or preview authorized archived original media
+      summary: Download or preview authorized saved original media
       parameters:
         - { $ref: "#/components/parameters/ID" }
         - {
@@ -383,11 +383,11 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        archive_id:
+        collection_id:
           {
             type: string,
             format: uuid,
-            description: Provisional while queued; read the completed job for the final shared archive ID.,
+            description: Provisional while queued; read the completed job for the final shared collection ID.,
           }
         state:
           {
@@ -457,7 +457,7 @@ components:
         sha256: { type: string }
         size: { type: integer, format: int64 }
         created_at: { type: string, format: date-time }
-    Archive:
+    Collection:
       type: object
       properties:
         saved_at:
@@ -479,12 +479,12 @@ components:
             description: Visibility declared by the provider,
           }
         text: { type: string }
-        summary: { type: string, description: Adapter-provided archive summary }
+        summary: { type: string, description: Adapter-provided collection summary }
         author_name: { type: string }
         published_at: { type: string, format: date-time }
         text_kind: { type: string, enum: [provider_summary, post_text] }
         graph: { $ref: "#/components/schemas/EntityGraph" }
-        text_source: { type: string, description: Source of the archived text }
+        text_source: { type: string, description: Source of the saved text }
         adapter_version: { type: string }
         warnings: { type: array, items: { type: string } }
         assets: { type: array, items: { $ref: "#/components/schemas/Asset" } }

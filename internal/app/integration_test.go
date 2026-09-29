@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -163,24 +162,6 @@ func (b *memoryBlob) Delete(_ context.Context, k string) error {
 	return nil
 }
 
-type fakeSender struct {
-	mu    sync.Mutex
-	chats []string
-	count int64
-}
-
-func (f *fakeSender) Send(_ context.Context, chat, text string, mid int64) (int64, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.chats = append(f.chats, chat)
-	f.count++
-	return f.count, nil
-}
-
-func (f *fakeSender) MediaItem(ctx context.Context, chat string, a domain.Asset) (int64, error) {
-	return f.Send(ctx, chat, a.ID, 0)
-}
-
 func TestIntegration(t *testing.T) {
 	adminDSN := os.Getenv("TEST_ADMIN_DATABASE_URL")
 	appDSN := os.Getenv("TEST_DATABASE_URL")
@@ -200,13 +181,12 @@ func TestIntegration(t *testing.T) {
 	}
 	fake := &fakeAdapter{text: "hello"}
 	mem := &memoryBlob{m: map[string][]byte{}}
-	sender := &fakeSender{}
 	cfg := Defaults()
 	cfg.Rate = 10000
-	s := &Service{DB: db, Adapter: fake, Blobs: mem, HTTP: http.DefaultClient, Config: cfg, Sender: sender}
+	s := &Service{DB: db, Adapter: fake, Blobs: mem, HTTP: http.DefaultClient, Config: cfg}
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &Worker{S: s})
-	queue, e := river.NewClient(riverpgxv5.New(db.Pool), &river.Config{Workers: workers, Queues: map[string]river.QueueConfig{"capture": {MaxWorkers: 4}, "download": {MaxWorkers: 8}, "control": {MaxWorkers: 4}, "delivery": {MaxWorkers: 2}}, FetchPollInterval: 100 * time.Millisecond, FetchCooldown: 10 * time.Millisecond})
+	queue, e := river.NewClient(riverpgxv5.New(db.Pool), &river.Config{Workers: workers, Queues: map[string]river.QueueConfig{"capture": {MaxWorkers: 4}, "download": {MaxWorkers: 8}, "control": {MaxWorkers: 4}}, FetchPollInterval: 100 * time.Millisecond, FetchCooldown: 10 * time.Millisecond})
 	must(t, e)
 	s.Queue = queue
 	newTenant := func() string {
@@ -275,18 +255,15 @@ func TestIntegration(t *testing.T) {
 	}
 	must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: j.ID, Type: "capture"}))
 	must(t, s.finalize(ctx, tenant, j.ID))
-	a, e := s.Archive(ctx, tenant, j.ArchiveID)
+	a, e := s.Collection(ctx, tenant, j.CollectionID)
 	must(t, e)
 	if a.Text != "hello" || a.Summary != "作者：hello" || a.AuthorName != "作者" || a.PublishedAt != "2026-04-05T03:22:33Z" {
 		t.Fatal(a)
 	}
-	recent := &commandRequest{Task: store.Task{Tenant: tenant}}
-	must(t, s.commandList(ctx, recent))
-	if len(recent.Entities) != 1 || recent.Entities[0].URL != a.URL || recent.Entities[0].Offset != 3 || recent.Entities[0].Length != 8 {
-		t.Fatal("missing summary source link", recent.Entities)
-	}
-	if recent.Text != "1. 作者：hello" || len(recent.Buttons) != 1 || recent.Buttons[0][0].Data != "/show "+a.ID || len(recent.Buttons[0]) != 2 || recent.Buttons[0][1].URL != a.URL {
-		t.Fatalf("unexpected recent list: %+v", recent)
+	page, err := s.Recent(ctx, tenant, "")
+	must(t, err)
+	if len(page.Items) != 1 || page.Items[0].ID != a.ID {
+		t.Fatal("missing saved collection")
 	}
 	// Reloaded app has no in-memory task state; redo persisted capture/finalize safely.
 	restarted := *s
@@ -295,13 +272,13 @@ func TestIntegration(t *testing.T) {
 	if fake.calls.Load() != 1 {
 		t.Fatal("completed capture re-fetched")
 	}
-	for _, fn := range []func() error{func() error { _, e := s.Archive(ctx, other.TenantID, a.ID); return e }, func() error { _, e := s.Job(ctx, other.TenantID, j.ID); return e }} {
+	for _, fn := range []func() error{func() error { _, e := s.Collection(ctx, other.TenantID, a.ID); return e }, func() error { _, e := s.Job(ctx, other.TenantID, j.ID); return e }} {
 		if fn() == nil {
 			t.Fatal("cross tenant data exposed")
 		}
 	}
 	var n int
-	must(t, db.Pool.QueryRow(ctx, `SELECT count(*) FROM archives`).Scan(&n))
+	must(t, db.Pool.QueryRow(ctx, `SELECT count(*) FROM collections`).Scan(&n))
 	if n != 0 {
 		t.Fatal("RLS missing without context")
 	}
@@ -322,19 +299,19 @@ func TestIntegration(t *testing.T) {
 		return rows.Err()
 	}))
 	for _, id := range subIDs {
-		must(t, s.deliver(ctx, store.Task{Tenant: tenant, ID: id}))
-		must(t, s.deliver(ctx, store.Task{Tenant: tenant, ID: id}))
-	}
-	if len(sender.chats) != 20 {
-		t.Fatalf("unexpected deliveries %d", len(sender.chats))
+		var count int
+		must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM channel_work WHERE tenant_id=$1 AND kind='delivery' AND resource=$2`, tenant, id).Scan(&count))
+		if count != 1 {
+			t.Fatal("delivery not published exactly once", count)
+		}
 	}
 	oldRevision := a.RevisionID
-	refresh := func() domain.Archive {
+	refresh := func() domain.Collection {
 		v, err := s.Submit(ctx, tenant, domain.CaptureInput{RefreshID: a.ID})
 		must(t, err)
 		must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: v.ID}))
 		must(t, s.finalize(ctx, tenant, v.ID))
-		v2, err := s.Archive(ctx, tenant, a.ID)
+		v2, err := s.Collection(ctx, tenant, a.ID)
 		must(t, err)
 		return v2
 	}
@@ -345,7 +322,7 @@ func TestIntegration(t *testing.T) {
 	if refresh().RevisionID == oldRevision {
 		t.Fatal("changed content missing revision")
 	}
-	pinned, e := s.CaptureArchive(ctx, tenant, j.ID)
+	pinned, e := s.CaptureCollection(ctx, tenant, j.ID)
 	must(t, e)
 	if pinned.Text != "hello" || pinned.Summary != "作者：hello" || pinned.AuthorName != "作者" || pinned.PublishedAt != "2026-04-05T03:22:33Z" {
 		t.Fatal("delivery snapshot changed")
@@ -388,7 +365,7 @@ func TestIntegration(t *testing.T) {
 		must(t, s.download(ctx, store.Task{Tenant: imageTenant, ID: asset.ID}))
 	}
 	must(t, s.finalize(ctx, imageTenant, v.ID))
-	imgArc, e := s.Archive(ctx, imageTenant, v.ArchiveID)
+	imgArc, e := s.Collection(ctx, imageTenant, v.CollectionID)
 	must(t, e)
 	if len(imgArc.Assets) != 2 || imgArc.Assets[0].Hash != imgArc.Assets[1].Hash {
 		t.Fatal(imgArc)
@@ -527,16 +504,12 @@ func TestIntegration(t *testing.T) {
 	defer stop()
 	must(t, queue.Stop(stopCtx))
 	t.Log("100 tenants / 1000 captures drained")
-	// Inbox survives process replacement; fixture verifies private-channel origin resolution.
-	update := map[string]any{"update_id": 7, "message": map[string]any{"message_id": 1, "from": map[string]any{"id": 42}, "chat": map[string]any{"id": 42, "type": "private"}, "text": "/usage"}}
-	raw, _ := json.Marshal(update)
-	var inbox string
-	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO inbox(tenant_id,channel_id,update_id,payload) VALUES($1,$2,7,$3) RETURNING id`, tenant, ch1, raw).Scan(&inbox))
-	must(t, restarted.processInbox(ctx, store.Task{Tenant: tenant, ID: inbox}))
-	must(t, restarted.processInbox(ctx, store.Task{Tenant: tenant, ID: inbox}))
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM replies WHERE inbox_id=$1`, inbox).Scan(&n))
-	if n != 1 {
-		t.Fatal("inbox duplicate reply")
+	// Business results survive repeated action requests; HTTP claim/ack recovery
+	// is covered by internal/httpapi channel integration tests.
+	result, err := channelTestAction(t, &restarted, tenant, "usage", "")
+	must(t, err)
+	if result.Usage == nil {
+		t.Fatal("missing usage")
 	}
 }
 
@@ -545,10 +518,6 @@ func must(t *testing.T, e error) {
 	if e != nil {
 		t.Fatal(e)
 	}
-}
-
-func (f *fakeSender) Media(ctx context.Context, chat string, aa []domain.Asset, caption string) (int64, error) {
-	return f.Send(ctx, chat, "album", 0)
 }
 
 func (f *fakeAdapter) CheckConnection(_ context.Context, r *pb.CheckConnectionRequest, _ ...grpc.CallOption) (*pb.CheckConnectionResponse, error) {

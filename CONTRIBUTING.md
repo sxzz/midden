@@ -31,9 +31,9 @@ Provider 必须声明支持的 public/private，并在结果中返回实际可�
 
 ## Telegram 命令
 
-命令在 `internal/app/commands.go` 的 `channelCommands` 中注册。每项包含名称、描述、参数说明、参数校验、是否接受按钮回调及处理函数。
+命令定义在 `internal/tgchannel/event.go`，文字、按钮和媒体展示在 `internal/tgchannel/`。该包只使用 `channelapi` 协议、通用收藏类型和 Telegram SDK，不引入数据库、对象存储或 Adapter 客户端。业务动作在 core 的 `internal/app/channel_actions.go` 实现。
 
-命令路由、`/help`、回调校验和 Telegram 命令菜单均读取这份注册表。新增命令时实现处理函数并注册，无需另行修改菜单。启动时核心调用 Telegram SDK 的 `setMyCommands` 同步菜单。
+独立 `cmd/telegram` 启动时同步命令菜单。内部 HTTP 接口与公网 API 使用不同监听端口；协议测试用 `httptest` 模拟 Telegram，不需要真实 Bot。共享数据库集成测试串行运行各 Go 包，避免另一个包的 River worker 消费当前测试的任务。
 
 按钮数据只指定动作与资源 ID。处理函数必须使用渠道身份解析出的租户上下文查询资源。
 
@@ -67,6 +67,7 @@ Adapter 契约见 [架构文档](docs/architecture.md#adapter-协议与能力发
 
 ```sh
 ./scripts/dev.sh          # Go 核心：增量编译、执行迁移、重启 core
+./scripts/dev.sh telegram # 显式启动／更新 Telegram channel
 ./scripts/dev.sh adapter  # TS Adapter：缓存构建、仅重启 adapter
 ./scripts/dev.sh all      # 更新两者
 ```
@@ -89,7 +90,7 @@ docker compose -f compose.yaml -f compose.local.yaml -f compose.build.yaml build
 
 URL 规范化、平台对象标识、Cookie 解析、上游请求和媒体缓存键由 Adapter 实现。Go 核心负责通用存储、权限、调度和不透明凭据加密，不根据平台名称或 Provider ID 分支。Telegram 渠道可提供 X 专属交互，但必须检查 Adapter 能力；更换 Adapter 不应要求修改核心。新增平台功能应同时增加非 X fixture 的回归覆盖。
 
-## 归档网页开发
+## 收藏网页开发
 
 `web/` 是独立 pnpm 工作区，使用锁定版本的 Vue 3.6 RC Vapor、TypeScript 和 Vite。组件使用 `<script setup vapor lang="ts">`，不依赖 VDOM 互操作；平台展示逻辑放在前端展示器中，公共 API 客户端和数据类型不依赖 Telegram SDK。
 

@@ -1,8 +1,8 @@
 <script setup vapor lang="ts">
-import { shallowRef, useTemplateRef, nextTick } from "vue";
+import { shallowRef, useTemplateRef, nextTick, watch } from "vue";
 import { assetURL, type Asset } from "../api";
 import { mediaNotice } from "../presentation";
-defineProps<{ assets: Asset[] }>();
+const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>();
 const selected = shallowRef<Asset>();
 const dialog = useTemplateRef<HTMLDialogElement>("viewer");
 async function view(asset: Asset) {
@@ -11,6 +11,18 @@ async function view(asset: Asset) {
   dialog.value?.showModal();
 }
 const revealed = shallowRef<string[]>([]);
+watch(
+  () => props.showSensitive,
+  (show) => {
+    if (!show) {
+      revealed.value = [];
+      if (selected.value?.sensitive) {
+        dialog.value?.close();
+        selected.value = undefined;
+      }
+    }
+  },
+);
 function reveal(id: string) {
   revealed.value = [...revealed.value, id];
 }
@@ -24,14 +36,32 @@ function backdrop(event: MouseEvent) {
       <p v-if="asset.state !== 'ready'" class="notice">
         {{ mediaNotice(asset) }}
       </p>
-      <!-- Sensitive bytes are only requested once the reader asks for them. -->
+      <!-- Keep the preview visible under the blur until explicitly revealed. -->
       <button
-        v-else-if="asset.sensitive && !revealed.includes(asset.id)"
+        v-else-if="
+          asset.sensitive && !showSensitive && !revealed.includes(asset.id)
+        "
         type="button"
         class="sensitive"
         @click="reveal(asset.id)"
       >
-        敏感内容 · 点按显示
+        <img
+          v-if="asset.mime?.startsWith('image/')"
+          class="blurred"
+          :src="assetURL(asset)"
+          alt=""
+          loading="lazy"
+        />
+        <video
+          v-else-if="asset.mime?.startsWith('video/')"
+          class="blurred"
+          :src="assetURL(asset) + '#t=0.1'"
+          muted
+          playsinline
+          preload="metadata"
+          aria-hidden="true"
+        />
+        <span class="sensitive-label">敏感内容 · 点按显示</span>
       </button>
       <template v-else
         ><button
@@ -43,7 +73,7 @@ function backdrop(event: MouseEvent) {
         >
           <img
             :src="assetURL(asset)"
-            :alt="asset.alt_text || '归档图片'"
+            :alt="asset.alt_text || '收藏图片'"
             loading="lazy"
           />
         </button>
@@ -72,7 +102,7 @@ function backdrop(event: MouseEvent) {
     <img
       v-if="selected"
       :src="assetURL(selected)"
-      :alt="selected.alt_text || '归档图片'"
+      :alt="selected.alt_text || '收藏图片'"
     />
     <p v-if="selected?.alt_text" class="alt">{{ selected.alt_text }}</p>
   </dialog>
@@ -103,14 +133,31 @@ function backdrop(event: MouseEvent) {
   background: var(--fill);
 }
 .sensitive {
+  position: relative;
   display: grid;
   place-items: center;
   width: 100%;
   min-height: 150px;
+  overflow: hidden;
+  isolation: isolate;
   border-radius: 8px;
   background: var(--fill);
-  color: var(--subtle);
-  font-size: 15px;
+  font-size: 14px;
+}
+.sensitive .blurred {
+  grid-area: 1 / 1;
+  filter: blur(18px);
+  transform: scale(1.12);
+  pointer-events: none;
+}
+.sensitive-label {
+  z-index: 1;
+  grid-area: 1 / 1;
+  padding: 8px 12px;
+  margin: 12px;
+  border-radius: 20px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
 }
 .notice {
   margin: 0;

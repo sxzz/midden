@@ -118,7 +118,7 @@ func TestWebSessions(t *testing.T) {
 		t.Fatal(e)
 	}
 	s := &app.Service{DB: db, Config: app.Defaults()}
-	c := WebConfig{"https://archive.test/app/", "123:test", channel}
+	c := WebConfig{"https://collection.test/app/", "123:test", channel}
 	h := WebHandler(s, c)
 	call := func(method, path, body, origin string, cookie *http.Cookie) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -133,7 +133,7 @@ func TestWebSessions(t *testing.T) {
 		return w
 	}
 	raw, _ := json.Marshal(map[string]string{"init_data": signedData(c.Token, time.Now().Unix())})
-	w := call("POST", "/v1/auth/telegram", string(raw), "https://archive.test", nil)
+	w := call("POST", "/v1/auth/telegram", string(raw), "https://collection.test", nil)
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
@@ -148,7 +148,7 @@ func TestWebSessions(t *testing.T) {
 	if e != nil || identity.TenantID != session["tenant_id"] {
 		t.Fatal(identity, e)
 	}
-	for _, path := range []string{"/v1/session", "/v1/archives?q=中文", "/v1/usage"} {
+	for _, path := range []string{"/v1/session", "/v1/collections?q=中文", "/v1/usage"} {
 		w = call("GET", path, "", "", ck)
 		if w.Code != 200 {
 			t.Fatal(path, w.Code, w.Body.String())
@@ -168,7 +168,7 @@ func TestWebSessions(t *testing.T) {
 	if w.Code != 403 {
 		t.Fatal(w.Code)
 	}
-	w = call("DELETE", "/v1/session", "", "https://archive.test", ck)
+	w = call("DELETE", "/v1/session", "", "https://collection.test", ck)
 	if w.Code != 204 {
 		t.Fatal(w.Code, w.Body.String())
 	}

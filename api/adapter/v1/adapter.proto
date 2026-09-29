@@ -106,7 +106,7 @@ message SourceResponse {
 }
 message RelatedTarget {
   string url = 1;
-  uint32 refresh_after_seconds = 2; // Zero reuses any existing archive; positive refreshes stale data.
+  uint32 refresh_after_seconds = 2; // Zero reuses any existing collection; positive refreshes stale data.
 }
 
 message FetchResponse {

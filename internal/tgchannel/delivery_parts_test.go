@@ -1,4 +1,4 @@
-package app
+package tgchannel
 
 import (
 	"strings"
@@ -59,8 +59,8 @@ func TestOversizeVideoDelivery(t *testing.T) {
 	}
 }
 
-func TestArchiveMediaDescription(t *testing.T) {
-	text := archiveMessage(domain.Archive{ID: "archive", Assets: []domain.Asset{{State: "ready", MIME: "video/mp4", AltText: "示例视频", Position: 0}}}, "complete")
+func TestCollectionMediaDescription(t *testing.T) {
+	text := collectionMessage(domain.Collection{ID: "collection", Assets: []domain.Asset{{State: "ready", MIME: "video/mp4", AltText: "示例视频", Position: 0}}}, "complete")
 	if !strings.Contains(text, "媒体 1 描述：示例视频") {
 		t.Fatal(text)
 	}
@@ -77,19 +77,19 @@ func TestSensitiveDocumentDelivery(t *testing.T) {
 	}
 }
 
-func TestArchiveEntitiesSurviveCaptionAndTextSplits(t *testing.T) {
+func TestCollectionEntitiesSurviveCaptionAndTextSplits(t *testing.T) {
 	for _, body := range []string{"", " \n ", strings.Repeat("😀正文\n", 1800)} {
 		for _, media := range []int{0, 1, 2} {
-			a := domain.Archive{ID: "archive-id", AuthorName: "😀作者", Text: body, Graph: &domain.EntityGraph{
+			a := domain.Collection{ID: "collection-id", AuthorName: "😀作者", Text: body, Graph: &domain.EntityGraph{
 				Root: "post", Entities: []domain.Entity{{Key: "author", Type: "x.profile", Data: []byte(`{"username":"fixture"}`)}},
 				Relations: []domain.EntityRelation{{Source: "post", Target: "author", Type: "authored_by"}},
 			}}
 			for i := 0; i < media; i++ {
 				a.Assets = append(a.Assets, domain.Asset{State: "ready"})
 			}
-			text := archiveMessage(a, "complete")
+			text := collectionMessage(a, "complete")
 			parts := deliveryParts(text, a.Assets)
-			formatDeliveryParts(parts, archiveMessageEntities(a))
+			formatDeliveryParts(parts, collectionMessageEntities(a))
 			var quoted, author, code string
 			for _, part := range parts {
 				units := utf16.Encode([]rune(part.text))

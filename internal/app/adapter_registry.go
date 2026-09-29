@@ -119,7 +119,7 @@ func (r *AdapterRegistry) Refresh(ctx context.Context) error {
 func (s *Service) CaptureAvailable(ctx context.Context, tenant, id string) (bool, error) {
 	var adapterID string
 	e := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT adapter_id FROM tenant_archives WHERE archive_id=$1`, id).Scan(&adapterID)
+		return tx.QueryRow(ctx, `SELECT adapter_id FROM tenant_collections WHERE collection_id=$1`, id).Scan(&adapterID)
 	})
 	if e != nil {
 		return false, e

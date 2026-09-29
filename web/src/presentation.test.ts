@@ -1,12 +1,12 @@
 import { it, expect } from "vitest";
 import {
-  groupArchives,
+  groupCollections,
   mediaSummary,
   present,
   shortDate,
   warningList,
 } from "./presentation";
-import { safeURL, type Archive } from "./api";
+import { safeURL, type Collection } from "./api";
 it("does not expose executable original URLs", () => {
   expect(safeURL("javascript:alert(1)")).toBeUndefined();
   expect(safeURL("https://example.test/post")).toBe(
@@ -16,17 +16,17 @@ it("does not expose executable original URLs", () => {
 it("uses the revision profile snapshot", () => {
   const a = {
     text: "text",
-    author_name: "Archived name",
+    author_name: "Saved name",
     graph: {
       root: "p",
       relations: [{ source: "p", target: "u", type: "authored_by" }],
       entities: [
         { key: "p", type: "x.post", data: {} },
-        { key: "u", type: "x.profile", data: { username: "archived_handle" } },
+        { key: "u", type: "x.profile", data: { username: "saved_handle" } },
       ],
     },
-  } as Archive;
-  expect(present(a).handle).toBe("archived_handle");
+  } as Collection;
+  expect(present(a).handle).toBe("saved_handle");
 });
 it("buckets the collection by when it was saved", () => {
   const now = new Date(2026, 8, 29, 12, 0);
@@ -34,8 +34,8 @@ it("buckets the collection by when it was saved", () => {
     ({
       id: `${y}-${m}-${d}`,
       saved_at: new Date(y, m, d, 9).toISOString(),
-    }) as Archive;
-  const groups = groupArchives(
+    }) as Collection;
+  const groups = groupCollections(
     [at(2026, 8, 29), at(2026, 8, 28), at(2026, 8, 12), at(2025, 10, 3)],
     now,
   );

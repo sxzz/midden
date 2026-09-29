@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,9 +14,14 @@ import (
 
 	tg "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
-	"monitor/internal/blob"
 	"monitor/internal/domain"
 )
+
+// MediaSource supplies authorized bytes; the Telegram transport knows nothing
+// about databases, object-store credentials, or where those bytes are stored.
+type MediaSource interface {
+	Get(context.Context, string) (io.ReadCloser, error)
+}
 
 type Client struct {
 	replyTo  int64
@@ -28,7 +34,7 @@ type Client struct {
 	Token    string
 	Base     string
 	HTTP     *http.Client
-	Blobs    blob.Storage
+	Blobs    MediaSource
 }
 type APIError struct {
 	Code        int
@@ -218,7 +224,7 @@ func (c *Client) WithReplyTo(messageID int64) *Client {
 	return &copy
 }
 
-// WithCode formats only the specified literal, leaving archived text untouched.
+// WithCode formats only the specified literal, leaving saved text untouched.
 func (c *Client) WithCode(text string) *Client {
 	copy := *c
 	copy.codeText = text
@@ -330,7 +336,7 @@ func (c *Client) uploadAttempt(ctx context.Context, chat string, a domain.Asset,
 		if errors.Is(e, errVideoMetadata) {
 			return 0, errVideoMetadata
 		}
-		return 0, fmt.Errorf("archived media unavailable")
+		return 0, fmt.Errorf("saved media unavailable")
 	}
 	defer p.close()
 	var m tg.Message
@@ -387,7 +393,7 @@ func (c *Client) albumAttempt(ctx context.Context, chat string, assets []domain.
 			if errors.Is(e, errVideoMetadata) {
 				return 0, errVideoMetadata
 			}
-			return 0, fmt.Errorf("archived media unavailable")
+			return 0, fmt.Errorf("saved media unavailable")
 		}
 		prepared = append(prepared, p)
 	}
@@ -565,7 +571,7 @@ func SplitCaption(text string) (string, string) {
 func (c *Client) ConfigureWebMenu(ctx context.Context, address string) error {
 	menu := map[string]any{"type": "commands"}
 	if address != "" {
-		menu = map[string]any{"type": "web_app", "text": "打开归档库", "web_app": map[string]string{"url": address}}
+		menu = map[string]any{"type": "web_app", "text": "打开收藏库", "web_app": map[string]string{"url": address}}
 	}
 	raw, e := json.Marshal(menu)
 	if e != nil {

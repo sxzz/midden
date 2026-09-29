@@ -1,7 +1,7 @@
 import { shallowRef, onUnmounted } from "vue";
-import { api, errorText, type Archive, type Page } from "../api";
+import { api, errorText, type Collection, type Page } from "../api";
 export function useCollection() {
-  const items = shallowRef<Archive[]>([]),
+  const items = shallowRef<Collection[]>([]),
     next = shallowRef(""),
     loading = shallowRef(false),
     error = shallowRef("");
@@ -23,7 +23,7 @@ export function useCollection() {
     q.set("q", q.get("q") || "");
     if (append && next.value) q.set("cursor", next.value);
     try {
-      const p = await api<Page<Archive>>("/archives?" + q, {
+      const p = await api<Page<Collection>>("/collections?" + q, {
         signal: controller.signal,
       });
       if (version !== generation) return;

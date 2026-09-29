@@ -278,7 +278,7 @@ func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) 
 		var alreadyCounted bool
 		e = tx.QueryRow(ctx, `SELECT EXISTS(
           SELECT FROM assets a JOIN revisions r ON r.capture_id=a.capture_id
-          JOIN tenant_archives ta ON ta.archive_id=r.archive_id JOIN blobs b ON b.id=a.blob_id WHERE b.hash=$1
+          JOIN tenant_collections ta ON ta.collection_id=r.collection_id JOIN blobs b ON b.id=a.blob_id WHERE b.hash=$1
           UNION ALL SELECT FROM assets a JOIN blobs b ON b.id=a.blob_id WHERE a.capture_id=$2 AND b.hash=$1 AND a.state='ready'
         )`, digest, cid).Scan(&alreadyCounted)
 		if e != nil {

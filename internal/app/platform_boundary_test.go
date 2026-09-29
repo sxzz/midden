@@ -3,8 +3,11 @@ package app
 import (
 	"context"
 	"encoding/base64"
+	"go/parser"
+	"go/token"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -72,7 +75,7 @@ func TestIndependentPlatformCapture(t *testing.T) {
 		if fake.last.Platform != host || fake.last.Kind != "entry" || fake.last.ObjectScope != "notebook" || fake.last.ExternalId != "item-A" || fake.last.ProviderId != "member-reader" || string(fake.last.Credential.Data) != "opaque notes session" {
 			t.Fatal("adapter identity or opaque credentials lost")
 		}
-		a, e := s.CaptureArchive(ctx, tenant, j.ID)
+		a, e := s.CaptureCollection(ctx, tenant, j.ID)
 		must(t, e)
 		if i == 0 {
 			first = a.ID
@@ -80,7 +83,7 @@ func TestIndependentPlatformCapture(t *testing.T) {
 			t.Fatal("platform identities collided")
 		}
 	}
-	added, e := s.SavePublicArchive(ctx, other, first)
+	added, e := s.SavePublicCollection(ctx, other, first)
 	must(t, e)
 	if !added {
 		t.Fatal("shared reference missing")
@@ -98,23 +101,38 @@ func TestIndependentPlatformCapture(t *testing.T) {
 	must(t, e)
 	must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: j.ID}))
 	must(t, s.finalize(ctx, tenant, j.ID))
-	a, e := s.CaptureArchive(ctx, tenant, j.ID)
+	a, e := s.CaptureCollection(ctx, tenant, j.ID)
 	must(t, e)
-	if _, e = s.Archive(ctx, other, a.ID); e == nil {
-		t.Fatal("private archive leaked")
+	if _, e = s.Collection(ctx, other, a.ID); e == nil {
+		t.Fatal("private collection leaked")
 	}
 }
 
 // Production core never interprets bundled platform protocols. Channel files
 // may provide platform-specific UX; SQL migrations retain deployed history.
 func TestCorePlatformBoundary(t *testing.T) {
-	files := []string{"service.go", "worker.go", "related.go", "capture_scope.go", "discovery.go", "connections.go", "account_dialog.go", "account_add.go", "telegram_accounts.go", "commands.go", "download.go", "media_cache.go", "entities.go", "sources.go", "../domain/domain.go", "../credentials/vault.go", "../../api/adapter/v1/adapter.proto"}
+	files := []string{"service.go", "worker.go", "related.go", "capture_scope.go", "discovery.go", "connections.go", "channel_actions.go", "channel_api.go", "channel_legacy.go", "download.go", "media_cache.go", "entities.go", "sources.go", "../domain/domain.go", "../credentials/vault.go", "../../api/adapter/v1/adapter.proto"}
 	for _, file := range files {
 		data, e := os.ReadFile(file)
 		must(t, e)
 		for _, word := range []string{"fxtwitter", "x-session", "x.com", "twitter.com", "auth_token", "csrf_token", "SessionCredential", `"x"`, `"X"`, "X 帖子", "X 账号"} {
 			if strings.Contains(string(data), word) {
 				t.Errorf("%s contains platform-specific %s", file, word)
+			}
+		}
+	}
+}
+
+// The application layer must not regain a dependency on a channel transport.
+func TestCoreChannelBoundary(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	must(t, err)
+	for _, file := range files {
+		f, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.ImportsOnly)
+		must(t, err)
+		for _, imp := range f.Imports {
+			if imp.Path.Value == `"monitor/internal/telegram"` || imp.Path.Value == `"monitor/internal/tgchannel"` {
+				t.Errorf("%s imports channel transport %s", file, imp.Path.Value)
 			}
 		}
 	}

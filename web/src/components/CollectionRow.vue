@@ -1,26 +1,26 @@
 <script setup vapor lang="ts">
 import { computed } from "vue";
-import { assetURL, type Archive } from "../api";
+import { assetURL, type Collection } from "../api";
 import { excerpt, mediaSummary, present, shortDate } from "../presentation";
 import MediaThumbs from "./MediaThumbs.vue";
-const props = defineProps<{ archive: Archive }>();
+const props = defineProps<{ collection: Collection; showSensitive?: boolean }>();
 defineEmits<{ open: [id: string] }>();
-const view = computed(() => present(props.archive));
+const view = computed(() => present(props.collection));
 const preview = computed(() => excerpt(view.value.body));
 const meta = computed(() =>
   [
     view.value.handle && "@" + view.value.handle,
-    props.archive.visibility === "private" && "私密",
-    mediaSummary(props.archive.assets),
+    props.collection.visibility === "private" && "私密",
+    mediaSummary(props.collection.assets),
   ]
     .filter(Boolean)
     .join(" · "),
 );
 </script>
 <template>
-  <button type="button" class="row" @click="$emit('open', archive.id)">
+  <button type="button" class="row" @click="$emit('open', collection.id)">
     <img
-      v-if="view.avatar"
+      v-if="view.avatar && (!view.avatar.sensitive || showSensitive)"
       class="avatar"
       :src="assetURL(view.avatar)"
       alt=""
@@ -32,12 +32,15 @@ const meta = computed(() =>
       <span class="head">
         <strong class="name">{{ view.name }}</strong
         ><span class="when">{{
-          shortDate(archive.saved_at || archive.observed_at)
+          shortDate(collection.saved_at || collection.observed_at)
         }}</span>
       </span>
       <span class="preview">{{ preview }}</span>
       <span v-if="meta" class="meta">{{ meta }}</span>
-      <MediaThumbs :assets="archive.assets || []" />
+      <MediaThumbs
+        :assets="collection.assets || []"
+        :show-sensitive="showSensitive"
+      />
     </span>
   </button>
 </template>

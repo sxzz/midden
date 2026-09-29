@@ -1,17 +1,18 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch, nextTick } from "vue";
-import { api, type Archive, type Usage } from "../api";
+import { api, type Collection, type Usage } from "../api";
 import { backButton, host } from "../host";
 import { useRoute, navigate } from "../composables/useRoute";
 import { useCollection } from "../composables/useCollection";
 import CollectionView from "./CollectionView.vue";
-import ArchiveDetail from "./ArchiveDetail.vue";
+import CollectionDetail from "./CollectionDetail.vue";
+const showSensitive = shallowRef(false);
 const route = useRoute(),
   collection = useCollection(),
   usage = shallowRef<Usage>();
 const { items, next, loading, error } = collection;
 const id = computed(
-  () => /^\/archive\/([a-f0-9-]+)$/.exec(route.value)?.[1] || "",
+  () => /^\/collection\/([a-f0-9-]+)$/.exec(route.value)?.[1] || "",
 );
 const query = computed(() =>
   route.value.startsWith("/?") ? route.value.slice(2) : "",
@@ -70,11 +71,11 @@ async function loadUsage() {
 loadUsage();
 function open(id: string) {
   scroll = window.scrollY;
-  navigate("/archive/" + id);
+  navigate("/collection/" + id);
 }
-function updated(archive: Archive) {
+function updated(collection: Collection) {
   items.value = items.value.map((a) =>
-    a.id === id.value ? { ...archive, saved_at: a.saved_at } : a,
+    a.id === id.value ? { ...collection, saved_at: a.saved_at } : a,
   );
   loadUsage();
 }
@@ -101,10 +102,35 @@ function search(q: string) {
         <span class="chevron" aria-hidden="true">‹</span>返回
       </button>
       <h1>{{ id ? "收藏详情" : "我的收藏" }}</h1>
+      <button
+        type="button"
+        class="sensitive-toggle"
+        aria-label="显示敏感内容"
+        :aria-pressed="showSensitive"
+        :title="showSensitive ? '隐藏敏感内容' : '显示敏感内容'"
+        @click="showSensitive = !showSensitive"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="22"
+          height="22"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+          <circle cx="12" cy="12" r="3" />
+          <path v-if="!showSensitive" d="m3 3 18 18" />
+        </svg>
+      </button>
     </header>
     <CollectionView
       v-if="!id"
       :items="items"
+      :show-sensitive="showSensitive"
       :query="query"
       :loading="loading"
       :error="error"
@@ -115,11 +141,12 @@ function search(q: string) {
       @more="collection.more()"
       @retry="collection.load(apiQuery(query))"
     />
-    <ArchiveDetail
+    <CollectionDetail
       v-else
       :key="id"
       :id="id"
       :saved-at="savedAt"
+      :show-sensitive="showSensitive"
       @deleted="deleted"
       @updated="updated"
     />
@@ -139,6 +166,25 @@ function search(q: string) {
   gap: 4px;
   min-height: 48px;
   padding: 10px calc(var(--gutter) + 4px) 2px;
+}
+.sensitive-toggle {
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--subtle);
+}
+.sensitive-toggle[aria-pressed="true"] {
+  color: var(--link);
+}
+.sensitive-toggle:active {
+  background: var(--fill);
+}
+.sensitive-toggle:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
 }
 .back {
   display: flex;

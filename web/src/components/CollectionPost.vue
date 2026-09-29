@@ -1,17 +1,17 @@
 <script setup vapor lang="ts">
 import { computed } from "vue";
-import { assetURL, type Archive } from "../api";
+import { assetURL, type Collection } from "../api";
 import { present, shortDate, warningList } from "../presentation";
 import MediaGallery from "./MediaGallery.vue";
-const props = defineProps<{ archive: Archive }>();
-const view = computed(() => present(props.archive));
-const warnings = computed(() => warningList(props.archive.warnings));
+const props = defineProps<{ collection: Collection; showSensitive?: boolean }>();
+const view = computed(() => present(props.collection));
+const warnings = computed(() => warningList(props.collection.warnings));
 </script>
 <template>
   <article class="post">
     <header class="author">
       <img
-        v-if="view.avatar"
+        v-if="view.avatar && (!view.avatar.sensitive || showSensitive)"
         class="avatar"
         :src="assetURL(view.avatar)"
         alt=""
@@ -22,13 +22,16 @@ const warnings = computed(() => warningList(props.archive.warnings));
         <strong class="name">{{ view.name }}</strong>
         <small class="meta"
           ><span v-if="view.handle">@{{ view.handle }} · </span
-          >{{ shortDate(archive.published_at) || view.kind
-          }}<span v-if="archive.visibility === 'private'"> · 私密</span></small
+          >{{ shortDate(collection.published_at) || view.kind
+          }}<span v-if="collection.visibility === 'private'"> · 私密</span></small
         >
       </div>
     </header>
     <p class="body">{{ view.body }}</p>
-    <MediaGallery :assets="archive.assets || []" />
+    <MediaGallery
+      :assets="collection.assets || []"
+      :show-sensitive="showSensitive"
+    />
     <p v-for="warning in warnings" :key="warning" class="warning">
       {{ warning }}
     </p>

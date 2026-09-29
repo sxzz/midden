@@ -23,3 +23,9 @@ services:
     build:
       context: .
       dockerfile: adapters/x/Dockerfile
+  telegram:
+    image: midden-core:dev
+    build:
+      context: .
+      args:
+        VCS_REF: ${MIDDEN_BUILD_REVISION:-}

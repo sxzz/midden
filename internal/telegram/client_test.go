@@ -67,7 +67,7 @@ func TestAlbumFallback(t *testing.T) {
 		if len(media) != 2 || r.FormValue("chat_id") != "-42" || r.FormValue("reply_to_message_id") != "123" {
 			t.Error("wrong album")
 		}
-		if media[0]["caption"] != "archive-id\n正文" || media[1]["caption"] != nil || media[0]["caption_entities"] == nil {
+		if media[0]["caption"] != "collection-id\n正文" || media[1]["caption"] != nil || media[0]["caption_entities"] == nil {
 			t.Error("caption or code entity lost", media)
 		}
 		if len(r.MultipartForm.File) != 2 {
@@ -87,7 +87,7 @@ func TestAlbumFallback(t *testing.T) {
 	}))
 	defer h.Close()
 	c := Client{Token: "test", Base: h.URL, HTTP: h.Client(), Blobs: testBlob{}}
-	id, e := c.WithReplyTo(123).WithCode("archive-id").Media(context.Background(), "-42", []domain.Asset{{Key: "one", MIME: "image/png"}, {Key: "two", MIME: "image/png"}}, "archive-id\n正文")
+	id, e := c.WithReplyTo(123).WithCode("collection-id").Media(context.Background(), "-42", []domain.Asset{{Key: "one", MIME: "image/png"}, {Key: "two", MIME: "image/png"}}, "collection-id\n正文")
 	if e != nil || id != 7 || calls != 2 {
 		t.Fatal(id, e, calls)
 	}
@@ -123,7 +123,7 @@ func TestEditUnchangedDoesNotSendDuplicate(t *testing.T) {
 	}))
 	defer h.Close()
 	c := Client{Token: "test", Base: h.URL, HTTP: h.Client()}
-	id, err := c.SendInteractive(context.Background(), "42", "done", 12, Keyboard{{{Text: "归档列表", Data: "/list"}}})
+	id, err := c.SendInteractive(context.Background(), "42", "done", 12, Keyboard{{{Text: "收藏列表", Data: "/list"}}})
 	if err != nil || id != 12 || calls != 1 {
 		t.Fatal(id, err, calls)
 	}
@@ -150,7 +150,7 @@ func TestEmptyKeyboardUsesArray(t *testing.T) {
 			}))
 			defer h.Close()
 			c := Client{Token: "test", Base: h.URL, HTTP: h.Client()}
-			if _, err := c.SendInteractive(context.Background(), "42", "暂无归档。", previous, nil); err != nil {
+			if _, err := c.SendInteractive(context.Background(), "42", "暂无收藏。", previous, nil); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -233,7 +233,7 @@ func TestCodeEntityPreservesLiteralContent(t *testing.T) {
 					t.Errorf("incorrect code entity: %+v", entities)
 				}
 				if r.Form.Get("text") != text || r.Form.Get("parse_mode") != "" {
-					t.Error("archived text changed or interpreted as markup")
+					t.Error("saved text changed or interpreted as markup")
 				}
 				w.Write([]byte(`{"ok":true,"result":{"message_id":12}}`))
 			}))

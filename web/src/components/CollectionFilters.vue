@@ -213,6 +213,7 @@ function clear() {
 .option select,
 .option input {
   min-height: 36px;
+  min-width: 0;
   max-width: 60%;
   border: 0;
   background: none;
@@ -224,6 +225,9 @@ function clear() {
   position: relative;
 }
 .apply {
+  display: block;
+  padding: 11px var(--inset);
+  text-align: left;
   width: 100%;
   min-height: 48px;
   color: var(--link);

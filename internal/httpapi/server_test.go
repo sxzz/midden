@@ -68,7 +68,7 @@ func TestRESTIsolation(t *testing.T) {
 	}
 	var job domain.Job
 	json.Unmarshal(w.Body.Bytes(), &job)
-	for _, path := range []string{"/v1/jobs/" + job.ID, "/v1/archives/" + job.ArchiveID} {
+	for _, path := range []string{"/v1/jobs/" + job.ID, "/v1/collections/" + job.CollectionID} {
 		if w = call("GET", path, "", b); w.Code != 404 {
 			t.Fatal(w.Code, w.Body.String())
 		}
@@ -85,13 +85,13 @@ func TestRESTIsolation(t *testing.T) {
 	if w = call("GET", "/v1/usage", "", "wrong"); w.Code != http.StatusUnauthorized {
 		t.Fatal(w.Code)
 	}
-	if w = call("DELETE", "/v1/archives/"+job.ArchiveID, "", b); w.Code != 404 {
+	if w = call("DELETE", "/v1/collections/"+job.CollectionID, "", b); w.Code != 404 {
 		t.Fatal("foreign collection deletion", w.Code)
 	}
-	if w = call("DELETE", "/v1/archives/"+job.ArchiveID, "", a); w.Code != 204 {
+	if w = call("DELETE", "/v1/collections/"+job.CollectionID, "", a); w.Code != 204 {
 		t.Fatal("collection deletion", w.Code, w.Body.String())
 	}
-	if w = call("DELETE", "/v1/archives/"+job.ArchiveID, "", a); w.Code != 404 {
+	if w = call("DELETE", "/v1/collections/"+job.CollectionID, "", a); w.Code != 404 {
 		t.Fatal("repeated deletion", w.Code)
 	}
 }

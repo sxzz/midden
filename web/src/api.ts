@@ -13,7 +13,7 @@ export interface Entity {
   data: Record<string, unknown>;
   assets?: Asset[];
 }
-export interface Archive {
+export interface Collection {
   id: string;
   url: string;
   text: string;
@@ -25,7 +25,7 @@ export interface Archive {
   visibility: string;
   revision_id: string;
   assets: Asset[];
-  warnings?: string[];
+  warnings?: string[] | null;
   graph?: {
     root: string;
     entities: Entity[];
@@ -42,7 +42,7 @@ export interface Revision {
 }
 export interface Job {
   id: string;
-  archive_id: string;
+  collection_id: string;
   state: string;
   error?: string;
 }
@@ -79,10 +79,10 @@ export async function api<T>(
 }
 export function errorText(e: unknown) {
   if (e instanceof APIError) {
-    if (e.status === 400 && e.message === "invalid archive filters")
+    if (e.status === 400 && e.message === "invalid collection filters")
       return "筛选条件无效，请检查关键词和日期范围。";
     if (e.status === 401) return "会话已失效，请关闭后从 Telegram 重新打开。";
-    if (e.status === 404) return "归档不存在或已从收藏中删除。";
+    if (e.status === 404) return "收藏不存在或已从收藏中删除。";
     if (e.status === 409) return "存储空间不足或操作冲突，请检查用量后重试。";
     if (e.status === 429) return "操作太频繁，请稍后重试。";
     if (e.status === 503) return "采集服务暂时不可用，请稍后重试。";

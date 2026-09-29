@@ -73,7 +73,7 @@ type CaptureInput struct {
 
 type Job struct {
 	ID           string    `json:"id"`
-	ArchiveID    string    `json:"archive_id,omitempty"`
+	CollectionID string    `json:"collection_id,omitempty"`
 	State        string    `json:"state"`
 	Error        string    `json:"error,omitempty"`
 	ProviderID   string    `json:"provider_id"`
@@ -130,7 +130,7 @@ type SourceResponse struct {
 	CreatedAt      time.Time `json:"created_at"`
 	Body           []byte    `json:"-"`
 }
-type Archive struct {
+type Collection struct {
 	AuthorName     string       `json:"author_name,omitempty"`
 	PublishedAt    string       `json:"published_at,omitempty"`
 	Summary        string       `json:"summary,omitempty"`
@@ -153,9 +153,9 @@ type Archive struct {
 }
 
 type Page struct {
-	Items          []Archive `json:"items"`
-	NextCursor     string    `json:"next_cursor,omitempty"`
-	PreviousCursor string    `json:"previous_cursor,omitempty"`
+	Items          []Collection `json:"items"`
+	NextCursor     string       `json:"next_cursor,omitempty"`
+	PreviousCursor string       `json:"previous_cursor,omitempty"`
 }
 
 type Usage struct {
@@ -165,7 +165,7 @@ type Usage struct {
 	Limit     int64 `json:"limit_bytes"`
 }
 
-// ChannelMediaCache stores opaque delivery references independently of archives.
+// ChannelMediaCache stores opaque delivery references independently of collections.
 type ChannelMediaCache interface {
 	GetChannelMedia(context.Context, string, string, string, string) (string, error)
 	PutChannelMedia(context.Context, string, string, string, string, string) error

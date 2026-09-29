@@ -13,3 +13,7 @@ services:
       - ./.local/dev/bin:/usr/local/bin:ro
   adapter:
     image: midden-adapter:dev
+  telegram:
+    image: midden-core:dev
+    volumes:
+      - ./.local/dev/bin:/usr/local/bin:ro

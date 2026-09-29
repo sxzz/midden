@@ -24,10 +24,10 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	pb "monitor/api/adapter/v1"
+	"monitor/internal/channelapi"
 	"monitor/internal/credentials"
 	"monitor/internal/domain"
 	"monitor/internal/store"
-	"monitor/internal/telegram"
 )
 
 func TestAccountIsolationAndPublicMerge(t *testing.T) {
@@ -60,10 +60,10 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		fmt.Fprintf(&batchText, "https://x.com/i/status/%d ", 9900000000000+i)
 	}
-	batch := &commandRequest{Task: store.Task{Tenant: batchTenant, ID: batchTenant}, Message: &telegram.Message{Text: batchText.String()}}
-	must(t, batchService.submitMessageURLs(ctx, batch, batch.Message))
-	if batch.Text != "" {
-		t.Fatal(batch.Text)
+	batch, _, err := channelTestEvent(t, &batchService, batchTenant, channelapi.Event{Command: "save", URLs: strings.Fields(batchText.String())})
+	must(t, err)
+	if batch.Count != 200 || len(batch.Errors) > 0 {
+		t.Fatal(batch)
 	}
 	var submitted int
 	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM submissions WHERE tenant_id=$1`, batchTenant).Scan(&submitted))
@@ -95,11 +95,12 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 		if username != "fixture" {
 			t.Fatal("account check did not refresh handle")
 		}
-		r := &commandRequest{Task: store.Task{Tenant: tenants[i]}}
-		must(t, s.commandAccount(ctx, r))
-		if !strings.Contains(r.Buttons[1][0].Text, "@fixture") {
-			t.Fatal("missing API handle in selector")
+		list, err := s.channelAccounts(ctx, tenants[i])
+		must(t, err)
+		if len(list.Accounts) != 1 || list.Accounts[0].Username != "fixture" {
+			t.Fatal("missing API handle")
 		}
+
 	}
 	if _, e = s.Submit(ctx, tenants[1], domain.CaptureInput{URL: "https://x.com/a/status/900111", ConnectionID: ids[0]}); !errors.Is(e, ErrConnection) {
 		t.Fatalf("cross-tenant connection: %v", e)
@@ -129,36 +130,36 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	}
 	public := complete(tenants[0], domain.CaptureInput{URL: "https://x.com/a/status/900111"})
 	personal := complete(tenants[1], domain.CaptureInput{URL: "https://x.com/a/status/900111", ConnectionID: ids[1]})
-	if public.ArchiveID != personal.ArchiveID {
+	if public.CollectionID != personal.CollectionID {
 		t.Fatal("public result not merged")
 	}
 	var count int
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM revisions WHERE archive_id=$1`, public.ArchiveID).Scan(&count))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM revisions WHERE collection_id=$1`, public.CollectionID).Scan(&count))
 	if count != 1 {
 		t.Fatal("unchanged account result added version", count)
 	}
-	refresh, e := s.Submit(ctx, tenants[0], domain.CaptureInput{RefreshID: public.ArchiveID})
+	refresh, e := s.Submit(ctx, tenants[0], domain.CaptureInput{RefreshID: public.CollectionID})
 	must(t, e)
 	if refresh.ConnectionID != "" || refresh.ProviderID != "fxtwitter" {
 		t.Fatal("borrowed another tenant's connection")
 	}
 	must(t, s.capture(ctx, store.Task{Tenant: tenants[0], ID: refresh.ID}))
 	must(t, s.finalize(ctx, tenants[0], refresh.ID))
-	refreshed := complete(tenants[1], domain.CaptureInput{RefreshID: personal.ArchiveID})
+	refreshed := complete(tenants[1], domain.CaptureInput{RefreshID: personal.CollectionID})
 	if refreshed.ConnectionID != ids[1] {
 		t.Fatal("refresh lost account selection")
 	}
 	fake.public = false
 	fake.text = "private content"
 	fake.urls = []string{mediaServer.URL}
-	private := complete(tenants[1], domain.CaptureInput{RefreshID: personal.ArchiveID})
-	if private.ArchiveID == public.ArchiveID {
+	private := complete(tenants[1], domain.CaptureInput{RefreshID: personal.CollectionID})
+	if private.CollectionID == public.CollectionID {
 		t.Fatal("visibility changed in place")
 	}
-	if _, e = s.Archive(ctx, tenants[0], private.ArchiveID); e == nil {
-		t.Fatal("private archive exposed")
+	if _, e = s.Collection(ctx, tenants[0], private.CollectionID); e == nil {
+		t.Fatal("private collection exposed")
 	}
-	original, e := s.Archive(ctx, tenants[0], public.ArchiveID)
+	original, e := s.Collection(ctx, tenants[0], public.CollectionID)
 	must(t, e)
 	if original.Text != "same content" {
 		t.Fatal("private refresh overwrote public content")
@@ -166,7 +167,7 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	second, e := s.ImportConnection(ctx, tenants[1], "", "second", &pb.Credential{Data: []byte("second-account")})
 	must(t, e)
 	another := complete(tenants[1], domain.CaptureInput{URL: "https://x.com/a/status/900111", ConnectionID: second})
-	if another.ArchiveID == private.ArchiveID {
+	if another.CollectionID == private.CollectionID {
 		t.Fatal("different connections merged private content")
 	}
 	var privateBlobs int
@@ -175,25 +176,25 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 		t.Fatal("private blobs were merged across connections", privateBlobs)
 	}
 	fake.public = true
-	restored := complete(tenants[1], domain.CaptureInput{RefreshID: private.ArchiveID})
-	if restored.ArchiveID != public.ArchiveID {
+	restored := complete(tenants[1], domain.CaptureInput{RefreshID: private.CollectionID})
+	if restored.CollectionID != public.CollectionID {
 		t.Fatal("public refresh did not merge content identity")
 	}
 	must(t, db.Tx(ctx, tenants[1], func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT count(*) FROM tenant_archives WHERE archive_id=$1`, private.ArchiveID).Scan(&count)
+		return tx.QueryRow(ctx, `SELECT count(*) FROM tenant_collections WHERE collection_id=$1`, private.CollectionID).Scan(&count)
 	}))
 	if count != 0 {
 		t.Fatal("old private reference survived public refresh")
 	}
-	// Refreshing public content must not re-save a completed private staging archive.
-	complete(tenants[1], domain.CaptureInput{RefreshID: restored.ArchiveID})
+	// Refreshing public content must not re-save a completed private staging collection.
+	complete(tenants[1], domain.CaptureInput{RefreshID: restored.CollectionID})
 	must(t, db.Tx(ctx, tenants[1], func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT count(*) FROM tenant_archives WHERE archive_id=$1`, private.ArchiveID).Scan(&count)
+		return tx.QueryRow(ctx, `SELECT count(*) FROM tenant_collections WHERE collection_id=$1`, private.CollectionID).Scan(&count)
 	}))
 	if count != 0 {
-		t.Fatal("public refresh resurrected old private archive")
+		t.Fatal("public refresh resurrected old private collection")
 	}
-	if _, e = s.Archive(ctx, tenants[1], another.ArchiveID); e != nil {
+	if _, e = s.Collection(ctx, tenants[1], another.CollectionID); e != nil {
 		t.Fatal("unrelated private scope lost")
 	}
 	fake.public = false
@@ -203,23 +204,22 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	must(t, s.capture(ctx, store.Task{Tenant: tenants[1], ID: pending.ID}))
 	var deletedCredential string
 	must(t, admin.Pool.QueryRow(ctx, `SELECT credential_ref FROM connections WHERE id=$1`, second).Scan(&deletedCredential))
-	deleteRequest := &commandRequest{Task: store.Task{Tenant: tenants[0]}, Argument: "confirm:" + second}
-	must(t, s.commandAccountDelete(ctx, deleteRequest))
-	if deleteRequest.Text != "账号不存在或无权限。" {
+	if _, err := channelTestAction(t, s, tenants[0], "account_delete", "confirm:"+second); err == nil {
 		t.Fatal("cross-tenant deletion allowed")
 	}
-	must(t, s.commandAccount(ctx, &commandRequest{Task: store.Task{Tenant: tenants[1]}, Argument: second}))
-	deleteRequest = &commandRequest{Task: store.Task{Tenant: tenants[1]}, Argument: second}
-	must(t, s.commandAccountDelete(ctx, deleteRequest))
-	if !strings.Contains(deleteRequest.Text, "删除采集账号") || !validCallback(deleteRequest.Buttons[0][0].Data) {
+	selectTestAccount(t, s, tenants[1], second)
+	confirmation, err := channelTestAction(t, s, tenants[1], "account_delete", second)
+	must(t, err)
+	if confirmation.Code != "confirm_account_delete" {
 		t.Fatal("missing delete confirmation")
 	}
 	if _, _, err := s.session(ctx, tenants[1], second); err != nil {
-		t.Fatal("confirmation revoked credentials early", err)
+		t.Fatal("early revocation", err)
 	}
-	deleteRequest.Argument = "confirm:" + second
-	must(t, s.commandAccountDelete(ctx, deleteRequest))
-	must(t, s.commandAccountDelete(ctx, deleteRequest))
+	for range 2 {
+		_, err := channelTestAction(t, s, tenants[1], "account_delete", "confirm:"+second)
+		must(t, err)
+	}
 	if selected, err := s.DefaultConnection(ctx, tenants[1]); err != nil || selected != "" {
 		t.Fatal("deleted default retained", err)
 	}
@@ -230,31 +230,27 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	if count != 0 {
 		t.Fatal("deleted credential retained")
 	}
-	menu := &commandRequest{Task: store.Task{Tenant: tenants[1]}}
-	must(t, s.commandAccount(ctx, menu))
-	for _, row := range menu.Buttons {
-		for _, b := range row {
-			if strings.Contains(b.Data, second) {
-				t.Fatal("deleted account remains listed")
-			}
+	menu, err := s.channelAccounts(ctx, tenants[1])
+	must(t, err)
+	for _, a := range menu.Accounts {
+		if a.ID == second {
+			t.Fatal("revoked account listed")
 		}
 	}
-	if _, err := s.Archive(ctx, tenants[1], another.ArchiveID); err != nil {
-		t.Fatal("deleting account removed saved archive", err)
+	if _, err := s.Collection(ctx, tenants[1], another.CollectionID); err != nil {
+		t.Fatal("deleting account removed saved collection", err)
 	}
 	if e = s.finalize(ctx, tenants[1], pending.ID); !errors.Is(e, ErrConnection) {
 		t.Fatal("revoked execution committed", e)
 	}
 	must(t, s.fail(ctx, store.Task{Tenant: tenants[1], ID: pending.ID, Type: "finalize"}, safeError(ErrConnection)))
-	req := &commandRequest{Task: store.Task{Tenant: tenants[1]}, Argument: ids[1]}
-	must(t, s.commandAccount(ctx, req))
+	selectTestAccount(t, s, tenants[1], ids[1])
 	selected, e := s.DefaultConnection(ctx, tenants[1])
 	must(t, e)
 	if selected != ids[1] {
 		t.Fatal("default not persisted")
 	}
-	req.Argument = "public"
-	must(t, s.commandAccount(ctx, req))
+	selectTestAccount(t, s, tenants[1], "public")
 	selected, e = s.DefaultConnection(ctx, tenants[1])
 	must(t, e)
 	if selected != "" {
@@ -308,7 +304,7 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	fake.public = true
 	removed, e := s.Submit(ctx, tenants[1], domain.CaptureInput{URL: "https://x.com/a/status/900115", ConnectionID: ids[1]})
 	must(t, e)
-	_, e = s.DeleteAllArchives(ctx, tenants[1], time.Now().Add(time.Second))
+	_, e = s.DeleteAllCollections(ctx, tenants[1], time.Now().Add(time.Second))
 	must(t, e)
 	must(t, s.capture(ctx, store.Task{Tenant: tenants[1], ID: removed.ID}))
 	must(t, s.finalize(ctx, tenants[1], removed.ID))

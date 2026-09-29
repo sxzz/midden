@@ -163,7 +163,7 @@ export interface SourceResponse {
 
 export interface RelatedTarget {
   url: string;
-  /** Zero reuses any existing archive; positive refreshes stale data. */
+  /** Zero reuses any existing collection; positive refreshes stale data. */
   refreshAfterSeconds: number;
 }
 

@@ -1,9 +1,10 @@
-package app
+package tgchannel
 
 import (
+	"unicode/utf16"
+
 	"monitor/internal/domain"
 	"monitor/internal/telegram"
-	"unicode/utf16"
 )
 
 type deliveryPart struct {
@@ -48,7 +49,7 @@ func deliveryParts(text string, assets []domain.Asset) []deliveryPart {
 }
 
 // Entity offsets use UTF-16 and must follow the exact caption/text split,
-// including when resuming a partially delivered archive.
+// including when resuming a partially delivered collection.
 func formatDeliveryParts(parts []deliveryPart, entities []telegram.Entity) {
 	offset := 0
 	for i := range parts {

@@ -36,13 +36,20 @@ export CORE_IMAGE="ghcr.io/sxzz/midden-core:sha-$(git rev-parse HEAD)"
 export ADAPTER_IMAGE="ghcr.io/sxzz/midden-adapter:sha-$(git rev-parse HEAD)"
 docker compose pull
 
-docker compose stop core
+telegram_running=false
+while IFS= read -r service; do
+	if [[ "$service" == telegram ]]; then telegram_running=true; fi
+done < <(docker compose ps --status running --services)
+docker compose stop telegram core
 docker compose exec -T postgres pg_dump -U postgres -d monitor -Fc >"$backup_dir/database.dump.partial"
 mv "$backup_dir/database.dump.partial" "$backup_dir/database.dump"
 git rev-parse HEAD >"$backup_dir/revision"
 echo "Database backup: $backup_dir/database.dump"
 docker compose run --rm --no-deps --pull never migrate
 docker compose up -d --no-deps --no-build --pull never adapter core
+if [[ "$telegram_running" == true ]]; then
+	docker compose --profile telegram up -d --no-deps --no-build --pull never telegram
+fi
 # Preserve immutable image choices for subsequent restarts and operator commands.
 printf 'CORE_IMAGE=%s\nADAPTER_IMAGE=%s\n' "$CORE_IMAGE" "$ADAPTER_IMAGE" >.local/deployed-images.env
 python3 - <<'PYTHON'

@@ -76,7 +76,7 @@ func TestImageUploadDedupAndImmutableCache(t *testing.T) {
 	}
 	fake.cacheKey = "x:avatar:synthetic-image-url"
 	refresh := func() {
-		job, err := s.Submit(ctx, tenants[0], domain.CaptureInput{RefreshID: jobs[0].ArchiveID})
+		job, err := s.Submit(ctx, tenants[0], domain.CaptureInput{RefreshID: jobs[0].CollectionID})
 		must(t, err)
 		must(t, s.capture(ctx, store.Task{Tenant: tenants[0], ID: job.ID}))
 		var id string

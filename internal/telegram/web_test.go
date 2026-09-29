@@ -36,19 +36,19 @@ func TestMiniAppEntrySerialization(t *testing.T) {
 		if e := json.Unmarshal([]byte(r.Form.Get("reply_markup")), &markup); e != nil {
 			t.Fatal(e)
 		}
-		if len(markup.Rows) != 1 || markup.Rows[0][0].WebApp == nil || markup.Rows[0][0].WebApp.URL != "https://archive.test/app/" {
+		if len(markup.Rows) != 1 || markup.Rows[0][0].WebApp == nil || markup.Rows[0][0].WebApp.URL != "https://collection.test/app/" {
 			t.Fatal(markup)
 		}
 		w.Write([]byte(`{"ok":true,"result":{"message_id":42,"chat":{"id":1,"type":"private"}}}`))
 	}))
 	defer srv.Close()
 	c := &Client{Token: "fixture", Base: srv.URL, HTTP: srv.Client()}
-	for _, address := range []string{"https://archive.test/app/", ""} {
+	for _, address := range []string{"https://collection.test/app/", ""} {
 		if e := c.ConfigureWebMenu(context.Background(), address); e != nil {
 			t.Fatal(e)
 		}
 	}
-	if id, e := c.SendInteractive(context.Background(), "1", "打开", 0, Keyboard{{{Text: "打开归档库", WebApp: &WebAppInfo{URL: "https://archive.test/app/"}}}}); e != nil || id != 42 {
+	if id, e := c.SendInteractive(context.Background(), "1", "打开", 0, Keyboard{{{Text: "打开收藏库", WebApp: &WebAppInfo{URL: "https://collection.test/app/"}}}}); e != nil || id != 42 {
 		t.Fatal(id, e)
 	}
 }

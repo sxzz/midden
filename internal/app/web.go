@@ -17,15 +17,15 @@ import (
 	"monitor/internal/store"
 )
 
-var ErrInvalidFilter = errors.New("invalid archive filters")
+var ErrInvalidFilter = errors.New("invalid collection filters")
 
-type ArchiveFilter struct{ Q, Media, Visibility, From, Before string }
+type CollectionFilter struct{ Q, Media, Visibility, From, Before string }
 type collectionCursor struct {
 	Time       time.Time
 	ID, Filter string
 }
 type CollectionItem struct {
-	domain.Archive
+	domain.Collection
 	SavedAt time.Time `json:"saved_at"`
 }
 type CollectionPage struct {
@@ -33,7 +33,7 @@ type CollectionPage struct {
 	Next  string           `json:"next_cursor,omitempty"`
 }
 
-func (s *Service) Collection(ctx context.Context, t string, f ArchiveFilter, cursor string) (p CollectionPage, e error) {
+func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter, cursor string) (p CollectionPage, e error) {
 	p.Items = []CollectionItem{}
 	if utf8.RuneCountInString(f.Q) > 500 || (f.Media != "" && f.Media != "image" && f.Media != "video" && f.Media != "text") || (f.Visibility != "" && f.Visibility != "public" && f.Visibility != "private") {
 		return p, ErrInvalidFilter
@@ -72,7 +72,7 @@ func (s *Service) Collection(ctx context.Context, t string, f ArchiveFilter, cur
 	}
 	q := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.TrimSpace(f.Q)) + "%"
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT a.id,ta.created_at FROM tenant_archives ta JOIN archives a ON a.id=ta.archive_id JOIN revisions r ON r.id=a.current_revision WHERE ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR a.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND ($5::timestamptz IS NULL OR (ta.created_at,a.id)<($5,$6::uuid)) AND ($7='' OR ($7='text' AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (($7='image' AND b.mime LIKE 'image/%') OR ($7='video' AND b.mime LIKE 'video/%')))) ORDER BY ta.created_at DESC,a.id DESC LIMIT 11`, q, f.Visibility, from, before, anchor, aid, f.Media)
+		rows, err := tx.Query(ctx, `SELECT a.id,ta.created_at FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id JOIN revisions r ON r.id=a.current_revision WHERE ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR a.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND ($5::timestamptz IS NULL OR (ta.created_at,a.id)<($5,$6::uuid)) AND ($7='' OR ($7='text' AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (($7='image' AND b.mime LIKE 'image/%') OR ($7='video' AND b.mime LIKE 'video/%')))) ORDER BY ta.created_at DESC,a.id DESC LIMIT 11`, q, f.Visibility, from, before, anchor, aid, f.Media)
 		if err != nil {
 			return err
 		}
@@ -101,7 +101,7 @@ func (s *Service) Collection(ctx context.Context, t string, f ArchiveFilter, cur
 			p.Next = base64.RawURLEncoding.EncodeToString(b)
 		}
 		for _, v := range entries {
-			a, err := archive(ctx, tx, v.id)
+			a, err := collection(ctx, tx, v.id)
 			if err != nil {
 				return err
 			}
@@ -139,13 +139,13 @@ func (s *Service) Revisions(ctx context.Context, t, id, cursor string) (p Revisi
 	}
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
 		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM tenant_archives WHERE archive_id=$1)`, id).Scan(&exists); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM tenant_collections WHERE collection_id=$1)`, id).Scan(&exists); err != nil {
 			return err
 		}
 		if !exists {
 			return domain.ErrNotFound
 		}
-		rows, err := tx.Query(ctx, `SELECT id,created_at FROM revisions WHERE archive_id=$1 AND ($2::timestamptz IS NULL OR (created_at,id)<($2,$3::uuid)) ORDER BY created_at DESC,id DESC LIMIT 21`, id, at, rid)
+		rows, err := tx.Query(ctx, `SELECT id,created_at FROM revisions WHERE collection_id=$1 AND ($2::timestamptz IS NULL OR (created_at,id)<($2,$3::uuid)) ORDER BY created_at DESC,id DESC LIMIT 21`, id, at, rid)
 		if err != nil {
 			return err
 		}
@@ -167,11 +167,11 @@ func (s *Service) Revisions(ctx context.Context, t, id, cursor string) (p Revisi
 	}
 	return
 }
-func (s *Service) Revision(ctx context.Context, t, id, rid string) (a domain.Archive, e error) {
+func (s *Service) Revision(ctx context.Context, t, id, rid string) (a domain.Collection, e error) {
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
 		var raw []byte
 		var cid string
-		err := tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,a.visibility,r.id,r.payload,r.capture_id,r.created_at,a.created_at FROM archives a JOIN tenant_archives ta ON ta.archive_id=a.id JOIN revisions r ON r.archive_id=a.id WHERE a.id=$1 AND r.id=$2`, id, rid).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &raw, &cid, &a.ObservedAt, &a.CreatedAt)
+		err := tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,a.visibility,r.id,r.payload,r.capture_id,r.created_at,a.created_at FROM collections a JOIN tenant_collections ta ON ta.collection_id=a.id JOIN revisions r ON r.collection_id=a.id WHERE a.id=$1 AND r.id=$2`, id, rid).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &raw, &cid, &a.ObservedAt, &a.CreatedAt)
 		if err != nil {
 			return err
 		}
@@ -203,12 +203,12 @@ func (s *Service) WebAccess(ctx context.Context, t, kind, id string) error {
 		var yes bool
 		var query string
 		switch kind {
-		case "archives":
-			query = `SELECT EXISTS(SELECT FROM tenant_archives WHERE archive_id=$1)`
+		case "collections":
+			query = `SELECT EXISTS(SELECT FROM tenant_collections WHERE collection_id=$1)`
 		case "assets":
-			query = `SELECT EXISTS(SELECT FROM assets m JOIN revisions r ON r.capture_id=m.capture_id JOIN tenant_archives ta ON ta.archive_id=r.archive_id WHERE m.id=$1)`
+			query = `SELECT EXISTS(SELECT FROM assets m JOIN revisions r ON r.capture_id=m.capture_id JOIN tenant_collections ta ON ta.collection_id=r.collection_id WHERE m.id=$1)`
 		case "entities":
-			query = `SELECT EXISTS(SELECT FROM entity_versions ev JOIN revision_entities re ON re.entity_version_id=ev.id JOIN revisions r ON r.id=re.revision_id JOIN tenant_archives ta ON ta.archive_id=r.archive_id WHERE ev.entity_id=$1)`
+			query = `SELECT EXISTS(SELECT FROM entity_versions ev JOIN revision_entities re ON re.entity_version_id=ev.id JOIN revisions r ON r.id=re.revision_id JOIN tenant_collections ta ON ta.collection_id=r.collection_id WHERE ev.entity_id=$1)`
 		default:
 			return domain.ErrNotFound
 		}
@@ -222,13 +222,13 @@ func (s *Service) WebAccess(ctx context.Context, t, kind, id string) error {
 	})
 }
 
-func (s *Service) SavedArchive(ctx context.Context, tenant, id string) (item CollectionItem, err error) {
+func (s *Service) SavedCollection(ctx context.Context, tenant, id string) (item CollectionItem, err error) {
 	err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-		if e := tx.QueryRow(ctx, `SELECT created_at FROM tenant_archives WHERE archive_id=$1`, id).Scan(&item.SavedAt); e != nil {
+		if e := tx.QueryRow(ctx, `SELECT created_at FROM tenant_collections WHERE collection_id=$1`, id).Scan(&item.SavedAt); e != nil {
 			return e
 		}
 		var e error
-		item.Archive, e = archive(ctx, tx, id)
+		item.Collection, e = collection(ctx, tx, id)
 		return e
 	})
 	return

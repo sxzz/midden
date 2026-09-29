@@ -32,25 +32,17 @@ type Config struct {
 	CaptureWorkers        int
 	DownloadWorkers       int
 	ControlWorkers        int
-	DeliveryWorkers       int
 	MaxImageBytes         int64
 	MaxVideoBytes         int64
 	MaxMedia              int
 }
 
 func Defaults() Config {
-	return Config{ConnectionConcurrency: 1, Quota: 1 << 30, Rate: 10, TenantConcurrency: 2, CaptureWorkers: 4, DownloadWorkers: 8, ControlWorkers: 4, DeliveryWorkers: 2, MaxImageBytes: 20 << 20, MaxVideoBytes: 512 << 20, MaxMedia: 20}
-}
-
-type Sender interface {
-	Send(context.Context, string, string, int64) (int64, error)
-	MediaItem(context.Context, string, domain.Asset) (int64, error)
-	Media(context.Context, string, []domain.Asset, string) (int64, error)
+	return Config{ConnectionConcurrency: 1, Quota: 1 << 30, Rate: 10, TenantConcurrency: 2, CaptureWorkers: 4, DownloadWorkers: 8, ControlWorkers: 4, MaxImageBytes: 20 << 20, MaxVideoBytes: 512 << 20, MaxMedia: 20}
 }
 
 type Service struct {
 	Registry      *AdapterRegistry
-	WebURL        string
 	Adapters      map[string]AdapterBinding
 	Descriptor    *pb.DescribeResponse
 	EntitySchemas map[string]adapter.EntitySchema
@@ -63,11 +55,12 @@ type Service struct {
 	Blobs         blob.Storage
 	HTTP          *http.Client
 	Config        Config
-	Sender        Sender
-	Senders       map[string]Sender
 }
 
 func (s *Service) Enqueue(ctx context.Context, tx pgx.Tx, tenant, id, kind string) error {
+	if kind == "deliver" || kind == "status" {
+		return enqueueChannel(ctx, tx, tenant, id)
+	}
 	_, e := s.Queue.InsertTx(ctx, tx, store.Task{Tenant: tenant, ID: id, Type: kind}, nil)
 	return e
 }
@@ -119,7 +112,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if in.RefreshID != "" {
 			var id string
 			err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-				return tx.QueryRow(ctx, "SELECT adapter_id FROM tenant_archives WHERE archive_id=$1", in.RefreshID).Scan(&id)
+				return tx.QueryRow(ctx, "SELECT adapter_id FROM tenant_collections WHERE collection_id=$1", in.RefreshID).Scan(&id)
 			})
 			if err != nil {
 				return out, err
@@ -147,7 +140,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 	}
 	if in.RefreshID != "" {
 		err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-			return tx.QueryRow(ctx, `SELECT a.url,t.provider_id,coalesce(t.connection_id::text,'') FROM tenant_archives t JOIN archives a ON a.id=t.archive_id WHERE t.archive_id=$1`, in.RefreshID).Scan(&in.URL, &in.ProviderID, &in.ConnectionID)
+			return tx.QueryRow(ctx, `SELECT a.url,t.provider_id,coalesce(t.connection_id::text,'') FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE t.collection_id=$1`, in.RefreshID).Scan(&in.URL, &in.ProviderID, &in.ConnectionID)
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return out, domain.ErrNotFound
@@ -268,31 +261,31 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			return e
 		}
 		if aid == "" && in.ConnectionID != "" {
-			e = tx.QueryRow(ctx, `SELECT a.id FROM captures c JOIN archives a ON a.id=c.archive_id WHERE c.tenant_id=$1 AND c.connection_id=$2 AND a.external_id=$3 AND a.platform=$4 AND a.kind=$5 AND a.object_scope=$6 AND c.state IN('queued','downloading') LIMIT 1`, tenant, in.ConnectionID, target.ExternalID, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
+			e = tx.QueryRow(ctx, `SELECT a.id FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.tenant_id=$1 AND c.connection_id=$2 AND a.external_id=$3 AND a.platform=$4 AND a.kind=$5 AND a.object_scope=$6 AND c.state IN('queued','downloading') LIMIT 1`, tenant, in.ConnectionID, target.ExternalID, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
 			if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 				return e
 			}
 		}
 		if aid == "" && in.ConnectionID != "" && in.RefreshID == "" {
-			e = tx.QueryRow(ctx, `SELECT a.id FROM tenant_archives t JOIN archives a ON a.id=t.archive_id WHERE a.external_id=$1 AND t.connection_id=$2 AND a.platform=$3 AND a.kind=$4 AND a.object_scope=$5 AND a.current_revision IS NOT NULL ORDER BY t.created_at DESC LIMIT 1`, target.ExternalID, in.ConnectionID, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
+			e = tx.QueryRow(ctx, `SELECT a.id FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE a.external_id=$1 AND t.connection_id=$2 AND a.platform=$3 AND a.kind=$4 AND a.object_scope=$5 AND a.current_revision IS NOT NULL ORDER BY t.created_at DESC LIMIT 1`, target.ExternalID, in.ConnectionID, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
 			if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 				return e
 			}
 		}
 		if aid == "" {
-			e = tx.QueryRow(ctx, `SELECT id FROM archives WHERE data_scope=$1 AND platform=$4 AND scope=$2 AND kind=$5 AND object_scope=$6 AND external_id=$3`, dataScope, scope, target.ExternalID, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
+			e = tx.QueryRow(ctx, `SELECT id FROM collections WHERE data_scope=$1 AND platform=$4 AND scope=$2 AND kind=$5 AND object_scope=$6 AND external_id=$3`, dataScope, scope, target.ExternalID, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
 			if errors.Is(e, pgx.ErrNoRows) {
-				e = tx.QueryRow(ctx, `INSERT INTO archives(tenant_id,visibility,external_id,url,provider_id,scope,platform,kind,object_scope) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, tenant, visibility, target.ExternalID, target.URL, in.ProviderID, scope, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
+				e = tx.QueryRow(ctx, `INSERT INTO collections(tenant_id,visibility,external_id,url,provider_id,scope,platform,kind,object_scope) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, tenant, visibility, target.ExternalID, target.URL, in.ProviderID, scope, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
 			}
 			if e != nil {
 				return e
 			}
 		}
-		// Hold the archive row through subscription creation so finalization cannot miss a subscriber.
-		if e = tx.QueryRow(ctx, `SELECT id FROM archives WHERE id=$1 FOR UPDATE`, aid).Scan(&aid); e != nil {
+		// Hold the collection row through subscription creation so finalization cannot miss a subscriber.
+		if e = tx.QueryRow(ctx, `SELECT id FROM collections WHERE id=$1 FOR UPDATE`, aid).Scan(&aid); e != nil {
 			return e
 		}
-		tag, e := tx.Exec(ctx, `INSERT INTO tenant_archives(tenant_id,archive_id,provider_id,connection_id,adapter_id) SELECT $1,$2,$3,nullif($4,'')::uuid,$6 WHERE $5='' OR $5=$2::uuid::text ON CONFLICT DO NOTHING`, tenant, aid, in.ProviderID, in.ConnectionID, in.RefreshID, desc.AdapterId)
+		tag, e := tx.Exec(ctx, `INSERT INTO tenant_collections(tenant_id,collection_id,provider_id,connection_id,adapter_id) SELECT $1,$2,$3,nullif($4,'')::uuid,$6 WHERE $5='' OR $5=$2::uuid::text ON CONFLICT DO NOTHING`, tenant, aid, in.ProviderID, in.ConnectionID, in.RefreshID, desc.AdapterId)
 		if e != nil {
 			return e
 		}
@@ -305,14 +298,14 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 				return domain.ErrQuota
 			}
 		}
-		if _, e = tx.Exec(ctx, `UPDATE archives SET unreferenced_at=NULL WHERE id=$1`, aid); e != nil {
+		if _, e = tx.Exec(ctx, `UPDATE collections SET unreferenced_at=NULL WHERE id=$1`, aid); e != nil {
 			return e
 		}
 
 		var cid string
-		e = tx.QueryRow(ctx, `SELECT id FROM captures WHERE archive_id=$1 AND provider_id=$2 AND coalesce(connection_id::text,'')=$3 AND adapter_id=$4 AND state IN('queued','downloading') AND page_cursor=$5 AND (NOT $6 OR NOT automatic) AND page_size=$7`, aid, in.ProviderID, in.ConnectionID, desc.AdapterId, in.PageCursor, target.Collection && !in.Automatic, in.PageSize).Scan(&cid)
+		e = tx.QueryRow(ctx, `SELECT id FROM captures WHERE collection_id=$1 AND provider_id=$2 AND coalesce(connection_id::text,'')=$3 AND adapter_id=$4 AND state IN('queued','downloading') AND page_cursor=$5 AND (NOT $6 OR NOT automatic) AND page_size=$7`, aid, in.ProviderID, in.ConnectionID, desc.AdapterId, in.PageCursor, target.Collection && !in.Automatic, in.PageSize).Scan(&cid)
 		if errors.Is(e, pgx.ErrNoRows) && in.PageCursor == "" && in.RefreshID == "" && (in.Automatic || !target.RefreshOnSubmit) {
-			e = tx.QueryRow(ctx, `SELECT r.capture_id FROM archives a JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1 AND ($2::bigint=0 OR a.observed_at > now()-make_interval(secs=>$2::double precision))`, aid, in.RefreshAfterSeconds).Scan(&cid)
+			e = tx.QueryRow(ctx, `SELECT r.capture_id FROM collections a JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1 AND ($2::bigint=0 OR a.observed_at > now()-make_interval(secs=>$2::double precision))`, aid, in.RefreshAfterSeconds).Scan(&cid)
 		}
 		if errors.Is(e, pgx.ErrNoRows) {
 			var unlimited bool
@@ -335,7 +328,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			if _, e = tx.Exec(ctx, `UPDATE tenants SET rate_count=$2,rate_start=$3 WHERE id=$1`, tenant, count+1, start); e != nil {
 				return e
 			}
-			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,archive_id,provider_id,scope,visibility,connection_id,refresh_from,adapter_id,automatic,page_cursor,is_collection,page_size) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid,$8,$9,$10,$11,$12) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility, in.ConnectionID, in.RefreshID, desc.AdapterId, in.Automatic, in.PageCursor, target.Collection && !in.Automatic, in.PageSize).Scan(&cid)
+			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,collection_id,provider_id,scope,visibility,connection_id,refresh_from,adapter_id,automatic,page_cursor,is_collection,page_size) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid,$8,$9,$10,$11,$12) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility, in.ConnectionID, in.RefreshID, desc.AdapterId, in.Automatic, in.PageCursor, target.Collection && !in.Automatic, in.PageSize).Scan(&cid)
 			if e != nil {
 				return e
 			}
@@ -351,7 +344,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			return e
 		}
 		if !in.Automatic && adapter.Supports(policy, adapter.CaptureRelated, 1, 0) {
-			if _, e = tx.Exec(ctx, `UPDATE submissions SET related_provider=$2,related_connection=nullif($3,'')::uuid,related_adapter=$4,related_state='pending',related_source_archive=$5 WHERE id=$1`, sid, in.ProviderID, in.ConnectionID, desc.AdapterId, aid); e != nil {
+			if _, e = tx.Exec(ctx, `UPDATE submissions SET related_provider=$2,related_connection=nullif($3,'')::uuid,related_adapter=$4,related_state='pending',related_source_collection=$5 WHERE id=$1`, sid, in.ProviderID, in.ConnectionID, desc.AdapterId, aid); e != nil {
 				return e
 			}
 			if e = s.Enqueue(ctx, tx, tenant, sid, "related"); e != nil {
@@ -372,17 +365,17 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 	return
 }
 
-// DeleteArchive removes only this tenant's collection reference. Shared content remains readable.
-func (s *Service) DeleteArchive(ctx context.Context, tenant, id string) error {
+// DeleteCollection removes only this tenant's collection reference. Shared content remains readable.
+func (s *Service) DeleteCollection(ctx context.Context, tenant, id string) error {
 	return s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, tenant); e != nil {
 			return e
 		}
 		var aid string
-		if e := tx.QueryRow(ctx, `SELECT id FROM archives WHERE id=$1 FOR UPDATE`, id).Scan(&aid); e != nil {
+		if e := tx.QueryRow(ctx, `SELECT id FROM collections WHERE id=$1 FOR UPDATE`, id).Scan(&aid); e != nil {
 			return e
 		}
-		tag, e := tx.Exec(ctx, `DELETE FROM tenant_archives WHERE tenant_id=$1 AND archive_id=$2`, tenant, id)
+		tag, e := tx.Exec(ctx, `DELETE FROM tenant_collections WHERE tenant_id=$1 AND collection_id=$2`, tenant, id)
 		if e != nil {
 			return e
 		}
@@ -396,7 +389,7 @@ func (s *Service) DeleteArchive(ctx context.Context, tenant, id string) error {
 }
 
 func scanJob(ctx context.Context, tx pgx.Tx, id string, j *domain.Job) error {
-	return tx.QueryRow(ctx, `SELECT id,archive_id,state,error,provider_id,coalesce(connection_id::text,''),scope,created_at FROM captures WHERE id=$1 AND (tenant_id=nullif(current_setting('app.tenant_id',true),'')::uuid OR EXISTS(SELECT FROM submissions WHERE capture_id=captures.id))`, id).Scan(&j.ID, &j.ArchiveID, &j.State, &j.Error, &j.ProviderID, &j.ConnectionID, &j.AccessScope, &j.CreatedAt)
+	return tx.QueryRow(ctx, `SELECT id,collection_id,state,error,provider_id,coalesce(connection_id::text,''),scope,created_at FROM captures WHERE id=$1 AND (tenant_id=nullif(current_setting('app.tenant_id',true),'')::uuid OR EXISTS(SELECT FROM submissions WHERE capture_id=captures.id))`, id).Scan(&j.ID, &j.CollectionID, &j.State, &j.Error, &j.ProviderID, &j.ConnectionID, &j.AccessScope, &j.CreatedAt)
 }
 
 func (s *Service) Job(ctx context.Context, t, id string) (j domain.Job, e error) {
@@ -411,10 +404,10 @@ func (s *Service) Usage(ctx context.Context, t string) (u domain.Usage, e error)
 	return
 }
 
-func archive(ctx context.Context, tx pgx.Tx, id string) (a domain.Archive, e error) {
+func collection(ctx context.Context, tx pgx.Tx, id string) (a domain.Collection, e error) {
 	var payload []byte
 	var cid string
-	e = tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,a.visibility,r.id,r.payload,r.capture_id,a.observed_at,a.created_at FROM archives a JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1`, id).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &payload, &cid, &a.ObservedAt, &a.CreatedAt)
+	e = tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,a.visibility,r.id,r.payload,r.capture_id,a.observed_at,a.created_at FROM collections a JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1`, id).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &payload, &cid, &a.ObservedAt, &a.CreatedAt)
 	if e != nil {
 		return
 	}
@@ -436,8 +429,8 @@ func archive(ctx context.Context, tx pgx.Tx, id string) (a domain.Archive, e err
 	return
 }
 
-func (s *Service) Archive(ctx context.Context, t, id string) (a domain.Archive, e error) {
-	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error { var err error; a, err = archive(ctx, tx, id); return err })
+func (s *Service) Collection(ctx context.Context, t, id string) (a domain.Collection, e error) {
+	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error { var err error; a, err = collection(ctx, tx, id); return err })
 	return
 }
 
@@ -465,7 +458,7 @@ func (s *Service) Asset(ctx context.Context, t, id string) (a domain.Asset, e er
 	return
 }
 
-func parseArchiveCursor(cursor string) (*string, bool, error) {
+func parseCollectionCursor(cursor string) (*string, bool, error) {
 	if cursor == "" {
 		return nil, false, nil
 	}
@@ -484,15 +477,15 @@ func parseArchiveCursor(cursor string) (*string, bool, error) {
 }
 
 func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, e error) {
-	p.Items = []domain.Archive{}
-	anchor, backwards, err := parseArchiveCursor(cursor)
+	p.Items = []domain.Collection{}
+	anchor, backwards, err := parseCollectionCursor(cursor)
 	if err != nil {
 		return p, err
 	}
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
 		if anchor != nil {
 			var x string
-			if err := tx.QueryRow(ctx, `SELECT a.id FROM archives a JOIN tenant_archives t ON t.archive_id=a.id WHERE a.id=$1 AND a.current_revision IS NOT NULL`, *anchor).Scan(&x); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT a.id FROM collections a JOIN tenant_collections t ON t.collection_id=a.id WHERE a.id=$1 AND a.current_revision IS NOT NULL`, *anchor).Scan(&x); err != nil {
 				return err
 			}
 		}
@@ -500,7 +493,7 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 		if backwards {
 			comparison, order = ">", "ASC"
 		}
-		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT a.id FROM archives a JOIN tenant_archives t ON t.archive_id=a.id WHERE a.current_revision IS NOT NULL AND ($1::uuid IS NULL OR (t.created_at,a.id)%s(SELECT created_at,archive_id FROM tenant_archives WHERE archive_id=$1)) ORDER BY t.created_at %s,a.id %s LIMIT 10`, comparison, order, order), anchor)
+		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT a.id FROM collections a JOIN tenant_collections t ON t.collection_id=a.id WHERE a.current_revision IS NOT NULL AND ($1::uuid IS NULL OR (t.created_at,a.id)%s(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$1)) ORDER BY t.created_at %s,a.id %s LIMIT 10`, comparison, order, order), anchor)
 		if err != nil {
 			return err
 		}
@@ -524,8 +517,8 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 		if len(ids) > 0 {
 			var previous, next bool
 			err := tx.QueryRow(ctx, `SELECT
-				EXISTS(SELECT 1 FROM tenant_archives t JOIN archives a ON a.id=t.archive_id WHERE a.current_revision IS NOT NULL AND (t.created_at,a.id)>(SELECT created_at,archive_id FROM tenant_archives WHERE archive_id=$1)),
-				EXISTS(SELECT 1 FROM tenant_archives t JOIN archives a ON a.id=t.archive_id WHERE a.current_revision IS NOT NULL AND (t.created_at,a.id)<(SELECT created_at,archive_id FROM tenant_archives WHERE archive_id=$2))`, ids[0], ids[len(ids)-1]).Scan(&previous, &next)
+				EXISTS(SELECT 1 FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE a.current_revision IS NOT NULL AND (t.created_at,a.id)>(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$1)),
+				EXISTS(SELECT 1 FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE a.current_revision IS NOT NULL AND (t.created_at,a.id)<(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$2))`, ids[0], ids[len(ids)-1]).Scan(&previous, &next)
 			if err != nil {
 				return err
 			}
@@ -537,7 +530,7 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 			}
 		}
 		for _, id := range ids {
-			a, err := archive(ctx, tx, id)
+			a, err := collection(ctx, tx, id)
 			if err != nil {
 				return err
 			}
@@ -563,12 +556,12 @@ type Payload struct {
 	Incomplete        bool                `json:"incomplete,omitempty"`
 }
 
-// CaptureArchive pins delivery to the revision produced (or reused) by that capture.
-func (s *Service) CaptureArchive(ctx context.Context, t, cid string) (a domain.Archive, e error) {
+// CaptureCollection pins delivery to the revision produced (or reused) by that capture.
+func (s *Service) CaptureCollection(ctx context.Context, t, cid string) (a domain.Collection, e error) {
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
 		var raw []byte
 		var assetCapture string
-		err := tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,a.visibility,r.id,r.payload,r.capture_id,a.observed_at,a.created_at FROM captures c JOIN archives a ON a.id=c.archive_id JOIN revisions r ON r.id=c.revision_id WHERE c.id=$1`, cid).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &raw, &assetCapture, &a.ObservedAt, &a.CreatedAt)
+		err := tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,a.visibility,r.id,r.payload,r.capture_id,a.observed_at,a.created_at FROM captures c JOIN collections a ON a.id=c.collection_id JOIN revisions r ON r.id=c.revision_id WHERE c.id=$1`, cid).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &raw, &assetCapture, &a.ObservedAt, &a.CreatedAt)
 		if err != nil {
 			return err
 		}
@@ -589,11 +582,4 @@ func (s *Service) CaptureArchive(ctx context.Context, t, cid string) (a domain.A
 		return err
 	})
 	return
-}
-
-func (s *Service) sender(channel string) Sender {
-	if s.Senders != nil {
-		return s.Senders[channel]
-	}
-	return s.Sender
 }

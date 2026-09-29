@@ -25,7 +25,7 @@ for i in $(seq 1 60); do
 done
 ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" go run ./cmd/monitorctl migrate
 ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" APP_DB_PASSWORD=monitor-app-test go run ./cmd/monitorctl app-password
-go test -race ./... -count=1 -timeout 240s
+go test -race -p 1 ./... -count=1 -timeout 240s
 
 export TEST_RESTORE_DIR="$restore_dir"
 TEST_RESTORE_PHASE=prepare go test ./internal/app -run TestBackupRestore -count=1 -v

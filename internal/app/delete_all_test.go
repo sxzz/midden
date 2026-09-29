@@ -15,15 +15,6 @@ import (
 	"monitor/internal/store"
 )
 
-func TestDeleteAllRequiresConfirmation(t *testing.T) {
-	var s Service
-	r := &commandRequest{}
-	must(t, s.commandDeleteAll(context.Background(), r))
-	if len(r.Buttons) != 1 || r.Buttons[0][0].Data != "/delete_all confirm" {
-		t.Fatal("missing confirmation", r)
-	}
-}
-
 func TestDeleteAllIsolationAndRetention(t *testing.T) {
 	if os.Getenv("TEST_DATABASE_URL") == "" {
 		t.Skip("Docker database required")
@@ -54,26 +45,26 @@ func TestDeleteAllIsolationAndRetention(t *testing.T) {
 	}
 	shared := save("https://x.com/i/status/98000000001")
 	alone := save("https://x.com/i/status/98000000002")
-	_, err = s.SavePublicArchive(ctx, b.TenantID, shared.ArchiveID)
+	_, err = s.SavePublicCollection(ctx, b.TenantID, shared.CollectionID)
 	must(t, err)
 	usageBefore, err := s.Usage(ctx, b.TenantID)
 	must(t, err)
 	var cutoff time.Time
 	must(t, admin.Pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&cutoff))
 	later := save("https://x.com/i/status/98000000003")
-	n, err := s.DeleteAllArchives(ctx, a.TenantID, cutoff)
+	n, err := s.DeleteAllCollections(ctx, a.TenantID, cutoff)
 	must(t, err)
 	if n != 2 {
 		t.Fatal("wrong deletion count", n)
 	}
-	n, err = s.DeleteAllArchives(ctx, a.TenantID, cutoff)
+	n, err = s.DeleteAllCollections(ctx, a.TenantID, cutoff)
 	must(t, err)
 	if n != 0 {
 		t.Fatal("retry removed newer saves", n)
 	}
 	page, err := s.Recent(ctx, a.TenantID, "")
 	must(t, err)
-	if len(page.Items) != 1 || page.Items[0].ID != later.ArchiveID {
+	if len(page.Items) != 1 || page.Items[0].ID != later.CollectionID {
 		t.Fatal("later save lost", page)
 	}
 	usageAfter, err := s.Usage(ctx, b.TenantID)
@@ -83,17 +74,17 @@ func TestDeleteAllIsolationAndRetention(t *testing.T) {
 	}
 	page, err = s.Recent(ctx, b.TenantID, "")
 	must(t, err)
-	if len(page.Items) != 1 || page.Items[0].ID != shared.ArchiveID {
+	if len(page.Items) != 1 || page.Items[0].ID != shared.CollectionID {
 		t.Fatal("other tenant data lost", page)
 	}
 	var aloneMarked, sharedMarked bool
-	must(t, admin.Pool.QueryRow(ctx, `SELECT (SELECT unreferenced_at IS NOT NULL FROM archives WHERE id=$1),(SELECT unreferenced_at IS NOT NULL FROM archives WHERE id=$2)`, alone.ArchiveID, shared.ArchiveID).Scan(&aloneMarked, &sharedMarked))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT (SELECT unreferenced_at IS NOT NULL FROM collections WHERE id=$1),(SELECT unreferenced_at IS NOT NULL FROM collections WHERE id=$2)`, alone.CollectionID, shared.CollectionID).Scan(&aloneMarked, &sharedMarked))
 	if !aloneMarked || sharedMarked {
 		t.Fatal("incorrect retention markers", aloneMarked, sharedMarked)
 	}
 	must(t, db.Tx(ctx, a.TenantID, func(tx pgx.Tx) error {
 		var retained int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM revisions WHERE archive_id=ANY($1::uuid[])`, []string{shared.ArchiveID, alone.ArchiveID, later.ArchiveID}).Scan(&retained); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM revisions WHERE collection_id=ANY($1::uuid[])`, []string{shared.CollectionID, alone.CollectionID, later.CollectionID}).Scan(&retained); err != nil {
 			return err
 		}
 		if retained != 3 {
