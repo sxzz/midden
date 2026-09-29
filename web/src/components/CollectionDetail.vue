@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { safeURL, type Collection } from "../api";
 import { date } from "../presentation";
 import { useCollectionDetail } from "../composables/useCollectionDetail";
+import CollectionSkeleton from "./ui/CollectionSkeleton.vue";
 import CollectionPost from "./CollectionPost.vue";
 import RevisionList from "./RevisionList.vue";
 import ConfirmSheet from "./ConfirmSheet.vue";
@@ -26,6 +27,11 @@ const {
   next,
   showHistory,
   historical,
+  latestRevision,
+  noHistory,
+  historyLoading,
+  loadingRevision,
+  toggleHistory,
   confirmDelete,
   available,
   historyPage,
@@ -42,7 +48,7 @@ const saved = computed(() => date(props.savedAt || collection.value?.saved_at));
 const link = computed(() => collection.value && safeURL(collection.value.url));
 const version = computed(() =>
   collection.value
-    ? `当前版本抓取于 ${date(collection.value.observed_at)}`
+    ? `${historical.value ? "历史" : "最新"}版本抓取于 ${date(collection.value.observed_at)}`
     : "",
 );
 </script>
@@ -50,19 +56,14 @@ const version = computed(() =>
   <ListSection v-if="error" plain>
     <p class="banner" role="alert">{{ error }}</p>
   </ListSection>
-  <p v-if="!collection && !error" class="loading">正在打开收藏…</p>
+  <ListSection v-if="!collection && !error"
+    ><CollectionSkeleton detail
+  /></ListSection>
   <template v-if="collection">
-    <ListSection v-if="historical">
-      <ListButton
-        label="正在查看历史版本"
-        hint="内容与媒体都来自这个版本"
-        trailing="回到当前"
-        :disabled="busy"
-        @select="revision()"
-      />
-    </ListSection>
     <ListSection :footnote="saved ? `保存于 ${saved}` : undefined">
+      <CollectionSkeleton v-if="loadingRevision" detail />
       <CollectionPost
+        v-else
         :collection="collection"
         :show-sensitive="showSensitive"
       />
@@ -71,7 +72,7 @@ const version = computed(() =>
       <ListButton v-if="link" label="打开原文" :href="link" />
       <ListButton
         label="重新抓取"
-        :disabled="busy || !available"
+        :disabled="busy || loadingRevision || !available"
         @select="refresh"
       />
       <ListButton
@@ -80,23 +81,27 @@ const version = computed(() =>
         @select="checkAvailability"
       />
       <ListButton
-        label="历史版本"
-        variant="plain"
-        chevron
-        @select="historyPage()"
+        :label="noHistory ? '无历史版本' : '历史版本'"
+        :trailing="noHistory ? undefined : showHistory ? '收起' : '展开'"
+        :disabled="noHistory"
+        :aria-expanded="showHistory && !noHistory"
+        aria-controls="revision-options"
+        @select="toggleHistory"
+      />
+      <RevisionList
+        v-if="showHistory && !noHistory"
+        id="revision-options"
+        :revisions="revisions"
+        :next="next"
+        :busy="busy || loadingRevision"
+        :loading="historyLoading"
+        :selected-id="collection.revision_id"
+        :latest-id="latestRevision"
+        @select="revision($event)"
+        @more="historyPage(true)"
       />
     </ListSection>
-    <!-- Kept mounted so progress is announced as it changes. -->
     <p class="status" :class="{ quiet: !status }" role="status">{{ status }}</p>
-    <RevisionList
-      v-if="showHistory"
-      :revisions="revisions"
-      :next="next"
-      :busy="busy"
-      :current="!historical"
-      @select="revision($event)"
-      @more="historyPage(true)"
-    />
     <ListSection>
       <ListButton
         label="删除这条收藏"

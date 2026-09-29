@@ -1,4 +1,5 @@
 <script setup vapor lang="ts">
+import LoadingImage from "./ui/LoadingImage.vue";
 import { computed } from "vue";
 import { assetURL, type Collection } from "../api";
 import { present, shortDate, warningList } from "../presentation";
@@ -13,7 +14,7 @@ const warnings = computed(() => warningList(props.collection.warnings));
 <template>
   <article class="post">
     <header class="author">
-      <img
+      <LoadingImage
         v-if="view.avatar && (!view.avatar.sensitive || showSensitive)"
         class="avatar"
         :src="assetURL(view.avatar)"
@@ -58,6 +59,9 @@ const warnings = computed(() => warningList(props.collection.warnings));
   border-radius: 50%;
   object-fit: cover;
   background: var(--fill);
+}
+.image-shell.avatar {
+  min-height: 0;
 }
 .initials {
   display: grid;

@@ -1,4 +1,5 @@
 <script setup vapor lang="ts">
+import LoadingImage from "./ui/LoadingImage.vue";
 import { computed } from "vue";
 import { assetURL, type Asset } from "../api";
 import { readyMedia } from "../presentation";
@@ -16,7 +17,7 @@ const overflow = computed(() => media.value.length - tiles.value.length);
       class="tile"
       :class="{ blurred: asset.sensitive && !showSensitive }"
     >
-      <img
+      <LoadingImage
         v-if="asset.mime?.startsWith('image/')"
         :src="assetURL(asset)"
         alt=""
@@ -59,13 +60,16 @@ const overflow = computed(() => media.value.length - tiles.value.length);
   overflow: hidden;
   background: var(--fill);
 }
-.tile img,
+.tile :deep(.image-shell),
 .tile video {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.tile.blurred img,
+.tile :deep(.image-shell) {
+  min-height: 0;
+}
+.tile.blurred :deep(img),
 .tile.blurred video {
   filter: blur(8px);
   transform: scale(1.2);

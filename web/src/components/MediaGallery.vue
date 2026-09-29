@@ -1,14 +1,13 @@
 <script setup vapor lang="ts">
-import { shallowRef, useTemplateRef, nextTick, watch } from "vue";
+import LoadingImage from "./ui/LoadingImage.vue";
+import { computed, shallowRef, watch } from "vue";
+import ImageViewer from "./ImageViewer.vue";
 import { assetURL, type Asset } from "../api";
 import { mediaNotice } from "../presentation";
 const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>();
 const selected = shallowRef<Asset>();
-const dialog = useTemplateRef<HTMLDialogElement>("viewer");
-async function view(asset: Asset) {
+function view(asset: Asset) {
   selected.value = asset;
-  await nextTick();
-  dialog.value?.showModal();
 }
 const revealed = shallowRef<string[]>([]);
 watch(
@@ -17,7 +16,6 @@ watch(
     if (!show) {
       revealed.value = [];
       if (selected.value?.sensitive) {
-        dialog.value?.close();
         selected.value = undefined;
       }
     }
@@ -26,9 +24,23 @@ watch(
 function reveal(id: string) {
   revealed.value = [...revealed.value, id];
 }
-function backdrop(event: MouseEvent) {
-  if (event.target === dialog.value) dialog.value?.close();
-}
+const images = computed(() =>
+  props.assets.filter(
+    (asset) =>
+      asset.state === "ready" &&
+      asset.mime?.startsWith("image/") &&
+      (!asset.sensitive ||
+        props.showSensitive ||
+        revealed.value.includes(asset.id)),
+  ),
+);
+watch(
+  () => props.assets,
+  () => {
+    selected.value = undefined;
+    revealed.value = [];
+  },
+);
 </script>
 <template>
   <div v-if="assets.length" class="media">
@@ -45,7 +57,7 @@ function backdrop(event: MouseEvent) {
         class="sensitive"
         @click="reveal(asset.id)"
       >
-        <img
+        <LoadingImage
           v-if="asset.mime?.startsWith('image/')"
           class="blurred"
           :src="assetURL(asset)"
@@ -71,7 +83,7 @@ function backdrop(event: MouseEvent) {
           aria-label="放大图片"
           @click="view(asset)"
         >
-          <img
+          <LoadingImage
             :src="assetURL(asset)"
             :alt="asset.alt_text || '收藏图片'"
             loading="lazy"
@@ -93,19 +105,12 @@ function backdrop(event: MouseEvent) {
       >
     </figure>
   </div>
-  <dialog ref="viewer" class="viewer" @click="backdrop">
-    <div class="viewer-bar">
-      <button type="button" class="close" @click="dialog?.close()">
-        关闭图片
-      </button>
-    </div>
-    <img
-      v-if="selected"
-      :src="assetURL(selected)"
-      :alt="selected.alt_text || '收藏图片'"
-    />
-    <p v-if="selected?.alt_text" class="alt">{{ selected.alt_text }}</p>
-  </dialog>
+  <ImageViewer
+    v-if="selected"
+    :images="images"
+    :initial-id="selected.id"
+    @close="selected = undefined"
+  />
 </template>
 <style scoped>
 .media {
@@ -123,7 +128,8 @@ function backdrop(event: MouseEvent) {
   width: 100%;
   background: none;
 }
-.media img,
+.media :deep(.image-shell img),
+.media :deep(.image-shell),
 .media video {
   display: block;
   width: 100%;
@@ -144,11 +150,15 @@ function backdrop(event: MouseEvent) {
   background: var(--fill);
   font-size: 14px;
 }
-.sensitive .blurred {
+.sensitive :deep(.blurred) {
   grid-area: 1 / 1;
-  filter: blur(18px);
+
   transform: scale(1.12);
   pointer-events: none;
+}
+.sensitive video.blurred,
+.sensitive :deep(.blurred img) {
+  filter: blur(18px);
 }
 .sensitive-label {
   z-index: 1;
@@ -175,47 +185,5 @@ function backdrop(event: MouseEvent) {
 figcaption {
   padding: 6px 2px;
   font-size: 13px;
-}
-.viewer {
-  width: 100vw;
-  max-width: 100vw;
-  height: 100dvh;
-  max-height: 100dvh;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: #000;
-  color: #fff;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  align-items: center;
-}
-.viewer:not([open]) {
-  display: none;
-}
-.viewer::backdrop {
-  background: #000;
-}
-.viewer-bar {
-  padding: max(10px, env(safe-area-inset-top)) 14px 10px;
-}
-.close {
-  min-height: 44px;
-  font-size: 16px;
-  color: #fff;
-}
-.viewer img {
-  display: block;
-  max-width: 100vw;
-  max-height: 100%;
-  margin: auto;
-  object-fit: contain;
-}
-.alt {
-  margin: 0;
-  padding: 12px 16px max(12px, env(safe-area-inset-bottom));
-  font-size: 13px;
-  line-height: 1.5;
-  color: #d5d5d5;
 }
 </style>

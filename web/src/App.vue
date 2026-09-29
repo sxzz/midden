@@ -2,6 +2,7 @@
 import { shallowRef, onMounted, onUnmounted } from "vue";
 import { api, errorText } from "./api";
 import { host, setupHost } from "./host";
+import CollectionSkeleton from "./components/ui/CollectionSkeleton.vue";
 import CollectionLibrary from "./components/CollectionLibrary.vue";
 const ready = shallowRef(false),
   error = shallowRef(""),
@@ -36,15 +37,21 @@ onUnmounted(() => cleanup());
 <template>
   <CollectionLibrary v-if="ready" />
   <main v-else class="gate">
-    <p role="status">{{ loading ? "正在打开收藏…" : error }}</p>
+    <CollectionSkeleton v-if="loading" />
+    <p v-else role="status">{{ error }}</p>
   </main>
 </template>
 <style scoped>
 .gate {
   display: grid;
+  width: 100%;
   place-items: center;
   min-height: 100dvh;
   padding: 32px;
+}
+.gate > [aria-busy] {
+  width: 100%;
+  max-width: 640px;
 }
 .gate p {
   margin: 0;

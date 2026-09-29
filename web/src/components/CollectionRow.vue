@@ -1,4 +1,5 @@
 <script setup vapor lang="ts">
+import LoadingImage from "./ui/LoadingImage.vue";
 import { computed } from "vue";
 import { assetURL, type Collection } from "../api";
 import { excerpt, mediaSummary, present, shortDate } from "../presentation";
@@ -22,7 +23,7 @@ const meta = computed(() =>
 </script>
 <template>
   <button type="button" class="row" @click="$emit('open', collection.id)">
-    <img
+    <LoadingImage
       v-if="view.avatar && (!view.avatar.sensitive || showSensitive)"
       class="avatar"
       :src="assetURL(view.avatar)"
@@ -73,6 +74,9 @@ const meta = computed(() =>
   border-radius: 50%;
   object-fit: cover;
   background: var(--fill);
+}
+.image-shell.avatar {
+  min-height: 0;
 }
 .initials {
   display: grid;

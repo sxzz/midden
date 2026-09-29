@@ -66,6 +66,13 @@ defineEmits<{ select: [] }>();
 .row.destructive {
   color: var(--destructive);
 }
+.row:disabled {
+  color: var(--subtle);
+  opacity: 1;
+}
+.row.link:not(:disabled) .trailing {
+  color: var(--link);
+}
 .row:active:not(:disabled) {
   background: var(--fill);
 }

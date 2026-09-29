@@ -1,35 +1,57 @@
 <script setup vapor lang="ts">
 import type { Revision } from "../api";
 import { date } from "../presentation";
-import ListSection from "./ui/ListSection.vue";
 import ListButton from "./ui/ListButton.vue";
 defineProps<{
   revisions: Revision[];
   next: string;
   busy?: boolean;
-  current?: boolean;
+  loading?: boolean;
+  selectedId: string;
+  latestId: string;
 }>();
-defineEmits<{ select: [id?: string]; more: [] }>();
+defineEmits<{ select: [id: string]; more: [] }>();
 </script>
 <template>
-  <ListSection title="历史版本" footnote="每次重新抓取都会留下一个版本。">
-    <ListButton
-      v-if="!current"
-      label="当前版本"
-      variant="plain"
-      trailing="查看"
-      :disabled="busy"
-      @select="$emit('select')"
-    />
+  <div class="revisions">
     <ListButton
       v-for="r in revisions"
       :key="r.id"
-      :label="date(r.created_at)"
-      variant="plain"
-      chevron
-      :disabled="busy"
+      :label="`${r.id === latestId ? '最新版本 · ' : ''}${date(r.created_at)}`"
+      :trailing="r.id === selectedId ? '正在查看' : '查看'"
+      :disabled="busy || r.id === selectedId"
       @select="$emit('select', r.id)"
     />
-    <ListButton v-if="next" label="更多版本" @select="$emit('more')" />
-  </ListSection>
+    <div
+      v-if="loading"
+      class="history-loading"
+      role="status"
+      aria-label="正在加载历史版本"
+      aria-busy="true"
+    >
+      <span class="skeleton" /><span class="skeleton" />
+    </div>
+    <ListButton
+      v-if="next"
+      label="更多版本"
+      :disabled="busy || loading"
+      @select="$emit('more')"
+    />
+  </div>
 </template>
+<style scoped>
+.revisions {
+  border-top: 1px solid var(--separator);
+  margin-left: var(--inset);
+}
+.history-loading {
+  display: grid;
+  gap: 20px;
+  padding: 16px;
+}
+.history-loading span {
+  height: 16px;
+  width: 75%;
+  border-radius: 4px;
+}
+</style>

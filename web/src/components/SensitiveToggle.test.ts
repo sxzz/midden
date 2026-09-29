@@ -20,6 +20,7 @@ vi.mock("../api", async (original) => ({
   api: vi.fn(async (path: string) => {
     if (path === "/collections" || path.startsWith("/collections?"))
       return { items: [collection] };
+    if (path.endsWith("/revisions")) return { items: [] };
     if (path.endsWith("/availability")) return { available: true };
     if (path.startsWith("/collections/")) return collection;
     return { used_bytes: 0, reserved_bytes: 0, limit_bytes: 1000 };

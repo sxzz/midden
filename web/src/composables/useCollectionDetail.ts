@@ -1,4 +1,4 @@
-import { shallowRef, watch, onUnmounted } from "vue";
+import { computed, shallowRef, watch, onUnmounted } from "vue";
 import {
   api,
   errorText,
@@ -20,8 +20,19 @@ export function useCollectionDetail(
     revisions = shallowRef<Revision[]>([]),
     next = shallowRef(""),
     showHistory = shallowRef(false),
-    historical = shallowRef(false),
+    latestRevision = shallowRef(""),
+    loadingRevision = shallowRef(false),
+    historyLoading = shallowRef(false),
+    historyLoaded = shallowRef(false),
     confirmDelete = shallowRef(false);
+  const historical = computed(
+    () =>
+      !!collection.value &&
+      collection.value.revision_id !== latestRevision.value,
+  );
+  const noHistory = computed(
+    () => historyLoaded.value && !next.value && revisions.value.length <= 1,
+  );
   let controller = new AbortController();
   async function checkAvailability() {
     try {
@@ -46,16 +57,27 @@ export function useCollectionDetail(
       controller.abort();
       controller = new AbortController();
       clearTimeout(timer);
+      const signal = controller.signal;
+      ++revisionRequest;
       collection.value = undefined;
       revisions.value = [];
       showHistory.value = false;
-      historical.value = false;
+      latestRevision.value = "";
+      loadingRevision.value = false;
+      historyLoading.value = false;
+      historyLoaded.value = false;
+      next.value = "";
+      status.value = "";
       error.value = "";
       busy.value = false;
+      available.value = false;
+      confirmDelete.value = false;
       try {
-        collection.value = await api<Collection>("/collections/" + id, {
-          signal: controller.signal,
-        });
+        const result = await api<Collection>("/collections/" + id, { signal });
+        if (signal.aborted) return;
+        collection.value = result;
+        latestRevision.value = collection.value.revision_id;
+        void historyPage();
         available.value = (
           await api<{ available: boolean }>(
             "/collections/" + id + "/availability",
@@ -65,7 +87,7 @@ export function useCollectionDetail(
           )
         ).available;
       } catch (e) {
-        if (!controller.signal.aborted) error.value = errorText(e);
+        if (!signal.aborted) error.value = errorText(e);
       }
     },
     { immediate: true },
@@ -75,30 +97,56 @@ export function useCollectionDetail(
     clearTimeout(timer);
   });
   async function historyPage(more = false) {
+    if (historyLoading.value || (more && !next.value)) return;
+    const signal = controller.signal;
+    historyLoading.value = true;
     try {
       const p = await api<Page<Revision>>(
         `/collections/${id()}/revisions${more ? "?cursor=" + encodeURIComponent(next.value) : ""}`,
-        { signal: controller.signal },
+        { signal },
       );
+      if (signal.aborted) return;
       revisions.value = more ? [...revisions.value, ...p.items] : p.items;
       next.value = p.next_cursor || "";
-      showHistory.value = true;
+      historyLoaded.value = true;
     } catch (e) {
-      error.value = errorText(e);
+      if (!signal.aborted) error.value = errorText(e);
+    } finally {
+      if (!signal.aborted) historyLoading.value = false;
     }
   }
+  function toggleHistory() {
+    showHistory.value = !showHistory.value;
+    if (showHistory.value && !historyLoaded.value) void historyPage();
+  }
   async function revision(revisionID?: string) {
+    if (
+      busy.value ||
+      loadingRevision.value ||
+      (revisionID
+        ? revisionID === collection.value?.revision_id
+        : !historical.value)
+    )
+      return;
     const request = ++revisionRequest;
+    const signal = controller.signal;
+    loadingRevision.value = true;
+    error.value = "";
     try {
       const result = await api<Collection>(
-        `/collections/${id()}${revisionID ? "/revisions/" + revisionID : ""}`,
-        { signal: controller.signal },
+        `/collections/${id()}${revisionID && revisionID !== latestRevision.value ? "/revisions/" + revisionID : ""}`,
+        { signal },
       );
-      if (request !== revisionRequest) return;
+      if (signal.aborted || request !== revisionRequest) return;
       collection.value = result;
-      historical.value = !!revisionID;
+      if (!revisionID || revisionID === latestRevision.value)
+        latestRevision.value = result.revision_id;
     } catch (e) {
-      error.value = errorText(e);
+      if (!signal.aborted && request === revisionRequest)
+        error.value = errorText(e);
+    } finally {
+      if (!signal.aborted && request === revisionRequest)
+        loadingRevision.value = false;
     }
   }
   async function remove() {
@@ -149,7 +197,8 @@ export function useCollectionDetail(
         );
         if (job.collection_id !== id())
           location.hash = "/collection/" + job.collection_id;
-        historical.value = false;
+        latestRevision.value = collection.value.revision_id;
+        await historyPage();
         updated(collection.value);
       }
     }
@@ -181,6 +230,11 @@ export function useCollectionDetail(
     next,
     showHistory,
     historical,
+    latestRevision,
+    noHistory,
+    historyLoading,
+    loadingRevision,
+    toggleHistory,
     confirmDelete,
     available,
     historyPage,

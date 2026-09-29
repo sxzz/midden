@@ -36,9 +36,14 @@ test("browse, filter, history, refresh and remove a saved post", async ({
       };
     else if (path.endsWith("/availability")) body = { available: true };
     else if (path.endsWith("/revisions"))
-      body = { items: [{ id: "r0", created_at: "2026-09-27T10:00:00Z" }] };
+      body = {
+        items: [
+          { id: "r1", created_at: collection.observed_at },
+          { id: "r0", created_at: "2026-09-27T10:00:00Z" },
+        ],
+      };
     else if (path.endsWith("/revisions/r0"))
-      body = { ...collection, text: "历史正文" };
+      body = { ...collection, revision_id: "r0", text: "历史正文" };
     else if (path === "/v1/captures")
       body = { id: "job", collection_id: id, state: "complete" };
     else if (path === "/v1/collections/" + id) {
@@ -69,7 +74,12 @@ test("browse, filter, history, refresh and remove a saved post", async ({
   await page.getByRole("button", { name: "历史版本" }).click();
   await page.getByRole("button", { name: /2026年9月27日/ }).click();
   await expect(page.getByText("历史正文")).toBeVisible();
-  await page.getByRole("button", { name: /正在查看历史版本/ }).click();
+  await expect(
+    page.getByRole("button", { name: /2026年9月27日/ }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: /最新版本 ·/ }).click();
+  await expect(page.getByText(collection.text)).toBeVisible();
+  await expect(page.getByRole("button", { name: /最新版本 ·/ })).toBeDisabled();
   await page.getByRole("button", { name: "重新抓取" }).click();
   await expect(page.getByText("已更新。")).toBeVisible();
   await page.getByRole("button", { name: "返回" }).click();
@@ -163,4 +173,84 @@ test("sensitive image stays blurred until revealed and opens inside the page", a
   await page.getByRole("button", { name: "关闭图片" }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
   expect(requests).toBeGreaterThan(0);
+});
+
+test("loading skeletons, one revision and touch image navigation", async ({
+  page,
+}) => {
+  const media = {
+    ...collection,
+    assets: [1, 2].map((n) => ({
+      id: `image${n}`,
+      state: "ready",
+      mime: "image/png",
+      sensitive: false,
+      alt_text: `图片${n}`,
+    })),
+  };
+  let releaseDetail!: () => void;
+  const detailGate = new Promise<void>((resolve) => {
+    releaseDetail = resolve;
+  });
+  let releaseImage!: () => void;
+  const imageGate = new Promise<void>((resolve) => {
+    releaseImage = resolve;
+  });
+  await page.route("https://telegram.org/**", (r) => r.fulfill({ body: "" }));
+  await page.route("**/v1/**", async (r) => {
+    const path = new URL(r.request().url()).pathname;
+    if (path.startsWith("/v1/assets/")) {
+      await imageGate;
+      return r.fulfill({
+        contentType: "image/svg+xml",
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="600" height="400" fill="#3390ec"/></svg>',
+      });
+    }
+    if (path === `/v1/collections/${id}`) await detailGate;
+    const body =
+      path === "/v1/session"
+        ? {}
+        : path.endsWith("/availability")
+          ? { available: true }
+          : path.endsWith("/revisions")
+            ? { items: [{ id: "r1", created_at: collection.observed_at }] }
+            : path === `/v1/collections/${id}`
+              ? media
+              : path === "/v1/usage"
+                ? { used_bytes: 0, reserved_bytes: 0, limit_bytes: 1000 }
+                : { items: [media] };
+    await r.fulfill({ json: body });
+  });
+  await page.goto("/app/");
+  await page.getByRole("button", { name: /测试作者/ }).click();
+  await expect(
+    page.getByRole("status", { name: "正在加载收藏" }),
+  ).toBeVisible();
+  releaseDetail();
+  await expect(page.getByRole("button", { name: "无历史版本" })).toBeDisabled();
+  await expect(page.locator(".media .skeleton")).toHaveCount(2);
+  releaseImage();
+  await expect(page.locator(".media .skeleton")).toHaveCount(0);
+  await page.getByRole("button", { name: "放大图片" }).first().click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("status")).toHaveText("1 / 2");
+  await expect(dialog.getByRole("button", { name: "上一张" })).toBeDisabled();
+  await page.locator(".stage").dispatchEvent("touchstart", {
+    touches: [{ identifier: 1, clientX: 320, clientY: 300 }],
+  });
+  await page.locator(".stage").dispatchEvent("touchend", {
+    touches: [],
+    changedTouches: [{ identifier: 1, clientX: 60, clientY: 305 }],
+  });
+  await expect(dialog.getByRole("status")).toHaveText("2 / 2");
+  await expect(dialog.getByRole("button", { name: "下一张" })).toBeDisabled();
+  await expect(dialog.getByAltText("图片2")).toHaveCSS("opacity", "1");
+  await page.screenshot({ path: "test-results/viewer-mobile.png" });
+  await dialog.getByRole("button", { name: "上一张" }).click();
+  await expect(dialog.getByRole("status")).toHaveText("1 / 2");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "放大图片" }).first(),
+  ).toBeFocused();
 });

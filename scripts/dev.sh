@@ -2,6 +2,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 target="${1:-core}"
+if [[ "$target" == web ]]; then
+	shift
+	exec node scripts/dev-web.mjs "$@"
+fi
 export MIDDEN_BUILD_REVISION="$(git rev-parse HEAD)"
 if [[ -n "$(git status --porcelain)" ]]; then
 	MIDDEN_BUILD_REVISION+="-dirty"
@@ -9,7 +13,7 @@ fi
 case "$target" in
 core | adapter | telegram | all) ;;
 *)
-	echo "Usage: $0 [core|adapter|telegram|all]" >&2
+	echo "Usage: $0 [core|adapter|telegram|all|web]" >&2
 	exit 2
 	;;
 esac

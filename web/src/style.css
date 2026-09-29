@@ -110,3 +110,22 @@ video {
     scroll-behavior: auto !important;
   }
 }
+
+.skeleton {
+  background: linear-gradient(
+    100deg,
+    var(--fill) 25%,
+    var(--card) 45%,
+    var(--fill) 65%
+  );
+  background-size: 240% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}

@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import type { Collection, Usage } from "../api";
 import { groupCollections } from "../presentation";
+import CollectionSkeleton from "./ui/CollectionSkeleton.vue";
 import CollectionFilters from "./CollectionFilters.vue";
 import CollectionRow from "./CollectionRow.vue";
 import ListSection from "./ui/ListSection.vue";
@@ -64,14 +65,15 @@ const storage = computed(() =>
         : "这里还是空的。在对话里把链接发给机器人，就会保存到这里。"
     }}
   </p>
-  <ListSection v-if="next">
+  <ListSection v-if="loading"><CollectionSkeleton /></ListSection>
+  <ListSection v-if="next && !loading">
     <ListButton
       :label="loading ? '加载中…' : '加载更多'"
       :disabled="loading"
       @select="$emit('more')"
     />
   </ListSection>
-  <p v-else-if="loading" class="footnote" role="status">正在读取收藏…</p>
+
   <p v-if="storage" class="footnote">{{ storage }}</p>
 </template>
 <style scoped>
