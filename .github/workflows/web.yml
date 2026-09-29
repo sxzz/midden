@@ -1,0 +1,32 @@
+name: web
+on:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: web-production
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: vars.MIDDEN_WEB_HOSTNAME != '' && (github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: pnpm/setup@v3
+        with:
+          cache: true
+          install: false
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Deploy static assets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          MIDDEN_WEB_HOSTNAME: ${{ vars.MIDDEN_WEB_HOSTNAME }}
+        run: pnpm --filter @midden/web run deploy --routes "${MIDDEN_WEB_HOSTNAME}/app/*"

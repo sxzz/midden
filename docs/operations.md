@@ -23,9 +23,9 @@ chmod +x ~/deploy-midden.sh
 ~/deploy-midden.sh          # 部署最新已发布版本
 ```
 
-脚本默认使用 `~/midden`，可通过 `MIDDEN_DIR` 指定仓库目录。它从 GHCR Core 的 `latest` 读取提交号，确认同一提交的 Core、Adapter 镜像均可用，再将干净仓库切换到该提交、备份数据库、执行迁移并更新应用。仓库会处于 detached HEAD；以后继续运行仓库外的脚本即可。最终以健康检查成功为部署完成。镜像发布尚未齐全时会在停止服务前退出，稍后重试即可。该脚本更新 Core（包含网页）、Adapter 及已启用的 Telegram channel；数据库及对象存储容器的配置调整由运营者另行执行。
+脚本默认使用 `~/midden`，可通过 `MIDDEN_DIR` 指定仓库目录。它从 GHCR Core 的 `latest` 读取提交号，确认同一提交的 Core、Adapter 镜像均可用，再将干净仓库切换到该提交、备份数据库、执行迁移并更新应用。仓库会处于 detached HEAD；以后继续运行仓库外的脚本即可。最终以健康检查成功为部署完成。镜像发布尚未齐全时会在停止服务前退出，稍后重试即可。该脚本更新 Core、Adapter 及已启用的 Telegram channel；数据库及对象存储容器的配置调整由运营者另行执行。
 
-升级前先停止 Core 和 Telegram，再备份并迁移。首次从内嵌 Bot 升级时，按数据库中已有 Bot 配置启用独立 Telegram；已有独立渠道保持原启停状态。渠道 ID 自动写入 `.env`。Core 健康与 `/app/` 页面检查通过后才启动 Telegram，并检查启动后是否退出或重启。脚本不设置公网域名或覆盖 `web_app_url`。
+升级前先停止 Core 和 Telegram，再备份并迁移。首次从内嵌 Bot 升级时，按数据库中已有 Bot 配置启用独立 Telegram；已有独立渠道保持原启停状态。渠道 ID 自动写入 `.env`。Core 健康检查通过后才启动 Telegram，并检查启动后是否退出或重启。脚本不设置公网域名或覆盖 `web_app_url`。
 
 已有部署运行 `./scripts/deploy.sh --pull`：fast-forward 拉取当前分支，下载该提交对应的镜像，停止 Core 和 Telegram 后导出数据库，再执行迁移并启动 Adapter、Core 和原先启用的 Telegram。服务器不执行镜像构建。如果 CI 尚未发布对应镜像，拉取失败，旧服务继续运行。迁移失败时保持核心停止，修复后重新部署。成功后将本次镜像标签写入 `.env`，日常重启保持相同版本。
 
@@ -184,7 +184,7 @@ REST 新提交省略 `connection_id` 时始终调用公共 API；指定时使用
 
 ## Mini App 部署
 
-core 镜像包含网页静态产物。反向代理须同时转发同域的 `/app/` 和 `/v1/`，保留 `Origin`、Cookie、Range 和响应 Content-Range；认证与媒体响应禁止共享缓存。设置数据库配置 `web_app_url` 为完整 HTTPS `/app/` 地址并重启 core 和已启用的 telegram 服务以同步私聊入口。不要把 Bot token 放入网页环境变量。
+网页与 core 独立发布：Cloudflare Workers Static Assets 提供 `/app/*`，反向代理或 Tunnel 转发同域 `/v1/*` 到 core 的 8080 端口，保留 `Origin`、Cookie、Range 和响应 Content-Range；认证与媒体响应禁止共享缓存。设置数据库配置 `web_app_url` 为完整 HTTPS `/app/` 地址并重启 core 和已启用的 telegram 服务以同步私聊入口。不要把 Bot token 放入网页环境变量。
 
 确认公开地址可以访问后，使用当前部署镜像设置地址：
 
@@ -213,3 +213,31 @@ Compose 默认不启动 Telegram，需 `docker compose --profile telegram up -d 
 ### 收藏命名
 
 REST 使用 `/v1/collections` 和 `collection_id`；Web 详情路由为 `#/collection/{id}`，保留期限配置为 `collection_retention_days`。基线直接创建收藏表，不包含旧命名升级逻辑或旧 API 路径别名。Core、Web 和 Telegram channel 应一起升级。
+
+## Cloudflare 静态网页部署
+
+`web/wrangler.json` 仅配置 `assets`，没有 `main` 或 Worker 脚本，且 `run_worker_first: false`。静态资源直接返回，不产生 Worker 脚本调用；未命中的文件返回 404，也不会进入 Worker。参见 [Cloudflare Static Assets 文档](https://developers.cloudflare.com/workers/static-assets/)。
+
+使用已接入 Cloudflare 的现有公网域名，DNS 保持代理状态并指向 core 的反向代理或 Tunnel。只将 `collection.example.com/app/*` 绑定到 `midden-web` 的 Workers Route，不能绑定整个域名作为 Worker Custom Domain，也不要使用 `/*` 路由，以免截获 API。浏览器继续使用相对路径 `/v1/*`，Cookie、Origin 校验和 `web_app_url` 保持同域。`workers.dev` 与预览域名默认关闭，因为它们没有同域后端。
+
+首次发布前准备 Cloudflare API Token（目标账户 Workers Scripts Edit、目标 Zone Workers Routes Edit 及 Zone Read 权限），通过环境变量提供 `CLOUDFLARE_API_TOKEN` 和 `CLOUDFLARE_ACCOUNT_ID`，然后运行（将示例域名替换为实际域名）：
+
+```sh
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm --filter @midden/web run deploy --routes 'collection.example.com/app/*'
+```
+
+构建将 `web/dist` 复制到独立上传目录 `.worker-assets/app/`，以匹配未被剥离的 `/app/` 路径。上传目录根部的 `_headers` 保留 CSP、Referrer-Policy 等安全头，不上传源代码或服务端配置。
+
+GitHub 自动发布：设置仓库 secrets `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`，以及变量 `MIDDEN_WEB_HOSTNAME`（仅域名，不带协议或路径）。`web` workflow 在 main 的 test workflow 成功后发布对应提交，也支持手动触发；未配置域名时跳过。后端镜像和部署脚本不再打包或检查网页。
+
+迁移已有环境时，先发布静态资源并验证 `https://实际域名/app/`、JS/CSS 与 Telegram 登录，再升级不含网页的新 core 镜像；若此前没有设置 `web_app_url`，先按上节配置。检查同域 `/v1/session` 返回 API 响应（未登录为 401），不能返回 HTML。Cloudflare 面板应显示静态资源请求而没有 Worker 脚本调用。回退网页时从前一个 Git 提交重新运行同一发布命令，无需回滚数据库。
+
+本地预览静态部署：
+
+```sh
+pnpm --filter @midden/web build:workers
+pnpm --filter @midden/web exec wrangler dev --port 8787
+```
+
+`http://127.0.0.1:8787/app/` 用于验证资源路径和响应头，不提供 API；本地完整登录与真实数据开发继续使用 `pnpm dev:web`。生产发布前可用 `pnpm --filter @midden/web exec wrangler deploy --dry-run` 验证配置。

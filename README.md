@@ -108,7 +108,7 @@ Profile 资料始终从公共实例获取。采集帖子前先读取作者 Profi
 
 收藏网页使用 Vue Vapor，提供手机帖子流、正文与作者搜索、媒体和可见性筛选、保存日期范围、历史版本、重新抓取、删除及存储用量。首次登录从 Telegram 进入，与 Bot 共用保存记录和额度；独立浏览器登录暂未开放。
 
-将 core 的 8080 端口通过 HTTPS 反向代理公开，网页 `/app/` 与 API `/v1/` 必须同域。设置公开地址后重启 core：
+网页通过 Cloudflare Workers Static Assets 单独发布，`/app/*` 由 Cloudflare 直接提供静态资源，不执行 Worker 脚本。core 镜像不包含网页。将 core 的 8080 端口通过 HTTPS 反向代理或 Cloudflare Tunnel 公开，保留同域 `/v1/*` 指向 core；只为 `/app/*` 设置 Workers Route。具体发布配置见 [静态网页部署](docs/operations.md#cloudflare-静态网页部署)。设置公开地址后重启 core：
 
 ```sh
 docker compose run --rm --entrypoint monitorctl migrate config-set web_app_url https://collection.example.com/app/

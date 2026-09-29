@@ -91,18 +91,16 @@ deploy_revision() {
 	phase='recording deployment configuration'
 	# Persist before startup: interrupted deployments remain pinned to this schema's images.
 	record_deployment_config
-	phase='starting adapter and core (including web)'
+	phase='starting adapter and core'
 	docker compose up -d --no-deps --no-build --pull never adapter core </dev/null
-	phase='waiting for core and web health'
-	local admin_address web_address
+	phase='waiting for core health'
+	local admin_address
 	admin_address=$(docker compose port core 9090 | head -n 1)
-	web_address=$(docker compose port core 8080 | head -n 1)
-	if [[ -z "$admin_address" || -z "$web_address" ]]; then
-		echo 'Core ports 9090 and 8080 must be published for health verification.' >&2
+	if [[ -z "$admin_address" ]]; then
+		echo 'Core port 9090 must be published for health verification.' >&2
 		return 1
 	fi
 	wait_for_http "$admin_address" /healthz
-	wait_for_http "$web_address" /app/
 	if [[ "$telegram_running" == true ]]; then
 		phase='starting Telegram channel'
 		docker compose --profile telegram up -d --no-deps --no-build --pull never telegram </dev/null
@@ -120,7 +118,7 @@ deploy_revision() {
 	printf 'CORE_IMAGE=%s\nADAPTER_IMAGE=%s\n' "$CORE_IMAGE" "$ADAPTER_IMAGE" >.local/deployed-images.env
 	rm -f .local/deploy-telegram-state
 	deployment_stopped=false
-	printf 'Deployment complete: %s\nCore and web health: ok\nTelegram enabled: %s\n' "$revision" "$telegram_running"
+	printf 'Deployment complete: %s\nCore health: ok\nTelegram enabled: %s\n' "$revision" "$telegram_running"
 }
 
 set -E

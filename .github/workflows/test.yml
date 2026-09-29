@@ -19,6 +19,8 @@ jobs:
       - run: node --test scripts/test-deploy.mjs scripts/test-configure-local-storage.mjs scripts/test-format.mjs scripts/test-cloudflare-tunnel.mjs
       - run: pnpm --filter @midden/web lint
       - run: pnpm build && pnpm test
+      - run: node scripts/prepare-web-assets.mjs
+      - run: pnpm --filter @midden/web exec wrangler deploy --dry-run
       - run: pnpm --filter @midden/web exec playwright install --with-deps chromium
       - run: pnpm --filter @midden/web test:e2e
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg

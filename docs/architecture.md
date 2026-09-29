@@ -276,7 +276,7 @@ X Adapter 支持帖子、用户名 Profile URL 和稳定用户 ID Profile URL。
 
 ## Web 收藏库与采集可用性
 
-Vue Vapor 静态客户端由 core 提供，业务页面只依赖 HTTP API；Telegram SDK 仅位于宿主层。平台展示器读取收藏实体快照，未知实体使用正文、摘要和媒体回退，不依赖 Adapter 在线。
+Vue Vapor 静态客户端由 Cloudflare Workers Static Assets 提供（不包含 Worker 脚本）；同域 `/app/*` 路由到静态资源，`/v1/*` 仍直达 core。本地开发可由 core 提供静态产物，业务页面只依赖 HTTP API；Telegram SDK 仅位于宿主层。平台展示器读取收藏实体快照，未知实体使用正文、摘要和媒体回退，不依赖 Adapter 在线。
 
 `web_sessions` 保存随机会话密钥摘要、租户和固定到期时间。登录验证 Telegram initData 后调用原有身份解析；Cookie 写请求校验 Origin。Web 会话在 RLS 之外校验收藏关系，公开内容也必须已被当前租户保存。REST Bearer 读取行为保持兼容。
 

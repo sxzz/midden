@@ -8,7 +8,9 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "lint": "eslint . --max-warnings=0",
-    "lint:fix": "pnpm lint --fix"
+    "lint:fix": "pnpm lint --fix",
+    "build:workers": "pnpm build && node ../scripts/prepare-web-assets.mjs",
+    "deploy": "pnpm build:workers && wrangler deploy"
   },
   "dependencies": {
     "vue": "3.6.0-rc.9"
@@ -24,7 +26,8 @@
     "typescript": "6.0.3",
     "vite": "8.3.1",
     "vitest": "5.0.2",
-    "vue-tsc": "3.3.11"
+    "vue-tsc": "3.3.11",
+    "wrangler": "4.143.0"
   },
   "prettier": "@sxzz/prettier-config"
 }
