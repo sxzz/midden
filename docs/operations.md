@@ -4,7 +4,7 @@
 
 `core` 仅使用非超级用户、非表所有者且不具备 BYPASSRLS 的 `monitor_app`。迁移和 CLI 使用管理员连接，管理员密码不注入核心或 adapter。S3 bucket 必须私有，图片经租户授权 API 读取，不暴露永久公开链接。
 
-默认 Compose 仅将 API 和监控映射到宿主机 loopback。外网访问 API 使用 TLS 反向代理。默认 Compose 由 `tls-init` 生成内部证书，通过 `adapter-tls` volume 提供给 Adapter 和核心，使用带服务认证的 TLS gRPC。证书有效期两年；到期前替换证书和密钥并重启 Adapter、核心。个人账号执行禁止使用明文 RPC。
+默认 Compose 仅将 API 和监控映射到宿主机 loopback。外网访问 API 使用 TLS 反向代理。默认 Compose 由 `tls-init` 生成内部证书，通过宿主机 `.local/adapter-tls/` 目录挂载提供给 Adapter 和核心，使用带服务认证的 TLS gRPC。证书有效期两年；到期前替换证书和密钥并重启 Adapter、核心。个人账号执行禁止使用明文 RPC。
 
 同一 Bot 一个接收者通过 PostgreSQL session advisory lock 保证；租户采集槽与图片任务也使用 session lock。进程退出后锁自动释放。账号采集同时持有租户槽和 Connection 槽，各需要一个池连接，执行短事务时还会获取连接；应为控制任务和 API 保留连接余量。
 
@@ -29,7 +29,7 @@ chmod +x ~/deploy-midden.sh
 
 仓库及镜像公开，服务器可以匿名 HTTPS 拉取。`.env`、S3 凭据和备份不纳入 Git。若部署进程被强制终止，确认没有部署仍在运行后可删除空目录 `.local/deploy.lock` 再重试。
 
-`compose.server.yaml` 提供较低的运行内存上限，并将 API、监控、S3 映射到本机 `18080`、`19090`、`18333`。使用本地 S3 的服务器可设置 `COMPOSE_FILE=compose.yaml:compose.local.yaml:compose.server.yaml`。已有部署保持原 `COMPOSE_PROJECT_NAME`，以继续使用原容器和数据卷。
+`compose.server.yaml` 提供较低的运行内存上限，并将 API、监控、S3 映射到本机 `18080`、`19090`、`18333`。使用本地 S3 的服务器可设置 `COMPOSE_FILE=compose.yaml:compose.local.yaml:compose.server.yaml`。已有部署保持原 `COMPOSE_PROJECT_NAME`，以继续管理原容器；数据通过项目下的 `.local/` 目录挂载，移动项目时需同步迁移该目录，并保留文件权限和所有者。旧版命名卷部署需先按 README 迁移数据。
 
 升级前还应按照下文备份对象存储，并安全保管 `.env` 中的 `CREDENTIAL_KEY` 及部署凭据。迁移脚本只自动备份数据库；账号密文恢复需要原加密密钥。备份默认写入 `.local/backups`，权限仅限当前用户，需另行复制到服务器外。
 

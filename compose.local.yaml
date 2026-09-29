@@ -16,7 +16,11 @@ services:
         -s3.config=/etc/monitor-s3.json,
       ]
     volumes:
-      - ${S3_DATA_PATH:-s3-data}:/data
+      - type: bind
+        source: ${S3_DATA_PATH:-./.local/seaweedfs}
+        target: /data
+        bind:
+          create_host_path: true
       - ./.local/s3.json:/etc/monitor-s3.json:ro
     ports:
       - "127.0.0.1:8333:8333"
@@ -37,5 +41,3 @@ services:
     depends_on:
       storage-init:
         condition: service_completed_successfully
-volumes:
-  s3-data:

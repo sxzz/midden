@@ -19,7 +19,7 @@ docker compose pull
 docker compose up -d
 ```
 
-脚本生成 `.env` 和 `.local/s3.json`，配置本地数据库、服务密钥和对象存储。Compose 启动 PostgreSQL、SeaweedFS、归档服务及 X 采集服务，自动创建存储桶。设置 `S3_DATA_PATH=./.local/seaweedfs` 可将本地 S3 数据保存在宿主机目录；未设置时使用 Docker 数据卷。切换路径会使用目标位置的数据，已有部署需先迁移数据或明确重置。
+脚本生成 `.env` 和 `.local/s3.json`，配置本地数据库、服务密钥和对象存储。Compose 启动 PostgreSQL、SeaweedFS、归档服务及 X 采集服务，自动创建存储桶。本地 S3 数据默认保存在宿主机的 `.local/seaweedfs/`，可通过 `S3_DATA_PATH` 指定其他宿主机目录。切换路径会使用目标位置的数据，已有部署需先迁移数据或明确重置。
 
 本地对象存储配置 32 个 32 MiB 分卷，媒体容量约 1 GiB（元数据另占少量空间），不按 Docker 剩余磁盘自动扩容。
 
@@ -37,7 +37,9 @@ docker compose ps
 docker compose logs --tail=100 core adapter
 ```
 
-数据保存在 Docker 数据卷中。`docker compose down` 停止服务并保留数据；`docker compose down -v` 会删除数据卷。
+数据通过本地目录挂载：PostgreSQL 使用 `.local/postgres/`，内部 TLS 证书使用 `.local/adapter-tls/`，本地 S3 默认使用 `.local/seaweedfs/`。这些目录已被 Git 忽略，`docker compose down` 和 `docker compose down -v` 均不会删除其中的数据。
+
+从旧版 Docker 命名卷升级时，先停止服务，将原 `postgres-data`、`adapter-tls`、`s3-data` 卷中的内容复制到对应目录（保留文件权限和所有者；已自定义 S3 路径的无需迁移该目录），再启动服务。迁移并验证数据前不要运行 `docker compose down -v`，以免删除旧卷。
 
 ### 使用已有对象存储
 

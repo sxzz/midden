@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - ./.local/postgres:/var/lib/postgresql/data
     healthcheck:
       test: [CMD-SHELL, "pg_isready -U postgres -d monitor"]
       interval: 5s
@@ -24,7 +24,7 @@ services:
       ADAPTER_TLS_CA: /tls/adapter.crt
       CREDENTIAL_KEY: ${CREDENTIAL_KEY:-}
     volumes:
-      - adapter-tls:/tls:ro
+      - ./.local/adapter-tls:/tls:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,7 +34,7 @@ services:
     user: "0:0"
     entrypoint: [monitorctl, tls-init, /tls]
     volumes:
-      - adapter-tls:/tls
+      - ./.local/adapter-tls:/tls
     restart: "no"
   adapter:
     image: ${ADAPTER_IMAGE:-ghcr.io/sxzz/midden-adapter:latest}
@@ -43,7 +43,7 @@ services:
       ADAPTER_TLS_CERT: /tls/adapter.crt
       ADAPTER_TLS_KEY: /tls/adapter.key
     volumes:
-      - adapter-tls:/tls:ro
+      - ./.local/adapter-tls:/tls:ro
     depends_on:
       tls-init:
         condition: service_completed_successfully
@@ -62,7 +62,7 @@ services:
       S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET}
       ADMIN_LISTEN: :9090
     volumes:
-      - adapter-tls:/tls:ro
+      - ./.local/adapter-tls:/tls:ro
     ports:
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:9090:9090"
@@ -72,6 +72,3 @@ services:
       adapter:
         condition: service_started
     restart: unless-stopped
-volumes:
-  adapter-tls:
-  postgres-data:
