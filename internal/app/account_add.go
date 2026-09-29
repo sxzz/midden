@@ -202,8 +202,15 @@ func (s *Service) commandAccountAdd(ctx context.Context, r *commandRequest) erro
 		r.Text = "此账号当前不可用，请重新添加会话。"
 		return nil
 	}
-	r.Text = "账号已添加：" + connectionLabel(name, username, accountID) + "。点击下方按钮用于后续保存，或使用 /account 切换来源。"
-	r.Buttons = telegram.Keyboard{{{Text: "使用此账号", Data: "/account " + connectionID}}}
+	selected, err := s.DefaultConnection(ctx, r.Task.Tenant)
+	if err != nil {
+		return err
+	}
+	r.Text = "账号已添加：" + connectionLabel(name, username, accountID) + "。"
+	if selected == connectionID {
+		r.Text += "已自动选中，用于后续保存。"
+	}
+	r.Buttons = telegram.Keyboard{{{Text: "管理账号", Data: "/account"}}}
 	return nil
 }
 

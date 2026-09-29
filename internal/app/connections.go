@@ -159,6 +159,10 @@ func (s *Service) importConnection(ctx context.Context, tenant, id, name string,
 			}
 		}
 
+		// Import and selection commit together; replay must preserve later choices.
+		if _, e = tx.Exec(ctx, `INSERT INTO tenant_preferences(tenant_id,adapter_id,default_connection_id) VALUES($1,$2,$3) ON CONFLICT(tenant_id,adapter_id) DO UPDATE SET default_connection_id=excluded.default_connection_id`, tenant, d.AdapterId, id); e != nil {
+			return e
+		}
 		_, e = tx.Exec(ctx, `DELETE FROM account_credentials c WHERE c.tenant_id=$1 AND NOT EXISTS(SELECT FROM connections n WHERE n.credential_ref=c.id)`, tenant)
 		return e
 	})

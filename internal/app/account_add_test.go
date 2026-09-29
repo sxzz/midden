@@ -141,6 +141,21 @@ func TestTelegramAccountImportIntegration(t *testing.T) {
 	if count != 1 || revision != 1 {
 		t.Fatal("duplicate connection or revision")
 	}
+	selected, err := s.DefaultConnection(ctx, identity.TenantID)
+	must(t, err)
+	if selected != envelope.AccountImport.ID {
+		t.Fatal("import did not select account")
+	}
+	// A replay after a later user choice must not select the imported account again.
+	_, err = admin.Pool.Exec(ctx, `UPDATE tenant_preferences SET default_connection_id=NULL WHERE tenant_id=$1`, identity.TenantID)
+	must(t, err)
+	_, err = s.importConnection(ctx, identity.TenantID, envelope.AccountImport.ID, "", nil, true)
+	must(t, err)
+	selected, err = s.DefaultConnection(ctx, identity.TenantID)
+	must(t, err)
+	if selected != "" {
+		t.Fatal("import replay overwrote later selection")
+	}
 	var payload, text string
 	must(t, admin.Pool.QueryRow(ctx, `SELECT i.payload::text,r.text FROM inbox i JOIN replies r ON r.inbox_id=i.id WHERE i.id=$1`, id).Scan(&payload, &text))
 	if strings.Contains(payload, "ciphertext") || strings.Contains(payload, token) || !strings.Contains(text, "账号已添加") {
