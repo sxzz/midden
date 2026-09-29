@@ -2,3 +2,6 @@ packages:
   - adapters/x
   - third_party/atmosphere
   - web
+allowBuilds:
+  esbuild: true
+  protobufjs: true
