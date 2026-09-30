@@ -1,10 +1,12 @@
 <script setup vapor lang="ts">
 import { computed } from 'vue'
 import { groupCollections } from '../presentation'
+import CollectionAlbum from './CollectionAlbum.vue'
 import CollectionFilters from './CollectionFilters.vue'
 import CollectionRow from './CollectionRow.vue'
 import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import InfiniteLoader from './ui/InfiniteLoader.vue'
+import LibraryLayoutToggle from './ui/LibraryLayoutToggle.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 import type { Collection, Usage } from '../api'
@@ -17,12 +19,24 @@ const props = defineProps<{
   next: string
   usage?: Usage
 }>()
-defineEmits<{
+const emit = defineEmits<{
   search: [query: string]
   open: [id: string]
   more: []
   retry: []
 }>()
+const layout = computed(() =>
+  new URLSearchParams(props.query).get('layout') === 'album' ? 'album' : 'feed',
+)
+function changeLayout(value: 'feed' | 'album') {
+  const q = new URLSearchParams(props.query)
+  if (value === 'album') q.set('layout', value)
+  else q.delete('layout')
+  emit('search', q.toString())
+}
+const mediaTypes = computed(
+  () => new URLSearchParams(props.query).get('media_type') || '',
+)
 const sort = computed(
   () => new URLSearchParams(props.query).get('sort') || 'captured',
 )
@@ -64,28 +78,50 @@ const storage = computed(() =>
 <template>
   <p v-if="storage" class="storage">{{ storage }}</p>
   <CollectionFilters :query="query" @search="$emit('search', $event)" />
+  <div class="layout-bar">
+    <LibraryLayoutToggle
+      :model-value="layout"
+      @update:model-value="changeLayout"
+    />
+  </div>
   <ListSection v-if="error && !items.length">
     <p class="banner" role="alert">{{ error }}</p>
     <ListButton label="重试" @select="$emit('retry')" />
   </ListSection>
-  <ListSection v-for="group in groups" :key="group.label" :title="group.label">
-    <CollectionRow
-      v-for="a in group.items"
-      :key="a.id"
-      :collection="a"
-      :sort="sort"
-      :show-sensitive="showSensitive"
-      @open="$emit('open', $event)"
-    />
-  </ListSection>
-  <p v-if="empty" class="empty">
-    {{
-      filtered
-        ? '没有匹配的收藏。换个关键词，或清除筛选。'
-        : '这里还是空的。在对话里把链接发给机器人，就会保存到这里。'
-    }}
-  </p>
-  <ListSection v-if="loading"><CollectionSkeleton /></ListSection>
+  <CollectionAlbum
+    v-if="layout === 'album'"
+    :items="items"
+    :media-types="mediaTypes"
+    :show-sensitive="showSensitive"
+    :loading="loading"
+    :next="next"
+    :error="error"
+    @open="$emit('open', $event)"
+  />
+  <template v-else>
+    <ListSection
+      v-for="group in groups"
+      :key="group.label"
+      :title="group.label"
+    >
+      <CollectionRow
+        v-for="a in group.items"
+        :key="a.id"
+        :collection="a"
+        :sort="sort"
+        :show-sensitive="showSensitive"
+        @open="$emit('open', $event)"
+      />
+    </ListSection>
+    <p v-if="empty" class="empty">
+      {{
+        filtered
+          ? '没有匹配的收藏。换个关键词，或清除筛选。'
+          : '这里还是空的。在对话里把链接发给机器人，就会保存到这里。'
+      }}
+    </p>
+    <ListSection v-if="loading"><CollectionSkeleton /></ListSection>
+  </template>
   <InfiniteLoader
     v-if="next"
     :loading="loading"
@@ -95,6 +131,11 @@ const storage = computed(() =>
 </template>
 
 <style scoped>
+.layout-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 var(--gutter) 16px;
+}
 .banner {
   margin: 0;
   padding: 14px var(--inset);

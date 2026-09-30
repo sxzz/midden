@@ -69,6 +69,7 @@ const meta = computed(() =>
       <span class="preview">{{ preview }}</span>
       <span v-if="meta" class="meta">{{ meta }}</span>
       <MediaThumbs
+        :collection-id="collection.id"
         :assets="collection.assets || []"
         :show-sensitive="showSensitive"
         @open="$emit('open', collection.id)"

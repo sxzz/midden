@@ -24,6 +24,7 @@ let scroll = 0
 let listRoute = '/'
 function apiQuery(raw: string) {
   const q = new URLSearchParams(raw)
+  q.delete('layout')
   const from = q.get('from_date')
   const to = q.get('to_date')
   q.delete('from_date')
@@ -48,10 +49,11 @@ watch(
     if (!id.value) {
       listRoute = route.fullPath
       query.value = route.fullPath.split('?')[1]?.split('#')[0] || ''
-      if (loadedQuery !== query.value) {
-        loadedQuery = query.value
+      const effectiveQuery = apiQuery(query.value)
+      if (loadedQuery !== effectiveQuery) {
+        loadedQuery = effectiveQuery
         scroll = 0
-        await collection.load(apiQuery(query.value))
+        await collection.load(effectiveQuery)
       }
       await nextTick()
       if (route.name === 'collections') window.scrollTo(0, scroll)

@@ -9,6 +9,7 @@ function read(query: string) {
   const params = new URLSearchParams(query)
   return {
     authors: params.getAll('author'),
+    layout: params.get('layout') === 'album' ? 'album' : '',
     order: params.get('order') || 'desc',
     sort: params.get('sort') || 'captured',
     q: params.get('q') || '',
@@ -68,6 +69,7 @@ function stringify(f: Form) {
   const q = new URLSearchParams()
   for (const [k, v] of [
     ['q', f.q],
+    ['layout', f.layout],
     ['entity_type', f.entity],
     ['sort', f.sort],
     ['order', f.order],
@@ -96,9 +98,10 @@ function search() {
   emit('search', query)
 }
 function clear() {
-  Object.assign(form, read(''))
+  const layout = form.layout
+  Object.assign(form, read(''), { layout })
   settled = build()
-  emit('search', '')
+  emit('search', layout ? 'layout=album' : '')
 }
 // Every discrete control applies itself; only the keyword box waits for Enter.
 watch(
@@ -285,7 +288,6 @@ const mediaOptions = Object.entries(mediaNames).map(([value, label]) => ({
             <option value="not_contains">不包含</option></select
           ><ChevronIcon class="select-chevron" /></span
       ></label>
-      <p class="hint">按当前版本的正文媒体判断；头像等附带资源不计入。</p>
       <fieldset class="dates">
         <legend>收藏日期</legend>
         <label class="option"

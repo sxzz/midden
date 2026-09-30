@@ -6,7 +6,11 @@ import MediaPreview from './MediaPreview.vue'
 import MediaViewer from './MediaViewer.vue'
 import EyeIcon from './ui/EyeIcon.vue'
 import type { Asset } from '../api'
-const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>()
+const props = defineProps<{
+  assets: Asset[]
+  showSensitive?: boolean
+  collectionId?: string
+}>()
 const emit = defineEmits<{ open: [] }>()
 const selected = shallowRef<Asset>()
 const LIMIT = 4
@@ -25,6 +29,10 @@ const previews = computed(() =>
       asset.mime?.startsWith('image/') || asset.mime?.startsWith('video/'),
   ),
 )
+function openCollection() {
+  selected.value = undefined
+  emit('open')
+}
 function view(asset: Asset) {
   if (!asset.mime?.startsWith('image/') && !asset.mime?.startsWith('video/')) {
     emit('open')
@@ -102,6 +110,8 @@ const overflow = computed(() => media.value.length - tiles.value.length)
     v-if="selected"
     :assets="previews"
     :initial-id="selected.id"
+    :collection-id="collectionId"
+    @open="openCollection"
     @close="selected = undefined"
   />
 </template>

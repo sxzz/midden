@@ -10,9 +10,15 @@ import {
 } from 'vue'
 import { api, assetURL, errorText, type Asset } from '../api'
 import { host } from '../host'
+import ViewerDetailButton from './ui/ViewerDetailButton.vue'
 import 'photoswipe/style.css'
-const props = defineProps<{ assets: Asset[]; initialId: string }>()
-const emit = defineEmits<{ close: [] }>()
+const props = defineProps<{
+  assets: Asset[]
+  initialId: string
+  collectionId?: string
+  collectionIds?: Record<string, string>
+}>()
+const emit = defineEmits<{ close: []; open: [id: string] }>()
 const index = shallowRef(
   Math.max(
     0,
@@ -20,6 +26,11 @@ const index = shallowRef(
   ),
 )
 const selected = computed(() => props.assets[index.value])
+const selectedCollection = computed(
+  () =>
+    selected.value &&
+    (props.collectionIds?.[selected.value.id] || props.collectionId),
+)
 const isVideo = computed(() => selected.value?.mime?.startsWith('video/'))
 const videos = new Set<HTMLVideoElement>()
 const dialog = useTemplateRef<HTMLDialogElement>('viewer')
@@ -87,7 +98,7 @@ onMounted(() => {
   dialog.value?.showModal()
   const previews = [
     ...document.querySelectorAll<HTMLImageElement>(
-      '.media img, .thumbs img, .author img',
+      '.media img, .thumbs img, .album img, .author img',
     ),
   ]
   const dataSource = props.assets.map((image) => {
@@ -95,7 +106,7 @@ onMounted(() => {
     if (image.mime?.startsWith('video/')) {
       const preview = [
         ...document.querySelectorAll<HTMLVideoElement>(
-          '.media video, .thumbs video',
+          '.media video, .thumbs video, .album video',
         ),
       ].find(
         (video) => video.src.split('#')[0] === new URL(src, location.href).href,
@@ -301,6 +312,10 @@ watch(
       >
         {{ index + 1 }} / {{ assets.length }}
       </p>
+      <ViewerDetailButton
+        v-if="selectedCollection"
+        @select="emit('open', selectedCollection!)"
+      />
       <button
         type="button"
         class="glass save"
