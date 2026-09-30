@@ -424,32 +424,16 @@ func (s *Service) Usage(ctx context.Context, t string) (u domain.Usage, e error)
 	return
 }
 
-func collection(ctx context.Context, tx pgx.Tx, id string) (a domain.Collection, e error) {
-	var payload []byte
-	var cid string
-	e = tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,a.visibility,r.id,r.payload,r.capture_id,a.observed_at,a.created_at FROM collections a JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1`, id).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &payload, &cid, &a.ObservedAt, &a.CreatedAt)
-	if e != nil {
-		return
+func collection(ctx context.Context, tx pgx.Tx, id string) (domain.Collection, error) {
+	loaded, err := collectionsByID(ctx, tx, []string{id})
+	if err != nil {
+		return domain.Collection{}, err
 	}
-	var p Payload
-	if e = json.Unmarshal(payload, &p); e != nil {
-		return
+	a, ok := loaded[id]
+	if !ok {
+		return domain.Collection{}, pgx.ErrNoRows
 	}
-	a.AuthorName = p.AuthorName
-	a.PublishedAt = p.PublishedAt
-	a.Summary = p.Summary
-	a.Text = p.Text
-	a.TextKind = p.TextKind
-	a.TextSource = p.TextSource
-	a.AdapterVersion = p.Version
-	a.Warnings = p.Warnings
-	all, err := assets(ctx, tx, cid)
-	e = err
-	hydrateGraph(&a, p, all)
-	if e == nil {
-		e = linkSavedEntities(ctx, tx, &a)
-	}
-	return
+	return a, nil
 }
 
 func (s *Service) Collection(ctx context.Context, t, id string) (a domain.Collection, e error) {
@@ -464,19 +448,28 @@ func (s *Service) Collection(ctx context.Context, t, id string) (a domain.Collec
 	return
 }
 
-func assets(ctx context.Context, tx pgx.Tx, cid string) (out []domain.Asset, e error) {
-	rows, e := tx.Query(ctx, `SELECT a.id,a.purpose,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,'') FROM assets a LEFT JOIN blobs b ON b.id=a.blob_id WHERE a.capture_id=$1 ORDER BY a.position`, cid)
+func assets(ctx context.Context, tx pgx.Tx, cid string) ([]domain.Asset, error) {
+	loaded, err := assetsByCapture(ctx, tx, []string{cid})
+	return loaded[cid], err
+}
+
+func assetsByCapture(ctx context.Context, tx pgx.Tx, cids []string) (out map[string][]domain.Asset, e error) {
+	rows, e := tx.Query(ctx, `SELECT a.capture_id,a.id,a.purpose,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,'') FROM assets a LEFT JOIN blobs b ON b.id=a.blob_id WHERE a.capture_id=ANY($1::uuid[]) ORDER BY a.capture_id,a.position`, cids)
 	if e != nil {
 		return nil, e
 	}
 	defer rows.Close()
-	out = []domain.Asset{}
+	out = make(map[string][]domain.Asset, len(cids))
+	for _, cid := range cids {
+		out[cid] = []domain.Asset{}
+	}
 	for rows.Next() {
 		var a domain.Asset
-		if e = rows.Scan(&a.ID, &a.Purpose, &a.Position, &a.AltText, &a.Sensitive, &a.State, &a.Error, &a.Hash, &a.MIME, &a.Size, &a.Key); e != nil {
+		var cid string
+		if e = rows.Scan(&cid, &a.ID, &a.Purpose, &a.Position, &a.AltText, &a.Sensitive, &a.State, &a.Error, &a.Hash, &a.MIME, &a.Size, &a.Key); e != nil {
 			return nil, e
 		}
-		out = append(out, a)
+		out[cid] = append(out[cid], a)
 	}
 	return out, rows.Err()
 }

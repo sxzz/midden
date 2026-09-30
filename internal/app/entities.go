@@ -212,16 +212,20 @@ func (s *Service) Entity(ctx context.Context, tenant, id string) (v domain.Entit
 
 // Resolve links at read time: saved membership belongs to the requesting tenant,
 // not to the shared entity snapshot. Only collections rooted at the entity count.
-func linkSavedEntities(ctx context.Context, tx pgx.Tx, a *domain.Collection) error {
-	if a.Graph == nil {
-		return nil
-	}
+func linkSavedEntities(ctx context.Context, tx pgx.Tx, collections ...*domain.Collection) error {
 	ids := []string{}
-	for i := range a.Graph.Entities {
-		e := &a.Graph.Entities[i]
-		e.SavedCollectionID = ""
-		if e.ID != "" {
-			ids = append(ids, e.ID)
+	seen := map[string]bool{}
+	for _, a := range collections {
+		if a.Graph == nil {
+			continue
+		}
+		for i := range a.Graph.Entities {
+			e := &a.Graph.Entities[i]
+			e.SavedCollectionID = ""
+			if e.ID != "" && !seen[e.ID] {
+				ids = append(ids, e.ID)
+				seen[e.ID] = true
+			}
 		}
 	}
 	if len(ids) == 0 {
@@ -247,9 +251,14 @@ func linkSavedEntities(ctx context.Context, tx pgx.Tx, a *domain.Collection) err
 	if err = rows.Err(); err != nil {
 		return err
 	}
-	for i := range a.Graph.Entities {
-		e := &a.Graph.Entities[i]
-		e.SavedCollectionID = links[e.ID]
+	for _, a := range collections {
+		if a.Graph == nil {
+			continue
+		}
+		for i := range a.Graph.Entities {
+			e := &a.Graph.Entities[i]
+			e.SavedCollectionID = links[e.ID]
+		}
 	}
 	return nil
 }

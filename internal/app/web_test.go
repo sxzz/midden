@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"google.golang.org/grpc"
@@ -58,6 +60,36 @@ func TestWebCollection(t *testing.T) {
 	for i, kind := range []string{"x.post", "x.profile"} {
 		_, e = admin.Pool.Exec(ctx, `UPDATE revisions SET payload=payload || jsonb_build_object('graph', jsonb_build_object('root','root','entities',jsonb_build_array(jsonb_build_object('key','root','type',$2::text),jsonb_build_object('key','author','type','x.profile')))) WHERE collection_id=$1`, jobs[i].CollectionID, kind)
 		must(t, e)
+		// Build the relational graph too, as finalization does in production.
+		must(t, db.Tx(ctx, a.TenantID, func(tx pgx.Tx) error {
+			var raw []byte
+			var rid, cid string
+			if err := tx.QueryRow(ctx, `SELECT id,capture_id,payload FROM revisions WHERE collection_id=$1`, jobs[i].CollectionID).Scan(&rid, &cid, &raw); err != nil {
+				return err
+			}
+			var payload Payload
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				return err
+			}
+			for j := range payload.Graph.Entities {
+				entity := &payload.Graph.Entities[j]
+				entity.ExternalID = jobs[i].CollectionID + entity.Key
+				entity.Data = json.RawMessage(`{}`)
+				entity.Schema = json.RawMessage(`{}`)
+			}
+			if err := persistEntities(ctx, tx, a.TenantID, cid, &payload, nil); err != nil {
+				return err
+			}
+			if err := linkEntities(ctx, tx, a.TenantID, cid, rid, payload.Graph); err != nil {
+				return err
+			}
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(ctx, `UPDATE revisions SET payload=$2 WHERE id=$1`, rid, raw)
+			return err
+		}))
 	}
 	for _, kind := range []string{"x.post", "x.profile"} {
 		filtered, err := s.Collections(ctx, a.TenantID, CollectionFilter{EntityType: kind}, "")

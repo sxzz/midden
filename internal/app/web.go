@@ -100,7 +100,7 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 	}
 	q := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.TrimSpace(f.Q)) + "%"
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
-		query := `SELECT a.id,ta.created_at,ordering.at,storage.bytes FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id JOIN revisions r ON r.id=a.current_revision CROSS JOIN LATERAL (SELECT CASE WHEN $8='published' AND pg_input_is_valid(r.payload->>'published_at','timestamp with time zone') THEN (r.payload->>'published_at')::timestamptz ELSE a.observed_at END AS at) ordering CROSS JOIN LATERAL (SELECT ` + collectionStorageSQL + ` AS bytes) storage WHERE (cardinality($11::text[])=0 OR EXISTS(` + authorMatchSQL + `)) AND ($14='' OR ($14='contains')=EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='' AND m.sensitive)) AND ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR a.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND (($8='storage' AND ($10::bigint IS NULL OR (storage.bytes,a.id)<($10,$6::uuid))) OR ($8<>'storage' AND ($5::timestamptz IS NULL OR (ordering.at,a.id)<($5,$6::uuid)))) AND ($7='' OR ('text'=ANY(string_to_array($7,',')) AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (('image'=ANY(string_to_array($7,',')) AND b.mime LIKE 'image/%') OR ('video'=ANY(string_to_array($7,',')) AND b.mime LIKE 'video/%')))) AND ($9='' OR EXISTS(SELECT FROM jsonb_array_elements(r.payload->'graph'->'entities') entity WHERE entity->>'key'=r.payload->'graph'->>'root' AND entity->>'type'=$9)) AND ($15='' OR EXISTS(SELECT FROM collection_tags ct WHERE ct.collection_id=a.id AND ct.tenant_id=ta.tenant_id AND ct.tag_id=NULLIF($15,'')::uuid)) ORDER BY CASE WHEN $8='storage' THEN storage.bytes END DESC,CASE WHEN $8<>'storage' THEN ordering.at END DESC,a.id DESC LIMIT 21`
+		query := `SELECT a.id,ta.created_at,ordering.at,storage.bytes FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id JOIN revisions r ON r.id=a.current_revision CROSS JOIN LATERAL (SELECT CASE WHEN $8='published' AND pg_input_is_valid(r.payload->>'published_at','timestamp with time zone') THEN (r.payload->>'published_at')::timestamptz ELSE a.observed_at END AS at) ordering CROSS JOIN LATERAL (SELECT ` + collectionStorageSQL + ` AS bytes) storage WHERE (cardinality($11::text[])=0 OR EXISTS(` + authorMatchSQL + `)) AND ($14='' OR ($14='contains')=EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='' AND m.sensitive)) AND ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR a.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND (($8='storage' AND ($10::bigint IS NULL OR (storage.bytes,a.id)<($10,$6::uuid))) OR ($8<>'storage' AND ($5::timestamptz IS NULL OR (ordering.at,a.id)<($5,$6::uuid)))) AND ($7='' OR ('text'=ANY(string_to_array($7,',')) AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (('image'=ANY(string_to_array($7,',')) AND b.mime LIKE 'image/%') OR ('video'=ANY(string_to_array($7,',')) AND b.mime LIKE 'video/%')))) AND ($9='' OR EXISTS(SELECT FROM revision_entities re JOIN entity_versions ev ON ev.id=re.entity_version_id JOIN entities en ON en.id=ev.entity_id WHERE re.revision_id=r.id AND re.is_root AND en.kind=$9)) AND ($15='' OR EXISTS(SELECT FROM collection_tags ct WHERE ct.collection_id=a.id AND ct.tenant_id=ta.tenant_id AND ct.tag_id=NULLIF($15,'')::uuid)) ORDER BY CASE WHEN $8='storage' THEN storage.bytes END DESC,CASE WHEN $8<>'storage' THEN ordering.at END DESC,a.id DESC LIMIT 21`
 		if f.Order == "asc" {
 			query = strings.ReplaceAll(query, "(ordering.at,a.id)<", "(ordering.at,a.id)>")
 			query = strings.ReplaceAll(query, "(storage.bytes,a.id)<", "(storage.bytes,a.id)>")
@@ -136,10 +136,18 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 			b, _ := json.Marshal(collectionCursor{Time: last.at, Bytes: last.bytes, ID: last.id, Filter: fingerprint})
 			p.Next = base64.RawURLEncoding.EncodeToString(b)
 		}
+		ids := make([]string, len(entries))
+		for i, v := range entries {
+			ids[i] = v.id
+		}
+		loaded, err := collectionsByID(ctx, tx, ids)
+		if err != nil {
+			return err
+		}
 		for _, v := range entries {
-			a, err := collection(ctx, tx, v.id)
-			if err != nil {
-				return err
+			a, ok := loaded[v.id]
+			if !ok {
+				return pgx.ErrNoRows
 			}
 			a.StorageBytes = v.bytes
 			p.Items = append(p.Items, CollectionItem{a, v.saved})
