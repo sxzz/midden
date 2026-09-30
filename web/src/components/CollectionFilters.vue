@@ -35,7 +35,7 @@ function read(query: string) {
     order: params.get('order') || 'desc',
     sort: params.get('sort') || 'captured',
     q: params.get('q') || '',
-    entity: params.get('entity_type') || 'x.post',
+    entity: (params.get('entity_type') ?? 'x.post').split(',').filter(Boolean),
     media: (params.get('media_type') || '').split(',').filter(Boolean),
     visibility: params.get('visibility') || '',
     sensitive: params.get('sensitive') || '',
@@ -45,6 +45,10 @@ function read(query: string) {
 }
 type Form = ReturnType<typeof read>
 const form = reactive(read(props.query))
+const entityOptions = [
+  { value: 'x.post', label: 'X 帖子' },
+  { value: 'x.profile', label: 'X 账号' },
+]
 const mediaNames: Record<string, string> = {
   image: '图片',
   video: '视频',
@@ -74,7 +78,13 @@ const active = computed(() =>
     form.tag
       ? tags.value.find((tag) => tag.id === form.tag)?.name || '已选标签'
       : '',
-    form.entity === 'x.profile' ? 'X 账号' : 'X 帖子',
+    form.entity
+      .map(
+        (value) =>
+          entityOptions.find((option) => option.value === value)?.label ||
+          value,
+      )
+      .join('、'),
     form.media.map((type) => mediaNames[type]).join('、'),
     // Authors are selected by identity; only their names are worth showing.
     form.authors.map((id) => authorNames.value[id] || id).join('、'),
@@ -97,7 +107,6 @@ function stringify(f: Form) {
     ['tag', f.tag],
     ['q', f.q],
     ['layout', f.layout],
-    ['entity_type', f.entity],
     ['sort', f.sort],
     ['order', f.order],
     ['media_type', f.media.join(',')],
@@ -107,6 +116,7 @@ function stringify(f: Form) {
     ['to_date', f.to],
   ])
     if (v) q.set(k, v)
+  q.set('entity_type', f.entity.join(','))
   for (const author of f.authors) q.append('author', author)
   return q.toString()
 }
@@ -134,7 +144,7 @@ function clear() {
 watch(
   () => [
     form.tag,
-    form.entity,
+    form.entity.join(','),
     form.sort,
     form.order,
     form.visibility,
@@ -301,13 +311,12 @@ const tagFilter = computed({
           </button>
         </p>
       </div>
-      <label class="option"
-        >类型<span class="select"
-          ><select v-model="form.entity" aria-label="类型">
-            <option value="x.post">X 帖子</option>
-            <option value="x.profile">X 账号</option></select
-          ><ChevronIcon class="select-chevron" /></span
-      ></label>
+      <MultiSelect
+        v-model="form.entity"
+        label="类型"
+        :options="entityOptions"
+        :searchable="false"
+      />
       <MultiSelect
         v-model="form.authors"
         label="作者"
@@ -322,6 +331,7 @@ const tagFilter = computed({
         v-model="form.media"
         label="媒体类型"
         :options="mediaOptions"
+        :searchable="false"
       />
       <label class="option"
         >来源内容权限<span class="select"

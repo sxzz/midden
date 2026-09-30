@@ -1,10 +1,14 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, useTemplateRef } from 'vue'
 import ChevronIcon from './ChevronIcon.vue'
-const props = defineProps<{
-  label: string
-  options: { value: string; label: string }[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    label: string
+    options: { value: string; label: string }[]
+    searchable?: boolean
+  }>(),
+  { searchable: true },
+)
 const selected = defineModel<string[]>({ required: true })
 const query = shallowRef('')
 const open = shallowRef(false)
@@ -14,6 +18,7 @@ const choices = computed(() => {
   for (const value of selected.value)
     if (!options.some((option) => option.value === value))
       options.push({ value, label: value })
+  if (!props.searchable) return options
   return options.filter((option) =>
     option.label.toLocaleLowerCase().includes(query.value.toLocaleLowerCase()),
   )
@@ -76,6 +81,7 @@ function navigate(event: KeyboardEvent) {
     </summary>
     <div class="choices">
       <input
+        v-if="searchable"
         v-model="query"
         type="search"
         :aria-label="`搜索${label}`"

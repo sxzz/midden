@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -91,10 +92,11 @@ func TestWebCollection(t *testing.T) {
 			return err
 		}))
 	}
-	for _, kind := range []string{"x.post", "x.profile"} {
+	for _, kind := range []string{"x.post", "x.profile", "x.post,x.profile"} {
 		filtered, err := s.Collections(ctx, a.TenantID, CollectionFilter{EntityType: kind}, "")
 		must(t, err)
-		if len(filtered.Items) != 1 {
+		want := len(strings.Split(kind, ","))
+		if len(filtered.Items) != want {
 			t.Fatalf("%s: got %d items", kind, len(filtered.Items))
 		}
 	}

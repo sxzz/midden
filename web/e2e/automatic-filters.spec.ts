@@ -49,7 +49,9 @@ test('filter changes apply immediately without collapsing controls', async ({
   )
   expect(tags[0]!.y).toBe(tags[1]!.y)
   expect(tags[1]!.x).toBeGreaterThan(tags[0]!.x)
-  await page.getByLabel('类型', { exact: true }).selectOption('x.profile')
+  await page.locator('summary[aria-label="类型"]').click()
+  await page.getByRole('option', { name: 'X 账号', exact: true }).click()
+  await page.getByRole('option', { name: 'X 帖子', exact: true }).click()
   await expect.poll(() => queries.at(-1)?.get('entity_type')).toBe('x.profile')
   await expect(panel).toHaveAttribute('aria-expanded', 'true')
   await page.getByRole('button', { name: '清除', exact: true }).click()
@@ -62,9 +64,12 @@ test('filter changes apply immediately without collapsing controls', async ({
     'false',
   )
   await page.goBack()
-  await expect(page.getByLabel('类型', { exact: true })).toHaveValue(
-    'x.profile',
-  )
+  await expect(
+    page.getByRole('option', { name: 'X 账号', exact: true }),
+  ).toHaveAttribute('aria-selected', 'true')
+  await expect(
+    page.getByRole('option', { name: 'X 帖子', exact: true }),
+  ).toHaveAttribute('aria-selected', 'false')
   await expect(list.getByRole('option', { name: '作者甲' })).toHaveAttribute(
     'aria-selected',
     'true',

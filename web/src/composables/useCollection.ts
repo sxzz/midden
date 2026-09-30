@@ -21,7 +21,7 @@ export function useCollection() {
     }
     query = params
     const q = new URLSearchParams(params)
-    if (!q.get('entity_type')) q.set('entity_type', 'x.post')
+    if (!q.has('entity_type')) q.set('entity_type', 'x.post')
     q.set('q', q.get('q') || '')
     if (append && next.value) q.set('cursor', next.value)
     try {
