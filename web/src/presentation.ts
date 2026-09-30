@@ -15,6 +15,7 @@ export interface Detail {
   datetime?: string
 }
 export interface Presentation {
+  profileCollectionId?: string
   name: string
   handle?: string
   avatar?: Asset
@@ -42,7 +43,7 @@ function details(
       ? [{ key: 'edited', label: '已编辑', value: editedAt, datetime: edited }]
       : []),
     ...(a.visibility === 'private'
-      ? [{ key: 'visibility', value: '私密' }]
+      ? [{ key: 'visibility', label: '可见性', value: '私密' }]
       : []),
   ]
 }
@@ -93,6 +94,15 @@ function metadata(entity?: Entity): Record<string, unknown> {
     ? (value as Record<string, unknown>)
     : {}
 }
+function profileBio(a: Collection, profile?: Entity): string {
+  const description = metadata(profile).description
+  if (typeof description === 'string') return description.trim() || '暂无简介'
+  // Older snapshots kept the handle as the first line of the collection text.
+  const lines = (a.text || '').split(/\r?\n/)
+  const handle = asText(profile?.data.username)
+  if (handle && lines[0]?.trim() === `@${handle}`) lines.shift()
+  return lines.join('\n').trim() || '暂无简介'
+}
 const x: Presenter = (a, root) => {
   const key = a.graph?.relations.find(
     (r) => r.source === a.graph?.root && r.type === 'authored_by',
@@ -104,6 +114,8 @@ const x: Presenter = (a, root) => {
   const post = root?.type === 'x.post' ? root.data : undefined
   return {
     ...generic(a),
+    body: isProfile ? profileBio(a, profile) : generic(a).body,
+    profileCollectionId: isProfile ? undefined : profile?.saved_collection_id,
     handle: asText(profile?.data.username),
     avatar: profile?.assets?.find(
       (v) => v.purpose === 'avatar' && v.state === 'ready',
@@ -112,11 +124,17 @@ const x: Presenter = (a, root) => {
     stats: isProfile
       ? group('账号统计', metadata(profile), accountCounts)
       : post && group('帖子统计', post, postCounts),
-    details: details(
-      a,
-      asText(post?.published_at) ?? a.published_at,
-      asText(post?.edited_at),
-    ),
+    details: [
+      ...details(
+        a,
+        asText(post?.published_at) ?? a.published_at,
+        asText(post?.edited_at),
+      ),
+      ...(isProfile && root?.external_id
+        ? [{ key: 'uid', label: 'UID', value: root.external_id }]
+        : []),
+      ...(a.id ? [{ key: 'uuid', label: 'UUID', value: a.id }] : []),
+    ],
   }
 }
 const registry: Record<string, Presenter> = { 'x.post': x, 'x.profile': x }

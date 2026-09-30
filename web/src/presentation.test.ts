@@ -89,7 +89,7 @@ it('details the post from its own record', () => {
     ['edited', '已编辑'],
   ])
   expect(present({ visibility: 'private' } as Collection).details).toEqual([
-    { key: 'visibility', value: '私密' },
+    { key: 'visibility', label: '可见性', value: '私密' },
   ])
 })
 it('buckets the collection by when it was saved', () => {
@@ -141,4 +141,49 @@ it('translates adapter warnings and drops duplicates', () => {
       'some adapter detail',
     ]),
   ).toEqual(['部分媒体超出限制，没有保存。', '部分内容没有完整保存。'])
+})
+
+const xProfile = (description?: string): Collection => ({
+  ...xPost({}, {}),
+  id: '06a4fde7-5a04-4c6f-b9e7-9cc99485900d',
+  revision_id: 'different-revision',
+  text: '@handle\nBio mentions @friend',
+  graph: {
+    root: 'u',
+    relations: [],
+    entities: [
+      {
+        key: 'u',
+        type: 'x.profile',
+        external_id: '1234567890123456789',
+        data: { username: 'handle', metadata: { description } },
+      },
+    ],
+  },
+})
+it('shows the saved bio without the synthetic handle prefix', () => {
+  expect(present(xProfile('Actual bio with @handle')).body).toBe(
+    'Actual bio with @handle',
+  )
+  expect(present(xProfile('')).body).toBe('暂无简介')
+  expect(present(xProfile()).body).toBe('Bio mentions @friend')
+  expect(
+    present({ ...xProfile(), text: '@handle is part of this bio' }).body,
+  ).toBe('@handle is part of this bio')
+})
+it('shows the exact profile UID and collection UUID in metadata', () => {
+  const profile = xProfile()
+  expect(present(profile).details).toEqual([
+    { key: 'uid', label: 'UID', value: '1234567890123456789' },
+    { key: 'uuid', label: 'UUID', value: profile.id },
+  ])
+  const post = {
+    ...xPost({}, {}),
+    id: 'post-collection',
+    revision_id: 'post-revision',
+  }
+  expect(present(post).details).toEqual([
+    { key: 'uuid', label: 'UUID', value: 'post-collection' },
+  ])
+  expect(present(post).body).toBe('text')
 })

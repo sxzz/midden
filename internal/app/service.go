@@ -399,6 +399,9 @@ func (s *Service) DeleteCollection(ctx context.Context, tenant, id string) error
 		if tag.RowsAffected() == 0 {
 			return domain.ErrNotFound
 		}
+		if err := pruneTags(ctx, tx); err != nil {
+			return err
+		}
 		// The restricted function checks references belonging to every tenant.
 		_, e = tx.Exec(ctx, `SELECT mark_unreferenced($1)`, id)
 		return e
@@ -443,6 +446,9 @@ func collection(ctx context.Context, tx pgx.Tx, id string) (a domain.Collection,
 	all, err := assets(ctx, tx, cid)
 	e = err
 	hydrateGraph(&a, p, all)
+	if e == nil {
+		e = linkSavedEntities(ctx, tx, &a)
+	}
 	return
 }
 

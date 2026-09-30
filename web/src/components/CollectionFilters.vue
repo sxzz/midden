@@ -1,13 +1,35 @@
 <script setup vapor lang="ts">
-import { computed, onUnmounted, reactive, shallowRef, watch } from 'vue'
-import { api, errorText, type Author } from '../api'
+import {
+  computed,
+  onActivated,
+  onMounted,
+  onUnmounted,
+  reactive,
+  shallowRef,
+  watch,
+} from 'vue'
+import { api, errorText, type Author, type Tag } from '../api'
 import ChevronIcon from './ui/ChevronIcon.vue'
 import MultiSelect from './ui/MultiSelect.vue'
+import TagChips from './ui/TagChips.vue'
+const tags = shallowRef<Tag[]>([])
+const tagError = shallowRef('')
+async function loadTags() {
+  try {
+    tags.value = await api<Tag[]>('/tags')
+    tagError.value = ''
+  } catch (e) {
+    tagError.value = errorText(e)
+  }
+}
+onMounted(loadTags)
+onActivated(loadTags)
 const props = defineProps<{ query: string }>()
 const emit = defineEmits<{ search: [query: string] }>()
 function read(query: string) {
   const params = new URLSearchParams(query)
   return {
+    tag: params.get('tag') || '',
     authors: params.getAll('author'),
     layout: params.get('layout') === 'album' ? 'album' : '',
     order: params.get('order') || 'desc',
@@ -38,6 +60,7 @@ const sensitiveNames: Record<string, string> = {
 }
 const open = shallowRef(
   !!(
+    form.tag ||
     form.authors.length ||
     form.media.length ||
     form.visibility ||
@@ -48,6 +71,9 @@ const open = shallowRef(
 )
 const active = computed(() =>
   [
+    form.tag
+      ? tags.value.find((tag) => tag.id === form.tag)?.name || '已选标签'
+      : '',
     form.entity === 'x.profile' ? 'X 账号' : 'X 帖子',
     form.media.map((type) => mediaNames[type]).join('、'),
     // Authors are selected by identity; only their names are worth showing.
@@ -68,6 +94,7 @@ const active = computed(() =>
 function stringify(f: Form) {
   const q = new URLSearchParams()
   for (const [k, v] of [
+    ['tag', f.tag],
     ['q', f.q],
     ['layout', f.layout],
     ['entity_type', f.entity],
@@ -106,6 +133,7 @@ function clear() {
 // Every discrete control applies itself; only the keyword box waits for Enter.
 watch(
   () => [
+    form.tag,
     form.entity,
     form.sort,
     form.order,
@@ -176,6 +204,14 @@ const mediaOptions = Object.entries(mediaNames).map(([value, label]) => ({
   value,
   label,
 }))
+// The API filters on one tag, so the chips are a single-choice group; the
+// query string keeps storing it as a scalar.
+const tagFilter = computed({
+  get: () => (form.tag ? [form.tag] : []),
+  set: (value) => {
+    form.tag = value[0] ?? ''
+  },
+})
 </script>
 
 <template>
@@ -247,6 +283,24 @@ const mediaOptions = Object.entries(mediaNames).map(([value, label]) => ({
       /></span>
     </div>
     <div v-show="open" class="panel">
+      <!-- Tags are your own vocabulary, so they get the same chips as in the
+           collection itself, not a picker that hides them. -->
+      <div v-if="tags.length || tagError" class="tag-filter">
+        <p class="tag-title">标签</p>
+        <TagChips
+          v-if="tags.length"
+          v-model="tagFilter"
+          label="标签筛选"
+          all-label="全部"
+          :tags="tags"
+        />
+        <p v-if="tagError" class="tag-error" role="alert">
+          {{ tagError }}
+          <button type="button" class="tag-retry" @click="loadTags">
+            重试
+          </button>
+        </p>
+      </div>
       <label class="option"
         >类型<span class="select"
           ><select v-model="form.entity" aria-label="类型">
@@ -394,6 +448,24 @@ const mediaOptions = Object.entries(mediaNames).map(([value, label]) => ({
   color: var(--subtle);
   font-size: 12px;
   line-height: 1.5;
+}
+.tag-filter {
+  padding: 12px var(--inset) 16px;
+  border-bottom: 1px solid var(--separator);
+}
+.tag-title {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+.tag-error {
+  margin: 10px 0 0;
+  color: var(--subtle);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.tag-retry {
+  min-height: 32px;
+  color: var(--link);
 }
 .dates {
   margin: 0;

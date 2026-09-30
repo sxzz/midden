@@ -21,6 +21,8 @@ vi.mock('../api', async (original) => ({
   api: vi.fn(async (path: string) => {
     if (path === '/collections' || path.startsWith('/collections?'))
       return { items: [collection] }
+    if (path === '/tags') return []
+    if (path.endsWith('/annotation')) return { note: '', tags: [] }
     if (path.endsWith('/revisions')) return { items: [] }
     if (path.endsWith('/availability')) return { available: true }
     if (path.startsWith('/collections/')) return collection

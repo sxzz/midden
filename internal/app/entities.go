@@ -209,3 +209,47 @@ func (s *Service) Entity(ctx context.Context, tenant, id string) (v domain.Entit
 	})
 	return
 }
+
+// Resolve links at read time: saved membership belongs to the requesting tenant,
+// not to the shared entity snapshot. Only collections rooted at the entity count.
+func linkSavedEntities(ctx context.Context, tx pgx.Tx, a *domain.Collection) error {
+	if a.Graph == nil {
+		return nil
+	}
+	ids := []string{}
+	for i := range a.Graph.Entities {
+		e := &a.Graph.Entities[i]
+		e.SavedCollectionID = ""
+		if e.ID != "" {
+			ids = append(ids, e.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (ev.entity_id) ev.entity_id,c.id
+ FROM entity_versions ev JOIN revision_entities re ON re.entity_version_id=ev.id AND re.is_root
+ JOIN collections c ON c.current_revision=re.revision_id
+ JOIN tenant_collections tc ON tc.collection_id=c.id
+ WHERE ev.entity_id=ANY($1::uuid[]) ORDER BY ev.entity_id,tc.created_at DESC,c.id`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	links := map[string]string{}
+	for rows.Next() {
+		var eid, cid string
+		if err = rows.Scan(&eid, &cid); err != nil {
+			return err
+		}
+		links[eid] = cid
+	}
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for i := range a.Graph.Entities {
+		e := &a.Graph.Entities[i]
+		e.SavedCollectionID = links[e.ID]
+	}
+	return nil
+}

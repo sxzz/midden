@@ -1,3 +1,11 @@
+export interface Tag {
+  id: string
+  name: string
+}
+export interface Annotation {
+  note: string
+  tags: Tag[]
+}
 export interface Asset {
   id: string
   purpose?: string
@@ -8,6 +16,8 @@ export interface Asset {
   error?: string
 }
 export interface Entity {
+  external_id?: string
+  saved_collection_id?: string
   key: string
   type: string
   data: Record<string, unknown>
@@ -88,6 +98,8 @@ export function errorText(e: unknown) {
   if (e instanceof APIError) {
     if (e.status === 400 && e.message === 'invalid collection filters')
       return '筛选条件无效，请检查关键词和日期范围。'
+    if (e.status === 400 && e.message === 'invalid note or tags')
+      return '请检查备注长度（最多 10000 字）、标签名称（最多 64 字）和标签数量（最多 100 个）。'
     if (e.status === 401) return '会话已失效，请关闭后从 Telegram 重新打开。'
     if (e.status === 404) return '收藏不存在或已从收藏中删除。'
     if (e.status === 409) return '存储空间不足或操作冲突，请检查用量后重试。'

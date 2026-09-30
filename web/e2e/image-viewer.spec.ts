@@ -43,6 +43,9 @@ test.beforeEach(async ({ page }) => {
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {
     const path = new URL(r.request().url()).pathname
+    if (path === '/v1/tags') return r.fulfill({ json: [] })
+    if (path.endsWith('/annotation'))
+      return r.fulfill({ json: { note: '', tags: [] } })
     if (path.startsWith('/v1/assets/'))
       return r.fulfill({
         contentType: 'image/svg+xml',
@@ -156,7 +159,10 @@ test('save sends the selected image to Telegram native download', async ({
   })
   await page.getByRole('button', { name: '下一张' }).click()
   await expect(page.getByRole('dialog').getByRole('status')).toHaveText('2 / 3')
-  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: '保存', exact: true })
+    .click()
   await expect(page.locator('body')).toHaveAttribute(
     'data-download',
     JSON.stringify({
@@ -182,10 +188,17 @@ test('save reports preparation failures and can retry', async ({ page }) => {
   await page.route('**/v1/assets/*/download', (route) =>
     route.fulfill({ status: 401, json: {} }),
   )
-  await page.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(page.getByRole('alert')).toContainText('会话已失效')
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: '保存', exact: true })
+    .click()
+  // The page behind the viewer carries alerts of its own; only the one inside
+  // the dialog reports this save.
+  await expect(page.getByRole('dialog').getByRole('alert')).toContainText(
+    '会话已失效',
+  )
   await expect(
-    page.getByRole('button', { name: '保存', exact: true }),
+    page.getByRole('dialog').getByRole('button', { name: '保存', exact: true }),
   ).toBeEnabled()
 })
 

@@ -97,16 +97,17 @@ type Asset struct {
 }
 
 type Entity struct {
-	ContextOnly     bool            `json:"context_only,omitempty"`
-	ID              string          `json:"id,omitempty"`
-	VersionID       string          `json:"version_id,omitempty"`
-	Key             string          `json:"key"`
-	Type            string          `json:"type"`
-	ExternalID      string          `json:"external_id"`
-	Data            json.RawMessage `json:"data"`
-	Schema          json.RawMessage `json:"schema"`
-	ResourceIndices []uint32        `json:"resource_indices,omitempty"`
-	Assets          []Asset         `json:"assets,omitempty"`
+	SavedCollectionID string          `json:"saved_collection_id,omitempty"`
+	ContextOnly       bool            `json:"context_only,omitempty"`
+	ID                string          `json:"id,omitempty"`
+	VersionID         string          `json:"version_id,omitempty"`
+	Key               string          `json:"key"`
+	Type              string          `json:"type"`
+	ExternalID        string          `json:"external_id"`
+	Data              json.RawMessage `json:"data"`
+	Schema            json.RawMessage `json:"schema"`
+	ResourceIndices   []uint32        `json:"resource_indices,omitempty"`
+	Assets            []Asset         `json:"assets,omitempty"`
 }
 type EntityRelation struct {
 	Source string `json:"source"`

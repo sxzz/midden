@@ -145,6 +145,37 @@ describe('Vapor collection rendering', () => {
     expect(el.textContent).toContain('@handle')
     expect(el.textContent).not.toContain('1,234')
   })
+  it('links the author identity to a saved profile and places storage in the record', () => {
+    const el = mount(CollectionPost, {
+      ...fixture,
+      assets: [],
+      storage_bytes: 1024,
+      graph: {
+        root: 'post',
+        relations: [{ source: 'post', target: 'author', type: 'authored_by' }],
+        entities: [
+          { key: 'post', type: 'x.post', data: {} },
+          {
+            key: 'author',
+            type: 'x.profile',
+            saved_collection_id: 'saved-profile',
+            data: { username: 'handle' },
+          },
+        ],
+      },
+    })
+    const link = el.querySelector<HTMLAnchorElement>('.profile-link')!
+    expect(link.getAttribute('href')).toBe('#/collection/saved-profile')
+    expect(link.textContent).toContain('测试作者')
+    expect(link.textContent).toContain('@handle')
+    expect(el.querySelector('.record')?.textContent).toContain('占用')
+    expect(el.querySelector('.record')?.textContent).toContain('1.0 KB')
+    expect(el.querySelector('.author')?.textContent).not.toContain('占用')
+  })
+  it('does not invent a profile link when no profile was saved', () => {
+    const el = mount(CollectionPost, fixture)
+    expect(el.querySelector('.profile-link')).toBeNull()
+  })
   it('renders unknown entities without executing markup', () => {
     const el = mount(CollectionPost, {
       ...fixture,

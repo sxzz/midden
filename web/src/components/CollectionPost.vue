@@ -15,7 +15,13 @@ const view = computed(() => present(props.collection))
 /** "Saved at" belongs with the other timestamps, right after the source's
     own publication date, rather than in a separate footnote. */
 const details = computed(() => {
-  const list = view.value.details
+  const list = [...view.value.details]
+  if (props.collection.storage_bytes !== undefined)
+    list.push({
+      key: 'storage',
+      label: '占用',
+      value: storageSize(props.collection.storage_bytes),
+    })
   const savedAt = props.savedAt || props.collection.saved_at
   const value = date(savedAt)
   if (!value || list.some((detail) => detail.key === 'saved')) return list
@@ -59,18 +65,19 @@ const warnings = computed(() => warningList(props.collection.warnings))
       ><span v-else class="avatar initials" aria-hidden="true">{{
         view.name.slice(0, 1)
       }}</span>
-      <div class="identity">
+      <a
+        v-if="view.profileCollectionId"
+        class="identity profile-link"
+        :href="`#/collection/${view.profileCollectionId}`"
+      >
+        <strong class="name">{{ view.name }}</strong>
+        <small v-if="view.handle" class="handle">@{{ view.handle }}</small>
+      </a>
+      <div v-else class="identity">
         <strong class="name">{{ view.name }}</strong>
         <small v-if="view.handle" class="handle">@{{ view.handle }}</small>
       </div>
     </header>
-    <p
-      v-if="collection.storage_bytes !== undefined"
-      class="storage"
-      title="包含正文、历史版本、媒体及原始响应；共享文件在每条收藏中分别计入"
-    >
-      占用 {{ storageSize(collection.storage_bytes) }}
-    </p>
     <p class="body">{{ view.body }}</p>
     <MediaGallery
       :assets="collection.assets || []"
@@ -87,12 +94,18 @@ const warnings = computed(() => warningList(props.collection.warnings))
         </div>
       </dl>
       <p v-if="details.length" class="details">
-        <span v-for="detail in details" :key="detail.key" class="detail"
+        <span
+          v-for="detail in details"
+          :key="detail.key"
+          class="detail"
+          :class="{ identifier: detail.key === 'uid' || detail.key === 'uuid' }"
           ><span v-if="detail.label" class="label">{{ detail.label }}</span
           ><time v-if="detail.datetime" :datetime="detail.datetime">{{
             detail.value
           }}</time
-          ><span v-else>{{ detail.value }}</span></span
+          ><span v-else :class="{ uuid: detail.key === 'uuid' }">{{
+            detail.value
+          }}</span></span
         >
       </p>
     </footer>
@@ -153,10 +166,17 @@ const warnings = computed(() => warningList(props.collection.warnings))
   font-size: 13px;
   color: var(--subtle);
 }
-.storage {
-  margin: 10px 0 0;
-  font-size: 13px;
-  color: var(--subtle);
+.profile-link {
+  color: inherit;
+  text-decoration: none;
+}
+.profile-link:hover .name {
+  color: var(--link);
+}
+.profile-link:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 4px;
+  border-radius: 4px;
 }
 .body {
   margin: 12px 0 0;
@@ -224,11 +244,21 @@ const warnings = computed(() => warningList(props.collection.warnings))
 }
 /* One fact per line: fixed label column on the left, value on the right. */
 .detail {
-  display: flex;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: baseline;
 }
-.detail .label {
-  flex: 0 0 3.2em;
+.detail.identifier {
+  font-size: 12px;
+}
+.detail > :last-child {
+  grid-column: 2;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.uuid {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 .detail time {
   font-variant-numeric: tabular-nums;

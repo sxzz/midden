@@ -98,6 +98,9 @@ const viewProps = computed(() =>
         savedAt: savedAt.value,
         showSensitive: showSensitive.value,
         onDeleted: deleted,
+        onAnnotationsSaved: () => {
+          loadedQuery = undefined
+        },
         onUpdated: updated,
       }
     : {

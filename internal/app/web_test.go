@@ -53,6 +53,7 @@ func TestWebCollection(t *testing.T) {
 		must(t, s.finalize(ctx, a.TenantID, j.ID))
 		jobs = append(jobs, j)
 	}
+	testAnnotations(t, s, admin, a.TenantID, b.TenantID, jobs[0].CollectionID, jobs[1].CollectionID)
 	// Both graphs contain a profile; only the graph root determines the filter.
 	for i, kind := range []string{"x.post", "x.profile"} {
 		_, e = admin.Pool.Exec(ctx, `UPDATE revisions SET payload=payload || jsonb_build_object('graph', jsonb_build_object('root','root','entities',jsonb_build_array(jsonb_build_object('key','root','type',$2::text),jsonb_build_object('key','author','type','x.profile')))) WHERE collection_id=$1`, jobs[i].CollectionID, kind)

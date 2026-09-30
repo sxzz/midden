@@ -46,6 +46,7 @@ const groups = computed(() =>
 const filtered = computed(() => {
   const q = new URLSearchParams(props.query)
   return [
+    'tag',
     'q',
     'author',
     'media_type',

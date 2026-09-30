@@ -27,6 +27,7 @@ func Handler(s *app.Service) http.Handler { return WebHandler(s, WebConfig{}) }
 
 func WebHandler(s *app.Service, web WebConfig) http.Handler {
 	mux := http.NewServeMux()
+	registerAnnotations(mux, s)
 	mux.HandleFunc("POST /v1/captures", func(w http.ResponseWriter, r *http.Request) {
 		var in domain.CaptureInput
 		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
@@ -88,8 +89,8 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 	})
 	mux.HandleFunc("GET /v1/collections", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		if _, ok := r.Context().Value(sessionKey{}).(bool); ok || q.Has("q") || q.Has("entity_type") || q.Has("media_type") || q.Has("visibility") || q.Has("saved_from") || q.Has("saved_before") || q.Has("sort") || q.Has("order") || q.Has("author") || q.Has("sensitive") {
-			v, e := s.Collections(r.Context(), tenant(r), app.CollectionFilter{Authors: q["author"], EntityType: q.Get("entity_type"), Q: q.Get("q"), Media: q.Get("media_type"), Visibility: q.Get("visibility"), From: q.Get("saved_from"), Before: q.Get("saved_before"), Sort: q.Get("sort"), Order: q.Get("order"), Sensitive: q.Get("sensitive")}, q.Get("cursor"))
+		if _, ok := r.Context().Value(sessionKey{}).(bool); ok || q.Has("q") || q.Has("entity_type") || q.Has("media_type") || q.Has("visibility") || q.Has("saved_from") || q.Has("saved_before") || q.Has("sort") || q.Has("order") || q.Has("author") || q.Has("sensitive") || q.Has("tag") {
+			v, e := s.Collections(r.Context(), tenant(r), app.CollectionFilter{Authors: q["author"], EntityType: q.Get("entity_type"), Q: q.Get("q"), Media: q.Get("media_type"), Visibility: q.Get("visibility"), From: q.Get("saved_from"), Before: q.Get("saved_before"), Sort: q.Get("sort"), Order: q.Get("order"), Sensitive: q.Get("sensitive"), Tag: q.Get("tag")}, q.Get("cursor"))
 			respond(w, 200, v, e)
 			return
 		}
@@ -269,6 +270,9 @@ func respond(w http.ResponseWriter, code int, v any, e error) {
 	case errors.Is(e, app.ErrAdapterUnavailable), status.Code(e) == codes.Unavailable, status.Code(e) == codes.DeadlineExceeded:
 		code = 503
 		msg = "adapter temporarily unavailable"
+	case errors.Is(e, app.ErrInvalidAnnotation):
+		code = 400
+		msg = e.Error()
 	case errors.Is(e, app.ErrInvalidFilter):
 		code = 400
 		msg = "invalid collection filters"

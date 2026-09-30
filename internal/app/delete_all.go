@@ -25,6 +25,9 @@ func (s *Service) DeleteAllCollections(ctx context.Context, tenant string, befor
 		if err != nil {
 			return err
 		}
+		if err := pruneTags(ctx, tx); err != nil {
+			return err
+		}
 		count = tag.RowsAffected()
 		_, err = tx.Exec(ctx, `SELECT mark_unreferenced(id) FROM unnest($1::uuid[]) AS id`, ids)
 		return err

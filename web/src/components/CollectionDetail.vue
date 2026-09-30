@@ -3,6 +3,7 @@ import { computed, shallowRef, watch } from 'vue'
 import { safeURL, type Collection } from '../api'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
 import { date } from '../presentation'
+import CollectionAnnotations from './CollectionAnnotations.vue'
 import CollectionPost from './CollectionPost.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
 import RevisionList from './RevisionList.vue'
@@ -17,6 +18,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   deleted: [id: string]
   updated: [collection: Collection]
+  annotationsSaved: []
 }>()
 const {
   collection,
@@ -79,6 +81,11 @@ const version = computed(() =>
         :show-sensitive="showSensitive"
       />
     </ListSection>
+    <CollectionAnnotations
+      :id="id"
+      :key="id"
+      @saved="emit('annotationsSaved')"
+    />
     <ListSection :footnote="version">
       <ListButton v-if="link" label="打开原文" :href="link" />
       <ListButton

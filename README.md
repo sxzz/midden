@@ -106,7 +106,7 @@ Profile 资料始终从公共实例获取。采集帖子前先读取作者 Profi
 
 ## Telegram 收藏网页
 
-收藏网页使用 Vue Vapor，提供手机帖子流、正文与作者搜索、实体类型（X post / X profile，默认 X post）、媒体和可见性筛选、保存日期范围、历史版本、重新抓取、删除及存储用量。首次登录从 Telegram 进入，与 Bot 共用保存记录和额度；独立浏览器登录暂未开放。
+收藏网页使用 Vue Vapor，提供手机帖子流、正文与作者搜索、实体类型（X post / X profile，默认 X post）、媒体和可见性筛选、保存日期范围、历史版本、重新抓取、删除及存储用量。详情页支持编辑备注、创建并分配标签，列表可按标签筛选；备注、标签和分配关系按租户隔离，不随公开内容共享。首次登录从 Telegram 进入，与 Bot 共用保存记录和额度；独立浏览器登录暂未开放。
 
 网页通过 Cloudflare Workers Static Assets 单独发布，`/app/*` 由 Cloudflare 直接提供静态资源，不执行 Worker 脚本。core 镜像不包含网页。将 core 的 8080 端口通过 HTTPS 反向代理或 Cloudflare Tunnel 公开，保留同域 `/v1/*` 指向 core；只为 `/app/*` 设置 Workers Route。具体发布配置见 [静态网页部署](docs/operations.md#cloudflare-静态网页部署)。设置公开地址后重启 core：
 
@@ -159,6 +159,8 @@ curl -H "Authorization: Bearer $MONITOR_TOKEN" \
 ```
 
 用实际帖子 URL 替换示例。响应包含任务 ID，可通过 `GET /v1/jobs/{id}` 查询状态。收藏列表使用 `GET /v1/collections`，收藏详情使用 `GET /v1/collections/{id}`。
+
+`GET /v1/tags` 列出当前租户已关联的标签；标签只能在保存收藏整理信息时创建。`GET /v1/collections/{id}/annotation` 返回自己的备注和已分配标签；`PATCH` 同一路径接收 `{"note":"我的备注","tag_names":["研究"]}`，省略字段则保留原值，空字符串或空数组用于清除。备注最多 10000 字，标签名去除首尾空白后为 1–64 字，每次最多分配 100 个标签。只能修改自己已保存的收藏、分配自己的标签。标签按名称复用或创建，并与备注、关联、未使用标签的清理在同一事务中保存；也兼容 `tag_ids`，但不能与 `tag_names` 同时提交。`GET /v1/collections?tag=<标签 UUID>` 按标签筛选，并可与其他条件组合。删除收藏会移除其备注和标签关联，仍被其他收藏使用的标签保留，没有关联的标签自动删除。
 
 完整接口、参数和响应结构见 [API 文档](docs/openapi.yaml)。
 

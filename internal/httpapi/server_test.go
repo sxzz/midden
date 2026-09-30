@@ -85,11 +85,38 @@ func TestRESTIsolation(t *testing.T) {
 	if w = call("GET", "/v1/usage", "", "wrong"); w.Code != http.StatusUnauthorized {
 		t.Fatal(w.Code)
 	}
+	annotationPath := "/v1/collections/" + job.CollectionID + "/annotation"
+	body := `{"note":"备注","tag_names":["研究"]}`
+	if w = call("PATCH", annotationPath, body, a); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w = call("POST", "/v1/tags", `{"name":"unused"}`, a); w.Code != 405 {
+		t.Fatal("standalone tag creation allowed", w.Code)
+	}
+	if w = call("GET", "/v1/tags", "", b); w.Code != 200 || strings.TrimSpace(w.Body.String()) != "[]" {
+		t.Fatal("foreign tag exposed", w.Code, w.Body.String())
+	}
+	for _, method := range []string{"GET", "PATCH"} {
+		if w = call(method, annotationPath, body, b); w.Code != 404 {
+			t.Fatal("foreign annotation", method, w.Code, w.Body.String())
+		}
+	}
+	for _, invalid := range []string{`{"note":"x","tenant_id":"other"}`, `{"tag_ids":["bad"]}`, `{} {}`} {
+		if w = call("PATCH", annotationPath, invalid, a); w.Code != 400 {
+			t.Fatal("invalid annotation accepted", w.Code, w.Body.String())
+		}
+	}
+	if w = call("GET", "/v1/collections?tag=bad", "", a); w.Code != 400 {
+		t.Fatal("invalid tag filter", w.Code)
+	}
 	if w = call("DELETE", "/v1/collections/"+job.CollectionID, "", b); w.Code != 404 {
 		t.Fatal("foreign collection deletion", w.Code)
 	}
 	if w = call("DELETE", "/v1/collections/"+job.CollectionID, "", a); w.Code != 204 {
 		t.Fatal("collection deletion", w.Code, w.Body.String())
+	}
+	if w = call("GET", annotationPath, "", a); w.Code != 404 {
+		t.Fatal("annotation survived removal", w.Code)
 	}
 	if w = call("DELETE", "/v1/collections/"+job.CollectionID, "", a); w.Code != 404 {
 		t.Fatal("repeated deletion", w.Code)

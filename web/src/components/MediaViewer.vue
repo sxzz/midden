@@ -221,32 +221,45 @@ onMounted(() => {
     pswp.element?.removeAttribute('role')
     pswp.element?.removeAttribute('aria-modal')
   })
-  // The API does not expose dimensions yet. Use existing thumbnails immediately,
-  // then resolve uncached slides from the library's own image load (no extra fetch).
+  // A cold list thumbnail may not know its natural size yet. Rebuilding a
+  // slide during the opening animation lets the opener restore stale zoom
+  // geometry, so defer the correction until it has finished.
+  const pendingSizes = new Set<number>()
+  let refreshQueued = false
+  function refreshSizes() {
+    if (disposed || !pswp.opener.isOpen || refreshQueued) return
+    refreshQueued = true
+    queueMicrotask(() => {
+      refreshQueued = false
+      if (disposed || !pswp.opener.isOpen) return
+      const indices = [...pendingSizes]
+      pendingSizes.clear()
+      for (const index of indices) pswp.refreshSlideContent(index)
+    })
+  }
   pswp.on('contentLoadImage', ({ content }) => {
     const image = content.element
     if (!(image instanceof HTMLImageElement)) return
-    image.addEventListener(
-      'load',
-      () => {
-        if (
-          disposed ||
-          !image.naturalWidth ||
-          (content.width === image.naturalWidth &&
-            content.height === image.naturalHeight)
-        )
-          return
-        content.data.width = content.width = image.naturalWidth
-        content.data.height = content.height = image.naturalHeight
-        if (content.slide)
-          queueMicrotask(() => {
-            if (!disposed && pswp.isOpen)
-              pswp.refreshSlideContent(content.index)
-          })
-      },
-      { once: true },
-    )
+    const resolveSize = () => {
+      if (disposed || !image.naturalWidth) return
+      if (
+        content.data.width === image.naturalWidth &&
+        content.data.height === image.naturalHeight
+      )
+        return
+      content.data.width = image.naturalWidth
+      content.data.height = image.naturalHeight
+      pendingSizes.add(content.index)
+      refreshSizes()
+    }
+    // Also covers lazy neighboring slides, whose loadComplete event is not
+    // dispatched until they have a slide, and already-cached image responses.
+    image.addEventListener('load', resolveSize, { once: true })
+    queueMicrotask(() => {
+      if (image.complete) resolveSize()
+    })
   })
+  pswp.on('openingAnimationEnd', refreshSizes)
   pswp.on('destroy', () => {
     if (!disposed) emit('close')
   })

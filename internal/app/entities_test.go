@@ -116,6 +116,21 @@ func TestMetadataRawIsolationAndRetention(t *testing.T) {
 	if author(a).ID == "" || len(author(a).Assets) != 1 || author(a).Assets[0].State != "ready" || len(a.Assets) != 0 {
 		t.Fatal("entity resources missing or sent as presentation")
 	}
+	if author(a).SavedCollectionID != "" {
+		t.Fatal("embedded author is not a saved profile")
+	}
+	for _, entity := range a.Graph.Entities {
+		if entity.Key == a.Graph.Root && entity.SavedCollectionID != a.ID {
+			t.Fatal("saved root link missing")
+		}
+	}
+	foreign, err := s.Collection(ctx, tenants[2], a.ID)
+	must(t, err)
+	for _, entity := range foreign.Graph.Entities {
+		if entity.SavedCollectionID != "" {
+			t.Fatal("saved membership leaked through public content")
+		}
+	}
 	profile, e := s.Entity(ctx, tenants[0], author(a).ID)
 	must(t, e)
 	var data map[string]any
