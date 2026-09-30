@@ -450,3 +450,43 @@ func TestChannelAccountLifecycle(t *testing.T) {
 		t.Fatal("invalid credentials accepted", result.Code)
 	}
 }
+
+func TestChannelActorProfileUpdates(t *testing.T) {
+	s, admin, channel := channelFixture(t)
+	ctx := context.Background()
+	event := channelapi.Event{UpdateID: 1, Actor: "42", Chat: "42", Private: true, MessageID: 1, Command: "usage", ActorProfile: &channelapi.ActorProfile{FirstName: "小明", LastName: "张", Username: "ming"}}
+	check := func(want channelapi.ActorProfile) {
+		t.Helper()
+		var got channelapi.ActorProfile
+		err := admin.Pool.QueryRow(ctx, `SELECT first_name,last_name,username FROM identities WHERE channel_id=$1 AND external_id='42'`, channel).Scan(&got.FirstName, &got.LastName, &got.Username)
+		if err != nil || got != want {
+			t.Fatalf("profile = %+v, want %+v: %v", got, want, err)
+		}
+	}
+	first := *event.ActorProfile
+	if _, err := s.ChannelEvent(ctx, channel, event); err != nil {
+		t.Fatal(err)
+	}
+	check(first)
+	event.UpdateID++
+	event.ActorProfile = &channelapi.ActorProfile{FirstName: "新昵称"}
+	if _, err := s.ChannelEvent(ctx, channel, event); err != nil {
+		t.Fatal(err)
+	}
+	renamed := *event.ActorProfile
+	check(renamed)
+	// A retried old event must not undo the rename.
+	event.UpdateID = 1
+	event.ActorProfile = &first
+	if _, err := s.ChannelEvent(ctx, channel, event); err != nil {
+		t.Fatal(err)
+	}
+	check(renamed)
+	// Missing optional profile data must not erase the stored profile.
+	event.UpdateID = 3
+	event.ActorProfile = nil
+	if _, err := s.ChannelEvent(ctx, channel, event); err != nil {
+		t.Fatal(err)
+	}
+	check(renamed)
+}

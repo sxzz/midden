@@ -102,6 +102,8 @@ erDiagram
 | `tokens`      | REST token 的 SHA-256 摘要、租户和撤销状态                                                                                         |
 | `connections` | 已存在的账号接入模型：租户、Adapter、Provider、账号标识、状态和凭据引用；个人账号由管理 CLI 导入、检查及撤销，凭据引用指向加密记录 |
 
+Telegram 交互会在 `identities` 保存发送者的 `first_name`、`last_name` 和 `username`，后续交互同步改名或清空的用户名；按钮交互取点击者资料，已有用户在下一次交互时补齐。
+
 首次 Telegram 私聊或群聊请求按发送者的 user ID，通过数据库函数 `resolve_identity` 创建个人租户与身份。事务锁保证并发首次访问不会创建多个绑定。不同渠道实例中的相同外部用户 ID 不会自动关联。群 ID 仅作为回复目的地，不作为身份。群内按钮操作还会校验原消息的发起身份，不能通过点击他人的按钮访问或更改其数据。「我也要存」是唯一例外：仅对公开收藏添加当前点击者的 `tenant_collections` 引用，在租户锁和收藏行锁内校验额度，不创建采集或提交记录，成功、重复和失败仅通过 callback toast 返回。
 
 `channels` 是全局实例配置；`identities` 是租户数据。身份解析和 token 认证通过受限的数据库函数完成，之后的业务事务设置 `app.tenant_id`。

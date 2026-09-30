@@ -108,8 +108,11 @@ type Message struct {
 	} `json:"sender_chat,omitempty"`
 	ID   int64 `json:"message_id"`
 	From struct {
-		ID  int64 `json:"id"`
-		Bot bool  `json:"is_bot"`
+		ID        int64  `json:"id"`
+		Bot       bool   `json:"is_bot"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+		Username  string `json:"username"`
 	} `json:"from"`
 	Chat struct {
 		ID   int64  `json:"id"`
@@ -130,8 +133,11 @@ type Update struct {
 type Callback struct {
 	ID   string `json:"id"`
 	From struct {
-		ID  int64 `json:"id"`
-		Bot bool  `json:"is_bot"`
+		ID        int64  `json:"id"`
+		Bot       bool   `json:"is_bot"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+		Username  string `json:"username"`
 	} `json:"from"`
 	Message *Message `json:"message"`
 	Data    string   `json:"data"`
@@ -146,8 +152,7 @@ func (u Update) ActorMessage() *Message {
 			return nil
 		}
 		copy := *q.Message
-		copy.From.ID = q.From.ID
-		copy.From.Bot = q.From.Bot
+		copy.From = q.From
 		copy.SenderChat = nil
 		m = &copy
 	}

@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"io/fs"
+	"net/url"
 	"os"
 	"testing"
+	"testing/fstest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -26,25 +29,60 @@ func TestBaselineMigrate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer admin.Exec(ctx, "DROP DATABASE "+identifier+" WITH (FORCE)")
-	cfg := admin.Config().Copy()
-	cfg.Database = name
-	db, err := Open(ctx, cfg.ConnString())
+	testURL, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testURL.Path = "/" + name
+	db, err := Open(ctx, testURL.String())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	// Upgrade a deployed baseline containing an existing user, then repeat migration.
+	baseline, err := migrations.ReadFile("migrations/0001_initial.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := db.Pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = applyMigrations(ctx, conn.Conn(), fstest.MapFS{"migrations/0001_initial.sql": {Data: baseline}})
+	conn.Release()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, channel, identity := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err = db.Pool.Exec(ctx, `INSERT INTO tenants(id) VALUES($1)`, tenant); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Pool.Exec(ctx, `INSERT INTO channels(id,kind,external_id) VALUES($1,'telegram','fixture')`, channel); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Pool.Exec(ctx, `INSERT INTO identities(id,tenant_id,channel_id,external_id) VALUES($1,$2,$3,'42')`, identity, tenant, channel); err != nil {
+		t.Fatal(err)
+	}
 	for range 2 {
 		if err = db.Migrate(ctx); err != nil {
 			t.Fatal(err)
 		}
 	}
 
+	var savedTenant, first, last, username string
+	if err = db.Pool.QueryRow(ctx, `SELECT tenant_id,first_name,last_name,username FROM identities WHERE id=$1`, identity).Scan(&savedTenant, &first, &last, &username); err != nil || savedTenant != tenant || first != "" || last != "" || username != "" {
+		t.Fatalf("upgraded identity changed: %v", err)
+	}
+	names, err := fs.Glob(migrations, "migrations/*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var count, version int
 	var filename, checksum string
-	if err = db.Pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil || count != 1 {
+	if err = db.Pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&count); err != nil || count != len(names) {
 		t.Fatalf("baseline ledger count = %d: %v", count, err)
 	}
-	if err = db.Pool.QueryRow(ctx, `SELECT name,checksum FROM schema_migrations`).Scan(&filename, &checksum); err != nil {
+	if err = db.Pool.QueryRow(ctx, `SELECT name,checksum FROM schema_migrations WHERE name='migrations/0001_initial.sql'`).Scan(&filename, &checksum); err != nil {
 		t.Fatal(err)
 	}
 	body, err := migrations.ReadFile("migrations/0001_initial.sql")

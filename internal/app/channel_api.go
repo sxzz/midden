@@ -83,6 +83,12 @@ func (s *Service) ChannelEvent(ctx context.Context, channel string, in channelap
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if in.ActorProfile != nil {
+			p := in.ActorProfile
+			if _, err := tx.Exec(ctx, `UPDATE identities SET first_name=$2,last_name=$3,username=$4 WHERE id=$1`, identity.ID, p.FirstName, p.LastName, p.Username); err != nil {
+				return err
+			}
+		}
 		if in.Private && in.CallbackID != "" {
 			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM submissions WHERE channel_id=$1 AND chat_id=$2 AND message_id=$3)`, channel, in.Chat, in.MessageID).Scan(&in.Protected); err != nil {
 				return err

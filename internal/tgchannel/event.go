@@ -80,6 +80,7 @@ func Normalize(u telegram.Update, username string) channelapi.Event {
 		}
 	}
 	out.Actor = strconv.FormatInt(m.From.ID, 10)
+	out.ActorProfile = &channelapi.ActorProfile{FirstName: m.From.FirstName, LastName: m.From.LastName, Username: m.From.Username}
 	out.Chat = strconv.FormatInt(m.Chat.ID, 10)
 	out.MessageID = m.ID
 	out.Private = m.Chat.Type == "private"

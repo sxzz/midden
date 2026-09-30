@@ -15,25 +15,32 @@ type Config struct {
 	WebURL string `json:"web_url"`
 	Offset int64  `json:"offset"`
 }
+type ActorProfile struct {
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Username  string `json:"username"`
+}
+
 type Event struct {
-	Sensitive  bool     `json:"sensitive,omitempty"`
-	Protected  bool     `json:"protected,omitempty"`
-	UpdateID   int64    `json:"update_id"`
-	Actor      string   `json:"actor"`
-	Chat       string   `json:"chat"`
-	MessageID  int64    `json:"message_id"`
-	CallbackID string   `json:"callback_id,omitempty"`
-	Private    bool     `json:"private"`
-	Command    string   `json:"command"`
-	Argument   string   `json:"argument,omitempty"`
-	URLs       []string `json:"urls,omitempty"`
-	Text       string   `json:"text,omitempty"`
-	Credential string   `json:"credential,omitempty"`
-	Name       string   `json:"name,omitempty"`
-	Adapter    string   `json:"adapter,omitempty"`
-	Problem    string   `json:"problem,omitempty"`
-	Ciphertext []byte   `json:"ciphertext,omitempty"`
-	Flow       string   `json:"flow,omitempty"`
+	ActorProfile *ActorProfile `json:"actor_profile,omitempty"`
+	Sensitive    bool          `json:"sensitive,omitempty"`
+	Protected    bool          `json:"protected,omitempty"`
+	UpdateID     int64         `json:"update_id"`
+	Actor        string        `json:"actor"`
+	Chat         string        `json:"chat"`
+	MessageID    int64         `json:"message_id"`
+	CallbackID   string        `json:"callback_id,omitempty"`
+	Private      bool          `json:"private"`
+	Command      string        `json:"command"`
+	Argument     string        `json:"argument,omitempty"`
+	URLs         []string      `json:"urls,omitempty"`
+	Text         string        `json:"text,omitempty"`
+	Credential   string        `json:"credential,omitempty"`
+	Name         string        `json:"name,omitempty"`
+	Adapter      string        `json:"adapter,omitempty"`
+	Problem      string        `json:"problem,omitempty"`
+	Ciphertext   []byte        `json:"ciphertext,omitempty"`
+	Flow         string        `json:"flow,omitempty"`
 }
 type Work struct {
 	ID        string          `json:"id"`
