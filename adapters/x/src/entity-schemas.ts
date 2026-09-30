@@ -7,6 +7,11 @@ export const entitySchemas = {
       text: {
         type: "string",
       },
+      replies: { type: "integer", minimum: 0 },
+      reposts: { type: "integer", minimum: 0 },
+      likes: { type: "integer", minimum: 0 },
+      bookmarks: { type: "integer", minimum: 0 },
+      quotes: { type: "integer", minimum: 0 },
       published_at: {
         type: "string",
         format: "date-time",

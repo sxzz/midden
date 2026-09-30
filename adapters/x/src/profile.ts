@@ -57,6 +57,7 @@ export function normalizeProfile(
   result.graph!.relations = [];
   result.relatedTargets = [];
   const entity = result.graph!.entities[0];
+  entity.contextOnly = false;
   const data = JSON.parse(Buffer.from(entity.dataJson).toString());
   if (provider === "fxtwitter") data.metadata = user;
   for (const key of ["raw_description", "birthday", "about_account"]) {

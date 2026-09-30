@@ -92,6 +92,57 @@ describe('Vapor collection rendering', () => {
     expect(el.textContent).toContain('部分媒体超出限制，没有保存。')
     expect(el.textContent).not.toContain('resource omitted')
   })
+  it('records the post under the body, media and warnings', () => {
+    const el = mount(CollectionPost, {
+      ...fixture,
+      published_at: '2026-09-28T10:00:00Z',
+      warnings: ['resource omitted: unsupported type or resource limit'],
+      graph: {
+        root: 'p',
+        relations: [{ source: 'p', target: 'u', type: 'authored_by' }],
+        entities: [
+          {
+            key: 'p',
+            type: 'x.post',
+            data: {
+              published_at: '2026-09-28T10:00:00Z',
+              replies: 0,
+              reposts: 12,
+              likes: 3456,
+            },
+          },
+          {
+            key: 'u',
+            type: 'x.profile',
+            data: {
+              username: 'handle',
+              metadata: { followers: 1234, likes: 56 },
+            },
+          },
+        ],
+      },
+    })
+    const record = el.querySelector('.record')!
+    const precedes = (selector: string) =>
+      !!(
+        el.querySelector(selector)!.compareDocumentPosition(record) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+      )
+    expect(precedes('.body')).toBe(true)
+    expect(precedes('.media')).toBe(true)
+    expect(precedes('.warning')).toBe(true)
+    expect(record.querySelector('time')?.getAttribute('datetime')).toBe(
+      '2026-09-28T10:00:00Z',
+    )
+    const stats = record.querySelector('.stats')!
+    expect(stats.getAttribute('aria-label')).toBe('帖子统计')
+    expect(
+      [...stats.querySelectorAll('.stat')].map((s) => s.textContent),
+    ).toEqual(['回复0', '转发12', '点赞3,456'])
+    // The header signs the post; the account's own counts stay on its profile.
+    expect(el.textContent).toContain('@handle')
+    expect(el.textContent).not.toContain('1,234')
+  })
   it('renders unknown entities without executing markup', () => {
     const el = mount(CollectionPost, {
       ...fixture,

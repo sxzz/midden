@@ -638,8 +638,11 @@ type Entity struct {
 	ExternalId      string                 `protobuf:"bytes,3,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
 	DataJson        []byte                 `protobuf:"bytes,4,opt,name=data_json,json=dataJson,proto3" json:"data_json,omitempty"`
 	ResourceIndices []uint32               `protobuf:"varint,5,rep,packed,name=resource_indices,json=resourceIndices,proto3" json:"resource_indices,omitempty"` // Indices in FetchResponse.resources.
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Non-root context: snapshot and entity-version it, but exclude its data/media
+	// and generic author_name/summary from collection revision comparison.
+	ContextOnly   bool `protobuf:"varint,6,opt,name=context_only,json=contextOnly,proto3" json:"context_only,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Entity) Reset() {
@@ -705,6 +708,13 @@ func (x *Entity) GetResourceIndices() []uint32 {
 		return x.ResourceIndices
 	}
 	return nil
+}
+
+func (x *Entity) GetContextOnly() bool {
+	if x != nil {
+		return x.ContextOnly
+	}
+	return false
 }
 
 type EntityRelation struct {
@@ -1577,14 +1587,15 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"EntityType\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
 	"\vjson_schema\x18\x02 \x01(\fR\n" +
-	"jsonSchema\"\x97\x01\n" +
+	"jsonSchema\"\xba\x01\n" +
 	"\x06Entity\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1f\n" +
 	"\vexternal_id\x18\x03 \x01(\tR\n" +
 	"externalId\x12\x1b\n" +
 	"\tdata_json\x18\x04 \x01(\fR\bdataJson\x12)\n" +
-	"\x10resource_indices\x18\x05 \x03(\rR\x0fresourceIndices\"T\n" +
+	"\x10resource_indices\x18\x05 \x03(\rR\x0fresourceIndices\x12!\n" +
+	"\fcontext_only\x18\x06 \x01(\bR\vcontextOnly\"T\n" +
 	"\x0eEntityRelation\x12\x16\n" +
 	"\x06source\x18\x01 \x01(\tR\x06source\x12\x16\n" +
 	"\x06target\x18\x02 \x01(\tR\x06target\x12\x12\n" +

@@ -36,6 +36,7 @@ test("profile metadata excludes account view state and never invents edit times"
     );
   assert.equal(data.metadata.following, undefined);
   assert.equal(profile.externalId, "123");
+  assert.equal(profile.contextOnly, true);
   assert.equal(root(result).published_at, "2026-01-01T00:00:00.000Z");
   assert.equal(root(result).edited_at, undefined);
   assert.ok(!JSON.stringify(data).includes("followed_by"));
@@ -104,5 +105,39 @@ test("X avatar cache keys track the exact image URL and rendition", () => {
   assert.equal(
     result.resources.find((r) => r.purpose === "avatar")?.immutableKey,
     key,
+  );
+});
+
+test("post engagement is root content, with zero distinct from missing", () => {
+  const r = FetchResponse.fromPartial({ externalId: "20", text: "post" });
+  attachEntities(r, {
+    replies: 12,
+    reposts: 3,
+    likes: 86,
+    bookmarks: 9,
+    quotes: 0,
+    author: { id: "123", likes: 999, followers: 400 },
+  });
+  const post = r.graph!.entities.find((e) => e.key === "post")!;
+  const data = JSON.parse(Buffer.from(post.dataJson).toString());
+  assert.deepEqual(data, {
+    text: "post",
+    replies: 12,
+    reposts: 3,
+    likes: 86,
+    bookmarks: 9,
+    quotes: 0,
+  });
+  const invalid = FetchResponse.fromPartial({ externalId: "21", text: "post" });
+  attachEntities(invalid, {
+    replies: -1,
+    reposts: 1.5,
+    likes: "86",
+    bookmarks: null,
+    quotes: Infinity,
+  });
+  assert.deepEqual(
+    JSON.parse(Buffer.from(invalid.graph!.entities[0].dataJson).toString()),
+    { text: "post" },
   );
 });

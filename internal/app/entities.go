@@ -57,7 +57,7 @@ func (s *Service) entityGraph(ctx context.Context, r *pb.FetchResponse) (*domain
 	keys, identities := map[string]bool{}, map[string]bool{}
 	total := 0
 	for _, e := range g.Entities {
-		if e == nil || !adapter.EntityName.MatchString(e.Key) || keys[e.Key] || !allowed[e.Type] || e.ExternalId == "" || len(e.ExternalId) > 200 || strings.ContainsRune(e.ExternalId, 0) || identities[e.Type+"\x00"+e.ExternalId] {
+		if e == nil || (e.ContextOnly && e.Key == g.Root) || !adapter.EntityName.MatchString(e.Key) || keys[e.Key] || !allowed[e.Type] || e.ExternalId == "" || len(e.ExternalId) > 200 || strings.ContainsRune(e.ExternalId, 0) || identities[e.Type+"\x00"+e.ExternalId] {
 			return nil, &PermanentError{"invalid entity identity or undeclared type"}
 		}
 		keys[e.Key], identities[e.Type+"\x00"+e.ExternalId] = true, true
@@ -80,7 +80,7 @@ func (s *Service) entityGraph(ctx context.Context, r *pb.FetchResponse) (*domain
 			}
 			seen[i] = true
 		}
-		out.Entities = append(out.Entities, domain.Entity{Key: e.Key, Type: e.Type, ExternalID: e.ExternalId, Data: data, Schema: schema.JSON, ResourceIndices: e.ResourceIndices})
+		out.Entities = append(out.Entities, domain.Entity{ContextOnly: e.ContextOnly, Key: e.Key, Type: e.Type, ExternalID: e.ExternalId, Data: data, Schema: schema.JSON, ResourceIndices: e.ResourceIndices})
 		if e.Key == g.Root && e.ExternalId != rootID {
 			return nil, &PermanentError{"entity root does not match capture identity"}
 		}

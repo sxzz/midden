@@ -1,12 +1,19 @@
 <script setup vapor lang="ts">
 import { computed } from 'vue'
 import { assetURL, type Collection } from '../api'
-import { excerpt, mediaSummary, present, shortDate } from '../presentation'
+import {
+  collectionTime,
+  excerpt,
+  mediaSummary,
+  present,
+  shortDate,
+} from '../presentation'
 import MediaThumbs from './MediaThumbs.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 const props = defineProps<{
   collection: Collection
   showSensitive?: boolean
+  sort?: string
 }>()
 defineEmits<{ open: [id: string] }>()
 const view = computed(() => present(props.collection))
@@ -37,7 +44,11 @@ const meta = computed(() =>
       <span class="head">
         <strong class="name">{{ view.name }}</strong
         ><span class="when">{{
-          shortDate(collection.saved_at || collection.observed_at)
+          shortDate(
+            sort
+              ? collectionTime(collection, sort)
+              : collection.saved_at || collection.observed_at,
+          )
         }}</span>
       </span>
       <span class="preview">{{ preview }}</span>

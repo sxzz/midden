@@ -450,17 +450,7 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		}
 		good := 0
 		partial := p.Incomplete
-		type sig struct {
-			Purpose   string
-			Hash      string
-			AltText   string
-			Sensitive bool
-			State     string
-			Error     string
-		}
-		ss := []sig{}
 		for _, a := range aa {
-			ss = append(ss, sig{a.Purpose, a.Hash, a.AltText, a.Sensitive, a.State, a.Error})
 			if a.State == "ready" {
 				if a.Purpose == "" {
 					good++
@@ -476,12 +466,7 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 			return e
 		}
 		raw, _ = json.Marshal(p)
-		digestData, _ := json.Marshal(struct {
-			Text, Kind, Summary, AuthorName, PublishedAt string
-			Graph                                        *domain.EntityGraph
-			Warnings                                     []string
-			Assets                                       []sig
-		}{p.Text, p.TextKind, p.Summary, p.AuthorName, p.PublishedAt, p.Graph, p.Warnings, ss})
+		digestData := revisionSignature(p, aa, p.Graph)
 		var digest string
 		if e = tx.QueryRow(ctx, `SELECT encode(digest($1::jsonb::text,'sha256'),'hex')`, digestData).Scan(&digest); e != nil {
 			return e
@@ -491,6 +476,34 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		e = tx.QueryRow(ctx, `SELECT r.content_hash,r.id FROM collections a LEFT JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1`, aid).Scan(&previous, &previousID)
 		if e != nil {
 			return e
+		}
+		// Compare the retained snapshot under today's context policy as well, so
+		// adopting the policy does not manufacture a one-off revision.
+		if previousID != nil && p.Graph != nil {
+			hasContext := false
+			for _, entity := range p.Graph.Entities {
+				hasContext = hasContext || entity.ContextOnly
+			}
+			if hasContext {
+				var previousRaw []byte
+				var previousCapture string
+				if e = tx.QueryRow(ctx, `SELECT payload,capture_id FROM revisions WHERE id=$1`, *previousID).Scan(&previousRaw, &previousCapture); e != nil {
+					return e
+				}
+				var previousPayload Payload
+				if e = json.Unmarshal(previousRaw, &previousPayload); e != nil {
+					return e
+				}
+				previousAssets, err := assets(ctx, tx, previousCapture)
+				if err != nil {
+					return err
+				}
+				var previousDigest string
+				if e = tx.QueryRow(ctx, `SELECT encode(digest($1::jsonb::text,'sha256'),'hex')`, revisionSignature(previousPayload, previousAssets, p.Graph)).Scan(&previousDigest); e != nil {
+					return e
+				}
+				previous = &previousDigest
+			}
 		}
 		revisionID := previousID
 		if previous == nil || *previous != digest {

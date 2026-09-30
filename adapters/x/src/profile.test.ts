@@ -63,6 +63,7 @@ test("profile captures exact API responses and the entire first page, never foll
   assert.equal(urls.length, 2);
   assert.equal(r.relatedTargets.length, 27);
   assert.equal(r.canonicalTarget?.externalId, user.id);
+  assert.equal(r.graph!.entities[0].contextOnly, false);
   assert.equal(r.graph?.root, "author");
   assert.equal(r.graph?.entities.length, 1);
   assert.equal(Buffer.from(r.sourceResponses[0].body).toString(), profileBody);

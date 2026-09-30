@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"net/http"
@@ -83,6 +84,7 @@ func TestMetadataRawIsolationAndRetention(t *testing.T) {
 	q, e := river.NewClient(riverpgxv5.New(db.Pool), &river.Config{})
 	must(t, e)
 	s := &Service{DB: db, Queue: q, Adapter: f, Config: Defaults(), HTTP: server.Client(), Blobs: &memoryBlob{m: map[string][]byte{}}}
+	s.Config.Rate = 1000
 	finish := func(tenant string, in domain.CaptureInput) domain.Collection {
 		t.Helper()
 		j, e := s.Submit(ctx, tenant, in)
@@ -180,6 +182,49 @@ func TestMetadataRawIsolationAndRetention(t *testing.T) {
 	if author(d).VersionID == author(c).VersionID || d.RevisionID == c.RevisionID {
 		t.Fatal("profile change lost")
 	}
+	// X can mark its author as context without manufacturing a transition version.
+	f.graph.Entities[1].ContextOnly = true
+	f.graph.Entities[1].DataJson = []byte(`{"username":"changed-handle","name":"Another name","metadata":{"followers":99}}`)
+	contextOnly := finish(tenants[1], domain.CaptureInput{RefreshID: c.ID})
+	if contextOnly.RevisionID != d.RevisionID {
+		t.Fatal("context-only author changed the post revision")
+	}
+	// Each post counter is content; repeated observations and author-only changes are not.
+	lastRevision := contextOnly.RevisionID
+	for _, field := range []string{"replies", "reposts", "likes", "bookmarks", "quotes"} {
+		f.graph.Entities[0].DataJson = []byte(fmt.Sprintf(`{"published_at":"2026-01-02T03:04:05Z","%s":0}`, field))
+		withCounter := finish(tenants[1], domain.CaptureInput{RefreshID: c.ID})
+		if withCounter.RevisionID == lastRevision {
+			t.Fatalf("adding %s=0 did not create a version", field)
+		}
+		same := finish(tenants[1], domain.CaptureInput{RefreshID: c.ID})
+		if same.RevisionID != withCounter.RevisionID {
+			t.Fatalf("unchanged %s created a version", field)
+		}
+		f.graph.Entities[0].DataJson = []byte(fmt.Sprintf(`{"published_at":"2026-01-02T03:04:05Z","%s":1}`, field))
+		changed := finish(tenants[1], domain.CaptureInput{RefreshID: c.ID})
+		if changed.RevisionID == withCounter.RevisionID {
+			t.Fatalf("changing %s did not create a version", field)
+		}
+		old, err := s.Revision(ctx, tenants[1], c.ID, withCounter.RevisionID)
+		must(t, err)
+		for _, entity := range old.Graph.Entities {
+			if entity.Key == old.Graph.Root {
+				var data map[string]any
+				must(t, json.Unmarshal(entity.Data, &data))
+				if data[field] != float64(0) {
+					t.Fatal("historical counter was overwritten")
+				}
+			}
+		}
+		lastRevision = changed.RevisionID
+	}
+	f.text = "edited post"
+	edited := finish(tenants[1], domain.CaptureInput{RefreshID: c.ID})
+	if edited.RevisionID == lastRevision {
+		t.Fatal("post edit failed to create a revision")
+	}
+	f.graph.Entities[1].ContextOnly = false
 	// Removing the raw owner's reference schedules private raw independently of the shared post.
 	must(t, s.DeleteCollection(ctx, tenants[0], a.ID))
 	var released int

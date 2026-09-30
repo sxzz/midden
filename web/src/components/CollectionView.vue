@@ -4,6 +4,7 @@ import { groupCollections } from '../presentation'
 import CollectionFilters from './CollectionFilters.vue'
 import CollectionRow from './CollectionRow.vue'
 import CollectionSkeleton from './ui/CollectionSkeleton.vue'
+import InfiniteLoader from './ui/InfiniteLoader.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 import type { Collection, Usage } from '../api'
@@ -22,7 +23,18 @@ defineEmits<{
   more: []
   retry: []
 }>()
-const groups = computed(() => groupCollections(props.items))
+const sort = computed(
+  () => new URLSearchParams(props.query).get('sort') || 'captured',
+)
+const groups = computed(() =>
+  groupCollections(props.items, new Date(), sort.value),
+)
+const filtered = computed(() => {
+  const q = new URLSearchParams(props.query)
+  return ['q', 'media_type', 'visibility', 'from_date', 'to_date'].some(
+    (key) => !!q.get(key),
+  )
+})
 const empty = computed(
   () => !props.loading && !props.error && !props.items.length,
 )
@@ -42,12 +54,13 @@ const storage = computed(() =>
 </script>
 
 <template>
+  <p v-if="storage" class="storage">{{ storage }}</p>
   <CollectionFilters
     :key="query"
     :query="query"
     @search="$emit('search', $event)"
   />
-  <ListSection v-if="error">
+  <ListSection v-if="error && !items.length">
     <p class="banner" role="alert">{{ error }}</p>
     <ListButton label="重试" @select="$emit('retry')" />
   </ListSection>
@@ -56,27 +69,25 @@ const storage = computed(() =>
       v-for="a in group.items"
       :key="a.id"
       :collection="a"
+      :sort="sort"
       :show-sensitive="showSensitive"
       @open="$emit('open', $event)"
     />
   </ListSection>
   <p v-if="empty" class="empty">
     {{
-      query
+      filtered
         ? '没有匹配的收藏。换个关键词，或清除筛选。'
         : '这里还是空的。在对话里把链接发给机器人，就会保存到这里。'
     }}
   </p>
   <ListSection v-if="loading"><CollectionSkeleton /></ListSection>
-  <ListSection v-if="next && !loading">
-    <ListButton
-      :label="loading ? '加载中…' : '加载更多'"
-      :disabled="loading"
-      @select="$emit('more')"
-    />
-  </ListSection>
-
-  <p v-if="storage" class="footnote">{{ storage }}</p>
+  <InfiniteLoader
+    v-if="next"
+    :loading="loading"
+    :error="error"
+    @more="$emit('more')"
+  />
 </template>
 
 <style scoped>
@@ -94,11 +105,11 @@ const storage = computed(() =>
   line-height: 1.7;
   color: var(--subtle);
 }
-.footnote {
+.storage {
   margin: 0 0 16px;
   padding: 0 calc(var(--gutter) + 4px);
-  text-align: center;
   font-size: 13px;
+  line-height: 1.5;
   color: var(--subtle);
 }
 </style>

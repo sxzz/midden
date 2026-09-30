@@ -87,6 +87,9 @@ message Entity {
   string external_id = 3;
   bytes data_json = 4;
   repeated uint32 resource_indices = 5; // Indices in FetchResponse.resources.
+  // Non-root context: snapshot and entity-version it, but exclude its data/media
+  // and generic author_name/summary from collection revision comparison.
+  bool context_only = 6;
 }
 message EntityRelation {
   string source = 1;

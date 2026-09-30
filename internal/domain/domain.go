@@ -97,6 +97,7 @@ type Asset struct {
 }
 
 type Entity struct {
+	ContextOnly     bool            `json:"context_only,omitempty"`
 	ID              string          `json:"id,omitempty"`
 	VersionID       string          `json:"version_id,omitempty"`
 	Key             string          `json:"key"`

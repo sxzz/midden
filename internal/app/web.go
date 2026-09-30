@@ -20,7 +20,7 @@ import (
 var ErrInvalidFilter = errors.New("invalid collection filters")
 
 type (
-	CollectionFilter struct{ Q, Media, Visibility, From, Before string }
+	CollectionFilter struct{ Q, Media, Visibility, From, Before, Sort, Order string }
 	collectionCursor struct {
 		Time       time.Time
 		ID, Filter string
@@ -38,7 +38,7 @@ type CollectionPage struct {
 
 func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter, cursor string) (p CollectionPage, e error) {
 	p.Items = []CollectionItem{}
-	if utf8.RuneCountInString(f.Q) > 500 || (f.Media != "" && f.Media != "image" && f.Media != "video" && f.Media != "text") || (f.Visibility != "" && f.Visibility != "public" && f.Visibility != "private") {
+	if (f.Order != "" && f.Order != "desc" && f.Order != "asc") || (f.Sort != "" && f.Sort != "captured" && f.Sort != "published") || utf8.RuneCountInString(f.Q) > 500 || (f.Media != "" && f.Media != "image" && f.Media != "video" && f.Media != "text") || (f.Visibility != "" && f.Visibility != "public" && f.Visibility != "private") {
 		return p, ErrInvalidFilter
 	}
 	var from, before *time.Time
@@ -75,18 +75,24 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 	}
 	q := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.TrimSpace(f.Q)) + "%"
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT a.id,ta.created_at FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id JOIN revisions r ON r.id=a.current_revision WHERE ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR a.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND ($5::timestamptz IS NULL OR (ta.created_at,a.id)<($5,$6::uuid)) AND ($7='' OR ($7='text' AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (($7='image' AND b.mime LIKE 'image/%') OR ($7='video' AND b.mime LIKE 'video/%')))) ORDER BY ta.created_at DESC,a.id DESC LIMIT 11`, q, f.Visibility, from, before, anchor, aid, f.Media)
+		query := `SELECT a.id,ta.created_at,ordering.at FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id JOIN revisions r ON r.id=a.current_revision CROSS JOIN LATERAL (SELECT CASE WHEN $8='published' AND pg_input_is_valid(r.payload->>'published_at','timestamp with time zone') THEN (r.payload->>'published_at')::timestamptz ELSE a.observed_at END AS at) ordering WHERE ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR a.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND ($5::timestamptz IS NULL OR (ordering.at,a.id)<($5,$6::uuid)) AND ($7='' OR ($7='text' AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (($7='image' AND b.mime LIKE 'image/%') OR ($7='video' AND b.mime LIKE 'video/%')))) ORDER BY ordering.at DESC,a.id DESC LIMIT 21`
+		if f.Order == "asc" {
+			query = strings.ReplaceAll(query, "(ordering.at,a.id)<", "(ordering.at,a.id)>")
+			query = strings.ReplaceAll(query, "ordering.at DESC,a.id DESC", "ordering.at ASC,a.id ASC")
+		}
+		rows, err := tx.Query(ctx, query, q, f.Visibility, from, before, anchor, aid, f.Media, f.Sort)
 		if err != nil {
 			return err
 		}
 		type entry struct {
-			id string
-			at time.Time
+			id    string
+			at    time.Time
+			saved time.Time
 		}
 		entries := []entry{}
 		for rows.Next() {
 			var x entry
-			if err = rows.Scan(&x.id, &x.at); err != nil {
+			if err = rows.Scan(&x.id, &x.saved, &x.at); err != nil {
 				rows.Close()
 				return err
 			}
@@ -97,9 +103,9 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 		if err != nil {
 			return err
 		}
-		if len(entries) > 10 {
-			entries = entries[:10]
-			last := entries[9]
+		if len(entries) > 20 {
+			entries = entries[:20]
+			last := entries[19]
 			b, _ := json.Marshal(collectionCursor{last.at, last.id, fingerprint})
 			p.Next = base64.RawURLEncoding.EncodeToString(b)
 		}
@@ -108,7 +114,7 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 			if err != nil {
 				return err
 			}
-			p.Items = append(p.Items, CollectionItem{a, v.at})
+			p.Items = append(p.Items, CollectionItem{a, v.saved})
 		}
 		return nil
 	})

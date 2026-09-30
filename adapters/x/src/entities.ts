@@ -96,6 +96,11 @@ export function attachEntities(
     }
   }
   const data: Record<string, unknown> = { text: result.text };
+  for (const key of ["replies", "reposts", "likes", "bookmarks", "quotes"]) {
+    const value = post[key];
+    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
+      data[key] = value;
+  }
   const published =
     timestamp(post.created_at) || timestamp(post.created_timestamp);
   result.publishedAt = published;
@@ -135,6 +140,7 @@ export function attachEntities(
     ];
     graph.entities.push({
       key: "author",
+      contextOnly: true,
       type: "x.profile",
       externalId: author.id,
       dataJson: Buffer.from(

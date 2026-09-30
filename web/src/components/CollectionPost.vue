@@ -1,7 +1,7 @@
 <script setup vapor lang="ts">
 import { computed } from 'vue'
 import { assetURL, type Collection } from '../api'
-import { present, shortDate, warningList } from '../presentation'
+import { present, warningList } from '../presentation'
 import MediaGallery from './MediaGallery.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 const props = defineProps<{
@@ -25,13 +25,7 @@ const warnings = computed(() => warningList(props.collection.warnings))
       }}</span>
       <div class="identity">
         <strong class="name">{{ view.name }}</strong>
-        <small class="meta"
-          ><span v-if="view.handle">@{{ view.handle }} · </span
-          >{{ shortDate(collection.published_at) || view.kind
-          }}<span v-if="collection.visibility === 'private'">
-            · 私密</span
-          ></small
-        >
+        <small v-if="view.handle" class="handle">@{{ view.handle }}</small>
       </div>
     </header>
     <p class="body">{{ view.body }}</p>
@@ -42,6 +36,23 @@ const warnings = computed(() => warningList(props.collection.warnings))
     <p v-for="warning in warnings" :key="warning" class="warning">
       {{ warning }}
     </p>
+    <footer v-if="view.stats || view.details.length" class="record">
+      <dl v-if="view.stats" class="stats" :aria-label="view.stats.label">
+        <div v-for="stat in view.stats.items" :key="stat.label" class="stat">
+          <dt>{{ stat.label }}</dt>
+          <dd>{{ stat.value }}</dd>
+        </div>
+      </dl>
+      <p v-if="view.details.length" class="details">
+        <span v-for="detail in view.details" :key="detail.key" class="detail"
+          ><span v-if="detail.label" class="label">{{ detail.label }}</span
+          ><time v-if="detail.datetime" :datetime="detail.datetime">{{
+            detail.value
+          }}</time
+          ><span v-else>{{ detail.value }}</span></span
+        >
+      </p>
+    </footer>
   </article>
 </template>
 
@@ -81,7 +92,7 @@ const warnings = computed(() => warningList(props.collection.warnings))
   font-size: 16px;
   font-weight: 600;
 }
-.meta {
+.handle {
   display: block;
   font-size: 13px;
   color: var(--subtle);
@@ -98,5 +109,70 @@ const warnings = computed(() => warningList(props.collection.warnings))
   font-size: 13px;
   line-height: 1.5;
   color: var(--subtle);
+}
+/* What the source recorded, kept under the post behind a hairline. */
+.record {
+  margin-top: 14px;
+  padding-top: 11px;
+  border-top: 1px solid var(--separator);
+}
+/* One row of equal columns, however many counts the source recorded.
+   minmax(0, …) lets a long number wrap inside its column instead of
+   pushing the row past the card. */
+.stats {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+/* Counts and timeline are two layers, so separate them when both are here. */
+.stats:not(:last-child) {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--separator);
+}
+/* Count above, label below: the number is what the reader scans for. */
+.stat {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  min-width: 0;
+}
+.stat dt {
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--subtle);
+  overflow-wrap: anywhere;
+}
+.stat dd {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 360px) {
+  .stat dd {
+    font-size: 16px;
+  }
+}
+.details {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--subtle);
+}
+/* One fact per line: fixed label column on the left, value on the right. */
+.detail {
+  display: flex;
+  gap: 8px;
+}
+.detail .label {
+  flex: 0 0 3.2em;
+}
+.detail time {
+  font-variant-numeric: tabular-nums;
 }
 </style>

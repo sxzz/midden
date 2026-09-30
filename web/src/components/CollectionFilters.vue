@@ -4,6 +4,8 @@ const props = defineProps<{ query: string }>()
 const emit = defineEmits<{ search: [query: string] }>()
 const initial = new URLSearchParams(props.query)
 const form = reactive({
+  order: initial.get('order') || 'desc',
+  sort: initial.get('sort') || 'captured',
   q: initial.get('q') || '',
   media: initial.get('media_type') || '',
   visibility: initial.get('visibility') || '',
@@ -41,6 +43,8 @@ function search() {
   const q = new URLSearchParams()
   for (const [k, v] of [
     ['q', form.q],
+    ['sort', form.sort],
+    ['order', form.order],
     ['media_type', form.media],
     ['visibility', form.visibility],
     ['from_date', form.from],
@@ -49,8 +53,24 @@ function search() {
     if (v) q.set(k, v)
   emit('search', q.toString())
 }
+function changeSort(event: Event) {
+  form.sort = (event.target as HTMLSelectElement).value
+  search()
+}
+function changeOrder(event: Event) {
+  form.order = (event.target as HTMLSelectElement).value
+  search()
+}
 function clear() {
-  Object.assign(form, { q: '', media: '', visibility: '', from: '', to: '' })
+  Object.assign(form, {
+    order: 'desc',
+    sort: 'captured',
+    q: '',
+    media: '',
+    visibility: '',
+    from: '',
+    to: '',
+  })
   emit('search', '')
 }
 </script>
@@ -81,6 +101,17 @@ function clear() {
       <button v-if="query" type="button" class="toggle reset" @click="clear">
         清除
       </button>
+    </div>
+    <div class="sort">
+      <span>排序</span>
+      <select :value="form.sort" aria-label="排序" @change="changeSort">
+        <option value="captured">采集时间</option>
+        <option value="published">发帖时间</option>
+      </select>
+      <select :value="form.order" aria-label="排序方向" @change="changeOrder">
+        <option value="desc">从新到旧</option>
+        <option value="asc">从旧到新</option>
+      </select>
     </div>
     <div v-show="open" class="panel">
       <label class="option"
@@ -114,6 +145,22 @@ function clear() {
 </template>
 
 <style scoped>
+.sort {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 0 4px;
+  font-size: 14px;
+  color: var(--subtle);
+}
+.sort select {
+  min-height: 40px;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+}
 .filters {
   padding: 10px var(--gutter) 6px;
 }

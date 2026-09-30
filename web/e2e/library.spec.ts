@@ -251,3 +251,116 @@ test('loading skeletons, one revision and touch image navigation', async ({
     page.getByRole('button', { name: '放大图片' }).first(),
   ).toBeFocused()
 })
+
+test('scroll loads the next page and retries without losing existing items', async ({
+  page,
+}) => {
+  let attempts = 0
+  const cursors: (string | null)[] = []
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', async (r) => {
+    const url = new URL(r.request().url())
+    if (url.pathname === '/v1/collections') {
+      const cursor = url.searchParams.get('cursor')
+      cursors.push(cursor)
+      if (cursor) {
+        attempts++
+        if (attempts === 1) {
+          await r.fulfill({ status: 500, json: { error: '加载失败' } })
+          return
+        }
+        await r.fulfill({
+          json: {
+            items: [{ ...collection, id: 'last', text: '最后一条收藏' }],
+          },
+        })
+      } else {
+        await r.fulfill({
+          json: {
+            items: Array.from({ length: 20 }, (_, i) => ({
+              ...collection,
+              id: String(i),
+              text: `收藏编号 ${i + 1}`,
+            })),
+            next_cursor: 'page-two',
+          },
+        })
+      }
+    } else {
+      await r.fulfill({
+        json:
+          url.pathname === '/v1/usage'
+            ? {
+                used_bytes: 1048576,
+                reserved_bytes: 0,
+                limit_bytes: 1073741824,
+              }
+            : {},
+      })
+    }
+  })
+  await page.goto('/app/')
+  await expect(page.getByText('收藏编号 1', { exact: true })).toBeVisible()
+  await expect(page.getByText('已用 1 MB，共 1.0 GB')).toBeInViewport()
+  expect(cursors).toEqual([null])
+  await page.getByText('收藏编号 20', { exact: true }).scrollIntoViewIfNeeded()
+  await expect(page.getByRole('button', { name: '重试加载' })).toBeVisible()
+  expect(cursors).toEqual([null, 'page-two'])
+  await expect(page.getByText('收藏编号 1', { exact: true })).toBeAttached()
+  await page.getByRole('button', { name: '重试加载' }).click()
+  await expect(page.getByText('最后一条收藏')).toBeVisible()
+  await expect(page.getByRole('button', { name: '重试加载' })).toHaveCount(0)
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+  expect(cursors).toEqual([null, 'page-two', 'page-two'])
+  await expect(page.getByText('收藏编号 1', { exact: true })).toBeAttached()
+})
+
+test('sort selection resets pagination and carries into subsequent pages', async ({
+  page,
+}) => {
+  const requests: string[] = []
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', async (r) => {
+    const url = new URL(r.request().url())
+    if (url.pathname !== '/v1/collections') {
+      await r.fulfill({ json: {} })
+      return
+    }
+    requests.push(url.search)
+    const published = url.searchParams.get('sort') === 'published'
+    const tail = url.searchParams.has('cursor')
+    await r.fulfill({
+      json: {
+        items: Array.from({ length: tail ? 1 : 20 }, (_, i) => ({
+          ...collection,
+          id: `${published}-${tail}-${i}`,
+          text: `${published ? '发帖' : '采集'}排序 ${tail ? '末页' : i + 1}`,
+        })),
+        next_cursor: tail ? undefined : 'next-page',
+      },
+    })
+  })
+  await page.goto('/app/')
+  await expect(page.getByText('采集排序 1', { exact: true })).toBeVisible()
+  await page
+    .getByRole('combobox', { name: '排序', exact: true })
+    .selectOption('published')
+  await expect(page.getByText('发帖排序 1', { exact: true })).toBeVisible()
+  await expect(page.getByText('采集排序 1', { exact: true })).toHaveCount(0)
+  expect(new URLSearchParams(requests.at(-1)).has('cursor')).toBe(false)
+  await page.getByText('发帖排序 20', { exact: true }).scrollIntoViewIfNeeded()
+  await expect(page.getByText('发帖排序 末页')).toBeVisible()
+  await page
+    .getByRole('combobox', { name: '排序方向', exact: true })
+    .selectOption('asc')
+  await expect(page.getByText('发帖排序 1', { exact: true })).toBeVisible()
+  const reset = new URLSearchParams(requests.at(-1))
+  expect(reset.get('order')).toBe('asc')
+  expect(reset.has('cursor')).toBe(false)
+  await page.getByText('发帖排序 20', { exact: true }).scrollIntoViewIfNeeded()
+  await expect(page.getByText('发帖排序 末页')).toBeVisible()
+  const last = new URLSearchParams(requests.at(-1))
+  expect(last.get('order')).toBe('asc')
+  expect(last.get('sort')).toBe('published')
+  expect(last.get('cursor')).toBe('next-page')
+})

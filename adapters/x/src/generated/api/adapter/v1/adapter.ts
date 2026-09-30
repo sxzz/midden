@@ -137,6 +137,11 @@ export interface Entity {
   dataJson: Buffer;
   /** Indices in FetchResponse.resources. */
   resourceIndices: number[];
+  /**
+   * Non-root context: snapshot and entity-version it, but exclude its data/media
+   * and generic author_name/summary from collection revision comparison.
+   */
+  contextOnly: boolean;
 }
 
 export interface EntityRelation {
@@ -1292,6 +1297,7 @@ function createBaseEntity(): Entity {
     externalId: "",
     dataJson: Buffer.alloc(0),
     resourceIndices: [],
+    contextOnly: false,
   };
 }
 
@@ -1317,6 +1323,9 @@ export const Entity: MessageFns<Entity> = {
       writer.uint32(v);
     }
     writer.join();
+    if (message.contextOnly !== false) {
+      writer.uint32(48).bool(message.contextOnly);
+    }
     return writer;
   },
 
@@ -1378,6 +1387,14 @@ export const Entity: MessageFns<Entity> = {
 
           break;
         }
+        case 6: {
+          if (tag !== 48) {
+            break;
+          }
+
+          message.contextOnly = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1400,6 +1417,9 @@ export const Entity: MessageFns<Entity> = {
       resourceIndices: globalThis.Array.isArray(object?.resourceIndices)
         ? object.resourceIndices.map((e: any) => globalThis.Number(e))
         : [],
+      contextOnly: isSet(object.contextOnly)
+        ? globalThis.Boolean(object.contextOnly)
+        : false,
     };
   },
 
@@ -1420,6 +1440,9 @@ export const Entity: MessageFns<Entity> = {
     if (message.resourceIndices?.length) {
       obj.resourceIndices = message.resourceIndices.map((e) => Math.round(e));
     }
+    if (message.contextOnly !== false) {
+      obj.contextOnly = message.contextOnly;
+    }
     return obj;
   },
 
@@ -1433,6 +1456,7 @@ export const Entity: MessageFns<Entity> = {
     message.externalId = object.externalId ?? "";
     message.dataJson = object.dataJson ?? Buffer.alloc(0);
     message.resourceIndices = object.resourceIndices?.map((e) => e) || [];
+    message.contextOnly = object.contextOnly ?? false;
     return message;
   },
 };

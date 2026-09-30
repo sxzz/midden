@@ -9,6 +9,7 @@ export function useCollection() {
   let controller: AbortController | undefined
   let generation = 0
   async function load(params: string, append = false) {
+    if (append && (loading.value || !next.value)) return
     controller?.abort()
     controller = new AbortController()
     const version = ++generation

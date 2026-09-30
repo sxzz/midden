@@ -45,7 +45,7 @@ func TestWebCollection(t *testing.T) {
 	s := &Service{DB: db, Queue: q, Adapter: fake, Config: Defaults(), Blobs: &memoryBlob{m: map[string][]byte{}}}
 	s.Config.Rate = 1000
 	var jobs []domain.Job
-	for i := 0; i < 12; i++ {
+	for i := 0; i < 22; i++ {
 		j, e := s.Submit(ctx, a.TenantID, domain.CaptureInput{URL: fmt.Sprintf("https://x.com/a/status/%d", time.Now().UnixNano())})
 		must(t, e)
 		must(t, s.capture(ctx, store.Task{Tenant: a.TenantID, ID: j.ID}))
@@ -54,10 +54,10 @@ func TestWebCollection(t *testing.T) {
 	}
 	page, e := s.Collections(ctx, a.TenantID, CollectionFilter{Q: "中文", Media: "text", Visibility: "public"}, "")
 	must(t, e)
-	if len(page.Items) != 10 || page.Next == "" {
+	if len(page.Items) != 20 || page.Next == "" {
 		t.Fatal(page)
 	}
-	must(t, s.DeleteCollection(ctx, a.TenantID, page.Items[9].ID))
+	must(t, s.DeleteCollection(ctx, a.TenantID, page.Items[19].ID))
 	tail, e := s.Collections(ctx, a.TenantID, CollectionFilter{Q: "中文", Media: "text", Visibility: "public"}, page.Next)
 	must(t, e)
 	if len(tail.Items) != 2 {
@@ -80,6 +80,47 @@ func TestWebCollection(t *testing.T) {
 	must(t, e)
 	if len(empty.Items) != 0 {
 		t.Fatal("date ignored")
+	}
+	// Published order reverses capture order; ties use IDs and invalid dates fall back.
+	for i, job := range jobs {
+		_, e = admin.Pool.Exec(ctx, `UPDATE revisions SET payload=jsonb_set(payload,'{published_at}',to_jsonb($2::text)) WHERE id=(SELECT current_revision FROM collections WHERE id=$1)`, job.CollectionID, time.Date(2026, 1, 22-i, 0, 0, 0, 0, time.UTC).Format(time.RFC3339))
+		must(t, e)
+	}
+	published, e := s.Collections(ctx, a.TenantID, CollectionFilter{Sort: "published"}, "")
+	must(t, e)
+	if len(published.Items) != 20 || published.Next == "" || published.Items[0].ID != jobs[0].CollectionID {
+		t.Fatal(published)
+	}
+	publishedTail, e := s.Collections(ctx, a.TenantID, CollectionFilter{Sort: "published"}, published.Next)
+	must(t, e)
+	if len(publishedTail.Items) != 1 || publishedTail.Next != "" {
+		t.Fatal(publishedTail)
+	}
+	ascending, e := s.Collections(ctx, a.TenantID, CollectionFilter{Sort: "published", Order: "asc"}, "")
+	must(t, e)
+	if len(ascending.Items) != 20 || ascending.Items[0].ID != jobs[21].CollectionID {
+		t.Fatal(ascending)
+	}
+	ascendingTail, e := s.Collections(ctx, a.TenantID, CollectionFilter{Sort: "published", Order: "asc"}, ascending.Next)
+	must(t, e)
+	if len(ascendingTail.Items) != 1 || ascendingTail.Items[0].ID != jobs[0].CollectionID || ascendingTail.Next != "" {
+		t.Fatal(ascendingTail)
+	}
+	if _, e = s.Collections(ctx, a.TenantID, CollectionFilter{Sort: "published", Order: "asc"}, published.Next); e == nil {
+		t.Fatal("cursor accepted for a different direction")
+	}
+	if _, e = s.Collections(ctx, a.TenantID, CollectionFilter{Sort: "captured"}, published.Next); e == nil {
+		t.Fatal("cursor accepted for a different sort")
+	}
+	if _, e = s.Collections(ctx, a.TenantID, CollectionFilter{Sort: "invalid"}, ""); !errors.Is(e, ErrInvalidFilter) {
+		t.Fatal("invalid sort accepted")
+	}
+	_, e = admin.Pool.Exec(ctx, `UPDATE revisions SET payload=jsonb_set(payload,'{published_at}','"invalid"'::jsonb) WHERE id=(SELECT current_revision FROM collections WHERE id=$1)`, jobs[0].CollectionID)
+	must(t, e)
+	fallback, e := s.Collections(ctx, a.TenantID, CollectionFilter{Sort: "published"}, "")
+	must(t, e)
+	if fallback.Items[0].ID != jobs[0].CollectionID {
+		t.Fatal("invalid publication date did not fall back to capture time")
 	}
 	id := jobs[0].CollectionID
 	// Use a retained item in case the pagination anchor happened to be this collection.
