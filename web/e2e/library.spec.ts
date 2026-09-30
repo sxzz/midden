@@ -83,6 +83,12 @@ test('browse, filter, history, refresh and remove a saved post', async ({
     fullPage: true,
   })
   await openRow()
+  await expect(page.locator('.post .details')).toContainText('保存于')
+  await expect(page.locator('.post .detail').nth(0)).toContainText('发布于')
+  await expect(page.locator('.post .detail').nth(1)).toContainText('保存于')
+  await expect(
+    page.locator('.section-footnote').filter({ hasText: '保存于' }),
+  ).toHaveCount(0)
   await page.getByRole('button', { name: '历史版本' }).click()
   await page.getByRole('button', { name: /2026年9月27日/ }).click()
   await expect(page.getByText('历史正文')).toBeVisible()
@@ -171,10 +177,10 @@ test('sensitive image stays blurred until revealed and opens inside the page', a
     .first()
     .click()
   await expect(
-    page.getByRole('button', { name: '敏感内容 · 点按显示' }),
+    page.getByRole('button', { name: '敏感内容，点按显示' }),
   ).toBeVisible()
   await expect(page.locator('.sensitive img')).toHaveCSS('filter', 'blur(18px)')
-  await page.getByRole('button', { name: '敏感内容 · 点按显示' }).click()
+  await page.getByRole('button', { name: '敏感内容，点按显示' }).click()
   await expect(page.getByAltText('合成测试图片')).toBeVisible()
   await expect(page.getByAltText('合成测试图片')).toHaveCSS('filter', 'none')
   await page.getByRole('button', { name: '放大图片' }).click()

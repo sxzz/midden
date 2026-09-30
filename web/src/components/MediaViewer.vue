@@ -269,13 +269,15 @@ watch(
     @close="emit('close')"
     @keydown="keydown"
   >
-    <div ref="stage" class="stage" />
+    <!-- The dialog's initial focus lands on the canvas, not the close button:
+         opening by tap must not leave a focus ring sitting on "close". Tab
+         still reaches the controls, and their rings stay visible. -->
+    <div ref="stage" class="stage" tabindex="-1" autofocus />
 
     <div class="chrome chrome-top">
       <button
         type="button"
         class="glass close"
-        autofocus
         :aria-label="isVideo ? '关闭视频' : '关闭图片'"
         @click="close"
       >
@@ -418,6 +420,10 @@ watch(
   overflow: hidden;
   touch-action: pan-y pinch-zoom;
 }
+/* Only the programmatic initial focus target; a ring here would be noise. */
+.stage:focus {
+  outline: none;
+}
 .stage :deep(.pswp) {
   position: absolute;
   z-index: 0;
@@ -521,6 +527,14 @@ watch(
 }
 .close:active {
   transform: scale(0.9);
+}
+/* Keyboard users keep a clear ring on every control. */
+.close:focus-visible,
+.save:focus-visible,
+.nav:focus-visible,
+.caption:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 .save {
   display: grid;

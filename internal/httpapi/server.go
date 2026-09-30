@@ -82,10 +82,14 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		v, e := s.Job(r.Context(), tenant(r), r.PathValue("id"))
 		respond(w, 200, v, e)
 	})
+	mux.HandleFunc("GET /v1/collections/authors", func(w http.ResponseWriter, r *http.Request) {
+		authors, e := s.CollectionAuthors(r.Context(), tenant(r))
+		respond(w, 200, map[string]any{"items": authors}, e)
+	})
 	mux.HandleFunc("GET /v1/collections", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		if _, ok := r.Context().Value(sessionKey{}).(bool); ok || q.Has("q") || q.Has("entity_type") || q.Has("media_type") || q.Has("visibility") || q.Has("saved_from") || q.Has("saved_before") || q.Has("sort") || q.Has("order") {
-			v, e := s.Collections(r.Context(), tenant(r), app.CollectionFilter{EntityType: q.Get("entity_type"), Q: q.Get("q"), Media: q.Get("media_type"), Visibility: q.Get("visibility"), From: q.Get("saved_from"), Before: q.Get("saved_before"), Sort: q.Get("sort"), Order: q.Get("order")}, q.Get("cursor"))
+		if _, ok := r.Context().Value(sessionKey{}).(bool); ok || q.Has("q") || q.Has("entity_type") || q.Has("media_type") || q.Has("visibility") || q.Has("saved_from") || q.Has("saved_before") || q.Has("sort") || q.Has("order") || q.Has("author") || q.Has("sensitive") {
+			v, e := s.Collections(r.Context(), tenant(r), app.CollectionFilter{Authors: q["author"], EntityType: q.Get("entity_type"), Q: q.Get("q"), Media: q.Get("media_type"), Visibility: q.Get("visibility"), From: q.Get("saved_from"), Before: q.Get("saved_before"), Sort: q.Get("sort"), Order: q.Get("order"), Sensitive: q.Get("sensitive")}, q.Get("cursor"))
 			respond(w, 200, v, e)
 			return
 		}
@@ -202,7 +206,7 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 	secured := authenticate(s, web, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := r.Context().Value(sessionKey{}).(bool); ok {
 			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-			if len(parts) >= 3 && (parts[1] == "collections" || parts[1] == "assets" || parts[1] == "entities") {
+			if r.URL.Path != "/v1/collections/authors" && len(parts) >= 3 && (parts[1] == "collections" || parts[1] == "assets" || parts[1] == "entities") {
 				if !valid(parts[2]) {
 					http.NotFound(w, r)
 					return

@@ -29,7 +29,7 @@ withDefaults(
 .media-preview {
   display: block;
   width: 100%;
-  height: 100%;
+  height: var(--media-height, 100%);
   overflow: hidden;
   border-radius: inherit;
 }
@@ -37,11 +37,12 @@ withDefaults(
 .media-preview video {
   display: block;
   width: 100%;
-  height: 100%;
+  height: var(--media-height, 100%);
   min-height: 0;
   object-fit: var(--media-fit);
 }
 .media-preview :deep(img) {
+  height: var(--media-height, 100%);
   object-fit: var(--media-fit);
 }
 </style>

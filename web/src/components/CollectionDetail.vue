@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { computed } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import { safeURL, type Collection } from '../api'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
 import { date } from '../presentation'
@@ -44,7 +44,16 @@ const {
   (id) => emit('deleted', id),
   (collection) => emit('updated', collection),
 )
-const saved = computed(() => date(props.savedAt || collection.value?.saved_at))
+// A historical revision does not carry the collection's own save date, so keep
+// the last one we learned and hand it to the post.
+const savedAt = shallowRef(props.savedAt)
+watch(
+  () => props.savedAt || collection.value?.saved_at,
+  (value) => {
+    if (value) savedAt.value = value
+  },
+  { immediate: true },
+)
 const link = computed(() => collection.value && safeURL(collection.value.url))
 const version = computed(() =>
   collection.value
@@ -61,11 +70,12 @@ const version = computed(() =>
     ><CollectionSkeleton detail
   /></ListSection>
   <template v-if="collection">
-    <ListSection :footnote="saved ? `保存于 ${saved}` : undefined">
+    <ListSection>
       <CollectionSkeleton v-if="loadingRevision" detail />
       <CollectionPost
         v-else
         :collection="collection"
+        :saved-at="savedAt"
         :show-sensitive="showSensitive"
       />
     </ListSection>

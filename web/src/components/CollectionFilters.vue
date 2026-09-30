@@ -1,18 +1,27 @@
 <script setup vapor lang="ts">
-import { computed, reactive, shallowRef } from 'vue'
+import { computed, onUnmounted, reactive, shallowRef, watch } from 'vue'
+import { api, errorText, type Author } from '../api'
+import ChevronIcon from './ui/ChevronIcon.vue'
+import MultiSelect from './ui/MultiSelect.vue'
 const props = defineProps<{ query: string }>()
 const emit = defineEmits<{ search: [query: string] }>()
-const initial = new URLSearchParams(props.query)
-const form = reactive({
-  order: initial.get('order') || 'desc',
-  sort: initial.get('sort') || 'captured',
-  q: initial.get('q') || '',
-  entity: initial.get('entity_type') || 'x.post',
-  media: (initial.get('media_type') || '').split(',').filter(Boolean),
-  visibility: initial.get('visibility') || '',
-  from: initial.get('from_date') || '',
-  to: initial.get('to_date') || '',
-})
+function read(query: string) {
+  const params = new URLSearchParams(query)
+  return {
+    authors: params.getAll('author'),
+    order: params.get('order') || 'desc',
+    sort: params.get('sort') || 'captured',
+    q: params.get('q') || '',
+    entity: params.get('entity_type') || 'x.post',
+    media: (params.get('media_type') || '').split(',').filter(Boolean),
+    visibility: params.get('visibility') || '',
+    sensitive: params.get('sensitive') || '',
+    from: params.get('from_date') || '',
+    to: params.get('to_date') || '',
+  }
+}
+type Form = ReturnType<typeof read>
+const form = reactive(read(props.query))
 const mediaNames: Record<string, string> = {
   image: '图片',
   video: '视频',
@@ -22,14 +31,28 @@ const visibilityNames: Record<string, string> = {
   public: '公开内容',
   private: '受限内容',
 }
+const sensitiveNames: Record<string, string> = {
+  contains: '包含敏感内容',
+  not_contains: '不含敏感内容',
+}
 const open = shallowRef(
-  !!(form.media.length || form.visibility || form.from || form.to),
+  !!(
+    form.authors.length ||
+    form.media.length ||
+    form.visibility ||
+    form.sensitive ||
+    form.from ||
+    form.to
+  ),
 )
 const active = computed(() =>
   [
     form.entity === 'x.profile' ? 'X 账号' : 'X 帖子',
     form.media.map((type) => mediaNames[type]).join('、'),
+    // Authors are selected by identity; only their names are worth showing.
+    form.authors.map((id) => authorNames.value[id] || id).join('、'),
     visibilityNames[form.visibility],
+    sensitiveNames[form.sensitive],
     form.from && form.to
       ? `${form.from} 至 ${form.to}`
       : form.from
@@ -41,49 +64,134 @@ const active = computed(() =>
     .filter(Boolean)
     .join(' · '),
 )
-function search() {
+function stringify(f: Form) {
   const q = new URLSearchParams()
   for (const [k, v] of [
-    ['q', form.q],
-    ['entity_type', form.entity],
-    ['sort', form.sort],
-    ['order', form.order],
-    ['media_type', form.media.join(',')],
-    ['visibility', form.visibility],
-    ['from_date', form.from],
-    ['to_date', form.to],
+    ['q', f.q],
+    ['entity_type', f.entity],
+    ['sort', f.sort],
+    ['order', f.order],
+    ['media_type', f.media.join(',')],
+    ['visibility', f.visibility],
+    ['sensitive', f.sensitive],
+    ['from_date', f.from],
+    ['to_date', f.to],
   ])
     if (v) q.set(k, v)
-  emit('search', q.toString())
+  for (const author of f.authors) q.append('author', author)
+  return q.toString()
 }
-function changeSort(event: Event) {
-  form.sort = (event.target as HTMLSelectElement).value
-  search()
-}
-function changeOrder(event: Event) {
-  form.order = (event.target as HTMLSelectElement).value
-  search()
+const build = () => stringify(form)
+/** The last query this component and its parent agree on, canonicalised so
+    neither the auto-search watcher nor the `query` sync can echo one back —
+    the router may re-encode or reorder what we emitted. */
+let settled = build()
+/** A range the user is still halfway through typing is not a filter yet. */
+const usable = () => !form.from || !form.to || !(form.from > form.to)
+function search() {
+  if (!usable()) return
+  const query = build()
+  if (query === settled) return
+  settled = query
+  emit('search', query)
 }
 function clear() {
-  Object.assign(form, {
-    order: 'desc',
-    sort: 'captured',
-    q: '',
-    entity: 'x.post',
-    media: [],
-    visibility: '',
-    from: '',
-    to: '',
-  })
+  Object.assign(form, read(''))
+  settled = build()
   emit('search', '')
 }
+// Every discrete control applies itself; only the keyword box waits for Enter.
+watch(
+  () => [
+    form.entity,
+    form.sort,
+    form.order,
+    form.visibility,
+    form.sensitive,
+    form.from,
+    form.to,
+    form.media.join(','),
+    JSON.stringify(form.authors),
+  ],
+  () => search(),
+)
+// Back/forward (and any other outside change) rewrites the form. `settled`
+// already holds whatever we emitted, so our own queries never round-trip.
+watch(
+  () => props.query,
+  (query) => {
+    const incoming = read(query)
+    if (stringify(incoming) === settled) return
+    settled = stringify(incoming)
+    Object.assign(form, incoming)
+  },
+)
+const authors = shallowRef<Author[]>([])
+const authorError = shallowRef('')
+const authorsLoading = shallowRef(false)
+let authorsLoaded = false
+const controller = new AbortController()
+onUnmounted(() => controller.abort())
+async function loadAuthors() {
+  if (authorsLoading.value) return
+  authorsLoading.value = true
+  authorError.value = ''
+  try {
+    const data = await api<{ items: Author[] }>('/collections/authors', {
+      signal: controller.signal,
+    })
+    authors.value = data.items.filter(
+      (author) => typeof author?.id === 'string' && author.id,
+    )
+    authorsLoaded = true
+  } catch (error) {
+    if (!controller.signal.aborted) authorError.value = errorText(error)
+  } finally {
+    authorsLoading.value = false
+  }
+}
+watch(
+  open,
+  (value) => {
+    if (value && !authorsLoaded) void loadAuthors()
+  },
+  { immediate: true },
+)
+// Two accounts may share a display name, so the label is never the value.
+const authorOptions = computed(() =>
+  authors.value.map((author) => ({
+    value: author.id,
+    label: author.name || author.id,
+  })),
+)
+const authorNames = computed(() =>
+  Object.fromEntries(
+    authors.value.map((author) => [author.id, author.name || author.id]),
+  ),
+)
+const mediaOptions = Object.entries(mediaNames).map(([value, label]) => ({
+  value,
+  label,
+}))
 </script>
 
 <template>
   <form class="filters" @submit.prevent="search">
     <div class="bar">
-      <span class="glass" aria-hidden="true">⌕</span
-      ><input
+      <svg
+        class="glass"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <circle cx="10.5" cy="10.5" r="6" />
+        <path d="M15 15l4.5 4.5" />
+      </svg>
+      <input
         v-model="form.q"
         type="search"
         class="field"
@@ -100,8 +208,8 @@ function clear() {
         @click="open = !open"
       >
         筛选<span v-if="active" class="separator" aria-hidden="true">·</span
-        ><span v-if="active" class="active">{{ active }}</span
-        ><span class="caret" :class="{ open }" aria-hidden="true">›</span>
+        ><span v-if="active" class="active">{{ active }}</span>
+        <ChevronIcon :open="open" />
       </button>
       <button v-if="query" type="button" class="toggle reset" @click="clear">
         清除
@@ -109,46 +217,75 @@ function clear() {
     </div>
     <div class="sort">
       <span>排序</span>
-      <select :value="form.sort" aria-label="排序" @change="changeSort">
-        <option value="captured">采集时间</option>
-        <option value="published">发帖时间</option>
-        <option value="storage">存储空间</option>
-      </select>
-      <select :value="form.order" aria-label="排序方向" @change="changeOrder">
-        <option value="desc">
-          {{ form.sort === 'storage' ? '从大到小' : '从新到旧' }}
-        </option>
-        <option value="asc">
-          {{ form.sort === 'storage' ? '从小到大' : '从旧到新' }}
-        </option>
-      </select>
+      <span class="select"
+        ><select
+          :value="form.sort"
+          aria-label="排序"
+          @change="form.sort = ($event.target as HTMLSelectElement).value"
+        >
+          <option value="captured">采集时间</option>
+          <option value="published">发帖时间</option>
+          <option value="storage">存储空间</option></select
+        ><ChevronIcon class="select-chevron"
+      /></span>
+      <span class="select"
+        ><select
+          :value="form.order"
+          aria-label="排序方向"
+          @change="form.order = ($event.target as HTMLSelectElement).value"
+        >
+          <option value="desc">
+            {{ form.sort === 'storage' ? '从大到小' : '从新到旧' }}
+          </option>
+          <option value="asc">
+            {{ form.sort === 'storage' ? '从小到大' : '从旧到新' }}
+          </option></select
+        ><ChevronIcon class="select-chevron"
+      /></span>
     </div>
     <div v-show="open" class="panel">
       <label class="option"
-        >类型<select v-model="form.entity" aria-label="类型">
-          <option value="x.post">X 帖子</option>
-          <option value="x.profile">X 账号</option>
-        </select></label
-      >
-      <fieldset class="media-options">
-        <legend>媒体类型</legend>
-        <label v-for="(name, value) in mediaNames" :key="value">
-          <input v-model="form.media" type="checkbox" :value="value" />{{
-            name
-          }}
-        </label>
-        <p class="hint">不选表示全部；多选时匹配任意一种。</p>
-      </fieldset>
+        >类型<span class="select"
+          ><select v-model="form.entity" aria-label="类型">
+            <option value="x.post">X 帖子</option>
+            <option value="x.profile">X 账号</option></select
+          ><ChevronIcon class="select-chevron" /></span
+      ></label>
+      <MultiSelect
+        v-model="form.authors"
+        label="作者"
+        :options="authorOptions"
+      />
+      <p v-if="authorsLoading" class="hint" role="status">正在加载作者…</p>
+      <p v-if="authorError" class="hint" role="alert">
+        {{ authorError }}
+        <button type="button" @click="loadAuthors">重试</button>
+      </p>
+      <MultiSelect
+        v-model="form.media"
+        label="媒体类型"
+        :options="mediaOptions"
+      />
       <label class="option"
-        >来源内容权限<select v-model="form.visibility">
-          <option value="">全部</option>
-          <option value="public">公开内容</option>
-          <option value="private">受限内容</option>
-        </select></label
-      >
+        >来源内容权限<span class="select"
+          ><select v-model="form.visibility">
+            <option value="">全部</option>
+            <option value="public">公开内容</option>
+            <option value="private">受限内容</option></select
+          ><ChevronIcon class="select-chevron" /></span
+      ></label>
       <p class="hint">
         指采集时原内容的访问权限；受限内容按你的账号隔离保存，并非收藏的分享设置。
       </p>
+      <label class="option"
+        >敏感内容<span class="select"
+          ><select v-model="form.sensitive" aria-label="敏感内容">
+            <option value="">全部</option>
+            <option value="contains">包含</option>
+            <option value="not_contains">不包含</option></select
+          ><ChevronIcon class="select-chevron" /></span
+      ></label>
+      <p class="hint">按当前版本的正文媒体判断；头像等附带资源不计入。</p>
       <fieldset class="dates">
         <legend>收藏日期</legend>
         <label class="option"
@@ -162,12 +299,9 @@ function clear() {
             aria-label="收藏结束日期"
         /></label>
         <p class="hint">
-          按加入收藏的日期筛选，包含开始和结束当天；留空表示不限。
+          按加入收藏的日期筛选，包含开始和结束当天；留空表示不限。改动会立即生效。
         </p>
       </fieldset>
-      <div class="panel-actions">
-        <button type="submit" class="apply">应用筛选</button>
-      </div>
     </div>
   </form>
 </template>
@@ -201,8 +335,10 @@ function clear() {
   padding-inline: 12px;
 }
 .glass {
-  font-size: 20px;
-  line-height: 1;
+  display: block;
+  flex: none;
+  width: 20px;
+  height: 20px;
   color: var(--subtle);
 }
 .field {
@@ -257,7 +393,6 @@ function clear() {
   font-size: 12px;
   line-height: 1.5;
 }
-.media-options,
 .dates {
   margin: 0;
   padding: 8px 0;
@@ -268,32 +403,11 @@ legend {
   padding: 8px var(--inset) 0;
   font-size: 15px;
 }
-.media-options label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 44px;
-  margin-left: var(--inset);
-}
-.media-options input {
-  accent-color: var(--link);
-}
 .active {
   color: var(--subtle);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.caret {
-  display: inline-block;
-  margin-left: 4px;
-  font-size: 17px;
-  line-height: 1;
-  transform: rotate(90deg);
-  transition: transform 0.15s ease;
-}
-.caret.open {
-  transform: rotate(-90deg);
 }
 .panel {
   background: var(--card);
@@ -313,8 +427,7 @@ legend {
 .option {
   position: relative;
 }
-.option + .option::before,
-.panel-actions::before {
+.option + .option::before {
   content: '';
   position: absolute;
   inset: 0 0 auto var(--inset);
@@ -325,23 +438,33 @@ legend {
 .option input {
   min-height: 36px;
   min-width: 0;
-  max-width: 60%;
   border: 0;
   background: none;
   color: var(--link);
   font-size: 16px;
   text-align: right;
 }
-.panel-actions {
-  position: relative;
+.option input {
+  max-width: 60%;
 }
-.apply {
-  display: block;
-  padding: 11px var(--inset);
-  text-align: left;
-  width: 100%;
-  min-height: 48px;
-  color: var(--link);
-  font-size: 16px;
+/* The chevron owns a reserved gutter, so no arrow ever crowds its own label. */
+.select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 60%;
+}
+.select select {
+  appearance: none;
+  -webkit-appearance: none;
+  max-width: 100%;
+  padding-right: 26px;
+}
+.select-chevron {
+  position: absolute;
+  right: 0;
+  top: calc(50% - 12px);
+  pointer-events: none;
 }
 </style>

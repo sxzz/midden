@@ -31,9 +31,15 @@ const groups = computed(() =>
 )
 const filtered = computed(() => {
   const q = new URLSearchParams(props.query)
-  return ['q', 'media_type', 'visibility', 'from_date', 'to_date'].some(
-    (key) => !!q.get(key),
-  )
+  return [
+    'q',
+    'author',
+    'media_type',
+    'visibility',
+    'sensitive',
+    'from_date',
+    'to_date',
+  ].some((key) => !!q.get(key))
 })
 const empty = computed(
   () => !props.loading && !props.error && !props.items.length,
@@ -57,11 +63,7 @@ const storage = computed(() =>
 
 <template>
   <p v-if="storage" class="storage">{{ storage }}</p>
-  <CollectionFilters
-    :key="query"
-    :query="query"
-    @search="$emit('search', $event)"
-  />
+  <CollectionFilters :query="query" @search="$emit('search', $event)" />
   <ListSection v-if="error && !items.length">
     <p class="banner" role="alert">{{ error }}</p>
     <ListButton label="重试" @select="$emit('retry')" />

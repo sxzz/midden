@@ -152,7 +152,7 @@ func TestWebSessions(t *testing.T) {
 	if e != nil || identity.TenantID != session["tenant_id"] {
 		t.Fatal(identity, e)
 	}
-	for _, path := range []string{"/v1/session", "/v1/collections?q=中文", "/v1/usage"} {
+	for _, path := range []string{"/v1/session", "/v1/collections?q=中文", "/v1/collections/authors", "/v1/usage"} {
 		w = call("GET", path, "", "", ck)
 		if w.Code != 200 {
 			t.Fatal(path, w.Code, w.Body.String())

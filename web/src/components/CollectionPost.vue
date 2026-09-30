@@ -1,15 +1,34 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
 import { assetURL, type Collection } from '../api'
-import { present, storageSize, warningList } from '../presentation'
+import { date, present, storageSize, warningList } from '../presentation'
 import MediaGallery from './MediaGallery.vue'
 import MediaViewer from './MediaViewer.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 const props = defineProps<{
   collection: Collection
+  /** When the viewer already knows it, so revisions never drop the date. */
+  savedAt?: string
   showSensitive?: boolean
 }>()
 const view = computed(() => present(props.collection))
+/** "Saved at" belongs with the other timestamps, right after the source's
+    own publication date, rather than in a separate footnote. */
+const details = computed(() => {
+  const list = view.value.details
+  const savedAt = props.savedAt || props.collection.saved_at
+  const value = date(savedAt)
+  if (!value || list.some((detail) => detail.key === 'saved')) return list
+  const published = list.findIndex((detail) => detail.key === 'published')
+  const merged = [...list]
+  merged.splice(published + 1, 0, {
+    key: 'saved',
+    label: '保存于',
+    value,
+    datetime: savedAt,
+  })
+  return merged
+})
 const previewAvatar = shallowRef(false)
 const avatarAssets = computed(() =>
   view.value.avatar && (!view.value.avatar.sensitive || props.showSensitive)
@@ -60,15 +79,15 @@ const warnings = computed(() => warningList(props.collection.warnings))
     <p v-for="warning in warnings" :key="warning" class="warning">
       {{ warning }}
     </p>
-    <footer v-if="view.stats || view.details.length" class="record">
+    <footer v-if="view.stats || details.length" class="record">
       <dl v-if="view.stats" class="stats" :aria-label="view.stats.label">
         <div v-for="stat in view.stats.items" :key="stat.label" class="stat">
           <dt>{{ stat.label }}</dt>
           <dd>{{ stat.value }}</dd>
         </div>
       </dl>
-      <p v-if="view.details.length" class="details">
-        <span v-for="detail in view.details" :key="detail.key" class="detail"
+      <p v-if="details.length" class="details">
+        <span v-for="detail in details" :key="detail.key" class="detail"
           ><span v-if="detail.label" class="label">{{ detail.label }}</span
           ><time v-if="detail.datetime" :datetime="detail.datetime">{{
             detail.value

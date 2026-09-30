@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -68,6 +69,89 @@ func TestWebCollection(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Authors are the adapter's own graph identities. Nine captures of author-1
+	// carry an old display name and the newest carries the current one; author-2
+	// and author-3 are different accounts that happen to share a display name;
+	// the last collection has no authored_by relation at all.
+	setAuthor := func(job domain.Job, external, name string, at time.Time) {
+		_, e := admin.Pool.Exec(ctx, `UPDATE revisions SET created_at=$4::timestamptz,payload=payload||jsonb_build_object('author_name',$2::text,'graph',jsonb_build_object('root','post','relations',jsonb_build_array(jsonb_build_object('source','post','target','author','type','authored_by')),'entities',jsonb_build_array(jsonb_build_object('key','post','type','x.post','external_id','post'),jsonb_build_object('key','author','type','x.profile','external_id',$3::text)))) WHERE id=(SELECT current_revision FROM collections WHERE id=$1)`, job.CollectionID, name, external, at)
+		must(t, e)
+	}
+	base := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	for i, job := range jobs[:21] {
+		switch {
+		case i < 10:
+			name := "旧名"
+			if i == 9 {
+				name = "新名"
+			}
+			setAuthor(job, "author-1", name, base.Add(time.Duration(i)*time.Hour))
+		case i < 20:
+			setAuthor(job, "author-2", "同名作者", base.Add(time.Duration(i)*time.Hour))
+		default:
+			setAuthor(job, "author-3", "同名作者", base.Add(time.Duration(i)*time.Hour))
+		}
+	}
+	authorOne, authorTwo, authorThree := "x/x.profile/author-1", "x/x.profile/author-2", "x/x.profile/author-3"
+	authors, err := s.CollectionAuthors(ctx, a.TenantID)
+	must(t, err)
+	// A renamed account stays one option under its latest captured name, two
+	// accounts sharing a name stay apart, and an unauthored collection adds none.
+	// Ordered by display name, then by identity so same-named accounts are stable.
+	want := []CollectionAuthor{{ID: authorTwo, Name: "同名作者"}, {ID: authorThree, Name: "同名作者"}, {ID: authorOne, Name: "新名"}}
+	if !reflect.DeepEqual(authors, want) {
+		t.Fatalf("author choices: %v", authors)
+	}
+	for key, count := range map[string]int{authorOne: 10, authorTwo: 10, authorThree: 1} {
+		matched, err := s.Collections(ctx, a.TenantID, CollectionFilter{Authors: []string{key}}, "")
+		must(t, err)
+		if len(matched.Items) != count {
+			t.Fatalf("author %s matched %d", key, len(matched.Items))
+		}
+	}
+	// Selecting one of two same-named accounts must not drag in the other.
+	sameName, err := s.Collections(ctx, a.TenantID, CollectionFilter{Authors: []string{authorTwo, authorThree}}, "")
+	must(t, err)
+	if len(sameName.Items) != 11 {
+		t.Fatalf("same-name authors merged or split: %d", len(sameName.Items))
+	}
+	union := []string{authorOne, authorTwo, authorThree}
+	unionPage, err := s.Collections(ctx, a.TenantID, CollectionFilter{Authors: union}, "")
+	must(t, err)
+	if len(unionPage.Items) != 20 || unionPage.Next == "" {
+		t.Fatal("author union failed")
+	}
+	unionTail, err := s.Collections(ctx, a.TenantID, CollectionFilter{Authors: union}, unionPage.Next)
+	must(t, err)
+	if len(unionTail.Items) != 1 || unionTail.Next != "" {
+		t.Fatal("author pagination failed")
+	}
+	if _, err = s.Collections(ctx, a.TenantID, CollectionFilter{Authors: []string{authorOne}}, unionPage.Next); err == nil {
+		t.Fatal("cursor accepted changed authors")
+	}
+	for _, invalid := range []string{"新名", "x/x.profile", "x/x.profile/author-1/extra", "x//author-1", "x/x.profile/author%2d1"} {
+		if _, err = s.Collections(ctx, a.TenantID, CollectionFilter{Authors: []string{invalid}}, ""); !errors.Is(err, ErrInvalidFilter) {
+			t.Fatalf("accepted author key %q", invalid)
+		}
+	}
+	// Another tenant only ever sees authors of what it saved itself.
+	shared := jobs[20].CollectionID
+	added, err := s.SavePublicCollection(ctx, b.TenantID, shared)
+	must(t, err)
+	if !added {
+		t.Fatal("shared reference missing")
+	}
+	foreign, err := s.CollectionAuthors(ctx, b.TenantID)
+	must(t, err)
+	if !reflect.DeepEqual(foreign, []CollectionAuthor{{ID: authorThree, Name: "同名作者"}}) {
+		t.Fatalf("foreign authors exposed: %v", foreign)
+	}
+	leak, err := s.Collections(ctx, b.TenantID, CollectionFilter{Authors: []string{authorOne}}, "")
+	must(t, err)
+	if len(leak.Items) != 0 {
+		t.Fatal("author filter crossed tenants")
+	}
+	must(t, s.DeleteCollection(ctx, b.TenantID, shared))
 	// Storage order must remain stable across pages, including equal-sized items.
 	for i, job := range jobs {
 		_, e = admin.Pool.Exec(ctx, `UPDATE revisions SET content_bytes=$2 WHERE collection_id=$1`, job.CollectionID, (i/2)*100)
@@ -214,6 +298,51 @@ func TestWebCollection(t *testing.T) {
 	must(t, s.DeleteCollection(ctx, a.TenantID, id))
 	if _, e = s.Revision(ctx, a.TenantID, id, versions.Items[0].ID); !errors.Is(e, domain.ErrNotFound) {
 		t.Fatal(e)
+	}
+
+	// Sensitivity is decided by the current revision's content resources: an
+	// avatar never marks a collection sensitive, and a collection with no
+	// resources at all counts as not containing any.
+	var marked []domain.Job
+	for range 2 {
+		j, err := s.Submit(ctx, a.TenantID, domain.CaptureInput{URL: fmt.Sprintf("https://x.com/a/status/%d", time.Now().UnixNano())})
+		must(t, err)
+		must(t, s.capture(ctx, store.Task{Tenant: a.TenantID, ID: j.ID}))
+		must(t, s.finalize(ctx, a.TenantID, j.ID))
+		marked = append(marked, j)
+	}
+	author := "x/x.profile/author-sensitive"
+	for i, job := range marked {
+		setAuthor(job, "author-sensitive", "敏感作者", base.Add(time.Duration(i)*time.Hour))
+		purpose := ""
+		if i == 1 {
+			purpose = "avatar"
+		}
+		_, e = admin.Pool.Exec(ctx, `INSERT INTO assets(tenant_id,visibility,capture_id,position,source_url,purpose,kind,state,sensitive) SELECT $1,rv.visibility,rv.capture_id,99,'https://example.test/sensitive.png',$3,'image','ready',TRUE FROM revisions rv JOIN collections c ON c.current_revision=rv.id WHERE c.id=$2`, a.TenantID, job.CollectionID, purpose)
+		must(t, e)
+	}
+	for value, want := range map[string]string{"contains": marked[0].CollectionID, "not_contains": marked[1].CollectionID} {
+		page, err := s.Collections(ctx, a.TenantID, CollectionFilter{Authors: []string{author}, Sensitive: value}, "")
+		must(t, err)
+		if len(page.Items) != 1 || page.Items[0].ID != want {
+			t.Fatalf("sensitive %s: %v", value, page.Items)
+		}
+	}
+	all, e := s.Collections(ctx, a.TenantID, CollectionFilter{Authors: []string{author}}, "")
+	must(t, e)
+	if len(all.Items) != 2 {
+		t.Fatal("empty sensitive filter narrowed results")
+	}
+	if _, e = s.Collections(ctx, a.TenantID, CollectionFilter{Sensitive: "maybe"}, ""); !errors.Is(e, ErrInvalidFilter) {
+		t.Fatal("invalid sensitive filter accepted")
+	}
+	bound, e := s.Collections(ctx, a.TenantID, CollectionFilter{Sensitive: "not_contains"}, "")
+	must(t, e)
+	if bound.Next == "" {
+		t.Fatal("sensitive filter lost pagination")
+	}
+	if _, e = s.Collections(ctx, a.TenantID, CollectionFilter{Sensitive: "contains"}, bound.Next); e == nil {
+		t.Fatal("cursor accepted a changed sensitive filter")
 	}
 }
 

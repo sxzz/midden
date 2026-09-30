@@ -33,6 +33,11 @@ export interface Collection {
     relations: { source: string; target: string; type: string }[]
   }
 }
+/** `id` is the stable adapter entity identity; `name` is only a label. */
+export interface Author {
+  id: string
+  name: string
+}
 export interface Page<T> {
   items: T[]
   next_cursor?: string

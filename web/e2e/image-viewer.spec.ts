@@ -227,3 +227,15 @@ test('detail avatar opens its own preview and returns focus on close', async ({
   await expect(avatar).toBeFocused()
   expect(page.url()).toBe(url)
 })
+
+test('opening preview has no automatic close outline but keyboard focus stays visible', async ({
+  page,
+}) => {
+  const dialog = page.getByRole('dialog')
+  const close = dialog.getByRole('button', { name: '关闭图片' })
+  await expect(close).toHaveCSS('outline-style', 'none')
+  await page.keyboard.press('Tab')
+  const focused = dialog.locator(':focus')
+  await expect(focused).toHaveCount(1)
+  await expect(focused).not.toHaveCSS('outline-style', 'none')
+})
