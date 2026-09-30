@@ -120,7 +120,7 @@ func groupButtons(keys telegram.Keyboard) telegram.Keyboard {
 	for _, row := range keys {
 		var kept []telegram.Button
 		for _, b := range row {
-			private := false
+			private := b.WebApp != nil
 			for _, c := range commands {
 				if c.Private && (b.Data == "/"+c.Name || strings.HasPrefix(b.Data, "/"+c.Name+" ")) {
 					private = true

@@ -204,6 +204,16 @@ type Button struct {
 }
 type Keyboard [][]Button
 
+func keyboardJSON(buttons Keyboard) string {
+	if buttons == nil {
+		buttons = Keyboard{}
+	}
+	raw, _ := json.Marshal(struct {
+		Rows Keyboard `json:"inline_keyboard"`
+	}{buttons})
+	return string(raw)
+}
+
 func markup(buttons Keyboard) tg.InlineKeyboardMarkup {
 	rows := make([][]tg.InlineKeyboardButton, 0, len(buttons))
 	for _, row := range buttons {
@@ -270,12 +280,16 @@ func (c *Client) SendInteractive(ctx context.Context, chat, text string, previou
 	}
 	b := c.sdk(ctx)
 	if previous != 0 {
-		cfg := tg.NewEditMessageTextAndMarkup(id, int(previous), text, markup(buttons))
-		cfg.Entities = c.textEntities(text)
-		cfg.DisableWebPagePreview = true
-		m, err := b.Send(cfg)
+		// The SDK's typed edit markup predates web_app buttons. Serialize our
+		// complete keyboard for edits as well as newly sent messages.
+		rawEntities, _ := json.Marshal(append([]tg.MessageEntity{}, c.textEntities(text)...))
+		_, err := b.MakeRequest("editMessageText", tg.Params{
+			"chat_id": strconv.FormatInt(id, 10), "message_id": strconv.FormatInt(previous, 10),
+			"text": text, "entities": string(rawEntities), "disable_web_page_preview": "true",
+			"reply_markup": keyboardJSON(buttons),
+		})
 		if err == nil {
-			return int64(m.MessageID), nil
+			return previous, nil
 		}
 		var a *tg.Error
 		if errors.As(err, &a) && a.Code == 400 {
@@ -535,7 +549,10 @@ func (c *Client) SetButtons(ctx context.Context, chat string, messageID int64, b
 	if err != nil {
 		return err
 	}
-	_, err = c.sdk(ctx).Request(tg.NewEditMessageReplyMarkup(id, int(messageID), markup(buttons)))
+	_, err = c.sdk(ctx).MakeRequest("editMessageReplyMarkup", tg.Params{
+		"chat_id": strconv.FormatInt(id, 10), "message_id": strconv.FormatInt(messageID, 10),
+		"reply_markup": keyboardJSON(buttons),
+	})
 	var api *tg.Error
 	if errors.As(err, &api) && api.Code == 400 && strings.Contains(api.Message, "message is not modified") {
 		return nil

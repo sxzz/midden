@@ -5,6 +5,7 @@ import { useSensitiveMedia } from '../composables/useSensitiveMedia'
 import { mediaNotice } from '../presentation'
 import MediaPreview from './MediaPreview.vue'
 import MediaViewer from './MediaViewer.vue'
+import EyeIcon from './ui/EyeIcon.vue'
 const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>()
 const selected = shallowRef<Asset>()
 function view(asset: Asset) {
@@ -68,8 +69,8 @@ watch(
             :class="{ blurred: hidden(asset) }"
           />
           <span v-if="hidden(asset) && !covered" class="sensitive-label"
-            >敏感内容，点按显示</span
-          >
+            ><EyeIcon
+          /></span>
           <span
             v-else-if="!hidden(asset) && asset.mime?.startsWith('video/')"
             class="play"
@@ -84,9 +85,10 @@ watch(
       v-if="covered"
       type="button"
       class="group-veil"
+      aria-label="敏感内容，点按显示"
       @click.stop="revealAll"
     >
-      敏感内容，点按显示
+      <EyeIcon />
     </button>
   </div>
   <MediaViewer

@@ -324,7 +324,7 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 		text = collectionMessage(a, d.Job.State)
 		entities = collectionMessageEntities(a)
 		parts = deliveryParts(text, a.Assets)
-		keys = collectionButtons(a.ID, a.URL)
+		keys = collectionButtons(a.ID, a.URL, r.Config.WebURL)
 		if telegram.IsProfileCollection(a) {
 			keys[0][0].Text = "查看主页"
 		}
@@ -367,7 +367,7 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 		case "media":
 			id, e = formatted.Media(ctx, d.Chat, p.assets, p.text)
 		case "buttons":
-			e = formatted.SetButtons(ctx, d.Chat, mid, keys)
+			e = formatted.SetButtons(ctx, d.Chat, mid, buttonsForChat(d.Chat, keys))
 		}
 		if e != nil {
 			return e

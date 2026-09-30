@@ -2,6 +2,7 @@ package tgchannel
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"unicode/utf16"
 
@@ -25,12 +26,19 @@ func jobState(state string) string {
 	return state
 }
 
-func collectionButtons(id, url string) telegram.Keyboard {
-	return telegram.Keyboard{
-		{{Text: "原帖", URL: url}, {Text: "重新抓取", Data: "/refresh " + id}},
+func collectionButtons(id, sourceURL, webURL string) telegram.Keyboard {
+	keys := telegram.Keyboard{
+		{{Text: "原帖", URL: sourceURL}, {Text: "重新抓取", Data: "/refresh " + id}},
 		{{Text: "删除", Data: "/delete " + id}},
 		{{Text: "收藏列表", Data: "/list"}},
 	}
+	if webURL != "" {
+		if entry, err := url.Parse(webURL); err == nil && entry.Scheme == "https" && entry.Host != "" {
+			entry.Fragment = "/collection/" + id
+			keys = append(keys, []telegram.Button{{Text: "在小程序中打开", WebApp: &telegram.WebAppInfo{URL: entry.String()}}})
+		}
+	}
+	return keys
 }
 
 func usageText(used, reserved, limit int64) string {

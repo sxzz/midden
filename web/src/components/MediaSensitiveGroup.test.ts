@@ -60,7 +60,7 @@ describe.each([
 ] as const)('%s', (_name, component, tile) => {
   it('covers a wholly sensitive group once and opens the viewer on the next tap', async () => {
     const el = mount(component, [asset('a', true), asset('b', true)])
-    expect(veil(el)?.textContent?.trim()).toBe('敏感内容，点按显示')
+    expect(veil(el)?.getAttribute('aria-label')).toBe('敏感内容，点按显示')
     // Nothing underneath may be reached by keyboard while the veil is up.
     expect(covered(el)).toBe(true)
     veil(el)!.click()

@@ -121,3 +121,20 @@ test('showing sensitive media globally covers the group again when turned off', 
   await toggle.click()
   await expect(groupVeil(page)).toHaveCount(1)
 })
+
+test('sensitive video thumbnails blur until revealed', async ({ page }) => {
+  await serve(
+    page,
+    [1, 2, 3].map((n) => ({ ...image(n, true), mime: 'video/mp4' })),
+  )
+  const videos = page.locator('.thumbs video')
+  await expect(videos).toHaveCount(3)
+  for (const video of await videos.all())
+    await expect(video).toHaveCSS('filter', 'blur(8px)')
+  await expect(groupVeil(page).locator('svg')).toBeVisible()
+  await expect(groupVeil(page)).toHaveText('')
+  await groupVeil(page).click()
+  for (const video of await videos.all())
+    await expect(video).toHaveCSS('filter', 'none')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+})

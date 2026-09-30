@@ -51,4 +51,14 @@ func TestMiniAppEntrySerialization(t *testing.T) {
 	if id, e := c.SendInteractive(context.Background(), "1", "打开", 0, Keyboard{{{Text: "打开", WebApp: &WebAppInfo{URL: "https://collection.test/app/"}}}}); e != nil || id != 42 {
 		t.Fatal(id, e)
 	}
+	buttons := Keyboard{{{Text: "打开", WebApp: &WebAppInfo{URL: "https://collection.test/app/"}}}}
+	if id, err := c.SendInteractive(context.Background(), "1", "updated", 42, buttons); err != nil || id != 42 {
+		t.Fatal(id, err)
+	}
+	if err := c.SetButtons(context.Background(), "1", 42, buttons); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 5 {
+		t.Fatalf("expected send, edit and markup requests; got %d calls", calls)
+	}
 }

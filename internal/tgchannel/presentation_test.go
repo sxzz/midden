@@ -61,3 +61,28 @@ func TestCollectionReasonsDeduplicated(t *testing.T) {
 		t.Fatal(text)
 	}
 }
+
+func TestCollectionMiniAppButton(t *testing.T) {
+	id := uuid.NewString()
+	keys := collectionButtons(id, "https://example.test/post", "https://collection.test/app/?theme=dark#/")
+	button := keys[len(keys)-1][0]
+	if button.Text != "在小程序中打开" || button.WebApp == nil || button.WebApp.URL != "https://collection.test/app/?theme=dark#/collection/"+id {
+		t.Fatalf("unexpected mini app button: %+v", button)
+	}
+	for _, row := range buttonsForChat("-123", keys) {
+		for _, b := range row {
+			if b.WebApp != nil {
+				t.Fatal("web app button leaked into group")
+			}
+		}
+	}
+	for _, address := range []string{"", "http://collection.test/app/", ":bad"} {
+		for _, row := range collectionButtons(id, "https://example.test/post", address) {
+			for _, b := range row {
+				if b.WebApp != nil {
+					t.Fatal("invalid web URL enabled mini app button")
+				}
+			}
+		}
+	}
+}

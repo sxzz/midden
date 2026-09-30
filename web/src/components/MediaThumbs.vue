@@ -4,6 +4,7 @@ import { useSensitiveMedia } from '../composables/useSensitiveMedia'
 import { readyMedia } from '../presentation'
 import MediaPreview from './MediaPreview.vue'
 import MediaViewer from './MediaViewer.vue'
+import EyeIcon from './ui/EyeIcon.vue'
 import type { Asset } from '../api'
 const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>()
 const emit = defineEmits<{ open: [] }>()
@@ -80,8 +81,8 @@ const overflow = computed(() => media.value.length - tiles.value.length)
           >▶</span
         >
         <span v-if="hidden(asset) && !covered" class="sensitive-label"
-          >敏感</span
-        >
+          ><EyeIcon
+        /></span>
         <span v-if="overflow && index === tiles.length - 1" class="more"
           >+{{ overflow }}</span
         >
@@ -91,9 +92,10 @@ const overflow = computed(() => media.value.length - tiles.value.length)
       v-if="covered"
       type="button"
       class="group-veil"
+      aria-label="敏感内容，点按显示"
       @click.stop="revealAll"
     >
-      敏感内容，点按显示
+      <EyeIcon />
     </button>
   </span>
   <MediaViewer
@@ -147,7 +149,7 @@ const overflow = computed(() => media.value.length - tiles.value.length)
   background: var(--fill);
 }
 .tile :deep(.image-shell),
-.tile video {
+.tile :deep(video) {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -156,7 +158,7 @@ const overflow = computed(() => media.value.length - tiles.value.length)
   min-height: 0;
 }
 .tile.blurred :deep(img),
-.tile.blurred video {
+.tile.blurred :deep(video) {
   filter: blur(8px);
   transform: scale(1.2);
 }

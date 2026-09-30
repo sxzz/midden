@@ -69,7 +69,9 @@ it('toggles sensitive media across the collection and detail without losing the 
   expect(image()).not.toBeNull()
   expect(image()?.closest('.blurred, .sensitive')).not.toBeNull()
   // Every resource here is sensitive, so the group asks once for all of them.
-  expect(el.textContent).toContain('敏感内容，点按显示')
+  expect(el.querySelector('.group-veil')?.getAttribute('aria-label')).toBe(
+    '敏感内容，点按显示',
+  )
   el.querySelector<HTMLButtonElement>('.group-veil')!.click()
   await nextTick()
   expect(image()).not.toBeNull()

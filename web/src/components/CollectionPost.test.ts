@@ -64,7 +64,9 @@ describe('Vapor collection rendering', () => {
     expect(el.textContent).toContain('测试作者')
     expect(el.querySelector('img')).not.toBeNull()
     expect(el.querySelector('.blurred')).not.toBeNull()
-    expect(el.textContent).toContain('敏感')
+    expect(el.querySelector('.group-veil')?.getAttribute('aria-label')).toBe(
+      '敏感内容，点按显示',
+    )
   })
   it('shows a row thumbnail for ordinary media', () => {
     const el = mount(CollectionRow, {
