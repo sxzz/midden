@@ -8,7 +8,8 @@ import {
   useTemplateRef,
   watch,
 } from 'vue'
-import { assetURL, type Asset } from '../api'
+import { api, assetURL, errorText, type Asset } from '../api'
+import { host } from '../host'
 import 'photoswipe/style.css'
 const props = defineProps<{ images: Asset[]; initialId: string }>()
 const emit = defineEmits<{ close: [] }>()
@@ -21,6 +22,37 @@ const index = shallowRef(
 const selected = computed(() => props.images[index.value])
 const dialog = useTemplateRef<HTMLDialogElement>('viewer')
 const stage = useTemplateRef<HTMLDivElement>('stage')
+const saving = shallowRef(false)
+const saveError = shallowRef('')
+async function save() {
+  const image = selected.value
+  if (!image || saving.value) return
+  saveError.value = ''
+  const tg = host()
+  if (tg?.initData && tg.downloadFile && tg.isVersionAtLeast?.('8.0')) {
+    saving.value = true
+    try {
+      const params = await api<{ url: string; file_name: string }>(
+        `/assets/${encodeURIComponent(image.id)}/download`,
+        { method: 'POST' },
+      )
+      if (!disposed) tg.downloadFile(params)
+    } catch (error) {
+      saveError.value = errorText(error)
+    } finally {
+      saving.value = false
+    }
+  } else {
+    const link = document.createElement('a')
+    link.href = assetURL(image, false)
+    link.download = image.id
+    link.target = '_blank'
+    link.rel = 'noopener'
+    document.body.append(link)
+    link.click()
+    link.remove()
+  }
+}
 let photoSwipe: PhotoSwipe | undefined
 let previousOverflow = ''
 let opener: HTMLElement | null = null
@@ -186,7 +218,11 @@ watch(
       >
         {{ index + 1 }} / {{ images.length }}
       </p>
+      <button type="button" class="glass save" :disabled="saving" @click="save">
+        {{ saving ? '准备中…' : '保存' }}
+      </button>
     </div>
+    <p v-if="saveError" class="save-error" role="alert">{{ saveError }}</p>
 
     <div
       v-if="selected?.alt_text || images.length > 1"
@@ -373,6 +409,25 @@ watch(
 }
 .close:active {
   transform: scale(0.9);
+}
+.save {
+  min-height: 44px;
+  padding: 0 16px;
+  margin-left: auto;
+  color: #fff;
+  font-size: 15px;
+}
+.save:disabled {
+  opacity: 0.5;
+}
+.save-error {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 64px);
+  inset-inline: 14px;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 12px;
+  text-align: center;
 }
 .counter {
   display: flex;

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"monitor/internal/adapter"
 	"monitor/internal/domain"
 	"monitor/internal/store"
 )
@@ -20,7 +21,7 @@ import (
 var ErrInvalidFilter = errors.New("invalid collection filters")
 
 type (
-	CollectionFilter struct{ Q, Media, Visibility, From, Before, Sort, Order string }
+	CollectionFilter struct{ Q, EntityType, Media, Visibility, From, Before, Sort, Order string }
 	collectionCursor struct {
 		Time       time.Time
 		ID, Filter string
@@ -38,7 +39,7 @@ type CollectionPage struct {
 
 func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter, cursor string) (p CollectionPage, e error) {
 	p.Items = []CollectionItem{}
-	if (f.Order != "" && f.Order != "desc" && f.Order != "asc") || (f.Sort != "" && f.Sort != "captured" && f.Sort != "published") || utf8.RuneCountInString(f.Q) > 500 || (f.Media != "" && f.Media != "image" && f.Media != "video" && f.Media != "text") || (f.Visibility != "" && f.Visibility != "public" && f.Visibility != "private") {
+	if (f.EntityType != "" && !adapter.EntityName.MatchString(f.EntityType)) || (f.Order != "" && f.Order != "desc" && f.Order != "asc") || (f.Sort != "" && f.Sort != "captured" && f.Sort != "published") || utf8.RuneCountInString(f.Q) > 500 || (f.Media != "" && f.Media != "image" && f.Media != "video" && f.Media != "text") || (f.Visibility != "" && f.Visibility != "public" && f.Visibility != "private") {
 		return p, ErrInvalidFilter
 	}
 	var from, before *time.Time
@@ -75,12 +76,12 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 	}
 	q := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.TrimSpace(f.Q)) + "%"
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
-		query := `SELECT a.id,ta.created_at,ordering.at FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id JOIN revisions r ON r.id=a.current_revision CROSS JOIN LATERAL (SELECT CASE WHEN $8='published' AND pg_input_is_valid(r.payload->>'published_at','timestamp with time zone') THEN (r.payload->>'published_at')::timestamptz ELSE a.observed_at END AS at) ordering WHERE ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR a.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND ($5::timestamptz IS NULL OR (ordering.at,a.id)<($5,$6::uuid)) AND ($7='' OR ($7='text' AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (($7='image' AND b.mime LIKE 'image/%') OR ($7='video' AND b.mime LIKE 'video/%')))) ORDER BY ordering.at DESC,a.id DESC LIMIT 21`
+		query := `SELECT a.id,ta.created_at,ordering.at FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id JOIN revisions r ON r.id=a.current_revision CROSS JOIN LATERAL (SELECT CASE WHEN $8='published' AND pg_input_is_valid(r.payload->>'published_at','timestamp with time zone') THEN (r.payload->>'published_at')::timestamptz ELSE a.observed_at END AS at) ordering WHERE ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR a.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND ($5::timestamptz IS NULL OR (ordering.at,a.id)<($5,$6::uuid)) AND ($7='' OR ($7='text' AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (($7='image' AND b.mime LIKE 'image/%') OR ($7='video' AND b.mime LIKE 'video/%')))) AND ($9='' OR EXISTS(SELECT FROM jsonb_array_elements(r.payload->'graph'->'entities') entity WHERE entity->>'key'=r.payload->'graph'->>'root' AND entity->>'type'=$9)) ORDER BY ordering.at DESC,a.id DESC LIMIT 21`
 		if f.Order == "asc" {
 			query = strings.ReplaceAll(query, "(ordering.at,a.id)<", "(ordering.at,a.id)>")
 			query = strings.ReplaceAll(query, "ordering.at DESC,a.id DESC", "ordering.at ASC,a.id ASC")
 		}
-		rows, err := tx.Query(ctx, query, q, f.Visibility, from, before, anchor, aid, f.Media, f.Sort)
+		rows, err := tx.Query(ctx, query, q, f.Visibility, from, before, anchor, aid, f.Media, f.Sort, f.EntityType)
 		if err != nil {
 			return err
 		}

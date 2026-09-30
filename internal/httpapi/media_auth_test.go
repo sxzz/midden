@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -52,7 +53,7 @@ func TestMediaCacheAuthorization(t *testing.T) {
 	session, foreign, expired := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	exec(`INSERT INTO web_sessions(digest,tenant_id) VALUES($1,$2),($3,$4)`, store.Hash(session), tenant, store.Hash(foreign), other)
 	exec(`INSERT INTO web_sessions(digest,tenant_id,expires_at) VALUES($1,$2,now()-interval '1 second')`, store.Hash(expired), tenant)
-	h := WebHandler(&app.Service{DB: db, Blobs: streamMediaStorage{}, Config: app.Defaults()}, WebConfig{URL: "https://collection.test/app/"})
+	h := WebHandler(&app.Service{DB: db, Blobs: streamMediaStorage{}, Config: app.Defaults()}, WebConfig{URL: "https://collection.test/app/", Token: "test-secret"})
 	call := func(method, path, credential, origin, validator string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, nil)
 		if credential != "" {
@@ -100,7 +101,28 @@ func TestMediaCacheAuthorization(t *testing.T) {
 			t.Fatal(path, w.Code, w.Header(), w.Body.String())
 		}
 	}
+	grantResponse := call("POST", "/v1/assets/"+asset+"/download", session, "https://collection.test", "")
+	var download struct {
+		URL string `json:"url"`
+	}
+	if grantResponse.Code != 200 || json.Unmarshal(grantResponse.Body.Bytes(), &download) != nil || download.URL == "" {
+		t.Fatal(grantResponse.Code, grantResponse.Body.String())
+	}
+	for _, credential := range []string{"", foreign} {
+		w := call("POST", "/v1/assets/"+asset+"/download", credential, "https://collection.test", "")
+		if w.Code < 400 {
+			t.Fatal("unauthorized grant", w.Code)
+		}
+	}
+	wDownload := call("GET", download.URL, "", "", "")
+	if wDownload.Code != 200 || wDownload.Body.String() != "0123456789" || wDownload.Header().Get("Access-Control-Allow-Origin") != "https://web.telegram.org" || !strings.Contains(wDownload.Header().Get("Content-Disposition"), asset+".png") {
+		t.Fatal(wDownload.Code, wDownload.Header(), wDownload.Body.String())
+	}
 	exec(`DELETE FROM tenant_collections WHERE tenant_id=$1 AND collection_id=$2`, tenant, collection)
+	wDownload = call("GET", download.URL, "", "", "")
+	if wDownload.Code != 404 {
+		t.Fatal("deleted grant still works", wDownload.Code)
+	}
 	w := call("GET", path, session, "", etag)
 	if w.Code != 404 || !strings.Contains(w.Header().Get("Cache-Control"), "no-store") {
 		t.Fatal("deleted collection", w.Code, w.Header())

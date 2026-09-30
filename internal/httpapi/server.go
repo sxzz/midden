@@ -84,8 +84,8 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 	})
 	mux.HandleFunc("GET /v1/collections", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		if _, ok := r.Context().Value(sessionKey{}).(bool); ok || q.Has("q") || q.Has("media_type") || q.Has("visibility") || q.Has("saved_from") || q.Has("saved_before") || q.Has("sort") || q.Has("order") {
-			v, e := s.Collections(r.Context(), tenant(r), app.CollectionFilter{Q: q.Get("q"), Media: q.Get("media_type"), Visibility: q.Get("visibility"), From: q.Get("saved_from"), Before: q.Get("saved_before"), Sort: q.Get("sort"), Order: q.Get("order")}, q.Get("cursor"))
+		if _, ok := r.Context().Value(sessionKey{}).(bool); ok || q.Has("q") || q.Has("entity_type") || q.Has("media_type") || q.Has("visibility") || q.Has("saved_from") || q.Has("saved_before") || q.Has("sort") || q.Has("order") {
+			v, e := s.Collections(r.Context(), tenant(r), app.CollectionFilter{EntityType: q.Get("entity_type"), Q: q.Get("q"), Media: q.Get("media_type"), Visibility: q.Get("visibility"), From: q.Get("saved_from"), Before: q.Get("saved_before"), Sort: q.Get("sort"), Order: q.Get("order")}, q.Get("cursor"))
 			respond(w, 200, v, e)
 			return
 		}
@@ -221,6 +221,7 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 	}))
 	root := http.NewServeMux()
 	root.Handle("/v1/", secured)
+	registerDownloads(root, mux, s, web)
 	root.HandleFunc("GET /app/", func(w http.ResponseWriter, r *http.Request) {
 		dir := os.Getenv("WEB_DIST")
 		if dir == "" {

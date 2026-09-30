@@ -1,4 +1,9 @@
 interface Telegram {
+  isVersionAtLeast?: (version: string) => boolean
+  downloadFile?: (
+    params: { url: string; file_name: string },
+    callback?: (accepted: boolean) => void,
+  ) => void
   initData: string
   colorScheme: string
   themeParams: Record<string, string | undefined>

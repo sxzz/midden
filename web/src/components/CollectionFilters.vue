@@ -7,6 +7,7 @@ const form = reactive({
   order: initial.get('order') || 'desc',
   sort: initial.get('sort') || 'captured',
   q: initial.get('q') || '',
+  entity: initial.get('entity_type') || 'x.post',
   media: initial.get('media_type') || '',
   visibility: initial.get('visibility') || '',
   from: initial.get('from_date') || '',
@@ -26,6 +27,7 @@ const open = shallowRef(
 )
 const active = computed(() =>
   [
+    form.entity === 'x.profile' ? 'X profile' : 'X post',
     mediaNames[form.media],
     visibilityNames[form.visibility],
     form.from && form.to
@@ -43,6 +45,7 @@ function search() {
   const q = new URLSearchParams()
   for (const [k, v] of [
     ['q', form.q],
+    ['entity_type', form.entity],
     ['sort', form.sort],
     ['order', form.order],
     ['media_type', form.media],
@@ -66,6 +69,7 @@ function clear() {
     order: 'desc',
     sort: 'captured',
     q: '',
+    entity: 'x.post',
     media: '',
     visibility: '',
     from: '',
@@ -114,6 +118,12 @@ function clear() {
       </select>
     </div>
     <div v-show="open" class="panel">
+      <label class="option"
+        >类型<select v-model="form.entity" aria-label="类型">
+          <option value="x.post">X post</option>
+          <option value="x.profile">X profile</option>
+        </select></label
+      >
       <label class="option"
         >媒体<select v-model="form.media">
           <option value="">全部</option>

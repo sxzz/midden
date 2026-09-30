@@ -52,6 +52,21 @@ func TestWebCollection(t *testing.T) {
 		must(t, s.finalize(ctx, a.TenantID, j.ID))
 		jobs = append(jobs, j)
 	}
+	// Both graphs contain a profile; only the graph root determines the filter.
+	for i, kind := range []string{"x.post", "x.profile"} {
+		_, e = admin.Pool.Exec(ctx, `UPDATE revisions SET payload=payload || jsonb_build_object('graph', jsonb_build_object('root','root','entities',jsonb_build_array(jsonb_build_object('key','root','type',$2::text),jsonb_build_object('key','author','type','x.profile')))) WHERE collection_id=$1`, jobs[i].CollectionID, kind)
+		must(t, e)
+	}
+	for _, kind := range []string{"x.post", "x.profile"} {
+		filtered, err := s.Collections(ctx, a.TenantID, CollectionFilter{EntityType: kind}, "")
+		must(t, err)
+		if len(filtered.Items) != 1 {
+			t.Fatalf("%s: got %d items", kind, len(filtered.Items))
+		}
+	}
+	if _, err := s.Collections(ctx, a.TenantID, CollectionFilter{EntityType: "invalid type"}, ""); !errors.Is(err, ErrInvalidFilter) {
+		t.Fatal(err)
+	}
 	page, e := s.Collections(ctx, a.TenantID, CollectionFilter{Q: "中文", Media: "text", Visibility: "public"}, "")
 	must(t, e)
 	if len(page.Items) != 20 || page.Next == "" {

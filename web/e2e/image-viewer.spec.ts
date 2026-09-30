@@ -106,3 +106,64 @@ test('reduced motion keeps button navigation immediate', async ({ page }) => {
     'none',
   )
 })
+
+test('save sends the selected image to Telegram native download', async ({
+  page,
+}) => {
+  const requested: string[] = []
+  await page.route('**/v1/assets/*/download', (route) => {
+    requested.push(route.request().url())
+    return route.fulfill({
+      json: {
+        url: 'https://example.test/v1/downloads/signed',
+        file_name: 'photo-1.png',
+      },
+    })
+  })
+  await page.evaluate(() => {
+    Object.assign(globalThis, {
+      Telegram: {
+        WebApp: {
+          initData: 'fixture',
+          isVersionAtLeast: () => true,
+          downloadFile: (params: unknown) => {
+            document.body.dataset.download = JSON.stringify(params)
+          },
+        },
+      },
+    })
+  })
+  await page.getByRole('button', { name: '下一张' }).click()
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('2 / 3')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('body')).toHaveAttribute(
+    'data-download',
+    JSON.stringify({
+      url: 'https://example.test/v1/downloads/signed',
+      file_name: 'photo-1.png',
+    }),
+  )
+  expect(requested[0]).toContain('/assets/photo-1/download')
+})
+
+test('save reports preparation failures and can retry', async ({ page }) => {
+  await page.evaluate(() => {
+    Object.assign(globalThis, {
+      Telegram: {
+        WebApp: {
+          initData: 'fixture',
+          isVersionAtLeast: () => true,
+          downloadFile: () => {},
+        },
+      },
+    })
+  })
+  await page.route('**/v1/assets/*/download', (route) =>
+    route.fulfill({ status: 401, json: {} }),
+  )
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('会话已失效')
+  await expect(
+    page.getByRole('button', { name: '保存', exact: true }),
+  ).toBeEnabled()
+})

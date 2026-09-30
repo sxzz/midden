@@ -116,14 +116,11 @@ const warnings = computed(() => warningList(props.collection.warnings))
   padding-top: 11px;
   border-top: 1px solid var(--separator);
 }
-/* One row of equal columns, however many counts the source recorded.
-   minmax(0, …) lets a long number wrap inside its column instead of
-   pushing the row past the card. */
+/* Wrap whole statistics into new rows, never split a number. */
 .stats {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
-  gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 12px;
   margin: 0;
 }
 /* Counts and timeline are two layers, so separate them when both are here. */
@@ -137,7 +134,7 @@ const warnings = computed(() => warningList(props.collection.warnings))
   display: flex;
   flex-direction: column-reverse;
   gap: 2px;
-  min-width: 0;
+  flex: 1 0 88px;
 }
 .stat dt {
   font-size: 12px;
@@ -151,7 +148,7 @@ const warnings = computed(() => warningList(props.collection.warnings))
   font-weight: 600;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 @media (max-width: 360px) {
   .stat dd {
