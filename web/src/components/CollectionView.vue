@@ -44,7 +44,9 @@ const size = (n: number) =>
     : `${(n / 1048576).toFixed(0)} MB`
 const storage = computed(() =>
   props.usage
-    ? `已用 ${size(props.usage.used_bytes)}，共 ${size(props.usage.limit_bytes)}${
+    ? `已用 ${size(props.usage.used_bytes)}，${
+        props.usage.unlimited ? '不限额' : `共 ${size(props.usage.limit_bytes)}`
+      }${
         props.usage.reserved_bytes
           ? `，${size(props.usage.reserved_bytes)} 正在保存`
           : ''

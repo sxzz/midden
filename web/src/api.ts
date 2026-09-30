@@ -50,6 +50,7 @@ export interface Usage {
   used_bytes: number
   reserved_bytes: number
   limit_bytes: number
+  unlimited: boolean
 }
 export class APIError extends Error {
   constructor(
