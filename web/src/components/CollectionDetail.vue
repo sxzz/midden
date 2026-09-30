@@ -131,7 +131,7 @@ const version = computed(() =>
     <ConfirmSheet
       :open="confirmDelete"
       title="删除这条收藏？"
-      description="它会从你的收藏库移除，别人保存的记录不受影响。"
+      description="不影响其他用户保存的记录。"
       confirm-label="删除"
       :busy="busy"
       @confirm="remove"

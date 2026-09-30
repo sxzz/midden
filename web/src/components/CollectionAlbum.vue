@@ -92,7 +92,7 @@ onDeactivated(() => {
 <template>
   <AlbumGrid :tiles="tiles" :loading="loading" @select="select" />
   <p v-if="!tiles.length && !loading && !next && !error" class="empty">
-    当前筛选下没有可显示的图片或视频。
+    暂无匹配的图片或视频
   </p>
   <MediaViewer
     v-if="preview"

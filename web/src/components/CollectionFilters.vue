@@ -331,9 +331,6 @@ const tagFilter = computed({
             <option value="private">受限内容</option></select
           ><ChevronIcon class="select-chevron" /></span
       ></label>
-      <p class="hint">
-        指采集时原内容的访问权限；受限内容按你的账号隔离保存，并非收藏的分享设置。
-      </p>
       <label class="option"
         >敏感内容<span class="select"
           ><select v-model="form.sensitive" aria-label="敏感内容">
@@ -354,9 +351,7 @@ const tagFilter = computed({
             :min="form.from"
             aria-label="收藏结束日期"
         /></label>
-        <p class="hint">
-          按加入收藏的日期筛选，包含开始和结束当天；留空表示不限。改动会立即生效。
-        </p>
+        <p class="hint">包含起止当天；留空不限。</p>
       </fieldset>
     </div>
   </form>

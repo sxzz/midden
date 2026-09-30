@@ -115,11 +115,7 @@ const storage = computed(() =>
       />
     </ListSection>
     <p v-if="empty" class="empty">
-      {{
-        filtered
-          ? '没有匹配的收藏。换个关键词，或清除筛选。'
-          : '这里还是空的。在对话里把链接发给机器人，就会保存到这里。'
-      }}
+      {{ filtered ? '没有匹配的收藏' : '暂无收藏' }}
     </p>
     <ListSection v-if="loading"><CollectionSkeleton /></ListSection>
   </template>
