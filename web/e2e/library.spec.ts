@@ -103,17 +103,13 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await page.getByRole('button', { name: '返回' }).click()
   await page.getByRole('searchbox').fill('不存在')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
-  await expect(
-    page.getByText('没有匹配的收藏。换个关键词，或清除筛选。'),
-  ).toBeVisible()
+  await expect(page.getByText('没有匹配的收藏', { exact: true })).toBeVisible()
   await page.getByRole('searchbox').fill('')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await openRow()
   await page.getByRole('button', { name: '删除这条收藏' }).click()
   await page.getByRole('button', { name: '删除', exact: true }).click()
-  await expect(
-    page.getByText('这里还是空的。在对话里把链接发给机器人，就会保存到这里。'),
-  ).toBeVisible()
+  await expect(page.getByText('暂无收藏', { exact: true })).toBeVisible()
 })
 test('ordinary browser explains Telegram entry', async ({ page }) => {
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
