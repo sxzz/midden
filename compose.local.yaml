@@ -6,8 +6,8 @@ services:
       [
         server,
         -master.volumeSizeLimitMB=32,
-        -volume.max=32,
-        -volume.minFreeSpace=512MiB,
+        -volume.max=0,
+        -volume.minFreeSpace=5GiB,
         -s3,
         -s3.port=8333,
         -dir=/data,

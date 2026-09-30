@@ -12,6 +12,8 @@
 
 首次部署按 README 配置 `.env` 和 S3，再运行 `docker compose pull && docker compose up -d`。迁移服务成功退出后核心才启动。
 
+本地 SeaweedFS 使用 `-volume.max=0`，根据可用磁盘空间自动计算分卷上限，按需创建 32 MiB 分卷；`-volume.minFreeSpace=5GiB` 在剩余空间不足时将分卷设为只读。监控 Docker 虚拟机及宿主机空间，在达到余量阈值前增加磁盘容量或清理数据。旧部署应用这些参数时运行 `docker compose up -d --no-deps s3`，保持原来的 `/data` 挂载不变；短暂重启后，已终止的失败任务需要重新抓取。可在 S3 容器内查询 `http://localhost:9333/dir/status`，检查分卷上限及目标 collection 的 `writables`，并通过实际媒体写入确认恢复；Core 健康检查不代表 S3 可写。
+
 GitHub Actions 在 main 分支测试通过后构建并发布 `ghcr.io/sxzz/midden-core` 和 `ghcr.io/sxzz/midden-adapter`，支持 amd64、arm64。镜像同时包含 `latest` 标签和不可变部署选择 `sha-<完整提交 SHA>`。
 
 服务器可安装独立的一键更新脚本：
