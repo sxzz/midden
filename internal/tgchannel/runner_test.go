@@ -194,3 +194,13 @@ func TestCollectionControls(t *testing.T) {
 		t.Fatal(text, keys)
 	}
 }
+
+func TestCollectionFailureSummary(t *testing.T) {
+	d := channelapi.Delivery{ProgressDetails: &channelapi.CollectionProgress{Done: true, Total: 3, Partial: 2, Failed: 1, Reasons: []channelapi.FailureReason{{Reason: "storage quota exceeded", Count: 2}, {Reason: "account cannot access this post", Count: 1}}}}
+	text, _ := collectionProgressMessage("submission", d)
+	for _, want := range []string{"内容不完整 2", "失败 1", "进行中 0", "存储配额不足（2 条）", "采集账号无权访问该帖子（1 条）"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q: %s", want, text)
+		}
+	}
+}

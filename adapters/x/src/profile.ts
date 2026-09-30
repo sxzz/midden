@@ -71,7 +71,7 @@ export function normalizeProfile(
       url: user.banner_url,
       kind: "image",
       purpose: "banner",
-      immutableKey: "",
+      immutableKey: `x:banner:${user.banner_url}`,
       altText: "",
       sensitive: false,
     });

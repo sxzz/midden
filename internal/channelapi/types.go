@@ -95,7 +95,13 @@ type Delivery struct {
 	// Legacy rendered replies are retained only for upgrade draining.
 	Legacy json.RawMessage
 }
+type FailureReason struct {
+	Reason string
+	Count  int
+}
+
 type CollectionProgress struct {
+	Reasons                                             []FailureReason
 	URL, CollectionID, Next, Error                      string
 	Total, Complete, Partial, Failed, Pending, MaxBatch int
 	Done, Stopped                                       bool

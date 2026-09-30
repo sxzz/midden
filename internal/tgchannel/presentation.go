@@ -59,12 +59,20 @@ func collectionMessage(a domain.Collection, state string) string {
 			parts = append(parts, fmt.Sprintf("媒体 %d 描述：%s", asset.Position+1, alt))
 		}
 	}
+	seen := map[string]bool{}
+	addReason := func(reason string) {
+		reason = failureReason(reason)
+		if reason != "" && !seen[reason] {
+			seen[reason] = true
+			parts = append(parts, "未完整保存原因："+reason)
+		}
+	}
 	for _, warning := range a.Warnings {
-		parts = append(parts, warning)
+		addReason(warning)
 	}
 	for _, asset := range a.Assets {
 		if asset.State == "failed" {
-			parts = append(parts, "媒体未保存："+asset.Error)
+			addReason(asset.Error)
 		}
 	}
 	return strings.Join(parts, "\n\n")
@@ -124,4 +132,25 @@ func collectionListSummary(summary, text string) string {
 		return string(chars[:limit-1]) + "…"
 	}
 	return summary
+}
+
+func failureReason(reason string) string {
+	switch strings.TrimSpace(reason) {
+	case "storage quota exceeded":
+		return "存储配额不足"
+	case "account cannot access this post":
+		return "采集账号无权访问该帖子"
+	case "account request signing unavailable":
+		return "采集账号请求签名不可用"
+	case "context deadline exceeded":
+		return "请求超时"
+	case "job exhausted retries or was interrupted":
+		return "任务重试次数已用尽或执行被中断"
+	case "operation failed; retry or inspect service health":
+		return "服务内部错误，需检查服务日志"
+	case "resource omitted: unsupported type or resource limit":
+		return "部分资源类型不支持或资源数量超过限制"
+	default:
+		return strings.TrimSpace(reason)
+	}
 }

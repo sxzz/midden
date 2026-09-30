@@ -153,8 +153,9 @@ export function normalize(
         url,
         kind,
         purpose: "",
-        immutableKey:
-          kind === "video" && item.id ? `${item.id}:${parsed.pathname}` : "",
+        immutableKey: item.id
+          ? `x:media:${kind}:${item.id}`
+          : `x:media:${kind}:url:${parsed.href}`,
         altText: (item.altText ?? "").trim(),
         sensitive: Boolean(
           post.possibly_sensitive || item.sensitive || item.possibly_sensitive,

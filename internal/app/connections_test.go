@@ -138,6 +138,19 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	if count != 1 {
 		t.Fatal("unchanged account result added version", count)
 	}
+	// A stale public result fetched with an account must restart in private staging.
+	s.Config.Rate++ // Allow the additional regression capture in this scenario.
+	_, e = admin.Pool.Exec(ctx, `UPDATE collections SET observed_at=now()-interval '1 hour' WHERE id=$1`, personal.CollectionID)
+	must(t, e)
+	staleCapture, e := s.Submit(ctx, tenants[1], domain.CaptureInput{URL: "https://x.com/a/status/900111", ConnectionID: ids[1], Automatic: true, RefreshAfterSeconds: 60})
+	must(t, e)
+	var stagingVisibility string
+	must(t, admin.Pool.QueryRow(ctx, `SELECT visibility FROM captures WHERE id=$1`, staleCapture.ID).Scan(&stagingVisibility))
+	if stagingVisibility != "private" {
+		t.Fatal("account capture did not start private")
+	}
+	must(t, s.capture(ctx, store.Task{Tenant: tenants[1], ID: staleCapture.ID}))
+	must(t, s.finalize(ctx, tenants[1], staleCapture.ID))
 	refresh, e := s.Submit(ctx, tenants[0], domain.CaptureInput{RefreshID: public.CollectionID})
 	must(t, e)
 	if refresh.ConnectionID != "" || refresh.ProviderID != "fxtwitter" {

@@ -374,3 +374,33 @@ test("summary counts each media item in order, excluding author avatars", () => 
   assert.equal(result.authorName, post.author.name);
   assert.equal(result.publishedAt, "2026-01-01T00:00:00.000Z");
 });
+
+for (const type of ["photo", "video"] as const) {
+  test(`${type} cache identity follows media ID rather than download URL`, () => {
+    const post = structuredClone(fixture.status);
+    const item = {
+      id: "media-100",
+      type,
+      url: `https://media.test/original.${type === "photo" ? "jpg" : "mp4"}`,
+    };
+    post.media = { all: [item] };
+    const resource = () =>
+      normalize(
+        post,
+        post.id,
+        "fxtwitter",
+        Visibility.VISIBILITY_PUBLIC,
+      ).resources.find((r) => r.purpose === "")!;
+    const key = resource().immutableKey;
+    assert.ok(key.includes(item.id));
+    item.url = `https://other.test/changed.${type === "photo" ? "jpg" : "mp4"}?token=new`;
+    assert.equal(resource().immutableKey, key);
+    item.id = "media-101";
+    assert.notEqual(resource().immutableKey, key);
+    item.id = "";
+    const fallback = resource().immutableKey;
+    assert.ok(fallback.includes(item.url));
+    item.url += "&version=2";
+    assert.notEqual(resource().immutableKey, fallback);
+  });
+}

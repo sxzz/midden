@@ -200,9 +200,10 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if e := lockTenant(ctx, tx, tenant); e != nil {
 			return e
 		}
+		recheck := false
 		if in.ParentSubmission != "" {
 			var stopped bool
-			if e := tx.QueryRow(ctx, `SELECT collection_stopped FROM submissions WHERE id=$1`, in.ParentSubmission).Scan(&stopped); e != nil {
+			if e := tx.QueryRow(ctx, `SELECT s.collection_stopped,c.is_collection FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1`, in.ParentSubmission).Scan(&stopped, &recheck); e != nil {
 				return e
 			}
 			if stopped {
@@ -304,7 +305,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 
 		var cid string
 		e = tx.QueryRow(ctx, `SELECT id FROM captures WHERE collection_id=$1 AND provider_id=$2 AND coalesce(connection_id::text,'')=$3 AND adapter_id=$4 AND state IN('queued','downloading') AND page_cursor=$5 AND (NOT $6 OR NOT automatic) AND page_size=$7`, aid, in.ProviderID, in.ConnectionID, desc.AdapterId, in.PageCursor, target.Collection && !in.Automatic, in.PageSize).Scan(&cid)
-		if errors.Is(e, pgx.ErrNoRows) && in.PageCursor == "" && in.RefreshID == "" && (in.Automatic || !target.RefreshOnSubmit) {
+		if errors.Is(e, pgx.ErrNoRows) && !recheck && in.PageCursor == "" && in.RefreshID == "" && (in.Automatic || !target.RefreshOnSubmit) {
 			e = tx.QueryRow(ctx, `SELECT r.capture_id FROM collections a JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1 AND ($2::bigint=0 OR a.observed_at > now()-make_interval(secs=>$2::double precision))`, aid, in.RefreshAfterSeconds).Scan(&cid)
 		}
 		if errors.Is(e, pgx.ErrNoRows) {
@@ -328,7 +329,23 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			if _, e = tx.Exec(ctx, `UPDATE tenants SET rate_count=$2,rate_start=$3 WHERE id=$1`, tenant, count+1, start); e != nil {
 				return e
 			}
-			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,collection_id,provider_id,scope,visibility,connection_id,refresh_from,adapter_id,automatic,page_cursor,is_collection,page_size) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid,$8,$9,$10,$11,$12) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility, in.ConnectionID, in.RefreshID, desc.AdapterId, in.Automatic, in.PageCursor, target.Collection && !in.Automatic, in.PageSize).Scan(&cid)
+			captureCollection, refreshFrom := aid, in.RefreshID
+			var collectionVisibility string
+			if e = tx.QueryRow(ctx, `SELECT visibility FROM collections WHERE id=$1`, aid).Scan(&collectionVisibility); e != nil {
+				return e
+			}
+			if collectionVisibility != visibility {
+				// Cached account results can be public, but a new account capture must
+				// start private until the adapter classifies the fetched content.
+				e = tx.QueryRow(ctx, `INSERT INTO collections(tenant_id,visibility,external_id,url,provider_id,scope,platform,kind,object_scope) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(data_scope,platform,scope,kind,object_scope,external_id) DO UPDATE SET unreferenced_at=NULL RETURNING id`, tenant, visibility, target.ExternalID, target.URL, in.ProviderID, scope, target.Platform, target.Kind, target.ObjectScope).Scan(&captureCollection)
+				if e != nil {
+					return e
+				}
+				if refreshFrom == "" {
+					refreshFrom = aid
+				}
+			}
+			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,collection_id,provider_id,scope,visibility,connection_id,refresh_from,adapter_id,automatic,page_cursor,is_collection,page_size) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid,$8,$9,$10,$11,$12) RETURNING id`, tenant, captureCollection, in.ProviderID, scope, visibility, in.ConnectionID, refreshFrom, desc.AdapterId, in.Automatic, in.PageCursor, target.Collection && !in.Automatic, in.PageSize).Scan(&cid)
 			if e != nil {
 				return e
 			}

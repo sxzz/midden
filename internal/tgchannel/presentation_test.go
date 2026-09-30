@@ -53,3 +53,11 @@ func TestCollectionListSummary(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectionReasonsDeduplicated(t *testing.T) {
+	a := domain.Collection{Warnings: []string{"storage quota exceeded"}, Assets: []domain.Asset{{State: "failed", Error: "storage quota exceeded"}, {State: "failed", Error: "storage quota exceeded"}}}
+	text := collectionMessage(a, "partial")
+	if strings.Count(text, "存储配额不足") != 1 {
+		t.Fatal(text)
+	}
+}

@@ -309,7 +309,7 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 		}
 		return save(channelapi.Ack{MessageID: id, RetrySeconds: 5})
 	}
-	text := jobState(d.Job.State) + "\n输入：" + d.Input + "\n" + d.Job.Error
+	text := jobState(d.Job.State) + "\n输入：" + d.Input + "\n" + failureReason(d.Job.Error)
 	keys := telegram.Keyboard{{{Text: "重试", Data: "/retry " + d.Job.CollectionID}}}
 	var entities []telegram.Entity
 	parts := deliveryParts(text, nil)
@@ -384,7 +384,7 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 
 func collectionProgressMessage(id string, d channelapi.Delivery) (string, telegram.Keyboard) {
 	c := d.ProgressDetails
-	text := fmt.Sprintf("正在保存帖子…\n%s\n\n本次 %d 条：已保存 %d · 部分保存 %d · 失败 %d · 待完成 %d", c.URL, c.Total, c.Complete, c.Partial, c.Failed, max(0, c.Total-c.Complete-c.Partial-c.Failed))
+	text := fmt.Sprintf("正在保存帖子…\n%s\n\n本次 %d 条：已保存 %d · 内容不完整 %d · 失败 %d · 进行中 %d", c.URL, c.Total, c.Complete, c.Partial, c.Failed, max(0, c.Total-c.Complete-c.Partial-c.Failed))
 	if c.Done {
 		text = strings.Replace(text, "正在保存帖子…", "帖子抓取完成", 1)
 	}
@@ -393,10 +393,24 @@ func collectionProgressMessage(id string, d channelapi.Delivery) (string, telegr
 		text = strings.Replace(text, "正在保存帖子…", "帖子抓取已中止", 1)
 	}
 	if d.Job.State == "failed" {
-		text = "帖子列表获取失败\n输入：" + d.Input + "\n" + d.Job.Error
+		text = "帖子列表获取失败\n输入：" + d.Input + "\n" + failureReason(d.Job.Error)
 	}
 	if c.Error != "" {
 		text += "\n部分页面获取失败，可重试继续。"
+	}
+	if len(c.Reasons) > 0 {
+		text += "\n\n未完整保存原因（相同原因合并，同一条可能涉及多个原因）："
+		for i, reason := range c.Reasons {
+			if i == 8 {
+				text += fmt.Sprintf("\n另有 %d 类原因，可在对应收藏中查看。", len(c.Reasons)-i)
+				break
+			}
+			message := []rune(failureReason(reason.Reason))
+			if len(message) > 180 {
+				message = append(message[:180], '…')
+			}
+			text += fmt.Sprintf("\n• %s（%d 条）", string(message), reason.Count)
+		}
 	}
 	keys := telegram.Keyboard{{{Text: "查看主页", URL: c.URL}}}
 	if !c.Stopped && c.Done && c.Next != "" {

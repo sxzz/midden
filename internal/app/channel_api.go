@@ -285,7 +285,7 @@ func (s *Service) channelCollection(ctx context.Context, tenant, id string) (*ch
 	var batchPending, batchFailed bool
 	var state string
 	e := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, collectionChainSQL+`,jobs AS (SELECT DISTINCT child.capture_id FROM submissions child JOIN pages ON child.idem_key LIKE 'related:'||pages.id::text||':%')
+		err := tx.QueryRow(ctx, collectionChainSQL+`,jobs AS (SELECT DISTINCT child.capture_id FROM submissions child JOIN pages ON child.idem_key LIKE 'related:'||pages.id::text||':%')
  SELECT (SELECT a.url FROM pages p JOIN captures c ON c.id=p.capture_id JOIN collections a ON a.id=c.collection_id ORDER BY depth LIMIT 1),
  (SELECT c.collection_id FROM pages p JOIN captures c ON c.id=p.capture_id ORDER BY depth LIMIT 1),
  (SELECT c.state FROM pages p JOIN captures c ON c.id=p.capture_id ORDER BY depth LIMIT 1),
@@ -300,6 +300,30 @@ func (s *Service) channelCollection(ctx context.Context, tenant, id string) (*ch
  (SELECT c.max_batch_size FROM pages JOIN captures c ON c.id=pages.capture_id ORDER BY depth DESC LIMIT 1),
  EXISTS(SELECT FROM pages WHERE collection_stopped)
  `, id).Scan(&c.URL, &c.CollectionID, &state, &c.Complete, &c.Partial, &c.Failed, &c.Pending, &c.Total, &batchPending, &batchFailed, &c.Next, &c.MaxBatch, &c.Stopped)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, collectionChainSQL+`, affected AS (
+ SELECT capture_id FROM pages
+ UNION SELECT child.capture_id FROM submissions child JOIN pages ON child.idem_key LIKE 'related:'||pages.id::text||':%'
+), reasons AS (
+ SELECT c.id, c.error AS reason FROM captures c JOIN affected a ON a.capture_id=c.id WHERE c.state='failed'
+ UNION SELECT c.id, a.error FROM assets a JOIN captures c ON c.id=a.capture_id JOIN affected x ON x.capture_id=c.id WHERE a.state='failed'
+ UNION SELECT c.id, w.reason FROM captures c JOIN affected a ON a.capture_id=c.id JOIN revisions r ON r.id=c.revision_id CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(r.payload->'warnings')='array' THEN r.payload->'warnings' ELSE '[]'::jsonb END) w(reason) WHERE c.state='partial'
+ UNION SELECT p.capture_id,p.related_error FROM pages p WHERE p.related_state='failed'
+) SELECT reason,count(DISTINCT id) FROM reasons WHERE reason<>'' GROUP BY reason ORDER BY count(DISTINCT id) DESC,reason`, id)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var reason channelapi.FailureReason
+			if err := rows.Scan(&reason.Reason, &reason.Count); err != nil {
+				return err
+			}
+			c.Reasons = append(c.Reasons, reason)
+		}
+		return rows.Err()
 	})
 	c.Done = state == "failed" || ((state == "complete" || state == "partial") && !batchPending && c.Pending == 0)
 	if batchFailed {

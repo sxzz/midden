@@ -230,3 +230,19 @@ test("timeline collection stops at end or a cursor cycle without dropping posts"
     assert.equal(result.nextPageCursor, "");
   }
 });
+
+test("banner cache identity uses the complete URL", () => {
+  const profile = {
+    ...user,
+    banner_url: "https://pbs.twimg.com/profile_banners/123/456?size=large",
+  };
+  const key = () =>
+    normalizeProfile(profile, user.id, "fxtwitter").resources.find(
+      (r) => r.purpose === "banner",
+    )!.immutableKey;
+  const original = key();
+  assert.equal(original, `x:banner:${profile.banner_url}`);
+  assert.equal(key(), original);
+  profile.banner_url += "&version=2";
+  assert.notEqual(key(), original);
+});

@@ -109,6 +109,56 @@ func TestCollectionProgressAndMore(t *testing.T) {
 	if !c.Done || c.Complete != 1 || c.Next != "second" {
 		t.Fatalf("progress: %+v", c)
 	}
+	// Multiple missing resources with the same cause are reported once per capture.
+	_, e = admin.Pool.Exec(ctx, "UPDATE captures SET state='partial' WHERE id=$1", child)
+	must(t, e)
+	_, e = admin.Pool.Exec(ctx, `INSERT INTO assets(tenant_id,visibility,capture_id,position,source_url,kind,state,error) VALUES($1,'public',$2,0,'https://media.test/one','image','failed','storage quota exceeded'),($1,'public',$2,1,'https://media.test/two','video','failed','storage quota exceeded')`, tenant, child)
+	must(t, e)
+	c = collectionData(t, s, tenant, sid)
+	if len(c.Reasons) != 1 || c.Reasons[0].Count != 1 || c.Reasons[0].Reason != "storage quota exceeded" {
+		t.Fatalf("reasons not deduplicated: %+v", c.Reasons)
+	}
+	// Reposting the profile starts a fresh child capture even when a saved revision exists.
+	recheck, recheckErr := s.Submit(ctx, tenant, domain.CaptureInput{URL: target})
+	must(t, recheckErr)
+	must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: recheck.ID}))
+	must(t, s.finalize(ctx, tenant, recheck.ID))
+	var recheckSID, newChild string
+	must(t, admin.Pool.QueryRow(ctx, "SELECT id FROM submissions WHERE capture_id=$1", recheck.ID).Scan(&recheckSID))
+	must(t, s.related(ctx, store.Task{Tenant: tenant, ID: recheckSID}))
+	must(t, admin.Pool.QueryRow(ctx, "SELECT capture_id FROM submissions WHERE idem_key=$1", "related:"+recheckSID+":0").Scan(&newChild))
+	if newChild == child {
+		t.Fatal("profile reused incomplete saved capture")
+	}
+	must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: newChild}))
+	must(t, s.finalize(ctx, tenant, newChild))
+	if refreshed := collectionData(t, s, tenant, recheckSID); refreshed.Complete != 1 || len(refreshed.Reasons) != 0 {
+		t.Fatalf("old errors leaked into refreshed batch: %+v", refreshed)
+	}
+	// Complete and failed captures also must be checked again in a new batch.
+	for _, state := range []string{"failed", "complete"} {
+		_, e = admin.Pool.Exec(ctx, "UPDATE captures SET state=$2,error='context deadline exceeded' WHERE id=$1", newChild, state)
+		must(t, e)
+		if state == "failed" {
+			failed := collectionData(t, s, tenant, recheckSID)
+			if failed.Failed != 1 || len(failed.Reasons) != 1 || failed.Reasons[0].Reason != "context deadline exceeded" {
+				t.Fatalf("missing failure cause: %+v", failed)
+			}
+		}
+		batch, err := s.Submit(ctx, tenant, domain.CaptureInput{URL: target})
+		must(t, err)
+		must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: batch.ID}))
+		must(t, s.finalize(ctx, tenant, batch.ID))
+		must(t, admin.Pool.QueryRow(ctx, "SELECT id FROM submissions WHERE capture_id=$1", batch.ID).Scan(&recheckSID))
+		must(t, s.related(ctx, store.Task{Tenant: tenant, ID: recheckSID}))
+		previous := newChild
+		must(t, admin.Pool.QueryRow(ctx, "SELECT capture_id FROM submissions WHERE idem_key=$1", "related:"+recheckSID+":0").Scan(&newChild))
+		if previous == newChild {
+			t.Fatalf("reused %s capture", state)
+		}
+		must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: newChild}))
+		must(t, s.finalize(ctx, tenant, newChild))
+	}
 	_, e = admin.Pool.Exec(ctx, "UPDATE submissions SET state='sent' WHERE id=$1", sid)
 	must(t, e)
 	_, e = s.channelPage(ctx, tenant, domain.Origin{}, uuid.NewString(), sid, "more")
