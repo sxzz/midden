@@ -167,3 +167,22 @@ test('save reports preparation failures and can retry', async ({ page }) => {
     page.getByRole('button', { name: '保存', exact: true }),
   ).toBeEnabled()
 })
+
+test('opens the clicked list image without navigating and restores focus', async ({
+  page,
+}) => {
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await page.getByRole('button', { name: '返回' }).click()
+  const thumbnail = page.getByRole('button', { name: '放大图片' }).nth(1)
+  const url = page.url()
+  await thumbnail.click()
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('2 / 3')
+  await page.getByRole('dialog').getByRole('button', { name: '下一张' }).click()
+  await expect(page.getByRole('dialog').getByRole('status')).toHaveText('3 / 3')
+  expect(page.url()).toBe(url)
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(thumbnail).toBeFocused()
+  expect(page.url()).toBe(url)
+})

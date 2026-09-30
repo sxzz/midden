@@ -1,9 +1,43 @@
 <script setup vapor lang="ts">
-import { computed } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import { assetURL, type Asset } from '../api'
 import { readyMedia } from '../presentation'
+import ImageViewer from './ImageViewer.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>()
+const emit = defineEmits<{ open: [] }>()
+const selected = shallowRef<Asset>()
+const revealed = shallowRef<string[]>([])
+const images = computed(() =>
+  media.value.filter(
+    (asset) =>
+      asset.mime?.startsWith('image/') &&
+      (!asset.sensitive ||
+        props.showSensitive ||
+        revealed.value.includes(asset.id)),
+  ),
+)
+function view(asset: Asset) {
+  if (!asset.mime?.startsWith('image/')) {
+    emit('open')
+    return
+  }
+  if (
+    asset.sensitive &&
+    !props.showSensitive &&
+    !revealed.value.includes(asset.id)
+  ) {
+    revealed.value = [...revealed.value, asset.id]
+  }
+  selected.value = asset
+}
+watch(
+  () => [props.assets, props.showSensitive],
+  () => {
+    selected.value = undefined
+    revealed.value = []
+  },
+)
 const LIMIT = 4
 const media = computed(() => readyMedia(props.assets))
 const tiles = computed(() => media.value.slice(0, LIMIT))
@@ -11,12 +45,21 @@ const overflow = computed(() => media.value.length - tiles.value.length)
 </script>
 
 <template>
-  <span v-if="tiles.length" class="thumbs" aria-hidden="true">
-    <span
+  <span v-if="tiles.length" class="thumbs">
+    <button
       v-for="(asset, index) in tiles"
       :key="asset.id"
+      type="button"
       class="tile"
+      :aria-label="
+        asset.mime?.startsWith('image/')
+          ? asset.sensitive && !showSensitive
+            ? '查看敏感图片'
+            : '放大图片'
+          : '查看收藏详情'
+      "
       :class="{ blurred: asset.sensitive && !showSensitive }"
+      @click.stop="view(asset)"
     >
       <LoadingImage
         v-if="asset.mime?.startsWith('image/')"
@@ -39,8 +82,14 @@ const overflow = computed(() => media.value.length - tiles.value.length)
       <span v-if="overflow && index === tiles.length - 1" class="more"
         >+{{ overflow }}</span
       >
-    </span>
+    </button>
   </span>
+  <ImageViewer
+    v-if="selected"
+    :images="images"
+    :initial-id="selected.id"
+    @close="selected = undefined"
+  />
 </template>
 
 <style scoped>

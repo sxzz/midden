@@ -57,10 +57,9 @@ let photoSwipe: PhotoSwipe | undefined
 let previousOverflow = ''
 let opener: HTMLElement | null = null
 let disposed = false
-let closeRequested = false
 function close() {
-  closeRequested = true
-  photoSwipe?.close()
+  if (!photoSwipe?.opener.isOpen) emit('close')
+  else photoSwipe.close()
 }
 function move(delta: number) {
   photoSwipe?.mainScroll.moveIndexBy(
@@ -84,7 +83,7 @@ onMounted(() => {
   document.body.style.overflow = 'hidden'
   dialog.value?.showModal()
   const previews = [
-    ...document.querySelectorAll<HTMLImageElement>('.media img'),
+    ...document.querySelectorAll<HTMLImageElement>('.media img, .thumbs img'),
   ]
   const dataSource = props.images.map((image) => {
     const src = assetURL(image)
@@ -126,7 +125,6 @@ onMounted(() => {
   photoSwipe = pswp
   pswp.on('openingAnimationEnd', () => {
     if (disposed) pswp.destroy()
-    else if (closeRequested) pswp.close()
   })
   pswp.on('change', () => {
     index.value = pswp.currIndex

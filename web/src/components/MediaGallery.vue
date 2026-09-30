@@ -3,6 +3,7 @@ import { computed, shallowRef, watch } from 'vue'
 import { assetURL, type Asset } from '../api'
 import { mediaNotice } from '../presentation'
 import ImageViewer from './ImageViewer.vue'
+import MediaDownload from './MediaDownload.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>()
 const selected = shallowRef<Asset>()
@@ -94,14 +95,15 @@ watch(
           v-else-if="asset.mime?.startsWith('video/')"
           :src="assetURL(asset)"
           controls
+          controlslist="nodownload"
           playsinline
           preload="none"
         >
-          <a :href="assetURL(asset, false)">下载视频</a>
+          <MediaDownload :asset="asset">下载视频</MediaDownload>
         </video>
         <a v-else class="download" :href="assetURL(asset, false)">下载文件</a>
         <figcaption v-if="asset.mime?.startsWith('video/')">
-          <a :href="assetURL(asset, false)">无法播放？下载原文件</a>
+          <MediaDownload :asset="asset">下载原视频</MediaDownload>
         </figcaption></template
       >
     </figure>

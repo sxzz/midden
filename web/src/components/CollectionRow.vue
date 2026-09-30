@@ -15,7 +15,15 @@ const props = defineProps<{
   showSensitive?: boolean
   sort?: string
 }>()
-defineEmits<{ open: [id: string] }>()
+const emit = defineEmits<{ open: [id: string] }>()
+function open(event: MouseEvent) {
+  if (
+    event.target instanceof Element &&
+    event.target.closest('button, dialog, a')
+  )
+    return
+  emit('open', props.collection.id)
+}
 const view = computed(() => present(props.collection))
 const preview = computed(() => excerpt(view.value.body))
 const meta = computed(() =>
@@ -30,7 +38,7 @@ const meta = computed(() =>
 </script>
 
 <template>
-  <button type="button" class="row" @click="$emit('open', collection.id)">
+  <div class="row" @click="open">
     <LoadingImage
       v-if="view.avatar && (!view.avatar.sensitive || showSensitive)"
       class="avatar"
@@ -41,7 +49,11 @@ const meta = computed(() =>
       view.name.slice(0, 1)
     }}</span>
     <span class="content">
-      <span class="head">
+      <button
+        type="button"
+        class="head"
+        @click.stop="$emit('open', collection.id)"
+      >
         <strong class="name">{{ view.name }}</strong
         ><span class="when">{{
           shortDate(
@@ -50,15 +62,16 @@ const meta = computed(() =>
               : collection.saved_at || collection.observed_at,
           )
         }}</span>
-      </span>
+      </button>
       <span class="preview">{{ preview }}</span>
       <span v-if="meta" class="meta">{{ meta }}</span>
       <MediaThumbs
         :assets="collection.assets || []"
         :show-sensitive="showSensitive"
+        @open="$emit('open', collection.id)"
       />
     </span>
-  </button>
+  </div>
 </template>
 
 <style scoped>
@@ -103,6 +116,8 @@ const meta = computed(() =>
   min-width: 0;
 }
 .head {
+  width: 100%;
+  background: none;
   display: flex;
   align-items: baseline;
   gap: 8px;
