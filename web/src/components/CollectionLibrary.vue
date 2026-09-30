@@ -1,22 +1,19 @@
-<script setup vapor lang="ts">
-import { computed, nextTick, shallowRef, watch } from 'vue'
+<script setup lang="ts">
+import { computed, nextTick, onUnmounted, shallowRef, watch } from 'vue'
+import { RouterView, useRoute, useRouter } from 'vue-router'
 import { api, type Collection, type Usage } from '../api'
 import { useCollection } from '../composables/useCollection'
-import { navigate, useRoute } from '../composables/useRoute'
 import { backButton, host } from '../host'
-import CollectionDetail from './CollectionDetail.vue'
-import CollectionView from './CollectionView.vue'
 const showSensitive = shallowRef(false)
 const route = useRoute()
+const router = useRouter()
 const collection = useCollection()
 const usage = shallowRef<Usage>()
 const { items, next, loading, error } = collection
-const id = computed(
-  () => /^\/collection\/([a-f0-9-]+)$/.exec(route.value)?.[1] || '',
+const id = computed(() =>
+  route.name === 'collection' ? String(route.params.id) : '',
 )
-const query = computed(() =>
-  route.value.startsWith('/?') ? route.value.slice(2) : '',
-)
+const query = shallowRef('')
 // Telegram draws its own back button; only stand in for it elsewhere.
 const standalone = !host()?.initData
 const savedAt = computed(
@@ -45,18 +42,19 @@ function apiQuery(raw: string) {
   return q.toString()
 }
 watch(
-  route,
+  () => route.fullPath,
   async () => {
     backButton(!!id.value)
     if (!id.value) {
-      listRoute = route.value
+      listRoute = route.fullPath
+      query.value = route.fullPath.split('?')[1]?.split('#')[0] || ''
       if (loadedQuery !== query.value) {
         loadedQuery = query.value
         scroll = 0
         await collection.load(apiQuery(query.value))
       }
       await nextTick()
-      window.scrollTo(0, scroll)
+      if (route.name === 'collections') window.scrollTo(0, scroll)
     } else window.scrollTo(0, 0)
   },
   { immediate: true },
@@ -69,9 +67,12 @@ async function loadUsage() {
   }
 }
 loadUsage()
+const removeGuard = router.beforeEach((_to, from) => {
+  if (from.name === 'collections') scroll = window.scrollY
+})
+onUnmounted(removeGuard)
 function open(id: string) {
-  scroll = window.scrollY
-  navigate(`/collection/${id}`)
+  void router.push({ name: 'collection', params: { id } })
 }
 function updated(collection: Collection) {
   items.value = items.value.map((a) =>
@@ -81,14 +82,36 @@ function updated(collection: Collection) {
 }
 function deleted(id: string) {
   collection.remove(id)
-  navigate(listRoute)
+  void router.push(listRoute)
   loadUsage()
 }
 function search(q: string) {
-  loadedQuery = undefined
-  navigate(`/${q ? `?${q}` : ''}`)
-  if (route.value === `/${q ? `?${q}` : ''}`) collection.load(apiQuery(q))
+  const target = `/${q ? `?${q}` : ''}`
+  if (route.fullPath === target) void collection.load(apiQuery(q))
+  else void router.push(target)
 }
+const viewProps = computed(() =>
+  id.value
+    ? {
+        savedAt: savedAt.value,
+        showSensitive: showSensitive.value,
+        onDeleted: deleted,
+        onUpdated: updated,
+      }
+    : {
+        items: items.value,
+        showSensitive: showSensitive.value,
+        query: query.value,
+        loading: loading.value,
+        error: error.value,
+        next: next.value,
+        usage: usage.value,
+        onSearch: search,
+        onOpen: open,
+        onMore: collection.more,
+        onRetry: () => collection.load(apiQuery(query.value)),
+      },
+)
 </script>
 
 <template>
@@ -98,7 +121,7 @@ function search(q: string) {
         v-if="id && standalone"
         type="button"
         class="back"
-        @click="navigate(listRoute)"
+        @click="router.push(listRoute)"
       >
         <span class="chevron" aria-hidden="true">‹</span>返回
       </button>
@@ -128,29 +151,19 @@ function search(q: string) {
         </svg>
       </button>
     </header>
-    <CollectionView
-      v-if="!id"
-      :items="items"
-      :show-sensitive="showSensitive"
-      :query="query"
-      :loading="loading"
-      :error="error"
-      :next="next"
-      :usage="usage"
-      @search="search"
-      @open="open"
-      @more="collection.more()"
-      @retry="collection.load(apiQuery(query))"
-    />
-    <CollectionDetail
-      v-else
-      :id="id"
-      :key="id"
-      :saved-at="savedAt"
-      :show-sensitive="showSensitive"
-      @deleted="deleted"
-      @updated="updated"
-    />
+    <RouterView v-slot="{ Component, route: viewRoute }">
+      <KeepAlive include="CollectionView" :max="1">
+        <component
+          :is="Component"
+          :key="
+            viewRoute.name === 'collections'
+              ? 'collections'
+              : viewRoute.params.id
+          "
+          v-bind="viewProps"
+        />
+      </KeepAlive>
+    </RouterView>
   </main>
 </template>
 

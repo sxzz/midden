@@ -60,7 +60,7 @@ test('entity defaults, switching, resetting and mobile statistic layout', async 
   await expect.poll(() => queries.at(-1)).toBe('x.profile')
   await page.reload()
   await expect(page.getByRole('button', { name: /^筛选/ })).toContainText(
-    'X profile',
+    'X 账号',
   )
   await page.getByRole('button', { name: '清除', exact: true }).click()
   await expect.poll(() => queries.at(-1)).toBe('x.post')
@@ -85,4 +85,49 @@ test('entity defaults, switching, resetting and mobile statistic layout', async 
   }
   await page.setViewportSize({ width: 390, height: 844 })
   await page.screenshot({ path: 'test-results/profile-stats-mobile.png' })
+})
+
+test('Chinese filters support multiple media, date bounds and storage order', async ({
+  page,
+}) => {
+  let query = new URLSearchParams()
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const url = new URL(r.request().url())
+    if (url.pathname === '/v1/collections') query = url.searchParams
+    return r.fulfill({
+      json: { items: [{ ...profile, storage_bytes: 2097152 }] },
+    })
+  })
+  await page.goto('/app/')
+  await expect(page.locator('.row .meta')).toContainText('2.0 MB')
+  await page.getByRole('button', { name: /^筛选/ }).click()
+  await expect(
+    page.getByLabel('类型', { exact: true }).locator('option:checked'),
+  ).toHaveText('X 帖子')
+  await page.getByRole('checkbox', { name: '图片', exact: true }).check()
+  await page.getByRole('checkbox', { name: '视频', exact: true }).check()
+  await page.getByLabel('收藏开始日期').fill('2026-09-01')
+  await page.getByLabel('收藏结束日期').fill('2026-09-30')
+  await expect(page.getByText(/并非收藏的分享设置/)).toBeVisible()
+  await page.getByRole('button', { name: '应用筛选' }).click()
+  await expect.poll(() => query.get('media_type')).toBe('image,video')
+  expect(query.get('saved_from')).toBeTruthy()
+  expect(query.get('saved_before')).toBeTruthy()
+  await page.reload()
+  await expect(
+    page.getByRole('checkbox', { name: '图片', exact: true }),
+  ).toBeChecked()
+  await expect(
+    page.getByRole('checkbox', { name: '视频', exact: true }),
+  ).toBeChecked()
+  await page.getByLabel('排序', { exact: true }).selectOption('storage')
+  await expect.poll(() => query.get('sort')).toBe('storage')
+  await expect(
+    page.getByLabel('排序方向').locator('option:checked'),
+  ).toHaveText('从大到小')
+  await page.getByLabel('排序方向').selectOption('asc')
+  await expect.poll(() => query.get('order')).toBe('asc')
+  await page.getByRole('button', { name: '清除', exact: true }).click()
+  await expect.poll(() => query.get('media_type')).toBeNull()
 })

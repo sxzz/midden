@@ -24,6 +24,7 @@ type (
 	CollectionFilter struct{ Q, EntityType, Media, Visibility, From, Before, Sort, Order string }
 	collectionCursor struct {
 		Time       time.Time
+		Bytes      int64
 		ID, Filter string
 	}
 )
@@ -39,7 +40,7 @@ type CollectionPage struct {
 
 func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter, cursor string) (p CollectionPage, e error) {
 	p.Items = []CollectionItem{}
-	if (f.EntityType != "" && !adapter.EntityName.MatchString(f.EntityType)) || (f.Order != "" && f.Order != "desc" && f.Order != "asc") || (f.Sort != "" && f.Sort != "captured" && f.Sort != "published") || utf8.RuneCountInString(f.Q) > 500 || (f.Media != "" && f.Media != "image" && f.Media != "video" && f.Media != "text") || (f.Visibility != "" && f.Visibility != "public" && f.Visibility != "private") {
+	if (f.EntityType != "" && !adapter.EntityName.MatchString(f.EntityType)) || (f.Order != "" && f.Order != "desc" && f.Order != "asc") || (f.Sort != "" && f.Sort != "captured" && f.Sort != "published" && f.Sort != "storage") || utf8.RuneCountInString(f.Q) > 500 || !validMediaFilter(f.Media) || (f.Visibility != "" && f.Visibility != "public" && f.Visibility != "private") {
 		return p, ErrInvalidFilter
 	}
 	var from, before *time.Time
@@ -62,26 +63,29 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 	fingerprint := store.Hash(string(raw))
 	var anchor *time.Time
 	var aid *string
+	var byteAnchor *int64
 	if cursor != "" {
 		b, err := base64.RawURLEncoding.DecodeString(cursor)
 		var c collectionCursor
-		if err != nil || json.Unmarshal(b, &c) != nil || c.Filter != fingerprint || c.Time.IsZero() {
+		if err != nil || json.Unmarshal(b, &c) != nil || c.Filter != fingerprint || (f.Sort != "storage" && c.Time.IsZero()) || c.Bytes < 0 {
 			return p, fmt.Errorf("invalid cursor")
 		}
 		if _, err = uuid.Parse(c.ID); err != nil {
 			return p, fmt.Errorf("invalid cursor")
 		}
 		anchor = &c.Time
+		byteAnchor = &c.Bytes
 		aid = &c.ID
 	}
 	q := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.TrimSpace(f.Q)) + "%"
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
-		query := `SELECT a.id,ta.created_at,ordering.at FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id JOIN revisions r ON r.id=a.current_revision CROSS JOIN LATERAL (SELECT CASE WHEN $8='published' AND pg_input_is_valid(r.payload->>'published_at','timestamp with time zone') THEN (r.payload->>'published_at')::timestamptz ELSE a.observed_at END AS at) ordering WHERE ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR a.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND ($5::timestamptz IS NULL OR (ordering.at,a.id)<($5,$6::uuid)) AND ($7='' OR ($7='text' AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (($7='image' AND b.mime LIKE 'image/%') OR ($7='video' AND b.mime LIKE 'video/%')))) AND ($9='' OR EXISTS(SELECT FROM jsonb_array_elements(r.payload->'graph'->'entities') entity WHERE entity->>'key'=r.payload->'graph'->>'root' AND entity->>'type'=$9)) ORDER BY ordering.at DESC,a.id DESC LIMIT 21`
+		query := `SELECT a.id,ta.created_at,ordering.at,storage.bytes FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id JOIN revisions r ON r.id=a.current_revision CROSS JOIN LATERAL (SELECT CASE WHEN $8='published' AND pg_input_is_valid(r.payload->>'published_at','timestamp with time zone') THEN (r.payload->>'published_at')::timestamptz ELSE a.observed_at END AS at) ordering CROSS JOIN LATERAL (SELECT ` + collectionStorageSQL + ` AS bytes) storage WHERE ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR a.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND (($8='storage' AND ($10::bigint IS NULL OR (storage.bytes,a.id)<($10,$6::uuid))) OR ($8<>'storage' AND ($5::timestamptz IS NULL OR (ordering.at,a.id)<($5,$6::uuid)))) AND ($7='' OR ('text'=ANY(string_to_array($7,',')) AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (('image'=ANY(string_to_array($7,',')) AND b.mime LIKE 'image/%') OR ('video'=ANY(string_to_array($7,',')) AND b.mime LIKE 'video/%')))) AND ($9='' OR EXISTS(SELECT FROM jsonb_array_elements(r.payload->'graph'->'entities') entity WHERE entity->>'key'=r.payload->'graph'->>'root' AND entity->>'type'=$9)) ORDER BY CASE WHEN $8='storage' THEN storage.bytes END DESC,CASE WHEN $8<>'storage' THEN ordering.at END DESC,a.id DESC LIMIT 21`
 		if f.Order == "asc" {
 			query = strings.ReplaceAll(query, "(ordering.at,a.id)<", "(ordering.at,a.id)>")
-			query = strings.ReplaceAll(query, "ordering.at DESC,a.id DESC", "ordering.at ASC,a.id ASC")
+			query = strings.ReplaceAll(query, "(storage.bytes,a.id)<", "(storage.bytes,a.id)>")
+			query = strings.ReplaceAll(query, " DESC", " ASC")
 		}
-		rows, err := tx.Query(ctx, query, q, f.Visibility, from, before, anchor, aid, f.Media, f.Sort, f.EntityType)
+		rows, err := tx.Query(ctx, query, q, f.Visibility, from, before, anchor, aid, f.Media, f.Sort, f.EntityType, byteAnchor)
 		if err != nil {
 			return err
 		}
@@ -89,11 +93,12 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 			id    string
 			at    time.Time
 			saved time.Time
+			bytes int64
 		}
 		entries := []entry{}
 		for rows.Next() {
 			var x entry
-			if err = rows.Scan(&x.id, &x.saved, &x.at); err != nil {
+			if err = rows.Scan(&x.id, &x.saved, &x.at, &x.bytes); err != nil {
 				rows.Close()
 				return err
 			}
@@ -107,7 +112,7 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 		if len(entries) > 20 {
 			entries = entries[:20]
 			last := entries[19]
-			b, _ := json.Marshal(collectionCursor{last.at, last.id, fingerprint})
+			b, _ := json.Marshal(collectionCursor{Time: last.at, Bytes: last.bytes, ID: last.id, Filter: fingerprint})
 			p.Next = base64.RawURLEncoding.EncodeToString(b)
 		}
 		for _, v := range entries {
@@ -115,6 +120,7 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 			if err != nil {
 				return err
 			}
+			a.StorageBytes = v.bytes
 			p.Items = append(p.Items, CollectionItem{a, v.saved})
 		}
 		return nil
@@ -172,7 +178,7 @@ func (s *Service) Revisions(ctx context.Context, t, id, cursor string) (p Revisi
 	if len(p.Items) > 20 {
 		p.Items = p.Items[:20]
 		v := p.Items[19]
-		b, _ := json.Marshal(collectionCursor{v.CreatedAt, v.ID, id})
+		b, _ := json.Marshal(collectionCursor{Time: v.CreatedAt, ID: v.ID, Filter: id})
 		p.Next = base64.RawURLEncoding.EncodeToString(b)
 	}
 	return
@@ -203,7 +209,8 @@ func (s *Service) Revision(ctx context.Context, t, id, rid string) (a domain.Col
 			return err
 		}
 		hydrateGraph(&a, p, all)
-		return nil
+		a.StorageBytes, err = collectionStorage(ctx, tx, id)
+		return err
 	})
 	return
 }
@@ -240,7 +247,43 @@ func (s *Service) SavedCollection(ctx context.Context, tenant, id string) (item 
 		}
 		var e error
 		item.Collection, e = collection(ctx, tx, id)
+		if e == nil {
+			item.StorageBytes, e = collectionStorage(ctx, tx, id)
+		}
 		return e
 	})
+	return
+}
+
+// The comma-separated choices are ORed: a collection may match any selected type.
+func validMediaFilter(raw string) bool {
+	if raw == "" {
+		return true
+	}
+	for _, media := range strings.Split(raw, ",") {
+		if media != "image" && media != "video" && media != "text" {
+			return false
+		}
+	}
+	return true
+}
+
+// Same accounting units as tenant_usage(), scoped to one collection. Shared blobs
+// are deduplicated within this collection, not apportioned across collections.
+const collectionStorageSQL = `(
+ COALESCE((SELECT SUM(rv.content_bytes) FROM revisions rv WHERE rv.collection_id=a.id),0)
+ + COALESCE((SELECT SUM(media.size) FROM (
+   SELECT DISTINCT b.hash,b.size FROM revisions rv
+   JOIN assets m ON m.capture_id=rv.capture_id JOIN blobs b ON b.id=m.blob_id
+   WHERE rv.collection_id=a.id
+ ) media),0)
+ + COALESCE((SELECT SUM(sr.size) FROM source_responses sr
+   JOIN captures c ON c.id=sr.capture_id
+   WHERE c.collection_id=a.id AND c.state IN ('complete','partial')
+   AND (sr.visibility='public' OR sr.tenant_id=nullif(current_setting('app.tenant_id',true),'')::uuid)),0)
+)::bigint`
+
+func collectionStorage(ctx context.Context, tx pgx.Tx, id string) (n int64, err error) {
+	err = tx.QueryRow(ctx, `SELECT `+collectionStorageSQL+` FROM collections a WHERE a.id=$1`, id).Scan(&n)
 	return
 }

@@ -186,8 +186,12 @@ paths:
         - {
             in: query,
             name: media_type,
-            schema: { type: string, enum: [image, video, text] },
-            description: Mixed posts match image and video; avatar resources are excluded.,
+            schema:
+              {
+                type: string,
+                pattern: "^(image|video|text)(,(image|video|text))*$",
+              },
+            description: Comma-separated media types matched with OR. Avatar resources are excluded.,
           }
         - {
             in: query,
@@ -207,9 +211,21 @@ paths:
             description: Exclusive saved time.,
           }
         - in: query
+          name: sort
+          schema:
+            {
+              type: string,
+              enum: [captured, published, storage],
+              default: captured,
+            }
+          description: Order by capture time, publication time or total collection storage bytes.
+        - in: query
+          name: order
+          schema: { type: string, enum: [asc, desc], default: desc }
+        - in: query
           name: cursor
           schema: { type: string }
-          description: Opaque cursor returned by a previous page; pages contain at most 10 collections.
+          description: Opaque cursor bound to the filters and ordering. Filtered pages contain at most 20 collections; legacy pages at most 10.
       responses:
         "200":
           description: Page
@@ -465,6 +481,10 @@ components:
     Collection:
       type: object
       properties:
+        storage_bytes:
+          type: integer
+          format: int64
+          description: Saved collection storage including all revisions, deduplicated media and source responses. Shared media is counted in each collection.
         saved_at:
           {
             type: string,

@@ -447,7 +447,14 @@ func collection(ctx context.Context, tx pgx.Tx, id string) (a domain.Collection,
 }
 
 func (s *Service) Collection(ctx context.Context, t, id string) (a domain.Collection, e error) {
-	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error { var err error; a, err = collection(ctx, tx, id); return err })
+	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
+		var err error
+		a, err = collection(ctx, tx, id)
+		if err == nil {
+			a.StorageBytes, err = collectionStorage(ctx, tx, id)
+		}
+		return err
+	})
 	return
 }
 

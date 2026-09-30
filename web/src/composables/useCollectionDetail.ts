@@ -1,4 +1,5 @@
 import { computed, onUnmounted, shallowRef, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   api,
   errorText,
@@ -12,6 +13,7 @@ export function useCollectionDetail(
   deleted: (id: string) => void,
   updated: (collection: Collection) => void,
 ) {
+  const router = useRouter()
   const available = shallowRef(false)
   const collection = shallowRef<Collection>()
   const error = shallowRef('')
@@ -192,7 +194,10 @@ export function useCollectionDetail(
           },
         )
         if (job.collection_id !== id())
-          location.hash = `/collection/${job.collection_id}`
+          void router.replace({
+            name: 'collection',
+            params: { id: job.collection_id },
+          })
         latestRevision.value = collection.value.revision_id
         await historyPage()
         updated(collection.value)

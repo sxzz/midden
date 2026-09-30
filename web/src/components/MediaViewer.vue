@@ -11,15 +11,17 @@ import {
 import { api, assetURL, errorText, type Asset } from '../api'
 import { host } from '../host'
 import 'photoswipe/style.css'
-const props = defineProps<{ images: Asset[]; initialId: string }>()
+const props = defineProps<{ assets: Asset[]; initialId: string }>()
 const emit = defineEmits<{ close: [] }>()
 const index = shallowRef(
   Math.max(
     0,
-    props.images.findIndex((image) => image.id === props.initialId),
+    props.assets.findIndex((image) => image.id === props.initialId),
   ),
 )
-const selected = computed(() => props.images[index.value])
+const selected = computed(() => props.assets[index.value])
+const isVideo = computed(() => selected.value?.mime?.startsWith('video/'))
+const videos = new Set<HTMLVideoElement>()
 const dialog = useTemplateRef<HTMLDialogElement>('viewer')
 const stage = useTemplateRef<HTMLDivElement>('stage')
 const saving = shallowRef(false)
@@ -68,6 +70,7 @@ function move(delta: number) {
   )
 }
 function keydown(event: KeyboardEvent) {
+  if (event.target instanceof HTMLVideoElement) return
   if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
     event.preventDefault()
     move(event.key === 'ArrowLeft' ? -1 : 1)
@@ -83,10 +86,28 @@ onMounted(() => {
   document.body.style.overflow = 'hidden'
   dialog.value?.showModal()
   const previews = [
-    ...document.querySelectorAll<HTMLImageElement>('.media img, .thumbs img'),
+    ...document.querySelectorAll<HTMLImageElement>(
+      '.media img, .thumbs img, .author img',
+    ),
   ]
-  const dataSource = props.images.map((image) => {
+  const dataSource = props.assets.map((image) => {
     const src = assetURL(image)
+    if (image.mime?.startsWith('video/')) {
+      const preview = [
+        ...document.querySelectorAll<HTMLVideoElement>(
+          '.media video, .thumbs video',
+        ),
+      ].find(
+        (video) => video.src.split('#')[0] === new URL(src, location.href).href,
+      )
+      return {
+        src,
+        type: 'video',
+        alt: image.alt_text || '收藏视频',
+        width: preview?.videoWidth || 1600,
+        height: preview?.videoHeight || 900,
+      }
+    }
     const preview = previews.find(
       (img) => img.src === new URL(src, location.href).href && img.naturalWidth,
     )
@@ -120,9 +141,65 @@ onMounted(() => {
     imageClickAction: 'zoom',
     tapAction: false,
     doubleTapAction: 'zoom',
-    errorMsg: '图片加载失败，请关闭后重试',
+    errorMsg: '媒体加载失败，请关闭后重试',
+    paddingFn: (_viewport, item) =>
+      item.type === 'video'
+        ? { top: 72, bottom: 110, left: 12, right: 12 }
+        : { top: 0, bottom: 0, left: 0, right: 0 },
   })
   photoSwipe = pswp
+  pswp.on('contentLoad', (event) => {
+    const { content } = event
+    if (content.data.type !== 'video') return
+    event.preventDefault()
+    const container = document.createElement('div')
+    container.className = 'video-slide'
+    const video = document.createElement('video')
+    video.src = content.data.src || ''
+    video.controls = true
+    video.playsInline = true
+    video.preload = 'metadata'
+    video.setAttribute('aria-label', content.data.alt || '收藏视频')
+    video.addEventListener(
+      'error',
+      () => {
+        if (disposed) return
+        const error = document.createElement('p')
+        error.setAttribute('role', 'alert')
+        error.textContent = '视频加载失败，可尝试保存后播放'
+        container.replaceChildren(error)
+      },
+      { once: true },
+    )
+    videos.add(video)
+    container.append(video)
+    content.element = container
+    content.state = 'loaded'
+  })
+  // Native playback and seeking controls must not start a gallery drag.
+  pswp.on('pointerDown', (event) => {
+    if (event.originalEvent.target instanceof HTMLVideoElement)
+      event.preventDefault()
+  })
+  pswp.on('contentActivate', ({ content }) => {
+    const video = content.element?.querySelector('video')
+    // Only the active slide plays; native controls remain available if blocked.
+    if (video) void video.play().catch(() => {})
+  })
+  pswp.on('contentDeactivate', ({ content }) => {
+    content.element?.querySelector('video')?.pause()
+  })
+  pswp.on('contentDestroy', ({ content }) => {
+    const video = content.element?.querySelector('video')
+    if (!video) return
+    video.pause()
+    video.removeAttribute('src')
+    video.load()
+    videos.delete(video)
+  })
+  pswp.on('close', () => {
+    for (const video of videos) video.pause()
+  })
   pswp.on('openingAnimationEnd', () => {
     if (disposed) pswp.destroy()
   })
@@ -166,13 +243,19 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   disposed = true
+  for (const video of videos) {
+    video.pause()
+    video.removeAttribute('src')
+    video.load()
+  }
+  videos.clear()
   photoSwipe?.destroy()
   dialog.value?.close()
   document.body.style.overflow = previousOverflow
   if (opener?.isConnected) opener.focus({ preventScroll: true })
 })
 watch(
-  () => props.images,
+  () => props.assets,
   () => emit('close'),
 )
 </script>
@@ -181,7 +264,7 @@ watch(
   <dialog
     ref="viewer"
     class="viewer"
-    aria-label="图片预览"
+    :aria-label="isVideo ? '视频预览' : '图片预览'"
     @cancel.prevent="close"
     @close="emit('close')"
     @keydown="keydown"
@@ -193,7 +276,7 @@ watch(
         type="button"
         class="glass close"
         autofocus
-        aria-label="关闭图片"
+        :aria-label="isVideo ? '关闭视频' : '关闭图片'"
         @click="close"
       >
         <svg
@@ -209,25 +292,45 @@ watch(
         </svg>
       </button>
       <p
-        v-if="images.length > 1"
+        v-if="assets.length > 1"
         class="glass counter"
         role="status"
         aria-live="polite"
       >
-        {{ index + 1 }} / {{ images.length }}
+        {{ index + 1 }} / {{ assets.length }}
       </p>
-      <button type="button" class="glass save" :disabled="saving" @click="save">
-        {{ saving ? '准备中…' : '保存' }}
+      <button
+        type="button"
+        class="glass save"
+        :disabled="saving"
+        :aria-label="saving ? '准备中…' : '保存'"
+        :aria-busy="saving"
+        :title="saving ? '准备中…' : '保存'"
+        @click="save"
+      >
+        <svg
+          class="icon"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.9"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path v-if="saving" d="M5 12h.01M12 12h.01M19 12h.01" />
+          <path v-else d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4" />
+        </svg>
       </button>
     </div>
     <p v-if="saveError" class="save-error" role="alert">{{ saveError }}</p>
 
     <div
-      v-if="selected?.alt_text || images.length > 1"
+      v-if="selected?.alt_text || assets.length > 1"
       class="chrome chrome-bottom"
     >
       <p v-if="selected?.alt_text" class="caption">{{ selected.alt_text }}</p>
-      <div v-if="images.length > 1" class="glass remote">
+      <div v-if="assets.length > 1" class="glass remote">
         <button
           type="button"
           class="nav"
@@ -248,9 +351,9 @@ watch(
             <path d="M14.5 5.5 8 12l6.5 6.5" />
           </svg>
         </button>
-        <span v-if="images.length <= 8" class="dots" aria-hidden="true">
+        <span v-if="assets.length <= 8" class="dots" aria-hidden="true">
           <span
-            v-for="(image, slot) in images"
+            v-for="(image, slot) in assets"
             :key="image.id"
             class="dot"
             :class="{ on: slot === index }"
@@ -259,7 +362,7 @@ watch(
         <button
           type="button"
           class="nav"
-          :disabled="index === images.length - 1"
+          :disabled="index === assets.length - 1"
           aria-label="下一张"
           @click="move(1)"
         >
@@ -336,6 +439,17 @@ watch(
   font-size: 14px;
 }
 
+.stage :deep(.video-slide) {
+  display: grid;
+  place-items: center;
+  color: var(--subtle);
+}
+.stage :deep(.video-slide video) {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 .chrome {
   position: absolute;
   right: 0;
@@ -409,8 +523,11 @@ watch(
   transform: scale(0.9);
 }
 .save {
-  min-height: 44px;
-  padding: 0 16px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
   margin-left: auto;
   color: #fff;
   font-size: 15px;

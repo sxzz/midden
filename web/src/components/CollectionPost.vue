@@ -1,26 +1,43 @@
 <script setup vapor lang="ts">
-import { computed } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import { assetURL, type Collection } from '../api'
-import { present, warningList } from '../presentation'
+import { present, storageSize, warningList } from '../presentation'
 import MediaGallery from './MediaGallery.vue'
+import MediaViewer from './MediaViewer.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 const props = defineProps<{
   collection: Collection
   showSensitive?: boolean
 }>()
 const view = computed(() => present(props.collection))
+const previewAvatar = shallowRef(false)
+const avatarAssets = computed(() =>
+  view.value.avatar && (!view.value.avatar.sensitive || props.showSensitive)
+    ? [view.value.avatar]
+    : [],
+)
+watch(avatarAssets, () => {
+  previewAvatar.value = false
+})
 const warnings = computed(() => warningList(props.collection.warnings))
 </script>
 
 <template>
   <article class="post">
     <header class="author">
-      <LoadingImage
-        v-if="view.avatar && (!view.avatar.sensitive || showSensitive)"
-        class="avatar"
-        :src="assetURL(view.avatar)"
-        alt=""
-      /><span v-else class="avatar initials" aria-hidden="true">{{
+      <button
+        v-if="avatarAssets.length"
+        type="button"
+        class="avatar avatar-button"
+        :aria-label="`查看${view.name}的头像`"
+        @click="previewAvatar = true"
+      >
+        <LoadingImage
+          class="avatar"
+          :src="assetURL(avatarAssets[0]!)"
+          alt=""
+        /></button
+      ><span v-else class="avatar initials" aria-hidden="true">{{
         view.name.slice(0, 1)
       }}</span>
       <div class="identity">
@@ -28,6 +45,13 @@ const warnings = computed(() => warningList(props.collection.warnings))
         <small v-if="view.handle" class="handle">@{{ view.handle }}</small>
       </div>
     </header>
+    <p
+      v-if="collection.storage_bytes !== undefined"
+      class="storage"
+      title="包含正文、历史版本、媒体及原始响应；共享文件在每条收藏中分别计入"
+    >
+      占用 {{ storageSize(collection.storage_bytes) }}
+    </p>
     <p class="body">{{ view.body }}</p>
     <MediaGallery
       :assets="collection.assets || []"
@@ -53,6 +77,12 @@ const warnings = computed(() => warningList(props.collection.warnings))
         >
       </p>
     </footer>
+    <MediaViewer
+      v-if="previewAvatar && avatarAssets.length"
+      :assets="avatarAssets"
+      :initial-id="avatarAssets[0]!.id"
+      @close="previewAvatar = false"
+    />
   </article>
 </template>
 
@@ -72,6 +102,13 @@ const warnings = computed(() => warningList(props.collection.warnings))
   border-radius: 50%;
   object-fit: cover;
   background: var(--fill);
+}
+.avatar-button {
+  padding: 0;
+}
+.avatar-button:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 3px;
 }
 .image-shell.avatar {
   min-height: 0;
@@ -94,6 +131,11 @@ const warnings = computed(() => warningList(props.collection.warnings))
 }
 .handle {
   display: block;
+  font-size: 13px;
+  color: var(--subtle);
+}
+.storage {
+  margin: 10px 0 0;
   font-size: 13px;
   color: var(--subtle);
 }

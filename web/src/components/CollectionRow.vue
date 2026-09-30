@@ -7,6 +7,7 @@ import {
   mediaSummary,
   present,
   shortDate,
+  storageSize,
 } from '../presentation'
 import MediaThumbs from './MediaThumbs.vue'
 import LoadingImage from './ui/LoadingImage.vue'
@@ -31,6 +32,8 @@ const meta = computed(() =>
     view.value.handle && `@${view.value.handle}`,
     props.collection.visibility === 'private' && '私密',
     mediaSummary(props.collection.assets),
+    props.collection.storage_bytes !== undefined &&
+      storageSize(props.collection.storage_bytes),
   ]
     .filter(Boolean)
     .join(' · '),

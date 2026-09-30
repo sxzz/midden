@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { createVaporApp, nextTick } from 'vue'
+import { createApp, nextTick, vaporInteropPlugin } from 'vue'
+import { router } from '../router'
 import CollectionLibrary from './CollectionLibrary.vue'
 const collection = {
   id: '00000000-0000-4000-8000-000000000001',
@@ -38,7 +39,9 @@ it('toggles sensitive media across the collection and detail without losing the 
   location.hash = '/'
   const el = document.createElement('div')
   document.body.append(el)
-  const app = createVaporApp(CollectionLibrary)
+  await router.push('/')
+  const app = createApp(CollectionLibrary).use(vaporInteropPlugin).use(router)
+  await router.isReady()
   app.mount(el)
   unmount = () => app.unmount()
   const toggle = () =>
@@ -46,6 +49,10 @@ it('toggles sensitive media across the collection and detail without losing the 
   const image = () =>
     el.querySelector('img[src="/v1/assets/sensitive-image?inline=1"]')
   await vi.waitFor(() => expect(el.textContent).toContain('测试正文'))
+  const originalImage = image()!
+  originalImage.dispatchEvent(new Event('load'))
+  await nextTick()
+  expect(originalImage.classList.contains('pending')).toBe(false)
   expect(toggle().getAttribute('aria-pressed')).toBe('false')
   expect(image()).not.toBeNull()
   expect(image()?.closest('.blurred, .sensitive')).not.toBeNull()
@@ -76,4 +83,6 @@ it('toggles sensitive media across the collection and detail without losing the 
   expect(toggle().getAttribute('aria-pressed')).toBe('false')
   expect(image()).not.toBeNull()
   expect(image()?.closest('.blurred, .sensitive')).not.toBeNull()
+  expect(image()).toBe(originalImage)
+  expect(image()?.classList.contains('pending')).toBe(false)
 })

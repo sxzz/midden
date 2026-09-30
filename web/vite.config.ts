@@ -32,6 +32,7 @@ export default defineConfig({
   server: { proxy: { '/v1': 'http://127.0.0.1:8080' } },
   test: {
     alias: testAliases,
+    server: { deps: { inline: ['vue-router'] } },
     environment: 'jsdom',
     include: ['src/**/*.test.ts'],
   },

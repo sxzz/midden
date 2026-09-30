@@ -9,6 +9,27 @@ const collection = {
   observed_at: '2026-09-30T10:00:00Z',
   visibility: 'public',
   revision_id: 'r1',
+  graph: {
+    root: 'post',
+    entities: [
+      { key: 'post', type: 'x.post', data: {} },
+      {
+        key: 'author',
+        type: 'x.profile',
+        data: {},
+        assets: [
+          {
+            id: 'avatar',
+            purpose: 'avatar',
+            state: 'ready',
+            mime: 'image/png',
+            sensitive: false,
+          },
+        ],
+      },
+    ],
+    relations: [{ source: 'post', target: 'author', type: 'authored_by' }],
+  },
   assets: Array.from({ length: 3 }, (_, i) => ({
     id: `photo-${i}`,
     state: 'ready',
@@ -184,5 +205,25 @@ test('opens the clicked list image without navigating and restores focus', async
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect(thumbnail).toBeFocused()
+  expect(page.url()).toBe(url)
+})
+
+test('detail avatar opens its own preview and returns focus on close', async ({
+  page,
+}) => {
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  const url = page.url()
+  const avatar = page.getByRole('button', { name: '查看相册测试的头像' })
+  await avatar.click()
+  const dialog = page.getByRole('dialog', { name: '图片预览' })
+  await expect(dialog.locator('.pswp__img').last()).toHaveAttribute(
+    'src',
+    '/v1/assets/avatar?inline=1',
+  )
+  await expect(dialog.getByRole('button', { name: '下一张' })).toHaveCount(0)
+  await dialog.getByRole('button', { name: '关闭图片' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(avatar).toBeFocused()
   expect(page.url()).toBe(url)
 })

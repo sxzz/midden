@@ -2,9 +2,8 @@
 import { computed, shallowRef, watch } from 'vue'
 import { assetURL, type Asset } from '../api'
 import { mediaNotice } from '../presentation'
-import ImageViewer from './ImageViewer.vue'
-import MediaDownload from './MediaDownload.vue'
-import LoadingImage from './ui/LoadingImage.vue'
+import MediaPreview from './MediaPreview.vue'
+import MediaViewer from './MediaViewer.vue'
 const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>()
 const selected = shallowRef<Asset>()
 function view(asset: Asset) {
@@ -22,14 +21,21 @@ watch(
     }
   },
 )
+function hidden(asset: Asset) {
+  return (
+    asset.sensitive &&
+    !props.showSensitive &&
+    !revealed.value.includes(asset.id)
+  )
+}
 function reveal(id: string) {
   revealed.value = [...revealed.value, id]
 }
-const images = computed(() =>
+const previews = computed(() =>
   props.assets.filter(
     (asset) =>
       asset.state === 'ready' &&
-      asset.mime?.startsWith('image/') &&
+      (asset.mime?.startsWith('image/') || asset.mime?.startsWith('video/')) &&
       (!asset.sensitive ||
         props.showSensitive ||
         revealed.value.includes(asset.id)),
@@ -50,67 +56,44 @@ watch(
       <p v-if="asset.state !== 'ready'" class="notice">
         {{ mediaNotice(asset) }}
       </p>
-      <!-- Keep the preview visible under the blur until explicitly revealed. -->
       <button
         v-else-if="
-          asset.sensitive && !showSensitive && !revealed.includes(asset.id)
+          asset.mime?.startsWith('image/') || asset.mime?.startsWith('video/')
         "
         type="button"
-        class="sensitive"
-        @click="reveal(asset.id)"
+        class="frame"
+        :class="{ sensitive: hidden(asset) }"
+        :aria-label="
+          hidden(asset)
+            ? '敏感内容 · 点按显示'
+            : asset.mime?.startsWith('video/')
+              ? '播放视频'
+              : '放大图片'
+        "
+        @click="hidden(asset) ? reveal(asset.id) : view(asset)"
       >
-        <LoadingImage
-          v-if="asset.mime?.startsWith('image/')"
-          class="blurred"
-          :src="assetURL(asset)"
-          alt=""
-          loading="lazy"
+        <MediaPreview
+          :asset="asset"
+          fit="contain"
+          :alt="asset.alt_text"
+          :class="{ blurred: hidden(asset) }"
         />
-        <video
+        <span v-if="hidden(asset)" class="sensitive-label"
+          >敏感内容 · 点按显示</span
+        >
+        <span
           v-else-if="asset.mime?.startsWith('video/')"
-          class="blurred"
-          :src="`${assetURL(asset)}#t=0.1`"
-          muted
-          playsinline
-          preload="metadata"
+          class="play"
           aria-hidden="true"
-        />
-        <span class="sensitive-label">敏感内容 · 点按显示</span>
+          >▶</span
+        >
       </button>
-      <template v-else
-        ><button
-          v-if="asset.mime?.startsWith('image/')"
-          type="button"
-          class="frame"
-          aria-label="放大图片"
-          @click="view(asset)"
-        >
-          <LoadingImage
-            :src="assetURL(asset)"
-            :alt="asset.alt_text || '收藏图片'"
-            loading="lazy"
-          />
-        </button>
-        <video
-          v-else-if="asset.mime?.startsWith('video/')"
-          :src="assetURL(asset)"
-          controls
-          controlslist="nodownload"
-          playsinline
-          preload="none"
-        >
-          <MediaDownload :asset="asset">下载视频</MediaDownload>
-        </video>
-        <a v-else class="download" :href="assetURL(asset, false)">下载文件</a>
-        <figcaption v-if="asset.mime?.startsWith('video/')">
-          <MediaDownload :asset="asset">下载原视频</MediaDownload>
-        </figcaption></template
-      >
+      <a v-else class="download" :href="assetURL(asset, false)">下载文件</a>
     </figure>
   </div>
-  <ImageViewer
+  <MediaViewer
     v-if="selected"
-    :images="images"
+    :assets="previews"
     :initial-id="selected.id"
     @close="selected = undefined"
   />
@@ -119,75 +102,66 @@ watch(
 <style scoped>
 .media {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
   margin-top: 12px;
+}
+.media:has(.item:only-child) {
+  grid-template-columns: 1fr;
 }
 .item {
   margin: 0;
   min-width: 0;
 }
 .frame {
-  display: block;
-  width: 100%;
-  background: none;
-}
-.media :deep(.image-shell img),
-.media :deep(.image-shell),
-.media video {
-  display: block;
-  width: 100%;
-  max-height: 46dvh;
-  object-fit: contain;
-  border-radius: 8px;
-  background: var(--fill);
-}
-.sensitive {
   position: relative;
-  display: grid;
-  place-items: center;
+  display: block;
   width: 100%;
-  min-height: 150px;
+  aspect-ratio: 1;
+  padding: 0;
   overflow: hidden;
-  isolation: isolate;
   border-radius: 8px;
   background: var(--fill);
-  font-size: 14px;
 }
-.sensitive :deep(.blurred) {
-  grid-area: 1 / 1;
-
+.frame .blurred {
   transform: scale(1.12);
-  pointer-events: none;
 }
-.sensitive video.blurred,
-.sensitive :deep(.blurred img) {
+.frame :deep(.blurred img),
+.frame :deep(.blurred video) {
   filter: blur(18px);
 }
+.play,
 .sensitive-label {
-  z-index: 1;
-  grid-area: 1 / 1;
-  padding: 8px 12px;
-  margin: 12px;
-  border-radius: 20px;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   background: rgba(0, 0, 0, 0.55);
-  color: #fff;
+  color: white;
+  pointer-events: none;
 }
-.notice {
+.play {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+}
+.sensitive-label {
+  width: max-content;
+  max-width: 95%;
+  padding: 8px;
+  border-radius: 20px;
+  font-size: 12px;
+}
+.notice,
+.download {
+  display: block;
   margin: 0;
   padding: 14px;
   border-radius: 8px;
   background: var(--fill);
   color: var(--subtle);
   font-size: 14px;
-}
-.download {
-  display: block;
-  padding: 14px 0;
-  font-size: 15px;
-}
-figcaption {
-  padding: 6px 2px;
-  font-size: 13px;
 }
 </style>

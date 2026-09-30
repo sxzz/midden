@@ -1,24 +1,24 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
-import { assetURL, type Asset } from '../api'
 import { readyMedia } from '../presentation'
-import ImageViewer from './ImageViewer.vue'
-import LoadingImage from './ui/LoadingImage.vue'
+import MediaPreview from './MediaPreview.vue'
+import MediaViewer from './MediaViewer.vue'
+import type { Asset } from '../api'
 const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>()
 const emit = defineEmits<{ open: [] }>()
 const selected = shallowRef<Asset>()
 const revealed = shallowRef<string[]>([])
-const images = computed(() =>
+const previews = computed(() =>
   media.value.filter(
     (asset) =>
-      asset.mime?.startsWith('image/') &&
+      (asset.mime?.startsWith('image/') || asset.mime?.startsWith('video/')) &&
       (!asset.sensitive ||
         props.showSensitive ||
         revealed.value.includes(asset.id)),
   ),
 )
 function view(asset: Asset) {
-  if (!asset.mime?.startsWith('image/')) {
+  if (!asset.mime?.startsWith('image/') && !asset.mime?.startsWith('video/')) {
     emit('open')
     return
   }
@@ -56,26 +56,28 @@ const overflow = computed(() => media.value.length - tiles.value.length)
           ? asset.sensitive && !showSensitive
             ? '查看敏感图片'
             : '放大图片'
-          : '查看收藏详情'
+          : asset.mime?.startsWith('video/')
+            ? asset.sensitive && !showSensitive
+              ? '查看敏感视频'
+              : '播放视频'
+            : '查看收藏详情'
       "
       :class="{ blurred: asset.sensitive && !showSensitive }"
       @click.stop="view(asset)"
     >
-      <LoadingImage
-        v-if="asset.mime?.startsWith('image/')"
-        :src="assetURL(asset)"
-        alt=""
-        loading="lazy"
-        decoding="async"
-      />
-      <video
-        v-else-if="asset.mime?.startsWith('video/')"
-        :src="`${assetURL(asset)}#t=0.1`"
-        muted
-        playsinline
-        preload="metadata"
+      <MediaPreview
+        v-if="
+          asset.mime?.startsWith('image/') || asset.mime?.startsWith('video/')
+        "
+        :asset="asset"
       />
       <span v-else class="veil">文件</span>
+      <span
+        v-if="asset.mime?.startsWith('video/')"
+        class="play"
+        aria-hidden="true"
+        >▶</span
+      >
       <span v-if="asset.sensitive && !showSensitive" class="sensitive-label"
         >敏感</span
       >
@@ -84,9 +86,9 @@ const overflow = computed(() => media.value.length - tiles.value.length)
       >
     </button>
   </span>
-  <ImageViewer
+  <MediaViewer
     v-if="selected"
-    :images="images"
+    :assets="previews"
     :initial-id="selected.id"
     @close="selected = undefined"
   />
@@ -139,6 +141,9 @@ const overflow = computed(() => media.value.length - tiles.value.length)
   color: var(--subtle);
 }
 .play {
+  position: absolute;
+  color: white;
+  pointer-events: none;
   font-size: 16px;
 }
 .more {

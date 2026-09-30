@@ -132,6 +132,7 @@ type SourceResponse struct {
 	Body           []byte    `json:"-"`
 }
 type Collection struct {
+	StorageBytes   int64        `json:"storage_bytes"`
 	AuthorName     string       `json:"author_name,omitempty"`
 	PublishedAt    string       `json:"published_at,omitempty"`
 	Summary        string       `json:"summary,omitempty"`

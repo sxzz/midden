@@ -14,6 +14,7 @@ export interface Entity {
   assets?: Asset[]
 }
 export interface Collection {
+  storage_bytes?: number
   id: string
   url: string
   text: string

@@ -181,6 +181,8 @@ export function groupCollections(
   now = new Date(),
   sort?: string,
 ) {
+  if (sort === 'storage')
+    return items.length ? [{ label: '全部收藏', items }] : []
   const groups: CollectionGroup[] = []
   for (const item of items) {
     const label = groupLabel(
@@ -234,4 +236,16 @@ export function warningList(list?: string[] | null) {
 export function excerpt(text: string, limit = 120) {
   const flat = text.replaceAll(/\s+/g, ' ').trim()
   return flat.length > limit ? `${flat.slice(0, limit)}…` : flat
+}
+
+export function storageSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let value = bytes / 1024
+  let index = 0
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024
+    index++
+  }
+  return `${value.toFixed(1)} ${units[index]}`
 }

@@ -1,18 +1,31 @@
 <script setup vapor lang="ts">
-import { useTemplateRef, watchEffect } from 'vue'
+import {
+  onActivated,
+  onDeactivated,
+  shallowRef,
+  useTemplateRef,
+  watchEffect,
+} from 'vue'
 import ListButton from './ListButton.vue'
 import ListSection from './ListSection.vue'
 
 const props = defineProps<{ loading: boolean; error: string }>()
 const emit = defineEmits<{ more: [] }>()
+const active = shallowRef(true)
+onActivated(() => {
+  active.value = true
+})
+onDeactivated(() => {
+  active.value = false
+})
 const sentinel = useTemplateRef<HTMLDivElement>('sentinel')
 
 watchEffect(
   (cleanup) => {
-    if (!sentinel.value || props.loading || props.error) return
+    if (!active.value || !sentinel.value || props.loading || props.error) return
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
+        if (active.value && entries.some((entry) => entry.isIntersecting)) {
           observer.disconnect()
           emit('more')
         }

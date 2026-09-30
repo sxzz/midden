@@ -14,7 +14,8 @@
   },
   "dependencies": {
     "photoswipe": "^5.4.4",
-    "vue": "3.6.0-rc.9"
+    "vue": "3.6.0-rc.9",
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

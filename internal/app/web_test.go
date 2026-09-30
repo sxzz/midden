@@ -67,6 +67,51 @@ func TestWebCollection(t *testing.T) {
 	if _, err := s.Collections(ctx, a.TenantID, CollectionFilter{EntityType: "invalid type"}, ""); !errors.Is(err, ErrInvalidFilter) {
 		t.Fatal(err)
 	}
+
+	// Storage order must remain stable across pages, including equal-sized items.
+	for i, job := range jobs {
+		_, e = admin.Pool.Exec(ctx, `UPDATE revisions SET content_bytes=$2 WHERE collection_id=$1`, job.CollectionID, (i/2)*100)
+		must(t, e)
+	}
+	for _, order := range []string{"asc", "desc"} {
+		filter := CollectionFilter{Sort: "storage", Order: order, Media: "image,text"}
+		first, err := s.Collections(ctx, a.TenantID, filter, "")
+		must(t, err)
+		if len(first.Items) != 20 || first.Next == "" {
+			t.Fatal(first)
+		}
+		second, err := s.Collections(ctx, a.TenantID, filter, first.Next)
+		must(t, err)
+		all := append(first.Items, second.Items...)
+		if len(all) != 22 || second.Next != "" {
+			t.Fatalf("storage pagination: %d", len(all))
+		}
+		seen := map[string]bool{}
+		for i, item := range all {
+			if seen[item.ID] {
+				t.Fatal("duplicate storage result")
+			}
+			seen[item.ID] = true
+			if i > 0 {
+				previous := all[i-1]
+				less := previous.StorageBytes < item.StorageBytes || (previous.StorageBytes == item.StorageBytes && previous.ID < item.ID)
+				if (order == "asc") != less {
+					t.Fatal("incorrect storage ordering")
+				}
+			}
+			detail, err := s.SavedCollection(ctx, a.TenantID, item.ID)
+			must(t, err)
+			if detail.StorageBytes != item.StorageBytes {
+				t.Fatal("detail storage differs")
+			}
+		}
+		if _, err = s.Collections(ctx, a.TenantID, CollectionFilter{Sort: "captured"}, first.Next); err == nil {
+			t.Fatal("storage cursor accepted for another sort")
+		}
+	}
+	if _, err := s.Collections(ctx, a.TenantID, CollectionFilter{Media: "image,invalid"}, ""); !errors.Is(err, ErrInvalidFilter) {
+		t.Fatal("invalid media accepted")
+	}
 	page, e := s.Collections(ctx, a.TenantID, CollectionFilter{Q: "中文", Media: "text", Visibility: "public"}, "")
 	must(t, e)
 	if len(page.Items) != 20 || page.Next == "" {
