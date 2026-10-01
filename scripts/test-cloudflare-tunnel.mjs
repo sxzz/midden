@@ -154,3 +154,23 @@ test("missing GUI login session fails without installing partial files", (t) => 
   );
   assert.ok(!existsSync(join(f.home, ".cloudflared")));
 });
+
+test("routes only the deploy webhook path to the webhook port", (t) => {
+  const f = fixture(t);
+  const result = installTunnel(
+    { ...f.options, prepareOnly: true, deployWebhookPort: 18090 },
+    f.runtime,
+  );
+  const config = readFileSync(result.configPath, "utf8");
+  const webhook = config.indexOf('path: "^/hooks/deploy$"');
+  assert.ok(webhook > 0 && webhook < config.indexOf("127.0.0.1:18080"));
+  assert.match(config, /service: http:\/\/127\.0\.0\.1:18090/);
+  assert.throws(
+    () =>
+      installTunnel(
+        { ...f.options, prepareOnly: true, deployWebhookPort: 70000 },
+        f.runtime,
+      ),
+    /deploy webhook port/,
+  );
+});

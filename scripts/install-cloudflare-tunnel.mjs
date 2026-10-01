@@ -43,6 +43,7 @@ export function installTunnel(options, runtime = {}) {
     credentials,
     prepareOnly = false,
     home = homedir(),
+    deployWebhookPort,
   } = options;
   const run = runtime.run ?? spawnSync;
   const platform = runtime.platform ?? process.platform;
@@ -61,6 +62,15 @@ export function installTunnel(options, runtime = {}) {
     throw new Error(
       "Provide a DNS hostname without scheme, port, path or wildcard.",
     );
+  if (
+    deployWebhookPort !== undefined &&
+    !(
+      Number.isInteger(deployWebhookPort) &&
+      deployWebhookPort > 0 &&
+      deployWebhookPort < 65536
+    )
+  )
+    throw new Error("Provide a valid deploy webhook port.");
   if (
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
       tunnelID ?? "",
@@ -110,7 +120,12 @@ export function installTunnel(options, runtime = {}) {
   const configPath = join(directory, "config.yml");
   const credentialsPath = join(directory, "credentials.json");
   const plistPath = join(agents, `${label}.plist`);
-  const config = `tunnel: ${JSON.stringify(tunnelID)}\ncredentials-file: ${JSON.stringify(credentialsPath)}\ningress:\n  - hostname: ${JSON.stringify(hostname.toLowerCase())}\n    service: http://127.0.0.1:18080\n  - service: http_status:404\n`;
+  // The deploy webhook exposes exactly one path; everything else reaches core.
+  const webhook =
+    deployWebhookPort === undefined
+      ? ""
+      : `  - hostname: ${JSON.stringify(hostname.toLowerCase())}\n    path: "^/hooks/deploy$"\n    service: http://127.0.0.1:${deployWebhookPort}\n`;
+  const config = `tunnel: ${JSON.stringify(tunnelID)}\ncredentials-file: ${JSON.stringify(credentialsPath)}\ningress:\n${webhook}  - hostname: ${JSON.stringify(hostname.toLowerCase())}\n    service: http://127.0.0.1:18080\n  - service: http_status:404\n`;
   const args = [
     binary,
     "--no-autoupdate",
@@ -184,9 +199,11 @@ if (
       if (flags[index] === "--prepare-only") options.prepareOnly = true;
       else if (flags[index] === "--cloudflared" && flags[index + 1])
         options.cloudflared = flags[++index];
+      else if (flags[index] === "--deploy-webhook-port" && flags[index + 1])
+        options.deployWebhookPort = Number(flags[++index]);
       else
         throw new Error(
-          "Usage: node scripts/install-cloudflare-tunnel.mjs <hostname> <tunnel-uuid> <credentials.json> [--prepare-only] [--cloudflared /path/to/cloudflared]",
+          "Usage: node scripts/install-cloudflare-tunnel.mjs <hostname> <tunnel-uuid> <credentials.json> [--prepare-only] [--cloudflared /path/to/cloudflared] [--deploy-webhook-port PORT]",
         );
     }
     const result = installTunnel(options);

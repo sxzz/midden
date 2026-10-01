@@ -29,6 +29,19 @@ chmod +x ~/deploy-midden.sh
 
 升级前先停止 Core 和 Telegram，再备份并迁移。首次从内嵌 Bot 升级时，按数据库中已有 Bot 配置启用独立 Telegram；已有独立渠道保持原启停状态。渠道 ID 自动写入 `.env`。Core 健康检查通过后才启动 Telegram，并检查启动后是否退出或重启。脚本不设置公网域名或覆盖 `web_app_url`。
 
+### 自动部署
+
+服务器可在镜像发布后自动部署。GitHub 在 `images` 工作流完成后发送 `workflow_run` webhook，本机接收服务校验签名，确认是 main 分支 push 触发且构建成功，再从 `origin/main` 取出 `deploy-latest.sh` 执行。webhook 内容只是触发信号：部署的版本仍由脚本从 GHCR 和 `origin/main` 确定，伪造或重放的请求最多重新检查一次最新发布版本。最新版本已经部署时不会停止服务；部署期间收到的多次触发合并为一次复查。
+
+```sh
+node scripts/install-deploy-webhook.mjs ~/midden            # LaunchAgent org.midden.deploy-webhook，监听 127.0.0.1:18090
+node scripts/install-cloudflare-tunnel.mjs <hostname> <tunnel-uuid> <credentials.json> --deploy-webhook-port 18090
+```
+
+安装脚本生成 `.local/deploy-webhook.secret`（仅当前用户可读），并把接收服务复制到 `~/.local/share/midden/`，避免部署切换版本时影响正在运行的服务。tunnel 只把 `https://<hostname>/hooks/deploy` 转给接收服务，其余请求仍到 Core。随后在 GitHub 仓库 Settings → Webhooks 添加：Payload URL 为该地址，Content type 为 `application/json`，Secret 为密钥文件内容，事件只选 Workflow runs。
+
+在 `.env` 设置 `DEPLOY_NOTIFY_CHAT_ID=<Telegram 用户 ID>` 后，每次部署成功、失败或未能开始时，由数据库中配置的 Bot 只向该用户发送结果；失败消息包含出错阶段，数据库备份位置见部署日志。每次部署的完整输出保存在 `.local/deploy-webhook/`。启用前确认 main 上尚未部署的提交可以上线：下一次镜像发布会一并部署它们。
+
 已有部署运行 `./scripts/deploy.sh --pull`：fast-forward 拉取当前分支，下载该提交对应的镜像，停止 Core 和 Telegram 后导出数据库，再执行迁移并启动 Adapter、Core 和原先启用的 Telegram。服务器不执行镜像构建。如果 CI 尚未发布对应镜像，拉取失败，旧服务继续运行。迁移失败时保持核心停止，修复后重新部署。成功后将本次镜像标签写入 `.env`，日常重启保持相同版本。
 
 仓库及镜像公开，服务器可以匿名 HTTPS 拉取。`.env`、S3 凭据和备份不纳入 Git。若部署进程被强制终止，确认没有部署仍在运行后可删除空目录 `.local/deploy.lock` 再重试。`.local/deploy-telegram-state` 保留未完成部署的渠道启用状态，重试时读取，成功后自动删除。
