@@ -174,7 +174,7 @@ func TestPublicSharing(t *testing.T) {
 	if n != 2 {
 		t.Fatal("revision duplication", n)
 	}
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM blobs WHERE visibility='public' AND hash=$1`, store.Hash(img.String())).Scan(&n))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM blobs WHERE hash=$1`, store.Hash(img.String())).Scan(&n))
 	if n != 1 {
 		t.Fatal("public blob duplication", n)
 	}
@@ -182,7 +182,7 @@ func TestPublicSharing(t *testing.T) {
 		t.Fatal("unchanged images uploaded again", mem.puts.Load())
 	}
 	for _, tenant := range []string{a, b} {
-		must(t, s.Collect(ctx, tenant, 0))
+		must(t, s.Collect(ctx, 0))
 		u, err := s.Usage(ctx, tenant)
 		must(t, err)
 		if u.Reserved != 0 {
@@ -251,14 +251,12 @@ func TestPublicSharing(t *testing.T) {
 	_, e = admin.Pool.Exec(ctx, `UPDATE tenants SET quota_bytes=1073741824 WHERE id=$1`, a)
 	must(t, e)
 
-	// Same target and image under a private provider are isolated from public and other tenants.
+	// Private observations are readable only by tenants with access; stored bytes are shared.
 	private := *s
 	private.Adapter = &fakeAdapter{text: "secret", urls: []string{h.URL}}
-	pj, e := private.Submit(ctx, a, domain.CaptureInput{URL: target})
+	privateTarget := "https://x.com/a/status/91000000005"
+	pj, e := private.Submit(ctx, a, domain.CaptureInput{URL: privateTarget})
 	must(t, e)
-	if pj.CollectionID == j.CollectionID {
-		t.Fatal("private/public merged")
-	}
 	s.Adapter = private.Adapter
 	complete(pj)
 	s.Adapter = fake
@@ -273,29 +271,35 @@ func TestPublicSharing(t *testing.T) {
 	if _, e = s.Asset(ctx, b, pa.Assets[0].ID); e == nil {
 		t.Fatal("private asset exposed")
 	}
-	if pa.Assets[0].Key == old.Assets[0].Key {
-		t.Fatal("private/public blob merged")
+	if pa.Assets[0].Key != old.Assets[0].Key {
+		t.Fatal("identical media bytes stored twice")
 	}
-	p2, e := private.Submit(ctx, b, domain.CaptureInput{URL: target})
+	// Without an account to prove access, the other tenant observes it itself.
+	p2, e := private.Submit(ctx, b, domain.CaptureInput{URL: privateTarget})
 	must(t, e)
-	if p2.CollectionID == pj.CollectionID {
-		t.Fatal("private tenants merged")
+	if p2.CollectionID != pj.CollectionID || p2.ID == pj.ID {
+		t.Fatal("private observation did not join the stored object")
 	}
 	s.Adapter = private.Adapter
 	complete(p2)
 	s.Adapter = fake
 	pbCollection, e := s.Collection(ctx, b, p2.CollectionID)
 	must(t, e)
-	if pbCollection.Assets[0].Key == pa.Assets[0].Key {
-		t.Fatal("private image shared across tenants")
+	if pbCollection.RevisionID == pa.RevisionID {
+		t.Fatal("tenant read another tenant's private observation")
 	}
-	// RLS rejects fabricated links even when the attacker knows a private UUID.
-	e = db.Tx(ctx, b, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO tenant_collections(tenant_id,collection_id,provider_id,adapter_id) VALUES($1,$2,'fixture','fixture')`, b, pj.CollectionID)
+	// A fabricated link to a known UUID yields no content.
+	var stranger string
+	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO tenants DEFAULT VALUES RETURNING id`).Scan(&stranger))
+	must(t, db.Tx(ctx, stranger, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO tenant_collections(tenant_id,collection_id,provider_id,adapter_id) VALUES($1,$2,'fixture','fixture')`, stranger, pj.CollectionID)
 		return err
-	})
-	if e == nil {
-		t.Fatal("private collection link accepted")
+	}))
+	if _, e = s.Collection(ctx, stranger, pj.CollectionID); e == nil {
+		t.Fatal("fabricated link exposed private content")
+	}
+	if _, e = s.Asset(ctx, stranger, pa.Assets[0].ID); e == nil {
+		t.Fatal("fabricated link exposed private media")
 	}
 	e = db.Tx(ctx, b, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `INSERT INTO submissions(tenant_id,capture_id,idem_key,fingerprint) VALUES($1,$2,'forged','forged')`, b, pj.ID)
@@ -331,17 +335,12 @@ func TestPublicSharing(t *testing.T) {
 	if n != 0 {
 		t.Fatal("unreferenced collection not removed")
 	}
-	for _, tenant := range []string{a, b, c} {
-		must(t, s.Collect(ctx, tenant, 0))
-	}
+	must(t, s.Collect(ctx, 0))
 	if _, e = s.Collection(ctx, b, j.CollectionID); e == nil {
 		t.Fatal("orphan collection remained")
 	}
 	_, e = s.Asset(ctx, a, pa.Assets[0].ID)
 	must(t, e)
-	if _, e = s.Asset(ctx, b, pbCollection.Assets[0].ID); e == nil {
-		t.Fatal("deleting the logical collection retained its private-scope asset")
-	}
 	_, e = s.Asset(ctx, b, secondCollection.Assets[0].ID)
 	must(t, e)
 	if _, e = mem.Get(ctx, secondCollection.Assets[0].Key); e != nil {

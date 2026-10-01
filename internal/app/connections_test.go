@@ -117,18 +117,21 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 		t.Helper()
 		j, e := s.Submit(ctx, tenant, in)
 		must(t, e)
-		must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: j.ID}))
-		var media []domain.Asset
-		must(t, db.Tx(ctx, tenant, func(tx pgx.Tx) error { var err error; media, err = assets(ctx, tx, j.ID); return err }))
-		for _, asset := range media {
-			must(t, s.download(ctx, store.Task{Tenant: tenant, ID: asset.ID}))
+		if j.State != "complete" && j.State != "partial" {
+			must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: j.ID}))
+			var media []domain.Asset
+			must(t, db.Tx(ctx, tenant, func(tx pgx.Tx) error { var err error; media, err = assets(ctx, tx, j.ID); return err }))
+			for _, asset := range media {
+				must(t, s.download(ctx, store.Task{Tenant: tenant, ID: asset.ID}))
+			}
+			must(t, s.finalize(ctx, tenant, j.ID))
 		}
-		must(t, s.finalize(ctx, tenant, j.ID))
 		j, e = s.Job(ctx, tenant, j.ID)
 		must(t, e)
 		return j
 	}
 	public := complete(tenants[0], domain.CaptureInput{URL: "https://x.com/a/status/900111"})
+	// Content another source already stored is shared rather than fetched again.
 	personal := complete(tenants[1], domain.CaptureInput{URL: "https://x.com/a/status/900111", ConnectionID: ids[1]})
 	if public.CollectionID != personal.CollectionID {
 		t.Fatal("public result not merged")
@@ -136,9 +139,9 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	var count int
 	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM revisions WHERE collection_id=$1`, public.CollectionID).Scan(&count))
 	if count != 1 {
-		t.Fatal("unchanged account result added version", count)
+		t.Fatal("reused content added a version", count)
 	}
-	// A stale public result fetched with an account must restart in private staging.
+	// A stale result fetched with an account starts private until classified.
 	s.Config.Rate++ // Allow the additional regression capture in this scenario.
 	_, e = admin.Pool.Exec(ctx, `UPDATE collections SET observed_at=now()-interval '1 hour' WHERE id=$1`, personal.CollectionID)
 	must(t, e)
@@ -151,6 +154,10 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	}
 	must(t, s.capture(ctx, store.Task{Tenant: tenants[1], ID: staleCapture.ID}))
 	must(t, s.finalize(ctx, tenants[1], staleCapture.ID))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM revisions WHERE collection_id=$1`, public.CollectionID).Scan(&count))
+	if count != 1 {
+		t.Fatal("unchanged account result added version", count)
+	}
 	refresh, e := s.Submit(ctx, tenants[0], domain.CaptureInput{RefreshID: public.CollectionID})
 	must(t, e)
 	if refresh.ConnectionID != "" || refresh.ProviderID != "fxtwitter" {
@@ -162,63 +169,56 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	if refreshed.ConnectionID != ids[1] {
 		t.Fatal("refresh lost account selection")
 	}
+	// A private observation is another version of the same stored object,
+	// readable only by tenants that proved access.
 	fake.public = false
 	fake.text = "private content"
 	fake.urls = []string{mediaServer.URL}
 	private := complete(tenants[1], domain.CaptureInput{RefreshID: personal.CollectionID})
-	if private.CollectionID == public.CollectionID {
-		t.Fatal("visibility changed in place")
-	}
-	if _, e = s.Collection(ctx, tenants[0], private.CollectionID); e == nil {
-		t.Fatal("private collection exposed")
+	if private.CollectionID != public.CollectionID {
+		t.Fatal("private observation stored a second copy")
 	}
 	original, e := s.Collection(ctx, tenants[0], public.CollectionID)
 	must(t, e)
-	if original.Text != "same content" {
-		t.Fatal("private refresh overwrote public content")
-	}
-	second, e := s.ImportConnection(ctx, tenants[1], "", "second", &pb.Credential{Data: []byte("second-account")})
-	must(t, e)
-	another := complete(tenants[1], domain.CaptureInput{URL: "https://x.com/a/status/900111", ConnectionID: second})
-	if another.CollectionID == private.CollectionID {
-		t.Fatal("different connections merged private content")
-	}
-	var privateBlobs int
-	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM blobs WHERE tenant_id=$1 AND visibility='private'`, tenants[1]).Scan(&privateBlobs))
-	if privateBlobs != 2 {
-		t.Fatal("private blobs were merged across connections", privateBlobs)
-	}
-	fake.public = true
-	restored := complete(tenants[1], domain.CaptureInput{RefreshID: private.CollectionID})
-	if restored.CollectionID != public.CollectionID {
-		t.Fatal("public refresh did not merge content identity")
-	}
-	must(t, db.Tx(ctx, tenants[1], func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT count(*) FROM tenant_collections WHERE collection_id=$1`, private.CollectionID).Scan(&count)
-	}))
-	if count != 1 {
-		t.Fatal("public refresh discarded completed private history")
+	if original.Text != "same content" || original.Visibility != "public" {
+		t.Fatal("private version exposed to a tenant without access", original.Text)
 	}
 	history, e := s.Collection(ctx, tenants[1], private.CollectionID)
 	must(t, e)
-	if history.Text != "private content" || len(history.Assets) != 1 {
-		t.Fatal("private historical content or media was lost", history)
+	if history.Text != "private content" || len(history.Assets) != 1 || history.Visibility != "private" {
+		t.Fatal("private version or media missing for the fetching tenant", history)
+	}
+	// Another account of the same tenant reuses the version it can already read.
+	second, e := s.ImportConnection(ctx, tenants[1], "", "second", &pb.Credential{Data: []byte("second-account")})
+	must(t, e)
+	another := complete(tenants[1], domain.CaptureInput{URL: "https://x.com/a/status/900111", ConnectionID: second})
+	if another.CollectionID != private.CollectionID {
+		t.Fatal("different connections stored separate copies")
+	}
+	var blobs int
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM blobs b WHERE EXISTS(SELECT FROM assets a JOIN captures c ON c.id=a.capture_id WHERE a.blob_id=b.id AND c.collection_id=$1)`, private.CollectionID).Scan(&blobs))
+	if blobs != 1 {
+		t.Fatal("media bytes stored more than once", blobs)
+	}
+	// The same content observed publicly becomes readable by everyone.
+	fake.public = true
+	restored := complete(tenants[1], domain.CaptureInput{RefreshID: private.CollectionID})
+	if restored.CollectionID != public.CollectionID {
+		t.Fatal("public refresh changed content identity")
+	}
+	published, e := s.Collection(ctx, tenants[0], public.CollectionID)
+	must(t, e)
+	if published.Text != "private content" || published.Visibility != "public" {
+		t.Fatal("publicly observed content not shared", published.Text, published.Visibility)
 	}
 	mergedPage, e := s.Collections(ctx, tenants[1], CollectionFilter{}, "")
 	must(t, e)
 	if len(mergedPage.Items) != 1 {
-		t.Fatal("cross-scope history appeared as duplicate library entries", len(mergedPage.Items))
+		t.Fatal("history appeared as duplicate library entries", len(mergedPage.Items))
 	}
-	// Another refresh must keep the completed private history saved.
 	complete(tenants[1], domain.CaptureInput{RefreshID: restored.CollectionID})
-	must(t, db.Tx(ctx, tenants[1], func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT count(*) FROM tenant_collections WHERE collection_id=$1`, private.CollectionID).Scan(&count)
-	}))
-	if count != 1 {
-		t.Fatal("subsequent refresh discarded old private history")
-	}
 	if _, e = s.Collection(ctx, tenants[1], another.CollectionID); e != nil {
-		t.Fatal("unrelated private scope lost")
+		t.Fatal("saved collection lost")
 	}
 	fake.public = false
 	fake.urls = nil

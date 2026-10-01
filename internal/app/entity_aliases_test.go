@@ -102,18 +102,17 @@ func TestCanonicalEntityAliasLinks(t *testing.T) {
 	check(a, profile.CollectionID)
 	finish(b, "https://notes.test/collection/"+stable)
 	check(b, profile.CollectionID)
-	// Cross-scope snapshots of an accessible identity link to the saved profile.
+	// Entities are shared by identity and link to the tenant's saved profile.
 	// Different platforms and entity kinds remain distinct.
 	for _, external := range []string{alias, stable} {
-		for _, variant := range []struct{ platform, scope, visibility, kind string }{
-			{"different", "public", "public", "directory.person"},
-			{"notes", "different", "public", "directory.person"},
-			{"notes", "public", "private", "directory.person"},
-			{"notes", "public", "public", "directory.other"},
+		for _, variant := range []struct{ platform, kind string }{
+			{"different", "directory.person"},
+			{"notes", "directory.person"},
+			{"notes", "directory.other"},
 		} {
 			var id string
 			must(t, db.Tx(ctx, a, func(tx pgx.Tx) error {
-				err := tx.QueryRow(ctx, `INSERT INTO entities(tenant_id,visibility,platform,scope,kind,external_id) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(data_scope,platform,scope,kind,external_id) DO UPDATE SET observed_at=now() RETURNING id`, a, variant.visibility, variant.platform, variant.scope, variant.kind, external).Scan(&id)
+				err := tx.QueryRow(ctx, `INSERT INTO entities(platform,kind,external_id) VALUES($1,$2,$3) ON CONFLICT(platform,kind,external_id) DO UPDATE SET observed_at=now() RETURNING id`, variant.platform, variant.kind, external).Scan(&id)
 				if err != nil {
 					return err
 				}
@@ -126,22 +125,10 @@ func TestCanonicalEntityAliasLinks(t *testing.T) {
 					want = profile.CollectionID
 				}
 				if c.Graph.Entities[0].SavedCollectionID != want {
-					t.Fatal("unexpected cross-scope alias link", variant, c.Graph.Entities[0].SavedCollectionID)
+					t.Fatal("unexpected alias link", variant, c.Graph.Entities[0].SavedCollectionID)
 				}
 				return nil
 			}))
-			if variant.visibility == "private" {
-				must(t, db.Tx(ctx, b, func(tx pgx.Tx) error {
-					c := domain.Collection{Graph: &domain.EntityGraph{Entities: []domain.Entity{{ID: id}}}}
-					if err := linkSavedEntities(ctx, tx, &c); err != nil {
-						return err
-					}
-					if c.Graph.Entities[0].SavedCollectionID != "" {
-						t.Fatal("foreign private source entity leaked")
-					}
-					return nil
-				}))
-			}
 		}
 	}
 

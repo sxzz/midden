@@ -17,7 +17,7 @@ func collectionsByID(ctx context.Context, tx pgx.Tx, ids []string) (map[string]d
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,a.visibility,r.id,r.payload,r.capture_id,a.observed_at,a.created_at FROM collections a JOIN revisions r ON r.id=a.current_revision WHERE a.id=ANY($1::uuid[])`, ids)
+	rows, err := tx.Query(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,r.visibility,r.visibility,r.id,r.payload,r.capture_id,a.observed_at,a.created_at FROM collections a CROSS JOIN LATERAL (SELECT head.* FROM revisions head WHERE head.collection_id=a.id ORDER BY head.created_at DESC,head.id DESC LIMIT 1) r WHERE a.id=ANY($1::uuid[])`, ids)
 	if err != nil {
 		return nil, err
 	}

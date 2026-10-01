@@ -254,30 +254,12 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			return e
 		}
 		// Serialize all submissions for one content identity, including different tenants.
-		dataScope := "00000000-0000-0000-0000-000000000000"
-		if visibility == "private" {
-			dataScope = tenant
-		}
-		if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1))`, dataScope+"|"+target.Platform+"|"+scope+"|"+target.Kind+"|"+target.ObjectScope+"|"+target.ExternalID); e != nil {
+		if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1))`, target.Platform+"|"+target.Kind+"|"+target.ObjectScope+"|"+target.ExternalID); e != nil {
 			return e
 		}
-		if aid == "" && in.ConnectionID != "" {
-			e = tx.QueryRow(ctx, `SELECT a.id FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.tenant_id=$1 AND c.connection_id=$2 AND a.external_id=$3 AND a.platform=$4 AND a.kind=$5 AND a.object_scope=$6 AND c.state IN('queued','downloading') LIMIT 1`, tenant, in.ConnectionID, target.ExternalID, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
-			if e != nil && !errors.Is(e, pgx.ErrNoRows) {
-				return e
-			}
-		}
-		if aid == "" && in.ConnectionID != "" && in.RefreshID == "" {
-			e = tx.QueryRow(ctx, `SELECT a.id FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE a.external_id=$1 AND t.connection_id=$2 AND a.platform=$3 AND a.kind=$4 AND a.object_scope=$5 AND a.current_revision IS NOT NULL ORDER BY t.created_at DESC LIMIT 1`, target.ExternalID, in.ConnectionID, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
-			if e != nil && !errors.Is(e, pgx.ErrNoRows) {
-				return e
-			}
-		}
 		if aid == "" {
-			e = tx.QueryRow(ctx, `SELECT id FROM collections WHERE data_scope=$1 AND platform=$4 AND scope=$2 AND kind=$5 AND object_scope=$6 AND external_id=$3`, dataScope, scope, target.ExternalID, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
-			if errors.Is(e, pgx.ErrNoRows) {
-				e = tx.QueryRow(ctx, `INSERT INTO collections(tenant_id,visibility,external_id,url,provider_id,scope,platform,kind,object_scope) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, tenant, visibility, target.ExternalID, target.URL, in.ProviderID, scope, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
-			}
+			// One collection per adapter object, whichever source stored it.
+			e = tx.QueryRow(ctx, `INSERT INTO collections(external_id,url,provider_id,platform,kind,object_scope) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(platform,kind,object_scope,external_id) DO UPDATE SET unreferenced_at=collections.unreferenced_at RETURNING id`, target.ExternalID, target.URL, in.ProviderID, target.Platform, target.Kind, target.ObjectScope).Scan(&aid)
 			if e != nil {
 				return e
 			}
@@ -304,9 +286,26 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		}
 
 		var cid string
+		mode := "fetch"
 		e = tx.QueryRow(ctx, `SELECT id FROM captures WHERE collection_id=$1 AND provider_id=$2 AND coalesce(connection_id::text,'')=$3 AND adapter_id=$4 AND state IN('queued','downloading') AND page_cursor=$5 AND (NOT $6 OR NOT automatic) AND page_size=$7`, aid, in.ProviderID, in.ConnectionID, desc.AdapterId, in.PageCursor, target.Collection && !in.Automatic, in.PageSize).Scan(&cid)
 		if errors.Is(e, pgx.ErrNoRows) && !recheck && in.PageCursor == "" && in.RefreshID == "" && (in.Automatic || !target.RefreshOnSubmit) {
-			e = tx.QueryRow(ctx, `SELECT r.capture_id FROM collections a JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1 AND ($2::bigint=0 OR a.observed_at > now()-make_interval(secs=>$2::double precision))`, aid, in.RefreshAfterSeconds).Scan(&cid)
+			// Reuse the newest version this tenant can read. When another source
+			// stored a newer version this tenant cannot read yet, an account can
+			// prove access instead of fetching the content again.
+			var visible *string
+			var hidden, fresh bool
+			if e = tx.QueryRow(ctx, `SELECT r.capture_id,has_hidden_revision(a.id),$2::bigint=0 OR a.observed_at > now()-make_interval(secs=>$2::double precision) FROM collections a LEFT JOIN LATERAL (SELECT head.* FROM revisions head WHERE head.collection_id=a.id ORDER BY head.created_at DESC,head.id DESC LIMIT 1) r ON TRUE WHERE a.id=$1`, aid, in.RefreshAfterSeconds).Scan(&visible, &hidden, &fresh); e != nil {
+				return e
+			}
+			switch {
+			case fresh && hidden && in.ConnectionID != "" && adapter.Supports(policy, adapter.CaptureAccess, 1, 0):
+				mode = "check"
+				e = pgx.ErrNoRows
+			case fresh && visible != nil:
+				cid = *visible
+			default:
+				e = pgx.ErrNoRows
+			}
 		}
 		if errors.Is(e, pgx.ErrNoRows) {
 			var unlimited bool
@@ -329,23 +328,8 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			if _, e = tx.Exec(ctx, `UPDATE tenants SET rate_count=$2,rate_start=$3 WHERE id=$1`, tenant, count+1, start); e != nil {
 				return e
 			}
-			captureCollection, refreshFrom := aid, in.RefreshID
-			var collectionVisibility string
-			if e = tx.QueryRow(ctx, `SELECT visibility FROM collections WHERE id=$1`, aid).Scan(&collectionVisibility); e != nil {
-				return e
-			}
-			if collectionVisibility != visibility {
-				// Cached account results can be public, but a new account capture must
-				// start private until the adapter classifies the fetched content.
-				e = tx.QueryRow(ctx, `INSERT INTO collections(tenant_id,visibility,external_id,url,provider_id,scope,platform,kind,object_scope) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(data_scope,platform,scope,kind,object_scope,external_id) DO UPDATE SET unreferenced_at=NULL RETURNING id`, tenant, visibility, target.ExternalID, target.URL, in.ProviderID, scope, target.Platform, target.Kind, target.ObjectScope).Scan(&captureCollection)
-				if e != nil {
-					return e
-				}
-				if refreshFrom == "" {
-					refreshFrom = aid
-				}
-			}
-			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,collection_id,provider_id,scope,visibility,connection_id,refresh_from,adapter_id,automatic,page_cursor,is_collection,page_size) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid,$8,$9,$10,$11,$12) RETURNING id`, tenant, captureCollection, in.ProviderID, scope, visibility, in.ConnectionID, refreshFrom, desc.AdapterId, in.Automatic, in.PageCursor, target.Collection && !in.Automatic, in.PageSize).Scan(&cid)
+			// Account captures start private until the adapter classifies the result.
+			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,collection_id,provider_id,scope,visibility,connection_id,refresh_from,adapter_id,automatic,page_cursor,is_collection,page_size,mode) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid,$8,$9,$10,$11,$12,$13) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility, in.ConnectionID, in.RefreshID, desc.AdapterId, in.Automatic, in.PageCursor, target.Collection && !in.Automatic, in.PageSize, mode).Scan(&cid)
 			if e != nil {
 				return e
 			}
@@ -526,7 +510,7 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
 		if anchor != nil {
 			var x string
-			if err := tx.QueryRow(ctx, `SELECT a.id FROM collections a JOIN tenant_collections t ON t.collection_id=a.id WHERE a.id=$1 AND a.current_revision IS NOT NULL`, *anchor).Scan(&x); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT a.id FROM collections a JOIN tenant_collections t ON t.collection_id=a.id WHERE a.id=$1 AND visible_head(a.id) IS NOT NULL`, *anchor).Scan(&x); err != nil {
 				return err
 			}
 		}
@@ -534,7 +518,7 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 		if backwards {
 			comparison, order = ">", "ASC"
 		}
-		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT a.id FROM collections a JOIN tenant_collections t ON t.collection_id=a.id WHERE `+latestIdentitySQL+` AND a.current_revision IS NOT NULL AND ($1::uuid IS NULL OR (t.created_at,a.id)%s(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$1)) ORDER BY t.created_at %s,a.id %s LIMIT 10`, comparison, order, order), anchor)
+		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT a.id FROM collections a JOIN tenant_collections t ON t.collection_id=a.id WHERE `+latestIdentitySQL+` AND visible_head(a.id) IS NOT NULL AND ($1::uuid IS NULL OR (t.created_at,a.id)%s(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$1)) ORDER BY t.created_at %s,a.id %s LIMIT 10`, comparison, order, order), anchor)
 		if err != nil {
 			return err
 		}
@@ -558,8 +542,8 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 		if len(ids) > 0 {
 			var previous, next bool
 			err := tx.QueryRow(ctx, `SELECT
-				EXISTS(SELECT 1 FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE `+latestIdentitySQL+` AND a.current_revision IS NOT NULL AND (t.created_at,a.id)>(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$1)),
-				EXISTS(SELECT 1 FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE `+latestIdentitySQL+` AND a.current_revision IS NOT NULL AND (t.created_at,a.id)<(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$2))`, ids[0], ids[len(ids)-1]).Scan(&previous, &next)
+				EXISTS(SELECT 1 FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE `+latestIdentitySQL+` AND visible_head(a.id) IS NOT NULL AND (t.created_at,a.id)>(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$1)),
+				EXISTS(SELECT 1 FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE `+latestIdentitySQL+` AND visible_head(a.id) IS NOT NULL AND (t.created_at,a.id)<(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$2))`, ids[0], ids[len(ids)-1]).Scan(&previous, &next)
 			if err != nil {
 				return err
 			}
@@ -606,7 +590,7 @@ func (s *Service) CaptureCollection(ctx context.Context, t, cid string) (a domai
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
 		var raw []byte
 		var assetCapture string
-		err := tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,a.visibility,r.id,r.payload,r.capture_id,a.observed_at,a.created_at FROM captures c JOIN collections a ON a.id=c.collection_id JOIN revisions r ON r.id=c.revision_id WHERE c.id=$1`, cid).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &raw, &assetCapture, &a.ObservedAt, &a.CreatedAt)
+		err := tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,r.visibility,r.visibility,r.id,r.payload,r.capture_id,a.observed_at,a.created_at FROM captures c JOIN collections a ON a.id=c.collection_id JOIN revisions r ON r.id=c.revision_id WHERE c.id=$1`, cid).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &raw, &assetCapture, &a.ObservedAt, &a.CreatedAt)
 		if err != nil {
 			return err
 		}

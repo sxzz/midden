@@ -265,10 +265,14 @@ func TestMetadataRawIsolationAndRetention(t *testing.T) {
 	f.entityTypes[1].Name = "weather.station"
 	one := finish(tenants[0], domain.CaptureInput{URL: "https://x.com/a/status/99190013"})
 	two := finish(tenants[2], domain.CaptureInput{URL: "https://x.com/a/status/99190013"})
-	if author(one).ID == author(two).ID {
-		t.Fatal("private entities merged across tenants")
+	// Entity identities are shared; each tenant reads them through its own access.
+	if author(one).ID != author(two).ID {
+		t.Fatal("entity identity stored twice")
 	}
-	if _, err := s.Entity(ctx, tenants[2], author(one).ID); err == nil {
+	if _, err := s.Entity(ctx, tenants[2], author(one).ID); err != nil {
+		t.Fatal("entity unreadable for a tenant that fetched it", err)
+	}
+	if _, err := s.Entity(ctx, tenants[1], author(one).ID); err == nil {
 		t.Fatal("private entity leaked")
 	}
 	for _, entity := range one.Graph.Entities {

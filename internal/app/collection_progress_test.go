@@ -112,7 +112,7 @@ func TestCollectionProgressAndMore(t *testing.T) {
 	// Multiple missing resources with the same cause are reported once per capture.
 	_, e = admin.Pool.Exec(ctx, "UPDATE captures SET state='partial' WHERE id=$1", child)
 	must(t, e)
-	_, e = admin.Pool.Exec(ctx, `INSERT INTO assets(tenant_id,visibility,capture_id,position,source_url,kind,state,error) VALUES($1,'public',$2,0,'https://media.test/one','image','failed','storage quota exceeded'),($1,'public',$2,1,'https://media.test/two','video','failed','storage quota exceeded')`, tenant, child)
+	_, e = admin.Pool.Exec(ctx, `INSERT INTO assets(capture_id,position,source_url,kind,state,error) VALUES($1,0,'https://media.test/one','image','failed','storage quota exceeded'),($1,1,'https://media.test/two','video','failed','storage quota exceeded')`, child)
 	must(t, e)
 	c = collectionData(t, s, tenant, sid)
 	if len(c.Reasons) != 1 || c.Reasons[0].Count != 1 || c.Reasons[0].Reason != "storage quota exceeded" {

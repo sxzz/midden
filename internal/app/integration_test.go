@@ -337,8 +337,11 @@ func TestIntegration(t *testing.T) {
 		t.Fatal(e)
 	}
 	// Image storage, interrupted upload, dedup and quota reservations.
+	// Stored bytes are shared globally, so use content no other test uploads.
 	var imageData bytes.Buffer
-	must(t, png.Encode(&imageData, image.NewRGBA(image.Rect(0, 0, 2, 2))))
+	uniqueImage := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	copy(uniqueImage.Pix, uuid.New().String())
+	must(t, png.Encode(&imageData, uniqueImage))
 	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.Write(imageData.Bytes())
@@ -375,9 +378,9 @@ func TestIntegration(t *testing.T) {
 	if u.Reserved != 0 {
 		t.Fatal("leaked reservation")
 	}
-	must(t, s.Collect(ctx, imageTenant, 0))
+	must(t, s.Collect(ctx, 0))
 	must(t, db.Tx(ctx, imageTenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT count(*) FROM blobs WHERE tenant_id=$1 AND visibility='private'`, imageTenant).Scan(&n)
+		return tx.QueryRow(ctx, `SELECT count(*) FROM blobs WHERE hash=$1`, imgArc.Assets[0].Hash).Scan(&n)
 	}))
 	if n != 1 {
 		t.Fatal("file not deduplicated")
@@ -415,6 +418,10 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("quota race: %+v", smallUsage)
 	}
 	// A worker killed on its final attempt is reconciled from River's terminal state.
+	// New bytes force an upload instead of reusing the stored blob.
+	imageData.Reset()
+	copy(uniqueImage.Pix, uuid.New().String())
+	must(t, png.Encode(&imageData, uniqueImage))
 	crashTenant := newTenant()
 	crashed, e := s.Submit(ctx, crashTenant, domain.CaptureInput{URL: "https://x.com/a/status/32"})
 	must(t, e)

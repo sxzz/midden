@@ -18,7 +18,7 @@ func (s *Service) SavePublicCollection(ctx context.Context, tenant, id string) (
 	if s.Registry != nil || len(s.adapterBindings()) > 0 {
 		var raw string
 		err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-			return tx.QueryRow(ctx, "SELECT url FROM collections WHERE id=$1 AND visibility='public'", id).Scan(&raw)
+			return tx.QueryRow(ctx, "SELECT url FROM collections WHERE id=$1 AND visible_head(id) IS NOT NULL", id).Scan(&raw)
 		})
 		if err != nil {
 			return false, err
@@ -42,7 +42,7 @@ func (s *Service) SavePublicCollection(ctx context.Context, tenant, id string) (
 			return err
 		}
 		var collection string
-		if err := tx.QueryRow(ctx, `SELECT id FROM collections WHERE id=$1 AND visibility='public' AND current_revision IS NOT NULL FOR UPDATE`, id).Scan(&collection); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT id FROM collections WHERE id=$1 AND visible_head(id) IS NOT NULL FOR UPDATE`, id).Scan(&collection); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return domain.ErrNotFound
 			}

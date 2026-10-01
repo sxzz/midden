@@ -84,10 +84,10 @@ func TestWebCollection(t *testing.T) {
 			if i == 0 {
 				payload.Graph.Relations = []domain.EntityRelation{{Source: "root", Target: "author", Type: "authored_by"}}
 			}
-			if err := persistEntities(ctx, tx, a.TenantID, cid, &payload, nil); err != nil {
+			if err := persistEntities(ctx, tx, cid, &payload, nil); err != nil {
 				return err
 			}
-			if err := linkEntities(ctx, tx, a.TenantID, cid, rid, payload.Graph); err != nil {
+			if err := linkEntities(ctx, tx, rid, payload.Graph); err != nil {
 				return err
 			}
 			raw, err := json.Marshal(payload)
@@ -373,7 +373,7 @@ func TestWebCollection(t *testing.T) {
 		if i == 1 {
 			purpose = "avatar"
 		}
-		_, e = admin.Pool.Exec(ctx, `INSERT INTO assets(tenant_id,visibility,capture_id,position,source_url,purpose,kind,state,sensitive) SELECT $1,rv.visibility,rv.capture_id,99,'https://example.test/sensitive.png',$3,'image','ready',TRUE FROM revisions rv JOIN collections c ON c.current_revision=rv.id WHERE c.id=$2`, a.TenantID, job.CollectionID, purpose)
+		_, e = admin.Pool.Exec(ctx, `INSERT INTO assets(capture_id,position,source_url,purpose,kind,state,sensitive) SELECT rv.capture_id,99,'https://example.test/sensitive.png',$2,'image','ready',TRUE FROM revisions rv JOIN collections c ON c.current_revision=rv.id WHERE c.id=$1`, job.CollectionID, purpose)
 		must(t, e)
 	}
 	for value, want := range map[string]string{"contains": marked[0].CollectionID, "not_contains": marked[1].CollectionID} {

@@ -63,32 +63,12 @@ func (s *Service) Maintain(ctx context.Context) error {
 	if _, e = s.DB.Pool.Exec(ctx, `SELECT collect_unreferenced_collections((SELECT value::bigint FROM config WHERE key='collection_retention_days') * interval '1 day')`); e != nil {
 		return e
 	}
-	rows, e = s.DB.Pool.Query(ctx, `SELECT tenant_id FROM garbage_tenants()`)
-	if e != nil {
-		return e
-	}
-	var tenants []string
-	for rows.Next() {
-		var id string
-		if e = rows.Scan(&id); e != nil {
-			rows.Close()
-			return e
-		}
-		tenants = append(tenants, id)
-	}
-	e = rows.Err()
-	rows.Close()
-	if e != nil {
-		return e
-	}
 	var graceHours int64
 	if e = s.DB.Pool.QueryRow(ctx, `SELECT value::bigint FROM config WHERE key='object_gc_grace_hours'`).Scan(&graceHours); e != nil {
 		return e
 	}
-	for _, id := range tenants {
-		if e = s.Collect(ctx, id, time.Duration(graceHours)*time.Hour); e != nil {
-			return e
-		}
+	if e = s.Collect(ctx, time.Duration(graceHours)*time.Hour); e != nil {
+		return e
 	}
 	rows, e = s.DB.Pool.Query(ctx, `SELECT queue,state,count(*) FROM river_job GROUP BY queue,state`)
 	if e != nil {

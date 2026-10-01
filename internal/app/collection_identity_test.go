@@ -43,16 +43,20 @@ func TestCollectionIdentityHistory(t *testing.T) {
 	public := capture("https://x.com/i/status/734510001")
 	fake.public = false
 	fake.text = "private snapshot"
-	private := capture("https://x.com/i/status/734510002")
-	// This is deliberately a non-X identity: grouping is a core identity rule.
-	_, err = admin.Pool.Exec(ctx, `UPDATE collections SET platform='fixture',kind='account',external_id=$3,observed_at=CASE WHEN id=$1 THEN '2026-01-01'::timestamptz ELSE '2026-01-02'::timestamptz END WHERE id IN ($1,$2)`, public, private, owner)
+	// A private observation is a version of the same stored object.
+	job, err := s.Submit(ctx, owner, domain.CaptureInput{RefreshID: public})
 	must(t, err)
+	must(t, s.capture(ctx, store.Task{Tenant: owner, ID: job.ID}))
+	must(t, s.finalize(ctx, owner, job.ID))
+	if job.CollectionID != public {
+		t.Fatal("private observation stored a second copy")
+	}
 	_, err = admin.Pool.Exec(ctx, `INSERT INTO tenant_collections(tenant_id,collection_id,provider_id,adapter_id) VALUES($1,$2,'fxtwitter','fixture')`, other, public)
 	must(t, err)
 	page, err := s.Collections(ctx, owner, CollectionFilter{}, "")
 	must(t, err)
-	if len(page.Items) != 1 || page.Items[0].ID != private || page.Items[0].Text != "private snapshot" {
-		t.Fatalf("identity not grouped: %+v", page)
+	if len(page.Items) != 1 || page.Items[0].ID != public || page.Items[0].Text != "private snapshot" {
+		t.Fatalf("latest readable version not shown: %+v", page)
 	}
 	var tag string
 	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO tags(tenant_id,name) VALUES($1,'older-source') RETURNING id`, owner).Scan(&tag))
@@ -60,31 +64,36 @@ func TestCollectionIdentityHistory(t *testing.T) {
 	must(t, err)
 	tagged, err := s.Collections(ctx, owner, CollectionFilter{Tag: tag}, "")
 	must(t, err)
-	if len(tagged.Items) != 1 || tagged.Items[0].ID != private {
-		t.Fatalf("older scope tag did not match logical collection: %+v", tagged)
+	if len(tagged.Items) != 1 || tagged.Items[0].ID != public {
+		t.Fatalf("tag did not match collection: %+v", tagged)
 	}
 	recent, err := s.Recent(ctx, owner, "")
 	must(t, err)
-	if len(recent.Items) != 1 || recent.Items[0].ID != private {
-		t.Fatalf("recent not grouped: %+v", recent)
+	if len(recent.Items) != 1 || recent.Items[0].ID != public {
+		t.Fatalf("recent mismatch: %+v", recent)
 	}
 	detail, err := s.SavedCollection(ctx, owner, public)
 	must(t, err)
 	if detail.Text != "private snapshot" || detail.StorageBytes != page.Items[0].StorageBytes {
-		t.Fatalf("old deep link did not resolve latest snapshot: %+v", detail)
+		t.Fatalf("detail did not resolve latest snapshot: %+v", detail)
 	}
 	history, err := s.Revisions(ctx, owner, public, "")
 	must(t, err)
 	if len(history.Items) != 2 {
-		t.Fatalf("history missing scopes: %+v", history)
+		t.Fatalf("history missing versions: %+v", history)
 	}
+	var privateRevision string
 	for _, revision := range history.Items {
 		old, err := s.Revision(ctx, owner, public, revision.ID)
 		must(t, err)
 		if old.StorageBytes != detail.StorageBytes {
 			t.Fatalf("history storage mismatch")
 		}
+		if old.Visibility == "private" {
+			privateRevision = revision.ID
+		}
 	}
+	// A tenant without access reads only the public version of the same object.
 	publicDetail, err := s.SavedCollection(ctx, other, public)
 	must(t, err)
 	if publicDetail.Text != "public snapshot" || publicDetail.StorageBytes >= detail.StorageBytes {
@@ -95,13 +104,13 @@ func TestCollectionIdentityHistory(t *testing.T) {
 	if len(otherHistory.Items) != 1 {
 		t.Fatalf("private history leaked: %+v", otherHistory)
 	}
-	if _, err := s.SavedCollection(ctx, other, private); err == nil {
-		t.Fatal("foreign deep link accepted")
+	if _, err := s.Revision(ctx, other, public, privateRevision); err == nil {
+		t.Fatal("private revision readable without access")
 	}
 	must(t, db.Tx(ctx, owner, func(tx pgx.Tx) error {
 		ids, err := savedIdentityIDs(ctx, tx, public)
-		if len(ids) != 2 {
-			t.Fatalf("expected two saved scopes, got %v", ids)
+		if len(ids) != 1 {
+			t.Fatalf("expected one stored copy, got %v", ids)
 		}
 		return err
 	}))
@@ -151,7 +160,7 @@ func TestRelatedHistoryAndAliases(t *testing.T) {
 		{Key: "mention", Type: "x.profile", ExternalId: "name:fixture_friend", DataJson: []byte(`{"username":"fixture_friend"}`), ContextOnly: true},
 	}, Relations: []*pb.EntityRelation{{Source: "post", Target: "mention", Type: "mentions"}}}
 	mention := capture(domain.CaptureInput{URL: "https://x.com/i/status/734520003"})
-	_, err = admin.Pool.Exec(ctx, `INSERT INTO collection_identity_aliases(tenant_id,visibility,platform,scope,kind,object_scope,external_id,collection_id) SELECT tenant_id,visibility,platform,scope,kind,object_scope,'name:fixture_friend',id FROM collections WHERE id=$1`, profile)
+	_, err = admin.Pool.Exec(ctx, `INSERT INTO collection_identity_aliases(platform,kind,object_scope,external_id,collection_id) SELECT platform,kind,object_scope,'name:fixture_friend',id FROM collections WHERE id=$1`, profile)
 	must(t, err)
 	related, err := s.Collections(ctx, owner, CollectionFilter{RelatedTo: profile, EntityType: "x.post"}, "")
 	must(t, err)

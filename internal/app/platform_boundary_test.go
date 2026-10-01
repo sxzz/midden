@@ -66,8 +66,10 @@ func TestIndependentPlatformCapture(t *testing.T) {
 	must(t, admin.Pool.QueryRow(ctx, "INSERT INTO tenants DEFAULT VALUES RETURNING id").Scan(&other))
 	connection, e := s.ImportConnection(ctx, tenant, "", "Notes", &pb.Credential{Data: []byte("opaque notes session")})
 	must(t, e)
+	// Content is shared by identity across tenants; isolate this test's objects.
+	unique := tenant[:8]
 	var first string
-	for i, host := range []string{"notes.test", "second.test"} {
+	for i, host := range []string{"notes-" + unique + ".test", "second-" + unique + ".test"} {
 		j, e := s.Submit(ctx, tenant, domain.CaptureInput{URL: "https://" + host + "/entry/item-A", ConnectionID: connection})
 		must(t, e)
 		must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: j.ID}))
@@ -97,7 +99,7 @@ func TestIndependentPlatformCapture(t *testing.T) {
 	must(t, s.finalize(ctx, other, j.ID))
 	// Session results may become private without changing target normalization.
 	fake.public = false
-	j, e = s.Submit(ctx, tenant, domain.CaptureInput{URL: "https://private.test/entry/item-A", ConnectionID: connection})
+	j, e = s.Submit(ctx, tenant, domain.CaptureInput{URL: "https://private-" + unique + ".test/entry/item-A", ConnectionID: connection})
 	must(t, e)
 	must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: j.ID}))
 	must(t, s.finalize(ctx, tenant, j.ID))
@@ -111,7 +113,7 @@ func TestIndependentPlatformCapture(t *testing.T) {
 // Production core never interprets bundled platform protocols. Channel files
 // may provide platform-specific UX; SQL migrations retain deployed history.
 func TestCorePlatformBoundary(t *testing.T) {
-	files := []string{"service.go", "worker.go", "related.go", "capture_scope.go", "discovery.go", "connections.go", "channel_actions.go", "channel_api.go", "channel_legacy.go", "download.go", "media_cache.go", "entities.go", "sources.go", "../domain/domain.go", "../credentials/vault.go", "../../api/adapter/v1/adapter.proto"}
+	files := []string{"service.go", "worker.go", "related.go", "capture_scope.go", "access.go", "discovery.go", "connections.go", "channel_actions.go", "channel_api.go", "channel_legacy.go", "download.go", "media_cache.go", "entities.go", "sources.go", "../domain/domain.go", "../credentials/vault.go", "../../api/adapter/v1/adapter.proto"}
 	for _, file := range files {
 		data, e := os.ReadFile(file)
 		must(t, e)

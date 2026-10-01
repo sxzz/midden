@@ -61,7 +61,7 @@ func TestCollectionsBatch(t *testing.T) {
 	}
 	// Exercise resource grouping and position ordering without external downloads.
 	for _, id := range ids[:2] {
-		_, err = admin.Pool.Exec(ctx, `INSERT INTO assets(capture_id,tenant_id,visibility,position,source_url,purpose,kind,alt_text) SELECT r.capture_id,$2,'public',pos,'https://example.test/image','','image',$1::text FROM revisions r CROSS JOIN unnest(ARRAY[2,0]) pos WHERE r.collection_id=$1::uuid`, id, tenants[0])
+		_, err = admin.Pool.Exec(ctx, `INSERT INTO assets(capture_id,position,source_url,purpose,kind,alt_text) SELECT r.capture_id,pos,'https://example.test/image','','image',$1::text FROM revisions r CROSS JOIN unnest(ARRAY[2,0]) pos WHERE r.collection_id=$1::uuid`, id)
 		must(t, err)
 	}
 	for _, tenant := range tenants {

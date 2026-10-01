@@ -27,7 +27,7 @@ func main() {
 
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: monitorctl config-list | config-set KEY VALUE | storage-init | migrate | tenant-create | tenant-unlimited TENANT on|off | token-create TENANT | token-revoke TOKEN_ID | channel-create UUID BOT_ID | app-password")
+		return fmt.Errorf("usage: monitorctl config-list | config-set KEY VALUE | storage-init | migrate | tenant-create | tenant-delete TENANT | tenant-unlimited TENANT on|off | token-create TENANT | token-revoke TOKEN_ID | channel-create UUID BOT_ID | app-password")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -49,6 +49,18 @@ func run() error {
 		return connectionCommand(ctx, db, os.Args[1:])
 	}
 	switch os.Args[1] {
+	case "tenant-delete":
+		if len(os.Args) != 3 {
+			return fmt.Errorf("tenant-delete TENANT")
+		}
+		if _, err := uuid.Parse(os.Args[2]); err != nil {
+			return fmt.Errorf("invalid tenant ID")
+		}
+		if err := db.DeleteTenant(ctx, os.Args[2]); err != nil {
+			return err
+		}
+		fmt.Println("tenant deleted")
+		return nil
 	case "tenant-unlimited":
 		if len(os.Args) != 4 || (os.Args[3] != "on" && os.Args[3] != "off") {
 			return fmt.Errorf("tenant-unlimited TENANT on|off")

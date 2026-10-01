@@ -66,7 +66,7 @@ func TestRelatedCollectionsRequireDirectRootEdges(t *testing.T) {
 	profileExternal := uuid.NewString()
 	profile := capture("collection", profileExternal)
 	alias := "handle:synthetic_friend_" + uuid.NewString()
-	_, err = admin.Pool.Exec(ctx, `INSERT INTO collection_identity_aliases(tenant_id,visibility,platform,scope,kind,object_scope,external_id,collection_id) SELECT tenant_id,visibility,platform,scope,kind,object_scope,$2,id FROM collections WHERE id=$1`, profile, alias)
+	_, err = admin.Pool.Exec(ctx, `INSERT INTO collection_identity_aliases(platform,kind,object_scope,external_id,collection_id) SELECT platform,kind,object_scope,$2,id FROM collections WHERE id=$1`, profile, alias)
 	must(t, err)
 	entity := func(key, kind, external string) *pb.Entity {
 		return &pb.Entity{Key: key, Type: kind, ExternalId: external, DataJson: []byte(`{}`), ContextOnly: key != "root"}
@@ -92,7 +92,7 @@ func TestRelatedCollectionsRequireDirectRootEdges(t *testing.T) {
 	fixture.graph = &pb.EntityGraph{Root: "root", Entities: []*pb.Entity{entity("root", "document.entry", "")}}
 	repost := capture("entry", repostExternal)
 	repostAlias := "entry:synthetic_repost_" + uuid.NewString()
-	_, err = admin.Pool.Exec(ctx, `INSERT INTO collection_identity_aliases(tenant_id,visibility,platform,scope,kind,object_scope,external_id,collection_id) SELECT tenant_id,visibility,platform,scope,kind,object_scope,$2,id FROM collections WHERE id=$1`, repost, repostAlias)
+	_, err = admin.Pool.Exec(ctx, `INSERT INTO collection_identity_aliases(platform,kind,object_scope,external_id,collection_id) SELECT platform,kind,object_scope,$2,id FROM collections WHERE id=$1`, repost, repostAlias)
 	must(t, err)
 	containedExternal := uuid.NewString()
 	contained := capture("entry", containedExternal)

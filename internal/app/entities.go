@@ -109,12 +109,13 @@ func (s *Service) entityGraph(ctx context.Context, r *pb.FetchResponse) (*domain
 	return out, nil
 }
 
-func persistEntities(ctx context.Context, tx pgx.Tx, tenant, cid string, p *Payload, assets []domain.Asset) error {
+// Entities and their versions are shared by identity; revisions decide who reads them.
+func persistEntities(ctx context.Context, tx pgx.Tx, cid string, p *Payload, assets []domain.Asset) error {
 	if p.Graph == nil {
 		return nil
 	}
-	var visibility, scope, platform string
-	if err := tx.QueryRow(ctx, `SELECT c.visibility,a.scope,a.platform FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.id=$1`, cid).Scan(&visibility, &scope, &platform); err != nil {
+	var platform string
+	if err := tx.QueryRow(ctx, `SELECT a.platform FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.id=$1`, cid).Scan(&platform); err != nil {
 		return err
 	}
 	for i := range p.Graph.Entities {
@@ -133,27 +134,27 @@ func persistEntities(ctx context.Context, tx pgx.Tx, tenant, cid string, p *Payl
 		if err != nil {
 			return err
 		}
-		if err = tx.QueryRow(ctx, `INSERT INTO entities(tenant_id,visibility,scope,platform,kind,external_id) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(data_scope,platform,scope,kind,external_id) DO UPDATE SET observed_at=now() RETURNING id`, tenant, visibility, scope, platform, e.Type, e.ExternalID).Scan(&e.ID); err != nil {
+		if err = tx.QueryRow(ctx, `INSERT INTO entities(platform,kind,external_id) VALUES($1,$2,$3) ON CONFLICT(platform,kind,external_id) DO UPDATE SET observed_at=now() RETURNING id`, platform, e.Type, e.ExternalID).Scan(&e.ID); err != nil {
 			return err
 		}
-		if err = tx.QueryRow(ctx, `INSERT INTO entity_versions(entity_id,tenant_id,visibility,content_hash,data,schema) VALUES($1,$2,$3,encode(digest($4::jsonb::text,'sha256'),'hex'),$5,$6) ON CONFLICT(entity_id,content_hash) DO UPDATE SET content_hash=excluded.content_hash RETURNING id`, e.ID, tenant, visibility, body, e.Data, e.Schema).Scan(&e.VersionID); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT ensure_entity_version($1,$2::jsonb,$3,$4)`, e.ID, body, e.Data, e.Schema).Scan(&e.VersionID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func linkEntities(ctx context.Context, tx pgx.Tx, tenant, cid, rid string, g *domain.EntityGraph) error {
+func linkEntities(ctx context.Context, tx pgx.Tx, rid string, g *domain.EntityGraph) error {
 	if g == nil {
 		return nil
 	}
 	for _, e := range g.Entities {
-		if _, err := tx.Exec(ctx, `INSERT INTO revision_entities(revision_id,entity_key,entity_version_id,tenant_id,visibility,is_root) SELECT $1,$2,$3,$4,visibility,$5 FROM captures WHERE id=$6`, rid, e.Key, e.VersionID, tenant, e.Key == g.Root, cid); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO revision_entities(revision_id,entity_key,entity_version_id,is_root) VALUES($1,$2,$3,$4)`, rid, e.Key, e.VersionID, e.Key == g.Root); err != nil {
 			return err
 		}
 	}
 	for _, r := range g.Relations {
-		if _, err := tx.Exec(ctx, `INSERT INTO entity_relations(revision_id,source_key,target_key,kind,tenant_id,visibility) SELECT $1,$2,$3,$4,$5,visibility FROM captures WHERE id=$6`, rid, r.Source, r.Target, r.Type, tenant, cid); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO entity_relations(revision_id,source_key,target_key,kind) VALUES($1,$2,$3,$4)`, rid, r.Source, r.Target, r.Type); err != nil {
 			return err
 		}
 	}
@@ -236,10 +237,10 @@ func linkSavedEntities(ctx context.Context, tx pgx.Tx, collections ...*domain.Co
 	rows, err := tx.Query(ctx, `WITH candidates AS (
  SELECT source.id AS entity_id,c.id,tc.created_at,0 AS priority
  FROM entities source
- JOIN entities target ON (target.platform,target.kind,target.external_id)=(source.platform,source.kind,source.external_id)
- JOIN entity_versions ev ON ev.entity_id=target.id
+ JOIN entity_versions ev ON ev.entity_id=source.id
  JOIN revision_entities re ON re.entity_version_id=ev.id AND re.is_root
- JOIN collections c ON c.current_revision=re.revision_id
+ JOIN revisions rv ON rv.id=re.revision_id
+ JOIN collections c ON c.id=rv.collection_id AND visible_head(c.id)=rv.id
  JOIN tenant_collections tc ON tc.collection_id=c.id
  WHERE source.id=ANY($1::uuid[])
  UNION ALL
@@ -247,10 +248,10 @@ func linkSavedEntities(ctx context.Context, tx pgx.Tx, collections ...*domain.Co
  FROM entities source
  JOIN collection_identity_aliases alias ON alias.external_id=source.external_id
   AND alias.platform=source.platform
- JOIN collections c ON c.id=alias.collection_id AND c.platform=alias.platform AND c.scope=alias.scope
-  AND c.data_scope=alias.data_scope AND c.kind=alias.kind AND c.object_scope=alias.object_scope
+ JOIN collections c ON c.id=alias.collection_id AND c.platform=alias.platform
+  AND c.kind=alias.kind AND c.object_scope=alias.object_scope
  JOIN tenant_collections tc ON tc.collection_id=c.id
- JOIN revision_entities re ON re.revision_id=c.current_revision AND re.is_root
+ JOIN revision_entities re ON re.revision_id=visible_head(c.id) AND re.is_root
  JOIN entity_versions ev ON ev.id=re.entity_version_id
  JOIN entities target ON target.id=ev.entity_id AND target.kind=source.kind
   AND target.platform=source.platform

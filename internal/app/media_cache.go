@@ -10,9 +10,10 @@ import (
 	"monitor/internal/store"
 )
 
-// Reuse immutable provider media within its visibility and access scope.
+// Reuse immutable provider media stored by any capture. The adapter listed this
+// media for the current capture, so its account can already see these bytes.
 // The caller holds the media advisory lock until download or reuse completes.
-func (s *Service) reuseMedia(ctx context.Context, t store.Task, scope, accessScope, key string) (bool, error) {
+func (s *Service) reuseMedia(ctx context.Context, t store.Task, key string) (bool, error) {
 	hit := false
 	err := s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
 		if err := lockTenant(ctx, tx, t.Tenant); err != nil {
@@ -32,7 +33,7 @@ func (s *Service) reuseMedia(ctx context.Context, t store.Task, scope, accessSco
 		}
 		var bid, hash string
 		var size int64
-		err := tx.QueryRow(ctx, `SELECT b.id,b.hash,b.size FROM assets a JOIN blobs b ON b.id=a.blob_id WHERE a.data_scope=$1 AND a.cache_key=$2 AND a.state='ready' AND b.access_scope=$3 LIMIT 1`, scope, key, accessScope).Scan(&bid, &hash, &size)
+		err := tx.QueryRow(ctx, `SELECT id,hash,size FROM cached_blob($1)`, key).Scan(&bid, &hash, &size)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}

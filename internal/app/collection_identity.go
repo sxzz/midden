@@ -2,21 +2,18 @@ package app
 
 import (
 	"context"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
 
-// Storage scopes preserve source permissions; the tenant's library groups the
-// same adapter-declared object across those scopes into one logical collection.
-const savedIdentityMembersSQL = `SELECT member.id FROM collections requested
- JOIN tenant_collections saved_requested ON saved_requested.collection_id=requested.id
- JOIN collections member ON (member.platform,member.kind,member.object_scope,member.external_id)=(requested.platform,requested.kind,requested.object_scope,requested.external_id)
+// Content is stored once per adapter object, so a saved collection is its own
+// logical identity. These helpers keep library queries independent of that.
+const savedIdentityMembersSQL = `SELECT member.id FROM collections member
  JOIN tenant_collections saved_member ON saved_member.collection_id=member.id
- WHERE requested.id=$1`
+ WHERE member.id=$1`
 
 func savedIdentityIDs(ctx context.Context, tx pgx.Tx, id string) ([]string, error) {
-	rows, err := tx.Query(ctx, savedIdentityMembersSQL+` ORDER BY member.id`, id)
+	rows, err := tx.Query(ctx, savedIdentityMembersSQL, id)
 	if err != nil {
 		return nil, err
 	}
@@ -38,10 +35,9 @@ func savedIdentityIDs(ctx context.Context, tx pgx.Tx, id string) ([]string, erro
 	return ids, nil
 }
 
-// Used before paging, so duplicate source scopes never consume page slots.
-const latestIdentitySQL = `NOT EXISTS(SELECT FROM collections newer JOIN tenant_collections saved_newer ON saved_newer.collection_id=newer.id WHERE (newer.platform,newer.kind,newer.object_scope,newer.external_id)=(a.platform,a.kind,a.object_scope,a.external_id) AND newer.current_revision IS NOT NULL AND (newer.observed_at,newer.id)>(a.observed_at,a.id))`
+const latestIdentitySQL = `TRUE`
 
-var identityStorageSQL = `(SELECT COALESCE(SUM(` + strings.ReplaceAll(collectionStorageSQL, "a.id", "stored.id") + `),0)::bigint FROM collections stored JOIN tenant_collections saved_storage ON saved_storage.collection_id=stored.id WHERE (stored.platform,stored.kind,stored.object_scope,stored.external_id)=(a.platform,a.kind,a.object_scope,a.external_id))`
+var identityStorageSQL = collectionStorageSQL
 
 func savedIdentityStorage(ctx context.Context, tx pgx.Tx, id string) (int64, error) {
 	var bytes int64

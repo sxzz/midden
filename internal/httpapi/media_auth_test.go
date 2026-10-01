@@ -43,12 +43,12 @@ func TestMediaCacheAuthorization(t *testing.T) {
 		}
 	}
 	exec(`INSERT INTO tenants(id) VALUES($1),($2)`, tenant, other)
-	exec(`INSERT INTO collections(id,tenant_id,visibility,platform,kind,external_id,url,provider_id) VALUES($1,$2,'public','fixture','post',$1::uuid::text,'https://example.test/post','fixture')`, collection, tenant)
+	exec(`INSERT INTO collections(id,platform,kind,external_id,url,provider_id) VALUES($1,'fixture','post',$1::uuid::text,'https://example.test/post','fixture')`, collection)
 	exec(`INSERT INTO captures(id,tenant_id,visibility,collection_id,provider_id,scope,adapter_id,state) VALUES($1,$2,'public',$3,'fixture','public','fixture','complete')`, capture, tenant, collection)
-	exec(`INSERT INTO revisions(id,tenant_id,visibility,collection_id,capture_id,content_hash,payload,content_bytes) VALUES($1,$2,'public',$3,$4,'fixture','{}',2)`, revision, tenant, collection, capture)
+	exec(`INSERT INTO revisions(id,visibility,collection_id,capture_id,content_hash,payload,content_bytes) VALUES($1,'public',$2,$3,'fixture','{}',2)`, revision, collection, capture)
 	exec(`UPDATE collections SET current_revision=$2 WHERE id=$1`, collection, revision)
-	exec(`INSERT INTO blobs(id,tenant_id,visibility,hash,object_key,size,mime) VALUES($1,$2,'public',$3,$1::uuid::text,10,'image/png')`, blobID, tenant, hash)
-	exec(`INSERT INTO assets(id,tenant_id,visibility,capture_id,position,source_url,kind,state,blob_id) VALUES($1,$2,'public',$3,0,'https://example.test/image','image','ready',$4)`, asset, tenant, capture, blobID)
+	exec(`INSERT INTO blobs(id,hash,object_key,size,mime) VALUES($1,$2,$1::uuid::text,10,'image/png') ON CONFLICT(hash) DO NOTHING`, blobID, hash)
+	exec(`INSERT INTO assets(id,capture_id,position,source_url,kind,state,blob_id) VALUES($1,$2,0,'https://example.test/image','image','ready',(SELECT id FROM blobs WHERE hash=$3))`, asset, capture, hash)
 	exec(`INSERT INTO tenant_collections(tenant_id,collection_id,provider_id,adapter_id) VALUES($1,$2,'fixture','fixture')`, tenant, collection)
 	session, foreign, expired := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	exec(`INSERT INTO web_sessions(digest,tenant_id) VALUES($1,$2),($3,$4)`, store.Hash(session), tenant, store.Hash(foreign), other)

@@ -204,9 +204,9 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	defer release(c, t.Tenant, slot)
 	var automatic bool
 	var pageSize uint32
-	var url, id, provider, connection, scope, state, visibility, platform, kind, objectScope, pageCursor string
+	var url, id, provider, connection, scope, state, visibility, platform, kind, objectScope, pageCursor, mode, collectionID string
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT a.url,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),c.scope,c.state,c.visibility,a.platform,a.kind,a.object_scope,c.automatic,c.page_cursor,c.page_size FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.id=$1`, t.ID).Scan(&url, &id, &provider, &connection, &scope, &state, &visibility, &platform, &kind, &objectScope, &automatic, &pageCursor, &pageSize)
+		return tx.QueryRow(ctx, `SELECT a.url,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),c.scope,c.state,c.visibility,a.platform,a.kind,a.object_scope,c.automatic,c.page_cursor,c.page_size,c.mode,a.id FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.id=$1`, t.ID).Scan(&url, &id, &provider, &connection, &scope, &state, &visibility, &platform, &kind, &objectScope, &automatic, &pageCursor, &pageSize, &mode, &collectionID)
 	})
 	if e != nil {
 		return e
@@ -259,6 +259,10 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if _, e := s.requireProvider(ctx, provider, adapter.CaptureFetch); e != nil {
 		return e
 	}
+	if mode == "check" {
+		target := &pb.ObjectRef{Platform: platform, Kind: kind, ObjectScope: objectScope, ExternalId: id}
+		return s.checkAccess(ctx, t, collectionID, url, target, provider, connection, scope, credential, revision)
+	}
 	callCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	var trailer metadata.MD
@@ -269,6 +273,11 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if e != nil {
 		if connection != "" && status.Code(e) == codes.Unauthenticated {
 			s.markReauth(ctx, t.Tenant, connection, revision)
+		}
+		if connection != "" && accessDenied(e) {
+			if err := s.revokeAccess(ctx, t.Tenant, objectRef{platform, kind, objectScope, id}); err != nil {
+				return err
+			}
 		}
 		if values := trailer.Get("retry-after"); len(values) > 0 {
 			if n, _ := strconv.Atoi(values[0]); n > 0 && n <= 86400 {
@@ -368,14 +377,26 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		if e := validateExecution(ctx, tx, connection, revision); e != nil {
 			return e
 		}
-		if connection != "" || r.CanonicalTarget != nil {
-			if e := s.resolveCaptureScope(ctx, tx, t.Tenant, t.ID, visibility, r.CanonicalTarget); e != nil {
+		if r.CanonicalTarget != nil {
+			if e := s.resolveCaptureScope(ctx, tx, t.Tenant, t.ID, r.CanonicalTarget); e != nil {
 				return e
 			}
 		}
 		relatedJSON, _ := json.Marshal(r.RelatedTargets)
-		if _, e := tx.Exec(ctx, `UPDATE captures SET credential_revision=$2,related_targets=$3,next_page_cursor=$4,max_batch_size=$5 WHERE id=$1`, t.ID, revision, relatedJSON, r.NextPageCursor, r.MaxBatchSize); e != nil {
+		restricted := objectRefs(r.RestrictedTargets)
+		restrictedJSON, _ := json.Marshal(restricted)
+		if _, e := tx.Exec(ctx, `UPDATE captures SET credential_revision=$2,related_targets=$3,next_page_cursor=$4,max_batch_size=$5,visibility=$6,restricted_targets=$7 WHERE id=$1`, t.ID, revision, relatedJSON, r.NextPageCursor, r.MaxBatchSize, visibility, restrictedJSON); e != nil {
 			return e
+		}
+		// Whatever an account fetched, its tenant has proven it can see.
+		if connection != "" {
+			var root objectRef
+			if e := tx.QueryRow(ctx, `SELECT a.platform,a.kind,a.object_scope,a.external_id FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.id=$1`, t.ID).Scan(&root.Platform, &root.Kind, &root.ObjectScope, &root.ExternalID); e != nil {
+				return e
+			}
+			if e := grantAccess(ctx, tx, t.Tenant, connection, "fetch", append(restricted, root)); e != nil {
+				return e
+			}
 		}
 		if e := persistSources(ctx, tx, t.Tenant, t.ID, r); e != nil {
 			return e
@@ -395,14 +416,10 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 			var aid string
 			cacheKey := ""
 			if v.ImmutableKey != "" {
-				mediaScope := scope
-				if visibility == "public" {
-					mediaScope = "public"
-				}
-				key, _ := json.Marshal([]string{platform, mediaScope, v.ImmutableKey})
+				key, _ := json.Marshal([]string{platform, v.ImmutableKey})
 				cacheKey = store.Hash(string(key))
 			}
-			if e = tx.QueryRow(ctx, `INSERT INTO assets(tenant_id,capture_id,position,source_url,visibility,kind,cache_key,alt_text,sensitive,purpose) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, t.Tenant, t.ID, n, v.Url, visibility, v.Kind, cacheKey, v.AltText, v.Sensitive, v.Purpose).Scan(&aid); e != nil {
+			if e = tx.QueryRow(ctx, `INSERT INTO assets(capture_id,position,source_url,kind,cache_key,alt_text,sensitive,purpose) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, t.ID, n, v.Url, v.Kind, cacheKey, v.AltText, v.Sensitive, v.Purpose).Scan(&aid); e != nil {
 				return e
 			}
 			n++
@@ -462,7 +479,7 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		if p.Text == "" && good == 0 && p.Graph == nil {
 			return s.failCaptureTx(ctx, tx, tenant, cid, "no text or media could be saved")
 		}
-		if e = persistEntities(ctx, tx, tenant, cid, &p, aa); e != nil {
+		if e = persistEntities(ctx, tx, cid, &p, aa); e != nil {
 			return e
 		}
 		raw, _ = json.Marshal(p)
@@ -471,9 +488,10 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		if e = tx.QueryRow(ctx, `SELECT encode(digest($1::jsonb::text,'sha256'),'hex')`, digestData).Scan(&digest); e != nil {
 			return e
 		}
-		var previous *string
-		var previousID *string
-		e = tx.QueryRow(ctx, `SELECT r.content_hash,r.id FROM collections a LEFT JOIN revisions r ON r.id=a.current_revision WHERE a.id=$1`, aid).Scan(&previous, &previousID)
+		// Compare with the newest revision this tenant can read: equal content from
+		// any source is the same version for everyone who may see it.
+		var previous, previousID, previousVisibility *string
+		e = tx.QueryRow(ctx, `SELECT r.content_hash,r.id,r.visibility FROM collections a LEFT JOIN LATERAL (SELECT head.* FROM revisions head WHERE head.collection_id=a.id ORDER BY head.created_at DESC,head.id DESC LIMIT 1) r ON TRUE WHERE a.id=$1`, aid).Scan(&previous, &previousID, &previousVisibility)
 		if e != nil {
 			return e
 		}
@@ -506,13 +524,23 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 			}
 		}
 		revisionID := previousID
+		if previous != nil && *previous == digest && *previousVisibility == "private" {
+			if _, e = tx.Exec(ctx, `SELECT publish_revision($1,$2)`, *previousID, cid); e != nil {
+				return e
+			}
+		}
 		if previous == nil || *previous != digest {
 			var rid string
-			e = tx.QueryRow(ctx, `INSERT INTO revisions(tenant_id,collection_id,capture_id,content_hash,payload,content_bytes,visibility) SELECT $1,$2,$3,$4,$5,$6,visibility FROM captures WHERE id=$3 RETURNING id`, tenant, aid, cid, digest, raw, len(raw)).Scan(&rid)
+			e = tx.QueryRow(ctx, `INSERT INTO revisions(collection_id,capture_id,content_hash,payload,content_bytes,visibility) SELECT $1,$2,$3,$4,$5,visibility FROM captures WHERE id=$2 RETURNING id`, aid, cid, digest, raw, len(raw)).Scan(&rid)
 			if e != nil {
 				return e
 			}
-			if e = linkEntities(ctx, tx, tenant, cid, rid, p.Graph); e != nil {
+			// Restricted embedded objects gate this revision for tenants that only
+			// proved access to the root object.
+			if _, e = tx.Exec(ctx, `INSERT INTO revision_access_requirements(revision_id,platform,kind,object_scope,external_id) SELECT $1,x->>'platform',x->>'kind',x->>'object_scope',x->>'external_id' FROM captures c CROSS JOIN LATERAL jsonb_array_elements(c.restricted_targets) x WHERE c.id=$2 AND c.visibility='private' ON CONFLICT DO NOTHING`, rid, cid); e != nil {
+				return e
+			}
+			if e = linkEntities(ctx, tx, rid, p.Graph); e != nil {
 				return e
 			}
 			revisionID = &rid

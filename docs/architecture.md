@@ -43,9 +43,9 @@ Adapter 是运营者部署并认证的可信服务，Provider 和其返回的资
 
 ## 内容可见性
 
-Provider 在 `Describe` 中声明支持的 `visibilities`，由 `Fetch` 返回实际可见性。公共 API 只返回 public；账号任务在抓取前按租户、Connection 隔离，取得明确公开证据后才合并到公共收藏，否则按 private 保存。刷新改变可见性时建立对应作用域的内容身份，成功后移动发起租户的保存引用，不改变其他租户的权限。刷新选择保存在 `tenant_collections`，共享收藏不能成为借用其他租户凭据的入口。
+Provider 在 `Describe` 中声明支持的 `visibilities`，由 `Fetch` 返回实际可见性。公共 API 只返回 public。每个 Adapter 对象只保存一份内容：不论哪个租户、用哪个账号抓取，结果都成为同一收藏的历史版本，内容相同则复用版本。版本保留产生它的那次观察的可见性；账号抓取在取得明确公开证据前按 private 保存，之后同样内容被公开观察到时，该版本改为 public。刷新选择保存在 `tenant_collections`，共享收藏不能成为借用其他租户凭据的入口。
 
-`collections`、`captures`、`revisions`、`assets`、`blobs` 保存可见性，以及数据库生成的 `data_scope`：public 使用统一的全零 UUID，private 使用租户 UUID。因此公开内容在全局去重，私有内容只在同租户内去重，两者不复用版本或媒体。`tenant_id` 记录创建者，用于写入权限及对象生命周期管理，不决定保存者的额度计量。创建者和可见性创建后不可修改。
+内容不属于任何租户。public 版本对所有已认证租户可读；private 版本只对执行该次抓取的租户，以及在 `access_grants` 中证明过访问权的租户可读。授权按租户和对象身份记录，与使用哪个账号无关：账号抓取成功即为抓取的对象授权；已有账号的租户保存他人已存的受限内容时，先用 `CheckAccess` 只请求帖子元数据确认可见，再复用已存内容，不下载媒体、不另存副本。授权后可读该对象全部历史版本；账号访问被拒绝时记录 `revoked_at`，此前的版本继续可读，之后他人抓到的版本不可读。版本内嵌的非公开对象记录在 `revision_access_requirements`，租户需同时具备这些对象的访问权（或其已有公开版本）才能读取。额度仍按保存者计算，只计入该租户可读的版本。删除没有保存记录的租户（`monitorctl tenant-delete`）不影响他人可读的内容。
 
 公开收藏的当前版本指针全局共享，任意租户刷新成功后，所有保存者查看时得到新版本；已发送的 Telegram 内容消息不改写，也不向其他保存者广播。`tenant_collections` 记录各租户自己的保存记录。任务查询仅对执行租户或提交者开放。受限函数 `capture_deliveries` 让执行租户调度该任务各提交来源的投递，不开放其他租户的身份或会话数据。
 
@@ -57,7 +57,7 @@ Provider 在 `Describe` 中声明支持的 `visibilities`，由 `Fetch` 返回�
 2. 应用服务规范化帖子 URL，找到或创建 `collections`。已有收藏可直接返回；同一收藏进行中的采集合并到同一个 `captures`。
 3. 每次用户提交生成独立 `submissions`，记录身份、会话和幂等键。多个提交可以共享一次采集，但分别向各自来源投递。
 4. 采集 worker 调用 Adapter，保存文字、媒体链接及来源信息，创建媒体下载任务。
-5. 下载 worker 预留存储额度，下载并校验媒体，计算 SHA-256，上传 S3。公开媒体跨租户复用 Blob；私有媒体仅在所属租户内复用。
+5. 下载 worker 预留存储额度，下载并校验媒体，计算 SHA-256，上传 S3。媒体按 SHA-256 全局只存一份，任何抓取都复用已有 Blob；Blob 的读取仍需要可读的媒体引用。
 6. 资源全部到达终态后，收藏 worker 生成内容 hash。内容有变化则写入新 `revisions`；无变化则复用原版本并更新观察时间。
 7. channel 通过内部 HTTP 领取投递任务，对纯文字结果更新原状态消息；图文结果移除临时状态消息，以带说明的媒体或相册发送。已确认的消息和媒体批次进度经 HTTP 写回 core，供重试和重启后恢复。
 
@@ -126,13 +126,13 @@ Telegram 交互会在 `identities` 保存发送者的 `first_name`、`last_name`
 
 ### 媒体与对象
 
-| 表        | 作用与关键约束                                                                                 |
-| --------- | ---------------------------------------------------------------------------------------------- |
-| `assets`  | 某次采集中的媒体引用，保存顺序、来源 URL、下载状态、失败原因和 Blob／对象引用                  |
-| `blobs`   | 去重后的媒体内容，保存 SHA-256、对象 key、大小和 MIME；`(data_scope, access_scope, hash)` 唯一 |
-| `objects` | S3 对象的生命周期记录，状态为 `pending`、`attached`、`garbage` 或 `deleting`                   |
+| 表        | 作用与关键约束                                                                |
+| --------- | ----------------------------------------------------------------------------- |
+| `assets`  | 某次采集中的媒体引用，保存顺序、来源 URL、下载状态、失败原因和 Blob／对象引用 |
+| `blobs`   | 去重后的媒体内容，保存 SHA-256、对象 key、大小和 MIME；`hash` 唯一            |
+| `objects` | S3 对象的生命周期记录，状态为 `pending`、`attached`、`garbage` 或 `deleting`  |
 
-媒体字节放在 S3，PostgreSQL 保存索引和元数据。对象 key 形如 `<tenant_id>/objects/<object_id>`。
+媒体字节放在 S3，PostgreSQL 保存索引和元数据。新对象 key 形如 `objects/<object_id>`，此前上传的对象保留原 key。对象回收不区分租户。
 
 先记录待上传对象，再执行上传和落库。内容重复时复用已有 Blob，多余对象标记为垃圾；垃圾对象超过 `config.object_gc_grace_hours` 指定的最小存活时间后清理（默认 24 小时）。这样可以处理上传成功但数据库提交前进程中断的情况。
 
@@ -159,7 +159,7 @@ API 的 `used_bytes` 由 `tenant_usage()` 在当前租户 RLS 上下文中计算
 | `schema_migrations` | 已执行迁移的文件名、校验和与执行时间；管理员访问                                             |
 | `river_*`           | River 管理的任务、队列、调度和迁移记录                                                       |
 
-业务表启用并强制执行 RLS。身份、Connection、保存记录、提交与消息按租户隔离；内容允许已认证租户读取 public 数据，private 数据仅允许所属租户读取。内容关联外键使用 `data_scope`，渠道及账号关联外键使用 `tenant_id`。核心的 `monitor_app` 角色无超级用户、表所有者或 `BYPASSRLS` 权限。River 表是内部共享调度数据，由核心访问；用户通过业务 API 查询自己的任务。
+业务表启用并强制执行 RLS。身份、Connection、保存记录、访问授权、提交与消息按租户隔离；收藏、实体和 Blob 的身份行对已认证租户共享，版本、媒体引用、实体版本和关系按版本可读性控制，由 `SECURITY DEFINER` 函数 `tenant_can_read_revision` 判定；账号原始响应只对执行抓取的租户可读。核心的 `monitor_app` 角色无超级用户、表所有者或 `BYPASSRLS` 权限。River 表是内部共享调度数据，由核心访问；用户通过业务 API 查询自己的任务。
 
 ## Telegram 消息处理
 
@@ -184,7 +184,7 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 - `adapters/x/src/session.ts`：租户账号 transport 与结果可见性判定。
 - `adapters/x/src/`：公共 API 与个人账号 Provider；`third_party/atmosphere/`：固定上游版本的本地源码依赖。
 
-媒体引用保存 `kind`、`alt_text` 和 `cache_key`。缓存键由平台、最终访问作用域及不可变媒体标识组成；公开资源可跨 Provider 共享，私有作用域包含 Connection，在 `data_scope` 内查找；标识包含媒体 ID 与文件规格。下载使用媒体级锁合并并发请求，命中缓存后复用 Blob 并按当前租户引用结算额度。媒体描述计入版本内容大小及变化比较，描述变化不会触发视频重新下载。缓存随媒体引用的保留和清理生命周期释放。
+媒体引用保存 `kind`、`alt_text` 和 `cache_key`。缓存键由平台和不可变媒体标识组成，不含访问作用域：Adapter 为本次抓取列出该媒体，说明执行账号已能看到这些字节；标识包含媒体 ID 与文件规格。下载使用媒体级锁合并并发请求，命中缓存后复用 Blob 并按当前租户引用结算额度。媒体描述计入版本内容大小及变化比较，描述变化不会触发视频重新下载。缓存随媒体引用的保留和清理生命周期释放。
 
 群聊普通消息在入库和身份解析前检查 Telegram 的 mention／bot_command 实体，只有明确指向当前 Bot 用户名的消息才进入处理；图片说明中的 @ 同样适用。按钮回调沿用原权限规则，不要求再次 @。用户名通过启动时的 getMe 获取。
 
@@ -249,7 +249,7 @@ Adapter 的 `Describe.entity_types` 提供类型名与自包含 JSON Schema 2020
 
 `Fetch.graph` 包含 root、entities、relations。每个实体有图内 key、类型、外部 ID、JSON data 和资源索引；关系使用图内 key 与 Adapter 定义的关系名称。整张图继承采集结果的可见性与访问作用域，不能从图内引用其他租户或作用域的已有实体。资源的 purpose 由 Adapter 定义：空值表示加入通用展示，其余作为实体关联资源保存。核心只认识通用媒体类型，不解释 avatar 等角色。
 
-`entities` 以平台、访问作用域、类型和外部 ID 标识对象，公共实体跨租户共享，私有实体按租户隔离。`entity_versions` 保存数据、Schema 快照与内容哈希；实际资源内容参与版本比较。`revision_entities` 将收藏版本关联到当时的实体版本，并标记根节点；`entity_relations` 保存该次快照的关系，端点外键包含数据作用域。`GET /v1/entities/{id}` 读取调用租户所保存收藏关联的最新实体快照；收藏 API 内的 graph 固定关联当时版本。
+`entities` 以平台、类型和外部 ID 标识对象，全局只有一份；实体版本的数据只能通过可读的收藏版本读取。`entity_versions` 保存数据、Schema 快照与内容哈希；实际资源内容参与版本比较。`revision_entities` 将收藏版本关联到当时的实体版本，并标记根节点；`entity_relations` 保存该次快照的关系。`GET /v1/entities/{id}` 读取调用租户所保存收藏关联的最新实体快照；收藏 API 内的 graph 固定关联当时版本。
 
 X Adapter 在 `adapters/x/src/entity-schemas.ts` 定义 `x.post` 和 `x.profile`，通过 `authored_by` 关联。转发使用 Profile 到原帖的 `reposted` 关系；单帖中的引用和转发分别使用帖子到原帖的 `quoted`、`reposted` 关系，并独立采集原帖。详情页显示关联摘要，优先链接已保存的原帖；帖子正文与作者简介中的提及使用 `mentions` 指向 Profile，并调度关联资料采集。时间线保留转发关系，同时单独采集原帖。实体图最多包含 512 个实体、1,024 条关系，仍受 2 MiB 大小限制。帖子 data 包含正文、上游发布时间、编辑时间及来源、编辑 ID 列表；Profile data 包含用户名、昵称、头像 URL 与个人资料。头像文件由 Adapter 作为关联资源返回，核心下载保存，不加入 Telegram 帖子相册。编辑时间优先采用上游明确字段，否则在存在多个编辑版本 ID 时从最新 Snowflake 推导并标记 `x_snowflake`；没有证据时省略。
 

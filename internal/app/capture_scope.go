@@ -9,45 +9,33 @@ import (
 	"monitor/internal/domain"
 )
 
-// Resolve the final content identity before creating any resources. Account captures
-// start private, and only the trusted adapter can classify their result as public.
-func (s *Service) resolveCaptureScope(ctx context.Context, tx pgx.Tx, tenant, cid, visibility string, canonical *pb.ResolveResponse) error {
-	var old, external, url, provider, connection, savedSource, platform, kind, objectScope string
-	if e := tx.QueryRow(ctx, `SELECT a.id,a.external_id,a.url,c.provider_id,coalesce(c.connection_id::text,''),coalesce(c.refresh_from::text,a.id::text),a.platform,a.kind,a.object_scope FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.id=$1`, cid).Scan(&old, &external, &url, &provider, &connection, &savedSource, &platform, &kind, &objectScope); e != nil {
+// Resolve the adapter's canonical identity before creating any resources.
+// Content is stored once per identity, so only canonical moves change the collection.
+func (s *Service) resolveCaptureScope(ctx context.Context, tx pgx.Tx, tenant, cid string, canonical *pb.ResolveResponse) error {
+	var old, external, provider, connection, savedSource, platform, kind, objectScope string
+	if e := tx.QueryRow(ctx, `SELECT a.id,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),coalesce(c.refresh_from::text,a.id::text),a.platform,a.kind,a.object_scope FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.id=$1`, cid).Scan(&old, &external, &provider, &connection, &savedSource, &platform, &kind, &objectScope); e != nil {
 		return e
 	}
+	if canonical == nil || canonical.ExternalId == external {
+		return nil
+	}
 	requestedExternal := external
-	if canonical != nil {
-		external = canonical.ExternalId
-		url = canonical.Url
-	}
-	scope := "public"
-	dataScope := "00000000-0000-0000-0000-000000000000"
-	if visibility == "private" {
-		dataScope = tenant
-		if connection != "" {
-			scope = "connection:" + connection
-		}
-	}
-	if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,1))`, dataScope+"|"+platform+"|"+scope+"|"+kind+"|"+objectScope+"|"+external); e != nil {
+	external = canonical.ExternalId
+	if _, e := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,1))`, platform+"|"+kind+"|"+objectScope+"|"+external); e != nil {
 		return e
 	}
 	var target string
-	e := tx.QueryRow(ctx, `INSERT INTO collections(tenant_id,visibility,external_id,url,provider_id,scope,platform,kind,object_scope) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(data_scope,platform,scope,kind,object_scope,external_id) DO UPDATE SET unreferenced_at=collections.unreferenced_at RETURNING id`, tenant, visibility, external, url, provider, scope, platform, kind, objectScope).Scan(&target)
+	e := tx.QueryRow(ctx, `INSERT INTO collections(external_id,url,provider_id,platform,kind,object_scope) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(platform,kind,object_scope,external_id) DO UPDATE SET unreferenced_at=collections.unreferenced_at RETURNING id`, external, canonical.Url, provider, platform, kind, objectScope).Scan(&target)
 	if e != nil {
 		return e
 	}
 	// Preserve the adapter's alias without rewriting historical entity snapshots.
-	// The final visibility and full collection identity keep private aliases isolated.
-	if requestedExternal != external {
-		if _, e = tx.Exec(ctx, `INSERT INTO collection_identity_aliases(tenant_id,visibility,platform,scope,kind,object_scope,external_id,collection_id)
- SELECT tenant_id,visibility,platform,scope,kind,object_scope,$2,id FROM collections WHERE id=$1
- ON CONFLICT(data_scope,platform,scope,kind,object_scope,external_id) DO UPDATE SET collection_id=excluded.collection_id`, target, requestedExternal); e != nil {
-			return e
-		}
+	if _, e = tx.Exec(ctx, `INSERT INTO collection_identity_aliases(platform,kind,object_scope,external_id,collection_id) VALUES($1,$2,$3,$4,$5)
+ ON CONFLICT(platform,kind,object_scope,external_id) DO UPDATE SET collection_id=excluded.collection_id`, platform, kind, objectScope, requestedExternal, target); e != nil {
+		return e
 	}
-	// A queued capture has no resources/revisions, so changing its scope here cannot expose old content.
-	if _, e = tx.Exec(ctx, `UPDATE captures SET collection_id=$2,visibility=$3 WHERE id=$1`, cid, target, visibility); e != nil {
+	// A queued capture has no resources/revisions, so moving it cannot expose old content.
+	if _, e = tx.Exec(ctx, `UPDATE captures SET collection_id=$2 WHERE id=$1`, cid, target); e != nil {
 		return e
 	}
 	if _, e = tx.Exec(ctx, `INSERT INTO tenant_collections(tenant_id,collection_id,provider_id,connection_id,adapter_id) SELECT $1,$2,$3,nullif($4,'')::uuid,(SELECT adapter_id FROM captures WHERE id=$6) WHERE EXISTS(SELECT FROM tenant_collections WHERE collection_id=$5) ON CONFLICT(tenant_id,collection_id) DO UPDATE SET provider_id=excluded.provider_id,connection_id=excluded.connection_id,adapter_id=excluded.adapter_id`, tenant, target, provider, connection, savedSource, cid); e != nil {
@@ -60,14 +48,11 @@ func (s *Service) resolveCaptureScope(ctx context.Context, tx pgx.Tx, tenant, ci
 	if !within {
 		return domain.ErrQuota
 	}
-	// Keep an old completed collection until successful finalization; remove only empty staging references.
-	if target != old {
-		if _, e = tx.Exec(ctx, `DELETE FROM tenant_collections WHERE collection_id=$1 AND EXISTS(SELECT FROM collections WHERE id=$1 AND current_revision IS NULL)`, old); e != nil {
-			return e
-		}
-		_, e = tx.Exec(ctx, `SELECT mark_unreferenced($1)`, old)
+	// Keep an old completed collection; remove only empty staging references.
+	if _, e = tx.Exec(ctx, `DELETE FROM tenant_collections WHERE collection_id=$1 AND EXISTS(SELECT FROM collections WHERE id=$1 AND current_revision IS NULL)`, old); e != nil {
+		return e
 	}
-	if e != nil {
+	if _, e = tx.Exec(ctx, `SELECT mark_unreferenced($1)`, old); e != nil {
 		return e
 	}
 	if _, e = tx.Exec(ctx, `UPDATE collections SET unreferenced_at=NULL WHERE id=$1 AND EXISTS(SELECT FROM tenant_collections WHERE collection_id=$1)`, target); e != nil {

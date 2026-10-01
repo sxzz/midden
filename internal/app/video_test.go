@@ -113,12 +113,12 @@ func TestVideoCache(t *testing.T) {
 	if downloads.Load() != 2 {
 		t.Fatal("quality cache collision")
 	}
-	// Private content cannot reuse public cache or another tenant's private cache.
+	// Media an account fetch lists is reusable whoever stored it first.
 	f.public = false
 	complete(a, 980004, "")
 	complete(b, 980005, "")
-	if downloads.Load() != 4 {
-		t.Fatal("visibility cache collision")
+	if downloads.Load() != 2 {
+		t.Fatal("stored media downloaded again", downloads.Load())
 	}
 	s.Config.MaxVideoBytes = 64
 	j, e := s.Submit(ctx, a, domain.CaptureInput{URL: "https://x.com/a/status/980006"})
