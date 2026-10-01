@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -17,12 +16,11 @@ func annotateCollectionRelations(ctx context.Context, tx pgx.Tx, relatedTo strin
 	}
 	// Use the same direct-edge predicate as filtering and storage totals so
 	// context nodes cannot acquire unrelated labels on otherwise valid results.
-	relations := strings.ReplaceAll(relatedCollectionSQL, "NULLIF($16,'')", "$1")
-	rows, err := tx.Query(ctx, `SELECT DISTINCT a.id,edge.kind FROM collections a
+	rows, err := tx.Query(ctx, withRelatedContext("$1", `SELECT DISTINCT a.id,edge.kind FROM collections a
  JOIN tenant_collections saved_candidate ON saved_candidate.collection_id=a.id
  CROSS JOIN LATERAL (SELECT head.* FROM revisions head WHERE head.collection_id=a.id ORDER BY head.created_at DESC,head.id DESC LIMIT 1) r
- CROSS JOIN LATERAL (`+relations+`) edge
- WHERE a.id=ANY($2::uuid[]) ORDER BY a.id,edge.kind`, relatedTo, ids)
+ CROSS JOIN LATERAL (`+relatedCollectionSQL+`) edge
+ WHERE a.id=ANY($2::uuid[]) ORDER BY a.id,edge.kind`), relatedTo, ids)
 	if err != nil {
 		return err
 	}
