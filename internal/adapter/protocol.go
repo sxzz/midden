@@ -15,6 +15,7 @@ const (
 	CaptureRelated    = "capture.related"
 	CapturePage       = "capture.page"
 	CaptureCanonical  = "capture.canonical"
+	CaptureAccess     = "capture.access"
 	ConnectionCheck   = "connection.check"
 	CredentialPrepare = "credential.prepare"
 )

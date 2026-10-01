@@ -523,3 +523,7 @@ func must(t *testing.T, e error) {
 func (f *fakeAdapter) CheckConnection(_ context.Context, r *pb.CheckConnectionRequest, _ ...grpc.CallOption) (*pb.CheckConnectionResponse, error) {
 	return &pb.CheckConnectionResponse{AccountId: store.Hash(string(r.GetCredential().GetData())), Username: "fixture"}, nil
 }
+
+func (f *fakeAdapter) CheckAccess(context.Context, *pb.CheckAccessRequest, ...grpc.CallOption) (*pb.CheckAccessResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "access check unsupported")
+}

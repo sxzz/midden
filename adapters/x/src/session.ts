@@ -12,6 +12,8 @@ import {
 } from "@fxembed/atmosphere/providers/twitter-runtime";
 import type { TwitterBuildHost } from "@fxembed/atmosphere/providers/twitter/build-host";
 import {
+  CheckAccessResponse,
+  ObjectRef,
   SourceResponse,
   Visibility,
 } from "./generated/api/adapter/v1/adapter.js";
@@ -206,6 +208,67 @@ export function rawIsPublic(node: any): boolean {
   walk(node);
   return !restricted;
 }
+function unavailable(node: any): boolean {
+  return (
+    !node ||
+    typeof node !== "object" ||
+    node.__typename === "TweetUnavailable" ||
+    node.__typename === "TweetTombstone"
+  );
+}
+function unwrapTweet(node: any): any {
+  const value = node?.result ?? node;
+  return value?.__typename === "TweetWithVisibilityResults"
+    ? value.tweet
+    : value;
+}
+function tweetId(node: any): unknown {
+  const tweet = unwrapTweet(node);
+  return tweet?.rest_id ?? tweet?.legacy?.id_str;
+}
+// Readable means the upstream returned the post's content to this account.
+function readable(node: any): boolean {
+  const tweet = unwrapTweet(node);
+  return (
+    !unavailable(node?.result ?? node) &&
+    !unavailable(tweet) &&
+    Boolean(tweet.core && tweet.legacy)
+  );
+}
+// Quoted and retweeted posts nested anywhere in a raw GraphQL tweet, by rest ID.
+export function embeddedTweets(raw: any): Map<string, any> {
+  const found = new Map<string, any>();
+  const walk = (value: any): void => {
+    if (!value || typeof value !== "object") return;
+    for (const [key, child] of Object.entries(value)) {
+      if (
+        /^(quoted_(status_result|tweet_results)|retweeted_status_results?)$/.test(
+          key,
+        )
+      ) {
+        const id = tweetId(child);
+        if (typeof id === "string" && !found.has(id))
+          found.set(id, (child as any)?.result ?? child);
+      }
+      walk(child);
+    }
+  };
+  walk(raw);
+  return found;
+}
+const postRef = (externalId: string): ObjectRef => ({
+  platform: "x",
+  kind: "post",
+  objectScope: "",
+  externalId,
+});
+async function sessionTweet(id: string, host: TwitterBuildHost): Promise<any> {
+  const data = await fetchByRestId(id, host, true);
+  const raw = data?.data?.tweetResult?.result;
+  if (unavailable(raw) || unavailable(unwrapTweet(raw)))
+    throw responseError(403);
+  return raw;
+}
 export async function fetchSession(
   id: string,
   credential: SessionCredential,
@@ -217,17 +280,45 @@ export async function fetchSession(
     twitterProxy: accountTransport(credential, signal, fetch, responses),
     shouldTranscodeGif: () => false,
   };
-  const data = await fetchByRestId(id, host, true);
-  const raw = data?.data?.tweetResult?.result;
-  if (
-    !raw ||
-    raw.__typename === "TweetUnavailable" ||
-    raw.__typename === "TweetTombstone"
-  )
-    throw responseError(403);
+  const raw = await sessionTweet(id, host);
   const result = await parseSessionResult(id, raw, host);
   result.sourceResponses = responses;
   return result;
+}
+// capture.access/1: one TweetResultByRestId request, without building the post,
+// profiles or media. Access errors match fetchSession.
+export async function checkSessionAccess(
+  id: string,
+  embedded: ObjectRef[],
+  credential: SessionCredential,
+  signal: AbortSignal,
+  fetcher: typeof fetch = fetch,
+): Promise<CheckAccessResponse> {
+  const host: TwitterBuildHost = {
+    t: (key) => key,
+    twitterProxy: accountTransport(credential, signal, fetcher),
+    shouldTranscodeGif: () => false,
+  };
+  const raw = await sessionTweet(id, host);
+  if (tweetId(raw) !== id || !readable(raw))
+    throw new ProviderError(status.UNAVAILABLE, "invalid provider post");
+  const nodes = embeddedTweets(raw);
+  const accessible = [postRef(id)];
+  for (const ref of embedded)
+    if (
+      ref.platform === "x" &&
+      ref.kind === "post" &&
+      !ref.objectScope &&
+      !accessible.some((item) => item.externalId === ref.externalId) &&
+      readable(nodes.get(ref.externalId))
+    )
+      accessible.push(postRef(ref.externalId));
+  return {
+    visibility: rawIsPublic(raw)
+      ? Visibility.VISIBILITY_PUBLIC
+      : Visibility.VISIBILITY_PRIVATE,
+    accessible,
+  };
 }
 export async function parseSessionResult(
   id: string,
@@ -235,6 +326,10 @@ export async function parseSessionResult(
   host: TwitterBuildHost,
 ) {
   const publicEvidence = rawIsPublic(raw);
+  // Evaluate before Atmosphere normalizes (and mutates) the raw nodes.
+  const nestedPublic = new Map(
+    [...embeddedTweets(raw)].map(([key, node]) => [key, rawIsPublic(node)]),
+  );
   const editSource = structuredClone(raw);
   const post = await buildAPITwitterStatus(
     host,
@@ -256,6 +351,29 @@ export async function parseSessionResult(
   if (raw?.mediaVisibilityResults?.blurred_image_interstitial) {
     for (const resource of result.resources) resource.sensitive = true;
   }
+  // Embedded posts need both raw and normalized public evidence, like the root.
+  const built = new Map<string, any>();
+  const collect = (value: any): void => {
+    for (const key of ["quote", "repost"]) {
+      const child = value?.[key];
+      if (typeof child?.id === "string" && !built.has(child.id)) {
+        built.set(child.id, child);
+        collect(child);
+      }
+    }
+  };
+  collect(post);
+  for (const entity of result.graph?.entities ?? [])
+    if (
+      entity.type === "x.post" &&
+      entity.key !== result.graph!.root &&
+      !(
+        nestedPublic.get(entity.externalId) === true &&
+        visibilityOf(built.get(entity.externalId)) ===
+          Visibility.VISIBILITY_PUBLIC
+      )
+    )
+      result.restrictedTargets.push(postRef(entity.externalId));
   return result;
 }
 export async function checkSession(

@@ -518,3 +518,139 @@ test("public provider rejects a protected embedded quote or repost", async () =>
     }
   }
 });
+
+test("gRPC CheckAccess validates identity and account scope before one access check", async () => {
+  const calls: any[] = [];
+  const server = createServer(
+    "fixture-token",
+    true,
+    undefined,
+    undefined,
+    async (id, embedded, session) => {
+      calls.push({ id, embedded, session });
+      if (id === "403") throw responseError(403);
+      return {
+        visibility: Visibility.VISIBILITY_PRIVATE,
+        accessible: [
+          { platform: "x", kind: "post", objectScope: "", externalId: id },
+        ],
+      };
+    },
+  );
+  const port = await new Promise<number>((resolve, reject) =>
+    server.bindAsync(
+      "127.0.0.1:0",
+      ServerCredentials.createInsecure(),
+      (e, p) => (e ? reject(e) : resolve(p)),
+    ),
+  );
+  const client = new AdapterClient(
+    `127.0.0.1:${port}`,
+    credentials.createInsecure(),
+  );
+  const metadata = new Metadata();
+  metadata.set("authorization", "Bearer fixture-token");
+  const ref = (externalId: string, kind = "post") => ({
+    platform: "x",
+    kind,
+    objectScope: "",
+    externalId,
+  });
+  const request = (patch: any = {}) => ({
+    url: "https://x.com/fixture/status/123",
+    target: ref("123"),
+    embedded: [ref("124")],
+    providerId: "x-session",
+    connectionId: "c1",
+    accessScope: "connection:c1",
+    requestId: "r1",
+    credential: {
+      data: Buffer.from(
+        JSON.stringify({
+          auth_token: credential.authToken,
+          csrf_token: credential.csrfToken,
+        }),
+      ),
+    },
+    ...patch,
+  });
+  const call = (target: AdapterClient, req: any) =>
+    new Promise<any>((resolve, reject) =>
+      target.checkAccess(req, metadata, (e, v) => (e ? reject(e) : resolve(v))),
+    );
+  try {
+    const described: any = await new Promise((resolve, reject) =>
+      client.describe({}, metadata, (e, v) => (e ? reject(e) : resolve(v))),
+    );
+    assert.ok(
+      described.providers[1].capabilities.some(
+        (c: any) =>
+          c.name === "capture.access" && c.major === 1 && c.minor === 0,
+      ),
+    );
+    assert.ok(
+      !described.providers[0].capabilities.some(
+        (c: any) => c.name === "capture.access",
+      ),
+    );
+    const result = await call(client, request());
+    assert.equal(result.visibility, Visibility.VISIBILITY_PRIVATE);
+    assert.deepEqual(result.accessible, [ref("123")]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].id, "123");
+    assert.deepEqual(calls[0].embedded, [ref("124")]);
+    assert.equal(calls[0].session.authToken, credential.authToken);
+    for (const patch of [
+      { target: ref("999") },
+      { target: ref("123", "profile") },
+      {
+        url: "https://x.com/fixture",
+        target: ref("handle:fixture", "profile"),
+      },
+      { providerId: "fxtwitter" },
+      { connectionId: "" },
+      { accessScope: "public" },
+      { credential: undefined },
+    ])
+      await assert.rejects(
+        () => call(client, request(patch)),
+        (e: any) => e.code === status.INVALID_ARGUMENT,
+      );
+    await assert.rejects(
+      () =>
+        call(
+          client,
+          request({
+            url: "https://x.com/fixture/status/403",
+            target: ref("403"),
+          }),
+        ),
+      (e: any) => e.code === status.PERMISSION_DENIED,
+    );
+    assert.equal(calls.length, 2);
+  } finally {
+    client.close();
+    server.forceShutdown();
+  }
+  const insecure = createServer("fixture-token");
+  const insecurePort = await new Promise<number>((resolve, reject) =>
+    insecure.bindAsync(
+      "127.0.0.1:0",
+      ServerCredentials.createInsecure(),
+      (e, p) => (e ? reject(e) : resolve(p)),
+    ),
+  );
+  const plain = new AdapterClient(
+    `127.0.0.1:${insecurePort}`,
+    credentials.createInsecure(),
+  );
+  try {
+    await assert.rejects(
+      () => call(plain, request()),
+      (e: any) => e.code === status.FAILED_PRECONDITION,
+    );
+  } finally {
+    plain.close();
+    insecure.forceShutdown();
+  }
+});

@@ -11,6 +11,8 @@ service Adapter {
   rpc PrepareCredential(PrepareCredentialRequest) returns (PrepareCredentialResponse);
   rpc Fetch(FetchRequest) returns (FetchResponse);
   rpc CheckConnection(CheckConnectionRequest) returns (CheckConnectionResponse);
+  // capture.access/1: verify an account can still read stored content without a full fetch.
+  rpc CheckAccess(CheckAccessRequest) returns (CheckAccessResponse);
 }
 
 message DescribeRequest {}
@@ -132,6 +134,7 @@ message FetchResponse {
   uint32 max_batch_size = 19; // Optional collection batch limit; zero disables batch actions.
   string next_page_cursor = 18; // Empty at end of collection; capture.page/1.
   string published_at = 15; // Original publication time in RFC 3339; empty when unknown.
+  repeated ObjectRef restricted_targets = 20; // Embedded (non-root) objects in the graph lacking public evidence.
 }
 
 // Execution-only secrets; never persisted in task payloads or logs.
@@ -151,3 +154,26 @@ message PrepareCredentialResponse { Credential credential = 1; }
 
 message CheckConnectionRequest { string provider_id = 1; Credential credential = 2; }
 message CheckConnectionResponse { string account_id = 1; string username = 2; }
+
+message ObjectRef {
+  string platform = 1;
+  string kind = 2;
+  string object_scope = 3;
+  string external_id = 4;
+}
+// Errors follow Fetch: PERMISSION_DENIED/NOT_FOUND mean no access, UNAUTHENTICATED
+// requires authorization again, RESOURCE_EXHAUSTED/UNAVAILABLE may carry retry-after.
+message CheckAccessRequest {
+  string url = 1;
+  ObjectRef target = 2;
+  repeated ObjectRef embedded = 3; // Other restricted objects the stored revision contains; report which are visible.
+  string provider_id = 4;
+  string connection_id = 5;
+  string access_scope = 6;
+  string request_id = 7;
+  Credential credential = 8;
+}
+message CheckAccessResponse {
+  Visibility visibility = 1; // Of the target, same semantics as FetchResponse.visibility.
+  repeated ObjectRef accessible = 2; // Subset of {target} and embedded the account can read.
+}

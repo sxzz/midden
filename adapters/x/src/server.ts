@@ -19,13 +19,14 @@ import {
   Visibility,
 } from "./generated/api/adapter/v1/adapter.js";
 import { fetchPublic, ProviderError } from "./provider.js";
-import { checkSession } from "./session.js";
+import { checkSession, checkSessionAccess } from "./session.js";
 
 export function createServer(
   secret: string,
   tls = false,
   publicFetcher = fetchPublic,
   strategy = new CaptureStrategy(publicFetcher),
+  accessChecker = checkSessionAccess,
 ): Server {
   if (!secret) throw new Error("ADAPTER_TOKEN is required");
   const server = new Server({
@@ -117,6 +118,7 @@ export function createServer(
             "capture.related",
             "capture.page",
             "capture.canonical",
+            "capture.access",
             "connection.check",
             "credential.prepare",
             "content.text",
@@ -180,6 +182,40 @@ export function createServer(
           "account execution requires TLS",
         );
       return strategy.fetch(req, signal, decodeCredential(req.credential));
+    }),
+    checkAccess: unary(async (req, signal) => {
+      const target = resolveTarget(req.url);
+      if (
+        target.kind !== "post" ||
+        target.externalId !== req.target?.externalId ||
+        target.platform !== req.target?.platform ||
+        target.kind !== req.target?.kind ||
+        target.objectScope !== req.target?.objectScope
+      )
+        throw new ProviderError(
+          status.INVALID_ARGUMENT,
+          "invalid target identity",
+        );
+      if (
+        req.providerId !== "x-session" ||
+        !req.connectionId ||
+        req.accessScope !== `connection:${req.connectionId}`
+      )
+        throw new ProviderError(
+          status.INVALID_ARGUMENT,
+          "invalid provider or connection",
+        );
+      if (!tls)
+        throw new ProviderError(
+          status.FAILED_PRECONDITION,
+          "account execution requires TLS",
+        );
+      return accessChecker(
+        target.externalId,
+        req.embedded ?? [],
+        decodeCredential(req.credential),
+        signal,
+      );
     }),
     checkConnection: unary(async (req, signal) => {
       if (!tls)

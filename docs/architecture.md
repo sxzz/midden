@@ -212,6 +212,7 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 | `capture.related`    | 1.0      | 返回关联目标及最小刷新间隔；核心按提交者身份持久化执行有界关联采集                                     |
 | `capture.page`       | 1.0      | `Fetch.page_cursor` / `next_page_cursor` 为不透明分页游标；沿用原 Provider、Connection，空返回表示末页 |
 | `capture.canonical`  | 1.0      | Fetch 返回同平台、同类型的稳定目标身份                                                                 |
+| `capture.access`     | 1.0      | 用 `CheckAccess` 单次上游请求确认账号仍可读取目标及内嵌对象；错误语义同 Fetch                          |
 | `credential.prepare` | 1.0      | 用 `PrepareCredential` 将用户输入转换为 Adapter 私有的凭据格式                                         |
 | `connection.check`   | 1.0      | 用 `CheckConnection` 验证账号会话                                                                      |
 | `content.text`       | 1.0      | 采集结果可以包含文字                                                                                   |
@@ -220,7 +221,7 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 | `media.image`        | 1.0      | 采集结果可以包含图片                                                                                   |
 | `media.video`        | 1.0      | 采集结果可以包含视频                                                                                   |
 
-能力表示 Provider 可以提供的功能，不保证每次结果包含所有媒体。实际收藏内容仍以 Fetch 返回的数据为准。公共 FxTwitter Provider 不声明账号验证能力；个人账号 Provider 声明该能力。采集 Provider 同时声明允许的可见性，实际结果仍须遵守公私隔离规则。
+能力表示 Provider 可以提供的功能，不保证每次结果包含所有媒体。实际收藏内容仍以 Fetch 返回的数据为准。公共 FxTwitter Provider 不声明账号验证能力；个人账号 Provider 声明该能力。采集 Provider 同时声明允许的可见性，实际结果仍须遵守公私隔离规则。`CheckAccess` 不重新采集内容，只返回目标可见性及请求中目标和内嵌对象里账号可读的子集；声明 `capture.access` 的 Provider 在 Fetch 的 `restricted_targets` 中列出图中缺少公开证据的内嵌对象，公共 Provider 留空。
 
 调用方按能力名称、相同 major、满足最低要求的 minor 选择操作；未知能力或未知能力 major 不阻止握手，也不会自动启用操作。一个能力 major 只能声明一次，需要支持多个 major 时分别声明。缺少操作能力时核心在提交或发送凭据前拒绝请求。声明了能力但实际返回 `UNIMPLEMENTED` 属于契约错误，按永久失败处理，不切换 Provider。
 
