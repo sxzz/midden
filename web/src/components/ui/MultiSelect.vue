@@ -131,8 +131,8 @@ summary {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 48px;
-  padding: 6px var(--inset);
+  min-height: 44px;
+  padding: 2px var(--inset);
   cursor: pointer;
   list-style: none;
 }
@@ -148,7 +148,7 @@ summary::-webkit-details-marker {
   color: var(--link);
 }
 .choices {
-  padding: 0 var(--inset) 12px;
+  padding: 0 var(--inset) 10px;
 }
 input {
   width: 100%;
@@ -165,7 +165,7 @@ input {
   gap: 8px;
   max-height: 220px;
   overflow-y: auto;
-  padding: 10px 0 2px;
+  padding: 8px 0 2px;
 }
 .tag {
   max-width: 100%;

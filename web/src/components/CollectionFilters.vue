@@ -249,6 +249,8 @@ const tagFilter = computed({
         maxlength="500"
       /><button type="submit" class="submit">搜索</button>
     </div>
+    <!-- Filter summary and sort share one line; the sort pickers are named
+         by their own values, so they need no visible label. -->
     <div class="toggles">
       <button
         type="button"
@@ -263,34 +265,31 @@ const tagFilter = computed({
       <button v-if="query" type="button" class="toggle reset" @click="clear">
         清除
       </button>
-    </div>
-    <div class="sort">
-      <span>排序</span>
-      <span class="select"
-        ><select
-          :value="form.sort"
-          aria-label="排序"
-          @change="form.sort = ($event.target as HTMLSelectElement).value"
-        >
-          <option value="captured">采集时间</option>
-          <option value="published">发帖时间</option>
-          <option value="storage">存储空间</option></select
-        ><ChevronIcon class="select-chevron"
-      /></span>
-      <span class="select"
-        ><select
-          :value="form.order"
-          aria-label="排序方向"
-          @change="form.order = ($event.target as HTMLSelectElement).value"
-        >
-          <option value="desc">
-            {{ form.sort === 'storage' ? '从大到小' : '从新到旧' }}
-          </option>
-          <option value="asc">
-            {{ form.sort === 'storage' ? '从小到大' : '从旧到新' }}
-          </option></select
-        ><ChevronIcon class="select-chevron"
-      /></span>
+      <span class="sort"
+        ><span class="select"
+          ><select
+            :value="form.sort"
+            aria-label="排序"
+            @change="form.sort = ($event.target as HTMLSelectElement).value"
+          >
+            <option value="captured">采集时间</option>
+            <option value="published">发帖时间</option>
+            <option value="storage">存储空间</option></select
+          ><ChevronIcon class="select-chevron" /></span
+        ><span class="select"
+          ><select
+            :value="form.order"
+            aria-label="排序方向"
+            @change="form.order = ($event.target as HTMLSelectElement).value"
+          >
+            <option value="desc">
+              {{ form.sort === 'storage' ? '从大到小' : '从新到旧' }}
+            </option>
+            <option value="asc">
+              {{ form.sort === 'storage' ? '从小到大' : '从旧到新' }}
+            </option></select
+          ><ChevronIcon class="select-chevron" /></span
+      ></span>
     </div>
     <div v-show="open" class="panel">
       <!-- Tags are your own vocabulary, so they get the same chips as in the
@@ -349,43 +348,27 @@ const tagFilter = computed({
             <option value="not_contains">不包含</option></select
           ><ChevronIcon class="select-chevron" /></span
       ></label>
-      <fieldset class="dates">
-        <legend>收藏日期</legend>
-        <label class="option"
-          >从<input v-model="form.from" type="date" aria-label="收藏开始日期"
-        /></label>
-        <label class="option"
-          >至<input
+      <div class="option dates" role="group" aria-label="收藏日期">
+        收藏日期<span class="range"
+          ><input
+            v-model="form.from"
+            type="date"
+            aria-label="收藏开始日期" /><span aria-hidden="true">–</span
+          ><input
             v-model="form.to"
             type="date"
             :min="form.from"
             aria-label="收藏结束日期"
-        /></label>
-        <p class="hint">包含起止当天；留空不限。</p>
-      </fieldset>
+        /></span>
+      </div>
+      <p class="hint">收藏日期包含起止当天；留空不限。</p>
     </div>
   </form>
 </template>
 
 <style scoped>
-.sort {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 40px;
-  padding: 0 4px;
-  font-size: 14px;
-  color: var(--subtle);
-}
-.sort select {
-  min-height: 40px;
-  border: 0;
-  background: none;
-  color: var(--link);
-  font: inherit;
-}
 .filters {
-  padding: 10px var(--gutter) 6px;
+  padding: 8px var(--gutter) 4px;
 }
 .bar {
   display: flex;
@@ -398,14 +381,14 @@ const tagFilter = computed({
 .glass {
   display: block;
   flex: none;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   color: var(--subtle);
 }
 .field {
   flex: 1;
   min-width: 0;
-  min-height: 44px;
+  min-height: 40px;
   border: 0;
   background: none;
   font-size: 16px;
@@ -419,7 +402,7 @@ const tagFilter = computed({
 }
 .submit {
   flex-shrink: 0;
-  min-height: 44px;
+  min-height: 40px;
   padding-left: 4px;
   font-size: 15px;
   color: var(--link);
@@ -427,40 +410,62 @@ const tagFilter = computed({
 .toggles {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
+  min-height: 40px;
+  font-size: 14px;
+  white-space: nowrap;
 }
 .toggle {
   display: flex;
   align-items: center;
+  min-width: 0;
   min-height: 40px;
   padding: 0 4px;
-  font-size: 14px;
   color: var(--link);
 }
 .reset {
+  flex: none;
   color: var(--subtle);
 }
 .separator {
   color: var(--subtle);
   padding-inline: 6px;
 }
-.toggle {
-  min-width: 0;
+.active {
+  color: var(--subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sort {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  margin-left: auto;
+}
+.sort .select {
+  max-width: none;
+}
+.sort select {
+  min-height: 40px;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
 }
 .hint {
   margin: 0;
-  padding: 4px var(--inset) 12px;
+  padding: 0 var(--inset) 10px;
   color: var(--subtle);
   font-size: 12px;
   line-height: 1.5;
 }
 .tag-filter {
-  padding: 12px var(--inset) 16px;
+  padding: 10px var(--inset) 12px;
   border-bottom: 1px solid var(--separator);
 }
 .tag-title {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   font-size: 15px;
 }
 .tag-error {
@@ -473,39 +478,22 @@ const tagFilter = computed({
   min-height: 32px;
   color: var(--link);
 }
-.dates {
-  margin: 0;
-  padding: 8px 0;
-  border: 0;
-  min-width: 0;
-}
-legend {
-  padding: 8px var(--inset) 0;
-  font-size: 15px;
-}
-.active {
-  color: var(--subtle);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .panel {
   background: var(--card);
   border-radius: var(--radius);
-  margin-top: 4px;
+  margin-top: 2px;
   overflow: hidden;
 }
 .option {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 48px;
-  padding: 6px var(--inset);
-  font-size: 16px;
-}
-.option {
-  position: relative;
+  min-height: 44px;
+  padding: 2px var(--inset);
+  font-size: 15px;
+  white-space: nowrap;
 }
 .option + .option::before {
   content: '';
@@ -521,11 +509,26 @@ legend {
   border: 0;
   background: none;
   color: var(--link);
-  font-size: 16px;
+  font-size: 15px;
   text-align: right;
 }
-.option input {
-  max-width: 60%;
+/* Both ends share the row with their label while they fit; on a narrow
+   screen the range drops below it rather than cutting dates short. */
+.dates {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+.range {
+  display: flex;
+  flex: 1 0 15.5em;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--subtle);
+}
+.range input {
+  flex: 0 1 8.5em;
 }
 /* The chevron owns a reserved gutter, so no arrow ever crowds its own label. */
 .select {
