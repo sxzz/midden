@@ -88,20 +88,30 @@ async function pgFormatter() {
     // A missing or incompatible system tool is replaced by the pinned release.
   }
   const directory = path.join(TOOLS, "pgFormatter-5.11");
+  // Hooks export GIT_DIR and friends for this repository; drop them so git targets the tool clone.
+  const local = (await run(["git", "rev-parse", "--local-env-vars"]))
+    .toString()
+    .split("\n");
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !local.includes(key)),
+  );
   if (!existsSync(directory)) {
     await mkdir(path.dirname(directory), { recursive: true });
     console.log("Installing pgFormatter 5.11");
-    await run([
-      "git",
-      "clone",
-      "--depth=1",
-      "--branch=v5.11",
-      "https://github.com/darold/pgFormatter.git",
-      directory,
-    ]);
+    await run(
+      [
+        "git",
+        "clone",
+        "--depth=1",
+        "--branch=v5.11",
+        "https://github.com/darold/pgFormatter.git",
+        directory,
+      ],
+      { env },
+    );
   }
   if (
-    (await run(["git", "-C", directory, "rev-parse", "HEAD"]))
+    (await run(["git", "-C", directory, "rev-parse", "HEAD"], { env }))
       .toString()
       .trim() !== PG_FORMAT_COMMIT
   ) {

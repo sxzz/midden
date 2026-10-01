@@ -126,3 +126,34 @@ test("staged web files use their local Prettier configuration", (t) => {
     "const value = 1\nconsole.log(value)\n",
   );
 });
+
+test("SQL hook resolves the pinned pgFormatter from a linked worktree", (t) => {
+  const { root, run, git } = fixture(t);
+  git("add", ".githooks", "scripts");
+  git("commit", "-m", "tooling");
+  const linked = path.join(root, "linked");
+  git("worktree", "add", "--quiet", linked);
+  symlinkSync(
+    path.join(ROOT, "node_modules"),
+    path.join(linked, "node_modules"),
+    "dir",
+  );
+  if (existsSync(path.join(ROOT, ".tools")))
+    symlinkSync(path.join(ROOT, ".tools"), path.join(linked, ".tools"), "dir");
+  const filename = path.join(linked, "sample.sql");
+  writeFileSync(filename, "select 1;\n");
+  const inLinked = (...args) => run(["git", "-C", linked, ...args]);
+  run([
+    process.execPath,
+    path.join(linked, "scripts/format.mjs"),
+    "--write",
+    "sample.sql",
+  ]);
+  inLinked("add", "sample.sql");
+  // The hook exports GIT_DIR for the linked worktree; the tool revision check must ignore it.
+  inLinked("commit", "-m", "formatted SQL");
+  assert.equal(
+    inLinked("show", "HEAD:sample.sql").stdout,
+    readFileSync(filename, "utf8"),
+  );
+});
