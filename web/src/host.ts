@@ -93,7 +93,7 @@ export function applyTheme(
   set('--fill', format(shade(parse(card), dark ? 0.07 : -0.06)))
 }
 
-export function setupHost() {
+export function setupHost(back: () => void = () => history.back()) {
   // Lets the collection be reviewed in both schemes outside Telegram.
   const forced = new URLSearchParams(location.search).get('theme')
   if (forced === 'dark' || forced === 'light') applyTheme({}, forced)
@@ -105,7 +105,6 @@ export function setupHost() {
   tg.expand()
   tg.disableVerticalSwipes?.()
   tg.onEvent('themeChanged', theme)
-  const back = () => history.back()
   tg.BackButton.onClick(back)
   return () => {
     tg.offEvent('themeChanged', theme)

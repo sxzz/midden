@@ -75,8 +75,14 @@ func TestWebCollection(t *testing.T) {
 			for j := range payload.Graph.Entities {
 				entity := &payload.Graph.Entities[j]
 				entity.ExternalID = jobs[i].CollectionID + entity.Key
+				if i == 0 && entity.Key == "author" {
+					entity.ExternalID = jobs[1].CollectionID + "root"
+				}
 				entity.Data = json.RawMessage(`{}`)
 				entity.Schema = json.RawMessage(`{}`)
+			}
+			if i == 0 {
+				payload.Graph.Relations = []domain.EntityRelation{{Source: "root", Target: "author", Type: "authored_by"}}
 			}
 			if err := persistEntities(ctx, tx, a.TenantID, cid, &payload, nil); err != nil {
 				return err
@@ -99,6 +105,20 @@ func TestWebCollection(t *testing.T) {
 		if len(filtered.Items) != want {
 			t.Fatalf("%s: got %d items", kind, len(filtered.Items))
 		}
+	}
+	// A profile's related posts use stored entity identity and tenant ownership.
+	related, err := s.Collections(ctx, a.TenantID, CollectionFilter{RelatedTo: jobs[1].CollectionID, EntityType: "x.post"}, "")
+	must(t, err)
+	if len(related.Items) != 1 || related.Items[0].ID != jobs[0].CollectionID || related.TotalStorageBytes == nil || *related.TotalStorageBytes != related.Items[0].StorageBytes {
+		t.Fatalf("related collection or storage mismatch: %+v", related)
+	}
+	otherRelated, err := s.Collections(ctx, b.TenantID, CollectionFilter{RelatedTo: jobs[1].CollectionID, EntityType: "x.post"}, "")
+	must(t, err)
+	if len(otherRelated.Items) != 0 || otherRelated.TotalStorageBytes == nil || *otherRelated.TotalStorageBytes != 0 {
+		t.Fatalf("related collections leaked across tenants: %+v", otherRelated)
+	}
+	if _, err := s.Collections(ctx, a.TenantID, CollectionFilter{RelatedTo: "not-a-uuid"}, ""); !errors.Is(err, ErrInvalidFilter) {
+		t.Fatal(err)
 	}
 	if _, err := s.Collections(ctx, a.TenantID, CollectionFilter{EntityType: "invalid type"}, ""); !errors.Is(err, ErrInvalidFilter) {
 		t.Fatal(err)

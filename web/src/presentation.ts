@@ -214,24 +214,9 @@ export function groupCollections(
   return groups
 }
 
-const isImage = (a: Asset) => !!a.mime?.startsWith('image/')
-const isVideo = (a: Asset) => !!a.mime?.startsWith('video/')
 /** Media that finished saving, in the order the source published it. */
 export function readyMedia(assets: Asset[] = []) {
   return assets.filter((a) => a.state === 'ready')
-}
-export function mediaSummary(assets: Asset[] = []) {
-  const ready = readyMedia(assets)
-  const images = ready.filter(isImage).length
-  const videos = ready.filter(isVideo).length
-  const others = ready.length - images - videos
-  return [
-    images && `${images} 张图片`,
-    videos && `${videos} 段视频`,
-    others && `${others} 个文件`,
-  ]
-    .filter(Boolean)
-    .join(' · ')
 }
 /** Media state in words. Storage states never reach the reader. */
 export function mediaNotice(asset: Asset) {
@@ -266,4 +251,33 @@ export function storageSize(bytes: number) {
     index++
   }
   return `${value.toFixed(1)} ${units[index]}`
+}
+
+export interface BodyPart {
+  text: string
+  href?: string
+}
+/** Only captured, saved profile identities become internal links. */
+export function mentionParts(collection: Collection, text: string): BodyPart[] {
+  const profiles = new Map<string, string>()
+  for (const entity of collection.graph?.entities ?? []) {
+    if (entity.type !== 'x.profile' || !entity.saved_collection_id) continue
+    const handle = asText(entity.data.username)
+    if (handle) profiles.set(handle.toLowerCase(), entity.saved_collection_id)
+  }
+  const parts: BodyPart[] = []
+  let offset = 0
+  for (const match of text.matchAll(/(?<![\w@./])@(\w{1,15})\b/g)) {
+    const id = profiles.get(match[1]!.toLowerCase())
+    if (!id) continue
+    if (match.index > offset)
+      parts.push({ text: text.slice(offset, match.index) })
+    parts.push({
+      text: match[0],
+      href: `#/collection/${encodeURIComponent(id)}`,
+    })
+    offset = match.index + match[0].length
+  }
+  if (offset < text.length) parts.push({ text: text.slice(offset) })
+  return parts
 }

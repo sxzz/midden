@@ -32,6 +32,10 @@ func collectionButtons(id, sourceURL, webURL string) telegram.Keyboard {
 		{{Text: "删除", Data: "/delete " + id}},
 		{{Text: "收藏列表", Data: "/list"}},
 	}
+	return appendMiniAppButton(keys, id, webURL)
+}
+
+func appendMiniAppButton(keys telegram.Keyboard, id, webURL string) telegram.Keyboard {
 	if webURL != "" {
 		if entry, err := url.Parse(webURL); err == nil && entry.Scheme == "https" && entry.Host != "" {
 			entry.Fragment = "/collection/" + id

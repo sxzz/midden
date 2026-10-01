@@ -269,3 +269,52 @@ func TestCollectionProgressAndMore(t *testing.T) {
 		t.Fatal("unrelated capture paused")
 	}
 }
+
+type referencedPageAdapter struct{ *pageAdapter }
+
+func (f *referencedPageAdapter) Fetch(ctx context.Context, r *pb.FetchRequest, o ...grpc.CallOption) (*pb.FetchResponse, error) {
+	result, err := f.pageAdapter.Fetch(ctx, r, o...)
+	if err == nil && r.Kind == "collection" && !r.Automatic {
+		result.RelatedTargets = append(result.RelatedTargets, &pb.RelatedTarget{Url: "https://notes.test/collection/reference"})
+	}
+	return result, err
+}
+
+func TestCollectionReferencesDoNotConsumeMemberLimit(t *testing.T) {
+	if os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("Docker database required")
+	}
+	ctx := context.Background()
+	admin, err := store.Open(ctx, os.Getenv("TEST_ADMIN_DATABASE_URL"))
+	must(t, err)
+	defer admin.Close()
+	db, err := store.Open(ctx, os.Getenv("TEST_DATABASE_URL"))
+	must(t, err)
+	defer db.Close()
+	queue, err := river.NewClient(riverpgxv5.New(db.Pool), &river.Config{})
+	must(t, err)
+	var tenant string
+	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO tenants DEFAULT VALUES RETURNING id`).Scan(&tenant))
+	s := &Service{DB: db, Queue: queue, Adapter: &referencedPageAdapter{&pageAdapter{&collectionAdapter{&fakeAdapter{}}}}, Config: Defaults()}
+	job, err := s.Submit(ctx, tenant, domain.CaptureInput{URL: "https://notes.test/collection/" + uuid.NewString(), CollectionLimit: 2})
+	must(t, err)
+	must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: job.ID}))
+	must(t, s.finalize(ctx, tenant, job.ID))
+	var submission, next string
+	must(t, admin.Pool.QueryRow(ctx, `SELECT id FROM submissions WHERE capture_id=$1`, job.ID).Scan(&submission))
+	must(t, s.related(ctx, store.Task{Tenant: tenant, ID: submission}))
+	var remaining int
+	must(t, admin.Pool.QueryRow(ctx, `SELECT next.capture_id,next.collection_limit FROM submissions first JOIN submissions next ON next.id=first.next_submission WHERE first.id=$1`, submission).Scan(&next, &remaining))
+	if remaining != 1 {
+		t.Fatal("profile reference consumed member limit", remaining)
+	}
+	must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: next}))
+	must(t, s.finalize(ctx, tenant, next))
+	must(t, admin.Pool.QueryRow(ctx, `SELECT id FROM submissions WHERE capture_id=$1`, next).Scan(&submission))
+	must(t, s.related(ctx, store.Task{Tenant: tenant, ID: submission}))
+	var state string
+	must(t, admin.Pool.QueryRow(ctx, `SELECT related_state FROM submissions WHERE idem_key=$1`, "related:"+submission+":0").Scan(&state))
+	if state != "pending" {
+		t.Fatal("later-page member cannot hydrate its references", state)
+	}
+}

@@ -1,5 +1,7 @@
 <script setup vapor lang="ts">
 import { computed, onDeactivated, shallowRef, watch } from 'vue'
+import { excerpt, present } from '../presentation'
+import { authoredBy, authorIdentity, authorLabel } from '../relations'
 import AlbumGrid from './AlbumGrid.vue'
 import MediaViewer from './MediaViewer.vue'
 import type { Asset, Collection } from '../api'
@@ -24,13 +26,50 @@ const entries = computed(() =>
           (!props.mediaTypes ||
             props.mediaTypes.split(',').includes(asset.mime!.split('/')[0]!)),
       )
-      .map((asset) => ({
+      .map((asset, index) => ({
         key: `${collection.id}:${asset.id}`,
         asset,
         collectionId: collection.id,
+        caption: index === 0 ? caption(collection) : undefined,
       })),
   ),
 )
+function caption(collection: Collection) {
+  const graph = collection.graph
+  const quoted =
+    graph?.relations.flatMap((relation) => {
+      if (relation.source !== graph.root || relation.type !== 'quoted')
+        return []
+      const target = graph.entities.find(
+        (entity) => entity.key === relation.target && entity.type === 'x.post',
+      )
+      if (!target) return []
+      return [
+        {
+          text:
+            typeof target.data.text === 'string'
+              ? excerpt(target.data.text, 100)
+              : '查看引用的帖子',
+          // A tile is a button, so attribution stays plain text here.
+          author: authorLabel(authorIdentity(authoredBy(graph, target.key))),
+        },
+      ]
+    }) ?? []
+  const labels = [
+    collection.relation_types?.includes('reposted') && '转发',
+    collection.relation_types?.includes('mentions') && '提及',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  if (!labels && !quoted.length) return undefined
+  return {
+    labels,
+    text: excerpt(present(collection).body, 80),
+    quote: quoted.map((entry) => entry.text).join('；'),
+    // Attribution only stays unambiguous while there is a single quote.
+    quoteAuthor: quoted.length === 1 ? quoted[0]!.author : '',
+  }
+}
 const revealed = shallowRef<string[]>([])
 const tiles = computed(() =>
   entries.value.map((entry) => ({

@@ -2,10 +2,11 @@
 import { computed, shallowRef, watch } from 'vue'
 import { safeURL, type Collection } from '../api'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
-import { date } from '../presentation'
+import { date, present } from '../presentation'
 import CollectionAnnotations from './CollectionAnnotations.vue'
 import CollectionPost from './CollectionPost.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
+import ProfileCollections from './ProfileCollections.vue'
 import RevisionList from './RevisionList.vue'
 import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import ListButton from './ui/ListButton.vue'
@@ -55,6 +56,18 @@ watch(
     if (value) savedAt.value = value
   },
   { immediate: true },
+)
+const isProfile = computed(() =>
+  collection.value?.graph?.entities.some(
+    (entity) =>
+      entity.key === collection.value?.graph?.root &&
+      entity.type === 'x.profile',
+  ),
+)
+// The related list is this profile's own timeline, so the posts it holds by a
+// repost relation were reposted by this profile and say so.
+const profileName = computed(() =>
+  collection.value ? present(collection.value).name : '',
 )
 const link = computed(() => collection.value && safeURL(collection.value.url))
 const version = computed(() =>
@@ -128,6 +141,13 @@ const version = computed(() =>
         @select="confirmDelete = true"
       />
     </ListSection>
+    <ProfileCollections
+      v-if="isProfile"
+      :id="id"
+      :revision-id="latestRevision"
+      :show-sensitive="showSensitive"
+      :reposted-by="profileName"
+    />
     <ConfirmSheet
       :open="confirmDelete"
       title="删除这条收藏？"

@@ -1,15 +1,24 @@
 <script setup vapor lang="ts">
 import { onMounted, onUnmounted, shallowRef } from 'vue'
+import { useRouter } from 'vue-router'
 import { api, errorText } from './api'
 import CollectionLibrary from './components/CollectionLibrary.vue'
 import CollectionSkeleton from './components/ui/CollectionSkeleton.vue'
 import { host, setupHost } from './host'
+import { followInternalLink, goBack } from './navigation'
+const router = useRouter()
 const ready = shallowRef(false)
 const error = shallowRef('')
 const loading = shallowRef(true)
 let cleanup = () => {}
 onMounted(async () => {
-  cleanup = setupHost()
+  const stopHost = setupHost(() => goBack(router))
+  const follow = (event: MouseEvent) => followInternalLink(router, event)
+  document.addEventListener('click', follow)
+  cleanup = () => {
+    stopHost()
+    document.removeEventListener('click', follow)
+  }
   try {
     await api('/session')
     ready.value = true

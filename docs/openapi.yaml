@@ -69,7 +69,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
   /v1/collections/{id}/revisions:
     get:
-      summary: List retained versions of a saved collection, newest first
+      summary: List retained versions across saved source scopes of the same collection identity, newest first
       parameters:
         - { $ref: "#/components/parameters/ID" }
         - { in: query, name: cursor, schema: { type: string } }
@@ -201,8 +201,16 @@ paths:
   /v1/collections:
     get:
       summary: List this tenant's collection, newest first
-      description: Cookie sessions always use filtered collection pagination. Bearer requests with no filter parameters retain legacy cursor semantics. Filtered cursors are bound to the filter values and include their own sorting anchor.
+      description: Cookie sessions always use filtered collection pagination. Bearer requests with no filter parameters retain legacy cursor semantics. Filtered cursors are bound to the filter values and include their own sorting anchor. Saved source scopes with the same platform, kind, object scope and external ID appear once, using the latest captured snapshot. Storage includes all of this tenant's saved source scopes.
       parameters:
+        - in: query
+          name: related_to
+          schema: { type: string, format: uuid }
+          description: Saved collection whose graph identity is related to the returned collections. Matches either direction across this tenant's saved source scopes and excludes the requested collection.
+        - in: query
+          name: entity_type
+          schema: { type: string }
+          description: Adapter-declared root entity type, for example x.post or x.profile.
         - in: query
           name: author
           style: form
@@ -280,6 +288,10 @@ paths:
                       items: { $ref: "#/components/schemas/Collection" },
                     }
                   next_cursor: { type: string }
+                  total_storage_bytes:
+                    type: integer
+                    format: int64
+                    description: Present with related_to. Sum of related collection storage across all pages and saved source scopes, restricted by entity_type; other display filters do not change this total. Shared blobs are deduplicated within each source collection.
                   previous_cursor: { type: string }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -480,6 +492,10 @@ components:
       properties:
         id: { type: string, format: uuid }
         version_id: { type: string, format: uuid }
+        saved_collection_id:
+          type: string
+          format: uuid
+          description: Current tenant's saved collection for this entity, resolved at read time.
         key: { type: string }
         type: { type: string, description: Adapter-defined entity type }
         external_id: { type: string }
@@ -491,6 +507,15 @@ components:
           }
         resource_indices: { type: array, items: { type: integer, minimum: 0 } }
         assets: { type: array, items: { $ref: "#/components/schemas/Asset" } }
+    IncomingRelation:
+      type: object
+      required: [type, entity]
+      properties:
+        type: { type: string, enum: [reposted, quoted] }
+        entity: { $ref: "#/components/schemas/Entity" }
+        author:
+          allOf: [{ $ref: "#/components/schemas/Entity" }]
+          description: Optional author connected by authored_by in the selected source snapshot. Saved profile links are restricted to the current tenant.
     EntityGraph:
       type: object
       properties:
@@ -521,6 +546,14 @@ components:
     Collection:
       type: object
       properties:
+        incoming_relations:
+          type: array
+          items: { $ref: "#/components/schemas/IncomingRelation" }
+          description: Detail-only view of incoming reposted and quoted relations retained in the current tenant's saved history. Sources are deduplicated by stable entity identity and relation type, using their latest saved entity data. Does not modify the captured graph.
+        relation_types:
+          type: array
+          items: { type: string }
+          description: Adapter graph relation kinds connecting this collection to related_to, including relations retained in older profile timeline snapshots.
         storage_bytes:
           type: integer
           format: int64

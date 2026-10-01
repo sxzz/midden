@@ -2,7 +2,17 @@
 import MediaPreview from './MediaPreview.vue'
 import EyeIcon from './ui/EyeIcon.vue'
 import type { Asset } from '../api'
-export type AlbumTile = { key: string; asset: Asset; hidden: boolean }
+export type AlbumTile = {
+  key: string
+  asset: Asset
+  hidden: boolean
+  caption?: {
+    labels: string
+    text: string
+    quote: string
+    quoteAuthor?: string
+  }
+}
 defineProps<{ tiles: AlbumTile[]; loading?: boolean }>()
 defineEmits<{ select: [key: string] }>()
 const isVideo = (asset: Asset) => !!asset.mime?.startsWith('video/')
@@ -40,15 +50,43 @@ const placeholders = 12
       :aria-label="label(tile)"
       @click="$emit('select', tile.key)"
     >
-      <MediaPreview :asset="tile.asset" />
-      <span v-if="isVideo(tile.asset)" class="play" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="currentColor">
-          <path d="M8 5.5v13l11-6.5z" />
-        </svg>
+      <span class="media">
+        <MediaPreview :asset="tile.asset" />
+        <span v-if="isVideo(tile.asset)" class="play" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8 5.5v13l11-6.5z" />
+          </svg>
+        </span>
+        <span v-if="tile.hidden" class="veil" aria-hidden="true"
+          ><EyeIcon
+        /></span>
       </span>
-      <span v-if="tile.hidden" class="veil" aria-hidden="true"
-        ><EyeIcon
-      /></span>
+      <span
+        v-if="tile.caption"
+        class="caption"
+        :title="
+          [
+            tile.caption.labels,
+            tile.caption.text,
+            [tile.caption.quoteAuthor, tile.caption.quote]
+              .filter(Boolean)
+              .join('：'),
+          ]
+            .filter(Boolean)
+            .join(' · ')
+        "
+      >
+        <span v-if="tile.caption.labels" class="relation-label">{{
+          tile.caption.labels
+        }}</span>
+        <span class="caption-text">{{ tile.caption.text }}</span>
+        <span v-if="tile.caption.quote" class="quote"
+          ><span class="quote-label">引用的帖子</span
+          ><span v-if="tile.caption.quoteAuthor" class="quote-author"
+            >{{ tile.caption.quoteAuthor }}：</span
+          >{{ tile.caption.quote }}</span
+        >
+      </span>
     </button>
   </div>
 </template>
@@ -65,11 +103,52 @@ const placeholders = 12
   display: block;
   width: 100%;
   aspect-ratio: 1;
+  text-align: left;
   overflow: hidden;
   background: var(--fill);
 }
 .tile.skeleton {
+  aspect-ratio: 1;
   border-radius: 0;
+}
+.media {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  overflow: hidden;
+}
+.caption {
+  position: absolute;
+  inset: auto 0 0;
+  display: grid;
+  gap: 2px;
+  padding: 14px 6px 5px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+  color: white;
+  font-size: 11px;
+  line-height: 1.3;
+  pointer-events: none;
+}
+.caption-text,
+.quote {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.relation-label {
+  font-weight: 600;
+}
+.quote {
+  opacity: 0.9;
+}
+.quote-label {
+  margin-right: 4px;
+  font-weight: 600;
+}
+.quote-author {
+  font-weight: 600;
 }
 .tile :deep(.image-shell),
 .tile :deep(video) {

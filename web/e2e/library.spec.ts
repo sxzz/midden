@@ -166,7 +166,7 @@ test('sensitive image stays blurred until revealed and opens inside the page', a
   })
   await page.goto('/app/')
   // Sensitive thumbnails and detail previews must remain blurred until revealed.
-  await expect(page.getByText('1 张图片')).toBeVisible()
+  await expect(page.locator('.thumbs img')).toBeVisible()
   await expect(page.locator('.thumbs img')).toHaveCSS('filter', 'blur(8px)')
   await page
     .getByRole('button', { name: /测试作者/ })

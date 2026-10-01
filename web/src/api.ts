@@ -24,6 +24,9 @@ export interface Entity {
   assets?: Asset[]
 }
 export interface Collection {
+  /** `author` is the profile the source snapshot attributes the entity to. */
+  incoming_relations?: { type: string; entity: Entity; author?: Entity }[]
+  relation_types?: string[]
   storage_bytes?: number
   id: string
   url: string
@@ -49,6 +52,7 @@ export interface Author {
   name: string
 }
 export interface Page<T> {
+  total_storage_bytes?: number
   items: T[]
   next_cursor?: string
 }

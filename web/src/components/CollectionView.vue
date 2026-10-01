@@ -18,6 +18,9 @@ const props = defineProps<{
   error: string
   next: string
   usage?: Usage
+  hideFilters?: boolean
+  /** Display name of the account this list belongs to, for its reposts. */
+  repostedBy?: string
 }>()
 const emit = defineEmits<{
   search: [query: string]
@@ -78,7 +81,11 @@ const storage = computed(() =>
 
 <template>
   <p v-if="storage" class="storage">{{ storage }}</p>
-  <CollectionFilters :query="query" @search="$emit('search', $event)" />
+  <CollectionFilters
+    v-if="!hideFilters"
+    :query="query"
+    @search="$emit('search', $event)"
+  />
   <div class="layout-bar">
     <LibraryLayoutToggle
       :model-value="layout"
@@ -111,6 +118,7 @@ const storage = computed(() =>
         :collection="a"
         :sort="sort"
         :show-sensitive="showSensitive"
+        :reposted-by="repostedBy"
         @open="$emit('open', $event)"
       />
     </ListSection>

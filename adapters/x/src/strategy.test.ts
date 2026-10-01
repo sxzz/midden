@@ -440,3 +440,45 @@ test("public timeline always uses FxTwitter public instance with a selected acco
   );
   assert.equal(privateCalls, 0);
 });
+
+test("full author hydration preserves post mentions and captures mentions from the richer bio", async () => {
+  const { normalize } = await import("./provider.js");
+  const strategy = new CaptureStrategy(
+    async () =>
+      normalize(
+        {
+          type: "status",
+          id: "42",
+          text: "Hi @Mentioned",
+          author: user,
+          media: { all: [] },
+        },
+        "42",
+        "fxtwitter",
+        Visibility.VISIBILITY_PUBLIC,
+      ),
+    async (id) =>
+      normalizeProfile(
+        { ...user, description: "With @BioFriend" },
+        id,
+        "fxtwitter",
+      ),
+  );
+  const result = await strategy.fetch(
+    request("post", "fxtwitter"),
+    AbortSignal.timeout(1000),
+  );
+  assert.deepEqual(
+    new Set(result.relatedTargets.map((target) => target.url)),
+    new Set([
+      "https://x.com/i/user/123",
+      "https://x.com/mentioned",
+      "https://x.com/biofriend",
+    ]),
+  );
+  assert.equal(
+    result.graph!.relations.filter((relation) => relation.type === "mentions")
+      .length,
+    2,
+  );
+});

@@ -116,7 +116,7 @@ test('Chinese filters support multiple media, date bounds and storage order', as
     })
   })
   await page.goto('/app/')
-  await expect(page.locator('.row .meta')).toContainText('2.0 MB')
+  await expect(page.locator('.row .storage')).toContainText('2.0 MB')
   await page.getByRole('button', { name: /^筛选/ }).click()
   await expect(page.locator('summary[aria-label="类型"]')).toContainText(
     'X 帖子',

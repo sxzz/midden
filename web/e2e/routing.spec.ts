@@ -67,3 +67,55 @@ for (const back of ['button', 'history'] as const) {
     }
   })
 }
+
+test('Telegram back from a directly opened collection returns home', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const noop = () => {}
+    Object.assign(globalThis, {
+      Telegram: {
+        WebApp: {
+          initData: 'test',
+          themeParams: {},
+          colorScheme: 'light',
+          ready: noop,
+          expand: noop,
+          onEvent: noop,
+          offEvent: noop,
+          BackButton: {
+            show: noop,
+            hide: noop,
+            offClick: noop,
+            onClick: (back: () => void) => {
+              Object.assign(globalThis, { telegramBack: back })
+            },
+          },
+        },
+      },
+    })
+  })
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    return r.fulfill({
+      json:
+        path === '/v1/collections' || path.endsWith('/revisions')
+          ? { items: [] }
+          : path === `/v1/collections/${items[0]!.id}`
+            ? items[0]
+            : path === '/v1/tags'
+              ? []
+              : path.endsWith('/annotation')
+                ? { note: '', tags: [] }
+                : {},
+    })
+  })
+  await page.goto(`/app/#/collection/${items[0]!.id}`)
+  await expect(page.locator('h1')).toHaveText('收藏详情')
+  await page.evaluate(() =>
+    (globalThis as unknown as { telegramBack: () => void }).telegramBack(),
+  )
+  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page).toHaveURL(/#\/$/)
+})

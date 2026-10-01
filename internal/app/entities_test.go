@@ -277,3 +277,22 @@ func TestMetadataRawIsolationAndRetention(t *testing.T) {
 		}
 	}
 }
+
+func TestEntityGraphAllowsCollectionPageWithBoundedSize(t *testing.T) {
+	f := &fakeAdapter{graph: &pb.EntityGraph{}, entityTypes: []*pb.EntityType{{Name: "notes.item", JsonSchema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}`)}}}
+	s := &Service{Adapter: f}
+	r := &pb.FetchResponse{ProviderId: "fxtwitter", ExternalId: "0", Graph: &pb.EntityGraph{Root: "item_0"}}
+	for i := range 512 {
+		r.Graph.Entities = append(r.Graph.Entities, &pb.Entity{Key: fmt.Sprintf("item_%d", i), Type: "notes.item", ExternalId: fmt.Sprint(i), DataJson: []byte(`{}`), ContextOnly: i > 0})
+		if i > 0 {
+			r.Graph.Relations = append(r.Graph.Relations, &pb.EntityRelation{Source: "item_0", Target: fmt.Sprintf("item_%d", i), Type: "contains"})
+		}
+	}
+	if _, err := s.entityGraph(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	r.Graph.Entities = append(r.Graph.Entities, &pb.Entity{Key: "overflow", Type: "notes.item", ExternalId: "overflow", DataJson: []byte(`{}`)})
+	if _, err := s.entityGraph(context.Background(), r); err == nil {
+		t.Fatal("unbounded entity graph accepted")
+	}
+}

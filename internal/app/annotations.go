@@ -56,10 +56,15 @@ func pruneTags(ctx context.Context, tx pgx.Tx) error {
 
 func readAnnotation(ctx context.Context, tx pgx.Tx, id string) (a Annotation, err error) {
 	a.Tags = []Tag{}
-	if err = tx.QueryRow(ctx, `SELECT note FROM tenant_collections WHERE collection_id=$1`, id).Scan(&a.Note); err != nil {
-		return
+	ids, err := savedIdentityIDs(ctx, tx, id)
+	if err != nil {
+		return a, err
 	}
-	rows, err := tx.Query(ctx, `SELECT t.id,t.name FROM tags t JOIN collection_tags ct ON ct.tenant_id=t.tenant_id AND ct.tag_id=t.id WHERE ct.collection_id=$1 ORDER BY t.name,t.id`, id)
+	// Retain distinct existing notes when formerly separate captures are unified.
+	if err = tx.QueryRow(ctx, `SELECT coalesce(string_agg(note,E'\n\n' ORDER BY first_saved,note),'') FROM (SELECT note,min(created_at) first_saved FROM tenant_collections WHERE collection_id=ANY($1::uuid[]) AND note<>'' GROUP BY note) notes`, ids).Scan(&a.Note); err != nil {
+		return a, err
+	}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT t.id,t.name FROM tags t JOIN collection_tags ct ON ct.tenant_id=t.tenant_id AND ct.tag_id=t.id WHERE ct.collection_id=ANY($1::uuid[]) ORDER BY t.name,t.id`, ids)
 	if err != nil {
 		return a, err
 	}
@@ -112,12 +117,12 @@ func (s *Service) UpdateAnnotation(ctx context.Context, tenant, id string, in An
 		if e := lockTenant(ctx, tx, tenant); e != nil {
 			return e
 		}
-		var exists string
-		if e := tx.QueryRow(ctx, `SELECT collection_id FROM tenant_collections WHERE collection_id=$1 FOR UPDATE`, id).Scan(&exists); e != nil {
+		members, e := savedIdentityIDs(ctx, tx, id)
+		if e != nil {
 			return e
 		}
 		if in.Note != nil {
-			if _, e := tx.Exec(ctx, `UPDATE tenant_collections SET note=$2 WHERE collection_id=$1`, id, *in.Note); e != nil {
+			if _, e := tx.Exec(ctx, `UPDATE tenant_collections SET note=$2 WHERE collection_id=ANY($1::uuid[])`, members, *in.Note); e != nil {
 				return e
 			}
 		}
@@ -142,11 +147,11 @@ func (s *Service) UpdateAnnotation(ctx context.Context, tenant, id string, in An
 					return domain.ErrNotFound
 				}
 			}
-			if _, e := tx.Exec(ctx, `DELETE FROM collection_tags WHERE collection_id=$1`, id); e != nil {
+			if _, e := tx.Exec(ctx, `DELETE FROM collection_tags WHERE collection_id=ANY($1::uuid[])`, members); e != nil {
 				return e
 			}
 			for _, tag := range *in.TagIDs {
-				if _, e := tx.Exec(ctx, `INSERT INTO collection_tags(tenant_id,collection_id,tag_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, tenant, id, tag); e != nil {
+				if _, e := tx.Exec(ctx, `INSERT INTO collection_tags(tenant_id,collection_id,tag_id) SELECT $1,unnest($2::uuid[]),$3 ON CONFLICT DO NOTHING`, tenant, members, tag); e != nil {
 					return e
 				}
 			}
@@ -154,7 +159,6 @@ func (s *Service) UpdateAnnotation(ctx context.Context, tenant, id string, in An
 		if e := pruneTags(ctx, tx); e != nil {
 			return e
 		}
-		var e error
 		a, e = readAnnotation(ctx, tx, id)
 		return e
 	})

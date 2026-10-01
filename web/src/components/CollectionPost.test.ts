@@ -78,7 +78,8 @@ describe('Vapor collection rendering', () => {
     expect(el.querySelector('img')?.getAttribute('src')).toBe(
       '/v1/assets/m2?inline=1',
     )
-    expect(el.textContent).toContain('1 张图片')
+    // The thumbnail is the summary; a row no longer counts the media in words.
+    expect(el.textContent).not.toContain('1 张图片')
   })
   it("keeps storage states out of the reader's way", () => {
     const el = mount(CollectionPost, {

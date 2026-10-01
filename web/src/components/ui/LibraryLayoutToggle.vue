@@ -17,6 +17,8 @@ const options: { value: Layout; label: string }[] = [
       class="option"
       :class="{ on: modelValue === option.value }"
       :aria-pressed="modelValue === option.value"
+      :aria-label="option.label"
+      :title="option.label"
       @click="emit('update:modelValue', option.value)"
     >
       <svg
@@ -40,7 +42,6 @@ const options: { value: Layout; label: string }[] = [
           <rect x="13.5" y="13.5" width="7" height="7" rx="1.4" />
         </template>
       </svg>
-      {{ option.label }}
     </button>
   </div>
 </template>
@@ -58,10 +59,11 @@ const options: { value: Layout; label: string }[] = [
   position: relative;
   display: flex;
   align-items: center;
-  gap: 5px;
-  /* The pill is 36px tall, but the tap target stays a full 44px. */
-  min-height: 36px;
-  padding: 0 13px;
+  justify-content: center;
+  /* Keep a 44px tap target around the compact visual control. */
+  min-height: 30px;
+  width: 36px;
+  padding: 0;
   border-radius: 999px;
   color: var(--subtle);
   font-size: 14px;
@@ -74,7 +76,8 @@ const options: { value: Layout; label: string }[] = [
 .option::before {
   content: '';
   position: absolute;
-  inset-block: -4px;
+  inset-block: -7px;
+  inset-inline: 0;
 }
 .option.on {
   background: var(--card);
@@ -86,8 +89,8 @@ const options: { value: Layout; label: string }[] = [
   outline-offset: 1px;
 }
 .icon {
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
 }
 </style>

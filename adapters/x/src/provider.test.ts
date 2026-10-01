@@ -404,3 +404,117 @@ for (const type of ["photo", "video"] as const) {
     assert.notEqual(resource().immutableKey, fallback);
   });
 }
+
+test("session quote capture retains quoted author, relation and target through GraphQL normalization", async () => {
+  const tweet = (id: string, author: string, text: string): any => ({
+    __typename: "Tweet",
+    rest_id: id,
+    core: {
+      user_results: {
+        result: {
+          __typename: "User",
+          rest_id: author,
+          legacy: {
+            screen_name: `user${author}`,
+            name: `User ${author}`,
+            protected: false,
+          },
+        },
+      },
+    },
+    legacy: {
+      id_str: id,
+      full_text: text,
+      created_at: "Mon Jan 01 00:00:00 +0000 2024",
+      entities: { urls: [], hashtags: [], user_mentions: [] },
+      extended_entities: { media: [] },
+    },
+  });
+  const raw = tweet("900123", "42", "quoting another post");
+  raw.legacy.quoted_status_id_str = "900124";
+  raw.quoted_status_result = {
+    result: tweet("900124", "43", "quoted original"),
+  };
+  const host = {
+    t: (key: string) => key,
+    twitterProxy: {
+      fetch: async () => {
+        throw new Error("Unexpected extra request");
+      },
+    },
+  };
+  const result = await parseSessionResult("900123", structuredClone(raw), host);
+  const reference = result.graph!.entities.find(
+    (e) => e.externalId === "900124",
+  )!;
+  assert.ok(reference);
+  assert.equal(result.visibility, Visibility.VISIBILITY_PUBLIC);
+  assert.ok(
+    result.graph!.relations.some(
+      (r) =>
+        r.source === "post" &&
+        r.target === reference.key &&
+        r.type === "quoted",
+    ),
+  );
+  assert.ok(
+    result.relatedTargets.some(
+      (t) => t.url === "https://x.com/i/web/status/900124",
+    ),
+  );
+  assert.ok(
+    result.relatedTargets.some((t) => t.url === "https://x.com/i/user/43"),
+  );
+  raw.quoted_status_result.result.core.user_results.result.legacy.protected = true;
+  assert.equal(
+    (await parseSessionResult("900123", structuredClone(raw), host)).visibility,
+    Visibility.VISIBILITY_PRIVATE,
+  );
+  await assert.rejects(
+    () => parseSessionResult("900125", structuredClone(raw), host),
+    /invalid provider post/,
+  );
+});
+
+test("public provider rejects a protected embedded quote or repost", async () => {
+  for (const field of ["quote", "repost"]) {
+    const server = httpServer((_req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          code: 200,
+          status: {
+            type: "status",
+            id: "20",
+            text: "root",
+            media: { all: [] },
+            author: { protected: false },
+            [field]: {
+              type: "status",
+              id: "21",
+              text: "private",
+              author: { protected: true },
+            },
+          },
+        }),
+      );
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    try {
+      const address = server.address() as any;
+      await assert.rejects(
+        () =>
+          fetchPublic(
+            "20",
+            AbortSignal.timeout(2000),
+            `http://127.0.0.1:${address.port}`,
+          ),
+        /cannot save private posts/,
+      );
+    } finally {
+      server.close();
+    }
+  }
+});

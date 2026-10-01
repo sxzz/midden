@@ -16,6 +16,7 @@ func (s *Service) resolveCaptureScope(ctx context.Context, tx pgx.Tx, tenant, ci
 	if e := tx.QueryRow(ctx, `SELECT a.id,a.external_id,a.url,c.provider_id,coalesce(c.connection_id::text,''),coalesce(c.refresh_from::text,a.id::text),a.platform,a.kind,a.object_scope FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.id=$1`, cid).Scan(&old, &external, &url, &provider, &connection, &savedSource, &platform, &kind, &objectScope); e != nil {
 		return e
 	}
+	requestedExternal := external
 	if canonical != nil {
 		external = canonical.ExternalId
 		url = canonical.Url
@@ -35,6 +36,15 @@ func (s *Service) resolveCaptureScope(ctx context.Context, tx pgx.Tx, tenant, ci
 	e := tx.QueryRow(ctx, `INSERT INTO collections(tenant_id,visibility,external_id,url,provider_id,scope,platform,kind,object_scope) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(data_scope,platform,scope,kind,object_scope,external_id) DO UPDATE SET unreferenced_at=collections.unreferenced_at RETURNING id`, tenant, visibility, external, url, provider, scope, platform, kind, objectScope).Scan(&target)
 	if e != nil {
 		return e
+	}
+	// Preserve the adapter's alias without rewriting historical entity snapshots.
+	// The final visibility and full collection identity keep private aliases isolated.
+	if requestedExternal != external {
+		if _, e = tx.Exec(ctx, `INSERT INTO collection_identity_aliases(tenant_id,visibility,platform,scope,kind,object_scope,external_id,collection_id)
+ SELECT tenant_id,visibility,platform,scope,kind,object_scope,$2,id FROM collections WHERE id=$1
+ ON CONFLICT(data_scope,platform,scope,kind,object_scope,external_id) DO UPDATE SET collection_id=excluded.collection_id`, target, requestedExternal); e != nil {
+			return e
+		}
 	}
 	// A queued capture has no resources/revisions, so changing its scope here cannot expose old content.
 	if _, e = tx.Exec(ctx, `UPDATE captures SET collection_id=$2,visibility=$3 WHERE id=$1`, cid, target, visibility); e != nil {

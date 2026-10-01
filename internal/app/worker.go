@@ -541,7 +541,9 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 			return e
 		}
 		if previousCollection != nil && *previousCollection != aid {
-			if _, e = tx.Exec(ctx, `DELETE FROM tenant_collections WHERE collection_id=$1`, *previousCollection); e != nil {
+			// A change of source permissions is another historical snapshot of
+			// the same logical collection. Preserve completed saved history.
+			if _, e = tx.Exec(ctx, `DELETE FROM tenant_collections WHERE collection_id=$1 AND EXISTS(SELECT FROM collections WHERE id=$1 AND current_revision IS NULL)`, *previousCollection); e != nil {
 				return e
 			}
 			if _, e = tx.Exec(ctx, `SELECT mark_unreferenced($1)`, *previousCollection); e != nil {

@@ -2,7 +2,7 @@ import { expect, it } from 'vitest'
 import { safeURL, type Collection } from './api'
 import {
   groupCollections,
-  mediaSummary,
+  mentionParts,
   present,
   shortDate,
   warningList,
@@ -123,16 +123,6 @@ it('writes list timestamps the way the chat list does', () => {
   )
   expect(shortDate(undefined, now)).toBe('')
 })
-it('counts media without naming storage internals', () => {
-  expect(
-    mediaSummary([
-      { id: 'a', state: 'ready', mime: 'image/png', sensitive: false },
-      { id: 'b', state: 'ready', mime: 'video/mp4', sensitive: false },
-      { id: 'c', state: 'failed', mime: 'image/png', sensitive: false },
-    ]),
-  ).toBe('1 张图片 · 1 段视频')
-  expect(mediaSummary([])).toBe('')
-})
 it('translates adapter warnings and drops duplicates', () => {
   expect(
     warningList([
@@ -186,4 +176,24 @@ it('shows the exact profile UID and collection UUID in metadata', () => {
     { key: 'uuid', label: 'UUID', value: 'post-collection' },
   ])
   expect(present(post).body).toBe('text')
+})
+
+it('links saved mention identities without linking emails or unsaved profiles', () => {
+  const collection = xProfile()
+  collection.graph!.entities.push(
+    {
+      key: 'friend',
+      type: 'x.profile',
+      data: { username: 'Friend' },
+      saved_collection_id: 'friend-id',
+    },
+    { key: 'unknown', type: 'x.profile', data: { username: 'unknown' } },
+  )
+  expect(
+    mentionParts(collection, 'Hello @FRIEND! @unknown mail@friend.test'),
+  ).toEqual([
+    { text: 'Hello ' },
+    { text: '@FRIEND', href: '#/collection/friend-id' },
+    { text: '! @unknown mail@friend.test' },
+  ])
 })

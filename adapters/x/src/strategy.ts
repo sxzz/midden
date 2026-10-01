@@ -1,3 +1,4 @@
+import { attachMentions } from "./entities.js";
 import { preferOriginalAvatars } from "./avatar.js";
 import { status } from "@grpc/grpc-js";
 import { fetchPublic, ProviderError } from "./provider.js";
@@ -240,6 +241,13 @@ export class CaptureStrategy {
         (e) => e.key === profile.graph!.root,
       )!;
       author.dataJson = node.dataJson;
+      const data = JSON.parse(Buffer.from(node.dataJson).toString());
+      attachMentions(
+        result,
+        author.key,
+        data.metadata?.description,
+        data.metadata?.raw_description?.facets,
+      );
       author.resourceIndices = profile.resources.map((resource) => {
         let i = result.resources.findIndex(
           (r) => r.url === resource.url && r.purpose === resource.purpose,
@@ -252,8 +260,13 @@ export class CaptureStrategy {
       });
     }
     result.sourceResponses.push(...profile.sourceResponses);
-    result.relatedTargets = [
-      { url: profile.canonicalTarget!.url, refreshAfterSeconds: 60 },
-    ];
+    const targets = new Map(
+      result.relatedTargets.map((target) => [target.url, target]),
+    );
+    targets.set(profile.canonicalTarget!.url, {
+      url: profile.canonicalTarget!.url,
+      refreshAfterSeconds: 60,
+    });
+    result.relatedTargets = [...targets.values()];
   }
 }

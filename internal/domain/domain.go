@@ -132,27 +132,35 @@ type SourceResponse struct {
 	CreatedAt      time.Time `json:"created_at"`
 	Body           []byte    `json:"-"`
 }
+type IncomingRelation struct {
+	Type   string  `json:"type"`
+	Entity Entity  `json:"entity"`
+	Author *Entity `json:"author,omitempty"`
+}
+
 type Collection struct {
-	StorageBytes   int64        `json:"storage_bytes"`
-	AuthorName     string       `json:"author_name,omitempty"`
-	PublishedAt    string       `json:"published_at,omitempty"`
-	Summary        string       `json:"summary,omitempty"`
-	Graph          *EntityGraph `json:"graph,omitempty"`
-	Visibility     string       `json:"visibility"`
-	ID             string       `json:"id"`
-	URL            string       `json:"url"`
-	ExternalID     string       `json:"external_id"`
-	ProviderID     string       `json:"provider_id"`
-	AccessScope    string       `json:"access_scope"`
-	RevisionID     string       `json:"revision_id"`
-	Text           string       `json:"text"`
-	TextKind       string       `json:"text_kind"`
-	TextSource     string       `json:"text_source,omitempty"`
-	AdapterVersion string       `json:"adapter_version"`
-	Warnings       []string     `json:"warnings"`
-	Assets         []Asset      `json:"assets"`
-	ObservedAt     time.Time    `json:"observed_at"`
-	CreatedAt      time.Time    `json:"created_at"`
+	IncomingRelations []IncomingRelation `json:"incoming_relations,omitempty"`
+	RelationTypes     []string           `json:"relation_types,omitempty"`
+	StorageBytes      int64              `json:"storage_bytes"`
+	AuthorName        string             `json:"author_name,omitempty"`
+	PublishedAt       string             `json:"published_at,omitempty"`
+	Summary           string             `json:"summary,omitempty"`
+	Graph             *EntityGraph       `json:"graph,omitempty"`
+	Visibility        string             `json:"visibility"`
+	ID                string             `json:"id"`
+	URL               string             `json:"url"`
+	ExternalID        string             `json:"external_id"`
+	ProviderID        string             `json:"provider_id"`
+	AccessScope       string             `json:"access_scope"`
+	RevisionID        string             `json:"revision_id"`
+	Text              string             `json:"text"`
+	TextKind          string             `json:"text_kind"`
+	TextSource        string             `json:"text_source,omitempty"`
+	AdapterVersion    string             `json:"adapter_version"`
+	Warnings          []string           `json:"warnings"`
+	Assets            []Asset            `json:"assets"`
+	ObservedAt        time.Time          `json:"observed_at"`
+	CreatedAt         time.Time          `json:"created_at"`
 }
 
 type Page struct {

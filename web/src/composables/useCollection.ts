@@ -3,6 +3,7 @@ import { api, errorText, type Collection, type Page } from '../api'
 export function useCollection() {
   const items = shallowRef<Collection[]>([])
   const next = shallowRef('')
+  const totalStorageBytes = shallowRef<number>()
   const loading = shallowRef(false)
   const error = shallowRef('')
   let query = ''
@@ -18,6 +19,7 @@ export function useCollection() {
     if (!append) {
       items.value = []
       next.value = ''
+      totalStorageBytes.value = undefined
     }
     query = params
     const q = new URLSearchParams(params)
@@ -31,6 +33,7 @@ export function useCollection() {
       if (version !== generation) return
       items.value = append ? [...items.value, ...p.items] : p.items
       next.value = p.next_cursor || ''
+      totalStorageBytes.value = p.total_storage_bytes
     } catch (e) {
       if (
         version === generation &&
@@ -44,6 +47,7 @@ export function useCollection() {
   onUnmounted(() => controller?.abort())
   return {
     items,
+    totalStorageBytes,
     next,
     loading,
     error,

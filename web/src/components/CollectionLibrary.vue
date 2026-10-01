@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, shallowRef, watch } from 'vue'
-import { RouterView, useRoute, useRouter } from 'vue-router'
+import {
+  RouterView,
+  useRoute,
+  useRouter,
+  type RouteLocationNormalized,
+} from 'vue-router'
 import { api, type Collection, type Usage } from '../api'
 import { useCollection } from '../composables/useCollection'
 import { backButton, host } from '../host'
+import { goBack } from '../navigation'
 const showSensitive = shallowRef(false)
 const route = useRoute()
 const router = useRouter()
@@ -20,8 +26,20 @@ const savedAt = computed(
   () => items.value.find((a) => a.id === id.value)?.saved_at,
 )
 let loadedQuery: string | undefined
-let scroll = 0
 let listRoute = '/'
+// The list plus a few recent details stay alive so going back neither refetches
+// nor rebuilds their scroll, order and paging state. Bounded so a long chain of
+// profile hops cannot keep every visited detail in memory.
+const cachedViews = 6
+const removed = shallowRef<string[]>([])
+/** Cache identity of a view: one entry for the list, one per collection. */
+function viewKey(target: RouteLocationNormalized) {
+  if (target.name === 'collections') return 'collections'
+  const key = String(target.params.id)
+  // Returning to a collection we deleted must reload, not show the cached copy.
+  return removed.value.includes(key) ? `${key}#removed` : key
+}
+const scrolls = new Map<string, number>()
 function apiQuery(raw: string) {
   const q = new URLSearchParams(raw)
   q.delete('layout')
@@ -46,18 +64,20 @@ watch(
   () => route.fullPath,
   async () => {
     backButton(!!id.value)
+    const key = viewKey(route)
     if (!id.value) {
       listRoute = route.fullPath
       query.value = route.fullPath.split('?')[1]?.split('#')[0] || ''
       const effectiveQuery = apiQuery(query.value)
       if (loadedQuery !== effectiveQuery) {
         loadedQuery = effectiveQuery
-        scroll = 0
+        scrolls.set(key, 0)
         await collection.load(effectiveQuery)
       }
-      await nextTick()
-      if (route.name === 'collections') window.scrollTo(0, scroll)
-    } else window.scrollTo(0, 0)
+    }
+    // Wait for the cached view to be reinserted so its height is back.
+    await nextTick()
+    if (viewKey(route) === key) window.scrollTo(0, scrolls.get(key) || 0)
   },
   { immediate: true },
 )
@@ -70,20 +90,24 @@ async function loadUsage() {
 }
 loadUsage()
 const removeGuard = router.beforeEach((_to, from) => {
-  if (from.name === 'collections') scroll = window.scrollY
+  if (from.name) scrolls.set(viewKey(from), window.scrollY)
 })
 onUnmounted(removeGuard)
 function open(id: string) {
   void router.push({ name: 'collection', params: { id } })
 }
 function updated(collection: Collection) {
+  // Match the collection that finished, not whichever detail is on screen: a
+  // capture can report back after the user moved on to another collection.
   items.value = items.value.map((a) =>
-    a.id === id.value ? { ...collection, saved_at: a.saved_at } : a,
+    a.id === collection.id ? { ...collection, saved_at: a.saved_at } : a,
   )
   loadUsage()
 }
 function deleted(id: string) {
   collection.remove(id)
+  removed.value = [...removed.value, id]
+  scrolls.delete(id)
   void router.push(listRoute)
   loadUsage()
 }
@@ -126,7 +150,7 @@ const viewProps = computed(() =>
         v-if="id && standalone"
         type="button"
         class="back"
-        @click="router.push(listRoute)"
+        @click="goBack(router)"
       >
         <span class="chevron" aria-hidden="true">‹</span>返回
       </button>
@@ -157,14 +181,10 @@ const viewProps = computed(() =>
       </button>
     </header>
     <RouterView v-slot="{ Component, route: viewRoute }">
-      <KeepAlive include="CollectionView" :max="1">
+      <KeepAlive :max="cachedViews">
         <component
           :is="Component"
-          :key="
-            viewRoute.name === 'collections'
-              ? 'collections'
-              : viewRoute.params.id
-          "
+          :key="viewKey(viewRoute)"
           v-bind="viewProps"
         />
       </KeepAlive>

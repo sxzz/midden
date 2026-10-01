@@ -24,7 +24,7 @@ func (s *Service) entityGraph(ctx context.Context, r *pb.FetchResponse) (*domain
 		rootID = r.CanonicalTarget.ExternalId
 	}
 	g := r.Graph
-	if len(g.Entities) == 0 || len(g.Entities) > 32 || len(g.Relations) > 128 {
+	if len(g.Entities) == 0 || len(g.Entities) > 512 || len(g.Relations) > 1024 {
 		return nil, &PermanentError{"invalid entity graph size"}
 	}
 	schemas := s.EntitySchemas
@@ -212,6 +212,8 @@ func (s *Service) Entity(ctx context.Context, tenant, id string) (v domain.Entit
 
 // Resolve links at read time: saved membership belongs to the requesting tenant,
 // not to the shared entity snapshot. Only collections rooted at the entity count.
+// Scope-specific snapshots may link across scopes when both the source entity
+// and canonical target are visible and the tenant has saved the target.
 func linkSavedEntities(ctx context.Context, tx pgx.Tx, collections ...*domain.Collection) error {
 	ids := []string{}
 	seen := map[string]bool{}
@@ -231,11 +233,30 @@ func linkSavedEntities(ctx context.Context, tx pgx.Tx, collections ...*domain.Co
 	if len(ids) == 0 {
 		return nil
 	}
-	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (ev.entity_id) ev.entity_id,c.id
- FROM entity_versions ev JOIN revision_entities re ON re.entity_version_id=ev.id AND re.is_root
+	rows, err := tx.Query(ctx, `WITH candidates AS (
+ SELECT source.id AS entity_id,c.id,tc.created_at,0 AS priority
+ FROM entities source
+ JOIN entities target ON (target.platform,target.kind,target.external_id)=(source.platform,source.kind,source.external_id)
+ JOIN entity_versions ev ON ev.entity_id=target.id
+ JOIN revision_entities re ON re.entity_version_id=ev.id AND re.is_root
  JOIN collections c ON c.current_revision=re.revision_id
  JOIN tenant_collections tc ON tc.collection_id=c.id
- WHERE ev.entity_id=ANY($1::uuid[]) ORDER BY ev.entity_id,tc.created_at DESC,c.id`, ids)
+ WHERE source.id=ANY($1::uuid[])
+ UNION ALL
+ SELECT source.id,c.id,tc.created_at,1 AS priority
+ FROM entities source
+ JOIN collection_identity_aliases alias ON alias.external_id=source.external_id
+  AND alias.platform=source.platform
+ JOIN collections c ON c.id=alias.collection_id AND c.platform=alias.platform AND c.scope=alias.scope
+  AND c.data_scope=alias.data_scope AND c.kind=alias.kind AND c.object_scope=alias.object_scope
+ JOIN tenant_collections tc ON tc.collection_id=c.id
+ JOIN revision_entities re ON re.revision_id=c.current_revision AND re.is_root
+ JOIN entity_versions ev ON ev.id=re.entity_version_id
+ JOIN entities target ON target.id=ev.entity_id AND target.kind=source.kind
+  AND target.platform=source.platform
+ WHERE source.id=ANY($1::uuid[])
+ ) SELECT DISTINCT ON (entity_id) entity_id,id FROM candidates
+ ORDER BY entity_id,priority,created_at DESC,id`, ids)
 	if err != nil {
 		return err
 	}

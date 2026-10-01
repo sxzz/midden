@@ -1,9 +1,16 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
 import { assetURL, type Collection } from '../api'
-import { date, present, storageSize, warningList } from '../presentation'
+import {
+  date,
+  mentionParts,
+  present,
+  storageSize,
+  warningList,
+} from '../presentation'
 import MediaGallery from './MediaGallery.vue'
 import MediaViewer from './MediaViewer.vue'
+import PostRelations from './PostRelations.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 const props = defineProps<{
   collection: Collection
@@ -12,6 +19,9 @@ const props = defineProps<{
   showSensitive?: boolean
 }>()
 const view = computed(() => present(props.collection))
+const bodyParts = computed(() =>
+  mentionParts(props.collection, view.value.body),
+)
 /** "Saved at" belongs with the other timestamps, right after the source's
     own publication date, rather than in a separate footnote. */
 const details = computed(() => {
@@ -78,11 +88,19 @@ const warnings = computed(() => warningList(props.collection.warnings))
         <small v-if="view.handle" class="handle">@{{ view.handle }}</small>
       </div>
     </header>
-    <p class="body">{{ view.body }}</p>
+    <p class="body">
+      <template v-for="(part, index) in bodyParts" :key="index"
+        ><a v-if="part.href" :href="part.href" class="mention">{{
+          part.text
+        }}</a
+        ><template v-else>{{ part.text }}</template></template
+      >
+    </p>
     <MediaGallery
       :assets="collection.assets || []"
       :show-sensitive="showSensitive"
     />
+    <PostRelations :collection="collection" />
     <p v-for="warning in warnings" :key="warning" class="warning">
       {{ warning }}
     </p>
@@ -119,6 +137,9 @@ const warnings = computed(() => warningList(props.collection.warnings))
 </template>
 
 <style scoped>
+.mention {
+  color: var(--link);
+}
 .post {
   padding: 14px var(--inset) 16px;
 }

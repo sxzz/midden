@@ -29,8 +29,8 @@ func validateRelatedResult(policy *pb.Provider, r *pb.FetchResponse, platform, k
 		return &PermanentError{"undeclared related capture capability"}
 	}
 	// Bounded fanout for any adapter; never silently truncate an upstream page.
-	if len(r.RelatedTargets) > 200 {
-		return &PermanentError{"related capture page exceeds 200 targets"}
+	if len(r.RelatedTargets) > 512 {
+		return &PermanentError{"related capture page exceeds 512 targets"}
 	}
 	for _, t := range r.RelatedTargets {
 		if t == nil || domain.ValidateURL(t.Url) != nil {
@@ -41,7 +41,7 @@ func validateRelatedResult(policy *pb.Provider, r *pb.FetchResponse, platform, k
 }
 
 // Each submission executes under its own tenant and original provider selection.
-// Child submissions do not expand again and do not send unsolicited channel messages.
+// Automatic submissions never send channel messages; Submit bounds reference expansion.
 func (s *Service) related(ctx context.Context, task store.Task) error {
 	var state, parent, provider, connection, adapterID, parentURL string
 	var automatic, stopped bool
@@ -134,7 +134,29 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 			targets = nil
 		}
 	}
+	var limit uint32
+	var next string
+	var collection bool
+	if err := s.DB.Tx(ctx, task.Tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT s.collection_limit,c.next_page_cursor,c.is_collection FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1`, task.ID).Scan(&limit, &next, &collection)
+	}); err != nil {
+		return err
+	}
+	members := uint32(0)
 	for i, target := range targets {
+		// Collection references (such as author profiles) hydrate alongside
+		// members but must not consume the requested member batch size.
+		member := true
+		if collection && limit > 0 {
+			resolved, resolveErr := scoped.Resolve(ctx, target.Url)
+			if resolveErr != nil {
+				return resolveErr
+			}
+			member = !resolved.Collection
+		}
+		if member {
+			members++
+		}
 		_, err = scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: target.Url, ProviderID: provider, ConnectionID: connection, Automatic: true, RefreshAfterSeconds: target.RefreshAfterSeconds, Key: fmt.Sprintf("related:%s:%d", task.ID, i)})
 		if errors.Is(err, errCollectionStopped) {
 			return nil
@@ -147,15 +169,8 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		}
 	}
 
-	var limit uint32
-	var next string
-	if err := s.DB.Tx(ctx, task.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT s.collection_limit,c.next_page_cursor FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1`, task.ID).Scan(&limit, &next)
-	}); err != nil {
-		return err
-	}
-	if limit > uint32(len(targets)) && len(targets) > 0 && next != "" {
-		remaining := limit - uint32(len(targets))
+	if limit > members && members > 0 && next != "" {
+		remaining := limit - members
 		_, err := scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: parentURL, ProviderID: provider, ConnectionID: connection, PageCursor: next, PageSize: remaining, CollectionLimit: remaining, Key: "batch:" + task.ID})
 		if errors.Is(err, errCollectionStopped) {
 			return nil

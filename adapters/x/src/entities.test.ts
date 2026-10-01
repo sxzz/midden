@@ -141,3 +141,125 @@ test("post engagement is root content, with zero distinct from missing", () => {
     { text: "post" },
   );
 });
+
+test("post and author bio mentions keep graph identities and schedule profile capture", () => {
+  const result = FetchResponse.fromPartial({
+    externalId: "20",
+    text: "Hi @Other and @other; email a@invalid.test",
+  });
+  attachEntities(result, {
+    author: { id: "123", screen_name: "author", description: "with @Bio" },
+    raw_text: { facets: [{ type: "mention", original: "Other", id: "456" }] },
+    reposted_by: { id: "789", screen_name: "reposter", name: "Reposter" },
+  });
+  assert.deepEqual(
+    result.graph!.entities.map((e) => e.externalId),
+    ["20", "123", "456", "handle:bio", "789"],
+  );
+  assert.equal(
+    result.graph!.relations.filter((r) => r.type === "mentions").length,
+    2,
+  );
+  const repost = result.graph!.relations.find((r) => r.type === "reposted")!;
+  assert.equal(
+    result.graph!.entities.find((e) => e.key === repost.source)?.externalId,
+    "789",
+  );
+  assert.equal(repost.target, "post");
+  assert.deepEqual(
+    result.relatedTargets.map((t) => t.url),
+    [
+      "https://x.com/i/user/123",
+      "https://x.com/i/user/456",
+      "https://x.com/bio",
+      "https://x.com/i/user/789",
+    ],
+  );
+});
+
+test("quote and repost references preserve source identity and schedule complete captures", () => {
+  const result = FetchResponse.fromPartial({ externalId: "20", text: "root" });
+  const original = {
+    type: "status",
+    id: "21",
+    text: "original @Friend",
+    created_at: "2026-01-01T00:00:00Z",
+    author: { id: "456", screen_name: "original_author", name: "Original" },
+    raw_text: { facets: [{ type: "mention", original: "Friend", id: "789" }] },
+    media: { all: [{ type: "photo", url: "https://media.test/original.jpg" }] },
+  };
+  attachEntities(result, {
+    author: { id: "123", screen_name: "root_author" },
+    quote: original,
+    repost: original,
+  });
+  const graph = result.graph!;
+  assert.equal(
+    graph.entities.find((e) => e.key === graph.root)?.externalId,
+    "20",
+  );
+  const reference = graph.entities.find(
+    (e) => e.type === "x.post" && e.externalId === "21",
+  )!;
+  assert.equal(graph.entities.filter((e) => e.externalId === "21").length, 1);
+  assert.equal(reference.contextOnly, true);
+  assert.deepEqual(reference.resourceIndices, []);
+  assert.deepEqual(JSON.parse(Buffer.from(reference.dataJson).toString()), {
+    text: "original @Friend",
+    published_at: "2026-01-01T00:00:00.000Z",
+  });
+  for (const type of ["quoted", "reposted"])
+    assert.ok(
+      graph.relations.some(
+        (r) =>
+          r.source === "post" && r.target === reference.key && r.type === type,
+      ),
+    );
+  const authorKey = graph.entities.find((e) => e.externalId === "456")!.key;
+  assert.ok(
+    graph.relations.some(
+      (r) =>
+        r.source === reference.key &&
+        r.target === authorKey &&
+        r.type === "authored_by",
+    ),
+  );
+  assert.equal(
+    result.relatedTargets.filter(
+      (t) => t.url === "https://x.com/i/web/status/21",
+    ).length,
+    1,
+  );
+  assert.ok(
+    result.relatedTargets.some((t) => t.url === "https://x.com/i/user/456"),
+  );
+  assert.ok(
+    result.relatedTargets.some((t) => t.url === "https://x.com/i/user/789"),
+  );
+  assert.equal(result.resources.length, 0);
+});
+
+test("unavailable quotes retain known IDs without inventing content; invalid and cyclic IDs are ignored", () => {
+  const result = FetchResponse.fromPartial({ externalId: "20", text: "root" });
+  const post: any = {
+    id: "20",
+    quote: { type: "tombstone", id: "21" },
+    repost: { id: "not-a-post" },
+  };
+  post.quote.quote = post;
+  attachEntities(result, post);
+  assert.deepEqual(
+    result.graph!.entities.map((e) => e.externalId),
+    ["20", "21"],
+  );
+  assert.deepEqual(result.graph!.relations, [
+    { source: "post", target: "post_1", type: "quoted" },
+  ]);
+  assert.deepEqual(
+    JSON.parse(Buffer.from(result.graph!.entities[1].dataJson).toString()),
+    { text: "" },
+  );
+  assert.deepEqual(result.relatedTargets, [
+    { url: "https://x.com/i/web/status/21", refreshAfterSeconds: 60 },
+  ]);
+});

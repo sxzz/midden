@@ -169,7 +169,7 @@ func TestPausedDeliveryDoesNotContactTelegram(t *testing.T) {
 
 func TestCollectionControls(t *testing.T) {
 	d := channelapi.Delivery{ProgressDetails: &channelapi.CollectionProgress{URL: "https://example.test/profile", CollectionID: "collection", Complete: 1, Next: "cursor", MaxBatch: 1000}}
-	_, keys := collectionProgressMessage("submission", d)
+	_, keys := collectionProgressMessage("submission", d, "https://collection.test/app/")
 	contains := func(keys telegram.Keyboard, action string) bool {
 		for _, row := range keys {
 			for _, b := range row {
@@ -180,16 +180,19 @@ func TestCollectionControls(t *testing.T) {
 		}
 		return false
 	}
+	if keys[0][0].Text != "在 X 查看主页" || keys[len(keys)-1][0].WebApp == nil || keys[len(keys)-1][0].WebApp.URL != "https://collection.test/app/#/collection/collection" {
+		t.Fatal("unclear profile navigation or missing mini app", keys)
+	}
 	if !contains(keys, "/collection_stop") {
 		t.Fatal("missing stop")
 	}
 	d.ProgressDetails.Done = true
-	_, keys = collectionProgressMessage("submission", d)
+	_, keys = collectionProgressMessage("submission", d, "https://collection.test/app/")
 	if contains(keys, "/collection_stop") || !contains(keys, "/more1000") {
 		t.Fatal(keys)
 	}
 	d.ProgressDetails.Stopped = true
-	text, keys := collectionProgressMessage("submission", d)
+	text, keys := collectionProgressMessage("submission", d, "https://collection.test/app/")
 	if !strings.Contains(text, "已中止") || contains(keys, "/more") || contains(keys, "/page_retry") || contains(keys, "/collection_stop") {
 		t.Fatal(text, keys)
 	}
@@ -197,7 +200,7 @@ func TestCollectionControls(t *testing.T) {
 
 func TestCollectionFailureSummary(t *testing.T) {
 	d := channelapi.Delivery{ProgressDetails: &channelapi.CollectionProgress{Done: true, Total: 3, Partial: 2, Failed: 1, Reasons: []channelapi.FailureReason{{Reason: "storage quota exceeded", Count: 2}, {Reason: "account cannot access this post", Count: 1}}}}
-	text, _ := collectionProgressMessage("submission", d)
+	text, _ := collectionProgressMessage("submission", d, "https://collection.test/app/")
 	for _, want := range []string{"内容不完整 2", "失败 1", "进行中 0", "存储配额不足（2 条）", "采集账号无权访问该帖子（1 条）"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q: %s", want, text)

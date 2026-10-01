@@ -442,6 +442,7 @@ const tagFilter = computed({
   color: var(--subtle);
 }
 .separator {
+  color: var(--subtle);
   padding-inline: 6px;
 }
 .toggle {

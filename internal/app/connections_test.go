@@ -196,16 +196,26 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	must(t, db.Tx(ctx, tenants[1], func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM tenant_collections WHERE collection_id=$1`, private.CollectionID).Scan(&count)
 	}))
-	if count != 0 {
-		t.Fatal("old private reference survived public refresh")
+	if count != 1 {
+		t.Fatal("public refresh discarded completed private history")
 	}
-	// Refreshing public content must not re-save a completed private staging collection.
+	history, e := s.Collection(ctx, tenants[1], private.CollectionID)
+	must(t, e)
+	if history.Text != "private content" || len(history.Assets) != 1 {
+		t.Fatal("private historical content or media was lost", history)
+	}
+	mergedPage, e := s.Collections(ctx, tenants[1], CollectionFilter{}, "")
+	must(t, e)
+	if len(mergedPage.Items) != 1 {
+		t.Fatal("cross-scope history appeared as duplicate library entries", len(mergedPage.Items))
+	}
+	// Another refresh must keep the completed private history saved.
 	complete(tenants[1], domain.CaptureInput{RefreshID: restored.CollectionID})
 	must(t, db.Tx(ctx, tenants[1], func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM tenant_collections WHERE collection_id=$1`, private.CollectionID).Scan(&count)
 	}))
-	if count != 0 {
-		t.Fatal("public refresh resurrected old private collection")
+	if count != 1 {
+		t.Fatal("subsequent refresh discarded old private history")
 	}
 	if _, e = s.Collection(ctx, tenants[1], another.CollectionID); e != nil {
 		t.Fatal("unrelated private scope lost")

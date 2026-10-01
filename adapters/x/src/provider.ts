@@ -197,7 +197,19 @@ export async function fetchPublic(
     throw new ProviderError(status.UNAVAILABLE, "invalid provider response");
   if (data.code !== 200)
     throw responseError(data.code, response.headers.get("retry-after"));
-  if (data.status?.author?.protected)
+  const containsProtectedAuthor = (
+    post: any,
+    seen = new Set<any>(),
+  ): boolean => {
+    if (!post || typeof post !== "object" || seen.has(post)) return false;
+    seen.add(post);
+    return (
+      Boolean(post.author?.protected) ||
+      containsProtectedAuthor(post.quote, seen) ||
+      containsProtectedAuthor(post.repost, seen)
+    );
+  };
+  if (containsProtectedAuthor(data.status))
     throw new ProviderError(
       status.FAILED_PRECONDITION,
       "public provider cannot save private posts",

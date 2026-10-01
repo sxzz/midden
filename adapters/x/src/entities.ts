@@ -160,4 +160,170 @@ export function attachEntities(
     });
   }
   result.graph = graph;
+  attachMentions(result, "post", result.text, post.raw_text?.facets);
+  if (graph.entities.some((entity) => entity.key === "author"))
+    attachMentions(
+      result,
+      "author",
+      author.description,
+      author.raw_description?.facets,
+    );
+  if (post.reposted_by?.id) {
+    const key = attachProfileReference(result, post.reposted_by);
+    if (key) addRelation(result, key, "post", "reposted");
+  }
+  attachPostReferences(result, "post", post);
+}
+
+// Embedded posts are context, not complete captures: their media and full
+// history (including further quote/repost links) are fetched independently
+// through relatedTargets. Only direct references belong to this capture.
+function attachPostReferences(
+  result: FetchResponse,
+  source: string,
+  post: any,
+): void {
+  for (const [field, relation] of [
+    ["quote", "quoted"],
+    ["repost", "reposted"],
+  ]) {
+    const referenced = post?.[field];
+    const id = referenced?.id;
+    if (typeof id !== "string" || !/^\d+$/.test(id) || id === result.externalId)
+      continue;
+    let entity = result.graph!.entities.find(
+      (item) => item.type === "x.post" && item.externalId === id,
+    );
+    if (!entity) {
+      const data: Record<string, unknown> = {
+        text: typeof referenced.text === "string" ? referenced.text.trim() : "",
+      };
+      const published =
+        timestamp(referenced.created_at) ||
+        timestamp(referenced.created_timestamp);
+      if (published) data.published_at = published;
+      entity = {
+        key: `post_${result.graph!.entities.length}`,
+        type: "x.post",
+        externalId: id,
+        contextOnly: true,
+        dataJson: Buffer.from(JSON.stringify(data)),
+        resourceIndices: [],
+      };
+      result.graph!.entities.push(entity);
+    }
+    addRelation(result, source, entity.key, relation);
+    const url = `https://x.com/i/web/status/${id}`;
+    if (!result.relatedTargets.some((target) => target.url === url))
+      result.relatedTargets.push({ url, refreshAfterSeconds: 60 });
+    const author = attachProfileReference(result, referenced.author);
+    if (author) addRelation(result, entity.key, author, "authored_by");
+    attachMentions(
+      result,
+      entity.key,
+      referenced.text,
+      referenced.raw_text?.facets,
+    );
+    const reposter = attachProfileReference(result, referenced.reposted_by);
+    if (reposter) addRelation(result, reposter, entity.key, "reposted");
+  }
+}
+
+// References use stable IDs whenever the upstream supplies them. Handle-only
+// mentions are still captured so canonical profile resolution can hydrate them.
+export function attachProfileReference(
+  result: FetchResponse,
+  user: any,
+): string | undefined {
+  const username =
+    typeof user?.screen_name === "string"
+      ? user.screen_name.replace(/^@/, "")
+      : "";
+  const id =
+    typeof user?.id === "string" && /^\d+$/.test(user.id)
+      ? user.id
+      : /^[A-Za-z0-9_]{1,15}$/.test(username)
+        ? `handle:${username.toLowerCase()}`
+        : "";
+  if (!id || !result.graph) return;
+  let entity = result.graph.entities.find(
+    (item) =>
+      item.type === "x.profile" &&
+      (item.externalId === id ||
+        (username &&
+          JSON.parse(
+            Buffer.from(item.dataJson).toString(),
+          ).username?.toLowerCase() === username.toLowerCase())),
+  );
+  if (!entity) {
+    entity = {
+      key: `profile_${result.graph.entities.length}`,
+      type: "x.profile",
+      externalId: id,
+      contextOnly: true,
+      dataJson: Buffer.from(
+        JSON.stringify({
+          username,
+          name: user.name || username,
+          avatar_url: user.avatar_url || "",
+          metadata: {},
+        }),
+      ),
+      resourceIndices: [],
+    };
+    result.graph.entities.push(entity);
+  }
+  if (entity.key === result.graph.root) return entity.key;
+  const url = /^\d+$/.test(entity.externalId)
+    ? `https://x.com/i/user/${entity.externalId}`
+    : `https://x.com/${username.toLowerCase()}`;
+  if (!result.relatedTargets.some((target) => target.url === url))
+    result.relatedTargets.push({ url, refreshAfterSeconds: 3600 });
+  return entity.key;
+}
+
+export function addRelation(
+  result: FetchResponse,
+  source: string,
+  target: string,
+  type: string,
+): void {
+  if (
+    !result.graph!.relations.some(
+      (r) => r.source === source && r.target === target && r.type === type,
+    )
+  )
+    result.graph!.relations.push({ source, target, type });
+}
+
+export function attachMentions(
+  result: FetchResponse,
+  source: string,
+  text: unknown,
+  facets: any,
+): void {
+  const mentions = new Map<string, any>();
+  if (Array.isArray(facets))
+    for (const facet of facets) {
+      if (facet?.type === "mention" && typeof facet.original === "string") {
+        const username = facet.original.replace(/^@/, "");
+        if (/^[A-Za-z0-9_]{1,15}$/.test(username))
+          mentions.set(username.toLowerCase(), {
+            id: facet.id,
+            screen_name: username,
+          });
+      }
+    }
+  if (typeof text === "string")
+    for (const match of text.matchAll(
+      /(?<![\w@./])@([A-Za-z0-9_]{1,15})(?![A-Za-z0-9_])/g,
+    )) {
+      const username = match[1];
+      if (!mentions.has(username.toLowerCase()))
+        mentions.set(username.toLowerCase(), { screen_name: username });
+    }
+  for (const user of mentions.values()) {
+    const key = attachProfileReference(result, user);
+    if (key) addRelation(result, source, key, "mentions");
+  }
 }

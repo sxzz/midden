@@ -291,7 +291,7 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 		return save(channelapi.Ack{Done: true, Progress: w.Progress, MessageID: mid})
 	}
 	if d.ProgressDetails != nil {
-		text, keys := collectionProgressMessage(w.Resource, d)
+		text, keys := collectionProgressMessage(w.Resource, d, r.Config.WebURL)
 		id, e := sender.SendInteractive(ctx, d.Chat, text, mid, buttonsForChat(d.Chat, keys))
 		if e != nil {
 			return e
@@ -326,7 +326,7 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 		parts = deliveryParts(text, a.Assets)
 		keys = collectionButtons(a.ID, a.URL, r.Config.WebURL)
 		if telegram.IsProfileCollection(a) {
-			keys[0][0].Text = "查看主页"
+			keys[0][0].Text = "在 X 查看主页"
 		}
 		if strings.HasPrefix(d.Chat, "-") && a.Visibility == "public" {
 			keys = append(keys, []telegram.Button{{Text: "我也要存", Data: "/save " + a.ID}})
@@ -382,15 +382,15 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 	return save(channelapi.Ack{Done: true, Progress: len(parts), MessageID: mid})
 }
 
-func collectionProgressMessage(id string, d channelapi.Delivery) (string, telegram.Keyboard) {
+func collectionProgressMessage(id string, d channelapi.Delivery, webURL string) (string, telegram.Keyboard) {
 	c := d.ProgressDetails
-	text := fmt.Sprintf("正在保存帖子…\n%s\n\n本次 %d 条：已保存 %d · 内容不完整 %d · 失败 %d · 进行中 %d", c.URL, c.Total, c.Complete, c.Partial, c.Failed, max(0, c.Total-c.Complete-c.Partial-c.Failed))
+	text := fmt.Sprintf("正在采集…\n%s\n\n本次 %d 项：已保存 %d · 内容不完整 %d · 失败 %d · 进行中 %d", c.URL, c.Total, c.Complete, c.Partial, c.Failed, max(0, c.Total-c.Complete-c.Partial-c.Failed))
 	if c.Done {
-		text = strings.Replace(text, "正在保存帖子…", "帖子抓取完成", 1)
+		text = strings.Replace(text, "正在采集…", "采集完成", 1)
 	}
 	if c.Stopped {
-		text = strings.Replace(text, "帖子抓取完成", "帖子抓取已中止", 1)
-		text = strings.Replace(text, "正在保存帖子…", "帖子抓取已中止", 1)
+		text = strings.Replace(text, "采集完成", "采集已中止", 1)
+		text = strings.Replace(text, "正在采集…", "采集已中止", 1)
 	}
 	if d.Job.State == "failed" {
 		text = "帖子列表获取失败\n输入：" + d.Input + "\n" + failureReason(d.Job.Error)
@@ -412,7 +412,7 @@ func collectionProgressMessage(id string, d channelapi.Delivery) (string, telegr
 			text += fmt.Sprintf("\n• %s（%d 条）", string(message), reason.Count)
 		}
 	}
-	keys := telegram.Keyboard{{{Text: "查看主页", URL: c.URL}}}
+	keys := telegram.Keyboard{{{Text: "在 X 查看主页", URL: c.URL}}}
 	if !c.Stopped && c.Done && c.Next != "" {
 		keys = append(keys, []telegram.Button{{Text: "抓取更多", Data: "/more " + id}})
 		if c.MaxBatch >= 1000 {
@@ -425,6 +425,6 @@ func collectionProgressMessage(id string, d channelapi.Delivery) (string, telegr
 	if !c.Done && !c.Stopped {
 		keys = append(keys, []telegram.Button{{Text: "中止", Data: "/collection_stop " + id}})
 	}
-	keys = append(keys, []telegram.Button{{Text: "查看 Profile", Data: "/show " + c.CollectionID}}, []telegram.Button{{Text: "收藏列表", Data: "/list"}})
-	return text, keys
+	keys = append(keys, []telegram.Button{{Text: "在此查看已保存资料", Data: "/show " + c.CollectionID}}, []telegram.Button{{Text: "收藏列表", Data: "/list"}})
+	return text, appendMiniAppButton(keys, c.CollectionID, webURL)
 }

@@ -247,3 +247,46 @@ test("banner cache identity uses the complete URL", () => {
   profile.banner_url += "&version=2";
   assert.notEqual(key(), original);
 });
+
+test("timeline retains repost relations across pages and still collects original posts", async () => {
+  const { collectTimeline } = await import("./profile.js");
+  const profile = normalizeProfile(
+    { ...user, description: "with @Other" },
+    user.id,
+    "fxtwitter",
+  );
+  let calls = 0;
+  await collectTimeline(profile, async () => {
+    calls++;
+    return {
+      code: 200,
+      results: [
+        {
+          type: "status",
+          id: String(calls),
+          text: "original",
+          reposted_by: user,
+        },
+      ],
+      cursor: { bottom: calls === 1 ? "next" : "" },
+    };
+  });
+  assert.equal(calls, 2);
+  assert.deepEqual(
+    profile.graph!.relations.filter((r) => r.type === "reposted"),
+    [
+      { source: "author", target: "timeline_1", type: "reposted" },
+      { source: "author", target: "timeline_2", type: "reposted" },
+    ],
+  );
+  assert.ok(profile.graph!.relations.some((r) => r.type === "mentions"));
+  assert.ok(
+    profile.relatedTargets.some((t) => t.url === "https://x.com/other"),
+  );
+  for (const id of ["1", "2"])
+    assert.ok(
+      profile.relatedTargets.some(
+        (t) => t.url === `https://x.com/i/web/status/${id}`,
+      ),
+    );
+});

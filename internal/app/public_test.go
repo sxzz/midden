@@ -339,8 +339,9 @@ func TestPublicSharing(t *testing.T) {
 	}
 	_, e = s.Asset(ctx, a, pa.Assets[0].ID)
 	must(t, e)
-	_, e = s.Asset(ctx, b, pbCollection.Assets[0].ID)
-	must(t, e)
+	if _, e = s.Asset(ctx, b, pbCollection.Assets[0].ID); e == nil {
+		t.Fatal("deleting the logical collection retained its private-scope asset")
+	}
 	_, e = s.Asset(ctx, b, secondCollection.Assets[0].ID)
 	must(t, e)
 	if _, e = mem.Get(ctx, secondCollection.Assets[0].Key); e != nil {

@@ -360,7 +360,15 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if e != nil {
 			return e
 		}
-		if !in.Automatic && adapter.Supports(policy, adapter.CaptureRelated, 1, 0) {
+		expandRelated := !in.Automatic
+		if in.Automatic && !target.Collection && !target.RefreshOnSubmit && in.ParentSubmission != "" {
+			// A collection's direct child can hydrate its references. Never
+			// recursively expand references of references or automatic collections.
+			if e = tx.QueryRow(ctx, `SELECT s.parent_submission IS NULL OR c.is_collection FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1`, in.ParentSubmission).Scan(&expandRelated); e != nil {
+				return e
+			}
+		}
+		if expandRelated && adapter.Supports(policy, adapter.CaptureRelated, 1, 0) {
 			if _, e = tx.Exec(ctx, `UPDATE submissions SET related_provider=$2,related_connection=nullif($3,'')::uuid,related_adapter=$4,related_state='pending',related_source_collection=$5 WHERE id=$1`, sid, in.ProviderID, in.ConnectionID, desc.AdapterId, aid); e != nil {
 				return e
 			}
@@ -388,23 +396,33 @@ func (s *Service) DeleteCollection(ctx context.Context, tenant, id string) error
 		if e := lockTenant(ctx, tx, tenant); e != nil {
 			return e
 		}
-		var aid string
-		if e := tx.QueryRow(ctx, `SELECT id FROM collections WHERE id=$1 FOR UPDATE`, id).Scan(&aid); e != nil {
-			return e
+		ids, e := savedIdentityIDs(ctx, tx, id)
+		if errors.Is(e, pgx.ErrNoRows) {
+			return domain.ErrNotFound
 		}
-		tag, e := tx.Exec(ctx, `DELETE FROM tenant_collections WHERE tenant_id=$1 AND collection_id=$2`, tenant, id)
 		if e != nil {
 			return e
 		}
-		if tag.RowsAffected() == 0 {
-			return domain.ErrNotFound
+		// Lock every member in a stable order before removing the logical save.
+		for _, member := range ids {
+			var locked string
+			if e := tx.QueryRow(ctx, `SELECT id FROM collections WHERE id=$1 FOR UPDATE`, member).Scan(&locked); e != nil {
+				return e
+			}
+		}
+		if _, e = tx.Exec(ctx, `DELETE FROM tenant_collections WHERE tenant_id=$1 AND collection_id=ANY($2::uuid[])`, tenant, ids); e != nil {
+			return e
 		}
 		if err := pruneTags(ctx, tx); err != nil {
 			return err
 		}
 		// The restricted function checks references belonging to every tenant.
-		_, e = tx.Exec(ctx, `SELECT mark_unreferenced($1)`, id)
-		return e
+		for _, member := range ids {
+			if _, e = tx.Exec(ctx, `SELECT mark_unreferenced($1)`, member); e != nil {
+				return e
+			}
+		}
+		return nil
 	})
 }
 
@@ -516,7 +534,7 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 		if backwards {
 			comparison, order = ">", "ASC"
 		}
-		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT a.id FROM collections a JOIN tenant_collections t ON t.collection_id=a.id WHERE a.current_revision IS NOT NULL AND ($1::uuid IS NULL OR (t.created_at,a.id)%s(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$1)) ORDER BY t.created_at %s,a.id %s LIMIT 10`, comparison, order, order), anchor)
+		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT a.id FROM collections a JOIN tenant_collections t ON t.collection_id=a.id WHERE `+latestIdentitySQL+` AND a.current_revision IS NOT NULL AND ($1::uuid IS NULL OR (t.created_at,a.id)%s(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$1)) ORDER BY t.created_at %s,a.id %s LIMIT 10`, comparison, order, order), anchor)
 		if err != nil {
 			return err
 		}
@@ -540,8 +558,8 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 		if len(ids) > 0 {
 			var previous, next bool
 			err := tx.QueryRow(ctx, `SELECT
-				EXISTS(SELECT 1 FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE a.current_revision IS NOT NULL AND (t.created_at,a.id)>(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$1)),
-				EXISTS(SELECT 1 FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE a.current_revision IS NOT NULL AND (t.created_at,a.id)<(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$2))`, ids[0], ids[len(ids)-1]).Scan(&previous, &next)
+				EXISTS(SELECT 1 FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE `+latestIdentitySQL+` AND a.current_revision IS NOT NULL AND (t.created_at,a.id)>(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$1)),
+				EXISTS(SELECT 1 FROM tenant_collections t JOIN collections a ON a.id=t.collection_id WHERE `+latestIdentitySQL+` AND a.current_revision IS NOT NULL AND (t.created_at,a.id)<(SELECT created_at,collection_id FROM tenant_collections WHERE collection_id=$2))`, ids[0], ids[len(ids)-1]).Scan(&previous, &next)
 			if err != nil {
 				return err
 			}
@@ -554,6 +572,10 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 		}
 		for _, id := range ids {
 			a, err := collection(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			a.StorageBytes, err = savedIdentityStorage(ctx, tx, id)
 			if err != nil {
 				return err
 			}

@@ -12,19 +12,38 @@ const selected = ref<string[]>([])
 const tags = ref<Tag[]>([])
 const name = shallowRef('')
 const loading = shallowRef(true)
-const busy = shallowRef(false)
 const error = shallowRef('')
 const ready = shallowRef(false)
-const tagKey = (ids: string[]) => JSON.stringify([...ids].sort())
-/** What the server last confirmed. Saving is only offered against a real
-    difference, so an untouched collection cannot be written back. */
-const stored = shallowRef({ note: '', tags: '' })
-const dirty = computed(
-  () =>
-    ready.value &&
-    (note.value !== stored.value.note ||
-      tagKey(selected.value) !== stored.value.tags),
+/** The note is committed by hand and the tags save themselves, so each side
+    carries its own progress, failure and confirmed baseline. Neither request
+    may report for the other, and neither answer may overwrite the other's
+    editing state. */
+const noteSaving = shallowRef(false)
+const noteError = shallowRef('')
+const storedNote = shallowRef('')
+const tagsSaving = shallowRef(false)
+const tagsError = shallowRef('')
+/** Keyed by tag *name*, the only identity both sides agree on: a tag created
+    here carries a local draft id until the server answers with a real one. */
+const storedTags = shallowRef('')
+const tagKey = (names: string[]) => JSON.stringify([...names].sort())
+const chosen = () =>
+  tags.value
+    .filter((tag) => selected.value.includes(tag.id))
+    .map((tag) => tag.name)
+const noteDirty = computed(() => ready.value && note.value !== storedNote.value)
+const tagsDirty = computed(
+  () => ready.value && tagKey(chosen()) !== storedTags.value,
 )
+const url = computed(
+  () => `/collections/${encodeURIComponent(props.id)}/annotation`,
+)
+const noteStatus = computed(() => {
+  if (noteSaving.value) return '正在保存备注…'
+  if (note.value.length > noteLimit - 500)
+    return `${note.value.length} / ${noteLimit}`
+  return noteDirty.value ? '备注尚未保存' : ''
+})
 const field = useTemplateRef<HTMLTextAreaElement>('noteField')
 /** Grow the note with its content, so reading it back never means scrolling
     a four-line box. CSS keeps both a floor and a ceiling. */
@@ -37,16 +56,24 @@ function grow() {
 // `post` so the field is mounted and holds its new text before it is measured.
 watch([ready, note], grow, { flush: 'post' })
 let generation = 0
+/** Latest tag edit still to be written, and whether a writer is draining it. */
+let tagsQueued = false
+let tagsWriting = false
 async function load() {
   const current = ++generation
   loading.value = true
   ready.value = false
   error.value = ''
+  noteSaving.value = false
+  noteError.value = ''
+  tagsSaving.value = false
+  tagsError.value = ''
+  // Another collection's queued edit must not be written against this one.
+  tagsQueued = false
+  tagsWriting = false
   try {
     const [annotation, available] = await Promise.all([
-      api<Annotation>(
-        `/collections/${encodeURIComponent(props.id)}/annotation`,
-      ),
+      api<Annotation>(url.value),
       api<Tag[]>('/tags'),
     ])
     if (current !== generation) return
@@ -54,7 +81,8 @@ async function load() {
     note.value = annotation.note
     selected.value = annotation.tags.map((tag) => tag.id)
     tags.value = available
-    stored.value = { note: note.value, tags: tagKey(selected.value) }
+    storedNote.value = note.value
+    storedTags.value = tagKey(annotation.tags.map((tag) => tag.name))
     ready.value = true
   } catch (e) {
     if (current === generation) error.value = errorText(e)
@@ -63,9 +91,13 @@ async function load() {
   }
 }
 watch(() => props.id, load, { immediate: true })
+function editTags(ids: string[]) {
+  selected.value = ids
+  queueTags()
+}
 function createTag() {
   const wanted = name.value.trim()
-  if (busy.value || !wanted) return
+  if (!ready.value || !wanted) return
   const tag = tags.value.find((item) => item.name === wanted) ?? {
     id: `draft:${wanted}`,
     name: wanted,
@@ -73,39 +105,83 @@ function createTag() {
   if (!tags.value.some((item) => item.id === tag.id)) tags.value.push(tag)
   if (!selected.value.includes(tag.id)) selected.value.push(tag.id)
   name.value = ''
+  queueTags()
 }
-async function save() {
-  if (busy.value || !dirty.value) return
-  busy.value = true
-  error.value = ''
+/** Record that the chips differ from the server and make sure exactly one
+    writer is draining them: a burst of edits stays in order, and only the last
+    one has to reach the server. */
+function queueTags() {
+  if (!ready.value) return
+  tagsQueued = true
+  if (tagsWriting) return
+  tagsWriting = true
+  void writeTags()
+}
+async function writeTags() {
   const current = generation
-  const sent = {
-    note: note.value,
-    tags: tags.value
-      .filter((tag) => selected.value.includes(tag.id))
-      .map((tag) => tag.name),
-  }
   try {
-    const annotation = await api<Annotation>(
-      `/collections/${encodeURIComponent(props.id)}/annotation`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify({ note: sent.note, tag_names: sent.tags }),
-      },
-    )
+    while (tagsQueued && current === generation) {
+      tagsQueued = false
+      if (tagKey(chosen()) === storedTags.value) break
+      tagsSaving.value = true
+      tagsError.value = ''
+      try {
+        const annotation = await api<Annotation>(url.value, {
+          method: 'PATCH',
+          body: JSON.stringify({ tag_names: chosen() }),
+        })
+        if (current !== generation) return
+        // Record what the server now holds even when a newer edit is already
+        // waiting: otherwise the next pass could read this write's own result
+        // as the baseline and skip the write that puts the chips back.
+        storedTags.value = tagKey(annotation.tags.map((tag) => tag.name))
+        // A newer edit already replaced what this request sent; leave the chips
+        // alone so its own write decides, instead of flashing back to this one.
+        if (tagsQueued) continue
+        // The note keeps whatever is in the box: this answer is not about it.
+        selected.value = annotation.tags.map((tag) => tag.id)
+        tags.value = annotation.tags
+        // Reload available tags after the server removed unused ones.
+        const available = await api<Tag[]>('/tags').catch(() => annotation.tags)
+        if (current !== generation) return
+        if (!tagsQueued) tags.value = available
+        emit('saved')
+      } catch (e) {
+        if (current !== generation) return
+        // Only report a failure that is still what the chips ask for; a newer
+        // edit supersedes it, so keep draining rather than stopping here.
+        if (tagsQueued) continue
+        tagsError.value = errorText(e)
+        return
+      }
+    }
+  } finally {
+    if (current === generation) {
+      tagsWriting = false
+      tagsSaving.value = false
+    }
+  }
+}
+async function saveNote() {
+  if (noteSaving.value || !noteDirty.value) return
+  const current = generation
+  noteSaving.value = true
+  noteError.value = ''
+  const sent = note.value
+  try {
+    const annotation = await api<Annotation>(url.value, {
+      method: 'PATCH',
+      body: JSON.stringify({ note: sent }),
+    })
     if (current !== generation) return
-    selected.value = annotation.tags.map((tag) => tag.id)
-    tags.value = annotation.tags
-    stored.value = { note: sent.note, tags: tagKey(selected.value) }
-    // Reload available tags after the server removed unused ones.
-    const available = await api<Tag[]>('/tags').catch(() => annotation.tags)
-    if (current !== generation) return
-    tags.value = available
+    // Confirm the note only. The chips may have been edited or written while
+    // this was in flight, and this answer's tags can already be stale.
+    storedNote.value = annotation.note
     emit('saved')
   } catch (e) {
-    if (current === generation) error.value = errorText(e)
+    if (current === generation) noteError.value = errorText(e)
   } finally {
-    busy.value = false
+    if (current === generation) noteSaving.value = false
   }
 }
 </script>
@@ -115,7 +191,7 @@ async function save() {
     title="我的整理"
     footnote="备注和标签仅当前账号可见，适用于这条收藏的所有版本。"
   >
-    <form class="annotations" @submit.prevent="save">
+    <form class="annotations" @submit.prevent="saveNote">
       <div
         v-if="loading"
         class="placeholder"
@@ -133,8 +209,8 @@ async function save() {
         <p class="message bad" role="alert">{{ error }}</p>
         <button type="button" class="retry" @click="load">重试</button>
       </div>
-      <fieldset v-else class="fields" :disabled="busy">
-        <div class="field">
+      <div v-else class="fields">
+        <section class="field">
           <label class="field-label" :for="`note-${id}`">备注</label>
           <textarea
             :id="`note-${id}`"
@@ -144,18 +220,29 @@ async function save() {
             :maxlength="noteLimit"
             placeholder="记下你为什么保存它…"
           />
-          <p v-if="note.length > noteLimit - 500" class="hint">
-            {{ note.length }} / {{ noteLimit }}
+          <div class="note-actions">
+            <p class="hint" role="status">{{ noteStatus }}</p>
+            <button
+              type="submit"
+              class="commit"
+              :disabled="!noteDirty || noteSaving"
+            >
+              保存备注
+            </button>
+          </div>
+          <p v-if="noteError" class="message bad" role="alert">
+            {{ noteError }}
           </p>
-        </div>
-        <div class="field">
+        </section>
+        <section class="field">
           <span class="field-label">标签</span>
           <TagChips
             v-if="tags.length"
-            v-model="selected"
+            :model-value="selected"
             label="选择标签"
             :tags="tags"
             multiple
+            @update:model-value="editTags"
           />
           <p v-else class="hint">还没有标签，在下面创建第一个。</p>
           <div class="create">
@@ -186,27 +273,34 @@ async function save() {
               创建
             </button>
           </div>
-        </div>
-        <p v-if="error" class="message bad" role="alert">{{ error }}</p>
-        <button type="submit" class="save" :disabled="!dirty">
-          {{ busy ? '保存中…' : '保存' }}
-        </button>
-      </fieldset>
+          <p v-if="tagsSaving" class="hint" role="status">正在保存标签…</p>
+          <p v-if="tagsError" class="message bad" role="alert">
+            {{ tagsError }}
+          </p>
+          <button
+            v-if="tagsError && tagsDirty"
+            type="button"
+            class="retry"
+            @click="queueTags"
+          >
+            重试保存标签
+          </button>
+        </section>
+      </div>
     </form>
   </ListSection>
 </template>
 
 <style scoped>
 .fields {
-  border: 0;
-  padding: 0;
-  margin: 0;
   min-width: 0;
 }
 /* Note and tags are two stacked rows of one card, parted by the same inset
-   hairline the rest of the app's grouped lists use. */
+   hairline the rest of the app's grouped lists use. Each row carries its own
+   action or autosave notice, so it is clear which one a message belongs to. */
 .field {
   position: relative;
+  display: block;
   padding: 13px var(--inset) 16px;
 }
 .field + .field::before {
@@ -245,10 +339,42 @@ textarea::placeholder {
   color: var(--subtle);
 }
 .hint {
-  margin: 8px 0 0;
+  margin: 10px 0 0;
   color: var(--subtle);
   font-size: 13px;
   line-height: 1.5;
+}
+/* The note's own row: what it is waiting for on the left, the only action that
+   writes it on the right. Nothing here speaks for the tags. */
+.note-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+.note-actions .hint {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.commit {
+  flex: none;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--link) 14%, transparent);
+  color: var(--link);
+  font-size: 14px;
+  font-weight: 600;
+  transition: transform 0.12s ease;
+}
+.commit:disabled {
+  background: var(--fill);
+  color: var(--subtle);
+  opacity: 1;
+}
+.commit:active:not(:disabled) {
+  transform: scale(0.97);
 }
 /* Creating a tag shares the chips' pill shape, so it reads as the next tag
    rather than a separate form. */
@@ -294,48 +420,21 @@ textarea::placeholder {
   color: var(--subtle);
   opacity: 1;
 }
-/* The commit action spans the card, and its hairline runs full width to mark
-   the break between what you are editing and what applies it. */
-.save {
-  position: relative;
-  display: block;
-  width: 100%;
-  min-height: 50px;
-  padding: 13px var(--inset);
-  color: var(--link);
-  font-size: 16px;
-  font-weight: 600;
-  text-align: center;
-}
-.save::before {
-  content: '';
-  position: absolute;
-  inset: 0 0 auto;
-  height: 1px;
-  background: var(--separator);
-}
-.save:disabled {
-  color: var(--subtle);
-  opacity: 1;
-}
-.save:active:not(:disabled) {
-  background: var(--fill);
-}
-.save:focus-visible {
-  outline-offset: -3px;
-}
 .failed {
-  padding-top: 16px;
+  padding: 16px var(--inset) 14px;
+}
+.failed .message {
+  margin: 0;
 }
 .retry {
   min-height: 44px;
-  padding: 0 var(--inset) 12px;
+  margin-top: 4px;
   color: var(--link);
   font-size: 15px;
+  font-weight: 500;
 }
 .message {
-  margin: 0;
-  padding: 0 var(--inset) 14px;
+  margin: 10px 0 0;
   font-size: 13px;
   line-height: 1.5;
   color: var(--subtle);

@@ -1,4 +1,11 @@
-import { computed, onUnmounted, shallowRef, watch } from 'vue'
+import {
+  computed,
+  onActivated,
+  onDeactivated,
+  onUnmounted,
+  shallowRef,
+  watch,
+} from 'vue'
 import { useRouter } from 'vue-router'
 import {
   api,
@@ -52,12 +59,41 @@ export function useCollectionDetail(
   }
   let revisionRequest = 0
   let timer: ReturnType<typeof setTimeout> | undefined
+  // While this detail sits in the navigation cache it keeps its state but must
+  // stay quiet: no polling requests and no routing from a view nobody sees.
+  let visible = true
+  let pending: Job | undefined
+  // Only the newest poll chain may act. Deactivating, switching collection or
+  // starting a capture retires the previous chain, so a reply still in flight
+  // cannot schedule a second timer or write its result after the fact.
+  let pollRun = 0
+  const stale = (run: number) => controller.signal.aborted || run !== pollRun
+  function retirePoll() {
+    ++pollRun
+    clearTimeout(timer)
+  }
+  function failed(e: unknown) {
+    if (controller.signal.aborted) return
+    busy.value = false
+    error.value = errorText(e)
+  }
+  onDeactivated(() => {
+    visible = false
+    retirePoll()
+  })
+  onActivated(() => {
+    visible = true
+    // Resuming can reject on its own request, which must surface as an error
+    // rather than an unhandled rejection from the lifecycle hook.
+    if (pending) startPoll(pending).catch(failed)
+  })
   watch(
     id,
     async (id) => {
       controller.abort()
       controller = new AbortController()
-      clearTimeout(timer)
+      retirePoll()
+      pending = undefined
       const signal = controller.signal
       ++revisionRequest
       collection.value = undefined
@@ -92,7 +128,7 @@ export function useCollectionDetail(
   )
   onUnmounted(() => {
     controller.abort()
-    clearTimeout(timer)
+    retirePoll()
   })
   async function historyPage(more = false) {
     if (historyLoading.value || (more && !next.value)) return
@@ -161,8 +197,14 @@ export function useCollectionDetail(
       busy.value = false
     }
   }
-  async function poll(job: Job) {
-    if (controller.signal.aborted) return
+  /** Start a fresh poll chain, retiring whatever chain was running before. */
+  function startPoll(job: Job) {
+    retirePoll()
+    return poll(job, pollRun)
+  }
+  async function poll(job: Job, run: number) {
+    if (stale(run)) return
+    pending = job
     status.value =
       job.state === 'queued'
         ? '正在采集…'
@@ -174,42 +216,51 @@ export function useCollectionDetail(
               ? '重新抓取失败，旧版本仍可查看。'
               : '已更新。'
     if (['queued', 'downloading'].includes(job.state)) {
+      if (!visible) return
       timer = setTimeout(async () => {
         try {
-          await poll(
-            await api<Job>(`/jobs/${job.id}`, { signal: controller.signal }),
-          )
+          const next = await api<Job>(`/jobs/${job.id}`, {
+            signal: controller.signal,
+          })
+          await poll(next, run)
         } catch (e) {
-          busy.value = false
-          error.value = errorText(e)
+          if (stale(run)) return
+          failed(e)
         }
       }, 2000)
-    } else {
-      busy.value = false
-      if (job.state !== 'failed') {
-        collection.value = await api<Collection>(
-          `/collections/${job.collection_id}`,
-          {
-            signal: controller.signal,
-          },
-        )
-        if (job.collection_id !== id())
-          void router.replace({
-            name: 'collection',
-            params: { id: job.collection_id },
-          })
-        latestRevision.value = collection.value.revision_id
-        await historyPage()
-        updated(collection.value)
-      }
+      return
     }
+    // Finish the job only while shown, so the pending state survives a trip
+    // through the cache and resumes on the next activation.
+    if (!visible) return
+    busy.value = false
+    if (job.state !== 'failed') {
+      const result = await api<Collection>(
+        `/collections/${job.collection_id}`,
+        { signal: controller.signal },
+      )
+      if (stale(run) || !visible) return
+      collection.value = result
+      if (job.collection_id !== id())
+        void router.replace({
+          name: 'collection',
+          params: { id: job.collection_id },
+        })
+      latestRevision.value = result.revision_id
+      await historyPage()
+      // Landing here after the view was cached would push this job's result
+      // into a list the user has already navigated away from.
+      if (stale(run) || !visible) return
+      updated(result)
+    }
+    pending = undefined
   }
   async function refresh() {
     ++revisionRequest
     busy.value = true
     error.value = ''
     try {
-      await poll(
+      await startPoll(
         await api<Job>('/captures', {
           method: 'POST',
           body: JSON.stringify({ refresh_id: id() }),

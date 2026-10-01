@@ -3,7 +3,12 @@ import { profileStatusesAPI } from "@fxembed/atmosphere/providers/twitter/userSt
 import type { TwitterBuildHost } from "@fxembed/atmosphere/providers/twitter/build-host";
 import type { SessionCredential } from "./credential.js";
 import { accountTransport } from "./session.js";
-import { attachEntities } from "./entities.js";
+import {
+  attachEntities,
+  attachMentions,
+  attachProfileReference,
+  addRelation,
+} from "./entities.js";
 import { ProviderError, readJSON, responseError } from "./provider.js";
 import {
   FetchResponse,
@@ -77,6 +82,12 @@ export function normalizeProfile(
       sensitive: false,
     });
   }
+  attachMentions(
+    result,
+    "author",
+    user.description,
+    user.raw_description?.facets,
+  );
   return result;
 }
 
@@ -92,8 +103,31 @@ export function attachTimeline(result: FetchResponse, timeline: any): void {
       post?.type === "status" &&
       typeof post.id === "string" &&
       /^\d+$/.test(post.id)
-    )
+    ) {
       ids.add(post.id);
+      if (result.graph && post.reposted_by?.id) {
+        const profile = attachProfileReference(result, post.reposted_by);
+        let entity = result.graph.entities.find(
+          (item) => item.type === "x.post" && item.externalId === post.id,
+        );
+        if (!entity) {
+          entity = {
+            key: `timeline_${post.id}`,
+            type: "x.post",
+            externalId: post.id,
+            contextOnly: true,
+            dataJson: Buffer.from(
+              JSON.stringify({
+                text: typeof post.text === "string" ? post.text : "",
+              }),
+            ),
+            resourceIndices: [],
+          };
+          result.graph.entities.push(entity);
+        }
+        if (profile) addRelation(result, profile, entity.key, "reposted");
+      }
+    }
   }
   if (ids.size > 200)
     throw new ProviderError(
@@ -104,10 +138,14 @@ export function attachTimeline(result: FetchResponse, timeline: any): void {
     ids.size && typeof timeline.cursor?.bottom === "string"
       ? timeline.cursor.bottom
       : "";
-  result.relatedTargets = [...ids].map((id) => ({
-    url: `https://x.com/i/web/status/${id}`,
-    refreshAfterSeconds: 0,
-  }));
+  const targets = new Map(
+    result.relatedTargets.map((target) => [target.url, target]),
+  );
+  for (const id of ids) {
+    const url = `https://x.com/i/web/status/${id}`;
+    targets.set(url, { url, refreshAfterSeconds: 0 });
+  }
+  result.relatedTargets = [...targets.values()];
 }
 
 async function publicJSON(
@@ -145,7 +183,8 @@ export async function collectTimeline(
   const targets = new Map(result.relatedTargets.map((t) => [t.url, t]));
   const visited = new Set<string>();
   result.nextPageCursor = cursor;
-  while (targets.size < target) {
+  let posts = 0;
+  while (posts < target) {
     if (visited.has(cursor)) {
       result.nextPageCursor = "";
       break;
@@ -156,11 +195,15 @@ export async function collectTimeline(
       break;
     }
     visited.add(cursor);
-    const page = FetchResponse.fromPartial({});
+    const page = FetchResponse.fromPartial({ graph: result.graph });
     // Advance the checkpoint only after successfully parsing the entire page.
     attachTimeline(page, await fetchPage(cursor));
     for (const item of page.relatedTargets) targets.set(item.url, item);
+    result.graph = page.graph;
     result.relatedTargets = [...targets.values()];
+    posts = result.relatedTargets.filter((item) =>
+      item.url.includes("/status/"),
+    ).length;
     const next = page.nextPageCursor;
     result.nextPageCursor = visited.has(next) ? "" : next;
     if (!result.nextPageCursor) break;

@@ -23,7 +23,7 @@ var ErrInvalidFilter = errors.New("invalid collection filters")
 
 type (
 	CollectionFilter struct {
-		Q, EntityType, Media, Visibility, From, Before, Sort, Order, Sensitive, Tag string
+		Q, EntityType, Media, Visibility, From, Before, Sort, Order, Sensitive, Tag, RelatedTo string
 		// Stable author keys, never display names. See authorIdentity.
 		Authors []string
 	}
@@ -39,8 +39,9 @@ type CollectionItem struct {
 	SavedAt time.Time `json:"saved_at"`
 }
 type CollectionPage struct {
-	Items []CollectionItem `json:"items"`
-	Next  string           `json:"next_cursor,omitempty"`
+	Items             []CollectionItem `json:"items"`
+	Next              string           `json:"next_cursor,omitempty"`
+	TotalStorageBytes *int64           `json:"total_storage_bytes,omitempty"`
 }
 
 func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter, cursor string) (p CollectionPage, e error) {
@@ -64,6 +65,11 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 			if !adapter.EntityName.MatchString(kind) {
 				return p, ErrInvalidFilter
 			}
+		}
+	}
+	if f.RelatedTo != "" {
+		if _, err := uuid.Parse(f.RelatedTo); err != nil {
+			return p, ErrInvalidFilter
 		}
 	}
 	if f.Tag != "" {
@@ -107,13 +113,22 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 	}
 	q := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.TrimSpace(f.Q)) + "%"
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
-		query := `SELECT a.id,ta.created_at,ordering.at,storage.bytes FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id JOIN revisions r ON r.id=a.current_revision CROSS JOIN LATERAL (SELECT CASE WHEN $8='published' AND pg_input_is_valid(r.payload->>'published_at','timestamp with time zone') THEN (r.payload->>'published_at')::timestamptz ELSE a.observed_at END AS at) ordering CROSS JOIN LATERAL (SELECT ` + collectionStorageSQL + ` AS bytes) storage WHERE (cardinality($11::text[])=0 OR EXISTS(` + authorMatchSQL + `)) AND ($14='' OR ($14='contains')=EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='' AND m.sensitive)) AND ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR a.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND (($8='storage' AND ($10::bigint IS NULL OR (storage.bytes,a.id)<($10,$6::uuid))) OR ($8<>'storage' AND ($5::timestamptz IS NULL OR (ordering.at,a.id)<($5,$6::uuid)))) AND ($7='' OR ('text'=ANY(string_to_array($7,',')) AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (('image'=ANY(string_to_array($7,',')) AND b.mime LIKE 'image/%') OR ('video'=ANY(string_to_array($7,',')) AND b.mime LIKE 'video/%')))) AND ($9='' OR EXISTS(SELECT FROM revision_entities re JOIN entity_versions ev ON ev.id=re.entity_version_id JOIN entities en ON en.id=ev.entity_id WHERE re.revision_id=r.id AND re.is_root AND en.kind=ANY(string_to_array($9,',')))) AND ($15='' OR EXISTS(SELECT FROM collection_tags ct WHERE ct.collection_id=a.id AND ct.tenant_id=ta.tenant_id AND ct.tag_id=NULLIF($15,'')::uuid)) ORDER BY CASE WHEN $8='storage' THEN storage.bytes END DESC,CASE WHEN $8<>'storage' THEN ordering.at END DESC,a.id DESC LIMIT 21`
+		if f.RelatedTo != "" {
+			var total int64
+			// Calculate across all matching collections, independently of pagination.
+			query := `SELECT COALESCE(SUM(` + collectionStorageSQL + `),0)::bigint FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id JOIN revisions r ON r.id=a.current_revision WHERE a.id<>$1::uuid AND EXISTS(` + strings.ReplaceAll(relatedCollectionSQL, "NULLIF($16,'')", "$1") + `) AND ($2='' OR EXISTS(SELECT FROM revision_entities re JOIN entity_versions ev ON ev.id=re.entity_version_id JOIN entities en ON en.id=ev.entity_id WHERE re.revision_id=r.id AND re.is_root AND en.kind=$2))`
+			if err := tx.QueryRow(ctx, query, f.RelatedTo, f.EntityType).Scan(&total); err != nil {
+				return err
+			}
+			p.TotalStorageBytes = &total
+		}
+		query := `SELECT a.id,ta.created_at,ordering.at,storage.bytes FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id JOIN revisions r ON r.id=a.current_revision CROSS JOIN LATERAL (SELECT CASE WHEN $8='published' AND pg_input_is_valid(r.payload->>'published_at','timestamp with time zone') THEN (r.payload->>'published_at')::timestamptz ELSE a.observed_at END AS at) ordering CROSS JOIN LATERAL (SELECT ` + identityStorageSQL + ` AS bytes) storage WHERE ` + latestIdentitySQL + ` AND (cardinality($11::text[])=0 OR EXISTS(` + authorMatchSQL + `)) AND ($14='' OR ($14='contains')=EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='' AND m.sensitive)) AND ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR a.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND (($8='storage' AND ($10::bigint IS NULL OR (storage.bytes,a.id)<($10,$6::uuid))) OR ($8<>'storage' AND ($5::timestamptz IS NULL OR (ordering.at,a.id)<($5,$6::uuid)))) AND ($7='' OR ('text'=ANY(string_to_array($7,',')) AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (('image'=ANY(string_to_array($7,',')) AND b.mime LIKE 'image/%') OR ('video'=ANY(string_to_array($7,',')) AND b.mime LIKE 'video/%')))) AND ($9='' OR EXISTS(SELECT FROM revision_entities re JOIN entity_versions ev ON ev.id=re.entity_version_id JOIN entities en ON en.id=ev.entity_id WHERE re.revision_id=r.id AND re.is_root AND en.kind=ANY(string_to_array($9,',')))) AND ($16='' OR (a.id<>NULLIF($16,'')::uuid AND EXISTS(` + relatedCollectionSQL + `))) AND ($15='' OR EXISTS(SELECT FROM collection_tags ct JOIN collections tagged ON tagged.id=ct.collection_id JOIN tenant_collections saved_tagged ON saved_tagged.collection_id=tagged.id WHERE (tagged.platform,tagged.kind,tagged.object_scope,tagged.external_id)=(a.platform,a.kind,a.object_scope,a.external_id) AND ct.tenant_id=ta.tenant_id AND ct.tag_id=NULLIF($15,'')::uuid)) ORDER BY CASE WHEN $8='storage' THEN storage.bytes END DESC,CASE WHEN $8<>'storage' THEN ordering.at END DESC,a.id DESC LIMIT 21`
 		if f.Order == "asc" {
 			query = strings.ReplaceAll(query, "(ordering.at,a.id)<", "(ordering.at,a.id)>")
 			query = strings.ReplaceAll(query, "(storage.bytes,a.id)<", "(storage.bytes,a.id)>")
 			query = strings.ReplaceAll(query, " DESC", " ASC")
 		}
-		rows, err := tx.Query(ctx, query, q, f.Visibility, from, before, anchor, aid, f.Media, f.Sort, f.EntityType, byteAnchor, platforms, kinds, externals, f.Sensitive, f.Tag)
+		rows, err := tx.Query(ctx, query, q, f.Visibility, from, before, anchor, aid, f.Media, f.Sort, f.EntityType, byteAnchor, platforms, kinds, externals, f.Sensitive, f.Tag, f.RelatedTo)
 		if err != nil {
 			return err
 		}
@@ -149,6 +164,9 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 		}
 		loaded, err := collectionsByID(ctx, tx, ids)
 		if err != nil {
+			return err
+		}
+		if err = annotateCollectionRelations(ctx, tx, f.RelatedTo, ids, loaded); err != nil {
 			return err
 		}
 		for _, v := range entries {
@@ -197,7 +215,7 @@ func (s *Service) Revisions(ctx context.Context, t, id, cursor string) (p Revisi
 		if !exists {
 			return domain.ErrNotFound
 		}
-		rows, err := tx.Query(ctx, `SELECT id,created_at FROM revisions WHERE collection_id=$1 AND ($2::timestamptz IS NULL OR (created_at,id)<($2,$3::uuid)) ORDER BY created_at DESC,id DESC LIMIT 21`, id, at, rid)
+		rows, err := tx.Query(ctx, `SELECT id,created_at FROM revisions WHERE collection_id IN (`+savedIdentityMembersSQL+`) AND ($2::timestamptz IS NULL OR (created_at,id)<($2,$3::uuid)) ORDER BY created_at DESC,id DESC LIMIT 21`, id, at, rid)
 		if err != nil {
 			return err
 		}
@@ -224,7 +242,7 @@ func (s *Service) Revision(ctx context.Context, t, id, rid string) (a domain.Col
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
 		var raw []byte
 		var cid string
-		err := tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,a.visibility,r.id,r.payload,r.capture_id,r.created_at,a.created_at FROM collections a JOIN tenant_collections ta ON ta.collection_id=a.id JOIN revisions r ON r.collection_id=a.id WHERE a.id=$1 AND r.id=$2`, id, rid).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &raw, &cid, &a.ObservedAt, &a.CreatedAt)
+		err := tx.QueryRow(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,a.scope,a.visibility,r.id,r.payload,r.capture_id,r.created_at,a.created_at FROM collections a JOIN tenant_collections ta ON ta.collection_id=a.id JOIN revisions r ON r.collection_id=a.id WHERE a.id IN (`+savedIdentityMembersSQL+`) AND r.id=$2`, id, rid).Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &raw, &cid, &a.ObservedAt, &a.CreatedAt)
 		if err != nil {
 			return err
 		}
@@ -248,7 +266,10 @@ func (s *Service) Revision(ctx context.Context, t, id, rid string) (a domain.Col
 		if err = linkSavedEntities(ctx, tx, &a); err != nil {
 			return err
 		}
-		a.StorageBytes, err = collectionStorage(ctx, tx, id)
+		if err = attachIncomingRelations(ctx, tx, &a); err != nil {
+			return err
+		}
+		a.StorageBytes, err = savedIdentityStorage(ctx, tx, id)
 		return err
 	})
 	return
@@ -281,13 +302,20 @@ func (s *Service) WebAccess(ctx context.Context, t, kind, id string) error {
 
 func (s *Service) SavedCollection(ctx context.Context, tenant, id string) (item CollectionItem, err error) {
 	err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-		if e := tx.QueryRow(ctx, `SELECT created_at FROM tenant_collections WHERE collection_id=$1`, id).Scan(&item.SavedAt); e != nil {
+		if e := tx.QueryRow(ctx, `SELECT MIN(created_at) FROM tenant_collections WHERE collection_id IN (`+savedIdentityMembersSQL+`) HAVING COUNT(*)>0`, id).Scan(&item.SavedAt); e != nil {
 			return e
 		}
 		var e error
-		item.Collection, e = collection(ctx, tx, id)
+		var latest string
+		if e = tx.QueryRow(ctx, savedIdentityMembersSQL+` AND member.current_revision IS NOT NULL ORDER BY member.observed_at DESC,member.id DESC LIMIT 1`, id).Scan(&latest); e != nil {
+			return e
+		}
+		item.Collection, e = collection(ctx, tx, latest)
 		if e == nil {
-			item.StorageBytes, e = collectionStorage(ctx, tx, id)
+			e = attachIncomingRelations(ctx, tx, &item.Collection)
+		}
+		if e == nil {
+			item.StorageBytes, e = savedIdentityStorage(ctx, tx, id)
 		}
 		return e
 	})
@@ -398,3 +426,45 @@ func (s *Service) CollectionAuthors(ctx context.Context, tenant string) (authors
 	})
 	return
 }
+
+// Resolve related objects by platform/type/external identity across source scopes,
+// restricted on both sides to this tenant's saved collections. Historical profile
+// graphs retain timeline pages that have since moved out of the current snapshot.
+var relatedCollectionSQL = `SELECT relation.kind FROM revision_entities related
+ JOIN entity_relations relation ON relation.revision_id=related.revision_id AND relation.target_key=related.entity_key
+ JOIN revision_entities candidate_root ON candidate_root.revision_id=relation.revision_id AND candidate_root.entity_key=relation.source_key AND candidate_root.is_root
+ JOIN entity_versions related_version ON related_version.id=related.entity_version_id
+ JOIN entities related_identity ON related_identity.id=related_version.entity_id
+ JOIN revision_entities target ON target.is_root
+ JOIN entity_versions target_version ON target_version.id=target.entity_version_id
+ JOIN entities target_identity ON target_identity.id=target_version.entity_id
+ JOIN collections target_collection ON target_collection.current_revision=target.revision_id
+ JOIN tenant_collections saved_target ON saved_target.collection_id=target_collection.id
+ WHERE ` + relatedIdentityMatchSQL + ` AND related.revision_id=r.id AND target_collection.id IN (` + strings.ReplaceAll(savedIdentityMembersSQL, "$1", "NULLIF($16,'')::uuid") + `)
+ UNION ALL
+ SELECT relation.kind FROM revision_entities related
+ JOIN entity_versions related_version ON related_version.id=related.entity_version_id
+ JOIN entities related_identity ON related_identity.id=related_version.entity_id
+ JOIN entity_relations relation ON true
+ JOIN revision_entities owner_root ON owner_root.revision_id=relation.revision_id AND owner_root.entity_key=relation.source_key AND owner_root.is_root
+ JOIN revision_entities target ON target.revision_id=relation.revision_id AND target.entity_key=relation.target_key
+ JOIN entity_versions target_version ON target_version.id=target.entity_version_id
+ JOIN entities target_identity ON target_identity.id=target_version.entity_id
+ JOIN revisions target_revision ON target_revision.id=target.revision_id
+ JOIN collections target_collection ON target_collection.id=target_revision.collection_id
+ JOIN tenant_collections saved_target ON saved_target.collection_id=target_collection.id
+ WHERE ` + relatedCandidateIdentityMatchSQL + ` AND related.revision_id=r.id AND related.is_root AND target_collection.id IN (` + strings.ReplaceAll(savedIdentityMembersSQL, "$1", "NULLIF($16,'')::uuid") + `)`
+
+const relatedIdentityMatchSQL = `(target_identity.platform=related_identity.platform AND target_identity.kind=related_identity.kind AND (
+ target_identity.external_id=related_identity.external_id OR EXISTS(
+ SELECT FROM collection_identity_aliases alias WHERE alias.collection_id=target_collection.id
+ AND (alias.platform,alias.scope,alias.data_scope,alias.kind,alias.object_scope)=(target_collection.platform,target_collection.scope,target_collection.data_scope,target_collection.kind,target_collection.object_scope)
+ AND alias.external_id=related_identity.external_id)))`
+
+// The reverse edge points to the candidate, so any provisional target identity
+// must resolve through that candidate's aliases, not the owner's profile aliases.
+const relatedCandidateIdentityMatchSQL = `(target_identity.platform=related_identity.platform AND target_identity.kind=related_identity.kind AND (
+ target_identity.external_id=related_identity.external_id OR EXISTS(
+ SELECT FROM collection_identity_aliases alias WHERE alias.collection_id=a.id
+ AND (alias.platform,alias.scope,alias.data_scope,alias.kind,alias.object_scope)=(a.platform,a.scope,a.data_scope,a.kind,a.object_scope)
+ AND alias.external_id=target_identity.external_id)))`

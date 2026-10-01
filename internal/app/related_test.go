@@ -146,6 +146,15 @@ func TestRelatedCaptures(t *testing.T) {
 			t.Fatal("canonical ref not retained")
 		}
 	}
+	// A collected entry hydrates its profile/reference; that second hop must stop.
+	var entryCapture, entrySubmission string
+	must(t, admin.Pool.QueryRow(ctx, `SELECT c.id,s.id FROM captures c JOIN collections a ON a.id=c.collection_id JOIN submissions s ON s.capture_id=c.id WHERE s.tenant_id=$1 AND a.external_id='shared-0'`, a).Scan(&entryCapture, &entrySubmission))
+	complete(a, domain.Job{ID: entryCapture})
+	related(a, entryCapture)
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM submissions WHERE tenant_id=$1 AND parent_submission=$2 AND related_state='none'`, a, entrySubmission).Scan(&count))
+	if count != 1 {
+		t.Fatal("collected entry did not hydrate its reference", count)
+	}
 	// An explicit collection request always refreshes, even inside the freshness window.
 	next := submit(a, domain.CaptureInput{URL: "https://notes.test/collection/shared"})
 	if next.ID == ja.ID {
