@@ -1,7 +1,8 @@
 name: test
 on: [push, pull_request]
+# Independent jobs run in parallel; downstream workflows wait for all of them.
 jobs:
-  test:
+  checks:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -21,8 +22,40 @@ jobs:
       - run: pnpm build && pnpm test
       - run: node scripts/prepare-web-assets.mjs
       - run: pnpm --filter @midden/web exec wrangler deploy --dry-run
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
+        with:
+          cache: true
+          install: false
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # Browser downloads are keyed by the locked Playwright version.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm --filter @midden/web exec playwright install --with-deps chromium
       - run: pnpm --filter @midden/web test:e2e
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+  go:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
+        with:
+          cache: true
+          install: false
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # The adapter integration test runs the built TypeScript server.
+      - run: pnpm --filter "@monitor/x-adapter..." --recursive run build
+      # Tests need only ffprobe; recommended packages add a third of the download.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: go vet ./...
       - run: ./scripts/test-integration.sh
