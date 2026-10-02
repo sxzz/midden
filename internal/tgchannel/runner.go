@@ -391,6 +391,9 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 	return save(channelapi.Ack{Done: true, Progress: len(parts), MessageID: mid})
 }
 
+// maxBatchItems bounds the items listed in a batch message.
+const maxBatchItems = 5
+
 func batchMessage(b domain.RefreshBatch) string {
 	mode := "完整更新"
 	if b.UpdateMode == "append" {
@@ -406,17 +409,25 @@ func batchMessage(b domain.RefreshBatch) string {
 		return strings.Join(out, " · ")
 	}
 	fetched := max(b.Complete-b.Reused, 0)
-	m := b.Members
 	// Profiles' posts finish after the profiles themselves.
-	posts := ""
-	if m.Total > 0 {
-		saved := counts("已保存", m.Complete, "不完整", m.Partial, "失败", m.Failed)
-		if !b.Done {
-			saved = counts("抓取中", m.Pending, "已保存", m.Complete, "不完整", m.Partial, "失败", m.Failed)
+	posts := func(m domain.MemberProgress, done bool) string {
+		if done {
+			return counts("已保存", m.Complete, "不完整", m.Partial, "失败", m.Failed)
 		}
-		if saved != "" {
-			posts = "\n帖子：" + saved
+		// The total is known once a listing is fetched, before its posts run.
+		if m.Total == 0 {
+			return ""
 		}
+		finished := m.Complete + m.Partial + m.Failed
+		text := fmt.Sprintf("%d/%d", finished, max(m.Total, finished+m.Pending))
+		if c := counts("抓取中", m.Pending, "已保存", m.Complete, "不完整", m.Partial, "失败", m.Failed); c != "" {
+			text += " · " + c
+		}
+		return text
+	}
+	summary := ""
+	if p := posts(b.Members, b.Done); p != "" {
+		summary = "\n帖子：" + p
 	}
 	switch {
 	case b.State == "failed" && b.Done:
@@ -424,19 +435,39 @@ func batchMessage(b domain.RefreshBatch) string {
 		if b.Error == "storage quota exceeded" {
 			reason = "存储空间不足"
 		}
-		return fmt.Sprintf("批量%s已中止：%s\n已提交 %d/%d", mode, reason, b.Submitted, b.Total) + posts
+		return fmt.Sprintf("批量%s已中止：%s\n已提交 %d/%d", mode, reason, b.Submitted, b.Total) + summary
 	case !b.Done:
 		text := fmt.Sprintf("批量%s中…\n已提交 %d/%d", mode, b.Submitted, b.Total)
 		if c := counts("抓取中", b.Running, "已抓取", fetched, "无变化", b.Reused, "失败", b.Failed); c != "" {
 			text += " · " + c
 		}
-		return text + posts
+		text += summary
+		if len(b.Active) > 0 {
+			text += "\n\n进行中："
+		}
+		for i, item := range b.Active {
+			if i == maxBatchItems {
+				text += fmt.Sprintf("\n另有 %d 项", len(b.Active)-i)
+				break
+			}
+			var parts []string
+			if item.Running {
+				parts = append(parts, "抓取中")
+			}
+			if p := posts(item.Members, false); p != "" {
+				parts = append(parts, "帖子 "+p)
+			} else if !item.Running {
+				parts = append(parts, "提交帖子中")
+			}
+			text += fmt.Sprintf("\n• %s：%s", strings.TrimPrefix(strings.TrimPrefix(item.URL, "https://"), "http://"), strings.Join(parts, " · "))
+		}
+		return text
 	}
 	text := fmt.Sprintf("批量%s完成，共 %d 项", mode, b.Total)
 	if c := counts("已抓取", fetched, "无变化", b.Reused, "不完整", b.Partial, "失败", b.Failed, "无法更新", b.Rejected); c != "" {
 		text += "\n" + c
 	}
-	return text + posts
+	return text + summary
 }
 
 func collectionProgressMessage(id string, d channelapi.Delivery, webURL string) (string, telegram.Keyboard) {

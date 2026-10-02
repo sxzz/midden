@@ -82,20 +82,22 @@ func (s *Service) RefreshBatch(ctx context.Context, tenant, id string) (out Refr
 }
 
 // Members are followed from each submitted collection through its continuation
-// pages, matching how collection progress is reported to channels.
+// pages, matching how collection progress is reported to channels. Their total
+// counts the targets a fetched listing named, so it is known while the listing
+// still downloads and before its members are submitted.
 func scanRefreshBatch(ctx context.Context, tx pgx.Tx, id string, b *RefreshBatch) error {
 	var membersPending bool
 	err := tx.QueryRow(ctx, `WITH RECURSIVE batch AS (SELECT * FROM refresh_batches WHERE id=$1),
 pages AS (
- SELECT s.id,s.next_submission,s.related_state,0 AS depth FROM batch JOIN submissions s ON s.idem_key LIKE 'refresh-batch:'||batch.id::text||':%' JOIN captures c ON c.id=s.capture_id WHERE c.is_collection
- UNION ALL SELECT s.id,s.next_submission,s.related_state,p.depth+1 FROM submissions s JOIN pages p ON s.id=p.next_submission WHERE p.depth<1000
+ SELECT s.id,s.capture_id,s.next_submission,s.related_state,0 AS depth FROM batch JOIN submissions s ON s.idem_key LIKE 'refresh-batch:'||batch.id::text||':%' JOIN captures c ON c.id=s.capture_id WHERE c.is_collection
+ UNION ALL SELECT s.id,s.capture_id,s.next_submission,s.related_state,p.depth+1 FROM submissions s JOIN pages p ON s.id=p.next_submission WHERE p.depth<1000
 ), members AS (SELECT DISTINCT child.capture_id FROM submissions child JOIN pages ON child.idem_key LIKE 'related:'||pages.id::text||':%')
 SELECT batch.id,batch.state,batch.error,batch.update_mode,cardinality(batch.collection_ids),batch.position,batch.reused,batch.rejected,
  (SELECT count(*) FROM captures c WHERE c.id=ANY(batch.capture_ids) AND c.state IN ('queued','downloading')),
  (SELECT count(*) FROM captures c WHERE c.id=ANY(batch.capture_ids) AND c.state='complete'),
  (SELECT count(*) FROM captures c WHERE c.id=ANY(batch.capture_ids) AND c.state='partial'),
  (SELECT count(*) FROM captures c WHERE c.id=ANY(batch.capture_ids) AND c.state='failed'),
- (SELECT count(*) FROM members),
+ GREATEST((SELECT count(*) FROM members),(SELECT count(DISTINCT t->>'url') FROM pages JOIN captures c ON c.id=pages.capture_id CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.related_targets)='array' THEN c.related_targets ELSE '[]' END) t)),
  (SELECT count(*) FROM members JOIN captures c ON c.id=members.capture_id WHERE c.state='complete'),
  (SELECT count(*) FROM members JOIN captures c ON c.id=members.capture_id WHERE c.state='partial'),
  (SELECT count(*) FROM members JOIN captures c ON c.id=members.capture_id WHERE c.state='failed'),
@@ -103,10 +105,51 @@ SELECT batch.id,batch.state,batch.error,batch.update_mode,cardinality(batch.coll
  EXISTS(SELECT FROM pages WHERE related_state='pending')
 FROM batch`, id).Scan(&b.ID, &b.State, &b.Error, &b.UpdateMode, &b.Total, &b.Submitted, &b.Reused, &b.Rejected, &b.Running, &b.Complete, &b.Partial, &b.Failed,
 		&b.Members.Total, &b.Members.Complete, &b.Members.Partial, &b.Members.Failed, &b.Members.Pending, &membersPending)
+	if err != nil {
+		return err
+	}
 	b.Members.Done = !membersPending && b.Members.Pending == 0
 	// A failed batch submits nothing more, but what it started still runs.
 	b.Done = b.State != "running" && b.Running == 0 && b.Members.Done
-	return err
+	return scanRefreshItems(ctx, tx, id, b)
+}
+
+// scanRefreshItems lists the submitted collections still running or waiting
+// on their members, so a profile reports its posts while it is being updated.
+func scanRefreshItems(ctx context.Context, tx pgx.Tx, id string, b *RefreshBatch) error {
+	rows, err := tx.Query(ctx, `WITH RECURSIVE pages AS (
+ SELECT s.id AS root,s.id,s.capture_id,s.next_submission,s.related_state,0 AS depth FROM refresh_batches b JOIN submissions s ON s.idem_key LIKE 'refresh-batch:'||b.id::text||':%' WHERE b.id=$1
+ UNION ALL SELECT p.root,s.id,s.capture_id,s.next_submission,s.related_state,p.depth+1 FROM submissions s JOIN pages p ON s.id=p.next_submission WHERE p.depth<1000
+), members AS (SELECT DISTINCT pages.root,child.capture_id FROM submissions child JOIN pages ON child.idem_key LIKE 'related:'||pages.id::text||':%'),
+targets AS (SELECT pages.root,count(DISTINCT t->>'url') AS n FROM pages JOIN captures c ON c.id=pages.capture_id CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.related_targets)='array' THEN c.related_targets ELSE '[]' END) t GROUP BY pages.root),
+progress AS (SELECT members.root,count(*) AS total,
+ count(*) FILTER (WHERE c.state='complete') AS complete,
+ count(*) FILTER (WHERE c.state='partial') AS partial,
+ count(*) FILTER (WHERE c.state='failed') AS failed,
+ count(*) FILTER (WHERE c.state IN ('queued','downloading')) AS pending
+ FROM members JOIN captures c ON c.id=members.capture_id GROUP BY members.root)
+SELECT a.url,c.state IN ('queued','downloading'),GREATEST(coalesce(t.n,0),coalesce(p.total,0)),coalesce(p.complete,0),coalesce(p.partial,0),coalesce(p.failed,0),coalesce(p.pending,0),
+ EXISTS(SELECT FROM pages x WHERE x.root=r.id AND x.related_state='pending')
+FROM pages r JOIN submissions s ON s.id=r.id JOIN captures c ON c.id=r.capture_id JOIN collections a ON a.id=c.collection_id
+LEFT JOIN targets t ON t.root=r.id LEFT JOIN progress p ON p.root=r.id
+WHERE r.depth=0 ORDER BY s.created_at,s.id`, id)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item domain.RefreshItem
+		var membersPending bool
+		m := &item.Members
+		if err := rows.Scan(&item.URL, &item.Running, &m.Total, &m.Complete, &m.Partial, &m.Failed, &m.Pending, &membersPending); err != nil {
+			return err
+		}
+		m.Done = !membersPending && m.Pending == 0
+		if item.Running || !m.Done {
+			b.Active = append(b.Active, item)
+		}
+	}
+	return rows.Err()
 }
 
 // refreshBatch submits the remaining collections in order, persisting progress

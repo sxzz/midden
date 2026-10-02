@@ -218,6 +218,16 @@ type RefreshBatch struct {
 	// Members covers the captures selected collections (such as profiles)
 	// started for their posts, which finish after the collections themselves.
 	Members MemberProgress `json:"members"`
+	// Active lists, in batch order, the submitted items still running or
+	// waiting on their members.
+	Active []RefreshItem `json:"active,omitempty"`
 	// Done once every submission and every member capture has finished.
 	Done bool `json:"done"`
+}
+
+type RefreshItem struct {
+	URL string `json:"url"`
+	// Running while the item's own capture has not finished.
+	Running bool           `json:"running"`
+	Members MemberProgress `json:"members"`
 }

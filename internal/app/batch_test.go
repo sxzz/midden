@@ -142,13 +142,17 @@ func TestRefreshBatchModes(t *testing.T) {
 	if p := progress(); p.Done || p.Running != 0 || p.Members.Done {
 		t.Fatalf("batch done before members were listed %+v", p)
 	}
+	// The fetched listing already tells how many members are coming.
+	if p := progress(); p.Members.Total != 4 || len(p.Active) != 1 || p.Active[0].Running || p.Active[0].Members.Total != 4 || p.Active[0].URL != "https://notes.test/collection/"+prefix {
+		t.Fatalf("listed members before submission %+v %+v", p.Members, p.Active)
+	}
 	var sid string
 	must(t, db.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT id FROM submissions WHERE capture_id=$1 AND related_state='pending'`, listing).Scan(&sid)
 	}))
 	must(t, s.related(ctx, store.Task{Tenant: tenant, ID: sid, Type: "related"}))
 	// Unchanged members are reused and count as saved; the rest still run.
-	if p := progress(); p.Done || p.Members.Total != 4 || p.Members.Pending != 2 || p.Members.Complete != 2 {
+	if p := progress(); p.Done || p.Members.Total != 4 || p.Members.Pending != 2 || p.Members.Complete != 2 || len(p.Active) != 1 || p.Active[0].Members.Pending != 2 {
 		t.Fatalf("batch member progress %+v", p.Members)
 	}
 	rows, e := admin.Pool.Query(ctx, `SELECT c.id FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.parent_submission=$1 AND c.state='queued'`, sid)
@@ -158,7 +162,7 @@ func TestRefreshBatchModes(t *testing.T) {
 	for _, id := range queued {
 		complete(id)
 	}
-	if p := progress(); !p.Done || !p.Members.Done || p.Members.Complete != 4 {
+	if p := progress(); !p.Done || !p.Members.Done || p.Members.Complete != 4 || len(p.Active) != 0 {
 		t.Fatalf("batch not done after members %+v", p)
 	}
 	for id, want := range map[string]int{prefix + "-kept": 1, prefix + "-undated": 1, prefix + "-edited": 2, prefix + "-new": 1} {
