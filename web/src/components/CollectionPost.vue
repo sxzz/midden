@@ -12,6 +12,7 @@ import MediaGallery from './MediaGallery.vue'
 import MediaViewer from './MediaViewer.vue'
 import PostRelations from './PostRelations.vue'
 import LoadingImage from './ui/LoadingImage.vue'
+import LockIcon from './ui/LockIcon.vue'
 const props = defineProps<{
   collection: Collection
   /** When the viewer already knows it, so revisions never drop the date. */
@@ -80,11 +81,17 @@ const warnings = computed(() => warningList(props.collection.warnings))
         class="identity profile-link"
         :href="`#/collection/${view.profileCollectionId}`"
       >
-        <strong class="name">{{ view.name }}</strong>
+        <strong class="name"
+          >{{ view.name
+          }}<LockIcon v-if="collection.visibility === 'private'" class="lock"
+        /></strong>
         <small v-if="view.handle" class="handle">@{{ view.handle }}</small>
       </a>
       <div v-else class="identity">
-        <strong class="name">{{ view.name }}</strong>
+        <strong class="name"
+          >{{ view.name
+          }}<LockIcon v-if="collection.visibility === 'private'" class="lock"
+        /></strong>
         <small v-if="view.handle" class="handle">@{{ view.handle }}</small>
       </div>
     </header>
@@ -181,6 +188,9 @@ const warnings = computed(() => warningList(props.collection.warnings))
   display: block;
   font-size: 16px;
   font-weight: 600;
+}
+.lock {
+  margin-left: 3px;
 }
 .handle {
   display: block;

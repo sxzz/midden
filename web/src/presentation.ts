@@ -44,9 +44,6 @@ function details(
     ...(editedAt
       ? [{ key: 'edited', label: '已编辑', value: editedAt, datetime: edited }]
       : []),
-    ...(a.visibility === 'private'
-      ? [{ key: 'visibility', label: '可见性', value: '私密' }]
-      : []),
   ]
 }
 const generic: Presenter = (a) => ({

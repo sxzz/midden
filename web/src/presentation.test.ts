@@ -88,9 +88,8 @@ it('details the post from its own record', () => {
     ['published', '发布于'],
     ['edited', '已编辑'],
   ])
-  expect(present({ visibility: 'private' } as Collection).details).toEqual([
-    { key: 'visibility', label: '可见性', value: '私密' },
-  ])
+  // Privacy is a lock beside the name, not a detail line.
+  expect(present({ visibility: 'private' } as Collection).details).toEqual([])
 })
 it('buckets the collection by when it was saved', () => {
   const now = new Date(2026, 8, 29, 12, 0)

@@ -11,6 +11,7 @@ import {
 import MediaThumbs from './MediaThumbs.vue'
 import PostRelations from './PostRelations.vue'
 import LoadingImage from './ui/LoadingImage.vue'
+import LockIcon from './ui/LockIcon.vue'
 const props = defineProps<{
   collection: Collection
   showSensitive?: boolean
@@ -58,7 +59,6 @@ const when = computed(() =>
 )
 const meta = computed(() =>
   [
-    props.collection.visibility === 'private' && '私密',
     // The banner above the post already names the account that reposted it.
     !reposter.value &&
       props.collection.relation_types?.includes('reposted') &&
@@ -137,7 +137,10 @@ const storage = computed(() =>
         >
           <span class="identity"
             ><strong class="name">{{ view.name }}</strong
-            ><span v-if="view.handle" class="handle"
+            ><LockIcon
+              v-if="collection.visibility === 'private'"
+              class="lock"
+            /><span v-if="view.handle" class="handle"
               >@{{ view.handle }}</span
             ></span
           ><span class="when">{{ when }}</span>
@@ -271,6 +274,12 @@ const storage = computed(() =>
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Tucked against the name the way X shows a protected account. */
+.lock {
+  align-self: center;
+  margin-left: -3px;
+  font-size: 15px;
 }
 .handle {
   min-width: 0;

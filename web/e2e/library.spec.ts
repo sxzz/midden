@@ -411,3 +411,44 @@ test('a failed refresh shows a toast every time it is tried', async ({
   await expect(page.getByText(collection.text)).toBeVisible()
   await expect(page.locator('.banner')).toHaveCount(0)
 })
+
+test('a private collection shows a lock beside the name, not a detail line', async ({
+  page,
+}) => {
+  const hidden = {
+    ...collection,
+    visibility: 'private',
+    author_name: '一个名字很长很长很长很长很长很长很长很长的私密账号',
+  }
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/collections')
+      return r.fulfill({
+        json: { items: [hidden, { ...collection, id: 'b' }] },
+      })
+    if (path.endsWith('/availability'))
+      return r.fulfill({ json: { available: true } })
+    if (path.endsWith('/revisions')) return r.fulfill({ json: { items: [] } })
+    if (path === `/v1/collections/${id}`) return r.fulfill({ json: hidden })
+    if (path.endsWith('/annotation'))
+      return r.fulfill({ json: { note: '', tags: [] } })
+    if (path === '/v1/tags') return r.fulfill({ json: [] })
+    return r.fulfill({ json: {} })
+  })
+  await page.goto('/app/')
+  const rows = page.locator('.row')
+  await expect(rows).toHaveCount(2)
+  // The lock stays visible even when the name has to be truncated.
+  await expect(rows.nth(0).getByRole('img', { name: '私密' })).toBeVisible()
+  await expect(rows.nth(1).getByRole('img', { name: '私密' })).toHaveCount(0)
+  await expect(page.getByText('私密', { exact: true })).toHaveCount(0)
+  await page.screenshot({ path: 'test-results/private-lock-list.png' })
+  await rows.nth(0).locator('.head').click()
+  await expect(
+    page.locator('.post .name').getByRole('img', { name: '私密' }),
+  ).toBeVisible()
+  await expect(page.getByText('可见性')).toHaveCount(0)
+  await page.screenshot({ path: 'test-results/private-lock-detail.png' })
+})
