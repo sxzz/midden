@@ -101,6 +101,13 @@ onMounted(() => {
       '.media img, .thumbs img, .album img, .author img',
     ),
   ]
+  // Until an image reports its natural size, its slide spans the whole
+  // viewport and object-fit keeps the picture contained inside it, so a cold
+  // first open never shows a guessed aspect ratio.
+  const viewport = {
+    width: stage.value.clientWidth || window.innerWidth,
+    height: stage.value.clientHeight || window.innerHeight,
+  }
   const dataSource = props.assets.map((image) => {
     const src = assetURL(image)
     if (image.mime?.startsWith('video/')) {
@@ -125,8 +132,8 @@ onMounted(() => {
     return {
       src,
       alt: image.alt_text || '收藏图片',
-      width: preview?.naturalWidth || 1600,
-      height: preview?.naturalHeight || 1200,
+      width: preview?.naturalWidth || viewport.width,
+      height: preview?.naturalHeight || viewport.height,
     }
   })
   const pswp = new PhotoSwipe({
@@ -458,6 +465,7 @@ watch(
 }
 .stage :deep(.pswp__img) {
   max-width: none;
+  object-fit: contain;
   -webkit-touch-callout: default;
 }
 .stage :deep(.pswp__img--placeholder) {

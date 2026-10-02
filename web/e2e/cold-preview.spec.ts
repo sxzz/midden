@@ -37,11 +37,19 @@ test('first list preview fits the image after dimensions arrive during opening',
   })
   await page.goto('/app/')
   await page.getByRole('button', { name: '放大图片', exact: true }).click()
-  // No thumbnail dimensions were available when the native dialog opened.
-  release()
   const image = page
     .getByRole('dialog')
     .locator('.pswp__item[aria-hidden="false"] img.pswp__img')
+  // No thumbnail dimensions are known yet, so the slide spans the viewport
+  // and the picture is contained instead of stretched to a guessed ratio.
+  await expect(image).toHaveCSS('object-fit', 'contain')
+  await expect
+    .poll(async () => {
+      const box = await image.boundingBox()
+      return [Math.round(box?.width || 0), Math.round(box?.height || 0)]
+    })
+    .toEqual([390, 844])
+  release()
   await expect
     .poll(async () => {
       const box = await image.boundingBox()
