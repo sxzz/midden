@@ -47,17 +47,8 @@ const reposter = computed(() =>
     ? props.repostedBy
     : undefined,
 )
-// A profile row stands for the account itself; its bio belongs to the profile,
-// not to a line in a list. A post keeps showing its text.
-const isProfile = computed(() => {
-  const graph = props.collection.graph
-  return !!graph?.entities.some(
-    (entity) => entity.key === graph.root && entity.type === 'x.profile',
-  )
-})
-const preview = computed(() =>
-  isProfile.value ? '' : excerpt(view.value.body),
-)
+// A post previews its own text and a profile its own bio.
+const preview = computed(() => excerpt(view.value.bio ?? view.value.body))
 const when = computed(() =>
   shortDate(
     props.sort

@@ -121,7 +121,7 @@ it('reads the handle beside the name, keeps the time right and drops media count
   // Storage closes the row below the media instead of sitting over it.
   expect(el.querySelector('.content')?.lastElementChild).toBe(storage)
 })
-it('keeps a profile row to its identity, without the bio a post would show', () => {
+it('shows a profile row with its own bio', () => {
   const el = mount(CollectionRow, {
     collection: {
       id: 'profile',
@@ -148,8 +148,7 @@ it('keeps a profile row to its identity, without the bio a post would show', () 
   })
   expect(el.querySelector('.name')?.textContent).toBe('合成账号')
   expect(el.querySelector('.handle')?.textContent).toBe('@synthetic')
-  expect(el.querySelector('.preview')).toBeNull()
-  expect(el.textContent).not.toContain('合成账号简介')
+  expect(el.querySelector('.preview')?.textContent).toBe('合成账号简介')
 })
 it('hands the profile name down to the rows of its related collections', async () => {
   vi.mocked(api).mockResolvedValue({ items: [repost, mentioned] })

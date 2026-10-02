@@ -20,6 +20,8 @@ export interface Presentation {
   handle?: string
   avatar?: Asset
   body: string
+  /** A profile's own bio, empty when it has none. */
+  bio?: string
   /** Counts the source recorded for whatever the collection is about. */
   stats?: StatGroup
   /** What the source recorded about the item itself, read after the body. */
@@ -96,12 +98,12 @@ function metadata(entity?: Entity): Record<string, unknown> {
 }
 function profileBio(a: Collection, profile?: Entity): string {
   const description = metadata(profile).description
-  if (typeof description === 'string') return description.trim() || '暂无简介'
+  if (typeof description === 'string') return description.trim()
   // Older snapshots kept the handle as the first line of the collection text.
   const lines = (a.text || '').split(/\r?\n/)
   const handle = asText(profile?.data.username)
   if (handle && lines[0]?.trim() === `@${handle}`) lines.shift()
-  return lines.join('\n').trim() || '暂无简介'
+  return lines.join('\n').trim()
 }
 const x: Presenter = (a, root) => {
   const key = a.graph?.relations.find(
@@ -112,9 +114,11 @@ const x: Presenter = (a, root) => {
     ? root
     : a.graph?.entities.find((e) => e.key === key && e.type === 'x.profile')
   const post = root?.type === 'x.post' ? root.data : undefined
+  const bio = isProfile ? profileBio(a, profile) : undefined
   return {
     ...generic(a),
-    body: isProfile ? profileBio(a, profile) : generic(a).body,
+    body: bio === undefined ? generic(a).body : bio || '暂无简介',
+    bio,
     profileCollectionId: isProfile ? undefined : profile?.saved_collection_id,
     handle: asText(profile?.data.username),
     avatar: profile?.assets?.find(
