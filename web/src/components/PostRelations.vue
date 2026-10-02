@@ -288,9 +288,12 @@ const relations = computed(() => {
 .compact .label {
   font-size: 11px;
 }
+/* In a list row the row's own preview is muted; a referenced post must not
+   read louder than the post it belongs to. */
 .compact .text {
   -webkit-line-clamp: 2;
   font-size: 13px;
+  color: var(--subtle);
 }
 .relation:active,
 a.relation-author:active {
