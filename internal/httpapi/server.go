@@ -252,7 +252,7 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		mux.ServeHTTP(w, r)
 	}))
 	root := http.NewServeMux()
-	root.Handle("/v1/", secured)
+	root.Handle("/v1/", serverTiming(secured))
 	registerDownloads(root, mux, s, web)
 	root.HandleFunc("GET /app/", func(w http.ResponseWriter, r *http.Request) {
 		dir := os.Getenv("WEB_DIST")
