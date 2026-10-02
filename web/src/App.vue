@@ -3,14 +3,18 @@ import { onMounted, onUnmounted, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, errorText } from './api'
 import CollectionLibrary from './components/CollectionLibrary.vue'
+import TelegramLogin from './components/TelegramLogin.vue'
 import AppToast from './components/ui/AppToast.vue'
 import CollectionSkeleton from './components/ui/CollectionSkeleton.vue'
 import { host, setupHost } from './host'
+import { takeWidgetLogin, widgetLogin } from './login'
 import { followInternalLink, goBack } from './navigation'
 const router = useRouter()
 const ready = shallowRef(false)
 const error = shallowRef('')
 const loading = shallowRef(true)
+// Outside Telegram there is no initData; the browser logs in instead.
+const browserLogin = shallowRef(false)
 let cleanup = () => {}
 onMounted(async () => {
   const stopHost = setupHost(() => goBack(router))
@@ -20,13 +24,17 @@ onMounted(async () => {
     stopHost()
     document.removeEventListener('click', follow)
   }
+  // Coming back from the Login Widget, sign in before checking the session.
+  const login = takeWidgetLogin()
+  const loginError = login ? await widgetLogin(login) : ''
   try {
     await api('/session')
     ready.value = true
   } catch {
     const data = host()?.initData
     if (!data) {
-      error.value = '请从 Telegram Bot 的「打开」进入。'
+      browserLogin.value = true
+      error.value = loginError
     } else {
       try {
         await api('/auth/telegram', {
@@ -49,6 +57,7 @@ onUnmounted(() => cleanup())
   <CollectionLibrary v-if="ready" />
   <main v-else class="gate">
     <CollectionSkeleton v-if="loading" />
+    <TelegramLogin v-else-if="browserLogin" :error="error" />
     <p v-else role="status">{{ error }}</p>
   </main>
   <AppToast />

@@ -10,9 +10,21 @@ security:
   - webSession: []
 paths:
   /v1/auth/telegram:
+    get:
+      summary: Bot username for the Telegram Login Widget
+      security: []
+      responses:
+        "200":
+          description: Bot username
+          content:
+            application/json:
+              schema:
+                { type: object, properties: { bot_username: { type: string } } }
+        "404": { description: Mini App disabled }
+        "503": { description: Telegram did not answer }
     post:
-      summary: Exchange signed Telegram initData for a 12-hour HttpOnly session
-      description: Requires configured web_app_url, matching Origin, valid bot signature and auth_date within five minutes (30 seconds future tolerance). Resolves the same tenant as the Bot.
+      summary: Exchange signed Telegram initData or Login Widget data for a 12-hour HttpOnly session
+      description: Requires configured web_app_url, matching Origin and a valid bot signature. Send exactly one of init_data (Mini App; auth_date within five minutes) or login (Login Widget fields as received, signed with SHA-256 of the bot token; auth_date within 24 hours). 30 seconds future tolerance. Resolves the same tenant as the Bot.
       security: []
       requestBody:
         required: true
@@ -20,9 +32,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [init_data]
               properties:
                 init_data: { type: string }
+                login:
+                  type: object
+                  description: Login Widget fields (id, first_name, username, photo_url, auth_date, hash, ...)
+                  additionalProperties:
+                    { oneOf: [{ type: string }, { type: number }] }
       responses:
         "200":
           description: Session created; sets __Host-midden cookie (Secure, HttpOnly, SameSite=None, Path=/)

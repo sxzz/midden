@@ -213,6 +213,8 @@ docker compose --profile telegram restart telegram
 
 「打开」是 Bot 私聊的菜单按钮，由 Telegram channel 启动时同步。没有按钮时先检查 `web_app_url` 是否为空，再检查 telegram 服务启动日志；仅部署网页或重启 core 不会同步菜单。手机上的 `localhost` 指向手机本身，正式入口必须使用客户端可访问的 HTTPS 地址。
 
+浏览器登录：在 BotFather 中对该 Bot 执行 `/setdomain`，填入 `web_app_url` 的域名，Telegram 登录按钮才会显示；一个 Bot 只能设置一个登录域名。浏览器会话可在「采集账号」页面退出登录。
+
 关闭入口：将 `web_app_url` 设为空字符串并重启，Cookie 登录随之停用。已有 REST token 不受影响。会话过期后由维护任务清理；更换域名会使旧 Origin 无法进行 Cookie 写操作。
 
 Adapter 不可达时仍可浏览、搜索和删除已有收藏。后台每轮发现结束后等待 15 秒重试，日志记录可用性变化；`/healthz` 仍表示数据库及核心读取服务健康。配置或协议错误会终止进程。网页刷新是否可用由对应收藏的 availability 接口给出。

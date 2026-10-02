@@ -13,12 +13,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"monitor/internal/app"
 	"monitor/internal/store"
+	"monitor/internal/telegram"
 )
 
 type (
@@ -79,6 +81,83 @@ func telegramUser(raw, token string, now time.Time) (string, error) {
 	return strconv.FormatInt(user.ID, 10), nil
 }
 
+// widgetMaxAge bounds how old a Login Widget authorization may be. Telegram
+// reuses a browser's earlier authorization, so this is longer than initData's.
+const widgetMaxAge = 24 * time.Hour
+
+// widgetUser verifies Telegram Login Widget data, which a browser outside
+// Telegram receives. Unlike initData its secret is SHA-256 of the bot token.
+func widgetUser(fields map[string]json.RawMessage, token string, now time.Time) (string, error) {
+	values := map[string]string{}
+	keys := []string{}
+	for k, raw := range fields {
+		var text string
+		if json.Unmarshal(raw, &text) != nil {
+			var number json.Number
+			d := json.NewDecoder(strings.NewReader(string(raw)))
+			d.UseNumber()
+			if d.Decode(&number) != nil {
+				return "", fmt.Errorf("invalid field")
+			}
+			text = number.String()
+		}
+		values[k] = text
+		if k != "hash" {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	parts := []string{}
+	for _, k := range keys {
+		parts = append(parts, k+"="+values[k])
+	}
+	secret := sha256.Sum256([]byte(token))
+	mac := hmac.New(sha256.New, secret[:])
+	mac.Write([]byte(strings.Join(parts, "\n")))
+	signature, e := hex.DecodeString(values["hash"])
+	if e != nil || !hmac.Equal(signature, mac.Sum(nil)) {
+		return "", fmt.Errorf("invalid signature")
+	}
+	ts, e := strconv.ParseInt(values["auth_date"], 10, 64)
+	if e != nil || ts > now.Unix()+30 || ts < now.Add(-widgetMaxAge).Unix() {
+		return "", fmt.Errorf("expired data")
+	}
+	id, e := strconv.ParseInt(values["id"], 10, 64)
+	if e != nil || id <= 0 {
+		return "", fmt.Errorf("invalid user")
+	}
+	return strconv.FormatInt(id, 10), nil
+}
+
+// lookupBot names the bot for the Login Widget; a variable so tests stay offline.
+var lookupBot = func(ctx context.Context, token string) (string, error) {
+	c := &telegram.Client{Token: token}
+	if _, e := c.Me(ctx); e != nil {
+		return "", e
+	}
+	return c.Username, nil
+}
+
+// botName remembers the bot username once Telegram has answered.
+type botName struct {
+	mu   sync.Mutex
+	name string
+}
+
+func (b *botName) get(ctx context.Context, token string) (string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.name != "" {
+		return b.name, nil
+	}
+	name, e := lookupBot(ctx, token)
+	if e != nil || name == "" {
+		return "", fmt.Errorf("bot username unavailable")
+	}
+	b.name = name
+	return name, nil
+}
+
 func webOrigin(c WebConfig) string {
 	u, e := url.Parse(c.URL)
 	if e != nil {
@@ -102,13 +181,21 @@ func login(s *app.Service, c WebConfig, w http.ResponseWriter, r *http.Request) 
 	}
 	var in struct {
 		InitData string `json:"init_data"`
+		// Login is the Login Widget's user object, from a browser outside Telegram.
+		Login map[string]json.RawMessage `json:"login"`
 	}
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&in) != nil {
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&in) != nil || (in.InitData == "") == (in.Login == nil) {
 		write(w, 400, map[string]string{"error": "invalid request"})
 		return
 	}
-	user, e := telegramUser(in.InitData, c.Token, time.Now())
-	if e != nil {
+	var user string
+	var e error
+	if in.Login != nil {
+		if user, e = widgetUser(in.Login, c.Token, time.Now()); e != nil {
+			write(w, 401, map[string]string{"error": "log in with Telegram again"})
+			return
+		}
+	} else if user, e = telegramUser(in.InitData, c.Token, time.Now()); e != nil {
 		write(w, 401, map[string]string{"error": "reopen Telegram Mini App"})
 		return
 	}
@@ -136,10 +223,25 @@ func login(s *app.Service, c WebConfig, w http.ResponseWriter, r *http.Request) 
 }
 
 func authenticate(s *app.Service, c WebConfig, next http.Handler) http.Handler {
+	bot := &botName{}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if r.URL.Path == "/v1/auth/telegram" && r.Method == "POST" {
 			login(s, c, w, r)
+			return
+		}
+		// A browser outside Telegram needs the bot's username for the Login Widget.
+		if r.URL.Path == "/v1/auth/telegram" && r.Method == "GET" {
+			if c.URL == "" {
+				http.NotFound(w, r)
+				return
+			}
+			name, e := bot.get(r.Context(), c.Token)
+			if e != nil {
+				write(w, 503, map[string]string{"error": "Telegram unavailable"})
+				return
+			}
+			write(w, 200, map[string]string{"bot_username": name})
 			return
 		}
 		var t string

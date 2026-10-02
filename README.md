@@ -115,7 +115,7 @@ docker compose run --rm --entrypoint monitorctl migrate config-set web_app_url h
 docker compose up -d --force-recreate core
 ```
 
-启用的 `telegram` 服务也需重启以同步菜单。Bot 私聊菜单和 `/start` 消息会提供「打开」。在 BotFather 中按客户端要求配置该 HTTPS 域名。将 `web_app_url` 设置为空字符串并重启可关闭网页登录和入口，恢复命令菜单。会话有效期 12 小时，到期后从 Bot 重新打开。
+启用的 `telegram` 服务也需重启以同步菜单。Bot 私聊菜单和 `/start` 消息会提供「打开」。在 BotFather 中按客户端要求配置该 HTTPS 域名。将 `web_app_url` 设置为空字符串并重启可关闭网页登录和入口，恢复命令菜单。会话有效期 12 小时，到期后从 Bot 重新打开。在普通浏览器中打开 `/app/` 时显示 Telegram 登录按钮，登录后进入同一租户；这需要在 BotFather 用 `/setdomain` 把该域名设为 Bot 的登录域名。
 
 图片在网页内放大查看，右上角可保存图片；Telegram 8.0+ 使用原生下载弹窗，其他环境使用普通下载链接。视频支持分段读取；浏览器无法播放的原文件可下载。日期筛选使用设备本地日期，筛选的是保存时间。网页只访问自己的收藏；删除后不能继续通过网页访问其历史和媒体。
 
