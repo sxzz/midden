@@ -77,6 +77,13 @@ function refreshWith(mode: UpdateMode) {
   choosingMode.value = false
   void refresh(mode)
 }
+// Only a profile has members for an appending refresh to skip. A lone post
+// carries no upstream change time, so appending would just reuse a complete
+// save and never notice an edit.
+function startRefresh() {
+  if (isProfile.value) choosingMode.value = true
+  else refreshWith('full')
+}
 const version = computed(() =>
   collection.value
     ? `${historical.value ? '历史' : '最新'}版本抓取于 ${date(collection.value.observed_at)}`
@@ -111,7 +118,7 @@ const version = computed(() =>
       <ListButton
         label="重新抓取"
         :disabled="busy || loadingRevision || !available"
-        @select="choosingMode = true"
+        @select="startRefresh"
       />
       <ListButton
         v-if="!available"

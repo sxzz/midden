@@ -100,12 +100,13 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await page.getByRole('button', { name: /最新版本 ·/ }).click()
   await expect(page.getByText(collection.text)).toBeVisible()
   await expect(page.getByRole('button', { name: /最新版本 ·/ })).toBeDisabled()
+  // A post refreshes in full right away; only profiles offer appending.
   await page.getByRole('button', { name: '重新抓取' }).click()
-  await page.getByRole('button', { name: /附加更新/ }).click()
   await expect(page.getByText('已更新。')).toBeVisible()
+  await expect(page.getByRole('button', { name: /附加更新/ })).toBeHidden()
   expect(captureBodies.at(-1)).toEqual({
     refresh_id: id,
-    update_mode: 'append',
+    update_mode: 'full',
   })
   await page.getByRole('button', { name: '返回' }).click()
   await page.getByRole('searchbox').fill('不存在')
@@ -403,7 +404,6 @@ test('a failed refresh shows a toast every time it is tried', async ({
   const toast = page.locator('.toast')
   for (let i = 1; i <= 2; i++) {
     await page.getByRole('button', { name: '重新抓取' }).click()
-    await page.getByRole('button', { name: /完整更新/ }).click()
     await expect.poll(() => attempts).toBe(i)
     await expect(toast).toHaveText('操作太频繁，请稍后重试。')
   }
