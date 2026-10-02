@@ -72,6 +72,8 @@ node scripts/install-cloudflare-tunnel.mjs <hostname> <tunnel-uuid> <credentials
 
 ## 数据和对象备份
 
+`./scripts/backup.sh` 生成完整备份 `.local/backups/<YYYYMMDD-HHMMSS>.tgz`：数据库 dump、bucket 中全部对象、`.env`、`.local/s3.json` 和 Adapter TLS 证书。宿主机需安装 rclone（`brew install rclone`）。脚本与部署共用 `.local/deploy.lock`，不会与部署同时运行。默认不停服务：`pg_dump` 导出单一事务快照，随后逐个同步对象；对象写入后不会修改，且先于引用它的记录写入，因此导出中的新内容都会包含在备份中。对象同步不是时间点快照：同步期间被保留期清理的对象可能已删除，而导出中仍有引用。`object_gc_grace_hours` 从对象创建时间起算，不能覆盖这种情况。恢复后这些记录会在下一轮清理中删除，适合日常备份。迁移、升级或恢复演练需要严格一致时，使用 `--stop-writes`：备份期间停止 Core 和 Telegram（清理与回收都在 Core 中运行），完成后恢复原运行状态。`--keep N` 只保留最新 N 个 `.tgz`，不清理部署产生的数据库备份目录。备份仍在同一台机器上，需另行复制到服务器外。
+
 一致备份采用短暂停写：停止 Telegram channel、核心 API 和所有 worker，保持 PostgreSQL 与对象存储运行；等待进程优雅退出。必须先备份全部对象和数据库，随后再恢复写入。不要只备份当前版本对应对象，旧版本同样需要保留。
 
 示例使用 AWS CLI（配置独立的备份凭据）与 Docker 内的 PostgreSQL 工具：
