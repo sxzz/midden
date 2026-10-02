@@ -1,3 +1,4 @@
+import { host } from './host'
 export interface Tag {
   id: string
   name: string
@@ -144,7 +145,10 @@ export function errorText(e: unknown) {
       return '备注最多 10000 字，标签名最多 64 字，标签最多 100 个。'
     if (e.status === 400 && e.message === 'invalid credentials')
       return '凭据无效或已过期。'
-    if (e.status === 401) return '会话已失效，请从 Telegram 重新打开。'
+    if (e.status === 401)
+      return host()?.initData
+        ? '会话已失效，请从 Telegram 重新打开。'
+        : '登录已失效，请刷新页面重新登录。'
     if (e.status === 404) return '收藏不存在或已删除。'
     if (e.status === 409) return '存储空间不足或操作冲突。'
     if (e.status === 429) return '操作太频繁，请稍后重试。'

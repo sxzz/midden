@@ -287,7 +287,7 @@ Fetch 失败时，Adapter 可以用 trailer `source-state` 告知来源本身已
 
 Vue Vapor 静态客户端由 Cloudflare Workers Static Assets 提供（不包含 Worker 脚本）；同域 `/app/*` 路由到静态资源，`/v1/*` 仍直达 core。本地开发可由 core 提供静态产物，业务页面只依赖 HTTP API；Telegram SDK 仅位于宿主层。平台展示器读取收藏实体快照，未知实体使用正文、摘要和媒体回退，不依赖 Adapter 在线。
 
-`web_sessions` 保存随机会话密钥摘要、租户和固定到期时间。登录验证 Telegram initData 后调用原有身份解析；Cookie 写请求校验 Origin。Web 会话在 RLS 之外校验收藏关系，公开内容也必须已被当前租户保存。REST Bearer 读取行为保持兼容。
+`web_sessions` 保存随机会话密钥摘要、租户和固定到期时间。登录验证 Telegram initData 后调用原有身份解析；普通浏览器使用 Telegram Login Widget，按其规则以 Bot token 的 SHA-256 为密钥校验签名，`auth_date` 允许 24 小时内，之后同样解析为 Bot 的租户。Widget 以跳转方式回到 `/app/`，网页读取并立即从地址栏移除签名字段后提交。`GET /v1/auth/telegram` 无需登录，返回 Widget 所需的 Bot 用户名（首次调用时向 Telegram 查询并缓存）。Cookie 写请求校验 Origin。Web 会话在 RLS 之外校验收藏关系，公开内容也必须已被当前租户保存。REST Bearer 读取行为保持兼容。
 
 Adapter 描述通过后台注册表定期发现。不可达不阻止 HTTP 读取服务启动；注册表保留最后一次有效描述，独立标记在线状态。协议、身份或重复域名等配置错误终止服务。刷新不切换原 Provider，网页可查询保存记录对应 Adapter 的可用性。
 

@@ -270,7 +270,7 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self' https://web.telegram.org")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; base-uri 'none'; object-src 'none'; frame-src https://oauth.telegram.org; frame-ancestors 'self' https://web.telegram.org")
 		http.ServeFile(w, r, filepath.Join(dir, filepath.Clean("/"+name)))
 	})
 	return root

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -56,6 +57,63 @@ func TestTelegramLoginValidation(t *testing.T) {
 	for _, bad := range []string{raw + "&user=%7B%7D", signedData(token, now.Unix()-301), signedData(token, now.Unix()+31), signedData("other", now.Unix()), raw + "%"} {
 		if _, e = telegramUser(bad, token, now); e == nil {
 			t.Fatal("accepted invalid initData")
+		}
+	}
+}
+
+// widgetData signs a Login Widget user object the way Telegram does.
+func widgetData(token string, at int64) map[string]any {
+	v := map[string]any{"id": int64(9007199254740991), "first_name": "测试", "username": "fixture", "auth_date": at}
+	keys := []string{}
+	for k := range v {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := []string{}
+	for _, k := range keys {
+		parts = append(parts, k+"="+strings.Trim(fmt.Sprint(v[k]), " "))
+	}
+	secret := sha256.Sum256([]byte(token))
+	mac := hmac.New(sha256.New, secret[:])
+	mac.Write([]byte(strings.Join(parts, "\n")))
+	v["hash"] = hex.EncodeToString(mac.Sum(nil))
+	return v
+}
+
+func decodeWidget(t *testing.T, v map[string]any) map[string]json.RawMessage {
+	t.Helper()
+	raw, _ := json.Marshal(v)
+	var out map[string]json.RawMessage
+	if e := json.Unmarshal(raw, &out); e != nil {
+		t.Fatal(e)
+	}
+	return out
+}
+
+func TestTelegramWidgetValidation(t *testing.T) {
+	now := time.Unix(1800000000, 0)
+	token := "123:test"
+	user, e := widgetUser(decodeWidget(t, widgetData(token, now.Unix())), token, now)
+	if e != nil || user != "9007199254740991" {
+		t.Fatal(user, e)
+	}
+	// An earlier authorization from the same browser is still accepted.
+	if _, e = widgetUser(decodeWidget(t, widgetData(token, now.Add(-23*time.Hour).Unix())), token, now); e != nil {
+		t.Fatal(e)
+	}
+	tampered := widgetData(token, now.Unix())
+	tampered["id"] = 1
+	initDataSecret := widgetData(token, now.Unix())
+	initDataSecret["hash"] = "00"
+	for _, bad := range []map[string]any{
+		tampered,
+		initDataSecret,
+		widgetData(token, now.Add(-25*time.Hour).Unix()),
+		widgetData(token, now.Unix()+31),
+		widgetData("other", now.Unix()),
+	} {
+		if _, e = widgetUser(decodeWidget(t, bad), token, now); e == nil {
+			t.Fatal("accepted invalid widget data", bad)
 		}
 	}
 }
@@ -166,6 +224,23 @@ func TestWebSessions(t *testing.T) {
 	h.ServeHTTP(invalid, r)
 	if invalid.Code != 401 {
 		t.Fatal("invalid bearer fell back to session")
+	}
+
+	// A browser outside Telegram logs in with the Login Widget as the same tenant.
+	lookupBot = func(context.Context, string) (string, error) { return "fixture_bot", nil }
+	w = call("GET", "/v1/auth/telegram", "", "", nil)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"bot_username":"fixture_bot"`) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	raw, _ = json.Marshal(map[string]any{"login": widgetData(c.Token, time.Now().Unix())})
+	w = call("POST", "/v1/auth/telegram", string(raw), "https://collection.test", nil)
+	json.Unmarshal(w.Body.Bytes(), &session)
+	if w.Code != 200 || session["tenant_id"] != identity.TenantID || len(w.Result().Cookies()) != 1 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	raw, _ = json.Marshal(map[string]any{"login": widgetData(c.Token, time.Now().Unix()), "init_data": signedData(c.Token, time.Now().Unix())})
+	if w = call("POST", "/v1/auth/telegram", string(raw), "https://collection.test", nil); w.Code != 400 {
+		t.Fatal("accepted both credentials", w.Code)
 	}
 
 	w = call("DELETE", "/v1/session", "", "https://evil.test", ck)

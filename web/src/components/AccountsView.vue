@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
 import { computed, onActivated, shallowRef } from 'vue'
 import { api, errorText, type Account, type Accounts } from '../api'
+import { host } from '../host'
 import ConfirmSheet from './ConfirmSheet.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
@@ -24,6 +25,19 @@ const version = /^([0-9a-f]{40})(-dirty)?$/.exec(__BUILD_VERSION__)
 const versionText = version
   ? version[1].slice(0, 7) + (version[2] || '')
   : __BUILD_VERSION__
+// Inside Telegram the Mini App signs in again on every open; only a browser
+// session is worth ending by hand.
+const browser = !host()?.initData
+async function logout() {
+  busy.value = true
+  try {
+    await api('/session', { method: 'DELETE' })
+    location.reload()
+  } catch (e) {
+    error.value = errorText(e)
+    busy.value = false
+  }
+}
 const versionURL = version
   ? `https://github.com/sxzz/midden/commit/${version[1]}`
   : ''
@@ -224,6 +238,14 @@ async function remove() {
     </template>
     <p v-if="!addable" class="status">未配置个人账号接入。</p>
   </template>
+  <ListSection v-if="browser">
+    <ListButton
+      label="退出登录"
+      variant="destructive"
+      :disabled="busy"
+      @select="logout"
+    />
+  </ListSection>
   <p class="version">
     版本
     <a v-if="versionURL" :href="versionURL" target="_blank" rel="noopener"
