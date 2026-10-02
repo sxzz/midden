@@ -65,6 +65,7 @@ watch(
           <MediaPreview
             :asset="asset"
             fit="contain"
+            eager
             :alt="asset.alt_text"
             :class="{ blurred: hidden(asset) }"
           />

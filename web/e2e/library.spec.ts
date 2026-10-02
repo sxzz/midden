@@ -578,3 +578,47 @@ test('a post reads its author as last seen and notes when it was deleted', async
   await header.getByRole('button', { name: '最新资料' }).click()
   await expect(header.locator('.name')).toHaveText('新名字')
 })
+
+test('list media loads only near the viewport and leaves the API ahead', async ({
+  page,
+}) => {
+  const rows = Array.from({ length: 20 }, (_, i) => ({
+    ...collection,
+    id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+    assets: [
+      {
+        id: `video-${i}`,
+        state: 'ready',
+        mime: 'video/mp4',
+        sensitive: false,
+      },
+      {
+        id: `image-${i}`,
+        state: 'ready',
+        mime: 'image/png',
+        sensitive: false,
+      },
+    ],
+  }))
+  const requested = new Set<string>()
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path.startsWith('/v1/assets/')) {
+      requested.add(path.split('/').pop()!)
+      return r.fulfill({ status: 404, body: '' })
+    }
+    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/collections') return r.fulfill({ json: { items: rows } })
+    return r.fulfill({ json: {} })
+  })
+  await page.goto('/app/')
+  await expect(page.locator('.row')).toHaveCount(20)
+  await expect.poll(() => requested.has('video-0')).toBe(true)
+  // Far below the fold, neither images nor videos have started.
+  expect(requested.has('video-19')).toBe(false)
+  expect(requested.has('image-19')).toBe(false)
+  await page.locator('.row').last().scrollIntoViewIfNeeded()
+  await expect.poll(() => requested.has('video-19')).toBe(true)
+  await expect.poll(() => requested.has('image-19')).toBe(true)
+})

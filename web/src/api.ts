@@ -124,6 +124,8 @@ export async function api<T>(
   options: RequestInit = {},
 ): Promise<T> {
   const response = await fetch(`/v1${path}`, {
+    // Ahead of images and video, which share the same connection.
+    priority: 'high',
     ...options,
     credentials: 'same-origin',
     headers: {
