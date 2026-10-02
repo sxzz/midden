@@ -23,21 +23,8 @@ var ErrConnection = errors.New("account unavailable; choose a source or authoriz
 type Connection struct{ ID, Name, State, AccountID, Username string }
 
 func (s *Service) ImportConnection(ctx context.Context, tenant, id, name string, c *pb.Credential) (string, error) {
-	return s.importConnection(ctx, tenant, id, name, c, false)
-}
-
-func (s *Service) importConnection(ctx context.Context, tenant, id, name string, c *pb.Credential, createOnly bool) (string, error) {
 	if !s.AdapterTLS || s.Vault == nil {
 		return "", fmt.Errorf("account connections require TLS and credential encryption")
-	}
-	if createOnly && id != "" {
-		saved, e := s.importedConnection(ctx, tenant, id)
-		if e == nil {
-			return saved, nil
-		}
-		if !errors.Is(e, domain.ErrNotFound) && !errors.Is(e, pgx.ErrNoRows) {
-			return "", e
-		}
 	}
 	d, e := s.descriptor(ctx)
 	if e != nil {
@@ -108,22 +95,9 @@ func (s *Service) importConnection(ctx context.Context, tenant, id, name string,
 	if result == nil || strings.TrimSpace(result.AccountId) == "" {
 		return "", fmt.Errorf("adapter returned no verified account identity")
 	}
-	requestID := id
 	e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, tenant); e != nil {
 			return e
-		}
-
-		if createOnly {
-			var saved string
-			err := tx.QueryRow(ctx, "SELECT connection_id FROM connection_imports WHERE request_id=$1 AND tenant_id=$2", requestID, tenant).Scan(&saved)
-			if err == nil {
-				id = saved
-				return nil
-			}
-			if !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
 		}
 		var existingID string
 		err := tx.QueryRow(ctx, `SELECT id FROM connections WHERE adapter_id=$1 AND provider_id=$2 AND account_id=$3 AND state<>'revoked' AND tenant_id=$4`, d.AdapterId, p.Id, result.AccountId, tenant).Scan(&existingID)
@@ -153,13 +127,7 @@ func (s *Service) importConnection(ctx context.Context, tenant, id, name string,
 		if tag.RowsAffected() != 1 {
 			return domain.ErrNotFound
 		}
-		if createOnly {
-			if _, e = tx.Exec(ctx, "INSERT INTO connection_imports(tenant_id,request_id,connection_id) VALUES($1,$2,$3)", tenant, requestID, id); e != nil {
-				return e
-			}
-		}
-
-		// Import and selection commit together; replay must preserve later choices.
+		// Import and selection commit together.
 		if _, e = tx.Exec(ctx, `INSERT INTO tenant_preferences(tenant_id,adapter_id,default_connection_id) VALUES($1,$2,$3) ON CONFLICT(tenant_id,adapter_id) DO UPDATE SET default_connection_id=excluded.default_connection_id`, tenant, d.AdapterId, id); e != nil {
 			return e
 		}
@@ -302,14 +270,6 @@ func (s *Service) DefaultConnection(ctx context.Context, tenant string) (string,
 	var id string
 	e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT coalesce((SELECT default_connection_id::text FROM tenant_preferences WHERE adapter_id=$1),'')`, d.AdapterId).Scan(&id)
-	})
-	return id, e
-}
-
-func (s *Service) importedConnection(ctx context.Context, tenant, request string) (string, error) {
-	var id string
-	e := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT connection_id FROM connection_imports WHERE request_id=$1 AND tenant_id=$2 UNION ALL SELECT id FROM connections WHERE id=$1 AND tenant_id=$2 LIMIT 1`, request, tenant).Scan(&id)
 	})
 	return id, e
 }

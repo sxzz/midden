@@ -83,6 +83,28 @@ export interface Usage {
   limit_bytes: number
   unlimited: boolean
 }
+export interface AccountPlatform {
+  id: string
+  name: string
+  help?: string
+  /** Whether new captures can use the platform's public source. */
+  public: boolean
+  can_add: boolean
+  /** Empty when the public source is selected. */
+  selected_account_id?: string
+}
+export interface Account {
+  id: string
+  name: string
+  username?: string
+  state: string
+  platform: string
+  selected: boolean
+}
+export interface Accounts {
+  platforms: AccountPlatform[]
+  accounts: Account[]
+}
 export class APIError extends Error {
   constructor(
     public status: number,
@@ -115,6 +137,8 @@ export function errorText(e: unknown) {
       return '筛选条件无效。'
     if (e.status === 400 && e.message === 'invalid note or tags')
       return '备注最多 10000 字，标签名最多 64 字，标签最多 100 个。'
+    if (e.status === 400 && e.message === 'invalid credentials')
+      return '凭据无效或已过期。'
     if (e.status === 401) return '会话已失效，请从 Telegram 重新打开。'
     if (e.status === 404) return '收藏不存在或已删除。'
     if (e.status === 409) return '存储空间不足或操作冲突。'

@@ -28,6 +28,7 @@ func Handler(s *app.Service) http.Handler { return WebHandler(s, WebConfig{}) }
 func WebHandler(s *app.Service, web WebConfig) http.Handler {
 	mux := http.NewServeMux()
 	registerAnnotations(mux, s)
+	registerAccounts(mux, s)
 	mux.HandleFunc("POST /v1/captures", func(w http.ResponseWriter, r *http.Request) {
 		var in domain.CaptureInput
 		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
@@ -299,6 +300,12 @@ func respond(w http.ResponseWriter, code int, v any, e error) {
 	case errors.Is(e, app.ErrInvalidAnnotation):
 		code = 400
 		msg = e.Error()
+	case errors.Is(e, app.ErrInvalidCredential):
+		code = 400
+		msg = "invalid credentials"
+	case errors.Is(e, app.ErrInvalidAccount):
+		code = 400
+		msg = "invalid account request"
 	case errors.Is(e, app.ErrInvalidFilter):
 		code = 400
 		msg = "invalid collection filters"

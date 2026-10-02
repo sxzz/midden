@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	pb "monitor/api/adapter/v1"
 	"monitor/internal/channelapi"
 	"monitor/internal/domain"
 )
@@ -46,28 +45,12 @@ func (s *Service) ChannelEvent(ctx context.Context, channel string, in channelap
 		return false, e
 	}
 	id := uuid.NewSHA1(uuid.NameSpaceOID, []byte("channel-event:"+channel+":"+strconv.FormatInt(in.UpdateID, 10))).String()
-	in.Ciphertext, in.Flow, in.Problem = nil, "", ""
+	in.Problem = ""
 	in.Sensitive, in.Protected = false, false
+	// Accounts are added on the web. A credential typed into the chat is only
+	// a signal to delete that message; it is never stored or processed.
 	secret := in.Credential != ""
-	// Establish a dialog at ingress so a credential in the same polling batch
-	// cannot overtake the queued prompt.
-	promptAdapter := ""
-	if in.Private && in.Command == "account_add" && !secret {
-		list, err := s.channelAccounts(ctx, identity.TenantID)
-		if err != nil {
-			return false, err
-		}
-		selected := in.Adapter
-		if selected == "" && len(list.Platforms) == 1 {
-			selected = list.Platforms[0].ID
-		}
-		for _, p := range list.Platforms {
-			if p.ID == selected && p.CanAdd {
-				promptAdapter = p.ID
-				in.Adapter = p.ID
-			}
-		}
-	}
+	in.Credential = ""
 	e = s.DB.Tx(ctx, identity.TenantID, func(tx pgx.Tx) error {
 		if err := lockTenant(ctx, tx, identity.TenantID); err != nil {
 			return err
@@ -77,7 +60,7 @@ func (s *Service) ChannelEvent(ctx context.Context, channel string, in channelap
 		if err == nil {
 			var old channelapi.Event
 			_ = json.Unmarshal(previous, &old)
-			secret = secret || old.Sensitive || len(old.Ciphertext) > 0
+			secret = secret || old.Sensitive
 			return nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -107,55 +90,6 @@ func (s *Service) ChannelEvent(ctx context.Context, channel string, in channelap
 			if !allowed {
 				in.Problem = "foreign_message"
 			}
-		}
-		if promptAdapter != "" {
-			in.Flow = id
-			if _, err := tx.Exec(ctx, `INSERT INTO account_dialogs(tenant_id,identity_id,chat_id,flow_id,adapter_id,expires_at) VALUES($1,$2,$3,$4,$5,now()+interval '10 minutes') ON CONFLICT(tenant_id,identity_id,chat_id) DO UPDATE SET flow_id=excluded.flow_id,adapter_id=excluded.adapter_id,expires_at=excluded.expires_at`, identity.TenantID, identity.ID, in.Chat, id, promptAdapter); err != nil {
-				return err
-			}
-		}
-		if in.Private && in.Command == "account_cancel" {
-			if _, err := tx.Exec(ctx, `DELETE FROM account_dialogs WHERE identity_id=$1 AND chat_id=$2`, identity.ID, in.Chat); err != nil {
-				return err
-			}
-		}
-		if in.Private && in.Command == "" {
-			var adapter, flow string
-			var expired bool
-			err := tx.QueryRow(ctx, `SELECT adapter_id,flow_id,expires_at<=now() FROM account_dialogs WHERE identity_id=$1 AND chat_id=$2`, identity.ID, in.Chat).Scan(&adapter, &flow, &expired)
-			if err == nil {
-				in.Command = "account_add"
-				in.Adapter = adapter
-				in.Flow = flow
-				in.Credential = in.Text
-				in.Text = ""
-				in.URLs = nil
-				secret = true
-				if expired {
-					in.Problem = "dialog_expired"
-					in.Credential = ""
-				}
-			}
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
-		}
-		if in.Credential != "" {
-			secret = true
-			if !in.Private || s.Vault == nil {
-				in.Problem = "credentials_unavailable"
-			} else {
-				ciphertext, err := s.Vault.Seal(identity.TenantID, id, &pb.Credential{Data: []byte(in.Credential)})
-				if err != nil {
-					in.Problem = "invalid_credentials"
-				} else {
-					in.Ciphertext = ciphertext
-				}
-			}
-			in.Credential = ""
-			in.Text = ""
-			in.Argument = ""
-			in.URLs = nil
 		}
 		in.Sensitive = secret
 		raw, err := json.Marshal(in)

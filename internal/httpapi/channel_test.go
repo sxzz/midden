@@ -144,14 +144,18 @@ func TestChannelHTTPIsolationAndLease(t *testing.T) {
 	secret.UpdateID = 2
 	secret.Command = "account_add"
 	secret.Credential = "synthetic-cookie-secret"
-	redacted, e := client.Event(ctx, secret)
-	if e != nil || !redacted {
-		t.Fatal(redacted, e)
+	// Credentials pasted into the chat are dropped; only the deletion signal
+	// survives, including on replay.
+	for i := 0; i < 2; i++ {
+		redacted, e := client.Event(ctx, secret)
+		if e != nil || !redacted {
+			t.Fatal(redacted, e)
+		}
 	}
 	var raw string
 	_ = admin.Pool.QueryRow(ctx, `SELECT payload::text FROM channel_work WHERE channel_id=$1 AND resource='2'`, channel).Scan(&raw)
-	if strings.Contains(raw, secret.Credential) || !strings.Contains(raw, "ciphertext") {
-		t.Fatal("credential not sealed")
+	if strings.Contains(raw, secret.Credential) || !strings.Contains(raw, `"sensitive": true`) {
+		t.Fatal("credential retained", raw)
 	}
 	// A different actor cannot read the first actor's collection via a work claim.
 	a, e := s.DB.Resolve(ctx, channel, "101", s.Config.Quota)
@@ -288,66 +292,6 @@ func TestChannelRunnerEndToEnd(t *testing.T) {
 	}
 }
 
-// The prompt and credential may arrive in one getUpdates response, before any
-// work is claimed. The second input must already be encrypted at that point.
-func TestChannelCredentialIngress(t *testing.T) {
-	s, admin, channel := channelFixture(t)
-	d := &pb.DescribeResponse{AdapterId: "fixture", Providers: []*pb.Provider{{Id: "session", Authentication: "session", DefaultProvider: true, Capabilities: []*pb.Capability{{Name: "credential.prepare", Major: 1}, {Name: "connection.check", Major: 1}}}}}
-	s.Adapters = map[string]app.AdapterBinding{"fixture": {Descriptor: d, Client: channelAdapter{}, TLS: true}}
-	server := httptest.NewServer(ChannelHandler(s))
-	defer server.Close()
-	client := &tgchannel.Client{Base: server.URL, Channel: channel}
-	ctx := context.Background()
-	prompt := channelapi.Event{UpdateID: 1, Actor: "101", Chat: "101", Private: true, Command: "account_add", Adapter: "fixture"}
-	if _, err := client.Event(ctx, prompt); err != nil {
-		t.Fatal(err)
-	}
-	credential := channelapi.Event{UpdateID: 2, Actor: "101", Chat: "101", Private: true, Text: "synthetic opaque secret"}
-	for i := 0; i < 2; i++ {
-		secret, err := client.Event(ctx, credential)
-		if err != nil || !secret {
-			t.Fatal("credential redaction", secret, err)
-		}
-	}
-	var raw string
-	if err := admin.Pool.QueryRow(ctx, `SELECT payload::text FROM channel_work WHERE channel_id=$1 AND resource='2'`, channel).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(raw, credential.Text) || !strings.Contains(raw, "ciphertext") {
-		t.Fatal("credential leaked or lost")
-	}
-	work, err := client.Claim(ctx)
-	if err != nil || work == nil {
-		t.Fatal(work, err)
-	}
-	result, err := client.Action(ctx, *work, "account_add")
-	if err != nil || result.Code != "account_prompt" {
-		t.Fatal(result, err)
-	}
-	if err = client.Ack(ctx, *work, channelapi.Ack{Done: true}); err != nil {
-		t.Fatal(err)
-	}
-	work, err = client.Claim(ctx)
-	if err != nil || work == nil {
-		t.Fatal(work, err)
-	}
-	// Terminal failure also scrubs the encrypted transient input, but duplicate
-	// intake must still tell the channel to delete the original user message.
-	if err = client.Ack(ctx, *work, channelapi.Ack{Permanent: true}); err != nil {
-		t.Fatal(err)
-	}
-	secret, err := client.Event(ctx, credential)
-	if err != nil || !secret {
-		t.Fatal("terminal replay lost redaction", err)
-	}
-	if err = admin.Pool.QueryRow(ctx, `SELECT payload::text FROM channel_work WHERE id=$1`, work.ID).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(raw, "ciphertext") || strings.Contains(raw, credential.Text) {
-		t.Fatal("terminal credential retained")
-	}
-}
-
 type channelAccountAdapter struct{ channelAdapter }
 
 func (channelAccountAdapter) PrepareCredential(_ context.Context, r *pb.PrepareCredentialRequest, _ ...grpc.CallOption) (*pb.PrepareCredentialResponse, error) {
@@ -361,93 +305,152 @@ func (channelAccountAdapter) CheckConnection(_ context.Context, r *pb.CheckConne
 	return &pb.CheckConnectionResponse{AccountId: store.Hash(string(r.Credential.Data)), Username: "fixture"}, nil
 }
 
-func TestChannelAccountLifecycle(t *testing.T) {
+func TestWebAccountLifecycle(t *testing.T) {
 	s, admin, channel := channelFixture(t)
+	d := &pb.DescribeResponse{AdapterId: "fixture", DisplayName: "Fixture", Providers: []*pb.Provider{
+		{Id: "public", Authentication: "none", DefaultProvider: true},
+		{Id: "session", Authentication: "session", DefaultProvider: true, CredentialHelp: "Fixture cookie", Capabilities: []*pb.Capability{{Name: "credential.prepare", Major: 1}, {Name: "connection.check", Major: 1}}},
+	}}
+	s.Adapters = map[string]app.AdapterBinding{"fixture": {Descriptor: d, Client: channelAccountAdapter{}, TLS: true}}
+	ctx := context.Background()
+	identity, err := s.DB.Resolve(ctx, channel, "101", s.Config.Quota)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := func(tenant string) string {
+		t.Helper()
+		value := uuid.NewString()
+		if _, err := admin.Pool.Exec(ctx, `INSERT INTO tokens(tenant_id,digest) VALUES($1,$2)`, tenant, store.Hash(value)); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	owner := token(identity.TenantID)
+	other, err := s.DB.Resolve(ctx, channel, "202", s.Config.Quota)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stranger := token(other.TenantID)
+	h := WebHandler(s, WebConfig{})
+	call := func(method, path, body, bearer string, out any) int {
+		t.Helper()
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+bearer)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if v, ok := out.(*app.Accounts); ok {
+			// Omitted fields must not keep values from an earlier response.
+			*v = app.Accounts{}
+		}
+		if out != nil {
+			_ = json.Unmarshal(w.Body.Bytes(), out)
+		}
+		return w.Code
+	}
+	var list app.Accounts
+	if code := call("GET", "/v1/accounts", "", owner, &list); code != 200 || len(list.Platforms) != 1 || !list.Platforms[0].CanAdd || !list.Platforms[0].Public || list.Platforms[0].Help != "Fixture cookie" || len(list.Accounts) != 0 {
+		t.Fatal(code, list)
+	}
+	for body, want := range map[string]int{
+		`{"platform":"fixture","credential":"invalid"}`:                                     400,
+		`{"platform":"fixture","credential":""}`:                                            400,
+		`{"platform":"fixture","credential":"x","name":"` + strings.Repeat("a", 101) + `"}`: 400,
+		`{"platform":"other","credential":"x"}`:                                             422,
+		`{"platform":"fixture","credential":"x","extra":true}`:                              400,
+	} {
+		if code := call("POST", "/v1/accounts", body, owner, nil); code != want {
+			t.Fatal(body, code)
+		}
+	}
+	var added app.Account
+	if code := call("POST", "/v1/accounts", `{"platform":"fixture","credential":"opaque credential with spaces","name":"Main"}`, owner, &added); code != 201 || added.Name != "Main" || added.Username != "fixture" || added.Platform != "fixture" || !added.Selected || added.State != "ready" {
+		t.Fatal(code, added)
+	}
+	var raw string
+	if err := admin.Pool.QueryRow(ctx, `SELECT encode(ciphertext,'escape') FROM account_credentials WHERE tenant_id=$1`, identity.TenantID).Scan(&raw); err != nil || strings.Contains(raw, "opaque credential") {
+		t.Fatal("credential stored in plaintext", err)
+	}
+	// Adding the same upstream account again keeps one connection.
+	var again app.Account
+	if code := call("POST", "/v1/accounts", `{"platform":"fixture","credential":"opaque credential with spaces"}`, owner, &again); code != 201 || again.ID != added.ID {
+		t.Fatal(code, again)
+	}
+	if code := call("GET", "/v1/accounts", "", stranger, &list); code != 200 || len(list.Accounts) != 0 {
+		t.Fatal("foreign account listed", code, list)
+	}
+	if code := call("PUT", "/v1/accounts/selection", `{"platform":"fixture","account_id":"`+added.ID+`"}`, stranger, nil); code == 200 {
+		t.Fatal("foreign account selected")
+	}
+	if code := call("DELETE", "/v1/accounts/"+added.ID, "", stranger, nil); code != 404 {
+		t.Fatal("foreign account deleted", code)
+	}
+	if code := call("PUT", "/v1/accounts/selection", `{"platform":"fixture"}`, owner, &list); code != 200 || list.Platforms[0].Selected != "" || list.Accounts[0].Selected {
+		t.Fatal("public source not selected", code, list)
+	}
+	if code := call("PUT", "/v1/accounts/selection", `{"platform":"fixture","account_id":"`+added.ID+`"}`, owner, &list); code != 200 || list.Platforms[0].Selected != added.ID || !list.Accounts[0].Selected {
+		t.Fatal("account not selected", code, list)
+	}
+	if code := call("DELETE", "/v1/accounts/"+added.ID, "", owner, nil); code != 204 {
+		t.Fatal(code)
+	}
+	if code := call("GET", "/v1/accounts", "", owner, &list); code != 200 || len(list.Accounts) != 0 || list.Platforms[0].Selected != "" {
+		t.Fatal("revoked account listed", code, list)
+	}
+	if code := call("PUT", "/v1/accounts/selection", `{"platform":"fixture","account_id":"`+added.ID+`"}`, owner, nil); code != 422 {
+		t.Fatal("revoked account selected", code)
+	}
+}
+
+func TestChannelAccountDelete(t *testing.T) {
+	s, _, channel := channelFixture(t)
 	d := &pb.DescribeResponse{AdapterId: "fixture", DisplayName: "Fixture", Providers: []*pb.Provider{{Id: "session", Authentication: "session", DefaultProvider: true, Capabilities: []*pb.Capability{{Name: "credential.prepare", Major: 1}, {Name: "connection.check", Major: 1}}}}}
 	s.Adapters = map[string]app.AdapterBinding{"fixture": {Descriptor: d, Client: channelAccountAdapter{}, TLS: true}}
 	server := httptest.NewServer(ChannelHandler(s))
 	defer server.Close()
 	client := &tgchannel.Client{Base: server.URL, Channel: channel}
 	ctx := context.Background()
+	identity, err := s.DB.Resolve(ctx, channel, "101", s.Config.Quota)
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := s.AddAccount(ctx, identity.TenantID, "fixture", "Main", "opaque")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var update int64
-	run := func(event channelapi.Event) (channelapi.Result, channelapi.Event, bool) {
+	run := func(command, argument string) channelapi.Result {
 		t.Helper()
 		update++
-		event.UpdateID = update
-		if event.Actor == "" {
-			event.Actor = "101"
-		}
-		event.Chat = event.Actor
-		event.Private = true
-		secret, err := client.Event(ctx, event)
-		if err != nil {
+		if _, err := client.Event(ctx, channelapi.Event{UpdateID: update, Actor: "101", Chat: "101", Private: true, Command: command, Argument: argument}); err != nil {
 			t.Fatal(err)
 		}
 		work, err := client.Claim(ctx)
 		if err != nil || work == nil {
 			t.Fatal(work, err)
 		}
-		var stored channelapi.Event
-		if err = json.Unmarshal(work.Payload, &stored); err != nil {
-			t.Fatal(err)
-		}
-		result, err := client.Action(ctx, *work, stored.Command)
+		result, err := client.Action(ctx, *work, command)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err = client.Ack(ctx, *work, channelapi.Ack{Done: true}); err != nil {
 			t.Fatal(err)
 		}
-		return result, stored, secret
+		return result
 	}
-	result, _, _ := run(channelapi.Event{Command: "account_add"})
-	if result.Code != "account_prompt" || result.Platform.Name != "Fixture" {
+	if result := run("account", ""); result.Accounts == nil || len(result.Accounts.Accounts) != 1 || !result.Accounts.Platforms[0].CanAdd {
 		t.Fatal(result)
 	}
-	// Reconstructing the HTTP client does not lose the stored dialog.
-	client = &tgchannel.Client{Base: server.URL, Channel: channel}
-	result, stored, secret := run(channelapi.Event{Text: "opaque credential with spaces"})
-	if result.Code != "account_added" || !secret || stored.Text != "" || len(stored.Ciphertext) == 0 {
-		t.Fatal("import failed", result.Code)
-	}
-	connection := result.Account.ID
-	var count int
-	if err := admin.Pool.QueryRow(ctx, "SELECT count(*) FROM account_dialogs WHERE identity_id IN(SELECT id FROM identities WHERE channel_id=$1)", channel).Scan(&count); err != nil || count != 0 {
-		t.Fatal("dialog retained", count, err)
-	}
-	result, _, _ = run(channelapi.Event{Command: "account_delete", Argument: connection})
-	if result.Code != "confirm_account_delete" {
+	if result := run("account_delete", added.ID); result.Code != "confirm_account_delete" {
 		t.Fatal(result)
 	}
-	var state string
-	if err := admin.Pool.QueryRow(ctx, "SELECT state FROM connections WHERE id=$1", connection).Scan(&state); err != nil || state != "ready" {
-		t.Fatal("deleted without confirmation", state, err)
+	if list, _ := s.Accounts(ctx, identity.TenantID); len(list.Accounts) != 1 {
+		t.Fatal("deleted without confirmation")
 	}
-	result, _, _ = run(channelapi.Event{Command: "account_delete", Argument: "confirm:" + connection})
-	if result.Code != "account_deleted" {
+	if result := run("account_delete", "confirm:"+added.ID); result.Code != "account_deleted" {
 		t.Fatal(result)
 	}
-	run(channelapi.Event{Command: "account_add"})
-	result, stored, secret = run(channelapi.Event{Actor: "202", Command: "usage", Text: "unrelated"})
-	if secret || len(stored.Ciphertext) > 0 {
-		t.Fatal("cross-identity dialog")
-	}
-	if _, err := admin.Pool.Exec(ctx, "UPDATE account_dialogs SET expires_at=now()-interval '1 minute' WHERE identity_id IN(SELECT id FROM identities WHERE channel_id=$1)", channel); err != nil {
-		t.Fatal(err)
-	}
-	result, stored, secret = run(channelapi.Event{Text: "expired secret"})
-	if result.Code != "dialog_expired" || !secret || stored.Text != "" || len(stored.Ciphertext) != 0 {
-		t.Fatal("expired input", result.Code)
-	}
-	run(channelapi.Event{Command: "account_add"})
-	run(channelapi.Event{Command: "account_cancel"})
-	_, stored, secret = run(channelapi.Event{Command: "usage", Text: "ordinary"})
-	if secret || len(stored.Ciphertext) != 0 {
-		t.Fatal("cancel failed")
-	}
-	result, _, secret = run(channelapi.Event{Command: "account_add", Adapter: "fixture", Credential: "invalid"})
-	if !secret || result.Code != "invalid_credentials" {
-		t.Fatal("invalid credentials accepted", result.Code)
+	if list, _ := s.Accounts(ctx, identity.TenantID); len(list.Accounts) != 0 {
+		t.Fatal("account retained")
 	}
 }
 

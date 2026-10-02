@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, shallowRef, watch } from 'vue'
 import {
+  RouterLink,
   RouterView,
   useRoute,
   useRouter,
@@ -19,6 +20,7 @@ const { items, next, loading, error } = collection
 const id = computed(() =>
   route.name === 'collection' ? String(route.params.id) : '',
 )
+const accounts = computed(() => route.name === 'accounts')
 const query = shallowRef('')
 // Telegram draws its own back button; only stand in for it elsewhere.
 const standalone = !host()?.initData
@@ -34,7 +36,8 @@ const cachedViews = 6
 const removed = shallowRef<string[]>([])
 /** Cache identity of a view: one entry for the list, one per collection. */
 function viewKey(target: RouteLocationNormalized) {
-  if (target.name === 'collections') return 'collections'
+  if (target.name === 'collections' || target.name === 'accounts')
+    return String(target.name)
   const key = String(target.params.id)
   // Returning to a collection we deleted must reload, not show the cached copy.
   return removed.value.includes(key) ? `${key}#removed` : key
@@ -63,9 +66,9 @@ function apiQuery(raw: string) {
 watch(
   () => route.fullPath,
   async () => {
-    backButton(!!id.value)
+    backButton(!!id.value || accounts.value)
     const key = viewKey(route)
-    if (!id.value) {
+    if (!id.value && !accounts.value) {
       listRoute = route.fullPath
       query.value = route.fullPath.split('?')[1]?.split('#')[0] || ''
       const effectiveQuery = apiQuery(query.value)
@@ -117,29 +120,31 @@ function search(q: string) {
   else void router.push(target)
 }
 const viewProps = computed(() =>
-  id.value
-    ? {
-        savedAt: savedAt.value,
-        showSensitive: showSensitive.value,
-        onDeleted: deleted,
-        onAnnotationsSaved: () => {
-          loadedQuery = undefined
+  accounts.value
+    ? {}
+    : id.value
+      ? {
+          savedAt: savedAt.value,
+          showSensitive: showSensitive.value,
+          onDeleted: deleted,
+          onAnnotationsSaved: () => {
+            loadedQuery = undefined
+          },
+          onUpdated: updated,
+        }
+      : {
+          items: items.value,
+          showSensitive: showSensitive.value,
+          query: query.value,
+          loading: loading.value,
+          error: error.value,
+          next: next.value,
+          usage: usage.value,
+          onSearch: search,
+          onOpen: open,
+          onMore: collection.more,
+          onRetry: () => collection.load(apiQuery(query.value)),
         },
-        onUpdated: updated,
-      }
-    : {
-        items: items.value,
-        showSensitive: showSensitive.value,
-        query: query.value,
-        loading: loading.value,
-        error: error.value,
-        next: next.value,
-        usage: usage.value,
-        onSearch: search,
-        onOpen: open,
-        onMore: collection.more,
-        onRetry: () => collection.load(apiQuery(query.value)),
-      },
 )
 </script>
 
@@ -147,17 +152,40 @@ const viewProps = computed(() =>
   <main class="page">
     <header class="bar">
       <button
-        v-if="id && standalone"
+        v-if="(id || accounts) && standalone"
         type="button"
         class="back"
         @click="goBack(router)"
       >
         <span class="chevron" aria-hidden="true">‹</span>返回
       </button>
-      <h1>{{ id ? '收藏详情' : '我的收藏' }}</h1>
+      <h1>{{ accounts ? '采集账号' : id ? '收藏详情' : '我的收藏' }}</h1>
+      <RouterLink
+        v-if="!id && !accounts"
+        to="/accounts"
+        class="icon-button accounts-link"
+        aria-label="采集账号"
+        title="采集账号"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="22"
+          height="22"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5" />
+        </svg>
+      </RouterLink>
       <button
+        v-if="!accounts"
         type="button"
-        class="sensitive-toggle"
+        class="icon-button sensitive-toggle"
         aria-label="显示敏感内容"
         :aria-pressed="showSensitive"
         :title="showSensitive ? '隐藏敏感内容' : '显示敏感内容'"
@@ -207,8 +235,7 @@ const viewProps = computed(() =>
   min-height: 48px;
   padding: 10px calc(var(--gutter) + 4px) 2px;
 }
-.sensitive-toggle {
-  margin-left: auto;
+.icon-button {
   display: grid;
   place-items: center;
   width: 44px;
@@ -216,13 +243,17 @@ const viewProps = computed(() =>
   border-radius: 50%;
   color: var(--subtle);
 }
+/* Header actions sit at the trailing edge whichever of them are shown. */
+.bar > h1 {
+  margin-right: auto;
+}
 .sensitive-toggle[aria-pressed='true'] {
   color: var(--link);
 }
-.sensitive-toggle:active {
+.icon-button:active {
   background: var(--fill);
 }
-.sensitive-toggle:focus-visible {
+.icon-button:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 2px;
 }

@@ -3,6 +3,7 @@ package tgchannel
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"unicode/utf16"
 
@@ -55,6 +56,9 @@ func (r *Runner) command(ctx context.Context, w channelapi.Work, event channelap
 			out.Buttons = append(out.Buttons, []telegram.Button{{Text: "打开", WebApp: &telegram.WebAppInfo{URL: r.Config.WebURL}}})
 		}
 		return out, nil
+	}
+	if op == "account_add" {
+		return r.accountWebResponse(event), nil
 	}
 	if op == "save" && len(event.URLs) > 200 {
 		out.Text = "每次最多 200 个链接。"
@@ -131,7 +135,7 @@ func (r *Runner) command(ctx context.Context, w channelapi.Work, event channelap
 		if v.Code == "no_more" {
 			out.Text = "没有更多帖子了。"
 		}
-	case "account", "account_delete", "account_add", "account_cancel":
+	case "account", "account_delete":
 		out = r.accountResponse(event, v)
 	}
 	return out, nil
@@ -140,20 +144,6 @@ func (r *Runner) command(ctx context.Context, w channelapi.Work, event channelap
 func (r *Runner) accountResponse(event channelapi.Event, v channelapi.Result) response {
 	out := response{Buttons: telegram.Keyboard{{{Text: "返回账号列表", Data: "/account"}}}}
 	switch v.Code {
-	case "account_cancelled":
-		out.Text = "已取消添加账号。"
-	case "dialog_expired":
-		out.Text = "添加账号已超时。"
-	case "credentials_unavailable":
-		out.Text = "未配置个人账号接入。"
-	case "invalid_credentials":
-		out.Text = "凭据格式无效。"
-	case "account_prompt":
-		out.Text = "添加 " + v.Platform.Name + " 账号\n\n" + v.Platform.Help + "\n\n发送凭据，10 分钟内有效。"
-		out.Buttons = telegram.Keyboard{{{Text: "取消添加", Data: "/account_cancel"}}}
-	case "account_added":
-		out.Text = "账号已添加：" + v.Account.Name
-		out.Buttons = telegram.Keyboard{{{Text: "使用此账号", Data: "/account " + v.Account.ID}}}
 	case "confirm_account_delete":
 		out.Text = "删除采集账号 " + v.Account.Name + "？"
 		out.Buttons = telegram.Keyboard{{{Text: "确认删除", Data: "/account_delete confirm:" + v.Account.ID}, {Text: "取消", Data: "/account"}}}
@@ -162,45 +152,70 @@ func (r *Runner) accountResponse(event channelapi.Event, v channelapi.Result) re
 	default:
 		out.Text = "选择采集来源。"
 		out.Buttons = nil
-		if v.Code == "choose_platform" {
-			out.Text = "选择平台。"
-		}
+		canAdd := false
 		if v.Accounts != nil {
 			for _, p := range v.Accounts.Platforms {
-				if p.Public && v.Code != "choose_platform" {
+				canAdd = canAdd || p.CanAdd
+				if p.Public {
 					label := p.Name + " · 公共来源"
 					if p.Selected == "" {
 						label = "✓ " + label
 					}
 					out.Buttons = append(out.Buttons, []telegram.Button{{Text: label, Data: "/account public:" + p.ID}})
 				}
-				if p.CanAdd && event.Private {
-					out.Buttons = append(out.Buttons, []telegram.Button{{Text: p.Name + " · 添加账号", Data: "/account_add @" + p.ID}})
-				}
 			}
-			if v.Code != "choose_platform" {
-				for _, a := range v.Accounts.Accounts {
-					label := a.Name
-					if a.Username != "" {
-						label = "@" + strings.TrimPrefix(a.Username, "@")
-						if a.Name != "" {
-							label += " · " + a.Name
-						}
+			for _, a := range v.Accounts.Accounts {
+				label := a.Name
+				if a.Username != "" {
+					label = "@" + strings.TrimPrefix(a.Username, "@")
+					if a.Name != "" {
+						label += " · " + a.Name
 					}
-					if a.Selected {
-						label = "✓ " + label
-					}
-					if a.State != "ready" {
-						label += "（需重新授权）"
-					}
-					row := []telegram.Button{{Text: label, Data: "/account " + a.ID}}
-					if event.Private {
-						row = append(row, telegram.Button{Text: "删除", Data: "/account_delete " + a.ID})
-					}
-					out.Buttons = append(out.Buttons, row)
 				}
+				if a.Selected {
+					label = "✓ " + label
+				}
+				if a.State != "ready" {
+					label += "（需重新授权）"
+				}
+				row := []telegram.Button{{Text: label, Data: "/account " + a.ID}}
+				if event.Private {
+					row = append(row, telegram.Button{Text: "删除", Data: "/account_delete " + a.ID})
+				}
+				out.Buttons = append(out.Buttons, row)
 			}
+		}
+		if button := r.accountsButton(); canAdd && event.Private && button != nil {
+			out.Buttons = append(out.Buttons, []telegram.Button{*button})
 		}
 	}
 	return out
+}
+
+// accountWebResponse answers the retired /account_add command and its old
+// buttons: credentials are entered on the web, never in the chat.
+func (r *Runner) accountWebResponse(event channelapi.Event) response {
+	out := response{Text: "在网页中添加采集账号。", Buttons: telegram.Keyboard{{{Text: "返回账号列表", Data: "/account"}}}}
+	if event.Credential != "" {
+		out.Text = "不要在聊天中发送凭据。在网页中添加采集账号。"
+	}
+	if !event.Private {
+		out.Text = "在私聊中打开网页添加采集账号。"
+		return out
+	}
+	if button := r.accountsButton(); button != nil {
+		out.Buttons = append(telegram.Keyboard{{*button}}, out.Buttons...)
+	} else {
+		out.Text = "未配置网页入口。"
+	}
+	return out
+}
+
+func (r *Runner) accountsButton() *telegram.Button {
+	entry, err := url.Parse(r.Config.WebURL)
+	if r.Config.WebURL == "" || err != nil || entry.Scheme != "https" || entry.Host == "" {
+		return nil
+	}
+	entry.Fragment = "/accounts"
+	return &telegram.Button{Text: "添加账号", WebApp: &telegram.WebAppInfo{URL: entry.String()}}
 }

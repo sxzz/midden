@@ -229,13 +229,11 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 
 Adapter 在 `Describe.display_name` 声明展示名称；未提供名称时显示其 ID。界面不维护平台 ID 与名称的映射。
 
-Provider 通过 `default_provider` 声明各认证模式的默认选择，同一认证模式只能有一个默认项。任务和 Connection 保存实际 Provider，执行时校验 Adapter 归属及能力，不隐式替换。凭据格式说明由 `credential_help` 提供。Telegram 可提供 X 专属交互；账号命令菜单按 Adapter 能力启用。
+Provider 通过 `default_provider` 声明各认证模式的默认选择，同一认证模式只能有一个默认项。任务和 Connection 保存实际 Provider，执行时校验 Adapter 归属及能力，不隐式替换。凭据格式说明由 `credential_help` 提供。网页添加表单和 Telegram 的“添加账号”入口按 Adapter 能力启用。
 
 Describe 声明在核心启动时验证并缓存，能力变化需重启核心重新发现；管理 CLI 每次操作重新发现。滚动升级应先部署提供兼容旧能力的 Adapter，再升级核心，最后停用旧能力；跨 major 升级需并行部署对应版本端点。
 
-Telegram `/account_add` 在接收阶段将凭据输入使用租户绑定的加密密文暂存于 `channel_work`；处理阶段通过 TLS 调用 Adapter 的 `PrepareCredential` 解析并规范化。Go 核心只处理不透明字节、加密和归属校验，不解析 Cookie 字段；原始消息文字和实体在持久化前移除。队列只保存 work ID。处理完成或终止失败时清理暂存密文；验证通过后的长期凭据仍存放在 `account_credentials`。Connection ID 由渠道实例和 update ID 稳定生成，重复执行不会重新创建账号或恢复已撤销凭据。
-
-账号添加采用私聊交互：选择平台后，`account_dialogs` 按租户、渠道身份和会话保存平台及 10 分钟期限。下一条非命令文本作为不透明凭据加密进入 `channel_work`，原文不落库；取消、超时或提交结束会清理对应交互。数据库状态使核心重启后仍可继续输入。
+账号在网页添加：`POST /v1/accounts` 在请求内同步通过 TLS 调用 Adapter 的 `PrepareCredential` 解析并规范化，再用 `CheckConnection` 验证，成功后才加密写入 `account_credentials`；凭据输入不进入队列，也不写日志。Go 核心只处理不透明字节、加密和归属校验，不解析 Cookie 字段。`GET /v1/accounts` 列出各 Adapter 的公共来源、可添加状态、凭据说明和账号（不含凭据），`PUT /v1/accounts/selection` 切换来源，`DELETE /v1/accounts/{id}` 撤销账号。Telegram 渠道不接收凭据：`/account_add` 只回复网页入口，命令后附带的内容仅作为删除原消息的信号，不进入 `channel_work`。旧版本队列中的账号导入数据会丢弃暂存密文并回复网页入口。
 
 X 账号验证使用携带该账号 Cookie 的 `Viewer` GraphQL 接口，从当前会话返回的用户实体确认账号 ID 和用户名。普通帖子和 Profile 查询直接请求 API，不依赖登录首页或请求签名。只有上游签名清单中的接口才使用该账号首页初始化签名，账号页面不进入共享缓存。浏览器验证挑战、认证拒绝、受限会话、响应结构变化和上游临时故障分别处理；未知响应不视为验证成功，也不会自动回退为访客或其他账号。
 
@@ -267,7 +265,7 @@ Fetch 的 text、text_kind、summary、author_name、published_at 和展示媒�
 
 采集提交分别保留用户输入的原始链接（包括参数），不会因 URL 规范化或任务合并而覆盖。Telegram 失败通知使用对应提交的输入；旧提交优先从尚存的 inbox 恢复，无法恢复时使用收藏来源 URL。较长的命令回复分段发送并持久化进度。账号采集使用私有暂存身份，但刷新已有收藏不会把暂存身份自动加入保存列表；结果可见性确定后才关联最终收藏。
 
-账号以租户、Adapter、Provider 和上游验证返回的账号 ID 去重。重复添加替换凭据、刷新 handle 并递增凭据版本，保留 Connection ID 和当前选择。`connection_imports` 记录渠道导入请求的结果，队列重试不重复覆盖凭据，也不恢复已撤销账号。
+账号以租户、Adapter、Provider 和上游验证返回的账号 ID 去重。重复添加替换凭据、刷新 handle 并递增凭据版本，保留 Connection ID，并选中该账号。
 
 ### 关联目标和 Profile 采集
 

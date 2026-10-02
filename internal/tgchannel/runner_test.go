@@ -75,7 +75,7 @@ func TestNormalizeGroupAndCredentials(t *testing.T) {
 	m.Chat.ID = 101
 	m.Chat.Type = "private"
 	got := Normalize(telegram.Update{ID: 1, Message: m}, "OurBot")
-	if got.Credential != "opaque-cookie" || got.Text != "" || got.Argument != "" || len(got.URLs) > 0 || got.Adapter != "fixture" {
+	if got.Credential != "opaque-cookie label" || got.Text != "" || got.Argument != "" || len(got.URLs) > 0 {
 		t.Fatal("credential duplicated in normal event fields")
 	}
 }

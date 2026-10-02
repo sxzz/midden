@@ -8,8 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	pb "monitor/api/adapter/v1"
 	"monitor/internal/adapter"
@@ -158,11 +156,11 @@ func (s *Service) ChannelAction(ctx context.Context, channel string, in channela
 		result.Code = "collection_stopped"
 	case "more", "more1000", "page_retry":
 		result, e = s.channelPage(ctx, tenant, origin, w.ID, arg, in.Name)
-	case "account", "account_delete", "account_add", "account_cancel":
+	case "account", "account_delete":
 		if !event.Private && in.Name != "account" {
 			return result, domain.ErrUnsupported
 		}
-		result, e = s.channelAccount(ctx, tenant, identity.ID, origin, event, w, in.Name)
+		result, e = s.channelAccount(ctx, tenant, event, in.Name)
 	default:
 		return result, domain.ErrUnsupported
 	}
@@ -273,17 +271,9 @@ func (s *Service) channelAccounts(ctx context.Context, tenant string) (channelap
 	return out, e
 }
 
-func (s *Service) channelAccount(ctx context.Context, tenant, identity string, origin domain.Origin, event channelapi.Event, w channelapi.Work, op string) (channelapi.Result, error) {
+func (s *Service) channelAccount(ctx context.Context, tenant string, event channelapi.Event, op string) (channelapi.Result, error) {
 	var out channelapi.Result
 	arg := event.Argument
-	if op == "account_cancel" {
-		e := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-			_, e := tx.Exec(ctx, `DELETE FROM account_dialogs WHERE identity_id=$1 AND chat_id=$2 AND expires_at<=$3::timestamptz+interval '10 minutes'`, identity, origin.ChatID, w.CreatedAt)
-			return e
-		})
-		out.Code = "account_cancelled"
-		return out, e
-	}
 	if op == "account_delete" && arg != "" {
 		id := strings.TrimPrefix(arg, "confirm:")
 		if _, err := uuid.Parse(id); err != nil {
@@ -305,141 +295,19 @@ func (s *Service) channelAccount(ctx context.Context, tenant, identity string, o
 		return out, e
 	}
 	if op == "account" && arg != "" {
-		var scoped *Service
-		var e error
-		connection := arg
+		platform, connection := "", arg
 		if strings.HasPrefix(arg, "public") {
-			id := strings.TrimPrefix(arg, "public:")
+			platform, connection = strings.TrimPrefix(arg, "public:"), ""
 			if arg == "public" && len(s.adapterIDs()) == 1 {
-				id = s.adapterIDs()[0]
+				platform = s.adapterIDs()[0]
 			}
-			scoped, e = s.forAdapter(id)
-			connection = ""
-			if e == nil {
-				_, e = scoped.defaultProvider(ctx, "none")
-			}
-		} else {
-			if _, err := uuid.Parse(arg); err != nil {
-				return out, domain.ErrNotFound
-			}
-			scoped, e = s.forConnection(ctx, tenant, arg)
 		}
-		if e != nil {
-			return out, e
-		}
-		d, e := scoped.descriptor(ctx)
-		if e != nil {
-			return out, e
-		}
-		e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-			if connection != "" {
-				var state string
-				if e := tx.QueryRow(ctx, `SELECT state FROM connections WHERE id=$1`, connection).Scan(&state); e != nil {
-					return e
-				}
-				if state != "ready" {
-					return ErrConnection
-				}
-			}
-			_, e := tx.Exec(ctx, `INSERT INTO tenant_preferences(tenant_id,adapter_id,default_connection_id) VALUES($1,$2,nullif($3,'')::uuid) ON CONFLICT(tenant_id,adapter_id) DO UPDATE SET default_connection_id=excluded.default_connection_id`, tenant, d.AdapterId, connection)
-			return e
-		})
-		if e != nil {
+		if e := s.SelectAccount(ctx, tenant, platform, connection); e != nil {
 			return out, e
 		}
 	}
 	list, e := s.channelAccounts(ctx, tenant)
-	if e != nil {
-		return out, e
-	}
 	out.Accounts = &list
-	if op != "account_add" {
-		return out, nil
-	}
-	if event.Problem != "" {
-		out.Code = event.Problem
-		return out, nil
-	}
-	id := event.Adapter
-	if id == "" {
-		id = strings.TrimPrefix(arg, "@")
-	}
-	if id == "" && len(list.Platforms) == 1 {
-		id = list.Platforms[0].ID
-	}
-	var platform *channelapi.Platform
-	for i := range list.Platforms {
-		if list.Platforms[i].ID == id && list.Platforms[i].CanAdd {
-			platform = &list.Platforms[i]
-		}
-	}
-	if platform == nil {
-		out.Code = "choose_platform"
-		return out, nil
-	}
-	out.Platform = platform
-	if len(event.Ciphertext) == 0 {
-		if event.Flow != "" {
-			out.Code = "account_prompt"
-			return out, nil
-		}
-		e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-			_, e := tx.Exec(ctx, `INSERT INTO account_dialogs(tenant_id,identity_id,chat_id,flow_id,adapter_id,expires_at) VALUES($1,$2,$3,$4,$5,$6::timestamptz+interval '10 minutes') ON CONFLICT(tenant_id,identity_id,chat_id) DO NOTHING`, tenant, identity, origin.ChatID, w.ID, id, w.CreatedAt)
-			return e
-		})
-		out.Code = "account_prompt"
-		return out, e
-	}
-	if event.Flow != "" {
-		var active bool
-		err := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-			return tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM account_dialogs WHERE identity_id=$1 AND chat_id=$2 AND flow_id=$3 AND expires_at>now())`, identity, origin.ChatID, event.Flow).Scan(&active)
-		})
-		if err != nil {
-			return out, err
-		}
-		if !active {
-			out.Code = "dialog_expired"
-			return out, nil
-		}
-	}
-	scoped, e := s.forAdapter(id)
-	if e != nil {
-		return out, e
-	}
-	credential, e := s.Vault.Open(tenant, w.ID, event.Ciphertext)
-	if e != nil {
-		return out, e
-	}
-	name := event.Name
-	if name == "" {
-		name = "采集账号"
-	}
-	connection, e := scoped.importConnection(ctx, tenant, w.ID, name, credential, true)
-	if e != nil {
-		switch status.Code(e) {
-		case codes.InvalidArgument, codes.Unauthenticated, codes.PermissionDenied, codes.FailedPrecondition:
-			out.Code = "invalid_credentials"
-			return out, nil
-		}
-		return out, e
-	}
-	var ready bool
-	e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT state='ready' FROM connections WHERE id=$1`, connection).Scan(&ready)
-	})
-	if e != nil {
-		return out, e
-	}
-	if !ready {
-		return out, ErrConnection
-	}
-	e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-		_, e := tx.Exec(ctx, `DELETE FROM account_dialogs WHERE identity_id=$1 AND chat_id=$2 AND flow_id=$3`, identity, origin.ChatID, event.Flow)
-		return e
-	})
-	out.Code = "account_added"
-	out.Account = &channelapi.Account{ID: connection, Name: name}
 	return out, e
 }
 

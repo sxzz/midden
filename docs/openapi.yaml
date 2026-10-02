@@ -464,6 +464,90 @@ paths:
                     }
                   unlimited: { type: boolean }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/accounts:
+    get:
+      summary: Account sources per adapter; never returns credentials
+      responses:
+        "200":
+          description: Platforms and non-revoked accounts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Accounts" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      summary: Verify and add a personal account, then select it for its platform
+      description: The credential is verified synchronously by the adapter and stored encrypted. Adding the same upstream account again replaces its credential and keeps its ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [platform, credential]
+              properties:
+                platform: { type: string, description: Adapter ID with can_add }
+                credential:
+                  {
+                    type: string,
+                    description: Opaque adapter input,
+                    e.g. Base64 X cookie,
+                  }
+                name: { type: string, maxLength: 100 }
+      responses:
+        "201":
+          description: Added account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Account" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422":
+          {
+            description: Platform does not accept accounts,
+            or account mismatch,
+          }
+        "503": { description: Adapter unavailable }
+  /v1/accounts/selection:
+    put:
+      summary: Choose the source for new captures on one platform
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [platform]
+              properties:
+                platform: { type: string }
+                account_id:
+                  {
+                    type: string,
+                    format: uuid,
+                    description: Omit for the public source,
+                  }
+      responses:
+        "200":
+          description: Updated account list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Accounts" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          {
+            description: Account needs re-authorization or platform has no public source,
+          }
+  /v1/accounts/{id}:
+    delete:
+      summary: Revoke an account; saved collections stay
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses:
+        "204": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 components:
   securitySchemes:
     webSession:
@@ -499,6 +583,40 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    Accounts:
+      type: object
+      required: [platforms, accounts]
+      properties:
+        platforms:
+          type: array
+          items:
+            type: object
+            required: [id, name, public, can_add]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              help: { type: string, description: Credential format hint }
+              public: { type: boolean }
+              can_add: { type: boolean }
+              selected_account_id:
+                {
+                  type: string,
+                  format: uuid,
+                  description: Absent when the public source is selected,
+                }
+        accounts:
+          type: array
+          items: { $ref: "#/components/schemas/Account" }
+    Account:
+      type: object
+      required: [id, name, state, platform, selected]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        username: { type: string }
+        state: { type: string, enum: [pending, ready, reauth_required] }
+        platform: { type: string }
+        selected: { type: boolean }
     Error:
       type: object
       required: [error]

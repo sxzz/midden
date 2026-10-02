@@ -29,8 +29,6 @@ var commands = []command{
 	{"refresh", "重新抓取帖子", "<收藏 ID>", false},
 	{"delete", "删除", "<收藏 ID>", false},
 	{"delete_all", "删除全部保存记录", "", false},
-	{"account_add", "添加采集账号", "", true},
-	{"account_cancel", "取消添加账号", "", true},
 	{"account_delete", "删除采集账号", "[账号 ID]", true},
 	{"account", "选择采集账号", "", false},
 	{"usage", "查看存储用量", "", false},
@@ -92,15 +90,13 @@ func Normalize(u telegram.Update, username string) channelapi.Event {
 		out.Argument = strings.TrimSpace(strings.TrimPrefix(input, fields[0]))
 	}
 	if out.Command == "account_add" {
+		// Accounts are added on the web. Anything after the old command may be
+		// a pasted credential: keep it only as the signal to delete the message.
 		f := strings.Fields(out.Argument)
 		if len(f) > 0 && strings.HasPrefix(f[0], "@") {
-			out.Adapter = strings.TrimPrefix(f[0], "@")
 			f = f[1:]
 		}
-		if len(f) > 0 {
-			out.Credential = f[0]
-			out.Name = strings.Join(f[1:], " ")
-		}
+		out.Credential = strings.Join(f, " ")
 		out.Text = ""
 		out.Argument = ""
 		out.URLs = nil
@@ -191,7 +187,7 @@ func validCallback(data string) bool {
 		}
 		raw, e := base64.RawURLEncoding.DecodeString(arg)
 		return e == nil && id(strings.TrimPrefix(string(raw), "p:"))
-	case "/usage", "/help", "/account_cancel":
+	case "/usage", "/help":
 		return arg == ""
 	case "/delete_all":
 		return arg == "" || arg == "confirm"

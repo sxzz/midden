@@ -36,11 +36,7 @@ type Event struct {
 	URLs         []string      `json:"urls,omitempty"`
 	Text         string        `json:"text,omitempty"`
 	Credential   string        `json:"credential,omitempty"`
-	Name         string        `json:"name,omitempty"`
-	Adapter      string        `json:"adapter,omitempty"`
 	Problem      string        `json:"problem,omitempty"`
-	Ciphertext   []byte        `json:"ciphertext,omitempty"`
-	Flow         string        `json:"flow,omitempty"`
 }
 type Work struct {
 	ID        string          `json:"id"`

@@ -7,7 +7,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc"
 
 	pb "monitor/api/adapter/v1"
@@ -21,7 +20,7 @@ func (*sameAccountAdapter) CheckConnection(context.Context, *pb.CheckConnectionR
 	return &pb.CheckConnectionResponse{AccountId: "verified-user", Username: "current-handle"}, nil
 }
 
-func TestAccountUpsertAndReplay(t *testing.T) {
+func TestAccountUpsert(t *testing.T) {
 	if os.Getenv("TEST_DATABASE_URL") == "" {
 		t.Skip("Docker required")
 	}
@@ -41,8 +40,7 @@ func TestAccountUpsertAndReplay(t *testing.T) {
 	first, e := s.ImportConnection(ctx, tenant, "", "first", &pb.Credential{Data: []byte("old-credential")})
 	must(t, e)
 	selectTestAccount(t, s, tenant, first)
-	request := uuid.NewString()
-	second, e := s.importConnection(ctx, tenant, request, "updated", &pb.Credential{Data: []byte("new-credential")}, true)
+	second, e := s.ImportConnection(ctx, tenant, "", "updated", &pb.Credential{Data: []byte("new-credential")})
 	must(t, e)
 	if first != second {
 		t.Fatal("duplicate account ID")
@@ -58,22 +56,6 @@ func TestAccountUpsertAndReplay(t *testing.T) {
 		t.Fatal("credential not replaced")
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			id, e := s.importConnection(ctx, tenant, request, "replay", &pb.Credential{Data: []byte("must-not-replace")}, true)
-			if e != nil || id != first {
-				t.Error("replay failed", e)
-			}
-		}()
-	}
-	wg.Wait()
-	value, revision, e = s.session(ctx, tenant, first)
-	must(t, e)
-	if string(value.Data) != "new-credential" || revision != 2 {
-		t.Fatal("replay updated credentials")
-	}
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
 		go func() {
@@ -94,16 +76,5 @@ func TestAccountUpsertAndReplay(t *testing.T) {
 	must(t, e)
 	if foreign == first {
 		t.Fatal("cross-tenant merge")
-	}
-	must(t, s.RevokeConnection(ctx, tenant, first))
-	id, e := s.importConnection(ctx, tenant, request, "replay", &pb.Credential{Data: []byte("must-not-resurrect")}, true)
-	must(t, e)
-	if id != first {
-		t.Fatal("lost receipt")
-	}
-	var state string
-	must(t, admin.Pool.QueryRow(ctx, "SELECT state FROM connections WHERE id=$1", first).Scan(&state))
-	if state != "revoked" {
-		t.Fatal("replay resurrected account")
 	}
 }
