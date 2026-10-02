@@ -24,6 +24,7 @@ watch(
       :src="src"
       :alt="alt"
       :loading="loading"
+      :fetchpriority="loading === 'lazy' ? 'low' : undefined"
       decoding="async"
       :class="{ pending: state !== 'ready' }"
       @load="state = 'ready'"
