@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { status } from "@grpc/grpc-js";
 import { resolveTarget } from "./resolve.js";
 import {
   fetchPublicProfile,
@@ -309,5 +310,43 @@ test("timeline targets carry each post's latest known change", () => {
   assert.deepEqual(
     result.relatedTargets.map((t) => t.updatedAt),
     ["2026-01-01T00:00:00.000Z", "2026-01-01T00:30:00.000Z", ""],
+  );
+});
+
+test("profile failures name suspension and missing accounts without blocking retries", async () => {
+  const profile = (status: number, body: unknown) =>
+    fetchPublicProfile(
+      user.id,
+      true,
+      new AbortController().signal,
+      "https://provider.test/profile",
+      async () => new Response(JSON.stringify(body), { status }),
+    );
+  const failure = (message: string) => (e: any) =>
+    e.message === message && e.code === status.FAILED_PRECONDITION;
+  await assert.rejects(
+    profile(404, {
+      code: 404,
+      message: "User is suspended",
+      reason: "suspended",
+    }),
+    failure("account is suspended"),
+  );
+  await assert.rejects(
+    profile(200, {
+      code: 404,
+      message: "User is suspended",
+      reason: "suspended",
+    }),
+    failure("account is suspended"),
+  );
+  await assert.rejects(
+    profile(404, { code: 404, message: "User not found" }),
+    failure("profile not found"),
+  );
+  await assert.rejects(profile(404, "not json"), failure("profile not found"));
+  await assert.rejects(
+    profile(410, { code: 410 }),
+    failure("provider cannot access this profile"),
   );
 });

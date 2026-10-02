@@ -166,6 +166,16 @@ func failureReason(reason string) string {
 		return "存储配额不足"
 	case "account cannot access this post":
 		return "采集账号无权访问该帖子"
+	case "account is suspended":
+		return "账号已被封禁，解封后可重新抓取"
+	case "profile not found":
+		return "账号不存在或已改名"
+	case "post not found or deleted":
+		return "帖子不存在或已删除"
+	case "provider cannot access this post":
+		return "无法获取该帖子"
+	case "provider cannot access this profile":
+		return "无法获取该账号资料"
 	case "account request signing unavailable":
 		return "采集账号请求签名不可用"
 	case "context deadline exceeded":

@@ -86,3 +86,16 @@ func TestCollectionMiniAppButton(t *testing.T) {
 		}
 	}
 }
+
+func TestUnavailableContentReasons(t *testing.T) {
+	for reason, want := range map[string]string{
+		"account is suspended":                "账号已被封禁，解封后可重新抓取",
+		"profile not found":                   "账号不存在或已改名",
+		"post not found or deleted":           "帖子不存在或已删除",
+		"provider cannot access this profile": "无法获取该账号资料",
+	} {
+		if got := failureReason(reason); got != want {
+			t.Errorf("%s: %s", reason, got)
+		}
+	}
+}

@@ -10,7 +10,12 @@ import {
   addRelation,
   postUpdatedAt,
 } from "./entities.js";
-import { ProviderError, readJSON, responseError } from "./provider.js";
+import {
+  ProviderError,
+  readJSON,
+  responseError,
+  upstreamError,
+} from "./provider.js";
 import {
   FetchResponse,
   SourceResponse,
@@ -159,8 +164,7 @@ async function publicJSON(
     signal,
     headers: { Accept: "application/json", "User-Agent": "Monitor/0.4" },
   });
-  if (!response.ok)
-    throw responseError(response.status, response.headers.get("retry-after"));
+  if (!response.ok) throw await upstreamError(response, "profile");
   const data = await readJSON(response, (body) =>
     responses.push({
       body,
@@ -170,7 +174,12 @@ async function publicJSON(
     }),
   );
   if (data?.code !== 200)
-    throw responseError(typeof data?.code === "number" ? data.code : 502);
+    throw responseError(
+      typeof data?.code === "number" ? data.code : 502,
+      null,
+      "profile",
+      data?.reason,
+    );
   return data;
 }
 // Keep whole upstream pages: the requested size is a target, never a truncation boundary.

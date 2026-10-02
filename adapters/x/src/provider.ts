@@ -20,6 +20,8 @@ export class ProviderError extends Error {
 export function responseError(
   code: number,
   retry: string | null = null,
+  target: "post" | "profile" = "post",
+  reason?: unknown,
 ): ProviderError {
   if (code === 401)
     return new ProviderError(
@@ -44,9 +46,38 @@ export function responseError(
       seconds,
     );
   }
+  // Not retried within this job, but nothing is blocked: a suspension can be
+  // lifted, and a later refresh or profile capture asks upstream again.
+  if (code === 404 && reason === "suspended")
+    return new ProviderError(
+      status.FAILED_PRECONDITION,
+      "account is suspended",
+    );
+  if (code === 404)
+    return new ProviderError(
+      status.FAILED_PRECONDITION,
+      target === "profile" ? "profile not found" : "post not found or deleted",
+    );
   return new ProviderError(
     status.FAILED_PRECONDITION,
-    "provider cannot access this post",
+    `provider cannot access this ${target}`,
+  );
+}
+/** Error for a failed HTTP response, keeping the reason from its JSON body. */
+export async function upstreamError(
+  response: Response,
+  target: "post" | "profile",
+): Promise<ProviderError> {
+  let reason: unknown;
+  try {
+    const text = await response.text();
+    if (text.length <= 64 << 10) reason = JSON.parse(text)?.reason;
+  } catch {}
+  return responseError(
+    response.status,
+    response.headers.get("retry-after"),
+    target,
+    reason,
   );
 }
 export async function readJSON(

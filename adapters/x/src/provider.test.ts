@@ -654,3 +654,14 @@ test("gRPC CheckAccess validates identity and account scope before one access ch
     insecure.forceShutdown();
   }
 });
+
+test("missing posts are reported as not found, other failures stay generic", () => {
+  for (const [error, message] of [
+    [responseError(404), "post not found or deleted"],
+    [responseError(404, null, "post", "suspended"), "account is suspended"],
+    [responseError(400), "provider cannot access this post"],
+  ] as const) {
+    assert.equal(error.message, message);
+    assert.equal(error.code, status.FAILED_PRECONDITION);
+  }
+});
