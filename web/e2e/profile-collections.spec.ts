@@ -227,6 +227,7 @@ test('profile refresh keeps reloading related posts until its members finish', a
   const related = page.getByRole('region', { name: '关联的收藏' })
   await expect(related.locator('.row')).toHaveCount(1)
   await page.getByRole('button', { name: '重新抓取' }).click()
+  await page.getByRole('button', { name: /完整更新/ }).click()
   await expect(page.locator('p.status')).toHaveText(
     /已更新，正在保存帖子（剩余 \d 条）…/,
   )

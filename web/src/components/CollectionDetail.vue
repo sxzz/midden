@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
-import { safeURL, type Collection } from '../api'
+import { safeURL, type Collection, type UpdateMode } from '../api'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
 import { date, present } from '../presentation'
 import CollectionAnnotations from './CollectionAnnotations.vue'
@@ -11,6 +11,7 @@ import RevisionList from './RevisionList.vue'
 import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
+import UpdateModeSheet from './UpdateModeSheet.vue'
 const props = defineProps<{
   id: string
   savedAt?: string
@@ -71,6 +72,11 @@ const profileName = computed(() =>
   collection.value ? present(collection.value).name : '',
 )
 const link = computed(() => collection.value && safeURL(collection.value.url))
+const choosingMode = shallowRef(false)
+function refreshWith(mode: UpdateMode) {
+  choosingMode.value = false
+  void refresh(mode)
+}
 const version = computed(() =>
   collection.value
     ? `${historical.value ? '历史' : '最新'}版本抓取于 ${date(collection.value.observed_at)}`
@@ -105,7 +111,7 @@ const version = computed(() =>
       <ListButton
         label="重新抓取"
         :disabled="busy || loadingRevision || !available"
-        @select="refresh"
+        @select="choosingMode = true"
       />
       <ListButton
         v-if="!available"
@@ -149,6 +155,12 @@ const version = computed(() =>
       :members-version="membersVersion"
       :show-sensitive="showSensitive"
       :reposted-by="profileName"
+    />
+    <UpdateModeSheet
+      :open="choosingMode"
+      title="重新抓取"
+      @select="refreshWith"
+      @cancel="choosingMode = false"
     />
     <ConfirmSheet
       :open="confirmDelete"

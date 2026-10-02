@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, errorText } from './api'
 import CollectionLibrary from './components/CollectionLibrary.vue'
+import AppToast from './components/ui/AppToast.vue'
 import CollectionSkeleton from './components/ui/CollectionSkeleton.vue'
 import { host, setupHost } from './host'
 import { followInternalLink, goBack } from './navigation'
@@ -50,6 +51,7 @@ onUnmounted(() => cleanup())
     <CollectionSkeleton v-if="loading" />
     <p v-else role="status">{{ error }}</p>
   </main>
+  <AppToast />
 </template>
 
 <style scoped>

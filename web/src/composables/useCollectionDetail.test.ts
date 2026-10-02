@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, h, KeepAlive, nextTick, shallowRef } from 'vue'
 import { api, type Collection, type Job } from '../api'
 import { useCollectionDetail } from './useCollectionDetail'
+import { toastState } from './useToast'
 const { replace } = vi.hoisted(() => ({ replace: vi.fn() }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ replace }) }))
 vi.mock('../api', async (original) => ({
@@ -53,7 +54,7 @@ const Detail = {
       () => {},
       (value) => updates.push(value),
     )
-    if (props.id === 'kept') refresh = detail.refresh
+    if (props.id === 'kept') refresh = () => detail.refresh('full')
     return () => [
       h('p', { class: 'status' }, detail.status.value),
       h('p', { class: 'error' }, detail.error.value),
@@ -194,6 +195,8 @@ it('reports a failure from resuming a capture instead of rejecting', async () =>
   await reload.release()
   rejects.add('/collections/kept')
   await show('kept')
-  await vi.waitFor(() => expect(view.error()).toBe('接口失败'))
+  // The collection is still on screen, so the failure shows as a toast.
+  await vi.waitFor(() => expect(toastState.value?.text).toBe('接口失败'))
+  expect(view.error()).toBe('')
   expect(updates).toEqual([])
 })

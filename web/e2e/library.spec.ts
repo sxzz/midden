@@ -19,6 +19,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   page,
 }) => {
   let deleted = false
+  const captureBodies: unknown[] = []
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', async (r) => {
     const u = new URL(r.request().url())
@@ -55,9 +56,10 @@ test('browse, filter, history, refresh and remove a saved post', async ({
           }
         else if (path.endsWith('/revisions/r0'))
           body = { ...collection, revision_id: 'r0', text: '历史正文' }
-        else if (path === '/v1/captures')
+        else if (path === '/v1/captures') {
+          captureBodies.push(r.request().postDataJSON())
           body = { id: 'job', collection_id: id, state: 'complete' }
-        else if (path === `/v1/collections/${id}`) {
+        } else if (path === `/v1/collections/${id}`) {
           if (r.request().method() === 'DELETE') {
             deleted = true
             await r.fulfill({ status: 204 })
@@ -99,7 +101,12 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await expect(page.getByText(collection.text)).toBeVisible()
   await expect(page.getByRole('button', { name: /最新版本 ·/ })).toBeDisabled()
   await page.getByRole('button', { name: '重新抓取' }).click()
+  await page.getByRole('button', { name: /附加更新/ }).click()
   await expect(page.getByText('已更新。')).toBeVisible()
+  expect(captureBodies.at(-1)).toEqual({
+    refresh_id: id,
+    update_mode: 'append',
+  })
   await page.getByRole('button', { name: '返回' }).click()
   await page.getByRole('searchbox').fill('不存在')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
@@ -365,4 +372,42 @@ test('sort selection resets pagination and carries into subsequent pages', async
   expect(last.get('order')).toBe('asc')
   expect(last.get('sort')).toBe('published')
   expect(last.get('cursor')).toBe('next-page')
+})
+
+test('a failed refresh shows a toast every time it is tried', async ({
+  page,
+}) => {
+  let attempts = 0
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/captures') {
+      attempts++
+      return r.fulfill({
+        status: 429,
+        json: { error: 'capture rate exceeded' },
+      })
+    }
+    if (path.endsWith('/availability'))
+      return r.fulfill({ json: { available: true } })
+    if (path.endsWith('/revisions')) return r.fulfill({ json: { items: [] } })
+    if (path === `/v1/collections/${id}`) return r.fulfill({ json: collection })
+    if (path.endsWith('/annotation'))
+      return r.fulfill({ json: { note: '', tags: [] } })
+    if (path === '/v1/tags') return r.fulfill({ json: [] })
+    return r.fulfill({ json: {} })
+  })
+  await page.goto(`/app/#/collection/${id}`)
+  await expect(page.getByText(collection.text)).toBeVisible()
+  const toast = page.locator('.toast')
+  for (let i = 1; i <= 2; i++) {
+    await page.getByRole('button', { name: '重新抓取' }).click()
+    await page.getByRole('button', { name: /完整更新/ }).click()
+    await expect.poll(() => attempts).toBe(i)
+    await expect(toast).toHaveText('操作太频繁，请稍后重试。')
+  }
+  // The collection stays on screen instead of giving way to an error banner.
+  await expect(page.getByText(collection.text)).toBeVisible()
+  await expect(page.locator('.banner')).toHaveCount(0)
 })

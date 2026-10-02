@@ -15,7 +15,9 @@ import {
   type MemberProgress,
   type Page,
   type Revision,
+  type UpdateMode,
 } from '../api'
+import { toast } from './useToast'
 const settled = (m?: MemberProgress) =>
   m ? m.complete + m.partial + m.failed : 0
 function memberStatus(m: MemberProgress) {
@@ -64,6 +66,13 @@ export function useCollectionDetail(
     () => historyLoaded.value && !next.value && revisions.value.length <= 1,
   )
   let controller = new AbortController()
+  // Once the collection is on screen, a failed action must not replace it or
+  // land in a banner out of view: say so where the reader is looking.
+  function report(e: unknown) {
+    const text = errorText(e)
+    if (collection.value) toast(text)
+    else error.value = text
+  }
   async function checkAvailability() {
     try {
       available.value = (
@@ -74,7 +83,7 @@ export function useCollectionDetail(
     } catch (e) {
       if (!controller.signal.aborted) {
         available.value = false
-        error.value = errorText(e)
+        report(e)
       }
     }
   }
@@ -98,7 +107,7 @@ export function useCollectionDetail(
   function failed(e: unknown) {
     if (controller.signal.aborted) return
     busy.value = false
-    error.value = errorText(e)
+    report(e)
   }
   onDeactivated(() => {
     visible = false
@@ -172,7 +181,7 @@ export function useCollectionDetail(
       next.value = p.next_cursor || ''
       historyLoaded.value = true
     } catch (e) {
-      if (!signal.aborted) error.value = errorText(e)
+      if (!signal.aborted) report(e)
     } finally {
       if (!signal.aborted) historyLoading.value = false
     }
@@ -204,8 +213,7 @@ export function useCollectionDetail(
       if (!revisionID || revisionID === latestRevision.value)
         latestRevision.value = result.revision_id
     } catch (e) {
-      if (!signal.aborted && request === revisionRequest)
-        error.value = errorText(e)
+      if (!signal.aborted && request === revisionRequest) report(e)
     } finally {
       if (!signal.aborted && request === revisionRequest)
         loadingRevision.value = false
@@ -220,7 +228,7 @@ export function useCollectionDetail(
       })
       deleted(id())
     } catch (e) {
-      error.value = errorText(e)
+      report(e)
     } finally {
       busy.value = false
     }
@@ -327,21 +335,21 @@ export function useCollectionDetail(
       }
     }, 2000)
   }
-  async function refresh() {
+  async function refresh(mode: UpdateMode) {
+    if (busy.value) return
     ++revisionRequest
     busy.value = true
-    error.value = ''
     try {
       await startPoll(
         await api<Job>('/captures', {
           method: 'POST',
-          body: JSON.stringify({ refresh_id: id() }),
+          body: JSON.stringify({ refresh_id: id(), update_mode: mode }),
           headers: { 'Idempotency-Key': crypto.randomUUID() },
           signal: controller.signal,
         }),
       )
     } catch (e) {
-      error.value = errorText(e)
+      report(e)
       busy.value = false
     }
   }
