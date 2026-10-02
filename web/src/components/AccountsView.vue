@@ -20,6 +20,13 @@ const notice = shallowRef<{
 }>()
 const removing = shallowRef<Account>()
 const addable = computed(() => data.value?.platforms.some((p) => p.can_add))
+const version = /^([0-9a-f]{40})(-dirty)?$/.exec(__BUILD_VERSION__)
+const versionText = version
+  ? version[1].slice(0, 7) + (version[2] || '')
+  : __BUILD_VERSION__
+const versionURL = version
+  ? `https://github.com/sxzz/midden/commit/${version[1]}`
+  : ''
 
 async function load() {
   loading.value = true
@@ -217,6 +224,13 @@ async function remove() {
     </template>
     <p v-if="!addable" class="status">未配置个人账号接入。</p>
   </template>
+  <p class="version">
+    版本
+    <a v-if="versionURL" :href="versionURL" target="_blank" rel="noopener"
+      ><code>{{ versionText }}</code></a
+    >
+    <code v-else>{{ versionText }}</code>
+  </p>
   <ConfirmSheet
     :open="!!removing"
     :title="`删除 ${removing ? label(removing) : ''}？`"
@@ -371,5 +385,20 @@ input::placeholder {
 }
 .submit:active:not(:disabled) {
   background: var(--fill);
+}
+.version {
+  margin: 0;
+  padding: 8px calc(var(--gutter) + 4px) 24px;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--subtle);
+}
+.version a {
+  color: var(--link);
+}
+.version code {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 </style>

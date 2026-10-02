@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vitest/config'
@@ -21,6 +22,21 @@ const testAliases = Object.fromEntries(
         ),
   ]),
 )
+// Matches the bot's buildinfo.Version: the commit, marked dirty when the
+// checkout has local changes, or "dev" outside a git checkout.
+function buildVersion() {
+  const git = (...args: string[]) =>
+    execFileSync('git', args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+  try {
+    const revision = git('rev-parse', 'HEAD')
+    return git('status', '--porcelain') ? `${revision}-dirty` : revision
+  } catch {
+    return 'dev'
+  }
+}
 export default defineConfig({
   base: '/app/',
   plugins: [vue()],
@@ -28,6 +44,7 @@ export default defineConfig({
     __VUE_OPTIONS_API__: false,
     __VUE_PROD_DEVTOOLS__: false,
     __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false,
+    __BUILD_VERSION__: JSON.stringify(buildVersion()),
   },
   server: { proxy: { '/v1': 'http://127.0.0.1:8080' } },
   test: {

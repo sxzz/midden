@@ -69,6 +69,12 @@ test('adds, selects and deletes an X account', async ({ page }) => {
   await page.goto('/app/')
   await page.getByRole('link', { name: '采集账号' }).click()
   await expect(page.locator('h1')).toHaveText('采集账号')
+  // Same build version as the bot's /start: a commit, or dev outside git.
+  const version = page.getByRole('link', { name: /^[0-9a-f]{7}(-dirty)?$/ })
+  await expect(version).toHaveAttribute(
+    'href',
+    /^https:\/\/github\.com\/sxzz\/midden\/commit\/[0-9a-f]{40}$/,
+  )
   await expect(page.getByText('添加 X 账号')).toBeVisible()
   await expect(page.getByText('Base64 Cookie')).toBeVisible()
 
