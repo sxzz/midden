@@ -27,7 +27,11 @@ export function verifySignature(secret, body, header) {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
-// Only a successful image build of a push to main can be a new release.
+// Only a successful image build on main can be a new release. The images
+// workflow runs after the test workflow (its own event is "workflow_run") and
+// itself publishes only for pushes, or when dispatched by hand.
+const RELEASE_EVENTS = new Set(["workflow_run", "workflow_dispatch"]);
+
 export function isRelease(event, payload, repository) {
   const run = payload?.workflow_run;
   return (
@@ -36,7 +40,7 @@ export function isRelease(event, payload, repository) {
     payload.repository?.full_name === repository &&
     run?.name === "images" &&
     run.conclusion === "success" &&
-    run.event === "push" &&
+    RELEASE_EVENTS.has(run.event) &&
     run.head_branch === "main"
   );
 }

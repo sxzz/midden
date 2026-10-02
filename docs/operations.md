@@ -31,7 +31,7 @@ chmod +x ~/deploy-midden.sh
 
 ### 自动部署
 
-服务器可在镜像发布后自动部署。GitHub 在 `images` 工作流完成后发送 `workflow_run` webhook，本机接收服务校验签名，确认是 main 分支 push 触发且构建成功，再从 `origin/main` 取出 `deploy-latest.sh` 执行。webhook 内容只是触发信号：部署的版本仍由脚本从 GHCR 和 `origin/main` 确定，伪造或重放的请求最多重新检查一次最新发布版本。最新版本已经部署时不会停止服务；部署期间收到的多次触发合并为一次复查。
+服务器可在镜像发布后自动部署。GitHub 在 `images` 工作流完成后发送 `workflow_run` webhook，本机接收服务校验签名，确认是 main 分支的镜像构建成功（`images` 由 `test` 的 `workflow_run` 或手动触发，只在 push 时发布镜像），再从 `origin/main` 取出 `deploy-latest.sh` 执行。webhook 内容只是触发信号：部署的版本仍由脚本从 GHCR 和 `origin/main` 确定，伪造或重放的请求最多重新检查一次最新发布版本。最新版本已经部署时不会停止服务；部署期间收到的多次触发合并为一次复查。
 
 ```sh
 node scripts/install-deploy-webhook.mjs ~/midden            # LaunchAgent org.midden.deploy-webhook，监听 127.0.0.1:18090

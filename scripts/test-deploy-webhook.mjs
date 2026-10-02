@@ -30,7 +30,7 @@ const release = {
   workflow_run: {
     name: "images",
     conclusion: "success",
-    event: "push",
+    event: "workflow_run",
     head_branch: "main",
   },
 };
@@ -43,13 +43,24 @@ test("accepts only signatures made with the shared secret", () => {
   assert.ok(!verifySignature("other".repeat(10), body, sign(body)));
 });
 
-test("deploys only successful image builds of pushes to main", () => {
+test("deploys only successful image builds on main", () => {
   assert.ok(isRelease("workflow_run", release, "sxzz/midden"));
+  assert.ok(
+    isRelease(
+      "workflow_run",
+      {
+        ...release,
+        workflow_run: { ...release.workflow_run, event: "workflow_dispatch" },
+      },
+      "sxzz/midden",
+    ),
+  );
   for (const change of [
     { action: "requested" },
     { repository: { full_name: "fork/midden" } },
     { workflow_run: { ...release.workflow_run, name: "test" } },
     { workflow_run: { ...release.workflow_run, conclusion: "failure" } },
+    { workflow_run: { ...release.workflow_run, event: "push" } },
     { workflow_run: { ...release.workflow_run, event: "pull_request" } },
     { workflow_run: { ...release.workflow_run, head_branch: "feature" } },
   ])
