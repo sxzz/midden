@@ -159,7 +159,7 @@ func failureReason(reason string) string {
 	case "job exhausted retries or was interrupted":
 		return "任务重试次数已用尽或执行被中断"
 	case "operation failed; retry or inspect service health":
-		return "服务内部错误，需检查服务日志"
+		return "服务内部错误"
 	case "resource omitted: unsupported type or resource limit":
 		return "部分资源类型不支持或资源数量超过限制"
 	default:

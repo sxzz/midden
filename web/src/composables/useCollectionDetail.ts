@@ -250,7 +250,7 @@ export function useCollectionDetail(
           : job.state === 'partial'
             ? '已更新，部分媒体缺失。'
             : job.state === 'failed'
-              ? '重新抓取失败，旧版本仍可查看。'
+              ? '重新抓取失败。'
               : '已更新。'
     if (['queued', 'downloading'].includes(job.state)) {
       if (!visible) return

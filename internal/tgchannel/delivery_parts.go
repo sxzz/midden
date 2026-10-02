@@ -19,7 +19,7 @@ func deliveryParts(text string, assets []domain.Asset) []deliveryPart {
 	for _, a := range assets {
 		if a.State == "ready" {
 			if a.Size > 50000000 {
-				text += "\n\n文件已保存，但超过 Telegram 回传大小限制，可通过 API 下载。"
+				text += "\n\n文件超过 Telegram 大小限制，请在网页查看。"
 				continue
 			}
 			ready = append(ready, a)

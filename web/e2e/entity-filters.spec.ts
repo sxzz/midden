@@ -126,7 +126,7 @@ test('Chinese filters support multiple media, date bounds and storage order', as
   await page.getByRole('option', { name: '视频', exact: true }).click()
   await page.getByLabel('收藏开始日期').fill('2026-09-01')
   await page.getByLabel('收藏结束日期').fill('2026-09-30')
-  await page.getByLabel('来源内容权限').selectOption('private')
+  await page.getByLabel('可见性').selectOption('private')
   await expect.poll(() => query.get('visibility')).toBe('private')
   await expect.poll(() => query.get('media_type')).toBe('image,video')
   await expect.poll(() => query.get('saved_from')).toBeTruthy()

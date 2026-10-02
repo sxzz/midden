@@ -204,7 +204,7 @@ func (r *Runner) event(ctx context.Context, w channelapi.Work, save func(channel
 		if !errors.As(e, &api) || api.Status >= 500 || api.Status == 429 {
 			return e
 		}
-		out = response{Text: "操作未完成，请检查输入或使用 /help。", Buttons: menuButtons()}
+		out = response{Text: "操作失败，使用 /help 查看用法。", Buttons: menuButtons()}
 	}
 	if out.Toast != "" {
 		_ = r.Bot.AnswerToast(ctx, v.CallbackID, out.Toast)
@@ -453,13 +453,13 @@ func collectionProgressMessage(id string, d channelapi.Delivery, webURL string) 
 		text = "帖子列表获取失败\n输入：" + d.Input + "\n" + failureReason(d.Job.Error)
 	}
 	if c.Error != "" {
-		text += "\n部分页面获取失败，可重试继续。"
+		text += "\n部分页面获取失败。"
 	}
 	if len(c.Reasons) > 0 {
-		text += "\n\n未完整保存原因（相同原因合并，同一条可能涉及多个原因）："
+		text += "\n\n未完整保存原因："
 		for i, reason := range c.Reasons {
 			if i == 8 {
-				text += fmt.Sprintf("\n另有 %d 类原因，可在对应收藏中查看。", len(c.Reasons)-i)
+				text += fmt.Sprintf("\n另有 %d 类原因。", len(c.Reasons)-i)
 				break
 			}
 			message := []rune(failureReason(reason.Reason))
@@ -482,6 +482,6 @@ func collectionProgressMessage(id string, d channelapi.Delivery, webURL string) 
 	if !c.Done && !c.Stopped {
 		keys = append(keys, []telegram.Button{{Text: "中止", Data: "/collection_stop " + id}})
 	}
-	keys = append(keys, []telegram.Button{{Text: "在此查看已保存资料", Data: "/show " + c.CollectionID}}, []telegram.Button{{Text: "收藏列表", Data: "/list"}})
+	keys = append(keys, []telegram.Button{{Text: "查看已保存资料", Data: "/show " + c.CollectionID}}, []telegram.Button{{Text: "收藏列表", Data: "/list"}})
 	return text, appendMiniAppButton(keys, c.CollectionID, webURL)
 }

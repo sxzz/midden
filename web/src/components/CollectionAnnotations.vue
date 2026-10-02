@@ -187,10 +187,7 @@ async function saveNote() {
 </script>
 
 <template>
-  <ListSection
-    title="我的整理"
-    footnote="备注和标签仅当前账号可见，适用于这条收藏的所有版本。"
-  >
+  <ListSection title="我的整理">
     <form class="annotations" @submit.prevent="saveNote">
       <div
         v-if="loading"
@@ -218,7 +215,7 @@ async function saveNote() {
             v-model="note"
             rows="3"
             :maxlength="noteLimit"
-            placeholder="记下你为什么保存它…"
+            placeholder="添加备注…"
           />
           <div class="note-actions">
             <p class="hint" role="status">{{ noteStatus }}</p>
@@ -244,7 +241,7 @@ async function saveNote() {
             multiple
             @update:model-value="editTags"
           />
-          <p v-else class="hint">还没有标签，在下面创建第一个。</p>
+          <p v-else class="hint">暂无标签。</p>
           <div class="create">
             <svg
               class="plus"

@@ -308,7 +308,7 @@ it('asks for a first tag when the account has none', async () => {
     path === '/tags' ? [] : { note: '', tags: [] },
   )
   const el = mount(CollectionAnnotations, { id: 'collection' })
-  await vi.waitFor(() => expect(el.textContent).toContain('还没有标签'))
+  await vi.waitFor(() => expect(el.textContent).toContain('暂无标签'))
   expect(el.querySelector('[aria-label="新标签名称"]')).not.toBeNull()
 })
 it('submits and clears a tag filter together with the existing filters', async () => {

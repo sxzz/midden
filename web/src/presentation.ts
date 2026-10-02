@@ -221,17 +221,17 @@ export function readyMedia(assets: Asset[] = []) {
 }
 /** Media state in words. Storage states never reach the reader. */
 export function mediaNotice(asset: Asset) {
-  if (asset.state === 'pending') return '媒体还在保存中'
-  if (asset.state === 'failed') return '这个媒体没能保存下来'
-  return '这个媒体暂时无法打开'
+  if (asset.state === 'pending') return '媒体保存中'
+  if (asset.state === 'failed') return '媒体保存失败'
+  return '媒体无法打开'
 }
 const warnings: Record<string, string> = {
   'resource omitted: unsupported type or resource limit':
-    '部分媒体超出限制，没有保存。',
+    '部分媒体超出限制，未保存。',
 }
 /** Adapter warnings are diagnostic strings; readers get plain wording. */
 export function warningText(warning: string) {
-  return warnings[warning] || '部分内容没有完整保存。'
+  return warnings[warning] || '内容不完整。'
 }
 export function warningList(list?: string[] | null) {
   return [...new Set((list ?? []).map(warningText))]

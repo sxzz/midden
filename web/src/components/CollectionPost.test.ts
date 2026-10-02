@@ -43,7 +43,7 @@ describe('Vapor collection rendering', () => {
       const el = mount(CollectionPost, { ...fixture, warnings })
       expect(el.textContent).toContain('收藏正文')
       expect(el.textContent).toContain('测试作者')
-      expect(el.textContent).not.toContain('部分内容没有完整保存')
+      expect(el.textContent).not.toContain('内容不完整')
       expect(el.querySelector('.sensitive')).not.toBeNull()
     },
   )
@@ -89,10 +89,10 @@ describe('Vapor collection rendering', () => {
       ],
       warnings: ['resource omitted: unsupported type or resource limit'],
     })
-    expect(el.textContent).toContain('这个媒体没能保存下来')
+    expect(el.textContent).toContain('媒体保存失败')
     expect(el.textContent).not.toContain('failed')
     expect(el.textContent).not.toContain('502')
-    expect(el.textContent).toContain('部分媒体超出限制，没有保存。')
+    expect(el.textContent).toContain('部分媒体超出限制，未保存。')
     expect(el.textContent).not.toContain('resource omitted')
   })
   it('records the post under the body, media and warnings', () => {

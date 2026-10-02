@@ -143,9 +143,7 @@ export class CaptureStrategy {
             );
           } else {
             result.incomplete = true;
-            result.warnings.push(
-              "该账号的帖子受保护，需添加有访问权限的采集账号；Profile 已保存。",
-            );
+            result.warnings.push("帖子受保护，需添加有访问权限的采集账号。");
           }
         } else {
           // Fetch only the timeline here; reuse the profile response obtained above.
@@ -197,7 +195,7 @@ export class CaptureStrategy {
         if (!credential)
           throw new ProviderError(
             status.PERMISSION_DENIED,
-            "该帖子受保护，请添加有访问权限的采集账号。",
+            "帖子受保护，需添加有访问权限的采集账号。",
           );
         result =
           discovered?.providerId === "x-session"

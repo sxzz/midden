@@ -443,7 +443,7 @@ test('a private collection shows a lock beside the name, not a detail line', asy
   // The lock stays visible even when the name has to be truncated.
   await expect(rows.nth(0).getByRole('img', { name: '私密' })).toBeVisible()
   await expect(rows.nth(1).getByRole('img', { name: '私密' })).toHaveCount(0)
-  await expect(page.getByText('私密', { exact: true })).toHaveCount(0)
+  await expect(rows.nth(0).locator('.meta')).toHaveCount(0)
   await page.screenshot({ path: 'test-results/private-lock-list.png' })
   await rows.nth(0).locator('.head').click()
   await expect(

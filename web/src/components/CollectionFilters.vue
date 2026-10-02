@@ -55,8 +55,8 @@ const mediaNames: Record<string, string> = {
   text: '纯文字',
 }
 const visibilityNames: Record<string, string> = {
-  public: '公开内容',
-  private: '受限内容',
+  public: '公开',
+  private: '私密',
 }
 const sensitiveNames: Record<string, string> = {
   contains: '包含敏感内容',
@@ -333,11 +333,11 @@ const tagFilter = computed({
         :searchable="false"
       />
       <label class="option"
-        >来源内容权限<span class="select"
+        >可见性<span class="select"
           ><select v-model="form.visibility">
             <option value="">全部</option>
-            <option value="public">公开内容</option>
-            <option value="private">受限内容</option></select
+            <option value="public">公开</option>
+            <option value="private">私密</option></select
           ><ChevronIcon class="select-chevron" /></span
       ></label>
       <label class="option"
@@ -361,7 +361,6 @@ const tagFilter = computed({
             aria-label="收藏结束日期"
         /></span>
       </div>
-      <p class="hint">收藏日期包含起止当天；留空不限。</p>
     </div>
   </form>
 </template>

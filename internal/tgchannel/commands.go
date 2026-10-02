@@ -22,7 +22,7 @@ type response struct {
 func (r *Runner) command(ctx context.Context, w channelapi.Work, event channelapi.Event) (response, error) {
 	out := response{Buttons: menuButtons()}
 	if event.Problem == "foreign_message" {
-		return response{Text: "这条消息仅限发起者操作。"}, nil
+		return response{Text: "仅限发起者操作。"}, nil
 	}
 	if event.CallbackID != "" && event.Private && !event.Protected {
 		out.Previous = event.MessageID
@@ -106,22 +106,22 @@ func (r *Runner) command(ctx context.Context, w channelapi.Work, event channelap
 		}
 	case "save":
 		if v.Count == 0 && len(v.Errors) == 0 && event.Private {
-			out.Text = "请发送支持的平台链接，或使用 /help。"
+			out.Text = "请发送支持的链接，或使用 /help。"
 		}
 		out.Text += strings.Join(v.Errors, "\n")
 		out.Previous = 0
 	case "save_shared":
-		out.Toast = "已保存到你的收藏库。"
+		out.Toast = "已保存。"
 		out.Previous = 0
 	case "collection_stop":
-		out.Text = "已中止后续帖子抓取。"
+		out.Text = "已中止。"
 		out.Previous = 0
 	case "delete":
-		out.Text = "已删除，并释放对应额度。"
+		out.Text = "已删除。"
 		out.Previous = 0
 	case "delete_all":
 		if v.Code == "confirm_delete_all" {
-			out.Text = "删除你保存的全部收藏？不影响其他用户的保存记录。"
+			out.Text = "删除你保存的全部收藏？"
 			out.Buttons = telegram.Keyboard{{{Text: "确认删除全部", Data: "/delete_all confirm"}, {Text: "取消", Data: "/help"}}}
 		} else {
 			out.Text = fmt.Sprintf("已删除 %d 条保存记录。", v.Count)
@@ -143,27 +143,27 @@ func (r *Runner) accountResponse(event channelapi.Event, v channelapi.Result) re
 	case "account_cancelled":
 		out.Text = "已取消添加账号。"
 	case "dialog_expired":
-		out.Text = "添加账号已超时，请重新点击添加账号。"
+		out.Text = "添加账号已超时。"
 	case "credentials_unavailable":
-		out.Text = "个人账号接入尚未配置，请联系管理员。"
+		out.Text = "未配置个人账号接入。"
 	case "invalid_credentials":
-		out.Text = "凭据格式无效，请重新添加账号。"
+		out.Text = "凭据格式无效。"
 	case "account_prompt":
-		out.Text = "添加 " + v.Platform.Name + " 账号\n\n" + v.Platform.Help + "\n\n请直接发送凭据，10 分钟内有效。"
+		out.Text = "添加 " + v.Platform.Name + " 账号\n\n" + v.Platform.Help + "\n\n发送凭据，10 分钟内有效。"
 		out.Buttons = telegram.Keyboard{{{Text: "取消添加", Data: "/account_cancel"}}}
 	case "account_added":
 		out.Text = "账号已添加：" + v.Account.Name
 		out.Buttons = telegram.Keyboard{{{Text: "使用此账号", Data: "/account " + v.Account.ID}}}
 	case "confirm_account_delete":
-		out.Text = "删除采集账号 " + v.Account.Name + "？已保存的收藏会保留。"
+		out.Text = "删除采集账号 " + v.Account.Name + "？"
 		out.Buttons = telegram.Keyboard{{{Text: "确认删除", Data: "/account_delete confirm:" + v.Account.ID}, {Text: "取消", Data: "/account"}}}
 	case "account_deleted":
-		out.Text = "账号已删除，已保存的收藏保留。"
+		out.Text = "账号已删除。"
 	default:
-		out.Text = "各平台独立选择采集来源。"
+		out.Text = "选择采集来源。"
 		out.Buttons = nil
 		if v.Code == "choose_platform" {
-			out.Text = "请选择添加账号的平台。"
+			out.Text = "选择平台。"
 		}
 		if v.Accounts != nil {
 			for _, p := range v.Accounts.Platforms {

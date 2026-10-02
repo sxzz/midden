@@ -112,16 +112,16 @@ export async function api<T>(
 export function errorText(e: unknown) {
   if (e instanceof APIError) {
     if (e.status === 400 && e.message === 'invalid collection filters')
-      return '筛选条件无效，请检查关键词和日期范围。'
+      return '筛选条件无效。'
     if (e.status === 400 && e.message === 'invalid note or tags')
-      return '请检查备注长度（最多 10000 字）、标签名称（最多 64 字）和标签数量（最多 100 个）。'
-    if (e.status === 401) return '会话已失效，请关闭后从 Telegram 重新打开。'
-    if (e.status === 404) return '收藏不存在或已从收藏中删除。'
-    if (e.status === 409) return '存储空间不足或操作冲突，请检查用量后重试。'
+      return '备注最多 10000 字，标签名最多 64 字，标签最多 100 个。'
+    if (e.status === 401) return '会话已失效，请从 Telegram 重新打开。'
+    if (e.status === 404) return '收藏不存在或已删除。'
+    if (e.status === 409) return '存储空间不足或操作冲突。'
     if (e.status === 429) return '操作太频繁，请稍后重试。'
-    if (e.status === 503) return '采集服务暂时不可用，请稍后重试。'
+    if (e.status === 503) return '采集服务不可用。'
   }
-  return e instanceof Error ? e.message : '加载失败，请重试。'
+  return e instanceof Error ? e.message : '加载失败。'
 }
 export const assetURL = (a: Asset, inline = true) =>
   `/v1/assets/${encodeURIComponent(a.id)}${inline ? '?inline=1' : ''}`

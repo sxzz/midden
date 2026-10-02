@@ -192,7 +192,7 @@ export async function collectTimeline(
     }
     if (visited.size >= 20) {
       result.incomplete = true;
-      result.warnings.push("连续翻页已达单次处理上限，可继续抓取剩余帖子。");
+      result.warnings.push("已达单次翻页上限。");
       break;
     }
     visited.add(cursor);
@@ -235,9 +235,7 @@ export async function fetchPublicTimeline(
     );
   } catch {
     result.incomplete = true;
-    result.warnings.push(
-      "帖子获取中断；已获取的帖子会继续保存，可重试或继续抓取。",
-    );
+    result.warnings.push("帖子获取中断。");
   }
 }
 
@@ -263,9 +261,7 @@ export async function fetchPublicProfile(
       );
     } catch {
       result.incomplete = true;
-      result.warnings.push(
-        "帖子获取中断；已获取的帖子会继续保存，可重试或继续抓取。",
-      );
+      result.warnings.push("帖子获取中断。");
     }
   }
   result.sourceResponses = responses;
@@ -302,9 +298,7 @@ export async function fetchSessionTimeline(
     );
   } catch {
     result.incomplete = true;
-    result.warnings.push(
-      "帖子获取中断；已获取的帖子会继续保存，可重试或继续抓取。",
-    );
+    result.warnings.push("帖子获取中断。");
   }
   result.sourceResponses.push(...responses);
 }

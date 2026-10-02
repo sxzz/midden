@@ -162,10 +162,10 @@ export function normalize(
         ),
       });
     }
-    if (unsupported || post.media.external) warn("此类媒体暂不支持收藏。");
+    if (unsupported || post.media.external) warn("不支持此类媒体。");
     if (invalid) warn("部分媒体缺少有效下载地址。");
   }
-  if (post.article) warn("文章正文暂不支持收藏。");
+  if (post.article) warn("不支持文章正文。");
   if (!result.text && !result.resources.length)
     throw new ProviderError(
       status.FAILED_PRECONDITION,

@@ -54,7 +54,7 @@ func TestDeliveryPartsKeepTextWithMedia(t *testing.T) {
 
 func TestOversizeVideoDelivery(t *testing.T) {
 	parts := deliveryParts("正文", []domain.Asset{{State: "ready", MIME: "video/mp4", Size: 50000001}})
-	if len(parts) != 1 || parts[0].kind != "text" || !strings.Contains(parts[0].text, "文件已保存") {
+	if len(parts) != 1 || parts[0].kind != "text" || !strings.Contains(parts[0].text, "文件超过 Telegram 大小限制") {
 		t.Fatal(parts)
 	}
 }

@@ -91,7 +91,7 @@ test('video errors remain closable and can navigate to images', async ({
 }) => {
   await page.route('**/v1/assets/clip?*', (r) => r.fulfill({ status: 404 }))
   await page.getByRole('button', { name: '播放视频' }).click()
-  await expect(page.getByRole('alert')).toContainText('视频加载失败')
+  await expect(page.getByRole('alert')).toContainText('视频无法播放')
   await page.getByRole('button', { name: '下一张' }).click()
   await expect(page.getByRole('dialog').getByAltText('测试图片')).toBeVisible()
   await page.keyboard.press('Escape')

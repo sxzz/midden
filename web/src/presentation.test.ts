@@ -129,7 +129,7 @@ it('translates adapter warnings and drops duplicates', () => {
       'resource omitted: unsupported type or resource limit',
       'some adapter detail',
     ]),
-  ).toEqual(['部分媒体超出限制，没有保存。', '部分内容没有完整保存。'])
+  ).toEqual(['部分媒体超出限制，未保存。', '内容不完整。'])
 })
 
 const xProfile = (description?: string): Collection => ({

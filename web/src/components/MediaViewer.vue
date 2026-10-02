@@ -152,7 +152,7 @@ onMounted(() => {
     imageClickAction: 'zoom',
     tapAction: false,
     doubleTapAction: 'zoom',
-    errorMsg: '媒体加载失败，请关闭后重试',
+    errorMsg: '媒体加载失败',
     paddingFn: (_viewport, item) =>
       item.type === 'video'
         ? { top: 72, bottom: 110, left: 12, right: 12 }
@@ -177,7 +177,7 @@ onMounted(() => {
         if (disposed) return
         const error = document.createElement('p')
         error.setAttribute('role', 'alert')
-        error.textContent = '视频加载失败，可尝试保存后播放'
+        error.textContent = '视频无法播放，可保存后观看'
         container.replaceChildren(error)
       },
       { once: true },
