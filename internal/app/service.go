@@ -452,6 +452,30 @@ func (s *Service) Job(ctx context.Context, t, id string) (j domain.Job, e error)
 	return
 }
 
+// JobProgress adds member progress to a collection capture, following this
+// tenant's newest submission of it through its continuation pages.
+func (s *Service) JobProgress(ctx context.Context, t, id string) (j domain.Job, e error) {
+	var submission *string
+	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
+		if err := scanJob(ctx, tx, id, &j); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT (SELECT s.id FROM submissions s WHERE s.capture_id=c.id AND s.related_state<>'none' ORDER BY s.created_at DESC LIMIT 1) FROM captures c WHERE c.id=$1 AND c.is_collection`, id).Scan(&submission)
+	})
+	if errors.Is(e, domain.ErrNotFound) && j.ID != "" {
+		return j, nil
+	}
+	if e != nil || submission == nil {
+		return
+	}
+	c, e := s.channelCollection(ctx, t, *submission)
+	if e != nil {
+		return j, e
+	}
+	j.Members = &domain.MemberProgress{Total: c.Total, Complete: c.Complete, Partial: c.Partial, Failed: c.Failed, Pending: c.Pending, Done: c.Done || c.Stopped}
+	return
+}
+
 func (s *Service) Usage(ctx context.Context, t string) (u domain.Usage, e error) {
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT tenant_usage(),reserved_bytes,quota_bytes,tenant_unlimited() FROM tenants WHERE id=$1`, t).Scan(&u.Used, &u.Reserved, &u.Limit, &u.Unlimited)

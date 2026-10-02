@@ -85,6 +85,18 @@ type Job struct {
 	ConnectionID string    `json:"connection_id,omitempty"`
 	AccessScope  string    `json:"access_scope"`
 	CreatedAt    time.Time `json:"created_at"`
+	// Members reports the captures a collection (such as a profile) started for
+	// its members, which keep running after the collection's own capture ends.
+	Members *MemberProgress `json:"members,omitempty"`
+}
+
+type MemberProgress struct {
+	Total    int  `json:"total"`
+	Complete int  `json:"complete"`
+	Partial  int  `json:"partial"`
+	Failed   int  `json:"failed"`
+	Pending  int  `json:"pending"`
+	Done     bool `json:"done"`
 }
 
 type Asset struct {

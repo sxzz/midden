@@ -42,6 +42,7 @@ const {
   remove,
   refresh,
   checkAvailability,
+  membersVersion,
 } = useCollectionDetail(
   () => props.id,
   (id) => emit('deleted', id),
@@ -145,6 +146,7 @@ const version = computed(() =>
       v-if="isProfile"
       :id="id"
       :revision-id="latestRevision"
+      :members-version="membersVersion"
       :show-sensitive="showSensitive"
       :reposted-by="profileName"
     />

@@ -566,6 +566,20 @@ components:
         connection_id: { type: string, format: uuid }
         access_scope: { type: string }
         created_at: { type: string, format: date-time }
+        members:
+          type: object
+          description: >-
+            Only on collection captures (such as profiles), from GET
+            /v1/jobs/{id}. The collection's own capture ends once its members
+            are listed; their captures finish later. done is true once every
+            member capture of this tenant's newest submission has finished.
+          properties:
+            total: { type: integer }
+            complete: { type: integer }
+            partial: { type: integer }
+            failed: { type: integer }
+            pending: { type: integer }
+            done: { type: boolean }
     Asset:
       type: object
       properties:

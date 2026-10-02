@@ -101,7 +101,7 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		if !checkID(w, r) {
 			return
 		}
-		v, e := s.Job(r.Context(), tenant(r), r.PathValue("id"))
+		v, e := s.JobProgress(r.Context(), tenant(r), r.PathValue("id"))
 		respond(w, 200, v, e)
 	})
 	mux.HandleFunc("GET /v1/collections/authors", func(w http.ResponseWriter, r *http.Request) {

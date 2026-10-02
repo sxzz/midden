@@ -7,6 +7,8 @@ import CollectionView from './CollectionView.vue'
 const props = defineProps<{
   id: string
   revisionId: string
+  /** Bumped when a refresh of this profile saved new or updated posts. */
+  membersVersion?: number
   showSensitive?: boolean
   /** This profile's display name, shown on the posts it reposted. */
   repostedBy?: string
@@ -24,12 +26,28 @@ const query = computed(() => {
   if (layout.value) q.set('layout', layout.value)
   return q.toString()
 })
-const { items, next, loading, error, totalStorageBytes, load, more } =
-  useCollection()
+const {
+  items,
+  next,
+  loading,
+  refreshing,
+  error,
+  totalStorageBytes,
+  load,
+  refresh,
+  more,
+} = useCollection()
 watch(
-  () => [props.id, props.revisionId, order.value],
+  () => [props.id, order.value],
   () => load(query.value),
   { immediate: true },
+)
+// A refreshed profile keeps its list on screen while the new posts load in.
+watch(
+  () => [props.revisionId, props.membersVersion],
+  () => {
+    if (!loading.value) void refresh()
+  },
 )
 function search(value: string) {
   layout.value = new URLSearchParams(value).get('layout') || ''
@@ -53,6 +71,14 @@ function open(id: string) {
         @click="order = order === 'desc' ? 'asc' : 'desc'"
       >
         {{ order === 'desc' ? '倒序 ↓' : '正序 ↑' }}
+      </button>
+      <button
+        type="button"
+        class="soft-refresh"
+        :disabled="loading || refreshing"
+        @click="refresh"
+      >
+        {{ refreshing ? '刷新中…' : '刷新' }}
       </button>
     </div>
     <CollectionView
@@ -96,6 +122,13 @@ function open(id: string) {
   background: var(--fill);
   color: var(--text);
   font-size: inherit;
+}
+.sort-control .soft-refresh {
+  margin-left: auto;
+  color: var(--link);
+}
+.sort-control .soft-refresh:disabled {
+  color: var(--subtle);
 }
 .storage {
   margin: 0 0 12px;

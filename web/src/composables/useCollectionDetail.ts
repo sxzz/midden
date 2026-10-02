@@ -12,9 +12,25 @@ import {
   errorText,
   type Collection,
   type Job,
+  type MemberProgress,
   type Page,
   type Revision,
 } from '../api'
+const settled = (m?: MemberProgress) =>
+  m ? m.complete + m.partial + m.failed : 0
+function memberStatus(m: MemberProgress) {
+  if (!m.done)
+    return `已更新，正在保存帖子${m.pending ? `（剩余 ${m.pending} 条）` : ''}…`
+  if (!m.total) return '已更新。'
+  return [
+    `已更新，${m.complete} 条帖子已保存`,
+    m.partial && `${m.partial} 条不完整`,
+    m.failed && `${m.failed} 条失败`,
+  ]
+    .filter(Boolean)
+    .join('，')
+    .concat('。')
+}
 export function useCollectionDetail(
   id: () => string,
   deleted: (id: string) => void,
@@ -34,6 +50,11 @@ export function useCollectionDetail(
   const historyLoading = shallowRef(false)
   const historyLoaded = shallowRef(false)
   const confirmDelete = shallowRef(false)
+  /**
+   * Bumped whenever a refresh brings in new member content (such as a
+   * profile's posts), so lists of those members know to reload.
+   */
+  const membersVersion = shallowRef(0)
   const historical = computed(
     () =>
       !!collection.value &&
@@ -63,6 +84,8 @@ export function useCollectionDetail(
   // stay quiet: no polling requests and no routing from a view nobody sees.
   let visible = true
   let pending: Job | undefined
+  // A finished collection capture whose members are still being captured.
+  let members: Job | undefined
   // Only the newest poll chain may act. Deactivating, switching collection or
   // starting a capture retires the previous chain, so a reply still in flight
   // cannot schedule a second timer or write its result after the fact.
@@ -86,6 +109,10 @@ export function useCollectionDetail(
     // Resuming can reject on its own request, which must surface as an error
     // rather than an unhandled rejection from the lifecycle hook.
     if (pending) startPoll(pending).catch(failed)
+    else if (members) {
+      retirePoll()
+      watchMembers(members, pollRun)
+    }
   })
   watch(
     id,
@@ -94,6 +121,7 @@ export function useCollectionDetail(
       controller = new AbortController()
       retirePoll()
       pending = undefined
+      members = undefined
       const signal = controller.signal
       ++revisionRequest
       collection.value = undefined
@@ -200,6 +228,7 @@ export function useCollectionDetail(
   /** Start a fresh poll chain, retiring whatever chain was running before. */
   function startPoll(job: Job) {
     retirePoll()
+    members = undefined
     return poll(job, pollRun)
   }
   async function poll(job: Job, run: number) {
@@ -252,8 +281,51 @@ export function useCollectionDetail(
       // into a list the user has already navigated away from.
       if (stale(run) || !visible) return
       updated(result)
+      membersVersion.value++
     }
     pending = undefined
+    if (job.state !== 'failed' && job.members && !job.members.done)
+      watchMembers(job, run)
+  }
+  /**
+   * The collection's own capture only lists its members; their captures finish
+   * later. Keep following them and reload member lists as content lands,
+   * throttled so a large batch does not reload on every poll.
+   */
+  function watchMembers(
+    job: Job,
+    run: number,
+    last?: { at: number; settled: number },
+  ) {
+    let reloaded = last ?? { at: Date.now(), settled: settled(job.members) }
+    if (stale(run) || !job.members) return
+    status.value = memberStatus(job.members)
+    if (job.members.done) {
+      members = undefined
+      return
+    }
+    members = job
+    if (!visible) return
+    timer = setTimeout(async () => {
+      try {
+        const next = await api<Job>(`/jobs/${job.id}`, {
+          signal: controller.signal,
+        })
+        if (stale(run)) return
+        const landed = settled(next.members) !== reloaded.settled
+        if (
+          next.members?.done ||
+          (landed && Date.now() - reloaded.at >= 6000)
+        ) {
+          membersVersion.value++
+          reloaded = { at: Date.now(), settled: settled(next.members) }
+        }
+        watchMembers(next, run, reloaded)
+      } catch (e) {
+        if (stale(run)) return
+        failed(e)
+      }
+    }, 2000)
   }
   async function refresh() {
     ++revisionRequest
@@ -294,5 +366,6 @@ export function useCollectionDetail(
     remove,
     refresh,
     checkAvailability,
+    membersVersion,
   }
 }

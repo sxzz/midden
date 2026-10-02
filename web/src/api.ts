@@ -60,11 +60,21 @@ export interface Revision {
   id: string
   created_at: string
 }
+/** Captures a collection (such as a profile) started for its members. */
+export interface MemberProgress {
+  total: number
+  complete: number
+  partial: number
+  failed: number
+  pending: number
+  done: boolean
+}
 export interface Job {
   id: string
   collection_id: string
   state: string
   error?: string
+  members?: MemberProgress
 }
 export type UpdateMode = 'append' | 'full'
 /** Progress of one background refresh of many saved collections. */
