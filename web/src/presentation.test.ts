@@ -5,6 +5,7 @@ import {
   mentionParts,
   present,
   shortDate,
+  sourceStateNotice,
   warningList,
 } from './presentation'
 it('does not expose executable original URLs', () => {
@@ -195,4 +196,52 @@ it('links saved mention identities without linking emails or unsaved profiles', 
     { text: '@FRIEND', href: '#/collection/friend-id' },
     { text: '! @unknown mail@friend.test' },
   ])
+})
+it('reads the author as last seen, or as captured on request', () => {
+  const a = xPost({}, { protected: false })
+  const author = a.graph!.entities[1]!
+  author.data.name = 'Old name'
+  author.current = {
+    id: 'v2',
+    data: {
+      name: 'New name',
+      username: 'renamed',
+      metadata: { protected: true },
+    },
+  }
+  // A capture made while the account was public still shows its current lock.
+  const latest = present({ ...a, author_name: 'Old name' })
+  expect([latest.name, latest.handle, latest.locked]).toEqual([
+    'New name',
+    'renamed',
+    true,
+  ])
+  expect(latest.profileChanged).toBe(true)
+  const captured = present(a, { captured: true })
+  expect([captured.name, captured.handle, captured.locked]).toEqual([
+    'Old name',
+    'handle',
+    false,
+  ])
+})
+it('locks by the profile, not the capture visibility', () => {
+  expect(present(xPost({}, { protected: true })).locked).toBe(true)
+  expect(
+    present({ ...xPost({}, { protected: false }), visibility: 'private' })
+      .locked,
+  ).toBe(false)
+  // Only a profile that never recorded protection falls back to visibility.
+  expect(present({ ...xPost({}, {}), visibility: 'private' }).locked).toBe(true)
+})
+it('notes a source found gone', () => {
+  const a = xPost({}, {})
+  expect(sourceStateNotice(a)).toBe('')
+  expect(sourceStateNotice({ ...a, source_state: 'deleted' })).toBe(
+    '原帖已删除',
+  )
+  expect(
+    sourceStateNotice({ ...a, source_state: 'suspended' }).startsWith(
+      '作者已被封禁',
+    ),
+  ).toBe(true)
 })

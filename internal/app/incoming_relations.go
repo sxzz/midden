@@ -89,6 +89,7 @@ func attachIncomingRelations(ctx context.Context, tx pgx.Tx, collection *domain.
 		sources.Graph.Entities = append(sources.Graph.Entities, *entity)
 		if incoming.Author != nil {
 			sources.Graph.Entities = append(sources.Graph.Entities, *incoming.Author)
+			sources.Graph.Relations = append(sources.Graph.Relations, domain.EntityRelation{Source: entity.Key, Target: incoming.Author.Key, Type: authorRelation})
 		}
 	}
 	rows.Close()

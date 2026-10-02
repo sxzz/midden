@@ -13,6 +13,7 @@ import {
   fetchPublic,
   ProviderError,
   responseError,
+  sourceState,
 } from "./provider.js";
 import {
   visibilityOf,
@@ -664,4 +665,42 @@ test("missing posts are reported as not found, other failures stay generic", () 
     assert.equal(error.message, message);
     assert.equal(error.code, status.FAILED_PRECONDITION);
   }
+});
+
+test("the public post API marks a missing post deleted and a suspended one suspended", async () => {
+  let body: unknown;
+  let code = 200;
+  const server = httpServer((_req, res) => {
+    res.writeHead(code, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const endpoint = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const failure = () =>
+    fetchPublic("42", new AbortController().signal, endpoint).then(
+      () => assert.fail("expected a failure"),
+      (error) => error,
+    );
+  try {
+    body = { code: 404, message: "NOT_FOUND" };
+    assert.equal(sourceState(await failure()), "deleted");
+    body = {
+      code: 404,
+      status: { type: "tombstone", reason: "suspended" },
+      author: null,
+    };
+    const suspended = await failure();
+    assert.equal(sourceState(suspended), "suspended");
+    assert.equal(suspended.message, "account is suspended");
+    // A protected post exists; only the account cannot read it.
+    body = { code: 401, message: "PRIVATE_TWEET" };
+    assert.equal(sourceState(await failure()), undefined);
+    code = 404;
+    body = { code: 404 };
+    assert.equal(sourceState(await failure()), "deleted");
+  } finally {
+    server.close();
+  }
+  // GraphQL 404s mean a stale query, never a missing post.
+  assert.equal(sourceState(responseError(404)), undefined);
 });

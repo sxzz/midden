@@ -22,6 +22,8 @@ export interface Entity {
   type: string
   data: Record<string, unknown>
   assets?: Asset[]
+  /** An author's newest version, when it differs from this snapshot. */
+  current?: { id: string; data: Record<string, unknown>; assets?: Asset[] }
 }
 export interface Collection {
   /** `author` is the profile the source snapshot attributes the entity to. */
@@ -36,6 +38,9 @@ export interface Collection {
   published_at?: string
   saved_at?: string
   observed_at: string
+  /** What the last refresh learned about the source itself. */
+  source_state?: 'deleted' | 'suspended'
+  source_state_at?: string
   visibility: string
   revision_id: string
   assets: Asset[]

@@ -1,9 +1,20 @@
 <script setup vapor lang="ts">
 import { computed } from 'vue'
 import { shortDate } from '../presentation'
-import { authoredBy, authorIdentity, type RelationAuthor } from '../relations'
+import {
+  authoredBy,
+  authorIdentity,
+  isProtected,
+  type RelationAuthor,
+} from '../relations'
+import LockIcon from './ui/LockIcon.vue'
 import type { Collection } from '../api'
-const props = defineProps<{ collection: Collection; compact?: boolean }>()
+const props = defineProps<{
+  collection: Collection
+  compact?: boolean
+  /** Show authors as the capture recorded them. */
+  captured?: boolean
+}>()
 const relations = computed(() => {
   const graph = props.collection.graph
   if (!graph) return []
@@ -24,7 +35,10 @@ const relations = computed(() => {
             type: relation.type,
             entity,
             outgoing,
-            author: authorIdentity(authoredBy(graph, entity.key)),
+            author: authorIdentity(
+              authoredBy(graph, entity.key),
+              props.captured,
+            ),
           },
         ]
       : []
@@ -35,7 +49,7 @@ const relations = computed(() => {
         ...relation,
         outgoing: false,
         // The live relation is the only place an incoming author is recorded.
-        author: authorIdentity(relation.author),
+        author: authorIdentity(relation.author, props.captured),
       }),
     ),
   )
@@ -50,6 +64,8 @@ const relations = computed(() => {
       author?: RelationAuthor
       /** A profile card's own avatar, shown inside its link. */
       avatar?: string
+      /** A profile card's own account is protected. */
+      locked: boolean
       published: string
       publishedLabel: string
     }
@@ -97,9 +113,11 @@ const relations = computed(() => {
     const prior = cards.get(key)
     // A live incoming relation can supply the saved link missing in an older snapshot.
     const avatar = postLink ? undefined : authorIdentity(entity)?.avatar
+    const locked = !postLink && !!isProtected(entity)
     if (prior && (!prior.external || !entity.saved_collection_id)) {
       prior.author ??= attribution
       prior.avatar ??= avatar
+      prior.locked ||= locked
       if (!prior.published && published) {
         prior.published = published
         prior.publishedLabel = shortDate(published)
@@ -109,6 +127,7 @@ const relations = computed(() => {
     cards.set(key, {
       author: attribution ?? prior?.author,
       avatar: avatar ?? prior?.avatar,
+      locked: locked || !!prior?.locked,
       published: published || prior?.published || '',
       publishedLabel: shortDate(published) || prior?.publishedLabel || '',
       key,
@@ -152,7 +171,8 @@ const relations = computed(() => {
           />
           <span v-if="relation.author.name" class="author-name">{{
             relation.author.name
-          }}</span>
+          }}</span
+          ><LockIcon v-if="relation.author.protected" class="lock" />
           <span v-if="relation.author.handle" class="author-handle"
             >@{{ relation.author.handle }}</span
           >
@@ -173,7 +193,8 @@ const relations = computed(() => {
         <span class="label">{{ relation.label }}</span>
         <span v-if="relation.avatar" class="account">
           <img class="avatar" :src="relation.avatar" alt="" loading="lazy" />
-          <span class="text">{{ relation.text }}</span>
+          <span class="text">{{ relation.text }}</span
+          ><LockIcon v-if="relation.locked" class="lock" />
         </span>
         <span v-else class="text">{{ relation.text }}</span>
       </a>
@@ -257,6 +278,12 @@ const relations = computed(() => {
 }
 .author-name {
   font-weight: 600;
+}
+/* Tucked against the name the way X shows a protected account. */
+.lock {
+  flex-shrink: 0;
+  margin-left: -2px;
+  font-size: 13px;
 }
 .author-handle,
 .published {

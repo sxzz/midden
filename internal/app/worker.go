@@ -98,6 +98,15 @@ func (w *Worker) Work(ctx context.Context, j *river.Job[store.Task]) error {
 	return fmt.Errorf("%s", safeError(e))
 }
 
+// markSourceState records that the source is gone. The capture still fails;
+// earlier revisions stay as they were.
+func (s *Service) markSourceState(ctx context.Context, tenant, collection, state string) error {
+	return s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
+		_, e := tx.Exec(ctx, `UPDATE collections SET source_state=$2,source_state_at=now() WHERE id=$1 AND source_state IS DISTINCT FROM $2`, collection, state)
+		return e
+	})
+}
+
 type PermanentError struct{ Message string }
 
 func (e *PermanentError) Error() string { return e.Message }
@@ -275,6 +284,11 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if e != nil {
 		if connection != "" && status.Code(e) == codes.Unauthenticated {
 			s.markReauth(ctx, t.Tenant, connection, revision)
+		}
+		if state := trailer.Get("source-state"); len(state) > 0 && (state[0] == "deleted" || state[0] == "suspended") {
+			if err := s.markSourceState(ctx, t.Tenant, collectionID, state[0]); err != nil {
+				return err
+			}
 		}
 		if connection != "" && accessDenied(e) {
 			if err := s.revokeAccess(ctx, t.Tenant, objectRef{platform, kind, objectScope, id}); err != nil {
@@ -563,7 +577,7 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		if _, e = tx.Exec(ctx, `UPDATE captures SET state=$2,content_reserved=0,payload=NULL,finished_at=now(),revision_id=$3 WHERE id=$1`, cid, state, revisionID); e != nil {
 			return e
 		}
-		if _, e = tx.Exec(ctx, `UPDATE collections SET observed_at=now() WHERE id=$1`, aid); e != nil {
+		if _, e = tx.Exec(ctx, `UPDATE collections SET observed_at=now(),source_state=NULL,source_state_at=NULL WHERE id=$1`, aid); e != nil {
 			return e
 		}
 		var previousCollection *string

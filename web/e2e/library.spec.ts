@@ -452,3 +452,70 @@ test('a private collection shows a lock beside the name, not a detail line', asy
   await expect(page.getByText('可见性')).toHaveCount(0)
   await page.screenshot({ path: 'test-results/private-lock-detail.png' })
 })
+
+test('a post reads its author as last seen and notes when it was deleted', async ({
+  page,
+}) => {
+  const post = {
+    ...collection,
+    author_name: '旧名字',
+    source_state: 'deleted',
+    source_state_at: '2026-10-02T08:00:00Z',
+    graph: {
+      root: 'post',
+      entities: [
+        { key: 'post', type: 'x.post', data: { text: collection.text } },
+        {
+          key: 'author',
+          type: 'x.profile',
+          data: {
+            name: '旧名字',
+            username: 'old',
+            metadata: { protected: false },
+          },
+          current: {
+            id: 'v2',
+            data: {
+              name: '新名字',
+              username: 'renamed',
+              metadata: { protected: true },
+            },
+          },
+        },
+      ],
+      relations: [{ source: 'post', target: 'author', type: 'authored_by' }],
+    },
+  }
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/collections')
+      return r.fulfill({ json: { items: [post] } })
+    if (path.endsWith('/availability'))
+      return r.fulfill({ json: { available: true } })
+    if (path.endsWith('/revisions')) return r.fulfill({ json: { items: [] } })
+    if (path === `/v1/collections/${id}`) return r.fulfill({ json: post })
+    if (path.endsWith('/annotation'))
+      return r.fulfill({ json: { note: '', tags: [] } })
+    if (path === '/v1/tags') return r.fulfill({ json: [] })
+    return r.fulfill({ json: {} })
+  })
+  await page.goto('/app/')
+  const row = page.locator('.row')
+  await expect(row.locator('.name')).toHaveText('新名字')
+  await expect(row.getByRole('img', { name: '私密' })).toBeVisible()
+  await expect(row.locator('.meta')).toContainText('原帖已删除')
+  await page.screenshot({ path: 'test-results/current-profile-list.png' })
+  await row.locator('.head').click()
+  const header = page.locator('.post .author')
+  await expect(header.locator('.name')).toHaveText('新名字')
+  await expect(page.locator('.post .notice')).toContainText('原帖已删除')
+  await page.screenshot({ path: 'test-results/current-profile-detail.png' })
+  await header.getByRole('button', { name: '抓取时资料' }).click()
+  await expect(header.locator('.name')).toHaveText('旧名字')
+  await expect(header.getByRole('img', { name: '私密' })).toHaveCount(0)
+  await page.screenshot({ path: 'test-results/captured-profile-detail.png' })
+  await header.getByRole('button', { name: '最新资料' }).click()
+  await expect(header.locator('.name')).toHaveText('新名字')
+})

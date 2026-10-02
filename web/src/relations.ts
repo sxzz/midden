@@ -8,6 +8,7 @@ export interface RelationAuthor {
   avatar?: string
   /** Only profiles saved in this tenant become internal links. */
   href?: string
+  protected?: boolean
 }
 const asText = (value: unknown) =>
   typeof value === 'string' && value.trim() ? value.trim() : undefined
@@ -21,8 +22,38 @@ export function authoredBy(graph: Graph | undefined, key: string) {
     (entity) => entity.key === target && entity.type === 'x.profile',
   )
 }
+/**
+ * An author reads as its newest version; `captured` asks for the one this
+ * capture recorded instead.
+ */
+export function profileVersion(
+  entity: Entity | undefined,
+  captured = false,
+): Entity | undefined {
+  if (!entity?.current || captured) return entity
+  return {
+    ...entity,
+    data: entity.current.data,
+    // Keep the captured avatar when the newer version saved none.
+    assets: entity.current.assets?.length
+      ? entity.current.assets
+      : entity.assets,
+  }
+}
+/** Whether an account is protected; undefined when the profile never said. */
+export function isProtected(entity?: Entity): boolean | undefined {
+  if (entity?.type !== 'x.profile') return
+  const metadata = entity.data.metadata as Record<string, unknown> | undefined
+  return typeof metadata?.protected === 'boolean'
+    ? metadata.protected
+    : undefined
+}
 /** Attribution is only shown when the snapshot actually recorded it. */
-export function authorIdentity(entity?: Entity): RelationAuthor | undefined {
+export function authorIdentity(
+  author?: Entity,
+  captured = false,
+): RelationAuthor | undefined {
+  const entity = profileVersion(author, captured)
   if (entity?.type !== 'x.profile') return
   const name = asText(entity.data.name)
   const handle = asText(entity.data.username)
@@ -39,6 +70,7 @@ export function authorIdentity(entity?: Entity): RelationAuthor | undefined {
     href: entity.saved_collection_id
       ? `#/collection/${encodeURIComponent(entity.saved_collection_id)}`
       : undefined,
+    protected: isProtected(entity),
   }
 }
 /** One line of attribution for places that cannot render a link. */

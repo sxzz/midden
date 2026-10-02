@@ -125,6 +125,14 @@ type Entity struct {
 	Schema            json.RawMessage `json:"schema"`
 	ResourceIndices   []uint32        `json:"resource_indices,omitempty"`
 	Assets            []Asset         `json:"assets,omitempty"`
+	// Current is the newest complete version of a referenced profile this
+	// tenant can read, set only when it differs from the snapshot.
+	Current *EntityVersion `json:"current,omitempty"`
+}
+type EntityVersion struct {
+	ID     string          `json:"id"`
+	Data   json.RawMessage `json:"data"`
+	Assets []Asset         `json:"assets,omitempty"`
 }
 type EntityRelation struct {
 	Source string `json:"source"`
@@ -177,7 +185,10 @@ type Collection struct {
 	Warnings          []string           `json:"warnings"`
 	Assets            []Asset            `json:"assets"`
 	ObservedAt        time.Time          `json:"observed_at"`
-	CreatedAt         time.Time          `json:"created_at"`
+	// SourceState is what the last refresh learned: "deleted" or "suspended".
+	SourceState   string     `json:"source_state,omitempty"`
+	SourceStateAt *time.Time `json:"source_state_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
 
 type Page struct {

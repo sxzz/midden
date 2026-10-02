@@ -5,6 +5,7 @@ import {
   date,
   mentionParts,
   present,
+  sourceStateNotice,
   storageSize,
   warningList,
 } from '../presentation'
@@ -19,7 +20,12 @@ const props = defineProps<{
   savedAt?: string
   showSensitive?: boolean
 }>()
-const view = computed(() => present(props.collection))
+// Authors read as their newest profile unless asked for the captured one.
+const captured = shallowRef(false)
+const view = computed(() =>
+  present(props.collection, { captured: captured.value }),
+)
+const notice = computed(() => sourceStateNotice(props.collection))
 const bodyParts = computed(() =>
   mentionParts(props.collection, view.value.body),
 )
@@ -82,19 +88,27 @@ const warnings = computed(() => warningList(props.collection.warnings))
         :href="`#/collection/${view.profileCollectionId}`"
       >
         <strong class="name"
-          >{{ view.name
-          }}<LockIcon v-if="collection.visibility === 'private'" class="lock"
+          >{{ view.name }}<LockIcon v-if="view.locked" class="lock"
         /></strong>
         <small v-if="view.handle" class="handle">@{{ view.handle }}</small>
       </a>
       <div v-else class="identity">
         <strong class="name"
-          >{{ view.name
-          }}<LockIcon v-if="collection.visibility === 'private'" class="lock"
+          >{{ view.name }}<LockIcon v-if="view.locked" class="lock"
         /></strong>
         <small v-if="view.handle" class="handle">@{{ view.handle }}</small>
       </div>
+      <button
+        v-if="view.profileChanged"
+        type="button"
+        class="profile-version"
+        :aria-pressed="captured"
+        @click="captured = !captured"
+      >
+        {{ captured ? '最新资料' : '抓取时资料' }}
+      </button>
     </header>
+    <p v-if="notice" class="notice" role="status">{{ notice }}</p>
     <p class="body">
       <template v-for="(part, index) in bodyParts" :key="index"
         ><a v-if="part.href" :href="part.href" class="mention">{{
@@ -107,7 +121,7 @@ const warnings = computed(() => warningList(props.collection.warnings))
       :assets="collection.assets || []"
       :show-sensitive="showSensitive"
     />
-    <PostRelations :collection="collection" />
+    <PostRelations :collection="collection" :captured="captured" />
     <p v-for="warning in warnings" :key="warning" class="warning">
       {{ warning }}
     </p>
@@ -215,6 +229,19 @@ const warnings = computed(() => warningList(props.collection.warnings))
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+/* Shown right under the author, before content that is no longer online. */
+.notice {
+  margin: 10px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--destructive);
+}
+.profile-version {
+  flex-shrink: 0;
+  padding: 0;
+  font-size: 13px;
+  color: var(--link);
 }
 .warning {
   margin: 10px 0 0;

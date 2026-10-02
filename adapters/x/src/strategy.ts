@@ -1,7 +1,7 @@
 import { attachMentions } from "./entities.js";
 import { preferOriginalAvatars } from "./avatar.js";
 import { status } from "@grpc/grpc-js";
-import { fetchPublic, ProviderError } from "./provider.js";
+import { fetchPublic, ProviderError, sourceState } from "./provider.js";
 import { fetchSession } from "./session.js";
 import {
   fetchPublicProfile,
@@ -161,8 +161,17 @@ export class CaptureStrategy {
           `handle:${author.toLowerCase()}`,
           false,
           signal,
-        );
-      else {
+        ).catch((error) => {
+          // The handle in a saved link may since have been renamed or
+          // suspended; the post itself tells which, so look it up by ID.
+          if (
+            error instanceof ProviderError &&
+            error.code === status.FAILED_PRECONDITION
+          )
+            return undefined;
+          throw error;
+        });
+      if (!profile) {
         // An ID-only link has no author. Discover it once before selecting the final source.
         try {
           discovered = await this.publicPost(req.externalId, signal);
@@ -173,11 +182,7 @@ export class CaptureStrategy {
             error.code !== status.UNAUTHENTICATED
           )
             throw error;
-          discovered = await this.sessionPost(
-            req.externalId,
-            credential,
-            signal,
-          );
+          discovered = await this.session(req.externalId, credential, signal);
         }
         const authorNode = discovered.graph?.entities.find(
           (e) => e.type === "x.profile",
@@ -200,7 +205,7 @@ export class CaptureStrategy {
         result =
           discovered?.providerId === "x-session"
             ? discovered
-            : await this.sessionPost(req.externalId, credential, signal);
+            : await this.session(req.externalId, credential, signal);
       } else
         result =
           discovered?.providerId === "fxtwitter"
@@ -228,6 +233,28 @@ export class CaptureStrategy {
     return result;
   }
   timeline = fetchPublicTimeline;
+  // An account sees a deleted post and a post it may not read alike. The public
+  // API still tells them apart, so ask it before treating this as lost access.
+  private async session(
+    id: string,
+    credential: SessionCredential,
+    signal: AbortSignal,
+  ): Promise<FetchResponse> {
+    try {
+      return await this.sessionPost(id, credential, signal);
+    } catch (error) {
+      if (
+        !(error instanceof ProviderError) ||
+        error.code !== status.PERMISSION_DENIED
+      )
+        throw error;
+      const gone = await this.publicPost(id, signal).then(
+        () => undefined,
+        (probe) => (sourceState(probe) ? probe : undefined),
+      );
+      throw gone ?? error;
+    }
+  }
   private attachProfile(result: FetchResponse, profile: FetchResponse) {
     const author = result.graph?.entities.find(
       (e) =>

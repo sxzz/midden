@@ -1,3 +1,4 @@
+import { isProtected, profileVersion } from './relations'
 import type { Asset, Collection, Entity } from './api'
 export interface Stat {
   label: string
@@ -19,6 +20,10 @@ export interface Presentation {
   name: string
   handle?: string
   avatar?: Asset
+  /** Shown as a lock beside the name. */
+  locked: boolean
+  /** The author has a newer profile than this capture recorded. */
+  profileChanged?: boolean
   body: string
   /** A profile's own bio, empty when it has none. */
   bio?: string
@@ -27,7 +32,15 @@ export interface Presentation {
   /** What the source recorded about the item itself, read after the body. */
   details: Detail[]
 }
-type Presenter = (a: Collection, root?: Entity) => Presentation
+export interface PresentOptions {
+  /** Show the author as this capture recorded it, not as last seen. */
+  captured?: boolean
+}
+type Presenter = (
+  a: Collection,
+  root?: Entity,
+  options?: PresentOptions,
+) => Presentation
 const asText = (value: unknown) =>
   typeof value === 'string' && value ? value : undefined
 function details(
@@ -48,6 +61,7 @@ function details(
 }
 const generic: Presenter = (a) => ({
   name: a.author_name || '已保存的内容',
+  locked: a.visibility === 'private',
   body: a.text || a.summary || '暂无正文',
   details: details(a),
 })
@@ -102,20 +116,28 @@ function profileBio(a: Collection, profile?: Entity): string {
   if (handle && lines[0]?.trim() === `@${handle}`) lines.shift()
   return lines.join('\n').trim()
 }
-const x: Presenter = (a, root) => {
+const x: Presenter = (a, root, options = {}) => {
   const key = a.graph?.relations.find(
     (r) => r.source === a.graph?.root && r.type === 'authored_by',
   )?.target
   const isProfile = root?.type === 'x.profile'
-  const profile = isProfile
-    ? root
+  const author = isProfile
+    ? undefined
     : a.graph?.entities.find((e) => e.key === key && e.type === 'x.profile')
+  const profile = isProfile ? root : profileVersion(author, options.captured)
   const post = root?.type === 'x.post' ? root.data : undefined
   const bio = isProfile ? profileBio(a, profile) : undefined
   return {
     ...generic(a),
+    // The collection's own author line is the capture's; the profile may be newer.
+    name: asText(profile?.data.name) || generic(a).name,
     body: bio === undefined ? generic(a).body : bio || '暂无简介',
     bio,
+    profileChanged: !!author?.current,
+    // The lock follows the author's profile, not the visibility this capture
+    // happened to have; that is only a fallback for snapshots that never
+    // recorded protection.
+    locked: isProtected(profile) ?? a.visibility === 'private',
     profileCollectionId: isProfile ? undefined : profile?.saved_collection_id,
     handle: asText(profile?.data.username),
     avatar: profile?.assets?.find(
@@ -139,9 +161,25 @@ const x: Presenter = (a, root) => {
   }
 }
 const registry: Record<string, Presenter> = { 'x.post': x, 'x.profile': x }
-export function present(a: Collection) {
+export function present(a: Collection, options?: PresentOptions) {
   const root = a.graph?.entities.find((e) => e.key === a.graph?.root)
-  return (registry[root?.type || ''] || generic)(a, root)
+  return (registry[root?.type || ''] || generic)(a, root, options)
+}
+/** What a refresh found about the source, for a line of its own. */
+export function sourceStateNotice(a: Collection): string {
+  if (!a.source_state) return ''
+  const root = a.graph?.entities.find((e) => e.key === a.graph?.root)
+  const profile = root?.type === 'x.profile'
+  const label =
+    a.source_state === 'suspended'
+      ? profile
+        ? '账号已被封禁'
+        : '作者已被封禁'
+      : profile
+        ? '账号已不存在'
+        : '原帖已删除'
+  const at = date(a.source_state_at)
+  return at ? `${label} · ${at} 发现` : label
 }
 
 function parseDate(value?: string) {

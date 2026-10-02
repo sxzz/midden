@@ -482,3 +482,69 @@ test("full author hydration preserves post mentions and captures mentions from t
     2,
   );
 });
+
+test("a post the account cannot read is reported gone when the public API says so", async () => {
+  const { responseError, sourceState } = await import("./provider.js");
+  const { status } = await import("@grpc/grpc-js");
+  let publicCode = 404;
+  let reason: string | undefined;
+  const strategy = new CaptureStrategy(
+    async () => {
+      const error = responseError(publicCode, null, "post", reason);
+      if (publicCode === 404 && !reason)
+        error.metadata.set("source-state", "deleted");
+      throw error;
+    },
+    async (id) =>
+      normalizeProfile({ ...user, protected: true }, id, "fxtwitter"),
+    async () => {
+      throw responseError(403);
+    },
+  );
+  const fetch = () =>
+    strategy.fetch(request(), AbortSignal.timeout(1000), credential).then(
+      () => assert.fail("expected a failure"),
+      (error) => error,
+    );
+  assert.equal(sourceState(await fetch()), "deleted");
+  publicCode = 401;
+  const denied = await fetch();
+  assert.equal(denied.code, status.PERMISSION_DENIED);
+  assert.equal(sourceState(denied), undefined);
+});
+test("a renamed or suspended handle falls back to the post's own answer", async () => {
+  const { responseError, sourceState } = await import("./provider.js");
+  const strategy = new CaptureStrategy(
+    async () => {
+      throw responseError(404, null, "post", "suspended");
+    },
+    async () => {
+      throw responseError(404, null, "profile", "suspended");
+    },
+  );
+  const error = await strategy
+    .fetch(request("post", "fxtwitter"), AbortSignal.timeout(1000))
+    .then(
+      () => assert.fail("expected a failure"),
+      (e) => e,
+    );
+  assert.equal(sourceState(error), "suspended");
+  const calls: string[] = [];
+  const renamed = new CaptureStrategy(
+    async () => {
+      calls.push("public-post");
+      return post("fxtwitter");
+    },
+    async (id) => {
+      calls.push(`profile:${id}`);
+      if (id.startsWith("handle:")) throw responseError(404, null, "profile");
+      return normalizeProfile(user, id, "fxtwitter");
+    },
+  );
+  await renamed.fetch(request("post", "fxtwitter"), AbortSignal.timeout(1000));
+  assert.deepEqual(calls, [
+    "profile:handle:fixture",
+    "public-post",
+    "profile:123",
+  ]);
+});

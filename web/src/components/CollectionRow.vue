@@ -6,6 +6,7 @@ import {
   excerpt,
   present,
   shortDate,
+  sourceStateNotice,
   storageSize,
 } from '../presentation'
 import MediaThumbs from './MediaThumbs.vue'
@@ -59,6 +60,7 @@ const when = computed(() =>
 )
 const meta = computed(() =>
   [
+    sourceStateNotice(props.collection),
     // The banner above the post already names the account that reposted it.
     !reposter.value &&
       props.collection.relation_types?.includes('reposted') &&
@@ -137,10 +139,9 @@ const storage = computed(() =>
         >
           <span class="identity"
             ><strong class="name">{{ view.name }}</strong
-            ><LockIcon
-              v-if="collection.visibility === 'private'"
-              class="lock"
-            /><span v-if="view.handle" class="handle"
+            ><LockIcon v-if="view.locked" class="lock" /><span
+              v-if="view.handle"
+              class="handle"
               >@{{ view.handle }}</span
             ></span
           ><span class="when">{{ when }}</span>

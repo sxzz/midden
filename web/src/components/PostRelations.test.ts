@@ -353,3 +353,33 @@ it('shows saved incoming repost accounts and quote/repost posts without duplicat
   expect(links[2]?.textContent).toContain('转发此帖的帖子')
   expect(links[2]?.getAttribute('href')).toBe('https://x.com/i/web/status/567')
 })
+it('shows a quoted post’s author as last seen, with its lock', () => {
+  const el = mount({
+    root: 'post',
+    entities: [
+      root,
+      {
+        key: 'quote',
+        type: 'x.post',
+        external_id: '456',
+        data: { text: '锁推原帖' },
+      },
+      {
+        key: 'author',
+        type: 'x.profile',
+        external_id: '789',
+        data: { name: '旧名字', metadata: { protected: false } },
+        current: {
+          id: 'v2',
+          data: { name: '新名字', metadata: { protected: true } },
+        },
+      },
+    ],
+    relations: [
+      { source: 'post', target: 'quote', type: 'quoted' },
+      { source: 'quote', target: 'author', type: 'authored_by' },
+    ],
+  })
+  expect(el.querySelector('.relation-author')!.textContent).toContain('新名字')
+  expect(el.querySelector('.relation-author .lock')).not.toBeNull()
+})

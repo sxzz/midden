@@ -17,6 +17,14 @@ export class ProviderError extends Error {
       this.metadata.set("retry-after", String(Math.min(86400, retrySeconds)));
   }
 }
+/** Trailer telling the core the post itself is gone, not merely unreadable. */
+export const sourceStateKey = "source-state";
+export type SourceState = "deleted" | "suspended";
+export function sourceState(error: unknown): SourceState | undefined {
+  if (!(error instanceof ProviderError)) return;
+  const [value] = error.metadata.get(sourceStateKey);
+  return value === "deleted" || value === "suspended" ? value : undefined;
+}
 export function responseError(
   code: number,
   retry: string | null = null,
@@ -48,11 +56,14 @@ export function responseError(
   }
   // Not retried within this job, but nothing is blocked: a suspension can be
   // lifted, and a later refresh or profile capture asks upstream again.
-  if (code === 404 && reason === "suspended")
-    return new ProviderError(
+  if (code === 404 && reason === "suspended") {
+    const error = new ProviderError(
       status.FAILED_PRECONDITION,
       "account is suspended",
     );
+    error.metadata.set(sourceStateKey, "suspended");
+    return error;
+  }
   if (code === 404)
     return new ProviderError(
       status.FAILED_PRECONDITION,
@@ -63,6 +74,21 @@ export function responseError(
     `provider cannot access this ${target}`,
   );
 }
+// Only the public post API answers 404 for a post that no longer exists; it
+// answers 401 for one that exists but is protected. A 404 from the GraphQL
+// endpoints means a stale query, so they never mark a post as gone.
+function publicPostError(
+  code: number,
+  retry: string | null,
+  reason: unknown,
+): ProviderError {
+  const error = responseError(code, retry, "post", reason);
+  if (code === 404 && reason !== "suspended")
+    error.metadata.set(sourceStateKey, "deleted");
+  return error;
+}
+// FxTwitter v2 nests a tombstone's reason under `status`.
+const upstreamReason = (data: any) => data?.reason ?? data?.status?.reason;
 /** Error for a failed HTTP response, keeping the reason from its JSON body. */
 export async function upstreamError(
   response: Response,
@@ -71,14 +97,12 @@ export async function upstreamError(
   let reason: unknown;
   try {
     const text = await response.text();
-    if (text.length <= 64 << 10) reason = JSON.parse(text)?.reason;
+    if (text.length <= 64 << 10) reason = upstreamReason(JSON.parse(text));
   } catch {}
-  return responseError(
-    response.status,
-    response.headers.get("retry-after"),
-    target,
-    reason,
-  );
+  const retry = response.headers.get("retry-after");
+  return target === "post"
+    ? publicPostError(response.status, retry, reason)
+    : responseError(response.status, retry, target, reason);
 }
 export async function readJSON(
   response: Response,
@@ -218,8 +242,7 @@ export async function fetchPublic(
     signal,
     headers: { Accept: "application/json", "User-Agent": "Monitor/0.4" },
   });
-  if (!response.ok)
-    throw responseError(response.status, response.headers.get("retry-after"));
+  if (!response.ok) throw await upstreamError(response, "post");
   let rawBody = Buffer.alloc(0);
   const data = await readJSON(response, (body) => {
     rawBody = Buffer.from(body);
@@ -227,7 +250,11 @@ export async function fetchPublic(
   if (typeof data.code !== "number")
     throw new ProviderError(status.UNAVAILABLE, "invalid provider response");
   if (data.code !== 200)
-    throw responseError(data.code, response.headers.get("retry-after"));
+    throw publicPostError(
+      data.code,
+      response.headers.get("retry-after"),
+      upstreamReason(data),
+    );
   const containsProtectedAuthor = (
     post: any,
     seen = new Set<any>(),
