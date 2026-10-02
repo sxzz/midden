@@ -273,6 +273,34 @@ it('keeps an incoming repost account card free of a repeated self attribution', 
   expect(el.querySelector('.relation')?.textContent).toContain('转发此帖的账号')
   expect(el.querySelector('.relation-author')).toBeNull()
 })
+it('shows a repost account card with its own saved avatar, never a sensitive one', () => {
+  const avatar = (sensitive: boolean) => ({
+    id: sensitive ? 'hidden-avatar' : 'avatar',
+    purpose: 'avatar',
+    state: 'ready',
+    sensitive,
+  })
+  const profile = (key: string, sensitive: boolean) => ({
+    key,
+    type: 'x.profile',
+    external_id: key === 'shown' ? '789' : '790',
+    saved_collection_id: `saved-${key}`,
+    data: { username: key, name: `合成账号 ${key}` },
+    assets: [avatar(sensitive)],
+  })
+  const el = mount({ root: 'post', entities: [root], relations: [] }, [
+    { type: 'reposted', entity: profile('shown', false) },
+    { type: 'reposted', entity: profile('hidden', true) },
+  ])
+  const [shown, hidden] = el.querySelectorAll('.relation')
+  expect(shown?.querySelector('img')?.getAttribute('src')).toBe(
+    '/v1/assets/avatar?inline=1',
+  )
+  expect(shown?.textContent).toContain('合成账号 shown')
+  expect(hidden?.querySelector('img')).toBeNull()
+  expect(hidden?.textContent).toContain('合成账号 hidden')
+  expect(el.querySelector('.relation-author')).toBeNull()
+})
 it('shows saved incoming repost accounts and quote/repost posts without duplicate snapshot cards', () => {
   const profile = {
     key: 'reposter',

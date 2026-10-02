@@ -48,6 +48,8 @@ const relations = computed(() => {
       href: string
       external: boolean
       author?: RelationAuthor
+      /** A profile card's own avatar, shown inside its link. */
+      avatar?: string
       published: string
       publishedLabel: string
     }
@@ -94,8 +96,10 @@ const relations = computed(() => {
           : '转发此帖的帖子'
     const prior = cards.get(key)
     // A live incoming relation can supply the saved link missing in an older snapshot.
+    const avatar = postLink ? undefined : authorIdentity(entity)?.avatar
     if (prior && (!prior.external || !entity.saved_collection_id)) {
       prior.author ??= attribution
+      prior.avatar ??= avatar
       if (!prior.published && published) {
         prior.published = published
         prior.publishedLabel = shortDate(published)
@@ -104,6 +108,7 @@ const relations = computed(() => {
     }
     cards.set(key, {
       author: attribution ?? prior?.author,
+      avatar: avatar ?? prior?.avatar,
       published: published || prior?.published || '',
       publishedLabel: shortDate(published) || prior?.publishedLabel || '',
       key,
@@ -166,7 +171,11 @@ const relations = computed(() => {
         :rel="relation.external ? 'noopener noreferrer' : undefined"
       >
         <span class="label">{{ relation.label }}</span>
-        <span class="text">{{ relation.text }}</span>
+        <span v-if="relation.avatar" class="account">
+          <img class="avatar" :src="relation.avatar" alt="" loading="lazy" />
+          <span class="text">{{ relation.text }}</span>
+        </span>
+        <span v-else class="text">{{ relation.text }}</span>
       </a>
     </div>
   </div>
@@ -223,6 +232,20 @@ const relations = computed(() => {
   font-size: 13px;
   text-decoration: none;
   overflow-wrap: anywhere;
+}
+.account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.account .avatar {
+  width: 24px;
+  height: 24px;
+}
+.compact .account .avatar {
+  width: 18px;
+  height: 18px;
 }
 .avatar {
   width: 20px;
