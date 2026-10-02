@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
-import { computed } from 'vue'
+import { computed, shallowRef } from 'vue'
 import { groupCollections } from '../presentation'
+import BatchRefresh from './BatchRefresh.vue'
 import CollectionAlbum from './CollectionAlbum.vue'
 import CollectionFilters from './CollectionFilters.vue'
 import CollectionRow from './CollectionRow.vue'
@@ -36,6 +37,20 @@ function changeLayout(value: 'feed' | 'album') {
   if (value === 'album') q.set('layout', value)
   else q.delete('layout')
   emit('search', q.toString())
+}
+// Selection is a mode of the feed: rows toggle instead of opening.
+const selecting = shallowRef(false)
+const selected = shallowRef<string[]>([])
+const listed = computed(() => props.items.map((a) => a.id))
+function startSelecting() {
+  selected.value = []
+  selecting.value = true
+  if (layout.value === 'album') changeLayout('feed')
+}
+function toggle(id: string) {
+  selected.value = selected.value.includes(id)
+    ? selected.value.filter((item) => item !== id)
+    : [...selected.value, id]
 }
 const mediaTypes = computed(
   () => new URLSearchParams(props.query).get('media_type') || '',
@@ -87,6 +102,14 @@ const storage = computed(() =>
     @search="$emit('search', $event)"
   />
   <div class="layout-bar">
+    <button
+      v-if="!selecting && items.length"
+      type="button"
+      class="batch"
+      @click="startSelecting"
+    >
+      批量更新
+    </button>
     <LibraryLayoutToggle
       :model-value="layout"
       @update:model-value="changeLayout"
@@ -119,7 +142,9 @@ const storage = computed(() =>
         :sort="sort"
         :show-sensitive="showSensitive"
         :reposted-by="repostedBy"
+        :selected="selecting ? selected.includes(a.id) : undefined"
         @open="$emit('open', $event)"
+        @toggle="toggle"
       />
     </ListSection>
     <p v-if="empty" class="empty">
@@ -133,13 +158,34 @@ const storage = computed(() =>
     :error="error"
     @more="$emit('more')"
   />
+  <BatchRefresh
+    v-if="selecting"
+    :selected="selected"
+    :listed="listed"
+    @select="selected = $event"
+    @close="selecting = false"
+    @finished="$emit('retry')"
+  />
 </template>
 
 <style scoped>
 .layout-bar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
   margin: 0 var(--gutter) 16px;
+}
+.batch {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 14px;
+  color: var(--link);
+  background: var(--fill);
+}
+.batch:active {
+  opacity: 0.7;
 }
 .banner {
   margin: 0;

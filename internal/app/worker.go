@@ -60,6 +60,8 @@ func (w *Worker) Work(ctx context.Context, j *river.Job[store.Task]) error {
 		e = w.S.download(ctx, j.Args)
 	case "finalize":
 		e = w.S.finalize(ctx, j.Args.Tenant, j.Args.ID)
+	case "refresh_batch":
+		e = w.S.refreshBatch(ctx, j.Args)
 	default:
 		return river.JobCancel(fmt.Errorf("unknown task type"))
 	}
@@ -691,6 +693,9 @@ func (s *Service) fail(ctx context.Context, t store.Task, msg string) error {
 			return s.Enqueue(ctx, tx, t.Tenant, cid, "finalize")
 		case "related":
 			_, e := tx.Exec(ctx, `UPDATE submissions SET related_state='failed',related_error=$2 WHERE id=$1 AND related_state='pending'`, t.ID, msg)
+			return e
+		case "refresh_batch":
+			_, e := tx.Exec(ctx, `UPDATE refresh_batches SET state='failed',error=$2 WHERE id=$1 AND state='running'`, t.ID, msg)
 			return e
 		}
 		return nil

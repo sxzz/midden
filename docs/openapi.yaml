@@ -137,6 +137,7 @@ paths:
                     format: uuid,
                     description: Optional tenant-owned ready X session connection; omitted means public FxTwitter API.,
                   }
+                update_mode: { $ref: "#/components/schemas/UpdateMode" }
               description: Supply url for a new capture or refresh_id to re-fetch with the tenant save record's original provider and connection.
       responses:
         "202":
@@ -159,6 +160,55 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "429":
           description: Tenant capture rate exceeded; Retry-After is returned
+  /v1/refresh-batches:
+    post:
+      summary: Refresh many saved collections in the background
+      description: >-
+        Each collection is submitted in order as if by POST /v1/captures with
+        refresh_id. The tenant capture rate delays the batch instead of failing
+        it; collections deleted meanwhile are counted as rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [collection_ids]
+              properties:
+                collection_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items: { type: string, format: uuid }
+                  description: Collections this tenant saved; duplicates are merged.
+                update_mode: { $ref: "#/components/schemas/UpdateMode" }
+      responses:
+        "202":
+          description: Batch accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RefreshBatch" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: Empty or oversized batch, or unknown update mode
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /v1/refresh-batches/{id}:
+    get:
+      summary: Read refresh batch progress
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses:
+        "200":
+          description: Refresh batch
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RefreshBatch" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/jobs/{id}:
     get:
       summary: Read capture status
@@ -452,6 +502,50 @@ components:
       required: [error]
       properties:
         error: { type: string }
+    UpdateMode:
+      type: string
+      enum: [full, append]
+      default: full
+      description: >-
+        full captures the content again. append reuses content whose newest
+        version came from a complete capture and that has not changed upstream
+        since it was last observed, judged by the adapter-reported update time
+        (publication or edit) of collection members. A collection such as a
+        profile is always fetched again to list its members; only its members
+        are reused.
+    RefreshBatch:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        state:
+          {
+            type: string,
+            enum: [running, complete, failed],
+            description: complete once every collection was submitted; captures may still be running.,
+          }
+        error: { type: string }
+        update_mode: { $ref: "#/components/schemas/UpdateMode" }
+        total: { type: integer }
+        submitted: { type: integer }
+        reused:
+          {
+            type: integer,
+            description: Submissions answered by existing content without fetching.,
+          }
+        rejected:
+          {
+            type: integer,
+            description: Collections that could not be submitted,
+            such as deleted ones.,
+          }
+        running:
+          {
+            type: integer,
+            description: Captures started by this batch that are still queued or downloading. Collection members are not counted.,
+          }
+        complete: { type: integer }
+        partial: { type: integer }
+        failed: { type: integer }
     Job:
       type: object
       properties:

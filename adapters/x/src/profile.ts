@@ -8,6 +8,7 @@ import {
   attachMentions,
   attachProfileReference,
   addRelation,
+  postUpdatedAt,
 } from "./entities.js";
 import { ProviderError, readJSON, responseError } from "./provider.js";
 import {
@@ -97,14 +98,14 @@ export function attachTimeline(result: FetchResponse, timeline: any): void {
       status.UNAVAILABLE,
       "invalid profile timeline response",
     );
-  const ids = new Set<string>();
+  const ids = new Map<string, string>();
   for (const post of timeline.results) {
     if (
       post?.type === "status" &&
       typeof post.id === "string" &&
       /^\d+$/.test(post.id)
     ) {
-      ids.add(post.id);
+      ids.set(post.id, postUpdatedAt(post));
       if (result.graph && post.reposted_by?.id) {
         const profile = attachProfileReference(result, post.reposted_by);
         let entity = result.graph.entities.find(
@@ -141,9 +142,9 @@ export function attachTimeline(result: FetchResponse, timeline: any): void {
   const targets = new Map(
     result.relatedTargets.map((target) => [target.url, target]),
   );
-  for (const id of ids) {
+  for (const [id, updatedAt] of ids) {
     const url = `https://x.com/i/web/status/${id}`;
-    targets.set(url, { url, refreshAfterSeconds: 0 });
+    targets.set(url, { url, refreshAfterSeconds: 0, updatedAt });
   }
   result.relatedTargets = [...targets.values()];
 }

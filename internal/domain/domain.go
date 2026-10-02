@@ -62,13 +62,18 @@ type CaptureInput struct {
 	CollectionLimit     uint32 `json:"-"`
 	Automatic           bool   `json:"-"`
 	RefreshAfterSeconds uint32 `json:"-"`
-	Input               string `json:"-"`
-	URL                 string `json:"url"`
-	ProviderID          string `json:"provider_id,omitempty"`
-	ConnectionID        string `json:"connection_id,omitempty"`
-	RefreshID           string `json:"refresh_id,omitempty"`
-	Key                 string `json:"-"`
-	Origin              Origin `json:"-"`
+	// UpdatedAt is the adapter's latest known change time of a related target (RFC 3339).
+	UpdatedAt    string `json:"-"`
+	Input        string `json:"-"`
+	URL          string `json:"url"`
+	ProviderID   string `json:"provider_id,omitempty"`
+	ConnectionID string `json:"connection_id,omitempty"`
+	RefreshID    string `json:"refresh_id,omitempty"`
+	// UpdateMode "append" reuses content that is complete and unchanged since its
+	// last observation; "full" (the default) captures it again.
+	UpdateMode string `json:"update_mode,omitempty"`
+	Key        string `json:"-"`
+	Origin     Origin `json:"-"`
 }
 
 type Job struct {

@@ -43,11 +43,11 @@ func validateRelatedResult(policy *pb.Provider, r *pb.FetchResponse, platform, k
 // Each submission executes under its own tenant and original provider selection.
 // Automatic submissions never send channel messages; Submit bounds reference expansion.
 func (s *Service) related(ctx context.Context, task store.Task) error {
-	var state, parent, provider, connection, adapterID, parentURL string
+	var state, parent, provider, connection, adapterID, parentURL, mode string
 	var automatic, stopped bool
 	var raw []byte
 	err := s.DB.Tx(ctx, task.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT s.related_state,c.state,s.related_provider,coalesce(s.related_connection::text,''),s.related_adapter,c.related_targets,c.automatic,a.url,s.collection_stopped FROM submissions s JOIN captures c ON c.id=s.capture_id JOIN collections a ON a.id=c.collection_id WHERE s.id=$1`, task.ID).Scan(&state, &parent, &provider, &connection, &adapterID, &raw, &automatic, &parentURL, &stopped)
+		return tx.QueryRow(ctx, `SELECT s.related_state,c.state,s.related_provider,coalesce(s.related_connection::text,''),s.related_adapter,c.related_targets,c.automatic,a.url,s.collection_stopped,s.update_mode FROM submissions s JOIN captures c ON c.id=s.capture_id JOIN collections a ON a.id=c.collection_id WHERE s.id=$1`, task.ID).Scan(&state, &parent, &provider, &connection, &adapterID, &raw, &automatic, &parentURL, &stopped, &mode)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
@@ -121,7 +121,7 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		}
 		if target.RefreshOnSubmit {
 			// An explicit request joining an automatic capture still needs collection expansion.
-			_, err = scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: parentURL, ProviderID: provider, ConnectionID: connection, Key: "related-expand:" + task.ID})
+			_, err = scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: parentURL, ProviderID: provider, ConnectionID: connection, UpdateMode: mode, Key: "related-expand:" + task.ID})
 			if errors.Is(err, errCollectionStopped) {
 				return nil
 			}
@@ -157,7 +157,7 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		if member {
 			members++
 		}
-		_, err = scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: target.Url, ProviderID: provider, ConnectionID: connection, Automatic: true, RefreshAfterSeconds: target.RefreshAfterSeconds, Key: fmt.Sprintf("related:%s:%d", task.ID, i)})
+		_, err = scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: target.Url, ProviderID: provider, ConnectionID: connection, Automatic: true, RefreshAfterSeconds: target.RefreshAfterSeconds, UpdatedAt: target.UpdatedAt, Key: fmt.Sprintf("related:%s:%d", task.ID, i)})
 		if errors.Is(err, errCollectionStopped) {
 			return nil
 		}
@@ -171,7 +171,7 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 
 	if limit > members && members > 0 && next != "" {
 		remaining := limit - members
-		_, err := scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: parentURL, ProviderID: provider, ConnectionID: connection, PageCursor: next, PageSize: remaining, CollectionLimit: remaining, Key: "batch:" + task.ID})
+		_, err := scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: parentURL, ProviderID: provider, ConnectionID: connection, PageCursor: next, PageSize: remaining, CollectionLimit: remaining, UpdateMode: mode, Key: "batch:" + task.ID})
 		if errors.Is(err, errCollectionStopped) {
 			return nil
 		}

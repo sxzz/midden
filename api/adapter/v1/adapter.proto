@@ -112,6 +112,7 @@ message SourceResponse {
 message RelatedTarget {
   string url = 1;
   uint32 refresh_after_seconds = 2; // Zero reuses any existing collection; positive refreshes stale data.
+  string updated_at = 3; // Latest known content change (publication or edit) in RFC 3339; empty when unknown.
 }
 
 message FetchResponse {

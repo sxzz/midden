@@ -260,6 +260,10 @@ test("unavailable quotes retain known IDs without inventing content; invalid and
     { text: "" },
   );
   assert.deepEqual(result.relatedTargets, [
-    { url: "https://x.com/i/web/status/21", refreshAfterSeconds: 60 },
+    {
+      url: "https://x.com/i/web/status/21",
+      refreshAfterSeconds: 60,
+      updatedAt: "",
+    },
   ]);
 });

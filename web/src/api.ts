@@ -66,6 +66,23 @@ export interface Job {
   state: string
   error?: string
 }
+export type UpdateMode = 'append' | 'full'
+/** Progress of one background refresh of many saved collections. */
+export interface RefreshBatch {
+  id: string
+  state: 'running' | 'complete' | 'failed'
+  error?: string
+  update_mode: UpdateMode
+  total: number
+  submitted: number
+  /** Submissions answered by existing content, skipping the fetch. */
+  reused: number
+  rejected: number
+  running: number
+  complete: number
+  partial: number
+  failed: number
+}
 export interface Usage {
   used_bytes: number
   reserved_bytes: number

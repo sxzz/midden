@@ -10,6 +10,35 @@ function timestamp(value: unknown): string {
   return Number.isFinite(date.getTime()) ? date.toISOString() : "";
 }
 
+function postEdit(post: any, raw?: any) {
+  const node = raw?.tweet ?? raw;
+  const ids = node?.edit_control?.edit_tweet_ids ?? post?.edit_ids ?? [];
+  const editIds: string[] = Array.isArray(ids)
+    ? ids.filter((id: unknown) => typeof id === "string" && /^\d+$/.test(id))
+    : [];
+  let editedAt = timestamp(post?.edited_at ?? node?.legacy?.edited_at);
+  let editedAtSource = editedAt ? "upstream" : "";
+  // An edit creates a new Snowflake ID. Keep the derivation explicit, never use editable_until.
+  if (!editedAt && new Set(editIds).size > 1) {
+    const newest = editIds.reduce((a, b) => (BigInt(a) > BigInt(b) ? a : b));
+    const millis = Number((BigInt(newest) >> 22n) + 1288834974657n);
+    if (Number.isSafeInteger(millis) && millis < 8640000000000000) {
+      editedAt = new Date(millis).toISOString();
+      editedAtSource = "x_snowflake";
+    }
+  }
+  return { editIds, editedAt, editedAtSource };
+}
+
+/** The latest content change a timeline entry reveals: its edit, else its publication. */
+export function postUpdatedAt(post: any): string {
+  return (
+    postEdit(post).editedAt ||
+    timestamp(post?.created_at) ||
+    timestamp(post?.created_timestamp)
+  );
+}
+
 // X profile image paths identify a particular image and size, not the account.
 // Keep the exact URL (including query parameters); do not cache arbitrary hosts.
 export function avatarImmutableKey(value: string): string {
@@ -79,22 +108,7 @@ export function attachEntities(
       verified_at: author.verification.verified_at,
       type: author.verification.type,
     };
-  const node = raw?.tweet ?? raw;
-  const ids = node?.edit_control?.edit_tweet_ids ?? post.edit_ids ?? [];
-  const editIds: string[] = Array.isArray(ids)
-    ? ids.filter((id: unknown) => typeof id === "string" && /^\d+$/.test(id))
-    : [];
-  let editedAt = timestamp(post.edited_at ?? node?.legacy?.edited_at);
-  let editedAtSource = editedAt ? "upstream" : "";
-  // An edit creates a new Snowflake ID. Keep the derivation explicit, never use editable_until.
-  if (!editedAt && new Set(editIds).size > 1) {
-    const newest = editIds.reduce((a, b) => (BigInt(a) > BigInt(b) ? a : b));
-    const millis = Number((BigInt(newest) >> 22n) + 1288834974657n);
-    if (Number.isSafeInteger(millis) && millis < 8640000000000000) {
-      editedAt = new Date(millis).toISOString();
-      editedAtSource = "x_snowflake";
-    }
-  }
+  const { editIds, editedAt, editedAtSource } = postEdit(post, raw);
   const data: Record<string, unknown> = { text: result.text };
   for (const key of ["replies", "reposts", "likes", "bookmarks", "quotes"]) {
     const value = post[key];
@@ -136,7 +150,11 @@ export function attachEntities(
       );
     }
     result.relatedTargets = [
-      { url: `https://x.com/i/user/${author.id}`, refreshAfterSeconds: 60 },
+      {
+        url: `https://x.com/i/user/${author.id}`,
+        refreshAfterSeconds: 60,
+        updatedAt: "",
+      },
     ];
     graph.entities.push({
       key: "author",
@@ -215,7 +233,11 @@ function attachPostReferences(
     addRelation(result, source, entity.key, relation);
     const url = `https://x.com/i/web/status/${id}`;
     if (!result.relatedTargets.some((target) => target.url === url))
-      result.relatedTargets.push({ url, refreshAfterSeconds: 60 });
+      result.relatedTargets.push({
+        url,
+        refreshAfterSeconds: 60,
+        updatedAt: "",
+      });
     const author = attachProfileReference(result, referenced.author);
     if (author) addRelation(result, entity.key, author, "authored_by");
     attachMentions(
@@ -278,7 +300,11 @@ export function attachProfileReference(
     ? `https://x.com/i/user/${entity.externalId}`
     : `https://x.com/${username.toLowerCase()}`;
   if (!result.relatedTargets.some((target) => target.url === url))
-    result.relatedTargets.push({ url, refreshAfterSeconds: 3600 });
+    result.relatedTargets.push({
+      url,
+      refreshAfterSeconds: 3600,
+      updatedAt: "",
+    });
   return entity.key;
 }
 

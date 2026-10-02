@@ -76,6 +76,27 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		j, e := s.Submit(r.Context(), tenant(r), in)
 		respond(w, 202, j, e)
 	})
+	mux.HandleFunc("POST /v1/refresh-batches", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			CollectionIDs []string `json:"collection_ids"`
+			UpdateMode    string   `json:"update_mode"`
+		}
+		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+		d.DisallowUnknownFields()
+		if d.Decode(&in) != nil {
+			write(w, 400, map[string]string{"error": "invalid request"})
+			return
+		}
+		b, e := s.StartRefreshBatch(r.Context(), tenant(r), in.CollectionIDs, in.UpdateMode)
+		respond(w, 202, b, e)
+	})
+	mux.HandleFunc("GET /v1/refresh-batches/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
+			return
+		}
+		b, e := s.RefreshBatch(r.Context(), tenant(r), r.PathValue("id"))
+		respond(w, 200, b, e)
+	})
 	mux.HandleFunc("GET /v1/jobs/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if !checkID(w, r) {
 			return

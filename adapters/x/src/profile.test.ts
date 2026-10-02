@@ -290,3 +290,24 @@ test("timeline retains repost relations across pages and still collects original
       ),
     );
 });
+
+test("timeline targets carry each post's latest known change", () => {
+  const result = normalizeProfile(user, user.id, "fxtwitter");
+  attachTimeline(result, {
+    code: 200,
+    results: [
+      { type: "status", id: "1", created_at: "2026-01-01T00:00:00Z" },
+      {
+        type: "status",
+        id: "2",
+        created_at: "2026-01-01T00:00:00Z",
+        edited_at: "2026-01-01T00:30:00Z",
+      },
+      { type: "status", id: "3" },
+    ],
+  });
+  assert.deepEqual(
+    result.relatedTargets.map((t) => t.updatedAt),
+    ["2026-01-01T00:00:00.000Z", "2026-01-01T00:30:00.000Z", ""],
+  );
+});

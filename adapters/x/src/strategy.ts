@@ -266,6 +266,7 @@ export class CaptureStrategy {
     targets.set(profile.canonicalTarget!.url, {
       url: profile.canonicalTarget!.url,
       refreshAfterSeconds: 60,
+      updatedAt: "",
     });
     result.relatedTargets = [...targets.values()];
   }

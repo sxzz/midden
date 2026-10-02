@@ -17,9 +17,21 @@ const props = defineProps<{
   sort?: string
   /** Display name of the account this list belongs to, for its reposts. */
   repostedBy?: string
+  /** Set while the list is selecting; the row then toggles instead of opening. */
+  selected?: boolean
 }>()
-const emit = defineEmits<{ open: [id: string] }>()
+const emit = defineEmits<{ open: [id: string]; toggle: [id: string] }>()
+const selectable = computed(() => props.selected !== undefined)
+// Captured before the row's own buttons and links, so none of them opens
+// anything while the list is selecting.
+function select(event: Event) {
+  if (!selectable.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  emit('toggle', props.collection.id)
+}
 function open(event: MouseEvent) {
+  if (selectable.value) return
   if (
     event.target instanceof Element &&
     event.target.closest('button, dialog, a')
@@ -73,7 +85,17 @@ const storage = computed(() =>
 </script>
 
 <template>
-  <div class="row" @click="open">
+  <div
+    class="row"
+    :class="{ selectable, selected }"
+    :role="selectable ? 'checkbox' : undefined"
+    :aria-checked="selectable ? selected : undefined"
+    :tabindex="selectable ? 0 : undefined"
+    @click.capture="select"
+    @keydown.space="select"
+    @keydown.enter="select"
+    @click="open"
+  >
     <!-- The repost line is a row of its own across the whole item, so the
          avatar and the name below it stay the original author's. -->
     <span v-if="reposter" class="repost">
@@ -95,6 +117,18 @@ const storage = computed(() =>
       <span class="repost-text">{{ reposter }} 已转发</span>
     </span>
     <span class="post">
+      <span v-if="selectable" class="check" aria-hidden="true">
+        <svg v-if="selected" viewBox="0 0 24 24" width="14" height="14">
+          <path
+            d="m5 12.5 4.5 4.5L19 7.5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </span>
       <LoadingImage
         v-if="view.avatar && (!view.avatar.sensitive || showSensitive)"
         class="avatar"
@@ -150,6 +184,32 @@ const storage = computed(() =>
 }
 .row:active {
   background: var(--fill);
+}
+.row.selectable {
+  cursor: pointer;
+}
+/* Line the separator up with the avatar, past the check column. */
+.row.selectable + .row.selectable::before {
+  left: calc(var(--inset) + 86px);
+}
+.row.selectable:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: -2px;
+}
+.check {
+  display: grid;
+  place-items: center;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--subtle);
+  color: #fff;
+}
+.selected .check {
+  background: var(--link);
+  box-shadow: none;
 }
 .post {
   display: flex;
