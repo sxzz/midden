@@ -14,8 +14,7 @@ const items = [item(1), item(2), item(3)]
 
 test('select collections and refresh them in append mode', async ({ page }) => {
   let started: { collection_ids: string[]; update_mode: string } | undefined
-  let polls = 0
-  let listLoads = 0
+  let polled = false
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {
     const path = new URL(r.request().url()).pathname
@@ -24,53 +23,12 @@ test('select collections and refresh them in append mode', async ({ page }) => {
       return r.fulfill({
         json: { used_bytes: 0, reserved_bytes: 0, limit_bytes: 1 << 30 },
       })
-    if (path === '/v1/collections') {
-      listLoads++
-      return r.fulfill({ json: { items } })
-    }
-    const batch = {
-      id: 'batch',
-      update_mode: 'append',
-      total: 2,
-      reused: 1,
-      rejected: 0,
-      partial: 0,
-      failed: 0,
-    }
+    if (path === '/v1/collections') return r.fulfill({ json: { items } })
     if (path === '/v1/refresh-batches') {
       started = r.request().postDataJSON()
-      return r.fulfill({
-        status: 202,
-        json: {
-          ...batch,
-          state: 'running',
-          submitted: 0,
-          running: 0,
-          complete: 0,
-        },
-      })
+      return r.fulfill({ status: 202, json: { id: 'batch', state: 'running' } })
     }
-    if (path === '/v1/refresh-batches/batch') {
-      polls++
-      return r.fulfill({
-        json:
-          polls < 2
-            ? {
-                ...batch,
-                state: 'running',
-                submitted: 1,
-                running: 1,
-                complete: 0,
-              }
-            : {
-                ...batch,
-                state: 'complete',
-                submitted: 2,
-                running: 0,
-                complete: 2,
-              },
-      })
-    }
+    if (path.startsWith('/v1/refresh-batches/')) polled = true
     return r.fulfill({ status: 404, json: { error: 'not found' } })
   })
   await page.goto('/app/')
@@ -82,23 +40,17 @@ test('select collections and refresh them in append mode', async ({ page }) => {
   await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(2)
   await expect(page).toHaveURL(/#\/$/)
   await expect(page.getByText('已选 2 项')).toBeVisible()
-  await page.screenshot({ path: 'test-results/batch-select-mobile.png' })
   await page.getByRole('button', { name: '更新', exact: true }).click()
   await expect(page.getByText('更新 2 项收藏')).toBeVisible()
-  await page.screenshot({ path: 'test-results/batch-mode-mobile.png' })
-  const loadsBefore = listLoads
   await page.getByRole('button', { name: /附加更新/ }).click()
+  // Progress arrives as a bot message; the page just leaves selection mode.
+  await expect(page.getByRole('checkbox')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '批量更新' })).toBeVisible()
   expect(started).toEqual({
     collection_ids: [items[0].id, items[2].id],
     update_mode: 'append',
   })
-  await expect(page.getByText('更新中 1/2')).toBeVisible()
-  await expect(page.getByText('完成：已抓取 1 · 无变化 1')).toBeVisible()
-  // The finished batch reloads the list so refreshed content shows.
-  await expect.poll(() => listLoads).toBeGreaterThan(loadsBefore)
-  await page.getByRole('button', { name: '完成' }).click()
-  await expect(page.getByRole('checkbox')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '批量更新' })).toBeVisible()
+  expect(polled).toBe(false)
 })
 
 test('select all toggles every listed collection', async ({ page }) => {

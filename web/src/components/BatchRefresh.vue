@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
-import { computed, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
-import { api, errorText, type RefreshBatch, type UpdateMode } from '../api'
+import { computed, shallowRef, useTemplateRef, watch } from 'vue'
+import { api, errorText, type UpdateMode } from '../api'
 const props = defineProps<{
   selected: string[]
   /** Every collection currently listed, for selecting them all at once. */
@@ -9,7 +9,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [ids: string[]]
   close: []
-  finished: []
 }>()
 const modes: { value: UpdateMode; label: string; description: string }[] = [
   {
@@ -26,7 +25,6 @@ const modes: { value: UpdateMode; label: string; description: string }[] = [
 const choosing = shallowRef(false)
 const busy = shallowRef(false)
 const error = shallowRef('')
-const batch = shallowRef<RefreshBatch>()
 const dialog = useTemplateRef<HTMLDialogElement>('sheet')
 watch(choosing, (open) => {
   if (open) dialog.value?.showModal()
@@ -37,51 +35,12 @@ const allSelected = computed(
     props.listed.length > 0 &&
     props.listed.every((id) => props.selected.includes(id)),
 )
-const done = computed(
-  () =>
-    !!batch.value &&
-    batch.value.state !== 'running' &&
-    batch.value.running === 0,
-)
-const progress = computed(() => {
-  const b = batch.value
-  if (!b) return ''
-  if (b.state === 'failed')
-    return `已中止：${b.error === 'storage quota exceeded' ? '存储空间不足' : '采集服务不可用'}`
-  if (!done.value) return `更新中 ${b.submitted}/${b.total}`
-  const counts = [
-    ['已抓取', Math.max(b.complete - b.reused, 0)],
-    ['无变化', b.reused],
-    ['不完整', b.partial],
-    ['失败', b.failed],
-    ['无法更新', b.rejected],
-  ] as const
-  return `完成${counts
-    .filter(([, n]) => n)
-    .map(([label, n], i) => `${i ? ' · ' : '：'}${label} ${n}`)
-    .join('')}`
-})
-let timer: ReturnType<typeof setTimeout> | undefined
-let disposed = false
-onUnmounted(() => {
-  disposed = true
-  clearTimeout(timer)
-})
-async function poll(id: string) {
-  try {
-    batch.value = await api<RefreshBatch>(`/refresh-batches/${id}`)
-  } catch (e) {
-    error.value = errorText(e)
-  }
-  if (disposed) return
-  if (done.value) emit('finished')
-  else timer = setTimeout(() => poll(id), 2000)
-}
+// Progress is reported by the bot in the requester's private chat.
 async function start(mode: UpdateMode) {
   busy.value = true
   error.value = ''
   try {
-    batch.value = await api<RefreshBatch>('/refresh-batches', {
+    await api('/refresh-batches', {
       method: 'POST',
       body: JSON.stringify({
         collection_ids: props.selected,
@@ -89,7 +48,7 @@ async function start(mode: UpdateMode) {
       }),
     })
     choosing.value = false
-    timer = setTimeout(() => poll(batch.value!.id), 1000)
+    emit('close')
   } catch (e) {
     error.value = errorText(e)
   } finally {
@@ -103,32 +62,24 @@ function backdrop(event: MouseEvent) {
 
 <template>
   <div class="toolbar" role="region" aria-label="批量更新">
-    <template v-if="batch">
-      <p class="status" role="status">{{ progress }}</p>
-      <button type="button" class="action strong" @click="$emit('close')">
-        {{ done ? '完成' : '收起' }}
-      </button>
-    </template>
-    <template v-else>
-      <button
-        type="button"
-        class="action"
-        :disabled="!listed.length"
-        @click="$emit('select', allSelected ? [] : listed)"
-      >
-        {{ allSelected ? '取消全选' : '全选' }}
-      </button>
-      <p class="status">已选 {{ selected.length }} 项</p>
-      <button type="button" class="action" @click="$emit('close')">取消</button>
-      <button
-        type="button"
-        class="action strong"
-        :disabled="!selected.length"
-        @click="choosing = true"
-      >
-        更新
-      </button>
-    </template>
+    <button
+      type="button"
+      class="action"
+      :disabled="!listed.length"
+      @click="$emit('select', allSelected ? [] : listed)"
+    >
+      {{ allSelected ? '取消全选' : '全选' }}
+    </button>
+    <p class="status">已选 {{ selected.length }} 项</p>
+    <button type="button" class="action" @click="$emit('close')">取消</button>
+    <button
+      type="button"
+      class="action strong"
+      :disabled="!selected.length"
+      @click="choosing = true"
+    >
+      更新
+    </button>
   </div>
   <p v-if="error && !choosing" class="error" role="alert">{{ error }}</p>
   <dialog

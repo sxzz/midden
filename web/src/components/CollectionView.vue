@@ -164,7 +164,6 @@ const storage = computed(() =>
     :listed="listed"
     @select="selected = $event"
     @close="selecting = false"
-    @finished="$emit('retry')"
   />
 </template>
 
