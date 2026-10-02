@@ -226,7 +226,10 @@ type RefreshBatch struct {
 }
 
 type RefreshItem struct {
-	URL string `json:"url"`
+	URL          string `json:"url"`
+	CollectionID string `json:"collection_id"`
+	// Collection is the item's latest saved content, absent before its first capture.
+	Collection *Collection `json:"collection,omitempty"`
 	// Running while the item's own capture has not finished.
 	Running bool           `json:"running"`
 	Members MemberProgress `json:"members"`

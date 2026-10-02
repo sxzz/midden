@@ -128,7 +128,7 @@ progress AS (SELECT members.root,count(*) AS total,
  count(*) FILTER (WHERE c.state='failed') AS failed,
  count(*) FILTER (WHERE c.state IN ('queued','downloading')) AS pending
  FROM members JOIN captures c ON c.id=members.capture_id GROUP BY members.root)
-SELECT a.url,c.state IN ('queued','downloading'),GREATEST(coalesce(t.n,0),coalesce(p.total,0)),coalesce(p.complete,0),coalesce(p.partial,0),coalesce(p.failed,0),coalesce(p.pending,0),
+SELECT a.url,c.collection_id,c.state IN ('queued','downloading'),GREATEST(coalesce(t.n,0),coalesce(p.total,0)),coalesce(p.complete,0),coalesce(p.partial,0),coalesce(p.failed,0),coalesce(p.pending,0),
  EXISTS(SELECT FROM pages x WHERE x.root=r.id AND x.related_state='pending')
 FROM pages r JOIN submissions s ON s.id=r.id JOIN captures c ON c.id=r.capture_id JOIN collections a ON a.id=c.collection_id
 LEFT JOIN targets t ON t.root=r.id LEFT JOIN progress p ON p.root=r.id
@@ -141,7 +141,7 @@ WHERE r.depth=0 ORDER BY s.created_at,s.id`, id)
 		var item domain.RefreshItem
 		var membersPending bool
 		m := &item.Members
-		if err := rows.Scan(&item.URL, &item.Running, &m.Total, &m.Complete, &m.Partial, &m.Failed, &m.Pending, &membersPending); err != nil {
+		if err := rows.Scan(&item.URL, &item.CollectionID, &item.Running, &m.Total, &m.Complete, &m.Partial, &m.Failed, &m.Pending, &membersPending); err != nil {
 			return err
 		}
 		m.Done = !membersPending && m.Pending == 0
@@ -149,7 +149,25 @@ WHERE r.depth=0 ORDER BY s.created_at,s.id`, id)
 			b.Active = append(b.Active, item)
 		}
 	}
-	return rows.Err()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	// Saved content lets channels name an item instead of showing its URL.
+	ids := make([]string, len(b.Active))
+	for i, item := range b.Active {
+		ids[i] = item.CollectionID
+	}
+	saved, err := collectionsByID(ctx, tx, ids)
+	if err != nil {
+		return err
+	}
+	for i, item := range b.Active {
+		if a, ok := saved[item.CollectionID]; ok {
+			b.Active[i].Collection = &a
+		}
+	}
+	return nil
 }
 
 // refreshBatch submits the remaining collections in order, persisting progress

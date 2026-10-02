@@ -143,7 +143,7 @@ func TestRefreshBatchModes(t *testing.T) {
 		t.Fatalf("batch done before members were listed %+v", p)
 	}
 	// The fetched listing already tells how many members are coming.
-	if p := progress(); p.Members.Total != 4 || len(p.Active) != 1 || p.Active[0].Running || p.Active[0].Members.Total != 4 || p.Active[0].URL != "https://notes.test/collection/"+prefix {
+	if p := progress(); p.Members.Total != 4 || len(p.Active) != 1 || p.Active[0].Running || p.Active[0].Members.Total != 4 || p.Active[0].URL != "https://notes.test/collection/"+prefix || p.Active[0].Collection == nil || p.Active[0].Collection.ID != first.CollectionID {
 		t.Fatalf("listed members before submission %+v %+v", p.Members, p.Active)
 	}
 	var sid string

@@ -257,7 +257,8 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 	mid := w.MessageID
 	if d.Batch != nil {
 		// One message for the whole batch, edited until every capture finished.
-		id, e := sender.SendInteractive(ctx, d.Chat, batchMessage(*d.Batch), mid, nil)
+		text, keys := batchMessage(*d.Batch)
+		id, e := sender.SendInteractive(ctx, d.Chat, text, mid, keys)
 		if e != nil {
 			return e
 		}
@@ -394,7 +395,22 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 // maxBatchItems bounds the items listed in a batch message.
 const maxBatchItems = 5
 
-func batchMessage(b domain.RefreshBatch) string {
+// batchItemName names an item by its saved profile or author, falling back to
+// its URL before the first capture.
+func batchItemName(item domain.RefreshItem) string {
+	if a := item.Collection; a != nil {
+		if text, _, _, ok := telegram.ProfilePresentation(*a); ok {
+			return strings.SplitN(text, "\n", 2)[0]
+		}
+		if name := strings.TrimSpace(a.AuthorName); name != "" {
+			return name
+		}
+	}
+	return strings.TrimPrefix(strings.TrimPrefix(item.URL, "https://"), "http://")
+}
+
+// batchMessage also returns a link button for each listed item in progress.
+func batchMessage(b domain.RefreshBatch) (string, telegram.Keyboard) {
 	mode := "完整更新"
 	if b.UpdateMode == "append" {
 		mode = "附加更新"
@@ -435,7 +451,7 @@ func batchMessage(b domain.RefreshBatch) string {
 		if b.Error == "storage quota exceeded" {
 			reason = "存储空间不足"
 		}
-		return fmt.Sprintf("批量%s已中止：%s\n已提交 %d/%d", mode, reason, b.Submitted, b.Total) + summary
+		return fmt.Sprintf("批量%s已中止：%s\n已提交 %d/%d", mode, reason, b.Submitted, b.Total) + summary, nil
 	case !b.Done:
 		text := fmt.Sprintf("批量%s中…\n已提交 %d/%d", mode, b.Submitted, b.Total)
 		if c := counts("抓取中", b.Running, "已抓取", fetched, "无变化", b.Reused, "失败", b.Failed); c != "" {
@@ -445,11 +461,18 @@ func batchMessage(b domain.RefreshBatch) string {
 		if len(b.Active) > 0 {
 			text += "\n\n进行中："
 		}
+		var keys telegram.Keyboard
 		for i, item := range b.Active {
 			if i == maxBatchItems {
 				text += fmt.Sprintf("\n另有 %d 项", len(b.Active)-i)
 				break
 			}
+			name := batchItemName(item)
+			label := []rune(name)
+			if len(label) > 32 {
+				label = append(label[:32], '…')
+			}
+			keys = append(keys, []telegram.Button{{Text: string(label), URL: item.URL}})
 			var parts []string
 			if item.Running {
 				parts = append(parts, "抓取中")
@@ -459,15 +482,16 @@ func batchMessage(b domain.RefreshBatch) string {
 			} else if !item.Running {
 				parts = append(parts, "提交帖子中")
 			}
-			text += fmt.Sprintf("\n• %s：%s", strings.TrimPrefix(strings.TrimPrefix(item.URL, "https://"), "http://"), strings.Join(parts, " · "))
+			// The status gets its own line: Telegram would extend a URL over it.
+			text += fmt.Sprintf("\n• %s\n  %s", name, strings.Join(parts, " · "))
 		}
-		return text
+		return text, keys
 	}
 	text := fmt.Sprintf("批量%s完成，共 %d 项", mode, b.Total)
 	if c := counts("已抓取", fetched, "无变化", b.Reused, "不完整", b.Partial, "失败", b.Failed, "无法更新", b.Rejected); c != "" {
 		text += "\n" + c
 	}
-	return text + summary
+	return text + summary, nil
 }
 
 func collectionProgressMessage(id string, d channelapi.Delivery, webURL string) (string, telegram.Keyboard) {
