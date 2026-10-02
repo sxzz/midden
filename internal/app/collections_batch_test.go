@@ -71,8 +71,14 @@ func TestCollectionsBatch(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if counted.queries != 3 {
-				t.Fatalf("batch issued %d queries, want 3", counted.queries)
+			// Payloads, assets and saved links, plus one batched avatar lookup
+			// when the tenant has saved any of the entities.
+			want := 3
+			if tenant == tenants[0] {
+				want = 4
+			}
+			if counted.queries != want {
+				t.Fatalf("batch issued %d queries, want %d", counted.queries, want)
 			}
 			for i, id := range ids {
 				a := loaded[id]

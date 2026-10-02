@@ -282,5 +282,76 @@ func linkSavedEntities(ctx context.Context, tx pgx.Tx, collections ...*domain.Co
 			e.SavedCollectionID = links[e.ID]
 		}
 	}
+	return attachSavedAvatars(ctx, tx, collections...)
+}
+
+func hasAvatar(e domain.Entity) bool {
+	for _, a := range e.Assets {
+		if a.Purpose == "avatar" && a.State == "ready" {
+			return true
+		}
+	}
+	return false
+}
+
+// A referenced account (a quoted post's author, say) is captured without its
+// avatar. When the account is saved here, show the avatar of its own current
+// version instead; it is readable wherever the saved collection is.
+func attachSavedAvatars(ctx context.Context, tx pgx.Tx, collections ...*domain.Collection) error {
+	ids := []string{}
+	seen := map[string]bool{}
+	for _, a := range collections {
+		if a.Graph == nil {
+			continue
+		}
+		for _, e := range a.Graph.Entities {
+			if e.SavedCollectionID != "" && !hasAvatar(e) && !seen[e.SavedCollectionID] {
+				seen[e.SavedCollectionID] = true
+				ids = append(ids, e.SavedCollectionID)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	// Only the saved collection's root entity owns the avatar, never another
+	// account mentioned in the same capture. One query for the whole batch.
+	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (c.id) c.id,a.id,a.purpose,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,'')
+ FROM unnest($1::uuid[]) c(id)
+ JOIN revisions r ON r.id=visible_head(c.id)
+ JOIN revision_entities re ON re.revision_id=r.id AND re.is_root
+ CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'graph'->'entities')='array' THEN r.payload->'graph'->'entities' ELSE '[]' END) e
+ JOIN assets a ON a.capture_id=r.capture_id AND a.purpose='avatar' AND a.state='ready'
+ LEFT JOIN blobs b ON b.id=a.blob_id
+ WHERE e->>'key'=re.entity_key AND jsonb_typeof(e->'resource_indices')='array' AND e->'resource_indices' @> to_jsonb(a.position)
+ ORDER BY c.id,a.position`, ids)
+	if err != nil {
+		return err
+	}
+	avatars := map[string]domain.Asset{}
+	for rows.Next() {
+		var id string
+		var a domain.Asset
+		if err = rows.Scan(&id, &a.ID, &a.Purpose, &a.Position, &a.AltText, &a.Sensitive, &a.State, &a.Error, &a.Hash, &a.MIME, &a.Size, &a.Key); err != nil {
+			rows.Close()
+			return err
+		}
+		avatars[id] = a
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for _, a := range collections {
+		if a.Graph == nil {
+			continue
+		}
+		for i := range a.Graph.Entities {
+			e := &a.Graph.Entities[i]
+			if avatar, ok := avatars[e.SavedCollectionID]; ok && !hasAvatar(*e) {
+				e.Assets = append(e.Assets, avatar)
+			}
+		}
+	}
 	return nil
 }
