@@ -305,7 +305,7 @@ const storage = computed(() =>
   margin-top: 2px;
   font-size: 15px;
   line-height: 1.45;
-  color: var(--subtle);
+  color: var(--text);
 }
 .meta {
   display: block;
