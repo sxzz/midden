@@ -199,3 +199,20 @@ type ChannelMediaCache interface {
 	PutChannelMedia(context.Context, string, string, string, string, string) error
 	DeleteChannelMedia(context.Context, string, string, string, string, string) error
 }
+
+type RefreshBatch struct {
+	ID         string `json:"id"`
+	State      string `json:"state"`
+	Error      string `json:"error,omitempty"`
+	UpdateMode string `json:"update_mode"`
+	Total      int    `json:"total"`
+	// Submitted counts collections handed to capture, including reused ones.
+	Submitted int `json:"submitted"`
+	Reused    int `json:"reused"`
+	Rejected  int `json:"rejected"`
+	// Running and the terminal counts cover the captures that submissions started.
+	Running  int `json:"running"`
+	Complete int `json:"complete"`
+	Partial  int `json:"partial"`
+	Failed   int `json:"failed"`
+}

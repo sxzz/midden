@@ -166,7 +166,9 @@ paths:
       description: >-
         Each collection is submitted in order as if by POST /v1/captures with
         refresh_id. The tenant capture rate delays the batch instead of failing
-        it; collections deleted meanwhile are counted as rejected.
+        it; collections deleted meanwhile are counted as rejected. A batch
+        started from a web session reports its progress in one Telegram private
+        message, edited until it finishes.
       requestBody:
         required: true
         content:

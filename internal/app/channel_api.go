@@ -258,6 +258,16 @@ func (s *Service) ChannelDelivery(ctx context.Context, channel, id, lease string
 		})
 		return d, e
 	}
+	if w.Kind == "batch" {
+		d.Batch = &RefreshBatch{}
+		e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
+			if err := tx.QueryRow(ctx, `SELECT chat_id FROM refresh_batches WHERE id=$1 AND channel_id=$2`, w.Resource, channel).Scan(&d.Chat); err != nil {
+				return err
+			}
+			return scanRefreshBatch(ctx, tx, w.Resource, d.Batch)
+		})
+		return d, e
+	}
 	if w.Kind != "delivery" {
 		return d, domain.ErrNotFound
 	}

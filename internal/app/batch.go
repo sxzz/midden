@@ -16,26 +16,13 @@ import (
 
 const maxRefreshBatch = 500
 
-type RefreshBatch struct {
-	ID         string `json:"id"`
-	State      string `json:"state"`
-	Error      string `json:"error,omitempty"`
-	UpdateMode string `json:"update_mode"`
-	Total      int    `json:"total"`
-	// Submitted counts collections handed to capture, including reused ones.
-	Submitted int `json:"submitted"`
-	Reused    int `json:"reused"`
-	Rejected  int `json:"rejected"`
-	// Running and the terminal counts cover the captures that submissions started.
-	Running  int `json:"running"`
-	Complete int `json:"complete"`
-	Partial  int `json:"partial"`
-	Failed   int `json:"failed"`
-}
+// RefreshBatch is shared with channels, which report its progress.
+type RefreshBatch = domain.RefreshBatch
 
 // StartRefreshBatch queues refreshes of the tenant's saved collections. Submission
 // runs in the background so the capture rate limit delays it instead of failing it.
-func (s *Service) StartRefreshBatch(ctx context.Context, tenant string, ids []string, mode string) (out RefreshBatch, err error) {
+// With a channel, the tenant's private chat there gets one progress message.
+func (s *Service) StartRefreshBatch(ctx context.Context, tenant string, ids []string, mode, channel string) (out RefreshBatch, err error) {
 	if mode == "" {
 		mode = "full"
 	}
@@ -65,12 +52,24 @@ func (s *Service) StartRefreshBatch(ctx context.Context, tenant string, ids []st
 		if saved != len(unique) {
 			return domain.ErrNotFound
 		}
+		var chat *string
+		if channel != "" {
+			e := tx.QueryRow(ctx, `SELECT external_id FROM identities WHERE tenant_id=$1 AND channel_id=$2 LIMIT 1`, tenant, channel).Scan(&chat)
+			if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+				return e
+			}
+		}
 		var id string
-		if e := tx.QueryRow(ctx, `INSERT INTO refresh_batches(tenant_id,collection_ids,update_mode) VALUES($1,$2::uuid[],$3) RETURNING id`, tenant, unique, mode).Scan(&id); e != nil {
+		if e := tx.QueryRow(ctx, `INSERT INTO refresh_batches(tenant_id,collection_ids,update_mode,channel_id,chat_id) VALUES($1,$2::uuid[],$3,CASE WHEN $5::text IS NOT NULL THEN nullif($4,'')::uuid END,$5) RETURNING id`, tenant, unique, mode, channel, chat).Scan(&id); e != nil {
 			return e
 		}
 		if e := s.Enqueue(ctx, tx, tenant, id, "refresh_batch"); e != nil {
 			return e
+		}
+		if chat != nil {
+			if _, e := tx.Exec(ctx, `INSERT INTO channel_work(tenant_id,channel_id,kind,resource) VALUES($1,$2,'batch',$3)`, tenant, channel, id); e != nil {
+				return e
+			}
 		}
 		return scanRefreshBatch(ctx, tx, id, &out)
 	})

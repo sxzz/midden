@@ -99,6 +99,7 @@ type Delivery struct {
 	Job                    domain.Job
 	Collection             *domain.Collection
 	ProgressDetails        *CollectionProgress
+	Batch                  *domain.RefreshBatch
 	// Legacy rendered replies are retained only for upgrade draining.
 	Legacy json.RawMessage
 }

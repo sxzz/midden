@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 
 	pb "monitor/api/adapter/v1"
+	"monitor/internal/channelapi"
 	"monitor/internal/domain"
 	"monitor/internal/store"
 )
@@ -102,7 +103,7 @@ func TestRefreshBatchModes(t *testing.T) {
 		return
 	}
 	runBatch := func(ids []string, mode string) RefreshBatch {
-		b, e := s.StartRefreshBatch(ctx, tenant, ids, mode)
+		b, e := s.StartRefreshBatch(ctx, tenant, ids, mode, "")
 		must(t, e)
 		must(t, s.refreshBatch(ctx, store.Task{Tenant: tenant, ID: b.ID, Type: "refresh_batch"}))
 		b, e = s.RefreshBatch(ctx, tenant, b.ID)
@@ -151,7 +152,7 @@ func TestRefreshBatchModes(t *testing.T) {
 	var kept, gone string
 	must(t, admin.Pool.QueryRow(ctx, `SELECT id FROM collections WHERE external_id=$1`, prefix+"-kept").Scan(&kept))
 	must(t, admin.Pool.QueryRow(ctx, `SELECT id FROM collections WHERE external_id=$1`, prefix+"-new").Scan(&gone))
-	b, e = s.StartRefreshBatch(ctx, tenant, []string{kept, gone, kept}, "append")
+	b, e = s.StartRefreshBatch(ctx, tenant, []string{kept, gone, kept}, "append", "")
 	must(t, e)
 	if b.Total != 2 {
 		t.Fatal("duplicate ids not merged", b.Total)
@@ -179,16 +180,45 @@ func TestRefreshBatchModes(t *testing.T) {
 	// Batches only accept the tenant's own saved collections.
 	var other string
 	must(t, admin.Pool.QueryRow(ctx, "INSERT INTO tenants DEFAULT VALUES RETURNING id").Scan(&other))
-	if _, e = s.StartRefreshBatch(ctx, other, []string{kept}, "append"); e != domain.ErrNotFound {
+	if _, e = s.StartRefreshBatch(ctx, other, []string{kept}, "append", ""); e != domain.ErrNotFound {
 		t.Fatal("foreign collection accepted", e)
 	}
 	if _, e = s.RefreshBatch(ctx, other, b.ID); e != domain.ErrNotFound {
 		t.Fatal("foreign batch readable", e)
 	}
-	if _, e = s.StartRefreshBatch(ctx, tenant, []string{kept}, "merge"); e != domain.ErrUnsupported {
+	if _, e = s.StartRefreshBatch(ctx, tenant, []string{kept}, "merge", ""); e != domain.ErrUnsupported {
 		t.Fatal("unknown mode accepted", e)
 	}
-	if _, e = s.StartRefreshBatch(ctx, tenant, nil, "full"); e != domain.ErrUnsupported {
+	if _, e = s.StartRefreshBatch(ctx, tenant, nil, "full", ""); e != domain.ErrUnsupported {
 		t.Fatal("empty batch accepted", e)
 	}
+
+	// A batch from the bot's web app reports to the requester's private chat
+	// through one channel work item; without an identity there it reports nowhere.
+	channel := uuid.NewString()
+	_, e = admin.Pool.Exec(ctx, `INSERT INTO channels(id,kind,external_id) VALUES($1,'test',$2)`, channel, channel)
+	must(t, e)
+	b, e = s.StartRefreshBatch(ctx, tenant, []string{kept}, "append", channel)
+	must(t, e)
+	var works int
+	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM channel_work WHERE kind='batch' AND resource=$1`, b.ID).Scan(&works))
+	if works != 0 {
+		t.Fatal("batch reported without an identity", works)
+	}
+	_, e = admin.Pool.Exec(ctx, `INSERT INTO identities(tenant_id,channel_id,external_id) VALUES($1,$2,'4242')`, tenant, channel)
+	must(t, e)
+	b, e = s.StartRefreshBatch(ctx, tenant, []string{kept}, "append", channel)
+	must(t, e)
+	must(t, s.refreshBatch(ctx, store.Task{Tenant: tenant, ID: b.ID, Type: "refresh_batch"}))
+	w, e := s.ClaimChannel(ctx, channel)
+	must(t, e)
+	if w == nil || w.Kind != "batch" || w.Resource != b.ID {
+		t.Fatalf("batch work %+v", w)
+	}
+	d, e := s.ChannelDelivery(ctx, channel, w.ID, w.Lease)
+	must(t, e)
+	if d.Chat != "4242" || d.Batch == nil || d.Batch.ID != b.ID || d.Batch.State != "complete" || d.Batch.Submitted != 1 {
+		t.Fatalf("batch delivery %+v %+v", d, d.Batch)
+	}
+	must(t, s.AckChannel(ctx, channel, w.ID, channelapi.Ack{Lease: w.Lease, MessageID: 7, Done: true}))
 }

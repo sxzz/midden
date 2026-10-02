@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"monitor/internal/channelapi"
+	"monitor/internal/domain"
 	"monitor/internal/telegram"
 )
 
@@ -254,6 +255,15 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 	bot.Blobs = mediaReader{r.API, w}
 	sender := bot.WithReplyTo(d.ReplyTo)
 	mid := w.MessageID
+	if d.Batch != nil {
+		// One message for the whole batch, edited until every capture finished.
+		id, e := sender.SendInteractive(ctx, d.Chat, batchMessage(*d.Batch), mid, nil)
+		if e != nil {
+			return e
+		}
+		done := d.Batch.State != "running" && d.Batch.Running == 0
+		return save(channelapi.Ack{MessageID: id, Done: done, RetrySeconds: 5})
+	}
 	if len(d.Legacy) > 0 && string(d.Legacy) != "null" {
 		var old struct {
 			Text     string
@@ -380,6 +390,42 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 		}
 	}
 	return save(channelapi.Ack{Done: true, Progress: len(parts), MessageID: mid})
+}
+
+func batchMessage(b domain.RefreshBatch) string {
+	mode := "完整更新"
+	if b.UpdateMode == "append" {
+		mode = "附加更新"
+	}
+	counts := func(parts ...any) string {
+		var out []string
+		for i := 0; i < len(parts); i += 2 {
+			if n := parts[i+1].(int); n > 0 {
+				out = append(out, fmt.Sprintf("%s %d", parts[i], n))
+			}
+		}
+		return strings.Join(out, " · ")
+	}
+	fetched := max(b.Complete-b.Reused, 0)
+	switch {
+	case b.State == "failed":
+		reason := "采集服务不可用"
+		if b.Error == "storage quota exceeded" {
+			reason = "存储空间不足"
+		}
+		return fmt.Sprintf("批量%s已中止：%s\n已提交 %d/%d", mode, reason, b.Submitted, b.Total)
+	case b.State == "running" || b.Running > 0:
+		text := fmt.Sprintf("批量%s中…\n已提交 %d/%d", mode, b.Submitted, b.Total)
+		if c := counts("抓取中", b.Running, "已抓取", fetched, "无变化", b.Reused, "失败", b.Failed); c != "" {
+			text += " · " + c
+		}
+		return text
+	}
+	text := fmt.Sprintf("批量%s完成，共 %d 项", mode, b.Total)
+	if c := counts("已抓取", fetched, "无变化", b.Reused, "不完整", b.Partial, "失败", b.Failed, "无法更新", b.Rejected); c != "" {
+		text += "\n" + c
+	}
+	return text
 }
 
 func collectionProgressMessage(id string, d channelapi.Delivery, webURL string) (string, telegram.Keyboard) {

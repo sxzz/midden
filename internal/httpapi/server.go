@@ -87,7 +87,12 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 			write(w, 400, map[string]string{"error": "invalid request"})
 			return
 		}
-		b, e := s.StartRefreshBatch(r.Context(), tenant(r), in.CollectionIDs, in.UpdateMode)
+		// Web sessions come from the bot, so its private chat gets the progress message.
+		channel := ""
+		if _, ok := r.Context().Value(sessionKey{}).(bool); ok {
+			channel = web.Channel
+		}
+		b, e := s.StartRefreshBatch(r.Context(), tenant(r), in.CollectionIDs, in.UpdateMode, channel)
 		respond(w, 202, b, e)
 	})
 	mux.HandleFunc("GET /v1/refresh-batches/{id}", func(w http.ResponseWriter, r *http.Request) {

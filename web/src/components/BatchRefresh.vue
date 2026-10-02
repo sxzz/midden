@@ -15,14 +15,12 @@ const modes: { value: UpdateMode; label: string; description: string }[] = [
   {
     value: 'append',
     label: '附加更新',
-    description:
-      '只抓取新增和有变动的内容。已完整保存、上次抓取后没有更新的帖子会跳过；Profile 会读取最新帖子列表，只保存新帖和编辑过的帖子。',
+    description: '只抓新增和有改动的内容',
   },
   {
     value: 'full',
     label: '完整更新',
-    description:
-      '重新抓取所选的全部内容；Profile 会重新检查最新一批帖子。内容没有变化时不会增加历史版本。',
+    description: '全部重新抓取',
   },
 ]
 const choosing = shallowRef(false)
@@ -49,18 +47,19 @@ const progress = computed(() => {
   const b = batch.value
   if (!b) return ''
   if (b.state === 'failed')
-    return `更新中止：${b.error === 'storage quota exceeded' ? '存储空间不足' : '采集服务暂时不可用'}`
-  if (!done.value)
-    return `正在更新 ${b.submitted}/${b.total}${b.running ? `，${b.running} 项抓取中` : ''}`
-  return [
-    `更新完成：${Math.max(b.complete - b.reused, 0)} 项已抓取`,
-    b.reused && `${b.reused} 项无变化`,
-    b.partial && `${b.partial} 项不完整`,
-    b.failed && `${b.failed} 项失败`,
-    b.rejected && `${b.rejected} 项已删除或无法更新`,
-  ]
-    .filter(Boolean)
-    .join('，')
+    return `已中止：${b.error === 'storage quota exceeded' ? '存储空间不足' : '采集服务不可用'}`
+  if (!done.value) return `更新中 ${b.submitted}/${b.total}`
+  const counts = [
+    ['已抓取', Math.max(b.complete - b.reused, 0)],
+    ['无变化', b.reused],
+    ['不完整', b.partial],
+    ['失败', b.failed],
+    ['无法更新', b.rejected],
+  ] as const
+  return `完成${counts
+    .filter(([, n]) => n)
+    .map(([label, n], i) => `${i ? ' · ' : '：'}${label} ${n}`)
+    .join('')}`
 })
 let timer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
@@ -141,10 +140,7 @@ function backdrop(event: MouseEvent) {
   >
     <div class="group">
       <p class="head">
-        <strong id="batch-title">更新 {{ selected.length }} 项收藏</strong
-        ><span
-          >更新在后台进行，关闭页面不会中断；较多内容受采集频率限制会分批抓取。</span
-        >
+        <strong id="batch-title">更新 {{ selected.length }} 项收藏</strong>
       </p>
       <button
         v-for="mode in modes"

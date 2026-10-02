@@ -92,8 +92,8 @@ test('select collections and refresh them in append mode', async ({ page }) => {
     collection_ids: [items[0].id, items[2].id],
     update_mode: 'append',
   })
-  await expect(page.getByText(/正在更新 1\/2，1 项抓取中/)).toBeVisible()
-  await expect(page.getByText('更新完成：1 项已抓取，1 项无变化')).toBeVisible()
+  await expect(page.getByText('更新中 1/2')).toBeVisible()
+  await expect(page.getByText('完成：已抓取 1 · 无变化 1')).toBeVisible()
   // The finished batch reloads the list so refreshed content shows.
   await expect.poll(() => listLoads).toBeGreaterThan(loadsBefore)
   await page.getByRole('button', { name: '完成' }).click()
