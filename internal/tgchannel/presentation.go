@@ -45,8 +45,22 @@ func appendMiniAppButton(keys telegram.Keyboard, id, webURL string) telegram.Key
 	return keys
 }
 
-func usageText(used, reserved, limit int64) string {
-	return fmt.Sprintf("已使用 %.1f MiB / %.1f MiB\n处理中预留 %.1f MiB", float64(used)/(1<<20), float64(limit)/(1<<20), float64(reserved)/(1<<20))
+func usageText(u domain.Usage) string {
+	mib := func(n int64) string {
+		if n >= 1<<30 {
+			return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
+		}
+		return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+	}
+	// An unlimited tenant has no limit worth printing.
+	text := "已用 " + mib(u.Used) + "，共 " + mib(u.Limit)
+	if u.Unlimited {
+		text = "已用 " + mib(u.Used) + "，不限额"
+	}
+	if u.Reserved > 0 {
+		text += "\n保存中 " + mib(u.Reserved)
+	}
+	return text
 }
 
 func collectionMessage(a domain.Collection, state string) string {

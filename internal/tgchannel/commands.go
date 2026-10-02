@@ -94,7 +94,7 @@ func (r *Runner) command(ctx context.Context, w channelapi.Work, event channelap
 		}
 	case "usage":
 		if v.Usage != nil {
-			out.Text = usageText(v.Usage.Used, v.Usage.Reserved, v.Usage.Limit)
+			out.Text = usageText(*v.Usage)
 		}
 	case "status":
 		if v.Job != nil {
