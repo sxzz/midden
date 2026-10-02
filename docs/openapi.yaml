@@ -543,11 +543,26 @@ components:
         running:
           {
             type: integer,
-            description: Captures started by this batch that are still queued or downloading. Collection members are not counted.,
+            description: Captures started by this batch that are still queued or downloading. Collection members are counted in members.,
           }
         complete: { type: integer }
         partial: { type: integer }
         failed: { type: integer }
+        members:
+          type: object
+          description: Captures that selected collections (such as profiles) started for their members, which finish after the collections themselves.
+          properties:
+            total: { type: integer }
+            complete: { type: integer }
+            partial: { type: integer }
+            failed: { type: integer }
+            pending: { type: integer }
+            done: { type: boolean }
+        done:
+          {
+            type: boolean,
+            description: Every submission and every member capture has finished.,
+          }
     Job:
       type: object
       properties:

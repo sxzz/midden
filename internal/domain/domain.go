@@ -215,4 +215,9 @@ type RefreshBatch struct {
 	Complete int `json:"complete"`
 	Partial  int `json:"partial"`
 	Failed   int `json:"failed"`
+	// Members covers the captures selected collections (such as profiles)
+	// started for their posts, which finish after the collections themselves.
+	Members MemberProgress `json:"members"`
+	// Done once every submission and every member capture has finished.
+	Done bool `json:"done"`
 }

@@ -132,7 +132,35 @@ func TestRefreshBatchModes(t *testing.T) {
 	}
 	var listing string
 	must(t, admin.Pool.QueryRow(ctx, `SELECT capture_ids[1] FROM refresh_batches WHERE id=$1`, b.ID).Scan(&listing))
-	expand(listing)
+	progress := func() RefreshBatch {
+		b, e := s.RefreshBatch(ctx, tenant, b.ID)
+		must(t, e)
+		return b
+	}
+	// The listing finishing does not finish the batch: its members are next.
+	complete(listing)
+	if p := progress(); p.Done || p.Running != 0 || p.Members.Done {
+		t.Fatalf("batch done before members were listed %+v", p)
+	}
+	var sid string
+	must(t, db.Tx(ctx, tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT id FROM submissions WHERE capture_id=$1 AND related_state='pending'`, listing).Scan(&sid)
+	}))
+	must(t, s.related(ctx, store.Task{Tenant: tenant, ID: sid, Type: "related"}))
+	// Unchanged members are reused and count as saved; the rest still run.
+	if p := progress(); p.Done || p.Members.Total != 4 || p.Members.Pending != 2 || p.Members.Complete != 2 {
+		t.Fatalf("batch member progress %+v", p.Members)
+	}
+	rows, e := admin.Pool.Query(ctx, `SELECT c.id FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.parent_submission=$1 AND c.state='queued'`, sid)
+	must(t, e)
+	queued, e := pgx.CollectRows(rows, pgx.RowTo[string])
+	must(t, e)
+	for _, id := range queued {
+		complete(id)
+	}
+	if p := progress(); !p.Done || !p.Members.Done || p.Members.Complete != 4 {
+		t.Fatalf("batch not done after members %+v", p)
+	}
 	for id, want := range map[string]int{prefix + "-kept": 1, prefix + "-undated": 1, prefix + "-edited": 2, prefix + "-new": 1} {
 		if got := captures(id); got != want {
 			t.Fatalf("%s captured %d times, want %d", id, got, want)

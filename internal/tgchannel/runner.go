@@ -261,8 +261,7 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 		if e != nil {
 			return e
 		}
-		done := d.Batch.State != "running" && d.Batch.Running == 0
-		return save(channelapi.Ack{MessageID: id, Done: done, RetrySeconds: 5})
+		return save(channelapi.Ack{MessageID: id, Done: d.Batch.Done, RetrySeconds: 5})
 	}
 	if len(d.Legacy) > 0 && string(d.Legacy) != "null" {
 		var old struct {
@@ -407,25 +406,37 @@ func batchMessage(b domain.RefreshBatch) string {
 		return strings.Join(out, " · ")
 	}
 	fetched := max(b.Complete-b.Reused, 0)
+	m := b.Members
+	// Profiles' posts finish after the profiles themselves.
+	posts := ""
+	if m.Total > 0 {
+		saved := counts("已保存", m.Complete, "不完整", m.Partial, "失败", m.Failed)
+		if !b.Done {
+			saved = counts("抓取中", m.Pending, "已保存", m.Complete, "不完整", m.Partial, "失败", m.Failed)
+		}
+		if saved != "" {
+			posts = "\n帖子：" + saved
+		}
+	}
 	switch {
-	case b.State == "failed":
+	case b.State == "failed" && b.Done:
 		reason := "采集服务不可用"
 		if b.Error == "storage quota exceeded" {
 			reason = "存储空间不足"
 		}
-		return fmt.Sprintf("批量%s已中止：%s\n已提交 %d/%d", mode, reason, b.Submitted, b.Total)
-	case b.State == "running" || b.Running > 0:
+		return fmt.Sprintf("批量%s已中止：%s\n已提交 %d/%d", mode, reason, b.Submitted, b.Total) + posts
+	case !b.Done:
 		text := fmt.Sprintf("批量%s中…\n已提交 %d/%d", mode, b.Submitted, b.Total)
 		if c := counts("抓取中", b.Running, "已抓取", fetched, "无变化", b.Reused, "失败", b.Failed); c != "" {
 			text += " · " + c
 		}
-		return text
+		return text + posts
 	}
 	text := fmt.Sprintf("批量%s完成，共 %d 项", mode, b.Total)
 	if c := counts("已抓取", fetched, "无变化", b.Reused, "不完整", b.Partial, "失败", b.Failed, "无法更新", b.Rejected); c != "" {
 		text += "\n" + c
 	}
-	return text
+	return text + posts
 }
 
 func collectionProgressMessage(id string, d channelapi.Delivery, webURL string) (string, telegram.Keyboard) {
