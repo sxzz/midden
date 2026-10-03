@@ -194,6 +194,9 @@ func release(c *pgxpool.Conn, tenant string, slot int) {
 	c.Release()
 }
 
+// How long a capture waits in place for its connection before it is snoozed.
+var connectionWait = 2 * time.Second
+
 func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if s.Registry != nil || len(s.adapterBindings()) > 0 {
 		var id string
@@ -236,10 +239,25 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		}
 		var acquired bool
 		connectionSlot := 0
-		for i := 0; i < max(1, s.Config.ConnectionConcurrency); i++ {
-			connectionSlot = i
-			e = lock.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext($1),$2)`, "connection:"+connection, i).Scan(&acquired)
-			if e != nil || acquired {
+		// Most captures hold a connection only briefly, so wait a moment for a
+		// turn: going back to the queue costs at least a second each time.
+		for deadline := time.Now().Add(connectionWait); ; {
+			for i := 0; i < max(1, s.Config.ConnectionConcurrency); i++ {
+				connectionSlot = i
+				e = lock.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext($1),$2)`, "connection:"+connection, i).Scan(&acquired)
+				if e != nil || acquired {
+					break
+				}
+			}
+			if e != nil || acquired || !time.Now().Before(deadline) {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				e = ctx.Err()
+			case <-time.After(25 * time.Millisecond):
+			}
+			if e != nil {
 				break
 			}
 		}
