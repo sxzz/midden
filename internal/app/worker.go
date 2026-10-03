@@ -494,9 +494,20 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 				return e
 			}
 		}
-		return s.Enqueue(ctx, tx, t.Tenant, t.ID, "finalize")
+		return s.finalizeSettled(ctx, tx, t.Tenant, t.ID)
 	})
 	return e
+}
+
+// finalizeSettled queues a capture's finalization once none of its assets is
+// pending. Callers hold the tenant lock, which orders the asset completions of
+// a capture, so the last one to settle sees the others done.
+func (s *Service) finalizeSettled(ctx context.Context, tx pgx.Tx, tenant, cid string) error {
+	var pending bool
+	if e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM assets WHERE capture_id=$1 AND state='pending')`, cid).Scan(&pending); e != nil || pending {
+		return e
+	}
+	return s.Enqueue(ctx, tx, tenant, cid, "finalize")
 }
 
 func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
@@ -649,7 +660,23 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 	})
 }
 
+// deliveries runs once a capture reaches its final state.
 func (s *Service) deliveries(ctx context.Context, tx pgx.Tx, t, cid string) error {
+	// Related captures wait for this one; start them now instead of on their
+	// fallback poll. A submission's related task is idempotent.
+	waiting, e := tx.Query(ctx, `SELECT id FROM submissions WHERE capture_id=$1 AND related_state='pending' AND NOT collection_stopped`, cid)
+	if e != nil {
+		return e
+	}
+	submissions, e := pgx.CollectRows(waiting, pgx.RowTo[string])
+	if e != nil {
+		return e
+	}
+	for _, id := range submissions {
+		if e = s.Enqueue(ctx, tx, t, id, "related"); e != nil {
+			return e
+		}
+	}
 	rows, e := tx.Query(ctx, `SELECT tenant_id,id FROM capture_deliveries($1)`, cid)
 	if e != nil {
 		return e
@@ -755,7 +782,7 @@ func (s *Service) fail(ctx context.Context, t store.Task, msg string) error {
 					return e
 				}
 			}
-			return s.Enqueue(ctx, tx, t.Tenant, cid, "finalize")
+			return s.finalizeSettled(ctx, tx, t.Tenant, cid)
 		case "related":
 			_, e := tx.Exec(ctx, `UPDATE submissions SET related_state='failed',related_error=$2 WHERE id=$1 AND related_state='pending'`, t.ID, msg)
 			return e

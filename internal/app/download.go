@@ -25,6 +25,9 @@ import (
 	"monitor/internal/store"
 )
 
+// How long a media task waits in place for another task handling the same file.
+var mediaWait = 2 * time.Second
+
 func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) {
 	started := time.Now()
 	stage := "lock_asset"
@@ -62,9 +65,21 @@ func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) 
 		return e
 	}
 	if cacheKey != "" {
-		e = c.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext($1),-2)`, cacheKey).Scan(&ok)
-		if e != nil {
-			return e
+		// The same file usually arrives from several captures at once and the
+		// first one settles it quickly, so wait a moment instead of requeueing.
+		for deadline := time.Now().Add(mediaWait); ; {
+			e = c.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext($1),-2)`, cacheKey).Scan(&ok)
+			if e != nil {
+				return e
+			}
+			if ok || !time.Now().Before(deadline) {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(25 * time.Millisecond):
+			}
 		}
 		if !ok {
 			return river.JobSnooze(time.Second)
@@ -315,7 +330,7 @@ func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) 
 		if e = s.enqueueThumbnail(ctx, tx, t.Tenant, bid); e != nil {
 			return e
 		}
-		return s.Enqueue(ctx, tx, t.Tenant, cid, "finalize")
+		return s.finalizeSettled(ctx, tx, t.Tenant, cid)
 	})
 }
 
