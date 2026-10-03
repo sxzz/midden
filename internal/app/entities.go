@@ -312,7 +312,7 @@ func attachCurrentProfiles(ctx context.Context, tx pgx.Tx, collections ...*domai
 	if len(ids) == 0 {
 		return nil
 	}
-	rows, err := tx.Query(ctx, `SELECT latest.entity_id,latest.id,latest.data,a.id,a.purpose,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,'')
+	rows, err := tx.Query(ctx, `SELECT latest.entity_id,latest.id,latest.data,a.id,a.purpose,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,''),EXISTS(SELECT FROM blob_thumbnails t WHERE t.blob_id=a.blob_id AND t.state='ready')
  FROM (SELECT DISTINCT ON (ev.entity_id) ev.entity_id,ev.id,ev.data,r.capture_id,r.payload,re.entity_key
   FROM entity_versions ev
   JOIN revision_entities re ON re.entity_version_id=ev.id
@@ -339,11 +339,12 @@ func attachCurrentProfiles(ctx context.Context, tx pgx.Tx, collections ...*domai
 		var sensitive *bool
 		var hash, mime, key string
 		var size int64
-		if err = rows.Scan(&entity, &v.ID, &v.Data, &assetID, &purpose, &position, &alt, &sensitive, &state, &errText, &hash, &mime, &size, &key); err != nil {
+		var thumbnail bool
+		if err = rows.Scan(&entity, &v.ID, &v.Data, &assetID, &purpose, &position, &alt, &sensitive, &state, &errText, &hash, &mime, &size, &key, &thumbnail); err != nil {
 			return err
 		}
 		if assetID != nil {
-			v.Assets = []domain.Asset{{ID: *assetID, Purpose: *purpose, Position: *position, AltText: *alt, Sensitive: *sensitive, State: *state, Error: *errText, Hash: hash, MIME: mime, Size: size, Key: key}}
+			v.Assets = []domain.Asset{{ID: *assetID, Purpose: *purpose, Position: *position, AltText: *alt, Sensitive: *sensitive, State: *state, Error: *errText, Hash: hash, MIME: mime, Size: size, Key: key, Thumbnail: thumbnail}}
 		}
 		current[entity] = &v
 	}
@@ -396,7 +397,7 @@ func attachSavedAvatars(ctx context.Context, tx pgx.Tx, collections ...*domain.C
 	}
 	// Only the saved collection's root entity owns the avatar, never another
 	// account mentioned in the same capture. One query for the whole batch.
-	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (c.id) c.id,a.id,a.purpose,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,'')
+	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (c.id) c.id,a.id,a.purpose,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,''),EXISTS(SELECT FROM blob_thumbnails t WHERE t.blob_id=a.blob_id AND t.state='ready')
  FROM unnest($1::uuid[]) c(id)
  JOIN revisions r ON r.id=visible_head(c.id)
  JOIN revision_entities re ON re.revision_id=r.id AND re.is_root
@@ -412,7 +413,7 @@ func attachSavedAvatars(ctx context.Context, tx pgx.Tx, collections ...*domain.C
 	for rows.Next() {
 		var id string
 		var a domain.Asset
-		if err = rows.Scan(&id, &a.ID, &a.Purpose, &a.Position, &a.AltText, &a.Sensitive, &a.State, &a.Error, &a.Hash, &a.MIME, &a.Size, &a.Key); err != nil {
+		if err = rows.Scan(&id, &a.ID, &a.Purpose, &a.Position, &a.AltText, &a.Sensitive, &a.State, &a.Error, &a.Hash, &a.MIME, &a.Size, &a.Key, &a.Thumbnail); err != nil {
 			rows.Close()
 			return err
 		}

@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
-import { assetURL, type Collection } from '../api'
+import { previewURL, type Collection } from '../api'
 import {
   date,
   mentionParts,
@@ -76,7 +76,7 @@ const warnings = computed(() => warningList(props.collection.warnings))
       >
         <LoadingImage
           class="avatar"
-          :src="assetURL(avatarAssets[0]!)"
+          :src="previewURL(avatarAssets[0]!)"
           alt=""
         /></button
       ><span v-else class="avatar initials" aria-hidden="true">{{

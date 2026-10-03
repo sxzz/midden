@@ -293,6 +293,9 @@ func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) 
 		if _, e = tx.Exec(ctx, `UPDATE assets SET state='ready',blob_id=$2,reserved_bytes=$3 WHERE id=$1`, t.ID, bid, charge); e != nil {
 			return e
 		}
+		if e = s.enqueueThumbnail(ctx, tx, t.Tenant, bid); e != nil {
+			return e
+		}
 		return s.Enqueue(ctx, tx, t.Tenant, cid, "finalize")
 	})
 }

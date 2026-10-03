@@ -71,6 +71,9 @@ func (s *Service) reuseMedia(ctx context.Context, t store.Task, key string) (boo
 			return err
 		}
 		hit = true
+		if err = s.enqueueThumbnail(ctx, tx, t.Tenant, bid); err != nil {
+			return err
+		}
 		return s.Enqueue(ctx, tx, t.Tenant, cid, "finalize")
 	})
 	return hit, err

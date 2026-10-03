@@ -622,3 +622,65 @@ test('list media loads only near the viewport and leaves the API ahead', async (
   await expect.poll(() => requested.has('video-19')).toBe(true)
   await expect.poll(() => requested.has('image-19')).toBe(true)
 })
+
+test('lists show thumbnails; the open post loads the originals', async ({
+  page,
+}) => {
+  const pixel = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=',
+    'base64',
+  )
+  const post = {
+    ...collection,
+    assets: [
+      {
+        id: 'photo',
+        state: 'ready',
+        mime: 'image/png',
+        sensitive: false,
+        thumbnail: true,
+      },
+      {
+        id: 'clip',
+        state: 'ready',
+        mime: 'video/mp4',
+        sensitive: false,
+        thumbnail: true,
+      },
+      // Not rendered yet, so the list falls back to the original.
+      { id: 'fresh', state: 'ready', mime: 'image/png', sensitive: false },
+    ],
+  }
+  const requested: string[] = []
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path.startsWith('/v1/assets/')) {
+      requested.push(path.slice('/v1/assets/'.length))
+      return r.fulfill({ contentType: 'image/png', body: pixel })
+    }
+    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/collections')
+      return r.fulfill({ json: { items: [post] } })
+    if (path === `/v1/collections/${id}`) return r.fulfill({ json: post })
+    if (path.endsWith('/availability'))
+      return r.fulfill({ json: { available: true } })
+    if (path.endsWith('/revisions')) return r.fulfill({ json: { items: [] } })
+    if (path.endsWith('/annotation'))
+      return r.fulfill({ json: { note: '', tags: [] } })
+    return r.fulfill({ json: [] })
+  })
+  await page.goto('/app/')
+  const thumbs = page.locator('.row .thumbs')
+  await expect(thumbs.locator('img')).toHaveCount(3)
+  // The video tile is a still image with its play mark, not a video element.
+  await expect(thumbs.locator('video')).toHaveCount(0)
+  await expect(thumbs.locator('.play')).toHaveCount(1)
+  await expect
+    .poll(() => requested.toSorted())
+    .toEqual(['clip/thumbnail', 'fresh', 'photo/thumbnail'])
+  await page.locator('.row .head').click()
+  await expect(page.locator('.post')).toBeVisible()
+  await expect.poll(() => requested.includes('photo')).toBe(true)
+  await expect.poll(() => requested.includes('clip')).toBe(true)
+})

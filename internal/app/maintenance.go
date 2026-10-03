@@ -70,6 +70,9 @@ func (s *Service) Maintain(ctx context.Context) error {
 	if e = s.Collect(ctx, time.Duration(graceHours)*time.Hour); e != nil {
 		return e
 	}
+	if e = s.backfillThumbnails(ctx); e != nil {
+		return e
+	}
 	rows, e = s.DB.Pool.Query(ctx, `SELECT queue,state,count(*) FROM river_job GROUP BY queue,state`)
 	if e != nil {
 		return e

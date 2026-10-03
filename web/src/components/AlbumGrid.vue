@@ -51,7 +51,7 @@ const placeholders = 12
       @click="$emit('select', tile.key)"
     >
       <span class="media">
-        <MediaPreview :asset="tile.asset" />
+        <MediaPreview :asset="tile.asset" thumbnail />
         <span v-if="isVideo(tile.asset)" class="play" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="currentColor">
             <path d="M8 5.5v13l11-6.5z" />

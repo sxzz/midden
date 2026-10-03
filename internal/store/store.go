@@ -101,7 +101,7 @@ func (t Task) InsertOpts() river.InsertOpts {
 	switch t.Type {
 	case "capture":
 		q = "capture"
-	case "download":
+	case "download", "thumbnail":
 		q = "download"
 	}
 	return river.InsertOpts{Queue: q, MaxAttempts: 3}

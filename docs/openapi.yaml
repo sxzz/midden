@@ -423,6 +423,14 @@ paths:
             application/json:
               schema: {}
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/assets/{id}/thumbnail:
+    get:
+      summary: Small derived image of authorized saved media (a still frame for video)
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses:
+        "200":
+          { description: WebP or JPEG image; immutable for its URL's lifetime }
+        "404": { description: Not found, not authorized, or no thumbnail yet }
   /v1/assets/{id}:
     head:
       summary: Read authorized media headers without a body
@@ -746,6 +754,11 @@ components:
         sha256: { type: string }
         mime: { type: string }
         size: { type: integer, format: int64 }
+        thumbnail:
+          {
+            type: boolean,
+            description: "A small derived image is ready at /v1/assets/{id}/thumbnail",
+          }
     Entity:
       type: object
       properties:

@@ -80,6 +80,7 @@ const overflow = computed(() => media.value.length - tiles.value.length)
             asset.mime?.startsWith('image/') || asset.mime?.startsWith('video/')
           "
           :asset="asset"
+          thumbnail
         />
         <span v-else class="veil">文件</span>
         <span

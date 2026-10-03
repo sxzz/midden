@@ -191,6 +191,17 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		serveAsset(w, r, s.Blobs, a)
 	})
 
+	mux.HandleFunc("GET /v1/assets/{id}/thumbnail", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
+			return
+		}
+		a, e := s.Thumbnail(r.Context(), tenant(r), r.PathValue("id"))
+		if e != nil {
+			respond(w, 200, nil, e)
+			return
+		}
+		serveAsset(w, r, s.Blobs, a)
+	})
 	mux.HandleFunc("GET /v1/session", func(w http.ResponseWriter, r *http.Request) { write(w, 200, map[string]string{"tenant_id": tenant(r)}) })
 	mux.HandleFunc("DELETE /v1/session", func(w http.ResponseWriter, r *http.Request) {
 		if c, e := r.Cookie(sessionCookie); e == nil {

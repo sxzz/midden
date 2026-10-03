@@ -513,7 +513,7 @@ func assets(ctx context.Context, tx pgx.Tx, cid string) ([]domain.Asset, error) 
 }
 
 func assetsByCapture(ctx context.Context, tx pgx.Tx, cids []string) (out map[string][]domain.Asset, e error) {
-	rows, e := tx.Query(ctx, `SELECT a.capture_id,a.id,a.purpose,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,'') FROM assets a LEFT JOIN blobs b ON b.id=a.blob_id WHERE a.capture_id=ANY($1::uuid[]) ORDER BY a.capture_id,a.position`, cids)
+	rows, e := tx.Query(ctx, `SELECT a.capture_id,a.id,a.purpose,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,''),EXISTS(SELECT FROM blob_thumbnails t WHERE t.blob_id=a.blob_id AND t.state='ready') FROM assets a LEFT JOIN blobs b ON b.id=a.blob_id WHERE a.capture_id=ANY($1::uuid[]) ORDER BY a.capture_id,a.position`, cids)
 	if e != nil {
 		return nil, e
 	}
@@ -525,7 +525,7 @@ func assetsByCapture(ctx context.Context, tx pgx.Tx, cids []string) (out map[str
 	for rows.Next() {
 		var a domain.Asset
 		var cid string
-		if e = rows.Scan(&cid, &a.ID, &a.Purpose, &a.Position, &a.AltText, &a.Sensitive, &a.State, &a.Error, &a.Hash, &a.MIME, &a.Size, &a.Key); e != nil {
+		if e = rows.Scan(&cid, &a.ID, &a.Purpose, &a.Position, &a.AltText, &a.Sensitive, &a.State, &a.Error, &a.Hash, &a.MIME, &a.Size, &a.Key, &a.Thumbnail); e != nil {
 			return nil, e
 		}
 		out[cid] = append(out[cid], a)
@@ -537,6 +537,16 @@ func (s *Service) Asset(ctx context.Context, t, id string) (a domain.Asset, e er
 	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT a.id,b.object_key,b.mime,b.size,b.hash FROM assets a JOIN blobs b ON b.id=a.blob_id WHERE a.id=$1 AND a.state='ready'`, id).Scan(&a.ID, &a.Key, &a.MIME, &a.Size, &a.Hash)
 	})
+	return
+}
+
+// Thumbnail resolves the small derived image of a ready asset, if one was made.
+func (s *Service) Thumbnail(ctx context.Context, t, id string) (a domain.Asset, e error) {
+	e = s.DB.Tx(ctx, t, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT a.id,th.object_key,th.mime,th.size FROM assets a JOIN blob_thumbnails th ON th.blob_id=a.blob_id AND th.state='ready' WHERE a.id=$1 AND a.state='ready'`, id).Scan(&a.ID, &a.Key, &a.MIME, &a.Size)
+	})
+	// Object keys are never reused, so the key identifies these bytes for caching.
+	a.Hash = store.Hash(a.Key)
 	return
 }
 
