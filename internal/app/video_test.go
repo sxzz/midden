@@ -120,13 +120,4 @@ func TestVideoCache(t *testing.T) {
 	if downloads.Load() != 2 {
 		t.Fatal("stored media downloaded again", downloads.Load())
 	}
-	s.Config.MaxVideoBytes = 64
-	j, e := s.Submit(ctx, a, domain.CaptureInput{URL: "https://x.com/a/status/980006"})
-	must(t, e)
-	must(t, s.capture(ctx, store.Task{Tenant: a, ID: j.ID}))
-	var aid string
-	must(t, admin.Pool.QueryRow(ctx, `SELECT id FROM assets WHERE capture_id=$1`, j.ID).Scan(&aid))
-	if s.download(ctx, store.Task{Tenant: a, ID: aid}) == nil {
-		t.Fatal("cached video bypassed size limit")
-	}
 }

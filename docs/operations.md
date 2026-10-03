@@ -135,8 +135,6 @@ monitorctl channel-create <stable-channel-uuid> <bot-numeric-id>
 | `download_workers`          | `8`          | 图片下载 worker 数                      |
 | `control_workers`           | `4`          | 控制任务 worker 数                      |
 | `delivery_workers`          | `2`          | 旧投递 worker 配置，独立 channel 不使用 |
-| `max_image_bytes`           | `20971520`   | 单图最大字节数                          |
-| `max_video_bytes`           | `536870912`  | 单个视频最大字节数                      |
 | `max_media`                 | `20`         | 每帖最多媒体数                          |
 
 两个保留期参数在下一轮维护任务生效，默认每分钟运行一次。更改收藏保留期会应用于所有尚未清理的收藏，时间从最后一条保存记录删除时开始计算；已物理清理的内容不会恢复。其他参数由核心启动时加载，修改后执行 `docker compose restart core`。CLI 创建租户直接使用数据库中的默认额度。
