@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { CaptureStrategy } from "./strategy.js";
 import {
   normalizeProfile,
@@ -547,4 +548,82 @@ test("a renamed or suspended handle falls back to the post's own answer", async 
     "public-post",
     "profile:123",
   ]);
+});
+test("posts listed by a public timeline are captured without a request of their own", async () => {
+  const listedPost = JSON.parse(
+    readFileSync(new URL("./testdata/post.json", import.meta.url), "utf8"),
+  ).status;
+  const page = "https://api.fxtwitter.com/2/profile/id:123/statuses?count=100";
+  let now = 0;
+  const posts: string[] = [];
+  let profiles = 0;
+  const strategy = new CaptureStrategy(
+    async (id) => {
+      posts.push(id);
+      return post("fxtwitter");
+    },
+    async (id) =>
+      ++profiles &&
+      normalizeProfile(
+        { ...user, id: id.startsWith("handle:") ? user.id : id },
+        id,
+        "fxtwitter",
+      ),
+    undefined,
+    undefined,
+    () => now,
+  );
+  strategy.timeline = async (
+    _result,
+    _signal,
+    _fetcher,
+    _cursor,
+    _size,
+    onPost,
+  ) => {
+    onPost!(
+      { ...listedPost, reposted_by: { id: "123", screen_name: "fixture" } },
+      page,
+    );
+    onPost!({ ...listedPost, id: "43", article: {} }, page);
+  };
+  await strategy.fetch(request("profile"), AbortSignal.timeout(1000));
+  const member = {
+    ...request("post", "fxtwitter"),
+    url: `https://x.com/i/web/status/${listedPost.id}`,
+    externalId: listedPost.id,
+    automatic: true,
+  };
+  const listed = await strategy.fetch(member, AbortSignal.timeout(1000));
+  assert.deepEqual(posts, []);
+  // The listing also describes the author: only the timeline's profile was asked for.
+  assert.equal(profiles, 1);
+  const author = listed.graph!.entities.find((e) => e.key === "author")!;
+  assert.equal(
+    JSON.parse(Buffer.from(author.dataJson).toString()).metadata.id,
+    listedPost.author.id,
+  );
+  assert.equal(listed.text, listedPost.text);
+  assert.equal(listed.sourceResponses[0].sourceUrl, page);
+  assert.equal(
+    JSON.parse(Buffer.from(listed.sourceResponses[0].body).toString()).id,
+    listedPost.id,
+  );
+  // The repost belongs to the timeline, not to the post.
+  assert.equal(
+    listed.graph!.relations.some((r) => r.type === "reposted"),
+    false,
+  );
+  // Explicit captures, articles and expired listings ask upstream.
+  await strategy.fetch(
+    { ...member, automatic: false },
+    AbortSignal.timeout(1000),
+  );
+  await strategy.fetch(
+    { ...member, url: "https://x.com/i/web/status/43", externalId: "43" },
+    AbortSignal.timeout(1000),
+  );
+  now = 30 * 60_000;
+  await strategy.fetch(member, AbortSignal.timeout(1000));
+  assert.deepEqual(posts, [listedPost.id, "43", listedPost.id]);
 });

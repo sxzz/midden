@@ -2,6 +2,7 @@ import { attachEntities } from "./entities.js";
 import { status, Metadata } from "@grpc/grpc-js";
 import {
   FetchResponse,
+  SourceResponse,
   Visibility,
 } from "./generated/api/adapter/v1/adapter.js";
 
@@ -255,6 +256,20 @@ export async function fetchPublic(
       response.headers.get("retry-after"),
       upstreamReason(data),
     );
+  return publicPost(data.status, id, {
+    body: rawBody,
+    contentType: response.headers.get("content-type") ?? "application/json",
+    sourceUrl: `${endpoint}/${id}`,
+    visibility: Visibility.VISIBILITY_PUBLIC,
+  });
+}
+
+/** Normalizes a public API status, whichever public response carried it. */
+export function publicPost(
+  post: any,
+  id: string,
+  source: SourceResponse,
+): FetchResponse {
   const containsProtectedAuthor = (
     post: any,
     seen = new Set<any>(),
@@ -267,24 +282,12 @@ export async function fetchPublic(
       containsProtectedAuthor(post.repost, seen)
     );
   };
-  if (containsProtectedAuthor(data.status))
+  if (containsProtectedAuthor(post))
     throw new ProviderError(
       status.FAILED_PRECONDITION,
       "public provider cannot save private posts",
     );
-  const result = normalize(
-    data.status,
-    id,
-    "fxtwitter",
-    Visibility.VISIBILITY_PUBLIC,
-  );
-  result.sourceResponses = [
-    {
-      body: rawBody,
-      contentType: response.headers.get("content-type") ?? "application/json",
-      sourceUrl: `${endpoint}/${id}`,
-      visibility: Visibility.VISIBILITY_PUBLIC,
-    },
-  ];
+  const result = normalize(post, id, "fxtwitter", Visibility.VISIBILITY_PUBLIC);
+  result.sourceResponses = [source];
   return result;
 }
