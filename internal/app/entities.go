@@ -215,6 +215,11 @@ func (s *Service) Entity(ctx context.Context, tenant, id string) (v domain.Entit
 // not to the shared entity snapshot. Only collections rooted at the entity count.
 // Scope-specific snapshots may link across scopes when both the source entity
 // and canonical target are visible and the tenant has saved the target.
+//
+// Both branches pin their starting point in a subquery that cannot be
+// flattened (OFFSET 0). The planner underrates the row-level read check, so
+// left free it walked every saved collection's head, or hashed every root in
+// the database, running that check on each row.
 func linkSavedEntities(ctx context.Context, tx pgx.Tx, collections ...*domain.Collection) error {
 	ids := []string{}
 	seen := map[string]bool{}
@@ -236,14 +241,13 @@ func linkSavedEntities(ctx context.Context, tx pgx.Tx, collections ...*domain.Co
 		return nil
 	}
 	rows, err := tx.Query(ctx, `WITH candidates AS (
- SELECT source.id AS entity_id,c.id,tc.created_at,0 AS priority
- FROM entities source
- JOIN entity_versions ev ON ev.entity_id=source.id
- JOIN revision_entities re ON re.entity_version_id=ev.id AND re.is_root
- JOIN revisions rv ON rv.id=re.revision_id
+ SELECT rooted.entity_id,c.id,tc.created_at,0 AS priority
+ FROM (SELECT ev.entity_id,re.revision_id FROM entity_versions ev
+  JOIN revision_entities re ON re.entity_version_id=ev.id AND re.is_root
+  WHERE ev.entity_id=ANY($1::uuid[]) OFFSET 0) rooted
+ JOIN revisions rv ON rv.id=rooted.revision_id
  JOIN collections c ON c.id=rv.collection_id AND visible_head(c.id)=rv.id
  JOIN tenant_collections tc ON tc.collection_id=c.id
- WHERE source.id=ANY($1::uuid[])
  UNION ALL
  SELECT source.id,c.id,tc.created_at,1 AS priority
  FROM entities source
@@ -252,7 +256,8 @@ func linkSavedEntities(ctx context.Context, tx pgx.Tx, collections ...*domain.Co
  JOIN collections c ON c.id=alias.collection_id AND c.platform=alias.platform
   AND c.kind=alias.kind AND c.object_scope=alias.object_scope
  JOIN tenant_collections tc ON tc.collection_id=c.id
- JOIN revision_entities re ON re.revision_id=visible_head(c.id) AND re.is_root
+ CROSS JOIN LATERAL (SELECT visible_head(c.id) AS id OFFSET 0) head
+ JOIN revision_entities re ON re.revision_id=head.id AND re.is_root
  JOIN entity_versions ev ON ev.id=re.entity_version_id
  JOIN entities target ON target.id=ev.entity_id AND target.kind=source.kind
   AND target.platform=source.platform
