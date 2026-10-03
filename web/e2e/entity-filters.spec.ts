@@ -32,15 +32,14 @@ const profile = {
   },
 }
 
-test('entity defaults, switching, resetting and mobile statistic layout', async ({
+test('entity tabs keep their own filters and mobile statistic layout', async ({
   page,
 }) => {
-  const queries: string[] = []
+  const queries: URLSearchParams[] = []
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {
     const url = new URL(r.request().url())
-    if (url.pathname === '/v1/collections')
-      queries.push(url.searchParams.get('entity_type') || '')
+    if (url.pathname === '/v1/collections') queries.push(url.searchParams)
     return r.fulfill({
       json:
         url.pathname === `/v1/collections/${id}`
@@ -50,36 +49,46 @@ test('entity defaults, switching, resetting and mobile statistic layout', async 
             : { items: [profile] },
     })
   })
+  const type = () => queries.at(-1)?.get('entity_type')
   await page.goto('/app/')
   await expect(page.getByRole('button', { name: /测试账号/ })).toBeVisible()
-  expect(queries.at(-1)).toBe('x.post')
+  expect(type()).toBe('x.post')
+  const posts = page.getByRole('tab', { name: '帖子' })
+  const accounts = page.getByRole('tab', { name: '账号' })
+  await expect(posts).toHaveAttribute('aria-selected', 'true')
   await page.getByRole('button', { name: /^筛选/ }).click()
-  await page.locator('summary[aria-label="类型"]').click()
-  await expect(page.getByRole('searchbox', { name: '搜索类型' })).toHaveCount(0)
-  const post = page.getByRole('option', { name: 'X 帖子', exact: true })
-  const account = page.getByRole('option', { name: 'X 账号', exact: true })
-  await expect(post).toHaveAttribute('aria-selected', 'true')
-  await account.click()
-  await expect.poll(() => queries.at(-1)).toBe('x.post,x.profile')
-  await page.reload()
+  await page.getByLabel('可见性').selectOption('public')
+  await expect.poll(() => queries.at(-1)?.get('visibility')).toBe('public')
+  await accounts.click()
+  await expect(accounts).toHaveAttribute('aria-selected', 'true')
+  await expect.poll(type).toBe('x.profile')
+  // The posts tab's filter stays with the posts tab.
+  expect(queries.at(-1)?.get('visibility')).toBeNull()
   await page.getByRole('button', { name: /^筛选/ }).click()
-  await page.locator('summary[aria-label="类型"]').click()
-  await expect(post).toHaveAttribute('aria-selected', 'true')
-  await expect(account).toHaveAttribute('aria-selected', 'true')
-  await post.click()
-  await expect.poll(() => queries.at(-1)).toBe('x.profile')
+  // An account has no author, media or sensitivity to filter by.
+  await expect(page.locator('summary[aria-label="作者"]')).toHaveCount(0)
+  await expect(page.locator('summary[aria-label="媒体类型"]')).toHaveCount(0)
+  await expect(page.getByLabel('敏感内容', { exact: true })).toHaveCount(0)
+  await page.getByLabel('可见性').selectOption('private')
+  await expect.poll(() => queries.at(-1)?.get('visibility')).toBe('private')
+  expect(type()).toBe('x.profile')
+  const requests = queries.length
+  await posts.click()
+  await expect(page.getByLabel('可见性')).toHaveValue('public')
+  await accounts.click()
+  await expect(page.getByLabel('可见性')).toHaveValue('private')
+  // Both lists were cached, so neither switch reached the server.
+  expect(queries.length).toBe(requests)
   await page.reload()
-  await expect(page.getByRole('button', { name: /^筛选/ })).toContainText(
-    'X 账号',
-  )
-  await page.getByRole('button', { name: /^筛选/ }).click()
-  await page.locator('summary[aria-label="类型"]').click()
-  await account.click()
-  await expect.poll(() => queries.at(-1)).toBe('')
-  await page.reload()
-  await expect.poll(() => queries.at(-1)).toBe('')
+  await expect(accounts).toHaveAttribute('aria-selected', 'true')
+  await expect.poll(type).toBe('x.profile')
+  expect(queries.at(-1)?.get('visibility')).toBe('private')
+  // Clearing drops the filters, not the tab.
   await page.getByRole('button', { name: '清除', exact: true }).click()
-  await expect.poll(() => queries.at(-1)).toBe('x.post')
+  await expect.poll(() => queries.at(-1)?.get('visibility')).toBeNull()
+  expect(type()).toBe('x.profile')
+  await expect(accounts).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('button', { name: '清除' })).toHaveCount(0)
   await page.getByRole('button', { name: /测试账号/ }).click()
   for (const width of [320, 390, 560]) {
     await page.setViewportSize({ width, height: 844 })
@@ -118,9 +127,6 @@ test('Chinese filters support multiple media, date bounds and storage order', as
   await page.goto('/app/')
   await expect(page.locator('.row .storage')).toContainText('2.0 MB')
   await page.getByRole('button', { name: /^筛选/ }).click()
-  await expect(page.locator('summary[aria-label="类型"]')).toContainText(
-    'X 帖子',
-  )
   await page.locator('summary[aria-label="媒体类型"]').click()
   await page.getByRole('option', { name: '图片', exact: true }).click()
   await page.getByRole('option', { name: '视频', exact: true }).click()

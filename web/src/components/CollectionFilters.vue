@@ -35,7 +35,8 @@ function read(query: string) {
     order: params.get('order') || 'desc',
     sort: params.get('sort') || 'captured',
     q: params.get('q') || '',
-    entity: (params.get('entity_type') ?? 'x.post').split(',').filter(Boolean),
+    // Which tab this form belongs to; it rides along but is never edited here.
+    entity: params.get('entity_type') === 'x.profile' ? 'x.profile' : '',
     media: (params.get('media_type') || '').split(',').filter(Boolean),
     visibility: params.get('visibility') || '',
     sensitive: params.get('sensitive') || '',
@@ -45,10 +46,8 @@ function read(query: string) {
 }
 type Form = ReturnType<typeof read>
 const form = reactive(read(props.query))
-const entityOptions = [
-  { value: 'x.post', label: 'X 帖子' },
-  { value: 'x.profile', label: 'X 账号' },
-]
+// Authors, media and sensitivity describe posts; an account has none of them.
+const posts = computed(() => !form.entity)
 const mediaNames: Record<string, string> = {
   image: '图片',
   video: '视频',
@@ -78,13 +77,6 @@ const active = computed(() =>
     form.tag
       ? tags.value.find((tag) => tag.id === form.tag)?.name || '已选标签'
       : '',
-    form.entity
-      .map(
-        (value) =>
-          entityOptions.find((option) => option.value === value)?.label ||
-          value,
-      )
-      .join('、'),
     form.media.map((type) => mediaNames[type]).join('、'),
     // Authors are selected by identity; only their names are worth showing.
     form.authors.map((id) => authorNames.value[id] || id).join('、'),
@@ -114,9 +106,9 @@ function stringify(f: Form) {
     ['sensitive', f.sensitive],
     ['from_date', f.from],
     ['to_date', f.to],
+    ['entity_type', f.entity],
   ])
     if (v) q.set(k, v)
-  q.set('entity_type', f.entity.join(','))
   for (const author of f.authors) q.append('author', author)
   return q.toString()
 }
@@ -135,16 +127,24 @@ function search() {
   emit('search', query)
 }
 function clear() {
-  const layout = form.layout
-  Object.assign(form, read(''), { layout })
+  const { layout, entity } = form
+  Object.assign(form, read(''), { layout, entity })
   settled = build()
-  emit('search', layout ? 'layout=album' : '')
+  const q = new URLSearchParams()
+  if (layout) q.set('layout', layout)
+  if (entity) q.set('entity_type', entity)
+  emit('search', q.toString())
 }
+/** The tab itself is not a filter, so it alone leaves nothing to clear. */
+const clearable = computed(() => {
+  const q = new URLSearchParams(props.query)
+  q.delete('entity_type')
+  return q.size > 0
+})
 // Every discrete control applies itself; only the keyword box waits for Enter.
 watch(
   () => [
     form.tag,
-    form.entity.join(','),
     form.sort,
     form.order,
     form.visibility,
@@ -194,7 +194,7 @@ async function loadAuthors() {
 watch(
   open,
   (value) => {
-    if (value && !authorsLoaded) void loadAuthors()
+    if (value && posts.value && !authorsLoaded) void loadAuthors()
   },
   { immediate: true },
 )
@@ -262,7 +262,12 @@ const tagFilter = computed({
         ><span v-if="active" class="active">{{ active }}</span>
         <ChevronIcon :open="open" />
       </button>
-      <button v-if="query" type="button" class="toggle reset" @click="clear">
+      <button
+        v-if="clearable"
+        type="button"
+        class="toggle reset"
+        @click="clear"
+      >
         清除
       </button>
       <span class="sort"
@@ -273,7 +278,7 @@ const tagFilter = computed({
             @change="form.sort = ($event.target as HTMLSelectElement).value"
           >
             <option value="captured">采集时间</option>
-            <option value="published">发帖时间</option>
+            <option v-if="posts" value="published">发帖时间</option>
             <option value="storage">存储空间</option></select
           ><ChevronIcon class="select-chevron" /></span
         ><span class="select"
@@ -310,28 +315,24 @@ const tagFilter = computed({
           </button>
         </p>
       </div>
-      <MultiSelect
-        v-model="form.entity"
-        label="类型"
-        :options="entityOptions"
-        :searchable="false"
-      />
-      <MultiSelect
-        v-model="form.authors"
-        label="作者"
-        :options="authorOptions"
-      />
-      <p v-if="authorsLoading" class="hint" role="status">正在加载作者…</p>
-      <p v-if="authorError" class="hint" role="alert">
-        {{ authorError }}
-        <button type="button" @click="loadAuthors">重试</button>
-      </p>
-      <MultiSelect
-        v-model="form.media"
-        label="媒体类型"
-        :options="mediaOptions"
-        :searchable="false"
-      />
+      <template v-if="posts">
+        <MultiSelect
+          v-model="form.authors"
+          label="作者"
+          :options="authorOptions"
+        />
+        <p v-if="authorsLoading" class="hint" role="status">正在加载作者…</p>
+        <p v-if="authorError" class="hint" role="alert">
+          {{ authorError }}
+          <button type="button" @click="loadAuthors">重试</button>
+        </p>
+        <MultiSelect
+          v-model="form.media"
+          label="媒体类型"
+          :options="mediaOptions"
+          :searchable="false"
+        />
+      </template>
       <label class="option"
         >可见性<span class="select"
           ><select v-model="form.visibility">
@@ -340,7 +341,7 @@ const tagFilter = computed({
             <option value="private">私密</option></select
           ><ChevronIcon class="select-chevron" /></span
       ></label>
-      <label class="option"
+      <label v-if="posts" class="option"
         >敏感内容<span class="select"
           ><select v-model="form.sensitive" aria-label="敏感内容">
             <option value="">全部</option>

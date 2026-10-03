@@ -49,11 +49,20 @@ test('filter changes apply immediately without collapsing controls', async ({
   )
   expect(tags[0]!.y).toBe(tags[1]!.y)
   expect(tags[1]!.x).toBeGreaterThan(tags[0]!.x)
-  await page.locator('summary[aria-label="类型"]').click()
-  await page.getByRole('option', { name: 'X 账号', exact: true }).click()
-  await page.getByRole('option', { name: 'X 帖子', exact: true }).click()
+  // The other tab is its own list with its own filters; coming back finds
+  // this one as it was left, without asking the server again.
+  await page.getByRole('tab', { name: '账号' }).click()
   await expect.poll(() => queries.at(-1)?.get('entity_type')).toBe('x.profile')
+  expect(queries.at(-1)?.getAll('author')).toEqual([])
+  await expect(panel).toHaveAttribute('aria-expanded', 'false')
+  const requests = queries.length
+  await page.getByRole('tab', { name: '帖子' }).click()
   await expect(panel).toHaveAttribute('aria-expanded', 'true')
+  await expect(list.getByRole('option', { name: '作者乙' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  expect(queries.length).toBe(requests)
   await page.getByRole('button', { name: '清除', exact: true }).click()
   await expect.poll(() => queries.at(-1)?.getAll('author')).toEqual([])
   await expect(page).toHaveURL(/#\/$/)
@@ -64,12 +73,6 @@ test('filter changes apply immediately without collapsing controls', async ({
     'false',
   )
   await page.goBack()
-  await expect(
-    page.getByRole('option', { name: 'X 账号', exact: true }),
-  ).toHaveAttribute('aria-selected', 'true')
-  await expect(
-    page.getByRole('option', { name: 'X 帖子', exact: true }),
-  ).toHaveAttribute('aria-selected', 'false')
   await expect(list.getByRole('option', { name: '作者甲' })).toHaveAttribute(
     'aria-selected',
     'true',
