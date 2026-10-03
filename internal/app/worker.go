@@ -661,26 +661,27 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 				return e
 			}
 		}
-		// Related captures wait for this one; start them now instead of on their
-		// next poll. A submission's related task is idempotent.
-		rows, e := tx.Query(ctx, `SELECT id FROM submissions WHERE capture_id=$1 AND related_state='pending' AND NOT collection_stopped`, cid)
-		if e != nil {
-			return e
-		}
-		waiting, e := pgx.CollectRows(rows, pgx.RowTo[string])
-		if e != nil {
-			return e
-		}
-		for _, id := range waiting {
-			if e = s.Enqueue(ctx, tx, tenant, id, "related"); e != nil {
-				return e
-			}
-		}
 		return s.deliveries(ctx, tx, tenant, cid)
 	})
 }
 
+// deliveries runs once a capture reaches its final state.
 func (s *Service) deliveries(ctx context.Context, tx pgx.Tx, t, cid string) error {
+	// Related captures wait for this one; start them now instead of on their
+	// fallback poll. A submission's related task is idempotent.
+	waiting, e := tx.Query(ctx, `SELECT id FROM submissions WHERE capture_id=$1 AND related_state='pending' AND NOT collection_stopped`, cid)
+	if e != nil {
+		return e
+	}
+	submissions, e := pgx.CollectRows(waiting, pgx.RowTo[string])
+	if e != nil {
+		return e
+	}
+	for _, id := range submissions {
+		if e = s.Enqueue(ctx, tx, t, id, "related"); e != nil {
+			return e
+		}
+	}
 	rows, e := tx.Query(ctx, `SELECT tenant_id,id FROM capture_deliveries($1)`, cid)
 	if e != nil {
 		return e

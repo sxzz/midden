@@ -71,6 +71,10 @@ func measureUsage(ctx context.Context, tx pgx.Tx) error {
 	return e
 }
 
+// How long a related task waits before checking on a capture that should
+// have started it.
+const relatedFallback = 10 * time.Second
+
 func lockTenant(ctx context.Context, tx pgx.Tx, tenant string) error {
 	var id string
 	return tx.QueryRow(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, tenant).Scan(&id)
@@ -387,7 +391,17 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			if _, e = tx.Exec(ctx, `UPDATE submissions SET related_provider=$2,related_connection=nullif($3,'')::uuid,related_adapter=$4,related_state='pending',related_source_collection=$5 WHERE id=$1`, sid, in.ProviderID, in.ConnectionID, desc.AdapterId, aid); e != nil {
 				return e
 			}
-			if e = s.Enqueue(ctx, tx, tenant, sid, "related"); e != nil {
+			// A capture still running starts the task itself when it ends; the
+			// queued one is then only the fallback for a capture another tenant runs.
+			var running bool
+			if e = tx.QueryRow(ctx, `SELECT state IN('queued','downloading') FROM captures WHERE id=$1`, cid).Scan(&running); e != nil {
+				return e
+			}
+			var opts *river.InsertOpts
+			if running {
+				opts = &river.InsertOpts{ScheduledAt: time.Now().Add(relatedFallback)}
+			}
+			if _, e = s.Queue.InsertTx(ctx, tx, store.Task{Tenant: tenant, ID: sid, Type: "related"}, opts); e != nil {
 				return e
 			}
 		}

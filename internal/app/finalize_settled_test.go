@@ -66,6 +66,11 @@ func TestFinalizeQueuedOnceAndStartsRelated(t *testing.T) {
 	var submission string
 	must(t, admin.Pool.QueryRow(ctx, `SELECT id FROM submissions WHERE capture_id=$1`, job.ID).Scan(&submission))
 	before := queued(submission, "related")
+	var fallback string
+	must(t, admin.Pool.QueryRow(ctx, `SELECT state FROM river_job WHERE args->>'id'=$1 AND args->>'type'='related'`, submission).Scan(&fallback))
+	if fallback != "scheduled" {
+		t.Fatalf("related task of a running capture: %s", fallback)
+	}
 	must(t, s.finalize(ctx, tenant, job.ID))
 	if n := queued(submission, "related"); n != before+1 {
 		t.Fatalf("related not started by the finished capture: %d, was %d", n, before)
