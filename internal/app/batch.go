@@ -85,13 +85,17 @@ func (s *Service) RefreshBatch(ctx context.Context, tenant, id string) (out Refr
 // pages, matching how collection progress is reported to channels. Their total
 // counts the targets a fetched listing named, so it is known while the listing
 // still downloads and before its members are submitted.
+//
+// Roots and members are looked up per row through their indexes (the exact
+// idempotency key, parent_submission). Matching either by a key prefix read
+// every submission of the tenant on each poll.
 func scanRefreshBatch(ctx context.Context, tx pgx.Tx, id string, b *RefreshBatch) error {
 	var membersPending bool
 	err := tx.QueryRow(ctx, `WITH RECURSIVE batch AS (SELECT * FROM refresh_batches WHERE id=$1),
 pages AS (
- SELECT s.id,s.capture_id,s.next_submission,s.related_state,0 AS depth FROM batch JOIN submissions s ON s.idem_key LIKE 'refresh-batch:'||batch.id::text||':%' JOIN captures c ON c.id=s.capture_id WHERE c.is_collection
+ SELECT s.id,s.capture_id,s.next_submission,s.related_state,0 AS depth FROM batch CROSS JOIN LATERAL unnest(batch.collection_ids) WITH ORDINALITY n(id,position) CROSS JOIN LATERAL (SELECT root.* FROM submissions root WHERE root.tenant_id=batch.tenant_id AND root.idem_key='refresh-batch:'||batch.id::text||':'||(n.position-1) OFFSET 0) s JOIN captures c ON c.id=s.capture_id WHERE c.is_collection
  UNION ALL SELECT s.id,s.capture_id,s.next_submission,s.related_state,p.depth+1 FROM submissions s JOIN pages p ON s.id=p.next_submission WHERE p.depth<1000
-), members AS (SELECT DISTINCT child.capture_id FROM submissions child JOIN pages ON child.idem_key LIKE 'related:'||pages.id::text||':%')
+), members AS (SELECT DISTINCT child.capture_id FROM pages CROSS JOIN LATERAL (SELECT member.capture_id FROM submissions member WHERE member.parent_submission=pages.id AND member.idem_key LIKE 'related:%' OFFSET 0) child)
 SELECT batch.id,batch.state,batch.error,batch.update_mode,cardinality(batch.collection_ids),batch.position,batch.reused,batch.rejected,
  (SELECT count(*) FROM captures c WHERE c.id=ANY(batch.capture_ids) AND c.state IN ('queued','downloading')),
  (SELECT count(*) FROM captures c WHERE c.id=ANY(batch.capture_ids) AND c.state='complete'),
@@ -118,9 +122,9 @@ FROM batch`, id).Scan(&b.ID, &b.State, &b.Error, &b.UpdateMode, &b.Total, &b.Sub
 // on their members, so a profile reports its posts while it is being updated.
 func scanRefreshItems(ctx context.Context, tx pgx.Tx, id string, b *RefreshBatch) error {
 	rows, err := tx.Query(ctx, `WITH RECURSIVE pages AS (
- SELECT s.id AS root,s.id,s.capture_id,s.next_submission,s.related_state,0 AS depth FROM refresh_batches b JOIN submissions s ON s.idem_key LIKE 'refresh-batch:'||b.id::text||':%' WHERE b.id=$1
+ SELECT s.id AS root,s.id,s.capture_id,s.next_submission,s.related_state,0 AS depth FROM refresh_batches b CROSS JOIN LATERAL unnest(b.collection_ids) WITH ORDINALITY n(id,position) CROSS JOIN LATERAL (SELECT root.* FROM submissions root WHERE root.tenant_id=b.tenant_id AND root.idem_key='refresh-batch:'||b.id::text||':'||(n.position-1) OFFSET 0) s WHERE b.id=$1
  UNION ALL SELECT p.root,s.id,s.capture_id,s.next_submission,s.related_state,p.depth+1 FROM submissions s JOIN pages p ON s.id=p.next_submission WHERE p.depth<1000
-), members AS (SELECT DISTINCT pages.root,child.capture_id FROM submissions child JOIN pages ON child.idem_key LIKE 'related:'||pages.id::text||':%'),
+), members AS (SELECT DISTINCT pages.root,child.capture_id FROM pages CROSS JOIN LATERAL (SELECT member.capture_id FROM submissions member WHERE member.parent_submission=pages.id AND member.idem_key LIKE 'related:%' OFFSET 0) child),
 targets AS (SELECT pages.root,count(DISTINCT t->>'url') AS n FROM pages JOIN captures c ON c.id=pages.capture_id CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.related_targets)='array' THEN c.related_targets ELSE '[]' END) t GROUP BY pages.root),
 progress AS (SELECT members.root,count(*) AS total,
  count(*) FILTER (WHERE c.state='complete') AS complete,

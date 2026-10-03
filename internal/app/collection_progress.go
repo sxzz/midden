@@ -31,7 +31,11 @@ func (s *Service) StopCollection(ctx context.Context, tenant, id string) error {
 		// The tenant lock also guards Submit, so no new descendants can escape this checkpoint.
 		_, err := tx.Exec(ctx, `WITH RECURSIVE stopped AS (
             SELECT id,next_submission FROM submissions WHERE id=$1
-            UNION SELECT s.id,s.next_submission FROM submissions s JOIN stopped p ON s.parent_submission=p.id OR s.id=p.next_submission OR s.idem_key='batch:'||p.id::text
+            UNION SELECT s.id,s.next_submission FROM stopped p CROSS JOIN LATERAL (
+                SELECT id,next_submission FROM submissions WHERE parent_submission=p.id
+                UNION ALL SELECT id,next_submission FROM submissions WHERE id=p.next_submission
+                UNION ALL SELECT id,next_submission FROM submissions WHERE tenant_id=current_tenant() AND idem_key='batch:'||p.id::text
+            ) s
         ) UPDATE submissions SET collection_stopped=true,related_state=CASE WHEN related_state='pending' THEN 'complete' ELSE related_state END WHERE id IN(SELECT id FROM stopped)`, id)
 		if err != nil {
 			return err
