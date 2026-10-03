@@ -402,9 +402,12 @@ func attachSavedAvatars(ctx context.Context, tx pgx.Tx, collections ...*domain.C
 	}
 	// Only the saved collection's root entity owns the avatar, never another
 	// account mentioned in the same capture. One query for the whole batch.
+	// Each head is resolved before the join (OFFSET 0): joined on visible_head()
+	// directly, every revision in the database went through the read check.
 	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (c.id) c.id,a.id,a.purpose,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,''),EXISTS(SELECT FROM blob_thumbnails t WHERE t.blob_id=a.blob_id AND t.state='ready')
  FROM unnest($1::uuid[]) c(id)
- JOIN revisions r ON r.id=visible_head(c.id)
+ CROSS JOIN LATERAL (SELECT visible_head(c.id) AS id OFFSET 0) head
+ JOIN revisions r ON r.id=head.id
  JOIN revision_entities re ON re.revision_id=r.id AND re.is_root
  CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(r.payload->'graph'->'entities')='array' THEN r.payload->'graph'->'entities' ELSE '[]' END) e
  JOIN assets a ON a.capture_id=r.capture_id AND a.purpose='avatar' AND a.state='ready'

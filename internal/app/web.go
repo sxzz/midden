@@ -439,7 +439,8 @@ var relatedContextSQL = `WITH requested_roots AS MATERIALIZED (
  SELECT DISTINCT target_identity.platform,target_identity.kind,known.external_id
  FROM collections target_collection
  JOIN tenant_collections saved_target ON saved_target.collection_id=target_collection.id
- JOIN revision_entities target ON target.revision_id=visible_head(target_collection.id) AND target.is_root
+ CROSS JOIN LATERAL (SELECT visible_head(target_collection.id) AS id OFFSET 0) head
+ JOIN revision_entities target ON target.revision_id=head.id AND target.is_root
  JOIN entity_versions target_version ON target_version.id=target.entity_version_id
  JOIN entities target_identity ON target_identity.id=target_version.entity_id
  CROSS JOIN LATERAL (SELECT target_identity.external_id UNION SELECT alias.external_id FROM collection_identity_aliases alias WHERE alias.collection_id=target_collection.id
@@ -467,13 +468,16 @@ func withRelatedContext(requested, query string) string {
 
 // Direct edges only: the candidate's root must point at the requested identity,
 // or the requested collection's root must point at the candidate's identity.
-var relatedCollectionSQL = `SELECT relation.kind FROM entity_relations relation
- JOIN revision_entities candidate_root ON candidate_root.revision_id=relation.revision_id AND candidate_root.entity_key=relation.source_key AND candidate_root.is_root
+// The candidate's own edges are read first (OFFSET 0); otherwise the planner
+// starts at the requested identity and walks every revision it appears in,
+// once per candidate.
+var relatedCollectionSQL = `SELECT relation.kind FROM (SELECT edge.revision_id,edge.target_key,edge.kind FROM entity_relations edge
+  JOIN revision_entities candidate_root ON candidate_root.revision_id=edge.revision_id AND candidate_root.entity_key=edge.source_key AND candidate_root.is_root
+  WHERE edge.revision_id=r.id OFFSET 0) relation
  JOIN revision_entities related ON related.revision_id=relation.revision_id AND related.entity_key=relation.target_key
  JOIN entity_versions related_version ON related_version.id=related.entity_version_id
  JOIN entities related_identity ON related_identity.id=related_version.entity_id
  JOIN requested_roots ON (requested_roots.platform,requested_roots.kind,requested_roots.external_id)=(related_identity.platform,related_identity.kind,related_identity.external_id)
- WHERE relation.revision_id=r.id
  UNION ALL
  SELECT requested_targets.relation_kind FROM revision_entities related
  JOIN entity_versions related_version ON related_version.id=related.entity_version_id
