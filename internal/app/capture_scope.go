@@ -42,7 +42,7 @@ func (s *Service) resolveCaptureScope(ctx context.Context, tx pgx.Tx, tenant, ci
 		return e
 	}
 	var within bool
-	if e = tx.QueryRow(ctx, `SELECT tenant_unlimited() OR tenant_usage()+reserved_bytes<=quota_bytes FROM tenants WHERE id=$1`, tenant).Scan(&within); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT tenant_unlimited() OR tenant_used()+reserved_bytes<=quota_bytes FROM tenants WHERE id=$1`, tenant).Scan(&within); e != nil {
 		return e
 	}
 	if !within {

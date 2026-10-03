@@ -55,7 +55,7 @@ func (s *Service) SavePublicCollection(ctx context.Context, tenant, id string) (
 		added = tag.RowsAffected() > 0
 		if added {
 			var within bool
-			if err := tx.QueryRow(ctx, `SELECT tenant_unlimited() OR tenant_usage()+reserved_bytes<=quota_bytes FROM tenants WHERE id=$1`, tenant).Scan(&within); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT tenant_unlimited() OR tenant_used()+reserved_bytes<=quota_bytes FROM tenants WHERE id=$1`, tenant).Scan(&within); err != nil {
 				return err
 			}
 			if !within {

@@ -437,7 +437,10 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		if e := persistSources(ctx, tx, t.Tenant, t.ID, r); e != nil {
 			return e
 		}
-		tag, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes+$2 WHERE id=$1 AND (tenant_unlimited() OR tenant_usage()+reserved_bytes+$2<=quota_bytes)`, t.Tenant, len(b)+rawSize+entityReserve)
+		if e := measureUsage(ctx, tx); e != nil {
+			return e
+		}
+		tag, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes+$2 WHERE id=$1 AND (tenant_unlimited() OR used_bytes+reserved_bytes+$2<=quota_bytes)`, t.Tenant, len(b)+rawSize+entityReserve)
 		if e != nil {
 			return e
 		}
@@ -587,7 +590,9 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		if e = releaseAssetReservations(ctx, tx, tenant, cid); e != nil {
 			return e
 		}
-		if _, e = tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes-$2 WHERE id=$1`, tenant, reserved); e != nil {
+		// The reservation becomes stored content here, so the kept total is
+		// measured again before the next quota check.
+		if _, e = tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes-$2,used_at=NULL WHERE id=$1`, tenant, reserved); e != nil {
 			return e
 		}
 		state = "complete"

@@ -167,7 +167,7 @@ func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) 
 		if e := lockTenant(ctx, tx, t.Tenant); e != nil {
 			return e
 		}
-		if e := tx.QueryRow(ctx, `SELECT CASE WHEN tenant_unlimited() THEN 9223372036854775807 ELSE quota_bytes-tenant_usage()-reserved_bytes+$2 END FROM tenants WHERE id=$1`, t.Tenant, reserved).Scan(&allowed); e != nil {
+		if e := tx.QueryRow(ctx, `SELECT CASE WHEN tenant_unlimited() THEN 9223372036854775807 ELSE quota_bytes-tenant_used()-reserved_bytes+$2 END FROM tenants WHERE id=$1`, t.Tenant, reserved).Scan(&allowed); e != nil {
 			return e
 		}
 		log.InfoContext(ctx, "media storage reservation", "available_bytes", allowed, "requested_bytes", want)
@@ -299,7 +299,10 @@ func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) 
 		if alreadyCounted {
 			charge = 0
 		}
-		tag, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes-$3+$2 WHERE id=$1 AND (tenant_unlimited() OR tenant_usage()+reserved_bytes-$3+$2<=quota_bytes)`, t.Tenant, charge, reserved)
+		if e := measureUsage(ctx, tx); e != nil {
+			return e
+		}
+		tag, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes-$3+$2 WHERE id=$1 AND (tenant_unlimited() OR used_bytes+reserved_bytes-$3+$2<=quota_bytes)`, t.Tenant, charge, reserved)
 		if e != nil {
 			return e
 		}

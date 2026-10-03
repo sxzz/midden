@@ -63,6 +63,14 @@ func (s *Service) Enqueue(ctx context.Context, tx pgx.Tx, tenant, id, kind strin
 	return e
 }
 
+// measureUsage brings tenants.used_bytes up to date for a statement that
+// compares it in the same transaction. tenant_used() cannot sit inside an
+// UPDATE of the tenant row, because it writes that row itself.
+func measureUsage(ctx context.Context, tx pgx.Tx) error {
+	_, e := tx.Exec(ctx, `SELECT tenant_used()`)
+	return e
+}
+
 func lockTenant(ctx context.Context, tx pgx.Tx, tenant string) error {
 	var id string
 	return tx.QueryRow(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE`, tenant).Scan(&id)
@@ -289,7 +297,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		}
 		if tag.RowsAffected() > 0 {
 			var within bool
-			if e = tx.QueryRow(ctx, `SELECT tenant_unlimited() OR tenant_usage()+reserved_bytes<=quota_bytes FROM tenants WHERE id=$1`, tenant).Scan(&within); e != nil {
+			if e = tx.QueryRow(ctx, `SELECT tenant_unlimited() OR tenant_used()+reserved_bytes<=quota_bytes FROM tenants WHERE id=$1`, tenant).Scan(&within); e != nil {
 				return e
 			}
 			if !within {
@@ -335,7 +343,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			var used, reserved, quota int64
 			var count int
 			var start time.Time
-			if e = tx.QueryRow(ctx, `SELECT tenant_unlimited(),CASE WHEN tenant_unlimited() THEN 0 ELSE tenant_usage() END,reserved_bytes,quota_bytes,rate_count,rate_start FROM tenants WHERE id=$1`, tenant).Scan(&unlimited, &used, &reserved, &quota, &count, &start); e != nil {
+			if e = tx.QueryRow(ctx, `SELECT tenant_unlimited(),tenant_used(),reserved_bytes,quota_bytes,rate_count,rate_start FROM tenants WHERE id=$1`, tenant).Scan(&unlimited, &used, &reserved, &quota, &count, &start); e != nil {
 				return e
 			}
 			if !unlimited && used+reserved >= quota {

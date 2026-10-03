@@ -50,7 +50,10 @@ func (s *Service) reuseMedia(ctx context.Context, t store.Task, key string) (boo
 		if counted {
 			charge = 0
 		}
-		tag, err := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes-$2+$3 WHERE id=$1 AND (tenant_unlimited() OR tenant_usage()+reserved_bytes-$2+$3<=quota_bytes)`, t.Tenant, reserved, charge)
+		if err = measureUsage(ctx, tx); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes-$2+$3 WHERE id=$1 AND (tenant_unlimited() OR used_bytes+reserved_bytes-$2+$3<=quota_bytes)`, t.Tenant, reserved, charge)
 		if err != nil {
 			return err
 		}
