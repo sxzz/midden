@@ -28,7 +28,7 @@ onMounted(async () => {
 <template>
   <section class="login" aria-label="登录">
     <h1>Midden</h1>
-    <p>使用 Telegram 账号登录，查看与 Bot 中相同的收藏。</p>
+    <p>使用 Telegram 账号登录</p>
     <div ref="widget" class="widget" />
     <p v-if="props.error || failure" class="error" role="alert">
       {{ props.error || failure }}
