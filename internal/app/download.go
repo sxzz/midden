@@ -318,7 +318,7 @@ func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) 
 		if e = s.enqueueThumbnail(ctx, tx, t.Tenant, bid); e != nil {
 			return e
 		}
-		return s.Enqueue(ctx, tx, t.Tenant, cid, "finalize")
+		return s.finalizeSettled(ctx, tx, t.Tenant, cid)
 	})
 }
 
