@@ -227,18 +227,25 @@ export async function fetchPublicTimeline(
   fetcher: typeof fetch = fetch,
   cursor = "",
   pageSize = 0,
+  // Receives every listed post with the page URL it came from.
+  onPost?: (post: any, sourceUrl: string) => void,
 ): Promise<void> {
   signal = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
   try {
     await collectTimeline(
       result,
-      (next) =>
-        publicJSON(
-          `https://api.fxtwitter.com/2/profile/id:${result.canonicalTarget!.externalId}/statuses?count=${Math.min(pageSize || 100, 100)}${next ? `&cursor=${encodeURIComponent(next)}` : ""}`,
+      async (next) => {
+        const url = `https://api.fxtwitter.com/2/profile/id:${result.canonicalTarget!.externalId}/statuses?count=${Math.min(pageSize || 100, 100)}${next ? `&cursor=${encodeURIComponent(next)}` : ""}`;
+        const page = await publicJSON(
+          url,
           signal,
           result.sourceResponses,
           fetcher,
-        ),
+        );
+        if (onPost && Array.isArray(page.results))
+          for (const post of page.results) onPost(post, url);
+        return page;
+      },
       cursor,
       pageSize,
     );

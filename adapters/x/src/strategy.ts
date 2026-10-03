@@ -1,7 +1,12 @@
 import { attachMentions } from "./entities.js";
 import { preferOriginalAvatars } from "./avatar.js";
 import { status } from "@grpc/grpc-js";
-import { fetchPublic, ProviderError, sourceState } from "./provider.js";
+import {
+  fetchPublic,
+  ProviderError,
+  publicPost,
+  sourceState,
+} from "./provider.js";
 import { fetchSession } from "./session.js";
 import {
   fetchPublicProfile,
@@ -17,8 +22,16 @@ import {
 
 const profileTTL = 60_000;
 const maxCachedProfiles = 1000;
+// A public timeline lists its posts in full. They are kept long enough for the
+// core to come back for each one, so a listed post costs no request of its own.
+const listedPostTTL = 30 * 60_000;
+const maxListedPosts = 2000;
 export class CaptureStrategy {
   private profiles = new Map<string, { at: number; value: FetchResponse }>();
+  private listed = new Map<
+    string,
+    { at: number; post: any; sourceUrl: string }
+  >();
   private pending = new Map<string, Promise<FetchResponse>>();
   constructor(
     private publicPost = fetchPublic,
@@ -82,6 +95,45 @@ export class CaptureStrategy {
       this.pending.set(key, promise);
     }
     return FetchResponse.fromPartial(await promise);
+  }
+  private list(post: any, sourceUrl: string) {
+    // The listing carries only a stub of an article; the post's own response
+    // has its content.
+    if (
+      post?.type !== "status" ||
+      typeof post.id !== "string" ||
+      !/^\d+$/.test(post.id) ||
+      post.article
+    )
+      return;
+    this.listed.delete(post.id);
+    // A post's own response never says who reposted it into a timeline.
+    this.listed.set(post.id, {
+      at: this.now(),
+      post: { ...post, reposted_by: null },
+      sourceUrl,
+    });
+    while (this.listed.size > maxListedPosts)
+      this.listed.delete(this.listed.keys().next().value!);
+  }
+  // Only automatic captures settle for the listing; an explicit one asks upstream.
+  private async post(
+    req: FetchRequest,
+    signal: AbortSignal,
+  ): Promise<FetchResponse> {
+    const listed = req.automatic && this.listed.get(req.externalId);
+    if (listed && this.now() - listed.at < listedPostTTL)
+      try {
+        return publicPost(listed.post, req.externalId, {
+          body: Buffer.from(JSON.stringify(listed.post)),
+          contentType: "application/json",
+          sourceUrl: listed.sourceUrl,
+          visibility: Visibility.VISIBILITY_PUBLIC,
+        });
+      } catch {
+        // Whatever the listing lacks, the post's own response decides.
+      }
+    return this.publicPost(req.externalId, signal);
   }
   private protected(profile: FetchResponse): boolean {
     const value = this.user(profile).protected;
@@ -147,7 +199,14 @@ export class CaptureStrategy {
           }
         } else {
           // Fetch only the timeline here; reuse the profile response obtained above.
-          await this.timeline(result, signal, undefined, cursor, req.pageSize);
+          await this.timeline(
+            result,
+            signal,
+            undefined,
+            cursor,
+            req.pageSize,
+            (post, sourceUrl) => this.list(post, sourceUrl),
+          );
         }
       }
     } else {
@@ -174,7 +233,7 @@ export class CaptureStrategy {
       if (!profile) {
         // An ID-only link has no author. Discover it once before selecting the final source.
         try {
-          discovered = await this.publicPost(req.externalId, signal);
+          discovered = await this.post(req, signal);
         } catch (error) {
           if (
             !credential ||
@@ -210,7 +269,7 @@ export class CaptureStrategy {
         result =
           discovered?.providerId === "fxtwitter"
             ? discovered
-            : await this.publicPost(req.externalId, signal);
+            : await this.post(req, signal);
       this.attachProfile(result, profile);
     }
     if (req.kind === "profile" && result.nextPageCursor) {
