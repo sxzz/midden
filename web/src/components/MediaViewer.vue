@@ -66,6 +66,8 @@ async function save() {
     link.remove()
   }
 }
+// Keeps the native video controls clear of the floating chrome.
+const videoPadding = { top: 72, bottom: 110, left: 12, right: 12 }
 let photoSwipe: PhotoSwipe | undefined
 let previousOverflow = ''
 let opener: HTMLElement | null = null
@@ -103,29 +105,22 @@ onMounted(() => {
   ]
   // Until an image reports its natural size, its slide spans the whole
   // viewport and object-fit keeps the picture contained inside it, so a cold
-  // first open never shows a guessed aspect ratio.
+  // first open never shows a guessed aspect ratio. A video slide always fills
+  // the area its padding leaves free, for the same reason.
   const viewport = {
     width: stage.value.clientWidth || window.innerWidth,
     height: stage.value.clientHeight || window.innerHeight,
   }
   const dataSource = props.assets.map((image) => {
     const src = assetURL(image)
-    if (image.mime?.startsWith('video/')) {
-      const preview = [
-        ...document.querySelectorAll<HTMLVideoElement>(
-          '.media video, .thumbs video, .album video',
-        ),
-      ].find(
-        (video) => video.src.split('#')[0] === new URL(src, location.href).href,
-      )
+    if (image.mime?.startsWith('video/'))
       return {
         src,
         type: 'video',
         alt: image.alt_text || '收藏视频',
-        width: preview?.videoWidth || 1600,
-        height: preview?.videoHeight || 900,
+        width: viewport.width - videoPadding.left - videoPadding.right,
+        height: viewport.height - videoPadding.top - videoPadding.bottom,
       }
-    }
     const preview = previews.find(
       (img) => img.src === new URL(src, location.href).href && img.naturalWidth,
     )
@@ -162,7 +157,7 @@ onMounted(() => {
     errorMsg: '媒体加载失败',
     paddingFn: (_viewport, item) =>
       item.type === 'video'
-        ? { top: 72, bottom: 110, left: 12, right: 12 }
+        ? videoPadding
         : { top: 0, bottom: 0, left: 0, right: 0 },
   })
   photoSwipe = pswp
