@@ -130,6 +130,16 @@ test('Chinese filters support multiple media, date bounds and storage order', as
   await page.locator('summary[aria-label="媒体类型"]').click()
   await page.getByRole('option', { name: '图片', exact: true }).click()
   await page.getByRole('option', { name: '视频', exact: true }).click()
+  // No date field is on screen until a custom range is asked for.
+  const range = page.getByLabel('收藏日期', { exact: true })
+  await expect(page.getByLabel('收藏开始日期')).toHaveCount(0)
+  await range.selectOption('6')
+  await expect.poll(() => query.get('saved_from')).toBeTruthy()
+  expect(query.get('saved_before')).toBeNull()
+  await expect(page.getByRole('button', { name: /^筛选/ })).toContainText(
+    '最近 7 天',
+  )
+  await range.selectOption('custom')
   await page.getByLabel('收藏开始日期').fill('2026-09-01')
   await page.getByLabel('收藏结束日期').fill('2026-09-30')
   await page.getByLabel('可见性').selectOption('private')
@@ -138,6 +148,10 @@ test('Chinese filters support multiple media, date bounds and storage order', as
   await expect.poll(() => query.get('saved_from')).toBeTruthy()
   await expect.poll(() => query.get('saved_before')).toBeTruthy()
   await page.reload()
+  await expect(page.getByLabel('收藏日期', { exact: true })).toHaveValue(
+    'custom',
+  )
+  await expect(page.getByLabel('收藏开始日期')).toHaveValue('2026-09-01')
   await page.locator('summary[aria-label="媒体类型"]').click()
   await expect(
     page.getByRole('option', { name: '图片', exact: true }),
@@ -154,6 +168,8 @@ test('Chinese filters support multiple media, date bounds and storage order', as
   await expect.poll(() => query.get('order')).toBe('asc')
   await page.getByRole('button', { name: '清除', exact: true }).click()
   await expect.poll(() => query.get('media_type')).toBeNull()
+  await expect(page.getByLabel('收藏日期', { exact: true })).toHaveValue('')
+  await expect(page.getByLabel('收藏开始日期')).toHaveCount(0)
 })
 
 test('author dropdown searches names but filters by stable identity', async ({

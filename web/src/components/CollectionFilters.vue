@@ -61,6 +61,38 @@ const sensitiveNames: Record<string, string> = {
   contains: '包含敏感内容',
   not_contains: '不含敏感内容',
 }
+/** Local calendar day `days` before today, as a date input writes it. */
+function daysAgo(days: number) {
+  const d = new Date()
+  d.setDate(d.getDate() - days)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+const rangeOptions = [
+  { value: '0', label: '今天' },
+  { value: '6', label: '最近 7 天' },
+  { value: '29', label: '最近 30 天' },
+]
+// A native date field fills in today as soon as its picker opens on a phone,
+// which would filter the list by accident. The common ranges are one tap, and
+// the two fields only appear once a custom range is asked for.
+const customRange = shallowRef(false)
+const range = computed({
+  get() {
+    if (customRange.value) return 'custom'
+    if (!form.from && !form.to) return ''
+    const known =
+      !form.to &&
+      rangeOptions.find((option) => daysAgo(+option.value) === form.from)
+    return known ? known.value : 'custom'
+  },
+  set(value) {
+    customRange.value = value === 'custom'
+    if (customRange.value) return
+    form.from = value ? daysAgo(+value) : ''
+    form.to = ''
+  },
+})
 const open = shallowRef(
   !!(
     form.tag ||
@@ -82,13 +114,14 @@ const active = computed(() =>
     form.authors.map((id) => authorNames.value[id] || id).join('、'),
     visibilityNames[form.visibility],
     sensitiveNames[form.sensitive],
-    form.from && form.to
-      ? `${form.from} 至 ${form.to}`
-      : form.from
-        ? `${form.from} 起`
-        : form.to
-          ? `${form.to} 前`
-          : '',
+    rangeOptions.find((option) => option.value === range.value)?.label ||
+      (form.from && form.to
+        ? `${form.from} 至 ${form.to}`
+        : form.from
+          ? `${form.from} 起`
+          : form.to
+            ? `${form.to} 前`
+            : ''),
   ]
     .filter(Boolean)
     .join(' · '),
@@ -129,6 +162,7 @@ function search() {
 function clear() {
   const { layout, entity } = form
   Object.assign(form, read(''), { layout, entity })
+  customRange.value = false
   settled = build()
   const q = new URLSearchParams()
   if (layout) q.set('layout', layout)
@@ -165,6 +199,7 @@ watch(
     if (stringify(incoming) === settled) return
     settled = stringify(incoming)
     Object.assign(form, incoming)
+    if (!incoming.from && !incoming.to) customRange.value = false
   },
 )
 const authors = shallowRef<Author[]>([])
@@ -349,8 +384,27 @@ const tagFilter = computed({
             <option value="not_contains">不包含</option></select
           ><ChevronIcon class="select-chevron" /></span
       ></label>
-      <div class="option dates" role="group" aria-label="收藏日期">
-        收藏日期<span class="range"
+      <label class="option"
+        >收藏日期<span class="select"
+          ><select v-model="range" aria-label="收藏日期">
+            <option value="">全部</option>
+            <option
+              v-for="option in rangeOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+            <option value="custom">自定义</option></select
+          ><ChevronIcon class="select-chevron" /></span
+      ></label>
+      <div
+        v-if="range === 'custom'"
+        class="option dates"
+        role="group"
+        aria-label="自定义收藏日期"
+      >
+        起止日期<span class="range"
           ><input
             v-model="form.from"
             type="date"
