@@ -66,6 +66,7 @@ message FetchRequest {
   uint32 page_size = 13; // Optional target size; adapter may exceed it to preserve whole upstream pages.
   string page_cursor = 12; // Opaque capture.page/1 continuation, same provider and connection.
   bool automatic = 11; // Related captures must not recursively expand collections.
+  bool credential_deferred = 14; // credential.deferred/1: credential withheld; fail with trailer credential-required to get it.
 }
 
 message Resource {

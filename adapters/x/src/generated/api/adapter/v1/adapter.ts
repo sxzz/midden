@@ -110,6 +110,8 @@ export interface FetchRequest {
   pageCursor: string;
   /** Related captures must not recursively expand collections. */
   automatic: boolean;
+  /** credential.deferred/1: credential withheld; fail with trailer credential-required to get it. */
+  credentialDeferred: boolean;
 }
 
 export interface Resource {
@@ -809,6 +811,7 @@ function createBaseFetchRequest(): FetchRequest {
     pageSize: 0,
     pageCursor: "",
     automatic: false,
+    credentialDeferred: false,
   };
 }
 
@@ -855,6 +858,9 @@ export const FetchRequest: MessageFns<FetchRequest> = {
     }
     if (message.automatic !== false) {
       writer.uint32(88).bool(message.automatic);
+    }
+    if (message.credentialDeferred !== false) {
+      writer.uint32(112).bool(message.credentialDeferred);
     }
     return writer;
   },
@@ -971,6 +977,14 @@ export const FetchRequest: MessageFns<FetchRequest> = {
           message.automatic = reader.bool();
           continue;
         }
+        case 14: {
+          if (tag !== 112) {
+            break;
+          }
+
+          message.credentialDeferred = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1014,6 +1028,9 @@ export const FetchRequest: MessageFns<FetchRequest> = {
         : "",
       automatic: isSet(object.automatic)
         ? globalThis.Boolean(object.automatic)
+        : false,
+      credentialDeferred: isSet(object.credentialDeferred)
+        ? globalThis.Boolean(object.credentialDeferred)
         : false,
     };
   },
@@ -1059,6 +1076,9 @@ export const FetchRequest: MessageFns<FetchRequest> = {
     if (message.automatic !== false) {
       obj.automatic = message.automatic;
     }
+    if (message.credentialDeferred !== false) {
+      obj.credentialDeferred = message.credentialDeferred;
+    }
     return obj;
   },
 
@@ -1083,6 +1103,7 @@ export const FetchRequest: MessageFns<FetchRequest> = {
     message.pageSize = object.pageSize ?? 0;
     message.pageCursor = object.pageCursor ?? "";
     message.automatic = object.automatic ?? false;
+    message.credentialDeferred = object.credentialDeferred ?? false;
     return message;
   },
 };

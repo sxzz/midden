@@ -18,6 +18,8 @@ export class ProviderError extends Error {
       this.metadata.set("retry-after", String(Math.min(86400, retrySeconds)));
   }
 }
+/** Trailer telling the core to repeat a deferred fetch with the account. */
+export const credentialRequiredKey = "credential-required";
 /** Trailer telling the core the post itself is gone, not merely unreadable. */
 export const sourceStateKey = "source-state";
 export type SourceState = "deleted" | "suspended";

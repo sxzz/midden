@@ -69,7 +69,7 @@ Provider 在 `Describe` 中声明支持的 `visibilities`，由 `Fetch` 返回�
 | `download` | 下载媒体、上传对象存储 | 8              |
 | `control`  | 关联内容调度、完成收藏 | 4              |
 
-采集另外受每租户 2 个执行槽、每 Connection 默认 1 个执行槽限制，分别由 `tenant_concurrency` 和 `connection_concurrency` 配置。下载受下载 worker 数限制。可重试采集失败最多执行 3 次；限流响应的 `Retry-After` 控制下一次重试时间。channel 使用 `channel_work` 持久化租约和延后重试，每 25 秒续租，租约 90 秒到期。
+采集另外受每租户 2 个执行槽、每 Connection 默认 1 个执行槽限制，分别由 `tenant_concurrency` 和 `connection_concurrency` 配置。Connection 执行槽被占用时，采集先在原地等待最多 2 秒，仍未轮到才延后重试。Provider 声明 `credential.deferred` 时，核心先不带凭据、不占执行槽调用 Fetch；Adapter 确实需要账号时以 trailer `credential-required` 拒绝，核心取得执行槽后带凭据重新调用。下载受下载 worker 数限制。可重试采集失败最多执行 3 次；限流响应的 `Retry-After` 控制下一次重试时间。channel 使用 `channel_work` 持久化租约和延后重试，每 25 秒续租，租约 90 秒到期。
 
 ## 数据库关系
 
@@ -208,20 +208,21 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 
 `Describe` 是唯一必需的业务 RPC；标准 gRPC health 用于部署健康检查。核心握手不限定平台 ID，也不要求支持采集、账号或某一种媒体。每个 Provider 独立声明 `capabilities`，每项含 `name`、`major`、`minor`：
 
-| 能力                 | 当前版本 | 含义                                                                                                   |
-| -------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
-| `capture.fetch`      | 1.0      | 用 `Resolve` 规范化 URL，再用 `Fetch` 读取单个目标                                                     |
-| `capture.related`    | 1.0      | 返回关联目标及最小刷新间隔；核心按提交者身份持久化执行有界关联采集                                     |
-| `capture.page`       | 1.0      | `Fetch.page_cursor` / `next_page_cursor` 为不透明分页游标；沿用原 Provider、Connection，空返回表示末页 |
-| `capture.canonical`  | 1.0      | Fetch 返回同平台、同类型的稳定目标身份                                                                 |
-| `capture.access`     | 1.0      | 用 `CheckAccess` 单次上游请求确认账号仍可读取目标及内嵌对象；错误语义同 Fetch                          |
-| `credential.prepare` | 1.0      | 用 `PrepareCredential` 将用户输入转换为 Adapter 私有的凭据格式                                         |
-| `connection.check`   | 1.0      | 用 `CheckConnection` 验证账号会话                                                                      |
-| `content.text`       | 1.0      | 采集结果可以包含文字                                                                                   |
-| `entity.graph`       | 1.0      | 返回由 Adapter 声明结构的实体及关系                                                                    |
-| `source.raw`         | 1.0      | 完整上游响应体及其可见性                                                                               |
-| `media.image`        | 1.0      | 采集结果可以包含图片                                                                                   |
-| `media.video`        | 1.0      | 采集结果可以包含视频                                                                                   |
+| 能力                  | 当前版本 | 含义                                                                                                          |
+| --------------------- | -------- | ------------------------------------------------------------------------------------------------------------- |
+| `capture.fetch`       | 1.0      | 用 `Resolve` 规范化 URL，再用 `Fetch` 读取单个目标                                                            |
+| `capture.related`     | 1.0      | 返回关联目标及最小刷新间隔；核心按提交者身份持久化执行有界关联采集                                            |
+| `capture.page`        | 1.0      | `Fetch.page_cursor` / `next_page_cursor` 为不透明分页游标；沿用原 Provider、Connection，空返回表示末页        |
+| `capture.canonical`   | 1.0      | Fetch 返回同平台、同类型的稳定目标身份                                                                        |
+| `capture.access`      | 1.0      | 用 `CheckAccess` 单次上游请求确认账号仍可读取目标及内嵌对象；错误语义同 Fetch                                 |
+| `credential.prepare`  | 1.0      | 用 `PrepareCredential` 将用户输入转换为 Adapter 私有的凭据格式                                                |
+| `credential.deferred` | 1.0      | `Fetch.credential_deferred` 表示凭据暂未提供；需要账号时以 trailer `credential-required` 拒绝，核心带凭据重试 |
+| `connection.check`    | 1.0      | 用 `CheckConnection` 验证账号会话                                                                             |
+| `content.text`        | 1.0      | 采集结果可以包含文字                                                                                          |
+| `entity.graph`        | 1.0      | 返回由 Adapter 声明结构的实体及关系                                                                           |
+| `source.raw`          | 1.0      | 完整上游响应体及其可见性                                                                                      |
+| `media.image`         | 1.0      | 采集结果可以包含图片                                                                                          |
+| `media.video`         | 1.0      | 采集结果可以包含视频                                                                                          |
 
 能力表示 Provider 可以提供的功能，不保证每次结果包含所有媒体。实际收藏内容仍以 Fetch 返回的数据为准。公共 FxTwitter Provider 不声明账号验证能力；个人账号 Provider 声明该能力。采集 Provider 同时声明允许的可见性，实际结果仍须遵守公私隔离规则。`CheckAccess` 不重新采集内容，只返回目标可见性及请求中目标和内嵌对象里账号可读的子集；声明 `capture.access` 的 Provider 在 Fetch 的 `restricted_targets` 中列出图中缺少公开证据的内嵌对象，公共 Provider 留空。
 

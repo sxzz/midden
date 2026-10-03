@@ -3,6 +3,7 @@ import { preferOriginalAvatars } from "./avatar.js";
 import { status } from "@grpc/grpc-js";
 import {
   fetchPublic,
+  credentialRequiredKey,
   ProviderError,
   publicPost,
   sourceState,
@@ -165,6 +166,18 @@ export class CaptureStrategy {
     credential?: SessionCredential,
   ): Promise<FetchResponse> {
     let result: FetchResponse;
+    // The core withholds the account until a fetch turns out to need it.
+    const account = () => {
+      if (!credential && req.credentialDeferred) {
+        const error = new ProviderError(
+          status.FAILED_PRECONDITION,
+          "account required",
+        );
+        error.metadata.set(credentialRequiredKey, "1");
+        throw error;
+      }
+      return credential;
+    };
     if (req.pageCursor && (req.kind !== "profile" || req.automatic))
       throw new ProviderError(
         status.INVALID_ARGUMENT,
@@ -197,6 +210,7 @@ export class CaptureStrategy {
           }
         }
         if (this.protected(result)) {
+          const credential = account();
           if (credential) {
             // The collection of protected posts is account-private, while the profile metadata is public.
             result.visibility = Visibility.VISIBILITY_PRIVATE;
@@ -253,11 +267,12 @@ export class CaptureStrategy {
           discovered = await this.publicPost(req.externalId, signal);
         } catch (error) {
           if (
-            !credential ||
             !(error instanceof ProviderError) ||
             error.code !== status.UNAUTHENTICATED
           )
             throw error;
+          const credential = account();
+          if (!credential) throw error;
           discovered = await this.session(req.externalId, credential, signal);
         }
         const authorNode = discovered.graph?.entities.find(
@@ -273,6 +288,7 @@ export class CaptureStrategy {
       if (discovered?.providerId === "x-session") {
         result = discovered;
       } else if (this.protected(profile)) {
+        const credential = account();
         if (!credential)
           throw new ProviderError(
             status.PERMISSION_DENIED,
@@ -302,7 +318,7 @@ export class CaptureStrategy {
     }
     // Execution provider remains the persisted connection choice. textSource and raw URLs record actual sources.
     result.providerId = req.providerId;
-    if (credential)
+    if (credential || req.credentialDeferred)
       for (const source of result.sourceResponses)
         source.visibility = Visibility.VISIBILITY_PRIVATE;
     await preferOriginalAvatars(result, signal);
