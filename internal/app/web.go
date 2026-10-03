@@ -122,7 +122,7 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 			}
 			p.TotalStorageBytes = &total
 		}
-		query := withRelatedContext("NULLIF($16,'')", `SELECT a.id,ta.created_at,ordering.at,storage.bytes FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id CROSS JOIN LATERAL (SELECT head.* FROM revisions head WHERE head.collection_id=a.id ORDER BY head.created_at DESC,head.id DESC LIMIT 1) r CROSS JOIN LATERAL (SELECT CASE WHEN $8='published' AND pg_input_is_valid(r.payload->>'published_at','timestamp with time zone') THEN (r.payload->>'published_at')::timestamptz ELSE a.observed_at END AS at) ordering CROSS JOIN LATERAL (SELECT `+identityStorageSQL+` AS bytes) storage WHERE `+latestIdentitySQL+` AND (cardinality($11::text[])=0 OR EXISTS(`+authorMatchSQL+`)) AND ($14='' OR ($14='contains')=EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='' AND m.sensitive)) AND ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR r.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND (($8='storage' AND ($10::bigint IS NULL OR (storage.bytes,a.id)<($10,$6::uuid))) OR ($8<>'storage' AND ($5::timestamptz IS NULL OR (ordering.at,a.id)<($5,$6::uuid)))) AND ($7='' OR ('text'=ANY(string_to_array($7,',')) AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (('image'=ANY(string_to_array($7,',')) AND b.mime LIKE 'image/%') OR ('video'=ANY(string_to_array($7,',')) AND b.mime LIKE 'video/%')))) AND ($9='' OR EXISTS(SELECT FROM revision_entities re JOIN entity_versions ev ON ev.id=re.entity_version_id JOIN entities en ON en.id=ev.entity_id WHERE re.revision_id=r.id AND re.is_root AND en.kind=ANY(string_to_array($9,',')))) AND ($16='' OR (a.id<>NULLIF($16,'')::uuid AND EXISTS(`+relatedCollectionSQL+`))) AND ($15='' OR EXISTS(SELECT FROM collection_tags ct JOIN collections tagged ON tagged.id=ct.collection_id JOIN tenant_collections saved_tagged ON saved_tagged.collection_id=tagged.id WHERE (tagged.platform,tagged.kind,tagged.object_scope,tagged.external_id)=(a.platform,a.kind,a.object_scope,a.external_id) AND ct.tenant_id=ta.tenant_id AND ct.tag_id=NULLIF($15,'')::uuid)) ORDER BY CASE WHEN $8='storage' THEN storage.bytes END DESC,CASE WHEN $8<>'storage' THEN ordering.at END DESC,a.id DESC LIMIT 21`)
+		query := withRelatedContext("NULLIF($16,'')", `SELECT a.id,ta.created_at,ordering.at,storage.bytes,ARRAY(SELECT DISTINCT edge.kind FROM related_edges edge WHERE edge.collection_id=a.id ORDER BY 1) FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id CROSS JOIN LATERAL (SELECT head.* FROM revisions head WHERE head.collection_id=a.id ORDER BY head.created_at DESC,head.id DESC LIMIT 1) r CROSS JOIN LATERAL (SELECT CASE WHEN $8='published' AND pg_input_is_valid(r.payload->>'published_at','timestamp with time zone') THEN (r.payload->>'published_at')::timestamptz ELSE a.observed_at END AS at) ordering CROSS JOIN LATERAL (SELECT `+identityStorageSQL+` AS bytes) storage WHERE `+latestIdentitySQL+` AND (cardinality($11::text[])=0 OR EXISTS(`+authorMatchSQL+`)) AND ($14='' OR ($14='contains')=EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='' AND m.sensitive)) AND ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR r.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND (($8='storage' AND ($10::bigint IS NULL OR (storage.bytes,a.id)<($10,$6::uuid))) OR ($8<>'storage' AND ($5::timestamptz IS NULL OR (ordering.at,a.id)<($5,$6::uuid)))) AND ($7='' OR ('text'=ANY(string_to_array($7,',')) AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (('image'=ANY(string_to_array($7,',')) AND b.mime LIKE 'image/%') OR ('video'=ANY(string_to_array($7,',')) AND b.mime LIKE 'video/%')))) AND ($9='' OR EXISTS(SELECT FROM revision_entities re JOIN entity_versions ev ON ev.id=re.entity_version_id JOIN entities en ON en.id=ev.entity_id WHERE re.revision_id=r.id AND re.is_root AND en.kind=ANY(string_to_array($9,',')))) AND ($16='' OR (a.id<>NULLIF($16,'')::uuid AND EXISTS(`+relatedCollectionSQL+`))) AND ($15='' OR EXISTS(SELECT FROM collection_tags ct JOIN collections tagged ON tagged.id=ct.collection_id JOIN tenant_collections saved_tagged ON saved_tagged.collection_id=tagged.id WHERE (tagged.platform,tagged.kind,tagged.object_scope,tagged.external_id)=(a.platform,a.kind,a.object_scope,a.external_id) AND ct.tenant_id=ta.tenant_id AND ct.tag_id=NULLIF($15,'')::uuid)) ORDER BY CASE WHEN $8='storage' THEN storage.bytes END DESC,CASE WHEN $8<>'storage' THEN ordering.at END DESC,a.id DESC LIMIT 21`)
 		if f.Order == "asc" {
 			query = strings.ReplaceAll(query, "(ordering.at,a.id)<", "(ordering.at,a.id)>")
 			query = strings.ReplaceAll(query, "(storage.bytes,a.id)<", "(storage.bytes,a.id)>")
@@ -137,11 +137,13 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 			at    time.Time
 			saved time.Time
 			bytes int64
+			// How the entry relates to the requested collection, when filtered by one.
+			relations []string
 		}
 		entries := []entry{}
 		for rows.Next() {
 			var x entry
-			if err = rows.Scan(&x.id, &x.saved, &x.at, &x.bytes); err != nil {
+			if err = rows.Scan(&x.id, &x.saved, &x.at, &x.bytes, &x.relations); err != nil {
 				rows.Close()
 				return err
 			}
@@ -166,15 +168,15 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 		if err != nil {
 			return err
 		}
-		if err = annotateCollectionRelations(ctx, tx, f.RelatedTo, ids, loaded); err != nil {
-			return err
-		}
 		for _, v := range entries {
 			a, ok := loaded[v.id]
 			if !ok {
 				return pgx.ErrNoRows
 			}
 			a.StorageBytes = v.bytes
+			if len(v.relations) > 0 {
+				a.RelationTypes = v.relations
+			}
 			p.Items = append(p.Items, CollectionItem{a, v.saved})
 		}
 		return nil
@@ -431,10 +433,13 @@ func (s *Service) CollectionAuthors(ctx context.Context, tenant string) (authors
 // restricted on both sides to this tenant's saved collections. Historical profile
 // graphs retain timeline pages that have since moved out of the current snapshot.
 //
-// The requested collection's side of each edge is resolved once, up front, so the
-// per-candidate predicate only walks the candidate's own head revision. Joining
-// the whole relation graph inside that predicate re-scanned it for every saved
-// collection, which took minutes on a few thousand rows.
+// The requested collection's side of each edge is resolved once, up front, and
+// the candidates are then found from it: by the revisions the requested
+// identity appears in, and by the identities its own root points at. A
+// provisional target identity resolves through the candidate's aliases, never
+// the owner's. Checking each saved collection against the requested side
+// instead grew with the whole library, and joining the relation graph inside
+// that check took minutes on a few thousand rows.
 var relatedContextSQL = `WITH requested_roots AS MATERIALIZED (
  SELECT DISTINCT target_identity.platform,target_identity.kind,known.external_id
  FROM collections target_collection
@@ -457,6 +462,33 @@ var relatedContextSQL = `WITH requested_roots AS MATERIALIZED (
  JOIN entity_versions target_version ON target_version.id=target.entity_version_id
  JOIN entities target_identity ON target_identity.id=target_version.entity_id
  WHERE target_collection.id IN (` + strings.ReplaceAll(savedIdentityMembersSQL, "$1", "NULLIF($16,'')::uuid") + `)
+), related_edges AS MATERIALIZED (
+ SELECT rv.collection_id,relation.kind
+ FROM (SELECT related.revision_id,related.entity_key FROM requested_roots
+  JOIN entities related_identity ON (related_identity.platform,related_identity.kind,related_identity.external_id)=(requested_roots.platform,requested_roots.kind,requested_roots.external_id)
+  JOIN entity_versions related_version ON related_version.entity_id=related_identity.id
+  JOIN revision_entities related ON related.entity_version_id=related_version.id OFFSET 0) related
+ JOIN entity_relations relation ON relation.revision_id=related.revision_id AND relation.target_key=related.entity_key
+ JOIN revision_entities candidate_root ON candidate_root.revision_id=relation.revision_id AND candidate_root.entity_key=relation.source_key AND candidate_root.is_root
+ JOIN revisions rv ON rv.id=relation.revision_id
+ WHERE visible_head(rv.collection_id)=rv.id
+ UNION ALL
+ SELECT rv.collection_id,candidate.relation_kind
+ FROM (SELECT requested_targets.relation_kind,candidate_root.revision_id FROM requested_targets
+  JOIN entities candidate_identity ON (candidate_identity.platform,candidate_identity.kind,candidate_identity.external_id)=(requested_targets.platform,requested_targets.kind,requested_targets.external_id)
+  JOIN entity_versions candidate_version ON candidate_version.entity_id=candidate_identity.id
+  JOIN revision_entities candidate_root ON candidate_root.entity_version_id=candidate_version.id AND candidate_root.is_root OFFSET 0) candidate
+ JOIN revisions rv ON rv.id=candidate.revision_id
+ WHERE visible_head(rv.collection_id)=rv.id
+ UNION ALL
+ SELECT candidate.id,requested_targets.relation_kind
+ FROM requested_targets
+ JOIN collection_identity_aliases alias ON alias.external_id=requested_targets.external_id
+ JOIN collections candidate ON candidate.id=alias.collection_id AND (alias.platform,alias.kind,alias.object_scope)=(candidate.platform,candidate.kind,candidate.object_scope)
+ CROSS JOIN LATERAL (SELECT visible_head(candidate.id) AS id OFFSET 0) head
+ JOIN revision_entities candidate_root ON candidate_root.revision_id=head.id AND candidate_root.is_root
+ JOIN entity_versions candidate_version ON candidate_version.id=candidate_root.entity_version_id
+ JOIN entities candidate_identity ON candidate_identity.id=candidate_version.entity_id AND candidate_identity.platform=requested_targets.platform AND candidate_identity.kind=requested_targets.kind
 )`
 
 // withRelatedContext prefixes query with the requested-side CTEs that
@@ -468,26 +500,5 @@ func withRelatedContext(requested, query string) string {
 
 // Direct edges only: the candidate's root must point at the requested identity,
 // or the requested collection's root must point at the candidate's identity.
-// The candidate's own edges are read first (OFFSET 0); otherwise the planner
-// starts at the requested identity and walks every revision it appears in,
-// once per candidate.
-var relatedCollectionSQL = `SELECT relation.kind FROM (SELECT edge.revision_id,edge.target_key,edge.kind FROM entity_relations edge
-  JOIN revision_entities candidate_root ON candidate_root.revision_id=edge.revision_id AND candidate_root.entity_key=edge.source_key AND candidate_root.is_root
-  WHERE edge.revision_id=r.id OFFSET 0) relation
- JOIN revision_entities related ON related.revision_id=relation.revision_id AND related.entity_key=relation.target_key
- JOIN entity_versions related_version ON related_version.id=related.entity_version_id
- JOIN entities related_identity ON related_identity.id=related_version.entity_id
- JOIN requested_roots ON (requested_roots.platform,requested_roots.kind,requested_roots.external_id)=(related_identity.platform,related_identity.kind,related_identity.external_id)
- UNION ALL
- SELECT requested_targets.relation_kind FROM revision_entities related
- JOIN entity_versions related_version ON related_version.id=related.entity_version_id
- JOIN entities related_identity ON related_identity.id=related_version.entity_id
- JOIN requested_targets ON requested_targets.platform=related_identity.platform AND requested_targets.kind=related_identity.kind AND ` + relatedCandidateIdentityMatchSQL + `
- WHERE related.revision_id=r.id AND related.is_root`
-
-// The reverse edge points to the candidate, so any provisional target identity
-// must resolve through that candidate's aliases, not the owner's profile aliases.
-const relatedCandidateIdentityMatchSQL = `(requested_targets.external_id=related_identity.external_id OR EXISTS(
- SELECT FROM collection_identity_aliases alias WHERE alias.collection_id=a.id
- AND (alias.platform,alias.kind,alias.object_scope)=(a.platform,a.kind,a.object_scope)
- AND alias.external_id=requested_targets.external_id))`
+// related_edges holds every such candidate, found once from the requested side.
+var relatedCollectionSQL = `SELECT edge.kind FROM related_edges edge WHERE edge.collection_id=a.id`
