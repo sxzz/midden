@@ -19,9 +19,9 @@ func (s *Service) reuseMedia(ctx context.Context, t store.Task, key string) (boo
 		if err := lockTenant(ctx, tx, t.Tenant); err != nil {
 			return err
 		}
-		var state, cid, kind string
+		var state, cid string
 		var reserved int64
-		if err := tx.QueryRow(ctx, `SELECT state,capture_id,reserved_bytes,kind FROM assets WHERE id=$1 FOR UPDATE`, t.ID).Scan(&state, &cid, &reserved, &kind); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT state,capture_id,reserved_bytes FROM assets WHERE id=$1 FOR UPDATE`, t.ID).Scan(&state, &cid, &reserved); err != nil {
 			return err
 		}
 		if state != "pending" {
@@ -39,13 +39,6 @@ func (s *Service) reuseMedia(ctx context.Context, t store.Task, key string) (boo
 		}
 		if err != nil {
 			return err
-		}
-		limit := s.Config.MaxImageBytes
-		if kind == "video" {
-			limit = s.Config.MaxVideoBytes
-		}
-		if size > limit {
-			return &PermanentError{"media exceeds size limit"}
 		}
 		var counted bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(

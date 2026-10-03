@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
@@ -84,7 +85,7 @@ func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) 
 	}
 	var kind, source, state, key, cid, oid string
 	var reserved int64
-	stage = "reserve_storage"
+	stage = "prepare_object"
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
 		if e := lockTenant(ctx, tx, t.Tenant); e != nil {
 			return e
@@ -99,27 +100,6 @@ func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) 
 		}
 		if state != "pending" {
 			return nil
-		}
-		if reserved == 0 {
-			var available int64
-			if e = tx.QueryRow(ctx, `SELECT CASE WHEN tenant_unlimited() THEN 9223372036854775807 ELSE quota_bytes-tenant_usage()-reserved_bytes END FROM tenants WHERE id=$1`, t.Tenant).Scan(&available); e != nil {
-				return e
-			}
-			limit := s.Config.MaxImageBytes
-			if kind == "video" {
-				limit = s.Config.MaxVideoBytes
-			}
-			log.InfoContext(ctx, "media storage reservation", "capture_id", cid, "available_bytes", available, "requested_bytes", limit)
-			reserved = min(available, limit)
-			if reserved <= 0 {
-				return domain.ErrQuota
-			}
-			if _, e = tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes+$2 WHERE id=$1`, t.Tenant, reserved); e != nil {
-				return e
-			}
-			if _, e = tx.Exec(ctx, `UPDATE assets SET reserved_bytes=$2 WHERE id=$1`, t.ID, reserved); e != nil {
-				return e
-			}
 		}
 		if objectID == nil {
 			oid = uuid.NewString()
@@ -143,7 +123,7 @@ func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) 
 	if e != nil || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return &PermanentError{"invalid media URL"}
 	}
-	log = log.With("capture_id", cid, "media_kind", kind, "source_host", u.Hostname(), "reserved_bytes", reserved)
+	log = log.With("capture_id", cid, "media_kind", kind, "source_host", u.Hostname())
 	stage = "http_request"
 	log.InfoContext(ctx, "media request started", "client_timeout_ms", s.HTTP.Timeout.Milliseconds())
 	trace := &httptrace.ClientTrace{
@@ -177,8 +157,38 @@ func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) 
 	if resp.StatusCode != 200 {
 		return &PermanentError{"media provider rejected request"}
 	}
-	if resp.ContentLength > reserved {
-		return &PermanentError{"media exceeds size or remaining storage limit"}
+	// The tenant's remaining storage is the only size limit. Reserve the
+	// declared size so concurrent downloads cannot overrun it together; a
+	// response without one is capped at what is left and charged on commit.
+	stage = "reserve_storage"
+	want := max(resp.ContentLength, 0)
+	var allowed int64
+	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
+		if e := lockTenant(ctx, tx, t.Tenant); e != nil {
+			return e
+		}
+		if e := tx.QueryRow(ctx, `SELECT CASE WHEN tenant_unlimited() THEN 9223372036854775807 ELSE quota_bytes-tenant_usage()-reserved_bytes+$2 END FROM tenants WHERE id=$1`, t.Tenant, reserved).Scan(&allowed); e != nil {
+			return e
+		}
+		log.InfoContext(ctx, "media storage reservation", "available_bytes", allowed, "requested_bytes", want)
+		if allowed <= 0 || want > allowed {
+			return domain.ErrQuota
+		}
+		if want == reserved {
+			return nil
+		}
+		if _, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes-$3+$2 WHERE id=$1`, t.Tenant, want, reserved); e != nil {
+			return e
+		}
+		_, e := tx.Exec(ctx, `UPDATE assets SET reserved_bytes=$2 WHERE id=$1`, t.ID, want)
+		return e
+	})
+	if e != nil {
+		return e
+	}
+	reserved = want
+	if resp.ContentLength >= 0 {
+		allowed = want
 	}
 	f, e := os.CreateTemp("", "monitor-media-*")
 	if e != nil {
@@ -188,13 +198,18 @@ func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) 
 	defer f.Close()
 	h := sha256.New()
 	stage = "read_body"
-	n, e := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, reserved+1))
+	// Read one byte past the allowance to detect an oversized body.
+	readLimit := allowed
+	if readLimit < math.MaxInt64 {
+		readLimit++
+	}
+	n, e := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, readLimit))
 	if e != nil {
 		return fmt.Errorf("media download interrupted: %w", e)
 	}
 	log.InfoContext(ctx, "media body received", "bytes", n, "elapsed_ms", time.Since(started).Milliseconds())
-	if n > reserved {
-		return &PermanentError{"media exceeds size or remaining storage limit"}
+	if n > allowed {
+		return domain.ErrQuota
 	}
 	if n == 0 {
 		return &PermanentError{"empty media"}
@@ -284,8 +299,12 @@ func (s *Service) download(ctx context.Context, t store.Task) (resultErr error) 
 		if alreadyCounted {
 			charge = 0
 		}
-		if _, e = tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes-$3+$2 WHERE id=$1`, t.Tenant, charge, reserved); e != nil {
+		tag, e := tx.Exec(ctx, `UPDATE tenants SET reserved_bytes=reserved_bytes-$3+$2 WHERE id=$1 AND (tenant_unlimited() OR tenant_usage()+reserved_bytes-$3+$2<=quota_bytes)`, t.Tenant, charge, reserved)
+		if e != nil {
 			return e
+		}
+		if tag.RowsAffected() == 0 {
+			return domain.ErrQuota
 		}
 		if _, e = tx.Exec(ctx, `UPDATE objects SET state=$2 WHERE id=$1 AND state='pending'`, oid, objectState); e != nil {
 			return e

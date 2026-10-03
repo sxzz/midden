@@ -32,13 +32,11 @@ type Config struct {
 	CaptureWorkers        int
 	DownloadWorkers       int
 	ControlWorkers        int
-	MaxImageBytes         int64
-	MaxVideoBytes         int64
 	MaxMedia              int
 }
 
 func Defaults() Config {
-	return Config{ConnectionConcurrency: 1, Quota: 1 << 30, Rate: 10, TenantConcurrency: 2, CaptureWorkers: 4, DownloadWorkers: 8, ControlWorkers: 4, MaxImageBytes: 20 << 20, MaxVideoBytes: 512 << 20, MaxMedia: 20}
+	return Config{ConnectionConcurrency: 1, Quota: 1 << 30, Rate: 10, TenantConcurrency: 2, CaptureWorkers: 4, DownloadWorkers: 8, ControlWorkers: 4, MaxMedia: 20}
 }
 
 type Service struct {

@@ -203,7 +203,7 @@ docker compose up -d
 
 备份应同时包含 PostgreSQL、对象存储和配置文件，具体步骤见运维文档。
 
-视频保存最高分辨率、同分辨率最高码率的 MP4／WebM 版本。`max_video_bytes`、`max_image_bytes` 和 `max_media` 可通过配置命令调整；超过 Telegram 50 MB 回传限制的文件仍可保存，通过 API 下载。
+视频保存最高分辨率、同分辨率最高码率的 MP4／WebM 版本。单个文件大小只受租户剩余空间限制，`max_media` 可通过配置命令调整；超过 Telegram 50 MB 回传限制的文件仍可保存，通过 API 下载。
 
 媒体的 `altText` 会随收藏保存，并附在 Telegram 预览中。视频按平台媒体 ID 与文件规格缓存，同一作用域内刷新或其他帖子引用同一视频时直接复用；不同规格和私有访问范围分别缓存。文件仍按 SHA-256 去重。
 
