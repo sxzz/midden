@@ -23,7 +23,9 @@ const (
 	// Enough for a list tile, an album cell or an avatar on a 3x screen.
 	thumbnailShortSide = 400
 	thumbnailLongSide  = 1200
-	thumbnailBackfill  = 50
+	// Per maintenance run. A task takes about a tenth of a second and the
+	// download workers run them in parallel, so this is cleared well within a run.
+	thumbnailBackfill = 2000
 )
 
 // thumbnailEncoder prefers WebP and falls back to JPEG where ffmpeg was built
