@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { onBeforeUnmount, onMounted, shallowRef, useTemplateRef } from 'vue'
-import { assetURL, type Asset } from '../api'
+import { assetURL, previewURL, type Asset } from '../api'
 import LoadingImage from './ui/LoadingImage.vue'
 const props = withDefaults(
   defineProps<{
@@ -9,6 +9,8 @@ const props = withDefaults(
     fit?: 'cover' | 'contain'
     /** Load at once, as the post being read does. */
     eager?: boolean
+    /** Show the small derived image where one exists, as lists do. */
+    thumbnail?: boolean
   }>(),
   { fit: 'cover' },
 )
@@ -47,6 +49,12 @@ onBeforeUnmount(() => {
 <template>
   <span ref="root" class="media-preview" :style="{ '--media-fit': fit }">
     <span v-if="!near" class="pending" aria-hidden="true" />
+    <!-- A video's thumbnail is a still frame, so no video is fetched for it. -->
+    <LoadingImage
+      v-else-if="thumbnail && asset.thumbnail"
+      :src="previewURL(asset)"
+      :alt="alt || ''"
+    />
     <LoadingImage
       v-else-if="asset.mime?.startsWith('image/')"
       :src="assetURL(asset)"

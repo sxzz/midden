@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed } from 'vue'
-import { assetURL, type Collection } from '../api'
+import { previewURL, type Collection } from '../api'
 import {
   collectionTime,
   excerpt,
@@ -125,7 +125,7 @@ const storage = computed(() =>
       <LoadingImage
         v-if="view.avatar && (!view.avatar.sensitive || showSensitive)"
         class="avatar"
-        :src="assetURL(view.avatar)"
+        :src="previewURL(view.avatar)"
         alt=""
         loading="lazy"
       /><span v-else class="avatar initials" aria-hidden="true">{{

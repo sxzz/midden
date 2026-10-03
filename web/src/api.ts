@@ -15,6 +15,8 @@ export interface Asset {
   alt_text?: string
   sensitive: boolean
   error?: string
+  /** A small derived image exists for lists; videos get their first frame. */
+  thumbnail?: boolean
 }
 export interface Entity {
   external_id?: string
@@ -160,6 +162,11 @@ export function errorText(e: unknown) {
 }
 export const assetURL = (a: Asset, inline = true) =>
   `/v1/assets/${encodeURIComponent(a.id)}${inline ? '?inline=1' : ''}`
+/** The small image for lists and avatars, or the original until one exists. */
+export const previewURL = (a: Asset) =>
+  a.thumbnail
+    ? `/v1/assets/${encodeURIComponent(a.id)}/thumbnail?inline=1`
+    : assetURL(a)
 export function safeURL(value: string) {
   try {
     const u = new URL(value)

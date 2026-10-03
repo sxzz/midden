@@ -103,6 +103,9 @@ func (t Task) InsertOpts() river.InsertOpts {
 		q = "capture"
 	case "download":
 		q = "download"
+	case "thumbnail":
+		// Shares the download workers but yields to media someone is waiting for.
+		return river.InsertOpts{Queue: "download", MaxAttempts: 3, Priority: 4}
 	}
 	return river.InsertOpts{Queue: q, MaxAttempts: 3}
 }

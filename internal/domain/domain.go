@@ -111,6 +111,8 @@ type Asset struct {
 	MIME      string `json:"mime,omitempty"`
 	Size      int64  `json:"size"`
 	Key       string `json:"-"`
+	// Thumbnail reports a derived small image at /v1/assets/{id}/thumbnail.
+	Thumbnail bool `json:"thumbnail,omitempty"`
 }
 
 type Entity struct {

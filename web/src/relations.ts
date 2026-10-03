@@ -1,4 +1,4 @@
-import { assetURL, type Collection, type Entity } from './api'
+import { previewURL, type Collection, type Entity } from './api'
 type Graph = NonNullable<Collection['graph']>
 /** Who a related post is attributed to, as far as the saved data can tell. */
 export interface RelationAuthor {
@@ -66,7 +66,7 @@ export function authorIdentity(
   return {
     name,
     handle,
-    avatar: avatar && assetURL(avatar),
+    avatar: avatar && previewURL(avatar),
     href: entity.saved_collection_id
       ? `#/collection/${encodeURIComponent(entity.saved_collection_id)}`
       : undefined,
