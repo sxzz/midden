@@ -10,14 +10,15 @@ import (
 )
 
 const (
-	ProtocolVersion   = "1.0"
-	CaptureFetch      = "capture.fetch"
-	CaptureRelated    = "capture.related"
-	CapturePage       = "capture.page"
-	CaptureCanonical  = "capture.canonical"
-	CaptureAccess     = "capture.access"
-	ConnectionCheck   = "connection.check"
-	CredentialPrepare = "credential.prepare"
+	ProtocolVersion    = "1.0"
+	CaptureFetch       = "capture.fetch"
+	CaptureRelated     = "capture.related"
+	CapturePage        = "capture.page"
+	CaptureCanonical   = "capture.canonical"
+	CaptureAccess      = "capture.access"
+	ConnectionCheck    = "connection.check"
+	CredentialPrepare  = "credential.prepare"
+	CredentialDeferred = "credential.deferred"
 )
 
 var protocolPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)

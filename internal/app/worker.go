@@ -197,6 +197,47 @@ func release(c *pgxpool.Conn, tenant string, slot int) {
 // How long a capture waits in place for its connection before it is snoozed.
 var connectionWait = 2 * time.Second
 
+// connectionTurn takes one of the connection's capture slots until the
+// returned function is called.
+func (s *Service) connectionTurn(ctx context.Context, connection string) (func(), error) {
+	lock, e := s.DB.Pool.Acquire(ctx)
+	if e != nil {
+		return nil, e
+	}
+	var acquired bool
+	slot := 0
+	// Most captures hold a connection only briefly, so wait a moment for a
+	// turn: going back to the queue costs at least a second each time.
+	for deadline := time.Now().Add(connectionWait); ; {
+		for i := 0; i < max(1, s.Config.ConnectionConcurrency); i++ {
+			slot = i
+			e = lock.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext($1),$2)`, "connection:"+connection, i).Scan(&acquired)
+			if e != nil || acquired {
+				break
+			}
+		}
+		if e != nil || acquired || !time.Now().Before(deadline) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			e = ctx.Err()
+		case <-time.After(25 * time.Millisecond):
+		}
+		if e != nil {
+			break
+		}
+	}
+	if e != nil || !acquired {
+		lock.Release()
+		if e != nil {
+			return nil, e
+		}
+		return nil, river.JobSnooze(time.Second)
+	}
+	return func() { release(lock, "connection:"+connection, slot) }, nil
+}
+
 func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if s.Registry != nil || len(s.adapterBindings()) > 0 {
 		var id string
@@ -233,48 +274,10 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	var credential *pb.Credential
 	var revision int64
 	if connection != "" {
-		lock, e := s.DB.Pool.Acquire(ctx)
-		if e != nil {
-			return e
-		}
-		var acquired bool
-		connectionSlot := 0
-		// Most captures hold a connection only briefly, so wait a moment for a
-		// turn: going back to the queue costs at least a second each time.
-		for deadline := time.Now().Add(connectionWait); ; {
-			for i := 0; i < max(1, s.Config.ConnectionConcurrency); i++ {
-				connectionSlot = i
-				e = lock.QueryRow(ctx, `SELECT pg_try_advisory_lock(hashtext($1),$2)`, "connection:"+connection, i).Scan(&acquired)
-				if e != nil || acquired {
-					break
-				}
-			}
-			if e != nil || acquired || !time.Now().Before(deadline) {
-				break
-			}
-			select {
-			case <-ctx.Done():
-				e = ctx.Err()
-			case <-time.After(25 * time.Millisecond):
-			}
-			if e != nil {
-				break
-			}
-		}
-		if e != nil || !acquired {
-			lock.Release()
-			if e != nil {
-				return e
-			}
-			return river.JobSnooze(time.Second)
-		}
-		defer release(lock, "connection:"+connection, connectionSlot)
 		credential, revision, e = s.session(ctx, t.Tenant, connection)
 		if e != nil {
 			return e
 		}
-	}
-	if connection != "" {
 		_, selected, err := s.connectionProvider(ctx, t.Tenant, connection)
 		if err != nil || selected != provider {
 			return ErrConnection
@@ -290,6 +293,16 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if _, e := s.requireProvider(ctx, provider, adapter.CaptureFetch); e != nil {
 		return e
 	}
+	// A fetch that never touches the account need not wait for it: the adapter
+	// is asked without the credential first and says when it needs one.
+	deferred := connection != "" && mode != "check" && adapter.Supports(policy, adapter.CredentialDeferred, 1, 0)
+	if connection != "" && !deferred {
+		done, e := s.connectionTurn(ctx, connection)
+		if e != nil {
+			return e
+		}
+		defer done()
+	}
 	if mode == "check" {
 		target := &pb.ObjectRef{Platform: platform, Kind: kind, ObjectScope: objectScope, ExternalId: id}
 		return s.checkAccess(ctx, t, collectionID, url, target, provider, connection, scope, credential, revision)
@@ -297,10 +310,28 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	callCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	var trailer metadata.MD
-	fetchStart := time.Now()
-	r, e := s.Adapter.Fetch(callCtx, &pb.FetchRequest{PageCursor: pageCursor, PageSize: pageSize, Automatic: automatic, Platform: platform, Kind: kind, ObjectScope: objectScope, Url: url, ExternalId: id, ProviderId: provider, ConnectionId: connection, AccessScope: scope, RequestId: t.ID, Credential: credential}, grpc.Trailer(&trailer))
-	ProviderDuration.WithLabelValues(provider).Observe(time.Since(fetchStart).Seconds())
-	ProviderResults.WithLabelValues(provider, status.Code(e).String()).Inc()
+	fetch := func(credential *pb.Credential) (*pb.FetchResponse, error) {
+		trailer = nil
+		fetchStart := time.Now()
+		r, e := s.Adapter.Fetch(callCtx, &pb.FetchRequest{PageCursor: pageCursor, PageSize: pageSize, Automatic: automatic, Platform: platform, Kind: kind, ObjectScope: objectScope, Url: url, ExternalId: id, ProviderId: provider, ConnectionId: connection, AccessScope: scope, RequestId: t.ID, Credential: credential, CredentialDeferred: credential == nil && deferred}, grpc.Trailer(&trailer))
+		ProviderDuration.WithLabelValues(provider).Observe(time.Since(fetchStart).Seconds())
+		ProviderResults.WithLabelValues(provider, status.Code(e).String()).Inc()
+		return r, e
+	}
+	var r *pb.FetchResponse
+	if deferred {
+		r, e = fetch(nil)
+		if e != nil && len(trailer.Get("credential-required")) > 0 {
+			done, err := s.connectionTurn(ctx, connection)
+			if err != nil {
+				return err
+			}
+			defer done()
+			r, e = fetch(credential)
+		}
+	} else {
+		r, e = fetch(credential)
+	}
 	if e != nil {
 		if connection != "" && status.Code(e) == codes.Unauthenticated {
 			s.markReauth(ctx, t.Tenant, connection, revision)

@@ -121,6 +121,7 @@ export function createServer(
             "capture.access",
             "connection.check",
             "credential.prepare",
+            "credential.deferred",
             "content.text",
             "entity.graph",
             "source.raw",
@@ -181,7 +182,13 @@ export function createServer(
           status.FAILED_PRECONDITION,
           "account execution requires TLS",
         );
-      return strategy.fetch(req, signal, decodeCredential(req.credential));
+      return strategy.fetch(
+        req,
+        signal,
+        req.credentialDeferred && !req.credential
+          ? undefined
+          : decodeCredential(req.credential),
+      );
     }),
     checkAccess: unary(async (req, signal) => {
       const target = resolveTarget(req.url);

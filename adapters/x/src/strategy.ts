@@ -3,6 +3,7 @@ import { preferOriginalAvatars } from "./avatar.js";
 import { status } from "@grpc/grpc-js";
 import {
   fetchPublic,
+  credentialRequiredKey,
   ProviderError,
   publicPost,
   sourceState,
@@ -12,6 +13,7 @@ import {
   fetchPublicProfile,
   fetchPublicTimeline,
   fetchSessionTimeline,
+  normalizeProfile,
 } from "./profile.js";
 import type { SessionCredential } from "./credential.js";
 import {
@@ -117,23 +119,37 @@ export class CaptureStrategy {
       this.listed.delete(this.listed.keys().next().value!);
   }
   // Only automatic captures settle for the listing; an explicit one asks upstream.
-  private async post(
-    req: FetchRequest,
-    signal: AbortSignal,
-  ): Promise<FetchResponse> {
+  private listedPost(req: FetchRequest): FetchResponse | undefined {
     const listed = req.automatic && this.listed.get(req.externalId);
-    if (listed && this.now() - listed.at < listedPostTTL)
-      try {
-        return publicPost(listed.post, req.externalId, {
-          body: Buffer.from(JSON.stringify(listed.post)),
-          contentType: "application/json",
-          sourceUrl: listed.sourceUrl,
-          visibility: Visibility.VISIBILITY_PUBLIC,
-        });
-      } catch {
-        // Whatever the listing lacks, the post's own response decides.
-      }
-    return this.publicPost(req.externalId, signal);
+    if (!listed || this.now() - listed.at >= listedPostTTL) return;
+    try {
+      const result = publicPost(listed.post, req.externalId, {
+        body: Buffer.from(JSON.stringify(listed.post)),
+        contentType: "application/json",
+        sourceUrl: listed.sourceUrl,
+        visibility: Visibility.VISIBILITY_PUBLIC,
+      });
+      // The listing describes the author as the profile API does, except for
+      // the avatar size; a public timeline cannot list a protected author.
+      const author = listed.post.author;
+      this.attachProfile(
+        result,
+        normalizeProfile(
+          {
+            ...author,
+            avatar_url: author.avatar_url?.replace(
+              /_200x200(\.[^/.]+)$/,
+              "_normal$1",
+            ),
+          },
+          author.id,
+          "fxtwitter",
+        ),
+      );
+      return result;
+    } catch {
+      // Whatever the listing lacks, the post's own response decides.
+    }
   }
   private protected(profile: FetchResponse): boolean {
     const value = this.user(profile).protected;
@@ -150,6 +166,18 @@ export class CaptureStrategy {
     credential?: SessionCredential,
   ): Promise<FetchResponse> {
     let result: FetchResponse;
+    // The core withholds the account until a fetch turns out to need it.
+    const account = () => {
+      if (!credential && req.credentialDeferred) {
+        const error = new ProviderError(
+          status.FAILED_PRECONDITION,
+          "account required",
+        );
+        error.metadata.set(credentialRequiredKey, "1");
+        throw error;
+      }
+      return credential;
+    };
     if (req.pageCursor && (req.kind !== "profile" || req.automatic))
       throw new ProviderError(
         status.INVALID_ARGUMENT,
@@ -182,6 +210,7 @@ export class CaptureStrategy {
           }
         }
         if (this.protected(result)) {
+          const credential = account();
           if (credential) {
             // The collection of protected posts is account-private, while the profile metadata is public.
             result.visibility = Visibility.VISIBILITY_PRIVATE;
@@ -209,6 +238,8 @@ export class CaptureStrategy {
           );
         }
       }
+    } else if ((result = this.listedPost(req)!)) {
+      // Complete as listed.
     } else {
       const author = new URL(req.url).pathname.match(
         /^\/([A-Za-z0-9_]+)\/status\//,
@@ -233,14 +264,15 @@ export class CaptureStrategy {
       if (!profile) {
         // An ID-only link has no author. Discover it once before selecting the final source.
         try {
-          discovered = await this.post(req, signal);
+          discovered = await this.publicPost(req.externalId, signal);
         } catch (error) {
           if (
-            !credential ||
             !(error instanceof ProviderError) ||
             error.code !== status.UNAUTHENTICATED
           )
             throw error;
+          const credential = account();
+          if (!credential) throw error;
           discovered = await this.session(req.externalId, credential, signal);
         }
         const authorNode = discovered.graph?.entities.find(
@@ -256,6 +288,7 @@ export class CaptureStrategy {
       if (discovered?.providerId === "x-session") {
         result = discovered;
       } else if (this.protected(profile)) {
+        const credential = account();
         if (!credential)
           throw new ProviderError(
             status.PERMISSION_DENIED,
@@ -269,7 +302,7 @@ export class CaptureStrategy {
         result =
           discovered?.providerId === "fxtwitter"
             ? discovered
-            : await this.post(req, signal);
+            : await this.publicPost(req.externalId, signal);
       this.attachProfile(result, profile);
     }
     if (req.kind === "profile" && result.nextPageCursor) {
@@ -285,7 +318,7 @@ export class CaptureStrategy {
     }
     // Execution provider remains the persisted connection choice. textSource and raw URLs record actual sources.
     result.providerId = req.providerId;
-    if (credential)
+    if (credential || req.credentialDeferred)
       for (const source of result.sourceResponses)
         source.visibility = Visibility.VISIBILITY_PRIVATE;
     await preferOriginalAvatars(result, signal);

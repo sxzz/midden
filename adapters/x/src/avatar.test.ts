@@ -39,7 +39,12 @@ test("unavailable or non-image original avatars retain their original URL", asyn
     },
   ]) {
     const r = result();
-    await preferOriginalAvatars(r, AbortSignal.timeout(1000), fetcher);
+    await preferOriginalAvatars(
+      r,
+      AbortSignal.timeout(1000),
+      fetcher,
+      new Map(),
+    );
     assert.equal(r.resources[0].url, url);
     assert.equal(r.resources[0].immutableKey, `x:avatar:${url}`);
   }
@@ -59,4 +64,26 @@ test("other media, avatar sizes and hosts are not probed", async () => {
     return new Response(null, { status: 404 });
   });
   assert.equal(calls, 0);
+});
+
+test("an original avatar found once is not probed again", async () => {
+  const known = new Map<string, string>();
+  let calls = 0;
+  for (let i = 0; i < 2; i++) {
+    const r = result();
+    await preferOriginalAvatars(
+      r,
+      AbortSignal.timeout(1000),
+      async () => {
+        calls++;
+        return new Response("image", {
+          status: 206,
+          headers: { "content-type": "image/jpeg" },
+        });
+      },
+      known,
+    );
+    assert.equal(r.resources[0].url, url.replace("_normal", ""));
+  }
+  assert.equal(calls, 1);
 });

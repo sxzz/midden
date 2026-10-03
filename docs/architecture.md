@@ -69,7 +69,7 @@ Provider 在 `Describe` 中声明支持的 `visibilities`，由 `Fetch` 返回�
 | `download` | 下载媒体、上传对象存储 | 8              |
 | `control`  | 关联内容调度、完成收藏 | 4              |
 
-采集另外受每租户 2 个执行槽、每 Connection 默认 1 个执行槽限制，分别由 `tenant_concurrency` 和 `connection_concurrency` 配置。下载受下载 worker 数限制。可重试采集失败最多执行 3 次；限流响应的 `Retry-After` 控制下一次重试时间。channel 使用 `channel_work` 持久化租约和延后重试，每 25 秒续租，租约 90 秒到期。
+采集另外受每租户 2 个执行槽、每 Connection 默认 1 个执行槽限制，分别由 `tenant_concurrency` 和 `connection_concurrency` 配置。Connection 执行槽被占用时，采集先在原地等待最多 2 秒，仍未轮到才延后重试。Provider 声明 `credential.deferred` 时，核心先不带凭据、不占执行槽调用 Fetch；Adapter 确实需要账号时以 trailer `credential-required` 拒绝，核心取得执行槽后带凭据重新调用。下载受下载 worker 数限制。可重试采集失败最多执行 3 次；限流响应的 `Retry-After` 控制下一次重试时间。channel 使用 `channel_work` 持久化租约和延后重试，每 25 秒续租，租约 90 秒到期。
 
 ## 数据库关系
 
@@ -138,7 +138,7 @@ Telegram 交互会在 `identities` 保存发送者的 `first_name`、`last_name`
 
 资源下载完成后先计算 SHA-256，在同一可见性及访问作用域的 hash 锁下检查 Blob；已有内容直接复用，仅不存在时上传 S3。上传期间不持有数据库事务。上传成功但数据库提交中断的临时对象仍由延迟清理机制回收。不可变媒体缓存也按访问作用域隔离。
 
-X 视频缓存键包含媒体 ID 和具体画质路径。X 头像仅对 `https://pbs.twimg.com/profile_images/<图片ID>/<文件名>` 生成完整 URL 缓存键，保留尺寸和查询参数；URL 相同则复用原文件，URL 改变重新下载并按 hash 去重。其他来源的头像不采用 URL 缓存。
+X 视频缓存键包含媒体 ID 和具体画质路径。X 头像仅对 `https://pbs.twimg.com/profile_images/<图片ID>/<文件名>` 生成完整 URL 缓存键，保留尺寸和查询参数；Adapter 对 `_normal` 头像探测原图是否存在，已确认存在的原图地址在内存中保留（最多 5000 条），不重复探测；URL 相同则复用原文件，URL 改变重新下载并按 hash 去重。其他来源的头像不采用 URL 缓存。
 
 旧版本通过 `revisions.capture_id` 找到对应 `assets`。媒体顺序属于引用，内容 hash 属于 Blob；不同版本可以引用同一份媒体。物理存储按 Blob 去重，租户用量按其保存记录的引用分别计算。
 
@@ -210,20 +210,21 @@ Telegram 投递采用至少一次语义：远端成功但响应丢失时可能�
 
 `Describe` 是唯一必需的业务 RPC；标准 gRPC health 用于部署健康检查。核心握手不限定平台 ID，也不要求支持采集、账号或某一种媒体。每个 Provider 独立声明 `capabilities`，每项含 `name`、`major`、`minor`：
 
-| 能力                 | 当前版本 | 含义                                                                                                   |
-| -------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
-| `capture.fetch`      | 1.0      | 用 `Resolve` 规范化 URL，再用 `Fetch` 读取单个目标                                                     |
-| `capture.related`    | 1.0      | 返回关联目标及最小刷新间隔；核心按提交者身份持久化执行有界关联采集                                     |
-| `capture.page`       | 1.0      | `Fetch.page_cursor` / `next_page_cursor` 为不透明分页游标；沿用原 Provider、Connection，空返回表示末页 |
-| `capture.canonical`  | 1.0      | Fetch 返回同平台、同类型的稳定目标身份                                                                 |
-| `capture.access`     | 1.0      | 用 `CheckAccess` 单次上游请求确认账号仍可读取目标及内嵌对象；错误语义同 Fetch                          |
-| `credential.prepare` | 1.0      | 用 `PrepareCredential` 将用户输入转换为 Adapter 私有的凭据格式                                         |
-| `connection.check`   | 1.0      | 用 `CheckConnection` 验证账号会话                                                                      |
-| `content.text`       | 1.0      | 采集结果可以包含文字                                                                                   |
-| `entity.graph`       | 1.0      | 返回由 Adapter 声明结构的实体及关系                                                                    |
-| `source.raw`         | 1.0      | 完整上游响应体及其可见性                                                                               |
-| `media.image`        | 1.0      | 采集结果可以包含图片                                                                                   |
-| `media.video`        | 1.0      | 采集结果可以包含视频                                                                                   |
+| 能力                  | 当前版本 | 含义                                                                                                          |
+| --------------------- | -------- | ------------------------------------------------------------------------------------------------------------- |
+| `capture.fetch`       | 1.0      | 用 `Resolve` 规范化 URL，再用 `Fetch` 读取单个目标                                                            |
+| `capture.related`     | 1.0      | 返回关联目标及最小刷新间隔；核心按提交者身份持久化执行有界关联采集                                            |
+| `capture.page`        | 1.0      | `Fetch.page_cursor` / `next_page_cursor` 为不透明分页游标；沿用原 Provider、Connection，空返回表示末页        |
+| `capture.canonical`   | 1.0      | Fetch 返回同平台、同类型的稳定目标身份                                                                        |
+| `capture.access`      | 1.0      | 用 `CheckAccess` 单次上游请求确认账号仍可读取目标及内嵌对象；错误语义同 Fetch                                 |
+| `credential.prepare`  | 1.0      | 用 `PrepareCredential` 将用户输入转换为 Adapter 私有的凭据格式                                                |
+| `credential.deferred` | 1.0      | `Fetch.credential_deferred` 表示凭据暂未提供；需要账号时以 trailer `credential-required` 拒绝，核心带凭据重试 |
+| `connection.check`    | 1.0      | 用 `CheckConnection` 验证账号会话                                                                             |
+| `content.text`        | 1.0      | 采集结果可以包含文字                                                                                          |
+| `entity.graph`        | 1.0      | 返回由 Adapter 声明结构的实体及关系                                                                           |
+| `source.raw`          | 1.0      | 完整上游响应体及其可见性                                                                                      |
+| `media.image`         | 1.0      | 采集结果可以包含图片                                                                                          |
+| `media.video`         | 1.0      | 采集结果可以包含视频                                                                                          |
 
 能力表示 Provider 可以提供的功能，不保证每次结果包含所有媒体。实际收藏内容仍以 Fetch 返回的数据为准。公共 FxTwitter Provider 不声明账号验证能力；个人账号 Provider 声明该能力。采集 Provider 同时声明允许的可见性，实际结果仍须遵守公私隔离规则。`CheckAccess` 不重新采集内容，只返回目标可见性及请求中目标和内嵌对象里账号可读的子集；声明 `capture.access` 的 Provider 在 Fetch 的 `restricted_targets` 中列出图中缺少公开证据的内嵌对象，公共 Provider 留空。
 
@@ -279,7 +280,7 @@ Fetch 的 text、text_kind、summary、author_name、published_at 和展示媒�
 
 每次显式提交都持久化一个关联任务及提交者的 Adapter、Provider、Connection。主采集完成后，任务在该租户上下文中逐一创建幂等子提交，共享主采集的其他租户使用各自的账号选择。子提交设置 `automatic`，不生成渠道投递；集合或需要显式刷新的自动目标不再展开，其他直接子提交可继续采集一层引用，引用的引用不再展开；限流时延后执行，错误记录在提交的 `related_state` 和 `related_error`。每页最多接受 512 个关联目标（包括帖子及资料引用），超限拒绝整页而非静默截断。
 
-X Adapter 支持帖子、用户名 Profile URL 和稳定用户 ID Profile URL。帖子返回作者 Profile 的关联目标，刷新间隔为 60 秒；Profile 显式提交始终重新读取资料并连续读取时间线，将累计约 100 条帖子声明为关联目标，并返回下一页游标供用户通过「抓取更多」继续采集。公开账号使用公共实例，count=100；受保护账号使用所选采集账号，count=100。自动 Profile 采集只读取资料。Profile 资料始终使用 FxTwitter 公共 API，包括 protected 账号；即使用户选择了账号，公开帖文仍使用公共 API，只有受保护帖文使用该 Connection 的 Cookie。完整响应体保存在 `source_responses`，账号原始数据不随公开资料共享。公开时间线列出的帖子与单帖接口返回的内容相同，Adapter 在内存中保留 30 分钟（最多 2000 条），核心随后自动采集这些帖子时直接使用，不再逐条请求；其原始响应记录为列表中的该条目，请求地址为所在的时间线页。显式提交的帖子、带文章的帖子（列表只含空壳）、受保护时间线以及缓存过期或 Adapter 重启后的帖子仍请求单帖接口。Profile 头像和封面作为实体关联资源保存。
+X Adapter 支持帖子、用户名 Profile URL 和稳定用户 ID Profile URL。帖子返回作者 Profile 的关联目标，刷新间隔为 60 秒；Profile 显式提交始终重新读取资料并连续读取时间线，将累计约 100 条帖子声明为关联目标，并返回下一页游标供用户通过「抓取更多」继续采集。公开账号使用公共实例，count=100；受保护账号使用所选采集账号，count=100。自动 Profile 采集只读取资料。Profile 资料始终使用 FxTwitter 公共 API，包括 protected 账号；即使用户选择了账号，公开帖文仍使用公共 API，只有受保护帖文使用该 Connection 的 Cookie。完整响应体保存在 `source_responses`，账号原始数据不随公开资料共享。公开时间线列出的帖子与单帖接口返回的内容相同，Adapter 在内存中保留 30 分钟（最多 2000 条），核心随后自动采集这些帖子时直接使用，不再逐条请求，作者也采用列表条目中的资料（不含 `about_account`，头像统一为 `_normal` 地址后再探测原图），不再请求资料接口；其原始响应记录为列表中的该条目，请求地址为所在的时间线页。显式提交的帖子、带文章的帖子（列表只含空壳）、受保护时间线以及缓存过期或 Adapter 重启后的帖子仍请求单帖接口。Profile 头像和封面作为实体关联资源保存。
 
 Fetch 失败时，Adapter 可以用 trailer `source-state` 告知来源本身已不可用：`deleted` 表示帖子已删除，`suspended` 表示账号被封禁。核心把它记录在 `collections.source_state` 和 `source_state_at`，采集仍按失败处理，已有版本不变；之后任一次成功采集会清除该标记，因为封禁可能解除。X Adapter 只依据公共帖子 API 的返回判断：`code` 404 视为删除，404 且 reason 为 `suspended` 视为封禁，401 表示帖子存在但受保护。GraphQL 接口的 404 表示查询已失效，不作为删除依据。采集账号读不到帖子时，Adapter 会先查询公共 API，确认已删除或封禁时报告该状态，而不是撤销访问授权。保存链接中的用户名查不到或已被封禁时，改按帖子 ID 查询，以处理改名的情况。
 

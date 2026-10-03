@@ -354,22 +354,23 @@ func (x *DescribeResponse) GetDisplayName() string {
 }
 
 type FetchRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Url           string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
-	ExternalId    string                 `protobuf:"bytes,2,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
-	ProviderId    string                 `protobuf:"bytes,3,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
-	ConnectionId  string                 `protobuf:"bytes,4,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
-	AccessScope   string                 `protobuf:"bytes,5,opt,name=access_scope,json=accessScope,proto3" json:"access_scope,omitempty"`
-	RequestId     string                 `protobuf:"bytes,6,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Credential    *Credential            `protobuf:"bytes,7,opt,name=credential,proto3" json:"credential,omitempty"`
-	Platform      string                 `protobuf:"bytes,8,opt,name=platform,proto3" json:"platform,omitempty"`
-	Kind          string                 `protobuf:"bytes,9,opt,name=kind,proto3" json:"kind,omitempty"`
-	ObjectScope   string                 `protobuf:"bytes,10,opt,name=object_scope,json=objectScope,proto3" json:"object_scope,omitempty"`
-	PageSize      uint32                 `protobuf:"varint,13,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`      // Optional target size; adapter may exceed it to preserve whole upstream pages.
-	PageCursor    string                 `protobuf:"bytes,12,opt,name=page_cursor,json=pageCursor,proto3" json:"page_cursor,omitempty"` // Opaque capture.page/1 continuation, same provider and connection.
-	Automatic     bool                   `protobuf:"varint,11,opt,name=automatic,proto3" json:"automatic,omitempty"`                    // Related captures must not recursively expand collections.
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Url                string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	ExternalId         string                 `protobuf:"bytes,2,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
+	ProviderId         string                 `protobuf:"bytes,3,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	ConnectionId       string                 `protobuf:"bytes,4,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
+	AccessScope        string                 `protobuf:"bytes,5,opt,name=access_scope,json=accessScope,proto3" json:"access_scope,omitempty"`
+	RequestId          string                 `protobuf:"bytes,6,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Credential         *Credential            `protobuf:"bytes,7,opt,name=credential,proto3" json:"credential,omitempty"`
+	Platform           string                 `protobuf:"bytes,8,opt,name=platform,proto3" json:"platform,omitempty"`
+	Kind               string                 `protobuf:"bytes,9,opt,name=kind,proto3" json:"kind,omitempty"`
+	ObjectScope        string                 `protobuf:"bytes,10,opt,name=object_scope,json=objectScope,proto3" json:"object_scope,omitempty"`
+	PageSize           uint32                 `protobuf:"varint,13,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`                               // Optional target size; adapter may exceed it to preserve whole upstream pages.
+	PageCursor         string                 `protobuf:"bytes,12,opt,name=page_cursor,json=pageCursor,proto3" json:"page_cursor,omitempty"`                          // Opaque capture.page/1 continuation, same provider and connection.
+	Automatic          bool                   `protobuf:"varint,11,opt,name=automatic,proto3" json:"automatic,omitempty"`                                             // Related captures must not recursively expand collections.
+	CredentialDeferred bool                   `protobuf:"varint,14,opt,name=credential_deferred,json=credentialDeferred,proto3" json:"credential_deferred,omitempty"` // credential.deferred/1: credential withheld; fail with trailer credential-required to get it.
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *FetchRequest) Reset() {
@@ -489,6 +490,13 @@ func (x *FetchRequest) GetPageCursor() string {
 func (x *FetchRequest) GetAutomatic() bool {
 	if x != nil {
 		return x.Automatic
+	}
+	return false
+}
+
+func (x *FetchRequest) GetCredentialDeferred() bool {
+	if x != nil {
+		return x.CredentialDeferred
 	}
 	return false
 }
@@ -1792,7 +1800,7 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\x05hosts\x18\x04 \x03(\tR\x05hosts\x122\n" +
 	"\tproviders\x18\x05 \x03(\v2\x14.adapter.v1.ProviderR\tproviders\x129\n" +
 	"\fentity_types\x18\x06 \x03(\v2\x16.adapter.v1.EntityTypeR\ventityTypes\x12!\n" +
-	"\fdisplay_name\x18\a \x01(\tR\vdisplayName\"\xb0\x03\n" +
+	"\fdisplay_name\x18\a \x01(\tR\vdisplayName\"\xe1\x03\n" +
 	"\fFetchRequest\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x1f\n" +
 	"\vexternal_id\x18\x02 \x01(\tR\n" +
@@ -1813,7 +1821,8 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\tpage_size\x18\r \x01(\rR\bpageSize\x12\x1f\n" +
 	"\vpage_cursor\x18\f \x01(\tR\n" +
 	"pageCursor\x12\x1c\n" +
-	"\tautomatic\x18\v \x01(\bR\tautomatic\"\xa8\x01\n" +
+	"\tautomatic\x18\v \x01(\bR\tautomatic\x12/\n" +
+	"\x13credential_deferred\x18\x0e \x01(\bR\x12credentialDeferred\"\xa8\x01\n" +
 	"\bResource\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12#\n" +

@@ -556,12 +556,14 @@ test("posts listed by a public timeline are captured without a request of their 
   const page = "https://api.fxtwitter.com/2/profile/id:123/statuses?count=100";
   let now = 0;
   const posts: string[] = [];
+  let profiles = 0;
   const strategy = new CaptureStrategy(
     async (id) => {
       posts.push(id);
       return post("fxtwitter");
     },
     async (id) =>
+      ++profiles &&
       normalizeProfile(
         { ...user, id: id.startsWith("handle:") ? user.id : id },
         id,
@@ -594,6 +596,13 @@ test("posts listed by a public timeline are captured without a request of their 
   };
   const listed = await strategy.fetch(member, AbortSignal.timeout(1000));
   assert.deepEqual(posts, []);
+  // The listing also describes the author: only the timeline's profile was asked for.
+  assert.equal(profiles, 1);
+  const author = listed.graph!.entities.find((e) => e.key === "author")!;
+  assert.equal(
+    JSON.parse(Buffer.from(author.dataJson).toString()).metadata.id,
+    listedPost.author.id,
+  );
   assert.equal(listed.text, listedPost.text);
   assert.equal(listed.sourceResponses[0].sourceUrl, page);
   assert.equal(
@@ -617,4 +626,52 @@ test("posts listed by a public timeline are captured without a request of their 
   now = 30 * 60_000;
   await strategy.fetch(member, AbortSignal.timeout(1000));
   assert.deepEqual(posts, [listedPost.id, "43", listedPost.id]);
+});
+test("a deferred account is asked for only when the fetch needs it", async () => {
+  let protectedUser = false,
+    now = 0;
+  const sessions: string[] = [];
+  const strategy = new CaptureStrategy(
+    async () => ({
+      ...post("fxtwitter"),
+      sourceResponses: [
+        {
+          body: Buffer.from("{}"),
+          contentType: "application/json",
+          sourceUrl: "",
+          visibility: Visibility.VISIBILITY_PUBLIC,
+        },
+      ],
+    }),
+    async (id) =>
+      normalizeProfile({ ...user, protected: protectedUser }, id, "fxtwitter"),
+    async (id) => {
+      sessions.push(id);
+      return post("x-session");
+    },
+    undefined,
+    () => now,
+  );
+  const deferred = { ...request(), credentialDeferred: true };
+  const open = await strategy.fetch(deferred, AbortSignal.timeout(1000));
+  // What an account's capture returns stays private, with or without the account.
+  assert.equal(
+    open.sourceResponses.every(
+      (source) => source.visibility === Visibility.VISIBILITY_PRIVATE,
+    ),
+    true,
+  );
+  protectedUser = true;
+  now = 61_000;
+  await assert.rejects(
+    strategy.fetch(
+      { ...deferred, url: "https://x.com/i/web/status/42" },
+      AbortSignal.timeout(1000),
+    ),
+    (error: any) =>
+      error.metadata.get("credential-required")[0] === "1" &&
+      sessions.length === 0,
+  );
+  await strategy.fetch(deferred, AbortSignal.timeout(1000), credential);
+  assert.deepEqual(sessions, ["42"]);
 });
