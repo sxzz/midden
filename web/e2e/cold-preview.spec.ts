@@ -62,6 +62,15 @@ test('first list preview fits the image after dimensions arrive during opening',
       return Math.round(box?.width || 0)
     })
     .toBe(281)
+  // The fitted size follows the viewer when the viewport changes.
+  await page.setViewportSize({ width: 844, height: 390 })
+  await expect
+    .poll(async () => {
+      const box = await image.boundingBox()
+      return [Math.round(box?.width || 0), Math.round(box?.height || 0)]
+    })
+    .toEqual([130, 390])
+  await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('button', { name: '关闭图片' }).click()
   await page.getByRole('button', { name: '放大图片', exact: true }).click()
   await expect

@@ -98,6 +98,32 @@ test('video errors remain closable and can navigate to images', async ({
   await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
+test('a clip taller than the viewer is contained and follows the viewport', async ({
+  page,
+}) => {
+  await page.route('**/v1/assets/clip?*', (r) =>
+    r.fulfill({
+      path: fileURLToPath(new URL('fixtures/tall.webm', import.meta.url)),
+      contentType: 'video/webm',
+    }),
+  )
+  await page.getByRole('button', { name: '播放视频' }).click()
+  const video = page.getByRole('dialog').locator('video')
+  await expect
+    .poll(() => video.evaluate((v: HTMLVideoElement) => v.videoHeight))
+    .toBe(240)
+  const box = async () => {
+    const { x, y, width, height } = (await video.boundingBox())!
+    return [x, y, width, height].map(Math.round)
+  }
+  // The slide fills what the chrome leaves free and the frame is fitted
+  // inside it, whatever the clip's own proportions.
+  await expect.poll(box).toEqual([12, 72, 366, 662])
+  await expect(video).toHaveCSS('object-fit', 'contain')
+  await page.setViewportSize({ width: 844, height: 390 })
+  await expect.poll(box).toEqual([12, 72, 820, 208])
+})
+
 test('detail image and video thumbnails have equal rows with uncropped media', async ({
   page,
 }) => {

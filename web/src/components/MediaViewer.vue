@@ -12,6 +12,9 @@ import { api, assetURL, errorText, type Asset } from '../api'
 import { host } from '../host'
 import ViewerDetailButton from './ui/ViewerDetailButton.vue'
 import 'photoswipe/style.css'
+// The API carries no dimensions, so an image's natural size is learned when it
+// first loads and kept for the next time the same asset is opened.
+const naturalSizes = new Map<string, { width: number; height: number }>()
 const props = defineProps<{
   assets: Asset[]
   initialId: string
@@ -68,7 +71,9 @@ async function save() {
 }
 // Keeps the native video controls clear of the floating chrome.
 const videoPadding = { top: 72, bottom: 110, left: 12, right: 12 }
+const noPadding = { top: 0, bottom: 0, left: 0, right: 0 }
 let photoSwipe: PhotoSwipe | undefined
+let resizeObserver: ResizeObserver | undefined
 let previousOverflow = ''
 let opener: HTMLElement | null = null
 let disposed = false
@@ -98,43 +103,30 @@ onMounted(() => {
   previousOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
   dialog.value?.showModal()
-  const previews = [
-    ...document.querySelectorAll<HTMLImageElement>(
-      '.media img, .thumbs img, .album img, .author img',
-    ),
-  ]
-  // Until an image reports its natural size, its slide spans the whole
-  // viewport and object-fit keeps the picture contained inside it, so a cold
-  // first open never shows a guessed aspect ratio. A video slide always fills
-  // the area its padding leaves free, for the same reason.
-  const viewport = {
-    width: stage.value.clientWidth || window.innerWidth,
-    height: stage.value.clientHeight || window.innerHeight,
-  }
-  const dataSource = props.assets.map((image) => {
-    const src = assetURL(image)
-    if (image.mime?.startsWith('video/'))
-      return {
-        src,
-        type: 'video',
-        alt: image.alt_text || '收藏视频',
-        width: viewport.width - videoPadding.left - videoPadding.right,
-        height: viewport.height - videoPadding.top - videoPadding.bottom,
-      }
-    const preview = previews.find(
-      (img) => img.src === new URL(src, location.href).href && img.naturalWidth,
-    )
+  const el = stage.value
+  const assets = props.assets
+  // Slide geometry is decided in `calcSlideSize` below; these dimensions only
+  // have to be non-zero for PhotoSwipe to treat the item as sized.
+  const dataSource = assets.map((image) => {
+    const video = image.mime?.startsWith('video/')
     return {
-      src,
-      alt: image.alt_text || '收藏图片',
-      width: preview?.naturalWidth || viewport.width,
-      height: preview?.naturalHeight || viewport.height,
+      src: assetURL(image),
+      type: video ? 'video' : 'image',
+      alt: image.alt_text || (video ? '收藏视频' : '收藏图片'),
+      width: el.clientWidth || window.innerWidth,
+      height: el.clientHeight || window.innerHeight,
     }
   })
   const pswp = new PhotoSwipe({
     dataSource,
     index: index.value,
-    appendToEl: stage.value,
+    appendToEl: el,
+    // The stage is the viewport, not the window: inside a host webview the two
+    // can disagree, and the stage can change size without a window resize.
+    getViewportSizeFn: () => ({
+      x: el.clientWidth || window.innerWidth,
+      y: el.clientHeight || window.innerHeight,
+    }),
     loop: false,
     preload: [1, 1],
     bgOpacity: 1,
@@ -156,11 +148,27 @@ onMounted(() => {
     doubleTapAction: 'zoom',
     errorMsg: '媒体加载失败',
     paddingFn: (_viewport, item) =>
-      item.type === 'video'
-        ? videoPadding
-        : { top: 0, bottom: 0, left: 0, right: 0 },
+      item.type === 'video' ? videoPadding : noPadding,
   })
   photoSwipe = pswp
+  // The single place a slide gets its size, run again on every viewport
+  // change. An image uses its natural size once known. Until then, and always
+  // for a video, the slide fills the free area and object-fit contains the
+  // media inside it, so nothing is ever shown at a guessed aspect ratio.
+  pswp.on('calcSlideSize', ({ slide }) => {
+    const asset = assets[slide.index]
+    const size =
+      slide.data.type === 'video'
+        ? undefined
+        : naturalSizes.get(asset?.id || '')
+    slide.width = size?.width || slide.panAreaSize.x
+    slide.height = size?.height || slide.panAreaSize.y
+    slide.zoomLevels.update(slide.width, slide.height, slide.panAreaSize)
+  })
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(() => pswp.updateSize())
+    resizeObserver.observe(el)
+  }
   pswp.on('contentLoad', (event) => {
     const { content } = event
     if (content.data.type !== 'video') return
@@ -223,36 +231,35 @@ onMounted(() => {
     pswp.element?.removeAttribute('role')
     pswp.element?.removeAttribute('aria-modal')
   })
-  // A cold list thumbnail may not know its natural size yet. Rebuilding a
-  // slide during the opening animation lets the opener restore stale zoom
-  // geometry, so defer the correction until it has finished.
-  const pendingSizes = new Set<number>()
-  let refreshQueued = false
-  function refreshSizes() {
-    if (disposed || !pswp.opener.isOpen || refreshQueued) return
-    refreshQueued = true
-    queueMicrotask(() => {
-      refreshQueued = false
-      if (disposed || !pswp.opener.isOpen) return
-      const indices = [...pendingSizes]
-      pendingSizes.clear()
-      for (const index of indices) pswp.refreshSlideContent(index)
-    })
+  // Resizing a slide during the opening animation lets the opener restore
+  // stale zoom geometry, so a size learned meanwhile is applied afterwards.
+  const pendingSlides = new Set<number>()
+  function resizeSlide(index: number) {
+    if (disposed) return
+    if (pswp.opener.isOpening) {
+      pendingSlides.add(index)
+      return
+    }
+    for (const holder of pswp.mainScroll.itemHolders)
+      if (holder.slide?.index === index) holder.slide.resize()
   }
   pswp.on('contentLoadImage', ({ content }) => {
     const image = content.element
-    if (!(image instanceof HTMLImageElement)) return
+    const id = assets[content.index]?.id
+    if (!(image instanceof HTMLImageElement) || !id) return
     const resolveSize = () => {
       if (disposed || !image.naturalWidth) return
+      const known = naturalSizes.get(id)
       if (
-        content.data.width === image.naturalWidth &&
-        content.data.height === image.naturalHeight
+        known?.width === image.naturalWidth &&
+        known.height === image.naturalHeight
       )
         return
-      content.data.width = image.naturalWidth
-      content.data.height = image.naturalHeight
-      pendingSizes.add(content.index)
-      refreshSizes()
+      naturalSizes.set(id, {
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+      })
+      resizeSlide(content.index)
     }
     // Also covers lazy neighboring slides, whose loadComplete event is not
     // dispatched until they have a slide, and already-cached image responses.
@@ -261,7 +268,11 @@ onMounted(() => {
       if (image.complete) resolveSize()
     })
   })
-  pswp.on('openingAnimationEnd', refreshSizes)
+  pswp.on('openingAnimationEnd', () => {
+    const indices = [...pendingSlides]
+    pendingSlides.clear()
+    for (const index of indices) resizeSlide(index)
+  })
   pswp.on('destroy', () => {
     if (!disposed) emit('close')
   })
@@ -275,6 +286,7 @@ onBeforeUnmount(() => {
     video.load()
   }
   videos.clear()
+  resizeObserver?.disconnect()
   photoSwipe?.destroy()
   dialog.value?.close()
   document.body.style.overflow = previousOverflow
@@ -478,6 +490,9 @@ watch(
 
 .stage :deep(.video-slide) {
   display: grid;
+  /* A definite track: an auto one grows to the video's own height, so a clip
+     taller than the slide would overflow it instead of being contained. */
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   place-items: center;
   color: var(--subtle);
 }
