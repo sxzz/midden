@@ -335,7 +335,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			var used, reserved, quota int64
 			var count int
 			var start time.Time
-			if e = tx.QueryRow(ctx, `SELECT tenant_unlimited(),tenant_usage(),reserved_bytes,quota_bytes,rate_count,rate_start FROM tenants WHERE id=$1`, tenant).Scan(&unlimited, &used, &reserved, &quota, &count, &start); e != nil {
+			if e = tx.QueryRow(ctx, `SELECT tenant_unlimited(),CASE WHEN tenant_unlimited() THEN 0 ELSE tenant_usage() END,reserved_bytes,quota_bytes,rate_count,rate_start FROM tenants WHERE id=$1`, tenant).Scan(&unlimited, &used, &reserved, &quota, &count, &start); e != nil {
 				return e
 			}
 			if !unlimited && used+reserved >= quota {
@@ -619,10 +619,14 @@ func (s *Service) Recent(ctx context.Context, t, cursor string) (p domain.Page, 
 				p.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(ids[len(ids)-1]))
 			}
 		}
+		loaded, err := collectionsByID(ctx, tx, ids)
+		if err != nil {
+			return err
+		}
 		for _, id := range ids {
-			a, err := collection(ctx, tx, id)
-			if err != nil {
-				return err
+			a, ok := loaded[id]
+			if !ok {
+				return pgx.ErrNoRows
 			}
 			a.StorageBytes, err = savedIdentityStorage(ctx, tx, id)
 			if err != nil {

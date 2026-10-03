@@ -235,7 +235,7 @@ func (s *Service) channelCollection(ctx context.Context, tenant, id string) (*ch
 	var batchPending, batchFailed bool
 	var state string
 	e := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, collectionChainSQL+`,jobs AS (SELECT DISTINCT child.capture_id FROM submissions child JOIN pages ON child.idem_key LIKE 'related:'||pages.id::text||':%')
+		err := tx.QueryRow(ctx, collectionChainSQL+`,jobs AS (SELECT DISTINCT child.capture_id FROM pages CROSS JOIN LATERAL (SELECT member.capture_id FROM submissions member WHERE member.parent_submission=pages.id AND member.idem_key LIKE 'related:%' OFFSET 0) child)
  SELECT (SELECT a.url FROM pages p JOIN captures c ON c.id=p.capture_id JOIN collections a ON a.id=c.collection_id ORDER BY depth LIMIT 1),
  (SELECT c.collection_id FROM pages p JOIN captures c ON c.id=p.capture_id ORDER BY depth LIMIT 1),
  (SELECT c.state FROM pages p JOIN captures c ON c.id=p.capture_id ORDER BY depth LIMIT 1),
@@ -255,7 +255,7 @@ func (s *Service) channelCollection(ctx context.Context, tenant, id string) (*ch
 		}
 		rows, err := tx.Query(ctx, collectionChainSQL+`, affected AS (
  SELECT capture_id FROM pages
- UNION SELECT child.capture_id FROM submissions child JOIN pages ON child.idem_key LIKE 'related:'||pages.id::text||':%'
+ UNION SELECT child.capture_id FROM pages CROSS JOIN LATERAL (SELECT member.capture_id FROM submissions member WHERE member.parent_submission=pages.id AND member.idem_key LIKE 'related:%' OFFSET 0) child
 ), reasons AS (
  SELECT c.id, c.error AS reason FROM captures c JOIN affected a ON a.capture_id=c.id WHERE c.state='failed'
  UNION SELECT c.id, a.error FROM assets a JOIN captures c ON c.id=a.capture_id JOIN affected x ON x.capture_id=c.id WHERE a.state='failed'
