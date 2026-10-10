@@ -60,13 +60,16 @@ node scripts/install-cloudflare-tunnel.mjs <hostname> <tunnel-uuid> <credentials
 - `monitor_task_results_total`：采集、下载、投递等成功/失败次数。
 - `monitor_provider_requests_total` / `monitor_provider_duration_seconds`：按 Provider 记录 RPC 状态及耗时，不记录账号或租户标签。
 - `monitor_queue_jobs`：按队列和状态的数量，每分钟更新。
+
+每分钟的维护任务由相互独立的步骤组成：清理过期会话、结算终态任务、结束中断的采集、回收无引用收藏、删除垃圾对象、补缩略图、更新队列指标。某一步失败时日志 `maintenance failed` 的 `error` 字段给出步骤名和原因，其余步骤照常执行。回收按每批 100 条循环，单轮最多持续 30 秒。删除失败的对象记录在 `objects.gc_attempts`，并按指数退避（最长一天）推迟到 `objects.gc_after` 之后再试，不影响其他对象的回收。
+
 - `monitor_queue_oldest_seconds`：最老等待任务年龄。
 
 `/healthz` 检查数据库。Adapter 提供带服务认证的 gRPC health；启动时 Core 还验证 Describe 契约。每租户存储使用由 `/v1/usage` 查询，避免在 Prometheus 导出无界租户标签。
 
 关注持续队列积压、provider 失败率、图片失败及 Telegram 429。失败信息对用户脱敏，不输出远端响应、token、Bot API 请求 URL。FxTwitter 返回成功状态但没有可用图文时，采集仍然失败；不要将其判定为源帖子删除。
 
-任务最多执行三次。进程中断的 River 任务由 stuck-job rescue 恢复；达到最终尝试后被丢弃的任务由每分钟 reconciliation 转成明确业务失败并释放预留额度。图片下载预留在重试间保留，资源失败或成功时释放。业务事务与 River 入队原子提交。
+任务最多执行三次。进程中断的 River 任务由 stuck-job rescue 恢复；达到最终尝试后被丢弃的任务由每分钟 reconciliation 转成明确业务失败并释放预留额度。任务记录已不存在、创建超过一小时仍未结束的采集同样按中断处理并标记失败，避免它继续占用预留额度、挡住后续提交和收藏回收。图片下载预留在重试间保留，资源失败或成功时释放。业务事务与 River 入队原子提交。
 
 投递进度按已确认的文本/图片批次记录。Telegram 接收成功而客户端丢失响应时，重试仍可能重复发送。用户可 `/show` 再次请求收藏；不要依赖 Telegram 文件作为唯一备份。
 
