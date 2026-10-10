@@ -37,6 +37,24 @@ Protocol 固定为 `1.0`，schema 固定为 `1`，正式发布前不因新增字
 
 Provider 必须声明支持的 public/private，并在结果中返回实际可见性，不能由用户请求控制。共享内容测试使用 public Provider，隔离测试使用 private Provider。
 
+## 性能与结果对比
+
+`scripts/perf.sh` 在一个独立的临时 PostgreSQL 容器上运行，不使用集成测试数据库，也不接触开发或生产数据。对应的代码在 `internal/app/perf_test.go`（构建标签 `perf`，日常测试不编译）。
+
+```sh
+scripts/perf.sh up                 # 启动并迁移一个空库
+scripts/perf.sh seed 4 5000        # 4 个租户，每个经真实采集路径保存 5000 条帖子
+scripts/perf.sh load backup.dump   # 或者载入一份 pg_dump -Fc，并升级到当前迁移
+scripts/perf.sh bench              # 对每个读接口计时，按 p95 从慢到快
+scripts/perf.sh explain 'Collections[none]'   # 最慢一次调用背后每条 SQL 的执行计划
+scripts/perf.sh dump before.json   # 记录每个租户从每个读接口得到的结果（含错误）
+scripts/perf.sh down
+```
+
+造出的数据由合成 Adapter 按 ID 决定：帖子分布在若干作者名下，相邻租户有一半帖子重合（共享内容），每十条有一条经私有 Provider 采集，十分之一会再采集一次产生新版本，每五条引用同作者的上一条。数据量由参数决定，用来观察耗时随库的大小和租户数的变化。
+
+修改读路径的查询、RLS 策略或数据结构时，用旧构建和新构建各 `dump` 一次再 `cmp`：两份文件必须逐字节相同。导出覆盖全部租户，也包含每个租户读取自己未保存内容的结果，所以既能发现结果变化，也能发现越权。再用 `bench` 比较前后耗时，并在更大的数据量上重复一次；只在小数据上快不说明问题。
+
 ## Telegram 命令
 
 命令定义在 `internal/tgchannel/event.go`，文字、按钮和媒体展示在 `internal/tgchannel/`。该包只使用 `channelapi` 协议、通用收藏类型和 Telegram SDK，不引入数据库、对象存储或 Adapter 客户端。业务动作在 core 的 `internal/app/channel_actions.go` 实现。
