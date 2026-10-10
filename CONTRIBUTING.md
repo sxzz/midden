@@ -25,7 +25,13 @@ make integration
 
 Protocol 固定为 `1.0`，schema 固定为 `1`，正式发布前不因新增字段或功能递增。当前完整结构是 `internal/store/migrations/0001_initial.sql` 基线，包含收藏命名、网页会话、unlimited 权限和独立 Telegram 队列，不保留此前的升级路径。
 
-从此基线开始，需要保留服务器数据。新增数据库变更放入 `internal/store/migrations/YYYYMMDDHHMMSS_description.sql`，按文件名排序；迁移文件名是执行顺序，不是 schema 版本号。已经部署的 SQL 不修改、不删除、不插入到已执行历史之前。迁移和校验和存入 `schema_migrations`，重复部署跳过已执行文件，修改历史或降级到缺少已执行文件的构建会报错。每个文件在一个事务中执行，不在文件内写 BEGIN/COMMIT，不使用不能在事务内执行的 DDL。需要更新已有 SQL 函数时在新文件内使用 CREATE OR REPLACE。
+从此基线开始，需要保留服务器数据。新增数据库变更放入 `internal/store/migrations/YYYYMMDDHHMMSS_description.sql`；迁移文件名决定全新数据库的执行顺序，不是 schema 版本号。已经部署的 SQL 不改变行为、不删除、不改名。需要更新已有 SQL 函数时在新文件内使用 CREATE OR REPLACE。
+
+迁移历史按集合比对：`schema_migrations` 记录每个已执行文件的名称和校验和，部署时执行数据库尚未见过的文件，不要求它排在已执行文件之后。两个分支各自新增迁移后无论以何种顺序合并都能升级，因此新迁移不能依赖另一个未合并迁移的执行先后。为了让各环境的顺序尽量一致，新文件仍应排在目标分支已有文件之后；Pull Request 的 CI 用 `scripts/check-migrations.mjs` 检查这一点，以及目标分支已有的文件没有被删除或改名。数据库记录了当前构建没有的文件时拒绝执行（降级）。
+
+校验和按规范化后的 SQL 计算：忽略空白、注释和引号外的大小写，所以格式化工具重排已执行的文件不会被当成修改；改变语句内容则会报错。较早构建按原始字节记录的校验和在文件未变时被接受，并在下一次迁移时改写为新格式。
+
+每个文件默认在一个事务中执行，不在文件内写 BEGIN/COMMIT。不能在事务内执行或不应长时间持锁的 DDL（例如 `CREATE INDEX CONCURRENTLY`）放在单独的文件里，首行写 `-- migrate: no-transaction`：文件按语句逐条执行并各自提交，全部成功后才记录。这类文件失败后会从头重跑，每条语句必须可以重复执行；并发建索引失败会留下无效索引，所以写成 `DROP INDEX CONCURRENTLY IF EXISTS` 加 `CREATE INDEX CONCURRENTLY` 成对出现。大表上的索引用这种方式创建，避免升级期间阻塞写入。
 
 新建配置用 INSERT ... ON CONFLICT DO NOTHING，避免覆盖运营者设置。数据修复与结构修改一起写入迁移，并测试带数据升级、重复执行、失败回滚。数据库及对象存储使用 Docker。
 

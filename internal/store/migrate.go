@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io/fs"
 	"sort"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 )
@@ -50,7 +52,19 @@ func (s *Store) Migrate(ctx context.Context) error {
 	return err
 }
 
+// A migration that starts with this line runs statement by statement outside
+// a transaction, for DDL such as CREATE INDEX CONCURRENTLY.
+const noTransaction = "-- migrate: no-transaction"
+
+// migrationChecksum identifies a migration by its normalized SQL, so running
+// the formatter over an applied file does not turn it into a different one.
+func migrationChecksum(body string) string { return "2:" + Hash(normalizeSQL(body)) }
+
 // Caller holds the migration lock for the entire application and River upgrade.
+//
+// History is a set, not a prefix: branches that each add a migration merge in
+// either order, and whichever file a database has not seen yet is applied.
+// What stays fixed is that an applied file is never edited or removed.
 func applyMigrations(ctx context.Context, conn *pgx.Conn, files fs.FS) error {
 	names, err := fs.Glob(files, "migrations/*.sql")
 	if err != nil || len(names) == 0 {
@@ -64,55 +78,91 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn, files fs.FS) error {
 	if err != nil {
 		return err
 	}
-	type appliedMigration struct{ name, checksum string }
-	var applied []appliedMigration
+	applied := map[string]string{}
 	for rows.Next() {
-		var m appliedMigration
-		if err = rows.Scan(&m.name, &m.checksum); err != nil {
+		var name, checksum string
+		if err = rows.Scan(&name, &checksum); err != nil {
 			rows.Close()
 			return err
 		}
-		applied = append(applied, m)
+		applied[name] = checksum
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
 		return err
 	}
-	if len(applied) > len(names) {
-		return fmt.Errorf("database has migrations absent from this build; downgrade refused")
-	}
-	// Validate the complete applied prefix before changing anything.
-	for i, m := range applied {
-		body, err := fs.ReadFile(files, names[i])
-		if err != nil {
-			return err
-		}
-		if m.name != names[i] || m.checksum != Hash(string(body)) {
-			return fmt.Errorf("migration %s differs from database history; restore the applied file", m.name)
-		}
-	}
-	for _, name := range names[len(applied):] {
+	// Validate the complete applied history before changing anything.
+	bodies := make(map[string]string, len(names))
+	var pending, legacy []string
+	for _, name := range names {
 		body, err := fs.ReadFile(files, name)
 		if err != nil {
 			return err
 		}
-		err = func() error {
-			tx, err := conn.Begin(ctx)
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback(context.Background())
-			if _, err = tx.Exec(ctx, string(body)); err != nil {
-				return err
-			}
-			if _, err = tx.Exec(ctx, `INSERT INTO schema_migrations(name,checksum) VALUES($1,$2)`, name, Hash(string(body))); err != nil {
-				return err
-			}
-			return tx.Commit(ctx)
-		}()
-		if err != nil {
+		bodies[name] = string(body)
+		recorded, ok := applied[name]
+		switch {
+		case !ok:
+			pending = append(pending, name)
+		case recorded == migrationChecksum(string(body)):
+		case recorded == Hash(string(body)):
+			// Recorded over the raw bytes by an earlier build.
+			legacy = append(legacy, name)
+		default:
+			return fmt.Errorf("migration %s differs from database history; restore the applied file", name)
+		}
+		delete(applied, name)
+	}
+	if len(applied) > 0 {
+		absent := make([]string, 0, len(applied))
+		for name := range applied {
+			absent = append(absent, name)
+		}
+		sort.Strings(absent)
+		return fmt.Errorf("database has migrations absent from this build (%s); downgrade refused", strings.Join(absent, ", "))
+	}
+	for _, name := range legacy {
+		if _, err = conn.Exec(ctx, `UPDATE schema_migrations SET checksum=$2 WHERE name=$1`, name, migrationChecksum(bodies[name])); err != nil {
+			return err
+		}
+	}
+	for _, name := range pending {
+		if err = applyMigration(ctx, conn, name, bodies[name]); err != nil {
 			return fmt.Errorf("migration %s: %w", name, err)
 		}
 	}
 	return nil
+}
+
+func applyMigration(ctx context.Context, conn *pgx.Conn, name, body string) error {
+	record := func(q interface {
+		Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	},
+	) error {
+		_, err := q.Exec(ctx, `INSERT INTO schema_migrations(name,checksum) VALUES($1,$2)`, name, migrationChecksum(body))
+		return err
+	}
+	if first, _, _ := strings.Cut(strings.TrimLeft(body, " \t\r\n"), "\n"); strings.TrimSpace(first) == noTransaction {
+		// Nothing rolls back here. The file is recorded only once every
+		// statement has succeeded, so a failed run starts over from the top
+		// and each statement has to tolerate having run before.
+		for _, statement := range splitSQL(body) {
+			if _, err := conn.Exec(ctx, statement); err != nil {
+				return err
+			}
+		}
+		return record(conn)
+	}
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.Background())
+	if _, err = tx.Exec(ctx, body); err != nil {
+		return err
+	}
+	if err = record(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
