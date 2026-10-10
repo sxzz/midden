@@ -1,7 +1,12 @@
 <script setup vapor lang="ts">
 import { computed, onDeactivated, shallowRef, watch } from 'vue'
 import { excerpt, present } from '../presentation'
-import { authoredBy, authorIdentity, authorLabel } from '../relations'
+import {
+  authoredBy,
+  authorIdentity,
+  authorLabel,
+  isPostEntity,
+} from '../relations'
 import AlbumGrid from './AlbumGrid.vue'
 import MediaViewer from './MediaViewer.vue'
 import type { Asset, Collection } from '../api'
@@ -41,7 +46,7 @@ function caption(collection: Collection) {
       if (relation.source !== graph.root || relation.type !== 'quoted')
         return []
       const target = graph.entities.find(
-        (entity) => entity.key === relation.target && entity.type === 'x.post',
+        (entity) => entity.key === relation.target && isPostEntity(entity),
       )
       if (!target) return []
       return [

@@ -6,6 +6,21 @@ import (
 	"monitor/internal/domain"
 )
 
+func TestInstagramProfilePresentation(t *testing.T) {
+	a := domain.Collection{URL: "https://www.instagram.com/fixture.name/", Graph: &domain.EntityGraph{Root: "author", Entities: []domain.Entity{{Key: "author", Type: "instagram.profile", ExternalID: "77", Data: []byte(`{"username":"fixture.name","name":"Instagram Fixture","metadata":{"description":"Bio"}}`)}}}}
+	if !IsProfileCollection(a) || CollectionAuthorURL(a) != a.URL || ProfileLinkLabel(a) != "在 Instagram 查看主页" {
+		t.Fatal("Instagram profile presentation missing")
+	}
+	text, entities, _, ok := ProfilePresentation(a)
+	if !ok || text != "Instagram Fixture\n@fixture.name\n\nBio" || len(entities) != 1 || entities[0].URL != a.URL {
+		t.Fatal(text, entities)
+	}
+	a.Graph.Entities[0].Data = []byte(`{"username":"unsafe/?query"}`)
+	if CollectionAuthorURL(a) != "" {
+		t.Fatal("unsafe Instagram profile link")
+	}
+}
+
 func TestCollectionAuthorURLUsesOnlyRootAuthor(t *testing.T) {
 	g := &domain.EntityGraph{Root: "post", Entities: []domain.Entity{
 		{Key: "other", Type: "x.profile", Data: []byte(`{"username":"other"}`)},

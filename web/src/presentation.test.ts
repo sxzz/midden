@@ -8,6 +8,89 @@ import {
   sourceStateNotice,
   warningList,
 } from './presentation'
+it('keeps captionless social posts empty without using their author summary', () => {
+  for (const type of ['x.post', 'instagram.post']) {
+    const a: Collection = {
+      id: 'captionless',
+      url: 'https://example.test/post',
+      observed_at: '2026-10-11T00:00:00Z',
+      visibility: 'private',
+      revision_id: 'r1',
+      assets: [],
+      text: '',
+      summary: '作者：图片或视频',
+      author_name: '作者',
+      graph: {
+        root: 'post',
+        entities: [{ key: 'post', type, data: {} }],
+        relations: [],
+      },
+    }
+    expect(present(a).body).toBe('')
+    expect(present({ ...a, text: ' \n ' }).body).toBe('')
+    expect(present({ ...a, text: '原帖正文' }).body).toBe('原帖正文')
+  }
+})
+it('presents Instagram profiles, comments, dotted mentions, and absent counts', () => {
+  const a = {
+    id: 'instagram-post',
+    url: 'https://www.instagram.com/p/C/',
+    observed_at: '2026-10-01T00:00:00Z',
+    revision_id: 'r1',
+    assets: [],
+    text: 'Hello @fixture.name',
+    visibility: 'private',
+    graph: {
+      root: 'post',
+      relations: [{ source: 'post', target: 'author', type: 'authored_by' }],
+      entities: [
+        {
+          key: 'post',
+          type: 'instagram.post',
+          data: { text: 'Hello @fixture.name', replies: 0, likes: 3 },
+        },
+        {
+          key: 'author',
+          type: 'instagram.profile',
+          external_id: '77',
+          saved_collection_id: 'saved-profile',
+          data: {
+            username: 'fixture.name',
+            name: 'Instagram Fixture',
+            metadata: {
+              description: 'Bio',
+              protected: true,
+              followers: 5,
+              following: 2,
+              statuses: 1,
+            },
+          },
+        },
+      ],
+    },
+  } as Collection
+  const presentation = present(a)
+  expect(presentation.name).toBe('Instagram Fixture')
+  expect(presentation.locked).toBe(true)
+  expect(presentation.profileCollectionId).toBe('saved-profile')
+  expect(presentation.stats?.items).toEqual([
+    { label: '评论', value: '0' },
+    { label: '点赞', value: '3' },
+  ])
+  expect(mentionParts(a, a.text)).toEqual([
+    { text: 'Hello ' },
+    { text: '@fixture.name', href: '#/collection/saved-profile' },
+  ])
+  const profile = { ...a, text: 'Bio', graph: { ...a.graph!, root: 'author' } }
+  expect(present(profile).body).toBe('Bio')
+  expect(present(profile).stats?.items.map((item) => item.label)).toEqual([
+    '关注者',
+    '正在关注',
+    '帖子',
+  ])
+  a.graph!.entities[0]!.data = { text: 'Hello' }
+  expect(present(a).stats).toBeUndefined()
+})
 it('does not expose executable original URLs', () => {
   expect(safeURL('javascript:alert(1)')).toBeUndefined()
   expect(safeURL('https://example.test/post')).toBe('https://example.test/post')

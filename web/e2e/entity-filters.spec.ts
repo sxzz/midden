@@ -32,6 +32,48 @@ const profile = {
   },
 }
 
+test('platform filter merges Instagram and X and preserves legacy X links', async ({
+  page,
+}) => {
+  let query = new URLSearchParams()
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const url = new URL(r.request().url())
+    if (url.pathname === '/v1/collections') query = url.searchParams
+    return r.fulfill({ json: { items: [] } })
+  })
+  await page.goto('/app/')
+  await expect
+    .poll(() => query.get('entity_type'))
+    .toBe('x.post,instagram.post')
+  await page.getByRole('button', { name: /^筛选/ }).click()
+  await page.getByLabel('平台', { exact: true }).selectOption('instagram')
+  await expect.poll(() => query.get('entity_type')).toBe('instagram.post')
+  await page.reload()
+  await expect(page.getByLabel('平台', { exact: true })).toHaveValue(
+    'instagram',
+  )
+  await page.getByLabel('平台', { exact: true }).selectOption('')
+  await expect
+    .poll(() => query.get('entity_type'))
+    .toBe('x.post,instagram.post')
+  await page.getByRole('tab', { name: '账号', exact: true }).click()
+  await expect
+    .poll(() => query.get('entity_type'))
+    .toBe('x.profile,instagram.profile')
+  await page.getByRole('button', { name: /^筛选/ }).click()
+  await page.getByLabel('平台', { exact: true }).selectOption('instagram')
+  await expect.poll(() => query.get('entity_type')).toBe('instagram.profile')
+  await page.goto('/app/#/?entity_type=x.post')
+  await expect.poll(() => query.get('entity_type')).toBe('x.post')
+  await expect(page.getByLabel('平台', { exact: true })).toHaveValue('x')
+  await page.goto('/app/#/?entity_type=x.profile')
+  await expect.poll(() => query.get('entity_type')).toBe('x.profile')
+  await expect(
+    page.getByRole('tab', { name: '账号', exact: true }),
+  ).toHaveAttribute('aria-selected', 'true')
+})
+
 test('entity tabs keep their own filters and mobile statistic layout', async ({
   page,
 }) => {
@@ -52,7 +94,7 @@ test('entity tabs keep their own filters and mobile statistic layout', async ({
   const type = () => queries.at(-1)?.get('entity_type')
   await page.goto('/app/')
   await expect(page.getByRole('button', { name: /测试账号/ })).toBeVisible()
-  expect(type()).toBe('x.post')
+  expect(type()).toBe('x.post,instagram.post')
   const posts = page.getByRole('tab', { name: '帖子' })
   const accounts = page.getByRole('tab', { name: '账号' })
   await expect(posts).toHaveAttribute('aria-selected', 'true')
@@ -61,7 +103,7 @@ test('entity tabs keep their own filters and mobile statistic layout', async ({
   await expect.poll(() => queries.at(-1)?.get('visibility')).toBe('public')
   await accounts.click()
   await expect(accounts).toHaveAttribute('aria-selected', 'true')
-  await expect.poll(type).toBe('x.profile')
+  await expect.poll(type).toBe('x.profile,instagram.profile')
   // The posts tab's filter stays with the posts tab.
   expect(queries.at(-1)?.get('visibility')).toBeNull()
   await page.getByRole('button', { name: /^筛选/ }).click()
@@ -71,7 +113,7 @@ test('entity tabs keep their own filters and mobile statistic layout', async ({
   await expect(page.getByLabel('敏感内容', { exact: true })).toHaveCount(0)
   await page.getByLabel('可见性').selectOption('private')
   await expect.poll(() => queries.at(-1)?.get('visibility')).toBe('private')
-  expect(type()).toBe('x.profile')
+  expect(type()).toBe('x.profile,instagram.profile')
   const requests = queries.length
   await posts.click()
   await expect(page.getByLabel('可见性')).toHaveValue('public')
@@ -81,12 +123,12 @@ test('entity tabs keep their own filters and mobile statistic layout', async ({
   expect(queries.length).toBe(requests)
   await page.reload()
   await expect(accounts).toHaveAttribute('aria-selected', 'true')
-  await expect.poll(type).toBe('x.profile')
+  await expect.poll(type).toBe('x.profile,instagram.profile')
   expect(queries.at(-1)?.get('visibility')).toBe('private')
   // Clearing drops the filters, not the tab.
   await page.getByRole('button', { name: '清除', exact: true }).click()
   await expect.poll(() => queries.at(-1)?.get('visibility')).toBeNull()
-  expect(type()).toBe('x.profile')
+  expect(type()).toBe('x.profile,instagram.profile')
   await expect(accounts).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('button', { name: '清除' })).toHaveCount(0)
   await page.getByRole('button', { name: /测试账号/ }).click()

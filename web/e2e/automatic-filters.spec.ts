@@ -52,7 +52,9 @@ test('filter changes apply immediately without collapsing controls', async ({
   // The other tab is its own list with its own filters; coming back finds
   // this one as it was left, without asking the server again.
   await page.getByRole('tab', { name: '账号' }).click()
-  await expect.poll(() => queries.at(-1)?.get('entity_type')).toBe('x.profile')
+  await expect
+    .poll(() => queries.at(-1)?.get('entity_type'))
+    .toBe('x.profile,instagram.profile')
   expect(queries.at(-1)?.getAll('author')).toEqual([])
   await expect(panel).toHaveAttribute('aria-expanded', 'false')
   const requests = queries.length

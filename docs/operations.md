@@ -179,9 +179,11 @@ REST 新提交省略 `connection_id` 时始终调用公共 API；指定时使用
 
 `config.connection_concurrency` 控制每 Connection 并发，默认 1；修改后重启核心。运行日志不保存会话、原始上游响应或个人账号身份。受保护帖子端到端验收需提供有访问权限的测试会话；自动测试使用固定响应。
 
+Instagram 必须使用用户自己的账号凭据，不提供公共来源或匿名采集。内容按私有保存，访问须经用户自己的账号验证；账号原始响应仅本人可见。Profile 使用登录账号连续分页，支持继续采集约 1000 条。Instagram 在同一网页账号入口添加，提交的 Base64 浏览器 Cookie 必须包含 `sessionid`，可包含 `csrftoken`、`ds_user_id`、`mid`、`ig_did`。验证通过已登录网页的 `PolarisViewer` 确认会话所属账号；不会信任 Cookie 中的用户 ID。Profile 与分页由 Atmosphere 的请求级会话调用网页 GraphQL；Adapter 只提供取消、超时、响应大小限制和私有原始响应保存。原始 JSON 直接保存；HTML 等非 JSON 响应以包含原始 Content-Type、Base64 编码和完整响应字节的 JSON 保存，兼容现有原始响应接口。列表取得的完整帖子仅在相同 Connection 和凭据下复用，显式重新抓取仍请求原站。使用与网页 Cookie 一致的浏览器请求指纹，登录或 checkpoint 失败时提示重新授权或浏览器验证，不使用其他租户的账号。账号选择分别按 X 和 Instagram 保存。凭据同样通过 TLS RPC 执行并在数据库中加密；不要将 Cookie 发送给 Bot。
+
 ## 多 Adapter 与账号选择
 
-主 Adapter 仍由 `ADAPTER_ADDRESS`、`ADAPTER_TOKEN`、`ADAPTER_TLS_CA` 配置。其他端点存放在 config 表的 `additional_adapters`，值为 JSON 数组：
+X 主端点仍由 `ADAPTER_ADDRESS`、`ADAPTER_TOKEN`、`ADAPTER_TLS_CA` 配置。默认 `adapter` 容器同时运行 X（9091）和 Instagram（9092），共用现有 TLS 证书；任一进程退出时启动器终止另一进程，Compose 重启容器。core 的 `BUNDLED_ADAPTER_ADDRESSES` 接受逗号分隔的内置端点，并复用主端点的 token 和 CA；标准 Compose 设置为 `adapter:9092`，自动注册 Instagram，无需更改数据库配置。独立运行 X 的旧启动方式仍然有效；独立运行 core 时如需 Instagram，设置该变量为实际端点。其他端点存放在 config 表的 `additional_adapters`，值为 JSON 数组：
 
 ```json
 [
@@ -195,7 +197,7 @@ REST 新提交省略 `connection_id` 时始终调用公共 API；指定时使用
 
 使用 `monitorctl config-set additional_adapters --stdin` 从受保护文件导入，然后重启核心。该配置按敏感值处理，`config-list` 不显示内容。TLS CA 路径需在核心容器中可读。每个 Adapter 的 ID 必须为 1–32 个字母、数字、下划线或连字符；host 声明不能重叠，Provider ID 可以相同。
 
-网页“采集账号”页面和 `/account` 都按 Adapter 显示账号，各平台分别选择一个账号或公共来源。网页只对声明了 `credential.prepare` 与 `connection.check` 能力的 Adapter 显示添加表单，并展示其凭据说明；目前只有 X Adapter 支持。同一条消息中的不同平台链接使用各自的选择。删除账号仅清除该平台的当前选择；已有任务保留原 Adapter 和账号，不自动回退。
+网页“采集账号”页面和 `/account` 都按 Adapter 显示账号，各平台分别选择账号；X 可选择公共来源，Instagram 必须添加并选中自己的账号。网页只对声明了 `credential.prepare` 与 `connection.check` 能力的 Adapter 显示添加表单，并展示其凭据说明；内置 X 和 Instagram Adapter 均支持。同一条消息中的不同平台链接使用各自的选择。删除账号仅清除该平台的当前选择；已有任务保留原 Adapter 和账号，不自动回退。
 
 ## Mini App 部署
 

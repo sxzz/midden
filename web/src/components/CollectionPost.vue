@@ -109,7 +109,7 @@ const warnings = computed(() => warningList(props.collection.warnings))
       </button>
     </header>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
-    <p class="body">
+    <p v-if="view.body" class="body">
       <template v-for="(part, index) in bodyParts" :key="index"
         ><a v-if="part.href" :href="part.href" class="mention">{{
           part.text

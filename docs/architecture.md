@@ -2,7 +2,7 @@
 
 ## 服务组成
 
-Monitor 由 Go 核心服务、可选 Telegram channel、独立 Node.js/TypeScript X Adapter、PostgreSQL 和 S3 兼容对象存储组成。Web、REST 和 channel 共用 core 的采集、收藏、权限和额度逻辑。
+Monitor 由 Go 核心服务、可选 Telegram channel、Node.js/TypeScript X 与 Instagram Adapter、PostgreSQL 和 S3 兼容对象存储组成。Web、REST 和 channel 共用 core 的采集、收藏、权限和额度逻辑。
 
 ```mermaid
 flowchart LR
@@ -19,27 +19,36 @@ flowchart LR
         App --> Workers
     end
     Core <-->|业务数据与持久化队列| PG[(PostgreSQL)]
-    Core -->|TLS gRPC：Describe / Fetch / CheckConnection| Adapter[X Adapter]
+    Core -->|TLS gRPC：Describe / Fetch / CheckConnection| Adapter[内置 X / Instagram Adapter]
     Adapter -->|正文与媒体| Provider[FxTwitter API v2]
     Provider -->|媒体链接| Adapter
     Adapter -->|租户账号会话| X[X API，经 Atmosphere 解析]
+    Adapter -->|租户浏览器会话，经 Atmosphere 请求与解析| IG[Instagram Web GraphQL]
     Core -->|HTTP 下载| Media[媒体服务]
     Core <-->|媒体原文件| S3[(S3 对象存储)]
 ```
 
-| 组件           | 当前职责                                                                               |
-| -------------- | -------------------------------------------------------------------------------------- |
-| `core`         | Web/REST、内部 Channel API、租户认证、任务调度、下载、去重、收藏与额度                 |
-| `telegram`     | 可选渠道进程：长轮询、命令解析、文字与按钮展示、媒体投递；仅连接 core HTTP 和 Telegram |
-| `adapter`      | 提供 gRPC 接口，识别 X 帖子，通过公共 FxTwitter API 或租户账号获取正文与媒体           |
-| PostgreSQL     | 保存身份、收藏、任务、资源索引、用量和 River 队列                                      |
-| S3             | 保存媒体二进制；本地部署使用 SeaweedFS                                                 |
-| `migrate`      | 一次性执行数据库迁移并配置业务数据库角色                                               |
-| `storage-init` | 本地对象存储初始化：创建 bucket 并验证访问                                             |
+| 组件           | 当前职责                                                                                                                     |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `core`         | Web/REST、内部 Channel API、租户认证、任务调度、下载、去重、收藏与额度                                                       |
+| `telegram`     | 可选渠道进程：长轮询、命令解析、文字与按钮展示、媒体投递；仅连接 core HTTP 和 Telegram                                       |
+| `adapter`      | 提供 gRPC 接口，分别在 9091 / 9092 提供 X / Instagram gRPC，X 通过匿名来源或租户账号、Instagram 仅通过租户账号获取正文与媒体 |
+| PostgreSQL     | 保存身份、收藏、任务、资源索引、用量和 River 队列                                                                            |
+| S3             | 保存媒体二进制；本地部署使用 SeaweedFS                                                                                       |
+| `migrate`      | 一次性执行数据库迁移并配置业务数据库角色                                                                                     |
+| `storage-init` | 本地对象存储初始化：创建 bucket 并验证访问                                                                                   |
 
 Adapter 是运营者部署并认证的可信服务，Provider 和其返回的资源链接按可信输入处理。Adapter 不连接数据库或对象存储；核心负责下载和持久化。用户请求及按钮参数需要身份、权限、URL 范围和额度校验。
 
 `fxtwitter` Provider 直接调用 FxTwitter 公共实例的 `/2/status/{id}`，无需任何账号；可选 `x-session` Provider 使用指定租户的账号会话，经固定源码版本的 Atmosphere 请求并解析 X。Provider 选择持久化在任务中；收藏记录来源和 adapter 版本。视频和 GIF 选择 最高分辨率、同分辨率最高码率的 MP4／WebM 下载；文章及缺失媒体会明确标记，限流和暂时不可用会重试。
+
+Instagram Adapter 使用独立 ID `instagram`，仅提供 `instagram-session`（个人账号）Provider，不执行匿名请求，采集内容沿用私有内容的账号访问校验，账号原始响应仅本人可见，实体类型为 `instagram.post` 与 `instagram.profile`。标准容器通过 `adapters/server.mjs` 管理两个进程，core 通过 `BUNDLED_ADAPTER_ADDRESSES` 自动发现第二个服务；其他 Adapter 继续由数据库配置注册。
+
+Instagram 使用固定版本 Atmosphere 的纯解析器，Adapter 的请求级 transport 管理 Cookie、取消、响应大小、原始响应及错误。无全局账号池。匿名 HTML 的原文以 `{ "html": "原文" }` JSON 包装保存；JSON 接口保留原始响应字节。账号选择持久化，先尝试匿名来源，受限时通过 `credential-required` 获取该连接的凭据。账号原始响应始终私有；账号读取成功不足以证明内容公开。只有匿名采集成功的帖子进入一分钟公开时间线缓存（最多 1000 条），缓存不包含个人账号响应。轮播媒体按子媒体 ID、画质生成缓存键，头像按完整 URL 生成缓存键。来源状态无法确定时不报告删除。
+
+Profile 将 handle 规范化为稳定用户 ID，后续采集按 ID 查询并更新主页链接；旧 handle 只作为经 ID 校验的公开查询提示。每次批次连续翻页到约 100 条或末尾，最多 12 页并保留完整末页；失败保留成员与当前游标，公开和账号游标带来源模式且不能混用。帖子到作者使用 `authored_by`，正文和简介提及使用 `mentions`。缺失的统计不补零，作者为上下文实体，Profile 为独立根实体。
+
+网页保留帖子／账号两栏，默认分别查询 `entity_type=x.post,instagram.post` 和 `entity_type=x.profile,instagram.profile`；平台筛选映射为单个平台实体类型。旧单一 `entity_type` 链接继续只显示对应平台。
 
 ## 内容可见性
 

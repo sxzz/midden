@@ -145,10 +145,13 @@ async function remove() {
   <template v-else-if="data">
     <template v-for="p in data.platforms" :key="p.id">
       <ListSection
-        v-if="p.public || accountsOf(p.id).length"
+        v-if="p.public || p.can_add || accountsOf(p.id).length"
         :title="`${p.name} 采集来源`"
         footnote="只影响新保存的内容；重新抓取沿用原来的来源。"
       >
+        <p v-if="!p.public && !p.selected_account_id" class="banner">
+          {{ p.name }} 需要添加并选择自己的账号凭据后才能采集。
+        </p>
         <ListButton
           v-if="p.public"
           label="公共来源"
@@ -256,7 +259,11 @@ async function remove() {
   <ConfirmSheet
     :open="!!removing"
     :title="`删除 ${removing ? label(removing) : ''}？`"
-    description="正在使用此账号时，新保存改用公共来源。"
+    :description="
+      data?.platforms.find((p) => p.id === removing?.platform)?.public
+        ? '正在使用此账号时，新保存改用公共来源。'
+        : '删除后，需要选择其他账号或重新添加自己的凭据才能采集。'
+    "
     confirm-label="删除账号"
     :busy="busy"
     @confirm="remove"

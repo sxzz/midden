@@ -116,7 +116,7 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 		if f.RelatedTo != "" {
 			var total int64
 			// Calculate across all matching collections, independently of pagination.
-			query := withRelatedContext("$1", `SELECT COALESCE(SUM(`+collectionStorageSQL+`),0)::bigint FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id CROSS JOIN LATERAL (SELECT head.* FROM revisions head WHERE head.collection_id=a.id ORDER BY head.created_at DESC,head.id DESC LIMIT 1) r WHERE a.id<>$1::uuid AND EXISTS(`+relatedCollectionSQL+`) AND ($2='' OR EXISTS(SELECT FROM revision_entities re JOIN entity_versions ev ON ev.id=re.entity_version_id JOIN entities en ON en.id=ev.entity_id WHERE re.revision_id=r.id AND re.is_root AND en.kind=$2))`)
+			query := withRelatedContext("$1", `SELECT COALESCE(SUM(`+collectionStorageSQL+`),0)::bigint FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id CROSS JOIN LATERAL (SELECT head.* FROM revisions head WHERE head.collection_id=a.id ORDER BY head.created_at DESC,head.id DESC LIMIT 1) r WHERE a.id<>$1::uuid AND EXISTS(`+relatedCollectionSQL+`) AND ($2='' OR EXISTS(SELECT FROM revision_entities re JOIN entity_versions ev ON ev.id=re.entity_version_id JOIN entities en ON en.id=ev.entity_id WHERE re.revision_id=r.id AND re.is_root AND en.kind=ANY(string_to_array($2,','))))`)
 			if err := tx.QueryRow(ctx, query, f.RelatedTo, f.EntityType).Scan(&total); err != nil {
 				return err
 			}

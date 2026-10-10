@@ -4,6 +4,8 @@ import { shortDate } from '../presentation'
 import {
   authoredBy,
   authorIdentity,
+  isPostEntity,
+  isProfileEntity,
   isProtected,
   type RelationAuthor,
 } from '../relations'
@@ -19,7 +21,7 @@ const relations = computed(() => {
   const graph = props.collection.graph
   if (!graph) return []
   const root = graph.entities.find((entity) => entity.key === graph.root)
-  if (root?.type !== 'x.post') return []
+  if (!isPostEntity(root)) return []
   const candidates = graph.relations.flatMap((relation) => {
     if (relation.type !== 'quoted' && relation.type !== 'reposted') return []
     const outgoing = relation.source === graph.root
@@ -71,23 +73,32 @@ const relations = computed(() => {
     }
   >()
   for (const { type, entity, outgoing, author } of candidates) {
-    const postLink = entity.type === 'x.post'
+    const postLink = isPostEntity(entity)
     if (type !== 'quoted' && type !== 'reposted') continue
     if (
       !postLink &&
-      (entity.type !== 'x.profile' || outgoing || type !== 'reposted')
+      (!isProfileEntity(entity) || outgoing || type !== 'reposted')
     )
       continue
     const externalId = entity.external_id || ''
     const handle =
       typeof entity.data.username === 'string' ? entity.data.username : ''
-    const href = entity.saved_collection_id
-      ? `#/collection/${encodeURIComponent(entity.saved_collection_id)}`
+    const externalURL = entity.type.startsWith('instagram.')
+      ? postLink &&
+        typeof entity.data.shortcode === 'string' &&
+        /^[\w-]{1,20}$/.test(entity.data.shortcode)
+        ? `https://www.instagram.com/p/${entity.data.shortcode}/`
+        : !postLink && /^\w[\w.]{0,29}$/.test(handle)
+          ? `https://www.instagram.com/${handle}/`
+          : ''
       : /^\d+$/.test(externalId)
         ? `https://x.com/i/${postLink ? 'web/status' : 'user'}/${externalId}`
         : !postLink && /^\w{1,15}$/.test(handle)
           ? `https://x.com/${handle}`
           : ''
+    const href = entity.saved_collection_id
+      ? `#/collection/${encodeURIComponent(entity.saved_collection_id)}`
+      : externalURL
     if (!href) continue
     const text =
       typeof entity.data.text === 'string' ? entity.data.text.trim() : ''
@@ -132,7 +143,9 @@ const relations = computed(() => {
       publishedLabel: shortDate(published) || prior?.publishedLabel || '',
       key,
       // Where the link leads belongs with its kind, not in a footer of its own.
-      label: external ? `${kind} · 在 X` : kind,
+      label: external
+        ? `${kind} · 在 ${entity.type.startsWith('instagram.') ? 'Instagram' : 'X'}`
+        : kind,
       text: postLink
         ? text || `帖子 ${externalId}`
         : name || (handle ? `@${handle}` : `账号 ${externalId}`),

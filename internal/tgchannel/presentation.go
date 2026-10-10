@@ -70,10 +70,11 @@ func collectionMessage(a domain.Collection, state string) string {
 		author = "未知作者"
 	}
 	body := strings.TrimSpace(a.Text)
-	if body == "" {
-		body = "空"
+	content := author
+	if body != "" {
+		content += "：\n" + body
 	}
-	parts := []string{header, author + "：\n" + body}
+	parts := []string{header, content}
 	if text, _, _, ok := telegram.ProfilePresentation(a); ok {
 		parts = []string{text}
 	}
@@ -176,6 +177,20 @@ func failureReason(reason string) string {
 		return "无法获取该帖子"
 	case "provider cannot access this profile":
 		return "无法获取该账号资料"
+	case "account required; add and select your own credentials":
+		return "此平台需要账号，请先添加并选择自己的采集凭据。"
+	case "Instagram requires an account; select an Instagram account and retry", "Instagram requires login":
+		return "Instagram 需要登录，请在采集账号中选择 Instagram 账号后重试。"
+	case "Instagram session expired; authorize again":
+		return "Instagram 登录已失效，请重新添加账号授权。"
+	case "Instagram rate limited the request":
+		return "Instagram 请求过于频繁，请稍后重试。"
+	case "Instagram access denied or browser verification required", "Instagram requires browser verification", "Instagram redirected to login or verification", "Instagram requires login, verification, or a later retry":
+		return "Instagram 要求登录验证或账号无权访问，请检查账号后重试。"
+	case "Instagram content not found or inaccessible":
+		return "Instagram 内容不存在或当前账号无权访问。"
+	case "Instagram temporarily unavailable":
+		return "Instagram 暂时不可用，请稍后重试。"
 	case "account request signing unavailable":
 		return "采集账号请求签名不可用"
 	case "context deadline exceeded":

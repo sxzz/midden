@@ -336,7 +336,7 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 		parts = deliveryParts(text, a.Assets)
 		keys = collectionButtons(a.ID, a.URL, r.Config.WebURL)
 		if telegram.IsProfileCollection(a) {
-			keys[0][0].Text = "在 X 查看主页"
+			keys[0][0].Text = telegram.ProfileLinkLabel(a)
 		}
 		if strings.HasPrefix(d.Chat, "-") && a.Visibility == "public" {
 			keys = append(keys, []telegram.Button{{Text: "我也要存", Data: "/save " + a.ID}})
@@ -524,7 +524,7 @@ func collectionProgressMessage(id string, d channelapi.Delivery, webURL string) 
 			text += fmt.Sprintf("\n• %s（%d 条）", string(message), reason.Count)
 		}
 	}
-	keys := telegram.Keyboard{{{Text: "在 X 查看主页", URL: c.URL}}}
+	keys := telegram.Keyboard{{{Text: telegram.ProfileURLLabel(c.URL), URL: c.URL}}}
 	if !c.Stopped && c.Done && c.Next != "" {
 		keys = append(keys, []telegram.Button{{Text: "抓取更多", Data: "/more " + id}})
 		if c.MaxBatch >= 1000 {

@@ -3,6 +3,7 @@ import { computed, shallowRef, watch } from 'vue'
 import { safeURL, type Collection, type UpdateMode } from '../api'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
 import { date, present } from '../presentation'
+import { isProfileEntity } from '../relations'
 import CollectionAnnotations from './CollectionAnnotations.vue'
 import CollectionPost from './CollectionPost.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
@@ -62,8 +63,7 @@ watch(
 const isProfile = computed(() =>
   collection.value?.graph?.entities.some(
     (entity) =>
-      entity.key === collection.value?.graph?.root &&
-      entity.type === 'x.profile',
+      entity.key === collection.value?.graph?.root && isProfileEntity(entity),
   ),
 )
 // The related list is this profile's own timeline, so the posts it holds by a
@@ -159,6 +159,13 @@ const version = computed(() =>
       v-if="isProfile"
       :id="id"
       :revision-id="latestRevision"
+      :platform="
+        collection?.graph?.entities.find(
+          (entity) => entity.key === collection?.graph?.root,
+        )?.type === 'instagram.profile'
+          ? 'instagram'
+          : 'x'
+      "
       :members-version="membersVersion"
       :show-sensitive="showSensitive"
       :reposted-by="profileName"

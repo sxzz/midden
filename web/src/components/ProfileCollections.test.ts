@@ -8,6 +8,26 @@ vi.mock('../api', async (original) => ({
   api: vi.fn(),
 }))
 let unmount = () => {}
+it('loads Instagram profile members with their own platform entity type', async () => {
+  const request = vi.mocked(api)
+  request.mockResolvedValue({ items: [], total_storage_bytes: 0 })
+  const el = document.createElement('div')
+  document.body.append(el)
+  const app = createVaporApp(ProfileCollections, {
+    id: 'instagram-profile',
+    revisionId: 'r1',
+    platform: 'instagram',
+  })
+  app.mount(el)
+  unmount = () => app.unmount()
+  await vi.waitFor(() => expect(request).toHaveBeenCalled())
+  const query = new URL(
+    String(request.mock.calls[0]![0]),
+    'https://example.test',
+  ).searchParams
+  expect(query.get('entity_type')).toBe('instagram.post')
+  expect(query.get('related_to')).toBe('instagram-profile')
+})
 afterEach(() => {
   unmount()
   document.body.replaceChildren()

@@ -31,11 +31,15 @@ const createList = (path: string) => ({
 })
 const lists: Record<Tab, ReturnType<typeof createList>> = {
   'x.post': createList('/'),
-  'x.profile': createList('/?entity_type=x.profile'),
+  'x.profile': createList('/?entity_type=x.profile,instagram.profile'),
 }
 const all = Object.values(lists)
 function tabOf(target: RouteLocationNormalized): Tab {
-  return target.query.entity_type === 'x.profile' ? 'x.profile' : 'x.post'
+  return String(target.query.entity_type || '')
+    .split(',')
+    .some((type) => type.endsWith('.profile'))
+    ? 'x.profile'
+    : 'x.post'
 }
 const tab = computed(() => tabOf(route))
 const id = computed(() =>
@@ -69,7 +73,13 @@ const scrolls = new Map<string, number>()
 function apiQuery(raw: string, type: Tab) {
   const q = new URLSearchParams(raw)
   q.delete('layout')
-  q.set('entity_type', type)
+  if (!q.has('entity_type'))
+    q.set(
+      'entity_type',
+      type === 'x.profile'
+        ? 'x.profile,instagram.profile'
+        : 'x.post,instagram.post',
+    )
   const from = q.get('from_date')
   const to = q.get('to_date')
   q.delete('from_date')

@@ -1,5 +1,13 @@
 import { previewURL, type Collection, type Entity } from './api'
 type Graph = NonNullable<Collection['graph']>
+export const isProfileEntity = (
+  entity?: Entity,
+): entity is Entity & { type: 'x.profile' | 'instagram.profile' } =>
+  entity?.type === 'x.profile' || entity?.type === 'instagram.profile'
+export const isPostEntity = (
+  entity?: Entity,
+): entity is Entity & { type: 'x.post' | 'instagram.post' } =>
+  entity?.type === 'x.post' || entity?.type === 'instagram.post'
 /** Who a related post is attributed to, as far as the saved data can tell. */
 export interface RelationAuthor {
   name?: string
@@ -19,7 +27,7 @@ export function authoredBy(graph: Graph | undefined, key: string) {
   )?.target
   if (!target) return
   return graph?.entities.find(
-    (entity) => entity.key === target && entity.type === 'x.profile',
+    (entity) => entity.key === target && isProfileEntity(entity),
   )
 }
 /**
@@ -42,7 +50,7 @@ export function profileVersion(
 }
 /** Whether an account is protected; undefined when the profile never said. */
 export function isProtected(entity?: Entity): boolean | undefined {
-  if (entity?.type !== 'x.profile') return
+  if (!isProfileEntity(entity)) return
   const metadata = entity.data.metadata as Record<string, unknown> | undefined
   return typeof metadata?.protected === 'boolean'
     ? metadata.protected
@@ -54,7 +62,7 @@ export function authorIdentity(
   captured = false,
 ): RelationAuthor | undefined {
   const entity = profileVersion(author, captured)
-  if (entity?.type !== 'x.profile') return
+  if (!isProfileEntity(entity)) return
   const name = asText(entity.data.name)
   const handle = asText(entity.data.username)
   if (!name && !handle) return

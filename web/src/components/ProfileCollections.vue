@@ -7,6 +7,7 @@ import CollectionView from './CollectionView.vue'
 const props = defineProps<{
   id: string
   revisionId: string
+  platform?: string
   /** Bumped when a refresh of this profile saved new or updated posts. */
   membersVersion?: number
   showSensitive?: boolean
@@ -19,7 +20,7 @@ const order = shallowRef<'asc' | 'desc'>('desc')
 const query = computed(() => {
   const q = new URLSearchParams({
     related_to: props.id,
-    entity_type: 'x.post',
+    entity_type: `${props.platform || 'x'}.post`,
     sort: 'published',
     order: order.value,
   })
@@ -38,7 +39,7 @@ const {
   more,
 } = useCollection()
 watch(
-  () => [props.id, order.value],
+  () => [props.id, props.platform, order.value],
   () => load(query.value),
   { immediate: true },
 )

@@ -156,6 +156,9 @@ func (r *Runner) accountResponse(event channelapi.Event, v channelapi.Result) re
 		if v.Accounts != nil {
 			for _, p := range v.Accounts.Platforms {
 				canAdd = canAdd || p.CanAdd
+				if !p.Public && p.Selected == "" {
+					out.Text += "\n" + p.Name + " 需要添加并选择自己的账号凭据后才能采集。"
+				}
 				if p.Public {
 					label := p.Name + " · 公共来源"
 					if p.Selected == "" {

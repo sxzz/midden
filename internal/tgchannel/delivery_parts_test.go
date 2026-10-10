@@ -114,7 +114,7 @@ func TestCollectionEntitiesSurviveCaptionAndTextSplits(t *testing.T) {
 			if code != a.ID || author != a.AuthorName || quoted != strings.TrimSpace(body) {
 				t.Fatal("formatting lost across split", media)
 			}
-			if strings.TrimSpace(body) == "" && text != a.ID+"\n\n"+a.AuthorName+"：\n空" {
+			if strings.TrimSpace(body) == "" && text != a.ID+"\n\n"+a.AuthorName {
 				t.Fatal(text)
 			}
 		}

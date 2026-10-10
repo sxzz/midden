@@ -1,4 +1,9 @@
-import { isProtected, profileVersion } from './relations'
+import {
+  isPostEntity,
+  isProfileEntity,
+  isProtected,
+  profileVersion,
+} from './relations'
 import type { Asset, Collection, Entity } from './api'
 export interface Stat {
   label: string
@@ -116,22 +121,23 @@ function profileBio(a: Collection, profile?: Entity): string {
   if (handle && lines[0]?.trim() === `@${handle}`) lines.shift()
   return lines.join('\n').trim()
 }
-const x: Presenter = (a, root, options = {}) => {
+const social: Presenter = (a, root, options = {}) => {
   const key = a.graph?.relations.find(
     (r) => r.source === a.graph?.root && r.type === 'authored_by',
   )?.target
-  const isProfile = root?.type === 'x.profile'
+  const isProfile = isProfileEntity(root)
   const author = isProfile
     ? undefined
-    : a.graph?.entities.find((e) => e.key === key && e.type === 'x.profile')
+    : a.graph?.entities.find((e) => e.key === key && isProfileEntity(e))
   const profile = isProfile ? root : profileVersion(author, options.captured)
-  const post = root?.type === 'x.post' ? root.data : undefined
+  const post = isPostEntity(root) ? root!.data : undefined
   const bio = isProfile ? profileBio(a, profile) : undefined
+  const body = post ? (a.text?.trim() ? a.text : '') : generic(a).body
   return {
     ...generic(a),
     // The collection's own author line is the capture's; the profile may be newer.
     name: asText(profile?.data.name) || generic(a).name,
-    body: bio === undefined ? generic(a).body : bio || '暂无简介',
+    body: bio === undefined ? body : bio || '暂无简介',
     bio,
     profileChanged: !!author?.current,
     // The lock follows the author's profile, not the visibility this capture
@@ -145,8 +151,24 @@ const x: Presenter = (a, root, options = {}) => {
     ),
     // Counts come from the entity the collection is about, and only that one.
     stats: isProfile
-      ? group('账号统计', metadata(profile), accountCounts)
-      : post && group('帖子统计', post, postCounts),
+      ? group(
+          '账号统计',
+          metadata(profile),
+          root?.type === 'instagram.profile'
+            ? accountCounts.slice(0, 3)
+            : accountCounts,
+        )
+      : post &&
+        group(
+          '帖子统计',
+          post,
+          root?.type === 'instagram.post'
+            ? [
+                ['replies', '评论'],
+                ['likes', '点赞'],
+              ]
+            : postCounts,
+        ),
     details: [
       ...details(
         a,
@@ -160,7 +182,12 @@ const x: Presenter = (a, root, options = {}) => {
     ],
   }
 }
-const registry: Record<string, Presenter> = { 'x.post': x, 'x.profile': x }
+const registry: Record<string, Presenter> = {
+  'x.post': social,
+  'x.profile': social,
+  'instagram.post': social,
+  'instagram.profile': social,
+}
 export function present(a: Collection, options?: PresentOptions) {
   const root = a.graph?.entities.find((e) => e.key === a.graph?.root)
   return (registry[root?.type || ''] || generic)(a, root, options)
@@ -169,7 +196,7 @@ export function present(a: Collection, options?: PresentOptions) {
 export function sourceStateNotice(a: Collection): string {
   if (!a.source_state) return ''
   const root = a.graph?.entities.find((e) => e.key === a.graph?.root)
-  const profile = root?.type === 'x.profile'
+  const profile = isProfileEntity(root)
   const label =
     a.source_state === 'suspended'
       ? profile
@@ -300,13 +327,19 @@ export interface BodyPart {
 export function mentionParts(collection: Collection, text: string): BodyPart[] {
   const profiles = new Map<string, string>()
   for (const entity of collection.graph?.entities ?? []) {
-    if (entity.type !== 'x.profile' || !entity.saved_collection_id) continue
+    if (!isProfileEntity(entity) || !entity.saved_collection_id) continue
     const handle = asText(entity.data.username)
     if (handle) profiles.set(handle.toLowerCase(), entity.saved_collection_id)
   }
   const parts: BodyPart[] = []
   let offset = 0
-  for (const match of text.matchAll(/(?<![\w@./])@(\w{1,15})\b/g)) {
+  const root = collection.graph?.entities.find(
+    (entity) => entity.key === collection.graph?.root,
+  )
+  const pattern = root?.type.startsWith('instagram.')
+    ? /(?<![\w@./])@(\w(?:[\w.]{0,28}\w)?)(?![\w.])/g
+    : /(?<![\w@./])@(\w{1,15})\b/g
+  for (const match of text.matchAll(pattern)) {
     const id = profiles.get(match[1]!.toLowerCase())
     if (!id) continue
     if (match.index > offset)

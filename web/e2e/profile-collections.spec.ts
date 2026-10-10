@@ -87,6 +87,90 @@ const quotedPost = {
   author_name: '合成原作者',
 }
 
+test('Instagram profile queries Instagram posts and links dotted mentions', async ({
+  page,
+}) => {
+  const igMention = {
+    ...mention,
+    type: 'instagram.profile',
+    external_id: 'handle:friend.name',
+    data: { username: 'friend.name' },
+  }
+  const igProfile = {
+    ...profile,
+    url: 'https://www.instagram.com/owner.name/',
+    text: 'Instagram 简介提到 @friend.name',
+    graph: {
+      ...profile.graph,
+      entities: [
+        {
+          ...profile.graph.entities[0]!,
+          type: 'instagram.profile',
+          data: { username: 'owner.name' },
+        },
+        igMention,
+      ],
+    },
+  }
+  const igPost = {
+    ...post,
+    text: 'Instagram 帖子提到 @friend.name',
+    relation_types: [],
+    graph: {
+      root: 'post',
+      relations: [],
+      entities: [
+        {
+          key: 'post',
+          type: 'instagram.post',
+          external_id: '300',
+          data: { shortcode: 'Es' },
+        },
+        igMention,
+      ],
+    },
+  }
+  let query = new URLSearchParams()
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const url = new URL(r.request().url())
+    if (url.pathname === '/v1/collections') {
+      query = url.searchParams
+      return r.fulfill({ json: { items: [igPost], total_storage_bytes: 1024 } })
+    }
+    return r.fulfill({
+      json:
+        url.pathname === `/v1/collections/${profileId}`
+          ? igProfile
+          : url.pathname === `/v1/collections/${postId}`
+            ? igPost
+            : url.pathname === '/v1/tags'
+              ? []
+              : url.pathname.endsWith('/annotation')
+                ? { note: '', tags: [] }
+                : { items: [], available: true },
+    })
+  })
+  await page.goto(`/app/#/collection/${profileId}`)
+  const related = page.getByRole('region', { name: '关联的收藏' })
+  await expect(related.locator('.row')).toHaveCount(1)
+  expect(query.get('entity_type')).toBe('instagram.post')
+  expect(query.get('related_to')).toBe(profileId)
+  await expect(
+    page
+      .locator('.post .body')
+      .getByRole('link', { name: '@friend.name', exact: true }),
+  ).toHaveAttribute('href', `#/collection/${mentionedId}`)
+  await related.locator('.row').click()
+  await expect(page).toHaveURL(new RegExp(`/collection/${postId}$`))
+  await expect(
+    page
+      .locator('.post .body')
+      .getByRole('link', { name: '@friend.name', exact: true }),
+  ).toHaveAttribute('href', `#/collection/${mentionedId}`)
+  await page.screenshot({ path: 'test-results/instagram-post-mobile.png' })
+})
+
 test('profile shows related collection rows and total storage, with internal bio and post mentions', async ({
   page,
 }) => {

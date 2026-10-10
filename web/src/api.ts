@@ -149,6 +149,11 @@ export function errorText(e: unknown) {
       return '备注最多 10000 字，标签名最多 64 字，标签最多 100 个。'
     if (e.status === 400 && e.message === 'invalid credentials')
       return '凭据无效或已过期。'
+    if (
+      e.status === 422 &&
+      e.message === 'account required; add and select your own credentials'
+    )
+      return '此平台需要账号，请先添加并选择自己的采集凭据。'
     if (e.status === 401)
       return host()?.initData
         ? '会话已失效，请从 Telegram 重新打开。'

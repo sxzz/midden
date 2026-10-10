@@ -43,7 +43,7 @@ export function useCollection() {
   }
   function page(params: string, cursor: string, signal: AbortSignal) {
     const q = new URLSearchParams(params)
-    if (!q.has('entity_type')) q.set('entity_type', 'x.post')
+    if (!q.has('entity_type')) q.set('entity_type', 'x.post,instagram.post')
     q.set('q', q.get('q') || '')
     if (cursor) q.set('cursor', cursor)
     return api<Page<Collection>>(`/collections?${q}`, { signal })

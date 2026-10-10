@@ -137,3 +137,35 @@ test('feed preview can open its collection and return to the feed', async ({
     page.getByRole('button', { name: '信息流', exact: true }),
   ).toHaveAttribute('aria-pressed', 'true')
 })
+
+test('captionless Instagram posts show media without summary or placeholder text', async ({
+  page,
+}) => {
+  await setup(page)
+  await page.route(`**/v1/collections/${first}`, (r) =>
+    r.fulfill({
+      json: {
+        ...item(first, [asset('one')]),
+        text: '',
+        summary: '作者：图片或视频',
+        graph: {
+          root: 'post',
+          entities: [
+            { key: 'post', type: 'instagram.post', data: { text: '' } },
+          ],
+          relations: [],
+        },
+      },
+    }),
+  )
+  await page.goto(`/app/#/collection/${first}`)
+  await expect(page.locator('.post .name')).toHaveText('作者')
+  await expect(page.locator('.post .body')).toHaveCount(0)
+  await expect(
+    page.locator('.post').getByRole('button', { name: '放大图片' }),
+  ).toBeVisible()
+  await expect(page.getByText('作者：图片或视频', { exact: true })).toHaveCount(
+    0,
+  )
+  await expect(page.getByText('暂无正文', { exact: true })).toHaveCount(0)
+})

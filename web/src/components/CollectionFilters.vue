@@ -36,7 +36,14 @@ function read(query: string) {
     sort: params.get('sort') || 'captured',
     q: params.get('q') || '',
     // Which tab this form belongs to; it rides along but is never edited here.
-    entity: params.get('entity_type') === 'x.profile' ? 'x.profile' : '',
+    entity: params.get('entity_type') || '',
+    platform: params.get('entity_type')?.includes(',')
+      ? ''
+      : params.get('entity_type')?.startsWith('instagram.')
+        ? 'instagram'
+        : params.get('entity_type')?.startsWith('x.')
+          ? 'x'
+          : '',
     media: (params.get('media_type') || '').split(',').filter(Boolean),
     visibility: params.get('visibility') || '',
     sensitive: params.get('sensitive') || '',
@@ -47,7 +54,17 @@ function read(query: string) {
 type Form = ReturnType<typeof read>
 const form = reactive(read(props.query))
 // Authors, media and sensitivity describe posts; an account has none of them.
-const posts = computed(() => !form.entity)
+const posts = computed(
+  () => !form.entity.split(',').some((type) => type.endsWith('.profile')),
+)
+const entityTypes = (entity: string, platform: string) => {
+  const kind = entity.split(',').some((type) => type.endsWith('.profile'))
+    ? 'profile'
+    : 'post'
+  return (platform ? [platform] : ['x', 'instagram'])
+    .map((name) => `${name}.${kind}`)
+    .join(',')
+}
 const mediaNames: Record<string, string> = {
   image: '图片',
   video: '视频',
@@ -95,6 +112,7 @@ const range = computed({
 })
 const open = shallowRef(
   !!(
+    form.platform ||
     form.tag ||
     form.authors.length ||
     form.media.length ||
@@ -106,6 +124,7 @@ const open = shallowRef(
 )
 const active = computed(() =>
   [
+    form.platform ? (form.platform === 'instagram' ? 'Instagram' : 'X') : '',
     form.tag
       ? tags.value.find((tag) => tag.id === form.tag)?.name || '已选标签'
       : '',
@@ -139,7 +158,10 @@ function stringify(f: Form) {
     ['sensitive', f.sensitive],
     ['from_date', f.from],
     ['to_date', f.to],
-    ['entity_type', f.entity],
+    [
+      'entity_type',
+      f.entity || f.platform ? entityTypes(f.entity, f.platform) : '',
+    ],
   ])
     if (v) q.set(k, v)
   for (const author of f.authors) q.append('author', author)
@@ -161,23 +183,27 @@ function search() {
 }
 function clear() {
   const { layout, entity } = form
-  Object.assign(form, read(''), { layout, entity })
+  const category = entity.split(',').some((type) => type.endsWith('.profile'))
+    ? 'x.profile,instagram.profile'
+    : ''
+  Object.assign(form, read(''), { layout, entity: category })
   customRange.value = false
   settled = build()
   const q = new URLSearchParams()
   if (layout) q.set('layout', layout)
-  if (entity) q.set('entity_type', entity)
+  if (category) q.set('entity_type', category)
   emit('search', q.toString())
 }
 /** The tab itself is not a filter, so it alone leaves nothing to clear. */
 const clearable = computed(() => {
   const q = new URLSearchParams(props.query)
   q.delete('entity_type')
-  return q.size > 0
+  return !!form.platform || q.size > 0
 })
 // Every discrete control applies itself; only the keyword box waits for Enter.
 watch(
   () => [
+    form.platform,
     form.tag,
     form.sort,
     form.order,
@@ -332,6 +358,15 @@ const tagFilter = computed({
       ></span>
     </div>
     <div v-show="open" class="panel">
+      <label class="option">
+        平台<span class="select"
+          ><select v-model="form.platform" aria-label="平台">
+            <option value="">全部</option>
+            <option value="x">X</option>
+            <option value="instagram">Instagram</option></select
+          ><ChevronIcon class="select-chevron"
+        /></span>
+      </label>
       <!-- Tags are your own vocabulary, so they get the same chips as in the
            collection itself, not a picker that hides them. -->
       <div v-if="tags.length || tagError" class="tag-filter">

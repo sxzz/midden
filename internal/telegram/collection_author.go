@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"encoding/json"
+	"net/url"
 	"regexp"
 	"strings"
 	"unicode/utf16"
@@ -10,11 +11,12 @@ import (
 )
 
 var (
-	xHandle = regexp.MustCompile(`^[A-Za-z0-9_]{1,15}$`)
-	xUserID = regexp.MustCompile(`^[0-9]+$`)
+	xHandle         = regexp.MustCompile(`^[A-Za-z0-9_]{1,15}$`)
+	xUserID         = regexp.MustCompile(`^[0-9]+$`)
+	instagramHandle = regexp.MustCompile(`^[A-Za-z0-9_](?:[A-Za-z0-9_.]{0,28}[A-Za-z0-9_])?$`)
 )
 
-// X presentation belongs to the Telegram channel, not the collection store or core protocol.
+// Platform presentation belongs to the channel, not the collection store or core protocol.
 func CollectionAuthorURL(a domain.Collection) string {
 	if a.Graph == nil {
 		return ""
@@ -27,11 +29,17 @@ func CollectionAuthorURL(a domain.Collection) string {
 		}
 	}
 	for _, entity := range a.Graph.Entities {
-		if entity.Key != key || entity.Type != "x.profile" {
+		if entity.Key != key || (entity.Type != "x.profile" && entity.Type != "instagram.profile") {
 			continue
 		}
 		var profile struct {
 			Username string `json:"username"`
+		}
+		if entity.Type == "instagram.profile" {
+			if json.Unmarshal(entity.Data, &profile) == nil && instagramHandle.MatchString(profile.Username) && !strings.Contains(profile.Username, "..") {
+				return "https://www.instagram.com/" + profile.Username + "/"
+			}
+			return ""
 		}
 		if json.Unmarshal(entity.Data, &profile) == nil && xHandle.MatchString(profile.Username) {
 			return "https://x.com/" + profile.Username
@@ -46,12 +54,31 @@ func CollectionAuthorURL(a domain.Collection) string {
 func IsProfileCollection(a domain.Collection) bool {
 	if a.Graph != nil {
 		for _, entity := range a.Graph.Entities {
-			if entity.Key == a.Graph.Root && entity.Type == "x.profile" {
+			if entity.Key == a.Graph.Root && (entity.Type == "x.profile" || entity.Type == "instagram.profile") {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func ProfileLinkLabel(a domain.Collection) string {
+	if a.Graph != nil {
+		for _, entity := range a.Graph.Entities {
+			if entity.Key == a.Graph.Root && entity.Type == "instagram.profile" {
+				return "在 Instagram 查看主页"
+			}
+		}
+	}
+	return ProfileURLLabel(a.URL)
+}
+
+func ProfileURLLabel(raw string) string {
+	u, err := url.Parse(raw)
+	if err == nil && (u.Hostname() == "instagram.com" || u.Hostname() == "www.instagram.com" || u.Hostname() == "m.instagram.com") {
+		return "在 Instagram 查看主页"
+	}
+	return "在 X 查看主页"
 }
 
 // ProfilePresentation reads the adapter-owned profile entity for Telegram display.
