@@ -86,7 +86,7 @@ func TestBaselineMigrate(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, err := migrations.ReadFile("migrations/0001_initial.sql")
-	if err != nil || filename != "migrations/0001_initial.sql" || checksum != Hash(string(body)) {
+	if err != nil || filename != "migrations/0001_initial.sql" || checksum != migrationChecksum(string(body)) {
 		t.Fatalf("baseline ledger = %q %q: %v", filename, checksum, err)
 	}
 	if err = db.Pool.QueryRow(ctx, `SELECT version FROM schema_versions`).Scan(&version); err != nil || version != 1 {

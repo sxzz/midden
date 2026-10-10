@@ -348,31 +348,43 @@ func parseRetry(s string) time.Duration {
 // Collect deletes garbage objects of every tenant; uploads are shared content.
 func (s *Service) Collect(ctx context.Context, grace time.Duration) error {
 	type obj struct{ ID, Key string }
-	var list []obj
-	rows, e := s.DB.Pool.Query(ctx, `SELECT id,object_key FROM claim_garbage_objects($1::interval,100)`, fmt.Sprintf("%f seconds", grace.Seconds()))
-	if e != nil {
-		return e
-	}
-	for rows.Next() {
-		var o obj
-		if e = rows.Scan(&o.ID, &o.Key); e != nil {
-			rows.Close()
-			return e
+	deadline := time.Now().Add(maintenanceBudget)
+	var failed []error
+	for {
+		var list []obj
+		rows, e := s.DB.Pool.Query(ctx, `SELECT id,object_key FROM claim_garbage_objects($1::interval,$2)`, fmt.Sprintf("%f seconds", grace.Seconds()), maintenanceBatch)
+		if e != nil {
+			return errors.Join(append(failed, e)...)
 		}
-		list = append(list, o)
-	}
-	e = rows.Err()
-	rows.Close()
-	if e != nil {
-		return e
-	}
-	for _, o := range list {
-		if e = s.Blobs.Delete(ctx, o.Key); e != nil {
-			return e
+		for rows.Next() {
+			var o obj
+			if e = rows.Scan(&o.ID, &o.Key); e != nil {
+				rows.Close()
+				return errors.Join(append(failed, e)...)
+			}
+			list = append(list, o)
 		}
-		if _, e = s.DB.Pool.Exec(ctx, `SELECT finish_garbage_object($1)`, o.ID); e != nil {
-			return e
+		e = rows.Err()
+		rows.Close()
+		if e != nil {
+			return errors.Join(append(failed, e)...)
+		}
+		for _, o := range list {
+			if e = s.Blobs.Delete(ctx, o.Key); e == nil {
+				_, e = s.DB.Pool.Exec(ctx, `SELECT finish_garbage_object($1)`, o.ID)
+			}
+			if e == nil {
+				continue
+			}
+			// The object waits before its next attempt; the rest of the batch
+			// and the batches after it are still collected.
+			failed = append(failed, fmt.Errorf("object %s: %w", o.ID, e))
+			if _, e = s.DB.Pool.Exec(ctx, `SELECT defer_garbage_object($1)`, o.ID); e != nil {
+				return errors.Join(append(failed, e)...)
+			}
+		}
+		if len(list) < maintenanceBatch || time.Now().After(deadline) || ctx.Err() != nil {
+			return errors.Join(failed...)
 		}
 	}
-	return nil
 }

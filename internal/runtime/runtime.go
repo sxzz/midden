@@ -111,7 +111,7 @@ func Run() error {
 		defer ticker.Stop()
 		for {
 			if err := s.Maintain(ctx); err != nil && ctx.Err() == nil {
-				slog.Warn("maintenance failed")
+				slog.Warn("maintenance failed", "error", err)
 			}
 			select {
 			case <-ctx.Done():
