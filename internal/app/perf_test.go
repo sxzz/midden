@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -12,10 +13,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
@@ -213,13 +216,14 @@ func TestPerfSeed(t *testing.T) {
 	config.Rate = 1 << 30
 	s := &Service{DB: env.db, Queue: queue, Adapter: adapter, Config: config, Blobs: &memoryBlob{m: map[string][]byte{}}}
 	start := time.Now()
+	var deadlocks atomic.Int64
 	var wg sync.WaitGroup
 	failures := make(chan error, tenants)
 	for i := range tenants {
 		var tenant string
 		must(t, env.admin.Pool.QueryRow(ctx, `INSERT INTO tenants(quota_bytes) VALUES(1::bigint<<50) RETURNING id`).Scan(&tenant))
 		wg.Go(func() {
-			run := func(in domain.CaptureInput) (string, error) {
+			once := func(in domain.CaptureInput) (string, error) {
 				j, err := s.Submit(ctx, tenant, in)
 				if err != nil || j.State != "queued" {
 					// Content another tenant already captured is saved as it is.
@@ -229,6 +233,27 @@ func TestPerfSeed(t *testing.T) {
 					return "", err
 				}
 				return j.CollectionID, s.finalize(ctx, tenant, j.ID)
+			}
+			// Tenants reach shared content at the same moment here. A capture
+			// another tenant is still running cannot be driven from this one, so
+			// wait for it; a deadlock is what the queue would retry. What still
+			// fails after that is reported.
+			run := func(in domain.CaptureInput) (id string, err error) {
+				for attempt := 0; attempt < 200; attempt++ {
+					if id, err = once(in); err == nil {
+						return
+					}
+					var pg *pgconn.PgError
+					switch {
+					case errors.Is(err, domain.ErrNotFound):
+						time.Sleep(50 * time.Millisecond)
+					case errors.As(err, &pg) && pg.Code == "40P01" && attempt < 5:
+						deadlocks.Add(1)
+					default:
+						return
+					}
+				}
+				return
 			}
 			for n := range posts {
 				// Neighbouring tenants overlap on half of their posts.
@@ -275,7 +300,7 @@ func TestPerfSeed(t *testing.T) {
 	must(t, err)
 	var saved, collections, revisions int
 	must(t, env.admin.Pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM tenant_collections),(SELECT count(*) FROM collections),(SELECT count(*) FROM revisions)`).Scan(&saved, &collections, &revisions))
-	fmt.Printf("seeded %d tenants in %s: %d saves, %d collections, %d revisions\n", tenants, time.Since(start).Round(time.Second), saved, collections, revisions)
+	fmt.Printf("seeded %d tenants in %s: %d saves, %d collections, %d revisions, %d deadlocks retried\n", tenants, time.Since(start).Round(time.Second), saved, collections, revisions, deadlocks.Load())
 }
 
 type perfSample struct {
