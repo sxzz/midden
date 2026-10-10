@@ -25,6 +25,10 @@ for i in $(seq 1 60); do
 done
 ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" go run ./cmd/monitorctl migrate
 ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" APP_DB_PASSWORD=monitor-app-test go run ./cmd/monitorctl app-password
+# Compare migration checksums across formatter output when the pinned formatter is installed.
+if [ -x .tools/format/pgFormatter-5.11/pg_format ]; then
+	export TEST_PG_FORMAT="$PWD/.tools/format/pgFormatter-5.11/pg_format"
+fi
 go test -race -p 1 ./... -count=1 -timeout 240s
 
 export TEST_RESTORE_DIR="$restore_dir"
