@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -50,23 +49,18 @@ func Run() error {
 		return e
 	}
 	s := &app.Service{Vault: vault, DB: db, Blobs: b, HTTP: &http.Client{Timeout: 5 * time.Minute}, Config: cfg}
-	var endpoints []struct {
-		Address string
-		Token   string
-		TLSCA   string `json:"tls_ca"`
-	}
 	var endpointJSON string
 	if e = db.Pool.QueryRow(ctx, `SELECT value FROM config WHERE key='additional_adapters'`).Scan(&endpointJSON); e != nil {
 		return e
 	}
-	if json.Unmarshal([]byte(endpointJSON), &endpoints) != nil {
-		return fmt.Errorf("invalid additional_adapters config")
+	endpoints, e := adapterEndpoints(adapterEndpointConfig{
+		Address: config.Get("ADAPTER_ADDRESS", "127.0.0.1:9091"),
+		Token:   config.Required("ADAPTER_TOKEN"),
+		TLSCA:   os.Getenv("ADAPTER_TLS_CA"),
+	}, endpointJSON, os.Getenv("BUNDLED_ADAPTER_ADDRESSES"))
+	if e != nil {
+		return e
 	}
-	endpoints = append([]struct {
-		Address string
-		Token   string
-		TLSCA   string `json:"tls_ca"`
-	}{{config.Get("ADAPTER_ADDRESS", "127.0.0.1:9091"), config.Required("ADAPTER_TOKEN"), os.Getenv("ADAPTER_TLS_CA")}}, endpoints...)
 	bindings := []app.AdapterEndpoint{}
 	for _, endpoint := range endpoints {
 		if endpoint.Address == "" || endpoint.Token == "" {

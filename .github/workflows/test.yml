@@ -17,7 +17,7 @@ jobs:
           install: false
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm format:check
-      - run: node --test scripts/test-deploy.mjs scripts/test-configure-local-storage.mjs scripts/test-format.mjs scripts/test-cloudflare-tunnel.mjs scripts/test-deploy-webhook.mjs
+      - run: node --test scripts/test-deploy.mjs scripts/test-configure-local-storage.mjs scripts/test-format.mjs scripts/test-cloudflare-tunnel.mjs scripts/test-deploy-webhook.mjs scripts/test-adapter-runtime.mjs
       - run: pnpm --filter @midden/web lint
       - run: pnpm build && pnpm test
       - run: node scripts/prepare-web-assets.mjs
@@ -54,7 +54,7 @@ jobs:
           install: false
       - run: pnpm install --frozen-lockfile --ignore-scripts
       # The adapter integration test runs the built TypeScript server.
-      - run: pnpm --filter "@monitor/x-adapter..." --recursive run build
+      - run: pnpm --filter '@monitor/*...' --recursive run build
       # Tests need only ffprobe; recommended packages add a third of the download.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: go vet ./...
