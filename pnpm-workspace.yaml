@@ -1,5 +1,5 @@
 packages:
-  - adapters/x
+  - adapters/*
   - third_party/atmosphere
   - web
 allowBuilds:

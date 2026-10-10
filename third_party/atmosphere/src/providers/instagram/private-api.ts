@@ -28,6 +28,10 @@ export function fetchPrivateUserByUsername(
   ctx: InstagramRequestContext | undefined,
   options: InstagramApiOptions = {},
 ): Promise<InstagramPrivateApiResult> {
+  if (ctx?.session)
+    return ctx.session
+      .profile(username)
+      .then((user) => ({ ok: true, status: 200, json: { user } }));
   return instagramPrivateApiRequest(
     `/users/${encodeURIComponent(username)}/usernameinfo/`,
     ctx,
@@ -44,6 +48,10 @@ export function fetchPrivateUserById(
   ctx: InstagramRequestContext | undefined,
   options: InstagramApiOptions = {},
 ): Promise<InstagramPrivateApiResult> {
+  if (ctx?.session)
+    return ctx.session
+      .profile(userId)
+      .then((user) => ({ ok: true, status: 200, json: { user } }));
   return instagramPrivateApiRequest(
     `/users/${encodeURIComponent(userId)}/info/`,
     ctx,
@@ -59,6 +67,10 @@ export function fetchPrivateMediaInfo(
   ctx: InstagramRequestContext | undefined,
   options: InstagramApiOptions & { shortcode?: string } = {},
 ): Promise<InstagramPrivateApiResult> {
+  if (ctx?.session)
+    return ctx.session
+      .post(mediaId)
+      .then((item) => ({ ok: true, status: 200, json: { items: [item] } }));
   return instagramPrivateApiRequest(
     `/media/${encodeURIComponent(mediaId)}/info/`,
     ctx,
@@ -138,6 +150,10 @@ export function fetchPrivateUserFeed(
     username?: string;
   } = {},
 ): Promise<InstagramPrivateApiResult> {
+  if (ctx?.session)
+    return ctx.session
+      .page(userId, options.maxId ?? "", options.count ?? 12)
+      .then((json) => ({ ok: true, status: 200, json }));
   return instagramPrivateApiRequest(
     `/feed/user/${encodeURIComponent(userId)}/`,
     ctx,

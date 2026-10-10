@@ -18,6 +18,8 @@ import (
 	"monitor/internal/domain"
 )
 
+var ErrAccountRequired = errors.New("account required; add and select your own credentials")
+
 var ErrConnection = errors.New("account unavailable; choose a source or authorize again")
 
 type Connection struct{ ID, Name, State, AccountID, Username string }

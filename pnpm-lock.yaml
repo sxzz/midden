@@ -224,6 +224,25 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
 
+  adapters/instagram:
+    dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.10.0
+        version: 2.10.0
+      '@fxembed/atmosphere':
+        specifier: workspace:*
+        version: link:../../third_party/atmosphere
+      '@grpc/grpc-js':
+        specifier: 1.14.5
+        version: 1.14.5
+      protobufjs:
+        specifier: 7.6.6
+        version: 7.6.6
+    devDependencies:
+      tsx:
+        specifier: 4.23.0
+        version: 4.23.0
+
   adapters/x:
     dependencies:
       '@bufbuild/protobuf':

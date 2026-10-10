@@ -160,12 +160,17 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			return out, ErrConnection
 		}
 		in.ProviderID = provider
-	} else if in.ProviderID == "" {
+	} else {
 		p, e := s.defaultProvider(ctx, "none")
-		if e != nil {
+		if errors.Is(e, ErrAccountRequired) {
 			return out, e
 		}
-		in.ProviderID = p.Id
+		if in.ProviderID == "" {
+			if e != nil {
+				return out, e
+			}
+			in.ProviderID = p.Id
+		}
 	}
 	policy, e := s.requireProvider(ctx, in.ProviderID, adapter.CaptureFetch)
 	if e != nil {

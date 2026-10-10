@@ -5,6 +5,7 @@ import {
   getInstagramProxyRuntime,
 } from "../instagram-runtime.js";
 import type { InstagramCredentials } from "../../types/proxy-credentials.js";
+import type { InstagramSessionProvider } from "./session.js";
 import {
   INSTAGRAM_ANDROID_APP_ID,
   INSTAGRAM_ANDROID_CAPABILITIES,
@@ -25,6 +26,8 @@ const WEB_USER_AGENT =
 export type InstagramRequestContext = {
   userAgent?: string;
   credentialKey?: string;
+  /** Request-bound browser account; bypasses the worker's shared account pool. */
+  session?: InstagramSessionProvider;
 };
 
 /**
@@ -35,6 +38,7 @@ export type InstagramRequestContext = {
 export function hasInstagramAccountProxy(
   ctx: InstagramRequestContext | undefined,
 ): boolean {
+  if (ctx?.session) return Boolean(ctx.session.credential.sessionId);
   return Boolean(
     ctx?.credentialKey?.trim() &&
     getInstagramProxyRuntime().hasBundledEncryptedCredentials(),
@@ -45,6 +49,7 @@ export function hasInstagramAccountProxy(
 export async function resolveInstagramAccounts(
   ctx: InstagramRequestContext | undefined,
 ): Promise<InstagramCredentials[]> {
+  if (ctx?.session) return [ctx.session.credential];
   if (!hasInstagramAccountProxy(ctx)) return [];
   const rt = getInstagramProxyRuntime();
   try {

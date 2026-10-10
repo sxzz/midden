@@ -133,3 +133,11 @@ func (*fixtureAdapter) Resolve(_ context.Context, r *pb.ResolveRequest, _ ...grp
 	parts := strings.Split(r.Url, "/")
 	return &pb.ResolveResponse{Url: r.Url, Platform: "fixture", Kind: "item", ExternalId: parts[len(parts)-1]}, nil
 }
+
+func TestAccountRequiredResponse(t *testing.T) {
+	w := httptest.NewRecorder()
+	respond(w, 200, nil, app.ErrAccountRequired)
+	if w.Code != 422 || !strings.Contains(w.Body.String(), app.ErrAccountRequired.Error()) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}

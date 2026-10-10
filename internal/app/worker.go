@@ -133,8 +133,11 @@ func RetryDelay(e error) time.Duration {
 }
 
 func safeError(e error) string {
+	if errors.Is(e, ErrAccountRequired) {
+		return "此平台需要账号，请先添加并选择自己的采集凭据。"
+	}
 	if errors.Is(e, ErrConnection) {
-		return "账号不可用，请重新授权或使用 /account 选择公共来源。"
+		return "账号不可用，请在采集账号中选择可用账号或重新授权。"
 	}
 	if errors.Is(e, domain.ErrQuota) {
 		return "storage quota exceeded"

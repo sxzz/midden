@@ -16,8 +16,12 @@ func (s *Service) resolveCaptureScope(ctx context.Context, tx pgx.Tx, tenant, ci
 	if e := tx.QueryRow(ctx, `SELECT a.id,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),coalesce(c.refresh_from::text,a.id::text),a.platform,a.kind,a.object_scope FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.id=$1`, cid).Scan(&old, &external, &provider, &connection, &savedSource, &platform, &kind, &objectScope); e != nil {
 		return e
 	}
-	if canonical == nil || canonical.ExternalId == external {
+	if canonical == nil {
 		return nil
+	}
+	if canonical.ExternalId == external {
+		_, e := tx.Exec(ctx, `UPDATE collections SET url=$2 WHERE id=$1 AND url<>$2`, old, canonical.Url)
+		return e
 	}
 	requestedExternal := external
 	external = canonical.ExternalId

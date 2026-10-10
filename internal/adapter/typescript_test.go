@@ -1,24 +1,13 @@
 package adapter
 
 import (
-	"bufio"
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
-	"math/big"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +18,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "monitor/api/adapter/v1"
+	"monitor/internal/adapter/adaptertest"
 )
 
 func TestTypeScriptTLSProtocol(t *testing.T) {
@@ -56,46 +46,10 @@ func TestTypeScriptTLSProtocol(t *testing.T) {
 		w.Write(fixture)
 	}))
 	defer upstream.Close()
-	dir := t.TempDir()
-	key, e := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if e != nil {
-		t.Fatal(e)
-	}
-	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "localhost"}, DNSNames: []string{"localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
-	cert, e := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	if e != nil {
-		t.Fatal(e)
-	}
-	der, e := x509.MarshalPKCS8PrivateKey(key)
-	if e != nil {
-		t.Fatal(e)
-	}
-	ca := filepath.Join(dir, "cert.pem")
-	keyfile := filepath.Join(dir, "key.pem")
-	os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert}), 0o600)
-	os.WriteFile(keyfile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600)
-	script := `import {createServer} from './dist/server.js'; import {fetchPublic} from './dist/provider.js'; import {CaptureStrategy} from './dist/strategy.js'; import {normalizeProfile} from './dist/profile.js'; import {ServerCredentials} from '@grpc/grpc-js'; import {readFileSync} from 'node:fs'; const post=(id,signal)=>fetchPublic(id,signal,process.env.FIXTURE_ENDPOINT); const strategy=new CaptureStrategy(post,async(id)=>normalizeProfile({type:'profile',id,name:'Fixture',screen_name:'fixture',protected:false},id,'fxtwitter')); const s=createServer('fixture',true,post,strategy); s.bindAsync('127.0.0.1:0',ServerCredentials.createSsl(null,[{cert_chain:readFileSync(process.env.FIXTURE_CERT),private_key:readFileSync(process.env.FIXTURE_KEY)}],false),(e,p)=>{if(e)process.exit(1);process.stdout.write(p+'\n')});`
-	// Plain write: console.log colours numbers when FORCE_COLOR is set.
+	addresses, ca := adaptertest.Start(t, upstream.URL, "")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "node", "--input-type=module", "-e", script)
-	cmd.Dir = filepath.Join(root, "adapters/x")
-	cmd.Env = append(os.Environ(), "FIXTURE_CERT="+ca, "FIXTURE_KEY="+keyfile, "FIXTURE_ENDPOINT="+upstream.URL)
-	stdout, e := cmd.StdoutPipe()
-	if e != nil {
-		t.Fatal(e)
-	}
-	cmd.Stderr = os.Stderr
-	if e = cmd.Start(); e != nil {
-		t.Fatal(e)
-	}
-	defer func() { cmd.Process.Kill(); cmd.Wait() }()
-	scanner := bufio.NewScanner(stdout)
-	if !scanner.Scan() {
-		t.Fatal("TS adapter failed to start")
-	}
-	port := strings.TrimSpace(scanner.Text())
-	conn, e := Dial("127.0.0.1:"+port, "fixture", ca)
+	conn, e := Dial(addresses[0], "fixture", ca)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -154,13 +108,72 @@ func TestTypeScriptTLSProtocol(t *testing.T) {
 	if _, e = client.CheckConnection(ctx, &pb.CheckConnectionRequest{ProviderId: "x-session"}); status.Code(e) != codes.InvalidArgument {
 		t.Fatal("credential validation lost over RPC", e)
 	}
-	bad, e := Dial("127.0.0.1:"+port, "wrong", ca)
+	bad, e := Dial(addresses[0], "wrong", ca)
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer bad.Close()
 	if _, e = pb.NewAdapterClient(bad).Describe(ctx, &pb.DescribeRequest{}); status.Code(e) != codes.Unauthenticated {
 		t.Fatal(e)
+	}
+	instagramConn, e := Dial(addresses[1], "fixture", ca)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer instagramConn.Close()
+	instagram := pb.NewAdapterClient(instagramConn)
+	descriptor, e := instagram.Describe(ctx, &pb.DescribeRequest{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = Validate(descriptor); e != nil {
+		t.Fatal(e)
+	}
+	if descriptor.AdapterId != "instagram" || descriptor.DisplayName != "Instagram" || len(descriptor.Providers) != 1 {
+		t.Fatal("Instagram discovery missing", descriptor)
+	}
+	resolvedIG, e := instagram.Resolve(ctx, &pb.ResolveRequest{Url: "https://instagram.com/reel/C/?igsh=fixture"})
+	if e != nil || resolvedIG.ExternalId != "2" || resolvedIG.Platform != "instagram" {
+		t.Fatal("Instagram resolution", resolvedIG, e)
+	}
+	if descriptor.Providers[0].Authentication != "session" || len(descriptor.Providers[0].Visibilities) != 1 || descriptor.Providers[0].Visibilities[0] != pb.Visibility_VISIBILITY_PRIVATE {
+		t.Fatal("Instagram must require private account execution", descriptor)
+	}
+	if _, e = instagram.Fetch(ctx, &pb.FetchRequest{Url: resolvedIG.Url, ExternalId: resolvedIG.ExternalId, Platform: "instagram", Kind: "post", ProviderId: "instagram-session"}); status.Code(e) != codes.InvalidArgument {
+		t.Fatal("Instagram accepted missing connection", e)
+	}
+	preparedIG, e := instagram.PrepareCredential(ctx, &pb.PrepareCredentialRequest{ProviderId: "instagram-session", Input: []byte("c2Vzc2lvbmlkPWZpeHR1cmUtc2Vzc2lvbg==")})
+	if e != nil {
+		t.Fatal(e)
+	}
+	identityIG, e := instagram.CheckConnection(ctx, &pb.CheckConnectionRequest{ProviderId: "instagram-session", Credential: preparedIG.Credential})
+	if e != nil || identityIG.AccountId != "77" || identityIG.Username != "fixture.name" {
+		t.Fatal("Instagram account verification", identityIG, e)
+	}
+	privateIG, e := instagram.Fetch(ctx, &pb.FetchRequest{Url: "https://www.instagram.com/p/D/", ExternalId: "3", Platform: "instagram", Kind: "post", ProviderId: "instagram-session", ConnectionId: "fixture", AccessScope: "connection:fixture", Credential: preparedIG.Credential})
+	if e != nil || privateIG.Text != "Instagram private" || privateIG.Visibility != pb.Visibility_VISIBILITY_PRIVATE {
+		t.Fatal("Instagram private capture", privateIG, e)
+	}
+	for _, source := range privateIG.SourceResponses {
+		if source.Visibility != pb.Visibility_VISIBILITY_PRIVATE {
+			t.Fatal("Instagram raw account response leaked")
+		}
+	}
+	accessIG, e := instagram.CheckAccess(ctx, &pb.CheckAccessRequest{Url: "https://www.instagram.com/p/D/", Target: &pb.ObjectRef{Platform: "instagram", Kind: "post", ExternalId: "3"}, ProviderId: "instagram-session", ConnectionId: "fixture", AccessScope: "connection:fixture", Credential: preparedIG.Credential})
+	if e != nil || accessIG.Visibility != pb.Visibility_VISIBILITY_PRIVATE || len(accessIG.Accessible) != 1 {
+		t.Fatal("Instagram account access", accessIG, e)
+	}
+	profileIG, e := instagram.Fetch(ctx, &pb.FetchRequest{Url: "https://www.instagram.com/fixture.name/", ExternalId: "handle:fixture.name", Platform: "instagram", Kind: "profile", ProviderId: "instagram-session", ConnectionId: "fixture", AccessScope: "connection:fixture", Credential: preparedIG.Credential, PageSize: 1})
+	if e != nil || profileIG.CanonicalTarget.GetExternalId() != "77" || len(profileIG.RelatedTargets) != 2 || profileIG.NextPageCursor == "" || profileIG.Incomplete {
+		t.Fatal("Instagram authenticated profile pagination", profileIG, e)
+	}
+	continuedIG, e := instagram.Fetch(ctx, &pb.FetchRequest{Url: profileIG.CanonicalTarget.Url, ExternalId: "77", Platform: "instagram", Kind: "profile", ProviderId: "instagram-session", ConnectionId: "fixture", AccessScope: "connection:fixture", Credential: preparedIG.Credential, PageSize: 1, PageCursor: profileIG.NextPageCursor})
+	if e != nil || len(continuedIG.RelatedTargets) != 1 || continuedIG.NextPageCursor != "" || continuedIG.Incomplete {
+		t.Fatal("Instagram authenticated continuation", continuedIG, e)
+	}
+	listedIG, e := instagram.Fetch(ctx, &pb.FetchRequest{Url: "https://www.instagram.com/p/C/", ExternalId: "2", Platform: "instagram", Kind: "post", ProviderId: "instagram-session", ConnectionId: "fixture", AccessScope: "connection:fixture", Credential: preparedIG.Credential, Automatic: true})
+	if e != nil || listedIG.Text != "Instagram account" || listedIG.Visibility != pb.Visibility_VISIBILITY_PRIVATE {
+		t.Fatal("Instagram listed post snapshot", listedIG, e)
 	}
 	expired, stop := context.WithCancel(ctx)
 	stop()

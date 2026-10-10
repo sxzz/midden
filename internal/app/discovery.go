@@ -55,6 +55,13 @@ func (s *Service) defaultProvider(ctx context.Context, authentication string) (*
 		}
 	}
 	if found == nil {
+		if authentication == "none" {
+			for _, p := range d.Providers {
+				if p.Authentication == "session" && p.DefaultProvider {
+					return nil, ErrAccountRequired
+				}
+			}
+		}
 		return nil, domain.ErrUnsupported
 	}
 	return found, nil
