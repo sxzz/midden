@@ -81,6 +81,20 @@ func (s *Service) RefreshBatch(ctx context.Context, tenant, id string) (out Refr
 	return
 }
 
+// batchPagesSQL walks a batch's collection submissions and their continuation pages.
+const batchPagesSQL = `WITH RECURSIVE batch AS (SELECT * FROM refresh_batches WHERE id=$1),
+pages AS (
+ SELECT s.id,s.capture_id,s.next_submission,s.related_state,s.collection_stopped,0 AS depth FROM batch CROSS JOIN LATERAL unnest(batch.collection_ids) WITH ORDINALITY n(id,position) CROSS JOIN LATERAL (SELECT root.* FROM submissions root WHERE root.tenant_id=batch.tenant_id AND root.idem_key='refresh-batch:'||batch.id::text||':'||(n.position-1) OFFSET 0) s JOIN captures c ON c.id=s.capture_id WHERE c.is_collection
+ UNION ALL SELECT s.id,s.capture_id,s.next_submission,s.related_state,s.collection_stopped,p.depth+1 FROM submissions s JOIN pages p ON s.id=p.next_submission WHERE p.depth<1000
+)`
+
+// retryableMembersSQL selects, from batchPagesSQL's pages, the member
+// submissions a retry fetches again: their capture failed and the source has
+// not reported the content gone. A page still submitting members, or stopped,
+// is left alone.
+const retryableMembersSQL = ` FROM pages CROSS JOIN LATERAL (SELECT member.id,member.capture_id FROM submissions member WHERE member.parent_submission=pages.id AND member.idem_key LIKE 'related:%' OFFSET 0) member JOIN captures c ON c.id=member.capture_id
+ WHERE c.state='failed' AND pages.related_state='complete' AND NOT pages.collection_stopped AND NOT EXISTS(SELECT FROM collections a WHERE a.id=c.collection_id AND a.source_state IS NOT NULL)`
+
 // Members are followed from each submitted collection through its continuation
 // pages, matching how collection progress is reported to channels. Their total
 // counts the targets a fetched listing named, so it is known while the listing
@@ -91,11 +105,7 @@ func (s *Service) RefreshBatch(ctx context.Context, tenant, id string) (out Refr
 // every submission of the tenant on each poll.
 func scanRefreshBatch(ctx context.Context, tx pgx.Tx, id string, b *RefreshBatch) error {
 	var membersPending bool
-	err := tx.QueryRow(ctx, `WITH RECURSIVE batch AS (SELECT * FROM refresh_batches WHERE id=$1),
-pages AS (
- SELECT s.id,s.capture_id,s.next_submission,s.related_state,0 AS depth FROM batch CROSS JOIN LATERAL unnest(batch.collection_ids) WITH ORDINALITY n(id,position) CROSS JOIN LATERAL (SELECT root.* FROM submissions root WHERE root.tenant_id=batch.tenant_id AND root.idem_key='refresh-batch:'||batch.id::text||':'||(n.position-1) OFFSET 0) s JOIN captures c ON c.id=s.capture_id WHERE c.is_collection
- UNION ALL SELECT s.id,s.capture_id,s.next_submission,s.related_state,p.depth+1 FROM submissions s JOIN pages p ON s.id=p.next_submission WHERE p.depth<1000
-), members AS (SELECT DISTINCT child.capture_id FROM pages CROSS JOIN LATERAL (SELECT member.capture_id FROM submissions member WHERE member.parent_submission=pages.id AND member.idem_key LIKE 'related:%' OFFSET 0) child)
+	err := tx.QueryRow(ctx, batchPagesSQL+`, members AS (SELECT DISTINCT child.capture_id FROM pages CROSS JOIN LATERAL (SELECT member.capture_id FROM submissions member WHERE member.parent_submission=pages.id AND member.idem_key LIKE 'related:%' OFFSET 0) child)
 SELECT batch.id,batch.state,batch.error,batch.update_mode,cardinality(batch.collection_ids),batch.position,batch.reused,batch.rejected,
  (SELECT count(*) FROM captures c WHERE c.id=ANY(batch.capture_ids) AND c.state IN ('queued','downloading')),
  (SELECT count(*) FROM captures c WHERE c.id=ANY(batch.capture_ids) AND c.state='complete'),
@@ -106,15 +116,19 @@ SELECT batch.id,batch.state,batch.error,batch.update_mode,cardinality(batch.coll
  (SELECT count(*) FROM members JOIN captures c ON c.id=members.capture_id WHERE c.state='partial'),
  (SELECT count(*) FROM members JOIN captures c ON c.id=members.capture_id WHERE c.state='failed'),
  (SELECT count(*) FROM members JOIN captures c ON c.id=members.capture_id WHERE c.state IN ('queued','downloading')),
- EXISTS(SELECT FROM pages WHERE related_state='pending')
+ EXISTS(SELECT FROM pages WHERE related_state='pending'),
+ (SELECT count(DISTINCT member.capture_id)`+retryableMembersSQL+`)
 FROM batch`, id).Scan(&b.ID, &b.State, &b.Error, &b.UpdateMode, &b.Total, &b.Submitted, &b.Reused, &b.Rejected, &b.Running, &b.Complete, &b.Partial, &b.Failed,
-		&b.Members.Total, &b.Members.Complete, &b.Members.Partial, &b.Members.Failed, &b.Members.Pending, &membersPending)
+		&b.Members.Total, &b.Members.Complete, &b.Members.Partial, &b.Members.Failed, &b.Members.Pending, &membersPending, &b.Retryable)
 	if err != nil {
 		return err
 	}
 	b.Members.Done = !membersPending && b.Members.Pending == 0
 	// A failed batch submits nothing more, but what it started still runs.
 	b.Done = b.State != "running" && b.Running == 0 && b.Members.Done
+	if !b.Done {
+		b.Retryable = 0
+	}
 	return scanRefreshItems(ctx, tx, id, b)
 }
 
@@ -248,4 +262,59 @@ func (s *Service) failRefreshBatch(ctx context.Context, task store.Task, msg str
 		_, e := tx.Exec(ctx, `UPDATE refresh_batches SET state='failed',error=$2 WHERE id=$1 AND state='running'`, task.ID, msg)
 		return e
 	})
+}
+
+// errBatchRunning rejects a retry while the batch still submits or captures.
+var errBatchRunning = errors.New("refresh batch is still running")
+
+// RetryRefreshBatch fetches again the member posts of a finished batch whose
+// capture failed, and returns how many. Each failed submission gives up its
+// idempotency key, so the page's related task submits that target anew and
+// leaves every other member as it is; the batch reports progress again until
+// the retried captures finish.
+func (s *Service) RetryRefreshBatch(ctx context.Context, tenant, id string) (n int64, err error) {
+	err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
+		if e := lockTenant(ctx, tx, tenant); e != nil {
+			return e
+		}
+		var b RefreshBatch
+		if e := scanRefreshBatch(ctx, tx, id, &b); e != nil {
+			return e
+		}
+		if !b.Done {
+			return errBatchRunning
+		}
+		rows, e := tx.Query(ctx, batchPagesSQL+`, failed AS (SELECT member.id,pages.id AS page`+retryableMembersSQL+`),
+renamed AS (UPDATE submissions s SET idem_key='retried:'||s.id::text FROM failed WHERE s.id=failed.id RETURNING failed.page),
+reopened AS (UPDATE submissions s SET related_state='pending' WHERE s.id IN (SELECT page FROM renamed) RETURNING s.id)
+SELECT id::text,(SELECT count(*) FROM renamed) FROM reopened`, id)
+		if e != nil {
+			return e
+		}
+		var pages []string
+		for rows.Next() {
+			var page string
+			if e = rows.Scan(&page, &n); e != nil {
+				rows.Close()
+				return e
+			}
+			pages = append(pages, page)
+		}
+		rows.Close()
+		if e = rows.Err(); e != nil {
+			return e
+		}
+		for _, page := range pages {
+			if e = s.Enqueue(ctx, tx, tenant, page, "related"); e != nil {
+				return e
+			}
+		}
+		if n == 0 {
+			return nil
+		}
+		// The batch's message follows the retried captures like the first run.
+		_, e = tx.Exec(ctx, `UPDATE channel_work w SET state='pending',available_at=now(),lease=NULL,lease_until=NULL FROM refresh_batches b WHERE b.id=$1 AND w.channel_id=b.channel_id AND w.kind='batch' AND w.resource=b.id::text AND w.state<>'pending'`, id)
+		return e
+	})
+	return
 }

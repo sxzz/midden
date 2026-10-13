@@ -445,13 +445,19 @@ func batchMessage(b domain.RefreshBatch) (string, telegram.Keyboard) {
 	if p := posts(b.Members, b.Done); p != "" {
 		summary = "\n帖子：" + p
 	}
+	// Failures such as an unavailable source can succeed later, so a finished
+	// batch offers to fetch only its failed posts again.
+	var retry telegram.Keyboard
+	if b.Done && b.Retryable > 0 {
+		retry = telegram.Keyboard{{{Text: fmt.Sprintf("重试失败的帖子（%d）", b.Retryable), Data: "/batch_retry " + b.ID}}}
+	}
 	switch {
 	case b.State == "failed" && b.Done:
 		reason := "采集服务不可用"
 		if b.Error == "storage quota exceeded" {
 			reason = "存储空间不足"
 		}
-		return fmt.Sprintf("批量%s已中止：%s\n已提交 %d/%d", mode, reason, b.Submitted, b.Total) + summary, nil
+		return fmt.Sprintf("批量%s已中止：%s\n已提交 %d/%d", mode, reason, b.Submitted, b.Total) + summary, retry
 	case !b.Done:
 		text := fmt.Sprintf("批量%s中…\n已提交 %d/%d", mode, b.Submitted, b.Total)
 		if c := counts("抓取中", b.Running, "已抓取", fetched, "无变化", b.Reused, "失败", b.Failed); c != "" {
@@ -491,7 +497,7 @@ func batchMessage(b domain.RefreshBatch) (string, telegram.Keyboard) {
 	if c := counts("已抓取", fetched, "无变化", b.Reused, "不完整", b.Partial, "失败", b.Failed, "无法更新", b.Rejected); c != "" {
 		text += "\n" + c
 	}
-	return text + summary, nil
+	return text + summary, retry
 }
 
 func collectionProgressMessage(id string, d channelapi.Delivery, webURL string) (string, telegram.Keyboard) {

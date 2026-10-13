@@ -231,6 +231,9 @@ type RefreshBatch struct {
 	// Members covers the captures selected collections (such as profiles)
 	// started for their posts, which finish after the collections themselves.
 	Members MemberProgress `json:"members"`
+	// Retryable counts the failed members a finished batch can fetch again:
+	// those whose source has not reported the content gone.
+	Retryable int `json:"retryable"`
 	// Active lists, in batch order, the submitted items still running or
 	// waiting on their members.
 	Active []RefreshItem `json:"active,omitempty"`

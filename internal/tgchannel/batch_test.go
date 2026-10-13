@@ -47,4 +47,9 @@ func TestBatchMessageButtons(t *testing.T) {
 	if _, keys = batchMessage(b); keys != nil {
 		t.Fatalf("finished batch kept buttons %+v", keys)
 	}
+	// A finished batch offers to fetch again what may still succeed.
+	b.ID, b.Retryable = "0d2b7c1e-5b0a-4a57-9a0c-0d7a4c1f8e11", 3
+	if _, keys = batchMessage(b); len(keys) != 1 || keys[0][0].Text != "重试失败的帖子（3）" || keys[0][0].Data != "/batch_retry "+b.ID || !validCallback(keys[0][0].Data) {
+		t.Fatalf("retry button %+v", keys)
+	}
 }

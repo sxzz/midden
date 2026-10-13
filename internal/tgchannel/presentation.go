@@ -191,6 +191,8 @@ func failureReason(reason string) string {
 		return "Instagram 内容不存在或当前账号无权访问。"
 	case "Instagram temporarily unavailable":
 		return "Instagram 暂时不可用，请稍后重试。"
+	case "provider temporarily unavailable":
+		return "来源平台暂时不可用，请稍后重试。"
 	case "account request signing unavailable":
 		return "采集账号请求签名不可用"
 	case "context deadline exceeded":

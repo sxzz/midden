@@ -135,6 +135,17 @@ func (r *Runner) command(ctx context.Context, w channelapi.Work, event channelap
 		if v.Code == "no_more" {
 			out.Text = "没有更多帖子了。"
 		}
+	case "batch_retry":
+		// The batch's own message reports the retry; it must stay in place.
+		out.Previous = 0
+		switch {
+		case v.Code == "batch_running":
+			out.Toast = "批量更新仍在进行。"
+		case v.Count == 0:
+			out.Toast = "没有可重试的帖子。"
+		default:
+			out.Toast = fmt.Sprintf("正在重试 %d 条失败的帖子。", v.Count)
+		}
 	case "account", "account_delete":
 		out = r.accountResponse(event, v)
 	}

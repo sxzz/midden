@@ -133,6 +133,11 @@ func RetryDelay(e error) time.Duration {
 }
 
 func safeError(e error) string {
+	// A retry that ran out of attempts fails with what the upstream said.
+	var retry *RetryError
+	if errors.As(e, &retry) && retry.Err != nil {
+		return safeError(retry.Err)
+	}
 	if errors.Is(e, ErrAccountRequired) {
 		return "此平台需要账号，请先添加并选择自己的采集凭据。"
 	}
@@ -450,6 +455,13 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		if r.CanonicalTarget != nil {
 			if e := s.resolveCaptureScope(ctx, tx, t.Tenant, t.ID, r.CanonicalTarget); e != nil {
 				return e
+			}
+			// A capture that joined a running one stores nothing itself.
+			if e := tx.QueryRow(ctx, `SELECT state FROM captures WHERE id=$1`, t.ID).Scan(&state); e != nil {
+				return e
+			}
+			if state != "queued" {
+				return nil
 			}
 		}
 		relatedJSON, _ := json.Marshal(r.RelatedTargets)

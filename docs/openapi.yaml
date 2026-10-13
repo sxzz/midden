@@ -700,6 +700,11 @@ components:
             failed: { type: integer }
             pending: { type: integer }
             done: { type: boolean }
+        retryable:
+          {
+            type: integer,
+            description: Failed member captures of a finished batch that can be fetched again. Those whose source reported the content gone are not counted.,
+          }
         done:
           {
             type: boolean,

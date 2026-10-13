@@ -59,7 +59,7 @@ func (s *Service) ChannelAction(ctx context.Context, channel string, in channela
 	}
 	arg := event.Argument
 	switch in.Name {
-	case "status", "show", "save_shared", "refresh", "retry", "delete", "more", "more1000", "page_retry", "collection_stop":
+	case "status", "show", "save_shared", "refresh", "retry", "delete", "more", "more1000", "page_retry", "collection_stop", "batch_retry":
 		if _, err := uuid.Parse(arg); err != nil {
 			return result, domain.ErrNotFound
 		}
@@ -154,6 +154,11 @@ func (s *Service) ChannelAction(ctx context.Context, channel string, in channela
 	case "collection_stop":
 		e = s.StopCollection(ctx, tenant, arg)
 		result.Code = "collection_stopped"
+	case "batch_retry":
+		result.Count, e = s.RetryRefreshBatch(ctx, tenant, arg)
+		if errors.Is(e, errBatchRunning) {
+			result.Code, e = "batch_running", nil
+		}
 	case "more", "more1000", "page_retry":
 		result, e = s.channelPage(ctx, tenant, origin, w.ID, arg, in.Name)
 	case "account", "account_delete":

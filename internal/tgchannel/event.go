@@ -179,7 +179,7 @@ func validCallback(data string) bool {
 	id := func(s string) bool { _, e := uuid.Parse(s); return e == nil }
 	adapter := func(s string) bool { return regexp.MustCompile(`^[a-zA-Z0-9_-]{1,32}$`).MatchString(s) }
 	switch f[0] {
-	case "/show", "/status", "/refresh", "/retry", "/delete", "/more", "/more1000", "/page_retry", "/collection_stop", "/save":
+	case "/show", "/status", "/refresh", "/retry", "/delete", "/more", "/more1000", "/page_retry", "/collection_stop", "/batch_retry", "/save":
 		return id(arg)
 	case "/list":
 		if arg == "" {
