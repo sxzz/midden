@@ -50,6 +50,40 @@ func TestDeliveryResumesConfirmedParts(t *testing.T) {
 	}
 }
 
+// A capture still running or failed links to its record in the mini app,
+// except in groups, where Telegram does not open web apps from messages.
+func TestCaptureMessagesOpenTheirRecord(t *testing.T) {
+	for _, tc := range []struct {
+		chat, state, button string
+	}{
+		{"101", "queued", "在小程序查看进度"},
+		{"101", "failed", "在小程序查看详情"},
+		{"-100", "queued", ""},
+		{"-100", "failed", ""},
+	} {
+		core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(channelapi.Delivery{Chat: tc.chat, State: "pending", Input: "https://example.test/post", Job: domain.Job{ID: "job", CollectionID: "collection", State: tc.state}})
+		}))
+		var markup string
+		bot := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = r.ParseForm()
+			markup = r.FormValue("reply_markup")
+			fmt.Fprintf(w, `{"ok":true,"result":{"message_id":20,"chat":{"id":%s,"type":"private"}}}`, tc.chat)
+		}))
+		r := Runner{API: &Client{Base: core.URL, Channel: "channel"}, Bot: &telegram.Client{Base: bot.URL, Token: "42:fixture", HTTP: bot.Client()}, Config: channelapi.Config{WebURL: "https://collection.test/app/"}}
+		work := channelapi.Work{ID: "work", Lease: "lease", Kind: "delivery", Resource: "submission"}
+		if err := r.deliver(context.Background(), work, func(channelapi.Ack) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+		core.Close()
+		bot.Close()
+		linked := strings.Contains(markup, "https://collection.test/app/#/captures/submission")
+		if linked != (tc.button != "") || tc.button != "" && !strings.Contains(markup, tc.button) {
+			t.Fatalf("%s %s: %s", tc.chat, tc.state, markup)
+		}
+	}
+}
+
 func TestNormalizeGroupAndCredentials(t *testing.T) {
 	for _, tc := range []struct {
 		input    string
@@ -185,6 +219,17 @@ func TestCollectionControls(t *testing.T) {
 	}
 	if !contains(keys, "/collection_stop") {
 		t.Fatal("missing stop")
+	}
+	if progress := keys[len(keys)-2][0]; progress.Text != "在小程序查看进度" || progress.WebApp == nil || progress.WebApp.URL != "https://collection.test/app/#/captures/submission" {
+		t.Fatal("missing capture record in the mini app", progress)
+	}
+	_, keys = collectionProgressMessage("submission", d, "")
+	for _, row := range keys {
+		for _, b := range row {
+			if b.WebApp != nil {
+				t.Fatal("mini app button without a web app URL", keys)
+			}
+		}
 	}
 	d.ProgressDetails.Done = true
 	_, keys = collectionProgressMessage("submission", d, "https://collection.test/app/")

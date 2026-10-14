@@ -322,14 +322,16 @@ func (r *Runner) deliver(ctx context.Context, w channelapi.Work, save func(chann
 		if d.Input != "" {
 			text += "\n" + d.Input
 		}
-		id, e := sender.SendInteractive(ctx, d.Chat, text, mid, telegram.Keyboard{{{Text: "查看状态", Data: "/status " + d.Job.ID}}})
+		keys := appendRecordButton(telegram.Keyboard{{{Text: "查看状态", Data: "/status " + d.Job.ID}}}, "在小程序查看进度", w.Resource, r.Config.WebURL)
+		id, e := sender.SendInteractive(ctx, d.Chat, text, mid, buttonsForChat(d.Chat, keys))
 		if e != nil {
 			return e
 		}
 		return save(channelapi.Ack{MessageID: id, RetrySeconds: 5})
 	}
 	text := jobState(d.Job.State) + "\n输入：" + d.Input + "\n" + failureReason(d.Job.Error)
-	keys := telegram.Keyboard{{{Text: "重试", Data: "/retry " + d.Job.CollectionID}}}
+	// A failed capture's record explains what went wrong.
+	keys := appendRecordButton(telegram.Keyboard{{{Text: "重试", Data: "/retry " + d.Job.CollectionID}}}, "在小程序查看详情", w.Resource, r.Config.WebURL)
 	var entities []telegram.Entity
 	parts := deliveryParts(text, nil)
 	if d.Collection != nil {
@@ -549,5 +551,6 @@ func collectionProgressMessage(id string, d channelapi.Delivery, webURL string) 
 		keys = append(keys, []telegram.Button{{Text: "中止", Data: "/collection_stop " + id}})
 	}
 	keys = append(keys, []telegram.Button{{Text: "查看已保存资料", Data: "/show " + c.CollectionID}}, []telegram.Button{{Text: "收藏列表", Data: "/list"}})
+	keys = appendRecordButton(keys, "在小程序查看进度", id, webURL)
 	return text, appendMiniAppButton(keys, c.CollectionID, webURL)
 }

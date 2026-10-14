@@ -36,10 +36,20 @@ func collectionButtons(id, sourceURL, webURL string) telegram.Keyboard {
 }
 
 func appendMiniAppButton(keys telegram.Keyboard, id, webURL string) telegram.Keyboard {
+	return appendMiniAppRoute(keys, "在小程序中打开", "/collection/"+id, webURL)
+}
+
+// appendRecordButton opens the capture record of a submission, where its
+// progress, failures and details are shown.
+func appendRecordButton(keys telegram.Keyboard, text, submission, webURL string) telegram.Keyboard {
+	return appendMiniAppRoute(keys, text, "/captures/"+submission, webURL)
+}
+
+func appendMiniAppRoute(keys telegram.Keyboard, text, route, webURL string) telegram.Keyboard {
 	if webURL != "" {
 		if entry, err := url.Parse(webURL); err == nil && entry.Scheme == "https" && entry.Host != "" {
-			entry.Fragment = "/collection/" + id
-			keys = append(keys, []telegram.Button{{Text: "在小程序中打开", WebApp: &telegram.WebAppInfo{URL: entry.String()}}})
+			entry.Fragment = route
+			keys = append(keys, []telegram.Button{{Text: text, WebApp: &telegram.WebAppInfo{URL: entry.String()}}})
 		}
 	}
 	return keys
