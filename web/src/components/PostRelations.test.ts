@@ -86,6 +86,34 @@ it('shows a quoted post kept by reference with its saved summary, or as an X lin
   expect(unsaved.textContent).toContain('帖子 456')
   expect(unsaved.getAttribute('href')).toBe('https://x.com/i/web/status/456')
 })
+it('heads a quoted post kept by reference with its saved author', () => {
+  const el = mount({
+    root: 'post',
+    entities: [
+      root,
+      {
+        key: 'quote',
+        type: 'x.post',
+        external_id: '456',
+        saved_collection_id: 'saved-quote',
+        saved_text: '已保存的原帖',
+        saved_author: {
+          key: 'saved_author_0',
+          type: 'x.profile',
+          external_id: '789',
+          saved_collection_id: 'saved-author',
+          data: { username: 'quoted_account', name: '原帖作者' },
+        },
+        data: {},
+      },
+    ],
+    relations: [{ source: 'post', target: 'quote', type: 'quoted' }],
+  })
+  const author = el.querySelector<HTMLAnchorElement>('.relation-author')!
+  expect(author.getAttribute('href')).toBe('#/collection/saved-author')
+  expect(author.textContent).toContain('原帖作者')
+  expect(author.textContent).toContain('@quoted_account')
+})
 it('links an unsaved repost to its X status without using untrusted payload URLs', () => {
   const el = mount({
     root: 'post',

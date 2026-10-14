@@ -25,7 +25,9 @@ export function authoredBy(graph: Graph | undefined, key: string) {
   const target = graph?.relations.find(
     (relation) => relation.source === key && relation.type === 'authored_by',
   )?.target
-  if (!target) return
+  // A post kept by reference names its author only through its saved copy.
+  if (!target)
+    return graph?.entities.find((entity) => entity.key === key)?.saved_author
   return graph?.entities.find(
     (entity) => entity.key === target && isProfileEntity(entity),
   )

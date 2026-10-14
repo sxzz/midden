@@ -56,6 +56,10 @@ func TestReferencedPostReadsItsSavedSummary(t *testing.T) {
 		return job.CollectionID
 	}
 	quoted := "synthetic_quote_" + uuid.NewString()
+	fixture.graph = &pb.EntityGraph{Root: "root", Entities: []*pb.Entity{
+		{Key: "root", Type: "document.entry", DataJson: []byte(`{}`)},
+		{Key: "author", Type: "directory.person", ExternalId: "synthetic_author_" + quoted, DataJson: []byte(`{"name":"Quoted author"}`), ContextOnly: true},
+	}, Relations: []*pb.EntityRelation{{Source: "root", Target: "author", Type: "authored_by"}}}
 	capture(owner, quoted)
 	fixture.graph = &pb.EntityGraph{Root: "root", Entities: []*pb.Entity{
 		{Key: "root", Type: "document.entry", DataJson: []byte(`{}`)},
@@ -70,6 +74,10 @@ func TestReferencedPostReadsItsSavedSummary(t *testing.T) {
 			if e.Key == "quote" {
 				if e.SavedSummary != "" && e.SavedText != "full text of "+quoted {
 					t.Fatalf("missing full reference text: %q", e.SavedText)
+				}
+				// The snapshot drops the quoted post's author; its saved copy names it.
+				if (e.SavedSummary != "") != (e.SavedAuthor != nil) || e.SavedAuthor != nil && string(e.SavedAuthor.Data) != `{"name": "Quoted author"}` {
+					t.Fatalf("saved quote author: %+v", e.SavedAuthor)
 				}
 				return e.SavedSummary
 			}

@@ -24,6 +24,8 @@ export interface Entity {
   /** The saved collection's current summary, for a post kept by reference. */
   saved_summary?: string
   saved_text?: string
+  /** The saved copy's author, for a post the graph keeps by reference. */
+  saved_author?: Entity
   key: string
   type: string
   data: Record<string, unknown>

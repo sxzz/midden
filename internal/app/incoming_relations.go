@@ -101,8 +101,17 @@ func attachIncomingRelations(ctx context.Context, tx pgx.Tx, collection *domain.
 		return err
 	}
 	linked := make(map[string]domain.Entity, len(sources.Graph.Entities))
+	ids := []string{}
 	for _, entity := range sources.Graph.Entities {
 		linked[entity.Key] = entity
+		if entity.SavedCollectionID != "" {
+			ids = append(ids, entity.SavedCollectionID)
+		}
+	}
+	// A saved quoting post shows its attachments the way a quoted one does.
+	saved, err := savedPosts(ctx, tx, ids)
+	if err != nil {
+		return err
 	}
 	for i := range collection.IncomingRelations {
 		incoming := &collection.IncomingRelations[i]
@@ -110,6 +119,12 @@ func attachIncomingRelations(ctx context.Context, tx pgx.Tx, collection *domain.
 		if incoming.Author != nil {
 			author := linked[incoming.Author.Key]
 			incoming.Author = &author
+		}
+		if post, ok := saved[incoming.Entity.SavedCollectionID]; ok {
+			incoming.Entity.Assets = post.assets
+			if incoming.Author == nil {
+				incoming.Author = post.author
+			}
 		}
 	}
 	return nil

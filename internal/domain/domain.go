@@ -131,8 +131,10 @@ type Entity struct {
 	SavedCollectionID string `json:"saved_collection_id,omitempty"`
 	// SavedSummary is the saved collection's current summary, for a quoted or
 	// reposted post the snapshot keeps by reference only.
-	SavedText       string          `json:"saved_text,omitempty"`
-	SavedSummary    string          `json:"saved_summary,omitempty"`
+	SavedText    string `json:"saved_text,omitempty"`
+	SavedSummary string `json:"saved_summary,omitempty"`
+	// SavedAuthor is that saved post's author, which the snapshot no longer keeps.
+	SavedAuthor     *Entity         `json:"saved_author,omitempty"`
 	ContextOnly     bool            `json:"context_only,omitempty"`
 	ID              string          `json:"id,omitempty"`
 	VersionID       string          `json:"version_id,omitempty"`

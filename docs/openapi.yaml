@@ -1180,6 +1180,9 @@ components:
         saved_summary:
           type: string
           description: For a post the root quotes or reposts, the summary of its saved collection's current version; the snapshot keeps such a post by reference only.
+        saved_author:
+          allOf: [{ $ref: "#/components/schemas/Entity" }]
+          description: For a post the root quotes or reposts, the author of its saved collection's current version. Its assets also come from that version.
         key: { type: string }
         type: { type: string, description: Adapter-defined entity type }
         external_id: { type: string }
@@ -1199,7 +1202,7 @@ components:
         entity: { $ref: "#/components/schemas/Entity" }
         author:
           allOf: [{ $ref: "#/components/schemas/Entity" }]
-          description: Optional author connected by authored_by in the selected source snapshot. Saved profile links are restricted to the current tenant.
+          description: Optional author connected by authored_by in the selected source snapshot, or else the author of the source's saved collection. Saved profile links are restricted to the current tenant. When the source is saved, the entity carries that collection's assets.
     EntityGraph:
       type: object
       properties:

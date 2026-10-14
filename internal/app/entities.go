@@ -243,6 +243,7 @@ func linkSavedEntities(ctx context.Context, tx pgx.Tx, collections ...*domain.Co
 			e.SavedCollectionID = ""
 			e.SavedSummary = ""
 			e.SavedText = ""
+			e.SavedAuthor = nil
 			e.Current = nil
 			if e.ID != "" && !seen[e.ID] {
 				ids = append(ids, e.ID)
@@ -327,39 +328,10 @@ func attachSavedSummaries(ctx context.Context, tx pgx.Tx, collections ...*domain
 			}
 		}
 	}
-	if len(ids) == 0 {
-		return nil
-	}
-	rows, err := tx.Query(ctx, `SELECT c.id,coalesce(r.payload->>'summary',''),r.capture_id,coalesce(r.payload->>'text','') FROM unnest($1::uuid[]) c(id)
- CROSS JOIN LATERAL (SELECT visible_head(c.id) AS id OFFSET 0) head
- JOIN revisions r ON r.id=head.id`, ids)
+	saved, err := savedPosts(ctx, tx, ids)
 	if err != nil {
 		return err
 	}
-	summaries := map[string]string{}
-	texts := map[string]string{}
-	captures := map[string]string{}
-	captureIDs := []string{}
-	for rows.Next() {
-		var id, summary, capture, text string
-		if err = rows.Scan(&id, &summary, &capture, &text); err != nil {
-			rows.Close()
-			return err
-		}
-		summaries[id] = summary
-		texts[id] = text
-		captures[id] = capture
-		captureIDs = append(captureIDs, capture)
-	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return err
-	}
-	media, err := assetsByCapture(ctx, tx, captureIDs)
-	if err != nil {
-		return err
-	}
-
 	for _, a := range collections {
 		if a.Graph == nil {
 			continue
@@ -367,18 +339,99 @@ func attachSavedSummaries(ctx context.Context, tx pgx.Tx, collections ...*domain
 		referenced := referencedPosts(a.Graph)
 		for i := range a.Graph.Entities {
 			e := &a.Graph.Entities[i]
-			if referenced[e.Key] {
-				e.SavedSummary = summaries[e.SavedCollectionID]
-				e.SavedText = texts[e.SavedCollectionID]
-				for _, asset := range media[captures[e.SavedCollectionID]] {
-					if asset.Purpose == "" {
-						e.Assets = append(e.Assets, asset)
-					}
-				}
+			if post, ok := saved[e.SavedCollectionID]; ok && referenced[e.Key] {
+				e.SavedSummary = post.summary
+				e.SavedText = post.text
+				e.SavedAuthor = post.author
+				e.Assets = append(e.Assets, post.assets...)
 			}
 		}
 	}
 	return nil
+}
+
+type savedPost struct {
+	summary, text string
+	author        *domain.Entity
+	assets        []domain.Asset
+}
+
+// savedPosts reads saved collections' current heads: what a post shown only
+// by reference says, who wrote it and what it attaches.
+func savedPosts(ctx context.Context, tx pgx.Tx, ids []string) (map[string]savedPost, error) {
+	out := map[string]savedPost{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT c.id,coalesce(r.payload->>'summary',''),r.capture_id,coalesce(r.payload->>'text',''),coalesce(author.entity,'null'::jsonb) FROM unnest($1::uuid[]) c(id)
+ CROSS JOIN LATERAL (SELECT visible_head(c.id) AS id OFFSET 0) head
+ JOIN revisions r ON r.id=head.id
+ LEFT JOIN LATERAL (
+ SELECT jsonb_build_object('id',identity.id,'version_id',version.id,'key','saved_author','type',identity.kind,
+ 'external_id',identity.external_id,'data',version.data,'schema',version.schema) AS entity
+ FROM revision_entities root
+ JOIN entity_relations edge ON edge.revision_id=root.revision_id AND edge.source_key=root.entity_key AND edge.kind='authored_by'
+ JOIN revision_entities ref ON ref.revision_id=edge.revision_id AND ref.entity_key=edge.target_key
+ JOIN entity_versions version ON version.id=ref.entity_version_id
+ JOIN entities identity ON identity.id=version.entity_id
+ WHERE root.revision_id=r.id AND root.is_root
+ ORDER BY edge.target_key LIMIT 1
+ ) author ON true`, ids)
+	if err != nil {
+		return nil, err
+	}
+	captures := map[string]string{}
+	captureIDs := []string{}
+	// Authors are linked and refreshed like any graph entity, through one of their own.
+	var authors domain.Collection
+	authors.Graph = &domain.EntityGraph{}
+	for rows.Next() {
+		var id, capture, authorJSON string
+		var post savedPost
+		if err = rows.Scan(&id, &post.summary, &capture, &post.text, &authorJSON); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err = json.Unmarshal([]byte(authorJSON), &post.author); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if post.author != nil {
+			post.author.Key = fmt.Sprintf("saved_author_%d", len(authors.Graph.Entities))
+			authors.Graph.Entities = append(authors.Graph.Entities, *post.author)
+		}
+		out[id] = post
+		captures[id] = capture
+		captureIDs = append(captureIDs, capture)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	media, err := assetsByCapture(ctx, tx, captureIDs)
+	if err != nil {
+		return nil, err
+	}
+	if err = linkSavedEntities(ctx, tx, &authors); err != nil {
+		return nil, err
+	}
+	linked := make(map[string]domain.Entity, len(authors.Graph.Entities))
+	for _, e := range authors.Graph.Entities {
+		linked[e.Key] = e
+	}
+	for id, post := range out {
+		for _, asset := range media[captures[id]] {
+			if asset.Purpose == "" {
+				post.assets = append(post.assets, asset)
+			}
+		}
+		if post.author != nil {
+			author := linked[post.author.Key]
+			post.author = &author
+		}
+		out[id] = post
+	}
+	return out, nil
 }
 
 // referencedPosts lists what the graph's root quotes or reposts.
