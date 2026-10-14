@@ -27,6 +27,8 @@ const (
 	maintenanceBudget = 30 * time.Second
 	// A capture this old with no job left to finish it was interrupted.
 	staleCaptureAge = time.Hour
+	// Raw responses a later capture supersedes stay this long.
+	supersededRawAge = 7 * 24 * time.Hour
 )
 
 // Maintain runs every housekeeping step. The steps are independent: one that
@@ -44,6 +46,7 @@ func (s *Service) Maintain(ctx context.Context) error {
 		{"terminal jobs", s.reconcileJobs},
 		{"stale captures", s.failStaleCaptures},
 		{"unreferenced collections", s.collectCollections},
+		{"superseded raw responses", s.pruneSourceResponses},
 		{"garbage objects", func(ctx context.Context) error {
 			var graceHours int64
 			if e := s.DB.Pool.QueryRow(ctx, `SELECT value::bigint FROM config WHERE key='object_gc_grace_hours'`).Scan(&graceHours); e != nil {
@@ -145,6 +148,21 @@ func (s *Service) collectCollections(ctx context.Context) error {
 			return e
 		}
 		if removed < maintenanceBatch || time.Now().After(deadline) {
+			return nil
+		}
+	}
+}
+
+// pruneSourceResponses keeps raw responses for each version and for the newest
+// capture of a collection; any other capture's go after supersededRawAge.
+func (s *Service) pruneSourceResponses(ctx context.Context) error {
+	deadline := time.Now().Add(maintenanceBudget)
+	for {
+		var cleared int
+		if e := s.DB.Pool.QueryRow(ctx, `SELECT prune_source_responses($1::interval,$2)`, fmt.Sprintf("%f seconds", supersededRawAge.Seconds()), maintenanceBatch).Scan(&cleared); e != nil {
+			return e
+		}
+		if cleared < maintenanceBatch || time.Now().After(deadline) {
 			return nil
 		}
 	}

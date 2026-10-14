@@ -61,7 +61,7 @@ node scripts/install-cloudflare-tunnel.mjs <hostname> <tunnel-uuid> <credentials
 - `monitor_provider_requests_total` / `monitor_provider_duration_seconds`：按 Provider 记录 RPC 状态及耗时，不记录账号或租户标签。
 - `monitor_queue_jobs`：按队列和状态的数量，每分钟更新。
 
-每分钟的维护任务由相互独立的步骤组成：清理过期会话、结算终态任务、结束中断的采集、回收无引用收藏、删除垃圾对象、补缩略图、更新队列指标。某一步失败时日志 `maintenance failed` 的 `error` 字段给出步骤名和原因，其余步骤照常执行。回收按每批 100 条循环，单轮最多持续 30 秒。删除失败的对象记录在 `objects.gc_attempts`，并按指数退避（最长一天）推迟到 `objects.gc_after` 之后再试，不影响其他对象的回收。
+每分钟的维护任务由相互独立的步骤组成：清理过期会话、结算终态任务、结束中断的采集、回收无引用收藏、删除被取代的原始响应、删除垃圾对象、补缩略图、更新队列指标。某一步失败时日志 `maintenance failed` 的 `error` 字段给出步骤名和原因，其余步骤照常执行。回收按每批 100 条循环，单轮最多持续 30 秒。删除失败的对象记录在 `objects.gc_attempts`，并按指数退避（最长一天）推迟到 `objects.gc_after` 之后再试，不影响其他对象的回收。
 
 - `monitor_queue_oldest_seconds`：最老等待任务年龄。
 
