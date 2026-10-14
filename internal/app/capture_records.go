@@ -38,6 +38,9 @@ type (
 		// captures of its members across every page fetched for this record.
 		Members *domain.MemberProgress `json:"members,omitempty"`
 		Stopped bool                   `json:"stopped,omitempty"`
+		// Retryable counts the failed members a finished collection record can
+		// fetch again, leaving out those whose source reported them gone.
+		Retryable int `json:"retryable,omitempty"`
 		// Done once the capture and every member capture have finished.
 		Done bool `json:"done"`
 
@@ -71,14 +74,16 @@ type (
 		Reasons []CaptureReason `json:"reasons"`
 	}
 	CaptureMember struct {
-		JobID        string    `json:"job_id"`
-		CollectionID string    `json:"collection_id"`
-		Saved        bool      `json:"saved"`
-		URL          string    `json:"url"`
-		State        string    `json:"state"`
-		Error        string    `json:"error,omitempty"`
-		Reasons      []string  `json:"reasons"`
-		CreatedAt    time.Time `json:"created_at"`
+		JobID        string   `json:"job_id"`
+		CollectionID string   `json:"collection_id"`
+		Saved        bool     `json:"saved"`
+		URL          string   `json:"url"`
+		State        string   `json:"state"`
+		Error        string   `json:"error,omitempty"`
+		Reasons      []string `json:"reasons"`
+		// Gone when the source reported the content deleted or suspended.
+		Gone      bool      `json:"gone,omitempty"`
+		CreatedAt time.Time `json:"created_at"`
 	}
 	CaptureMemberPage struct {
 		Items []CaptureMember `json:"items"`
@@ -100,7 +105,7 @@ const captureRecordSQL = `SELECT s.id,s.input,s.update_mode,s.created_at,c.is_co
  CROSS JOIN LATERAL (SELECT count(*) AS total,count(*) FILTER (WHERE x.state='ready') AS ready,count(*) FILTER (WHERE x.state='failed') AS failed FROM assets x WHERE x.capture_id=c.id) m
  WHERE s.tenant_id=current_tenant() AND ` + recordRootSQL
 
-const recordRootSQL = `s.parent_submission IS NULL AND s.input<>'' AND s.idem_key NOT LIKE 'related:%' AND s.idem_key NOT LIKE 'related-expand:%' AND s.idem_key NOT LIKE 'batch:%'`
+const recordRootSQL = `s.parent_submission IS NULL AND s.input<>'' AND s.idem_key NOT LIKE 'related:%' AND s.idem_key NOT LIKE 'related-expand:%' AND s.idem_key NOT LIKE 'batch:%' AND s.idem_key NOT LIKE 'retried:%'`
 
 func scanCaptureRecords(rows pgx.Rows) ([]CaptureRecord, error) {
 	defer rows.Close()
@@ -128,6 +133,14 @@ func (s *Service) memberProgress(ctx context.Context, tenant string, r *CaptureR
 	r.Members = &domain.MemberProgress{Total: c.Total, Complete: c.Complete, Partial: c.Partial, Failed: c.Failed, Pending: c.Pending, Done: c.Done || c.Stopped}
 	r.Stopped = c.Stopped
 	r.Done = r.Members.Done
+	if r.Done {
+		e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, collectionChainSQL+` SELECT count(DISTINCT member.capture_id)`+retryableMembersSQL, r.ID).Scan(&r.Retryable)
+		})
+		if e != nil {
+			return nil, e
+		}
+	}
 	reasons := make([]CaptureReason, 0, len(c.Reasons))
 	for _, reason := range c.Reasons {
 		reasons = append(reasons, CaptureReason{Reason: reason.Reason, Count: reason.Count})
@@ -255,7 +268,7 @@ func (s *Service) CaptureMembers(ctx context.Context, tenant, id, state, cursor 
 			return domain.ErrNotFound
 		}
 		rows, err := tx.Query(ctx, collectionChainSQL+`,members AS (SELECT DISTINCT child.capture_id FROM pages CROSS JOIN LATERAL (SELECT member.capture_id FROM submissions member WHERE member.parent_submission=pages.id AND member.idem_key LIKE 'related:%' OFFSET 0) child)
- SELECT c.id,c.collection_id,a.url,c.state,c.error,c.created_at,EXISTS(SELECT FROM tenant_collections t WHERE t.collection_id=a.id),
+ SELECT c.id,c.collection_id,a.url,c.state,c.error,c.created_at,EXISTS(SELECT FROM tenant_collections t WHERE t.collection_id=a.id),a.source_state IS NOT NULL,
  ARRAY(SELECT x.error FROM assets x WHERE x.capture_id=c.id AND x.state='failed' AND x.error<>''
   UNION SELECT w FROM revisions r CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(r.payload->'warnings')='array' THEN r.payload->'warnings' ELSE '[]'::jsonb END) w WHERE r.id=c.revision_id AND c.state='partial' ORDER BY 1)
  FROM members m JOIN captures c ON c.id=m.capture_id JOIN collections a ON a.id=c.collection_id
@@ -265,7 +278,7 @@ func (s *Service) CaptureMembers(ctx context.Context, tenant, id, state, cursor 
 			return err
 		}
 		p.Items, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (m CaptureMember, e error) {
-			e = row.Scan(&m.JobID, &m.CollectionID, &m.URL, &m.State, &m.Error, &m.CreatedAt, &m.Saved, &m.Reasons)
+			e = row.Scan(&m.JobID, &m.CollectionID, &m.URL, &m.State, &m.Error, &m.CreatedAt, &m.Saved, &m.Gone, &m.Reasons)
 			return
 		})
 		return err
@@ -336,4 +349,30 @@ func (s *Service) RetryCaptureRecord(ctx context.Context, tenant, id, key string
 	}
 	in.Key = key
 	return s.Submit(ctx, tenant, in)
+}
+
+// RetryCaptureMembers fetches again the failed members of a collection record,
+// or only the one whose capture is member, within the same record. It returns
+// how many were retried; members whose source reported them gone are left.
+func (s *Service) RetryCaptureMembers(ctx context.Context, tenant, id, member string) (n int64, err error) {
+	var only *string
+	if member != "" {
+		only = &member
+	}
+	err = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
+		if e := lockTenant(ctx, tx, tenant); e != nil {
+			return e
+		}
+		var root bool
+		if e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM (`+captureRecordSQL+` AND s.id=$1) r)`, id).Scan(&root); e != nil {
+			return e
+		}
+		if !root {
+			return domain.ErrNotFound
+		}
+		var e error
+		n, e = s.retryFailedMembers(ctx, tx, tenant, collectionChainSQL, ` AND ($2::uuid IS NULL OR member.capture_id=$2::uuid)`, id, only)
+		return e
+	})
+	return
 }

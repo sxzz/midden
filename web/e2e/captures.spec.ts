@@ -200,8 +200,17 @@ test('shows collection progress, member failures, stop and retry', async ({
         state: 'complete',
         error: undefined,
       }
+      // The source reported this one deleted, so it cannot be retried.
+      const gone = {
+        ...failed,
+        job_id: 'member-gone',
+        url: 'https://x.com/fixture/status/4',
+        gone: true,
+      }
       return r.fulfill({
-        json: { items: state ? [failed] : [failed, complete] },
+        json: {
+          items: state ? [failed, gone] : [failed, complete, gone],
+        },
       })
     }
     if (path === `/v1/captures/${profile}/stop`) {
@@ -211,16 +220,20 @@ test('shows collection progress, member failures, stop and retry', async ({
         stopped: true,
         done: true,
         members: { ...members, pending: 0, done: true },
+        retryable: 1,
       }
       return r.fulfill({ status: 204 })
+    }
+    if (path === `/v1/captures/${profile}/retry-failed`) {
+      const body = request.postDataJSON()
+      posted.push(`retry-failed:${body.job_id ?? 'all'}`)
+      const count = current.retryable ?? 0
+      current = { ...current, retryable: 0 }
+      return r.fulfill({ status: 202, json: { count } })
     }
     if (path === `/v1/captures/${profile}/retry`) {
       posted.push('retry')
       return r.fulfill({ status: 202, json: { id: `job-${retried}` } })
-    }
-    if (path === '/v1/captures' && request.method() === 'POST') {
-      posted.push(request.postDataJSON().url)
-      return r.fulfill({ status: 202, json: { id: 'member-again' } })
     }
     if (path === '/v1/captures')
       return r.fulfill({
@@ -255,20 +268,38 @@ test('shows collection progress, member failures, stop and retry', async ({
   expect(memberQueries.at(-1)).toBe('')
   expect(memberQueries[0]).toBe('problem')
 
-  await page
-    .getByRole('button', { name: '重试 x.com/fixture/status/2' })
-    .click()
-  await expect.poll(() => posted).toEqual(['https://x.com/fixture/status/2'])
-
   // A running collection can be stopped, and only a finished one retried.
+  const retryMember = page.getByRole('button', {
+    name: '重试 x.com/fixture/status/2',
+  })
+  await expect(retryMember).toHaveCount(0)
   await expect(
     page.getByRole('button', { name: '重新采集', exact: true }),
   ).toHaveCount(0)
   await page.getByRole('button', { name: '中止', exact: true }).click()
   await expect(status).toContainText('已中止')
   await expect(page.getByRole('progressbar')).toHaveCount(0)
+
+  // Failed posts are fetched again inside this record, all or one at a time;
+  // one the source reported gone is not offered.
+  await expect(
+    page.getByRole('button', { name: '重试 x.com/fixture/status/4' }),
+  ).toHaveCount(0)
+  await page.getByRole('button', { name: '重试失败的帖子（1）' }).click()
+  await expect(page.getByText('正在重试 1 条失败的帖子。')).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: /重试失败的帖子/ }),
+  ).toHaveCount(0)
+  await retryMember.click()
+  await expect(page.getByText('没有可重试的帖子。')).toBeVisible()
+
   await page.getByRole('button', { name: '重新采集', exact: true }).click()
-  // Retrying opens the record it created.
+  // Retrying the whole record opens the record it created.
   await expect(page).toHaveURL(new RegExp(`#/captures/${retried}$`))
-  expect(posted).toEqual(['https://x.com/fixture/status/2', 'stop', 'retry'])
+  expect(posted).toEqual([
+    'stop',
+    'retry-failed:all',
+    'retry-failed:member-failed',
+    'retry',
+  ])
 })

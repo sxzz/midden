@@ -99,6 +99,34 @@ func TestCaptureRecords(t *testing.T) {
 		t.Fatal("accepted an unknown member state", e)
 	}
 
+	// A failed member is fetched again inside the same record, not as a new one.
+	if detail.Retryable != 1 {
+		t.Fatal("retryable members", detail.Retryable)
+	}
+	if n, e := s.RetryCaptureMembers(ctx, other, record, ""); !errors.Is(e, domain.ErrNotFound) || n != 0 {
+		t.Fatal("foreign member retry permitted", n, e)
+	}
+	n, e := s.RetryCaptureMembers(ctx, tenant, record, members[1])
+	must(t, e)
+	if n != 1 {
+		t.Fatal("retried members", n)
+	}
+	if r, e := s.CaptureRecord(ctx, tenant, record); e != nil || r.Done || r.Retryable != 0 {
+		t.Fatalf("record after member retry %+v %v", r.CaptureRecord, e)
+	}
+	must(t, s.related(ctx, store.Task{Tenant: tenant, ID: record, Type: "related"}))
+	var retried string
+	must(t, admin.Pool.QueryRow(ctx, `SELECT capture_id FROM submissions WHERE parent_submission=$1 AND idem_key LIKE 'related:%' AND capture_id<>ALL($2::uuid[])`, record, members).Scan(&retried))
+	complete(retried)
+	detail, e = s.CaptureRecord(ctx, tenant, record)
+	must(t, e)
+	if m := detail.Members; !detail.Done || m.Complete != 2 || m.Failed != 0 || m.Total != 2 {
+		t.Fatalf("record after the retried member finished %+v", m)
+	}
+	if list = records(); len(list) != 2 {
+		t.Fatalf("member retry added a record: %+v", list)
+	}
+
 	// Another tenant sees none of it and cannot act on it.
 	if p, e := s.CaptureRecords(ctx, other, ""); e != nil || len(p.Items) != 0 {
 		t.Fatalf("foreign records %+v %v", p.Items, e)

@@ -193,16 +193,20 @@ async function retry() {
     busy.value = false
   }
 }
-async function retryMember(member: CaptureMember) {
+/** Fetch failed posts again inside this record, all of them or just one. */
+async function retryFailed(member?: CaptureMember) {
   if (busy.value) return
   busy.value = true
   try {
-    await api('/captures', {
-      method: 'POST',
-      body: JSON.stringify({ url: member.url }),
-      headers: { 'Idempotency-Key': crypto.randomUUID() },
-    })
-    toast('已重新提交。')
+    const { count } = await api<{ count: number }>(
+      `/captures/${props.id}/retry-failed`,
+      {
+        method: 'POST',
+        body: JSON.stringify(member ? { job_id: member.job_id } : {}),
+      },
+    )
+    toast(count ? `正在重试 ${count} 条失败的帖子。` : '没有可重试的帖子。')
+    await Promise.all([load(), loadMembers()])
   } catch (e) {
     toast(errorText(e))
   } finally {
@@ -288,6 +292,12 @@ function openCollection(id: string) {
         @select="stop"
       />
       <ListButton
+        v-if="record.retryable"
+        :label="`重试失败的帖子（${record.retryable}）`"
+        :disabled="busy"
+        @select="retryFailed()"
+      />
+      <ListButton
         v-if="record.done"
         :label="record.state === 'failed' ? '重试' : '重新采集'"
         :disabled="busy"
@@ -361,12 +371,12 @@ function openCollection(id: string) {
             }}</span>
           </button>
           <button
-            v-if="m.state === 'failed'"
+            v-if="m.state === 'failed' && !m.gone && record.done"
             type="button"
             class="member-retry"
             :aria-label="`重试 ${linkTitle(m.url)}`"
             :disabled="busy"
-            @click="retryMember(m)"
+            @click="retryFailed(m)"
           >
             重试
           </button>

@@ -277,6 +277,35 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "429":
           description: Tenant capture rate exceeded; Retry-After is returned
+  /v1/captures/{id}/retry-failed:
+    post:
+      summary: Fetch a collection record's failed members again within it
+      description: >-
+        Like retrying a refresh batch: each failed member gives up its
+        submission and the page submits that target again, so progress stays
+        on this record. Members whose source reported the content gone are
+        left. job_id retries only that member capture.
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                job_id: { type: string, format: uuid }
+      responses:
+        "202":
+          description: How many members are fetched again
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/captures/{id}/stop:
     post:
       summary: Stop a collection record from fetching pages and starting members
@@ -920,6 +949,11 @@ components:
             pending: { type: integer }
             done: { type: boolean }
         stopped: { type: boolean }
+        retryable:
+          {
+            type: integer,
+            description: Failed members a finished collection record can fetch again with its retry-failed action.,
+          }
         done:
           {
             type: boolean,
@@ -970,6 +1004,11 @@ components:
             type: array,
             items: { type: string },
             description: Media failures and warnings of this member.,
+          }
+        gone:
+          {
+            type: boolean,
+            description: The source reported the content deleted or suspended; it is not retried.,
           }
         created_at: { type: string, format: date-time }
     Job:

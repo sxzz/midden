@@ -109,6 +109,7 @@ const reasons: Record<string, string> = {
   'Instagram content not found or inaccessible':
     'Instagram 内容不存在或当前账号无权访问',
   'Instagram temporarily unavailable': 'Instagram 暂时不可用，请稍后重试',
+  'provider temporarily unavailable': '来源平台暂时不可用，请稍后重试',
   'account request signing unavailable': '采集账号请求签名不可用',
   'context deadline exceeded': '请求超时',
   'job exhausted retries or was interrupted': '任务重试次数已用尽或执行被中断',

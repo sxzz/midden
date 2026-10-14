@@ -284,30 +284,9 @@ func (s *Service) RetryRefreshBatch(ctx context.Context, tenant, id string) (n i
 		if !b.Done {
 			return errBatchRunning
 		}
-		rows, e := tx.Query(ctx, batchPagesSQL+`, failed AS (SELECT member.id,pages.id AS page`+retryableMembersSQL+`),
-renamed AS (UPDATE submissions s SET idem_key='retried:'||s.id::text FROM failed WHERE s.id=failed.id RETURNING failed.page),
-reopened AS (UPDATE submissions s SET related_state='pending' WHERE s.id IN (SELECT page FROM renamed) RETURNING s.id)
-SELECT id::text,(SELECT count(*) FROM renamed) FROM reopened`, id)
-		if e != nil {
+		var e error
+		if n, e = s.retryFailedMembers(ctx, tx, tenant, batchPagesSQL, "", id); e != nil {
 			return e
-		}
-		var pages []string
-		for rows.Next() {
-			var page string
-			if e = rows.Scan(&page, &n); e != nil {
-				rows.Close()
-				return e
-			}
-			pages = append(pages, page)
-		}
-		rows.Close()
-		if e = rows.Err(); e != nil {
-			return e
-		}
-		for _, page := range pages {
-			if e = s.Enqueue(ctx, tx, tenant, page, "related"); e != nil {
-				return e
-			}
 		}
 		if n == 0 {
 			return nil
@@ -317,4 +296,38 @@ SELECT id::text,(SELECT count(*) FROM renamed) FROM reopened`, id)
 		return e
 	})
 	return
+}
+
+// retryFailedMembers fetches again the retryable failed members of pages, the
+// CTE pagesSQL defines from args, and returns how many. Each failed submission
+// gives up its idempotency key, so the page's related task submits that target
+// anew and leaves every other member as it is. filter narrows the members
+// further, as SQL over member and c.
+func (s *Service) retryFailedMembers(ctx context.Context, tx pgx.Tx, tenant, pagesSQL, filter string, args ...any) (n int64, err error) {
+	rows, err := tx.Query(ctx, pagesSQL+`, failed AS (SELECT member.id,pages.id AS page`+retryableMembersSQL+filter+`),
+renamed AS (UPDATE submissions s SET idem_key='retried:'||s.id::text FROM failed WHERE s.id=failed.id RETURNING failed.page),
+reopened AS (UPDATE submissions s SET related_state='pending' WHERE s.id IN (SELECT page FROM renamed) RETURNING s.id)
+SELECT id::text,(SELECT count(*) FROM renamed) FROM reopened`, args...)
+	if err != nil {
+		return 0, err
+	}
+	var pages []string
+	for rows.Next() {
+		var page string
+		if err = rows.Scan(&page, &n); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		pages = append(pages, page)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, page := range pages {
+		if err = s.Enqueue(ctx, tx, tenant, page, "related"); err != nil {
+			return 0, err
+		}
+	}
+	return n, nil
 }

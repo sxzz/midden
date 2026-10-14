@@ -110,6 +110,23 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		j, e := s.RetryCaptureRecord(r.Context(), tenant(r), r.PathValue("id"), r.Header.Get("Idempotency-Key"))
 		respond(w, 202, j, e)
 	})
+	mux.HandleFunc("POST /v1/captures/{id}/retry-failed", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
+			return
+		}
+		// An empty body retries every failed member; job_id retries one.
+		var in struct {
+			JobID string `json:"job_id"`
+		}
+		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10))
+		d.DisallowUnknownFields()
+		if e := d.Decode(&in); e != nil && e != io.EOF || in.JobID != "" && !valid(in.JobID) {
+			write(w, 400, map[string]string{"error": "invalid request"})
+			return
+		}
+		n, e := s.RetryCaptureMembers(r.Context(), tenant(r), r.PathValue("id"), in.JobID)
+		respond(w, 202, map[string]int64{"count": n}, e)
+	})
 	mux.HandleFunc("POST /v1/captures/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
 		if !checkID(w, r) {
 			return

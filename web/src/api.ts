@@ -118,6 +118,8 @@ export interface CaptureRecord {
   /** Set for a collection such as a profile, covering its members' captures. */
   members?: MemberProgress
   stopped?: boolean
+  /** Failed members a finished collection record can fetch again. */
+  retryable?: number
   /** The capture and every member capture have finished. */
   done: boolean
 }
@@ -142,6 +144,8 @@ export interface CaptureMember {
   state: CaptureRecord['state']
   error?: string
   reasons: string[]
+  /** The source reported the content deleted or suspended. */
+  gone?: boolean
   created_at: string
 }
 export interface Usage {
