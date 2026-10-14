@@ -119,17 +119,20 @@ type Asset struct {
 }
 
 type Entity struct {
-	SavedCollectionID string          `json:"saved_collection_id,omitempty"`
-	ContextOnly       bool            `json:"context_only,omitempty"`
-	ID                string          `json:"id,omitempty"`
-	VersionID         string          `json:"version_id,omitempty"`
-	Key               string          `json:"key"`
-	Type              string          `json:"type"`
-	ExternalID        string          `json:"external_id"`
-	Data              json.RawMessage `json:"data"`
-	Schema            json.RawMessage `json:"schema"`
-	ResourceIndices   []uint32        `json:"resource_indices,omitempty"`
-	Assets            []Asset         `json:"assets,omitempty"`
+	SavedCollectionID string `json:"saved_collection_id,omitempty"`
+	// SavedSummary is the saved collection's current summary, for a quoted or
+	// reposted post the snapshot keeps by reference only.
+	SavedSummary    string          `json:"saved_summary,omitempty"`
+	ContextOnly     bool            `json:"context_only,omitempty"`
+	ID              string          `json:"id,omitempty"`
+	VersionID       string          `json:"version_id,omitempty"`
+	Key             string          `json:"key"`
+	Type            string          `json:"type"`
+	ExternalID      string          `json:"external_id"`
+	Data            json.RawMessage `json:"data"`
+	Schema          json.RawMessage `json:"schema"`
+	ResourceIndices []uint32        `json:"resource_indices,omitempty"`
+	Assets          []Asset         `json:"assets,omitempty"`
 	// Current is the newest complete version of a referenced profile this
 	// tenant can read, set only when it differs from the snapshot.
 	Current *EntityVersion `json:"current,omitempty"`

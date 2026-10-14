@@ -51,10 +51,14 @@ function caption(collection: Collection) {
       if (!target) return []
       return [
         {
+          // A quoted post is kept by reference; its saved collection says
+          // what it is.
           text:
-            typeof target.data.text === 'string'
+            (typeof target.data.text === 'string' && target.data.text.trim()
               ? excerpt(target.data.text, 100)
-              : '查看引用的帖子',
+              : target.saved_summary
+                ? excerpt(target.saved_summary, 100)
+                : '') || '查看引用的帖子',
           // A tile is a button, so attribution stays plain text here.
           author: authorLabel(authorIdentity(authoredBy(graph, target.key))),
         },

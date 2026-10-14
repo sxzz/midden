@@ -406,7 +406,7 @@ for (const type of ["photo", "video"] as const) {
   });
 }
 
-test("session quote capture retains quoted author, relation and target through GraphQL normalization", async () => {
+test("session quote capture keeps the quoted post by reference through GraphQL normalization", async () => {
   const tweet = (id: string, author: string, text: string): any => ({
     __typename: "Tweet",
     rest_id: id,
@@ -463,8 +463,10 @@ test("session quote capture retains quoted author, relation and target through G
       (t) => t.url === "https://x.com/i/web/status/900124",
     ),
   );
-  assert.ok(
+  // The quoted post's author belongs to the quoted post's own capture.
+  assert.equal(
     result.relatedTargets.some((t) => t.url === "https://x.com/i/user/43"),
+    false,
   );
   raw.quoted_status_result.result.core.user_results.result.legacy.protected = true;
   assert.equal(
@@ -477,7 +479,7 @@ test("session quote capture retains quoted author, relation and target through G
   );
 });
 
-test("public provider rejects a protected embedded quote or repost", async () => {
+test("public provider keeps a protected quote or repost by reference only", async () => {
   for (const field of ["quote", "repost"]) {
     const server = httpServer((_req, res) => {
       res.setHeader("content-type", "application/json");
@@ -494,7 +496,7 @@ test("public provider rejects a protected embedded quote or repost", async () =>
               type: "status",
               id: "21",
               text: "private",
-              author: { protected: true },
+              author: { id: "456", screen_name: "hidden", protected: true },
             },
           },
         }),
@@ -505,18 +507,66 @@ test("public provider rejects a protected embedded quote or repost", async () =>
     );
     try {
       const address = server.address() as any;
-      await assert.rejects(
-        () =>
-          fetchPublic(
-            "20",
-            AbortSignal.timeout(2000),
-            `http://127.0.0.1:${address.port}`,
-          ),
-        /cannot save private posts/,
+      const result = await fetchPublic(
+        "20",
+        AbortSignal.timeout(2000),
+        `http://127.0.0.1:${address.port}`,
+      );
+      const reference = result.graph!.entities.find(
+        (e) => e.externalId === "21",
+      )!;
+      assert.deepEqual(JSON.parse(Buffer.from(reference.dataJson).toString()), {
+        text: "",
+      });
+      assert.equal(
+        result.graph!.entities.some((e) => e.externalId === "456"),
+        false,
       );
     } finally {
       server.close();
     }
+  }
+});
+
+test("a repost's link is saved as the reposted post", async () => {
+  const server = httpServer((_req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({
+        code: 200,
+        status: {
+          type: "status",
+          id: "21",
+          text: "original",
+          media: { all: [] },
+          author: { id: "456", screen_name: "author", protected: false },
+          reposted_by: { id: "123", screen_name: "reposter" },
+        },
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address() as any;
+    const result = await fetchPublic(
+      "20",
+      AbortSignal.timeout(2000),
+      `http://127.0.0.1:${address.port}`,
+    );
+    assert.equal(result.externalId, "20");
+    assert.equal(result.canonicalTarget?.externalId, "21");
+    assert.equal(result.canonicalTarget?.url, "https://x.com/i/web/status/21");
+    const graph = result.graph!;
+    assert.equal(
+      graph.entities.find((e) => e.key === graph.root)?.externalId,
+      "21",
+    );
+    assert.equal(
+      graph.relations.some((r) => r.type === "reposted"),
+      false,
+    );
+  } finally {
+    server.close();
   }
 });
 

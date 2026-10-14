@@ -230,6 +230,7 @@ func linkSavedEntities(ctx context.Context, tx pgx.Tx, collections ...*domain.Co
 		for i := range a.Graph.Entities {
 			e := &a.Graph.Entities[i]
 			e.SavedCollectionID = ""
+			e.SavedSummary = ""
 			e.Current = nil
 			if e.ID != "" && !seen[e.ID] {
 				ids = append(ids, e.ID)
@@ -291,7 +292,75 @@ func linkSavedEntities(ctx context.Context, tx pgx.Tx, collections ...*domain.Co
 	if err = attachSavedAvatars(ctx, tx, collections...); err != nil {
 		return err
 	}
+	if err = attachSavedSummaries(ctx, tx, collections...); err != nil {
+		return err
+	}
 	return attachCurrentProfiles(ctx, tx, collections...)
+}
+
+// A quoted or reposted post is kept by reference only; where it is saved and
+// readable, show what its own collection says now.
+func attachSavedSummaries(ctx context.Context, tx pgx.Tx, collections ...*domain.Collection) error {
+	ids := []string{}
+	seen := map[string]bool{}
+	for _, a := range collections {
+		if a.Graph == nil {
+			continue
+		}
+		referenced := referencedPosts(a.Graph)
+		for _, e := range a.Graph.Entities {
+			if referenced[e.Key] && e.SavedCollectionID != "" && !seen[e.SavedCollectionID] {
+				seen[e.SavedCollectionID] = true
+				ids = append(ids, e.SavedCollectionID)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT c.id,coalesce(r.payload->>'summary','') FROM unnest($1::uuid[]) c(id)
+ CROSS JOIN LATERAL (SELECT visible_head(c.id) AS id OFFSET 0) head
+ JOIN revisions r ON r.id=head.id`, ids)
+	if err != nil {
+		return err
+	}
+	summaries := map[string]string{}
+	for rows.Next() {
+		var id, summary string
+		if err = rows.Scan(&id, &summary); err != nil {
+			rows.Close()
+			return err
+		}
+		summaries[id] = summary
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for _, a := range collections {
+		if a.Graph == nil {
+			continue
+		}
+		referenced := referencedPosts(a.Graph)
+		for i := range a.Graph.Entities {
+			e := &a.Graph.Entities[i]
+			if referenced[e.Key] {
+				e.SavedSummary = summaries[e.SavedCollectionID]
+			}
+		}
+	}
+	return nil
+}
+
+// referencedPosts lists what the graph's root quotes or reposts.
+func referencedPosts(g *domain.EntityGraph) map[string]bool {
+	out := map[string]bool{}
+	for _, r := range g.Relations {
+		if r.Source == g.Root && (r.Type == "quoted" || r.Type == "reposted") {
+			out[r.Target] = true
+		}
+	}
+	return out
 }
 
 // An entry keeps its author as captured, but reads with the author's newest

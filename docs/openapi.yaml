@@ -1074,6 +1074,9 @@ components:
           type: string
           format: uuid
           description: Current tenant's saved collection for this entity, resolved at read time.
+        saved_summary:
+          type: string
+          description: For a post the root quotes or reposts, the summary of its saved collection's current version; the snapshot keeps such a post by reference only.
         key: { type: string }
         type: { type: string, description: Adapter-defined entity type }
         external_id: { type: string }

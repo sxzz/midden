@@ -193,9 +193,9 @@ export function attachEntities(
   attachPostReferences(result, "post", post);
 }
 
-// Embedded posts are context, not complete captures: their media and full
-// history (including further quote/repost links) are fetched independently
-// through relatedTargets. Only direct references belong to this capture.
+// A quoted or reposted post is kept by reference only: its content, author
+// and mentions belong to that post, which is captured on its own through
+// relatedTargets and may be readable to fewer people than this one.
 function attachPostReferences(
   result: FetchResponse,
   source: string,
@@ -205,27 +205,19 @@ function attachPostReferences(
     ["quote", "quoted"],
     ["repost", "reposted"],
   ]) {
-    const referenced = post?.[field];
-    const id = referenced?.id;
+    const id = post?.[field]?.id;
     if (typeof id !== "string" || !/^\d+$/.test(id) || id === result.externalId)
       continue;
     let entity = result.graph!.entities.find(
       (item) => item.type === "x.post" && item.externalId === id,
     );
     if (!entity) {
-      const data: Record<string, unknown> = {
-        text: typeof referenced.text === "string" ? referenced.text.trim() : "",
-      };
-      const published =
-        timestamp(referenced.created_at) ||
-        timestamp(referenced.created_timestamp);
-      if (published) data.published_at = published;
       entity = {
         key: `post_${result.graph!.entities.length}`,
         type: "x.post",
         externalId: id,
         contextOnly: true,
-        dataJson: Buffer.from(JSON.stringify(data)),
+        dataJson: Buffer.from(JSON.stringify({ text: "" })),
         resourceIndices: [],
       };
       result.graph!.entities.push(entity);
@@ -236,16 +228,6 @@ function attachPostReferences(
       result.relatedTargets.push(
         RelatedTarget.fromPartial({ url, refreshAfterSeconds: 60 }),
       );
-    const author = attachProfileReference(result, referenced.author);
-    if (author) addRelation(result, entity.key, author, "authored_by");
-    attachMentions(
-      result,
-      entity.key,
-      referenced.text,
-      referenced.raw_text?.facets,
-    );
-    const reposter = attachProfileReference(result, referenced.reposted_by);
-    if (reposter) addRelation(result, reposter, entity.key, "reposted");
   }
 }
 

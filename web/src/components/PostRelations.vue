@@ -100,8 +100,12 @@ const relations = computed(() => {
       ? `#/collection/${encodeURIComponent(entity.saved_collection_id)}`
       : externalURL
     if (!href) continue
+    // A quoted or reposted post is kept by reference; its saved collection
+    // says what it is, otherwise only the link remains.
     const text =
-      typeof entity.data.text === 'string' ? entity.data.text.trim() : ''
+      (typeof entity.data.text === 'string' ? entity.data.text.trim() : '') ||
+      entity.saved_summary?.trim() ||
+      ''
     const name =
       typeof entity.data.name === 'string' ? entity.data.name.trim() : ''
     const key = `${outgoing ? 'out' : 'in'}:${type}:${entity.type}:${externalId || entity.saved_collection_id || entity.key}`

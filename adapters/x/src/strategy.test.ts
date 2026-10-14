@@ -638,7 +638,7 @@ test("posts listed by a public timeline are captured without a request of their 
     AbortSignal.timeout(1000),
   );
   await strategy.fetch(member("43"), AbortSignal.timeout(1000));
-  now += 60 * 60_000;
+  now += 61 * 60_000;
   await strategy.fetch(member(listedPost.id), AbortSignal.timeout(1000));
   assert.deepEqual(posts, [listedPost.id, "43", listedPost.id]);
 });

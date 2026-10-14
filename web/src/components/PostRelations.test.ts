@@ -55,6 +55,37 @@ it('shows the quoted post as an internal collection link with its text', () => {
   expect(link.textContent).not.toContain('在 X')
   expect(el.querySelector('.destination')).toBeNull()
 })
+it('shows a quoted post kept by reference with its saved summary, or as an X link', () => {
+  const quote = (saved: boolean) =>
+    mount({
+      root: 'post',
+      entities: [
+        root,
+        {
+          key: 'quote',
+          type: 'x.post',
+          external_id: '456',
+          ...(saved
+            ? {
+                saved_collection_id: 'saved-quote',
+                saved_summary: '原作者：已保存的原帖',
+              }
+            : {}),
+          data: { text: '' },
+        },
+      ],
+      relations: [{ source: 'post', target: 'quote', type: 'quoted' }],
+    }).querySelector<HTMLAnchorElement>('.relation')!
+  const saved = quote(true)
+  expect(saved.textContent).toContain('原作者：已保存的原帖')
+  expect(saved.getAttribute('href')).toBe('#/collection/saved-quote')
+  unmount()
+  document.body.replaceChildren()
+  const unsaved = quote(false)
+  expect(unsaved.textContent).toContain('在 X')
+  expect(unsaved.textContent).toContain('帖子 456')
+  expect(unsaved.getAttribute('href')).toBe('https://x.com/i/web/status/456')
+})
 it('links an unsaved repost to its X status without using untrusted payload URLs', () => {
   const el = mount({
     root: 'post',

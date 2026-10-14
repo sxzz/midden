@@ -21,6 +21,8 @@ export interface Asset {
 export interface Entity {
   external_id?: string
   saved_collection_id?: string
+  /** The saved collection's current summary, for a post kept by reference. */
+  saved_summary?: string
   key: string
   type: string
   data: Record<string, unknown>

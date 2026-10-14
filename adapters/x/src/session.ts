@@ -22,6 +22,7 @@ import {
   ProviderError,
   readJSON,
   responseError,
+  asRepost,
 } from "./provider.js";
 
 // Public application token from pinned upstream src/constants.ts; not an account secret.
@@ -281,9 +282,18 @@ export async function fetchSession(
     shouldTranscodeGif: () => false,
   };
   const raw = await sessionTweet(id, host);
-  const result = await parseSessionResult(id, raw, host);
+  // A repost's link carries the reposted post, which is what is saved.
+  const reposted = unwrapTweet(raw)?.legacy?.retweeted_status_result?.result;
+  const original = (reposted?.tweet ?? reposted)?.rest_id;
+  const result = await parseSessionResult(
+    reposted && original ? original : id,
+    reposted && original ? reposted : raw,
+    host,
+  );
   result.sourceResponses = responses;
-  return result;
+  return reposted && original && original !== id
+    ? asRepost(result, id)
+    : result;
 }
 // capture.access/1: one TweetResultByRestId request, without building the post,
 // profiles or media. Access errors match fetchSession.
@@ -325,11 +335,8 @@ export async function parseSessionResult(
   raw: any,
   host: TwitterBuildHost,
 ) {
-  const publicEvidence = rawIsPublic(raw);
   // Evaluate before Atmosphere normalizes (and mutates) the raw nodes.
-  const nestedPublic = new Map(
-    [...embeddedTweets(raw)].map(([key, node]) => [key, rawIsPublic(node)]),
-  );
+  const publicEvidence = rawIsPublic(raw);
   const editSource = structuredClone(raw);
   const post = await buildAPITwitterStatus(
     host,
@@ -351,29 +358,6 @@ export async function parseSessionResult(
   if (raw?.mediaVisibilityResults?.blurred_image_interstitial) {
     for (const resource of result.resources) resource.sensitive = true;
   }
-  // Embedded posts need both raw and normalized public evidence, like the root.
-  const built = new Map<string, any>();
-  const collect = (value: any): void => {
-    for (const key of ["quote", "repost"]) {
-      const child = value?.[key];
-      if (typeof child?.id === "string" && !built.has(child.id)) {
-        built.set(child.id, child);
-        collect(child);
-      }
-    }
-  };
-  collect(post);
-  for (const entity of result.graph?.entities ?? [])
-    if (
-      entity.type === "x.post" &&
-      entity.key !== result.graph!.root &&
-      !(
-        nestedPublic.get(entity.externalId) === true &&
-        visibilityOf(built.get(entity.externalId)) ===
-          Visibility.VISIBILITY_PUBLIC
-      )
-    )
-      result.restrictedTargets.push(postRef(entity.externalId));
   return result;
 }
 export async function checkSession(

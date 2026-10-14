@@ -2,6 +2,7 @@ import { attachEntities } from "./entities.js";
 import { status, Metadata } from "@grpc/grpc-js";
 import {
   FetchResponse,
+  ResolveResponse,
   SourceResponse,
   Visibility,
 } from "./generated/api/adapter/v1/adapter.js";
@@ -272,24 +273,38 @@ export function publicPost(
   id: string,
   source: SourceResponse,
 ): FetchResponse {
-  const containsProtectedAuthor = (
-    post: any,
-    seen = new Set<any>(),
-  ): boolean => {
-    if (!post || typeof post !== "object" || seen.has(post)) return false;
-    seen.add(post);
-    return (
-      Boolean(post.author?.protected) ||
-      containsProtectedAuthor(post.quote, seen) ||
-      containsProtectedAuthor(post.repost, seen)
-    );
-  };
-  if (containsProtectedAuthor(post))
+  // A quoted or reposted post is kept by reference, so only the post's own
+  // author decides whether the public provider may save it.
+  if (post?.author?.protected)
     throw new ProviderError(
       status.FAILED_PRECONDITION,
       "public provider cannot save private posts",
     );
-  const result = normalize(post, id, "fxtwitter", Visibility.VISIBILITY_PUBLIC);
+  // A repost's link answers with the reposted post, which is what is saved.
+  const original =
+    post?.id !== id && post?.reposted_by && /^\d+$/.test(String(post?.id))
+      ? String(post.id)
+      : id;
+  const result = normalize(
+    original === id ? post : { ...post, reposted_by: null },
+    original,
+    "fxtwitter",
+    Visibility.VISIBILITY_PUBLIC,
+  );
   result.sourceResponses = [source];
+  return original === id ? result : asRepost(result, id);
+}
+
+/** Saves a repost's link as the reposted post the result describes. */
+export function asRepost(result: FetchResponse, id: string): FetchResponse {
+  const original = result.externalId;
+  result.externalId = id;
+  result.canonicalTarget = ResolveResponse.fromPartial({
+    url: `https://x.com/i/web/status/${original}`,
+    platform: "x",
+    kind: "post",
+    objectScope: "",
+    externalId: original,
+  });
   return result;
 }

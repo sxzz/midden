@@ -303,7 +303,7 @@ test("access check maps unavailable targets and mismatched IDs like Fetch", asyn
     );
 });
 
-test("session Fetch lists embedded posts lacking public evidence", async () => {
+test("session Fetch lists no restricted embedded posts: their content is not kept", async () => {
   const host = {
     t: (key: string) => key,
     twitterProxy: {
@@ -312,30 +312,14 @@ test("session Fetch lists embedded posts lacking public evidence", async () => {
       },
     },
   };
-  const visible = await parseSessionResult(
-    "900123",
-    quoting(tweet("900124", "43")),
-    host,
-  );
-  assert.deepEqual(visible.restrictedTargets, []);
-  const restricted = await parseSessionResult(
-    "900123",
-    quoting(tweet("900124", "43", true)),
-    host,
-  );
-  assert.equal(restricted.visibility, Visibility.VISIBILITY_PRIVATE);
-  assert.deepEqual(restricted.restrictedTargets, [ref("900124")]);
-  const missingFlag = quoting(tweet("900124", "43"));
-  delete missingFlag.quoted_status_result.result.core.user_results.result.legacy
-    .protected;
-  assert.deepEqual(
-    (await parseSessionResult("900123", missingFlag, host)).restrictedTargets,
-    [ref("900124")],
-  );
-  // A protected root alone does not mark its public quote restricted.
-  const root = quoting(tweet("900124", "43"));
-  root.core.user_results.result.legacy.protected = true;
-  const own = await parseSessionResult("900123", root, host);
-  assert.equal(own.visibility, Visibility.VISIBILITY_PRIVATE);
-  assert.deepEqual(own.restrictedTargets, []);
+  for (const quoted of [tweet("900124", "43"), tweet("900124", "43", true)]) {
+    const result = await parseSessionResult("900123", quoting(quoted), host);
+    assert.deepEqual(result.restrictedTargets, []);
+    const reference = result.graph!.entities.find(
+      (e) => e.externalId === "900124",
+    )!;
+    assert.deepEqual(JSON.parse(Buffer.from(reference.dataJson).toString()), {
+      text: "",
+    });
+  }
 });

@@ -177,7 +177,7 @@ test("post and author bio mentions keep graph identities and schedule profile ca
   );
 });
 
-test("quote and repost references preserve source identity and schedule complete captures", () => {
+test("quote and repost references keep only the referenced post's identity and schedule its capture", () => {
   const result = FetchResponse.fromPartial({ externalId: "20", text: "root" });
   const original = {
     type: "status",
@@ -204,9 +204,9 @@ test("quote and repost references preserve source identity and schedule complete
   assert.equal(graph.entities.filter((e) => e.externalId === "21").length, 1);
   assert.equal(reference.contextOnly, true);
   assert.deepEqual(reference.resourceIndices, []);
+  // The referenced post's content, author and mentions are its own capture's.
   assert.deepEqual(JSON.parse(Buffer.from(reference.dataJson).toString()), {
-    text: "original @Friend",
-    published_at: "2026-01-01T00:00:00.000Z",
+    text: "",
   });
   for (const type of ["quoted", "reposted"])
     assert.ok(
@@ -215,27 +215,14 @@ test("quote and repost references preserve source identity and schedule complete
           r.source === "post" && r.target === reference.key && r.type === type,
       ),
     );
-  const authorKey = graph.entities.find((e) => e.externalId === "456")!.key;
-  assert.ok(
-    graph.relations.some(
-      (r) =>
-        r.source === reference.key &&
-        r.target === authorKey &&
-        r.type === "authored_by",
-    ),
-  );
   assert.equal(
-    result.relatedTargets.filter(
-      (t) => t.url === "https://x.com/i/web/status/21",
-    ).length,
-    1,
+    graph.entities.some((e) => ["456", "789"].includes(e.externalId)),
+    false,
   );
-  assert.ok(
-    result.relatedTargets.some((t) => t.url === "https://x.com/i/user/456"),
-  );
-  assert.ok(
-    result.relatedTargets.some((t) => t.url === "https://x.com/i/user/789"),
-  );
+  assert.deepEqual(result.relatedTargets.map((t) => t.url).sort(), [
+    "https://x.com/i/user/123",
+    "https://x.com/i/web/status/21",
+  ]);
   assert.equal(result.resources.length, 0);
 });
 
