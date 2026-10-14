@@ -84,6 +84,9 @@ message Resource {
 message EntityType {
   string name = 1;
   bytes json_schema = 2;
+  // JSON pointers into the entity's data at observed values (counts) rather
+  // than content: kept with each capture and left out of versions.
+  repeated string metric_paths = 3;
 }
 message Entity {
   string key = 1; // Local graph key, not a database ID.

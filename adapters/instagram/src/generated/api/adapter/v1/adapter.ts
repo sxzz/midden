@@ -131,6 +131,11 @@ export interface Resource {
 export interface EntityType {
   name: string;
   jsonSchema: Buffer;
+  /**
+   * JSON pointers into the entity's data at observed values (counts) rather
+   * than content: kept with each capture and left out of versions.
+   */
+  metricPaths: string[];
 }
 
 export interface Entity {
@@ -1295,7 +1300,7 @@ export const Resource: MessageFns<Resource> = {
 };
 
 function createBaseEntityType(): EntityType {
-  return { name: "", jsonSchema: Buffer.alloc(0) };
+  return { name: "", jsonSchema: Buffer.alloc(0), metricPaths: [] };
 }
 
 export const EntityType: MessageFns<EntityType> = {
@@ -1308,6 +1313,9 @@ export const EntityType: MessageFns<EntityType> = {
     }
     if (message.jsonSchema.length !== 0) {
       writer.uint32(18).bytes(message.jsonSchema);
+    }
+    for (const v of message.metricPaths) {
+      writer.uint32(26).string(v!);
     }
     return writer;
   },
@@ -1336,6 +1344,14 @@ export const EntityType: MessageFns<EntityType> = {
           message.jsonSchema = Buffer.from(reader.bytes());
           continue;
         }
+        case 3: {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.metricPaths.push(reader.string());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1351,6 +1367,9 @@ export const EntityType: MessageFns<EntityType> = {
       jsonSchema: isSet(object.jsonSchema)
         ? Buffer.from(bytesFromBase64(object.jsonSchema))
         : Buffer.alloc(0),
+      metricPaths: globalThis.Array.isArray(object?.metricPaths)
+        ? object.metricPaths.map((e: any) => globalThis.String(e))
+        : [],
     };
   },
 
@@ -1362,6 +1381,9 @@ export const EntityType: MessageFns<EntityType> = {
     if (message.jsonSchema.length !== 0) {
       obj.jsonSchema = base64FromBytes(message.jsonSchema);
     }
+    if (message.metricPaths?.length) {
+      obj.metricPaths = message.metricPaths;
+    }
     return obj;
   },
 
@@ -1372,6 +1394,7 @@ export const EntityType: MessageFns<EntityType> = {
     const message = createBaseEntityType();
     message.name = object.name ?? "";
     message.jsonSchema = object.jsonSchema ?? Buffer.alloc(0);
+    message.metricPaths = object.metricPaths?.map((e) => e) || [];
     return message;
   },
 };

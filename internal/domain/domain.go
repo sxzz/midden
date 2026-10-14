@@ -133,6 +133,10 @@ type Entity struct {
 	Schema          json.RawMessage `json:"schema"`
 	ResourceIndices []uint32        `json:"resource_indices,omitempty"`
 	Assets          []Asset         `json:"assets,omitempty"`
+	// Metrics are the observed values (counts) split out of Data at their
+	// adapter-declared paths; they never take part in versions.
+	Metrics     map[string]json.RawMessage `json:"-"`
+	MetricPaths []string                   `json:"-"`
 	// Current is the newest complete version of a referenced profile this
 	// tenant can read, set only when it differs from the snapshot.
 	Current *EntityVersion `json:"current,omitempty"`

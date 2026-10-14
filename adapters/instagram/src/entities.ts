@@ -50,6 +50,12 @@ export const entityTypes = Object.entries({
       ...schema,
     }),
   ),
+  // Counts are observations, not content: the core keeps them with each
+  // capture and leaves them out of versions.
+  metricPaths:
+    name === "instagram.post"
+      ? ["/likes", "/replies"]
+      : ["/metadata/followers", "/metadata/following", "/metadata/statuses"],
 }));
 
 export function timestamp(raw: unknown): string {

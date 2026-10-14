@@ -18,6 +18,8 @@ var EntityName = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
 type EntitySchema struct {
 	JSON     json.RawMessage
 	Compiled *jsonschema.Schema
+	// MetricPaths point at observed values kept apart from the entity's content.
+	MetricPaths []string
 }
 
 type noSchemaLoader struct{}
@@ -57,7 +59,11 @@ func CompileEntityTypes(d *pb.DescribeResponse) (map[string]EntitySchema, error)
 			return nil, fmt.Errorf("invalid entity schema %s: %w", def.Name, err)
 		}
 		raw, _ := json.Marshal(data)
-		out[def.Name] = EntitySchema{JSON: raw, Compiled: compiled}
+		paths, err := compileMetricPaths(def.Name, def.MetricPaths)
+		if err != nil {
+			return nil, err
+		}
+		out[def.Name] = EntitySchema{JSON: raw, Compiled: compiled, MetricPaths: paths}
 	}
 	for _, p := range d.Providers {
 		seen := map[string]bool{}

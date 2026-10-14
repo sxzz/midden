@@ -73,6 +73,10 @@ func (s *Service) entityGraph(ctx context.Context, r *pb.FetchResponse) (*domain
 		if err != nil {
 			return nil, &PermanentError{"entity data does not match adapter schema"}
 		}
+		data, metrics, err := adapter.SplitMetrics(data, schema.MetricPaths)
+		if err != nil {
+			return nil, err
+		}
 		seen := map[uint32]bool{}
 		for _, i := range e.ResourceIndices {
 			if int(i) >= len(r.Resources) || seen[i] {
@@ -80,7 +84,7 @@ func (s *Service) entityGraph(ctx context.Context, r *pb.FetchResponse) (*domain
 			}
 			seen[i] = true
 		}
-		out.Entities = append(out.Entities, domain.Entity{ContextOnly: e.ContextOnly, Key: e.Key, Type: e.Type, ExternalID: e.ExternalId, Data: data, Schema: schema.JSON, ResourceIndices: e.ResourceIndices})
+		out.Entities = append(out.Entities, domain.Entity{ContextOnly: e.ContextOnly, Key: e.Key, Type: e.Type, ExternalID: e.ExternalId, Data: data, Schema: schema.JSON, ResourceIndices: e.ResourceIndices, Metrics: metrics, MetricPaths: schema.MetricPaths})
 		if e.Key == g.Root && e.ExternalId != rootID {
 			return nil, &PermanentError{"entity root does not match capture identity"}
 		}
@@ -198,6 +202,13 @@ func (s *Service) Entity(ctx context.Context, tenant, id string) (v domain.Entit
 		}
 		var a domain.Collection
 		hydrateGraph(&a, p, aa)
+		m, err := captureMetrics(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		if err = overlayMetrics(&a, m); err != nil {
+			return err
+		}
 		if a.Graph != nil {
 			for _, e := range a.Graph.Entities {
 				if e.ID == id && e.VersionID == version {
@@ -386,7 +397,7 @@ func attachCurrentProfiles(ctx context.Context, tx pgx.Tx, collections ...*domai
 	if len(ids) == 0 {
 		return nil
 	}
-	rows, err := tx.Query(ctx, `SELECT latest.entity_id,latest.id,latest.data,a.id,a.purpose,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,''),EXISTS(SELECT FROM blob_thumbnails t WHERE t.blob_id=a.blob_id AND t.state='ready')
+	rows, err := tx.Query(ctx, `SELECT latest.entity_id,latest.id,latest.data,latest.capture_id,a.id,a.purpose,a.position,a.alt_text,a.sensitive,a.state,a.error,coalesce(b.hash,''),coalesce(b.mime,''),coalesce(b.size,0),coalesce(b.object_key,''),EXISTS(SELECT FROM blob_thumbnails t WHERE t.blob_id=a.blob_id AND t.state='ready')
  FROM (SELECT DISTINCT ON (ev.entity_id) ev.entity_id,ev.id,ev.data,r.capture_id,r.payload,re.entity_key
   FROM entity_versions ev
   JOIN revision_entities re ON re.entity_version_id=ev.id
@@ -405,8 +416,9 @@ func attachCurrentProfiles(ctx context.Context, tx pgx.Tx, collections ...*domai
 	}
 	defer rows.Close()
 	current := map[string]*domain.EntityVersion{}
+	observedBy := map[string]string{}
 	for rows.Next() {
-		var entity string
+		var entity, capture string
 		var v domain.EntityVersion
 		var assetID, purpose, alt, state, errText *string
 		var position *int
@@ -414,13 +426,14 @@ func attachCurrentProfiles(ctx context.Context, tx pgx.Tx, collections ...*domai
 		var hash, mime, key string
 		var size int64
 		var thumbnail bool
-		if err = rows.Scan(&entity, &v.ID, &v.Data, &assetID, &purpose, &position, &alt, &sensitive, &state, &errText, &hash, &mime, &size, &key, &thumbnail); err != nil {
+		if err = rows.Scan(&entity, &v.ID, &v.Data, &capture, &assetID, &purpose, &position, &alt, &sensitive, &state, &errText, &hash, &mime, &size, &key, &thumbnail); err != nil {
 			return err
 		}
 		if assetID != nil {
 			v.Assets = []domain.Asset{{ID: *assetID, Purpose: *purpose, Position: *position, AltText: *alt, Sensitive: *sensitive, State: *state, Error: *errText, Hash: hash, MIME: mime, Size: size, Key: key, Thumbnail: thumbnail}}
 		}
 		current[entity] = &v
+		observedBy[entity] = capture
 	}
 	if err = rows.Err(); err != nil {
 		return err
@@ -433,6 +446,14 @@ func attachCurrentProfiles(ctx context.Context, tx pgx.Tx, collections ...*domai
 		for i := range a.Graph.Entities {
 			e := &a.Graph.Entities[i]
 			if v, ok := current[e.ID]; ok && authors[e.Key] && v.ID != e.VersionID {
+				// The current version reads with the counts its capture saw.
+				m, err := captureMetrics(ctx, tx, observedBy[e.ID])
+				if err != nil {
+					return err
+				}
+				if v.Data, err = adapter.OverlayMetrics(v.Data, m[metricKey(*e)]); err != nil {
+					return err
+				}
 				e.Current = v
 			}
 		}

@@ -53,9 +53,22 @@ export const entitySchemas = {
     additionalProperties: false,
   },
 };
+// Counts are observations, not content: the core keeps them with each capture
+// and leaves them out of versions.
+const metricPaths: Record<string, string[]> = {
+  "x.post": ["/replies", "/reposts", "/likes", "/bookmarks", "/quotes"],
+  "x.profile": [
+    "/metadata/followers",
+    "/metadata/following",
+    "/metadata/statuses",
+    "/metadata/media_count",
+    "/metadata/likes",
+  ],
+};
 export const entityTypes = Object.entries(entitySchemas).map(
   ([name, schema]) => ({
     name,
     jsonSchema: Buffer.from(JSON.stringify(schema)),
+    metricPaths: metricPaths[name] ?? [],
   }),
 );

@@ -400,6 +400,22 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		return e
 	}
 	p := Payload{AuthorName: r.AuthorName, PublishedAt: r.PublishedAt, Summary: r.Summary, Graph: graph, Text: r.Text, TextKind: r.TextKind, Warnings: r.Warnings, Version: r.AdapterVersion, TextSource: r.TextSource, Incomplete: r.Incomplete}
+	if graph != nil {
+		for _, e := range graph.Entities {
+			if len(e.MetricPaths) > 0 {
+				if p.MetricPaths == nil {
+					p.MetricPaths = map[string][]string{}
+				}
+				p.MetricPaths[e.Type] = e.MetricPaths
+			}
+			if len(e.Metrics) > 0 {
+				if p.Metrics == nil {
+					p.Metrics = map[string]map[string]json.RawMessage{}
+				}
+				p.Metrics[metricKey(e)] = e.Metrics
+			}
+		}
+	}
 	// Keep resource positions stable in the graph after applying execution limits.
 	kept := []*pb.Resource{}
 	positions := map[uint32]uint32{}
@@ -610,7 +626,7 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 			for _, entity := range p.Graph.Entities {
 				hasContext = hasContext || entity.ContextOnly
 			}
-			if hasContext {
+			if hasContext || len(p.MetricPaths) > 0 {
 				var previousRaw []byte
 				var previousCapture string
 				if e = tx.QueryRow(ctx, `SELECT payload,capture_id FROM revisions WHERE id=$1`, *previousID).Scan(&previousRaw, &previousCapture); e != nil {
@@ -620,15 +636,27 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 				if e = json.Unmarshal(previousRaw, &previousPayload); e != nil {
 					return e
 				}
+				// Older versions kept observed values in the data.
+				if e = stripMetrics(previousPayload.Graph, p.MetricPaths); e != nil {
+					return e
+				}
 				previousAssets, err := assets(ctx, tx, previousCapture)
 				if err != nil {
 					return err
 				}
-				var previousDigest string
-				if e = tx.QueryRow(ctx, `SELECT encode(digest($1::jsonb::text,'sha256'),'hex')`, revisionSignature(previousPayload, previousAssets, p.Graph)).Scan(&previousDigest); e != nil {
+				// Compare content only: an older version may name another entity
+				// version for data it no longer counts as content, or number the
+				// same entities differently.
+				current := comparable(p)
+				var previousDigest, currentDigest string
+				if e = tx.QueryRow(ctx, `SELECT encode(digest($1::jsonb::text,'sha256'),'hex'),encode(digest($2::jsonb::text,'sha256'),'hex')`, revisionSignature(comparable(previousPayload), previousAssets, current.Graph), revisionSignature(current, aa, current.Graph)).Scan(&previousDigest, &currentDigest); e != nil {
 					return e
 				}
-				previous = &previousDigest
+				if previousDigest == currentDigest {
+					previous = &digest
+				} else {
+					previous = &previousDigest
+				}
 			}
 		}
 		revisionID := previousID
@@ -666,7 +694,7 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		if partial {
 			state = "partial"
 		}
-		if _, e = tx.Exec(ctx, `UPDATE captures SET state=$2,content_reserved=0,payload=NULL,finished_at=now(),revision_id=$3 WHERE id=$1`, cid, state, revisionID); e != nil {
+		if _, e = tx.Exec(ctx, `UPDATE captures SET state=$2,content_reserved=0,payload=NULL,finished_at=now(),revision_id=$3,metrics=$4 WHERE id=$1`, cid, state, revisionID, metricsJSON(p.Metrics)); e != nil {
 			return e
 		}
 		if _, e = tx.Exec(ctx, `UPDATE collections SET observed_at=now(),source_state=NULL,source_state_at=NULL WHERE id=$1`, aid); e != nil {

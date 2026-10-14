@@ -17,7 +17,7 @@ func collectionsByID(ctx context.Context, tx pgx.Tx, ids []string) (map[string]d
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,r.visibility,r.visibility,r.id,r.payload,r.capture_id,a.observed_at,a.created_at,coalesce(a.source_state,''),a.source_state_at FROM collections a CROSS JOIN LATERAL (SELECT head.* FROM revisions head WHERE head.collection_id=a.id ORDER BY head.created_at DESC,head.id DESC LIMIT 1) r WHERE a.id=ANY($1::uuid[])`, ids)
+	rows, err := tx.Query(ctx, `SELECT a.id,a.url,a.external_id,a.provider_id,r.visibility,r.visibility,r.id,r.payload,r.capture_id,a.observed_at,a.created_at,coalesce(a.source_state,''),a.source_state_at,latest.metrics FROM collections a CROSS JOIN LATERAL (SELECT head.* FROM revisions head WHERE head.collection_id=a.id ORDER BY head.created_at DESC,head.id DESC LIMIT 1) r LEFT JOIN LATERAL (SELECT c.metrics FROM captures c WHERE c.collection_id=a.id AND c.metrics IS NOT NULL AND c.state IN ('complete','partial') ORDER BY c.finished_at DESC,c.id DESC LIMIT 1) latest ON TRUE WHERE a.id=ANY($1::uuid[])`, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -25,6 +25,9 @@ func collectionsByID(ctx context.Context, tx pgx.Tx, ids []string) (map[string]d
 		collection domain.Collection
 		payload    Payload
 		capture    string
+		// The newest counts this tenant may read, even when that capture
+		// reused an older version.
+		metrics []byte
 	}
 	entries := []entry{}
 	captures := []string{}
@@ -32,7 +35,7 @@ func collectionsByID(ctx context.Context, tx pgx.Tx, ids []string) (map[string]d
 		var v entry
 		var raw []byte
 		a := &v.collection
-		if err = rows.Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &raw, &v.capture, &a.ObservedAt, &a.CreatedAt, &a.SourceState, &a.SourceStateAt); err != nil {
+		if err = rows.Scan(&a.ID, &a.URL, &a.ExternalID, &a.ProviderID, &a.AccessScope, &a.Visibility, &a.RevisionID, &raw, &v.capture, &a.ObservedAt, &a.CreatedAt, &a.SourceState, &a.SourceStateAt, &v.metrics); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -68,6 +71,15 @@ func collectionsByID(ctx context.Context, tx pgx.Tx, ids []string) (map[string]d
 	for i := range entries {
 		v := &entries[i]
 		hydrateGraph(&v.collection, v.payload, media[v.capture])
+		if len(v.metrics) > 0 {
+			var m map[string]map[string]json.RawMessage
+			if err = json.Unmarshal(v.metrics, &m); err != nil {
+				return nil, err
+			}
+			if err = overlayMetrics(&v.collection, m); err != nil {
+				return nil, err
+			}
+		}
 		collections[i] = &v.collection
 	}
 	if err = linkSavedEntities(ctx, tx, collections...); err != nil {

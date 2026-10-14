@@ -265,6 +265,14 @@ func (s *Service) Revision(ctx context.Context, t, id, rid string) (a domain.Col
 			return err
 		}
 		hydrateGraph(&a, p, all)
+		// A past version reads with the counts its own capture saw.
+		m, err := captureMetrics(ctx, tx, cid)
+		if err != nil {
+			return err
+		}
+		if err = overlayMetrics(&a, m); err != nil {
+			return err
+		}
 		if err = linkSavedEntities(ctx, tx, &a); err != nil {
 			return err
 		}

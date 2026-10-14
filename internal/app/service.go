@@ -676,7 +676,13 @@ type Payload struct {
 	Version           string              `json:"adapter_version"`
 	TextSource        string              `json:"text_source,omitempty"`
 	Incomplete        bool                `json:"incomplete,omitempty"`
+	// Metrics are each entity's observed values by metricKey; MetricPaths by
+	// entity type say where they sat in the data, also in older versions.
+	Metrics     map[string]map[string]json.RawMessage `json:"metrics,omitempty"`
+	MetricPaths map[string][]string                   `json:"metric_paths,omitempty"`
 }
+
+func metricKey(e domain.Entity) string { return e.Type + "/" + e.ExternalID }
 
 // CaptureCollection pins delivery to the revision produced (or reused) by that capture.
 func (s *Service) CaptureCollection(ctx context.Context, t, cid string) (a domain.Collection, e error) {
@@ -700,8 +706,19 @@ func (s *Service) CaptureCollection(ctx context.Context, t, cid string) (a domai
 		a.AdapterVersion = p.Version
 		a.Warnings = p.Warnings
 		all, err := assets(ctx, tx, assetCapture)
+		if err != nil {
+			return err
+		}
 		hydrateGraph(&a, p, all)
-		return err
+		// The counts this capture saw, even when it reused an older version.
+		m, err := captureMetrics(ctx, tx, cid)
+		if err == nil && m == nil {
+			m, err = captureMetrics(ctx, tx, assetCapture)
+		}
+		if err != nil {
+			return err
+		}
+		return overlayMetrics(&a, m)
 	})
 	return
 }

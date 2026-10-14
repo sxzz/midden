@@ -596,9 +596,12 @@ func (x *Resource) GetPurpose() string {
 
 // Adapter-owned JSON Schema (2020-12), bundled and self-contained.
 type EntityType struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	JsonSchema    []byte                 `protobuf:"bytes,2,opt,name=json_schema,json=jsonSchema,proto3" json:"json_schema,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Name       string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	JsonSchema []byte                 `protobuf:"bytes,2,opt,name=json_schema,json=jsonSchema,proto3" json:"json_schema,omitempty"`
+	// JSON pointers into the entity's data at observed values (counts) rather
+	// than content: kept with each capture and left out of versions.
+	MetricPaths   []string `protobuf:"bytes,3,rep,name=metric_paths,json=metricPaths,proto3" json:"metric_paths,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -643,6 +646,13 @@ func (x *EntityType) GetName() string {
 func (x *EntityType) GetJsonSchema() []byte {
 	if x != nil {
 		return x.JsonSchema
+	}
+	return nil
+}
+
+func (x *EntityType) GetMetricPaths() []string {
+	if x != nil {
+		return x.MetricPaths
 	}
 	return nil
 }
@@ -1865,12 +1875,13 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\rimmutable_key\x18\x03 \x01(\tR\fimmutableKey\x12\x19\n" +
 	"\balt_text\x18\x04 \x01(\tR\aaltText\x12\x1c\n" +
 	"\tsensitive\x18\x05 \x01(\bR\tsensitive\x12\x18\n" +
-	"\apurpose\x18\x06 \x01(\tR\apurpose\"A\n" +
+	"\apurpose\x18\x06 \x01(\tR\apurpose\"d\n" +
 	"\n" +
 	"EntityType\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1f\n" +
 	"\vjson_schema\x18\x02 \x01(\fR\n" +
-	"jsonSchema\"\xba\x01\n" +
+	"jsonSchema\x12!\n" +
+	"\fmetric_paths\x18\x03 \x03(\tR\vmetricPaths\"\xba\x01\n" +
 	"\x06Entity\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x1f\n" +
