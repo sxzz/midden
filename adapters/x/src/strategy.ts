@@ -8,18 +8,25 @@ import {
   publicPost,
   sourceState,
 } from "./provider.js";
-import { fetchSession } from "./session.js";
+import {
+  accountTransport,
+  fetchSession,
+  parseSessionResult,
+} from "./session.js";
+import type { TwitterBuildHost } from "@fxembed/atmosphere/providers/twitter/build-host";
 import {
   fetchPublicProfile,
   fetchPublicTimeline,
   fetchSessionTimeline,
   decodePrefetch,
   normalizeProfile,
+  type Prefetch,
 } from "./profile.js";
 import type { SessionCredential } from "./credential.js";
 import {
   FetchResponse,
   RelatedTarget,
+  SourceResponse,
   Visibility,
   type FetchRequest,
 } from "./generated/api/adapter/v1/adapter.js";
@@ -96,13 +103,17 @@ export class CaptureStrategy {
   }
   // Only a capture its listing created settles for what the listing showed;
   // an explicit one asks upstream.
-  private listedPost(req: FetchRequest): FetchResponse | undefined {
+  private async listedPost(
+    req: FetchRequest,
+    signal: AbortSignal,
+    account: () => SessionCredential | undefined,
+  ): Promise<FetchResponse | undefined> {
     const listed = req.automatic ? decodePrefetch(req.prefetch) : undefined;
-    if (
-      listed?.source !== "fxtwitter" ||
-      listed.post?.id !== req.externalId ||
-      !(this.now() - Date.parse(listed.observed_at) < prefetchTTL)
-    )
+    if (!listed || !(this.now() - Date.parse(listed.observed_at) < prefetchTTL))
+      return;
+    if (listed.source === "x-session")
+      return this.listedSessionPost(req, listed, signal, account);
+    if (listed.source !== "fxtwitter" || listed.post?.id !== req.externalId)
       return;
     try {
       const result = publicPost(listed.post, req.externalId, {
@@ -133,6 +144,67 @@ export class CaptureStrategy {
       // Whatever the listing lacks, the post's own response decides.
     }
   }
+  // An account's timeline lists the raw node its single-post response would
+  // carry, so the post is read exactly as that response would be.
+  private async listedSessionPost(
+    req: FetchRequest,
+    listed: Extract<Prefetch, { source: "x-session" }>,
+    signal: AbortSignal,
+    account: () => SessionCredential | undefined,
+  ): Promise<FetchResponse | undefined> {
+    const node = listed.node;
+    if (
+      req.providerId !== "x-session" ||
+      (node?.tweet ?? node)?.rest_id !== req.externalId
+    )
+      return;
+    // Building a post rarely asks upstream (a live broadcast card does); then
+    // the account must be at hand, as for the post's own response.
+    let asked = false;
+    const credential = req.credentialDeferred ? undefined : account();
+    const responses: SourceResponse[] = [];
+    const host: TwitterBuildHost = {
+      t: (key) => key,
+      twitterProxy: credential
+        ? accountTransport(credential, signal, fetch, responses)
+        : {
+            fetch: async () => {
+              asked = true;
+              throw new Error("account required");
+            },
+          },
+      shouldTranscodeGif: () => false,
+    };
+    let result: FetchResponse | undefined;
+    try {
+      result = await this.sessionListed(
+        req.externalId,
+        structuredClone(node),
+        host,
+      );
+    } catch {
+      // Whatever the node lacks, the post's own response decides.
+    }
+    if (asked) account();
+    if (!result || asked) return;
+    result.sourceResponses = [
+      {
+        body: Buffer.from(JSON.stringify(node)),
+        contentType: "application/json",
+        sourceUrl: listed.source_url,
+        visibility: Visibility.VISIBILITY_PRIVATE,
+      },
+      ...responses,
+    ];
+    const author = result.graph?.entities.find((e) => e.type === "x.profile");
+    if (!author) return;
+    this.attachProfile(
+      result,
+      await this.profile(author.externalId, false, signal),
+    );
+    return result;
+  }
+  sessionListed = parseSessionResult;
   private protected(profile: FetchResponse): boolean {
     const value = this.user(profile).protected;
     if (typeof value !== "boolean")
@@ -213,7 +285,7 @@ export class CaptureStrategy {
           await this.timeline(result, signal, undefined, cursor, req.pageSize);
         }
       }
-    } else if ((result = this.listedPost(req)!)) {
+    } else if ((result = (await this.listedPost(req, signal, account))!)) {
       // Complete as listed.
     } else {
       const author = new URL(req.url).pathname.match(

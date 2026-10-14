@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { CaptureStrategy } from "./strategy.js";
+import { parseSessionResult } from "./session.js";
 import {
   normalizeProfile,
   fetchSessionTimeline,
@@ -688,4 +689,139 @@ test("a deferred account is asked for only when the fetch needs it", async () =>
   );
   await strategy.fetch(deferred, AbortSignal.timeout(1000), credential);
   assert.deepEqual(sessions, ["42"]);
+});
+const rawTweet = (id: string, author = "123"): any => ({
+  __typename: "Tweet",
+  rest_id: id,
+  core: {
+    user_results: {
+      result: {
+        __typename: "User",
+        rest_id: author,
+        legacy: { screen_name: "fixture", name: "Fixture", protected: true },
+      },
+    },
+  },
+  legacy: {
+    id_str: id,
+    full_text: `post ${id}`,
+    created_at: "Mon Jan 01 00:00:00 +0000 2024",
+    entities: { urls: [], hashtags: [], user_mentions: [] },
+    extended_entities: { media: [] },
+  },
+});
+test("an account's timeline hands each post its raw node, a repost the reposted one", async () => {
+  const repost = rawTweet("51");
+  repost.legacy.retweeted_status_result = { result: rawTweet("41", "456") };
+  const publicRepost = rawTweet("52");
+  const publicOriginal = rawTweet("39", "789");
+  publicOriginal.core.user_results.result.legacy.protected = false;
+  publicRepost.legacy.retweeted_status_result = { result: publicOriginal };
+  const entry = (result: any) => ({
+    content: {
+      itemContent: { __typename: "TimelineTweet", tweet_results: { result } },
+    },
+  });
+  const r = normalizeProfile({ ...user, protected: true }, "123", "fxtwitter");
+  await fetchSessionTimeline(
+    r,
+    credential,
+    AbortSignal.timeout(2000),
+    async () =>
+      Response.json({
+        data: {
+          user: {
+            result: {
+              timeline: {
+                timeline: {
+                  instructions: [
+                    {
+                      type: "TimelineAddEntries",
+                      entries: [
+                        entry(rawTweet("40")),
+                        entry(repost),
+                        entry(publicRepost),
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      }),
+  );
+  const prefetched = (id: string) =>
+    JSON.parse(
+      Buffer.from(
+        r.relatedTargets.find((t) => t.url.endsWith(`/${id}`))!.prefetch,
+      ).toString(),
+    );
+  assert.equal(prefetched("40").source, "x-session");
+  assert.equal(prefetched("40").node.rest_id, "40");
+  assert.equal(prefetched("41").node.rest_id, "41");
+  assert.equal(
+    r.relatedTargets.some((t) => t.url.endsWith("/51")),
+    false,
+  );
+  // A public author's post is read from the public API like any public post.
+  assert.equal(
+    r.relatedTargets.find((t) => t.url.endsWith("/39"))!.prefetch.length,
+    0,
+  );
+});
+test("a post listed by an account's timeline needs neither its own request nor the account", async () => {
+  const sessions: string[] = [];
+  let profiles = 0;
+  const strategy = new CaptureStrategy(
+    async () => {
+      throw new Error("no public request expected");
+    },
+    async (id) =>
+      ++profiles &&
+      normalizeProfile({ ...user, protected: true }, id, "fxtwitter"),
+    async (id) => {
+      sessions.push(id);
+      return post("x-session");
+    },
+  );
+  const listed = (node: any) =>
+    FetchRequest.fromPartial({
+      ...request(),
+      url: "https://x.com/i/web/status/42",
+      automatic: true,
+      credentialDeferred: true,
+      prefetch: Buffer.from(
+        JSON.stringify({
+          source: "x-session",
+          observed_at: new Date().toISOString(),
+          source_url: "https://x.com/i/api/graphql/UserTweets",
+          node,
+        }),
+      ),
+    });
+  const result = await strategy.fetch(
+    listed(rawTweet("42")),
+    AbortSignal.timeout(1000),
+  );
+  assert.deepEqual(sessions, []);
+  assert.equal(profiles, 1);
+  assert.equal(result.text, "post 42");
+  assert.equal(result.visibility, Visibility.VISIBILITY_PRIVATE);
+  assert.equal(
+    result.sourceResponses.every(
+      (s) => s.visibility === Visibility.VISIBILITY_PRIVATE,
+    ),
+    true,
+  );
+  // A post whose building asks upstream needs the account, as its own
+  // response would.
+  strategy.sessionListed = async (id, raw, host) => {
+    await host.twitterProxy.fetch("https://x.com/i/api/1.1/live", {});
+    return parseSessionResult(id, raw, host);
+  };
+  await assert.rejects(
+    strategy.fetch(listed(rawTweet("42")), AbortSignal.timeout(1000)),
+    (error: any) => error.metadata.get("credential-required")[0] === "1",
+  );
 });

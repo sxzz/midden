@@ -1,5 +1,13 @@
 import { status } from "@grpc/grpc-js";
-import { profileStatusesAPI } from "@fxembed/atmosphere/providers/twitter/userStatuses";
+import { graphQLOrchestrator } from "@fxembed/atmosphere/providers/twitter/graphql/orchestrator";
+import { UserTweetsQuery } from "@fxembed/atmosphere/providers/twitter/graphql/queries";
+import {
+  getProfileStatusesTimelineInstructions,
+  validateUserTweetsTimeline,
+} from "@fxembed/atmosphere/providers/twitter/graphql/validators";
+import { buildAPITwitterStatus } from "@fxembed/atmosphere/providers/twitter/processor";
+import { processTimelineInstructions } from "@fxembed/atmosphere/providers/twitter/search";
+import { isTombstone } from "@fxembed/atmosphere/helpers/tombstone";
 import type { TwitterBuildHost } from "@fxembed/atmosphere/providers/twitter/build-host";
 import type { SessionCredential } from "./credential.js";
 import { accountTransport } from "./session.js";
@@ -27,12 +35,9 @@ import {
  * What a timeline showed of one listed post. The core hands it back to the
  * capture of that post, which then needs no request of its own.
  */
-export interface Prefetch {
-  source: "fxtwitter";
-  observed_at: string;
-  source_url: string;
-  post: any;
-}
+export type Prefetch =
+  | { source: "fxtwitter"; observed_at: string; source_url: string; post: any }
+  | { source: "x-session"; observed_at: string; source_url: string; node: any };
 export function encodePrefetch(value: Prefetch): Buffer | undefined {
   const body = Buffer.from(JSON.stringify(value));
   return body.length <= 64 << 10 ? body : undefined;
@@ -331,6 +336,89 @@ export async function fetchPublicProfile(
   return result;
 }
 
+// The raw node of a post, which an account's single-post response would carry
+// too; a repost lists the reposted post's node. A public author's post is read
+// from the public API like any public post, so it gets no prefetch here.
+function sessionPrefetch(node: any, sourceUrl: string): Buffer | undefined {
+  const author = (node?.tweet ?? node)?.core?.user_results?.result;
+  if ((author?.privacy?.protected ?? author?.legacy?.protected) !== true)
+    return;
+  return encodePrefetch({
+    source: "x-session",
+    observed_at: new Date().toISOString(),
+    source_url: sourceUrl,
+    node,
+  });
+}
+function timelineNodes(instructions: any[]): any[] {
+  const nodes: any[] = [];
+  const visit = (content: any) => {
+    const item = content?.itemContent ?? content?.content ?? content;
+    if (item?.__typename === "TimelineTweet" && item.tweet_results?.result)
+      nodes.push(item.tweet_results.result);
+  };
+  for (const instruction of instructions)
+    for (const entry of instruction?.entries ??
+      (instruction?.entry ? [instruction.entry] : [])) {
+      visit(entry?.content);
+      for (const item of entry?.content?.items ?? []) visit(item?.item);
+    }
+  return nodes;
+}
+// UserTweets lists posts in the same shape as the single-post response, so the
+// raw nodes can stand in for it. ProfileTimeline uses another shape.
+async function sessionTimelinePage(
+  userId: string,
+  count: number,
+  cursor: string | null,
+  host: TwitterBuildHost,
+) {
+  const response = await graphQLOrchestrator(host, [
+    {
+      key: "tweets",
+      required: true,
+      methods: [
+        {
+          name: "UserTweets",
+          query: UserTweetsQuery,
+          weight: 1,
+          validator: validateUserTweetsTimeline,
+        },
+      ],
+      variables: { userId, count, cursor },
+    },
+  ]);
+  if (!response.tweets?.success)
+    throw new ProviderError(
+      status.UNAVAILABLE,
+      "invalid profile timeline response",
+    );
+  const instructions =
+    getProfileStatusesTimelineInstructions(response.tweets.data) ?? [];
+  const results: any[] = [];
+  const nodes = new Map<string, any>();
+  for (const node of timelineNodes(instructions)) {
+    const tweet = node.tweet ?? node;
+    const status: any = await buildAPITwitterStatus(
+      host,
+      tweet,
+      undefined,
+      null,
+      false,
+      false,
+    ).catch(() => null);
+    if (!status || isTombstone(status) || status.status) continue;
+    const original = tweet.legacy?.retweeted_status_result?.result ?? node;
+    if ((original.tweet ?? original).rest_id === status.id)
+      nodes.set(status.id, original);
+    results.push(status);
+  }
+  const bottom = processTimelineInstructions(instructions).cursors.find(
+    (c) => c.cursorType === "Bottom",
+  )?.value;
+  return { timeline: { code: 200, results, cursor: { bottom } }, nodes };
+}
+
 export async function fetchSessionTimeline(
   result: FetchResponse,
   credential: SessionCredential,
@@ -349,14 +437,21 @@ export async function fetchSessionTimeline(
   try {
     await collectTimeline(
       result,
-      async (next) => ({
-        timeline: await profileStatusesAPI(
-          { type: "userId", value: result.canonicalTarget!.externalId },
+      async (next) => {
+        const recorded = responses.length;
+        const { timeline, nodes } = await sessionTimelinePage(
+          result.canonicalTarget!.externalId,
           Math.min(pageSize || 100, 100),
           next || null,
           host,
-        ),
-      }),
+        );
+        const sourceUrl = responses.slice(recorded).at(-1)?.sourceUrl ?? "";
+        return {
+          timeline,
+          prefetch: (post: any) =>
+            sessionPrefetch(nodes.get(post.id), sourceUrl),
+        };
+      },
       cursor,
       pageSize,
     );
