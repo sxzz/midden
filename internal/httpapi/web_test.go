@@ -216,6 +216,19 @@ func TestWebSessions(t *testing.T) {
 			t.Fatal(path, w.Code, w.Body.String())
 		}
 	}
+	// A session lists its capture records and saves links only through the selected source.
+	if w = call("GET", "/v1/captures", "", "", ck); w.Code != 200 || strings.TrimSpace(w.Body.String()) != `{"items":[]}` {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	unknown := uuid.NewString()
+	for _, request := range [][2]string{{"GET", "/v1/captures/" + unknown}, {"GET", "/v1/captures/" + unknown + "/members"}, {"POST", "/v1/captures/" + unknown + "/retry"}, {"POST", "/v1/captures/" + unknown + "/stop"}, {"GET", "/v1/captures/not-an-id"}} {
+		if w = call(request[0], request[1], "", "https://collection.test", ck); w.Code != 404 {
+			t.Fatal(request, w.Code, w.Body.String())
+		}
+	}
+	if w = call("POST", "/v1/captures", `{"url":"https://x.com/fixture/status/1","connection_id":"`+unknown+`"}`, "https://collection.test", ck); w.Code != 400 {
+		t.Fatal("session chose its own connection", w.Code, w.Body.String())
+	}
 
 	r := httptest.NewRequest("GET", "/v1/session", nil)
 	r.AddCookie(ck)

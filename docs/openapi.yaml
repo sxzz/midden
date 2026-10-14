@@ -125,8 +125,35 @@ paths:
               schema: { $ref: "#/components/schemas/Collection" }
         "404": { $ref: "#/components/responses/NotFound" }
   /v1/captures:
+    get:
+      summary: List this tenant's capture records, newest first
+      description: >-
+        A record is one request the tenant made through any channel, the web or
+        this API: a saved link, a refresh, or a further page of a collection.
+        Captures a collection (such as a profile) started for its members are
+        reported inside that collection's record, not as records of their own.
+      parameters:
+        - { in: query, name: cursor, schema: { type: string } }
+      responses:
+        "200":
+          description: One page of 30 records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/CaptureRecord" }
+                  next_cursor: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
     post:
       summary: Submit an X URL or refresh an existing collection
+      description: >-
+        A web session supplying url saves it through the source selected for
+        the platform (PUT /v1/accounts/selection), like a link sent to the bot,
+        and may not set provider_id, connection_id or update_mode.
       parameters:
         - in: header
           name: Idempotency-Key
@@ -176,6 +203,94 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "429":
           description: Tenant capture rate exceeded; Retry-After is returned
+  /v1/captures/{id}:
+    get:
+      summary: Read one capture record with its media and failure reasons
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses:
+        "200":
+          description: Capture record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaptureRecordDetail" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/captures/{id}/members:
+    get:
+      summary: List the member captures of a collection record
+      description: Members in the order they were submitted, 50 per page.
+      parameters:
+        - { $ref: "#/components/parameters/ID" }
+        - in: query
+          name: state
+          schema:
+            {
+              type: string,
+              enum: [problem, failed, partial, complete, pending],
+            }
+          description: problem selects failed and partial members.
+        - { in: query, name: cursor, schema: { type: string } }
+      responses:
+        "200":
+          description: One page of members
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/CaptureMember" }
+                  next_cursor: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/captures/{id}/retry:
+    post:
+      summary: Capture a record's target again as a new record
+      description: >-
+        A record whose collection's last capture failed, or whose collection was
+        deleted from the library, starts over with the source selected now. Any
+        other is refreshed through the source that saved it.
+      parameters:
+        - { $ref: "#/components/parameters/ID" }
+        - in: header
+          name: Idempotency-Key
+          schema: { type: string, maxLength: 200 }
+      responses:
+        "202":
+          description: Capture accepted or existing capture reused
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Idempotency conflict or storage quota exceeded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: Account authentication or provider unsupported
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: Tenant capture rate exceeded; Retry-After is returned
+  /v1/captures/{id}/stop:
+    post:
+      summary: Stop a collection record from fetching pages and starting members
+      description: Captures already submitted finish; saved content is kept.
+      parameters: [{ $ref: "#/components/parameters/ID" }]
+      responses:
+        "204": { description: Stopped }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: The record is not a collection
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /v1/refresh-batches:
     post:
       summary: Refresh many saved collections in the background
@@ -710,6 +825,107 @@ components:
             type: boolean,
             description: Every submission and every member capture has finished.,
           }
+    CaptureRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        job_id:
+          {
+            type: string,
+            format: uuid,
+            description: The capture that answers this record; other records may share it.,
+          }
+        collection_id: { type: string, format: uuid }
+        saved:
+          {
+            type: boolean,
+            description: False once the collection left this tenant's library.,
+          }
+        url: { type: string, description: Canonical URL of the target. }
+        input: { type: string, description: The link as it was submitted. }
+        platform: { type: string }
+        kind: { type: string }
+        state:
+          {
+            type: string,
+            enum: [queued, downloading, complete, partial, failed],
+          }
+        error: { type: string }
+        update_mode: { $ref: "#/components/schemas/UpdateMode" }
+        media:
+          type: object
+          description: Images and videos of the record's own capture.
+          properties:
+            total: { type: integer }
+            ready: { type: integer }
+            failed: { type: integer }
+        created_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        members:
+          type: object
+          description: >-
+            Only on collection records (such as profiles): the captures of its
+            members across every page fetched for this record.
+          properties:
+            total: { type: integer }
+            complete: { type: integer }
+            partial: { type: integer }
+            failed: { type: integer }
+            pending: { type: integer }
+            done: { type: boolean }
+        stopped: { type: boolean }
+        done:
+          {
+            type: boolean,
+            description: The capture and every member capture have finished.,
+          }
+    CaptureRecordDetail:
+      allOf:
+        - $ref: "#/components/schemas/CaptureRecord"
+        - type: object
+          properties:
+            warnings: { type: array, items: { type: string } }
+            media_items:
+              type: array
+              description: At most 500, in position order.
+              items:
+                type: object
+                properties:
+                  position: { type: integer }
+                  kind: { type: string, enum: [image, video] }
+                  purpose: { type: string }
+                  state: { type: string, enum: [pending, ready, failed] }
+                  error: { type: string }
+            reasons:
+              type: array
+              description: >-
+                Why the pages and members of a collection record failed or were
+                saved incompletely, most common first.
+              items:
+                type: object
+                properties:
+                  reason: { type: string }
+                  count: { type: integer }
+    CaptureMember:
+      type: object
+      properties:
+        job_id: { type: string, format: uuid }
+        collection_id: { type: string, format: uuid }
+        saved: { type: boolean }
+        url: { type: string }
+        state:
+          {
+            type: string,
+            enum: [queued, downloading, complete, partial, failed],
+          }
+        error: { type: string }
+        reasons:
+          {
+            type: array,
+            items: { type: string },
+            description: Media failures and warnings of this member.,
+          }
+        created_at: { type: string, format: date-time }
     Job:
       type: object
       properties:

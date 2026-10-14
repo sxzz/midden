@@ -120,20 +120,13 @@ func (s *Service) ChannelAction(ctx context.Context, channel string, in channela
 			}
 		}
 	case "refresh", "retry":
-		var url, state string
-		e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-			return tx.QueryRow(ctx, `SELECT a.url,coalesce((SELECT c.state FROM captures c WHERE c.collection_id=a.id AND (c.tenant_id=$2 OR EXISTS(SELECT FROM submissions s WHERE s.capture_id=c.id AND s.tenant_id=$2)) ORDER BY c.created_at DESC,c.id DESC LIMIT 1),'') FROM collections a JOIN tenant_collections t ON t.collection_id=a.id WHERE a.id=$1`, arg, tenant).Scan(&url, &state)
-		})
-		if e != nil {
-			return result, e
+		capture, err := s.recaptureInput(ctx, tenant, arg, in.Name == "retry")
+		if err != nil {
+			return result, err
 		}
-		capture := domain.CaptureInput{RefreshID: arg, Key: "refresh:" + w.ID, Origin: origin}
-		if in.Name == "retry" || state == "failed" {
-			connection, err := s.connectionForURL(ctx, tenant, url)
-			if err != nil {
-				return result, err
-			}
-			capture = domain.CaptureInput{URL: url, Input: url, ConnectionID: connection, Key: "retry:" + w.ID, Origin: origin}
+		capture.Key, capture.Origin = "retry:"+w.ID, origin
+		if capture.RefreshID != "" {
+			capture.Key = "refresh:" + w.ID
 		}
 		j, err := s.Submit(ctx, tenant, capture)
 		result.Job = &j

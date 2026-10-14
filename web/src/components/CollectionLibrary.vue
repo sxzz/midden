@@ -46,6 +46,23 @@ const id = computed(() =>
   route.name === 'collection' ? String(route.params.id) : '',
 )
 const accounts = computed(() => route.name === 'accounts')
+const captures = computed(() => route.name === 'captures')
+const capture = computed(() => route.name === 'capture')
+/** Any page reached from the library, which is where back returns to. */
+const nested = computed(
+  () => !!id.value || accounts.value || captures.value || capture.value,
+)
+const title = computed(() =>
+  accounts.value
+    ? '采集账号'
+    : captures.value
+      ? '采集'
+      : capture.value
+        ? '采集记录'
+        : id.value
+          ? '收藏详情'
+          : '我的收藏',
+)
 // Telegram draws its own back button; only stand in for it elsewhere.
 const standalone = !host()?.initData
 const savedAt = computed(() => {
@@ -65,6 +82,8 @@ const removed = shallowRef<string[]>([])
 function viewKey(target: RouteLocationNormalized) {
   if (target.name === 'collections') return `collections:${tabOf(target)}`
   if (target.name === 'accounts') return 'accounts'
+  if (target.name === 'captures') return 'captures'
+  if (target.name === 'capture') return `capture:${String(target.params.id)}`
   const key = String(target.params.id)
   // Returning to a collection we deleted must reload, not show the cached copy.
   return removed.value.includes(key) ? `${key}#removed` : key
@@ -100,9 +119,9 @@ function apiQuery(raw: string, type: Tab) {
 watch(
   () => route.fullPath,
   async () => {
-    backButton(!!id.value || accounts.value)
+    backButton(nested.value)
     const key = viewKey(route)
-    if (!id.value && !accounts.value) {
+    if (!nested.value) {
       const list = lists[tab.value]
       listRoute = list.path = route.fullPath
       list.query.value = route.fullPath.split('?')[1]?.split('#')[0] || ''
@@ -156,8 +175,14 @@ function search(q: string) {
     void lists[tab.value].collection.load(apiQuery(q, tab.value))
   else void router.push(target)
 }
+// Captures change what the lists hold; reload them when they are next shown.
+function saved() {
+  for (const list of all) list.loadedQuery = undefined
+  loadUsage()
+}
 const viewProps = computed(() => {
   if (accounts.value) return {}
+  if (captures.value || capture.value) return { onSaved: saved }
   if (id.value)
     return {
       savedAt: savedAt.value,
@@ -190,16 +215,39 @@ const viewProps = computed(() => {
   <main class="page">
     <header class="bar">
       <button
-        v-if="(id || accounts) && standalone"
+        v-if="nested && standalone"
         type="button"
         class="back"
         @click="goBack(router)"
       >
         <span class="chevron" aria-hidden="true">‹</span>返回
       </button>
-      <h1>{{ accounts ? '采集账号' : id ? '收藏详情' : '我的收藏' }}</h1>
+      <h1>{{ title }}</h1>
       <RouterLink
-        v-if="!id && !accounts"
+        v-if="!nested"
+        to="/captures"
+        class="icon-button captures-link"
+        aria-label="采集"
+        title="采集"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="22"
+          height="22"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 4v11" />
+          <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+          <path d="M5 20h14" />
+        </svg>
+      </RouterLink>
+      <RouterLink
+        v-if="!nested"
         to="/accounts"
         class="icon-button accounts-link"
         aria-label="采集账号"
@@ -221,7 +269,7 @@ const viewProps = computed(() => {
         </svg>
       </RouterLink>
       <button
-        v-if="!accounts"
+        v-if="!accounts && !captures && !capture"
         type="button"
         class="icon-button sensitive-toggle"
         aria-label="显示敏感内容"
@@ -246,7 +294,7 @@ const viewProps = computed(() => {
         </svg>
       </button>
     </header>
-    <div v-if="!id && !accounts" class="tabs" role="tablist" aria-label="类型">
+    <div v-if="!nested" class="tabs" role="tablist" aria-label="类型">
       <button
         v-for="option in tabs"
         :key="option.value"

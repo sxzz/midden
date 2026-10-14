@@ -52,9 +52,16 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 				return
 			}
 		}
+		in.Key = r.Header.Get("Idempotency-Key")
 		if _, ok := r.Context().Value(sessionKey{}).(bool); ok {
+			// A session saves links like the bot does, through the selected source.
 			if in.RefreshID == "" {
-				write(w, 400, map[string]string{"error": "save links through the bot"})
+				if in.ConnectionID != "" || in.ProviderID != "" || in.UpdateMode != "" {
+					write(w, 400, map[string]string{"error": "invalid request"})
+					return
+				}
+				j, e := s.CaptureURL(r.Context(), tenant(r), in.URL, in.Key)
+				respond(w, 202, j, e)
 				return
 			}
 			if e := s.WebAccess(r.Context(), tenant(r), "collections", in.RefreshID); e != nil {
@@ -62,7 +69,6 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 				return
 			}
 		}
-		in.Key = r.Header.Get("Idempotency-Key")
 		if in.RefreshID != "" {
 			available, err := s.CaptureAvailable(r.Context(), tenant(r), in.RefreshID)
 			if err != nil {
@@ -76,6 +82,42 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		}
 		j, e := s.Submit(r.Context(), tenant(r), in)
 		respond(w, 202, j, e)
+	})
+	mux.HandleFunc("GET /v1/captures", func(w http.ResponseWriter, r *http.Request) {
+		v, e := s.CaptureRecords(r.Context(), tenant(r), r.URL.Query().Get("cursor"))
+		respond(w, 200, v, e)
+	})
+	mux.HandleFunc("GET /v1/captures/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
+			return
+		}
+		v, e := s.CaptureRecord(r.Context(), tenant(r), r.PathValue("id"))
+		respond(w, 200, v, e)
+	})
+	mux.HandleFunc("GET /v1/captures/{id}/members", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
+			return
+		}
+		q := r.URL.Query()
+		v, e := s.CaptureMembers(r.Context(), tenant(r), r.PathValue("id"), q.Get("state"), q.Get("cursor"))
+		respond(w, 200, v, e)
+	})
+	mux.HandleFunc("POST /v1/captures/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
+			return
+		}
+		j, e := s.RetryCaptureRecord(r.Context(), tenant(r), r.PathValue("id"), r.Header.Get("Idempotency-Key"))
+		respond(w, 202, j, e)
+	})
+	mux.HandleFunc("POST /v1/captures/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
+			return
+		}
+		if e := s.StopCollection(r.Context(), tenant(r), r.PathValue("id")); e != nil {
+			respond(w, 200, nil, e)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /v1/refresh-batches", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

@@ -85,6 +85,58 @@ export interface Job {
   members?: MemberProgress
 }
 export type UpdateMode = 'append' | 'full'
+/** Images and videos of a record's own capture. */
+export interface MediaProgress {
+  total: number
+  ready: number
+  failed: number
+}
+/** One capture request: a saved link, a refresh, or a further page. */
+export interface CaptureRecord {
+  id: string
+  job_id: string
+  collection_id: string
+  /** False once the collection left the library. */
+  saved: boolean
+  url: string
+  input: string
+  platform: string
+  kind: string
+  state: 'queued' | 'downloading' | 'complete' | 'partial' | 'failed'
+  error?: string
+  update_mode: UpdateMode
+  media: MediaProgress
+  created_at: string
+  finished_at?: string
+  /** Set for a collection such as a profile, covering its members' captures. */
+  members?: MemberProgress
+  stopped?: boolean
+  /** The capture and every member capture have finished. */
+  done: boolean
+}
+export interface CaptureMedia {
+  position: number
+  kind: string
+  purpose?: string
+  state: 'pending' | 'ready' | 'failed'
+  error?: string
+}
+export interface CaptureRecordDetail extends CaptureRecord {
+  warnings: string[]
+  media_items: CaptureMedia[]
+  /** Why members failed or were saved incompletely, most common first. */
+  reasons: { reason: string; count: number }[]
+}
+export interface CaptureMember {
+  job_id: string
+  collection_id: string
+  saved: boolean
+  url: string
+  state: CaptureRecord['state']
+  error?: string
+  reasons: string[]
+  created_at: string
+}
 export interface Usage {
   used_bytes: number
   reserved_bytes: number
@@ -147,6 +199,8 @@ export function errorText(e: unknown) {
       return '筛选条件无效。'
     if (e.status === 400 && e.message === 'invalid note or tags')
       return '备注最多 10000 字，标签名最多 64 字，标签最多 100 个。'
+    if (e.status === 400 && e.message === 'unsupported URL')
+      return '不支持的链接。'
     if (e.status === 400 && e.message === 'invalid credentials')
       return '凭据无效或已过期。'
     if (
@@ -154,6 +208,8 @@ export function errorText(e: unknown) {
       e.message === 'account required; add and select your own credentials'
     )
       return '此平台需要账号，请先添加并选择自己的采集凭据。'
+    if (e.status === 422 && e.message.startsWith('account unavailable'))
+      return '账号不可用，请在采集账号中选择可用账号或重新授权。'
     if (e.status === 401)
       return host()?.initData
         ? '会话已失效，请从 Telegram 重新打开。'
