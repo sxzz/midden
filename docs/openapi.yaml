@@ -306,6 +306,49 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/captures/{id}/pages:
+    post:
+      summary: Continue a finished collection record like the bot's buttons
+      description: >-
+        more fetches the next page of the listing, more1000 keeps fetching
+        until about 1000 members, and page_retry fetches the last page again.
+        The pages form a new record. Asking for more again gives the same
+        capture; the record's pages field tells which operations apply.
+      parameters:
+        - { $ref: "#/components/parameters/ID" }
+        - in: header
+          name: Idempotency-Key
+          schema: { type: string, maxLength: 200 }
+          description: Distinguishes page retries.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [op]
+              properties:
+                op: { type: string, enum: [more, more1000, page_retry] }
+      responses:
+        "202":
+          description: Capture of the pages accepted or existing capture reused
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: No pages after the last one fetched, or the request conflicts with an earlier one
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: The record is not a finished collection, or the source cannot fetch 1000 at once
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /v1/captures/{id}/stop:
     post:
       summary: Stop a collection record from fetching pages and starting members
@@ -949,6 +992,25 @@ components:
             type: integer,
             description: Failed members a finished collection record can fetch again with its retry-failed action.,
           }
+        pages:
+          type: object
+          description: Only on a finished collection record that was not stopped.
+          properties:
+            more:
+              {
+                type: boolean,
+                description: The listing has pages after the last one fetched.,
+              }
+            more_1000:
+              {
+                type: boolean,
+                description: The source can fetch about 1000 at once.,
+              }
+            failed:
+              {
+                type: boolean,
+                description: A page was not fetched; page_retry fetches it again.,
+              }
         done:
           {
             type: boolean,

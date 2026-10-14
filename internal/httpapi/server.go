@@ -131,6 +131,22 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		n, e := s.RetryCaptureMembers(r.Context(), tenant(r), r.PathValue("id"), in.JobID)
 		respond(w, 202, map[string]int64{"count": n}, e)
 	})
+	mux.HandleFunc("POST /v1/captures/{id}/pages", func(w http.ResponseWriter, r *http.Request) {
+		if !checkID(w, r) {
+			return
+		}
+		var in struct {
+			Op string `json:"op"`
+		}
+		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10))
+		d.DisallowUnknownFields()
+		if d.Decode(&in) != nil || in.Op != "more" && in.Op != "more1000" && in.Op != "page_retry" {
+			write(w, 400, map[string]string{"error": "invalid request"})
+			return
+		}
+		j, e := s.CaptureRecordPage(r.Context(), tenant(r), r.PathValue("id"), in.Op, r.Header.Get("Idempotency-Key"))
+		respond(w, 202, j, e)
+	})
 	mux.HandleFunc("POST /v1/captures/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
 		if !checkID(w, r) {
 			return
@@ -428,6 +444,9 @@ func respond(w http.ResponseWriter, code int, v any, e error) {
 		msg = "account unavailable; choose a source or authorize again"
 	case errors.Is(e, domain.ErrUnsupported):
 		code = 422
+		msg = e.Error()
+	case errors.Is(e, app.ErrNoMorePages):
+		code = 409
 		msg = e.Error()
 	case errors.Is(e, domain.ErrConflict):
 		code = 409

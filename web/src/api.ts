@@ -120,6 +120,8 @@ export interface CaptureRecord {
   stopped?: boolean
   /** Failed members a finished collection record can fetch again. */
   retryable?: number
+  /** What a finished collection record can fetch next, as the bot offers. */
+  pages?: { more: boolean; more_1000: boolean; failed: boolean }
   /** The capture and every member capture have finished. */
   done: boolean
 }
@@ -210,6 +212,8 @@ export function errorText(e: unknown) {
       return '筛选条件无效。'
     if (e.status === 400 && e.message === 'invalid note or tags')
       return '备注最多 10000 字，标签名最多 64 字，标签最多 100 个。'
+    if (e.status === 409 && e.message === 'no more pages')
+      return '没有更多帖子了。'
     if (e.status === 400 && e.message === 'unsupported URL')
       return '不支持的链接。'
     if (e.status === 400 && e.message === 'invalid credentials')

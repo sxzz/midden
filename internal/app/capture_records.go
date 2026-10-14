@@ -40,10 +40,20 @@ type (
 		// Retryable counts the failed members a finished collection record can
 		// fetch again, leaving out those whose source reported them gone.
 		Retryable int `json:"retryable,omitempty"`
+		// Pages tells what a finished collection record can fetch next.
+		Pages *RecordPages `json:"pages,omitempty"`
 		// Done once the capture and every member capture have finished.
 		Done bool `json:"done"`
 
 		collection bool
+	}
+	RecordPages struct {
+		// More is set while the listing has pages after the last one fetched.
+		More bool `json:"more"`
+		// More1000 is set when the source can fetch about 1000 at once.
+		More1000 bool `json:"more_1000"`
+		// Failed is set when the last page, or one before it, was not fetched.
+		Failed bool `json:"failed"`
 	}
 	MediaProgress struct {
 		Total  int `json:"total"`
@@ -132,6 +142,9 @@ func (s *Service) memberProgress(ctx context.Context, tenant string, r *CaptureR
 	r.Members = &domain.MemberProgress{Total: c.Total, Complete: c.Complete, Partial: c.Partial, Failed: c.Failed, Pending: c.Pending, Done: c.Done || c.Stopped}
 	r.Stopped = c.Stopped
 	r.Done = r.Members.Done
+	if r.Done && !r.Stopped {
+		r.Pages = &RecordPages{More: c.Next != "", More1000: c.Next != "" && c.MaxBatch >= 1000, Failed: c.Error != "" || r.State == "failed" || r.State == "partial"}
+	}
 	if r.Done {
 		e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx, collectionChainSQL+` SELECT count(DISTINCT member.capture_id)`+retryableMembersSQL, r.ID).Scan(&r.Retryable)
@@ -374,4 +387,47 @@ func (s *Service) RetryCaptureMembers(ctx context.Context, tenant, id, member st
 		return e
 	})
 	return
+}
+
+// CaptureRecordPage continues a finished collection record like the bot's
+// buttons: "more", "more1000" or "page_retry". Its pages form a new record.
+// Asking for more twice gives the same capture.
+func (s *Service) CaptureRecordPage(ctx context.Context, tenant, id, op, key string) (domain.Job, error) {
+	var r CaptureRecord
+	e := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, captureRecordSQL+` AND s.id=$1`, id)
+		if err != nil {
+			return err
+		}
+		items, err := scanCaptureRecords(rows)
+		if err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			return domain.ErrNotFound
+		}
+		r = items[0]
+		return nil
+	})
+	if e != nil {
+		return domain.Job{}, e
+	}
+	if _, e = s.memberProgress(ctx, tenant, &r); e != nil {
+		return domain.Job{}, e
+	}
+	if r.Pages == nil {
+		return domain.Job{}, domain.ErrUnsupported
+	}
+	idem := "more:" + id
+	switch op {
+	case "more", "more1000":
+	case "page_retry":
+		if key == "" {
+			key = uuid.NewString()
+		}
+		idem = "page-retry:" + key
+	default:
+		return domain.Job{}, domain.ErrUnsupported
+	}
+	return s.collectionPage(ctx, tenant, domain.Origin{}, id, op, idem, false)
 }

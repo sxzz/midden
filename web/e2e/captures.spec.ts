@@ -302,3 +302,63 @@ test('shows collection progress, member failures, stop and retry', async ({
     'retry',
   ])
 })
+
+test('a finished profile record fetches more pages as its own record', async ({
+  page,
+}) => {
+  const next = '55555555-5555-4555-8555-555555555555'
+  const members = {
+    total: 100,
+    complete: 100,
+    partial: 0,
+    failed: 0,
+    pending: 0,
+    done: true,
+  }
+  const finished = detail({
+    id: profile,
+    kind: 'profile',
+    url: 'https://x.com/fixture',
+    state: 'complete',
+    done: true,
+    members,
+    pages: { more: true, more_1000: true, failed: false },
+  })
+  const ops: string[] = []
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const request = r.request()
+    const path = new URL(request.url()).pathname
+    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === `/v1/captures/${profile}/pages`) {
+      const { op } = request.postDataJSON()
+      ops.push(op)
+      if (op === 'more1000')
+        return r.fulfill({ status: 409, json: { error: 'no more pages' } })
+      return r.fulfill({ status: 202, json: { id: `job-${next}` } })
+    }
+    if (path === `/v1/captures/${profile}/members`)
+      return r.fulfill({ json: { items: [] } })
+    if (path === '/v1/captures')
+      return r.fulfill({
+        json: {
+          items: [record({ id: next, kind: 'profile' }), finished],
+        },
+      })
+    if (path === `/v1/captures/${profile}`) return r.fulfill({ json: finished })
+    if (path === `/v1/captures/${next}`)
+      return r.fulfill({
+        json: detail({ id: next, kind: 'profile', members }),
+      })
+    return r.fulfill({ status: 404, json: { error: 'not found' } })
+  })
+  await page.goto(`/app/#/captures/${profile}`)
+  await expect(page.getByRole('button', { name: '重试本页' })).toHaveCount(0)
+  await page.getByRole('button', { name: '抓取1000条' }).click()
+  await expect(page.getByText('没有更多帖子了。')).toBeVisible()
+  await page.getByRole('button', { name: '抓取更多' }).click()
+  await expect(page).toHaveURL(new RegExp(`#/captures/${next}$`))
+  // The next page is still running, so it offers nothing to continue yet.
+  await expect(page.getByRole('button', { name: '抓取更多' })).toHaveCount(0)
+  expect(ops).toEqual(['more1000', 'more'])
+})

@@ -172,3 +172,83 @@ func TestCaptureRecords(t *testing.T) {
 		t.Fatalf("records after saving again: %+v", list)
 	}
 }
+
+func TestCaptureRecordPages(t *testing.T) {
+	if os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("Docker database required")
+	}
+	ctx := context.Background()
+	admin, e := store.Open(ctx, os.Getenv("TEST_ADMIN_DATABASE_URL"))
+	must(t, e)
+	defer admin.Close()
+	db, e := store.Open(ctx, os.Getenv("TEST_DATABASE_URL"))
+	must(t, e)
+	defer db.Close()
+	queue, e := river.NewClient(riverpgxv5.New(db.Pool), &river.Config{})
+	must(t, e)
+	cfg := Defaults()
+	cfg.Rate = 1000
+	s := &Service{DB: db, Queue: queue, Adapter: &pageAdapter{&collectionAdapter{&fakeAdapter{}}}, Config: cfg}
+	var tenant, other string
+	must(t, admin.Pool.QueryRow(ctx, "INSERT INTO tenants DEFAULT VALUES RETURNING id").Scan(&tenant))
+	must(t, admin.Pool.QueryRow(ctx, "INSERT INTO tenants DEFAULT VALUES RETURNING id").Scan(&other))
+	complete := func(id string) {
+		must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: id}))
+		must(t, s.finalize(ctx, tenant, id))
+	}
+	// Runs a page record to its end: the listing, then its one member.
+	finish := func(job domain.Job) CaptureRecordDetail {
+		complete(job.ID)
+		var record string
+		must(t, db.Tx(ctx, tenant, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT id FROM submissions WHERE capture_id=$1 AND parent_submission IS NULL ORDER BY created_at DESC LIMIT 1`, job.ID).Scan(&record)
+		}))
+		must(t, s.related(ctx, store.Task{Tenant: tenant, ID: record, Type: "related"}))
+		var member string
+		must(t, admin.Pool.QueryRow(ctx, `SELECT capture_id FROM submissions WHERE parent_submission=$1`, record).Scan(&member))
+		complete(member)
+		d, e := s.CaptureRecord(ctx, tenant, record)
+		must(t, e)
+		return d
+	}
+
+	job, e := s.CaptureURL(ctx, tenant, "https://notes.test/collection/"+uuid.NewString(), "")
+	must(t, e)
+	first := finish(job)
+	if p := first.Pages; !first.Done || p == nil || !p.More || !p.More1000 || p.Failed {
+		t.Fatalf("first page record %+v %+v", first.CaptureRecord, p)
+	}
+	if _, e = s.CaptureRecordPage(ctx, other, first.ID, "more", ""); !errors.Is(e, domain.ErrNotFound) {
+		t.Fatal("foreign record continued", e)
+	}
+	more, e := s.CaptureRecordPage(ctx, tenant, first.ID, "more", "")
+	must(t, e)
+	// Asking twice gives the same page, as pressing the bot's button twice does.
+	if again, e := s.CaptureRecordPage(ctx, tenant, first.ID, "more", ""); e != nil || again.ID != more.ID {
+		t.Fatal("second request fetched another page", again.ID, more.ID, e)
+	}
+	second := finish(more)
+	records, e := s.CaptureRecords(ctx, tenant, "")
+	must(t, e)
+	if len(records.Items) != 2 || records.Items[0].ID != second.ID || records.Items[1].ID != first.ID {
+		t.Fatalf("the next page is not its own record: %+v", records.Items)
+	}
+	if p := second.Pages; p == nil || p.More || p.More1000 {
+		t.Fatalf("last page still offers more: %+v", p)
+	}
+	if _, e = s.CaptureRecordPage(ctx, tenant, second.ID, "more", ""); !errors.Is(e, ErrNoMorePages) {
+		t.Fatal("fetched past the last page", e)
+	}
+	// Retrying a page fetches the same cursor again.
+	retried, e := s.CaptureRecordPage(ctx, tenant, second.ID, "page_retry", "fixture")
+	must(t, e)
+	var cursor string
+	must(t, admin.Pool.QueryRow(ctx, `SELECT page_cursor FROM captures WHERE id=$1`, retried.ID).Scan(&cursor))
+	if cursor != "second" {
+		t.Fatal("page retry fetched another page", cursor)
+	}
+	// Only the bot's three operations exist.
+	if _, e = s.CaptureRecordPage(ctx, tenant, records.Items[0].ID, "unknown", ""); !errors.Is(e, domain.ErrUnsupported) {
+		t.Fatal("accepted an unknown operation", e)
+	}
+}

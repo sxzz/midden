@@ -226,6 +226,12 @@ func TestWebSessions(t *testing.T) {
 			t.Fatal(request, w.Code, w.Body.String())
 		}
 	}
+	if w = call("POST", "/v1/captures/"+unknown+"/pages", `{"op":"more"}`, "https://collection.test", ck); w.Code != 404 {
+		t.Fatal("pages of an unknown record", w.Code, w.Body.String())
+	}
+	if w = call("POST", "/v1/captures/"+unknown+"/pages", `{"op":"all"}`, "https://collection.test", ck); w.Code != 400 {
+		t.Fatal("accepted an unknown page operation", w.Code)
+	}
 	if w = call("POST", "/v1/captures", `{"url":"https://x.com/fixture/status/1","connection_id":"`+unknown+`"}`, "https://collection.test", ck); w.Code != 400 {
 		t.Fatal("session chose its own connection", w.Code, w.Body.String())
 	}

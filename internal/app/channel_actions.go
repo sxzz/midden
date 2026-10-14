@@ -171,6 +171,25 @@ func (s *Service) ChannelAction(ctx context.Context, channel string, in channela
 
 func (s *Service) channelPage(ctx context.Context, tenant string, origin domain.Origin, key, id, op string) (channelapi.Result, error) {
 	var out channelapi.Result
+	idem := "more:" + id
+	if op == "page_retry" {
+		idem = "page-retry:" + key
+	}
+	_, e := s.collectionPage(ctx, tenant, origin, id, op, idem, true)
+	if errors.Is(e, ErrNoMorePages) {
+		out.Code, e = "no_more", nil
+	}
+	return out, e
+}
+
+// ErrNoMorePages reports a collection whose listing has no page after the last one fetched.
+var ErrNoMorePages = errors.New("no more pages")
+
+// collectionPage continues the collection a submission captured from its last
+// page: "more" fetches the next page, "more1000" keeps fetching until about
+// 1000 members, and "page_retry" fetches the last page again. A channel acts
+// only once its message was delivered.
+func (s *Service) collectionPage(ctx context.Context, tenant string, origin domain.Origin, id, op, idem string, delivered bool) (domain.Job, error) {
 	var url, provider, connection, cursor string
 	var maxBatch, remaining, pageSize uint32
 	retry := op == "page_retry"
@@ -179,29 +198,23 @@ func (s *Service) channelPage(ctx context.Context, tenant string, origin domain.
 		limit = 1000
 	}
 	e := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, collectionChainSQL+` SELECT a.url,p.related_provider,coalesce(p.related_connection::text,''),CASE WHEN $2 THEN c.page_cursor ELSE c.next_page_cursor END,c.max_batch_size,p.collection_limit,c.page_size FROM pages p JOIN captures c ON c.id=p.capture_id JOIN collections a ON a.id=c.collection_id JOIN tenant_collections owned ON owned.collection_id=a.id WHERE c.is_collection AND EXISTS(SELECT FROM submissions WHERE id=$1 AND state='sent' AND related_state<>'none') ORDER BY depth DESC LIMIT 1`, id, retry).Scan(&url, &provider, &connection, &cursor, &maxBatch, &remaining, &pageSize)
+		return tx.QueryRow(ctx, collectionChainSQL+` SELECT a.url,p.related_provider,coalesce(p.related_connection::text,''),CASE WHEN $2 THEN c.page_cursor ELSE c.next_page_cursor END,c.max_batch_size,p.collection_limit,c.page_size FROM pages p JOIN captures c ON c.id=p.capture_id JOIN collections a ON a.id=c.collection_id JOIN tenant_collections owned ON owned.collection_id=a.id WHERE c.is_collection AND EXISTS(SELECT FROM submissions WHERE id=$1 AND (state='sent' OR NOT $3) AND related_state<>'none') ORDER BY depth DESC LIMIT 1`, id, retry, delivered).Scan(&url, &provider, &connection, &cursor, &maxBatch, &remaining, &pageSize)
 	})
 	if e != nil {
-		return out, e
+		return domain.Job{}, e
 	}
 	if !retry && limit > maxBatch {
-		return out, domain.ErrUnsupported
+		return domain.Job{}, domain.ErrUnsupported
 	}
 	if cursor == "" && !retry {
-		out.Code = "no_more"
-		return out, nil
+		return domain.Job{}, ErrNoMorePages
 	}
 	if retry {
 		limit = remaining
 	} else {
 		pageSize = limit
 	}
-	idem := "more:" + id
-	if retry {
-		idem = "page-retry:" + key
-	}
-	_, e = s.Submit(ctx, tenant, domain.CaptureInput{URL: url, ProviderID: provider, ConnectionID: connection, PageCursor: cursor, PageSize: pageSize, CollectionLimit: limit, Key: idem, Origin: origin})
-	return out, e
+	return s.Submit(ctx, tenant, domain.CaptureInput{URL: url, ProviderID: provider, ConnectionID: connection, PageCursor: cursor, PageSize: pageSize, CollectionLimit: limit, Key: idem, Origin: origin})
 }
 
 func (s *Service) channelAccounts(ctx context.Context, tenant string) (channelapi.AccountList, error) {

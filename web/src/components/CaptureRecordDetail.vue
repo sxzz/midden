@@ -193,6 +193,26 @@ async function retry() {
     busy.value = false
   }
 }
+/**
+ * Continue the listing like the bot's buttons. The pages fetched form a new
+ * record, which is opened.
+ */
+async function page(op: 'more' | 'more1000' | 'page_retry') {
+  if (busy.value) return
+  busy.value = true
+  try {
+    const job = await api<Job>(`/captures/${props.id}/pages`, {
+      method: 'POST',
+      body: JSON.stringify({ op }),
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+    })
+    await follow(job)
+  } catch (e) {
+    toast(errorText(e))
+  } finally {
+    busy.value = false
+  }
+}
 /** Fetch failed posts again inside this record, all of them or just one. */
 async function retryFailed(member?: CaptureMember) {
   if (busy.value) return
@@ -290,6 +310,24 @@ function openCollection(id: string) {
         variant="destructive"
         :disabled="busy"
         @select="stop"
+      />
+      <ListButton
+        v-if="record.pages?.more"
+        label="抓取更多"
+        :disabled="busy"
+        @select="page('more')"
+      />
+      <ListButton
+        v-if="record.pages?.more_1000"
+        label="抓取1000条"
+        :disabled="busy"
+        @select="page('more1000')"
+      />
+      <ListButton
+        v-if="record.pages?.failed"
+        label="重试本页"
+        :disabled="busy"
+        @select="page('page_retry')"
       />
       <ListButton
         v-if="record.retryable"
