@@ -49,8 +49,22 @@ test("adapter owns X target identity", () => {
       collection: false,
     });
   }
+  // FxEmbed mirrors name the same post, with an optional view and language.
   for (const input of [
-    "https://x.com/home",
+    "https://fxtwitter.com/fixture/status/123",
+    "https://fixupx.com/fixture/status/123/en",
+    "https://d.fxtwitter.com/fixture/status/123/photo/1",
+    "https://g.fixupx.com/fixture/status/123/zh-CN/",
+  ])
+    assert.equal(resolveTarget(input).url, "https://x.com/fixture/status/123");
+  assert.equal(
+    resolveTarget("https://fxtwitter.com/Fixture").externalId,
+    "handle:fixture",
+  );
+  for (const input of [
+    "https://x.com/fixture/status/123/en",
+    "https://api.fxtwitter.com/fixture/status/123",
+    "https://fxtwitter.com.evil.test/a/status/123",
     "https://x.com.evil.test/a/status/123",
     "https://user@x.com/a/status/123",
     "file:///a/status/123",

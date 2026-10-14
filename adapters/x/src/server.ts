@@ -1,5 +1,5 @@
 import { CaptureStrategy } from "./strategy.js";
-import { resolveTarget } from "./resolve.js";
+import { hosts, resolveTarget } from "./resolve.js";
 import { decodeCredential, prepareCredential } from "./credential.js";
 import { entityTypes } from "./entity-schemas.js";
 import {
@@ -79,14 +79,7 @@ export function createServer(
       adapterId: "x",
       displayName: "X",
       version: "0.4.0",
-      hosts: [
-        "x.com",
-        "twitter.com",
-        "www.x.com",
-        "www.twitter.com",
-        "mobile.x.com",
-        "mobile.twitter.com",
-      ],
+      hosts,
       entityTypes,
       providers: [
         {

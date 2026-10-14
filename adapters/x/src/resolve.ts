@@ -1,8 +1,32 @@
 import { status } from "@grpc/grpc-js";
 import { ProviderError } from "./provider.js";
+// FxEmbed mirrors X paths on its own domains. A subdomain only picks how the
+// embed is rendered (direct media, gallery, text), never another object.
+const mirrors = ["fxtwitter.com", "fixupx.com"];
+const mirrorModes = ["www", "d", "dl", "g", "t"];
+export const hosts = [
+  ...["x.com", "twitter.com"].flatMap((host) => [
+    host,
+    `www.${host}`,
+    `mobile.${host}`,
+  ]),
+  ...mirrors.flatMap((host) => [
+    host,
+    ...mirrorModes.map((mode) => `${mode}.${host}`),
+  ]),
+];
 export function resolveTarget(raw: string) {
   try {
     const url = new URL(raw.trim());
+    const mirror = mirrors.some(
+      (host) => url.hostname === host || url.hostname.endsWith(`.${host}`),
+    );
+    // A mirrored post link may end with the language to translate it into.
+    if (mirror)
+      url.pathname = url.pathname.replace(
+        /(\/status\/\d+(?:\/(?:photo|video)\/\d+)?)\/[A-Za-z]{2}(?:-[A-Za-z]{2,4})?\/?$/,
+        "$1",
+      );
     const match = url.pathname.match(
       /^\/(?:[A-Za-z0-9_]{1,20}|i\/web)\/status\/(\d+)(?:\/(?:photo|video)\/\d+)?\/?$/,
     );
@@ -11,7 +35,7 @@ export function resolveTarget(raw: string) {
       url.username ||
       url.password ||
       url.port ||
-      !/^(?:(?:www|mobile)\.)?(?:x|twitter)\.com$/.test(url.hostname)
+      !hosts.includes(url.hostname)
     )
       throw new Error();
     if (match)
