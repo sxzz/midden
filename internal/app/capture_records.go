@@ -93,11 +93,14 @@ const (
 )
 
 // Records are the tenant's root submissions. One that only shows saved content
-// again carries no input and is not a capture.
+// again carries no input and is not a capture. A member or continuation page
+// loses its parent when that is deleted, so their keys exclude them as well.
 const captureRecordSQL = `SELECT s.id,s.input,s.update_mode,s.created_at,c.is_collection AND s.related_state<>'none',c.id,c.collection_id,c.state,c.error,c.finished_at,a.url,a.platform,a.kind,EXISTS(SELECT FROM tenant_collections t WHERE t.collection_id=a.id),m.total,m.ready,m.failed
  FROM submissions s JOIN captures c ON c.id=s.capture_id JOIN collections a ON a.id=c.collection_id
  CROSS JOIN LATERAL (SELECT count(*) AS total,count(*) FILTER (WHERE x.state='ready') AS ready,count(*) FILTER (WHERE x.state='failed') AS failed FROM assets x WHERE x.capture_id=c.id) m
- WHERE s.tenant_id=current_tenant() AND s.parent_submission IS NULL AND s.input<>''`
+ WHERE s.tenant_id=current_tenant() AND ` + recordRootSQL
+
+const recordRootSQL = `s.parent_submission IS NULL AND s.input<>'' AND s.idem_key NOT LIKE 'related:%' AND s.idem_key NOT LIKE 'related-expand:%' AND s.idem_key NOT LIKE 'batch:%'`
 
 func scanCaptureRecords(rows pgx.Rows) ([]CaptureRecord, error) {
 	defer rows.Close()
@@ -245,7 +248,7 @@ func (s *Service) CaptureMembers(ctx context.Context, tenant, id, state, cursor 
 	}
 	e = s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
 		var root bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM submissions WHERE id=$1 AND parent_submission IS NULL AND input<>'')`, id).Scan(&root); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM (`+captureRecordSQL+` AND s.id=$1) r)`, id).Scan(&root); err != nil {
 			return err
 		}
 		if !root {
@@ -318,7 +321,7 @@ func (s *Service) RetryCaptureRecord(ctx context.Context, tenant, id, key string
 	var collection, url string
 	var saved bool
 	e := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT a.id,a.url,EXISTS(SELECT FROM tenant_collections t WHERE t.collection_id=a.id) FROM submissions s JOIN captures c ON c.id=s.capture_id JOIN collections a ON a.id=c.collection_id WHERE s.id=$1 AND s.parent_submission IS NULL AND s.input<>''`, id).Scan(&collection, &url, &saved)
+		return tx.QueryRow(ctx, `SELECT a.id,a.url,EXISTS(SELECT FROM tenant_collections t WHERE t.collection_id=a.id) FROM submissions s JOIN captures c ON c.id=s.capture_id JOIN collections a ON a.id=c.collection_id WHERE s.id=$1 AND `+recordRootSQL, id).Scan(&collection, &url, &saved)
 	})
 	if e != nil {
 		return domain.Job{}, e

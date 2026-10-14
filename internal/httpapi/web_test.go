@@ -229,6 +229,21 @@ func TestWebSessions(t *testing.T) {
 	if w = call("POST", "/v1/captures", `{"url":"https://x.com/fixture/status/1","connection_id":"`+unknown+`"}`, "https://collection.test", ck); w.Code != 400 {
 		t.Fatal("session chose its own connection", w.Code, w.Body.String())
 	}
+	// Deleting everything needs the intent spelled out and reports what it removed.
+	if w = call("GET", "/v1/library", "", "", ck); w.Code != 200 || strings.TrimSpace(w.Body.String()) != `{"collections":0,"records":0,"running":0}` {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	for _, body := range []string{``, `{}`, `{"confirm":"yes"}`, `{"confirm":"delete all","extra":1}`} {
+		if w = call("POST", "/v1/library/delete-all", body, "https://collection.test", ck); w.Code != 400 {
+			t.Fatal("deleted without confirmation", body, w.Code)
+		}
+	}
+	if w = call("POST", "/v1/library/delete-all", `{"confirm":"delete all"}`, "https://evil.test", ck); w.Code != 403 {
+		t.Fatal("cross-origin delete", w.Code)
+	}
+	if w = call("POST", "/v1/library/delete-all", `{"confirm":"delete all"}`, "https://collection.test", ck); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
 
 	r := httptest.NewRequest("GET", "/v1/session", nil)
 	r.AddCookie(ck)

@@ -49,18 +49,39 @@ func TestDeleteAllIsolationAndRetention(t *testing.T) {
 	must(t, err)
 	usageBefore, err := s.Usage(ctx, b.TenantID)
 	must(t, err)
+	// A delivery still waiting on a deleted record has nothing left to send.
+	var delivery string
+	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO channel_work(tenant_id,channel_id,kind,resource) SELECT $1,$2,'delivery',id::text FROM submissions WHERE capture_id=$3 AND tenant_id=$1 RETURNING id`, a.TenantID, channel, alone.ID).Scan(&delivery))
+	size, err := s.LibrarySize(ctx, a.TenantID)
+	must(t, err)
+	if size != (LibrarySize{Collections: 2, Records: 2}) {
+		t.Fatal("wrong library size", size)
+	}
 	var cutoff time.Time
 	must(t, admin.Pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&cutoff))
 	later := save("https://x.com/i/status/98000000003")
-	n, err := s.DeleteAllCollections(ctx, a.TenantID, cutoff)
+	n, err := s.DeleteAll(ctx, a.TenantID, cutoff)
 	must(t, err)
-	if n != 2 {
+	if n != (LibrarySize{Collections: 2, Records: 2}) {
 		t.Fatal("wrong deletion count", n)
 	}
-	n, err = s.DeleteAllCollections(ctx, a.TenantID, cutoff)
+	n, err = s.DeleteAll(ctx, a.TenantID, cutoff)
 	must(t, err)
-	if n != 0 {
+	if n != (LibrarySize{}) {
 		t.Fatal("retry removed newer saves", n)
+	}
+	records, err := s.CaptureRecords(ctx, a.TenantID, "")
+	must(t, err)
+	if len(records.Items) != 1 || records.Items[0].JobID != later.ID {
+		t.Fatal("capture records not cleared up to the cutoff", records.Items)
+	}
+	var settled string
+	must(t, admin.Pool.QueryRow(ctx, `SELECT state FROM channel_work WHERE id=$1`, delivery).Scan(&settled))
+	if settled != "done" {
+		t.Fatal("delivery of a deleted record left pending", settled)
+	}
+	if other, err := s.CaptureRecords(ctx, b.TenantID, ""); err != nil || len(other.Items) != 0 {
+		t.Fatal("other tenant records changed", other.Items, err)
 	}
 	page, err := s.Recent(ctx, a.TenantID, "")
 	must(t, err)

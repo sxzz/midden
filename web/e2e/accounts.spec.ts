@@ -235,3 +235,69 @@ test('adds, selects and deletes an X account', async ({ page }) => {
   await page.getByRole('button', { name: '返回' }).click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
 })
+
+test('deleting everything shows what goes and needs the phrase typed', async ({
+  page,
+}) => {
+  let deleted: unknown
+  let listed = [
+    {
+      id: '11111111-1111-4111-8111-111111111111',
+      url: 'https://example.test/post/1',
+      text: '要删除的收藏',
+      author_name: '作者',
+      saved_at: '2026-09-29T10:00:00Z',
+      observed_at: '2026-09-29T10:00:00Z',
+      visibility: 'public',
+      revision_id: 'r1',
+      assets: [],
+    },
+  ]
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const request = r.request()
+    const path = new URL(request.url()).pathname
+    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/accounts')
+      return r.fulfill({ json: { platforms: [], accounts: [] } })
+    if (path === '/v1/library')
+      return r.fulfill({ json: { collections: 12, records: 30, running: 2 } })
+    if (path === '/v1/library/delete-all') {
+      deleted = request.postDataJSON()
+      listed = []
+      return r.fulfill({ json: { collections: 12, records: 30, running: 0 } })
+    }
+    if (path === '/v1/collections')
+      return r.fulfill({ json: { items: listed } })
+    return r.fulfill({ json: {} })
+  })
+  await page.goto('/app/')
+  await expect(page.getByText('要删除的收藏')).toBeVisible()
+  await page.getByRole('link', { name: '采集账号' }).click()
+  await page
+    .getByRole('button', { name: '删除全部收藏和采集记录', exact: true })
+    .click()
+  const sheet = page.getByRole('dialog', { name: '删除全部收藏和采集记录？' })
+  await expect(sheet).toContainText(
+    '12 条收藏、30 条采集记录（2 条进行中），无法恢复。',
+  )
+  const confirm = sheet.getByRole('button', { name: '永久删除' })
+  await expect(confirm).toBeDisabled()
+  await sheet.getByLabel('输入「删除全部」以确认').fill('删除')
+  await expect(confirm).toBeDisabled()
+  // Cancelling forgets what was typed.
+  await sheet.getByRole('button', { name: '取消' }).click()
+  await page
+    .getByRole('button', { name: '删除全部收藏和采集记录', exact: true })
+    .click()
+  await expect(sheet.getByLabel('输入「删除全部」以确认')).toHaveValue('')
+  expect(deleted).toBeUndefined()
+  await sheet.getByLabel('输入「删除全部」以确认').fill('删除全部')
+  await confirm.click()
+  await expect(
+    page.getByText('已删除 12 条收藏和 30 条采集记录。'),
+  ).toBeVisible()
+  expect(deleted).toEqual({ confirm: 'delete all' })
+  await page.getByRole('button', { name: '返回' }).click()
+  await expect(page.getByText('暂无收藏')).toBeVisible()
+})

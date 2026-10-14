@@ -28,7 +28,6 @@ var commands = []command{
 	{"retry", "使用当前账号重试", "<收藏 ID>", false},
 	{"refresh", "重新抓取帖子", "<收藏 ID>", false},
 	{"delete", "删除", "<收藏 ID>", false},
-	{"delete_all", "删除全部保存记录", "", false},
 	{"account_delete", "删除采集账号", "[账号 ID]", true},
 	{"account", "选择采集账号", "", false},
 	{"usage", "查看存储用量", "", false},
@@ -189,8 +188,6 @@ func validCallback(data string) bool {
 		return e == nil && id(strings.TrimPrefix(string(raw), "p:"))
 	case "/usage", "/help":
 		return arg == ""
-	case "/delete_all":
-		return arg == "" || arg == "confirm"
 	case "/account_add":
 		return arg == "" || strings.HasPrefix(arg, "@") && adapter(strings.TrimPrefix(arg, "@"))
 	case "/account_delete":

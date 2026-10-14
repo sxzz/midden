@@ -123,14 +123,6 @@ func (r *Runner) command(ctx context.Context, w channelapi.Work, event channelap
 	case "delete":
 		out.Text = "已删除。"
 		out.Previous = 0
-	case "delete_all":
-		if v.Code == "confirm_delete_all" {
-			out.Text = "删除你保存的全部收藏？"
-			out.Buttons = telegram.Keyboard{{{Text: "确认删除全部", Data: "/delete_all confirm"}, {Text: "取消", Data: "/help"}}}
-		} else {
-			out.Text = fmt.Sprintf("已删除 %d 条保存记录。", v.Count)
-			out.Previous = 0
-		}
 	case "more", "more1000", "page_retry":
 		if v.Code == "no_more" {
 			out.Text = "没有更多帖子了。"

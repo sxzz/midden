@@ -137,13 +137,6 @@ func (s *Service) ChannelAction(ctx context.Context, channel string, in channela
 			e = nil
 		}
 		result.Code = "deleted"
-	case "delete_all":
-		if arg != "confirm" {
-			result.Code = "confirm_delete_all"
-			break
-		}
-		result.Count, e = s.DeleteAllCollections(ctx, tenant, w.CreatedAt)
-		result.Code = "deleted_all"
 	case "collection_stop":
 		e = s.StopCollection(ctx, tenant, arg)
 		result.Code = "collection_stopped"

@@ -181,7 +181,13 @@ function saved() {
   loadUsage()
 }
 const viewProps = computed(() => {
-  if (accounts.value) return {}
+  if (accounts.value)
+    return {
+      onCleared: () => {
+        for (const { collection } of all) collection.items.value = []
+        saved()
+      },
+    }
   if (captures.value || capture.value) return { onSaved: saved }
   if (id.value)
     return {

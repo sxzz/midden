@@ -327,7 +327,7 @@ func TestAccountIsolationAndPublicMerge(t *testing.T) {
 	fake.public = true
 	removed, e := s.Submit(ctx, tenants[1], domain.CaptureInput{URL: "https://x.com/a/status/900115", ConnectionID: ids[1]})
 	must(t, e)
-	_, e = s.DeleteAllCollections(ctx, tenants[1], time.Now().Add(time.Second))
+	_, e = s.DeleteAll(ctx, tenants[1], time.Now().Add(time.Second))
 	must(t, e)
 	must(t, s.capture(ctx, store.Task{Tenant: tenants[1], ID: removed.ID}))
 	must(t, s.finalize(ctx, tenants[1], removed.ID))

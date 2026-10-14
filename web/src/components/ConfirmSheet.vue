@@ -1,20 +1,29 @@
 <script setup vapor lang="ts">
-import { useTemplateRef, watch } from 'vue'
+import { computed, shallowRef, useId, useTemplateRef, watch } from 'vue'
 const props = defineProps<{
   open: boolean
   title: string
   description?: string
   confirmLabel: string
   busy?: boolean
+  /** For what cannot be undone: the phrase to type before confirming. */
+  phrase?: string
 }>()
+// Several sheets can share a page; each needs its own title id.
+const titleId = useId()
 const emit = defineEmits<{ confirm: []; cancel: [] }>()
 const dialog = useTemplateRef<HTMLDialogElement>('sheet')
 watch(
   () => props.open,
   (open) => {
+    typed.value = ''
     if (open) dialog.value?.showModal()
     else dialog.value?.close()
   },
+)
+const typed = shallowRef('')
+const ready = computed(
+  () => !props.phrase || typed.value.trim() === props.phrase,
 )
 function backdrop(event: MouseEvent) {
   if (event.target === dialog.value) emit('cancel')
@@ -25,20 +34,30 @@ function backdrop(event: MouseEvent) {
   <dialog
     ref="sheet"
     class="sheet"
-    aria-labelledby="confirm-title"
+    :aria-labelledby="titleId"
     @click="backdrop"
     @cancel.prevent="$emit('cancel')"
   >
     <div class="group">
       <p class="head">
-        <strong id="confirm-title">{{ title }}</strong
+        <strong :id="titleId">{{ title }}</strong
         ><span v-if="description">{{ description }}</span>
       </p>
+      <label v-if="phrase" class="phrase">
+        <span>输入「{{ phrase }}」以确认</span>
+        <input
+          v-model="typed"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          :placeholder="phrase"
+        />
+      </label>
       <button
         type="button"
         class="action destructive"
-        :disabled="busy"
-        @click="$emit('confirm')"
+        :disabled="busy || !ready"
+        @click="ready && $emit('confirm')"
       >
         {{ confirmLabel }}
       </button>
@@ -96,6 +115,26 @@ function backdrop(event: MouseEvent) {
 }
 .destructive {
   color: var(--destructive);
+}
+.destructive:disabled {
+  color: var(--subtle);
+}
+.phrase {
+  display: grid;
+  gap: 8px;
+  padding: 0 16px 16px;
+  font-size: 14px;
+  color: var(--subtle);
+  text-align: center;
+}
+.phrase input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--fill);
+  font-size: 16px;
+  text-align: center;
 }
 .cancel {
   color: var(--link);

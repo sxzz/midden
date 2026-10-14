@@ -291,6 +291,42 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /v1/library:
+    get:
+      summary: Count what deleting everything would remove
+      responses:
+        "200":
+          description: Library size
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LibrarySize" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/library/delete-all:
+    post:
+      summary: Delete this tenant's saved collections and capture records
+      description: >-
+        Removes what was saved and requested up to the time of the request,
+        with notes and tags. Running collection captures stop starting further
+        pages and members. Shared content stays for other tenants and is
+        collected after retention.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm]
+              properties:
+                confirm: { type: string, enum: [delete all] }
+      responses:
+        "200":
+          description: What was deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LibrarySize" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /v1/refresh-batches:
     post:
       summary: Refresh many saved collections in the background
@@ -824,6 +860,16 @@ components:
           {
             type: boolean,
             description: Every submission and every member capture has finished.,
+          }
+    LibrarySize:
+      type: object
+      properties:
+        collections: { type: integer }
+        records: { type: integer }
+        running:
+          {
+            type: integer,
+            description: Records whose capture has not finished.,
           }
     CaptureRecord:
       type: object

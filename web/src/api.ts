@@ -85,6 +85,13 @@ export interface Job {
   members?: MemberProgress
 }
 export type UpdateMode = 'append' | 'full'
+/** What deleting everything would remove. */
+export interface LibrarySize {
+  collections: number
+  records: number
+  /** Records whose capture has not finished. */
+  running: number
+}
 /** Images and videos of a record's own capture. */
 export interface MediaProgress {
   total: number

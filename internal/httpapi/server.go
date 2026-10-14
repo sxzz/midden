@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"google.golang.org/grpc/codes"
@@ -118,6 +119,24 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /v1/library", func(w http.ResponseWriter, r *http.Request) {
+		v, e := s.LibrarySize(r.Context(), tenant(r))
+		respond(w, 200, v, e)
+	})
+	mux.HandleFunc("POST /v1/library/delete-all", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Confirm string `json:"confirm"`
+		}
+		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10))
+		d.DisallowUnknownFields()
+		// A request that does not spell out the intent deletes nothing.
+		if d.Decode(&in) != nil || in.Confirm != "delete all" {
+			write(w, 400, map[string]string{"error": "invalid request"})
+			return
+		}
+		v, e := s.DeleteAll(r.Context(), tenant(r), time.Now())
+		respond(w, 200, v, e)
 	})
 	mux.HandleFunc("POST /v1/refresh-batches", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
