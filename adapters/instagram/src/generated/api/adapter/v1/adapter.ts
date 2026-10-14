@@ -210,6 +210,14 @@ export interface FetchResponse {
   publishedAt: string;
   /** Embedded (non-root) objects in the graph lacking public evidence. */
   restrictedTargets: ObjectRef[];
+  /**
+   * A private result that is private only because this account (same platform)
+   * limits who may read it. Once the account is observed public, the stored
+   * versions become public.
+   */
+  privateSubject: ObjectRef | undefined;
+  /** Accounts (same platform) this fetch observed as public. */
+  publicSubjects: ObjectRef[];
 }
 
 /** Execution-only secrets; never persisted in task payloads or logs. */
@@ -2008,6 +2016,8 @@ function createBaseFetchResponse(): FetchResponse {
     nextPageCursor: "",
     publishedAt: "",
     restrictedTargets: [],
+    privateSubject: undefined,
+    publicSubjects: [],
   };
 }
 
@@ -2078,6 +2088,15 @@ export const FetchResponse: MessageFns<FetchResponse> = {
     }
     for (const v of message.restrictedTargets) {
       ObjectRef.encode(v!, writer.uint32(162).fork()).join();
+    }
+    if (message.privateSubject !== undefined) {
+      ObjectRef.encode(
+        message.privateSubject,
+        writer.uint32(170).fork(),
+      ).join();
+    }
+    for (const v of message.publicSubjects) {
+      ObjectRef.encode(v!, writer.uint32(178).fork()).join();
     }
     return writer;
   },
@@ -2259,6 +2278,24 @@ export const FetchResponse: MessageFns<FetchResponse> = {
           );
           continue;
         }
+        case 21: {
+          if (tag !== 170) {
+            break;
+          }
+
+          message.privateSubject = ObjectRef.decode(reader, reader.uint32());
+          continue;
+        }
+        case 22: {
+          if (tag !== 178) {
+            break;
+          }
+
+          message.publicSubjects.push(
+            ObjectRef.decode(reader, reader.uint32()),
+          );
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2325,6 +2362,12 @@ export const FetchResponse: MessageFns<FetchResponse> = {
         : "",
       restrictedTargets: globalThis.Array.isArray(object?.restrictedTargets)
         ? object.restrictedTargets.map((e: any) => ObjectRef.fromJSON(e))
+        : [],
+      privateSubject: isSet(object.privateSubject)
+        ? ObjectRef.fromJSON(object.privateSubject)
+        : undefined,
+      publicSubjects: globalThis.Array.isArray(object?.publicSubjects)
+        ? object.publicSubjects.map((e: any) => ObjectRef.fromJSON(e))
         : [],
     };
   },
@@ -2397,6 +2440,14 @@ export const FetchResponse: MessageFns<FetchResponse> = {
         ObjectRef.toJSON(e),
       );
     }
+    if (message.privateSubject !== undefined) {
+      obj.privateSubject = ObjectRef.toJSON(message.privateSubject);
+    }
+    if (message.publicSubjects?.length) {
+      obj.publicSubjects = message.publicSubjects.map((e) =>
+        ObjectRef.toJSON(e),
+      );
+    }
     return obj;
   },
 
@@ -2435,6 +2486,12 @@ export const FetchResponse: MessageFns<FetchResponse> = {
     message.publishedAt = object.publishedAt ?? "";
     message.restrictedTargets =
       object.restrictedTargets?.map((e) => ObjectRef.fromPartial(e)) || [];
+    message.privateSubject =
+      object.privateSubject !== undefined && object.privateSubject !== null
+        ? ObjectRef.fromPartial(object.privateSubject)
+        : undefined;
+    message.publicSubjects =
+      object.publicSubjects?.map((e) => ObjectRef.fromPartial(e)) || [];
     return message;
   },
 };

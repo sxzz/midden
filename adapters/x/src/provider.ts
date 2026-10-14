@@ -5,6 +5,7 @@ import {
   ResolveResponse,
   SourceResponse,
   Visibility,
+  type ObjectRef,
 } from "./generated/api/adapter/v1/adapter.js";
 
 export class ProviderError extends Error {
@@ -292,8 +293,18 @@ export function publicPost(
     Visibility.VISIBILITY_PUBLIC,
   );
   result.sourceResponses = [source];
+  if (post?.author?.protected === false && /^\d+$/.test(post.author.id))
+    result.publicSubjects.push(profileRef(post.author.id));
   return original === id ? result : asRepost(result, id);
 }
+
+/** The profile an X account's posts are kept under. */
+export const profileRef = (externalId: string): ObjectRef => ({
+  platform: "x",
+  kind: "profile",
+  objectScope: "",
+  externalId,
+});
 
 /** Saves a repost's link as the reposted post the result describes. */
 export function asRepost(result: FetchResponse, id: string): FetchResponse {

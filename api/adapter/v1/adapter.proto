@@ -139,6 +139,11 @@ message FetchResponse {
   string next_page_cursor = 18; // Empty at end of collection; capture.page/1.
   string published_at = 15; // Original publication time in RFC 3339; empty when unknown.
   repeated ObjectRef restricted_targets = 20; // Embedded (non-root) objects in the graph lacking public evidence.
+  // A private result that is private only because this account (same platform)
+  // limits who may read it. Once the account is observed public, the stored
+  // versions become public.
+  ObjectRef private_subject = 21;
+  repeated ObjectRef public_subjects = 22; // Accounts (same platform) this fetch observed as public.
 }
 
 // Execution-only secrets; never persisted in task payloads or logs.

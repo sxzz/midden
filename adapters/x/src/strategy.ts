@@ -4,6 +4,7 @@ import { status } from "@grpc/grpc-js";
 import {
   fetchPublic,
   credentialRequiredKey,
+  profileRef,
   ProviderError,
   publicPost,
   sourceState,
@@ -266,8 +267,12 @@ export class CaptureStrategy {
         if (this.protected(result)) {
           const credential = account();
           if (credential) {
-            // The collection of protected posts is account-private, while the profile metadata is public.
+            // The collection of protected posts is account-private, while the
+            // profile metadata is public; it opens once the account does.
             result.visibility = Visibility.VISIBILITY_PRIVATE;
+            result.privateSubject = profileRef(
+              result.canonicalTarget!.externalId,
+            );
             await this.sessionTimeline(
               result,
               credential,
@@ -365,6 +370,9 @@ export class CaptureStrategy {
     }
     // Execution provider remains the persisted connection choice. textSource and raw URLs record actual sources.
     result.providerId = req.providerId;
+    result.publicSubjects = [
+      ...new Map(result.publicSubjects.map((s) => [s.externalId, s])).values(),
+    ];
     if (credential || req.credentialDeferred)
       for (const source of result.sourceResponses)
         source.visibility = Visibility.VISIBILITY_PRIVATE;
@@ -424,6 +432,7 @@ export class CaptureStrategy {
       });
     }
     result.sourceResponses.push(...profile.sourceResponses);
+    result.publicSubjects.push(...profile.publicSubjects);
     const targets = new Map(
       result.relatedTargets.map((target) => [target.url, target]),
     );

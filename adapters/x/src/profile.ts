@@ -23,6 +23,7 @@ import {
   readJSON,
   responseError,
   upstreamError,
+  profileRef,
 } from "./provider.js";
 import {
   FetchResponse,
@@ -99,6 +100,7 @@ export function normalizeProfile(
       refreshOnSubmit: true,
       collection: true,
     },
+    publicSubjects: user.protected === false ? [profileRef(user.id)] : [],
   });
   // Reuse the public field projection; account-view fields remain exclusively in private raw responses.
   attachEntities(result, { author: user });

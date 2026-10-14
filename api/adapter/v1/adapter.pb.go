@@ -1011,8 +1011,13 @@ type FetchResponse struct {
 	NextPageCursor    string                 `protobuf:"bytes,18,opt,name=next_page_cursor,json=nextPageCursor,proto3" json:"next_page_cursor,omitempty"`        // Empty at end of collection; capture.page/1.
 	PublishedAt       string                 `protobuf:"bytes,15,opt,name=published_at,json=publishedAt,proto3" json:"published_at,omitempty"`                   // Original publication time in RFC 3339; empty when unknown.
 	RestrictedTargets []*ObjectRef           `protobuf:"bytes,20,rep,name=restricted_targets,json=restrictedTargets,proto3" json:"restricted_targets,omitempty"` // Embedded (non-root) objects in the graph lacking public evidence.
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// A private result that is private only because this account (same platform)
+	// limits who may read it. Once the account is observed public, the stored
+	// versions become public.
+	PrivateSubject *ObjectRef   `protobuf:"bytes,21,opt,name=private_subject,json=privateSubject,proto3" json:"private_subject,omitempty"`
+	PublicSubjects []*ObjectRef `protobuf:"bytes,22,rep,name=public_subjects,json=publicSubjects,proto3" json:"public_subjects,omitempty"` // Accounts (same platform) this fetch observed as public.
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *FetchResponse) Reset() {
@@ -1181,6 +1186,20 @@ func (x *FetchResponse) GetPublishedAt() string {
 func (x *FetchResponse) GetRestrictedTargets() []*ObjectRef {
 	if x != nil {
 		return x.RestrictedTargets
+	}
+	return nil
+}
+
+func (x *FetchResponse) GetPrivateSubject() *ObjectRef {
+	if x != nil {
+		return x.PrivateSubject
+	}
+	return nil
+}
+
+func (x *FetchResponse) GetPublicSubjects() []*ObjectRef {
+	if x != nil {
+		return x.PublicSubjects
 	}
 	return nil
 }
@@ -1881,7 +1900,7 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\x15refresh_after_seconds\x18\x02 \x01(\rR\x13refreshAfterSeconds\x12\x1d\n" +
 	"\n" +
 	"updated_at\x18\x03 \x01(\tR\tupdatedAt\x12\x1a\n" +
-	"\bprefetch\x18\x04 \x01(\fR\bprefetch\"\xea\x06\n" +
+	"\bprefetch\x18\x04 \x01(\fR\bprefetch\"\xea\a\n" +
 	"\rFetchResponse\x12\x1f\n" +
 	"\vexternal_id\x18\x01 \x01(\tR\n" +
 	"externalId\x12\x12\n" +
@@ -1911,7 +1930,9 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\x0emax_batch_size\x18\x13 \x01(\rR\fmaxBatchSize\x12(\n" +
 	"\x10next_page_cursor\x18\x12 \x01(\tR\x0enextPageCursor\x12!\n" +
 	"\fpublished_at\x18\x0f \x01(\tR\vpublishedAt\x12D\n" +
-	"\x12restricted_targets\x18\x14 \x03(\v2\x15.adapter.v1.ObjectRefR\x11restrictedTargets\" \n" +
+	"\x12restricted_targets\x18\x14 \x03(\v2\x15.adapter.v1.ObjectRefR\x11restrictedTargets\x12>\n" +
+	"\x0fprivate_subject\x18\x15 \x01(\v2\x15.adapter.v1.ObjectRefR\x0eprivateSubject\x12>\n" +
+	"\x0fpublic_subjects\x18\x16 \x03(\v2\x15.adapter.v1.ObjectRefR\x0epublicSubjects\" \n" +
 	"\n" +
 	"Credential\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\"\"\n" +
@@ -2044,30 +2065,32 @@ var file_api_adapter_v1_adapter_proto_depIdxs = []int32{
 	16, // 12: adapter.v1.FetchResponse.canonical_target:type_name -> adapter.v1.ResolveResponse
 	12, // 13: adapter.v1.FetchResponse.related_targets:type_name -> adapter.v1.RelatedTarget
 	21, // 14: adapter.v1.FetchResponse.restricted_targets:type_name -> adapter.v1.ObjectRef
-	14, // 15: adapter.v1.PrepareCredentialResponse.credential:type_name -> adapter.v1.Credential
-	14, // 16: adapter.v1.CheckConnectionRequest.credential:type_name -> adapter.v1.Credential
-	21, // 17: adapter.v1.CheckAccessRequest.target:type_name -> adapter.v1.ObjectRef
-	21, // 18: adapter.v1.CheckAccessRequest.embedded:type_name -> adapter.v1.ObjectRef
-	14, // 19: adapter.v1.CheckAccessRequest.credential:type_name -> adapter.v1.Credential
-	0,  // 20: adapter.v1.CheckAccessResponse.visibility:type_name -> adapter.v1.Visibility
-	21, // 21: adapter.v1.CheckAccessResponse.accessible:type_name -> adapter.v1.ObjectRef
-	1,  // 22: adapter.v1.Adapter.Describe:input_type -> adapter.v1.DescribeRequest
-	15, // 23: adapter.v1.Adapter.Resolve:input_type -> adapter.v1.ResolveRequest
-	17, // 24: adapter.v1.Adapter.PrepareCredential:input_type -> adapter.v1.PrepareCredentialRequest
-	5,  // 25: adapter.v1.Adapter.Fetch:input_type -> adapter.v1.FetchRequest
-	19, // 26: adapter.v1.Adapter.CheckConnection:input_type -> adapter.v1.CheckConnectionRequest
-	22, // 27: adapter.v1.Adapter.CheckAccess:input_type -> adapter.v1.CheckAccessRequest
-	4,  // 28: adapter.v1.Adapter.Describe:output_type -> adapter.v1.DescribeResponse
-	16, // 29: adapter.v1.Adapter.Resolve:output_type -> adapter.v1.ResolveResponse
-	18, // 30: adapter.v1.Adapter.PrepareCredential:output_type -> adapter.v1.PrepareCredentialResponse
-	13, // 31: adapter.v1.Adapter.Fetch:output_type -> adapter.v1.FetchResponse
-	20, // 32: adapter.v1.Adapter.CheckConnection:output_type -> adapter.v1.CheckConnectionResponse
-	23, // 33: adapter.v1.Adapter.CheckAccess:output_type -> adapter.v1.CheckAccessResponse
-	28, // [28:34] is the sub-list for method output_type
-	22, // [22:28] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	21, // 15: adapter.v1.FetchResponse.private_subject:type_name -> adapter.v1.ObjectRef
+	21, // 16: adapter.v1.FetchResponse.public_subjects:type_name -> adapter.v1.ObjectRef
+	14, // 17: adapter.v1.PrepareCredentialResponse.credential:type_name -> adapter.v1.Credential
+	14, // 18: adapter.v1.CheckConnectionRequest.credential:type_name -> adapter.v1.Credential
+	21, // 19: adapter.v1.CheckAccessRequest.target:type_name -> adapter.v1.ObjectRef
+	21, // 20: adapter.v1.CheckAccessRequest.embedded:type_name -> adapter.v1.ObjectRef
+	14, // 21: adapter.v1.CheckAccessRequest.credential:type_name -> adapter.v1.Credential
+	0,  // 22: adapter.v1.CheckAccessResponse.visibility:type_name -> adapter.v1.Visibility
+	21, // 23: adapter.v1.CheckAccessResponse.accessible:type_name -> adapter.v1.ObjectRef
+	1,  // 24: adapter.v1.Adapter.Describe:input_type -> adapter.v1.DescribeRequest
+	15, // 25: adapter.v1.Adapter.Resolve:input_type -> adapter.v1.ResolveRequest
+	17, // 26: adapter.v1.Adapter.PrepareCredential:input_type -> adapter.v1.PrepareCredentialRequest
+	5,  // 27: adapter.v1.Adapter.Fetch:input_type -> adapter.v1.FetchRequest
+	19, // 28: adapter.v1.Adapter.CheckConnection:input_type -> adapter.v1.CheckConnectionRequest
+	22, // 29: adapter.v1.Adapter.CheckAccess:input_type -> adapter.v1.CheckAccessRequest
+	4,  // 30: adapter.v1.Adapter.Describe:output_type -> adapter.v1.DescribeResponse
+	16, // 31: adapter.v1.Adapter.Resolve:output_type -> adapter.v1.ResolveResponse
+	18, // 32: adapter.v1.Adapter.PrepareCredential:output_type -> adapter.v1.PrepareCredentialResponse
+	13, // 33: adapter.v1.Adapter.Fetch:output_type -> adapter.v1.FetchResponse
+	20, // 34: adapter.v1.Adapter.CheckConnection:output_type -> adapter.v1.CheckConnectionResponse
+	23, // 35: adapter.v1.Adapter.CheckAccess:output_type -> adapter.v1.CheckAccessResponse
+	30, // [30:36] is the sub-list for method output_type
+	24, // [24:30] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_api_adapter_v1_adapter_proto_init() }

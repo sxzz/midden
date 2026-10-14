@@ -23,6 +23,7 @@ import {
   readJSON,
   responseError,
   asRepost,
+  profileRef,
 } from "./provider.js";
 
 // Public application token from pinned upstream src/constants.ts; not an account secret.
@@ -148,66 +149,87 @@ export function accountTransport(
   };
 }
 // Public classification requires positive evidence for every included author.
-export function visibilityOf(post: any): Visibility {
-  if (post?.type !== "status" || post.author?.protected !== false)
-    return Visibility.VISIBILITY_PRIVATE;
-  for (const key of ["quote", "repost"])
-    if (post[key] && visibilityOf(post[key]) !== Visibility.VISIBILITY_PUBLIC)
-      return Visibility.VISIBILITY_PRIVATE;
-  return Visibility.VISIBILITY_PUBLIC;
-}
-// Atmosphere defaults a missing protected flag to false; inspect raw evidence first.
-export function rawIsPublic(node: any): boolean {
-  if (!node || typeof node !== "object") return false;
+/**
+ * Who may read a post, from its raw node. The author's protection decides,
+ * unless the post itself reaches fewer people (subscribers only, a circle, a
+ * community, or a limit X does not explain). Quoted and reposted posts do not
+ * count: they are kept by reference only.
+ */
+export function rawVisibility(node: any): {
+  visibility: Visibility;
+  /** The author's ID, when the node names one. */
+  author?: string;
+  /** The author is known to be public. */
+  authorPublic: boolean;
+  /** Private only because this author is protected. */
+  subject?: string;
+} {
+  if (!node || typeof node !== "object")
+    return { visibility: Visibility.VISIBILITY_PRIVATE, authorPublic: false };
+  let narrowed = false;
+  let tweet = node;
   // A sensitive-media blur changes presentation, not who may read the post.
   // Unknown wrapper/visibility fields still require private storage.
   if (node.__typename === "TweetWithVisibilityResults") {
-    if (
+    const media = node.mediaVisibilityResults;
+    narrowed =
       Object.keys(node).some(
         (key) =>
           !["__typename", "tweet", "mediaVisibilityResults"].includes(key),
-      )
-    )
-      return false;
-    const media = node.mediaVisibilityResults;
-    if (
-      media != null &&
-      (typeof media !== "object" ||
-        Array.isArray(media) ||
-        Object.keys(media).some((key) => key !== "blurred_image_interstitial"))
-    )
-      return false;
-    return rawIsPublic(node.tweet);
+      ) ||
+      (media != null &&
+        (typeof media !== "object" ||
+          Array.isArray(media) ||
+          Object.keys(media).some(
+            (key) => key !== "blurred_image_interstitial",
+          )));
+    tweet = node.tweet;
   }
-  const root = node.tweet ?? node.result ?? node;
+  const root = tweet?.tweet ?? tweet?.result ?? tweet;
+  const user =
+    root?.core?.user_results?.result ?? root?.core?.user_result?.result;
   const author =
-    root.core?.user_results?.result ?? root.core?.user_result?.result;
-  const protectedFlag = author?.privacy?.protected ?? author?.legacy?.protected;
-  if (protectedFlag !== false) return false;
-  let restricted = false;
+    typeof user?.rest_id === "string" && /^\d+$/.test(user.rest_id)
+      ? user.rest_id
+      : undefined;
+  const protectedFlag = user?.privacy?.protected ?? user?.legacy?.protected;
   const walk = (value: any): void => {
     if (!value || typeof value !== "object") return;
     for (const [key, child] of Object.entries(value)) {
+      if (
+        value === root &&
+        (key === "core" ||
+          /^quoted_(status_result|tweet_results)$/.test(key) ||
+          /^retweeted_status_results?$/.test(key))
+      )
+        continue;
+      if (key === "legacy" && value === root) {
+        const { retweeted_status_result, ...rest } = child as any;
+        walk(rest);
+        continue;
+      }
       if (
         child &&
         /trusted_friends|exclusive_tweet|limited_?actions?|tombstone|interstitial|audience|community_results/i.test(
           key,
         )
       )
-        restricted = true;
-      if (key === "protected" && child !== false) restricted = true;
-      if (
-        /^quoted_(status_result|tweet_results)$/.test(key) &&
-        !rawIsPublic(child)
-      )
-        restricted = true;
-      if (/^retweeted_status_results?$/.test(key) && !rawIsPublic(child))
-        restricted = true;
+        narrowed = true;
+      if (key === "protected" && child !== false) narrowed = true;
       if (typeof child === "object") walk(child);
     }
   };
-  walk(node);
-  return !restricted;
+  walk(root);
+  const authorPublic = protectedFlag === false;
+  return {
+    visibility:
+      authorPublic && !narrowed
+        ? Visibility.VISIBILITY_PUBLIC
+        : Visibility.VISIBILITY_PRIVATE,
+    author,
+    authorPublic,
+    subject: protectedFlag === true && !narrowed ? author : undefined,
+  };
 }
 function unavailable(node: any): boolean {
   return (
@@ -324,9 +346,7 @@ export async function checkSessionAccess(
     )
       accessible.push(postRef(ref.externalId));
   return {
-    visibility: rawIsPublic(raw)
-      ? Visibility.VISIBILITY_PUBLIC
-      : Visibility.VISIBILITY_PRIVATE,
+    visibility: rawVisibility(raw).visibility,
     accessible,
   };
 }
@@ -336,7 +356,7 @@ export async function parseSessionResult(
   host: TwitterBuildHost,
 ) {
   // Evaluate before Atmosphere normalizes (and mutates) the raw nodes.
-  const publicEvidence = rawIsPublic(raw);
+  const seen = rawVisibility(raw);
   const editSource = structuredClone(raw);
   const post = await buildAPITwitterStatus(
     host,
@@ -348,13 +368,10 @@ export async function parseSessionResult(
     "root",
     id,
   );
-  const result = normalize(
-    post,
-    id,
-    "x-session",
-    publicEvidence ? visibilityOf(post) : Visibility.VISIBILITY_PRIVATE,
-    editSource,
-  );
+  const result = normalize(post, id, "x-session", seen.visibility, editSource);
+  if (seen.subject) result.privateSubject = profileRef(seen.subject);
+  if (seen.authorPublic && seen.author)
+    result.publicSubjects.push(profileRef(seen.author));
   if (raw?.mediaVisibilityResults?.blurred_image_interstitial) {
     for (const resource of result.resources) resource.sensitive = true;
   }

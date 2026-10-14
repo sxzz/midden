@@ -16,9 +16,8 @@ import {
   sourceState,
 } from "./provider.js";
 import {
-  visibilityOf,
   accountTransport,
-  rawIsPublic,
+  rawVisibility,
   parseSessionResult,
 } from "./session.js";
 import {
@@ -72,23 +71,8 @@ test("public fixture preserves text, alt text and highest quality media", () => 
   assert.equal(video.sensitive, true);
   assert.ok(video.immutableKey.includes("video-1"));
 });
-test("private classification is conservative and includes quotes", () => {
-  assert.equal(
-    visibilityOf({ type: "status", author: { protected: false } }),
-    Visibility.VISIBILITY_PUBLIC,
-  );
-  for (const p of [
-    {},
-    { type: "status", author: {} },
-    { type: "status", author: { protected: true } },
-    {
-      type: "status",
-      author: { protected: false },
-      quote: { type: "status", author: { protected: true } },
-    },
-  ])
-    assert.equal(visibilityOf(p), Visibility.VISIBILITY_PRIVATE);
-});
+const isPublic = (node: any) =>
+  rawVisibility(node).visibility === Visibility.VISIBILITY_PUBLIC;
 test("request-bound accounts cannot mix credentials; errors never retry anonymously", async () => {
   const seen: string[] = [];
   const fetcher: typeof fetch = async (_url, init) => {
@@ -314,7 +298,7 @@ test("Atmosphere parses authorized protected and public GraphQL fixtures", async
   result = await parseSessionResult("900123", structuredClone(raw), host);
   assert.equal(result.visibility, Visibility.VISIBILITY_PUBLIC);
   assert.equal(
-    rawIsPublic({ __typename: "TweetWithVisibilityResults", tweet: raw }),
+    isPublic({ __typename: "TweetWithVisibilityResults", tweet: raw }),
     true,
   );
   const wrapped = {
@@ -328,30 +312,92 @@ test("Atmosphere parses authorized protected and public GraphQL fixtures", async
       },
     },
   };
-  assert.equal(rawIsPublic(wrapped), true);
+  assert.equal(isPublic(wrapped), true);
   assert.equal(
     (await parseSessionResult("900123", wrapped, host)).visibility,
     Visibility.VISIBILITY_PUBLIC,
   );
-  assert.equal(rawIsPublic({ ...wrapped, limitedActionResults: {} }), false);
+  assert.equal(isPublic({ ...wrapped, limitedActionResults: {} }), false);
   assert.equal(
-    rawIsPublic({
+    isPublic({
       ...wrapped,
       mediaVisibilityResults: { audience_restriction: {} },
     }),
     false,
   );
   assert.equal(
-    rawIsPublic({ ...wrapped, mediaVisibilityResults: { interstitial: {} } }),
+    isPublic({ ...wrapped, mediaVisibilityResults: { interstitial: {} } }),
     false,
   );
   wrapped.tweet.core.user_results.result.legacy.protected = true;
-  assert.equal(rawIsPublic(wrapped), false);
-  assert.equal(rawIsPublic({ ...raw, limitedActionResults: {} }), false);
+  assert.equal(isPublic(wrapped), false);
+  assert.equal(isPublic({ ...raw, limitedActionResults: {} }), false);
   delete raw.core.user_results.result.legacy.protected;
-  assert.equal(rawIsPublic(raw), false);
+  assert.equal(isPublic(raw), false);
   result = await parseSessionResult("900123", structuredClone(raw), host);
   assert.equal(result.visibility, Visibility.VISIBILITY_PRIVATE);
+});
+
+test("a post's author decides its visibility and names why it is private", async () => {
+  const tweet = (id: string, author: string, protectedFlag: boolean): any => ({
+    __typename: "Tweet",
+    rest_id: id,
+    core: {
+      user_results: {
+        result: {
+          __typename: "User",
+          rest_id: author,
+          legacy: {
+            screen_name: `user${author}`,
+            name: `User ${author}`,
+            protected: protectedFlag,
+          },
+        },
+      },
+    },
+    legacy: {
+      id_str: id,
+      full_text: `post ${id}`,
+      created_at: "Mon Jan 01 00:00:00 +0000 2024",
+      entities: { urls: [], hashtags: [], user_mentions: [] },
+      extended_entities: { media: [] },
+    },
+  });
+  const host = {
+    t: (key: string) => key,
+    twitterProxy: {
+      fetch: async () => {
+        throw new Error("Unexpected extra request");
+      },
+    },
+  };
+  const parse = (raw: any) =>
+    parseSessionResult("900123", structuredClone(raw), host);
+  const protectedPost = await parse(tweet("900123", "42", true));
+  assert.equal(protectedPost.visibility, Visibility.VISIBILITY_PRIVATE);
+  assert.equal(protectedPost.privateSubject?.externalId, "42");
+  assert.equal(protectedPost.privateSubject?.kind, "profile");
+  assert.deepEqual(protectedPost.publicSubjects, []);
+  // A quote of a protected post no longer narrows a public author's post.
+  const quoting = tweet("900123", "42", false);
+  quoting.quoted_status_result = { result: tweet("900124", "43", true) };
+  const open = await parse(quoting);
+  assert.equal(open.visibility, Visibility.VISIBILITY_PUBLIC);
+  assert.equal(open.privateSubject, undefined);
+  assert.deepEqual(
+    open.publicSubjects.map((s) => s.externalId),
+    ["42"],
+  );
+  // A post reaching fewer people than its public author stays private and is
+  // never opened by its author's publicity.
+  const exclusive = tweet("900123", "42", false);
+  exclusive.legacy.exclusive_tweet_info = { creator_results: {} };
+  const narrowed = await parse(exclusive);
+  assert.equal(narrowed.visibility, Visibility.VISIBILITY_PRIVATE);
+  assert.equal(narrowed.privateSubject, undefined);
+  const protectedExclusive = tweet("900123", "42", true);
+  protectedExclusive.legacy.exclusive_tweet_info = { creator_results: {} };
+  assert.equal((await parse(protectedExclusive)).privateSubject, undefined);
 });
 
 test("summary counts each media item in order, excluding author avatars", () => {
@@ -468,10 +514,11 @@ test("session quote capture keeps the quoted post by reference through GraphQL n
     result.relatedTargets.some((t) => t.url === "https://x.com/i/user/43"),
     false,
   );
+  // A protected quoted post is kept by reference and does not narrow this one.
   raw.quoted_status_result.result.core.user_results.result.legacy.protected = true;
   assert.equal(
     (await parseSessionResult("900123", structuredClone(raw), host)).visibility,
-    Visibility.VISIBILITY_PRIVATE,
+    Visibility.VISIBILITY_PUBLIC,
   );
   await assert.rejects(
     () => parseSessionResult("900125", structuredClone(raw), host),

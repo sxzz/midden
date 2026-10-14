@@ -368,6 +368,14 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if err := validateRelatedResult(policy, r, platform, kind, objectScope); err != nil {
 		return err
 	}
+	privateSubject, publicSubjects, err := visibilitySubjects(r, platform)
+	if err != nil {
+		return err
+	}
+	subject := objectRef{}
+	if privateSubject != nil {
+		subject = *privateSubject
+	}
 	expectedVisibility := pb.Visibility_VISIBILITY_PRIVATE
 	if visibility == "public" {
 		expectedVisibility = pb.Visibility_VISIBILITY_PUBLIC
@@ -468,8 +476,14 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		relatedJSON, _ := json.Marshal(r.RelatedTargets)
 		restricted := objectRefs(r.RestrictedTargets)
 		restrictedJSON, _ := json.Marshal(restricted)
-		if _, e := tx.Exec(ctx, `UPDATE captures SET prefetch=NULL,credential_revision=$2,related_targets=$3,next_page_cursor=$4,max_batch_size=$5,visibility=$6,restricted_targets=$7 WHERE id=$1`, t.ID, revision, relatedJSON, r.NextPageCursor, r.MaxBatchSize, visibility, restrictedJSON); e != nil {
+		if _, e := tx.Exec(ctx, `UPDATE captures SET prefetch=NULL,credential_revision=$2,related_targets=$3,next_page_cursor=$4,max_batch_size=$5,visibility=$6,restricted_targets=$7,subject_platform=nullif($8,''),subject_kind=nullif($9,''),subject_scope=CASE WHEN $11='' THEN NULL ELSE $10 END,subject_external_id=nullif($11,'') WHERE id=$1`, t.ID, revision, relatedJSON, r.NextPageCursor, r.MaxBatchSize, visibility, restrictedJSON, subject.Platform, subject.Kind, subject.ObjectScope, subject.ExternalID); e != nil {
 			return e
+		}
+		// An account seen public opens what was kept private only for it.
+		for _, s := range publicSubjects {
+			if _, e := tx.Exec(ctx, `SELECT publish_subject($1,$2,$3,$4)`, s.Platform, s.Kind, s.ObjectScope, s.ExternalID); e != nil {
+				return e
+			}
 		}
 		// Whatever an account fetched, its tenant has proven it can see.
 		if connection != "" {
@@ -625,7 +639,7 @@ func (s *Service) finalize(ctx context.Context, tenant, cid string) error {
 		}
 		if previous == nil || *previous != digest {
 			var rid string
-			e = tx.QueryRow(ctx, `INSERT INTO revisions(collection_id,capture_id,content_hash,payload,content_bytes,visibility) SELECT $1,$2,$3,$4,$5,visibility FROM captures WHERE id=$2 RETURNING id`, aid, cid, digest, raw, len(raw)).Scan(&rid)
+			e = tx.QueryRow(ctx, `INSERT INTO revisions(collection_id,capture_id,content_hash,payload,content_bytes,visibility,subject_platform,subject_kind,subject_scope,subject_external_id) SELECT $1,$2,$3,$4,$5,visibility,subject_platform,subject_kind,subject_scope,subject_external_id FROM captures WHERE id=$2 RETURNING id`, aid, cid, digest, raw, len(raw)).Scan(&rid)
 			if e != nil {
 				return e
 			}

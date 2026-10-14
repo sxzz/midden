@@ -52,7 +52,7 @@ Profile 将 handle 规范化为稳定用户 ID，后续采集按 ID 查询并更
 
 ## 内容可见性
 
-Provider 在 `Describe` 中声明支持的 `visibilities`，由 `Fetch` 返回实际可见性。公共 API 只返回 public。每个 Adapter 对象只保存一份内容：不论哪个租户、用哪个账号抓取，结果都成为同一收藏的历史版本，内容相同则复用版本。版本保留产生它的那次观察的可见性；账号抓取在取得明确公开证据前按 private 保存，之后同样内容被公开观察到时，该版本改为 public。刷新选择保存在 `tenant_collections`，共享收藏不能成为借用其他租户凭据的入口。
+Provider 在 `Describe` 中声明支持的 `visibilities`，由 `Fetch` 返回实际可见性。公共 API 只返回 public。每个 Adapter 对象只保存一份内容：不论哪个租户、用哪个账号抓取，结果都成为同一收藏的历史版本，内容相同则复用版本。版本保留产生它的那次观察的可见性；账号抓取在取得明确公开证据前按 private 保存，之后同样内容被公开观察到时，该版本改为 public。Fetch 可以用 `private_subject` 说明私有结果仅因某个账号（同一平台）限制访问而私有，核心把它记在采集和版本上；任一租户的采集在 `public_subjects` 中报告该账号公开时，所有仅因它而私有的版本改为 public。之后再次受限的账号只影响新的采集，已有版本不变；因其他原因私有、没有记录账号的版本不会因此公开。刷新选择保存在 `tenant_collections`，共享收藏不能成为借用其他租户凭据的入口。
 
 内容不属于任何租户。public 版本对所有已认证租户可读；private 版本只对执行该次抓取的租户，以及在 `access_grants` 中证明过访问权的租户可读。授权按租户和对象身份记录，与使用哪个账号无关：账号抓取成功即为抓取的对象授权；已有账号的租户保存他人已存的受限内容时，先用 `CheckAccess` 只请求帖子元数据确认可见，再复用已存内容，不下载媒体、不另存副本。授权后可读该对象全部历史版本；账号访问被拒绝时记录 `revoked_at`，此前的版本继续可读，之后他人抓到的版本不可读；授权不定期复核，只在该租户自己的抓取或 `CheckAccess` 被拒绝时撤销，之后再次成功即恢复。版本内嵌的非公开对象记录在 `revision_access_requirements`，租户需同时具备这些对象的访问权（或其已有公开版本）才能读取。额度仍按保存者计算，只计入该租户可读的版本。删除没有保存记录的租户（`monitorctl tenant-delete`）不影响他人可读的内容。
 
@@ -262,7 +262,7 @@ Adapter 的 `Describe.entity_types` 提供类型名与自包含 JSON Schema 2020
 
 `entities` 以平台、类型和外部 ID 标识对象，全局只有一份；实体版本的数据只能通过可读的收藏版本读取。`entity_versions` 保存数据、Schema 快照与内容哈希；实际资源内容参与版本比较。`revision_entities` 将收藏版本关联到当时的实体版本，并标记根节点；`entity_relations` 保存该次快照的关系。`GET /v1/entities/{id}` 读取调用租户所保存收藏关联的最新实体快照；收藏 API 内的 graph 固定关联当时版本。
 
-X Adapter 在 `adapters/x/src/entity-schemas.ts` 定义 `x.post` 和 `x.profile`，通过 `authored_by` 关联。转发使用 Profile 到原帖的 `reposted` 关系；单帖中的引用和转发分别使用帖子到原帖的 `quoted`、`reposted` 关系，被引用或转发的帖子只保存 ID，不保存其正文、作者和提及（它们可能比引用者更不公开），原帖另行独立采集，无权访问时跳过。读取时，图中被根节点引用或转发、且该租户已保存可读的帖子附带 `saved_summary`（该收藏当前版本的摘要）；详情页据此显示摘要并链接收藏，否则链接到 X。指向转发的链接按原帖采集：Fetch 以 `canonical_target` 移到原帖。X 的结果不再产生 `restricted_targets`。帖子正文与作者简介中的提及使用 `mentions` 指向 Profile，并调度关联资料采集。时间线保留转发关系，同时单独采集原帖。实体图最多包含 512 个实体、1,024 条关系，仍受 2 MiB 大小限制。帖子 data 包含正文、上游发布时间、编辑时间及来源、编辑 ID 列表；Profile data 包含用户名、昵称、头像 URL 与个人资料。头像文件由 Adapter 作为关联资源返回，核心下载保存，不加入 Telegram 帖子相册。编辑时间优先采用上游明确字段，否则在存在多个编辑版本 ID 时从最新 Snowflake 推导并标记 `x_snowflake`；没有证据时省略。
+X Adapter 在 `adapters/x/src/entity-schemas.ts` 定义 `x.post` 和 `x.profile`，通过 `authored_by` 关联。转发使用 Profile 到原帖的 `reposted` 关系；单帖中的引用和转发分别使用帖子到原帖的 `quoted`、`reposted` 关系，被引用或转发的帖子只保存 ID，不保存其正文、作者和提及（它们可能比引用者更不公开），原帖另行独立采集，无权访问时跳过。读取时，图中被根节点引用或转发、且该租户已保存可读的帖子附带 `saved_summary`（该收藏当前版本的摘要）；详情页据此显示摘要并链接收藏，否则链接到 X。指向转发的链接按原帖采集：Fetch 以 `canonical_target` 移到原帖。X 的结果不再产生 `restricted_targets`。X 帖子的可见性由作者决定：作者受保护时私有，并以作者 Profile 作为 `private_subject`；作者公开且帖子本身没有更窄的受众（仅订阅者、密友圈、社群或其他未知限制）时公开；有更窄受众的帖子私有且不记录账号。资料、帖子作者或原始节点显示账号公开时，该账号列入 `public_subjects`。帖子正文与作者简介中的提及使用 `mentions` 指向 Profile，并调度关联资料采集。时间线保留转发关系，同时单独采集原帖。实体图最多包含 512 个实体、1,024 条关系，仍受 2 MiB 大小限制。帖子 data 包含正文、上游发布时间、编辑时间及来源、编辑 ID 列表；Profile data 包含用户名、昵称、头像 URL 与个人资料。头像文件由 Adapter 作为关联资源返回，核心下载保存，不加入 Telegram 帖子相册。编辑时间优先采用上游明确字段，否则在存在多个编辑版本 ID 时从最新 Snowflake 推导并标记 `x_snowflake`；没有证据时省略。
 
 Fetch 的 text、text_kind、summary、author_name、published_at 和展示媒体是可选的通用展示字段，与 entity data 分开。summary 由 Adapter 提供；X Adapter 使用“作者名：内容”，并按帖子媒体顺序追加 `[图片]`、`[视频]`，不包括作者头像。Telegram 列表将换行合并为空格，每条最多显示 100 个字符，超出用省略号收尾并保留媒体标记，条目间留空行。列表摘要以文本链接指向收藏的来源 URL。每行按钮并排提供查看收藏和查看原帖。详情展示收藏 ID、作者、正文和原始发布时间，来源通过原帖按钮打开；时间转换为 UTC+8，未知时间省略。Telegram 只读取这些字段，不解析 X 或其他平台的专属 JSON。正文和摘要在同一收藏版本中保存。
 

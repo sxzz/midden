@@ -244,12 +244,13 @@ test("access check omits an embedded quote the account cannot read", async () =>
     { __typename: "TweetTombstone", tombstone: { text: { text: "gone" } } },
     { __typename: "TweetUnavailable", rest_id: "900124" },
   ]) {
+    // The quoting post's own author decides its visibility.
     const result = await access(quoting(quoted));
-    assert.equal(result.visibility, Visibility.VISIBILITY_PRIVATE);
+    assert.equal(result.visibility, Visibility.VISIBILITY_PUBLIC);
     assert.deepEqual(result.accessible, [ref("900123")]);
   }
   const hidden = await access(quoting(tweet("900124", "43", true)));
-  assert.equal(hidden.visibility, Visibility.VISIBILITY_PRIVATE);
+  assert.equal(hidden.visibility, Visibility.VISIBILITY_PUBLIC);
   assert.deepEqual(hidden.accessible, [ref("900123"), ref("900124")]);
 });
 
