@@ -255,6 +255,19 @@ export class CaptureStrategy {
             result.relatedTargets.push(
               RelatedTarget.fromPartial({
                 url,
+                publishedAt: timestamp(
+                  item.taken_at ?? item.taken_at_timestamp,
+                ),
+                mediaTypes: [
+                  ...new Set<string>(
+                    (item.carousel_media || [item]).map((media: any) =>
+                      media.media_type === 2 || media.video_versions?.length
+                        ? "video"
+                        : "image",
+                    ),
+                  ),
+                ],
+                postType: "post",
                 updatedAt:
                   timestamp(item.caption?.edited_at ?? item.edited_at) ||
                   timestamp(item.taken_at ?? item.taken_at_timestamp),

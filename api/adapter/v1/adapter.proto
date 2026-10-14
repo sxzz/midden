@@ -115,6 +115,11 @@ message SourceResponse {
   Visibility visibility = 4; // Account responses stay private even for public posts.
 }
 message RelatedTarget {
+  // Optional listing metadata for tenant-specific collection capture filters.
+  string published_at = 5;
+  repeated string media_types = 6; // image or video, excluding quoted media.
+  string post_type = 7; // post, quote or repost; empty for non-post references.
+
   string url = 1;
   uint32 refresh_after_seconds = 2; // Zero reuses any existing collection; positive refreshes stale data.
   string updated_at = 3; // Latest known content change (publication or edit) in RFC 3339; empty when unknown.

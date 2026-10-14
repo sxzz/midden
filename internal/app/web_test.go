@@ -79,6 +79,9 @@ func TestWebCollection(t *testing.T) {
 					entity.ExternalID = jobs[1].CollectionID + "root"
 				}
 				entity.Data = json.RawMessage(`{}`)
+				if i == 1 && entity.Key == "root" {
+					entity.Data = json.RawMessage(`{"metadata":{"protected":true}}`)
+				}
 				entity.Schema = json.RawMessage(`{}`)
 			}
 			if i == 0 {
@@ -98,6 +101,31 @@ func TestWebCollection(t *testing.T) {
 			return err
 		}))
 	}
+	// Capture visibility is public, while the author's latest profile is private.
+	privatePosts, err := s.Collections(ctx, a.TenantID, CollectionFilter{EntityType: "x.post", Visibility: "private"}, "")
+	must(t, err)
+	if len(privatePosts.Items) != 1 || privatePosts.Items[0].ID != jobs[0].CollectionID {
+		t.Fatal("author visibility did not follow the latest profile", privatePosts)
+	}
+	publicPosts, err := s.Collections(ctx, a.TenantID, CollectionFilter{EntityType: "x.post", Visibility: "public"}, "")
+	must(t, err)
+	if len(publicPosts.Items) != 0 {
+		t.Fatal("post capture visibility was used instead of author visibility")
+	}
+	names := []string{"author-tag"}
+	annotation, err := s.UpdateAnnotation(ctx, a.TenantID, jobs[1].CollectionID, AnnotationUpdate{TagNames: &names})
+	must(t, err)
+	tagged, err := s.Collections(ctx, a.TenantID, CollectionFilter{Tag: annotation.Tags[0].ID, EntityType: "x.post"}, "")
+	must(t, err)
+	if len(tagged.Items) != 1 || tagged.Items[0].ID != jobs[0].CollectionID {
+		t.Fatal("author tag did not match the post", tagged)
+	}
+	foreignTagged, err := s.Collections(ctx, b.TenantID, CollectionFilter{Tag: annotation.Tags[0].ID}, "")
+	must(t, err)
+	if len(foreignTagged.Items) != 0 {
+		t.Fatal("author tags crossed tenant boundary")
+	}
+
 	for _, kind := range []string{"x.post", "x.profile", "x.post,x.profile"} {
 		filtered, err := s.Collections(ctx, a.TenantID, CollectionFilter{EntityType: kind}, "")
 		must(t, err)
@@ -251,13 +279,13 @@ func TestWebCollection(t *testing.T) {
 	if _, err := s.Collections(ctx, a.TenantID, CollectionFilter{Media: "image,invalid"}, ""); !errors.Is(err, ErrInvalidFilter) {
 		t.Fatal("invalid media accepted")
 	}
-	page, e := s.Collections(ctx, a.TenantID, CollectionFilter{Q: "中文", Media: "text", Visibility: "public"}, "")
+	page, e := s.Collections(ctx, a.TenantID, CollectionFilter{Q: "中文", Media: "text"}, "")
 	must(t, e)
 	if len(page.Items) != 20 || page.Next == "" {
 		t.Fatal(page)
 	}
 	must(t, s.DeleteCollection(ctx, a.TenantID, page.Items[19].ID))
-	tail, e := s.Collections(ctx, a.TenantID, CollectionFilter{Q: "中文", Media: "text", Visibility: "public"}, page.Next)
+	tail, e := s.Collections(ctx, a.TenantID, CollectionFilter{Q: "中文", Media: "text"}, page.Next)
 	must(t, e)
 	if len(tail.Items) != 2 {
 		t.Fatal(tail)

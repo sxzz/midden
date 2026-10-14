@@ -20,6 +20,7 @@ const props = defineProps<{
   next: string
   usage?: Usage
   hideFilters?: boolean
+  hideAuthors?: boolean
   /** Display name of the account this list belongs to, for its reposts. */
   repostedBy?: string
 }>()
@@ -65,6 +66,7 @@ const filtered = computed(() => {
   const q = new URLSearchParams(props.query)
   return [
     'tag',
+    'post_type',
     'q',
     'author',
     'media_type',
@@ -99,6 +101,7 @@ const storage = computed(() =>
   <CollectionFilters
     v-if="!hideFilters"
     :query="query"
+    :hide-authors="hideAuthors"
     @search="$emit('search', $event)"
   />
   <div class="layout-bar">
@@ -121,7 +124,17 @@ const storage = computed(() =>
   </ListSection>
   <CollectionAlbum
     v-if="layout === 'album'"
-    :items="items"
+    :items="
+      hideAuthors
+        ? items.filter(
+            (item) =>
+              !item.relation_types?.length ||
+              item.relation_types.some(
+                (type) => type === 'authored_by' || type === 'reposted',
+              ),
+          )
+        : items
+    "
     :media-types="mediaTypes"
     :show-sensitive="showSensitive"
     :loading="loading"

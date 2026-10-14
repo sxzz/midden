@@ -107,15 +107,15 @@ test('submits links and follows the record until it finishes', async ({
     '已提交 1 条，1 条未提交：不支持的链接。',
   )
   expect(submitted).toEqual([
-    { url: 'https://fxtwitter.com/fixture/status/1' },
-    { url: 'https://unsupported.test/a' },
+    { url: 'https://fxtwitter.com/fixture/status/1', options: {} },
+    { url: 'https://unsupported.test/a', options: {} },
   ])
   // The link that failed stays to be corrected.
   await expect(page.getByLabel('链接')).toHaveValue(
     'https://unsupported.test/a',
   )
 
-  const row = page.getByRole('button', { name: /x\.com\/fixture\/status\/1/ })
+  const row = page.getByRole('link', { name: /x\.com\/fixture\/status\/1/ })
   await expect(row).toContainText('正在保存媒体')
   await expect(row).toContainText('媒体 1/4')
   await expect(row.getByRole('progressbar')).toHaveAttribute('value', '0.25')

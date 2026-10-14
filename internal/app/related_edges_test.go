@@ -85,7 +85,7 @@ func TestRelatedCollectionsRequireDirectRootEdges(t *testing.T) {
 	fixture.graph = postGraph(profileExternal, edge("root", "author", "authored_by"), edge("author", "profile", "mentions"))
 	capture("entry", uuid.NewString()) // The author's bio does not relate the post.
 	fixture.graph = postGraph(profileExternal, edge("root", "quote", "quoted"), edge("quote", "profile", "authored_by"))
-	capture("entry", uuid.NewString()) // A quoted post's author is indirect context.
+	quote := capture("entry", uuid.NewString()) // A quoted post's author is indirect context.
 	fixture.graph = postGraph(profileExternal)
 	capture("entry", uuid.NewString()) // Presence in the graph alone proves no edge.
 	repostExternal := uuid.NewString()
@@ -118,6 +118,20 @@ func TestRelatedCollectionsRequireDirectRootEdges(t *testing.T) {
 	}
 	if result.TotalStorageBytes == nil || *result.TotalStorageBytes != bytes {
 		t.Fatal("storage includes indirect context", result.TotalStorageBytes, bytes)
+	}
+
+	for _, tc := range []struct {
+		filter CollectionFilter
+		want   string
+	}{
+		{CollectionFilter{PostType: "quote", EntityType: "document.entry"}, quote},
+		{CollectionFilter{RelatedTo: profile, PostType: "repost", EntityType: "document.entry"}, repost},
+	} {
+		filtered, err := service.Collections(ctx, owner, tc.filter, "")
+		must(t, err)
+		if len(filtered.Items) != 1 || filtered.Items[0].ID != tc.want {
+			t.Fatalf("post type filter mismatch: %+v", filtered.Items)
+		}
 	}
 	isolated, err := service.Collections(ctx, other, CollectionFilter{RelatedTo: profile, EntityType: "document.entry"}, "")
 	must(t, err)

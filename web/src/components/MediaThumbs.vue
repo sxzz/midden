@@ -5,9 +5,10 @@ import { readyMedia } from '../presentation'
 import MediaPreview from './MediaPreview.vue'
 import MediaViewer from './MediaViewer.vue'
 import EyeIcon from './ui/EyeIcon.vue'
-import type { Asset } from '../api'
+import type { Asset, Collection } from '../api'
 const props = defineProps<{
   assets: Asset[]
+  collection?: Collection
   showSensitive?: boolean
   collectionId?: string
 }>()
@@ -112,6 +113,7 @@ const overflow = computed(() => media.value.length - tiles.value.length)
     :assets="previews"
     :initial-id="selected.id"
     :collection-id="collectionId"
+    :collection="collection"
     @open="openCollection"
     @close="selected = undefined"
   />
@@ -121,12 +123,14 @@ const overflow = computed(() => media.value.length - tiles.value.length)
 .thumbs-group {
   position: relative;
   display: flex;
-  width: max-content;
+  width: 100%;
   max-width: 100%;
   margin-top: 8px;
 }
 .thumbs {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
   min-width: 0;
   gap: 4px;
 }
@@ -148,12 +152,15 @@ const overflow = computed(() => media.value.length - tiles.value.length)
   outline: 2px solid #fff;
   outline-offset: -3px;
 }
+.thumbs:has(.tile:only-child) {
+  grid-template-columns: 1fr;
+}
 .tile {
   position: relative;
   display: grid;
   place-items: center;
-  width: 54px;
-  height: 54px;
+  width: 100%;
+  aspect-ratio: 1.4;
   flex-shrink: 0;
   border-radius: 8px;
   overflow: hidden;

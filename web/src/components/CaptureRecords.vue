@@ -6,12 +6,12 @@ import {
   onUnmounted,
   shallowRef,
 } from 'vue'
-import { useRouter } from 'vue-router'
 import {
   api,
   errorText,
   type CaptureRecord,
   type CaptureRecordDetail,
+  type CaptureOptions as Options,
   type Page,
 } from '../api'
 import {
@@ -24,6 +24,7 @@ import {
   recordRowTime,
   recordStatus,
 } from '../captures'
+import CaptureOptions from './CaptureOptions.vue'
 import InfiniteLoader from './ui/InfiniteLoader.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
@@ -31,13 +32,13 @@ const emit = defineEmits<{
   /** A capture finished, so saved content changed. */
   saved: []
 }>()
-const router = useRouter()
 const items = shallowRef<CaptureRecord[]>([])
 const next = shallowRef('')
 const loading = shallowRef(true)
 const loaded = shallowRef(false)
 const error = shallowRef('')
 const text = shallowRef('')
+const options = shallowRef<Options>({})
 const submitting = shallowRef(false)
 const notice = shallowRef<{ text: string; failed?: boolean }>()
 const links = computed(() => extractLinks(text.value))
@@ -142,7 +143,7 @@ async function submit() {
     try {
       await api('/captures', {
         method: 'POST',
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, options: options.value }),
         headers: { 'Idempotency-Key': crypto.randomUUID() },
       })
     } catch (e) {
@@ -162,9 +163,6 @@ async function submit() {
   submitting.value = false
   await refresh()
 }
-function open(id: string) {
-  void router.push({ name: 'capture', params: { id } })
-}
 </script>
 
 <template>
@@ -183,6 +181,7 @@ function open(id: string) {
           @keydown.enter.ctrl.prevent="submit"
         />
       </label>
+      <CaptureOptions v-model="options" />
       <p
         v-if="notice"
         class="notice"
@@ -211,12 +210,11 @@ function open(id: string) {
     <ListButton label="重试" @select="refresh" />
   </ListSection>
   <ListSection v-for="group in groups" :key="group.label" :title="group.label">
-    <button
+    <a
       v-for="r in group.items"
       :key="r.id"
-      type="button"
       class="record"
-      @click="open(r.id)"
+      :href="`#/captures/${r.id}`"
     >
       <span class="main">
         <span class="title">{{ linkTitle(r.url) }}</span>
@@ -239,7 +237,7 @@ function open(id: string) {
         recordStatus(r).label
       }}</span>
       <span class="chevron" aria-hidden="true">›</span>
-    </button>
+    </a>
   </ListSection>
   <p v-if="!items.length && loaded && !error" class="status">暂无采集记录</p>
   <p v-else-if="loading && !error" class="status" role="status">加载中…</p>
@@ -324,6 +322,8 @@ textarea::placeholder {
   color: var(--subtle);
 }
 .record {
+  color: inherit;
+  text-decoration: none;
   position: relative;
   display: flex;
   align-items: center;

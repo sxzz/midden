@@ -39,6 +39,14 @@ function open(event: MouseEvent) {
     event.target.closest('button, dialog, a')
   )
     return
+  if (event.ctrlKey || event.metaKey || event.shiftKey) {
+    window.open(
+      `#/collection/${encodeURIComponent(props.collection.id)}`,
+      '_blank',
+      'noopener',
+    )
+    return
+  }
   emit('open', props.collection.id)
 }
 const view = computed(() => present(props.collection))
@@ -122,21 +130,22 @@ const storage = computed(() =>
           />
         </svg>
       </span>
-      <LoadingImage
-        v-if="view.avatar && (!view.avatar.sensitive || showSensitive)"
-        class="avatar"
-        :src="previewURL(view.avatar)"
-        alt=""
-        loading="lazy"
-      /><span v-else class="avatar initials" aria-hidden="true">{{
-        view.name.slice(0, 1)
-      }}</span>
+      <a
+        :href="view.profileHref"
+        class="avatar-link"
+        :aria-label="`查看${view.name}的主页`"
+        ><LoadingImage
+          v-if="view.avatar && (!view.avatar.sensitive || showSensitive)"
+          class="avatar"
+          :src="previewURL(view.avatar)"
+          alt=""
+          loading="lazy"
+        /><span v-else class="avatar initials" aria-hidden="true">{{
+          view.name.slice(0, 1)
+        }}</span></a
+      >
       <span class="content">
-        <button
-          type="button"
-          class="head"
-          @click.stop="$emit('open', collection.id)"
-        >
+        <a :href="`#/collection/${collection.id}`" class="head">
           <span class="identity"
             ><strong class="name">{{ view.name }}</strong
             ><LockIcon v-if="view.locked" class="lock" /><span
@@ -145,12 +154,17 @@ const storage = computed(() =>
               >@{{ view.handle }}</span
             ></span
           ><span class="when">{{ when }}</span>
-        </button>
+        </a>
         <span v-if="preview" class="preview">{{ preview }}</span>
         <span v-if="meta" class="meta">{{ meta }}</span>
-        <PostRelations :collection="collection" compact />
+        <PostRelations
+          :collection="collection"
+          :show-sensitive="showSensitive"
+          compact
+        />
         <MediaThumbs
           :collection-id="collection.id"
+          :collection="collection"
           :assets="collection.assets || []"
           :show-sensitive="showSensitive"
           @open="$emit('open', collection.id)"
@@ -162,6 +176,13 @@ const storage = computed(() =>
 </template>
 
 <style scoped>
+.avatar-link {
+  flex-shrink: 0;
+}
+.head {
+  color: inherit;
+  text-decoration: none;
+}
 .row {
   position: relative;
   display: flex;
@@ -324,5 +345,11 @@ const storage = computed(() =>
   text-align: right;
   font-size: 12px;
   color: var(--subtle);
+}
+@media (min-width: 768px) {
+  .preview {
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+  }
 }
 </style>

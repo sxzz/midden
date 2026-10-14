@@ -65,7 +65,7 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 					write(w, 400, map[string]string{"error": "invalid request"})
 					return
 				}
-				j, e := s.CaptureURL(r.Context(), tenant(r), in.URL, in.Key)
+				j, e := s.CaptureURL(r.Context(), tenant(r), in.URL, in.Key, in.Options)
 				respond(w, 202, j, e)
 				return
 			}
@@ -219,8 +219,8 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 	})
 	mux.HandleFunc("GET /v1/collections", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		if _, ok := r.Context().Value(sessionKey{}).(bool); ok || q.Has("q") || q.Has("entity_type") || q.Has("media_type") || q.Has("visibility") || q.Has("saved_from") || q.Has("saved_before") || q.Has("sort") || q.Has("order") || q.Has("author") || q.Has("sensitive") || q.Has("tag") || q.Has("related_to") {
-			v, e := s.Collections(r.Context(), tenant(r), app.CollectionFilter{Authors: q["author"], EntityType: q.Get("entity_type"), Q: q.Get("q"), Media: q.Get("media_type"), Visibility: q.Get("visibility"), From: q.Get("saved_from"), Before: q.Get("saved_before"), Sort: q.Get("sort"), Order: q.Get("order"), Sensitive: q.Get("sensitive"), Tag: q.Get("tag"), RelatedTo: q.Get("related_to")}, q.Get("cursor"))
+		if _, ok := r.Context().Value(sessionKey{}).(bool); ok || q.Has("q") || q.Has("entity_type") || q.Has("media_type") || q.Has("visibility") || q.Has("saved_from") || q.Has("saved_before") || q.Has("sort") || q.Has("order") || q.Has("author") || q.Has("sensitive") || q.Has("tag") || q.Has("related_to") || q.Has("post_type") {
+			v, e := s.Collections(r.Context(), tenant(r), app.CollectionFilter{Authors: q["author"], EntityType: q.Get("entity_type"), Q: q.Get("q"), Media: q.Get("media_type"), Visibility: q.Get("visibility"), From: q.Get("saved_from"), Before: q.Get("saved_before"), Sort: q.Get("sort"), Order: q.Get("order"), Sensitive: q.Get("sensitive"), Tag: q.Get("tag"), RelatedTo: q.Get("related_to"), PostType: q.Get("post_type")}, q.Get("cursor"))
 			respond(w, 200, v, e)
 			return
 		}

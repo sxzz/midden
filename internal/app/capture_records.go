@@ -308,7 +308,11 @@ func (s *Service) CaptureMembers(ctx context.Context, tenant, id, state, cursor 
 
 // CaptureURL saves a link through the source the tenant selected for its
 // platform, the way a link sent to a channel is saved.
-func (s *Service) CaptureURL(ctx context.Context, tenant, raw, key string) (domain.Job, error) {
+func (s *Service) CaptureURL(ctx context.Context, tenant, raw, key string, options ...*domain.CaptureOptions) (domain.Job, error) {
+	var opts *domain.CaptureOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	target, e := s.Resolve(ctx, raw)
 	if e != nil {
 		return domain.Job{}, e
@@ -317,7 +321,7 @@ func (s *Service) CaptureURL(ctx context.Context, tenant, raw, key string) (doma
 	if e != nil {
 		return domain.Job{}, e
 	}
-	return s.Submit(ctx, tenant, domain.CaptureInput{URL: target.URL, Input: raw, ConnectionID: connection, Key: key})
+	return s.Submit(ctx, tenant, domain.CaptureInput{URL: target.URL, Input: raw, ConnectionID: connection, Key: key, Options: opts})
 }
 
 // recaptureInput builds the capture that fetches a saved collection again. One
@@ -345,21 +349,29 @@ func (s *Service) recaptureInput(ctx context.Context, tenant, collection string,
 func (s *Service) RetryCaptureRecord(ctx context.Context, tenant, id, key string) (domain.Job, error) {
 	var collection, url string
 	var saved bool
+	var optionsJSON []byte
+	var options *domain.CaptureOptions
 	e := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT a.id,a.url,EXISTS(SELECT FROM tenant_collections t WHERE t.collection_id=a.id) FROM submissions s JOIN captures c ON c.id=s.capture_id JOIN collections a ON a.id=c.collection_id WHERE s.id=$1 AND `+recordRootSQL, id).Scan(&collection, &url, &saved)
+		return tx.QueryRow(ctx, `SELECT a.id,a.url,EXISTS(SELECT FROM tenant_collections t WHERE t.collection_id=a.id),s.capture_options FROM submissions s JOIN captures c ON c.id=s.capture_id JOIN collections a ON a.id=c.collection_id WHERE s.id=$1 AND `+recordRootSQL, id).Scan(&collection, &url, &saved, &optionsJSON)
 	})
 	if e != nil {
 		return domain.Job{}, e
 	}
+	if len(optionsJSON) > 0 {
+		if err := json.Unmarshal(optionsJSON, &options); err != nil {
+			return domain.Job{}, err
+		}
+	}
 	// Deleted from the library since: saving it again is all that is left.
 	if !saved {
-		return s.CaptureURL(ctx, tenant, url, key)
+		return s.CaptureURL(ctx, tenant, url, key, options)
 	}
 	in, e := s.recaptureInput(ctx, tenant, collection, false)
 	if e != nil {
 		return domain.Job{}, e
 	}
 	in.Key = key
+	in.Options = options
 	return s.Submit(ctx, tenant, in)
 }
 

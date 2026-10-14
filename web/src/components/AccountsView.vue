@@ -89,6 +89,9 @@ async function load() {
   loading.value = true
   try {
     data.value = await api<Accounts>('/accounts')
+    data.value.platforms.sort(
+      (a, b) => Number(b.id === 'x') - Number(a.id === 'x'),
+    )
     error.value = ''
   } catch (e) {
     error.value = errorText(e)

@@ -118,9 +118,9 @@ test('a profile keeps its related order, layout and pages after a nested post', 
   const list = page.getByRole('region', { name: '关联的收藏' })
   await expect(list.locator('.row')).toHaveCount(3)
   await expect(list.locator('.row').first()).toContainText('合成帖子 5')
-  const order = list.getByRole('button', { name: /发布时间排序/ })
-  await order.click()
-  await expect(order).toHaveText('正序 ↑')
+  const order = list.getByRole('combobox', { name: '排序方向' })
+  await order.selectOption('asc')
+  await expect(order).toHaveValue('asc')
   await expect(list.locator('.row').first()).toContainText('合成帖子 1')
   // Reach the second page, then remember the whole list in album layout.
   await scrollTo(page, 100_000)
@@ -143,7 +143,7 @@ test('a profile keeps its related order, layout and pages after a nested post', 
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
   // The cached profile keeps its own identity, order, layout and both pages.
   await expect(page.locator('.post .body')).toHaveText('合成主页简介')
-  await expect(order).toHaveText('正序 ↑')
+  await expect(order).toHaveValue('asc')
   await expect(album).toHaveAttribute('aria-pressed', 'true')
   await expect(list.locator('.album button')).toHaveCount(5)
   expect(counts.relatedLoads()).toBe(relatedLoads)

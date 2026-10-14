@@ -23,7 +23,7 @@ var ErrInvalidFilter = errors.New("invalid collection filters")
 
 type (
 	CollectionFilter struct {
-		Q, EntityType, Media, Visibility, From, Before, Sort, Order, Sensitive, Tag, RelatedTo string
+		Q, EntityType, Media, Visibility, From, Before, Sort, Order, Sensitive, Tag, RelatedTo, PostType string
 		// Stable author keys, never display names. See authorIdentity.
 		Authors []string
 	}
@@ -46,6 +46,9 @@ type CollectionPage struct {
 
 func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter, cursor string) (p CollectionPage, e error) {
 	p.Items = []CollectionItem{}
+	if f.PostType != "" && f.PostType != "post" && f.PostType != "quote" && f.PostType != "repost" {
+		return p, ErrInvalidFilter
+	}
 	if len(f.Authors) > 100 {
 		return p, ErrInvalidFilter
 	}
@@ -122,13 +125,20 @@ func (s *Service) Collections(ctx context.Context, t string, f CollectionFilter,
 			}
 			p.TotalStorageBytes = &total
 		}
-		query := withRelatedContext("NULLIF($16,'')", `SELECT a.id,ta.created_at,ordering.at,storage.bytes,ARRAY(SELECT DISTINCT edge.kind FROM related_edges edge WHERE edge.collection_id=a.id ORDER BY 1) FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id CROSS JOIN LATERAL (SELECT head.* FROM revisions head WHERE head.collection_id=a.id ORDER BY head.created_at DESC,head.id DESC LIMIT 1) r CROSS JOIN LATERAL (SELECT CASE WHEN $8='published' AND pg_input_is_valid(r.payload->>'published_at','timestamp with time zone') THEN (r.payload->>'published_at')::timestamptz ELSE a.observed_at END AS at) ordering CROSS JOIN LATERAL (SELECT `+identityStorageSQL+` AS bytes) storage WHERE `+latestIdentitySQL+` AND (cardinality($11::text[])=0 OR EXISTS(`+authorMatchSQL+`)) AND ($14='' OR ($14='contains')=EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='' AND m.sensitive)) AND ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR r.visibility=$2) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND (($8='storage' AND ($10::bigint IS NULL OR (storage.bytes,a.id)<($10,$6::uuid))) OR ($8<>'storage' AND ($5::timestamptz IS NULL OR (ordering.at,a.id)<($5,$6::uuid)))) AND ($7='' OR ('text'=ANY(string_to_array($7,',')) AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (('image'=ANY(string_to_array($7,',')) AND b.mime LIKE 'image/%') OR ('video'=ANY(string_to_array($7,',')) AND b.mime LIKE 'video/%')))) AND ($9='' OR EXISTS(SELECT FROM revision_entities re JOIN entity_versions ev ON ev.id=re.entity_version_id JOIN entities en ON en.id=ev.entity_id WHERE re.revision_id=r.id AND re.is_root AND en.kind=ANY(string_to_array($9,',')))) AND ($16='' OR (a.id<>NULLIF($16,'')::uuid AND EXISTS(`+relatedCollectionSQL+`))) AND ($15='' OR EXISTS(SELECT FROM collection_tags ct JOIN collections tagged ON tagged.id=ct.collection_id JOIN tenant_collections saved_tagged ON saved_tagged.collection_id=tagged.id WHERE (tagged.platform,tagged.kind,tagged.object_scope,tagged.external_id)=(a.platform,a.kind,a.object_scope,a.external_id) AND ct.tenant_id=ta.tenant_id AND ct.tag_id=NULLIF($15,'')::uuid)) ORDER BY CASE WHEN $8='storage' THEN storage.bytes END DESC,CASE WHEN $8<>'storage' THEN ordering.at END DESC,a.id DESC LIMIT 21`)
+		query := withRelatedContext("NULLIF($16,'')", `SELECT a.id,ta.created_at,ordering.at,storage.bytes,ARRAY(SELECT DISTINCT edge.kind FROM related_edges edge WHERE edge.collection_id=a.id ORDER BY 1) FROM tenant_collections ta JOIN collections a ON a.id=ta.collection_id CROSS JOIN LATERAL (SELECT head.* FROM revisions head WHERE head.collection_id=a.id ORDER BY head.created_at DESC,head.id DESC LIMIT 1) r CROSS JOIN LATERAL (SELECT CASE WHEN $8='published' AND pg_input_is_valid(r.payload->>'published_at','timestamp with time zone') THEN (r.payload->>'published_at')::timestamptz ELSE a.observed_at END AS at) ordering CROSS JOIN LATERAL (SELECT `+identityStorageSQL+` AS bytes) storage WHERE `+latestIdentitySQL+` AND (cardinality($11::text[])=0 OR EXISTS(`+authorMatchSQL+`)) AND ($14='' OR ($14='contains')=EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='' AND m.sensitive)) AND ($1='%%' OR concat_ws(' ',r.payload->>'text',r.payload->>'summary',r.payload->>'author_name') ILIKE $1) AND ($2='' OR EXISTS(`+authorVisibilitySQL+`)) AND ($3::timestamptz IS NULL OR ta.created_at >= $3) AND ($4::timestamptz IS NULL OR ta.created_at < $4) AND (($8='storage' AND ($10::bigint IS NULL OR (storage.bytes,a.id)<($10,$6::uuid))) OR ($8<>'storage' AND ($5::timestamptz IS NULL OR (ordering.at,a.id)<($5,$6::uuid)))) AND ($7='' OR ('text'=ANY(string_to_array($7,',')) AND NOT EXISTS(SELECT FROM assets m WHERE m.capture_id=r.capture_id AND m.purpose='')) OR EXISTS(SELECT FROM assets m JOIN blobs b ON b.id=m.blob_id WHERE m.capture_id=r.capture_id AND m.purpose='' AND (('image'=ANY(string_to_array($7,',')) AND b.mime LIKE 'image/%') OR ('video'=ANY(string_to_array($7,',')) AND b.mime LIKE 'video/%')))) AND ($9='' OR EXISTS(SELECT FROM revision_entities re JOIN entity_versions ev ON ev.id=re.entity_version_id JOIN entities en ON en.id=ev.entity_id WHERE re.revision_id=r.id AND re.is_root AND en.kind=ANY(string_to_array($9,',')))) AND ($16='' OR (a.id<>NULLIF($16,'')::uuid AND EXISTS(`+relatedCollectionSQL+`))) AND ($15='' OR EXISTS(SELECT FROM collection_tags ct JOIN collections tagged ON tagged.id=ct.collection_id JOIN tenant_collections saved_tagged ON saved_tagged.collection_id=tagged.id WHERE ((tagged.platform,tagged.kind,tagged.object_scope,tagged.external_id)=(a.platform,a.kind,a.object_scope,a.external_id) OR EXISTS(SELECT FROM entity_relations author_edge
+ JOIN revision_entities post_root ON post_root.revision_id=author_edge.revision_id AND post_root.entity_key=author_edge.source_key AND post_root.is_root
+ JOIN revision_entities author_ref ON author_ref.revision_id=author_edge.revision_id AND author_ref.entity_key=author_edge.target_key
+ JOIN entity_versions author_version ON author_version.id=author_ref.entity_version_id
+ JOIN revision_entities tagged_root ON tagged_root.revision_id=visible_head(tagged.id) AND tagged_root.is_root
+ JOIN entity_versions tagged_version ON tagged_version.id=tagged_root.entity_version_id AND tagged_version.entity_id=author_version.entity_id
+ WHERE author_edge.revision_id=r.id AND author_edge.kind='authored_by')) AND ct.tenant_id=ta.tenant_id AND ct.tag_id=NULLIF($15,'')::uuid)) AND ($17='' OR $17=(`+postTypeSQL+`)) ORDER BY CASE WHEN $8='storage' THEN storage.bytes END DESC,CASE WHEN $8<>'storage' THEN ordering.at END DESC,a.id DESC LIMIT 21`)
 		if f.Order == "asc" {
 			query = strings.ReplaceAll(query, "(ordering.at,a.id)<", "(ordering.at,a.id)>")
 			query = strings.ReplaceAll(query, "(storage.bytes,a.id)<", "(storage.bytes,a.id)>")
-			query = strings.ReplaceAll(query, " DESC", " ASC")
+			orderAt := strings.LastIndex(query, " ORDER BY CASE")
+			query = query[:orderAt] + strings.ReplaceAll(query[orderAt:], " DESC", " ASC")
 		}
-		rows, err := tx.Query(ctx, query, q, f.Visibility, from, before, anchor, aid, f.Media, f.Sort, f.EntityType, byteAnchor, platforms, kinds, externals, f.Sensitive, f.Tag, f.RelatedTo)
+		rows, err := tx.Query(ctx, query, q, f.Visibility, from, before, anchor, aid, f.Media, f.Sort, f.EntityType, byteAnchor, platforms, kinds, externals, f.Sensitive, f.Tag, f.RelatedTo, f.PostType)
 		if err != nil {
 			return err
 		}
@@ -510,3 +520,27 @@ func withRelatedContext(requested, query string) string {
 // or the requested collection's root must point at the candidate's identity.
 // related_edges holds every such candidate, found once from the requested side.
 var relatedCollectionSQL = `SELECT edge.kind FROM related_edges edge WHERE edge.collection_id=a.id`
+
+// Visibility describes the author's current account, independent of the source
+// used to capture a post. Unknown account visibility never implies public.
+const authorVisibilitySQL = `SELECT FROM revision_entities subject
+ JOIN entity_versions snapshot ON snapshot.id=subject.entity_version_id
+ JOIN entities identity ON identity.id=snapshot.entity_id
+ LEFT JOIN LATERAL (SELECT ev.data FROM entity_versions ev
+  JOIN revision_entities re ON re.entity_version_id=ev.id
+  JOIN revisions rv ON rv.id=re.revision_id
+  WHERE ev.entity_id=identity.id AND visible_head(rv.collection_id)=rv.id
+   AND (re.is_root OR EXISTS(SELECT FROM entity_relations edge JOIN revision_entities root ON root.revision_id=edge.revision_id AND root.entity_key=edge.source_key AND root.is_root WHERE edge.revision_id=re.revision_id AND edge.target_key=re.entity_key AND edge.kind='authored_by'))
+  ORDER BY rv.created_at DESC LIMIT 1) latest ON TRUE
+ WHERE subject.revision_id=r.id AND (
+  (subject.is_root AND NOT EXISTS(SELECT FROM entity_relations edge JOIN revision_entities root ON root.revision_id=edge.revision_id AND root.entity_key=edge.source_key AND root.is_root WHERE edge.revision_id=r.id AND edge.kind='authored_by'))
+  OR EXISTS(SELECT FROM entity_relations edge JOIN revision_entities root ON root.revision_id=edge.revision_id AND root.entity_key=edge.source_key AND root.is_root WHERE edge.revision_id=r.id AND edge.target_key=subject.entity_key AND edge.kind='authored_by'))
+ AND coalesce(latest.data,snapshot.data)->'metadata'->>'protected'=CASE WHEN $2='private' THEN 'true' ELSE 'false' END`
+
+// Repost is relative to a requested profile; otherwise any saved repost edge
+// identifies it. A quote contains its own text plus an outgoing quoted edge.
+const postTypeSQL = `SELECT CASE WHEN
+ (($16<>'' AND EXISTS(SELECT FROM related_edges edge WHERE edge.collection_id=a.id AND edge.kind='reposted')) OR
+ ($16='' AND EXISTS(SELECT FROM revision_entities root JOIN entity_versions rv ON rv.id=root.entity_version_id JOIN entity_versions version ON version.entity_id=rv.entity_id JOIN revision_entities target ON target.entity_version_id=version.id JOIN entity_relations edge ON edge.revision_id=target.revision_id AND edge.target_key=target.entity_key AND edge.kind='reposted' JOIN revisions owner ON owner.id=edge.revision_id JOIN tenant_collections saved ON saved.collection_id=owner.collection_id WHERE root.revision_id=r.id AND root.is_root))) THEN 'repost'
+ WHEN EXISTS(SELECT FROM entity_relations edge JOIN revision_entities root ON root.revision_id=edge.revision_id AND root.entity_key=edge.source_key AND root.is_root WHERE edge.revision_id=r.id AND edge.kind='quoted') THEN 'quote'
+ ELSE 'post' END`

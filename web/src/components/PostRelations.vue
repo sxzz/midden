@@ -9,11 +9,16 @@ import {
   isProtected,
   type RelationAuthor,
 } from '../relations'
+import MediaThumbs from './MediaThumbs.vue'
 import LockIcon from './ui/LockIcon.vue'
-import type { Collection } from '../api'
+import type { Asset, Collection } from '../api'
+function openCollection(id?: string) {
+  if (id) window.location.hash = `#/collection/${id}`
+}
 const props = defineProps<{
   collection: Collection
   compact?: boolean
+  showSensitive?: boolean
   /** Show authors as the capture recorded them. */
   captured?: boolean
 }>()
@@ -59,6 +64,9 @@ const relations = computed(() => {
     string,
     {
       key: string
+      outgoing: boolean
+      assets: Asset[]
+      collectionId?: string
       label: string
       text: string
       href: string
@@ -104,6 +112,7 @@ const relations = computed(() => {
     // says what it is, otherwise only the link remains.
     const text =
       (typeof entity.data.text === 'string' ? entity.data.text.trim() : '') ||
+      entity.saved_text?.trim() ||
       entity.saved_summary?.trim() ||
       ''
     const name =
@@ -120,11 +129,11 @@ const relations = computed(() => {
       ? '转发此帖的账号'
       : outgoing
         ? type === 'quoted'
-          ? '引用的帖子'
-          : '转发的帖子'
+          ? '↘ 引用了这条帖子'
+          : '↻ 转发了这条帖子'
         : type === 'quoted'
-          ? '引用此帖的帖子'
-          : '转发此帖的帖子'
+          ? '↖ 这条帖子引用了当前帖子'
+          : '↖ 这条帖子转发了当前帖子'
     const prior = cards.get(key)
     // A live incoming relation can supply the saved link missing in an older snapshot.
     const avatar = postLink ? undefined : authorIdentity(entity)?.avatar
@@ -140,6 +149,9 @@ const relations = computed(() => {
       continue
     }
     cards.set(key, {
+      outgoing,
+      assets: entity.assets || [],
+      collectionId: entity.saved_collection_id,
       author: attribution ?? prior?.author,
       avatar: avatar ?? prior?.avatar,
       locked: locked || !!prior?.locked,
@@ -168,7 +180,12 @@ const relations = computed(() => {
     :class="{ compact }"
     aria-label="帖子关联"
   >
-    <div v-for="relation in relations" :key="relation.key" class="quote">
+    <div
+      v-for="relation in relations"
+      :key="relation.key"
+      class="quote"
+      :class="{ incoming: !relation.outgoing }"
+    >
       <!-- The author stands beside the post link, never inside it, so a saved
            profile stays a link of its own. -->
       <div v-if="relation.author || relation.publishedLabel" class="head">
@@ -215,6 +232,21 @@ const relations = computed(() => {
         </span>
         <span v-else class="text">{{ relation.text }}</span>
       </a>
+      <MediaThumbs
+        v-if="relation.assets.length"
+        :assets="relation.assets"
+        :collection="{
+          ...collection,
+          graph: undefined,
+          id: relation.collectionId || collection.id,
+          text: relation.text,
+          author_name: relation.author?.name || relation.author?.handle || '',
+          assets: relation.assets,
+        }"
+        :show-sensitive="showSensitive"
+        :collection-id="relation.collectionId"
+        @open="openCollection(relation.collectionId)"
+      />
     </div>
   </div>
 </template>
@@ -225,13 +257,14 @@ const relations = computed(() => {
   gap: 10px;
   margin-top: 14px;
 }
-/* A referenced post reads as an indented aside: no card, no background, only
-   the muted rule that marks where the other post begins. */
+/* A bordered card separates the referenced post from the surrounding text. */
 .quote {
   display: grid;
   gap: 4px;
-  padding-left: 10px;
-  border-left: 2px solid var(--separator);
+  padding: 12px;
+  border: 1px solid var(--separator);
+  border-radius: 14px;
+  background: var(--card);
 }
 /* Author first, the way the quoted post itself would be read. */
 .head {
@@ -247,8 +280,12 @@ const relations = computed(() => {
   color: inherit;
   text-decoration: none;
 }
+.incoming {
+  border-left: 3px solid var(--link);
+}
 .label {
-  color: var(--subtle);
+  font-weight: 600;
+  color: var(--link);
   font-size: 12px;
 }
 .text {
@@ -330,7 +367,7 @@ const relations = computed(() => {
   font-size: 12px;
 }
 .compact .label {
-  font-size: 11px;
+  font-size: 13px;
 }
 /* In a list row a referenced post stays secondary to the row's own text. */
 .compact .text {

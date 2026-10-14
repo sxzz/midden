@@ -358,3 +358,42 @@ test("profile failures name suspension and missing accounts without blocking ret
     failure("provider cannot access this profile"),
   );
 });
+
+test("timeline exposes publication, own media and sharing kind for capture selection", async () => {
+  const { attachTimeline } = await import("./profile.js");
+  const result = normalizeProfile(user, user.id, "fxtwitter");
+  attachTimeline(result, {
+    code: 200,
+    results: [
+      {
+        type: "status",
+        id: "900001",
+        created_timestamp: 1790812800,
+        media: { photos: [{ type: "photo" }] },
+      },
+      {
+        type: "status",
+        id: "900002",
+        created_at: "2026-10-01T00:00:00Z",
+        quote: { media: { all: [{ type: "photo" }] } },
+        media: { all: [] },
+      },
+      {
+        type: "status",
+        id: "900003",
+        reposted_by: user,
+        media: { all: [{ type: "video" }] },
+      },
+    ],
+  });
+  const posts = result.relatedTargets.filter((target) => target.postType);
+  assert.deepEqual(
+    posts.map((target) => target.postType),
+    ["post", "quote", "repost"],
+  );
+  assert.deepEqual(
+    posts.map((target) => target.mediaTypes),
+    [["image"], [], ["video"]],
+  );
+  assert.equal(posts[1]?.publishedAt, "2026-10-01T00:00:00.000Z");
+});

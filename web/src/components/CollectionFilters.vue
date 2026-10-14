@@ -24,12 +24,13 @@ async function loadTags() {
 }
 onMounted(loadTags)
 onActivated(loadTags)
-const props = defineProps<{ query: string }>()
+const props = defineProps<{ query: string; hideAuthors?: boolean }>()
 const emit = defineEmits<{ search: [query: string] }>()
 function read(query: string) {
   const params = new URLSearchParams(query)
   return {
     tag: params.get('tag') || '',
+    postType: params.get('post_type') || '',
     authors: params.getAll('author'),
     layout: params.get('layout') === 'album' ? 'album' : '',
     order: params.get('order') || 'desc',
@@ -64,6 +65,11 @@ const entityTypes = (entity: string, platform: string) => {
   return (platform ? [platform] : ['x', 'instagram'])
     .map((name) => `${name}.${kind}`)
     .join(',')
+}
+const postTypeNames: Record<string, string> = {
+  post: '普通帖子',
+  quote: '引用转帖',
+  repost: '纯转发',
 }
 const mediaNames: Record<string, string> = {
   image: '图片',
@@ -112,6 +118,7 @@ const range = computed({
 })
 const open = shallowRef(
   !!(
+    form.postType ||
     form.platform ||
     form.tag ||
     form.authors.length ||
@@ -131,6 +138,7 @@ const active = computed(() =>
     form.media.map((type) => mediaNames[type]).join('、'),
     // Authors are selected by identity; only their names are worth showing.
     form.authors.map((id) => authorNames.value[id] || id).join('、'),
+    postTypeNames[form.postType],
     visibilityNames[form.visibility],
     sensitiveNames[form.sensitive],
     rangeOptions.find((option) => option.value === range.value)?.label ||
@@ -149,6 +157,7 @@ function stringify(f: Form) {
   const q = new URLSearchParams()
   for (const [k, v] of [
     ['tag', f.tag],
+    ['post_type', f.postType],
     ['q', f.q],
     ['layout', f.layout],
     ['sort', f.sort],
@@ -204,6 +213,7 @@ const clearable = computed(() => {
 watch(
   () => [
     form.platform,
+    form.postType,
     form.tag,
     form.sort,
     form.order,
@@ -255,7 +265,8 @@ async function loadAuthors() {
 watch(
   open,
   (value) => {
-    if (value && posts.value && !authorsLoaded) void loadAuthors()
+    if (value && posts.value && !props.hideAuthors && !authorsLoaded)
+      void loadAuthors()
   },
   { immediate: true },
 )
@@ -333,21 +344,13 @@ const tagFilter = computed({
       </button>
       <span class="sort"
         ><span class="select"
-          ><select
-            :value="form.sort"
-            aria-label="排序"
-            @change="form.sort = ($event.target as HTMLSelectElement).value"
-          >
+          ><select v-model="form.sort" aria-label="排序">
             <option value="captured">采集时间</option>
             <option v-if="posts" value="published">发帖时间</option>
             <option value="storage">存储空间</option></select
           ><ChevronIcon class="select-chevron" /></span
         ><span class="select"
-          ><select
-            :value="form.order"
-            aria-label="排序方向"
-            @change="form.order = ($event.target as HTMLSelectElement).value"
-          >
+          ><select v-model="form.order" aria-label="排序方向">
             <option value="desc">
               {{ form.sort === 'storage' ? '从大到小' : '从新到旧' }}
             </option>
@@ -386,13 +389,21 @@ const tagFilter = computed({
         </p>
       </div>
       <template v-if="posts">
+        <div
+          v-if="!hideAuthors && authorsLoading"
+          class="author-skeleton"
+          role="status"
+          aria-label="正在加载作者"
+        >
+          <span v-for="n in 4" :key="n" />
+        </div>
         <MultiSelect
+          v-else-if="!hideAuthors"
           v-model="form.authors"
           label="作者"
           :options="authorOptions"
         />
-        <p v-if="authorsLoading" class="hint" role="status">正在加载作者…</p>
-        <p v-if="authorError" class="hint" role="alert">
+        <p v-if="!hideAuthors && authorError" class="hint" role="alert">
           {{ authorError }}
           <button type="button" @click="loadAuthors">重试</button>
         </p>
@@ -403,8 +414,17 @@ const tagFilter = computed({
           :searchable="false"
         />
       </template>
+      <label v-if="posts" class="option"
+        >帖子类型<span class="select"
+          ><select v-model="form.postType" aria-label="帖子类型">
+            <option value="">全部</option>
+            <option value="post">普通帖子</option>
+            <option value="quote">引用转帖</option>
+            <option value="repost">纯转发</option></select
+          ><ChevronIcon class="select-chevron" /></span
+      ></label>
       <label class="option"
-        >可见性<span class="select"
+        >作者可见性<span class="select"
           ><select v-model="form.visibility">
             <option value="">全部</option>
             <option value="public">公开</option>
@@ -456,6 +476,24 @@ const tagFilter = computed({
 </template>
 
 <style scoped>
+.author-skeleton {
+  display: flex;
+  gap: 8px;
+  padding: 14px var(--inset);
+}
+.author-skeleton span {
+  width: 64px;
+  height: 30px;
+  border-radius: 15px;
+  background: linear-gradient(
+    100deg,
+    var(--fill) 25%,
+    var(--card) 45%,
+    var(--fill) 65%
+  );
+  background-size: 240% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
 .filters {
   padding: 8px var(--gutter) 4px;
 }

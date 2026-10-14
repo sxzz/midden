@@ -47,7 +47,7 @@ it('shows the quoted post as an internal collection link with its text', () => {
     relations: [{ source: 'post', target: 'quote', type: 'quoted' }],
   })
   const link = el.querySelector<HTMLAnchorElement>('.relation')!
-  expect(link.textContent).toContain('引用的帖子')
+  expect(link.textContent).toContain('↘ 引用了这条帖子')
   expect(link.textContent).toContain('引用的原帖正文')
   expect(link.getAttribute('href')).toBe('#/collection/saved-quote')
   expect(link.getAttribute('target')).toBeNull()
@@ -101,7 +101,7 @@ it('links an unsaved repost to its X status without using untrusted payload URLs
     relations: [{ source: 'post', target: 'repost', type: 'reposted' }],
   })
   const link = el.querySelector<HTMLAnchorElement>('.relation')!
-  expect(link.textContent).toContain('转发的帖子')
+  expect(link.textContent).toContain('↻ 转发了这条帖子')
   expect(link.textContent).toContain('在 X')
   expect(link.getAttribute('href')).toBe('https://x.com/i/web/status/456')
   expect(link.getAttribute('target')).toBe('_blank')
@@ -277,7 +277,7 @@ it('attributes an incoming quote to the author the relation supplies', () => {
     },
   ])
   const link = el.querySelector<HTMLAnchorElement>('.relation')!
-  expect(link.textContent).toContain('引用此帖的帖子')
+  expect(link.textContent).toContain('↖ 这条帖子引用了当前帖子')
   expect(link.textContent).toContain('合成引用内容')
   const author = el.querySelector<HTMLAnchorElement>('.relation-author')!
   expect(author.getAttribute('href')).toBe('#/collection/saved-author')
@@ -379,9 +379,9 @@ it('shows saved incoming repost accounts and quote/repost posts without duplicat
   expect(links).toHaveLength(3)
   expect(links[0]?.textContent).toContain('转发此帖的账号')
   expect(links[0]?.getAttribute('href')).toBe('#/collection/saved-profile')
-  expect(links[1]?.textContent).toContain('引用此帖的帖子')
+  expect(links[1]?.textContent).toContain('↖ 这条帖子引用了当前帖子')
   expect(links[1]?.getAttribute('href')).toBe('#/collection/saved-quote')
-  expect(links[2]?.textContent).toContain('转发此帖的帖子')
+  expect(links[2]?.textContent).toContain('↖ 这条帖子转发了当前帖子')
   expect(links[2]?.getAttribute('href')).toBe('https://x.com/i/web/status/567')
 })
 it('shows a quoted post’s author as last seen, with its lock', () => {
@@ -413,4 +413,34 @@ it('shows a quoted post’s author as last seen, with its lock', () => {
   })
   expect(el.querySelector('.relation-author')!.textContent).toContain('新名字')
   expect(el.querySelector('.relation-author .lock')).not.toBeNull()
+})
+
+it('shows saved quote media inside its card without mixing it into the root gallery', () => {
+  const el = mount({
+    root: 'post',
+    entities: [
+      root,
+      {
+        key: 'quote',
+        type: 'x.post',
+        external_id: '456',
+        saved_collection_id: 'saved-quote',
+        data: { text: '引用正文' },
+        assets: [
+          {
+            id: 'quoted-image',
+            state: 'ready',
+            mime: 'image/png',
+            sensitive: false,
+          },
+        ],
+      },
+    ],
+    relations: [{ source: 'post', target: 'quote', type: 'quoted' }],
+  })
+  expect(el.querySelector('.relations img')?.getAttribute('src')).toBe(
+    '/v1/assets/quoted-image?inline=1',
+  )
+  expect(el.querySelector('.post > .media-group')).toBeNull()
+  expect(el.querySelector('.quote')?.textContent).toContain('↘ 引用了这条帖子')
 })

@@ -162,6 +162,30 @@ export function attachTimeline(
         RelatedTarget.fromPartial({
           url: `https://x.com/i/web/status/${post.id}`,
           updatedAt: postUpdatedAt(post),
+          publishedAt: Number.isFinite(Date.parse(post.created_at))
+            ? new Date(post.created_at).toISOString()
+            : typeof post.created_timestamp === "number"
+              ? new Date(post.created_timestamp * 1000).toISOString()
+              : "",
+          mediaTypes: [
+            ...new Set<string>(
+              (
+                post.media?.all ?? [
+                  ...(post.media?.photos ?? []),
+                  ...(post.media?.videos ?? []),
+                ]
+              )
+                .map((media: any) =>
+                  media.type === "photo"
+                    ? "image"
+                    : media.type === "video" || media.type === "gif"
+                      ? "video"
+                      : "",
+                )
+                .filter(Boolean),
+            ),
+          ],
+          postType: post.reposted_by ? "repost" : post.quote ? "quote" : "post",
           prefetch: prefetch?.(post),
         }),
       );

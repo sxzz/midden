@@ -81,7 +81,7 @@ test('a wholly sensitive group is covered once in the list and the detail', asyn
   await expect(dialog.getByText('1 / 3')).toBeVisible()
   await dialog.getByRole('button', { name: '关闭图片' }).click()
 
-  await page.getByRole('button', { name: /敏感测试/ }).click()
+  await page.locator('.head').filter({ hasText: '敏感测试' }).click()
   await expect(groupVeil(page)).toHaveCount(1)
   await groupVeil(page).focus()
   await expect(groupVeil(page)).toBeFocused()
@@ -96,7 +96,7 @@ test('a mixed group keeps per-resource reveal and a two-step open', async ({
 }) => {
   await serve(page, [image(1, true), image(2, false)])
   await expect(groupVeil(page)).toHaveCount(0)
-  await page.getByRole('button', { name: /敏感测试/ }).click()
+  await page.locator('.head').filter({ hasText: '敏感测试' }).click()
   const sensitive = page.getByRole('button', { name: '敏感内容，点按显示' })
   await expect(sensitive).toHaveCount(1)
   await sensitive.click()

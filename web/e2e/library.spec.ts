@@ -74,10 +74,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
     await r.fulfill({ json: body })
   })
   const openRow = () =>
-    page
-      .getByRole('button', { name: /测试作者/ })
-      .first()
-      .click()
+    page.locator('.head').filter({ hasText: '测试作者' }).first().click()
   await page.goto('/app/')
   await expect(page.getByText(collection.text)).toBeVisible()
   await page.screenshot({
@@ -230,10 +227,7 @@ test('sensitive image stays blurred until revealed and opens inside the page', a
   // Sensitive thumbnails and detail previews must remain blurred until revealed.
   await expect(page.locator('.thumbs img')).toBeVisible()
   await expect(page.locator('.thumbs img')).toHaveCSS('filter', 'blur(8px)')
-  await page
-    .getByRole('button', { name: /测试作者/ })
-    .first()
-    .click()
+  await page.locator('.head').filter({ hasText: '测试作者' }).first().click()
   await expect(
     page.getByRole('button', { name: '敏感内容，点按显示' }),
   ).toBeVisible()
@@ -291,7 +285,7 @@ test('loading skeletons, one revision and touch image navigation', async ({
     await r.fulfill({ json: body })
   })
   await page.goto('/app/')
-  await page.getByRole('button', { name: /测试作者/ }).click()
+  await page.locator('.head').filter({ hasText: '测试作者' }).click()
   await expect(page.getByRole('status', { name: '正在加载收藏' })).toBeVisible()
   releaseDetail()
   await expect(page.getByRole('button', { name: '无历史版本' })).toBeDisabled()

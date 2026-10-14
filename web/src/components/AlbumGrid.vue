@@ -212,4 +212,9 @@ const placeholders = 12
     transform: none;
   }
 }
+@media (min-width: 768px) {
+  .album {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+}
 </style>

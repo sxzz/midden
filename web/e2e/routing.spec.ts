@@ -43,7 +43,7 @@ for (const back of ['button', 'history'] as const) {
     await expect(img).not.toHaveClass(/pending/)
     const original = await img.elementHandle()
     const scroll = await page.evaluate(() => window.scrollY)
-    await row.click()
+    await row.locator('.head').click()
     await expect(page.locator('h1')).toHaveText('收藏详情')
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
     if (back === 'button')

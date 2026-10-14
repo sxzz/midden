@@ -93,7 +93,9 @@ test('entity tabs keep their own filters and mobile statistic layout', async ({
   })
   const type = () => queries.at(-1)?.get('entity_type')
   await page.goto('/app/')
-  await expect(page.getByRole('button', { name: /测试账号/ })).toBeVisible()
+  await expect(
+    page.locator('.head').filter({ hasText: '测试账号' }),
+  ).toBeVisible()
   expect(type()).toBe('x.post,instagram.post')
   const posts = page.getByRole('tab', { name: '帖子' })
   const accounts = page.getByRole('tab', { name: '账号' })
@@ -131,7 +133,7 @@ test('entity tabs keep their own filters and mobile statistic layout', async ({
   expect(type()).toBe('x.profile,instagram.profile')
   await expect(accounts).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('button', { name: '清除' })).toHaveCount(0)
-  await page.getByRole('button', { name: /测试账号/ }).click()
+  await page.locator('.head').filter({ hasText: '测试账号' }).click()
   for (const width of [320, 390, 560]) {
     await page.setViewportSize({ width, height: 844 })
     const counts = page.locator('.stat dd')

@@ -47,8 +47,8 @@ const membersLoading = shallowRef(false)
 /** Members are many; the ones needing attention are listed first. */
 const filter = shallowRef<'problem' | ''>('problem')
 const filters = [
-  { value: 'problem', label: '有问题的帖子' },
   { value: '', label: '全部帖子' },
+  { value: 'problem', label: '有问题的帖子' },
 ] as const
 
 const status = computed(() => record.value && recordStatus(record.value))
@@ -246,7 +246,11 @@ async function stop() {
     busy.value = false
   }
 }
-function openCollection(id: string) {
+function openCollection(id: string, event?: MouseEvent) {
+  if (event?.ctrlKey || event?.metaKey || event?.shiftKey) {
+    window.open(`#/collection/${id}`, '_blank', 'noopener')
+    return
+  }
   void router.push({ name: 'collection', params: { id } })
 }
 </script>
@@ -393,7 +397,7 @@ function openCollection(id: string) {
             type="button"
             class="member-main"
             :disabled="!m.saved || m.state === 'failed'"
-            @click="openCollection(m.collection_id)"
+            @click="openCollection(m.collection_id, $event)"
           >
             <span class="line-text"
               >{{ linkTitle(m.url)

@@ -1,12 +1,16 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
-import { assetURL, type Asset } from '../api'
+import { assetURL, type Asset, type Collection } from '../api'
 import { useSensitiveMedia } from '../composables/useSensitiveMedia'
 import { mediaNotice } from '../presentation'
 import MediaPreview from './MediaPreview.vue'
 import MediaViewer from './MediaViewer.vue'
 import EyeIcon from './ui/EyeIcon.vue'
-const props = defineProps<{ assets: Asset[]; showSensitive?: boolean }>()
+const props = defineProps<{
+  assets: Asset[]
+  showSensitive?: boolean
+  collection?: Collection
+}>()
 const selected = shallowRef<Asset>()
 function view(asset: Asset) {
   selected.value = asset
@@ -96,6 +100,7 @@ watch(
     v-if="selected"
     :assets="previews"
     :initial-id="selected.id"
+    :collection="collection"
     @close="selected = undefined"
   />
 </template>

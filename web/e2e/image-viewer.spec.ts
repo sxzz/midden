@@ -66,7 +66,7 @@ test.beforeEach(async ({ page }) => {
     return r.fulfill({ json: body })
   })
   await page.goto('/app/')
-  await page.getByRole('button', { name: /相册测试/ }).click()
+  await page.locator('.head').filter({ hasText: '相册测试' }).click()
   await page.getByRole('button', { name: '放大图片' }).first().click()
 })
 
@@ -221,11 +221,26 @@ test('opens the clicked list image without navigating and restores focus', async
   expect(page.url()).toBe(url)
 })
 
-test('detail avatar opens its own preview and returns focus on close', async ({
+test('profile avatar opens its own preview and returns focus on close', async ({
   page,
 }) => {
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).toHaveCount(0)
+  const profile = {
+    ...collection,
+    graph: {
+      ...collection.graph,
+      root: 'author',
+      entities: collection.graph.entities.filter(
+        (entity) => entity.key === 'author',
+      ),
+      relations: [],
+    },
+  }
+  await page.route(`**/v1/collections/${collection.id}`, (route) =>
+    route.fulfill({ json: profile }),
+  )
+  await page.reload()
   const url = page.url()
   const avatar = page.getByRole('button', { name: '查看相册测试的头像' })
   await avatar.click()

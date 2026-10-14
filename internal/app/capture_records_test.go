@@ -212,7 +212,7 @@ func TestCaptureRecordPages(t *testing.T) {
 		return d
 	}
 
-	job, e := s.CaptureURL(ctx, tenant, "https://notes.test/collection/"+uuid.NewString(), "")
+	job, e := s.CaptureURL(ctx, tenant, "https://notes.test/collection/"+uuid.NewString(), "", &domain.CaptureOptions{OmitShared: true, MaxPosts: 1})
 	must(t, e)
 	first := finish(job)
 	if p := first.Pages; !first.Done || p == nil || !p.More || !p.More1000 || p.Failed {
@@ -228,6 +228,12 @@ func TestCaptureRecordPages(t *testing.T) {
 		t.Fatal("second request fetched another page", again.ID, more.ID, e)
 	}
 	second := finish(more)
+	// A page fetched on request filters its posts like the record it extends.
+	var options string
+	must(t, admin.Pool.QueryRow(ctx, `SELECT capture_options::text FROM submissions WHERE id=$1`, second.ID).Scan(&options))
+	if options != `{"max_posts": 1, "omit_shared": true}` {
+		t.Fatal("next page dropped the capture options", options)
+	}
 	records, e := s.CaptureRecords(ctx, tenant, "")
 	must(t, e)
 	if len(records.Items) != 2 || records.Items[0].ID != second.ID || records.Items[1].ID != first.ID {

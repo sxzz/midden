@@ -21,6 +21,7 @@ func (f *summaryFixture) Fetch(ctx context.Context, r *pb.FetchRequest, opts ...
 	out, err := f.relatedEdgeFixture.Fetch(ctx, r, opts...)
 	if err == nil {
 		out.Summary = "summary of " + r.ExternalId
+		out.Text = "full text of " + r.ExternalId
 	}
 	return out, err
 }
@@ -67,6 +68,9 @@ func TestReferencedPostReadsItsSavedSummary(t *testing.T) {
 		must(t, err)
 		for _, e := range a.Graph.Entities {
 			if e.Key == "quote" {
+				if e.SavedSummary != "" && e.SavedText != "full text of "+quoted {
+					t.Fatalf("missing full reference text: %q", e.SavedText)
+				}
 				return e.SavedSummary
 			}
 		}

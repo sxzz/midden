@@ -242,6 +242,7 @@ func linkSavedEntities(ctx context.Context, tx pgx.Tx, collections ...*domain.Co
 			e := &a.Graph.Entities[i]
 			e.SavedCollectionID = ""
 			e.SavedSummary = ""
+			e.SavedText = ""
 			e.Current = nil
 			if e.ID != "" && !seen[e.ID] {
 				ids = append(ids, e.ID)
@@ -329,25 +330,36 @@ func attachSavedSummaries(ctx context.Context, tx pgx.Tx, collections ...*domain
 	if len(ids) == 0 {
 		return nil
 	}
-	rows, err := tx.Query(ctx, `SELECT c.id,coalesce(r.payload->>'summary','') FROM unnest($1::uuid[]) c(id)
+	rows, err := tx.Query(ctx, `SELECT c.id,coalesce(r.payload->>'summary',''),r.capture_id,coalesce(r.payload->>'text','') FROM unnest($1::uuid[]) c(id)
  CROSS JOIN LATERAL (SELECT visible_head(c.id) AS id OFFSET 0) head
  JOIN revisions r ON r.id=head.id`, ids)
 	if err != nil {
 		return err
 	}
 	summaries := map[string]string{}
+	texts := map[string]string{}
+	captures := map[string]string{}
+	captureIDs := []string{}
 	for rows.Next() {
-		var id, summary string
-		if err = rows.Scan(&id, &summary); err != nil {
+		var id, summary, capture, text string
+		if err = rows.Scan(&id, &summary, &capture, &text); err != nil {
 			rows.Close()
 			return err
 		}
 		summaries[id] = summary
+		texts[id] = text
+		captures[id] = capture
+		captureIDs = append(captureIDs, capture)
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
 		return err
 	}
+	media, err := assetsByCapture(ctx, tx, captureIDs)
+	if err != nil {
+		return err
+	}
+
 	for _, a := range collections {
 		if a.Graph == nil {
 			continue
@@ -357,6 +369,12 @@ func attachSavedSummaries(ctx context.Context, tx pgx.Tx, collections ...*domain
 			e := &a.Graph.Entities[i]
 			if referenced[e.Key] {
 				e.SavedSummary = summaries[e.SavedCollectionID]
+				e.SavedText = texts[e.SavedCollectionID]
+				for _, asset := range media[captures[e.SavedCollectionID]] {
+					if asset.Purpose == "" {
+						e.Assets = append(e.Assets, asset)
+					}
+				}
 			}
 		}
 	}

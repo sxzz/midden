@@ -128,6 +128,16 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		}
 		return scoped.Submit(ctx, tenant, in)
 	}
+	if in.Options != nil {
+		if in.Options.MaxPosts > 100000 {
+			return out, domain.ErrInvalidTarget
+		}
+		if in.Options.Since != "" {
+			if _, e := time.Parse(time.RFC3339, in.Options.Since); e != nil {
+				return out, domain.ErrInvalidTarget
+			}
+		}
+	}
 	desc, err := s.descriptor(ctx)
 	if err != nil {
 		return out, err
@@ -183,7 +193,11 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 	if e != nil {
 		return out, e
 	}
-	if in.CollectionLimit > 1000 || in.PageSize > 1000 {
+	if target.Collection && !in.Automatic && in.Options != nil && in.PageCursor == "" {
+		in.CollectionLimit = in.Options.MaxPosts
+		in.PageSize = min(in.CollectionLimit, 100)
+	}
+	if (in.CollectionLimit > 1000 && in.Options == nil) || in.PageSize > 1000 {
 		return out, domain.ErrUnsupported
 	}
 	if len(in.PageCursor) > 4096 || ((in.PageCursor != "" || in.CollectionLimit > 0 || in.PageSize > 0) && (in.Automatic || !target.Collection || !adapter.Supports(policy, adapter.CapturePage, 1, 0))) {
@@ -212,8 +226,14 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		recheck := false
 		if in.ParentSubmission != "" {
 			var stopped bool
-			if e := tx.QueryRow(ctx, `SELECT s.collection_stopped,c.is_collection FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1`, in.ParentSubmission).Scan(&stopped, &recheck); e != nil {
+			var options []byte
+			if e := tx.QueryRow(ctx, `SELECT s.collection_stopped,c.is_collection,s.capture_options FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1`, in.ParentSubmission).Scan(&stopped, &recheck, &options); e != nil {
 				return e
+			}
+			if in.Options == nil && len(options) > 0 {
+				if e := json.Unmarshal(options, &in.Options); e != nil {
+					return e
+				}
 			}
 			if stopped {
 				return errCollectionStopped
@@ -250,7 +270,15 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if in.Input == "" {
 			in.Input = in.URL
 		}
-		fingerprint := store.Hash(desc.AdapterId + "|" + target.Platform + "|" + target.Kind + "|" + target.ObjectScope + "|" + target.ExternalID + "|" + in.ProviderID + "|" + scope + "|" + in.RefreshID + "|" + in.PageCursor + fmt.Sprintf("|%d|%d", in.PageSize, in.CollectionLimit))
+		optionsJSON, e := json.Marshal(in.Options)
+		if e != nil {
+			return e
+		}
+		optionsFingerprint := ""
+		if in.Options != nil {
+			optionsFingerprint = "|" + string(optionsJSON)
+		}
+		fingerprint := store.Hash(desc.AdapterId + "|" + target.Platform + "|" + target.Kind + "|" + target.ObjectScope + "|" + target.ExternalID + "|" + in.ProviderID + "|" + scope + "|" + in.RefreshID + "|" + in.PageCursor + fmt.Sprintf("|%d|%d", in.PageSize, in.CollectionLimit) + optionsFingerprint)
 		var existing, f string
 		e = tx.QueryRow(ctx, `SELECT capture_id,fingerprint FROM submissions WHERE tenant_id=$1 AND idem_key=$2`, tenant, in.Key).Scan(&existing, &f)
 		if e == nil {
@@ -354,7 +382,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			return e
 		}
 		var sid string
-		e = tx.QueryRow(ctx, `INSERT INTO submissions(tenant_id,capture_id,identity_id,channel_id,chat_id,idem_key,fingerprint,reply_to_message_id,input,collection_limit,parent_submission) VALUES($1,$2,nullif($3,'')::uuid,nullif($4,'')::uuid,nullif($5,''),$6,$7,$8,$9,$10,nullif($11,'')::uuid) RETURNING id`, tenant, cid, in.Origin.IdentityID, in.Origin.ChannelID, in.Origin.ChatID, in.Key, fingerprint, in.Origin.ReplyToMessageID, in.Input, in.CollectionLimit, in.ParentSubmission).Scan(&sid)
+		e = tx.QueryRow(ctx, `INSERT INTO submissions(tenant_id,capture_id,identity_id,channel_id,chat_id,idem_key,fingerprint,reply_to_message_id,input,collection_limit,parent_submission,capture_options) VALUES($1,$2,nullif($3,'')::uuid,nullif($4,'')::uuid,nullif($5,''),$6,$7,$8,$9,$10,nullif($11,'')::uuid,$12) RETURNING id`, tenant, cid, in.Origin.IdentityID, in.Origin.ChannelID, in.Origin.ChatID, in.Key, fingerprint, in.Origin.ReplyToMessageID, in.Input, in.CollectionLimit, in.ParentSubmission, optionsJSON).Scan(&sid)
 		if e != nil {
 			return e
 		}

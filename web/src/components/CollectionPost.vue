@@ -67,8 +67,22 @@ const warnings = computed(() => warningList(props.collection.warnings))
 <template>
   <article class="post">
     <header class="author">
+      <a
+        v-if="view.bio === undefined && view.profileHref"
+        :href="view.profileHref"
+        class="avatar"
+        :aria-label="`查看${view.name}的主页`"
+        ><LoadingImage
+          v-if="avatarAssets.length"
+          class="avatar"
+          :src="previewURL(avatarAssets[0]!)"
+          alt=""
+        /><span v-else class="avatar initials">{{
+          view.name.slice(0, 1)
+        }}</span></a
+      >
       <button
-        v-if="avatarAssets.length"
+        v-else-if="avatarAssets.length && view.bio !== undefined"
         type="button"
         class="avatar avatar-button"
         :aria-label="`查看${view.name}的头像`"
@@ -119,9 +133,14 @@ const warnings = computed(() => warningList(props.collection.warnings))
     </p>
     <MediaGallery
       :assets="collection.assets || []"
+      :collection="collection"
       :show-sensitive="showSensitive"
     />
-    <PostRelations :collection="collection" :captured="captured" />
+    <PostRelations
+      :collection="collection"
+      :captured="captured"
+      :show-sensitive="showSensitive"
+    />
     <p v-for="warning in warnings" :key="warning" class="warning">
       {{ warning }}
     </p>

@@ -22,6 +22,7 @@ export interface Detail {
 }
 export interface Presentation {
   profileCollectionId?: string
+  profileHref?: string
   name: string
   handle?: string
   avatar?: Asset
@@ -145,6 +146,16 @@ const social: Presenter = (a, root, options = {}) => {
     // recorded protection.
     locked: isProtected(profile) ?? a.visibility === 'private',
     profileCollectionId: isProfile ? undefined : profile?.saved_collection_id,
+    profileHref: isProfile
+      ? `#/collection/${a.id}`
+      : profile?.saved_collection_id
+        ? `#/collection/${profile.saved_collection_id}`
+        : asText(profile?.data.username)
+          ? `https://${profile?.type === 'instagram.profile' ? 'www.instagram.com' : 'x.com'}/${encodeURIComponent(asText(profile?.data.username)!)}`
+          : profile?.type === 'x.profile' &&
+              /^\d+$/.test(profile.external_id || '')
+            ? `https://x.com/i/user/${profile.external_id}`
+            : undefined,
     handle: asText(profile?.data.username),
     avatar: profile?.assets?.find(
       (v) => v.purpose === 'avatar' && v.state === 'ready',

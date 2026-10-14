@@ -932,11 +932,15 @@ func (x *SourceResponse) GetVisibility() Visibility {
 }
 
 type RelatedTarget struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	Url                 string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
-	RefreshAfterSeconds uint32                 `protobuf:"varint,2,opt,name=refresh_after_seconds,json=refreshAfterSeconds,proto3" json:"refresh_after_seconds,omitempty"` // Zero reuses any existing collection; positive refreshes stale data.
-	UpdatedAt           string                 `protobuf:"bytes,3,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`                                  // Latest known content change (publication or edit) in RFC 3339; empty when unknown.
-	Prefetch            []byte                 `protobuf:"bytes,4,opt,name=prefetch,proto3" json:"prefetch,omitempty"`                                                     // capture.prefetch/1: adapter-owned observation of the target, at most 64 KiB, handed back once in FetchRequest.prefetch.
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Optional listing metadata for tenant-specific collection capture filters.
+	PublishedAt         string   `protobuf:"bytes,5,opt,name=published_at,json=publishedAt,proto3" json:"published_at,omitempty"`
+	MediaTypes          []string `protobuf:"bytes,6,rep,name=media_types,json=mediaTypes,proto3" json:"media_types,omitempty"` // image or video, excluding quoted media.
+	PostType            string   `protobuf:"bytes,7,opt,name=post_type,json=postType,proto3" json:"post_type,omitempty"`       // post, quote or repost; empty for non-post references.
+	Url                 string   `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	RefreshAfterSeconds uint32   `protobuf:"varint,2,opt,name=refresh_after_seconds,json=refreshAfterSeconds,proto3" json:"refresh_after_seconds,omitempty"` // Zero reuses any existing collection; positive refreshes stale data.
+	UpdatedAt           string   `protobuf:"bytes,3,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`                                  // Latest known content change (publication or edit) in RFC 3339; empty when unknown.
+	Prefetch            []byte   `protobuf:"bytes,4,opt,name=prefetch,proto3" json:"prefetch,omitempty"`                                                     // capture.prefetch/1: adapter-owned observation of the target, at most 64 KiB, handed back once in FetchRequest.prefetch.
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -969,6 +973,27 @@ func (x *RelatedTarget) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RelatedTarget.ProtoReflect.Descriptor instead.
 func (*RelatedTarget) Descriptor() ([]byte, []int) {
 	return file_api_adapter_v1_adapter_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *RelatedTarget) GetPublishedAt() string {
+	if x != nil {
+		return x.PublishedAt
+	}
+	return ""
+}
+
+func (x *RelatedTarget) GetMediaTypes() []string {
+	if x != nil {
+		return x.MediaTypes
+	}
+	return nil
+}
+
+func (x *RelatedTarget) GetPostType() string {
+	if x != nil {
+		return x.PostType
+	}
+	return ""
 }
 
 func (x *RelatedTarget) GetUrl() string {
@@ -1905,8 +1930,12 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"source_url\x18\x03 \x01(\tR\tsourceUrl\x126\n" +
 	"\n" +
 	"visibility\x18\x04 \x01(\x0e2\x16.adapter.v1.VisibilityR\n" +
-	"visibility\"\x90\x01\n" +
-	"\rRelatedTarget\x12\x10\n" +
+	"visibility\"\xf1\x01\n" +
+	"\rRelatedTarget\x12!\n" +
+	"\fpublished_at\x18\x05 \x01(\tR\vpublishedAt\x12\x1f\n" +
+	"\vmedia_types\x18\x06 \x03(\tR\n" +
+	"mediaTypes\x12\x1b\n" +
+	"\tpost_type\x18\a \x01(\tR\bpostType\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x122\n" +
 	"\x15refresh_after_seconds\x18\x02 \x01(\rR\x13refreshAfterSeconds\x12\x1d\n" +
 	"\n" +

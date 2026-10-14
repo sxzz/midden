@@ -23,6 +23,7 @@ export interface Entity {
   saved_collection_id?: string
   /** The saved collection's current summary, for a post kept by reference. */
   saved_summary?: string
+  saved_text?: string
   key: string
   type: string
   data: Record<string, unknown>
@@ -250,4 +251,12 @@ export function safeURL(value: string) {
   } catch {
     return
   }
+}
+
+export interface CaptureOptions {
+  media_only?: boolean
+  omit_shared?: boolean
+  skip_references?: boolean
+  max_posts?: number
+  since?: string
 }

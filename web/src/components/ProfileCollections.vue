@@ -15,16 +15,12 @@ const props = defineProps<{
   repostedBy?: string
 }>()
 const router = useRouter()
-const layout = shallowRef('')
-const order = shallowRef<'asc' | 'desc'>('desc')
+const filters = shallowRef('sort=published&order=desc')
 const query = computed(() => {
-  const q = new URLSearchParams({
-    related_to: props.id,
-    entity_type: `${props.platform || 'x'}.post`,
-    sort: 'published',
-    order: order.value,
-  })
-  if (layout.value) q.set('layout', layout.value)
+  const q = new URLSearchParams(filters.value)
+  q.set('related_to', props.id)
+  if (!q.has('entity_type'))
+    q.set('entity_type', `${props.platform || 'x'}.post`)
   return q.toString()
 })
 const {
@@ -38,8 +34,13 @@ const {
   refresh,
   more,
 } = useCollection()
+const requestQuery = computed(() => {
+  const q = new URLSearchParams(query.value)
+  q.delete('layout')
+  return q.toString()
+})
 watch(
-  () => [props.id, props.platform, order.value],
+  () => requestQuery.value,
   () => load(query.value),
   { immediate: true },
 )
@@ -51,7 +52,7 @@ watch(
   },
 )
 function search(value: string) {
-  layout.value = new URLSearchParams(value).get('layout') || ''
+  filters.value = value
 }
 function open(id: string) {
   void router.push({ name: 'collection', params: { id } })
@@ -65,14 +66,6 @@ function open(id: string) {
       帖子占用总量 {{ storageSize(totalStorageBytes) }}
     </p>
     <div class="sort-control">
-      <span>发布时间</span>
-      <button
-        type="button"
-        :aria-label="`发布时间排序：${order === 'desc' ? '倒序，切换为正序' : '正序，切换为倒序'}`"
-        @click="order = order === 'desc' ? 'asc' : 'desc'"
-      >
-        {{ order === 'desc' ? '倒序 ↓' : '正序 ↑' }}
-      </button>
       <button
         type="button"
         class="soft-refresh"
@@ -90,7 +83,7 @@ function open(id: string) {
       :next="next"
       :show-sensitive="showSensitive"
       :reposted-by="repostedBy"
-      hide-filters
+      hide-authors
       @search="search"
       @open="open"
       @more="more"

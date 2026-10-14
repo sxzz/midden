@@ -8,8 +8,9 @@ import {
   useTemplateRef,
   watch,
 } from 'vue'
-import { api, assetURL, errorText, type Asset } from '../api'
+import { api, assetURL, errorText, type Asset, type Collection } from '../api'
 import { host } from '../host'
+import { present } from '../presentation'
 import ViewerDetailButton from './ui/ViewerDetailButton.vue'
 import 'photoswipe/style.css'
 // The API carries no dimensions, so an image's natural size is learned when it
@@ -17,6 +18,8 @@ import 'photoswipe/style.css'
 const naturalSizes = new Map<string, { width: number; height: number }>()
 const props = defineProps<{
   assets: Asset[]
+  collection?: Collection
+  collections?: Collection[]
   initialId: string
   collectionId?: string
   collectionIds?: Record<string, string>
@@ -34,6 +37,16 @@ const selectedCollection = computed(
     selected.value &&
     (props.collectionIds?.[selected.value.id] || props.collectionId),
 )
+const expanded = shallowRef(false)
+const caption = computed(() => {
+  const collection =
+    props.collections?.find((item) => item.id === selectedCollection.value) ||
+    props.collection
+  return collection ? present(collection) : undefined
+})
+watch(index, () => {
+  expanded.value = false
+})
 const isVideo = computed(() => selected.value?.mime?.startsWith('video/'))
 const videos = new Set<HTMLVideoElement>()
 const dialog = useTemplateRef<HTMLDialogElement>('viewer')
@@ -148,7 +161,9 @@ onMounted(() => {
     doubleTapAction: 'zoom',
     errorMsg: '媒体加载失败',
     paddingFn: (_viewport, item) =>
-      item.type === 'video' ? videoPadding : noPadding,
+      item.type === 'video'
+        ? { ...videoPadding, bottom: caption.value ? 210 : videoPadding.bottom }
+        : noPadding,
   })
   photoSwipe = pswp
   // The single place a slide gets its size, run again on every viewport
@@ -370,9 +385,32 @@ watch(
     <p v-if="saveError" class="save-error" role="alert">{{ saveError }}</p>
 
     <div
-      v-if="selected?.alt_text || assets.length > 1"
+      v-if="caption || selected?.alt_text || assets.length > 1"
       class="chrome chrome-bottom"
     >
+      <div v-if="caption" class="post-caption">
+        <a
+          v-if="caption.profileCollectionId"
+          :href="`#/collection/${caption.profileCollectionId}`"
+          @click="close"
+          >{{ caption.name
+          }}<span v-if="caption.handle"> @{{ caption.handle }}</span></a
+        >
+        <strong v-else
+          >{{ caption.name
+          }}<span v-if="caption.handle"> @{{ caption.handle }}</span></strong
+        >
+        <button
+          v-if="caption.body"
+          type="button"
+          class="caption-body"
+          :class="{ expanded }"
+          :aria-expanded="expanded"
+          @click="expanded = !expanded"
+        >
+          {{ caption.body }}
+        </button>
+      </div>
       <p v-if="selected?.alt_text" class="caption">{{ selected.alt_text }}</p>
       <div v-if="assets.length > 1" class="glass remote">
         <button
@@ -429,6 +467,37 @@ watch(
 </template>
 
 <style scoped>
+.post-caption {
+  width: min(100%, 760px);
+  pointer-events: auto;
+  text-align: left;
+}
+.post-caption a {
+  color: white;
+  font-weight: 600;
+}
+.post-caption span {
+  color: var(--subtle);
+}
+.caption-body {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: left;
+  color: white;
+  line-height: 1.5;
+  width: 100%;
+  padding: 6px 0;
+}
+.caption-body.expanded {
+  display: block;
+  max-height: 40dvh;
+  overflow-y: auto;
+}
+
 .viewer {
   position: fixed;
   inset: 0;

@@ -55,7 +55,18 @@ type (
 	}
 )
 
+// CaptureOptions applies to one submitter's expansion, never a shared capture.
+type CaptureOptions struct {
+	MediaOnly      bool   `json:"media_only,omitempty"`
+	OmitShared     bool   `json:"omit_shared,omitempty"`
+	SkipReferences bool   `json:"skip_references,omitempty"`
+	MaxPosts       uint32 `json:"max_posts,omitempty"`
+	Since          string `json:"since,omitempty"`
+}
+
 type CaptureInput struct {
+	Options *CaptureOptions `json:"options,omitempty"`
+
 	PageCursor          string `json:"-"`
 	PageSize            uint32 `json:"-"`
 	ParentSubmission    string `json:"-"`
@@ -120,6 +131,7 @@ type Entity struct {
 	SavedCollectionID string `json:"saved_collection_id,omitempty"`
 	// SavedSummary is the saved collection's current summary, for a quoted or
 	// reposted post the snapshot keeps by reference only.
+	SavedText       string          `json:"saved_text,omitempty"`
 	SavedSummary    string          `json:"saved_summary,omitempty"`
 	ContextOnly     bool            `json:"context_only,omitempty"`
 	ID              string          `json:"id,omitempty"`

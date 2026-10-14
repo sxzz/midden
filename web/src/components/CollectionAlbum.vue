@@ -56,9 +56,11 @@ function caption(collection: Collection) {
           text:
             (typeof target.data.text === 'string' && target.data.text.trim()
               ? excerpt(target.data.text, 100)
-              : target.saved_summary
-                ? excerpt(target.saved_summary, 100)
-                : '') || '查看引用的帖子',
+              : target.saved_text
+                ? excerpt(target.saved_text, 100)
+                : target.saved_summary
+                  ? excerpt(target.saved_summary, 100)
+                  : '') || '查看引用的帖子',
           // A tile is a button, so attribution stays plain text here.
           author: authorLabel(authorIdentity(authoredBy(graph, target.key))),
         },
@@ -70,7 +72,6 @@ function caption(collection: Collection) {
   ]
     .filter(Boolean)
     .join(' · ')
-  if (!labels && !quoted.length) return undefined
   return {
     labels,
     text: excerpt(present(collection).body, 80),
@@ -144,9 +145,10 @@ onDeactivated(() => {
   </p>
   <MediaViewer
     v-if="preview"
-    :assets="preview.assets"
-    :initial-id="preview.initialId"
-    :collection-ids="preview.collectionIds"
+    :assets="preview?.assets || []"
+    :initial-id="preview?.initialId || ''"
+    :collection-ids="preview?.collectionIds"
+    :collections="items"
     @close="preview = undefined"
     @open="open"
   />

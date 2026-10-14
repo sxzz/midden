@@ -62,7 +62,11 @@ it('shows related posts using the library and the total across all pages', async
   unmount = () => app.unmount()
   await vi.waitFor(() => expect(el.textContent).toContain('关联帖子'))
   expect(el.textContent).toContain('帖子占用总量 4.0 KB')
-  expect(request).toHaveBeenCalledTimes(1)
+  expect(
+    request.mock.calls.filter(([path]) =>
+      String(path).startsWith('/collections?'),
+    ),
+  ).toHaveLength(1)
   const query = new URL(
     String(request.mock.calls[0]![0]),
     'https://example.test',
@@ -71,10 +75,15 @@ it('shows related posts using the library and the total across all pages', async
   expect(query.get('entity_type')).toBe('x.post')
   expect(query.get('sort')).toBe('published')
   expect(query.get('order')).toBe('desc')
-  expect(el.querySelector('form')).toBeNull()
+  expect(el.querySelector('form')).not.toBeNull()
+  expect(el.querySelector('summary[aria-label="作者"]')).toBeNull()
   el.querySelector<HTMLButtonElement>('[aria-label="相册"]')!.click()
   await nextTick()
-  expect(request).toHaveBeenCalledTimes(1)
+  expect(
+    request.mock.calls.filter(([path]) =>
+      String(path).startsWith('/collections?'),
+    ),
+  ).toHaveLength(1)
   expect(
     el.querySelector('[aria-label="相册"]')?.getAttribute('aria-pressed'),
   ).toBe('true')
@@ -95,6 +104,7 @@ it('restarts published-time pagination when changing order and preserves the sel
   const request = vi.mocked(api)
   const queries: URLSearchParams[] = []
   request.mockImplementation(async (path) => {
+    if (path === '/tags') return []
     const query = new URL(String(path), 'https://example.test').searchParams
     queries.push(query)
     const order = query.get('order')
@@ -134,9 +144,13 @@ it('restarts published-time pagination when changing order and preserves the sel
   expect(queries[1]?.get('order')).toBe('desc')
   el.querySelector<HTMLButtonElement>('[aria-label="相册"]')!.click()
   await nextTick()
-  expect(request).toHaveBeenCalledTimes(2)
-  el.querySelector<HTMLButtonElement>('[aria-label^="发布时间排序"]')!.click()
-  await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(3))
+  expect(queries).toHaveLength(2)
+  const orderSelect = el.querySelector<HTMLSelectElement>(
+    '[aria-label="排序方向"]',
+  )!
+  orderSelect.value = 'asc'
+  orderSelect.dispatchEvent(new Event('change', { bubbles: true }))
+  await vi.waitFor(() => expect(queries).toHaveLength(3))
   expect(queries[2]?.get('order')).toBe('asc')
   expect(queries[2]?.get('sort')).toBe('published')
   expect(queries[2]?.has('cursor')).toBe(false)

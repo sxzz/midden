@@ -46,7 +46,7 @@ for (const entry of ['list', 'detail']) {
   test(`${entry} video opens in shared preview and pauses on navigation and close`, async ({
     page,
   }) => {
-    if (entry === 'detail') await page.locator('.row').click()
+    if (entry === 'detail') await page.locator('.row .head').click()
     const url = page.url()
     const opener = page.getByRole('button', { name: '播放视频' })
     await opener.click()
@@ -118,16 +118,16 @@ test('a clip taller than the viewer is contained and follows the viewport', asyn
   }
   // The slide fills what the chrome leaves free and the frame is fitted
   // inside it, whatever the clip's own proportions.
-  await expect.poll(box).toEqual([12, 72, 366, 662])
+  await expect.poll(box).toEqual([12, 72, 366, 562])
   await expect(video).toHaveCSS('object-fit', 'contain')
   await page.setViewportSize({ width: 844, height: 390 })
-  await expect.poll(box).toEqual([12, 72, 820, 208])
+  await expect.poll(box).toEqual([12, 72, 820, 108])
 })
 
 test('detail image and video thumbnails have equal rows with uncropped media', async ({
   page,
 }) => {
-  await page.locator('.row').click()
+  await page.locator('.row .head').click()
   for (const width of [320, 390, 560]) {
     await page.setViewportSize({ width, height: 844 })
     const frames = page.locator('.media .frame')

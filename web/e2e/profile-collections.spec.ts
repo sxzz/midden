@@ -206,7 +206,9 @@ test('profile shows related collection rows and total storage, with internal bio
   await expect(related.getByText('帖子占用总量 2.0 MB')).toBeVisible()
   await expect(related.locator('.row')).toHaveCount(1)
   await expect(related.locator('.row .repost')).toContainText('主账号 已转发')
-  await expect(related.locator('.row .relation')).toContainText('引用的帖子')
+  await expect(related.locator('.row .relation')).toContainText(
+    '↘ 引用了这条帖子',
+  )
   await related.locator('.row .relation').click()
   await expect(page).toHaveURL(new RegExp(`/collection/${quoteId}$`))
   await expect(page.locator('.post .body')).toHaveText('合成被引用正文')

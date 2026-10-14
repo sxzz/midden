@@ -48,15 +48,21 @@ func validateRelatedResult(policy *pb.Provider, r *pb.FetchResponse, platform, k
 func (s *Service) related(ctx context.Context, task store.Task) error {
 	var state, parent, provider, connection, adapterID, parentURL string
 	var automatic, stopped bool
-	var raw []byte
+	var raw, optionsJSON []byte
+	var options *domain.CaptureOptions
 	err := s.DB.Tx(ctx, task.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT s.related_state,c.state,s.related_provider,coalesce(s.related_connection::text,''),s.related_adapter,c.related_targets,c.automatic,a.url,s.collection_stopped FROM submissions s JOIN captures c ON c.id=s.capture_id JOIN collections a ON a.id=c.collection_id WHERE s.id=$1`, task.ID).Scan(&state, &parent, &provider, &connection, &adapterID, &raw, &automatic, &parentURL, &stopped)
+		return tx.QueryRow(ctx, `SELECT s.related_state,c.state,s.related_provider,coalesce(s.related_connection::text,''),s.related_adapter,c.related_targets,c.automatic,a.url,s.collection_stopped,s.capture_options FROM submissions s JOIN captures c ON c.id=s.capture_id JOIN collections a ON a.id=c.collection_id WHERE s.id=$1`, task.ID).Scan(&state, &parent, &provider, &connection, &adapterID, &raw, &automatic, &parentURL, &stopped, &optionsJSON)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
+	}
+	if len(optionsJSON) > 0 {
+		if err := json.Unmarshal(optionsJSON, &options); err != nil {
+			return err
+		}
 	}
 	if state != "pending" || stopped {
 		return nil
@@ -138,10 +144,10 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		}
 	}
 	var limit uint32
-	var next string
+	var next, currentCursor string
 	var collection bool
 	if err := s.DB.Tx(ctx, task.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT s.collection_limit,c.next_page_cursor,c.is_collection FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1`, task.ID).Scan(&limit, &next, &collection)
+		return tx.QueryRow(ctx, `SELECT s.collection_limit,c.next_page_cursor,c.is_collection,c.page_cursor FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1`, task.ID).Scan(&limit, &next, &collection, &currentCursor)
 	}); err != nil {
 		return err
 	}
@@ -150,12 +156,24 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		// Collection references (such as author profiles) hydrate alongside
 		// members but must not consume the requested member batch size.
 		member := true
-		if collection && limit > 0 {
+		if collection || (options != nil && options.SkipReferences) {
 			resolved, resolveErr := scoped.Resolve(ctx, target.Url)
 			if resolveErr != nil {
 				return resolveErr
 			}
 			member = !resolved.Collection
+		}
+		if options != nil && member {
+			if collection {
+				if limit > 0 && members >= limit {
+					continue
+				}
+				if !captureTargetMatches(options, target) {
+					continue
+				}
+			} else if options.SkipReferences {
+				continue
+			}
 		}
 		if member {
 			members++
@@ -172,9 +190,16 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		}
 	}
 
-	if limit > members && members > 0 && next != "" {
-		remaining := limit - members
-		_, err := scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: parentURL, ProviderID: provider, ConnectionID: connection, PageCursor: next, PageSize: remaining, CollectionLimit: remaining, Key: "batch:" + task.ID})
+	if next != "" && next != currentCursor && ((options != nil && collection && (limit == 0 || limit > members)) || (options == nil && limit > members && members > 0)) {
+		remaining := uint32(0)
+		if limit > members {
+			remaining = limit - members
+		}
+		pageSize := remaining
+		if options != nil {
+			pageSize = min(remaining, 100)
+		}
+		_, err := scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: parentURL, ProviderID: provider, ConnectionID: connection, PageCursor: next, PageSize: pageSize, CollectionLimit: remaining, Options: options, Key: "batch:" + task.ID})
 		if errors.Is(err, errCollectionStopped) {
 			return nil
 		}
@@ -199,4 +224,24 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		_, err := tx.Exec(ctx, `UPDATE submissions SET related_state='complete' WHERE id=$1 AND NOT collection_stopped`, task.ID)
 		return err
 	})
+}
+
+func captureTargetMatches(options *domain.CaptureOptions, target *pb.RelatedTarget) bool {
+	if options.OmitShared && (target.PostType == "quote" || target.PostType == "repost") {
+		return false
+	}
+	if options.SkipReferences && target.PostType == "repost" {
+		return false
+	}
+	if options.MediaOnly && len(target.MediaTypes) == 0 {
+		return false
+	}
+	if options.Since != "" {
+		since, _ := time.Parse(time.RFC3339, options.Since)
+		published, err := time.Parse(time.RFC3339, target.PublishedAt)
+		if err != nil || published.Before(since) {
+			return false
+		}
+	}
+	return true
 }

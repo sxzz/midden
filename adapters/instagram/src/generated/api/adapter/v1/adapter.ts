@@ -176,6 +176,12 @@ export interface SourceResponse {
 }
 
 export interface RelatedTarget {
+  /** Optional listing metadata for tenant-specific collection capture filters. */
+  publishedAt: string;
+  /** image or video, excluding quoted media. */
+  mediaTypes: string[];
+  /** post, quote or repost; empty for non-post references. */
+  postType: string;
   url: string;
   /** Zero reuses any existing collection; positive refreshes stale data. */
   refreshAfterSeconds: number;
@@ -1896,6 +1902,9 @@ export const SourceResponse: MessageFns<SourceResponse> = {
 
 function createBaseRelatedTarget(): RelatedTarget {
   return {
+    publishedAt: "",
+    mediaTypes: [],
+    postType: "",
     url: "",
     refreshAfterSeconds: 0,
     updatedAt: "",
@@ -1908,6 +1917,15 @@ export const RelatedTarget: MessageFns<RelatedTarget> = {
     message: RelatedTarget,
     writer: BinaryWriter = new BinaryWriter(),
   ): BinaryWriter {
+    if (message.publishedAt !== "") {
+      writer.uint32(42).string(message.publishedAt);
+    }
+    for (const v of message.mediaTypes) {
+      writer.uint32(50).string(v!);
+    }
+    if (message.postType !== "") {
+      writer.uint32(58).string(message.postType);
+    }
     if (message.url !== "") {
       writer.uint32(10).string(message.url);
     }
@@ -1931,6 +1949,30 @@ export const RelatedTarget: MessageFns<RelatedTarget> = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
+        case 5: {
+          if (tag !== 42) {
+            break;
+          }
+
+          message.publishedAt = reader.string();
+          continue;
+        }
+        case 6: {
+          if (tag !== 50) {
+            break;
+          }
+
+          message.mediaTypes.push(reader.string());
+          continue;
+        }
+        case 7: {
+          if (tag !== 58) {
+            break;
+          }
+
+          message.postType = reader.string();
+          continue;
+        }
         case 1: {
           if (tag !== 10) {
             break;
@@ -1974,6 +2016,15 @@ export const RelatedTarget: MessageFns<RelatedTarget> = {
 
   fromJSON(object: any): RelatedTarget {
     return {
+      publishedAt: isSet(object.publishedAt)
+        ? globalThis.String(object.publishedAt)
+        : "",
+      mediaTypes: globalThis.Array.isArray(object?.mediaTypes)
+        ? object.mediaTypes.map((e: any) => globalThis.String(e))
+        : [],
+      postType: isSet(object.postType)
+        ? globalThis.String(object.postType)
+        : "",
       url: isSet(object.url) ? globalThis.String(object.url) : "",
       refreshAfterSeconds: isSet(object.refreshAfterSeconds)
         ? globalThis.Number(object.refreshAfterSeconds)
@@ -1989,6 +2040,15 @@ export const RelatedTarget: MessageFns<RelatedTarget> = {
 
   toJSON(message: RelatedTarget): unknown {
     const obj: any = {};
+    if (message.publishedAt !== "") {
+      obj.publishedAt = message.publishedAt;
+    }
+    if (message.mediaTypes?.length) {
+      obj.mediaTypes = message.mediaTypes;
+    }
+    if (message.postType !== "") {
+      obj.postType = message.postType;
+    }
     if (message.url !== "") {
       obj.url = message.url;
     }
@@ -2009,6 +2069,9 @@ export const RelatedTarget: MessageFns<RelatedTarget> = {
   },
   fromPartial(object: DeepPartial<RelatedTarget>): RelatedTarget {
     const message = createBaseRelatedTarget();
+    message.publishedAt = object.publishedAt ?? "";
+    message.mediaTypes = object.mediaTypes?.map((e) => e) || [];
+    message.postType = object.postType ?? "";
     message.url = object.url ?? "";
     message.refreshAfterSeconds = object.refreshAfterSeconds ?? 0;
     message.updatedAt = object.updatedAt ?? "";

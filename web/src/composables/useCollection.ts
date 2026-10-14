@@ -44,6 +44,19 @@ export function useCollection() {
   function page(params: string, cursor: string, signal: AbortSignal) {
     const q = new URLSearchParams(params)
     if (!q.has('entity_type')) q.set('entity_type', 'x.post,instagram.post')
+    q.delete('layout')
+    for (const [local, apiKey] of [
+      ['from_date', 'saved_from'],
+      ['to_date', 'saved_before'],
+    ] as const) {
+      const value = q.get(local)
+      q.delete(local)
+      if (!value) continue
+      const date = new Date(`${value}T00:00:00`)
+      if (!Number.isFinite(date.getTime())) continue
+      if (local === 'to_date') date.setDate(date.getDate() + 1)
+      q.set(apiKey, date.toISOString())
+    }
     q.set('q', q.get('q') || '')
     if (cursor) q.set('cursor', cursor)
     return api<Page<Collection>>(`/collections?${q}`, { signal })

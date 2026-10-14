@@ -192,16 +192,24 @@ var ErrNoMorePages = errors.New("no more pages")
 func (s *Service) collectionPage(ctx context.Context, tenant string, origin domain.Origin, id, op, idem string, delivered bool) (domain.Job, error) {
 	var url, provider, connection, cursor string
 	var maxBatch, remaining, pageSize uint32
+	var optionsJSON []byte
 	retry := op == "page_retry"
 	var limit uint32
 	if op == "more1000" {
 		limit = 1000
 	}
 	e := s.DB.Tx(ctx, tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, collectionChainSQL+` SELECT a.url,p.related_provider,coalesce(p.related_connection::text,''),CASE WHEN $2 THEN c.page_cursor ELSE c.next_page_cursor END,c.max_batch_size,p.collection_limit,c.page_size FROM pages p JOIN captures c ON c.id=p.capture_id JOIN collections a ON a.id=c.collection_id JOIN tenant_collections owned ON owned.collection_id=a.id WHERE c.is_collection AND EXISTS(SELECT FROM submissions WHERE id=$1 AND (state='sent' OR NOT $3) AND related_state<>'none') ORDER BY depth DESC LIMIT 1`, id, retry, delivered).Scan(&url, &provider, &connection, &cursor, &maxBatch, &remaining, &pageSize)
+		return tx.QueryRow(ctx, collectionChainSQL+` SELECT a.url,p.related_provider,coalesce(p.related_connection::text,''),CASE WHEN $2 THEN c.page_cursor ELSE c.next_page_cursor END,c.max_batch_size,p.collection_limit,c.page_size,p.capture_options FROM pages p JOIN captures c ON c.id=p.capture_id JOIN collections a ON a.id=c.collection_id JOIN tenant_collections owned ON owned.collection_id=a.id WHERE c.is_collection AND EXISTS(SELECT FROM submissions WHERE id=$1 AND (state='sent' OR NOT $3) AND related_state<>'none') ORDER BY depth DESC LIMIT 1`, id, retry, delivered).Scan(&url, &provider, &connection, &cursor, &maxBatch, &remaining, &pageSize, &optionsJSON)
 	})
 	if e != nil {
 		return domain.Job{}, e
+	}
+	// The pages fetched on request filter their posts like the record they extend.
+	var options *domain.CaptureOptions
+	if len(optionsJSON) > 0 {
+		if e := json.Unmarshal(optionsJSON, &options); e != nil {
+			return domain.Job{}, e
+		}
 	}
 	if !retry && limit > maxBatch {
 		return domain.Job{}, domain.ErrUnsupported
@@ -214,7 +222,7 @@ func (s *Service) collectionPage(ctx context.Context, tenant string, origin doma
 	} else {
 		pageSize = limit
 	}
-	return s.Submit(ctx, tenant, domain.CaptureInput{URL: url, ProviderID: provider, ConnectionID: connection, PageCursor: cursor, PageSize: pageSize, CollectionLimit: limit, Key: idem, Origin: origin})
+	return s.Submit(ctx, tenant, domain.CaptureInput{URL: url, ProviderID: provider, ConnectionID: connection, PageCursor: cursor, PageSize: pageSize, CollectionLimit: limit, Options: options, Key: idem, Origin: origin})
 }
 
 func (s *Service) channelAccounts(ctx context.Context, tenant string) (channelapi.AccountList, error) {

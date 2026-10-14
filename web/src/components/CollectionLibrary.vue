@@ -220,6 +220,23 @@ const viewProps = computed(() => {
 <template>
   <main class="page">
     <header class="bar">
+      <RouterLink to="/" class="icon-button" aria-label="Home" title="返回首页">
+        <svg
+          viewBox="0 0 24 24"
+          width="22"
+          height="22"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M4 10.5 12 4l8 6.5" />
+          <path d="M6 9v11h12V9" />
+          <path d="M10 20v-6h4v6" />
+        </svg>
+      </RouterLink>
       <button
         v-if="nested && standalone"
         type="button"
@@ -301,18 +318,17 @@ const viewProps = computed(() => {
       </button>
     </header>
     <div v-if="!nested" class="tabs" role="tablist" aria-label="类型">
-      <button
+      <RouterLink
         v-for="option in tabs"
         :key="option.value"
-        type="button"
         role="tab"
         class="tab"
         :class="{ on: tab === option.value }"
         :aria-selected="tab === option.value"
-        @click="tab === option.value || router.push(lists[option.value].path)"
+        :to="lists[option.value].path"
       >
         {{ option.label }}
-      </button>
+      </RouterLink>
     </div>
     <RouterView v-slot="{ Component, route: viewRoute }">
       <KeepAlive :max="cachedViews">
@@ -328,7 +344,7 @@ const viewProps = computed(() => {
 
 <style scoped>
 .page {
-  max-width: 560px;
+  max-width: 960px;
   margin: 0 auto;
   min-height: 100dvh;
   padding-top: var(--tg-content-safe-area-inset-top, 0px);
@@ -373,7 +389,9 @@ const viewProps = computed(() => {
 }
 .tab {
   flex: 1;
-  text-align: center;
+  /* Tabs are links now, so centre the label vertically ourselves. */
+  display: grid;
+  place-items: center;
   min-height: 32px;
   border-radius: 8px;
   font-size: 14px;
