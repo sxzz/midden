@@ -1,11 +1,13 @@
 import { expect, test } from 'vitest'
 import {
   extractLinks,
+  groupRecords,
   linkTitle,
   mediaLabel,
   reasonText,
   recordCounts,
   recordProgress,
+  recordRowTime,
   recordStatus,
 } from './captures'
 import type { CaptureRecord } from './api'
@@ -116,4 +118,27 @@ test('names profile images by what they are', () => {
   )
   expect(mediaLabel({ ...media, position: 2 })).toBe('图片 3')
   expect(mediaLabel({ ...media, position: 3, kind: 'video' })).toBe('视频 4')
+})
+
+test('groups records by day like the library, with times under them', () => {
+  const now = new Date(2026, 9, 15, 12)
+  const at = (y: number, m: number, d: number, h: number, min: number) =>
+    new Date(y, m, d, h, min).toISOString()
+  const items = [
+    record({ id: 'a', created_at: at(2026, 9, 15, 9, 5) }),
+    record({ id: 'b', created_at: at(2026, 9, 14, 23, 0) }),
+    record({ id: 'c', created_at: at(2026, 9, 2, 8, 30) }),
+    record({ id: 'd', created_at: at(2025, 11, 31, 20, 0) }),
+  ]
+  expect(
+    groupRecords(items, now).map((g) => [g.label, g.items.map((r) => r.id)]),
+  ).toEqual([
+    ['今天', ['a']],
+    ['昨天', ['b']],
+    ['10月', ['c']],
+    ['2025年12月', ['d']],
+  ])
+  expect(recordRowTime(items[0].created_at, now)).toBe('9:05')
+  expect(recordRowTime(items[1].created_at, now)).toBe('23:00')
+  expect(recordRowTime(items[2].created_at, now)).toBe('10月2日 8:30')
 })

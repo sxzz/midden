@@ -16,12 +16,13 @@ import {
 } from '../api'
 import {
   extractLinks,
+  groupRecords,
   linkTitle,
   reasonText,
   recordCounts,
   recordProgress,
+  recordRowTime,
   recordStatus,
-  recordTime,
 } from '../captures'
 import InfiniteLoader from './ui/InfiniteLoader.vue'
 import ListButton from './ui/ListButton.vue'
@@ -40,6 +41,7 @@ const text = shallowRef('')
 const submitting = shallowRef(false)
 const notice = shallowRef<{ text: string; failed?: boolean }>()
 const links = computed(() => extractLinks(text.value))
+const groups = computed(() => groupRecords(items.value))
 
 let visible = true
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -208,9 +210,9 @@ function open(id: string) {
     <p class="banner" role="alert">{{ error }}</p>
     <ListButton label="重试" @select="refresh" />
   </ListSection>
-  <ListSection v-if="items.length" title="采集记录">
+  <ListSection v-for="group in groups" :key="group.label" :title="group.label">
     <button
-      v-for="r in items"
+      v-for="r in group.items"
       :key="r.id"
       type="button"
       class="record"
@@ -219,7 +221,7 @@ function open(id: string) {
       <span class="main">
         <span class="title">{{ linkTitle(r.url) }}</span>
         <span class="meta">
-          {{ recordTime(r.created_at)
+          {{ recordRowTime(r.created_at)
           }}<template v-if="recordCounts(r)"> · {{ recordCounts(r) }}</template>
         </span>
         <span v-if="r.error" class="meta reason">{{
@@ -239,7 +241,7 @@ function open(id: string) {
       <span class="chevron" aria-hidden="true">›</span>
     </button>
   </ListSection>
-  <p v-else-if="loaded && !error" class="status">暂无采集记录</p>
+  <p v-if="!items.length && loaded && !error" class="status">暂无采集记录</p>
   <p v-else-if="loading && !error" class="status" role="status">加载中…</p>
   <InfiniteLoader
     v-if="next && items.length"

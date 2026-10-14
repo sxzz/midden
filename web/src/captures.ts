@@ -1,3 +1,4 @@
+import { groupLabel } from './presentation'
 import type { CaptureMedia, CaptureRecord } from './api'
 
 /**
@@ -154,4 +155,26 @@ export function recordTime(value: string) {
       ? `${d.getMonth() + 1}月${d.getDate()}日`
       : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
   return `${day} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** Records bucketed by the day or month they were made, like the library. */
+export function groupRecords(items: CaptureRecord[], now = new Date()) {
+  const groups: { label: string; items: CaptureRecord[] }[] = []
+  for (const item of items) {
+    const label = groupLabel(item.created_at, now)
+    const last = groups.at(-1)
+    if (last?.label === label) last.items.push(item)
+    else groups.push({ label, items: [item] })
+  }
+  return groups
+}
+
+/** A row's time under its group: the day is already in the group's title. */
+export function recordRowTime(value: string, now = new Date()) {
+  const d = new Date(value)
+  if (!Number.isFinite(d.getTime())) return ''
+  const time = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+  return ['今天', '昨天'].includes(groupLabel(value, now))
+    ? time
+    : `${d.getMonth() + 1}月${d.getDate()}日 ${time}`
 }
