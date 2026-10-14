@@ -62,8 +62,6 @@ type CaptureInput struct {
 	CollectionLimit     uint32 `json:"-"`
 	Automatic           bool   `json:"-"`
 	RefreshAfterSeconds uint32 `json:"-"`
-	// UpdatedAt is the adapter's latest known change time of a related target (RFC 3339).
-	UpdatedAt string `json:"-"`
 	// Prefetch is what the adapter already observed of a related target; the
 	// capture it creates gets it back instead of asking upstream again.
 	Prefetch     []byte `json:"-"`
@@ -72,8 +70,8 @@ type CaptureInput struct {
 	ProviderID   string `json:"provider_id,omitempty"`
 	ConnectionID string `json:"connection_id,omitempty"`
 	RefreshID    string `json:"refresh_id,omitempty"`
-	// UpdateMode "append" reuses content that is complete and unchanged since its
-	// last observation; "full" (the default) captures it again.
+	// UpdateMode is accepted for compatibility and ignored: every capture
+	// observes its target again.
 	UpdateMode string `json:"update_mode,omitempty"`
 	Key        string `json:"-"`
 	Origin     Origin `json:"-"`
@@ -224,11 +222,10 @@ type ChannelMediaCache interface {
 }
 
 type RefreshBatch struct {
-	ID         string `json:"id"`
-	State      string `json:"state"`
-	Error      string `json:"error,omitempty"`
-	UpdateMode string `json:"update_mode"`
-	Total      int    `json:"total"`
+	ID    string `json:"id"`
+	State string `json:"state"`
+	Error string `json:"error,omitempty"`
+	Total int    `json:"total"`
 	// Submitted counts collections handed to capture, including reused ones.
 	Submitted int `json:"submitted"`
 	Reused    int `json:"reused"`

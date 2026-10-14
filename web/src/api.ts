@@ -86,7 +86,6 @@ export interface Job {
   error?: string
   members?: MemberProgress
 }
-export type UpdateMode = 'append' | 'full'
 /** What deleting everything would remove. */
 export interface LibrarySize {
   collections: number
@@ -113,7 +112,6 @@ export interface CaptureRecord {
   kind: string
   state: 'queued' | 'downloading' | 'complete' | 'partial' | 'failed'
   error?: string
-  update_mode: UpdateMode
   media: MediaProgress
   created_at: string
   finished_at?: string

@@ -1,8 +1,7 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef } from 'vue'
-import { api, errorText, type UpdateMode } from '../api'
+import { api, errorText } from '../api'
 import { toast } from '../composables/useToast'
-import UpdateModeSheet from './UpdateModeSheet.vue'
 const props = defineProps<{
   selected: string[]
   /** Every collection currently listed, for selecting them all at once. */
@@ -12,7 +11,6 @@ const emit = defineEmits<{
   select: [ids: string[]]
   close: []
 }>()
-const choosing = shallowRef(false)
 const busy = shallowRef(false)
 const allSelected = computed(
   () =>
@@ -20,17 +18,13 @@ const allSelected = computed(
     props.listed.every((id) => props.selected.includes(id)),
 )
 // Progress is reported by the bot in the requester's private chat.
-async function start(mode: UpdateMode) {
+async function start() {
   busy.value = true
   try {
     await api('/refresh-batches', {
       method: 'POST',
-      body: JSON.stringify({
-        collection_ids: props.selected,
-        update_mode: mode,
-      }),
+      body: JSON.stringify({ collection_ids: props.selected }),
     })
-    choosing.value = false
     emit('close')
   } catch (e) {
     toast(errorText(e))
@@ -55,19 +49,12 @@ async function start(mode: UpdateMode) {
     <button
       type="button"
       class="action strong"
-      :disabled="!selected.length"
-      @click="choosing = true"
+      :disabled="!selected.length || busy"
+      @click="start"
     >
       更新
     </button>
   </div>
-  <UpdateModeSheet
-    :open="choosing"
-    :title="`更新 ${selected.length} 项收藏`"
-    :busy="busy"
-    @select="start"
-    @cancel="choosing = false"
-  />
 </template>
 
 <style scoped>

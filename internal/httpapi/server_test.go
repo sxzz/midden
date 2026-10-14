@@ -82,6 +82,13 @@ func TestRESTIsolation(t *testing.T) {
 	if w = call("POST", "/v1/captures", `{"url":"https://x.com/u/status/99","tenant_id":"other"}`, a); w.Code != 400 {
 		t.Fatal(w.Code)
 	}
+	// update_mode is accepted and ignored; unknown values are still refused.
+	if w = call("POST", "/v1/captures", `{"url":"https://x.com/u/status/99","update_mode":"append"}`, a); w.Code != 202 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if w = call("POST", "/v1/captures", `{"url":"https://x.com/u/status/99","update_mode":"merge"}`, a); w.Code != 400 {
+		t.Fatal(w.Code)
+	}
 	if w = call("GET", "/v1/usage", "", "wrong"); w.Code != http.StatusUnauthorized {
 		t.Fatal(w.Code)
 	}

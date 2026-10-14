@@ -22,14 +22,13 @@ type (
 		JobID        string `json:"job_id"`
 		CollectionID string `json:"collection_id"`
 		// Saved is false once the collection left this tenant's library.
-		Saved      bool   `json:"saved"`
-		URL        string `json:"url"`
-		Input      string `json:"input"`
-		Platform   string `json:"platform"`
-		Kind       string `json:"kind"`
-		State      string `json:"state"`
-		Error      string `json:"error,omitempty"`
-		UpdateMode string `json:"update_mode"`
+		Saved    bool   `json:"saved"`
+		URL      string `json:"url"`
+		Input    string `json:"input"`
+		Platform string `json:"platform"`
+		Kind     string `json:"kind"`
+		State    string `json:"state"`
+		Error    string `json:"error,omitempty"`
 		// Media counts the images and videos of the record's own capture.
 		Media      MediaProgress `json:"media"`
 		CreatedAt  time.Time     `json:"created_at"`
@@ -100,7 +99,7 @@ const (
 // Records are the tenant's root submissions. One that only shows saved content
 // again carries no input and is not a capture. A member or continuation page
 // loses its parent when that is deleted, so their keys exclude them as well.
-const captureRecordSQL = `SELECT s.id,s.input,s.update_mode,s.created_at,c.is_collection AND s.related_state<>'none',c.id,c.collection_id,c.state,c.error,c.finished_at,a.url,a.platform,a.kind,EXISTS(SELECT FROM tenant_collections t WHERE t.collection_id=a.id),m.total,m.ready,m.failed
+const captureRecordSQL = `SELECT s.id,s.input,s.created_at,c.is_collection AND s.related_state<>'none',c.id,c.collection_id,c.state,c.error,c.finished_at,a.url,a.platform,a.kind,EXISTS(SELECT FROM tenant_collections t WHERE t.collection_id=a.id),m.total,m.ready,m.failed
  FROM submissions s JOIN captures c ON c.id=s.capture_id JOIN collections a ON a.id=c.collection_id
  CROSS JOIN LATERAL (SELECT count(*) AS total,count(*) FILTER (WHERE x.state='ready') AS ready,count(*) FILTER (WHERE x.state='failed') AS failed FROM assets x WHERE x.capture_id=c.id) m
  WHERE s.tenant_id=current_tenant() AND ` + recordRootSQL
@@ -112,7 +111,7 @@ func scanCaptureRecords(rows pgx.Rows) ([]CaptureRecord, error) {
 	items := []CaptureRecord{}
 	for rows.Next() {
 		var r CaptureRecord
-		if e := rows.Scan(&r.ID, &r.Input, &r.UpdateMode, &r.CreatedAt, &r.collection, &r.JobID, &r.CollectionID, &r.State, &r.Error, &r.FinishedAt, &r.URL, &r.Platform, &r.Kind, &r.Saved, &r.Media.Total, &r.Media.Ready, &r.Media.Failed); e != nil {
+		if e := rows.Scan(&r.ID, &r.Input, &r.CreatedAt, &r.collection, &r.JobID, &r.CollectionID, &r.State, &r.Error, &r.FinishedAt, &r.URL, &r.Platform, &r.Kind, &r.Saved, &r.Media.Total, &r.Media.Ready, &r.Media.Failed); e != nil {
 			return nil, e
 		}
 		r.Done = r.State == "complete" || r.State == "partial" || r.State == "failed"

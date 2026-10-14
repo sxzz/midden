@@ -15,7 +15,6 @@ import {
   type MemberProgress,
   type Page,
   type Revision,
-  type UpdateMode,
 } from '../api'
 import { toast } from './useToast'
 const settled = (m?: MemberProgress) =>
@@ -335,7 +334,7 @@ export function useCollectionDetail(
       }
     }, 2000)
   }
-  async function refresh(mode: UpdateMode) {
+  async function refresh() {
     if (busy.value) return
     ++revisionRequest
     busy.value = true
@@ -343,7 +342,7 @@ export function useCollectionDetail(
       await startPoll(
         await api<Job>('/captures', {
           method: 'POST',
-          body: JSON.stringify({ refresh_id: id(), update_mode: mode }),
+          body: JSON.stringify({ refresh_id: id() }),
           headers: { 'Idempotency-Key': crypto.randomUUID() },
           signal: controller.signal,
         }),

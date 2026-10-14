@@ -20,7 +20,6 @@ const record = (patch: Partial<CaptureRecord>): CaptureRecord => ({
   platform: 'x',
   kind: 'post',
   state: 'queued',
-  update_mode: 'full',
   media: { total: 0, ready: 0, failed: 0 },
   created_at: '2026-10-14T08:00:00Z',
   done: false,

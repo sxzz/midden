@@ -186,19 +186,6 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 	if in.CollectionLimit > 1000 || in.PageSize > 1000 {
 		return out, domain.ErrUnsupported
 	}
-	switch in.UpdateMode {
-	case "":
-		in.UpdateMode = "full"
-	case "full", "append":
-	default:
-		return out, domain.ErrUnsupported
-	}
-	var changedAt *time.Time
-	if in.UpdatedAt != "" {
-		if t, e := time.Parse(time.RFC3339Nano, in.UpdatedAt); e == nil {
-			changedAt = &t
-		}
-	}
 	if len(in.PageCursor) > 4096 || ((in.PageCursor != "" || in.CollectionLimit > 0 || in.PageSize > 0) && (in.Automatic || !target.Collection || !adapter.Supports(policy, adapter.CapturePage, 1, 0))) {
 		return out, domain.ErrUnsupported
 	}
@@ -220,19 +207,17 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if e := lockTenant(ctx, tx, tenant); e != nil {
 			return e
 		}
+		// A collection's members are observed again with it; their listing
+		// usually hands them what they need, so this asks upstream little.
 		recheck := false
-		appendOnly := in.UpdateMode == "append"
 		if in.ParentSubmission != "" {
 			var stopped bool
-			var parentMode string
-			if e := tx.QueryRow(ctx, `SELECT s.collection_stopped,c.is_collection,s.update_mode FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1`, in.ParentSubmission).Scan(&stopped, &recheck, &parentMode); e != nil {
+			if e := tx.QueryRow(ctx, `SELECT s.collection_stopped,c.is_collection FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.id=$1`, in.ParentSubmission).Scan(&stopped, &recheck); e != nil {
 				return e
 			}
 			if stopped {
 				return errCollectionStopped
 			}
-			// Members of an appending collection refresh are reused when unchanged.
-			appendOnly = appendOnly || recheck && parentMode == "append"
 		}
 		if in.ConnectionID != "" {
 			if !s.AdapterTLS || s.Vault == nil {
@@ -265,7 +250,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		if in.Input == "" {
 			in.Input = in.URL
 		}
-		fingerprint := store.Hash(desc.AdapterId + "|" + target.Platform + "|" + target.Kind + "|" + target.ObjectScope + "|" + target.ExternalID + "|" + in.ProviderID + "|" + scope + "|" + in.RefreshID + "|" + in.PageCursor + fmt.Sprintf("|%d|%d", in.PageSize, in.CollectionLimit) + appendFingerprint(in.UpdateMode))
+		fingerprint := store.Hash(desc.AdapterId + "|" + target.Platform + "|" + target.Kind + "|" + target.ObjectScope + "|" + target.ExternalID + "|" + in.ProviderID + "|" + scope + "|" + in.RefreshID + "|" + in.PageCursor + fmt.Sprintf("|%d|%d", in.PageSize, in.CollectionLimit))
 		var existing, f string
 		e = tx.QueryRow(ctx, `SELECT capture_id,fingerprint FROM submissions WHERE tenant_id=$1 AND idem_key=$2`, tenant, in.Key).Scan(&existing, &f)
 		if e == nil {
@@ -312,22 +297,14 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 		var cid string
 		mode := "fetch"
 		e = tx.QueryRow(ctx, `SELECT id FROM captures WHERE collection_id=$1 AND provider_id=$2 AND coalesce(connection_id::text,'')=$3 AND adapter_id=$4 AND state IN('queued','downloading') AND page_cursor=$5 AND (NOT $6 OR NOT automatic) AND page_size=$7`, aid, in.ProviderID, in.ConnectionID, desc.AdapterId, in.PageCursor, target.Collection && !in.Automatic, in.PageSize).Scan(&cid)
-		// Appending never skips the collection itself: its listing is what
-		// reveals new members.
-		appendOnly = appendOnly && (in.Automatic || !target.Collection && !target.RefreshOnSubmit)
-		if errors.Is(e, pgx.ErrNoRows) && in.PageCursor == "" && (appendOnly || !recheck && in.RefreshID == "" && (in.Automatic || !target.RefreshOnSubmit)) {
+		if errors.Is(e, pgx.ErrNoRows) && in.PageCursor == "" && !recheck && in.RefreshID == "" && (in.Automatic || !target.RefreshOnSubmit) {
 			// Reuse the newest version this tenant can read. When another source
 			// stored a newer version this tenant cannot read yet, an account can
 			// prove access instead of fetching the content again.
 			var visible *string
-			var hidden, fresh, complete, unchanged bool
-			if e = tx.QueryRow(ctx, `SELECT r.capture_id,has_hidden_revision(a.id),$2::bigint=0 OR a.observed_at > now()-make_interval(secs=>$2::double precision),coalesce(c.state='complete',false),$3::timestamptz IS NULL OR a.observed_at>=$3 FROM collections a LEFT JOIN LATERAL (SELECT head.* FROM revisions head WHERE head.collection_id=a.id ORDER BY head.created_at DESC,head.id DESC LIMIT 1) r ON TRUE LEFT JOIN captures c ON c.id=r.capture_id WHERE a.id=$1`, aid, in.RefreshAfterSeconds, changedAt).Scan(&visible, &hidden, &fresh, &complete, &unchanged); e != nil {
+			var hidden, fresh bool
+			if e = tx.QueryRow(ctx, `SELECT r.capture_id,has_hidden_revision(a.id),$2::bigint=0 OR a.observed_at > now()-make_interval(secs=>$2::double precision) FROM collections a LEFT JOIN LATERAL (SELECT head.* FROM revisions head WHERE head.collection_id=a.id ORDER BY head.created_at DESC,head.id DESC LIMIT 1) r ON TRUE WHERE a.id=$1`, aid, in.RefreshAfterSeconds).Scan(&visible, &hidden, &fresh); e != nil {
 				return e
-			}
-			// Appending refetches what was saved incompletely or changed upstream
-			// after the last observation, and everything not saved yet.
-			if appendOnly && !(complete && unchanged) {
-				fresh = false
 			}
 			switch {
 			case fresh && hidden && in.ConnectionID != "" && adapter.Supports(policy, adapter.CaptureAccess, 1, 0):
@@ -377,7 +354,7 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			return e
 		}
 		var sid string
-		e = tx.QueryRow(ctx, `INSERT INTO submissions(tenant_id,capture_id,identity_id,channel_id,chat_id,idem_key,fingerprint,reply_to_message_id,input,collection_limit,parent_submission,update_mode) VALUES($1,$2,nullif($3,'')::uuid,nullif($4,'')::uuid,nullif($5,''),$6,$7,$8,$9,$10,nullif($11,'')::uuid,$12) RETURNING id`, tenant, cid, in.Origin.IdentityID, in.Origin.ChannelID, in.Origin.ChatID, in.Key, fingerprint, in.Origin.ReplyToMessageID, in.Input, in.CollectionLimit, in.ParentSubmission, in.UpdateMode).Scan(&sid)
+		e = tx.QueryRow(ctx, `INSERT INTO submissions(tenant_id,capture_id,identity_id,channel_id,chat_id,idem_key,fingerprint,reply_to_message_id,input,collection_limit,parent_submission) VALUES($1,$2,nullif($3,'')::uuid,nullif($4,'')::uuid,nullif($5,''),$6,$7,$8,$9,$10,nullif($11,'')::uuid) RETURNING id`, tenant, cid, in.Origin.IdentityID, in.Origin.ChannelID, in.Origin.ChatID, in.Key, fingerprint, in.Origin.ReplyToMessageID, in.Input, in.CollectionLimit, in.ParentSubmission).Scan(&sid)
 		if e != nil {
 			return e
 		}
@@ -455,14 +432,6 @@ func (s *Service) DeleteCollection(ctx context.Context, tenant, id string) error
 		}
 		return nil
 	})
-}
-
-// Full refreshes keep the fingerprints stored before update modes existed.
-func appendFingerprint(mode string) string {
-	if mode == "append" {
-		return "|append"
-	}
-	return ""
 }
 
 func scanJob(ctx context.Context, tx pgx.Tx, id string, j *domain.Job) error {

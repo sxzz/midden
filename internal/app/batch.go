@@ -22,13 +22,7 @@ type RefreshBatch = domain.RefreshBatch
 // StartRefreshBatch queues refreshes of the tenant's saved collections. Submission
 // runs in the background so the capture rate limit delays it instead of failing it.
 // With a channel, the tenant's private chat there gets one progress message.
-func (s *Service) StartRefreshBatch(ctx context.Context, tenant string, ids []string, mode, channel string) (out RefreshBatch, err error) {
-	if mode == "" {
-		mode = "full"
-	}
-	if mode != "full" && mode != "append" {
-		return out, domain.ErrUnsupported
-	}
+func (s *Service) StartRefreshBatch(ctx context.Context, tenant string, ids []string, channel string) (out RefreshBatch, err error) {
 	seen := map[string]bool{}
 	unique := make([]string, 0, len(ids))
 	for _, id := range ids {
@@ -60,7 +54,7 @@ func (s *Service) StartRefreshBatch(ctx context.Context, tenant string, ids []st
 			}
 		}
 		var id string
-		if e := tx.QueryRow(ctx, `INSERT INTO refresh_batches(tenant_id,collection_ids,update_mode,channel_id,chat_id) VALUES($1,$2::uuid[],$3,CASE WHEN $5::text IS NOT NULL THEN nullif($4,'')::uuid END,$5) RETURNING id`, tenant, unique, mode, channel, chat).Scan(&id); e != nil {
+		if e := tx.QueryRow(ctx, `INSERT INTO refresh_batches(tenant_id,collection_ids,channel_id,chat_id) VALUES($1,$2::uuid[],CASE WHEN $4::text IS NOT NULL THEN nullif($3,'')::uuid END,$4) RETURNING id`, tenant, unique, channel, chat).Scan(&id); e != nil {
 			return e
 		}
 		if e := s.Enqueue(ctx, tx, tenant, id, "refresh_batch"); e != nil {
@@ -106,7 +100,7 @@ const retryableMembersSQL = ` FROM pages CROSS JOIN LATERAL (SELECT member.id,me
 func scanRefreshBatch(ctx context.Context, tx pgx.Tx, id string, b *RefreshBatch) error {
 	var membersPending bool
 	err := tx.QueryRow(ctx, batchPagesSQL+`, members AS (SELECT DISTINCT child.capture_id FROM pages CROSS JOIN LATERAL (SELECT member.capture_id FROM submissions member WHERE member.parent_submission=pages.id AND member.idem_key LIKE 'related:%' OFFSET 0) child)
-SELECT batch.id,batch.state,batch.error,batch.update_mode,cardinality(batch.collection_ids),batch.position,batch.reused,batch.rejected,
+SELECT batch.id,batch.state,batch.error,cardinality(batch.collection_ids),batch.position,batch.reused,batch.rejected,
  (SELECT count(*) FROM captures c WHERE c.id=ANY(batch.capture_ids) AND c.state IN ('queued','downloading')),
  (SELECT count(*) FROM captures c WHERE c.id=ANY(batch.capture_ids) AND c.state='complete'),
  (SELECT count(*) FROM captures c WHERE c.id=ANY(batch.capture_ids) AND c.state='partial'),
@@ -118,7 +112,7 @@ SELECT batch.id,batch.state,batch.error,batch.update_mode,cardinality(batch.coll
  (SELECT count(*) FROM members JOIN captures c ON c.id=members.capture_id WHERE c.state IN ('queued','downloading')),
  EXISTS(SELECT FROM pages WHERE related_state='pending'),
  (SELECT count(DISTINCT member.capture_id)`+retryableMembersSQL+`)
-FROM batch`, id).Scan(&b.ID, &b.State, &b.Error, &b.UpdateMode, &b.Total, &b.Submitted, &b.Reused, &b.Rejected, &b.Running, &b.Complete, &b.Partial, &b.Failed,
+FROM batch`, id).Scan(&b.ID, &b.State, &b.Error, &b.Total, &b.Submitted, &b.Reused, &b.Rejected, &b.Running, &b.Complete, &b.Partial, &b.Failed,
 		&b.Members.Total, &b.Members.Complete, &b.Members.Partial, &b.Members.Failed, &b.Members.Pending, &membersPending, &b.Retryable)
 	if err != nil {
 		return err
@@ -192,11 +186,11 @@ WHERE r.depth=0 ORDER BY s.created_at,s.id`, id)
 // after each one so retries and snoozes never submit a collection twice.
 func (s *Service) refreshBatch(ctx context.Context, task store.Task) error {
 	var ids []string
-	var mode, state string
+	var state string
 	var position int
 	var expired bool
 	if err := s.DB.Tx(ctx, task.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT collection_ids::text[],update_mode,position,state,created_at<now()-interval '1 day' FROM refresh_batches WHERE id=$1`, task.ID).Scan(&ids, &mode, &position, &state, &expired)
+		return tx.QueryRow(ctx, `SELECT collection_ids::text[],position,state,created_at<now()-interval '1 day' FROM refresh_batches WHERE id=$1`, task.ID).Scan(&ids, &position, &state, &expired)
 	}); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil
@@ -222,7 +216,7 @@ func (s *Service) refreshBatch(ctx context.Context, task store.Task) error {
 		}
 		var job domain.Job
 		if !rejected {
-			job, err = s.Submit(ctx, task.Tenant, domain.CaptureInput{RefreshID: id, UpdateMode: mode, Key: fmt.Sprintf("refresh-batch:%s:%d", task.ID, position)})
+			job, err = s.Submit(ctx, task.Tenant, domain.CaptureInput{RefreshID: id, Key: fmt.Sprintf("refresh-batch:%s:%d", task.ID, position)})
 			switch {
 			case errors.Is(err, domain.ErrRate):
 				return river.JobSnooze(time.Minute)

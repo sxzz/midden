@@ -12,8 +12,8 @@ const item = (n: number) => ({
 })
 const items = [item(1), item(2), item(3)]
 
-test('select collections and refresh them in append mode', async ({ page }) => {
-  let started: { collection_ids: string[]; update_mode: string } | undefined
+test('select collections and refresh them', async ({ page }) => {
+  let started: { collection_ids: string[] } | undefined
   let polled = false
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {
@@ -41,15 +41,10 @@ test('select collections and refresh them in append mode', async ({ page }) => {
   await expect(page).toHaveURL(/#\/$/)
   await expect(page.getByText('已选 2 项')).toBeVisible()
   await page.getByRole('button', { name: '更新', exact: true }).click()
-  await expect(page.getByText('更新 2 项收藏')).toBeVisible()
-  await page.getByRole('button', { name: /附加更新/ }).click()
   // Progress arrives as a bot message; the page just leaves selection mode.
   await expect(page.getByRole('checkbox')).toHaveCount(0)
   await expect(page.getByRole('button', { name: '批量更新' })).toBeVisible()
-  expect(started).toEqual({
-    collection_ids: [items[0].id, items[2].id],
-    update_mode: 'append',
-  })
+  expect(started).toEqual({ collection_ids: [items[0].id, items[2].id] })
   expect(polled).toBe(false)
 })
 

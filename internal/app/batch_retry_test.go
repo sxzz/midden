@@ -115,7 +115,7 @@ func TestRefreshBatchRetry(t *testing.T) {
 	must(t, admin.Pool.QueryRow(ctx, `SELECT id FROM submissions WHERE capture_id=$1 AND related_state='pending'`, first.ID).Scan(&page))
 	members(page)
 
-	b, e := s.StartRefreshBatch(ctx, tenant, []string{first.CollectionID}, "full", channel)
+	b, e := s.StartRefreshBatch(ctx, tenant, []string{first.CollectionID}, channel)
 	must(t, e)
 	must(t, s.refreshBatch(ctx, store.Task{Tenant: tenant, ID: b.ID, Type: "refresh_batch"}))
 	progress := func() RefreshBatch {
@@ -220,7 +220,7 @@ func TestCaptureJoinsRunningCanonicalCapture(t *testing.T) {
 	alias, e := s.Submit(ctx, tenant, domain.CaptureInput{URL: "https://notes.test/collection/alias-" + prefix})
 	must(t, e)
 	var batch string
-	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO refresh_batches(tenant_id,collection_ids,update_mode,capture_ids) VALUES($1,ARRAY[$2::uuid],'full',ARRAY[$3::uuid]) RETURNING id`, tenant, alias.CollectionID, alias.ID).Scan(&batch))
+	must(t, admin.Pool.QueryRow(ctx, `INSERT INTO refresh_batches(tenant_id,collection_ids,capture_ids) VALUES($1,ARRAY[$2::uuid],ARRAY[$3::uuid]) RETURNING id`, tenant, alias.CollectionID, alias.ID).Scan(&batch))
 	must(t, s.capture(ctx, store.Task{Tenant: tenant, ID: alias.ID}))
 	var state, tracked string
 	var submissions int

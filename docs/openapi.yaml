@@ -829,14 +829,11 @@ components:
     UpdateMode:
       type: string
       enum: [full, append]
-      default: full
+      deprecated: true
       description: >-
-        full captures the content again. append reuses content whose newest
-        version came from a complete capture and that has not changed upstream
-        since it was last observed, judged by the adapter-reported update time
-        (publication or edit) of collection members. A collection such as a
-        profile is always fetched again to list its members; only its members
-        are reused.
+        Accepted for compatibility and ignored: every refresh observes the
+        content again. A collection's members come with its listing and counts
+        no longer make versions, so there is nothing left to skip.
     RefreshBatch:
       type: object
       properties:
@@ -848,7 +845,6 @@ components:
             description: complete once every collection was submitted; captures may still be running.,
           }
         error: { type: string }
-        update_mode: { $ref: "#/components/schemas/UpdateMode" }
         total: { type: integer }
         submitted: { type: integer }
         reused:
@@ -926,7 +922,6 @@ components:
             enum: [queued, downloading, complete, partial, failed],
           }
         error: { type: string }
-        update_mode: { $ref: "#/components/schemas/UpdateMode" }
         media:
           type: object
           description: Images and videos of the record's own capture.

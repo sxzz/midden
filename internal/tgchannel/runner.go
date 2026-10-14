@@ -420,10 +420,6 @@ func batchItemName(item domain.RefreshItem) string {
 
 // batchMessage also returns a link button for each listed item in progress.
 func batchMessage(b domain.RefreshBatch) (string, telegram.Keyboard) {
-	mode := "完整更新"
-	if b.UpdateMode == "append" {
-		mode = "附加更新"
-	}
 	counts := func(parts ...any) string {
 		var out []string
 		for i := 0; i < len(parts); i += 2 {
@@ -466,9 +462,9 @@ func batchMessage(b domain.RefreshBatch) (string, telegram.Keyboard) {
 		if b.Error == "storage quota exceeded" {
 			reason = "存储空间不足"
 		}
-		return fmt.Sprintf("批量%s已中止：%s\n已提交 %d/%d", mode, reason, b.Submitted, b.Total) + summary, retry
+		return fmt.Sprintf("批量更新已中止：%s\n已提交 %d/%d", reason, b.Submitted, b.Total) + summary, retry
 	case !b.Done:
-		text := fmt.Sprintf("批量%s中…\n已提交 %d/%d", mode, b.Submitted, b.Total)
+		text := fmt.Sprintf("批量更新中…\n已提交 %d/%d", b.Submitted, b.Total)
 		if c := counts("抓取中", b.Running, "已抓取", fetched, "无变化", b.Reused, "失败", b.Failed); c != "" {
 			text += " · " + c
 		}
@@ -502,7 +498,7 @@ func batchMessage(b domain.RefreshBatch) (string, telegram.Keyboard) {
 		}
 		return text, keys
 	}
-	text := fmt.Sprintf("批量%s完成，共 %d 项", mode, b.Total)
+	text := fmt.Sprintf("批量更新完成，共 %d 项", b.Total)
 	if c := counts("已抓取", fetched, "无变化", b.Reused, "不完整", b.Partial, "失败", b.Failed, "无法更新", b.Rejected); c != "" {
 		text += "\n" + c
 	}

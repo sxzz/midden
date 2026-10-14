@@ -47,6 +47,10 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 			write(w, 400, map[string]string{"error": "invalid identifier"})
 			return
 		}
+		if !knownUpdateMode(in.UpdateMode) {
+			write(w, 400, map[string]string{"error": "invalid request"})
+			return
+		}
 		if in.RefreshID == "" {
 			if e := domain.ValidateURL(in.URL); e != nil {
 				write(w, 400, map[string]string{"error": "unsupported URL"})
@@ -171,7 +175,12 @@ func WebHandler(s *app.Service, web WebConfig) http.Handler {
 		if _, ok := r.Context().Value(sessionKey{}).(bool); ok {
 			channel = web.Channel
 		}
-		b, e := s.StartRefreshBatch(r.Context(), tenant(r), in.CollectionIDs, in.UpdateMode, channel)
+		// update_mode is accepted and ignored: every refresh observes again.
+		if !knownUpdateMode(in.UpdateMode) {
+			write(w, 400, map[string]string{"error": "invalid request"})
+			return
+		}
+		b, e := s.StartRefreshBatch(r.Context(), tenant(r), in.CollectionIDs, channel)
 		respond(w, 202, b, e)
 	})
 	mux.HandleFunc("GET /v1/refresh-batches/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -434,4 +443,10 @@ func write(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(v)
+}
+
+// knownUpdateMode accepts the update modes clients used to choose between;
+// both now observe again.
+func knownUpdateMode(mode string) bool {
+	return mode == "" || mode == "full" || mode == "append"
 }

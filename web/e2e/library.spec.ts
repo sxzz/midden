@@ -100,14 +100,9 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await page.getByRole('button', { name: /最新版本 ·/ }).click()
   await expect(page.getByText(collection.text)).toBeVisible()
   await expect(page.getByRole('button', { name: /最新版本 ·/ })).toBeDisabled()
-  // A post refreshes in full right away; only profiles offer appending.
   await page.getByRole('button', { name: '重新抓取' }).click()
   await expect(page.getByText('已更新。')).toBeVisible()
-  await expect(page.getByRole('button', { name: /附加更新/ })).toBeHidden()
-  expect(captureBodies.at(-1)).toEqual({
-    refresh_id: id,
-    update_mode: 'full',
-  })
+  expect(captureBodies.at(-1)).toEqual({ refresh_id: id })
   await page.getByRole('button', { name: '返回' }).click()
   await page.getByRole('searchbox').fill('不存在')
   await page.getByRole('button', { name: '搜索', exact: true }).click()

@@ -53,7 +53,7 @@ func (f *datedAdapter) Fetch(ctx context.Context, r *pb.FetchRequest, o ...grpc.
 	return out, nil
 }
 
-func TestRefreshBatchModes(t *testing.T) {
+func TestRefreshBatches(t *testing.T) {
 	if os.Getenv("TEST_DATABASE_URL") == "" {
 		t.Skip("Docker database required")
 	}
@@ -102,8 +102,8 @@ func TestRefreshBatchModes(t *testing.T) {
 		must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM captures c JOIN collections a ON a.id=c.collection_id WHERE a.external_id=$1`, external).Scan(&n))
 		return
 	}
-	runBatch := func(ids []string, mode string) RefreshBatch {
-		b, e := s.StartRefreshBatch(ctx, tenant, ids, mode, "")
+	runBatch := func(ids []string) RefreshBatch {
+		b, e := s.StartRefreshBatch(ctx, tenant, ids, "")
 		must(t, e)
 		must(t, s.refreshBatch(ctx, store.Task{Tenant: tenant, ID: b.ID, Type: "refresh_batch"}))
 		b, e = s.RefreshBatch(ctx, tenant, b.ID)
@@ -120,15 +120,15 @@ func TestRefreshBatchModes(t *testing.T) {
 		}
 	}
 
-	// Appending refreshes the listing, reuses unchanged members, refetches the
-	// edited one and adds the new one.
+	// A refresh reads the listing again and observes every member again,
+	// including a new one.
 	fake.mu.Lock()
 	fake.members[prefix+"-edited"] = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 	fake.members[prefix+"-new"] = time.Now().UTC().Format(time.RFC3339)
 	fake.mu.Unlock()
-	b := runBatch([]string{first.CollectionID}, "append")
+	b := runBatch([]string{first.CollectionID})
 	if b.State != "complete" || b.Total != 1 || b.Submitted != 1 || b.Reused != 0 || b.Running != 1 {
-		t.Fatalf("append batch progress %+v", b)
+		t.Fatalf("batch progress %+v", b)
 	}
 	var listing string
 	must(t, admin.Pool.QueryRow(ctx, `SELECT capture_ids[1] FROM refresh_batches WHERE id=$1`, b.ID).Scan(&listing))
@@ -151,8 +151,7 @@ func TestRefreshBatchModes(t *testing.T) {
 		return tx.QueryRow(ctx, `SELECT id FROM submissions WHERE capture_id=$1 AND related_state='pending'`, listing).Scan(&sid)
 	}))
 	must(t, s.related(ctx, store.Task{Tenant: tenant, ID: sid, Type: "related"}))
-	// Unchanged members are reused and count as saved; the rest still run.
-	if p := progress(); p.Done || p.Members.Total != 4 || p.Members.Pending != 2 || p.Members.Complete != 2 || len(p.Active) != 1 || p.Active[0].Members.Pending != 2 {
+	if p := progress(); p.Done || p.Members.Total != 4 || p.Members.Pending != 4 || p.Members.Complete != 0 || len(p.Active) != 1 || p.Active[0].Members.Pending != 4 {
 		t.Fatalf("batch member progress %+v", p.Members)
 	}
 	rows, e := admin.Pool.Query(ctx, `SELECT c.id FROM submissions s JOIN captures c ON c.id=s.capture_id WHERE s.parent_submission=$1 AND c.state='queued'`, sid)
@@ -165,26 +164,18 @@ func TestRefreshBatchModes(t *testing.T) {
 	if p := progress(); !p.Done || !p.Members.Done || p.Members.Complete != 4 || len(p.Active) != 0 {
 		t.Fatalf("batch not done after members %+v", p)
 	}
-	for id, want := range map[string]int{prefix + "-kept": 1, prefix + "-undated": 1, prefix + "-edited": 2, prefix + "-new": 1} {
+	for id, want := range map[string]int{prefix + "-kept": 2, prefix + "-undated": 2, prefix + "-edited": 2, prefix + "-new": 1} {
 		if got := captures(id); got != want {
 			t.Fatalf("%s captured %d times, want %d", id, got, want)
 		}
 	}
 
-	// A full refresh captures every member again.
-	b = runBatch([]string{first.CollectionID}, "full")
-	must(t, admin.Pool.QueryRow(ctx, `SELECT capture_ids[1] FROM refresh_batches WHERE id=$1`, b.ID).Scan(&listing))
-	expand(listing)
-	if got := captures(prefix + "-kept"); got != 2 {
-		t.Fatal("full refresh skipped a member", got)
-	}
-
-	// Single saved entries: appending reuses complete content, full refetches it,
-	// and collections deleted meanwhile are skipped without failing the batch.
+	// Single saved entries are fetched again; collections deleted meanwhile
+	// are skipped without failing the batch.
 	var kept, gone string
 	must(t, admin.Pool.QueryRow(ctx, `SELECT id FROM collections WHERE external_id=$1`, prefix+"-kept").Scan(&kept))
 	must(t, admin.Pool.QueryRow(ctx, `SELECT id FROM collections WHERE external_id=$1`, prefix+"-new").Scan(&gone))
-	b, e = s.StartRefreshBatch(ctx, tenant, []string{kept, gone, kept}, "append", "")
+	b, e = s.StartRefreshBatch(ctx, tenant, []string{kept, gone, kept}, "")
 	must(t, e)
 	if b.Total != 2 {
 		t.Fatal("duplicate ids not merged", b.Total)
@@ -193,15 +184,11 @@ func TestRefreshBatchModes(t *testing.T) {
 	must(t, s.refreshBatch(ctx, store.Task{Tenant: tenant, ID: b.ID, Type: "refresh_batch"}))
 	b, e = s.RefreshBatch(ctx, tenant, b.ID)
 	must(t, e)
-	if b.State != "complete" || b.Submitted != 2 || b.Reused != 1 || b.Rejected != 1 || b.Complete != 1 {
-		t.Fatalf("append entry batch %+v", b)
+	if b.State != "complete" || b.Submitted != 2 || b.Reused != 0 || b.Rejected != 1 || b.Running != 1 {
+		t.Fatalf("entry batch %+v", b)
 	}
-	if got := captures(prefix + "-kept"); got != 2 {
-		t.Fatal("append refetched unchanged entry", got)
-	}
-	b = runBatch([]string{kept}, "full")
-	if b.Reused != 0 || b.Running != 1 || captures(prefix+"-kept") != 3 {
-		t.Fatalf("full entry batch %+v", b)
+	if got := captures(prefix + "-kept"); got != 3 {
+		t.Fatal("entry not fetched again", got)
 	}
 	// Replaying a finished batch submits nothing more.
 	must(t, s.refreshBatch(ctx, store.Task{Tenant: tenant, ID: b.ID, Type: "refresh_batch"}))
@@ -212,16 +199,13 @@ func TestRefreshBatchModes(t *testing.T) {
 	// Batches only accept the tenant's own saved collections.
 	var other string
 	must(t, admin.Pool.QueryRow(ctx, "INSERT INTO tenants DEFAULT VALUES RETURNING id").Scan(&other))
-	if _, e = s.StartRefreshBatch(ctx, other, []string{kept}, "append", ""); e != domain.ErrNotFound {
+	if _, e = s.StartRefreshBatch(ctx, other, []string{kept}, ""); e != domain.ErrNotFound {
 		t.Fatal("foreign collection accepted", e)
 	}
 	if _, e = s.RefreshBatch(ctx, other, b.ID); e != domain.ErrNotFound {
 		t.Fatal("foreign batch readable", e)
 	}
-	if _, e = s.StartRefreshBatch(ctx, tenant, []string{kept}, "merge", ""); e != domain.ErrUnsupported {
-		t.Fatal("unknown mode accepted", e)
-	}
-	if _, e = s.StartRefreshBatch(ctx, tenant, nil, "full", ""); e != domain.ErrUnsupported {
+	if _, e = s.StartRefreshBatch(ctx, tenant, nil, ""); e != domain.ErrUnsupported {
 		t.Fatal("empty batch accepted", e)
 	}
 
@@ -230,7 +214,7 @@ func TestRefreshBatchModes(t *testing.T) {
 	channel := uuid.NewString()
 	_, e = admin.Pool.Exec(ctx, `INSERT INTO channels(id,kind,external_id) VALUES($1,'test',$2)`, channel, channel)
 	must(t, e)
-	b, e = s.StartRefreshBatch(ctx, tenant, []string{kept}, "append", channel)
+	b, e = s.StartRefreshBatch(ctx, tenant, []string{kept}, channel)
 	must(t, e)
 	var works int
 	must(t, admin.Pool.QueryRow(ctx, `SELECT count(*) FROM channel_work WHERE kind='batch' AND resource=$1`, b.ID).Scan(&works))
@@ -239,7 +223,7 @@ func TestRefreshBatchModes(t *testing.T) {
 	}
 	_, e = admin.Pool.Exec(ctx, `INSERT INTO identities(tenant_id,channel_id,external_id) VALUES($1,$2,'4242')`, tenant, channel)
 	must(t, e)
-	b, e = s.StartRefreshBatch(ctx, tenant, []string{kept}, "append", channel)
+	b, e = s.StartRefreshBatch(ctx, tenant, []string{kept}, channel)
 	must(t, e)
 	must(t, s.refreshBatch(ctx, store.Task{Tenant: tenant, ID: b.ID, Type: "refresh_batch"}))
 	w, e := s.ClaimChannel(ctx, channel, "")

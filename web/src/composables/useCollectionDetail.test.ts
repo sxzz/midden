@@ -54,7 +54,7 @@ const Detail = {
       () => {},
       (value) => updates.push(value),
     )
-    if (props.id === 'kept') refresh = () => detail.refresh('full')
+    if (props.id === 'kept') refresh = () => detail.refresh()
     return () => [
       h('p', { class: 'status' }, detail.status.value),
       h('p', { class: 'error' }, detail.error.value),

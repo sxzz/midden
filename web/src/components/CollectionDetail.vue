@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
-import { safeURL, type Collection, type UpdateMode } from '../api'
+import { safeURL, type Collection } from '../api'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
 import { date, present } from '../presentation'
 import { isProfileEntity } from '../relations'
@@ -12,7 +12,6 @@ import RevisionList from './RevisionList.vue'
 import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
-import UpdateModeSheet from './UpdateModeSheet.vue'
 const props = defineProps<{
   id: string
   savedAt?: string
@@ -72,17 +71,8 @@ const profileName = computed(() =>
   collection.value ? present(collection.value).name : '',
 )
 const link = computed(() => collection.value && safeURL(collection.value.url))
-const choosingMode = shallowRef(false)
-function refreshWith(mode: UpdateMode) {
-  choosingMode.value = false
-  void refresh(mode)
-}
-// Only a profile has members for an appending refresh to skip. A lone post
-// carries no upstream change time, so appending would just reuse a complete
-// save and never notice an edit.
 function startRefresh() {
-  if (isProfile.value) choosingMode.value = true
-  else refreshWith('full')
+  void refresh()
 }
 const version = computed(() =>
   collection.value
@@ -169,12 +159,6 @@ const version = computed(() =>
       :members-version="membersVersion"
       :show-sensitive="showSensitive"
       :reposted-by="profileName"
-    />
-    <UpdateModeSheet
-      :open="choosingMode"
-      title="重新抓取"
-      @select="refreshWith"
-      @cancel="choosingMode = false"
     />
     <ConfirmSheet
       :open="confirmDelete"
