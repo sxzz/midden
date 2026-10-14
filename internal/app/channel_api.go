@@ -105,9 +105,14 @@ func (s *Service) ChannelEvent(ctx context.Context, channel string, in channelap
 	return secret, e
 }
 
-func (s *Service) ClaimChannel(ctx context.Context, channel string) (*channelapi.Work, error) {
+// ClaimChannel claims the next work of a lane: "event" for commands,
+// "delivery" for everything sent back, or "" for either.
+func (s *Service) ClaimChannel(ctx context.Context, channel, lane string) (*channelapi.Work, error) {
+	if lane != "" && lane != "event" && lane != "delivery" {
+		return nil, fmt.Errorf("unknown work lane")
+	}
 	var w channelapi.Work
-	e := s.DB.Pool.QueryRow(ctx, `SELECT id,lease,kind,resource,payload,progress,message_id,created_at FROM claim_channel_work($1)`, channel).Scan(&w.ID, &w.Lease, &w.Kind, &w.Resource, &w.Payload, &w.Progress, &w.MessageID, &w.CreatedAt)
+	e := s.DB.Pool.QueryRow(ctx, `SELECT id,lease,kind,resource,payload,progress,message_id,created_at FROM claim_channel_work($1,nullif($2,''))`, channel, lane).Scan(&w.ID, &w.Lease, &w.Kind, &w.Resource, &w.Payload, &w.Progress, &w.MessageID, &w.CreatedAt)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -149,8 +154,15 @@ func (s *Service) AckChannel(ctx context.Context, channel, id string, a channela
 		if a.Progress < 0 || a.RetrySeconds < 0 || a.RetrySeconds > 86400 {
 			return fmt.Errorf("invalid acknowledgement")
 		}
-		// A zero delay renews the lease and records a delivery checkpoint.
-		_, e := tx.Exec(ctx, `UPDATE channel_work SET state=$3,progress=greatest(progress,$4),message_id=$5,lease_until=CASE WHEN $6>0 THEN NULL ELSE now()+interval '90 seconds' END,available_at=now()+$6*interval '1 second',payload=CASE WHEN $3 IN ('done','failed') AND kind='event' THEN jsonb_build_object('sensitive',coalesce((payload->>'sensitive')::boolean,false),'actor',payload->'actor','chat',payload->'chat') ELSE payload END WHERE id=$1 AND lease=$2`, id, a.Lease, next, a.Progress, a.MessageID, a.RetrySeconds)
+		// A zero delay renews the lease and records a delivery checkpoint. A failed
+		// attempt waits at least 5s doubled per consecutive failure, up to 10
+		// minutes; progress or a scheduled follow-up ends the streak.
+		_, e := tx.Exec(ctx, `UPDATE channel_work SET state=$3,progress=greatest(progress,$4),message_id=$5,
+			lease_until=CASE WHEN $6>0 OR $7 THEN NULL ELSE now()+interval '90 seconds' END,
+			available_at=now()+CASE WHEN $7 THEN greatest($6,least(600,5*power(2,least(failures,10))::int)) ELSE $6 END*interval '1 second',
+			failures=CASE WHEN $7 THEN failures+1 WHEN $6>0 OR $4>progress THEN 0 ELSE failures END,
+			payload=CASE WHEN $3 IN ('done','failed') AND kind='event' THEN jsonb_build_object('sensitive',coalesce((payload->>'sensitive')::boolean,false),'actor',payload->'actor','chat',payload->'chat') ELSE payload END
+			WHERE id=$1 AND lease=$2`, id, a.Lease, next, a.Progress, a.MessageID, a.RetrySeconds, a.Failed)
 		if e != nil {
 			return e
 		}

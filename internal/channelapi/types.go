@@ -61,6 +61,9 @@ type Ack struct {
 	Done         bool   `json:"done"`
 	RetrySeconds int    `json:"retry_seconds,omitempty"`
 	Permanent    bool   `json:"permanent,omitempty"`
+	// Failed reports a failed attempt; core lengthens the retry delay with each
+	// consecutive one.
+	Failed bool `json:"failed,omitempty"`
 }
 type Account struct {
 	ID, Name, Username, AccountID, State, Adapter string

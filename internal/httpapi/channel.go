@@ -46,7 +46,7 @@ func ChannelHandler(s *app.Service) http.Handler {
 		deadline := time.NewTimer(20 * time.Second)
 		defer deadline.Stop()
 		for {
-			v, e := s.ClaimChannel(r.Context(), r.PathValue("channel"))
+			v, e := s.ClaimChannel(r.Context(), r.PathValue("channel"), r.URL.Query().Get("lane"))
 			if e != nil || v != nil {
 				respond(w, 200, v, e)
 				return

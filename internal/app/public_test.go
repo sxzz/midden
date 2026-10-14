@@ -131,7 +131,7 @@ func TestPublicSharing(t *testing.T) {
 		}
 	}
 	for {
-		w, err := s.ClaimChannel(ctx, channel)
+		w, err := s.ClaimChannel(ctx, channel, "")
 		must(t, err)
 		if w == nil {
 			break

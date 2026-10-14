@@ -108,7 +108,7 @@ func TestChannelHTTPIsolationAndLease(t *testing.T) {
 	if count != 1 {
 		t.Fatal("duplicate event", count)
 	}
-	w, e := client.Claim(ctx)
+	w, e := client.Claim(ctx, "event")
 	if e != nil || w == nil {
 		t.Fatal(w, e)
 	}
@@ -123,7 +123,7 @@ func TestChannelHTTPIsolationAndLease(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	next, e := client.Claim(ctx)
+	next, e := client.Claim(ctx, "event")
 	if e != nil || next == nil || next.Lease == w.Lease || next.Progress != 2 || next.MessageID != 55 {
 		t.Fatal(next, e)
 	}
@@ -401,6 +401,90 @@ func TestWebAccountLifecycle(t *testing.T) {
 	}
 }
 
+func TestChannelWorkLanesAndBackoff(t *testing.T) {
+	s, admin, channel := channelFixture(t)
+	ctx := context.Background()
+	server := httptest.NewServer(ChannelHandler(s))
+	defer server.Close()
+	client := &tgchannel.Client{Base: server.URL, Channel: channel}
+	if _, e := client.Event(ctx, channelapi.Event{UpdateID: 1, Actor: "101", Chat: "101", Private: true, MessageID: 1, Command: "usage"}); e != nil {
+		t.Fatal(e)
+	}
+	// The delivery is older, so a single queue would hand it out first.
+	var delivery string
+	e := admin.Pool.QueryRow(ctx, `INSERT INTO channel_work(tenant_id,channel_id,kind,resource,created_at) SELECT tenant_id,channel_id,'delivery',gen_random_uuid()::text,created_at-interval '1 minute' FROM channel_work WHERE channel_id=$1 RETURNING id`, channel).Scan(&delivery)
+	if e != nil {
+		t.Fatal(e)
+	}
+	d, e := client.Claim(ctx, "delivery")
+	if e != nil || d == nil || d.ID != delivery {
+		t.Fatal("delivery lane", d, e)
+	}
+	// A command is answered while the delivery is still running.
+	ev, e := client.Claim(ctx, "event")
+	if e != nil || ev == nil || ev.Kind != "event" {
+		t.Fatal("event lane", ev, e)
+	}
+	if _, e = client.Claim(ctx, "unknown"); e == nil {
+		t.Fatal("unknown lane accepted")
+	}
+	wait := func() (int, float64) {
+		t.Helper()
+		var failures int
+		var delay float64
+		if e := admin.Pool.QueryRow(ctx, `SELECT failures,extract(epoch FROM available_at-now()) FROM channel_work WHERE id=$1`, delivery).Scan(&failures, &delay); e != nil {
+			t.Fatal(e)
+		}
+		return failures, delay
+	}
+	reclaim := func() channelapi.Work {
+		t.Helper()
+		if _, e := admin.Pool.Exec(ctx, `UPDATE channel_work SET available_at=now() WHERE id=$1`, delivery); e != nil {
+			t.Fatal(e)
+		}
+		w, e := client.Claim(ctx, "delivery")
+		if e != nil || w == nil || w.ID != delivery {
+			t.Fatal("reclaim", w, e)
+		}
+		return *w
+	}
+	// Each consecutive failure doubles the wait.
+	for i, want := range []float64{5, 10, 20} {
+		if i > 0 {
+			d = new(channelapi.Work)
+			*d = reclaim()
+		}
+		if e = client.Ack(ctx, *d, channelapi.Ack{RetrySeconds: 5, Failed: true}); e != nil {
+			t.Fatal(e)
+		}
+		if failures, delay := wait(); failures != i+1 || delay < want-2 || delay > want {
+			t.Fatalf("failure %d: failures=%d delay=%.1f", i+1, failures, delay)
+		}
+	}
+	// A longer delay asked for by Telegram still wins.
+	w := reclaim()
+	if e = client.Ack(ctx, w, channelapi.Ack{RetrySeconds: 120, Failed: true}); e != nil {
+		t.Fatal(e)
+	}
+	if failures, delay := wait(); failures != 4 || delay < 118 || delay > 120 {
+		t.Fatalf("retry-after: failures=%d delay=%.1f", failures, delay)
+	}
+	// A heartbeat keeps the streak, progress ends it.
+	w = reclaim()
+	if e = client.Ack(ctx, w, channelapi.Ack{}); e != nil {
+		t.Fatal(e)
+	}
+	if failures, _ := wait(); failures != 4 {
+		t.Fatal("heartbeat reset failures", failures)
+	}
+	if e = client.Ack(ctx, w, channelapi.Ack{Progress: 1}); e != nil {
+		t.Fatal(e)
+	}
+	if failures, _ := wait(); failures != 0 {
+		t.Fatal("progress kept failures", failures)
+	}
+}
+
 func TestChannelAccountDelete(t *testing.T) {
 	s, _, channel := channelFixture(t)
 	d := &pb.DescribeResponse{AdapterId: "fixture", DisplayName: "Fixture", Providers: []*pb.Provider{{Id: "session", Authentication: "session", DefaultProvider: true, Capabilities: []*pb.Capability{{Name: "credential.prepare", Major: 1}, {Name: "connection.check", Major: 1}}}}}
@@ -424,7 +508,7 @@ func TestChannelAccountDelete(t *testing.T) {
 		if _, err := client.Event(ctx, channelapi.Event{UpdateID: update, Actor: "101", Chat: "101", Private: true, Command: command, Argument: argument}); err != nil {
 			t.Fatal(err)
 		}
-		work, err := client.Claim(ctx)
+		work, err := client.Claim(ctx, "")
 		if err != nil || work == nil {
 			t.Fatal(work, err)
 		}

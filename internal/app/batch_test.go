@@ -242,7 +242,7 @@ func TestRefreshBatchModes(t *testing.T) {
 	b, e = s.StartRefreshBatch(ctx, tenant, []string{kept}, "append", channel)
 	must(t, e)
 	must(t, s.refreshBatch(ctx, store.Task{Tenant: tenant, ID: b.ID, Type: "refresh_batch"}))
-	w, e := s.ClaimChannel(ctx, channel)
+	w, e := s.ClaimChannel(ctx, channel, "")
 	must(t, e)
 	if w == nil || w.Kind != "batch" || w.Resource != b.ID {
 		t.Fatalf("batch work %+v", w)

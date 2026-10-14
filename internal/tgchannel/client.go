@@ -82,9 +82,9 @@ func (c *Client) Event(ctx context.Context, v channelapi.Event) (bool, error) {
 	return result.Delete, e
 }
 
-func (c *Client) Claim(ctx context.Context) (*channelapi.Work, error) {
+func (c *Client) Claim(ctx context.Context, lane string) (*channelapi.Work, error) {
 	var v *channelapi.Work
-	e := c.call(ctx, "POST", "/work/claim", "", nil, &v)
+	e := c.call(ctx, "POST", "/work/claim?"+url.Values{"lane": {lane}}.Encode(), "", nil, &v)
 	return v, e
 }
 

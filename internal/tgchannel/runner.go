@@ -48,27 +48,35 @@ func (r *Runner) Run(ctx context.Context) error {
 	child, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var wg sync.WaitGroup
-	wg.Add(1)
+	wg.Add(2)
 	go func() { defer wg.Done(); r.poll(child, cfg.Offset) }()
+	// Commands get their own worker: a delivery can spend minutes uploading
+	// media, and the bot must keep answering meanwhile. Each lane stays serial
+	// so messages to a chat keep their order.
+	go func() { defer wg.Done(); r.work(child, "event") }()
 	defer wg.Wait()
-	for child.Err() == nil {
-		w, e := r.API.Claim(child)
+	r.work(child, "delivery")
+	return nil
+}
+
+func (r *Runner) work(ctx context.Context, lane string) {
+	for ctx.Err() == nil {
+		w, e := r.API.Claim(ctx, lane)
 		if e != nil {
-			if child.Err() != nil {
-				break
+			if ctx.Err() != nil {
+				return
 			}
-			slog.Warn("channel work unavailable")
-			if !pause(child, 2*time.Second) {
-				break
+			slog.Warn("channel work unavailable", "lane", lane, "error", e)
+			if !pause(ctx, 2*time.Second) {
+				return
 			}
 			continue
 		}
 		if w == nil {
 			continue
 		}
-		r.runWork(child, *w)
+		r.runWork(ctx, *w)
 	}
-	return nil
 }
 
 func pause(ctx context.Context, d time.Duration) bool {
@@ -162,6 +170,7 @@ func (r *Runner) runWork(ctx context.Context, w channelapi.Work) {
 		mu.Unlock()
 		a.Done = false
 		a.RetrySeconds = 5
+		a.Failed = true
 		var tg *telegram.APIError
 		var api *APIError
 		if errors.As(e, &tg) {
@@ -175,7 +184,7 @@ func (r *Runner) runWork(ctx context.Context, w channelapi.Work) {
 			return
 		}
 		_ = r.API.Ack(ctx, w, a)
-		slog.Warn("channel work postponed", "kind", w.Kind)
+		slog.Warn("channel work postponed", "kind", w.Kind, "work", w.ID, "progress", a.Progress, "permanent", a.Permanent, "error", e)
 	}
 }
 

@@ -83,6 +83,11 @@ func apiError(err error) error {
 	if errors.As(err, &e) {
 		return &APIError{Code: e.Code, RetryAfter: time.Duration(e.RetryAfter) * time.Second, InvalidFile: invalidFileReference(e.Message)}
 	}
+	// The transport error names the token-bearing URL, so only its kind is kept.
+	var timeout interface{ Timeout() bool }
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()) {
+		return fmt.Errorf("telegram transport timed out")
+	}
 	return fmt.Errorf("telegram transport failed")
 }
 

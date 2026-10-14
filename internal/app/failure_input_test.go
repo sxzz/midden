@@ -48,7 +48,7 @@ func TestFailureRetainsEachSubmissionInput(t *testing.T) {
 	must(t, s.fail(ctx, store.Task{Tenant: identities[0].TenantID, ID: jobs[0].ID, Type: "capture"}, "provider request failed"))
 	restarted := *s
 	for i := range identities {
-		w, err := restarted.ClaimChannel(ctx, channel)
+		w, err := restarted.ClaimChannel(ctx, channel, "")
 		must(t, err)
 		if w == nil {
 			t.Fatal("missing delivery")

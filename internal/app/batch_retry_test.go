@@ -140,7 +140,7 @@ func TestRefreshBatchRetry(t *testing.T) {
 	if p := progress(); !p.Done || p.Members.Complete != 1 || p.Members.Failed != 3 || p.Retryable != 2 {
 		t.Fatalf("failed batch progress %+v", p)
 	}
-	w, e := s.ClaimChannel(ctx, channel)
+	w, e := s.ClaimChannel(ctx, channel, "")
 	must(t, e)
 	if w == nil || w.Kind != "batch" || w.Resource != b.ID {
 		t.Fatalf("batch work %+v", w)
@@ -161,7 +161,7 @@ func TestRefreshBatchRetry(t *testing.T) {
 		t.Fatal("retry repeated while running", n, e)
 	}
 	// The message that reported the batch follows the retry.
-	again, e := s.ClaimChannel(ctx, channel)
+	again, e := s.ClaimChannel(ctx, channel, "")
 	must(t, e)
 	if again == nil || again.ID != w.ID || again.MessageID != 7 {
 		t.Fatalf("batch work not reopened %+v", again)
