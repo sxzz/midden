@@ -13,27 +13,23 @@ import {
   fetchPublicProfile,
   fetchPublicTimeline,
   fetchSessionTimeline,
+  decodePrefetch,
   normalizeProfile,
 } from "./profile.js";
 import type { SessionCredential } from "./credential.js";
 import {
   FetchResponse,
+  RelatedTarget,
   Visibility,
   type FetchRequest,
 } from "./generated/api/adapter/v1/adapter.js";
 
 const profileTTL = 60_000;
 const maxCachedProfiles = 1000;
-// A public timeline lists its posts in full. They are kept long enough for the
-// core to come back for each one, so a listed post costs no request of its own.
-const listedPostTTL = 30 * 60_000;
-const maxListedPosts = 2000;
+// A listed post stands in for the post's own response while it is this fresh.
+const prefetchTTL = 60 * 60_000;
 export class CaptureStrategy {
   private profiles = new Map<string, { at: number; value: FetchResponse }>();
-  private listed = new Map<
-    string,
-    { at: number; post: any; sourceUrl: string }
-  >();
   private pending = new Map<string, Promise<FetchResponse>>();
   constructor(
     private publicPost = fetchPublic,
@@ -98,35 +94,21 @@ export class CaptureStrategy {
     }
     return FetchResponse.fromPartial(await promise);
   }
-  private list(post: any, sourceUrl: string) {
-    // The listing carries only a stub of an article; the post's own response
-    // has its content.
+  // Only a capture its listing created settles for what the listing showed;
+  // an explicit one asks upstream.
+  private listedPost(req: FetchRequest): FetchResponse | undefined {
+    const listed = req.automatic ? decodePrefetch(req.prefetch) : undefined;
     if (
-      post?.type !== "status" ||
-      typeof post.id !== "string" ||
-      !/^\d+$/.test(post.id) ||
-      post.article
+      listed?.source !== "fxtwitter" ||
+      listed.post?.id !== req.externalId ||
+      !(this.now() - Date.parse(listed.observed_at) < prefetchTTL)
     )
       return;
-    this.listed.delete(post.id);
-    // A post's own response never says who reposted it into a timeline.
-    this.listed.set(post.id, {
-      at: this.now(),
-      post: { ...post, reposted_by: null },
-      sourceUrl,
-    });
-    while (this.listed.size > maxListedPosts)
-      this.listed.delete(this.listed.keys().next().value!);
-  }
-  // Only automatic captures settle for the listing; an explicit one asks upstream.
-  private listedPost(req: FetchRequest): FetchResponse | undefined {
-    const listed = req.automatic && this.listed.get(req.externalId);
-    if (!listed || this.now() - listed.at >= listedPostTTL) return;
     try {
       const result = publicPost(listed.post, req.externalId, {
         body: Buffer.from(JSON.stringify(listed.post)),
         contentType: "application/json",
-        sourceUrl: listed.sourceUrl,
+        sourceUrl: listed.source_url,
         visibility: Visibility.VISIBILITY_PUBLIC,
       });
       // The listing describes the author as the profile API does, except for
@@ -228,14 +210,7 @@ export class CaptureStrategy {
           }
         } else {
           // Fetch only the timeline here; reuse the profile response obtained above.
-          await this.timeline(
-            result,
-            signal,
-            undefined,
-            cursor,
-            req.pageSize,
-            (post, sourceUrl) => this.list(post, sourceUrl),
-          );
+          await this.timeline(result, signal, undefined, cursor, req.pageSize);
         }
       }
     } else if ((result = this.listedPost(req)!)) {
@@ -380,11 +355,13 @@ export class CaptureStrategy {
     const targets = new Map(
       result.relatedTargets.map((target) => [target.url, target]),
     );
-    targets.set(profile.canonicalTarget!.url, {
-      url: profile.canonicalTarget!.url,
-      refreshAfterSeconds: 60,
-      updatedAt: "",
-    });
+    targets.set(
+      profile.canonicalTarget!.url,
+      RelatedTarget.fromPartial({
+        url: profile.canonicalTarget!.url,
+        refreshAfterSeconds: 60,
+      }),
+    );
     result.relatedTargets = [...targets.values()];
   }
 }

@@ -36,6 +36,9 @@ func validateRelatedResult(policy *pb.Provider, r *pb.FetchResponse, platform, k
 		if t == nil || domain.ValidateURL(t.Url) != nil {
 			return &PermanentError{"invalid related target"}
 		}
+		if len(t.Prefetch) > 0 && (len(t.Prefetch) > 64<<10 || !adapter.Supports(policy, adapter.CapturePrefetch, 1, 0)) {
+			return &PermanentError{"undeclared or oversized related prefetch"}
+		}
 	}
 	return nil
 }
@@ -157,7 +160,7 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		if member {
 			members++
 		}
-		_, err = scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: target.Url, ProviderID: provider, ConnectionID: connection, Automatic: true, RefreshAfterSeconds: target.RefreshAfterSeconds, UpdatedAt: target.UpdatedAt, Key: fmt.Sprintf("related:%s:%d", task.ID, i)})
+		_, err = scoped.Submit(ctx, task.Tenant, domain.CaptureInput{ParentSubmission: task.ID, URL: target.Url, ProviderID: provider, ConnectionID: connection, Automatic: true, RefreshAfterSeconds: target.RefreshAfterSeconds, UpdatedAt: target.UpdatedAt, Prefetch: target.Prefetch, Key: fmt.Sprintf("related:%s:%d", task.ID, i)})
 		if errors.Is(err, errCollectionStopped) {
 			return nil
 		}
@@ -189,6 +192,10 @@ func (s *Service) related(ctx context.Context, task store.Task) error {
 		}
 	}
 	return s.DB.Tx(ctx, task.Tenant, func(tx pgx.Tx) error {
+		// Every member now holds its own prefetch; the parent need not keep them.
+		if _, err := tx.Exec(ctx, `UPDATE captures SET related_targets=(SELECT jsonb_agg(t-'prefetch') FROM jsonb_array_elements(related_targets) t) WHERE id=(SELECT capture_id FROM submissions WHERE id=$1) AND jsonb_typeof(related_targets)='array' AND jsonb_path_exists(related_targets,'$[*].prefetch')`, task.ID); err != nil {
+			return err
+		}
 		_, err := tx.Exec(ctx, `UPDATE submissions SET related_state='complete' WHERE id=$1 AND NOT collection_stopped`, task.ID)
 		return err
 	})

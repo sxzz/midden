@@ -368,6 +368,7 @@ type FetchRequest struct {
 	PageSize           uint32                 `protobuf:"varint,13,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`                               // Optional target size; adapter may exceed it to preserve whole upstream pages.
 	PageCursor         string                 `protobuf:"bytes,12,opt,name=page_cursor,json=pageCursor,proto3" json:"page_cursor,omitempty"`                          // Opaque capture.page/1 continuation, same provider and connection.
 	Automatic          bool                   `protobuf:"varint,11,opt,name=automatic,proto3" json:"automatic,omitempty"`                                             // Related captures must not recursively expand collections.
+	Prefetch           []byte                 `protobuf:"bytes,15,opt,name=prefetch,proto3" json:"prefetch,omitempty"`                                                // capture.prefetch/1: the prefetch of the related target that created this automatic capture.
 	CredentialDeferred bool                   `protobuf:"varint,14,opt,name=credential_deferred,json=credentialDeferred,proto3" json:"credential_deferred,omitempty"` // credential.deferred/1: credential withheld; fail with trailer credential-required to get it.
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
@@ -492,6 +493,13 @@ func (x *FetchRequest) GetAutomatic() bool {
 		return x.Automatic
 	}
 	return false
+}
+
+func (x *FetchRequest) GetPrefetch() []byte {
+	if x != nil {
+		return x.Prefetch
+	}
+	return nil
 }
 
 func (x *FetchRequest) GetCredentialDeferred() bool {
@@ -918,6 +926,7 @@ type RelatedTarget struct {
 	Url                 string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
 	RefreshAfterSeconds uint32                 `protobuf:"varint,2,opt,name=refresh_after_seconds,json=refreshAfterSeconds,proto3" json:"refresh_after_seconds,omitempty"` // Zero reuses any existing collection; positive refreshes stale data.
 	UpdatedAt           string                 `protobuf:"bytes,3,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`                                  // Latest known content change (publication or edit) in RFC 3339; empty when unknown.
+	Prefetch            []byte                 `protobuf:"bytes,4,opt,name=prefetch,proto3" json:"prefetch,omitempty"`                                                     // capture.prefetch/1: adapter-owned observation of the target, at most 64 KiB, handed back once in FetchRequest.prefetch.
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -971,6 +980,13 @@ func (x *RelatedTarget) GetUpdatedAt() string {
 		return x.UpdatedAt
 	}
 	return ""
+}
+
+func (x *RelatedTarget) GetPrefetch() []byte {
+	if x != nil {
+		return x.Prefetch
+	}
+	return nil
 }
 
 type FetchResponse struct {
@@ -1800,7 +1816,7 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\x05hosts\x18\x04 \x03(\tR\x05hosts\x122\n" +
 	"\tproviders\x18\x05 \x03(\v2\x14.adapter.v1.ProviderR\tproviders\x129\n" +
 	"\fentity_types\x18\x06 \x03(\v2\x16.adapter.v1.EntityTypeR\ventityTypes\x12!\n" +
-	"\fdisplay_name\x18\a \x01(\tR\vdisplayName\"\xe1\x03\n" +
+	"\fdisplay_name\x18\a \x01(\tR\vdisplayName\"\xfd\x03\n" +
 	"\fFetchRequest\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x1f\n" +
 	"\vexternal_id\x18\x02 \x01(\tR\n" +
@@ -1821,7 +1837,8 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"\tpage_size\x18\r \x01(\rR\bpageSize\x12\x1f\n" +
 	"\vpage_cursor\x18\f \x01(\tR\n" +
 	"pageCursor\x12\x1c\n" +
-	"\tautomatic\x18\v \x01(\bR\tautomatic\x12/\n" +
+	"\tautomatic\x18\v \x01(\bR\tautomatic\x12\x1a\n" +
+	"\bprefetch\x18\x0f \x01(\fR\bprefetch\x12/\n" +
 	"\x13credential_deferred\x18\x0e \x01(\bR\x12credentialDeferred\"\xa8\x01\n" +
 	"\bResource\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x12\x12\n" +
@@ -1858,12 +1875,13 @@ const file_api_adapter_v1_adapter_proto_rawDesc = "" +
 	"source_url\x18\x03 \x01(\tR\tsourceUrl\x126\n" +
 	"\n" +
 	"visibility\x18\x04 \x01(\x0e2\x16.adapter.v1.VisibilityR\n" +
-	"visibility\"t\n" +
+	"visibility\"\x90\x01\n" +
 	"\rRelatedTarget\x12\x10\n" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x122\n" +
 	"\x15refresh_after_seconds\x18\x02 \x01(\rR\x13refreshAfterSeconds\x12\x1d\n" +
 	"\n" +
-	"updated_at\x18\x03 \x01(\tR\tupdatedAt\"\xea\x06\n" +
+	"updated_at\x18\x03 \x01(\tR\tupdatedAt\x12\x1a\n" +
+	"\bprefetch\x18\x04 \x01(\fR\bprefetch\"\xea\x06\n" +
 	"\rFetchResponse\x12\x1f\n" +
 	"\vexternal_id\x18\x01 \x01(\tR\n" +
 	"externalId\x12\x12\n" +

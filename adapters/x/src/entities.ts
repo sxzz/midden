@@ -1,6 +1,7 @@
 import {
   FetchResponse,
   EntityGraph,
+  RelatedTarget,
   Resource,
 } from "./generated/api/adapter/v1/adapter.js";
 
@@ -150,11 +151,10 @@ export function attachEntities(
       );
     }
     result.relatedTargets = [
-      {
+      RelatedTarget.fromPartial({
         url: `https://x.com/i/user/${author.id}`,
         refreshAfterSeconds: 60,
-        updatedAt: "",
-      },
+      }),
     ];
     graph.entities.push({
       key: "author",
@@ -233,11 +233,9 @@ function attachPostReferences(
     addRelation(result, source, entity.key, relation);
     const url = `https://x.com/i/web/status/${id}`;
     if (!result.relatedTargets.some((target) => target.url === url))
-      result.relatedTargets.push({
-        url,
-        refreshAfterSeconds: 60,
-        updatedAt: "",
-      });
+      result.relatedTargets.push(
+        RelatedTarget.fromPartial({ url, refreshAfterSeconds: 60 }),
+      );
     const author = attachProfileReference(result, referenced.author);
     if (author) addRelation(result, entity.key, author, "authored_by");
     attachMentions(
@@ -300,11 +298,9 @@ export function attachProfileReference(
     ? `https://x.com/i/user/${entity.externalId}`
     : `https://x.com/${username.toLowerCase()}`;
   if (!result.relatedTargets.some((target) => target.url === url))
-    result.relatedTargets.push({
-      url,
-      refreshAfterSeconds: 3600,
-      updatedAt: "",
-    });
+    result.relatedTargets.push(
+      RelatedTarget.fromPartial({ url, refreshAfterSeconds: 3600 }),
+    );
   return entity.key;
 }
 

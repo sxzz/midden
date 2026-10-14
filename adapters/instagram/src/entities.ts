@@ -6,6 +6,7 @@ import {
 import {
   Entity,
   FetchResponse,
+  RelatedTarget,
   Resource,
   ResolveResponse,
   Visibility,
@@ -300,11 +301,12 @@ export function postResult(
       target: author.key,
       type: "authored_by",
     });
-    result.relatedTargets.push({
-      url: `https://www.instagram.com/${user.username}/`,
-      refreshAfterSeconds: 60,
-      updatedAt: "",
-    });
+    result.relatedTargets.push(
+      RelatedTarget.fromPartial({
+        url: `https://www.instagram.com/${user.username}/`,
+        refreshAfterSeconds: 60,
+      }),
+    );
   }
   result.summary = `${result.authorName || "Instagram"}：${text || "图片或视频"}`;
   return result;
@@ -336,7 +338,9 @@ export function attachMentions(result: FetchResponse, text: string): void {
       target: key,
       type: "mentions",
     });
-    result.relatedTargets.push({ url, refreshAfterSeconds: 60, updatedAt: "" });
+    result.relatedTargets.push(
+      RelatedTarget.fromPartial({ url, refreshAfterSeconds: 60 }),
+    );
     targets.add(url);
   }
 }

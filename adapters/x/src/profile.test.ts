@@ -180,12 +180,14 @@ test("timeline collection keeps whole pages, deduplicates and resumes after the 
     cursors.push(cursor);
     const page = cursors.length;
     return {
-      code: 200,
-      results: Array.from({ length: 18 }, (_, i) => ({
-        type: "status",
-        id: i === 0 ? "1" : String(page * 100 + i),
-      })),
-      cursor: { bottom: `page-${page + 1}` },
+      timeline: {
+        code: 200,
+        results: Array.from({ length: 18 }, (_, i) => ({
+          type: "status",
+          id: i === 0 ? "1" : String(page * 100 + i),
+        })),
+        cursor: { bottom: `page-${page + 1}` },
+      },
     };
   });
   assert.equal(cursors.length, 6);
@@ -200,9 +202,11 @@ test("timeline collection preserves progress when a later request fails", async 
     collectTimeline(result, async (cursor) => {
       if (cursor) throw new Error("upstream unavailable");
       return {
-        code: 200,
-        results: [{ type: "status", id: "1" }],
-        cursor: { bottom: "retry-here" },
+        timeline: {
+          code: 200,
+          results: [{ type: "status", id: "1" }],
+          cursor: { bottom: "retry-here" },
+        },
       };
     }),
   );
@@ -220,9 +224,11 @@ test("timeline collection stops at end or a cursor cycle without dropping posts"
       async () => {
         calls++;
         return {
-          code: 200,
-          results: [{ type: "status", id: "1" }],
-          cursor: { bottom },
+          timeline: {
+            code: 200,
+            results: [{ type: "status", id: "1" }],
+            cursor: { bottom },
+          },
         };
       },
       "start",
@@ -260,16 +266,18 @@ test("timeline retains repost relations across pages and still collects original
   await collectTimeline(profile, async () => {
     calls++;
     return {
-      code: 200,
-      results: [
-        {
-          type: "status",
-          id: String(calls),
-          text: "original",
-          reposted_by: user,
-        },
-      ],
-      cursor: { bottom: calls === 1 ? "next" : "" },
+      timeline: {
+        code: 200,
+        results: [
+          {
+            type: "status",
+            id: String(calls),
+            text: "original",
+            reposted_by: user,
+          },
+        ],
+        cursor: { bottom: calls === 1 ? "next" : "" },
+      },
     };
   });
   assert.equal(calls, 2);

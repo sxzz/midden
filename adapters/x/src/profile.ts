@@ -18,9 +18,45 @@ import {
 } from "./provider.js";
 import {
   FetchResponse,
+  RelatedTarget,
   SourceResponse,
   Visibility,
 } from "./generated/api/adapter/v1/adapter.js";
+
+/**
+ * What a timeline showed of one listed post. The core hands it back to the
+ * capture of that post, which then needs no request of its own.
+ */
+export interface Prefetch {
+  source: "fxtwitter";
+  observed_at: string;
+  source_url: string;
+  post: any;
+}
+export function encodePrefetch(value: Prefetch): Buffer | undefined {
+  const body = Buffer.from(JSON.stringify(value));
+  return body.length <= 64 << 10 ? body : undefined;
+}
+export function decodePrefetch(body: Uint8Array): Prefetch | undefined {
+  if (!body.length) return;
+  try {
+    const value = JSON.parse(Buffer.from(body).toString());
+    return value && typeof value === "object" ? value : undefined;
+  } catch {
+    return;
+  }
+}
+// The listing carries only a stub of an article and says who reposted a post
+// into the timeline, which the post's own response never does.
+function publicPrefetch(post: any, sourceUrl: string): Buffer | undefined {
+  if (post.article) return;
+  return encodePrefetch({
+    source: "fxtwitter",
+    observed_at: new Date().toISOString(),
+    source_url: sourceUrl,
+    post: { ...post, reposted_by: null },
+  });
+}
 
 export function normalizeProfile(
   user: any,
@@ -97,20 +133,31 @@ export function normalizeProfile(
   return result;
 }
 
-export function attachTimeline(result: FetchResponse, timeline: any): void {
+export function attachTimeline(
+  result: FetchResponse,
+  timeline: any,
+  prefetch?: (post: any) => Buffer | undefined,
+): void {
   if (timeline?.code !== 200 || !Array.isArray(timeline.results))
     throw new ProviderError(
       status.UNAVAILABLE,
       "invalid profile timeline response",
     );
-  const ids = new Map<string, string>();
+  const ids = new Map<string, RelatedTarget>();
   for (const post of timeline.results) {
     if (
       post?.type === "status" &&
       typeof post.id === "string" &&
       /^\d+$/.test(post.id)
     ) {
-      ids.set(post.id, postUpdatedAt(post));
+      ids.set(
+        post.id,
+        RelatedTarget.fromPartial({
+          url: `https://x.com/i/web/status/${post.id}`,
+          updatedAt: postUpdatedAt(post),
+          prefetch: prefetch?.(post),
+        }),
+      );
       if (result.graph && post.reposted_by?.id) {
         const profile = attachProfileReference(result, post.reposted_by);
         let entity = result.graph.entities.find(
@@ -147,10 +194,7 @@ export function attachTimeline(result: FetchResponse, timeline: any): void {
   const targets = new Map(
     result.relatedTargets.map((target) => [target.url, target]),
   );
-  for (const [id, updatedAt] of ids) {
-    const url = `https://x.com/i/web/status/${id}`;
-    targets.set(url, { url, refreshAfterSeconds: 0, updatedAt });
-  }
+  for (const target of ids.values()) targets.set(target.url, target);
   result.relatedTargets = [...targets.values()];
 }
 
@@ -185,7 +229,10 @@ async function publicJSON(
 // Keep whole upstream pages: the requested size is a target, never a truncation boundary.
 export async function collectTimeline(
   result: FetchResponse,
-  fetchPage: (cursor: string) => Promise<any>,
+  fetchPage: (cursor: string) => Promise<{
+    timeline: any;
+    prefetch?: (post: any) => Buffer | undefined;
+  }>,
   cursor = "",
   pageSize = 0,
 ): Promise<void> {
@@ -207,7 +254,8 @@ export async function collectTimeline(
     visited.add(cursor);
     const page = FetchResponse.fromPartial({ graph: result.graph });
     // Advance the checkpoint only after successfully parsing the entire page.
-    attachTimeline(page, await fetchPage(cursor));
+    const { timeline, prefetch } = await fetchPage(cursor);
+    attachTimeline(page, timeline, prefetch);
     for (const item of page.relatedTargets) targets.set(item.url, item);
     result.graph = page.graph;
     result.relatedTargets = [...targets.values()];
@@ -227,8 +275,6 @@ export async function fetchPublicTimeline(
   fetcher: typeof fetch = fetch,
   cursor = "",
   pageSize = 0,
-  // Receives every listed post with the page URL it came from.
-  onPost?: (post: any, sourceUrl: string) => void,
 ): Promise<void> {
   signal = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
   try {
@@ -236,15 +282,16 @@ export async function fetchPublicTimeline(
       result,
       async (next) => {
         const url = `https://api.fxtwitter.com/2/profile/id:${result.canonicalTarget!.externalId}/statuses?count=${Math.min(pageSize || 100, 100)}${next ? `&cursor=${encodeURIComponent(next)}` : ""}`;
-        const page = await publicJSON(
+        const timeline = await publicJSON(
           url,
           signal,
           result.sourceResponses,
           fetcher,
         );
-        if (onPost && Array.isArray(page.results))
-          for (const post of page.results) onPost(post, url);
-        return page;
+        return {
+          timeline,
+          prefetch: (post: any) => publicPrefetch(post, url),
+        };
       },
       cursor,
       pageSize,
@@ -302,13 +349,14 @@ export async function fetchSessionTimeline(
   try {
     await collectTimeline(
       result,
-      (next) =>
-        profileStatusesAPI(
+      async (next) => ({
+        timeline: await profileStatusesAPI(
           { type: "userId", value: result.canonicalTarget!.externalId },
           Math.min(pageSize || 100, 100),
           next || null,
           host,
         ),
+      }),
       cursor,
       pageSize,
     );

@@ -110,6 +110,8 @@ export interface FetchRequest {
   pageCursor: string;
   /** Related captures must not recursively expand collections. */
   automatic: boolean;
+  /** capture.prefetch/1: the prefetch of the related target that created this automatic capture. */
+  prefetch: Buffer;
   /** credential.deferred/1: credential withheld; fail with trailer credential-required to get it. */
   credentialDeferred: boolean;
 }
@@ -174,6 +176,8 @@ export interface RelatedTarget {
   refreshAfterSeconds: number;
   /** Latest known content change (publication or edit) in RFC 3339; empty when unknown. */
   updatedAt: string;
+  /** capture.prefetch/1: adapter-owned observation of the target, at most 64 KiB, handed back once in FetchRequest.prefetch. */
+  prefetch: Buffer;
 }
 
 export interface FetchResponse {
@@ -811,6 +815,7 @@ function createBaseFetchRequest(): FetchRequest {
     pageSize: 0,
     pageCursor: "",
     automatic: false,
+    prefetch: Buffer.alloc(0),
     credentialDeferred: false,
   };
 }
@@ -858,6 +863,9 @@ export const FetchRequest: MessageFns<FetchRequest> = {
     }
     if (message.automatic !== false) {
       writer.uint32(88).bool(message.automatic);
+    }
+    if (message.prefetch.length !== 0) {
+      writer.uint32(122).bytes(message.prefetch);
     }
     if (message.credentialDeferred !== false) {
       writer.uint32(112).bool(message.credentialDeferred);
@@ -977,6 +985,14 @@ export const FetchRequest: MessageFns<FetchRequest> = {
           message.automatic = reader.bool();
           continue;
         }
+        case 15: {
+          if (tag !== 122) {
+            break;
+          }
+
+          message.prefetch = Buffer.from(reader.bytes());
+          continue;
+        }
         case 14: {
           if (tag !== 112) {
             break;
@@ -1029,6 +1045,9 @@ export const FetchRequest: MessageFns<FetchRequest> = {
       automatic: isSet(object.automatic)
         ? globalThis.Boolean(object.automatic)
         : false,
+      prefetch: isSet(object.prefetch)
+        ? Buffer.from(bytesFromBase64(object.prefetch))
+        : Buffer.alloc(0),
       credentialDeferred: isSet(object.credentialDeferred)
         ? globalThis.Boolean(object.credentialDeferred)
         : false,
@@ -1076,6 +1095,9 @@ export const FetchRequest: MessageFns<FetchRequest> = {
     if (message.automatic !== false) {
       obj.automatic = message.automatic;
     }
+    if (message.prefetch.length !== 0) {
+      obj.prefetch = base64FromBytes(message.prefetch);
+    }
     if (message.credentialDeferred !== false) {
       obj.credentialDeferred = message.credentialDeferred;
     }
@@ -1103,6 +1125,7 @@ export const FetchRequest: MessageFns<FetchRequest> = {
     message.pageSize = object.pageSize ?? 0;
     message.pageCursor = object.pageCursor ?? "";
     message.automatic = object.automatic ?? false;
+    message.prefetch = object.prefetch ?? Buffer.alloc(0);
     message.credentialDeferred = object.credentialDeferred ?? false;
     return message;
   },
@@ -1841,7 +1864,12 @@ export const SourceResponse: MessageFns<SourceResponse> = {
 };
 
 function createBaseRelatedTarget(): RelatedTarget {
-  return { url: "", refreshAfterSeconds: 0, updatedAt: "" };
+  return {
+    url: "",
+    refreshAfterSeconds: 0,
+    updatedAt: "",
+    prefetch: Buffer.alloc(0),
+  };
 }
 
 export const RelatedTarget: MessageFns<RelatedTarget> = {
@@ -1857,6 +1885,9 @@ export const RelatedTarget: MessageFns<RelatedTarget> = {
     }
     if (message.updatedAt !== "") {
       writer.uint32(26).string(message.updatedAt);
+    }
+    if (message.prefetch.length !== 0) {
+      writer.uint32(34).bytes(message.prefetch);
     }
     return writer;
   },
@@ -1893,6 +1924,14 @@ export const RelatedTarget: MessageFns<RelatedTarget> = {
           message.updatedAt = reader.string();
           continue;
         }
+        case 4: {
+          if (tag !== 34) {
+            break;
+          }
+
+          message.prefetch = Buffer.from(reader.bytes());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1911,6 +1950,9 @@ export const RelatedTarget: MessageFns<RelatedTarget> = {
       updatedAt: isSet(object.updatedAt)
         ? globalThis.String(object.updatedAt)
         : "",
+      prefetch: isSet(object.prefetch)
+        ? Buffer.from(bytesFromBase64(object.prefetch))
+        : Buffer.alloc(0),
     };
   },
 
@@ -1925,6 +1967,9 @@ export const RelatedTarget: MessageFns<RelatedTarget> = {
     if (message.updatedAt !== "") {
       obj.updatedAt = message.updatedAt;
     }
+    if (message.prefetch.length !== 0) {
+      obj.prefetch = base64FromBytes(message.prefetch);
+    }
     return obj;
   },
 
@@ -1936,6 +1981,7 @@ export const RelatedTarget: MessageFns<RelatedTarget> = {
     message.url = object.url ?? "";
     message.refreshAfterSeconds = object.refreshAfterSeconds ?? 0;
     message.updatedAt = object.updatedAt ?? "";
+    message.prefetch = object.prefetch ?? Buffer.alloc(0);
     return message;
   },
 };

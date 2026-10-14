@@ -269,9 +269,10 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	defer release(c, t.Tenant, slot)
 	var automatic bool
 	var pageSize uint32
+	var prefetch []byte
 	var url, id, provider, connection, scope, state, visibility, platform, kind, objectScope, pageCursor, mode, collectionID string
 	e = s.DB.Tx(ctx, t.Tenant, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT a.url,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),c.scope,c.state,c.visibility,a.platform,a.kind,a.object_scope,c.automatic,c.page_cursor,c.page_size,c.mode,a.id FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.id=$1`, t.ID).Scan(&url, &id, &provider, &connection, &scope, &state, &visibility, &platform, &kind, &objectScope, &automatic, &pageCursor, &pageSize, &mode, &collectionID)
+		return tx.QueryRow(ctx, `SELECT a.url,a.external_id,c.provider_id,coalesce(c.connection_id::text,''),c.scope,c.state,c.visibility,a.platform,a.kind,a.object_scope,c.automatic,c.page_cursor,c.page_size,c.mode,a.id,c.prefetch FROM captures c JOIN collections a ON a.id=c.collection_id WHERE c.id=$1`, t.ID).Scan(&url, &id, &provider, &connection, &scope, &state, &visibility, &platform, &kind, &objectScope, &automatic, &pageCursor, &pageSize, &mode, &collectionID, &prefetch)
 	})
 	if e != nil {
 		return e
@@ -321,7 +322,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	fetch := func(credential *pb.Credential) (*pb.FetchResponse, error) {
 		trailer = nil
 		fetchStart := time.Now()
-		r, e := s.Adapter.Fetch(callCtx, &pb.FetchRequest{PageCursor: pageCursor, PageSize: pageSize, Automatic: automatic, Platform: platform, Kind: kind, ObjectScope: objectScope, Url: url, ExternalId: id, ProviderId: provider, ConnectionId: connection, AccessScope: scope, RequestId: t.ID, Credential: credential, CredentialDeferred: credential == nil && deferred}, grpc.Trailer(&trailer))
+		r, e := s.Adapter.Fetch(callCtx, &pb.FetchRequest{Prefetch: prefetch, PageCursor: pageCursor, PageSize: pageSize, Automatic: automatic, Platform: platform, Kind: kind, ObjectScope: objectScope, Url: url, ExternalId: id, ProviderId: provider, ConnectionId: connection, AccessScope: scope, RequestId: t.ID, Credential: credential, CredentialDeferred: credential == nil && deferred}, grpc.Trailer(&trailer))
 		ProviderDuration.WithLabelValues(provider).Observe(time.Since(fetchStart).Seconds())
 		ProviderResults.WithLabelValues(provider, status.Code(e).String()).Inc()
 		return r, e
@@ -467,7 +468,7 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 		relatedJSON, _ := json.Marshal(r.RelatedTargets)
 		restricted := objectRefs(r.RestrictedTargets)
 		restrictedJSON, _ := json.Marshal(restricted)
-		if _, e := tx.Exec(ctx, `UPDATE captures SET credential_revision=$2,related_targets=$3,next_page_cursor=$4,max_batch_size=$5,visibility=$6,restricted_targets=$7 WHERE id=$1`, t.ID, revision, relatedJSON, r.NextPageCursor, r.MaxBatchSize, visibility, restrictedJSON); e != nil {
+		if _, e := tx.Exec(ctx, `UPDATE captures SET prefetch=NULL,credential_revision=$2,related_targets=$3,next_page_cursor=$4,max_batch_size=$5,visibility=$6,restricted_targets=$7 WHERE id=$1`, t.ID, revision, relatedJSON, r.NextPageCursor, r.MaxBatchSize, visibility, restrictedJSON); e != nil {
 			return e
 		}
 		// Whatever an account fetched, its tenant has proven it can see.
@@ -762,7 +763,7 @@ func (s *Service) failCaptureTx(ctx context.Context, tx pgx.Tx, t, id, msg strin
 	if _, e := tx.Exec(ctx, `DELETE FROM source_responses WHERE capture_id=$1`, id); e != nil {
 		return e
 	}
-	if _, e := tx.Exec(ctx, `UPDATE captures SET state='failed',error=$2,content_reserved=0,payload=NULL,finished_at=now() WHERE id=$1`, id, msg); e != nil {
+	if _, e := tx.Exec(ctx, `UPDATE captures SET prefetch=NULL,state='failed',error=$2,content_reserved=0,payload=NULL,finished_at=now() WHERE id=$1`, id, msg); e != nil {
 		return e
 	}
 	return s.deliveries(ctx, tx, t, id)

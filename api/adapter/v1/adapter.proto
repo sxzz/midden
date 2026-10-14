@@ -66,6 +66,7 @@ message FetchRequest {
   uint32 page_size = 13; // Optional target size; adapter may exceed it to preserve whole upstream pages.
   string page_cursor = 12; // Opaque capture.page/1 continuation, same provider and connection.
   bool automatic = 11; // Related captures must not recursively expand collections.
+  bytes prefetch = 15; // capture.prefetch/1: the prefetch of the related target that created this automatic capture.
   bool credential_deferred = 14; // credential.deferred/1: credential withheld; fail with trailer credential-required to get it.
 }
 
@@ -114,6 +115,7 @@ message RelatedTarget {
   string url = 1;
   uint32 refresh_after_seconds = 2; // Zero reuses any existing collection; positive refreshes stale data.
   string updated_at = 3; // Latest known content change (publication or edit) in RFC 3339; empty when unknown.
+  bytes prefetch = 4; // capture.prefetch/1: adapter-owned observation of the target, at most 64 KiB, handed back once in FetchRequest.prefetch.
 }
 
 message FetchResponse {

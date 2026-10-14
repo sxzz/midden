@@ -553,8 +553,7 @@ test("posts listed by a public timeline are captured without a request of their 
   const listedPost = JSON.parse(
     readFileSync(new URL("./testdata/post.json", import.meta.url), "utf8"),
   ).status;
-  const page = "https://api.fxtwitter.com/2/profile/id:123/statuses?count=100";
-  let now = 0;
+  let now = Date.now();
   const posts: string[] = [];
   let profiles = 0;
   const strategy = new CaptureStrategy(
@@ -573,28 +572,46 @@ test("posts listed by a public timeline are captured without a request of their 
     undefined,
     () => now,
   );
-  strategy.timeline = async (
-    _result,
-    _signal,
-    _fetcher,
-    _cursor,
-    _size,
-    onPost,
-  ) => {
-    onPost!(
-      { ...listedPost, reposted_by: { id: "123", screen_name: "fixture" } },
-      page,
+  let page = "";
+  strategy.timeline = (result, signal, _fetcher, cursor, size) =>
+    fetchPublicTimeline(
+      result,
+      signal,
+      async (input) => {
+        page = String(input);
+        return Response.json({
+          code: 200,
+          results: [
+            {
+              ...listedPost,
+              reposted_by: { id: "123", screen_name: "fixture" },
+            },
+            { ...listedPost, id: "43", article: {} },
+          ],
+          cursor: {},
+        });
+      },
+      cursor,
+      size,
     );
-    onPost!({ ...listedPost, id: "43", article: {} }, page);
-  };
-  await strategy.fetch(request("profile"), AbortSignal.timeout(1000));
-  const member = {
+  const profile = await strategy.fetch(
+    request("profile"),
+    AbortSignal.timeout(1000),
+  );
+  // The core hands each target's prefetch to the capture it creates.
+  const member = (id: string) => ({
     ...request("post", "fxtwitter"),
-    url: `https://x.com/i/web/status/${listedPost.id}`,
-    externalId: listedPost.id,
+    url: `https://x.com/i/web/status/${id}`,
+    externalId: id,
     automatic: true,
-  };
-  const listed = await strategy.fetch(member, AbortSignal.timeout(1000));
+    prefetch: profile.relatedTargets.find((t) => t.url.endsWith(`/${id}`))!
+      .prefetch,
+  });
+  assert.equal(member("43").prefetch.length, 0);
+  const listed = await strategy.fetch(
+    member(listedPost.id),
+    AbortSignal.timeout(1000),
+  );
   assert.deepEqual(posts, []);
   // The listing also describes the author: only the timeline's profile was asked for.
   assert.equal(profiles, 1);
@@ -614,17 +631,14 @@ test("posts listed by a public timeline are captured without a request of their 
     listed.graph!.relations.some((r) => r.type === "reposted"),
     false,
   );
-  // Explicit captures, articles and expired listings ask upstream.
+  // Explicit captures, articles and stale listings ask upstream.
   await strategy.fetch(
-    { ...member, automatic: false },
+    { ...member(listedPost.id), automatic: false },
     AbortSignal.timeout(1000),
   );
-  await strategy.fetch(
-    { ...member, url: "https://x.com/i/web/status/43", externalId: "43" },
-    AbortSignal.timeout(1000),
-  );
-  now = 30 * 60_000;
-  await strategy.fetch(member, AbortSignal.timeout(1000));
+  await strategy.fetch(member("43"), AbortSignal.timeout(1000));
+  now += 60 * 60_000;
+  await strategy.fetch(member(listedPost.id), AbortSignal.timeout(1000));
   assert.deepEqual(posts, [listedPost.id, "43", listedPost.id]);
 });
 test("a deferred account is asked for only when the fetch needs it", async () => {

@@ -63,7 +63,10 @@ type CaptureInput struct {
 	Automatic           bool   `json:"-"`
 	RefreshAfterSeconds uint32 `json:"-"`
 	// UpdatedAt is the adapter's latest known change time of a related target (RFC 3339).
-	UpdatedAt    string `json:"-"`
+	UpdatedAt string `json:"-"`
+	// Prefetch is what the adapter already observed of a related target; the
+	// capture it creates gets it back instead of asking upstream again.
+	Prefetch     []byte `json:"-"`
 	Input        string `json:"-"`
 	URL          string `json:"url"`
 	ProviderID   string `json:"provider_id,omitempty"`

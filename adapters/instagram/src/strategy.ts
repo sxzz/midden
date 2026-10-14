@@ -12,6 +12,7 @@ import { credentialRequired, ProviderError } from "./errors.js";
 import { shortcodeFromPk } from "./resolve.js";
 import {
   FetchResponse,
+  RelatedTarget,
   SourceResponse,
   type FetchRequest,
   type CheckAccessRequest,
@@ -251,13 +252,14 @@ export class CaptureStrategy {
             );
           const url = `https://www.instagram.com/p/${shortcodeFromPk(postId)}/`;
           if (!result.relatedTargets.some((target) => target.url === url))
-            result.relatedTargets.push({
-              url,
-              refreshAfterSeconds: 0,
-              updatedAt:
-                timestamp(item.caption?.edited_at ?? item.edited_at) ||
-                timestamp(item.taken_at ?? item.taken_at_timestamp),
-            });
+            result.relatedTargets.push(
+              RelatedTarget.fromPartial({
+                url,
+                updatedAt:
+                  timestamp(item.caption?.edited_at ?? item.edited_at) ||
+                  timestamp(item.taken_at ?? item.taken_at_timestamp),
+              }),
+            );
         }
         next = page.next;
         if (!next || members.size >= target) break;

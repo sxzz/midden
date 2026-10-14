@@ -16,6 +16,7 @@ const (
 	CapturePage        = "capture.page"
 	CaptureCanonical   = "capture.canonical"
 	CaptureAccess      = "capture.access"
+	CapturePrefetch    = "capture.prefetch"
 	ConnectionCheck    = "connection.check"
 	CredentialPrepare  = "credential.prepare"
 	CredentialDeferred = "credential.deferred"

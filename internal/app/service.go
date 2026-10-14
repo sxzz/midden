@@ -360,8 +360,13 @@ func (s *Service) Submit(ctx context.Context, tenant string, in domain.CaptureIn
 			if _, e = tx.Exec(ctx, `UPDATE tenants SET rate_count=$2,rate_start=$3 WHERE id=$1`, tenant, count+1, start); e != nil {
 				return e
 			}
+			// Only a capture its listing created may skip asking upstream.
+			var prefetch []byte
+			if in.Automatic && len(in.Prefetch) > 0 {
+				prefetch = in.Prefetch
+			}
 			// Account captures start private until the adapter classifies the result.
-			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,collection_id,provider_id,scope,visibility,connection_id,refresh_from,adapter_id,automatic,page_cursor,is_collection,page_size,mode) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid,$8,$9,$10,$11,$12,$13) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility, in.ConnectionID, in.RefreshID, desc.AdapterId, in.Automatic, in.PageCursor, target.Collection && !in.Automatic, in.PageSize, mode).Scan(&cid)
+			e = tx.QueryRow(ctx, `INSERT INTO captures(tenant_id,collection_id,provider_id,scope,visibility,connection_id,refresh_from,adapter_id,automatic,page_cursor,is_collection,page_size,mode,prefetch) VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,nullif($7,'')::uuid,$8,$9,$10,$11,$12,$13,$14) RETURNING id`, tenant, aid, in.ProviderID, scope, visibility, in.ConnectionID, in.RefreshID, desc.AdapterId, in.Automatic, in.PageCursor, target.Collection && !in.Automatic, in.PageSize, mode, prefetch).Scan(&cid)
 			if e != nil {
 				return e
 			}
