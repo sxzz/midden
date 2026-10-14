@@ -4,11 +4,13 @@ import {
   api,
   errorText,
   type Account,
+  type AccountPlatform,
   type Accounts,
   type LibrarySize,
 } from '../api'
 import { toast } from '../composables/useToast'
 import { host } from '../host'
+import AddAccountSheet from './AddAccountSheet.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
@@ -16,16 +18,9 @@ const data = shallowRef<Accounts>()
 const loading = shallowRef(true)
 const error = shallowRef('')
 const busy = shallowRef(false)
-interface Draft {
-  credential: string
-  name: string
-}
-const drafts = shallowRef<Record<string, Draft>>({})
-const notice = shallowRef<{
-  platform: string
-  text: string
-  failed?: boolean
-}>()
+/** The platform whose add-account sheet is open. */
+const adding = shallowRef<AccountPlatform>()
+const addError = shallowRef('')
 const removing = shallowRef<Account>()
 const emit = defineEmits<{
   /** Everything saved was deleted; lists must not show it any more. */
@@ -112,51 +107,40 @@ function label(a: Account) {
 function accountsOf(platform: string) {
   return data.value?.accounts.filter((a) => a.platform === platform) || []
 }
-function draft(platform: string): Draft {
-  return drafts.value[platform] || { credential: '', name: '' }
-}
-function edit(platform: string, key: keyof Draft, event: Event) {
-  const value = (event.target as HTMLInputElement | HTMLTextAreaElement).value
-  drafts.value = {
-    ...drafts.value,
-    [platform]: { ...draft(platform), [key]: value },
-  }
+function openAdd(platform: AccountPlatform) {
+  addError.value = ''
+  adding.value = platform
 }
 
 async function select(platform: string, account = '') {
   if (busy.value) return
   busy.value = true
-  notice.value = undefined
   try {
     data.value = await api<Accounts>('/accounts/selection', {
       method: 'PUT',
       body: JSON.stringify({ platform, account_id: account }),
     })
   } catch (e) {
-    notice.value = { platform, text: errorText(e), failed: true }
+    toast(errorText(e))
   } finally {
     busy.value = false
   }
 }
-async function add(platform: string) {
-  const value = draft(platform).credential.trim()
-  if (!value || busy.value) return
+async function add(credential: string, name: string) {
+  const platform = adding.value?.id
+  if (!platform || busy.value) return
   busy.value = true
-  notice.value = undefined
+  addError.value = ''
   try {
     const account = await api<Account>('/accounts', {
       method: 'POST',
-      body: JSON.stringify({
-        platform,
-        credential: value,
-        name: draft(platform).name.trim(),
-      }),
+      body: JSON.stringify({ platform, credential, name }),
     })
-    drafts.value = { ...drafts.value, [platform]: { credential: '', name: '' } }
-    notice.value = { platform, text: `已添加并选择 ${label(account)}。` }
+    adding.value = undefined
+    toast(`已添加并选择 ${label(account)}。`)
     await load()
   } catch (e) {
-    notice.value = { platform, text: errorText(e), failed: true }
+    addError.value = errorText(e)
   } finally {
     busy.value = false
   }
@@ -173,11 +157,7 @@ async function remove() {
     await load()
   } catch (e) {
     removing.value = undefined
-    notice.value = {
-      platform: account.platform,
-      text: errorText(e),
-      failed: true,
-    }
+    toast(errorText(e))
   } finally {
     busy.value = false
   }
@@ -195,7 +175,6 @@ async function remove() {
       <ListSection
         v-if="p.public || p.can_add || accountsOf(p.id).length"
         :title="`${p.name} 采集来源`"
-        footnote="只影响新保存的内容；重新抓取沿用原来的来源。"
       >
         <p v-if="!p.public && !p.selected_account_id" class="banner">
           {{ p.name }} 需要添加并选择自己的账号凭据后才能采集。
@@ -233,59 +212,13 @@ async function remove() {
             删除
           </button>
         </div>
+        <ListButton
+          v-if="p.can_add"
+          label="添加账号"
+          :disabled="busy"
+          @select="openAdd(p)"
+        />
       </ListSection>
-      <ListSection
-        v-if="p.can_add"
-        :title="`添加 ${p.name} 账号`"
-        :footnote="p.help"
-      >
-        <form class="form" @submit.prevent="add(p.id)">
-          <label class="field">
-            <span class="field-label">凭据</span>
-            <textarea
-              :value="draft(p.id).credential"
-              rows="3"
-              autocomplete="off"
-              autocapitalize="off"
-              spellcheck="false"
-              placeholder="粘贴凭据"
-              @input="edit(p.id, 'credential', $event)"
-            />
-          </label>
-          <label class="field">
-            <span class="field-label">名称（可选）</span>
-            <input
-              :value="draft(p.id).name"
-              maxlength="100"
-              autocomplete="off"
-              placeholder="用于区分多个账号"
-              @input="edit(p.id, 'name', $event)"
-            />
-          </label>
-          <p
-            v-if="notice?.platform === p.id"
-            class="notice"
-            :class="{ failed: notice.failed }"
-            :role="notice.failed ? 'alert' : 'status'"
-          >
-            {{ notice.text }}
-          </p>
-          <button
-            type="submit"
-            class="submit"
-            :disabled="busy || !draft(p.id).credential.trim()"
-          >
-            {{ busy ? '正在验证…' : '验证并添加' }}
-          </button>
-        </form>
-      </ListSection>
-      <p
-        v-else-if="notice?.platform === p.id"
-        class="notice outside"
-        role="alert"
-      >
-        {{ notice.text }}
-      </p>
     </template>
     <p v-if="!addable" class="status">未配置个人账号接入。</p>
   </template>
@@ -325,6 +258,15 @@ async function remove() {
     @confirm="remove"
     @cancel="removing = undefined"
   />
+  <AddAccountSheet
+    :open="!!adding"
+    :name="adding?.name ?? ''"
+    :help="adding?.help"
+    :busy="busy"
+    :error="addError"
+    @submit="add"
+    @cancel="adding = undefined"
+  />
   <ConfirmSheet
     :open="clearing"
     title="删除全部收藏和采集记录？"
@@ -359,6 +301,15 @@ async function remove() {
 }
 .account::before,
 .account + .account::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto var(--inset);
+  height: 1px;
+  background: var(--separator);
+}
+/* The add button follows accounts or the notice, not another list row. */
+.account + :deep(.row)::before,
+.banner + :deep(.row)::before {
   content: '';
   position: absolute;
   inset: 0 0 auto var(--inset);
@@ -406,80 +357,6 @@ async function remove() {
   padding: 0 var(--inset);
   font-size: 15px;
   color: var(--destructive);
-}
-.form {
-  margin: 0;
-}
-.field {
-  position: relative;
-  display: block;
-  padding: 13px var(--inset) 12px;
-}
-.field + .field::before {
-  content: '';
-  position: absolute;
-  inset: 0 0 auto var(--inset);
-  height: 1px;
-  background: var(--separator);
-}
-.field-label {
-  display: block;
-  margin-bottom: 9px;
-  color: var(--subtle);
-  font-size: 13px;
-  font-weight: 600;
-}
-textarea,
-input {
-  display: block;
-  width: 100%;
-  padding: 11px 13px;
-  border: 0;
-  border-radius: 12px;
-  background: var(--fill);
-  line-height: 1.55;
-}
-textarea {
-  min-height: 82px;
-  resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 14px;
-  word-break: break-all;
-}
-textarea::placeholder,
-input::placeholder {
-  color: var(--subtle);
-}
-.notice {
-  margin: 0;
-  padding: 0 var(--inset) 12px;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--subtle);
-}
-.notice.failed {
-  color: var(--destructive);
-}
-.notice.outside {
-  margin: -10px 0 22px;
-  padding: 0 calc(var(--gutter) + 4px);
-}
-.submit {
-  position: relative;
-  display: block;
-  width: 100%;
-  min-height: 48px;
-  padding: 11px var(--inset);
-  font-size: 16px;
-  text-align: center;
-  color: var(--link);
-  box-shadow: inset 0 1px 0 var(--separator);
-}
-.submit:disabled {
-  color: var(--subtle);
-}
-.submit:active:not(:disabled) {
-  background: var(--fill);
 }
 .version {
   margin: 0;

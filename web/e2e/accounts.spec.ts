@@ -81,18 +81,25 @@ test('Instagram and X choose their accounts independently', async ({
   })
   await page.goto('/app/')
   await page.getByRole('link', { name: '采集账号' }).click()
-  const form = page.locator('section').filter({
-    has: page.getByRole('heading', {
-      name: '添加 Instagram 账号',
-      exact: true,
-    }),
-  })
   await expect(
     page.getByText('Instagram 需要添加并选择自己的账号凭据后才能采集。'),
   ).toBeVisible()
+  // Adding is a sheet opened from the platform's own source list.
+  await page
+    .locator('section')
+    .filter({
+      has: page.getByRole('heading', {
+        name: 'Instagram 采集来源',
+        exact: true,
+      }),
+    })
+    .getByRole('button', { name: '添加账号' })
+    .click()
+  const form = page.getByRole('dialog', { name: '添加 Instagram 账号' })
   await expect(form).toContainText('sessionid')
   await form.getByLabel('凭据').fill('fixture-cookie')
   await form.getByRole('button', { name: '验证并添加' }).click()
+  await expect(form).toBeHidden()
   const x = page.getByRole('button', {
     name: '@x_fixture · X 主号',
     exact: true,
@@ -197,21 +204,28 @@ test('adds, selects and deletes an X account', async ({ page }) => {
     'href',
     /^https:\/\/github\.com\/sxzz\/midden\/commit\/[0-9a-f]{40}$/,
   )
-  await expect(page.getByText('添加 X 账号')).toBeVisible()
-  await expect(page.getByText('Base64 Cookie')).toBeVisible()
+  // The form stays out of the source list until asked for.
+  await expect(page.getByLabel('凭据')).toBeHidden()
+  await page.getByRole('button', { name: '添加账号' }).click()
+  const sheet = page.getByRole('dialog', { name: '添加 X 账号' })
+  await expect(sheet).toContainText('Base64 Cookie')
 
-  const credential = page.getByLabel('凭据')
-  const submit = page.getByRole('button', { name: '验证并添加' })
+  const credential = sheet.getByLabel('凭据')
+  const submit = sheet.getByRole('button', { name: '验证并添加' })
   await expect(submit).toBeDisabled()
   await credential.fill('expired')
   await submit.click()
-  await expect(page.getByRole('alert')).toHaveText(/凭据无效/)
+  await expect(sheet.getByRole('alert')).toHaveText(/凭据无效/)
 
   await credential.fill('  opaque-cookie  ')
-  await page.getByLabel('名称（可选）').fill('主号')
+  await sheet.getByLabel('名称（可选）').fill('主号')
   await submit.click()
   await expect(page.getByText('已添加并选择 @synthetic · 主号。')).toBeVisible()
+  await expect(sheet).toBeHidden()
+  // Opening it again starts from an empty form.
+  await page.getByRole('button', { name: '添加账号' }).click()
   await expect(credential).toHaveValue('')
+  await sheet.getByRole('button', { name: '取消' }).click()
   expect(posted.at(-1)).toEqual({
     platform: 'x',
     credential: 'opaque-cookie',
