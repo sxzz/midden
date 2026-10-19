@@ -397,3 +397,43 @@ test("timeline exposes publication, own media and sharing kind for capture selec
   );
   assert.equal(posts[1]?.publishedAt, "2026-10-01T00:00:00.000Z");
 });
+
+test("timeline collection ends at a page without new posts, as past UserTweets' end", async () => {
+  const { collectTimeline } = await import("./profile.js");
+  const result = normalizeProfile(user, user.id, "fxtwitter");
+  let calls = 0;
+  await collectTimeline(result, async () => {
+    calls++;
+    // The pinned post repeats on every page; later pages carry nothing else.
+    const results = [{ type: "status", id: "1" }];
+    if (calls <= 2)
+      for (let i = 1; i <= 20; i++)
+        results.push({ type: "status", id: String(calls * 100 + i) });
+    return {
+      timeline: { code: 200, results, cursor: { bottom: `page-${calls + 1}` } },
+    };
+  });
+  assert.equal(calls, 3);
+  assert.equal(result.relatedTargets.length, 41);
+  assert.equal(result.nextPageCursor, "");
+  assert.equal(result.incomplete, false);
+});
+
+test("timeline collection stops a source that never runs out of cursors", async () => {
+  const { collectTimeline, maxTimelinePages } = await import("./profile.js");
+  const result = normalizeProfile(user, user.id, "fxtwitter");
+  let calls = 0;
+  await collectTimeline(result, async () => {
+    calls++;
+    return {
+      timeline: {
+        code: 200,
+        results: [{ type: "status", id: String(calls) }],
+        cursor: { bottom: `page-${calls + 1}` },
+      },
+    };
+  });
+  assert.equal(calls, maxTimelinePages);
+  assert.equal(result.incomplete, true);
+  assert.equal(result.nextPageCursor, `page-${calls + 1}`);
+});

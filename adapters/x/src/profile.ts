@@ -257,6 +257,10 @@ async function publicJSON(
     );
   return data;
 }
+// A capture targets about 100 posts, five or six pages. The bound only stops
+// a source that keeps handing out cursors from spending the account's quota.
+export const maxTimelinePages = 15;
+
 // Keep whole upstream pages: the requested size is a target, never a truncation boundary.
 export async function collectTimeline(
   result: FetchResponse,
@@ -277,7 +281,7 @@ export async function collectTimeline(
       result.nextPageCursor = "";
       break;
     }
-    if (visited.size >= 20) {
+    if (visited.size >= maxTimelinePages) {
       result.incomplete = true;
       result.warnings.push("已达单次翻页上限。");
       break;
@@ -290,11 +294,14 @@ export async function collectTimeline(
     for (const item of page.relatedTargets) targets.set(item.url, item);
     result.graph = page.graph;
     result.relatedTargets = [...targets.values()];
+    const before = posts;
     posts = result.relatedTargets.filter((item) =>
       item.url.includes("/status/"),
     ).length;
     const next = page.nextPageCursor;
-    result.nextPageCursor = visited.has(next) ? "" : next;
+    // Past its end, UserTweets keeps returning a fresh cursor with only the
+    // pinned post. A page without a new post is the end of the timeline.
+    result.nextPageCursor = visited.has(next) || posts === before ? "" : next;
     if (!result.nextPageCursor) break;
     cursor = result.nextPageCursor;
   }

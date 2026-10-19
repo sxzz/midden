@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -25,6 +27,36 @@ func TestAccountRawCannotBecomePublic(t *testing.T) {
 	r := &pb.FetchResponse{SourceResponses: []*pb.SourceResponse{{Body: []byte(`{"viewer":true}`), ContentType: "application/json", Visibility: pb.Visibility_VISIBILITY_PUBLIC}}}
 	if _, e := sourceBytes(r, true); e == nil {
 		t.Fatal("account response exposed as public")
+	}
+}
+
+func TestSurplusSourceResponsesDoNotFailTheCapture(t *testing.T) {
+	page := func(i int) *pb.SourceResponse {
+		// A JSON string just under 1 MiB, so four of them fit the limit.
+		body := []byte(`"` + strings.Repeat("x", 1<<20-16) + strconv.Itoa(i) + `"`)
+		return &pb.SourceResponse{Body: body, ContentType: "application/json", SourceUrl: "https://example.test/" + strconv.Itoa(i), Visibility: pb.Visibility_VISIBILITY_PUBLIC}
+	}
+	// Many small responses are all kept: only their size is limited.
+	r := &pb.FetchResponse{}
+	for i := range 40 {
+		r.SourceResponses = append(r.SourceResponses, &pb.SourceResponse{Body: []byte(`{"page":` + strconv.Itoa(i) + `}`), ContentType: "application/json", SourceUrl: "https://example.test/" + strconv.Itoa(i), Visibility: pb.Visibility_VISIBILITY_PUBLIC})
+	}
+	if dropped := keepSourceResponses(r); dropped != 0 || len(r.SourceResponses) != 40 {
+		t.Fatal("dropped responses within the limit", dropped)
+	}
+	if _, e := sourceBytes(r, false); e != nil {
+		t.Fatal(e)
+	}
+	// Past the size limit, the earliest responses that fit are kept.
+	r = &pb.FetchResponse{}
+	for i := range 6 {
+		r.SourceResponses = append(r.SourceResponses, page(i))
+	}
+	if dropped := keepSourceResponses(r); dropped != 2 || len(r.SourceResponses) != 4 || r.SourceResponses[0].SourceUrl != "https://example.test/0" {
+		t.Fatal("kept the wrong responses", dropped, len(r.SourceResponses))
+	}
+	if _, e := sourceBytes(r, false); e != nil {
+		t.Fatal(e)
 	}
 }
 

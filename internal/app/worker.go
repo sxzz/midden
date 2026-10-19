@@ -395,6 +395,9 @@ func (s *Service) capture(ctx context.Context, t store.Task) error {
 	if e != nil {
 		return e
 	}
+	if dropped := keepSourceResponses(r); dropped > 0 {
+		slog.WarnContext(ctx, "adapter returned more source responses than kept", "capture_id", t.ID, "provider_id", r.ProviderId, "dropped", dropped)
+	}
 	rawSize, e := sourceBytes(r, connection != "")
 	if e != nil {
 		return e
