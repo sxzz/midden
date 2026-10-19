@@ -11,11 +11,31 @@ import (
 	"monitor/internal/store"
 )
 
+// maxSourceBytes bounds the raw response bodies one capture keeps. Their number
+// is not limited: an adapter may read as many pages as fit.
+const maxSourceBytes = 4 << 20
+
+// keepSourceResponses keeps the raw responses that fit maxSourceBytes, in the
+// order the adapter returned them, and reports how many it dropped. Raw
+// responses only record how content was fetched; losing some must not discard
+// the content.
+func keepSourceResponses(r *pb.FetchResponse) int {
+	n := 0
+	for i, v := range r.SourceResponses {
+		if v != nil {
+			n += len(v.Body)
+		}
+		if n > maxSourceBytes {
+			dropped := len(r.SourceResponses) - i
+			r.SourceResponses = r.SourceResponses[:i]
+			return dropped
+		}
+	}
+	return 0
+}
+
 func sourceBytes(r *pb.FetchResponse, account bool) (int, error) {
 	n := 0
-	if len(r.SourceResponses) > 16 {
-		return 0, &PermanentError{"too many source responses"}
-	}
 	for _, v := range r.SourceResponses {
 		if v == nil || len(v.Body) == 0 || !json.Valid(v.Body) || v.ContentType == "" || len(v.SourceUrl) > 8192 {
 			return 0, &PermanentError{"invalid source response"}
@@ -28,7 +48,7 @@ func sourceBytes(r *pb.FetchResponse, account bool) (int, error) {
 		}
 		n += len(v.Body)
 	}
-	if n > 4<<20 {
+	if n > maxSourceBytes {
 		return 0, &PermanentError{"source responses exceed limit"}
 	}
 	return n, nil
