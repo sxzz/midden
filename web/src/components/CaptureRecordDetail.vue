@@ -30,6 +30,7 @@ import {
   stateStatus,
 } from '../captures'
 import { toast } from '../composables/useToast'
+import InfiniteLoader from './ui/InfiniteLoader.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 const props = defineProps<{ id: string }>()
@@ -44,8 +45,8 @@ const busy = shallowRef(false)
 const members = shallowRef<CaptureMember[]>([])
 const membersNext = shallowRef('')
 const membersLoading = shallowRef(false)
-/** Members are many; the ones needing attention are listed first. */
-const filter = shallowRef<'problem' | ''>('problem')
+const membersError = shallowRef('')
+const filter = shallowRef<'problem' | ''>('')
 const filters = [
   { value: '', label: '全部帖子' },
   { value: 'problem', label: '有问题的帖子' },
@@ -118,6 +119,7 @@ async function loadMembers(more = false) {
   if (more && (membersLoading.value || !membersNext.value)) return
   const current = ++membersRun
   membersLoading.value = true
+  membersError.value = ''
   try {
     const q = new URLSearchParams()
     if (filter.value) q.set('state', filter.value)
@@ -129,7 +131,7 @@ async function loadMembers(more = false) {
     members.value = more ? [...members.value, ...page.items] : page.items
     membersNext.value = page.next_cursor || ''
   } catch (e) {
-    if (current === membersRun) toast(errorText(e))
+    if (current === membersRun) membersError.value = errorText(e)
   } finally {
     if (current === membersRun) membersLoading.value = false
   }
@@ -149,7 +151,9 @@ watch(
     membersNext.value = ''
     error.value = ''
     showAllMedia.value = false
-    filter.value = 'problem'
+    filter.value = ''
+    membersError.value = ''
+    ++membersRun
     void load()
   },
   { immediate: true },
@@ -428,13 +432,13 @@ function openCollection(id: string, event?: MouseEvent) {
             membersLoading ? '加载中…' : filter ? '没有问题。' : '暂无帖子。'
           }}
         </p>
-        <ListButton
-          v-if="membersNext"
-          label="加载更多"
-          :disabled="membersLoading"
-          @select="loadMembers(true)"
-        />
       </ListSection>
+      <InfiniteLoader
+        v-if="membersNext || membersError"
+        :loading="membersLoading"
+        :error="membersError"
+        @more="loadMembers(!!membersNext)"
+      />
     </template>
   </template>
 </template>

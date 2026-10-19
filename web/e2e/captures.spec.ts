@@ -256,16 +256,22 @@ test('shows collection progress, member failures, stop and retry', async ({
   await expect(page.getByRole('heading', { name: /媒体/ })).toHaveCount(0)
   await expect(page.getByText('帖子不存在或已删除').first()).toBeVisible()
 
-  // Members needing attention come first; the rest are one tab away.
+  // All members are shown by default; problems remain available in their tab.
   const failed = page.getByRole('button', {
     name: /^x\.com\/fixture\/status\/2/,
   })
   await expect(failed).toContainText('失败')
+  await expect(page.getByRole('tab', { name: '全部帖子' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(page.getByText('x.com/fixture/status/3')).toBeVisible()
+  await page.getByRole('tab', { name: '有问题的帖子' }).click()
   await expect(page.getByText('x.com/fixture/status/3')).toHaveCount(0)
   await page.getByRole('tab', { name: '全部帖子' }).click()
   await expect(page.getByText('x.com/fixture/status/3')).toBeVisible()
   expect(memberQueries.at(-1)).toBe('')
-  expect(memberQueries[0]).toBe('problem')
+  expect(memberQueries[0]).toBe('')
 
   // A running collection can be stopped, and only a finished one retried.
   const retryMember = page.getByRole('button', {
@@ -361,4 +367,56 @@ test('a finished profile record fetches more pages as its own record', async ({
   // The next page is still running, so it offers nothing to continue yet.
   await expect(page.getByRole('button', { name: '抓取更多' })).toHaveCount(0)
   expect(ops).toEqual(['more1000', 'more'])
+})
+
+test('loads more capture members automatically at the bottom', async ({
+  page,
+}) => {
+  const cursors: string[] = []
+  await page.route('**/v1/**', (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/members')) {
+      const cursor = url.searchParams.get('cursor') || ''
+      cursors.push(cursor)
+      return route.fulfill({
+        json: {
+          items: Array.from({ length: cursor ? 1 : 30 }, (_, index) => ({
+            job_id: `member-${cursor || 'first'}-${index}`,
+            url: `https://x.com/fixture/status/${cursor ? 999 : index + 1}`,
+            state: 'complete',
+            saved: true,
+            collection_id: collection,
+            reasons: [],
+          })),
+          next_cursor: cursor ? '' : 'next-page',
+        },
+      })
+    }
+    return route.fulfill({
+      json:
+        url.pathname === `/v1/captures/${profile}`
+          ? detail({
+              id: profile,
+              kind: 'profile',
+              state: 'complete',
+              done: true,
+              members: {
+                total: 31,
+                complete: 31,
+                pending: 0,
+                failed: 0,
+                done: true,
+              },
+            })
+          : {},
+    })
+  })
+  await page.goto(`/app/#/captures/${profile}`)
+  await expect(page.locator('.member')).toHaveCount(30)
+  await page.locator('.member').last().scrollIntoViewIfNeeded()
+  await expect(page.locator('.member')).toHaveCount(31)
+  expect(cursors).toEqual(['', 'next-page'])
+  await expect(
+    page.getByRole('button', { name: '加载更多', exact: true }),
+  ).toHaveCount(0)
 })
