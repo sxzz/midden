@@ -336,6 +336,7 @@ it('shows a repost account card with its own saved avatar, never a sensitive one
   const avatar = (sensitive: boolean) => ({
     id: sensitive ? 'hidden-avatar' : 'avatar',
     purpose: 'avatar',
+    mime: 'image/png',
     state: 'ready',
     sensitive,
   })
@@ -359,6 +360,7 @@ it('shows a repost account card with its own saved avatar, never a sensitive one
   expect(hidden?.querySelector('img')).toBeNull()
   expect(hidden?.textContent).toContain('合成账号 hidden')
   expect(el.querySelector('.relation-author')).toBeNull()
+  expect(el.querySelector('.thumbs-group')).toBeNull()
 })
 it('shows saved incoming repost accounts and quote/repost posts without duplicate snapshot cards', () => {
   const profile = {

@@ -150,7 +150,7 @@ const relations = computed(() => {
     }
     cards.set(key, {
       outgoing,
-      assets: entity.assets || [],
+      assets: postLink ? entity.assets || [] : [],
       collectionId: entity.saved_collection_id,
       author: attribution ?? prior?.author,
       avatar: avatar ?? prior?.avatar,
