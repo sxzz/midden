@@ -56,6 +56,11 @@ test('restores sort controls and opens author links in a new tab', async ({
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('/app/#/?sort=published&order=asc')
   const sort = page.getByRole('combobox', { name: '排序', exact: true })
+  await expect(
+    page.getByRole('link', { name: 'Home', exact: true }),
+  ).toHaveCount(0)
+  await expect(page.locator('.thumbs')).toHaveCSS('height', '180px')
+  await expect(page.locator('.avatar-link')).toHaveCSS('height', '40px')
   await expect(sort).toHaveValue('published')
   expect(await page.locator('.page').evaluate((el) => el.clientWidth)).toBe(960)
   await page.screenshot({
@@ -170,3 +175,49 @@ test('capture options are submitted with links', async ({ page }) => {
   })
   expect(Date.parse(body.options.since)).toBeLessThan(Date.now() - 6 * 86400000)
 })
+
+for (const [width, homeHeight, profileHeight] of [
+  [390, 120, 180],
+  [1440, 180, 260],
+]) {
+  test(`attachment sizes at viewport ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width: width!, height: 900 })
+    await page.route('**/v1/**', (route) => {
+      const path = new URL(route.request().url()).pathname
+      return route.fulfill({
+        json:
+          path === '/v1/tags'
+            ? []
+            : path === '/v1/collections'
+              ? { items: [post] }
+              : path === '/v1/collections/bbbb'
+                ? {
+                    ...post,
+                    id: 'bbbb',
+                    assets: [],
+                    graph: {
+                      root: 'profile',
+                      entities: [
+                        {
+                          key: 'profile',
+                          type: 'x.profile',
+                          data: { name: '测试作者', description: '简介' },
+                        },
+                      ],
+                      relations: [],
+                    },
+                  }
+                : path === '/v1/collections/aaaa'
+                  ? post
+                  : { items: [] },
+      })
+    })
+    await page.goto('/app/')
+    await expect(page.locator('.thumbs')).toHaveCSS('height', `${homeHeight}px`)
+    await page.locator('.avatar-link').click()
+    await expect(page.locator('.related .thumbs')).toHaveCSS(
+      'height',
+      `${profileHeight}px`,
+    )
+  })
+}

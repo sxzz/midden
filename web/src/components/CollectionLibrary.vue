@@ -220,7 +220,13 @@ const viewProps = computed(() => {
 <template>
   <main class="page">
     <header class="bar">
-      <RouterLink to="/" class="icon-button" aria-label="Home" title="返回首页">
+      <RouterLink
+        v-if="nested"
+        to="/"
+        class="icon-button"
+        aria-label="Home"
+        title="返回首页"
+      >
         <svg
           viewBox="0 0 24 24"
           width="22"

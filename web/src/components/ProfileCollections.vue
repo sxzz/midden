@@ -84,6 +84,7 @@ function open(id: string) {
       :show-sensitive="showSensitive"
       :reposted-by="repostedBy"
       hide-authors
+      enlarged-media
       @search="search"
       @open="open"
       @more="more"

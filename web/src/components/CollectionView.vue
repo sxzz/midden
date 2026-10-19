@@ -21,6 +21,7 @@ const props = defineProps<{
   usage?: Usage
   hideFilters?: boolean
   hideAuthors?: boolean
+  enlargedMedia?: boolean
   /** Display name of the account this list belongs to, for its reposts. */
   repostedBy?: string
 }>()
@@ -152,6 +153,7 @@ const storage = computed(() =>
         v-for="a in group.items"
         :key="a.id"
         :collection="a"
+        :enlarged-media="enlargedMedia"
         :sort="sort"
         :show-sensitive="showSensitive"
         :reposted-by="repostedBy"

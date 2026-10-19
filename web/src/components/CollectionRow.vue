@@ -14,6 +14,7 @@ import PostRelations from './PostRelations.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 import LockIcon from './ui/LockIcon.vue'
 const props = defineProps<{
+  enlargedMedia?: boolean
   collection: Collection
   showSensitive?: boolean
   sort?: string
@@ -163,6 +164,8 @@ const storage = computed(() =>
           compact
         />
         <MediaThumbs
+          :size="enlargedMedia ? 'medium' : 'small'"
+          :desktop-size="enlargedMedia ? 'large' : 'medium'"
           :collection-id="collection.id"
           :collection="collection"
           :assets="collection.assets || []"
@@ -177,6 +180,10 @@ const storage = computed(() =>
 
 <style scoped>
 .avatar-link {
+  align-self: flex-start;
+  display: block;
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
 }
 .head {

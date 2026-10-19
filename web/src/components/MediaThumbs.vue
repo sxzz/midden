@@ -7,6 +7,8 @@ import MediaViewer from './MediaViewer.vue'
 import EyeIcon from './ui/EyeIcon.vue'
 import type { Asset, Collection } from '../api'
 const props = defineProps<{
+  size?: 'small' | 'medium' | 'large'
+  desktopSize?: 'small' | 'medium' | 'large'
   assets: Asset[]
   collection?: Collection
   showSensitive?: boolean
@@ -54,7 +56,11 @@ const overflow = computed(() => media.value.length - tiles.value.length)
 </script>
 
 <template>
-  <span v-if="tiles.length" class="thumbs-group">
+  <span
+    v-if="tiles.length"
+    class="thumbs-group"
+    :class="[`size-${size || 'small'}`, `desktop-${desktopSize || 'medium'}`]"
+  >
     <!-- While one veil covers the group, nothing beneath it may be tabbed to. -->
     <span class="thumbs" :inert="covered || undefined">
       <button
@@ -120,10 +126,30 @@ const overflow = computed(() => media.value.length - tiles.value.length)
 </template>
 
 <style scoped>
+.size-small {
+  --attachment-height: 120px;
+}
+.size-medium {
+  --attachment-height: 180px;
+}
+.size-large {
+  --attachment-height: 260px;
+}
+@media (min-width: 768px) {
+  .desktop-small {
+    --attachment-height: 120px;
+  }
+  .desktop-medium {
+    --attachment-height: 180px;
+  }
+  .desktop-large {
+    --attachment-height: 260px;
+  }
+}
 .thumbs-group {
   position: relative;
   display: flex;
-  width: 100%;
+  width: min(100%, calc(var(--attachment-height) * 2));
   max-width: 100%;
   margin-top: 8px;
 }
@@ -132,6 +158,8 @@ const overflow = computed(() => media.value.length - tiles.value.length)
   grid-template-columns: repeat(2, minmax(0, 1fr));
   width: 100%;
   min-width: 0;
+  height: var(--attachment-height);
+  grid-auto-rows: minmax(0, 1fr);
   gap: 4px;
 }
 /* One veil across the strip, so a uniformly sensitive row asks once. */
@@ -160,7 +188,8 @@ const overflow = computed(() => media.value.length - tiles.value.length)
   display: grid;
   place-items: center;
   width: 100%;
-  aspect-ratio: 1.4;
+  height: 100%;
+  min-height: 0;
   flex-shrink: 0;
   border-radius: 8px;
   overflow: hidden;

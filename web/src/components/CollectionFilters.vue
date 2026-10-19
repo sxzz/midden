@@ -67,9 +67,9 @@ const entityTypes = (entity: string, platform: string) => {
     .join(',')
 }
 const postTypeNames: Record<string, string> = {
-  post: '普通帖子',
-  quote: '引用转帖',
-  repost: '纯转发',
+  post: '贴文',
+  quote: '引用',
+  repost: '转发',
 }
 const mediaNames: Record<string, string> = {
   image: '图片',
@@ -418,9 +418,9 @@ const tagFilter = computed({
         >帖子类型<span class="select"
           ><select v-model="form.postType" aria-label="帖子类型">
             <option value="">全部</option>
-            <option value="post">普通帖子</option>
-            <option value="quote">引用转帖</option>
-            <option value="repost">纯转发</option></select
+            <option value="post">贴文</option>
+            <option value="quote">引用</option>
+            <option value="repost">转发</option></select
           ><ChevronIcon class="select-chevron" /></span
       ></label>
       <label class="option"

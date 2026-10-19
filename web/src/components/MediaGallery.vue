@@ -109,11 +109,14 @@ watch(
 .media-group {
   position: relative;
   margin-top: 12px;
+  max-width: 640px;
 }
 .media {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
+  max-height: min(360px, 50vh);
+  overflow-y: auto;
 }
 /* One veil for the whole group, sized to it, so the label has room to read. */
 .group-veil {
@@ -136,7 +139,7 @@ watch(
 }
 .item:only-child .frame {
   aspect-ratio: auto;
-  --media-height: auto;
+  height: min(360px, 50vh);
 }
 .item {
   margin: 0;
@@ -146,7 +149,7 @@ watch(
   position: relative;
   display: block;
   width: 100%;
-  aspect-ratio: 1;
+  height: min(180px, 25vh);
   padding: 0;
   overflow: hidden;
   border-radius: 8px;
