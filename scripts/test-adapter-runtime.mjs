@@ -17,7 +17,7 @@ async function fixture(t, fail = false) {
     await mkdir(join(root, name, "dist"), { recursive: true });
     await writeFile(
       join(root, name, "dist", "server.js"),
-      `process.stdout.write('${name} ready\\n'); setInterval(() => {}, 1000); process.on('SIGTERM', () => { process.stdout.write('${name} stopped\\n'); process.exit(0); }); ${name === "instagram" && fail ? "setTimeout(() => process.exit(23), 50);" : ""}`,
+      `const timer = setInterval(() => {}, 1000); process.on('SIGTERM', () => { clearInterval(timer); process.stdout.write('${name} stopped\\n'); }); process.stdout.write('${name} ready\\n'); ${name === "instagram" && fail ? "setTimeout(() => process.exit(23), 50);" : ""}`,
     );
   }
   const child = spawn(process.execPath, [join(root, "server.mjs")], {
@@ -34,7 +34,7 @@ test(
   { timeout: 10000 },
   async (t) => {
     const run = await fixture(t, true);
-    const [code] = await once(run.child, "exit");
+    const [code] = await once(run.child, "close");
     assert.equal(code, 1);
     assert.match(run.output(), /x stopped/);
   },
@@ -50,7 +50,7 @@ test(
       !run.output().includes("x ready")
     )
       await once(run.child.stdout, "data");
-    const exited = once(run.child, "exit");
+    const exited = once(run.child, "close");
     run.child.kill("SIGTERM");
     const [code] = await exited;
     assert.equal(code, 0);
