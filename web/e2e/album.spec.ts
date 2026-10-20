@@ -169,3 +169,62 @@ test('captionless Instagram posts show media without summary or placeholder text
   )
   await expect(page.getByText('暂无正文', { exact: true })).toHaveCount(0)
 })
+
+test('album retains loaded tiles and appends skeletons while paging', async ({
+  page,
+}) => {
+  const { promise, resolve } = Promise.withResolvers<void>()
+  await setup(page)
+  await page.route('**/v1/collections?*', async (route) => {
+    const url = new URL(route.request().url())
+    if (url.searchParams.has('cursor')) {
+      await promise
+      return route.fulfill({ json: { items: [item(second, [asset('two')])] } })
+    }
+    return route.fulfill({
+      json: { items: [item(first, [asset('one')])], next_cursor: 'page2' },
+    })
+  })
+  await page.goto('/app/#/?layout=album')
+  await expect(page.locator('.album button')).toHaveCount(1)
+  await expect(page.locator('.album > .skeleton')).toHaveCount(12)
+  resolve()
+  await expect(page.locator('.album button')).toHaveCount(2)
+  await expect(page.locator('.album > .skeleton')).toHaveCount(0)
+})
+
+test('feed preserves single photo proportions and arranges three photos as a mosaic', async ({
+  page,
+}) => {
+  await setup(page)
+  await page.route('**/v1/collections?*', (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          item(first, [asset('portrait')]),
+          item(second, [asset('one'), asset('two'), asset('three')]),
+        ],
+      },
+    }),
+  )
+  await page.route('**/v1/assets/portrait*', (route) =>
+    route.fulfill({
+      contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="300" height="400" fill="#678"/></svg>',
+    }),
+  )
+  await page.goto('/app/')
+  await expect(page.locator('.count-1')).toHaveCSS('width', '90px')
+  await expect(page.locator('.count-1 img')).toHaveCSS('object-fit', 'contain')
+  await expect(page.locator('.count-3 .tile').first()).toHaveCSS(
+    'grid-row-start',
+    'span 2',
+  )
+  const heights = await page
+    .locator('.count-3 .tile')
+    .evaluateAll((tiles) =>
+      tiles.map((tile) => tile.getBoundingClientRect().height),
+    )
+  expect(heights[0]).toBeGreaterThan(heights[1]! * 1.9)
+  expect(heights[1]).toBe(heights[2])
+})

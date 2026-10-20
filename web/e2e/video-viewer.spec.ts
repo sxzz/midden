@@ -118,10 +118,10 @@ test('a clip taller than the viewer is contained and follows the viewport', asyn
   }
   // The slide fills what the chrome leaves free and the frame is fitted
   // inside it, whatever the clip's own proportions.
-  await expect.poll(box).toEqual([12, 72, 366, 562])
+  await expect.poll(box).toEqual([12, 72, 366, 622])
   await expect(video).toHaveCSS('object-fit', 'contain')
   await page.setViewportSize({ width: 844, height: 390 })
-  await expect.poll(box).toEqual([12, 72, 820, 108])
+  await expect.poll(box).toEqual([12, 72, 820, 168])
 })
 
 test('detail image and video thumbnails have equal rows with uncropped media', async ({

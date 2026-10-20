@@ -16,6 +16,20 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ open: [] }>()
 const selected = shallowRef<Asset>()
+const singleRatio = shallowRef(1)
+function measure(event: Event) {
+  const image = event.target
+  if (image instanceof HTMLImageElement && image.naturalHeight)
+    singleRatio.value = Math.max(
+      0.75,
+      Math.min(2, image.naturalWidth / image.naturalHeight),
+    )
+  else if (image instanceof HTMLVideoElement && image.videoHeight)
+    singleRatio.value = Math.max(
+      0.75,
+      Math.min(2, image.videoWidth / image.videoHeight),
+    )
+}
 const LIMIT = 4
 const media = computed(() => readyMedia(props.assets))
 // Whether the group is uniformly sensitive is a property of the whole row, not
@@ -51,6 +65,12 @@ watch(
     selected.value = undefined
   },
 )
+watch(
+  () => media.value[0]?.id,
+  () => {
+    singleRatio.value = 1
+  },
+)
 const tiles = computed(() => media.value.slice(0, LIMIT))
 const overflow = computed(() => media.value.length - tiles.value.length)
 </script>
@@ -59,7 +79,14 @@ const overflow = computed(() => media.value.length - tiles.value.length)
   <span
     v-if="tiles.length"
     class="thumbs-group"
-    :class="[`size-${size || 'small'}`, `desktop-${desktopSize || 'medium'}`]"
+    :class="[
+      `size-${size || 'small'}`,
+      `desktop-${desktopSize || 'medium'}`,
+      `count-${tiles.length}`,
+    ]"
+    :style="{ '--preview-ratio': tiles.length === 1 ? singleRatio : 2 }"
+    @load.capture="measure"
+    @loadedmetadata.capture="measure"
   >
     <!-- While one veil covers the group, nothing beneath it may be tabbed to. -->
     <span class="thumbs" :inert="covered || undefined">
@@ -88,6 +115,7 @@ const overflow = computed(() => media.value.length - tiles.value.length)
           "
           :asset="asset"
           thumbnail
+          fit="contain"
         />
         <span v-else class="veil">文件</span>
         <span
@@ -149,7 +177,7 @@ const overflow = computed(() => media.value.length - tiles.value.length)
 .thumbs-group {
   position: relative;
   display: flex;
-  width: min(100%, calc(var(--attachment-height) * 2));
+  width: min(100%, calc(var(--attachment-height) * var(--preview-ratio)));
   max-width: 100%;
   margin-top: 8px;
 }
@@ -183,6 +211,12 @@ const overflow = computed(() => media.value.length - tiles.value.length)
 .thumbs:has(.tile:only-child) {
   grid-template-columns: 1fr;
 }
+.count-3 .thumbs {
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+.count-3 .tile:first-child {
+  grid-row: span 2;
+}
 .tile {
   position: relative;
   display: grid;
@@ -199,7 +233,7 @@ const overflow = computed(() => media.value.length - tiles.value.length)
 .tile :deep(video) {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 .tile :deep(.image-shell) {
   min-height: 0;

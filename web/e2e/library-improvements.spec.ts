@@ -141,6 +141,15 @@ test('album captions and the media viewer include expandable post text', async (
   await page.locator('.album .tile').click()
   const viewer = page.getByRole('dialog')
   await expect(viewer.locator('.post-caption')).toContainText('测试作者')
+  await expect(viewer.locator('.caption-avatar img')).toBeVisible()
+  await expect(viewer.locator('.caption-avatar')).toHaveAttribute(
+    'href',
+    '#/collection/bbbb',
+  )
+  await expect(viewer.locator('.chrome-bottom')).toHaveCSS(
+    'padding-top',
+    '12px',
+  )
   const body = viewer.locator('.caption-body')
   await expect(body).toHaveAttribute('aria-expanded', 'false')
   await body.click()

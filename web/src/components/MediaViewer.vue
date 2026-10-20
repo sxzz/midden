@@ -8,9 +8,17 @@ import {
   useTemplateRef,
   watch,
 } from 'vue'
-import { api, assetURL, errorText, type Asset, type Collection } from '../api'
+import {
+  api,
+  assetURL,
+  errorText,
+  previewURL,
+  type Asset,
+  type Collection,
+} from '../api'
 import { host } from '../host'
 import { present } from '../presentation'
+import LoadingImage from './ui/LoadingImage.vue'
 import ViewerDetailButton from './ui/ViewerDetailButton.vue'
 import 'photoswipe/style.css'
 // The API carries no dimensions, so an image's natural size is learned when it
@@ -83,7 +91,7 @@ async function save() {
   }
 }
 // Keeps the native video controls clear of the floating chrome.
-const videoPadding = { top: 72, bottom: 110, left: 12, right: 12 }
+const videoPadding = { top: 72, bottom: 80, left: 12, right: 12 }
 const noPadding = { top: 0, bottom: 0, left: 0, right: 0 }
 let photoSwipe: PhotoSwipe | undefined
 let resizeObserver: ResizeObserver | undefined
@@ -162,7 +170,7 @@ onMounted(() => {
     errorMsg: '媒体加载失败',
     paddingFn: (_viewport, item) =>
       item.type === 'video'
-        ? { ...videoPadding, bottom: caption.value ? 210 : videoPadding.bottom }
+        ? { ...videoPadding, bottom: caption.value ? 150 : videoPadding.bottom }
         : noPadding,
   })
   photoSwipe = pswp
@@ -389,27 +397,43 @@ watch(
       class="chrome chrome-bottom"
     >
       <div v-if="caption" class="post-caption">
-        <a
-          v-if="caption.profileCollectionId"
-          :href="`#/collection/${caption.profileCollectionId}`"
-          @click="close"
-          >{{ caption.name
-          }}<span v-if="caption.handle"> @{{ caption.handle }}</span></a
+        <component
+          :is="caption.profileHref ? 'a' : 'span'"
+          :href="caption.profileHref"
+          class="caption-avatar"
+          :aria-label="`查看${caption.name}的主页`"
+          @click="caption.profileHref && close()"
         >
-        <strong v-else
-          >{{ caption.name
-          }}<span v-if="caption.handle"> @{{ caption.handle }}</span></strong
-        >
-        <button
-          v-if="caption.body"
-          type="button"
-          class="caption-body"
-          :class="{ expanded }"
-          :aria-expanded="expanded"
-          @click="expanded = !expanded"
-        >
-          {{ caption.body }}
-        </button>
+          <LoadingImage
+            v-if="caption.avatar && !caption.avatar.sensitive"
+            :src="previewURL(caption.avatar)"
+            alt=""
+          />
+          <span v-else aria-hidden="true">{{ caption.name.slice(0, 1) }}</span>
+        </component>
+        <div class="caption-content">
+          <a
+            v-if="caption.profileCollectionId"
+            :href="`#/collection/${caption.profileCollectionId}`"
+            @click="close"
+            >{{ caption.name
+            }}<span v-if="caption.handle"> @{{ caption.handle }}</span></a
+          >
+          <strong v-else
+            >{{ caption.name
+            }}<span v-if="caption.handle"> @{{ caption.handle }}</span></strong
+          >
+          <button
+            v-if="caption.body"
+            type="button"
+            class="caption-body"
+            :class="{ expanded }"
+            :aria-expanded="expanded"
+            @click="expanded = !expanded"
+          >
+            {{ caption.body }}
+          </button>
+        </div>
       </div>
       <p v-if="selected?.alt_text" class="caption">{{ selected.alt_text }}</p>
       <div v-if="assets.length > 1" class="glass remote">
@@ -467,7 +491,31 @@ watch(
 </template>
 
 <style scoped>
+.caption-avatar {
+  display: grid;
+  place-items: center;
+  align-self: start;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.15);
+}
+.caption-avatar :deep(.image-shell),
+.caption-avatar :deep(img) {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: cover;
+}
+.caption-content {
+  flex: 1;
+  min-width: 0;
+}
 .post-caption {
+  display: flex;
+  gap: 10px;
   width: min(100%, 760px);
   pointer-events: auto;
   text-align: left;
@@ -591,9 +639,9 @@ watch(
   bottom: 0;
   display: grid;
   justify-items: center;
-  gap: 14px;
-  padding: 56px calc(env(safe-area-inset-right, 0px) + 14px)
-    calc(env(safe-area-inset-bottom, 0px) + 14px)
+  gap: 8px;
+  padding: 12px calc(env(safe-area-inset-right, 0px) + 14px)
+    calc(env(safe-area-inset-bottom, 0px) + 8px)
     calc(env(safe-area-inset-left, 0px) + 14px);
   background: linear-gradient(
     to top,

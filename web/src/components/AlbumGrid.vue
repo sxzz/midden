@@ -25,21 +25,7 @@ const placeholders = 12
 </script>
 
 <template>
-  <div
-    v-if="loading && !tiles.length"
-    class="album"
-    role="status"
-    aria-label="正在加载收藏"
-    aria-busy="true"
-  >
-    <span
-      v-for="i in placeholders"
-      :key="i"
-      class="tile skeleton"
-      aria-hidden="true"
-    />
-  </div>
-  <div v-else class="album">
+  <div class="album" :aria-busy="loading || undefined">
     <button
       v-for="tile in tiles"
       :key="tile.key"
@@ -88,6 +74,16 @@ const placeholders = 12
         >
       </span>
     </button>
+    <template v-if="loading">
+      <span
+        v-for="i in placeholders"
+        :key="`loading-${i}`"
+        class="tile skeleton"
+        :role="i === 1 ? 'status' : undefined"
+        :aria-label="i === 1 ? '正在加载收藏' : undefined"
+        :aria-hidden="i !== 1 || undefined"
+      />
+    </template>
   </div>
 </template>
 
