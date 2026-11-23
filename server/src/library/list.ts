@@ -36,6 +36,8 @@ export interface Author {
   id: string
   /** The newest captured display name, only a label. */
   name: string
+  /** Saved collections by this author. */
+  count: number
 }
 
 const PAGE = 20
@@ -197,15 +199,16 @@ function mediaSQL(kinds: string[]): SQL {
 
 /**
  * Tagged directly, or written by an author whose saved collection is
- * tagged.
+ * tagged. Listed as one set, so SQLite starts from the few tagged rows
+ * instead of testing every saved collection.
  */
-const tagSQL = (tag: string) => sql`(
-  EXISTS (SELECT 1 FROM collection_tags ct
-    WHERE ct.collection_id = k.collection_id AND ct.tag_id = ${tag})
-  OR k.author_entity_id IN (
-    SELECT tagged.root_entity_id FROM collection_tags ct
-    JOIN catalog tagged ON tagged.collection_id = ct.collection_id
-    WHERE ct.tag_id = ${tag}))`
+const tagSQL = (tag: string) => sql`k.collection_id IN (
+  SELECT ct.collection_id FROM collection_tags ct WHERE ct.tag_id = ${tag}
+  UNION
+  SELECT authored.collection_id FROM collection_tags ct
+  JOIN catalog tagged ON tagged.collection_id = ct.collection_id
+  JOIN catalog authored ON authored.author_entity_id = tagged.root_entity_id
+  WHERE ct.tag_id = ${tag})`
 
 /** The newest revision of the collection named by `column`. */
 const headOf = (column: string) =>
@@ -427,37 +430,88 @@ export function listCollections(
 
 const byteOrder = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
+const AUTHOR_PAGE = 50
+
+export interface AuthorFilter {
+  /** Part of the name or the platform's id, any case. */
+  q?: string
+  /** Where the previous page ended. */
+  cursor?: string
+  /** Only these author keys, unpaged: labels for a saved selection. */
+  authors?: string[]
+}
+
 /**
  * The authors behind saved collections, labelled with the newest display
- * name captured for each. Identity is the entity the root is authored by,
- * never the name: a renamed account stays one author, and two accounts
- * sharing a name stay apart.
+ * name captured for each, those with the most saved posts first. Identity is
+ * the entity the root is authored by, never the name: a renamed account
+ * stays one author, and two accounts sharing a name stay apart.
  */
-export function listAuthors(ctx: CaptureContext): Author[] {
-  // One row per author, labelled by its newest captured name: a lone max()
-  // makes SQLite read `name` from the row it picked. Prefer a name, then the
-  // newest revision.
+export function listAuthors(
+  ctx: CaptureContext,
+  input: AuthorFilter = {},
+): Page<Author> {
+  const q = (input.q ?? '').trim().toLocaleLowerCase()
+  const wanted = input.authors ?? []
+  const offset = input.cursor ? Number(input.cursor) : 0
+  if (
+    runes(q) > MAX_QUERY ||
+    wanted.length > MAX_AUTHORS ||
+    wanted.some((key) => !parseAuthorKey(key)) ||
+    !Number.isSafeInteger(offset) ||
+    offset < 0 ||
+    (input.cursor && String(offset) !== input.cursor)
+  )
+    throw invalid()
+  // One row per author, labelled by its newest captured name: the name rides
+  // at the end of the key max() picks, which prefers a name, then the newest
+  // revision. A unit separator ends the revision id.
   const rows = ctx.db.all<{
     platform: string
     kind: string
     external: string
     name: string
+    count: number
   }>(sql`
-    SELECT au.platform, au.kind, au.external_id AS external, named.name
+    SELECT au.platform, au.kind, au.external_id AS external,
+      substr(named.newest, 17 + instr(substr(named.newest, 17), char(31)))
+        AS name, named.count
     FROM (
-      SELECT k.author_entity_id AS author, k.author_name AS name,
-        max(printf('%d%015d%s', k.author_name <> '', k.revision_at, k.revision_id))
+      SELECT k.author_entity_id AS author, count(*) AS count,
+        max(printf('%d%015d%s', k.author_name <> '', k.revision_at,
+          k.revision_id) || char(31) || k.author_name) AS newest
       FROM ${sql.raw(SAVED)}
       WHERE k.author_entity_id IS NOT NULL
       GROUP BY k.author_entity_id
     ) named
     JOIN entities au ON au.id = named.author`)
-  return rows
-    .map((row) => ({
-      id: authorKey(row),
-      // Without a captured name the platform's own id is the only honest
-      // label; merging blank names would merge authors.
-      name: row.name || row.external,
-    }))
-    .toSorted((a, b) => byteOrder(a.name, b.name) || byteOrder(a.id, b.id))
+  let authors = rows.map((row) => ({
+    id: authorKey(row),
+    // Without a captured name the platform's own id is the only honest
+    // label; merging blank names would merge authors.
+    name: row.name || row.external,
+    count: row.count,
+    external: row.external,
+  }))
+  if (wanted.length) {
+    const keys = new Set(wanted)
+    authors = authors.filter((author) => keys.has(author.id))
+  } else if (q)
+    authors = authors.filter(
+      (author) =>
+        author.name.toLocaleLowerCase().includes(q) ||
+        author.external.toLocaleLowerCase().includes(q),
+    )
+  authors.sort(
+    (a, b) =>
+      b.count - a.count || byteOrder(a.name, b.name) || byteOrder(a.id, b.id),
+  )
+  const end = wanted.length ? authors.length : offset + AUTHOR_PAGE
+  const page: Page<Author> = {
+    items: authors
+      .slice(wanted.length ? 0 : offset, end)
+      .map(({ id, name, count }) => ({ id, name, count })),
+  }
+  if (end < authors.length) page.next_cursor = String(end)
+  return page
 }

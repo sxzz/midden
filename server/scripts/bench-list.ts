@@ -1,7 +1,7 @@
 // Seed a library through the real capture pipeline (fake platform), then time
 // the collection list for common filters.
 //
-//   node scripts/bench-list.ts seed <db> [posts=20000]
+//   BENCH_AUTHORS=400 node scripts/bench-list.ts seed <db> [posts=20000]
 //   node scripts/bench-list.ts run <db> [entity type]
 //
 // `run` filters on the given root type, by default the most common one in the
@@ -39,7 +39,7 @@ if (!file || !['seed', 'run'].includes(command ?? '')) {
   process.exit(2)
 }
 
-const AUTHORS = 400
+const AUTHORS = Number(process.env.BENCH_AUTHORS) || 400
 const WORDS = [
   '猫',
   '天气',

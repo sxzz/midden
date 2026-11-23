@@ -276,7 +276,11 @@ export const revisions = sqliteTable(
     contentBytes: integer().notNull(),
     createdAt: createdAt(),
   },
-  (t) => [index('revisions_head').on(t.collectionId, t.createdAt, t.id)],
+  (t) => [
+    index('revisions_head').on(t.collectionId, t.createdAt, t.id),
+    // Storage sums read sizes from here instead of rows carrying payloads.
+    index('revisions_bytes').on(t.collectionId, t.contentBytes),
+  ],
 )
 
 /** Platform objects seen inside revisions, shared across collections. */
@@ -351,13 +355,17 @@ export const entityRelations = sqliteTable(
 )
 
 /** Stored media bytes; the hash is also the media store key. */
-export const blobs = sqliteTable('blobs', {
-  id: text().primaryKey(),
-  hash: text().notNull().unique(),
-  size: integer().notNull(),
-  mime: text().notNull(),
-  createdAt: createdAt(),
-})
+export const blobs = sqliteTable(
+  'blobs',
+  {
+    id: text().primaryKey(),
+    hash: text().notNull().unique(),
+    size: integer().notNull(),
+    mime: text().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('blobs_size').on(t.size)],
+)
 
 /** A media item of a capture, at its position among the kept resources. */
 export const assets = sqliteTable(
@@ -441,7 +449,11 @@ export const sourceResponses = sqliteTable(
     size: integer().notNull(),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('source_responses_position').on(t.captureId, t.position)],
+  (t) => [
+    uniqueIndex('source_responses_position').on(t.captureId, t.position),
+    // Sizes without reading the bodies stored before them.
+    index('source_responses_size').on(t.captureId, t.size),
+  ],
 )
 
 /**

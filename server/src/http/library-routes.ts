@@ -27,6 +27,12 @@ const Filters = v.object({
   cursor: text,
 })
 
+const AuthorFilters = v.object({
+  q: text,
+  cursor: text,
+  author: v.optional(v.union([v.string(), v.array(v.string())])),
+})
+
 /** Reading the library: collections, their history, entities, raw sources. */
 export function libraryRoutes(ctx: AccountsContext) {
   return (
@@ -57,7 +63,17 @@ export function libraryRoutes(ctx: AccountsContext) {
         )
       })
 
-      .get('/collections/authors', (c) => c.json({ items: listAuthors(ctx) }))
+      .get('/collections/authors', query(AuthorFilters), (c) => {
+        const input = c.req.valid('query')
+        const author = input.author ?? []
+        return c.json(
+          listAuthors(ctx, {
+            q: input.q || undefined,
+            cursor: input.cursor || undefined,
+            authors: typeof author === 'string' ? [author] : author,
+          }),
+        )
+      })
 
       .get('/collections/:id', (c) =>
         c.json(getCollection(ctx, c.req.param('id'))),

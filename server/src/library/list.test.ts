@@ -252,12 +252,31 @@ describe('library listing', () => {
     const [pa, pb, pc, pd] = ['pa', 'pb', 'pc', 'pd'].map(
       (id) => `fake/fake.profile/${id}`,
     )
-    expect(listAuthors(ctx)).toEqual([
-      { id: pd, name: 'pd' },
-      { id: pb, name: '同名作者' },
-      { id: pc, name: '同名作者' },
-      { id: pa, name: '新名' },
+    // Most saved posts first, then by name.
+    expect(listAuthors(ctx)).toEqual({
+      items: [
+        { id: pa, name: '新名', count: 3 },
+        { id: pb, name: '同名作者', count: 2 },
+        { id: pd, name: 'pd', count: 1 },
+        { id: pc, name: '同名作者', count: 1 },
+      ],
+    })
+    // Search reaches names and the platform's ids; keys name a selection.
+    const found = (filter: Parameters<typeof listAuthors>[1]) =>
+      listAuthors(ctx, filter).items.map((author) => author.id)
+    expect(found({ q: '同名' })).toEqual([pb, pc])
+    expect(found({ q: 'PD' })).toEqual([pd])
+    expect(found({ authors: [pc!, pa!] })).toEqual([pa, pc])
+    expect(listAuthors(ctx, { cursor: '4' }).items).toEqual([])
+    for (const filter of [
+      { cursor: '-1' },
+      { cursor: '01' },
+      { cursor: 'x' },
+      { authors: ['新名'] },
     ])
+      expect(() => listAuthors(ctx, filter)).toThrow(
+        'invalid collection filters',
+      )
     expect(all(ctx, { authors: [pa!] })).toHaveLength(3)
     expect(all(ctx, { authors: [pb!, pc!] })).toHaveLength(3)
     expect(all(ctx, { authors: [pc!] })).toHaveLength(1)
