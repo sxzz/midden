@@ -7,8 +7,6 @@ const HTTP_SCHEME = /^https?:\/\//i
 const BARE_LINK = /^[\w-]+(?:\.[\w-]+)+\/\S+$/
 const WWW_PREFIX = /^www\./
 const TRAILING_SLASH = /\/$/
-const INSTAGRAM_LOGIN_FAILURE =
-  /^Instagram (?:access denied|requires browser|redirected|requires login, )/
 
 /**
  * Pull the links out of pasted text. A link may come without its scheme, the
@@ -97,43 +95,6 @@ export function recordCounts(r: CaptureRecord) {
   ]
     .filter(Boolean)
     .join(' · ')
-}
-
-const reasons: Record<string, string> = {
-  'storage quota exceeded': '存储空间不足',
-  'account cannot access this post': '采集账号无权访问该帖子',
-  'account is suspended': '账号已被封禁，解封后可重新抓取',
-  'profile not found': '账号不存在或已改名',
-  'post not found or deleted': '帖子不存在或已删除',
-  'provider cannot access this post': '无法获取该帖子',
-  'provider cannot access this profile': '无法获取该账号资料',
-  'account required; add and select your own credentials':
-    '此平台需要账号，请先在采集账号中添加并选择一个账号',
-  'Instagram requires an account; select an Instagram account and retry':
-    'Instagram 需要登录，请在采集账号中选择 Instagram 账号后重试',
-  'Instagram requires login':
-    'Instagram 需要登录，请在采集账号中选择 Instagram 账号后重试',
-  'Instagram session expired; authorize again':
-    'Instagram 登录已失效，请重新添加账号授权',
-  'Instagram rate limited the request': 'Instagram 请求过于频繁，请稍后重试',
-  'Instagram content not found or inaccessible':
-    'Instagram 内容不存在或当前账号无权访问',
-  'Instagram temporarily unavailable': 'Instagram 暂时不可用，请稍后重试',
-  'provider temporarily unavailable': '来源平台暂时不可用，请稍后重试',
-  'account request signing unavailable': '采集账号请求签名不可用',
-  'context deadline exceeded': '请求超时',
-  'job exhausted retries or was interrupted': '任务重试次数已用尽或执行被中断',
-  'capture was interrupted': '采集被中断',
-  'operation failed; retry or inspect service health': '服务内部错误',
-  'resource omitted: unsupported type or resource limit':
-    '部分资源类型不支持或资源数量超过限制',
-}
-/** A failure reason as the bot words it; unknown ones are shown as recorded. */
-export function reasonText(reason: string) {
-  const text = reason.trim()
-  if (INSTAGRAM_LOGIN_FAILURE.test(text))
-    return 'Instagram 要求登录验证或账号无权访问，请检查账号后重试'
-  return reasons[text] ?? text
 }
 
 const purposes: Record<string, string> = {

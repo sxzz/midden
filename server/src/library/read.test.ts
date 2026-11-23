@@ -214,8 +214,10 @@ describe('collection', () => {
     ).toBe(21)
     expect(() =>
       listRevisions(ctx, other.collectionId, first.next_cursor),
-    ).toThrow('invalid cursor')
-    expect(() => listRevisions(ctx, id, 'garbage')).toThrow('invalid cursor')
+    ).toThrow('翻页位置无效，请刷新后重试')
+    expect(() => listRevisions(ctx, id, 'garbage')).toThrow(
+      '翻页位置无效，请刷新后重试',
+    )
   })
 
   test('only saved collections are readable', async () => {
@@ -244,7 +246,7 @@ describe('collection', () => {
       () => getCollection(ctx, randomUUIDv7()),
       () => getCollection(ctx, 'not-a-uuid'),
     ])
-      expect(read).toThrow('not found')
+      expect(read).toThrow('内容不存在或已删除')
     // Delivery of a capture's result does not depend on the library.
     expect(getCaptureCollection(ctx, done.id).text).toBe('x')
   })
@@ -576,6 +578,6 @@ describe('entity links', () => {
         (r) => r.type,
       ),
     ).toEqual(['reposted'])
-    expect(() => getEntity(ctx, randomUUIDv7())).toThrow('not found')
+    expect(() => getEntity(ctx, randomUUIDv7())).toThrow('内容不存在或已删除')
   })
 })

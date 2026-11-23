@@ -99,10 +99,7 @@ export class CaptureStrategy {
             error instanceof ProviderError &&
             error.code === status.UNAUTHENTICATED
           )
-            throw new ProviderError(
-              status.UNAVAILABLE,
-              'public profile service unavailable',
-            )
+            throw new ProviderError(status.UNAVAILABLE, '公共资料服务不可用')
           throw error
         })
         .then((value) => {
@@ -186,7 +183,7 @@ export class CaptureStrategy {
             // eslint-disable-next-line require-await
             fetch: async () => {
               asked = true
-              throw new Error('account required')
+              throw new Error('需要采集账号')
             },
           },
       shouldTranscodeGif: () => false,
@@ -224,10 +221,7 @@ export class CaptureStrategy {
   private protected(profile: FetchResponse): boolean {
     const value = this.user(profile).protected
     if (typeof value !== 'boolean')
-      throw new ProviderError(
-        status.UNAVAILABLE,
-        'profile protection status unavailable',
-      )
+      throw new ProviderError(status.UNAVAILABLE, '无法确认账号是否受保护')
     return value
   }
   async fetch(
@@ -236,17 +230,14 @@ export class CaptureStrategy {
     credential?: SessionCredential,
   ): Promise<FetchResponse> {
     if (req.pageCursor && (req.kind !== 'profile' || req.automatic))
-      throw new ProviderError(
-        status.INVALID_ARGUMENT,
-        'invalid collection continuation',
-      )
+      throw new ProviderError(status.INVALID_ARGUMENT, '翻页信息无效')
     let result: FetchResponse
     // The core withholds the account until a fetch turns out to need it.
     const account = () => {
       if (!credential && req.credentialDeferred) {
         const error = new ProviderError(
           status.FAILED_PRECONDITION,
-          'account required',
+          '需要采集账号',
         )
         error.metadata.set(credentialRequiredKey, '1')
         throw error
@@ -275,7 +266,7 @@ export class CaptureStrategy {
           } catch {
             throw new ProviderError(
               status.FAILED_PRECONDITION,
-              'collection changed; start again from the profile link',
+              '列表已变化，请从主页链接重新开始',
             )
           }
         }
@@ -344,10 +335,7 @@ export class CaptureStrategy {
           (e) => e.type === 'x.profile',
         )
         if (!authorNode)
-          throw new ProviderError(
-            status.UNAVAILABLE,
-            'post author unavailable for capture policy',
-          )
+          throw new ProviderError(status.UNAVAILABLE, '无法确认帖子作者')
         profile = await this.profile(authorNode.externalId, false, signal)
       }
       if (discovered?.providerId === 'x-session') {

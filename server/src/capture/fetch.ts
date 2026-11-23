@@ -181,7 +181,7 @@ function onFetchError(
       .run()
   const seconds = retryAfter(error)
   if (seconds)
-    return new RetryError('temporary upstream failure', seconds * 1000, {
+    return new RetryError('来源平台暂时出错', seconds * 1000, {
       cause: error,
     })
   return error
@@ -223,10 +223,10 @@ export function stage(
     response.externalId !== identity.externalId ||
     response.providerId !== identity.providerId
   )
-    throw new PermanentError('adapter returned mismatched identity')
+    throw new PermanentError('平台返回的内容与链接不符')
   validateRelated(response, policy, identity)
   if (Buffer.byteLength(response.text) > MAX_TEXT)
-    throw new PermanentError('text exceeds collection limit')
+    throw new PermanentError('正文超出长度上限')
   const graph = validateGraph(response, policy, entityTypes)
   const sources = keepSources(response.sourceResponses)
 
@@ -259,15 +259,13 @@ export function stage(
       Buffer.byteLength(resource.altText) > MAX_TEXT ||
       Buffer.byteLength(resource.purpose) > 128
     )
-      throw new PermanentError('resource metadata exceeds limit')
+      throw new PermanentError('媒体信息超出上限')
     let keep = resource.kind === 'image' || resource.kind === 'video'
     if (resource.purpose) keep &&= ++purposed <= MAX_PURPOSED_MEDIA
     else keep &&= ++media <= MAX_MEDIA
     if (!keep) {
       payload.incomplete = true
-      payload.warnings.push(
-        'resource omitted: unsupported type or resource limit',
-      )
+      payload.warnings.push('部分资源类型不支持或资源数量超过限制')
       continue
     }
     positions.set(index, kept.length)
@@ -297,7 +295,7 @@ function validateRelated(
     ((response.nextPageCursor || response.maxBatchSize > 0) &&
       !supports(policy, 'capture.page'))
   )
-    throw new PermanentError('undeclared or invalid page continuation')
+    throw new PermanentError('平台返回的翻页信息无效')
   const canonical = response.canonicalTarget
   if (
     canonical &&
@@ -308,20 +306,20 @@ function validateRelated(
       !canonical.externalId ||
       !validURL(canonical.url))
   )
-    throw new PermanentError('invalid canonical target')
+    throw new PermanentError('平台返回的规范链接无效')
   if (response.relatedTargets.length && !supports(policy, 'capture.related'))
-    throw new PermanentError('undeclared related capture capability')
+    throw new PermanentError('平台返回了未声明的关联内容')
   if (response.relatedTargets.length > MAX_RELATED)
-    throw new PermanentError('related capture page exceeds 512 targets')
+    throw new PermanentError('单页关联内容超过 512 条')
   for (const target of response.relatedTargets) {
     if (!validURL(target.url))
-      throw new PermanentError('invalid related target')
+      throw new PermanentError('平台返回的关联内容无效')
     if (
       target.prefetch.length &&
       (target.prefetch.length > MAX_PREFETCH ||
         !supports(policy, 'capture.prefetch'))
     )
-      throw new PermanentError('undeclared or oversized related prefetch')
+      throw new PermanentError('平台返回的预取内容无效或过大')
   }
 }
 
@@ -346,7 +344,7 @@ function keepSources(
         valid = false
       }
     }
-    if (!valid) throw new PermanentError('invalid source response')
+    if (!valid) throw new PermanentError('平台原始响应无效')
   }
   return kept
 }

@@ -4,7 +4,6 @@ import {
   groupRecords,
   linkTitle,
   mediaLabel,
-  reasonText,
   recordCounts,
   recordProgress,
   recordRowTime,
@@ -100,14 +99,6 @@ test('a collection follows its members after its own capture ends', () => {
       }),
     ).label,
   ).toBe('已完成')
-})
-
-test('words known failure reasons and keeps unknown ones', () => {
-  expect(reasonText('post not found or deleted')).toBe('帖子不存在或已删除')
-  expect(reasonText('Instagram requires browser verification')).toMatch(
-    /登录验证/,
-  )
-  expect(reasonText('upstream said no')).toBe('upstream said no')
 })
 
 test('names profile images by what they are', () => {

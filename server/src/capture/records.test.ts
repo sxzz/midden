@@ -45,7 +45,7 @@ function setup(broken: Set<string>) {
             if (broken.has(req.externalId))
               throw new FakeFailure(
                 status.FAILED_PRECONDITION,
-                'post not found or deleted',
+                '帖子不存在或已删除',
               )
             return { text: 'post', graph: postGraph(req.externalId, {}) }
           }
@@ -79,7 +79,9 @@ describe('capture records', () => {
     // Two posts left; profile members are not records.
     expect(second.items).toHaveLength(3)
     expect(second.next).toBeUndefined()
-    expect(() => listRecords(c.db, 'bogus')).toThrow('invalid cursor')
+    expect(() => listRecords(c.db, 'bogus')).toThrow(
+      '翻页位置无效，请刷新后重试',
+    )
     expect(librarySize(c.db)).toMatchObject({ records: 33, running: 0 })
   })
 
@@ -98,7 +100,7 @@ describe('capture records', () => {
     expect(record.pages).toEqual({ more: true, more1000: true, failed: false })
     expect(record.retryable).toBe(1)
     expect(recordDetail(c.db, record.id).reasons).toEqual([
-      { reason: 'post not found or deleted', count: 1 },
+      { reason: '帖子不存在或已删除', count: 1 },
     ])
     expect(
       recordMembers(c.db, record.id, 'problem').items.map((m) => m.url),
@@ -175,8 +177,8 @@ describe('capture records', () => {
     const page = listRecords(c.db).items[0]!
     expect(page.members).toMatchObject({ total: 2, complete: 2 })
     expect(page.pages?.more).toBe(false)
-    expect(() => recordPage(c, page.id, 'more')).toThrow('no more pages')
-    expect(() => recordPage(c, page.id, 'sideways')).toThrow('not supported')
+    expect(() => recordPage(c, page.id, 'more')).toThrow('没有更多帖子了')
+    expect(() => recordPage(c, page.id, 'sideways')).toThrow('不支持')
   })
 
   test('retrying a deleted record saves it again', async () => {

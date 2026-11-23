@@ -26,7 +26,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
     let body: unknown
     switch (path) {
       case '/v1/session': {
-        body = { tenant_id: 'fixture' }
+        body = {}
         break
       }
       case '/v1/usage': {
@@ -62,7 +62,10 @@ test('browse, filter, history, refresh and remove a saved post', async ({
           }
           body = collection
         } else {
-          await r.fulfill({ status: 404, json: { error: 'not found' } })
+          await r.fulfill({
+            status: 404,
+            json: { error: '内容不存在或已删除' },
+          })
           return
         }
     }
@@ -120,14 +123,14 @@ test('an ordinary browser logs in with the Telegram Login Widget', async ({
     const path = new URL(r.request().url()).pathname
     if (path === '/v1/session')
       return session
-        ? r.fulfill({ json: { tenant_id: 'x' } })
-        : r.fulfill({ status: 401, json: { error: 'authentication required' } })
+        ? r.fulfill({ json: {} })
+        : r.fulfill({ status: 401, json: { error: '需要登录' } })
     if (path === '/v1/auth/telegram' && r.request().method() === 'GET')
       return r.fulfill({ json: { bot_username: 'midden_bot' } })
     if (path === '/v1/auth/telegram') {
       logins.push(r.request().postDataJSON())
       session = true
-      return r.fulfill({ json: { tenant_id: 'x' } })
+      return r.fulfill({ json: {} })
     }
     if (path === '/v1/collections') return r.fulfill({ json: { items: [] } })
     return r.fulfill({ json: {} })
@@ -168,11 +171,14 @@ test('a rejected widget login says so on the login page', async ({ page }) => {
     const path = new URL(r.request().url()).pathname
     if (path === '/v1/auth/telegram' && r.request().method() === 'GET')
       return r.fulfill({ json: { bot_username: 'midden_bot' } })
-    return r.fulfill({ status: 401, json: { error: 'invalid' } })
+    return r.fulfill({
+      status: 401,
+      json: { error: 'Telegram 登录校验失败，请重试' },
+    })
   })
   await page.goto('/app/?id=42&auth_date=1&hash=bad')
   await expect(page.getByRole('alert')).toHaveText(
-    'Telegram 登录校验失败，请重试。',
+    'Telegram 登录校验失败，请重试',
   )
 })
 
@@ -209,7 +215,7 @@ test('sensitive image stays blurred until revealed and opens inside the page', a
     }
     const body =
       path === '/v1/session'
-        ? { tenant_id: 'fixture' }
+        ? {}
         : path === '/v1/usage'
           ? { used_bytes: 0 }
           : path.endsWith('/availability')
@@ -421,12 +427,12 @@ test('a failed refresh shows a toast every time it is tried', async ({
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {
     const path = new URL(r.request().url()).pathname
-    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/session') return r.fulfill({ json: {} })
     if (path === '/v1/captures') {
       attempts++
       return r.fulfill({
-        status: 429,
-        json: { error: 'capture rate exceeded' },
+        status: 503,
+        json: { error: '采集服务暂时不可用' },
       })
     }
     if (path.endsWith('/availability'))
@@ -444,7 +450,7 @@ test('a failed refresh shows a toast every time it is tried', async ({
   for (let i = 1; i <= 2; i++) {
     await page.getByRole('button', { name: '重新抓取' }).click()
     await expect.poll(() => attempts).toBe(i)
-    await expect(toast).toHaveText('操作太频繁，请稍后重试。')
+    await expect(toast).toHaveText('采集服务暂时不可用')
   }
   // The collection stays on screen instead of giving way to an error banner.
   await expect(page.getByText(collection.text)).toBeVisible()
@@ -475,7 +481,7 @@ test('a private collection shows a lock beside the name, not a detail line', asy
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {
     const path = new URL(r.request().url()).pathname
-    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/session') return r.fulfill({ json: {} })
     if (path === '/v1/collections')
       return r.fulfill({
         json: { items: [hidden, { ...collection, id: 'b' }] },
@@ -541,7 +547,7 @@ test('a post reads its author as last seen and notes when it was deleted', async
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {
     const path = new URL(r.request().url()).pathname
-    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/session') return r.fulfill({ json: {} })
     if (path === '/v1/collections')
       return r.fulfill({ json: { items: [post] } })
     if (path.endsWith('/availability'))
@@ -603,7 +609,7 @@ test('list media loads only near the viewport and leaves the API ahead', async (
       requested.add(path.split('/').pop()!)
       return r.fulfill({ status: 404, body: '' })
     }
-    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/session') return r.fulfill({ json: {} })
     if (path === '/v1/collections') return r.fulfill({ json: { items: rows } })
     return r.fulfill({ json: {} })
   })
@@ -664,7 +670,7 @@ test('lists show thumbnails; the open post loads the originals', async ({
       requested.push(path.slice('/v1/assets/'.length))
       return r.fulfill({ contentType: 'image/png', body: pixel })
     }
-    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/session') return r.fulfill({ json: {} })
     if (path === '/v1/collections')
       return r.fulfill({ json: { items: [post] } })
     if (path === `/v1/collections/${id}`) return r.fulfill({ json: post })

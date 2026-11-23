@@ -115,12 +115,7 @@ export function resolveCaptureScope(
         .where(eq(refreshBatches.id, batch.id))
         .run()
     }
-    failCapture(
-      ctx,
-      tx,
-      captureId,
-      'joined a running capture of the same content',
-    )
+    failCapture(ctx, tx, captureId, '已并入同一内容正在进行的采集')
   } else {
     // A queued capture has no media or revisions yet, so it moves cleanly.
     tx.update(captures)

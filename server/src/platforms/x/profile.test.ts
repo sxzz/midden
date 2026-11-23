@@ -335,7 +335,7 @@ test('profile failures name suspension and missing accounts without blocking ret
       message: 'User is suspended',
       reason: 'suspended',
     }),
-    failure('account is suspended'),
+    failure('账号已被封禁，解封后可重新抓取'),
   )
   await assert.rejects(
     profile(200, {
@@ -343,16 +343,16 @@ test('profile failures name suspension and missing accounts without blocking ret
       message: 'User is suspended',
       reason: 'suspended',
     }),
-    failure('account is suspended'),
+    failure('账号已被封禁，解封后可重新抓取'),
   )
   await assert.rejects(
     profile(404, { code: 404, message: 'User not found' }),
-    failure('profile not found'),
+    failure('账号不存在或已改名'),
   )
-  await assert.rejects(profile(404, 'not json'), failure('profile not found'))
+  await assert.rejects(profile(404, 'not json'), failure('账号不存在或已改名'))
   await assert.rejects(
     profile(410, { code: 410 }),
-    failure('provider cannot access this profile'),
+    failure('无法获取该账号资料'),
   )
 })
 

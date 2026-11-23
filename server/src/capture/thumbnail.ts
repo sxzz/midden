@@ -81,7 +81,7 @@ export async function runThumbnail(
     .get()
   if (done) return
   if (!SOURCE_TYPES.has(blob.mime)) {
-    record(ctx, blob.id, { state: 'failed', error: 'unsupported media format' })
+    record(ctx, blob.id, { state: 'failed', error: '不支持的媒体格式' })
     return
   }
   await mkdir(ctx.stagingDir, { recursive: true })

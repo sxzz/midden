@@ -49,10 +49,7 @@ export function accountTransport(
           url.hostname,
         )
       )
-        throw new ProviderError(
-          status.FAILED_PRECONDITION,
-          'unsupported account endpoint',
-        )
+        throw new ProviderError(status.FAILED_PRECONDITION, '不支持的账号接口')
       const headers = new Headers(init.headers)
       headers.set('user-agent', accountUserAgent)
       headers.set('referer', 'https://x.com/')
@@ -77,10 +74,7 @@ export function accountTransport(
           generator = await transaction
         } catch (e) {
           if (e instanceof ProviderError) throw e
-          throw new ProviderError(
-            status.UNAVAILABLE,
-            'account request signing unavailable',
-          )
+          throw new ProviderError(status.UNAVAILABLE, '采集账号请求签名不可用')
         }
         headers.set(
           'x-client-transaction-id',
@@ -100,7 +94,7 @@ export function accountTransport(
         await response.body?.cancel()
         throw new ProviderError(
           status.UNAVAILABLE,
-          'X requires browser verification; account validity is unknown',
+          'X 要求浏览器验证，无法确认账号是否有效',
         )
       }
       if (!response.ok) {
@@ -119,10 +113,7 @@ export function accountTransport(
           responses.reduce((n, r) => n + r.body.length, 0) + body.length >
           4 << 20
         )
-          throw new ProviderError(
-            status.RESOURCE_EXHAUSTED,
-            'source responses exceed limit',
-          )
+          throw new ProviderError(status.RESOURCE_EXHAUSTED, '原始响应超出上限')
         responses.push({
           body: Buffer.from(body),
           contentType:
@@ -139,10 +130,7 @@ export function accountTransport(
           throw responseError(429, response.headers.get('retry-after'))
         if (codes.some((c: number) => [63, 179, 200].includes(c)))
           throw responseError(403)
-        throw new ProviderError(
-          status.UNAVAILABLE,
-          'account provider returned an error',
-        )
+        throw new ProviderError(status.UNAVAILABLE, '账号接口返回错误')
       }
       return Response.json(data)
     },
@@ -336,10 +324,7 @@ export async function checkSession(
   const data = await readJSON(response)
   const viewer = data?.data?.viewer
   if (viewer?.is_tfe_restricted_session === true)
-    throw new ProviderError(
-      status.PERMISSION_DENIED,
-      'account session is restricted',
-    )
+    throw new ProviderError(status.PERMISSION_DENIED, 'X 账号受限')
   const user = viewer?.user_results?.result
   const accountId = user?.rest_id
   const username = user?.core?.screen_name
@@ -352,7 +337,7 @@ export async function checkSession(
   )
     throw new ProviderError(
       status.FAILED_PRECONDITION,
-      'account verification response format changed',
+      '账号验证响应格式已变化',
     )
   return { accountId, username }
 }

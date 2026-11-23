@@ -152,7 +152,7 @@ test('adds, selects and deletes an X account', async ({ page }) => {
       if (body.credential === 'expired')
         return r.fulfill({
           status: 400,
-          json: { error: 'invalid credentials' },
+          json: { error: '凭据无效或已过期' },
         })
       const account = {
         id: main,
@@ -270,7 +270,7 @@ test('deleting everything shows what goes and needs the phrase typed', async ({
   await page.route('**/v1/**', (r) => {
     const request = r.request()
     const path = new URL(request.url()).pathname
-    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/session') return r.fulfill({ json: {} })
     if (path === '/v1/accounts')
       return r.fulfill({ json: { platforms: [], accounts: [] } })
     if (path === '/v1/library')

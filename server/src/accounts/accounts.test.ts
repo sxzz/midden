@@ -32,13 +32,9 @@ function setup() {
           requests.push(req)
           // Needs the account, and says so when it was withheld.
           if (req.credentialDeferred && !req.credential)
-            throw new FakeFailure(
-              status.FAILED_PRECONDITION,
-              'account required',
-              {
-                'credential-required': '1',
-              },
-            )
+            throw new FakeFailure(status.FAILED_PRECONDITION, '需要采集账号', {
+              'credential-required': '1',
+            })
           return { text: Buffer.from(req.credential?.data ?? []).toString() }
         },
       }),
@@ -104,7 +100,7 @@ describe('accounts', () => {
       error: '账号不可用，请在采集账号中选择可用账号或重新授权。',
     })
     expect(listAccounts(ctx).platforms[0]!.selected).toBe('')
-    expect(() => selectAccount(ctx, 'fake', id)).toThrow('not found')
+    expect(() => selectAccount(ctx, 'fake', id)).toThrow('内容不存在或已删除')
     expect(() => selectAccount(ctx, 'fake', '')).not.toThrow()
   })
 

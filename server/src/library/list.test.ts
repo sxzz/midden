@@ -93,9 +93,11 @@ describe('library listing', () => {
     // Newest capture first.
     expect(ids([...first.items, ...second.items])).toEqual(made.toReversed())
     expect(() => listCollections(ctx, { q: 'x' }, first.next_cursor)).toThrow(
-      'invalid cursor',
+      '翻页位置无效，请刷新后重试',
     )
-    expect(() => listCollections(ctx, {}, 'garbage')).toThrow('invalid cursor')
+    expect(() => listCollections(ctx, {}, 'garbage')).toThrow(
+      '翻页位置无效，请刷新后重试',
+    )
 
     // Search is literal and covers the text.
     expect(all(ctx, { q: '中文' })).toHaveLength(22)
@@ -114,14 +116,14 @@ describe('library listing', () => {
     const page = listCollections(ctx, { sort: 'published' })
     expect(() =>
       listCollections(ctx, { sort: 'captured' }, page.next_cursor),
-    ).toThrow('invalid cursor')
+    ).toThrow('翻页位置无效，请刷新后重试')
     expect(() =>
       listCollections(
         ctx,
         { sort: 'published', order: 'asc' },
         page.next_cursor,
       ),
-    ).toThrow('invalid cursor')
+    ).toThrow('翻页位置无效，请刷新后重试')
 
     // Storage order is stable across pages, ties by id.
     for (const order of ['asc', 'desc']) {
@@ -164,9 +166,7 @@ describe('library listing', () => {
         savedBefore: '2026-01-01T00:00:00Z',
       },
     ])
-      expect(() => listCollections(ctx, filter)).toThrow(
-        'invalid collection filters',
-      )
+      expect(() => listCollections(ctx, filter)).toThrow('筛选条件无效')
   })
 
   test('root type, media, sensitivity and save time', async () => {
@@ -274,9 +274,7 @@ describe('library listing', () => {
       { cursor: 'x' },
       { authors: ['新名'] },
     ])
-      expect(() => listAuthors(ctx, filter)).toThrow(
-        'invalid collection filters',
-      )
+      expect(() => listAuthors(ctx, filter)).toThrow('筛选条件无效')
     expect(all(ctx, { authors: [pa!] })).toHaveLength(3)
     expect(all(ctx, { authors: [pb!, pc!] })).toHaveLength(3)
     expect(all(ctx, { authors: [pc!] })).toHaveLength(1)
@@ -288,7 +286,7 @@ describe('library listing', () => {
       'fake/fake.profile/p%61',
     ])
       expect(() => listCollections(ctx, { authors: [key] })).toThrow(
-        'invalid collection filters',
+        '筛选条件无效',
       )
   })
 

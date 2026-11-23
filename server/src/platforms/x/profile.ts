@@ -78,7 +78,7 @@ export function normalizeProfile(
     typeof user.name !== 'string' ||
     (!requested.startsWith('handle:') && requested !== user.id)
   )
-    throw new ProviderError(status.UNAVAILABLE, 'invalid profile response')
+    throw new ProviderError(status.UNAVAILABLE, '平台返回的账号资料无效')
   const result = FetchResponse.fromPartial({
     externalId: requested,
     providerId: provider,
@@ -147,10 +147,7 @@ export function attachTimeline(
   prefetch?: (post: any) => Buffer | undefined,
 ): void {
   if (timeline?.code !== 200 || !Array.isArray(timeline.results))
-    throw new ProviderError(
-      status.UNAVAILABLE,
-      'invalid profile timeline response',
-    )
+    throw new ProviderError(status.UNAVAILABLE, '平台返回的时间线无效')
   const ids = new Map<string, RelatedTarget>()
   for (const post of timeline.results) {
     if (
@@ -215,10 +212,7 @@ export function attachTimeline(
     }
   }
   if (ids.size > 200)
-    throw new ProviderError(
-      status.RESOURCE_EXHAUSTED,
-      'profile timeline exceeds capture page limit',
-    )
+    throw new ProviderError(status.RESOURCE_EXHAUSTED, '时间线超出单次翻页上限')
   result.nextPageCursor =
     ids.size && typeof timeline.cursor?.bottom === 'string'
       ? timeline.cursor.bottom
@@ -422,10 +416,7 @@ async function sessionTimelinePage(
     },
   ])
   if (!response.tweets?.success)
-    throw new ProviderError(
-      status.UNAVAILABLE,
-      'invalid profile timeline response',
-    )
+    throw new ProviderError(status.UNAVAILABLE, '平台返回的时间线无效')
   const instructions =
     getProfileStatusesTimelineInstructions(response.tweets.data) ?? []
   const results: any[] = []

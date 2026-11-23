@@ -10,10 +10,7 @@ export const accountUserAgent =
 export function bootstrapIdentity(html: string) {
   const marker = /window\.__INITIAL_STATE__\s*=\s*/.exec(html)
   const invalid = () =>
-    new ProviderError(
-      status.FAILED_PRECONDITION,
-      'account verification page format changed',
-    )
+    new ProviderError(status.FAILED_PRECONDITION, '账号验证页面格式已变化')
   if (!marker) throw invalid()
   const input = html.slice(marker.index + marker[0].length)
   if (input[0] !== '{') throw invalid()
@@ -36,10 +33,7 @@ export function bootstrapIdentity(html: string) {
         throw invalid()
       }
       if (state.session?.isRestrictedSession === true)
-        throw new ProviderError(
-          status.PERMISSION_DENIED,
-          'account session is restricted',
-        )
+        throw new ProviderError(status.PERMISSION_DENIED, 'X 账号受限')
       const id = state.session?.user_id
       const user = state.entities?.users?.entities?.[id]
       if (
@@ -82,29 +76,22 @@ export async function accountBootstrap(
     ) {
       throw new ProviderError(
         status.UNAUTHENTICATED,
-        'account session expired; authorize again',
+        'X 登录已失效，请重新添加账号授权',
       )
     }
-    throw new ProviderError(
-      status.UNAVAILABLE,
-      'unexpected account verification redirect',
-    )
+    throw new ProviderError(status.UNAVAILABLE, '账号验证时被意外重定向')
   }
   if (response.headers.get('cf-mitigated') === 'challenge') {
     await response.body?.cancel()
     throw new ProviderError(
       status.UNAVAILABLE,
-      'X requires browser verification; account validity is unknown',
+      'X 要求浏览器验证，无法确认账号是否有效',
     )
   }
   if (!response.ok)
     throw responseError(response.status, response.headers.get('retry-after'))
   const reader = response.body?.getReader()
-  if (!reader)
-    throw new ProviderError(
-      status.UNAVAILABLE,
-      'empty account verification response',
-    )
+  if (!reader) throw new ProviderError(status.UNAVAILABLE, '账号验证响应为空')
   const chunks: Uint8Array[] = []
   let size = 0
   try {
@@ -113,10 +100,7 @@ export async function accountBootstrap(
       if (done) break
       size += value.length
       if (size > 2 << 20)
-        throw new ProviderError(
-          status.UNAVAILABLE,
-          'account verification response too large',
-        )
+        throw new ProviderError(status.UNAVAILABLE, '账号验证响应过大')
       chunks.push(value)
     }
   } finally {

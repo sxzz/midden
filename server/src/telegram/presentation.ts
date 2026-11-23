@@ -103,48 +103,6 @@ export function jobState(state: string): string {
   }
 }
 
-const INSTAGRAM_LOGIN =
-  'Instagram 需要登录，请在采集账号中选择 Instagram 账号后重试。'
-const INSTAGRAM_CHECK =
-  'Instagram 要求登录验证或账号无权访问，请检查账号后重试。'
-const REASONS: Record<string, string> = {
-  'storage quota exceeded': '存储空间不足',
-  'account cannot access this post': '采集账号无权访问该帖子',
-  'account is suspended': '账号已被封禁，解封后可重新抓取',
-  'profile not found': '账号不存在或已改名',
-  'post not found or deleted': '帖子不存在或已删除',
-  'provider cannot access this post': '无法获取该帖子',
-  'provider cannot access this profile': '无法获取该账号资料',
-  'account required; add and select your own credentials':
-    '此平台需要账号，请先在采集账号中添加并选择一个账号。',
-  'Instagram requires an account; select an Instagram account and retry':
-    INSTAGRAM_LOGIN,
-  'Instagram requires login': INSTAGRAM_LOGIN,
-  'Instagram session expired; authorize again':
-    'Instagram 登录已失效，请重新添加账号授权。',
-  'Instagram rate limited the request': 'Instagram 请求过于频繁，请稍后重试。',
-  'Instagram access denied or browser verification required': INSTAGRAM_CHECK,
-  'Instagram requires browser verification': INSTAGRAM_CHECK,
-  'Instagram redirected to login or verification': INSTAGRAM_CHECK,
-  'Instagram requires login, verification, or a later retry': INSTAGRAM_CHECK,
-  'Instagram content not found or inaccessible':
-    'Instagram 内容不存在或当前账号无权访问。',
-  'Instagram temporarily unavailable': 'Instagram 暂时不可用，请稍后重试。',
-  'provider temporarily unavailable': '来源平台暂时不可用，请稍后重试。',
-  'account request signing unavailable': '采集账号请求签名不可用',
-  'context deadline exceeded': '请求超时',
-  'job exhausted retries or was interrupted': '任务重试次数已用尽或执行被中断',
-  'operation failed; retry or inspect service health': '服务内部错误',
-  'resource omitted: unsupported type or resource limit':
-    '部分资源类型不支持或资源数量超过限制',
-}
-
-/** A stored failure reason in the words users read; unknown ones as is. */
-export function failureReason(reason: string): string {
-  const trimmed = reason.trim()
-  return REASONS[trimmed] ?? trimmed
-}
-
 // --- Collections -----------------------------------------------------------
 
 const PROFILE_TYPES = new Set(['x.profile', 'instagram.profile'])
@@ -268,7 +226,7 @@ export function collectionMessage(
       .map((a) => a.error!),
     ...(options.reasons ?? []),
   ])
-    reasons.add(failureReason(reason))
+    reasons.add(reason)
   for (const reason of reasons) blocks.push(`未完整保存原因：${reason}`)
 
   const source = isProfile(collection)
@@ -348,7 +306,7 @@ export function progressMessage(
 ): Rendered {
   let body: string
   if (p.rootState === 'failed') {
-    body = `帖子列表获取失败\n输入：${p.input}\n${failureReason(p.rootError)}`
+    body = `帖子列表获取失败\n输入：${p.input}\n${p.rootError}`
   } else {
     const heading = p.stopped ? '采集已中止' : p.done ? '采集完成' : '正在采集…'
     const running = Math.max(0, p.total - p.complete - p.partial - p.failed)
@@ -358,7 +316,7 @@ export function progressMessage(
   if (p.reasons.length) {
     body += '\n\n未完整保存原因：'
     for (const { reason, count } of p.reasons.slice(0, MAX_REASONS))
-      body += `\n• ${cut(failureReason(reason), REASON_LENGTH)}（${count} 条）`
+      body += `\n• ${cut(reason, REASON_LENGTH)}（${count} 条）`
     if (p.reasons.length > MAX_REASONS)
       body += `\n另有 ${p.reasons.length - MAX_REASONS} 类原因。`
   }

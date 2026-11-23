@@ -107,18 +107,14 @@ describe('capture and finalize', () => {
 
   test('a gone post fails the capture and marks the source', async () => {
     const { ctx } = setup(() => {
-      throw new FakeFailure(
-        status.FAILED_PRECONDITION,
-        'post not found or deleted',
-        {
-          'source-state': 'deleted',
-        },
-      )
+      throw new FakeFailure(status.FAILED_PRECONDITION, '帖子不存在或已删除', {
+        'source-state': 'deleted',
+      })
     })
     const done = await capture(ctx, post)
     expect(done).toMatchObject({
       state: 'failed',
-      error: 'post not found or deleted',
+      error: '帖子不存在或已删除',
     })
     expect(ctx.db.select().from(collections).get()?.sourceState).toBe('deleted')
   })
@@ -140,7 +136,7 @@ describe('capture and finalize', () => {
     const { ctx } = setup(() => ({ text: '' }))
     expect(await capture(ctx, post)).toMatchObject({
       state: 'failed',
-      error: 'no text or media could be saved',
+      error: '没有可保存的正文或媒体',
     })
   })
 
@@ -148,7 +144,7 @@ describe('capture and finalize', () => {
     const { ctx } = setup(() => ({ externalId: '2', text: 'x' }))
     expect(await capture(ctx, post)).toMatchObject({
       state: 'failed',
-      error: 'adapter returned mismatched identity',
+      error: '平台返回的内容与链接不符',
     })
   })
 

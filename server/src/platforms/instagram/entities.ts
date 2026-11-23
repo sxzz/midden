@@ -149,7 +149,7 @@ export function profileResult(
   })
   const entity = attachProfile(result, user, 'author', false)
   if (!entity)
-    throw new ProviderError(status.UNAVAILABLE, 'invalid Instagram profile')
+    throw new ProviderError(status.UNAVAILABLE, 'Instagram 账号资料无效')
   result.summary = `${result.authorName}：${result.text || `@${user.username}`}`
   result.canonicalTarget = ResolveResponse.fromPartial({
     url: `https://www.instagram.com/${user.username}/`,
@@ -223,10 +223,7 @@ export function postResult(
   visibility: Visibility,
 ): FetchResponse {
   if (mediaId(node) !== requested)
-    throw new ProviderError(
-      status.UNAVAILABLE,
-      'Instagram returned a different post',
-    )
+    throw new ProviderError(status.UNAVAILABLE, 'Instagram 返回了另一条帖子')
   const shortcode = shortcodeFromPk(requested)
   const user = node.user ?? node.owner ?? {}
   const text = captionFromMedia(node)

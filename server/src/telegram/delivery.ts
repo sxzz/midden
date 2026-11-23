@@ -14,7 +14,6 @@ import { batchMessage } from './batch-message.ts'
 import { deliveryParts, type Part } from './parts.ts'
 import {
   collectionMessage,
-  failureReason,
   groupKeyboard,
   messageAssets,
   progressMessage,
@@ -377,7 +376,7 @@ export class DeliveryWorker {
       )
       if (details) keyboard[0]!.push(details)
       await this.#status(delivery, {
-        text: `收藏失败\n输入：${submission.input}\n${failureReason(capture.error)}`,
+        text: `收藏失败\n输入：${submission.input}\n${capture.error}`,
         entities: [],
         keyboard,
       })

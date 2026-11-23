@@ -20,7 +20,7 @@ export class ProviderError extends Error {
 export function credentialRequired(): never {
   const error = new ProviderError(
     status.FAILED_PRECONDITION,
-    'Instagram requires an account; select an Instagram account and retry',
+    'Instagram 需要登录，请在采集账号中选择 Instagram 账号后重试',
   )
   error.metadata.set('credential-required', '1')
   throw error
@@ -34,34 +34,31 @@ export function responseError(
   if (code === 429)
     return new ProviderError(
       status.RESOURCE_EXHAUSTED,
-      'Instagram rate limited the request',
+      'Instagram 请求过于频繁，请稍后重试',
       retry,
     )
   if (code >= 500)
     return new ProviderError(
       status.UNAVAILABLE,
-      'Instagram temporarily unavailable',
+      'Instagram 暂时不可用，请稍后重试',
       retry,
     )
   if (code === 401)
     return new ProviderError(
       account ? status.UNAUTHENTICATED : status.FAILED_PRECONDITION,
       account
-        ? 'Instagram session expired; authorize again'
-        : 'Instagram requires login',
+        ? 'Instagram 登录已失效，请重新添加账号授权'
+        : 'Instagram 需要登录，请在采集账号中选择 Instagram 账号后重试',
     )
   if (code === 403)
     return new ProviderError(
       account ? status.PERMISSION_DENIED : status.FAILED_PRECONDITION,
-      'Instagram access denied or browser verification required',
+      'Instagram 要求登录验证或账号无权访问，请检查账号后重试',
     )
   if (code === 404)
     return new ProviderError(
       status.NOT_FOUND,
-      'Instagram content not found or inaccessible',
+      'Instagram 内容不存在或当前账号无权访问',
     )
-  return new ProviderError(
-    status.UNAVAILABLE,
-    'Instagram returned an invalid response',
-  )
+  return new ProviderError(status.UNAVAILABLE, 'Instagram 返回的数据无效')
 }

@@ -113,13 +113,10 @@ describe('validateGraph', () => {
   })
 
   test.each([
-    [
-      { root: 'post', entities: [], relations: [] },
-      'invalid entity graph size',
-    ],
+    [{ root: 'post', entities: [], relations: [] }, '实体图大小无效'],
     [
       { root: 'post', entities: [entity('post', 'other', '1')], relations: [] },
-      'invalid entity identity or undeclared type',
+      '实体标识无效或类型未声明',
     ],
     [
       {
@@ -127,7 +124,7 @@ describe('validateGraph', () => {
         entities: [entity('post', 'x.post', '1', {}, { contextOnly: true })],
         relations: [],
       },
-      'invalid entity identity or undeclared type',
+      '实体标识无效或类型未声明',
     ],
     [
       {
@@ -135,7 +132,7 @@ describe('validateGraph', () => {
         entities: [entity('post', 'x.post', '2')],
         relations: [],
       },
-      'entity root does not match capture identity',
+      '实体根与采集对象不符',
     ],
     [
       {
@@ -143,7 +140,7 @@ describe('validateGraph', () => {
         entities: [entity('post', 'x.post', '1')],
         relations: [],
       },
-      'missing entity root',
+      '缺少实体根',
     ],
     [
       {
@@ -151,7 +148,7 @@ describe('validateGraph', () => {
         entities: [entity('post', 'x.post', '1', {}, { resourceIndices: [1] })],
         relations: [],
       },
-      'invalid entity resource reference',
+      '实体引用的媒体无效',
     ],
     [
       {
@@ -159,7 +156,7 @@ describe('validateGraph', () => {
         entities: [entity('post', 'x.post', '1')],
         relations: [{ source: 'post', target: 'gone', type: 'quoted' }],
       },
-      'invalid entity relation',
+      '实体关系无效',
     ],
     [
       {
@@ -170,7 +167,7 @@ describe('validateGraph', () => {
           { source: 'post', target: 'post', type: 'quoted' },
         ],
       },
-      'duplicate entity relation',
+      '实体关系重复',
     ],
   ])('rejects %#', (graph, message) => {
     expect(() => validateGraph(response(graph), provider, types)).toThrow(

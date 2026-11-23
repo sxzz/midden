@@ -38,7 +38,7 @@ test('submits links and follows the record until it finishes', async ({
   await page.route('**/v1/**', (r) => {
     const request = r.request()
     const path = new URL(request.url()).pathname
-    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/session') return r.fulfill({ json: {} })
     if (path === '/v1/collections') {
       listReloads++
       return r.fulfill({ json: { items: [] } })
@@ -47,7 +47,7 @@ test('submits links and follows the record until it finishes', async ({
       const body = request.postDataJSON()
       submitted.push(body)
       if (body.url.includes('unsupported.test'))
-        return r.fulfill({ status: 400, json: { error: 'unsupported URL' } })
+        return r.fulfill({ status: 400, json: { error: '不支持的链接' } })
       records = [
         record({
           state: 'downloading',
@@ -74,19 +74,19 @@ test('submits links and follows the record until it finishes', async ({
           state: 'partial',
           done: true,
           media: { total: 4, ready: 3, failed: 1 },
-          warnings: ['resource omitted: unsupported type or resource limit'],
+          warnings: ['部分资源类型不支持或资源数量超过限制'],
           media_items: [
             { position: 0, kind: 'image', state: 'ready' },
             {
               position: 1,
               kind: 'video',
               state: 'failed',
-              error: 'context deadline exceeded',
+              error: '请求超时',
             },
           ],
         }),
       })
-    return r.fulfill({ status: 404, json: { error: 'not found' } })
+    return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
   await page.goto('/app/')
   await page.getByRole('link', { name: '采集', exact: true }).click()
@@ -104,7 +104,7 @@ test('submits links and follows the record until it finishes', async ({
   await expect(submit).toHaveText('采集 2 条')
   await submit.click()
   await expect(page.getByRole('alert')).toHaveText(
-    '已提交 1 条，1 条未提交：不支持的链接。',
+    '已提交 1 条，1 条未提交：不支持的链接',
   )
   expect(submitted).toEqual([
     { url: 'https://fxtwitter.com/fixture/status/1', options: {} },
@@ -163,7 +163,7 @@ test('shows collection progress, member failures, stop and retry', async ({
     url: 'https://x.com/fixture',
     state: 'complete',
     members,
-    reasons: [{ reason: 'post not found or deleted', count: 1 }],
+    reasons: [{ reason: '帖子不存在或已删除', count: 1 }],
     media: { total: 2, ready: 2, failed: 0 },
     media_items: [
       { position: 0, kind: 'image', purpose: 'avatar', state: 'ready' },
@@ -177,7 +177,7 @@ test('shows collection progress, member failures, stop and retry', async ({
     const request = r.request()
     const url = new URL(request.url())
     const path = url.pathname
-    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/session') return r.fulfill({ json: {} })
     if (path === '/v1/collections') return r.fulfill({ json: { items: [] } })
     if (path === `/v1/captures/${profile}/members`) {
       const state = url.searchParams.get('state') || ''
@@ -188,7 +188,7 @@ test('shows collection progress, member failures, stop and retry', async ({
         saved: true,
         url: 'https://x.com/fixture/status/2',
         state: 'failed',
-        error: 'post not found or deleted',
+        error: '帖子不存在或已删除',
         reasons: [],
         created_at: '2026-10-14T08:00:01Z',
       }
@@ -243,7 +243,7 @@ test('shows collection progress, member failures, stop and retry', async ({
       return r.fulfill({
         json: detail({ id: retried, kind: 'profile', members }),
       })
-    return r.fulfill({ status: 404, json: { error: 'not found' } })
+    return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
   await page.goto(`/app/#/captures/${profile}`)
   // The toast region is a status too; this is the record's own line.
@@ -335,12 +335,12 @@ test('a finished profile record fetches more pages as its own record', async ({
   await page.route('**/v1/**', (r) => {
     const request = r.request()
     const path = new URL(request.url()).pathname
-    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/session') return r.fulfill({ json: {} })
     if (path === `/v1/captures/${profile}/pages`) {
       const { op } = request.postDataJSON()
       ops.push(op)
       if (op === 'more1000')
-        return r.fulfill({ status: 409, json: { error: 'no more pages' } })
+        return r.fulfill({ status: 409, json: { error: '没有更多帖子了' } })
       return r.fulfill({ status: 202, json: { id: `job-${next}` } })
     }
     if (path === `/v1/captures/${profile}/members`)
@@ -356,12 +356,12 @@ test('a finished profile record fetches more pages as its own record', async ({
       return r.fulfill({
         json: detail({ id: next, kind: 'profile', members }),
       })
-    return r.fulfill({ status: 404, json: { error: 'not found' } })
+    return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
   await page.goto(`/app/#/captures/${profile}`)
   await expect(page.getByRole('button', { name: '重试本页' })).toHaveCount(0)
   await page.getByRole('button', { name: '抓取 1000 条' }).click()
-  await expect(page.getByText('没有更多帖子了。')).toBeVisible()
+  await expect(page.getByText('没有更多帖子了')).toBeVisible()
   await page.getByRole('button', { name: '抓取更多' }).click()
   await expect(page).toHaveURL(new RegExp(`#/captures/${next}$`))
   // The next page is still running, so it offers nothing to continue yet.

@@ -14,7 +14,7 @@ export interface RelationAuthor {
   handle?: string
   /** An avatar already saved here; the app never requests a remote one. */
   avatar?: string
-  /** Only profiles saved in this tenant become internal links. */
+  /** Only profiles saved in the library become internal links. */
   href?: string
   protected?: boolean
 }

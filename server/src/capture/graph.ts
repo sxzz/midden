@@ -42,7 +42,7 @@ export function validateGraph(
     source.entities.length > MAX_ENTITIES ||
     source.relations.length > MAX_RELATIONS
   )
-    fail('invalid entity graph size')
+    fail('实体图大小无效')
   const allowed = new Set(
     provider.capabilities.some(
       (c) => c.name === 'entity.graph' && c.major === 1,
@@ -73,19 +73,19 @@ export function validateGraph(
       entity.externalId.includes('\0') ||
       identities.has(identity)
     )
-      fail('invalid entity identity or undeclared type')
+      fail('实体标识无效或类型未声明')
     keys.add(entity.key)
     identities.add(identity)
     total += entity.dataJson.length
-    if (total > MAX_GRAPH_BYTES) fail('entity graph exceeds limit')
+    if (total > MAX_GRAPH_BYTES) fail('实体图超出上限')
     let data: unknown
     try {
       data = JSON.parse(Buffer.from(entity.dataJson).toString('utf8'))
     } catch {
-      fail('entity data does not match adapter schema')
+      fail('实体数据不符合平台定义')
     }
     if (!data || typeof data !== 'object' || Array.isArray(data))
-      fail('entity data does not match adapter schema')
+      fail('实体数据不符合平台定义')
     const typePaths = paths.get(entity.type) ?? []
     if (typePaths.length) metricPaths[entity.type] = [...typePaths]
     const split = splitMetrics(data as Record<string, unknown>, typePaths)
@@ -94,7 +94,7 @@ export function validateGraph(
     const seen = new Set<number>()
     for (const index of entity.resourceIndices) {
       if (index >= response.resources.length || seen.has(index))
-        fail('invalid entity resource reference')
+        fail('实体引用的媒体无效')
       seen.add(index)
     }
     graph.entities.push({
@@ -108,9 +108,9 @@ export function validateGraph(
       ...(entity.contextOnly ? { context_only: true } : {}),
     })
     if (entity.key === source.root && entity.externalId !== rootId)
-      fail('entity root does not match capture identity')
+      fail('实体根与采集对象不符')
   }
-  if (!keys.has(source.root)) fail('missing entity root')
+  if (!keys.has(source.root)) fail('缺少实体根')
   const relations = new Set<string>()
   for (const relation of source.relations) {
     if (
@@ -118,9 +118,9 @@ export function validateGraph(
       !keys.has(relation.target) ||
       !ENTITY_NAME.test(relation.type)
     )
-      fail('invalid entity relation')
+      fail('实体关系无效')
     const key = `${relation.source}|${relation.type}|${relation.target}`
-    if (relations.has(key)) fail('duplicate entity relation')
+    if (relations.has(key)) fail('实体关系重复')
     relations.add(key)
     graph.relations.push({
       source: relation.source,

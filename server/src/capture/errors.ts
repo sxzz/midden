@@ -28,10 +28,10 @@ export function safeError(error: unknown): string {
     return '此平台需要账号，请先在采集账号中添加并选择一个账号。'
   if (isAppError(error, 'connection'))
     return '账号不可用，请在采集账号中选择可用账号或重新授权。'
-  if (isAppError(error, 'unsupported')) return 'provider operation unsupported'
+  if (isAppError(error, 'unsupported')) return '平台不支持此操作'
   if (error instanceof PermanentError) return error.message
   if (isProviderFailure(error)) return error.message
-  return 'operation failed; retry or inspect service health'
+  return '服务内部错误'
 }
 
 export const MAX_RETRY_AFTER = 86_400

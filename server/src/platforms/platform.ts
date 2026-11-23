@@ -56,7 +56,7 @@ export async function guard<T>(
     if (isProviderFailure(error)) throw error
     throw failure(
       combined.aborted ? 4 /* DEADLINE_EXCEEDED */ : 14 /* UNAVAILABLE */,
-      'provider request failed',
+      '平台请求失败',
     )
   }
 }

@@ -145,14 +145,14 @@ async function download(ctx: CaptureContext, job: Job): Promise<void> {
   try {
     url = new URL(asset.sourceUrl)
   } catch {
-    throw new PermanentError('invalid media URL')
+    throw new PermanentError('媒体地址无效')
   }
   if (
     !['http:', 'https:'].includes(url.protocol) ||
     url.username ||
     url.password
   )
-    throw new PermanentError('invalid media URL')
+    throw new PermanentError('媒体地址无效')
 
   const signal = AbortSignal.any([
     job.signal,
@@ -162,19 +162,19 @@ async function download(ctx: CaptureContext, job: Job): Promise<void> {
   try {
     response = await (ctx.fetch ?? fetch)(url, { signal })
   } catch (error) {
-    throw new Error(`media request failed: ${(error as Error).message}`, {
+    throw new Error(`媒体请求失败：${(error as Error).message}`, {
       cause: error,
     })
   }
   if (response.status === 429 || response.status >= 500) {
     await response.body?.cancel()
     const after = retryAfterMs(response.headers.get('retry-after'))
-    if (after > 0) throw new RetryError('media upstream unavailable', after)
-    throw new Error('media upstream unavailable')
+    if (after > 0) throw new RetryError('媒体服务器暂时不可用', after)
+    throw new Error('媒体服务器暂时不可用')
   }
   if (response.status !== 200 || !response.body) {
     await response.body?.cancel()
-    throw new PermanentError('media provider rejected request')
+    throw new PermanentError('媒体服务器拒绝了请求')
   }
 
   let staged: StagedFile
@@ -183,13 +183,13 @@ async function download(ctx: CaptureContext, job: Job): Promise<void> {
       signal,
     })
   } catch (error) {
-    throw new Error('media download interrupted', { cause: error })
+    throw new Error('媒体下载被中断', { cause: error })
   }
   try {
-    if (staged.size === 0) throw new PermanentError('empty media')
+    if (staged.size === 0) throw new PermanentError('媒体文件为空')
     const mime = sniffMediaType(await readHead(staged.path))
     if (!acceptsMediaType(asset.kind, mime))
-      throw new PermanentError('unsupported media format')
+      throw new PermanentError('不支持的媒体格式')
     await ctx.mediaLocks.run(staged.hash, async () => {
       // Claim the key back from garbage collection before writing it.
       ctx.db.delete(mediaGarbage).where(eq(mediaGarbage.key, staged.hash)).run()

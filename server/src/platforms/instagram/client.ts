@@ -61,14 +61,11 @@ export class InstagramClient {
       target.username ||
       target.password
     )
-      throw new ProviderError(
-        status.INVALID_ARGUMENT,
-        'invalid Instagram endpoint',
-      )
+      throw new ProviderError(status.INVALID_ARGUMENT, 'Instagram 接口地址无效')
     if (!this.credential?.sessionId)
       throw new ProviderError(
         status.FAILED_PRECONDITION,
-        'Instagram requires an account; select an Instagram account and retry',
+        'Instagram 需要登录，请在采集账号中选择 Instagram 账号后重试',
       )
     let response: Response
     try {
@@ -80,14 +77,14 @@ export class InstagramClient {
     } catch {
       throw new ProviderError(
         this.signal.aborted ? status.DEADLINE_EXCEEDED : status.UNAVAILABLE,
-        'Instagram request failed',
+        'Instagram 请求失败',
       )
     }
     if (response.status >= 300 && response.status < 400) {
       await response.body?.cancel()
       throw new ProviderError(
         status.UNAUTHENTICATED,
-        'Instagram redirected to login or verification',
+        'Instagram 要求登录验证，请检查账号后重试',
       )
     }
     if (!response.ok || response.headers.get('cf-mitigated') === 'challenge') {
@@ -95,7 +92,7 @@ export class InstagramClient {
       if (response.headers.get('cf-mitigated') === 'challenge')
         throw new ProviderError(
           status.PERMISSION_DENIED,
-          'Instagram requires browser verification',
+          'Instagram 要求浏览器验证，请检查账号后重试',
         )
       throw responseError(
         response.status,
@@ -105,7 +102,7 @@ export class InstagramClient {
     }
     const reader = response.body?.getReader()
     if (!reader)
-      throw new ProviderError(status.UNAVAILABLE, 'empty Instagram response')
+      throw new ProviderError(status.UNAVAILABLE, 'Instagram 返回了空响应')
     const chunks: Uint8Array[] = []
     let size = 0
     try {
@@ -116,7 +113,7 @@ export class InstagramClient {
         if (size > 2 << 20)
           throw new ProviderError(
             status.RESOURCE_EXHAUSTED,
-            'Instagram response exceeds capture limit',
+            'Instagram 响应超出上限',
           )
         chunks.push(value)
       }
@@ -124,7 +121,7 @@ export class InstagramClient {
       if (error instanceof ProviderError) throw error
       throw new ProviderError(
         this.signal.aborted ? status.DEADLINE_EXCEEDED : status.UNAVAILABLE,
-        'Instagram response interrupted',
+        'Instagram 响应被中断',
       )
     } finally {
       await reader.cancel().catch(() => {})
@@ -149,7 +146,7 @@ export class InstagramClient {
       if (this.sources.length >= 16 || this.bytes + sourceBody.length > 4 << 20)
         throw new ProviderError(
           status.RESOURCE_EXHAUSTED,
-          'Instagram source responses exceed capture limit',
+          'Instagram 原始响应超出上限',
         )
       this.sources.push(
         SourceResponse.fromPartial({
@@ -176,9 +173,12 @@ export class InstagramClient {
         404: status.NOT_FOUND,
         429: status.RESOURCE_EXHAUSTED,
       }
+      // Atmosphere words its errors in English; ours say the same by status.
       throw new ProviderError(
         codes[error.status] ?? status.UNAVAILABLE,
-        error.message,
+        error.status === 400
+          ? 'Instagram 返回的数据无效'
+          : responseError(error.status, true).message,
         error.retryAfter,
       )
     }

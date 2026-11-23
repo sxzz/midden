@@ -21,7 +21,6 @@ import {
   linkTitle,
   mediaLabel,
   mediaStates,
-  reasonText,
   recordCounts,
   recordProgress,
   recordStatus,
@@ -59,7 +58,7 @@ const reasons = computed(() => {
   if (!r) return []
   const found = new Map<string, number>()
   const add = (reason: string | undefined, count = 1) => {
-    const text = reason && reasonText(reason)
+    const text = reason?.trim()
     if (text) found.set(text, (found.get(text) || 0) + count)
   }
   add(r.error)
@@ -372,9 +371,7 @@ function openCollection(id: string, event?: MouseEvent) {
       <p v-for="m in media" :key="m.position" class="line">
         <span class="line-text"
           >{{ mediaLabel(m)
-          }}<small v-if="m.error" class="hint">{{
-            reasonText(m.error)
-          }}</small></span
+          }}<small v-if="m.error" class="hint">{{ m.error }}</small></span
         >
         <span class="line-trailing" :class="mediaStates[m.state].tone">{{
           mediaStates[m.state].label
@@ -417,7 +414,7 @@ function openCollection(id: string, event?: MouseEvent) {
                 v-for="reason in m.error ? [m.error] : m.reasons"
                 :key="reason"
                 class="hint"
-                >{{ reasonText(reason) }}</small
+                >{{ reason }}</small
               ></span
             >
             <span class="line-trailing" :class="stateStatus(m.state).tone">{{

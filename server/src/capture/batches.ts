@@ -58,7 +58,7 @@ export function runRefreshBatch(ctx: CaptureContext, job: Job): void {
   if (batch?.state !== 'running') return
   const now = ctx.now?.() ?? Date.now()
   if (batch.createdAt.getTime() < now - BATCH_LIFETIME) {
-    failRefreshBatch(ctx, batch.id, 'capture service unavailable')
+    failRefreshBatch(ctx, batch.id, '采集服务不可用')
     return
   }
   for (

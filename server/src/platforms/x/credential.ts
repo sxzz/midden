@@ -15,7 +15,7 @@ export function validateCredential(
     !/^[\w-]{10,4096}$/.test(c.authToken) ||
     !/^[\w-]{10,4096}$/.test(c.csrfToken)
   )
-    throw new ProviderError(status.INVALID_ARGUMENT, 'invalid account session')
+    throw new ProviderError(status.INVALID_ARGUMENT, '账号凭据无效')
 }
 export function decodeCredential(c?: Credential): SessionCredential {
   try {
@@ -24,7 +24,7 @@ export function decodeCredential(c?: Credential): SessionCredential {
     validateCredential(value)
     return value
   } catch {
-    throw new ProviderError(status.INVALID_ARGUMENT, 'invalid account session')
+    throw new ProviderError(status.INVALID_ARGUMENT, '账号凭据无效')
   }
 }
 export function prepareCredential(input: Uint8Array): Credential {
@@ -66,9 +66,6 @@ export function prepareCredential(input: Uint8Array): Credential {
       ),
     }
   } catch {
-    throw new ProviderError(
-      status.INVALID_ARGUMENT,
-      'invalid account credential input',
-    )
+    throw new ProviderError(status.INVALID_ARGUMENT, '账号凭据格式无效')
   }
 }

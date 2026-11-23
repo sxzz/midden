@@ -17,7 +17,7 @@ test('select collections and refresh them', async ({ page }) => {
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {
     const path = new URL(r.request().url()).pathname
-    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/session') return r.fulfill({ json: {} })
     if (path === '/v1/usage')
       return r.fulfill({
         json: { used_bytes: 0 },
@@ -28,7 +28,7 @@ test('select collections and refresh them', async ({ page }) => {
       return r.fulfill({ status: 202, json: { id: 'batch', state: 'running' } })
     }
     if (path.startsWith('/v1/refresh-batches/')) polled = true
-    return r.fulfill({ status: 404, json: { error: 'not found' } })
+    return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
   await page.goto('/app/')
   await expect(page.getByText('第 1 条收藏')).toBeVisible()
@@ -51,9 +51,9 @@ test('select all toggles every listed collection', async ({ page }) => {
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {
     const path = new URL(r.request().url()).pathname
-    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/session') return r.fulfill({ json: {} })
     if (path === '/v1/collections') return r.fulfill({ json: { items } })
-    return r.fulfill({ status: 404, json: { error: 'not found' } })
+    return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
   await page.goto('/app/')
   await page.getByRole('button', { name: '批量更新' }).click()

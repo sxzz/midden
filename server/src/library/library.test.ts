@@ -37,18 +37,20 @@ describe('annotations', () => {
     const { collectionId } = submit(ctx, { url: 'https://fake.test/p/1' })
     expect(() =>
       updateAnnotation(ctx.db, collectionId, { tagIds: [], tagNames: [] }),
-    ).toThrow('invalid note or tags')
+    ).toThrow('备注最多 10000 字，标签名最多 64 字，标签最多 100 个')
     expect(() =>
       updateAnnotation(ctx.db, collectionId, { tagNames: ['x'.repeat(65)] }),
-    ).toThrow('invalid note or tags')
+    ).toThrow('备注最多 10000 字，标签名最多 64 字，标签最多 100 个')
     expect(() =>
       updateAnnotation(ctx.db, collectionId, {
         note: 'changed',
         tagIds: [randomUUIDv7()],
       }),
-    ).toThrow('not found')
+    ).toThrow('内容不存在或已删除')
     expect(readAnnotation(ctx.db, collectionId).note).toBe('')
-    expect(() => readAnnotation(ctx.db, randomUUIDv7())).toThrow('not found')
+    expect(() => readAnnotation(ctx.db, randomUUIDv7())).toThrow(
+      '内容不存在或已删除',
+    )
   })
 })
 
@@ -63,7 +65,9 @@ describe('delete', () => {
     expect(
       ctx.db.select().from(collections).get()?.unreferencedAt,
     ).toBeInstanceOf(Date)
-    expect(() => deleteCollection(ctx.db, collectionId)).toThrow('not found')
+    expect(() => deleteCollection(ctx.db, collectionId)).toThrow(
+      '内容不存在或已删除',
+    )
   })
 
   test('delete all keeps what was saved after the cutoff', () => {

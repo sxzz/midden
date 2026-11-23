@@ -382,7 +382,7 @@ test('private profiles use their selected account for timelines and retain parti
   assert.equal(result.relatedTargets.length, 1)
   assert.equal(result.incomplete, true)
   assert.equal(JSON.parse(result.nextPageCursor).cursor, 'second')
-  assert.match(result.warnings[0]!, /session expired/)
+  assert.match(result.warnings[0]!, /登录已失效/)
 })
 
 test('classifies expired sessions, verification, limits, redirects and identity mismatch without anonymous retries', async () => {

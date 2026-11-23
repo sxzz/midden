@@ -104,19 +104,18 @@ describe('Vapor collection rendering', () => {
           error: 'download: 502',
         }),
       ],
-      warnings: ['resource omitted: unsupported type or resource limit'],
+      warnings: ['部分资源类型不支持或资源数量超过限制'],
     })
     expect(el.textContent).toContain('媒体保存失败')
     expect(el.textContent).not.toContain('failed')
     expect(el.textContent).not.toContain('502')
-    expect(el.textContent).toContain('部分媒体超出限制，未保存。')
-    expect(el.textContent).not.toContain('resource omitted')
+    expect(el.textContent).toContain('部分资源类型不支持或资源数量超过限制')
   })
   it('records the post under the body, media and warnings', () => {
     const el = mount(CollectionPost, {
       ...fixture,
       published_at: '2026-09-28T10:00:00Z',
-      warnings: ['resource omitted: unsupported type or resource limit'],
+      warnings: ['部分资源类型不支持或资源数量超过限制'],
       graph: {
         root: 'p',
         relations: [{ source: 'p', target: 'u', type: 'authored_by' }],

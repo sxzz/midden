@@ -17,7 +17,6 @@ import {
   extractLinks,
   groupRecords,
   linkTitle,
-  reasonText,
   recordCounts,
   recordProgress,
   recordRowTime,
@@ -222,9 +221,7 @@ async function submit() {
           {{ recordRowTime(r.created_at)
           }}<template v-if="recordCounts(r)"> · {{ recordCounts(r) }}</template>
         </span>
-        <span v-if="r.error" class="meta reason">{{
-          reasonText(r.error)
-        }}</span>
+        <span v-if="r.error" class="meta reason">{{ r.error }}</span>
         <progress
           v-if="!r.done"
           class="bar"

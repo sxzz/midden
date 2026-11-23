@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { onMounted, shallowRef, useTemplateRef } from 'vue'
-import { APIError, call, client, errorText } from '../api'
+import { call, client, errorText } from '../api'
 const props = defineProps<{ error?: string }>()
 const widget = useTemplateRef<HTMLDivElement>('widget')
 const failure = shallowRef('')
@@ -18,11 +18,7 @@ onMounted(async () => {
     script.dataset.authUrl = location.origin + location.pathname
     widget.value?.append(script)
   } catch (e) {
-    // The server answers 404 when Telegram login is not configured.
-    failure.value =
-      e instanceof APIError && e.status === 404
-        ? '服务器未配置 Telegram 登录。'
-        : errorText(e)
+    failure.value = errorText(e)
   }
 })
 </script>

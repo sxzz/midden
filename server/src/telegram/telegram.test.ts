@@ -2,7 +2,6 @@ import { describe, expect, test } from 'vitest'
 import { deliveryParts } from './parts.ts'
 import {
   collectionMessage,
-  failureReason,
   groupKeyboard,
   progressMessage,
   webRoute,
@@ -127,10 +126,8 @@ describe('presentation', () => {
     const message = collectionMessage(
       collection({
         text: '',
-        warnings: ['post not found or deleted'],
-        assets: [
-          asset('a', { state: 'failed', error: 'post not found or deleted' }),
-        ],
+        warnings: ['帖子不存在或已删除'],
+        assets: [asset('a', { state: 'failed', error: '帖子不存在或已删除' })],
       }),
       'partial',
     )
@@ -167,7 +164,7 @@ describe('presentation', () => {
       next: 'n',
       maxBatch: 1000,
       pageError: false,
-      reasons: [{ reason: 'storage quota exceeded', count: 2 }],
+      reasons: [{ reason: '存储空间不足', count: 2 }],
     }
     const labels = (p: typeof base) =>
       progressMessage(p, { group: true })
@@ -192,7 +189,6 @@ describe('presentation', () => {
     expect(progressMessage(base, { group: true }).text).toContain(
       '存储空间不足（2 条）',
     )
-    expect(failureReason(' unknown ')).toBe('unknown')
   })
 })
 

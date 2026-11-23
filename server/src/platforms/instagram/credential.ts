@@ -31,7 +31,7 @@ function validate(value: SessionCredential): SessionCredential {
     ) ||
     (value.userId && !/^\d+$/.test(value.userId))
   )
-    throw new Error('invalid session')
+    throw new Error('会话无效')
   return value
 }
 
@@ -51,10 +51,7 @@ export function decodeCredential(credential?: Credential): SessionCredential {
       if (raw[key] !== undefined) value[key] = raw[key]
     return validate(value)
   } catch {
-    throw new ProviderError(
-      status.INVALID_ARGUMENT,
-      'invalid Instagram session',
-    )
+    throw new ProviderError(status.INVALID_ARGUMENT, 'Instagram 会话无效')
   }
 }
 
@@ -92,7 +89,7 @@ export function prepareCredential(input: Uint8Array): Credential {
   } catch {
     throw new ProviderError(
       status.INVALID_ARGUMENT,
-      'invalid Instagram Cookie; provide a Base64 browser Cookie containing sessionid',
+      'Instagram Cookie 无效，请提供包含 sessionid 的 Base64 浏览器 Cookie',
     )
   }
 }

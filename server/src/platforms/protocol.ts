@@ -127,7 +127,7 @@ export interface SourceResponse {
 }
 
 export interface RelatedTarget {
-  /** Optional listing metadata for tenant-specific collection capture filters. */
+  /** Optional listing metadata for the capture filters of collections. */
   publishedAt: string
   /** image or video, excluding quoted media. */
   mediaTypes: string[]

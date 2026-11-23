@@ -81,9 +81,7 @@ export function failStaleCaptures(ctx: CaptureContext): number {
     .limit(BATCH)
     .all()
   for (const { id } of stale)
-    ctx.db.transaction((tx) =>
-      failCapture(ctx, tx, id, 'capture was interrupted'),
-    )
+    ctx.db.transaction((tx) => failCapture(ctx, tx, id, '采集被中断'))
   return stale.length
 }
 

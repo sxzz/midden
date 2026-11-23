@@ -119,7 +119,7 @@ describe('maintenance', () => {
     expect(failStaleCaptures(c)).toBe(1)
     expect(
       c.db.select().from(captures).where(eq(captures.id, job.id)).get(),
-    ).toMatchObject({ state: 'failed', error: 'capture was interrupted' })
+    ).toMatchObject({ state: 'failed', error: '采集被中断' })
   })
 
   test('raw responses of superseded unchanged captures are pruned', async () => {

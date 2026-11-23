@@ -41,7 +41,7 @@ function continuation(raw: string, id: string): Cursor | undefined {
   } catch {
     throw new ProviderError(
       status.FAILED_PRECONDITION,
-      'Instagram collection changed; start again from the profile link',
+      'Instagram 列表已变化，请从主页链接重新开始',
     )
   }
 }
@@ -114,22 +114,16 @@ export class CaptureStrategy {
     credential?: SessionCredential,
   ): Promise<FetchResponse> {
     if (req.pageCursor && (req.kind !== 'profile' || req.automatic))
-      throw new ProviderError(
-        status.INVALID_ARGUMENT,
-        'invalid collection continuation',
-      )
+      throw new ProviderError(status.INVALID_ARGUMENT, '翻页信息无效')
     if (!credential) {
       if (req.credentialDeferred) credentialRequired()
       throw new ProviderError(
         status.FAILED_PRECONDITION,
-        'Instagram requires an account; select an Instagram account and retry',
+        'Instagram 需要登录，请在采集账号中选择 Instagram 账号后重试',
       )
     }
     if (signal.aborted)
-      throw new ProviderError(
-        status.DEADLINE_EXCEEDED,
-        'Instagram request interrupted',
-      )
+      throw new ProviderError(status.DEADLINE_EXCEEDED, 'Instagram 请求被中断')
     if (req.automatic && req.kind === 'post') {
       const listed = this.listed.get(
         this.listedKey(req, credential, req.externalId),
@@ -165,7 +159,7 @@ export class CaptureStrategy {
           if (signal.aborted)
             throw new ProviderError(
               status.DEADLINE_EXCEEDED,
-              'Instagram request interrupted',
+              'Instagram 请求被中断',
             )
           // Keep the post's captured author when separate account metadata is unavailable.
         }
@@ -239,7 +233,7 @@ export class CaptureStrategy {
         )
           throw new ProviderError(
             status.UNAVAILABLE,
-            'invalid Instagram timeline members',
+            'Instagram 时间线数据无效',
           )
         for (const item of page.items) {
           const postId = mediaId(item)
@@ -248,7 +242,7 @@ export class CaptureStrategy {
           if (members.size > 200)
             throw new ProviderError(
               status.RESOURCE_EXHAUSTED,
-              'Instagram timeline exceeds capture page limit',
+              'Instagram 时间线超出单次翻页上限',
             )
           const url = `https://www.instagram.com/p/${shortcodeFromPk(postId)}/`
           if (result.relatedTargets.every((target) => target.url !== url))

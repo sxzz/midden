@@ -261,7 +261,7 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
     const partial =
       !!payload.incomplete || states.some((a) => a.state !== 'ready')
     if (!payload.text && ready === 0 && !payload.graph) {
-      failCapture(ctx, tx, capture.id, 'no text or media could be saved')
+      failCapture(ctx, tx, capture.id, '没有可保存的正文或媒体')
       return
     }
     const now = new Date(ctx.now?.() ?? Date.now())

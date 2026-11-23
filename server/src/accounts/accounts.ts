@@ -56,7 +56,7 @@ function verificationError(error: unknown): Error {
   if (isProviderFailure(error) && INVALID_CREDENTIAL.has(error.code))
     return new AppError('invalid_credential')
   return new Error(
-    `account verification failed: ${error instanceof Error ? error.message : String(error)}`,
+    `账号验证失败：${error instanceof Error ? error.message : String(error)}`,
     { cause: error },
   )
 }
@@ -82,7 +82,7 @@ export async function addAccount(
     throw verificationError(error)
   }
   if (!credential.data.length || credential.data.length > MAX_CREDENTIAL)
-    throw new Error('adapter returned invalid credential')
+    throw new Error('平台返回的凭据无效')
   let account
   try {
     account = await platform.checkConnection(
@@ -93,8 +93,7 @@ export async function addAccount(
   } catch (error) {
     throw verificationError(error)
   }
-  if (!account.accountId)
-    throw new Error('account verification failed: no account id')
+  if (!account.accountId) throw new Error('账号验证失败：没有账号 ID')
   const ref = newId()
   const sealed = ctx.vault.seal(ref, credential.data)
   return ctx.db.transaction((tx) => {

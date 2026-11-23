@@ -8,7 +8,7 @@ const invalid = (
   result: { success: boolean },
   c: { json: (body: { error: string }, status: 400) => Response },
 ) => {
-  if (!result.success) return c.json({ error: 'invalid request' }, 400)
+  if (!result.success) return c.json({ error: '请求无效' }, 400)
 }
 
 /** Validate a JSON body; invalid input is a plain 400 like any bad request. */

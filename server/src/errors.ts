@@ -20,21 +20,21 @@ export type ErrorKind =
   | 'collection_stopped'
 
 const messages: Record<ErrorKind, string> = {
-  invalid_target: 'invalid or unsupported URL',
-  not_found: 'not found',
-  unsupported: 'provider operation is not supported',
-  conflict: 'idempotency key conflicts with an earlier request',
-  account_required: 'account required; add and select your own credentials',
-  connection: 'account unavailable; choose a source or authorize again',
-  invalid_credential: 'invalid credentials',
-  invalid_account: 'invalid account request',
-  invalid_annotation: 'invalid note or tags',
-  invalid_filter: 'invalid collection filters',
-  invalid_cursor: 'invalid cursor',
-  invalid_request: 'invalid request',
-  no_more_pages: 'no more pages',
-  batch_running: 'refresh batch is still running',
-  collection_stopped: 'collection stopped',
+  invalid_target: '不支持的链接',
+  not_found: '内容不存在或已删除',
+  unsupported: '平台不支持此操作',
+  conflict: '与之前的请求冲突，请刷新后重试',
+  account_required: '此平台需要账号，请先在采集账号中添加并选择一个账号',
+  connection: '账号不可用，请在采集账号中选择可用账号或重新授权',
+  invalid_credential: '凭据无效或已过期',
+  invalid_account: '账号请求无效',
+  invalid_annotation: '备注最多 10000 字，标签名最多 64 字，标签最多 100 个',
+  invalid_filter: '筛选条件无效',
+  invalid_cursor: '翻页位置无效，请刷新后重试',
+  invalid_request: '请求无效',
+  no_more_pages: '没有更多帖子了',
+  batch_running: '批量更新仍在进行',
+  collection_stopped: '采集已中止',
 }
 
 export class AppError extends Error {

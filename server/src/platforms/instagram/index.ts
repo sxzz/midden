@@ -27,19 +27,13 @@ export function createInstagramPlatform(
       target.kind !== req.kind ||
       target.objectScope !== req.objectScope
     )
-      throw new ProviderError(
-        status.INVALID_ARGUMENT,
-        'invalid target identity',
-      )
+      throw new ProviderError(status.INVALID_ARGUMENT, '目标标识无效')
     if (
       req.providerId !== PROVIDER ||
       !req.connectionId ||
       req.accessScope !== `connection:${req.connectionId}`
     )
-      throw new ProviderError(
-        status.INVALID_ARGUMENT,
-        'invalid provider or connection',
-      )
+      throw new ProviderError(status.INVALID_ARGUMENT, '采集来源或账号无效')
   }
   return {
     description: {
@@ -78,10 +72,7 @@ export function createInstagramPlatform(
     resolve: resolveTarget,
     prepareCredential(providerId, input) {
       if (providerId !== PROVIDER)
-        throw new ProviderError(
-          status.UNIMPLEMENTED,
-          'credential import unsupported',
-        )
+        throw new ProviderError(status.UNIMPLEMENTED, '不支持导入凭据')
       return prepareCredential(input)
     },
     fetch: (req, signal) =>
@@ -98,10 +89,7 @@ export function createInstagramPlatform(
     checkConnection: (providerId, credential, signal) =>
       guard(signal, failure, (signal) => {
         if (providerId !== PROVIDER)
-          throw new ProviderError(
-            status.INVALID_ARGUMENT,
-            'unsupported account provider',
-          )
+          throw new ProviderError(status.INVALID_ARGUMENT, '不支持的账号来源')
         return new InstagramClient(
           signal,
           decodeCredential(credential),

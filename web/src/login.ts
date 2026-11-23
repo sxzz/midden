@@ -27,8 +27,8 @@ export async function widgetLogin(login: Record<string, string>) {
     await call(client.auth.telegram.$post({ json: { login } }))
     return ''
   } catch (e) {
-    return e instanceof APIError && e.status === 401
-      ? 'Telegram 登录校验失败，请重试。'
-      : errorText(e)
+    // A failed check is the server's 401, which errorText reads as an
+    // expired session.
+    return e instanceof APIError && e.status === 401 ? e.message : errorText(e)
   }
 }

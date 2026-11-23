@@ -120,7 +120,7 @@ describe('api', () => {
       body: JSON.stringify({ url: 'https://example.com/x' }),
     })
     expect(bad.status).toBe(400)
-    expect(await bad.json()).toEqual({ error: 'unsupported URL' })
+    expect(await bad.json()).toEqual({ error: '不支持的链接' })
     const missing = await call('/captures/nope')
     expect(missing.status).toBe(404)
     const invalid = await call('/captures', {

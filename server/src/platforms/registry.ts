@@ -66,7 +66,7 @@ export class Platforms {
       !target.kind ||
       !target.externalId
     )
-      throw new Error('adapter returned invalid target')
+      throw new Error('平台返回的链接无效')
     return { platform, target }
   }
 }

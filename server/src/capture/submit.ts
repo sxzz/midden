@@ -161,7 +161,7 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
   const userInput = input.input || input.url
   const key = input.key || newId()
   if (key.length > MAX_KEY)
-    throw new AppError('invalid_request', 'idempotency key too long')
+    throw new AppError('invalid_request', '请求标识过长')
   const automatic = input.automatic ?? false
   const providerId = input.providerId!
   const connectionId = input.connectionId ?? ''

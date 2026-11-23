@@ -92,8 +92,7 @@ test('required signing does not silently proceed after a homepage challenge', as
   await assert.rejects(
     () => transport.fetch('https://api.x.com/graphql/fixture/SearchTimeline'),
     (e: any) =>
-      e.code === status.UNAVAILABLE &&
-      e.message.includes('browser verification'),
+      e.code === status.UNAVAILABLE && e.message.includes('浏览器验证'),
   )
   assert.deepEqual(calls, ['https://x.com/home'])
 })

@@ -130,8 +130,8 @@ describe('media', () => {
         .orderBy(assets.position)
         .all(),
     ).toEqual([
-      { state: 'failed', error: 'unsupported media format' },
-      { state: 'failed', error: 'media provider rejected request' },
+      { state: 'failed', error: '不支持的媒体格式' },
+      { state: 'failed', error: '媒体服务器拒绝了请求' },
       { state: 'ready', error: '' },
     ])
   })

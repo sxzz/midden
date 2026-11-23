@@ -79,7 +79,7 @@ describe('submit', () => {
     const first = submit(ctx, { url: post, key: 'a' })
     expect(submit(ctx, { url: post, key: 'a' })).toEqual(first)
     expect(() => submit(ctx, { url: profile, key: 'a' })).toThrow(
-      'idempotency key conflicts',
+      '与之前的请求冲突',
     )
   })
 
@@ -148,7 +148,7 @@ describe('submit', () => {
   test('refresh requires a saved collection and keeps its source', () => {
     const ctx = testContext()
     expect(() => submit(ctx, { refreshId: randomUUIDv7() })).toThrow(
-      'not found',
+      '内容不存在或已删除',
     )
     const first = submit(ctx, { url: post })
     complete(ctx, first.id)
@@ -161,20 +161,18 @@ describe('submit', () => {
     const ctx = testContext()
     expect(() =>
       submit(ctx, { url: 'https://www.instagram.com/p/C0deabc/' }),
-    ).toThrow('account required')
+    ).toThrow('此平台需要账号')
   })
 
   test('rejects unknown hosts and bad paging', () => {
     const ctx = testContext()
     expect(() => submit(ctx, { url: 'https://example.com/x' })).toThrow(
-      'invalid or unsupported URL',
+      '不支持的链接',
     )
-    expect(() => submit(ctx, { url: post, pageSize: 10 })).toThrow(
-      'not supported',
-    )
+    expect(() => submit(ctx, { url: post, pageSize: 10 })).toThrow('不支持')
     expect(() =>
       submit(ctx, { url: profile, options: { maxPosts: 100_001 } }),
-    ).toThrow('invalid or unsupported URL')
+    ).toThrow('不支持的链接')
   })
 
   test('options set the first page size and limit', () => {

@@ -61,7 +61,7 @@ describe('refresh batches', () => {
     broken.add('4')
     const started = startRefreshBatch(c, [...ids, ids[0]!])
     expect(started).toMatchObject({ total: 2, submitted: 0, done: false })
-    expect(() => retryRefreshBatch(c, started.id)).toThrow('still running')
+    expect(() => retryRefreshBatch(c, started.id)).toThrow('批量更新仍在进行')
     await c.queue.drain()
     const done = batchProgress(c.db, started.id)
     expect(done).toMatchObject({
@@ -86,8 +86,10 @@ describe('refresh batches', () => {
 
   test('only saved collections can be refreshed', () => {
     const c = setup(new Set())
-    expect(() => startRefreshBatch(c, ['nope'])).toThrow('not supported')
-    expect(() => startRefreshBatch(c, [])).toThrow('not supported')
-    expect(() => startRefreshBatch(c, [randomUUIDv7()])).toThrow('not found')
+    expect(() => startRefreshBatch(c, ['nope'])).toThrow('不支持')
+    expect(() => startRefreshBatch(c, [])).toThrow('不支持')
+    expect(() => startRefreshBatch(c, [randomUUIDv7()])).toThrow(
+      '内容不存在或已删除',
+    )
   })
 })

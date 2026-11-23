@@ -53,11 +53,11 @@ export function createApi(options: HttpOptions) {
       })
       .get('/auth/telegram', async (c) => {
         if (!options.telegram || !webOrigin || !options.botUsername)
-          return c.json({ error: 'not found' }, 404)
+          return c.json({ error: '服务器未配置 Telegram 登录' }, 404)
         try {
           return c.json({ bot_username: await options.botUsername() })
         } catch {
-          return c.json({ error: 'Telegram unavailable' }, 503)
+          return c.json({ error: 'Telegram 暂时不可用，请稍后重试' }, 503)
         }
       })
       .post(
@@ -73,9 +73,9 @@ export function createApi(options: HttpOptions) {
         (c) => {
           const telegram = options.telegram
           if (!telegram || !webOrigin)
-            return c.json({ error: 'not found' }, 404)
+            return c.json({ error: '服务器未配置 Telegram 登录' }, 404)
           if (c.req.header('Origin') !== webOrigin)
-            return c.json({ error: 'invalid origin' }, 403)
+            return c.json({ error: '请求来源无效' }, 403)
           const input = c.req.valid('json')
           const user =
             'init_data' in input
@@ -86,13 +86,13 @@ export function createApi(options: HttpOptions) {
               {
                 error:
                   'init_data' in input
-                    ? 'reopen Telegram Mini App'
-                    : 'log in with Telegram again',
+                    ? '会话已失效，请从 Telegram 重新打开'
+                    : 'Telegram 登录校验失败，请重试',
               },
               401,
             )
           if (user !== telegram.owner)
-            return c.json({ error: 'not allowed' }, 403)
+            return c.json({ error: '只有所有者可以登录' }, 403)
           setCookie(c, SESSION_COOKIE, createSession(ctx.db, now()), {
             path: '/',
             secure: true,
@@ -109,21 +109,20 @@ export function createApi(options: HttpOptions) {
         if (header !== undefined) {
           const token = header.startsWith('Bearer ') ? header.slice(7) : ''
           if (!token || !tokenValid(ctx.db, token))
-            return c.json({ error: 'invalid session or token' }, 401)
+            return c.json({ error: '登录已失效或令牌无效' }, 401)
           c.set('session', false)
           await next()
           return
         }
         const cookie = getCookie(c, SESSION_COOKIE)
-        if (!cookie || !webOrigin)
-          return c.json({ error: 'authentication required' }, 401)
+        if (!cookie || !webOrigin) return c.json({ error: '需要登录' }, 401)
         if (!sessionValid(ctx.db, cookie, now()))
-          return c.json({ error: 'invalid session or token' }, 401)
+          return c.json({ error: '登录已失效或令牌无效' }, 401)
         if (
           !['GET', 'HEAD'].includes(c.req.method) &&
           c.req.header('Origin') !== webOrigin
         )
-          return c.json({ error: 'invalid origin' }, 403)
+          return c.json({ error: '请求来源无效' }, 403)
         c.set('session', true)
         await next()
       })

@@ -24,30 +24,22 @@ const statuses: Record<ErrorKind, ContentfulStatusCode> = {
   unsupported: 422,
 }
 
-// The web app matches these texts to show its own wording.
-const texts: Partial<Record<ErrorKind, string>> = {
-  invalid_target: 'unsupported URL',
-}
-
 /** Turn a thrown error into the JSON error response. */
 export function errorResponse(c: Context, error: unknown, logger: Logger) {
   if (error instanceof HTTPException)
     return c.json({ error: error.message }, error.status)
   if (isAppError(error))
-    return c.json(
-      { error: texts[error.kind] ?? error.message },
-      statuses[error.kind],
-    )
+    return c.json({ error: error.message }, statuses[error.kind])
   if (
     isProviderFailure(error) &&
     (error.code === status.UNAVAILABLE ||
       error.code === status.DEADLINE_EXCEEDED)
   )
-    return c.json({ error: 'adapter temporarily unavailable' }, 503)
+    return c.json({ error: '采集服务暂时不可用' }, 503)
   logger.error({ err: error, path: c.req.path }, 'request failed')
-  return c.json({ error: 'internal error' }, 500)
+  return c.json({ error: '服务内部错误' }, 500)
 }
 
-export function badRequest(message = 'invalid request'): HTTPException {
+export function badRequest(message = '请求无效'): HTTPException {
   return new HTTPException(400, { message })
 }

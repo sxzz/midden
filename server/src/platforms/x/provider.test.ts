@@ -469,7 +469,7 @@ test('session quote capture keeps the quoted post by reference through GraphQL n
   )
   await assert.rejects(
     () => parseSessionResult('900125', structuredClone(raw), host),
-    /invalid provider post/,
+    /平台返回的帖子数据无效/,
   )
 })
 
@@ -564,9 +564,12 @@ test("a repost's link is saved as the reposted post", async () => {
 
 test('missing posts are reported as not found, other failures stay generic', () => {
   for (const [error, message] of [
-    [responseError(404), 'post not found or deleted'],
-    [responseError(404, null, 'post', 'suspended'), 'account is suspended'],
-    [responseError(400), 'provider cannot access this post'],
+    [responseError(404), '帖子不存在或已删除'],
+    [
+      responseError(404, null, 'post', 'suspended'),
+      '账号已被封禁，解封后可重新抓取',
+    ],
+    [responseError(400), '无法获取该帖子'],
   ] as const) {
     assert.equal(error.message, message)
     assert.equal(error.code, status.FAILED_PRECONDITION)
@@ -597,7 +600,7 @@ test('the public post API marks a missing post deleted and a suspended one suspe
     }
     const suspended = await failure()
     assert.equal(sourceState(suspended), 'suspended')
-    assert.equal(suspended.message, 'account is suspended')
+    assert.equal(suspended.message, '账号已被封禁，解封后可重新抓取')
     // A protected post exists; only the account cannot read it.
     body = { code: 401, message: 'PRIVATE_TWEET' }
     assert.equal(sourceState(await failure()), undefined)

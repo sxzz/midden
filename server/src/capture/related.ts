@@ -47,7 +47,7 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
   if (capture.state === 'queued' || capture.state === 'downloading')
     throw new SnoozeError(2000)
   if (capture.state === 'failed') {
-    failRelated(ctx, submission.id, 'parent capture failed')
+    failRelated(ctx, submission.id, '所在页面采集失败')
     return
   }
   const source = {

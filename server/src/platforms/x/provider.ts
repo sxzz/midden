@@ -38,13 +38,10 @@ export function responseError(
   if (code === 401)
     return new ProviderError(
       status.UNAUTHENTICATED,
-      'account session expired; authorize again',
+      'X 登录已失效，请重新添加账号授权',
     )
   if (code === 403)
-    return new ProviderError(
-      status.PERMISSION_DENIED,
-      'account cannot access this post',
-    )
+    return new ProviderError(status.PERMISSION_DENIED, '采集账号无权访问该帖子')
   if (code === 429 || code >= 500) {
     const seconds =
       retry && /^\d+$/.test(retry)
@@ -54,7 +51,7 @@ export function responseError(
           : 0
     return new ProviderError(
       status.UNAVAILABLE,
-      'provider temporarily unavailable',
+      '来源平台暂时不可用，请稍后重试',
       seconds,
     )
   }
@@ -63,7 +60,7 @@ export function responseError(
   if (code === 404 && reason === 'suspended') {
     const error = new ProviderError(
       status.FAILED_PRECONDITION,
-      'account is suspended',
+      '账号已被封禁，解封后可重新抓取',
     )
     error.metadata.set(sourceStateKey, 'suspended')
     return error
@@ -71,11 +68,11 @@ export function responseError(
   if (code === 404)
     return new ProviderError(
       status.FAILED_PRECONDITION,
-      target === 'profile' ? 'profile not found' : 'post not found or deleted',
+      target === 'profile' ? '账号不存在或已改名' : '帖子不存在或已删除',
     )
   return new ProviderError(
     status.FAILED_PRECONDITION,
-    `provider cannot access this ${target}`,
+    target === 'profile' ? '无法获取该账号资料' : '无法获取该帖子',
   )
 }
 // Only the public post API answers 404 for a post that no longer exists; it
@@ -113,8 +110,7 @@ export async function readJSON(
   retain?: (body: Buffer) => void,
 ): Promise<any> {
   const reader = response.body?.getReader()
-  if (!reader)
-    throw new ProviderError(status.UNAVAILABLE, 'empty provider response')
+  if (!reader) throw new ProviderError(status.UNAVAILABLE, '平台返回了空响应')
   let size = 0
   const chunks: Uint8Array[] = []
   try {
@@ -130,7 +126,7 @@ export async function readJSON(
     return JSON.parse(body.toString('utf8'))
   } catch {
     await reader.cancel()
-    throw new ProviderError(status.UNAVAILABLE, 'invalid provider response')
+    throw new ProviderError(status.UNAVAILABLE, '平台返回的数据无效')
   }
 }
 export function normalize(
@@ -141,16 +137,13 @@ export function normalize(
   raw?: any,
 ): FetchResponse {
   if (post?.type === 'tombstone')
-    throw new ProviderError(
-      status.PERMISSION_DENIED,
-      'account cannot access this post',
-    )
+    throw new ProviderError(status.PERMISSION_DENIED, '采集账号无权访问该帖子')
   if (
     post?.type !== 'status' ||
     post.id !== id ||
     typeof post.text !== 'string'
   )
-    throw new ProviderError(status.UNAVAILABLE, 'invalid provider post')
+    throw new ProviderError(status.UNAVAILABLE, '平台返回的帖子数据无效')
   const result = FetchResponse.fromPartial({
     externalId: id,
     providerId: provider,
@@ -229,7 +222,7 @@ export function normalize(
   if (!result.text && !result.resources.length)
     throw new ProviderError(
       status.FAILED_PRECONDITION,
-      'provider returned no supported text or media',
+      '帖子没有可保存的正文或媒体',
     )
   const markers = result.resources
     .map((r) => (r.kind === 'image' ? '[图片]' : '[视频]'))
@@ -253,7 +246,7 @@ export async function fetchPublic(
     rawBody = Buffer.from(body)
   })
   if (typeof data.code !== 'number')
-    throw new ProviderError(status.UNAVAILABLE, 'invalid provider response')
+    throw new ProviderError(status.UNAVAILABLE, '平台返回的数据无效')
   if (data.code !== 200)
     throw publicPostError(
       data.code,
@@ -279,7 +272,7 @@ export function publicPost(
   if (post?.author?.protected)
     throw new ProviderError(
       status.FAILED_PRECONDITION,
-      'public provider cannot save private posts',
+      '公共来源无法保存受保护的帖子',
     )
   // A repost's link answers with the reposted post, which is what is saved.
   const original =

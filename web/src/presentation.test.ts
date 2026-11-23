@@ -215,14 +215,14 @@ it('writes list timestamps the way the chat list does', () => {
   )
   expect(shortDate(undefined, now)).toBe('')
 })
-it('translates adapter warnings and drops duplicates', () => {
+it('shows warnings as written, once each', () => {
   expect(
     warningList([
-      'resource omitted: unsupported type or resource limit',
-      'resource omitted: unsupported type or resource limit',
-      'some adapter detail',
+      '部分资源类型不支持或资源数量超过限制',
+      '部分资源类型不支持或资源数量超过限制',
+      '帖子获取中断。',
     ]),
-  ).toEqual(['部分媒体超出限制，未保存。', '内容不完整。'])
+  ).toEqual(['部分资源类型不支持或资源数量超过限制', '帖子获取中断。'])
 })
 
 const xProfile = (description?: string): Collection => ({

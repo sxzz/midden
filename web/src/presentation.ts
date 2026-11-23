@@ -314,16 +314,9 @@ export function mediaNotice(asset: Asset) {
   if (asset.state === 'failed') return '媒体保存失败'
   return '媒体无法打开'
 }
-const warnings: Record<string, string> = {
-  'resource omitted: unsupported type or resource limit':
-    '部分媒体超出限制，未保存。',
-}
-/** Adapter warnings are diagnostic strings; readers get plain wording. */
-export function warningText(warning: string) {
-  return warnings[warning] || '内容不完整。'
-}
+/** What a capture could not save, each said once. */
 export function warningList(list?: string[] | null) {
-  return [...new Set((list ?? []).map(warningText))]
+  return [...new Set(list)]
 }
 /** One-paragraph preview for a list row. */
 export function excerpt(text: string, limit = 120) {

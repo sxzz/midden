@@ -64,10 +64,7 @@ export function resolveTarget(raw: string): ResolveResponse {
       })
     throw new Error()
   } catch {
-    throw new ProviderError(
-      status.INVALID_ARGUMENT,
-      'unsupported Instagram URL',
-    )
+    throw new ProviderError(status.INVALID_ARGUMENT, '不支持的 Instagram 链接')
   }
 }
 

@@ -82,6 +82,6 @@ export function resolveTarget(raw: string) {
       }
     throw new Error()
   } catch {
-    throw new ProviderError(status.INVALID_ARGUMENT, 'unsupported X URL')
+    throw new ProviderError(status.INVALID_ARGUMENT, '不支持的 X 链接')
   }
 }
