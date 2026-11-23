@@ -141,7 +141,6 @@ CREATE TABLE `entity_versions` (
 	`entity_id` text NOT NULL,
 	`content_hash` text NOT NULL,
 	`data` text NOT NULL,
-	`schema` text NOT NULL,
 	`created_at` integer NOT NULL,
 	CONSTRAINT `fk_entity_versions_entity_id_entities_id_fk` FOREIGN KEY (`entity_id`) REFERENCES `entities`(`id`) ON DELETE CASCADE
 );

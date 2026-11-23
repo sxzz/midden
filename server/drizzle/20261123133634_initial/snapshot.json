@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "aa364c90-85ed-4704-9092-3f50747d0c49",
+  "id": "8d48278b-1a96-4edc-b563-c0d455a41ae2",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -1037,16 +1037,6 @@
     {
       "table": "entity_versions",
       "name": "data",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "entity_versions",
-      "name": "schema",
       "type": "text",
       "notNull": true,
       "autoincrement": false,

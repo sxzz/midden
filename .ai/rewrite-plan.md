@@ -35,6 +35,9 @@
 
 ## 工程约定
 
+- 实体数据不再按平台声明的 JSON Schema 校验，也不存 schema：采集代码与 core 同进程，由 TS 类型保证；实体版本去重哈希只覆盖数据与媒体。
+- ID 直接用 `crypto.randomUUIDv7()`。
+
 - `scripts/` 下的脚本一律用 `.ts`，由 Node 26 直接运行。
 - lint 在根目录执行 `eslint --max-warnings=0 .`，只有一份根配置；`third_party/` 是上游代码，不参与 lint。
 - server 不编译，Node 直接运行 `.ts`；只能用可擦除的 TS 语法（`erasableSyntaxOnly`）。包内导入用 `#` 子路径（如 `#db/client.ts`）。

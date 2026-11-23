@@ -235,7 +235,6 @@ export const entityVersions = sqliteTable(
       .references(() => entities.id, { onDelete: 'cascade' }),
     contentHash: text().notNull(),
     data: text({ mode: 'json' }).notNull(),
-    schema: text({ mode: 'json' }).notNull(),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('entity_versions_content').on(t.entityId, t.contentHash)],
