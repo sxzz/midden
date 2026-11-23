@@ -17,7 +17,6 @@ const item = (id: string, assets: ReturnType<typeof asset>[]) => ({
   revision_id: 'r1',
   observed_at: '2026-09-30T10:00:00Z',
   saved_at: '2026-09-30T10:00:00Z',
-  visibility: 'public',
 })
 async function setup(page: Page, paginated = false) {
   const queries: URLSearchParams[] = []

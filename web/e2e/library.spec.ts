@@ -10,7 +10,6 @@ const collection = {
   published_at: '2026-09-28T10:00:00Z',
   saved_at: '2026-09-29T10:00:00Z',
   observed_at: '2026-09-29T10:00:00Z',
-  visibility: 'public',
   revision_id: 'r1',
   assets: [],
   warnings: [],
@@ -465,10 +464,23 @@ test('a failed refresh shows a toast every time it is tried', async ({
 test('a private collection shows a lock beside the name, not a detail line', async ({
   page,
 }) => {
+  // The lock comes from the author's protected profile.
   const hidden = {
     ...collection,
-    visibility: 'private',
     author_name: '一个名字很长很长很长很长很长很长很长很长的私密账号',
+    graph: {
+      root: 'post',
+      entities: [
+        { key: 'post', type: 'x.post', external_id: '1', data: {} },
+        {
+          key: 'author',
+          type: 'x.profile',
+          external_id: '2',
+          data: { metadata: { protected: true } },
+        },
+      ],
+      relations: [{ source: 'post', target: 'author', type: 'authored_by' }],
+    },
   }
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {

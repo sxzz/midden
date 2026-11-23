@@ -7,7 +7,6 @@ const profile = {
   text: '简介',
   author_name: '测试账号',
   observed_at: '2026-09-30T10:00:00Z',
-  visibility: 'public',
   revision_id: 'r1',
   assets: [],
   graph: {

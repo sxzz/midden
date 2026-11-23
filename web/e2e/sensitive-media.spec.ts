@@ -16,7 +16,6 @@ const collection = (assets: ReturnType<typeof image>[]) => ({
   author_name: '敏感测试',
   observed_at: '2026-09-30T10:00:00Z',
   saved_at: '2026-09-30T10:00:00Z',
-  visibility: 'public',
   revision_id: 'r1',
   warnings: [],
   assets,

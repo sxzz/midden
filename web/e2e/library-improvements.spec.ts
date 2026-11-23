@@ -8,7 +8,6 @@ const post = {
   author_name: '测试作者',
   observed_at: '2026-10-01T00:00:00Z',
   revision_id: 'r1',
-  visibility: 'public',
   assets: [
     {
       id: 'image',

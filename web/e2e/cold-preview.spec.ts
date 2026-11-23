@@ -10,7 +10,6 @@ test('first list preview fits the image after dimensions arrive during opening',
     text: 'Cold image',
     author_name: 'Author',
     observed_at: '2026-09-30T00:00:00Z',
-    visibility: 'public',
     revision_id: 'r1',
     assets: [
       {

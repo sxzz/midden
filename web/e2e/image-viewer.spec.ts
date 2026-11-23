@@ -7,7 +7,6 @@ const collection = {
   text: '相册交互测试',
   author_name: '相册测试',
   observed_at: '2026-09-30T10:00:00Z',
-  visibility: 'public',
   revision_id: 'r1',
   graph: {
     root: 'post',

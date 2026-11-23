@@ -6,7 +6,6 @@ const item = (n: number) => ({
   author_name: `作者${n}`,
   saved_at: '2026-09-29T10:00:00Z',
   observed_at: '2026-09-29T10:00:00Z',
-  visibility: 'public',
   revision_id: `r${n}`,
   assets: [],
 })

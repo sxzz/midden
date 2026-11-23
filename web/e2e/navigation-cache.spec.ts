@@ -9,7 +9,6 @@ const base = {
   url: 'https://example.test/item',
   observed_at: '2026-09-30T10:00:00Z',
   saved_at: '2026-09-30T10:00:00Z',
-  visibility: 'public',
   revision_id: 'revision-1',
 }
 const profile = {
