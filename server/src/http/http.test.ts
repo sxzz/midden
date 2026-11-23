@@ -109,6 +109,12 @@ describe('api', () => {
     expect(await (await call('/library')).json()).toMatchObject({
       collections: 1,
     })
+    const { collection_id: collectionId } = (await (
+      await call(`/jobs/${job.id}`)
+    ).json()) as { collection_id: string }
+    expect(
+      await (await call(`/collections/${collectionId}/availability`)).json(),
+    ).toEqual({ available: true })
   })
 
   test('maps errors to the statuses and texts the web app knows', async () => {
