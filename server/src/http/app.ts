@@ -124,7 +124,8 @@ export function createApi(options: HttpOptions) {
         c.set('session', true)
         await next()
       })
-      .get('/session', (c) => c.json({}))
+      // Answers only whether the request is signed in.
+      .get('/session', (c) => c.body(null, 204))
       .delete('/session', (c) => {
         const cookie = getCookie(c, SESSION_COOKIE)
         if (cookie) deleteSession(ctx.db, cookie)
