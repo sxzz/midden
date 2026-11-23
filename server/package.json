@@ -8,6 +8,10 @@
   "exports": {
     "./api": "./src/http/app.ts"
   },
+  "files": [
+    "drizzle",
+    "src"
+  ],
   "engines": {
     "node": ">=26"
   },
