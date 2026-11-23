@@ -2,7 +2,11 @@
 // the collection list for common filters.
 //
 //   node scripts/bench-list.ts seed <db> [posts=20000]
-//   node scripts/bench-list.ts run <db>
+//   node scripts/bench-list.ts run <db> [entity type]
+//
+// `run` filters on the given root type, by default the most common one in the
+// catalog. It fills missing catalog rows first, so point it at a copy of a
+// real database, not the live one.
 import { Buffer } from 'node:buffer'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -29,9 +33,9 @@ import type { AccountsContext } from '#accounts/accounts.ts'
 import type { CaptureContext } from '#capture/context.ts'
 import type { FetchResponse } from '#platforms/protocol.ts'
 
-const [command, file, count = '20000'] = process.argv.slice(2)
+const [command, file, arg] = process.argv.slice(2)
 if (!file || !['seed', 'run'].includes(command ?? '')) {
-  console.error('usage: bench-list.ts seed|run <db> [posts]')
+  console.error('usage: bench-list.ts seed <db> [posts] | run <db> [type]')
   process.exit(2)
 }
 
@@ -179,7 +183,14 @@ function bench(ctx: CaptureContext) {
     'SELECT collection_id AS id FROM library ORDER BY collection_id LIMIT 1',
   )!.id
   const authors = listAuthors(ctx)
-  const base = { entityType: 'fake.post' }
+  const entityType =
+    arg ??
+    ctx.db.get<{ kind: string }>(
+      'SELECT root_kind AS kind FROM catalog WHERE root_kind IS NOT NULL GROUP BY root_kind ORDER BY count(*) DESC LIMIT 1',
+    )?.kind
+  if (!entityType) throw new Error('no catalogued collection has a root type')
+  console.log(`entity type ${entityType}`)
+  const base = { entityType }
   const cases: [string, Parameters<typeof listCollections>[1]][] = [
     ['default', base],
     ['published', { ...base, sort: 'published' }],
@@ -214,7 +225,7 @@ function bench(ctx: CaptureContext) {
 const ctx = context((req) => post(Number(req.externalId)))
 if (command === 'seed') {
   ctx.queue.start()
-  await seed(ctx, Number(count))
+  await seed(ctx, Number(arg ?? 20_000))
   await ctx.queue.stop()
 } else {
   const at = performance.now()
