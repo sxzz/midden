@@ -125,7 +125,9 @@ async function backup() {
         createWriteStream(path.join(partial, 'midden.db.gz')),
       )
     } finally {
-      rmSync(file, { force: true })
+      // Checking the snapshot opened it, which leaves WAL side files.
+      for (const suffix of ['', '-wal', '-shm'])
+        rmSync(file + suffix, { force: true })
     }
     // SECRET_KEY in .env decrypts the stored account credentials.
     copyFileSync(path.join(dir, '.env'), path.join(partial, '.env'))

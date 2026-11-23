@@ -20,8 +20,8 @@ import { parseEnv } from 'node:util'
 
 const IMAGE = 'ghcr.io/sxzz/midden'
 const REVISION = /^[\da-f]{40}$/
-// Database snapshots kept from earlier deployments.
-const KEEP_SNAPSHOTS = 5
+// Database snapshots kept: this deployment's and the one before.
+const KEEP_SNAPSHOTS = 2
 
 const check = process.argv.includes('--check')
 const dir = path.resolve(
@@ -116,8 +116,45 @@ function snapshot(dataDir: string): string {
     .filter((name) => name.endsWith('.db'))
     .toSorted()
     .slice(0, -KEEP_SNAPSHOTS)
-  for (const name of older) rmSync(path.join(path.dirname(file), name))
+  for (const name of older)
+    for (const suffix of ['', '-wal', '-shm'])
+      rmSync(path.join(path.dirname(file), name + suffix), { force: true })
   return file
+}
+
+/**
+ * Remove the service's images other than the running revision and the one
+ * a rollback would return to. A failure here does not fail the deployment.
+ */
+function pruneImages(keep: string[]) {
+  try {
+    const tags = run('docker', [
+      'image',
+      'ls',
+      IMAGE,
+      '--format',
+      '{{.Tag}}',
+    ]).split('\n')
+    const stale = tags.filter(
+      (tag) =>
+        tag.startsWith('sha-') && !keep.includes(tag.slice('sha-'.length)),
+    )
+    if (stale.length)
+      run('docker', ['image', 'rm', ...stale.map((tag) => `${IMAGE}:${tag}`)])
+    // Earlier `latest` pulls left these untagged.
+    run('docker', [
+      'image',
+      'prune',
+      '--force',
+      '--filter',
+      `label=org.opencontainers.image.source=https://github.com/sxzz/midden`,
+    ])
+    if (stale.length) console.info(`removed images ${stale.join(', ')}`)
+  } catch (error) {
+    console.error(
+      `could not remove old images: ${error instanceof Error ? error.message : error}`,
+    )
+  }
 }
 
 function restore(dataDir: string, file: string) {
@@ -176,6 +213,7 @@ function deploy(): string {
     start(current)
     return `rolled back ${revision}: unhealthy; running ${current} with the database from ${backup}`
   }
+  pruneImages([revision, current])
   return `deployed ${revision} (was ${current || 'nothing'})`
 }
 
