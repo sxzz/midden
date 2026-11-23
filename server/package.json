@@ -5,6 +5,9 @@
   "imports": {
     "#*": "./src/*"
   },
+  "engines": {
+    "node": ">=26"
+  },
   "scripts": {
     "dev": "node --watch --env-file-if-exists=../.env src/main.ts",
     "start": "node src/main.ts",
