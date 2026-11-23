@@ -22,15 +22,15 @@
 | 测试     | vitest                                                                                                                                        |
 | 包名     | `@midden/*`                                                                                                                                   |
 | 兼容性   | 不保留：旧 Bot 消息按钮、旧 REST token、`/v1/assets/{id}` 媒体读取均不兼容                                                                    |
-| 数据导入 | 暂不编写导入脚本                                                                                                                              |
+| 数据导入 | 另一个代理在 `import-legacy` 分支写了导入工具（`tools/import-legacy/`），已用它完成 prod 迁移                                                 |
 | 筛选性能 | 冗余索引表 `catalog`（`library/catalog.ts`），由 finalize 与原始响应清理维护；`server/scripts/bench-list.ts` 造数据并计时                     |
 
 ## Git 与发布
 
 - 重写最初在无历史的 `ts` 分支上进行；2026-11-24 起 `main` 指向重写后的历史，`ts` 已删除。旧 Go 代码在 `golang` 分支（含远端）。
 - 按迁移阶段自行提交，每个提交范围小；提交信息英文，格式 `type(scope): ...`，不加 AI 署名。
-- `test` 工作流的 `image` job 在每次 push 构建并启动镜像；在 `main` 上，checks 与 e2e 通过后发布 amd64 + arm64 的 `ghcr.io/sxzz/midden`。服务器的自动部署由用户关闭，部署手动进行；`web` 工作流（Cloudflare `/app/`）已停用，prod 切到新后端时再启用。
-- 每次提交后立即推送到 `origin/main`（用户已授权）。
+- `test` 工作流的 `image` job 在每次 push 构建并启动镜像；在 `main` 上，checks 与 e2e 通过后发布 amd64 + arm64 的 `ghcr.io/sxzz/midden`。服务器的自动部署由用户关闭，部署手动进行；`web` 工作流在 `main` 通过测试后把网页部署到 Cloudflare `/app/`。
+- 在 worktree 中工作时在自己的分支上提交，不检出、不提交本地 `main`；提交后直接推到远端 `main`（`git push origin HEAD:main`，用户已授权）。
 
 ## 工程约定
 
@@ -123,12 +123,12 @@ web/             现有网页
 
 ## 进度
 
-- 第 1–6 阶段已完成：采集链路、HTTP API 与读取侧、网页改用签名媒体链接、Telegram Bot（`server/src/telegram/`，规格见 `.ai/telegram-spec.md`）、定时维护。用真实 FxTwitter 帖子端到端验证过采集与 API；Bot 只有假 API 的测试，尚未接真实 Bot 验证。
-- 第 7 阶段：Dockerfile（`node:26.13.1-alpine`，升级 Node 时与 `devEngines` 一起改）、`compose.yaml`、`.env.example`、`cli.ts token create` / `backup`、README 与 `docs/`、`CONTRIBUTING.md` 已完成。CI 的 `image` 任务只构建并做健康检查，不发布。
+- 第 1–6 阶段已完成：采集链路、HTTP API 与读取侧、网页改用签名媒体链接、Telegram Bot（`server/src/telegram/`，规格见 `.ai/telegram-spec.md`）、定时维护。用真实 FxTwitter 帖子端到端验证过采集与 API；Bot 已在 dev Bot 上实际验证。
+- 第 7 阶段：Dockerfile（`node:26.13.1-alpine`，升级 Node 时与 `devEngines` 一起改）、`compose.yaml`、`.env.example`、`cli.ts token create` / `backup`、README 与 `docs/`、`CONTRIBUTING.md` 已完成。镜像发布见「Git 与发布」。
 - Bot 实现与旧版的差异：正文为空时只显示 ID 与作者（不显示"空"）；按钮提示真正显示；链接先去重再按 200 计数；非所有者的按钮静默应答；`/show` 直接按收藏投递；投递每 5 秒轮询，不由采集事件唤醒。
 - 本地检查：依次运行 `pnpm lint`、`pnpm typecheck`、`FFMPEG=ffmpeg pnpm --filter @midden/server exec vitest run`（容器里有 apt 装的 ffmpeg）。本机下载不了 Playwright 浏览器，e2e 看 CI。
 - dev：仓库根目录 `.env`（不提交）配置测试 Bot @kevinspiderbot 与 `WEB_APP_URL=https://devbox.beago-mine.ts.net/app/`；`tailscale serve` 把 tailnet 内的 HTTPS 转发到 8080；`pnpm dev` 启动。
-- 第 8 阶段：`main` 已切换，镜像发布工作流已加入；prod 的部署与 Cloudflare `/app/` 静态部署（`web` 工作流）由用户决定何时恢复。旧数据由另一个代理写的导入脚本迁移。
+- 第 8 阶段已完成（2026-11-24）：`main` 指向重写后的历史，prod 已切换到新镜像并导入旧数据，`web` 工作流已重新启用。重写到此结束，之后按普通项目维护。
 
 ## 阶段
 

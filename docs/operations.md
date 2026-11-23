@@ -8,6 +8,11 @@
 
 网页也可以继续单独部署在 Cloudflare 静态托管（`pnpm --filter @midden/web run deploy`），此时代理需把同域的 `/v1/` 与 `/media/` 转发到本服务。
 
+## 发布
+
+- 镜像：`main` 上每次推送，`test` 工作流的 `image` 任务在检查与浏览器测试通过后构建 amd64 与 arm64 镜像，发布为 `ghcr.io/sxzz/midden:latest` 和 `ghcr.io/sxzz/midden:sha-<提交>`。其他分支与 PR 只构建并做健康检查，不发布。服务器上用 `docker compose pull && docker compose up -d` 更新。
+- 网页：`test` 在 `main` 上通过后，`web` 工作流把网页部署到 Cloudflare 静态托管（仓库变量 `MIDDEN_WEB_HOSTNAME` 指定域名，路由 `<域名>/app/*`）。
+
 ## 日常操作
 
 ```sh
@@ -48,6 +53,10 @@ docker compose pull && docker compose up -d   # 更新
 - 不再被引用的媒体文件 24 小时后删除；
 - 为缺少缩略图的媒体补做缩略图；
 - 清理过期的网页会话。
+
+## 从 Go 版迁移
+
+2026-11-24 起生产环境运行本实现。旧的 Go 多服务版本（PostgreSQL、SeaweedFS、gRPC adapter）保存在 `golang` 分支；其数据由 `import-legacy` 分支中的导入工具（`tools/import-legacy/`）迁入 SQLite 与 `media/`，导入后会重建 `catalog`。旧版的 Bot 按钮、REST token、媒体链接不再可用。
 
 ## 排查
 
