@@ -22,8 +22,9 @@
     "dev": "pnpm --filter @midden/server dev",
     "lint": "eslint --max-warnings=0 .",
     "lint:fix": "eslint --fix .",
-    "typecheck": "tsrs --fast -p scripts && pnpm -r --parallel run typecheck",
-    "test": "pnpm -r run test"
+    "prepare": "pnpm --filter @fxembed/atmosphere build",
+    "test": "pnpm -r run test",
+    "typecheck": "tsrs --fast -p scripts && pnpm -r --parallel run typecheck"
   },
   "devDependencies": {
     "@sxzz/eslint-config": "^8.9.2",

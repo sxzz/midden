@@ -7,7 +7,8 @@ COPY server/package.json server/
 COPY shared/package.json shared/
 COPY third_party/atmosphere/package.json third_party/atmosphere/
 COPY web/package.json web/
-RUN pnpm install --frozen-lockfile
+# Sources are not copied yet; the build below builds Atmosphere.
+RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY . .
 RUN pnpm build && pnpm prune --prod
 
