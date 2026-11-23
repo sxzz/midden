@@ -10,8 +10,9 @@ export default sxzz(
     },
   },
   [
-    // Vendored upstream sources keep their own formatting for easier diffs.
-    { ignores: ['third_party/**'] },
+    // Vendored upstream sources keep their own formatting for easier diffs;
+    // migrations are generated and maintained by drizzle-kit.
+    { ignores: ['third_party/**', 'server/drizzle/**'] },
     {
       files: ['web/**'],
       rules: {
