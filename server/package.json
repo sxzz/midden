@@ -1,0 +1,24 @@
+{
+  "name": "@midden/server",
+  "type": "module",
+  "private": true,
+  "imports": {
+    "#*": "./src/*"
+  },
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=../.env src/main.ts",
+    "start": "node src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.11",
+    "@midden/shared": "workspace:*",
+    "hono": "^4.13.21",
+    "pino": "^10.4.0",
+    "valibot": "^1.5.0"
+  },
+  "devDependencies": {
+    "vitest": "^5.1.1"
+  }
+}

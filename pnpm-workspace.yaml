@@ -1,0 +1,18 @@
+minimumReleaseAgeExcludePrune: true
+
+minimumReleaseAgeExclude:
+  - hono@4.13.21
+trustPolicy: no-downgrade
+
+trustPolicyExcludePrune: true
+
+shellEmulator: true
+
+packages:
+  - server
+  - shared
+  - third_party/atmosphere
+  - web
+allowBuilds:
+  esbuild: true
+  workerd: false

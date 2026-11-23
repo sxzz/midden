@@ -1,0 +1,14 @@
+{
+  "name": "@midden/shared",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "valibot": "^1.5.0"
+  }
+}

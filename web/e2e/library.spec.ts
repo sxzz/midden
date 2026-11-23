@@ -1,0 +1,675 @@
+import { Buffer } from 'node:buffer'
+import { expect, test } from '@playwright/test'
+import { swipeImage } from './touch'
+const id = '11111111-1111-4111-8111-111111111111'
+const collection = {
+  id,
+  url: 'https://example.test/post',
+  text: '这是一条保存在 Midden 的测试收藏。',
+  author_name: '测试作者',
+  published_at: '2026-09-28T10:00:00Z',
+  saved_at: '2026-09-29T10:00:00Z',
+  observed_at: '2026-09-29T10:00:00Z',
+  visibility: 'public',
+  revision_id: 'r1',
+  assets: [],
+  warnings: [],
+}
+test('browse, filter, history, refresh and remove a saved post', async ({
+  page,
+}) => {
+  let deleted = false
+  const captureBodies: unknown[] = []
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', async (r) => {
+    const u = new URL(r.request().url())
+    const path = u.pathname
+    let body: unknown
+    switch (path) {
+      case '/v1/session': {
+        body = { tenant_id: 'fixture' }
+        break
+      }
+      case '/v1/usage': {
+        body = {
+          used_bytes: 1048576,
+          reserved_bytes: 0,
+          limit_bytes: 1073741824,
+        }
+        break
+      }
+      case '/v1/collections': {
+        body = {
+          items:
+            deleted || u.searchParams.get('q') === '不存在' ? [] : [collection],
+        }
+        break
+      }
+      default:
+        if (path.endsWith('/availability')) body = { available: true }
+        else if (path.endsWith('/revisions'))
+          body = {
+            items: [
+              { id: 'r1', created_at: collection.observed_at },
+              { id: 'r0', created_at: '2026-09-27T10:00:00Z' },
+            ],
+          }
+        else if (path.endsWith('/revisions/r0'))
+          body = { ...collection, revision_id: 'r0', text: '历史正文' }
+        else if (path === '/v1/captures') {
+          captureBodies.push(r.request().postDataJSON())
+          body = { id: 'job', collection_id: id, state: 'complete' }
+        } else if (path === `/v1/collections/${id}`) {
+          if (r.request().method() === 'DELETE') {
+            deleted = true
+            await r.fulfill({ status: 204 })
+            return
+          }
+          body = collection
+        } else {
+          await r.fulfill({ status: 404, json: { error: 'not found' } })
+          return
+        }
+    }
+    await r.fulfill({ json: body })
+  })
+  const openRow = () =>
+    page.locator('.head').filter({ hasText: '测试作者' }).first().click()
+  await page.goto('/app/')
+  await expect(page.getByText(collection.text)).toBeVisible()
+  await page.screenshot({
+    path: 'test-results/library-mobile.png',
+    fullPage: true,
+  })
+  await openRow()
+  await expect(page.locator('.post .details')).toContainText('保存于')
+  await expect(page.locator('.post .detail').nth(0)).toContainText('发布于')
+  await expect(page.locator('.post .detail').nth(1)).toContainText('保存于')
+  await expect(
+    page.locator('.section-footnote').filter({ hasText: '保存于' }),
+  ).toHaveCount(0)
+  await page.getByRole('button', { name: '历史版本' }).click()
+  await page.getByRole('button', { name: /2026年9月27日/ }).click()
+  await expect(page.getByText('历史正文')).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: /2026年9月27日/ }),
+  ).toBeDisabled()
+  await page.getByRole('button', { name: /最新版本 ·/ }).click()
+  await expect(page.getByText(collection.text)).toBeVisible()
+  await expect(page.getByRole('button', { name: /最新版本 ·/ })).toBeDisabled()
+  await page.getByRole('button', { name: '重新抓取' }).click()
+  await expect(page.getByText('已更新。')).toBeVisible()
+  expect(captureBodies.at(-1)).toEqual({ refresh_id: id })
+  await page.getByRole('button', { name: '返回' }).click()
+  await page.getByRole('searchbox').fill('不存在')
+  await page.getByRole('button', { name: '搜索', exact: true }).click()
+  await expect(page.getByText('没有匹配的收藏', { exact: true })).toBeVisible()
+  await page.getByRole('searchbox').fill('')
+  await page.getByRole('button', { name: '搜索', exact: true }).click()
+  await openRow()
+  await page.getByRole('button', { name: '删除这条收藏' }).click()
+  await page.getByRole('button', { name: '删除', exact: true }).click()
+  await expect(page.getByText('暂无收藏', { exact: true })).toBeVisible()
+})
+test('an ordinary browser logs in with the Telegram Login Widget', async ({
+  page,
+}) => {
+  let widget = ''
+  await page.route('https://telegram.org/**', (r) => {
+    widget = r.request().url()
+    return r.fulfill({ body: '', contentType: 'text/javascript' })
+  })
+  let session = false
+  const logins: unknown[] = []
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path === '/v1/session')
+      return session
+        ? r.fulfill({ json: { tenant_id: 'x' } })
+        : r.fulfill({ status: 401, json: { error: 'authentication required' } })
+    if (path === '/v1/auth/telegram' && r.request().method() === 'GET')
+      return r.fulfill({ json: { bot_username: 'midden_bot' } })
+    if (path === '/v1/auth/telegram') {
+      logins.push(r.request().postDataJSON())
+      session = true
+      return r.fulfill({ json: { tenant_id: 'x' } })
+    }
+    if (path === '/v1/collections') return r.fulfill({ json: { items: [] } })
+    return r.fulfill({ json: {} })
+  })
+  await page.goto('/app/')
+  await expect(page.getByText('使用 Telegram 账号登录')).toBeVisible()
+  const script = page.locator('.widget script')
+  await expect(script).toHaveAttribute('data-telegram-login', 'midden_bot')
+  await expect(script).toHaveAttribute(
+    'data-auth-url',
+    new URL('/app/', page.url()).href,
+  )
+  expect(widget).toContain('telegram-widget.js')
+  await page.screenshot({ path: 'test-results/browser-login.png' })
+
+  // Telegram redirects back with the signed fields in the query.
+  await page.goto(
+    '/app/?theme=dark&id=42&first_name=%E6%B5%8B%E8%AF%95&auth_date=1800000000&hash=abc',
+  )
+  await expect(page.getByText('暂无收藏', { exact: true })).toBeVisible()
+  expect(logins).toEqual([
+    {
+      login: {
+        id: '42',
+        first_name: '测试',
+        auth_date: '1800000000',
+        hash: 'abc',
+      },
+    },
+  ])
+  // The signed fields leave the address bar; the app's own options stay.
+  expect(new URL(page.url()).search).toBe('?theme=dark')
+})
+
+test('a rejected widget login says so on the login page', async ({ page }) => {
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path === '/v1/auth/telegram' && r.request().method() === 'GET')
+      return r.fulfill({ json: { bot_username: 'midden_bot' } })
+    return r.fulfill({ status: 401, json: { error: 'invalid' } })
+  })
+  await page.goto('/app/?id=42&auth_date=1&hash=bad')
+  await expect(page.getByRole('alert')).toHaveText(
+    'Telegram 登录校验失败，请重试。',
+  )
+})
+
+test('sensitive image stays blurred until revealed and opens inside the page', async ({
+  page,
+}) => {
+  let requests = 0
+  const sensitive = {
+    ...collection,
+    assets: [
+      {
+        id: 'media',
+        mime: 'image/png',
+        state: 'ready',
+        sensitive: true,
+        alt_text: '合成测试图片',
+      },
+    ],
+  }
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', async (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path.startsWith('/v1/assets/')) {
+      requests++
+      await r.fulfill({
+        contentType: 'image/png',
+        body: Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=',
+          'base64',
+        ),
+      })
+      return
+    }
+    const body =
+      path === '/v1/session'
+        ? { tenant_id: 'fixture' }
+        : path === '/v1/usage'
+          ? { used_bytes: 0, reserved_bytes: 0, limit_bytes: 1000 }
+          : path.endsWith('/availability')
+            ? { available: true }
+            : path === `/v1/collections/${id}`
+              ? sensitive
+              : { items: [sensitive] }
+    await r.fulfill({ json: body })
+  })
+  await page.goto('/app/')
+  // Sensitive thumbnails and detail previews must remain blurred until revealed.
+  await expect(page.locator('.thumbs img')).toBeVisible()
+  await expect(page.locator('.thumbs img')).toHaveCSS('filter', 'blur(8px)')
+  await page.locator('.head').filter({ hasText: '测试作者' }).first().click()
+  await expect(
+    page.getByRole('button', { name: '敏感内容，点按显示' }),
+  ).toBeVisible()
+  await expect(page.locator('.sensitive img')).toHaveCSS('filter', 'blur(18px)')
+  await page.getByRole('button', { name: '敏感内容，点按显示' }).click()
+  await expect(page.getByAltText('合成测试图片')).toBeVisible()
+  await expect(page.getByAltText('合成测试图片')).toHaveCSS('filter', 'none')
+  await page.getByRole('button', { name: '放大图片' }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('button', { name: '关闭图片' }).click()
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  expect(requests).toBeGreaterThan(0)
+})
+
+test('loading skeletons, one revision and touch image navigation', async ({
+  page,
+}) => {
+  const media = {
+    ...collection,
+    assets: [1, 2].map((n) => ({
+      id: `image${n}`,
+      state: 'ready',
+      mime: 'image/png',
+      sensitive: false,
+      alt_text: `图片${n}`,
+    })),
+  }
+  const { promise: detailGate, resolve: releaseDetail } =
+    Promise.withResolvers<void>()
+  const { promise: imageGate, resolve: releaseImage } =
+    Promise.withResolvers<void>()
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', async (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path.startsWith('/v1/assets/')) {
+      await imageGate
+      return r.fulfill({
+        contentType: 'image/svg+xml',
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="600" height="400" fill="#3390ec"/></svg>',
+      })
+    }
+    if (path === `/v1/collections/${id}`) await detailGate
+    const body =
+      path === '/v1/session'
+        ? {}
+        : path.endsWith('/availability')
+          ? { available: true }
+          : path.endsWith('/revisions')
+            ? { items: [{ id: 'r1', created_at: collection.observed_at }] }
+            : path === `/v1/collections/${id}`
+              ? media
+              : path === '/v1/usage'
+                ? { used_bytes: 0, reserved_bytes: 0, limit_bytes: 1000 }
+                : { items: [media] }
+    await r.fulfill({ json: body })
+  })
+  await page.goto('/app/')
+  await page.locator('.head').filter({ hasText: '测试作者' }).click()
+  await expect(page.getByRole('status', { name: '正在加载收藏' })).toBeVisible()
+  releaseDetail()
+  await expect(page.getByRole('button', { name: '无历史版本' })).toBeDisabled()
+  await expect(page.locator('.media .skeleton')).toHaveCount(2)
+  releaseImage()
+  await expect(page.locator('.media .skeleton')).toHaveCount(0)
+  await page.getByRole('button', { name: '放大图片' }).first().click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('status')).toHaveText('1 / 2')
+  await expect(dialog.getByRole('button', { name: '上一张' })).toBeDisabled()
+  await swipeImage(page)
+  await expect(dialog.getByRole('status')).toHaveText('2 / 2')
+  await expect(dialog.getByRole('button', { name: '下一张' })).toBeDisabled()
+  await expect(dialog.getByAltText('图片2')).toHaveCSS('opacity', '1')
+  await page.screenshot({ path: 'test-results/viewer-mobile.png' })
+  await dialog.getByRole('button', { name: '上一张' }).click()
+  await expect(dialog.getByRole('status')).toHaveText('1 / 2')
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: '放大图片' }).first(),
+  ).toBeFocused()
+})
+
+test('scroll loads the next page and retries without losing existing items', async ({
+  page,
+}) => {
+  let attempts = 0
+  const cursors: (string | null)[] = []
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', async (r) => {
+    const url = new URL(r.request().url())
+    if (url.pathname === '/v1/collections') {
+      const cursor = url.searchParams.get('cursor')
+      cursors.push(cursor)
+      if (cursor) {
+        attempts++
+        if (attempts === 1) {
+          await r.fulfill({ status: 500, json: { error: '加载失败' } })
+          return
+        }
+        await r.fulfill({
+          json: {
+            items: [{ ...collection, id: 'last', text: '最后一条收藏' }],
+          },
+        })
+      } else {
+        await r.fulfill({
+          json: {
+            items: Array.from({ length: 20 }, (_, i) => ({
+              ...collection,
+              id: String(i),
+              text: `收藏编号 ${i + 1}`,
+            })),
+            next_cursor: 'page-two',
+          },
+        })
+      }
+    } else {
+      await r.fulfill({
+        json:
+          url.pathname === '/v1/usage'
+            ? {
+                used_bytes: 1048576,
+                reserved_bytes: 0,
+                limit_bytes: 1073741824,
+              }
+            : {},
+      })
+    }
+  })
+  await page.goto('/app/')
+  await expect(page.getByText('收藏编号 1', { exact: true })).toBeVisible()
+  await expect(page.getByText('已用 1 MB，共 1.0 GB')).toBeInViewport()
+  expect(cursors).toEqual([null])
+  await page.getByText('收藏编号 20', { exact: true }).scrollIntoViewIfNeeded()
+  await expect(page.getByRole('button', { name: '重试加载' })).toBeVisible()
+  expect(cursors).toEqual([null, 'page-two'])
+  await expect(page.getByText('收藏编号 1', { exact: true })).toBeAttached()
+  await page.getByRole('button', { name: '重试加载' }).click()
+  await expect(page.getByText('最后一条收藏')).toBeVisible()
+  await expect(page.getByRole('button', { name: '重试加载' })).toHaveCount(0)
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+  expect(cursors).toEqual([null, 'page-two', 'page-two'])
+  await expect(page.getByText('收藏编号 1', { exact: true })).toBeAttached()
+})
+
+test('sort selection resets pagination and carries into subsequent pages', async ({
+  page,
+}) => {
+  const requests: string[] = []
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', async (r) => {
+    const url = new URL(r.request().url())
+    if (url.pathname !== '/v1/collections') {
+      await r.fulfill({ json: {} })
+      return
+    }
+    requests.push(url.search)
+    const published = url.searchParams.get('sort') === 'published'
+    const tail = url.searchParams.has('cursor')
+    await r.fulfill({
+      json: {
+        items: Array.from({ length: tail ? 1 : 20 }, (_, i) => ({
+          ...collection,
+          id: `${published}-${tail}-${i}`,
+          text: `${published ? '发帖' : '采集'}排序 ${tail ? '末页' : i + 1}`,
+        })),
+        next_cursor: tail ? undefined : 'next-page',
+      },
+    })
+  })
+  await page.goto('/app/')
+  await expect(page.getByText('采集排序 1', { exact: true })).toBeVisible()
+  await page
+    .getByRole('combobox', { name: '排序', exact: true })
+    .selectOption('published')
+  await expect(page.getByText('发帖排序 1', { exact: true })).toBeVisible()
+  await expect(page.getByText('采集排序 1', { exact: true })).toHaveCount(0)
+  expect(new URLSearchParams(requests.at(-1)).has('cursor')).toBe(false)
+  await page.getByText('发帖排序 20', { exact: true }).scrollIntoViewIfNeeded()
+  await expect(page.getByText('发帖排序 末页')).toBeVisible()
+  await page
+    .getByRole('combobox', { name: '排序方向', exact: true })
+    .selectOption('asc')
+  await expect(page.getByText('发帖排序 1', { exact: true })).toBeVisible()
+  const reset = new URLSearchParams(requests.at(-1))
+  expect(reset.get('order')).toBe('asc')
+  expect(reset.has('cursor')).toBe(false)
+  await page.getByText('发帖排序 20', { exact: true }).scrollIntoViewIfNeeded()
+  await expect(page.getByText('发帖排序 末页')).toBeVisible()
+  const last = new URLSearchParams(requests.at(-1))
+  expect(last.get('order')).toBe('asc')
+  expect(last.get('sort')).toBe('published')
+  expect(last.get('cursor')).toBe('next-page')
+})
+
+test('a failed refresh shows a toast every time it is tried', async ({
+  page,
+}) => {
+  let attempts = 0
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/captures') {
+      attempts++
+      return r.fulfill({
+        status: 429,
+        json: { error: 'capture rate exceeded' },
+      })
+    }
+    if (path.endsWith('/availability'))
+      return r.fulfill({ json: { available: true } })
+    if (path.endsWith('/revisions')) return r.fulfill({ json: { items: [] } })
+    if (path === `/v1/collections/${id}`) return r.fulfill({ json: collection })
+    if (path.endsWith('/annotation'))
+      return r.fulfill({ json: { note: '', tags: [] } })
+    if (path === '/v1/tags') return r.fulfill({ json: [] })
+    return r.fulfill({ json: {} })
+  })
+  await page.goto(`/app/#/collection/${id}`)
+  await expect(page.getByText(collection.text)).toBeVisible()
+  const toast = page.locator('.toast')
+  for (let i = 1; i <= 2; i++) {
+    await page.getByRole('button', { name: '重新抓取' }).click()
+    await expect.poll(() => attempts).toBe(i)
+    await expect(toast).toHaveText('操作太频繁，请稍后重试。')
+  }
+  // The collection stays on screen instead of giving way to an error banner.
+  await expect(page.getByText(collection.text)).toBeVisible()
+  await expect(page.locator('.banner')).toHaveCount(0)
+})
+
+test('a private collection shows a lock beside the name, not a detail line', async ({
+  page,
+}) => {
+  const hidden = {
+    ...collection,
+    visibility: 'private',
+    author_name: '一个名字很长很长很长很长很长很长很长很长的私密账号',
+  }
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/collections')
+      return r.fulfill({
+        json: { items: [hidden, { ...collection, id: 'b' }] },
+      })
+    if (path.endsWith('/availability'))
+      return r.fulfill({ json: { available: true } })
+    if (path.endsWith('/revisions')) return r.fulfill({ json: { items: [] } })
+    if (path === `/v1/collections/${id}`) return r.fulfill({ json: hidden })
+    if (path.endsWith('/annotation'))
+      return r.fulfill({ json: { note: '', tags: [] } })
+    if (path === '/v1/tags') return r.fulfill({ json: [] })
+    return r.fulfill({ json: {} })
+  })
+  await page.goto('/app/')
+  const rows = page.locator('.row')
+  await expect(rows).toHaveCount(2)
+  // The lock stays visible even when the name has to be truncated.
+  await expect(rows.nth(0).getByRole('img', { name: '私密' })).toBeVisible()
+  await expect(rows.nth(1).getByRole('img', { name: '私密' })).toHaveCount(0)
+  await expect(rows.nth(0).locator('.meta')).toHaveCount(0)
+  await page.screenshot({ path: 'test-results/private-lock-list.png' })
+  await rows.nth(0).locator('.head').click()
+  await expect(
+    page.locator('.post .name').getByRole('img', { name: '私密' }),
+  ).toBeVisible()
+  await expect(page.getByText('可见性')).toHaveCount(0)
+  await page.screenshot({ path: 'test-results/private-lock-detail.png' })
+})
+
+test('a post reads its author as last seen and notes when it was deleted', async ({
+  page,
+}) => {
+  const post = {
+    ...collection,
+    author_name: '旧名字',
+    source_state: 'deleted',
+    source_state_at: '2026-10-02T08:00:00Z',
+    graph: {
+      root: 'post',
+      entities: [
+        { key: 'post', type: 'x.post', data: { text: collection.text } },
+        {
+          key: 'author',
+          type: 'x.profile',
+          data: {
+            name: '旧名字',
+            username: 'old',
+            metadata: { protected: false },
+          },
+          current: {
+            id: 'v2',
+            data: {
+              name: '新名字',
+              username: 'renamed',
+              metadata: { protected: true },
+            },
+          },
+        },
+      ],
+      relations: [{ source: 'post', target: 'author', type: 'authored_by' }],
+    },
+  }
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/collections')
+      return r.fulfill({ json: { items: [post] } })
+    if (path.endsWith('/availability'))
+      return r.fulfill({ json: { available: true } })
+    if (path.endsWith('/revisions')) return r.fulfill({ json: { items: [] } })
+    if (path === `/v1/collections/${id}`) return r.fulfill({ json: post })
+    if (path.endsWith('/annotation'))
+      return r.fulfill({ json: { note: '', tags: [] } })
+    if (path === '/v1/tags') return r.fulfill({ json: [] })
+    return r.fulfill({ json: {} })
+  })
+  await page.goto('/app/')
+  const row = page.locator('.row')
+  await expect(row.locator('.name')).toHaveText('新名字')
+  await expect(row.getByRole('img', { name: '私密' })).toBeVisible()
+  await expect(row.locator('.meta')).toContainText('原帖已删除')
+  await page.screenshot({ path: 'test-results/current-profile-list.png' })
+  await row.locator('.head').click()
+  const header = page.locator('.post .author')
+  await expect(header.locator('.name')).toHaveText('新名字')
+  await expect(page.locator('.post .notice')).toContainText('原帖已删除')
+  await page.screenshot({ path: 'test-results/current-profile-detail.png' })
+  await header.getByRole('button', { name: '抓取时资料' }).click()
+  await expect(header.locator('.name')).toHaveText('旧名字')
+  await expect(header.getByRole('img', { name: '私密' })).toHaveCount(0)
+  await page.screenshot({ path: 'test-results/captured-profile-detail.png' })
+  await header.getByRole('button', { name: '最新资料' }).click()
+  await expect(header.locator('.name')).toHaveText('新名字')
+})
+
+test('list media loads only near the viewport and leaves the API ahead', async ({
+  page,
+}) => {
+  const rows = Array.from({ length: 20 }, (_, i) => ({
+    ...collection,
+    id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+    assets: [
+      {
+        id: `video-${i}`,
+        state: 'ready',
+        mime: 'video/mp4',
+        sensitive: false,
+      },
+      {
+        id: `image-${i}`,
+        state: 'ready',
+        mime: 'image/png',
+        sensitive: false,
+      },
+    ],
+  }))
+  const requested = new Set<string>()
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path.startsWith('/v1/assets/')) {
+      requested.add(path.split('/').pop()!)
+      return r.fulfill({ status: 404, body: '' })
+    }
+    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/collections') return r.fulfill({ json: { items: rows } })
+    return r.fulfill({ json: {} })
+  })
+  await page.goto('/app/')
+  await expect(page.locator('.row')).toHaveCount(20)
+  await expect.poll(() => requested.has('video-0')).toBe(true)
+  // Far below the fold, neither images nor videos have started.
+  expect(requested.has('video-19')).toBe(false)
+  expect(requested.has('image-19')).toBe(false)
+  await page.locator('.row').last().scrollIntoViewIfNeeded()
+  await expect.poll(() => requested.has('video-19')).toBe(true)
+  await expect.poll(() => requested.has('image-19')).toBe(true)
+})
+
+test('lists show thumbnails; the open post loads the originals', async ({
+  page,
+}) => {
+  const pixel = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=',
+    'base64',
+  )
+  const post = {
+    ...collection,
+    assets: [
+      {
+        id: 'photo',
+        state: 'ready',
+        mime: 'image/png',
+        sensitive: false,
+        thumbnail: true,
+      },
+      {
+        id: 'clip',
+        state: 'ready',
+        mime: 'video/mp4',
+        sensitive: false,
+        thumbnail: true,
+      },
+      // Not rendered yet, so the list falls back to the original.
+      { id: 'fresh', state: 'ready', mime: 'image/png', sensitive: false },
+    ],
+  }
+  const requested: string[] = []
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path.startsWith('/v1/assets/')) {
+      requested.push(path.slice('/v1/assets/'.length))
+      return r.fulfill({ contentType: 'image/png', body: pixel })
+    }
+    if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
+    if (path === '/v1/collections')
+      return r.fulfill({ json: { items: [post] } })
+    if (path === `/v1/collections/${id}`) return r.fulfill({ json: post })
+    if (path.endsWith('/availability'))
+      return r.fulfill({ json: { available: true } })
+    if (path.endsWith('/revisions')) return r.fulfill({ json: { items: [] } })
+    if (path.endsWith('/annotation'))
+      return r.fulfill({ json: { note: '', tags: [] } })
+    return r.fulfill({ json: [] })
+  })
+  await page.goto('/app/')
+  const thumbs = page.locator('.row .thumbs')
+  await expect(thumbs.locator('img')).toHaveCount(3)
+  // The video tile is a still image with its play mark, not a video element.
+  await expect(thumbs.locator('video')).toHaveCount(0)
+  await expect(thumbs.locator('.play')).toHaveCount(1)
+  await expect
+    .poll(() => requested.toSorted())
+    .toEqual(['clip/thumbnail', 'fresh', 'photo/thumbnail'])
+  await page.locator('.row .head').click()
+  await expect(page.locator('.post')).toBeVisible()
+  await expect.poll(() => requested.includes('photo')).toBe(true)
+  await expect.poll(() => requested.includes('clip')).toBe(true)
+})

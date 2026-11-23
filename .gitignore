@@ -1,0 +1,19 @@
+.env
+.env.*
+!.env.example
+
+# Local runtime data: SQLite database and media.
+.local/
+data/
+
+node_modules/
+**/dist/
+.coverage*
+
+.DS_Store
+
+web/test-results/
+web/playwright-report/
+
+web/.worker-assets/
+web/.wrangler/
