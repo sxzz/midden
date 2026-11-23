@@ -63,7 +63,26 @@ GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<域名>/hooks/
    rsync -a data/media/ <备份位置>/media/
    ```
 
-恢复时停止服务，将备份的数据库文件放回 `data/midden.db`，媒体放回 `data/media/`，使用原来的 `SECRET_KEY` 启动。
+### 自动备份
+
+`scripts/backup.ts` 每天备份一次：
+
+- 数据库：服务在线备份，检查完整性后 gzip 压缩，与 `.env` 及当前提交一起存到 `<目标>/daily/<时间>/`，保留 7 天（最新一份总是保留）；
+- 媒体：`rsync` 增量镜像到 `<目标>/media/`，不删除；
+- 部署进行中时等部署结束；失败时通过 Bot 通知 `DEPLOY_NOTIFY_CHAT_ID`（默认 `OWNER_TELEGRAM_ID`）。
+
+目标默认 `~/backups/midden/auto`。安装为每天 12:00 运行的 LaunchAgent，直接运行部署目录里的脚本，随部署更新：
+
+```sh
+node scripts/install-backup.ts --dir ~/midden            # --to <目标> --at HH:MM
+launchctl kickstart gui/$(id -u)/org.midden.backup      # 立即运行一次
+```
+
+日志在 `.local/backup/`。升级 Node 后重新运行安装命令。
+
+### 恢复
+
+恢复时停止服务，将备份的数据库文件放回 `data/midden.db`（自动备份的 `midden.db.gz` 先 `gunzip`），删除旁边的 `midden.db-wal` 与 `midden.db-shm`，媒体放回 `data/media/`，使用原来的 `SECRET_KEY` 启动。
 
 数据库与媒体分别备份时，可能有少量新媒体在数据库备份中尚未出现（无害），或数据库引用了刚被回收的旧媒体；后者在维护时会被清理。需要严格一致时，先 `docker compose stop` 再备份。
 
