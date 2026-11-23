@@ -4,7 +4,6 @@ import { handle, type Reply, type Request } from './commands.ts'
 import {
   DeliveryWorker,
   editText,
-  enqueueDelivery,
   isDeliveryMessage,
   sendText,
 } from './delivery.ts'
@@ -54,8 +53,6 @@ function validLink(value: string): boolean {
 
 export interface RunningBot {
   stop: () => Promise<void>
-  /** Follow a refresh batch in the owner's private chat. */
-  followBatch: (batchId: string) => void
 }
 
 export async function startBot(options: BotOptions): Promise<RunningBot> {
@@ -249,7 +246,5 @@ export async function startBot(options: BotOptions): Promise<RunningBot> {
       worker.stop()
       await bot.stop()
     },
-    followBatch: (batchId) =>
-      enqueueDelivery(ctx, { kind: 'batch', ref: batchId, chatId: owner }),
   }
 }

@@ -26,8 +26,6 @@ export interface HttpOptions {
   webAppUrl?: string
   /** Look up the bot's username for the login widget. */
   botUsername?: () => Promise<string>
-  /** Follow a refresh batch the owner started in the web app. */
-  followBatch?: (batchId: string) => void
   now?: () => number
 }
 
@@ -133,7 +131,7 @@ export function createApi(options: HttpOptions) {
         deleteCookie(c, SESSION_COOKIE, { path: '/', secure: true })
         return c.body(null, 204)
       })
-      .route('/', captureRoutes(ctx, { followBatch: options.followBatch }))
+      .route('/', captureRoutes(ctx))
       .route('/', accountRoutes(ctx))
       .route('/', libraryRoutes(ctx))
   )

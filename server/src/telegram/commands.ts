@@ -6,7 +6,6 @@ import {
   selectAccount,
   type AccountsContext,
 } from '#accounts/accounts.ts'
-import { retryRefreshBatch } from '#capture/batches.ts'
 import { safeError } from '#capture/errors.ts'
 import { sha256Hex } from '#capture/json.ts'
 import { captureURL, recapture, recordPage } from '#capture/records.ts'
@@ -206,25 +205,6 @@ function run(c: CommandContext, request: Request): Reply {
       stopCollection(ctx, requireId(arg))
       deliverSubmission(c, request, arg)
       return menu('已中止。', { newMessage: true })
-    case 'batch_retry':
-      try {
-        const count = retryRefreshBatch(ctx, requireId(arg))
-        enqueueDelivery(ctx, {
-          kind: 'batch',
-          ref: arg,
-          chatId: request.chatId,
-        })
-        return {
-          toast: count
-            ? `正在重试 ${count} 条失败的帖子。`
-            : '没有可重试的帖子。',
-          newMessage: true,
-        }
-      } catch (error) {
-        if (isAppError(error, 'batch_running'))
-          return { toast: '批量更新仍在进行。', newMessage: true }
-        throw error
-      }
     default:
       throw new AppError('unsupported')
   }

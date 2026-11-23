@@ -1,6 +1,5 @@
 import { and, asc, eq, lte } from 'drizzle-orm'
 import { GrammyError, type Api } from 'grammy'
-import { batchProgress } from '#capture/batches.ts'
 import { collectionProgress, collectionReasons } from '#capture/records.ts'
 import { newId } from '#db/id.ts'
 import {
@@ -10,7 +9,6 @@ import {
   telegramDeliveries,
 } from '#db/schema.ts'
 import { getCaptureCollection, getCollection } from '#library/read.ts'
-import { batchMessage } from './batch-message.ts'
 import { deliveryParts, type Part } from './parts.ts'
 import {
   collectionMessage,
@@ -40,7 +38,7 @@ export interface Deliverer {
   now?: () => number
 }
 
-/** Queue a message to the owner; one per submission, collection or batch. */
+/** Queue a message to the owner; one per submission or collection. */
 export function enqueueDelivery(
   ctx: CaptureContext,
   input: {
@@ -63,7 +61,7 @@ export function enqueueDelivery(
     )
     .get()
   if (existing && input.kind !== 'show') {
-    // Reopen it, e.g. a stopped collection or a retried batch.
+    // Reopen it, e.g. a stopped collection.
     ctx.db
       .update(telegramDeliveries)
       .set({ state: 'pending', nextAt: new Date(ctx.now?.() ?? Date.now()) })
@@ -297,11 +295,6 @@ export class DeliveryWorker {
       const collection = getCollection(this.#d.ctx, delivery.ref)
       await this.#final(delivery, collection, 'complete')
       return false
-    }
-    if (delivery.kind === 'batch') {
-      const progress = batchProgress(this.#d.ctx.db, delivery.ref)
-      await this.#status(delivery, batchMessage(this.#d.ctx, progress))
-      return !progress.done
     }
     const { db } = this.#d.ctx
     const row = db

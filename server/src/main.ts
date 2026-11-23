@@ -67,7 +67,6 @@ let botUsername: string | undefined
 let bot: RunningBot | undefined
 const api = createApi({
   ctx,
-  followBatch: (id) => bot?.followBatch(id),
   telegram: config.telegram,
   webAppUrl: config.webAppUrl,
   botUsername: async () => {

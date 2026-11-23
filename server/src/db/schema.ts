@@ -597,16 +597,16 @@ export const apiTokens = sqliteTable('api_tokens', {
 })
 
 /**
- * Messages the bot owes the owner: a capture's status and result, a shown
- * collection, a refresh batch. Progress is checkpointed per sent part, so a
+ * Messages the bot owes the owner: a capture's status and result, or a shown
+ * collection. Progress is checkpointed per sent part, so a
  * restart resumes without resending.
  */
 export const telegramDeliveries = sqliteTable(
   'telegram_deliveries',
   {
     id: text().primaryKey(),
-    kind: text({ enum: ['submission', 'show', 'batch'] }).notNull(),
-    // Submission, collection or refresh batch id.
+    kind: text({ enum: ['submission', 'show'] }).notNull(),
+    // Submission or collection id.
     ref: text().notNull(),
     chatId: text().notNull(),
     group: bool().notNull().default(false),
