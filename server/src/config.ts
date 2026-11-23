@@ -20,6 +20,7 @@ const Env = v.object({
   ),
   // Root secret for every derived key (credential encryption, media URL
   // signatures). Rotating it invalidates stored credentials.
+  FFMPEG: v.optional(v.pipe(v.string(), v.nonEmpty()), 'ffmpeg'),
   SECRET_KEY: v.pipe(
     v.string('SECRET_KEY is required'),
     v.minLength(32, 'SECRET_KEY must be at least 32 characters'),
@@ -34,6 +35,7 @@ export interface Config {
   port: number
   logLevel: v.InferOutput<typeof Env>['LOG_LEVEL']
   secretKey: string
+  ffmpeg: string
 }
 
 export function loadConfig(
@@ -57,5 +59,6 @@ export function loadConfig(
     port: parsed.PORT,
     logLevel: parsed.LOG_LEVEL,
     secretKey: parsed.SECRET_KEY,
+    ffmpeg: parsed.FFMPEG,
   }
 }
