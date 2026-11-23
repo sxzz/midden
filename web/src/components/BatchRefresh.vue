@@ -40,12 +40,12 @@ async function start() {
       type="button"
       class="action"
       :disabled="!listed.length"
-      @click="$emit('select', allSelected ? [] : listed)"
+      @click="emit('select', allSelected ? [] : listed)"
     >
       {{ allSelected ? '取消全选' : '全选' }}
     </button>
     <p class="status">已选 {{ selected.length }} 项</p>
-    <button type="button" class="action" @click="$emit('close')">取消</button>
+    <button type="button" class="action" @click="emit('close')">取消</button>
     <button
       type="button"
       class="action strong"

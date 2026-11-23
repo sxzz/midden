@@ -48,7 +48,9 @@ function update() {
 <template>
   <details
     class="capture-options"
-    @toggle="open = ($event.target as HTMLDetailsElement).open"
+    @toggle="
+      (event: Event) => (open = (event.target as HTMLDetailsElement).open)
+    "
     @change="update"
   >
     <summary>

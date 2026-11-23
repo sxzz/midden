@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-defineEmits<{ select: [] }>()
+const emit = defineEmits<{ select: [] }>()
 </script>
 
 <template>
@@ -8,7 +8,7 @@ defineEmits<{ select: [] }>()
     class="glass detail"
     aria-label="打开收藏详情"
     title="收藏详情"
-    @click="$emit('select')"
+    @click="emit('select')"
   >
     <svg
       class="icon"

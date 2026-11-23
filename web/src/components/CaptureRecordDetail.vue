@@ -401,7 +401,9 @@ function openCollection(id: string, event?: MouseEvent) {
             type="button"
             class="member-main"
             :disabled="!m.saved || m.state === 'failed'"
-            @click="openCollection(m.collection_id, $event)"
+            @click="
+              (event: MouseEvent) => openCollection(m.collection_id, event)
+            "
           >
             <span class="line-text"
               >{{ linkTitle(m.url)

@@ -72,7 +72,9 @@ function navigate(event: KeyboardEvent) {
     ref="dropdown"
     class="multi-select"
     @keydown.esc="close"
-    @toggle="open = ($event.target as HTMLDetailsElement).open"
+    @toggle="
+      (event: Event) => (open = (event.target as HTMLDetailsElement).open)
+    "
   >
     <summary :aria-label="label">
       <span>{{ label }}</span><span class="value">{{ summary }}</span>

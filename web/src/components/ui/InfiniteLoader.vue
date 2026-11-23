@@ -43,7 +43,7 @@ watchEffect(
   <div ref="sentinel" class="sentinel" aria-hidden="true" />
   <ListSection v-if="error">
     <p class="error" role="alert">{{ error }}</p>
-    <ListButton label="重试加载" @select="$emit('more')" />
+    <ListButton label="重试加载" @select="emit('more')" />
   </ListSection>
 </template>
 

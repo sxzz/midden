@@ -14,7 +14,7 @@ export type AlbumTile = {
   }
 }
 defineProps<{ tiles: AlbumTile[]; loading?: boolean }>()
-defineEmits<{ select: [key: string] }>()
+const emit = defineEmits<{ select: [key: string] }>()
 const isVideo = (asset: Asset) => !!asset.mime?.startsWith('video/')
 function label(tile: AlbumTile) {
   if (tile.hidden) return '敏感内容，点按显示'
@@ -34,7 +34,7 @@ const placeholders = 12
       :class="{ blurred: tile.hidden }"
       :data-key="tile.key"
       :aria-label="label(tile)"
-      @click="$emit('select', tile.key)"
+      @click="emit('select', tile.key)"
     >
       <span class="media">
         <MediaPreview :asset="tile.asset" thumbnail />

@@ -170,7 +170,7 @@ const storage = computed(() =>
           :collection="collection"
           :assets="collection.assets || []"
           :show-sensitive="showSensitive"
-          @open="$emit('open', collection.id)"
+          @open="emit('open', collection.id)"
         />
         <span v-if="storage" class="storage">{{ storage }}</span>
       </span>

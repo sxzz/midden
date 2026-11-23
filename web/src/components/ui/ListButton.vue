@@ -11,7 +11,7 @@ withDefaults(
   }>(),
   { variant: 'link' },
 )
-defineEmits<{ select: [] }>()
+const emit = defineEmits<{ select: [] }>()
 </script>
 
 <template>
@@ -31,7 +31,7 @@ defineEmits<{ select: [] }>()
     class="row"
     :class="variant"
     :disabled="disabled"
-    @click="$emit('select')"
+    @click="emit('select')"
   >
     <span class="label"
       >{{ label }}<small v-if="hint" class="hint">{{ hint }}</small></span

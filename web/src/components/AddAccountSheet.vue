@@ -41,7 +41,7 @@ function submit() {
     class="sheet"
     :aria-labelledby="titleId"
     @click="backdrop"
-    @cancel.prevent="busy || $emit('cancel')"
+    @cancel.prevent="busy || emit('cancel')"
   >
     <form class="group" @submit.prevent="submit">
       <p class="head">
@@ -81,7 +81,7 @@ function submit() {
       type="button"
       class="group action cancel"
       :disabled="busy"
-      @click="$emit('cancel')"
+      @click="emit('cancel')"
     >
       取消
     </button>

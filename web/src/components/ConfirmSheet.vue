@@ -36,7 +36,7 @@ function backdrop(event: MouseEvent) {
     class="sheet"
     :aria-labelledby="titleId"
     @click="backdrop"
-    @cancel.prevent="$emit('cancel')"
+    @cancel.prevent="emit('cancel')"
   >
     <div class="group">
       <p class="head">
@@ -58,12 +58,12 @@ function backdrop(event: MouseEvent) {
         type="button"
         class="action destructive"
         :disabled="busy || !ready"
-        @click="ready && $emit('confirm')"
+        @click="ready && emit('confirm')"
       >
         {{ confirmLabel }}
       </button>
     </div>
-    <button type="button" class="group action cancel" @click="$emit('cancel')">
+    <button type="button" class="group action cancel" @click="emit('cancel')">
       取消
     </button>
   </dialog>

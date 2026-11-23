@@ -103,7 +103,7 @@ const storage = computed(() =>
     v-if="!hideFilters"
     :query="query"
     :hide-authors="hideAuthors"
-    @search="$emit('search', $event)"
+    @search="(value) => emit('search', value)"
   />
   <div class="layout-bar">
     <button
@@ -121,7 +121,7 @@ const storage = computed(() =>
   </div>
   <ListSection v-if="error && !items.length">
     <p class="banner" role="alert">{{ error }}</p>
-    <ListButton label="重试" @select="$emit('retry')" />
+    <ListButton label="重试" @select="emit('retry')" />
   </ListSection>
   <CollectionAlbum
     v-if="layout === 'album'"
@@ -141,7 +141,7 @@ const storage = computed(() =>
     :loading="loading"
     :next="next"
     :error="error"
-    @open="$emit('open', $event)"
+    @open="(value) => emit('open', value)"
   />
   <template v-else>
     <ListSection
@@ -158,7 +158,7 @@ const storage = computed(() =>
         :show-sensitive="showSensitive"
         :reposted-by="repostedBy"
         :selected="selecting ? selected.includes(a.id) : undefined"
-        @open="$emit('open', $event)"
+        @open="(value) => emit('open', value)"
         @toggle="toggle"
       />
     </ListSection>
@@ -171,13 +171,13 @@ const storage = computed(() =>
     v-if="next"
     :loading="loading"
     :error="error"
-    @more="$emit('more')"
+    @more="emit('more')"
   />
   <BatchRefresh
     v-if="selecting"
     :selected="selected"
     :listed="listed"
-    @select="selected = $event"
+    @select="(value) => (selected = value)"
     @close="selecting = false"
   />
 </template>

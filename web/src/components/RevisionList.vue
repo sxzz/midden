@@ -10,7 +10,7 @@ defineProps<{
   selectedId: string
   latestId: string
 }>()
-defineEmits<{ select: [id: string]; more: [] }>()
+const emit = defineEmits<{ select: [id: string]; more: [] }>()
 </script>
 
 <template>
@@ -21,7 +21,7 @@ defineEmits<{ select: [id: string]; more: [] }>()
       :label="`${r.id === latestId ? '最新版本 · ' : ''}${date(r.created_at)}`"
       :trailing="r.id === selectedId ? '正在查看' : '查看'"
       :disabled="busy || r.id === selectedId"
-      @select="$emit('select', r.id)"
+      @select="emit('select', r.id)"
     />
     <div
       v-if="loading"
@@ -36,7 +36,7 @@ defineEmits<{ select: [id: string]; more: [] }>()
       v-if="next"
       label="更多版本"
       :disabled="busy || loading"
-      @select="$emit('more')"
+      @select="emit('more')"
     />
   </div>
 </template>

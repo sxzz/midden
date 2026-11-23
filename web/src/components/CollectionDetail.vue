@@ -132,7 +132,7 @@ const version = computed(() =>
         :loading="historyLoading"
         :selected-id="collection.revision_id"
         :latest-id="latestRevision"
-        @select="revision($event)"
+        @select="revision"
         @more="historyPage(true)"
       />
     </ListSection>
