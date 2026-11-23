@@ -8,11 +8,11 @@ This spec describes how the old Go Telegram bot (`/home/paseo/workspace/midden-g
 
 Paths are relative to `/home/paseo/workspace/midden-go`.
 
-| short | file |
-|---|---|
-| `tgc/` | `internal/tgchannel/` |
-| `tg/` | `internal/telegram/` |
-| `app/` | `internal/app/` |
+| short    | file                         |
+| -------- | ---------------------------- |
+| `tgc/`   | `internal/tgchannel/`        |
+| `tg/`    | `internal/telegram/`         |
+| `app/`   | `internal/app/`              |
 | `deploy` | `scripts/deploy-webhook.mjs` |
 
 ### Architecture in Go, and what changes
@@ -114,18 +114,18 @@ Callbacks in groups are always accepted. They are not subject to the trigger.
 
 Test cases (`tgc/group_trigger_test.go:9-36`, `tgc/runner_test.go:87-106`):
 
-| input | entities | handled |
-|---|---|---|
-| `https://x.com/a/status/20` | none | no |
-| `/usage` | bot_command(0,6) | no |
-| `/usage@OurBot` | bot_command(0,13) | yes |
-| `/usage@OtherBot` | bot_command(0,15) | no |
-| `@OurBot https://x.com/a/status/20` | mention(0,7) | yes |
-| `@OurBotExtra https://…` | mention(0,12) | no |
-| `@OurBot https://…` | code(0,7) | no |
-| `@ourbot /usage` | mention(0,7) | yes (command `usage`) |
-| `😀 @OurBot https://…` | mention(3,7) | yes (UTF-16 offsets) |
-| caption `@OurBot https://…` | caption mention | yes |
+| input                               | entities          | handled               |
+| ----------------------------------- | ----------------- | --------------------- |
+| `https://x.com/a/status/20`         | none              | no                    |
+| `/usage`                            | bot_command(0,6)  | no                    |
+| `/usage@OurBot`                     | bot_command(0,13) | yes                   |
+| `/usage@OtherBot`                   | bot_command(0,15) | no                    |
+| `@OurBot https://x.com/a/status/20` | mention(0,7)      | yes                   |
+| `@OurBotExtra https://…`            | mention(0,12)     | no                    |
+| `@OurBot https://…`                 | code(0,7)         | no                    |
+| `@ourbot /usage`                    | mention(0,7)      | yes (command `usage`) |
+| `😀 @OurBot https://…`              | mention(3,7)      | yes (UTF-16 offsets)  |
+| caption `@OurBot https://…`         | caption mention   | yes                   |
 
 ### 2.4 Link extraction (`URLs`, `tg/client.go:468-492`; test `tg/client_test.go:20-26`)
 
@@ -153,20 +153,20 @@ Limits and de-duplication for `save`:
 
 The menu descriptions are verbatim. "Private-only" commands are omitted from the group menu and the group help. In a group they reply `请在私聊中使用此命令。` (`tgc/commands.go:31-36`). The `Usage` strings exist in the table but are never displayed anywhere.
 
-| command | menu description | usage (unused) | private-only |
-|---|---|---|---|
-| `start` | 开始使用 | | yes |
-| `save` | 保存帖子 | `<帖子链接…>` | no |
-| `list` | 查看收藏列表 | `[游标]` | yes |
-| `show` | 查看指定收藏 | `<收藏 ID>` | no |
-| `status` | 查看采集状态 | `<任务 ID>` | no |
-| `retry` | 使用当前账号重试 | `<收藏 ID>` | no |
-| `refresh` | 重新抓取帖子 | `<收藏 ID>` | no |
-| `delete` | 删除 | `<收藏 ID>` | no |
-| `account_delete` | 删除采集账号 | `[账号 ID]` | yes |
-| `account` | 选择采集账号 | | no |
-| `usage` | 查看存储用量 | | no |
-| `help` | 查看使用帮助 | | no |
+| command          | menu description | usage (unused) | private-only |
+| ---------------- | ---------------- | -------------- | ------------ |
+| `start`          | 开始使用         |                | yes          |
+| `save`           | 保存帖子         | `<帖子链接…>`  | no           |
+| `list`           | 查看收藏列表     | `[游标]`       | yes          |
+| `show`           | 查看指定收藏     | `<收藏 ID>`    | no           |
+| `status`         | 查看采集状态     | `<任务 ID>`    | no           |
+| `retry`          | 使用当前账号重试 | `<收藏 ID>`    | no           |
+| `refresh`        | 重新抓取帖子     | `<收藏 ID>`    | no           |
+| `delete`         | 删除             | `<收藏 ID>`    | no           |
+| `account_delete` | 删除采集账号     | `[账号 ID]`    | yes          |
+| `account`        | 选择采集账号     |                | no           |
+| `usage`          | 查看存储用量     |                | no           |
+| `help`           | 查看使用帮助     |                | no           |
 
 Other operations exist only as callback data, though typing them in a private chat also works: `more`, `more1000`, `page_retry`, `collection_stop`, `batch_retry`. In groups they are not "known commands", so a typed `/more@Bot` is not triggered.
 
@@ -256,14 +256,14 @@ Every text below is verbatim. `\n` is a newline.
 
 `jobState` (`tgc/presentation.go:13-27`):
 
-| state | text |
-|---|---|
-| `queued` | 正在采集 |
-| `downloading` | 正在保存媒体 |
-| `complete` | 收藏完成 |
-| `partial` | 已收藏，部分资源缺失 |
-| `failed` | 收藏失败 |
-| other | the raw state |
+| state         | text                 |
+| ------------- | -------------------- |
+| `queued`      | 正在采集             |
+| `downloading` | 正在保存媒体         |
+| `complete`    | 收藏完成             |
+| `partial`     | 已收藏，部分资源缺失 |
+| `failed`      | 收藏失败             |
+| other         | the raw state        |
 
 #### `/retry <收藏 ID>` and `/refresh <收藏 ID>` (`app/channel_actions.go:122-133`; `app/capture_records.go:330-346`)
 
@@ -308,12 +308,12 @@ List rendering:
 
 #### `/account_add` (retired, not in the menu) (`tgc/commands.go:201-218`)
 
-| case | text | keyboard |
-|---|---|---|
-| private, nothing after the command | `在网页中添加采集账号。` | `[添加账号 → web_app #/accounts]`, `[返回账号列表 → /account]` |
-| private, something pasted after it | `不要在聊天中发送凭据。在网页中添加采集账号。` (and the user's message is deleted, §4.2) | same |
-| private, no valid https web URL | `未配置网页入口。` | `[返回账号列表]` |
-| group | `在私聊中打开网页添加采集账号。` | `[返回账号列表]` |
+| case                               | text                                                                                     | keyboard                                                       |
+| ---------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| private, nothing after the command | `在网页中添加采集账号。`                                                                 | `[添加账号 → web_app #/accounts]`, `[返回账号列表 → /account]` |
+| private, something pasted after it | `不要在聊天中发送凭据。在网页中添加采集账号。` (and the user's message is deleted, §4.2) | same                                                           |
+| private, no valid https web URL    | `未配置网页入口。`                                                                       | `[返回账号列表]`                                               |
+| group                              | `在私聊中打开网页添加采集账号。`                                                         | `[返回账号列表]`                                               |
 
 Rewrite: the rewrite plan keeps account management. The Go bot does **not** add accounts via chat messages; it only points to the web page and deletes pasted credentials. **Decide** whether to keep `/account_add` at all.
 
@@ -498,6 +498,7 @@ In groups:
   3. Send.
 
   This way the album appears in order, below the user's link.
+
 - **Text-only, or text first.** The header (part 0) **edits** the status message, with the keyboard. If the edit target is gone, it is sent new (§7.1).
 - **Header text after albums.** Sent as a new message, with the keyboard.
 - **Other text parts.** Plain new messages, without keyboard.
@@ -511,17 +512,17 @@ In groups:
 
 Over the chain of pages for this submission (the root plus its `next_submission` pages):
 
-| field | meaning |
-|---|---|
-| `URL` | URL of the first page's collection |
-| `CollectionID` | collection ID of the first page |
-| `Total` | distinct related target URLs over all pages |
-| `Complete`, `Partial`, `Failed`, `Pending` | counts of member captures by state |
-| `Next` | the deepest page's next cursor |
-| `MaxBatch` | the deepest page's max batch size |
-| `Stopped` | any page stopped |
-| `Error` | `partial_pages` if any page or capture failed or was partial, or any related expansion failed |
-| `Reasons` | grouped failure reasons with distinct-capture counts, ordered by count desc then reason |
+| field                                      | meaning                                                                                       |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `URL`                                      | URL of the first page's collection                                                            |
+| `CollectionID`                             | collection ID of the first page                                                               |
+| `Total`                                    | distinct related target URLs over all pages                                                   |
+| `Complete`, `Partial`, `Failed`, `Pending` | counts of member captures by state                                                            |
+| `Next`                                     | the deepest page's next cursor                                                                |
+| `MaxBatch`                                 | the deepest page's max batch size                                                             |
+| `Stopped`                                  | any page stopped                                                                              |
+| `Error`                                    | `partial_pages` if any page or capture failed or was partial, or any related expansion failed |
+| `Reasons`                                  | grouped failure reasons with distinct-capture counts, ordered by count desc then reason       |
 
 `Done` (`app/channel_api.go:290`) holds when the root capture failed, or when it is complete/partial and no page is still running or expanding and no member is pending.
 
@@ -540,17 +541,17 @@ Over the chain of pages for this submission (the root plus its `next_submission`
 
 #### Keyboard (in this order)
 
-| row | button | data / target | shown when |
-|---|---|---|---|
-| 1 | `在 X 查看主页` / `在 Instagram 查看主页` | url = `URL` | always (label by host: instagram.com / www. / m. means Instagram) |
-| 2 | `抓取更多` | `/more <submission id>` | done, not stopped, `Next` non-empty |
-| 3 | `抓取1000条` | `/more1000 <submission id>` | as above and `MaxBatch >= 1000` |
-| 4 | `重试本页` | `/page_retry <submission id>` | done, not stopped, and (`Error` set, or root failed, or root partial) |
-| 5 | `中止` | `/collection_stop <submission id>` | not done and not stopped |
-| 6 | `查看已保存资料` | `/show <collection id>` | always |
-| 7 | `收藏列表` | `/list` | always (removed in groups) |
-| 8 | `在小程序查看进度` | web_app `#/captures/<submission id>` | valid https web URL, private |
-| 9 | `在小程序中打开` | web_app `#/collection/<collection id>` | valid https web URL, private |
+| row | button                                    | data / target                          | shown when                                                            |
+| --- | ----------------------------------------- | -------------------------------------- | --------------------------------------------------------------------- |
+| 1   | `在 X 查看主页` / `在 Instagram 查看主页` | url = `URL`                            | always (label by host: instagram.com / www. / m. means Instagram)     |
+| 2   | `抓取更多`                                | `/more <submission id>`                | done, not stopped, `Next` non-empty                                   |
+| 3   | `抓取1000条`                              | `/more1000 <submission id>`            | as above and `MaxBatch >= 1000`                                       |
+| 4   | `重试本页`                                | `/page_retry <submission id>`          | done, not stopped, and (`Error` set, or root failed, or root partial) |
+| 5   | `中止`                                    | `/collection_stop <submission id>`     | not done and not stopped                                              |
+| 6   | `查看已保存资料`                          | `/show <collection id>`                | always                                                                |
+| 7   | `收藏列表`                                | `/list`                                | always (removed in groups)                                            |
+| 8   | `在小程序查看进度`                        | web_app `#/captures/<submission id>`   | valid https web URL, private                                          |
+| 9   | `在小程序中打开`                          | web_app `#/collection/<collection id>` | valid https web URL, private                                          |
 
 Tests: `tgc/runner_test.go:204-244`, `tgc/instagram_test.go:42-75`.
 
@@ -565,23 +566,23 @@ Tests: `tgc/runner_test.go:204-244`, `tgc/instagram_test.go:42-75`.
 - **Origin.** A batch refresh started from the web with a **Telegram-derived web session** (`internal/httpapi/server.go:189-199`) gets one message in the owner's **private** chat. API-token batches get none.
 - **Lifecycle.** The message is edited every 5 s until done. `batch_retry` reopens it (`app/batch.go:288-290`).
 - **Helpers.**
-  - `counts(...)` joins only the non-zero `<label> <n>` pairs with ` · `.
+  - `counts(...)` joins only the non-zero `<label> <n>` pairs with `·`.
   - `fetched = max(Complete-Reused, 0)`.
 - **Members line.** `summary = "\n帖子：" + posts(Members, Done)`, when non-empty.
   - Done: `counts(已保存, 不完整, 失败)`.
-  - Running with `Total>0`: `<finished>/<max(Total, finished+Pending)>`, then ` · ` + `counts(抓取中, 已保存, 不完整, 失败)` if non-empty.
+  - Running with `Total>0`: `<finished>/<max(Total, finished+Pending)>`, then `·` + `counts(抓取中, 已保存, 不完整, 失败)` if non-empty.
   - Otherwise empty.
 
-| state | text |
-|---|---|
-| failed and done | `批量更新已中止：<reason>\n已提交 <Submitted>/<Total>` + summary. The reason is `存储空间不足` for a quota error, else `采集服务不可用`. |
-| running (not done) | `批量更新中…\n已提交 <S>/<T>` + (` · ` + `counts(抓取中 Running, 已抓取 fetched, 无变化 Reused, 失败 Failed)`) + summary. Then, if there are active items, `\n\n进行中：`, and for each of the first 5: `\n• <name>\n  <status>`. After 5: `\n另有 <k> 项`. |
-| done | `批量更新完成，共 <T> 项` + (`\n` + `counts(已抓取, 无变化, 不完整 Partial, 失败, 无法更新 Rejected)`) + summary |
+| state              | text                                                                                                                                                                                                                                                      |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| failed and done    | `批量更新已中止：<reason>\n已提交 <Submitted>/<Total>` + summary. The reason is `存储空间不足` for a quota error, else `采集服务不可用`.                                                                                                                  |
+| running (not done) | `批量更新中…\n已提交 <S>/<T>` + (`·` + `counts(抓取中 Running, 已抓取 fetched, 无变化 Reused, 失败 Failed)`) + summary. Then, if there are active items, `\n\n进行中：`, and for each of the first 5: `\n• <name>\n  <status>`. After 5: `\n另有 <k> 项`. |
+| done               | `批量更新完成，共 <T> 项` + (`\n` + `counts(已抓取, 无变化, 不完整 Partial, 失败, 无法更新 Rejected)`) + summary                                                                                                                                          |
 
 Running-state details:
 
 - **Item name.** The saved profile's first line, else the author name, else the URL without `https://`/`http://`.
-- **Item status.** Built from `抓取中` (if running) and `帖子 <posts(item.Members)>` (if non-empty). If neither applies, it is `提交帖子中`. The parts are joined with ` · `.
+- **Item status.** Built from `抓取中` (if running) and `帖子 <posts(item.Members)>` (if non-empty). If neither applies, it is `提交帖子中`. The parts are joined with `·`.
 - **Item buttons.** Each listed item gets a URL button with label `name`, cut to 32 runes + `…`, linking to the item URL. The status goes on its own line because "Telegram would extend a URL over it".
 
 Done-state keyboard: if `Retryable > 0`, one button `重试失败的帖子（<n>）` → `/batch_retry <batch id>`; otherwise no keyboard.
@@ -598,14 +599,14 @@ The Go bot has no revision/history browsing. Version history exists only in the 
 
 Callback data is at most 64 bytes, has 1 or 2 whitespace fields, and must match one of these rows. Anything else is answered as `/help`.
 
-| data | argument rule |
-|---|---|
-| `/show`, `/status`, `/refresh`, `/retry`, `/delete`, `/more`, `/more1000`, `/page_retry`, `/collection_stop`, `/batch_retry` (and dropped `/save`) | UUID required |
-| `/list` | none, or base64url(no pad) of `<uuid>` or `p:<uuid>` |
-| `/usage`, `/help` | none |
-| `/account_add` | none or `@<adapter>` (`^[a-zA-Z0-9_-]{1,32}$`) |
-| `/account_delete` | none, `<uuid>` or `confirm:<uuid>` |
-| `/account` | none, `public`, `<uuid>`, or `public:<adapter>` |
+| data                                                                                                                                               | argument rule                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `/show`, `/status`, `/refresh`, `/retry`, `/delete`, `/more`, `/more1000`, `/page_retry`, `/collection_stop`, `/batch_retry` (and dropped `/save`) | UUID required                                        |
+| `/list`                                                                                                                                            | none, or base64url(no pad) of `<uuid>` or `p:<uuid>` |
+| `/usage`, `/help`                                                                                                                                  | none                                                 |
+| `/account_add`                                                                                                                                     | none or `@<adapter>` (`^[a-zA-Z0-9_-]{1,32}$`)       |
+| `/account_delete`                                                                                                                                  | none, `<uuid>` or `confirm:<uuid>`                   |
+| `/account`                                                                                                                                         | none, `public`, `<uuid>`, or `public:<adapter>`      |
 
 `/start` as callback data is invalid.
 
@@ -615,37 +616,37 @@ Rewrite: no compatibility with old messages is required, so the format may chang
 
 The "Press →" column gives the result of pressing. Pressing a callback button produces the same result as typing the command.
 
-| label (verbatim) | kind | data / URL | appears on | press → |
-|---|---|---|---|---|
-| 收藏列表 | cb | `/list` | menu row, collection msg, progress msg | list (§3.4) |
-| 存储用量 | cb | `/usage` | menu row | usage |
-| 打开 | web_app | web URL | `/start` reply | opens Mini App |
-| 查看第N条 | cb | `/show <id>` | list | delivers collection |
-| 原文 | url | source URL | list | — |
-| ← 上一页 / 下一页 → | cb | `/list <cursor>` | list | edits list |
-| 查看状态 | cb | `/status <job>` | status msg | status reply |
-| 更新状态 | cb | `/status <job>` | status reply | edits status reply |
-| 查看收藏 | cb | `/show <collection>` | status reply | delivers collection |
-| 在小程序查看进度 | web_app | `#/captures/<submission>` | status msg, progress msg | — |
-| 在小程序查看详情 | web_app | `#/captures/<submission>` | failed msg | — |
-| 重试 | cb | `/retry <collection>` | failed msg | new capture |
-| 原帖 / 在 X 查看主页 / 在 Instagram 查看主页 | url | source URL | collection msg | — |
-| 重新抓取 | cb | `/refresh <collection>` | collection msg | new capture |
-| 删除 | cb | `/delete <collection>` | collection msg | `已删除。` |
-| 在小程序中打开 | web_app | `#/collection/<collection>` | collection msg, progress msg | — |
-| 抓取更多 | cb | `/more <submission>` | progress msg | next page |
-| 抓取1000条 | cb | `/more1000 <submission>` | progress msg | ~1000 more |
-| 重试本页 | cb | `/page_retry <submission>` | progress msg | refetch last page |
-| 中止 | cb | `/collection_stop <submission>` | progress msg | `已中止。` |
-| 查看已保存资料 | cb | `/show <collection>` | progress msg | profile delivery |
-| (item name) | url | item URL | batch msg (running) | — |
-| 重试失败的帖子（N） | cb | `/batch_retry <batch>` | batch msg (done) | toast |
-| `[✓ ]<平台> · 公共来源` | cb | `/account public:<platform>` | account list | select, re-render |
-| `[✓ ]@user · name[（需重新授权）]` | cb | `/account <id>` | account list | select, re-render |
-| 删除 | cb | `/account_delete <id>` | account list (private) | confirm prompt |
-| 添加账号 | web_app | `#/accounts` | account list, `/account_add` | — |
-| 确认删除 | cb | `/account_delete confirm:<id>` | confirm prompt | `账号已删除。` |
-| 取消 / 返回账号列表 | cb | `/account` | confirm prompt / results | account list |
+| label (verbatim)                             | kind    | data / URL                      | appears on                             | press →             |
+| -------------------------------------------- | ------- | ------------------------------- | -------------------------------------- | ------------------- |
+| 收藏列表                                     | cb      | `/list`                         | menu row, collection msg, progress msg | list (§3.4)         |
+| 存储用量                                     | cb      | `/usage`                        | menu row                               | usage               |
+| 打开                                         | web_app | web URL                         | `/start` reply                         | opens Mini App      |
+| 查看第N条                                    | cb      | `/show <id>`                    | list                                   | delivers collection |
+| 原文                                         | url     | source URL                      | list                                   | —                   |
+| ← 上一页 / 下一页 →                          | cb      | `/list <cursor>`                | list                                   | edits list          |
+| 查看状态                                     | cb      | `/status <job>`                 | status msg                             | status reply        |
+| 更新状态                                     | cb      | `/status <job>`                 | status reply                           | edits status reply  |
+| 查看收藏                                     | cb      | `/show <collection>`            | status reply                           | delivers collection |
+| 在小程序查看进度                             | web_app | `#/captures/<submission>`       | status msg, progress msg               | —                   |
+| 在小程序查看详情                             | web_app | `#/captures/<submission>`       | failed msg                             | —                   |
+| 重试                                         | cb      | `/retry <collection>`           | failed msg                             | new capture         |
+| 原帖 / 在 X 查看主页 / 在 Instagram 查看主页 | url     | source URL                      | collection msg                         | —                   |
+| 重新抓取                                     | cb      | `/refresh <collection>`         | collection msg                         | new capture         |
+| 删除                                         | cb      | `/delete <collection>`          | collection msg                         | `已删除。`          |
+| 在小程序中打开                               | web_app | `#/collection/<collection>`     | collection msg, progress msg           | —                   |
+| 抓取更多                                     | cb      | `/more <submission>`            | progress msg                           | next page           |
+| 抓取1000条                                   | cb      | `/more1000 <submission>`        | progress msg                           | ~1000 more          |
+| 重试本页                                     | cb      | `/page_retry <submission>`      | progress msg                           | refetch last page   |
+| 中止                                         | cb      | `/collection_stop <submission>` | progress msg                           | `已中止。`          |
+| 查看已保存资料                               | cb      | `/show <collection>`            | progress msg                           | profile delivery    |
+| (item name)                                  | url     | item URL                        | batch msg (running)                    | —                   |
+| 重试失败的帖子（N）                          | cb      | `/batch_retry <batch>`          | batch msg (done)                       | toast               |
+| `[✓ ]<平台> · 公共来源`                      | cb      | `/account public:<platform>`    | account list                           | select, re-render   |
+| `[✓ ]@user · name[（需重新授权）]`           | cb      | `/account <id>`                 | account list                           | select, re-render   |
+| 删除                                         | cb      | `/account_delete <id>`          | account list (private)                 | confirm prompt      |
+| 添加账号                                     | web_app | `#/accounts`                    | account list, `/account_add`           | —                   |
+| 确认删除                                     | cb      | `/account_delete confirm:<id>`  | confirm prompt                         | `账号已删除。`      |
+| 取消 / 返回账号列表                          | cb      | `/account`                      | confirm prompt / results               | account list        |
 
 **Who may press.** In Go, private-chat buttons can be pressed only by the chat's user. Group buttons can be pressed by the original requester (§0). Rewrite: the owner only.
 
@@ -684,17 +685,17 @@ When sending keyboards that contain `web_app` buttons, the raw JSON keyboard is 
 
 ### 7.1 Telegram API errors
 
-| situation | behavior | ref |
-|---|---|---|
-| 429 | Retry the whole work after `retry_after` seconds (minimum 1). Also applies to uploads. | `tgc/runner.go:177-178`; tests `tg/client_test.go:96-107,205-217` |
-| other 4xx (blocked bot 403, chat not found, message too long, bad request…) | **Permanent**. The work is marked failed (the submission's message state becomes `failed`) and not retried. | `tgc/runner.go:179-181`, `app/channel_api.go:151-153,170` |
-| 5xx, transport error, timeout | Retry with backoff: at least 5 s, doubled per consecutive failure, capped at 600 s. A Telegram `retry_after` larger than that wins. Progress resets the streak. | `app/channel_api.go:157-165`; test `internal/httpapi/channel_test.go:404-486` |
-| edit: `message is not modified` | Success; keeps the message ID. | `tg/client.go:300-302` |
-| edit: `message to edit not found` / `message can't be edited` | Send as a new message instead, with the same reply-to. | `tg/client.go:304-306`; test `tg/group_test.go:45-91` |
-| editMessageReplyMarkup: not modified | Success. | `tg/client.go:561-564` |
-| deleteMessage: `message to delete not found` | Success. | `tg/client.go:575-577` |
-| sending a photo/video fails with 400, or ffprobe cannot read a video | Resend the same item or album **as documents** (§8). | `tg/client.go:344-351,396-400` |
-| 400 with an invalid cached `file_id` | Forget the cache entry, re-upload once. | `tg/client.go:369-372,427-439` |
+| situation                                                                   | behavior                                                                                                                                                        | ref                                                                           |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| 429                                                                         | Retry the whole work after `retry_after` seconds (minimum 1). Also applies to uploads.                                                                          | `tgc/runner.go:177-178`; tests `tg/client_test.go:96-107,205-217`             |
+| other 4xx (blocked bot 403, chat not found, message too long, bad request…) | **Permanent**. The work is marked failed (the submission's message state becomes `failed`) and not retried.                                                     | `tgc/runner.go:179-181`, `app/channel_api.go:151-153,170`                     |
+| 5xx, transport error, timeout                                               | Retry with backoff: at least 5 s, doubled per consecutive failure, capped at 600 s. A Telegram `retry_after` larger than that wins. Progress resets the streak. | `app/channel_api.go:157-165`; test `internal/httpapi/channel_test.go:404-486` |
+| edit: `message is not modified`                                             | Success; keeps the message ID.                                                                                                                                  | `tg/client.go:300-302`                                                        |
+| edit: `message to edit not found` / `message can't be edited`               | Send as a new message instead, with the same reply-to.                                                                                                          | `tg/client.go:304-306`; test `tg/group_test.go:45-91`                         |
+| editMessageReplyMarkup: not modified                                        | Success.                                                                                                                                                        | `tg/client.go:561-564`                                                        |
+| deleteMessage: `message to delete not found`                                | Success.                                                                                                                                                        | `tg/client.go:575-577`                                                        |
+| sending a photo/video fails with 400, or ffprobe cannot read a video        | Resend the same item or album **as documents** (§8).                                                                                                            | `tg/client.go:344-351,396-400`                                                |
+| 400 with an invalid cached `file_id`                                        | Forget the cache entry, re-upload once.                                                                                                                         | `tg/client.go:369-372,427-439`                                                |
 
 Messages that are too long cannot occur, because of the 3500 and 1024 limits. Transport errors are reported without the token-bearing URL (`tg/client.go:74-92`).
 
@@ -708,11 +709,11 @@ Messages that are too long cannot occur, because of the 3500 and 1024 limits. Tr
 
 ### 8.1 Representation per asset (`mediaKind`, `tg/file_cache.go:22-30`)
 
-| MIME | first try | fallback |
-|---|---|---|
-| `video/mp4` | `video` (`supports_streaming=true`, probed width/height) | `document` |
-| `video/webm` | `document` | — |
-| anything else (jpeg, png, webp, gif…) | `photo` | `document` |
+| MIME                                  | first try                                                | fallback   |
+| ------------------------------------- | -------------------------------------------------------- | ---------- |
+| `video/mp4`                           | `video` (`supports_streaming=true`, probed width/height) | `document` |
+| `video/webm`                          | `document`                                               | —          |
+| anything else (jpeg, png, webp, gif…) | `photo`                                                  | `document` |
 
 - **Upload vs URL.** All bytes are **uploaded** (multipart). Nothing is sent by URL. The file name is `<sha256 hash><ext>`, where ext is `.webm`, `.mp4`, `.png`, `.webp`, otherwise `.jpg` (`tg/client.go:453-466`).
   - Rewrite: the plan's signed URLs could be used for `sendPhoto` by URL. Telegram then fetches from the public URL, with a 5 MB photo / 20 MB other limit. That is a behavior change; **Decide**. Uploading keeps parity.
@@ -782,43 +783,43 @@ These are **not part of the bot**. A separate host-side webhook script, `deploy`
 
 ### 11.1 Fixed texts and toasts
 
-| string | where |
-|---|---|
-| 开始使用 / 保存帖子 / 查看收藏列表 / 查看指定收藏 / 查看采集状态 / 使用当前账号重试 / 重新抓取帖子 / 删除 / 删除采集账号 / 选择采集账号 / 查看存储用量 / 查看使用帮助 | command menu, help (`tgc/event.go:22-35`) |
-| 发送支持的平台链接保存内容（每次最多 200 个）。 | help/start (`tgc/commands.go:42`) |
-| `\n/<cmd> — <desc>` | help lines (`tgc/commands.go:47`) |
-| `\n\n版本：` | start (`tgc/commands.go:50`) |
-| 仅限发起者操作。 | dropped (`tgc/commands.go:26`) |
-| 请在私聊中使用此命令。 | private-only command in group (`tgc/commands.go:33`) |
-| 每次最多 200 个链接。 | save (`tgc/commands.go:64`) |
-| 操作失败，使用 /help 查看用法。 | action error (`tgc/runner.go:216`) |
-| 暂无收藏。 | empty list (`tgc/commands.go:97`) |
-| `<i>. ` / 无文字内容 / `…` | list items (`tgc/commands.go:79`, `tgc/presentation.go:143`) |
-| 请发送支持的链接，或使用 /help。 | save, nothing found (`tgc/commands.go:113`) |
-| 已保存。 | dropped toast (`tgc/commands.go:118`) |
-| 已中止。 | stop (`tgc/commands.go:121`) |
-| 已删除。 | delete (`tgc/commands.go:124`) |
-| 没有更多帖子了。 | more (`tgc/commands.go:128`) |
-| 批量更新仍在进行。 / 没有可重试的帖子。 / 正在重试 %d 条失败的帖子。 | batch_retry toasts (`tgc/commands.go:135-139`) |
-| 删除采集账号 %s？ | account delete prompt (`tgc/commands.go:151`) |
-| 账号已删除。 | account deleted (`tgc/commands.go:154`) |
-| 选择采集来源。 | account list (`tgc/commands.go:156`) |
-| `\n%s 需要添加并选择自己的账号凭据后才能采集。` | account list (`tgc/commands.go:163`) |
-| ` · 公共来源`, `✓ `, `（需重新授权）`, ` · ` | account buttons (`tgc/commands.go:166-186`) |
-| 在网页中添加采集账号。 / 不要在聊天中发送凭据。在网页中添加采集账号。 / 在私聊中打开网页添加采集账号。 / 未配置网页入口。 | account_add (`tgc/commands.go:204-215`) |
-| 正在采集 / 正在保存媒体 / 收藏完成 / 已收藏，部分资源缺失 / 收藏失败 | `jobState` (`tgc/presentation.go:13-27`) |
-| `…` suffix, `\n输入：` | status/failed messages (`tgc/runner.go:321,332`) |
-| 未知作者 | collection/profile (`tgc/presentation.go:80,124`; `tg/collection_author.go:106`) |
-| `：\n` | author/body separator (`tgc/presentation.go:85`) |
-| 部分内容未保存 | partial (`tgc/presentation.go:92`) |
-| 媒体 %d 描述：%s | alt text (`tgc/presentation.go:96`) |
-| 未完整保存原因： | reasons (`tgc/presentation.go:104`, `tgc/runner.go:527`) |
-| `\n\n文件超过 Telegram 大小限制，请在网页查看。` | oversize asset (`tgc/delivery_parts.go:22`) |
-| 已用 / ，共 / ，不限额 / 保存中 | usage (`tgc/presentation.go:66-71`) |
-| 正在采集… / 采集完成 / 采集已中止 / 本次 %d 项：已保存 %d · 内容不完整 %d · 失败 %d · 进行中 %d / 帖子列表获取失败 / 部分页面获取失败。 / `• %s（%d 条）` / 另有 %d 类原因。 | progress message (`tgc/runner.go:512-538`) |
-| 批量更新已中止：/ 采集服务不可用 / 存储空间不足 / 已提交 %d/%d / 批量更新中… / 抓取中 / 已抓取 / 无变化 / 失败 / 不完整 / 已保存 / 无法更新 / 帖子： / 帖子 / 进行中： / 另有 %d 项 / 提交帖子中 / 批量更新完成，共 %d 项 | batch message (`tgc/runner.go:425-507`) |
-| 此平台需要账号，请先添加并选择自己的采集凭据。 / 账号不可用，请在采集账号中选择可用账号或重新授权。 | save errors (`app/worker.go:142-147`) |
-| ✅ midden 部署成功 / 版本 / ❌ midden 部署失败（版本 …） / ❌ midden 部署未开始 | deploy script (`deploy:226-237`) |
+| string                                                                                                                                                                                                                    | where                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| 开始使用 / 保存帖子 / 查看收藏列表 / 查看指定收藏 / 查看采集状态 / 使用当前账号重试 / 重新抓取帖子 / 删除 / 删除采集账号 / 选择采集账号 / 查看存储用量 / 查看使用帮助                                                     | command menu, help (`tgc/event.go:22-35`)                                        |
+| 发送支持的平台链接保存内容（每次最多 200 个）。                                                                                                                                                                           | help/start (`tgc/commands.go:42`)                                                |
+| `\n/<cmd> — <desc>`                                                                                                                                                                                                       | help lines (`tgc/commands.go:47`)                                                |
+| `\n\n版本：`                                                                                                                                                                                                              | start (`tgc/commands.go:50`)                                                     |
+| 仅限发起者操作。                                                                                                                                                                                                          | dropped (`tgc/commands.go:26`)                                                   |
+| 请在私聊中使用此命令。                                                                                                                                                                                                    | private-only command in group (`tgc/commands.go:33`)                             |
+| 每次最多 200 个链接。                                                                                                                                                                                                     | save (`tgc/commands.go:64`)                                                      |
+| 操作失败，使用 /help 查看用法。                                                                                                                                                                                           | action error (`tgc/runner.go:216`)                                               |
+| 暂无收藏。                                                                                                                                                                                                                | empty list (`tgc/commands.go:97`)                                                |
+| `<i>. ` / 无文字内容 / `…`                                                                                                                                                                                                | list items (`tgc/commands.go:79`, `tgc/presentation.go:143`)                     |
+| 请发送支持的链接，或使用 /help。                                                                                                                                                                                          | save, nothing found (`tgc/commands.go:113`)                                      |
+| 已保存。                                                                                                                                                                                                                  | dropped toast (`tgc/commands.go:118`)                                            |
+| 已中止。                                                                                                                                                                                                                  | stop (`tgc/commands.go:121`)                                                     |
+| 已删除。                                                                                                                                                                                                                  | delete (`tgc/commands.go:124`)                                                   |
+| 没有更多帖子了。                                                                                                                                                                                                          | more (`tgc/commands.go:128`)                                                     |
+| 批量更新仍在进行。 / 没有可重试的帖子。 / 正在重试 %d 条失败的帖子。                                                                                                                                                      | batch_retry toasts (`tgc/commands.go:135-139`)                                   |
+| 删除采集账号 %s？                                                                                                                                                                                                         | account delete prompt (`tgc/commands.go:151`)                                    |
+| 账号已删除。                                                                                                                                                                                                              | account deleted (`tgc/commands.go:154`)                                          |
+| 选择采集来源。                                                                                                                                                                                                            | account list (`tgc/commands.go:156`)                                             |
+| `\n%s 需要添加并选择自己的账号凭据后才能采集。`                                                                                                                                                                           | account list (`tgc/commands.go:163`)                                             |
+| ` · 公共来源`, `✓ `, `（需重新授权）`, `·`                                                                                                                                                                                | account buttons (`tgc/commands.go:166-186`)                                      |
+| 在网页中添加采集账号。 / 不要在聊天中发送凭据。在网页中添加采集账号。 / 在私聊中打开网页添加采集账号。 / 未配置网页入口。                                                                                                 | account_add (`tgc/commands.go:204-215`)                                          |
+| 正在采集 / 正在保存媒体 / 收藏完成 / 已收藏，部分资源缺失 / 收藏失败                                                                                                                                                      | `jobState` (`tgc/presentation.go:13-27`)                                         |
+| `…` suffix, `\n输入：`                                                                                                                                                                                                    | status/failed messages (`tgc/runner.go:321,332`)                                 |
+| 未知作者                                                                                                                                                                                                                  | collection/profile (`tgc/presentation.go:80,124`; `tg/collection_author.go:106`) |
+| `：\n`                                                                                                                                                                                                                    | author/body separator (`tgc/presentation.go:85`)                                 |
+| 部分内容未保存                                                                                                                                                                                                            | partial (`tgc/presentation.go:92`)                                               |
+| 媒体 %d 描述：%s                                                                                                                                                                                                          | alt text (`tgc/presentation.go:96`)                                              |
+| 未完整保存原因：                                                                                                                                                                                                          | reasons (`tgc/presentation.go:104`, `tgc/runner.go:527`)                         |
+| `\n\n文件超过 Telegram 大小限制，请在网页查看。`                                                                                                                                                                          | oversize asset (`tgc/delivery_parts.go:22`)                                      |
+| 已用 / ，共 / ，不限额 / 保存中                                                                                                                                                                                           | usage (`tgc/presentation.go:66-71`)                                              |
+| 正在采集… / 采集完成 / 采集已中止 / 本次 %d 项：已保存 %d · 内容不完整 %d · 失败 %d · 进行中 %d / 帖子列表获取失败 / 部分页面获取失败。 / `• %s（%d 条）` / 另有 %d 类原因。                                              | progress message (`tgc/runner.go:512-538`)                                       |
+| 批量更新已中止：/ 采集服务不可用 / 存储空间不足 / 已提交 %d/%d / 批量更新中… / 抓取中 / 已抓取 / 无变化 / 失败 / 不完整 / 已保存 / 无法更新 / 帖子： / 帖子 / 进行中： / 另有 %d 项 / 提交帖子中 / 批量更新完成，共 %d 项 | batch message (`tgc/runner.go:425-507`)                                          |
+| 此平台需要账号，请先添加并选择自己的采集凭据。 / 账号不可用，请在采集账号中选择可用账号或重新授权。                                                                                                                       | save errors (`app/worker.go:142-147`)                                            |
+| ✅ midden 部署成功 / 版本 / ❌ midden 部署失败（版本 …） / ❌ midden 部署未开始                                                                                                                                           | deploy script (`deploy:226-237`)                                                 |
 
 ### 11.2 Button labels
 
@@ -830,28 +831,28 @@ The menu button text is 打开 (`tg/client.go:601`).
 
 Used in failed messages, collection reasons and progress reasons. Unknown reasons are shown raw, trimmed.
 
-| raw | shown |
-|---|---|
-| storage quota exceeded | 存储配额不足 |
-| account cannot access this post | 采集账号无权访问该帖子 |
-| account is suspended | 账号已被封禁，解封后可重新抓取 |
-| profile not found | 账号不存在或已改名 |
-| post not found or deleted | 帖子不存在或已删除 |
-| provider cannot access this post | 无法获取该帖子 |
-| provider cannot access this profile | 无法获取该账号资料 |
-| account required; add and select your own credentials | 此平台需要账号，请先添加并选择自己的采集凭据。 |
-| Instagram requires an account; select an Instagram account and retry / Instagram requires login | Instagram 需要登录，请在采集账号中选择 Instagram 账号后重试。 |
-| Instagram session expired; authorize again | Instagram 登录已失效，请重新添加账号授权。 |
-| Instagram rate limited the request | Instagram 请求过于频繁，请稍后重试。 |
-| Instagram access denied or browser verification required / Instagram requires browser verification / Instagram redirected to login or verification / Instagram requires login, verification, or a later retry | Instagram 要求登录验证或账号无权访问，请检查账号后重试。 |
-| Instagram content not found or inaccessible | Instagram 内容不存在或当前账号无权访问。 |
-| Instagram temporarily unavailable | Instagram 暂时不可用，请稍后重试。 |
-| provider temporarily unavailable | 来源平台暂时不可用，请稍后重试。 |
-| account request signing unavailable | 采集账号请求签名不可用 |
-| context deadline exceeded | 请求超时 |
-| job exhausted retries or was interrupted | 任务重试次数已用尽或执行被中断 |
-| operation failed; retry or inspect service health | 服务内部错误 |
-| resource omitted: unsupported type or resource limit | 部分资源类型不支持或资源数量超过限制 |
+| raw                                                                                                                                                                                                           | shown                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| storage quota exceeded                                                                                                                                                                                        | 存储配额不足                                                  |
+| account cannot access this post                                                                                                                                                                               | 采集账号无权访问该帖子                                        |
+| account is suspended                                                                                                                                                                                          | 账号已被封禁，解封后可重新抓取                                |
+| profile not found                                                                                                                                                                                             | 账号不存在或已改名                                            |
+| post not found or deleted                                                                                                                                                                                     | 帖子不存在或已删除                                            |
+| provider cannot access this post                                                                                                                                                                              | 无法获取该帖子                                                |
+| provider cannot access this profile                                                                                                                                                                           | 无法获取该账号资料                                            |
+| account required; add and select your own credentials                                                                                                                                                         | 此平台需要账号，请先添加并选择自己的采集凭据。                |
+| Instagram requires an account; select an Instagram account and retry / Instagram requires login                                                                                                               | Instagram 需要登录，请在采集账号中选择 Instagram 账号后重试。 |
+| Instagram session expired; authorize again                                                                                                                                                                    | Instagram 登录已失效，请重新添加账号授权。                    |
+| Instagram rate limited the request                                                                                                                                                                            | Instagram 请求过于频繁，请稍后重试。                          |
+| Instagram access denied or browser verification required / Instagram requires browser verification / Instagram redirected to login or verification / Instagram requires login, verification, or a later retry | Instagram 要求登录验证或账号无权访问，请检查账号后重试。      |
+| Instagram content not found or inaccessible                                                                                                                                                                   | Instagram 内容不存在或当前账号无权访问。                      |
+| Instagram temporarily unavailable                                                                                                                                                                             | Instagram 暂时不可用，请稍后重试。                            |
+| provider temporarily unavailable                                                                                                                                                                              | 来源平台暂时不可用，请稍后重试。                              |
+| account request signing unavailable                                                                                                                                                                           | 采集账号请求签名不可用                                        |
+| context deadline exceeded                                                                                                                                                                                     | 请求超时                                                      |
+| job exhausted retries or was interrupted                                                                                                                                                                      | 任务重试次数已用尽或执行被中断                                |
+| operation failed; retry or inspect service health                                                                                                                                                             | 服务内部错误                                                  |
+| resource omitted: unsupported type or resource limit                                                                                                                                                          | 部分资源类型不支持或资源数量超过限制                          |
 
 Note: `/status` shows `job.error` **untranslated** (`tgc/commands.go:105`), and save errors use `safeError`, not `failureReason`. Both can show English text. **Decide** whether to run them through `failureReason` too.
 

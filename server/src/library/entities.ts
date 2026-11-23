@@ -287,23 +287,18 @@ function attachCurrentProfiles(r: Reader, views: readonly WithGraph[]): void {
     metrics: string | null
     avatar: string | null
   }>(sql`
-    SELECT entity, version, data, metrics, avatar FROM (
-      SELECT ev.entity_id AS entity, ev.id AS version, ev.data, c.metrics,
-        ${sql.raw(avatarOf('r', 're.entity_key'))} AS avatar,
-        row_number() OVER (PARTITION BY ev.entity_id
-          ORDER BY r.created_at DESC, r.id DESC) AS n
-      FROM entity_versions ev
-      JOIN revision_entities re ON re.entity_version_id = ev.id
-      JOIN revisions r ON r.id = re.revision_id
-      JOIN captures c ON c.id = r.capture_id
-      WHERE ev.entity_id IN (SELECT value FROM json_each(${list(ids)}))
-        AND (re.is_root = 1 OR EXISTS (
-          SELECT 1 FROM entity_relations edge
-          JOIN revision_entities source ON source.revision_id = edge.revision_id
-            AND source.entity_key = edge.source_key AND source.is_root = 1
-          WHERE edge.revision_id = re.revision_id
-            AND edge.target_key = re.entity_key AND edge.kind = ${AUTHORED_BY}))
-    ) WHERE n = 1`)
+    SELECT wanted.value AS entity, ev.id AS version, ev.data, c.metrics,
+      ${sql.raw(avatarOf('r', 're.entity_key'))} AS avatar
+    FROM json_each(${list(ids)}) wanted
+    -- The account's newest capture as a root or a root's author.
+    JOIN catalog k ON k.rowid = (
+      SELECT s.rowid FROM catalog s WHERE s.subject_entity_id = wanted.value
+      ORDER BY s.revision_at DESC, s.revision_id DESC LIMIT 1)
+    JOIN revisions r ON r.id = k.revision_id
+    JOIN captures c ON c.id = r.capture_id
+    JOIN revision_entities re ON re.revision_id = r.id
+    JOIN entity_versions ev ON ev.id = re.entity_version_id
+      AND ev.entity_id = wanted.value`)
   const avatars = assetsById(
     r,
     rows.map((row) => row.avatar).filter((id): id is string => !!id),

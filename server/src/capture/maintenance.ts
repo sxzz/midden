@@ -26,6 +26,7 @@ import {
   sourceResponses,
   submissions,
 } from '#db/schema.ts'
+import { catalogCollections } from '#library/catalog.ts'
 import { failCapture } from './lifecycle.ts'
 import type { Transaction } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
@@ -184,7 +185,7 @@ function collectBatch(tx: Transaction): number {
 export function pruneSourceResponses(ctx: CaptureContext): number {
   const cutoff = new Date(now(ctx) - RAW_KEEP)
   const superseded = ctx.db
-    .select({ id: captures.id })
+    .select({ id: captures.id, collectionId: captures.collectionId })
     .from(captures)
     .where(
       and(
@@ -196,12 +197,22 @@ export function pruneSourceResponses(ctx: CaptureContext): number {
       ),
     )
     .all()
-    .map((row) => row.id)
   if (superseded.length)
-    ctx.db
-      .delete(sourceResponses)
-      .where(inArray(sourceResponses.captureId, superseded))
-      .run()
+    ctx.db.transaction((tx) => {
+      tx.delete(sourceResponses)
+        .where(
+          inArray(
+            sourceResponses.captureId,
+            superseded.map((row) => row.id),
+          ),
+        )
+        .run()
+      // Raw responses count toward storage.
+      catalogCollections(
+        tx,
+        superseded.map((row) => row.collectionId),
+      )
+    })
   return superseded.length
 }
 

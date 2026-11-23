@@ -1,10 +1,12 @@
 // Test helpers for the library read side: captures run through the real
 // pipeline against the fake platform.
 import { Buffer } from 'node:buffer'
-import { eq } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
+import { expect } from 'vitest'
 import { captureHandlers } from '#capture/handlers.ts'
 import { submit, type SubmitInput } from '#capture/submit.ts'
-import { captures } from '#db/schema.ts'
+import { captures, catalog } from '#db/schema.ts'
+import { catalogMissing } from '#library/catalog.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, type FakeFetch } from '#testing/fake-platform.ts'
 import type { CaptureContext } from '#capture/context.ts'
@@ -82,4 +84,14 @@ export function image(path: string, extra: Partial<Resource> = {}): Resource {
     purpose: '',
     ...extra,
   }
+}
+
+/** The catalog as kept up to date matches one rebuilt from scratch. */
+export function expectCatalogFresh(ctx: CaptureContext) {
+  const rows = () =>
+    ctx.db.select().from(catalog).orderBy(asc(catalog.collectionId)).all()
+  const kept = rows()
+  ctx.db.delete(catalog).run()
+  catalogMissing(ctx.db)
+  expect(rows()).toEqual(kept)
 }

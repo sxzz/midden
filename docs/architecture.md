@@ -24,18 +24,18 @@ flowchart LR
 
 ## 代码结构
 
-| 目录 | 内容 |
-| --- | --- |
+| 目录                    | 内容                                                                                                  |
+| ----------------------- | ----------------------------------------------------------------------------------------------------- |
 | `server/src/platforms/` | X 与 Instagram 采集，由旧版 adapter 移植，在进程内直接调用；`third_party/atmosphere` 是其依赖的上游库 |
-| `server/src/capture/` | 采集链路：提交、抓取、下载、缩略图、版本、related 展开与续页、记录与进度、批量刷新、维护 |
-| `server/src/library/` | 读取：收藏详情、筛选列表、作者、版本、原始响应、删除、标签备注 |
-| `server/src/accounts/` | 采集账号与加密凭据 |
-| `server/src/jobs/` | 存在 SQLite 中的持久化任务队列 |
-| `server/src/blob/` | 媒体存储接口、本地目录实现、签名链接 |
-| `server/src/http/` | Hono 路由与认证 |
-| `server/src/telegram/` | Bot：命令、消息渲染与分段、投递、媒体发送 |
-| `server/drizzle/` | 由 drizzle-kit 生成的数据库迁移，启动时自动应用 |
-| `web/` | Vue 网页，构建后由 server 在 `/app/` 提供 |
+| `server/src/capture/`   | 采集链路：提交、抓取、下载、缩略图、版本、related 展开与续页、记录与进度、批量刷新、维护              |
+| `server/src/library/`   | 读取：收藏详情、筛选列表、作者、版本、原始响应、删除、标签备注                                        |
+| `server/src/accounts/`  | 采集账号与加密凭据                                                                                    |
+| `server/src/jobs/`      | 存在 SQLite 中的持久化任务队列                                                                        |
+| `server/src/blob/`      | 媒体存储接口、本地目录实现、签名链接                                                                  |
+| `server/src/http/`      | Hono 路由与认证                                                                                       |
+| `server/src/telegram/`  | Bot：命令、消息渲染与分段、投递、媒体发送                                                             |
+| `server/drizzle/`       | 由 drizzle-kit 生成的数据库迁移，启动时自动应用                                                       |
+| `web/`                  | Vue 网页，构建后由 server 在 `/app/` 提供                                                             |
 
 ## 数据
 
@@ -44,6 +44,7 @@ flowchart LR
 - 实体（帖子、账号）按平台身份共享，`entity_versions` 按内容去重。
 - 媒体按 SHA-256 存在 `media/ab/cd/<哈希>`，`blobs` 记录类型与大小，缩略图同样按内容存放。
 - 删除收藏后，维护任务在没有进行中的抓取时删除其内容；不再被引用的媒体文件 24 小时后删除。
+- `catalog` 为每个有版本的收藏保存列表筛选与排序所需的字段（根实体类型、作者、媒体种类、发布时间、占用空间、搜索文本等），由最新版本派生，在同一事务内随抓取完成和原始响应清理更新。列表只读这张窄表；作者的最新资料、作者被打的标签、被保存的转发等跨收藏的条件在查询时通过索引计算。启动时会补齐缺失的行，所以改变它的派生方式时，在迁移中清空这张表即可重建。
 
 ## 任务
 

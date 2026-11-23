@@ -12,6 +12,7 @@ import {
   revisionEntities,
   revisions,
 } from '#db/schema.ts'
+import { catalogCollections } from '#library/catalog.ts'
 import { canonicalJson, sha256Hex } from './json.ts'
 import {
   deliveries,
@@ -339,6 +340,7 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
       .set({ observedAt: now, sourceState: null, sourceStateAt: null })
       .where(eq(collections.id, collection.id))
       .run()
+    catalogCollections(tx, [collection.id])
     // A refresh that turned out to be another collection (canonicalized).
     if (capture.refreshFrom && capture.refreshFrom !== collection.id) {
       unsaveIfEmpty(tx, capture.refreshFrom)

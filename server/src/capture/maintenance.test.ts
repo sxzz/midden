@@ -14,6 +14,7 @@ import {
 import { deleteCollection } from '#library/delete.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, postGraph } from '#testing/fake-platform.ts'
+import { expectCatalogFresh } from '#testing/library.ts'
 import { captureHandlers } from './handlers.ts'
 import {
   collectCollections,
@@ -139,5 +140,7 @@ describe('maintenance', () => {
     expect(pruneSourceResponses(c)).toBe(1)
     // The first (a revision) and the newest stay.
     expect(c.db.select().from(sourceResponses).all()).toHaveLength(2)
+    // Storage in the catalog follows the pruned responses.
+    expectCatalogFresh(c)
   })
 })

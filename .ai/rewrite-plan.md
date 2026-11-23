@@ -9,21 +9,21 @@
 
 ## 已确定的决策
 
-| 项目     | 决定                                                                                                                        |
-| -------- | --------------------------------------------------------------------------------------------------------------------------- |
-| 运行时   | Node 26 LTS；开发时直接在容器里运行，prod 继续用 Docker Compose（一个镜像，含 ffmpeg）                                      |
+| 项目     | 决定                                                                                                                                          |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 运行时   | Node 26 LTS；开发时直接在容器里运行，prod 继续用 Docker Compose（一个镜像，含 ffmpeg）                                                        |
 | 数据库   | SQLite，使用 Node 内置 `node:sqlite`；Drizzle `1.0.0-rc` 的 `node-sqlite` 驱动，drizzle-kit 生成迁移。不用 better-sqlite3，除非内置驱动出问题 |
-| 媒体     | `BlobStore` 接口，当前只实现本地目录，保留以后换远端／S3 的口子                                                             |
-| 媒体读取 | 签名 URL 直连：fs 实现由应用签发并提供 HMAC 链接，S3 实现将来返回预签名链接                                                 |
-| HTTP     | Hono + `@hono/node-server`                                                                                                  |
-| 校验     | valibot                                                                                                                     |
-| Bot      | grammY，长轮询，与 HTTP 同一进程                                                                                            |
-| 日志     | pino，JSON 输出到 stdout                                                                                                    |
-| 测试     | vitest                                                                                                                      |
-| 包名     | `@midden/*`                                                                                                                 |
-| 兼容性   | 不保留：旧 Bot 消息按钮、旧 REST token、`/v1/assets/{id}` 媒体读取均不兼容                                                 |
-| 数据导入 | 暂不编写导入脚本                                                                                                            |
-| 筛选性能 | 本次不处理；列表查询集中在 `library/` 模块，以后加冗余索引表只改这里                                                       |
+| 媒体     | `BlobStore` 接口，当前只实现本地目录，保留以后换远端／S3 的口子                                                                               |
+| 媒体读取 | 签名 URL 直连：fs 实现由应用签发并提供 HMAC 链接，S3 实现将来返回预签名链接                                                                   |
+| HTTP     | Hono + `@hono/node-server`                                                                                                                    |
+| 校验     | valibot                                                                                                                                       |
+| Bot      | grammY，长轮询，与 HTTP 同一进程                                                                                                              |
+| 日志     | pino，JSON 输出到 stdout                                                                                                                      |
+| 测试     | vitest                                                                                                                                        |
+| 包名     | `@midden/*`                                                                                                                                   |
+| 兼容性   | 不保留：旧 Bot 消息按钮、旧 REST token、`/v1/assets/{id}` 媒体读取均不兼容                                                                    |
+| 数据导入 | 暂不编写导入脚本                                                                                                                              |
+| 筛选性能 | 冗余索引表 `catalog`（`library/catalog.ts`），由 finalize 与原始响应清理维护；`server/scripts/bench-list.ts` 造数据并计时                     |
 
 ## Git 与发布
 

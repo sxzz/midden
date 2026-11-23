@@ -3,11 +3,13 @@ import { collections } from '#db/schema.ts'
 import {
   capture,
   entity,
+  expectCatalogFresh,
   graph,
   image,
   libraryContext,
 } from '#testing/library.ts'
 import { updateAnnotation } from './annotations.ts'
+import { catalogCollections } from './catalog.ts'
 import { listAuthors, listCollections, type CollectionFilter } from './list.ts'
 import { getCollection } from './read.ts'
 import type { CaptureContext } from '#capture/context.ts'
@@ -17,6 +19,7 @@ import type { CollectionView } from './views.ts'
 let ctx: CaptureContext | undefined
 afterEach(async () => {
   await ctx?.queue.stop()
+  if (ctx) expectCatalogFresh(ctx)
   ctx = undefined
 })
 
@@ -141,6 +144,7 @@ describe('library listing', () => {
       .update(collections)
       .set({ observedAt: new Date(1e12) })
       .run()
+    catalogCollections(ctx.db, made)
     expect(ids(all(ctx))).toEqual(made.toSorted().toReversed())
 
     for (const filter of [

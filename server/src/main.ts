@@ -18,6 +18,7 @@ import { openDatabase } from '#db/client.ts'
 import { createApi } from '#http/app.ts'
 import { pruneSessions } from '#http/auth.ts'
 import { JobQueue } from '#jobs/queue.ts'
+import { catalogMissing } from '#library/catalog.ts'
 import { createLogger } from '#log.ts'
 import { createInstagramPlatform } from '#platforms/instagram/index.ts'
 import { Platforms } from '#platforms/registry.ts'
@@ -31,6 +32,8 @@ const APP_PREFIX = /^\/app/
 const config = loadConfig()
 const logger = createLogger(config.logLevel)
 const db = openDatabase(config.databasePath)
+const catalogued = catalogMissing(db)
+if (catalogued) logger.info({ count: catalogued }, 'catalogued collections')
 const signer = new MediaSigner({
   secret: deriveKey(config.secretKey, 'media-url'),
 })

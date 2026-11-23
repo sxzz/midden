@@ -16,7 +16,7 @@ docker compose logs --tail=100 midden
 docker compose pull && docker compose up -d   # 更新
 ```
 
-数据库迁移在启动时自动应用。
+数据库迁移在启动时自动应用；随后补齐收藏列表的索引表 `catalog` 中缺失的行（首次部署或导入数据后可能需要几秒）。
 
 ## 备份与恢复
 

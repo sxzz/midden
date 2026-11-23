@@ -121,6 +121,61 @@ export const library = sqliteTable(
   (t) => [index('library_created').on(t.createdAt, t.collectionId)],
 )
 
+/**
+ * What the library list filters and sorts on, one row per collection with a
+ * revision, derived from its newest revision (see `library/catalog.ts`).
+ * Facts that depend on other collections (the author's newest profile, tags
+ * on the author, reposts by saved collections) are looked up when listing.
+ */
+export const catalog = sqliteTable(
+  'catalog',
+  {
+    collectionId: text()
+      .primaryKey()
+      .references(() => collections.id, { onDelete: 'cascade' }),
+    revisionId: text().notNull(),
+    revisionAt: integer().notNull(),
+    observedAt: integer().notNull(),
+    /** Publication time, or `observedAt` when the source gave none. */
+    publishedAt: integer().notNull(),
+    storageBytes: integer().notNull(),
+    /** The root entity and its type; null without an entity graph. */
+    rootEntityId: text(),
+    rootKind: text(),
+    /** The entity the root is authored by (the first by key). */
+    authorEntityId: text(),
+    authorName: text().notNull(),
+    /** Whose account this is about: the author, or the root itself. */
+    subjectEntityId: text(),
+    /** Whether that account was protected in this revision; null if unknown. */
+    subjectProtected: integer({ mode: 'boolean' }),
+    /** Content media (no purpose), by what was stored. */
+    hasMedia: integer({ mode: 'boolean' }).notNull(),
+    hasImage: integer({ mode: 'boolean' }).notNull(),
+    hasVideo: integer({ mode: 'boolean' }).notNull(),
+    hasSensitive: integer({ mode: 'boolean' }).notNull(),
+    /** The root quotes another post. */
+    quotes: integer({ mode: 'boolean' }).notNull(),
+    /** Text, summary and author name, for substring search. */
+    search: text().notNull(),
+  },
+  (t) => [
+    index('catalog_observed').on(t.observedAt, t.collectionId),
+    index('catalog_published').on(t.publishedAt, t.collectionId),
+    index('catalog_storage').on(t.storageBytes, t.collectionId),
+    index('catalog_root').on(t.rootEntityId),
+    // Covers the author list, which reads every saved row.
+    index('catalog_author').on(
+      t.authorEntityId,
+      t.authorName,
+      t.revisionAt,
+      t.revisionId,
+      t.collectionId,
+    ),
+    index('catalog_subject').on(t.subjectEntityId, t.revisionAt, t.revisionId),
+  ],
+)
+
 export const captureStates = [
   'queued',
   'downloading',
@@ -275,6 +330,8 @@ export const entityRelations = sqliteTable(
     primaryKey({
       columns: [t.revisionId, t.sourceKey, t.kind, t.targetKey],
     }),
+    // Reposts by saved collections, for the library's post type filter.
+    index('entity_relations_kind').on(t.kind, t.revisionId),
   ],
 )
 

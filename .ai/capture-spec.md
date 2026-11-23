@@ -10,26 +10,26 @@ This spec describes how the old Go service (`/home/paseo/workspace/midden-go`, b
 - `app/` means `internal/app/`. `adapter/` means `internal/adapter/`. `x/` means `adapters/x/src/`. `ig/` means `adapters/instagram/src/`.
 - Migration citations use short keys. Each key stands for `internal/store/migrations/<file>`:
 
-  | key | file |
-  |---|---|
-  | `init` | `0001_initial.sql` |
-  | `annot` | `20260930150000_collection_annotations.sql` |
-  | `alias` | `20261001020000_collection_identity_aliases.sql` |
-  | `aliasidx` | `20261001030000_collection_identity_index.sql` |
-  | `shared` | `20261002020000_shared_content_access.sql` |
-  | `batch` | `20261002030000_batch_refresh.sql` |
-  | `batchmsg` | `20261002040000_refresh_batch_messages.sql` |
-  | `srcstate` | `20261003010000_collection_source_state.sql` |
-  | `thumbs` | `20261003020000_blob_thumbnails.sql` |
-  | `nolimits` | `20261003040000_drop_media_size_limits.sql` |
-  | `lookup` | `20261004010000_lookup_indexes.sql` |
-  | `maint` | `20261011010000_maintenance.sql` |
-  | `records` | `20261014010000_capture_records.sql` |
-  | `prefetch` | `20261015020000_capture_prefetch.sql` |
-  | `metrics` | `20261015040000_capture_metrics.sql` |
-  | `single` | `20261015050000_single_update_mode.sql` |
-  | `prune` | `20261015060000_prune_source_responses.sql` |
-  | `options` | `20261015070000_capture_options.sql` |
+  | key        | file                                             |
+  | ---------- | ------------------------------------------------ |
+  | `init`     | `0001_initial.sql`                               |
+  | `annot`    | `20260930150000_collection_annotations.sql`      |
+  | `alias`    | `20261001020000_collection_identity_aliases.sql` |
+  | `aliasidx` | `20261001030000_collection_identity_index.sql`   |
+  | `shared`   | `20261002020000_shared_content_access.sql`       |
+  | `batch`    | `20261002030000_batch_refresh.sql`               |
+  | `batchmsg` | `20261002040000_refresh_batch_messages.sql`      |
+  | `srcstate` | `20261003010000_collection_source_state.sql`     |
+  | `thumbs`   | `20261003020000_blob_thumbnails.sql`             |
+  | `nolimits` | `20261003040000_drop_media_size_limits.sql`      |
+  | `lookup`   | `20261004010000_lookup_indexes.sql`              |
+  | `maint`    | `20261011010000_maintenance.sql`                 |
+  | `records`  | `20261014010000_capture_records.sql`             |
+  | `prefetch` | `20261015020000_capture_prefetch.sql`            |
+  | `metrics`  | `20261015040000_capture_metrics.sql`             |
+  | `single`   | `20261015050000_single_update_mode.sql`          |
+  | `prune`    | `20261015060000_prune_source_responses.sql`      |
+  | `options`  | `20261015070000_capture_options.sql`             |
 
 ### Dropped features
 
@@ -76,40 +76,40 @@ The schema was PostgreSQL. **[MT]** marks columns that exist only for multi-tena
 
 ### 1.1 Table map
 
-| table | role | kept? |
-|---|---|---|
-| `collections` | One row per adapter object (post, profile) identified by `(platform, kind, object_scope, external_id)`. | yes |
-| `collection_identity_aliases` | Maps an alternate external id (such as `handle:foo`) to the canonical collection. | yes |
-| `captures` | One fetch job of a collection. Also the "job" users see. | yes |
-| `revisions` | Immutable content snapshot of a collection, produced by exactly one capture. | yes |
-| `revision_entities`, `entity_relations` | Entity graph of a revision. | yes |
-| `entities`, `entity_versions` | Global entity identities and their content-hash-deduplicated versions. | yes |
-| `assets` | A media item of a capture at a position. | yes |
-| `blobs` | Stored media bytes, deduplicated by sha256. | yes |
-| `blob_thumbnails` | One thumbnail result per blob. | yes |
-| `objects` | Ledger of object-store keys, used for GC. | yes; simpler with content-addressed keys, see §4.6 |
-| `source_responses` | Raw upstream responses per capture. | yes |
-| `submissions` | A request for a capture: user input, a member of a collection, or a continuation page. | yes |
-| `refresh_batches` | Batch refresh of many saved collections. | yes |
-| `tenant_collections` | "Saved in the library" plus note and the source used to save. | **table dropped, semantics kept**, see §1.2.14 |
-| `tags`, `collection_tags` | Tags on saved collections. | yes, without `tenant_id` |
-| `connections`, `account_credentials`, `tenant_preferences` | Accounts, encrypted credentials, and the per-adapter account selection. | yes, without `tenant_id` |
-| `tenants`, `tenant_entitlements`, `tokens`, `web_sessions`, `access_grants`, `revision_access_requirements`, `channels`, `identities`, `inbox`, `replies`, `channel_work`, `channel_media_cache`, `config`, `schema_versions` | — | dropped. `config` becomes env vars (§1.4). |
+| table                                                                                                                                                                                                                         | role                                                                                                    | kept?                                              |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `collections`                                                                                                                                                                                                                 | One row per adapter object (post, profile) identified by `(platform, kind, object_scope, external_id)`. | yes                                                |
+| `collection_identity_aliases`                                                                                                                                                                                                 | Maps an alternate external id (such as `handle:foo`) to the canonical collection.                       | yes                                                |
+| `captures`                                                                                                                                                                                                                    | One fetch job of a collection. Also the "job" users see.                                                | yes                                                |
+| `revisions`                                                                                                                                                                                                                   | Immutable content snapshot of a collection, produced by exactly one capture.                            | yes                                                |
+| `revision_entities`, `entity_relations`                                                                                                                                                                                       | Entity graph of a revision.                                                                             | yes                                                |
+| `entities`, `entity_versions`                                                                                                                                                                                                 | Global entity identities and their content-hash-deduplicated versions.                                  | yes                                                |
+| `assets`                                                                                                                                                                                                                      | A media item of a capture at a position.                                                                | yes                                                |
+| `blobs`                                                                                                                                                                                                                       | Stored media bytes, deduplicated by sha256.                                                             | yes                                                |
+| `blob_thumbnails`                                                                                                                                                                                                             | One thumbnail result per blob.                                                                          | yes                                                |
+| `objects`                                                                                                                                                                                                                     | Ledger of object-store keys, used for GC.                                                               | yes; simpler with content-addressed keys, see §4.6 |
+| `source_responses`                                                                                                                                                                                                            | Raw upstream responses per capture.                                                                     | yes                                                |
+| `submissions`                                                                                                                                                                                                                 | A request for a capture: user input, a member of a collection, or a continuation page.                  | yes                                                |
+| `refresh_batches`                                                                                                                                                                                                             | Batch refresh of many saved collections.                                                                | yes                                                |
+| `tenant_collections`                                                                                                                                                                                                          | "Saved in the library" plus note and the source used to save.                                           | **table dropped, semantics kept**, see §1.2.14     |
+| `tags`, `collection_tags`                                                                                                                                                                                                     | Tags on saved collections.                                                                              | yes, without `tenant_id`                           |
+| `connections`, `account_credentials`, `tenant_preferences`                                                                                                                                                                    | Accounts, encrypted credentials, and the per-adapter account selection.                                 | yes, without `tenant_id`                           |
+| `tenants`, `tenant_entitlements`, `tokens`, `web_sessions`, `access_grants`, `revision_access_requirements`, `channels`, `identities`, `inbox`, `replies`, `channel_work`, `channel_media_cache`, `config`, `schema_versions` | —                                                                                                       | dropped. `config` becomes env vars (§1.4).         |
 
 ### 1.2 Tables
 
 #### 1.2.1 `collections`
 
-| column | type | notes |
-|---|---|---|
-| `id` | uuid PK | `init:655` |
-| `platform`, `kind`, `object_scope` (default `''`), `external_id` | text NN | The identity. UNIQUE `collections_identity_key (platform, kind, object_scope, external_id)` (`shared:594`). |
-| `url` | text NN | Canonical URL from Resolve, later updated to `CanonicalTarget.url`. |
-| `provider_id` | text NN | Provider of the first submission that created the row. Informational. |
-| `current_revision` | uuid null | FK `(id, current_revision) → revisions(collection_id, id)` (`shared:595`). Set on every new revision (`app/worker.go:686`). |
-| `unreferenced_at` | timestamptz null | GC clock. Set by `mark_unreferenced` when nothing saves the collection; cleared when a submission targets it. |
-| `created_at`, `observed_at` | timestamptz NN default now() | `observed_at = now()` at every finalize (`app/worker.go:703`). It drives the freshness window (§3.2 step 11). |
-| `source_state` | text null | CHECK `IN ('deleted','suspended')`, plus `source_state_at` with CHECK that both are null or both are set (`srcstate:5-7`). |
+| column                                                           | type                         | notes                                                                                                                       |
+| ---------------------------------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                             | uuid PK                      | `init:655`                                                                                                                  |
+| `platform`, `kind`, `object_scope` (default `''`), `external_id` | text NN                      | The identity. UNIQUE `collections_identity_key (platform, kind, object_scope, external_id)` (`shared:594`).                 |
+| `url`                                                            | text NN                      | Canonical URL from Resolve, later updated to `CanonicalTarget.url`.                                                         |
+| `provider_id`                                                    | text NN                      | Provider of the first submission that created the row. Informational.                                                       |
+| `current_revision`                                               | uuid null                    | FK `(id, current_revision) → revisions(collection_id, id)` (`shared:595`). Set on every new revision (`app/worker.go:686`). |
+| `unreferenced_at`                                                | timestamptz null             | GC clock. Set by `mark_unreferenced` when nothing saves the collection; cleared when a submission targets it.               |
+| `created_at`, `observed_at`                                      | timestamptz NN default now() | `observed_at = now()` at every finalize (`app/worker.go:703`). It drives the freshness window (§3.2 step 11).               |
+| `source_state`                                                   | text null                    | CHECK `IN ('deleted','suspended')`, plus `source_state_at` with CHECK that both are null or both are set (`srcstate:5-7`).  |
 
 - Index `(platform, kind, object_scope, external_id, observed_at DESC, id DESC)` (`aliasidx:2`) and a partial index on `unreferenced_at` (`lookup:11`).
 - **[MT] dropped earlier:** `tenant_id`, `visibility`, `scope`, `data_scope` (`shared:589-593`).
@@ -129,33 +129,33 @@ The schema was PostgreSQL. **[MT]** marks columns that exist only for multi-tena
 
 #### 1.2.3 `captures`
 
-| column | type / default | meaning |
-|---|---|---|
-| `id` | uuid PK | Exposed as the "job id". |
-| `collection_id` | uuid NN FK | Can be moved to a canonical collection while still `queued` (`app/capture_scope.go:47-51`). |
-| `provider_id`, `adapter_id` | text NN | — |
-| `connection_id` | uuid null | The account used. Null means the anonymous provider. |
-| `credential_revision` | bigint null | `connections.revision` used at fetch time (`app/worker.go:498`). Later steps abort if it changed (§6.5). |
-| `refresh_from` | uuid null | The `RefreshID` collection this capture refreshes (no FK). |
-| `scope` | text NN | **Access scope** sent to the adapter: `public` or `connection:<connection uuid>` (`app/service.go:263-266`). The X adapter validates it (`x/server.ts:160-174`), so keep it. |
-| `state` | text default `queued` | CHECK `IN ('queued','downloading','complete','partial','failed')` (`init:633`). |
-| `error` | text default `''` | Failure message shown to users (§7). |
-| `payload` | jsonb null | Staged `Payload` (§3.6.1) between capture and finalize. Set to NULL at finalize or fail. |
-| `adapter_version` | text default `''` | — |
-| `created_at`, `finished_at` | timestamptz | `finished_at` is set at complete, partial or failed. |
-| `revision_id` | uuid null | The revision this capture produced **or reused**. FK `(collection_id, revision_id) → revisions(collection_id, id)` (`shared:603`). |
-| `automatic` | bool default false | Created by a related-target fan-out. Never expands collections. |
-| `related_targets` | jsonb default `[]` | `FetchResponse.related_targets` as stored JSON. The `prefetch` keys are removed after fan-out (`app/related.go:221`). |
-| `page_size` | int default 0 | Requested target size for a collection page. |
-| `page_cursor` | text default `''` | Cursor this capture fetched (≤4096). |
-| `next_page_cursor` | text default `''` | Cursor returned by the adapter. Empty means the end. |
-| `is_collection` | bool default false | `target.Collection && !automatic` (`app/service.go:374`). |
-| `max_batch_size` | int default 0 | From the adapter. Must be ≥1000 for "more1000". |
-| `paused` | bool default false | Paused captures' tasks snooze for 1 min (`app/worker.go:46-52,860-875`). **Nothing in the code sets it**; it is vestigial. |
-| `mode` | text default `fetch` | CHECK `IN ('fetch','check')`. `check` is dropped. |
-| `prefetch` | bytea null | Prefetch from the listing that created this automatic capture (`prefetch:5`). Cleared at capture commit (`app/worker.go:498`) and at fail (`app/worker.go:811`). |
-| `metrics` | jsonb null | Observed counts of this capture: `{ "<entityType>/<externalId>": { "/json/pointer": <value> } }` (`metrics:5`, `app/worker.go:700`). |
-| `visibility`, `content_reserved`, `restricted_targets`, `subject_*`, `tenant_id` | — | **[MT]**. |
+| column                                                                           | type / default        | meaning                                                                                                                                                                      |
+| -------------------------------------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                                             | uuid PK               | Exposed as the "job id".                                                                                                                                                     |
+| `collection_id`                                                                  | uuid NN FK            | Can be moved to a canonical collection while still `queued` (`app/capture_scope.go:47-51`).                                                                                  |
+| `provider_id`, `adapter_id`                                                      | text NN               | —                                                                                                                                                                            |
+| `connection_id`                                                                  | uuid null             | The account used. Null means the anonymous provider.                                                                                                                         |
+| `credential_revision`                                                            | bigint null           | `connections.revision` used at fetch time (`app/worker.go:498`). Later steps abort if it changed (§6.5).                                                                     |
+| `refresh_from`                                                                   | uuid null             | The `RefreshID` collection this capture refreshes (no FK).                                                                                                                   |
+| `scope`                                                                          | text NN               | **Access scope** sent to the adapter: `public` or `connection:<connection uuid>` (`app/service.go:263-266`). The X adapter validates it (`x/server.ts:160-174`), so keep it. |
+| `state`                                                                          | text default `queued` | CHECK `IN ('queued','downloading','complete','partial','failed')` (`init:633`).                                                                                              |
+| `error`                                                                          | text default `''`     | Failure message shown to users (§7).                                                                                                                                         |
+| `payload`                                                                        | jsonb null            | Staged `Payload` (§3.6.1) between capture and finalize. Set to NULL at finalize or fail.                                                                                     |
+| `adapter_version`                                                                | text default `''`     | —                                                                                                                                                                            |
+| `created_at`, `finished_at`                                                      | timestamptz           | `finished_at` is set at complete, partial or failed.                                                                                                                         |
+| `revision_id`                                                                    | uuid null             | The revision this capture produced **or reused**. FK `(collection_id, revision_id) → revisions(collection_id, id)` (`shared:603`).                                           |
+| `automatic`                                                                      | bool default false    | Created by a related-target fan-out. Never expands collections.                                                                                                              |
+| `related_targets`                                                                | jsonb default `[]`    | `FetchResponse.related_targets` as stored JSON. The `prefetch` keys are removed after fan-out (`app/related.go:221`).                                                        |
+| `page_size`                                                                      | int default 0         | Requested target size for a collection page.                                                                                                                                 |
+| `page_cursor`                                                                    | text default `''`     | Cursor this capture fetched (≤4096).                                                                                                                                         |
+| `next_page_cursor`                                                               | text default `''`     | Cursor returned by the adapter. Empty means the end.                                                                                                                         |
+| `is_collection`                                                                  | bool default false    | `target.Collection && !automatic` (`app/service.go:374`).                                                                                                                    |
+| `max_batch_size`                                                                 | int default 0         | From the adapter. Must be ≥1000 for "more1000".                                                                                                                              |
+| `paused`                                                                         | bool default false    | Paused captures' tasks snooze for 1 min (`app/worker.go:46-52,860-875`). **Nothing in the code sets it**; it is vestigial.                                                   |
+| `mode`                                                                           | text default `fetch`  | CHECK `IN ('fetch','check')`. `check` is dropped.                                                                                                                            |
+| `prefetch`                                                                       | bytea null            | Prefetch from the listing that created this automatic capture (`prefetch:5`). Cleared at capture commit (`app/worker.go:498`) and at fail (`app/worker.go:811`).             |
+| `metrics`                                                                        | jsonb null            | Observed counts of this capture: `{ "<entityType>/<externalId>": { "/json/pointer": <value> } }` (`metrics:5`, `app/worker.go:700`).                                         |
+| `visibility`, `content_reserved`, `restricted_targets`, `subject_*`, `tenant_id` | —                     | **[MT]**.                                                                                                                                                                    |
 
 - **UNIQUE partial `one_active_capture`** (`shared:674-680`): `(collection_id, adapter_id, provider_id, coalesce(connection_id, <public-zero-uuid or tenant>), md5(page_cursor), page_size, automatic, mode) WHERE state IN ('queued','downloading')`.
   - Single-user equivalent: `(collection_id, adapter_id, provider_id, coalesce(connection_id,''), page_cursor, page_size, automatic) WHERE state IN ('queued','downloading')`.
@@ -213,20 +213,20 @@ The schema was PostgreSQL. **[MT]** marks columns that exist only for multi-tena
 
 #### 1.2.9 `assets`
 
-| column | notes |
-|---|---|
-| `id`, `capture_id` (FK) | — |
-| `position` | Index into the capture's **kept** resources. UNIQUE `(capture_id, position)`. |
-| `source_url` | Download URL from the adapter. |
-| `purpose` | Default `''`, CHECK `length ≤ 128`. `''` means content media. Otherwise it is a role such as `avatar` or `banner`. |
-| `alt_text`, `sensitive` | From the resource. |
-| `cache_key` | `''`, or the sha256 of `JSON(["<platform>", immutable_key])` (`app/worker.go:533-537`). |
-| `kind` | CHECK `IN ('image','video')`. |
-| `state` | Default `pending`, CHECK `IN ('pending','ready','failed')`. |
-| `error` | — |
-| `blob_id` | FK → blobs, set when ready. |
-| `object_id` | FK → objects, the upload slot reserved for this download. |
-| `reserved_bytes` | **[MT]**. |
+| column                  | notes                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `id`, `capture_id` (FK) | —                                                                                                                  |
+| `position`              | Index into the capture's **kept** resources. UNIQUE `(capture_id, position)`.                                      |
+| `source_url`            | Download URL from the adapter.                                                                                     |
+| `purpose`               | Default `''`, CHECK `length ≤ 128`. `''` means content media. Otherwise it is a role such as `avatar` or `banner`. |
+| `alt_text`, `sensitive` | From the resource.                                                                                                 |
+| `cache_key`             | `''`, or the sha256 of `JSON(["<platform>", immutable_key])` (`app/worker.go:533-537`).                            |
+| `kind`                  | CHECK `IN ('image','video')`.                                                                                      |
+| `state`                 | Default `pending`, CHECK `IN ('pending','ready','failed')`.                                                        |
+| `error`                 | —                                                                                                                  |
+| `blob_id`               | FK → blobs, set when ready.                                                                                        |
+| `object_id`             | FK → objects, the upload slot reserved for this download.                                                          |
+| `reserved_bytes`        | **[MT]**.                                                                                                          |
 
 - **Indexes:** `assets_cache (cache_key) WHERE state='ready' AND cache_key<>''` (`shared:682-684`), `(blob_id)` and `(object_id)`.
 - **Lifecycle:**
@@ -313,22 +313,22 @@ What "saved" means and where it is used. A single-user port needs an equivalent,
 
 #### 1.2.15 `submissions`
 
-| column | meaning |
-|---|---|
-| `id`, `capture_id` (FK) | The capture this request is attached to. **Many submissions can share one capture** (coalescing). A submission can also point to an old finished capture (reuse). |
-| `idem_key` | UNIQUE `(tenant_id, idem_key)`. In single-user it is UNIQUE `(idem_key)`. Its prefixes have meaning (§3.2.3). |
-| `fingerprint` | sha256 of the request identity (§3.2.3). |
-| `input` | The raw user input. It defaults to the URL if empty (`app/service.go:206-208,270-272`). `''` only for channel "show" rows. |
-| `created_at` | — |
-| `related_provider`, `related_connection`, `related_adapter`, `related_source_collection` | The source to use for fan-out, and the collection at submit time. |
-| `related_state` | Default `none`. Values `none` \| `pending` \| `complete` \| `failed` (no CHECK). |
-| `related_error` | — |
-| `collection_limit` | Remaining member budget for this page (0 means unlimited when options are set; see §5.2). |
-| `next_submission` | The continuation page submission (FK, same tenant). |
-| `collection_stopped` | bool. |
-| `parent_submission` | FK ON DELETE SET NULL. Set for members and references (fan-out). Not set for "more" pages, which are new records. |
-| `capture_options` | jsonb `CaptureOptions` (`options:2`). |
-| `state`, `progress`, `status_text`, `error`, `message_id`, `reply_to_message_id`, `identity_id`, `channel_id`, `chat_id` | **[MT/channel]**. Telegram delivery state. |
+| column                                                                                                                   | meaning                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`, `capture_id` (FK)                                                                                                  | The capture this request is attached to. **Many submissions can share one capture** (coalescing). A submission can also point to an old finished capture (reuse). |
+| `idem_key`                                                                                                               | UNIQUE `(tenant_id, idem_key)`. In single-user it is UNIQUE `(idem_key)`. Its prefixes have meaning (§3.2.3).                                                     |
+| `fingerprint`                                                                                                            | sha256 of the request identity (§3.2.3).                                                                                                                          |
+| `input`                                                                                                                  | The raw user input. It defaults to the URL if empty (`app/service.go:206-208,270-272`). `''` only for channel "show" rows.                                        |
+| `created_at`                                                                                                             | —                                                                                                                                                                 |
+| `related_provider`, `related_connection`, `related_adapter`, `related_source_collection`                                 | The source to use for fan-out, and the collection at submit time.                                                                                                 |
+| `related_state`                                                                                                          | Default `none`. Values `none` \| `pending` \| `complete` \| `failed` (no CHECK).                                                                                  |
+| `related_error`                                                                                                          | —                                                                                                                                                                 |
+| `collection_limit`                                                                                                       | Remaining member budget for this page (0 means unlimited when options are set; see §5.2).                                                                         |
+| `next_submission`                                                                                                        | The continuation page submission (FK, same tenant).                                                                                                               |
+| `collection_stopped`                                                                                                     | bool.                                                                                                                                                             |
+| `parent_submission`                                                                                                      | FK ON DELETE SET NULL. Set for members and references (fan-out). Not set for "more" pages, which are new records.                                                 |
+| `capture_options`                                                                                                        | jsonb `CaptureOptions` (`options:2`).                                                                                                                             |
+| `state`, `progress`, `status_text`, `error`, `message_id`, `reply_to_message_id`, `identity_id`, `channel_id`, `chat_id` | **[MT/channel]**. Telegram delivery state.                                                                                                                        |
 
 - **Index** `submission_records (tenant_id, created_at DESC, id DESC) WHERE parent_submission IS NULL AND input <> ''` (`records:4-5`). These are the capture records.
 - **Lifecycle:**
@@ -468,14 +468,14 @@ RETURNING id
 
 These become env vars or constants.
 
-| key | default | used for |
-|---|---|---|
-| `max_media` | 20 | `Config.MaxMedia`: maximum content resources (`purpose == ''`) kept per capture (`app/service.go:39`). |
-| `connection_concurrency` | 1 | Concurrent account-using captures per connection (`app/worker.go:220`). |
-| `capture_workers` / `download_workers` / `control_workers` | 4 / 8 / 4 | Queue concurrency (`internal/runtime/role.go:9-11`). |
-| `collection_retention_days` | 7 | Grace before an unsaved collection is physically removed. The plan removes this, see §6.4. |
-| `object_gc_grace_hours` | 24 | Minimum object age before deletion. |
-| `capture_rate`, `tenant_quota_bytes`, `tenant_concurrency` | — | [MT] dropped. |
+| key                                                        | default   | used for                                                                                               |
+| ---------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------ |
+| `max_media`                                                | 20        | `Config.MaxMedia`: maximum content resources (`purpose == ''`) kept per capture (`app/service.go:39`). |
+| `connection_concurrency`                                   | 1         | Concurrent account-using captures per connection (`app/worker.go:220`).                                |
+| `capture_workers` / `download_workers` / `control_workers` | 4 / 8 / 4 | Queue concurrency (`internal/runtime/role.go:9-11`).                                                   |
+| `collection_retention_days`                                | 7         | Grace before an unsaved collection is physically removed. The plan removes this, see §6.4.             |
+| `object_gc_grace_hours`                                    | 24        | Minimum object age before deletion.                                                                    |
+| `capture_rate`, `tenant_quota_bytes`, `tenant_concurrency` | —         | [MT] dropped.                                                                                          |
 
 ---
 
@@ -512,18 +512,18 @@ The TS rewrite already calls platforms in-process. The interface is `Platform` w
 
 **Capabilities the core checks**
 
-| name | effect |
-|---|---|
-| `capture.fetch` | The provider can capture. Submit and capture require it (`app/service.go:185`, `app/worker.go:295`). |
-| `capture.related` | `related_targets` is allowed. Without it a non-empty list is a permanent error (`app/related.go:28-30`), and Submit does not schedule a `related` task (`app/service.go:397`). |
-| `capture.page` | `next_page_cursor`, `max_batch_size`, `page_size` and `page_cursor` are allowed (`app/related.go:20-22`, `app/service.go:203`). |
-| `capture.canonical` | `canonical_target` is allowed (`app/related.go:23-27`). |
-| `capture.prefetch` | `RelatedTarget.prefetch` is allowed, at most 64 KiB (`app/related.go:39-41`). |
-| `credential.deferred` | First fetch without the credential (§3.4). |
-| `credential.prepare`, `connection.check` | Account import (§6.5). |
-| `entity.graph` | The graph's entity types must come from providers that declare `entity.graph` (`app/entities.go:48-55`). |
-| `capture.access` | Dropped. |
-| `content.text`, `source.raw`, `media.image`, `media.video` | Declared by X but ignored by the core. |
+| name                                                       | effect                                                                                                                                                                         |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `capture.fetch`                                            | The provider can capture. Submit and capture require it (`app/service.go:185`, `app/worker.go:295`).                                                                           |
+| `capture.related`                                          | `related_targets` is allowed. Without it a non-empty list is a permanent error (`app/related.go:28-30`), and Submit does not schedule a `related` task (`app/service.go:397`). |
+| `capture.page`                                             | `next_page_cursor`, `max_batch_size`, `page_size` and `page_cursor` are allowed (`app/related.go:20-22`, `app/service.go:203`).                                                |
+| `capture.canonical`                                        | `canonical_target` is allowed (`app/related.go:23-27`).                                                                                                                        |
+| `capture.prefetch`                                         | `RelatedTarget.prefetch` is allowed, at most 64 KiB (`app/related.go:39-41`).                                                                                                  |
+| `credential.deferred`                                      | First fetch without the credential (§3.4).                                                                                                                                     |
+| `credential.prepare`, `connection.check`                   | Account import (§6.5).                                                                                                                                                         |
+| `entity.graph`                                             | The graph's entity types must come from providers that declare `entity.graph` (`app/entities.go:48-55`).                                                                       |
+| `capture.access`                                           | Dropped.                                                                                                                                                                       |
+| `content.text`, `source.raw`, `media.image`, `media.video` | Declared by X but ignored by the core.                                                                                                                                         |
 
 **Concrete descriptors**
 
@@ -565,18 +565,18 @@ The TS rewrite already calls platforms in-process. The interface is `Platform` w
 
 **`FetchResponse`** (`adapter.proto:129-155`)
 
-| field | core rule |
-|---|---|
-| `external_id`, `provider_id` | Must equal the request's values, otherwise the permanent error `adapter returned mismatched identity` (`app/worker.go:365-367`). The **requested** id is echoed even when canonical differs. |
-| `text`, `text_kind`, `text_source`, `summary`, `author_name`, `published_at` (RFC 3339 or empty), `warnings[]`, `adapter_version`, `incomplete` | Copied into the Payload. `text` must be ≤ 1 MiB, otherwise `text exceeds collection limit` (`app/worker.go:391-393`). `incomplete` makes the capture `partial`. |
-| `resources[]` | Media descriptors (§2.5). |
-| `graph` | Entity graph (§2.4). |
-| `source_responses[]` | `{ body, content_type, source_url, visibility }`, §4.7. |
-| `canonical_target` | ResolveResponse. Requires `capture.canonical`; must have the same platform, kind and object_scope, a non-empty external id and a valid URL (`app/related.go:23-27`). |
-| `related_targets[]` | ≤512, otherwise `related capture page exceeds 512 targets`. Each needs a valid URL. See §2.6. |
-| `next_page_cursor` | ≤4096 bytes. Empty means the end. |
-| `max_batch_size` | ≤1000. A non-zero value requires `capture.page`. |
-| `visibility`, `restricted_targets`, `private_subject`, `public_subjects` | [MT], dropped. |
+| field                                                                                                                                           | core rule                                                                                                                                                                                    |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `external_id`, `provider_id`                                                                                                                    | Must equal the request's values, otherwise the permanent error `adapter returned mismatched identity` (`app/worker.go:365-367`). The **requested** id is echoed even when canonical differs. |
+| `text`, `text_kind`, `text_source`, `summary`, `author_name`, `published_at` (RFC 3339 or empty), `warnings[]`, `adapter_version`, `incomplete` | Copied into the Payload. `text` must be ≤ 1 MiB, otherwise `text exceeds collection limit` (`app/worker.go:391-393`). `incomplete` makes the capture `partial`.                              |
+| `resources[]`                                                                                                                                   | Media descriptors (§2.5).                                                                                                                                                                    |
+| `graph`                                                                                                                                         | Entity graph (§2.4).                                                                                                                                                                         |
+| `source_responses[]`                                                                                                                            | `{ body, content_type, source_url, visibility }`, §4.7.                                                                                                                                      |
+| `canonical_target`                                                                                                                              | ResolveResponse. Requires `capture.canonical`; must have the same platform, kind and object_scope, a non-empty external id and a valid URL (`app/related.go:23-27`).                         |
+| `related_targets[]`                                                                                                                             | ≤512, otherwise `related capture page exceeds 512 targets`. Each needs a valid URL. See §2.6.                                                                                                |
+| `next_page_cursor`                                                                                                                              | ≤4096 bytes. Empty means the end.                                                                                                                                                            |
+| `max_batch_size`                                                                                                                                | ≤1000. A non-zero value requires `capture.page`.                                                                                                                                             |
+| `visibility`, `restricted_targets`, `private_subject`, `public_subjects`                                                                        | [MT], dropped.                                                                                                                                                                               |
 
 ### 2.4 Entity graph format and validation (`app/entities.go:18-114`)
 
@@ -685,13 +685,13 @@ Sources: `x/provider.ts:11-94` and `ig/errors.ts:1-69`. Unexpected errors become
 
 **Worker classification** (`app/worker.go:81-100`)
 
-| error | class |
-|---|---|
-| `ErrUnsupported`, `ErrNotFound` (also any "row not found" from a transaction, `internal/store/store.go:65-70`), `ErrConnection`, `ErrQuota` [MT] | **permanent** |
-| status INVALID_ARGUMENT, FAILED_PRECONDITION, UNIMPLEMENTED, PERMISSION_DENIED, UNAUTHENTICATED | **permanent** |
-| `PermanentError{msg}` (the core's own validation errors) | **permanent** |
-| `RetryError{After}` | retry exactly after `After`, keeping the attempt count. `RetryError` has no `Unwrap`, so it is never classified permanent even if it wraps a permanent code. |
-| anything else: UNAVAILABLE, RESOURCE_EXHAUSTED without retry-after, DEADLINE_EXCEEDED, **NOT_FOUND**, UNKNOWN, network or DB errors, `ErrInvalidTarget`, `ErrAccountRequired` | retryable, with exponential backoff |
+| error                                                                                                                                                                         | class                                                                                                                                                        |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ErrUnsupported`, `ErrNotFound` (also any "row not found" from a transaction, `internal/store/store.go:65-70`), `ErrConnection`, `ErrQuota` [MT]                              | **permanent**                                                                                                                                                |
+| status INVALID_ARGUMENT, FAILED_PRECONDITION, UNIMPLEMENTED, PERMISSION_DENIED, UNAUTHENTICATED                                                                               | **permanent**                                                                                                                                                |
+| `PermanentError{msg}` (the core's own validation errors)                                                                                                                      | **permanent**                                                                                                                                                |
+| `RetryError{After}`                                                                                                                                                           | retry exactly after `After`, keeping the attempt count. `RetryError` has no `Unwrap`, so it is never classified permanent even if it wraps a permanent code. |
+| anything else: UNAVAILABLE, RESOURCE_EXHAUSTED without retry-after, DEADLINE_EXCEEDED, **NOT_FOUND**, UNKNOWN, network or DB errors, `ErrInvalidTarget`, `ErrAccountRequired` | retryable, with exponential backoff                                                                                                                          |
 
 Permanent errors, or the last attempt (attempt ≥ 3): call `fail(task, safeError(e))` (§3.10), then cancel the job.
 
@@ -720,7 +720,7 @@ Permanent errors, or the last attempt (attempt ≥ 3): call `fail(task, safeErro
   - 5xx → UNAVAILABLE.
   - 401 → UNAUTHENTICATED with an account, else FAILED_PRECONDITION.
   - 403 → PERMISSION_DENIED with an account, else FAILED_PRECONDITION.
-  - 404 → **NOT_FOUND**, which the core *retries* 3 times before failing.
+  - 404 → **NOT_FOUND**, which the core _retries_ 3 times before failing.
 - **`credential-required`:** X and Instagram raise FAILED_PRECONDITION with this trailer when the credential was withheld and is needed (`x/strategy.ts:224-233`, `ig/errors.ts:22-29`).
 
 ---
@@ -729,16 +729,16 @@ Permanent errors, or the last attempt (attempt ≥ 3): call `fail(task, safeErro
 
 ### 3.1 Entry points
 
-| entry | what it submits | file |
-|---|---|---|
-| `CaptureURL(raw, key, options)` (web "save link") | `Resolve(raw)`, then the **currently selected account** for that adapter (`DefaultConnection`), then `Submit{URL: target.URL, Input: raw, ConnectionID, Key, Options}`. | `app/capture_records.go:311-325` |
-| `POST /v1/captures` (API) | A `CaptureInput` JSON (≤16 KiB, unknown fields rejected). The key comes from the `Idempotency-Key` header. `update_mode` must be `''`/`full`/`append` and is ignored. Web sessions may not set `connection_id`/`provider_id`/`update_mode` and go through `CaptureURL`. | `internal/httpapi/server.go:33-89` |
-| Telegram "save" (multi-link message) | ≤200 URLs, otherwise `ErrUnsupported`. Each is resolved; unresolvable ones are **silently skipped**; duplicates by `platform|kind|object_scope|external_id` are skipped. Key `<work id>:<sha256(identity)>`. Per-URL errors are collected as `safeError` strings, and `Count` counts successes. | `app/channel_actions.go:96-121` |
-| Refresh a saved collection | `Submit{RefreshID: id}` | §3.2 |
-| Retry or refresh (bot) / `recaptureInput` | If `restart` is false and the latest capture is not `failed`: `{RefreshID}`. Otherwise `{URL, Input: URL, ConnectionID: current selection}` (start over with the source selected **now**). | `app/capture_records.go:330-346` |
-| Record retry, record page, member retry | §5.4 | — |
-| Related fan-out (children) | §3.7 | — |
-| Refresh batch | §6.3 | — |
+| entry                                             | what it submits                                                                                                                                                                                                                                                         | file                               |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `CaptureURL(raw, key, options)` (web "save link") | `Resolve(raw)`, then the **currently selected account** for that adapter (`DefaultConnection`), then `Submit{URL: target.URL, Input: raw, ConnectionID, Key, Options}`.                                                                                                 | `app/capture_records.go:311-325`   |
+| `POST /v1/captures` (API)                         | A `CaptureInput` JSON (≤16 KiB, unknown fields rejected). The key comes from the `Idempotency-Key` header. `update_mode` must be `''`/`full`/`append` and is ignored. Web sessions may not set `connection_id`/`provider_id`/`update_mode` and go through `CaptureURL`. | `internal/httpapi/server.go:33-89` |
+| Telegram "save" (multi-link message)              | ≤200 URLs, otherwise `ErrUnsupported`. Each is resolved; unresolvable ones are **silently skipped**; duplicates by `platform                                                                                                                                            | kind                               | object_scope | external_id`are skipped. Key`<work id>:<sha256(identity)>`. Per-URL errors are collected as `safeError`strings, and`Count` counts successes. | `app/channel_actions.go:96-121` |
+| Refresh a saved collection                        | `Submit{RefreshID: id}`                                                                                                                                                                                                                                                 | §3.2                               |
+| Retry or refresh (bot) / `recaptureInput`         | If `restart` is false and the latest capture is not `failed`: `{RefreshID}`. Otherwise `{URL, Input: URL, ConnectionID: current selection}` (start over with the source selected **now**).                                                                              | `app/capture_records.go:330-346`   |
+| Record retry, record page, member retry           | §5.4                                                                                                                                                                                                                                                                    | —                                  |
+| Related fan-out (children)                        | §3.7                                                                                                                                                                                                                                                                    | —                                  |
+| Refresh batch                                     | §6.3                                                                                                                                                                                                                                                                    | —                                  |
 
 ### 3.2 Submit (`app/service.go:111-427`)
 
@@ -801,6 +801,7 @@ The transaction is serialized per tenant by `lockTenant`.
       - A plain explicit submit of an already-stored post never refetches.
       - Explicit profile submits (`refresh_on_submit`) always refetch.
       - Automatic children refetch only when older than their `refresh_after_seconds`.
+
 18. **New capture** (`:347-380`), when none was joined or reused:
     - Insert a capture with `collection_id`, `provider_id`, `scope`, `connection_id`, `refresh_from = RefreshID`, `adapter_id`, `automatic`, `page_cursor`, `is_collection = target.Collection && !Automatic`, `page_size`, `mode='fetch'`, and `prefetch` (**only if `Automatic`** and a prefetch was given).
     - Enqueue `capture`.
@@ -817,16 +818,16 @@ The transaction is serialized per tenant by `lockTenant`.
 
 The prefixes have meaning; they are matched with `LIKE`.
 
-| prefix | made by | meaning |
-|---|---|---|
-| `related:<parentSubmission>:<index>` | related fan-out (`app/related.go:181`) | A member or reference of a page. These are counted as "members" everywhere (`LIKE 'related:%'`). |
-| `related-expand:<sid>` | related task of an automatic capture that must expand (`app/related.go:133`) | — |
-| `batch:<sid>` | auto-continuation page (`app/related.go:202`) | Linked via `next_submission`. |
-| `more:<recordId>` | "more" / "more1000" (`app/capture_records.go:433`) | A second press returns the same job. |
-| `page-retry:<key or uuid>` | "page_retry" (`app/capture_records.go:436-441`) | — |
-| `retried:<submissionId>` | key rename of retried failed members (`app/batch.go:302`) | Frees the original `related:` key. |
-| `refresh-batch:<batchId>:<position>` | refresh batch (`app/batch.go:219`) | — |
-| `retry:<w>`, `refresh:<w>`, `show:<w>` | bot (channel) | — |
+| prefix                                 | made by                                                                      | meaning                                                                                          |
+| -------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `related:<parentSubmission>:<index>`   | related fan-out (`app/related.go:181`)                                       | A member or reference of a page. These are counted as "members" everywhere (`LIKE 'related:%'`). |
+| `related-expand:<sid>`                 | related task of an automatic capture that must expand (`app/related.go:133`) | —                                                                                                |
+| `batch:<sid>`                          | auto-continuation page (`app/related.go:202`)                                | Linked via `next_submission`.                                                                    |
+| `more:<recordId>`                      | "more" / "more1000" (`app/capture_records.go:433`)                           | A second press returns the same job.                                                             |
+| `page-retry:<key or uuid>`             | "page_retry" (`app/capture_records.go:436-441`)                              | —                                                                                                |
+| `retried:<submissionId>`               | key rename of retried failed members (`app/batch.go:302`)                    | Frees the original `related:` key.                                                               |
+| `refresh-batch:<batchId>:<position>`   | refresh batch (`app/batch.go:219`)                                           | —                                                                                                |
+| `retry:<w>`, `refresh:<w>`, `show:<w>` | bot (channel)                                                                | —                                                                                                |
 
 Records exclude `related:%`, `related-expand:%`, `batch:%` and `retried:%`, and require no parent and `input <> ''` (`app/capture_records.go:117`).
 
@@ -948,6 +949,7 @@ Notes:
    - set `collections.current_revision`.
 
    **If equal**, reuse the previous revision. There is no new row.
+
 8. Set the capture to `state = partial ? 'partial' : 'complete'`, `payload = NULL`, `finished_at = now()`, `revision_id` = new or reused, and `metrics` = JSON of the payload's metrics (null if empty).
 9. Update the collection: `observed_at = now()`, `source_state = NULL`, `source_state_at = NULL`. A successful capture clears a gone state.
 10. **Refresh moved the collection** (`:706-719`): if `refresh_from` is set and differs from the capture's collection, delete the old collection's saved row only if it has no `current_revision`, then `mark_unreferenced(old)`.
@@ -1044,6 +1046,7 @@ The task id is the submission id.
    - `pageSize = options ? min(remaining, 100) : remaining`.
    - Submit `{ParentSubmission: sid, URL: collection url, same provider/connection, PageCursor: next, PageSize: pageSize, CollectionLimit: remaining, Options: options, Key: "batch:<sid>"}`. This is not automatic, so it is itself a collection page with its own related task.
    - Set `submission.next_submission` to the submission with key `batch:<sid>`.
+
 8. **Finish:** remove the `prefetch` key from every element of the capture's `related_targets`, then set `related_state='complete'` unless stopped (`:219-226`).
 
 Child submissions carry prefetch only when automatic (§3.2 step 18). The child capture's `prefetch` is cleared after its fetch.
@@ -1083,15 +1086,15 @@ See §4.5.
 
 ### 3.11 State machines
 
-| entity | transitions |
-|---|---|
-| capture | `queued` → `downloading` (capture commit) → `complete` \| `partial` (finalize). `queued`/`downloading` → `failed` (`failCaptureTx`, reached from capture/finalize fail, a join, nothing saved, a stale sweep or job reconcile). Terminal states never change. |
-| asset | `pending` → `ready` (download or cache reuse) \| `failed` (download fail or capture fail). |
-| `submission.related_state` | `none` (no fan-out) \| `pending` → `complete` (related done, or stopped) \| `failed` (parent failed or task failed). `complete` → `pending` again on member retry (§5.4). |
-| refresh_batch | `running` → `complete` (everything submitted) \| `failed` (quota [MT], expired after 1 day, or task failure). |
-| `blob_thumbnails` | absent → `ready` \| `failed`. Terminal. |
-| objects | §4.6. |
-| connection | `ready` → `reauth_required` (UNAUTHENTICATED) → `ready` (re-import). Any state → `revoked`. |
+| entity                     | transitions                                                                                                                                                                                                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| capture                    | `queued` → `downloading` (capture commit) → `complete` \| `partial` (finalize). `queued`/`downloading` → `failed` (`failCaptureTx`, reached from capture/finalize fail, a join, nothing saved, a stale sweep or job reconcile). Terminal states never change. |
+| asset                      | `pending` → `ready` (download or cache reuse) \| `failed` (download fail or capture fail).                                                                                                                                                                    |
+| `submission.related_state` | `none` (no fan-out) \| `pending` → `complete` (related done, or stopped) \| `failed` (parent failed or task failed). `complete` → `pending` again on member retry (§5.4).                                                                                     |
+| refresh_batch              | `running` → `complete` (everything submitted) \| `failed` (quota [MT], expired after 1 day, or task failure).                                                                                                                                                 |
+| `blob_thumbnails`          | absent → `ready` \| `failed`. Terminal.                                                                                                                                                                                                                       |
+| objects                    | §4.6.                                                                                                                                                                                                                                                         |
+| connection                 | `ready` → `reauth_required` (UNAUTHENTICATED) → `ready` (re-import). Any state → `revoked`.                                                                                                                                                                   |
 
 ### 3.12 Entity persistence and version dedup (`app/entities.go:117-166`)
 
@@ -1601,11 +1604,11 @@ It runs every minute. The steps are independent: errors are joined and the remai
 
 ### 7.1 Chinese strings produced by the core (preserve verbatim)
 
-| text | where | when |
-|---|---|---|
-| `此平台需要账号，请先添加并选择自己的采集凭据。` | `app/worker.go:142` (`safeError(ErrAccountRequired)`) | Shown as a failure or error, for example a bot save of an Instagram link without an account (`app/instagram_runtime_test.go:74`). |
-| `账号不可用，请在采集账号中选择可用账号或重新授权。` | `app/worker.go:145` (`safeError(ErrConnection)`) | Stored as the capture or asset error when the account is unusable, rotated or revoked. |
-| `采集账号` | `app/accounts.go:67` | Default account name. |
+| text                                                 | where                                                 | when                                                                                                                              |
+| ---------------------------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `此平台需要账号，请先添加并选择自己的采集凭据。`     | `app/worker.go:142` (`safeError(ErrAccountRequired)`) | Shown as a failure or error, for example a bot save of an Instagram link without an account (`app/instagram_runtime_test.go:74`). |
+| `账号不可用，请在采集账号中选择可用账号或重新授权。` | `app/worker.go:145` (`safeError(ErrConnection)`)      | Stored as the capture or asset error when the account is unusable, rotated or revoked.                                            |
+| `采集账号`                                           | `app/accounts.go:67`                                  | Default account name.                                                                                                             |
 
 ### 7.2 Chinese strings produced by adapters
 
@@ -1672,14 +1675,14 @@ These are user-visible in records and reasons. They are listed so the same texts
 - **Payload warning:** `resource omitted: unsupported type or resource limit`.
 - **API errors** (`internal/httpapi/server.go:403-458`):
 
-  | status | message |
-  |---|---|
-  | 400 | `unsupported URL`, `invalid cursor`, `idempotency key too long`, `invalid collection filters`, `invalid note or tags`, `invalid credentials`, `invalid account request` |
-  | 404 | `not found` |
-  | 409 | `idempotency key conflicts with an earlier request`, `no more pages` |
-  | 422 | `account required; add and select your own credentials`, `account unavailable; choose a source or authorize again`, `ErrUnsupported` text |
-  | 503 | `adapter temporarily unavailable` (for UNAVAILABLE/DEADLINE_EXCEEDED) |
-  | 500 | `internal error` |
+  | status | message                                                                                                                                                                 |
+  | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | 400    | `unsupported URL`, `invalid cursor`, `idempotency key too long`, `invalid collection filters`, `invalid note or tags`, `invalid credentials`, `invalid account request` |
+  | 404    | `not found`                                                                                                                                                             |
+  | 409    | `idempotency key conflicts with an earlier request`, `no more pages`                                                                                                    |
+  | 422    | `account required; add and select your own credentials`, `account unavailable; choose a source or authorize again`, `ErrUnsupported` text                               |
+  | 503    | `adapter temporarily unavailable` (for UNAVAILABLE/DEADLINE_EXCEEDED)                                                                                                   |
+  | 500    | `internal error`                                                                                                                                                        |
 
 ---
 
