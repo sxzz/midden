@@ -254,8 +254,7 @@ export function batchProgress(db: Executor, id: string): BatchProgress {
       (p) => p.root.submission.id === root.submission.id,
     )
     const rootRunning = isRunning(root.capture.state)
-    const membersDone =
-      !item || item.progress.done || item.progress.stopped
+    const membersDone = !item || item.progress.done || item.progress.stopped
     if (!rootRunning && membersDone) continue
     active.push({
       url: root.url,

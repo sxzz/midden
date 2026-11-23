@@ -271,7 +271,7 @@ export interface CaptureRecord {
   retryable?: number
 }
 
-function recordFilter() {
+export function recordFilterSQL() {
   return and(
     isNull(submissions.parentSubmission),
     sql`${submissions.input} <> ''`,
@@ -297,7 +297,7 @@ function recordRows(
     .from(submissions)
     .innerJoin(captures, eq(captures.id, submissions.captureId))
     .innerJoin(collections, eq(collections.id, captures.collectionId))
-    .where(and(recordFilter(), where))
+    .where(and(recordFilterSQL(), where))
     .orderBy(desc(submissions.createdAt), desc(submissions.id))
     .limit(limit)
     .all()
@@ -766,7 +766,7 @@ export function librarySize(db: Executor) {
       db
         .select({ n: sql<number>`count(*)`.mapWith(Number) })
         .from(submissions)
-        .where(recordFilter()),
+        .where(recordFilterSQL()),
     ),
     running: one(
       db
