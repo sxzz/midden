@@ -19,6 +19,7 @@ import { accountRoutes } from '#http/account-routes.ts'
 import { createApi } from '#http/app.ts'
 import { pruneSessions } from '#http/auth.ts'
 import { captureRoutes } from '#http/capture-routes.ts'
+import { libraryRoutes } from '#http/library-routes.ts'
 import { JobQueue } from '#jobs/queue.ts'
 import { createLogger } from '#log.ts'
 import { createInstagramPlatform } from '#platforms/instagram/index.ts'
@@ -78,6 +79,7 @@ const api = createApi({
 })
 captureRoutes(api, ctx)
 accountRoutes(api, ctx)
+libraryRoutes(api, ctx)
 
 const app = new Hono()
 app.get('/healthz', (c) => c.text('ok'))

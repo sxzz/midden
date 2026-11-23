@@ -7,6 +7,7 @@ import { accountRoutes } from './account-routes.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
 import { createToken } from './auth.ts'
 import { captureRoutes } from './capture-routes.ts'
+import { libraryRoutes } from './library-routes.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
 const BOT = '123:secret-token'
@@ -39,6 +40,7 @@ function setup() {
   })
   captureRoutes(app, ctx)
   accountRoutes(app, ctx)
+  libraryRoutes(app, ctx)
   const token = createToken(ctx.db, 'test')
   const call = (path: string, init: RequestInit = {}) =>
     app.request(path, {
@@ -192,5 +194,36 @@ describe('api', () => {
     expect(await (await call('/accounts')).json()).toMatchObject({
       accounts: [],
     })
+  })
+
+  test('reads the library', async () => {
+    const { ctx, call } = setup()
+    await call('/captures', {
+      method: 'POST',
+      body: JSON.stringify({ url: 'https://fake.test/p/1' }),
+    })
+    await ctx.queue.drain()
+    const list = (await (await call('/collections')).json()) as {
+      items: { id: string; text: string }[]
+    }
+    expect(list.items).toMatchObject([{ text: 'post' }])
+    const id = list.items[0]!.id
+    expect(await (await call(`/collections/${id}`)).json()).toMatchObject({
+      id,
+      graph: { root: 'post' },
+    })
+    const revisions = (await (
+      await call(`/collections/${id}/revisions`)
+    ).json()) as {
+      items: { id: string }[]
+    }
+    expect(revisions.items).toHaveLength(1)
+    expect(
+      (await call(`/collections/${id}/revisions/${revisions.items[0]!.id}`))
+        .status,
+    ).toBe(200)
+    expect((await call('/collections/authors')).status).toBe(200)
+    expect(await (await call(`/collections/${id}/sources`)).json()).toEqual([])
+    expect((await call('/collections?sort=nonsense')).status).toBe(400)
   })
 })
