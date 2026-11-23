@@ -1,5 +1,9 @@
 # Build: install, build Atmosphere and the web app, then drop dev dependencies.
-FROM node:26.13.1-alpine AS build
+# The output is JavaScript, so it is built once on the builder's own platform
+# rather than under emulation for each target (arm64 took 12x longer). The
+# only platform binaries kept (esbuild, rolldown from vue-router's build
+# plugin) are never loaded by the server.
+FROM --platform=$BUILDPLATFORM node:26.13.1-alpine AS build
 RUN npm install -g pnpm@12.23.0
 WORKDIR /src
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
