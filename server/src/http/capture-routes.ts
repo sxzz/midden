@@ -22,7 +22,7 @@ import {
   type CaptureRecordDetail,
 } from '#capture/records.ts'
 import { stopCollection } from '#capture/related.ts'
-import { captures, submissions } from '#db/schema.ts'
+import { captures, collections, library, submissions } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { deleteAll } from '#library/delete.ts'
 import { body, type Env } from './app.ts'
@@ -288,6 +288,25 @@ export function captureRoutes(app: Hono<Env>, ctx: AccountsContext): void {
   app.post('/refresh-batches/:id/retry', (c) =>
     c.json({ retried: retryRefreshBatch(ctx, c.req.param('id')) }),
   )
+
+  // Whether a saved collection can be captured again. Platforms run in
+  // process, so this holds for any saved collection on a known platform.
+  app.get('/collections/:id/availability', (c) => {
+    const saved = ctx.db
+      .select({ url: collections.url })
+      .from(library)
+      .innerJoin(collections, eq(collections.id, library.collectionId))
+      .where(eq(library.collectionId, c.req.param('id')))
+      .get()
+    if (!saved) throw new AppError('not_found')
+    let available = true
+    try {
+      ctx.platforms.resolve(saved.url)
+    } catch {
+      available = false
+    }
+    return c.json({ available })
+  })
 
   app.get('/library', (c) => c.json(librarySize(ctx.db)))
 

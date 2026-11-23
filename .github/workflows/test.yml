@@ -38,3 +38,16 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm --filter @midden/web exec playwright install --with-deps chromium
       - run: pnpm --filter @midden/web test:e2e
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build the image without publishing it
+        run: docker build -t midden:test .
+      - name: Start it and check health
+        run: |
+          docker run -d --name midden -e SECRET_KEY=0123456789abcdef0123456789abcdef -p 8080:8080 midden:test
+          for i in $(seq 30); do curl -fsS http://127.0.0.1:8080/healthz && exit 0; sleep 1; done
+          docker logs midden
+          exit 1

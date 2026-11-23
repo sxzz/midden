@@ -1,0 +1,16 @@
+services:
+  midden:
+    image: ${MIDDEN_IMAGE:-ghcr.io/sxzz/midden:latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    volumes:
+      # SQLite database and media; back this directory up.
+      - ${DATA_PATH:-./data}:/data
+    ports:
+      - 127.0.0.1:${PORT:-8080}:8080
+    healthcheck:
+      test: [CMD, wget, -qO-, http://127.0.0.1:8080/healthz]
+      interval: 30s
+      timeout: 5s

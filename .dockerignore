@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+.local/
+data/
+**/node_modules/
+**/dist/
+web/test-results/
+web/playwright-report/
+web/.worker-assets/
+web/.wrangler/
