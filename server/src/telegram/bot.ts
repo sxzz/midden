@@ -90,10 +90,19 @@ export async function startBot(options: BotOptions): Promise<RunningBot> {
     })),
     { scope: { type: 'all_group_chats' } },
   )
+  const menuButton = options.webAppUrl
+    ? ({
+        type: 'web_app',
+        text: '打开',
+        web_app: { url: options.webAppUrl },
+      } as const)
+    : ({ type: 'commands' } as const)
+  await bot.api.setChatMenuButton({ menu_button: menuButton })
+  // A menu button set in BotFather outranks the default one; the owner's own
+  // chat setting outranks both.
   await bot.api.setChatMenuButton({
-    menu_button: options.webAppUrl
-      ? { type: 'web_app', text: '打开', web_app: { url: options.webAppUrl } }
-      : { type: 'commands' },
+    chat_id: Number(owner),
+    menu_button: menuButton,
   })
 
   const commandContext = {
