@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { useId } from 'vue'
+import { useId, watch } from 'vue'
 import type { Tag } from '../../api'
 const props = defineProps<{
   /** Names the group for assistive tech; the visible heading stays outside,
@@ -14,14 +14,20 @@ const props = defineProps<{
 const selected = defineModel<string[]>({ required: true })
 // Radios only form a group per `name`, so two groups on one page must differ.
 const group = useId()
+// The model changes only once the parent renders again; picks made before
+// that build on the last one instead of the stale model.
+let pending: string[] | undefined
+watch(selected, () => (pending = undefined))
 function pick(id: string) {
-  if (!props.multiple) {
-    selected.value = id ? [id] : []
-    return
-  }
-  selected.value = selected.value.includes(id)
-    ? selected.value.filter((item) => item !== id)
-    : [...selected.value, id]
+  const current = pending ?? selected.value
+  pending = !props.multiple
+    ? id
+      ? [id]
+      : []
+    : current.includes(id)
+      ? current.filter((item) => item !== id)
+      : [...current, id]
+  selected.value = pending
 }
 </script>
 
