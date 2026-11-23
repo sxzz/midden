@@ -195,7 +195,11 @@ const idempotencyKey = (c: {
   req: { header: (name: string) => string | undefined }
 }) => c.req.header('Idempotency-Key') || undefined
 
-export function captureRoutes(app: Hono<Env>, ctx: AccountsContext): void {
+export function captureRoutes(
+  app: Hono<Env>,
+  ctx: AccountsContext,
+  options: { followBatch?: (batchId: string) => void } = {},
+): void {
   app.post('/captures', async (c) => {
     const input = await body(
       c,
@@ -278,7 +282,10 @@ export function captureRoutes(app: Hono<Env>, ctx: AccountsContext): void {
       c,
       v.strictObject({ collection_ids: v.array(v.string()) }),
     )
-    return c.json(batchJson(startRefreshBatch(ctx, input.collection_ids)))
+    const batch = startRefreshBatch(ctx, input.collection_ids)
+    // Started by the owner in the web app: follow it in Telegram too.
+    if (c.get('session')) options.followBatch?.(batch.id)
+    return c.json(batchJson(batch))
   })
 
   app.get('/refresh-batches/:id', (c) =>

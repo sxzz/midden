@@ -499,3 +499,47 @@ export const apiTokens = sqliteTable('api_tokens', {
   name: text().notNull(),
   createdAt: createdAt(),
 })
+
+/**
+ * Messages the bot owes the owner: a capture's status and result, a shown
+ * collection, a refresh batch. Progress is checkpointed per sent part, so a
+ * restart resumes without resending.
+ */
+export const telegramDeliveries = sqliteTable(
+  'telegram_deliveries',
+  {
+    id: text().primaryKey(),
+    kind: text({ enum: ['submission', 'show', 'batch'] }).notNull(),
+    // Submission, collection or refresh batch id.
+    ref: text().notNull(),
+    chatId: text().notNull(),
+    group: bool().notNull().default(false),
+    // In groups, replies go to the message that asked.
+    replyTo: integer(),
+    // The status or header message, edited in place.
+    messageId: integer(),
+    progress: integer().notNull().default(0),
+    state: text({ enum: ['pending', 'done', 'failed'] })
+      .notNull()
+      .default('pending'),
+    nextAt: timestamp().notNull(),
+    failures: integer().notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('telegram_deliveries_due').on(t.state, t.nextAt),
+    index('telegram_deliveries_ref').on(t.ref),
+  ],
+)
+
+/** Telegram file ids of uploaded media, per bot, to avoid re-uploading. */
+export const telegramMedia = sqliteTable(
+  'telegram_media',
+  {
+    botId: text().notNull(),
+    hash: text().notNull(),
+    representation: text({ enum: ['photo', 'video', 'document'] }).notNull(),
+    fileId: text().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.botId, t.hash, t.representation] })],
+)

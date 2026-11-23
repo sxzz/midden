@@ -25,6 +25,7 @@ import { createLogger } from '#log.ts'
 import { createInstagramPlatform } from '#platforms/instagram/index.ts'
 import { Platforms } from '#platforms/registry.ts'
 import { createXPlatform } from '#platforms/x/index.ts'
+import { startBot, type RunningBot } from '#telegram/bot.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
 const MAINTENANCE_INTERVAL = 60_000
@@ -77,7 +78,8 @@ const api = createApi({
     return (botUsername = result.result.username)
   },
 })
-captureRoutes(api, ctx)
+let bot: RunningBot | undefined
+captureRoutes(api, ctx, { followBatch: (id) => bot?.followBatch(id) })
 accountRoutes(api, ctx)
 libraryRoutes(api, ctx)
 
@@ -97,6 +99,15 @@ app.get('/app/*', serveStatic({ root: config.webDir, path: 'index.html' }))
 app.get('/', (c) => c.redirect('/app/'))
 
 queue.start()
+if (config.telegram)
+  bot = await startBot({
+    ctx,
+    token: config.telegram.token,
+    owner: config.telegram.owner,
+    webAppUrl: config.webAppUrl,
+    version: process.env.BUILD_REVISION || 'dev',
+    ffmpeg: config.ffmpeg,
+  })
 let maintaining = false
 const maintenance = setInterval(() => {
   if (maintaining) return
@@ -120,6 +131,7 @@ async function shutdown(signal: NodeJS.Signals) {
   logger.info({ signal }, 'shutting down')
   clearInterval(maintenance)
   server.close()
+  await bot?.stop()
   await queue.stop()
   db.$client.close()
   process.exit(0)
