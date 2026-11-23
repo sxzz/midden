@@ -120,6 +120,12 @@ web/             现有网页
 7. 采集记录、进度、成员重试。
 8. 批量刷新、删除、标签备注、账号与凭据、定时维护。
 
+## 进度
+
+- 第 1、2、3 阶段已完成：采集链路（提交、capture、finalize、下载、缩略图、related 展开与续页、记录与进度、批量刷新、删除、标签备注、账号、维护）均已移植，有测试，并用真实 FxTwitter 帖子端到端验证过。
+- 本地检查：`/tmp/midden-check.sh` 不存在时，依次运行 `pnpm lint`、`pnpm typecheck`、`FFMPEG=<ffmpeg 路径> pnpm --filter @midden/server exec vitest run`；容器里 ffmpeg 用 `mise exec conda:ffmpeg -- which ffmpeg` 找到路径。
+- 下一步：第 4 阶段 HTTP API 与网页。
+
 ## 阶段
 
 1. 骨架：pnpm workspace（`server/`、`shared/`、`web/`、`third_party/atmosphere/`），lint／format／typecheck／vitest，CI。
