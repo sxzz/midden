@@ -103,7 +103,13 @@ it('reads the handle beside the name, keeps the time right and drops media count
       ...repost,
       storage_bytes: 2048,
       assets: [
-        { id: 'a1', state: 'ready', mime: 'image/png', sensitive: false },
+        {
+          id: 'a1',
+          url: '/v1/assets/a1?inline=1',
+          state: 'ready',
+          mime: 'image/png',
+          sensitive: false,
+        },
       ],
     },
   })

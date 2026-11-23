@@ -36,7 +36,14 @@ const post = (id: string, label: string) => ({
   id,
   text: `合成帖子 ${label}`,
   author_name: '合成主页',
-  assets: [{ id: `asset-${label}`, mime: 'image/png', state: 'ready' }],
+  assets: [
+    {
+      id: `asset-${label}`,
+      url: `/v1/assets/asset-${label}?inline=1`,
+      mime: 'image/png',
+      state: 'ready',
+    },
+  ],
 })
 const related = relatedIds.map((id, index) => post(id, String(index + 1)))
 const fillers = fillerIds.map((id, index) => post(id, `填充 ${index + 1}`))

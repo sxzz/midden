@@ -17,6 +17,11 @@ export interface Asset {
   error?: string
   /** A small derived image exists for lists; videos get their first frame. */
   thumbnail?: boolean
+  /** Signed, time-limited links to the media; absent until it is ready. */
+  url?: string
+  thumbnail_url?: string
+  download_url?: string
+  file_name?: string
 }
 export interface Entity {
   external_id?: string
@@ -240,12 +245,14 @@ export function errorText(e: unknown) {
   return e instanceof Error ? e.message : '加载失败。'
 }
 export const assetURL = (a: Asset, inline = true) =>
-  `/v1/assets/${encodeURIComponent(a.id)}${inline ? '?inline=1' : ''}`
+  (inline ? a.url : (a.download_url ?? a.url)) ?? ''
 /** The small image for lists and avatars, or the original until one exists. */
-export const previewURL = (a: Asset) =>
-  a.thumbnail
-    ? `/v1/assets/${encodeURIComponent(a.id)}/thumbnail?inline=1`
-    : assetURL(a)
+export const previewURL = (a: Asset) => a.thumbnail_url ?? assetURL(a)
+/** What Telegram's downloadFile needs: an absolute URL and a file name. */
+export const telegramDownload = (a: Asset) => ({
+  url: new URL(assetURL(a, false), location.href).href,
+  file_name: a.file_name ?? a.id,
+})
 export function safeURL(value: string) {
   try {
     const u = new URL(value)

@@ -10,6 +10,7 @@ const collection = {
   assets: [
     {
       id: 'sensitive-image',
+      url: '/v1/assets/sensitive-image?inline=1',
       state: 'ready',
       mime: 'image/png',
       sensitive: true,

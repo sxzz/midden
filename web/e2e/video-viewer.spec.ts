@@ -8,8 +8,20 @@ const collection = {
   url: 'https://example.test/video',
   revision_id: 'r1',
   assets: [
-    { id: 'clip', mime: 'video/webm', state: 'ready', alt_text: '测试视频' },
-    { id: 'photo', mime: 'image/png', state: 'ready', alt_text: '测试图片' },
+    {
+      id: 'clip',
+      url: '/v1/assets/clip?inline=1',
+      mime: 'video/webm',
+      state: 'ready',
+      alt_text: '测试视频',
+    },
+    {
+      id: 'photo',
+      url: '/v1/assets/photo?inline=1',
+      mime: 'image/png',
+      state: 'ready',
+      alt_text: '测试图片',
+    },
   ],
 }
 

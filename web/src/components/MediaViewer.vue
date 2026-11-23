@@ -9,10 +9,10 @@ import {
   watch,
 } from 'vue'
 import {
-  api,
   assetURL,
   errorText,
   previewURL,
+  telegramDownload,
   type Asset,
   type Collection,
 } from '../api'
@@ -61,7 +61,7 @@ const dialog = useTemplateRef<HTMLDialogElement>('viewer')
 const stage = useTemplateRef<HTMLDivElement>('stage')
 const saving = shallowRef(false)
 const saveError = shallowRef('')
-async function save() {
+function save() {
   const image = selected.value
   if (!image || saving.value) return
   saveError.value = ''
@@ -69,11 +69,7 @@ async function save() {
   if (tg?.initData && tg.downloadFile && tg.isVersionAtLeast?.('8.0')) {
     saving.value = true
     try {
-      const params = await api<{ url: string; file_name: string }>(
-        `/assets/${encodeURIComponent(image.id)}/download`,
-        { method: 'POST' },
-      )
-      if (!disposed) tg.downloadFile(params)
+      if (!disposed) tg.downloadFile(telegramDownload(image))
     } catch (error) {
       saveError.value = errorText(error)
     } finally {

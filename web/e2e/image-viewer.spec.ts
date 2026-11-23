@@ -20,6 +20,7 @@ const collection = {
         assets: [
           {
             id: 'avatar',
+            url: '/v1/assets/avatar?inline=1',
             purpose: 'avatar',
             state: 'ready',
             mime: 'image/png',
@@ -32,6 +33,9 @@ const collection = {
   },
   assets: Array.from({ length: 3 }, (_, i) => ({
     id: `photo-${i}`,
+    url: `/v1/assets/photo-${i}?inline=1`,
+    download_url: `/v1/assets/photo-${i}?download=1`,
+    file_name: `photo-${i}.png`,
     state: 'ready',
     mime: 'image/png',
     sensitive: false,
@@ -134,16 +138,6 @@ test('reduced motion keeps button navigation immediate', async ({ page }) => {
 test('save sends the selected image to Telegram native download', async ({
   page,
 }) => {
-  const requested: string[] = []
-  await page.route('**/v1/assets/*/download', (route) => {
-    requested.push(route.request().url())
-    return route.fulfill({
-      json: {
-        url: 'https://example.test/v1/downloads/signed',
-        file_name: 'photo-1.png',
-      },
-    })
-  })
   await page.evaluate(() => {
     Object.assign(globalThis, {
       Telegram: {
@@ -166,28 +160,26 @@ test('save sends the selected image to Telegram native download', async ({
   await expect(page.locator('body')).toHaveAttribute(
     'data-download',
     JSON.stringify({
-      url: 'https://example.test/v1/downloads/signed',
+      url: new URL('/v1/assets/photo-1?download=1', page.url()).href,
       file_name: 'photo-1.png',
     }),
   )
-  expect(requested[0]).toContain('/assets/photo-1/download')
 })
 
-test('save reports preparation failures and can retry', async ({ page }) => {
+test('save reports download failures and can retry', async ({ page }) => {
   await page.evaluate(() => {
     Object.assign(globalThis, {
       Telegram: {
         WebApp: {
           initData: 'fixture',
           isVersionAtLeast: () => true,
-          downloadFile: () => {},
+          downloadFile: () => {
+            throw new Error('下载失败')
+          },
         },
       },
     })
   })
-  await page.route('**/v1/assets/*/download', (route) =>
-    route.fulfill({ status: 401, json: {} }),
-  )
   await page
     .getByRole('dialog')
     .getByRole('button', { name: '保存', exact: true })
@@ -195,7 +187,7 @@ test('save reports preparation failures and can retry', async ({ page }) => {
   // The page behind the viewer carries alerts of its own; only the one inside
   // the dialog reports this save.
   await expect(page.getByRole('dialog').getByRole('alert')).toContainText(
-    '会话已失效',
+    '下载失败',
   )
   await expect(
     page.getByRole('dialog').getByRole('button', { name: '保存', exact: true }),

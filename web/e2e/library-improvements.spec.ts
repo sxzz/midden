@@ -10,7 +10,13 @@ const post = {
   revision_id: 'r1',
   visibility: 'public',
   assets: [
-    { id: 'image', state: 'ready', mime: 'image/png', sensitive: false },
+    {
+      id: 'image',
+      url: '/v1/assets/image?inline=1',
+      state: 'ready',
+      mime: 'image/png',
+      sensitive: false,
+    },
   ],
   graph: {
     root: 'post',
@@ -24,6 +30,7 @@ const post = {
         assets: [
           {
             id: 'avatar',
+            url: '/v1/assets/avatar?inline=1',
             purpose: 'avatar',
             state: 'ready',
             mime: 'image/png',

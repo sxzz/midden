@@ -1,12 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createVaporApp } from 'vue'
-import { api } from '../api'
 import { host } from '../host'
 import MediaDownload from './MediaDownload.vue'
-vi.mock('../api', async (original) => ({
-  ...(await original<typeof import('../api')>()),
-  api: vi.fn(),
-}))
 vi.mock('../host', () => ({ host: vi.fn() }))
 let unmount = () => {}
 afterEach(() => {
@@ -20,6 +15,9 @@ function mount() {
   const app = createVaporApp(MediaDownload, {
     asset: {
       id: 'video-1',
+      url: '/media/abc?t=video%2Fmp4&s=x',
+      download_url: '/media/abc?t=video%2Fmp4&n=video-1.mp4&s=y',
+      file_name: 'video-1.mp4',
       state: 'ready',
       mime: 'video/mp4',
       sensitive: false,
@@ -34,44 +32,37 @@ function click(el: HTMLElement) {
   el.querySelector('a')!.dispatchEvent(event)
   return event
 }
-it('hands the authorized URL to Telegram and suppresses browser navigation', async () => {
-  const downloadFile = vi.fn()
+function inTelegram(downloadFile: (params: unknown) => void) {
   vi.mocked(host).mockReturnValue({
     initData: 'fixture',
     isVersionAtLeast: () => true,
     downloadFile,
   } as unknown as ReturnType<typeof host>)
-  const params = {
-    url: 'https://collection.test/v1/downloads/video-1?signature=fixture',
-    file_name: 'video-1.mp4',
-  }
-  vi.mocked(api).mockResolvedValue(params)
+}
+it('hands the signed download link to Telegram and suppresses navigation', () => {
+  const downloadFile = vi.fn()
+  inTelegram(downloadFile)
   const el = mount()
   expect(click(el).defaultPrevented).toBe(true)
-  await vi.waitFor(() => expect(downloadFile).toHaveBeenCalledWith(params))
-  expect(api).toHaveBeenCalledWith('/assets/video-1/download', {
-    method: 'POST',
+  expect(downloadFile).toHaveBeenCalledWith({
+    url: new URL('/media/abc?t=video%2Fmp4&n=video-1.mp4&s=y', location.href)
+      .href,
+    file_name: 'video-1.mp4',
   })
 })
-it('shows download errors and allows retry', async () => {
-  const downloadFile = vi.fn()
-  vi.mocked(host).mockReturnValue({
-    initData: 'fixture',
-    isVersionAtLeast: () => true,
-    downloadFile,
-  } as unknown as ReturnType<typeof host>)
-  vi.mocked(api).mockRejectedValue(new Error('下载失败'))
+it('shows download errors', async () => {
+  inTelegram(() => {
+    throw new Error('下载失败')
+  })
   const el = mount()
   click(el)
   await vi.waitFor(() =>
     expect(el.querySelector('[role="alert"]')?.textContent).toBe('下载失败'),
   )
-  expect(downloadFile).not.toHaveBeenCalled()
-  click(el)
-  await vi.waitFor(() => expect(api).toHaveBeenCalledTimes(2))
 })
 it('keeps a normal download link outside Telegram', () => {
   const el = mount()
-  expect(el.querySelector('a')?.getAttribute('href')).toBe('/v1/assets/video-1')
-  expect(api).not.toHaveBeenCalled()
+  expect(el.querySelector('a')?.getAttribute('href')).toBe(
+    '/media/abc?t=video%2Fmp4&n=video-1.mp4&s=y',
+  )
 })

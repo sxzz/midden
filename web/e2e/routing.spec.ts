@@ -8,7 +8,14 @@ const items = Array.from({ length: 30 }, (_, index) => ({
   saved_at: '2026-09-29T10:00:00Z',
   observed_at: '2026-09-29T10:00:00Z',
   revision_id: 'r1',
-  assets: [{ id: `image-${index}`, state: 'ready', mime: 'image/png' }],
+  assets: [
+    {
+      id: `image-${index}`,
+      url: `/v1/assets/image-${index}?inline=1`,
+      state: 'ready',
+      mime: 'image/png',
+    },
+  ],
 }))
 
 for (const back of ['button', 'history'] as const) {

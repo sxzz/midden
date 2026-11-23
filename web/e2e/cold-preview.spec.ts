@@ -13,7 +13,13 @@ test('first list preview fits the image after dimensions arrive during opening',
     visibility: 'public',
     revision_id: 'r1',
     assets: [
-      { id: 'cold', state: 'ready', mime: 'image/svg+xml', sensitive: false },
+      {
+        id: 'cold',
+        url: '/v1/assets/cold?inline=1',
+        state: 'ready',
+        mime: 'image/svg+xml',
+        sensitive: false,
+      },
     ],
   }
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))

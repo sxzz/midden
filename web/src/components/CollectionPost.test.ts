@@ -15,6 +15,7 @@ const fixture: Collection = {
   assets: [
     {
       id: 'm1',
+      url: '/v1/assets/m1?inline=1',
       state: 'ready',
       mime: 'image/png',
       sensitive: true,
@@ -72,7 +73,13 @@ describe('Vapor collection rendering', () => {
     const el = mount(CollectionRow, {
       ...fixture,
       assets: [
-        { id: 'm2', state: 'ready', mime: 'image/png', sensitive: false },
+        {
+          id: 'm2',
+          url: '/v1/assets/m2?inline=1',
+          state: 'ready',
+          mime: 'image/png',
+          sensitive: false,
+        },
       ],
     })
     expect(el.querySelector('img')?.getAttribute('src')).toBe(
@@ -85,7 +92,13 @@ describe('Vapor collection rendering', () => {
     const el = mount(CollectionPost, {
       ...fixture,
       assets: [
-        { id: 'm3', state: 'failed', sensitive: false, error: 'download: 502' },
+        {
+          id: 'm3',
+          url: '/v1/assets/m3?inline=1',
+          state: 'failed',
+          sensitive: false,
+          error: 'download: 502',
+        },
       ],
       warnings: ['resource omitted: unsupported type or resource limit'],
     })

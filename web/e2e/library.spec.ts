@@ -190,6 +190,7 @@ test('sensitive image stays blurred until revealed and opens inside the page', a
     assets: [
       {
         id: 'media',
+        url: '/v1/assets/media?inline=1',
         mime: 'image/png',
         state: 'ready',
         sensitive: true,
@@ -249,6 +250,7 @@ test('loading skeletons, one revision and touch image navigation', async ({
     ...collection,
     assets: [1, 2].map((n) => ({
       id: `image${n}`,
+      url: `/v1/assets/image${n}?inline=1`,
       state: 'ready',
       mime: 'image/png',
       sensitive: false,
@@ -577,12 +579,14 @@ test('list media loads only near the viewport and leaves the API ahead', async (
     assets: [
       {
         id: `video-${i}`,
+        url: `/v1/assets/video-${i}?inline=1`,
         state: 'ready',
         mime: 'video/mp4',
         sensitive: false,
       },
       {
         id: `image-${i}`,
+        url: `/v1/assets/image-${i}?inline=1`,
         state: 'ready',
         mime: 'image/png',
         sensitive: false,
@@ -624,6 +628,8 @@ test('lists show thumbnails; the open post loads the originals', async ({
     assets: [
       {
         id: 'photo',
+        url: '/v1/assets/photo?inline=1',
+        thumbnail_url: '/v1/assets/photo/thumbnail?inline=1',
         state: 'ready',
         mime: 'image/png',
         sensitive: false,
@@ -631,13 +637,21 @@ test('lists show thumbnails; the open post loads the originals', async ({
       },
       {
         id: 'clip',
+        url: '/v1/assets/clip?inline=1',
+        thumbnail_url: '/v1/assets/clip/thumbnail?inline=1',
         state: 'ready',
         mime: 'video/mp4',
         sensitive: false,
         thumbnail: true,
       },
       // Not rendered yet, so the list falls back to the original.
-      { id: 'fresh', state: 'ready', mime: 'image/png', sensitive: false },
+      {
+        id: 'fresh',
+        url: '/v1/assets/fresh?inline=1',
+        state: 'ready',
+        mime: 'image/png',
+        sensitive: false,
+      },
     ],
   }
   const requested: string[] = []

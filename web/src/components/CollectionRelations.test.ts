@@ -40,6 +40,7 @@ const collection: Collection = {
         assets: [
           {
             id: 'quote-avatar',
+            url: '/v1/assets/quote-avatar?inline=1',
             purpose: 'avatar',
             state: 'ready',
             mime: 'image/png',

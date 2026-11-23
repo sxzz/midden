@@ -198,6 +198,7 @@ it('heads an outgoing quote with its graph author, avatar and date, linking the 
         assets: [
           {
             id: 'avatar-1',
+            url: '/v1/assets/avatar-1?inline=1',
             purpose: 'avatar',
             state: 'ready',
             mime: 'image/png',
@@ -335,6 +336,7 @@ it('keeps an incoming repost account card free of a repeated self attribution', 
 it('shows a repost account card with its own saved avatar, never a sensitive one', () => {
   const avatar = (sensitive: boolean) => ({
     id: sensitive ? 'hidden-avatar' : 'avatar',
+    url: `/v1/assets/${sensitive ? 'hidden-avatar' : 'avatar'}?inline=1`,
     purpose: 'avatar',
     mime: 'image/png',
     state: 'ready',
@@ -459,6 +461,7 @@ it('shows saved quote media inside its card without mixing it into the root gall
         assets: [
           {
             id: 'quoted-image',
+            url: '/v1/assets/quoted-image?inline=1',
             state: 'ready',
             mime: 'image/png',
             sensitive: false,

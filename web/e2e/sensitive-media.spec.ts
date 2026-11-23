@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test'
 const id = '22222222-2222-4222-8222-222222222222'
 const image = (n: number, sensitive: boolean) => ({
   id: `photo-${n}`,
+  url: `/v1/assets/photo-${n}?inline=1`,
   state: 'ready',
   mime: 'image/png',
   sensitive,
