@@ -23,6 +23,30 @@ docker compose pull && docker compose up -d   # 更新
 
 数据库迁移在启动时自动应用；随后补齐收藏列表的索引表 `catalog` 中缺失的行（首次部署或导入数据后可能需要几秒）。
 
+## 自动部署
+
+`main` 的 test 工作流通过后会发布镜像 `ghcr.io/sxzz/midden:latest` 与 `:sha-<提交>`。部署机上的 webhook 收到这次运行完成的事件后，从 `origin/main` 取出 `scripts/deploy.ts` 执行：
+
+1. 确认部署目录（默认 `~/midden`）没有本地改动，最新镜像的提交在 `origin/main` 上，且与正在运行的版本不同；
+2. 在线备份数据库到 `data/backups/deploy/`（保留最近 5 份）；
+3. 切换到该提交，用 `:sha-<提交>` 镜像 `docker compose up -d --wait`，并检查 `/healthz`；
+4. 新版本不健康时停掉它，恢复部署前的数据库，切回原来的版本。
+
+结果通过 Bot 发给 `DEPLOY_NOTIFY_CHAT_ID`（默认 `OWNER_TELEGRAM_ID`），日志在 `.local/deploy-webhook/`。也可以手动运行：
+
+```sh
+node scripts/deploy.ts --check   # 只检查，不改动
+node scripts/deploy.ts
+```
+
+安装 webhook（macOS LaunchAgent，复制到 `~/.local/share/midden/`，监听 `127.0.0.1:18090/hooks/deploy`）：
+
+```sh
+node scripts/install-deploy-webhook.ts --dir ~/midden
+```
+
+GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<域名>/hooks/deploy`，密钥与 `.local/deploy-webhook.secret` 相同；隧道把该路径转发到 18090 端口。升级 Node 后重新运行安装命令。
+
 ## 备份与恢复
 
 需要备份的是数据目录与 `.env`（其中的 `SECRET_KEY` 用于解密账号凭据）。
