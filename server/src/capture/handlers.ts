@@ -1,3 +1,4 @@
+import { failRefreshBatch, runRefreshBatch } from './batches.ts'
 import { failDownload, runDownload } from './download.ts'
 import { safeError } from './errors.ts'
 import { runCapture } from './fetch.ts'
@@ -41,6 +42,15 @@ export function captureHandlers(
         return Promise.resolve()
       },
       fail: (job, error) => failRelated(context(), job.ref, safeError(error)),
+    },
+    refresh_batch: {
+      queue: 'control',
+      run: (job) => {
+        runRefreshBatch(context(), job)
+        return Promise.resolve()
+      },
+      fail: (job, error) =>
+        failRefreshBatch(context(), job.ref, safeError(error)),
     },
     finalize: {
       queue: 'control',
