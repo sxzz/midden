@@ -18,6 +18,16 @@ export class RetryError extends Error {
   }
 }
 
+/** Try again later without using an attempt (e.g. a busy account). */
+export class SnoozeError extends Error {
+  override name = 'SnoozeError'
+  readonly afterMs: number
+  constructor(afterMs: number) {
+    super(`snoozed for ${afterMs} ms`)
+    this.afterMs = afterMs
+  }
+}
+
 export interface Job {
   id: number
   type: string
@@ -46,6 +56,8 @@ export interface QueueOptions {
   timeoutMs?: number
   pollMs?: number
   now?: () => number
+  /** Failures retrying cannot fix, besides `PermanentError`. */
+  isPermanent?: (error: unknown) => boolean
 }
 
 const DEFAULT_TIMEOUT = 10 * 60_000
@@ -66,6 +78,7 @@ export class JobQueue {
   readonly #timeoutMs: number
   readonly #pollMs: number
   readonly #now: () => number
+  readonly #isPermanent: (error: unknown) => boolean
   readonly #running = new Map<string, Set<Promise<void>>>()
   readonly #stop = new AbortController()
   #timer: NodeJS.Timeout | undefined
@@ -79,6 +92,7 @@ export class JobQueue {
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT
     this.#pollMs = options.pollMs ?? 1000
     this.#now = options.now ?? Date.now
+    this.#isPermanent = options.isPermanent ?? (() => false)
     for (const handler of Object.values(this.#handlers)) {
       if (!this.#concurrency[handler.queue])
         throw new Error(`No concurrency configured for queue ${handler.queue}`)
@@ -250,13 +264,20 @@ export class JobQueue {
     log: Logger,
   ): Promise<void> {
     // Shutting down is not the job's fault: run it again on the next start.
-    if (this.#stop.signal.aborted) {
+    const snooze =
+      error instanceof SnoozeError
+        ? error.afterMs
+        : this.#stop.signal.aborted
+          ? 0
+          : undefined
+    if (snooze !== undefined) {
       this.#db
         .update(jobs)
         .set({
           state: 'available',
           leaseUntil: null,
           attempt: row.attempt - 1,
+          runAt: new Date(this.#now() + snooze),
         })
         .where(eq(jobs.id, row.id))
         .run()
@@ -264,7 +285,9 @@ export class JobQueue {
     }
     const message = error instanceof Error ? error.message : String(error)
     const final =
-      error instanceof PermanentError || row.attempt >= row.maxAttempts
+      error instanceof PermanentError ||
+      this.#isPermanent(error) ||
+      row.attempt >= row.maxAttempts
     if (final) {
       log.warn({ err: error }, 'job failed')
       try {

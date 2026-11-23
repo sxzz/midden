@@ -7,6 +7,7 @@ import {
   JobQueue,
   PermanentError,
   RetryError,
+  SnoozeError,
   type Job,
 } from './queue.ts'
 
@@ -215,5 +216,24 @@ describe('JobQueue', () => {
     await running
     await queue.stop()
     expect(rows(db)).toMatchObject([{ state: 'available', attempt: 0 }])
+  })
+
+  test('snoozing reschedules without using an attempt', async () => {
+    const clock = 1000
+    const { db, queue } = setup(
+      {
+        busy: {
+          queue: 'main',
+          run: async () => {
+            throw new SnoozeError(500)
+          },
+        },
+      },
+      { now: () => clock },
+    )
+    queue.enqueue(db, 'busy', 'x')
+    queue.start()
+    await queue.drain()
+    expect(rows(db)).toMatchObject([{ attempt: 0, runAt: new Date(1500) }])
   })
 })

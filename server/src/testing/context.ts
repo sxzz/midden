@@ -4,6 +4,7 @@ import path from 'node:path'
 import { pino } from 'pino'
 import { FsBlobStore } from '#blob/fs-store.ts'
 import { MediaSigner } from '#blob/signer.ts'
+import { isPermanent } from '#capture/errors.ts'
 import { openDatabase } from '#db/client.ts'
 import { JobQueue, type JobHandler } from '#jobs/queue.ts'
 import { createInstagramPlatform } from '#platforms/instagram/index.ts'
@@ -16,7 +17,7 @@ import type { Platform } from '#platforms/platform.ts'
 export function testContext(
   options: {
     platforms?: Platform[]
-    handlers?: Record<string, JobHandler>
+    handlers?: (ctx: () => CaptureContext) => Record<string, JobHandler>
     now?: () => number
   } = {},
 ): CaptureContext {
@@ -25,13 +26,15 @@ export function testContext(
   const dir = mkdtempSync(path.join(tmpdir(), 'midden-test-'))
   const signer = new MediaSigner({ secret: new TextEncoder().encode('test') })
   const noop: JobHandler = { queue: 'control', run: async () => {} }
-  const handlers = options.handlers ?? {
+  let ctx: CaptureContext | undefined
+  const handlers = {
     capture: { ...noop, queue: 'capture' },
     download: { ...noop, queue: 'download' },
     thumbnail: { ...noop, queue: 'download', priority: 4 },
     finalize: noop,
     related: noop,
     refresh_batch: noop,
+    ...options.handlers?.(() => ctx!),
   }
   const queue = new JobQueue({
     db,
@@ -39,8 +42,9 @@ export function testContext(
     handlers,
     concurrency: { capture: 4, download: 8, control: 4 },
     now: options.now,
+    isPermanent,
   })
-  return {
+  ctx = {
     db,
     queue,
     logger,
@@ -54,4 +58,5 @@ export function testContext(
     },
     now: options.now,
   }
+  return ctx
 }
