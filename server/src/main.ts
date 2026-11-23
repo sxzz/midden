@@ -1,6 +1,7 @@
 import path from 'node:path'
 import process from 'node:process'
 import { serve } from '@hono/node-server'
+import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { Vault } from '#accounts/vault.ts'
 import { FsBlobStore } from '#blob/fs-store.ts'
@@ -14,6 +15,10 @@ import { detectThumbnailer } from '#capture/thumbnail.ts'
 import { loadConfig } from '#config.ts'
 import { deriveKey } from '#crypto.ts'
 import { openDatabase } from '#db/client.ts'
+import { accountRoutes } from '#http/account-routes.ts'
+import { createApi } from '#http/app.ts'
+import { pruneSessions } from '#http/auth.ts'
+import { captureRoutes } from '#http/capture-routes.ts'
 import { JobQueue } from '#jobs/queue.ts'
 import { createLogger } from '#log.ts'
 import { createInstagramPlatform } from '#platforms/instagram/index.ts'
@@ -54,15 +59,46 @@ ctx = {
   thumbnailer,
 }
 
+let botUsername: string | undefined
+const api = createApi({
+  ctx,
+  telegram: config.telegram,
+  webAppUrl: config.webAppUrl,
+  botUsername: async () => {
+    if (botUsername) return botUsername
+    const response = await fetch(
+      `https://api.telegram.org/bot${config.telegram!.token}/getMe`,
+      { signal: AbortSignal.timeout(10_000) },
+    )
+    const result = (await response.json()) as { result?: { username?: string } }
+    if (!result.result?.username) throw new Error('bot username unavailable')
+    return (botUsername = result.result.username)
+  },
+})
+captureRoutes(api, ctx)
+accountRoutes(api, ctx)
+
 const app = new Hono()
 app.get('/healthz', (c) => c.text('ok'))
+app.route('/v1', api)
 app.route('/', mediaRoutes(ctx.blobs, signer))
+// The built web app; unknown paths under /app/ load the app itself.
+app.use(
+  '/app/*',
+  serveStatic({
+    root: config.webDir,
+    rewriteRequestPath: (path) => path.replace(/^\/app/, ''),
+  }),
+)
+app.get('/app/*', serveStatic({ root: config.webDir, path: 'index.html' }))
+app.get('/', (c) => c.redirect('/app/'))
 
 queue.start()
 let maintaining = false
 const maintenance = setInterval(() => {
   if (maintaining) return
   maintaining = true
+  pruneSessions(db)
   runMaintenance(ctx)
     .catch(() => {})
     .finally(() => (maintaining = false))

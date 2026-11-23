@@ -1,5 +1,6 @@
 import path from 'node:path'
 import process from 'node:process'
+import { fileURLToPath } from 'node:url'
 import * as v from 'valibot'
 
 const port = v.pipe(
@@ -29,6 +30,8 @@ const Env = v.object({
   WEB_APP_URL: v.optional(
     v.pipe(v.string(), v.url(), v.regex(/^https:\/\/[^/?#]+\/app\/$/)),
   ),
+  // The built web app served under /app/.
+  WEB_DIR: v.optional(v.pipe(v.string(), v.nonEmpty())),
   FFMPEG: v.optional(v.pipe(v.string(), v.nonEmpty()), 'ffmpeg'),
   SECRET_KEY: v.pipe(
     v.string('SECRET_KEY is required'),
@@ -45,6 +48,7 @@ export interface Config {
   logLevel: v.InferOutput<typeof Env>['LOG_LEVEL']
   secretKey: string
   ffmpeg: string
+  webDir: string
   telegram?: { token: string; owner: string }
   webAppUrl?: string
 }
@@ -75,6 +79,10 @@ export function loadConfig(
     logLevel: parsed.LOG_LEVEL,
     secretKey: parsed.SECRET_KEY,
     ffmpeg: parsed.FFMPEG,
+    webDir: path.resolve(
+      parsed.WEB_DIR ??
+        fileURLToPath(new URL('../../web/dist', import.meta.url)),
+    ),
     ...(parsed.TELEGRAM_BOT_TOKEN && parsed.OWNER_TELEGRAM_ID
       ? {
           telegram: {

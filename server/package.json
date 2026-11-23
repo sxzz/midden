@@ -13,7 +13,8 @@
     "start": "node src/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "cli": "node --env-file-if-exists=../.env src/cli.ts"
   },
   "dependencies": {
     "@fxembed/atmosphere": "workspace:*",
