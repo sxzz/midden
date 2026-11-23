@@ -20,6 +20,7 @@ import { submit } from '../../../server/src/capture/submit.ts'
 import { deriveKey } from '../../../server/src/crypto.ts'
 import { openDatabase, type Database } from '../../../server/src/db/client.ts'
 import { JobQueue } from '../../../server/src/jobs/queue.ts'
+import { catalogMissing } from '../../../server/src/library/catalog.ts'
 import { listCollections } from '../../../server/src/library/list.ts'
 import {
   getCollection,
@@ -208,6 +209,38 @@ describe.skipIf(!hasPostgresTools())('import', () => {
     expect(result.code).toBe(1)
     expect(result.stderr).toContain('choose the owner')
   }, 60_000)
+
+  test('the catalog matches a rebuild from the imported tables', () => {
+    const { db } = open()
+    try {
+      const rows = () =>
+        db.$client.prepare('SELECT * FROM catalog ORDER BY collection_id').all()
+      const imported = rows()
+      // One row per collection with a revision, the unsaved ones included.
+      expect(imported.map((row) => row.collection_id)).toEqual(
+        db.$client
+          .prepare(
+            'SELECT DISTINCT collection_id FROM revisions ORDER BY collection_id',
+          )
+          .all()
+          .map((row) => row.collection_id),
+      )
+      db.$client.exec('DELETE FROM catalog')
+      catalogMissing(db)
+      expect(rows()).toEqual(imported)
+      // The head the catalog lists is the collection's current revision.
+      expect(
+        db.$client
+          .prepare(
+            `SELECT count(*) AS n FROM catalog k JOIN collections c
+              ON c.id = k.collection_id WHERE c.current_revision <> k.revision_id`,
+          )
+          .get(),
+      ).toEqual({ n: 0 })
+    } finally {
+      db.$client.close()
+    }
+  })
 
   test('media are stored by content hash', () => {
     for (const hash of Object.values(fixture.hashes))

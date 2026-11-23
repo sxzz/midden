@@ -174,8 +174,11 @@ export async function importLegacy(
         },
       },
     )
-    // The library lists from the catalog; the server would fill it on start.
+    // The library lists from the catalog, which finalize keeps up to date.
+    // The rows above bypassed finalize, so rebuild every row from the final
+    // tables rather than trusting any that exist.
     log('building the library catalog')
+    db.$client.exec('DELETE FROM catalog')
     catalogMissing(db)
     verify(db)
     for (const table of tables) table.importedRows = countRows(db, table.target)
