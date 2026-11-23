@@ -219,7 +219,7 @@ const viewProps = computed(() => {
 
 <template>
   <main class="page">
-    <header class="bar">
+    <header class="bar" :class="{ nested }">
       <RouterLink
         v-if="nested"
         to="/"
@@ -371,6 +371,14 @@ const viewProps = computed(() => {
   border-radius: 50%;
   color: var(--subtle);
 }
+/* Inner pages start with a section title, which needs room from the bar. */
+.bar.nested {
+  padding-bottom: 12px;
+}
+/* The home glyph, not its tap target, lines up with the text below. */
+.bar > .icon-button:first-child {
+  margin-left: -11px;
+}
 /* Header actions sit at the trailing edge whichever of them are shown. */
 .bar > h1 {
   margin-right: auto;
@@ -410,7 +418,11 @@ const viewProps = computed(() => {
 .tab.on {
   background: var(--card);
   color: var(--text);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  /* The ring keeps it apart in dark themes, where the card is darker than
+     the track. */
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--text) 12%, transparent),
+    0 1px 3px rgba(0, 0, 0, 0.12);
 }
 .tab:focus-visible {
   outline: 2px solid var(--link);
