@@ -7,10 +7,12 @@ import {
   refreshBatches,
   submissions,
 } from '#db/schema.ts'
+import { inJson } from '#db/sql.ts'
 import { AppError, isAppError } from '#errors.ts'
 import {
-  collectionProgress,
+  collectionProgresses,
   retryFailed,
+  type CollectionProgress,
   type MemberProgress,
 } from './records.ts'
 import { submit } from './submit.ts'
@@ -206,9 +208,13 @@ export function batchProgress(db: Executor, id: string): BatchProgress {
       const position = (key: string) => Number(key.split(':').at(-1))
       return position(a.submission.idemKey) - position(b.submission.idemKey)
     })
+  const byRoot = collectionProgresses(
+    db,
+    roots.map((root) => root.submission.id),
+  )
   const progresses = roots.map((root) => ({
     root,
-    progress: collectionProgress(db, root.submission.id),
+    progress: byRoot.get(root.submission.id)!,
   }))
   const urls = new Set<string>()
   const members = new Map<string, string>()
@@ -229,7 +235,7 @@ export function batchProgress(db: Executor, id: string): BatchProgress {
       .innerJoin(captures, eq(captures.id, submissions.captureId))
       .where(
         and(
-          inArray(submissions.parentSubmission, pageIds),
+          inJson(submissions.parentSubmission, pageIds),
           like(submissions.idemKey, 'related:%'),
         ),
       )
@@ -305,7 +311,7 @@ export function batchProgress(db: Executor, id: string): BatchProgress {
 
 function countFailedMembers(
   db: Executor,
-  progresses: ReturnType<typeof collectionProgress>[],
+  progresses: CollectionProgress[],
 ): number {
   const pages = progresses.flatMap((p) =>
     p.pages
@@ -324,7 +330,7 @@ function countFailedMembers(
     .innerJoin(collections, eq(collections.id, captures.collectionId))
     .where(
       and(
-        inArray(submissions.parentSubmission, pages),
+        inJson(submissions.parentSubmission, pages),
         like(submissions.idemKey, 'related:%'),
         eq(captures.state, 'failed'),
       ),
@@ -337,16 +343,18 @@ function countFailedMembers(
 export function retryRefreshBatch(ctx: CaptureContext, id: string): number {
   const progress = batchProgress(ctx.db, id)
   if (!progress.done) throw new AppError('batch_running')
-  const pages = batchRoots(ctx.db, id)
+  const roots = batchRoots(ctx.db, id)
     .filter((root) => root.capture.isCollection)
-    .flatMap((root) =>
-      collectionProgress(ctx.db, root.submission.id)
-        .pages.filter(
+    .map((root) => root.submission.id)
+  const pages = [...collectionProgresses(ctx.db, roots).values()].flatMap(
+    (progress) =>
+      progress.pages
+        .filter(
           (p) =>
             p.submission.relatedState === 'complete' &&
             !p.submission.collectionStopped,
         )
         .map((p) => p.submission.id),
-    )
+  )
   return retryFailed(ctx, pages)
 }

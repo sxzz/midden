@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { captures, collections, library, submissions } from '#db/schema.ts'
+import { inJson } from '#db/sql.ts'
 import { AppError, isAppError } from '#errors.ts'
 import { SnoozeError, type Job } from '#jobs/queue.ts'
 import { matchesOptions, type CaptureOptions } from './options.ts'
@@ -230,18 +231,18 @@ export function stopCollection(
       const rows = tx
         .select({ id: submissions.id, next: submissions.nextSubmission })
         .from(submissions)
-        .where(inArray(submissions.id, ids))
+        .where(inJson(submissions.id, ids))
         .all()
       const children = tx
         .select({ id: submissions.id })
         .from(submissions)
-        .where(inArray(submissions.parentSubmission, ids))
+        .where(inJson(submissions.parentSubmission, ids))
         .all()
       const pages = tx
         .select({ id: submissions.id })
         .from(submissions)
         .where(
-          inArray(
+          inJson(
             submissions.idemKey,
             ids.map((id) => `batch:${id}`),
           ),
@@ -256,13 +257,13 @@ export function stopCollection(
     const all = [...seen]
     tx.update(submissions)
       .set({ collectionStopped: true })
-      .where(inArray(submissions.id, all))
+      .where(inJson(submissions.id, all))
       .run()
     tx.update(submissions)
       .set({ relatedState: 'complete' })
       .where(
         and(
-          inArray(submissions.id, all),
+          inJson(submissions.id, all),
           eq(submissions.relatedState, 'pending'),
         ),
       )

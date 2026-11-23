@@ -1,7 +1,7 @@
 import { and, asc, eq, lte } from 'drizzle-orm'
 import { GrammyError, type Api } from 'grammy'
 import { batchProgress } from '#capture/batches.ts'
-import { collectionProgress } from '#capture/records.ts'
+import { collectionProgress, collectionReasons } from '#capture/records.ts'
 import { newId } from '#db/id.ts'
 import {
   captures,
@@ -341,7 +341,7 @@ export class DeliveryWorker {
             next: progress.next,
             maxBatch: progress.maxBatch,
             pageError: progress.error === 'partial_pages',
-            reasons: progress.reasons,
+            reasons: collectionReasons(db, progress.pages),
           },
           { webAppUrl: this.#d.webAppUrl, group: delivery.group },
         ),

@@ -1,16 +1,5 @@
 import { Buffer } from 'node:buffer'
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  inArray,
-  isNull,
-  like,
-  notLike,
-  or,
-  sql,
-} from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, like, notLike, or, sql } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import {
   accountSelections,
@@ -22,6 +11,7 @@ import {
   revisions,
   submissions,
 } from '#db/schema.ts'
+import { inJson } from '#db/sql.ts'
 import { AppError } from '#errors.ts'
 import { submit, type Job } from './submit.ts'
 import type { Executor } from '#db/client.ts'
@@ -103,35 +93,55 @@ export interface MemberProgress {
   done: boolean
 }
 
+type Page = { submission: Submission; capture: Capture }
+
 export interface CollectionProgress extends MemberProgress {
   stopped: boolean
   next: string
   maxBatch: number
   error: '' | 'partial_pages'
-  reasons: { reason: string; count: number }[]
-  pages: { submission: Submission; capture: Capture }[]
+  /** Failed members a retry would fetch again. */
+  retryable: number
+  pages: Page[]
 }
 
-/** A record's pages: its submission and the continuation chain, in order. */
-function pageChain(db: Executor, root: string) {
-  const pages: { submission: Submission; capture: Capture }[] = []
-  let id: string | null = root
-  while (id && pages.length < MAX_DEPTH) {
-    const row = db
+/** Each record's pages: its submission and the continuation chain, in order. */
+function pageChains(db: Executor, roots: string[]): Map<string, Page[]> {
+  const chains = new Map(roots.map((root) => [root, [] as Page[]]))
+  if (!roots.length) return chains
+  const links = db.all<{ root: string; id: string }>(sql`
+    WITH RECURSIVE chain(root, id, depth) AS (
+      SELECT value, value, 1 FROM json_each(${JSON.stringify(roots)})
+      UNION ALL
+      SELECT chain.root, s.next_submission, chain.depth + 1
+      FROM chain JOIN submissions s ON s.id = chain.id
+      WHERE s.next_submission IS NOT NULL AND chain.depth < ${MAX_DEPTH}
+    )
+    SELECT root, id FROM chain ORDER BY depth`)
+  const rows = new Map(
+    db
       .select({ submission: submissions, capture: captures })
       .from(submissions)
       .innerJoin(captures, eq(captures.id, submissions.captureId))
-      .where(eq(submissions.id, id))
-      .get()
-    if (!row) break
-    pages.push(row)
-    id = row.submission.nextSubmission
+      .where(inJson(submissions.id, [...new Set(links.map((link) => link.id))]))
+      .all()
+      .map((row) => [row.submission.id, row]),
+  )
+  const broken = new Set<string>()
+  for (const { root, id } of links) {
+    const row = rows.get(id)
+    if (!row) broken.add(root)
+    if (!broken.has(root)) chains.get(root)!.push(row!)
   }
-  return pages
+  return chains
 }
 
 const isPending = (state: string) =>
   state === 'queued' || state === 'downloading'
+
+const isRetryablePage = (page: Page) =>
+  page.submission.relatedState === 'complete' &&
+  !page.submission.collectionStopped
 
 function memberSubmissions(db: Executor, pageIds: string[]) {
   if (!pageIds.length) return []
@@ -141,74 +151,90 @@ function memberSubmissions(db: Executor, pageIds: string[]) {
     .innerJoin(captures, eq(captures.id, submissions.captureId))
     .where(
       and(
-        inArray(submissions.parentSubmission, pageIds),
+        inJson(submissions.parentSubmission, pageIds),
         like(submissions.idemKey, 'related:%'),
       ),
     )
     .all()
 }
 
-/** Why captures of a collection fell short, counted per capture. */
-function failureReasons(db: Executor, captureList: Capture[], extra: string[]) {
-  const reasons = new Map<string, Set<string>>()
-  const add = (reason: string, captureId: string) => {
-    if (!reason) return
-    if (!reasons.has(reason)) reasons.set(reason, new Set())
-    reasons.get(reason)!.add(captureId)
-  }
-  const ids = captureList.map((c) => c.id)
-  for (const capture of captureList)
-    if (capture.state === 'failed') add(capture.error, capture.id)
-  if (ids.length) {
-    for (const asset of db
-      .select({ captureId: assets.captureId, error: assets.error })
-      .from(assets)
-      .where(and(inArray(assets.captureId, ids), eq(assets.state, 'failed')))
-      .all())
-      add(asset.error, asset.captureId)
-    const partial = captureList.filter(
-      (c) => c.state === 'partial' && c.revisionId,
-    )
-    if (partial.length)
-      for (const revision of db
-        .select({ id: revisions.id, payload: revisions.payload })
-        .from(revisions)
-        .where(
-          inArray(
-            revisions.id,
-            partial.map((c) => c.revisionId!),
-          ),
-        )
-        .all()) {
-        const owner = partial.find((c) => c.revisionId === revision.id)!
-        for (const warning of (revision.payload as Payload).warnings ?? [])
-          add(warning, owner.id)
+type MemberCounts = Pick<
+  CollectionProgress,
+  'complete' | 'partial' | 'failed' | 'pending' | 'retryable'
+>
+
+/**
+ * Members of each record by state, counted in SQL: a profile can have tens
+ * of thousands. A member listed on several pages counts once.
+ */
+function memberCounts(
+  db: Executor,
+  chains: Map<string, Page[]>,
+): Map<string, MemberCounts> {
+  const counts = new Map<string, MemberCounts>()
+  for (const root of chains.keys())
+    counts.set(root, {
+      complete: 0,
+      partial: 0,
+      failed: 0,
+      pending: 0,
+      retryable: 0,
+    })
+  const pages = [...chains].flatMap(([root, list]) =>
+    list.map((page) => ({
+      id: page.submission.id,
+      root,
+      retry: isRetryablePage(page) ? 1 : 0,
+    })),
+  )
+  if (!pages.length) return counts
+  // Retryable: failed members of finished pages whose source still exists.
+  const rows = db.all<{
+    root: string
+    state: string
+    n: number
+    retryable: number
+  }>(sql`
+    SELECT p.value ->> '$.root' AS root, c.state AS state,
+      count(DISTINCT c.id) AS n,
+      count(DISTINCT CASE
+        WHEN p.value ->> '$.retry' AND c.state = 'failed'
+          AND a.source_state IS NULL
+        THEN c.id END) AS retryable
+    FROM json_each(${JSON.stringify(pages)}) p
+    JOIN submissions s ON s.parent_submission = p.value ->> '$.id'
+    JOIN captures c ON c.id = s.capture_id
+    JOIN collections a ON a.id = c.collection_id
+    WHERE s.idem_key LIKE 'related:%'
+    GROUP BY 1, 2`)
+  for (const row of rows) {
+    const count = counts.get(row.root)!
+    switch (row.state) {
+      case 'complete': {
+        count.complete += row.n
+        break
       }
+      case 'partial': {
+        count.partial += row.n
+        break
+      }
+      case 'failed': {
+        count.failed += row.n
+        break
+      }
+      default:
+        if (isPending(row.state)) count.pending += row.n
+    }
+    count.retryable += row.retryable
   }
-  for (const [index, reason] of extra.entries()) add(reason, `page:${index}`)
-  return [...reasons]
-    .map(([reason, set]) => ({ reason, count: set.size }))
-    .toSorted((a, b) => b.count - a.count || (a.reason < b.reason ? -1 : 1))
+  return counts
 }
 
-export function collectionProgress(
-  db: Executor,
-  root: string,
-): CollectionProgress {
-  const pages = pageChain(db, root)
-  const members = memberSubmissions(
-    db,
-    pages.map((p) => p.submission.id),
-  )
-  const unique = new Map(members.map((m) => [m.capture.id, m.capture]))
-  const memberCaptures = [...unique.values()]
-  const count = (test: (state: string) => boolean) =>
-    memberCaptures.filter((c) => test(c.state)).length
+function progressOf(pages: Page[], counts: MemberCounts): CollectionProgress {
   const urls = new Set<string>()
   for (const page of pages)
     for (const target of page.capture.relatedTargets as StoredTarget[])
       urls.add(target.url)
-  const pending = count(isPending)
   const first = pages[0]?.capture
   const last = pages.at(-1)?.capture
   const pagePending = pages.some(
@@ -220,7 +246,7 @@ export function collectionProgress(
     first?.state === 'failed' ||
     ((first?.state === 'complete' || first?.state === 'partial') &&
       !pagePending &&
-      pending === 0)
+      counts.pending === 0)
   const pageFailed = pages.some(
     (p) =>
       p.capture.state === 'failed' ||
@@ -229,24 +255,90 @@ export function collectionProgress(
   )
   return {
     total: urls.size,
-    complete: count((s) => s === 'complete'),
-    partial: count((s) => s === 'partial'),
-    failed: count((s) => s === 'failed'),
-    pending,
+    ...counts,
     done,
     stopped: pages.some((p) => p.submission.collectionStopped),
     next: last?.nextPageCursor ?? '',
     maxBatch: last?.maxBatchSize ?? 0,
     error: pageFailed ? 'partial_pages' : '',
-    reasons: failureReasons(
-      db,
-      [...pages.map((p) => p.capture), ...memberCaptures],
-      pages
-        .filter((p) => p.submission.relatedState === 'failed')
-        .map((p) => p.submission.relatedError),
-    ),
     pages,
   }
+}
+
+/** Progress of several collection records at once, by record id. */
+export function collectionProgresses(
+  db: Executor,
+  roots: string[],
+): Map<string, CollectionProgress> {
+  const chains = pageChains(db, roots)
+  const counts = memberCounts(db, chains)
+  return new Map(
+    [...chains].map(([root, pages]) => [
+      root,
+      progressOf(pages, counts.get(root)!),
+    ]),
+  )
+}
+
+export function collectionProgress(
+  db: Executor,
+  root: string,
+): CollectionProgress {
+  return collectionProgresses(db, [root]).get(root)!
+}
+
+/**
+ * Why captures fell short, counted per capture: `captureIds` and the members
+ * of `pageIds`. Each reason in `extra` counts once more.
+ */
+function failureReasons(
+  db: Executor,
+  captureIds: string[],
+  pageIds: string[],
+  extra: string[],
+) {
+  const rows = db.all<{ reason: string; count: number }>(sql`
+    WITH ids(id) AS (
+      SELECT value FROM json_each(${JSON.stringify(captureIds)})
+      UNION
+      SELECT s.capture_id FROM submissions s
+      WHERE s.parent_submission IN
+          (SELECT value FROM json_each(${JSON.stringify(pageIds)}))
+        AND s.idem_key LIKE 'related:%'
+    ),
+    reasons(reason, capture) AS (
+      SELECT c.error, c.id FROM ids JOIN captures c ON c.id = ids.id
+      WHERE c.state = 'failed'
+      UNION ALL
+      SELECT a.error, a.capture_id FROM ids JOIN assets a ON a.capture_id = ids.id
+      WHERE a.state = 'failed'
+      UNION ALL
+      SELECT w.value, c.id FROM ids JOIN captures c ON c.id = ids.id
+      JOIN revisions r ON r.id = c.revision_id,
+        json_each(r.payload, '$.warnings') w
+      WHERE c.state = 'partial'
+    )
+    SELECT reason, count(DISTINCT capture) AS count FROM reasons
+    WHERE reason <> ''
+    GROUP BY reason`)
+  const counts = new Map(rows.map((row) => [row.reason, row.count]))
+  for (const reason of extra)
+    if (reason) counts.set(reason, (counts.get(reason) ?? 0) + 1)
+  return [...counts]
+    .map(([reason, count]) => ({ reason, count }))
+    .toSorted((a, b) => b.count - a.count || (a.reason < b.reason ? -1 : 1))
+}
+
+/** Why a collection record's pages and members fell short. */
+export function collectionReasons(db: Executor, pages: Page[]) {
+  return failureReasons(
+    db,
+    pages.map((p) => p.capture.id),
+    pages.map((p) => p.submission.id),
+    pages
+      .filter((p) => p.submission.relatedState === 'failed')
+      .map((p) => p.submission.relatedError),
+  )
 }
 
 // --- Records --------------------------------------------------------------
@@ -311,98 +403,93 @@ function retryableMembers(db: Executor, pageIds: string[]) {
   )
 }
 
-function retryablePages(progress: CollectionProgress) {
-  return progress.pages.filter(
-    (p) =>
-      p.submission.relatedState === 'complete' &&
-      !p.submission.collectionStopped,
-  )
-}
+type RecordRow = ReturnType<typeof recordRows>[number]
 
-function countRetryable(db: Executor, progress: CollectionProgress): number {
-  const pages = retryablePages(progress).map((p) => p.submission.id)
-  const failed = retryableMembers(db, pages)
-  if (!failed.length) return 0
-  const gone = new Set(
-    db
-      .select({ id: collections.id })
-      .from(collections)
-      .where(
-        and(
-          inArray(
-            collections.id,
-            failed.map((m) => m.capture.collectionId),
-          ),
-          sql`${collections.sourceState} IS NOT NULL`,
-        ),
+/** Records for rows, with a fixed number of queries for any number of rows. */
+function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
+  const media = new Map(
+    (rows.length
+      ? db
+          .select({
+            captureId: assets.captureId,
+            total: sql<number>`count(*)`.mapWith(Number),
+            ready:
+              sql<number>`count(*) FILTER (WHERE ${assets.state} = 'ready')`.mapWith(
+                Number,
+              ),
+            failed:
+              sql<number>`count(*) FILTER (WHERE ${assets.state} = 'failed')`.mapWith(
+                Number,
+              ),
+          })
+          .from(assets)
+          .where(
+            inJson(
+              assets.captureId,
+              rows.map((row) => row.capture.id),
+            ),
+          )
+          .groupBy(assets.captureId)
+          .all()
+      : []
+    ).map(({ captureId, ...counts }) => [captureId, counts]),
+  )
+  const progresses = collectionProgresses(
+    db,
+    rows
+      .filter(
+        (row) =>
+          row.capture.isCollection && row.submission.relatedState !== 'none',
       )
-      .all()
-      .map((row) => row.id),
+      .map((row) => row.submission.id),
   )
-  return new Set(
-    failed
-      .filter((m) => !gone.has(m.capture.collectionId))
-      .map((m) => m.capture.id),
-  ).size
+  return rows.map(({ submission, capture, collection, saved }) => {
+    const record: CaptureRecord = {
+      id: submission.id,
+      jobId: capture.id,
+      collectionId: collection.id,
+      saved: !!saved,
+      url: collection.url,
+      input: submission.input,
+      platform: collection.platform,
+      kind: collection.kind,
+      state: capture.state,
+      error: capture.error,
+      createdAt: submission.createdAt,
+      finishedAt: capture.finishedAt,
+      media: media.get(capture.id) ?? { total: 0, ready: 0, failed: 0 },
+      done: ['complete', 'partial', 'failed'].includes(capture.state),
+    }
+    const progress = progresses.get(submission.id)
+    if (progress) {
+      const {
+        pages: _,
+        stopped,
+        next,
+        maxBatch,
+        error,
+        retryable,
+        ...members
+      } = progress
+      record.members = members
+      record.stopped = stopped
+      record.done = members.done || stopped
+      if (record.done && !stopped)
+        record.pages = {
+          more: !!next,
+          more1000: !!next && maxBatch >= 1000,
+          failed:
+            error === 'partial_pages' ||
+            capture.state === 'failed' ||
+            capture.state === 'partial',
+        }
+      if (record.done) record.retryable = retryable
+    }
+    return record
+  })
 }
 
-function toRecord(
-  db: Executor,
-  row: ReturnType<typeof recordRows>[number],
-): CaptureRecord {
-  const { submission, capture, collection } = row
-  const states = db
-    .select({ state: assets.state })
-    .from(assets)
-    .where(eq(assets.captureId, capture.id))
-    .all()
-  const record: CaptureRecord = {
-    id: submission.id,
-    jobId: capture.id,
-    collectionId: collection.id,
-    saved: !!row.saved,
-    url: collection.url,
-    input: submission.input,
-    platform: collection.platform,
-    kind: collection.kind,
-    state: capture.state,
-    error: capture.error,
-    createdAt: submission.createdAt,
-    finishedAt: capture.finishedAt,
-    media: {
-      total: states.length,
-      ready: states.filter((a) => a.state === 'ready').length,
-      failed: states.filter((a) => a.state === 'failed').length,
-    },
-    done: ['complete', 'partial', 'failed'].includes(capture.state),
-  }
-  if (capture.isCollection && submission.relatedState !== 'none') {
-    const progress = collectionProgress(db, submission.id)
-    const {
-      pages: _,
-      reasons: __,
-      stopped,
-      next,
-      maxBatch,
-      error,
-      ...members
-    } = progress
-    record.members = members
-    record.stopped = stopped
-    record.done = members.done || stopped
-    if (record.done && !stopped)
-      record.pages = {
-        more: !!next,
-        more1000: !!next && maxBatch >= 1000,
-        failed:
-          error === 'partial_pages' ||
-          capture.state === 'failed' ||
-          capture.state === 'partial',
-      }
-    if (record.done) record.retryable = countRetryable(db, progress)
-  }
-  return record
-}
+const toRecord = (db: Executor, row: RecordRow) => toRecords(db, [row])[0]!
 
 export function listRecords(
   db: Executor,
@@ -422,7 +509,7 @@ export function listRecords(
       : undefined,
     RECORD_PAGE + 1,
   )
-  const items = rows.slice(0, RECORD_PAGE).map((row) => toRecord(db, row))
+  const items = toRecords(db, rows.slice(0, RECORD_PAGE))
   const last = items.at(-1)
   return {
     items,
@@ -477,8 +564,8 @@ export function recordDetail(db: Executor, id: string): CaptureRecordDetail {
       .limit(500)
       .all(),
     reasons: record.members
-      ? collectionProgress(db, id).reasons
-      : failureReasons(db, [row.capture], []),
+      ? collectionReasons(db, collectionProgress(db, id).pages)
+      : failureReasons(db, [row.capture.id], [], []),
   }
 }
 
@@ -513,7 +600,9 @@ export function recordMembers(
   recordRow(db, id)
   const filter = `members:${id}:${state}`
   const after = cursor ? decodeCursor(cursor, filter) : undefined
-  const pages = pageChain(db, id).map((p) => p.submission.id)
+  const pages = pageChains(db, [id])
+    .get(id)!
+    .map((p) => p.submission.id)
   const wanted = MEMBER_STATES[state]
   const members = [
     ...new Map(
@@ -532,48 +621,55 @@ export function recordMembers(
         (c.createdAt.getTime() === after.at.getTime() && c.id > after.id),
     )
   const page = members.slice(0, MEMBER_PAGE)
+  const ids = page.map((c) => c.id)
+  const targets = new Map(
+    (page.length
+      ? db
+          .select({
+            id: collections.id,
+            url: collections.url,
+            sourceState: collections.sourceState,
+            saved:
+              sql<boolean>`EXISTS (SELECT 1 FROM ${library} WHERE ${library.collectionId} = ${collections.id})`.mapWith(
+                Boolean,
+              ),
+          })
+          .from(collections)
+          .where(
+            inJson(
+              collections.id,
+              page.map((c) => c.collectionId),
+            ),
+          )
+          .all()
+      : []
+    ).map((row) => [row.id, row]),
+  )
+  const reasons = new Map<string, Set<string>>(ids.map((id) => [id, new Set()]))
+  if (page.length)
+    for (const row of db.all<{ capture: string; reason: string }>(sql`
+      SELECT capture_id AS capture, error AS reason FROM assets
+      WHERE capture_id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
+        AND state = 'failed' AND error <> ''
+      UNION ALL
+      SELECT c.id, w.value FROM captures c
+      JOIN revisions r ON r.id = c.revision_id,
+        json_each(r.payload, '$.warnings') w
+      WHERE c.id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
+        AND c.state = 'partial'`))
+      reasons.get(row.capture)!.add(row.reason)
   const items = page.map((capture): CaptureMember => {
-    const collection = db
-      .select()
-      .from(collections)
-      .where(eq(collections.id, capture.collectionId))
-      .get()!
-    const saved = !!db
-      .select({ id: library.collectionId })
-      .from(library)
-      .where(eq(library.collectionId, collection.id))
-      .get()
-    const reasons = new Set(
-      db
-        .select({ error: assets.error })
-        .from(assets)
-        .where(
-          and(eq(assets.captureId, capture.id), eq(assets.state, 'failed')),
-        )
-        .all()
-        .map((a) => a.error)
-        .filter(Boolean),
-    )
-    if (capture.state === 'partial' && capture.revisionId) {
-      const revision = db
-        .select({ payload: revisions.payload })
-        .from(revisions)
-        .where(eq(revisions.id, capture.revisionId))
-        .get()
-      for (const warning of (revision?.payload as Payload | undefined)
-        ?.warnings ?? [])
-        reasons.add(warning)
-    }
+    const collection = targets.get(capture.collectionId)!
     return {
       jobId: capture.id,
       collectionId: collection.id,
-      saved,
+      saved: collection.saved,
       url: collection.url,
       state: capture.state,
       error: capture.error,
       createdAt: capture.createdAt,
       gone: collection.sourceState !== null,
-      reasons: [...reasons].toSorted(),
+      reasons: [...reasons.get(capture.id)!].toSorted(),
     }
   })
   const last = page.at(-1)
@@ -656,10 +752,11 @@ export function retryMembers(
 ): number {
   const { db } = ctx
   recordRow(db, id)
-  const progress = collectionProgress(db, id)
   return retryFailed(
     ctx,
-    retryablePages(progress).map((p) => p.submission.id),
+    collectionProgress(db, id)
+      .pages.filter(isRetryablePage)
+      .map((p) => p.submission.id),
     memberJobId,
   )
 }
@@ -680,7 +777,7 @@ export function retryFailed(
             .from(collections)
             .where(
               and(
-                inArray(
+                inJson(
                   collections.id,
                   failed.map((m) => m.capture.collectionId),
                 ),

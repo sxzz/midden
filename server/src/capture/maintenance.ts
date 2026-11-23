@@ -28,6 +28,7 @@ import {
   sourceResponses,
   submissions,
 } from '#db/schema.ts'
+import { inJson } from '#db/sql.ts'
 import { catalogCollections } from '#library/catalog.ts'
 import { failCapture } from './lifecycle.ts'
 import type { Transaction } from '#db/client.ts'
@@ -164,7 +165,7 @@ function collectBatch(tx: Transaction): number {
       .delete(entityVersions)
       .where(
         and(
-          sql`${entityVersions.id} IN (SELECT value FROM json_each(${JSON.stringify(versionIds)}))`,
+          inJson(entityVersions.id, versionIds),
           sql`NOT EXISTS (SELECT 1 FROM ${revisionEntities} WHERE ${revisionEntities.entityVersionId} = ${entityVersions.id})`,
         ),
       )
@@ -175,7 +176,7 @@ function collectBatch(tx: Transaction): number {
       tx.delete(entities)
         .where(
           and(
-            sql`${entities.id} IN (SELECT value FROM json_each(${JSON.stringify(entityIds)}))`,
+            inJson(entities.id, entityIds),
             sql`NOT EXISTS (SELECT 1 FROM ${entityVersions} WHERE ${entityVersions.entityId} = ${entities.id})`,
           ),
         )

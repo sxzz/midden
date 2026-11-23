@@ -2,6 +2,7 @@ import { and, eq, isNull, lte, sql } from 'drizzle-orm'
 import { recordFilterSQL } from '#capture/records.ts'
 import { markUnreferenced } from '#capture/submit.ts'
 import { collections, library, submissions } from '#db/schema.ts'
+import { inJson } from '#db/sql.ts'
 import { AppError } from '#errors.ts'
 import { pruneTags } from './annotations.ts'
 import type { Database } from '#db/client.ts'
@@ -51,7 +52,7 @@ export function deleteAll(
       .set({ unreferencedAt: before })
       .where(
         and(
-          sql`${collections.id} IN (SELECT value FROM json_each(${JSON.stringify(saved)}))`,
+          inJson(collections.id, saved),
           isNull(collections.unreferencedAt),
           sql`NOT EXISTS (SELECT 1 FROM ${library} WHERE ${library.collectionId} = ${collections.id})`,
         ),

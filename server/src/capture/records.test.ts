@@ -15,6 +15,7 @@ import {
   retryMembers,
   retryRecord,
 } from './records.ts'
+import { stopCollection } from './related.ts'
 import { submit } from './submit.ts'
 import type { CaptureContext } from './context.ts'
 
@@ -110,6 +111,57 @@ describe('capture records', () => {
     expect(record.members).toMatchObject({ total: 2, complete: 2, failed: 0 })
     expect(record.retryable).toBe(0)
     expect(collectionProgress(c.db, job.submissionId).pages).toHaveLength(1)
+  })
+
+  test('counts more members than SQLite binds values', async () => {
+    const c = setup(new Set())
+    const job = submit(c, { url: 'https://fake.test/u/someone' })
+    await c.queue.drain()
+    // Members written directly: a profile can have tens of thousands, past
+    // the 32766 values a statement can bind.
+    const client = c.db.$client
+    const collection = client.prepare(
+      `INSERT INTO collections (id, platform, kind, external_id, url, provider_id, created_at, observed_at, source_state)
+       VALUES (?, 'fake', 'post', ?, ?, 'fake', 0, 0, ?)`,
+    )
+    const capture = client.prepare(
+      `INSERT INTO captures (id, collection_id, provider_id, adapter_id, scope, state, error, created_at)
+       VALUES (?, ?, 'fake', 'fake', 'public', ?, ?, 0)`,
+    )
+    const member = client.prepare(
+      `INSERT INTO submissions (id, capture_id, idem_key, fingerprint, input, created_at, parent_submission)
+       VALUES (?, ?, ?, '', '', 0, ?)`,
+    )
+    const extra = 33_000
+    client.exec('BEGIN')
+    for (let i = 0; i < extra; i++) {
+      const id = `m${i}`
+      const failed = i % 3 === 0
+      // Of the failed members, every tenth is gone at the source.
+      collection.run(
+        id,
+        id,
+        `https://fake.test/p/m${i}`,
+        i % 30 ? null : 'deleted',
+      )
+      capture.run(id, id, failed ? 'failed' : 'complete', failed ? 'lost' : '')
+      member.run(id, id, `related:${job.submissionId}:m${i}`, job.submissionId)
+    }
+    client.exec('COMMIT')
+
+    const record = listRecords(c.db).items[0]!
+    expect(record.members).toMatchObject({
+      complete: 2 + 22_000,
+      failed: 11_000,
+      done: true,
+    })
+    expect(record.retryable).toBe(11_000 - 1100)
+    expect(recordDetail(c.db, record.id).reasons).toEqual([
+      { reason: 'lost', count: 11_000 },
+    ])
+    expect(recordMembers(c.db, record.id, 'failed').items).toHaveLength(50)
+    expect(() => stopCollection(c, job.submissionId)).not.toThrow()
+    expect(listRecords(c.db).items[0]!.stopped).toBe(true)
   })
 
   test('"more" continues once; asking twice gives the same job', async () => {
