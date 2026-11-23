@@ -29,7 +29,7 @@ export default sxzz(
     },
     {
       // Runs only on Node 26; browser baseline does not apply.
-      files: ['server/**', 'scripts/**'],
+      files: ['server/**', 'scripts/**', 'tools/**'],
       rules: { 'baseline-js/use-baseline': 'off' },
     },
     {

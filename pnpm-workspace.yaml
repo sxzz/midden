@@ -13,6 +13,7 @@ shellEmulator: true
 packages:
   - server
   - shared
+  - tools/*
   - third_party/atmosphere
   - web
 
