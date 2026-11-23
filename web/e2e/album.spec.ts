@@ -3,6 +3,7 @@ const first = '11111111-1111-4111-8111-111111111111'
 const second = '22222222-2222-4222-8222-222222222222'
 const asset = (id: string, mime = 'image/png', sensitive = false) => ({
   id,
+  url: `/v1/assets/${id}?inline=1`,
   mime,
   sensitive,
   state: 'ready',
