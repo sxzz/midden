@@ -17,6 +17,7 @@ import {
 } from './views.ts'
 import type { CaptureContext } from '#capture/context.ts'
 import type { Metrics, Payload } from '#capture/payload.ts'
+import type { Executor } from '#db/client.ts'
 
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
 export const isUUID = (value: unknown): value is string =>
@@ -27,6 +28,18 @@ export const isUUID = (value: unknown): value is string =>
  * captures behind them, and the raw responses of its finished captures.
  * Media shared with other collections count in each.
  */
+/**
+ * Space taken by everything stored: media, revisions and raw responses,
+ * whether or not the library still holds them.
+ */
+export function storageUsed(db: Executor): number {
+  const row = db.get<{ used: number }>(sql`SELECT
+    (SELECT coalesce(sum(size), 0) FROM blobs)
+    + (SELECT coalesce(sum(content_bytes), 0) FROM revisions)
+    + (SELECT coalesce(sum(size), 0) FROM source_responses) AS used`)
+  return Number(row?.used ?? 0)
+}
+
 export const storageOf = (collection: string) => `(
   coalesce((SELECT sum(rv.content_bytes) FROM revisions rv
     WHERE rv.collection_id = ${collection}), 0)

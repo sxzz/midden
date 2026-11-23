@@ -181,7 +181,7 @@ async function remove() {
         :title="`${p.name} 采集来源`"
       >
         <p v-if="!p.public && !p.selected_account_id" class="banner">
-          {{ p.name }} 需要添加并选择自己的账号凭据后才能采集。
+          {{ p.name }} 需要先添加并选择一个账号才能采集。
         </p>
         <ListButton
           v-if="p.public"
@@ -224,7 +224,7 @@ async function remove() {
         />
       </ListSection>
     </template>
-    <p v-if="!addable" class="status">未配置个人账号接入。</p>
+    <p v-if="!addable" class="status">没有支持添加账号的平台。</p>
   </template>
   <ListSection title="数据">
     <ListButton
@@ -255,7 +255,7 @@ async function remove() {
     :description="
       data?.platforms.find((p) => p.id === removing?.platform)?.public
         ? '正在使用此账号时，新保存改用公共来源。'
-        : '删除后，需要选择其他账号或重新添加自己的凭据才能采集。'
+        : '删除后，需要选择其他账号或重新添加才能采集。'
     "
     confirm-label="删除账号"
     :busy="busy"

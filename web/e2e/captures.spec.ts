@@ -360,7 +360,7 @@ test('a finished profile record fetches more pages as its own record', async ({
   })
   await page.goto(`/app/#/captures/${profile}`)
   await expect(page.getByRole('button', { name: '重试本页' })).toHaveCount(0)
-  await page.getByRole('button', { name: '抓取1000条' }).click()
+  await page.getByRole('button', { name: '抓取 1000 条' }).click()
   await expect(page.getByText('没有更多帖子了。')).toBeVisible()
   await page.getByRole('button', { name: '抓取更多' }).click()
   await expect(page).toHaveURL(new RegExp(`#/captures/${next}$`))

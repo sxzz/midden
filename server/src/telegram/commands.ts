@@ -14,7 +14,7 @@ import { stopCollection } from '#capture/related.ts'
 import { captures, connections, library } from '#db/schema.ts'
 import { AppError, isAppError } from '#errors.ts'
 import { deleteCollection } from '#library/delete.ts'
-import { getCollection } from '#library/read.ts'
+import { getCollection, storageUsed } from '#library/read.ts'
 import { enqueueDelivery } from './delivery.ts'
 import {
   COMMANDS,
@@ -181,14 +181,7 @@ function run(c: CommandContext, request: Request): Reply {
     case 'account_add':
       return accountAdd(c, request)
     case 'usage': {
-      const row = ctx.db.$client
-        .prepare(
-          `SELECT (SELECT coalesce(sum(size), 0) FROM blobs)
-             + (SELECT coalesce(sum(content_bytes), 0) FROM revisions)
-             + (SELECT coalesce(sum(size), 0) FROM source_responses) AS used`,
-        )
-        .get() as { used: number | bigint }
-      return menu(`已用 ${formatBytes(Number(row.used))}`)
+      return menu(`已用 ${formatBytes(storageUsed(ctx.db))}`)
     }
     case 'more':
     case 'more1000':
@@ -405,7 +398,7 @@ function accountList(c: CommandContext, group: boolean): Reply {
   const keyboard: Keyboard = []
   for (const platform of platforms)
     if (!platform.public && !platform.selected)
-      text += `\n${platform.name} 需要添加并选择自己的账号凭据后才能采集。`
+      text += `\n${platform.name} 需要先添加并选择一个账号才能采集。`
   for (const platform of platforms)
     if (platform.public)
       keyboard.push([

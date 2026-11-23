@@ -15,6 +15,7 @@ import {
   updateAnnotation,
 } from '#library/annotations.ts'
 import { deleteCollection } from '#library/delete.ts'
+import { storageUsed } from '#library/read.ts'
 import { json, type Env } from './validate.ts'
 
 const accountJson = (
@@ -44,100 +45,81 @@ export function accountRoutes(ctx: AccountsContext) {
     }
   }
 
-  return (
-    new Hono<Env>()
-      .get('/accounts', (c) => c.json(accounts()))
+  return new Hono<Env>()
+    .get('/accounts', (c) => c.json(accounts()))
 
-      .post(
-        '/accounts',
-        json(
-          v.strictObject({
-            platform: v.string(),
-            credential: v.pipe(v.string(), v.maxLength(65_536)),
-            name: v.optional(v.string()),
-          }),
-        ),
-        async (c) => {
-          const input = c.req.valid('json')
-          const { id } = await addAccount(ctx, input.platform, {
-            credential: Buffer.from(input.credential),
-            name: input.name,
-          })
-          // The web app names the account it just added from this response.
-          const account = listAccounts(ctx).accounts.find((a) => a.id === id)!
-          return c.json(accountJson(account))
-        },
-      )
-
-      .put(
-        '/accounts/selection',
-        json(v.strictObject({ platform: v.string(), account_id: v.string() })),
-        (c) => {
-          const input = c.req.valid('json')
-          selectAccount(ctx, input.platform, input.account_id)
-          return c.json(accounts())
-        },
-      )
-
-      .post('/accounts/:id/check', async (c) => {
-        await checkAccount(ctx, c.req.param('id'))
-        return c.body(null, 204)
-      })
-
-      .delete('/accounts/:id', (c) => {
-        revokeAccount(ctx, c.req.param('id'))
-        return c.body(null, 204)
-      })
-
-      .get('/tags', (c) => c.json(listTags(ctx.db)))
-
-      .get('/collections/:id/annotation', (c) =>
-        c.json(readAnnotation(ctx.db, c.req.param('id'))),
-      )
-
-      .patch(
-        '/collections/:id/annotation',
-        json(
-          v.strictObject({
-            note: v.optional(v.string()),
-            tag_ids: v.optional(v.array(v.string())),
-            tag_names: v.optional(v.array(v.string())),
-          }),
-        ),
-        (c) => {
-          const input = c.req.valid('json')
-          return c.json(
-            updateAnnotation(ctx.db, c.req.param('id'), {
-              note: input.note,
-              tagIds: input.tag_ids,
-              tagNames: input.tag_names,
-            }),
-          )
-        },
-      )
-
-      .delete('/collections/:id', (c) => {
-        deleteCollection(ctx.db, c.req.param('id'))
-        return c.body(null, 204)
-      })
-
-      // Space used by what is stored; there is no quota.
-      .get('/usage', (c) => {
-        const row = ctx.db.$client
-          .prepare(
-            `SELECT
-           (SELECT coalesce(sum(size), 0) FROM blobs)
-           + (SELECT coalesce(sum(content_bytes), 0) FROM revisions)
-           + (SELECT coalesce(sum(size), 0) FROM source_responses) AS used`,
-          )
-          .get() as { used: number | bigint }
-        const used = Number(row.used)
-        return c.json({
-          used_bytes: used,
-          reserved_bytes: 0,
-          limit_bytes: 0,
-          unlimited: true,
+    .post(
+      '/accounts',
+      json(
+        v.strictObject({
+          platform: v.string(),
+          credential: v.pipe(v.string(), v.maxLength(65_536)),
+          name: v.optional(v.string()),
+        }),
+      ),
+      async (c) => {
+        const input = c.req.valid('json')
+        const { id } = await addAccount(ctx, input.platform, {
+          credential: Buffer.from(input.credential),
+          name: input.name,
         })
-      })
-  )
+        // The web app names the account it just added from this response.
+        const account = listAccounts(ctx).accounts.find((a) => a.id === id)!
+        return c.json(accountJson(account))
+      },
+    )
+
+    .put(
+      '/accounts/selection',
+      json(v.strictObject({ platform: v.string(), account_id: v.string() })),
+      (c) => {
+        const input = c.req.valid('json')
+        selectAccount(ctx, input.platform, input.account_id)
+        return c.json(accounts())
+      },
+    )
+
+    .post('/accounts/:id/check', async (c) => {
+      await checkAccount(ctx, c.req.param('id'))
+      return c.body(null, 204)
+    })
+
+    .delete('/accounts/:id', (c) => {
+      revokeAccount(ctx, c.req.param('id'))
+      return c.body(null, 204)
+    })
+
+    .get('/tags', (c) => c.json(listTags(ctx.db)))
+
+    .get('/collections/:id/annotation', (c) =>
+      c.json(readAnnotation(ctx.db, c.req.param('id'))),
+    )
+
+    .patch(
+      '/collections/:id/annotation',
+      json(
+        v.strictObject({
+          note: v.optional(v.string()),
+          tag_ids: v.optional(v.array(v.string())),
+          tag_names: v.optional(v.array(v.string())),
+        }),
+      ),
+      (c) => {
+        const input = c.req.valid('json')
+        return c.json(
+          updateAnnotation(ctx.db, c.req.param('id'), {
+            note: input.note,
+            tagIds: input.tag_ids,
+            tagNames: input.tag_names,
+          }),
+        )
+      },
+    )
+
+    .delete('/collections/:id', (c) => {
+      deleteCollection(ctx.db, c.req.param('id'))
+      return c.body(null, 204)
+    })
+
+    .get('/usage', (c) => c.json({ used_bytes: storageUsed(ctx.db) }))
 }

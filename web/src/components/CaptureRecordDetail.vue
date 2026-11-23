@@ -333,7 +333,7 @@ function openCollection(id: string, event?: MouseEvent) {
       />
       <ListButton
         v-if="record.pages?.more_1000"
-        label="抓取1000条"
+        label="抓取 1000 条"
         :disabled="busy"
         @select="page('more1000')"
       />

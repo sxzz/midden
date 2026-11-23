@@ -182,7 +182,7 @@ describe('presentation', () => {
     expect(labels({ ...base, done: true })).toEqual([
       '在 X 查看主页',
       '抓取更多',
-      '抓取1000条',
+      '抓取 1000 条',
       '查看已保存资料',
       '收藏列表',
     ])
@@ -190,7 +190,7 @@ describe('presentation', () => {
       '内容不完整 2 · 失败 1 · 进行中 0',
     )
     expect(progressMessage(base, { group: true }).text).toContain(
-      '存储配额不足（2 条）',
+      '存储空间不足（2 条）',
     )
     expect(failureReason(' unknown ')).toBe('unknown')
   })

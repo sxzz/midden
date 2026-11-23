@@ -82,7 +82,7 @@ test('Instagram and X choose their accounts independently', async ({
   await page.goto('/app/')
   await page.getByRole('link', { name: '采集账号' }).click()
   await expect(
-    page.getByText('Instagram 需要添加并选择自己的账号凭据后才能采集。'),
+    page.getByText('Instagram 需要先添加并选择一个账号才能采集。'),
   ).toBeVisible()
   // Adding is a sheet opened from the platform's own source list.
   await page
@@ -127,7 +127,7 @@ test('Instagram and X choose their accounts independently', async ({
     .getByRole('button', { name: '删除 @fixture.name', exact: true })
     .click()
   await expect(
-    page.getByText('删除后，需要选择其他账号或重新添加自己的凭据才能采集。'),
+    page.getByText('删除后，需要选择其他账号或重新添加才能采集。'),
   ).toBeVisible()
 })
 
@@ -191,7 +191,7 @@ test('adds, selects and deletes an X account', async ({ page }) => {
     if (path === '/v1/accounts') return r.fulfill({ json: state })
     if (path === '/v1/usage')
       return r.fulfill({
-        json: { used_bytes: 0, reserved_bytes: 0, limit_bytes: 1000 },
+        json: { used_bytes: 0 },
       })
     return r.fulfill({ json: { items: [] } })
   })

@@ -44,9 +44,7 @@ async function setup(page: Page, paginated = false) {
     return r.fulfill({
       json:
         record ||
-        (u.pathname === '/v1/usage'
-          ? { used_bytes: 0, reserved_bytes: 0, limit_bytes: 1000 }
-          : { items: [] }),
+        (u.pathname === '/v1/usage' ? { used_bytes: 0 } : { items: [] }),
     })
   })
   return queries

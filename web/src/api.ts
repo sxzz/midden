@@ -90,7 +90,7 @@ export function errorText(e: unknown) {
       e.status === 422 &&
       e.message === 'account required; add and select your own credentials'
     )
-      return '此平台需要账号，请先添加并选择自己的采集凭据。'
+      return '此平台需要账号，请先在采集账号中添加并选择一个账号。'
     if (e.status === 422 && e.message.startsWith('account unavailable'))
       return '账号不可用，请在采集账号中选择可用账号或重新授权。'
     if (e.status === 401)
@@ -98,7 +98,7 @@ export function errorText(e: unknown) {
         ? '会话已失效，请从 Telegram 重新打开。'
         : '登录已失效，请刷新页面重新登录。'
     if (e.status === 404) return '收藏不存在或已删除。'
-    if (e.status === 409) return '存储空间不足或操作冲突。'
+    if (e.status === 409) return '操作冲突，请刷新后重试。'
     if (e.status === 429) return '操作太频繁，请稍后重试。'
     if (e.status === 503) return '采集服务不可用。'
   }

@@ -30,11 +30,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
         break
       }
       case '/v1/usage': {
-        body = {
-          used_bytes: 1048576,
-          reserved_bytes: 0,
-          limit_bytes: 1073741824,
-        }
+        body = { used_bytes: 1048576 }
         break
       }
       case '/v1/collections': {
@@ -215,7 +211,7 @@ test('sensitive image stays blurred until revealed and opens inside the page', a
       path === '/v1/session'
         ? { tenant_id: 'fixture' }
         : path === '/v1/usage'
-          ? { used_bytes: 0, reserved_bytes: 0, limit_bytes: 1000 }
+          ? { used_bytes: 0 }
           : path.endsWith('/availability')
             ? { available: true }
             : path === `/v1/collections/${id}`
@@ -281,7 +277,7 @@ test('loading skeletons, one revision and touch image navigation', async ({
             : path === `/v1/collections/${id}`
               ? media
               : path === '/v1/usage'
-                ? { used_bytes: 0, reserved_bytes: 0, limit_bytes: 1000 }
+                ? { used_bytes: 0 }
                 : { items: [media] }
     await r.fulfill({ json: body })
   })
@@ -347,20 +343,13 @@ test('scroll loads the next page and retries without losing existing items', asy
       }
     } else {
       await r.fulfill({
-        json:
-          url.pathname === '/v1/usage'
-            ? {
-                used_bytes: 1048576,
-                reserved_bytes: 0,
-                limit_bytes: 1073741824,
-              }
-            : {},
+        json: url.pathname === '/v1/usage' ? { used_bytes: 1048576 } : {},
       })
     }
   })
   await page.goto('/app/')
   await expect(page.getByText('收藏编号 1', { exact: true })).toBeVisible()
-  await expect(page.getByText('已用 1 MB，共 1.0 GB')).toBeInViewport()
+  await expect(page.getByText('已用 1.0 MB', { exact: true })).toBeInViewport()
   expect(cursors).toEqual([null])
   await page.getByText('收藏编号 20', { exact: true }).scrollIntoViewIfNeeded()
   await expect(page.getByRole('button', { name: '重试加载' })).toBeVisible()

@@ -100,7 +100,7 @@ export function recordCounts(r: CaptureRecord) {
 }
 
 const reasons: Record<string, string> = {
-  'storage quota exceeded': '存储配额不足',
+  'storage quota exceeded': '存储空间不足',
   'account cannot access this post': '采集账号无权访问该帖子',
   'account is suspended': '账号已被封禁，解封后可重新抓取',
   'profile not found': '账号不存在或已改名',
@@ -108,7 +108,7 @@ const reasons: Record<string, string> = {
   'provider cannot access this post': '无法获取该帖子',
   'provider cannot access this profile': '无法获取该账号资料',
   'account required; add and select your own credentials':
-    '此平台需要账号，请先添加并选择自己的采集凭据',
+    '此平台需要账号，请先在采集账号中添加并选择一个账号',
   'Instagram requires an account; select an Instagram account and retry':
     'Instagram 需要登录，请在采集账号中选择 Instagram 账号后重试',
   'Instagram requires login':

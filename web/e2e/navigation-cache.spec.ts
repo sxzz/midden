@@ -87,7 +87,7 @@ async function setup(page: Page) {
     if (path === '/v1/tags') return route.fulfill({ json: [] })
     if (path === '/v1/usage')
       return route.fulfill({
-        json: { used_bytes: 0, reserved_bytes: 0, limit_bytes: 1000 },
+        json: { used_bytes: 0 },
       })
     return route.fulfill({
       json: details.find((item) => path === `/v1/collections/${item.id}`) || {},

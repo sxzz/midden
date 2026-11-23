@@ -20,7 +20,7 @@ test('select collections and refresh them', async ({ page }) => {
     if (path === '/v1/session') return r.fulfill({ json: { tenant_id: 'x' } })
     if (path === '/v1/usage')
       return r.fulfill({
-        json: { used_bytes: 0, reserved_bytes: 0, limit_bytes: 1 << 30 },
+        json: { used_bytes: 0 },
       })
     if (path === '/v1/collections') return r.fulfill({ json: { items } })
     if (path === '/v1/refresh-batches') {

@@ -1,6 +1,11 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef } from 'vue'
-import { groupCollections, listSort, listsProfiles } from '../presentation'
+import {
+  groupCollections,
+  listSort,
+  listsProfiles,
+  storageSize,
+} from '../presentation'
 import BatchRefresh from './BatchRefresh.vue'
 import CollectionAlbum from './CollectionAlbum.vue'
 import CollectionFilters from './CollectionFilters.vue'
@@ -82,20 +87,8 @@ const filtered = computed(() => {
 const empty = computed(
   () => !props.loading && !props.error && !props.items.length,
 )
-const size = (n: number) =>
-  n >= 1073741824
-    ? `${(n / 1073741824).toFixed(1)} GB`
-    : `${(n / 1048576).toFixed(0)} MB`
 const storage = computed(() =>
-  props.usage
-    ? `已用 ${size(props.usage.used_bytes)}，${
-        props.usage.unlimited ? '不限额' : `共 ${size(props.usage.limit_bytes)}`
-      }${
-        props.usage.reserved_bytes
-          ? `，${size(props.usage.reserved_bytes)} 正在保存`
-          : ''
-      }`
-    : '',
+  props.usage ? `已用 ${storageSize(props.usage.used_bytes)}` : '',
 )
 </script>
 

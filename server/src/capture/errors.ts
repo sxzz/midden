@@ -25,7 +25,7 @@ export function safeError(error: unknown): string {
   if (error instanceof RetryError && error.cause !== undefined)
     return safeError(error.cause)
   if (isAppError(error, 'account_required'))
-    return '此平台需要账号，请先添加并选择自己的采集凭据。'
+    return '此平台需要账号，请先在采集账号中添加并选择一个账号。'
   if (isAppError(error, 'connection'))
     return '账号不可用，请在采集账号中选择可用账号或重新授权。'
   if (isAppError(error, 'unsupported')) return 'provider operation unsupported'
