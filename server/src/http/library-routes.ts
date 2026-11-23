@@ -33,7 +33,7 @@ export function libraryRoutes(app: Hono<Env>, ctx: AccountsContext): void {
     )
   })
 
-  app.get('/collections/authors', (c) => c.json(listAuthors(ctx)))
+  app.get('/collections/authors', (c) => c.json({ items: listAuthors(ctx) }))
 
   app.get('/collections/:id', (c) =>
     c.json(getCollection(ctx, c.req.param('id'))),

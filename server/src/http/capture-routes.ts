@@ -256,7 +256,7 @@ export function captureRoutes(
       v.strictObject({ job_id: v.optional(v.string()) }),
     )
     return c.json({
-      retried: retryMembers(ctx, c.req.param('id'), input.job_id),
+      count: retryMembers(ctx, c.req.param('id'), input.job_id),
     })
   })
 
@@ -293,7 +293,7 @@ export function captureRoutes(
   )
 
   app.post('/refresh-batches/:id/retry', (c) =>
-    c.json({ retried: retryRefreshBatch(ctx, c.req.param('id')) }),
+    c.json({ count: retryRefreshBatch(ctx, c.req.param('id')) }),
   )
 
   // Whether a saved collection can be captured again. Platforms run in
@@ -319,6 +319,6 @@ export function captureRoutes(
 
   app.post('/library/delete-all', async (c) => {
     await body(c, v.strictObject({ confirm: v.literal('delete all') }))
-    return c.json(deleteAll(ctx.db))
+    return c.json({ ...deleteAll(ctx.db), running: 0 })
   })
 }

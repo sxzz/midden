@@ -29,9 +29,9 @@ const accountJson = (
 })
 
 export function accountRoutes(app: Hono<Env>, ctx: AccountsContext): void {
-  app.get('/accounts', (c) => {
+  const accounts = () => {
     const { platforms, accounts } = listAccounts(ctx)
-    return c.json({
+    return {
       platforms: platforms.map((p) => ({
         id: p.id,
         name: p.name,
@@ -41,8 +41,10 @@ export function accountRoutes(app: Hono<Env>, ctx: AccountsContext): void {
         ...(p.selected ? { selected_account_id: p.selected } : {}),
       })),
       accounts: accounts.map(accountJson),
-    })
-  })
+    }
+  }
+
+  app.get('/accounts', (c) => c.json(accounts()))
 
   app.post('/accounts', async (c) => {
     const input = await body(
@@ -68,7 +70,7 @@ export function accountRoutes(app: Hono<Env>, ctx: AccountsContext): void {
       v.strictObject({ platform: v.string(), account_id: v.string() }),
     )
     selectAccount(ctx, input.platform, input.account_id)
-    return c.body(null, 204)
+    return c.json(accounts())
   })
 
   app.post('/accounts/:id/check', async (c) => {
