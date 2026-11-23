@@ -122,11 +122,11 @@ web/             现有网页
 
 ## 进度
 
-- 第 1、2、3 阶段已完成：采集链路全部移植，有测试，并用真实 FxTwitter 帖子端到端验证过。
-- 第 4 阶段基本完成：HTTP API（认证、采集、记录、账号、标签备注、删除、用量、读取侧）、网页改用签名媒体链接、服务端直接提供 `/app/`、`node src/cli.ts token create` 生成 API token。读取侧在 `server/src/library/`。
-- 第 7 阶段部分完成：Dockerfile（`node:26.13.1-alpine`，升级 Node 时与 `devEngines` 一起改）、`compose.yaml`、`.env.example`；CI 的 `image` 任务构建镜像并做健康检查，但不发布。
+- 第 1–6 阶段已完成：采集链路、HTTP API 与读取侧、网页改用签名媒体链接、Telegram Bot（`server/src/telegram/`，规格见 `.ai/telegram-spec.md`）、定时维护。用真实 FxTwitter 帖子端到端验证过采集与 API；Bot 只有假 API 的测试，尚未接真实 Bot 验证。
+- 第 7 阶段：Dockerfile（`node:26.13.1-alpine`，升级 Node 时与 `devEngines` 一起改）、`compose.yaml`、`.env.example`、`cli.ts token create` / `backup`、README 与 `docs/`、`CONTRIBUTING.md` 已完成。CI 的 `image` 任务只构建并做健康检查，不发布。
+- Bot 实现与旧版的差异：正文为空时只显示 ID 与作者（不显示"空"）；按钮提示真正显示；链接先去重再按 200 计数；非所有者的按钮静默应答；`/show` 直接按收藏投递；投递每 5 秒轮询，不由采集事件唤醒。
 - 本地检查：`/tmp/midden-check.sh` 不存在时，依次运行 `pnpm lint`、`pnpm typecheck`、`FFMPEG=<ffmpeg 路径> pnpm --filter @midden/server exec vitest run`；容器里 ffmpeg 用 `mise exec conda:ffmpeg -- which ffmpeg` 找到路径。本机下载不了 Playwright 浏览器，e2e 看 CI。
-- 下一步：第 5 阶段 Telegram Bot（规格见 `.ai/telegram-spec.md`），然后第 6 阶段剩余部分、第 7 阶段的部署脚本与文档。
+- 剩余：第 8 阶段（切换 main 与 prod，需要用户确认）。切换时再加镜像发布工作流（`workflow_run` 读取默认分支上的文件，提前加入会被旧 main 的 CI 触发），并处理旧的部署 webhook。旧数据如何导入另行决定。
 
 ## 阶段
 
