@@ -17,6 +17,8 @@ jobs:
       # Thumbnail tests call ffmpeg; recommended packages add a third of the download.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: pnpm test
+        env:
+          FFMPEG: ffmpeg
       - run: node scripts/prepare-web-assets.ts
       - run: pnpm --filter @midden/web exec wrangler deploy --dry-run
   e2e:

@@ -1,3 +1,4 @@
+import type { KeyedLock } from '#blob/locks.ts'
 import type { BlobStore } from '#blob/store.ts'
 import type { Database } from '#db/client.ts'
 import type { JobQueue } from '#jobs/queue.ts'
@@ -16,6 +17,17 @@ export interface CaptureContext {
   /** Decrypt a stored credential. */
   openCredential: (ref: string) => Uint8Array
   now?: () => number
+  /** Serializes writes and deletions of one media key. */
+  mediaLocks: KeyedLock
+  /** HTTP client for media downloads. */
+  fetch?: typeof fetch
+  /** How to render thumbnails; none are made without ffmpeg. */
+  thumbnailer?: Thumbnailer
+}
+
+export interface Thumbnailer {
+  ffmpeg: string
+  encoder: 'libwebp' | 'mjpeg'
 }
 
 export const MAX_MEDIA = 20

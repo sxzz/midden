@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pino } from 'pino'
 import { FsBlobStore } from '#blob/fs-store.ts'
+import { KeyedLock } from '#blob/locks.ts'
 import { MediaSigner } from '#blob/signer.ts'
 import { isPermanent } from '#capture/errors.ts'
 import { openDatabase } from '#db/client.ts'
@@ -19,6 +20,8 @@ export function testContext(
     platforms?: Platform[]
     handlers?: (ctx: () => CaptureContext) => Record<string, JobHandler>
     now?: () => number
+    fetch?: typeof fetch
+    thumbnailer?: CaptureContext['thumbnailer']
   } = {},
 ): CaptureContext {
   const db = openDatabase(':memory:')
@@ -57,6 +60,9 @@ export function testContext(
       throw new Error('no credentials in tests')
     },
     now: options.now,
+    mediaLocks: new KeyedLock(),
+    fetch: options.fetch,
+    thumbnailer: options.thumbnailer,
   }
   return ctx
 }
