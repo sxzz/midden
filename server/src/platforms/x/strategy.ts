@@ -1,0 +1,461 @@
+import { Buffer } from 'node:buffer'
+import {
+  FetchResponse,
+  RelatedTarget,
+  Visibility,
+  type FetchRequest,
+  type SourceResponse,
+} from '../protocol.ts'
+import { status } from '../rpc.ts'
+import { preferOriginalAvatars } from './avatar.ts'
+import { attachMentions } from './entities.ts'
+import {
+  decodePrefetch,
+  fetchPublicProfile,
+  fetchPublicTimeline,
+  fetchSessionTimeline,
+  normalizeProfile,
+  type Prefetch,
+} from './profile.ts'
+import {
+  credentialRequiredKey,
+  fetchPublic,
+  profileRef,
+  ProviderError,
+  publicPost,
+  sourceState,
+} from './provider.ts'
+import {
+  accountTransport,
+  fetchSession,
+  parseSessionResult,
+} from './session.ts'
+import type { SessionCredential } from './credential.ts'
+import type { TwitterBuildHost } from '@fxembed/atmosphere/providers/twitter/build-host'
+
+const profileTTL = 60_000
+const maxCachedProfiles = 1000
+// A listed post stands in for the post's own response while it is this fresh.
+const prefetchTTL = 60 * 60_000
+export class CaptureStrategy {
+  private profiles = new Map<string, { at: number; value: FetchResponse }>()
+  private pending = new Map<string, Promise<FetchResponse>>()
+  private publicPost: typeof fetchPublic
+  private publicProfile: typeof fetchPublicProfile
+  private sessionPost: typeof fetchSession
+  private sessionTimeline: typeof fetchSessionTimeline
+  private now: () => number
+  constructor(
+    publicPost = fetchPublic,
+    publicProfile = fetchPublicProfile,
+    sessionPost = fetchSession,
+    sessionTimeline = fetchSessionTimeline,
+    now = Date.now,
+  ) {
+    this.publicPost = publicPost
+    this.publicProfile = publicProfile
+    this.sessionPost = sessionPost
+    this.sessionTimeline = sessionTimeline
+    this.now = now
+  }
+
+  private remember(value: FetchResponse) {
+    const user = this.user(value)
+    for (const key of [
+      value.canonicalTarget!.externalId,
+      `handle:${user.screen_name.toLowerCase()}`,
+    ]) {
+      this.profiles.delete(key)
+      this.profiles.set(key, {
+        at: this.now(),
+        value: FetchResponse.fromPartial(value),
+      })
+    }
+    while (this.profiles.size > maxCachedProfiles)
+      this.profiles.delete(this.profiles.keys().next().value!)
+  }
+  private user(profile: FetchResponse): any {
+    return JSON.parse(
+      Buffer.from(
+        profile.graph!.entities.find((e) => e.key === profile.graph!.root)!
+          .dataJson,
+      ).toString(),
+    ).metadata
+  }
+  private async profile(
+    id: string,
+    force: boolean,
+    signal: AbortSignal,
+  ): Promise<FetchResponse> {
+    const cached = this.profiles.get(id)
+    if (!force && cached && this.now() - cached.at < profileTTL)
+      return FetchResponse.fromPartial(cached.value)
+    const key = `${force ? 'explicit' : 'automatic'}:${id}`
+    let promise = this.pending.get(key)
+    if (!promise) {
+      promise = this.publicProfile(id, false, signal)
+        .catch((error) => {
+          if (
+            error instanceof ProviderError &&
+            error.code === status.UNAUTHENTICATED
+          )
+            throw new ProviderError(
+              status.UNAVAILABLE,
+              'public profile service unavailable',
+            )
+          throw error
+        })
+        .then((value) => {
+          this.remember(value)
+          return value
+        })
+        .finally(() => this.pending.delete(key))
+      this.pending.set(key, promise)
+    }
+    return FetchResponse.fromPartial(await promise)
+  }
+  // Only a capture its listing created settles for what the listing showed;
+  // an explicit one asks upstream. Async so validation failures reject.
+  // eslint-disable-next-line require-await
+  private async listedPost(
+    req: FetchRequest,
+    signal: AbortSignal,
+    account: () => SessionCredential | undefined,
+  ): Promise<FetchResponse | undefined> {
+    const listed = req.automatic ? decodePrefetch(req.prefetch) : undefined
+    if (!listed || !(this.now() - Date.parse(listed.observed_at) < prefetchTTL))
+      return
+    if (listed.source === 'x-session')
+      return this.listedSessionPost(req, listed, signal, account)
+    if (listed.source !== 'fxtwitter' || listed.post?.id !== req.externalId)
+      return
+    try {
+      const result = publicPost(listed.post, req.externalId, {
+        body: Buffer.from(JSON.stringify(listed.post)),
+        contentType: 'application/json',
+        sourceUrl: listed.source_url,
+        visibility: Visibility.VISIBILITY_PUBLIC,
+      })
+      // The listing describes the author as the profile API does, except for
+      // the avatar size; a public timeline cannot list a protected author.
+      const author = listed.post.author
+      this.attachProfile(
+        result,
+        normalizeProfile(
+          {
+            ...author,
+            avatar_url: author.avatar_url?.replace(
+              /_200x200(\.[^/.]+)$/,
+              '_normal$1',
+            ),
+          },
+          author.id,
+          'fxtwitter',
+        ),
+      )
+      return result
+    } catch {
+      // Whatever the listing lacks, the post's own response decides.
+    }
+  }
+  // An account's timeline lists the raw node its single-post response would
+  // carry, so the post is read exactly as that response would be.
+  private async listedSessionPost(
+    req: FetchRequest,
+    listed: Extract<Prefetch, { source: 'x-session' }>,
+    signal: AbortSignal,
+    account: () => SessionCredential | undefined,
+  ): Promise<FetchResponse | undefined> {
+    const node = listed.node
+    if (
+      req.providerId !== 'x-session' ||
+      (node?.tweet ?? node)?.rest_id !== req.externalId
+    )
+      return
+    // Building a post rarely asks upstream (a live broadcast card does); then
+    // the account must be at hand, as for the post's own response.
+    let asked = false
+    const credential = req.credentialDeferred ? undefined : account()
+    const responses: SourceResponse[] = []
+    const host: TwitterBuildHost = {
+      t: (key) => key,
+      twitterProxy: credential
+        ? accountTransport(credential, signal, fetch, responses)
+        : {
+            // Async so callers see a rejection, as from a real request.
+            // eslint-disable-next-line require-await
+            fetch: async () => {
+              asked = true
+              throw new Error('account required')
+            },
+          },
+      shouldTranscodeGif: () => false,
+    }
+    let result: FetchResponse | undefined
+    try {
+      result = await this.sessionListed(
+        req.externalId,
+        structuredClone(node),
+        host,
+      )
+    } catch {
+      // Whatever the node lacks, the post's own response decides.
+    }
+    if (asked) account()
+    if (!result || asked) return
+    result.sourceResponses = [
+      {
+        body: Buffer.from(JSON.stringify(node)),
+        contentType: 'application/json',
+        sourceUrl: listed.source_url,
+        visibility: Visibility.VISIBILITY_PRIVATE,
+      },
+      ...responses,
+    ]
+    const author = result.graph?.entities.find((e) => e.type === 'x.profile')
+    if (!author) return
+    this.attachProfile(
+      result,
+      await this.profile(author.externalId, false, signal),
+    )
+    return result
+  }
+  sessionListed = parseSessionResult
+  private protected(profile: FetchResponse): boolean {
+    const value = this.user(profile).protected
+    if (typeof value !== 'boolean')
+      throw new ProviderError(
+        status.UNAVAILABLE,
+        'profile protection status unavailable',
+      )
+    return value
+  }
+  async fetch(
+    req: FetchRequest,
+    signal: AbortSignal,
+    credential?: SessionCredential,
+  ): Promise<FetchResponse> {
+    if (req.pageCursor && (req.kind !== 'profile' || req.automatic))
+      throw new ProviderError(
+        status.INVALID_ARGUMENT,
+        'invalid collection continuation',
+      )
+    let result: FetchResponse
+    // The core withholds the account until a fetch turns out to need it.
+    const account = () => {
+      if (!credential && req.credentialDeferred) {
+        const error = new ProviderError(
+          status.FAILED_PRECONDITION,
+          'account required',
+        )
+        error.metadata.set(credentialRequiredKey, '1')
+        throw error
+      }
+      return credential
+    }
+    if (req.kind === 'profile') {
+      result = await this.profile(req.externalId, !req.automatic, signal)
+      result.externalId = req.externalId
+      if (!req.automatic) {
+        const mode = this.protected(result) ? 'private' : 'public'
+        result.maxBatchSize = mode === 'public' ? 1000 : 0
+        let cursor = ''
+        if (req.pageCursor) {
+          try {
+            const page = JSON.parse(req.pageCursor)
+            if (
+              page.user !== result.canonicalTarget!.externalId ||
+              page.mode !== mode ||
+              typeof page.cursor !== 'string' ||
+              !page.cursor ||
+              req.pageCursor.length > 4096
+            )
+              throw new Error()
+            cursor = page.cursor
+          } catch {
+            throw new ProviderError(
+              status.FAILED_PRECONDITION,
+              'collection changed; start again from the profile link',
+            )
+          }
+        }
+        if (this.protected(result)) {
+          const credential = account()
+          if (credential) {
+            // The collection of protected posts is account-private, while the
+            // profile metadata is public; it opens once the account does.
+            result.visibility = Visibility.VISIBILITY_PRIVATE
+            result.privateSubject = profileRef(
+              result.canonicalTarget!.externalId,
+            )
+            await this.sessionTimeline(
+              result,
+              credential,
+              signal,
+              undefined,
+              cursor,
+              req.pageSize,
+            )
+          } else {
+            result.incomplete = true
+            result.warnings.push('帖子受保护，需添加有访问权限的采集账号。')
+          }
+        } else {
+          // Fetch only the timeline here; reuse the profile response obtained above.
+          await this.timeline(result, signal, undefined, cursor, req.pageSize)
+        }
+      }
+    } else if ((result = (await this.listedPost(req, signal, account))!)) {
+      // Complete as listed.
+    } else {
+      const author = new URL(req.url).pathname.match(/^\/(\w+)\/status\//)?.[1]
+      let profile: FetchResponse | undefined
+      let discovered: FetchResponse | undefined
+      if (author && author !== 'i')
+        profile = await this.profile(
+          `handle:${author.toLowerCase()}`,
+          false,
+          signal,
+        ).catch((error: unknown): undefined => {
+          // The handle in a saved link may since have been renamed or
+          // suspended; the post itself tells which, so look it up by ID.
+          if (
+            error instanceof ProviderError &&
+            error.code === status.FAILED_PRECONDITION
+          )
+            return
+          throw error
+        })
+      if (!profile) {
+        // An ID-only link has no author. Discover it once before selecting the final source.
+        try {
+          discovered = await this.publicPost(req.externalId, signal)
+        } catch (error) {
+          if (
+            !(error instanceof ProviderError) ||
+            error.code !== status.UNAUTHENTICATED
+          )
+            throw error
+          const credential = account()
+          if (!credential) throw error
+          discovered = await this.session(req.externalId, credential, signal)
+        }
+        const authorNode = discovered.graph?.entities.find(
+          (e) => e.type === 'x.profile',
+        )
+        if (!authorNode)
+          throw new ProviderError(
+            status.UNAVAILABLE,
+            'post author unavailable for capture policy',
+          )
+        profile = await this.profile(authorNode.externalId, false, signal)
+      }
+      if (discovered?.providerId === 'x-session') {
+        result = discovered
+      } else if (this.protected(profile)) {
+        const credential = account()
+        if (!credential)
+          throw new ProviderError(
+            status.PERMISSION_DENIED,
+            '帖子受保护，需添加有访问权限的采集账号。',
+          )
+        result =
+          discovered?.providerId === 'x-session'
+            ? discovered
+            : await this.session(req.externalId, credential, signal)
+      } else
+        result =
+          discovered?.providerId === 'fxtwitter'
+            ? discovered
+            : await this.publicPost(req.externalId, signal)
+      this.attachProfile(result, profile)
+    }
+    if (req.kind === 'profile' && result.nextPageCursor) {
+      const previous = req.pageCursor ? JSON.parse(req.pageCursor).cursor : ''
+      result.nextPageCursor =
+        result.nextPageCursor === previous && !result.incomplete
+          ? ''
+          : JSON.stringify({
+              user: result.canonicalTarget!.externalId,
+              mode: this.protected(result) ? 'private' : 'public',
+              cursor: result.nextPageCursor,
+            })
+    }
+    // Execution provider remains the persisted connection choice. textSource and raw URLs record actual sources.
+    result.providerId = req.providerId
+    result.publicSubjects = [
+      ...new Map(result.publicSubjects.map((s) => [s.externalId, s])).values(),
+    ]
+    if (credential || req.credentialDeferred)
+      for (const source of result.sourceResponses)
+        source.visibility = Visibility.VISIBILITY_PRIVATE
+    await preferOriginalAvatars(result, signal)
+    return result
+  }
+  timeline = fetchPublicTimeline
+  // An account sees a deleted post and a post it may not read alike. The public
+  // API still tells them apart, so ask it before treating this as lost access.
+  private async session(
+    id: string,
+    credential: SessionCredential,
+    signal: AbortSignal,
+  ): Promise<FetchResponse> {
+    try {
+      return await this.sessionPost(id, credential, signal)
+    } catch (error) {
+      if (
+        !(error instanceof ProviderError) ||
+        error.code !== status.PERMISSION_DENIED
+      )
+        throw error
+      const gone = await this.publicPost(id, signal).then(
+        () => undefined,
+        (probe) => (sourceState(probe) ? probe : undefined),
+      )
+      throw gone ?? error
+    }
+  }
+  private attachProfile(result: FetchResponse, profile: FetchResponse) {
+    const author = result.graph?.entities.find(
+      (e) =>
+        e.type === 'x.profile' &&
+        e.externalId === profile.canonicalTarget!.externalId,
+    )
+    if (author) {
+      const node = profile.graph!.entities.find(
+        (e) => e.key === profile.graph!.root,
+      )!
+      author.dataJson = node.dataJson
+      const data = JSON.parse(Buffer.from(node.dataJson).toString())
+      attachMentions(
+        result,
+        author.key,
+        data.metadata?.description,
+        data.metadata?.raw_description?.facets,
+      )
+      author.resourceIndices = profile.resources.map((resource) => {
+        let i = result.resources.findIndex(
+          (r) => r.url === resource.url && r.purpose === resource.purpose,
+        )
+        if (i < 0) {
+          i = result.resources.length
+          result.resources.push(resource)
+        }
+        return i
+      })
+    }
+    result.sourceResponses.push(...profile.sourceResponses)
+    result.publicSubjects.push(...profile.publicSubjects)
+    const targets = new Map(
+      result.relatedTargets.map((target) => [target.url, target]),
+    )
+    targets.set(
+      profile.canonicalTarget!.url,
+      RelatedTarget.fromPartial({
+        url: profile.canonicalTarget!.url,
+        refreshAfterSeconds: 60,
+      }),
+    )
+    result.relatedTargets = [...targets.values()]
+  }
+}

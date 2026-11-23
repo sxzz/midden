@@ -27,6 +27,14 @@ export default sxzz(
       },
     },
     {
+      // Carried over from the gRPC adapters; these rules only restyle it.
+      files: ['server/src/platforms/**'],
+      rules: {
+        'e18e/prefer-static-regex': 'off',
+        'unicorn/error-message': 'off',
+      },
+    },
+    {
       files: ['**/*.test.ts'],
       rules: {
         // Async mocks keep the API's Promise contract; fixtures may be partial.
