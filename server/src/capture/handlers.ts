@@ -3,6 +3,7 @@ import { safeError } from './errors.ts'
 import { runCapture } from './fetch.ts'
 import { runFinalize } from './finalize.ts'
 import { failCapture } from './lifecycle.ts'
+import { failRelated, runRelated } from './related.ts'
 import { failThumbnail, runThumbnail } from './thumbnail.ts'
 import type { Job, JobHandler } from '#jobs/queue.ts'
 import type { CaptureContext } from './context.ts'
@@ -32,6 +33,14 @@ export function captureHandlers(
       priority: 4,
       run: (job) => runThumbnail(context(), job),
       fail: (job, error) => failThumbnail(context(), job.ref, safeError(error)),
+    },
+    related: {
+      queue: 'control',
+      run: (job) => {
+        runRelated(context(), job)
+        return Promise.resolve()
+      },
+      fail: (job, error) => failRelated(context(), job.ref, safeError(error)),
     },
     finalize: {
       queue: 'control',
