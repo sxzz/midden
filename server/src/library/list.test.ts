@@ -182,6 +182,11 @@ describe('library listing', () => {
         resources: [image('b.jpg', { sensitive: true })],
         graph: graph([entity('root', 'fake.post', 'nsfw', {}, [0])]),
       }),
+      lost: () => ({
+        text: 'image that failed to download',
+        resources: [image('missing/d.jpg')],
+        graph: graph([entity('root', 'fake.post', 'lost', {}, [0])]),
+      }),
       avatar: () => ({
         text: 'sensitive avatar only',
         resources: [image('c.jpg', { sensitive: true, purpose: 'avatar' })],
@@ -199,7 +204,7 @@ describe('library listing', () => {
       }),
     })
     const saved: Record<string, string> = {}
-    for (const id of ['text', 'img', 'nsfw', 'avatar'])
+    for (const id of ['text', 'img', 'nsfw', 'lost', 'avatar'])
       saved[id] = (await capture(ctx, post(id))).collectionId
     saved.profile = (await capture(ctx, profile('5'))).collectionId
     const match = (filter: CollectionFilter) =>
@@ -211,20 +216,24 @@ describe('library listing', () => {
     expect(match({ entityType: 'fake.profile' })).toEqual(new Set(['profile']))
     // The text entry has no graph, so no root type at all.
     expect(match({ entityType: 'fake.post' })).toEqual(
-      new Set(['img', 'nsfw', 'avatar']),
+      new Set(['img', 'nsfw', 'lost', 'avatar']),
     )
-    expect(match({ entityType: 'fake.post,fake.profile' }).size).toBe(4)
+    expect(match({ entityType: 'fake.post,fake.profile' }).size).toBe(5)
     expect(match({ mediaType: 'text' })).toEqual(
       new Set(['text', 'avatar', 'profile']),
     )
-    expect(match({ mediaType: 'image' })).toEqual(new Set(['img', 'nsfw']))
-    expect(match({ mediaType: 'image,text' }).size).toBe(5)
+    // Media count by what the post had, whether or not it was saved.
+    expect(match({ mediaType: 'image' })).toEqual(
+      new Set(['img', 'nsfw', 'lost']),
+    )
+    expect(match({ mediaType: 'video' }).size).toBe(0)
+    expect(match({ mediaType: 'image,text' }).size).toBe(6)
     // An avatar never makes a collection sensitive.
     expect(match({ sensitive: 'contains' })).toEqual(new Set(['nsfw']))
-    expect(match({ sensitive: 'not_contains' }).size).toBe(4)
+    expect(match({ sensitive: 'not_contains' }).size).toBe(5)
     const future = new Date(Date.now() + 3_600_000).toISOString()
     expect(match({ savedFrom: future }).size).toBe(0)
-    expect(match({ savedBefore: future }).size).toBe(5)
+    expect(match({ savedBefore: future }).size).toBe(6)
   })
 
   test('authors are stable identities labelled with their newest name', async () => {

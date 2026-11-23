@@ -14,18 +14,23 @@ import type { Entity, EntityGraph, Resource } from '#platforms/protocol.ts'
 
 export const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4])
 
-/** A context whose media downloads return distinct JPEG bytes per path. */
+/**
+ * A context whose media downloads return distinct JPEG bytes per path;
+ * paths under /missing/ are not found.
+ */
 export function libraryContext(fetch: FakeFetch) {
   const handle = { current: fetch }
   const ctx = testContext({
     platforms: [fakePlatform(handle)],
     handlers: captureHandlers,
-    fetch: (input) =>
-      Promise.resolve(
-        new Response(
-          Buffer.concat([JPEG, Buffer.from(new URL(String(input)).pathname)]),
-        ),
-      ),
+    fetch: (input) => {
+      const { pathname } = new URL(String(input))
+      return Promise.resolve(
+        pathname.startsWith('/missing/')
+          ? new Response('', { status: 404 })
+          : new Response(Buffer.concat([JPEG, Buffer.from(pathname)])),
+      )
+    },
   })
   ctx.queue.start()
   return { ctx, handle }

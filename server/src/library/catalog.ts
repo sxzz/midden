@@ -22,8 +22,10 @@ import type { Database, Executor } from '#db/client.ts'
 const PUBLISHED_AT = `CASE WHEN h.payload ->> 'published_at' GLOB '[0-9][0-9][0-9][0-9]-*'
   THEN CAST(round(unixepoch(h.payload ->> 'published_at', 'subsec') * 1000) AS INTEGER) END`
 
+// Content media as the platform listed them, saved or not: a post whose
+// images all failed to download still counts as one with images.
 const content = (filter = '') => `EXISTS (
-  SELECT 1 FROM assets m ${filter.includes('b.') ? 'JOIN blobs b ON b.id = m.blob_id' : ''}
+  SELECT 1 FROM assets m
   WHERE m.capture_id = h.capture_id AND m.purpose = '' ${filter})`
 
 /** Bring the catalog rows of these collections up to date. */
@@ -79,8 +81,8 @@ export function catalogCollections(db: Executor, ids: readonly string[]) {
       CASE json_type(coalesce(h.author_data, h.root_data), '$.metadata.protected')
         WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,
       ${sql.raw(content())},
-      ${sql.raw(content(`AND b.mime LIKE 'image/%'`))},
-      ${sql.raw(content(`AND b.mime LIKE 'video/%'`))},
+      ${sql.raw(content(`AND m.kind = 'image'`))},
+      ${sql.raw(content(`AND m.kind = 'video'`))},
       ${sql.raw(content('AND m.sensitive = 1'))},
       EXISTS (SELECT 1 FROM entity_relations edge
         WHERE edge.revision_id = h.revision_id
