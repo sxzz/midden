@@ -1,15 +1,12 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick, vaporInteropPlugin } from 'vue'
+import { asset as build } from '../testing/api'
 import MediaGallery from './MediaGallery.vue'
 import MediaThumbs from './MediaThumbs.vue'
 import type { Asset } from '../api'
 
-const asset = (id: string, sensitive: boolean): Asset => ({
-  id,
-  state: 'ready',
-  mime: 'image/png',
-  sensitive,
-})
+const asset = (id: string, sensitive: boolean): Asset =>
+  build({ id, mime: 'image/png', sensitive })
 // jsdom has neither a modal dialog nor media queries; the viewer only needs to
 // reach the DOM here, not to render a real gallery.
 beforeAll(() => {

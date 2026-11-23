@@ -70,7 +70,7 @@ function details(
 }
 const generic: Presenter = (a) => ({
   name: a.author_name || '已保存的内容',
-  locked: a.visibility === 'private',
+  locked: false,
   body: a.text || a.summary || '暂无正文',
   details: details(a),
 })
@@ -144,10 +144,8 @@ const social: Presenter = (a, root, options = {}) => {
     body: bio === undefined ? body : bio || '暂无简介',
     bio,
     profileChanged: !!author?.current,
-    // The lock follows the author's profile, not the visibility this capture
-    // happened to have; that is only a fallback for snapshots that never
-    // recorded protection.
-    locked: isProtected(profile) ?? a.visibility === 'private',
+    // The lock follows the author's profile as last seen.
+    locked: isProtected(profile) ?? false,
     profileCollectionId: isProfile ? undefined : profile?.saved_collection_id,
     profileHref: isProfile
       ? `#/collection/${a.id}`

@@ -1,15 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createVaporApp, nextTick } from 'vue'
-import { api } from '../api'
+import { mockApi } from '../testing/api'
 import ProfileCollections from './ProfileCollections.vue'
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
-vi.mock('../api', async (original) => ({
-  ...(await original<typeof import('../api')>()),
-  api: vi.fn(),
-}))
 let unmount = () => {}
 it('loads Instagram profile members with their own platform entity type', async () => {
-  const request = vi.mocked(api)
+  const request = mockApi()
   request.mockResolvedValue({ items: [], total_storage_bytes: 0 })
   const el = document.createElement('div')
   document.body.append(el)
@@ -35,7 +31,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 it('shows related posts using the library and the total across all pages', async () => {
-  const request = vi.mocked(api)
+  const request = mockApi()
   request.mockResolvedValue({
     items: [
       {
@@ -101,7 +97,7 @@ it('restarts published-time pagination when changing order and preserves the sel
       disconnect() {}
     },
   )
-  const request = vi.mocked(api)
+  const request = mockApi()
   const queries: URLSearchParams[] = []
   request.mockImplementation(async (path) => {
     if (path === '/tags') return []

@@ -1,14 +1,12 @@
 <script setup vapor lang="ts">
 import { onMounted, shallowRef, useTemplateRef } from 'vue'
-import { api, APIError, errorText } from '../api'
+import { APIError, call, client, errorText } from '../api'
 const props = defineProps<{ error?: string }>()
 const widget = useTemplateRef<HTMLDivElement>('widget')
 const failure = shallowRef('')
 onMounted(async () => {
   try {
-    const { bot_username } = await api<{ bot_username: string }>(
-      '/auth/telegram',
-    )
+    const { bot_username } = await call(client.auth.telegram.$get())
     const script = document.createElement('script')
     script.async = true
     script.src = 'https://telegram.org/js/telegram-widget.js?22'

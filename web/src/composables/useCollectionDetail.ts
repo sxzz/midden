@@ -8,15 +8,26 @@ import {
 } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  api,
+  call,
+  client,
   errorText,
   type Collection,
   type Job,
   type MemberProgress,
-  type Page,
   type Revision,
 } from '../api'
 import { toast } from './useToast'
+const collections = client.collections[':id']
+const getCollection = (id: string, signal: AbortSignal) =>
+  call(collections.$get({ param: { id } }, { init: { signal } }))
+const getJob = (id: string, signal: AbortSignal) =>
+  call(client.jobs[':id'].$get({ param: { id } }, { init: { signal } }))
+const availability = async (id: string, signal: AbortSignal) =>
+  (
+    await call(
+      collections.availability.$get({ param: { id } }, { init: { signal } }),
+    )
+  ).available
 const settled = (m?: MemberProgress) =>
   m ? m.complete + m.partial + m.failed : 0
 function memberStatus(m: MemberProgress) {
@@ -74,11 +85,7 @@ export function useCollectionDetail(
   }
   async function checkAvailability() {
     try {
-      available.value = (
-        await api<{ available: boolean }>(`/collections/${id()}/availability`, {
-          signal: controller.signal,
-        })
-      ).available
+      available.value = await availability(id(), controller.signal)
     } catch (e) {
       if (!controller.signal.aborted) {
         available.value = false
@@ -146,16 +153,12 @@ export function useCollectionDetail(
       available.value = false
       confirmDelete.value = false
       try {
-        const result = await api<Collection>(`/collections/${id}`, { signal })
+        const result = await getCollection(id, signal)
         if (signal.aborted) return
         collection.value = result
-        latestRevision.value = collection.value.revision_id
+        latestRevision.value = result.revision_id
         void historyPage()
-        available.value = (
-          await api<{ available: boolean }>(`/collections/${id}/availability`, {
-            signal: controller.signal,
-          })
-        ).available
+        available.value = await availability(id, signal)
       } catch (e) {
         if (!signal.aborted) error.value = errorText(e)
       }
@@ -171,9 +174,11 @@ export function useCollectionDetail(
     const signal = controller.signal
     historyLoading.value = true
     try {
-      const p = await api<Page<Revision>>(
-        `/collections/${id()}/revisions${more ? `?cursor=${encodeURIComponent(next.value)}` : ''}`,
-        { signal },
+      const p = await call(
+        collections.revisions.$get(
+          { param: { id: id() }, query: more ? { cursor: next.value } : {} },
+          { init: { signal } },
+        ),
       )
       if (signal.aborted) return
       revisions.value = more ? [...revisions.value, ...p.items] : p.items
@@ -203,10 +208,15 @@ export function useCollectionDetail(
     loadingRevision.value = true
     error.value = ''
     try {
-      const result = await api<Collection>(
-        `/collections/${id()}${revisionID && revisionID !== latestRevision.value ? `/revisions/${revisionID}` : ''}`,
-        { signal },
-      )
+      const result =
+        revisionID && revisionID !== latestRevision.value
+          ? await call(
+              collections.revisions[':revision'].$get(
+                { param: { id: id(), revision: revisionID } },
+                { init: { signal } },
+              ),
+            )
+          : await getCollection(id(), signal)
       if (signal.aborted || request !== revisionRequest) return
       collection.value = result
       if (!revisionID || revisionID === latestRevision.value)
@@ -221,10 +231,12 @@ export function useCollectionDetail(
   async function remove() {
     busy.value = true
     try {
-      await api(`/collections/${id()}`, {
-        method: 'DELETE',
-        signal: controller.signal,
-      })
+      await call(
+        collections.$delete(
+          { param: { id: id() } },
+          { init: { signal: controller.signal } },
+        ),
+      )
       deleted(id())
     } catch (e) {
       report(e)
@@ -255,9 +267,7 @@ export function useCollectionDetail(
       if (!visible) return
       timer = setTimeout(async () => {
         try {
-          const next = await api<Job>(`/jobs/${job.id}`, {
-            signal: controller.signal,
-          })
+          const next = await getJob(job.id, controller.signal)
           await poll(next, run)
         } catch (e) {
           if (stale(run)) return
@@ -271,10 +281,7 @@ export function useCollectionDetail(
     if (!visible) return
     busy.value = false
     if (job.state !== 'failed') {
-      const result = await api<Collection>(
-        `/collections/${job.collection_id}`,
-        { signal: controller.signal },
-      )
+      const result = await getCollection(job.collection_id, controller.signal)
       if (stale(run) || !visible) return
       collection.value = result
       if (job.collection_id !== id())
@@ -315,9 +322,7 @@ export function useCollectionDetail(
     if (!visible) return
     timer = setTimeout(async () => {
       try {
-        const next = await api<Job>(`/jobs/${job.id}`, {
-          signal: controller.signal,
-        })
+        const next = await getJob(job.id, controller.signal)
         if (stale(run)) return
         const landed = settled(next.members) !== reloaded.settled
         if (
@@ -340,12 +345,15 @@ export function useCollectionDetail(
     busy.value = true
     try {
       await startPoll(
-        await api<Job>('/captures', {
-          method: 'POST',
-          body: JSON.stringify({ refresh_id: id() }),
-          headers: { 'Idempotency-Key': crypto.randomUUID() },
-          signal: controller.signal,
-        }),
+        await call(
+          client.captures.$post(
+            { json: { refresh_id: id() } },
+            {
+              headers: { 'Idempotency-Key': crypto.randomUUID() },
+              init: { signal: controller.signal },
+            },
+          ),
+        ),
       )
     } catch (e) {
       report(e)

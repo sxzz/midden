@@ -114,7 +114,6 @@ describe('collection', () => {
       id: done.collectionId,
       url: post('1'),
       external_id: '1',
-      visibility: 'public',
       revision_id: done.revisionId,
       text: 'hello',
       summary: 'A: hello',

@@ -8,7 +8,7 @@ import {
   shallowRef,
   watch,
 } from 'vue'
-import { api, errorText, type Author, type Tag } from '../api'
+import { call, client, errorText, type Author, type Tag } from '../api'
 import ChevronIcon from './ui/ChevronIcon.vue'
 import MultiSelect from './ui/MultiSelect.vue'
 import TagChips from './ui/TagChips.vue'
@@ -16,7 +16,7 @@ const tags = shallowRef<Tag[]>([])
 const tagError = shallowRef('')
 async function loadTags() {
   try {
-    tags.value = await api<Tag[]>('/tags')
+    tags.value = await call(client.tags.$get())
     tagError.value = ''
   } catch (e) {
     tagError.value = errorText(e)
@@ -249,12 +249,12 @@ async function loadAuthors() {
   authorsLoading.value = true
   authorError.value = ''
   try {
-    const data = await api<{ items: Author[] }>('/collections/authors', {
-      signal: controller.signal,
-    })
-    authors.value = data.items.filter(
-      (author) => typeof author?.id === 'string' && author.id,
+    const data = await call(
+      client.collections.authors.$get(undefined, {
+        init: { signal: controller.signal },
+      }),
     )
+    authors.value = data.items.filter((author) => author.id)
     authorsLoaded = true
   } catch (error) {
     if (!controller.signal.aborted) authorError.value = errorText(error)

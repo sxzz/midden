@@ -1,12 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, vaporInteropPlugin } from 'vue'
-import { api, type Tag } from '../api'
+import { mockApi } from '../testing/api'
 import CollectionAnnotations from './CollectionAnnotations.vue'
 import CollectionFilters from './CollectionFilters.vue'
-vi.mock('../api', async (original) => ({
-  ...(await original<typeof import('../api')>()),
-  api: vi.fn(),
-}))
+import type { Tag } from '../api'
 let unmount = () => {}
 afterEach(() => {
   unmount()
@@ -56,12 +53,12 @@ function deferred() {
 }
 it('autosaves tag creation and removal while the note waits for its button', async () => {
   const saved = vi.fn()
-  const request = vi.mocked(api)
+  const request = mockApi()
   let annotation = { note: '原备注', tags: [{ id: 'old', name: '原标签' }] }
   const sent: unknown[] = []
   request.mockImplementation(async (path, options) => {
     if (path === '/tags') return annotation.tags
-    if (options?.method === 'PATCH') {
+    if (options.method === 'PATCH') {
       const body = JSON.parse(String(options.body))
       sent.push(body)
       annotation = {
@@ -104,12 +101,12 @@ it('autosaves tag creation and removal while the note waits for its button', asy
   expect(noteButton(el).disabled).toBe(true)
 })
 it('allows retrying a failed tag autosave independently of the note', async () => {
-  const request = vi.mocked(api)
+  const request = mockApi()
   request.mockImplementation(async (path, options) => {
     if (path === '/tags') return [{ id: 'old', name: '原标签' }]
     return {
       note: '原备注',
-      tags: options ? [] : [{ id: 'old', name: '原标签' }],
+      tags: options.method === 'PATCH' ? [] : [{ id: 'old', name: '原标签' }],
     }
   })
   const el = mount(CollectionAnnotations, { id: 'collection' })
@@ -122,18 +119,18 @@ it('allows retrying a failed tag autosave independently of the note', async () =
   expect(noteButton(el).disabled).toBe(true)
   press(el, 'button', '重试保存标签')
   await vi.waitFor(() => expect(el.textContent).not.toContain('网络故障'))
-  expect(request).toHaveBeenLastCalledWith('/tags')
+  expect(request).toHaveBeenLastCalledWith('/tags', { method: 'GET' })
   expect(request).toHaveBeenCalledWith('/collections/collection/annotation', {
     method: 'PATCH',
     body: JSON.stringify({ tag_names: [] }),
   })
 })
 it('keeps a failed note save inside the note region', async () => {
-  const request = vi.mocked(api)
+  const request = mockApi()
   let annotation = { note: '原备注', tags: [{ id: 'old', name: '原标签' }] }
   request.mockImplementation(async (path, options) => {
     if (path === '/tags') return [{ id: 'old', name: '原标签' }]
-    if (options?.method === 'PATCH') {
+    if (options.method === 'PATCH') {
       const body = JSON.parse(String(options.body))
       annotation = {
         note: body.note ?? annotation.note,
@@ -167,7 +164,7 @@ it('keeps a failed note save inside the note region', async () => {
 })
 it('coalesces a burst of tag edits into the last one', async () => {
   const saved = vi.fn()
-  const request = vi.mocked(api)
+  const request = mockApi()
   const vocabulary = [
     { id: 'a', name: '甲' },
     { id: 'b', name: '乙' },
@@ -177,7 +174,7 @@ it('coalesces a burst of tag edits into the last one', async () => {
   const open = deferred()
   request.mockImplementation(async (path, options) => {
     if (path === '/tags') return vocabulary
-    if (options?.method === 'PATCH') {
+    if (options.method === 'PATCH') {
       const names: string[] = JSON.parse(String(options.body)).tag_names
       sent.push(names)
       if (sent.length === 1) await open.promise
@@ -200,7 +197,9 @@ it('coalesces a burst of tag edits into the last one', async () => {
   await vi.waitFor(() => expect(sent).toEqual([['甲'], ['乙']]))
   // The write that survived ends by reloading the vocabulary, and the progress
   // notice goes away once nothing is left to drain.
-  await vi.waitFor(() => expect(request).toHaveBeenLastCalledWith('/tags'))
+  await vi.waitFor(() =>
+    expect(request).toHaveBeenLastCalledWith('/tags', { method: 'GET' }),
+  )
   await vi.waitFor(() => expect(el.textContent).not.toContain('正在保存标签…'))
   expect(checked(el, '乙')).toBe(true)
   expect(checked(el, '甲')).toBe(false)
@@ -209,14 +208,14 @@ it('coalesces a burst of tag edits into the last one', async () => {
   expect(saved).toHaveBeenCalledTimes(1)
 })
 it('restores a tag reselected while its removal was still in flight', async () => {
-  const request = vi.mocked(api)
+  const request = mockApi()
   const vocabulary = [{ id: 'a', name: '甲' }]
   const sent: string[][] = []
   let stored: Tag[] = [...vocabulary]
   const open = deferred()
   request.mockImplementation(async (path, options) => {
     if (path === '/tags') return vocabulary
-    if (options?.method === 'PATCH') {
+    if (options.method === 'PATCH') {
       const names: string[] = JSON.parse(String(options.body)).tag_names
       sent.push(names)
       if (sent.length === 1) await open.promise
@@ -234,20 +233,22 @@ it('restores a tag reselected while its removal was still in flight', async () =
   press(el, 'label', '甲')
   open.release()
   await vi.waitFor(() => expect(sent).toEqual([[], ['甲']]))
-  await vi.waitFor(() => expect(request).toHaveBeenLastCalledWith('/tags'))
+  await vi.waitFor(() =>
+    expect(request).toHaveBeenLastCalledWith('/tags', { method: 'GET' }),
+  )
   await vi.waitFor(() => expect(el.textContent).not.toContain('正在保存标签…'))
   expect(checked(el, '甲')).toBe(true)
   expect(stored).toEqual(vocabulary)
 })
 it('lets a note save and a tag autosave finish without overwriting each other', async () => {
-  const request = vi.mocked(api)
+  const request = mockApi()
   const vocabulary = [{ id: 'old', name: '原标签' }]
   let stored = { note: '原备注', tags: vocabulary as Tag[] }
   const sent: unknown[] = []
   const open = deferred()
   request.mockImplementation(async (path, options) => {
     if (path === '/tags') return vocabulary
-    if (options?.method !== 'PATCH') return stored
+    if (options.method !== 'PATCH') return stored
     const body = JSON.parse(String(options.body))
     sent.push(body)
     if (body.tag_names) {
@@ -273,7 +274,9 @@ it('lets a note save and a tag autosave finish without overwriting each other', 
   await vi.waitFor(() => expect(sent).toEqual([{ note: '新备注' }]))
   // The chips finish their own write while the note is still open.
   press(el, 'label', '原标签')
-  await vi.waitFor(() => expect(request).toHaveBeenLastCalledWith('/tags'))
+  await vi.waitFor(() =>
+    expect(request).toHaveBeenLastCalledWith('/tags', { method: 'GET' }),
+  )
   await vi.waitFor(() => expect(el.textContent).not.toContain('正在保存标签…'))
   expect(sent).toEqual([{ note: '新备注' }, { tag_names: [] }])
   expect(checked(el, '原标签')).toBe(false)
@@ -288,7 +291,7 @@ it('lets a note save and a tag autosave finish without overwriting each other', 
   expect(stored).toEqual({ note: '新备注', tags: [] })
 })
 it('sizes the note to its own text instead of a fixed box', async () => {
-  vi.mocked(api).mockImplementation(async (path) =>
+  mockApi().mockImplementation(async (path) =>
     path === '/tags' ? [] : { note: '第一行', tags: [] },
   )
   const el = mount(CollectionAnnotations, { id: 'collection' })
@@ -304,7 +307,7 @@ it('sizes the note to its own text instead of a fixed box', async () => {
   await vi.waitFor(() => expect(area.style.height).not.toBe(''))
 })
 it('asks for a first tag when the account has none', async () => {
-  vi.mocked(api).mockImplementation(async (path) =>
+  mockApi().mockImplementation(async (path) =>
     path === '/tags' ? [] : { note: '', tags: [] },
   )
   const el = mount(CollectionAnnotations, { id: 'collection' })
@@ -312,7 +315,7 @@ it('asks for a first tag when the account has none', async () => {
   expect(el.querySelector('[aria-label="新标签名称"]')).not.toBeNull()
 })
 it('submits and clears a tag filter together with the existing filters', async () => {
-  vi.mocked(api).mockImplementation(async (path) =>
+  mockApi().mockImplementation(async (path) =>
     path === '/tags' ? [{ id: 'tag', name: '研究' }] : { items: [] },
   )
   const search = vi.fn()

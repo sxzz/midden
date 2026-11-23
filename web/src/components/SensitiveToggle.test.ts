@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, vaporInteropPlugin } from 'vue'
 import { router } from '../router'
+import { mockApi } from '../testing/api'
 import CollectionLibrary from './CollectionLibrary.vue'
 const collection = {
   id: '00000000-0000-4000-8000-000000000001',
@@ -17,19 +18,16 @@ const collection = {
     },
   ],
 }
-vi.mock('../api', async (original) => ({
-  ...(await original<typeof import('../api')>()),
-  api: vi.fn(async (path: string) => {
-    if (path === '/collections' || path.startsWith('/collections?'))
-      return { items: [collection] }
-    if (path === '/tags') return []
-    if (path.endsWith('/annotation')) return { note: '', tags: [] }
-    if (path.endsWith('/revisions')) return { items: [] }
-    if (path.endsWith('/availability')) return { available: true }
-    if (path.startsWith('/collections/')) return collection
-    return { used_bytes: 0, reserved_bytes: 0, limit_bytes: 1000 }
-  }),
-}))
+mockApi((path) => {
+  if (path === '/collections' || path.startsWith('/collections?'))
+    return { items: [collection] }
+  if (path === '/tags') return []
+  if (path.endsWith('/annotation')) return { note: '', tags: [] }
+  if (path.endsWith('/revisions')) return { items: [] }
+  if (path.endsWith('/availability')) return { available: true }
+  if (path.startsWith('/collections/')) return collection
+  return { used_bytes: 0 }
+})
 let unmount = () => {}
 afterEach(() => {
   unmount()

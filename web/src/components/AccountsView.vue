@@ -1,7 +1,8 @@
 <script setup vapor lang="ts">
 import { computed, onActivated, shallowRef } from 'vue'
 import {
-  api,
+  call,
+  client,
   errorText,
   type Account,
   type AccountPlatform,
@@ -40,7 +41,7 @@ async function askClear() {
   if (busy.value) return
   busy.value = true
   try {
-    library.value = await api<LibrarySize>('/library')
+    library.value = await call(client.library.$get())
     clearing.value = true
   } catch (e) {
     toast(errorText(e))
@@ -52,10 +53,9 @@ async function clearAll() {
   if (busy.value) return
   busy.value = true
   try {
-    const v = await api<LibrarySize>('/library/delete-all', {
-      method: 'POST',
-      body: JSON.stringify({ confirm: 'delete all' }),
-    })
+    const v = await call(
+      client.library['delete-all'].$post({ json: { confirm: 'delete all' } }),
+    )
     clearing.value = false
     toast(`已删除 ${v.collections} 条收藏和 ${v.records} 条采集记录。`)
     emit('cleared')
@@ -76,7 +76,7 @@ const browser = !host()?.initData
 async function logout() {
   busy.value = true
   try {
-    await api('/session', { method: 'DELETE' })
+    await call(client.session.$delete())
     location.reload()
   } catch (e) {
     error.value = errorText(e)
@@ -90,10 +90,11 @@ const versionURL = version
 async function load() {
   loading.value = true
   try {
-    data.value = await api<Accounts>('/accounts')
-    data.value.platforms.sort(
+    const accounts = await call(client.accounts.$get())
+    accounts.platforms.sort(
       (a, b) => Number(b.id === 'x') - Number(a.id === 'x'),
     )
+    data.value = accounts
     error.value = ''
   } catch (e) {
     error.value = errorText(e)
@@ -121,10 +122,11 @@ async function select(platform: string, account = '') {
   if (busy.value) return
   busy.value = true
   try {
-    data.value = await api<Accounts>('/accounts/selection', {
-      method: 'PUT',
-      body: JSON.stringify({ platform, account_id: account }),
-    })
+    data.value = await call(
+      client.accounts.selection.$put({
+        json: { platform, account_id: account },
+      }),
+    )
   } catch (e) {
     toast(errorText(e))
   } finally {
@@ -137,10 +139,9 @@ async function add(credential: string, name: string) {
   busy.value = true
   addError.value = ''
   try {
-    const account = await api<Account>('/accounts', {
-      method: 'POST',
-      body: JSON.stringify({ platform, credential, name }),
-    })
+    const account = await call(
+      client.accounts.$post({ json: { platform, credential, name } }),
+    )
     adding.value = undefined
     toast(`已添加并选择 ${label(account)}。`)
     await load()
@@ -155,9 +156,7 @@ async function remove() {
   if (!account || busy.value) return
   busy.value = true
   try {
-    await api(`/accounts/${encodeURIComponent(account.id)}`, {
-      method: 'DELETE',
-    })
+    await call(client.accounts[':id'].$delete({ param: { id: account.id } }))
     removing.value = undefined
     await load()
   } catch (e) {

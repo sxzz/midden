@@ -1,219 +1,79 @@
+import {
+  hc,
+  type ClientResponse,
+  type InferRequestType,
+  type InferResponseType,
+  type parseResponse,
+} from 'hono/client'
 import { host } from './host'
-export interface Tag {
-  id: string
-  name: string
-}
-export interface Annotation {
-  note: string
-  tags: Tag[]
-}
-export interface Asset {
-  id: string
-  purpose?: string
-  state: string
-  mime?: string
-  alt_text?: string
-  sensitive: boolean
-  error?: string
-  /** A small derived image exists for lists; videos get their first frame. */
-  thumbnail?: boolean
-  /** Signed, time-limited links to the media; absent until it is ready. */
-  url?: string
-  thumbnail_url?: string
-  download_url?: string
-  file_name?: string
-}
-export interface Entity {
-  external_id?: string
-  saved_collection_id?: string
-  /** The saved collection's current summary, for a post kept by reference. */
-  saved_summary?: string
-  saved_text?: string
-  /** The saved copy's author, for a post the graph keeps by reference. */
-  saved_author?: Entity
-  key: string
-  type: string
-  data: Record<string, unknown>
-  assets?: Asset[]
-  /** An author's newest version, when it differs from this snapshot. */
-  current?: { id: string; data: Record<string, unknown>; assets?: Asset[] }
-}
-export interface Collection {
-  /** `author` is the profile the source snapshot attributes the entity to. */
-  incoming_relations?: { type: string; entity: Entity; author?: Entity }[]
-  relation_types?: string[]
-  storage_bytes?: number
-  id: string
-  url: string
-  text: string
-  summary?: string
-  author_name?: string
-  published_at?: string
-  saved_at?: string
-  observed_at: string
-  /** What the last refresh learned about the source itself. */
-  source_state?: 'deleted' | 'suspended'
-  source_state_at?: string
-  visibility: string
-  revision_id: string
-  assets: Asset[]
-  warnings?: string[] | null
-  graph?: {
-    root: string
-    entities: Entity[]
-    relations: { source: string; target: string; type: string }[]
-  }
-}
-/** `id` is the stable adapter entity identity; `name` is only a label. */
-export interface Author {
-  id: string
-  name: string
-}
-export interface Page<T> {
-  total_storage_bytes?: number
-  items: T[]
-  next_cursor?: string
-}
-export interface Revision {
-  id: string
-  created_at: string
-}
-/** Captures a collection (such as a profile) started for its members. */
-export interface MemberProgress {
-  total: number
-  complete: number
-  partial: number
-  failed: number
-  pending: number
-  done: boolean
-}
-export interface Job {
-  id: string
-  collection_id: string
-  state: string
-  error?: string
-  members?: MemberProgress
-}
-/** What deleting everything would remove. */
-export interface LibrarySize {
-  collections: number
-  records: number
-  /** Records whose capture has not finished. */
-  running: number
-}
-/** Images and videos of a record's own capture. */
-export interface MediaProgress {
-  total: number
-  ready: number
-  failed: number
-}
-/** One capture request: a saved link, a refresh, or a further page. */
-export interface CaptureRecord {
-  id: string
-  job_id: string
-  collection_id: string
-  /** False once the collection left the library. */
-  saved: boolean
-  url: string
-  input: string
-  platform: string
-  kind: string
-  state: 'queued' | 'downloading' | 'complete' | 'partial' | 'failed'
-  error?: string
-  media: MediaProgress
-  created_at: string
-  finished_at?: string
-  /** Set for a collection such as a profile, covering its members' captures. */
-  members?: MemberProgress
-  stopped?: boolean
-  /** Failed members a finished collection record can fetch again. */
-  retryable?: number
-  /** What a finished collection record can fetch next, as the bot offers. */
-  pages?: { more: boolean; more_1000: boolean; failed: boolean }
-  /** The capture and every member capture have finished. */
-  done: boolean
-}
-export interface CaptureMedia {
-  position: number
-  kind: string
-  purpose?: string
-  state: 'pending' | 'ready' | 'failed'
-  error?: string
-}
-export interface CaptureRecordDetail extends CaptureRecord {
-  warnings: string[]
-  media_items: CaptureMedia[]
-  /** Why members failed or were saved incompletely, most common first. */
-  reasons: { reason: string; count: number }[]
-}
-export interface CaptureMember {
-  job_id: string
-  collection_id: string
-  saved: boolean
-  url: string
-  state: CaptureRecord['state']
-  error?: string
-  reasons: string[]
-  /** The source reported the content deleted or suspended. */
-  gone?: boolean
-  created_at: string
-}
-export interface Usage {
-  used_bytes: number
-  reserved_bytes: number
-  limit_bytes: number
-  unlimited: boolean
-}
-export interface AccountPlatform {
-  id: string
-  name: string
-  help?: string
-  /** Whether new captures can use the platform's public source. */
-  public: boolean
-  can_add: boolean
-  /** Empty when the public source is selected. */
-  selected_account_id?: string
-}
-export interface Account {
-  id: string
-  name: string
-  username?: string
-  state: string
-  platform: string
-  selected: boolean
-}
-export interface Accounts {
-  platforms: AccountPlatform[]
-  accounts: Account[]
-}
-export class APIError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
-    super(message)
-  }
-}
-export async function api<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const response = await fetch(`/v1${path}`, {
+import type { Api } from '@midden/server/api'
+
+/** The server's `/v1` API, typed from its route definitions. */
+export const client = hc<Api>('/v1', {
+  fetch: (input: RequestInfo | URL, init?: RequestInit) =>
     // Ahead of images and video, which share the same connection.
-    priority: 'high',
-    ...options,
-    credentials: 'same-origin',
-    headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...options.headers,
-    },
-  })
+    fetch(input, { priority: 'high', ...init, credentials: 'same-origin' }),
+})
+
+export class APIError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
+/**
+ * The successful body of a request, or an APIError carrying the status and
+ * the server's message.
+ */
+export async function call<T extends ClientResponse<unknown>>(
+  request: T | Promise<T>,
+): Promise<Awaited<ReturnType<typeof parseResponse<T>>>> {
+  const response = await request
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}))
+    const body = (await response.json().catch(() => ({}))) as {
+      error?: string
+    }
     throw new APIError(response.status, body.error || '服务暂时不可用')
   }
-  return response.status === 204 ? (undefined as T) : response.json()
+  return (response.status === 204 ? undefined : await response.json()) as never
 }
+
+type Ok<T> = InferResponseType<T, 200>
+
+export type Collection = Ok<(typeof client.collections)[':id']['$get']>
+export type CollectionPage = Ok<typeof client.collections.$get>
+export type Asset = Collection['assets'][number]
+export type Entity = NonNullable<Collection['graph']>['entities'][number]
+export type Author = Ok<typeof client.collections.authors.$get>['items'][number]
+export type Revision = Ok<
+  (typeof client.collections)[':id']['revisions']['$get']
+>['items'][number]
+export type Job = Ok<(typeof client.jobs)[':id']['$get']>
+export type MemberProgress = NonNullable<Job['members']>
+export type LibrarySize = Ok<typeof client.library.$get>
+export type CaptureRecord = Ok<typeof client.captures.$get>['items'][number]
+export type CaptureRecordDetail = Ok<(typeof client.captures)[':id']['$get']>
+export type CaptureMedia = CaptureRecordDetail['media_items'][number]
+export type CaptureMember = Ok<
+  (typeof client.captures)[':id']['members']['$get']
+>['items'][number]
+export type Usage = Ok<typeof client.usage.$get>
+export type Accounts = Ok<typeof client.accounts.$get>
+export type Account = Accounts['accounts'][number]
+export type AccountPlatform = Accounts['platforms'][number]
+export type Tag = Ok<typeof client.tags.$get>[number]
+export type Annotation = Ok<
+  (typeof client.collections)[':id']['annotation']['$get']
+>
+export type CaptureOptions = NonNullable<
+  Extract<
+    InferRequestType<typeof client.captures.$post>['json'],
+    { url: string }
+  >['options']
+>
+
 export function errorText(e: unknown) {
   if (e instanceof APIError) {
     if (e.status === 400 && e.message === 'invalid collection filters')
@@ -260,12 +120,4 @@ export function safeURL(value: string) {
   } catch {
     return
   }
-}
-
-export interface CaptureOptions {
-  media_only?: boolean
-  omit_shared?: boolean
-  skip_references?: boolean
-  max_posts?: number
-  since?: string
 }

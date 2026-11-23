@@ -316,7 +316,10 @@ function attachCurrentProfiles(r: Reader, views: readonly WithGraph[]): void {
     const metrics = row.metrics ? parseJson<Metrics>(row.metrics) : undefined
     const current: EntityVersionView = {
       id: row.version,
-      data: overlayMetrics(parseJson(row.data), metrics?.[metricKey(entity)]),
+      data: overlayMetrics(
+        parseJson<Record<string, unknown>>(row.data),
+        metrics?.[metricKey(entity)],
+      ),
     }
     const avatar = row.avatar && avatars.get(row.avatar)
     if (avatar) current.assets = [avatar]

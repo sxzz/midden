@@ -1,28 +1,28 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createVaporApp, nextTick } from 'vue'
+import { asset, collection, entity } from '../testing/api'
 import CollectionPost from './CollectionPost.vue'
 import CollectionRow from './CollectionRow.vue'
 import type { Collection } from '../api'
-const fixture: Collection = {
+const fixture = collection({
   id: 'fixture',
   url: 'https://example.test/post',
   text: '收藏正文',
   author_name: '测试作者',
   saved_at: '2026-09-29T00:00:00Z',
   observed_at: '2026-09-29T00:00:00Z',
-  visibility: 'private',
   revision_id: 'r1',
   assets: [
-    {
+    asset({
       id: 'm1',
       url: '/v1/assets/m1?inline=1',
       state: 'ready',
       mime: 'image/png',
       sensitive: true,
       alt_text: '测试图片',
-    },
+    }),
   ],
-}
+})
 let unmount = () => {}
 type Mountable = Parameters<typeof createVaporApp>[0]
 function mount(component: Mountable, collection: Collection) {
@@ -41,7 +41,11 @@ describe('Vapor collection rendering', () => {
   it.each([null, undefined, []])(
     'renders a detail with warnings=%s',
     (warnings) => {
-      const el = mount(CollectionPost, { ...fixture, warnings })
+      // An older server could leave warnings out or send null.
+      const el = mount(CollectionPost, {
+        ...fixture,
+        warnings: warnings as string[],
+      })
       expect(el.textContent).toContain('收藏正文')
       expect(el.textContent).toContain('测试作者')
       expect(el.textContent).not.toContain('内容不完整')
@@ -73,13 +77,13 @@ describe('Vapor collection rendering', () => {
     const el = mount(CollectionRow, {
       ...fixture,
       assets: [
-        {
+        asset({
           id: 'm2',
           url: '/v1/assets/m2?inline=1',
           state: 'ready',
           mime: 'image/png',
           sensitive: false,
-        },
+        }),
       ],
     })
     expect(el.querySelector('img')?.getAttribute('src')).toBe(
@@ -92,13 +96,13 @@ describe('Vapor collection rendering', () => {
     const el = mount(CollectionPost, {
       ...fixture,
       assets: [
-        {
+        asset({
           id: 'm3',
           url: '/v1/assets/m3?inline=1',
           state: 'failed',
           sensitive: false,
           error: 'download: 502',
-        },
+        }),
       ],
       warnings: ['resource omitted: unsupported type or resource limit'],
     })
@@ -117,7 +121,7 @@ describe('Vapor collection rendering', () => {
         root: 'p',
         relations: [{ source: 'p', target: 'u', type: 'authored_by' }],
         entities: [
-          {
+          entity({
             key: 'p',
             type: 'x.post',
             data: {
@@ -126,15 +130,15 @@ describe('Vapor collection rendering', () => {
               reposts: 12,
               likes: 3456,
             },
-          },
-          {
+          }),
+          entity({
             key: 'u',
             type: 'x.profile',
             data: {
               username: 'handle',
               metadata: { followers: 1234, likes: 56 },
             },
-          },
+          }),
         ],
       },
     })
@@ -168,13 +172,13 @@ describe('Vapor collection rendering', () => {
         root: 'post',
         relations: [{ source: 'post', target: 'author', type: 'authored_by' }],
         entities: [
-          { key: 'post', type: 'x.post', data: {} },
-          {
+          entity({ key: 'post', type: 'x.post', data: {} }),
+          entity({
             key: 'author',
             type: 'x.profile',
             saved_collection_id: 'saved-profile',
             data: { username: 'handle' },
-          },
+          }),
         ],
       },
     })
@@ -198,7 +202,7 @@ describe('Vapor collection rendering', () => {
       graph: {
         root: 'root',
         relations: [],
-        entities: [{ key: 'root', type: 'notes.article', data: {} }],
+        entities: [entity({ key: 'root', type: 'notes.article', data: {} })],
       },
     })
     expect(el.querySelector('script')).toBeNull()

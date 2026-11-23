@@ -18,10 +18,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 /** Remove the values at `paths` from a copy of `data` and return them. */
-export function splitMetrics(
-  data: unknown,
+export function splitMetrics<T>(
+  data: T,
   paths: readonly string[],
-): { data: unknown; metrics: Record<string, unknown> | undefined } {
+): { data: T; metrics: Record<string, unknown> | undefined } {
   if (!paths.length || !isObject(data)) return { data, metrics: undefined }
   const copy = structuredClone(data)
   let metrics: Record<string, unknown> | undefined
@@ -46,10 +46,10 @@ export function splitMetrics(
  * Put observed values back into a copy of `data`, creating missing parent
  * objects but never replacing a value that is not an object.
  */
-export function overlayMetrics(
-  data: unknown,
+export function overlayMetrics<T>(
+  data: T,
   metrics: Record<string, unknown> | undefined,
-): unknown {
+): T {
   if (!metrics || !isObject(data)) return data
   const copy = structuredClone(data)
   for (const [pointer, value] of Object.entries(metrics)) {

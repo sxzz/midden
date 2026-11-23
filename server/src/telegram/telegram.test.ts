@@ -25,7 +25,6 @@ const collection = (patch: Partial<CollectionView> = {}): CollectionView => ({
   url: 'https://x.com/a/status/1',
   external_id: '1',
   provider_id: 'fxtwitter',
-  visibility: 'public',
   revision_id: 'r',
   text: 'hello',
   text_kind: 'plain',

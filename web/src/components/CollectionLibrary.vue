@@ -7,7 +7,7 @@ import {
   useRouter,
   type RouteLocationNormalized,
 } from 'vue-router'
-import { api, type Collection, type Usage } from '../api'
+import { call, client, type Collection, type Usage } from '../api'
 import { useCollection } from '../composables/useCollection'
 import { backButton, host } from '../host'
 import { goBack } from '../navigation'
@@ -140,7 +140,7 @@ watch(
 )
 async function loadUsage() {
   try {
-    usage.value = await api<Usage>('/usage')
+    usage.value = await call(client.usage.$get())
   } catch {
     usage.value = undefined
   }

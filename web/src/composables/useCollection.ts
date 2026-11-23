@@ -1,5 +1,31 @@
 import { onUnmounted, shallowRef } from 'vue'
-import { api, errorText, type Collection, type Page } from '../api'
+import { call, client, errorText, type Collection } from '../api'
+/** One page of the library list for a route query. */
+function page(params: string, cursor: string, signal: AbortSignal) {
+  const q = new URLSearchParams(params)
+  if (!q.has('entity_type')) q.set('entity_type', 'x.post,instagram.post')
+  q.delete('layout')
+  for (const [local, apiKey] of [
+    ['from_date', 'saved_from'],
+    ['to_date', 'saved_before'],
+  ] as const) {
+    const value = q.get(local)
+    q.delete(local)
+    if (!value) continue
+    const date = new Date(`${value}T00:00:00`)
+    if (!Number.isFinite(date.getTime())) continue
+    if (local === 'to_date') date.setDate(date.getDate() + 1)
+    q.set(apiKey, date.toISOString())
+  }
+  q.set('q', q.get('q') || '')
+  if (cursor) q.set('cursor', cursor)
+  return call(
+    client.collections.$get(
+      { query: { ...Object.fromEntries(q), author: q.getAll('author') } },
+      { init: { signal } },
+    ),
+  )
+}
 export function useCollection() {
   const items = shallowRef<Collection[]>([])
   const next = shallowRef('')
@@ -40,26 +66,6 @@ export function useCollection() {
     } finally {
       if (version === generation) loading.value = false
     }
-  }
-  function page(params: string, cursor: string, signal: AbortSignal) {
-    const q = new URLSearchParams(params)
-    if (!q.has('entity_type')) q.set('entity_type', 'x.post,instagram.post')
-    q.delete('layout')
-    for (const [local, apiKey] of [
-      ['from_date', 'saved_from'],
-      ['to_date', 'saved_before'],
-    ] as const) {
-      const value = q.get(local)
-      q.delete(local)
-      if (!value) continue
-      const date = new Date(`${value}T00:00:00`)
-      if (!Number.isFinite(date.getTime())) continue
-      if (local === 'to_date') date.setDate(date.getDate() + 1)
-      q.set(apiKey, date.toISOString())
-    }
-    q.set('q', q.get('q') || '')
-    if (cursor) q.set('cursor', cursor)
-    return api<Page<Collection>>(`/collections?${q}`, { signal })
   }
   /**
    * Reload the current query without clearing the list, covering as many items

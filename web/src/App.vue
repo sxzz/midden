@@ -1,7 +1,7 @@
 <script setup vapor lang="ts">
 import { onMounted, onUnmounted, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
-import { api, errorText } from './api'
+import { call, client, errorText } from './api'
 import CollectionLibrary from './components/CollectionLibrary.vue'
 import TelegramLogin from './components/TelegramLogin.vue'
 import AppToast from './components/ui/AppToast.vue'
@@ -28,7 +28,7 @@ onMounted(async () => {
   const login = takeWidgetLogin()
   const loginError = login ? await widgetLogin(login) : ''
   try {
-    await api('/session')
+    await call(client.session.$get())
     ready.value = true
   } catch {
     const data = host()?.initData
@@ -37,10 +37,7 @@ onMounted(async () => {
       error.value = loginError
     } else {
       try {
-        await api('/auth/telegram', {
-          method: 'POST',
-          body: JSON.stringify({ init_data: data }),
-        })
+        await call(client.auth.telegram.$post({ json: { init_data: data } }))
         ready.value = true
       } catch (e) {
         error.value = errorText(e)

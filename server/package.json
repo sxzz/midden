@@ -5,6 +5,9 @@
   "imports": {
     "#*": "./src/*"
   },
+  "exports": {
+    "./api": "./src/http/app.ts"
+  },
   "engines": {
     "node": ">=26"
   },

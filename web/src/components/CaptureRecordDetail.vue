@@ -9,14 +9,13 @@ import {
 } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  api,
   APIError,
+  call,
+  client,
   errorText,
   type CaptureMember,
-  type CaptureRecord,
   type CaptureRecordDetail,
   type Job,
-  type Page,
 } from '../api'
 import {
   linkTitle,
@@ -93,7 +92,9 @@ async function load() {
   clearTimeout(timer)
   try {
     const before = record.value
-    const result = await api<CaptureRecordDetail>(`/captures/${props.id}`)
+    const result = await call(
+      client.captures[':id'].$get({ param: { id: props.id } }),
+    )
     if (current !== run) return
     record.value = result
     error.value = ''
@@ -121,11 +122,14 @@ async function loadMembers(more = false) {
   membersLoading.value = true
   membersError.value = ''
   try {
-    const q = new URLSearchParams()
-    if (filter.value) q.set('state', filter.value)
-    if (more) q.set('cursor', membersNext.value)
-    const page = await api<Page<CaptureMember>>(
-      `/captures/${props.id}/members?${q}`,
+    const page = await call(
+      client.captures[':id'].members.$get({
+        param: { id: props.id },
+        query: {
+          ...(filter.value ? { state: filter.value } : {}),
+          ...(more ? { cursor: membersNext.value } : {}),
+        },
+      }),
     )
     if (current !== membersRun) return
     members.value = more ? [...members.value, ...page.items] : page.items
@@ -172,7 +176,7 @@ onUnmounted(retire)
 /** Open the record a new capture created, or the list when it is not there. */
 async function follow(job: Job) {
   try {
-    const page = await api<Page<CaptureRecord>>('/captures')
+    const page = await call(client.captures.$get({ query: {} }))
     const created = page.items.find((r) => r.job_id === job.id)
     if (created && created.id !== props.id)
       return router.replace({ name: 'capture', params: { id: created.id } })
@@ -185,10 +189,12 @@ async function retry() {
   if (busy.value) return
   busy.value = true
   try {
-    const job = await api<Job>(`/captures/${props.id}/retry`, {
-      method: 'POST',
-      headers: { 'Idempotency-Key': crypto.randomUUID() },
-    })
+    const job = await call(
+      client.captures[':id'].retry.$post(
+        { param: { id: props.id } },
+        { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+      ),
+    )
     toast('已重新提交。')
     await follow(job)
   } catch (e) {
@@ -205,11 +211,12 @@ async function page(op: 'more' | 'more1000' | 'page_retry') {
   if (busy.value) return
   busy.value = true
   try {
-    const job = await api<Job>(`/captures/${props.id}/pages`, {
-      method: 'POST',
-      body: JSON.stringify({ op }),
-      headers: { 'Idempotency-Key': crypto.randomUUID() },
-    })
+    const job = await call(
+      client.captures[':id'].pages.$post(
+        { param: { id: props.id }, json: { op } },
+        { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+      ),
+    )
     await follow(job)
   } catch (e) {
     toast(errorText(e))
@@ -222,12 +229,11 @@ async function retryFailed(member?: CaptureMember) {
   if (busy.value) return
   busy.value = true
   try {
-    const { count } = await api<{ count: number }>(
-      `/captures/${props.id}/retry-failed`,
-      {
-        method: 'POST',
-        body: JSON.stringify(member ? { job_id: member.job_id } : {}),
-      },
+    const { count } = await call(
+      client.captures[':id']['retry-failed'].$post({
+        param: { id: props.id },
+        json: member ? { job_id: member.job_id } : {},
+      }),
     )
     toast(count ? `正在重试 ${count} 条失败的帖子。` : '没有可重试的帖子。')
     await Promise.all([load(), loadMembers()])
@@ -241,7 +247,7 @@ async function stop() {
   if (busy.value) return
   busy.value = true
   try {
-    await api(`/captures/${props.id}/stop`, { method: 'POST' })
+    await call(client.captures[':id'].stop.$post({ param: { id: props.id } }))
     toast('已中止。')
     await load()
   } catch (e) {

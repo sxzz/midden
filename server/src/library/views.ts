@@ -44,7 +44,7 @@ const EXTENSIONS: Record<string, string> = {
 
 export interface EntityVersionView {
   id: string
-  data: unknown
+  data: Record<string, unknown>
   assets?: AssetView[]
 }
 
@@ -54,7 +54,7 @@ export interface EntityView {
   key: string
   type: string
   external_id: string
-  data: unknown
+  data: Record<string, unknown>
   resource_indices?: number[]
   context_only?: boolean
   assets?: AssetView[]
@@ -85,8 +85,6 @@ export interface CollectionView {
   url: string
   external_id: string
   provider_id: string
-  /** Single user: nothing is restricted. */
-  visibility: 'public'
   revision_id: string
   text: string
   text_kind: string

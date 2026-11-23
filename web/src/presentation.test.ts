@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { safeURL, type Collection } from './api'
+import { safeURL, type Collection, type Entity } from './api'
 import {
   groupCollections,
   mentionParts,
@@ -8,13 +8,13 @@ import {
   sourceStateNotice,
   warningList,
 } from './presentation'
+import { collection, entity } from './testing/api'
 it('keeps captionless social posts empty without using their author summary', () => {
   for (const type of ['x.post', 'instagram.post']) {
-    const a: Collection = {
+    const a = collection({
       id: 'captionless',
       url: 'https://example.test/post',
       observed_at: '2026-10-11T00:00:00Z',
-      visibility: 'private',
       revision_id: 'r1',
       assets: [],
       text: '',
@@ -22,34 +22,33 @@ it('keeps captionless social posts empty without using their author summary', ()
       author_name: '作者',
       graph: {
         root: 'post',
-        entities: [{ key: 'post', type, data: {} }],
+        entities: [entity({ key: 'post', type })],
         relations: [],
       },
-    }
+    })
     expect(present(a).body).toBe('')
     expect(present({ ...a, text: ' \n ' }).body).toBe('')
     expect(present({ ...a, text: '原帖正文' }).body).toBe('原帖正文')
   }
 })
 it('presents Instagram profiles, comments, dotted mentions, and absent counts', () => {
-  const a = {
+  const a = collection({
     id: 'instagram-post',
     url: 'https://www.instagram.com/p/C/',
     observed_at: '2026-10-01T00:00:00Z',
     revision_id: 'r1',
     assets: [],
     text: 'Hello @fixture.name',
-    visibility: 'private',
     graph: {
       root: 'post',
       relations: [{ source: 'post', target: 'author', type: 'authored_by' }],
       entities: [
-        {
+        entity({
           key: 'post',
           type: 'instagram.post',
           data: { text: 'Hello @fixture.name', replies: 0, likes: 3 },
-        },
-        {
+        }),
+        entity({
           key: 'author',
           type: 'instagram.profile',
           external_id: '77',
@@ -65,10 +64,10 @@ it('presents Instagram profiles, comments, dotted mentions, and absent counts', 
               statuses: 1,
             },
           },
-        },
+        }),
       ],
     },
-  } as Collection
+  })
   const presentation = present(a)
   expect(presentation.name).toBe('Instagram Fixture')
   expect(presentation.locked).toBe(true)
@@ -96,33 +95,40 @@ it('does not expose executable original URLs', () => {
   expect(safeURL('https://example.test/post')).toBe('https://example.test/post')
 })
 it('uses the revision profile snapshot', () => {
-  const a = {
+  const a = collection({
     text: 'text',
     author_name: 'Saved name',
     graph: {
       root: 'p',
       relations: [{ source: 'p', target: 'u', type: 'authored_by' }],
       entities: [
-        { key: 'p', type: 'x.post', data: {} },
-        { key: 'u', type: 'x.profile', data: { username: 'saved_handle' } },
+        entity({ key: 'p', type: 'x.post', data: {} }),
+        entity({
+          key: 'u',
+          type: 'x.profile',
+          data: { username: 'saved_handle' },
+        }),
       ],
     },
-  } as Collection
+  })
   expect(present(a).handle).toBe('saved_handle')
 })
-const xPost = (data: Record<string, unknown>, metadata: unknown) =>
-  ({
+const xPost = (data: Entity['data'], metadata: Entity['data'][string]) =>
+  collection({
     text: 'text',
-    visibility: 'public',
     graph: {
       root: 'p',
       relations: [{ source: 'p', target: 'u', type: 'authored_by' }],
       entities: [
-        { key: 'p', type: 'x.post', data },
-        { key: 'u', type: 'x.profile', data: { username: 'handle', metadata } },
+        entity({ key: 'p', type: 'x.post', data }),
+        entity({
+          key: 'u',
+          type: 'x.profile',
+          data: { username: 'handle', metadata },
+        }),
       ],
     },
-  }) as Collection
+  })
 it('counts the account only where the account is the subject', () => {
   const metadata = { followers: 1234, likes: 56 }
   expect(present(xPost({}, metadata)).stats).toBeUndefined()
@@ -132,7 +138,11 @@ it('counts the account only where the account is the subject', () => {
       root: 'u',
       relations: [],
       entities: [
-        { key: 'u', type: 'x.profile', data: { username: 'handle', metadata } },
+        entity({
+          key: 'u',
+          type: 'x.profile',
+          data: { username: 'handle', metadata },
+        }),
       ],
     },
   }
@@ -171,17 +181,16 @@ it('details the post from its own record', () => {
   expect(present(a).details.map((d) => [d.key, d.label])).toEqual([
     ['published', '发布于'],
     ['edited', '已编辑'],
+    ['uuid', 'UUID'],
   ])
-  // Privacy is a lock beside the name, not a detail line.
-  expect(present({ visibility: 'private' } as Collection).details).toEqual([])
 })
 it('buckets the collection by when it was saved', () => {
   const now = new Date(2026, 8, 29, 12, 0)
   const at = (y: number, m: number, d: number) =>
-    ({
+    collection({
       id: `${y}-${m}-${d}`,
       saved_at: new Date(y, m, d, 9).toISOString(),
-    }) as Collection
+    })
   const groups = groupCollections(
     [at(2026, 8, 29), at(2026, 8, 28), at(2026, 8, 12), at(2025, 10, 3)],
     now,
@@ -225,12 +234,12 @@ const xProfile = (description?: string): Collection => ({
     root: 'u',
     relations: [],
     entities: [
-      {
+      entity({
         key: 'u',
         type: 'x.profile',
         external_id: '1234567890123456789',
         data: { username: 'handle', metadata: { description } },
-      },
+      }),
     ],
   },
 })
@@ -264,13 +273,17 @@ it('shows the exact profile UID and collection UUID in metadata', () => {
 it('links saved mention identities without linking emails or unsaved profiles', () => {
   const collection = xProfile()
   collection.graph!.entities.push(
-    {
+    entity({
       key: 'friend',
       type: 'x.profile',
       data: { username: 'Friend' },
       saved_collection_id: 'friend-id',
-    },
-    { key: 'unknown', type: 'x.profile', data: { username: 'unknown' } },
+    }),
+    entity({
+      key: 'unknown',
+      type: 'x.profile',
+      data: { username: 'unknown' },
+    }),
   )
   expect(
     mentionParts(collection, 'Hello @FRIEND! @unknown mail@friend.test'),
@@ -307,14 +320,10 @@ it('reads the author as last seen, or as captured on request', () => {
     false,
   ])
 })
-it('locks by the profile, not the capture visibility', () => {
+it('locks by the profile', () => {
   expect(present(xPost({}, { protected: true })).locked).toBe(true)
-  expect(
-    present({ ...xPost({}, { protected: false }), visibility: 'private' })
-      .locked,
-  ).toBe(false)
-  // Only a profile that never recorded protection falls back to visibility.
-  expect(present({ ...xPost({}, {}), visibility: 'private' }).locked).toBe(true)
+  expect(present(xPost({}, { protected: false })).locked).toBe(false)
+  expect(present(xPost({}, {})).locked).toBe(false)
 })
 it('notes a source found gone', () => {
   const a = xPost({}, {})

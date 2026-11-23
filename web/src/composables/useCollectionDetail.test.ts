@@ -1,24 +1,21 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, h, KeepAlive, nextTick, shallowRef } from 'vue'
-import { api, type Collection, type Job } from '../api'
+import { collection as fixture, mockApi } from '../testing/api'
 import { useCollectionDetail } from './useCollectionDetail'
 import { toastState } from './useToast'
+import type { Collection, Job } from '../api'
 const { replace } = vi.hoisted(() => ({ replace: vi.fn() }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ replace }) }))
-vi.mock('../api', async (original) => ({
-  ...(await original<typeof import('../api')>()),
-  api: vi.fn(),
-}))
-const collection = (id: string): Collection => ({
-  id,
-  url: 'https://example.test/item',
-  text: '合成正文',
-  author_name: '合成作者',
-  observed_at: '2026-10-01T00:00:00Z',
-  visibility: 'public',
-  revision_id: 'r1',
-  assets: [],
-})
+const collection = (id: string): Collection =>
+  fixture({
+    id,
+    url: 'https://example.test/item',
+    text: '合成正文',
+    author_name: '合成作者',
+    observed_at: '2026-10-01T00:00:00Z',
+    revision_id: 'r1',
+  })
+let api = mockApi()
 let job: Job = { id: 'job-1', collection_id: 'kept', state: 'queued' }
 /** One shared refresh handle, so the test can start a capture and watch it. */
 let refresh = async () => {}
@@ -93,7 +90,7 @@ beforeEach(() => {
   updates = []
   gates = new Map()
   rejects = new Set()
-  vi.mocked(api).mockImplementation(async (path: string) => {
+  api = mockApi(async (path) => {
     const gate = gates.get(path)
     if (gate) {
       gates.delete(path)
@@ -114,7 +111,7 @@ afterEach(() => {
   vi.resetAllMocks()
 })
 const calls = (prefix: string) =>
-  vi.mocked(api).mock.calls.filter(([path]) => path.startsWith(prefix)).length
+  api.mock.calls.filter(([path]) => path.startsWith(prefix)).length
 it('stops polling a capture while the detail is cached and resumes on return', async () => {
   const view = mount()
   await vi.advanceTimersByTimeAsync(0)
@@ -125,7 +122,7 @@ it('stops polling a capture while the detail is cached and resumes on return', a
   await vi.advanceTimersByTimeAsync(10_000)
   expect(calls('/jobs/')).toBe(0)
   // Coming back resumes the pending job instead of starting a new capture.
-  job = { ...job, state: 'ready' }
+  job = { ...job, state: 'complete' }
   await show('kept')
   await vi.advanceTimersByTimeAsync(2000)
   await vi.waitFor(() => expect(view.status()).toBe('已更新。'))
@@ -156,7 +153,7 @@ it('does not reroute or touch the list when a capture finishes while cached', as
   mount()
   await vi.advanceTimersByTimeAsync(0)
   await refresh()
-  job = { ...job, state: 'ready' }
+  job = { ...job, state: 'complete' }
   // Hold the collection reload that follows a finished job.
   const reload = hold('/collections/moved')
   await vi.advanceTimersByTimeAsync(2000)
@@ -170,7 +167,7 @@ it('defers the list update when the view is cached during its history reload', a
   mount()
   await vi.advanceTimersByTimeAsync(0)
   await refresh()
-  job = { ...job, state: 'ready' }
+  job = { ...job, state: 'complete' }
   // The initial load already fetched revisions; hold the one inside the job.
   const history = hold('/collections/kept/revisions')
   await vi.advanceTimersByTimeAsync(2000)
@@ -187,7 +184,7 @@ it('reports a failure from resuming a capture instead of rejecting', async () =>
   const view = mount()
   await vi.advanceTimersByTimeAsync(0)
   await refresh()
-  job = { ...job, state: 'ready' }
+  job = { ...job, state: 'complete' }
   const reload = hold('/collections/kept')
   await vi.advanceTimersByTimeAsync(2000)
   await reload.reached()

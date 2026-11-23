@@ -79,7 +79,6 @@ function view(
     url: row.url,
     external_id: row.external_id,
     provider_id: row.provider_id,
-    visibility: 'public',
     revision_id: row.revision_id,
     ...hydrate(payload, assets),
     observed_at: iso(row.observed_at),

@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue'
-import { api, errorText, type Annotation, type Tag } from '../api'
+import { call, client, errorText, type Tag } from '../api'
 import ListSection from './ui/ListSection.vue'
 import TagChips from './ui/TagChips.vue'
 const props = defineProps<{ id: string }>()
@@ -35,9 +35,9 @@ const noteDirty = computed(() => ready.value && note.value !== storedNote.value)
 const tagsDirty = computed(
   () => ready.value && tagKey(chosen()) !== storedTags.value,
 )
-const url = computed(
-  () => `/collections/${encodeURIComponent(props.id)}/annotation`,
-)
+const endpoint = client.collections[':id'].annotation
+const patch = (json: { note?: string; tag_names?: string[] }) =>
+  call(endpoint.$patch({ param: { id: props.id }, json }))
 const noteStatus = computed(() => {
   if (noteSaving.value) return '正在保存备注…'
   if (note.value.length > noteLimit - 500)
@@ -73,8 +73,8 @@ async function load() {
   tagsWriting = false
   try {
     const [annotation, available] = await Promise.all([
-      api<Annotation>(url.value),
-      api<Tag[]>('/tags'),
+      call(endpoint.$get({ param: { id: props.id } })),
+      call(client.tags.$get()),
     ])
     if (current !== generation) return
     name.value = ''
@@ -126,10 +126,7 @@ async function writeTags() {
       tagsSaving.value = true
       tagsError.value = ''
       try {
-        const annotation = await api<Annotation>(url.value, {
-          method: 'PATCH',
-          body: JSON.stringify({ tag_names: chosen() }),
-        })
+        const annotation = await patch({ tag_names: chosen() })
         if (current !== generation) return
         // Record what the server now holds even when a newer edit is already
         // waiting: otherwise the next pass could read this write's own result
@@ -142,7 +139,9 @@ async function writeTags() {
         selected.value = annotation.tags.map((tag) => tag.id)
         tags.value = annotation.tags
         // Reload available tags after the server removed unused ones.
-        const available = await api<Tag[]>('/tags').catch(() => annotation.tags)
+        const available = await call(client.tags.$get()).catch(
+          () => annotation.tags,
+        )
         if (current !== generation) return
         if (!tagsQueued) tags.value = available
         emit('saved')
@@ -169,10 +168,7 @@ async function saveNote() {
   noteError.value = ''
   const sent = note.value
   try {
-    const annotation = await api<Annotation>(url.value, {
-      method: 'PATCH',
-      body: JSON.stringify({ note: sent }),
-    })
+    const annotation = await patch({ note: sent })
     if (current !== generation) return
     // Confirm the note only. The chips may have been edited or written while
     // this was in flight, and this answer's tags can already be stale.

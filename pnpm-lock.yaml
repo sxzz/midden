@@ -283,6 +283,9 @@ importers:
 
   web:
     dependencies:
+      hono:
+        specifier: ^4.13.21
+        version: 4.13.21
       photoswipe:
         specifier: ^5.4.4
         version: 5.4.4
@@ -293,6 +296,9 @@ importers:
         specifier: ^5.5.1
         version: 5.5.1(@vue/compiler-sfc@3.6.0-rc.16)(esbuild@0.28.2)(rolldown@1.2.19)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(yaml@2.9.1))(vue@3.6.0-rc.16(typescript@6.0.3))
     devDependencies:
+      '@midden/server':
+        specifier: workspace:*
+        version: link:../server
       '@playwright/test':
         specifier: ^1.65.1
         version: 1.65.1

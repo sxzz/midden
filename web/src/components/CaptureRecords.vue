@@ -7,12 +7,11 @@ import {
   shallowRef,
 } from 'vue'
 import {
-  api,
+  call,
+  client,
   errorText,
   type CaptureRecord,
-  type CaptureRecordDetail,
   type CaptureOptions as Options,
-  type Page,
 } from '../api'
 import {
   extractLinks,
@@ -64,14 +63,14 @@ function schedule() {
 async function refresh() {
   const current = ++run
   try {
-    const page = await api<Page<CaptureRecord>>('/captures')
+    const page = await call(client.captures.$get({ query: {} }))
     const fresh = new Map(page.items.map((r) => [r.id, r]))
     const older = items.value.filter((r) => !fresh.has(r.id))
     const updates = await Promise.all(
       older
         .filter((r) => !r.done)
         .slice(0, followed)
-        .map((r) => api<CaptureRecordDetail>(`/captures/${r.id}`)),
+        .map((r) => call(client.captures[':id'].$get({ param: { id: r.id } }))),
     )
     if (current !== run) return
     for (const r of updates) fresh.set(r.id, r)
@@ -97,8 +96,8 @@ async function more() {
   const current = ++run
   loading.value = true
   try {
-    const page = await api<Page<CaptureRecord>>(
-      `/captures?cursor=${encodeURIComponent(next.value)}`,
+    const page = await call(
+      client.captures.$get({ query: { cursor: next.value } }),
     )
     if (current !== run) return
     const known = new Set(items.value.map((r) => r.id))
@@ -141,11 +140,12 @@ async function submit() {
   let reason = ''
   for (const url of targets) {
     try {
-      await api('/captures', {
-        method: 'POST',
-        body: JSON.stringify({ url, options: options.value }),
-        headers: { 'Idempotency-Key': crypto.randomUUID() },
-      })
+      await call(
+        client.captures.$post(
+          { json: { url, options: options.value } },
+          { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+        ),
+      )
     } catch (e) {
       failed.push(url)
       reason ||= errorText(e)

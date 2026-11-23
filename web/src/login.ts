@@ -1,4 +1,4 @@
-import { api, APIError, errorText } from './api'
+import { APIError, call, client, errorText } from './api'
 
 /**
  * The Login Widget redirects back with its signed fields in the query. Take
@@ -24,10 +24,7 @@ export function takeWidgetLogin(): Record<string, string> | undefined {
 /** Exchanges widget data for a session; returns why it failed, if it did. */
 export async function widgetLogin(login: Record<string, string>) {
   try {
-    await api('/auth/telegram', {
-      method: 'POST',
-      body: JSON.stringify({ login }),
-    })
+    await call(client.auth.telegram.$post({ json: { login } }))
     return ''
   } catch (e) {
     return e instanceof APIError && e.status === 401

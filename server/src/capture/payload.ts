@@ -6,7 +6,8 @@ export interface PayloadEntity {
   key: string
   type: string
   external_id: string
-  data: unknown
+  /** Always an object; the graph check rejects anything else. */
+  data: Record<string, unknown>
   resource_indices?: number[]
   context_only?: boolean
 }

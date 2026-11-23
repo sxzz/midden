@@ -1,27 +1,23 @@
 import { afterEach, expect, it } from 'vitest'
 import { createVaporApp } from 'vue'
+import { asset, collection as collectionOf, entity } from '../testing/api'
 import CollectionAlbum from './CollectionAlbum.vue'
 import CollectionRow from './CollectionRow.vue'
-import type { Collection } from '../api'
-const collection: Collection = {
+const collection = collectionOf({
   id: 'root',
   url: 'https://example.test/post',
   text: '根帖自己的内容',
   observed_at: '2026-10-01T00:00:00Z',
-  visibility: 'public',
   revision_id: 'r1',
   relation_types: ['reposted', 'mentions'],
-  assets: [1, 2].map((id) => ({
-    id: `asset-${id}`,
-    state: 'ready',
-    mime: 'image/png',
-    sensitive: false,
-  })),
+  assets: [1, 2].map((id) =>
+    asset({ id: `asset-${id}`, mime: 'image/png', sensitive: false }),
+  ),
   graph: {
     root: 'post',
     entities: [
-      { key: 'post', type: 'x.post', external_id: '100', data: {} },
-      {
+      entity({ key: 'post', type: 'x.post', external_id: '100', data: {} }),
+      entity({
         key: 'quote',
         type: 'x.post',
         external_id: '200',
@@ -30,24 +26,24 @@ const collection: Collection = {
           text: '被引用帖的独立内容',
           published_at: '2026-09-18T12:00:00Z',
         },
-      },
-      {
+      }),
+      entity({
         key: 'quote-author',
         type: 'x.profile',
         external_id: '400',
         saved_collection_id: 'quote-author',
         data: { username: 'quoted_account', name: '被引用账号' },
         assets: [
-          {
+          asset({
             id: 'quote-avatar',
             url: '/v1/assets/quote-avatar?inline=1',
             purpose: 'avatar',
             state: 'ready',
             mime: 'image/png',
             sensitive: false,
-          },
+          }),
         ],
-      },
+      }),
     ],
     relations: [
       { source: 'post', target: 'quote', type: 'quoted' },
@@ -65,7 +61,7 @@ const collection: Collection = {
       },
     },
   ],
-}
+})
 let unmount = () => {}
 afterEach(() => {
   unmount()

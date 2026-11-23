@@ -26,7 +26,7 @@ import { stopCollection } from '#capture/related.ts'
 import { captures, collections, library, submissions } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { deleteAll } from '#library/delete.ts'
-import { json, type Env } from './validate.ts'
+import { Cursor, json, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { CaptureOptions } from '#capture/options.ts'
 import type { Job } from '#capture/submit.ts'
@@ -54,8 +54,6 @@ function captureOptions(
   }
 }
 
-const iso = (date: Date | null | undefined) => date?.toISOString()
-
 function memberProgress(m: NonNullable<CaptureRecord['members']>) {
   return {
     total: m.total,
@@ -80,8 +78,8 @@ function recordJson(r: CaptureRecord) {
     state: r.state,
     ...(r.error ? { error: r.error } : {}),
     media: r.media,
-    created_at: iso(r.createdAt),
-    ...(r.finishedAt ? { finished_at: iso(r.finishedAt) } : {}),
+    created_at: r.createdAt.toISOString(),
+    ...(r.finishedAt ? { finished_at: r.finishedAt.toISOString() } : {}),
     ...(r.members ? { members: memberProgress(r.members) } : {}),
     ...(r.stopped === undefined ? {} : { stopped: r.stopped }),
     ...(r.retryable === undefined ? {} : { retryable: r.retryable }),
@@ -123,7 +121,7 @@ function memberJson(m: CaptureMember) {
     ...(m.error ? { error: m.error } : {}),
     reasons: m.reasons,
     ...(m.gone ? { gone: true } : {}),
-    created_at: iso(m.createdAt),
+    created_at: m.createdAt.toISOString(),
   }
 }
 
@@ -223,8 +221,11 @@ export function captureRoutes(
         },
       )
 
-      .get('/captures', (c) => {
-        const page = listRecords(ctx.db, c.req.query('cursor') || undefined)
+      .get('/captures', query(Cursor), (c) => {
+        const page = listRecords(
+          ctx.db,
+          c.req.valid('query').cursor || undefined,
+        )
         return c.json({
           items: page.items.map(recordJson),
           ...(page.next ? { next_cursor: page.next } : {}),
@@ -235,18 +236,28 @@ export function captureRoutes(
         c.json(detailJson(recordDetail(ctx.db, c.req.param('id')))),
       )
 
-      .get('/captures/:id/members', (c) => {
-        const page = recordMembers(
-          ctx.db,
-          c.req.param('id'),
-          c.req.query('state') ?? '',
-          c.req.query('cursor') || undefined,
-        )
-        return c.json({
-          items: page.items.map(memberJson),
-          ...(page.next ? { next_cursor: page.next } : {}),
-        })
-      })
+      .get(
+        '/captures/:id/members',
+        query(
+          v.object({
+            state: v.optional(v.string()),
+            cursor: v.optional(v.string()),
+          }),
+        ),
+        (c) => {
+          const input = c.req.valid('query')
+          const page = recordMembers(
+            ctx.db,
+            c.req.param('id'),
+            input.state ?? '',
+            input.cursor || undefined,
+          )
+          return c.json({
+            items: page.items.map(memberJson),
+            ...(page.next ? { next_cursor: page.next } : {}),
+          })
+        },
+      )
 
       .post('/captures/:id/retry', (c) =>
         c.json(

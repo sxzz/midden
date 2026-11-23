@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef } from 'vue'
-import { api, errorText } from '../api'
+import { call, client, errorText } from '../api'
 import { toast } from '../composables/useToast'
 const props = defineProps<{
   selected: string[]
@@ -21,10 +21,11 @@ const allSelected = computed(
 async function start() {
   busy.value = true
   try {
-    await api('/refresh-batches', {
-      method: 'POST',
-      body: JSON.stringify({ collection_ids: props.selected }),
-    })
+    await call(
+      client['refresh-batches'].$post({
+        json: { collection_ids: props.selected },
+      }),
+    )
     emit('close')
   } catch (e) {
     toast(errorText(e))

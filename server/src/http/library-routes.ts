@@ -1,36 +1,58 @@
 import { Hono } from 'hono'
+import * as v from 'valibot'
 import { getEntity } from '#library/entities.ts'
 import { listAuthors, listCollections } from '#library/list.ts'
 import { getCollection, getRevision, listRevisions } from '#library/read.ts'
 import { getSource, listSources } from '#library/sources.ts'
+import { Cursor, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
-import type { Env } from './validate.ts'
+
+const text = v.optional(v.string())
+
+/** Collection list filters; list.ts checks their values. */
+const Filters = v.object({
+  q: text,
+  entity_type: text,
+  media_type: text,
+  visibility: text,
+  saved_from: text,
+  saved_before: text,
+  sort: text,
+  order: text,
+  author: v.optional(v.union([v.string(), v.array(v.string())])),
+  sensitive: text,
+  tag: text,
+  related_to: text,
+  post_type: text,
+  cursor: text,
+})
 
 /** Reading the library: collections, their history, entities, raw sources. */
 export function libraryRoutes(ctx: AccountsContext) {
   return (
     new Hono<Env>()
-      .get('/collections', (c) => {
-        const query = (name: string) => c.req.query(name) || undefined
+      .get('/collections', query(Filters), (c) => {
+        const input = c.req.valid('query')
+        const author = input.author ?? []
         return c.json(
           listCollections(
             ctx,
             {
-              q: query('q'),
-              entityType: query('entity_type'),
-              mediaType: query('media_type'),
-              visibility: query('visibility'),
-              savedFrom: query('saved_from'),
-              savedBefore: query('saved_before'),
-              sort: query('sort'),
-              order: query('order'),
-              authors: c.req.queries('author') ?? [],
-              sensitive: query('sensitive'),
-              tag: query('tag'),
-              relatedTo: query('related_to'),
-              postType: query('post_type'),
+              q: input.q || undefined,
+              entityType: input.entity_type || undefined,
+              mediaType: input.media_type || undefined,
+              visibility: input.visibility || undefined,
+              savedFrom: input.saved_from || undefined,
+              savedBefore: input.saved_before || undefined,
+              sort: input.sort || undefined,
+              order: input.order || undefined,
+              authors: typeof author === 'string' ? [author] : author,
+              sensitive: input.sensitive || undefined,
+              tag: input.tag || undefined,
+              relatedTo: input.related_to || undefined,
+              postType: input.post_type || undefined,
             },
-            query('cursor'),
+            input.cursor || undefined,
           ),
         )
       })
@@ -41,12 +63,12 @@ export function libraryRoutes(ctx: AccountsContext) {
         c.json(getCollection(ctx, c.req.param('id'))),
       )
 
-      .get('/collections/:id/revisions', (c) =>
+      .get('/collections/:id/revisions', query(Cursor), (c) =>
         c.json(
           listRevisions(
             ctx,
             c.req.param('id'),
-            c.req.query('cursor') || undefined,
+            c.req.valid('query').cursor || undefined,
           ),
         ),
       )
@@ -64,7 +86,7 @@ export function libraryRoutes(ctx: AccountsContext) {
       // Raw upstream bytes: shown as they were, but never run as this site.
       .get('/sources/:id', (c) => {
         const source = getSource(ctx, c.req.param('id'))
-        return new Response(source.body, {
+        return new Response(new Uint8Array(source.body), {
           headers: {
             'Content-Type': source.content_type,
             'X-Content-Type-Options': 'nosniff',

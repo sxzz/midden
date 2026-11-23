@@ -88,7 +88,7 @@ export function validateGraph(
       fail('entity data does not match adapter schema')
     const typePaths = paths.get(entity.type) ?? []
     if (typePaths.length) metricPaths[entity.type] = [...typePaths]
-    const split = splitMetrics(data, typePaths)
+    const split = splitMetrics(data as Record<string, unknown>, typePaths)
     if (split.metrics)
       metrics[`${entity.type}/${entity.externalId}`] = split.metrics
     const seen = new Set<number>()

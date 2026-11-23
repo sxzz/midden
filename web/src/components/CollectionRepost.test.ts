@@ -1,44 +1,39 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createVaporApp } from 'vue'
-import { api, type Collection } from '../api'
+import { asset, collection, entity, mockApi } from '../testing/api'
 import CollectionRow from './CollectionRow.vue'
 import ProfileCollections from './ProfileCollections.vue'
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
-vi.mock('../api', async (original) => ({
-  ...(await original<typeof import('../api')>()),
-  api: vi.fn(),
-}))
 /** A post someone else wrote, kept because the listed account reposted it. */
-const repost: Collection = {
+const repost = collection({
   id: 'repost',
   url: 'https://example.test/post/1',
   text: '合成原帖正文',
   author_name: '合成原作者',
   observed_at: '2026-10-01T00:00:00Z',
   saved_at: '2026-10-01T00:00:00Z',
-  visibility: 'public',
   revision_id: 'r1',
   relation_types: ['reposted'],
   assets: [],
   graph: {
     root: 'post',
     entities: [
-      { key: 'post', type: 'x.post', external_id: '100', data: {} },
-      {
+      entity({ key: 'post', type: 'x.post', external_id: '100', data: {} }),
+      entity({
         key: 'author',
         type: 'x.profile',
         external_id: '200',
         data: { username: 'origin', name: '合成原作者' },
-      },
+      }),
     ],
     relations: [{ source: 'post', target: 'author', type: 'authored_by' }],
   },
-}
-const mentioned: Collection = {
+})
+const mentioned = collection({
   ...repost,
   id: 'mentioned',
   relation_types: ['mentions'],
-}
+})
 let unmount = () => {}
 afterEach(() => {
   unmount()
@@ -103,13 +98,13 @@ it('reads the handle beside the name, keeps the time right and drops media count
       ...repost,
       storage_bytes: 2048,
       assets: [
-        {
+        asset({
           id: 'a1',
           url: '/v1/assets/a1?inline=1',
           state: 'ready',
           mime: 'image/png',
           sensitive: false,
-        },
+        }),
       ],
     },
   })
@@ -129,35 +124,34 @@ it('reads the handle beside the name, keeps the time right and drops media count
 })
 it('shows a profile row with its own bio', () => {
   const el = mount(CollectionRow, {
-    collection: {
+    collection: collection({
       id: 'profile',
       url: 'https://example.test/profile',
       text: '合成账号简介',
       author_name: '合成账号',
       observed_at: '2026-10-01T00:00:00Z',
-      visibility: 'public',
       revision_id: 'r1',
       assets: [],
       graph: {
         root: 'profile',
         entities: [
-          {
+          entity({
             key: 'profile',
             type: 'x.profile',
             external_id: '300',
             data: { username: 'synthetic' },
-          },
+          }),
         ],
         relations: [],
       },
-    } satisfies Collection,
+    }),
   })
   expect(el.querySelector('.name')?.textContent).toBe('合成账号')
   expect(el.querySelector('.handle')?.textContent).toBe('@synthetic')
   expect(el.querySelector('.preview')?.textContent).toBe('合成账号简介')
 })
 it('hands the profile name down to the rows of its related collections', async () => {
-  vi.mocked(api).mockResolvedValue({ items: [repost, mentioned] })
+  mockApi().mockResolvedValue({ items: [repost, mentioned] })
   const el = mount(ProfileCollections, {
     id: 'profile',
     revisionId: 'r1',

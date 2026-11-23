@@ -1,5 +1,6 @@
 import { afterEach, expect, it } from 'vitest'
 import { createVaporApp } from 'vue'
+import { asset, collection as collectionOf, entity } from '../testing/api'
 import CollectionPost from './CollectionPost.vue'
 import type { Collection } from '../api'
 
@@ -12,17 +13,16 @@ function mount(
   graph: NonNullable<Collection['graph']>,
   incoming_relations?: Collection['incoming_relations'],
 ) {
-  const collection: Collection = {
+  const collection = collectionOf({
     id: 'post',
     url: 'https://example.test/post',
     text: '根帖正文',
     observed_at: '2026-10-01T00:00:00Z',
-    visibility: 'public',
     revision_id: 'r1',
     assets: [],
     graph,
     incoming_relations,
-  }
+  })
   const el = document.createElement('div')
   document.body.append(el)
   const app = createVaporApp(CollectionPost, { collection })
@@ -36,13 +36,13 @@ it('shows the quoted post as an internal collection link with its text', () => {
     root: 'post',
     entities: [
       root,
-      {
+      entity({
         key: 'quote',
         type: 'x.post',
         external_id: '456',
         saved_collection_id: 'saved-quote',
         data: { text: '引用的原帖正文' },
-      },
+      }),
     ],
     relations: [{ source: 'post', target: 'quote', type: 'quoted' }],
   })
@@ -61,7 +61,7 @@ it('shows a quoted post kept by reference with its saved summary, or as an X lin
       root: 'post',
       entities: [
         root,
-        {
+        entity({
           key: 'quote',
           type: 'x.post',
           external_id: '456',
@@ -72,7 +72,7 @@ it('shows a quoted post kept by reference with its saved summary, or as an X lin
               }
             : {}),
           data: { text: '' },
-        },
+        }),
       ],
       relations: [{ source: 'post', target: 'quote', type: 'quoted' }],
     }).querySelector<HTMLAnchorElement>('.relation')!
@@ -91,7 +91,7 @@ it('heads a quoted post kept by reference with its saved author', () => {
     root: 'post',
     entities: [
       root,
-      {
+      entity({
         key: 'quote',
         type: 'x.post',
         external_id: '456',
@@ -105,7 +105,7 @@ it('heads a quoted post kept by reference with its saved author', () => {
           data: { username: 'quoted_account', name: '原帖作者' },
         },
         data: {},
-      },
+      }),
     ],
     relations: [{ source: 'post', target: 'quote', type: 'quoted' }],
   })
@@ -119,12 +119,12 @@ it('links an unsaved repost to its X status without using untrusted payload URLs
     root: 'post',
     entities: [
       root,
-      {
+      entity({
         key: 'repost',
         type: 'x.post',
         external_id: '456',
         data: { text: '转发的原帖', url: 'javascript:alert(1)' },
-      },
+      }),
     ],
     relations: [{ source: 'post', target: 'repost', type: 'reposted' }],
   })
@@ -140,13 +140,13 @@ it('shows profile repost attribution without confusing it with a quoted post', (
     root: 'post',
     entities: [
       root,
-      {
+      entity({
         key: 'reposter',
         type: 'x.profile',
         external_id: '789',
         saved_collection_id: 'profile',
         data: { username: 'fixture', name: '转发账号' },
-      },
+      }),
     ],
     relations: [{ source: 'reposter', target: 'post', type: 'reposted' }],
   })
@@ -160,13 +160,13 @@ it('does not invent links for invalid identifiers or unrelated graph edges', () 
     root: 'post',
     entities: [
       root,
-      {
+      entity({
         key: 'unsafe',
         type: 'x.post',
         external_id: '../unsafe',
         data: {},
-      },
-      { key: 'other', type: 'x.post', external_id: '456', data: {} },
+      }),
+      entity({ key: 'other', type: 'x.post', external_id: '456', data: {} }),
     ],
     relations: [
       { source: 'post', target: 'unsafe', type: 'quoted' },
@@ -182,30 +182,30 @@ it('heads an outgoing quote with its graph author, avatar and date, linking the 
     root: 'post',
     entities: [
       root,
-      {
+      entity({
         key: 'quote',
         type: 'x.post',
         external_id: '456',
         saved_collection_id: 'saved-quote',
         data: { text: '引用的原帖正文', published_at: '2026-09-20T12:00:00Z' },
-      },
-      {
+      }),
+      entity({
         key: 'quote-author',
         type: 'x.profile',
         external_id: '789',
         saved_collection_id: 'saved-author',
         data: { username: 'quoted_account', name: '被引用账号' },
         assets: [
-          {
+          asset({
             id: 'avatar-1',
             url: '/v1/assets/avatar-1?inline=1',
             purpose: 'avatar',
             state: 'ready',
             mime: 'image/png',
             sensitive: false,
-          },
+          }),
         ],
-      },
+      }),
     ],
     relations: [
       { source: 'post', target: 'quote', type: 'quoted' },
@@ -238,18 +238,18 @@ it('shows an unsaved outgoing repost author as plain text instead of a link', ()
     root: 'post',
     entities: [
       root,
-      {
+      entity({
         key: 'repost',
         type: 'x.post',
         external_id: '456',
         data: { text: '转发的原帖' },
-      },
-      {
+      }),
+      entity({
         key: 'repost-author',
         type: 'x.profile',
         external_id: '789',
         data: { username: 'origin_account' },
-      },
+      }),
     ],
     relations: [
       { source: 'post', target: 'repost', type: 'reposted' },
@@ -266,15 +266,20 @@ it('omits attribution when the snapshot records no usable author', () => {
     root: 'post',
     entities: [
       root,
-      {
+      entity({
         key: 'quote',
         type: 'x.post',
         external_id: '456',
         saved_collection_id: 'saved-quote',
         data: { text: '引用的原帖正文' },
-      },
-      { key: 'blank', type: 'x.profile', external_id: '789', data: {} },
-      { key: 'other-post', type: 'x.post', external_id: '567', data: {} },
+      }),
+      entity({ key: 'blank', type: 'x.profile', external_id: '789', data: {} }),
+      entity({
+        key: 'other-post',
+        type: 'x.post',
+        external_id: '567',
+        data: {},
+      }),
     ],
     relations: [
       { source: 'post', target: 'quote', type: 'quoted' },
@@ -334,22 +339,24 @@ it('keeps an incoming repost account card free of a repeated self attribution', 
   expect(el.querySelector('.relation-author')).toBeNull()
 })
 it('shows a repost account card with its own saved avatar, never a sensitive one', () => {
-  const avatar = (sensitive: boolean) => ({
-    id: sensitive ? 'hidden-avatar' : 'avatar',
-    url: `/v1/assets/${sensitive ? 'hidden-avatar' : 'avatar'}?inline=1`,
-    purpose: 'avatar',
-    mime: 'image/png',
-    state: 'ready',
-    sensitive,
-  })
-  const profile = (key: string, sensitive: boolean) => ({
-    key,
-    type: 'x.profile',
-    external_id: key === 'shown' ? '789' : '790',
-    saved_collection_id: `saved-${key}`,
-    data: { username: key, name: `合成账号 ${key}` },
-    assets: [avatar(sensitive)],
-  })
+  const avatar = (sensitive: boolean) =>
+    asset({
+      id: sensitive ? 'hidden-avatar' : 'avatar',
+      url: `/v1/assets/${sensitive ? 'hidden-avatar' : 'avatar'}?inline=1`,
+      purpose: 'avatar',
+      mime: 'image/png',
+      state: 'ready',
+      sensitive,
+    })
+  const profile = (key: string, sensitive: boolean) =>
+    entity({
+      key,
+      type: 'x.profile',
+      external_id: key === 'shown' ? '789' : '790',
+      saved_collection_id: `saved-${key}`,
+      data: { username: key, name: `合成账号 ${key}` },
+      assets: [avatar(sensitive)],
+    })
   const el = mount({ root: 'post', entities: [root], relations: [] }, [
     { type: 'reposted', entity: profile('shown', false) },
     { type: 'reposted', entity: profile('hidden', true) },
@@ -421,13 +428,13 @@ it('shows a quoted post’s author as last seen, with its lock', () => {
     root: 'post',
     entities: [
       root,
-      {
+      entity({
         key: 'quote',
         type: 'x.post',
         external_id: '456',
         data: { text: '锁推原帖' },
-      },
-      {
+      }),
+      entity({
         key: 'author',
         type: 'x.profile',
         external_id: '789',
@@ -436,7 +443,7 @@ it('shows a quoted post’s author as last seen, with its lock', () => {
           id: 'v2',
           data: { name: '新名字', metadata: { protected: true } },
         },
-      },
+      }),
     ],
     relations: [
       { source: 'post', target: 'quote', type: 'quoted' },
@@ -452,22 +459,22 @@ it('shows saved quote media inside its card without mixing it into the root gall
     root: 'post',
     entities: [
       root,
-      {
+      entity({
         key: 'quote',
         type: 'x.post',
         external_id: '456',
         saved_collection_id: 'saved-quote',
         data: { text: '引用正文' },
         assets: [
-          {
+          asset({
             id: 'quoted-image',
             url: '/v1/assets/quoted-image?inline=1',
             state: 'ready',
             mime: 'image/png',
             sensitive: false,
-          },
+          }),
         ],
-      },
+      }),
     ],
     relations: [{ source: 'post', target: 'quote', type: 'quoted' }],
   })
