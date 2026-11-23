@@ -267,7 +267,7 @@ CREATE UNIQUE INDEX `entity_versions_content` ON `entity_versions` (`entity_id`,
 CREATE INDEX `jobs_claim` ON `jobs` (`queue`,`state`,`priority`,`run_at`);--> statement-breakpoint
 CREATE INDEX `jobs_ref` ON `jobs` (`ref`);--> statement-breakpoint
 CREATE INDEX `library_created` ON `library` (`created_at`,`collection_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `revision_entities_root` ON `revision_entities` (`revision_id`) WHERE "revision_entities"."is_root";--> statement-breakpoint
+CREATE UNIQUE INDEX `revision_entities_root` ON `revision_entities` (`revision_id`) WHERE "revision_entities"."is_root" = 1;--> statement-breakpoint
 CREATE INDEX `revision_entities_version` ON `revision_entities` (`entity_version_id`);--> statement-breakpoint
 CREATE INDEX `revisions_head` ON `revisions` (`collection_id`,`created_at`,`id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `source_responses_position` ON `source_responses` (`capture_id`,`position`);--> statement-breakpoint

@@ -257,7 +257,7 @@ export const revisionEntities = sqliteTable(
     primaryKey({ columns: [t.revisionId, t.entityKey] }),
     uniqueIndex('revision_entities_root')
       .on(t.revisionId)
-      .where(sqlString(t.isRoot)),
+      .where(sql`${t.isRoot} = 1`),
     index('revision_entities_version').on(t.entityVersionId),
   ],
 )
