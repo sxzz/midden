@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pino } from 'pino'
+import { Vault } from '#accounts/vault.ts'
 import { FsBlobStore } from '#blob/fs-store.ts'
 import { KeyedLock } from '#blob/locks.ts'
 import { MediaSigner } from '#blob/signer.ts'
@@ -11,6 +12,7 @@ import { JobQueue, type JobHandler } from '#jobs/queue.ts'
 import { createInstagramPlatform } from '#platforms/instagram/index.ts'
 import { Platforms } from '#platforms/registry.ts'
 import { createXPlatform } from '#platforms/x/index.ts'
+import type { AccountsContext } from '#accounts/accounts.ts'
 import type { CaptureContext } from '#capture/context.ts'
 import type { Platform } from '#platforms/platform.ts'
 
@@ -23,13 +25,14 @@ export function testContext(
     fetch?: typeof fetch
     thumbnailer?: CaptureContext['thumbnailer']
   } = {},
-): CaptureContext {
+): AccountsContext {
   const db = openDatabase(':memory:')
+  const vault = new Vault(new Uint8Array(32).fill(7))
   const logger = pino({ level: 'silent' })
   const dir = mkdtempSync(path.join(tmpdir(), 'midden-test-'))
   const signer = new MediaSigner({ secret: new TextEncoder().encode('test') })
   const noop: JobHandler = { queue: 'control', run: async () => {} }
-  let ctx: CaptureContext | undefined
+  let ctx: AccountsContext | undefined
   const handlers = {
     capture: { ...noop, queue: 'capture' },
     download: { ...noop, queue: 'download' },
@@ -56,9 +59,8 @@ export function testContext(
     ),
     blobs: new FsBlobStore(path.join(dir, 'media'), signer),
     stagingDir: path.join(dir, 'tmp'),
-    openCredential: () => {
-      throw new Error('no credentials in tests')
-    },
+    vault,
+    openCredential: (ref) => vault.open(db, ref),
     now: options.now,
     mediaLocks: new KeyedLock(),
     fetch: options.fetch,
