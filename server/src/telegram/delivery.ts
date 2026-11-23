@@ -1,8 +1,8 @@
-import { randomUUIDv7 } from 'node:crypto'
 import { and, asc, eq, lte } from 'drizzle-orm'
 import { GrammyError, type Api } from 'grammy'
 import { batchProgress } from '#capture/batches.ts'
 import { collectionProgress } from '#capture/records.ts'
+import { newId } from '#db/id.ts'
 import {
   captures,
   collections,
@@ -75,7 +75,7 @@ export function enqueueDelivery(
   ctx.db
     .insert(telegramDeliveries)
     .values({
-      id: randomUUIDv7(),
+      id: newId(),
       kind: input.kind,
       ref: input.ref,
       chatId: input.chatId,

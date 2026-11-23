@@ -1,10 +1,10 @@
 import { Buffer } from 'node:buffer'
-import { randomUUIDv7 } from 'node:crypto'
 import { open } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import { and, eq, ne } from 'drizzle-orm'
 import { KeyedLock } from '#blob/locks.ts'
 import { stage, type StagedFile } from '#blob/staging.ts'
+import { newId } from '#db/id.ts'
 import {
   assets,
   blobs,
@@ -204,7 +204,7 @@ async function download(ctx: CaptureContext, job: Job): Promise<void> {
           .where(eq(blobs.hash, staged.hash))
           .get()?.id
         if (!blobId) {
-          blobId = randomUUIDv7()
+          blobId = newId()
           tx.insert(blobs)
             .values({ id: blobId, hash: staged.hash, size: staged.size, mime })
             .run()

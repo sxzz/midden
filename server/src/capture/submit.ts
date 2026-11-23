@@ -1,5 +1,5 @@
-import { randomUUIDv7 } from 'node:crypto'
 import { and, desc, eq, isNull, sql } from 'drizzle-orm'
+import { newId } from '#db/id.ts'
 import {
   captureRunning,
   captures,
@@ -159,7 +159,7 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
   )
     throw new AppError('unsupported')
   const userInput = input.input || input.url
-  const key = input.key || randomUUIDv7()
+  const key = input.key || newId()
   if (key.length > MAX_KEY)
     throw new AppError('invalid_request', 'idempotency key too long')
   const automatic = input.automatic ?? false
@@ -290,7 +290,7 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
     }
 
     if (!captureId) {
-      captureId = randomUUIDv7()
+      captureId = newId()
       tx.insert(captures)
         .values({
           id: captureId,
@@ -311,7 +311,7 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
       ctx.queue.enqueue(tx, 'capture', captureId)
     }
 
-    const submissionId = randomUUIDv7()
+    const submissionId = newId()
     tx.insert(submissions)
       .values({
         id: submissionId,
@@ -395,7 +395,7 @@ export function upsertCollection(
     )
     .get()
   if (found) return found.id
-  const id = randomUUIDv7()
+  const id = newId()
   tx.insert(collections)
     .values({
       id,

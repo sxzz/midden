@@ -3,10 +3,10 @@ import {
   createHash,
   createHmac,
   randomBytes,
-  randomUUIDv7,
   timingSafeEqual,
 } from 'node:crypto'
 import { eq, lt } from 'drizzle-orm'
+import { newId } from '#db/id.ts'
 import { apiTokens, webSessions } from '#db/schema.ts'
 import type { Database } from '#db/client.ts'
 
@@ -130,7 +130,7 @@ export function pruneSessions(db: Database, now = Date.now()): void {
 export function createToken(db: Database, name: string): string {
   const value = `md_${randomBytes(24).toString('base64url')}`
   db.insert(apiTokens)
-    .values({ id: randomUUIDv7(), digest: digest(value), name })
+    .values({ id: newId(), digest: digest(value), name })
     .run()
   return value
 }

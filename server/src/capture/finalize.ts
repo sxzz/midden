@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
-import { randomUUIDv7 } from 'node:crypto'
 import { and, asc, desc, eq } from 'drizzle-orm'
+import { newId } from '#db/id.ts'
 import {
   assets,
   blobs,
@@ -205,7 +205,7 @@ function persistEntities(
         .where(eq(entities.id, entityId))
         .run()
     else {
-      entityId = randomUUIDv7()
+      entityId = newId()
       tx.insert(entities)
         .values({
           id: entityId,
@@ -227,7 +227,7 @@ function persistEntities(
       )
       .get()?.id
     if (!versionId) {
-      versionId = randomUUIDv7()
+      versionId = newId()
       tx.insert(entityVersions)
         .values({ id: versionId, entityId, contentHash, data: entity.data })
         .run()
@@ -289,7 +289,7 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
         metricPaths,
       ) !== digest
     ) {
-      revisionId = randomUUIDv7()
+      revisionId = newId()
       const body = JSON.stringify(payload)
       tx.insert(revisions)
         .values({

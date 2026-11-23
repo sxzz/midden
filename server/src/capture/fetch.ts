@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
-import { randomUUIDv7 } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
+import { newId } from '#db/id.ts'
 import {
   assets,
   captures,
@@ -401,7 +401,7 @@ function commit(
       const body = Buffer.from(source.body)
       tx.insert(sourceResponses)
         .values({
-          id: randomUUIDv7(),
+          id: newId(),
           captureId,
           position,
           body,
@@ -414,7 +414,7 @@ function commit(
         .run()
     }
     for (const [position, resource] of staged.resources.entries()) {
-      const assetId = randomUUIDv7()
+      const assetId = newId()
       tx.insert(assets)
         .values({
           id: assetId,

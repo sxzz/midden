@@ -69,8 +69,6 @@ describe('capture records', () => {
     const c = setup(new Set())
     for (let i = 1; i <= 32; i++)
       submit(c, { url: `https://fake.test/p/${100 + i}` })
-    // Requests in the same millisecond order by their random UUIDv7 bits.
-    await new Promise((resolve) => setTimeout(resolve, 2))
     submit(c, { url: 'https://fake.test/u/someone' })
     await c.queue.drain()
     const first = listRecords(c.db)

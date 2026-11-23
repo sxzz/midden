@@ -1,5 +1,4 @@
 import { Buffer } from 'node:buffer'
-import { randomUUIDv7 } from 'node:crypto'
 import {
   and,
   asc,
@@ -12,6 +11,7 @@ import {
   or,
   sql,
 } from 'drizzle-orm'
+import { newId } from '#db/id.ts'
 import {
   accountSelections,
   assets,
@@ -727,7 +727,7 @@ export function recordPage(
   const record = toRecord(ctx.db, recordRow(ctx.db, id))
   if (!record.pages) throw new AppError('unsupported')
   let idem = `more:${id}`
-  if (op === 'page_retry') idem = `page-retry:${key || randomUUIDv7()}`
+  if (op === 'page_retry') idem = `page-retry:${key || newId()}`
   else if (op !== 'more' && op !== 'more1000') throw new AppError('unsupported')
   const retry = op === 'page_retry'
   const last = collectionProgress(ctx.db, id).pages.at(-1)!

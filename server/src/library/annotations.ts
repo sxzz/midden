@@ -1,5 +1,5 @@
-import { randomUUIDv7 } from 'node:crypto'
 import { asc, eq, inArray, sql } from 'drizzle-orm'
+import { newId } from '#db/id.ts'
 import { collectionTags, library, tags } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import type { Database, Executor, Transaction } from '#db/client.ts'
@@ -106,7 +106,7 @@ export function updateAnnotation(
       ids = []
       for (const name of new Set(update.tagNames.map((n) => n.trim()))) {
         tx.insert(tags)
-          .values({ id: randomUUIDv7(), name })
+          .values({ id: newId(), name })
           .onConflictDoNothing()
           .run()
         ids.push(

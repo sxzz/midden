@@ -1,5 +1,5 @@
-import { randomUUIDv7 } from 'node:crypto'
 import { and, eq, gte, inArray, like, lt } from 'drizzle-orm'
+import { newId } from '#db/id.ts'
 import {
   captures,
   collections,
@@ -36,7 +36,7 @@ export function startRefreshBatch(ctx: CaptureContext, ids: string[]) {
       .where(inArray(library.collectionId, unique))
       .all()
     if (saved.length !== unique.length) throw new AppError('not_found')
-    const batchId = randomUUIDv7()
+    const batchId = newId()
     tx.insert(refreshBatches)
       .values({ id: batchId, collectionIds: unique })
       .run()

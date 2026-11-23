@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
-import { randomUUIDv7 } from 'node:crypto'
 import { and, asc, eq, ne, sql } from 'drizzle-orm'
 import { selectedConnection } from '#capture/records.ts'
+import { newId } from '#db/id.ts'
 import {
   accountCredentials,
   accountSelections,
@@ -95,7 +95,7 @@ export async function addAccount(
   }
   if (!account.accountId)
     throw new Error('account verification failed: no account id')
-  const ref = randomUUIDv7()
+  const ref = newId()
   const sealed = ctx.vault.seal(ref, credential.data)
   return ctx.db.transaction((tx) => {
     const existing = tx
@@ -111,7 +111,7 @@ export async function addAccount(
       )
       .get()
     tx.insert(accountCredentials).values({ id: ref, ciphertext: sealed }).run()
-    const id = existing?.id ?? randomUUIDv7()
+    const id = existing?.id ?? newId()
     if (existing)
       tx.update(connections)
         .set({
