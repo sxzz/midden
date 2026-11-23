@@ -33,6 +33,13 @@
 - 在切换前，`ts` 的 CI 只跑检查和测试，不发布镜像、不触发部署。
 - 每次提交后立即推送到 `origin/ts`（用户已授权）；推送 `main` 仍需用户确认。
 
+## 工程约定
+
+- `scripts/` 下的脚本一律用 `.ts`，由 Node 26 直接运行。
+- lint 在根目录执行 `eslint --max-warnings=0 .`，只有一份根配置；`third_party/` 是上游代码，不参与 lint。
+- server 不编译，Node 直接运行 `.ts`；只能用可擦除的 TS 语法（`erasableSyntaxOnly`）。包内导入用 `#` 子路径（如 `#db/client.ts`）。
+- Drizzle 1.0 RC 的命名风格在建表函数上设置（`sqliteTableCreator(..., 'snake_case')`）；`node-sqlite` 驱动的事务回调是同步的，里面不能 `await`。
+
 ## 功能范围
 
 保留（行为与旧版一致）：
