@@ -122,9 +122,11 @@ web/             现有网页
 
 ## 进度
 
-- 第 1、2、3 阶段已完成：采集链路（提交、capture、finalize、下载、缩略图、related 展开与续页、记录与进度、批量刷新、删除、标签备注、账号、维护）均已移植，有测试，并用真实 FxTwitter 帖子端到端验证过。
-- 本地检查：`/tmp/midden-check.sh` 不存在时，依次运行 `pnpm lint`、`pnpm typecheck`、`FFMPEG=<ffmpeg 路径> pnpm --filter @midden/server exec vitest run`；容器里 ffmpeg 用 `mise exec conda:ffmpeg -- which ffmpeg` 找到路径。
-- 下一步：第 4 阶段 HTTP API 与网页。
+- 第 1、2、3 阶段已完成：采集链路全部移植，有测试，并用真实 FxTwitter 帖子端到端验证过。
+- 第 4 阶段基本完成：HTTP API（认证、采集、记录、账号、标签备注、删除、用量、读取侧）、网页改用签名媒体链接、服务端直接提供 `/app/`、`node src/cli.ts token create` 生成 API token。读取侧在 `server/src/library/`。
+- 第 7 阶段部分完成：Dockerfile（`node:26.13.1-alpine`，升级 Node 时与 `devEngines` 一起改）、`compose.yaml`、`.env.example`；CI 的 `image` 任务构建镜像并做健康检查，但不发布。
+- 本地检查：`/tmp/midden-check.sh` 不存在时，依次运行 `pnpm lint`、`pnpm typecheck`、`FFMPEG=<ffmpeg 路径> pnpm --filter @midden/server exec vitest run`；容器里 ffmpeg 用 `mise exec conda:ffmpeg -- which ffmpeg` 找到路径。本机下载不了 Playwright 浏览器，e2e 看 CI。
+- 下一步：第 5 阶段 Telegram Bot（规格见 `.ai/telegram-spec.md`），然后第 6 阶段剩余部分、第 7 阶段的部署脚本与文档。
 
 ## 阶段
 
