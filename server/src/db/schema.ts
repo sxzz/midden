@@ -481,3 +481,21 @@ export const accountSelections = sqliteTable('account_selections', {
   adapterId: text().primaryKey(),
   connectionId: text(),
 })
+
+/** Browser sessions, by the SHA-256 of the cookie value. */
+export const webSessions = sqliteTable(
+  'web_sessions',
+  {
+    digest: text().primaryKey(),
+    expiresAt: timestamp().notNull(),
+  },
+  (t) => [index('web_sessions_expires').on(t.expiresAt)],
+)
+
+/** REST API tokens, by the SHA-256 of the token. */
+export const apiTokens = sqliteTable('api_tokens', {
+  id: text().primaryKey(),
+  digest: text().notNull().unique(),
+  name: text().notNull(),
+  createdAt: createdAt(),
+})
