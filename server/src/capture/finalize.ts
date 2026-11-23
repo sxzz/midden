@@ -238,6 +238,14 @@ function persistEntities(
 }
 
 /**
+ * Rows to insert with one statement each: few enough to stay below SQLite's
+ * limit on bound values.
+ */
+function* chunks<T>(rows: T[], size = 1000): Generator<T[]> {
+  for (let i = 0; i < rows.length; i += size) yield rows.slice(i, i + size)
+}
+
+/**
  * Turn a capture whose media have settled into a revision, or reuse the
  * newest one when nothing that counts as content changed.
  */
@@ -302,23 +310,27 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
           createdAt: now,
         })
         .run()
-      for (const entity of payload.graph?.entities ?? [])
+      for (const entities of chunks(payload.graph?.entities ?? []))
         tx.insert(revisionEntities)
-          .values({
-            revisionId,
-            entityKey: entity.key,
-            entityVersionId: entity.version_id!,
-            isRoot: entity.key === payload.graph!.root,
-          })
+          .values(
+            entities.map((entity) => ({
+              revisionId: revisionId!,
+              entityKey: entity.key,
+              entityVersionId: entity.version_id!,
+              isRoot: entity.key === payload.graph!.root,
+            })),
+          )
           .run()
-      for (const relation of payload.graph?.relations ?? [])
+      for (const relations of chunks(payload.graph?.relations ?? []))
         tx.insert(entityRelations)
-          .values({
-            revisionId,
-            sourceKey: relation.source,
-            targetKey: relation.target,
-            kind: relation.type,
-          })
+          .values(
+            relations.map((relation) => ({
+              revisionId: revisionId!,
+              sourceKey: relation.source,
+              targetKey: relation.target,
+              kind: relation.type,
+            })),
+          )
           .onConflictDoNothing()
           .run()
       tx.update(collections)

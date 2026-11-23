@@ -14,7 +14,7 @@ import { runMaintenance } from '#capture/maintenance.ts'
 import { detectThumbnailer } from '#capture/thumbnail.ts'
 import { loadConfig } from '#config.ts'
 import { deriveKey } from '#crypto.ts'
-import { openDatabase } from '#db/client.ts'
+import { openDatabase, optimize } from '#db/client.ts'
 import { createApi } from '#http/app.ts'
 import { pruneSessions } from '#http/auth.ts'
 import { JobQueue } from '#jobs/queue.ts'
@@ -27,6 +27,7 @@ import { startBot, type RunningBot } from '#telegram/bot.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
 const MAINTENANCE_INTERVAL = 60_000
+const OPTIMIZE_INTERVAL = 6 * 60 * 60_000
 const APP_PREFIX = /^\/app/
 
 const config = loadConfig()
@@ -115,6 +116,7 @@ const maintenance = setInterval(() => {
     .catch(() => {})
     .finally(() => (maintaining = false))
 }, MAINTENANCE_INTERVAL)
+const optimizing = setInterval(optimize, OPTIMIZE_INTERVAL, db)
 
 const server = serve(
   { fetch: app.fetch, port: config.port, hostname: config.host },
@@ -128,6 +130,7 @@ async function shutdown(signal: NodeJS.Signals) {
   stopping = true
   logger.info({ signal }, 'shutting down')
   clearInterval(maintenance)
+  clearInterval(optimizing)
   server.close()
   await bot?.stop()
   await queue.stop()

@@ -18,7 +18,19 @@ export function openDatabase(file: string) {
   client.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;')
   const db = drizzle({ client })
   migrate(db, { migrationsFolder: MIGRATIONS })
+  optimize(db, true)
   return db
+}
+
+/**
+ * Refresh the query planner's statistics where they are missing or stale,
+ * reading at most a few hundred rows per index. SQLite recommends this on
+ * opening a long-lived connection and then every few hours.
+ */
+export function optimize(db: Database, opening = false): void {
+  db.$client.exec(
+    `PRAGMA analysis_limit = 400; PRAGMA optimize${opening ? ' = 0x10002' : ''};`,
+  )
 }
 
 export type Database = ReturnType<typeof openDatabase>
