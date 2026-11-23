@@ -46,7 +46,12 @@ export default defineConfig({
     __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false,
     __BUILD_VERSION__: JSON.stringify(buildVersion()),
   },
-  server: { proxy: { '/v1': 'http://127.0.0.1:8080' } },
+  server: {
+    proxy: {
+      '/v1': 'http://127.0.0.1:8080',
+      '/media': 'http://127.0.0.1:8080',
+    },
+  },
   test: {
     alias: testAliases,
     server: { deps: { inline: ['vue-router'] } },
