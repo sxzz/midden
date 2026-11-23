@@ -39,10 +39,11 @@ function mount(
 ) {
   const el = document.createElement('div')
   document.body.append(el)
-  const app = createApp(component, { assets, showSensitive })
-    .use(vaporInteropPlugin)
-    .mount(el)
-  unmount = () => app.$.appContext.app.unmount()
+  const app = createApp(component, { assets, showSensitive }).use(
+    vaporInteropPlugin,
+  )
+  app.mount(el)
+  unmount = () => app.unmount()
   return el
 }
 const veil = (el: HTMLElement) =>

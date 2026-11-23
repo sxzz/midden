@@ -13,7 +13,7 @@
     },
     "packageManager": {
       "name": "pnpm",
-      "version": "12.21.0",
+      "version": "12.23.0",
       "onFail": "download"
     }
   },
@@ -22,7 +22,7 @@
     "dev": "pnpm --filter @midden/server dev",
     "lint": "eslint --max-warnings=0 .",
     "lint:fix": "eslint --fix .",
-    "typecheck": "tsc -p scripts && pnpm -r --parallel run typecheck",
+    "typecheck": "tsrs --fast -p scripts && pnpm -r --parallel run typecheck",
     "test": "pnpm -r run test"
   },
   "devDependencies": {
@@ -31,7 +31,8 @@
     "@types/node": "^26.6.6",
     "eslint": "^10.15.0",
     "prettier": "^3.10.1",
-    "typescript": "6.0.3"
+    "tsrs": "^7.1.0-beta.tsrs4",
+    "typescript": "^6.0.3"
   },
   "prettier": "@sxzz/prettier-config"
 }

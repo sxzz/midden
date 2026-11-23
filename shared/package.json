@@ -9,7 +9,7 @@
     "node": ">=26"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsrs --fast"
   },
   "dependencies": {
     "valibot": "^1.5.0"

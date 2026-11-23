@@ -1,6 +1,6 @@
 # Build: install, build Atmosphere and the web app, then drop dev dependencies.
 FROM node:26.13.1-alpine AS build
-RUN npm install -g pnpm@12.21.0
+RUN npm install -g pnpm@12.23.0
 WORKDIR /src
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY server/package.json server/

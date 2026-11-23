@@ -1,19 +1,21 @@
+ignoreWorkspaceRootCheck: true
+minimumReleaseAge: 0
 minimumReleaseAgeExcludePrune: true
-
-minimumReleaseAgeExclude:
-  - hono@4.13.21
-  - grammy@1.48.0
+trustLockfile: true
 trustPolicy: no-downgrade
-
+trustPolicyIgnoreAfter: 10080 # 7 days
 trustPolicyExcludePrune: true
-
+# tsrs publishes each platform binary with its own trusted publisher.
+trustPolicyExclude:
+  - tsrs
+  - '@tsrs/*'
 shellEmulator: true
-
 packages:
   - server
   - shared
   - third_party/atmosphere
   - web
+
 allowBuilds:
-  esbuild: true
+  esbuild: false
   workerd: false
