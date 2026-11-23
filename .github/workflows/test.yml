@@ -14,8 +14,13 @@ jobs:
       - run: pnpm lint
       - run: pnpm build
       - run: pnpm typecheck
-      # Thumbnail tests call ffmpeg; recommended packages add a third of the download.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      # Thumbnail tests call ffmpeg and ffprobe. A prebuilt conda-forge build
+      # through mise, cached between runs, instead of apt.
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          mise_toml: |
+            [tools]
+            ffmpeg = "9.1.0"
       - run: pnpm test
         env:
           FFMPEG: ffmpeg
