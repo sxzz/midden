@@ -38,7 +38,6 @@
 - 先完成移植，不考虑与旧数据的兼容（库内格式、内容哈希可以自由设计）；旧采集数据如何复用等移植完再定。HTTP API 可以重新设计，`web/` 的前端逻辑跟着一起改写，不必迁就旧接口。
 
 - 实体数据不再按平台声明的 JSON Schema 校验，也不存 schema：采集代码与 core 同进程，由 TS 类型保证；实体版本去重哈希只覆盖数据与媒体。
-- ID 直接用 `crypto.randomUUIDv7()`。
 
 - `scripts/` 下的脚本一律用 `.ts`，由 Node 26 直接运行。
 - lint 在根目录执行 `eslint --max-warnings=0 .`，只有一份根配置；`third_party/` 是上游代码，不参与 lint。
