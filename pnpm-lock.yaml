@@ -205,9 +205,15 @@ importers:
       '@hono/node-server':
         specifier: ^2.1.11
         version: 2.1.11(hono@4.13.21)
+      '@hono/standard-validator':
+        specifier: ^0.4.1
+        version: 0.4.1(@standard-schema/spec@1.1.0)(hono@4.13.21)
       '@midden/shared':
         specifier: workspace:*
         version: link:../shared
+      '@standard-schema/spec':
+        specifier: ^1.1.0
+        version: 1.1.0
       drizzle-orm:
         specifier: 1.0.0-rc.6
         version: 1.0.0-rc.6(valibot@1.5.0(typescript@6.0.3))(zod@4.6.7)
@@ -717,6 +723,12 @@ packages:
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4 || ^5.0.0-0
+
+  '@hono/standard-validator@0.4.1':
+    resolution: {integrity: sha512-Q0+1dgMKAXEvsmJ5FNoamwnfrf/I5JNnKn7WzfynH8nJlNe1lNOW1+vlKpEQZbrBLEgmxIeys6HjRotDvZzq+A==}
+    peerDependencies:
+      '@standard-schema/spec': ^1.0.0
+      hono: '>=4.11.2'
 
   '@hono/zod-openapi@1.6.3':
     resolution: {integrity: sha512-VYR82Y60plu8g3pN60OUXMVKpmxh3R04Qs++3DY9vtwZ9/sA/BRY0PcRIR+Z37/3itWtM7pYwT9bKiH9JhqV6Q==}
@@ -3703,6 +3715,11 @@ snapshots:
 
   '@hono/node-server@2.1.11(hono@4.13.21)':
     dependencies:
+      hono: 4.13.21
+
+  '@hono/standard-validator@0.4.1(@standard-schema/spec@1.1.0)(hono@4.13.21)':
+    dependencies:
+      '@standard-schema/spec': 1.1.0
       hono: 4.13.21
 
   '@hono/zod-openapi@1.6.3(hono@4.13.21)(zod@4.6.7)':

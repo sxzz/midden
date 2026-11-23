@@ -15,11 +15,8 @@ import { detectThumbnailer } from '#capture/thumbnail.ts'
 import { loadConfig } from '#config.ts'
 import { deriveKey } from '#crypto.ts'
 import { openDatabase } from '#db/client.ts'
-import { accountRoutes } from '#http/account-routes.ts'
 import { createApi } from '#http/app.ts'
 import { pruneSessions } from '#http/auth.ts'
-import { captureRoutes } from '#http/capture-routes.ts'
-import { libraryRoutes } from '#http/library-routes.ts'
 import { JobQueue } from '#jobs/queue.ts'
 import { createLogger } from '#log.ts'
 import { createInstagramPlatform } from '#platforms/instagram/index.ts'
@@ -63,8 +60,10 @@ ctx = {
 }
 
 let botUsername: string | undefined
+let bot: RunningBot | undefined
 const api = createApi({
   ctx,
+  followBatch: (id) => bot?.followBatch(id),
   telegram: config.telegram,
   webAppUrl: config.webAppUrl,
   botUsername: async () => {
@@ -78,10 +77,6 @@ const api = createApi({
     return (botUsername = result.result.username)
   },
 })
-let bot: RunningBot | undefined
-captureRoutes(api, ctx, { followBatch: (id) => bot?.followBatch(id) })
-accountRoutes(api, ctx)
-libraryRoutes(api, ctx)
 
 const app = new Hono()
 app.get('/healthz', (c) => c.text('ok'))

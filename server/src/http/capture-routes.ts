@@ -1,4 +1,5 @@
 import { and, desc, eq, ne } from 'drizzle-orm'
+import { Hono } from 'hono'
 import * as v from 'valibot'
 import {
   batchProgress,
@@ -25,11 +26,10 @@ import { stopCollection } from '#capture/related.ts'
 import { captures, collections, library, submissions } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { deleteAll } from '#library/delete.ts'
-import { body, type Env } from './app.ts'
+import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { CaptureOptions } from '#capture/options.ts'
 import type { Job } from '#capture/submit.ts'
-import type { Hono } from 'hono'
 
 const OptionsBody = v.optional(
   v.strictObject({
@@ -196,129 +196,144 @@ const idempotencyKey = (c: {
 }) => c.req.header('Idempotency-Key') || undefined
 
 export function captureRoutes(
-  app: Hono<Env>,
   ctx: AccountsContext,
   options: { followBatch?: (batchId: string) => void } = {},
-): void {
-  app.post('/captures', async (c) => {
-    const input = await body(
-      c,
-      v.union([
-        v.strictObject({
-          url: v.pipe(v.string(), v.maxLength(8192)),
-          options: OptionsBody,
-        }),
-        v.strictObject({ refresh_id: v.string() }),
-      ]),
-    )
-    const key = idempotencyKey(c)
-    const job =
-      'url' in input
-        ? captureURL(ctx, input.url, key, captureOptions(input.options))
-        : recapture(ctx, input.refresh_id, { key })
-    return c.json(jobJson(ctx, job))
-  })
+) {
+  return (
+    new Hono<Env>()
+      .post(
+        '/captures',
+        json(
+          v.union([
+            v.strictObject({
+              url: v.pipe(v.string(), v.maxLength(8192)),
+              options: OptionsBody,
+            }),
+            v.strictObject({ refresh_id: v.string() }),
+          ]),
+        ),
+        (c) => {
+          const input = c.req.valid('json')
+          const key = idempotencyKey(c)
+          const job =
+            'url' in input
+              ? captureURL(ctx, input.url, key, captureOptions(input.options))
+              : recapture(ctx, input.refresh_id, { key })
+          return c.json(jobJson(ctx, job))
+        },
+      )
 
-  app.get('/captures', (c) => {
-    const page = listRecords(ctx.db, c.req.query('cursor') || undefined)
-    return c.json({
-      items: page.items.map(recordJson),
-      ...(page.next ? { next_cursor: page.next } : {}),
-    })
-  })
+      .get('/captures', (c) => {
+        const page = listRecords(ctx.db, c.req.query('cursor') || undefined)
+        return c.json({
+          items: page.items.map(recordJson),
+          ...(page.next ? { next_cursor: page.next } : {}),
+        })
+      })
 
-  app.get('/captures/:id', (c) =>
-    c.json(detailJson(recordDetail(ctx.db, c.req.param('id')))),
+      .get('/captures/:id', (c) =>
+        c.json(detailJson(recordDetail(ctx.db, c.req.param('id')))),
+      )
+
+      .get('/captures/:id/members', (c) => {
+        const page = recordMembers(
+          ctx.db,
+          c.req.param('id'),
+          c.req.query('state') ?? '',
+          c.req.query('cursor') || undefined,
+        )
+        return c.json({
+          items: page.items.map(memberJson),
+          ...(page.next ? { next_cursor: page.next } : {}),
+        })
+      })
+
+      .post('/captures/:id/retry', (c) =>
+        c.json(
+          jobJson(ctx, retryRecord(ctx, c.req.param('id'), idempotencyKey(c))),
+        ),
+      )
+
+      .post(
+        '/captures/:id/retry-failed',
+        json(v.strictObject({ job_id: v.optional(v.string()) })),
+        (c) => {
+          const input = c.req.valid('json')
+          return c.json({
+            count: retryMembers(ctx, c.req.param('id'), input.job_id),
+          })
+        },
+      )
+
+      .post(
+        '/captures/:id/pages',
+        json(v.strictObject({ op: v.string() })),
+        (c) => {
+          const input = c.req.valid('json')
+          return c.json(
+            jobJson(
+              ctx,
+              recordPage(ctx, c.req.param('id'), input.op, idempotencyKey(c)),
+            ),
+          )
+        },
+      )
+
+      .post('/captures/:id/stop', (c) => {
+        stopCollection(ctx, c.req.param('id'))
+        return c.body(null, 204)
+      })
+
+      .get('/jobs/:id', (c) => c.json(jobJson(ctx, { id: c.req.param('id') })))
+
+      .post(
+        '/refresh-batches',
+        json(v.strictObject({ collection_ids: v.array(v.string()) })),
+        (c) => {
+          const input = c.req.valid('json')
+          const batch = startRefreshBatch(ctx, input.collection_ids)
+          // Started by the owner in the web app: follow it in Telegram too.
+          if (c.get('session')) options.followBatch?.(batch.id)
+          return c.json(batchJson(batch))
+        },
+      )
+
+      .get('/refresh-batches/:id', (c) =>
+        c.json(batchJson(batchProgress(ctx.db, c.req.param('id')))),
+      )
+
+      .post('/refresh-batches/:id/retry', (c) =>
+        c.json({ count: retryRefreshBatch(ctx, c.req.param('id')) }),
+      )
+
+      // Whether a saved collection can be captured again. Platforms run in
+      // process, so this holds for any saved collection on a known platform.
+      .get('/collections/:id/availability', (c) => {
+        const saved = ctx.db
+          .select({ url: collections.url })
+          .from(library)
+          .innerJoin(collections, eq(collections.id, library.collectionId))
+          .where(eq(library.collectionId, c.req.param('id')))
+          .get()
+        if (!saved) throw new AppError('not_found')
+        let available = true
+        try {
+          ctx.platforms.resolve(saved.url)
+        } catch {
+          available = false
+        }
+        return c.json({ available })
+      })
+
+      .get('/library', (c) => c.json(librarySize(ctx.db)))
+
+      .post(
+        '/library/delete-all',
+        json(v.strictObject({ confirm: v.literal('delete all') })),
+        (c) => {
+          c.req.valid('json')
+          return c.json({ ...deleteAll(ctx.db), running: 0 })
+        },
+      )
   )
-
-  app.get('/captures/:id/members', (c) => {
-    const page = recordMembers(
-      ctx.db,
-      c.req.param('id'),
-      c.req.query('state') ?? '',
-      c.req.query('cursor') || undefined,
-    )
-    return c.json({
-      items: page.items.map(memberJson),
-      ...(page.next ? { next_cursor: page.next } : {}),
-    })
-  })
-
-  app.post('/captures/:id/retry', (c) =>
-    c.json(
-      jobJson(ctx, retryRecord(ctx, c.req.param('id'), idempotencyKey(c))),
-    ),
-  )
-
-  app.post('/captures/:id/retry-failed', async (c) => {
-    const input = await body(
-      c,
-      v.strictObject({ job_id: v.optional(v.string()) }),
-    )
-    return c.json({
-      count: retryMembers(ctx, c.req.param('id'), input.job_id),
-    })
-  })
-
-  app.post('/captures/:id/pages', async (c) => {
-    const input = await body(c, v.strictObject({ op: v.string() }))
-    return c.json(
-      jobJson(
-        ctx,
-        recordPage(ctx, c.req.param('id'), input.op, idempotencyKey(c)),
-      ),
-    )
-  })
-
-  app.post('/captures/:id/stop', (c) => {
-    stopCollection(ctx, c.req.param('id'))
-    return c.body(null, 204)
-  })
-
-  app.get('/jobs/:id', (c) => c.json(jobJson(ctx, { id: c.req.param('id') })))
-
-  app.post('/refresh-batches', async (c) => {
-    const input = await body(
-      c,
-      v.strictObject({ collection_ids: v.array(v.string()) }),
-    )
-    const batch = startRefreshBatch(ctx, input.collection_ids)
-    // Started by the owner in the web app: follow it in Telegram too.
-    if (c.get('session')) options.followBatch?.(batch.id)
-    return c.json(batchJson(batch))
-  })
-
-  app.get('/refresh-batches/:id', (c) =>
-    c.json(batchJson(batchProgress(ctx.db, c.req.param('id')))),
-  )
-
-  app.post('/refresh-batches/:id/retry', (c) =>
-    c.json({ count: retryRefreshBatch(ctx, c.req.param('id')) }),
-  )
-
-  // Whether a saved collection can be captured again. Platforms run in
-  // process, so this holds for any saved collection on a known platform.
-  app.get('/collections/:id/availability', (c) => {
-    const saved = ctx.db
-      .select({ url: collections.url })
-      .from(library)
-      .innerJoin(collections, eq(collections.id, library.collectionId))
-      .where(eq(library.collectionId, c.req.param('id')))
-      .get()
-    if (!saved) throw new AppError('not_found')
-    let available = true
-    try {
-      ctx.platforms.resolve(saved.url)
-    } catch {
-      available = false
-    }
-    return c.json({ available })
-  })
-
-  app.get('/library', (c) => c.json(librarySize(ctx.db)))
-
-  app.post('/library/delete-all', async (c) => {
-    await body(c, v.strictObject({ confirm: v.literal('delete all') }))
-    return c.json({ ...deleteAll(ctx.db), running: 0 })
-  })
 }

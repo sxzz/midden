@@ -3,11 +3,8 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { captureHandlers } from '#capture/handlers.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, postGraph } from '#testing/fake-platform.ts'
-import { accountRoutes } from './account-routes.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
 import { createToken } from './auth.ts'
-import { captureRoutes } from './capture-routes.ts'
-import { libraryRoutes } from './library-routes.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
 const BOT = '123:secret-token'
@@ -38,9 +35,6 @@ function setup() {
     telegram: { token: BOT, owner: OWNER },
     webAppUrl: WEB,
   })
-  captureRoutes(app, ctx)
-  accountRoutes(app, ctx)
-  libraryRoutes(app, ctx)
   const token = createToken(ctx.db, 'test')
   const call = (path: string, init: RequestInit = {}) =>
     app.request(path, {
