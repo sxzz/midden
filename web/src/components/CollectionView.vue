@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef } from 'vue'
-import { groupCollections } from '../presentation'
+import { groupCollections, listSort, listsProfiles } from '../presentation'
 import BatchRefresh from './BatchRefresh.vue'
 import CollectionAlbum from './CollectionAlbum.vue'
 import CollectionFilters from './CollectionFilters.vue'
@@ -31,8 +31,12 @@ const emit = defineEmits<{
   more: []
   retry: []
 }>()
+// An album shows posts' media; accounts have none to show.
+const albums = computed(() => !listsProfiles(props.query))
 const layout = computed(() =>
-  new URLSearchParams(props.query).get('layout') === 'album' ? 'album' : 'feed',
+  albums.value && new URLSearchParams(props.query).get('layout') === 'album'
+    ? 'album'
+    : 'feed',
 )
 function changeLayout(value: 'feed' | 'album') {
   const q = new URLSearchParams(props.query)
@@ -57,9 +61,7 @@ function toggle(id: string) {
 const mediaTypes = computed(
   () => new URLSearchParams(props.query).get('media_type') || '',
 )
-const sort = computed(
-  () => new URLSearchParams(props.query).get('sort') || 'captured',
-)
+const sort = computed(() => listSort(props.query))
 const groups = computed(() =>
   groupCollections(props.items, new Date(), sort.value),
 )
@@ -105,7 +107,7 @@ const storage = computed(() =>
     :hide-authors="hideAuthors"
     @search="(value) => emit('search', value)"
   />
-  <div class="layout-bar">
+  <div v-if="(!selecting && items.length) || albums" class="layout-bar">
     <button
       v-if="!selecting && items.length"
       type="button"
@@ -115,6 +117,7 @@ const storage = computed(() =>
       批量更新
     </button>
     <LibraryLayoutToggle
+      v-if="albums"
       :model-value="layout"
       @update:model-value="changeLayout"
     />

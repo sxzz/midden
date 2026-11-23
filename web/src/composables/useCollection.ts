@@ -1,10 +1,12 @@
 import { onUnmounted, shallowRef } from 'vue'
 import { call, client, errorText, type Collection } from '../api'
+import { listSort } from '../presentation'
 /** One page of the library list for a route query. */
 function page(params: string, cursor: string, signal: AbortSignal) {
   const q = new URLSearchParams(params)
   if (!q.has('entity_type')) q.set('entity_type', 'x.post,instagram.post')
   q.delete('layout')
+  q.set('sort', listSort(q))
   for (const [local, apiKey] of [
     ['from_date', 'saved_from'],
     ['to_date', 'saved_before'],

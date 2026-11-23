@@ -4,16 +4,25 @@ import ChevronIcon from './ChevronIcon.vue'
 const props = withDefaults(
   defineProps<{
     label: string
-    options: { value: string; label: string }[]
+    /** `detail` is a quiet aside, such as a count; it is not announced. */
+    options: { value: string; label: string; detail?: string }[]
     searchable?: boolean
+    /** The parent searches (`search`) and pages (`more`) the options. */
+    remote?: boolean
+    /** Labels for selected values that are not among the options. */
+    names?: Record<string, string>
+    loading?: boolean
+    more?: boolean
   }>(),
   { searchable: true },
 )
+const emit = defineEmits<{ search: [query: string]; more: [] }>()
 const selected = defineModel<string[]>({ required: true })
 const query = shallowRef('')
 const open = shallowRef(false)
 const dropdown = useTemplateRef<HTMLDetailsElement>('dropdown')
 const choices = computed(() => {
+  if (props.remote) return props.options
   const options = [...props.options]
   for (const value of selected.value)
     if (!options.some((option) => option.value === value))
@@ -29,6 +38,7 @@ const summary = computed(
       .map(
         (value) =>
           props.options.find((option) => option.value === value)?.label ||
+          props.names?.[value] ||
           value,
       )
       .join('、') || '全部',
@@ -88,6 +98,7 @@ function navigate(event: KeyboardEvent) {
         :aria-label="`搜索${label}`"
         placeholder="搜索"
         @keydown.enter.prevent
+        @input="remote && emit('search', query)"
       />
       <button
         v-if="selected.length"
@@ -115,17 +126,30 @@ function navigate(event: KeyboardEvent) {
           :aria-selected="selected.includes(option.value)"
           @click="toggle(option.value)"
         >
-          {{ option.label }}
+          {{ option.label
+          }}<span v-if="option.detail" class="detail" aria-hidden="true">{{
+            option.detail
+          }}</span>
+        </button>
+        <button
+          v-if="more"
+          type="button"
+          class="more"
+          :disabled="loading"
+          @click="emit('more')"
+        >
+          {{ loading ? '正在加载…' : '加载更多' }}
         </button>
       </div>
-      <p v-if="!choices.length" class="empty">没有匹配项</p>
+      <p v-if="!choices.length" class="empty">
+        {{ loading ? '正在搜索…' : '没有匹配项' }}
+      </p>
     </div>
   </details>
 </template>
 
 <style scoped>
 .multi-select {
-  border-bottom: 1px solid var(--separator);
   font-size: 15px;
 }
 summary {
@@ -139,6 +163,10 @@ summary {
 }
 summary::-webkit-details-marker {
   display: none;
+}
+/* The value ends where a select's does, 2px before its chevron. */
+summary > .chevron {
+  margin-left: -10px;
 }
 .value {
   margin-left: auto;
@@ -197,6 +225,22 @@ input {
   .tag {
     transition: none;
   }
+}
+.detail {
+  margin-left: 6px;
+  color: var(--subtle);
+  font-size: 12px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.more {
+  min-height: 34px;
+  padding: 6px 13px;
+  color: var(--link);
+  font-size: 14px;
+}
+.more:disabled {
+  color: var(--subtle);
 }
 .clear {
   color: var(--link);

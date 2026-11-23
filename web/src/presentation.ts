@@ -267,6 +267,18 @@ export interface CollectionGroup {
   label: string
   items: Collection[]
 }
+/** Whether a list query is for accounts rather than posts. */
+export const listsProfiles = (query: string | URLSearchParams) =>
+  (new URLSearchParams(query).get('entity_type') || '')
+    .split(',')
+    .some((type) => type.endsWith('.profile'))
+/**
+ * The order of a list: posts by when they were posted unless asked
+ * otherwise; accounts have no such time.
+ */
+export const listSort = (query: string | URLSearchParams) =>
+  new URLSearchParams(query).get('sort') ||
+  (listsProfiles(query) ? 'captured' : 'published')
 export function collectionTime(item: Collection, sort: string) {
   return sort === 'published' && parseDate(item.published_at)
     ? item.published_at

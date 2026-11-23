@@ -179,9 +179,7 @@ test('Chinese filters support multiple media, date bounds and storage order', as
   await range.selectOption('6')
   await expect.poll(() => query.get('saved_from')).toBeTruthy()
   expect(query.get('saved_before')).toBeNull()
-  await expect(page.getByRole('button', { name: /^筛选/ })).toContainText(
-    '最近 7 天',
-  )
+  await expect(page.locator('.filter-summary')).toContainText('最近 7 天')
   await range.selectOption('custom')
   await page.getByLabel('收藏开始日期').fill('2026-09-01')
   await page.getByLabel('收藏结束日期').fill('2026-09-30')
@@ -222,15 +220,27 @@ test('author dropdown searches names but filters by stable identity', async ({
   // The last two are different accounts under one display name: picking one
   // must send only its own id, never the shared name.
   const authors = [
-    { id: 'x/x.profile/1', name: '作者甲' },
-    { id: 'x/x.profile/2', name: "作者乙, O'Reilly" },
-    { id: 'x/x.profile/3', name: "作者乙, O'Reilly" },
+    { id: 'x/x.profile/1', name: '作者甲', count: 3 },
+    { id: 'x/x.profile/2', name: "作者乙, O'Reilly", count: 2 },
+    { id: 'x/x.profile/3', name: "作者乙, O'Reilly", count: 1 },
   ]
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {
     const url = new URL(r.request().url())
-    if (url.pathname === '/v1/collections/authors')
-      return r.fulfill({ json: { items: authors } })
+    // Searches and resolves selections like the server.
+    if (url.pathname === '/v1/collections/authors') {
+      const q = url.searchParams.get('q') || ''
+      const wanted = url.searchParams.getAll('author')
+      return r.fulfill({
+        json: {
+          items: authors.filter((author) =>
+            wanted.length
+              ? wanted.includes(author.id)
+              : author.name.includes(q),
+          ),
+        },
+      })
+    }
     if (url.pathname === '/v1/collections') query = url.searchParams
     return r.fulfill({ json: { items: [profile] } })
   })
@@ -283,7 +293,7 @@ test('sensitive filter applies immediately and clears', async ({ page }) => {
   await expect(select.locator('option')).toHaveText(['全部', '包含', '不包含'])
   await select.selectOption('contains')
   await expect.poll(() => query.get('sensitive')).toBe('contains')
-  await expect(panel).toContainText('包含敏感内容')
+  await expect(page.locator('.filter-summary')).toHaveText('包含敏感内容')
   await select.selectOption('not_contains')
   await expect.poll(() => query.get('sensitive')).toBe('not_contains')
   await page.reload()

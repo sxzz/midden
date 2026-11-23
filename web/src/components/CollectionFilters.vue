@@ -9,6 +9,7 @@ import {
   watch,
 } from 'vue'
 import { call, client, errorText, type Author, type Tag } from '../api'
+import { listSort, listsProfiles } from '../presentation'
 import ChevronIcon from './ui/ChevronIcon.vue'
 import MultiSelect from './ui/MultiSelect.vue'
 import TagChips from './ui/TagChips.vue'
@@ -34,7 +35,7 @@ function read(query: string) {
     authors: params.getAll('author'),
     layout: params.get('layout') === 'album' ? 'album' : '',
     order: params.get('order') || 'desc',
-    sort: params.get('sort') || 'captured',
+    sort: listSort(params),
     q: params.get('q') || '',
     // Which tab this form belongs to; it rides along but is never edited here.
     entity: params.get('entity_type') || '',
@@ -55,13 +56,9 @@ function read(query: string) {
 type Form = ReturnType<typeof read>
 const form = reactive(read(props.query))
 // Authors, media and sensitivity describe posts; an account has none of them.
-const posts = computed(
-  () => !form.entity.split(',').some((type) => type.endsWith('.profile')),
-)
+const posts = computed(() => !listsProfiles(`entity_type=${form.entity}`))
 const entityTypes = (entity: string, platform: string) => {
-  const kind = entity.split(',').some((type) => type.endsWith('.profile'))
-    ? 'profile'
-    : 'post'
+  const kind = listsProfiles(`entity_type=${entity}`) ? 'profile' : 'post'
   return (platform ? [platform] : ['x', 'instagram'])
     .map((name) => `${name}.${kind}`)
     .join(',')
@@ -160,8 +157,9 @@ function stringify(f: Form) {
     ['post_type', f.postType],
     ['q', f.q],
     ['layout', f.layout],
-    ['sort', f.sort],
-    ['order', f.order],
+    // The default order stays out of the address.
+    ['sort', f.sort === listSort(`entity_type=${f.entity}`) ? '' : f.sort],
+    ['order', f.order === 'desc' ? '' : f.order],
     ['media_type', f.media.join(',')],
     ['visibility', f.visibility],
     ['sensitive', f.sensitive],
@@ -192,21 +190,20 @@ function search() {
 }
 function clear() {
   const { layout, entity } = form
-  const category = entity.split(',').some((type) => type.endsWith('.profile'))
-    ? 'x.profile,instagram.profile'
-    : ''
-  Object.assign(form, read(''), { layout, entity: category })
-  customRange.value = false
-  settled = build()
   const q = new URLSearchParams()
   if (layout) q.set('layout', layout)
-  if (category) q.set('entity_type', category)
+  if (listsProfiles(`entity_type=${entity}`))
+    q.set('entity_type', 'x.profile,instagram.profile')
+  Object.assign(form, read(q.toString()))
+  customRange.value = false
+  settled = build()
   emit('search', q.toString())
 }
-/** The tab itself is not a filter, so it alone leaves nothing to clear. */
+/** The tab and the layout are not filters: they alone leave nothing to clear. */
 const clearable = computed(() => {
   const q = new URLSearchParams(props.query)
   q.delete('entity_type')
+  q.delete('layout')
   return !!form.platform || q.size > 0
 })
 // Every discrete control applies itself; only the keyword box waits for Enter.
@@ -238,50 +235,113 @@ watch(
     if (!incoming.from && !incoming.to) customRange.value = false
   },
 )
+// Authors come a page at a time, most saved posts first, and the search runs
+// on the server: a large library has thousands of them.
 const authors = shallowRef<Author[]>([])
+const authorQuery = shallowRef('')
+const authorsNext = shallowRef('')
 const authorError = shallowRef('')
 const authorsLoading = shallowRef(false)
-let authorsLoaded = false
+const authorsLoaded = shallowRef(false)
+/** Names of every author seen, so a selection reads by name. */
+const authorNames = shallowRef<Record<string, string>>({})
+const wantsAuthors = () => posts.value && !props.hideAuthors
 const controller = new AbortController()
 onUnmounted(() => controller.abort())
-async function loadAuthors() {
-  if (authorsLoading.value) return
+function remember(items: Author[]) {
+  const fresh = items.filter((a) => authorNames.value[a.id] !== a.name)
+  if (fresh.length)
+    authorNames.value = {
+      ...authorNames.value,
+      ...Object.fromEntries(fresh.map((a) => [a.id, a.name || a.id])),
+    }
+}
+let authorRequest = 0
+async function loadAuthors(more = false) {
+  const request = ++authorRequest
   authorsLoading.value = true
   authorError.value = ''
   try {
     const data = await call(
-      client.collections.authors.$get(undefined, {
-        init: { signal: controller.signal },
-      }),
+      client.collections.authors.$get(
+        {
+          query: {
+            q: authorQuery.value.trim() || undefined,
+            cursor: more ? authorsNext.value : undefined,
+          },
+        },
+        { init: { signal: controller.signal } },
+      ),
     )
-    authors.value = data.items.filter((author) => author.id)
-    authorsLoaded = true
+    // A newer search superseded this one.
+    if (request !== authorRequest) return
+    remember(data.items)
+    authors.value = more ? [...authors.value, ...data.items] : data.items
+    authorsNext.value = data.next_cursor ?? ''
+    authorsLoaded.value = true
   } catch (error) {
-    if (!controller.signal.aborted) authorError.value = errorText(error)
+    if (request === authorRequest && !controller.signal.aborted)
+      authorError.value = errorText(error)
   } finally {
-    authorsLoading.value = false
+    if (request === authorRequest) authorsLoading.value = false
   }
 }
 watch(
   open,
   (value) => {
-    if (value && posts.value && !props.hideAuthors && !authorsLoaded)
-      void loadAuthors()
+    if (value && wantsAuthors() && !authorsLoaded.value) void loadAuthors()
+  },
+  { immediate: true },
+)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+onUnmounted(() => clearTimeout(searchTimer))
+function searchAuthors(query: string) {
+  authorQuery.value = query
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(loadAuthors, 250)
+}
+// A selection from the address (a reload, a shared link) needs its names
+// even while the panel is closed: the summary shows them.
+watch(
+  () => form.authors,
+  async (ids) => {
+    const missing = ids.filter((id) => !(id in authorNames.value))
+    if (!missing.length || !wantsAuthors()) return
+    try {
+      remember(
+        (
+          await call(
+            client.collections.authors.$get(
+              { query: { author: missing } },
+              { init: { signal: controller.signal } },
+            ),
+          )
+        ).items,
+      )
+    } catch {
+      // The ids stand in for names.
+    }
   },
   { immediate: true },
 )
 // Two accounts may share a display name, so the label is never the value.
-const authorOptions = computed(() =>
-  authors.value.map((author) => ({
+// Selected authors beyond the loaded page stay listed so they can be undone.
+const authorOptions = computed(() => {
+  const options = authors.value.map((author) => ({
     value: author.id,
     label: author.name || author.id,
-  })),
-)
-const authorNames = computed(() =>
-  Object.fromEntries(
-    authors.value.map((author) => [author.id, author.name || author.id]),
-  ),
-)
+    detail: String(author.count),
+  }))
+  if (!authorQuery.value.trim())
+    for (const id of form.authors)
+      if (!authors.value.some((author) => author.id === id))
+        options.push({
+          value: id,
+          label: authorNames.value[id] || id,
+          detail: '',
+        })
+  return options
+})
 const mediaOptions = Object.entries(mediaNames).map(([value, label]) => ({
   value,
   label,
@@ -330,8 +390,7 @@ const tagFilter = computed({
         :aria-expanded="open"
         @click="open = !open"
       >
-        筛选<span v-if="active" class="separator" aria-hidden="true">·</span
-        ><span v-if="active" class="active">{{ active }}</span>
+        筛选
         <ChevronIcon :open="open" />
       </button>
       <button
@@ -345,8 +404,8 @@ const tagFilter = computed({
       <span class="sort"
         ><span class="select"
           ><select v-model="form.sort" aria-label="排序">
-            <option value="captured">采集时间</option>
             <option v-if="posts" value="published">发帖时间</option>
+            <option value="captured">采集时间</option>
             <option value="storage">存储空间</option></select
           ><ChevronIcon class="select-chevron" /></span
         ><span class="select"
@@ -360,6 +419,9 @@ const tagFilter = computed({
           ><ChevronIcon class="select-chevron" /></span
       ></span>
     </div>
+    <!-- On its own line: beside the sort pickers a phone has room for a
+         word or two of it. -->
+    <p v-if="active" class="filter-summary">{{ active }}</p>
     <div v-show="open" class="panel">
       <label class="option">
         平台<span class="select"
@@ -383,14 +445,12 @@ const tagFilter = computed({
         />
         <p v-if="tagError" class="tag-error" role="alert">
           {{ tagError }}
-          <button type="button" class="tag-retry" @click="loadTags">
-            重试
-          </button>
+          <button type="button" class="retry" @click="loadTags">重试</button>
         </p>
       </div>
       <template v-if="posts">
         <div
-          v-if="!hideAuthors && authorsLoading"
+          v-if="!hideAuthors && !authorsLoaded && authorsLoading"
           class="author-skeleton"
           role="status"
           aria-label="正在加载作者"
@@ -401,11 +461,19 @@ const tagFilter = computed({
           v-else-if="!hideAuthors"
           v-model="form.authors"
           label="作者"
+          remote
           :options="authorOptions"
+          :names="authorNames"
+          :loading="authorsLoading"
+          :more="!!authorsNext"
+          @search="searchAuthors"
+          @more="loadAuthors(true)"
         />
         <p v-if="!hideAuthors && authorError" class="hint" role="alert">
           {{ authorError }}
-          <button type="button" @click="loadAuthors">重试</button>
+          <button type="button" class="retry" @click="loadAuthors()">
+            重试
+          </button>
         </p>
         <MultiSelect
           v-model="form.media"
@@ -424,8 +492,12 @@ const tagFilter = computed({
           ><ChevronIcon class="select-chevron" /></span
       ></label>
       <label class="option"
-        >作者可见性<span class="select"
-          ><select v-model="form.visibility">
+        >{{ posts ? '作者可见性' : '可见性'
+        }}<span class="select"
+          ><select
+            v-model="form.visibility"
+            :aria-label="posts ? '作者可见性' : '可见性'"
+          >
             <option value="">全部</option>
             <option value="public">公开</option>
             <option value="private">私密</option></select
@@ -554,15 +626,13 @@ const tagFilter = computed({
   flex: none;
   color: var(--subtle);
 }
-.separator {
+.filter-summary {
+  margin: -4px 0 6px;
+  padding: 0 4px;
   color: var(--subtle);
-  padding-inline: 6px;
-}
-.active {
-  color: var(--subtle);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 .sort {
   display: flex;
@@ -589,7 +659,6 @@ const tagFilter = computed({
 }
 .tag-filter {
   padding: 10px var(--inset) 12px;
-  border-bottom: 1px solid var(--separator);
 }
 .tag-title {
   margin: 0 0 8px;
@@ -601,7 +670,7 @@ const tagFilter = computed({
   font-size: 13px;
   line-height: 1.5;
 }
-.tag-retry {
+.retry {
   min-height: 32px;
   color: var(--link);
 }
@@ -622,7 +691,11 @@ const tagFilter = computed({
   font-size: 15px;
   white-space: nowrap;
 }
-.option + .option::before {
+.panel > * {
+  position: relative;
+}
+/* Rows of every kind share one inset hairline, as in a grouped list. */
+.panel > * + *::before {
   content: '';
   position: absolute;
   inset: 0 0 auto var(--inset);
