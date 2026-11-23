@@ -27,6 +27,7 @@ import { createXPlatform } from '#platforms/x/index.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
 const MAINTENANCE_INTERVAL = 60_000
+const APP_PREFIX = /^\/app/
 
 const config = loadConfig()
 const logger = createLogger(config.logLevel)
@@ -87,7 +88,7 @@ app.use(
   '/app/*',
   serveStatic({
     root: config.webDir,
-    rewriteRequestPath: (path) => path.replace(/^\/app/, ''),
+    rewriteRequestPath: (path) => path.replace(APP_PREFIX, ''),
   }),
 )
 app.get('/app/*', serveStatic({ root: config.webDir, path: 'index.html' }))
