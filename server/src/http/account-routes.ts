@@ -17,6 +17,17 @@ import { deleteCollection } from '#library/delete.ts'
 import { body, type Env } from './app.ts'
 import type { Hono } from 'hono'
 
+const accountJson = (
+  a: ReturnType<typeof listAccounts>['accounts'][number],
+) => ({
+  id: a.id,
+  name: a.name,
+  ...(a.username ? { username: a.username } : {}),
+  state: a.state,
+  platform: a.platform,
+  selected: a.selected,
+})
+
 export function accountRoutes(app: Hono<Env>, ctx: AccountsContext): void {
   app.get('/accounts', (c) => {
     const { platforms, accounts } = listAccounts(ctx)
@@ -29,14 +40,7 @@ export function accountRoutes(app: Hono<Env>, ctx: AccountsContext): void {
         can_add: p.canAdd,
         ...(p.selected ? { selected_account_id: p.selected } : {}),
       })),
-      accounts: accounts.map((a) => ({
-        id: a.id,
-        name: a.name,
-        ...(a.username ? { username: a.username } : {}),
-        state: a.state,
-        platform: a.platform,
-        selected: a.selected,
-      })),
+      accounts: accounts.map(accountJson),
     })
   })
 
@@ -49,11 +53,13 @@ export function accountRoutes(app: Hono<Env>, ctx: AccountsContext): void {
         name: v.optional(v.string()),
       }),
     )
-    const account = await addAccount(ctx, input.platform, {
+    const { id } = await addAccount(ctx, input.platform, {
       credential: Buffer.from(input.credential),
       name: input.name,
     })
-    return c.json(account)
+    // The web app names the account it just added from this response.
+    const account = listAccounts(ctx).accounts.find((a) => a.id === id)!
+    return c.json(accountJson(account))
   })
 
   app.put('/accounts/selection', async (c) => {

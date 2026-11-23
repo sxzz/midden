@@ -181,7 +181,15 @@ describe('api', () => {
       method: 'POST',
       body: JSON.stringify({ platform: 'fake', credential: 'alice' }),
     })
-    const { id } = (await added.json()) as { id: string }
+    const account = (await added.json()) as { id: string }
+    expect(account).toMatchObject({
+      name: '采集账号',
+      username: 'fake',
+      state: 'ready',
+      platform: 'fake',
+      selected: true,
+    })
+    const { id } = account
     expect(await (await call('/accounts')).json()).toMatchObject({
       platforms: [
         { id: 'fake', public: true, can_add: true, selected_account_id: id },
