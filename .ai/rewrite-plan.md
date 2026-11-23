@@ -30,7 +30,7 @@
 - 新代码在无历史的 `ts` 分支上开发，推送到 `origin/ts`；GitHub 默认分支已改为 `ts`。`main` 保持旧版不变，prod 仍从 `main` 自动部署。
 - 基本迁移完成后再把 `main` 切换到 `ts` 的历史（需要用户确认，届时处理部署 webhook）。
 - 按迁移阶段自行提交，每个提交范围小；提交信息英文，格式 `type(scope): ...`，不加 AI 署名。
-- 在切换前，`ts` 的 CI 只跑检查和测试，不发布镜像、不触发部署。
+- `main` 已指向 `ts` 的历史；`main` 上 `test` 通过后由 `images` 发布 `ghcr.io/sxzz/midden`。服务器的自动部署由用户关闭，部署手动进行。
 - 每次提交后立即推送到 `origin/ts`（用户已授权）；推送 `main` 仍需用户确认。
 
 ## 工程约定
@@ -129,7 +129,7 @@ web/             现有网页
 - Bot 实现与旧版的差异：正文为空时只显示 ID 与作者（不显示"空"）；按钮提示真正显示；链接先去重再按 200 计数；非所有者的按钮静默应答；`/show` 直接按收藏投递；投递每 5 秒轮询，不由采集事件唤醒。
 - 本地检查：依次运行 `pnpm lint`、`pnpm typecheck`、`FFMPEG=ffmpeg pnpm --filter @midden/server exec vitest run`（容器里有 apt 装的 ffmpeg）。本机下载不了 Playwright 浏览器，e2e 看 CI。
 - dev：仓库根目录 `.env`（不提交）配置测试 Bot @kevinspiderbot 与 `WEB_APP_URL=https://devbox.beago-mine.ts.net/app/`；`tailscale serve` 把 tailnet 内的 HTTPS 转发到 8080；`pnpm dev` 启动。
-- 剩余：第 8 阶段（切换 main 与 prod，需要用户确认）。切换时再加镜像发布工作流（`workflow_run` 读取默认分支上的文件，提前加入会被旧 main 的 CI 触发），并处理旧的部署 webhook。旧数据如何导入另行决定。
+- 第 8 阶段：`main` 已切换，镜像发布工作流已加入；prod 的部署与 Cloudflare `/app/` 静态部署（`web` 工作流）由用户决定何时恢复。旧数据由另一个代理写的导入脚本迁移。
 
 ## 阶段
 

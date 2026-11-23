@@ -30,4 +30,7 @@ RUN mkdir /data && chown node:node /data
 USER node
 EXPOSE 8080
 VOLUME /data
+# Last, so a new commit does not invalidate the layers above.
+ARG VCS_REF=dev
+ENV BUILD_REVISION=$VCS_REF
 CMD ["node", "server/src/main.ts"]
