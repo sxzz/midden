@@ -29,7 +29,7 @@
 
 - 重写最初在无历史的 `ts` 分支上进行；2026-11-24 起 `main` 指向重写后的历史，`ts` 已删除。旧 Go 代码在 `golang` 分支（含远端）。
 - 按迁移阶段自行提交，每个提交范围小；提交信息英文，格式 `type(scope): ...`，不加 AI 署名。
-- `main` 上 `test` 通过后由 `images` 发布 `ghcr.io/sxzz/midden`。服务器的自动部署由用户关闭，部署手动进行；`web` 工作流（Cloudflare `/app/`）已停用，prod 切到新后端时再启用。
+- `test` 工作流的 `image` job 在每次 push 构建并启动镜像；在 `main` 上，checks 与 e2e 通过后发布 amd64 + arm64 的 `ghcr.io/sxzz/midden`。服务器的自动部署由用户关闭，部署手动进行；`web` 工作流（Cloudflare `/app/`）已停用，prod 切到新后端时再启用。
 - 每次提交后立即推送到 `origin/main`（用户已授权）。
 
 ## 工程约定
