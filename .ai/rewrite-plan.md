@@ -45,7 +45,7 @@
 保留（行为与旧版一致）：
 
 - X：FxTwitter 公共来源与 `x-session` 账号来源；Instagram：`instagram-session`。
-- 帖子与 Profile 采集、翻页（每批约 100 条、最多 12 页）、失败重试、停止、继续翻页。
+- 帖子与 Profile 采集、翻页（每批约 100 条；X 每次最多 15 个上游页，Instagram 12 个）、失败重试、停止、继续翻页。
 - 版本历史、重新抓取、批量刷新（refresh batches）、内容哈希去重。
 - ffmpeg 缩略图、标签与备注、相关收藏、作者列表、敏感媒体、原始响应查看。
 - 采集账号管理（凭据加密）、账号选择。
@@ -64,7 +64,10 @@
 
 - REST 路径保持 `/v1/...`，媒体改为响应中直接返回签名 URL；`docs/openapi.yaml` 同步更新。
 - 应用自身在 `/app/` 提供网页，Cloudflare 静态部署保留；Tunnel 需额外转发 `/media/*`。
-- 删除收藏立即生效；不再被引用的媒体 24 小时后回收；去掉 `collection_retention_days`。
+- 删除收藏立即从收藏库消失；没有进行中采集的未保存收藏由维护任务立即物理删除（不再有 `collection_retention_days`）；不再被引用的媒体文件 24 小时后删除。
+- 「已保存」沿用旧 `tenant_collections` 的语义，改为不带租户的 `library` 表：每次非刷新的提交（包括自动采集的成员和引用）都会保存。
+- 媒体不设大小上限（旧版额度去掉后本来就没有）；每次采集最多 20 个内容媒体、16 个带 purpose 的媒体。
+- 旧行为照搬：Instagram 404 会重试 3 次；带采集选项的「继续」会一直翻到时间线末尾。
 - `/usage` 只显示已用空间。
 - 网页会话不迁移；作者是否锁定（`protected`）作为内容数据保留，用于「可见性」筛选。
 - 群聊只处理所有者发出且 @Bot 的消息；私聊只接受所有者。
@@ -99,6 +102,19 @@ web/             现有网页
 数据表去掉 `tenant_id` 与可见性访问控制字段，其余结构基本照搬；ID 保留 UUID 文本；时间存整数毫秒。
 
 媒体：`media/ab/cd/<sha256>`，临时文件 → fsync → rename。接口 `put`、`stat`、`read(range)`、`delete`、`url(hash, { expiresIn, filename, disposition })`。签名过期时间按固定窗口取整，使同一窗口内 URL 稳定、浏览器缓存有效。
+
+## 采集移植
+
+旧 Go 采集链路的行为规格见 `.ai/capture-spec.md`（带 `golang` 分支的文件与行号引用），移植时以它为准，有疑问再查 `~/workspace/midden-go`。第 3 阶段按以下顺序分步提交：
+
+1. 业务表结构。
+2. 规范化 JSON、计数字段拆分、实体图校验。
+3. 提交（Submit）。
+4. capture 任务与 finalize（版本签名与去重）。
+5. 下载、MIME 识别、媒体缓存、缩略图。
+6. related 展开与自动续页、停止。
+7. 采集记录、进度、成员重试。
+8. 批量刷新、删除、标签备注、账号与凭据、定时维护。
 
 ## 阶段
 
