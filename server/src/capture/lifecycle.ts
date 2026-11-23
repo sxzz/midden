@@ -1,6 +1,7 @@
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import {
   assets,
+  captureRunning,
   captures,
   connections,
   sourceResponses,
@@ -104,12 +105,7 @@ export function failCapture(
       payload: null,
       finishedAt: new Date(ctx.now?.() ?? Date.now()),
     })
-    .where(
-      and(
-        eq(captures.id, captureId),
-        inArray(captures.state, ['queued', 'downloading']),
-      ),
-    )
+    .where(and(eq(captures.id, captureId), captureRunning))
     .run()
   deliveries(ctx, tx, captureId)
 }

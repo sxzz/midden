@@ -1,5 +1,6 @@
-import { and, eq, inArray, ne, sql } from 'drizzle-orm'
+import { and, eq, ne, sql } from 'drizzle-orm'
 import {
+  captureRunning,
   captures,
   collectionIdentityAliases,
   collections,
@@ -88,7 +89,7 @@ export function resolveCaptureScope(
         eq(captures.pageCursor, capture.pageCursor),
         eq(captures.pageSize, capture.pageSize),
         eq(captures.automatic, capture.automatic),
-        inArray(captures.state, ['queued', 'downloading']),
+        captureRunning,
       ),
     )
     .get()
@@ -97,8 +98,14 @@ export function resolveCaptureScope(
       .set({ captureId: running.id })
       .where(eq(submissions.captureId, captureId))
       .run()
-    for (const batch of tx.select().from(refreshBatches).all()) {
-      if (!batch.captureIds.includes(captureId)) continue
+    const batches = tx
+      .select()
+      .from(refreshBatches)
+      .where(
+        sql`EXISTS (SELECT 1 FROM json_each(${refreshBatches.captureIds}) WHERE value = ${captureId})`,
+      )
+      .all()
+    for (const batch of batches) {
       tx.update(refreshBatches)
         .set({
           captureIds: batch.captureIds.map((id) =>

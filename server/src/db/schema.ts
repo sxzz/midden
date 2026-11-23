@@ -48,6 +48,10 @@ export const jobs = sqliteTable(
   (t) => [
     index('jobs_claim').on(t.queue, t.state, t.priority, t.runAt),
     index('jobs_ref').on(t.ref),
+    // Expired leases are looked for every second.
+    index('jobs_running')
+      .on(t.leaseUntil)
+      .where(sql`${t.state} = 'running'`),
   ],
 )
 
@@ -241,8 +245,19 @@ export const captures = sqliteTable(
     index('captures_active')
       .on(t.state, t.createdAt)
       .where(sql`${t.state} IN ('queued', 'downloading')`),
+    // Raw responses of finished captures are pruned by age.
+    index('captures_finished')
+      .on(t.finishedAt)
+      .where(sql`${t.state} IN ('complete', 'partial')`),
   ],
 )
+
+// Written out rather than bound (`inArray` sends `IN (?, ?)`): SQLite only
+// matches the partial indexes above against literal lists.
+/** A capture still running. */
+export const captureRunning = sql`${captures.state} IN ('queued', 'downloading')`
+/** A capture that finished with something saved. */
+export const captureSaved = sql`${captures.state} IN ('complete', 'partial')`
 
 /** An immutable content snapshot of a collection, made by one capture. */
 export const revisions = sqliteTable(
@@ -377,18 +392,27 @@ export const assets = sqliteTable(
 )
 
 /** One thumbnail attempt per blob; a failure is final. */
-export const blobThumbnails = sqliteTable('blob_thumbnails', {
-  blobId: text()
-    .primaryKey()
-    .references(() => blobs.id, { onDelete: 'cascade' }),
-  state: text({ enum: ['ready', 'failed'] }).notNull(),
-  // Media store key (content hash) of the thumbnail.
-  key: text(),
-  size: integer(),
-  mime: text(),
-  error: text().notNull().default(''),
-  createdAt: createdAt(),
-})
+export const blobThumbnails = sqliteTable(
+  'blob_thumbnails',
+  {
+    blobId: text()
+      .primaryKey()
+      .references(() => blobs.id, { onDelete: 'cascade' }),
+    state: text({ enum: ['ready', 'failed'] }).notNull(),
+    // Media store key (content hash) of the thumbnail.
+    key: text(),
+    size: integer(),
+    mime: text(),
+    error: text().notNull().default(''),
+    createdAt: createdAt(),
+  },
+  // Media garbage checks whether a key is still a thumbnail.
+  (t) => [
+    index('blob_thumbnails_key')
+      .on(t.key)
+      .where(sql`${t.key} IS NOT NULL`),
+  ],
+)
 
 /**
  * Media store keys no longer referenced. Files are deleted after a grace
@@ -457,8 +481,11 @@ export const submissions = sqliteTable(
       .on(t.createdAt, t.id)
       .where(sql`${t.parentSubmission} IS NULL AND ${t.input} <> ''`),
     index('submissions_capture').on(t.captureId),
-    index('submissions_parent').on(t.parentSubmission),
-    index('submissions_next').on(t.nextSubmission),
+    // Partial: top-level requests (no parent) are most rows, and indexing
+    // them leads SQLite to read records through this index instead.
+    index('submissions_parent')
+      .on(t.parentSubmission)
+      .where(sql`${t.parentSubmission} IS NOT NULL`),
   ],
 )
 
@@ -586,6 +613,8 @@ export const telegramDeliveries = sqliteTable(
   (t) => [
     index('telegram_deliveries_due').on(t.state, t.nextAt),
     index('telegram_deliveries_ref').on(t.ref),
+    // Whether a pressed button sits on a delivery message.
+    index('telegram_deliveries_message').on(t.chatId, t.messageId),
   ],
 )
 

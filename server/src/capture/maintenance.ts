@@ -14,7 +14,9 @@ import {
   assets,
   blobs,
   blobThumbnails,
+  captureRunning,
   captures,
+  captureSaved,
   collections,
   entities,
   entityVersions,
@@ -36,6 +38,9 @@ const RAW_KEEP = 7 * 24 * 60 * 60_000
 const MEDIA_GRACE = 24 * 60 * 60_000
 const BATCH = 100
 const THUMBNAIL_BACKFILL = 2000
+const PRUNE_BATCH = 500
+
+const thumbnailsCaughtUp = new WeakSet<CaptureContext>()
 const BUDGET = 30_000
 
 /** One maintenance pass. Steps are independent; errors are collected. */
@@ -67,7 +72,7 @@ export function failStaleCaptures(ctx: CaptureContext): number {
     .from(captures)
     .where(
       and(
-        inArray(captures.state, ['queued', 'downloading']),
+        captureRunning,
         lt(captures.createdAt, cutoff),
         sql`NOT EXISTS (SELECT 1 FROM ${jobs} WHERE ${jobs.ref} = ${captures.id} OR ${jobs.ref} IN (SELECT ${assets.id} FROM ${assets} WHERE ${assets.captureId} = ${captures.id}))`,
       ),
@@ -127,6 +132,14 @@ function collectBatch(tx: Transaction): number {
         .all()
         .map((row) => row.id!)
     : []
+  // What the removed revisions used; only these can become orphans.
+  const versionIds = tx
+    .selectDistinct({ id: revisionEntities.entityVersionId })
+    .from(revisionEntities)
+    .innerJoin(revisions, eq(revisions.id, revisionEntities.revisionId))
+    .where(inArray(revisions.collectionId, candidates))
+    .all()
+    .map((row) => row.id)
   tx.update(collections)
     .set({ currentRevision: null })
     .where(inArray(collections.id, candidates))
@@ -146,16 +159,28 @@ function collectBatch(tx: Transaction): number {
     tx.delete(captures).where(inArray(captures.id, captureIds)).run()
   tx.delete(collections).where(inArray(collections.id, candidates)).run()
 
-  tx.delete(entityVersions)
-    .where(
-      sql`NOT EXISTS (SELECT 1 FROM ${revisionEntities} WHERE ${revisionEntities.entityVersionId} = ${entityVersions.id})`,
-    )
-    .run()
-  tx.delete(entities)
-    .where(
-      sql`NOT EXISTS (SELECT 1 FROM ${entityVersions} WHERE ${entityVersions.entityId} = ${entities.id})`,
-    )
-    .run()
+  if (versionIds.length) {
+    const orphans = tx
+      .delete(entityVersions)
+      .where(
+        and(
+          sql`${entityVersions.id} IN (SELECT value FROM json_each(${JSON.stringify(versionIds)}))`,
+          sql`NOT EXISTS (SELECT 1 FROM ${revisionEntities} WHERE ${revisionEntities.entityVersionId} = ${entityVersions.id})`,
+        ),
+      )
+      .returning({ entityId: entityVersions.entityId })
+      .all()
+    const entityIds = [...new Set(orphans.map((row) => row.entityId))]
+    if (entityIds.length)
+      tx.delete(entities)
+        .where(
+          and(
+            sql`${entities.id} IN (SELECT value FROM json_each(${JSON.stringify(entityIds)}))`,
+            sql`NOT EXISTS (SELECT 1 FROM ${entityVersions} WHERE ${entityVersions.entityId} = ${entities.id})`,
+          ),
+        )
+        .run()
+  }
   if (blobIds.length) {
     const orphans = tx
       .select({ id: blobs.id, hash: blobs.hash, thumbnail: blobThumbnails.key })
@@ -189,13 +214,14 @@ export function pruneSourceResponses(ctx: CaptureContext): number {
     .from(captures)
     .where(
       and(
-        inArray(captures.state, ['complete', 'partial']),
+        captureSaved,
         lt(captures.finishedAt, cutoff),
         sql`EXISTS (SELECT 1 FROM ${sourceResponses} WHERE ${sourceResponses.captureId} = ${captures.id})`,
         sql`NOT EXISTS (SELECT 1 FROM ${revisions} WHERE ${revisions.captureId} = ${captures.id})`,
         sql`EXISTS (SELECT 1 FROM ${captures} newer WHERE newer.collection_id = ${captures.collectionId} AND newer.state IN ('complete', 'partial') AND (newer.finished_at > ${captures.finishedAt} OR (newer.finished_at = ${captures.finishedAt} AND newer.id > ${captures.id})))`,
       ),
     )
+    .limit(PRUNE_BATCH)
     .all()
   if (superseded.length)
     ctx.db.transaction((tx) => {
@@ -278,7 +304,10 @@ export async function collectMedia(ctx: CaptureContext): Promise<number> {
 
 /** Blobs stored before thumbnails were possible get one now. */
 export function backfillThumbnails(ctx: CaptureContext): number {
-  if (!ctx.thumbnailer) return 0
+  // New media get thumbnails as they are downloaded; only what predates the
+  // thumbnailer (it is detected at start) is missing, so stop once caught up
+  // instead of scanning every blob each minute.
+  if (!ctx.thumbnailer || thumbnailsCaughtUp.has(ctx)) return 0
   const missing = ctx.db
     .select({ id: blobs.id })
     .from(blobs)
@@ -293,5 +322,6 @@ export function backfillThumbnails(ctx: CaptureContext): number {
   ctx.db.transaction((tx) => {
     for (const { id } of missing) ctx.queue.enqueue(tx, 'thumbnail', id)
   })
+  if (missing.length < THUMBNAIL_BACKFILL) thumbnailsCaughtUp.add(ctx)
   return missing.length
 }

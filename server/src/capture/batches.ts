@@ -1,5 +1,5 @@
 import { randomUUIDv7 } from 'node:crypto'
-import { and, eq, inArray, like } from 'drizzle-orm'
+import { and, eq, gte, inArray, like, lt } from 'drizzle-orm'
 import {
   captures,
   collections,
@@ -158,17 +158,26 @@ export interface BatchProgress {
 
 /** The collection roots a batch submitted, as record ids. */
 function batchRoots(db: Executor, id: string) {
-  return db
-    .select({
-      submission: submissions,
-      capture: captures,
-      url: collections.url,
-    })
-    .from(submissions)
-    .innerJoin(captures, eq(captures.id, submissions.captureId))
-    .innerJoin(collections, eq(collections.id, captures.collectionId))
-    .where(like(submissions.idemKey, `refresh-batch:${id}:%`))
-    .all()
+  return (
+    db
+      .select({
+        submission: submissions,
+        capture: captures,
+        url: collections.url,
+      })
+      .from(submissions)
+      .innerJoin(captures, eq(captures.id, submissions.captureId))
+      .innerJoin(collections, eq(collections.id, captures.collectionId))
+      // A key range rather than LIKE, which is case-insensitive and so cannot
+      // use the unique index on the key. ';' follows ':'.
+      .where(
+        and(
+          gte(submissions.idemKey, `refresh-batch:${id}:`),
+          lt(submissions.idemKey, `refresh-batch:${id};`),
+        ),
+      )
+      .all()
+  )
 }
 
 export function batchProgress(db: Executor, id: string): BatchProgress {

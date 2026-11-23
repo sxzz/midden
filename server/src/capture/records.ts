@@ -15,6 +15,7 @@ import {
 import {
   accountSelections,
   assets,
+  captureRunning,
   captures,
   collections,
   library,
@@ -772,7 +773,7 @@ export function librarySize(db: Executor) {
       db
         .select({ n: sql<number>`count(*)`.mapWith(Number) })
         .from(captures)
-        .where(inArray(captures.state, ['queued', 'downloading'])),
+        .where(captureRunning),
     ),
   }
 }

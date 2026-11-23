@@ -363,7 +363,8 @@ export function attachIncomingRelations(r: Reader, view: CollectionView): void {
           row_number() OVER (PARTITION BY incoming.source
             ORDER BY rv.created_at DESC, v.created_at DESC, rv.id DESC) AS n
         FROM (SELECT DISTINCT source FROM incoming) incoming
-        JOIN entity_versions v ON v.entity_id = incoming.source
+        -- The few sources drive; otherwise SQLite may scan every reference.
+        CROSS JOIN entity_versions v ON v.entity_id = incoming.source
         JOIN revision_entities ref ON ref.entity_version_id = v.id
         JOIN revisions rv ON rv.id = ref.revision_id
         JOIN library l ON l.collection_id = rv.collection_id

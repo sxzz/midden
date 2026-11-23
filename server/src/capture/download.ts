@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer'
 import { randomUUIDv7 } from 'node:crypto'
 import { open } from 'node:fs/promises'
 import { Readable } from 'node:stream'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, ne } from 'drizzle-orm'
 import { KeyedLock } from '#blob/locks.ts'
 import { stage, type StagedFile } from '#blob/staging.ts'
 import {
@@ -83,7 +83,12 @@ function reuseMedia(ctx: CaptureContext, assetId: string): boolean {
       .select({ blobId: assets.blobId })
       .from(assets)
       .where(
-        and(eq(assets.cacheKey, row.asset.cacheKey), eq(assets.state, 'ready')),
+        and(
+          eq(assets.cacheKey, row.asset.cacheKey),
+          eq(assets.state, 'ready'),
+          // Spelled out so SQLite can use the partial index `assets_cache`.
+          ne(assets.cacheKey, ''),
+        ),
       )
       .get()
     if (!cached?.blobId) return false

@@ -80,6 +80,8 @@ export class JobQueue {
   readonly #now: () => number
   readonly #isPermanent: (error: unknown) => boolean
   readonly #running = new Map<string, Set<Promise<void>>>()
+  /** The priorities each queue's jobs can have, for claiming by index. */
+  readonly #priorities = new Map<string, number[]>()
   readonly #stop = new AbortController()
   #timer: NodeJS.Timeout | undefined
   #started = false
@@ -96,6 +98,10 @@ export class JobQueue {
     for (const handler of Object.values(this.#handlers)) {
       if (!this.#concurrency[handler.queue])
         throw new Error(`No concurrency configured for queue ${handler.queue}`)
+      const priorities = this.#priorities.get(handler.queue) ?? []
+      const priority = handler.priority ?? 0
+      if (!priorities.includes(priority)) priorities.push(priority)
+      this.#priorities.set(handler.queue, priorities)
     }
   }
 
@@ -208,6 +214,9 @@ export class JobQueue {
         and(
           eq(jobs.queue, queue),
           eq(jobs.state, 'available'),
+          // Naming the priorities lets the index skip to due jobs at each one
+          // instead of walking every delayed job.
+          inArray(jobs.priority, this.#priorities.get(queue) ?? [0]),
           lte(jobs.runAt, new Date(now)),
         ),
       )

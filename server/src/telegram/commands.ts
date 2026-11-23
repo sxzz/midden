@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { and, asc, desc, eq, gt, lt, or } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, lt, or, sql } from 'drizzle-orm'
 import {
   listAccounts,
   revokeAccount,
@@ -326,20 +326,27 @@ function list(c: CommandContext, arg: string): Reply {
   rows = rows.slice(0, LIST_PAGE)
   if (after) rows.reverse()
   if (!rows.length) return { text: '暂无收藏。', keyboard: [] }
-  const items = rows.flatMap((row) => {
-    try {
-      return [getCollection(c.ctx, row.collectionId)]
-    } catch {
-      return []
-    }
-  })
+  // Only a line each: read it from the newest revision, not the full view.
+  const lines = new Map(
+    db
+      .all<{ id: string; url: string; text: string }>(
+        sql`SELECT k.collection_id AS id, c.url,
+          coalesce(nullif(r.payload ->> 'summary', ''), r.payload ->> 'text', '') AS text
+        FROM catalog k
+        JOIN collections c ON c.id = k.collection_id
+        JOIN revisions r ON r.id = k.revision_id
+        WHERE k.collection_id IN (SELECT value FROM json_each(${JSON.stringify(rows.map((row) => row.collectionId))}))`,
+      )
+      .map((line) => [line.id, line]),
+  )
+  const items = rows.flatMap((row) => lines.get(row.collectionId) ?? [])
   let text = ''
   const entities: MessageEntity[] = []
   const keyboard: Keyboard = []
   for (const [index, item] of items.entries()) {
     if (text) text += '\n\n'
     const label = `${index + 1}. `
-    const summary = summaryLine(item.summary || item.text)
+    const summary = summaryLine(item.text)
     text += label
     entities.push({
       type: 'text_link',

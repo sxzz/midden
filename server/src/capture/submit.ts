@@ -1,6 +1,7 @@
 import { randomUUIDv7 } from 'node:crypto'
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import {
+  captureRunning,
   captures,
   collections,
   connections,
@@ -254,7 +255,7 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
           eq(captures.providerId, providerId),
           sql`coalesce(${captures.connectionId}, '') = ${connectionId}`,
           eq(captures.adapterId, adapterId),
-          inArray(captures.state, ['queued', 'downloading']),
+          captureRunning,
           eq(captures.pageCursor, pageCursor),
           eq(captures.pageSize, pageSize),
           // An explicit collection request expands; it never joins a capture
@@ -359,12 +360,7 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
       const running = tx
         .select({ id: captures.id })
         .from(captures)
-        .where(
-          and(
-            eq(captures.id, captureId),
-            inArray(captures.state, ['queued', 'downloading']),
-          ),
-        )
+        .where(and(eq(captures.id, captureId), captureRunning))
         .get()
       ctx.queue.enqueue(tx, 'related', submissionId, {
         delayMs: running ? RELATED_FALLBACK_MS : 0,
