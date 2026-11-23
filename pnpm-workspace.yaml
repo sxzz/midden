@@ -19,3 +19,10 @@ packages:
 allowBuilds:
   esbuild: false
   workerd: false
+# Agent skills that dependencies ship, for every agent alike.
+skills:
+  dirs:
+    - .agents/skills
+permissions:
+  drizzle-kit:
+    skills: true

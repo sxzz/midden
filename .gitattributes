@@ -1,0 +1,3 @@
+# Each SQLite snapshot repeats the whole schema; collapse them in GitHub
+# reviews, where migration.sql is what needs reading.
+server/drizzle/*/snapshot.json linguist-generated=true
