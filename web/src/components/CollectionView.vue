@@ -43,7 +43,6 @@ const props = defineProps<{
 const slots = useSlots()
 const emit = defineEmits<{
   search: [query: string]
-  open: [id: string]
   more: []
   retry: []
   tagsChanged: [change: TagChange]
@@ -193,7 +192,6 @@ const storage = computed(() =>
     :loading="loading"
     :next="next"
     :error="error"
-    @open="(value) => emit('open', value)"
   />
   <template v-else>
     <ListSection
@@ -210,7 +208,6 @@ const storage = computed(() =>
         :show-sensitive="showSensitive"
         :reposted-by="repostedBy"
         :selected="selecting ? selected.includes(a.id) : undefined"
-        @open="(value) => emit('open', value)"
         @toggle="toggle"
       />
     </ListSection>

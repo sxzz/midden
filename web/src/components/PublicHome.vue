@@ -3,9 +3,9 @@ import { computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCollection } from '../composables/useCollection'
 import { listsProfiles } from '../presentation'
-import { collectionRoute } from '../share'
 import CollectionDetail from './CollectionDetail.vue'
 import CollectionView from './CollectionView.vue'
+import AppLink from './ui/AppLink.vue'
 import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import ListSection from './ui/ListSection.vue'
 import type { PublicShareInfo } from '../api'
@@ -68,13 +68,11 @@ function search(value: string) {
   const slug = String(route.params.slug)
   void router.push(`/s/${slug}${value ? `?${value}` : ''}`)
 }
-/** Another tab starts over, as on the home page. */
-function pick(value: Kind) {
-  if (value === kind.value) return
-  search(value === 'profile' ? `entity_type=${PROFILES}` : '')
-}
-function open(id: string) {
-  void router.push(collectionRoute(id))
+/** Another tab starts over, as on the home page; the shown one stays. */
+function tabLink(value: Kind) {
+  if (value === kind.value) return route.fullPath
+  const slug = String(route.params.slug)
+  return `/s/${slug}${value === 'profile' ? `?entity_type=${PROFILES}` : ''}`
 }
 </script>
 
@@ -87,18 +85,17 @@ function open(id: string) {
   />
   <template v-else>
     <div v-if="both" class="tabs" role="tablist" aria-label="类型">
-      <button
+      <AppLink
         v-for="option in tabs"
         :key="option.value"
-        type="button"
         role="tab"
         class="tab"
         :class="{ on: kind === option.value }"
         :aria-selected="kind === option.value"
-        @click="pick(option.value)"
+        :to="tabLink(option.value)"
       >
         {{ option.label }}
-      </button>
+      </AppLink>
     </div>
     <CollectionView
       :items="items"
@@ -109,7 +106,6 @@ function open(id: string) {
       :total="total"
       :show-sensitive="showSensitive"
       @search="search"
-      @open="open"
       @more="more"
       @retry="load(query)"
     />
@@ -127,6 +123,8 @@ function open(id: string) {
 }
 .tab {
   flex: 1;
+  display: grid;
+  place-items: center;
   min-height: 32px;
   text-align: center;
   border-radius: 8px;

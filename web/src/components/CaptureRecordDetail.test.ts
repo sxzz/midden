@@ -2,7 +2,10 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { createVaporApp } from 'vue'
 import { mockApi } from '../testing/api'
 import CaptureRecordDetail from './CaptureRecordDetail.vue'
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('vue-router', async () => {
+  const { resolve } = await import('../testing/router')
+  return { useRouter: () => ({ push: vi.fn(), resolve }) }
+})
 
 let unmount = () => {}
 afterEach(() => {

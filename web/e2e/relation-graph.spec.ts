@@ -85,7 +85,7 @@ test('opens a profile’s follow graph, with kinds to choose and more to load', 
   })
   await page.goto(`/app/#/collection/${profileId}`)
 
-  await page.getByRole('button', { name: '关系图谱' }).click()
+  await page.getByRole('link', { name: '关系图谱' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/graph$`))
   await expect(page.locator('h1')).toHaveText('关系图谱')
   const chips = page
@@ -133,16 +133,16 @@ test('opens a profile’s follow graph, with kinds to choose and more to load', 
   await sections.nth(1).locator('.person').first().click()
   const card = page.getByRole('region', { name: '账号' })
   await expect(card.locator('.name')).toHaveText('账号 1')
-  await expect(card.locator('.actions button')).toHaveText([
+  await expect(card.locator('.actions a')).toHaveText([
     '以他为中心',
     '打开详情',
   ])
-  await card.getByRole('button', { name: '以他为中心' }).click()
+  await card.getByRole('link', { name: '以他为中心' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${friendId}/graph$`))
   await page.goBack()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/graph$`))
 
-  await page.getByRole('button', { name: '返回', exact: true }).click()
+  await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
 })
 
@@ -254,7 +254,7 @@ test('marks the graph by a viewer account, and starts a comparison from it', asy
   // The profile itself is not offered.
   await expect(options).toHaveText(['我 @me', '别人 @other'])
   await options.filter({ hasText: '@me' }).click()
-  await page.getByRole('button', { name: '对比 2 个账号' }).click()
+  await page.getByRole('link', { name: '对比 2 个账号' }).click()
   await expect(page).toHaveURL(/#\/compare\?/)
   const address = new URLSearchParams(page.url().split('?', 2)[1])
   expect(address.getAll('rel_of')).toEqual(['x/x.profile/100', OWN])

@@ -290,9 +290,12 @@ it('shows a shared post read-only, its links kept inside the share', async () =>
   )
   // Its follows are shared with it, and their page stays in the share.
   await vi.waitFor(() => expect(el.textContent).toContain('关系网'))
-  const follows = [...el.querySelectorAll('button')].find((b) =>
-    b.textContent?.trim().startsWith('关注变化'),
+  const follows = [...el.querySelectorAll('a')].find((a) =>
+    a.textContent?.trim().startsWith('关注变化'),
   )!
+  expect(follows.getAttribute('href')).toBe(
+    `#/s/${SLUG}/collection/${PROFILE}/follows`,
+  )
   follows.click()
   await vi.waitFor(() =>
     expect(router.currentRoute.value.name).toBe('share-collection-follows'),

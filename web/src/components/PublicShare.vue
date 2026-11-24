@@ -9,8 +9,8 @@ import {
 } from 'vue-router'
 import { APIError, errorText, type PublicShareInfo } from '../api'
 import { backButton, host } from '../host'
-import { goBack } from '../navigation'
 import { readShare } from '../reads'
+import BackLink from './ui/BackLink.vue'
 import ListSection from './ui/ListSection.vue'
 // The frame of a public link (分享): what the share opens, then pages of
 // what it reaches, read without login. Sensitive media starts covered on
@@ -110,14 +110,9 @@ const viewProps = computed(() =>
           <path d="M10 20v-6h4v6" />
         </svg>
       </RouterLink>
-      <button
-        v-if="nested && standalone"
-        type="button"
-        class="back"
-        @click="goBack(router)"
-      >
+      <BackLink v-if="nested && standalone" class="back">
         <span class="chevron" aria-hidden="true">‹</span>返回
-      </button>
+      </BackLink>
       <h1>{{ title }}</h1>
       <button
         v-if="route.name !== 'share-collection-stats'"

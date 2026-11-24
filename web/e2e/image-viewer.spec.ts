@@ -206,7 +206,7 @@ test('opens the clicked list image without navigating and restores focus', async
 }) => {
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  await page.getByRole('button', { name: '返回' }).click()
+  await page.getByRole('link', { name: '返回' }).click()
   const thumbnail = page.getByRole('button', { name: '放大图片' }).nth(1)
   const url = page.url()
   await thumbnail.click()

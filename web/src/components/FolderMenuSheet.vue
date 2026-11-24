@@ -1,14 +1,16 @@
 <script setup vapor lang="ts">
 import { useId, useTemplateRef, watch } from 'vue'
+import AppLink from './ui/AppLink.vue'
 const props = defineProps<{
   open: boolean
   name: string
-  /** An update of the folder was started here: link to its progress. */
-  progress?: boolean
+  /** The record of an update of the folder started here, to link to. */
+  progress?: string
 }>()
 const emit = defineEmits<{
   update: []
-  progress: []
+  /** A link here navigates: the sheet should close. */
+  navigate: []
   share: []
   rename: []
   delete: []
@@ -41,14 +43,14 @@ function backdrop(event: MouseEvent) {
       <button type="button" class="action" @click="emit('update')">
         更新收藏夹
       </button>
-      <button
+      <AppLink
         v-if="progress"
-        type="button"
         class="action"
-        @click="emit('progress')"
+        :to="{ name: 'capture', params: { id: progress } }"
+        @navigate="emit('navigate')"
       >
         查看更新进度
-      </button>
+      </AppLink>
       <button type="button" class="action" @click="emit('share')">
         公开分享
       </button>
@@ -98,7 +100,8 @@ function backdrop(event: MouseEvent) {
   overflow-wrap: anywhere;
 }
 .action {
-  display: block;
+  display: grid;
+  place-items: center;
   width: 100%;
   min-height: 52px;
   font-size: 17px;

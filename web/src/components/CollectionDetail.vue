@@ -1,6 +1,5 @@
 <script setup vapor lang="ts">
 import { computed, onUnmounted, shallowRef, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import {
   call,
   client,
@@ -26,6 +25,7 @@ import MediaRemovalSheet from './MediaRemovalSheet.vue'
 import ProfileCollections from './ProfileCollections.vue'
 import RevisionTimeline from './RevisionTimeline.vue'
 import ShareSheet from './ShareSheet.vue'
+import AppLink from './ui/AppLink.vue'
 import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
@@ -138,19 +138,6 @@ const pages = computed(
     !!follows.value ||
     !!link.value,
 )
-const router = useRouter()
-function openTrends() {
-  void router.push(collectionRoute(props.id, 'stats'))
-}
-function openChanges() {
-  void router.push(collectionRoute(props.id, 'changes'))
-}
-function openFollows() {
-  void router.push(collectionRoute(props.id, 'follows'))
-}
-function openGraph() {
-  void router.push(collectionRoute(props.id, 'graph'))
-}
 // Behind a public link the page only reads: no capture, notes or deletion.
 const shared = computed(() => !!shareSlug.value)
 /** The owner's links that make this collection public, so none surprises. */
@@ -215,9 +202,6 @@ function startUpdate() {
 function updateStarted(recordId: string) {
   updateSheet.value = false
   started(recordId)
-}
-function openRecord() {
-  void router.push({ name: 'capture', params: { id: record.value } })
 }
 /** The removal being confirmed: one media item, or all of a post's. */
 const removal = shallowRef<{ target: RemovalTarget; title: string }>()
@@ -302,13 +286,12 @@ const version = computed(() =>
           <dt>{{ row.label }}</dt>
           <dd>
             <!-- The whole tile is the link; see .follow-link::after. -->
-            <a
+            <AppLink
               v-if="followLinks"
-              :href="router.resolve(followLinks[row.rel]).href"
+              :to="followLinks[row.rel]"
               class="follow-link"
               :aria-label="`${row.label} ${follows[row.rel]}，在收藏库中查看`"
-              @click.prevent="router.push(followLinks[row.rel])"
-              >{{ follows[row.rel] }}</a><template v-else>{{
+              >{{ follows[row.rel] }}</AppLink><template v-else>{{
               follows[row.rel]
             }}</template>
           </dd>
@@ -335,21 +318,26 @@ const version = computed(() =>
         v-if="trendable"
         label="统计趋势"
         chevron
-        @select="openTrends"
+        :to="collectionRoute(id, 'stats')"
       />
       <ListButton
         v-if="changeable"
         label="资料修改记录"
         chevron
-        @select="openChanges"
+        :to="collectionRoute(id, 'changes')"
       />
       <ListButton
         v-if="followChangeable"
         label="关注变化"
         chevron
-        @select="openFollows"
+        :to="collectionRoute(id, 'follows')"
       />
-      <ListButton v-if="follows" label="关系图谱" chevron @select="openGraph" />
+      <ListButton
+        v-if="follows"
+        label="关系图谱"
+        chevron
+        :to="collectionRoute(id, 'graph')"
+      />
       <ListButton v-if="link" label="打开原文" :href="link" />
       <ListButton
         v-if="!shared"
@@ -367,7 +355,12 @@ const version = computed(() =>
         :disabled="busy || updating || loadingPoint || !available"
         @select="startUpdate"
       />
-      <ListButton v-if="record" label="查看进度" chevron @select="openRecord" />
+      <ListButton
+        v-if="record"
+        label="查看进度"
+        chevron
+        :to="{ name: 'capture', params: { id: record } }"
+      />
       <ListButton
         v-if="!available"
         label="重试连接采集服务"

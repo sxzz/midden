@@ -28,9 +28,6 @@ function fillAccount(first?: RelationAuthor, second?: RelationAuthor) {
     protected: first.protected || second.protected,
   }
 }
-function openCollection(id?: string) {
-  if (id) window.location.hash = collectionHref(id)
-}
 const props = defineProps<{
   collection: Collection
   compact?: boolean
@@ -270,7 +267,6 @@ const relations = computed(() => {
         }"
         :show-sensitive="showSensitive"
         :collection-id="relation.collectionId"
-        @open="openCollection(relation.collectionId)"
       />
     </div>
   </div>

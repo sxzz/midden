@@ -14,6 +14,7 @@ const { push, replace, route, canvas } = vi.hoisted(() => ({
   canvas: {
     shown: [] as GraphModel[],
     onSelect: undefined as ((key: string | undefined) => void) | undefined,
+    onOpen: undefined as ((key: string, event: MouseEvent) => void) | undefined,
     selected: [] as (string | undefined)[],
     dim: [] as boolean[],
     camera: [] as string[],
@@ -22,10 +23,12 @@ const { push, replace, route, canvas } = vi.hoisted(() => ({
 }))
 vi.mock('vue-router', async () => {
   const { reactive } = await import('vue')
+  const { resolve } = await import('../testing/router')
   const current = reactive(route)
   return {
     useRouter: () => ({
       push,
+      resolve,
       replace: (to: { query: Record<string, string> }) => {
         replace(to)
         current.query = to.query
@@ -39,9 +42,13 @@ vi.mock('../graph-canvas', () => ({
   readTheme: () => ({}),
   createGraphCanvas: (
     _el: HTMLElement,
-    options: { onSelect: (key: string | undefined) => void },
+    options: {
+      onSelect: (key: string | undefined) => void
+      onOpen: (key: string, event: MouseEvent) => void
+    },
   ) => {
     canvas.onSelect = options.onSelect
+    canvas.onOpen = options.onOpen
     return {
       show: (model: GraphModel) => canvas.shown.push(model),
       select: (key: string | undefined) => canvas.selected.push(key),
@@ -189,22 +196,65 @@ it('opens a card for the tapped account and goes from it', async () => {
     'no-referrer',
   )
   expect(canvas.selected.at(-1)).toBe('m')
-  const buttons = [...card.querySelectorAll('.actions button')]
-  expect(buttons.map(text)).toEqual(['以他为中心', '打开详情'])
-  ;(buttons[0] as HTMLButtonElement).click()
+  // Links, so a modified click opens them in a new tab.
+  const links = [...card.querySelectorAll('.actions a')]
+  expect(links.map(text)).toEqual(['以他为中心', '打开详情', '打开原文'])
+  expect(links.map((a) => a.getAttribute('href'))).toEqual([
+    '#/collection/mc/graph',
+    '#/collection/mc',
+    'https://x.com/kobayashi',
+  ])
+  expect(links[2]!.getAttribute('target')).toBe('_blank')
+  expect(links[2]!.getAttribute('rel')).toBe('noopener noreferrer')
+  ;(links[0] as HTMLAnchorElement).click()
   expect(push).toHaveBeenLastCalledWith({
     name: 'collection-graph',
     params: { id: 'mc' },
   })
-  ;(buttons[1] as HTMLButtonElement).click()
+  ;(links[1] as HTMLAnchorElement).click()
   expect(push).toHaveBeenLastCalledWith({
     name: 'collection',
     params: { id: 'mc' },
   })
+  // A modified click is the browser's: no navigation here.
+  push.mockClear()
+  links[1]!.dispatchEvent(
+    new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true }),
+  )
+  expect(push).not.toHaveBeenCalled()
   // Tapping the stage closes it.
   canvas.onSelect!(undefined)
   await settle()
   expect(el.querySelector('.card')).toBeNull()
+})
+
+it("opens an account's page in a new tab on a modified or middle click", async () => {
+  const open = vi.spyOn(globalThis, 'open').mockReturnValue(null)
+  const { el } = await mount(() => graph())
+  canvas.onOpen!('m', new MouseEvent('click', { metaKey: true }))
+  canvas.onOpen!('m', new MouseEvent('auxclick', { button: 1 }))
+  expect(open.mock.calls).toEqual([
+    ['#/collection/mc', '_blank', 'noopener'],
+    ['#/collection/mc', '_blank', 'noopener'],
+  ])
+  await settle()
+  expect(el.querySelector('.card')).toBeNull()
+  // An account without a page here opens its card instead.
+  canvas.onOpen!('o', new MouseEvent('click', { metaKey: true }))
+  await settle()
+  expect(text(el.querySelector('.card .name'))).toBe('@outside')
+  expect(open).toHaveBeenCalledTimes(2)
+  // The list's entries do the same.
+  ;(el.querySelectorAll('.modes button')[1] as HTMLButtonElement).click()
+  await settle()
+  const person = [...el.querySelectorAll('.person')].find(
+    (p) => text(p.querySelector('.name')) === '小林',
+  )!
+  person.dispatchEvent(
+    new MouseEvent('click', { bubbles: true, ctrlKey: true }),
+  )
+  expect(open).toHaveBeenCalledTimes(3)
+  open.mockRestore()
 })
 
 it('zooms and frames the graph from its buttons', async () => {
@@ -287,7 +337,7 @@ it('kills the canvas with the page', async () => {
   expect(canvas.killed).toBe(true)
 })
 
-it('offers no way on from an account the page may not link to', () => {
+it("offers only the platform's page of an account the page may not link to", () => {
   const [, , outside] = graphModel(graph()).nodes
   const el = document.createElement('div')
   document.body.append(el)
@@ -296,16 +346,19 @@ it('offers no way on from an account the page may not link to', () => {
   unmount = () => app.unmount()
   expect(text(el.querySelector('.name'))).toBe('@outside')
   expect(text(el.querySelector('.initial'))).toBe('O')
-  expect(el.querySelector('.actions')).toBeNull()
+  expect(
+    [...el.querySelectorAll('.actions a')].map((a) => [
+      text(a),
+      a.getAttribute('href'),
+    ]),
+  ).toEqual([['打开原文', 'https://x.com/outside']])
   // The center is where the page is: only its details.
   const [center] = graphModel(graph()).nodes
   app.unmount()
   const again = createVaporApp(GraphNodeCard, { view: center })
   again.mount(el)
   unmount = () => again.unmount()
-  expect([...el.querySelectorAll('.actions button')].map(text)).toEqual([
-    '打开详情',
-  ])
+  expect([...el.querySelectorAll('.actions a')].map(text)).toEqual(['打开详情'])
 })
 
 it('marks accounts by the viewer the address names, and fades the rest', async () => {
@@ -423,11 +476,17 @@ it('compares the profile with accounts picked', async () => {
       '甲',
     ]),
   )
-  const go = el.querySelector<HTMLButtonElement>('.compare-go')!
-  expect(go.disabled).toBe(true)
+  expect(
+    el.querySelector<HTMLButtonElement>('button.compare-go')!.disabled,
+  ).toBe(true)
   picker.querySelector<HTMLButtonElement>('[role=option]')!.click()
   await settle()
+  // Once accounts are picked, a link to the comparison.
+  const go = el.querySelector<HTMLAnchorElement>('a.compare-go')!
   expect(text(go)).toBe('对比 2 个账号')
+  expect(go.getAttribute('href')).toBe(
+    `#/compare?rel_of=c&rel_of=${encodeURIComponent('x/x.profile/7')}`,
+  )
   go.click()
   expect(push).toHaveBeenLastCalledWith({
     name: 'compare',

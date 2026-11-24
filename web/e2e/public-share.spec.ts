@@ -138,7 +138,7 @@ test('a public link opens a folder and its items without login', async ({
   await page.reload()
   await expect(page.getByLabel('排序', { exact: true })).toHaveValue('updated')
 
-  await page.getByText('公开的帖子').click()
+  await page.locator('.row .head').click()
   await expect(page).toHaveURL(new RegExp(`#/s/${slug}/collection/${postId}$`))
   await expect(page.locator('h1')).toHaveText('收藏详情')
   for (const action of ['删除这条收藏', '公开分享', '我的整理'])
@@ -154,8 +154,8 @@ test('a public link opens a folder and its items without login', async ({
   )
   await expect(page.getByText('作者简介')).toBeVisible()
 
-  await page.getByRole('button', { name: '返回', exact: true }).click()
-  await page.getByRole('button', { name: '返回', exact: true }).click()
+  await page.getByRole('link', { name: '返回', exact: true }).click()
+  await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page.locator('h1')).toHaveText('公开收藏夹')
   expect(requested.every((path) => path.startsWith('/v1/public/'))).toBe(true)
   expect(telegram).toEqual([])

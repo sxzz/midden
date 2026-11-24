@@ -19,6 +19,7 @@ import {
 import { host } from '../host'
 import { present } from '../presentation'
 import { collectionHref } from '../share'
+import AppLink from './ui/AppLink.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 import ViewerDetailButton from './ui/ViewerDetailButton.vue'
 import 'photoswipe/style.css'
@@ -37,7 +38,6 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   close: []
-  open: [id: string]
   remove: [asset: Asset]
 }>()
 const index = shallowRef(
@@ -367,7 +367,8 @@ watch(
       </p>
       <ViewerDetailButton
         v-if="selectedCollection"
-        @select="emit('open', selectedCollection!)"
+        :href="collectionHref(selectedCollection)"
+        @navigate="emit('close')"
       />
       <button
         v-if="removable && selected"
@@ -424,11 +425,11 @@ watch(
     >
       <div v-if="caption" class="post-caption">
         <component
-          :is="caption.profileHref ? 'a' : 'span'"
+          :is="caption.profileHref ? AppLink : 'span'"
           :href="caption.profileHref"
           class="caption-avatar"
           :aria-label="`查看${caption.name}的主页`"
-          @click="caption.profileHref && close()"
+          @navigate="emit('close')"
         >
           <LoadingImage
             v-if="caption.avatar && !caption.avatar.sensitive"
@@ -438,12 +439,12 @@ watch(
           <span v-else aria-hidden="true">{{ caption.name.slice(0, 1) }}</span>
         </component>
         <div class="caption-content">
-          <a
+          <AppLink
             v-if="caption.profileCollectionId"
             :href="collectionHref(caption.profileCollectionId)"
-            @click="close"
+            @navigate="emit('close')"
             >{{ caption.name
-            }}<span v-if="caption.handle"> @{{ caption.handle }}</span></a
+            }}<span v-if="caption.handle"> @{{ caption.handle }}</span></AppLink
           >
           <strong v-else
             >{{ caption.name

@@ -34,6 +34,7 @@ import {
 } from '../captures'
 import { toast } from '../composables/useToast'
 import { relationsText } from '../follows'
+import AppLink from './ui/AppLink.vue'
 import InfiniteLoader from './ui/InfiniteLoader.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
@@ -399,13 +400,13 @@ const retryLabel = computed(() => {
   if (record.value?.update) return '再次更新'
   return record.value?.state === 'failed' ? '重试' : '重新采集'
 })
-function openCollection(id: string, event?: MouseEvent) {
-  if (event?.ctrlKey || event?.metaKey || event?.shiftKey) {
-    window.open(`#/collection/${id}`, '_blank', 'noopener')
-    return
-  }
-  void router.push({ name: 'collection', params: { id } })
-}
+/** A collection's page, which a saved member or profile links to. */
+const collectionPage = (id: string) => ({
+  name: 'collection',
+  params: { id },
+})
+/** Whether a member has a page to link to: saved, and not a profile list. */
+const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
 </script>
 
 <template>
@@ -474,7 +475,7 @@ function openCollection(id: string, event?: MouseEvent) {
         v-if="record.saved && record.state !== 'failed'"
         label="查看收藏"
         chevron
-        @select="openCollection(record.collection_id)"
+        :to="collectionPage(record.collection_id)"
       />
       <ListButton v-if="record.url" label="打开原链接" :href="record.url" />
       <ListButton
@@ -530,18 +531,14 @@ function openCollection(id: string, event?: MouseEvent) {
       "
     >
       <template v-for="p in record.profiles" :key="p.collection_id">
-        <button
-          type="button"
-          class="line profile"
-          @click="(event: MouseEvent) => openCollection(p.collection_id, event)"
-        >
+        <AppLink class="line profile" :to="collectionPage(p.collection_id)">
           <span class="line-text"
             >{{ profileHandle(p.url, p.handle)
             }}<small class="hint">{{ profilePartText(p) }}</small
             ><small v-if="p.error" class="hint">{{ p.error }}</small></span
           >
           <span class="chevron" aria-hidden="true">›</span>
-        </button>
+        </AppLink>
         <ListButton
           v-if="canContinue(p)"
           label="继续抓取"
@@ -595,13 +592,10 @@ function openCollection(id: string, event?: MouseEvent) {
       </div>
       <ListSection :title="heading">
         <div v-for="m in members" :key="m.job_id" class="member">
-          <button
-            type="button"
+          <component
+            :is="linked(m) ? AppLink : 'span'"
             class="member-main"
-            :disabled="!m.saved || m.state === 'failed' || !!m.list"
-            @click="
-              (event: MouseEvent) => openCollection(m.collection_id, event)
-            "
+            :to="linked(m) ? collectionPage(m.collection_id) : undefined"
           >
             <span class="line-text"
               >{{ memberTitle(m)
@@ -617,7 +611,7 @@ function openCollection(id: string, event?: MouseEvent) {
               :class="stateStatus(m.state, m.waiting).tone"
               >{{ stateStatus(m.state, m.waiting).label }}</span
             >
-          </button>
+          </component>
           <button
             v-if="m.state === 'failed' && !m.gone && !m.list && record.done"
             type="button"
@@ -750,6 +744,10 @@ function openCollection(id: string, event?: MouseEvent) {
   width: 100%;
   text-align: left;
 }
+a.profile,
+a.member-main {
+  color: inherit;
+}
 .profile:active {
   background: var(--fill);
 }
@@ -794,9 +792,6 @@ function openCollection(id: string, event?: MouseEvent) {
 .member-main:last-child {
   padding-right: var(--inset);
 }
-.member-main:disabled {
-  opacity: 1;
-}
 .member-retry {
   flex-shrink: 0;
   min-height: 44px;
@@ -807,7 +802,7 @@ function openCollection(id: string, event?: MouseEvent) {
 .member-retry:disabled {
   color: var(--subtle);
 }
-.member-main:active:not(:disabled),
+a.member-main:active,
 .member-retry:active:not(:disabled) {
   background: var(--fill);
 }

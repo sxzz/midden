@@ -1,9 +1,7 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { useCollection } from '../composables/useCollection'
 import { storageSize } from '../presentation'
-import { collectionRoute } from '../share'
 import CollectionView from './CollectionView.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
@@ -26,7 +24,6 @@ const emit = defineEmits<{
   /** Posts deleted from this list, as `CollectionView` reports them. */
   deleted: [ids: string[], withPosts: boolean]
 }>()
-const router = useRouter()
 // Newest posts first is already the default order of a list of posts.
 const filters = shallowRef('')
 const query = computed(() => {
@@ -73,9 +70,6 @@ watch(
 function search(value: string) {
   filters.value = value
 }
-function open(id: string) {
-  void router.push(collectionRoute(id))
-}
 </script>
 
 <template>
@@ -96,7 +90,6 @@ function open(id: string) {
       within-profile
       enlarged-media
       @search="search"
-      @open="open"
       @more="more"
       @retry="load(request)"
       @deleted="

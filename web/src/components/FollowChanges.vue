@@ -1,6 +1,5 @@
 <script setup vapor lang="ts">
 import { computed, onActivated, onUnmounted, shallowRef, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import {
   errorText,
   previewURL,
@@ -9,7 +8,8 @@ import {
 } from '../api'
 import { accountName, followDays, moment } from '../follows'
 import { readFollowChanges } from '../reads'
-import { collectionHref, collectionRoute } from '../share'
+import { collectionRoute } from '../share'
+import AppLink from './ui/AppLink.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 import Spinner from './ui/Spinner.vue'
 const props = defineProps<{ id: string; showSensitive?: boolean }>()
@@ -49,15 +49,6 @@ onActivated(() => {
 })
 onUnmounted(() => controller.abort())
 const days = computed(() => followDays(changes.value))
-const router = useRouter()
-function open(account: FollowAccount, event: MouseEvent) {
-  if (!account.collection_id) return
-  if (event.ctrlKey || event.metaKey || event.shiftKey) {
-    window.open(collectionHref(account.collection_id), '_blank', 'noopener')
-    return
-  }
-  void router.push(collectionRoute(account.collection_id))
-}
 // A sensitive avatar stays blurred unless all sensitive media are shown.
 const blurred = (account: FollowAccount) =>
   !!account.avatar?.sensitive && !props.showSensitive
@@ -93,11 +84,10 @@ const blurred = (account: FollowAccount) =>
                   :key="account.entity_id"
                   class="account"
                 >
-                  <button
+                  <AppLink
                     v-if="account.collection_id"
-                    type="button"
                     class="account-row"
-                    @click="open(account, $event)"
+                    :to="collectionRoute(account.collection_id)"
                   >
                     <span class="avatar" :class="{ blurred: blurred(account) }">
                       <LoadingImage
@@ -114,7 +104,7 @@ const blurred = (account: FollowAccount) =>
                         >@{{ account.username }}</span
                       >
                     </span>
-                  </button>
+                  </AppLink>
                   <span v-else class="account-row">
                     <span class="avatar" :class="{ blurred: blurred(account) }">
                       <LoadingImage
@@ -262,10 +252,7 @@ const blurred = (account: FollowAccount) =>
   color: inherit;
   text-align: left;
 }
-button.account-row {
-  cursor: pointer;
-}
-button.account-row:focus-visible {
+a.account-row:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 2px;
 }

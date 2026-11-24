@@ -54,7 +54,7 @@ for (const back of ['button', 'history'] as const) {
     await expect(page.locator('h1')).toHaveText('收藏详情')
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
     if (back === 'button')
-      await page.getByRole('button', { name: '返回' }).click()
+      await page.getByRole('link', { name: '返回' }).click()
     else await page.goBack()
     await expect(page.locator('h1')).toHaveText('我的收藏')
     await expect(page).toHaveURL(/#\/\?q=test$/)
@@ -72,7 +72,7 @@ for (const back of ['button', 'history'] as const) {
     await expect(page.locator('h1')).toHaveText('收藏详情')
     await page.reload()
     await expect(page.getByText('收藏 15', { exact: true })).toBeVisible()
-    await page.getByRole('button', { name: '返回' }).click()
+    await page.getByRole('link', { name: '返回' }).click()
     await expect(page.locator('.row')).toHaveCount(30)
   })
 }

@@ -23,12 +23,12 @@ import {
   relationQuery,
   relMinOf,
 } from '../relation-filter'
-import { collectionRoute } from '../share'
 import { formatCount } from '../trends'
 import CompareCombos from './CompareCombos.vue'
 import GraphNodeCard from './GraphNodeCard.vue'
 import MiniAvatar from './MiniAvatar.vue'
 import PerspectivePicker from './PerspectivePicker.vue'
+import AppLink from './ui/AppLink.vue'
 import Spinner from './ui/Spinner.vue'
 import ViewerBar from './ViewerBar.vue'
 import ViewerMark from './ViewerMark.vue'
@@ -215,6 +215,7 @@ const {
   height,
   error: canvasError,
   canvas,
+  choose,
 } = useGraphCanvas({
   stage: useTemplateRef<HTMLElement>('stage'),
   surface: useTemplateRef<HTMLElement>('surface'),
@@ -229,18 +230,11 @@ const mode = computed(() =>
   view.value === 'graph' && !canvasError.value ? 'graph' : 'grid',
 )
 
-function library() {
-  void router.push({
-    name: 'collections',
-    query: relationQuery(keys.value, side.value, min.value),
-  })
-}
-function center(id: string) {
-  void router.push(collectionRoute(id, 'graph'))
-}
-function open(id: string) {
-  void router.push(collectionRoute(id))
-}
+/** 「在收藏库中查看」: the library under the same relation filter. */
+const libraryRoute = computed(() => ({
+  name: 'collections',
+  query: relationQuery(keys.value, side.value, min.value),
+}))
 </script>
 
 <template>
@@ -252,7 +246,8 @@ function open(id: string) {
             type="button"
             class="center"
             :class="{ on: account.key === selected }"
-            @click="selected = account.key"
+            @click="choose(account.key, $event)"
+            @auxclick="choose(account.key, $event)"
           >
             <span class="avatar"
               ><MiniAvatar :view="account" :size="48" /><ViewerMark
@@ -390,9 +385,9 @@ function open(id: string) {
           >
           <Spinner v-if="loading" label="正在加载" class="busy" />
         </p>
-        <button v-if="keys.length" type="button" class="link" @click="library">
+        <AppLink v-if="keys.length" class="link" :to="libraryRoute">
           在收藏库中查看
-        </button>
+        </AppLink>
         <div class="modes" role="group" aria-label="显示方式">
           <button
             type="button"
@@ -429,7 +424,8 @@ function open(id: string) {
               type="button"
               class="person"
               :class="{ on: item.key === selected }"
-              @click="selected = item.key"
+              @click="choose(item.key, $event)"
+              @auxclick="choose(item.key, $event)"
             >
               <span
                 class="avatar"
@@ -512,8 +508,6 @@ function open(id: string) {
           :view="selectedView"
           :show-sensitive="showSensitive"
           :viewer-name="viewerName"
-          @center="center"
-          @open="open"
           @close="selected = undefined"
         >
           <span v-if="why" class="why">{{ why }}</span>
@@ -729,6 +723,8 @@ function open(id: string) {
   box-shadow: inset 0 0 0 1px var(--separator);
 }
 .link {
+  display: inline-flex;
+  align-items: center;
   min-height: 34px;
   padding: 0 12px;
   color: var(--link);

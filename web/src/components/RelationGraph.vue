@@ -1,6 +1,5 @@
 <script setup vapor lang="ts">
 import { computed, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { errorText, type FollowGraph } from '../api'
 import { useGraphCanvas } from '../composables/useGraphCanvas'
 import { useViewer } from '../composables/useViewer'
@@ -15,10 +14,11 @@ import {
 } from '../graph'
 import { readGraph } from '../reads'
 import { perspectiveName } from '../relation-filter'
-import { collectionRoute, shareSlug } from '../share'
+import { shareSlug } from '../share'
 import { formatCount } from '../trends'
 import GraphNodeCard from './GraphNodeCard.vue'
 import PerspectivePicker from './PerspectivePicker.vue'
+import AppLink from './ui/AppLink.vue'
 import Spinner from './ui/Spinner.vue'
 import ViewerBar from './ViewerBar.vue'
 import ViewerMark from './ViewerMark.vue'
@@ -126,6 +126,7 @@ const {
   height,
   error: canvasError,
   canvas,
+  choose,
 } = useGraphCanvas({
   stage: useTemplateRef<HTMLElement>('stage'),
   surface: useTemplateRef<HTMLElement>('surface'),
@@ -139,27 +140,17 @@ watch(canvasError, (value) => {
   if (value) mode.value = 'list'
 })
 
-const router = useRouter()
-function center(id: string) {
-  void router.push(collectionRoute(id, 'graph'))
-}
-function open(id: string) {
-  void router.push(collectionRoute(id))
-}
-
 /** 「对比」: other accounts to compare this one with. */
 const comparing = shallowRef(false)
 const others = shallowRef<string[]>([])
 const centerKey = computed(() => graph.value?.nodes[0]?.key ?? '')
-function compare() {
-  void router.push({
-    name: 'compare',
-    query: {
-      rel_of: [centerKey.value, ...others.value],
-      ...(viewer.value ? { viewer: viewer.value } : {}),
-    },
-  })
-}
+const compareRoute = computed(() => ({
+  name: 'compare',
+  query: {
+    rel_of: [centerKey.value, ...others.value],
+    ...(viewer.value ? { viewer: viewer.value } : {}),
+  },
+}))
 </script>
 
 <template>
@@ -224,13 +215,11 @@ function compare() {
                 :exclude="[centerKey]"
               />
             </div>
-            <button
-              type="button"
-              class="compare-go"
-              :disabled="!others.length"
-              @click="compare"
-            >
+            <AppLink v-if="others.length" class="compare-go" :to="compareRoute">
               对比 {{ others.length + 1 }} 个账号
+            </AppLink>
+            <button v-else type="button" class="compare-go" disabled>
+              对比 1 个账号
             </button>
             <button
               type="button"
@@ -259,7 +248,8 @@ function compare() {
                 type="button"
                 class="person"
                 :class="{ on: view.key === selected }"
-                @click="selected = view.key"
+                @click="choose(view.key, $event)"
+                @auxclick="choose(view.key, $event)"
               >
                 <span
                   class="avatar"
@@ -348,8 +338,6 @@ function compare() {
           :view="selectedView"
           :show-sensitive="showSensitive"
           :viewer-name="viewerName"
-          @center="center"
-          @open="open"
           @close="selected = undefined"
         />
       </div>
@@ -464,7 +452,8 @@ h2.mutual .dot {
   background: var(--card);
   overflow: hidden;
 }
-.compare button {
+.compare button,
+.compare-go {
   min-height: 34px;
   padding: 0 14px;
   border-radius: 17px;
@@ -477,6 +466,8 @@ h2.mutual .dot {
   box-shadow: inset 0 0 0 1px var(--separator);
 }
 .compare-go {
+  display: inline-flex;
+  align-items: center;
   background: var(--link);
   color: #fff;
   font-weight: 600;
@@ -484,7 +475,8 @@ h2.mutual .dot {
 .compare-go:disabled {
   opacity: 0.4;
 }
-.compare button:focus-visible {
+.compare button:focus-visible,
+.compare-go:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 2px;
 }

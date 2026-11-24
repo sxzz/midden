@@ -35,13 +35,13 @@ import {
   type ListTab,
 } from '../folders'
 import { backButton, host } from '../host'
-import { goBack } from '../navigation'
 import { listQuery } from '../reads'
 import ConfirmSheet from './ConfirmSheet.vue'
 import FolderMenuSheet from './FolderMenuSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
 import FolderStrip from './FolderStrip.vue'
 import ShareSheet from './ShareSheet.vue'
+import BackLink from './ui/BackLink.vue'
 import UpdateSheet from './UpdateSheet.vue'
 // Remembered in this browser, so a reload does not cover the media again.
 const SENSITIVE_KEY = 'midden.showSensitive'
@@ -312,9 +312,6 @@ const removeGuard = router.beforeEach((_to, from) => {
   if (from.name) scrolls.set(viewKey(from), window.scrollY)
 })
 onUnmounted(removeGuard)
-function open(id: string) {
-  void router.push({ name: 'collection', params: { id } })
-}
 function updated(collection: Collection) {
   // Match the collection that finished, not whichever detail is on screen: a
   // capture can report back after the user moved on to another collection.
@@ -391,11 +388,6 @@ function folderUpdated(recordId: string) {
   sheet.value = ''
   if (current)
     folderRecords.value = { ...folderRecords.value, [current.id]: recordId }
-}
-function openFolderRecord() {
-  const id = folder.value && folderRecords.value[folder.value.id]
-  sheet.value = ''
-  if (id) void router.push({ name: 'capture', params: { id } })
 }
 /** Save what the list shows as a new folder, and continue inside it. */
 async function saveFolder(name: string) {
@@ -479,7 +471,6 @@ function listProps(list: ReturnType<typeof createList>, error = '') {
     usage: usage.value,
     onSearch: search,
     onTagsChanged: tagsChanged,
-    onOpen: open,
     onMore: collection.more,
     onRetry: () => {
       if (list.loadedQuery !== undefined) void collection.load(list.loadedQuery)
@@ -569,14 +560,9 @@ const viewProps = computed(() => {
           <path d="M10 20v-6h4v6" />
         </svg>
       </RouterLink>
-      <button
-        v-if="nested && standalone"
-        type="button"
-        class="back"
-        @click="goBack(router)"
-      >
+      <BackLink v-if="nested && standalone" class="back">
         <span class="chevron" aria-hidden="true">‹</span>返回
-      </button>
+      </BackLink>
       <h1>{{ title }}</h1>
       <RouterLink
         v-if="!nested"
@@ -751,9 +737,9 @@ const viewProps = computed(() => {
       v-if="folder"
       :open="sheet === 'menu'"
       :name="folder.name"
-      :progress="!!folderRecords[folder.id]"
+      :progress="folderRecords[folder.id]"
       @update="openSheet('update')"
-      @progress="openFolderRecord"
+      @navigate="sheet = ''"
       @share="openSheet('share')"
       @rename="openSheet('rename')"
       @delete="openSheet('delete')"

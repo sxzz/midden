@@ -27,9 +27,11 @@ onMounted(() => {
   const stopHost = setupHost(() => goBack(router))
   const follow = (event: MouseEvent) => followInternalLink(router, event)
   document.addEventListener('click', follow)
+  document.addEventListener('auxclick', follow)
   cleanup = () => {
     stopHost()
     document.removeEventListener('click', follow)
+    document.removeEventListener('auxclick', follow)
   }
   let started = false
   watch(

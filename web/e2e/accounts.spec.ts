@@ -256,7 +256,7 @@ test('adds, selects and deletes an X account', async ({ page }) => {
   await page.getByRole('button', { name: '删除账号' }).click()
   await expect(account).toHaveCount(0)
 
-  await page.getByRole('button', { name: '返回' }).click()
+  await page.getByRole('link', { name: '返回' }).click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
 })
 
@@ -326,7 +326,7 @@ test('deleting everything shows what goes and needs the phrase typed', async ({
     page.getByText('已删除 12 条收藏和 30 条采集记录。'),
   ).toBeVisible()
   expect(deleted).toEqual({ confirm: 'delete all' })
-  await page.getByRole('button', { name: '返回' }).click()
+  await page.getByRole('link', { name: '返回' }).click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
   await expect(page.locator('.row')).toHaveCount(0)
   await expect(page.getByText(/暂无/)).toHaveCount(0)

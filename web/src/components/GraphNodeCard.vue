@@ -3,27 +3,28 @@ import { computed } from 'vue'
 import { previewURL } from '../api'
 import {
   kindLabels,
+  nodeURL,
   viewerLine,
   type GraphKind,
   type GraphNodeView,
 } from '../graph'
+import { collectionRoute } from '../share'
 import { formatCount } from '../trends'
+import AppLink from './ui/AppLink.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 import ViewerMark from './ViewerMark.vue'
 // The account tapped in the graph: who it is, its own counts, and where to
-// go from it. Only a saved profile the page may link to offers to go.
+// go from it. Only a saved profile the page may link to has pages here; any
+// account with a handle has its page on the platform.
 const props = defineProps<{
   view: GraphNodeView
   showSensitive?: boolean
   /** The chosen viewer's name, for the line on how it relates. */
   viewerName?: string
 }>()
-const emit = defineEmits<{
-  center: [id: string]
-  open: [id: string]
-  close: []
-}>()
+const emit = defineEmits<{ close: [] }>()
 const node = computed(() => props.view.node)
+const original = computed(() => nodeURL(node.value))
 const avatar = computed(() =>
   node.value.avatar ? previewURL(node.value.avatar) : '',
 )
@@ -97,17 +98,17 @@ const counts = computed(() => {
         </svg>
       </button>
     </div>
-    <div v-if="node.collection_id" class="actions">
-      <button
-        v-if="!view.center"
-        type="button"
-        @click="emit('center', node.collection_id)"
-      >
-        以他为中心
-      </button>
-      <button type="button" @click="emit('open', node.collection_id)">
-        打开详情
-      </button>
+    <div v-if="node.collection_id || original" class="actions">
+      <template v-if="node.collection_id">
+        <AppLink
+          v-if="!view.center"
+          :to="collectionRoute(node.collection_id, 'graph')"
+        >
+          以他为中心
+        </AppLink>
+        <AppLink :to="collectionRoute(node.collection_id)">打开详情</AppLink>
+      </template>
+      <AppLink v-if="original" :href="original">打开原文</AppLink>
     </div>
   </section>
 </template>
@@ -215,20 +216,24 @@ const counts = computed(() => {
   display: flex;
   box-shadow: inset 0 1px 0 var(--separator);
 }
-.actions button {
+.actions a {
   flex: 1;
+  display: grid;
+  place-items: center;
   min-height: 48px;
+  padding: 0 8px;
   font-size: 16px;
   text-align: center;
   color: var(--link);
 }
-.actions button + button {
+.actions a + a {
   box-shadow: inset 1px 0 0 var(--separator);
 }
-.actions button:active {
+.actions a:active {
   background: var(--fill);
 }
-button:focus-visible {
+button:focus-visible,
+.actions a:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: -2px;
 }

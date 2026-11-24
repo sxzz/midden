@@ -3,7 +3,10 @@ import { createVaporApp } from 'vue'
 import { asset, collection, entity, mockApi } from '../testing/api'
 import CollectionRow from './CollectionRow.vue'
 import ProfileCollections from './ProfileCollections.vue'
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('vue-router', async () => {
+  const { resolve } = await import('../testing/router')
+  return { useRouter: () => ({ push: vi.fn(), resolve }) }
+})
 /** A post someone else wrote, kept because the listed account reposted it. */
 const repost = collection({
   id: 'repost',

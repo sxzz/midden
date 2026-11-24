@@ -87,7 +87,7 @@ test('lists a profile’s changes from its detail and returns to it', async ({
     return route.fulfill({ json })
   })
   await page.goto(`/app/#/collection/${profileId}`)
-  await page.getByRole('button', { name: '资料修改记录' }).click()
+  await page.getByRole('link', { name: '资料修改记录' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/changes$`))
   await expect(page.locator('h1')).toHaveText('资料修改记录')
 
@@ -111,7 +111,7 @@ test('lists a profile’s changes from its detail and returns to it', async ({
   await page.keyboard.press('Escape')
   await expect(page.locator('dialog.viewer')).toBeHidden()
 
-  await page.getByRole('button', { name: '返回', exact: true }).click()
+  await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
   await expect(page.locator('h1')).toHaveText('收藏详情')
 })

@@ -11,6 +11,26 @@ import type { Asset, Collection, Entity } from './api'
 
 const LINE_BREAK = /\r?\n/
 const NUMERIC_ID = /^\d+$/
+
+/**
+ * An account's own page on its platform: by its handle, or for X without
+ * one, by its numeric id. `type` is the entity type, as `x.profile`.
+ */
+export function profileURL(account: {
+  type: string
+  username?: string
+  external_id?: string
+}): string | undefined {
+  if (account.username)
+    return account.type.startsWith('instagram.')
+      ? `https://www.instagram.com/${encodeURIComponent(account.username)}/`
+      : `https://x.com/${encodeURIComponent(account.username)}`
+  if (
+    account.type.startsWith('x.') &&
+    NUMERIC_ID.test(account.external_id || '')
+  )
+    return `https://x.com/i/user/${account.external_id}`
+}
 export interface Stat {
   label: string
   value: string
@@ -183,12 +203,12 @@ const social: Presenter = (a, root, options = {}) => {
       ? collectionHref(a.id)
       : profile?.saved_collection_id
         ? collectionHref(profile.saved_collection_id)
-        : asText(profile?.data.username)
-          ? `https://${profile?.type === 'instagram.profile' ? 'www.instagram.com' : 'x.com'}/${encodeURIComponent(asText(profile?.data.username)!)}`
-          : profile?.type === 'x.profile' &&
-              NUMERIC_ID.test(profile.external_id || '')
-            ? `https://x.com/i/user/${profile.external_id}`
-            : undefined,
+        : profile &&
+          profileURL({
+            type: profile.type,
+            username: asText(profile.data.username),
+            external_id: profile.external_id,
+          }),
     handle: asText(profile?.data.username),
     avatar: avatarOf(profile),
     // Counts come from the entity the collection is about, and only that one.

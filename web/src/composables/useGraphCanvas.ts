@@ -6,6 +6,9 @@ import {
   watch,
   type Ref,
 } from 'vue'
+import { useRouter } from 'vue-router'
+import { navigatesHere, openInNewTab } from '../navigation'
+import { collectionRoute } from '../share'
 import type { GraphModel } from '../graph'
 import type { GraphCanvas } from '../graph-canvas'
 
@@ -30,6 +33,19 @@ export function useGraphCanvas(options: {
    */
   minHeight?: () => number
 }) {
+  const router = useRouter()
+  /**
+   * An account clicked, on the canvas or in the list: its card, or its page
+   * in a new tab when clicked as a link would be to open one there (Cmd,
+   * Ctrl, Shift or the middle button). Only a saved profile has a page.
+   */
+  function choose(key: string, event?: MouseEvent) {
+    const id = options.model.value.nodes.find((view) => view.key === key)?.node
+      .collection_id
+    if (id && event && !navigatesHere(event))
+      openInNewTab(router, collectionRoute(id))
+    else options.selected.value = key
+  }
   const height = shallowRef(0)
   const error = shallowRef('')
   const canvas = shallowRef<GraphCanvas>()
@@ -63,6 +79,7 @@ export function useGraphCanvas(options: {
       const created = createGraphCanvas(options.surface.value, {
         theme: readTheme(),
         onSelect: (key) => (options.selected.value = key),
+        onOpen: choose,
       })
       canvas.value = created
       const retheme = () => created.setTheme(readTheme())
@@ -103,5 +120,5 @@ export function useGraphCanvas(options: {
     fitHeight()
     requestAnimationFrame(() => canvas.value?.resize())
   })
-  return { height, error, canvas }
+  return { height, error, canvas, choose }
 }

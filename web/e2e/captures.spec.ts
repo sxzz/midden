@@ -151,8 +151,8 @@ test('submits links and follows the record until it finishes', async ({
   await expect(page.getByText('图片 1')).toBeVisible()
 
   // Finished captures changed the library, so its list loads again.
-  await page.getByRole('button', { name: '返回' }).click()
-  await page.getByRole('button', { name: '返回' }).click()
+  await page.getByRole('link', { name: '返回' }).click()
+  await page.getByRole('link', { name: '返回' }).click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
   await expect.poll(() => listReloads).toBeGreaterThan(before)
 })
@@ -269,8 +269,9 @@ test('shows collection progress, member failures, stop and retry', async ({
 
   // Its members predate telling new posts from updates, so all are listed
   // by default; problems remain available in their tab.
-  const failed = page.getByRole('button', {
-    name: /^x\.com\/fixture\/status\/2/,
+  // A failed post has no page to open: plain text, not a link.
+  const failed = page.locator('span.member-main', {
+    hasText: /^x\.com\/fixture\/status\/2/,
   })
   await expect(failed).toContainText('失败')
   const all = page.getByRole('tab', { name: '全部 3' })

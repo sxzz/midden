@@ -13,6 +13,7 @@ import { collectionHref } from '../share'
 import MediaGallery from './MediaGallery.vue'
 import MediaViewer from './MediaViewer.vue'
 import PostRelations from './PostRelations.vue'
+import AppLink from './ui/AppLink.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 import LockIcon from './ui/LockIcon.vue'
 const props = defineProps<{
@@ -73,7 +74,7 @@ const warnings = computed(() => warningList(props.collection.warnings))
 <template>
   <article class="post">
     <header class="author">
-      <a
+      <AppLink
         v-if="view.bio === undefined && view.profileHref"
         :href="view.profileHref"
         class="avatar"
@@ -85,7 +86,7 @@ const warnings = computed(() => warningList(props.collection.warnings))
           alt=""
         /><span v-else class="avatar initials">{{
           view.name.slice(0, 1)
-        }}</span></a
+        }}</span></AppLink
       >
       <button
         v-else-if="viewable && view.bio !== undefined"

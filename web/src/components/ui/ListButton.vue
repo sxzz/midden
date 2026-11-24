@@ -1,9 +1,16 @@
 <script setup vapor lang="ts">
+import AppLink from './AppLink.vue'
+import type { RouteLocationRaw } from 'vue-router'
+// A row of a grouped list: a page of the app (`to`), another site (`href`),
+// or an action (`select`).
 withDefaults(
   defineProps<{
     label: string
     hint?: string
     trailing?: string
+    /** A route of the app: the row is a link to it. */
+    to?: RouteLocationRaw
+    /** Another site, opened in a new tab. */
     href?: string
     chevron?: boolean
     disabled?: boolean
@@ -11,20 +18,28 @@ withDefaults(
   }>(),
   { variant: 'link' },
 )
-const emit = defineEmits<{ select: [] }>()
+const emit = defineEmits<{ select: []; navigate: [] }>()
 </script>
 
 <template>
-  <a
-    v-if="href"
-    class="row link"
-    :href="href"
-    target="_blank"
-    rel="noopener noreferrer"
+  <AppLink
+    v-if="to"
+    class="row"
+    :class="variant"
+    :to="to"
+    @navigate="emit('navigate')"
   >
+    <span class="label"
+      >{{ label }}<small v-if="hint" class="hint">{{ hint }}</small></span
+    ><span v-if="trailing" class="trailing">{{ trailing }}</span
+    ><span v-else-if="chevron" class="trailing chevron" aria-hidden="true"
+      >›</span
+    >
+  </AppLink>
+  <AppLink v-else-if="href" class="row link" :href="href">
     <span class="label">{{ label }}</span>
     <span class="trailing" aria-hidden="true">↗</span>
-  </a>
+  </AppLink>
   <button
     v-else
     type="button"

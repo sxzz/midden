@@ -139,7 +139,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await expect(updateSheet.getByLabel('采集引用、转发的原帖')).toBeChecked()
   await expect(updateSheet.getByText('抓帖子')).toHaveCount(0)
   await updateSheet.getByRole('button', { name: '开始更新' }).click()
-  await page.getByRole('button', { name: '查看进度' }).click()
+  await page.getByRole('link', { name: '查看进度' }).click()
   await expect(page).toHaveURL(new RegExp(`/captures/${recordId}$`))
   expect(captureBodies.at(-1)).toEqual({
     target: { target: 'collection', id },
@@ -152,9 +152,9 @@ test('browse, filter, history, refresh and remove a saved post', async ({
       relations: false,
     },
   })
-  await page.getByRole('button', { name: '返回' }).click()
+  await page.getByRole('link', { name: '返回' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${id}$`))
-  await page.getByRole('button', { name: '返回' }).click()
+  await page.getByRole('link', { name: '返回' }).click()
   await page.getByRole('searchbox').fill('不存在')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await expect(page.getByText('没有匹配的收藏', { exact: true })).toBeVisible()

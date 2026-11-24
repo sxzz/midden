@@ -249,7 +249,11 @@ async function remove() {
   </ListSection>
   <p class="version">
     版本
-    <a v-if="versionURL" :href="versionURL" target="_blank" rel="noopener"
+    <a
+      v-if="versionURL"
+      :href="versionURL"
+      target="_blank"
+      rel="noopener noreferrer"
       ><code>{{ versionText }}</code></a
     >
     <code v-else>{{ versionText }}</code>

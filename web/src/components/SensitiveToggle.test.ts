@@ -62,7 +62,7 @@ it('toggles sensitive media across the collection and detail without losing the 
   await nextTick()
   expect(image()).not.toBeNull()
   expect(image()?.closest('.blurred, .sensitive')).toBeNull()
-  el.querySelector<HTMLButtonElement>('.row')!.click()
+  el.querySelector<HTMLAnchorElement>('.row .head')!.click()
   await vi.waitFor(() => expect(el.textContent).toContain('收藏详情'))
   await vi.waitFor(() => expect(image()).not.toBeNull())
   expect(image()?.closest('.blurred, .sensitive')).toBeNull()

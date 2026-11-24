@@ -1,6 +1,7 @@
 import { previewURL, type FollowGraph, type GraphNode } from './api'
 import { accountName } from './follows'
 import { byFollowers, ringOrder, type Point } from './graph-layout'
+import { profileURL } from './presentation'
 
 // The follow graph (关系图谱) as the page draws it: what the server sends,
 // turned into nodes and edges with their looks. Kept free of sigma so it
@@ -253,6 +254,21 @@ export function viewerLine(relation: ViewerRelation, name: string): string {
   if (relation === 'mutual') return `与 ${name} 互关`
   if (relation === 'following') return `${name} 关注了 TA`
   return `TA 关注了 ${name}`
+}
+
+/** An account's page on its platform, by the entity type in its key. */
+export function nodeURL(node: GraphNode): string | undefined {
+  let type: string
+  try {
+    type = decodeURIComponent(node.key.split('/', 3)[1] ?? '')
+  } catch {
+    return undefined
+  }
+  return profileURL({
+    type,
+    username: node.username,
+    external_id: node.external_id,
+  })
 }
 
 /** The badge's words, for its label: the same, shortly. */

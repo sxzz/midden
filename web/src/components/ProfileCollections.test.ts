@@ -2,7 +2,10 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { createVaporApp, nextTick } from 'vue'
 import { mockApi } from '../testing/api'
 import ProfileCollections from './ProfileCollections.vue'
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('vue-router', async () => {
+  const { resolve } = await import('../testing/router')
+  return { useRouter: () => ({ push: vi.fn(), resolve }) }
+})
 let unmount = () => {}
 it('loads Instagram profile members with their own platform entity type', async () => {
   const request = mockApi()

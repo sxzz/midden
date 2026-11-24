@@ -5,14 +5,10 @@ import { collection, mockApi, type Request } from '../testing/api'
 import CollectionDetail from './CollectionDetail.vue'
 import type { Collection } from '../api'
 const push = vi.fn()
-vi.mock('vue-router', () => ({
-  useRouter: () => ({
-    push,
-    resolve: (to: { query: Record<string, string> }) => ({
-      href: `#/?${new URLSearchParams(to.query)}`,
-    }),
-  }),
-}))
+vi.mock('vue-router', async () => {
+  const { resolve } = await import('../testing/router')
+  return { useRouter: () => ({ push, resolve }) }
+})
 
 let unmount = () => {}
 beforeEach(() => {

@@ -1,8 +1,12 @@
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { createVaporApp } from 'vue'
 import { asset, collection as collectionOf, entity } from '../testing/api'
 import CollectionAlbum from './CollectionAlbum.vue'
 import CollectionRow from './CollectionRow.vue'
+vi.mock('vue-router', async () => {
+  const { resolve } = await import('../testing/router')
+  return { useRouter: () => ({ push: vi.fn(), resolve }) }
+})
 const collection = collectionOf({
   id: 'root',
   url: 'https://example.test/post',

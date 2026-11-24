@@ -216,7 +216,15 @@ function drawMark(
 
 export function createGraphCanvas(
   container: HTMLElement,
-  options: { theme: GraphTheme; onSelect: (key: string | undefined) => void },
+  options: {
+    theme: GraphTheme
+    onSelect: (key: string | undefined) => void
+    /**
+     * A node clicked with a modifier key or the middle button, which on a
+     * link would open it in a new tab. Without it, such clicks select too.
+     */
+    onOpen?: (key: string, event: MouseEvent) => void
+  },
 ): GraphCanvas {
   let theme = options.theme
   let dim = false
@@ -310,13 +318,34 @@ export function createGraphCanvas(
       autoRescaleContent: 'nodes',
     },
   })
-  sigma.on('clickNode', ({ node }) => options.onSelect(node))
+  const modified = (event: MouseEvent | TouchEvent) =>
+    event.ctrlKey || event.metaKey || event.shiftKey || event.altKey
+  sigma.on('clickNode', ({ node, event }) => {
+    if (options.onOpen && modified(event.original))
+      options.onOpen(node, event.original as MouseEvent)
+    else options.onSelect(node)
+  })
   sigma.on('clickStage', () => options.onSelect(undefined))
 
   let model: GraphModel = { nodes: [], edges: [] }
   let selected: string | undefined
   let hovered: string | undefined
   let focus: Focus | undefined
+  // Sigma only reports the primary button. The middle one opens the node
+  // under the pointer, and must not start the browser's autoscroll there.
+  const middleDown = (event: MouseEvent) => {
+    if (event.button === 1 && hovered && options.onOpen) event.preventDefault()
+  }
+  const middleClick = (event: MouseEvent) => {
+    if (event.button !== 1 || !hovered || !options.onOpen) {
+      return
+    }
+
+    event.preventDefault()
+    options.onOpen(hovered, event)
+  }
+  container.addEventListener('mousedown', middleDown)
+  container.addEventListener('auxclick', middleClick)
   sigma.on('enterNode', ({ node }) => {
     hovered = node
     applyFocus()
@@ -708,6 +737,8 @@ export function createGraphCanvas(
     },
     fit: () => fit(),
     kill() {
+      container.removeEventListener('mousedown', middleDown)
+      container.removeEventListener('auxclick', middleClick)
       worker.terminate()
       sigma.kill()
       names.remove()

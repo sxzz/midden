@@ -9,9 +9,10 @@ import {
   sourceStateNotice,
   storageSize,
 } from '../presentation'
-import { collectionHref } from '../share'
+import { collectionRoute } from '../share'
 import MediaThumbs from './MediaThumbs.vue'
 import PostRelations from './PostRelations.vue'
+import AppLink from './ui/AppLink.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 import LockIcon from './ui/LockIcon.vue'
 const props = defineProps<{
@@ -24,7 +25,7 @@ const props = defineProps<{
   /** Set while the list is selecting; the row then toggles instead of opening. */
   selected?: boolean
 }>()
-const emit = defineEmits<{ open: [id: string]; toggle: [id: string] }>()
+const emit = defineEmits<{ toggle: [id: string] }>()
 const selectable = computed(() => props.selected !== undefined)
 // Captured before the row's own buttons and links, so none of them opens
 // anything while the list is selecting.
@@ -33,19 +34,6 @@ function select(event: Event) {
   event.preventDefault()
   event.stopPropagation()
   emit('toggle', props.collection.id)
-}
-function open(event: MouseEvent) {
-  if (selectable.value) return
-  if (
-    event.target instanceof Element &&
-    event.target.closest('button, dialog, a')
-  )
-    return
-  if (event.ctrlKey || event.metaKey || event.shiftKey) {
-    window.open(collectionHref(props.collection.id), '_blank', 'noopener')
-    return
-  }
-  emit('open', props.collection.id)
 }
 const view = computed(() => present(props.collection))
 // Only a saved `reposted` relation to the list's own account makes this row a
@@ -93,7 +81,6 @@ const storage = computed(() =>
     @click.capture="select"
     @keydown.space="select"
     @keydown.enter="select"
-    @click="open"
   >
     <!-- The repost line is a row of its own across the whole item, so the
          avatar and the name below it stay the original author's. -->
@@ -128,7 +115,7 @@ const storage = computed(() =>
           />
         </svg>
       </span>
-      <a
+      <AppLink
         :href="view.profileHref"
         class="avatar-link"
         :aria-label="`查看${view.name}的主页`"
@@ -140,10 +127,11 @@ const storage = computed(() =>
           loading="lazy"
         /><span v-else class="avatar initials" aria-hidden="true">{{
           view.name.slice(0, 1)
-        }}</span></a
+        }}</span></AppLink
       >
       <span class="content">
-        <a :href="collectionHref(collection.id)" class="head">
+        <!-- The whole row is this link; see .head::after. -->
+        <AppLink :to="collectionRoute(collection.id)" class="head">
           <span class="identity"
             ><strong class="name">{{ view.name }}</strong
             ><LockIcon v-if="view.locked" class="lock" /><span
@@ -152,7 +140,7 @@ const storage = computed(() =>
               >@{{ view.handle }}</span
             ></span
           ><span class="when">{{ when }}</span>
-        </a>
+        </AppLink>
         <span v-if="preview" class="preview">{{ preview }}</span>
         <span v-if="meta" class="meta">{{ meta }}</span>
         <PostRelations
@@ -167,7 +155,6 @@ const storage = computed(() =>
           :collection="collection"
           :assets="collection.assets || []"
           :show-sensitive="showSensitive"
-          @open="emit('open', collection.id)"
         />
         <span v-if="storage" class="storage">{{ storage }}</span>
       </span>
@@ -186,6 +173,20 @@ const storage = computed(() =>
 .head {
   color: inherit;
   text-decoration: none;
+}
+/* The row's surface opens the collection as a link of its own would: a new
+   tab on Cmd/Ctrl or the middle button, its address in the context menu.
+   What else in the row is a link or a button sits above it. */
+.head::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+.avatar-link,
+.content :deep(.relations a),
+.content :deep(.thumbs-group) {
+  position: relative;
+  z-index: 1;
 }
 .row {
   position: relative;

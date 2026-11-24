@@ -11,6 +11,7 @@ import {
   listsText,
   nodeOpacity,
   nodeSize,
+  nodeURL,
   peerShare,
   shortDay,
   type GraphKind,
@@ -309,4 +310,21 @@ it('says how complete each list is in one line', () => {
     ),
   ).toBe('关注名单未抓取 · 粉丝名单 2025-1-3 部分抓取')
   expect(shortDay('nonsense', now)).toBe('')
+})
+
+it("links an account to its page on its platform, by its key's type", () => {
+  const node = (key: string, username?: string) => ({
+    entity_id: key,
+    key,
+    external_id: key.split('/', 3)[2]!,
+    username,
+  })
+  expect(nodeURL(node('x/x.profile/12', 'jack'))).toBe('https://x.com/jack')
+  expect(nodeURL(node('instagram/instagram.profile/34', 'dog'))).toBe(
+    'https://www.instagram.com/dog/',
+  )
+  // Without a handle, X still knows the account by its id.
+  expect(nodeURL(node('x/x.profile/12'))).toBe('https://x.com/i/user/12')
+  expect(nodeURL(node('instagram/instagram.profile/34'))).toBeUndefined()
+  expect(nodeURL(node('x/%E0%A4%A/1', 'broken'))).toBeUndefined()
 })

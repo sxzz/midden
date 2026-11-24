@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, useId, useTemplateRef, watch } from 'vue'
 import { call, client } from '../api'
+import AppLink from './ui/AppLink.vue'
 /**
  * The 多选 bar's ⋯ menu: comparing the selected accounts' relations, and
  * the removals, each confirmed by its own sheet.
@@ -12,8 +13,8 @@ const props = defineProps<{
   profiles?: string[]
 }>()
 const emit = defineEmits<{
-  /** Compare these accounts, the ones with relation data. */
-  compare: [keys: string[]]
+  /** The link to the comparison navigates: the sheet should close. */
+  navigate: []
   removeMedia: []
   delete: []
   cancel: []
@@ -69,16 +70,16 @@ function backdrop(event: MouseEvent) {
   >
     <div class="group">
       <p :id="titleId" class="title">已选 {{ count }} 项</p>
-      <button
+      <AppLink
         v-if="comparable.length > 1"
-        type="button"
         class="action"
-        @click="emit('compare', comparable)"
+        :to="{ name: 'compare', query: { rel_of: comparable } }"
+        @navigate="emit('navigate')"
       >
         比较关系<span v-if="left" class="detail"
           >{{ comparable.length }} 个账号，{{ left }} 个没有关系数据</span
         >
-      </button>
+      </AppLink>
       <button type="button" class="action" @click="emit('removeMedia')">
         删除媒体
       </button>
@@ -124,7 +125,10 @@ function backdrop(event: MouseEvent) {
   color: var(--subtle);
 }
 .action {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   min-height: 52px;
   font-size: 17px;

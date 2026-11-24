@@ -1,9 +1,9 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef } from 'vue'
-import { useRouter } from 'vue-router'
 import { toast } from '../composables/useToast'
 import MediaRemovalSheet from './MediaRemovalSheet.vue'
 import SelectionMenuSheet from './SelectionMenuSheet.vue'
+import AppLink from './ui/AppLink.vue'
 import UpdateSheet from './UpdateSheet.vue'
 import type { RemovalEffect } from '../api'
 const props = defineProps<{
@@ -23,7 +23,6 @@ const emit = defineEmits<{
   /** Media of the selection was removed (删除媒体): sizes changed. */
   mediaRemoved: []
 }>()
-const router = useRouter()
 const sheet = shallowRef(false)
 const removing = shallowRef(false)
 const menu = shallowRef(false)
@@ -51,15 +50,6 @@ function onStarted(record: string) {
   started.value = { record, count: props.selected.length }
   emit('started')
 }
-function compare(keys: string[]) {
-  menu.value = false
-  void router.push({ name: 'compare', query: { rel_of: keys } })
-}
-function openRecord() {
-  const record = started.value?.record
-  emit('close')
-  if (record) void router.push({ name: 'capture', params: { id: record } })
-}
 </script>
 
 <template>
@@ -67,9 +57,13 @@ function openRecord() {
     <template v-if="started">
       <p class="status" role="status">已开始更新 {{ started.count }} 项</p>
       <button type="button" class="action" @click="emit('close')">关闭</button>
-      <button type="button" class="action strong" @click="openRecord">
+      <AppLink
+        class="action strong"
+        :to="{ name: 'capture', params: { id: started.record } }"
+        @navigate="emit('close')"
+      >
         查看进度
-      </button>
+      </AppLink>
     </template>
     <template v-else>
       <button type="button" class="action" @click="emit('close')">取消</button>
@@ -124,7 +118,7 @@ function openRecord() {
     :open="menu"
     :count="selected.length"
     :profiles="profiles"
-    @compare="compare"
+    @navigate="menu = false"
     @remove-media="openFromMenu('media')"
     @delete="openFromMenu('delete')"
     @cancel="menu = false"
@@ -183,6 +177,8 @@ function openRecord() {
   white-space: nowrap;
 }
 .action {
+  display: grid;
+  place-items: center;
   min-height: 44px;
   padding: 0 8px;
   border-radius: 8px;

@@ -1,14 +1,17 @@
 <script setup vapor lang="ts">
-const emit = defineEmits<{ select: [] }>()
+import AppLink from './AppLink.vue'
+// The viewer's link to the post it shows; `navigate` closes the viewer.
+defineProps<{ href: string }>()
+const emit = defineEmits<{ navigate: [] }>()
 </script>
 
 <template>
-  <button
-    type="button"
+  <AppLink
     class="glass detail"
+    :href="href"
     aria-label="打开收藏详情"
     title="收藏详情"
-    @click="emit('select')"
+    @navigate="emit('navigate')"
   >
     <svg
       class="icon"
@@ -24,7 +27,7 @@ const emit = defineEmits<{ select: [] }>()
       <path d="M7.8 9.2h8.4M7.8 12.8h8.4M7.8 16.4h5" />
     </svg>
     <span class="text">收藏详情</span>
-  </button>
+  </AppLink>
 </template>
 
 <style scoped>

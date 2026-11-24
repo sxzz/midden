@@ -63,7 +63,7 @@ test('select collections and update them as one record', async ({ page }) => {
       relations: false,
     },
   })
-  await page.getByRole('button', { name: '查看进度' }).click()
+  await page.getByRole('link', { name: '查看进度' }).click()
   await expect(page).toHaveURL(/#\/captures\/record$/)
 })
 

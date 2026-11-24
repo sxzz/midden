@@ -4,7 +4,10 @@ import { APIError, type FollowChanges as Changes } from '../api'
 import { asset, mockApi } from '../testing/api'
 import FollowChanges from './FollowChanges.vue'
 const { push } = vi.hoisted(() => ({ push: vi.fn() }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
+vi.mock('vue-router', async () => {
+  const { resolve } = await import('../testing/router')
+  return { useRouter: () => ({ push, resolve }) }
+})
 
 let unmount = () => {}
 afterEach(() => {
@@ -104,9 +107,10 @@ it('lists follow changes under their day, newest first, saying when they happene
 
 it('opens a saved account, and leaves an unsaved one as text', async () => {
   const { el } = await mount(() => changes)
-  const buttons = el.querySelectorAll<HTMLButtonElement>('button.account-row')
-  expect(buttons).toHaveLength(1)
-  buttons[0]!.click()
+  const links = el.querySelectorAll<HTMLAnchorElement>('a.account-row')
+  expect(links).toHaveLength(1)
+  expect(links[0]!.getAttribute('href')).toBe('#/collection/c1')
+  links[0]!.click()
   expect(push).toHaveBeenCalledWith({
     name: 'collection',
     params: { id: 'c1' },

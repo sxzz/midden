@@ -232,16 +232,16 @@ test('updates a profile with its lists and lists its follow changes', async ({
     },
   ])
   // How each part went is on the update's record.
-  await update.getByRole('button', { name: '查看进度' }).click()
+  await update.getByRole('link', { name: '查看进度' }).click()
   await expect(page).toHaveURL(new RegExp(`/captures/${recordId}$`))
   await expect(page.locator('.summary .title')).toHaveText('更新 @owner')
   await expect(
     page.locator('section').filter({ hasText: '账号' }).locator('.profile'),
   ).toContainText('资料 ✓ · 帖子 0 · 关注 ✓ · 粉丝 跳过')
-  await page.getByRole('button', { name: '返回', exact: true }).click()
+  await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
 
-  await page.getByRole('button', { name: '关注变化' }).click()
+  await page.getByRole('link', { name: '关注变化' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/follows$`))
   await expect(page.locator('h1')).toHaveText('关注变化')
   const entry = page.locator('.entry')
@@ -258,6 +258,6 @@ test('updates a profile with its lists and lists its follow changes', async ({
   await expect.poll(() => referers.length).toBeGreaterThan(0)
   expect(referers.every((referer) => !referer)).toBe(true)
 
-  await page.getByRole('button', { name: '返回', exact: true }).click()
+  await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
 })

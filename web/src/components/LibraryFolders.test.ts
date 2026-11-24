@@ -251,7 +251,7 @@ it('updates the open folder from its menu, then links to the progress', async ()
   )
   el.querySelector<HTMLButtonElement>('[aria-label="管理收藏夹"]')!.click()
   await nextTick()
-  expect(button(el, '查看更新进度')).toBeUndefined()
+  expect(el.textContent).not.toContain('查看更新进度')
   button(el, '更新收藏夹').click()
   await vi.waitFor(() =>
     expect(el.querySelector('dialog[open] .head')?.textContent).toBe(
@@ -278,8 +278,12 @@ it('updates the open folder from its menu, then links to the progress', async ()
   // The sheet closes once the update started.
   await vi.waitFor(() => expect(el.querySelector('dialog[open]')).toBeNull())
   el.querySelector<HTMLButtonElement>('[aria-label="管理收藏夹"]')!.click()
-  await vi.waitFor(() => expect(button(el, '查看更新进度')).toBeDefined())
-  button(el, '查看更新进度').click()
+  await vi.waitFor(() => expect(el.textContent).toContain('查看更新进度'))
+  const progress = [...el.querySelectorAll('a')].find(
+    (a) => a.textContent?.trim() === '查看更新进度',
+  )!
+  expect(progress.getAttribute('href')).toBe('#/captures/record')
+  progress.click()
   await vi.waitFor(() =>
     expect(router.currentRoute.value).toMatchObject({
       name: 'capture',

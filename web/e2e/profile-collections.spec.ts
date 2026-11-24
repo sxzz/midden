@@ -218,7 +218,7 @@ test('profile shows related collection rows and total storage, with internal bio
   await related.locator('.row .relation').click()
   await expect(page).toHaveURL(new RegExp(`/collection/${quoteId}$`))
   await expect(page.locator('.post .body')).toHaveText('合成被引用正文')
-  await page.getByRole('button', { name: '返回', exact: true }).click()
+  await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
   await expect(related.locator('.row .preview')).toHaveText(
     '相关帖子也提到 @friend',
@@ -317,7 +317,7 @@ test('profile update links to its record and shows new posts on return', async (
   // The posts, without the button below them.
   const rows = related.locator('.row').filter({ hasNotText: '抓取更早的帖子' })
   await expect(rows).toHaveCount(1)
-  await expect(page.getByRole('button', { name: '查看进度' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: '查看进度' })).toHaveCount(0)
   await page.getByRole('button', { name: '更新', exact: true }).click()
   const sheet = page.getByRole('dialog')
   await expect(sheet.getByLabel('帖子范围')).toHaveValue('latest')
@@ -340,9 +340,9 @@ test('profile update links to its record and shows new posts on return', async (
     },
   ])
   // Progress is not followed here: the page links to the update's record.
-  await page.getByRole('button', { name: '查看进度' }).click()
+  await page.getByRole('link', { name: '查看进度' }).click()
   await expect(page).toHaveURL(new RegExp(`/captures/${recordId}$`))
-  await page.getByRole('button', { name: '返回', exact: true }).click()
+  await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
   await expect(rows).toHaveCount(3)
   await expect(rows.first()).toContainText('新帖子 3')

@@ -64,7 +64,7 @@ test('charts a profile’s counts from its detail and returns to it', async ({
     return route.fulfill({ json })
   })
   await page.goto(`/app/#/collection/${profileId}`)
-  await page.getByRole('button', { name: '统计趋势' }).click()
+  await page.getByRole('link', { name: '统计趋势' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/stats$`))
   await expect(page.locator('h1')).toHaveText('统计趋势')
   await expect(page.locator('.summary')).toHaveText(
@@ -105,7 +105,7 @@ test('charts a profile’s counts from its detail and returns to it', async ({
   await page.locator('.summary').click()
   await expect(followers.locator('.value')).toHaveText('1,300')
 
-  await page.getByRole('button', { name: '返回', exact: true }).click()
+  await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
   await expect(page.locator('h1')).toHaveText('收藏详情')
 })

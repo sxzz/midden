@@ -105,7 +105,7 @@ async function setup(page: Page) {
 }
 
 const backButton = (page: Page) =>
-  page.getByRole('button', { name: '返回', exact: true })
+  page.getByRole('link', { name: '返回', exact: true })
 const scrollTo = (page: Page, top: number) =>
   page.evaluate((y) => {
     window.scrollTo(0, y)
@@ -139,7 +139,7 @@ test('a profile keeps its related order, layout and pages after a nested post', 
   await list.locator('.album button').first().click()
   await page
     .getByRole('dialog')
-    .getByRole('button', { name: '打开收藏详情' })
+    .getByRole('link', { name: '打开收藏详情' })
     .click()
   await expect(page).toHaveURL(new RegExp(`/collection/${relatedIds[0]}$`))
   await expect(page.locator('.post .body')).toHaveText('合成帖子 1')
@@ -166,7 +166,10 @@ test('the list and a profile each return to their own scroll position', async ({
   expect(listScroll).toBeGreaterThan(0)
 
   // Dispatch instead of click: a real click would scroll the row into view.
-  await page.locator('.row', { hasText: '@synthetic' }).dispatchEvent('click')
+  await page
+    .locator('.row', { hasText: '@synthetic' })
+    .locator('.head')
+    .dispatchEvent('click')
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
   await expect.poll(() => scrollY(page)).toBe(0)
   const list = page.getByRole('region', { name: '关联的收藏' })
@@ -176,7 +179,7 @@ test('the list and a profile each return to their own scroll position', async ({
   const profileScroll = await scrollTo(page, 600)
   expect(profileScroll).toBeGreaterThan(0)
 
-  await list.locator('.row').first().dispatchEvent('click')
+  await list.locator('.row .head').first().dispatchEvent('click')
   await expect(page).toHaveURL(new RegExp(`/collection/${relatedIds[4]}$`))
   await expect.poll(() => scrollY(page)).toBe(0)
 

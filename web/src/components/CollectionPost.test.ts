@@ -1,9 +1,13 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createVaporApp, nextTick } from 'vue'
 import { asset, collection, entity } from '../testing/api'
 import CollectionPost from './CollectionPost.vue'
 import CollectionRow from './CollectionRow.vue'
 import type { Collection, Entity } from '../api'
+vi.mock('vue-router', async () => {
+  const { resolve } = await import('../testing/router')
+  return { useRouter: () => ({ push: vi.fn(), resolve }) }
+})
 const fixture = collection({
   id: 'fixture',
   url: 'https://example.test/post',

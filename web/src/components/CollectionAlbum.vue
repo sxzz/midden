@@ -18,7 +18,6 @@ const props = defineProps<{
   next: string
   error: string
 }>()
-const emit = defineEmits<{ open: [id: string] }>()
 const entries = computed(() =>
   props.items.flatMap((collection) =>
     (collection.assets || [])
@@ -117,10 +116,6 @@ function select(key: string) {
     initialId: tile.asset.id,
   }
 }
-function open(id: string) {
-  preview.value = undefined
-  emit('open', id)
-}
 watch(
   () => props.showSensitive,
   () => {
@@ -147,7 +142,6 @@ onDeactivated(() => {
     :collection-ids="preview?.collectionIds"
     :collections="items"
     @close="preview = undefined"
-    @open="open"
   />
 </template>
 

@@ -67,11 +67,11 @@ test('album reuses loaded data and opens the currently previewed collection', as
   await expect(dialog.getByText('2 / 3')).toBeVisible()
   await page.keyboard.press('ArrowRight')
   await expect(dialog.getByText('3 / 3')).toBeVisible()
-  await dialog.getByRole('button', { name: '打开收藏详情' }).click()
+  await dialog.getByRole('link', { name: '打开收藏详情' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${second}$`))
   await expect(dialog).toHaveCount(0)
   await expect(page.locator('body')).not.toHaveCSS('overflow', 'hidden')
-  await page.getByRole('button', { name: '返回', exact: true }).click()
+  await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(
     page.getByRole('button', { name: '相册', exact: true }),
   ).toHaveAttribute('aria-pressed', 'true')
@@ -126,11 +126,11 @@ test('feed preview can open its collection and return to the feed', async ({
     .click()
   await page
     .getByRole('dialog')
-    .getByRole('button', { name: '打开收藏详情' })
+    .getByRole('link', { name: '打开收藏详情' })
     .click()
   await expect(page).toHaveURL(new RegExp(`/collection/${first}$`))
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  await page.getByRole('button', { name: '返回', exact: true }).click()
+  await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(
     page.getByRole('button', { name: '信息流', exact: true }),
   ).toHaveAttribute('aria-pressed', 'true')

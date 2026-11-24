@@ -8,9 +8,10 @@ import MediaGallery from './MediaGallery.vue'
 import MediaThumbs from './MediaThumbs.vue'
 import type { Collection } from '../api'
 
-vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: vi.fn(), resolve: () => ({ href: '#/' }) }),
-}))
+vi.mock('vue-router', async () => {
+  const { resolve } = await import('../testing/router')
+  return { useRouter: () => ({ push: vi.fn(), resolve }) }
+})
 
 beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({
@@ -122,18 +123,15 @@ describe('removed media', () => {
     expect(el.textContent).toContain('下次更新时重新下载')
   })
 
-  it('stays in list thumbnails, opening the collection', async () => {
-    const open = vi.fn()
+  it('stays in list thumbnails, linking to the collection', async () => {
     const el = mountVue(MediaThumbs, {
       assets: [removedVideo],
-      onOpen: open,
+      collectionId: 'post',
     })
-    const tile = el.querySelector<HTMLButtonElement>('.tile')!
+    const tile = el.querySelector<HTMLAnchorElement>('a.tile')!
     expect(tile.getAttribute('aria-label')).toBe('视频已移除，查看收藏详情')
     expect(tile.textContent).toContain('已移除')
-    tile.click()
-    await nextTick()
-    expect(open).toHaveBeenCalled()
+    expect(tile.getAttribute('href')).toBe('#/collection/post')
   })
 
   it('removes one item from the viewer (删除此媒体)', async () => {

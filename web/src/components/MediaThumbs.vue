@@ -2,8 +2,10 @@
 import { computed, shallowRef, watch } from 'vue'
 import { useSensitiveMedia } from '../composables/useSensitiveMedia'
 import { isRemoved, readyMedia, removedLabel } from '../presentation'
+import { collectionHref } from '../share'
 import MediaPreview from './MediaPreview.vue'
 import MediaViewer from './MediaViewer.vue'
+import AppLink from './ui/AppLink.vue'
 import EyeIcon from './ui/EyeIcon.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 import type { Asset, Collection } from '../api'
@@ -15,7 +17,6 @@ const props = defineProps<{
   showSensitive?: boolean
   collectionId?: string
 }>()
-const emit = defineEmits<{ open: [] }>()
 const selected = shallowRef<Asset>()
 const singleRatio = shallowRef(1)
 function measure(event: Event) {
@@ -53,19 +54,16 @@ const previews = computed(() =>
       asset.mime?.startsWith('image/') || asset.mime?.startsWith('video/'),
   ),
 )
-function openCollection() {
-  selected.value = undefined
-  emit('open')
-}
+const viewable = (asset: Asset) =>
+  !isRemoved(asset) &&
+  (!!asset.mime?.startsWith('image/') || !!asset.mime?.startsWith('video/'))
+/** A removed media item or a file has nothing to view: it links to its post. */
+const tileLink = (asset: Asset) =>
+  props.collectionId && !viewable(asset)
+    ? collectionHref(props.collectionId)
+    : undefined
 function view(asset: Asset) {
-  if (isRemoved(asset)) {
-    emit('open')
-    return
-  }
-  if (!asset.mime?.startsWith('image/') && !asset.mime?.startsWith('video/')) {
-    emit('open')
-    return
-  }
+  if (!viewable(asset)) return
   // Uncovering and looking are two taps, here as in the detail gallery.
   if (hidden(asset)) reveal(asset.id)
   else selected.value = asset
@@ -101,10 +99,12 @@ const overflow = computed(() => media.value.length - tiles.value.length)
   >
     <!-- While one veil covers the group, nothing beneath it may be tabbed to. -->
     <span class="thumbs" :inert="covered || undefined">
-      <button
+      <component
+        :is="tileLink(asset) ? AppLink : 'button'"
         v-for="(asset, index) in tiles"
         :key="asset.id"
-        type="button"
+        :type="tileLink(asset) ? undefined : 'button'"
+        :href="tileLink(asset)"
         class="tile"
         :aria-label="
           isRemoved(asset)
@@ -147,7 +147,7 @@ const overflow = computed(() => media.value.length - tiles.value.length)
         <span v-if="overflow && index === tiles.length - 1" class="more"
           >+{{ overflow }}</span
         >
-      </button>
+      </component>
     </span>
     <button
       v-if="covered"
@@ -165,7 +165,6 @@ const overflow = computed(() => media.value.length - tiles.value.length)
     :initial-id="selected.id"
     :collection-id="collectionId"
     :collection="collection"
-    @open="openCollection"
     @close="selected = undefined"
   />
 </template>

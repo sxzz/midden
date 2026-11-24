@@ -202,7 +202,7 @@ test('compares accounts: who follows whom, shared accounts by subset, the thresh
   await expect(page.locator('.surface canvas').first()).toBeVisible()
 
   // The library with the same filter, ready to save as a folder.
-  await page.getByRole('button', { name: '在收藏库中查看' }).click()
+  await page.getByRole('link', { name: '在收藏库中查看' }).click()
   await expect
     .poll(() => {
       const q = listed.at(-1)
