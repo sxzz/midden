@@ -25,7 +25,11 @@ async function loadTags() {
 }
 onMounted(loadTags)
 onActivated(loadTags)
-const props = defineProps<{ query: string; hideAuthors?: boolean }>()
+const props = defineProps<{
+  query: string
+  /** One account's own list: its platform and author are given. */
+  withinProfile?: boolean
+}>()
 const emit = defineEmits<{ search: [query: string] }>()
 function read(query: string) {
   const params = new URLSearchParams(query)
@@ -199,11 +203,13 @@ function clear() {
   settled = build()
   emit('search', q.toString())
 }
-/** The tab and the layout are not filters: they alone leave nothing to clear. */
+/** The tab, the layout and the account a list belongs to are not filters:
+    they alone leave nothing to clear. */
 const clearable = computed(() => {
   const q = new URLSearchParams(props.query)
   q.delete('entity_type')
   q.delete('layout')
+  q.delete('related_to')
   return !!form.platform || q.size > 0
 })
 // Every discrete control applies itself; only the keyword box waits for Enter.
@@ -245,7 +251,7 @@ const authorsLoading = shallowRef(false)
 const authorsLoaded = shallowRef(false)
 /** Names of every author seen, so a selection reads by name. */
 const authorNames = shallowRef<Record<string, string>>({})
-const wantsAuthors = () => posts.value && !props.hideAuthors
+const wantsAuthors = () => posts.value && !props.withinProfile
 const controller = new AbortController()
 onUnmounted(() => controller.abort())
 function remember(items: Author[]) {
@@ -420,7 +426,7 @@ const tagFilter = computed({
          word or two of it. -->
     <p v-if="active" class="filter-summary">{{ active }}</p>
     <div v-show="open" class="panel">
-      <label class="option">
+      <label v-if="!withinProfile" class="option">
         平台<span class="select"
           ><select v-model="form.platform" aria-label="平台">
             <option value="">全部</option>
@@ -447,7 +453,7 @@ const tagFilter = computed({
       </div>
       <template v-if="posts">
         <MultiSelect
-          v-if="!hideAuthors"
+          v-if="!withinProfile"
           v-model="form.authors"
           label="作者"
           remote
@@ -459,7 +465,7 @@ const tagFilter = computed({
           @search="searchAuthors"
           @more="loadAuthors(true)"
         />
-        <p v-if="!hideAuthors && authorError" class="hint" role="alert">
+        <p v-if="!withinProfile && authorError" class="hint" role="alert">
           {{ authorError }}
           <button type="button" class="retry" @click="loadAuthors()">
             重试

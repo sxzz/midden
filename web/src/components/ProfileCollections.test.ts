@@ -70,7 +70,8 @@ it('shows related posts using the library and the total across all pages', async
   expect(query.get('related_to')).toBe('profile')
   expect(query.get('entity_type')).toBe('x.post')
   expect(query.get('sort')).toBe('published')
-  expect(query.get('order')).toBe('desc')
+  // Newest first is the server's default, so the request leaves it out.
+  expect(query.get('order')).toBeNull()
   expect(el.querySelector('form')).not.toBeNull()
   expect(el.querySelector('summary[aria-label="作者"]')).toBeNull()
   el.querySelector<HTMLButtonElement>('[aria-label="相册"]')!.click()
@@ -103,7 +104,7 @@ it('restarts published-time pagination when changing order and preserves the sel
     if (path === '/tags') return []
     const query = new URL(String(path), 'https://example.test').searchParams
     queries.push(query)
-    const order = query.get('order')
+    const order = query.get('order') ?? 'desc'
     const second = query.has('cursor')
     return {
       items: [
@@ -137,7 +138,7 @@ it('restarts published-time pagination when changing order and preserves the sel
   await vi.waitFor(() => expect(el.querySelectorAll('.row')).toHaveLength(2))
   expect(queries[1]?.get('cursor')).toBe('desc-next')
   expect(queries[1]?.get('sort')).toBe('published')
-  expect(queries[1]?.get('order')).toBe('desc')
+  expect(queries[1]?.get('order')).toBeNull()
   el.querySelector<HTMLButtonElement>('[aria-label="相册"]')!.click()
   await nextTick()
   expect(queries).toHaveLength(2)

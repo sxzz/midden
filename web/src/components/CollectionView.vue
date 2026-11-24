@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { computed, shallowRef } from 'vue'
+import { computed, shallowRef, useSlots } from 'vue'
 import {
   groupCollections,
   listSort,
@@ -25,11 +25,14 @@ const props = defineProps<{
   next: string
   usage?: Usage
   hideFilters?: boolean
-  hideAuthors?: boolean
+  /** One account's own list: no author or platform to filter by. */
+  withinProfile?: boolean
   enlargedMedia?: boolean
   /** Display name of the account this list belongs to, for its reposts. */
   repostedBy?: string
 }>()
+/** `actions`: more buttons for the toolbar, styled like 批量更新. */
+const slots = useSlots()
 const emit = defineEmits<{
   search: [query: string]
   open: [id: string]
@@ -97,10 +100,14 @@ const storage = computed(() =>
   <CollectionFilters
     v-if="!hideFilters"
     :query="query"
-    :hide-authors="hideAuthors"
+    :within-profile="withinProfile"
     @search="(value) => emit('search', value)"
   />
-  <div v-if="(!selecting && items.length) || albums" class="layout-bar">
+  <div
+    v-if="(!selecting && items.length) || albums || slots.actions"
+    class="layout-bar"
+  >
+    <slot name="actions" />
     <button
       v-if="!selecting && items.length"
       type="button"
@@ -122,7 +129,7 @@ const storage = computed(() =>
   <CollectionAlbum
     v-if="layout === 'album'"
     :items="
-      hideAuthors
+      withinProfile
         ? items.filter(
             (item) =>
               !item.relation_types?.length ||
@@ -184,9 +191,10 @@ const storage = computed(() =>
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  margin: 0 var(--gutter) 16px;
+  margin: 12px var(--gutter) 16px;
 }
-.batch {
+.batch,
+.layout-bar :slotted(button) {
   min-height: 34px;
   padding: 0 12px;
   border-radius: 999px;
@@ -194,7 +202,11 @@ const storage = computed(() =>
   color: var(--link);
   background: var(--fill);
 }
-.batch:active {
+.layout-bar :slotted(button:disabled) {
+  color: var(--subtle);
+}
+.batch:active,
+.layout-bar :slotted(button:active:not(:disabled)) {
   opacity: 0.7;
 }
 .banner {

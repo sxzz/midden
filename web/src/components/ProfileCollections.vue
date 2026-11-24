@@ -15,12 +15,18 @@ const props = defineProps<{
   repostedBy?: string
 }>()
 const router = useRouter()
-const filters = shallowRef('sort=published&order=desc')
+// Newest posts first is already the default order of a list of posts.
+const filters = shallowRef('')
 const query = computed(() => {
   const q = new URLSearchParams(filters.value)
   q.set('related_to', props.id)
-  if (!q.has('entity_type'))
-    q.set('entity_type', `${props.platform || 'x'}.post`)
+  return q.toString()
+})
+// The profile's own platform is a given of the request, not a filter the
+// reader chose: kept out of `query`, the filters neither show nor clear it.
+const request = computed(() => {
+  const q = new URLSearchParams(query.value)
+  q.set('entity_type', `${props.platform || 'x'}.post`)
   return q.toString()
 })
 const {
@@ -35,13 +41,13 @@ const {
   more,
 } = useCollection()
 const requestQuery = computed(() => {
-  const q = new URLSearchParams(query.value)
+  const q = new URLSearchParams(request.value)
   q.delete('layout')
   return q.toString()
 })
 watch(
   () => requestQuery.value,
-  () => load(query.value),
+  () => load(request.value),
   { immediate: true },
 )
 // A refreshed profile keeps its list on screen while the new posts load in.
@@ -65,16 +71,6 @@ function open(id: string) {
     <p v-if="totalStorageBytes !== undefined" class="storage">
       帖子占用总量 {{ storageSize(totalStorageBytes) }}
     </p>
-    <div class="sort-control">
-      <button
-        type="button"
-        class="soft-refresh"
-        :disabled="loading || refreshing"
-        @click="refresh"
-      >
-        {{ refreshing ? '刷新中…' : '刷新' }}
-      </button>
-    </div>
     <CollectionView
       :items="items"
       :query="query"
@@ -83,13 +79,23 @@ function open(id: string) {
       :next="next"
       :show-sensitive="showSensitive"
       :reposted-by="repostedBy"
-      hide-authors
+      within-profile
       enlarged-media
       @search="search"
       @open="open"
       @more="more"
-      @retry="load(query)"
-    />
+      @retry="load(request)"
+    >
+      <template #actions>
+        <button
+          type="button"
+          :disabled="loading || refreshing"
+          @click="refresh"
+        >
+          {{ refreshing ? '刷新中…' : '刷新' }}
+        </button>
+      </template>
+    </CollectionView>
   </section>
 </template>
 
@@ -101,29 +107,6 @@ function open(id: string) {
   margin: 0 0 8px;
   padding: 0 calc(var(--gutter) + 4px);
   font-size: 17px;
-}
-.sort-control {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 calc(var(--gutter) + 4px) 8px;
-  color: var(--subtle);
-  font-size: 13px;
-}
-.sort-control button {
-  min-height: 32px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--fill);
-  color: var(--text);
-  font-size: inherit;
-}
-.sort-control .soft-refresh {
-  margin-left: auto;
-  color: var(--link);
-}
-.sort-control .soft-refresh:disabled {
-  color: var(--subtle);
 }
 .storage {
   margin: 0 0 12px;
