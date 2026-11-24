@@ -9,6 +9,7 @@ import {
 } from '#capture/batches.ts'
 import {
   captureURL,
+  captureWaits,
   collectionProgress,
   librarySize,
   listRecords,
@@ -77,6 +78,7 @@ function recordJson(r: CaptureRecord) {
     platform: r.platform,
     kind: r.kind,
     state: r.state,
+    ...(r.waiting ? { waiting: r.waiting } : {}),
     ...(r.error ? { error: r.error } : {}),
     media: r.media,
     created_at: r.createdAt.toISOString(),
@@ -120,6 +122,7 @@ function memberJson(m: CaptureMember) {
     saved: m.saved,
     url: m.url,
     state: m.state,
+    ...(m.waiting ? { waiting: m.waiting } : {}),
     ...(m.error ? { error: m.error } : {}),
     reasons: m.reasons,
     ...(m.gone ? { gone: true } : {}),
@@ -157,10 +160,15 @@ export function jobJson(ctx: AccountsContext, job: Pick<Job, 'id'>) {
       }
     }
   }
+  const waiting =
+    capture.state === 'queued'
+      ? captureWaits(ctx.db, [capture.id]).get(capture.id)
+      : undefined
   return {
     id: capture.id,
     collection_id: capture.collectionId,
     state: capture.state,
+    ...(waiting ? { waiting } : {}),
     ...(capture.error ? { error: capture.error } : {}),
     ...(members ? { members } : {}),
   }

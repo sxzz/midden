@@ -8,7 +8,12 @@ import {
 } from '#accounts/accounts.ts'
 import { safeError } from '#capture/errors.ts'
 import { sha256Hex } from '#capture/json.ts'
-import { captureURL, recapture, recordPage } from '#capture/records.ts'
+import {
+  captureURL,
+  captureWaits,
+  recapture,
+  recordPage,
+} from '#capture/records.ts'
 import { stopCollection } from '#capture/related.ts'
 import { captures, connections, library } from '#db/schema.ts'
 import { AppError, isAppError } from '#errors.ts'
@@ -180,7 +185,14 @@ function run(c: CommandContext, request: Request): Reply {
         keyboard.push([
           { text: '查看收藏', callback_data: `/show ${capture.collectionId}` },
         ])
-      return { text: `${jobState(capture.state)}\n${capture.error}`, keyboard }
+      const waiting =
+        capture.state === 'queued'
+          ? captureWaits(ctx.db, [capture.id]).get(capture.id)
+          : undefined
+      return {
+        text: `${jobState(capture.state, waiting)}\n${capture.error}`,
+        keyboard,
+      }
     }
     case 'retry':
     case 'refresh': {

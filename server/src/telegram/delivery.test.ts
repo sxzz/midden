@@ -107,6 +107,8 @@ describe('telegram delivery', () => {
       request({ links: ['https://fake.test/p/1'] }),
     )
     expect(reply).toEqual({})
+    // The queue claims the capture job once the submitting task yields.
+    await Promise.resolve()
     await worker.runDue()
     expect(calls.map((c) => c.method)).toEqual(['sendMessage'])
     expect(calls[0]!.args[1]).toBe('正在采集…\nhttps://fake.test/p/1')

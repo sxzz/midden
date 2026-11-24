@@ -31,12 +31,17 @@ const detail = (members: Record<string, number | boolean>) => ({
   media_items: [],
   reasons: [],
 })
-const member = (id: string, state = 'complete') => ({
+const member = (
+  id: string,
+  state = 'complete',
+  waiting?: 'queue' | 'retry',
+) => ({
   job_id: id,
   collection_id: id,
   saved: true,
   url: `https://x.com/fixture/status/${id}`,
   state,
+  ...(waiting ? { waiting } : {}),
   reasons: [],
   gone: false,
   created_at: '2026-10-14T08:00:01Z',
@@ -151,19 +156,27 @@ it('lists running posts until they finish, then leaves their tab', async () => {
     ...detail({ complete: 1, partial: 0, failed: 0, added: 1, updated: 0 }),
     done: false,
   }
-  running.members = { ...running.members, pending: 2, done: false }
+  running.members = { ...running.members, pending: 3, done: false }
   const record = { current: running }
   const { el, queried, tabs } = mount(() => record.current, {
     added: [member('1')],
-    pending: [member('2', 'downloading'), member('3', 'queued')],
+    pending: [
+      member('2', 'downloading'),
+      member('3', 'queued'),
+      member('4', 'queued', 'queue'),
+    ],
   })
   await vi.waitFor(() => expect(el.textContent).toContain('status/1'))
   expect(tabs()).toEqual([
     { name: '新增记录 1', selected: true },
-    { name: '正在采集 2', selected: false },
+    { name: '进行中 3', selected: false },
   ])
   ;[...el.querySelectorAll<HTMLElement>('[role=tab]')].at(-1)!.click()
-  await vi.waitFor(() => expect(el.textContent).toContain('status/3'))
+  await vi.waitFor(() => expect(el.textContent).toContain('status/4'))
+  // A member being fetched is not waiting in the queue.
+  expect(
+    [...el.querySelectorAll('.line-trailing')].map((s) => s.textContent),
+  ).toEqual(['正在保存媒体', '正在采集', '排队中'])
 
   // One finishes as a new post, one fails: the running tab goes and the
   // first tab left opens.

@@ -55,7 +55,7 @@ interface FilterOption {
 const filter = shallowRef<Filter>()
 /**
  * Only tabs with posts are shown, so an empty one says nothing at all.
- * Running members are only under 正在采集, shown while there are any; once
+ * Running members are only under 进行中, shown while there are any; once
  * finished they move to the tab of their outcome. New and updated count
  * finished members only, like the record's counts. A record with members
  * from before new and updated were told apart lists them all instead.
@@ -90,7 +90,7 @@ const filters = computed((): FilterOption[] => {
     count: m.failed + m.partial,
   })
   // Last, so the other tabs stay put when it goes away.
-  options.push({ value: 'pending', label: '正在采集', count: m.pending })
+  options.push({ value: 'pending', label: '进行中', count: m.pending })
   return options.filter((option) => option.count)
 })
 /**
@@ -511,9 +511,11 @@ function openCollection(id: string, event?: MouseEvent) {
                 >{{ reason }}</small
               ></span
             >
-            <span class="line-trailing" :class="stateStatus(m.state).tone">{{
-              stateStatus(m.state).label
-            }}</span>
+            <span
+              class="line-trailing"
+              :class="stateStatus(m.state, m.waiting).tone"
+              >{{ stateStatus(m.state, m.waiting).label }}</span
+            >
           </button>
           <button
             v-if="m.state === 'failed' && !m.gone && record.done"

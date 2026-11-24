@@ -1,6 +1,10 @@
 import { and, asc, eq, lte } from 'drizzle-orm'
 import { GrammyError, type Api } from 'grammy'
-import { collectionProgress, collectionReasons } from '#capture/records.ts'
+import {
+  captureWaits,
+  collectionProgress,
+  collectionReasons,
+} from '#capture/records.ts'
 import { newId } from '#db/id.ts'
 import {
   captures,
@@ -15,6 +19,7 @@ import {
   groupKeyboard,
   messageAssets,
   progressMessage,
+  waitLabel,
   webRoute,
   type Keyboard,
   type Rendered,
@@ -343,7 +348,10 @@ export class DeliveryWorker {
       return !progress.done
     }
     if (capture.state === 'queued' || capture.state === 'downloading') {
-      const heading = capture.state === 'queued' ? '正在采集…' : '正在保存媒体…'
+      const heading =
+        capture.state === 'queued'
+          ? `${waitLabel(captureWaits(db, [capture.id]).get(capture.id))}…`
+          : '正在保存媒体…'
       const keyboard: Keyboard = [
         [{ text: '查看状态', callback_data: `/status ${capture.id}` }],
       ]

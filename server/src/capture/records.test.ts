@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer'
-import { afterEach, describe, expect, test } from 'vitest'
-import { library } from '#db/schema.ts'
+import { and, eq } from 'drizzle-orm'
+import { afterEach, describe, expect, test, vi } from 'vitest'
+import { jobs, library } from '#db/schema.ts'
 import { status } from '#platforms/rpc.ts'
 import { testContext } from '#testing/context.ts'
 import { FakeFailure, fakePlatform, postGraph } from '#testing/fake-platform.ts'
@@ -231,5 +232,116 @@ describe('capture records', () => {
     expect(listRecords(c.db).items[0]!.saved).toBe(true)
     await c.queue.drain()
     expect(listRecords(c.db).items[0]!.added).toBe(true)
+  })
+})
+
+describe('waiting captures', () => {
+  /** Posts wait for `release`; post `flaky` hits a rate limit first. */
+  function gated() {
+    const gate = Promise.withResolvers<void>()
+    let limited = false
+    const c = testContext({
+      platforms: [
+        fakePlatform({
+          current: async (req) => {
+            if (req.kind !== 'post')
+              return {
+                text: 'profile',
+                relatedTargets: [1, 2, 3, 4, 5, 6].map(target),
+                maxBatchSize: 1000,
+              }
+            if (req.externalId === 'flaky' && !limited) {
+              limited = true
+              throw new FakeFailure(status.UNAVAILABLE, 'slow down', {
+                'retry-after': '30',
+              })
+            }
+            await gate.promise
+            return { text: 'post', graph: postGraph(req.externalId, {}) }
+          },
+        }),
+      ],
+      handlers: captureHandlers,
+    })
+    c.queue.start()
+    ctx = c
+    const running = () =>
+      c.db
+        .select()
+        .from(jobs)
+        .where(and(eq(jobs.type, 'capture'), eq(jobs.state, 'running')))
+        .all().length
+    return { c, release: () => gate.resolve(), running }
+  }
+
+  test('a capture being fetched is not waiting; one without a slot is', async () => {
+    const { c, release, running } = gated()
+    try {
+      const first = submit(c, { url: 'https://fake.test/p/1' })
+      await vi.waitFor(() => expect(running()).toBe(1))
+      let record = listRecords(c.db).items[0]!
+      // Still queued until the fetch is stored, but not waiting for anything.
+      expect(record).toMatchObject({ jobId: first.id, state: 'queued' })
+      expect(record.waiting).toBeUndefined()
+
+      for (let i = 2; i <= 5; i++)
+        submit(c, { url: `https://fake.test/p/${i}` })
+      await vi.waitFor(() => expect(running()).toBe(4))
+      const items = listRecords(c.db).items
+      expect(items.map((r) => [r.url, r.waiting])).toEqual([
+        ['https://fake.test/p/5', 'queue'],
+        ['https://fake.test/p/4', undefined],
+        ['https://fake.test/p/3', undefined],
+        ['https://fake.test/p/2', undefined],
+        ['https://fake.test/p/1', undefined],
+      ])
+      expect(recordDetail(c.db, items[0]!.id).waiting).toBe('queue')
+
+      release()
+      await c.queue.drain()
+      record = listRecords(c.db).items[0]!
+      expect(record.state).toBe('complete')
+      expect(record.waiting).toBeUndefined()
+    } finally {
+      release()
+    }
+  })
+
+  test('a capture backing off after a failure waits for its retry', async () => {
+    const { c, release } = gated()
+    try {
+      const job = submit(c, { url: 'https://fake.test/p/flaky' })
+      await vi.waitFor(() =>
+        expect(
+          c.db.select().from(jobs).where(eq(jobs.ref, job.id)).get(),
+        ).toMatchObject({ state: 'available', attempt: 1 }),
+      )
+      expect(listRecords(c.db).items[0]).toMatchObject({
+        state: 'queued',
+        waiting: 'retry',
+      })
+    } finally {
+      release()
+    }
+  })
+
+  test('members tell waiting from being fetched', async () => {
+    const { c, release, running } = gated()
+    try {
+      submit(c, { url: 'https://fake.test/u/someone' })
+      await vi.waitFor(() => {
+        expect(running()).toBe(4)
+        expect(
+          c.db.select().from(jobs).where(eq(jobs.type, 'capture')).all(),
+        ).toHaveLength(6)
+      })
+      const record = listRecords(c.db).items[0]!
+      const members = recordMembers(c.db, record.id, 'pending').items
+      expect(members).toHaveLength(6)
+      expect(members.every((m) => m.state === 'queued')).toBe(true)
+      expect(members.filter((m) => m.waiting === 'queue')).toHaveLength(2)
+    } finally {
+      release()
+    }
   })
 })

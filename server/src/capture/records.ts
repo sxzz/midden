@@ -7,6 +7,7 @@ import {
   captureRunning,
   captures,
   collections,
+  jobs,
   library,
   revisions,
   submissions,
@@ -377,6 +378,45 @@ export function collectionReasons(db: Executor, pages: Page[]) {
   )
 }
 
+// --- Waiting --------------------------------------------------------------
+
+/** Why a queued capture is not being fetched yet. */
+export type CaptureWait = 'queue' | 'retry'
+
+/**
+ * Queued captures whose capture job is not running: it waits for a free slot
+ * in the capture queue (or for its account to be free), or for the backoff
+ * after a failed attempt. A queued capture missing here is being fetched:
+ * the capture state stays `queued` until the fetch is stored.
+ */
+export function captureWaits(
+  db: Executor,
+  captureIds: string[],
+): Map<string, CaptureWait> {
+  if (!captureIds.length) return new Map()
+  return new Map(
+    db
+      .select({ ref: jobs.ref, attempt: jobs.attempt })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.type, 'capture'),
+          eq(jobs.state, 'available'),
+          inJson(jobs.ref, captureIds),
+        ),
+      )
+      .all()
+      // A busy account gives its attempt back, so only failures count here.
+      .map((job): [string, CaptureWait] => [
+        job.ref,
+        job.attempt > 0 ? 'retry' : 'queue',
+      ]),
+  )
+}
+
+const queuedIds = (list: Capture[]) =>
+  list.filter((c) => c.state === 'queued').map((c) => c.id)
+
 // --- Records --------------------------------------------------------------
 
 export interface CaptureRecord {
@@ -389,6 +429,8 @@ export interface CaptureRecord {
   platform: string
   kind: string
   state: string
+  /** Set while the capture is queued and not being fetched yet. */
+  waiting?: CaptureWait
   error: string
   createdAt: Date
   finishedAt: Date | null
@@ -481,6 +523,7 @@ function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
       )
       .map((row) => row.submission.id),
   )
+  const waits = captureWaits(db, queuedIds(rows.map((row) => row.capture)))
   return rows.map(({ submission, capture, collection, saved }) => {
     const record: CaptureRecord = {
       id: submission.id,
@@ -498,6 +541,8 @@ function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
       media: media.get(capture.id) ?? { total: 0, ready: 0, failed: 0 },
       done: ['complete', 'partial', 'failed'].includes(capture.state),
     }
+    const waiting = waits.get(capture.id)
+    if (waiting) record.waiting = waiting
     const progress = progresses.get(submission.id)
     if (progress) {
       const {
@@ -637,6 +682,7 @@ export interface CaptureMember {
   saved: boolean
   url: string
   state: string
+  waiting?: CaptureWait
   error: string
   createdAt: Date
   gone: boolean
@@ -719,14 +765,17 @@ export function recordMembers(
       WHERE c.id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
         AND c.state = 'partial'`))
       reasons.get(row.capture)!.add(row.reason)
+  const waits = captureWaits(db, queuedIds(page))
   const items = page.map((capture): CaptureMember => {
     const collection = targets.get(capture.collectionId)!
+    const waiting = waits.get(capture.id)
     return {
       jobId: capture.id,
       collectionId: collection.id,
       saved: collection.saved,
       url: collection.url,
       state: capture.state,
+      ...(waiting ? { waiting } : {}),
       error: capture.error,
       createdAt: capture.createdAt,
       gone: collection.sourceState !== null,

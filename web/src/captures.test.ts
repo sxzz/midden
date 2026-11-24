@@ -55,6 +55,10 @@ test('a post reports its own capture and media', () => {
   expect(recordProgress(downloading)).toBe(0.5)
   expect(recordCounts(downloading)).toBe('媒体 1/4 · 失败 1')
   expect(recordProgress(record({}))).toBeUndefined()
+  // Queued until the fetch is stored, so only `waiting` means it waits.
+  expect(recordStatus(record({})).label).toBe('正在采集')
+  expect(recordStatus(record({ waiting: 'queue' })).label).toBe('排队中')
+  expect(recordStatus(record({ waiting: 'retry' })).label).toBe('等待重试')
   expect(recordStatus(record({ state: 'failed', done: true }))).toEqual({
     label: '失败',
     tone: 'failed',

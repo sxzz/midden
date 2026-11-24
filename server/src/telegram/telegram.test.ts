@@ -3,6 +3,7 @@ import { deliveryParts } from './parts.ts'
 import {
   collectionMessage,
   groupKeyboard,
+  jobState,
   progressMessage,
   webRoute,
 } from './presentation.ts'
@@ -145,6 +146,13 @@ describe('presentation', () => {
         [{ text: 'show', callback_data: '/show x' }],
       ]),
     ).toEqual([[{ text: 'show', callback_data: '/show x' }]])
+  })
+
+  test('a queued capture is being fetched unless its job waits', () => {
+    expect(jobState('queued')).toBe('正在采集')
+    expect(jobState('queued', 'queue')).toBe('排队中')
+    expect(jobState('queued', 'retry')).toBe('等待重试')
+    expect(jobState('downloading', 'queue')).toBe('正在保存媒体')
   })
 
   test('progress controls follow the collection state', () => {

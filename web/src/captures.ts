@@ -42,22 +42,33 @@ export interface RecordStatus {
   label: string
   tone: Tone
 }
+// A queued capture is being fetched unless the server says it waits.
 const stateLabels: Record<CaptureRecord['state'], RecordStatus> = {
-  queued: { label: '排队中', tone: 'active' },
+  queued: { label: '正在采集', tone: 'active' },
   downloading: { label: '正在保存媒体', tone: 'active' },
   complete: { label: '已完成', tone: 'ok' },
   partial: { label: '部分缺失', tone: 'warn' },
   failed: { label: '失败', tone: 'failed' },
 }
+const waitLabels: Record<NonNullable<CaptureRecord['waiting']>, string> = {
+  queue: '排队中',
+  retry: '等待重试',
+}
 /** The state of a single capture, such as one member of a collection. */
-export const stateStatus = (state: CaptureRecord['state']): RecordStatus =>
-  stateLabels[state] ?? { label: state, tone: 'active' }
+export function stateStatus(
+  state: CaptureRecord['state'],
+  waiting?: CaptureRecord['waiting'],
+): RecordStatus {
+  if (state === 'queued' && waiting)
+    return { label: waitLabels[waiting] ?? '排队中', tone: 'active' }
+  return stateLabels[state] ?? { label: state, tone: 'active' }
+}
 
 /** The state of a whole record, members included. */
 export function recordStatus(r: CaptureRecord): RecordStatus {
   const m = r.members
   if (!m || r.state === 'failed' || r.state === 'queued')
-    return stateStatus(r.state)
+    return stateStatus(r.state, r.waiting)
   if (!r.done) return { label: '正在保存帖子', tone: 'active' }
   if (r.stopped) return { label: '已中止', tone: 'warn' }
   return m.failed + m.partial > 0 || r.state === 'partial'

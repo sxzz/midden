@@ -86,10 +86,16 @@ export function webRoute(
 
 // --- Texts -----------------------------------------------------------------
 
-export function jobState(state: string): string {
+/** What a queued capture waits for: see `captureWaits`. */
+export function waitLabel(waiting: string | undefined): string {
+  if (waiting === 'retry') return '等待重试'
+  return waiting ? '排队中' : '正在采集'
+}
+
+export function jobState(state: string, waiting?: string): string {
   switch (state) {
     case 'queued':
-      return '正在采集'
+      return waitLabel(waiting)
     case 'downloading':
       return '正在保存媒体'
     case 'complete':
