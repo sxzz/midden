@@ -54,6 +54,16 @@ const MAX_SOURCE_URL = 8192
 // Captures using one account run one at a time, to stay gentle with it.
 const busyConnections = new Set<string>()
 
+/**
+ * Take an account for one request at a time; snoozes the job while another
+ * holds it. Returns the release.
+ */
+export function holdConnection(id: string): () => void {
+  if (busyConnections.has(id)) throw new SnoozeError(1000)
+  busyConnections.add(id)
+  return () => busyConnections.delete(id)
+}
+
 /** Fetch a queued capture and stage its result for download and finalize. */
 export async function runCapture(ctx: CaptureContext, job: Job): Promise<void> {
   const { db } = ctx
@@ -93,10 +103,10 @@ export async function runCapture(ctx: CaptureContext, job: Job): Promise<void> {
   const deferred =
     !!capture.connectionId && supports(policy, 'credential.deferred')
   let holding = false
+  let release = () => {}
   const take = () => {
     if (!capture.connectionId || holding) return
-    if (busyConnections.has(capture.connectionId)) throw new SnoozeError(1000)
-    busyConnections.add(capture.connectionId)
+    release = holdConnection(capture.connectionId)
     holding = true
   }
   try {
@@ -167,8 +177,29 @@ export async function runCapture(ctx: CaptureContext, job: Job): Promise<void> {
     })
     commit(ctx, capture.id, revision, response, staged)
   } finally {
-    if (holding) busyConnections.delete(capture.connectionId!)
+    if (holding) release()
   }
+}
+
+/** A rejected session needs signing in again before it is used. */
+export function markReauth(
+  ctx: CaptureContext,
+  connectionId: string,
+  revision: number | null,
+  error: unknown,
+): void {
+  if (!isProviderFailure(error) || error.code !== status.UNAUTHENTICATED) return
+  ctx.db
+    .update(connections)
+    .set({ state: 'reauth_required' })
+    .where(
+      and(
+        eq(connections.id, connectionId),
+        eq(connections.revision, revision ?? -1),
+        eq(connections.state, 'ready'),
+      ),
+    )
+    .run()
 }
 
 /** Record what a fetch error says about the account and the source. */
@@ -179,21 +210,8 @@ function onFetchError(
   error: unknown,
 ): unknown {
   const { db } = ctx
-  if (
-    capture.connectionId &&
-    isProviderFailure(error) &&
-    error.code === status.UNAUTHENTICATED
-  )
-    db.update(connections)
-      .set({ state: 'reauth_required' })
-      .where(
-        and(
-          eq(connections.id, capture.connectionId),
-          eq(connections.revision, revision ?? -1),
-          eq(connections.state, 'ready'),
-        ),
-      )
-      .run()
+  if (capture.connectionId)
+    markReauth(ctx, capture.connectionId, revision, error)
   const gone = sourceState(error)
   if (gone)
     db.update(collections)

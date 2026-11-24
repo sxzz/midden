@@ -20,6 +20,39 @@ export interface Platform {
     credential: Credential | undefined,
     signal: AbortSignal,
   ) => Promise<CheckConnectionResponse>
+  /** Reading who an account follows and who follows it, when supported. */
+  relations?: Relations
+}
+
+/** Who an account follows, or who follows it. */
+export type RelationList = 'following' | 'followers'
+
+/** One page of an account's following or followers list. */
+export interface RelationsRequest {
+  list: RelationList
+  /** The account's external id, as its profile entity has it. */
+  externalId: string
+  /** Empty for the first page. */
+  cursor: string
+  credential: Credential | undefined
+}
+
+export interface RelationsPage {
+  /**
+   * Each listed account as a profile fetch of it would describe it, from the
+   * list's own user data: graph rooted at the profile, external id canonical.
+   */
+  accounts: FetchResponse[]
+  /** Empty at the end of the list. */
+  nextCursor: string
+}
+
+export interface Relations {
+  /** The provider the lists are read through; it needs an account. */
+  providerId: string
+  /** Pointers into the profile entity's data at each list's size. */
+  counts: Record<RelationList, string>
+  list: (req: RelationsRequest, signal: AbortSignal) => Promise<RelationsPage>
 }
 
 /** Errors platform code raises on purpose, with a status the core classifies. */

@@ -360,6 +360,91 @@ export const entityRelations = sqliteTable(
   ],
 )
 
+export const relationLists = ['following', 'followers'] as const
+/** Whose list: the accounts an account follows, or the ones following it. */
+export type RelationList = (typeof relationLists)[number]
+
+/**
+ * A follow seen between two accounts, as an interval of observation: from
+ * the first fetch that listed it to the last, until a complete fetch of a
+ * list that should hold it no longer did (`endedAt`). A follow seen again
+ * after it ended is a new row. Keyed by entity identity, so a follow seen
+ * in either account's list is the same edge.
+ */
+export const followEdges = sqliteTable(
+  'follow_edges',
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    followerId: text()
+      .notNull()
+      .references(() => entities.id, { onDelete: 'cascade' }),
+    followeeId: text()
+      .notNull()
+      .references(() => entities.id, { onDelete: 'cascade' }),
+    firstSeenAt: timestamp().notNull(),
+    lastSeenAt: timestamp().notNull(),
+    endedAt: timestamp(),
+  },
+  (t) => [
+    // One open interval per pair; also who an account follows now, and
+    // the reverse look-up of mutual follows.
+    uniqueIndex('follow_edges_open')
+      .on(t.followerId, t.followeeId)
+      .where(sql`${t.endedAt} IS NULL`),
+    // Every interval of an account, open ones first by `ended_at IS NULL`.
+    index('follow_edges_follower').on(t.followerId, t.endedAt, t.followeeId),
+    index('follow_edges_followee').on(t.followeeId, t.endedAt, t.followerId),
+  ],
+)
+
+export const relationFetchStates = [
+  'waiting',
+  'running',
+  'complete',
+  'partial',
+  'skipped',
+  'failed',
+] as const
+export type RelationFetchState = (typeof relationFetchStates)[number]
+
+/**
+ * One fetch of an account's following or followers list, asked for by a
+ * profile capture (抓关系网). Only a `complete` one may end follows; the
+ * newest complete one per account and list tells how fresh that list is.
+ */
+export const relationFetches = sqliteTable(
+  'relation_fetches',
+  {
+    id: text().primaryKey(),
+    // The request that asked; kept as history after it is gone.
+    submissionId: text().references(() => submissions.id, {
+      onDelete: 'set null',
+    }),
+    list: text({ enum: relationLists }).notNull(),
+    // The account whose list this is, known once its profile was fetched.
+    entityId: text().references(() => entities.id, { onDelete: 'cascade' }),
+    state: text({ enum: relationFetchStates }).notNull().default('waiting'),
+    // The list's size as the profile fetched in the same capture said.
+    expected: integer(),
+    // Distinct accounts listed so far.
+    fetched: integer().notNull().default(0),
+    pages: integer().notNull().default(0),
+    cursor: text().notNull().default(''),
+    providerId: text(),
+    connectionId: text(),
+    error: text().notNull().default(''),
+    createdAt: createdAt(),
+    startedAt: timestamp(),
+    finishedAt: timestamp(),
+  },
+  (t) => [
+    index('relation_fetches_submission').on(t.submissionId),
+    index('relation_fetches_complete')
+      .on(t.entityId, t.list, t.finishedAt)
+      .where(sql`${t.state} = 'complete'`),
+  ],
+)
+
 /** Stored media bytes; the hash is also the media store key. */
 export const blobs = sqliteTable(
   'blobs',

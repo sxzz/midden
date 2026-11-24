@@ -4,6 +4,11 @@ import { CHANGES_WINDOW, listProfileChanges } from '#library/changes.ts'
 import { filterCounts } from '#library/counts.ts'
 import { getEntity } from '#library/entities.ts'
 import { collectionFilter, FilterQuery } from '#library/filter-query.ts'
+import {
+  FOLLOW_CHANGES_LIMIT,
+  followCounts,
+  listFollowChanges,
+} from '#library/follows.ts'
 import { listAuthors, listCollections } from '#library/list.ts'
 import {
   COUNTS_LIMIT,
@@ -48,6 +53,19 @@ export const ChangesQuery = v.object({
       v.transform(Number),
       v.minValue(1),
       v.maxValue(CHANGES_WINDOW),
+    ),
+  ),
+})
+
+/** How many of the newest follow changes to return. */
+const FollowChangesQuery = v.object({
+  limit: v.optional(
+    v.pipe(
+      v.string(),
+      v.regex(/^\d{1,4}$/),
+      v.transform(Number),
+      v.minValue(1),
+      v.maxValue(FOLLOW_CHANGES_LIMIT),
     ),
   ),
 })
@@ -110,6 +128,16 @@ export function libraryRoutes(ctx: AccountsContext) {
             c.req.param('id'),
             c.req.valid('query').limit,
           ),
+        ),
+      )
+
+      .get('/collections/:id/follows', (c) =>
+        c.json(followCounts(ctx, c.req.param('id'))),
+      )
+
+      .get('/collections/:id/follow-changes', query(FollowChangesQuery), (c) =>
+        c.json(
+          listFollowChanges(ctx, c.req.param('id'), c.req.valid('query').limit),
         ),
       )
 

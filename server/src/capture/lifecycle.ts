@@ -4,6 +4,7 @@ import {
   captureRunning,
   captures,
   connections,
+  relationFetches,
   sourceResponses,
   submissions,
 } from '#db/schema.ts'
@@ -60,7 +61,8 @@ export function finalizeSettled(
 
 /**
  * A capture reached a terminal state: start the related work of everyone
- * waiting on it now instead of at their fallback time.
+ * waiting on it now instead of at their fallback time, and the list fetches
+ * asked for with it.
  */
 export function deliveries(
   ctx: CaptureContext,
@@ -79,6 +81,18 @@ export function deliveries(
     )
     .all()
   for (const { id } of waiting) ctx.queue.enqueue(tx, 'related', id)
+  const lists = tx
+    .select({ id: relationFetches.id })
+    .from(relationFetches)
+    .innerJoin(submissions, eq(submissions.id, relationFetches.submissionId))
+    .where(
+      and(
+        eq(submissions.captureId, captureId),
+        eq(relationFetches.state, 'waiting'),
+      ),
+    )
+    .all()
+  for (const { id } of lists) ctx.queue.enqueue(tx, 'relations', id)
 }
 
 /** Fail an unfinished capture; a finished one is left as it is. */

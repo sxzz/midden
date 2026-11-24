@@ -5,7 +5,12 @@ import {
   type FetchRequest,
 } from '#platforms/protocol.ts'
 import { Metadata, status } from '#platforms/rpc.ts'
-import type { Platform, ProviderFailure } from '#platforms/platform.ts'
+import type {
+  Platform,
+  ProviderFailure,
+  RelationsPage,
+  RelationsRequest,
+} from '#platforms/platform.ts'
 
 const POST = /^\/p\/(\w+)$/
 const PROFILE = /^\/u\/(\w+)$/
@@ -33,11 +38,19 @@ export type FakeFetch = (
   req: FetchRequest,
 ) => Partial<FetchResponse> | Promise<Partial<FetchResponse>>
 
+export type FakeRelations = (
+  req: RelationsRequest,
+) => RelationsPage | Promise<RelationsPage>
+
 /**
  * A platform at `fake.test`: `/p/<id>` is a post, `/u/<handle>` a profile
- * (a collection). Tests decide what each fetch returns.
+ * (a collection). Tests decide what each fetch returns, and what each page of
+ * a following or followers list holds (read with the `session` provider).
  */
-export function fakePlatform(fetch: { current: FakeFetch }): Platform {
+export function fakePlatform(
+  fetch: { current: FakeFetch },
+  relations?: { current: FakeRelations },
+): Platform {
   const shared = [
     'capture.fetch',
     'capture.related',
@@ -64,7 +77,7 @@ export function fakePlatform(fetch: { current: FakeFetch }): Platform {
         {
           name: 'fake.profile',
           jsonSchema: Buffer.alloc(0),
-          metricPaths: [],
+          metricPaths: ['/counts/following', '/counts/followers'],
           volatilePaths: [],
         },
       ],
@@ -132,6 +145,16 @@ export function fakePlatform(fetch: { current: FakeFetch }): Platform {
         ...(partial as object),
       })
     },
+    ...(relations && {
+      relations: {
+        providerId: 'session',
+        counts: {
+          following: '/counts/following',
+          followers: '/counts/followers',
+        },
+        list: (req) => Promise.resolve(relations.current(req)),
+      },
+    }),
     prepareCredential: (_provider, input) => ({ data: Buffer.from(input) }),
     checkConnection: (_provider, credential) =>
       Promise.resolve({
@@ -170,4 +193,55 @@ export function postGraph(
     ],
     relations: [{ source: 'post', target: 'author', type: 'authored_by' }],
   }
+}
+
+/**
+ * A fake profile as a fetch of it (or a list entry) returns it: `id` is
+ * numeric, so its link is canonical.
+ */
+export function fakeProfile(
+  id: string,
+  data: Record<string, unknown> = {},
+  extra: { avatar?: string } = {},
+): FetchResponse {
+  return FetchResponse.fromPartial({
+    externalId: id,
+    providerId: 'public',
+    adapterVersion: '1',
+    textKind: 'profile',
+    text: String(data.name ?? id),
+    canonicalTarget: {
+      url: `https://fake.test/u/${id}`,
+      platform: 'fake',
+      kind: 'profile',
+      objectScope: '',
+      externalId: id,
+      collection: true,
+      refreshOnSubmit: true,
+    },
+    resources: extra.avatar
+      ? [
+          {
+            url: extra.avatar,
+            kind: 'image',
+            purpose: 'avatar',
+            immutableKey: extra.avatar,
+          },
+        ]
+      : [],
+    graph: {
+      root: 'profile',
+      entities: [
+        {
+          key: 'profile',
+          type: 'fake.profile',
+          externalId: id,
+          dataJson: Buffer.from(JSON.stringify({ name: id, ...data })),
+          resourceIndices: extra.avatar ? [0] : [],
+          contextOnly: false,
+        },
+      ],
+      relations: [],
+    },
+  })
 }

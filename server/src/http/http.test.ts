@@ -258,6 +258,29 @@ describe('api', () => {
         (await call(`/collections/${id}/profile-changes?limit=${limit}`))
           .status,
       ).toBe(400)
+    // Nor any follows: nothing is said rather than zeros.
+    expect(await (await call(`/collections/${id}/follows`)).json()).toEqual({})
+    expect(
+      await (await call(`/collections/${id}/follow-changes?limit=1`)).json(),
+    ).toEqual({ items: [] })
+    expect(
+      (await call(`/collections/${id}/follow-changes?limit=0`)).status,
+    ).toBe(400)
+    // Updating it may ask for the lists, which only a profile has.
+    const refreshed = await call('/captures', {
+      method: 'POST',
+      body: JSON.stringify({ refresh_id: id, options: { relations: true } }),
+    })
+    expect(refreshed.status).toBe(200)
+    expect(await refreshed.json()).not.toHaveProperty('relations')
+    expect(
+      (
+        await call('/captures', {
+          method: 'POST',
+          body: JSON.stringify({ refresh_id: id, options: { posts: true } }),
+        })
+      ).status,
+    ).toBe(400)
     expect((await call('/collections/authors')).status).toBe(200)
     expect((await call('/collections?sort=nonsense')).status).toBe(400)
     // One author or several: both are a filter, not a malformed query.

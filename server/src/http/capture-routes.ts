@@ -24,6 +24,7 @@ import {
   type CaptureRecordDetail,
 } from '#capture/records.ts'
 import { stopCollection } from '#capture/related.ts'
+import { captureRelations, type RelationProgress } from '#capture/relations.ts'
 import { captures, collections, library, submissions } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { deleteAll } from '#library/delete.ts'
@@ -32,6 +33,14 @@ import type { AccountsContext } from '#accounts/accounts.ts'
 import type { CaptureOptions } from '#capture/options.ts'
 import type { Job } from '#capture/submit.ts'
 
+/**
+ * What a profile capture also fetches, beside the profile: its following and
+ * followers lists (抓关系网). A capture of anything else ignores it.
+ */
+const ProfileOptions = {
+  relations: v.optional(v.boolean()),
+}
+
 const OptionsBody = v.optional(
   v.strictObject({
     media_only: v.optional(v.boolean()),
@@ -39,9 +48,11 @@ const OptionsBody = v.optional(
     skip_references: v.optional(v.boolean()),
     max_posts: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
     since: v.optional(v.string()),
+    ...ProfileOptions,
   }),
 )
 
+/** The post options of a capture; the profile options are passed apart. */
 function captureOptions(
   input: v.InferOutput<typeof OptionsBody>,
 ): CaptureOptions | undefined {
@@ -67,6 +78,16 @@ function memberProgress(m: NonNullable<CaptureRecord['members']>) {
   }
 }
 
+function relationJson(r: RelationProgress) {
+  return {
+    list: r.list,
+    state: r.state,
+    ...(r.expected === undefined ? {} : { expected: r.expected }),
+    fetched: r.fetched,
+    ...(r.error ? { error: r.error } : {}),
+  }
+}
+
 function recordJson(r: CaptureRecord) {
   return {
     id: r.id,
@@ -87,6 +108,7 @@ function recordJson(r: CaptureRecord) {
     ...(r.added === undefined ? {} : { added: r.added }),
     ...(r.stopped === undefined ? {} : { stopped: r.stopped }),
     ...(r.retryable === undefined ? {} : { retryable: r.retryable }),
+    ...(r.relations ? { relations: r.relations.map(relationJson) } : {}),
     ...(r.pages
       ? {
           pages: {
@@ -164,6 +186,7 @@ export function jobJson(ctx: AccountsContext, job: Pick<Job, 'id'>) {
     capture.state === 'queued'
       ? captureWaits(ctx.db, [capture.id]).get(capture.id)
       : undefined
+  const relations = captureRelations(ctx.db, capture.id)
   return {
     id: capture.id,
     collection_id: capture.collectionId,
@@ -171,6 +194,7 @@ export function jobJson(ctx: AccountsContext, job: Pick<Job, 'id'>) {
     ...(waiting ? { waiting } : {}),
     ...(capture.error ? { error: capture.error } : {}),
     ...(members ? { members } : {}),
+    ...(relations ? { relations: relations.map(relationJson) } : {}),
   }
 }
 
@@ -214,16 +238,26 @@ export function captureRoutes(ctx: AccountsContext) {
               url: v.pipe(v.string(), v.maxLength(8192)),
               options: OptionsBody,
             }),
-            v.strictObject({ refresh_id: v.string() }),
+            v.strictObject({
+              refresh_id: v.string(),
+              options: v.optional(v.strictObject(ProfileOptions)),
+            }),
           ]),
         ),
         (c) => {
           const input = c.req.valid('json')
           const key = idempotencyKey(c)
+          const relations = input.options?.relations || undefined
           const job =
             'url' in input
-              ? captureURL(ctx, input.url, key, captureOptions(input.options))
-              : recapture(ctx, input.refresh_id, { key })
+              ? captureURL(
+                  ctx,
+                  input.url,
+                  key,
+                  captureOptions(input.options),
+                  relations,
+                )
+              : recapture(ctx, input.refresh_id, { key, relations })
           // The record this request made, so a client can open its progress.
           return c.json({ ...jobJson(ctx, job), record_id: job.submissionId })
         },

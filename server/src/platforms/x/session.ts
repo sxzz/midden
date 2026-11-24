@@ -102,7 +102,9 @@ export function accountTransport(
         await response.body?.cancel()
         throw responseError(
           response.status,
-          response.headers.get('retry-after'),
+          response.status === 429
+            ? retryHeader(response)
+            : response.headers.get('retry-after'),
         )
       }
       const data = await readJSON(response, (body) => {
@@ -127,8 +129,7 @@ export function accountTransport(
         const codes = data.errors.map((e: any) => e.code)
         if (codes.some((c: number) => [32, 89, 135, 215, 326].includes(c)))
           throw responseError(401)
-        if (codes.includes(88))
-          throw responseError(429, response.headers.get('retry-after'))
+        if (codes.includes(88)) throw responseError(429, retryHeader(response))
         if (codes.some((c: number) => [63, 179, 200].includes(c)))
           throw responseError(403)
         throw new ProviderError(status.UNAVAILABLE, '账号接口返回错误')
@@ -136,6 +137,17 @@ export function accountTransport(
       return Response.json(data)
     },
   }
+}
+/**
+ * When to ask again after a rate limit. X names the end of the limit's
+ * window (`x-rate-limit-reset`, epoch seconds) rather than `retry-after`.
+ */
+function retryHeader(response: Response): string | null {
+  const retry = response.headers.get('retry-after')
+  if (retry) return retry
+  const reset = Number(response.headers.get('x-rate-limit-reset'))
+  if (!Number.isFinite(reset) || reset <= 0) return null
+  return String(Math.max(1, Math.ceil(reset - Date.now() / 1000)))
 }
 // Public classification requires positive evidence for every included author.
 /**

@@ -4,6 +4,7 @@ import { status } from '../rpc.ts'
 import { decodeCredential, prepareCredential } from './credential.ts'
 import { entityTypes } from './entity-schemas.ts'
 import { ProviderError } from './provider.ts'
+import { listRelations } from './relations.ts'
 import { hosts, resolveTarget } from './resolve.ts'
 import { checkSession } from './session.ts'
 import { CaptureStrategy } from './strategy.ts'
@@ -28,6 +29,7 @@ const failure = (code: status, message: string) =>
 export function createXPlatform(
   strategy = new CaptureStrategy(),
   connectionCheck = checkSession,
+  relationsList = listRelations,
 ): Platform {
   function validate(req: FetchRequest) {
     const target = resolveTarget(req.url)
@@ -106,6 +108,15 @@ export function createXPlatform(
             : decodeCredential(req.credential),
         )
       }),
+    relations: {
+      providerId: 'x-session',
+      counts: {
+        following: '/metadata/following',
+        followers: '/metadata/followers',
+      },
+      list: (req, signal) =>
+        guard(signal, failure, (signal) => relationsList(req, signal)),
+    },
     checkConnection: (providerId, credential, signal) =>
       guard(signal, failure, (signal) => {
         if (providerId !== 'x-session')

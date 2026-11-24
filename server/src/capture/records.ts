@@ -14,6 +14,12 @@ import {
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError } from '#errors.ts'
+import {
+  askedRelations,
+  relationProgresses,
+  relationsDone,
+  type RelationProgress,
+} from './relations.ts'
 import { submit, type Job } from './submit.ts'
 import type { Executor } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
@@ -47,6 +53,7 @@ export function captureURL(
   raw: string,
   key?: string,
   options?: CaptureOptions,
+  relations?: boolean,
 ): Job {
   const { platform, target } = ctx.platforms.resolve(raw)
   return submit(ctx, {
@@ -56,6 +63,7 @@ export function captureURL(
       selectedConnection(ctx.db, platform.description.adapterId) || undefined,
     key,
     options,
+    relations,
   })
 }
 
@@ -442,6 +450,8 @@ export interface CaptureRecord {
   stopped?: boolean
   pages?: { more: boolean; more1000: boolean; failed: boolean }
   retryable?: number
+  /** The following and followers lists it asked for (抓关系网). */
+  relations?: RelationProgress[]
 }
 
 export function recordFilterSQL() {
@@ -524,6 +534,10 @@ function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
       .map((row) => row.submission.id),
   )
   const waits = captureWaits(db, queuedIds(rows.map((row) => row.capture)))
+  const relations = relationProgresses(
+    db,
+    rows.map((row) => row.submission.id),
+  )
   return rows.map(({ submission, capture, collection, saved }) => {
     const record: CaptureRecord = {
       id: submission.id,
@@ -572,6 +586,12 @@ function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
       submission.libraryAdded !== null
     )
       record.added = submission.libraryAdded
+    const lists = relations.get(submission.id)
+    if (lists) {
+      record.relations = lists
+      // The lists are fetched after the profile; the record runs until then.
+      record.done &&= relationsDone(lists)
+    }
     return record
   })
 }
@@ -804,6 +824,7 @@ export function recapture(
     restart?: boolean
     key?: string
     captureOptions?: CaptureOptions
+    relations?: boolean
   } = {},
 ): Job {
   const collection = ctx.db
@@ -825,6 +846,7 @@ export function recapture(
       refreshId: collectionId,
       key: options.key,
       options: options.captureOptions,
+      relations: options.relations,
     })
   const { platform } = ctx.platforms.resolve(collection.url)
   return submit(ctx, {
@@ -834,6 +856,7 @@ export function recapture(
       selectedConnection(ctx.db, platform.description.adapterId) || undefined,
     key: options.key,
     options: options.captureOptions,
+    relations: options.relations,
   })
 }
 
@@ -846,9 +869,15 @@ export function retryRecord(
   const row = recordRow(ctx.db, id)
   const options =
     (row.submission.captureOptions as CaptureOptions | null) ?? undefined
+  const relations = askedRelations(ctx.db, row.submission.id) || undefined
   // Deleted from the library since: saving it again is all that is left.
-  if (!row.saved) return captureURL(ctx, row.collection.url, key, options)
-  return recapture(ctx, row.collection.id, { key, captureOptions: options })
+  if (!row.saved)
+    return captureURL(ctx, row.collection.url, key, options, relations)
+  return recapture(ctx, row.collection.id, {
+    key,
+    captureOptions: options,
+    relations,
+  })
 }
 
 /**

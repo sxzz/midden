@@ -41,6 +41,7 @@ export function testContext(
     thumbnail: { ...noop, queue: 'download', priority: 4 },
     finalize: noop,
     related: noop,
+    relations: { ...noop, queue: 'capture' },
     refresh_batch: noop,
     ...options.handlers?.(() => ctx!),
   }

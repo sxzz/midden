@@ -7,6 +7,7 @@ import { runCapture } from './fetch.ts'
 import { runFinalize } from './finalize.ts'
 import { failCapture, isActive, loadCapture } from './lifecycle.ts'
 import { failRelated, runRelated } from './related.ts'
+import { failRelations, runRelations } from './relations.ts'
 import { failThumbnail, runThumbnail } from './thumbnail.ts'
 import type { Job, JobHandler } from '#jobs/queue.ts'
 import type { CaptureContext } from './context.ts'
@@ -71,6 +72,16 @@ export function captureHandlers(
       priority: 4,
       run: (job) => runThumbnail(context(), job),
       fail: (job, error) => failThumbnail(context(), job.ref, safeError(error)),
+    },
+    // Pages of an account's following or followers list, read with the
+    // account like a capture.
+    relations: {
+      queue: 'capture',
+      // Rate limits can take a few windows to clear; each run of pages is a
+      // new job, so these are per run.
+      maxAttempts: 5,
+      run: (job) => runRelations(context(), job),
+      fail: (job, error) => failRelations(context(), job.ref, safeError(error)),
     },
     related: {
       queue: 'control',

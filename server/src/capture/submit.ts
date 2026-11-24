@@ -18,6 +18,7 @@ import {
 import { RELATED_FALLBACK_MS, type CaptureContext } from './context.ts'
 import { canonicalJson, sha256Hex } from './json.ts'
 import { checkOptions, type CaptureOptions } from './options.ts'
+import { requestRelations } from './relations.ts'
 import type { Transaction } from '#db/client.ts'
 import type { Buffer } from 'node:buffer'
 
@@ -40,6 +41,11 @@ export interface SubmitInput {
   refreshAfterSeconds?: number
   prefetch?: Buffer
   options?: CaptureOptions
+  /**
+   * Also fetch the account's following and followers lists (抓关系网), for
+   * an explicit capture of a profile on a platform that can list them.
+   */
+  relations?: boolean
 }
 
 export interface Job {
@@ -214,6 +220,7 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
         pageSize,
         collectionLimit,
         ...(options ? [canonicalJson(options)] : []),
+        ...(input.relations ? ['relations'] : []),
       ].join('|'),
     )
     const existing = tx
@@ -326,6 +333,9 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
         libraryAdded,
       })
       .run()
+
+    if (input.relations && explicitCollection && platform.relations)
+      requestRelations(ctx, tx, submissionId, captureId)
 
     let expandRelated = !automatic
     if (

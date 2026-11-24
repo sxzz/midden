@@ -20,6 +20,7 @@ import {
   collections,
   entities,
   entityVersions,
+  followEdges,
   jobs,
   library,
   mediaGarbage,
@@ -176,6 +177,9 @@ function collectBatch(tx: Transaction): number {
           and(
             inJson(entities.id, entityIds),
             sql`NOT EXISTS (SELECT 1 FROM ${entityVersions} WHERE ${entityVersions.entityId} = ${entities.id})`,
+            // An account's follows outlive its saved profile.
+            sql`NOT EXISTS (SELECT 1 FROM ${followEdges} WHERE ${followEdges.followerId} = ${entities.id})`,
+            sql`NOT EXISTS (SELECT 1 FROM ${followEdges} WHERE ${followEdges.followeeId} = ${entities.id})`,
           ),
         )
         .run()

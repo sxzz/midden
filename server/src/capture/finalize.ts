@@ -27,7 +27,7 @@ import type { Transaction } from '#db/client.ts'
 import type { Job } from '#jobs/queue.ts'
 import type { Platforms } from '#platforms/registry.ts'
 import type { CaptureContext } from './context.ts'
-import type { Payload, PayloadGraph } from './payload.ts'
+import type { Payload, PayloadEntity, PayloadGraph } from './payload.ts'
 
 export interface AssetState {
   position: number
@@ -209,21 +209,16 @@ export function revisionDigest(
 }
 
 /**
- * Store each graph entity and its version. Entities are shared by platform
- * identity; versions by content (data plus the state of its media), and the
- * first stored data for a content hash is kept.
+ * How each entity of a capture is told apart from its other versions: its
+ * data together with the state of its media.
  */
-function persistEntities(
-  tx: Transaction,
-  platform: string,
-  graph: PayloadGraph,
+export function entityContentHashes(
   captureAssets: AssetState[],
-  now: Date,
-): void {
+): (entity: PayloadEntity) => string {
   const byPosition = new Map<number, AssetState>()
   for (const asset of captureAssets)
     if (!byPosition.has(asset.position)) byPosition.set(asset.position, asset)
-  for (const entity of graph.entities) {
+  return (entity) => {
     const media = (entity.resource_indices ?? []).map((index) => {
       const asset = byPosition.get(index)
       return asset
@@ -237,7 +232,25 @@ function persistEntities(
           ]
         : null
     })
-    const contentHash = sha256Hex(canonicalJson([entity.data, media]))
+    return sha256Hex(canonicalJson([entity.data, media]))
+  }
+}
+
+/**
+ * Store each graph entity and its version. Entities are shared by platform
+ * identity; versions by content (data plus the state of its media), and the
+ * first stored data for a content hash is kept.
+ */
+function persistEntities(
+  tx: Transaction,
+  platform: string,
+  graph: PayloadGraph,
+  captureAssets: AssetState[],
+  now: Date,
+): void {
+  const hashOf = entityContentHashes(captureAssets)
+  for (const entity of graph.entities) {
+    const contentHash = hashOf(entity)
     let entityId = tx
       .select({ id: entities.id })
       .from(entities)
@@ -291,7 +304,7 @@ function persistEntities(
  * Rows to insert with one statement each: few enough to stay below SQLite's
  * limit on bound values.
  */
-function* chunks<T>(rows: T[], size = 1000): Generator<T[]> {
+export function* chunks<T>(rows: T[], size = 1000): Generator<T[]> {
   for (let i = 0; i < rows.length; i += size) yield rows.slice(i, i + size)
 }
 
