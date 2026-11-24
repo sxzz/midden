@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { computed, shallowRef, watch } from 'vue'
+import { computed, onUnmounted, shallowRef, watch } from 'vue'
 import { safeURL, type Collection } from '../api'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
 import { date, present } from '../presentation'
@@ -8,6 +8,7 @@ import CollectionAnnotations from './CollectionAnnotations.vue'
 import CollectionPost from './CollectionPost.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
 import ProfileCollections from './ProfileCollections.vue'
+import ProfileTimeline from './ProfileTimeline.vue'
 import RevisionList from './RevisionList.vue'
 import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import ListButton from './ui/ListButton.vue'
@@ -40,6 +41,7 @@ const {
   available,
   historyPage,
   revision,
+  isSeen,
   remove,
   refresh,
   checkAvailability,
@@ -71,6 +73,15 @@ const profileName = computed(() =>
   collection.value ? present(collection.value).name : '',
 )
 const link = computed(() => collection.value && safeURL(collection.value.url))
+// Dragging the timeline passes many revisions: show the ones already fetched
+// at once, and fetch the others only where the drag rests.
+let pick: ReturnType<typeof setTimeout> | undefined
+onUnmounted(() => clearTimeout(pick))
+function preview(revisionId: string) {
+  clearTimeout(pick)
+  if (isSeen(revisionId)) void revision(revisionId)
+  else pick = setTimeout(revision, 150, revisionId)
+}
 function startRefresh() {
   void refresh()
 }
@@ -90,12 +101,26 @@ const version = computed(() =>
   /></ListSection>
   <template v-if="collection">
     <ListSection>
-      <CollectionSkeleton v-if="loadingRevision" detail />
+      <CollectionSkeleton v-if="loadingRevision && !isProfile" detail />
+      <!-- A profile stays on screen while the timeline fetches a revision, so
+           what changed between the two reads as a change. -->
       <CollectionPost
         v-else
+        :class="{ fetching: loadingRevision }"
         :collection="collection"
         :saved-at="savedAt"
         :show-sensitive="showSensitive"
+      />
+    </ListSection>
+    <ListSection v-if="isProfile && revisions.length > 1" title="资料变化">
+      <ProfileTimeline
+        :revisions="revisions"
+        :selected-id="collection.revision_id"
+        :latest-id="latestRevision"
+        :more="!!next"
+        :loading="historyLoading"
+        @select="preview"
+        @more="historyPage(true)"
       />
     </ListSection>
     <CollectionAnnotations
@@ -116,6 +141,7 @@ const version = computed(() =>
         @select="checkAvailability"
       />
       <ListButton
+        v-if="!isProfile"
         :label="noHistory ? '无历史版本' : '历史版本'"
         :trailing="noHistory ? undefined : showHistory ? '收起' : '展开'"
         :disabled="noHistory"
@@ -124,7 +150,7 @@ const version = computed(() =>
         @select="toggleHistory"
       />
       <RevisionList
-        v-if="showHistory && !noHistory"
+        v-if="!isProfile && showHistory && !noHistory"
         id="revision-options"
         :revisions="revisions"
         :next="next"
@@ -191,6 +217,10 @@ const version = computed(() =>
 .loading {
   padding-top: 32px;
   text-align: center;
+}
+.fetching {
+  opacity: 0.6;
+  transition: opacity 0.2s ease 0.1s;
 }
 .status.quiet {
   margin: 0;

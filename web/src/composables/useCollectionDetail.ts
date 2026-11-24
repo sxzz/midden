@@ -62,6 +62,12 @@ export function useCollectionDetail(
   const historyLoading = shallowRef(false)
   const historyLoaded = shallowRef(false)
   const confirmDelete = shallowRef(false)
+  /** Revisions already fetched, so moving back to one shows it at once. */
+  const seen = new Map<string, Collection>()
+  const show = (result: Collection) => {
+    seen.set(result.revision_id, result)
+    collection.value = result
+  }
   /**
    * Bumped whenever a refresh brings in new member content (such as a
    * profile's posts), so lists of those members know to reload.
@@ -140,6 +146,7 @@ export function useCollectionDetail(
       const signal = controller.signal
       ++revisionRequest
       collection.value = undefined
+      seen.clear()
       revisions.value = []
       showHistory.value = false
       latestRevision.value = ''
@@ -155,7 +162,7 @@ export function useCollectionDetail(
       try {
         const result = await getCollection(id, signal)
         if (signal.aborted) return
-        collection.value = result
+        show(result)
         latestRevision.value = result.revision_id
         void historyPage()
         available.value = await availability(id, signal)
@@ -194,16 +201,25 @@ export function useCollectionDetail(
     showHistory.value = !showHistory.value
     if (showHistory.value && !historyLoaded.value) void historyPage()
   }
+  /**
+   * Show a revision, or the latest without one. A newer request supersedes
+   * one still loading, so a timeline can be dragged across revisions.
+   */
   async function revision(revisionID?: string) {
     if (
       busy.value ||
-      loadingRevision.value ||
       (revisionID
         ? revisionID === collection.value?.revision_id
         : !historical.value)
     )
       return
     const request = ++revisionRequest
+    const known = seen.get(revisionID || latestRevision.value)
+    if (known) {
+      collection.value = known
+      loadingRevision.value = false
+      return
+    }
     const signal = controller.signal
     loadingRevision.value = true
     error.value = ''
@@ -217,7 +233,9 @@ export function useCollectionDetail(
               ),
             )
           : await getCollection(id(), signal)
-      if (signal.aborted || request !== revisionRequest) return
+      if (signal.aborted) return
+      seen.set(result.revision_id, result)
+      if (request !== revisionRequest) return
       collection.value = result
       if (!revisionID || revisionID === latestRevision.value)
         latestRevision.value = result.revision_id
@@ -283,7 +301,7 @@ export function useCollectionDetail(
     if (job.state !== 'failed') {
       const result = await getCollection(job.collection_id, controller.signal)
       if (stale(run) || !visible) return
-      collection.value = result
+      show(result)
       if (job.collection_id !== id())
         void router.replace({
           name: 'collection',
@@ -378,6 +396,8 @@ export function useCollectionDetail(
     available,
     historyPage,
     revision,
+    /** Whether a revision shows without a request. */
+    isSeen: (revisionID: string) => seen.has(revisionID),
     remove,
     refresh,
     checkAvailability,
