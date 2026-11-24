@@ -29,6 +29,7 @@ import {
   stateStatus,
 } from '../captures'
 import { toast } from '../composables/useToast'
+import { relationsText } from '../follows'
 import InfiniteLoader from './ui/InfiniteLoader.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
@@ -389,6 +390,10 @@ function openCollection(id: string, event?: MouseEvent) {
                 `已保存 ${record.members.complete}，不完整 ${record.members.partial}，失败 ${record.members.failed}，进行中 ${record.members.pending}`
               }}
             </dd>
+          </div>
+          <div v-if="record.relations">
+            <dt>关系网</dt>
+            <dd>{{ relationsText(record.relations) }}</dd>
           </div>
           <div v-if="additions">
             <dt>收藏</dt>

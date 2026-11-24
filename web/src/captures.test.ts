@@ -189,3 +189,35 @@ test('groups records by day like the library, with times under them', () => {
   expect(recordRowTime(items[1].created_at, now)).toBe('23:00')
   expect(recordRowTime(items[2].created_at, now)).toBe('10月2日 8:30')
 })
+
+test('a profile record runs on while its lists are fetched', () => {
+  const members = {
+    total: 2,
+    complete: 2,
+    partial: 0,
+    failed: 0,
+    pending: 0,
+    done: true,
+  }
+  const fetching = record({
+    kind: 'profile',
+    state: 'complete',
+    members,
+    relations: [
+      { list: 'following', state: 'running', expected: 30, fetched: 10 },
+      { list: 'followers', state: 'waiting', fetched: 0 },
+    ],
+  })
+  expect(recordStatus(fetching)).toEqual({
+    label: '正在抓关系网',
+    tone: 'active',
+  })
+  // The posts are all in; the lists have no share to show.
+  expect(recordProgress(fetching)).toBeUndefined()
+  const posts = record({
+    kind: 'profile',
+    state: 'complete',
+    members: { ...members, pending: 1, complete: 1, done: false },
+  })
+  expect(recordStatus(posts).label).toBe('正在保存帖子')
+})

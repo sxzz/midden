@@ -42,6 +42,8 @@ const {
   available,
   trendable,
   changeable,
+  follows,
+  followChangeable,
   historyPage,
   showPoint,
   isSeen,
@@ -64,6 +66,19 @@ watch(
   },
   { immediate: true },
 )
+/** An X profile: its update can also fetch its lists (抓关系网). */
+const isXProfile = computed(
+  () =>
+    collection.value?.graph?.entities.find(
+      (entity) => entity.key === collection.value?.graph?.root,
+    )?.type === 'x.profile',
+)
+/** Unchecked on every visit: fetching the lists costs many requests. */
+const withRelations = shallowRef(false)
+watch(
+  () => props.id,
+  () => (withRelations.value = false),
+)
 const isProfile = computed(() =>
   collection.value?.graph?.entities.some(
     (entity) =>
@@ -82,6 +97,9 @@ function openTrends() {
 }
 function openChanges() {
   void router.push(collectionRoute(props.id, 'changes'))
+}
+function openFollows() {
+  void router.push({ name: 'collection-follows', params: { id: props.id } })
 }
 // Behind a public link the page only reads: no capture, notes or deletion.
 const shared = computed(() => !!shareSlug.value)
@@ -136,7 +154,7 @@ function preview(point: string) {
   else pick = setTimeout(showPoint, 150, point)
 }
 function startRefresh() {
-  void refresh()
+  void refresh({ relations: isXProfile.value && withRelations.value })
 }
 function openRecord() {
   void router.push({ name: 'capture', params: { id: record.value } })
@@ -166,6 +184,23 @@ const version = computed(() =>
         :show-sensitive="showSensitive"
       />
     </ListSection>
+    <ListSection v-if="follows" title="关系网">
+      <!-- What stored follows say, not the profile's own counts. -->
+      <dl class="follows">
+        <div>
+          <dt>关注</dt>
+          <dd>{{ follows.following }}</dd>
+        </div>
+        <div>
+          <dt>粉丝</dt>
+          <dd>{{ follows.followers }}</dd>
+        </div>
+        <div>
+          <dt>互关</dt>
+          <dd>{{ follows.mutual }}</dd>
+        </div>
+      </dl>
+    </ListSection>
     <ListSection
       v-if="points.length > 1"
       :title="isProfile ? '资料变化' : '内容变化'"
@@ -194,6 +229,12 @@ const version = computed(() =>
         chevron
         @select="openChanges"
       />
+      <ListButton
+        v-if="followChangeable"
+        label="关注变化"
+        chevron
+        @select="openFollows"
+      />
       <ListButton v-if="link" label="打开原文" :href="link" />
       <ListButton
         v-if="!shared"
@@ -202,6 +243,16 @@ const version = computed(() =>
         :trailing="sharedDirectly ? '已公开' : undefined"
         @select="sharing = true"
       />
+      <!-- Options of the update, right above the button that starts it. -->
+      <label v-if="isXProfile && !shared" class="option"
+        ><span>抓关系网</span
+        ><input
+          v-model="withRelations"
+          class="switch"
+          type="checkbox"
+          role="switch"
+          :disabled="busy"
+      /></label>
       <ListButton
         v-if="!shared"
         label="重新抓取"
@@ -267,6 +318,85 @@ const version = computed(() =>
 </template>
 
 <style scoped>
+.follows {
+  display: flex;
+  margin: 0;
+  padding: 12px var(--inset);
+}
+.follows div {
+  flex: 1;
+  text-align: center;
+}
+.follows dt {
+  font-size: 13px;
+  color: var(--subtle);
+}
+.follows dd {
+  margin: 2px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  margin-left: var(--inset);
+  padding: 6px var(--inset) 6px 0;
+  font-size: 16px;
+  /* Separated from the rows around it like they are from each other. */
+  box-shadow:
+    inset 0 1px 0 var(--separator),
+    inset 0 -1px 0 var(--separator);
+}
+/* The switch of the capture options, for one option of an update. */
+.switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 46px;
+  height: 28px;
+  margin: 0;
+  border-radius: 14px;
+  background: var(--fill);
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 160ms ease;
+}
+.switch:checked {
+  background: var(--link);
+}
+.switch:checked::after {
+  transform: translateX(18px);
+}
+.switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.switch:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .switch,
+  .switch::after {
+    transition: none;
+  }
+}
 .banner {
   margin: 0;
   padding: 14px var(--inset);

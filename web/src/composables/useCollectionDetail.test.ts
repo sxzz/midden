@@ -40,6 +40,9 @@ let points: HistoryPoint[] = []
 let readings: number[] = []
 /** How many changes every profile's record answers with. */
 let changes = 0
+/** What every profile's follows answer with, and how many changes. */
+let followCounts: object = {}
+let followChanges = 0
 /** The kept collection's composable, for tests that step through points. */
 let detail: ReturnType<typeof useCollectionDetail> | undefined
 /** One shared refresh handle, so the test can start a capture. */
@@ -112,6 +115,8 @@ beforeEach(() => {
   readings = []
   profile = false
   changes = 0
+  followCounts = {}
+  followChanges = 0
   detail = undefined
   api = mockApi(async (path) => {
     const gate = gates.get(path)
@@ -137,6 +142,16 @@ beforeEach(() => {
           revision_id: `r${i}`,
           observed_at: '2026-10-01T00:00:00Z',
           fields: [{ field: 'name', before: 'A', after: 'B' }],
+        })),
+      }
+    if (path.endsWith('/follows')) return followCounts
+    if (path.includes('/follow-changes'))
+      return {
+        items: Array.from({ length: followChanges }, () => ({
+          type: 'follow',
+          observed_at: '2026-10-02T00:00:00Z',
+          since: '2026-10-01T00:00:00Z',
+          account: { entity_id: 'e', external_id: '9', name: 'B' },
         })),
       }
     const point = /\/history\/(.+)$/.exec(path)?.[1]
@@ -318,4 +333,39 @@ it('never asks for the changes of anything but a profile', async () => {
   expect(detail!.collection.value?.id).toBe('kept')
   expect(calls('/collections/kept/profile-changes')).toBe(0)
   expect(detail!.changeable.value).toBe(false)
+})
+it('asks for the lists with a profile update, and shows what they found on return', async () => {
+  profile = true
+  mount()
+  await vi.advanceTimersByTimeAsync(0)
+  const d = detail!
+  // Nothing observed yet: no counts and no record of follow changes.
+  expect(api).toHaveBeenCalledWith(
+    '/collections/kept/follow-changes?limit=1',
+    expect.anything(),
+  )
+  expect(d.follows.value).toBeUndefined()
+  expect(d.followChangeable.value).toBe(false)
+
+  await d.refresh({ relations: true })
+  const [, request] = api.mock.calls.find(([path]) => path === '/captures')!
+  expect(JSON.parse(request.body!)).toEqual({
+    refresh_id: 'kept',
+    options: { relations: true },
+  })
+  // The lists are followed on the record; coming back shows what they found.
+  followCounts = { following: 2, followers: 0, mutual: 0 }
+  followChanges = 1
+  await show('other')
+  await show('kept')
+  await vi.waitFor(() => expect(d.followChangeable.value).toBe(true))
+  expect(d.follows.value).toEqual({ following: 2, followers: 0, mutual: 0 })
+})
+it('updates without the lists unless asked, and never asks a post for follows', async () => {
+  mount()
+  await vi.advanceTimersByTimeAsync(0)
+  await refresh()
+  const [, request] = api.mock.calls.find(([path]) => path === '/captures')!
+  expect(JSON.parse(request.body!)).toEqual({ refresh_id: 'kept' })
+  expect(calls('/collections/kept/follow')).toBe(0)
 })

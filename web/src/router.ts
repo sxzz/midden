@@ -5,6 +5,7 @@ import CaptureRecords from './components/CaptureRecords.vue'
 import CollectionDetail from './components/CollectionDetail.vue'
 import CollectionTrends from './components/CollectionTrends.vue'
 import CollectionView from './components/CollectionView.vue'
+import FollowChanges from './components/FollowChanges.vue'
 import ProfileChanges from './components/ProfileChanges.vue'
 import PublicHome from './components/PublicHome.vue'
 
@@ -37,6 +38,12 @@ export const router = createRouter({
       path: '/collection/:id([a-f0-9-]+)/changes',
       name: 'collection-changes',
       component: ProfileChanges,
+      props: true,
+    },
+    {
+      path: '/collection/:id([a-f0-9-]+)/follows',
+      name: 'collection-follows',
+      component: FollowChanges,
       props: true,
     },
     { path: '/accounts', name: 'accounts', component: AccountsView },

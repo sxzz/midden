@@ -4,6 +4,7 @@ import {
   client,
   errorText,
   type Collection,
+  type FollowCounts,
   type HistoryPoint,
 } from '../api'
 import {
@@ -47,6 +48,10 @@ export function useCollectionDetail(
   const trendable = shallowRef(false)
   /** A profile whose shown fields changed at least once. */
   const changeable = shallowRef(false)
+  /** Follows of a profile as observed, when any were. */
+  const follows = shallowRef<FollowCounts>()
+  /** A profile whose follows changed at least once. */
+  const followChangeable = shallowRef(false)
   /** The newest point is the collection as it is now. */
   const latestPoint = computed(() => points.value[0]?.capture_id ?? '')
   /** The point on screen; '' is the current state. */
@@ -121,6 +126,8 @@ export function useCollectionDetail(
       confirmDelete.value = false
       trendable.value = false
       changeable.value = false
+      follows.value = undefined
+      followChangeable.value = false
       try {
         const result = await getCollection(id, signal)
         if (signal.aborted) return
@@ -129,6 +136,7 @@ export function useCollectionDetail(
         void historyPage()
         void checkTrends()
         void checkChanges(result)
+        void checkFollows(result)
         // A public page offers no capture to check for.
         if (!shareSlug.value) available.value = await availability(id, signal)
       } catch (e) {
@@ -167,6 +175,38 @@ export function useCollectionDetail(
       if (!signal.aborted) changeable.value = !!changes.items?.length
     } catch {
       // Without an answer the page is not offered; nothing else depends on it.
+    }
+  }
+  /**
+   * The follows observed of a profile and whether they ever changed (the
+   * newest change is enough to tell). Neither is shown without data, nor
+   * behind a public link, which does not share them.
+   */
+  async function checkFollows(result: Collection) {
+    const graph = result.graph
+    const root = graph?.entities.find((entity) => entity.key === graph.root)
+    if (shareSlug.value || !isProfileEntity(root)) return
+    const signal = controller.signal
+    try {
+      const [counts, changes] = await Promise.all([
+        call(
+          collections.follows.$get(
+            { param: { id: id() } },
+            { init: { signal } },
+          ),
+        ),
+        call(
+          collections['follow-changes'].$get(
+            { param: { id: id() }, query: { limit: '1' } },
+            { init: { signal } },
+          ),
+        ),
+      ])
+      if (signal.aborted) return
+      follows.value = counts.following === undefined ? undefined : counts
+      followChangeable.value = !!changes.items?.length
+    } catch {
+      // Without an answer nothing is shown; nothing else depends on it.
     }
   }
   async function historyPage(more = false) {
@@ -255,6 +295,7 @@ export function useCollectionDetail(
       latestRevision.value = result.revision_id
       void checkTrends()
       void checkChanges(result)
+      void checkFollows(result)
       void historyPage()
       updated(result)
       membersVersion.value++
@@ -262,13 +303,19 @@ export function useCollectionDetail(
       if (!signal.aborted) report(e)
     }
   }
-  async function refresh() {
+  /** Capture again; `relations` also fetches a profile's lists (抓关系网). */
+  async function refresh(options: { relations?: boolean } = {}) {
     if (busy.value) return
     busy.value = true
     try {
       const job = await call(
         client.captures.$post(
-          { json: { refresh_id: id() } },
+          {
+            json: {
+              refresh_id: id(),
+              ...(options.relations ? { options: { relations: true } } : {}),
+            },
+          },
           {
             headers: { 'Idempotency-Key': crypto.randomUUID() },
             init: { signal: controller.signal },
@@ -302,6 +349,8 @@ export function useCollectionDetail(
     available,
     trendable,
     changeable,
+    follows,
+    followChangeable,
     historyPage,
     showPoint,
     /** Whether a point shows without a request. */

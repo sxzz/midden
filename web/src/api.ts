@@ -58,7 +58,17 @@ export type ProfileChanges = Ok<
 >
 export type ProfileChange = ProfileChanges['items'][number]
 export type ProfileFieldChange = ProfileChange['fields'][number]
+export type FollowCounts = Ok<
+  (typeof client.collections)[':id']['follows']['$get']
+>
+export type FollowChanges = Ok<
+  (typeof client.collections)[':id']['follow-changes']['$get']
+>
+export type FollowChange = FollowChanges['items'][number]
+export type FollowAccount = FollowChange['account']
 export type Job = Ok<(typeof client.jobs)[':id']['$get']>
+/** How a capture's following or followers list fetch went (抓关系网). */
+export type RelationProgress = NonNullable<Job['relations']>[number]
 export type LibrarySize = Ok<typeof client.library.$get>
 export type CaptureRecord = Ok<typeof client.captures.$get>['items'][number]
 export type CaptureRecordDetail = Ok<(typeof client.captures)[':id']['$get']>

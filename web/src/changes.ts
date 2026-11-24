@@ -101,7 +101,7 @@ export function dayLabel(d: Date, now = new Date()): string {
     : `${d.getFullYear()}年${date}`
 }
 
-const clock = (d: Date) =>
+export const clock = (d: Date) =>
   `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
 
 /**

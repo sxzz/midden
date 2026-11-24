@@ -110,6 +110,7 @@ const captures = computed(() => route.name === 'captures')
 const capture = computed(() => route.name === 'capture')
 const stats = computed(() => route.name === 'collection-stats')
 const changes = computed(() => route.name === 'collection-changes')
+const follows = computed(() => route.name === 'collection-follows')
 /** Any page reached from the library, which is where back returns to. */
 const nested = computed(
   () =>
@@ -119,7 +120,8 @@ const nested = computed(
     captures.value ||
     capture.value ||
     stats.value ||
-    changes.value,
+    changes.value ||
+    follows.value,
 )
 const {
   folders,
@@ -144,11 +146,13 @@ const title = computed(() =>
           ? '统计趋势'
           : changes.value
             ? '资料修改记录'
-            : id.value
-              ? '收藏详情'
-              : folderId.value
-                ? folder.value?.name || '收藏夹'
-                : '我的收藏',
+            : follows.value
+              ? '关注变化'
+              : id.value
+                ? '收藏详情'
+                : folderId.value
+                  ? folder.value?.name || '收藏夹'
+                  : '我的收藏',
 )
 // Telegram draws its own back button; only stand in for it elsewhere.
 const standalone = !host()?.initData
@@ -176,6 +180,8 @@ function viewKey(target: RouteLocationNormalized) {
     return `stats:${String(target.params.id)}`
   if (target.name === 'collection-changes')
     return `changes:${String(target.params.id)}`
+  if (target.name === 'collection-follows')
+    return `follows:${String(target.params.id)}`
   const key = String(target.params.id)
   // Returning to a collection we deleted must reload, not show the cached copy.
   return removed.value.includes(key) ? `${key}#removed` : key
@@ -446,7 +452,8 @@ const viewProps = computed(() => {
     }
   if (captures.value || capture.value) return { onSaved: saved }
   if (stats.value) return {}
-  if (changes.value) return { showSensitive: showSensitive.value }
+  if (changes.value || follows.value)
+    return { showSensitive: showSensitive.value }
   if (id.value)
     return {
       savedAt: savedAt.value,

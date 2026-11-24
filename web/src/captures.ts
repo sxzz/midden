@@ -1,3 +1,4 @@
+import { relationsDone } from './follows'
 import { groupLabel } from './presentation'
 import type { CaptureMedia, CaptureRecord } from './api'
 
@@ -69,7 +70,12 @@ export function recordStatus(r: CaptureRecord): RecordStatus {
   const m = r.members
   if (!m || r.state === 'failed' || r.state === 'queued')
     return stateStatus(r.state, r.waiting)
-  if (!r.done) return { label: '正在保存帖子', tone: 'active' }
+  if (!r.done)
+    return {
+      label:
+        m.done && !relationsDone(r.relations) ? '正在抓关系网' : '正在保存帖子',
+      tone: 'active',
+    }
   if (r.stopped) return { label: '已中止', tone: 'warn' }
   return m.failed + m.partial > 0 || r.state === 'partial'
     ? { label: '部分缺失', tone: 'warn' }
@@ -80,6 +86,8 @@ export function recordStatus(r: CaptureRecord): RecordStatus {
 export function recordProgress(r: CaptureRecord) {
   if (r.done) return 1
   const m = r.members
+  // The lists that follow the posts have no share to show.
+  if (m?.done) return
   if (m) {
     if (m.total) return (m.total - m.pending) / m.total
   } else if (r.state === 'downloading' && r.media.total)

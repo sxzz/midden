@@ -10,6 +10,7 @@ const form = reactive({
   captureReferences: true,
   maxPosts: '',
   days: '',
+  relations: false,
 })
 const ranges = [
   { value: '', label: '全部' },
@@ -28,6 +29,7 @@ const options = computed<CaptureOptions>(() => {
     skip_references: !form.captureReferences,
     max_posts: form.maxPosts ? Number(form.maxPosts) : undefined,
     since: form.days ? since.toISOString() : undefined,
+    relations: form.relations || undefined,
   }
 })
 // Shown while collapsed so a non-default choice is never hidden.
@@ -38,6 +40,7 @@ const summary = computed(() => {
   if (!form.captureReferences) parts.push('原帖外链')
   if (form.maxPosts) parts.push(`最多 ${form.maxPosts} 条`)
   if (form.days) parts.push(ranges.find((r) => r.value === form.days)!.label)
+  if (form.relations) parts.push('抓关系网')
   return parts.join(' · ') || '全部采集'
 })
 function update() {
@@ -104,10 +107,18 @@ function update() {
           </option></select
         ><ChevronIcon class="select-chevron" /></span
     ></label>
+    <label class="row"
+      ><span>抓关系网<small class="hint">X 账号的关注和粉丝列表</small></span
+      ><input
+        v-model="form.relations"
+        class="switch"
+        type="checkbox"
+        role="switch"
+    /></label>
     <p class="note">
       以上条件用于账号主页的帖子采集；引用原帖选项也用于单条帖子{{
         form.captureReferences ? '' : '，未保存的原帖保留外链'
-      }}。
+      }}。抓关系网只用于 X 账号主页，需要采集账号，超过 5000 人的列表不抓。
     </p>
   </details>
 </template>
@@ -161,6 +172,11 @@ summary:focus-visible {
   padding: 6px var(--inset) 6px 0;
   font-size: 15px;
   box-shadow: inset 0 1px 0 var(--separator);
+}
+.hint {
+  display: block;
+  font-size: 13px;
+  color: var(--subtle);
 }
 .switch {
   appearance: none;
