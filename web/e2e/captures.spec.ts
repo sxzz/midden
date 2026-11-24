@@ -274,6 +274,9 @@ test('shows collection progress, member failures, stop and retry', async ({
   await expect(page.getByText('x.com/fixture/status/3')).toBeVisible()
   // The tab seen before shows again without loading.
   expect(memberQueries).toEqual(['', 'problem'])
+  // The post still running has its own tab while it lasts.
+  const running = page.getByRole('tab', { name: '正在采集 1' })
+  await expect(running).toBeVisible()
 
   // A running collection can be stopped, and only a finished one retried.
   const retryMember = page.getByRole('button', {
@@ -286,6 +289,7 @@ test('shows collection progress, member failures, stop and retry', async ({
   await page.getByRole('button', { name: '中止', exact: true }).click()
   await expect(status).toContainText('已中止')
   await expect(page.getByRole('progressbar')).toHaveCount(0)
+  await expect(running).toHaveCount(0)
 
   // Failed posts are fetched again inside this record, all or one at a time;
   // one the source reported gone is not offered.

@@ -45,48 +45,64 @@ const members = shallowRef<CaptureMember[]>([])
 const membersNext = shallowRef('')
 const membersLoading = shallowRef(false)
 const membersError = shallowRef('')
-type Filter = 'added' | 'updated' | 'problem' | ''
+type Filter = 'added' | 'updated' | 'problem' | 'pending' | ''
+interface FilterOption {
+  value: Filter
+  label: string
+  count: number
+  /** Said when the tab has no posts. */
+  empty: string
+}
 /** Unset until the record loads and picks the first tab with posts. */
 const filter = shallowRef<Filter>()
 /**
- * New and updated posts count finished members only, so running ones show in
- * no tab until they finish (the summary counts them). A record with members
+ * Running members are only under 正在采集, shown while there are any; once
+ * finished they move to the tab of their outcome. New and updated count
+ * finished members only, like the record's counts. A record with members
  * from before new and updated were told apart lists them all instead.
  */
-const filters = computed(() => {
+const filters = computed((): FilterOption[] => {
   const m = record.value?.members
   if (!m) return []
-  const problem = {
+  const options: FilterOption[] =
+    m.added !== undefined && m.updated !== undefined
+      ? [
+          {
+            value: 'added',
+            label: '新增记录',
+            count: m.added,
+            empty: '没有新增的帖子。',
+          },
+          {
+            value: 'updated',
+            label: '更新记录',
+            count: m.updated,
+            empty: '没有更新的帖子。',
+          },
+        ]
+      : [
+          {
+            value: '',
+            label: '全部',
+            count: m.complete + m.partial + m.failed + m.pending,
+            empty: '没有帖子。',
+          },
+        ]
+  options.push({
     value: 'problem',
     label: '异常记录',
     count: m.failed + m.partial,
     empty: '没有异常的帖子。',
-  } as const
-  if (m.added === undefined || m.updated === undefined)
-    return [
-      {
-        value: '',
-        label: '全部',
-        count: m.complete + m.partial + m.failed + m.pending,
-        empty: '没有帖子。',
-      },
-      problem,
-    ] as const
-  return [
-    {
-      value: 'added',
-      label: '新增记录',
-      count: m.added,
-      empty: '没有新增的帖子。',
-    },
-    {
-      value: 'updated',
-      label: '更新记录',
-      count: m.updated,
-      empty: '没有更新的帖子。',
-    },
-    problem,
-  ] as const
+  })
+  // Last, so the other tabs stay put when it goes away.
+  if (m.pending)
+    options.push({
+      value: 'pending',
+      label: '正在采集',
+      count: m.pending,
+      empty: '没有正在采集的帖子。',
+    })
+  return options
 })
 const currentFilter = computed(() =>
   filters.value.find((option) => option.value === filter.value),
@@ -693,6 +709,9 @@ function openCollection(id: string, event?: MouseEvent) {
 }
 .tab {
   flex: 1;
+  /* Four tabs may not fit a narrow phone on one line; the count wraps. */
+  min-width: 0;
+  padding: 4px;
   min-height: 32px;
   border-radius: 8px;
   font-size: 14px;
