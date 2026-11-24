@@ -72,14 +72,13 @@ interface RevisionRow {
   source_state_at: number | null
   saved_at: number | null
   revision_id: string
-  revision_at: number
   payload: string
   capture_id: string
 }
 
 const REVISION_COLUMNS = `a.id, a.url, a.external_id, a.provider_id,
   a.observed_at, a.created_at, a.source_state, a.source_state_at,
-  l.created_at AS saved_at, r.id AS revision_id, r.created_at AS revision_at,
+  l.created_at AS saved_at, r.id AS revision_id,
   r.payload, r.capture_id`
 
 function view(
@@ -321,71 +320,6 @@ export function getHistoryPoint(
     assetsByCapture(ctx, [row.capture_id]).get(row.capture_id) ?? [],
   )
   applyMetrics(collection.graph, captureMetrics(ctx, captureId))
-  linkSavedEntities(ctx, collection)
-  attachIncomingRelations(ctx, collection)
-  collection.storage_bytes = collectionStorage(ctx, id)
-  return collection
-}
-
-export interface RevisionInfo {
-  id: string
-  created_at: string
-}
-
-const REVISION_PAGE = 20
-
-/** A saved collection's revisions, newest first. */
-export function listRevisions(
-  ctx: CaptureContext,
-  id: string,
-  cursor?: string,
-): Page<RevisionInfo> {
-  const after = cursor ? decodeHistoryCursor(cursor, id) : undefined
-  assertSaved(ctx, id)
-  const rows = ctx.db.all<{ id: string; created_at: number }>(sql`
-    SELECT id, created_at FROM revisions
-    WHERE collection_id = ${id}
-      ${after ? sql`AND (created_at, id) < (${after.at}, ${after.id})` : sql``}
-    ORDER BY created_at DESC, id DESC
-    LIMIT ${REVISION_PAGE + 1}`)
-  const items = rows.slice(0, REVISION_PAGE)
-  const last = items.at(-1)
-  return {
-    items: items.map((row) => ({
-      id: row.id,
-      created_at: iso(row.created_at),
-    })),
-    ...(rows.length > REVISION_PAGE && last
-      ? { next_cursor: encodeCursor(last.created_at, last.id, id) }
-      : {}),
-  }
-}
-
-/**
- * One past revision of a saved collection, as it was captured: its own
- * capture's media and counts, observed when the revision was made.
- */
-export function getRevision(
-  ctx: CaptureContext,
-  id: string,
-  revisionId: string,
-): CollectionView {
-  assertSaved(ctx, id)
-  const row = isUUID(revisionId)
-    ? ctx.db.get<RevisionRow>(sql`
-        SELECT ${sql.raw(REVISION_COLUMNS)}
-        FROM collections a
-        JOIN library l ON l.collection_id = a.id
-        JOIN revisions r ON r.collection_id = a.id
-        WHERE a.id = ${id} AND r.id = ${revisionId}`)
-    : undefined
-  if (!row) throw new AppError('not_found')
-  const collection = view(
-    { ...row, observed_at: row.revision_at },
-    parseJson<Payload>(row.payload),
-    assetsByCapture(ctx, [row.capture_id]).get(row.capture_id) ?? [],
-  )
-  applyMetrics(collection.graph, captureMetrics(ctx, row.capture_id))
   linkSavedEntities(ctx, collection)
   attachIncomingRelations(ctx, collection)
   collection.storage_bytes = collectionStorage(ctx, id)

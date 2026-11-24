@@ -2,13 +2,7 @@ import { Hono } from 'hono'
 import * as v from 'valibot'
 import { getEntity } from '#library/entities.ts'
 import { listAuthors, listCollections } from '#library/list.ts'
-import {
-  getCollection,
-  getHistoryPoint,
-  getRevision,
-  listHistory,
-  listRevisions,
-} from '#library/read.ts'
+import { getCollection, getHistoryPoint, listHistory } from '#library/read.ts'
 import { getSource, listSources } from '#library/sources.ts'
 import { Cursor, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -93,20 +87,6 @@ export function libraryRoutes(ctx: AccountsContext) {
             c.req.valid('query').cursor || undefined,
           ),
         ),
-      )
-
-      .get('/collections/:id/revisions', query(Cursor), (c) =>
-        c.json(
-          listRevisions(
-            ctx,
-            c.req.param('id'),
-            c.req.valid('query').cursor || undefined,
-          ),
-        ),
-      )
-
-      .get('/collections/:id/revisions/:revision', (c) =>
-        c.json(getRevision(ctx, c.req.param('id'), c.req.param('revision'))),
       )
 
       .get('/collections/:id/history/:capture', (c) =>
