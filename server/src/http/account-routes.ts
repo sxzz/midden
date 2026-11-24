@@ -14,7 +14,7 @@ import {
   readAnnotation,
   updateAnnotation,
 } from '#library/annotations.ts'
-import { deleteCollection } from '#library/delete.ts'
+import { deleteCollection, deleteCollections } from '#library/delete.ts'
 import { storageUsed } from '#library/read.ts'
 import { deleteTag, renameTag } from '#library/tags.ts'
 import { json, type Env } from './validate.ts'
@@ -130,6 +130,26 @@ export function accountRoutes(ctx: AccountsContext) {
       deleteCollection(ctx.db, c.req.param('id'))
       return c.body(null, 204)
     })
+
+    .post(
+      '/collections/delete',
+      json(
+        v.strictObject({
+          ids: v.pipe(v.array(v.string()), v.minLength(1)),
+          with_posts: v.optional(v.boolean()),
+          dry_run: v.optional(v.boolean()),
+        }),
+      ),
+      (c) => {
+        const input = c.req.valid('json')
+        return c.json(
+          deleteCollections(ctx.db, input.ids, {
+            withPosts: input.with_posts,
+            dryRun: input.dry_run,
+          }),
+        )
+      },
+    )
 
     .get('/usage', (c) => c.json({ used_bytes: storageUsed(ctx.db) }))
 }

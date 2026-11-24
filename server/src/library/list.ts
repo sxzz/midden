@@ -334,25 +334,30 @@ const headOf = (column: string) =>
   `(SELECT hk.revision_id FROM catalog hk WHERE hk.collection_id = ${column})`
 
 /**
- * Collections directly related to the requested one, with how: either the
- * candidate's head root points at the requested identity (also by its
- * aliases), or the requested collection's root (in any revision) points at
- * the candidate's identity. A provisional target identity resolves through
- * the candidate's aliases. Context further away (a quoted post's author, an
- * author's bio) never relates.
+ * Collections directly related to each requested one, with how, as
+ * `related_edges(requested_id, collection_id, kind)`: either the candidate's
+ * head root points at the requested identity (also by its aliases), or the
+ * requested collection's root (in any revision) points at the candidate's
+ * identity. A provisional target identity resolves through the candidate's
+ * aliases. Context further away (a quoted post's author, an author's bio)
+ * never relates. `requested` selects the requested collections as `id`; a
+ * collection may relate to itself, and candidates need not be saved.
  */
-const relatedEdgesSQL = (requested: string) => sql`
+export const relatedEdgesSQL = (requested: SQL) => sql`
+  requested AS MATERIALIZED (${requested}),
   requested_roots AS MATERIALIZED (
-    SELECT identity.platform, identity.kind, identity.external_id
-    FROM library rl
+    SELECT rl.collection_id AS requested_id,
+      identity.platform, identity.kind, identity.external_id
+    FROM requested
+    CROSS JOIN library rl ON rl.collection_id = requested.id
     JOIN revision_entities target
       ON target.revision_id = ${sql.raw(headOf('rl.collection_id'))} AND target.is_root = 1
     JOIN entity_versions tv ON tv.id = target.entity_version_id
     JOIN entities identity ON identity.id = tv.entity_id
-    WHERE rl.collection_id = ${requested}
     UNION
-    SELECT identity.platform, identity.kind, alias.external_id
-    FROM library rl
+    SELECT rl.collection_id, identity.platform, identity.kind, alias.external_id
+    FROM requested
+    CROSS JOIN library rl ON rl.collection_id = requested.id
     JOIN collections rc ON rc.id = rl.collection_id
     JOIN revision_entities target
       ON target.revision_id = ${sql.raw(headOf('rc.id'))} AND target.is_root = 1
@@ -361,12 +366,13 @@ const relatedEdgesSQL = (requested: string) => sql`
     JOIN collection_identity_aliases alias ON alias.collection_id = rc.id
       AND alias.platform = rc.platform AND alias.kind = rc.kind
       AND alias.object_scope = rc.object_scope
-    WHERE rl.collection_id = ${requested}
   ),
   requested_targets AS MATERIALIZED (
-    SELECT DISTINCT identity.platform, identity.kind, identity.external_id,
+    SELECT DISTINCT rc.id AS requested_id,
+      identity.platform, identity.kind, identity.external_id,
       relation.kind AS relation_kind
-    FROM collections rc
+    FROM requested
+    CROSS JOIN collections rc ON rc.id = requested.id
     JOIN library rl ON rl.collection_id = rc.id
     JOIN revisions rr ON rr.collection_id = rc.id
     JOIN entity_relations relation ON relation.revision_id = rr.id
@@ -376,12 +382,11 @@ const relatedEdgesSQL = (requested: string) => sql`
       AND target.entity_key = relation.target_key
     JOIN entity_versions tv ON tv.id = target.entity_version_id
     JOIN entities identity ON identity.id = tv.entity_id
-    WHERE rc.id = ${requested}
   ),
-  -- CROSS JOIN keeps SQLite walking out from the requested collection's
+  -- CROSS JOIN keeps SQLite walking out from the requested collections'
   -- few identities instead of scanning every relation.
   related_edges AS MATERIALIZED (
-    SELECT rv.collection_id, relation.kind
+    SELECT requested_roots.requested_id, rv.collection_id, relation.kind
     FROM requested_roots
     CROSS JOIN entities related_identity ON related_identity.platform = requested_roots.platform
       AND related_identity.kind = requested_roots.kind
@@ -395,7 +400,8 @@ const relatedEdgesSQL = (requested: string) => sql`
     CROSS JOIN revisions rv ON rv.id = relation.revision_id
     WHERE rv.id = ${sql.raw(headOf('rv.collection_id'))}
     UNION ALL
-    SELECT rv.collection_id, requested_targets.relation_kind
+    SELECT requested_targets.requested_id, rv.collection_id,
+      requested_targets.relation_kind
     FROM requested_targets
     CROSS JOIN entities candidate_identity ON candidate_identity.platform = requested_targets.platform
       AND candidate_identity.kind = requested_targets.kind
@@ -406,7 +412,8 @@ const relatedEdgesSQL = (requested: string) => sql`
     CROSS JOIN revisions rv ON rv.id = candidate_root.revision_id
     WHERE rv.id = ${sql.raw(headOf('rv.collection_id'))}
     UNION ALL
-    SELECT candidate.id, requested_targets.relation_kind
+    SELECT requested_targets.requested_id, candidate.id,
+      requested_targets.relation_kind
     FROM requested_targets
     CROSS JOIN collection_identity_aliases alias ON alias.external_id = requested_targets.external_id
     JOIN collections candidate ON candidate.id = alias.collection_id
@@ -419,10 +426,14 @@ const relatedEdgesSQL = (requested: string) => sql`
     JOIN entities candidate_identity ON candidate_identity.id = candidate_version.entity_id
       AND candidate_identity.platform = requested_targets.platform
       AND candidate_identity.kind = requested_targets.kind
-  ),
+  )`
+
+/** One collection's related ones, with how, as `related(collection_id, kinds)`. */
+const relatedSQL = (requested: string) => sql`
+  ${relatedEdgesSQL(sql`SELECT ${requested} AS id`)},
   related AS MATERIALIZED (
     SELECT collection_id, json_group_array(DISTINCT kind) AS kinds
-    FROM related_edges WHERE collection_id <> ${requested}
+    FROM related_edges WHERE collection_id <> requested_id
     GROUP BY collection_id
   )`
 
@@ -539,7 +550,7 @@ function select(input: CollectionFilter, narrow?: Narrowing): Selection {
   }
   return {
     checked,
-    ctes: related ? sql`WITH ${relatedEdgesSQL(related)}` : sql``,
+    ctes: related ? sql`WITH ${relatedSQL(related)}` : sql``,
     source: related ? RELATED : SAVED,
     where: conditions.length ? sql.join(conditions, sql` AND `) : sql`1 = 1`,
   }
@@ -669,7 +680,7 @@ export function listCollections(
   if (related)
     page.total_storage_bytes =
       ctx.db.get<{ bytes: number }>(sql`
-        WITH ${relatedEdgesSQL(related)}
+        WITH ${relatedSQL(related)}
         SELECT coalesce(sum(k.storage_bytes), 0) AS bytes
         FROM ${sql.raw(RELATED)}
         WHERE ${types.length ? rootTypeSQL(types) : sql`1 = 1`}`)?.bytes ?? 0

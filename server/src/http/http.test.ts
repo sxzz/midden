@@ -135,6 +135,26 @@ describe('api', () => {
     expect(
       await (await call(`/collections/${collectionId}/update`)).json(),
     ).toEqual({ record: { id: update.id, done: true }, older: false })
+
+    // Several at once, counted first.
+    const remove = (body: object) =>
+      call('/collections/delete', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
+    const counts = {
+      profiles: 0,
+      posts: 1,
+      related: 0,
+      kept: { listed: 0, saved: 0, annotated: 0, quoted: 0 },
+    }
+    const dry = await remove({ ids: [collectionId], dry_run: true })
+    expect(await dry.json()).toEqual(counts)
+    expect((await remove({ ids: [] })).status).toBe(400)
+    expect(
+      await (await remove({ ids: [collectionId], with_posts: true })).json(),
+    ).toEqual(counts)
+    expect((await remove({ ids: [collectionId] })).status).toBe(404)
   })
 
   test('maps errors to the statuses and texts the web app knows', async () => {
