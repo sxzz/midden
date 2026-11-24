@@ -8,7 +8,8 @@ function unescape(token: string): string {
   return token.replaceAll('~1', '/').replaceAll('~0', '~')
 }
 
-function tokens(pointer: string): string[] | undefined {
+/** A JSON pointer's reference tokens, unescaped; undefined if malformed. */
+export function tokens(pointer: string): string[] | undefined {
   if (!pointer.startsWith('/')) return undefined
   return pointer.slice(1).split('/').map(unescape)
 }
