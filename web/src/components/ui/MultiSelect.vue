@@ -16,7 +16,7 @@ const props = withDefaults(
   }>(),
   { searchable: true },
 )
-const emit = defineEmits<{ search: [query: string]; more: [] }>()
+const emit = defineEmits<{ search: [query: string]; more: []; open: [] }>()
 const selected = defineModel<string[]>({ required: true })
 const query = shallowRef('')
 const open = shallowRef(false)
@@ -83,7 +83,10 @@ function navigate(event: KeyboardEvent) {
     class="multi-select"
     @keydown.esc="close"
     @toggle="
-      (event: Event) => (open = (event.target as HTMLDetailsElement).open)
+      (event: Event) => {
+        open = (event.target as HTMLDetailsElement).open
+        if (open) emit('open')
+      }
     "
   >
     <summary :aria-label="label">
@@ -141,9 +144,15 @@ function navigate(event: KeyboardEvent) {
           {{ loading ? '正在加载…' : '加载更多' }}
         </button>
       </div>
-      <p v-if="!choices.length" class="empty">
-        {{ loading ? '正在搜索…' : '没有匹配项' }}
-      </p>
+      <div
+        v-if="loading && !choices.length"
+        class="skeleton"
+        role="status"
+        :aria-label="`正在加载${label}`"
+      >
+        <span v-for="n in 4" :key="n" />
+      </div>
+      <p v-else-if="!choices.length" class="empty">没有匹配项</p>
     </div>
   </details>
 </template>
@@ -245,6 +254,30 @@ input {
 .clear {
   color: var(--link);
   min-height: 40px;
+}
+.skeleton {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 0 2px;
+}
+.skeleton span {
+  width: 64px;
+  height: 34px;
+  border-radius: 999px;
+  background: linear-gradient(
+    100deg,
+    var(--fill) 25%,
+    var(--card) 45%,
+    var(--fill) 65%
+  );
+  background-size: 240% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton span {
+    animation: none;
+  }
 }
 .empty {
   color: var(--subtle);

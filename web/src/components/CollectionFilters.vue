@@ -286,13 +286,10 @@ async function loadAuthors(more = false) {
     if (request === authorRequest) authorsLoading.value = false
   }
 }
-watch(
-  open,
-  (value) => {
-    if (value && wantsAuthors() && !authorsLoaded.value) void loadAuthors()
-  },
-  { immediate: true },
-)
+// Only once the author list is opened: most visits to the panel never do.
+function openAuthors() {
+  if (!authorsLoaded.value && !authorsLoading.value) void loadAuthors()
+}
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 onUnmounted(() => clearTimeout(searchTimer))
 function searchAuthors(query: string) {
@@ -449,16 +446,8 @@ const tagFilter = computed({
         </p>
       </div>
       <template v-if="posts">
-        <div
-          v-if="!hideAuthors && !authorsLoaded && authorsLoading"
-          class="author-skeleton"
-          role="status"
-          aria-label="正在加载作者"
-        >
-          <span v-for="n in 4" :key="n" />
-        </div>
         <MultiSelect
-          v-else-if="!hideAuthors"
+          v-if="!hideAuthors"
           v-model="form.authors"
           label="作者"
           remote
@@ -466,6 +455,7 @@ const tagFilter = computed({
           :names="authorNames"
           :loading="authorsLoading"
           :more="!!authorsNext"
+          @open="openAuthors"
           @search="searchAuthors"
           @more="loadAuthors(true)"
         />
@@ -548,24 +538,6 @@ const tagFilter = computed({
 </template>
 
 <style scoped>
-.author-skeleton {
-  display: flex;
-  gap: 8px;
-  padding: 14px var(--inset);
-}
-.author-skeleton span {
-  width: 64px;
-  height: 30px;
-  border-radius: 15px;
-  background: linear-gradient(
-    100deg,
-    var(--fill) 25%,
-    var(--card) 45%,
-    var(--fill) 65%
-  );
-  background-size: 240% 100%;
-  animation: skeleton-shimmer 1.5s ease-in-out infinite;
-}
 .filters {
   padding: 8px var(--gutter) 4px;
 }

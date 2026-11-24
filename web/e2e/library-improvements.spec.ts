@@ -93,15 +93,17 @@ test('restores sort controls and opens author links in a new tab', async ({
   await expect(page).toHaveURL(/#\/$/)
 })
 
-test('author loading uses skeletons and post type filters update the request', async ({
+test('authors load with skeletons once their list opens; post type filters update the request', async ({
   page,
 }) => {
   const { promise: pending, resolve: finishAuthors } =
     Promise.withResolvers<void>()
   let query = new URLSearchParams()
+  let authorRequests = 0
   await page.route('**/v1/**', async (route) => {
     const url = new URL(route.request().url())
     if (url.pathname === '/v1/collections/authors') {
+      authorRequests++
       await pending
       return route.fulfill({ json: { items: [] } })
     }
@@ -112,10 +114,16 @@ test('author loading uses skeletons and post type filters update the request', a
   })
   await page.goto('/app/')
   await page.getByRole('button', { name: /^筛选/ }).click()
-  await expect(page.locator('.author-skeleton')).toBeVisible()
-  await expect(page.locator('.author-skeleton')).toHaveText('')
+  // Opening the panel alone does not fetch authors.
+  await expect(page.locator('summary[aria-label="作者"]')).toBeVisible()
+  expect(authorRequests).toBe(0)
+  await page.locator('summary[aria-label="作者"]').click()
+  const skeleton = page.locator('.multi-select .skeleton')
+  await expect(skeleton).toBeVisible()
+  await expect(skeleton).toHaveText('')
   finishAuthors()
-  await expect(page.locator('.author-skeleton')).toHaveCount(0)
+  await expect(skeleton).toHaveCount(0)
+  expect(authorRequests).toBe(1)
   await page.getByRole('combobox', { name: '帖子类型' }).selectOption('quote')
   await expect.poll(() => query.get('post_type')).toBe('quote')
 })
