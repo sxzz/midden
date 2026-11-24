@@ -146,7 +146,9 @@ test('opens a profile’s follow graph, with kinds to choose and more to load', 
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
 })
 
-test('marks the graph by a viewer account', async ({ page }) => {
+test('marks the graph by a viewer account, and starts a comparison from it', async ({
+  page,
+}) => {
   await page.route('https://telegram.org/**', (route) =>
     route.fulfill({ body: '' }),
   )
@@ -202,6 +204,10 @@ test('marks the graph by a viewer account', async ({ page }) => {
         },
       })
     }
+    if (url.pathname === '/v1/collections/compare')
+      return route.fulfill({
+        json: { accounts: [], items: [], total: 0, edges: [], combos: [] },
+      })
     return route.fulfill({ json: url.pathname === '/v1/tags' ? [] : {} })
   })
   await page.goto(`/app/#/collection/${profileId}/graph`)
@@ -240,4 +246,18 @@ test('marks the graph by a viewer account', async ({ page }) => {
   await expect.poll(() => asked.at(-1)?.get('viewer')).toBe(OTHER)
   await expect(page).toHaveURL(/viewer=x(%2F|\/)x\.profile(%2F|\/)8/)
   await expect(chip).toHaveText(/^与 @other 的关系/)
+
+  // 对比: the profile and the accounts picked.
+  await page.getByRole('button', { name: '对比', exact: true }).click()
+  await page.locator('.compare summary').click()
+  const options = page.locator('.compare [role=option]')
+  // The profile itself is not offered.
+  await expect(options).toHaveText(['我 @me', '别人 @other'])
+  await options.filter({ hasText: '@me' }).click()
+  await page.getByRole('button', { name: '对比 2 个账号' }).click()
+  await expect(page).toHaveURL(/#\/compare\?/)
+  const address = new URLSearchParams(page.url().split('?', 2)[1])
+  expect(address.getAll('rel_of')).toEqual(['x/x.profile/100', OWN])
+  expect(address.get('viewer')).toBe(OTHER)
+  await expect(page.locator('h1')).toHaveText('关系对比')
 })

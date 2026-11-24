@@ -18,13 +18,14 @@ import { perspectiveName } from '../relation-filter'
 import { collectionRoute, shareSlug } from '../share'
 import { formatCount } from '../trends'
 import GraphNodeCard from './GraphNodeCard.vue'
+import PerspectivePicker from './PerspectivePicker.vue'
 import Spinner from './ui/Spinner.vue'
 import ViewerBar from './ViewerBar.vue'
 import ViewerMark from './ViewerMark.vue'
 // 关系图谱: a profile, the accounts it follows and that follow it, and the
 // follows among them, drawn with sigma (the renderer loads with this page),
 // or listed by kind. The owner may mark the accounts by another account's
-// follows (the viewer).
+// follows (the viewer) and compare the profile with others.
 const props = defineProps<{ id: string; showSensitive?: boolean }>()
 const graph = shallowRef<FollowGraph>()
 const error = shallowRef('')
@@ -145,6 +146,20 @@ function center(id: string) {
 function open(id: string) {
   void router.push(collectionRoute(id))
 }
+
+/** 「对比」: other accounts to compare this one with. */
+const comparing = shallowRef(false)
+const others = shallowRef<string[]>([])
+const centerKey = computed(() => graph.value?.nodes[0]?.key ?? '')
+function compare() {
+  void router.push({
+    name: 'compare',
+    query: {
+      rel_of: [centerKey.value, ...others.value],
+      ...(viewer.value ? { viewer: viewer.value } : {}),
+    },
+  })
+}
 </script>
 
 <template>
@@ -191,6 +206,41 @@ function open(id: string) {
           :marked="marked"
           @change="setViewer"
         />
+        <div v-if="graph && centerKey" class="compare">
+          <button
+            v-if="!comparing"
+            type="button"
+            class="compare-start"
+            @click="comparing = true"
+          >
+            对比
+          </button>
+          <template v-else>
+            <div class="picker">
+              <PerspectivePicker
+                v-model="others"
+                label="对比"
+                empty=""
+                :exclude="[centerKey]"
+              />
+            </div>
+            <button
+              type="button"
+              class="compare-go"
+              :disabled="!others.length"
+              @click="compare"
+            >
+              对比 {{ others.length + 1 }} 个账号
+            </button>
+            <button
+              type="button"
+              class="compare-cancel"
+              @click="((comparing = false), (others = []))"
+            >
+              取消
+            </button>
+          </template>
+        </div>
       </template>
       <p v-if="error" class="banner" role="alert">{{ error }}</p>
       <p v-if="canvasError" class="banner" role="alert">{{ canvasError }}</p>
@@ -399,6 +449,44 @@ h2.mutual .dot {
 }
 .modes button:disabled {
   opacity: 0.4;
+}
+.compare {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.compare .picker {
+  flex: 1 1 220px;
+  min-width: 0;
+  border-radius: var(--radius);
+  background: var(--card);
+  overflow: hidden;
+}
+.compare button {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 17px;
+  font-size: 14px;
+}
+.compare-start,
+.compare-cancel {
+  background: var(--card);
+  color: var(--link);
+  box-shadow: inset 0 0 0 1px var(--separator);
+}
+.compare-go {
+  background: var(--link);
+  color: #fff;
+  font-weight: 600;
+}
+.compare-go:disabled {
+  opacity: 0.4;
+}
+.compare button:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
 }
 .lists {
   margin: 8px 4px 0;

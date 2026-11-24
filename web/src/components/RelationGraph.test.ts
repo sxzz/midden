@@ -400,3 +400,37 @@ it('never marks or compares behind a public link', async () => {
     route.query = {}
   }
 })
+
+it('compares the profile with accounts picked', async () => {
+  const { el } = await mount((path) =>
+    path.startsWith('/collections/perspectives')
+      ? {
+          items: [
+            { id: 'x/x.profile/7', name: '甲', following: {}, followers: {} },
+            { id: 'c', name: '中心', following: {}, followers: {} },
+          ],
+        }
+      : graph(),
+  )
+  ;(el.querySelector('.compare-start') as HTMLButtonElement).click()
+  await settle()
+  const picker = el.querySelector<HTMLDetailsElement>('.compare details')!
+  picker.open = true
+  picker.dispatchEvent(new Event('toggle'))
+  await vi.waitFor(() =>
+    // The profile itself is not offered.
+    expect([...picker.querySelectorAll('[role=option]')].map(text)).toEqual([
+      '甲',
+    ]),
+  )
+  const go = el.querySelector<HTMLButtonElement>('.compare-go')!
+  expect(go.disabled).toBe(true)
+  picker.querySelector<HTMLButtonElement>('[role=option]')!.click()
+  await settle()
+  expect(text(go)).toBe('对比 2 个账号')
+  go.click()
+  expect(push).toHaveBeenLastCalledWith({
+    name: 'compare',
+    query: { rel_of: ['c', 'x/x.profile/7'] },
+  })
+})

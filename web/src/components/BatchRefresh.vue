@@ -10,6 +10,8 @@ const props = defineProps<{
   selected: string[]
   /** Every collection currently listed, for selecting them all at once. */
   listed: string[]
+  /** The selected accounts' keys, which may be compared. */
+  profiles?: string[]
 }>()
 const emit = defineEmits<{
   select: [ids: string[]]
@@ -48,6 +50,10 @@ function onStarted(record: string) {
   sheet.value = false
   started.value = { record, count: props.selected.length }
   emit('started')
+}
+function compare(keys: string[]) {
+  menu.value = false
+  void router.push({ name: 'compare', query: { rel_of: keys } })
 }
 function openRecord() {
   const record = started.value?.record
@@ -117,6 +123,8 @@ function openRecord() {
   <SelectionMenuSheet
     :open="menu"
     :count="selected.length"
+    :profiles="profiles"
+    @compare="compare"
     @remove-media="openFromMenu('media')"
     @delete="openFromMenu('delete')"
     @cancel="menu = false"

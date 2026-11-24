@@ -115,6 +115,7 @@ const stats = computed(() => route.name === 'collection-stats')
 const changes = computed(() => route.name === 'collection-changes')
 const follows = computed(() => route.name === 'collection-follows')
 const graphPage = computed(() => route.name === 'collection-graph')
+const comparePage = computed(() => route.name === 'compare')
 /** Any page reached from the library, which is where back returns to. */
 const nested = computed(
   () =>
@@ -126,7 +127,8 @@ const nested = computed(
     stats.value ||
     changes.value ||
     follows.value ||
-    graphPage.value,
+    graphPage.value ||
+    comparePage.value,
 )
 const {
   folders,
@@ -156,11 +158,13 @@ const title = computed(() =>
               ? '关注变化'
               : graphPage.value
                 ? '关系图谱'
-                : id.value
-                  ? '收藏详情'
-                  : folderId.value
-                    ? folder.value?.name || '收藏夹'
-                    : '我的收藏',
+                : comparePage.value
+                  ? '关系对比'
+                  : id.value
+                    ? '收藏详情'
+                    : folderId.value
+                      ? folder.value?.name || '收藏夹'
+                      : '我的收藏',
 )
 // Telegram draws its own back button; only stand in for it elsewhere.
 const standalone = !host()?.initData
@@ -192,6 +196,7 @@ function viewKey(target: RouteLocationNormalized) {
     return `follows:${String(target.params.id)}`
   if (target.name === 'collection-graph')
     return `graph:${String(target.params.id)}`
+  if (target.name === 'compare') return 'compare'
   const key = String(target.params.id)
   // Returning to a collection we deleted must reload, not show the cached copy.
   return removed.value.includes(key) ? `${key}#removed` : key
@@ -504,7 +509,7 @@ const viewProps = computed(() => {
     }
   if (captures.value || capture.value) return { onSaved: saved }
   if (stats.value) return {}
-  if (changes.value || follows.value || graphPage.value)
+  if (changes.value || follows.value || graphPage.value || comparePage.value)
     return { showSensitive: showSensitive.value }
   if (id.value)
     return {

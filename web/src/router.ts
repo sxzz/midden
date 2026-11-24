@@ -16,6 +16,7 @@ import PublicHome from './components/PublicHome.vue'
 
 // The graph page brings sigma and graphology: loaded only when opened.
 const RelationGraph = () => import('./components/RelationGraph.vue')
+const RelationCompare = () => import('./components/RelationCompare.vue')
 
 const SHARE = String.raw`/s/:slug([\w-]+)`
 // Pages inside a share take the collection; the slug is the share's own.
@@ -64,6 +65,8 @@ export const router = createRouter({
       component: RelationGraph,
       props: true,
     },
+    // Several accounts' relations side by side; the owner's alone.
+    { path: '/compare', name: 'compare', component: RelationCompare },
     { path: '/accounts', name: 'accounts', component: AccountsView },
     { path: '/captures', name: 'captures', component: CaptureRecords },
     {

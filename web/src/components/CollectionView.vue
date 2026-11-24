@@ -6,6 +6,8 @@ import {
   listsProfiles,
   storageSize,
 } from '../presentation'
+import { accountKey } from '../relation-filter'
+import { isProfileEntity } from '../relations'
 import { shareSlug } from '../share'
 import BatchRefresh from './BatchRefresh.vue'
 import CollectionAlbum from './CollectionAlbum.vue'
@@ -70,6 +72,16 @@ const selecting = shallowRef(false)
 const batch = shallowRef(0)
 const selected = shallowRef<string[]>([])
 const listed = computed(() => props.items.map((a) => a.id))
+/** The selected accounts' keys, for comparing their relations. */
+const selectedProfiles = computed(() => {
+  const chosen = new Set(selected.value)
+  return props.items.flatMap((a) => {
+    const root = a.graph?.entities.find((e) => e.key === a.graph?.root)
+    return chosen.has(a.id) && root && isProfileEntity(root)
+      ? [accountKey(root)]
+      : []
+  })
+})
 function startSelecting() {
   selected.value = []
   selecting.value = true
@@ -216,6 +228,7 @@ const storage = computed(() =>
     :key="batch"
     :selected="selected"
     :listed="listed"
+    :profiles="selectedProfiles"
     @select="(value) => (selected = value)"
     @started="selecting = false"
     @delete="deleting = true"
