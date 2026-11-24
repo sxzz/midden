@@ -12,7 +12,7 @@ export type ShareTarget = 'folder' | 'collection'
 /** A public link as its owner sees it. */
 export interface Share {
   id: string
-  /** The secret part of the public address. */
+  /** The public address: random, or set by the owner. */
   slug: string
   target: ShareTarget
   target_id: string
@@ -23,7 +23,15 @@ export interface Share {
 
 /** 18 random bytes: 144 bits, 24 characters of base64url. */
 const SLUG_BYTES = 18
-const SLUG = /^[\w-]{24}$/
+const RANDOM_SLUG = /^[\w-]{24}$/
+/**
+ * A slug the owner picks: lowercase letters, digits and `-`, 3 to 64 long,
+ * starting and ending with a letter or digit. Guessable by design.
+ */
+const CUSTOM_SLUG = /^[a-z\d][a-z\d-]{1,62}[a-z\d]$/
+
+const isSlug = (slug: string) =>
+  RANDOM_SLUG.test(slug) || CUSTOM_SLUG.test(slug)
 
 type Row = typeof shares.$inferSelect
 
@@ -64,6 +72,23 @@ function targetExists(db: Executor, row: Row): boolean {
 
 const active = () => isNull(shares.revokedAt)
 
+/** Whether a live link uses this slug. */
+function slugTaken(db: Executor, slug: string): boolean {
+  return !!db
+    .select({ id: shares.id })
+    .from(shares)
+    .where(and(eq(shares.slug, slug), active()))
+    .get()
+}
+
+/** A random slug no live link uses. */
+function randomSlug(db: Executor): string {
+  for (;;) {
+    const slug = randomBytes(SLUG_BYTES).toString('base64url')
+    if (!slugTaken(db, slug)) return slug
+  }
+}
+
 /**
  * Share a folder or a saved collection. A target has at most one live link:
  * sharing it again returns that link.
@@ -96,7 +121,7 @@ export function createShare(
         .insert(shares)
         .values({
           id: newId(),
-          slug: randomBytes(SLUG_BYTES).toString('base64url'),
+          slug: randomSlug(tx),
           targetKind: input.target,
           targetId: input.id,
         })
@@ -153,6 +178,48 @@ export function revokeShare(db: Executor, id: string): void {
 }
 
 /**
+ * Give a live link another slug, or a new random one when `slug` is null.
+ * The old slug stops working at once; there are no aliases. A slug another
+ * live link uses is a conflict; one only revoked or replaced links used is
+ * free again.
+ */
+export function setShareSlug(
+  db: Database,
+  id: string,
+  slug: string | null,
+): Share {
+  if (slug !== null && !CUSTOM_SLUG.test(slug))
+    throw new AppError('invalid_slug')
+  return db.transaction((tx) => {
+    const row = isUUID(id)
+      ? tx
+          .select()
+          .from(shares)
+          .where(and(eq(shares.id, id), active()))
+          .get()
+      : undefined
+    if (!row || !targetExists(tx, row)) throw new AppError('not_found')
+    let next = row
+    if (slug !== row.slug) {
+      if (slug !== null && slugTaken(tx, slug))
+        throw new AppError('conflict', '这个链接已被其他公开分享使用')
+      next = tx
+        .update(shares)
+        .set({ slug: slug ?? randomSlug(tx) })
+        .where(eq(shares.id, row.id))
+        .returning()
+        .get()!
+    }
+    return view(
+      next,
+      next.targetKind === 'folder'
+        ? folderRow(tx, next.targetId)?.name
+        : undefined,
+    )
+  })
+}
+
+/**
  * Stop the links of folders and collections that are gone, so saving the
  * collection again later does not bring an old address back.
  */
@@ -190,7 +257,7 @@ export interface OpenShare {
  * whose target is gone, is simply not found.
  */
 export function openShare(db: Executor, slug: string): OpenShare {
-  const row = SLUG.test(slug)
+  const row = isSlug(slug)
     ? db
         .select()
         .from(shares)

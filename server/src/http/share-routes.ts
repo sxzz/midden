@@ -1,6 +1,11 @@
 import { Hono } from 'hono'
 import * as v from 'valibot'
-import { createShare, listShares, revokeShare } from '#library/shares.ts'
+import {
+  createShare,
+  listShares,
+  revokeShare,
+  setShareSlug,
+} from '#library/shares.ts'
 import { json, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
@@ -24,6 +29,16 @@ export function shareRoutes(ctx: AccountsContext) {
           }),
         ),
         (c) => c.json(createShare(ctx.db, c.req.valid('json'))),
+      )
+
+      // A custom slug, or null for a new random one; the old one stops.
+      .patch(
+        '/shares/:id',
+        json(v.strictObject({ slug: v.nullable(v.string()) })),
+        (c) =>
+          c.json(
+            setShareSlug(ctx.db, c.req.param('id'), c.req.valid('json').slug),
+          ),
       )
 
       .delete('/shares/:id', (c) => {

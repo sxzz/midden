@@ -15,6 +15,7 @@ export type ErrorKind =
   | 'invalid_filter'
   | 'invalid_folder'
   | 'invalid_tag'
+  | 'invalid_slug'
   | 'invalid_cursor'
   | 'invalid_request'
   | 'no_more_pages'
@@ -34,6 +35,8 @@ const messages: Record<ErrorKind, string> = {
   invalid_filter: '筛选条件无效',
   invalid_folder: '收藏夹名称不能为空，最多 64 字',
   invalid_tag: '标签名不能为空，最多 64 字',
+  invalid_slug:
+    '自定义链接只能用小写字母、数字和 -，3 到 64 个字符，不能以 - 开头或结尾',
   invalid_cursor: '翻页位置无效，请刷新后重试',
   invalid_request: '请求无效',
   no_more_pages: '没有更多帖子了',

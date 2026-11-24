@@ -711,3 +711,117 @@ describe('public lists', () => {
     expect(await read(single, '/collections/authors')).toMatchObject(NOT_FOUND)
   })
 })
+
+describe('custom slugs', () => {
+  async function slugs() {
+    const made = await setup()
+    const { c, ids, owner } = made
+    const shareOf = (id: string) =>
+      createShare(c.db, { target: 'collection', id })
+    const patch = async (id: string, slug: string | null) => {
+      const response = await owner(`/shares/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ slug }),
+      })
+      return { status: response.status, body: (await response.json()) as never }
+    }
+    const opens = async (slug: string) => (await made.read(slug)).body
+    return {
+      ...made,
+      a1: shareOf(ids.a1!),
+      m1: shareOf(ids.m1!),
+      patch,
+      opens,
+    }
+  }
+
+  test('setting a slug replaces the old address at once', async () => {
+    const { ids, a1, patch, opens, read } = await slugs()
+    expect(await patch(a1.id, 'my-picks')).toMatchObject({
+      status: 200,
+      body: { id: a1.id, slug: 'my-picks', target_id: ids.a1 },
+    })
+    expect(await opens('my-picks')).toEqual({
+      target: 'collection',
+      collection_id: ids.a1,
+    })
+    expect(await read(a1.slug)).toMatchObject(NOT_FOUND)
+    expect((await read('my-picks', `/collections/${ids.a1}`)).status).toBe(200)
+    // The same slug again changes nothing.
+    expect((await patch(a1.id, 'my-picks')).status).toBe(200)
+
+    await patch(a1.id, 'better')
+    expect(await read('my-picks')).toMatchObject(NOT_FOUND)
+    expect(await opens('better')).toMatchObject({ collection_id: ids.a1 })
+
+    // Back to random: a new random slug, the custom one gone.
+    const reset = (await patch(a1.id, null)).body as { slug: string }
+    expect(reset.slug).toMatch(/^[\w-]{24}$/)
+    expect(reset.slug).not.toBe(a1.slug)
+    expect(await read('better')).toMatchObject(NOT_FOUND)
+    expect(await read(a1.slug)).toMatchObject(NOT_FOUND)
+    expect(await opens(reset.slug)).toMatchObject({ collection_id: ids.a1 })
+  })
+
+  test('a slug a live link uses is taken; a freed one is not', async () => {
+    const { c, ids, a1, m1, patch, opens } = await slugs()
+    await patch(a1.id, 'taken')
+    expect(await patch(m1.id, 'taken')).toEqual({
+      status: 409,
+      body: { error: '这个链接已被其他公开分享使用' },
+    })
+    expect(await opens('taken')).toMatchObject({ collection_id: ids.a1 })
+
+    // Revoked: the slug may name another link; the old one stays revoked.
+    revokeShare(c.db, a1.id)
+    expect((await patch(m1.id, 'taken')).status).toBe(200)
+    expect(await opens('taken')).toMatchObject({ collection_id: ids.m1 })
+    expect((await patch(a1.id, 'other')).status).toBe(404)
+    expect(listShares(c.db).map((s) => s.id)).toEqual([m1.id])
+
+    // Replaced: the slug m1 had is free again.
+    const r1 = createShare(c.db, { target: 'collection', id: ids.r1! })
+    await patch(m1.id, 'moved')
+    expect((await patch(r1.id, 'taken')).status).toBe(200)
+    expect(await opens('taken')).toMatchObject({ collection_id: ids.r1 })
+    expect(await opens('moved')).toMatchObject({ collection_id: ids.m1 })
+  })
+
+  test('only lowercase letters, digits and inner dashes, 3 to 64 long', async () => {
+    const { a1, patch } = await slugs()
+    for (const bad of [
+      'ab',
+      'x'.repeat(65),
+      'Picks',
+      '-abc',
+      'abc-',
+      'a_b',
+      'a b',
+      'a/b',
+      '精选集',
+      '',
+    ])
+      expect(await patch(a1.id, bad)).toMatchObject({
+        status: 400,
+        body: { error: expect.stringContaining('自定义链接') },
+      })
+    for (const good of ['abc', 'a-b', '2026', 'x'.repeat(64)])
+      expect((await patch(a1.id, good)).status).toBe(200)
+  })
+
+  test('only the owner changes a live link', async () => {
+    const { c, a1, patch } = await slugs()
+    expect((await patch(crypto.randomUUID(), 'abc')).status).toBe(404)
+    expect((await patch('nope', 'abc')).status).toBe(404)
+    const app = createApi({ ctx: c })
+    expect(
+      (
+        await app.request(`/shares/${a1.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slug: 'abc' }),
+        })
+      ).status,
+    ).toBe(401)
+  })
+})
