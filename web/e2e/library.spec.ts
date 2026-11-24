@@ -138,9 +138,9 @@ test('browse, filter, history, refresh and remove a saved post', async ({
 test('an ordinary browser logs in with the Telegram Login Widget', async ({
   page,
 }) => {
-  let widget = ''
+  const scripts: string[] = []
   await page.route('https://telegram.org/**', (r) => {
-    widget = r.request().url()
+    scripts.push(r.request().url())
     return r.fulfill({ body: '', contentType: 'text/javascript' })
   })
   let session = false
@@ -169,7 +169,11 @@ test('an ordinary browser logs in with the Telegram Login Widget', async ({
     'data-auth-url',
     new URL('/app/', page.url()).href,
   )
-  expect(widget).toContain('telegram-widget.js')
+  // The owner's app loads the Mini App script, then the widget's.
+  expect(scripts).toEqual([
+    'https://telegram.org/js/telegram-web-app.js',
+    expect.stringContaining('telegram-widget.js'),
+  ])
   await page.screenshot({ path: 'test-results/browser-login.png' })
 
   // Telegram redirects back with the signed fields in the query.
@@ -189,6 +193,48 @@ test('an ordinary browser logs in with the Telegram Login Widget', async ({
   ])
   // The signed fields leave the address bar; the app's own options stay.
   expect(new URL(page.url()).search).toBe('?theme=dark')
+})
+
+test('the Mini App signs in with the launch data in its address', async ({
+  page,
+}) => {
+  // Stands in for Telegram's script, which reads the launch data from the
+  // address as it loads: it must run before the router rewrites it.
+  await page.route('https://telegram.org/js/telegram-web-app.js', (r) =>
+    r.fulfill({
+      contentType: 'text/javascript',
+      body: `(() => {
+        const data = new URLSearchParams(location.hash.slice(1)).get('tgWebAppData') || ''
+        const noop = () => {}
+        window.Telegram = { WebApp: {
+          initData: data, themeParams: {}, colorScheme: 'dark',
+          ready: noop, expand: noop, onEvent: noop, offEvent: noop,
+          BackButton: { show: noop, hide: noop, onClick: noop, offClick: noop },
+        } }
+      })()`,
+    }),
+  )
+  const logins: unknown[] = []
+  let session = false
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path === '/v1/session')
+      return session
+        ? r.fulfill({ json: {} })
+        : r.fulfill({ status: 401, json: { error: '需要登录' } })
+    if (path === '/v1/auth/telegram') {
+      logins.push(r.request().postDataJSON())
+      session = true
+      return r.fulfill({ json: {} })
+    }
+    if (path === '/v1/collections') return r.fulfill({ json: { items: [] } })
+    return r.fulfill({ json: {} })
+  })
+  await page.goto('/app/#tgWebAppData=user%3D42%26hash%3Dabc')
+  await expect(page.locator('h1')).toHaveText('我的收藏')
+  expect(logins).toEqual([{ init_data: 'user=42&hash=abc' }])
+  // Its theme is applied from the start.
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
 })
 
 test('a rejected widget login says so on the login page', async ({ page }) => {

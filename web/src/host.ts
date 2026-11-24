@@ -30,6 +30,28 @@ export function host() {
   return window.Telegram?.WebApp
 }
 
+const SDK = 'https://telegram.org/js/telegram-web-app.js'
+let loading: Promise<void> | undefined
+/** Whether an address is a public link's (分享), read by visitors. */
+export const isPublicAddress = (hash: string) => hash.startsWith('#/s/')
+/**
+ * Load Telegram's Mini App script once, for the owner's app only: a public
+ * page never asks telegram.org for anything. Settles either way, since a
+ * browser signs in without it. Call it before the router first reads the
+ * address, as the script takes the launch data (`tgWebAppData`) from it.
+ */
+export function loadHost(hash = location.hash): Promise<void> {
+  if (host() || isPublicAddress(hash)) return Promise.resolve()
+  loading ??= new Promise((resolve) => {
+    const script = document.createElement('script')
+    script.src = SDK
+    script.addEventListener('load', () => resolve())
+    script.addEventListener('error', () => resolve())
+    document.head.append(script)
+  })
+  return loading
+}
+
 const HEX = /^#[\da-f]{6}$/i
 type RGB = [number, number, number]
 function parse(value: string): RGB {

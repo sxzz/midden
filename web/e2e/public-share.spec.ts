@@ -72,9 +72,12 @@ test('a public link opens a folder and its items without login', async ({
   page,
 }) => {
   const requested: string[] = []
-  await page.route('https://telegram.org/**', (route) =>
-    route.fulfill({ body: '' }),
-  )
+  // A visitor's page never asks telegram.org for anything.
+  const telegram: string[] = []
+  await page.route('https://telegram.org/**', (route) => {
+    telegram.push(route.request().url())
+    return route.fulfill({ body: '' })
+  })
   await page.route('**/media/**', (route) =>
     route.fulfill({ body: png, contentType: 'image/png' }),
   )
@@ -130,6 +133,7 @@ test('a public link opens a folder and its items without login', async ({
   await page.getByRole('button', { name: '返回', exact: true }).click()
   await expect(page.locator('h1')).toHaveText('公开收藏夹')
   expect(requested.every((path) => path.startsWith('/v1/public/'))).toBe(true)
+  expect(telegram).toEqual([])
 })
 
 test('a revoked link says so', async ({ page }) => {

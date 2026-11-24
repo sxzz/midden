@@ -7,7 +7,7 @@ import PublicShare from './components/PublicShare.vue'
 import TelegramLogin from './components/TelegramLogin.vue'
 import AppToast from './components/ui/AppToast.vue'
 import CollectionSkeleton from './components/ui/CollectionSkeleton.vue'
-import { host, setupHost } from './host'
+import { host, loadHost, setupHost } from './host'
 import { takeWidgetLogin, widgetLogin } from './login'
 import { followInternalLink, goBack } from './navigation'
 const router = useRouter()
@@ -44,6 +44,8 @@ async function signIn() {
   // Coming back from the Login Widget, sign in before checking the session.
   const login = takeWidgetLogin()
   const loginError = login ? await widgetLogin(login) : ''
+  // Opened on a public link first, the Mini App script is not loaded yet.
+  await loadHost()
   try {
     await call(client.session.$get())
     ready.value = true
