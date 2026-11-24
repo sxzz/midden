@@ -1,4 +1,8 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import {
+  createRouter,
+  createWebHashHistory,
+  type RouteLocationNormalized,
+} from 'vue-router'
 import AccountsView from './components/AccountsView.vue'
 import CaptureRecordDetail from './components/CaptureRecordDetail.vue'
 import CaptureRecords from './components/CaptureRecords.vue'
@@ -10,6 +14,10 @@ import ProfileChanges from './components/ProfileChanges.vue'
 import PublicHome from './components/PublicHome.vue'
 
 const SHARE = String.raw`/s/:slug([\w-]+)`
+// Pages inside a share take the collection; the slug is the share's own.
+const idOnly = (route: RouteLocationNormalized) => ({
+  id: String(route.params.id),
+})
 
 export const router = createRouter({
   history: createWebHashHistory(import.meta.env.BASE_URL),
@@ -66,21 +74,21 @@ export const router = createRouter({
       path: `${SHARE}/collection/:id([a-f0-9-]+)`,
       name: 'share-collection',
       component: CollectionDetail,
-      props: true,
+      props: idOnly,
       meta: { public: true },
     },
     {
       path: `${SHARE}/collection/:id([a-f0-9-]+)/stats`,
       name: 'share-collection-stats',
       component: CollectionTrends,
-      props: true,
+      props: idOnly,
       meta: { public: true },
     },
     {
       path: `${SHARE}/collection/:id([a-f0-9-]+)/changes`,
       name: 'share-collection-changes',
       component: ProfileChanges,
-      props: true,
+      props: idOnly,
       meta: { public: true },
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
