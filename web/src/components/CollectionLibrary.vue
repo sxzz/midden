@@ -424,7 +424,7 @@ async function updateFilter() {
     await updateFolder(current.id, {
       filter: folderFilter(folderList.query.value),
     })
-    toast('已更新收藏夹')
+    toast('已保存条件')
   } catch (e) {
     toast(errorText(e))
   } finally {
@@ -696,7 +696,7 @@ const viewProps = computed(() => {
         :disabled="busy"
         @click="updateFilter"
       >
-        更新收藏夹
+        保存条件
       </button>
     </div>
     <RouterView v-slot="{ Component, route: viewRoute }">

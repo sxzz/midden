@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, vaporInteropPlugin } from 'vue'
 import { APIError, type Folder } from '../api'
+import { toastState } from '../composables/useToast'
 import { router } from '../router'
 import { mockApi, type Request } from '../testing/api'
 import CollectionLibrary from './CollectionLibrary.vue'
@@ -169,8 +170,9 @@ it('opens a bare folder address at its filter and updates it once changed', asyn
       '筛选条件已修改',
     ),
   )
-  button(el, '更新收藏夹').click()
+  button(el, '保存条件').click()
   await vi.waitFor(() => expect(el.querySelector('.folder-status')).toBeNull())
+  expect(toastState.value?.text).toBe('已保存条件')
   expect(sent('PATCH', `/folders/${FOLDER}`)).toEqual([
     {
       filter: 'entity_type=x.post%2Cinstagram.post&media_type=image&order=asc',
