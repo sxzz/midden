@@ -147,7 +147,7 @@ export function collectionsById(
   return out
 }
 
-function assertSaved(r: Reader, id: string): number {
+export function assertSaved(r: Reader, id: string): number {
   const saved = isUUID(id)
     ? r.db.get<{ at: number }>(
         sql`SELECT created_at AS at FROM library WHERE collection_id = ${id}`,

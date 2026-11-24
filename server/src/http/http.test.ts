@@ -232,6 +232,16 @@ describe('api', () => {
       expect(
         (await call(`/collections/${id}/counts?limit=${limit}`)).status,
       ).toBe(400)
+    // A post has no profile to change.
+    for (const limit of ['', '?limit=1', '?limit=1000'])
+      expect(
+        await (await call(`/collections/${id}/profile-changes${limit}`)).json(),
+      ).toEqual({ items: [] })
+    for (const limit of ['0', '1001', 'all'])
+      expect(
+        (await call(`/collections/${id}/profile-changes?limit=${limit}`))
+          .status,
+      ).toBe(400)
     expect((await call('/collections/authors')).status).toBe(200)
     expect(await (await call(`/collections/${id}/sources`)).json()).toEqual([])
     expect((await call('/collections?sort=nonsense')).status).toBe(400)

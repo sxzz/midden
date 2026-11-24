@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import * as v from 'valibot'
+import { CHANGES_WINDOW, listProfileChanges } from '#library/changes.ts'
 import { getEntity } from '#library/entities.ts'
 import { listAuthors, listCollections } from '#library/list.ts'
 import {
@@ -48,6 +49,19 @@ const CountsQuery = v.object({
       v.transform(Number),
       v.minValue(1),
       v.maxValue(COUNTS_LIMIT),
+    ),
+  ),
+})
+
+/** How many of the newest profile changes to return. */
+const ChangesQuery = v.object({
+  limit: v.optional(
+    v.pipe(
+      v.string(),
+      v.regex(/^\d{1,4}$/),
+      v.transform(Number),
+      v.minValue(1),
+      v.maxValue(CHANGES_WINDOW),
     ),
   ),
 })
@@ -110,6 +124,16 @@ export function libraryRoutes(ctx: AccountsContext) {
 
       .get('/collections/:id/counts', query(CountsQuery), (c) =>
         c.json(listCounts(ctx, c.req.param('id'), c.req.valid('query').limit)),
+      )
+
+      .get('/collections/:id/profile-changes', query(ChangesQuery), (c) =>
+        c.json(
+          listProfileChanges(
+            ctx,
+            c.req.param('id'),
+            c.req.valid('query').limit,
+          ),
+        ),
       )
 
       .get('/collections/:id/history/:capture', (c) =>
