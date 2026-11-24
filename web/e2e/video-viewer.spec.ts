@@ -52,6 +52,9 @@ test.beforeEach(async ({ page }) => {
     })
   })
   await page.goto('/app/')
+  // The app starts once the Telegram script has loaded; wait for the router
+  // to settle the address before a test records it.
+  await expect(page.locator('.row .head')).toBeVisible()
 })
 
 for (const entry of ['list', 'detail']) {
