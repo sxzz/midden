@@ -408,7 +408,8 @@ const tagFilter = computed({
         ><span class="select"
           ><select v-model="form.sort" aria-label="排序">
             <option v-if="posts" value="published">发帖时间</option>
-            <option value="captured">采集时间</option>
+            <option value="saved">添加时间</option>
+            <option value="updated">更新时间</option>
             <option value="storage">存储空间</option></select
           ><ChevronIcon class="select-chevron" /></span
         ><span class="select"

@@ -164,3 +164,53 @@ it('restarts published-time pagination when changing order and preserves the sel
   expect(queries[3]?.get('cursor')).toBe('asc-next')
   expect(queries[3]?.get('order')).toBe('asc')
 })
+
+it('orders posts by when they were added or last updated, dated to match', async () => {
+  const request = mockApi()
+  const queries: URLSearchParams[] = []
+  request.mockImplementation(async (path) => {
+    if (path === '/tags') return []
+    queries.push(new URL(String(path), 'https://example.test').searchParams)
+    return {
+      items: [
+        {
+          id: 'post',
+          url: 'https://example.test/post',
+          text: '关联帖子',
+          author_name: '作者',
+          observed_at: '2024-03-04T12:00:00Z',
+          saved_at: '2023-05-06T12:00:00Z',
+          published_at: '2022-07-08T12:00:00Z',
+          visibility: 'public',
+          revision_id: 'r1',
+          assets: [],
+        },
+      ],
+      total_storage_bytes: 0,
+    }
+  })
+  const el = document.createElement('div')
+  document.body.append(el)
+  const app = createVaporApp(ProfileCollections, {
+    id: 'profile',
+    revisionId: 'r1',
+  })
+  app.mount(el)
+  unmount = () => app.unmount()
+  await vi.waitFor(() => expect(el.textContent).toContain('2022年7月8日'))
+  const sort = el.querySelector<HTMLSelectElement>('[aria-label="排序"]')!
+  expect([...sort.options].map((o) => o.textContent?.trim())).toEqual([
+    '发帖时间',
+    '添加时间',
+    '更新时间',
+    '存储空间',
+  ])
+  sort.value = 'saved'
+  sort.dispatchEvent(new Event('change', { bubbles: true }))
+  await vi.waitFor(() => expect(queries.at(-1)?.get('sort')).toBe('saved'))
+  await vi.waitFor(() => expect(el.textContent).toContain('2023年5月6日'))
+  sort.value = 'updated'
+  sort.dispatchEvent(new Event('change', { bubbles: true }))
+  await vi.waitFor(() => expect(queries.at(-1)?.get('sort')).toBe('updated'))
+  await vi.waitFor(() => expect(el.textContent).toContain('2024年3月4日'))
+})

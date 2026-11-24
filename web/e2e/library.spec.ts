@@ -429,7 +429,7 @@ test('sort selection resets pagination and carries into subsequent pages', async
   await expect(page.getByText('发帖排序 1', { exact: true })).toBeVisible()
   await page
     .getByRole('combobox', { name: '排序', exact: true })
-    .selectOption('captured')
+    .selectOption('updated')
   await expect(page.getByText('采集排序 1', { exact: true })).toBeVisible()
   await expect(page.getByText('发帖排序 1', { exact: true })).toHaveCount(0)
   expect(new URLSearchParams(requests.at(-1)).has('cursor')).toBe(false)
@@ -446,7 +446,7 @@ test('sort selection resets pagination and carries into subsequent pages', async
   await expect(page.getByText('采集排序 末页')).toBeVisible()
   const last = new URLSearchParams(requests.at(-1))
   expect(last.get('order')).toBe('asc')
-  expect(last.get('sort')).toBe('captured')
+  expect(last.get('sort')).toBe('updated')
   expect(last.get('cursor')).toBe('next-page')
 })
 

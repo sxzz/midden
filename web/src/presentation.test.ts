@@ -1,7 +1,9 @@
 import { expect, it } from 'vitest'
 import { safeURL, type Collection, type Entity } from './api'
 import {
+  collectionTime,
   groupCollections,
+  listSort,
   mentionParts,
   present,
   shortDate,
@@ -202,6 +204,33 @@ it('buckets the collection by when it was saved', () => {
     '2025年11月',
   ])
   expect(groups[0].items).toHaveLength(1)
+})
+it('dates and groups a list by the time it is ordered by', () => {
+  const item = {
+    observed_at: '2026-09-29T09:00:00Z',
+    saved_at: '2026-03-01T09:00:00Z',
+    published_at: '2025-11-03T09:00:00Z',
+  } as Collection
+  expect(collectionTime(item, 'published')).toBe(item.published_at)
+  expect(collectionTime(item, 'saved')).toBe(item.saved_at)
+  expect(collectionTime(item, 'updated')).toBe(item.observed_at)
+  // Without a time of its own a row falls back to its newest capture.
+  const bare = { observed_at: item.observed_at } as Collection
+  expect(collectionTime(bare, 'saved')).toBe(item.observed_at)
+  expect(collectionTime(bare, 'published')).toBe(item.observed_at)
+  const now = new Date('2026-10-15T12:00:00Z')
+  const label = (sort: string) => groupCollections([item], now, sort)[0]?.label
+  expect(label('published')).toBe('2025年11月')
+  expect(label('saved')).toBe('3月')
+  expect(label('updated')).toBe('9月')
+})
+it('orders posts by posting time and accounts by when they were added', () => {
+  expect(listSort('')).toBe('published')
+  expect(listSort('entity_type=x.profile,instagram.profile')).toBe('saved')
+  expect(listSort('sort=storage')).toBe('storage')
+  // Old links named the newest-capture order `captured`.
+  expect(listSort('sort=captured')).toBe('updated')
+  expect(listSort('entity_type=x.profile&sort=captured')).toBe('updated')
 })
 it('writes list timestamps the way the chat list does', () => {
   const now = new Date(2026, 8, 29, 12, 0)

@@ -288,15 +288,21 @@ export const listsProfiles = (query: string | URLSearchParams) =>
     .some((type) => type.endsWith('.profile'))
 /**
  * The order of a list: posts by when they were posted unless asked
- * otherwise; accounts have no such time.
+ * otherwise; accounts have no such time, and are kept in the order they
+ * were added, which a refresh never reshuffles.
  */
-export const listSort = (query: string | URLSearchParams) =>
-  new URLSearchParams(query).get('sort') ||
-  (listsProfiles(query) ? 'captured' : 'published')
+export function listSort(query: string | URLSearchParams) {
+  const sort = new URLSearchParams(query).get('sort')
+  // `captured` is the old name of the newest-capture order, kept for links.
+  if (sort === 'captured') return 'updated'
+  return sort || (listsProfiles(query) ? 'saved' : 'published')
+}
+/** The time a list row shows and is grouped by, following its order. */
 export function collectionTime(item: Collection, sort: string) {
-  return sort === 'published' && parseDate(item.published_at)
-    ? item.published_at
-    : item.observed_at
+  if (sort === 'published' && parseDate(item.published_at))
+    return item.published_at
+  if (sort === 'saved' && item.saved_at) return item.saved_at
+  return item.observed_at
 }
 export function groupCollections(
   items: Collection[],
