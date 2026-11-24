@@ -33,12 +33,13 @@ test('select collections and update them as one record', async ({ page }) => {
   await page.goto('/app/')
   await expect(page.getByText('第 1 条收藏')).toBeVisible()
   await page.getByRole('button', { name: '多选' }).click()
+  const bar = page.getByRole('region', { name: '多选' })
   // Selecting toggles rows instead of opening them.
   await page.getByRole('checkbox', { name: /作者1/ }).click()
   await page.getByRole('checkbox', { name: /作者3/ }).click()
   await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(2)
   await expect(page).toHaveURL(/#\/$/)
-  await expect(page.getByText('已选 2 项')).toBeVisible()
+  await expect(bar.getByText('已选 2 项')).toBeVisible()
   await page.getByRole('button', { name: '更新', exact: true }).click()
   // The sheet says what the update covers; posts have no options.
   const sheet = page.getByRole('dialog', { name: '更新 2 条帖子' })
@@ -66,10 +67,11 @@ test('select all toggles every listed collection', async ({ page }) => {
   })
   await page.goto('/app/')
   await page.getByRole('button', { name: '多选' }).click()
+  const bar = page.getByRole('region', { name: '多选' })
   await page.getByRole('button', { name: '全选' }).click()
-  await expect(page.getByText('已选 3 项')).toBeVisible()
+  await expect(bar.getByText('已选 3 项')).toBeVisible()
   await page.getByRole('button', { name: '取消全选' }).click()
-  await expect(page.getByText('已选 0 项')).toBeVisible()
+  await expect(bar.getByText('已选 0 项')).toBeVisible()
   await expect(
     page.getByRole('button', { name: '更新', exact: true }),
   ).toBeDisabled()
