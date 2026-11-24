@@ -16,6 +16,7 @@ import {
   sourceStateNotice,
   warningList,
 } from './presentation'
+import { shareSlug } from './share'
 import { asset, collection, entity } from './testing/api'
 it('keeps captionless social posts empty without using their author summary', () => {
   for (const type of ['x.post', 'instagram.post']) {
@@ -235,6 +236,18 @@ it('orders posts by posting time and accounts by when they were added', () => {
   expect(listSort('entity_type=x.profile,instagram.profile')).toBe('saved')
   expect(listSort('sort=storage')).toBe('storage')
   expect(listSort('entity_type=x.profile&sort=updated')).toBe('updated')
+})
+it('orders a public list only by times the owner shares', () => {
+  shareSlug.value = 'slug'
+  try {
+    expect(listSort('')).toBe('published')
+    expect(listSort('entity_type=x.profile,instagram.profile')).toBe('updated')
+    expect(listSort('sort=updated')).toBe('updated')
+    expect(listSort('sort=storage')).toBe('published')
+    expect(listSort('entity_type=x.profile&sort=saved')).toBe('updated')
+  } finally {
+    shareSlug.value = ''
+  }
 })
 it('writes list timestamps the way the chat list does', () => {
   const now = new Date(2026, 8, 29, 12, 0)

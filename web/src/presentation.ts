@@ -6,7 +6,7 @@ import {
   isProtected,
   profileVersion,
 } from './relations'
-import { collectionHref } from './share'
+import { collectionHref, shareSlug } from './share'
 import type { Asset, Collection, Entity } from './api'
 
 const LINE_BREAK = /\r?\n/
@@ -293,14 +293,24 @@ export function listsProfiles(query: string | URLSearchParams) {
     .split(',')
     .some((type) => type.endsWith('.profile'))
 }
+/** Orders a public link offers: when the owner saved and how much is theirs. */
+const PUBLIC_SORTS = new Set(['published', 'updated'])
 /**
  * The order of a list: posts by when they were posted unless asked
  * otherwise; accounts have no such time, and are kept in the order they
- * were added, which a refresh never reshuffles.
+ * were added, which a refresh never reshuffles. Behind a public link, which
+ * has no save times, the accounts updated last come first.
  */
 export function listSort(query: string | URLSearchParams) {
   const sort = new URLSearchParams(query).get('sort')
-  return sort || (listsProfiles(query) ? 'saved' : 'published')
+  const profiles = listsProfiles(query)
+  if (shareSlug.value)
+    return sort && PUBLIC_SORTS.has(sort)
+      ? sort
+      : profiles
+        ? 'updated'
+        : 'published'
+  return sort || (profiles ? 'saved' : 'published')
 }
 /** The time a list row shows and is grouped by, following its order. */
 export function collectionTime(item: Collection, sort: string) {

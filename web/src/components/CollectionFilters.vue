@@ -26,8 +26,8 @@ import MultiSelect from './ui/MultiSelect.vue'
 import TagFilterChips from './ui/TagFilterChips.vue'
 const tags = shallowRef<Tag[]>([])
 const tagError = shallowRef('')
-// Behind a public link there are no tags to offer: their names are the
-// owner's, and the share refuses a tag filter.
+// Behind a public link there are no tags, save dates or sizes to offer:
+// they are the owner's, and the share refuses filtering or sorting by them.
 const shared = !!shareSlug.value
 async function loadTags() {
   if (shared) return
@@ -88,12 +88,12 @@ function read(query: string) {
     media: (params.get('media_type') || '').split(',').filter(Boolean),
     visibility: params.get('visibility') || '',
     sensitive: params.get('sensitive') || '',
-    from: params.get('from_date') || '',
-    to: params.get('to_date') || '',
+    from: (!shared && params.get('from_date')) || '',
+    to: (!shared && params.get('to_date')) || '',
     /** A relative range such as `7d`, counted again on every visit. */
-    within: params.get('saved_within') || '',
+    within: (!shared && params.get('saved_within')) || '',
     /** Where its days are counted, when not this browser's zone. */
-    zone: params.get('time_zone') || '',
+    zone: (!shared && params.get('time_zone')) || '',
   }
 }
 type Form = ReturnType<typeof read>
@@ -505,9 +505,9 @@ const tagSummary = computed(() => {
         ><span class="select"
           ><select v-model="form.sort" aria-label="排序">
             <option v-if="posts" value="published">发帖时间</option>
-            <option value="saved">添加时间</option>
+            <option v-if="!shared" value="saved">添加时间</option>
             <option value="updated">更新时间</option>
-            <option value="storage">存储空间</option></select
+            <option v-if="!shared" value="storage">存储空间</option></select
           ><ChevronIcon class="select-chevron" /></span
         ><span class="select"
           ><select v-model="form.order" aria-label="排序方向">
@@ -673,7 +673,7 @@ const tagSummary = computed(() => {
             <option value="not_contains">不包含</option></select
           ><ChevronIcon class="select-chevron" /></span
       ></label>
-      <label class="option"
+      <label v-if="!shared" class="option"
         >收藏日期<span class="select"
           ><select v-model="range" aria-label="收藏日期">
             <option value="">全部</option>

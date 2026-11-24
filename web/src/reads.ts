@@ -93,7 +93,8 @@ export function readFollowChanges(
 
 /**
  * One page of a list for the list's API query. A share lists its folder or a
- * profile's posts, narrowed by the same filters but tags, which it refuses.
+ * profile's posts, narrowed by the same filters but tags and save dates,
+ * which it refuses.
  */
 export function readList(params: URLSearchParams, signal?: AbortSignal) {
   const query = () => ({
@@ -103,7 +104,16 @@ export function readList(params: URLSearchParams, signal?: AbortSignal) {
   if (!shareSlug.value)
     return call(client.collections.$get({ query: query() }, init(signal)))
   params = new URLSearchParams(params)
-  for (const key of ['tag', 'tag_mode', 'not_tag']) params.delete(key)
+  for (const key of [
+    'tag',
+    'tag_mode',
+    'not_tag',
+    'saved_from',
+    'saved_before',
+    'saved_within',
+    'time_zone',
+  ])
+    params.delete(key)
   return call(
     client.public[':slug'].collections.$get(
       { param: { slug: shareSlug.value }, query: query() },

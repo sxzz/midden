@@ -119,7 +119,7 @@ test('a public link opens a folder and its items without login', async ({
   ).toBeVisible()
 
   // The visitor filters and orders the list, newest posts first by default,
-  // with no tags; the choice is kept in the address.
+  // with no tags or save dates; the choice is kept in the address.
   expect(lists[0]?.get('sort')).toBe('published')
   await expect(page.getByLabel('排序', { exact: true })).toHaveValue(
     'published',
@@ -127,6 +127,7 @@ test('a public link opens a folder and its items without login', async ({
   await page.getByRole('button', { name: '筛选' }).click()
   await expect(page.getByText('帖子类型')).toBeVisible()
   await expect(page.getByText('标签')).toHaveCount(0)
+  await expect(page.getByText('收藏日期')).toHaveCount(0)
   await page.getByLabel('排序', { exact: true }).selectOption('updated')
   await expect(page).toHaveURL(/sort=updated/)
   await expect.poll(() => lists.at(-1)?.get('sort')).toBe('updated')

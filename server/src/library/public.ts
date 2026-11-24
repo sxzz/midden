@@ -58,18 +58,31 @@ export interface PublicShare {
 /**
  * A public list: a shared folder's, or the attached posts of a profile the
  * share shows. A visitor filters and orders it as the private list, except
- * by tag, which would name the owner's tags.
+ * by tag, which would name the owner's tags, and by save date or size,
+ * which public views leave out.
  */
 export interface PublicListQuery extends Omit<
   FilterParams,
-  'tag' | 'tag_mode' | 'not_tag' | 'related_to'
+  | 'tag'
+  | 'tag_mode'
+  | 'not_tag'
+  | 'related_to'
+  | 'saved_from'
+  | 'saved_before'
+  | 'saved_within'
+  | 'time_zone'
+  | 'sort'
 > {
+  sort?: '' | 'published' | 'updated'
   /** A profile's attached posts instead of the folder's own list. */
   related_to?: string
   cursor?: string
 }
 
-/** A public list without a chosen order shows the newest posts first. */
+/**
+ * A public list without a chosen order shows the newest posts first. An
+ * account has no post time and counts as published when last updated.
+ */
 const PUBLIC_SORT = 'published'
 
 function folderFilter(share: OpenShare) {
@@ -226,10 +239,6 @@ export function listPublicCollections(
       entityType: visitor.entityType,
       mediaType: visitor.mediaType,
       visibility: visitor.visibility,
-      savedFrom: visitor.savedFrom,
-      savedBefore: visitor.savedBefore,
-      savedWithin: visitor.savedWithin,
-      timeZone: visitor.timeZone,
       authors: visitor.authors,
       sensitive: visitor.sensitive,
       postType: visitor.postType,

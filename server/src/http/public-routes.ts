@@ -24,12 +24,24 @@ import type { AccountsContext } from '#accounts/accounts.ts'
 const text = v.optional(v.string())
 
 /**
- * The private list's filters but those by tag, which would name the owner's
- * tags: strict, so a `tag`, `tag_mode` or `not_tag` (or anything else
- * unknown) is refused, not ignored.
+ * The private list's filters but those that would tell the owner's own
+ * data: tags name them, and the save date and the `saved` and `storage`
+ * orders tell when things were saved and how large they are, which public
+ * views leave out. Strict, so any of these (or anything else unknown) is
+ * refused, not ignored.
  */
 const ListQuery = v.strictObject({
-  ...v.omit(FilterQuery, ['tag', 'tag_mode', 'not_tag']).entries,
+  ...v.omit(FilterQuery, [
+    'tag',
+    'tag_mode',
+    'not_tag',
+    'saved_from',
+    'saved_before',
+    'saved_within',
+    'time_zone',
+    'sort',
+  ]).entries,
+  sort: v.optional(v.picklist(['', 'published', 'updated'])),
   cursor: text,
 })
 

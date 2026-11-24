@@ -139,9 +139,22 @@ it('opens a shared folder without login, with a tab per kind it holds', async ()
   expect(router.currentRoute.value.query.entity_type).toBe(
     'x.profile,instagram.profile',
   )
+  const query = new URLSearchParams(paths().at(-1)!.split('?', 2)[1])
+  expect(query.get('entity_type')).toBe('x.profile,instagram.profile')
+  // Accounts have no post time and their save time is the owner's: the
+  // ones updated last come first, the only order offered.
+  expect(query.get('sort')).toBe('updated')
+  await vi.waitFor(() =>
+    expect(
+      el.querySelector<HTMLSelectElement>('select[aria-label=排序]')?.value,
+    ).toBe('updated'),
+  )
   expect(
-    new URLSearchParams(paths().at(-1)!.split('?', 2)[1]).get('entity_type'),
-  ).toBe('x.profile,instagram.profile')
+    [
+      ...el.querySelector<HTMLSelectElement>('select[aria-label=排序]')!
+        .options,
+    ].map((option) => option.textContent?.trim()),
+  ).toEqual(['更新时间'])
 })
 
 it('filters a shared folder newest posts first, without tags', async () => {
@@ -158,13 +171,13 @@ it('filters a shared folder newest posts first, without tags', async () => {
   const sort = el.querySelector<HTMLSelectElement>('select[aria-label=排序]')!
   expect(sort.value).toBe('published')
   expect([...sort.options].map((option) => option.textContent?.trim())).toEqual(
-    ['发帖时间', '添加时间', '更新时间', '存储空间'],
+    ['发帖时间', '更新时间'],
   )
   expect(
     el.querySelector<HTMLSelectElement>('select[aria-label=排序方向]')!.value,
   ).toBe('desc')
 
-  // The filters are there; the owner's tags are not.
+  // The filters are there; the owner's tags and save dates are not.
   ;[...el.querySelectorAll('button')]
     .find((b) => b.textContent?.trim().startsWith('筛选'))!
     .click()
@@ -172,6 +185,8 @@ it('filters a shared folder newest posts first, without tags', async () => {
   expect(el.querySelector('.panel')).not.toBeNull()
   expect(el.textContent).not.toContain('标签')
   expect(el.querySelector('[aria-label=标签筛选]')).toBeNull()
+  expect(el.textContent).not.toContain('收藏日期')
+  expect(el.querySelector('[aria-label=收藏日期]')).toBeNull()
 
   // A choice goes to the address and to the public list.
   const postType = el.querySelector<HTMLSelectElement>(
@@ -195,14 +210,23 @@ it('filters a shared folder newest posts first, without tags', async () => {
       expect.stringMatching(new RegExp(`^/public/${SLUG}/collections/authors`)),
     ),
   )
-  // A tag in the address is never sent.
+  // A tag, a save date or a private order in the address is never sent.
   const before = listed().length
   await router.push(
-    `/s/${SLUG}?tag=00000000-0000-7000-8000-00000000000a&tag_mode=all&not_tag=00000000-0000-7000-8000-00000000000b`,
+    `/s/${SLUG}?tag=00000000-0000-7000-8000-00000000000a&tag_mode=all&not_tag=00000000-0000-7000-8000-00000000000b&from_date=2026-01-01&to_date=2026-02-01&saved_within=7d&time_zone=UTC&sort=storage`,
   )
   await vi.waitFor(() => expect(listed().length).toBeGreaterThan(before))
-  for (const key of ['tag', 'tag_mode', 'not_tag'])
+  for (const key of [
+    'tag',
+    'tag_mode',
+    'not_tag',
+    'saved_from',
+    'saved_before',
+    'saved_within',
+    'time_zone',
+  ])
     expect(listed().every((q) => !q.has(key))).toBe(true)
+  expect(listed().at(-1)!.get('sort')).toBe('published')
   expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
 })
 

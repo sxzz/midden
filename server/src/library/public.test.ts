@@ -615,17 +615,42 @@ describe('public lists', () => {
     expect(await list('?order=asc')).toEqual(
       byName('x1', 'm1', 'e3', 'q1', 'r1', 'a1'),
     )
-    // The private list's other orders are offered too.
+    expect(await list('?sort=published&order=desc')).toEqual(await list())
+    // Of the private list's other orders, only the update time is offered.
     expect(await list('?sort=updated')).toEqual(
       byName('e3', 'q1', 'x1', 'r1', 'm1', 'a1'),
     )
-    expect((await read(slug, '/collections?sort=bogus')).status).toBe(400)
+    // Save time and size are the owner's, never told.
+    for (const sort of ['saved', 'storage', 'bogus'])
+      expect(await read(slug, `/collections?sort=${sort}`)).toMatchObject({
+        status: 400,
+        body: { error: '请求无效' },
+      })
 
     // A shared profile's posts, the same way.
     const profile = share(c, 'collection', ids.five!)
     const posts = (await read(profile, `/collections?related_to=${ids.five}`))
       .body as Listed
     expect(posts.items.map((item) => item.id)).toEqual(byName('a1', 'r1', 'm1'))
+  })
+
+  test('accounts updated last first by default', async () => {
+    const { c, ids, read } = await setup()
+    const folder = createFolder(c.db, {
+      name: '账号',
+      filter: 'entity_type=fake.profile&sort=saved&order=asc',
+    })
+    const slug = share(c, 'folder', folder.id)
+    const list = async (query = '') =>
+      ((await read(slug, `/collections${query}`)).body as Listed).items.map(
+        (item) => item.id,
+      )
+    // Bob was saved after five, which is captured again now.
+    await capture(c, profile('500'))
+    expect(await list()).toEqual([ids.five, ids.bob])
+    expect(await list('?entity_type=fake.profile')).toEqual([ids.five, ids.bob])
+    expect(await list('?order=asc')).toEqual([ids.bob, ids.five])
+    expect(await list('?sort=updated&order=desc')).toEqual(await list())
   })
 
   test("a visitor's filters only narrow the folder's", async () => {
@@ -660,7 +685,7 @@ describe('public lists', () => {
     expect(posts.items.map((item) => item.id)).toEqual([ids.m1])
   })
 
-  test('a tag is refused, never applied', async () => {
+  test('a tag or a save date is refused, never applied', async () => {
     const { ids, tag, read, slug, c } = await tagged('a1')
     for (const path of [
       `/collections?tag=${tag.id}`,
@@ -669,6 +694,13 @@ describe('public lists', () => {
       '/collections?tag_mode=all',
       `/collections?related_to=${ids.five}&tag=${tag.id}`,
       `/collections/authors?tag=${tag.id}`,
+      '/collections?saved_from=2026-01-01',
+      '/collections?saved_before=2026-01-01',
+      '/collections?saved_within=7d',
+      '/collections?saved_within=7d&time_zone=Asia/Shanghai',
+      '/collections?time_zone=UTC',
+      '/collections?saved_from=',
+      `/collections?related_to=${ids.five}&saved_within=7d`,
     ])
       expect(await read(slug, path)).toMatchObject({
         status: 400,
@@ -677,6 +709,10 @@ describe('public lists', () => {
     const profile = share(c, 'collection', ids.five!)
     expect(
       (await read(profile, `/collections?related_to=${ids.five}&tag=${tag.id}`))
+        .status,
+    ).toBe(400)
+    expect(
+      (await read(profile, `/collections?related_to=${ids.five}&sort=storage`))
         .status,
     ).toBe(400)
   })
