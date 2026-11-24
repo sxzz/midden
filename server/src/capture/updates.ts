@@ -378,13 +378,23 @@ export function startUpdate(
   })
 }
 
-const POST_OPTIONS: Record<UpdatePostMode, CaptureOptions | undefined> = {
-  // The timeline's first page, as any refresh of a profile reads it.
-  latest: undefined,
-  until_existing: { untilExisting: true, maxPosts: TIMELINE_CAP },
-  older: undefined,
-  none: { skipPosts: true },
+function postOptions(
+  ctx: CaptureContext,
+  mode: UpdatePostMode,
+): CaptureOptions | undefined {
+  switch (mode) {
+    // The timeline's first page, as any refresh of a profile reads it.
+    case 'latest':
+    case 'older':
+      return undefined
+    case 'until_existing':
+      return { untilExisting: true, maxPosts: timelineCap(ctx) }
+    case 'none':
+      return { skipPosts: true }
+  }
 }
+
+const timelineCap = (ctx: CaptureContext) => ctx.timelineCap ?? TIMELINE_CAP
 
 /** Submit one item of an update; undefined when it cannot be captured. */
 function submitItem(
@@ -414,7 +424,7 @@ function submitItem(
     return recapture(ctx, collectionId, {
       key,
       updateId: update.id,
-      captureOptions: POST_OPTIONS[update.posts],
+      captureOptions: postOptions(ctx, update.posts),
       relations: update.relations || undefined,
     })
   } catch (error) {
@@ -658,8 +668,8 @@ export function continueTimeline(
     connectionId: last.submission.relatedConnection ?? undefined,
     parentSubmission: last.submission.id,
     pageCursor: cursor,
-    pageSize: Math.min(TIMELINE_CAP, 100),
-    collectionLimit: TIMELINE_CAP,
+    pageSize: Math.min(timelineCap(ctx), 100),
+    collectionLimit: timelineCap(ctx),
     options: last.submission.captureOptions as CaptureOptions,
     // The key runRelated would have used, had the cap not stopped it.
     key: `batch:${last.submission.id}`,

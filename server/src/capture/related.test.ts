@@ -105,7 +105,9 @@ describe('related', () => {
     const c = setup(5, 2)
     submit(c, { url: 'https://fake.test/u/someone', options: { maxPosts: 5 } })
     await c.queue.drain()
-    expect(memberIds(c)).toEqual([1, 2, 3, 4, 5])
+    // The last page outruns the budget and is still submitted whole: the
+    // next page would start after it.
+    expect(memberIds(c)).toEqual([1, 2, 3, 4, 5, 6])
     expect(
       c.db
         .select()

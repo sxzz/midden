@@ -30,7 +30,8 @@ const PAGE_TARGET = 100
 
 /**
  * Submit what a capture page lists (members and references) and, while the
- * budget lasts, the next page.
+ * budget lasts, the next page. The budget is soft: a page is always submitted
+ * whole, since the next page starts after it and would skip what is left.
  */
 export function runRelated(ctx: CaptureContext, job: Job): void {
   const { db } = ctx
@@ -128,7 +129,6 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
       member = !ctx.platforms.resolve(target.url).target.collection
     if (options && member) {
       if (capture.isCollection) {
-        if (limit > 0 && members >= limit) continue
         if (!matchesOptions(options, target)) continue
       } else if (options.skipReferences) continue
     }

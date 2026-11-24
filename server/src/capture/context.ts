@@ -23,6 +23,8 @@ export interface CaptureContext {
   fetch?: typeof fetch
   /** How to render thumbnails; none are made without ffmpeg. */
   thumbnailer?: Thumbnailer
+  /** Overrides `TIMELINE_CAP`, so tests need not read a thousand posts. */
+  timelineCap?: number
 }
 
 export interface Thumbnailer {

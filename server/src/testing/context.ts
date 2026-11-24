@@ -26,6 +26,7 @@ export function testContext(
     fetch?: typeof fetch
     thumbnailer?: CaptureContext['thumbnailer']
     logger?: Logger
+    timelineCap?: number
   } = {},
 ): AccountsContext {
   const db = openDatabase(':memory:')
@@ -68,6 +69,7 @@ export function testContext(
     mediaLocks: new KeyedLock(),
     fetch: options.fetch,
     thumbnailer: options.thumbnailer,
+    timelineCap: options.timelineCap,
   }
   return ctx
 }
