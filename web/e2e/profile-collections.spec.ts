@@ -308,7 +308,9 @@ test('profile update links to its record and shows new posts on return', async (
   })
   await page.goto(`/app/#/collection/${profileId}`)
   const related = page.getByRole('region', { name: '关联的收藏' })
-  await expect(related.locator('.row')).toHaveCount(1)
+  // The posts, without the button below them.
+  const rows = related.locator('.row').filter({ hasNotText: '抓取更早的帖子' })
+  await expect(rows).toHaveCount(1)
   await expect(page.getByRole('button', { name: '查看进度' })).toHaveCount(0)
   await page.getByRole('button', { name: '更新', exact: true }).click()
   const sheet = page.getByRole('dialog')
@@ -327,8 +329,8 @@ test('profile update links to its record and shows new posts on return', async (
   await expect(page).toHaveURL(new RegExp(`/captures/${recordId}$`))
   await page.getByRole('button', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
-  await expect(related.locator('.row')).toHaveCount(3)
-  await expect(related.locator('.row').first()).toContainText('新帖子 3')
+  await expect(rows).toHaveCount(3)
+  await expect(rows.first()).toContainText('新帖子 3')
 
   // Below the whole list: the posts after the last page read.
   await related.getByRole('button', { name: '抓取更早的帖子' }).click()
@@ -342,6 +344,6 @@ test('profile update links to its record and shows new posts on return', async (
   saved = [postN(4), ...saved]
   const before = listLoads
   await related.getByRole('button', { name: '刷新', exact: true }).click()
-  await expect(related.locator('.row')).toHaveCount(4)
+  await expect(rows).toHaveCount(4)
   expect(listLoads).toBe(before + 1)
 })
