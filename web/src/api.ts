@@ -47,6 +47,9 @@ export type CollectionPage = Ok<typeof client.collections.$get>
 export type Asset = Collection['assets'][number]
 export type Entity = NonNullable<Collection['graph']>['entities'][number]
 export type Author = Ok<typeof client.collections.authors.$get>['items'][number]
+export type Perspective = Ok<
+  typeof client.collections.perspectives.$get
+>['items'][number]
 export type HistoryPoint = Ok<
   (typeof client.collections)[':id']['history']['$get']
 >['items'][number]

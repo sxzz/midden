@@ -1,4 +1,5 @@
 import { call, client } from './api'
+import { RELATION_KEYS } from './relation-filter'
 import { shareSlug } from './share'
 
 // Reads of the library the detail pages share with public links: the
@@ -93,8 +94,8 @@ export function readFollowChanges(
 
 /**
  * One page of a list for the list's API query. A share lists its folder or a
- * profile's posts, narrowed by the same filters but tags and save dates,
- * which it refuses.
+ * profile's posts, narrowed by the same filters but tags, save dates and
+ * follows, which it refuses.
  */
 export function readList(params: URLSearchParams, signal?: AbortSignal) {
   const query = () => ({
@@ -112,6 +113,7 @@ export function readList(params: URLSearchParams, signal?: AbortSignal) {
     'saved_before',
     'saved_within',
     'time_zone',
+    ...RELATION_KEYS,
   ])
     params.delete(key)
   return call(

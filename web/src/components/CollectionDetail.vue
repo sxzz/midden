@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { call, client, safeURL, type Collection, type Share } from '../api'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
 import { date, present } from '../presentation'
+import { accountKey, relationQuery, type Rel } from '../relation-filter'
 import { isProfileEntity } from '../relations'
 import { collectionRoute, shareSlug } from '../share'
 import CollectionAnnotations from './CollectionAnnotations.vue'
@@ -85,6 +86,32 @@ const isProfile = computed(() =>
       entity.key === collection.value?.graph?.root && isProfileEntity(entity),
   ),
 )
+/**
+ * Each follow count opens the library's accounts under the 关系 filter from
+ * this profile; behind a share they stay plain numbers, as the share
+ * refuses the filter.
+ */
+const followLinks = computed(() => {
+  const root = collection.value?.graph?.entities.find(
+    (entity) => entity.key === collection.value?.graph?.root,
+  )
+  if (shareSlug.value || !root || !isProfileEntity(root)) return undefined
+  const key = accountKey(root)
+  const to = (rel: Rel) => ({
+    name: 'collections',
+    query: relationQuery(key, rel),
+  })
+  return {
+    following: to('following'),
+    followers: to('followers'),
+    mutual: to('mutual'),
+  }
+})
+const followRows = [
+  { rel: 'following', label: '关注' },
+  { rel: 'followers', label: '粉丝' },
+  { rel: 'mutual', label: '互关' },
+] as const
 // The related list is this profile's own timeline, so the posts it holds by a
 // repost relation were reposted by this profile and say so.
 const profileName = computed(() =>
@@ -195,17 +222,20 @@ const version = computed(() =>
     <ListSection v-if="follows" title="关系网">
       <!-- What stored follows say, not the profile's own counts. -->
       <dl class="follows">
-        <div>
-          <dt>关注</dt>
-          <dd>{{ follows.following }}</dd>
-        </div>
-        <div>
-          <dt>粉丝</dt>
-          <dd>{{ follows.followers }}</dd>
-        </div>
-        <div>
-          <dt>互关</dt>
-          <dd>{{ follows.mutual }}</dd>
+        <div v-for="row in followRows" :key="row.rel">
+          <dt>{{ row.label }}</dt>
+          <dd>
+            <!-- The whole tile is the link; see .follow-link::after. -->
+            <a
+              v-if="followLinks"
+              :href="router.resolve(followLinks[row.rel]).href"
+              class="follow-link"
+              :aria-label="`${row.label} ${follows[row.rel]}，在收藏库中查看`"
+              @click.prevent="router.push(followLinks[row.rel])"
+              >{{ follows[row.rel] }}</a><template v-else>{{
+              follows[row.rel]
+            }}</template>
+          </dd>
         </div>
       </dl>
     </ListSection>
@@ -336,8 +366,18 @@ const version = computed(() =>
   padding: 12px var(--inset);
 }
 .follows div {
+  position: relative;
   flex: 1;
   text-align: center;
+}
+.follow-link {
+  color: var(--link);
+  text-decoration: none;
+}
+.follow-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
 }
 .follows dt {
   font-size: 13px;

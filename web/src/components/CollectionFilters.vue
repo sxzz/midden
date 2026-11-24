@@ -19,7 +19,9 @@ import {
 import { kindOf, KINDS, localDay, type Kind } from '../folders'
 import { listSort, listsProfiles } from '../presentation'
 import { readAuthors } from '../reads'
+import { isRel, type Rel } from '../relation-filter'
 import { shareSlug } from '../share'
+import RelationFilter from './RelationFilter.vue'
 import TagEditSheet from './TagEditSheet.vue'
 import ChevronIcon from './ui/ChevronIcon.vue'
 import MultiSelect from './ui/MultiSelect.vue'
@@ -28,6 +30,7 @@ const tags = shallowRef<Tag[]>([])
 const tagError = shallowRef('')
 // Behind a public link there are no tags, save dates or sizes to offer:
 // they are the owner's, and the share refuses filtering or sorting by them.
+// Nor follows (关系): their accounts reach beyond the share.
 const shared = !!shareSlug.value
 async function loadTags() {
   if (shared) return
@@ -62,6 +65,11 @@ function only<T extends string>(items: T[]): T | '' {
     : ''
 }
 const ids = (raw: string | null) => (raw ? raw.split(',') : [])
+/** Which follows the 关系 filter takes; none behind a share. */
+function relMode(params: URLSearchParams): Rel | '' {
+  const rel = params.get('rel')
+  return !shared && isRel(rel) ? rel : ''
+}
 function read(query: string) {
   const params = new URLSearchParams(query)
   const types = (params.get('entity_type') || '').split(',').filter(Boolean)
@@ -72,6 +80,9 @@ function read(query: string) {
     tagMode: !shared && params.get('tag_mode') === 'all' ? 'all' : '',
     /** Tags none of which may be there. */
     notTag: shared ? [] : ids(params.get('not_tag')),
+    /** The account whose follows select, and which of them. */
+    relOf: shared ? '' : params.get('rel_of') || '',
+    rel: relMode(params),
     postType: params.get('post_type') || '',
     authors: params.getAll('author'),
     layout: params.get('layout') === 'album' ? 'album' : '',
@@ -191,6 +202,7 @@ const open = shallowRef(
     form.platform ||
     form.tag.length ||
     form.notTag.length ||
+    form.relOf ||
     form.authors.length ||
     form.media.length ||
     form.visibility ||
@@ -206,6 +218,7 @@ const active = computed(() =>
     props.folder && form.kind ? kindNames[form.kind] : '',
     form.platform ? (form.platform === 'instagram' ? 'Instagram' : 'X') : '',
     tagSummary.value,
+    relationSummary.value,
     form.media.map((type) => mediaNames[type]).join('、'),
     // Authors are selected by identity; only their names are worth showing.
     form.authors.map((id) => authorNames.value[id] || id).join('、'),
@@ -231,6 +244,8 @@ function stringify(f: Form) {
     ['tag', f.tag.toSorted().join(',')],
     ['tag_mode', f.tag.length > 1 ? f.tagMode : ''],
     ['not_tag', f.notTag.toSorted().join(',')],
+    ['rel_of', f.rel ? f.relOf : ''],
+    ['rel', f.relOf ? f.rel : ''],
     ['post_type', f.postType],
     ['q', f.q],
     ['layout', f.layout],
@@ -297,6 +312,8 @@ watch(
     form.tag.join(','),
     form.tagMode,
     form.notTag.join(','),
+    form.relOf,
+    form.rel,
     form.sort,
     form.order,
     form.visibility,
@@ -440,6 +457,8 @@ async function tagChanged(change: TagChange) {
   if (tag.join() !== form.tag.join()) form.tag = tag
   if (notTag.join() !== form.notTag.join()) form.notTag = notTag
 }
+/** The 关系 filter in words, from its section, which knows the names. */
+const relationSummary = shallowRef('')
 const tagName = (id: string) => tags.value.find((tag) => tag.id === id)?.name
 /** Tags read by name; one no longer listed has none to show. */
 const tagSummary = computed(() => {
@@ -617,6 +636,12 @@ const tagSummary = computed(() => {
           <button type="button" class="retry" @click="loadTags">重试</button>
         </p>
       </div>
+      <RelationFilter
+        v-if="!shared"
+        v-model:rel-of="form.relOf"
+        v-model:rel="form.rel"
+        @summary="(text) => (relationSummary = text)"
+      />
       <template v-if="posts">
         <MultiSelect
           v-if="!withinProfile"

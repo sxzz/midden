@@ -159,6 +159,19 @@ test('updates a profile with its lists and lists its follow changes', async ({
   const counts = page.locator('dl.follows')
   await expect(counts.locator('dt')).toHaveText(['关注', '粉丝', '互关'])
   await expect(counts.locator('dd')).toHaveText(['2', '3', '1'])
+  // Each count opens the library's accounts under the 关系 filter.
+  await expect(counts.getByRole('link')).toHaveText(['2', '3', '1'])
+  const href = await counts
+    .getByRole('link', { name: '互关 1，在收藏库中查看' })
+    .getAttribute('href')
+  expect(href).toMatch(/^#\/\?/)
+  expect(
+    Object.fromEntries(new URLSearchParams(href!.split('?', 2)[1])),
+  ).toEqual({
+    entity_type: 'x.profile,instagram.profile',
+    rel_of: 'x/x.profile/100',
+    rel: 'mutual',
+  })
 
   // 抓关系网 is off until turned on, and goes along with the update: the
   // two, and the update's progress, form a list group of their own.

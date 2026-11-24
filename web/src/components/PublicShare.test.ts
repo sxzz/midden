@@ -210,10 +210,11 @@ it('filters a shared folder newest posts first, without tags', async () => {
       expect.stringMatching(new RegExp(`^/public/${SLUG}/collections/authors`)),
     ),
   )
-  // A tag, a save date or a private order in the address is never sent.
+  // A tag, a save date, a 关系 filter or a private order in the address is
+  // never sent.
   const before = listed().length
   await router.push(
-    `/s/${SLUG}?tag=00000000-0000-7000-8000-00000000000a&tag_mode=all&not_tag=00000000-0000-7000-8000-00000000000b&from_date=2026-01-01&to_date=2026-02-01&saved_within=7d&time_zone=UTC&sort=storage`,
+    `/s/${SLUG}?tag=00000000-0000-7000-8000-00000000000a&tag_mode=all&not_tag=00000000-0000-7000-8000-00000000000b&from_date=2026-01-01&to_date=2026-02-01&saved_within=7d&time_zone=UTC&sort=storage&rel_of=x%2Fx.profile%2F1&rel=following`,
   )
   await vi.waitFor(() => expect(listed().length).toBeGreaterThan(before))
   for (const key of [
@@ -224,6 +225,8 @@ it('filters a shared folder newest posts first, without tags', async () => {
     'saved_before',
     'saved_within',
     'time_zone',
+    'rel_of',
+    'rel',
   ])
     expect(listed().every((q) => !q.has(key))).toBe(true)
   expect(listed().at(-1)!.get('sort')).toBe('published')

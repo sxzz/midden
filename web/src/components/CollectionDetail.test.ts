@@ -3,7 +3,15 @@ import { createVaporApp } from 'vue'
 import { shareSlug } from '../share'
 import { collection, mockApi } from '../testing/api'
 import CollectionDetail from './CollectionDetail.vue'
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+const push = vi.fn()
+vi.mock('vue-router', () => ({
+  useRouter: () => ({
+    push,
+    resolve: (to: { query: Record<string, string> }) => ({
+      href: `#/?${new URLSearchParams(to.query)}`,
+    }),
+  }),
+}))
 
 let unmount = () => {}
 afterEach(() => {
@@ -38,6 +46,8 @@ async function mount() {
     )
       return profile
     if (path.endsWith('/availability')) return { available: true }
+    if (path.endsWith('/profile/follows'))
+      return { following: 2, followers: 3, mutual: 1 }
     if (path === '/captures')
       return {
         id: 'job',
@@ -101,4 +111,46 @@ it('shows no update group behind a public link', async () => {
   expect(el.querySelector('[role=switch]')).toBeNull()
   expect(el.textContent).not.toContain('重新抓取')
   expect(el.textContent).toContain('打开原文')
+})
+
+it('links each follow count to the library under the 关系 filter', async () => {
+  const el = await mount()
+  await vi.waitFor(() =>
+    expect(el.querySelectorAll('.follows a')).toHaveLength(3),
+  )
+  const links = [...el.querySelectorAll<HTMLAnchorElement>('.follows a')]
+  expect(links.map((a) => a.textContent)).toEqual(['2', '3', '1'])
+  expect(
+    links.map((a) => {
+      const q = new URLSearchParams(a.getAttribute('href')!.split('?', 2)[1])
+      return [q.get('entity_type'), q.get('rel_of'), q.get('rel')]
+    }),
+  ).toEqual(
+    ['following', 'followers', 'mutual'].map((rel) => [
+      'x.profile,instagram.profile',
+      'x/x.profile/1',
+      rel,
+    ]),
+  )
+  links[2]!.click()
+  expect(push).toHaveBeenLastCalledWith({
+    name: 'collections',
+    query: {
+      entity_type: 'x.profile,instagram.profile',
+      rel_of: 'x/x.profile/1',
+      rel: 'mutual',
+    },
+  })
+})
+
+it('keeps the follow counts plain behind a public link', async () => {
+  shareSlug.value = 's'
+  const el = await mount()
+  await vi.waitFor(() =>
+    expect(el.querySelector('.follows')?.textContent).toContain('互关'),
+  )
+  expect(el.querySelector('.follows a')).toBeNull()
+  expect(
+    [...el.querySelectorAll('.follows dd')].map((dd) => dd.textContent),
+  ).toEqual(['2', '3', '1'])
 })

@@ -91,6 +91,7 @@ const filtered = computed(() => {
   return [
     'tag',
     'not_tag',
+    'rel_of',
     'post_type',
     'q',
     'author',

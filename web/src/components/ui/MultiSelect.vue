@@ -4,8 +4,11 @@ import ChevronIcon from './ChevronIcon.vue'
 const props = withDefaults(
   defineProps<{
     label: string
-    /** `detail` is a quiet aside, such as a count; it is not announced. */
-    options: { value: string; label: string; detail?: string }[]
+    /**
+     * `detail` is a quiet aside, such as a count; it is not announced.
+     * `sub` is a second name read with the label, such as a handle.
+     */
+    options: { value: string; label: string; sub?: string; detail?: string }[]
     searchable?: boolean
     /** The parent searches (`search`) and pages (`more`) the options. */
     remote?: boolean
@@ -13,6 +16,8 @@ const props = withDefaults(
     names?: Record<string, string>
     loading?: boolean
     more?: boolean
+    /** One value at most: picking replaces it and closes the list. */
+    single?: boolean
   }>(),
   { searchable: true },
 )
@@ -44,6 +49,12 @@ const summary = computed(
       .join('、') || '全部',
 )
 function toggle(value: string) {
+  if (props.single) {
+    const picked = !selected.value.includes(value)
+    selected.value = picked ? [value] : []
+    if (picked && dropdown.value) dropdown.value.open = false
+    return
+  }
   selected.value = selected.value.includes(value)
     ? selected.value.filter((item) => item !== value)
     : [...selected.value, value]
@@ -116,7 +127,7 @@ function navigate(event: KeyboardEvent) {
       <div
         role="listbox"
         :aria-label="label"
-        aria-multiselectable="true"
+        :aria-multiselectable="!single"
         class="options"
         @keydown="navigate"
       >
@@ -130,7 +141,8 @@ function navigate(event: KeyboardEvent) {
           @click="toggle(option.value)"
         >
           {{ option.label
-          }}<span v-if="option.detail" class="detail" aria-hidden="true">{{
+          }}<span v-if="option.sub" class="sub">{{ ` ${option.sub}` }}</span
+          ><span v-if="option.detail" class="detail" aria-hidden="true">{{
             option.detail
           }}</span>
         </button>
@@ -234,6 +246,10 @@ input {
   .tag {
     transition: none;
   }
+}
+.sub {
+  color: var(--subtle);
+  font-weight: 400;
 }
 .detail {
   margin-left: 6px;
