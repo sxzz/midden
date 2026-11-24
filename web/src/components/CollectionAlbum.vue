@@ -140,9 +140,6 @@ onDeactivated(() => {
 
 <template>
   <AlbumGrid :tiles="tiles" :loading="loading" @select="select" />
-  <p v-if="!tiles.length && !loading && !next && !error" class="empty">
-    暂无匹配的图片或视频
-  </p>
   <MediaViewer
     v-if="preview"
     :assets="preview?.assets || []"
@@ -154,13 +151,4 @@ onDeactivated(() => {
   />
 </template>
 
-<style scoped>
-.empty {
-  margin: 0;
-  padding: 48px 32px;
-  text-align: center;
-  font-size: 15px;
-  line-height: 1.7;
-  color: var(--subtle);
-}
-</style>
+<style scoped></style>

@@ -71,7 +71,7 @@ function details(
 const generic: Presenter = (a) => ({
   name: a.author_name || '已保存的内容',
   locked: false,
-  body: a.text || a.summary || '暂无正文',
+  body: a.text || a.summary || '',
   details: details(a),
 })
 /** A count the source actually recorded. Zero is a reading; anything else is not. */
@@ -141,7 +141,7 @@ const social: Presenter = (a, root, options = {}) => {
     ...generic(a),
     // The collection's own author line is the capture's; the profile may be newer.
     name: asText(profile?.data.name) || generic(a).name,
-    body: bio === undefined ? body : bio || '暂无简介',
+    body: bio ?? body,
     bio,
     profileChanged: !!author?.current,
     // The lock follows the author's profile as last seen.

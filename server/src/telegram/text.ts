@@ -133,7 +133,7 @@ export function addressedText(
 
 /** Collapse whitespace, then cut to `max` code points keeping media markers. */
 export function summaryLine(value: string, max = 100): string {
-  const text = value.replaceAll(SPACES, ' ').trim() || '无文字内容'
+  const text = value.replaceAll(SPACES, ' ').trim()
   const chars = [...text]
   if (chars.length <= max) return text
   const markers = MEDIA_MARKERS.exec(text)?.[0] ?? ''

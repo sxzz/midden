@@ -247,7 +247,8 @@ it('shows the saved bio without the synthetic handle prefix', () => {
   expect(present(xProfile('Actual bio with @handle')).body).toBe(
     'Actual bio with @handle',
   )
-  expect(present(xProfile('')).body).toBe('暂无简介')
+  // No bio shows no bio, not a placeholder.
+  expect(present(xProfile('')).body).toBe('')
   expect(present(xProfile()).body).toBe('Bio mentions @friend')
   expect(
     present({ ...xProfile(), text: '@handle is part of this bio' }).body,

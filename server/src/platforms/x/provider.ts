@@ -228,7 +228,10 @@ export function normalize(
     .map((r) => (r.kind === 'image' ? '[图片]' : '[视频]'))
     .join('')
   attachEntities(result, post, raw)
-  result.summary = `${result.authorName || '未知作者'}：${result.text}${markers}`
+  // Only what the post has: no stand-in author.
+  result.summary = [result.authorName, `${result.text}${markers}`]
+    .filter(Boolean)
+    .join('：')
   return result
 }
 export async function fetchPublic(

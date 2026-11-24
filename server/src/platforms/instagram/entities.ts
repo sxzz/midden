@@ -311,7 +311,8 @@ export function postResult(
       }),
     )
   }
-  result.summary = `${result.authorName || 'Instagram'}：${text || '图片或视频'}`
+  // Only what the post has: no stand-in author or text.
+  result.summary = [result.authorName, text].filter(Boolean).join('：')
   return result
 }
 

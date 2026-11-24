@@ -312,5 +312,7 @@ test('deleting everything shows what goes and needs the phrase typed', async ({
   ).toBeVisible()
   expect(deleted).toEqual({ confirm: 'delete all' })
   await page.getByRole('button', { name: '返回' }).click()
-  await expect(page.getByText('暂无收藏')).toBeVisible()
+  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('.row')).toHaveCount(0)
+  await expect(page.getByText(/暂无/)).toHaveCount(0)
 })

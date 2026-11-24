@@ -432,10 +432,11 @@ function openCollection(id: string, event?: MouseEvent) {
             重试
           </button>
         </div>
-        <p v-if="!members.length" class="line muted">
-          {{
-            membersLoading ? '加载中…' : filter ? '没有问题。' : '暂无帖子。'
-          }}
+        <p
+          v-if="!members.length && (membersLoading || filter)"
+          class="line muted"
+        >
+          {{ membersLoading ? '加载中…' : '没有问题。' }}
         </p>
       </ListSection>
       <InfiniteLoader

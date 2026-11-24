@@ -272,7 +272,6 @@ async function saveNote() {
             multiple
             @update:model-value="editTags"
           />
-          <p v-else class="hint">暂无标签。</p>
           <div class="create">
             <svg
               class="plus"

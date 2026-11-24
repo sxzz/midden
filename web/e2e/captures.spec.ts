@@ -91,7 +91,9 @@ test('submits links and follows the record until it finishes', async ({
   await page.goto('/app/')
   await page.getByRole('link', { name: '采集', exact: true }).click()
   await expect(page.locator('h1')).toHaveText('采集')
-  await expect(page.getByText('暂无采集记录')).toBeVisible()
+  // An empty list says nothing once loaded.
+  await expect.poll(() => listReloads).toBeGreaterThan(0)
+  await expect(page.getByText(/暂无/)).toHaveCount(0)
   const before = listReloads
 
   const submit = page.getByRole('button', { name: /^采集/ })

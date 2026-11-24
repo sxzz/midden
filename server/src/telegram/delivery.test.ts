@@ -172,7 +172,7 @@ describe('telegram commands', () => {
       { type: 'code', offset: start.text!.length - 3, length: 3 },
     ])
     expect(handle(c, request({ command: 'list' }))).toEqual({
-      text: '暂无收藏。',
+      text: '收藏列表是空的。',
       keyboard: [],
     })
     submit(ctx, { url: 'https://fake.test/p/1' })

@@ -298,7 +298,7 @@ function list(c: CommandContext, arg: string): Reply {
   const more = rows.length > LIST_PAGE
   rows = rows.slice(0, LIST_PAGE)
   if (after) rows.reverse()
-  if (!rows.length) return { text: '暂无收藏。', keyboard: [] }
+  if (!rows.length) return { text: '收藏列表是空的。', keyboard: [] }
   // Only a line each: read it from the newest revision, not the full view.
   const lines = new Map(
     db
@@ -319,7 +319,8 @@ function list(c: CommandContext, arg: string): Reply {
   for (const [index, item] of items.entries()) {
     if (text) text += '\n\n'
     const label = `${index + 1}. `
-    const summary = summaryLine(item.text)
+    // Without text of its own, the link itself is the line.
+    const summary = summaryLine(item.text) || item.url
     text += label
     entities.push({
       type: 'text_link',

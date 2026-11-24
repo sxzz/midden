@@ -165,9 +165,7 @@ const storage = computed(() =>
         @toggle="toggle"
       />
     </ListSection>
-    <p v-if="empty" class="empty">
-      {{ filtered ? '没有匹配的收藏' : '暂无收藏' }}
-    </p>
+    <p v-if="empty && filtered" class="empty">没有匹配的收藏</p>
     <ListSection v-if="loading"><CollectionSkeleton /></ListSection>
   </template>
   <InfiniteLoader

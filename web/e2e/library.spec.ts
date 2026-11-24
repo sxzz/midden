@@ -107,7 +107,9 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await openRow()
   await page.getByRole('button', { name: '删除这条收藏' }).click()
   await page.getByRole('button', { name: '删除', exact: true }).click()
-  await expect(page.getByText('暂无收藏', { exact: true })).toBeVisible()
+  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('.row')).toHaveCount(0)
+  await expect(page.getByText(/暂无/)).toHaveCount(0)
 })
 test('an ordinary browser logs in with the Telegram Login Widget', async ({
   page,
@@ -150,7 +152,7 @@ test('an ordinary browser logs in with the Telegram Login Widget', async ({
   await page.goto(
     '/app/?theme=dark&id=42&first_name=%E6%B5%8B%E8%AF%95&auth_date=1800000000&hash=abc',
   )
-  await expect(page.getByText('暂无收藏', { exact: true })).toBeVisible()
+  await expect(page.locator('h1')).toHaveText('我的收藏')
   expect(logins).toEqual([
     {
       login: {

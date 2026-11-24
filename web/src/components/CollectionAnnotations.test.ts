@@ -314,8 +314,11 @@ it('asks for a first tag when the account has none', async () => {
     path === '/tags' ? [] : { note: '', tags: [] },
   )
   const el = mount(CollectionAnnotations, { id: 'collection' })
-  await vi.waitFor(() => expect(el.textContent).toContain('暂无标签'))
-  expect(el.querySelector('[aria-label="新标签名称"]')).not.toBeNull()
+  // Without tags there is just the field to make the first one.
+  await vi.waitFor(() =>
+    expect(el.querySelector('[aria-label="新标签名称"]')).not.toBeNull(),
+  )
+  expect(el.textContent).not.toContain('暂无')
 })
 it('submits and clears a tag filter together with the existing filters', async () => {
   mockApi().mockImplementation(async (path) =>

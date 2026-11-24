@@ -236,8 +236,14 @@ async function submit() {
       <span class="chevron" aria-hidden="true">›</span>
     </a>
   </ListSection>
-  <p v-if="!items.length && loaded && !error" class="status">暂无采集记录</p>
-  <p v-else-if="loading && !error" class="status" role="status">加载中…</p>
+  <!-- An empty list once loaded says nothing; only loading is worth a word. -->
+  <p
+    v-if="(items.length || !loaded) && loading && !error"
+    class="status"
+    role="status"
+  >
+    加载中…
+  </p>
   <InfiniteLoader
     v-if="next && items.length"
     :loading="loading"

@@ -159,21 +159,21 @@ export function profileURL(entity: EntityView | undefined): string | undefined {
 function profileText(collection: CollectionView): Rendered {
   const entity = root(collection)
   const values = data(entity)
-  const name =
-    text(values.name).trim() || collection.author_name?.trim() || '未知作者'
-  let body = name
+  const name = text(values.name).trim() || collection.author_name?.trim() || ''
   const username = text(values.username)
-  if (username) body += `\n@${username}`
   const bio = text(
     (values.metadata as Record<string, unknown> | undefined)?.description,
   ).trim()
-  if (bio) body += `\n\n${bio}`
+  // Only what the profile has; the link stands in when it has nothing.
+  const head = [name, username && `@${username}`].filter(Boolean).join('\n')
+  const body = [head, bio].filter(Boolean).join('\n\n') || collection.url
   const url = profileURL(entity)
   return {
     text: body,
-    entities: url
-      ? [{ type: 'text_link', offset: 0, length: name.length, url }]
-      : [],
+    entities:
+      url && name
+        ? [{ type: 'text_link', offset: 0, length: name.length, url }]
+        : [],
   }
 }
 
@@ -194,13 +194,16 @@ export function collectionMessage(
     blocks.push(profile.text)
     entities = profile.entities
   } else {
-    const author = collection.author_name?.trim() || '未知作者'
+    const author = collection.author_name?.trim() ?? ''
     const body = collection.text.trim()
-    blocks.push(collection.id, body ? `${author}：\n${body}` : author)
+    // Only what the post has: no stand-in author.
+    const head = author && body ? `${author}：\n` : author
+    blocks.push(collection.id)
+    if (head || body) blocks.push(head + body)
     entities.push({ type: 'code', offset: 0, length: collection.id.length })
     const url = profileURL(authorEntity(collection))
     const authorAt = collection.id.length + 2
-    if (url)
+    if (url && author)
       entities.push({
         type: 'text_link',
         offset: authorAt,
@@ -210,7 +213,7 @@ export function collectionMessage(
     if (body)
       entities.push({
         type: 'blockquote',
-        offset: authorAt + author.length + 2,
+        offset: authorAt + head.length,
         length: body.length,
       })
   }

@@ -93,7 +93,7 @@ describe('text', () => {
     expect(summaryLine(`${'字'.repeat(120)}[图片][视频]`)).toBe(
       `${'字'.repeat(91)}…[图片][视频]`,
     )
-    expect(summaryLine('  ')).toBe('无文字内容')
+    expect(summaryLine('  ')).toBe('')
   })
 })
 
