@@ -16,6 +16,7 @@ import {
   type Job,
   type MemberProgress,
 } from '../api'
+import { trends } from '../trends'
 import { toast } from './useToast'
 const collections = client.collections[':id']
 const getCollection = (id: string, signal: AbortSignal) =>
@@ -61,6 +62,8 @@ export function useCollectionDetail(
   const loadingPoint = shallowRef(false)
   const historyLoading = shallowRef(false)
   const confirmDelete = shallowRef(false)
+  /** At least two captures read a count, so the page of trends has a line. */
+  const trendable = shallowRef(false)
   /** The newest point is the collection as it is now. */
   const latestPoint = computed(() => points.value[0]?.capture_id ?? '')
   /** The point on screen; '' is the current state. */
@@ -164,12 +167,14 @@ export function useCollectionDetail(
       busy.value = false
       available.value = false
       confirmDelete.value = false
+      trendable.value = false
       try {
         const result = await getCollection(id, signal)
         if (signal.aborted) return
         show(result)
         latestRevision.value = result.revision_id
         void historyPage()
+        void checkTrends()
         available.value = await availability(id, signal)
       } catch (e) {
         if (!signal.aborted) error.value = errorText(e)
@@ -181,6 +186,25 @@ export function useCollectionDetail(
     controller.abort()
     retirePoll()
   })
+  /**
+   * Whether the collection has trends: two readings are enough to tell, so
+   * the detail asks for no more than that and leaves the series to its page.
+   */
+  async function checkTrends() {
+    if (trendable.value) return
+    const signal = controller.signal
+    try {
+      const series = await call(
+        collections.counts.$get(
+          { param: { id: id() }, query: { limit: '2' } },
+          { init: { signal } },
+        ),
+      )
+      if (!signal.aborted) trendable.value = trends(series).length > 0
+    } catch {
+      // Without an answer the page is not offered; nothing else depends on it.
+    }
+  }
   async function historyPage(more = false) {
     if (historyLoading.value || (more && !next.value)) return
     const signal = controller.signal
@@ -311,6 +335,7 @@ export function useCollectionDetail(
           params: { id: job.collection_id },
         })
       latestRevision.value = result.revision_id
+      void checkTrends()
       await historyPage()
       // Landing here after the view was cached would push this job's result
       // into a list the user has already navigated away from.
@@ -396,6 +421,7 @@ export function useCollectionDetail(
     loadingPoint,
     confirmDelete,
     available,
+    trendable,
     historyPage,
     showPoint,
     /** Whether a point shows without a request. */

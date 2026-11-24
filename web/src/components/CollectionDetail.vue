@@ -1,5 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, onUnmounted, shallowRef, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { safeURL, type Collection } from '../api'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
 import { date, present } from '../presentation'
@@ -37,6 +38,7 @@ const {
   loadingPoint,
   confirmDelete,
   available,
+  trendable,
   historyPage,
   showPoint,
   isSeen,
@@ -71,6 +73,10 @@ const profileName = computed(() =>
   collection.value ? present(collection.value).name : '',
 )
 const link = computed(() => collection.value && safeURL(collection.value.url))
+const router = useRouter()
+function openTrends() {
+  void router.push({ name: 'collection-stats', params: { id: props.id } })
+}
 // Dragging the timeline passes many points: show the ones already fetched at
 // once, and fetch the others only where the drag rests.
 let pick: ReturnType<typeof setTimeout> | undefined
@@ -124,6 +130,12 @@ const version = computed(() =>
       />
     </ListSection>
     <ListSection :footnote="version">
+      <ListButton
+        v-if="trendable"
+        label="统计趋势"
+        chevron
+        @select="openTrends"
+      />
       <ListButton v-if="link" label="打开原文" :href="link" />
       <ListButton
         label="重新抓取"

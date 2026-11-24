@@ -66,9 +66,15 @@ const id = computed(() =>
 const accounts = computed(() => route.name === 'accounts')
 const captures = computed(() => route.name === 'captures')
 const capture = computed(() => route.name === 'capture')
+const stats = computed(() => route.name === 'collection-stats')
 /** Any page reached from the library, which is where back returns to. */
 const nested = computed(
-  () => !!id.value || accounts.value || captures.value || capture.value,
+  () =>
+    !!id.value ||
+    accounts.value ||
+    captures.value ||
+    capture.value ||
+    stats.value,
 )
 const title = computed(() =>
   accounts.value
@@ -77,9 +83,11 @@ const title = computed(() =>
       ? '采集'
       : capture.value
         ? '采集记录'
-        : id.value
-          ? '收藏详情'
-          : '我的收藏',
+        : stats.value
+          ? '统计趋势'
+          : id.value
+            ? '收藏详情'
+            : '我的收藏',
 )
 // Telegram draws its own back button; only stand in for it elsewhere.
 const standalone = !host()?.initData
@@ -102,6 +110,8 @@ function viewKey(target: RouteLocationNormalized) {
   if (target.name === 'accounts') return 'accounts'
   if (target.name === 'captures') return 'captures'
   if (target.name === 'capture') return `capture:${String(target.params.id)}`
+  if (target.name === 'collection-stats')
+    return `stats:${String(target.params.id)}`
   const key = String(target.params.id)
   // Returning to a collection we deleted must reload, not show the cached copy.
   return removed.value.includes(key) ? `${key}#removed` : key
@@ -207,6 +217,7 @@ const viewProps = computed(() => {
       },
     }
   if (captures.value || capture.value) return { onSaved: saved }
+  if (stats.value) return {}
   if (id.value)
     return {
       savedAt: savedAt.value,
@@ -316,7 +327,7 @@ const viewProps = computed(() => {
         </svg>
       </RouterLink>
       <button
-        v-if="!accounts && !captures && !capture"
+        v-if="!accounts && !captures && !capture && !stats"
         type="button"
         class="icon-button sensitive-toggle"
         aria-label="显示敏感内容"

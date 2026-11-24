@@ -19,6 +19,8 @@ let api = mockApi()
 let job: Job = { id: 'job-1', collection_id: 'kept', state: 'queued' }
 /** The history every collection answers with. */
 let points: HistoryPoint[] = []
+/** The readings every collection's counts answer with. */
+let readings: number[] = []
 /** The kept collection's composable, for tests that step through points. */
 let detail: ReturnType<typeof useCollectionDetail> | undefined
 /** One shared refresh handle, so the test can start a capture and watch it. */
@@ -98,6 +100,7 @@ beforeEach(() => {
   gates = new Map()
   rejects = new Set()
   points = []
+  readings = []
   detail = undefined
   api = mockApi(async (path) => {
     const gate = gates.get(path)
@@ -107,6 +110,15 @@ beforeEach(() => {
     }
     if (rejects.has(path)) throw new Error('接口失败')
     if (path.endsWith('/history')) return { items: points }
+    if (path.includes('/counts'))
+      return {
+        entity_type: 'x.profile',
+        points: readings.map((followers, i) => ({
+          capture_id: `c${i}`,
+          observed_at: `2026-10-0${i + 1}T00:00:00Z`,
+          counts: { '/metadata/followers': followers },
+        })),
+      }
     const point = /\/history\/(.+)$/.exec(path)?.[1]
     const at = points.find((p) => p.capture_id === point)
     if (at)
@@ -284,4 +296,23 @@ it('drops a point still loading when the drag returns to the one shown', async (
   expect(d.shownPoint.value).toBe('c3')
   expect(d.historical.value).toBe(false)
   expect(d.collection.value?.revision_id).toBe('r1')
+})
+it('offers trends once two captures read a count', async () => {
+  readings = [10]
+  mount()
+  await vi.advanceTimersByTimeAsync(0)
+  const d = detail!
+  // Two readings are enough to tell, so no more are asked for.
+  expect(api).toHaveBeenCalledWith(
+    '/collections/kept/counts?limit=2',
+    expect.anything(),
+  )
+  expect(d.trendable.value).toBe(false)
+  // A refresh that reads the counts again makes a trend.
+  readings = [10, 12]
+  await refresh()
+  job = { ...job, state: 'complete' }
+  await vi.advanceTimersByTimeAsync(2000)
+  await vi.waitFor(() => expect(d.trendable.value).toBe(true))
+  expect(calls('/collections/kept/counts')).toBe(2)
 })

@@ -87,9 +87,9 @@ type Fields = readonly (readonly [key: string, label: string])[]
 function group(
   label: string,
   source: Record<string, unknown>,
-  fields: Fields,
+  fields: CountField[],
 ): StatGroup | undefined {
-  const items = fields.flatMap(([key, name]) => {
+  const items = fields.flatMap(({ key, label: name }) => {
     const value = count(source[key])
     return value === undefined ? [] : [{ label: name, value }]
   })
@@ -114,6 +114,32 @@ const accountCounts: Fields = [
   ['media_count', '媒体'],
   ['likes', '喜欢过'],
 ]
+/** The counts each entity type has, in the order the page lists them. */
+const typeCounts: Record<string, Fields> = {
+  'x.post': postCounts,
+  'instagram.post': [
+    ['replies', '评论'],
+    ['likes', '点赞'],
+  ],
+  'x.profile': accountCounts,
+  'instagram.profile': accountCounts.slice(0, 3),
+}
+export interface CountField {
+  key: string
+  label: string
+  /** Where the entity keeps it, as the API's counts are keyed. */
+  pointer: string
+}
+/** The counts shown for an entity of this type, with their names. */
+export function countFields(type = ''): CountField[] {
+  // Accounts keep their counts under metadata, posts on the post itself.
+  const base = type.endsWith('.profile') ? '/metadata/' : '/'
+  return (typeCounts[type] ?? []).map(([key, label]) => ({
+    key,
+    label,
+    pointer: base + key,
+  }))
+}
 function metadata(entity?: Entity): Record<string, unknown> {
   const value = entity?.data.metadata
   return value && typeof value === 'object'
@@ -167,24 +193,8 @@ const social: Presenter = (a, root, options = {}) => {
     ),
     // Counts come from the entity the collection is about, and only that one.
     stats: isProfile
-      ? group(
-          '账号统计',
-          metadata(profile),
-          root?.type === 'instagram.profile'
-            ? accountCounts.slice(0, 3)
-            : accountCounts,
-        )
-      : post &&
-        group(
-          '帖子统计',
-          post,
-          root?.type === 'instagram.post'
-            ? [
-                ['replies', '评论'],
-                ['likes', '点赞'],
-              ]
-            : postCounts,
-        ),
+      ? group('账号统计', metadata(profile), countFields(root?.type))
+      : post && group('帖子统计', post, countFields(root?.type)),
     details: [
       ...details(
         a,
