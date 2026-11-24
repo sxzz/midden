@@ -11,6 +11,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ changed: []; cancel: [] }>()
 const titleId = useId()
+const slugId = useId()
+const slugHintId = useId()
 const dialog = useTemplateRef<HTMLDialogElement>('sheet')
 const field = useTemplateRef<HTMLInputElement>('field')
 const share = shallowRef<Share>()
@@ -18,6 +20,56 @@ const loading = shallowRef(false)
 const busy = shallowRef(false)
 const error = shallowRef('')
 const link = computed(() => (share.value ? shareURL(share.value.slug) : ''))
+// A custom slug: lowercase letters, digits and inner dashes, as the server
+// checks; a random one never has this form. Anyone can guess a custom slug,
+// so random stays the default.
+const CUSTOM = /^[a-z\d][a-z\d-]{1,62}[a-z\d]$/
+const custom = computed(() => !!share.value && CUSTOM.test(share.value.slug))
+const OTHER_CHARS = /[^a-z\d-]/
+const draft = shallowRef('')
+const slugError = shallowRef('')
+watch(share, (value) => {
+  draft.value = value && CUSTOM.test(value.slug) ? value.slug : ''
+  slugError.value = ''
+})
+/** What is wrong with the slug being typed, before it is sent. */
+const problem = computed(() => {
+  const value = draft.value
+  if (!value) return ''
+  if (OTHER_CHARS.test(value)) return '只能用小写字母、数字和 -'
+  if (value.length < 3) return '至少 3 个字符'
+  if (value.length > 64) return '最多 64 个字符'
+  if (value.startsWith('-') || value.endsWith('-')) return '不能以 - 开头或结尾'
+  return ''
+})
+const savable = computed(
+  () =>
+    !!draft.value &&
+    !problem.value &&
+    draft.value !== share.value?.slug &&
+    !busy.value,
+)
+/** Give the link another slug, or a random one again; the old one stops. */
+async function setSlug(slug: string | null) {
+  const current = share.value
+  if (!current) return
+  busy.value = true
+  slugError.value = ''
+  try {
+    share.value = await call(
+      client.shares[':id'].$patch({
+        param: { id: current.id },
+        json: { slug },
+      }),
+    )
+    toast(slug ? '已更新链接' : '已改回随机链接')
+    emit('changed')
+  } catch (e) {
+    slugError.value = errorText(e)
+  } finally {
+    busy.value = false
+  }
+}
 async function load() {
   loading.value = true
   error.value = ''
@@ -112,8 +164,47 @@ function backdrop(event: MouseEvent) {
             @focus="($event.target as HTMLInputElement).select()"
           />
         </div>
+        <form class="field custom" @submit.prevent="savable && setSlug(draft)">
+          <label class="label" :for="slugId">自定义链接</label>
+          <span class="slug"
+            ><span class="prefix" aria-hidden="true">/s/</span
+            ><input
+              :id="slugId"
+              v-model.trim="draft"
+              :placeholder="custom ? '' : '例如 my-picks'"
+              autocapitalize="off"
+              autocomplete="off"
+              spellcheck="false"
+              maxlength="80"
+              :aria-invalid="!!(problem || slugError)"
+              :aria-describedby="slugHintId"
+            /><button type="submit" class="save" :disabled="!savable">
+              保存
+            </button></span
+          >
+          <span
+            :id="slugHintId"
+            class="hint"
+            :class="{ invalid: problem || slugError }"
+            :role="problem || slugError ? 'alert' : undefined"
+            >{{
+              problem ||
+              slugError ||
+              '小写字母、数字和 -，3 到 64 个字符；改动后旧链接立即失效。'
+            }}</span
+          >
+        </form>
         <button type="button" class="action" :disabled="busy" @click="copy">
           复制链接
+        </button>
+        <button
+          v-if="custom"
+          type="button"
+          class="action"
+          :disabled="busy"
+          @click="setSlug(null)"
+        >
+          改回随机链接
         </button>
         <button
           type="button"
@@ -196,6 +287,49 @@ function backdrop(event: MouseEvent) {
   font-size: 14px;
   color: var(--text);
   text-overflow: ellipsis;
+}
+.custom {
+  display: grid;
+  gap: 6px;
+}
+.label {
+  font-size: 13px;
+  color: var(--subtle);
+}
+.slug {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 12px;
+  border-radius: 10px;
+  background: var(--fill);
+}
+.prefix {
+  font-size: 14px;
+  color: var(--subtle);
+}
+.field .slug input {
+  flex: 1;
+  min-width: 0;
+  padding-left: 0;
+  background: none;
+}
+.save {
+  padding: 0 14px;
+  min-height: 40px;
+  font-size: 15px;
+  color: var(--link);
+}
+.save:disabled {
+  color: var(--subtle);
+}
+.hint {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--subtle);
+}
+.hint.invalid {
+  color: var(--destructive);
 }
 .error {
   margin: 0;

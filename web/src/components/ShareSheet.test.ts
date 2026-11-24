@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, vaporInteropPlugin } from 'vue'
+import { APIError, type Share } from '../api'
 import { router } from '../router'
 import { collection, entity, mockApi, type Request } from '../testing/api'
 import CollectionLibrary from './CollectionLibrary.vue'
-import type { Share } from '../api'
 
 const ID = '00000000-0000-7000-8000-000000000001'
 const FOLDER = '00000000-0000-7000-8000-00000000000f'
@@ -11,6 +11,9 @@ const SHARE = '00000000-0000-7000-8000-0000000000aa'
 const SLUG = 'AbCdEfGhIjKlMnOpQrStUv_-'
 // The app's own address with the share's route: /app/ when built.
 const LINK = `${location.origin}${import.meta.env.BASE_URL}#/s/${SLUG}`
+const RANDOM = 'ZyXwVuTsRqPoNmLkJiHgFeDc'
+const linkTo = (slug: string) =>
+  `${location.origin}${import.meta.env.BASE_URL}#/s/${slug}`
 
 let shares: Share[] = []
 let api: ReturnType<typeof mockApi>
@@ -42,7 +45,7 @@ beforeEach(() => {
   shares = [
     {
       id: '00000000-0000-7000-8000-0000000000ff',
-      slug: 'folder-slug-000000000000',
+      slug: 'Folder_Slug_000000000000',
       target: 'folder',
       target_id: FOLDER,
       name: '精选',
@@ -60,6 +63,17 @@ beforeEach(() => {
       }
       shares = [...shares, made]
       return made
+    }
+    if (path.startsWith('/shares/') && request.method === 'PATCH') {
+      const { slug } = JSON.parse((request as Request).body!) as {
+        slug: string | null
+      }
+      if (slug === 'taken')
+        throw new APIError(409, '这个链接已被其他公开分享使用')
+      shares = shares.map((s) =>
+        s.id === path.slice(8) ? { ...s, slug: slug ?? RANDOM } : s,
+      )
+      return shares.find((s) => s.id === path.slice(8))
     }
     if (path.startsWith('/shares/') && request.method === 'DELETE') {
       shares = shares.filter((s) => s.id !== path.slice(8))
@@ -167,8 +181,80 @@ it('shares a folder from its menu, showing the link it already has', async () =>
   expect(sheet.textContent).toContain('公开分享收藏夹「精选」')
   await vi.waitFor(() =>
     expect(sheet.querySelector('input')?.value).toBe(
-      `${location.origin}${import.meta.env.BASE_URL}#/s/folder-slug-000000000000`,
+      `${location.origin}${import.meta.env.BASE_URL}#/s/Folder_Slug_000000000000`,
     ),
   )
+  expect(button(sheet, '取消公开')).toBeTruthy()
+})
+
+it('sets a custom link, checking it as typed, and goes back to random', async () => {
+  const el = await mount(
+    `/folder/${FOLDER}?entity_type=x.post%2Cinstagram.post&q=a`,
+  )
+  await vi.waitFor(() =>
+    expect(el.querySelector('h1')?.textContent).toBe('精选'),
+  )
+  el.querySelector<HTMLButtonElement>('[aria-label="管理收藏夹"]')!.click()
+  await nextTick()
+  button(el.querySelector('dialog[open]')!, '公开分享').click()
+  await nextTick()
+  const sheet = el.querySelector('dialog[open]')!
+  const custom = () =>
+    [...sheet.querySelectorAll('label')].find(
+      (label) => label.textContent?.trim() === '自定义链接',
+    )!.control as HTMLInputElement
+  await vi.waitFor(() => expect(custom()).toBeTruthy())
+  // A random link has no custom slug to show, nor one to go back from.
+  expect(custom().value).toBe('')
+  expect(button(sheet, '改回随机链接')).toBeUndefined()
+  const save = () => button(sheet, '保存')
+  expect(save().disabled).toBe(true)
+  const type = async (value: string) => {
+    custom().value = value
+    custom().dispatchEvent(new Event('input'))
+    await nextTick()
+  }
+  const hint = () => sheet.querySelector('.hint')?.textContent?.trim()
+
+  for (const [value, message] of [
+    ['My-Picks', '只能用小写字母、数字和 -'],
+    ['ab', '至少 3 个字符'],
+    ['-picks', '不能以 - 开头或结尾'],
+    ['x'.repeat(65), '最多 64 个字符'],
+  ] as const) {
+    await type(value)
+    expect(hint()).toBe(message)
+    expect(custom().getAttribute('aria-invalid')).toBe('true')
+    expect(save().disabled).toBe(true)
+  }
+
+  // Taken by another live link: the server says so beside the field.
+  await type('taken')
+  expect(save().disabled).toBe(false)
+  save().click()
+  await vi.waitFor(() => expect(hint()).toBe('这个链接已被其他公开分享使用'))
+
+  await type('my-picks')
+  save().click()
+  await vi.waitFor(() =>
+    expect(sheet.querySelector('input')?.value).toBe(linkTo('my-picks')),
+  )
+  expect(sent('PATCH', `/shares/${shares[0]!.id}`)).toEqual([
+    { slug: 'taken' },
+    { slug: 'my-picks' },
+  ])
+  expect(custom().value).toBe('my-picks')
+  expect(save().disabled).toBe(true)
+
+  button(sheet, '改回随机链接').click()
+  await vi.waitFor(() =>
+    expect(sheet.querySelector('input')?.value).toBe(linkTo(RANDOM)),
+  )
+  expect(sent('PATCH', `/shares/${shares[0]!.id}`).at(-1)).toEqual({
+    slug: null,
+  })
+  expect(custom().value).toBe('')
+  expect(button(sheet, '改回随机链接')).toBeUndefined()
+  expect(button(sheet, '复制链接')).toBeTruthy()
   expect(button(sheet, '取消公开')).toBeTruthy()
 })
