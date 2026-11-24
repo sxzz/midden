@@ -493,6 +493,11 @@ export const submissions = sqliteTable(
     collectionStopped: bool().notNull().default(false),
     parentSubmission: text(),
     captureOptions: text({ mode: 'json' }),
+    // Whether the target had no saved content in the library when this
+    // submission was made, i.e. it is 新增 rather than 更新. Recorded at
+    // submit time because the library row it inserts makes that unknowable
+    // later; null for submissions older than the column.
+    libraryAdded: bool(),
   },
   (t) => [
     index('submissions_records')

@@ -328,6 +328,8 @@ export class DeliveryWorker {
             complete: progress.complete,
             partial: progress.partial,
             failed: progress.failed,
+            added: progress.added,
+            updated: progress.updated,
             done: progress.done,
             stopped: progress.stopped,
             next: progress.next,

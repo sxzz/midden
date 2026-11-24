@@ -62,6 +62,7 @@ function memberProgress(m: NonNullable<CaptureRecord['members']>) {
     failed: m.failed,
     pending: m.pending,
     done: m.done,
+    ...(m.added === undefined ? {} : { added: m.added, updated: m.updated }),
   }
 }
 
@@ -81,6 +82,7 @@ function recordJson(r: CaptureRecord) {
     created_at: r.createdAt.toISOString(),
     ...(r.finishedAt ? { finished_at: r.finishedAt.toISOString() } : {}),
     ...(r.members ? { members: memberProgress(r.members) } : {}),
+    ...(r.added === undefined ? {} : { added: r.added }),
     ...(r.stopped === undefined ? {} : { stopped: r.stopped }),
     ...(r.retryable === undefined ? {} : { retryable: r.retryable }),
     ...(r.pages
@@ -177,14 +179,14 @@ function batchJson(b: BatchProgress) {
     complete: b.complete,
     partial: b.partial,
     failed: b.failed,
-    members: b.members,
+    members: memberProgress(b.members),
     retryable: b.retryable,
     done: b.done,
     active: b.active.map((item) => ({
       url: item.url,
       collection_id: item.collectionId,
       running: item.running,
-      ...(item.members ? { members: item.members } : {}),
+      ...(item.members ? { members: memberProgress(item.members) } : {}),
     })),
   }
 }

@@ -72,7 +72,15 @@ describe('refresh batches', () => {
       complete: 2,
       done: true,
       retryable: 1,
-      members: { total: 2, complete: 1, failed: 1, done: true },
+      members: {
+        total: 2,
+        complete: 1,
+        failed: 1,
+        done: true,
+        // Saved by the first profile capture already.
+        added: 0,
+        updated: 1,
+      },
       active: [],
     })
     broken.clear()
@@ -80,7 +88,7 @@ describe('refresh batches', () => {
     await c.queue.drain()
     expect(batchProgress(c.db, started.id)).toMatchObject({
       retryable: 0,
-      members: { complete: 2, failed: 0 },
+      members: { complete: 2, failed: 0, added: 0, updated: 2 },
     })
   })
 

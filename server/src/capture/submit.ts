@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import {
   captureRunning,
@@ -230,6 +230,7 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
     let collectionId =
       input.refreshId && !connectionId ? input.refreshId : undefined
     collectionId ??= upsertCollection(tx, target, providerId)
+    const libraryAdded = !holdsContent(tx, collectionId)
     if (!input.refreshId || input.refreshId === collectionId)
       tx.insert(library)
         .values({
@@ -322,6 +323,7 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
         collectionLimit,
         parentSubmission: input.parentSubmission || null,
         captureOptions: options ?? null,
+        libraryAdded,
       })
       .run()
 
@@ -416,6 +418,25 @@ export function isSaved(tx: Transaction, collectionId: string): boolean {
     .select({ id: library.collectionId })
     .from(library)
     .where(eq(library.collectionId, collectionId))
+    .get()
+}
+
+/**
+ * Whether a collection is in the library with content. A library row alone
+ * does not count: submitting inserts one before anything is fetched, and a
+ * failed capture leaves it behind without content.
+ */
+export function holdsContent(tx: Transaction, collectionId: string): boolean {
+  return !!tx
+    .select({ id: library.collectionId })
+    .from(library)
+    .innerJoin(collections, eq(collections.id, library.collectionId))
+    .where(
+      and(
+        eq(library.collectionId, collectionId),
+        isNotNull(collections.currentRevision),
+      ),
+    )
     .get()
 }
 

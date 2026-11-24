@@ -10,6 +10,7 @@ import {
   library,
   revisionEntities,
   revisions,
+  submissions,
 } from '#db/schema.ts'
 import { status } from '#platforms/rpc.ts'
 import { testContext } from '#testing/context.ts'
@@ -177,5 +178,23 @@ describe('capture and finalize', () => {
     expect(
       ctx.db.select({ id: library.collectionId }).from(library).all(),
     ).toEqual([{ id: target.id }])
+
+    // Through the handle again: new to the staging collection, but the
+    // stable one was saved already.
+    const again = submit(ctx, { url: 'https://fake.test/u/someone' })
+    await ctx.queue.drain()
+    const added = (id: string) =>
+      ctx.db
+        .select({ added: submissions.libraryAdded })
+        .from(submissions)
+        .where(eq(submissions.id, id))
+        .get()!.added
+    expect(added(again.submissionId)).toBe(false)
+    const first = ctx.db
+      .select({ id: submissions.id })
+      .from(submissions)
+      .orderBy(submissions.createdAt, submissions.id)
+      .get()!
+    expect(added(first.id)).toBe(true)
   })
 })

@@ -274,6 +274,9 @@ export interface ProgressInput {
   complete: number
   partial: number
   failed: number
+  /** Saved members new to the library and already saved; absent if unknown. */
+  added?: number
+  updated?: number
   done: boolean
   stopped: boolean
   next: string
@@ -314,6 +317,8 @@ export function progressMessage(
     const heading = p.stopped ? '采集已中止' : p.done ? '采集完成' : '正在采集…'
     const running = Math.max(0, p.total - p.complete - p.partial - p.failed)
     body = `${heading}\n${p.url}\n\n本次 ${p.total} 项：已保存 ${p.complete} · 内容不完整 ${p.partial} · 失败 ${p.failed} · 进行中 ${running}`
+    if (p.added !== undefined && p.added + (p.updated ?? 0) > 0)
+      body += `\n其中新增 ${p.added} · 更新 ${p.updated ?? 0}`
   }
   if (p.pageError) body += '\n部分页面获取失败。'
   if (p.reasons.length) {

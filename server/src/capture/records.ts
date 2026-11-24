@@ -91,6 +91,12 @@ export interface MemberProgress {
   failed: number
   pending: number
   done: boolean
+  /**
+   * Finished members new to the library and ones already saved; absent
+   * while any finished member predates recording it.
+   */
+  added?: number
+  updated?: number
 }
 
 type Page = { submission: Submission; capture: Capture }
@@ -160,26 +166,41 @@ function memberSubmissions(db: Executor, pageIds: string[]) {
 
 type MemberCounts = Pick<
   CollectionProgress,
-  'complete' | 'partial' | 'failed' | 'pending' | 'retryable'
+  | 'complete'
+  | 'partial'
+  | 'failed'
+  | 'pending'
+  | 'retryable'
+  | 'added'
+  | 'updated'
 >
 
 /**
  * Members of each record by state, counted in SQL: a profile can have tens
- * of thousands. A member listed on several pages counts once.
+ * of thousands. A member listed on several pages counts once, as new when
+ * any of its listings saved it as new.
  */
 function memberCounts(
   db: Executor,
   chains: Map<string, Page[]>,
 ): Map<string, MemberCounts> {
   const counts = new Map<string, MemberCounts>()
-  for (const root of chains.keys())
+  const additions = new Map<
+    string,
+    { added: number; updated: number; unknown: number }
+  >()
+  for (const root of chains.keys()) {
     counts.set(root, {
       complete: 0,
       partial: 0,
       failed: 0,
       pending: 0,
       retryable: 0,
+      added: 0,
+      updated: 0,
     })
+    additions.set(root, { added: 0, updated: 0, unknown: 0 })
+  }
   const pages = [...chains].flatMap(([root, list]) =>
     list.map((page) => ({
       id: page.submission.id,
@@ -194,28 +215,36 @@ function memberCounts(
     state: string
     n: number
     retryable: number
+    added: number
+    updated: number
   }>(sql`
-    SELECT p.value ->> '$.root' AS root, c.state AS state,
-      count(DISTINCT c.id) AS n,
-      count(DISTINCT CASE
-        WHEN p.value ->> '$.retry' AND c.state = 'failed'
-          AND a.source_state IS NULL
-        THEN c.id END) AS retryable
-    FROM json_each(${JSON.stringify(pages)}) p
-    JOIN submissions s ON s.parent_submission = p.value ->> '$.id'
-    JOIN captures c ON c.id = s.capture_id
-    JOIN collections a ON a.id = c.collection_id
-    WHERE s.idem_key LIKE 'related:%'
+    WITH members AS (
+      SELECT p.value ->> '$.root' AS root, c.id AS id, c.state AS state,
+        max(p.value ->> '$.retry' AND c.state = 'failed'
+          AND a.source_state IS NULL) AS retryable,
+        max(s.library_added) AS added
+      FROM json_each(${JSON.stringify(pages)}) p
+      JOIN submissions s ON s.parent_submission = p.value ->> '$.id'
+      JOIN captures c ON c.id = s.capture_id
+      JOIN collections a ON a.id = c.collection_id
+      WHERE s.idem_key LIKE 'related:%'
+      GROUP BY 1, 2
+    )
+    SELECT root, state, count(*) AS n, sum(retryable) AS retryable,
+      count(*) FILTER (WHERE added = 1) AS added,
+      count(*) FILTER (WHERE added = 0) AS updated
+    FROM members
     GROUP BY 1, 2`)
   for (const row of rows) {
     const count = counts.get(row.root)!
+    const addition = additions.get(row.root)!
     switch (row.state) {
-      case 'complete': {
-        count.complete += row.n
-        break
-      }
+      case 'complete':
       case 'partial': {
-        count.partial += row.n
+        count[row.state] += row.n
+        addition.added += row.added
+        addition.updated += row.updated
+        addition.unknown += row.n - row.added - row.updated
         break
       }
       case 'failed': {
@@ -226,6 +255,13 @@ function memberCounts(
         if (isPending(row.state)) count.pending += row.n
     }
     count.retryable += row.retryable
+  }
+  for (const [root, count] of counts) {
+    const { added, updated, unknown } = additions.get(root)!
+    if (unknown) {
+      delete count.added
+      delete count.updated
+    } else Object.assign(count, { added, updated })
   }
   return counts
 }
@@ -359,6 +395,8 @@ export interface CaptureRecord {
   media: { total: number; ready: number; failed: number }
   done: boolean
   members?: MemberProgress
+  /** A record without members that saved its target: whether it was new. */
+  added?: boolean
   stopped?: boolean
   pages?: { more: boolean; more1000: boolean; failed: boolean }
   retryable?: number
@@ -484,7 +522,11 @@ function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
             capture.state === 'partial',
         }
       if (record.done) record.retryable = retryable
-    }
+    } else if (
+      (capture.state === 'complete' || capture.state === 'partial') &&
+      submission.libraryAdded !== null
+    )
+      record.added = submission.libraryAdded
     return record
   })
 }

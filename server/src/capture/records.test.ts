@@ -98,6 +98,8 @@ describe('capture records', () => {
       done: true,
     })
     expect(record.pages).toEqual({ more: true, more1000: true, failed: false })
+    // The failed member is not counted until it is saved.
+    expect(record.members).toMatchObject({ added: 1, updated: 0 })
     expect(record.retryable).toBe(1)
     expect(recordDetail(c.db, record.id).reasons).toEqual([
       { reason: '帖子不存在或已删除', count: 1 },
@@ -111,6 +113,8 @@ describe('capture records', () => {
     await c.queue.drain()
     record = listRecords(c.db).items[0]!
     expect(record.members).toMatchObject({ total: 2, complete: 2, failed: 0 })
+    // The failed attempt saved nothing, so the retry still adds it.
+    expect(record.members).toMatchObject({ added: 2, updated: 0 })
     expect(record.retryable).toBe(0)
     expect(collectionProgress(c.db, job.submissionId).pages).toHaveLength(1)
   })
@@ -158,12 +162,32 @@ describe('capture records', () => {
       done: true,
     })
     expect(record.retryable).toBe(11_000 - 1100)
+    // Members from before submissions recorded it: no guess.
+    expect(record.members!.added).toBeUndefined()
+    expect(record.members!.updated).toBeUndefined()
     expect(recordDetail(c.db, record.id).reasons).toEqual([
       { reason: 'lost', count: 11_000 },
     ])
     expect(recordMembers(c.db, record.id, 'failed').items).toHaveLength(50)
     expect(() => stopCollection(c, job.submissionId)).not.toThrow()
     expect(listRecords(c.db).items[0]!.stopped).toBe(true)
+  })
+
+  test('tells members new to the library from ones saved before', async () => {
+    const c = setup(new Set())
+    submit(c, { url: 'https://fake.test/p/1' })
+    await c.queue.drain()
+    expect(listRecords(c.db).items[0]).toMatchObject({ added: true })
+
+    submit(c, { url: 'https://fake.test/u/someone' })
+    await c.queue.drain()
+    const profile = listRecords(c.db).items[0]!
+    expect(profile.members).toMatchObject({ complete: 2, added: 1, updated: 1 })
+    expect(profile.added).toBeUndefined()
+
+    submit(c, { url: 'https://fake.test/p/2' })
+    await c.queue.drain()
+    expect(listRecords(c.db).items[0]).toMatchObject({ added: false })
   })
 
   test('"more" continues once; asking twice gives the same job', async () => {
@@ -190,5 +214,7 @@ describe('capture records', () => {
     expect(listRecords(c.db).items[0]!.saved).toBe(false)
     retryRecord(c, record.id)
     expect(listRecords(c.db).items[0]!.saved).toBe(true)
+    await c.queue.drain()
+    expect(listRecords(c.db).items[0]!.added).toBe(true)
   })
 })

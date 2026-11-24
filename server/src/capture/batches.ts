@@ -217,7 +217,7 @@ export function batchProgress(db: Executor, id: string): BatchProgress {
     progress: byRoot.get(root.submission.id)!,
   }))
   const urls = new Set<string>()
-  const members = new Map<string, string>()
+  const members = new Map<string, { state: string; added: boolean | null }>()
   let pagePending = false
   const pageIds: string[] = []
   for (const { progress } of progresses) {
@@ -230,7 +230,11 @@ export function batchProgress(db: Executor, id: string): BatchProgress {
   }
   if (pageIds.length)
     for (const member of db
-      .select({ id: captures.id, state: captures.state })
+      .select({
+        id: captures.id,
+        state: captures.state,
+        added: submissions.libraryAdded,
+      })
       .from(submissions)
       .innerJoin(captures, eq(captures.id, submissions.captureId))
       .where(
@@ -239,9 +243,19 @@ export function batchProgress(db: Executor, id: string): BatchProgress {
           like(submissions.idemKey, 'related:%'),
         ),
       )
-      .all())
-      members.set(member.id, member.state)
-  const memberStates = [...members.values()]
+      .all()) {
+      // Listed on several pages: new when any listing saved it as new,
+      // unknown only when no listing recorded it.
+      const seen = members.get(member.id)
+      members.set(member.id, {
+        state: member.state,
+        added: (seen?.added || member.added) ?? seen?.added ?? null,
+      })
+    }
+  const memberStates = [...members.values()].map((m) => m.state)
+  const finished = [...members.values()].filter(
+    (m) => m.state === 'complete' || m.state === 'partial',
+  )
   const pending = memberStates.filter(isRunning).length
   const memberProgress: MemberProgress = {
     total: Math.max(members.size, urls.size),
@@ -250,6 +264,13 @@ export function batchProgress(db: Executor, id: string): BatchProgress {
     failed: memberStates.filter((s) => s === 'failed').length,
     pending,
     done: !pagePending && pending === 0,
+    // Like a record's: only when every finished member was recorded.
+    ...(finished.every((m) => m.added !== null)
+      ? {
+          added: finished.filter((m) => m.added).length,
+          updated: finished.filter((m) => !m.added).length,
+        }
+      : {}),
   }
   const running = count(isRunning)
   const done = batch.state !== 'running' && running === 0 && memberProgress.done
@@ -284,6 +305,12 @@ export function batchProgress(db: Executor, id: string): BatchProgress {
               failed: item.progress.failed,
               pending: item.progress.pending,
               done: item.progress.done,
+              ...(item.progress.added === undefined
+                ? {}
+                : {
+                    added: item.progress.added,
+                    updated: item.progress.updated,
+                  }),
             },
           }
         : {}),

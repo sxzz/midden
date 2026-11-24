@@ -8,8 +8,14 @@ import {
   refreshBatches,
   submissions,
 } from '#db/schema.ts'
+import { inJson } from '#db/sql.ts'
 import { failCapture } from './lifecycle.ts'
-import { isSaved, markUnreferenced, upsertCollection } from './submit.ts'
+import {
+  holdsContent,
+  isSaved,
+  markUnreferenced,
+  upsertCollection,
+} from './submit.ts'
 import type { Transaction } from '#db/client.ts'
 import type { ResolveResponse } from '#platforms/protocol.ts'
 import type { CaptureContext } from './context.ts'
@@ -46,6 +52,19 @@ export function resolveCaptureScope(
     return
   }
   const savedSource = capture.refreshFrom ?? old.id
+  // Requests that saved the staging collection as new: the object may have
+  // been saved under its stable identity all along.
+  const added = tx
+    .select({ id: submissions.id })
+    .from(submissions)
+    .where(
+      and(
+        eq(submissions.captureId, captureId),
+        eq(submissions.libraryAdded, true),
+      ),
+    )
+    .all()
+    .map((row) => row.id)
   const target = upsertCollection(
     tx,
     {
@@ -93,6 +112,12 @@ export function resolveCaptureScope(
       ),
     )
     .get()
+  if (added.length && holdsContent(tx, target))
+    tx.update(submissions)
+      .set({ libraryAdded: false })
+      .where(inJson(submissions.id, added))
+      .run()
+
   if (running) {
     tx.update(submissions)
       .set({ captureId: running.id })

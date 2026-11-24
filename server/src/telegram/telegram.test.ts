@@ -189,6 +189,10 @@ describe('presentation', () => {
     expect(progressMessage(base, { group: true }).text).toContain(
       '存储空间不足（2 条）',
     )
+    expect(progressMessage(base, { group: true }).text).not.toContain('新增')
+    expect(
+      progressMessage({ ...base, added: 3, updated: 4 }, { group: true }).text,
+    ).toContain('其中新增 3 · 更新 4')
   })
 })
 
