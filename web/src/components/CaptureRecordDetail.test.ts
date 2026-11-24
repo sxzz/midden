@@ -77,28 +77,72 @@ function mount(
 
 it('splits posts into new, updated and failed ones, with counts', async () => {
   const { el, queried, tabs, click } = mount(
-    () => detail({ complete: 2, partial: 0, failed: 1, added: 0, updated: 2 }),
+    () => detail({ complete: 3, partial: 0, failed: 1, added: 1, updated: 2 }),
     {
+      added: [member('4')],
       updated: [member('1'), member('2')],
       problem: [member('3', 'failed')],
     },
   )
-  // Nothing is new, so the first tab with posts opens.
-  await vi.waitFor(() => expect(el.textContent).toContain('status/1'))
+  await vi.waitFor(() => expect(el.textContent).toContain('status/4'))
   expect(tabs()).toEqual([
-    { name: '新增记录 0', selected: false },
-    { name: '更新记录 2', selected: true },
+    { name: '新增记录 1', selected: true },
+    { name: '更新记录 2', selected: false },
     { name: '异常记录 1', selected: false },
   ])
   click('异常记录')
   await vi.waitFor(() => expect(el.textContent).toContain('status/3'))
-  expect(el.textContent).not.toContain('status/1')
-  click('新增记录')
-  await vi.waitFor(() => expect(el.textContent).toContain('没有新增的帖子。'))
-  // A tab seen before shows again without loading.
+  expect(el.textContent).not.toContain('status/4')
   click('更新记录')
   await vi.waitFor(() => expect(el.textContent).toContain('status/2'))
-  expect(queried).toEqual(['updated', 'problem', 'added'])
+  // A tab seen before shows again without loading.
+  click('新增记录')
+  await vi.waitFor(() => expect(el.textContent).toContain('status/4'))
+  expect(queried).toEqual(['added', 'problem', 'updated'])
+})
+
+it('hides tabs without posts and opens the first one left', async () => {
+  const { el, queried, tabs } = mount(
+    () => detail({ complete: 2, partial: 0, failed: 1, added: 0, updated: 2 }),
+    { updated: [member('1'), member('2')] },
+  )
+  await vi.waitFor(() => expect(el.textContent).toContain('status/1'))
+  expect(tabs()).toEqual([
+    { name: '更新记录 2', selected: true },
+    { name: '异常记录 1', selected: false },
+  ])
+  expect(queried).toEqual(['updated'])
+})
+
+it('heads the list with the only tab instead of a tab bar', async () => {
+  const { el, tabs } = mount(
+    () => detail({ complete: 2, partial: 0, failed: 0, added: 0, updated: 2 }),
+    { updated: [member('1'), member('2')] },
+  )
+  await vi.waitFor(() => expect(el.textContent).toContain('status/1'))
+  expect(tabs()).toEqual([])
+  expect(el.querySelector('[role=tablist]')).toBeNull()
+  expect(el.querySelector('h2')?.textContent).toBe('更新记录')
+})
+
+it('shows no posts list for a record without posts', async () => {
+  const { el, queried } = mount(
+    () =>
+      detail({
+        total: 0,
+        complete: 0,
+        partial: 0,
+        failed: 0,
+        added: 0,
+        updated: 0,
+      }),
+    {},
+  )
+  await vi.waitFor(() => expect(el.textContent).toContain('已完成'))
+  expect(el.querySelector('[role=tablist]')).toBeNull()
+  // Only the summary is left: no empty list or sentence about it.
+  expect(el.querySelectorAll('section')).toHaveLength(1)
+  expect(queried).toEqual([])
 })
 
 it('lists running posts until they finish, then leaves their tab', async () => {
@@ -116,27 +160,25 @@ it('lists running posts until they finish, then leaves their tab', async () => {
   await vi.waitFor(() => expect(el.textContent).toContain('status/1'))
   expect(tabs()).toEqual([
     { name: '新增记录 1', selected: true },
-    { name: '更新记录 0', selected: false },
-    { name: '异常记录 0', selected: false },
     { name: '正在采集 2', selected: false },
   ])
   ;[...el.querySelectorAll<HTMLElement>('[role=tab]')].at(-1)!.click()
   await vi.waitFor(() => expect(el.textContent).toContain('status/3'))
 
-  // Both finish as new posts: the tab goes and the list shows them there.
+  // One finishes as a new post, one fails: the running tab goes and the
+  // first tab left opens.
   record.current = detail({
-    complete: 3,
+    complete: 2,
     partial: 0,
-    failed: 0,
-    added: 3,
+    failed: 1,
+    added: 2,
     updated: 0,
   })
   await vi.advanceTimersByTimeAsync(2500)
   await vi.waitFor(() =>
     expect(tabs()).toEqual([
-      { name: '新增记录 3', selected: true },
-      { name: '更新记录 0', selected: false },
-      { name: '异常记录 0', selected: false },
+      { name: '新增记录 2', selected: true },
+      { name: '异常记录 1', selected: false },
     ]),
   )
   expect(queried).toEqual(['added', 'pending', 'added'])
@@ -154,4 +196,14 @@ it('lists every post of a record from before new and updated were told apart', a
     { name: '异常记录 1', selected: false },
   ])
   expect(queried).toEqual([''])
+})
+
+it("heads an old record's only list as the posts", async () => {
+  const { el, tabs } = mount(
+    () => detail({ complete: 3, partial: 0, failed: 0 }),
+    { '': [member('1'), member('2'), member('3')] },
+  )
+  await vi.waitFor(() => expect(el.textContent).toContain('status/3'))
+  expect(tabs()).toEqual([])
+  expect(el.querySelector('h2')?.textContent).toBe('帖子')
 })

@@ -380,8 +380,8 @@ test('a finished profile record fetches more pages as its own record', async ({
     'true',
   )
   await expect(page.getByRole('tab', { name: '更新记录 60' })).toBeVisible()
-  await expect(page.getByRole('tab', { name: '异常记录 0' })).toBeVisible()
-  await expect(page.getByText('没有新增的帖子。')).toBeVisible()
+  // Nothing failed, so there is no tab for it.
+  await expect(page.getByRole('tab', { name: /^异常记录/ })).toHaveCount(0)
   expect(memberQueries).toEqual(['added'])
   await expect(page.getByRole('button', { name: '重试本页' })).toHaveCount(0)
   await page.getByRole('button', { name: '抓取 1000 条' }).click()

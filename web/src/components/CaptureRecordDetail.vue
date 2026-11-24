@@ -50,12 +50,11 @@ interface FilterOption {
   value: Filter
   label: string
   count: number
-  /** Said when the tab has no posts. */
-  empty: string
 }
-/** Unset until the record loads and picks the first tab with posts. */
+/** Unset until the record loads, and while no tab has posts. */
 const filter = shallowRef<Filter>()
 /**
+ * Only tabs with posts are shown, so an empty one says nothing at all.
  * Running members are only under 正在采集, shown while there are any; once
  * finished they move to the tab of their outcome. New and updated count
  * finished members only, like the record's counts. A record with members
@@ -71,13 +70,11 @@ const filters = computed((): FilterOption[] => {
             value: 'added',
             label: '新增记录',
             count: m.added,
-            empty: '没有新增的帖子。',
           },
           {
             value: 'updated',
             label: '更新记录',
             count: m.updated,
-            empty: '没有更新的帖子。',
           },
         ]
       : [
@@ -85,28 +82,26 @@ const filters = computed((): FilterOption[] => {
             value: '',
             label: '全部',
             count: m.complete + m.partial + m.failed + m.pending,
-            empty: '没有帖子。',
           },
         ]
   options.push({
     value: 'problem',
     label: '异常记录',
     count: m.failed + m.partial,
-    empty: '没有异常的帖子。',
   })
   // Last, so the other tabs stay put when it goes away.
-  if (m.pending)
-    options.push({
-      value: 'pending',
-      label: '正在采集',
-      count: m.pending,
-      empty: '没有正在采集的帖子。',
-    })
-  return options
+  options.push({ value: 'pending', label: '正在采集', count: m.pending })
+  return options.filter((option) => option.count)
 })
-const currentFilter = computed(() =>
-  filters.value.find((option) => option.value === filter.value),
-)
+/**
+ * A lone tab has nothing to switch to, so it becomes the list's heading;
+ * 全部 alone just means the posts.
+ */
+const heading = computed(() => {
+  const [only, other] = filters.value
+  if (!only || other) return undefined
+  return only.value ? only.label : '帖子'
+})
 /** Pages loaded per tab, so going back to a tab shows it at once. */
 const cache = new Map<Filter, { items: CaptureMember[]; next: string }>()
 
@@ -165,12 +160,18 @@ async function load() {
       !!before?.members && before.members.pending !== result.members?.pending
     if (settled) emit('saved')
     const options = filters.value
-    // Open on the first tab with posts; keep the one chosen while it exists.
+    // Open on the first tab; keep the one chosen while it still has posts.
     const kept = options.some((option) => option.value === filter.value)
     if (!kept) {
-      filter.value = (options.find((o) => o.count) ?? options[0])?.value
+      filter.value = options[0]?.value
       members.value = []
       membersNext.value = ''
+      // With no tab left, retire a page still loading for the last one.
+      if (filter.value === undefined) {
+        ++membersRun
+        membersLoading.value = false
+        membersError.value = ''
+      }
     }
     // Members settle while the record runs; keep the list in step with them.
     if (result.members && (!before || !kept || settled || progressed)) {
@@ -476,8 +477,8 @@ function openCollection(id: string, event?: MouseEvent) {
         @select="showAllMedia = true"
       />
     </ListSection>
-    <template v-if="record.members">
-      <div class="tabs" role="tablist" aria-label="帖子明细">
+    <template v-if="record.members && filters.length">
+      <div v-if="!heading" class="tabs" role="tablist" aria-label="帖子明细">
         <button
           v-for="option in filters"
           :key="option.value"
@@ -491,7 +492,7 @@ function openCollection(id: string, event?: MouseEvent) {
           {{ option.label }} <span class="tab-count">{{ option.count }}</span>
         </button>
       </div>
-      <ListSection>
+      <ListSection :title="heading">
         <div v-for="m in members" :key="m.job_id" class="member">
           <button
             type="button"
@@ -525,11 +526,8 @@ function openCollection(id: string, event?: MouseEvent) {
             重试
           </button>
         </div>
-        <p
-          v-if="!members.length && (membersLoading || !membersError)"
-          class="line muted"
-        >
-          {{ membersLoading ? '加载中…' : currentFilter?.empty }}
+        <p v-if="!members.length && membersLoading" class="line muted">
+          加载中…
         </p>
       </ListSection>
       <InfiniteLoader
