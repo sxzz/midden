@@ -27,6 +27,8 @@ const props = defineProps<{
   hideFilters?: boolean
   /** One account's own list: no author or platform to filter by. */
   withinProfile?: boolean
+  /** A folder's list, whose filter may hold posts and accounts alike. */
+  folder?: boolean
   enlargedMedia?: boolean
   /** Display name of the account this list belongs to, for its reposts. */
   repostedBy?: string
@@ -108,6 +110,7 @@ const storage = computed(() =>
     v-if="!hideFilters"
     :query="query"
     :within-profile="withinProfile"
+    :folder="folder"
     @search="(value) => emit('search', value)"
   />
   <div

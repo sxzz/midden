@@ -5,10 +5,26 @@
 /** The list tab a query belongs to. */
 export type ListTab = 'x.post' | 'x.profile'
 
-const TAB_TYPES: Record<ListTab, string> = {
-  'x.post': 'x.post,instagram.post',
-  'x.profile': 'x.profile,instagram.profile',
+/** What one list shows: posts or accounts. */
+export type Kind = 'post' | 'profile'
+
+export const KINDS: Kind[] = ['post', 'profile']
+
+const KIND_TYPES: Record<Kind, string[]> = {
+  post: ['x.post', 'instagram.post'],
+  profile: ['x.profile', 'instagram.profile'],
 }
+
+const TAB_TYPES: Record<ListTab, string> = {
+  'x.post': KIND_TYPES.post.join(','),
+  'x.profile': KIND_TYPES.profile.join(','),
+}
+
+export const kindOf = (type: string): Kind =>
+  type.endsWith('.profile') ? 'profile' : 'post'
+
+export const tabKind = (tab: ListTab): Kind =>
+  tab === 'x.profile' ? 'profile' : 'post'
 
 export function listTab(query: string | URLSearchParams): ListTab {
   return (new URLSearchParams(query).get('entity_type') || '')
@@ -17,6 +33,38 @@ export function listTab(query: string | URLSearchParams): ListTab {
     ? 'x.profile'
     : 'x.post'
 }
+
+const typesOf = (q: URLSearchParams) =>
+  (q.get('entity_type') || '').split(',').filter(Boolean)
+
+/** The kinds a filter's entity types cover; naming none covers both. */
+export function filterKinds(filter: string | URLSearchParams): Kind[] {
+  const types = typesOf(new URLSearchParams(filter))
+  return types.length
+    ? KINDS.filter((kind) => types.some((type) => kindOf(type) === kind))
+    : KINDS
+}
+
+/**
+ * The tabs a folder's list needs: the kinds its filter covers that have
+ * results, by the counts by entity type when known. With none, the list
+ * still shows one kind, empty.
+ */
+export function folderKinds(
+  filter: string,
+  types?: Record<string, number>,
+): Kind[] {
+  const named = filterKinds(filter)
+  if (named.length < 2 || !types) return named
+  const found = named.filter((kind) =>
+    Object.entries(types).some(([type, n]) => n > 0 && kindOf(type) === kind),
+  )
+  return found.length ? found : named.slice(0, 1)
+}
+
+/** The browser's time zone, the one its date fields count days in. */
+export const localZone = () =>
+  new Intl.DateTimeFormat().resolvedOptions().timeZone
 
 const pad = (n: number) => String(n).padStart(2, '0')
 
@@ -33,13 +81,34 @@ export function withTab(raw: string, tab: ListTab = listTab(raw)) {
 }
 
 /**
- * The list's API query for an address query: the tab's entity types filled
- * in, local days turned into save times, the layout left out.
+ * A folder address that never reads as a bare one, which would show the
+ * folder's saved filter: an empty filter names no entity type explicitly.
  */
-export function apiQuery(raw: string, tab: ListTab = listTab(raw)) {
+export function folderAddress(raw: string) {
+  const q = new URLSearchParams(raw)
+  const filter = new URLSearchParams(q)
+  filter.delete('layout')
+  filter.delete('tab')
+  if (!filter.size) q.set('entity_type', '')
+  return q.toString()
+}
+
+/**
+ * The list's API query for an address query: local days turned into save
+ * times, a relative date given the browser's time zone, the layout and the
+ * folder's tab left out. With a kind, only that kind's entity types are
+ * asked for, all of them where the address names none.
+ */
+export function apiQuery(raw: string, kind?: Kind) {
   const q = new URLSearchParams(raw)
   q.delete('layout')
-  if (!q.has('entity_type')) q.set('entity_type', TAB_TYPES[tab])
+  q.delete('tab')
+  const types = typesOf(q)
+  if (kind) {
+    const named = types.length ? types : KIND_TYPES[kind]
+    const kept = named.filter((type) => kindOf(type) === kind)
+    q.set('entity_type', (kept.length ? kept : named).join(','))
+  } else if (!types.length) q.delete('entity_type')
   const from = q.get('from_date')
   const to = q.get('to_date')
   q.delete('from_date')
@@ -55,16 +124,20 @@ export function apiQuery(raw: string, tab: ListTab = listTab(raw)) {
       q.set('saved_before', d.toISOString())
     }
   }
+  if (!q.get('saved_within')) q.delete('time_zone')
+  else if (!q.get('time_zone')) q.set('time_zone', localZone())
   return q.toString()
 }
 
 /**
  * The filter a folder saves for an address query, written the way the
  * server stores it: no empty or non-filter values, keys in order, authors
- * sorted. Equal filters compare equal as strings.
+ * sorted. Equal filters compare equal as strings. A home tab's list gives
+ * its kind, which an address there leaves implicit; a folder's address
+ * names its entity types itself.
  */
-export function folderFilter(raw: string) {
-  const entries = [...new URLSearchParams(apiQuery(raw))].filter(
+export function folderFilter(raw: string, kind?: Kind) {
+  const entries = [...new URLSearchParams(apiQuery(raw, kind))].filter(
     ([key, value]) => value && key !== 'cursor',
   )
   entries.sort(([a, x], [b, y]) =>
@@ -92,12 +165,14 @@ export function folderQuery(filter: string) {
       q.set('to_date', localDay(d))
     }
   }
-  return q.toString()
+  // This browser's own zone goes without saying.
+  if (q.get('time_zone') === localZone()) q.delete('time_zone')
+  return folderAddress(q.toString())
 }
 
 /**
  * Whether an address query shows something other than the folder's filter.
- * The layout is how the list looks, not what it holds.
+ * The layout and the tab are how the list looks, not what it holds.
  */
 export function folderModified(raw: string, filter: string) {
   return folderFilter(raw) !== filter
@@ -114,6 +189,7 @@ export function hasFilters(raw: string) {
   if (types && !Object.values(TAB_TYPES).includes(types)) return true
   q.delete('entity_type')
   q.delete('layout')
+  q.delete('tab')
   for (const value of q.values()) if (value) return true
   return false
 }

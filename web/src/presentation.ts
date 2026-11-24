@@ -281,11 +281,18 @@ export interface CollectionGroup {
   label: string
   items: Collection[]
 }
-/** Whether a list query is for accounts rather than posts. */
-export const listsProfiles = (query: string | URLSearchParams) =>
-  (new URLSearchParams(query).get('entity_type') || '')
+/**
+ * Whether a list query is for accounts rather than posts. A folder whose
+ * filter holds both shows one of them, named by its `tab`.
+ */
+export function listsProfiles(query: string | URLSearchParams) {
+  const q = new URLSearchParams(query)
+  const tab = q.get('tab')
+  if (tab === 'post' || tab === 'profile') return tab === 'profile'
+  return (q.get('entity_type') || '')
     .split(',')
     .some((type) => type.endsWith('.profile'))
+}
 /**
  * The order of a list: posts by when they were posted unless asked
  * otherwise; accounts have no such time, and are kept in the order they

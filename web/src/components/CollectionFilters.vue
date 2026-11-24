@@ -9,6 +9,7 @@ import {
   watch,
 } from 'vue'
 import { call, client, errorText, type Author, type Tag } from '../api'
+import { kindOf, KINDS, localDay, type Kind } from '../folders'
 import { listSort, listsProfiles } from '../presentation'
 import ChevronIcon from './ui/ChevronIcon.vue'
 import MultiSelect from './ui/MultiSelect.vue'
@@ -29,10 +30,23 @@ const props = defineProps<{
   query: string
   /** One account's own list: its platform and author are given. */
   withinProfile?: boolean
+  /**
+   * A folder's list: its filter may name posts, accounts or both, where a
+   * home tab's list is one of them.
+   */
+  folder?: boolean
 }>()
 const emit = defineEmits<{ search: [query: string] }>()
+/** The one value all of these share, or nothing. */
+function only<T extends string>(items: T[]): T | '' {
+  return items.length && items.every((item) => item === items[0])
+    ? items[0]!
+    : ''
+}
 function read(query: string) {
   const params = new URLSearchParams(query)
+  const types = (params.get('entity_type') || '').split(',').filter(Boolean)
+  const platform = only(types.map((type) => type.split('.')[0] || ''))
   return {
     tag: params.get('tag') || '',
     postType: params.get('post_type') || '',
@@ -41,32 +55,50 @@ function read(query: string) {
     order: params.get('order') || 'desc',
     sort: listSort(params),
     q: params.get('q') || '',
-    // Which tab this form belongs to; it rides along but is never edited here.
+    // Which tab this form belongs to; it rides along, and only a folder's
+    // form edits the kind.
     entity: params.get('entity_type') || '',
-    platform: params.get('entity_type')?.includes(',')
-      ? ''
-      : params.get('entity_type')?.startsWith('instagram.')
-        ? 'instagram'
-        : params.get('entity_type')?.startsWith('x.')
-          ? 'x'
-          : '',
+    kind: only(types.map(kindOf)),
+    /** The kind a folder holding both shows; it rides along. */
+    tab: params.get('tab') || '',
+    platform: platform === 'x' || platform === 'instagram' ? platform : '',
     media: (params.get('media_type') || '').split(',').filter(Boolean),
     visibility: params.get('visibility') || '',
     sensitive: params.get('sensitive') || '',
     from: params.get('from_date') || '',
     to: params.get('to_date') || '',
+    /** A relative range such as `7d`, counted again on every visit. */
+    within: params.get('saved_within') || '',
+    /** Where its days are counted, when not this browser's zone. */
+    zone: params.get('time_zone') || '',
   }
 }
 type Form = ReturnType<typeof read>
 const form = reactive(read(props.query))
+/** The kind of list shown, which decides the controls and default order. */
+const shownKind = (f: Form): Kind =>
+  f.tab === 'post' || f.tab === 'profile'
+    ? f.tab
+    : f.kind === 'profile'
+      ? 'profile'
+      : 'post'
 // Authors, media and sensitivity describe posts; an account has none of them.
-const posts = computed(() => !listsProfiles(`entity_type=${form.entity}`))
-const entityTypes = (entity: string, platform: string) => {
-  const kind = listsProfiles(`entity_type=${entity}`) ? 'profile' : 'post'
-  return (platform ? [platform] : ['x', 'instagram'])
-    .map((name) => `${name}.${kind}`)
+const posts = computed(() => shownKind(form) === 'post')
+/**
+ * The entity types the form selects. A home tab's kind is fixed and its
+ * posts are the default, left out of the address; in a folder, no kind and
+ * no platform select everything.
+ */
+function entityTypes(f: Form) {
+  if (props.folder && !f.kind && !f.platform) return ''
+  if (!props.folder && f.kind !== 'profile' && !f.platform) return ''
+  const kinds = f.kind ? [f.kind] : props.folder ? KINDS : ['post']
+  const platforms = f.platform ? [f.platform] : ['x', 'instagram']
+  return kinds
+    .flatMap((kind) => platforms.map((name) => `${name}.${kind}`))
     .join(',')
 }
+const kindNames: Record<Kind, string> = { post: '帖子', profile: '账号' }
 const postTypeNames: Record<string, string> = {
   post: '贴文',
   quote: '引用',
@@ -89,14 +121,22 @@ const sensitiveNames: Record<string, string> = {
 function daysAgo(days: number) {
   const d = new Date()
   d.setDate(d.getDate() - days)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  return localDay(d)
 }
-const rangeOptions = [
-  { value: '0', label: '今天' },
-  { value: '6', label: '最近 7 天' },
-  { value: '29', label: '最近 30 天' },
-]
+const WITHIN = /^(\d+)d$/
+const withinDays = (within: string) => Number(WITHIN.exec(within)?.[1])
+const withinLabel = (within: string) => {
+  const days = withinDays(within)
+  return days === 1 ? '今天' : days > 1 ? `最近 ${days} 天` : ''
+}
+// Relative: the server counts the days again on every visit, so a folder
+// saved with one keeps showing the latest days.
+const rangeOptions = computed(() =>
+  ['1d', '7d', '30d', form.within]
+    .filter((value, i, all) => value && all.indexOf(value) === i)
+    .filter((value) => withinLabel(value))
+    .map((value) => ({ value, label: withinLabel(value) })),
+)
 // A native date field fills in today as soon as its picker opens on a phone,
 // which would filter the list by accident. The common ranges are one tap, and
 // the two fields only appear once a custom range is asked for.
@@ -104,16 +144,21 @@ const customRange = shallowRef(false)
 const range = computed({
   get() {
     if (customRange.value) return 'custom'
-    if (!form.from && !form.to) return ''
-    const known =
-      !form.to &&
-      rangeOptions.find((option) => daysAgo(+option.value) === form.from)
-    return known ? known.value : 'custom'
+    if (form.within) return form.within
+    return form.from || form.to ? 'custom' : ''
   },
   set(value) {
     customRange.value = value === 'custom'
-    if (customRange.value) return
-    form.from = value ? daysAgo(+value) : ''
+    if (customRange.value) {
+      // The fields start at the same days, which stay fixed from now on.
+      if (form.within) form.from = daysAgo(withinDays(form.within) - 1)
+      form.within = ''
+      form.zone = ''
+      return
+    }
+    form.within = value
+    form.zone = ''
+    form.from = ''
     form.to = ''
   },
 })
@@ -127,11 +172,14 @@ const open = shallowRef(
     form.visibility ||
     form.sensitive ||
     form.from ||
-    form.to
+    form.to ||
+    form.within ||
+    (props.folder && form.kind)
   ),
 )
 const active = computed(() =>
   [
+    props.folder && form.kind ? kindNames[form.kind] : '',
     form.platform ? (form.platform === 'instagram' ? 'Instagram' : 'X') : '',
     form.tag
       ? tags.value.find((tag) => tag.id === form.tag)?.name || '已选标签'
@@ -142,7 +190,7 @@ const active = computed(() =>
     postTypeNames[form.postType],
     visibilityNames[form.visibility],
     sensitiveNames[form.sensitive],
-    rangeOptions.find((option) => option.value === range.value)?.label ||
+    withinLabel(form.within) ||
       (form.from && form.to
         ? `${form.from} 至 ${form.to}`
         : form.from
@@ -161,18 +209,18 @@ function stringify(f: Form) {
     ['post_type', f.postType],
     ['q', f.q],
     ['layout', f.layout],
+    ['tab', f.tab],
     // The default order stays out of the address.
-    ['sort', f.sort === listSort(`entity_type=${f.entity}`) ? '' : f.sort],
+    ['sort', f.sort === listSort(`tab=${shownKind(f)}`) ? '' : f.sort],
     ['order', f.order === 'desc' ? '' : f.order],
     ['media_type', f.media.join(',')],
     ['visibility', f.visibility],
     ['sensitive', f.sensitive],
     ['from_date', f.from],
     ['to_date', f.to],
-    [
-      'entity_type',
-      f.entity || f.platform ? entityTypes(f.entity, f.platform) : '',
-    ],
+    ['saved_within', f.within],
+    ['time_zone', f.within ? f.zone : ''],
+    ['entity_type', entityTypes(f)],
   ])
     if (v) q.set(k, v)
   for (const author of f.authors) q.append('author', author)
@@ -193,10 +241,12 @@ function search() {
   emit('search', query)
 }
 function clear() {
-  const { layout, entity } = form
+  const { layout, entity, tab } = form
   const q = new URLSearchParams()
   if (layout) q.set('layout', layout)
-  if (listsProfiles(`entity_type=${entity}`))
+  if (tab) q.set('tab', tab)
+  // A home tab keeps its kind; a folder's kind is one of its filters.
+  if (!props.folder && listsProfiles(`entity_type=${entity}`))
     q.set('entity_type', 'x.profile,instagram.profile')
   Object.assign(form, read(q.toString()))
   customRange.value = false
@@ -207,14 +257,16 @@ function clear() {
     they alone leave nothing to clear. */
 const clearable = computed(() => {
   const q = new URLSearchParams(props.query)
-  q.delete('entity_type')
+  if (!props.folder) q.delete('entity_type')
   q.delete('layout')
+  q.delete('tab')
   q.delete('related_to')
-  return !!form.platform || q.size > 0
+  return !!form.platform || [...q.values()].some(Boolean)
 })
 // Every discrete control applies itself; only the keyword box waits for Enter.
 watch(
   () => [
+    form.kind,
     form.platform,
     form.postType,
     form.tag,
@@ -224,6 +276,7 @@ watch(
     form.sensitive,
     form.from,
     form.to,
+    form.within,
     form.media.join(','),
     JSON.stringify(form.authors),
   ],
@@ -238,7 +291,8 @@ watch(
     if (stringify(incoming) === settled) return
     settled = stringify(incoming)
     Object.assign(form, incoming)
-    if (!incoming.from && !incoming.to) customRange.value = false
+    if (incoming.within || (!incoming.from && !incoming.to))
+      customRange.value = false
   },
 )
 // Authors come a page at a time, most saved posts first, and the search runs
@@ -427,6 +481,15 @@ const tagFilter = computed({
          word or two of it. -->
     <p v-if="active" class="filter-summary">{{ active }}</p>
     <div v-show="open" class="panel">
+      <label v-if="folder" class="option">
+        类型<span class="select"
+          ><select v-model="form.kind" aria-label="类型">
+            <option value="">全部</option>
+            <option value="post">帖子</option>
+            <option value="profile">账号</option></select
+          ><ChevronIcon class="select-chevron"
+        /></span>
+      </label>
       <label v-if="!withinProfile" class="option">
         平台<span class="select"
           ><select v-model="form.platform" aria-label="平台">

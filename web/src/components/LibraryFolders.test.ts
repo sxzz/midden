@@ -18,6 +18,8 @@ const folder = (fields: Partial<Folder>): Folder => ({
 })
 
 let folders: Folder[] = []
+/** What `/collections/count` answers, by entity type. */
+let counts: Record<string, number> = {}
 let api: ReturnType<typeof mockApi>
 const sent = (method: string, path: string) =>
   api.mock.calls
@@ -41,8 +43,10 @@ beforeEach(() => {
       name: '账号们',
       filter: 'entity_type=x.profile%2Cinstagram.profile&visibility=private',
       count: 1,
+      types: { 'x.profile': 1 },
     }),
   ]
+  counts = {}
   api = mockApi((path, request) => {
     if (path === '/folders') {
       if (request.method === 'POST') {
@@ -69,6 +73,11 @@ beforeEach(() => {
       folders = folders.map((f) => (f.id === id ? changed : f))
       return changed
     }
+    if (path.startsWith('/collections/count?'))
+      return {
+        count: Object.values(counts).reduce((a, b) => a + b, 0),
+        types: counts,
+      }
     if (path.startsWith('/collections?')) return { items: [] }
     if (path === '/tags') return []
     return { used_bytes: 0 }
@@ -104,11 +113,12 @@ const listQueries = () =>
     .filter((path) => path.startsWith('/collections?'))
     .map((path) => new URLSearchParams(path.split('?', 2)[1]))
 
-it('lists the tab’s folders and saves the current filters as one', async () => {
+it('lists every folder and saves the current filters as one', async () => {
   const el = await mount('/?media_type=video')
+  // Whichever tab is shown, posts' and accounts' folders alike.
   await vi.waitFor(() =>
     expect(el.querySelector('nav[aria-label="收藏夹"]')?.textContent).toBe(
-      '图片3',
+      '图片3账号们1',
     ),
   )
   button(el, '存为收藏夹').click()
@@ -206,4 +216,137 @@ it('says so when the folder is gone', async () => {
   await vi.waitFor(() =>
     expect(el.textContent).toContain('收藏夹不存在或已删除'),
   )
+})
+
+const MIXED = '00000000-0000-7000-8000-0000000000cc'
+const tabs = (el: HTMLElement) =>
+  [...el.querySelectorAll('[role="tab"]')].map((tab) => [
+    tab.textContent?.trim(),
+    tab.getAttribute('aria-selected'),
+  ])
+
+it('splits a folder of posts and accounts into tabs, as a view', async () => {
+  folders.push(
+    folder({
+      id: MIXED,
+      name: '私密',
+      filter: 'visibility=private',
+      count: 5,
+      types: { 'x.post': 3, 'instagram.profile': 2 },
+    }),
+  )
+  const el = await mount(`/folder/${MIXED}`)
+  await vi.waitFor(() =>
+    expect(tabs(el)).toEqual([
+      ['帖子', 'true'],
+      ['账号', 'false'],
+    ]),
+  )
+  await vi.waitFor(() =>
+    expect(listQueries().at(-1)?.get('entity_type')).toBe(
+      'x.post,instagram.post',
+    ),
+  )
+  expect(listQueries().at(-1)?.get('visibility')).toBe('private')
+  // The folder's own counts said both kinds are there.
+  expect(api.mock.calls.some(([p]) => p.startsWith('/collections/count'))).toBe(
+    false,
+  )
+
+  el.querySelectorAll<HTMLAnchorElement>('[role="tab"]')[1]!.click()
+  await vi.waitFor(() =>
+    expect(listQueries().at(-1)?.get('entity_type')).toBe(
+      'x.profile,instagram.profile',
+    ),
+  )
+  expect(tabs(el)).toEqual([
+    ['帖子', 'false'],
+    ['账号', 'true'],
+  ])
+  expect(listQueries().at(-1)?.get('sort')).toBe('saved')
+  // Another tab is not another filter.
+  expect(el.querySelector('.folder-status')).toBeNull()
+  // The filters offer the kind as one of the folder's own conditions.
+  expect(el.querySelector('select[aria-label="类型"]')).not.toBeNull()
+
+  // A changed filter asks for its own counts: only accounts are left.
+  counts = { 'x.profile': 1 }
+  await router.push(`/folder/${MIXED}?visibility=public&tab=post`)
+  await vi.waitFor(() => expect(tabs(el)).toEqual([]))
+  await vi.waitFor(() =>
+    expect(listQueries().at(-1)?.get('entity_type')).toBe(
+      'x.profile,instagram.profile',
+    ),
+  )
+  expect(
+    api.mock.calls.filter(([p]) => p.startsWith('/collections/count')),
+  ).toHaveLength(1)
+  expect(el.querySelector('.folder-status')?.textContent).toContain(
+    '筛选条件已修改',
+  )
+})
+
+it('lists a folder holding one kind without tabs', async () => {
+  folders.push(
+    folder({
+      id: MIXED,
+      name: '全部',
+      filter: 'q=cat',
+      count: 2,
+      types: { 'x.profile': 2 },
+    }),
+  )
+  const el = await mount(`/folder/${MIXED}`)
+  await vi.waitFor(() =>
+    expect(listQueries().at(-1)?.get('entity_type')).toBe(
+      'x.profile,instagram.profile',
+    ),
+  )
+  expect(tabs(el)).toEqual([])
+  expect(el.querySelector('.folder-status')).toBeNull()
+})
+
+it('saves a quick save-date range as a relative one', async () => {
+  const zone = new Intl.DateTimeFormat().resolvedOptions().timeZone
+  const el = await mount('/')
+  const range = await vi.waitFor(() =>
+    el.querySelector<HTMLSelectElement>('select[aria-label="收藏日期"]')!,
+  )
+  expect([...range.options].map((o) => o.textContent?.trim())).toEqual([
+    '全部',
+    '今天',
+    '最近 7 天',
+    '最近 30 天',
+    '自定义',
+  ])
+  range.value = '7d'
+  range.dispatchEvent(new Event('change'))
+  await vi.waitFor(() =>
+    expect(listQueries().at(-1)?.get('saved_within')).toBe('7d'),
+  )
+  expect(listQueries().at(-1)?.get('time_zone')).toBe(zone)
+  expect(listQueries().at(-1)?.has('saved_from')).toBe(false)
+  expect(router.currentRoute.value.query.saved_within).toBe('7d')
+  await vi.waitFor(() =>
+    expect(el.querySelector('.filter-summary')?.textContent).toBe('最近 7 天'),
+  )
+
+  button(el, '存为收藏夹').click()
+  await nextTick()
+  const input = el.querySelector<HTMLInputElement>('dialog[open] input')!
+  input.value = '本周'
+  input.dispatchEvent(new Event('input'))
+  input.form!.requestSubmit()
+  await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('folder'))
+  expect(sent('POST', '/folders')[0].filter).toBe(
+    new URLSearchParams({
+      entity_type: 'x.post,instagram.post',
+      saved_within: '7d',
+      time_zone: zone,
+    }).toString(),
+  )
+  await vi.waitFor(() =>
+    expect(el.querySelector('h1')!.textContent).toBe('本周'),
+  )
+  expect(el.querySelector('.folder-status')).toBeNull()
 })

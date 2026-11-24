@@ -1,11 +1,13 @@
 import { onUnmounted, shallowRef } from 'vue'
 import { call, client, errorText, type Collection } from '../api'
+import { localZone } from '../folders'
 import { listSort } from '../presentation'
 /** One page of the library list for a route query. */
 function page(params: string, cursor: string, signal: AbortSignal) {
   const q = new URLSearchParams(params)
   if (!q.has('entity_type')) q.set('entity_type', 'x.post,instagram.post')
   q.delete('layout')
+  q.delete('tab')
   q.set('sort', listSort(q))
   for (const [local, apiKey] of [
     ['from_date', 'saved_from'],
@@ -19,6 +21,9 @@ function page(params: string, cursor: string, signal: AbortSignal) {
     if (local === 'to_date') date.setDate(date.getDate() + 1)
     q.set(apiKey, date.toISOString())
   }
+  // A relative save date counts days where the reader is.
+  if (q.get('saved_within') && !q.get('time_zone'))
+    q.set('time_zone', localZone())
   q.set('q', q.get('q') || '')
   if (cursor) q.set('cursor', cursor)
   return call(

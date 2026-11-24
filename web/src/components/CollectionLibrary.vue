@@ -7,18 +7,30 @@ import {
   useRouter,
   type RouteLocationNormalized,
 } from 'vue-router'
-import { call, client, errorText, type Collection, type Usage } from '../api'
+import {
+  call,
+  client,
+  errorText,
+  type Collection,
+  type Folder,
+  type Usage,
+} from '../api'
 import { useCollection } from '../composables/useCollection'
 import { useFolders } from '../composables/useFolders'
 import { toast } from '../composables/useToast'
 import {
   apiQuery,
+  filterKinds,
+  folderAddress,
   folderFilter,
+  folderKinds,
   folderModified,
   folderQuery,
   hasFilters,
   listTab,
+  tabKind,
   withTab,
+  type Kind,
   type ListTab,
 } from '../folders'
 import { backButton, host } from '../host'
@@ -69,6 +81,16 @@ const lists: Record<Tab, ReturnType<typeof createList>> = {
 }
 /** The open folder's list; one at a time, so opening another reloads it. */
 const folderList = createList('')
+const kindLabels: Record<Kind, string> = { post: '帖子', profile: '账号' }
+/**
+ * A folder may hold posts and accounts alike; each is its own list, and the
+ * tabs only show when its results have both. Which one is shown is a view
+ * choice (`tab` in the address), not part of the folder's filter.
+ */
+const folderKindsShown = shallowRef<Kind[]>([])
+const folderKind = shallowRef<Kind>('post')
+/** Counts by entity type for the last filter the open folder showed. */
+let counted: { filter: string; types: Record<string, number> } | undefined
 const all = [...Object.values(lists), folderList]
 const queryOf = (target: RouteLocationNormalized) =>
   target.fullPath.split('?')[1]?.split('#')[0] || ''
@@ -159,15 +181,60 @@ function viewKey(target: RouteLocationNormalized) {
 }
 const scrolls = new Map<string, number>()
 /** Show the list for the address, loading it unless already shown. */
-async function show(list: ReturnType<typeof createList>, key: string) {
+async function show(
+  list: ReturnType<typeof createList>,
+  key: string,
+  query = queryOf(route),
+  effectiveQuery = apiQuery(query, tabKind(tab.value)),
+) {
   listRoute = list.path = route.fullPath
-  list.query.value = queryOf(route)
-  const effectiveQuery = apiQuery(list.query.value, tab.value)
+  list.query.value = query
   if (list.loadedQuery !== effectiveQuery) {
     list.loadedQuery = effectiveQuery
     scrolls.set(key, 0)
     await list.collection.load(effectiveQuery)
   }
+}
+/** The kinds a folder filter's results hold; asked only when it names both. */
+async function kindsFor(filter: string, saved: Folder): Promise<Kind[]> {
+  if (filterKinds(filter).length < 2) return filterKinds(filter)
+  // The folders were just loaded with their own counts.
+  if (filter === saved.filter) return folderKinds(filter, saved.types)
+  if (counted?.filter !== filter) {
+    const q = new URLSearchParams(filter)
+    try {
+      const { types } = await call(
+        client.collections.count.$get({
+          query: { ...Object.fromEntries(q), author: q.getAll('author') },
+        }),
+      )
+      counted = { filter, types }
+    } catch {
+      // Unknown, so both tabs stay available.
+      return filterKinds(filter)
+    }
+  }
+  return folderKinds(filter, counted.types)
+}
+/** Show the open folder's list for the address, on the tab it asks for. */
+async function showFolder(saved: Folder, key: string) {
+  const address = queryOf(route)
+  const kinds = await kindsFor(folderFilter(address), saved)
+  if (viewKey(route) !== key || queryOf(route) !== address) return false
+  const asked = new URLSearchParams(address).get('tab')
+  const kind = kinds.find((k) => k === asked) ?? kinds[0] ?? 'post'
+  folderKindsShown.value = kinds
+  folderKind.value = kind
+  // The view and the filters read the kind from the query they are given.
+  const shown = new URLSearchParams(address)
+  shown.set('tab', kind)
+  await show(folderList, key, shown.toString(), apiQuery(address, kind))
+  return true
+}
+function folderTabLink(kind: Kind) {
+  const q = new URLSearchParams(queryOf(route))
+  q.set('tab', kind)
+  return `/folder/${folderId.value}?${q}`
 }
 let shownKey = ''
 watch(
@@ -183,20 +250,27 @@ watch(
       if (arrived) void loadFolders()
       await show(lists[tab.value], key)
     } else if (folderId.value) {
+      if (arrived) {
+        counted = undefined
+        folderKindsShown.value = []
+      }
       if (arrived || !foldersLoaded.value) await loadFolders()
       const saved = folder.value
       if (!saved || viewKey(route) !== key) return
       // A bare folder address (a bookmark) shows the folder's filter.
       const query = new URLSearchParams(queryOf(route))
       const layout = query.get('layout')
+      const shownTab = query.get('tab')
       query.delete('layout')
+      query.delete('tab')
       if (!query.size) {
         const target = new URLSearchParams(folderQuery(saved.filter))
         if (layout) target.set('layout', layout)
+        if (shownTab) target.set('tab', shownTab)
         void router.replace(`/folder/${saved.id}?${target}`)
         return
       }
-      await show(folderList, key)
+      if (!(await showFolder(saved, key))) return
     }
     // Wait for the cached view to be reinserted so its height is back.
     await nextTick()
@@ -230,6 +304,7 @@ function updated(collection: Collection) {
 }
 function deleted(id: string) {
   for (const { collection } of all) collection.remove(id)
+  counted = undefined
   removed.value = [...removed.value, id]
   scrolls.delete(id)
   void router.push(listRoute)
@@ -237,19 +312,21 @@ function deleted(id: string) {
 }
 function search(q: string) {
   let target = `/${q ? `?${q}` : ''}`
-  if (folderId.value) {
-    // An empty query would mean the folder's own filter, so the tab's entity
-    // types stay in it, which changes nothing the list shows.
-    target = `/folder/${folderId.value}?${withTab(q, tab.value)}`
-  }
+  if (folderId.value) target = `/folder/${folderId.value}?${folderAddress(q)}`
   if (route.fullPath === target) {
     const list = folderId.value ? folderList : lists[tab.value]
-    void list.collection.load(apiQuery(q, tab.value))
+    if (list.loadedQuery !== undefined)
+      void list.collection.load(list.loadedQuery)
   } else void router.push(target)
 }
-// Captures change what the lists hold; reload them when they are next shown.
-function saved() {
+/** What the lists hold changed; reload them when they are next shown. */
+function stale() {
   for (const list of all) list.loadedQuery = undefined
+  counted = undefined
+}
+// Captures change what the lists hold.
+function saved() {
+  stale()
   loadUsage()
 }
 /** What the current list shows, as an address query. */
@@ -263,9 +340,6 @@ const modified = computed(
     folderModified(folderList.query.value, folder.value.filter),
 )
 const canSave = computed(() => !nested.value && hasFilters(shownQuery.value))
-const listFolders = computed(() =>
-  folders.value.filter((f) => listTab(f.filter) === tab.value),
-)
 type Sheet = '' | 'create' | 'menu' | 'rename' | 'delete'
 const sheet = shallowRef<Sheet>('')
 const busy = shallowRef(false)
@@ -279,11 +353,18 @@ async function saveFolder(name: string) {
   busy.value = true
   sheetError.value = ''
   const query = shownQuery.value
+  // A home tab's address leaves its kind implicit; a folder's names it.
+  const inFolder = !!folderId.value
   try {
-    const created = await createFolder(name, folderFilter(query))
+    const created = await createFolder(
+      name,
+      inFolder ? folderFilter(query) : folderFilter(query, tabKind(tab.value)),
+    )
     sheet.value = ''
     toast('已存为收藏夹')
-    const target = `/folder/${created.id}?${withTab(query, tab.value)}`
+    const target = `/folder/${created.id}?${
+      inFolder ? folderAddress(query) : withTab(query, tab.value)
+    }`
     if (folderId.value) void router.replace(target)
     else void router.push(target)
   } catch (e) {
@@ -337,7 +418,6 @@ async function deleteFolder() {
   }
 }
 function listProps(list: ReturnType<typeof createList>, error = '') {
-  const type = tab.value
   const { collection, query } = list
   return {
     items: collection.items.value,
@@ -350,7 +430,9 @@ function listProps(list: ReturnType<typeof createList>, error = '') {
     onSearch: search,
     onOpen: open,
     onMore: collection.more,
-    onRetry: () => collection.load(apiQuery(query.value, type)),
+    onRetry: () => {
+      if (list.loadedQuery !== undefined) void collection.load(list.loadedQuery)
+    },
   }
 }
 const viewProps = computed(() => {
@@ -369,9 +451,7 @@ const viewProps = computed(() => {
       savedAt: savedAt.value,
       showSensitive: showSensitive.value,
       onDeleted: deleted,
-      onAnnotationsSaved: () => {
-        for (const list of all) list.loadedQuery = undefined
-      },
+      onAnnotationsSaved: stale,
       onUpdated: updated,
     }
   if (folderId.value) {
@@ -380,9 +460,11 @@ const viewProps = computed(() => {
       folderList,
       missing ? foldersError.value || '收藏夹不存在或已删除' : '',
     )
-    // Not this folder's items: another folder's, or none to show.
+    // Not this folder's items: another folder's, or none to show. Until its
+    // tabs are known, it is loading.
     if (missing || folderList.path !== route.fullPath)
-      Object.assign(props, { items: [], next: '' })
+      Object.assign(props, { items: [], next: '', loading: !missing })
+    Object.assign(props, { folder: true })
     if (missing) props.onRetry = loadFolders
     return props
   }
@@ -529,7 +611,26 @@ const viewProps = computed(() => {
         {{ option.label }}
       </RouterLink>
     </div>
-    <FolderStrip v-if="!nested" :folders="listFolders" />
+    <FolderStrip v-if="!nested" :folders="folders" />
+    <div
+      v-if="folderId && folderKindsShown.length > 1"
+      class="tabs"
+      role="tablist"
+      aria-label="类型"
+    >
+      <RouterLink
+        v-for="kind in folderKindsShown"
+        :key="kind"
+        role="tab"
+        class="tab"
+        :class="{ on: folderKind === kind }"
+        :aria-selected="folderKind === kind"
+        :to="folderTabLink(kind)"
+        replace
+      >
+        {{ kindLabels[kind] }}
+      </RouterLink>
+    </div>
     <div v-if="modified" class="folder-status" role="status">
       <span class="folder-status-text">筛选条件已修改</span>
       <button type="button" :disabled="busy" @click="openSheet('create')">
