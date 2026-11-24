@@ -6,7 +6,6 @@ import {
   authorIdentity,
   isPostEntity,
   isProfileEntity,
-  isProtected,
   type RelationAuthor,
 } from '../relations'
 import MediaThumbs from './MediaThumbs.vue'
@@ -17,6 +16,17 @@ const INSTAGRAM_SHORTCODE = /^[\w-]{1,20}$/
 const INSTAGRAM_HANDLE = /^\w[\w.]{0,29}$/
 const NUMERIC_ID = /^\d+$/
 const X_HANDLE = /^\w{1,15}$/
+/** One account seen twice: the first sighting wins, the second fills gaps. */
+function fillAccount(first?: RelationAuthor, second?: RelationAuthor) {
+  if (!first || !second) return first ?? second
+  return {
+    name: first.name ?? second.name,
+    handle: first.handle ?? second.handle,
+    avatar: first.avatar ?? second.avatar,
+    href: first.href ?? second.href,
+    protected: first.protected || second.protected,
+  }
+}
 function openCollection(id?: string) {
   if (id) window.location.hash = `#/collection/${id}`
 }
@@ -77,10 +87,8 @@ const relations = computed(() => {
       href: string
       external: boolean
       author?: RelationAuthor
-      /** A profile card's own avatar, shown inside its link. */
-      avatar?: string
-      /** A profile card's own account is protected. */
-      locked: boolean
+      /** A profile card's own account, shown inside its link. */
+      account?: RelationAuthor
       published: string
       publishedLabel: string
     }
@@ -140,13 +148,13 @@ const relations = computed(() => {
           ? '↖ 这条帖子引用了当前帖子'
           : '↖ 这条帖子转发了当前帖子'
     const prior = cards.get(key)
+    const account = postLink
+      ? undefined
+      : authorIdentity(entity, props.captured)
     // A live incoming relation can supply the saved link missing in an older snapshot.
-    const avatar = postLink ? undefined : authorIdentity(entity)?.avatar
-    const locked = !postLink && !!isProtected(entity)
     if (prior && (!prior.external || !entity.saved_collection_id)) {
       prior.author ??= attribution
-      prior.avatar ??= avatar
-      prior.locked ||= locked
+      prior.account = fillAccount(prior.account, account)
       if (!prior.published && published) {
         prior.published = published
         prior.publishedLabel = shortDate(published)
@@ -158,8 +166,7 @@ const relations = computed(() => {
       assets: postLink ? entity.assets || [] : [],
       collectionId: entity.saved_collection_id,
       author: attribution ?? prior?.author,
-      avatar: avatar ?? prior?.avatar,
-      locked: locked || !!prior?.locked,
+      account: fillAccount(account, prior?.account),
       published: published || prior?.published || '',
       publishedLabel: shortDate(published) || prior?.publishedLabel || '',
       key,
@@ -229,12 +236,21 @@ const relations = computed(() => {
         :rel="relation.external ? 'noopener noreferrer' : undefined"
       >
         <span class="label">{{ relation.label }}</span>
-        <span v-if="relation.avatar" class="account">
-          <img class="avatar" :src="relation.avatar" alt="" loading="lazy" />
-          <span class="text">{{ relation.text }}</span><LockIcon
-            v-if="relation.locked"
-            class="lock"
+        <!-- The account reads like a quoted post's author row. -->
+        <span v-if="relation.account" class="account">
+          <img
+            v-if="relation.account.avatar"
+            class="avatar"
+            :src="relation.account.avatar"
+            alt=""
+            loading="lazy"
           />
+          <span v-if="relation.account.name" class="author-name">{{
+            relation.account.name
+          }}</span><LockIcon v-if="relation.account.protected" class="lock" />
+          <span v-if="relation.account.handle" class="author-handle"
+            >@{{ relation.account.handle }}</span
+          >
         </span>
         <span v-else class="text">{{ relation.text }}</span>
       </a>
@@ -304,7 +320,8 @@ const relations = computed(() => {
   font-size: 15px;
   line-height: 1.5;
 }
-.relation-author {
+.relation-author,
+.account {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -313,20 +330,6 @@ const relations = computed(() => {
   font-size: 13px;
   text-decoration: none;
   overflow-wrap: anywhere;
-}
-.account {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.account .avatar {
-  width: 24px;
-  height: 24px;
-}
-.compact .account .avatar {
-  width: 18px;
-  height: 18px;
 }
 .avatar {
   width: 20px;

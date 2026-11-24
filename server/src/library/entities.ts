@@ -423,7 +423,12 @@ export function attachIncomingRelations(r: Reader, view: CollectionView): void {
   for (const relation of incoming) {
     const post = saved.get(relation.entity.saved_collection_id ?? '')
     if (!post) continue
-    if (post.assets.length) relation.entity.assets = post.assets
+    // A reposting account's saved collection is a profile with no content
+    // media; the avatar it lent is all the account has to show.
+    const avatars =
+      relation.entity.assets?.filter((a) => a.purpose === 'avatar') ?? []
+    const assets = [...avatars, ...post.assets]
+    if (assets.length) relation.entity.assets = assets
     else delete relation.entity.assets
     relation.author ??= post.author
   }

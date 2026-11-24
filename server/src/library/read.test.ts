@@ -497,6 +497,36 @@ describe('entity links', () => {
     expect(back.source_state_at).toBeUndefined()
   })
 
+  test('an incoming reposting account keeps its saved avatar', async () => {
+    const { ctx } = setup({
+      T: () => ({
+        text: 'target',
+        graph: graph([entity('root', 'fake.post', 'T')]),
+      }),
+      100: () => ({
+        text: 'reposter',
+        resources: [image('own.jpg', { purpose: 'avatar' })],
+        graph: graph(
+          [
+            entity('root', 'fake.profile', '100', { name: 'reposter' }, [0]),
+            entity('target', 'fake.post', 'T'),
+          ],
+          ['root', 'reposted', 'target'],
+        ),
+      }),
+    })
+    const target = await capture(ctx, post('T'))
+    const actor = await capture(ctx, profile('100'))
+    const own = avatarOf(find(getCollection(ctx, actor.collectionId), 'root'))
+    expect(own).toBeDefined()
+    const [reposted] = getCollection(
+      ctx,
+      target.collectionId,
+    ).incoming_relations!
+    expect(reposted?.type).toBe('reposted')
+    expect(avatarOf(reposted?.entity)).toBe(own)
+  })
+
   test('incoming relations come from saved history only', async () => {
     let profileName = 'old profile'
     let reposts = true

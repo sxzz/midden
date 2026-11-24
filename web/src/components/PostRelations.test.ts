@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest'
-import { createVaporApp } from 'vue'
+import { createVaporApp, nextTick } from 'vue'
 import { asset, collection as collectionOf, entity } from '../testing/api'
 import CollectionPost from './CollectionPost.vue'
 import type { Collection } from '../api'
@@ -362,14 +362,71 @@ it('shows a repost account card with its own saved avatar, never a sensitive one
     { type: 'reposted', entity: profile('hidden', true) },
   ])
   const [shown, hidden] = el.querySelectorAll('.relation')
-  expect(shown?.querySelector('img')?.getAttribute('src')).toBe(
+  // The account reads like a quoted post's author: avatar, name, handle.
+  const account = shown?.querySelector('.account')
+  expect(account?.querySelector('img.avatar')?.getAttribute('src')).toBe(
     '/v1/assets/avatar?inline=1',
   )
-  expect(shown?.textContent).toContain('合成账号 shown')
+  expect(account?.querySelector('.author-name')?.textContent).toBe(
+    '合成账号 shown',
+  )
+  expect(account?.querySelector('.author-handle')?.textContent).toBe('@shown')
+  // Without a shown avatar the row simply starts with the name.
   expect(hidden?.querySelector('img')).toBeNull()
-  expect(hidden?.textContent).toContain('合成账号 hidden')
+  expect(hidden?.querySelector('.account')?.textContent).toContain(
+    '合成账号 hidden',
+  )
   expect(el.querySelector('.relation-author')).toBeNull()
   expect(el.querySelector('.thumbs-group')).toBeNull()
+})
+it('shows the reposting account as captured or as last seen, with its lock', async () => {
+  const avatar = (id: string) =>
+    asset({
+      id,
+      url: `/v1/assets/${id}?inline=1`,
+      purpose: 'avatar',
+      mime: 'image/png',
+      sha256: id,
+    })
+  const el = mount({
+    root: 'post',
+    entities: [
+      root,
+      entity({
+        key: 'reposter',
+        type: 'x.profile',
+        external_id: '789',
+        saved_collection_id: 'profile',
+        data: { username: 'old', name: '旧名字' },
+        assets: [avatar('old-avatar')],
+        current: {
+          id: 'v2',
+          data: {
+            username: 'renamed',
+            name: '新名字',
+            metadata: { protected: true },
+          },
+          assets: [avatar('new-avatar')],
+        },
+      }),
+    ],
+    relations: [{ source: 'reposter', target: 'post', type: 'reposted' }],
+  })
+  const account = () => el.querySelector('.relation .account')!
+  expect(account().textContent).toContain('新名字')
+  expect(account().textContent).toContain('@renamed')
+  expect(account().querySelector('.lock')).not.toBeNull()
+  expect(account().querySelector('img')?.getAttribute('src')).toBe(
+    '/v1/assets/new-avatar?inline=1',
+  )
+  el.querySelector<HTMLButtonElement>('.profile-version')!.click()
+  await nextTick()
+  expect(account().textContent).toContain('旧名字')
+  expect(account().textContent).toContain('@old')
+  expect(account().querySelector('.lock')).toBeNull()
+  expect(account().querySelector('img')?.getAttribute('src')).toBe(
+    '/v1/assets/old-avatar?inline=1',
+  )
 })
 it('shows saved incoming repost accounts and quote/repost posts without duplicate snapshot cards', () => {
   const profile = {
