@@ -243,7 +243,6 @@ describe('api', () => {
           .status,
       ).toBe(400)
     expect((await call('/collections/authors')).status).toBe(200)
-    expect(await (await call(`/collections/${id}/sources`)).json()).toEqual([])
     expect((await call('/collections?sort=nonsense')).status).toBe(400)
     // One author or several: both are a filter, not a malformed query.
     for (const authors of [

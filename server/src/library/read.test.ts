@@ -2,13 +2,7 @@ import { Buffer } from 'node:buffer'
 import { randomUUIDv7 } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
-import {
-  assets,
-  blobs,
-  blobThumbnails,
-  revisions,
-  sourceResponses,
-} from '#db/schema.ts'
+import { assets, blobs, blobThumbnails, revisions } from '#db/schema.ts'
 import { status } from '#platforms/rpc.ts'
 import { FakeFailure } from '#testing/fake-platform.ts'
 import {
@@ -28,7 +22,6 @@ import {
   listCounts,
   listHistory,
 } from './read.ts'
-import { getSource, listSources } from './sources.ts'
 import type { CaptureContext } from '#capture/context.ts'
 import type { FetchResponse } from '#platforms/protocol.ts'
 import type { CollectionView, EntityView } from './views.ts'
@@ -497,74 +490,20 @@ describe('collection', () => {
   })
 
   test('only saved collections are readable', async () => {
-    const { ctx } = setup({
-      1: () => ({
-        text: 'x',
-        sourceResponses: [
-          {
-            body: Buffer.from('{}'),
-            contentType: 'application/json',
-            sourceUrl: 'https://api.test/1',
-            visibility: 1,
-          },
-        ],
-      }),
-    })
+    const { ctx } = setup({ 1: () => ({ text: 'x' }) })
     const done = await capture(ctx, post('1'))
-    const source = listSources(ctx, done.collectionId)[0]!
     deleteCollection(ctx.db, done.collectionId)
     for (const read of [
       () => getCollection(ctx, done.collectionId),
       () => listHistory(ctx, done.collectionId),
       () => listCounts(ctx, done.collectionId),
       () => getHistoryPoint(ctx, done.collectionId, done.id),
-      () => listSources(ctx, done.collectionId),
-      () => getSource(ctx, source.id),
       () => getCollection(ctx, randomUUIDv7()),
       () => getCollection(ctx, 'not-a-uuid'),
     ])
       expect(read).toThrow('内容不存在或已删除')
     // Delivery of a capture's result does not depend on the library.
     expect(getCaptureCollection(ctx, done.id).text).toBe('x')
-  })
-
-  test('raw responses of finished captures, newest first', async () => {
-    let n = 0
-    const { ctx } = setup({
-      1: () => ({
-        text: 'x',
-        sourceResponses: [
-          {
-            body: Buffer.from(`{"n":${++n}}`),
-            contentType: 'application/json',
-            sourceUrl: `https://api.test/${n}`,
-            visibility: 1,
-          },
-        ],
-      }),
-    })
-    const first = await capture(ctx, post('1'))
-    const second = await capture(ctx, { refreshId: first.collectionId })
-    const list = listSources(ctx, first.collectionId)
-    expect(list).toEqual([
-      expect.objectContaining({
-        capture_id: second.id,
-        provider_id: 'public',
-        adapter_version: '1',
-        content_type: 'application/json',
-        source_url: 'https://api.test/2',
-        size: 7,
-        created_at: expect.any(String),
-      }),
-      expect.objectContaining({ capture_id: first.id }),
-    ])
-    const stored = ctx.db.select().from(sourceResponses).all()
-    expect(list[0]!.sha256).toBe(
-      stored.find((s) => s.captureId === second.id)!.sha256,
-    )
-    const body = getSource(ctx, list[0]!.id)
-    expect(body.content_type).toBe('application/json')
-    expect(body.body.toString()).toBe('{"n":2}')
   })
 })
 

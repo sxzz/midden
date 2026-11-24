@@ -28,7 +28,7 @@ flowchart LR
 | ----------------------- | ----------------------------------------------------------------------------------------------------- |
 | `server/src/platforms/` | X 与 Instagram 采集，由旧版 adapter 移植，在进程内直接调用；`third_party/atmosphere` 是其依赖的上游库 |
 | `server/src/capture/`   | 采集链路：提交、抓取、下载、缩略图、版本、related 展开与续页、记录与进度、批量刷新、维护              |
-| `server/src/library/`   | 读取：收藏详情、筛选列表、作者、版本、原始响应、删除、标签备注、收藏夹                                |
+| `server/src/library/`   | 读取：收藏详情、筛选列表、作者、版本、删除、标签备注、收藏夹                                |
 | `server/src/accounts/`  | 采集账号与加密凭据                                                                                    |
 | `server/src/jobs/`      | 存在 SQLite 中的持久化任务队列                                                                        |
 | `server/src/blob/`      | 媒体存储接口、本地目录实现、签名链接                                                                  |

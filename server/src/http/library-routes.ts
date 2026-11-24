@@ -11,7 +11,6 @@ import {
   listCounts,
   listHistory,
 } from '#library/read.ts'
-import { getSource, listSources } from '#library/sources.ts'
 import { Cursor, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
@@ -52,82 +51,59 @@ const ChangesQuery = v.object({
   ),
 })
 
-/** Reading the library: collections, their history, entities, raw sources. */
+/** Reading the library: collections, their history, and entities. */
 export function libraryRoutes(ctx: AccountsContext) {
-  return (
-    new Hono<Env>()
-      .get('/collections', query(Filters), (c) => {
-        const input = c.req.valid('query')
-        return c.json(
-          listCollections(
-            ctx,
-            collectionFilter(input),
-            input.cursor || undefined,
-          ),
-        )
-      })
-
-      .get('/collections/authors', query(AuthorFilters), (c) => {
-        const input = c.req.valid('query')
-        const author = input.author ?? []
-        return c.json(
-          listAuthors(ctx, {
-            q: input.q || undefined,
-            cursor: input.cursor || undefined,
-            authors: typeof author === 'string' ? [author] : author,
-          }),
-        )
-      })
-
-      .get('/collections/:id', (c) =>
-        c.json(getCollection(ctx, c.req.param('id'))),
-      )
-
-      .get('/collections/:id/history', query(Cursor), (c) =>
-        c.json(
-          listHistory(
-            ctx,
-            c.req.param('id'),
-            c.req.valid('query').cursor || undefined,
-          ),
+  return new Hono<Env>()
+    .get('/collections', query(Filters), (c) => {
+      const input = c.req.valid('query')
+      return c.json(
+        listCollections(
+          ctx,
+          collectionFilter(input),
+          input.cursor || undefined,
         ),
       )
+    })
 
-      .get('/collections/:id/counts', query(CountsQuery), (c) =>
-        c.json(listCounts(ctx, c.req.param('id'), c.req.valid('query').limit)),
+    .get('/collections/authors', query(AuthorFilters), (c) => {
+      const input = c.req.valid('query')
+      const author = input.author ?? []
+      return c.json(
+        listAuthors(ctx, {
+          q: input.q || undefined,
+          cursor: input.cursor || undefined,
+          authors: typeof author === 'string' ? [author] : author,
+        }),
       )
+    })
 
-      .get('/collections/:id/profile-changes', query(ChangesQuery), (c) =>
-        c.json(
-          listProfileChanges(
-            ctx,
-            c.req.param('id'),
-            c.req.valid('query').limit,
-          ),
+    .get('/collections/:id', (c) =>
+      c.json(getCollection(ctx, c.req.param('id'))),
+    )
+
+    .get('/collections/:id/history', query(Cursor), (c) =>
+      c.json(
+        listHistory(
+          ctx,
+          c.req.param('id'),
+          c.req.valid('query').cursor || undefined,
         ),
-      )
+      ),
+    )
 
-      .get('/collections/:id/history/:capture', (c) =>
-        c.json(getHistoryPoint(ctx, c.req.param('id'), c.req.param('capture'))),
-      )
+    .get('/collections/:id/counts', query(CountsQuery), (c) =>
+      c.json(listCounts(ctx, c.req.param('id'), c.req.valid('query').limit)),
+    )
 
-      .get('/entities/:id', (c) => c.json(getEntity(ctx, c.req.param('id'))))
+    .get('/collections/:id/profile-changes', query(ChangesQuery), (c) =>
+      c.json(
+        listProfileChanges(ctx, c.req.param('id'), c.req.valid('query').limit),
+      ),
+    )
 
-      .get('/collections/:id/sources', (c) =>
-        c.json(listSources(ctx, c.req.param('id'))),
-      )
+    .get('/collections/:id/history/:capture', (c) =>
+      c.json(getHistoryPoint(ctx, c.req.param('id'), c.req.param('capture'))),
+    )
 
-      // Raw upstream bytes: shown as they were, but never run as this site.
-      .get('/sources/:id', (c) => {
-        const source = getSource(ctx, c.req.param('id'))
-        return new Response(new Uint8Array(source.body), {
-          headers: {
-            'Content-Type': source.content_type,
-            'X-Content-Type-Options': 'nosniff',
-            'Content-Security-Policy': 'sandbox',
-            'Cache-Control': 'no-store',
-          },
-        })
-      })
-  )
+    .get('/entities/:id', (c) => c.json(getEntity(ctx, c.req.param('id'))))
 }
