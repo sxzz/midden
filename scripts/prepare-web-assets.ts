@@ -15,6 +15,6 @@ await writeFile(
   X-Robots-Tag: noindex, nofollow
   Referrer-Policy: no-referrer
   Cache-Control: no-cache
-  Content-Security-Policy: default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; base-uri 'none'; object-src 'none'; frame-src https://oauth.telegram.org; frame-ancestors 'self' https://web.telegram.org
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://pbs.twimg.com; media-src 'self'; connect-src 'self'; base-uri 'none'; object-src 'none'; frame-src https://oauth.telegram.org; frame-ancestors 'self' https://web.telegram.org
 `,
 )
