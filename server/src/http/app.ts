@@ -13,6 +13,7 @@ import {
 } from './auth.ts'
 import { captureRoutes } from './capture-routes.ts'
 import { errorResponse } from './errors.ts'
+import { folderRoutes } from './folder-routes.ts'
 import { libraryRoutes } from './library-routes.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -135,6 +136,7 @@ export function createApi(options: HttpOptions) {
       .route('/', captureRoutes(ctx))
       .route('/', accountRoutes(ctx))
       .route('/', libraryRoutes(ctx))
+      .route('/', folderRoutes(ctx))
   )
 }
 

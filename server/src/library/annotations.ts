@@ -1,6 +1,6 @@
-import { asc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, notInArray, sql } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
-import { collectionTags, library, tags } from '#db/schema.ts'
+import { collectionTags, folders, library, tags } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import type { Database, Executor, Transaction } from '#db/client.ts'
 
@@ -35,11 +35,23 @@ export function listTags(db: Executor): Tag[] {
     .all()
 }
 
-/** Tags nothing uses any more go away. */
+/**
+ * Tags nothing uses any more go away. A folder filtering on a tag keeps it,
+ * so a tag used for grouping survives while its folder is empty.
+ */
 export function pruneTags(tx: Transaction): void {
+  const kept = tx
+    .select({ filter: folders.filter })
+    .from(folders)
+    .all()
+    .map((folder) => new URLSearchParams(folder.filter).get('tag'))
+    .filter((id): id is string => !!id)
   tx.delete(tags)
     .where(
-      sql`NOT EXISTS (SELECT 1 FROM ${collectionTags} WHERE ${collectionTags.tagId} = ${tags.id})`,
+      and(
+        sql`NOT EXISTS (SELECT 1 FROM ${collectionTags} WHERE ${collectionTags.tagId} = ${tags.id})`,
+        notInArray(tags.id, kept),
+      ),
     )
     .run()
 }

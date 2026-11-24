@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import * as v from 'valibot'
 import { CHANGES_WINDOW, listProfileChanges } from '#library/changes.ts'
 import { getEntity } from '#library/entities.ts'
+import { collectionFilter, FilterQuery } from '#library/filter-query.ts'
 import { listAuthors, listCollections } from '#library/list.ts'
 import {
   COUNTS_LIMIT,
@@ -16,23 +17,8 @@ import type { AccountsContext } from '#accounts/accounts.ts'
 
 const text = v.optional(v.string())
 
-/** Collection list filters; list.ts checks their values. */
-const Filters = v.object({
-  q: text,
-  entity_type: text,
-  media_type: text,
-  visibility: text,
-  saved_from: text,
-  saved_before: text,
-  sort: text,
-  order: text,
-  author: v.optional(v.union([v.string(), v.array(v.string())])),
-  sensitive: text,
-  tag: text,
-  related_to: text,
-  post_type: text,
-  cursor: text,
-})
+/** The list's filters and the page to read. */
+const Filters = v.object({ ...FilterQuery.entries, cursor: text })
 
 const AuthorFilters = v.object({
   q: text,
@@ -72,25 +58,10 @@ export function libraryRoutes(ctx: AccountsContext) {
     new Hono<Env>()
       .get('/collections', query(Filters), (c) => {
         const input = c.req.valid('query')
-        const author = input.author ?? []
         return c.json(
           listCollections(
             ctx,
-            {
-              q: input.q || undefined,
-              entityType: input.entity_type || undefined,
-              mediaType: input.media_type || undefined,
-              visibility: input.visibility || undefined,
-              savedFrom: input.saved_from || undefined,
-              savedBefore: input.saved_before || undefined,
-              sort: input.sort || undefined,
-              order: input.order || undefined,
-              authors: typeof author === 'string' ? [author] : author,
-              sensitive: input.sensitive || undefined,
-              tag: input.tag || undefined,
-              relatedTo: input.related_to || undefined,
-              postType: input.post_type || undefined,
-            },
+            collectionFilter(input),
             input.cursor || undefined,
           ),
         )

@@ -6,6 +6,7 @@ import { AppError } from '#errors.ts'
 import { collectionsById, isUUID } from './read.ts'
 import { list, type CollectionView, type Page } from './views.ts'
 import type { CaptureContext } from '#capture/context.ts'
+import type { Executor } from '#db/client.ts'
 
 /** Library filters, as given in the query string. Empty means unset. */
 export interface CollectionFilter {
@@ -341,15 +342,19 @@ const SAVED = `catalog k JOIN library l ON l.collection_id = k.collection_id`
 const RELATED = `related CROSS JOIN catalog k ON k.collection_id = related.collection_id
   JOIN library l ON l.collection_id = k.collection_id`
 
-/** The library, filtered, sorted and 20 per page. */
-export function listCollections(
-  ctx: CaptureContext,
-  input: CollectionFilter = {},
-  cursor?: string,
-): Page<CollectionView> {
-  const { filter, authors, from, before } = check(input)
-  const fingerprint = sha256Hex(canonicalJson(filter))
-  const after = cursor ? decodeCursor(cursor, fingerprint) : undefined
+interface Selection {
+  checked: Checked
+  /** The `WITH` clause the source needs, if any. */
+  ctes: SQL
+  /** Saved collections as `k` and `l`, maybe narrowed to related ones. */
+  source: string
+  where: SQL
+}
+
+/** The saved collections a filter selects, unordered. */
+function select(input: CollectionFilter): Selection {
+  const checked = check(input)
+  const { filter, authors, from, before } = checked
   const related = filter.relatedTo
   const types = values(filter.entityType)
   const conditions: SQL[] = []
@@ -377,9 +382,45 @@ export function listCollections(
   if (filter.tag) conditions.push(tagSQL(filter.tag))
   if (filter.postType)
     conditions.push(sql`${postTypeSQL(!!related)} = ${filter.postType}`)
-  const where = conditions.length
-    ? sql.join(conditions, sql` AND `)
-    : sql`1 = 1`
+  return {
+    checked,
+    ctes: related ? sql`WITH ${relatedEdgesSQL(related)}` : sql``,
+    source: related ? RELATED : SAVED,
+    where: conditions.length ? sql.join(conditions, sql` AND `) : sql`1 = 1`,
+  }
+}
+
+/** Throw `invalid_filter` unless the list accepts this filter. */
+export function checkFilter(input: CollectionFilter): void {
+  check(input)
+}
+
+/** How many saved collections the list shows for a filter, over all pages. */
+export function countCollections(
+  db: Executor,
+  input: CollectionFilter = {},
+): number {
+  const { ctes, source, where } = select(input)
+  return (
+    db.get<{ count: number }>(sql`
+      ${ctes}
+      SELECT count(*) AS count FROM ${sql.raw(source)} WHERE ${where}`)
+      ?.count ?? 0
+  )
+}
+
+/** The library, filtered, sorted and 20 per page. */
+export function listCollections(
+  ctx: CaptureContext,
+  input: CollectionFilter = {},
+  cursor?: string,
+): Page<CollectionView> {
+  const { checked, ctes, source, where } = select(input)
+  const { filter } = checked
+  const fingerprint = sha256Hex(canonicalJson(filter))
+  const after = cursor ? decodeCursor(cursor, fingerprint) : undefined
+  const related = filter.relatedTo
+  const types = values(filter.entityType)
   const by = filter.sort === 'storage' ? 'bytes' : 'at'
   const asc = filter.order === 'asc'
   const direction = sql.raw(asc ? 'ASC' : 'DESC')
@@ -395,7 +436,7 @@ export function listCollections(
     bytes: number
     relations: string | null
   }>(sql`
-    ${related ? sql`WITH ${relatedEdgesSQL(related)}` : sql``}
+    ${ctes}
     SELECT id, at, bytes, relations FROM (
       -- The id comes from the table whose index orders the page, so SQLite
       -- reads library_created in order for saved time instead of sorting.
@@ -403,7 +444,7 @@ export function listCollections(
         ${sql.raw(time)} AS at,
         k.storage_bytes AS bytes,
         ${sql.raw(related ? 'related.kinds' : 'NULL')} AS relations
-      FROM ${sql.raw(related ? RELATED : SAVED)}
+      FROM ${sql.raw(source)}
       WHERE ${where}
     )
     ${

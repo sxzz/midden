@@ -253,4 +253,76 @@ describe('api', () => {
       expect((await call(`/collections?${authors}`)).status).toBe(200)
     expect((await call('/collections?tag=a&tag=b')).status).toBe(400)
   })
+
+  test('saves library filters as folders', async () => {
+    const { ctx, call } = setup()
+    const send = (method: string, path: string, body: unknown) =>
+      call(path, { method, body: JSON.stringify(body) })
+    await send('POST', '/captures', { url: 'https://fake.test/p/1' })
+    await ctx.queue.drain()
+
+    const created = await send('POST', '/folders', {
+      name: '帖子',
+      filter: 'entity_type=fake.post&layout=album',
+    })
+    expect(created.status).toBe(200)
+    const folder = (await created.json()) as { id: string }
+    expect(folder).toMatchObject({
+      name: '帖子',
+      filter: 'entity_type=fake.post',
+      count: 1,
+      created_at: expect.any(String),
+      updated_at: expect.any(String),
+    })
+    await send('POST', '/folders', { name: '空', filter: 'q=nothing' })
+    expect(await (await call('/folders')).json()).toMatchObject([
+      { id: folder.id, count: 1 },
+      { name: '空', count: 0 },
+    ])
+
+    const renamed = await send('PATCH', `/folders/${folder.id}`, {
+      name: '全部帖子',
+    })
+    expect(await renamed.json()).toMatchObject({
+      name: '全部帖子',
+      filter: 'entity_type=fake.post',
+    })
+    const refiltered = await send('PATCH', `/folders/${folder.id}`, {
+      filter: 'q=post&sort=saved',
+    })
+    expect(await refiltered.json()).toMatchObject({
+      name: '全部帖子',
+      filter: 'q=post&sort=saved',
+      count: 1,
+    })
+
+    // The list's own rules, and its error text.
+    for (const filter of ['sort=nonsense', 'tag=a&tag=b'])
+      expect(
+        await (await send('POST', '/folders', { name: 'x', filter })).json(),
+      ).toEqual({ error: '筛选条件无效' })
+    const duplicate = await send('POST', '/folders', {
+      name: '空',
+      filter: '',
+    })
+    expect(duplicate.status).toBe(409)
+    expect(await duplicate.json()).toEqual({ error: '已有同名的收藏夹' })
+    const blank = await send('POST', '/folders', { name: ' ', filter: '' })
+    expect(blank.status).toBe(400)
+    expect(await blank.json()).toEqual({
+      error: '收藏夹名称不能为空，最多 64 字',
+    })
+    for (const body of [{ name: 'x' }, { name: 'x', filter: '', extra: 1 }])
+      expect((await send('POST', '/folders', body)).status).toBe(400)
+
+    expect(
+      (await call(`/folders/${folder.id}`, { method: 'DELETE' })).status,
+    ).toBe(204)
+    expect(
+      (await call(`/folders/${folder.id}`, { method: 'DELETE' })).status,
+    ).toBe(404)
+    expect(await (await call('/folders')).json()).toMatchObject([
+      { name: '空' },
+    ])
+  })
 })

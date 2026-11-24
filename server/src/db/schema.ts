@@ -550,6 +550,19 @@ export const collectionTags = sqliteTable(
   ],
 )
 
+/**
+ * Saved library filters (收藏夹). The filter is the list's own query string
+ * (`GET /v1/collections` without the cursor), in the canonical form of
+ * `library/filter-query.ts`, so new filters need no new columns.
+ */
+export const folders = sqliteTable('folders', {
+  id: text().primaryKey(),
+  name: text().notNull().unique(),
+  filter: text().notNull(),
+  createdAt: createdAt(),
+  updatedAt: createdAt(),
+})
+
 /** Platform accounts used for capturing. */
 export const connections = sqliteTable(
   'connections',
