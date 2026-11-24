@@ -39,9 +39,11 @@ const routes: Record<string, () => Partial<FetchResponse>> = {
       ['root', 'reposted', 'post'],
     ),
   }),
+  // Its avatar could not be saved: shown from the platform instead.
   600: () => ({
     text: 'profile bob',
-    graph: graph([entity('root', 'fake.profile', '600', { name: 'Bob' })]),
+    resources: [image('missing/bob.jpg', { purpose: 'avatar' })],
+    graph: graph([entity('root', 'fake.profile', '600', { name: 'Bob' }, [0])]),
   }),
   // Written by the profile, with an image.
   a1: () => ({
@@ -398,7 +400,13 @@ describe('public shares', () => {
       VALUES (${entityOf(ids.five!)}, ${entityOf(ids.bob!)}, ${day},
         ${day + 1000}, ${day + 2000})`)
     type Changes = {
-      items: { account: { name?: string; collection_id?: string } }[]
+      items: {
+        account: {
+          name?: string
+          collection_id?: string
+          avatar?: { remote_url?: string; url?: string }
+        }
+      }[]
     }
 
     const slug = share(c, 'collection', ids.five!)
@@ -413,6 +421,13 @@ describe('public shares', () => {
     expect(
       (changes.body as Changes).items[0]!.account.collection_id,
     ).toBeUndefined()
+    // Out of scope, bob still shows his name and avatar, here from X itself.
+    expect((changes.body as Changes).items[0]!.account.avatar).toMatchObject({
+      remote_url: 'https://m.test/missing/bob.jpg',
+    })
+    expect(
+      (changes.body as Changes).items[0]!.account.avatar,
+    ).not.toHaveProperty('url')
     for (const path of ['/follows', '/follow-changes'])
       expect(await read(slug, `/collections/${ids.bob}${path}`)).toMatchObject(
         NOT_FOUND,
@@ -428,6 +443,18 @@ describe('public shares', () => {
     expect((linked.body as Changes).items[0]!.account.collection_id).toBe(
       ids.bob,
     )
+    // In scope, bob's own page shows the platform's avatar like a saved one.
+    const page = await read(both, `/collections/${ids.bob}`)
+    expect(page.status).toBe(200)
+    expect(
+      (page.body as { graph: { entities: { assets?: object[] }[] } }).graph
+        .entities[0]!.assets,
+    ).toEqual([
+      expect.objectContaining({
+        purpose: 'avatar',
+        remote_url: 'https://m.test/missing/bob.jpg',
+      }),
+    ])
   })
 
   test('revoked, unknown and malformed slugs are not found', async () => {

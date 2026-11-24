@@ -111,8 +111,12 @@ export function errorText(e: unknown) {
 }
 export const assetURL = (a: Asset, inline = true) =>
   (inline ? a.url : (a.download_url ?? a.url)) ?? ''
-/** The small image for lists and avatars, or the original until one exists. */
-export const previewURL = (a: Asset) => a.thumbnail_url ?? assetURL(a)
+/**
+ * The small image for lists and avatars, or the original until one exists;
+ * for an account image never saved here, the platform's own address.
+ */
+export const previewURL = (a: Asset) =>
+  a.thumbnail_url ?? (a.url || a.remote_url || '')
 /** What Telegram's downloadFile needs: an absolute URL and a file name. */
 export const telegramDownload = (a: Asset) => ({
   url: new URL(assetURL(a, false), location.href).href,

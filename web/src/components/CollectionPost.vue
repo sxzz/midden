@@ -59,6 +59,8 @@ const avatarAssets = computed(() =>
     ? [view.value.avatar]
     : [],
 )
+/** Only an avatar saved here opens in the viewer; a remote one just shows. */
+const viewable = computed(() => avatarAssets.value[0]?.state === 'ready')
 watch(avatarAssets, () => {
   previewAvatar.value = false
 })
@@ -83,7 +85,7 @@ const warnings = computed(() => warningList(props.collection.warnings))
         }}</span></a
       >
       <button
-        v-else-if="avatarAssets.length && view.bio !== undefined"
+        v-else-if="viewable && view.bio !== undefined"
         type="button"
         class="avatar avatar-button"
         :aria-label="`查看${view.name}的头像`"
@@ -94,7 +96,12 @@ const warnings = computed(() => warningList(props.collection.warnings))
           :src="previewURL(avatarAssets[0]!)"
           alt=""
         /></button
-      ><span v-else class="avatar initials" aria-hidden="true">{{
+      ><LoadingImage
+        v-else-if="avatarAssets.length"
+        class="avatar"
+        :src="previewURL(avatarAssets[0]!)"
+        alt=""
+      /><span v-else class="avatar initials" aria-hidden="true">{{
         view.name.slice(0, 1)
       }}</span>
       <a

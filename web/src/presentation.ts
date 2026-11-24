@@ -1,4 +1,5 @@
 import {
+  avatarOf,
   collectionProfilesDiffer,
   isPostEntity,
   isProfileEntity,
@@ -189,9 +190,7 @@ const social: Presenter = (a, root, options = {}) => {
             ? `https://x.com/i/user/${profile.external_id}`
             : undefined,
     handle: asText(profile?.data.username),
-    avatar: profile?.assets?.find(
-      (v) => v.purpose === 'avatar' && v.state === 'ready',
-    ),
+    avatar: avatarOf(profile),
     // Counts come from the entity the collection is about, and only that one.
     stats: isProfile
       ? group('账号统计', metadata(profile), countFields(root?.type))

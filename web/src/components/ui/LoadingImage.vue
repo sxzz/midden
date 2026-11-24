@@ -24,6 +24,7 @@ watch(
       :src="src"
       :alt="alt"
       :loading="loading"
+      referrerpolicy="no-referrer"
       :fetchpriority="loading === 'lazy' ? 'low' : undefined"
       decoding="async"
       :class="{ pending: state !== 'ready' }"

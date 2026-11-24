@@ -116,7 +116,13 @@ const blurred = (account: FollowAccount) =>
                     </span>
                   </button>
                   <span v-else class="account-row">
-                    <span class="avatar" />
+                    <span class="avatar" :class="{ blurred: blurred(account) }">
+                      <LoadingImage
+                        v-if="account.avatar"
+                        :src="previewURL(account.avatar)"
+                        alt=""
+                      />
+                    </span>
                     <span class="names">
                       <span class="name">{{ accountName(account) }}</span>
                       <span

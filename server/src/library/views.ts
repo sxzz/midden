@@ -32,6 +32,12 @@ export interface AssetView {
   /** The original as an attachment named `file_name`. */
   download_url?: string
   file_name?: string
+  /**
+   * The platform's own address of an avatar or banner that was never
+   * downloaded (an account known only from a follow list, say), for the
+   * web to show from the platform. Absent once the image is saved here.
+   */
+  remote_url?: string
 }
 
 const EXTENSIONS: Record<string, string> = {
@@ -140,12 +146,14 @@ interface AssetRow {
   size: number | null
   thumb_key: string | null
   thumb_mime: string | null
+  kind: string
+  source_url: string
 }
 
 function assetRows(r: Reader, where: SQL): AssetRow[] {
   return r.db.all<AssetRow>(sql`
     SELECT a.capture_id, a.id, a.purpose, a.position, a.alt_text, a.sensitive,
-      a.state, a.error, b.hash, b.mime, b.size,
+      a.state, a.error, a.kind, a.source_url, b.hash, b.mime, b.size,
       t.key AS thumb_key, t.mime AS thumb_mime
     FROM assets a
     LEFT JOIN blobs b ON b.id = a.blob_id
@@ -154,8 +162,23 @@ function assetRows(r: Reader, where: SQL): AssetRow[] {
     ORDER BY a.capture_id, a.position`)
 }
 
+/** Images that stand for an account, which may be shown from the platform. */
+const ACCOUNT_IMAGES = new Set(['avatar', 'banner'])
+
+/** The platform's address of an account image not saved here, if any. */
+function remoteURL(row: AssetRow): string | undefined {
+  if (row.kind !== 'image' || !ACCOUNT_IMAGES.has(row.purpose)) return
+  try {
+    const url = new URL(row.source_url)
+    return url.protocol === 'https:' ? url.href : undefined
+  } catch {
+    return
+  }
+}
+
 function assetView(r: Reader, row: AssetRow): AssetView {
   const ready = row.state === 'ready' && !!row.hash
+  const remote = ready ? undefined : remoteURL(row)
   const thumbnail = !!row.thumb_key && !!row.thumb_mime
   const fileName = `${row.id}.${EXTENSIONS[row.mime ?? ''] ?? 'bin'}`
   return {
@@ -187,6 +210,7 @@ function assetView(r: Reader, row: AssetRow): AssetView {
           }),
         }
       : {}),
+    ...(remote ? { remote_url: remote } : {}),
   }
 }
 
@@ -218,16 +242,18 @@ export function assetsById(
 }
 
 /**
- * The first ready avatar among the resources of entity `keyColumn` in
- * revision `revision`, as an SQL expression yielding the asset id.
+ * The avatar among the resources of entity `keyColumn` in revision
+ * `revision`, as an SQL expression yielding the asset id: the first ready
+ * one, or else one only the platform has (see `remote_url`).
  */
 export const avatarOf = (revision: string, keyColumn: string) => `(
   SELECT av.id FROM json_each(${revision}.payload, '$.graph.entities') ge
   JOIN json_each(ge.value, '$.resource_indices') gi
   JOIN assets av ON av.capture_id = ${revision}.capture_id
-    AND av.position = gi.value AND av.purpose = 'avatar' AND av.state = 'ready'
+    AND av.position = gi.value AND av.purpose = 'avatar'
+    AND (av.state = 'ready' OR (av.kind = 'image' AND av.source_url LIKE 'https://%'))
   WHERE ge.value ->> 'key' = ${keyColumn}
-  ORDER BY av.position LIMIT 1)`
+  ORDER BY av.state = 'ready' DESC, av.position LIMIT 1)`
 
 export function entityView(entity: PayloadEntity): EntityView {
   return {

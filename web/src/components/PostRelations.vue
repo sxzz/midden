@@ -215,6 +215,7 @@ const relations = computed(() => {
             :src="relation.author.avatar"
             alt=""
             loading="lazy"
+            referrerpolicy="no-referrer"
           />
           <span v-if="relation.author.name" class="author-name">{{
             relation.author.name
@@ -245,6 +246,7 @@ const relations = computed(() => {
             :src="relation.account.avatar"
             alt=""
             loading="lazy"
+            referrerpolicy="no-referrer"
           />
           <span v-if="relation.account.name" class="author-name">{{
             relation.account.name

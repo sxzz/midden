@@ -1,5 +1,11 @@
 import { expect, it } from 'vitest'
-import { safeURL, type Collection, type Entity } from './api'
+import {
+  previewURL,
+  safeURL,
+  type Asset,
+  type Collection,
+  type Entity,
+} from './api'
 import {
   collectionTime,
   groupCollections,
@@ -455,4 +461,33 @@ it('notes a source found gone', () => {
       '作者已被封禁',
     ),
   ).toBe(true)
+})
+
+it("shows an account's avatar from the platform until one is saved here", () => {
+  const remote = asset({
+    id: 'remote',
+    purpose: 'avatar',
+    state: 'failed',
+    remote_url: 'https://pbs.twimg.com/profile_images/1/a.jpg',
+  })
+  const profile = (assets: Asset[]) =>
+    collection({
+      graph: {
+        root: 'profile',
+        relations: [],
+        entities: [
+          entity({ key: 'profile', type: 'x.profile', assets, data: {} }),
+        ],
+      },
+    })
+  const shown = present(profile([remote])).avatar!
+  expect(shown.id).toBe('remote')
+  expect(previewURL(shown)).toBe('https://pbs.twimg.com/profile_images/1/a.jpg')
+  // A saved avatar always wins, wherever it sits.
+  const saved = asset({ id: 'saved', purpose: 'avatar', url: '/media/saved' })
+  expect(present(profile([remote, saved])).avatar?.id).toBe('saved')
+  expect(previewURL(saved)).toBe('/media/saved')
+  // Neither saved nor known to the platform: no avatar at all.
+  const lost = asset({ id: 'lost', purpose: 'avatar', state: 'failed' })
+  expect(present(profile([lost])).avatar).toBeUndefined()
 })

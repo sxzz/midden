@@ -113,6 +113,36 @@ it('opens a saved account, and leaves an unsaved one as text', async () => {
   })
 })
 
+it('shows an avatar only the platform has, sending no referrer, linked or not', async () => {
+  const remote = (id: string) =>
+    asset({
+      id,
+      purpose: 'avatar',
+      state: 'failed',
+      remote_url: `https://pbs.twimg.com/profile_images/${id}.jpg`,
+    })
+  const { el } = await mount(() => ({
+    items: [
+      {
+        ...changes.items[0]!,
+        account: { ...changes.items[0]!.account, avatar: remote('r1') },
+      },
+      {
+        ...changes.items[1]!,
+        // Out of a share's scope: no link, but still name and avatar.
+        account: { ...changes.items[1]!.account, avatar: remote('r2') },
+      },
+    ],
+  }))
+  const images = [...el.querySelectorAll('.avatar img')]
+  expect(images.map((img) => img.getAttribute('src'))).toEqual([
+    'https://pbs.twimg.com/profile_images/r1.jpg',
+    'https://pbs.twimg.com/profile_images/r2.jpg',
+  ])
+  for (const img of images)
+    expect(img.getAttribute('referrerpolicy')).toBe('no-referrer')
+})
+
 it('shows nothing at all without changes, and the error when loading fails', async () => {
   const empty = await mount(() => ({ items: [] }))
   expect(empty.el.querySelector('.day')).toBeNull()

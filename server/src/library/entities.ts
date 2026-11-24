@@ -173,7 +173,13 @@ function attachSavedAvatars(r: Reader, views: readonly WithGraph[]): void {
   }
   for (const entity of graphEntities(views)) {
     const avatar = avatars.get(entity.saved_collection_id ?? '')
-    if (avatar && !hasAvatar(entity)) (entity.assets ??= []).push(avatar)
+    // One only the platform has may be the entity's own avatar already.
+    if (
+      avatar &&
+      !hasAvatar(entity) &&
+      !entity.assets?.some((a) => a.id === avatar.id)
+    )
+      (entity.assets ??= []).push(avatar)
   }
 }
 
@@ -317,7 +323,10 @@ function attachCurrentProfiles(r: Reader, views: readonly WithGraph[]): void {
       ),
     }
     const avatar = row.avatar && avatars.get(row.avatar)
-    if (avatar) current.assets = [avatar]
+    // An avatar saved here wins over one only the platform has, as from a
+    // version made of a follow list.
+    if (avatar && (avatar.state === 'ready' || !hasAvatar(entity)))
+      current.assets = [avatar]
     entity.current = current
   }
 }

@@ -15,6 +15,8 @@ import {
 } from '#db/schema.ts'
 import { listProfileChanges } from '#library/changes.ts'
 import { followCounts, listFollowChanges } from '#library/follows.ts'
+import { listCollections } from '#library/list.ts'
+import { getCollection } from '#library/read.ts'
 import { status } from '#platforms/rpc.ts'
 import { testContext } from '#testing/context.ts'
 import {
@@ -23,6 +25,7 @@ import {
   fakeProfile,
   type FakeRelations,
 } from '#testing/fake-platform.ts'
+import { JPEG } from '#testing/library.ts'
 import { captureHandlers } from './handlers.ts'
 import { captureURL, recapture, recordDetail } from './records.ts'
 import { LISTED_MEDIA } from './relation-store.ts'
@@ -40,6 +43,13 @@ interface World {
   lists: Record<string, Partial<Record<RelationList, string[]>>>
   /** Accounts per page. */
   pageSize: number
+  /** Profiles fetched for real come with an avatar to download. */
+  avatars?: boolean
+  /**
+   * How far each reading of the clock moves it; downloads snooze for a
+   * second, so with a step that long they would never let timers run.
+   */
+  step?: number
   /** Make the request for a page fail. */
   fail?: (req: RelationsRequest) => Error | undefined
   requests: RelationsRequest[]
@@ -84,7 +94,13 @@ function setup(world: Partial<World> = {}) {
             const counts = state.counts[id] ?? { following: 0, followers: 0 }
             // The same account as its list entries describe it.
             return {
-              ...fakeProfile(id, { name: `Name ${id}`, counts }),
+              ...fakeProfile(
+                id,
+                { name: `Name ${id}`, counts },
+                state.avatars
+                  ? { avatar: `https://m.test/real-${id}.jpg` }
+                  : {},
+              ),
               providerId: req.providerId,
             }
           },
@@ -93,8 +109,9 @@ function setup(world: Partial<World> = {}) {
       ),
     ],
     handlers: captureHandlers,
+    fetch: async () => new Response(JPEG),
     // Every reading of the clock moves it on, so each fetch is later.
-    now: () => (clock += 1000),
+    now: () => (clock += state.step ?? 1000),
   })
   ctx.queue.start()
   return { ctx, state }
@@ -402,6 +419,47 @@ describe('抓关系网', () => {
     expect(listProfileChanges(ctx, listed.id).items).toEqual([])
   })
 
+  test('a listed account shows its avatar from the platform until one is saved', async () => {
+    const { ctx, state } = setup({
+      counts: { '100': { following: 1, followers: 0 } },
+      lists: { '100': { following: ['300'] } },
+      step: 1,
+    })
+    await withAccount(ctx)
+    await update(ctx)
+    const listed = ctx.db
+      .select()
+      .from(collections)
+      .where(eq(collections.externalId, '300'))
+      .get()!
+    const avatarOf = (view: ReturnType<typeof getCollection>) =>
+      view.graph?.entities
+        .find((e) => e.key === view.graph?.root)
+        ?.assets?.find((a) => a.purpose === 'avatar')
+    // Not downloaded, so no signed link: only the platform's own address.
+    const remote = avatarOf(getCollection(ctx, listed.id))
+    expect(remote).toMatchObject({
+      state: 'failed',
+      remote_url: 'https://m.test/300.jpg',
+    })
+    expect(remote).not.toHaveProperty('url')
+    const item = listCollections(ctx, {
+      entityType: 'fake.profile',
+    }).items.find((i) => i.id === listed.id)!
+    expect(avatarOf(item)?.remote_url).toBe('https://m.test/300.jpg')
+
+    // Once fetched for real, the saved copy is shown instead.
+    state.avatars = true
+    captureURL(ctx, 'https://fake.test/u/300')
+    await ctx.queue.drain()
+    const saved = avatarOf(getCollection(ctx, listed.id))
+    expect(saved).toMatchObject({ state: 'ready' })
+    expect(saved?.url).toBeDefined()
+    expect(saved).not.toHaveProperty('remote_url')
+    // The list's image was never known, so the saved one changed nothing.
+    expect(listProfileChanges(ctx, listed.id).items).toEqual([])
+  })
+
   test('follow changes: news and ends after the first complete fetch, newest first', async () => {
     const { ctx, state } = setup({
       counts: { '100': { following: 2, followers: 2 } },
@@ -438,6 +496,10 @@ describe('抓关系网', () => {
       expect(change.since! <= change.observed_at).toBe(true)
       expect(change.account).toMatchObject({
         name: `Name ${change.account.external_id}`,
+        // Known only from the lists: shown from the platform.
+        avatar: {
+          remote_url: `https://m.test/${change.account.external_id}.jpg`,
+        },
       })
       expect(change.account.collection_id).toBeDefined()
     }

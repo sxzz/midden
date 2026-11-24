@@ -1,4 +1,4 @@
-import { previewURL, type Collection, type Entity } from './api'
+import { previewURL, type Asset, type Collection, type Entity } from './api'
 import { collectionHref } from './share'
 type Graph = NonNullable<Collection['graph']>
 export const isProfileEntity = (
@@ -13,7 +13,7 @@ export const isPostEntity = (
 export interface RelationAuthor {
   name?: string
   handle?: string
-  /** An avatar already saved here; the app never requests a remote one. */
+  /** The avatar saved here, or else the platform's (see `avatarOf`). */
   avatar?: string
   /** Only profiles saved in the library become internal links. */
   href?: string
@@ -51,12 +51,22 @@ export function profileVersion(
       : entity.assets,
   }
 }
-/** The avatar a header may show: saved, ready and not sensitive. */
-const shownAvatar = (entity?: Entity) =>
-  entity?.assets?.find(
-    (asset) =>
-      asset.purpose === 'avatar' && asset.state === 'ready' && !asset.sensitive,
+/**
+ * An entity's avatar: one saved here wins; without one, an avatar only the
+ * platform has (an account known from a follow list) is shown from there.
+ */
+export function avatarOf(entity?: Entity): Asset | undefined {
+  const avatars = entity?.assets?.filter((asset) => asset.purpose === 'avatar')
+  return (
+    avatars?.find((asset) => asset.state === 'ready') ??
+    avatars?.find((asset) => asset.remote_url)
   )
+}
+/** The avatar a header may show: saved or remote, and not sensitive. */
+const shownAvatar = (entity?: Entity) => {
+  const avatar = avatarOf(entity)
+  return avatar && !avatar.sensitive ? avatar : undefined
+}
 /** What a reader sees of an account, as one comparable value. */
 function seen(entity?: Entity) {
   const avatar = shownAvatar(entity)
@@ -64,7 +74,7 @@ function seen(entity?: Entity) {
     asText(entity?.data.name),
     asText(entity?.data.username),
     isProtected(entity),
-    avatar && (avatar.sha256 || avatar.url),
+    avatar && (avatar.sha256 || avatar.url || avatar.remote_url),
   ])
 }
 /**

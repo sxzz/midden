@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import { expect, test } from '@playwright/test'
 
 const profileId = '88888888-8888-4888-8888-888888888888'
@@ -79,15 +80,38 @@ const changes = {
       type: 'unfollowed_by',
       observed_at: '2026-11-05T08:00:00Z',
       since: '2026-11-04T08:00:00Z',
-      account: { entity_id: 'e2', external_id: '2', username: 'gone' },
+      account: {
+        entity_id: 'e2',
+        external_id: '2',
+        username: 'gone',
+        // Known only from a list: its avatar was never downloaded.
+        avatar: {
+          id: 'remote-avatar',
+          purpose: 'avatar',
+          position: 0,
+          state: 'failed',
+          sensitive: false,
+          size: 0,
+          remote_url: 'https://pbs.twimg.com/profile_images/2/gone.png',
+        },
+      },
     },
   ],
 }
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+  'base64',
+)
 
 test('updates a profile with its lists and lists its follow changes', async ({
   page,
 }) => {
   const submitted: unknown[] = []
+  const referers: (string | undefined)[] = []
+  await page.route('https://pbs.twimg.com/**', (route) => {
+    referers.push(route.request().headers().referer)
+    return route.fulfill({ body: PNG, contentType: 'image/png' })
+  })
   await page.route('https://telegram.org/**', (route) =>
     route.fulfill({ body: '' }),
   )
@@ -165,6 +189,15 @@ test('updates a profile with its lists and lists its follow changes', async ({
   await expect(entry).toHaveCount(1)
   await expect(entry.locator('.note')).toHaveText([/之后$/, /之后$/])
   await expect(entry.locator('.name')).toHaveText(['新朋友', '@gone'])
+  // X's own copy of an avatar never saved here, asked for without a referrer.
+  const remote = entry.locator('.avatar img')
+  await expect(remote).toHaveAttribute(
+    'src',
+    'https://pbs.twimg.com/profile_images/2/gone.png',
+  )
+  await expect(remote).toHaveAttribute('referrerpolicy', 'no-referrer')
+  await expect.poll(() => referers.length).toBeGreaterThan(0)
+  expect(referers.every((referer) => !referer)).toBe(true)
 
   await page.getByRole('button', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
