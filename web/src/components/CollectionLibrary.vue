@@ -11,7 +11,25 @@ import { call, client, type Collection, type Usage } from '../api'
 import { useCollection } from '../composables/useCollection'
 import { backButton, host } from '../host'
 import { goBack } from '../navigation'
-const showSensitive = shallowRef(false)
+// Remembered in this browser, so a reload does not cover the media again.
+const SENSITIVE_KEY = 'midden.showSensitive'
+const showSensitive = shallowRef(readFlag(SENSITIVE_KEY))
+watch(showSensitive, (on) => writeFlag(SENSITIVE_KEY, on))
+function readFlag(key: string) {
+  try {
+    return localStorage.getItem(key) === '1'
+  } catch {
+    return false
+  }
+}
+function writeFlag(key: string, on: boolean) {
+  try {
+    if (on) localStorage.setItem(key, '1')
+    else localStorage.removeItem(key)
+  } catch {
+    // Storage can be off; the choice then lasts until the page reloads.
+  }
+}
 const route = useRoute()
 const router = useRouter()
 const usage = shallowRef<Usage>()

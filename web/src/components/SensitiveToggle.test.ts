@@ -30,6 +30,7 @@ mockApi((path) => {
 })
 let unmount = () => {}
 afterEach(() => {
+  localStorage.clear()
   unmount()
   document.body.replaceChildren()
   location.hash = '/'
@@ -89,4 +90,26 @@ it('toggles sensitive media across the collection and detail without losing the 
   expect(image()?.closest('.blurred, .sensitive')).not.toBeNull()
   expect(image()).toBe(originalImage)
   expect(image()?.classList.contains('pending')).toBe(false)
+})
+it('remembers the choice in this browser across reloads', async () => {
+  vi.spyOn(globalThis, 'scrollTo').mockImplementation(() => {})
+  localStorage.setItem('midden.showSensitive', '1')
+  location.hash = '/'
+  const el = document.createElement('div')
+  document.body.append(el)
+  await router.push('/')
+  const app = createApp(CollectionLibrary).use(vaporInteropPlugin).use(router)
+  await router.isReady()
+  app.mount(el)
+  unmount = () => app.unmount()
+  const toggle = el.querySelector<HTMLButtonElement>(
+    '[aria-label="显示敏感内容"]',
+  )!
+  expect(toggle.getAttribute('aria-pressed')).toBe('true')
+  toggle.click()
+  await nextTick()
+  expect(localStorage.getItem('midden.showSensitive')).toBeNull()
+  toggle.click()
+  await nextTick()
+  expect(localStorage.getItem('midden.showSensitive')).toBe('1')
 })
