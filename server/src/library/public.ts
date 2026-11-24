@@ -1,14 +1,23 @@
 import { AppError } from '#errors.ts'
 import { listProfileChanges, type ProfileChanges } from './changes.ts'
 import { filterCounts } from './counts.ts'
-import { parseFilterQuery } from './filter-query.ts'
+import {
+  collectionFilter,
+  parseFilterQuery,
+  type FilterParams,
+} from './filter-query.ts'
 import {
   followCounts,
   listFollowChanges,
   type FollowChanges,
   type FollowCounts,
 } from './follows.ts'
-import { listCollections } from './list.ts'
+import {
+  listAuthors,
+  listCollections,
+  type Author,
+  type AuthorFilter,
+} from './list.ts'
 import {
   getCollection,
   getHistoryPoint,
@@ -46,38 +55,22 @@ export interface PublicShare {
   profiles?: number
 }
 
-export type ListKind = 'post' | 'profile'
-
-export interface PublicListQuery {
-  /** A folder's posts or its accounts. */
-  kind?: ListKind
+/**
+ * A public list: a shared folder's, or the attached posts of a profile the
+ * share shows. A visitor filters and orders it as the private list, except
+ * by tag, which would name the owner's tags.
+ */
+export interface PublicListQuery extends Omit<
+  FilterParams,
+  'tag' | 'related_to'
+> {
   /** A profile's attached posts instead of the folder's own list. */
   related_to?: string
-  /** For a profile's posts, as the private page orders them. */
-  sort?: string
-  order?: string
   cursor?: string
 }
 
-/** Every entity type the platforms know of this kind. */
-function typesOf(ctx: AccountsContext, kind: ListKind): string[] {
-  return ctx.platforms
-    .all()
-    .flatMap((platform) => platform.description.entityTypes)
-    .map((type) => type.name)
-    .filter((name) => name.endsWith(`.${kind}`))
-}
-
-/** The folder's own types narrowed to one kind; empty when none is left. */
-function narrowed(
-  ctx: AccountsContext,
-  own: string | undefined,
-  kind: ListKind,
-): string {
-  const wanted = typesOf(ctx, kind)
-  const types = own ? own.split(',').filter((t) => wanted.includes(t)) : wanted
-  return types.join(',')
-}
+/** A public list without a chosen order shows the newest posts first. */
+const PUBLIC_SORT = 'published'
 
 function folderFilter(share: OpenShare) {
   if (share.target !== 'folder') throw new AppError('not_found')
@@ -94,7 +87,7 @@ export function getPublicShare(
   folderFilter(share)
   // The same cached counts the folder list shows, by root type.
   const { types } = filterCounts(ctx.db, share.filter!)
-  const count = (kind: ListKind) =>
+  const count = (kind: 'post' | 'profile') =>
     Object.entries(types)
       .filter(([type]) => type.endsWith(`.${kind}`))
       .reduce((sum, [, n]) => sum + n, 0)
@@ -195,8 +188,21 @@ function within(ctx: AccountsContext, slug: string, id: string): OpenShare {
 }
 
 /**
- * A shared folder's list (one kind at a time), or the attached posts of a
- * profile the share shows, as the private page lists them.
+ * What a public list starts from: a profile's attached posts when the share
+ * shows that profile, else the shared folder's filter.
+ */
+function listedBy(share: OpenShare, relatedTo: string | undefined) {
+  if (!relatedTo) return folderFilter(share)
+  const posts = share.scope.profilePosts(relatedTo)
+  if (!posts) throw new AppError('not_found')
+  return posts
+}
+
+/**
+ * A shared folder's list, or the attached posts of a profile the share
+ * shows. The visitor's filters only narrow it: they are added to the
+ * folder's own, never in place of them. The visitor's order replaces the
+ * folder's; without one, the newest posts come first.
  */
 export function listPublicCollections(
   ctx: AccountsContext,
@@ -204,34 +210,49 @@ export function listPublicCollections(
   query: PublicListQuery,
 ): Page<CollectionView> {
   const share = openShare(ctx.db, slug)
-  let page: Page<CollectionView>
-  if (query.related_to) {
-    const posts = share.scope.profilePosts(query.related_to)
-    if (!posts) throw new AppError('not_found')
-    page = listCollections(
-      ctx,
-      {
-        ...posts,
-        sort: query.sort || undefined,
-        order: query.order || undefined,
-      },
-      query.cursor || undefined,
-    )
-  } else {
-    const filter = folderFilter(share)
-    const entityType = narrowed(ctx, filter.entityType, query.kind ?? 'post')
-    page = entityType
-      ? listCollections(
-          ctx,
-          { ...filter, entityType },
-          query.cursor || undefined,
-        )
-      : { items: [] }
-  }
+  const { related_to: relatedTo, cursor, ...params } = query
+  const base = listedBy(share, relatedTo || undefined)
+  const visitor = collectionFilter(params)
+  const page = listCollections(
+    ctx,
+    {
+      ...base,
+      sort: visitor.sort ?? PUBLIC_SORT,
+      order: visitor.order ?? 'desc',
+    },
+    cursor || undefined,
+    {
+      q: visitor.q,
+      entityType: visitor.entityType,
+      mediaType: visitor.mediaType,
+      visibility: visitor.visibility,
+      savedFrom: visitor.savedFrom,
+      savedBefore: visitor.savedBefore,
+      savedWithin: visitor.savedWithin,
+      timeZone: visitor.timeZone,
+      authors: visitor.authors,
+      sensitive: visitor.sensitive,
+      postType: visitor.postType,
+    },
+  )
   return {
     items: publicViews(share, page.items),
     ...(page.next_cursor ? { next_cursor: page.next_cursor } : {}),
   }
+}
+
+/**
+ * The authors of what a public list starts from, counted within it: the
+ * author picker of a shared folder or profile, which names no one else.
+ */
+export function listPublicAuthors(
+  ctx: AccountsContext,
+  slug: string,
+  input: AuthorFilter & { related_to?: string },
+): Page<Author> {
+  const share = openShare(ctx.db, slug)
+  const { related_to: relatedTo, ...filter } = input
+  return listAuthors(ctx, filter, listedBy(share, relatedTo || undefined))
 }
 
 export function getPublicCollection(

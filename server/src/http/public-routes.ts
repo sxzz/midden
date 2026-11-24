@@ -1,10 +1,12 @@
 import { Hono } from 'hono'
 import * as v from 'valibot'
+import { FilterQuery } from '#library/filter-query.ts'
 import {
   getPublicCollection,
   getPublicFollowCounts,
   getPublicHistoryPoint,
   getPublicShare,
+  listPublicAuthors,
   listPublicCollections,
   listPublicCounts,
   listPublicFollowChanges,
@@ -21,12 +23,21 @@ import type { AccountsContext } from '#accounts/accounts.ts'
 
 const text = v.optional(v.string())
 
-const ListQuery = v.object({
-  kind: v.optional(v.picklist(['post', 'profile'])),
-  related_to: text,
-  sort: text,
-  order: text,
+/**
+ * The private list's filters but the tag, which would name the owner's tags:
+ * strict, so a `tag` (or anything else unknown) is refused, not ignored.
+ */
+const ListQuery = v.strictObject({
+  ...v.omit(FilterQuery, ['tag']).entries,
   cursor: text,
+})
+
+/** The authors of a public list, which is a folder's or a profile's. */
+const AuthorQuery = v.strictObject({
+  q: text,
+  cursor: text,
+  author: v.optional(v.union([v.string(), v.array(v.string())])),
+  related_to: text,
 })
 
 /**
@@ -48,6 +59,20 @@ export function publicRoutes(ctx: AccountsContext) {
         listPublicCollections(ctx, c.req.param('slug'), c.req.valid('query')),
       ),
     )
+
+    .get('/:slug/collections/authors', query(AuthorQuery), (c) => {
+      // Registered before `:id`, which would take `authors` for an id.
+      const input = c.req.valid('query')
+      const author = input.author ?? []
+      return c.json(
+        listPublicAuthors(ctx, c.req.param('slug'), {
+          q: input.q || undefined,
+          cursor: input.cursor || undefined,
+          authors: typeof author === 'string' ? [author] : author,
+          related_to: input.related_to || undefined,
+        }),
+      )
+    })
 
     .get('/:slug/collections/:id', (c) =>
       c.json(getPublicCollection(ctx, c.req.param('slug'), c.req.param('id'))),

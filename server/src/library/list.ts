@@ -169,6 +169,8 @@ interface Checked {
   authors: Identity[]
   from?: number
   before?: number
+  /** A narrowing's own filter, as part of the cursor's fingerprint. */
+  narrow?: Checked['filter']
 }
 
 function check(input: CollectionFilter): Checked {
@@ -442,11 +444,13 @@ interface Selection {
   where: SQL
 }
 
-/** The saved collections a filter selects, unordered. */
-function select(input: CollectionFilter): Selection {
-  const checked = check(input)
+/**
+ * Conditions a checked filter puts on the saved collections `k` and `l`. A
+ * post's type is relative to the requested collection when the list is one
+ * collection's related ones.
+ */
+function conditionsOf(checked: Checked, related: boolean): SQL[] {
   const { filter, authors, from, before } = checked
-  const related = filter.relatedTo
   const types = values(filter.entityType)
   const conditions: SQL[] = []
   const q = filter.q.trim()
@@ -472,7 +476,34 @@ function select(input: CollectionFilter): Selection {
     )
   conditions.push(...tagSQL(filter.tag, filter.tagMode, filter.notTag))
   if (filter.postType)
-    conditions.push(sql`${postTypeSQL(!!related)} = ${filter.postType}`)
+    conditions.push(sql`${postTypeSQL(related)} = ${filter.postType}`)
+  return conditions
+}
+
+/**
+ * A filter that only narrows another one: its conditions are added to the
+ * other's, so it can never select more. It names no related collection and
+ * no tag, and the other filter's order stands.
+ */
+export type Narrowing = Omit<
+  CollectionFilter,
+  'relatedTo' | 'tag' | 'sort' | 'order'
+>
+
+/**
+ * The saved collections a filter selects, unordered; with a narrowing, only
+ * those it selects too.
+ */
+function select(input: CollectionFilter, narrow?: Narrowing): Selection {
+  const checked = check(input)
+  const related = checked.filter.relatedTo
+  const conditions = conditionsOf(checked, !!related)
+  if (narrow) {
+    const extra = check(narrow)
+    if (extra.filter.relatedTo || extra.filter.tag) throw invalid()
+    conditions.push(...conditionsOf(extra, !!related))
+    checked.narrow = extra.filter
+  }
   return {
     checked,
     ctes: related ? sql`WITH ${relatedEdgesSQL(related)}` : sql``,
@@ -532,15 +563,21 @@ export function selectedAmong(
   )
 }
 
-/** The library, filtered, sorted and 20 per page. */
+/**
+ * The library, filtered, sorted and 20 per page; with a narrowing, only what
+ * it selects too.
+ */
 export function listCollections(
   ctx: CaptureContext,
   input: CollectionFilter = {},
   cursor?: string,
+  narrow?: Narrowing,
 ): Page<CollectionView> {
-  const { checked, ctes, source, where } = select(input)
+  const { checked, ctes, source, where } = select(input, narrow)
   const { filter } = checked
-  const fingerprint = sha256Hex(canonicalJson(filter))
+  const fingerprint = sha256Hex(
+    canonicalJson(checked.narrow ? { filter, narrow: checked.narrow } : filter),
+  )
   const after = cursor ? decodeCursor(cursor, fingerprint) : undefined
   const related = filter.relatedTo
   const types = values(filter.entityType)
@@ -623,11 +660,14 @@ export interface AuthorFilter {
  * The authors behind saved collections, labelled with the newest display
  * name captured for each, those with the most saved posts first. Identity is
  * the entity the root is authored by, never the name: a renamed account
- * stays one author, and two accounts sharing a name stay apart.
+ * stays one author, and two accounts sharing a name stay apart. With a
+ * filter, only the collections it selects count, and only their authors are
+ * listed.
  */
 export function listAuthors(
   ctx: CaptureContext,
   input: AuthorFilter = {},
+  within: CollectionFilter = {},
 ): Page<Author> {
   const q = (input.q ?? '').trim().toLocaleLowerCase()
   const wanted = input.authors ?? []
@@ -641,6 +681,7 @@ export function listAuthors(
     (input.cursor && String(offset) !== input.cursor)
   )
     throw invalid()
+  const { ctes, source, where } = select(within)
   // One row per author, labelled by its newest captured name: the name rides
   // at the end of the key max() picks, which prefers a name, then the newest
   // revision. A unit separator ends the revision id.
@@ -651,6 +692,7 @@ export function listAuthors(
     name: string
     count: number
   }>(sql`
+    ${ctes}
     SELECT au.platform, au.kind, au.external_id AS external,
       substr(named.newest, 17 + instr(substr(named.newest, 17), char(31)))
         AS name, named.count
@@ -658,8 +700,8 @@ export function listAuthors(
       SELECT k.author_entity_id AS author, count(*) AS count,
         max(printf('%d%015d%s', k.author_name <> '', k.revision_at,
           k.revision_id) || char(31) || k.author_name) AS newest
-      FROM ${sql.raw(SAVED)}
-      WHERE k.author_entity_id IS NOT NULL
+      FROM ${sql.raw(source)}
+      WHERE k.author_entity_id IS NOT NULL AND ${where}
       GROUP BY k.author_entity_id
     ) named
     JOIN entities au ON au.id = named.author`)

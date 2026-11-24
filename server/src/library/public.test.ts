@@ -104,11 +104,25 @@ const routes: Record<string, () => Partial<FetchResponse>> = {
   }),
 }
 
+/**
+ * When each post was published: newest a1, r1, q1, e3, m1, x1, unlike the
+ * order they are captured in.
+ */
+const PUBLISHED: Record<string, string> = {
+  a1: '2026-01-06T00:00:00Z',
+  r1: '2026-01-05T00:00:00Z',
+  q1: '2026-01-04T00:00:00Z',
+  e3: '2026-01-03T00:00:00Z',
+  m1: '2026-01-02T00:00:00Z',
+  x1: '2026-01-01T00:00:00Z',
+}
+
 async function setup() {
   const made = libraryContext((req) => {
     const route = routes[req.externalId]
     if (!route) throw new Error(`no route for ${req.externalId}`)
-    return route()
+    const published = PUBLISHED[req.externalId]
+    return { ...route(), ...(published ? { publishedAt: published } : {}) }
   })
   const c = made.ctx as AccountsContext
   ctx = c
@@ -311,13 +325,17 @@ describe('public shares', () => {
     expect((await read(slug)).body).toMatchObject({ posts: 0, profiles: 1 })
     expect(
       (
-        (await read(slug, '/collections?kind=profile')).body as {
+        (await read(slug, '/collections?entity_type=fake.profile')).body as {
           items: { id: string }[]
         }
       ).items.map((i) => i.id),
     ).toEqual([ids.five])
     expect(
-      ((await read(slug, '/collections')).body as { items: unknown[] }).items,
+      (
+        (await read(slug, '/collections?entity_type=fake.post')).body as {
+          items: unknown[]
+        }
+      ).items,
     ).toEqual([])
     for (const id of ['five', 'a1', 'm1', 'r1'])
       expect((await read(slug, `/collections/${ids[id]}`)).status).toBe(200)
@@ -542,5 +560,154 @@ describe('public shares', () => {
         })
       ).status,
     ).toBe(401)
+  })
+})
+
+describe('public lists', () => {
+  type Listed = { items: { id: string }[] }
+  type Authors = { items: { id: string; name: string; count: number }[] }
+  // Without a captured author name, an author is labelled by its id.
+  const BOB = '600'
+  const FIVE = '500'
+
+  /** Tag these posts and share a folder of the tagged posts. */
+  async function tagged(...names: string[]) {
+    const made = await setup()
+    const { c, ids } = made
+    const tag = updateAnnotation(c.db, ids[names[0]!]!, {
+      tagNames: ['公开'],
+    }).tags[0]!
+    for (const name of names.slice(1))
+      updateAnnotation(c.db, ids[name]!, { tagIds: [tag.id] })
+    const folder = createFolder(c.db, {
+      name: '公开的',
+      // The folder's own order is not the public list's.
+      filter: `entity_type=fake.post&tag=${tag.id}&sort=updated&order=asc`,
+    })
+    const slug = share(c, 'folder', folder.id)
+    const list = async (query = '') => {
+      const { status, body } = await made.read(slug, `/collections${query}`)
+      expect(status).toBe(200)
+      return (body as Listed).items.map((item) => item.id)
+    }
+    const authors = async (query = '') => {
+      const { status, body } = await made.read(
+        slug,
+        `/collections/authors${query}`,
+      )
+      expect(status).toBe(200)
+      return (body as Authors).items
+    }
+    return { ...made, tag, slug, list, authors }
+  }
+
+  test('newest posts first by default, whatever order the folder keeps', async () => {
+    const all = ['a1', 'm1', 'r1', 'x1', 'q1', 'e3']
+    const { ids, list, read, slug, c } = await tagged(...all)
+    const byName = (...names: string[]) => names.map((name) => ids[name])
+    expect(await list()).toEqual(byName('a1', 'r1', 'q1', 'e3', 'm1', 'x1'))
+    expect(await list('?order=asc')).toEqual(
+      byName('x1', 'm1', 'e3', 'q1', 'r1', 'a1'),
+    )
+    // The private list's other orders are offered too.
+    expect(await list('?sort=updated')).toEqual(
+      byName('e3', 'q1', 'x1', 'r1', 'm1', 'a1'),
+    )
+    expect((await read(slug, '/collections?sort=bogus')).status).toBe(400)
+
+    // A shared profile's posts, the same way.
+    const profile = share(c, 'collection', ids.five!)
+    const posts = (await read(profile, `/collections?related_to=${ids.five}`))
+      .body as Listed
+    expect(posts.items.map((item) => item.id)).toEqual(byName('a1', 'r1', 'm1'))
+  })
+
+  test("a visitor's filters only narrow the folder's", async () => {
+    const { ids, list, authors, read, slug, c } = await tagged('a1', 'm1', 'x1')
+    const set = async (query: string) => (await list(query)).toSorted()
+    const of = (...names: string[]) =>
+      names.map((name) => ids[name]!).toSorted()
+    expect(await set('')).toEqual(of('a1', 'm1', 'x1'))
+    // q1 has an image too, but is not in the folder.
+    expect(await set('?media_type=image')).toEqual(of('a1', 'x1'))
+    expect(await set('?sensitive=contains')).toEqual(of('x1'))
+    expect(await set('?q=quotes')).toEqual([])
+    const bob = (await authors()).find((a) => a.name === BOB)!.id
+    // Bob wrote r1, q1 and e3 as well, outside the folder.
+    expect(await set(`?author=${encodeURIComponent(bob)}`)).toEqual(
+      of('m1', 'x1'),
+    )
+    // Another kind or an emptied filter selects nothing more.
+    expect(await set('?entity_type=fake.profile')).toEqual([])
+    expect(await set('?entity_type=fake.post,fake.profile')).toEqual(
+      of('a1', 'm1', 'x1'),
+    )
+    expect(await set('?entity_type=&q=')).toEqual(of('a1', 'm1', 'x1'))
+    // A bad value is refused as on the private list.
+    expect((await read(slug, '/collections?media_type=gif')).status).toBe(400)
+
+    // A shared profile's posts narrow the same way.
+    const profile = share(c, 'collection', ids.five!)
+    const posts = (
+      await read(profile, `/collections?related_to=${ids.five}&q=mentions`)
+    ).body as Listed
+    expect(posts.items.map((item) => item.id)).toEqual([ids.m1])
+  })
+
+  test('a tag is refused, never applied', async () => {
+    const { ids, tag, read, slug, c } = await tagged('a1')
+    for (const path of [
+      `/collections?tag=${tag.id}`,
+      `/collections?tag=`,
+      `/collections?related_to=${ids.five}&tag=${tag.id}`,
+      `/collections/authors?tag=${tag.id}`,
+    ])
+      expect(await read(slug, path)).toMatchObject({
+        status: 400,
+        body: { error: '请求无效' },
+      })
+    const profile = share(c, 'collection', ids.five!)
+    expect(
+      (await read(profile, `/collections?related_to=${ids.five}&tag=${tag.id}`))
+        .status,
+    ).toBe(400)
+  })
+
+  test('the author list names only authors within the share, counted there', async () => {
+    const { ids, authors, read, c, tag } = await tagged('a1')
+    // Bob has five saved posts, none of them shared.
+    expect(await authors()).toEqual([
+      { id: expect.any(String), name: FIVE, count: 1 },
+    ])
+    expect(await authors('?q=60')).toEqual([])
+    updateAnnotation(c.db, ids.m1!, { tagIds: [tag.id] })
+    const both = await authors()
+    // Bob counts only m1, not the four posts of his outside the share.
+    expect(both.map(({ name, count }) => ({ name, count }))).toEqual([
+      { name: FIVE, count: 1 },
+      { name: BOB, count: 1 },
+    ])
+    const bob = both.find((a) => a.name === BOB)!.id
+    expect(await authors(`?author=${encodeURIComponent(bob)}`)).toEqual([
+      { id: bob, name: BOB, count: 1 },
+    ])
+
+    // A shared profile: the authors of its posts.
+    const profile = share(c, 'collection', ids.five!)
+    const listed = (
+      await read(profile, `/collections/authors?related_to=${ids.five}`)
+    ).body as Authors
+    expect(listed.items.map(({ name, count }) => ({ name, count }))).toEqual([
+      { name: BOB, count: 2 },
+      { name: FIVE, count: 1 },
+    ])
+    for (const path of [
+      '/collections/authors',
+      `/collections/authors?related_to=${ids.bob}`,
+    ])
+      expect(await read(profile, path)).toMatchObject(NOT_FOUND)
+    // A single post has no list to filter.
+    const single = share(c, 'collection', ids.a1!)
+    expect(await read(single, '/collections/authors')).toMatchObject(NOT_FOUND)
   })
 })
