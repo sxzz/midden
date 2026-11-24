@@ -22,7 +22,7 @@
     "dev": "pnpm --filter @midden/server dev",
     "lint": "eslint --max-warnings=0 .",
     "lint:fix": "eslint --fix .",
-    "prepare": "pnpm --filter @fxembed/atmosphere build",
+    "prepare": "node scripts/git-hooks.ts && pnpm --filter @fxembed/atmosphere build",
     "test": "pnpm -r run test",
     "typecheck": "tsrs --fast -p scripts && pnpm -r --parallel run typecheck"
   },
