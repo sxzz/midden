@@ -35,7 +35,8 @@ export interface AssetView {
   /**
    * The platform's own address of an avatar or banner that was never
    * downloaded (an account known only from a follow list, say), for the
-   * web to show from the platform. Absent once the image is saved here.
+   * web to show from the platform. Absent once the image is saved here,
+   * and on platforms whose image addresses expire (see `REMOTE_IMAGES`).
    */
   remote_url?: string
 }
@@ -148,14 +149,17 @@ interface AssetRow {
   thumb_mime: string | null
   kind: string
   source_url: string
+  platform: string
 }
 
 function assetRows(r: Reader, where: SQL): AssetRow[] {
   return r.db.all<AssetRow>(sql`
     SELECT a.capture_id, a.id, a.purpose, a.position, a.alt_text, a.sensitive,
       a.state, a.error, a.kind, a.source_url, b.hash, b.mime, b.size,
-      t.key AS thumb_key, t.mime AS thumb_mime
+      t.key AS thumb_key, t.mime AS thumb_mime, co.platform
     FROM assets a
+    JOIN captures ca ON ca.id = a.capture_id
+    JOIN collections co ON co.id = ca.collection_id
     LEFT JOIN blobs b ON b.id = a.blob_id
     LEFT JOIN blob_thumbnails t ON t.blob_id = a.blob_id AND t.state = 'ready'
     WHERE ${where}
@@ -165,9 +169,22 @@ function assetRows(r: Reader, where: SQL): AssetRow[] {
 /** Images that stand for an account, which may be shown from the platform. */
 const ACCOUNT_IMAGES = new Set(['avatar', 'banner'])
 
+/**
+ * Platforms whose image addresses keep working, so an account image not
+ * saved here can be shown from them. Instagram's expire: there an
+ * undownloaded avatar falls back to the initial instead of a broken image.
+ * Mutable only so tests can let the fake platform stand in for X.
+ */
+export const REMOTE_IMAGES = new Set(['x'])
+
 /** The platform's address of an account image not saved here, if any. */
 function remoteURL(row: AssetRow): string | undefined {
-  if (row.kind !== 'image' || !ACCOUNT_IMAGES.has(row.purpose)) return
+  if (
+    row.kind !== 'image' ||
+    !ACCOUNT_IMAGES.has(row.purpose) ||
+    !REMOTE_IMAGES.has(row.platform)
+  )
+    return
   try {
     const url = new URL(row.source_url)
     return url.protocol === 'https:' ? url.href : undefined
@@ -251,7 +268,10 @@ export const avatarOf = (revision: string, keyColumn: string) => `(
   JOIN json_each(ge.value, '$.resource_indices') gi
   JOIN assets av ON av.capture_id = ${revision}.capture_id
     AND av.position = gi.value AND av.purpose = 'avatar'
-    AND (av.state = 'ready' OR (av.kind = 'image' AND av.source_url LIKE 'https://%'))
+    AND (av.state = 'ready' OR (av.kind = 'image' AND av.source_url LIKE 'https://%'
+      AND (SELECT co.platform FROM captures ca
+        JOIN collections co ON co.id = ca.collection_id
+        WHERE ca.id = av.capture_id) IN (${[...REMOTE_IMAGES].map((p) => `'${p}'`).join(', ')})))
   WHERE ge.value ->> 'key' = ${keyColumn}
   ORDER BY av.state = 'ready' DESC, av.position LIMIT 1)`
 

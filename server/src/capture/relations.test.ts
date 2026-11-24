@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { and, eq, isNull } from 'drizzle-orm'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, onTestFinished, test } from 'vitest'
 import { addAccount, type AccountsContext } from '#accounts/accounts.ts'
 import {
   assets,
@@ -17,6 +17,7 @@ import { listProfileChanges } from '#library/changes.ts'
 import { followCounts, listFollowChanges } from '#library/follows.ts'
 import { listCollections } from '#library/list.ts'
 import { getCollection } from '#library/read.ts'
+import { REMOTE_IMAGES } from '#library/views.ts'
 import { status } from '#platforms/rpc.ts'
 import { testContext } from '#testing/context.ts'
 import {
@@ -36,6 +37,14 @@ afterEach(async () => {
   await ctx?.queue.stop()
   ctx = undefined
 })
+
+/** Let the fake platform stand in for X, whose image addresses last. */
+function useRemoteImages(): void {
+  REMOTE_IMAGES.add('fake')
+  onTestFinished(() => {
+    REMOTE_IMAGES.delete('fake')
+  })
+}
 
 /** What the fake source says now: profiles' counts, and the lists. */
 interface World {
@@ -436,17 +445,23 @@ describe('抓关系网', () => {
       view.graph?.entities
         .find((e) => e.key === view.graph?.root)
         ?.assets?.find((a) => a.purpose === 'avatar')
-    // Not downloaded, so no signed link: only the platform's own address.
+    const item = () =>
+      listCollections(ctx, { entityType: 'fake.profile' }).items.find(
+        (i) => i.id === listed.id,
+      )!
+    // Like Instagram, whose image addresses expire: nothing to show.
+    for (const view of [getCollection(ctx, listed.id), item()])
+      expect(avatarOf(view)).not.toHaveProperty('remote_url')
+
+    // Like X: not downloaded, so no signed link, only the platform's address.
+    useRemoteImages()
     const remote = avatarOf(getCollection(ctx, listed.id))
     expect(remote).toMatchObject({
       state: 'failed',
       remote_url: 'https://m.test/300.jpg',
     })
     expect(remote).not.toHaveProperty('url')
-    const item = listCollections(ctx, {
-      entityType: 'fake.profile',
-    }).items.find((i) => i.id === listed.id)!
-    expect(avatarOf(item)?.remote_url).toBe('https://m.test/300.jpg')
+    expect(avatarOf(item())?.remote_url).toBe('https://m.test/300.jpg')
 
     // Once fetched for real, the saved copy is shown instead.
     state.avatars = true
@@ -461,6 +476,7 @@ describe('抓关系网', () => {
   })
 
   test('follow changes: news and ends after the first complete fetch, newest first', async () => {
+    useRemoteImages()
     const { ctx, state } = setup({
       counts: { '100': { following: 2, followers: 2 } },
       lists: {

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, onTestFinished, test } from 'vitest'
 import { createApi } from '#http/app.ts'
 import { createToken } from '#http/auth.ts'
 import {
@@ -14,6 +14,7 @@ import { deleteCollection } from './delete.ts'
 import { createFolder, deleteFolder, updateFolder } from './folders.ts'
 import { getCollection } from './read.ts'
 import { createShare, listShares, revokeShare } from './shares.ts'
+import { REMOTE_IMAGES } from './views.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { FetchResponse } from '#platforms/protocol.ts'
 
@@ -406,6 +407,11 @@ describe('public shares', () => {
   })
 
   test('follows show every account, linking only those shared', async () => {
+    // The fake platform stands in for X, whose image addresses last.
+    REMOTE_IMAGES.add('fake')
+    onTestFinished(() => {
+      REMOTE_IMAGES.delete('fake')
+    })
     const { c, ids, read } = await setup()
     const entityOf = (id: string) =>
       c.db.get<{ id: string }>(
