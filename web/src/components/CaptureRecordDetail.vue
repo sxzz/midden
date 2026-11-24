@@ -21,6 +21,7 @@ import {
   linkTitle,
   mediaLabel,
   mediaStates,
+  recordAdditions,
   recordCounts,
   recordProgress,
   recordStatus,
@@ -52,6 +53,9 @@ const filters = [
 
 const status = computed(() => record.value && recordStatus(record.value))
 const counts = computed(() => (record.value ? recordCounts(record.value) : ''))
+const additions = computed(() =>
+  record.value ? recordAdditions(record.value) : '',
+)
 /** Every reason something is missing, the record's own failure first. */
 const reasons = computed(() => {
   const r = record.value
@@ -299,6 +303,10 @@ function openCollection(id: string, event?: MouseEvent) {
                 `已保存 ${record.members.complete}，不完整 ${record.members.partial}，失败 ${record.members.failed}，进行中 ${record.members.pending}`
               }}
             </dd>
+          </div>
+          <div v-if="additions">
+            <dt>收藏</dt>
+            <dd>{{ additions }}</dd>
           </div>
           <div v-if="record.media.total">
             <dt>媒体</dt>

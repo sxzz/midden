@@ -4,6 +4,7 @@ import {
   groupRecords,
   linkTitle,
   mediaLabel,
+  recordAdditions,
   recordCounts,
   recordProgress,
   recordRowTime,
@@ -99,6 +100,57 @@ test('a collection follows its members after its own capture ends', () => {
       }),
     ).label,
   ).toBe('已完成')
+})
+
+test('says which saved posts were new to the library', () => {
+  const members = {
+    total: 120,
+    complete: 118,
+    partial: 2,
+    failed: 0,
+    pending: 0,
+    done: true,
+  }
+  const profile = (
+    patch: Partial<typeof members & { added: number; updated: number }>,
+  ) =>
+    record({
+      kind: 'profile',
+      state: 'complete',
+      done: true,
+      members: { ...members, ...patch },
+    })
+  const known = profile({ added: 30, updated: 90 })
+  expect(recordCounts(known)).toBe(
+    '帖子 120/120 · 新增 30 · 更新 90 · 不完整 2',
+  )
+  expect(recordAdditions(known)).toBe('新增 30，更新 90')
+  expect(recordCounts(profile({ added: 0, updated: 120 }))).toBe(
+    '帖子 120/120 · 更新 120 · 不完整 2',
+  )
+  expect(recordAdditions(profile({ added: 0, updated: 120 }))).toBe(
+    '新增 0，更新 120',
+  )
+  // Older records do not know: nothing rather than a guess.
+  expect(recordCounts(profile({}))).toBe('帖子 120/120 · 不完整 2')
+  expect(recordAdditions(profile({}))).toBe('')
+
+  const post = record({
+    state: 'complete',
+    done: true,
+    media: { total: 2, ready: 2, failed: 0 },
+  })
+  expect(recordCounts({ ...post, added: true })).toBe('新增 · 媒体 2/2')
+  expect(
+    recordCounts({
+      ...post,
+      added: false,
+      media: { total: 0, ready: 0, failed: 0 },
+    }),
+  ).toBe('更新')
+  expect(recordAdditions({ ...post, added: false })).toBe('更新了已有收藏')
+  expect(recordCounts(post)).toBe('媒体 2/2')
+  expect(recordAdditions(post)).toBe('')
 })
 
 test('names profile images by what they are', () => {

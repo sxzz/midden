@@ -322,6 +322,8 @@ test('a finished profile record fetches more pages as its own record', async ({
     failed: 0,
     pending: 0,
     done: true,
+    added: 40,
+    updated: 60,
   }
   const finished = detail({
     id: profile,
@@ -361,6 +363,10 @@ test('a finished profile record fetches more pages as its own record', async ({
     return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
   await page.goto(`/app/#/captures/${profile}`)
+  await expect(page.locator('p[role=status]')).toContainText(
+    '已完成 · 帖子 100/100 · 新增 40 · 更新 60',
+  )
+  await expect(page.getByText('新增 40，更新 60')).toBeVisible()
   await expect(page.getByRole('button', { name: '重试本页' })).toHaveCount(0)
   await page.getByRole('button', { name: '抓取 1000 条' }).click()
   await expect(page.getByText('没有更多帖子了')).toBeVisible()

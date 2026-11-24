@@ -82,19 +82,37 @@ export function recordCounts(r: CaptureRecord) {
     if (!m.total) return r.done ? '没有帖子' : ''
     return [
       `帖子 ${m.total - m.pending}/${m.total}`,
+      m.added && `新增 ${m.added}`,
+      m.updated && `更新 ${m.updated}`,
       m.partial && `不完整 ${m.partial}`,
       m.failed && `失败 ${m.failed}`,
     ]
       .filter(Boolean)
       .join(' · ')
   }
-  if (!r.media.total) return ''
+  const added = r.added === undefined ? '' : r.added ? '新增' : '更新'
+  if (!r.media.total) return added
   return [
+    added,
     `媒体 ${r.media.ready}/${r.media.total}`,
     r.media.failed && `失败 ${r.media.failed}`,
   ]
     .filter(Boolean)
     .join(' · ')
+}
+
+/**
+ * What the record did to the library: posts newly saved and ones refreshed.
+ * Empty while unknown, e.g. for records older than this distinction.
+ */
+export function recordAdditions(r: CaptureRecord) {
+  const m = r.members
+  if (m) {
+    if (!m.added && !m.updated) return ''
+    return `新增 ${m.added ?? 0}，更新 ${m.updated ?? 0}`
+  }
+  if (r.added === undefined) return ''
+  return r.added ? '新增到收藏' : '更新了已有收藏'
 }
 
 const purposes: Record<string, string> = {
