@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { AppError } from '#errors.ts'
 import { authorKey, parseAuthorKey } from './list.ts'
-import { iso, type Page, type Reader } from './views.ts'
+import { iso, list, type Page, type Reader } from './views.ts'
 
 /**
  * How far one list (关注 or 粉丝) of an account was read: the newest complete
@@ -23,14 +23,16 @@ export interface Perspective {
   own?: true
   following: ListFetch
   followers: ListFetch
+  /** Asked for by key and without relation data (now or ever). */
+  no_data?: true
 }
 
 export interface PerspectiveFilter {
   /** Part of the name, the username or the platform's id, any case. */
   q?: string
   cursor?: string
-  /** Only this account key, unpaged: the label of a chosen one. */
-  relOf?: string
+  /** Only these account keys, unpaged: the labels of chosen ones. */
+  relOf?: string[]
 }
 
 const PAGE = 50
@@ -94,21 +96,24 @@ export function listPerspectives(
 ): Page<Perspective> {
   const q = (input.q ?? '').trim().toLocaleLowerCase()
   const offset = input.cursor ? Number(input.cursor) : 0
-  const wanted = input.relOf ? parseAuthorKey(input.relOf) : undefined
+  const keys = (input.relOf ?? []).filter(Boolean)
+  const wanted = keys.map((key) => parseAuthorKey(key))
   if (
     [...q].length > MAX_QUERY ||
     !Number.isSafeInteger(offset) ||
     offset < 0 ||
     (input.cursor && String(offset) !== input.cursor) ||
-    (input.relOf && !wanted)
+    wanted.some((account) => !account)
   )
     throw new AppError('invalid_filter')
   const like = `%${q.replaceAll(/[\\%_]/g, String.raw`\$&`)}%`
   // A chosen account is labelled even when its data is gone, so the
   // filter still reads by name.
-  const candidates = wanted
-    ? sql`SELECT id FROM entities WHERE platform = ${wanted.platform}
-        AND kind = ${wanted.kind} AND external_id = ${wanted.external}`
+  const chosen = wanted.length > 0
+  const candidates = chosen
+    ? sql`SELECT e.id FROM json_each(${list(wanted.map((a) => [a!.platform, a!.kind, a!.external]))}) w
+        JOIN entities e ON e.platform = w.value ->> 0
+          AND e.kind = w.value ->> 1 AND e.external_id = w.value ->> 2`
     : WITH_DATA
   const rows = r.db.all<{
     platform: string
@@ -121,6 +126,7 @@ export function listPerspectives(
     following_partial: number | null
     followers_complete: number | null
     followers_partial: number | null
+    data: number
   }>(sql`
     WITH accounts AS MATERIALIZED (
       SELECT e.id, e.platform, e.kind, e.external_id,
@@ -147,7 +153,7 @@ export function listPerspectives(
         coalesce(name, username, external_id) AS label
       FROM named LEFT JOIN fetched ON fetched.id = named.id
       WHERE ${
-        q && !wanted
+        q && !chosen
           ? sql`(lower(name) LIKE ${like} ESCAPE '\\'
               OR lower(username) LIKE ${like} ESCAPE '\\'
               OR lower(external_id) LIKE ${like} ESCAPE '\\')`
@@ -156,24 +162,33 @@ export function listPerspectives(
     ),
     page AS (
       SELECT * FROM ranked ORDER BY ${ORDER}
-      LIMIT ${PAGE + 1} OFFSET ${offset}
+      LIMIT ${chosen ? -1 : PAGE + 1} OFFSET ${chosen ? 0 : offset}
     )
     SELECT platform, kind, external_id AS external, name, username, own,
       ${fetchedAt('following', 'complete')} AS following_complete,
       ${fetchedAt('following', 'partial')} AS following_partial,
       ${fetchedAt('followers', 'complete')} AS followers_complete,
-      ${fetchedAt('followers', 'partial')} AS followers_partial
+      ${fetchedAt('followers', 'partial')} AS followers_partial,
+      ${
+        chosen
+          ? sql`(EXISTS (SELECT 1 FROM follow_edges WHERE follower_id = page.id)
+            OR EXISTS (SELECT 1 FROM follow_edges WHERE followee_id = page.id)
+            OR EXISTS (SELECT 1 FROM relation_fetches
+              WHERE entity_id = page.id))`
+          : sql`1`
+      } AS data
     FROM page ORDER BY ${ORDER}`)
   const page: Page<Perspective> = {
-    items: rows.slice(0, PAGE).map((row) => ({
+    items: (chosen ? rows : rows.slice(0, PAGE)).map((row) => ({
       id: authorKey(row),
       ...(row.name ? { name: row.name } : {}),
       ...(row.username ? { username: row.username } : {}),
       ...(row.own ? { own: true as const } : {}),
       following: listFetch(row.following_complete, row.following_partial),
       followers: listFetch(row.followers_complete, row.followers_partial),
+      ...(row.data ? {} : { no_data: true as const }),
     })),
   }
-  if (rows.length > PAGE) page.next_cursor = String(offset + PAGE)
+  if (!chosen && rows.length > PAGE) page.next_cursor = String(offset + PAGE)
   return page
 }

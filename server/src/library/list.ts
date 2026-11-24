@@ -53,13 +53,17 @@ export interface CollectionFilter {
   relatedTo?: string
   postType?: string
   /**
-   * An account key (as an author's) whose current follows select: the
-   * accounts in `rel` of it, and posts by them. Given with `rel` or not at
-   * all.
+   * Account keys (as authors') whose current follows select: the accounts
+   * in `rel` of them, and posts by them. Given with `rel` or not at all.
    */
-  relOf?: string
-  /** `following`, `followers` or `mutual`, as `relOf` sees them. */
+  relOf?: string[]
+  /** `following`, `followers` or `mutual`, as each of `relOf` sees them. */
   rel?: string
+  /**
+   * How many of `relOf` an account must be in `rel` of, from 1 to all of
+   * them: 2 by default when there are several, else the one.
+   */
+  relMin?: string
 }
 
 export interface Author {
@@ -115,6 +119,16 @@ export function parseAuthorKey(key: string): Identity | undefined {
   const author = { platform, kind, external }
   return authorKey(author) === key ? author : undefined
 }
+
+/**
+ * How many perspectives an account must relate to when the filter does not
+ * say: two of several (shared follows), else the one.
+ */
+export const defaultRelMin = (perspectives: number) =>
+  Math.min(2, Math.max(1, perspectives))
+
+/** A threshold: a count without leading zeros. */
+const REL_MIN = /^[1-9]\d{0,5}$/
 
 const WITHIN = /^([1-9]\d{0,3})d$/
 
@@ -176,10 +190,15 @@ function validTags(tag: string, notTag: string): boolean {
 }
 
 interface Checked {
-  filter: Required<Omit<CollectionFilter, 'authors'>> & { authors: string[] }
+  filter: Required<Omit<CollectionFilter, 'authors' | 'relOf'>> & {
+    authors: string[]
+    relOf: string[]
+  }
   authors: Identity[]
-  /** The account whose follows select, with `filter.rel`. */
-  relOf?: Identity
+  /** The accounts whose follows select, with `filter.rel`. */
+  relOf: Identity[]
+  /** How many of them an account must relate to. */
+  relMin: number
   from?: number
   before?: number
   /** A narrowing's own filter, as part of the cursor's fingerprint. */
@@ -206,8 +225,10 @@ function check(input: CollectionFilter): Checked {
     notTag: tagList(input.notTag),
     relatedTo: input.relatedTo ?? '',
     postType: input.postType ?? '',
-    relOf: input.relOf ?? '',
+    // One set of perspectives is one filter, and one cursor fingerprint.
+    relOf: [...new Set(input.relOf)].toSorted(),
     rel: input.rel ?? '',
+    relMin: input.relMin ?? '',
   }
   const oneOf = (value: string, allowed: string[]) =>
     !value || allowed.includes(value)
@@ -234,13 +255,23 @@ function check(input: CollectionFilter): Checked {
     !validTags(filter.tag, filter.notTag) ||
     filter.authors.length > MAX_AUTHORS ||
     !oneOf(filter.rel, FOLLOW_SETS) ||
-    // A perspective and a mode come together or not at all.
-    Boolean(filter.rel) !== Boolean(filter.relOf)
+    // Perspectives and a mode come together or not at all.
+    Boolean(filter.rel) !== filter.relOf.length > 0 ||
+    (filter.relMin && (!filter.relOf.length || !REL_MIN.test(filter.relMin)))
   )
     throw invalid()
   // A perspective is an account: only accounts follow.
-  const relOf = filter.relOf ? parseAuthorKey(filter.relOf) : undefined
-  if (filter.relOf && !relOf?.kind.endsWith('.profile')) throw invalid()
+  const relOf = filter.relOf.map((key) => {
+    const account = parseAuthorKey(key)
+    if (!account?.kind.endsWith('.profile')) throw invalid()
+    return account
+  })
+  const relMin = filter.relMin
+    ? Number(filter.relMin)
+    : defaultRelMin(relOf.length)
+  if (relOf.length && relMin > relOf.length) throw invalid()
+  // The default is written one way: left out.
+  if (relMin === defaultRelMin(relOf.length)) filter.relMin = ''
   const authors = filter.authors.map((key) => {
     const author = parseAuthorKey(key)
     if (!author) throw invalid()
@@ -256,7 +287,7 @@ function check(input: CollectionFilter): Checked {
     from = savedSince(filter.savedWithin, filter.timeZone || undefined)
     if (from === undefined) throw invalid()
   }
-  return { filter, authors, relOf, from, before }
+  return { filter, authors, relOf, relMin, from, before }
 }
 
 interface Cursor {
@@ -533,9 +564,9 @@ function conditionsOf(checked: Checked, related: boolean): SQL[] {
   conditions.push(...tagSQL(filter.tag, filter.tagMode, filter.notTag))
   // An account's own profile and its posts share the subject, so one set of
   // accounts selects both tabs; `catalog_subject` looks each one up.
-  if (checked.relOf)
+  if (checked.relOf.length)
     conditions.push(
-      sql`k.subject_entity_id IN ${followSetSQL(checked.relOf, filter.rel as FollowSet)}`,
+      sql`k.subject_entity_id IN ${followSetSQL(checked.relOf, filter.rel as FollowSet, checked.relMin)}`,
     )
   if (filter.postType)
     conditions.push(sql`${postTypeSQL(related)} = ${filter.postType}`)
@@ -555,6 +586,7 @@ export type Narrowing = Omit<
   | 'notTag'
   | 'relOf'
   | 'rel'
+  | 'relMin'
   | 'sort'
   | 'order'
 >
@@ -569,8 +601,9 @@ function select(input: CollectionFilter, narrow?: Narrowing): Selection {
   const conditions = conditionsOf(checked, !!related)
   if (narrow) {
     const extra = check(narrow)
-    const { relatedTo, tag, tagMode, notTag, relOf, rel } = extra.filter
-    if (relatedTo || tag || tagMode || notTag || relOf || rel) throw invalid()
+    const { relatedTo, tag, tagMode, notTag, relOf, rel, relMin } = extra.filter
+    if (relatedTo || tag || tagMode || notTag || relOf.length || rel || relMin)
+      throw invalid()
     conditions.push(...conditionsOf(extra, !!related))
     checked.narrow = extra.filter
   }

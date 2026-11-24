@@ -4,6 +4,7 @@ import { connections, relationFetches } from '#db/schema.ts'
 import { isAppError } from '#errors.ts'
 import { capture, entity, graph, libraryContext } from '#testing/library.ts'
 import { updateAnnotation } from './annotations.ts'
+import { compareRelations } from './compare.ts'
 import { filterCounts } from './counts.ts'
 import { parseFilterQuery } from './filter-query.ts'
 import { createFolder } from './folders.ts'
@@ -103,7 +104,7 @@ async function setup() {
       .toSorted()
   const list = (filter: CollectionFilter) =>
     named(listCollections(c, filter).items)
-  return { c, ids, list, entityOf }
+  return { c, ids, list, entityOf, follow }
 }
 
 const PROFILES = 'fake.profile'
@@ -124,7 +125,7 @@ describe('the 关系 filter', () => {
   test('selects current follows, both tabs, each way', async () => {
     const { list } = await setup()
     const of = (rel: string, entityType: string) =>
-      list({ relOf: key('pat'), rel, entityType })
+      list({ relOf: [key('pat')], rel, entityType })
     expect(of('following', PROFILES)).toEqual(['alice', 'bob'])
     expect(of('followers', PROFILES)).toEqual(['alice', 'carol'])
     expect(of('mutual', PROFILES)).toEqual(['alice'])
@@ -132,16 +133,19 @@ describe('the 关系 filter', () => {
     expect(of('followers', POSTS)).toEqual(['a1', 'c1'])
     expect(of('mutual', POSTS)).toEqual(['a1'])
     // Dan's follows ended both ways; the reverse perspective works too.
-    expect(list({ relOf: key('dan'), rel: 'mutual' })).toEqual([])
-    expect(list({ relOf: key('alice'), rel: 'mutual' })).toEqual(['p1', 'pat'])
+    expect(list({ relOf: [key('dan')], rel: 'mutual' })).toEqual([])
+    expect(list({ relOf: [key('alice')], rel: 'mutual' })).toEqual([
+      'p1',
+      'pat',
+    ])
     // An account with no follows, or none stored at all, selects nothing.
-    expect(list({ relOf: key('eve'), rel: 'followers' })).toEqual([])
-    expect(list({ relOf: key('nobody'), rel: 'following' })).toEqual([])
+    expect(list({ relOf: [key('eve')], rel: 'followers' })).toEqual([])
+    expect(list({ relOf: [key('nobody')], rel: 'following' })).toEqual([])
   })
 
   test('combines with the other filters', async () => {
     const { c, ids, list } = await setup()
-    const pat = { relOf: key('pat'), rel: 'following' }
+    const pat = { relOf: [key('pat')], rel: 'following' }
     expect(list({ ...pat, authors: [key('bob')] })).toEqual(['b1'])
     expect(list({ ...pat, q: 'a1' })).toEqual(['a1'])
     expect(list({ ...pat, entityType: `${POSTS},${PROFILES}` })).toEqual([
@@ -170,7 +174,7 @@ describe('the 关系 filter', () => {
       count(`rel_of=${encodeURIComponent(key('carol'))}&rel=following`),
     ).toBe(2)
     // A cursor belongs to its filter.
-    const page = listCollections(c, { relOf: key('pat'), rel: 'following' })
+    const page = listCollections(c, { relOf: [key('pat')], rel: 'following' })
     expect(page.next_cursor).toBeUndefined()
   })
 
@@ -286,18 +290,297 @@ describe('perspectives', () => {
       listPerspectives(c, { q: 'AR' }).items.map((item) => item.username),
     ).toEqual(['carol'])
     expect(listPerspectives(c, { q: '%' }).items).toEqual([])
-    expect(listPerspectives(c, { relOf: key('eve') }).items).toEqual([
+    expect(listPerspectives(c, { relOf: [key('eve')] }).items).toEqual([
       {
         id: key('eve'),
         name: 'EVE',
         username: 'eve',
         following: {},
         followers: {},
+        no_data: true,
       },
     ])
-    expect(listPerspectives(c, { relOf: key('nobody') }).items).toEqual([])
+    // Several at once, each saying whether it has data.
+    expect(
+      listPerspectives(c, { relOf: [key('eve'), key('pat'), key('nobody')] })
+        .items.map((item) => [item.username, item.no_data ?? false])
+        .toSorted(),
+    ).toEqual([
+      ['eve', true],
+      ['pat', false],
+    ])
+    expect(listPerspectives(c, { relOf: [key('nobody')] }).items).toEqual([])
     expect(listPerspectives(c, { cursor: '3' }).items).toHaveLength(2)
     invalid(() => listPerspectives(c, { cursor: '03' }))
-    invalid(() => listPerspectives(c, { relOf: 'pat' }))
+    invalid(() => listPerspectives(c, { relOf: ['pat'] }))
+  })
+})
+
+/**
+ * On top of the base follows: Alice and Carol follow Bob, Carol follows
+ * Alice and Eve; Bob and Dan followed Alice once.
+ */
+async function several() {
+  const made = await setup()
+  const { follow } = made
+  follow('alice', 'bob')
+  follow('carol', 'bob')
+  follow('carol', 'alice')
+  follow('carol', 'eve')
+  follow('bob', 'alice', 3000)
+  follow('dan', 'alice', 3000)
+  return made
+}
+
+describe('the 关系 filter with several perspectives', () => {
+  test('selects accounts related to at least k of them', async () => {
+    const { list } = await several()
+    const of = (handles: string[], rel: string, relMin?: string) =>
+      list({
+        relOf: handles.map((handle) => key(handle)),
+        rel,
+        relMin,
+        entityType: PROFILES,
+      })
+    // Pat follows Alice and Bob, Alice follows Pat and Bob: two by default.
+    expect(of(['pat', 'alice'], 'following')).toEqual(['bob'])
+    expect(of(['pat', 'alice'], 'following', '2')).toEqual(['bob'])
+    // Any one of them.
+    expect(of(['pat', 'alice'], 'following', '1')).toEqual([
+      'alice',
+      'bob',
+      'pat',
+    ])
+    // Carol follows Pat, Bob, Alice and Eve.
+    const three = ['pat', 'alice', 'carol']
+    expect(of(three, 'following')).toEqual(['alice', 'bob', 'pat'])
+    expect(of(three, 'following', '3')).toEqual(['bob'])
+    // Followers: Carol follows both; Bob's and Dan's follows of Alice ended.
+    expect(of(['pat', 'alice'], 'followers')).toEqual(['carol'])
+    expect(of(['pat', 'alice'], 'followers', '1')).toEqual([
+      'alice',
+      'carol',
+      'pat',
+    ])
+    // Mutual is each perspective's own: Pat and Alice are each other's.
+    expect(of(['pat', 'alice'], 'mutual', '1')).toEqual(['alice', 'pat'])
+    expect(of(['pat', 'alice'], 'mutual')).toEqual([])
+    // An unknown perspective counts as one with no follows.
+    expect(of(['pat', 'nobody'], 'following')).toEqual([])
+    expect(of(['pat', 'nobody'], 'following', '1')).toEqual(['alice', 'bob'])
+    // Posts by them, too.
+    expect(
+      list({ relOf: three.map((h) => key(h)), rel: 'following', relMin: '3' }),
+    ).toEqual(['b1', 'bob'])
+  })
+
+  test('normalizes, counts apart and rejects what makes no sense', async () => {
+    const { c } = await several()
+    const pat = encodeURIComponent(key('pat'))
+    const alice = encodeURIComponent(key('alice'))
+    // A set, in order; the default threshold goes unsaid.
+    expect(
+      parseFilterQuery(
+        `rel_of=${pat}&rel=following&rel_of=${alice}&rel_of=${pat}&rel_min=2`,
+      ).canonical,
+    ).toBe(`rel=following&rel_of=${alice}&rel_of=${pat}`)
+    expect(
+      parseFilterQuery(`rel_of=${pat}&rel_of=${alice}&rel=following&rel_min=1`)
+        .canonical,
+    ).toBe(`rel=following&rel_min=1&rel_of=${alice}&rel_of=${pat}`)
+    expect(
+      parseFilterQuery(`rel_of=${pat}&rel=following&rel_min=1`).canonical,
+    ).toBe(`rel=following&rel_of=${pat}`)
+    const folder = createFolder(c.db, {
+      name: '共同关注',
+      filter: `rel_of=${pat}&rel_of=${alice}&rel=following&entity_type=fake.profile`,
+    })
+    expect(folder).toMatchObject({
+      filter: `entity_type=fake.profile&rel=following&rel_of=${alice}&rel_of=${pat}`,
+      count: 1,
+    })
+    // Counted apart by threshold, cached by the canonical form.
+    const count = (query: string) => filterCounts(c.db, query).count
+    const both = `rel_of=${pat}&rel_of=${alice}&rel=following&entity_type=fake.profile`
+    expect(count(both)).toBe(1)
+    expect(count(`${both}&rel_min=1`)).toBe(3)
+    expect(count(`${both}&rel_min=2`)).toBe(1)
+    // One filter, one fingerprint, whatever the order.
+    const a = listCollections(c, {
+      relOf: [key('alice'), key('pat')],
+      rel: 'following',
+      relMin: '2',
+    })
+    const b = listCollections(c, {
+      relOf: [key('pat'), key('alice'), key('pat')],
+      rel: 'following',
+    })
+    expect(a).toEqual(b)
+    for (const query of [
+      `rel_of=${pat}&rel_of=${alice}&rel=following&rel_min=0`,
+      `rel_of=${pat}&rel_of=${alice}&rel=following&rel_min=3`,
+      `rel_of=${pat}&rel_of=${alice}&rel=following&rel_min=02`,
+      `rel_of=${pat}&rel_of=${alice}&rel=following&rel_min=x`,
+      `rel_of=${pat}&rel=following&rel_min=2`,
+      'rel=following&rel_min=1',
+      'rel_min=2',
+      `rel_of=${pat}&rel_of=${alice}`,
+      `rel_of=${pat}&rel_of=x&rel=following`,
+    ])
+      invalid(() => {
+        const { filter } = parseFilterQuery(query)
+        listCollections(c, filter)
+      })
+  })
+})
+
+describe('comparing accounts', () => {
+  test('shared accounts, their subsets and the follows among the compared', async () => {
+    const { c } = await several()
+    // Pat follows Alice and Bob; Carol follows Pat, Bob, Alice and Eve.
+    const keys = [key('pat'), key('carol')]
+    const compared = compareRelations(c, { relOf: keys })
+    expect(
+      compared.accounts.map((a) => [a.key, a.username, a.collection_id]),
+    ).toEqual([
+      [key('pat'), 'pat', expect.any(String)],
+      [key('carol'), 'carol', expect.any(String)],
+    ])
+    expect(compared.accounts[0]!.lists).toEqual({
+      following: {},
+      followers: {},
+    })
+    // Two in common by default; the compared themselves are left out.
+    const named = (items: { username?: string; of: number[] }[]) =>
+      items.map((item) => [item.username, item.of])
+    expect(named(compared.items)).toEqual([
+      ['alice', [0, 1]],
+      ['bob', [0, 1]],
+    ])
+    expect(compared.total).toBe(2)
+    expect(compared.combos).toEqual([{ of: [0, 1], count: 2 }])
+    // Carol follows Pat; Alice and Pat follow each other; Alice follows Bob.
+    const at = (i: number) =>
+      i < 2 ? compared.accounts[i]!.username : compared.items[i - 2]!.username
+    expect(
+      compared.edges.map(([a, b]) => `${at(a)}>${at(b)}`).toSorted(),
+    ).toEqual(
+      [
+        'pat>alice',
+        'pat>bob',
+        'carol>pat',
+        'carol>alice',
+        'carol>bob',
+        'alice>pat',
+        'alice>bob',
+      ].toSorted(),
+    )
+
+    const any = compareRelations(c, { relOf: keys, min: 1 })
+    expect(named(any.items)).toEqual([
+      ['alice', [0, 1]],
+      ['bob', [0, 1]],
+      ['eve', [1]],
+    ])
+    expect(any.combos).toEqual([
+      { of: [0, 1], count: 2 },
+      { of: [1], count: 1 },
+    ])
+    // Exactly one subset.
+    const onlyCarol = compareRelations(c, { relOf: keys, min: 1, only: [1] })
+    expect(named(onlyCarol.items)).toEqual([['eve', [1]]])
+    expect(onlyCarol.total).toBe(1)
+    expect(onlyCarol.combos).toEqual(any.combos)
+    // A cap, with the total.
+    const capped = compareRelations(c, { relOf: keys, min: 1, limit: 1 })
+    expect(capped.items).toHaveLength(1)
+    expect(capped.total).toBe(3)
+    // Followers: Alice follows Pat (Carol does too, but is compared).
+    expect(
+      named(
+        compareRelations(c, { relOf: keys, rel: 'followers', min: 1 }).items,
+      ),
+    ).toEqual([['alice', [0]]])
+    // Ended follows do not count: Bob and Dan once followed Alice.
+    expect(
+      compareRelations(c, {
+        relOf: [key('alice'), key('pat')],
+        rel: 'followers',
+        min: 1,
+      }).items.map((item) => item.username),
+    ).toEqual(['carol'])
+    // An account never stored is compared as one with nothing.
+    const unknown = compareRelations(c, {
+      relOf: [key('pat'), key('nobody')],
+      min: 1,
+    })
+    expect(unknown.accounts[1]).toEqual({
+      key: key('nobody'),
+      external_id: 'nobody',
+      lists: { following: {}, followers: {} },
+    })
+    expect(named(unknown.items)).toEqual([
+      ['alice', [0]],
+      ['bob', [0]],
+    ])
+  })
+
+  test('rejects what it cannot compare', async () => {
+    const { c } = await several()
+    const keys = [key('pat'), key('carol')]
+    for (const query of [
+      { relOf: [] },
+      { relOf: [key('pat'), key('pat')] },
+      { relOf: ['fake/fake.post/p1'] },
+      { relOf: keys, min: 3 },
+      { relOf: keys, min: 0 },
+      { relOf: keys, only: [2] },
+      { relOf: keys, only: [1, 1] },
+      { relOf: keys, rel: 'mutual' as 'following' },
+    ])
+      invalid(() => compareRelations(c, query))
+  })
+
+  test('stays quick with many perspectives and thousands of follows each', async () => {
+    const { c } = await several()
+    // 20 perspectives following 2000 accounts each, drawn from 8000.
+    const now = Date.now()
+    const accounts = Array.from({ length: 8000 }, (_, i) => `syn-a${i}`)
+    const perspectives = Array.from({ length: 20 }, (_, i) => `syn-p${i}`)
+    c.db.$client.exec(`INSERT INTO entities
+      (id, platform, kind, external_id, observed_at) VALUES ${[
+        ...accounts,
+        ...perspectives,
+      ]
+        .map((id) => `('${id}', 'fake', 'fake.profile', '${id}', ${now})`)
+        .join(',')}`)
+    const edges: string[] = []
+    perspectives.forEach((p, i) => {
+      for (let j = 0; j < 2000; j++)
+        edges.push(
+          `('${p}', '${accounts[(i * 397 + j * 7) % accounts.length]}', ${now}, ${now})`,
+        )
+    })
+    c.db.$client.exec(`INSERT OR IGNORE INTO follow_edges
+      (follower_id, followee_id, first_seen_at, last_seen_at)
+      VALUES ${edges.join(',')}`)
+    const relOf = perspectives.map((id) => `fake/fake.profile/${id}`)
+    let started = performance.now()
+    filterCounts(
+      c.db,
+      new URLSearchParams([
+        ...relOf.map((k) => ['rel_of', k]),
+        ['rel', 'following'],
+        ['rel_min', '3'],
+      ]).toString(),
+    )
+    expect(performance.now() - started).toBeLessThan(1000)
+    started = performance.now()
+    const compared = compareRelations(c, { relOf, min: 2 })
+    expect(performance.now() - started).toBeLessThan(2000)
+    expect(compared.items).toHaveLength(300)
+    expect(compared.combos.reduce((sum, combo) => sum + combo.count, 0)).toBe(
+      compared.total,
+    )
   })
 })

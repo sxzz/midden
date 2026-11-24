@@ -76,6 +76,7 @@ export interface PublicListQuery extends Omit<
   | 'not_tag'
   | 'rel_of'
   | 'rel'
+  | 'rel_min'
   | 'related_to'
   | 'saved_from'
   | 'saved_before'

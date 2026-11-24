@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { subjectOf } from './follows.ts'
+import { authorKey } from './list.ts'
 import {
   assetsById,
   avatarOf,
@@ -21,6 +22,8 @@ export type GraphKind = (typeof graphKinds)[number]
 
 export interface GraphNode {
   entity_id: string
+  /** The account key, as `rel_of` takes it. */
+  key: string
   external_id: string
   name?: string
   username?: string
@@ -71,7 +74,10 @@ export const GRAPH_MAX = 10_000
  * platform declares for each list's size. Follows only join accounts of one
  * platform, so the center's platform tells.
  */
-function countPaths(ctx: Pick<CaptureContext, 'platforms'>, platform: string) {
+export function countPaths(
+  ctx: Pick<CaptureContext, 'platforms'>,
+  platform: string,
+) {
   const counts = ctx.platforms
     .all()
     .find((p) => p.description.adapterId === platform)?.relations?.counts
@@ -86,6 +92,8 @@ function countPaths(ctx: Pick<CaptureContext, 'platforms'>, platform: string) {
 interface Ranked {
   id: string
   kind: GraphKind | null
+  platform: string
+  entity_kind: string
   external_id: string
   collection_id: string | null
   followers: number | null
@@ -136,7 +144,8 @@ function rankable(
         AND c.object_scope = '' AND c.external_id = e.external_id
         AND EXISTS (SELECT 1 FROM library l WHERE l.collection_id = c.id)
     )
-    SELECT a.id, a.kind, a.external_id, a.collection_id,
+    SELECT a.id, a.kind, e.platform, e.kind AS entity_kind, a.external_id,
+      a.collection_id,
       ${count(paths?.followers)} AS followers,
       ${count(paths?.following)} AS following
     FROM accounts a
@@ -151,7 +160,10 @@ interface Shown {
 }
 
 /** Names and avatars of the accounts shown, as their saved profiles read. */
-function shownAccounts(r: Reader, ids: readonly string[]): Map<string, Shown> {
+export function shownAccounts(
+  r: Reader,
+  ids: readonly string[],
+): Map<string, Shown> {
   const rows = r.db.all<Shown>(sql`
     SELECT e.id,
       coalesce(own.data, (SELECT v.data FROM entity_versions v
@@ -177,7 +189,7 @@ function shownAccounts(r: Reader, ids: readonly string[]): Map<string, Shown> {
  * materialized once; read as two `IN (json_each)` subqueries SQLite took
  * seconds for a few thousand accounts.
  */
-function edgesAmong(r: Reader, ids: readonly string[]) {
+export function edgesAmong(r: Reader, ids: readonly string[]) {
   return r.db.all<{ follower: string; followee: string }>(sql`
     WITH ids(id) AS MATERIALIZED (SELECT value FROM json_each(${list(ids)}))
     SELECT f.follower_id AS follower, f.followee_id AS followee
@@ -186,7 +198,7 @@ function edgesAmong(r: Reader, ids: readonly string[]) {
     WHERE f.followee_id IN ids`)
 }
 
-function listsOf(r: Reader, subject: string): FollowGraph['lists'] {
+export function listsOf(r: Reader, subject: string): FollowGraph['lists'] {
   const rows = r.db.all<{
     list: 'following' | 'followers'
     state: string
@@ -204,6 +216,32 @@ function listsOf(r: Reader, subject: string): FollowGraph['lists'] {
     } else found.partial_at = iso(row.at)
   }
   return lists
+}
+
+/** An account's name, username and avatar, as far as they are known. */
+export function accountLabel(
+  account: Shown | undefined,
+  avatars: Map<string, AssetView>,
+): Pick<GraphNode, 'name' | 'username' | 'avatar'> {
+  const data = account?.data
+    ? parseJson<Record<string, unknown>>(account.data)
+    : {}
+  const avatar = account?.avatar ? avatars.get(account.avatar) : undefined
+  return {
+    ...(typeof data.name === 'string' && data.name ? { name: data.name } : {}),
+    ...(typeof data.username === 'string' && data.username
+      ? { username: data.username }
+      : {}),
+    ...(avatar ? { avatar } : {}),
+  }
+}
+
+/** Avatars of these accounts, by asset id. */
+export function avatarsOf(r: Reader, shown: Map<string, Shown>) {
+  return assetsById(
+    r,
+    [...shown.values()].flatMap((row) => (row.avatar ? [row.avatar] : [])),
+  )
 }
 
 const byFollowers = (a: Ranked, b: Ranked) =>
@@ -251,36 +289,21 @@ export function followGraph(
     ctx,
     kept.map((row) => row.id),
   )
-  const avatars = assetsById(
-    ctx,
-    [...shown.values()].flatMap((row) => (row.avatar ? [row.avatar] : [])),
-  )
-  const nodes = kept.map((row): GraphNode => {
-    const account = shown.get(row.id)
-    const data = account?.data
-      ? parseJson<Record<string, unknown>>(account.data)
-      : {}
-    const avatar = account?.avatar ? avatars.get(account.avatar) : undefined
-    return {
-      entity_id: row.id,
-      external_id: row.external_id,
-      ...(typeof data.name === 'string' && data.name
-        ? { name: data.name }
-        : {}),
-      ...(typeof data.username === 'string' && data.username
-        ? { username: data.username }
-        : {}),
-      ...(avatar ? { avatar } : {}),
-      ...(typeof row.followers === 'number'
-        ? { followers: row.followers }
-        : {}),
-      ...(typeof row.following === 'number'
-        ? { following: row.following }
-        : {}),
-      ...(row.collection_id ? { collection_id: row.collection_id } : {}),
-      ...(row.kind ? { kind: row.kind } : {}),
-    }
-  })
+  const avatars = avatarsOf(ctx, shown)
+  const nodes = kept.map((row): GraphNode => ({
+    entity_id: row.id,
+    key: authorKey({
+      platform: row.platform,
+      kind: row.entity_kind,
+      external: row.external_id,
+    }),
+    external_id: row.external_id,
+    ...accountLabel(shown.get(row.id), avatars),
+    ...(typeof row.followers === 'number' ? { followers: row.followers } : {}),
+    ...(typeof row.following === 'number' ? { following: row.following } : {}),
+    ...(row.collection_id ? { collection_id: row.collection_id } : {}),
+    ...(row.kind ? { kind: row.kind } : {}),
+  }))
   const index = new Map(kept.map((row, i) => [row.id, i]))
   const edges = edgesAmong(
     ctx,

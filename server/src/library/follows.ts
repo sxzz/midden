@@ -4,10 +4,12 @@ import {
   assetsById,
   avatarOf,
   iso,
+  list,
   parseJson,
   type AssetView,
   type Reader,
 } from './views.ts'
+import type { Identity } from './list.ts'
 
 /** Follows observed now, from the stored edges; absent without any. */
 export interface FollowCounts {
@@ -64,16 +66,33 @@ export type FollowSet = 'following' | 'followers' | 'mutual'
  * follows not ended. Each reads one index range from the account's entity:
  * `follow_edges_follower` or `follow_edges_followee`, and the open pair
  * index for the way back.
+ *
+ * With several perspectives, the accounts so related to at least `min` of
+ * them: one range per perspective, grouped by the other end and counted.
  */
 export function followSetSQL(
-  of: { platform: string; kind: string; external: string },
+  of: readonly Identity[],
   set: FollowSet,
+  min = 1,
 ): SQL {
-  const account = sql`(SELECT id FROM entities WHERE platform = ${of.platform}
-    AND kind = ${of.kind} AND external_id = ${of.external})`
+  const accounts =
+    of.length === 1
+      ? sql`(SELECT id FROM entities WHERE platform = ${of[0]!.platform}
+        AND kind = ${of[0]!.kind} AND external_id = ${of[0]!.external})`
+      : sql`(SELECT e.id FROM json_each(${list(of.map((a) => [a.platform, a.kind, a.external]))}) w
+        JOIN entities e ON e.platform = w.value ->> 0
+          AND e.kind = w.value ->> 1 AND e.external_id = w.value ->> 2)`
+  const one = of.length === 1
+  // One perspective needs no grouping: each account comes up once.
+  const counted = (side: string) =>
+    one
+      ? sql``
+      : sql` GROUP BY f.${sql.raw(side)}
+      HAVING count(DISTINCT f.${sql.raw(side === 'follower_id' ? 'followee_id' : 'follower_id')}) >= ${min}`
+  const match = one ? sql`=` : sql`IN`
   if (set === 'followers')
     return sql`(SELECT f.follower_id FROM follow_edges f
-      WHERE f.followee_id = ${account} AND f.ended_at IS NULL)`
+      WHERE f.followee_id ${match} ${accounts} AND f.ended_at IS NULL${counted('follower_id')})`
   const back =
     set === 'mutual'
       ? sql` AND EXISTS (SELECT 1 FROM follow_edges b
@@ -81,7 +100,7 @@ export function followSetSQL(
             AND b.ended_at IS NULL)`
       : sql``
   return sql`(SELECT f.followee_id FROM follow_edges f
-    WHERE f.follower_id = ${account} AND f.ended_at IS NULL${back})`
+    WHERE f.follower_id ${match} ${accounts} AND f.ended_at IS NULL${back}${counted('followee_id')})`
 }
 
 /** The account a saved profile is about: the root of its newest revision. */

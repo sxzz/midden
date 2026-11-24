@@ -376,6 +376,22 @@ describe('api', () => {
       items: [],
     })
     expect((await call('/collections/perspectives?cursor=x')).status).toBe(400)
+    // Several perspectives at once, and comparing them.
+    const two = 'rel_of=x%2Fx.profile%2F1&rel_of=x%2Fx.profile%2F2'
+    expect(
+      (await call(`/collections?${two}&rel=following&rel_min=1`)).status,
+    ).toBe(200)
+    expect(
+      await (await call(`/collections/compare?${two}&rel=followers`)).json(),
+    ).toMatchObject({ items: [], total: 0, combos: [], edges: [] })
+    for (const query of [
+      '',
+      `${two}&rel=mutual`,
+      `${two}&rel_min=0`,
+      `${two}&only=a`,
+      `${two}&limit=0`,
+    ])
+      expect((await call(`/collections/compare?${query}`)).status).toBe(400)
   })
 
   test('saves library filters as folders', async () => {

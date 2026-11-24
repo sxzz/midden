@@ -51,9 +51,16 @@ afterEach(() => {
 
 const graph = (total = 2): FollowGraph => ({
   nodes: [
-    { entity_id: 'c', external_id: '100', name: 'Center', collection_id: 'cc' },
+    {
+      entity_id: 'c',
+      key: 'c',
+      external_id: '100',
+      name: 'Center',
+      collection_id: 'cc',
+    },
     {
       entity_id: 'm',
+      key: 'm',
       external_id: '1',
       name: '小林',
       username: 'kobayashi',
@@ -65,6 +72,7 @@ const graph = (total = 2): FollowGraph => ({
     },
     {
       entity_id: 'o',
+      key: 'o',
       external_id: '2',
       username: 'outside',
       kind: 'followers',
@@ -199,6 +207,7 @@ it('lists the same accounts by kind, and opens the same card from the list', asy
       ...graph().nodes,
       {
         entity_id: 'p',
+        key: 'p',
         external_id: '3',
         name: '大号',
         followers: 9,
@@ -206,6 +215,7 @@ it('lists the same accounts by kind, and opens the same card from the list', asy
       },
       {
         entity_id: 'q',
+        key: 'q',
         external_id: '4',
         name: '小号',
         followers: 1,

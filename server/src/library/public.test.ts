@@ -798,13 +798,18 @@ describe('public lists', () => {
       '/collections?rel=mutual',
       `/collections?related_to=${ids.five}&rel_of=${pat}&rel=followers`,
       `/collections/authors?rel_of=${pat}&rel=following`,
+      `/collections?rel_of=${pat}&rel_of=${pat}2&rel=following&rel_min=2`,
+      `/collections?rel_min=1`,
     ])
       expect(await read(slug, path)).toMatchObject({
         status: 400,
         body: { error: '请求无效' },
       })
-    // The perspective list is the owner's alone.
+    // The perspective list and comparing are the owner's alone.
     expect((await read(slug, '/collections/perspectives')).status).toBe(404)
+    expect(
+      (await read(slug, `/collections/compare?rel_of=${pat}`)).status,
+    ).toBe(404)
     const profile = share(c, 'collection', ids.five!)
     expect(
       (

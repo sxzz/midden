@@ -1,6 +1,6 @@
 import * as v from 'valibot'
 import { AppError } from '#errors.ts'
-import { tagList, type CollectionFilter } from './list.ts'
+import { defaultRelMin, tagList, type CollectionFilter } from './list.ts'
 
 const text = v.optional(v.string())
 
@@ -23,8 +23,9 @@ export const FilterQuery = v.object({
   not_tag: text,
   related_to: text,
   post_type: text,
-  rel_of: text,
+  rel_of: v.optional(v.union([v.string(), v.array(v.string())])),
   rel: text,
+  rel_min: text,
 })
 
 export type FilterParams = v.InferOutput<typeof FilterQuery>
@@ -32,6 +33,7 @@ export type FilterParams = v.InferOutput<typeof FilterQuery>
 /** The filter the list reads from its query parameters. */
 export function collectionFilter(input: FilterParams): CollectionFilter {
   const author = input.author ?? []
+  const relOf = input.rel_of ?? []
   return {
     q: input.q || undefined,
     entityType: input.entity_type || undefined,
@@ -50,8 +52,9 @@ export function collectionFilter(input: FilterParams): CollectionFilter {
     notTag: input.not_tag || undefined,
     relatedTo: input.related_to || undefined,
     postType: input.post_type || undefined,
-    relOf: input.rel_of || undefined,
+    relOf: (typeof relOf === 'string' ? [relOf] : relOf).filter(Boolean),
     rel: input.rel || undefined,
+    relMin: input.rel_min || undefined,
   }
 }
 
@@ -84,10 +87,21 @@ export function parseFilterQuery(query: string): {
   output.not_tag = tagList(output.not_tag)
   if (output.tag_mode === 'any' || output.tag.split(',').length < 2)
     output.tag_mode = undefined
+  // Perspectives are a set, and the default threshold goes unsaid.
+  const relOf = output.rel_of ?? []
+  const perspectives = new Set(typeof relOf === 'string' ? [relOf] : relOf)
+  perspectives.delete('')
+  output.rel_of = [...perspectives]
+  if (
+    perspectives.size &&
+    output.rel_min === String(defaultRelMin(perspectives.size))
+  )
+    output.rel_min = undefined
   const canonical = new URLSearchParams()
   for (const key of KEYS) {
     const value = parsed.output[key as keyof FilterParams]
-    // Any author matches, so their order is not part of the filter.
+    // Any author matches, so their order is not part of the filter; nor
+    // is the perspectives'.
     const items = typeof value === 'string' ? [value] : (value ?? []).toSorted()
     for (const item of items) if (item) canonical.append(key, item)
   }

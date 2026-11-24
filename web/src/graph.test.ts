@@ -22,6 +22,7 @@ const graph: FollowGraph = {
   nodes: [
     {
       entity_id: 'c',
+      key: 'c',
       external_id: '100',
       name: 'Center',
       followers: 10,
@@ -29,6 +30,7 @@ const graph: FollowGraph = {
     },
     {
       entity_id: 'm',
+      key: 'm',
       external_id: '1',
       name: '小林',
       username: 'kobayashi',
@@ -42,6 +44,7 @@ const graph: FollowGraph = {
     },
     {
       entity_id: 'f',
+      key: 'f',
       external_id: '2',
       username: 'fan',
       kind: 'followers',
@@ -53,7 +56,7 @@ const graph: FollowGraph = {
         sensitive: true,
       }),
     },
-    { entity_id: 'g', external_id: '3', kind: 'following' },
+    { entity_id: 'g', key: 'g', external_id: '3', kind: 'following' },
   ],
   // c<->m, f->c, c->g, and between others: m->f and f<->g.
   edges: [
@@ -106,12 +109,16 @@ it('keeps each node’s key, name and edges its own when more are shown', () => 
   // edge indexes into the longer list.
   const people = Array.from({ length: 8 }, (_, i) => ({
     entity_id: `e${i}`,
+    key: `e${i}`,
     external_id: String(i),
     name: ['小智', '小云', '天末', 'Steven', '甲', '乙', '丙', '丁'][i],
     kind: 'mutual' as const,
   }))
   const shown = (count: number): FollowGraph => ({
-    nodes: [{ entity_id: 'c', external_id: 'c' }, ...people.slice(0, count)],
+    nodes: [
+      { entity_id: 'c', key: 'c', external_id: 'c' },
+      ...people.slice(0, count),
+    ],
     edges: [
       [1, 3],
       [count, 1],
@@ -181,9 +188,10 @@ function model(counts: Record<GraphKind, number>, peers: [number, number][]) {
     (kind) => Array.from<GraphKind>({ length: counts[kind] }).fill(kind),
   )
   const nodes = [
-    { entity_id: 'c', external_id: '0' },
+    { entity_id: 'c', key: 'c', external_id: '0' },
     ...kinds.map((kind, i) => ({
       entity_id: `n${i + 1}`,
+      key: `n${i + 1}`,
       external_id: String(i + 1),
       followers: (i * 7919) % 1000,
       kind,
@@ -272,12 +280,12 @@ it('hides the center’s edges unless focused, draws the others’ clearly, dims
 })
 
 it('takes the first character for an initial', () => {
-  expect(initialOf({ entity_id: 'x', external_id: '1', name: ' émile' })).toBe(
-    'É',
-  )
-  expect(initialOf({ entity_id: 'x', external_id: '1', name: '😀 hi' })).toBe(
-    '😀',
-  )
+  expect(
+    initialOf({ entity_id: 'x', key: 'x', external_id: '1', name: ' émile' }),
+  ).toBe('É')
+  expect(
+    initialOf({ entity_id: 'x', key: 'x', external_id: '1', name: '😀 hi' }),
+  ).toBe('😀')
 })
 
 it('says how complete each list is in one line', () => {
