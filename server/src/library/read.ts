@@ -198,12 +198,18 @@ export function getCaptureCollection(
   return collection
 }
 
-export interface RevisionInfo {
-  id: string
-  created_at: string
+/**
+ * A point on a collection's history: a capture whose content or counts differ
+ * from those of the saved capture before it.
+ */
+export interface HistoryPoint {
+  capture_id: string
+  /** When the capture finished, as `observed_at` shows it. */
+  observed_at: string
+  revision_id: string
 }
 
-const REVISION_PAGE = 20
+const HISTORY_PAGE = 20
 
 function encodeCursor(at: number, id: string, filter: string): string {
   return Buffer.from(JSON.stringify({ t: at, id, f: filter })).toString(
@@ -211,7 +217,7 @@ function encodeCursor(at: number, id: string, filter: string): string {
   )
 }
 
-function decodeRevisionCursor(cursor: string, filter: string) {
+function decodeHistoryCursor(cursor: string, filter: string) {
   try {
     const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'))
     if (
@@ -224,13 +230,117 @@ function decodeRevisionCursor(cursor: string, filter: string) {
   throw new AppError('invalid_cursor')
 }
 
+/**
+ * A capture's counts in a form that compares equal whatever order their keys
+ * were written in: every node with its path, sorted by path. Missing counts
+ * give an empty list, so two captures without counts compare equal.
+ */
+const CANONICAL_COUNTS = `(SELECT json_group_array(
+    json_array(t.fullkey, t.type, t.atom) ORDER BY t.fullkey)
+  FROM json_tree(c.metrics) t)`
+
+/**
+ * A saved collection's history, newest first: its saved captures, each run
+ * of captures that saw the same revision and counts kept only as its first.
+ * Runs are found over all captures on every page, so where a page ends never
+ * moves what counts as a change.
+ */
+export function listHistory(
+  ctx: CaptureContext,
+  id: string,
+  cursor?: string,
+): Page<HistoryPoint> {
+  const after = cursor ? decodeHistoryCursor(cursor, id) : undefined
+  assertSaved(ctx, id)
+  const rows = ctx.db.all<{
+    id: string
+    finished_at: number
+    revision_id: string
+  }>(sql`
+    -- Materialized so the counts are made comparable once per capture, not
+    -- again for each window function that reads them.
+    WITH saved AS MATERIALIZED (
+      SELECT c.id, c.finished_at, c.revision_id,
+        ${sql.raw(CANONICAL_COUNTS)} AS counts
+      FROM captures c
+      WHERE c.collection_id = ${id} AND c.state IN ('complete', 'partial')
+        AND c.revision_id IS NOT NULL
+    ), points AS (
+      SELECT id, finished_at, revision_id,
+        revision_id IS NOT lag(revision_id) OVER run
+          OR counts IS NOT lag(counts) OVER run AS changed
+      FROM saved
+      WINDOW run AS (ORDER BY finished_at, id)
+    )
+    SELECT id, finished_at, revision_id FROM points
+    WHERE changed
+      ${after ? sql`AND (finished_at, id) < (${after.at}, ${after.id})` : sql``}
+    ORDER BY finished_at DESC, id DESC
+    LIMIT ${HISTORY_PAGE + 1}`)
+  const items = rows.slice(0, HISTORY_PAGE)
+  const last = items.at(-1)
+  return {
+    items: items.map((row) => ({
+      capture_id: row.id,
+      observed_at: iso(row.finished_at),
+      revision_id: row.revision_id,
+    })),
+    ...(rows.length > HISTORY_PAGE && last
+      ? { next_cursor: encodeCursor(last.finished_at, last.id, id) }
+      : {}),
+  }
+}
+
+/**
+ * A saved collection as one of its captures saw it: the revision that
+ * capture produced or found unchanged, with that capture's counts. Media are
+ * those of the capture that made the revision: its entities refer to media by
+ * that capture's positions, and a capture that found it unchanged stored the
+ * same content media.
+ */
+export function getHistoryPoint(
+  ctx: CaptureContext,
+  id: string,
+  captureId: string,
+): CollectionView {
+  assertSaved(ctx, id)
+  const row = isUUID(captureId)
+    ? ctx.db.get<RevisionRow & { captured_at: number }>(sql`
+        SELECT ${sql.raw(REVISION_COLUMNS)}, c.finished_at AS captured_at
+        FROM collections a
+        JOIN library l ON l.collection_id = a.id
+        JOIN captures c ON c.collection_id = a.id
+        JOIN revisions r ON r.id = c.revision_id
+        WHERE a.id = ${id} AND c.id = ${captureId}
+          AND c.state IN ('complete', 'partial')`)
+    : undefined
+  if (!row) throw new AppError('not_found')
+  const collection = view(
+    { ...row, observed_at: row.captured_at },
+    parseJson<Payload>(row.payload),
+    assetsByCapture(ctx, [row.capture_id]).get(row.capture_id) ?? [],
+  )
+  applyMetrics(collection.graph, captureMetrics(ctx, captureId))
+  linkSavedEntities(ctx, collection)
+  attachIncomingRelations(ctx, collection)
+  collection.storage_bytes = collectionStorage(ctx, id)
+  return collection
+}
+
+export interface RevisionInfo {
+  id: string
+  created_at: string
+}
+
+const REVISION_PAGE = 20
+
 /** A saved collection's revisions, newest first. */
 export function listRevisions(
   ctx: CaptureContext,
   id: string,
   cursor?: string,
 ): Page<RevisionInfo> {
-  const after = cursor ? decodeRevisionCursor(cursor, id) : undefined
+  const after = cursor ? decodeHistoryCursor(cursor, id) : undefined
   assertSaved(ctx, id)
   const rows = ctx.db.all<{ id: string; created_at: number }>(sql`
     SELECT id, created_at FROM revisions

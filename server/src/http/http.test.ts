@@ -214,14 +214,14 @@ describe('api', () => {
       id,
       graph: { root: 'post' },
     })
-    const revisions = (await (
-      await call(`/collections/${id}/revisions`)
+    const history = (await (
+      await call(`/collections/${id}/history`)
     ).json()) as {
-      items: { id: string }[]
+      items: { capture_id: string }[]
     }
-    expect(revisions.items).toHaveLength(1)
+    expect(history.items).toHaveLength(1)
     expect(
-      (await call(`/collections/${id}/revisions/${revisions.items[0]!.id}`))
+      (await call(`/collections/${id}/history/${history.items[0]!.capture_id}`))
         .status,
     ).toBe(200)
     expect((await call('/collections/authors')).status).toBe(200)
