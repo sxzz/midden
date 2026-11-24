@@ -34,14 +34,18 @@ const SDK = 'https://telegram.org/js/telegram-web-app.js'
 let loading: Promise<void> | undefined
 /** Whether an address is a public link's (分享), read by visitors. */
 export const isPublicAddress = (hash: string) => hash.startsWith('#/s/')
+/** A /passkey link, opened in a browser to add a passkey. */
+const isPasskeyAddress = (hash: string) => hash.startsWith('#/passkey/')
 /**
  * Load Telegram's Mini App script once, for the owner's app only: a public
- * page never asks telegram.org for anything. Settles either way, since a
- * browser signs in without it. Call it before the router first reads the
- * address, as the script takes the launch data (`tgWebAppData`) from it.
+ * page or a /passkey link never asks telegram.org for anything. Settles
+ * either way, since a browser signs in without it. Call it before the
+ * router first reads the address, as the script takes the launch data
+ * (`tgWebAppData`) from it.
  */
 export function loadHost(hash = location.hash): Promise<void> {
-  if (host() || isPublicAddress(hash)) return Promise.resolve()
+  if (host() || isPublicAddress(hash) || isPasskeyAddress(hash))
+    return Promise.resolve()
   loading ??= new Promise((resolve) => {
     const script = document.createElement('script')
     script.src = SDK

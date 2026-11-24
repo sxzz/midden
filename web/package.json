@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@sigma/node-image": "^4.0.2",
+    "@simplewebauthn/browser": "^14.0.0",
     "graphology": "^0.26.0",
     "graphology-layout-forceatlas2": "^0.10.1",
     "hono": "^4.13.21",

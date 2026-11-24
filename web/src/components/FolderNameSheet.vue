@@ -6,6 +6,7 @@ const props = defineProps<{
   confirmLabel: string
   /** The name the field starts with, such as the folder's current one. */
   name?: string
+  placeholder?: string
   busy?: boolean
   error?: string
 }>()
@@ -47,7 +48,7 @@ function submit() {
           v-model="value"
           maxlength="64"
           autocomplete="off"
-          placeholder="收藏夹名称"
+          :placeholder="placeholder ?? '收藏夹名称'"
           enterkeyhint="done"
         />
       </label>

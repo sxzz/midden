@@ -16,6 +16,12 @@ it('never loads the Telegram script for a public link', async () => {
   expect(scripts()).toEqual([])
 })
 
+it('never loads the Telegram script for a /passkey link', async () => {
+  const { loadHost } = await import('./host')
+  await loadHost(`#/passkey/${'a'.repeat(43)}`)
+  expect(scripts()).toEqual([])
+})
+
 it('loads the Telegram script once for the owner, settling even if it fails', async () => {
   const { loadHost } = await import('./host')
   let settled = false

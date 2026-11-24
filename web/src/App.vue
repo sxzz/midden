@@ -3,18 +3,20 @@ import { computed, onMounted, onUnmounted, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { call, client, errorText } from './api'
 import CollectionLibrary from './components/CollectionLibrary.vue'
+import PasskeyLogin from './components/PasskeyLogin.vue'
+import PasskeySetup from './components/PasskeySetup.vue'
 import PublicShare from './components/PublicShare.vue'
-import TelegramLogin from './components/TelegramLogin.vue'
 import AppToast from './components/ui/AppToast.vue'
 import CollectionSkeleton from './components/ui/CollectionSkeleton.vue'
 import { host, loadHost, setupHost } from './host'
-import { takeWidgetLogin, widgetLogin } from './login'
 import { followInternalLink, goBack } from './navigation'
 const router = useRouter()
 const route = useRoute()
 // A public link is read without logging in; the library asks for it only
 // once one of its own pages is shown.
 const shared = computed(() => !!route.meta.public)
+// A /passkey link adds a passkey first, which also signs in.
+const setup = computed(() => !!route.meta.setup)
 const ready = shallowRef(false)
 const error = shallowRef('')
 const loading = shallowRef(true)
@@ -31,7 +33,7 @@ onMounted(() => {
   }
   let started = false
   watch(
-    shared,
+    () => shared.value || setup.value,
     (value) => {
       if (value || started) return
       started = true
@@ -41,9 +43,6 @@ onMounted(() => {
   )
 })
 async function signIn() {
-  // Coming back from the Login Widget, sign in before checking the session.
-  const login = takeWidgetLogin()
-  const loginError = login ? await widgetLogin(login) : ''
   // Opened on a public link first, the Mini App script is not loaded yet.
   await loadHost()
   try {
@@ -51,10 +50,8 @@ async function signIn() {
     ready.value = true
   } catch {
     const data = host()?.initData
-    if (!data) {
-      browserLogin.value = true
-      error.value = loginError
-    } else {
+    if (!data) browserLogin.value = true
+    else {
       try {
         await call(client.auth.telegram.$post({ json: { init_data: data } }))
         ready.value = true
@@ -66,15 +63,26 @@ async function signIn() {
     loading.value = false
   }
 }
+function signedIn() {
+  browserLogin.value = false
+  ready.value = true
+}
+// The link is used up: leave its address, and the library takes over.
+function passkeyAdded() {
+  void router.replace('/')
+}
 onUnmounted(() => cleanup())
 </script>
 
 <template>
   <PublicShare v-if="shared" />
+  <main v-else-if="setup" class="gate">
+    <PasskeySetup :token="String(route.params.token)" @done="passkeyAdded" />
+  </main>
   <CollectionLibrary v-else-if="ready" />
   <main v-else class="gate">
     <CollectionSkeleton v-if="loading" />
-    <TelegramLogin v-else-if="browserLogin" :error="error" />
+    <PasskeyLogin v-else-if="browserLogin" @done="signedIn" />
     <p v-else role="status">{{ error }}</p>
   </main>
   <AppToast />

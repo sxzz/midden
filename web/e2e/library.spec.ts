@@ -146,66 +146,6 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await expect(page.locator('.row')).toHaveCount(0)
   await expect(page.getByText(/暂无/)).toHaveCount(0)
 })
-test('an ordinary browser logs in with the Telegram Login Widget', async ({
-  page,
-}) => {
-  const scripts: string[] = []
-  await page.route('https://telegram.org/**', (r) => {
-    scripts.push(r.request().url())
-    return r.fulfill({ body: '', contentType: 'text/javascript' })
-  })
-  let session = false
-  const logins: unknown[] = []
-  await page.route('**/v1/**', (r) => {
-    const path = new URL(r.request().url()).pathname
-    if (path === '/v1/session')
-      return session
-        ? r.fulfill({ json: {} })
-        : r.fulfill({ status: 401, json: { error: '需要登录' } })
-    if (path === '/v1/auth/telegram' && r.request().method() === 'GET')
-      return r.fulfill({ json: { bot_username: 'midden_bot' } })
-    if (path === '/v1/auth/telegram') {
-      logins.push(r.request().postDataJSON())
-      session = true
-      return r.fulfill({ json: {} })
-    }
-    if (path === '/v1/collections') return r.fulfill({ json: { items: [] } })
-    return r.fulfill({ json: {} })
-  })
-  await page.goto('/app/')
-  await expect(page.getByText('使用 Telegram 账号登录')).toBeVisible()
-  const script = page.locator('.widget script')
-  await expect(script).toHaveAttribute('data-telegram-login', 'midden_bot')
-  await expect(script).toHaveAttribute(
-    'data-auth-url',
-    new URL('/app/', page.url()).href,
-  )
-  // The owner's app loads the Mini App script, then the widget's.
-  expect(scripts).toEqual([
-    'https://telegram.org/js/telegram-web-app.js',
-    expect.stringContaining('telegram-widget.js'),
-  ])
-  await page.screenshot({ path: 'test-results/browser-login.png' })
-
-  // Telegram redirects back with the signed fields in the query.
-  await page.goto(
-    '/app/?theme=dark&id=42&first_name=%E6%B5%8B%E8%AF%95&auth_date=1800000000&hash=abc',
-  )
-  await expect(page.locator('h1')).toHaveText('我的收藏')
-  expect(logins).toEqual([
-    {
-      login: {
-        id: '42',
-        first_name: '测试',
-        auth_date: '1800000000',
-        hash: 'abc',
-      },
-    },
-  ])
-  // The signed fields leave the address bar; the app's own options stay.
-  expect(new URL(page.url()).search).toBe('?theme=dark')
-})
-
 test('the Mini App signs in with the launch data in its address', async ({
   page,
 }) => {
@@ -246,23 +186,6 @@ test('the Mini App signs in with the launch data in its address', async ({
   expect(logins).toEqual([{ init_data: 'user=42&hash=abc' }])
   // Its theme is applied from the start.
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-})
-
-test('a rejected widget login says so on the login page', async ({ page }) => {
-  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
-  await page.route('**/v1/**', (r) => {
-    const path = new URL(r.request().url()).pathname
-    if (path === '/v1/auth/telegram' && r.request().method() === 'GET')
-      return r.fulfill({ json: { bot_username: 'midden_bot' } })
-    return r.fulfill({
-      status: 401,
-      json: { error: 'Telegram 登录校验失败，请重试' },
-    })
-  })
-  await page.goto('/app/?id=42&auth_date=1&hash=bad')
-  await expect(page.getByRole('alert')).toHaveText(
-    'Telegram 登录校验失败，请重试',
-  )
 })
 
 test('sensitive image stays blurred until revealed and opens inside the page', async ({

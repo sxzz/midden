@@ -77,6 +77,7 @@ test('Instagram and X choose their accounts independently', async ({
       }
       return r.fulfill({ json: state })
     }
+    if (path === '/v1/passkeys') return r.fulfill({ json: [] })
     return r.fulfill({ json: path === '/v1/accounts' ? state : { items: [] } })
   })
   await page.goto('/app/')
@@ -189,6 +190,7 @@ test('adds, selects and deletes an X account', async ({ page }) => {
       return r.fulfill({ status: 204 })
     }
     if (path === '/v1/accounts') return r.fulfill({ json: state })
+    if (path === '/v1/passkeys') return r.fulfill({ json: [] })
     if (path === '/v1/usage')
       return r.fulfill({
         json: { used_bytes: 0 },
@@ -271,6 +273,7 @@ test('deleting everything shows what goes and needs the phrase typed', async ({
     const request = r.request()
     const path = new URL(request.url()).pathname
     if (path === '/v1/session') return r.fulfill({ json: {} })
+    if (path === '/v1/passkeys') return r.fulfill({ json: [] })
     if (path === '/v1/accounts')
       return r.fulfill({ json: { platforms: [], accounts: [] } })
     if (path === '/v1/library')

@@ -10,6 +10,7 @@ import CollectionDetail from './components/CollectionDetail.vue'
 import CollectionTrends from './components/CollectionTrends.vue'
 import CollectionView from './components/CollectionView.vue'
 import FollowChanges from './components/FollowChanges.vue'
+import PasskeySetup from './components/PasskeySetup.vue'
 import ProfileChanges from './components/ProfileChanges.vue'
 import PublicHome from './components/PublicHome.vue'
 
@@ -113,6 +114,14 @@ export const router = createRouter({
       component: ProfileChanges,
       props: idOnly,
       meta: { public: true },
+    },
+    // A /passkey link from the bot: registers a passkey without signing in.
+    // App shows it in place of the library.
+    {
+      path: String.raw`/passkey/:token([\w-]+)`,
+      name: 'passkey',
+      component: PasskeySetup,
+      meta: { setup: true },
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
