@@ -52,14 +52,21 @@ function changeLayout(value: 'feed' | 'album') {
   else q.delete('layout')
   emit('search', q.toString())
 }
-// Selection is a mode of the feed: rows toggle instead of opening.
+// Selection is a mode of the feed: rows toggle instead of opening. The batch
+// bar outlasts it, to link to the batch once started.
 const selecting = shallowRef(false)
+const batch = shallowRef(0)
 const selected = shallowRef<string[]>([])
 const listed = computed(() => props.items.map((a) => a.id))
 function startSelecting() {
   selected.value = []
   selecting.value = true
+  batch.value++
   if (layout.value === 'album') changeLayout('feed')
+}
+function closeBatch() {
+  selecting.value = false
+  batch.value = 0
 }
 function toggle(id: string) {
   selected.value = selected.value.includes(id)
@@ -175,11 +182,13 @@ const storage = computed(() =>
     @more="emit('more')"
   />
   <BatchRefresh
-    v-if="selecting"
+    v-if="batch"
+    :key="batch"
     :selected="selected"
     :listed="listed"
     @select="(value) => (selected = value)"
-    @close="selecting = false"
+    @started="selecting = false"
+    @close="closeBatch"
   />
 </template>
 

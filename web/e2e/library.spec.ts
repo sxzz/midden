@@ -2,6 +2,8 @@ import { Buffer } from 'node:buffer'
 import { expect, test } from '@playwright/test'
 import { swipeImage } from './touch'
 const id = '11111111-1111-4111-8111-111111111111'
+/** The capture record a refresh of the collection answers with. */
+const recordId = '99999999-9999-4999-8999-999999999999'
 const collection = {
   id,
   url: 'https://example.test/post',
@@ -66,7 +68,12 @@ test('browse, filter, history, refresh and remove a saved post', async ({
           }
         else if (path === '/v1/captures') {
           captureBodies.push(r.request().postDataJSON())
-          body = { id: 'job', collection_id: id, state: 'complete' }
+          body = {
+            id: 'job',
+            collection_id: id,
+            state: 'queued',
+            record_id: recordId,
+          }
         } else if (path === `/v1/collections/${id}`) {
           if (r.request().method() === 'DELETE') {
             deleted = true
@@ -110,8 +117,11 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await expect(page.getByText(collection.text)).toBeVisible()
   await expect(page.locator('.timeline .when')).toContainText('最新版本')
   await page.getByRole('button', { name: '重新抓取' }).click()
-  await expect(page.getByText('已更新。')).toBeVisible()
+  await page.getByRole('button', { name: '查看进度' }).click()
+  await expect(page).toHaveURL(new RegExp(`/captures/${recordId}$`))
   expect(captureBodies.at(-1)).toEqual({ refresh_id: id })
+  await page.getByRole('button', { name: '返回' }).click()
+  await expect(page).toHaveURL(new RegExp(`/collection/${id}$`))
   await page.getByRole('button', { name: '返回' }).click()
   await page.getByRole('searchbox').fill('不存在')
   await page.getByRole('button', { name: '搜索', exact: true }).click()

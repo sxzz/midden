@@ -40,10 +40,14 @@ test('select collections and refresh them', async ({ page }) => {
   await expect(page).toHaveURL(/#\/$/)
   await expect(page.getByText('已选 2 项')).toBeVisible()
   await page.getByRole('button', { name: '更新', exact: true }).click()
-  // Progress arrives as a bot message; the page just leaves selection mode.
+  // Selection ends; the page confirms and links to the records instead of
+  // following the batch itself.
   await expect(page.getByRole('checkbox')).toHaveCount(0)
+  await expect(page.getByText('已开始更新 2 项')).toBeVisible()
   await expect(page.getByRole('button', { name: '批量更新' })).toBeVisible()
   expect(started).toEqual({ collection_ids: [items[0].id, items[2].id] })
+  await page.getByRole('button', { name: '查看进度' }).click()
+  await expect(page).toHaveURL(/#\/captures$/)
   expect(polled).toBe(false)
 })
 

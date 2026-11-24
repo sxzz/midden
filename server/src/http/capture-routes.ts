@@ -216,7 +216,8 @@ export function captureRoutes(ctx: AccountsContext) {
             'url' in input
               ? captureURL(ctx, input.url, key, captureOptions(input.options))
               : recapture(ctx, input.refresh_id, { key })
-          return c.json(jobJson(ctx, job))
+          // The record this request made, so a client can open its progress.
+          return c.json({ ...jobJson(ctx, job), record_id: job.submissionId })
         },
       )
 

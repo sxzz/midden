@@ -3,9 +3,7 @@ import { createApp, h, KeepAlive, nextTick, shallowRef } from 'vue'
 import { collection as fixture, mockApi } from '../testing/api'
 import { useCollectionDetail } from './useCollectionDetail'
 import { toastState } from './useToast'
-import type { Collection, HistoryPoint, Job } from '../api'
-const { replace } = vi.hoisted(() => ({ replace: vi.fn() }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ replace }) }))
+import type { Collection, HistoryPoint } from '../api'
 /** Whether collections answer as a profile rather than a post. */
 let profile = false
 const collection = (id: string): Collection =>
@@ -29,7 +27,13 @@ const collection = (id: string): Collection =>
       : {}),
   })
 let api = mockApi()
-let job: Job = { id: 'job-1', collection_id: 'kept', state: 'queued' }
+/** What starting a capture answers with. */
+const job = {
+  id: 'job-1',
+  collection_id: 'kept',
+  state: 'queued',
+  record_id: 'record-1',
+}
 /** The history every collection answers with. */
 let points: HistoryPoint[] = []
 /** The readings every collection's counts answer with. */
@@ -38,14 +42,11 @@ let readings: number[] = []
 let changes = 0
 /** The kept collection's composable, for tests that step through points. */
 let detail: ReturnType<typeof useCollectionDetail> | undefined
-/** One shared refresh handle, so the test can start a capture and watch it. */
+/** One shared refresh handle, so the test can start a capture. */
 let refresh = async () => {}
 /** Collections handed to the library list, to catch writes from a cached view. */
 let updates: Collection[] = []
-/**
- * Requests held open on purpose, so a reply can land only after the view has
- * been navigated away from and put in the cache.
- */
+/** Requests held open on purpose, so a later one can overtake them. */
 let gates = new Map<string, { wait: Promise<void>; release: () => void }>()
 let rejects = new Set<string>()
 function hold(path: string) {
@@ -76,10 +77,7 @@ const Detail = {
       refresh = () => used.refresh()
       detail = used
     }
-    return () => [
-      h('p', { class: 'status' }, used.status.value),
-      h('p', { class: 'error' }, used.error.value),
-    ]
+    return () => [h('p', { class: 'error' }, used.error.value)]
   },
 }
 const shown = shallowRef('kept')
@@ -95,10 +93,7 @@ function mount() {
   })
   app.mount(el)
   unmount = () => app.unmount()
-  return {
-    status: () => el.querySelector('.status')?.textContent,
-    error: () => el.querySelector('.error')?.textContent,
-  }
+  return { error: () => el.querySelector('.error')?.textContent }
 }
 /** Put the shown detail into the cache, or bring a cached one back. */
 async function show(id: string) {
@@ -110,7 +105,6 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.stubGlobal('crypto', { randomUUID: () => 'idempotency-key' })
   shown.value = 'kept'
-  job = { id: 'job-1', collection_id: 'kept', state: 'queued' }
   updates = []
   gates = new Map()
   rejects = new Set()
@@ -154,7 +148,7 @@ beforeEach(() => {
         observed_at: at.observed_at,
       }
     if (path.endsWith('/availability')) return { available: true }
-    if (path === '/captures' || path.startsWith('/jobs/')) return job
+    if (path === '/captures') return job
     return collection(path.split('/', 3)[2]!)
   })
 })
@@ -167,84 +161,40 @@ afterEach(() => {
 })
 const calls = (prefix: string) =>
   api.mock.calls.filter(([path]) => path.startsWith(prefix)).length
-it('stops polling a capture while the detail is cached and resumes on return', async () => {
-  const view = mount()
+it('leaves a refresh to its record instead of following it', async () => {
+  mount()
   await vi.advanceTimersByTimeAsync(0)
+  const d = detail!
+  expect(d.record.value).toBe('')
   await refresh()
-  expect(view.status()).toBe('正在采集…')
-  // Navigating to another collection puts this one in the cache.
-  await show('other')
+  expect(d.record.value).toBe('record-1')
+  expect(toastState.value?.text).toBe('已开始重新抓取')
+  const before = api.mock.calls.length
   await vi.advanceTimersByTimeAsync(10_000)
-  expect(calls('/jobs/')).toBe(0)
-  // Coming back resumes the pending job instead of starting a new capture.
-  job = { ...job, state: 'complete' }
-  await show('kept')
-  await vi.advanceTimersByTimeAsync(2000)
-  await vi.waitFor(() => expect(view.status()).toBe('已更新。'))
-  expect(calls('/jobs/')).toBe(1)
-  expect(calls('/captures')).toBe(1)
+  expect(api.mock.calls.length).toBe(before)
+  expect(updates).toEqual([])
 })
-it('keeps one poll timer when a job reply lands after the view came back', async () => {
+it('shows what a refresh saved when the reader comes back', async () => {
+  mount()
+  await vi.advanceTimersByTimeAsync(0)
+  const d = detail!
+  // Coming back without a refresh keeps the cached view as it was.
+  await show('other')
+  await show('kept')
+  expect(calls('/collections/kept')).toBe(4)
+  await refresh()
+  await show('other')
+  await show('kept')
+  await vi.waitFor(() =>
+    expect(updates.map((value) => value.id)).toEqual(['kept']),
+  )
+  expect(d.membersVersion.value).toBe(1)
+})
+it('reports a failed reload after a refresh as a toast', async () => {
   const view = mount()
   await vi.advanceTimersByTimeAsync(0)
   await refresh()
-  // Let the first job request go out, then leave it unanswered in flight.
-  const jobs = hold('/jobs/job-1')
-  await vi.advanceTimersByTimeAsync(2000)
-  await jobs.reached()
-  expect(calls('/jobs/')).toBe(1)
   await show('other')
-  await show('kept')
-  // The stale reply must retire instead of scheduling a chain of its own.
-  await jobs.release()
-  expect(view.status()).toBe('正在采集…')
-  await vi.advanceTimersByTimeAsync(2000)
-  expect(calls('/jobs/')).toBe(2)
-  await vi.advanceTimersByTimeAsync(2000)
-  expect(calls('/jobs/')).toBe(3)
-})
-it('does not reroute or touch the list when a capture finishes while cached', async () => {
-  job = { id: 'job-1', collection_id: 'moved', state: 'queued' }
-  mount()
-  await vi.advanceTimersByTimeAsync(0)
-  await refresh()
-  job = { ...job, state: 'complete' }
-  // Hold the collection reload that follows a finished job.
-  const reload = hold('/collections/moved')
-  await vi.advanceTimersByTimeAsync(2000)
-  await reload.reached()
-  await show('other')
-  await reload.release()
-  expect(replace).not.toHaveBeenCalled()
-  expect(updates).toEqual([])
-})
-it('defers the list update when the view is cached during its history reload', async () => {
-  mount()
-  await vi.advanceTimersByTimeAsync(0)
-  await refresh()
-  job = { ...job, state: 'complete' }
-  // The initial load already fetched the history; hold the one inside the job.
-  const history = hold('/collections/kept/history')
-  await vi.advanceTimersByTimeAsync(2000)
-  await history.reached()
-  await show('other')
-  await history.release()
-  expect(updates).toEqual([])
-  // Returning finishes the job and only then reports it to the list.
-  await show('kept')
-  await vi.advanceTimersByTimeAsync(0)
-  expect(updates.map((value) => value.id)).toEqual(['kept'])
-})
-it('reports a failure from resuming a capture instead of rejecting', async () => {
-  const view = mount()
-  await vi.advanceTimersByTimeAsync(0)
-  await refresh()
-  job = { ...job, state: 'complete' }
-  const reload = hold('/collections/kept')
-  await vi.advanceTimersByTimeAsync(2000)
-  await reload.reached()
-  await show('other')
-  await reload.release()
   rejects.add('/collections/kept')
   await show('kept')
   // The collection is still on screen, so the failure shows as a toast.
@@ -337,8 +287,8 @@ it('offers trends once two captures read a count', async () => {
   // A refresh that reads the counts again makes a trend.
   readings = [10, 12]
   await refresh()
-  job = { ...job, state: 'complete' }
-  await vi.advanceTimersByTimeAsync(2000)
+  await show('other')
+  await show('kept')
   await vi.waitFor(() => expect(d.trendable.value).toBe(true))
   expect(calls('/collections/kept/counts')).toBe(2)
 })
@@ -356,8 +306,8 @@ it('offers the record of changes once a profile changed', async () => {
   // A refresh that sees the profile change offers it.
   changes = 1
   await refresh()
-  job = { ...job, state: 'complete' }
-  await vi.advanceTimersByTimeAsync(2000)
+  await show('other')
+  await show('kept')
   await vi.waitFor(() => expect(d.changeable.value).toBe(true))
   expect(calls('/collections/kept/profile-changes')).toBe(2)
 })

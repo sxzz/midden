@@ -83,7 +83,11 @@ describe('api', () => {
       body: JSON.stringify({ url: 'https://fake.test/p/1' }),
     })
     expect(submitted.status).toBe(200)
-    const job = (await submitted.json()) as { id: string; state: string }
+    const job = (await submitted.json()) as {
+      id: string
+      state: string
+      record_id: string
+    }
     expect(job.state).toBe('queued')
     await ctx.queue.drain()
     expect(await (await call(`/jobs/${job.id}`)).json()).toMatchObject({
@@ -94,6 +98,7 @@ describe('api', () => {
       items: { id: string }[]
     }
     expect(records.items).toHaveLength(1)
+    expect(records.items[0]!.id).toBe(job.record_id)
     expect(
       await (await call(`/captures/${records.items[0]!.id}`)).json(),
     ).toMatchObject({
@@ -111,6 +116,17 @@ describe('api', () => {
     expect(
       await (await call(`/collections/${collectionId}/availability`)).json(),
     ).toEqual({ available: true })
+    // A refresh is a record of its own, opened by the id it answers with.
+    const refresh = (await (
+      await call('/captures', {
+        method: 'POST',
+        body: JSON.stringify({ refresh_id: collectionId }),
+      })
+    ).json()) as { id: string; record_id: string }
+    expect(refresh.record_id).not.toBe(job.record_id)
+    expect(
+      await (await call(`/captures/${refresh.record_id}`)).json(),
+    ).toMatchObject({ id: refresh.record_id, job_id: refresh.id })
   })
 
   test('maps errors to the statuses and texts the web app knows', async () => {

@@ -27,7 +27,7 @@ const {
   collection,
   error,
   busy,
-  status,
+  record,
   points,
   next,
   historical,
@@ -93,6 +93,9 @@ function preview(point: string) {
 function startRefresh() {
   void refresh()
 }
+function openRecord() {
+  void router.push({ name: 'capture', params: { id: record.value } })
+}
 const version = computed(() =>
   collection.value
     ? `${historical.value ? '历史' : '最新'}版本抓取于 ${date(collection.value.observed_at)}`
@@ -152,6 +155,7 @@ const version = computed(() =>
         :disabled="busy || loadingPoint || !available"
         @select="startRefresh"
       />
+      <ListButton v-if="record" label="查看进度" chevron @select="openRecord" />
       <ListButton
         v-if="!available"
         label="重试连接采集服务"
@@ -171,7 +175,6 @@ const version = computed(() =>
         @select="confirmDelete = true"
       />
     </ListSection>
-    <p class="status" :class="{ quiet: !status }" role="status">{{ status }}</p>
     <ProfileCollections
       v-if="isProfile"
       :id="id"
@@ -207,23 +210,8 @@ const version = computed(() =>
   font-size: 15px;
   line-height: 1.5;
 }
-.loading,
-.status {
-  margin: 0 0 16px;
-  padding: 0 calc(var(--gutter) + 4px);
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--subtle);
-}
-.loading {
-  padding-top: 32px;
-  text-align: center;
-}
 .fetching {
   opacity: 0.6;
   transition: opacity 0.2s ease 0.1s;
-}
-.status.quiet {
-  margin: 0;
 }
 </style>

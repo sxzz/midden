@@ -59,7 +59,6 @@ export type ProfileChanges = Ok<
 export type ProfileChange = ProfileChanges['items'][number]
 export type ProfileFieldChange = ProfileChange['fields'][number]
 export type Job = Ok<(typeof client.jobs)[':id']['$get']>
-export type MemberProgress = NonNullable<Job['members']>
 export type LibrarySize = Ok<typeof client.library.$get>
 export type CaptureRecord = Ok<typeof client.captures.$get>['items'][number]
 export type CaptureRecordDetail = Ok<(typeof client.captures)[':id']['$get']>

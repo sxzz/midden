@@ -1,20 +1,10 @@
-import {
-  computed,
-  onActivated,
-  onDeactivated,
-  onUnmounted,
-  shallowRef,
-  watch,
-} from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onActivated, onUnmounted, shallowRef, watch } from 'vue'
 import {
   call,
   client,
   errorText,
   type Collection,
   type HistoryPoint,
-  type Job,
-  type MemberProgress,
 } from '../api'
 import { isProfileEntity } from '../relations'
 import { trends } from '../trends'
@@ -22,40 +12,23 @@ import { toast } from './useToast'
 const collections = client.collections[':id']
 const getCollection = (id: string, signal: AbortSignal) =>
   call(collections.$get({ param: { id } }, { init: { signal } }))
-const getJob = (id: string, signal: AbortSignal) =>
-  call(client.jobs[':id'].$get({ param: { id } }, { init: { signal } }))
 const availability = async (id: string, signal: AbortSignal) =>
   (
     await call(
       collections.availability.$get({ param: { id } }, { init: { signal } }),
     )
   ).available
-const settled = (m?: MemberProgress) =>
-  m ? m.complete + m.partial + m.failed : 0
-function memberStatus(m: MemberProgress) {
-  if (!m.done)
-    return `已更新，正在保存帖子${m.pending ? `（剩余 ${m.pending} 条）` : ''}…`
-  if (!m.total) return '已更新。'
-  return [
-    `已更新，${m.complete} 条帖子已保存`,
-    m.partial && `${m.partial} 条不完整`,
-    m.failed && `${m.failed} 条失败`,
-  ]
-    .filter(Boolean)
-    .join('，')
-    .concat('。')
-}
 export function useCollectionDetail(
   id: () => string,
   deleted: (id: string) => void,
   updated: (collection: Collection) => void,
 ) {
-  const router = useRouter()
   const available = shallowRef(false)
   const collection = shallowRef<Collection>()
   const error = shallowRef('')
   const busy = shallowRef(false)
-  const status = shallowRef('')
+  /** The capture record of the refresh started here, which shows its progress. */
+  const record = shallowRef('')
   /** Captures where the content or counts changed, newest first. */
   const points = shallowRef<HistoryPoint[]>([])
   const next = shallowRef('')
@@ -84,8 +57,8 @@ export function useCollectionDetail(
     collection.value = result
   }
   /**
-   * Bumped whenever a refresh brings in new member content (such as a
-   * profile's posts), so lists of those members know to reload.
+   * Bumped whenever the collection is reloaded after a refresh, so lists of
+   * its members (such as a profile's posts) know to reload too.
    */
   const membersVersion = shallowRef(0)
   const historical = computed(() => key(selected.value) !== '')
@@ -112,49 +85,18 @@ export function useCollectionDetail(
     }
   }
   let pointRequest = 0
-  let timer: ReturnType<typeof setTimeout> | undefined
-  // While this detail sits in the navigation cache it keeps its state but must
-  // stay quiet: no polling requests and no routing from a view nobody sees.
-  let visible = true
-  let pending: Job | undefined
-  // A finished collection capture whose members are still being captured.
-  let members: Job | undefined
-  // Only the newest poll chain may act. Deactivating, switching collection or
-  // starting a capture retires the previous chain, so a reply still in flight
-  // cannot schedule a second timer or write its result after the fact.
-  let pollRun = 0
-  const stale = (run: number) => controller.signal.aborted || run !== pollRun
-  function retirePoll() {
-    ++pollRun
-    clearTimeout(timer)
-  }
-  function failed(e: unknown) {
-    if (controller.signal.aborted) return
-    busy.value = false
-    report(e)
-  }
-  onDeactivated(() => {
-    visible = false
-    retirePoll()
-  })
+  // Progress is followed on the refresh's record, not here. Coming back from
+  // there shows whatever the refresh has saved by then.
+  let refreshed = false
   onActivated(() => {
-    visible = true
-    // Resuming can reject on its own request, which must surface as an error
-    // rather than an unhandled rejection from the lifecycle hook.
-    if (pending) startPoll(pending).catch(failed)
-    else if (members) {
-      retirePoll()
-      watchMembers(members, pollRun)
-    }
+    if (refreshed) void reload()
   })
   watch(
     id,
     async (id) => {
       controller.abort()
       controller = new AbortController()
-      retirePoll()
-      pending = undefined
-      members = undefined
+      refreshed = false
       const signal = controller.signal
       ++pointRequest
       collection.value = undefined
@@ -165,7 +107,7 @@ export function useCollectionDetail(
       loadingPoint.value = false
       historyLoading.value = false
       next.value = ''
-      status.value = ''
+      record.value = ''
       error.value = ''
       busy.value = false
       available.value = false
@@ -187,10 +129,7 @@ export function useCollectionDetail(
     },
     { immediate: true },
   )
-  onUnmounted(() => {
-    controller.abort()
-    retirePoll()
-  })
+  onUnmounted(() => controller.abort())
   /**
    * Whether the collection has trends: two readings are enough to tell, so
    * the detail asks for no more than that and leaves the series to its page.
@@ -316,121 +255,45 @@ export function useCollectionDetail(
       busy.value = false
     }
   }
-  /** Start a fresh poll chain, retiring whatever chain was running before. */
-  function startPoll(job: Job) {
-    retirePoll()
-    members = undefined
-    return poll(job, pollRun)
-  }
-  async function poll(job: Job, run: number) {
-    if (stale(run)) return
-    pending = job
-    status.value =
-      job.state === 'queued'
-        ? '正在采集…'
-        : job.state === 'downloading'
-          ? '正在保存媒体…'
-          : job.state === 'partial'
-            ? '已更新，部分媒体缺失。'
-            : job.state === 'failed'
-              ? '重新抓取失败。'
-              : '已更新。'
-    if (['queued', 'downloading'].includes(job.state)) {
-      if (!visible) return
-      timer = setTimeout(async () => {
-        try {
-          const next = await getJob(job.id, controller.signal)
-          await poll(next, run)
-        } catch (e) {
-          if (stale(run)) return
-          failed(e)
-        }
-      }, 2000)
-      return
-    }
-    // Finish the job only while shown, so the pending state survives a trip
-    // through the cache and resumes on the next activation.
-    if (!visible) return
-    busy.value = false
-    if (job.state !== 'failed') {
-      const result = await getCollection(job.collection_id, controller.signal)
-      if (stale(run) || !visible) return
+  /** Show the collection as it is now, keeping the page on screen meanwhile. */
+  async function reload() {
+    const signal = controller.signal
+    try {
+      const result = await getCollection(id(), signal)
+      if (signal.aborted) return
+      ++pointRequest
+      loadingPoint.value = false
       show(result)
-      if (job.collection_id !== id())
-        void router.replace({
-          name: 'collection',
-          params: { id: job.collection_id },
-        })
       latestRevision.value = result.revision_id
       void checkTrends()
       void checkChanges(result)
-      await historyPage()
-      // Landing here after the view was cached would push this job's result
-      // into a list the user has already navigated away from.
-      if (stale(run) || !visible) return
+      void historyPage()
       updated(result)
       membersVersion.value++
+    } catch (e) {
+      if (!signal.aborted) report(e)
     }
-    pending = undefined
-    if (job.state !== 'failed' && job.members && !job.members.done)
-      watchMembers(job, run)
-  }
-  /**
-   * The collection's own capture only lists its members; their captures finish
-   * later. Keep following them and reload member lists as content lands,
-   * throttled so a large batch does not reload on every poll.
-   */
-  function watchMembers(
-    job: Job,
-    run: number,
-    last?: { at: number; settled: number },
-  ) {
-    let reloaded = last ?? { at: Date.now(), settled: settled(job.members) }
-    if (stale(run) || !job.members) return
-    status.value = memberStatus(job.members)
-    if (job.members.done) {
-      members = undefined
-      return
-    }
-    members = job
-    if (!visible) return
-    timer = setTimeout(async () => {
-      try {
-        const next = await getJob(job.id, controller.signal)
-        if (stale(run)) return
-        const landed = settled(next.members) !== reloaded.settled
-        if (
-          next.members?.done ||
-          (landed && Date.now() - reloaded.at >= 6000)
-        ) {
-          membersVersion.value++
-          reloaded = { at: Date.now(), settled: settled(next.members) }
-        }
-        watchMembers(next, run, reloaded)
-      } catch (e) {
-        if (stale(run)) return
-        failed(e)
-      }
-    }, 2000)
   }
   async function refresh() {
     if (busy.value) return
-    ++pointRequest
     busy.value = true
     try {
-      await startPoll(
-        await call(
-          client.captures.$post(
-            { json: { refresh_id: id() } },
-            {
-              headers: { 'Idempotency-Key': crypto.randomUUID() },
-              init: { signal: controller.signal },
-            },
-          ),
+      const job = await call(
+        client.captures.$post(
+          { json: { refresh_id: id() } },
+          {
+            headers: { 'Idempotency-Key': crypto.randomUUID() },
+            init: { signal: controller.signal },
+          },
         ),
       )
+      if (controller.signal.aborted) return
+      record.value = job.record_id
+      refreshed = true
+      toast('已开始重新抓取')
     } catch (e) {
-      report(e)
+      if (!controller.signal.aborted) report(e)
+    } finally {
       busy.value = false
     }
   }
@@ -438,7 +301,7 @@ export function useCollectionDetail(
     collection,
     error,
     busy,
-    status,
+    record,
     points,
     next,
     historical,

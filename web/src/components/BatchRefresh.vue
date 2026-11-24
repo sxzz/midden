@@ -1,5 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef } from 'vue'
+import { useRouter } from 'vue-router'
 import { call, client, errorText } from '../api'
 import { toast } from '../composables/useToast'
 const props = defineProps<{
@@ -9,15 +10,21 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   select: [ids: string[]]
+  /** The batch is running: selection ends, this bar stays to link to it. */
+  started: []
   close: []
 }>()
+const router = useRouter()
 const busy = shallowRef(false)
+/** How many collections the started batch refreshes; 0 before it starts. */
+const started = shallowRef(0)
 const allSelected = computed(
   () =>
     props.listed.length > 0 &&
     props.listed.every((id) => props.selected.includes(id)),
 )
-// Progress is reported by the bot in the requester's private chat.
+// Each collection of the batch is a record of its own, so progress is
+// followed on the list of records rather than here.
 async function start() {
   busy.value = true
   try {
@@ -26,35 +33,49 @@ async function start() {
         json: { collection_ids: props.selected },
       }),
     )
-    emit('close')
+    started.value = props.selected.length
+    emit('started')
   } catch (e) {
     toast(errorText(e))
   } finally {
     busy.value = false
   }
 }
+function openRecords() {
+  emit('close')
+  void router.push({ name: 'captures' })
+}
 </script>
 
 <template>
   <div class="toolbar" role="region" aria-label="批量更新">
-    <button
-      type="button"
-      class="action"
-      :disabled="!listed.length"
-      @click="emit('select', allSelected ? [] : listed)"
-    >
-      {{ allSelected ? '取消全选' : '全选' }}
-    </button>
-    <p class="status">已选 {{ selected.length }} 项</p>
-    <button type="button" class="action" @click="emit('close')">取消</button>
-    <button
-      type="button"
-      class="action strong"
-      :disabled="!selected.length || busy"
-      @click="start"
-    >
-      更新
-    </button>
+    <template v-if="started">
+      <p class="status" role="status">已开始更新 {{ started }} 项</p>
+      <button type="button" class="action" @click="emit('close')">关闭</button>
+      <button type="button" class="action strong" @click="openRecords">
+        查看进度
+      </button>
+    </template>
+    <template v-else>
+      <button
+        type="button"
+        class="action"
+        :disabled="!listed.length"
+        @click="emit('select', allSelected ? [] : listed)"
+      >
+        {{ allSelected ? '取消全选' : '全选' }}
+      </button>
+      <p class="status">已选 {{ selected.length }} 项</p>
+      <button type="button" class="action" @click="emit('close')">取消</button>
+      <button
+        type="button"
+        class="action strong"
+        :disabled="!selected.length || busy"
+        @click="start"
+      >
+        更新
+      </button>
+    </template>
   </div>
 </template>
 
