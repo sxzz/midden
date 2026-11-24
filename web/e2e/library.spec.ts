@@ -42,6 +42,25 @@ test('browse, filter, history, refresh and remove a saved post', async ({
         }
         break
       }
+      case '/v1/updates': {
+        captureBodies.push(r.request().postDataJSON())
+        body = { id: recordId }
+        break
+      }
+      case '/v1/collections/delete': {
+        if (!r.request().postDataJSON().dry_run) deleted = true
+        body = {
+          profiles: 0,
+          posts: 1,
+          related: 0,
+          kept: { listed: 0, saved: 0, annotated: 0, quoted: 0 },
+        }
+        break
+      }
+      case `/v1/collections/${id}`: {
+        body = collection
+        break
+      }
       default:
         if (path.endsWith('/availability')) body = { available: true }
         else if (path.endsWith('/history'))
@@ -66,17 +85,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
             text: '历史正文',
             observed_at: '2026-09-27T10:00:00Z',
           }
-        else if (path === '/v1/updates') {
-          captureBodies.push(r.request().postDataJSON())
-          body = { id: recordId }
-        } else if (path === `/v1/collections/${id}`) {
-          if (r.request().method() === 'DELETE') {
-            deleted = true
-            await r.fulfill({ status: 204 })
-            return
-          }
-          body = collection
-        } else {
+        else {
           await r.fulfill({
             status: 404,
             json: { error: '内容不存在或已删除' },
@@ -128,7 +137,11 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await openRow()
   await page.getByRole('button', { name: '删除这条收藏' }).click()
-  await page.getByRole('button', { name: '删除', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: '删除这条收藏？' })
+  // A post has no posts of its own to offer.
+  await expect(sheet.getByText('将删除 1 条帖子')).toBeVisible()
+  await expect(sheet.getByRole('checkbox')).toHaveCount(0)
+  await sheet.getByRole('button', { name: '删除', exact: true }).click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
   await expect(page.locator('.row')).toHaveCount(0)
   await expect(page.getByText(/暂无/)).toHaveCount(0)
