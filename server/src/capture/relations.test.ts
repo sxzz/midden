@@ -98,7 +98,7 @@ function setup(world: Partial<World> = {}) {
           {
             name: `Name ${id}`,
             ...(state.listed?.[id] !== undefined && {
-              counts: { followers: state.listed[id], following: 0 },
+              metadata: { followers: state.listed[id], following: 0 },
             }),
           },
           { avatar: `https://m.test/${id}.jpg` },
@@ -121,7 +121,7 @@ function setup(world: Partial<World> = {}) {
                 id,
                 {
                   name: `Name ${id}`,
-                  counts,
+                  metadata: counts,
                   ...(state.public?.includes(id) && { protected: false }),
                 },
                 state.avatars
@@ -230,6 +230,7 @@ describe('抓关系网', () => {
     const { ctx, state } = setup({
       counts: { '100': { following: 13, followers: 2 } },
       lists: { '100': { following, followers: ['21', '22'] } },
+      listed: { '21': 40 },
     })
     await withAccount(ctx)
     const job = await update(ctx)
@@ -290,13 +291,26 @@ describe('抓关系网', () => {
         .where(eq(captures.collectionId, listed.id))
         .all(),
     ).toEqual([{ state: 'failed', error: LISTED_MEDIA }])
-    expect(
+    // The list's counts order the account by them until it is captured.
+    const row = (id: string) =>
       ctx.db
-        .select({ search: catalog.search })
+        .select({
+          search: catalog.search,
+          followers: catalog.followersCount,
+          following: catalog.followingCount,
+        })
         .from(catalog)
-        .where(eq(catalog.collectionId, listed.id))
-        .get()?.search,
-    ).toContain('Name 21')
+        .where(eq(catalog.collectionId, id))
+        .get()
+    expect(row(listed.id)).toEqual({
+      search: expect.stringContaining('Name 21'),
+      followers: 40,
+      following: 0,
+    })
+    expect(row(subjectCollection(ctx))).toMatchObject({
+      followers: 2,
+      following: 13,
+    })
 
     // The record runs until its lists are done, and tells how they went.
     const record = recordDetail(ctx.db, job.submissionId)

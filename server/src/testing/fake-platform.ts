@@ -78,7 +78,7 @@ export function fakePlatform(
         {
           name: 'fake.profile',
           jsonSchema: Buffer.alloc(0),
-          metricPaths: ['/counts/following', '/counts/followers'],
+          metricPaths: ['/metadata/following', '/metadata/followers'],
           volatilePaths: [],
         },
       ],
@@ -152,8 +152,8 @@ export function fakePlatform(
         publicProviderId: 'public',
         protectedPath: '/protected',
         counts: {
-          following: '/counts/following',
-          followers: '/counts/followers',
+          following: '/metadata/following',
+          followers: '/metadata/followers',
         },
         list: (req) => Promise.resolve(relations.current(req)),
       },

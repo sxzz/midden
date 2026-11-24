@@ -31,6 +31,8 @@ const text = v.optional(v.string())
  * data: tags name them, the save date and the `saved` and `storage` orders
  * tell when things were saved and how large they are, which public views
  * leave out, and follows (`rel_of`, `rel`) reach accounts beyond the share.
+ * Accounts' follower and following counts are public, and so are their
+ * orders.
  * Strict, so any of these (or anything else unknown) is refused, not
  * ignored.
  */
@@ -47,7 +49,9 @@ const ListQuery = v.strictObject({
     'time_zone',
     'sort',
   ]).entries,
-  sort: v.optional(v.picklist(['', 'published', 'updated'])),
+  sort: v.optional(
+    v.picklist(['', 'published', 'updated', 'followers', 'following']),
+  ),
   cursor: text,
 })
 

@@ -94,7 +94,7 @@ function setup(
             return {
               ...fakeProfile(id, {
                 username: `u${id}`,
-                counts: state.counts[id] ?? { following: 0, followers: 0 },
+                metadata: state.counts[id] ?? { following: 0, followers: 0 },
               }),
               providerId: req.providerId,
               relatedTargets: posts.slice(start, next).map(target),

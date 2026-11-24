@@ -125,6 +125,9 @@ export const library = sqliteTable(
   (t) => [index('library_created').on(t.createdAt, t.collectionId)],
 )
 
+/** Above any real count, where an unknown one sorts from the bottom. */
+const UNKNOWN_LAST = String(Number.MAX_SAFE_INTEGER)
+
 /**
  * What the library list filters and sorts on, one row per collection with a
  * revision, derived from its newest revision (see `library/catalog.ts`).
@@ -162,11 +165,41 @@ export const catalog = sqliteTable(
     quotes: integer({ mode: 'boolean' }).notNull(),
     /** Text, summary and author name, for substring search. */
     search: text().notNull(),
+    /**
+     * An account's own counts as its newest capture with counts read them;
+     * null for posts and when unknown.
+     */
+    followersCount: integer(),
+    followingCount: integer(),
+    // The counts as the list orders them, unknown last either way: below
+    // every count from the top, above every count from the bottom. Real
+    // columns rather than expression indexes, which SQLite cannot seek a
+    // (key, id) cursor in.
+    followersDesc: integer().generatedAlwaysAs(
+      sql`coalesce(followers_count, -1)`,
+      { mode: 'virtual' },
+    ),
+    followersAsc: integer().generatedAlwaysAs(
+      sql`coalesce(followers_count, ${sql.raw(UNKNOWN_LAST)})`,
+      { mode: 'virtual' },
+    ),
+    followingDesc: integer().generatedAlwaysAs(
+      sql`coalesce(following_count, -1)`,
+      { mode: 'virtual' },
+    ),
+    followingAsc: integer().generatedAlwaysAs(
+      sql`coalesce(following_count, ${sql.raw(UNKNOWN_LAST)})`,
+      { mode: 'virtual' },
+    ),
   },
   (t) => [
     index('catalog_observed').on(t.observedAt, t.collectionId),
     index('catalog_published').on(t.publishedAt, t.collectionId),
     index('catalog_storage').on(t.storageBytes, t.collectionId),
+    index('catalog_followers_desc').on(t.followersDesc, t.collectionId),
+    index('catalog_followers_asc').on(t.followersAsc, t.collectionId),
+    index('catalog_following_desc').on(t.followingDesc, t.collectionId),
+    index('catalog_following_asc').on(t.followingAsc, t.collectionId),
     index('catalog_root').on(t.rootEntityId),
     // Covers the author list, which reads every saved row.
     index('catalog_author').on(

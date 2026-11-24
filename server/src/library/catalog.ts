@@ -9,13 +9,16 @@ import type { Database, Executor } from '#db/client.ts'
  * on, so listing reads one narrow row instead of walking each collection's
  * newest revision, its entity graph and its media.
  *
- * A row depends only on its collection: the newest revision, the media of the
- * capture behind it and the collection's storage. Whatever changes those must
- * call `catalogCollections` in the same transaction: finishing a capture
- * (finalize) and pruning raw responses. Deleting a collection cascades.
+ * A row depends only on its collection: the newest revision, the media of
+ * the capture behind it, the collection's storage and the counts of its
+ * newest capture with any. Whatever changes those must call
+ * `catalogCollections` in the same transaction: finishing a capture
+ * (finalize), storing accounts read from a follow list, removing media and
+ * pruning raw responses. Deleting a collection cascades.
  *
  * To change what a row holds, empty the table in a migration; the server
- * refills it on start (`catalogMissing`).
+ * refills it on start (`catalogMissing`). Columns only a few rows fill (an
+ * account's counts) can be filled in place by the migration instead.
  */
 
 // Publication time when the payload has a valid one.
@@ -28,6 +31,17 @@ const content = (filter = '') => `EXISTS (
   SELECT 1 FROM assets m
   WHERE m.capture_id = h.capture_id AND m.purpose = '' ${filter})`
 
+/**
+ * An account's own count as `h.metrics` (its newest capture's) holds it:
+ * keyed by the root's type and external id, then by the pointer both
+ * platforms keep account counts at. Anything but a whole number >= 0 is
+ * unknown. A post's metrics have no such pointer for the post itself.
+ */
+const accountCount = (name: 'followers' | 'following') => `(
+  SELECT CASE WHEN typeof(n) = 'integer' AND n >= 0 THEN n END FROM (
+    SELECT h.metrics -> (h.root_kind || '/' || h.root_external_id)
+      ->> '/metadata/${name}' AS n))`
+
 /** Bring the catalog rows of these collections up to date. */
 export function catalogCollections(db: Executor, ids: readonly string[]) {
   if (!ids.length) return
@@ -38,7 +52,13 @@ export function catalogCollections(db: Executor, ids: readonly string[]) {
   db.run(sql`
     WITH heads AS (
       SELECT c.id AS collection_id, c.observed_at, r.id AS revision_id,
-        r.created_at AS revision_at, r.capture_id, r.payload
+        r.created_at AS revision_at, r.capture_id, r.payload,
+        -- An account known only from a follow list has the capture that
+        -- list made, with the counts the list gave.
+        (SELECT cp.metrics FROM captures cp
+          WHERE cp.collection_id = c.id AND cp.metrics IS NOT NULL
+            AND cp.state IN ('complete', 'partial')
+          ORDER BY cp.finished_at DESC, cp.id DESC LIMIT 1) AS metrics
       FROM json_each(${targets}) t
       JOIN collections c ON c.id = t.value
       JOIN revisions r ON r.id = (
@@ -48,6 +68,7 @@ export function catalogCollections(db: Executor, ids: readonly string[]) {
     roots AS (
       SELECT heads.*, root.entity_key AS root_key,
         root_version.entity_id AS root_entity_id, root_entity.kind AS root_kind,
+        root_entity.external_id AS root_external_id,
         root_version.data AS root_data
       FROM heads
       LEFT JOIN revision_entities root
@@ -71,7 +92,8 @@ export function catalogCollections(db: Executor, ids: readonly string[]) {
     INSERT INTO catalog (collection_id, revision_id, revision_at, observed_at,
       published_at, storage_bytes, root_entity_id, root_kind, author_entity_id,
       author_name, subject_entity_id, subject_protected, has_media, has_image,
-      has_video, has_sensitive, quotes, search)
+      has_video, has_sensitive, quotes, search, followers_count,
+      following_count)
     SELECT h.collection_id, h.revision_id, h.revision_at, h.observed_at,
       coalesce(${sql.raw(PUBLISHED_AT)}, h.observed_at),
       ${sql.raw(storageOf('h.collection_id'))},
@@ -88,7 +110,9 @@ export function catalogCollections(db: Executor, ids: readonly string[]) {
         WHERE edge.revision_id = h.revision_id
           AND edge.source_key = h.root_key AND edge.kind = 'quoted'),
       concat_ws(' ', h.payload ->> 'text', h.payload ->> 'summary',
-        h.payload ->> 'author_name')
+        h.payload ->> 'author_name'),
+      ${sql.raw(accountCount('followers'))},
+      ${sql.raw(accountCount('following'))}
     FROM h WHERE true
     ON CONFLICT (collection_id) DO UPDATE SET
       revision_id = excluded.revision_id,
@@ -107,7 +131,9 @@ export function catalogCollections(db: Executor, ids: readonly string[]) {
       has_video = excluded.has_video,
       has_sensitive = excluded.has_sensitive,
       quotes = excluded.quotes,
-      search = excluded.search`)
+      search = excluded.search,
+      followers_count = excluded.followers_count,
+      following_count = excluded.following_count`)
 }
 
 /**

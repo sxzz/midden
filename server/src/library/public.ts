@@ -83,7 +83,7 @@ export interface PublicListQuery extends Omit<
   | 'time_zone'
   | 'sort'
 > {
-  sort?: '' | 'published' | 'updated'
+  sort?: '' | 'published' | 'updated' | 'followers' | 'following'
   /** A profile's attached posts instead of the folder's own list. */
   related_to?: string
   cursor?: string

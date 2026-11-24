@@ -31,7 +31,9 @@ export interface CollectionFilter {
   timeZone?: string
   /**
    * `published`, `saved` (added to the library), `updated` (newest capture,
-   * the default) or `storage`.
+   * the default), `storage`, or an account's `followers` or `following`
+   * count, which only orders a list of accounts alone and is `updated`
+   * otherwise.
    */
   sort?: string
   order?: string
@@ -212,7 +214,14 @@ function check(input: CollectionFilter): Checked {
   if (
     !oneOf(filter.postType, ['post', 'quote', 'repost']) ||
     !oneOf(filter.order, ['desc', 'asc']) ||
-    !oneOf(filter.sort, ['saved', 'updated', 'published', 'storage']) ||
+    !oneOf(filter.sort, [
+      'saved',
+      'updated',
+      'published',
+      'storage',
+      'followers',
+      'following',
+    ]) ||
     !oneOf(filter.visibility, ['public', 'private']) ||
     !oneOf(filter.sensitive, ['contains', 'not_contains']) ||
     runes(filter.q) > MAX_QUERY ||
@@ -280,6 +289,23 @@ function decodeCursor(cursor: string, fingerprint: string): Cursor {
       return { at: value.t, bytes: value.b, id: value.id }
   } catch {}
   throw new AppError('invalid_cursor')
+}
+
+/**
+ * The catalog column an account count order reads, the one kept for its
+ * direction, when the list can only hold accounts: the filter or its
+ * narrowing names account types alone.
+ * Anywhere else (a 帖子 tab of a folder saved with this order) it is ignored,
+ * as a folder keeps one order for both of its tabs.
+ */
+function countColumn(checked: Checked, asc: boolean): string | undefined {
+  const { sort } = checked.filter
+  if (sort !== 'followers' && sort !== 'following') return undefined
+  const accounts = [checked.filter, checked.narrow].some((f) => {
+    const types = values(f?.entityType)
+    return types.length > 0 && types.every((t) => t.endsWith('.profile'))
+  })
+  return accounts ? `k.${sort}_${asc ? 'asc' : 'desc'}` : undefined
 }
 
 /** The root is an entity of one of these types. */
@@ -650,12 +676,14 @@ export function listCollections(
   const by = filter.sort === 'storage' ? 'bytes' : 'at'
   const asc = filter.order === 'asc'
   const direction = sql.raw(asc ? 'ASC' : 'DESC')
+  // A count rides in the time's place.
   const time =
-    filter.sort === 'published'
+    countColumn(checked, asc) ??
+    (filter.sort === 'published'
       ? 'k.published_at'
       : filter.sort === 'saved'
         ? 'l.created_at'
-        : 'k.observed_at'
+        : 'k.observed_at')
   const rows = ctx.db.all<{
     id: string
     at: number
