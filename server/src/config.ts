@@ -25,11 +25,15 @@ const Env = v.object({
   TELEGRAM_BOT_TOKEN: v.optional(v.pipe(v.string(), v.regex(/^\d+:[\w-]+$/))),
   // The only Telegram user allowed in.
   OWNER_TELEGRAM_ID: v.optional(v.pipe(v.string(), v.regex(/^\d+$/))),
-  // Public HTTPS address of the web app (ending in /app/); enables cookie
-  // sessions and is the only origin allowed to write with them.
+  // Public HTTPS address of the web app (ending in /app/), opened as the
+  // Mini App; enables cookie sessions.
   WEB_APP_URL: v.optional(
     v.pipe(v.string(), v.url(), v.regex(/^https:\/\/[^/?#]+\/app\/$/)),
   ),
+  // Every origin the web app is reached on, comma-separated. Cookie
+  // sessions write and passkeys work only on these; WEB_APP_URL's own
+  // origin is always one of them.
+  WEB_ORIGINS: v.optional(v.string()),
   // The built web app served under /app/.
   WEB_DIR: v.optional(v.pipe(v.string(), v.nonEmpty())),
   FFMPEG: v.optional(v.pipe(v.string(), v.nonEmpty()), 'ffmpeg'),
@@ -53,6 +57,29 @@ export interface Config {
   webDir: string
   telegram?: { token: string; owner: string }
   webAppUrl?: string
+  /** Allowed web origins, WEB_APP_URL's first; empty without either. */
+  webOrigins: string[]
+}
+
+const TRAILING_SLASH = /\/$/
+const ORIGIN = /^(?:https:\/\/[^/?#:]+(?::\d+)?|http:\/\/localhost(?::\d+)?)$/
+
+/** WEB_APP_URL's origin and WEB_ORIGINS, each an exact origin. */
+function webOrigins(
+  webAppUrl: string | undefined,
+  list: string | undefined,
+): string[] {
+  const origins = webAppUrl ? [new URL(webAppUrl).origin] : []
+  for (const raw of (list ?? '').split(',')) {
+    const value = raw.trim().replace(TRAILING_SLASH, '')
+    if (!value) continue
+    if (!ORIGIN.test(value) || new URL(value).origin !== value)
+      throw new Error(
+        `Invalid configuration:\nWEB_ORIGINS: ${value} is not an https origin`,
+      )
+    if (!origins.includes(value)) origins.push(value)
+  }
+  return origins
 }
 
 export function loadConfig(
@@ -95,5 +122,6 @@ export function loadConfig(
         }
       : {}),
     ...(parsed.WEB_APP_URL ? { webAppUrl: parsed.WEB_APP_URL } : {}),
+    webOrigins: webOrigins(parsed.WEB_APP_URL, parsed.WEB_ORIGINS),
   }
 }

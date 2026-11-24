@@ -29,6 +29,7 @@ export const COMMANDS: CommandInfo[] = [
   { name: 'account_delete', description: '删除采集账号', privateOnly: true },
   { name: 'account', description: '选择采集账号', privateOnly: false },
   { name: 'usage', description: '查看存储用量', privateOnly: false },
+  { name: 'passkey', description: '添加网页登录的通行密钥', privateOnly: true },
   { name: 'help', description: '查看使用帮助', privateOnly: false },
 ]
 
@@ -47,7 +48,7 @@ export function helpText(group: boolean): string {
   return text
 }
 
-const PRIVATE_DATA = /^\/(?:start|list|account_delete)(?:\s|$)/
+const PRIVATE_DATA = /^\/(?:start|list|account_delete|passkey)(?:\s|$)/
 
 /** Telegram allows no web_app buttons in groups; private commands go too. */
 export function groupKeyboard(

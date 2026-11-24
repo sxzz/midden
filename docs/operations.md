@@ -4,7 +4,16 @@
 
 生产环境使用 `compose.yaml` 运行一个容器，镜像内含 Node.js 26 与 ffmpeg（用于缩略图和视频尺寸探测）。容器以非 root 用户运行，数据目录挂载到 `/data`。
 
-对外访问需要 HTTPS 反向代理（例如 Cloudflare Tunnel），把整个域名转发到服务端口，至少包括 `/app/`、`/v1/`、`/media/`。Mini App 与 Telegram 登录都要求 HTTPS。
+对外访问需要 HTTPS 反向代理（例如 Cloudflare Tunnel），把整个域名转发到服务端口，至少包括 `/app/`、`/v1/`、`/media/`。Mini App 与通行密钥都要求 HTTPS。
+
+## 网页登录
+
+浏览器用通行密钥登录，Telegram 中的 Mini App 照旧自动登录。
+
+- 网页只在一个域名上时，设置 `WEB_APP_URL` 即可。还有其他域名时，在 `.env` 中加上 `WEB_ORIGINS`（逗号分隔的来源，如 `https://a.example,https://b.example`；`WEB_APP_URL` 的域名总是包含在内），然后 `docker compose up -d`。不在列表中的域名不能登录。
+- 第一次登录：在 Telegram 私聊 Bot 发送 `/passkey`，点开要登录的域名对应的按钮，在打开的页面上创建通行密钥，创建后即已登录。链接 10 分钟内有效，只能用一次。
+- 通行密钥只能在创建它的域名上使用。每个域名各需要一个：在该域名上用 `/passkey` 的链接创建，或在已登录的页面「采集账号 → 通行密钥」中添加。
+- 通行密钥全部删除后，再发送 `/passkey` 即可添加新的。
 
 网页也可以继续单独部署在 Cloudflare 静态托管（`pnpm --filter @midden/web run deploy`），此时代理需把同域的 `/v1/` 与 `/media/` 转发到本服务。
 
@@ -95,7 +104,7 @@ launchctl kickstart gui/$(id -u)/org.midden.backup      # 立即运行一次
 - 原始响应保留 7 天；没有产生新版本、也不是最新一次的抓取，其原始响应随后删除；
 - 不再被引用的媒体文件 24 小时后删除；
 - 为缺少缩略图的媒体补做缩略图；
-- 清理过期的网页会话。
+- 清理过期的网页会话、通行密钥挑战与 `/passkey` 链接。
 
 ## 从 Go 版迁移
 

@@ -18,6 +18,8 @@ export interface BotOptions {
   token: string
   owner: string
   webAppUrl?: string
+  /** Origins the web app is served on; /passkey links to each. */
+  webOrigins: string[]
   version: string
   ffmpeg: string
 }
@@ -27,7 +29,7 @@ const FIELDS = /\s+/
 const PLATFORM_PREFIX = /^@\S+\s*/
 
 /** Whether Telegram says this update comes from the owner, in a usable chat. */
-function fromOwner(
+export function fromOwner(
   message: Message | undefined,
   from: { id: number; is_bot: boolean } | undefined,
   owner: string,
@@ -53,6 +55,8 @@ function validLink(value: string): boolean {
 
 export interface RunningBot {
   stop: () => Promise<void>
+  /** A short message to the owner; failures are only logged. */
+  notify: (text: string) => void
 }
 
 export async function startBot(options: BotOptions): Promise<RunningBot> {
@@ -105,6 +109,7 @@ export async function startBot(options: BotOptions): Promise<RunningBot> {
   const commandContext = {
     ctx,
     webAppUrl: options.webAppUrl,
+    webOrigins: options.webOrigins,
     version: options.version,
   }
 
@@ -245,6 +250,13 @@ export async function startBot(options: BotOptions): Promise<RunningBot> {
     stop: async () => {
       worker.stop()
       await bot.stop()
+    },
+    notify: (text) => {
+      bot.api
+        .sendMessage(Number(owner), text)
+        .catch((error) =>
+          ctx.logger.error({ err: error }, 'telegram notice failed'),
+        )
     },
   }
 }

@@ -6,16 +6,18 @@ import {
   timingSafeEqual,
 } from 'node:crypto'
 import { eq, lt } from 'drizzle-orm'
+import { setCookie } from 'hono/cookie'
 import { newId } from '#db/id.ts'
 import { apiTokens, webSessions } from '#db/schema.ts'
 import type { Database } from '#db/client.ts'
+import type { Context } from 'hono'
 
 const INIT_DATA_MAX_AGE = 300
-const WIDGET_MAX_AGE = 24 * 60 * 60
 const CLOCK_SKEW = 30
 export const SESSION_TTL = 12 * 60 * 60
+/** Host-only, so each of the app's domains keeps its own session. */
+export const SESSION_COOKIE = '__Host-midden'
 const HEX_HASH = /^[\da-f]{64}$/i
-const DIGITS = /^\d+$/
 
 const digest = (value: string) =>
   createHash('sha256').update(value).digest('hex')
@@ -63,33 +65,6 @@ export function initDataUser(
   }
 }
 
-/** The user id of a Telegram Login Widget authorization, if valid. */
-export function widgetUser(
-  fields: Record<string, unknown>,
-  token: string,
-  now = Date.now(),
-): string | undefined {
-  const values: Record<string, string> = {}
-  for (const [key, value] of Object.entries(fields)) {
-    if (typeof value === 'string') values[key] = value
-    else if (typeof value === 'number' && Number.isFinite(value))
-      values[key] = String(value)
-    else return undefined
-  }
-  const check = Object.keys(values)
-    .filter((key) => key !== 'hash')
-    .toSorted()
-    .map((key) => `${key}=${values[key]}`)
-    .join('\n')
-  const secret = createHash('sha256').update(token).digest()
-  const expected = createHmac('sha256', secret).update(check).digest()
-  if (!signatureMatches(expected, values.hash)) return undefined
-  if (!fresh(values.auth_date, WIDGET_MAX_AGE, now)) return undefined
-  return DIGITS.test(values.id ?? '') && values.id !== '0'
-    ? values.id
-    : undefined
-}
-
 export function createSession(db: Database, now = Date.now()): string {
   const value = randomBytes(32).toString('hex')
   db.insert(webSessions)
@@ -99,6 +74,20 @@ export function createSession(db: Database, now = Date.now()): string {
     })
     .run()
   return value
+}
+
+/**
+ * Sign the browser in. SameSite=None lets the Mini App keep its session
+ * inside Telegram's web client, which frames it from another site.
+ */
+export function startSession(c: Context, db: Database, now = Date.now()) {
+  setCookie(c, SESSION_COOKIE, createSession(db, now), {
+    path: '/',
+    secure: true,
+    httpOnly: true,
+    sameSite: 'None',
+    maxAge: SESSION_TTL,
+  })
 }
 
 export function sessionValid(

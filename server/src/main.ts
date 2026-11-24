@@ -17,6 +17,7 @@ import { deriveKey } from '#crypto.ts'
 import { openDatabase, optimize } from '#db/client.ts'
 import { createApi } from '#http/app.ts'
 import { pruneSessions } from '#http/auth.ts'
+import { prunePasskeys } from '#http/passkeys.ts'
 import { JobQueue } from '#jobs/queue.ts'
 import { catalogMissing } from '#library/catalog.ts'
 import { createLogger } from '#log.ts'
@@ -63,22 +64,12 @@ ctx = {
   thumbnailer,
 }
 
-let botUsername: string | undefined
 let bot: RunningBot | undefined
 const api = createApi({
   ctx,
   telegram: config.telegram,
-  webAppUrl: config.webAppUrl,
-  botUsername: async () => {
-    if (botUsername) return botUsername
-    const response = await fetch(
-      `https://api.telegram.org/bot${config.telegram!.token}/getMe`,
-      { signal: AbortSignal.timeout(10_000) },
-    )
-    const result = (await response.json()) as { result?: { username?: string } }
-    if (!result.result?.username) throw new Error('bot username unavailable')
-    return (botUsername = result.result.username)
-  },
+  webOrigins: config.webOrigins,
+  notify: (text) => bot?.notify(text),
 })
 
 const app = new Hono()
@@ -108,6 +99,7 @@ if (config.telegram)
     token: config.telegram.token,
     owner: config.telegram.owner,
     webAppUrl: config.webAppUrl,
+    webOrigins: config.webOrigins,
     version: process.env.BUILD_REVISION || 'dev',
     ffmpeg: config.ffmpeg,
   })
@@ -116,6 +108,7 @@ const maintenance = setInterval(() => {
   if (maintaining) return
   maintaining = true
   pruneSessions(db)
+  prunePasskeys(db)
   runMaintenance(ctx)
     .catch(() => {})
     .finally(() => (maintaining = false))

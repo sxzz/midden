@@ -136,7 +136,12 @@ API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…
 
 ## 认证
 
-- 网页：Telegram 登录组件或 Mini App 的 initData，验签后只接受 `OWNER_TELEGRAM_ID`；会话 Cookie `__Host-midden` 有效 12 小时，写请求校验 Origin。
+- 网页的来源：`WEB_APP_URL` 的来源加上 `WEB_ORIGINS` 中的来源。会话 Cookie `__Host-midden` 只属于签发它的域名（不设 Domain），有效 12 小时；`SameSite=None`，因为 Telegram 网页版在框架中打开 Mini App。带 Cookie 的写请求要求 Origin 在这些来源中。
+- Mini App：用 Telegram 签名的 initData 登录（`POST /v1/auth/telegram`），验签后只接受 `OWNER_TELEGRAM_ID`。
+- 浏览器：通行密钥（WebAuthn，`@simplewebauthn`）。RP ID 是请求的 Origin 的主机名，Origin 不在来源列表中时拒绝；每个通行密钥只能在创建它的域名上使用。登录用可发现凭据，不需要用户名：`POST /v1/auth/passkey/options` 取得挑战，`POST /v1/auth/passkey` 验证，只认当前 RP ID 下的通行密钥，要求用户验证并检查计数器，成功后签发与上面相同的会话 Cookie。
+- 第一个通行密钥：所有者私聊 Bot 发送 `/passkey`，Bot 为每个来源各生成一个 256 位随机令牌，回复按域名标注的按钮，链接为 `<来源>/app/#/passkey/<令牌>`（令牌在地址的片段中，不会发给服务器）。数据库只存令牌的哈希（`passkey_tokens`），10 分钟过期，只能在对应来源上使用，注册成功即删除；再次发送 `/passkey` 时之前的链接作废。注册页 `POST /v1/auth/passkey/register/options` 与 `POST /v1/auth/passkey/register` 都带令牌，注册成功后直接登录。
+- 登录后在「采集账号」页的「通行密钥」中查看（名称、域名、创建与上次使用时间）、重命名、删除，或为当前域名添加新的（`/v1/passkeys`）。删除最后一个也可以，之后用 `/passkey` 再加。添加和删除时 Bot 给所有者发一条消息（名称与域名）。
+- 挑战存在 `passkey_challenges`（只存哈希），5 分钟过期，用一次即删除，并记录用途、来源和来自哪个令牌，注册与登录、不同来源、有无令牌之间不能互用。登录与注册接口每个客户端每分钟 20 次、全部合计 60 次；未答复的挑战超过 500 个时拒绝新的。令牌与挑战不写入日志。
 - REST：Bearer token，数据库只存哈希。
 
 ## Telegram Bot

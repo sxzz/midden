@@ -33,7 +33,7 @@ function setup() {
   const app = createApi({
     ctx,
     telegram: { token: BOT, owner: OWNER },
-    webAppUrl: WEB,
+    webOrigins: [new URL(WEB).origin],
   })
   const token = createToken(ctx.db, 'test')
   const call = (path: string, init: RequestInit = {}) =>

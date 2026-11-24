@@ -769,6 +769,59 @@ export const apiTokens = sqliteTable('api_tokens', {
 })
 
 /**
+ * The owner's passkeys. Each is bound to the RP ID (the host name) of the
+ * domain it was created on and signs in only there.
+ */
+export const passkeys = sqliteTable(
+  'passkeys',
+  {
+    id: text().primaryKey(),
+    // The credential id, base64url.
+    credentialId: text().notNull().unique(),
+    rpId: text().notNull(),
+    name: text().notNull(),
+    publicKey: blob({ mode: 'buffer' }).$type<Buffer>().notNull(),
+    counter: integer().notNull().default(0),
+    // JSON array of the authenticator's transports, as it reported them.
+    transports: text().notNull().default('[]'),
+    createdAt: createdAt(),
+    lastUsedAt: timestamp(),
+  },
+  (t) => [index('passkeys_rp').on(t.rpId)],
+)
+
+/**
+ * WebAuthn challenges handed out and not yet answered, by the SHA-256 of the
+ * challenge. Each is good once, for one origin, until it expires.
+ */
+export const passkeyChallenges = sqliteTable(
+  'passkey_challenges',
+  {
+    digest: text().primaryKey(),
+    kind: text({ enum: ['login', 'register'] }).notNull(),
+    origin: text().notNull(),
+    // The /passkey link a registration came from; none when signed in.
+    tokenDigest: text(),
+    expiresAt: timestamp().notNull(),
+  },
+  (t) => [index('passkey_challenges_expires').on(t.expiresAt)],
+)
+
+/**
+ * Links from the bot's /passkey that register a passkey without signing in,
+ * by the SHA-256 of their token. One per origin; gone once used.
+ */
+export const passkeyTokens = sqliteTable(
+  'passkey_tokens',
+  {
+    digest: text().primaryKey(),
+    origin: text().notNull(),
+    expiresAt: timestamp().notNull(),
+  },
+  (t) => [index('passkey_tokens_expires').on(t.expiresAt)],
+)
+
+/**
  * Messages the bot owes the owner: a capture's status and result, or a shown
  * collection. Progress is checkpointed per sent part, so a
  * restart resumes without resending.

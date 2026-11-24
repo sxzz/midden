@@ -18,6 +18,7 @@ import { stopCollection } from '#capture/related.ts'
 import { startUpdate } from '#capture/updates.ts'
 import { captures, connections, library } from '#db/schema.ts'
 import { AppError, isAppError } from '#errors.ts'
+import { createPasskeyTokens } from '#http/passkeys.ts'
 import { deleteCollection } from '#library/delete.ts'
 import { getCollection, storageUsed } from '#library/read.ts'
 import { enqueueDelivery } from './delivery.ts'
@@ -56,6 +57,8 @@ export interface Reply {
 export interface CommandContext {
   ctx: AccountsContext
   webAppUrl?: string
+  /** Origins the web app is served on, for /passkey links. */
+  webOrigins?: string[]
   version: string
 }
 
@@ -134,6 +137,24 @@ function deliverSubmission(
   })
 }
 
+/**
+ * Links that register a passkey without signing in, one per domain: a
+ * passkey works only on the domain it was made on. The token sits in the
+ * address's fragment, which browsers never send to a server.
+ */
+function passkey(c: CommandContext): Reply {
+  const origins = c.webOrigins ?? []
+  if (origins.length === 0) return { text: '服务器未配置网页地址。' }
+  const links = createPasskeyTokens(c.ctx.db, origins)
+  return {
+    text: '添加通行密钥，10 分钟内有效。',
+    keyboard: links.map(({ origin, token }) => [
+      { text: new URL(origin).host, url: `${origin}/app/#/passkey/${token}` },
+    ]),
+    newMessage: true,
+  }
+}
+
 function run(c: CommandContext, request: Request): Reply {
   const { ctx } = c
   const { arg } = request
@@ -160,6 +181,8 @@ function run(c: CommandContext, request: Request): Reply {
     }
     case 'save':
       return save(c, request)
+    case 'passkey':
+      return passkey(c)
     case 'list':
       return list(c, arg)
     case 'show':
