@@ -122,7 +122,7 @@ describe('library listing', () => {
     expect(ascending.at(-1)?.id).toBe(made[0])
     const page = listCollections(ctx, { sort: 'published' })
     expect(() =>
-      listCollections(ctx, { sort: 'captured' }, page.next_cursor),
+      listCollections(ctx, { sort: 'updated' }, page.next_cursor),
     ).toThrow('翻页位置无效，请刷新后重试')
     expect(() =>
       listCollections(
@@ -162,13 +162,12 @@ describe('library listing', () => {
       made.toReversed(),
     )
     expect(ids(all(ctx, { sort: 'updated' }))).toEqual(made.toReversed())
-    // Old links name the newest capture `captured`; its pages carry on.
     const updated = listCollections(ctx, { sort: 'updated' })
     expect(
-      ids(
-        listCollections(ctx, { sort: 'captured' }, updated.next_cursor).items,
-      ),
+      ids(listCollections(ctx, { sort: 'updated' }, updated.next_cursor).items),
     ).toEqual(made.slice(0, 2).toReversed())
+    // `captured` was the old name of `updated` and is no longer an order.
+    expect(() => listCollections(ctx, { sort: 'captured' })).toThrow()
     expect(() =>
       listCollections(ctx, { sort: 'saved' }, updated.next_cursor),
     ).toThrow('翻页位置无效，请刷新后重试')

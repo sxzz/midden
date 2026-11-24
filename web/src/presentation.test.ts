@@ -228,9 +228,7 @@ it('orders posts by posting time and accounts by when they were added', () => {
   expect(listSort('')).toBe('published')
   expect(listSort('entity_type=x.profile,instagram.profile')).toBe('saved')
   expect(listSort('sort=storage')).toBe('storage')
-  // Old links named the newest-capture order `captured`.
-  expect(listSort('sort=captured')).toBe('updated')
-  expect(listSort('entity_type=x.profile&sort=captured')).toBe('updated')
+  expect(listSort('entity_type=x.profile&sort=updated')).toBe('updated')
 })
 it('writes list timestamps the way the chat list does', () => {
   const now = new Date(2026, 8, 29, 12, 0)

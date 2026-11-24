@@ -30,7 +30,7 @@ export interface CollectionFilter {
   timeZone?: string
   /**
    * `published`, `saved` (added to the library), `updated` (newest capture,
-   * the default) or `storage`. `captured` is the old name of `updated`.
+   * the default) or `storage`.
    */
   sort?: string
   order?: string
@@ -155,9 +155,7 @@ function check(input: CollectionFilter): Checked {
     savedBefore: input.savedBefore ?? '',
     savedWithin: input.savedWithin ?? '',
     timeZone: input.timeZone ?? '',
-    // Old links name the newest capture `captured`; one name keeps one
-    // cursor fingerprint for both.
-    sort: input.sort === 'captured' ? 'updated' : (input.sort ?? ''),
+    sort: input.sort ?? '',
     order: input.order ?? '',
     authors: input.authors ?? [],
     sensitive: input.sensitive ?? '',

@@ -301,8 +301,6 @@ export function listsProfiles(query: string | URLSearchParams) {
  */
 export function listSort(query: string | URLSearchParams) {
   const sort = new URLSearchParams(query).get('sort')
-  // `captured` is the old name of the newest-capture order, kept for links.
-  if (sort === 'captured') return 'updated'
   return sort || (listsProfiles(query) ? 'saved' : 'published')
 }
 /** The time a list row shows and is grouped by, following its order. */
