@@ -40,6 +40,7 @@ interface Account {
 interface Post {
   author: string
   quotes?: string
+  mentions?: string[]
 }
 
 function setup(accounts: Record<string, Account>, posts: Record<string, Post>) {
@@ -60,7 +61,7 @@ function setup(accounts: Record<string, Account>, posts: Record<string, Post>) {
         relatedTargets: [...account.wrote, ...account.reposted].map(member),
       }
     }
-    const { author, quotes } = posts[req.externalId]!
+    const { author, quotes, mentions = [] } = posts[req.externalId]!
     return {
       text: `post ${req.externalId}`,
       graph: graph(
@@ -68,8 +69,12 @@ function setup(accounts: Record<string, Account>, posts: Record<string, Post>) {
           entity('root', 'fake.post', req.externalId),
           entity('author', 'fake.profile', author),
           ...(quotes ? [entity('quote', 'fake.post', quotes)] : []),
+          ...mentions.map((id) => entity(`m${id}`, 'fake.profile', id)),
         ],
         ['root', 'authored_by', 'author'],
+        ...mentions.map(
+          (id) => ['root', 'mentions', `m${id}`] as [string, string, string],
+        ),
         ...(quotes
           ? [['root', 'quoted', 'quote'] as [string, string, string]]
           : []),
@@ -99,14 +104,28 @@ describe('deleting collections', () => {
       {
         // He; a second account deleted with him; one that stays.
         1: {
-          wrote: ['mine', 'quoting', 'quoting2', 'direct', 'refreshed'],
+          wrote: [
+            'mine',
+            'quoting',
+            'quoting2',
+            'direct',
+            'refreshed',
+            'shout',
+          ],
           reposted: ['alone', 'both', 'theirs', 'pair', 'tagged', 'noted'],
         },
         2: { wrote: [], reposted: ['pair', 'batched'] },
         3: { wrote: ['theirs', 'otherquote'], reposted: ['both'] },
+        // Gone before, leaving a post of his that only mentions 1.
+        5: { wrote: ['aside'], reposted: [] },
       },
       {
-        mine: { author: '1' },
+        // Mentioning others does not hold his own posts back...
+        mine: { author: '1', mentions: ['9', '2'] },
+        // ...unless a saved account that stays is mentioned.
+        shout: { author: '1', mentions: ['3'] },
+        // Only mentioning him is no reason to go with him.
+        aside: { author: '5', mentions: ['1'] },
         quoting: { author: '1', quotes: 'quoted' },
         quoting2: { author: '1', quotes: 'quoted2' },
         quoted: { author: '9' },
@@ -123,8 +142,9 @@ describe('deleting collections', () => {
         noted: { author: '9' },
       },
     )
-    for (const id of ['1', '2', '3']) await capture(c, profile(id))
+    for (const id of ['1', '2', '3', '5']) await capture(c, profile(id))
     let ids = saved(c)
+    deleteCollection(c.db, ids[5]!)
     // Saved on its own, after the timeline brought it in.
     await capture(c, post('direct'))
     // Refreshes are no saves of their own.
@@ -160,8 +180,8 @@ describe('deleting collections', () => {
       // mine, quoting, quoting2, quoted, refreshed, batched, alone, pair
       related: 8,
       kept: {
-        // both (reposted by 3 too), theirs (3 wrote it)
-        listed: 2,
+        // both (reposted by 3 too), theirs (3 wrote it), shout (mentions 3)
+        listed: 3,
         // direct
         saved: 1,
         annotated: 2,
@@ -185,6 +205,8 @@ describe('deleting collections', () => {
         'noted',
         'quoted2',
         'otherquote',
+        'shout',
+        'aside',
       ].toSorted(),
     )
     const removed = c.db

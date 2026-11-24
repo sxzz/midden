@@ -162,8 +162,9 @@ const count = (tx: Transaction, query: SQL) =>
 
 /**
  * The posts listed under the selected accounts (as their pages list them,
- * see `relatedEdgesSQL`), and the posts their own posts quote or repost,
- * into `RELATED`, each with the reason it stays or none.
+ * see `relatedEdgesSQL`) other than those that only mention them, and the
+ * posts their own posts quote or repost, into `RELATED`, each with the
+ * reason it stays or none.
  */
 function collectRelated(tx: Transaction): void {
   tx.run(
@@ -180,6 +181,8 @@ function collectRelated(tx: Transaction): void {
     JOIN catalog k ON k.collection_id = e.collection_id
     JOIN library l ON l.collection_id = e.collection_id
     WHERE k.root_kind = replace(pk.root_kind, '.profile', '.post')
+      -- Mentioning him lists a post on his page but does not make it his.
+      AND e.kind <> 'mentions'
       AND e.collection_id NOT IN (SELECT id FROM ${sql.raw(SELECTED)})
     GROUP BY e.collection_id`)
   // What his own posts quote or repost came in with them.
@@ -225,7 +228,7 @@ function collectRelated(tx: Transaction): void {
  * Ids not in the library are skipped; when none is, `not_found`.
  *
  * With `withPosts`, the posts listed under each selected account go too,
- * unless another saved account that stays lists them as well, the owner
+ * except those that only mention it, and unless another saved account that stays lists them as well, the owner
  * saved them on their own rather than through an account's timeline or a
  * post's references, they carry tags or a note, or a saved post that stays
  * quotes or reposts them. The posts the accounts' own posts quote or repost
