@@ -1,7 +1,10 @@
 <script setup vapor lang="ts">
 import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { call, client, errorText, type Tag } from '../api'
+import { useDelayedFlag } from '../composables/useDelayedFlag'
+import ChevronIcon from './ui/ChevronIcon.vue'
 import ListSection from './ui/ListSection.vue'
+import Spinner from './ui/Spinner.vue'
 import TagChips from './ui/TagChips.vue'
 const props = defineProps<{ id: string }>()
 const emit = defineEmits<{ saved: [] }>()
@@ -38,8 +41,21 @@ const tagsDirty = computed(
 const endpoint = client.collections[':id'].annotation
 const patch = (json: { note?: string; tag_names?: string[] }) =>
   call(endpoint.$patch({ param: { id: props.id }, json }))
+// Progress shows only for a save that takes a while, and then long enough to
+// read, so a quick one does not flash.
+const noteBusy = useDelayedFlag(() => noteSaving.value)
+const tagsBusy = useDelayedFlag(() => tagsSaving.value)
+/** Folded by default: the card says what it holds and opens on demand. */
+const open = shallowRef(false)
+const summary = computed(() => {
+  if (loading.value) return ''
+  if (!ready.value) return '加载失败'
+  if (noteError.value || tagsError.value) return '保存失败'
+  const names = chosen()
+  const parts = [storedNote.value.trim() && '有备注', names.join('、')]
+  return parts.filter(Boolean).join(' · ') || '添加备注或标签'
+})
 const noteStatus = computed(() => {
-  if (noteSaving.value) return '正在保存备注…'
   if (note.value.length > noteLimit - 500)
     return `${note.value.length} / ${noteLimit}`
   return noteDirty.value ? '备注尚未保存' : ''
@@ -53,8 +69,9 @@ function grow() {
   el.style.height = 'auto'
   el.style.height = `${el.scrollHeight}px`
 }
-// `post` so the field is mounted and holds its new text before it is measured.
-watch([ready, note], grow, { flush: 'post' })
+// `post` so the field is mounted and holds its new text before it is measured;
+// a folded card has no height to measure, so it grows again when opened.
+watch([ready, note, open], grow, { flush: 'post' })
 let generation = 0
 /** Latest tag edit still to be written, and whether a writer is draining it. */
 let tagsQueued = false
@@ -183,8 +200,24 @@ async function saveNote() {
 </script>
 
 <template>
-  <ListSection title="我的整理">
-    <form class="annotations" @submit.prevent="saveNote">
+  <ListSection>
+    <button
+      type="button"
+      class="toggle"
+      :aria-expanded="open"
+      :aria-controls="`annotations-${id}`"
+      @click="open = !open"
+    >
+      <span class="title">我的整理</span>
+      <span class="summary">{{ summary }}</span>
+      <ChevronIcon :open="open" />
+    </button>
+    <form
+      v-show="open"
+      :id="`annotations-${id}`"
+      class="annotations"
+      @submit.prevent="saveNote"
+    >
       <div
         v-if="loading"
         class="placeholder"
@@ -220,7 +253,7 @@ async function saveNote() {
               class="commit"
               :disabled="!noteDirty || noteSaving"
             >
-              保存备注
+              <Spinner v-if="noteBusy" label="正在保存备注" />保存备注
             </button>
           </div>
           <p v-if="noteError" class="message bad" role="alert">
@@ -228,7 +261,9 @@ async function saveNote() {
           </p>
         </section>
         <section class="field">
-          <span class="field-label">标签</span>
+          <span class="field-label"
+            >标签<Spinner v-if="tagsBusy" label="正在保存标签"
+          /></span>
           <TagChips
             v-if="tags.length"
             :model-value="selected"
@@ -266,7 +301,6 @@ async function saveNote() {
               创建
             </button>
           </div>
-          <p v-if="tagsSaving" class="hint" role="status">正在保存标签…</p>
           <p v-if="tagsError" class="message bad" role="alert">
             {{ tagsError }}
           </p>
@@ -285,6 +319,36 @@ async function saveNote() {
 </template>
 
 <style scoped>
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 2px var(--inset);
+  font-size: 15px;
+  text-align: left;
+}
+.toggle .summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--subtle);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Open, the fields hang under the toggle as rows of the same card. */
+.annotations {
+  position: relative;
+}
+.annotations::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto var(--inset);
+  height: 1px;
+  background: var(--separator);
+}
 .fields {
   min-width: 0;
 }
@@ -304,7 +368,9 @@ async function saveNote() {
   background: var(--separator);
 }
 .field-label {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 9px;
   color: var(--subtle);
   font-size: 13px;
@@ -351,6 +417,9 @@ textarea::placeholder {
   margin: 0;
 }
 .commit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex: none;
   min-height: 34px;
   padding: 0 14px;

@@ -43,6 +43,9 @@ function press(el: HTMLElement, selector: string, text: string) {
 /** The note's own action, which is the only thing that may write the note. */
 const noteButton = (el: HTMLElement) =>
   find(el, 'button', '保存备注') as HTMLButtonElement
+/** The progress a slow save shows, after a short delay. */
+const busy = (el: HTMLElement, what: '备注' | '标签') =>
+  el.querySelector(`[aria-label="正在保存${CSS.escape(what)}"]`)
 const checked = (el: HTMLElement, tag: string) =>
   find(el, 'label', tag)?.querySelector<HTMLInputElement>('input')?.checked
 /** A request the test holds open, to observe what happens mid-flight. */
@@ -75,7 +78,7 @@ it('autosaves tag creation and removal while the note waits for its button', asy
     expect(el.querySelector('textarea')?.value).toBe('原备注'),
   )
   expect(noteButton(el).disabled).toBe(true)
-  expect(el.textContent).not.toContain('正在保存标签…')
+  expect(busy(el, '标签')).toBeNull()
   // An edited note stays a draft: the tag writes below must not carry it.
   await input(el.querySelector('textarea')!, '新备注')
   await input(el.querySelector('[aria-label="新标签名称"]')!, '新标签')
@@ -154,7 +157,7 @@ it('keeps a failed note save inside the note region', async () => {
   // The failure belongs to the note alone: the tags offer no retry and keep
   // saving themselves, and their success does not clear the note's message.
   expect(find(el, 'button', '重试保存标签')).toBeUndefined()
-  expect(el.textContent).not.toContain('正在保存标签…')
+  expect(busy(el, '标签')).toBeNull()
   press(el, 'label', '原标签')
   await vi.waitFor(() => expect(annotation.tags).toEqual([]))
   expect(el.textContent).toContain('备注写入失败')
@@ -186,7 +189,7 @@ it('coalesces a burst of tag edits into the last one', async () => {
   await vi.waitFor(() => expect(el.textContent).toContain('甲'))
   press(el, 'label', '甲')
   await vi.waitFor(() => expect(sent).toEqual([['甲']]))
-  expect(el.textContent).toContain('正在保存标签…')
+  await vi.waitFor(() => expect(busy(el, '标签')).not.toBeNull())
   // Two more edits land while that first write is still open. They must not
   // race it, and the last one must still reach the server.
   press(el, 'label', '乙')
@@ -200,7 +203,7 @@ it('coalesces a burst of tag edits into the last one', async () => {
   await vi.waitFor(() =>
     expect(request).toHaveBeenLastCalledWith('/tags', { method: 'GET' }),
   )
-  await vi.waitFor(() => expect(el.textContent).not.toContain('正在保存标签…'))
+  await vi.waitFor(() => expect(busy(el, '标签')).toBeNull())
   expect(checked(el, '乙')).toBe(true)
   expect(checked(el, '甲')).toBe(false)
   expect(stored).toEqual([{ id: 'b', name: '乙' }])
@@ -236,7 +239,7 @@ it('restores a tag reselected while its removal was still in flight', async () =
   await vi.waitFor(() =>
     expect(request).toHaveBeenLastCalledWith('/tags', { method: 'GET' }),
   )
-  await vi.waitFor(() => expect(el.textContent).not.toContain('正在保存标签…'))
+  await vi.waitFor(() => expect(busy(el, '标签')).toBeNull())
   expect(checked(el, '甲')).toBe(true)
   expect(stored).toEqual(vocabulary)
 })
@@ -277,12 +280,12 @@ it('lets a note save and a tag autosave finish without overwriting each other', 
   await vi.waitFor(() =>
     expect(request).toHaveBeenLastCalledWith('/tags', { method: 'GET' }),
   )
-  await vi.waitFor(() => expect(el.textContent).not.toContain('正在保存标签…'))
+  await vi.waitFor(() => expect(busy(el, '标签')).toBeNull())
   expect(sent).toEqual([{ note: '新备注' }, { tag_names: [] }])
   expect(checked(el, '原标签')).toBe(false)
-  expect(el.textContent).toContain('正在保存备注…')
+  await vi.waitFor(() => expect(busy(el, '备注')).not.toBeNull())
   open.release()
-  await vi.waitFor(() => expect(el.textContent).not.toContain('正在保存备注…'))
+  await vi.waitFor(() => expect(busy(el, '备注')).toBeNull())
   await nextTick()
   // The note's stale answer must not put the removed tag back.
   expect(checked(el, '原标签')).toBe(false)
@@ -333,4 +336,20 @@ it('submits and clears a tag filter together with the existing filters', async (
   expect(
     el.querySelector<HTMLInputElement>('input[type="radio"]')!.checked,
   ).toBe(true)
+})
+it('starts folded and says what it holds', async () => {
+  mockApi().mockImplementation(async (path) =>
+    path === '/tags'
+      ? [{ id: 'a', name: '甲' }]
+      : { note: '原备注', tags: [{ id: 'a', name: '甲' }] },
+  )
+  const el = mount(CollectionAnnotations, { id: 'collection' })
+  const toggle = el.querySelector<HTMLButtonElement>('button[aria-expanded]')!
+  await vi.waitFor(() => expect(toggle.textContent).toContain('有备注 · 甲'))
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  expect(el.querySelector<HTMLElement>('form')!.style.display).toBe('none')
+  toggle.click()
+  await nextTick()
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  expect(el.querySelector<HTMLElement>('form')!.style.display).toBe('')
 })

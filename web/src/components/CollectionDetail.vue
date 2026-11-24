@@ -123,11 +123,6 @@ const version = computed(() =>
         @more="historyPage(true)"
       />
     </ListSection>
-    <CollectionAnnotations
-      :id="id"
-      :key="id"
-      @saved="emit('annotationsSaved')"
-    />
     <ListSection :footnote="version">
       <ListButton v-if="link" label="打开原文" :href="link" />
       <ListButton
@@ -163,6 +158,13 @@ const version = computed(() =>
       />
     </ListSection>
     <p class="status" :class="{ quiet: !status }" role="status">{{ status }}</p>
+    <!-- Folded under the actions: it is the reader's own notes, opened when
+         wanted rather than in the way of the collection. -->
+    <CollectionAnnotations
+      :id="id"
+      :key="id"
+      @saved="emit('annotationsSaved')"
+    />
     <ListSection>
       <ListButton
         label="删除这条收藏"
