@@ -1,5 +1,6 @@
+import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
-import { collections } from '#db/schema.ts'
+import { collections, library } from '#db/schema.ts'
 import {
   capture,
   entity,
@@ -140,6 +141,31 @@ describe('library listing', () => {
         items[3]!.storage_bytes,
       )
     }
+
+    // Saved time is when an entry joined the library, whatever was captured
+    // since: here the first one saved was captured last.
+    made.forEach((id, i) =>
+      ctx.db
+        .update(library)
+        .set({ createdAt: new Date(2e12 - i * 60_000) })
+        .where(eq(library.collectionId, id))
+        .run(),
+    )
+    expect(ids(all(ctx, { sort: 'saved' }))).toEqual(made)
+    expect(ids(all(ctx, { sort: 'saved', order: 'asc' }))).toEqual(
+      made.toReversed(),
+    )
+    expect(ids(all(ctx, { sort: 'updated' }))).toEqual(made.toReversed())
+    // Old links name the newest capture `captured`; its pages carry on.
+    const updated = listCollections(ctx, { sort: 'updated' })
+    expect(
+      ids(
+        listCollections(ctx, { sort: 'captured' }, updated.next_cursor).items,
+      ),
+    ).toEqual(made.slice(0, 2).toReversed())
+    expect(() =>
+      listCollections(ctx, { sort: 'saved' }, updated.next_cursor),
+    ).toThrow('翻页位置无效，请刷新后重试')
 
     // Equal times page deterministically by id.
     ctx.db

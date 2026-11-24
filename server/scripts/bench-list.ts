@@ -194,6 +194,9 @@ function bench(ctx: CaptureContext) {
   const cases: [string, Parameters<typeof listCollections>[1]][] = [
     ['default', base],
     ['published', { ...base, sort: 'published' }],
+    ['saved', { ...base, sort: 'saved' }],
+    ['saved, oldest first', { ...base, sort: 'saved', order: 'asc' }],
+    ['saved, all types', { sort: 'saved' }],
     ['storage', { ...base, sort: 'storage' }],
     ['text search', { ...base, q: '天气' }],
     ['rare text', { ...base, q: 'post 1234 ' }],
@@ -201,7 +204,7 @@ function bench(ctx: CaptureContext) {
     ['text only', { ...base, mediaType: 'text' }],
     ['sensitive', { ...base, sensitive: 'contains' }],
     ['private', { ...base, visibility: 'private' }],
-    ['one author', { ...base, authors: [authors[0]!.id] }],
+    ['one author', { ...base, authors: [authors.items[0]!.id] }],
     ['tag', { ...base, tag }],
     ['reposts', { ...base, postType: 'repost' }],
     ['quotes', { ...base, postType: 'quote' }],

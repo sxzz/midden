@@ -20,6 +20,10 @@ export interface CollectionFilter {
   savedFrom?: string
   /** RFC 3339; save time, exclusive. */
   savedBefore?: string
+  /**
+   * `published`, `saved` (added to the library), `updated` (newest capture,
+   * the default) or `storage`. `captured` is the old name of `updated`.
+   */
   sort?: string
   order?: string
   /** Author keys from `listAuthors`; any matches. */
@@ -109,7 +113,9 @@ function check(input: CollectionFilter): Checked {
     visibility: input.visibility ?? '',
     savedFrom: input.savedFrom ?? '',
     savedBefore: input.savedBefore ?? '',
-    sort: input.sort ?? '',
+    // Old links name the newest capture `captured`; one name keeps one
+    // cursor fingerprint for both.
+    sort: input.sort === 'captured' ? 'updated' : (input.sort ?? ''),
     order: input.order ?? '',
     authors: input.authors ?? [],
     sensitive: input.sensitive ?? '',
@@ -122,7 +128,7 @@ function check(input: CollectionFilter): Checked {
   if (
     !oneOf(filter.postType, ['post', 'quote', 'repost']) ||
     !oneOf(filter.order, ['desc', 'asc']) ||
-    !oneOf(filter.sort, ['captured', 'published', 'storage']) ||
+    !oneOf(filter.sort, ['saved', 'updated', 'published', 'storage']) ||
     !oneOf(filter.visibility, ['public', 'private']) ||
     !oneOf(filter.sensitive, ['contains', 'not_contains']) ||
     runes(filter.q) > MAX_QUERY ||
@@ -377,6 +383,12 @@ export function listCollections(
   const by = filter.sort === 'storage' ? 'bytes' : 'at'
   const asc = filter.order === 'asc'
   const direction = sql.raw(asc ? 'ASC' : 'DESC')
+  const time =
+    filter.sort === 'published'
+      ? 'k.published_at'
+      : filter.sort === 'saved'
+        ? 'l.created_at'
+        : 'k.observed_at'
   const rows = ctx.db.all<{
     id: string
     at: number
@@ -385,8 +397,10 @@ export function listCollections(
   }>(sql`
     ${related ? sql`WITH ${relatedEdgesSQL(related)}` : sql``}
     SELECT id, at, bytes, relations FROM (
-      SELECT k.collection_id AS id,
-        ${sql.raw(filter.sort === 'published' ? 'k.published_at' : 'k.observed_at')} AS at,
+      -- The id comes from the table whose index orders the page, so SQLite
+      -- reads library_created in order for saved time instead of sorting.
+      SELECT ${sql.raw(filter.sort === 'saved' ? 'l' : 'k')}.collection_id AS id,
+        ${sql.raw(time)} AS at,
         k.storage_bytes AS bytes,
         ${sql.raw(related ? 'related.kinds' : 'NULL')} AS relations
       FROM ${sql.raw(related ? RELATED : SAVED)}
