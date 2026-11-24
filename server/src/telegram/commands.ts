@@ -60,6 +60,7 @@ export interface CommandContext {
   /** Origins the web app is served on, for /passkey links. */
   webOrigins?: string[]
   version: string
+  now?: () => number
 }
 
 const MAX_LINKS = 200
@@ -145,7 +146,7 @@ function deliverSubmission(
 function passkey(c: CommandContext): Reply {
   const origins = c.webOrigins ?? []
   if (origins.length === 0) return { text: '服务器未配置网页地址。' }
-  const links = createPasskeyTokens(c.ctx.db, origins)
+  const links = createPasskeyTokens(c.ctx.db, origins, (c.now ?? Date.now)())
   return {
     text: '添加通行密钥，10 分钟内有效。',
     keyboard: links.map(({ origin, token }) => [

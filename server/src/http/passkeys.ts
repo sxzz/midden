@@ -8,19 +8,17 @@ import {
   type AuthenticationResponseJSON,
   type RegistrationResponseJSON,
 } from '@simplewebauthn/server'
-import { and, asc, count, eq, lt } from 'drizzle-orm'
+import { and, asc, eq, lt } from 'drizzle-orm'
 import { HTTPException } from 'hono/http-exception'
 import { newId } from '#db/id.ts'
-import { passkeyChallenges, passkeys, passkeyTokens } from '#db/schema.ts'
+import { passkeys, passkeyTokens } from '#db/schema.ts'
 import type { Database } from '#db/client.ts'
+import type { Challenges } from './challenges.ts'
 
 /** How long a /passkey link stays good. */
 export const TOKEN_TTL = 10 * 60 * 1000
-const CHALLENGE_TTL = 5 * 60 * 1000
 /** What the browser waits for the authenticator. */
 const CEREMONY_TIMEOUT = 2 * 60 * 1000
-/** Unanswered challenges at once; past this, new ones are refused. */
-const MAX_CHALLENGES = 500
 const RP_NAME = 'Midden'
 // One user owns every passkey, so they all carry the same user handle; an
 // authenticator then keeps one passkey per domain for this app.
@@ -30,8 +28,14 @@ export const NAME_MAX = 64
 const digest = (value: string) =>
   createHash('sha256').update(value).digest('hex')
 
-const fail = (status: 400 | 403 | 409 | 429, message: string) =>
+const fail = (status: 400 | 403 | 409, message: string) =>
   new HTTPException(status, { message })
+
+/** Where the passkey ceremonies keep and check their state. */
+export interface PasskeyStore {
+  db: Database
+  challenges: Challenges
+}
 
 /** A passkey is bound to the host name of the origin it was created on. */
 export const rpIdOf = (origin: string) => new URL(origin).hostname
@@ -110,68 +114,22 @@ function tokenDigest(
   return key
 }
 
-// --- Challenges ----------------------------------------------------------------
-
-function issueChallenge(
-  db: Database,
-  values: Omit<typeof passkeyChallenges.$inferInsert, 'digest' | 'expiresAt'>,
-  now: number,
-): Uint8Array<ArrayBuffer> {
-  db.delete(passkeyChallenges)
-    .where(lt(passkeyChallenges.expiresAt, new Date(now)))
-    .run()
-  const pending = db.select({ n: count() }).from(passkeyChallenges).get()!.n
-  if (pending >= MAX_CHALLENGES) throw fail(429, '请求过于频繁，请稍后重试')
-  const challenge = new Uint8Array(randomBytes(32))
-  db.insert(passkeyChallenges)
-    .values({
-      ...values,
-      digest: digest(Buffer.from(challenge).toString('base64url')),
-      expiresAt: new Date(now + CHALLENGE_TTL),
-    })
-    .run()
-  return challenge
-}
-
-/**
- * Take a challenge out for good: it answers once, whether or not the
- * response it came with turns out valid.
- */
-function takeChallenge(
-  db: Database,
-  challenge: string,
-  expected: { kind: 'login' | 'register'; origin: string },
-  now: number,
-) {
-  const row = db
-    .delete(passkeyChallenges)
-    .where(eq(passkeyChallenges.digest, digest(challenge)))
-    .returning()
-    .get()
-  if (
-    !row ||
-    row.kind !== expected.kind ||
-    row.origin !== expected.origin ||
-    row.expiresAt.getTime() <= now
-  )
-    return
-  return row
-}
-
 // --- Registration --------------------------------------------------------------
 
 /**
- * Options to create a passkey on this origin: signed in, or with a /passkey
- * link's token.
+ * Options to create a passkey on this origin: with a /passkey link's token,
+ * or signed in as `caller`. The challenge is bound to either.
  */
 export function registrationOptions(
-  db: Database,
+  { db, challenges }: PasskeyStore,
   origin: string,
-  token: string | undefined,
+  by: { token: string } | { caller: string },
   now = Date.now(),
 ) {
-  const linked =
-    token === undefined ? undefined : tokenDigest(db, token, origin, now)
+  const binding =
+    'token' in by
+      ? `link:${tokenDigest(db, by.token, origin, now)}`
+      : `caller:${by.caller}`
   const rpID = rpIdOf(origin)
   const existing = db
     .select()
@@ -183,11 +141,7 @@ export function registrationOptions(
     rpID,
     userID: USER_ID,
     userName: RP_NAME,
-    challenge: issueChallenge(
-      db,
-      { kind: 'register', origin, tokenDigest: linked },
-      now,
-    ),
+    challenge: challenges.issue({ purpose: 'register', origin, binding }, now),
     timeout: CEREMONY_TIMEOUT,
     attestationType: 'none',
     excludeCredentials: existing.map((row) => ({
@@ -202,30 +156,30 @@ export function registrationOptions(
 }
 
 /**
- * Check a new passkey against its challenge and keep it. With a link's
- * token, the challenge must have come from that link, which is then used up.
+ * Check a new passkey against its challenge and keep it. The challenge must
+ * have come from the same link or caller; a link is then used up.
  */
 export async function register(
-  db: Database,
+  { db, challenges }: PasskeyStore,
   origin: string,
   input: {
     response: RegistrationResponseJSON
     name: string
-    token?: string
-  },
+  } & ({ token: string } | { caller: string }),
   now = Date.now(),
 ): Promise<PasskeyView> {
   const rpID = rpIdOf(origin)
-  let challengeRow: ReturnType<typeof takeChallenge>
+  const linked = 'token' in input ? digest(input.token) : undefined
+  const binding = 'token' in input ? `link:${linked}` : `caller:${input.caller}`
+  let taken = false
   let info
   try {
     const result = await verifyRegistrationResponse({
       response: input.response,
       expectedChallenge: (challenge) =>
-        !!(challengeRow = takeChallenge(
-          db,
+        (taken = challenges.take(
           challenge,
-          { kind: 'register', origin },
+          { purpose: 'register', origin, binding },
           now,
         )),
       expectedOrigin: origin,
@@ -236,11 +190,8 @@ export async function register(
     if (!result.verified) throw new Error('not verified')
     info = result.registrationInfo
   } catch {
-    throw fail(400, challengeRow ? '通行密钥验证失败' : '验证已过期，请重试')
+    throw fail(400, taken ? '通行密钥验证失败' : '验证已过期，请重试')
   }
-  const linked = input.token === undefined ? undefined : digest(input.token)
-  if ((challengeRow!.tokenDigest ?? undefined) !== linked)
-    throw fail(403, '链接已失效，请在 Telegram 中重新发送 /passkey')
   const { credential } = info
   return db.transaction((tx) => {
     if (linked !== undefined) {
@@ -287,10 +238,14 @@ export async function register(
 // --- Login ---------------------------------------------------------------------
 
 /** Options to sign in on this origin with any passkey made for it. */
-export function loginOptions(db: Database, origin: string, now = Date.now()) {
+export function loginOptions(
+  { challenges }: PasskeyStore,
+  origin: string,
+  now = Date.now(),
+) {
   return generateAuthenticationOptions({
     rpID: rpIdOf(origin),
-    challenge: issueChallenge(db, { kind: 'login', origin }, now),
+    challenge: challenges.issue({ purpose: 'login', origin }, now),
     timeout: CEREMONY_TIMEOUT,
     userVerification: 'required',
   })
@@ -298,7 +253,7 @@ export function loginOptions(db: Database, origin: string, now = Date.now()) {
 
 /** Check a sign-in; only a passkey made for this origin's RP ID counts. */
 export async function login(
-  db: Database,
+  { db, challenges }: PasskeyStore,
   origin: string,
   response: AuthenticationResponseJSON,
   now = Date.now(),
@@ -316,12 +271,7 @@ export async function login(
     const result = await verifyAuthenticationResponse({
       response,
       expectedChallenge: (challenge) =>
-        (taken = !!takeChallenge(
-          db,
-          challenge,
-          { kind: 'login', origin },
-          now,
-        )),
+        (taken = challenges.take(challenge, { purpose: 'login', origin }, now)),
       expectedOrigin: origin,
       expectedRPID: rpID,
       credential: {
@@ -376,11 +326,8 @@ export function deletePasskey(
   return row && view(row)
 }
 
-/** Drop challenges and links nobody answered in time. */
+/** Drop links nobody used in time. */
 export function prunePasskeys(db: Database, now = Date.now()): void {
-  db.delete(passkeyChallenges)
-    .where(lt(passkeyChallenges.expiresAt, new Date(now)))
-    .run()
   db.delete(passkeyTokens)
     .where(lt(passkeyTokens.expiresAt, new Date(now)))
     .run()

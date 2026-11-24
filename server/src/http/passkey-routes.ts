@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto'
 import { Hono, type Context } from 'hono'
+import { getCookie } from 'hono/cookie'
 import { HTTPException } from 'hono/http-exception'
 import * as v from 'valibot'
-import { startSession } from './auth.ts'
+import { SESSION_COOKIE, startSession } from './auth.ts'
 import {
   deletePasskey,
   listPasskeys,
@@ -11,9 +13,9 @@ import {
   register,
   registrationOptions,
   renamePasskey,
+  type PasskeyStore,
   type PasskeyView,
 } from './passkeys.ts'
-import { rateLimit } from './rate-limit.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type {
@@ -23,6 +25,7 @@ import type {
 
 export interface PasskeyOptions {
   ctx: AccountsContext
+  store: PasskeyStore
   /** The origins the web app is served on; a passkey is made on one. */
   webOrigins: string[]
   /** Tell the owner a passkey came or went. */
@@ -43,8 +46,6 @@ const credential = (value: unknown) =>
 const Registration = v.custom<RegistrationResponseJSON>(credential)
 const Authentication = v.custom<AuthenticationResponseJSON>(credential)
 
-const WINDOW = 60_000
-
 /** The request's origin when it is one of the app's; refused otherwise. */
 function originOf(c: Context, origins: string[]): string {
   const origin = c.req.header('Origin')
@@ -55,24 +56,28 @@ function originOf(c: Context, origins: string[]): string {
 
 const describe = (p: PasskeyView) => `${p.name}（${p.rp_id}）`
 
+/** The signed-in caller, by its session cookie or API token. */
+const callerOf = (c: Context) =>
+  createHash('sha256')
+    .update(c.req.header('Authorization') ?? getCookie(c, SESSION_COOKIE) ?? '')
+    .digest('hex')
+
 /**
  * Signing in with a passkey, and making one from a /passkey link; both
  * work without a session.
  */
 export function passkeyAuthRoutes(o: PasskeyOptions) {
-  const { ctx } = o
-  const limit = rateLimit({ perClient: 20, total: 60, windowMs: WINDOW })
+  const { ctx, store } = o
   return new Hono<Env>()
-    .use(limit)
     .post('/options', async (c) =>
-      c.json(await loginOptions(ctx.db, originOf(c, o.webOrigins), o.now())),
+      c.json(await loginOptions(store, originOf(c, o.webOrigins), o.now())),
     )
     .post(
       '/',
       json(v.strictObject({ response: Authentication })),
       async (c) => {
         const origin = originOf(c, o.webOrigins)
-        await login(ctx.db, origin, c.req.valid('json').response, o.now())
+        await login(store, origin, c.req.valid('json').response, o.now())
         startSession(c, ctx.db, o.now())
         return c.body(null, 204)
       },
@@ -83,9 +88,9 @@ export function passkeyAuthRoutes(o: PasskeyOptions) {
       async (c) =>
         c.json(
           await registrationOptions(
-            ctx.db,
+            store,
             originOf(c, o.webOrigins),
-            c.req.valid('json').token,
+            c.req.valid('json'),
             o.now(),
           ),
         ),
@@ -98,7 +103,7 @@ export function passkeyAuthRoutes(o: PasskeyOptions) {
       async (c) => {
         const origin = originOf(c, o.webOrigins)
         const passkey = await register(
-          ctx.db,
+          store,
           origin,
           c.req.valid('json'),
           o.now(),
@@ -112,29 +117,27 @@ export function passkeyAuthRoutes(o: PasskeyOptions) {
 
 /** The owner's passkeys, signed in: list, add on this domain, rename, delete. */
 export function passkeyRoutes(o: PasskeyOptions) {
-  const { ctx } = o
-  const limit = rateLimit({ perClient: 20, total: 60, windowMs: WINDOW })
+  const { ctx, store } = o
   return new Hono<Env>()
     .get('/', (c) => c.json(listPasskeys(ctx.db)))
-    .post('/options', limit, async (c) =>
+    .post('/options', async (c) =>
       c.json(
         await registrationOptions(
-          ctx.db,
+          store,
           originOf(c, o.webOrigins),
-          undefined,
+          { caller: callerOf(c) },
           o.now(),
         ),
       ),
     )
     .post(
       '/',
-      limit,
       json(v.strictObject({ name: NAME, response: Registration })),
       async (c) => {
         const passkey = await register(
-          ctx.db,
+          store,
           originOf(c, o.webOrigins),
-          c.req.valid('json'),
+          { ...c.req.valid('json'), caller: callerOf(c) },
           o.now(),
         )
         o.notify?.(`已添加通行密钥：${describe(passkey)}`)

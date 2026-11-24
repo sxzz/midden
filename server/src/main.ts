@@ -69,6 +69,7 @@ const api = createApi({
   ctx,
   telegram: config.telegram,
   webOrigins: config.webOrigins,
+  challengeKey: deriveKey(config.secretKey, 'passkey-challenge'),
   notify: (text) => bot?.notify(text),
 })
 

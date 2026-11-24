@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { passkeyTokens } from '#db/schema.ts'
 import { fromOwner } from '#telegram/bot.ts'
@@ -26,7 +27,7 @@ afterEach(async () => {
 
 function setup() {
   ctx = testContext()
-  // /passkey runs on the real clock, as the bot does.
+  // The API and /passkey share this clock, so link expiry is exact.
   let time = Date.now()
   const start = new Date(time).toISOString()
   const clock = {
@@ -60,7 +61,7 @@ function setup() {
   /** /passkey from the owner's chat: the link token for each origin. */
   const links = () => {
     const reply = handle(
-      { ctx: ctx!, webOrigins: [MAIN, OTHER], version: 'dev' },
+      { ctx: ctx!, webOrigins: [MAIN, OTHER], version: 'dev', now: clock.now },
       {
         command: 'passkey',
         arg: '',
@@ -327,6 +328,43 @@ describe('passkey login', () => {
     ).toBe(400)
   })
 
+  test('a challenge works only as issued: untampered, for its purpose and origin', async () => {
+    const { links, registerWithLink, post } = setup()
+    const { authenticator } = await registerWithLink(links().tokens[MAIN]!)
+    const options = async (origin = MAIN) =>
+      (await (
+        await post('/auth/passkey/options', {}, origin)
+      ).json()) as PublicKeyCredentialRequestOptionsJSON
+    const answer = (request: PublicKeyCredentialRequestOptionsJSON) =>
+      post('/auth/passkey', { response: authenticator.get(request, MAIN) })
+
+    const tampered = await options()
+    const bytes = Buffer.from(tampered.challenge, 'base64url')
+    bytes[20]! ^= 1
+    expect(
+      (await answer({ ...tampered, challenge: bytes.toString('base64url') }))
+        .status,
+    ).toBe(400)
+    // Issued for the other domain.
+    const other = await options(OTHER)
+    expect((await answer({ ...other, rpId: 'midden.test' })).status).toBe(400)
+    // A registration challenge does not sign in.
+    const registration = (await (
+      await post('/auth/passkey/register/options', {
+        token: links().tokens[MAIN],
+      })
+    ).json()) as PublicKeyCredentialCreationOptionsJSON
+    expect(
+      (
+        await answer({
+          challenge: registration.challenge,
+          rpId: 'midden.test',
+        })
+      ).status,
+    ).toBe(400)
+    expect((await answer(await options())).status).toBe(204)
+  })
+
   test('only allowed origins get options, each with its own RP ID', async () => {
     const { post } = setup()
     expect(
@@ -342,19 +380,16 @@ describe('passkey login', () => {
     expect(main.userVerification).toBe('required')
   })
 
-  test('is rate limited', async () => {
+  test('is not rate limited', async () => {
     const { post } = setup()
-    const statuses = []
-    for (let i = 0; i < 21; i++)
-      statuses.push(
+    for (let i = 0; i < 80; i++)
+      expect(
         (
           await post('/auth/passkey/options', {}, MAIN, {
             'CF-Connecting-IP': '1.2.3.4',
           })
         ).status,
-      )
-    expect(statuses.slice(0, 20).every((s) => s === 200)).toBe(true)
-    expect(statuses[20]).toBe(429)
+      ).toBe(200)
   })
 
   test('cookie sessions write from every allowed origin and no other', async () => {
@@ -467,16 +502,49 @@ describe('passkey management', () => {
   })
 
   test('a signed-in challenge does not register through a link, or the other way', async () => {
-    const { call, post, links } = await signedIn()
-    const options = (await (
+    const { call, post, links, app } = await signedIn()
+    const signedInOptions = (await (
       await call('/passkeys/options', { method: 'POST' })
     ).json()) as PublicKeyCredentialCreationOptionsJSON
-    const response = await post('/auth/passkey/register', {
-      token: links().tokens[MAIN],
-      name: 'x',
-      response: softAuthenticator().create(options, MAIN),
+    const token = links().tokens[MAIN]!
+    expect(
+      (
+        await post('/auth/passkey/register', {
+          token,
+          name: 'x',
+          response: softAuthenticator().create(signedInOptions, MAIN),
+        })
+      ).status,
+    ).toBe(400)
+    const linkOptions = (await (
+      await post('/auth/passkey/register/options', { token })
+    ).json()) as PublicKeyCredentialCreationOptionsJSON
+    expect(
+      (
+        await call('/passkeys', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: 'x',
+            response: softAuthenticator().create(linkOptions, MAIN),
+          }),
+        })
+      ).status,
+    ).toBe(400)
+    // Nor through another caller's session.
+    const other = createToken(ctx!.db, 'other')
+    const response = await app.request('/passkeys', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${other}`,
+        Origin: MAIN,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'x',
+        response: softAuthenticator().create(signedInOptions, MAIN),
+      }),
     })
-    expect(response.status).toBe(403)
+    expect(response.status).toBe(400)
   })
 
   test('needs a session or token', async () => {

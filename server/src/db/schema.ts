@@ -818,23 +818,6 @@ export const passkeys = sqliteTable(
 )
 
 /**
- * WebAuthn challenges handed out and not yet answered, by the SHA-256 of the
- * challenge. Each is good once, for one origin, until it expires.
- */
-export const passkeyChallenges = sqliteTable(
-  'passkey_challenges',
-  {
-    digest: text().primaryKey(),
-    kind: text({ enum: ['login', 'register'] }).notNull(),
-    origin: text().notNull(),
-    // The /passkey link a registration came from; none when signed in.
-    tokenDigest: text(),
-    expiresAt: timestamp().notNull(),
-  },
-  (t) => [index('passkey_challenges_expires').on(t.expiresAt)],
-)
-
-/**
  * Links from the bot's /passkey that register a passkey without signing in,
  * by the SHA-256 of their token. One per origin; gone once used.
  */

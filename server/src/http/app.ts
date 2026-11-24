@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { Hono } from 'hono'
 import { deleteCookie, getCookie } from 'hono/cookie'
 import * as v from 'valibot'
@@ -11,6 +12,7 @@ import {
   tokenValid,
 } from './auth.ts'
 import { captureRoutes } from './capture-routes.ts'
+import { Challenges } from './challenges.ts'
 import { errorResponse } from './errors.ts'
 import { folderRoutes } from './folder-routes.ts'
 import { libraryRoutes } from './library-routes.ts'
@@ -20,6 +22,7 @@ import { publicRoutes } from './public-routes.ts'
 import { shareRoutes } from './share-routes.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
+import type { Buffer } from 'node:buffer'
 
 export { SESSION_COOKIE }
 
@@ -31,6 +34,8 @@ export interface HttpOptions {
    * these, and passkeys are made and used only on them.
    */
   webOrigins?: string[]
+  /** Signs WebAuthn challenges; derived from SECRET_KEY. */
+  challengeKey?: Buffer
   /** Tell the owner, through the bot, that a passkey came or went. */
   notify?: (text: string) => void
   now?: () => number
@@ -49,6 +54,10 @@ export function createApi(options: HttpOptions) {
     !!origin && webOrigins.includes(origin)
   const passkeys = {
     ctx,
+    store: {
+      db: ctx.db,
+      challenges: new Challenges(options.challengeKey ?? randomBytes(32)),
+    },
     webOrigins,
     notify: options.notify,
     now,
