@@ -23,7 +23,7 @@ mockApi((path) => {
     return { items: [collection] }
   if (path === '/tags') return []
   if (path.endsWith('/annotation')) return { note: '', tags: [] }
-  if (path.endsWith('/revisions')) return { items: [] }
+  if (path.endsWith('/history')) return { items: [] }
   if (path.endsWith('/availability')) return { available: true }
   if (path.startsWith('/collections/')) return collection
   return { used_bytes: 0 }

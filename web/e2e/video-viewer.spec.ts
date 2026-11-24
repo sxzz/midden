@@ -42,7 +42,7 @@ test.beforeEach(async ({ page }) => {
     return r.fulfill({
       json: path.endsWith('/availability')
         ? { available: true }
-        : path.endsWith('/revisions')
+        : path.endsWith('/history')
           ? { items: [] }
           : path === `/v1/collections/${collection.id}`
             ? collection

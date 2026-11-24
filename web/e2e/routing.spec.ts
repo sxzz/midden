@@ -38,7 +38,7 @@ for (const back of ['button', 'history'] as const) {
       return r.fulfill({
         json: path.endsWith('/availability')
           ? { available: true }
-          : path.endsWith('/revisions')
+          : path.endsWith('/history')
             ? { items: [] }
             : items.find((item) => path === `/v1/collections/${item.id}`) || {},
       })
@@ -109,7 +109,7 @@ test('Telegram back from a directly opened collection returns home', async ({
     const path = new URL(r.request().url()).pathname
     return r.fulfill({
       json:
-        path === '/v1/collections' || path.endsWith('/revisions')
+        path === '/v1/collections' || path.endsWith('/history')
           ? { items: [] }
           : path === `/v1/collections/${items[0]!.id}`
             ? items[0]

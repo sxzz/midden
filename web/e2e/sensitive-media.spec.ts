@@ -36,8 +36,16 @@ async function serve(page: import('@playwright/test').Page, assets: unknown[]) {
         ? {}
         : path.endsWith('/availability')
           ? { available: true }
-          : path.endsWith('/revisions')
-            ? { items: [{ id: 'r1', created_at: item.observed_at }] }
+          : path.endsWith('/history')
+            ? {
+                items: [
+                  {
+                    capture_id: 'c1',
+                    observed_at: item.observed_at,
+                    revision_id: 'r1',
+                  },
+                ],
+              }
             : path === `/v1/collections/${id}`
               ? item
               : path === '/v1/collections/authors'

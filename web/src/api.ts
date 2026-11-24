@@ -47,8 +47,8 @@ export type CollectionPage = Ok<typeof client.collections.$get>
 export type Asset = Collection['assets'][number]
 export type Entity = NonNullable<Collection['graph']>['entities'][number]
 export type Author = Ok<typeof client.collections.authors.$get>['items'][number]
-export type Revision = Ok<
-  (typeof client.collections)[':id']['revisions']['$get']
+export type HistoryPoint = Ok<
+  (typeof client.collections)[':id']['history']['$get']
 >['items'][number]
 export type Job = Ok<(typeof client.jobs)[':id']['$get']>
 export type MemberProgress = NonNullable<Job['members']>

@@ -1,5 +1,6 @@
 import { afterEach, expect, it } from 'vitest'
 import { createVaporApp, nextTick } from 'vue'
+import { date } from '../presentation'
 import RevisionTimeline from './RevisionTimeline.vue'
 
 let unmount = () => {}
@@ -8,11 +9,11 @@ afterEach(() => {
   document.body.replaceChildren()
 })
 
-// Newest first, as the API pages them.
-const revisions = [
-  { id: 'r3', created_at: '2026-03-01T00:00:00Z' },
-  { id: 'r2', created_at: '2026-02-01T00:00:00Z' },
-  { id: 'r1', created_at: '2026-01-01T00:00:00Z' },
+// Newest first, as the API pages them; the older two differ only in counts.
+const points = [
+  { capture_id: 'c3', observed_at: '2026-03-01T00:00:00Z', revision_id: 'r2' },
+  { capture_id: 'c2', observed_at: '2026-02-01T00:00:00Z', revision_id: 'r1' },
+  { capture_id: 'c1', observed_at: '2026-01-01T00:00:00Z', revision_id: 'r1' },
 ]
 
 function mount(props: Record<string, unknown>) {
@@ -21,9 +22,9 @@ function mount(props: Record<string, unknown>) {
   const selected: string[] = []
   const more: unknown[] = []
   const app = createVaporApp(RevisionTimeline, {
-    revisions,
-    selectedId: 'r3',
-    latestId: 'r3',
+    points,
+    selectedId: 'c3',
+    latestId: 'c3',
     more: false,
     label: '资料版本',
     // Vapor reads function props as getters: return the handler.
@@ -41,22 +42,32 @@ function mount(props: Record<string, unknown>) {
   return { el, range, drag, selected, more }
 }
 
-it('runs from the oldest revision on the left to the newest', async () => {
+it('runs from the oldest point on the left to the newest', async () => {
   const { el, range, drag, selected } = mount({})
   expect(range.max).toBe('2')
   expect(range.value).toBe('2')
   expect(el.textContent).toContain('最新版本')
+  expect(el.textContent).toContain(date(points[0]!.observed_at))
   drag(0)
   drag(0)
   drag(1)
   await nextTick()
-  // Each revision passed is asked for once; resting on one repeats nothing.
-  expect(selected).toEqual(['r1', 'r2'])
-  expect(el.textContent).toContain('第 2 / 3 个版本')
+  // Each point passed is asked for once, even two on the same revision;
+  // resting on one repeats nothing.
+  expect(selected).toEqual(['c1', 'c2'])
+  expect(el.textContent).toContain('第 2 / 3 次')
+  expect(el.textContent).toContain(date(points[1]!.observed_at))
 })
 
-it('asks for older revisions when resting on the oldest one loaded', () => {
-  const { range, drag, more } = mount({ more: true })
+it('starts at the point shown', () => {
+  const { el, range } = mount({ selectedId: 'c1' })
+  expect(range.value).toBe('0')
+  expect(el.textContent).toContain('第 1 / 3 次')
+})
+
+it('asks for older points when resting on the oldest one loaded', () => {
+  const { el, range, drag, more } = mount({ more: true })
+  expect(el.textContent).toContain('更早的记录')
   drag(0)
   range.dispatchEvent(new Event('change'))
   expect(more).toHaveLength(1)

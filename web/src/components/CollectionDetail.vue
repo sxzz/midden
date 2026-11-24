@@ -27,16 +27,18 @@ const {
   error,
   busy,
   status,
-  revisions,
+  points,
   next,
   historical,
+  latestPoint,
+  shownPoint,
   latestRevision,
   historyLoading,
-  loadingRevision,
+  loadingPoint,
   confirmDelete,
   available,
   historyPage,
-  revision,
+  showPoint,
   isSeen,
   remove,
   refresh,
@@ -69,14 +71,14 @@ const profileName = computed(() =>
   collection.value ? present(collection.value).name : '',
 )
 const link = computed(() => collection.value && safeURL(collection.value.url))
-// Dragging the timeline passes many revisions: show the ones already fetched
-// at once, and fetch the others only where the drag rests.
+// Dragging the timeline passes many points: show the ones already fetched at
+// once, and fetch the others only where the drag rests.
 let pick: ReturnType<typeof setTimeout> | undefined
 onUnmounted(() => clearTimeout(pick))
-function preview(revisionId: string) {
+function preview(point: string) {
   clearTimeout(pick)
-  if (isSeen(revisionId)) void revision(revisionId)
-  else pick = setTimeout(revision, 150, revisionId)
+  if (isSeen(point)) void showPoint(point)
+  else pick = setTimeout(showPoint, 150, point)
 }
 function startRefresh() {
   void refresh()
@@ -98,22 +100,22 @@ const version = computed(() =>
   <template v-if="collection">
     <ListSection>
       <!-- The collection stays on screen while the timeline fetches a
-           revision, so what changed between the two reads as a change. -->
+           point, so what changed between the two reads as a change. -->
       <CollectionPost
-        :class="{ fetching: loadingRevision }"
+        :class="{ fetching: loadingPoint }"
         :collection="collection"
         :saved-at="savedAt"
         :show-sensitive="showSensitive"
       />
     </ListSection>
     <ListSection
-      v-if="revisions.length > 1"
+      v-if="points.length > 1"
       :title="isProfile ? '资料变化' : '内容变化'"
     >
       <RevisionTimeline
-        :revisions="revisions"
-        :selected-id="collection.revision_id"
-        :latest-id="latestRevision"
+        :points="points"
+        :selected-id="shownPoint"
+        :latest-id="latestPoint"
         :more="!!next"
         :loading="historyLoading"
         :label="isProfile ? '资料版本' : '内容版本'"
@@ -125,7 +127,7 @@ const version = computed(() =>
       <ListButton v-if="link" label="打开原文" :href="link" />
       <ListButton
         label="重新抓取"
-        :disabled="busy || loadingRevision || !available"
+        :disabled="busy || loadingPoint || !available"
         @select="startRefresh"
       />
       <ListButton

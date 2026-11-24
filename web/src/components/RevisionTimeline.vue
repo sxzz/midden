@@ -1,22 +1,26 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
 import { date } from '../presentation'
-import type { Revision } from '../api'
+import type { HistoryPoint } from '../api'
 const props = defineProps<{
-  /** Newest first, as the API pages them. */
-  revisions: Revision[]
+  /**
+   * Captures where the content or counts changed, newest first, as the API
+   * pages them.
+   */
+  points: HistoryPoint[]
+  /** Capture ids of the point shown and of the newest point. */
   selectedId: string
   latestId: string
-  /** Older revisions remain to be loaded. */
+  /** Older points remain to be loaded. */
   more: boolean
   loading?: boolean
-  /** Names the slider for what changes across revisions. */
+  /** Names the slider for what changes across points. */
   label: string
 }>()
 const emit = defineEmits<{ select: [id: string]; more: [] }>()
 // Oldest on the left, so dragging right moves forward in time.
-const ordered = computed(() => props.revisions.toReversed())
-// The revision under the thumb, ahead of the one shown while it loads.
+const ordered = computed(() => props.points.toReversed())
+// The point under the thumb, ahead of the one shown while it loads.
 const current = shallowRef(props.selectedId)
 watch(
   () => props.selectedId,
@@ -25,27 +29,26 @@ watch(
 const index = computed(() =>
   Math.max(
     0,
-    ordered.value.findIndex((r) => r.id === current.value),
+    ordered.value.findIndex((p) => p.capture_id === current.value),
   ),
 )
 const last = computed(() => ordered.value.length - 1)
 const at = computed(() => ordered.value[index.value])
-const latest = computed(() => at.value?.id === props.latestId)
-// One dot per revision while they stay apart; past that the track says enough.
+const latest = computed(() => at.value?.capture_id === props.latestId)
+// One dot per point while they stay apart; past that the track says enough.
 const MAX_TICKS = 60
 const ticks = computed(() =>
   last.value > 0 && last.value < MAX_TICKS
-    ? ordered.value.map((r, i) => ({ id: r.id, at: i / last.value }))
+    ? ordered.value.map((p, i) => ({ id: p.capture_id, at: i / last.value }))
     : [],
 )
 function move(event: Event) {
-  const revision =
-    ordered.value[Number((event.target as HTMLInputElement).value)]
-  if (!revision || revision.id === current.value) return
-  current.value = revision.id
-  emit('select', revision.id)
+  const point = ordered.value[Number((event.target as HTMLInputElement).value)]
+  if (!point || point.capture_id === current.value) return
+  current.value = point.capture_id
+  emit('select', point.capture_id)
 }
-// Resting on the oldest loaded revision asks for the ones before it.
+// Resting on the oldest loaded point asks for the ones before it.
 function settle() {
   if (index.value === 0 && props.more && !props.loading) emit('more')
 }
@@ -54,9 +57,9 @@ function settle() {
 <template>
   <div class="timeline">
     <p class="when">
-      <strong>{{ date(at?.created_at) }}</strong>
+      <strong>{{ date(at?.observed_at) }}</strong>
       <span class="where">{{
-        latest ? '最新版本' : `第 ${index + 1} / ${last + 1} 个版本`
+        latest ? '最新版本' : `第 ${index + 1} / ${last + 1} 次`
       }}</span>
     </p>
     <div class="track">
@@ -65,7 +68,7 @@ function settle() {
           v-for="tick in ticks"
           :key="tick.id"
           class="tick"
-          :class="{ on: tick.id === at?.id }"
+          :class="{ on: tick.id === at?.capture_id }"
           :style="{ '--at': tick.at }"
         />
       </div>
@@ -76,7 +79,7 @@ function settle() {
         step="1"
         :value="index"
         :aria-label="label"
-        :aria-valuetext="`${date(at?.created_at)}${latest ? '，最新版本' : ''}`"
+        :aria-valuetext="`${date(at?.observed_at)}${latest ? '，最新版本' : ''}`"
         @input="move"
         @change="settle"
       />
@@ -89,9 +92,9 @@ function settle() {
         :disabled="loading"
         @click="emit('more')"
       >
-        {{ loading ? '正在加载…' : '更早的版本' }}
+        {{ loading ? '正在加载…' : '更早的记录' }}
       </button>
-      <span v-else>{{ date(ordered[0]?.created_at) }}</span>
+      <span v-else>{{ date(ordered[0]?.observed_at) }}</span>
       <span>最新</span>
     </p>
   </div>

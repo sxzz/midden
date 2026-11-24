@@ -78,8 +78,7 @@ async function setup(page: Page) {
             },
       })
     }
-    if (path.endsWith('/revisions'))
-      return route.fulfill({ json: { items: [] } })
+    if (path.endsWith('/history')) return route.fulfill({ json: { items: [] } })
     if (path.endsWith('/availability'))
       return route.fulfill({ json: { available: true } })
     if (path.endsWith('/annotation'))

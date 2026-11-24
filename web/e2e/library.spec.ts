@@ -42,15 +42,28 @@ test('browse, filter, history, refresh and remove a saved post', async ({
       }
       default:
         if (path.endsWith('/availability')) body = { available: true }
-        else if (path.endsWith('/revisions'))
+        else if (path.endsWith('/history'))
           body = {
             items: [
-              { id: 'r1', created_at: collection.observed_at },
-              { id: 'r0', created_at: '2026-09-27T10:00:00Z' },
+              {
+                capture_id: 'c1',
+                observed_at: collection.observed_at,
+                revision_id: 'r1',
+              },
+              {
+                capture_id: 'c0',
+                observed_at: '2026-09-27T10:00:00Z',
+                revision_id: 'r0',
+              },
             ],
           }
-        else if (path.endsWith('/revisions/r0'))
-          body = { ...collection, revision_id: 'r0', text: '历史正文' }
+        else if (path.endsWith('/history/c0'))
+          body = {
+            ...collection,
+            revision_id: 'r0',
+            text: '历史正文',
+            observed_at: '2026-09-27T10:00:00Z',
+          }
         else if (path === '/v1/captures') {
           captureBodies.push(r.request().postDataJSON())
           body = { id: 'job', collection_id: id, state: 'complete' }
@@ -281,8 +294,16 @@ test('loading skeletons, one revision and touch image navigation', async ({
         ? {}
         : path.endsWith('/availability')
           ? { available: true }
-          : path.endsWith('/revisions')
-            ? { items: [{ id: 'r1', created_at: collection.observed_at }] }
+          : path.endsWith('/history')
+            ? {
+                items: [
+                  {
+                    capture_id: 'c1',
+                    observed_at: collection.observed_at,
+                    revision_id: 'r1',
+                  },
+                ],
+              }
             : path === `/v1/collections/${id}`
               ? media
               : path === '/v1/usage'
@@ -292,7 +313,7 @@ test('loading skeletons, one revision and touch image navigation', async ({
   })
   await page.goto('/app/')
   const history = page.waitForResponse((r) =>
-    new URL(r.url()).pathname.endsWith('/revisions'),
+    new URL(r.url()).pathname.endsWith('/history'),
   )
   await page.locator('.head').filter({ hasText: '测试作者' }).click()
   await expect(page.getByRole('status', { name: '正在加载收藏' })).toBeVisible()
@@ -446,7 +467,7 @@ test('a failed refresh shows a toast every time it is tried', async ({
     }
     if (path.endsWith('/availability'))
       return r.fulfill({ json: { available: true } })
-    if (path.endsWith('/revisions')) return r.fulfill({ json: { items: [] } })
+    if (path.endsWith('/history')) return r.fulfill({ json: { items: [] } })
     if (path === `/v1/collections/${id}`) return r.fulfill({ json: collection })
     if (path.endsWith('/annotation'))
       return r.fulfill({ json: { note: '', tags: [] } })
@@ -497,7 +518,7 @@ test('a private collection shows a lock beside the name, not a detail line', asy
       })
     if (path.endsWith('/availability'))
       return r.fulfill({ json: { available: true } })
-    if (path.endsWith('/revisions')) return r.fulfill({ json: { items: [] } })
+    if (path.endsWith('/history')) return r.fulfill({ json: { items: [] } })
     if (path === `/v1/collections/${id}`) return r.fulfill({ json: hidden })
     if (path.endsWith('/annotation'))
       return r.fulfill({ json: { note: '', tags: [] } })
@@ -561,7 +582,7 @@ test('a post reads its author as last seen and notes when it was deleted', async
       return r.fulfill({ json: { items: [post] } })
     if (path.endsWith('/availability'))
       return r.fulfill({ json: { available: true } })
-    if (path.endsWith('/revisions')) return r.fulfill({ json: { items: [] } })
+    if (path.endsWith('/history')) return r.fulfill({ json: { items: [] } })
     if (path === `/v1/collections/${id}`) return r.fulfill({ json: post })
     if (path.endsWith('/annotation'))
       return r.fulfill({ json: { note: '', tags: [] } })
@@ -685,7 +706,7 @@ test('lists show thumbnails; the open post loads the originals', async ({
     if (path === `/v1/collections/${id}`) return r.fulfill({ json: post })
     if (path.endsWith('/availability'))
       return r.fulfill({ json: { available: true } })
-    if (path.endsWith('/revisions')) return r.fulfill({ json: { items: [] } })
+    if (path.endsWith('/history')) return r.fulfill({ json: { items: [] } })
     if (path.endsWith('/annotation'))
       return r.fulfill({ json: { note: '', tags: [] } })
     return r.fulfill({ json: [] })

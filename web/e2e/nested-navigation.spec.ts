@@ -65,7 +65,7 @@ for (const deep of [false, true]) {
       let json: unknown
       if (path === '/v1/collections')
         json = { items: url.searchParams.has('related_to') ? [] : [post] }
-      else if (path.endsWith('/revisions')) json = { items: [] }
+      else if (path.endsWith('/history')) json = { items: [] }
       else if (path.endsWith('/availability')) json = { available: true }
       else if (path.endsWith('/annotation')) json = { note: '', tags: [] }
       else if (path === '/v1/tags') json = []

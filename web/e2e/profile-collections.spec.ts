@@ -190,7 +190,7 @@ test('profile shows related collection rows and total storage, with internal bio
         items: url.searchParams.get('related_to') === profileId ? [post] : [],
         total_storage_bytes: 2097152,
       }
-    } else if (path.endsWith('/revisions')) json = { items: [] }
+    } else if (path.endsWith('/history')) json = { items: [] }
     else if (path.endsWith('/availability')) json = { available: true }
     else if (path.endsWith('/annotation')) json = { note: '', tags: [] }
     else if (path === '/v1/tags') json = []
@@ -300,7 +300,7 @@ test('profile refresh keeps reloading related posts until its members finish', a
         break
       }
       default:
-        if (path.endsWith('/revisions')) json = { items: [] }
+        if (path.endsWith('/history')) json = { items: [] }
         else if (path.endsWith('/availability')) json = { available: true }
         else if (path.endsWith('/annotation')) json = { note: '', tags: [] }
         else if (path === '/v1/tags') json = []

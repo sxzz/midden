@@ -3,7 +3,7 @@ import { createApp, h, KeepAlive, nextTick, shallowRef } from 'vue'
 import { collection as fixture, mockApi } from '../testing/api'
 import { useCollectionDetail } from './useCollectionDetail'
 import { toastState } from './useToast'
-import type { Collection, Job } from '../api'
+import type { Collection, HistoryPoint, Job } from '../api'
 const { replace } = vi.hoisted(() => ({ replace: vi.fn() }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ replace }) }))
 const collection = (id: string): Collection =>
@@ -17,6 +17,10 @@ const collection = (id: string): Collection =>
   })
 let api = mockApi()
 let job: Job = { id: 'job-1', collection_id: 'kept', state: 'queued' }
+/** The history every collection answers with. */
+let points: HistoryPoint[] = []
+/** The kept collection's composable, for tests that step through points. */
+let detail: ReturnType<typeof useCollectionDetail> | undefined
 /** One shared refresh handle, so the test can start a capture and watch it. */
 let refresh = async () => {}
 /** Collections handed to the library list, to catch writes from a cached view. */
@@ -46,15 +50,18 @@ function hold(path: string) {
 const Detail = {
   props: { id: { type: String, required: true } },
   setup(props: { id: string }) {
-    const detail = useCollectionDetail(
+    const used = useCollectionDetail(
       () => props.id,
       () => {},
       (value) => updates.push(value),
     )
-    if (props.id === 'kept') refresh = () => detail.refresh()
+    if (props.id === 'kept') {
+      refresh = () => used.refresh()
+      detail = used
+    }
     return () => [
-      h('p', { class: 'status' }, detail.status.value),
-      h('p', { class: 'error' }, detail.error.value),
+      h('p', { class: 'status' }, used.status.value),
+      h('p', { class: 'error' }, used.error.value),
     ]
   },
 }
@@ -90,6 +97,8 @@ beforeEach(() => {
   updates = []
   gates = new Map()
   rejects = new Set()
+  points = []
+  detail = undefined
   api = mockApi(async (path) => {
     const gate = gates.get(path)
     if (gate) {
@@ -97,7 +106,15 @@ beforeEach(() => {
       await gate.wait
     }
     if (rejects.has(path)) throw new Error('接口失败')
-    if (path.endsWith('/revisions')) return { items: [] }
+    if (path.endsWith('/history')) return { items: points }
+    const point = /\/history\/(.+)$/.exec(path)?.[1]
+    const at = points.find((p) => p.capture_id === point)
+    if (at)
+      return {
+        ...collection('kept'),
+        revision_id: at.revision_id,
+        observed_at: at.observed_at,
+      }
     if (path.endsWith('/availability')) return { available: true }
     if (path === '/captures' || path.startsWith('/jobs/')) return job
     return collection(path.split('/', 3)[2]!)
@@ -168,8 +185,8 @@ it('defers the list update when the view is cached during its history reload', a
   await vi.advanceTimersByTimeAsync(0)
   await refresh()
   job = { ...job, state: 'complete' }
-  // The initial load already fetched revisions; hold the one inside the job.
-  const history = hold('/collections/kept/revisions')
+  // The initial load already fetched the history; hold the one inside the job.
+  const history = hold('/collections/kept/history')
   await vi.advanceTimersByTimeAsync(2000)
   await history.reached()
   await show('other')
@@ -196,4 +213,75 @@ it('reports a failure from resuming a capture instead of rejecting', async () =>
   await vi.waitFor(() => expect(toastState.value?.text).toBe('接口失败'))
   expect(view.error()).toBe('')
   expect(updates).toEqual([])
+})
+// Newest first: a content change, then a change of counts alone.
+const history: HistoryPoint[] = [
+  { capture_id: 'c3', observed_at: '2026-10-01T00:00:00Z', revision_id: 'r1' },
+  { capture_id: 'c2', observed_at: '2026-09-01T00:00:00Z', revision_id: 'r0' },
+  { capture_id: 'c1', observed_at: '2026-08-01T00:00:00Z', revision_id: 'r0' },
+]
+/** Mount the kept collection with its history loaded. */
+async function withHistory() {
+  points = history
+  mount()
+  await vi.advanceTimersByTimeAsync(0)
+  const d = detail!
+  expect(d.points.value.map((p) => p.capture_id)).toEqual(['c3', 'c2', 'c1'])
+  return d
+}
+it('steps through points, each its own view even on one revision', async () => {
+  const d = await withHistory()
+  // The newest point is the current state, already on screen.
+  expect(d.shownPoint.value).toBe('c3')
+  expect(d.latestPoint.value).toBe('c3')
+  expect(d.historical.value).toBe(false)
+  expect(d.isSeen('c3')).toBe(true)
+  expect(d.isSeen('c2')).toBe(false)
+  await d.showPoint('c2')
+  expect(d.collection.value?.observed_at).toBe('2026-09-01T00:00:00Z')
+  expect(d.shownPoint.value).toBe('c2')
+  expect(d.historical.value).toBe(true)
+  // c1 has c2's revision but not its counts: fetched, not taken from c2.
+  await d.showPoint('c1')
+  expect(d.collection.value?.observed_at).toBe('2026-08-01T00:00:00Z')
+  expect(calls('/collections/kept/history/')).toBe(2)
+  // Points seen before, and the current state, show without a request.
+  const before = api.mock.calls.length
+  await d.showPoint('c2')
+  expect(d.collection.value?.observed_at).toBe('2026-09-01T00:00:00Z')
+  await d.showPoint('c3')
+  expect(d.historical.value).toBe(false)
+  expect(d.collection.value?.revision_id).toBe('r1')
+  expect(api.mock.calls.length).toBe(before)
+})
+it('lets a newer point supersede one still loading', async () => {
+  const d = await withHistory()
+  const slow = hold('/collections/kept/history/c2')
+  const first = d.showPoint('c2')
+  await slow.reached()
+  // The current state stays on screen, dimmed, while c2 loads.
+  expect(d.loadingPoint.value).toBe(true)
+  expect(d.shownPoint.value).toBe('c3')
+  await d.showPoint('c1')
+  expect(d.shownPoint.value).toBe('c1')
+  expect(d.loadingPoint.value).toBe(false)
+  await slow.release()
+  await first
+  // The late reply is kept for later but does not replace c1.
+  expect(d.shownPoint.value).toBe('c1')
+  expect(d.collection.value?.observed_at).toBe('2026-08-01T00:00:00Z')
+  expect(d.isSeen('c2')).toBe(true)
+})
+it('drops a point still loading when the drag returns to the one shown', async () => {
+  const d = await withHistory()
+  const slow = hold('/collections/kept/history/c2')
+  const first = d.showPoint('c2')
+  await slow.reached()
+  await d.showPoint('c3')
+  expect(d.loadingPoint.value).toBe(false)
+  await slow.release()
+  await first
+  expect(d.shownPoint.value).toBe('c3')
+  expect(d.historical.value).toBe(false)
+  expect(d.collection.value?.revision_id).toBe('r1')
 })

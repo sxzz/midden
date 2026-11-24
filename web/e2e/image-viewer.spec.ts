@@ -59,8 +59,16 @@ test.beforeEach(async ({ page }) => {
         ? {}
         : path.endsWith('/availability')
           ? { available: true }
-          : path.endsWith('/revisions')
-            ? { items: [{ id: 'r1', created_at: collection.observed_at }] }
+          : path.endsWith('/history')
+            ? {
+                items: [
+                  {
+                    capture_id: 'c1',
+                    observed_at: collection.observed_at,
+                    revision_id: 'r1',
+                  },
+                ],
+              }
             : path === `/v1/collections/${collection.id}`
               ? collection
               : path === '/v1/usage'

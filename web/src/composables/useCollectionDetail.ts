@@ -12,9 +12,9 @@ import {
   client,
   errorText,
   type Collection,
+  type HistoryPoint,
   type Job,
   type MemberProgress,
-  type Revision,
 } from '../api'
 import { toast } from './useToast'
 const collections = client.collections[':id']
@@ -54,16 +54,27 @@ export function useCollectionDetail(
   const error = shallowRef('')
   const busy = shallowRef(false)
   const status = shallowRef('')
-  const revisions = shallowRef<Revision[]>([])
+  /** Captures where the content or counts changed, newest first. */
+  const points = shallowRef<HistoryPoint[]>([])
   const next = shallowRef('')
   const latestRevision = shallowRef('')
-  const loadingRevision = shallowRef(false)
+  const loadingPoint = shallowRef(false)
   const historyLoading = shallowRef(false)
   const confirmDelete = shallowRef(false)
-  /** Revisions already fetched, so moving back to one shows it at once. */
+  /** The newest point is the collection as it is now. */
+  const latestPoint = computed(() => points.value[0]?.capture_id ?? '')
+  /** The point on screen; '' is the current state. */
+  const selected = shallowRef('')
+  const key = (point: string) => (point === latestPoint.value ? '' : point)
+  /**
+   * Points already fetched, by `key`, so moving back to one shows it at once.
+   * The current state is kept under '' rather than its point, which a
+   * refresh can move on from.
+   */
   const seen = new Map<string, Collection>()
   const show = (result: Collection) => {
-    seen.set(result.revision_id, result)
+    seen.set('', result)
+    selected.value = ''
     collection.value = result
   }
   /**
@@ -71,10 +82,10 @@ export function useCollectionDetail(
    * profile's posts), so lists of those members know to reload.
    */
   const membersVersion = shallowRef(0)
-  const historical = computed(
-    () =>
-      !!collection.value &&
-      collection.value.revision_id !== latestRevision.value,
+  const historical = computed(() => key(selected.value) !== '')
+  /** The point the timeline marks as shown. */
+  const shownPoint = computed(() =>
+    historical.value ? selected.value : latestPoint.value,
   )
   let controller = new AbortController()
   // Once the collection is on screen, a failed action must not replace it or
@@ -94,7 +105,7 @@ export function useCollectionDetail(
       }
     }
   }
-  let revisionRequest = 0
+  let pointRequest = 0
   let timer: ReturnType<typeof setTimeout> | undefined
   // While this detail sits in the navigation cache it keeps its state but must
   // stay quiet: no polling requests and no routing from a view nobody sees.
@@ -139,12 +150,13 @@ export function useCollectionDetail(
       pending = undefined
       members = undefined
       const signal = controller.signal
-      ++revisionRequest
+      ++pointRequest
       collection.value = undefined
       seen.clear()
-      revisions.value = []
+      selected.value = ''
+      points.value = []
       latestRevision.value = ''
-      loadingRevision.value = false
+      loadingPoint.value = false
       historyLoading.value = false
       next.value = ''
       status.value = ''
@@ -175,13 +187,13 @@ export function useCollectionDetail(
     historyLoading.value = true
     try {
       const p = await call(
-        collections.revisions.$get(
+        collections.history.$get(
           { param: { id: id() }, query: more ? { cursor: next.value } : {} },
           { init: { signal } },
         ),
       )
       if (signal.aborted) return
-      revisions.value = more ? [...revisions.value, ...p.items] : p.items
+      points.value = more ? [...points.value, ...p.items] : p.items
       next.value = p.next_cursor || ''
     } catch (e) {
       if (!signal.aborted) report(e)
@@ -190,48 +202,51 @@ export function useCollectionDetail(
     }
   }
   /**
-   * Show a revision, or the latest without one. A newer request supersedes
-   * one still loading, so a timeline can be dragged across revisions.
+   * Show a point of the history, or the current state without one. A newer
+   * request supersedes one still loading, so a timeline can be dragged
+   * across points.
    */
-  async function revision(revisionID?: string) {
-    if (
-      busy.value ||
-      (revisionID
-        ? revisionID === collection.value?.revision_id
-        : !historical.value)
-    )
-      return
-    const request = ++revisionRequest
-    const known = seen.get(revisionID || latestRevision.value)
-    if (known) {
-      collection.value = known
-      loadingRevision.value = false
+  async function showPoint(point?: string) {
+    if (busy.value) return
+    const target = key(point ?? '')
+    // Any request still loading is superseded, even by moving back to the
+    // point shown.
+    ++pointRequest
+    if (target === key(selected.value)) {
+      loadingPoint.value = false
       return
     }
+    const known = seen.get(target)
+    if (known) {
+      selected.value = target
+      collection.value = known
+      loadingPoint.value = false
+      return
+    }
+    const request = pointRequest
     const signal = controller.signal
-    loadingRevision.value = true
+    loadingPoint.value = true
     error.value = ''
     try {
-      const result =
-        revisionID && revisionID !== latestRevision.value
-          ? await call(
-              collections.revisions[':revision'].$get(
-                { param: { id: id(), revision: revisionID } },
-                { init: { signal } },
-              ),
-            )
-          : await getCollection(id(), signal)
+      const result = target
+        ? await call(
+            collections.history[':capture'].$get(
+              { param: { id: id(), capture: target } },
+              { init: { signal } },
+            ),
+          )
+        : await getCollection(id(), signal)
       if (signal.aborted) return
-      seen.set(result.revision_id, result)
-      if (request !== revisionRequest) return
+      seen.set(target, result)
+      if (request !== pointRequest) return
+      selected.value = target
       collection.value = result
-      if (!revisionID || revisionID === latestRevision.value)
-        latestRevision.value = result.revision_id
+      if (!target) latestRevision.value = result.revision_id
     } catch (e) {
-      if (!signal.aborted && request === revisionRequest) report(e)
+      if (!signal.aborted && request === pointRequest) report(e)
     } finally {
-      if (!signal.aborted && request === revisionRequest)
-        loadingRevision.value = false
+      if (!signal.aborted && request === pointRequest)
+        loadingPoint.value = false
     }
   }
   async function remove() {
@@ -347,7 +362,7 @@ export function useCollectionDetail(
   }
   async function refresh() {
     if (busy.value) return
-    ++revisionRequest
+    ++pointRequest
     busy.value = true
     try {
       await startPoll(
@@ -371,18 +386,20 @@ export function useCollectionDetail(
     error,
     busy,
     status,
-    revisions,
+    points,
     next,
     historical,
+    latestPoint,
+    shownPoint,
     latestRevision,
     historyLoading,
-    loadingRevision,
+    loadingPoint,
     confirmDelete,
     available,
     historyPage,
-    revision,
-    /** Whether a revision shows without a request. */
-    isSeen: (revisionID: string) => seen.has(revisionID),
+    showPoint,
+    /** Whether a point shows without a request. */
+    isSeen: (point: string) => seen.has(key(point)),
     remove,
     refresh,
     checkAvailability,
