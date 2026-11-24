@@ -659,6 +659,8 @@ describe('public lists', () => {
     for (const path of [
       `/collections?tag=${tag.id}`,
       `/collections?tag=`,
+      `/collections?not_tag=${tag.id}`,
+      '/collections?tag_mode=all',
       `/collections?related_to=${ids.five}&tag=${tag.id}`,
       `/collections/authors?tag=${tag.id}`,
     ])

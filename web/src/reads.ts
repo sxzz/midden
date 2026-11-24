@@ -103,7 +103,7 @@ export function readList(params: URLSearchParams, signal?: AbortSignal) {
   if (!shareSlug.value)
     return call(client.collections.$get({ query: query() }, init(signal)))
   params = new URLSearchParams(params)
-  params.delete('tag')
+  for (const key of ['tag', 'tag_mode', 'not_tag']) params.delete(key)
   return call(
     client.public[':slug'].collections.$get(
       { param: { slug: shareSlug.value }, query: query() },

@@ -24,11 +24,12 @@ import type { AccountsContext } from '#accounts/accounts.ts'
 const text = v.optional(v.string())
 
 /**
- * The private list's filters but the tag, which would name the owner's tags:
- * strict, so a `tag` (or anything else unknown) is refused, not ignored.
+ * The private list's filters but those by tag, which would name the owner's
+ * tags: strict, so a `tag`, `tag_mode` or `not_tag` (or anything else
+ * unknown) is refused, not ignored.
  */
 const ListQuery = v.strictObject({
-  ...v.omit(FilterQuery, ['tag']).entries,
+  ...v.omit(FilterQuery, ['tag', 'tag_mode', 'not_tag']).entries,
   cursor: text,
 })
 

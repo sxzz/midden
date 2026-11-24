@@ -483,11 +483,11 @@ function conditionsOf(checked: Checked, related: boolean): SQL[] {
 /**
  * A filter that only narrows another one: its conditions are added to the
  * other's, so it can never select more. It names no related collection and
- * no tag, and the other filter's order stands.
+ * no tag (wanted or not), and the other filter's order stands.
  */
 export type Narrowing = Omit<
   CollectionFilter,
-  'relatedTo' | 'tag' | 'sort' | 'order'
+  'relatedTo' | 'tag' | 'tagMode' | 'notTag' | 'sort' | 'order'
 >
 
 /**
@@ -500,7 +500,8 @@ function select(input: CollectionFilter, narrow?: Narrowing): Selection {
   const conditions = conditionsOf(checked, !!related)
   if (narrow) {
     const extra = check(narrow)
-    if (extra.filter.relatedTo || extra.filter.tag) throw invalid()
+    const { relatedTo, tag, tagMode, notTag } = extra.filter
+    if (relatedTo || tag || tagMode || notTag) throw invalid()
     conditions.push(...conditionsOf(extra, !!related))
     checked.narrow = extra.filter
   }

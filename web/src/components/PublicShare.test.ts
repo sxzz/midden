@@ -197,9 +197,12 @@ it('filters a shared folder newest posts first, without tags', async () => {
   )
   // A tag in the address is never sent.
   const before = listed().length
-  await router.push(`/s/${SLUG}?tag=00000000-0000-7000-8000-00000000000a`)
+  await router.push(
+    `/s/${SLUG}?tag=00000000-0000-7000-8000-00000000000a&tag_mode=all&not_tag=00000000-0000-7000-8000-00000000000b`,
+  )
   await vi.waitFor(() => expect(listed().length).toBeGreaterThan(before))
-  expect(listed().every((q) => !q.has('tag'))).toBe(true)
+  for (const key of ['tag', 'tag_mode', 'not_tag'])
+    expect(listed().every((q) => !q.has(key))).toBe(true)
   expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
 })
 

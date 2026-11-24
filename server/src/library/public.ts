@@ -62,7 +62,7 @@ export interface PublicShare {
  */
 export interface PublicListQuery extends Omit<
   FilterParams,
-  'tag' | 'related_to'
+  'tag' | 'tag_mode' | 'not_tag' | 'related_to'
 > {
   /** A profile's attached posts instead of the folder's own list. */
   related_to?: string
