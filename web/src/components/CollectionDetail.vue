@@ -8,8 +8,7 @@ import CollectionAnnotations from './CollectionAnnotations.vue'
 import CollectionPost from './CollectionPost.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
 import ProfileCollections from './ProfileCollections.vue'
-import ProfileTimeline from './ProfileTimeline.vue'
-import RevisionList from './RevisionList.vue'
+import RevisionTimeline from './RevisionTimeline.vue'
 import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
@@ -30,13 +29,10 @@ const {
   status,
   revisions,
   next,
-  showHistory,
   historical,
   latestRevision,
-  noHistory,
   historyLoading,
   loadingRevision,
-  toggleHistory,
   confirmDelete,
   available,
   historyPage,
@@ -101,24 +97,26 @@ const version = computed(() =>
   /></ListSection>
   <template v-if="collection">
     <ListSection>
-      <CollectionSkeleton v-if="loadingRevision && !isProfile" detail />
-      <!-- A profile stays on screen while the timeline fetches a revision, so
-           what changed between the two reads as a change. -->
+      <!-- The collection stays on screen while the timeline fetches a
+           revision, so what changed between the two reads as a change. -->
       <CollectionPost
-        v-else
         :class="{ fetching: loadingRevision }"
         :collection="collection"
         :saved-at="savedAt"
         :show-sensitive="showSensitive"
       />
     </ListSection>
-    <ListSection v-if="isProfile && revisions.length > 1" title="资料变化">
-      <ProfileTimeline
+    <ListSection
+      v-if="revisions.length > 1"
+      :title="isProfile ? '资料变化' : '内容变化'"
+    >
+      <RevisionTimeline
         :revisions="revisions"
         :selected-id="collection.revision_id"
         :latest-id="latestRevision"
         :more="!!next"
         :loading="historyLoading"
+        :label="isProfile ? '资料版本' : '内容版本'"
         @select="preview"
         @more="historyPage(true)"
       />
@@ -134,27 +132,6 @@ const version = computed(() =>
         v-if="!available"
         label="重试连接采集服务"
         @select="checkAvailability"
-      />
-      <ListButton
-        v-if="!isProfile"
-        :label="noHistory ? '无历史版本' : '历史版本'"
-        :trailing="noHistory ? undefined : showHistory ? '收起' : '展开'"
-        :disabled="noHistory"
-        :aria-expanded="showHistory && !noHistory"
-        aria-controls="revision-options"
-        @select="toggleHistory"
-      />
-      <RevisionList
-        v-if="!isProfile && showHistory && !noHistory"
-        id="revision-options"
-        :revisions="revisions"
-        :next="next"
-        :busy="busy || loadingRevision"
-        :loading="historyLoading"
-        :selected-id="collection.revision_id"
-        :latest-id="latestRevision"
-        @select="revision"
-        @more="historyPage(true)"
       />
       <!-- The reader's own notes, folded, then the one destructive action:
            every action on this collection in one card. -->

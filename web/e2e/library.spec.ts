@@ -86,15 +86,16 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await expect(
     page.locator('.section-footnote').filter({ hasText: '保存于' }),
   ).toHaveCount(0)
-  await page.getByRole('button', { name: '历史版本' }).click()
-  await page.getByRole('button', { name: /2026年9月27日/ }).click()
+  const timeline = page.getByRole('slider', { name: '内容版本' })
+  await expect(page.getByText('内容变化')).toBeVisible()
+  await timeline.focus()
+  await page.keyboard.press('Home')
   await expect(page.getByText('历史正文')).toBeVisible()
-  await expect(
-    page.getByRole('button', { name: /2026年9月27日/ }),
-  ).toBeDisabled()
-  await page.getByRole('button', { name: /最新版本 ·/ }).click()
+  await expect(page.getByText(/历史版本抓取于/)).toBeVisible()
+  await expect(page.locator('.timeline .when')).toContainText('2026年9月27日')
+  await page.keyboard.press('End')
   await expect(page.getByText(collection.text)).toBeVisible()
-  await expect(page.getByRole('button', { name: /最新版本 ·/ })).toBeDisabled()
+  await expect(page.locator('.timeline .when')).toContainText('最新版本')
   await page.getByRole('button', { name: '重新抓取' }).click()
   await expect(page.getByText('已更新。')).toBeVisible()
   expect(captureBodies.at(-1)).toEqual({ refresh_id: id })
@@ -290,10 +291,16 @@ test('loading skeletons, one revision and touch image navigation', async ({
     await r.fulfill({ json: body })
   })
   await page.goto('/app/')
+  const history = page.waitForResponse((r) =>
+    new URL(r.url()).pathname.endsWith('/revisions'),
+  )
   await page.locator('.head').filter({ hasText: '测试作者' }).click()
   await expect(page.getByRole('status', { name: '正在加载收藏' })).toBeVisible()
   releaseDetail()
-  await expect(page.getByRole('button', { name: '无历史版本' })).toBeDisabled()
+  await history
+  // A post with a single revision has no history to show.
+  await expect(page.getByRole('slider')).toHaveCount(0)
+  await expect(page.getByText(/历史版本|内容变化/)).toHaveCount(0)
   await expect(page.locator('.media .skeleton')).toHaveCount(2)
   releaseImage()
   await expect(page.locator('.media .skeleton')).toHaveCount(0)

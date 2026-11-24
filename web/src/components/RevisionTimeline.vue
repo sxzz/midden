@@ -10,6 +10,8 @@ const props = defineProps<{
   /** Older revisions remain to be loaded. */
   more: boolean
   loading?: boolean
+  /** Names the slider for what changes across revisions. */
+  label: string
 }>()
 const emit = defineEmits<{ select: [id: string]; more: [] }>()
 // Oldest on the left, so dragging right moves forward in time.
@@ -73,7 +75,7 @@ function settle() {
         :max="last"
         step="1"
         :value="index"
-        aria-label="资料版本"
+        :aria-label="label"
         :aria-valuetext="`${date(at?.created_at)}${latest ? '，最新版本' : ''}`"
         @input="move"
         @change="settle"

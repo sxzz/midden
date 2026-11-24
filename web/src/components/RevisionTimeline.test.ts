@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from 'vitest'
 import { createVaporApp, nextTick } from 'vue'
-import ProfileTimeline from './ProfileTimeline.vue'
+import RevisionTimeline from './RevisionTimeline.vue'
 
 let unmount = () => {}
 afterEach(() => {
@@ -20,11 +20,12 @@ function mount(props: Record<string, unknown>) {
   document.body.append(el)
   const selected: string[] = []
   const more: unknown[] = []
-  const app = createVaporApp(ProfileTimeline, {
+  const app = createVaporApp(RevisionTimeline, {
     revisions,
     selectedId: 'r3',
     latestId: 'r3',
     more: false,
+    label: '资料版本',
     // Vapor reads function props as getters: return the handler.
     onSelect: () => (id: string) => selected.push(id),
     onMore: () => () => more.push(1),

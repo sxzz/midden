@@ -56,11 +56,9 @@ export function useCollectionDetail(
   const status = shallowRef('')
   const revisions = shallowRef<Revision[]>([])
   const next = shallowRef('')
-  const showHistory = shallowRef(false)
   const latestRevision = shallowRef('')
   const loadingRevision = shallowRef(false)
   const historyLoading = shallowRef(false)
-  const historyLoaded = shallowRef(false)
   const confirmDelete = shallowRef(false)
   /** Revisions already fetched, so moving back to one shows it at once. */
   const seen = new Map<string, Collection>()
@@ -77,9 +75,6 @@ export function useCollectionDetail(
     () =>
       !!collection.value &&
       collection.value.revision_id !== latestRevision.value,
-  )
-  const noHistory = computed(
-    () => historyLoaded.value && !next.value && revisions.value.length <= 1,
   )
   let controller = new AbortController()
   // Once the collection is on screen, a failed action must not replace it or
@@ -148,11 +143,9 @@ export function useCollectionDetail(
       collection.value = undefined
       seen.clear()
       revisions.value = []
-      showHistory.value = false
       latestRevision.value = ''
       loadingRevision.value = false
       historyLoading.value = false
-      historyLoaded.value = false
       next.value = ''
       status.value = ''
       error.value = ''
@@ -190,16 +183,11 @@ export function useCollectionDetail(
       if (signal.aborted) return
       revisions.value = more ? [...revisions.value, ...p.items] : p.items
       next.value = p.next_cursor || ''
-      historyLoaded.value = true
     } catch (e) {
       if (!signal.aborted) report(e)
     } finally {
       if (!signal.aborted) historyLoading.value = false
     }
-  }
-  function toggleHistory() {
-    showHistory.value = !showHistory.value
-    if (showHistory.value && !historyLoaded.value) void historyPage()
   }
   /**
    * Show a revision, or the latest without one. A newer request supersedes
@@ -385,13 +373,10 @@ export function useCollectionDetail(
     status,
     revisions,
     next,
-    showHistory,
     historical,
     latestRevision,
-    noHistory,
     historyLoading,
     loadingRevision,
-    toggleHistory,
     confirmDelete,
     available,
     historyPage,
