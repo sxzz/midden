@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { and, asc, desc, eq, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import {
   assets,
@@ -23,7 +23,7 @@ import {
 import { splitMetrics } from './metrics.ts'
 import { unsaveIfEmpty } from './scope.ts'
 import { markUnreferenced } from './submit.ts'
-import type { Database, Transaction } from '#db/client.ts'
+import type { Transaction } from '#db/client.ts'
 import type { Job } from '#jobs/queue.ts'
 import type { Platforms } from '#platforms/registry.ts'
 import type { CaptureContext } from './context.ts'
@@ -206,56 +206,6 @@ export function revisionDigest(
         })),
     }),
   )
-}
-
-/**
- * Compute what history points show for revisions stored before the digest
- * was kept, a batch per transaction, so their look-alike points fold too.
- * Returns how many were filled.
- */
-export function fillViewHashes(
-  db: Database,
-  platforms: Platforms,
-  batch = 500,
-): number {
-  let filled = 0
-  for (;;) {
-    const rows = db
-      .select({
-        id: revisions.id,
-        captureId: revisions.captureId,
-        payload: revisions.payload,
-        adapterId: captures.adapterId,
-      })
-      .from(revisions)
-      .innerJoin(captures, eq(captures.id, revisions.captureId))
-      .where(isNull(revisions.viewHash))
-      .limit(batch)
-      .all()
-    if (!rows.length) return filled
-    db.transaction((tx) => {
-      for (const row of rows) {
-        const payload = row.payload as Payload
-        const context = new Set(
-          (payload.graph?.entities ?? [])
-            .filter((e) => e.context_only)
-            .map(identity),
-        )
-        const viewHash = revisionDigest(
-          payload,
-          captureAssets(tx, row.captureId),
-          context,
-          ignoredPaths(platforms, row.adapterId, payload.metric_paths),
-          true,
-        )
-        tx.update(revisions)
-          .set({ viewHash })
-          .where(eq(revisions.id, row.id))
-          .run()
-      }
-    })
-    filled += rows.length
-  }
 }
 
 /**

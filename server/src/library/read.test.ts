@@ -2,7 +2,6 @@ import { Buffer } from 'node:buffer'
 import { randomUUIDv7 } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
-import { fillViewHashes } from '#capture/finalize.ts'
 import {
   assets,
   blobs,
@@ -436,7 +435,7 @@ describe('collection', () => {
     ])
   })
 
-  test('revisions stored before view hashes fold once they are filled', async () => {
+  test('revisions without a view hash fall back to their own points', async () => {
     const state = { timeline: true, name: 'name' }
     const { ctx } = reposter(state)
     const first = await capture(ctx, profile('100'))
@@ -444,7 +443,7 @@ describe('collection', () => {
     state.timeline = false
     const bare = await refresh()
     state.timeline = true
-    await refresh()
+    const again = await refresh()
     function refresh() {
       return capture(ctx, { refreshId: id })
     }
@@ -452,15 +451,9 @@ describe('collection', () => {
     const folded = points()
     expect(folded).toEqual([first.id])
 
-    // As stored before: no view hash, so each revision is its own point.
+    // Without a view hash, each revision is its own point.
     ctx.db.update(revisions).set({ viewHash: null }).run()
-    expect(points()).toHaveLength(3)
-    expect(fillViewHashes(ctx.db, ctx.platforms, 2)).toBe(3)
-    expect(fillViewHashes(ctx.db, ctx.platforms)).toBe(0)
-    expect(points()).toEqual(folded)
-    const hashes = ctx.db.select().from(revisions).all()
-    expect(new Set(hashes.map((r) => r.viewHash)).size).toBe(1)
-    expect(new Set(hashes.map((r) => r.id))).toContain(bare.revisionId)
+    expect(points()).toEqual([again.id, bare.id, first.id])
   })
 
   test('history pages 20 points at a time across folded captures', async () => {
