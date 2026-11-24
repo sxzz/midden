@@ -332,6 +332,13 @@ test('profile update links to its record and shows new posts on return', async (
   await expect(rows).toHaveCount(3)
   await expect(rows.first()).toContainText('新帖子 3')
 
+  // A soft refresh reloads the list in place.
+  saved = [postN(4), ...saved]
+  const before = listLoads
+  await related.getByRole('button', { name: '刷新', exact: true }).click()
+  await expect(rows).toHaveCount(4)
+  expect(listLoads).toBe(before + 1)
+
   // Below the whole list: the posts after the last page read.
   await related.getByRole('button', { name: '抓取更早的帖子' }).click()
   await expect(page.locator('.toast')).toHaveText('已开始抓取更早的帖子')
@@ -339,11 +346,4 @@ test('profile update links to its record and shows new posts on return', async (
     target: { target: 'collection', id: profileId },
     options: { posts: 'older' },
   })
-
-  // A soft refresh reloads the list in place.
-  saved = [postN(4), ...saved]
-  const before = listLoads
-  await related.getByRole('button', { name: '刷新', exact: true }).click()
-  await expect(rows).toHaveCount(4)
-  expect(listLoads).toBe(before + 1)
 })
