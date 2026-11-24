@@ -17,6 +17,8 @@ import {
   type Focus,
   type GraphEdgeView,
   type GraphModel,
+  type GraphNodeView,
+  type ViewerRelation,
 } from './graph'
 import {
   LABEL_GAP,
@@ -24,7 +26,7 @@ import {
   placeLabels,
   type LabelCandidate,
 } from './graph-labels'
-import { ringLayout } from './graph-layout'
+import { ringLayout, stretchToAspect } from './graph-layout'
 import type { LayoutRequest, LayoutUpdate } from './graph-layout.worker'
 
 /**
@@ -52,6 +54,8 @@ export interface GraphTheme {
   peer: string
   /** The stage behind the graph, outlining names over edges. */
   card: string
+  /** The viewer's badge: apart from every ring colour. */
+  viewer: string
 }
 
 /** The page's colours, read from its CSS tokens (Telegram's or ours). */
@@ -70,6 +74,7 @@ export function readTheme(element: Element = document.documentElement) {
     followers: dark ? '#f0a35a' : '#d9822b',
     mutual: dark ? '#5fcf8a' : '#2e9e5b',
     peer: dark ? '#b9a4f5' : '#6a4fc9',
+    viewer: dark ? '#ff6b9a' : '#d6336c',
   } satisfies GraphTheme
 }
 
@@ -84,6 +89,8 @@ interface NodeAttributes {
   kind: string
   initial: string
   followers: number
+  /** The viewer's relation to it, or ''. */
+  mark: string
   [key: string]: unknown
 }
 
@@ -98,6 +105,8 @@ export interface GraphCanvas {
   show: (model: GraphModel) => void
   /** Mark one node as chosen, or none. */
   select: (key: string | undefined) => void
+  /** Fade the accounts the viewer has no relation to. */
+  setDim: (dim: boolean) => void
   setTheme: (theme: GraphTheme) => void
   /** Follow a change of the container's size. */
   resize: () => void
@@ -137,11 +146,80 @@ function initialImage(
   return url
 }
 
+/** Accounts the viewer has no relation to, when those are faded. */
+const DIMMED = 0.15
+
+/** The ring a node goes in: the kinds of a profile's graph only. */
+const ringKind = (kind: GraphNodeView['kind']) =>
+  kind && kind !== 'shared' ? { kind } : {}
+
+/**
+ * The viewer's badge on an avatar: a filled one with a heart for a mutual
+ * follow, with a check when the viewer follows it, and an outlined one
+ * with a dot when it follows the viewer.
+ */
+function drawMark(
+  g: CanvasRenderingContext2D,
+  relation: ViewerRelation,
+  at: { x: number; y: number; r: number; color: string; card: string },
+) {
+  const { x, y, r } = at
+  g.save()
+  g.beginPath()
+  g.arc(x, y, r, 0, Math.PI * 2)
+  g.fillStyle = relation === 'follower' ? at.card : at.color
+  g.fill()
+  g.lineWidth = Math.max(1.5, r * 0.22)
+  g.strokeStyle = relation === 'follower' ? at.color : at.card
+  g.stroke()
+  if (relation === 'mutual') {
+    // A heart.
+    const s = r * 0.52
+    g.beginPath()
+    g.moveTo(x, y + s * 0.85)
+    g.bezierCurveTo(
+      x - s * 1.3,
+      y - s * 0.1,
+      x - s * 0.6,
+      y - s * 1.1,
+      x,
+      y - s * 0.4,
+    )
+    g.bezierCurveTo(
+      x + s * 0.6,
+      y - s * 1.1,
+      x + s * 1.3,
+      y - s * 0.1,
+      x,
+      y + s * 0.85,
+    )
+    g.fillStyle = at.card
+    g.fill()
+  } else if (relation === 'following') {
+    g.beginPath()
+    g.moveTo(x - r * 0.42, y + r * 0.02)
+    g.lineTo(x - r * 0.1, y + r * 0.34)
+    g.lineTo(x + r * 0.45, y - r * 0.3)
+    g.lineWidth = Math.max(1.5, r * 0.26)
+    g.lineCap = 'round'
+    g.lineJoin = 'round'
+    g.strokeStyle = at.card
+    g.stroke()
+  } else {
+    g.beginPath()
+    g.arc(x, y, r * 0.32, 0, Math.PI * 2)
+    g.fillStyle = at.color
+    g.fill()
+  }
+  g.restore()
+}
+
 export function createGraphCanvas(
   container: HTMLElement,
   options: { theme: GraphTheme; onSelect: (key: string | undefined) => void },
 ): GraphCanvas {
   let theme = options.theme
+  let dim = false
   const initials = new Map<string, string>()
   const graph = new Graph<NodeAttributes, EdgeAttributes>({
     type: 'directed',
@@ -176,11 +254,13 @@ export function createGraphCanvas(
           size: { attribute: 'size' },
           color: (attributes) => nodeColor(attributes),
           ...imageStyle,
-          opacity: (_attributes, state, graphState) =>
-            nodeOpacity({
-              highlighted: state.isHighlighted,
-              focusing: graphState.hasHighlighted,
-            }),
+          opacity: (attributes, state, graphState) =>
+            dim && !attributes.mark && !state.isHighlighted
+              ? DIMMED
+              : nodeOpacity({
+                  highlighted: state.isHighlighted,
+                  focusing: graphState.hasHighlighted,
+                }),
           depth: (_attributes, state) =>
             state.isHighlighted || state.isHovered ? 'topNodes' : 'nodes',
         },
@@ -364,6 +444,23 @@ export function createGraphCanvas(
       g.fillStyle = theme.text
       g.fillText(label.text, label.x, label.y + 1)
     }
+    graph.forEachNode((node, a) => {
+      if (!a.mark) return
+      if (focus && !focus.nodes.has(node)) return
+      const data = sigma.getNodeDisplayData(node)
+      if (!data) return
+      const radius = sigma.scaleSize(data.size)
+      if (radius < 7) return
+      const at = sigma.framedGraphToViewport(data)
+      drawMark(g, a.mark as ViewerRelation, {
+        // On the avatar's rim, at its top right.
+        x: at.x + radius * 0.71,
+        y: at.y - radius * 0.71,
+        r: Math.min(11, Math.max(5.5, radius * 0.34)),
+        color: theme.viewer,
+        card: theme.card,
+      })
+    })
   }
 
   const worker = new Worker(
@@ -405,6 +502,7 @@ export function createGraphCanvas(
         kind: node.kind ?? '',
         initial: node.initial,
         followers: node.node.followers ?? -1,
+        mark: node.viewer ?? '',
         // Not a style input: initials are redrawn from it on a theme change.
         avatar: node.image ?? '',
       })
@@ -424,7 +522,7 @@ export function createGraphCanvas(
   }
 
   let placedAspect = 0
-  let placedKind: 'rings' | 'force' = 'rings'
+  let placedKind: 'rings' | 'force' | 'given' = 'rings'
   /**
    * Rings at once; the force layout starts from them in the worker, and
    * the rings stand until it is done.
@@ -432,13 +530,23 @@ export function createGraphCanvas(
   function layout() {
     run++
     placedAspect = aspect()
+    if (model.positions) {
+      // Given places take the canvas's shape, only ever spread apart.
+      const given = [...model.positions].map(([key, p]) => ({ key, ...p }))
+      stretchToAspect(given, placedAspect)
+      for (const { key, x, y } of given)
+        if (graph.hasNode(key)) graph.mergeNodeAttributes(key, { x, y })
+      placedKind = 'given'
+      fit(false)
+      return
+    }
     placedKind = layoutKind(model)
     const rings = ringLayout(
       model.nodes.map((node) => ({
         key: node.key,
         size: node.size,
         center: node.center,
-        ...(node.kind ? { kind: node.kind } : {}),
+        ...ringKind(node.kind),
         ...(node.node.followers === undefined
           ? {}
           : { followers: node.node.followers }),
@@ -491,7 +599,7 @@ export function createGraphCanvas(
         .map((node) => ({
           key: node.key,
           size: node.size,
-          ...(node.kind ? { kind: node.kind } : {}),
+          ...ringKind(node.kind),
           ...(node.node.followers === undefined
             ? {}
             : { followers: node.node.followers }),
@@ -570,16 +678,23 @@ export function createGraphCanvas(
     sigma.refresh()
   }
 
+  function setDim(next: boolean) {
+    dim = next
+    sigma.refresh()
+  }
+
   return {
     show,
     select,
+    setDim,
     setTheme,
     resize: () => {
       sigma.resize()
-      // Rings take the new shape; a force layout keeps its own.
+      // Rings and given places take the new shape; a force layout keeps
+      // its own.
       const now = aspect()
       if (
-        placedKind === 'rings' &&
+        placedKind !== 'force' &&
         model.nodes.length &&
         Math.abs(now / placedAspect - 1) > 0.08
       )

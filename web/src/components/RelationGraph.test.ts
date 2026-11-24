@@ -1,22 +1,39 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createVaporApp, nextTick } from 'vue'
 import { graphModel, type GraphModel } from '../graph'
+import { shareSlug } from '../share'
 import { asset, mockApi } from '../testing/api'
 import GraphNodeCard from './GraphNodeCard.vue'
 import RelationGraph from './RelationGraph.vue'
 import type { FollowGraph } from '../api'
 
-const { push, canvas } = vi.hoisted(() => ({
+const { push, replace, route, canvas } = vi.hoisted(() => ({
   push: vi.fn(),
+  replace: vi.fn(),
+  route: { name: 'collection-graph', query: {} as Record<string, string> },
   canvas: {
     shown: [] as GraphModel[],
     onSelect: undefined as ((key: string | undefined) => void) | undefined,
     selected: [] as (string | undefined)[],
+    dim: [] as boolean[],
     camera: [] as string[],
     killed: false,
   },
 }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
+vi.mock('vue-router', async () => {
+  const { reactive } = await import('vue')
+  const current = reactive(route)
+  return {
+    useRouter: () => ({
+      push,
+      replace: (to: { query: Record<string, string> }) => {
+        replace(to)
+        current.query = to.query
+      },
+    }),
+    useRoute: () => current,
+  }
+})
 // WebGL is out of reach here: the canvas records what it is asked to draw.
 vi.mock('../graph-canvas', () => ({
   readTheme: () => ({}),
@@ -28,6 +45,7 @@ vi.mock('../graph-canvas', () => ({
     return {
       show: (model: GraphModel) => canvas.shown.push(model),
       select: (key: string | undefined) => canvas.selected.push(key),
+      setDim: (dim: boolean) => canvas.dim.push(dim),
       setTheme: () => {},
       resize: () => {},
       zoomIn: () => canvas.camera.push('in'),
@@ -45,6 +63,7 @@ afterEach(() => {
   vi.resetAllMocks()
   canvas.shown = []
   canvas.selected = []
+  canvas.dim = []
   canvas.camera = []
   canvas.killed = false
 })
@@ -287,4 +306,97 @@ it('offers no way on from an account the page may not link to', () => {
   expect([...el.querySelectorAll('.actions button')].map(text)).toEqual([
     '打开详情',
   ])
+})
+
+it('marks accounts by the viewer the address names, and fades the rest', async () => {
+  route.query = { viewer: 'x/x.profile/9' }
+  try {
+    const marked: FollowGraph = {
+      ...graph(),
+      nodes: graph().nodes.map((node) =>
+        node.entity_id === 'm' ? { ...node, viewer: 'mutual' } : node,
+      ),
+      viewer: {
+        key: 'x/x.profile/9',
+        name: '旁观',
+        username: 'watcher',
+        lists: {
+          following: { complete_at: '2026-11-20T08:00:00.000Z' },
+          followers: {},
+        },
+      },
+    }
+    const { el, api } = await mount((path) =>
+      path.startsWith('/collections/perspectives') ? { items: [] } : marked,
+    )
+    // The viewer goes with the read; the owner's own account is not looked up.
+    expect(api).toHaveBeenCalledWith(
+      `/collections/cc/graph?limit=300&viewer=${encodeURIComponent('x/x.profile/9')}`,
+      expect.anything(),
+    )
+    expect(canvas.shown.at(-1)!.nodes.map((n) => n.viewer)).toEqual([
+      undefined,
+      'mutual',
+      undefined,
+    ])
+    const chip = [
+      ...el.querySelectorAll<HTMLButtonElement>('.viewer-bar .chip'),
+    ]
+    expect(chip.map(text)).toEqual(['与 @watcher 的关系1'])
+    expect(text(el.querySelector('.viewer-bar .lists'))).toMatch(
+      /^@watcher 关注名单 11-2\d 完整抓取 · 粉丝名单未抓取$/,
+    )
+    chip[0]!.click()
+    await settle()
+    expect(chip[0]!.getAttribute('aria-pressed')).toBe('true')
+    expect(canvas.dim.at(-1)).toBe(true)
+    // The card says how the viewer relates, by the viewer's name.
+    canvas.onSelect!('m')
+    await settle()
+    expect(text(el.querySelector('.card .viewer'))).toBe('与 @watcher 互关')
+    // The list shows the same badge, the rest faded.
+    ;(el.querySelectorAll('.modes button')[1] as HTMLButtonElement).click()
+    await settle()
+    expect(el.querySelectorAll('.list .viewer-mark')).toHaveLength(1)
+    expect(el.querySelectorAll('.list .avatar.faded')).toHaveLength(1)
+  } finally {
+    route.query = {}
+  }
+})
+
+it('marks nothing without a viewer, nor any data of it', async () => {
+  const { el, api } = await mount((path) =>
+    path.startsWith('/collections/perspectives')
+      ? {
+          items: [
+            { id: 'x/x.profile/1', own: true, following: {}, followers: {} },
+          ],
+        }
+      : graph(),
+  )
+  // The owner's own account is the viewer by default; it relates to none.
+  await vi.waitFor(() =>
+    expect(api).toHaveBeenCalledWith(
+      `/collections/cc/graph?limit=300&viewer=${encodeURIComponent('x/x.profile/1')}`,
+      expect.anything(),
+    ),
+  )
+  expect(el.querySelector('.viewer-bar .chip')).toBeNull()
+  expect(el.querySelector('.viewer-mark')).toBeNull()
+})
+
+it('never marks or compares behind a public link', async () => {
+  shareSlug.value = 'slug'
+  route.query = { viewer: 'x/x.profile/9' }
+  try {
+    const { el, api } = await mount(() => graph())
+    expect(api.mock.calls.map(([path]) => path)).toEqual([
+      '/public/slug/collections/cc/graph?limit=300',
+    ])
+    expect(el.querySelector('.viewer-bar')).toBeNull()
+    expect(el.querySelector('.compare')).toBeNull()
+  } finally {
+    shareSlug.value = ''
+    route.query = {}
+  }
 })

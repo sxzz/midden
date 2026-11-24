@@ -73,6 +73,9 @@ export type FollowGraph = Ok<
   (typeof client.collections)[':id']['graph']['$get']
 >
 export type GraphNode = FollowGraph['nodes'][number]
+export type RelationCompare = Ok<typeof client.collections.compare.$get>
+export type CompareAccount = RelationCompare['accounts'][number]
+export type CompareItem = RelationCompare['items'][number]
 export type Job = Ok<(typeof client.jobs)[':id']['$get']>
 /** How a capture's following or followers list fetch went (抓关系网). */
 export type RelationProgress = NonNullable<Job['relations']>[number]

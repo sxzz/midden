@@ -1,12 +1,23 @@
 <script setup vapor lang="ts">
 import { computed } from 'vue'
 import { previewURL } from '../api'
-import { kindLabels, type GraphNodeView } from '../graph'
+import {
+  kindLabels,
+  viewerLine,
+  type GraphKind,
+  type GraphNodeView,
+} from '../graph'
 import { formatCount } from '../trends'
 import LoadingImage from './ui/LoadingImage.vue'
+import ViewerMark from './ViewerMark.vue'
 // The account tapped in the graph: who it is, its own counts, and where to
 // go from it. Only a saved profile the page may link to offers to go.
-const props = defineProps<{ view: GraphNodeView; showSensitive?: boolean }>()
+const props = defineProps<{
+  view: GraphNodeView
+  showSensitive?: boolean
+  /** The chosen viewer's name, for the line on how it relates. */
+  viewerName?: string
+}>()
 const emit = defineEmits<{
   center: [id: string]
   open: [id: string]
@@ -18,6 +29,17 @@ const avatar = computed(() =>
 )
 const blurred = computed(
   () => !!node.value.avatar?.sensitive && !props.showSensitive,
+)
+/** The kind of a profile's graph; a comparison says more in its slot. */
+const kind = computed(() =>
+  props.view.kind && props.view.kind in kindLabels
+    ? (props.view.kind as GraphKind)
+    : undefined,
+)
+const viewerText = computed(() =>
+  props.view.viewer && props.viewerName
+    ? viewerLine(props.view.viewer, props.viewerName)
+    : '',
 )
 const counts = computed(() => {
   const parts: string[] = []
@@ -43,12 +65,16 @@ const counts = computed(() => {
         <span v-if="node.name && node.username" class="handle"
           >@{{ node.username }}</span
         >
-        <span v-if="counts.length || view.kind" class="meta">
-          <span v-if="view.kind" class="kind" :class="view.kind">{{
-            kindLabels[view.kind]
+        <span v-if="counts.length || kind" class="meta">
+          <span v-if="kind" class="kind" :class="kind">{{
+            kindLabels[kind]
           }}</span>
           <span v-for="part in counts" :key="part">{{ part }}</span>
         </span>
+        <span v-if="viewerText" class="viewer"
+          ><ViewerMark :relation="view.viewer!" />{{ viewerText }}</span
+        >
+        <slot />
       </span>
       <button
         type="button"
@@ -159,6 +185,18 @@ const counts = computed(() => {
 }
 .kind.mutual {
   color: #2e9e5b;
+}
+.viewer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 13px;
+}
+.viewer :deep(.viewer-mark) {
+  width: 16px;
+  height: 16px;
+  box-shadow: none;
 }
 .close {
   flex: none;

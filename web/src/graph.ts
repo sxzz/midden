@@ -1,6 +1,6 @@
 import { previewURL, type FollowGraph, type GraphNode } from './api'
 import { accountName } from './follows'
-import { byFollowers, ringOrder } from './graph-layout'
+import { byFollowers, ringOrder, type Point } from './graph-layout'
 
 // The follow graph (关系图谱) as the page draws it: what the server sends,
 // turned into nodes and edges with their looks. Kept free of sigma so it
@@ -24,11 +24,17 @@ export const kindLabels: Record<GraphKind, string> = {
 /** How many accounts the page asks for at first, and more each time. */
 export const GRAPH_PAGE = 300
 
+/** How the chosen viewer account relates to a node. */
+export type ViewerRelation = NonNullable<GraphNode['viewer']>
+
 export interface GraphNodeView {
   key: string
   node: GraphNode
   center: boolean
-  kind?: GraphKind
+  /** A comparison's account shared by several compared ones is `shared`. */
+  kind?: GraphKind | 'shared'
+  /** The viewer's relation to it, when a viewer is chosen and has one. */
+  viewer?: ViewerRelation
   /** Radius in layout units: the center biggest, others a little by followers. */
   size: number
   /** The avatar to draw, if any; else `initial` stands for it. */
@@ -56,6 +62,8 @@ export interface GraphEdgeView {
 export interface GraphModel {
   nodes: GraphNodeView[]
   edges: GraphEdgeView[]
+  /** Places worked out beforehand (a comparison's), instead of a layout. */
+  positions?: Map<string, Point>
 }
 
 /** The first character of the name shown, for an account without avatar. */
@@ -67,7 +75,7 @@ export function initialOf(node: GraphNode): string {
 
 /** The radius of an account's avatar, in layout units. */
 export const NODE_SIZE = 20
-const CENTER_SIZE = 30
+export const CENTER_SIZE = 30
 
 /**
  * A node's size by its follower count, on a log scale but mildly: from
@@ -118,6 +126,7 @@ export function graphModel(
       node,
       center: index === 0,
       ...(node.kind ? { kind: node.kind } : {}),
+      ...(node.viewer ? { viewer: node.viewer } : {}),
       size: index === 0 ? CENTER_SIZE : nodeSize(node.followers),
       // A sensitive avatar stays covered by the initial unless all are shown.
       ...(image && (options.showSensitive || !node.avatar?.sensitive)
@@ -141,7 +150,7 @@ export function graphModel(
       source: nodes[a]!.key,
       target: nodes[b]!.key,
       mutual: back,
-      kind: other === undefined ? 'peer' : nodes[other]!.kind!,
+      kind: other === undefined ? 'peer' : (nodes[other]!.kind as GraphKind),
     })
   }
   return { nodes, edges }
@@ -235,6 +244,23 @@ export const nodeOpacity = (state: {
   highlighted: boolean
   focusing: boolean
 }) => (state.focusing && !state.highlighted ? 0.22 : 1)
+
+/**
+ * The card's line on how the viewer relates to an account, by the viewer's
+ * name: 「与 @foo 互关」, 「@foo 关注了 TA」, 「TA 关注了 @foo」.
+ */
+export function viewerLine(relation: ViewerRelation, name: string): string {
+  if (relation === 'mutual') return `与 ${name} 互关`
+  if (relation === 'following') return `${name} 关注了 TA`
+  return `TA 关注了 ${name}`
+}
+
+/** The badge's words, for its label: the same, shortly. */
+export const viewerLabels: Record<ViewerRelation, string> = {
+  mutual: '互关',
+  following: '已关注',
+  follower: '关注者',
+}
 
 /** A day as the completeness line names it, e.g. 11-20, with the year if not this one. */
 export function shortDay(value: string, now = new Date()): string {

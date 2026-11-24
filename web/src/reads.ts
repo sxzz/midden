@@ -98,16 +98,47 @@ export function readFollowChanges(
  */
 export function readGraph(
   id: string,
-  options: { kinds?: readonly string[]; limit?: number } = {},
+  options: { kinds?: readonly string[]; limit?: number; viewer?: string } = {},
   signal?: AbortSignal,
 ) {
   const query: Record<string, string> = {}
   if (options.kinds) query.kinds = options.kinds.join(',')
   if (options.limit) query.limit = String(options.limit)
+  // Whose follows mark the nodes is the owner's alone.
+  if (shareSlug.value)
+    return call(
+      shared[':id'].graph.$get({ param: at(id), query }, init(signal)),
+    )
+  if (options.viewer) query.viewer = options.viewer
+  return call(own.graph.$get({ param: { id }, query }, init(signal)))
+}
+
+/** Several accounts' relations side by side; the owner's alone. */
+export function readCompare(
+  query: {
+    rel_of: string[]
+    rel: 'following' | 'followers'
+    rel_min?: number
+    only?: readonly number[]
+    limit?: number
+    viewer?: string
+  },
+  signal?: AbortSignal,
+) {
   return call(
-    shareSlug.value
-      ? shared[':id'].graph.$get({ param: at(id), query }, init(signal))
-      : own.graph.$get({ param: { id }, query }, init(signal)),
+    client.collections.compare.$get(
+      {
+        query: {
+          rel_of: query.rel_of,
+          rel: query.rel,
+          ...(query.rel_min ? { rel_min: String(query.rel_min) } : {}),
+          ...(query.only ? { only: query.only.join(',') } : {}),
+          ...(query.limit ? { limit: String(query.limit) } : {}),
+          ...(query.viewer ? { viewer: query.viewer } : {}),
+        },
+      },
+      init(signal),
+    ),
   )
 }
 

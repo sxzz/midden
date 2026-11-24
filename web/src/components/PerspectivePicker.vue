@@ -12,6 +12,8 @@ const props = defineProps<{
   single?: boolean
   /** Accounts not to offer, such as those already compared. */
   exclude?: string[]
+  /** The summary with nothing picked, `全部` by default. */
+  empty?: string
 }>()
 const selected = defineModel<string[]>({ required: true })
 const emit = defineEmits<{
@@ -123,6 +125,7 @@ defineExpose({ load })
     :label="label"
     remote
     :single="single"
+    :empty="empty"
     :options="options"
     :names="names"
     :loading="loading"

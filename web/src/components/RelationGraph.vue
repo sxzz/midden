@@ -1,15 +1,9 @@
 <script setup vapor lang="ts">
-import {
-  computed,
-  onActivated,
-  onMounted,
-  onUnmounted,
-  shallowRef,
-  useTemplateRef,
-  watch,
-} from 'vue'
+import { computed, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { errorText, type FollowGraph } from '../api'
+import { useGraphCanvas } from '../composables/useGraphCanvas'
+import { useViewer } from '../composables/useViewer'
 import {
   GRAPH_PAGE,
   graphGroups,
@@ -20,14 +14,17 @@ import {
   type GraphKind,
 } from '../graph'
 import { readGraph } from '../reads'
-import { collectionRoute } from '../share'
+import { perspectiveName } from '../relation-filter'
+import { collectionRoute, shareSlug } from '../share'
 import { formatCount } from '../trends'
 import GraphNodeCard from './GraphNodeCard.vue'
 import Spinner from './ui/Spinner.vue'
-import type { GraphCanvas } from '../graph-canvas'
+import ViewerBar from './ViewerBar.vue'
+import ViewerMark from './ViewerMark.vue'
 // 关系图谱: a profile, the accounts it follows and that follow it, and the
 // follows among them, drawn with sigma (the renderer loads with this page),
-// or listed by kind.
+// or listed by kind. The owner may mark the accounts by another account's
+// follows (the viewer).
 const props = defineProps<{ id: string; showSensitive?: boolean }>()
 const graph = shallowRef<FollowGraph>()
 const error = shallowRef('')
@@ -41,6 +38,10 @@ const modes = [
   { value: 'graph', label: '图谱' },
   { value: 'list', label: '列表' },
 ] as const
+const shared = computed(() => !!shareSlug.value)
+const { viewer, ready, setViewer } = useViewer()
+/** Accounts the viewer has no relation to fade. */
+const dim = shallowRef(false)
 let controller = new AbortController()
 async function load() {
   controller.abort()
@@ -51,7 +52,11 @@ async function load() {
     const all = kinds.value.length === graphKinds.length
     const result = await readGraph(
       props.id,
-      { ...(all ? {} : { kinds: kinds.value }), limit: limit.value },
+      {
+        ...(all ? {} : { kinds: kinds.value }),
+        limit: limit.value,
+        ...(viewer.value ? { viewer: viewer.value } : {}),
+      },
       signal,
     )
     if (signal.aborted) return
@@ -63,9 +68,11 @@ async function load() {
     if (!signal.aborted) loading.value = false
   }
 }
+// The first read waits for the viewer, so the graph comes marked at once.
 watch(
-  () => props.id,
-  () => {
+  () => (ready.value ? props.id : ''),
+  (id) => {
+    if (!id) return
     graph.value = undefined
     selected.value = undefined
     kinds.value = [...graphKinds]
@@ -74,6 +81,9 @@ watch(
   },
   { immediate: true },
 )
+watch(viewer, () => {
+  if (graph.value) void load()
+})
 function toggle(kind: GraphKind) {
   kinds.value = kinds.value.includes(kind)
     ? kinds.value.filter((k) => k !== kind)
@@ -94,6 +104,14 @@ const model = computed(() =>
 const shown = computed(() => Math.max(0, model.value.nodes.length - 1))
 const groups = computed(() => graphGroups(model.value))
 const lists = computed(() => listsText(graph.value?.lists))
+const marked = computed(
+  () => model.value.nodes.filter((view) => view.viewer).length,
+)
+const viewerName = computed(() =>
+  graph.value?.viewer
+    ? perspectiveName(graph.value.viewer.key, graph.value.viewer)
+    : '',
+)
 const selectedView = computed(() =>
   model.value.nodes.find((node) => node.key === selected.value),
 )
@@ -103,73 +121,21 @@ function brokenImage(key: string) {
   broken.value = new Set(broken.value).add(key)
 }
 
-const stage = useTemplateRef<HTMLElement>('stage')
-const surface = useTemplateRef<HTMLElement>('surface')
-const height = shallowRef(0)
-/** The stage takes the rest of the viewport below the controls. */
-function fitHeight() {
-  const element = stage.value
-  if (!element) return
-  const top = element.getBoundingClientRect().top + window.scrollY
-  height.value = Math.max(320, window.innerHeight - top - 12)
-}
-let canvas: GraphCanvas | undefined
-const canvasError = shallowRef('')
-let disposed = false
-let observer: MutationObserver | undefined
-const controls = useTemplateRef<HTMLElement>('controls')
-// The controls grow when the counts arrive and the chips wrap, or a
-// banner shows: the stage below moves down and must end at the viewport.
-const growth =
-  typeof ResizeObserver === 'undefined'
-    ? undefined
-    : new ResizeObserver(() => fitHeight())
-const scheme = window.matchMedia?.('(prefers-color-scheme: dark)')
-onMounted(async () => {
-  fitHeight()
-  window.addEventListener('resize', fitHeight)
-  if (controls.value) growth?.observe(controls.value)
-  try {
-    const { createGraphCanvas, readTheme } = await import('../graph-canvas')
-    if (disposed || !surface.value) return
-    canvas = createGraphCanvas(surface.value, {
-      theme: readTheme(),
-      onSelect: (key) => (selected.value = key),
-    })
-    const retheme = () => canvas?.setTheme(readTheme())
-    // Telegram sets its colours on the root's style; the app its data-theme.
-    observer = new MutationObserver(retheme)
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['style', 'data-theme'],
-    })
-    scheme?.addEventListener('change', retheme)
-    canvas.show(model.value)
-  } catch {
-    // Sigma needs WebGL 2.
-    canvasError.value = '此设备无法显示关系图谱。'
-    mode.value = 'list'
-  }
+const {
+  height,
+  error: canvasError,
+  canvas,
+} = useGraphCanvas({
+  stage: useTemplateRef<HTMLElement>('stage'),
+  surface: useTemplateRef<HTMLElement>('surface'),
+  controls: useTemplateRef<HTMLElement>('controls'),
+  model,
+  selected,
+  mode,
+  dim: computed(() => dim.value && marked.value > 0),
 })
-watch(model, (value) => {
-  canvas?.show(value)
-  canvas?.select(selected.value)
-})
-watch(selected, (key) => canvas?.select(key))
-// After the new height is laid out, or the canvas is shown again.
-watch([height, mode], () => requestAnimationFrame(() => canvas?.resize()))
-onUnmounted(() => {
-  disposed = true
-  window.removeEventListener('resize', fitHeight)
-  observer?.disconnect()
-  growth?.disconnect()
-  canvas?.kill()
-})
-
-// Back from the cache: the viewport may have changed meanwhile.
-onActivated(() => {
-  fitHeight()
-  requestAnimationFrame(() => canvas?.resize())
+watch(canvasError, (value) => {
+  if (value) mode.value = 'list'
 })
 
 const router = useRouter()
@@ -217,6 +183,15 @@ function open(id: string) {
         </div>
       </div>
       <p v-if="lists" class="lists">{{ lists }}</p>
+      <template v-if="!shared">
+        <ViewerBar
+          v-model:dim="dim"
+          :viewer="viewer"
+          :info="graph?.viewer"
+          :marked="marked"
+          @change="setViewer"
+        />
+      </template>
       <p v-if="error" class="banner" role="alert">{{ error }}</p>
       <p v-if="canvasError" class="banner" role="alert">{{ canvasError }}</p>
     </div>
@@ -236,7 +211,13 @@ function open(id: string) {
                 :class="{ on: view.key === selected }"
                 @click="selected = view.key"
               >
-                <span class="avatar" :class="group.kind">
+                <span
+                  class="avatar"
+                  :class="[
+                    group.kind,
+                    { faded: dim && marked && !view.viewer },
+                  ]"
+                >
                   <img
                     v-if="view.image && !broken.has(view.key)"
                     :src="view.image"
@@ -249,6 +230,7 @@ function open(id: string) {
                   <span v-else class="initial" aria-hidden="true">{{
                     view.initial
                   }}</span>
+                  <ViewerMark v-if="view.viewer" :relation="view.viewer" />
                 </span>
                 <span class="name">{{ view.label }}</span>
                 <span v-if="view.node.followers !== undefined" class="followers"
@@ -315,6 +297,7 @@ function open(id: string) {
           v-if="selectedView"
           :view="selectedView"
           :show-sensitive="showSensitive"
+          :viewer-name="viewerName"
           @center="center"
           @open="open"
           @close="selected = undefined"
@@ -481,12 +464,12 @@ h2.mutual .dot {
   background: var(--fill);
 }
 .avatar {
+  position: relative;
   display: grid;
   place-items: center;
   width: 52px;
   height: 52px;
   border-radius: 50%;
-  overflow: hidden;
   background: var(--fill);
   box-shadow:
     0 0 0 2px var(--card),
@@ -504,7 +487,16 @@ h2.mutual .dot {
 .avatar img {
   width: 100%;
   height: 100%;
+  border-radius: 50%;
   object-fit: cover;
+}
+.avatar.faded {
+  opacity: 0.25;
+}
+.avatar :deep(.viewer-mark) {
+  position: absolute;
+  top: -3px;
+  right: -3px;
 }
 .initial {
   font-size: 20px;
@@ -522,7 +514,7 @@ h2.mutual .dot {
   -webkit-line-clamp: 2;
   line-clamp: 2;
 }
-.followers {
+.person .followers {
   color: var(--subtle);
   font-size: 11px;
   font-variant-numeric: tabular-nums;

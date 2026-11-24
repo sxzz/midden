@@ -18,8 +18,10 @@ const props = withDefaults(
     more?: boolean
     /** One value at most: picking replaces it and closes the list. */
     single?: boolean
+    /** What the summary reads with nothing picked. */
+    empty?: string
   }>(),
-  { searchable: true },
+  { searchable: true, empty: '全部' },
 )
 const emit = defineEmits<{ search: [query: string]; more: []; open: [] }>()
 const selected = defineModel<string[]>({ required: true })
@@ -46,7 +48,7 @@ const summary = computed(
           props.names?.[value] ||
           value,
       )
-      .join('、') || '全部',
+      .join('、') || props.empty,
 )
 function toggle(value: string) {
   if (props.single) {

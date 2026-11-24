@@ -145,3 +145,99 @@ test('opens a profile’s follow graph, with kinds to choose and more to load', 
   await page.getByRole('button', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
 })
+
+test('marks the graph by a viewer account', async ({ page }) => {
+  await page.route('https://telegram.org/**', (route) =>
+    route.fulfill({ body: '' }),
+  )
+  const OWN = 'x/x.profile/9'
+  const OTHER = 'x/x.profile/8'
+  const perspectives = [
+    { id: OWN, name: '我', username: 'me', own: true },
+    { id: OTHER, name: '别人', username: 'other' },
+    { id: 'x/x.profile/100', name: '中心账号', username: 'center' },
+  ].map((p) => ({ ...p, following: {}, followers: {} }))
+  const asked: URLSearchParams[] = []
+  await page.route('**/v1/**', (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/graph')) {
+      asked.push(url.searchParams)
+      const viewer = url.searchParams.get('viewer')
+      const base = graph(300)
+      return route.fulfill({
+        json: {
+          ...base,
+          nodes: base.nodes.map((node, i) => ({
+            ...node,
+            key: `x/x.profile/${node.external_id}`,
+            ...(viewer && i % 4 === 1
+              ? { viewer: i % 8 === 1 ? 'mutual' : 'following' }
+              : viewer && i % 9 === 2
+                ? { viewer: 'follower' }
+                : {}),
+          })),
+          ...(viewer
+            ? {
+                viewer: {
+                  key: viewer,
+                  name: viewer === OWN ? '我' : '别人',
+                  username: viewer === OWN ? 'me' : 'other',
+                  lists: {
+                    following: { complete_at: '2026-11-21T08:00:00Z' },
+                    followers: {},
+                  },
+                },
+              }
+            : {}),
+        },
+      })
+    }
+    if (url.pathname === '/v1/collections/perspectives') {
+      const keys = url.searchParams.getAll('rel_of')
+      return route.fulfill({
+        json: {
+          items: keys.length
+            ? perspectives.filter((p) => keys.includes(p.id))
+            : perspectives,
+        },
+      })
+    }
+    return route.fulfill({ json: url.pathname === '/v1/tags' ? [] : {} })
+  })
+  await page.goto(`/app/#/collection/${profileId}/graph`)
+  // The owner's own account marks the graph by default.
+  await expect.poll(() => asked.at(-1)?.get('viewer')).toBe(OWN)
+  expect(asked).toHaveLength(1)
+  const chip = page.locator('.viewer-bar .chip')
+  await expect(chip).toHaveText(/^与 @me 的关系\s*\d+$/)
+  await expect(page.locator('.viewer-bar .lists')).toHaveText(
+    /^@me 关注名单 11-21 完整抓取 · 粉丝名单未抓取$/,
+  )
+  await chip.click()
+  await expect(chip).toHaveAttribute('aria-pressed', 'true')
+  const modes = page
+    .getByRole('group', { name: '显示方式' })
+    .getByRole('button')
+  await modes.nth(1).click()
+  await expect(page.locator('.list .viewer-mark').first()).toBeVisible()
+  await expect(page.locator('.list .avatar.faded').first()).toBeVisible()
+  await page.screenshot({ path: 'test-results/graph-viewer-list.png' })
+  await page.locator('.list .viewer-mark').first().click()
+  await expect(
+    page.getByRole('region', { name: '账号' }).locator('.viewer'),
+  ).toHaveText(/^(与 @me 互关|@me 关注了 TA|TA 关注了 @me)$/)
+  await page.getByRole('button', { name: '关闭' }).click()
+  await modes.nth(0).click()
+  await page.waitForTimeout(500)
+  await page.screenshot({ path: 'test-results/graph-viewer.png' })
+
+  // Another viewer, kept in the address.
+  await page.locator('.viewer-bar summary').click()
+  await page
+    .locator('.viewer-bar [role=option]')
+    .filter({ hasText: '@other' })
+    .click()
+  await expect.poll(() => asked.at(-1)?.get('viewer')).toBe(OTHER)
+  await expect(page).toHaveURL(/viewer=x(%2F|\/)x\.profile(%2F|\/)8/)
+  await expect(chip).toHaveText(/^与 @other 的关系/)
+})
