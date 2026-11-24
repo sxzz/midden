@@ -387,7 +387,11 @@ export function getPublicFollowGraph(
   query?: GraphQuery,
 ): FollowGraph {
   const share = within(ctx, slug, id)
-  const graph = followGraph(ctx, id, query)
+  // Whose follows mark the nodes is the owner's to see.
+  const graph = followGraph(ctx, id, {
+    kinds: query?.kinds,
+    limit: query?.limit,
+  })
   const linkable = share.scope.contains([
     ...new Set(
       graph.nodes.flatMap((node) =>

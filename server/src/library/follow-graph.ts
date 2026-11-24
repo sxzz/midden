@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
+import { AppError } from '#errors.ts'
 import { subjectOf } from './follows.ts'
-import { authorKey } from './list.ts'
+import { authorKey, parseAuthorKey } from './list.ts'
 import {
   assetsById,
   avatarOf,
@@ -35,6 +36,22 @@ export interface GraphNode {
   collection_id?: string
   /** Absent on the center. */
   kind?: GraphKind
+  /** How the chosen viewer relates to it now, when it does. */
+  viewer?: ViewerRelation
+}
+
+/**
+ * The viewer and a node follow each other (`mutual`), the viewer follows it
+ * (`following`), or it follows the viewer (`follower`).
+ */
+export type ViewerRelation = 'mutual' | 'following' | 'follower'
+
+/** The account the graph is seen from, and how far its lists were read. */
+export interface GraphViewer {
+  key: string
+  name?: string
+  username?: string
+  lists: { following: GraphList; followers: GraphList }
 }
 
 /** When a list of the center was last read, completely or in part. */
@@ -58,11 +75,63 @@ export interface FollowGraph {
   /** Accounts of each kind, whichever were chosen. */
   kinds: Record<GraphKind, number>
   lists: { following: GraphList; followers: GraphList }
+  /** With a viewer asked for. */
+  viewer?: GraphViewer
 }
 
 export interface GraphQuery {
   kinds?: readonly GraphKind[]
   limit?: number
+  /** An account key whose own follows mark the nodes; owner only. */
+  viewer?: string
+}
+
+/**
+ * How the viewer relates to each of these accounts now: one probe of the
+ * open pair index each way per account. Ended follows do not count.
+ */
+export function viewerRelations(
+  ctx: Reader,
+  key: string,
+  ids: readonly string[],
+): { viewer: GraphViewer; relations: Map<string, ViewerRelation> } {
+  const account = parseAuthorKey(key)
+  if (!account?.kind.endsWith('.profile')) throw new AppError('invalid_filter')
+  const id = ctx.db.get<{ id: string }>(
+    sql`SELECT id FROM entities WHERE platform = ${account.platform}
+      AND kind = ${account.kind} AND external_id = ${account.external}`,
+  )?.id
+  const relations = new Map<string, ViewerRelation>()
+  if (!id)
+    return {
+      viewer: { key, lists: { following: {}, followers: {} } },
+      relations,
+    }
+  const rows = ctx.db.all<{ id: string; o: number; i: number }>(sql`
+    WITH ids(id) AS MATERIALIZED (SELECT value FROM json_each(${list(ids)}))
+    SELECT ids.id,
+      EXISTS (SELECT 1 FROM follow_edges f WHERE f.follower_id = ${id}
+        AND f.followee_id = ids.id AND f.ended_at IS NULL) AS o,
+      EXISTS (SELECT 1 FROM follow_edges f WHERE f.follower_id = ids.id
+        AND f.followee_id = ${id} AND f.ended_at IS NULL) AS i
+    FROM ids WHERE ids.id <> ${id}`)
+  for (const row of rows)
+    if (row.o || row.i)
+      relations.set(
+        row.id,
+        row.o && row.i ? 'mutual' : row.o ? 'following' : 'follower',
+      )
+  const shown = shownAccounts(ctx, [id])
+  const { name, username } = accountLabel(shown.get(id), new Map())
+  return {
+    viewer: {
+      key,
+      ...(name ? { name } : {}),
+      ...(username ? { username } : {}),
+      lists: listsOf(ctx, id),
+    },
+    relations,
+  }
 }
 
 export const GRAPH_LIMIT = 300
@@ -314,11 +383,24 @@ export function followGraph(
       index.get(edge.followee)!,
     ])
     .toSorted((a, b) => a[0] - b[0] || a[1] - b[1])
+  const seen = query.viewer
+    ? viewerRelations(
+        ctx,
+        query.viewer,
+        kept.map((row) => row.id),
+      )
+    : undefined
+  if (seen)
+    for (const node of nodes) {
+      const relation = seen.relations.get(node.entity_id)
+      if (relation) node.viewer = relation
+    }
   return {
     nodes,
     edges,
     total: chosen.length,
     kinds: counts,
     lists: listsOf(ctx, subject),
+    ...(seen ? { viewer: seen.viewer } : {}),
   }
 }

@@ -8,8 +8,10 @@ import {
   GRAPH_LIMIT,
   listsOf,
   shownAccounts,
+  viewerRelations,
   type GraphList,
   type GraphNode,
+  type GraphViewer,
 } from './follow-graph.ts'
 import { authorKey, defaultRelMin, parseAuthorKey } from './list.ts'
 import { list, type Reader } from './views.ts'
@@ -55,6 +57,8 @@ export interface RelationCompare {
   edges: [number, number][]
   /** Every subset of at least `min` with accounts, most accounts first. */
   combos: CompareCombo[]
+  /** With a viewer asked for. */
+  viewer?: GraphViewer
 }
 
 export interface CompareQuery {
@@ -65,6 +69,8 @@ export interface CompareQuery {
   /** Indexes into `relOf`: only accounts related to exactly these. */
   only?: readonly number[]
   limit?: number
+  /** An account key whose own follows mark the accounts. */
+  viewer?: string
 }
 
 const invalid = () => new AppError('invalid_filter')
@@ -275,11 +281,27 @@ export function compareRelations(
       index.get(edge.followee)!,
     ])
     .toSorted((a, b) => a[0] - b[0] || a[1] - b[1])
+  const seen = query.viewer
+    ? viewerRelations(ctx, query.viewer, [...index.keys()])
+    : undefined
+  if (seen) {
+    for (const [i, account] of accounts.entries()) {
+      const relation = account.entity_id
+        ? seen.relations.get(account.entity_id)
+        : undefined
+      if (relation) accounts[i] = { ...account, viewer: relation }
+    }
+    for (const item of items) {
+      const relation = seen.relations.get(item.entity_id)
+      if (relation) item.viewer = relation
+    }
+  }
   return {
     accounts,
     items,
     total: chosen.length,
     edges,
     combos,
+    ...(seen ? { viewer: seen.viewer } : {}),
   }
 }

@@ -811,6 +811,14 @@ describe('public lists', () => {
       (await read(slug, `/collections/compare?rel_of=${pat}`)).status,
     ).toBe(404)
     const profile = share(c, 'collection', ids.five!)
+    // Nor may a visitor see a graph from an account of their choosing.
+    expect(
+      (await read(profile, `/collections/${ids.five}/graph?viewer=${pat}`))
+        .status,
+    ).toBe(400)
+    expect(
+      (await read(profile, `/collections/${ids.five}/graph`)).body,
+    ).not.toHaveProperty('viewer')
     expect(
       (
         await read(

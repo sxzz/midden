@@ -170,15 +170,18 @@ export function publicRoutes(ctx: AccountsContext) {
           ),
       )
 
-      .get('/:slug/collections/:id/graph', query(GraphQuery), (c) =>
-        c.json(
-          getPublicFollowGraph(
-            ctx,
-            c.req.param('slug'),
-            c.req.param('id'),
-            c.req.valid('query'),
+      .get(
+        '/:slug/collections/:id/graph',
+        query(v.strictObject(GraphQuery.entries)),
+        (c) =>
+          c.json(
+            getPublicFollowGraph(
+              ctx,
+              c.req.param('slug'),
+              c.req.param('id'),
+              c.req.valid('query'),
+            ),
           ),
-        ),
       )
 
       .get('/:slug/collections/:id/profile-changes', query(ChangesQuery), (c) =>

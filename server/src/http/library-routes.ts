@@ -108,6 +108,9 @@ export const GraphQuery = v.object({
   ),
 })
 
+/** The owner's graph may be seen from an account (`viewer`). */
+const OwnGraphQuery = v.object({ ...GraphQuery.entries, viewer: text })
+
 const count = (max: number, digits: number) =>
   v.pipe(
     v.string(),
@@ -137,6 +140,7 @@ export const CompareQuery = v.object({
     ),
   ),
   limit: v.optional(count(GRAPH_MAX, 5)),
+  viewer: text,
 })
 
 /** Reading the library: collections, their history, and entities. */
@@ -197,6 +201,7 @@ export function libraryRoutes(ctx: AccountsContext) {
             min: input.rel_min,
             only: input.only,
             limit: input.limit,
+            viewer: input.viewer || undefined,
           }),
         )
       })
@@ -239,8 +244,13 @@ export function libraryRoutes(ctx: AccountsContext) {
         ),
       )
 
-      .get('/collections/:id/graph', query(GraphQuery), (c) =>
-        c.json(followGraph(ctx, c.req.param('id'), c.req.valid('query'))),
+      .get('/collections/:id/graph', query(OwnGraphQuery), (c) =>
+        c.json(
+          followGraph(ctx, c.req.param('id'), {
+            ...c.req.valid('query'),
+            viewer: c.req.valid('query').viewer || undefined,
+          }),
+        ),
       )
 
       .get('/collections/:id/history/:capture', (c) =>

@@ -8,6 +8,7 @@ import { compareRelations } from './compare.ts'
 import { filterCounts } from './counts.ts'
 import { parseFilterQuery } from './filter-query.ts'
 import { createFolder } from './folders.ts'
+import { followGraph } from './follow-graph.ts'
 import { listCollections, type CollectionFilter } from './list.ts'
 import { listPerspectives } from './perspectives.ts'
 import type { CaptureContext } from '#capture/context.ts'
@@ -582,5 +583,47 @@ describe('comparing accounts', () => {
     expect(compared.combos.reduce((sum, combo) => sum + combo.count, 0)).toBe(
       compared.total,
     )
+  })
+})
+
+describe('a viewer', () => {
+  test('marks each node with how the viewer relates to it now', async () => {
+    const { c, ids } = await several()
+    // Alice follows Pat and Bob, Pat follows her back, Carol follows her.
+    const seen = followGraph(c, ids.pat!, { viewer: key('alice') })
+    expect(
+      Object.fromEntries(
+        seen.nodes.map((node) => [node.username, node.viewer ?? '']),
+      ),
+    ).toEqual({ pat: 'mutual', alice: '', bob: 'following', carol: 'follower' })
+    expect(seen.viewer).toEqual({
+      key: key('alice'),
+      name: 'ALICE',
+      username: 'alice',
+      lists: { following: {}, followers: {} },
+    })
+    // Without one, nothing is marked.
+    const plain = followGraph(c, ids.pat!)
+    expect(plain.nodes.some((node) => node.viewer)).toBe(false)
+    expect(plain).not.toHaveProperty('viewer')
+    // Ended follows do not count: Bob and Dan once followed Alice.
+    const compared = compareRelations(c, {
+      relOf: [key('pat'), key('carol')],
+      min: 1,
+      viewer: key('alice'),
+    })
+    expect(
+      [...compared.accounts, ...compared.items].map((node) => [
+        node.username,
+        node.viewer ?? '',
+      ]),
+    ).toEqual([
+      ['pat', 'mutual'],
+      ['carol', 'follower'],
+      ['alice', ''],
+      ['bob', 'following'],
+      ['eve', ''],
+    ])
+    invalid(() => followGraph(c, ids.pat!, { viewer: 'fake/fake.post/p1' }))
   })
 })
