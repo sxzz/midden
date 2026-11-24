@@ -118,6 +118,14 @@ const shownKind = (f: Form): Kind =>
       : 'post'
 // Authors, media and sensitivity describe posts; an account has none of them.
 const posts = computed(() => shownKind(form) === 'post')
+/** How the two directions of the chosen order read. */
+const orderNames = computed(() =>
+  form.sort === 'storage'
+    ? { desc: '从大到小', asc: '从小到大' }
+    : form.sort === 'followers' || form.sort === 'following'
+      ? { desc: '从多到少', asc: '从少到多' }
+      : { desc: '从新到旧', asc: '从旧到新' },
+)
 /**
  * The entity types the form selects. A home tab's kind is fixed and its
  * posts are the default, left out of the address; in a folder, no kind and
@@ -526,16 +534,16 @@ const tagSummary = computed(() => {
             <option v-if="posts" value="published">发帖时间</option>
             <option v-if="!shared" value="saved">添加时间</option>
             <option value="updated">更新时间</option>
-            <option v-if="!shared" value="storage">存储空间</option></select
+            <option v-if="!shared" value="storage">存储空间</option>
+            <template v-if="!posts">
+              <option value="followers">粉丝数</option>
+              <option value="following">关注数</option>
+            </template></select
           ><ChevronIcon class="select-chevron" /></span
         ><span class="select"
           ><select v-model="form.order" aria-label="排序方向">
-            <option value="desc">
-              {{ form.sort === 'storage' ? '从大到小' : '从新到旧' }}
-            </option>
-            <option value="asc">
-              {{ form.sort === 'storage' ? '从小到大' : '从旧到新' }}
-            </option></select
+            <option value="desc">{{ orderNames.desc }}</option>
+            <option value="asc">{{ orderNames.asc }}</option></select
           ><ChevronIcon class="select-chevron" /></span
       ></span>
     </div>

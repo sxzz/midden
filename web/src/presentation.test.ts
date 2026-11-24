@@ -236,6 +236,21 @@ it('orders posts by posting time and accounts by when they were added', () => {
   expect(listSort('entity_type=x.profile,instagram.profile')).toBe('saved')
   expect(listSort('sort=storage')).toBe('storage')
   expect(listSort('entity_type=x.profile&sort=updated')).toBe('updated')
+  // Counts order accounts; on posts the server reads the update time.
+  expect(listSort('entity_type=x.profile&sort=followers')).toBe('followers')
+  expect(listSort('tab=profile&sort=following')).toBe('following')
+  expect(listSort('sort=followers')).toBe('updated')
+  expect(listSort('tab=post&sort=following')).toBe('updated')
+})
+it('lists by count without time groups', () => {
+  const items = [
+    collection({ id: 'a', observed_at: '2026-09-29T09:00:00Z' }),
+    collection({ id: 'b', observed_at: '2025-01-01T09:00:00Z' }),
+  ]
+  for (const sort of ['followers', 'following'])
+    expect(groupCollections(items, new Date(), sort)).toEqual([
+      { label: '全部收藏', items },
+    ])
 })
 it('orders a public list only by times the owner shares', () => {
   shareSlug.value = 'slug'
@@ -245,6 +260,8 @@ it('orders a public list only by times the owner shares', () => {
     expect(listSort('sort=updated')).toBe('updated')
     expect(listSort('sort=storage')).toBe('published')
     expect(listSort('entity_type=x.profile&sort=saved')).toBe('updated')
+    expect(listSort('entity_type=x.profile&sort=followers')).toBe('followers')
+    expect(listSort('sort=following')).toBe('updated')
   } finally {
     shareSlug.value = ''
   }

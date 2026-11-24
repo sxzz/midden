@@ -132,6 +132,19 @@ test('entity tabs keep their own filters and mobile statistic layout', async ({
   expect(type()).toBe('x.profile,instagram.profile')
   await expect(accounts).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('button', { name: '清除' })).toHaveCount(0)
+  // Accounts also order by their counts, most first unless asked; posts
+  // have none to order by.
+  const sort = page.getByLabel('排序', { exact: true })
+  await sort.selectOption('followers')
+  await expect.poll(() => queries.at(-1)?.get('sort')).toBe('followers')
+  await expect(
+    page.getByLabel('排序方向').locator('option:checked'),
+  ).toHaveText('从多到少')
+  await posts.click()
+  await expect(sort.locator('option[value="followers"]')).toHaveCount(0)
+  await expect(sort.locator('option[value="following"]')).toHaveCount(0)
+  await accounts.click()
+  await expect(sort).toHaveValue('followers')
   await page.locator('.head').filter({ hasText: '测试账号' }).click()
   for (const width of [320, 390, 560]) {
     await page.setViewportSize({ width, height: 844 })

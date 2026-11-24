@@ -159,7 +159,7 @@ it('opens a shared folder without login, with a tab per kind it holds', async ()
   )
   expect(query.get('entity_type')).toBe('x.profile,instagram.profile')
   // Accounts have no post time and their save time is the owner's: the
-  // ones updated last come first, the only order offered.
+  // ones updated last come first; their public counts order them too.
   expect(query.get('sort')).toBe('updated')
   await vi.waitFor(() =>
     expect(
@@ -171,7 +171,7 @@ it('opens a shared folder without login, with a tab per kind it holds', async ()
       ...el.querySelector<HTMLSelectElement>('select[aria-label=排序]')!
         .options,
     ].map((option) => option.textContent?.trim()),
-  ).toEqual(['更新时间'])
+  ).toEqual(['更新时间', '粉丝数', '关注数'])
 })
 
 it('filters a shared folder newest posts first, without tags', async () => {

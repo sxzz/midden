@@ -293,17 +293,25 @@ export function listsProfiles(query: string | URLSearchParams) {
     .split(',')
     .some((type) => type.endsWith('.profile'))
 }
-/** Orders a public link offers: when the owner saved and how much is theirs. */
-const PUBLIC_SORTS = new Set(['published', 'updated'])
+/** Orders by an account's own counts, which only a list of accounts has. */
+const COUNT_SORTS = new Set(['followers', 'following'])
+/**
+ * Orders a public link offers: when the owner saved and how much is theirs
+ * stay hidden, while an account's counts are public.
+ */
+const PUBLIC_SORTS = new Set(['published', 'updated', ...COUNT_SORTS])
 /**
  * The order of a list: posts by when they were posted unless asked
  * otherwise; accounts have no such time, and are kept in the order they
  * were added, which a refresh never reshuffles. Behind a public link, which
- * has no save times, the accounts updated last come first.
+ * has no save times, the accounts updated last come first. A folder keeps
+ * one order for both tabs: on posts, an account count order is the update
+ * time, as the server reads it.
  */
 export function listSort(query: string | URLSearchParams) {
   const sort = new URLSearchParams(query).get('sort')
   const profiles = listsProfiles(query)
+  if (sort && COUNT_SORTS.has(sort) && !profiles) return 'updated'
   if (shareSlug.value)
     return sort && PUBLIC_SORTS.has(sort)
       ? sort
@@ -324,7 +332,8 @@ export function groupCollections(
   now = new Date(),
   sort?: string,
 ) {
-  if (sort === 'storage')
+  // Sizes and counts have no time to group by.
+  if (sort === 'storage' || (sort && COUNT_SORTS.has(sort)))
     return items.length ? [{ label: '全部收藏', items }] : []
   const groups: CollectionGroup[] = []
   for (const item of items) {
