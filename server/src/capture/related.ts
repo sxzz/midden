@@ -4,7 +4,7 @@ import { captures, collections, library, submissions } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError, isAppError } from '#errors.ts'
 import { SnoozeError, type Job } from '#jobs/queue.ts'
-import { matchesOptions, type CaptureOptions } from './options.ts'
+import { budget, matchesOptions, storedOptions } from './options.ts'
 import { unsaveIfEmpty } from './scope.ts'
 import {
   isSaved,
@@ -106,33 +106,39 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
     ctx.platforms.resolve(loaded.url).target.refreshOnSubmit
   ) {
     if (
-      submitChild({ url: loaded.url, key: `related-expand:${submission.id}` })
+      submitChild({
+        url: loaded.url,
+        options: storedOptions(submission.captureOptions),
+        key: `related-expand:${submission.id}`,
+      })
     )
       finish(ctx, submission.id, capture.id)
     return
   }
 
-  const options =
-    (submission.captureOptions as CaptureOptions | null) ?? undefined
-  // A profile updated without its posts submits nothing from its timeline.
-  if (capture.isCollection && options?.skipPosts) {
+  const options = storedOptions(submission.captureOptions)
+  // A profile captured without its posts submits nothing from its timeline.
+  if (capture.isCollection && options.posts === 'none') {
     finish(ctx, submission.id, capture.id)
     return
   }
   const limit = submission.collectionLimit
   const targets = capture.relatedTargets as StoredTarget[]
-  let members = 0
+  // Timeline posts as listed, and those that passed the filters.
+  let listed = 0
+  let kept = 0
   const memberSubmissions: string[] = []
   for (const [index, target] of targets.entries()) {
     let member = true
-    if (capture.isCollection || options?.skipReferences)
+    if (capture.isCollection || !options.captureReferences)
       member = !ctx.platforms.resolve(target.url).target.collection
-    if (options && member) {
+    if (member) {
       if (capture.isCollection) {
+        listed++
         if (!matchesOptions(options, target)) continue
-      } else if (options.skipReferences) continue
+        kept++
+      } else if (!options.captureReferences) continue
     }
-    if (member) members++
     const submitted = submitChild({
       url: target.url,
       automatic: true,
@@ -147,18 +153,20 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
   }
 
   const next = capture.nextPageCursor
-  let more = options
-    ? capture.isCollection && (limit === 0 || limit > members)
-    : limit > members && members > 0
+  // `max` budgets the posts it keeps; the other modes the posts listed.
+  const counted = options.posts === 'max' ? kept : listed
+  let more =
+    capture.isCollection &&
+    listed > 0 &&
+    (limit === 0 ? options.posts === 'max' : limit > counted)
   let nextOptions = options
   let capped = false
-  if (capture.isCollection && options?.finalPage) more = false
-  else if (capture.isCollection && options?.untilExisting) {
+  if (capture.isCollection && options.finalPage) more = false
+  else if (capture.isCollection && options.posts === 'until_existing') {
     // A post saved before this page was listed: read one page more, then stop.
-    if (savedBefore(ctx, memberSubmissions)) {
-      const { untilExisting: _, ...rest } = options
-      nextOptions = { ...rest, finalPage: true }
-    } else
+    if (savedBefore(ctx, memberSubmissions))
+      nextOptions = { ...options, finalPage: true }
+    else
       // The post cap ran out first; the page's next cursor continues it. A
       // page continued already has its next page.
       capped =
@@ -168,12 +176,12 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
         !submission.nextSubmission
   }
   if (next && next !== capture.pageCursor && more) {
-    const remaining = limit > members ? limit - members : 0
+    const remaining = limit > counted ? limit - counted : 0
     const key = `batch:${submission.id}`
     const submitted = submitChild({
       url: loaded.url,
       pageCursor: next,
-      pageSize: options ? Math.min(remaining, PAGE_TARGET) : remaining,
+      pageSize: Math.min(remaining, PAGE_TARGET),
       collectionLimit: remaining,
       options: nextOptions,
       key,
@@ -191,6 +199,46 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
         .run()
   }
   finish(ctx, submission.id, capture.id, capped)
+}
+
+/**
+ * Read on where the post cap stopped a timeline (`until_existing`), with the
+ * run's options and a fresh cap. The page joins the run's chain, so its
+ * posts belong to the same record.
+ */
+export function continuePages(
+  ctx: CaptureContext,
+  last: {
+    submission: typeof submissions.$inferSelect
+    capture: typeof captures.$inferSelect
+  },
+): SubmitJob {
+  const cursor = last.capture.nextPageCursor
+  if (!last.submission.timelineCapped || !cursor)
+    throw new AppError('unsupported')
+  const { url } = ctx.db
+    .select({ url: collections.url })
+    .from(collections)
+    .where(eq(collections.id, last.capture.collectionId))
+    .get()!
+  const options = storedOptions(last.submission.captureOptions)
+  const page = submit(ctx, {
+    url,
+    providerId: last.submission.relatedProvider,
+    connectionId: last.submission.relatedConnection ?? undefined,
+    parentSubmission: last.submission.id,
+    pageCursor: cursor,
+    ...budget(ctx, options),
+    options,
+    // The key runRelated would have used, had the cap not stopped it.
+    key: `batch:${last.submission.id}`,
+  })
+  ctx.db
+    .update(submissions)
+    .set({ nextSubmission: page.submissionId, timelineCapped: false })
+    .where(eq(submissions.id, last.submission.id))
+    .run()
+  return page
 }
 
 /** Whether any of these member submissions found its post already saved. */

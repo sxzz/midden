@@ -8,6 +8,7 @@ import {
   text,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core'
+import type { CaptureOptions, StoredOptions } from '#capture/options.ts'
 import type { Buffer } from 'node:buffer'
 
 // Columns are declared in camelCase and stored in snake_case.
@@ -637,7 +638,9 @@ export const submissions = sqliteTable(
     nextSubmission: text(),
     collectionStopped: bool().notNull().default(false),
     parentSubmission: text(),
-    captureOptions: text({ mode: 'json' }),
+    // The run's options (see `StoredOptions`); null on rows predating them,
+    // read as the defaults.
+    captureOptions: text({ mode: 'json' }).$type<StoredOptions>(),
     // Whether the target had no saved content in the library when this
     // submission was made, i.e. it is 新增 rather than 更新. Recorded at
     // submit time because the library row it inserts makes that unknowable
@@ -669,19 +672,6 @@ export const submissions = sqliteTable(
 export const updateTargets = ['collection', 'folder', 'many'] as const
 export type UpdateTarget = (typeof updateTargets)[number]
 /**
- * How an update reads a profile's timeline: the newest page (`latest`),
- * pages until one holds saved posts and one more, at most 1000 posts
- * (`until_existing`), the page after the last one read (`older`), or none.
- */
-export const updatePostModes = [
-  'latest',
-  'until_existing',
-  'older',
-  'none',
-] as const
-export type UpdatePostMode = (typeof updatePostModes)[number]
-
-/**
  * One 更新: a saved collection, a folder or a selection, captured again as
  * a single record. Its captures are the submissions that name it.
  */
@@ -696,8 +686,10 @@ export const updates = sqliteTable(
     name: text().notNull().default(''),
     // What the target held when the update started, each once.
     collectionIds: text({ mode: 'json' }).$type<string[]>().notNull(),
-    posts: text({ enum: updatePostModes }).notNull().default('latest'),
-    relations: bool().notNull().default(false),
+    // What each item captures, as a link submission would.
+    options: text({ mode: 'json' }).$type<CaptureOptions>().notNull(),
+    // Profiles read on from the page after their last one (抓取更早的帖子).
+    older: bool().notNull().default(false),
     // Items submitted (or skipped) so far, in order.
     position: integer().notNull().default(0),
     // Items gone from the library or no longer capturable when their turn came.

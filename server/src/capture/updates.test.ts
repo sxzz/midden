@@ -15,6 +15,7 @@ import {
   type FakeRelations,
 } from '#testing/fake-platform.ts'
 import { captureHandlers } from './handlers.ts'
+import { resolveOptions } from './options.ts'
 import { captureURL } from './records.ts'
 import {
   collectionUpdate,
@@ -112,8 +113,9 @@ function setup(
   return { ctx, state }
 }
 
+/** Save a link; a profile with its first page, as the world pages by 3. */
 async function save(c: AccountsContext, url: string) {
-  const job = captureURL(c, url)
+  const job = captureURL(c, url, undefined, resolveOptions({ count: 3 }))
   await c.queue.drain()
   return job.collectionId
 }
@@ -176,7 +178,7 @@ describe('更新', () => {
     const update = startUpdate(
       ctx,
       { target: 'collection', id },
-      { relations: true },
+      { options: resolveOptions({ count: 3, relations: true }) },
     )
     await ctx.queue.drain()
     // The profile, three posts of its first page and two lists.
@@ -187,7 +189,7 @@ describe('更新', () => {
       update: {
         profiles: 1,
         handle: 'u100',
-        options: { posts: 'latest', relations: true },
+        older: false,
       },
     })
     expect(records(ctx)).toHaveLength(before + 1)
@@ -228,7 +230,7 @@ describe('更新', () => {
     const update = startUpdate(
       ctx,
       { target: 'collection', id },
-      { posts: 'until_existing' },
+      { options: resolveOptions({ posts: 'until_existing' }) },
     )
     await ctx.queue.drain()
     // Pages 1–3, 4–6 (holds the saved 5) and one more, 7–9.
@@ -263,7 +265,7 @@ describe('更新', () => {
     const update = startUpdate(
       ctx,
       { target: 'collection', id },
-      { posts: 'until_existing' },
+      { options: resolveOptions({ posts: 'until_existing' }) },
     )
     await ctx.queue.drain()
     const pages = () =>
@@ -317,22 +319,34 @@ describe('更新', () => {
     })
     const id = await save(ctx, 'https://fake.test/u/100')
     expect(savedPosts(ctx)).toEqual([1, 2, 3])
-    startUpdate(ctx, { target: 'collection', id }, { posts: 'older' })
+    startUpdate(
+      ctx,
+      { target: 'collection', id },
+      { options: resolveOptions({ count: 3 }), older: true },
+    )
     await ctx.queue.drain()
     expect(savedPosts(ctx)).toEqual([1, 2, 3, 4, 5, 6])
-    startUpdate(ctx, { target: 'collection', id }, { posts: 'older' })
+    startUpdate(
+      ctx,
+      { target: 'collection', id },
+      { options: resolveOptions({ count: 3 }), older: true },
+    )
     await ctx.queue.drain()
     expect(savedPosts(ctx)).toEqual([1, 2, 3, 4, 5, 6, 7])
     expect(collectionUpdate(ctx, id).older).toBe(false)
     expect(() =>
-      startUpdate(ctx, { target: 'collection', id }, { posts: 'older' }),
+      startUpdate(
+        ctx,
+        { target: 'collection', id },
+        { options: resolveOptions({ count: 3 }), older: true },
+      ),
     ).toThrow('没有更多帖子了')
     // Without posts, only the profile is read again.
     state.timelines['100'] = [8, 9]
     const update = startUpdate(
       ctx,
       { target: 'collection', id },
-      { posts: 'none' },
+      { options: resolveOptions({ posts: 'none' }) },
     )
     await ctx.queue.drain()
     expect(savedPosts(ctx)).toEqual([1, 2, 3, 4, 5, 6, 7])

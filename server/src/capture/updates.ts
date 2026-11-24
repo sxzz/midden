@@ -13,7 +13,6 @@ import {
   revisions,
   submissions,
   updates,
-  type UpdatePostMode,
   type UpdateTarget,
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
@@ -21,6 +20,12 @@ import { AppError, isAppError } from '#errors.ts'
 import { SnoozeError, type Job as QueueJob } from '#jobs/queue.ts'
 import { parseFilterQuery } from '#library/filter-query.ts'
 import { selectedIds } from '#library/list.ts'
+import {
+  budget,
+  checkOptions,
+  DEFAULT_OPTIONS,
+  type CaptureOptions,
+} from './options.ts'
 import {
   captureWaits,
   collectionProgresses,
@@ -42,7 +47,7 @@ import {
   type MemberProgress,
   type Page,
 } from './records.ts'
-import { stopCollection } from './related.ts'
+import { continuePages, stopCollection } from './related.ts'
 import {
   failRelations,
   relationProgresses,
@@ -51,7 +56,6 @@ import {
 import { submit, type Job } from './submit.ts'
 import type { Executor } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
-import type { CaptureOptions } from './options.ts'
 import type { Metrics, Payload } from './payload.ts'
 
 /** A library selection updates at most this many collections. */
@@ -69,11 +73,6 @@ const FEED_WAIT_MS = 3000
 const RECENT_MS = 24 * 60 * 60_000
 /** Profiles the record details part by part; a folder may hold thousands. */
 const MAX_PROFILES = 200
-/**
- * Timeline posts `until_existing` reads per profile, per update or per
- * continuation of one: a profile never captured has no saved posts to stop at.
- */
-export const TIMELINE_CAP = 1000
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
 
 type Update = typeof updates.$inferSelect
@@ -86,8 +85,10 @@ export type UpdateTargetInput =
   | { target: 'many'; ids: string[] }
 
 export interface UpdateOptions {
-  posts?: UpdatePostMode
-  relations?: boolean
+  /** What each item captures; the defaults when absent. */
+  options?: CaptureOptions
+  /** Profiles read on from the page after their last one. */
+  older?: boolean
   /** Idempotency key: a repeat returns the update it started. */
   key?: string
 }
@@ -330,8 +331,8 @@ export function previewUpdate(
 
 /**
  * Update a target: capture each collection it holds again, as one record.
- * Profiles read their timeline as `posts` says and, with `relations`, their
- * following and followers lists. Returns the update's id.
+ * Each is captured as a link submission with the same options would be;
+ * `older` reads profiles on from their last page. Returns the update's id.
  */
 export function startUpdate(
   ctx: CaptureContext,
@@ -340,7 +341,8 @@ export function startUpdate(
 ): string {
   if (options.key && options.key.length > 200)
     throw new AppError('invalid_request', '请求标识过长')
-  const posts = options.posts ?? 'latest'
+  const captureOptions = options.options ?? DEFAULT_OPTIONS
+  checkOptions(captureOptions)
   return ctx.db.transaction((tx) => {
     if (options.key) {
       const existing = tx
@@ -351,11 +353,15 @@ export function startUpdate(
       if (existing) return existing.id
     }
     const resolved = resolveTarget(tx, input)
-    if (posts === 'older') {
+    if (options.older) {
       const only = itemKinds(tx, resolved.collectionIds).get(
         resolved.collectionIds[0]!,
       )
-      if (resolved.target !== 'collection' || only?.kind !== 'profile')
+      if (
+        resolved.target !== 'collection' ||
+        only?.kind !== 'profile' ||
+        captureOptions.posts === 'none'
+      )
         throw new AppError('unsupported')
       if (!hasOlder(tx, only.id)) throw new AppError('no_more_pages')
     }
@@ -367,8 +373,8 @@ export function startUpdate(
         targetId: resolved.targetId,
         name: resolved.name,
         collectionIds: resolved.collectionIds,
-        posts,
-        relations: options.relations ?? false,
+        options: captureOptions,
+        older: options.older ?? false,
         idemKey: options.key ?? null,
         createdAt: new Date(ctx.now?.() ?? Date.now()),
       })
@@ -377,24 +383,6 @@ export function startUpdate(
     return id
   })
 }
-
-function postOptions(
-  ctx: CaptureContext,
-  mode: UpdatePostMode,
-): CaptureOptions | undefined {
-  switch (mode) {
-    // The timeline's first page, as any refresh of a profile reads it.
-    case 'latest':
-    case 'older':
-      return undefined
-    case 'until_existing':
-      return { untilExisting: true, maxPosts: timelineCap(ctx) }
-    case 'none':
-      return { skipPosts: true }
-  }
-}
-
-const timelineCap = (ctx: CaptureContext) => ctx.timelineCap ?? TIMELINE_CAP
 
 /** Submit one item of an update; undefined when it cannot be captured. */
 function submitItem(
@@ -407,9 +395,7 @@ function submitItem(
   if (!item) return undefined
   const key = `update:${update.id}:${position}`
   try {
-    if (item.kind !== 'profile')
-      return recapture(ctx, collectionId, { key, updateId: update.id })
-    if (update.posts === 'older') {
+    if (item.kind === 'profile' && update.older) {
       const page = lastPage(ctx.db, collectionId)
       if (!page?.nextPageCursor) return undefined
       return submit(ctx, {
@@ -417,6 +403,8 @@ function submitItem(
         providerId: page.providerId,
         connectionId: page.connectionId ?? undefined,
         pageCursor: page.nextPageCursor,
+        ...budget(ctx, update.options),
+        options: update.options,
         key,
         updateId: update.id,
       })
@@ -424,8 +412,7 @@ function submitItem(
     return recapture(ctx, collectionId, {
       key,
       updateId: update.id,
-      captureOptions: postOptions(ctx, update.posts),
-      relations: update.relations || undefined,
+      options: update.options,
     })
   } catch (error) {
     if (
@@ -564,7 +551,7 @@ export function stopUpdate(ctx: CaptureContext, id: string): void {
 /** Start the same update again, as a new record. */
 export function repeatUpdate(ctx: CaptureContext, id: string): string {
   const update = loadUpdate(ctx.db, id)
-  const options = { posts: update.posts, relations: update.relations }
+  const options = { options: update.options, older: update.older }
   if (update.target === 'many')
     return startUpdate(
       ctx,
@@ -636,8 +623,8 @@ export function retryUpdateFailed(
 }
 
 /**
- * Read on where the post cap stopped a profile's timeline, with the same mode
- * and cap. The page joins the profile's chain, so its posts are this
+ * Read on where the post cap stopped a profile's timeline, with the same
+ * options. The page joins the profile's chain, so its posts are this
  * update's members.
  */
 export function continueTimeline(
@@ -654,31 +641,8 @@ export function continueTimeline(
   )
   if (!root) throw new AppError('not_found')
   const last = g!.pages.get(root.submission.id)?.at(-1)
-  const cursor = last?.capture.nextPageCursor
-  if (update.state === 'stopped' || !last?.submission.timelineCapped || !cursor)
-    throw new AppError('unsupported')
-  const { url } = ctx.db
-    .select({ url: collections.url })
-    .from(collections)
-    .where(eq(collections.id, collectionId))
-    .get()!
-  const page = submit(ctx, {
-    url,
-    providerId: last.submission.relatedProvider,
-    connectionId: last.submission.relatedConnection ?? undefined,
-    parentSubmission: last.submission.id,
-    pageCursor: cursor,
-    pageSize: Math.min(timelineCap(ctx), 100),
-    collectionLimit: timelineCap(ctx),
-    options: last.submission.captureOptions as CaptureOptions,
-    // The key runRelated would have used, had the cap not stopped it.
-    key: `batch:${last.submission.id}`,
-  })
-  ctx.db
-    .update(submissions)
-    .set({ nextSubmission: page.submissionId, timelineCapped: false })
-    .where(eq(submissions.id, last.submission.id))
-    .run()
+  if (update.state === 'stopped' || !last) throw new AppError('unsupported')
+  continuePages(ctx, last)
 }
 
 // --- Records ----------------------------------------------------------------
@@ -692,7 +656,8 @@ export interface UpdateInfo {
   handle: string
   posts: number
   profiles: number
-  options: { posts: UpdatePostMode; relations: boolean }
+  /** Profiles read on from their last page (抓取更早的帖子). */
+  older: boolean
   /** Items not submitted yet. */
   queued: number
   /** Items that could not be captured when their turn came. */
@@ -961,6 +926,7 @@ function toUpdateRecord(db: Executor, g: Gathered): UpdateRecord {
     members,
     stopped,
     ...(done ? { retryable: counts.retryable } : {}),
+    options: update.options,
     update: {
       target: update.target,
       targetId: update.targetId,
@@ -971,7 +937,7 @@ function toUpdateRecord(db: Executor, g: Gathered): UpdateRecord {
           : '',
       posts,
       profiles,
-      options: { posts: update.posts, relations: update.relations },
+      older: update.older,
       queued,
       skipped: update.skipped,
     },
@@ -1027,7 +993,7 @@ function profileParts(db: Executor, g: Gathered): ProfilePart[] {
       handle: names.get(id) ?? '',
       state: item.capture.state,
       error: item.capture.error,
-      ...(update.posts !== 'none' && progress
+      ...(update.options.posts !== 'none' && progress
         ? {
             posts: {
               total: progress.total,

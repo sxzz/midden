@@ -17,7 +17,15 @@ import {
 } from '#platforms/registry.ts'
 import { RELATED_FALLBACK_MS, type CaptureContext } from './context.ts'
 import { canonicalJson, sha256Hex } from './json.ts'
-import { checkOptions, type CaptureOptions } from './options.ts'
+import {
+  budget,
+  checkOptions,
+  DEFAULT_OPTIONS,
+  MAX_POSTS,
+  startOptions,
+  storedOptions,
+  type StoredOptions,
+} from './options.ts'
 import { requestRelations } from './relations.ts'
 import type { Transaction } from '#db/client.ts'
 import type { Buffer } from 'node:buffer'
@@ -40,12 +48,12 @@ export interface SubmitInput {
   /** For automatic targets: reuse stored content younger than this. */
   refreshAfterSeconds?: number
   prefetch?: Buffer
-  options?: CaptureOptions
   /**
-   * Also fetch the account's following and followers lists (抓关系网), for
-   * an explicit capture of a profile on a platform that can list them.
+   * How a profile expands, what its timeline keeps and whether its lists
+   * are fetched; a page or member without them inherits its parent's, a
+   * top-level request without them gets the defaults.
    */
-  relations?: boolean
+  options?: StoredOptions
   /** The update (更新) this request is an item of. */
   updateId?: string
 }
@@ -93,7 +101,7 @@ export function jobView(
  */
 export function submit(ctx: CaptureContext, request: SubmitInput): Job {
   const input = { ...request }
-  checkOptions(input.options)
+  if (input.options) checkOptions(input.options)
   const { db } = ctx
 
   if (input.refreshId) {
@@ -144,18 +152,17 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
   if (Boolean(input.connectionId) === anonymous)
     throw new AppError('connection')
 
+  // A profile's first page starts the run its options budget.
   if (
     target.collection &&
     !input.automatic &&
-    input.options &&
-    !input.pageCursor
-  ) {
-    input.collectionLimit = input.options.maxPosts ?? 0
-    input.pageSize = Math.min(input.collectionLimit, 100)
-  }
+    !input.pageCursor &&
+    supports(policy, 'capture.page')
+  )
+    Object.assign(input, budget(ctx, input.options ?? DEFAULT_OPTIONS))
   const pageSize = input.pageSize ?? 0
   const collectionLimit = input.collectionLimit ?? 0
-  if ((collectionLimit > 1000 && !input.options) || pageSize > 1000)
+  if (collectionLimit > MAX_POSTS || pageSize > 1000)
     throw new AppError('unsupported')
   const pageCursor = input.pageCursor ?? ''
   if (
@@ -178,6 +185,8 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
     // Members of a collection page are observed again with it.
     let recheck = false
     let options = input.options
+    // The options as asked, before the run fixes its date cutoff.
+    const asked = options
     if (input.parentSubmission) {
       const parent = tx
         .select({
@@ -191,7 +200,7 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
         .get()
       if (!parent) throw new AppError('not_found')
       recheck = parent.isCollection
-      options ??= (parent.options as CaptureOptions | null) ?? undefined
+      options ??= storedOptions(parent.options)
       if (parent.stopped) throw new AppError('collection_stopped')
     }
     if (connectionId) {
@@ -221,8 +230,7 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
         pageCursor,
         pageSize,
         collectionLimit,
-        ...(options ? [canonicalJson(options)] : []),
-        ...(input.relations ? ['relations'] : []),
+        ...(asked ? [canonicalJson(asked)] : []),
         ...(input.updateId ? [`update:${input.updateId}`] : []),
       ].join('|'),
     )
@@ -235,6 +243,10 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
       if (existing.fingerprint !== fingerprint) throw new AppError('conflict')
       return jobView(tx, existing.captureId, existing.id)
     }
+    const stored = startOptions(
+      options ?? DEFAULT_OPTIONS,
+      ctx.now?.() ?? Date.now(),
+    )
 
     // A refresh without an account keeps the collection it refreshes.
     let collectionId =
@@ -332,13 +344,20 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
         input: userInput,
         collectionLimit,
         parentSubmission: input.parentSubmission || null,
-        captureOptions: options ?? null,
+        captureOptions: stored,
         libraryAdded,
         updateId: input.updateId ?? null,
       })
       .run()
 
-    if (input.relations && explicitCollection && platform.relations)
+    // Lists belong to the run, not to each of its pages.
+    if (
+      stored.relations &&
+      explicitCollection &&
+      !input.parentSubmission &&
+      !pageCursor &&
+      platform.relations
+    )
       requestRelations(ctx, tx, submissionId, captureId)
 
     let expandRelated = !automatic

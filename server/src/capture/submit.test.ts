@@ -10,6 +10,7 @@ import {
   submissions,
 } from '#db/schema.ts'
 import { testContext } from '#testing/context.ts'
+import { DEFAULT_OPTIONS, resolveOptions } from './options.ts'
 import { submit } from './submit.ts'
 import type { CaptureContext } from './context.ts'
 
@@ -171,19 +172,102 @@ describe('submit', () => {
     )
     expect(() => submit(ctx, { url: post, pageSize: 10 })).toThrow('不支持')
     expect(() =>
-      submit(ctx, { url: profile, options: { maxPosts: 100_001 } }),
+      submit(ctx, {
+        url: profile,
+        options: { ...DEFAULT_OPTIONS, posts: 'max', count: 100_001 },
+      }),
     ).toThrow('不支持的链接')
   })
 
   test('options set the first page size and limit', () => {
-    const ctx = testContext()
-    const job = submit(ctx, { url: profile, options: { maxPosts: 250 } })
-    expect(
-      ctx.db.select().from(captures).where(eq(captures.id, job.id)).get(),
-    ).toMatchObject({ pageSize: 100, isCollection: true })
-    expect(ctx.db.select().from(submissions).get()).toMatchObject({
-      collectionLimit: 250,
-      captureOptions: { maxPosts: 250 },
+    const ctx = testContext({ timelineCap: 30 })
+    const first = (options?: Parameters<typeof resolveOptions>[0]) => {
+      const job = submit(ctx, {
+        url: profile,
+        ...(options ? { options: resolveOptions(options) } : {}),
+      })
+      const capture = ctx.db
+        .select()
+        .from(captures)
+        .where(eq(captures.id, job.id))
+        .get()!
+      const submission = ctx.db
+        .select()
+        .from(submissions)
+        .where(eq(submissions.id, job.submissionId))
+        .get()!
+      // Each request its own capture.
+      ctx.db
+        .update(captures)
+        .set({ state: 'complete' })
+        .where(eq(captures.id, job.id))
+        .run()
+      return {
+        pageSize: capture.pageSize,
+        limit: submission.collectionLimit,
+        options: submission.captureOptions,
+      }
+    }
+    // None given: the defaults, the newest 100.
+    expect(first()).toEqual({
+      pageSize: 100,
+      limit: 100,
+      options: DEFAULT_OPTIONS,
     })
+    expect(first({ posts: 'max', count: 250 })).toMatchObject({
+      pageSize: 100,
+      limit: 250,
+    })
+    // At most, with no number: no limit.
+    expect(first({ posts: 'max' })).toMatchObject({ pageSize: 0, limit: 0 })
+    expect(first({ posts: 'latest', count: 20 })).toMatchObject({
+      pageSize: 20,
+      limit: 20,
+    })
+    expect(first({ posts: 'until_existing' })).toMatchObject({
+      pageSize: 30,
+      limit: 30,
+    })
+    expect(first({ posts: 'none' })).toMatchObject({ pageSize: 0, limit: 0 })
+  })
+
+  test('a date range is fixed when the run starts, not in its fingerprint', () => {
+    let now = Date.parse('2026-06-10T00:00:00Z')
+    const ctx = testContext({ now: () => now })
+    const options = resolveOptions({ since_days: 7 })
+    const job = submit(ctx, { url: profile, options, key: 'k' })
+    expect(
+      ctx.db
+        .select()
+        .from(submissions)
+        .where(eq(submissions.id, job.submissionId))
+        .get()!.captureOptions,
+    ).toEqual({ ...options, since: '2026-06-03T00:00:00.000Z' })
+    // A repeat of the same request a moment later is the same request.
+    now += 1000
+    expect(submit(ctx, { url: profile, options, key: 'k' }).submissionId).toBe(
+      job.submissionId,
+    )
+  })
+
+  test('options are validated with their defaults filled in', () => {
+    expect(resolveOptions()).toEqual(DEFAULT_OPTIONS)
+    expect(resolveOptions({ posts: 'max' })).toEqual({
+      ...DEFAULT_OPTIONS,
+      posts: 'max',
+      count: undefined,
+    })
+    expect(resolveOptions({ posts: 'latest', count: 30 }).count).toBe(30)
+    expect(() => resolveOptions({ posts: 'until_existing', count: 5 })).toThrow(
+      '只有最新和最多可以设置条数',
+    )
+    expect(() => resolveOptions({ posts: 'none', count: 5 })).toThrow()
+    const ctx = testContext()
+    expect(() =>
+      submit(ctx, {
+        url: profile,
+        options: { ...DEFAULT_OPTIONS, sinceDays: 3 as 1 },
+      }),
+    ).toThrow('不支持的链接')
   })
 })

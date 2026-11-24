@@ -5,6 +5,7 @@ import { captures, collections, submissions } from '#db/schema.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, postGraph } from '#testing/fake-platform.ts'
 import { captureHandlers } from './handlers.ts'
+import { resolveOptions } from './options.ts'
 import { stopCollection } from './related.ts'
 import { submit } from './submit.ts'
 import type { FetchRequest, RelatedTarget } from '#platforms/protocol.ts'
@@ -77,7 +78,10 @@ function memberIds(c: CaptureContext) {
 describe('related', () => {
   test('a profile page submits its members and references', async () => {
     const c = setup(3, 2)
-    submit(c, { url: 'https://fake.test/u/someone' })
+    submit(c, {
+      url: 'https://fake.test/u/someone',
+      options: resolveOptions({ count: 2 }),
+    })
     await c.queue.drain()
     // Without options, one page.
     expect(memberIds(c)).toEqual([1, 2])
@@ -103,7 +107,10 @@ describe('related', () => {
 
   test('options continue across pages until the budget is spent', async () => {
     const c = setup(5, 2)
-    submit(c, { url: 'https://fake.test/u/someone', options: { maxPosts: 5 } })
+    submit(c, {
+      url: 'https://fake.test/u/someone',
+      options: resolveOptions({ posts: 'max', count: 5 }),
+    })
     await c.queue.drain()
     // The last page outruns the budget and is still submitted whole: the
     // next page would start after it.
@@ -121,7 +128,7 @@ describe('related', () => {
     const c = setup(3, 2)
     submit(c, {
       url: 'https://fake.test/u/someone',
-      options: { maxPosts: 0, mediaOnly: true },
+      options: resolveOptions({ posts: 'max', media_only: true }),
     })
     await c.queue.drain()
     // No member has media: none are submitted, yet every page is read.
@@ -133,7 +140,10 @@ describe('related', () => {
 
   test('a stopped collection submits nothing more', async () => {
     const c = setup(3, 2)
-    const job = submit(c, { url: 'https://fake.test/u/someone', options: {} })
+    const job = submit(c, {
+      url: 'https://fake.test/u/someone',
+      options: resolveOptions(),
+    })
     stopCollection(c, job.submissionId)
     await c.queue.drain()
     expect(memberIds(c)).toEqual([])

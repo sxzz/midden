@@ -6,6 +6,7 @@ import { status } from '#platforms/rpc.ts'
 import { testContext } from '#testing/context.ts'
 import { FakeFailure, fakePlatform, postGraph } from '#testing/fake-platform.ts'
 import { captureHandlers } from './handlers.ts'
+import { DEFAULT_OPTIONS } from './options.ts'
 import {
   collectionProgress,
   librarySize,
@@ -35,6 +36,9 @@ const target = (id: number) => ({
   postType: 'post',
   prefetch: Buffer.alloc(0),
 })
+
+/** Its first page of two posts only. */
+const firstPage = { ...DEFAULT_OPTIONS, count: 2 }
 
 /** A profile with two pages of two posts; `broken` posts fail. */
 function setup(broken: Set<string>) {
@@ -71,7 +75,7 @@ describe('capture records', () => {
     const c = setup(new Set())
     for (let i = 1; i <= 32; i++)
       submit(c, { url: `https://fake.test/p/${100 + i}` })
-    submit(c, { url: 'https://fake.test/u/someone' })
+    submit(c, { url: 'https://fake.test/u/someone', options: firstPage })
     await c.queue.drain()
     const first = listRecords(c.db)
     expect(first.items).toHaveLength(30)
@@ -89,7 +93,10 @@ describe('capture records', () => {
   test('collection records report member progress and retry failures', async () => {
     const broken = new Set(['2'])
     const c = setup(broken)
-    const job = submit(c, { url: 'https://fake.test/u/someone' })
+    const job = submit(c, {
+      url: 'https://fake.test/u/someone',
+      options: firstPage,
+    })
     await c.queue.drain()
     let record = listRecords(c.db).items[0]!
     expect(record.members).toMatchObject({
@@ -98,7 +105,12 @@ describe('capture records', () => {
       failed: 1,
       done: true,
     })
-    expect(record.pages).toEqual({ more: true, more1000: true, failed: false })
+    expect(record.pages).toEqual({
+      more: true,
+      more1000: true,
+      capped: false,
+      failed: false,
+    })
     // The failed member is not counted until it is saved.
     expect(record.members).toMatchObject({ added: 1, updated: 0 })
     expect(record.retryable).toBe(1)
@@ -126,7 +138,10 @@ describe('capture records', () => {
 
   test('counts more members than SQLite binds values', async () => {
     const c = setup(new Set())
-    const job = submit(c, { url: 'https://fake.test/u/someone' })
+    const job = submit(c, {
+      url: 'https://fake.test/u/someone',
+      options: firstPage,
+    })
     await c.queue.drain()
     // Members written directly: a profile can have tens of thousands, past
     // the 32766 values a statement can bind.
@@ -189,7 +204,7 @@ describe('capture records', () => {
     await c.queue.drain()
     expect(listRecords(c.db).items[0]).toMatchObject({ added: true })
 
-    submit(c, { url: 'https://fake.test/u/someone' })
+    submit(c, { url: 'https://fake.test/u/someone', options: firstPage })
     await c.queue.drain()
     const profile = listRecords(c.db).items[0]!
     expect(profile.members).toMatchObject({ complete: 2, added: 1, updated: 1 })
@@ -208,7 +223,7 @@ describe('capture records', () => {
 
   test('"more" continues once; asking twice gives the same job', async () => {
     const c = setup(new Set())
-    submit(c, { url: 'https://fake.test/u/someone' })
+    submit(c, { url: 'https://fake.test/u/someone', options: firstPage })
     await c.queue.drain()
     const root = listRecords(c.db).items[0]!
     const more = recordPage(c, root.id, 'more')
@@ -328,7 +343,7 @@ describe('waiting captures', () => {
   test('members tell waiting from being fetched', async () => {
     const { c, release, running } = gated()
     try {
-      submit(c, { url: 'https://fake.test/u/someone' })
+      submit(c, { url: 'https://fake.test/u/someone', options: firstPage })
       await vi.waitFor(() => {
         expect(running()).toBe(4)
         expect(

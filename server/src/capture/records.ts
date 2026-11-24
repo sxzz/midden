@@ -16,7 +16,13 @@ import {
 import { inJson } from '#db/sql.ts'
 import { AppError } from '#errors.ts'
 import {
-  askedRelations,
+  DEFAULT_OPTIONS,
+  publicOptions,
+  storedOptions,
+  type CaptureOptions,
+} from './options.ts'
+import { continuePages, type StoredTarget } from './related.ts'
+import {
   relationProgresses,
   relationsDone,
   type RelationProgress,
@@ -25,9 +31,7 @@ import { submit, type Job } from './submit.ts'
 import type { Executor } from '#db/client.ts'
 import type { RelationList } from '#platforms/platform.ts'
 import type { CaptureContext } from './context.ts'
-import type { CaptureOptions } from './options.ts'
 import type { Payload } from './payload.ts'
-import type { StoredTarget } from './related.ts'
 
 const RECORD_PAGE = 30
 const MEMBER_PAGE = 50
@@ -54,8 +58,7 @@ export function captureURL(
   ctx: CaptureContext,
   raw: string,
   key?: string,
-  options?: CaptureOptions,
-  relations?: boolean,
+  options: CaptureOptions = DEFAULT_OPTIONS,
 ): Job {
   const { platform, target } = ctx.platforms.resolve(raw)
   return submit(ctx, {
@@ -65,7 +68,6 @@ export function captureURL(
       selectedConnection(ctx.db, platform.description.adapterId) || undefined,
     key,
     options,
-    relations,
   })
 }
 
@@ -450,10 +452,18 @@ export interface CaptureRecord {
   /** A record without members that saved its target: whether it was new. */
   added?: boolean
   stopped?: boolean
-  pages?: { more: boolean; more1000: boolean; failed: boolean }
+  /** `capped`: the post cap stopped `until_existing`; it can continue. */
+  pages?: {
+    more: boolean
+    more1000: boolean
+    capped: boolean
+    failed: boolean
+  }
   retryable?: number
   /** The following and followers lists it asked for (抓关系网). */
   relations?: RelationProgress[]
+  /** The options it ran with; none on rows from before they were kept. */
+  options?: CaptureOptions
 }
 
 /**
@@ -568,15 +578,8 @@ function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
     if (waiting) record.waiting = waiting
     const progress = progresses.get(submission.id)
     if (progress) {
-      const {
-        pages: _,
-        stopped,
-        next,
-        maxBatch,
-        error,
-        retryable,
-        ...members
-      } = progress
+      const { pages, stopped, next, maxBatch, error, retryable, ...members } =
+        progress
       record.members = members
       record.stopped = stopped
       record.done = members.done || stopped
@@ -584,6 +587,7 @@ function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
         record.pages = {
           more: !!next,
           more1000: !!next && maxBatch >= 1000,
+          capped: !!pages.at(-1)?.submission.timelineCapped,
           failed:
             error === 'partial_pages' ||
             capture.state === 'failed' ||
@@ -595,6 +599,8 @@ function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
       submission.libraryAdded !== null
     )
       record.added = submission.libraryAdded
+    if (submission.captureOptions)
+      record.options = publicOptions(submission.captureOptions)
     const lists = relations.get(submission.id)
     if (lists) {
       record.relations = lists
@@ -878,8 +884,7 @@ export function recapture(
   options: {
     restart?: boolean
     key?: string
-    captureOptions?: CaptureOptions
-    relations?: boolean
+    options?: CaptureOptions
     updateId?: string
   } = {},
 ): Job {
@@ -901,8 +906,7 @@ export function recapture(
     return submit(ctx, {
       refreshId: collectionId,
       key: options.key,
-      options: options.captureOptions,
-      relations: options.relations,
+      options: options.options,
       updateId: options.updateId,
     })
   const { platform } = ctx.platforms.resolve(collection.url)
@@ -912,8 +916,7 @@ export function recapture(
     connectionId:
       selectedConnection(ctx.db, platform.description.adapterId) || undefined,
     key: options.key,
-    options: options.captureOptions,
-    relations: options.relations,
+    options: options.options,
     updateId: options.updateId,
   })
 }
@@ -925,17 +928,11 @@ export function retryRecord(
   key?: string,
 ): Job {
   const row = recordRow(ctx.db, id)
-  const options =
-    (row.submission.captureOptions as CaptureOptions | null) ?? undefined
-  const relations = askedRelations(ctx.db, row.submission.id) || undefined
+  // The same options, with the date range counted from now.
+  const options = publicOptions(storedOptions(row.submission.captureOptions))
   // Deleted from the library since: saving it again is all that is left.
-  if (!row.saved)
-    return captureURL(ctx, row.collection.url, key, options, relations)
-  return recapture(ctx, row.collection.id, {
-    key,
-    captureOptions: options,
-    relations,
-  })
+  if (!row.saved) return captureURL(ctx, row.collection.url, key, options)
+  return recapture(ctx, row.collection.id, { key, options })
 }
 
 /**
@@ -1007,10 +1004,11 @@ export function retryFailed(
 }
 
 /**
- * Continue a finished collection record: `more` fetches the next page,
- * `more1000` keeps going to about 1000 members, `page_retry` fetches the
- * last page again. The pages form a new record; asking twice for more gives
- * the same job.
+ * Continue a finished collection record: `more` fetches the next 100 posts,
+ * `more1000` the next 1000, both as a new record with the same filters;
+ * `continue` reads on where the post cap stopped `until_existing`, in the
+ * same record; `page_retry` fetches the last page again. Asking twice for
+ * more gives the same job.
  */
 export function recordPage(
   ctx: CaptureContext,
@@ -1020,32 +1018,36 @@ export function recordPage(
 ): Job {
   const record = toRecord(ctx.db, recordRow(ctx.db, id))
   if (!record.pages) throw new AppError('unsupported')
-  let idem = `more:${id}`
-  if (op === 'page_retry') idem = `page-retry:${key || newId()}`
-  else if (op !== 'more' && op !== 'more1000') throw new AppError('unsupported')
-  const retry = op === 'page_retry'
   const last = collectionProgress(ctx.db, id).pages.at(-1)!
-  const options =
-    (last.submission.captureOptions as CaptureOptions | null) ?? undefined
-  let limit = op === 'more1000' ? 1000 : 0
-  if (!retry && limit > last.capture.maxBatchSize)
+  if (op === 'continue') return continuePages(ctx, last)
+  const stored = storedOptions(last.submission.captureOptions)
+  if (op === 'page_retry')
+    return submit(ctx, {
+      url: record.url,
+      providerId: last.submission.relatedProvider,
+      connectionId: last.submission.relatedConnection ?? undefined,
+      pageCursor: last.capture.pageCursor,
+      pageSize: last.capture.pageSize,
+      collectionLimit: last.submission.collectionLimit,
+      options: stored,
+      key: `page-retry:${key || newId()}`,
+    })
+  if (op !== 'more' && op !== 'more1000') throw new AppError('unsupported')
+  const limit = op === 'more1000' ? 1000 : 100
+  if (limit > 100 && limit > last.capture.maxBatchSize)
     throw new AppError('unsupported')
-  const cursor = retry ? last.capture.pageCursor : last.capture.nextPageCursor
-  if (!cursor && !retry) throw new AppError('no_more_pages')
-  let pageSize = limit
-  if (retry) {
-    limit = last.submission.collectionLimit
-    pageSize = last.capture.pageSize
-  }
+  const cursor = last.capture.nextPageCursor
+  if (!cursor) throw new AppError('no_more_pages')
+  const { finalPage: _, ...rest } = stored
   return submit(ctx, {
     url: record.url,
     providerId: last.submission.relatedProvider,
     connectionId: last.submission.relatedConnection ?? undefined,
     pageCursor: cursor,
-    pageSize,
+    pageSize: limit,
     collectionLimit: limit,
-    options,
-    key: idem,
+    options: { ...rest, posts: 'latest', count: limit },
+    key: `more:${id}`,
   })
 }
 

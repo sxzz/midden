@@ -127,9 +127,18 @@ describe('api', () => {
     ).json()) as { id: string }
     expect(update.id).not.toBe(job.record_id)
     await ctx.queue.drain()
+    // Its record says what it ran with: the defaults, none given.
     expect(await (await call(`/captures/${update.id}`)).json()).toMatchObject({
       id: update.id,
-      update: { target: 'collection', posts: 1, profiles: 0 },
+      update: { target: 'collection', posts: 1, profiles: 0, older: false },
+      options: {
+        posts: 'latest',
+        count: 100,
+        media_only: false,
+        include_shared: true,
+        capture_references: true,
+        relations: false,
+      },
       done: true,
     })
     expect(
@@ -178,6 +187,28 @@ describe('api', () => {
       body: '{"url":1}',
     })
     expect(invalid.status).toBe(400)
+    // Both ways to start a capture take the same options, checked alike.
+    for (const options of [
+      { posts: 'all' },
+      { count: 0 },
+      { since_days: 3 },
+      { posts: 'until_existing', count: 5 },
+      { max_posts: 5 },
+    ]) {
+      const link = await call('/captures', {
+        method: 'POST',
+        body: JSON.stringify({ url: 'https://fake.test/u/1', options }),
+      })
+      expect(link.status).toBe(400)
+      const update = await call('/updates', {
+        method: 'POST',
+        body: JSON.stringify({
+          target: { target: 'many', ids: [] },
+          options,
+        }),
+      })
+      expect(update.status).toBe(400)
+    }
   })
 
   test('only the owner logs in, and sessions write only from the web app', async () => {

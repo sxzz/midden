@@ -30,6 +30,7 @@ import {
 } from '#testing/fake-platform.ts'
 import { JPEG } from '#testing/library.ts'
 import { captureHandlers } from './handlers.ts'
+import { DEFAULT_OPTIONS } from './options.ts'
 import { captureURL, recapture, recordDetail } from './records.ts'
 import { LISTED_MEDIA } from './relation-store.ts'
 import type { RelationList, RelationsRequest } from '#platforms/platform.ts'
@@ -159,7 +160,10 @@ async function withAccount(c: AccountsContext) {
 
 /** Capture the subject profile with its lists and wait for all of it. */
 async function update(c: AccountsContext, url = SUBJECT) {
-  const job = captureURL(c, url, undefined, undefined, true)
+  const job = captureURL(c, url, undefined, {
+    ...DEFAULT_OPTIONS,
+    relations: true,
+  })
   await c.queue.drain()
   return job
 }
@@ -679,7 +683,7 @@ describe('抓关系网', () => {
     expect(followCounts(ctx, id)).toEqual({})
     expect(listFollowChanges(ctx, id).items).toEqual([])
     await withAccount(ctx)
-    recapture(ctx, id, { relations: true })
+    recapture(ctx, id, { options: { ...DEFAULT_OPTIONS, relations: true } })
     await ctx.queue.drain()
     expect(fetchesOf(ctx, 'following')[0]?.state).toBe('complete')
   })

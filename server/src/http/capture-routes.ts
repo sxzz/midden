@@ -1,6 +1,7 @@
 import { and, desc, eq, ne } from 'drizzle-orm'
 import { Hono } from 'hono'
 import * as v from 'valibot'
+import { OptionsBody, optionsJson, resolveOptions } from '#capture/options.ts'
 import {
   captureURL,
   captureWaits,
@@ -36,27 +37,12 @@ import {
   type UpdateRecordDetail,
   type UpdateTargetInput,
 } from '#capture/updates.ts'
-import {
-  captures,
-  collections,
-  library,
-  submissions,
-  updatePostModes,
-} from '#db/schema.ts'
+import { captures, collections, library, submissions } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { deleteAll } from '#library/delete.ts'
 import { Cursor, json, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
-import type { CaptureOptions } from '#capture/options.ts'
 import type { Job } from '#capture/submit.ts'
-
-/**
- * What a profile capture also fetches, beside the profile: its following and
- * followers lists (抓关系网). A capture of anything else ignores it.
- */
-const ProfileOptions = {
-  relations: v.optional(v.boolean()),
-}
 
 /** What an update (更新) covers: a collection, a folder or a selection. */
 const UpdateTargetBody = v.union([
@@ -76,42 +62,6 @@ const targetInput = (
   body.target === 'many'
     ? { target: 'many', ids: body.ids }
     : { target: body.target, id: body.id }
-
-/**
- * How an update reads each profile: its timeline (`posts`, the newest page
- * by default) and its following and followers lists (`relations`, off).
- */
-const UpdateOptionsBody = v.optional(
-  v.strictObject({
-    posts: v.optional(v.picklist(updatePostModes)),
-    relations: v.optional(v.boolean()),
-  }),
-)
-
-const OptionsBody = v.optional(
-  v.strictObject({
-    media_only: v.optional(v.boolean()),
-    omit_shared: v.optional(v.boolean()),
-    skip_references: v.optional(v.boolean()),
-    max_posts: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
-    since: v.optional(v.string()),
-    ...ProfileOptions,
-  }),
-)
-
-/** The post options of a capture; the profile options are passed apart. */
-function captureOptions(
-  input: v.InferOutput<typeof OptionsBody>,
-): CaptureOptions | undefined {
-  if (!input) return undefined
-  return {
-    ...(input.media_only ? { mediaOnly: true } : {}),
-    ...(input.omit_shared ? { omitShared: true } : {}),
-    ...(input.skip_references ? { skipReferences: true } : {}),
-    ...(input.max_posts === undefined ? {} : { maxPosts: input.max_posts }),
-    ...(input.since ? { since: input.since } : {}),
-  }
-}
 
 function memberProgress(m: NonNullable<CaptureRecord['members']>) {
   return {
@@ -143,7 +93,7 @@ function updateJson(u: UpdateInfo) {
     ...(u.handle ? { handle: u.handle } : {}),
     posts: u.posts,
     profiles: u.profiles,
-    options: u.options,
+    older: u.older,
     queued: u.queued,
     skipped: u.skipped,
   }
@@ -182,11 +132,13 @@ function recordJson(r: CaptureRecord | UpdateRecord) {
     ...(r.stopped === undefined ? {} : { stopped: r.stopped }),
     ...(r.retryable === undefined ? {} : { retryable: r.retryable }),
     ...(r.relations ? { relations: r.relations.map(relationJson) } : {}),
+    ...(r.options ? { options: optionsJson(r.options) } : {}),
     ...(r.pages
       ? {
           pages: {
             more: r.pages.more,
             more_1000: r.pages.more1000,
+            capped: r.pages.capped,
             failed: r.pages.failed,
           },
         }
@@ -292,7 +244,7 @@ export function captureRoutes(ctx: AccountsContext) {
         json(
           v.strictObject({
             url: v.pipe(v.string(), v.maxLength(8192)),
-            options: OptionsBody,
+            options: v.optional(OptionsBody),
           }),
         ),
         (c) => {
@@ -301,8 +253,7 @@ export function captureRoutes(ctx: AccountsContext) {
             ctx,
             input.url,
             idempotencyKey(c),
-            captureOptions(input.options),
-            input.options?.relations || undefined,
+            resolveOptions(input.options),
           )
           // The record this request made, so a client can open its progress.
           return c.json({ ...jobJson(ctx, job), record_id: job.submissionId })
@@ -409,14 +360,16 @@ export function captureRoutes(ctx: AccountsContext) {
         json(
           v.strictObject({
             target: UpdateTargetBody,
-            options: UpdateOptionsBody,
+            options: v.optional(OptionsBody),
+            /** Read profiles on from their last page (抓取更早的帖子). */
+            older: v.optional(v.boolean()),
           }),
         ),
         (c) => {
           const input = c.req.valid('json')
           const id = startUpdate(ctx, targetInput(input.target), {
-            ...(input.options?.posts ? { posts: input.options.posts } : {}),
-            ...(input.options?.relations ? { relations: true } : {}),
+            options: resolveOptions(input.options),
+            older: input.older,
             key: idempotencyKey(c),
           })
           return c.json(recordJson(updateRecord(ctx.db, id)))
