@@ -93,7 +93,8 @@ async function loadExposure() {
   const id = props.id
   try {
     const found = await call(client.shares.$get({ query: { collection: id } }))
-    if (id === props.id) exposure.value = found
+    // An answer without a list, as from an older server, shows nothing.
+    if (id === props.id) exposure.value = Array.isArray(found) ? found : []
   } catch {
     // Without an answer the row only offers to share.
   }
