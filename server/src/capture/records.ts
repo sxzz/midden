@@ -11,6 +11,7 @@ import {
   library,
   revisions,
   submissions,
+  updates,
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError } from '#errors.ts'
@@ -22,6 +23,7 @@ import {
 } from './relations.ts'
 import { submit, type Job } from './submit.ts'
 import type { Executor } from '#db/client.ts'
+import type { RelationList } from '#platforms/platform.ts'
 import type { CaptureContext } from './context.ts'
 import type { CaptureOptions } from './options.ts'
 import type { Payload } from './payload.ts'
@@ -108,7 +110,7 @@ export interface MemberProgress {
   updated?: number
 }
 
-type Page = { submission: Submission; capture: Capture }
+export type Page = { submission: Submission; capture: Capture }
 
 export interface CollectionProgress extends MemberProgress {
   stopped: boolean
@@ -121,7 +123,7 @@ export interface CollectionProgress extends MemberProgress {
 }
 
 /** Each record's pages: its submission and the continuation chain, in order. */
-function pageChains(db: Executor, roots: string[]): Map<string, Page[]> {
+export function pageChains(db: Executor, roots: string[]): Map<string, Page[]> {
   const chains = new Map(roots.map((root) => [root, [] as Page[]]))
   if (!roots.length) return chains
   const links = db.all<{ root: string; id: string }>(sql`
@@ -151,14 +153,14 @@ function pageChains(db: Executor, roots: string[]): Map<string, Page[]> {
   return chains
 }
 
-const isPending = (state: string) =>
+export const isPending = (state: string) =>
   state === 'queued' || state === 'downloading'
 
-const isRetryablePage = (page: Page) =>
+export const isRetryablePage = (page: Page) =>
   page.submission.relatedState === 'complete' &&
   !page.submission.collectionStopped
 
-function memberSubmissions(db: Executor, pageIds: string[]) {
+export function memberSubmissions(db: Executor, pageIds: string[]) {
   if (!pageIds.length) return []
   return db
     .select({ submission: submissions, capture: captures })
@@ -336,7 +338,7 @@ export function collectionProgress(
  * Why captures fell short, counted per capture: `captureIds` and the members
  * of `pageIds`. Each reason in `extra` counts once more.
  */
-function failureReasons(
+export function failureReasons(
   db: Executor,
   captureIds: string[],
   pageIds: string[],
@@ -422,7 +424,7 @@ export function captureWaits(
   )
 }
 
-const queuedIds = (list: Capture[]) =>
+export const queuedIds = (list: Capture[]) =>
   list.filter((c) => c.state === 'queued').map((c) => c.id)
 
 // --- Records --------------------------------------------------------------
@@ -454,11 +456,17 @@ export interface CaptureRecord {
   relations?: RelationProgress[]
 }
 
-export function recordFilterSQL() {
+/**
+ * Requests that are records of their own. The items of an update are not:
+ * the update is their record, but they can still be looked up by id, e.g.
+ * to continue a profile's pages.
+ */
+export function recordFilterSQL(items = false) {
   return and(
     isNull(submissions.parentSubmission),
     sql`${submissions.input} <> ''`,
     ...INTERNAL_KEYS.map((key) => notLike(submissions.idemKey, key)),
+    ...(items ? [] : [isNull(submissions.updateId)]),
   )
 }
 
@@ -466,6 +474,7 @@ function recordRows(
   db: Executor,
   where: ReturnType<typeof and>,
   limit: number,
+  items = false,
 ) {
   return db
     .select({
@@ -480,7 +489,7 @@ function recordRows(
     .from(submissions)
     .innerJoin(captures, eq(captures.id, submissions.captureId))
     .innerJoin(collections, eq(collections.id, captures.collectionId))
-    .where(and(recordFilterSQL(), where))
+    .where(and(recordFilterSQL(items), where))
     .orderBy(desc(submissions.createdAt), desc(submissions.id))
     .limit(limit)
     .all()
@@ -598,11 +607,14 @@ function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
 
 const toRecord = (db: Executor, row: RecordRow) => toRecords(db, [row])[0]!
 
-export function listRecords(
+export const RECORD_PAGE_SIZE = RECORD_PAGE
+
+/** Up to `limit` request records older than `after`, newest first. */
+export function requestRecords(
   db: Executor,
-  cursor?: string,
-): { items: CaptureRecord[]; next?: string } {
-  const after = cursor ? decodeCursor(cursor, 'captures') : undefined
+  after: { at: Date; id: string } | undefined,
+  limit: number,
+): CaptureRecord[] {
   const rows = recordRows(
     db,
     after
@@ -614,20 +626,13 @@ export function listRecords(
           ),
         )
       : undefined,
-    RECORD_PAGE + 1,
+    limit,
   )
-  const items = toRecords(db, rows.slice(0, RECORD_PAGE))
-  const last = items.at(-1)
-  return {
-    items,
-    ...(rows.length > RECORD_PAGE && last
-      ? { next: encodeCursor(last.createdAt, last.id, 'captures') }
-      : {}),
-  }
+  return toRecords(db, rows)
 }
 
 function recordRow(db: Executor, id: string) {
-  const row = recordRows(db, eq(submissions.id, id), 1)[0]
+  const row = recordRows(db, eq(submissions.id, id), 1, true)[0]
   if (!row) throw new AppError('not_found')
   return row
 }
@@ -707,6 +712,10 @@ export interface CaptureMember {
   createdAt: Date
   gone: boolean
   reasons: string[]
+  /** A profile's following or followers list rather than a capture. */
+  list?: RelationList
+  /** That profile's username. */
+  handle?: string
 }
 
 export function recordMembers(
@@ -715,28 +724,63 @@ export function recordMembers(
   state: string,
   cursor?: string,
 ): { items: CaptureMember[]; next?: string } {
+  recordRow(db, id)
+  const pages = pageChains(db, [id])
+    .get(id)!
+    .map((p) => p.submission.id)
+  return memberPage(
+    db,
+    `members:${id}`,
+    state,
+    cursor,
+    memberSubmissions(db, pages),
+  )
+}
+
+/**
+ * A page of members by state, oldest first. A capture listed several times
+ * is one member, new if any listing was new (as `memberCounts` counts it).
+ * `extra` are members that are not captures, such as a profile's lists.
+ */
+export function memberPage(
+  db: Executor,
+  key: string,
+  state: string,
+  cursor: string | undefined,
+  listings: { capture: Capture; submission: Submission }[],
+  extra: CaptureMember[] = [],
+): { items: CaptureMember[]; next?: string } {
   const wanted = Object.hasOwn(MEMBER_FILTERS, state)
     ? MEMBER_FILTERS[state]
     : undefined
   if (!wanted) throw new AppError('invalid_filter')
-  recordRow(db, id)
-  const filter = `members:${id}:${state}`
+  const filter = `${key}:${state}`
   const after = cursor ? decodeCursor(cursor, filter) : undefined
-  const pages = pageChains(db, [id])
-    .get(id)!
-    .map((p) => p.submission.id)
-  // A member listed on several pages is one, new if any listing was new
-  // (as `memberCounts` counts it).
   const listed = new Map<string, { capture: Capture; added: boolean | null }>()
-  for (const { capture, submission } of memberSubmissions(db, pages)) {
+  for (const { capture, submission } of listings) {
     const seen = listed.get(capture.id)
     const added = submission.libraryAdded
     if (!seen) listed.set(capture.id, { capture, added })
     else if (added !== null && seen.added !== true) seen.added = added
   }
-  const members = [...listed.values()]
-    .filter((m) => wanted(m.capture.state, m.added))
-    .map((m) => m.capture)
+  type Entry = {
+    id: string
+    createdAt: Date
+    capture?: Capture
+    view?: CaptureMember
+  }
+  const members = [
+    ...[...listed.values()]
+      .filter((m) => wanted(m.capture.state, m.added))
+      .map((m): Entry => ({
+        id: m.capture.id,
+        createdAt: m.capture.createdAt,
+        capture: m.capture,
+      })),
+    ...extra
+      .filter((m) => wanted(m.state, null))
+      .map((m): Entry => ({ id: m.jobId, createdAt: m.createdAt, view: m })),
+  ]
     .toSorted(
       (a, b) =>
         a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : 1),
@@ -748,6 +792,24 @@ export function recordMembers(
         (c.createdAt.getTime() === after.at.getTime() && c.id > after.id),
     )
   const page = members.slice(0, MEMBER_PAGE)
+  const views = new Map(
+    memberViews(
+      db,
+      page.flatMap((m) => (m.capture ? [m.capture] : [])),
+    ).map((view) => [view.jobId, view]),
+  )
+  const items = page.map((m) => m.view ?? views.get(m.id)!)
+  const last = page.at(-1)
+  return {
+    items,
+    ...(members.length > MEMBER_PAGE && last
+      ? { next: encodeCursor(last.createdAt, last.id, filter) }
+      : {}),
+  }
+}
+
+/** Captures as members of a record, with why each fell short. */
+function memberViews(db: Executor, page: Capture[]): CaptureMember[] {
   const ids = page.map((c) => c.id)
   const targets = new Map(
     (page.length
@@ -786,7 +848,7 @@ export function recordMembers(
         AND c.state = 'partial'`))
       reasons.get(row.capture)!.add(row.reason)
   const waits = captureWaits(db, queuedIds(page))
-  const items = page.map((capture): CaptureMember => {
+  return page.map((capture): CaptureMember => {
     const collection = targets.get(capture.collectionId)!
     const waiting = waits.get(capture.id)
     return {
@@ -802,13 +864,6 @@ export function recordMembers(
       reasons: [...reasons.get(capture.id)!].toSorted(),
     }
   })
-  const last = page.at(-1)
-  return {
-    items,
-    ...(members.length > MEMBER_PAGE && last
-      ? { next: encodeCursor(last.createdAt, last.id, filter) }
-      : {}),
-  }
 }
 
 // --- Retries and pages ------------------------------------------------------
@@ -825,6 +880,7 @@ export function recapture(
     key?: string
     captureOptions?: CaptureOptions
     relations?: boolean
+    updateId?: string
   } = {},
 ): Job {
   const collection = ctx.db
@@ -847,6 +903,7 @@ export function recapture(
       key: options.key,
       options: options.captureOptions,
       relations: options.relations,
+      updateId: options.updateId,
     })
   const { platform } = ctx.platforms.resolve(collection.url)
   return submit(ctx, {
@@ -857,6 +914,7 @@ export function recapture(
     key: options.key,
     options: options.captureOptions,
     relations: options.relations,
+    updateId: options.updateId,
   })
 }
 
@@ -999,12 +1057,16 @@ export function librarySize(db: Executor) {
     collections: one(
       db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(library),
     ),
-    records: one(
-      db
-        .select({ n: sql<number>`count(*)`.mapWith(Number) })
-        .from(submissions)
-        .where(recordFilterSQL()),
-    ),
+    records:
+      one(
+        db
+          .select({ n: sql<number>`count(*)`.mapWith(Number) })
+          .from(submissions)
+          .where(recordFilterSQL()),
+      ) +
+      one(
+        db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(updates),
+      ),
     running: one(
       db
         .select({ n: sql<number>`count(*)`.mapWith(Number) })

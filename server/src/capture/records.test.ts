@@ -9,7 +9,6 @@ import { captureHandlers } from './handlers.ts'
 import {
   collectionProgress,
   librarySize,
-  listRecords,
   recordDetail,
   recordMembers,
   recordPage,
@@ -18,6 +17,7 @@ import {
 } from './records.ts'
 import { stopCollection } from './related.ts'
 import { submit } from './submit.ts'
+import { listRecords } from './updates.ts'
 import type { CaptureContext } from './context.ts'
 
 let ctx: CaptureContext | undefined

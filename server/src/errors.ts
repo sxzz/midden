@@ -19,7 +19,6 @@ export type ErrorKind =
   | 'invalid_cursor'
   | 'invalid_request'
   | 'no_more_pages'
-  | 'batch_running'
   | 'collection_stopped'
 
 const messages: Record<ErrorKind, string> = {
@@ -40,7 +39,6 @@ const messages: Record<ErrorKind, string> = {
   invalid_cursor: '翻页位置无效，请刷新后重试',
   invalid_request: '请求无效',
   no_more_pages: '没有更多帖子了',
-  batch_running: '批量更新仍在进行',
   collection_stopped: '采集已中止',
 }
 

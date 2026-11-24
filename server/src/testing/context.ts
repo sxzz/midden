@@ -42,7 +42,7 @@ export function testContext(
     finalize: noop,
     related: noop,
     relations: { ...noop, queue: 'capture' },
-    refresh_batch: noop,
+    update: noop,
     ...options.handlers?.(() => ctx!),
   }
   const queue = new JobQueue({

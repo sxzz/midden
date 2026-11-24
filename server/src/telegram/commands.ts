@@ -15,6 +15,7 @@ import {
   recordPage,
 } from '#capture/records.ts'
 import { stopCollection } from '#capture/related.ts'
+import { startUpdate } from '#capture/updates.ts'
 import { captures, connections, library } from '#db/schema.ts'
 import { AppError, isAppError } from '#errors.ts'
 import { deleteCollection } from '#library/delete.ts'
@@ -194,13 +195,28 @@ function run(c: CommandContext, request: Request): Reply {
         keyboard,
       }
     }
-    case 'retry':
-    case 'refresh': {
+    case 'retry': {
       const job = recapture(ctx, requireId(arg), {
-        restart: request.command === 'retry',
-        key: `${request.command}:${request.updateId}`,
+        restart: true,
+        key: `retry:${request.updateId}`,
       })
       deliverSubmission(c, request, job.submissionId)
+      return {}
+    }
+    case 'refresh': {
+      // An update like the web's 更新: one record, the profile's newest posts.
+      const id = startUpdate(
+        ctx,
+        { target: 'collection', id: requireId(arg) },
+        { key: `refresh:${request.updateId}` },
+      )
+      enqueueDelivery(ctx, {
+        kind: 'update',
+        ref: id,
+        chatId: request.chatId,
+        group: request.group,
+        replyTo: request.group ? request.messageId : undefined,
+      })
       return {}
     }
     case 'delete':

@@ -8,6 +8,15 @@ export const CaptureOptions = v.object({
   skipReferences: v.optional(v.boolean()),
   maxPosts: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
   since: v.optional(v.pipe(v.string(), v.isoTimestamp())),
+  /** Read the timeline without capturing its posts: the profile alone. */
+  skipPosts: v.optional(v.boolean()),
+  /**
+   * Keep paging until a page lists posts already saved, then read one page
+   * more: the saved post may only have been someone else's repost or quote.
+   */
+  untilExisting: v.optional(v.boolean()),
+  /** Set on that one page more: no page follows it. */
+  finalPage: v.optional(v.boolean()),
 })
 // eslint-disable-next-line @typescript-eslint/no-redeclare -- schema and type share the name
 export type CaptureOptions = v.InferOutput<typeof CaptureOptions>

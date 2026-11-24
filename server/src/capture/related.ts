@@ -6,7 +6,12 @@ import { AppError, isAppError } from '#errors.ts'
 import { SnoozeError, type Job } from '#jobs/queue.ts'
 import { matchesOptions, type CaptureOptions } from './options.ts'
 import { unsaveIfEmpty } from './scope.ts'
-import { isSaved, markUnreferenced, submit } from './submit.ts'
+import {
+  isSaved,
+  markUnreferenced,
+  submit,
+  type Job as SubmitJob,
+} from './submit.ts'
 import type { CaptureContext } from './context.ts'
 
 /** A related target as stored on its capture. */
@@ -78,12 +83,17 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
     markUnreferenced(tx, from, new Date(ctx.now?.() ?? Date.now()))
   })
 
-  const submitChild = (input: Parameters<typeof submit>[1]): boolean => {
+  const submitChild = (
+    input: Parameters<typeof submit>[1],
+  ): SubmitJob | undefined => {
     try {
-      submit(ctx, { ...source, parentSubmission: submission.id, ...input })
-      return true
+      return submit(ctx, {
+        ...source,
+        parentSubmission: submission.id,
+        ...input,
+      })
     } catch (error) {
-      if (isAppError(error, 'collection_stopped')) return false
+      if (isAppError(error, 'collection_stopped')) return undefined
       throw error
     }
   }
@@ -103,9 +113,15 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
 
   const options =
     (submission.captureOptions as CaptureOptions | null) ?? undefined
+  // A profile updated without its posts submits nothing from its timeline.
+  if (capture.isCollection && options?.skipPosts) {
+    finish(ctx, submission.id, capture.id)
+    return
+  }
   const limit = submission.collectionLimit
   const targets = capture.relatedTargets as StoredTarget[]
   let members = 0
+  const memberSubmissions: string[] = []
   for (const [index, target] of targets.entries()) {
     let member = true
     if (capture.isCollection || options?.skipReferences)
@@ -127,12 +143,23 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
       key: `related:${submission.id}:${index}`,
     })
     if (!submitted) return
+    if (member) memberSubmissions.push(submitted.submissionId)
   }
 
   const next = capture.nextPageCursor
-  const more = options
+  let more = options
     ? capture.isCollection && (limit === 0 || limit > members)
     : limit > members && members > 0
+  let nextOptions = options
+  if (capture.isCollection && options?.finalPage) more = false
+  else if (capture.isCollection && options?.untilExisting) {
+    more = true
+    // A post saved before this page was listed: read one page more, then stop.
+    if (savedBefore(ctx, memberSubmissions)) {
+      const { untilExisting: _, ...rest } = options
+      nextOptions = { ...rest, finalPage: true }
+    }
+  }
   if (next && next !== capture.pageCursor && more) {
     const remaining = limit > members ? limit - members : 0
     const key = `batch:${submission.id}`
@@ -141,7 +168,7 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
       pageCursor: next,
       pageSize: options ? Math.min(remaining, PAGE_TARGET) : remaining,
       collectionLimit: remaining,
-      options,
+      options: nextOptions,
       key,
     })
     if (!submitted) return
@@ -157,6 +184,21 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
         .run()
   }
   finish(ctx, submission.id, capture.id)
+}
+
+/** Whether any of these member submissions found its post already saved. */
+function savedBefore(ctx: CaptureContext, submissionIds: string[]): boolean {
+  if (!submissionIds.length) return false
+  return !!ctx.db
+    .select({ id: submissions.id })
+    .from(submissions)
+    .where(
+      and(
+        inJson(submissions.id, submissionIds),
+        eq(submissions.libraryAdded, false),
+      ),
+    )
+    .get()
 }
 
 function finish(ctx: CaptureContext, submissionId: string, captureId: string) {

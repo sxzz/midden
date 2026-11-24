@@ -583,12 +583,18 @@ export const submissions = sqliteTable(
     // submit time because the library row it inserts makes that unknowable
     // later; null for submissions older than the column.
     libraryAdded: bool(),
+    // The update (更新) this submission is an item of; its record is the
+    // update's, not one of its own.
+    updateId: text(),
   },
   (t) => [
     index('submissions_records')
       .on(t.createdAt, t.id)
       .where(sql`${t.parentSubmission} IS NULL AND ${t.input} <> ''`),
     index('submissions_capture').on(t.captureId),
+    index('submissions_update')
+      .on(t.updateId)
+      .where(sql`${t.updateId} IS NOT NULL`),
     // Partial: top-level requests (no parent) are most rows, and indexing
     // them leads SQLite to read records through this index instead.
     index('submissions_parent')
@@ -597,22 +603,52 @@ export const submissions = sqliteTable(
   ],
 )
 
-export const refreshBatches = sqliteTable('refresh_batches', {
-  id: text().primaryKey(),
-  collectionIds: text({ mode: 'json' }).$type<string[]>().notNull(),
-  position: integer().notNull().default(0),
-  reused: integer().notNull().default(0),
-  rejected: integer().notNull().default(0),
-  captureIds: text({ mode: 'json' })
-    .$type<string[]>()
-    .notNull()
-    .default(sql`'[]'`),
-  state: text({ enum: ['running', 'complete', 'failed'] })
-    .notNull()
-    .default('running'),
-  error: text().notNull().default(''),
-  createdAt: createdAt(),
-})
+export const updateTargets = ['collection', 'folder', 'many'] as const
+export type UpdateTarget = (typeof updateTargets)[number]
+/**
+ * How an update reads a profile's timeline: the newest page (`latest`),
+ * pages until one holds saved posts and one more (`until_existing`), the
+ * page after the last one read (`older`), or none.
+ */
+export const updatePostModes = [
+  'latest',
+  'until_existing',
+  'older',
+  'none',
+] as const
+export type UpdatePostMode = (typeof updatePostModes)[number]
+
+/**
+ * One 更新: a saved collection, a folder or a selection, captured again as
+ * a single record. Its captures are the submissions that name it.
+ */
+export const updates = sqliteTable(
+  'updates',
+  {
+    id: text().primaryKey(),
+    target: text({ enum: updateTargets }).notNull(),
+    // The collection or folder updated; '' for a selection.
+    targetId: text().notNull().default(''),
+    // The folder's name when the update started.
+    name: text().notNull().default(''),
+    // What the target held when the update started, each once.
+    collectionIds: text({ mode: 'json' }).$type<string[]>().notNull(),
+    posts: text({ enum: updatePostModes }).notNull().default('latest'),
+    relations: bool().notNull().default(false),
+    // Items submitted (or skipped) so far, in order.
+    position: integer().notNull().default(0),
+    // Items gone from the library or no longer capturable when their turn came.
+    skipped: integer().notNull().default(0),
+    state: text({ enum: ['running', 'complete', 'stopped', 'failed'] })
+      .notNull()
+      .default('running'),
+    error: text().notNull().default(''),
+    // A repeat of the same request starts nothing new.
+    idemKey: text().unique(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('updates_created').on(t.createdAt, t.id)],
+)
 
 export const tags = sqliteTable('tags', {
   id: text().primaryKey(),
@@ -738,7 +774,7 @@ export const telegramDeliveries = sqliteTable(
   'telegram_deliveries',
   {
     id: text().primaryKey(),
-    kind: text({ enum: ['submission', 'show'] }).notNull(),
+    kind: text({ enum: ['submission', 'update', 'show'] }).notNull(),
     // Submission or collection id.
     ref: text().notNull(),
     chatId: text().notNull(),

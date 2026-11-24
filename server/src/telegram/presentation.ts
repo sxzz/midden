@@ -24,7 +24,7 @@ export const COMMANDS: CommandInfo[] = [
   { name: 'show', description: '查看指定收藏', privateOnly: false },
   { name: 'status', description: '查看采集状态', privateOnly: false },
   { name: 'retry', description: '使用当前账号重试', privateOnly: false },
-  { name: 'refresh', description: '重新抓取帖子', privateOnly: false },
+  { name: 'refresh', description: '更新收藏', privateOnly: false },
   { name: 'delete', description: '删除', privateOnly: false },
   { name: 'account_delete', description: '删除采集账号', privateOnly: true },
   { name: 'account', description: '选择采集账号', privateOnly: false },
@@ -246,7 +246,7 @@ export function collectionMessage(
   const keyboard: Keyboard = [
     [
       { text: source, url: collection.url },
-      { text: '重新抓取', callback_data: `/refresh ${collection.id}` },
+      { text: '更新', callback_data: `/refresh ${collection.id}` },
     ],
     [{ text: '删除', callback_data: `/delete ${collection.id}` }],
     [{ text: '收藏列表', callback_data: '/list' }],
@@ -288,6 +288,8 @@ export interface ProgressInput {
   next: string
   maxBatch: number
   pageError: boolean
+  /** The record that shows the progress: the update's when it is in one. */
+  recordId?: string
   reasons: { reason: string; count: number }[]
 }
 
@@ -364,7 +366,7 @@ export function progressMessage(
     const progress = webRoute(
       options.webAppUrl,
       '在小程序查看进度',
-      `/captures/${p.submissionId}`,
+      `/captures/${p.recordId ?? p.submissionId}`,
     )
     const open = webRoute(
       options.webAppUrl,

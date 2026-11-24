@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer'
 import { afterEach, describe, expect, test } from 'vitest'
 import { captureHandlers } from '#capture/handlers.ts'
 import { submit } from '#capture/submit.ts'
+import { listRecords } from '#capture/updates.ts'
 import { telegramDeliveries } from '#db/schema.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, postGraph } from '#testing/fake-platform.ts'
@@ -160,6 +161,33 @@ describe('telegram delivery', () => {
     ])
     expect(calls[1]!.args[2]).toMatchObject({
       reply_markup: { inline_keyboard: expect.any(Array) },
+    })
+  })
+
+  test('/refresh is an update: one record, one message', async () => {
+    const { ctx, worker, calls } = setup(0)
+    const job = submit(ctx, { url: 'https://fake.test/p/1' })
+    await ctx.queue.drain()
+    const before = listRecords(ctx.db).items.length
+    const refresh = request({ command: 'refresh', arg: job.collectionId })
+    expect(handle({ ctx, version: 'dev' }, refresh)).toEqual({})
+    // The same Telegram update again starts nothing new.
+    handle({ ctx, version: 'dev' }, refresh)
+    await ctx.queue.drain()
+    const records = listRecords(ctx.db).items
+    expect(records).toHaveLength(before + 1)
+    expect(records[0]).toMatchObject({
+      update: { target: 'collection', posts: 1 },
+      done: true,
+      members: { total: 1, complete: 1 },
+    })
+    await worker.runDue()
+    expect(calls.map((c) => c.method)).toEqual(['sendMessage'])
+    expect(calls[0]!.args[1]).toContain('Author：\nhello')
+    expect(ctx.db.select().from(telegramDeliveries).get()).toMatchObject({
+      kind: 'update',
+      ref: records[0]!.id,
+      state: 'done',
     })
   })
 })

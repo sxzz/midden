@@ -5,12 +5,14 @@ import {
   collectionProgress,
   collectionReasons,
 } from '#capture/records.ts'
+import { updateRecord } from '#capture/updates.ts'
 import { newId } from '#db/id.ts'
 import {
   captures,
   collections,
   submissions,
   telegramDeliveries,
+  updates,
 } from '#db/schema.ts'
 import { getCaptureCollection, getCollection } from '#library/read.ts'
 import { deliveryParts, type Part } from './parts.ts'
@@ -301,6 +303,49 @@ export class DeliveryWorker {
       await this.#final(delivery, collection, 'complete')
       return false
     }
+    if (delivery.kind === 'update') return this.#deliverUpdate(delivery)
+    return this.#deliverSubmission(delivery, delivery.ref, delivery.ref)
+  }
+
+  /**
+   * An update started from the bot covers one collection: its message is
+   * that capture's, linking to the update's record. Returns whether to come
+   * back later.
+   */
+  async #deliverUpdate(delivery: Delivery): Promise<boolean> {
+    const { db } = this.#d.ctx
+    const update = db
+      .select()
+      .from(updates)
+      .where(eq(updates.id, delivery.ref))
+      .get()
+    if (!update) return false
+    const item = db
+      .select({ id: submissions.id })
+      .from(submissions)
+      .where(eq(submissions.updateId, update.id))
+      .orderBy(asc(submissions.createdAt))
+      .limit(1)
+      .get()
+    if (!item) {
+      const running = update.state === 'running'
+      await this.#status(delivery, {
+        text: running ? '排队中…' : '无法更新：内容不存在或已删除',
+        entities: [],
+      })
+      return running
+    }
+    const more = await this.#deliverSubmission(delivery, item.id, update.id)
+    // The lists (抓关系网) run after the profile; the record shows them.
+    return more || !updateRecord(db, update.id).done
+  }
+
+  /** A request's message; `recordId` is the record its links open. */
+  async #deliverSubmission(
+    delivery: Delivery,
+    submissionId: string,
+    recordId: string,
+  ): Promise<boolean> {
     const { db } = this.#d.ctx
     const row = db
       .select({
@@ -311,7 +356,7 @@ export class DeliveryWorker {
       .from(submissions)
       .innerJoin(captures, eq(captures.id, submissions.captureId))
       .innerJoin(collections, eq(collections.id, captures.collectionId))
-      .where(eq(submissions.id, delivery.ref))
+      .where(eq(submissions.id, submissionId))
       .get()
     // Deleted meanwhile (e.g. delete all): nothing left to say.
     if (!row) return false
@@ -324,6 +369,7 @@ export class DeliveryWorker {
         progressMessage(
           {
             submissionId: submission.id,
+            recordId,
             collectionId: first.collectionId,
             url: row.url,
             input: submission.input,
@@ -358,7 +404,7 @@ export class DeliveryWorker {
       const progress = webRoute(
         this.#d.webAppUrl,
         '在小程序查看进度',
-        `/captures/${submission.id}`,
+        `/captures/${recordId}`,
       )
       if (progress) keyboard[0]!.push(progress)
       await this.#status(delivery, {
@@ -375,7 +421,7 @@ export class DeliveryWorker {
       const details = webRoute(
         this.#d.webAppUrl,
         '在小程序查看详情',
-        `/captures/${submission.id}`,
+        `/captures/${recordId}`,
       )
       if (details) keyboard[0]!.push(details)
       await this.#status(delivery, {

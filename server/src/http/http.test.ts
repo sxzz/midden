@@ -116,17 +116,25 @@ describe('api', () => {
     expect(
       await (await call(`/collections/${collectionId}/availability`)).json(),
     ).toEqual({ available: true })
-    // A refresh is a record of its own, opened by the id it answers with.
-    const refresh = (await (
-      await call('/captures', {
+    // An update is a record of its own, opened by the id it answers with.
+    const update = (await (
+      await call('/updates', {
         method: 'POST',
-        body: JSON.stringify({ refresh_id: collectionId }),
+        body: JSON.stringify({
+          target: { target: 'collection', id: collectionId },
+        }),
       })
-    ).json()) as { id: string; record_id: string }
-    expect(refresh.record_id).not.toBe(job.record_id)
+    ).json()) as { id: string }
+    expect(update.id).not.toBe(job.record_id)
+    await ctx.queue.drain()
+    expect(await (await call(`/captures/${update.id}`)).json()).toMatchObject({
+      id: update.id,
+      update: { target: 'collection', posts: 1, profiles: 0 },
+      done: true,
+    })
     expect(
-      await (await call(`/captures/${refresh.record_id}`)).json(),
-    ).toMatchObject({ id: refresh.record_id, job_id: refresh.id })
+      await (await call(`/collections/${collectionId}/update`)).json(),
+    ).toEqual({ record: { id: update.id, done: true }, older: false })
   })
 
   test('maps errors to the statuses and texts the web app knows', async () => {
@@ -267,17 +275,22 @@ describe('api', () => {
       (await call(`/collections/${id}/follow-changes?limit=0`)).status,
     ).toBe(400)
     // Updating it may ask for the lists, which only a profile has.
-    const refreshed = await call('/captures', {
+    const refreshed = await call('/updates', {
       method: 'POST',
-      body: JSON.stringify({ refresh_id: id, options: { relations: true } }),
+      body: JSON.stringify({
+        target: { target: 'collection', id },
+        options: { relations: true },
+      }),
     })
     expect(refreshed.status).toBe(200)
-    expect(await refreshed.json()).not.toHaveProperty('relations')
     expect(
       (
-        await call('/captures', {
+        await call('/updates', {
           method: 'POST',
-          body: JSON.stringify({ refresh_id: id, options: { posts: true } }),
+          body: JSON.stringify({
+            target: { target: 'collection', id },
+            options: { posts: true },
+          }),
         })
       ).status,
     ).toBe(400)

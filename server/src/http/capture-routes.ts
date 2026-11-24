@@ -2,18 +2,10 @@ import { and, desc, eq, ne } from 'drizzle-orm'
 import { Hono } from 'hono'
 import * as v from 'valibot'
 import {
-  batchProgress,
-  retryRefreshBatch,
-  startRefreshBatch,
-  type BatchProgress,
-} from '#capture/batches.ts'
-import {
   captureURL,
   captureWaits,
   collectionProgress,
   librarySize,
-  listRecords,
-  recapture,
   recordDetail,
   recordMembers,
   recordPage,
@@ -25,7 +17,31 @@ import {
 } from '#capture/records.ts'
 import { stopCollection } from '#capture/related.ts'
 import { captureRelations, type RelationProgress } from '#capture/relations.ts'
-import { captures, collections, library, submissions } from '#db/schema.ts'
+import {
+  collectionUpdate,
+  isUpdate,
+  listRecords,
+  previewUpdate,
+  repeatUpdate,
+  retryUpdateFailed,
+  startUpdate,
+  stopUpdate,
+  updateDetail,
+  updateMembers,
+  updateRecord,
+  type ProfilePart,
+  type UpdateInfo,
+  type UpdateRecord,
+  type UpdateRecordDetail,
+  type UpdateTargetInput,
+} from '#capture/updates.ts'
+import {
+  captures,
+  collections,
+  library,
+  submissions,
+  updatePostModes,
+} from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { deleteAll } from '#library/delete.ts'
 import { Cursor, json, query, type Env } from './validate.ts'
@@ -40,6 +56,36 @@ import type { Job } from '#capture/submit.ts'
 const ProfileOptions = {
   relations: v.optional(v.boolean()),
 }
+
+/** What an update (更新) covers: a collection, a folder or a selection. */
+const UpdateTargetBody = v.union([
+  v.strictObject({
+    target: v.picklist(['collection', 'folder']),
+    id: v.string(),
+  }),
+  v.strictObject({
+    target: v.literal('many'),
+    ids: v.array(v.string()),
+  }),
+])
+
+const targetInput = (
+  body: v.InferOutput<typeof UpdateTargetBody>,
+): UpdateTargetInput =>
+  body.target === 'many'
+    ? { target: 'many', ids: body.ids }
+    : { target: body.target, id: body.id }
+
+/**
+ * How an update reads each profile: its timeline (`posts`, the newest page
+ * by default) and its following and followers lists (`relations`, off).
+ */
+const UpdateOptionsBody = v.optional(
+  v.strictObject({
+    posts: v.optional(v.picklist(updatePostModes)),
+    relations: v.optional(v.boolean()),
+  }),
+)
 
 const OptionsBody = v.optional(
   v.strictObject({
@@ -88,7 +134,33 @@ function relationJson(r: RelationProgress) {
   }
 }
 
-function recordJson(r: CaptureRecord) {
+function updateJson(u: UpdateInfo) {
+  return {
+    target: u.target,
+    ...(u.targetId ? { target_id: u.targetId } : {}),
+    ...(u.name ? { name: u.name } : {}),
+    ...(u.handle ? { handle: u.handle } : {}),
+    posts: u.posts,
+    profiles: u.profiles,
+    options: u.options,
+    queued: u.queued,
+    skipped: u.skipped,
+  }
+}
+
+function profilePartJson(p: ProfilePart) {
+  return {
+    collection_id: p.collectionId,
+    url: p.url,
+    ...(p.handle ? { handle: p.handle } : {}),
+    state: p.state,
+    ...(p.error ? { error: p.error } : {}),
+    ...(p.posts ? { posts: p.posts } : {}),
+    ...(p.relations ? { relations: p.relations.map(relationJson) } : {}),
+  }
+}
+
+function recordJson(r: CaptureRecord | UpdateRecord) {
   return {
     id: r.id,
     job_id: r.jobId,
@@ -118,13 +190,20 @@ function recordJson(r: CaptureRecord) {
           },
         }
       : {}),
+    ...('update' in r ? { update: updateJson(r.update) } : {}),
     done: r.done,
   }
 }
 
-function detailJson(r: CaptureRecordDetail) {
+function detailJson(r: CaptureRecordDetail | UpdateRecordDetail) {
   return {
     ...recordJson(r),
+    ...('profiles' in r
+      ? {
+          profiles: r.profiles.map(profilePartJson),
+          ...(r.moreProfiles ? { more_profiles: r.moreProfiles } : {}),
+        }
+      : {}),
     warnings: r.warnings,
     media_items: r.mediaItems.map((m) => ({
       position: m.position,
@@ -148,6 +227,8 @@ function memberJson(m: CaptureMember) {
     ...(m.error ? { error: m.error } : {}),
     reasons: m.reasons,
     ...(m.gone ? { gone: true } : {}),
+    ...(m.list ? { list: m.list } : {}),
+    ...(m.handle ? { handle: m.handle } : {}),
     created_at: m.createdAt.toISOString(),
   }
 }
@@ -198,31 +279,6 @@ export function jobJson(ctx: AccountsContext, job: Pick<Job, 'id'>) {
   }
 }
 
-function batchJson(b: BatchProgress) {
-  return {
-    id: b.id,
-    state: b.state,
-    ...(b.error ? { error: b.error } : {}),
-    total: b.total,
-    submitted: b.submitted,
-    reused: b.reused,
-    rejected: b.rejected,
-    running: b.running,
-    complete: b.complete,
-    partial: b.partial,
-    failed: b.failed,
-    members: memberProgress(b.members),
-    retryable: b.retryable,
-    done: b.done,
-    active: b.active.map((item) => ({
-      url: item.url,
-      collection_id: item.collectionId,
-      running: item.running,
-      ...(item.members ? { members: memberProgress(item.members) } : {}),
-    })),
-  }
-}
-
 const idempotencyKey = (c: {
   req: { header: (name: string) => string | undefined }
 }) => c.req.header('Idempotency-Key') || undefined
@@ -233,31 +289,20 @@ export function captureRoutes(ctx: AccountsContext) {
       .post(
         '/captures',
         json(
-          v.union([
-            v.strictObject({
-              url: v.pipe(v.string(), v.maxLength(8192)),
-              options: OptionsBody,
-            }),
-            v.strictObject({
-              refresh_id: v.string(),
-              options: v.optional(v.strictObject(ProfileOptions)),
-            }),
-          ]),
+          v.strictObject({
+            url: v.pipe(v.string(), v.maxLength(8192)),
+            options: OptionsBody,
+          }),
         ),
         (c) => {
           const input = c.req.valid('json')
-          const key = idempotencyKey(c)
-          const relations = input.options?.relations || undefined
-          const job =
-            'url' in input
-              ? captureURL(
-                  ctx,
-                  input.url,
-                  key,
-                  captureOptions(input.options),
-                  relations,
-                )
-              : recapture(ctx, input.refresh_id, { key, relations })
+          const job = captureURL(
+            ctx,
+            input.url,
+            idempotencyKey(c),
+            captureOptions(input.options),
+            input.options?.relations || undefined,
+          )
           // The record this request made, so a client can open its progress.
           return c.json({ ...jobJson(ctx, job), record_id: job.submissionId })
         },
@@ -274,9 +319,16 @@ export function captureRoutes(ctx: AccountsContext) {
         })
       })
 
-      .get('/captures/:id', (c) =>
-        c.json(detailJson(recordDetail(ctx.db, c.req.param('id')))),
-      )
+      .get('/captures/:id', (c) => {
+        const id = c.req.param('id')
+        return c.json(
+          detailJson(
+            isUpdate(ctx.db, id)
+              ? updateDetail(ctx.db, id)
+              : recordDetail(ctx.db, id),
+          ),
+        )
+      })
 
       .get(
         '/captures/:id/members',
@@ -288,9 +340,10 @@ export function captureRoutes(ctx: AccountsContext) {
         ),
         (c) => {
           const input = c.req.valid('query')
-          const page = recordMembers(
+          const id = c.req.param('id')
+          const page = (isUpdate(ctx.db, id) ? updateMembers : recordMembers)(
             ctx.db,
-            c.req.param('id'),
+            id,
             input.state ?? '',
             input.cursor || undefined,
           )
@@ -301,19 +354,28 @@ export function captureRoutes(ctx: AccountsContext) {
         },
       )
 
-      .post('/captures/:id/retry', (c) =>
-        c.json(
-          jobJson(ctx, retryRecord(ctx, c.req.param('id'), idempotencyKey(c))),
-        ),
-      )
+      // A new record capturing the same again; its id, to open it.
+      .post('/captures/:id/retry', (c) => {
+        const id = c.req.param('id')
+        return c.json({
+          record_id: isUpdate(ctx.db, id)
+            ? repeatUpdate(ctx, id)
+            : retryRecord(ctx, id, idempotencyKey(c)).submissionId,
+        })
+      })
 
       .post(
         '/captures/:id/retry-failed',
         json(v.strictObject({ job_id: v.optional(v.string()) })),
         (c) => {
           const input = c.req.valid('json')
+          const id = c.req.param('id')
           return c.json({
-            count: retryMembers(ctx, c.req.param('id'), input.job_id),
+            count: (isUpdate(ctx.db, id) ? retryUpdateFailed : retryMembers)(
+              ctx,
+              id,
+              input.job_id,
+            ),
           })
         },
       )
@@ -333,28 +395,59 @@ export function captureRoutes(ctx: AccountsContext) {
       )
 
       .post('/captures/:id/stop', (c) => {
-        stopCollection(ctx, c.req.param('id'))
+        const id = c.req.param('id')
+        if (isUpdate(ctx.db, id)) stopUpdate(ctx, id)
+        else stopCollection(ctx, id)
         return c.body(null, 204)
       })
 
       .get('/jobs/:id', (c) => c.json(jobJson(ctx, { id: c.req.param('id') })))
 
       .post(
-        '/refresh-batches',
-        json(v.strictObject({ collection_ids: v.array(v.string()) })),
+        '/updates',
+        json(
+          v.strictObject({
+            target: UpdateTargetBody,
+            options: UpdateOptionsBody,
+          }),
+        ),
         (c) => {
           const input = c.req.valid('json')
-          return c.json(batchJson(startRefreshBatch(ctx, input.collection_ids)))
+          const id = startUpdate(ctx, targetInput(input.target), {
+            ...(input.options?.posts ? { posts: input.options.posts } : {}),
+            ...(input.options?.relations ? { relations: true } : {}),
+            key: idempotencyKey(c),
+          })
+          return c.json(recordJson(updateRecord(ctx.db, id)))
         },
       )
 
-      .get('/refresh-batches/:id', (c) =>
-        c.json(batchJson(batchProgress(ctx.db, c.req.param('id')))),
+      // What an update would cover, for the sheet that starts it.
+      .post(
+        '/updates/preview',
+        json(v.strictObject({ target: UpdateTargetBody })),
+        (c) => {
+          const p = previewUpdate(ctx, targetInput(c.req.valid('json').target))
+          return c.json({
+            posts: p.posts,
+            profiles: p.profiles,
+            listable: p.listable,
+            ...(p.name ? { name: p.name } : {}),
+            ...(p.counts ? { counts: p.counts } : {}),
+            ...(p.older === undefined ? {} : { older: p.older }),
+          })
+        },
       )
 
-      .post('/refresh-batches/:id/retry', (c) =>
-        c.json({ count: retryRefreshBatch(ctx, c.req.param('id')) }),
-      )
+      // The update shown on a collection's page, and whether a profile has
+      // older posts to read.
+      .get('/collections/:id/update', (c) => {
+        const found = collectionUpdate(ctx, c.req.param('id'))
+        return c.json({
+          ...(found.record ? { record: found.record } : {}),
+          older: found.older,
+        })
+      })
 
       // Whether a saved collection can be captured again. Platforms run in
       // process, so this holds for any saved collection on a known platform.

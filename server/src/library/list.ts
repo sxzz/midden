@@ -596,6 +596,24 @@ export function selectedAmong(
   )
 }
 
+/** Every collection a filter selects, up to `limit`, in no set order. */
+export function selectedIds(
+  db: Executor,
+  input: CollectionFilter,
+  limit: number,
+): string[] {
+  const { ctes, source, where } = select(input)
+  return db
+    .all<{ id: string }>(
+      sql`
+      ${ctes}
+      SELECT k.collection_id AS id FROM ${sql.raw(source)}
+      WHERE ${where}
+      LIMIT ${limit}`,
+    )
+    .map((row) => row.id)
+}
+
 /**
  * The library, filtered, sorted and 20 per page; with a narrowing, only what
  * it selects too.

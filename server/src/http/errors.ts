@@ -20,7 +20,6 @@ const statuses: Record<ErrorKind, ContentfulStatusCode> = {
   not_found: 404,
   conflict: 409,
   no_more_pages: 409,
-  batch_running: 409,
   collection_stopped: 409,
   account_required: 422,
   connection: 422,

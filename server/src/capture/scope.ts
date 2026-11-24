@@ -5,7 +5,6 @@ import {
   collectionIdentityAliases,
   collections,
   library,
-  refreshBatches,
   submissions,
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
@@ -123,23 +122,6 @@ export function resolveCaptureScope(
       .set({ captureId: running.id })
       .where(eq(submissions.captureId, captureId))
       .run()
-    const batches = tx
-      .select()
-      .from(refreshBatches)
-      .where(
-        sql`EXISTS (SELECT 1 FROM json_each(${refreshBatches.captureIds}) WHERE value = ${captureId})`,
-      )
-      .all()
-    for (const batch of batches) {
-      tx.update(refreshBatches)
-        .set({
-          captureIds: batch.captureIds.map((id) =>
-            id === captureId ? running.id : id,
-          ),
-        })
-        .where(eq(refreshBatches.id, batch.id))
-        .run()
-    }
     failCapture(ctx, tx, captureId, '已并入同一内容正在进行的采集')
   } else {
     // A queued capture has no media or revisions yet, so it moves cleanly.

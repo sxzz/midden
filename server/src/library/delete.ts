@@ -1,7 +1,7 @@
 import { and, eq, isNull, lte, sql } from 'drizzle-orm'
 import { recordFilterSQL } from '#capture/records.ts'
 import { markUnreferenced } from '#capture/submit.ts'
-import { collections, library, submissions } from '#db/schema.ts'
+import { collections, library, submissions, updates } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError } from '#errors.ts'
 import { pruneTags } from './annotations.ts'
@@ -41,11 +41,16 @@ export function deleteAll(
       .all()
       .map((row) => row.id)
     const records =
-      tx
+      (tx
         .select({ n: sql<number>`count(*)`.mapWith(Number) })
         .from(submissions)
         .where(and(recordFilterSQL(), lte(submissions.createdAt, before)))
-        .get()?.n ?? 0
+        .get()?.n ?? 0) +
+      (tx
+        .select({ n: sql<number>`count(*)`.mapWith(Number) })
+        .from(updates)
+        .where(lte(updates.createdAt, before))
+        .get()?.n ?? 0)
     // By time rather than by id: a list of every saved id can exceed
     // SQLite's limit on bound values.
     tx.delete(library).where(lte(library.createdAt, before)).run()
@@ -62,6 +67,7 @@ export function deleteAll(
       )
       .run()
     tx.delete(submissions).where(lte(submissions.createdAt, before)).run()
+    tx.delete(updates).where(lte(updates.createdAt, before)).run()
     return { collections: saved.length, records }
   })
 }

@@ -1,6 +1,5 @@
 import { eq } from 'drizzle-orm'
 import { collections } from '#db/schema.ts'
-import { failRefreshBatch, runRefreshBatch } from './batches.ts'
 import { failDownload, runDownload } from './download.ts'
 import { errorCode, safeError } from './errors.ts'
 import { runCapture } from './fetch.ts'
@@ -9,6 +8,7 @@ import { failCapture, isActive, loadCapture } from './lifecycle.ts'
 import { failRelated, runRelated } from './related.ts'
 import { failRelations, runRelations } from './relations.ts'
 import { failThumbnail, runThumbnail } from './thumbnail.ts'
+import { failUpdate, runUpdate } from './updates.ts'
 import type { Job, JobHandler } from '#jobs/queue.ts'
 import type { CaptureContext } from './context.ts'
 
@@ -91,14 +91,14 @@ export function captureHandlers(
       },
       fail: (job, error) => failRelated(context(), job.ref, safeError(error)),
     },
-    refresh_batch: {
+    // Feeds an update's items to the capture queue a few at a time.
+    update: {
       queue: 'control',
       run: (job) => {
-        runRefreshBatch(context(), job)
+        runUpdate(context(), job)
         return Promise.resolve()
       },
-      fail: (job, error) =>
-        failRefreshBatch(context(), job.ref, safeError(error)),
+      fail: (job, error) => failUpdate(context(), job.ref, safeError(error)),
     },
     finalize: {
       queue: 'control',

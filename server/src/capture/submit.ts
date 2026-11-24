@@ -46,6 +46,8 @@ export interface SubmitInput {
    * an explicit capture of a profile on a platform that can list them.
    */
   relations?: boolean
+  /** The update (更新) this request is an item of. */
+  updateId?: string
 }
 
 export interface Job {
@@ -221,6 +223,7 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
         collectionLimit,
         ...(options ? [canonicalJson(options)] : []),
         ...(input.relations ? ['relations'] : []),
+        ...(input.updateId ? [`update:${input.updateId}`] : []),
       ].join('|'),
     )
     const existing = tx
@@ -331,6 +334,7 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
         parentSubmission: input.parentSubmission || null,
         captureOptions: options ?? null,
         libraryAdded,
+        updateId: input.updateId ?? null,
       })
       .run()
 
