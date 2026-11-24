@@ -135,6 +135,12 @@ describe('api', () => {
     expect(
       await (await call(`/collections/${collectionId}/update`)).json(),
     ).toEqual({ record: { id: update.id, done: true }, older: false })
+    // Only a profile's timeline the post cap stopped reads on.
+    const more = await call(`/updates/${update.id}/continue`, {
+      method: 'POST',
+      body: JSON.stringify({ collection_id: collectionId }),
+    })
+    expect(more.status).toBe(404)
 
     // Several at once, counted first.
     const remove = (body: object) =>

@@ -1,0 +1,1 @@
+ALTER TABLE `submissions` ADD `timeline_capped` integer DEFAULT false NOT NULL;

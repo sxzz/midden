@@ -69,6 +69,11 @@ const FEED_WAIT_MS = 3000
 const RECENT_MS = 24 * 60 * 60_000
 /** Profiles the record details part by part; a folder may hold thousands. */
 const MAX_PROFILES = 200
+/**
+ * Timeline posts `until_existing` reads per profile, per update or per
+ * continuation of one: a profile never captured has no saved posts to stop at.
+ */
+export const TIMELINE_CAP = 1000
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
 
 type Update = typeof updates.$inferSelect
@@ -376,7 +381,7 @@ export function startUpdate(
 const POST_OPTIONS: Record<UpdatePostMode, CaptureOptions | undefined> = {
   // The timeline's first page, as any refresh of a profile reads it.
   latest: undefined,
-  until_existing: { untilExisting: true },
+  until_existing: { untilExisting: true, maxPosts: TIMELINE_CAP },
   older: undefined,
   none: { skipPosts: true },
 }
@@ -620,6 +625,52 @@ export function retryUpdateFailed(
   return count
 }
 
+/**
+ * Read on where the post cap stopped a profile's timeline, with the same mode
+ * and cap. The page joins the profile's chain, so its posts are this
+ * update's members.
+ */
+export function continueTimeline(
+  ctx: CaptureContext,
+  id: string,
+  collectionId: string,
+): void {
+  const update = loadUpdate(ctx.db, id)
+  const [g] = gather(ctx.db, [update])
+  const root = g!.items.find(
+    (i) =>
+      i.capture.collectionId === collectionId &&
+      g!.roots.includes(i.submission.id),
+  )
+  if (!root) throw new AppError('not_found')
+  const last = g!.pages.get(root.submission.id)?.at(-1)
+  const cursor = last?.capture.nextPageCursor
+  if (update.state === 'stopped' || !last?.submission.timelineCapped || !cursor)
+    throw new AppError('unsupported')
+  const { url } = ctx.db
+    .select({ url: collections.url })
+    .from(collections)
+    .where(eq(collections.id, collectionId))
+    .get()!
+  const page = submit(ctx, {
+    url,
+    providerId: last.submission.relatedProvider,
+    connectionId: last.submission.relatedConnection ?? undefined,
+    parentSubmission: last.submission.id,
+    pageCursor: cursor,
+    pageSize: Math.min(TIMELINE_CAP, 100),
+    collectionLimit: TIMELINE_CAP,
+    options: last.submission.captureOptions as CaptureOptions,
+    // The key runRelated would have used, had the cap not stopped it.
+    key: `batch:${last.submission.id}`,
+  })
+  ctx.db
+    .update(submissions)
+    .set({ nextSubmission: page.submissionId, timelineCapped: false })
+    .where(eq(submissions.id, last.submission.id))
+    .run()
+}
+
 // --- Records ----------------------------------------------------------------
 
 export interface UpdateInfo {
@@ -647,7 +698,14 @@ export interface ProfilePart {
   state: string
   error: string
   /** Its timeline posts, unless the update left them out. */
-  posts?: { total: number; finished: number; pending: number; done: boolean }
+  posts?: {
+    total: number
+    finished: number
+    pending: number
+    done: boolean
+    /** Stopped by the post cap before reaching saved posts; can continue. */
+    capped: boolean
+  }
   relations?: RelationProgress[]
 }
 
@@ -966,6 +1024,9 @@ function profileParts(db: Executor, g: Gathered): ProfilePart[] {
               finished: progress.complete + progress.partial + progress.failed,
               pending: progress.pending,
               done: progress.done || progress.stopped,
+              capped:
+                !!progress.pages.at(-1)?.submission.timelineCapped &&
+                update.state !== 'stopped',
             },
           }
         : {}),

@@ -586,6 +586,9 @@ export const submissions = sqliteTable(
     // The update (更新) this submission is an item of; its record is the
     // update's, not one of its own.
     updateId: text(),
+    // A timeline page where `until_existing` ran into its post cap before
+    // reaching saved posts; its capture's next cursor continues it.
+    timelineCapped: bool().notNull().default(false),
   },
   (t) => [
     index('submissions_records')
@@ -607,8 +610,8 @@ export const updateTargets = ['collection', 'folder', 'many'] as const
 export type UpdateTarget = (typeof updateTargets)[number]
 /**
  * How an update reads a profile's timeline: the newest page (`latest`),
- * pages until one holds saved posts and one more (`until_existing`), the
- * page after the last one read (`older`), or none.
+ * pages until one holds saved posts and one more, at most 1000 posts
+ * (`until_existing`), the page after the last one read (`older`), or none.
  */
 export const updatePostModes = [
   'latest',

@@ -305,7 +305,13 @@ test('a profile of an update tells how each part went', () => {
     collection_id: 'p',
     url: 'https://x.com/i/user/1',
     state: 'complete',
-    posts: { total: 100, finished: 34, pending: 66, done: false },
+    posts: {
+      total: 100,
+      finished: 34,
+      pending: 66,
+      done: false,
+      capped: false,
+    },
     relations: [
       { list: 'following' as const, state: 'complete' as const, fetched: 3 },
       {
@@ -323,7 +329,7 @@ test('a profile of an update tells how each part went', () => {
     profilePartText({
       ...part,
       state: 'queued',
-      posts: { total: 0, finished: 0, pending: 0, done: false },
+      posts: { total: 0, finished: 0, pending: 0, done: false, capped: false },
       relations: [
         { list: 'following', state: 'waiting', fetched: 0 },
         { list: 'followers', state: 'failed', fetched: 0 },
@@ -335,7 +341,22 @@ test('a profile of an update tells how each part went', () => {
       collection_id: 'p',
       url: '',
       state: 'complete',
-      posts: { total: 40, finished: 40, pending: 0, done: true },
+      posts: { total: 40, finished: 40, pending: 0, done: true, capped: false },
     }),
   ).toBe('资料 ✓ · 帖子 40')
+  // Stopped by the post cap: what it read, and that saved posts are ahead.
+  expect(
+    profilePartText({
+      collection_id: 'p',
+      url: '',
+      state: 'complete',
+      posts: {
+        total: 1003,
+        finished: 1000,
+        pending: 0,
+        done: true,
+        capped: true,
+      },
+    }),
+  ).toBe('资料 ✓ · 帖子 1000（未到已有数据）')
 })

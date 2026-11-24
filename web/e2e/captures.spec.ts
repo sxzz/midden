@@ -520,3 +520,92 @@ test('an update reads as one record in the list', async ({ page }) => {
   await expect(done).toContainText('已完成')
   await expect(done).toContainText('更新 3')
 })
+
+test("an update's profile stopped by the post cap reads on in the same record", async ({
+  page,
+}) => {
+  let continued = false
+  const members = (pending: number) => ({
+    total: 1001 + pending,
+    complete: 1001,
+    partial: 0,
+    failed: 0,
+    pending,
+    done: pending === 0,
+    added: 1000,
+    updated: 1,
+  })
+  const update = () =>
+    detail({
+      id: retried,
+      job_id: '',
+      collection_id: profile,
+      url: 'https://x.com/cat',
+      kind: 'profile',
+      state: continued ? 'queued' : 'complete',
+      done: !continued,
+      members: members(continued ? 100 : 0),
+      update: {
+        target: 'collection',
+        target_id: profile,
+        handle: 'cat',
+        posts: 0,
+        profiles: 1,
+        options: { posts: 'until_existing', relations: false },
+        queued: 0,
+        skipped: 0,
+      },
+      profiles: [
+        {
+          collection_id: profile,
+          url: 'https://x.com/cat',
+          handle: 'cat',
+          state: 'complete',
+          posts: continued
+            ? {
+                total: 1100,
+                finished: 1000,
+                pending: 100,
+                done: false,
+                capped: false,
+              }
+            : {
+                total: 1000,
+                finished: 1000,
+                pending: 0,
+                done: true,
+                capped: true,
+              },
+        },
+      ],
+    })
+  const sent: unknown[] = []
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const request = r.request()
+    const path = new URL(request.url()).pathname
+    if (path === '/v1/session') return r.fulfill({ json: {} })
+    if (path === `/v1/updates/${retried}/continue`) {
+      sent.push(request.postDataJSON())
+      continued = true
+      return r.fulfill({ status: 204 })
+    }
+    if (path === `/v1/captures/${retried}/members`)
+      return r.fulfill({ json: { items: [] } })
+    if (path === `/v1/captures/${retried}`) return r.fulfill({ json: update() })
+    return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
+  })
+  await page.goto(`/app/#/captures/${retried}`)
+  const profiles = page.locator('.section').filter({
+    has: page.getByRole('heading', { name: '账号' }),
+  })
+  await expect(profiles).toContainText('资料 ✓ · 帖子 1000（未到已有数据）')
+  await profiles.getByRole('button', { name: '继续抓取' }).click()
+  // The same record, now reading on.
+  await expect(profiles).toContainText('资料 ✓ · 帖子 1000/1100')
+  await expect(page).toHaveURL(new RegExp(`#/captures/${retried}$`))
+  await expect(profiles.getByRole('button', { name: '继续抓取' })).toHaveCount(
+    0,
+  )
+  expect(sent).toEqual([{ collection_id: profile }])
+})

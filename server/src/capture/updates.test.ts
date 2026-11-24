@@ -18,12 +18,14 @@ import { captureHandlers } from './handlers.ts'
 import { captureURL } from './records.ts'
 import {
   collectionUpdate,
+  continueTimeline,
   listRecords,
   previewUpdate,
   retryUpdateFailed,
   runUpdate,
   startUpdate,
   stopUpdate,
+  TIMELINE_CAP,
   updateDetail,
   updateMembers,
   updateRecord,
@@ -194,7 +196,7 @@ describe('更新', () => {
         handle: 'u100',
         state: 'complete',
         error: '',
-        posts: { total: 3, finished: 3, pending: 0, done: true },
+        posts: { total: 3, finished: 3, pending: 0, done: true, capped: false },
         relations: [
           { list: 'following', state: 'complete', expected: 2, fetched: 2 },
           {
@@ -233,11 +235,13 @@ describe('更新', () => {
         .filter((r) => r.kind === 'profile')
         .map((r) => r.pageCursor),
     ).toEqual(['', '3', '6'])
+    // Saved posts came before the cap.
     expect(updateDetail(ctx.db, update).profiles[0]!.posts).toEqual({
       total: 9,
       finished: 9,
       pending: 0,
       done: true,
+      capped: false,
     })
     expect(updateRecord(ctx.db, update).members).toMatchObject({
       total: 10,
@@ -245,6 +249,58 @@ describe('更新', () => {
       updated: 2,
     })
   })
+
+  test('until_existing stops at the post cap, and continues in the same record', async () => {
+    const { ctx, state } = setup({ pageSize: 250 })
+    const id = await save(ctx, 'https://fake.test/u/100')
+    state.timelines['100'] = Array.from({ length: 2000 }, (_, i) => i + 1)
+    await save(ctx, 'https://fake.test/p/1300')
+    state.requests = []
+    const update = startUpdate(
+      ctx,
+      { target: 'collection', id },
+      { posts: 'until_existing' },
+    )
+    await ctx.queue.drain()
+    const pages = () =>
+      state.requests
+        .filter((r) => r.kind === 'profile')
+        .map((r) => r.pageCursor)
+    expect(pages()).toEqual(['', '250', '500', '750'])
+    expect(savedPosts(ctx)).toHaveLength(TIMELINE_CAP + 1)
+    expect(updateDetail(ctx.db, update).profiles[0]!.posts).toEqual({
+      total: TIMELINE_CAP,
+      finished: TIMELINE_CAP,
+      pending: 0,
+      done: true,
+      capped: true,
+    })
+    expect(updateRecord(ctx.db, update).done).toBe(true)
+
+    // From the cursor, by the same rules: 1250–1500 holds the saved 1300,
+    // then one page more.
+    continueTimeline(ctx, update, id)
+    expect(updateRecord(ctx.db, update).done).toBe(false)
+    expect(() => continueTimeline(ctx, update, id)).toThrow()
+    await ctx.queue.drain()
+    expect(pages().slice(4)).toEqual(['1000', '1250', '1500'])
+    expect(savedPosts(ctx)).toHaveLength(1750)
+    expect(updateDetail(ctx.db, update).profiles[0]!.posts).toEqual({
+      total: 1750,
+      finished: 1750,
+      pending: 0,
+      done: true,
+      capped: false,
+    })
+    expect(updateRecord(ctx.db, update).members).toMatchObject({
+      total: 1751,
+      added: 1749,
+      updated: 2,
+    })
+    // The page after the last one read: older picks up there.
+    expect(collectionUpdate(ctx, id).older).toBe(true)
+    // Some 1750 posts are captured through the queue.
+  }, 60_000)
 
   test('latest reads the first page; older the page after the last one', async () => {
     const { ctx, state } = setup({

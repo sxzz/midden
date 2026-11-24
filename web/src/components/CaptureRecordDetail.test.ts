@@ -298,3 +298,69 @@ it('an update: its target as the title, its profiles part by part, its lists as 
   click('进行中')
   await vi.waitFor(() => expect(el.textContent).toContain('@cat 关注名单'))
 })
+
+it('continues a profile the post cap stopped, inside the same record', async () => {
+  let continued = false
+  const update = () => ({
+    ...detail({ complete: 1000, partial: 0, failed: 0 }),
+    update: {
+      target: 'collection',
+      target_id: 'p1',
+      handle: 'cat',
+      posts: 0,
+      profiles: 1,
+      options: { posts: 'until_existing', relations: false },
+      queued: 0,
+      skipped: 0,
+    },
+    profiles: [
+      {
+        collection_id: 'p1',
+        url: 'https://x.com/i/user/1',
+        handle: 'cat',
+        state: 'complete',
+        posts: continued
+          ? {
+              total: 1100,
+              finished: 1000,
+              pending: 100,
+              done: false,
+              capped: false,
+            }
+          : {
+              total: 1000,
+              finished: 1000,
+              pending: 0,
+              done: true,
+              capped: true,
+            },
+      },
+    ],
+  })
+  const sent: unknown[] = []
+  mockApi((path, request) => {
+    if (path === '/captures/record') return update()
+    if (path.startsWith('/captures/record/members')) return { items: [] }
+    if (path === '/updates/record/continue' && request.method === 'POST') {
+      sent.push(JSON.parse(request.body!))
+      continued = true
+      return
+    }
+    throw new Error(`unexpected ${path}`)
+  })
+  const el = document.createElement('div')
+  document.body.append(el)
+  const app = createVaporApp(CaptureRecordDetail, { id: 'record' })
+  app.mount(el)
+  unmount = () => app.unmount()
+  await vi.waitFor(() =>
+    expect(el.textContent).toContain('资料 ✓ · 帖子 1000（未到已有数据）'),
+  )
+  const button = [...el.querySelectorAll('button')].find(
+    (b) => b.textContent?.trim() === '继续抓取',
+  )!
+  button.click()
+  await vi.waitFor(() => expect(el.textContent).toContain('帖子 1000/1100'))
+  expect(sent).toEqual([{ collection_id: 'p1' }])
+  expect(el.textContent).not.toContain('继续抓取')
+})

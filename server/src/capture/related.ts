@@ -151,14 +151,21 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
     ? capture.isCollection && (limit === 0 || limit > members)
     : limit > members && members > 0
   let nextOptions = options
+  let capped = false
   if (capture.isCollection && options?.finalPage) more = false
   else if (capture.isCollection && options?.untilExisting) {
-    more = true
     // A post saved before this page was listed: read one page more, then stop.
     if (savedBefore(ctx, memberSubmissions)) {
       const { untilExisting: _, ...rest } = options
       nextOptions = { ...rest, finalPage: true }
-    }
+    } else
+      // The post cap ran out first; the page's next cursor continues it. A
+      // page continued already has its next page.
+      capped =
+        !more &&
+        !!next &&
+        next !== capture.pageCursor &&
+        !submission.nextSubmission
   }
   if (next && next !== capture.pageCursor && more) {
     const remaining = limit > members ? limit - members : 0
@@ -183,7 +190,7 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
         .where(eq(submissions.id, submission.id))
         .run()
   }
-  finish(ctx, submission.id, capture.id)
+  finish(ctx, submission.id, capture.id, capped)
 }
 
 /** Whether any of these member submissions found its post already saved. */
@@ -201,7 +208,12 @@ function savedBefore(ctx: CaptureContext, submissionIds: string[]): boolean {
     .get()
 }
 
-function finish(ctx: CaptureContext, submissionId: string, captureId: string) {
+function finish(
+  ctx: CaptureContext,
+  submissionId: string,
+  captureId: string,
+  capped = false,
+) {
   ctx.db.transaction((tx) => {
     const capture = tx
       .select({ targets: captures.relatedTargets })
@@ -218,7 +230,7 @@ function finish(ctx: CaptureContext, submissionId: string, captureId: string) {
         .where(eq(captures.id, captureId))
         .run()
     tx.update(submissions)
-      .set({ relatedState: 'complete' })
+      .set({ relatedState: 'complete', timelineCapped: capped })
       .where(
         and(
           eq(submissions.id, submissionId),

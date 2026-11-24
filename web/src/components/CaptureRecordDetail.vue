@@ -17,6 +17,7 @@ import {
   type CaptureRecordDetail,
 } from '../api'
 import {
+  canContinue,
   linkTitle,
   mediaLabel,
   mediaStates,
@@ -335,6 +336,24 @@ async function retryFailed(member?: CaptureMember) {
     busy.value = false
   }
 }
+/** Read on where the post cap stopped a profile, inside this record. */
+async function continueTimeline(collectionId: string) {
+  if (busy.value) return
+  busy.value = true
+  try {
+    await call(
+      client.updates[':id'].continue.$post({
+        param: { id: props.id },
+        json: { collection_id: collectionId },
+      }),
+    )
+    await load()
+  } catch (e) {
+    toast(errorText(e))
+  } finally {
+    busy.value = false
+  }
+}
 async function stop() {
   if (busy.value) return
   busy.value = true
@@ -477,20 +496,26 @@ function openCollection(id: string, event?: MouseEvent) {
         record.more_profiles ? `另有 ${record.more_profiles} 个账号` : undefined
       "
     >
-      <button
-        v-for="p in record.profiles"
-        :key="p.collection_id"
-        type="button"
-        class="line profile"
-        @click="(event: MouseEvent) => openCollection(p.collection_id, event)"
-      >
-        <span class="line-text"
-          >{{ profileHandle(p.url, p.handle)
-          }}<small class="hint">{{ profilePartText(p) }}</small
-          ><small v-if="p.error" class="hint">{{ p.error }}</small></span
+      <template v-for="p in record.profiles" :key="p.collection_id">
+        <button
+          type="button"
+          class="line profile"
+          @click="(event: MouseEvent) => openCollection(p.collection_id, event)"
         >
-        <span class="chevron" aria-hidden="true">›</span>
-      </button>
+          <span class="line-text"
+            >{{ profileHandle(p.url, p.handle)
+            }}<small class="hint">{{ profilePartText(p) }}</small
+            ><small v-if="p.error" class="hint">{{ p.error }}</small></span
+          >
+          <span class="chevron" aria-hidden="true">›</span>
+        </button>
+        <ListButton
+          v-if="canContinue(p)"
+          label="继续抓取"
+          :disabled="busy"
+          @select="continueTimeline(p.collection_id)"
+        />
+      </template>
     </ListSection>
     <ListSection v-if="reasons.length" title="失败原因">
       <p v-for="reason in reasons" :key="reason.text" class="line">

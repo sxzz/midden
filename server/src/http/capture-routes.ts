@@ -19,6 +19,7 @@ import { stopCollection } from '#capture/related.ts'
 import { captureRelations, type RelationProgress } from '#capture/relations.ts'
 import {
   collectionUpdate,
+  continueTimeline,
   isUpdate,
   listRecords,
   previewUpdate,
@@ -419,6 +420,20 @@ export function captureRoutes(ctx: AccountsContext) {
             key: idempotencyKey(c),
           })
           return c.json(recordJson(updateRecord(ctx.db, id)))
+        },
+      )
+
+      // Read on where the post cap stopped a profile's timeline.
+      .post(
+        '/updates/:id/continue',
+        json(v.strictObject({ collection_id: v.string() })),
+        (c) => {
+          continueTimeline(
+            ctx,
+            c.req.param('id'),
+            c.req.valid('json').collection_id,
+          )
+          return c.body(null, 204)
         },
       )
 

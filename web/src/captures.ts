@@ -259,13 +259,18 @@ function listPart(r: RelationProgress) {
   return `${name} ${partMarks[r.state] ?? r.state}`
 }
 
+/** The post cap stopped the timeline before saved posts; it can read on. */
+export const canContinue = (p: ProfilePart) => !!p.posts?.done && p.posts.capped
+
 /**
  * How each part of a profile's update went, e.g.
  * 资料 ✓ · 帖子 34/100 · 关注 ✓ · 粉丝 跳过.
  */
 export function profilePartText(p: ProfilePart) {
   const parts = [`资料 ${partMarks[p.state] ?? '进行中'}`]
-  if (p.posts)
+  if (p.posts && canContinue(p))
+    parts.push(`帖子 ${p.posts.finished}（未到已有数据）`)
+  else if (p.posts)
     parts.push(
       p.posts.done
         ? `帖子 ${p.posts.total}`
