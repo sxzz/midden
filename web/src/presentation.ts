@@ -1,4 +1,5 @@
 import {
+  collectionProfilesDiffer,
   isPostEntity,
   isProfileEntity,
   isProtected,
@@ -31,7 +32,10 @@ export interface Presentation {
   avatar?: Asset
   /** Shown as a lock beside the name. */
   locked: boolean
-  /** The author has a newer profile than this capture recorded. */
+  /**
+   * An author shown with the post has a newer profile that looks different
+   * from what this capture recorded.
+   */
   profileChanged?: boolean
   body: string
   /** A profile's own bio, empty when it has none. */
@@ -143,7 +147,7 @@ const social: Presenter = (a, root, options = {}) => {
     name: asText(profile?.data.name) || generic(a).name,
     body: bio ?? body,
     bio,
-    profileChanged: !!author?.current,
+    profileChanged: collectionProfilesDiffer(a),
     // The lock follows the author's profile as last seen.
     locked: isProtected(profile) ?? false,
     profileCollectionId: isProfile ? undefined : profile?.saved_collection_id,

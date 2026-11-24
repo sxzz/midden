@@ -3,7 +3,7 @@ import { createVaporApp, nextTick } from 'vue'
 import { asset, collection, entity } from '../testing/api'
 import CollectionPost from './CollectionPost.vue'
 import CollectionRow from './CollectionRow.vue'
-import type { Collection } from '../api'
+import type { Collection, Entity } from '../api'
 const fixture = collection({
   id: 'fixture',
   url: 'https://example.test/post',
@@ -188,6 +188,43 @@ describe('Vapor collection rendering', () => {
     expect(el.querySelector('.record')?.textContent).toContain('占用')
     expect(el.querySelector('.record')?.textContent).toContain('1.0 KB')
     expect(el.querySelector('.author')?.textContent).not.toContain('占用')
+  })
+  it('offers the captured profile only when it looks different', async () => {
+    const post = (current: Entity['current']) =>
+      mount(CollectionPost, {
+        ...fixture,
+        assets: [],
+        graph: {
+          root: 'post',
+          relations: [
+            { source: 'post', target: 'author', type: 'authored_by' },
+          ],
+          entities: [
+            entity({ key: 'post', type: 'x.post', data: {} }),
+            entity({
+              key: 'author',
+              type: 'x.profile',
+              data: { name: '旧名字', metadata: { followers: 1 } },
+              current,
+            }),
+          ],
+        },
+      })
+    // Only the counts changed, so switching would show the same header.
+    let el = post({
+      id: 'v2',
+      data: { name: '旧名字', metadata: { followers: 2 } },
+    })
+    expect(el.querySelector('.profile-version')).toBeNull()
+    unmount()
+    el = post({ id: 'v2', data: { name: '新名字' } })
+    const toggle = el.querySelector<HTMLButtonElement>('.profile-version')!
+    expect(toggle.textContent).toContain('抓取时资料')
+    expect(el.querySelector('.author .name')?.textContent).toBe('新名字')
+    toggle.click()
+    await nextTick()
+    expect(el.querySelector('.author .name')?.textContent).toBe('旧名字')
+    expect(toggle.textContent).toContain('最新资料')
   })
   it('does not invent a profile link when no profile was saved', () => {
     const el = mount(CollectionPost, fixture)

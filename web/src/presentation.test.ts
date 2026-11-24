@@ -8,7 +8,7 @@ import {
   sourceStateNotice,
   warningList,
 } from './presentation'
-import { collection, entity } from './testing/api'
+import { asset, collection, entity } from './testing/api'
 it('keeps captionless social posts empty without using their author summary', () => {
   for (const type of ['x.post', 'instagram.post']) {
     const a = collection({
@@ -320,6 +320,97 @@ it('reads the author as last seen, or as captured on request', () => {
     'handle',
     false,
   ])
+})
+it('offers the captured profile only when it would look different', () => {
+  const avatar = (id: string, sha256?: string, sensitive = false) =>
+    asset({
+      id,
+      url: `/v1/assets/${id}?inline=1`,
+      purpose: 'avatar',
+      sha256,
+      sensitive,
+    })
+  const changed = (
+    captured: Partial<Entity>,
+    current: NonNullable<Entity['current']>,
+  ) => {
+    const a = xPost({}, { protected: false, followers: 1 })
+    Object.assign(a.graph!.entities[1]!, captured, { current })
+    return present(a).profileChanged
+  }
+  const data = { username: 'handle', metadata: { protected: false } }
+  // Counts and other unseen fields changed, nothing a reader sees.
+  expect(
+    changed(
+      {},
+      {
+        id: 'v2',
+        data: { ...data, metadata: { protected: false, followers: 9 } },
+      },
+    ),
+  ).toBe(false)
+  expect(changed({}, { id: 'v2', data: { ...data, name: 'New' } })).toBe(true)
+  expect(
+    changed({}, { id: 'v2', data: { ...data, username: 'renamed' } }),
+  ).toBe(true)
+  expect(
+    changed({}, { id: 'v2', data: { ...data, metadata: { protected: true } } }),
+  ).toBe(true)
+  // The same image saved twice is the same avatar.
+  expect(
+    changed(
+      { assets: [avatar('a1', 'same')] },
+      { id: 'v2', data, assets: [avatar('a2', 'same')] },
+    ),
+  ).toBe(false)
+  expect(
+    changed(
+      { assets: [avatar('a1', 'old')] },
+      { id: 'v2', data, assets: [avatar('a2', 'new')] },
+    ),
+  ).toBe(true)
+  expect(
+    changed(
+      { assets: [avatar('a1')] },
+      { id: 'v2', data, assets: [avatar('a2')] },
+    ),
+  ).toBe(true)
+  // A newer version without an avatar keeps the captured one.
+  expect(changed({ assets: [avatar('a1', 'old')] }, { id: 'v2', data })).toBe(
+    false,
+  )
+  // A sensitive avatar is never shown in a header.
+  expect(
+    changed({}, { id: 'v2', data, assets: [avatar('a2', 'new', true)] }),
+  ).toBe(false)
+})
+it('offers the captured profile for related authors that look different', () => {
+  const author = entity({
+    key: 'quote-author',
+    type: 'x.profile',
+    data: { name: 'Old' },
+    current: { id: 'v2', data: { name: 'New' } },
+  })
+  const a = xPost({}, {})
+  a.graph!.entities.push(entity({ key: 'quote', type: 'x.post' }), author)
+  a.graph!.relations.push(
+    { source: 'p', target: 'quote', type: 'quoted' },
+    { source: 'quote', target: 'quote-author', type: 'authored_by' },
+  )
+  expect(present(a).profileChanged).toBe(true)
+  const incoming = xPost({}, {})
+  incoming.incoming_relations = [
+    {
+      type: 'quoted',
+      entity: entity({ key: 'source', type: 'x.post' }),
+      author,
+    },
+  ]
+  expect(present(incoming).profileChanged).toBe(true)
+  // Nothing on an account's own page reads as another version.
+  const profile = xProfile()
+  profile.graph!.entities.push(author)
+  expect(present(profile).profileChanged).toBe(false)
 })
 it('locks by the profile', () => {
   expect(present(xPost({}, { protected: true })).locked).toBe(true)
