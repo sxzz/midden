@@ -23,7 +23,7 @@ pnpm typecheck
 pnpm test
 ```
 
-`pnpm install` 会启用 `.githooks/pre-commit`：每次提交前对暂存的文件运行 lint，并对整个仓库运行 typecheck（测试不在其中）。确需跳过时用 `git commit --no-verify`。
+`pnpm install` 会通过 simple-git-hooks 安装 pre-commit 钩子（命令在根目录 `package.json` 的 `simple-git-hooks` 字段）：每次提交前对暂存的文件运行 lint，并对整个仓库运行 typecheck（测试不在其中）。确需跳过时用 `git commit --no-verify`。
 
 lint 在根目录对整个仓库运行，只有一份配置；`third_party/` 是上游代码，`server/drizzle/` 是生成的迁移，均不参与。`scripts/` 下的脚本使用 `.ts`。e2e 测试：`pnpm --filter @midden/web test:e2e`。
 

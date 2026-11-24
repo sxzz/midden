@@ -18,6 +18,8 @@ packages:
 
 allowBuilds:
   esbuild: false
+  # Its postinstall would install the hooks too; `prepare` already does.
+  simple-git-hooks: false
   workerd: false
 permissions:
   drizzle-kit:

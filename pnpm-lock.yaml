@@ -203,6 +203,9 @@ importers:
       prettier:
         specifier: ^3.10.1
         version: 3.10.1
+      simple-git-hooks:
+        specifier: ^2.14.0
+        version: 2.14.0
       tsrs:
         specifier: ^7.1.0-beta.tsrs4
         version: 7.1.0-beta.tsrs4
@@ -3147,6 +3150,10 @@ packages:
 
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
+
+  simple-git-hooks@2.14.0:
+    resolution: {integrity: sha512-kkTORPAuxQz2g1QUuN0J8yGWT28tjGBfPOdJ4xT7Vbeu30veKUZQIoID2qGgCDAakaQn59UeZJJ4cFGB8PVP2A==}
+    hasBin: true
 
   sonic-boom@4.2.1:
     resolution: {integrity: sha512-w6AxtubXa2wTXAUsZMMWERrsIRAdrK0Sc+FUytWvYAhBJLyuI4llrMIC1DtlNSdI99EI86KZum2MMq3EAZlF9Q==}
@@ -6365,6 +6372,8 @@ snapshots:
   shebang-regex@3.0.0: {}
 
   siginfo@2.0.0: {}
+
+  simple-git-hooks@2.14.0: {}
 
   sonic-boom@4.2.1:
     dependencies:
