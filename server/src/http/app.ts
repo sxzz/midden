@@ -15,6 +15,8 @@ import { captureRoutes } from './capture-routes.ts'
 import { errorResponse } from './errors.ts'
 import { folderRoutes } from './folder-routes.ts'
 import { libraryRoutes } from './library-routes.ts'
+import { publicRoutes } from './public-routes.ts'
+import { shareRoutes } from './share-routes.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
@@ -102,6 +104,8 @@ export function createApi(options: HttpOptions) {
           return c.json({})
         },
       )
+      // Public links need no login; they read only what was shared.
+      .route('/public', publicRoutes(ctx))
       // Everything below needs a token or the owner's session.
       .use(async (c, next) => {
         const header = c.req.header('Authorization')
@@ -137,6 +141,7 @@ export function createApi(options: HttpOptions) {
       .route('/', accountRoutes(ctx))
       .route('/', libraryRoutes(ctx))
       .route('/', folderRoutes(ctx))
+      .route('/', shareRoutes(ctx))
   )
 }
 

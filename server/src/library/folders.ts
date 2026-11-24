@@ -6,6 +6,7 @@ import { pruneTags } from './annotations.ts'
 import { countsCached, filterCounts } from './counts.ts'
 import { parseFilterQuery } from './filter-query.ts'
 import { checkFilter } from './list.ts'
+import { revokeOrphanedShares } from './shares.ts'
 import type { Database, Executor } from '#db/client.ts'
 
 /** A saved library filter (收藏夹) and how many saved items it selects. */
@@ -139,5 +140,6 @@ export function deleteFolder(db: Database, id: string): void {
     const row = tx.delete(folders).where(eq(folders.id, id)).returning().get()
     if (!row) throw new AppError('not_found')
     pruneTags(tx)
+    revokeOrphanedShares(tx)
   })
 }

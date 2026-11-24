@@ -467,6 +467,27 @@ export function countCollections(
   return counts
 }
 
+/** Which of these collections the list shows for a filter, on any page. */
+export function selectedAmong(
+  db: Executor,
+  input: CollectionFilter,
+  ids: readonly string[],
+): Set<string> {
+  if (!ids.length) return new Set()
+  const { ctes, source, where } = select(input)
+  return new Set(
+    db
+      .all<{ id: string }>(
+        sql`
+      ${ctes}
+      SELECT k.collection_id AS id FROM ${sql.raw(source)}
+      WHERE ${where}
+        AND k.collection_id IN (SELECT value FROM json_each(${list(ids)}))`,
+      )
+      .map((row) => row.id),
+  )
+}
+
 /** The library, filtered, sorted and 20 per page. */
 export function listCollections(
   ctx: CaptureContext,

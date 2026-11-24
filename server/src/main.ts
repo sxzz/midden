@@ -85,7 +85,12 @@ const app = new Hono()
 app.get('/healthz', (c) => c.text('ok'))
 app.route('/v1', api)
 app.route('/', mediaRoutes(ctx.blobs, signer))
-// The built web app; unknown paths under /app/ load the app itself.
+// The built web app; unknown paths under /app/ load the app itself. Public
+// links open inside it, and neither it nor they belong in search results.
+app.use('/app/*', async (c, next) => {
+  await next()
+  c.header('X-Robots-Tag', 'noindex, nofollow')
+})
 app.use(
   '/app/*',
   serveStatic({

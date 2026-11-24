@@ -5,6 +5,7 @@ import { collections, library, submissions } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError } from '#errors.ts'
 import { pruneTags } from './annotations.ts'
+import { revokeOrphanedShares } from './shares.ts'
 import type { Database } from '#db/client.ts'
 
 /**
@@ -19,6 +20,7 @@ export function deleteCollection(db: Database, collectionId: string): void {
       .run()
     if (removed.changes === 0) throw new AppError('not_found')
     pruneTags(tx)
+    revokeOrphanedShares(tx)
     markUnreferenced(tx, collectionId, new Date())
   })
 }
@@ -48,6 +50,7 @@ export function deleteAll(
     // SQLite's limit on bound values.
     tx.delete(library).where(lte(library.createdAt, before)).run()
     pruneTags(tx)
+    revokeOrphanedShares(tx)
     tx.update(collections)
       .set({ unreferencedAt: before })
       .where(

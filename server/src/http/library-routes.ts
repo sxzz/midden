@@ -27,7 +27,7 @@ const AuthorFilters = v.object({
 })
 
 /** How many of the newest readings to return, at most COUNTS_LIMIT. */
-const CountsQuery = v.object({
+export const CountsQuery = v.object({
   limit: v.optional(
     v.pipe(
       v.string(),
@@ -40,7 +40,7 @@ const CountsQuery = v.object({
 })
 
 /** How many of the newest profile changes to return. */
-const ChangesQuery = v.object({
+export const ChangesQuery = v.object({
   limit: v.optional(
     v.pipe(
       v.string(),

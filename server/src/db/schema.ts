@@ -563,6 +563,24 @@ export const folders = sqliteTable('folders', {
   updatedAt: createdAt(),
 })
 
+/**
+ * Public links (分享). The slug is the only secret: whoever has it reads
+ * what the target holds at that moment, a folder by its filter or one saved
+ * collection. Revoked rows stay so an old slug never comes back.
+ */
+export const shares = sqliteTable(
+  'shares',
+  {
+    id: text().primaryKey(),
+    slug: text().notNull().unique(),
+    targetKind: text({ enum: ['folder', 'collection'] }).notNull(),
+    targetId: text().notNull(),
+    createdAt: createdAt(),
+    revokedAt: timestamp(),
+  },
+  (t) => [index('shares_target').on(t.targetKind, t.targetId)],
+)
+
 /** Platform accounts used for capturing. */
 export const connections = sqliteTable(
   'connections',
