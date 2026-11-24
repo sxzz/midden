@@ -156,16 +156,13 @@ const version = computed(() =>
         @select="revision"
         @more="historyPage(true)"
       />
-    </ListSection>
-    <p class="status" :class="{ quiet: !status }" role="status">{{ status }}</p>
-    <!-- Folded under the actions: it is the reader's own notes, opened when
-         wanted rather than in the way of the collection. -->
-    <CollectionAnnotations
-      :id="id"
-      :key="id"
-      @saved="emit('annotationsSaved')"
-    />
-    <ListSection>
+      <!-- The reader's own notes, folded, then the one destructive action:
+           every action on this collection in one card. -->
+      <CollectionAnnotations
+        :id="id"
+        :key="id"
+        @saved="emit('annotationsSaved')"
+      />
       <ListButton
         label="删除这条收藏"
         variant="destructive"
@@ -173,6 +170,7 @@ const version = computed(() =>
         @select="confirmDelete = true"
       />
     </ListSection>
+    <p class="status" :class="{ quiet: !status }" role="status">{{ status }}</p>
     <ProfileCollections
       v-if="isProfile"
       :id="id"

@@ -3,7 +3,6 @@ import { computed, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import { call, client, errorText, type Tag } from '../api'
 import { useDelayedFlag } from '../composables/useDelayedFlag'
 import ChevronIcon from './ui/ChevronIcon.vue'
-import ListSection from './ui/ListSection.vue'
 import Spinner from './ui/Spinner.vue'
 import TagChips from './ui/TagChips.vue'
 const props = defineProps<{ id: string }>()
@@ -200,7 +199,8 @@ async function saveNote() {
 </script>
 
 <template>
-  <ListSection>
+  <!-- Rows of the detail's action card rather than a card of its own. -->
+  <div class="annotations-block">
     <button
       type="button"
       class="toggle"
@@ -315,19 +315,42 @@ async function saveNote() {
         </section>
       </div>
     </form>
-  </ListSection>
+  </div>
 </template>
 
 <style scoped>
+/* Hairlines above and below, as between the card's other rows. */
+.annotations-block {
+  position: relative;
+}
+.annotations-block::before,
+.annotations-block::after {
+  content: '';
+  position: absolute;
+  left: var(--inset);
+  right: 0;
+  height: 1px;
+  background: var(--separator);
+}
+.annotations-block::before {
+  top: 0;
+}
+.annotations-block::after {
+  bottom: 0;
+}
 .toggle {
   display: flex;
   align-items: center;
   gap: 12px;
   width: 100%;
-  min-height: 44px;
-  padding: 2px var(--inset);
-  font-size: 15px;
+  min-height: 48px;
+  padding: 11px var(--inset);
+  color: var(--text);
+  font-size: 16px;
   text-align: left;
+}
+.toggle:active {
+  background: var(--fill);
 }
 .toggle .summary {
   flex: 1;
