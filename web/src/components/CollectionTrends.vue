@@ -1,7 +1,8 @@
 <script setup vapor lang="ts">
 import { computed, onActivated, onUnmounted, shallowRef, watch } from 'vue'
-import { call, client, errorText, type CountsSeries } from '../api'
+import { errorText, type CountsSeries } from '../api'
 import { date } from '../presentation'
+import { readCounts } from '../reads'
 import { axisDate, tableRows, trends } from '../trends'
 import TrendChart from './TrendChart.vue'
 import ChevronIcon from './ui/ChevronIcon.vue'
@@ -21,12 +22,7 @@ async function load() {
   const { signal } = controller
   loading.value = true
   try {
-    const result = await call(
-      client.collections[':id'].counts.$get(
-        { param: { id: props.id }, query: {} },
-        { init: { signal } },
-      ),
-    )
+    const result = await readCounts(props.id, undefined, signal)
     if (signal.aborted) return
     series.value = result
     error.value = ''

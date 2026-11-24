@@ -1,7 +1,8 @@
 import { onUnmounted, shallowRef } from 'vue'
-import { call, client, errorText, type Collection } from '../api'
+import { errorText, type Collection } from '../api'
 import { localZone } from '../folders'
 import { listSort } from '../presentation'
+import { readList } from '../reads'
 /** One page of the library list for a route query. */
 function page(params: string, cursor: string, signal: AbortSignal) {
   const q = new URLSearchParams(params)
@@ -26,12 +27,7 @@ function page(params: string, cursor: string, signal: AbortSignal) {
     q.set('time_zone', localZone())
   q.set('q', q.get('q') || '')
   if (cursor) q.set('cursor', cursor)
-  return call(
-    client.collections.$get(
-      { query: { ...Object.fromEntries(q), author: q.getAll('author') } },
-      { init: { signal } },
-    ),
-  )
+  return readList(q, signal)
 }
 export function useCollection() {
   const items = shallowRef<Collection[]>([])

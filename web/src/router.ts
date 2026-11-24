@@ -6,6 +6,9 @@ import CollectionDetail from './components/CollectionDetail.vue'
 import CollectionTrends from './components/CollectionTrends.vue'
 import CollectionView from './components/CollectionView.vue'
 import ProfileChanges from './components/ProfileChanges.vue'
+import PublicHome from './components/PublicHome.vue'
+
+const SHARE = String.raw`/s/:slug([\w-]+)`
 
 export const router = createRouter({
   history: createWebHashHistory(import.meta.env.BASE_URL),
@@ -43,6 +46,35 @@ export const router = createRouter({
       name: 'capture',
       component: CaptureRecordDetail,
       props: true,
+    },
+    // A public link: no login, only what the share reaches. PublicShare
+    // (shown by App instead of the library) frames these pages.
+    {
+      path: SHARE,
+      name: 'share',
+      component: PublicHome,
+      meta: { public: true },
+    },
+    {
+      path: `${SHARE}/collection/:id([a-f0-9-]+)`,
+      name: 'share-collection',
+      component: CollectionDetail,
+      props: true,
+      meta: { public: true },
+    },
+    {
+      path: `${SHARE}/collection/:id([a-f0-9-]+)/stats`,
+      name: 'share-collection-stats',
+      component: CollectionTrends,
+      props: true,
+      meta: { public: true },
+    },
+    {
+      path: `${SHARE}/collection/:id([a-f0-9-]+)/changes`,
+      name: 'share-collection-changes',
+      component: ProfileChanges,
+      props: true,
+      meta: { public: true },
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

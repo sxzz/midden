@@ -72,6 +72,8 @@ export type Account = Accounts['accounts'][number]
 export type AccountPlatform = Accounts['platforms'][number]
 export type Tag = Ok<typeof client.tags.$get>[number]
 export type Folder = Ok<typeof client.folders.$get>[number]
+export type Share = Ok<typeof client.shares.$get>[number]
+export type PublicShareInfo = Ok<(typeof client.public)[':slug']['$get']>
 export type Annotation = Ok<
   (typeof client.collections)[':id']['annotation']['$get']
 >

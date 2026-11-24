@@ -3,6 +3,7 @@ import { computed, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCollection } from '../composables/useCollection'
 import { storageSize } from '../presentation'
+import { collectionRoute } from '../share'
 import CollectionView from './CollectionView.vue'
 const props = defineProps<{
   id: string
@@ -61,7 +62,7 @@ function search(value: string) {
   filters.value = value
 }
 function open(id: string) {
-  void router.push({ name: 'collection', params: { id } })
+  void router.push(collectionRoute(id))
 }
 </script>
 

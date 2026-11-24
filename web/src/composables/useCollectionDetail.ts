@@ -6,12 +6,19 @@ import {
   type Collection,
   type HistoryPoint,
 } from '../api'
+import {
+  readCollection,
+  readCounts,
+  readHistory,
+  readHistoryPoint,
+  readProfileChanges,
+} from '../reads'
 import { isProfileEntity } from '../relations'
+import { shareSlug } from '../share'
 import { trends } from '../trends'
 import { toast } from './useToast'
 const collections = client.collections[':id']
-const getCollection = (id: string, signal: AbortSignal) =>
-  call(collections.$get({ param: { id } }, { init: { signal } }))
+const getCollection = readCollection
 const availability = async (id: string, signal: AbortSignal) =>
   (
     await call(
@@ -122,7 +129,8 @@ export function useCollectionDetail(
         void historyPage()
         void checkTrends()
         void checkChanges(result)
-        available.value = await availability(id, signal)
+        // A public page offers no capture to check for.
+        if (!shareSlug.value) available.value = await availability(id, signal)
       } catch (e) {
         if (!signal.aborted) error.value = errorText(e)
       }
@@ -138,12 +146,7 @@ export function useCollectionDetail(
     if (trendable.value) return
     const signal = controller.signal
     try {
-      const series = await call(
-        collections.counts.$get(
-          { param: { id: id() }, query: { limit: '2' } },
-          { init: { signal } },
-        ),
-      )
+      const series = await readCounts(id(), 2, signal)
       if (!signal.aborted) trendable.value = trends(series).length > 0
     } catch {
       // Without an answer the page is not offered; nothing else depends on it.
@@ -159,12 +162,7 @@ export function useCollectionDetail(
     if (changeable.value || !isProfileEntity(root)) return
     const signal = controller.signal
     try {
-      const changes = await call(
-        collections['profile-changes'].$get(
-          { param: { id: id() }, query: { limit: '1' } },
-          { init: { signal } },
-        ),
-      )
+      const changes = await readProfileChanges(id(), 1, signal)
       // An answer without a list, as from an older server, offers nothing.
       if (!signal.aborted) changeable.value = !!changes.items?.length
     } catch {
@@ -176,12 +174,7 @@ export function useCollectionDetail(
     const signal = controller.signal
     historyLoading.value = true
     try {
-      const p = await call(
-        collections.history.$get(
-          { param: { id: id() }, query: more ? { cursor: next.value } : {} },
-          { init: { signal } },
-        ),
-      )
+      const p = await readHistory(id(), more ? next.value : '', signal)
       if (signal.aborted) return
       points.value = more ? [...points.value, ...p.items] : p.items
       next.value = p.next_cursor || ''
@@ -219,12 +212,7 @@ export function useCollectionDetail(
     error.value = ''
     try {
       const result = target
-        ? await call(
-            collections.history[':capture'].$get(
-              { param: { id: id(), capture: target } },
-              { init: { signal } },
-            ),
-          )
+        ? await readHistoryPoint(id(), target, signal)
         : await getCollection(id(), signal)
       if (signal.aborted) return
       seen.set(target, result)

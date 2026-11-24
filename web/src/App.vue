@@ -1,8 +1,9 @@
 <script setup vapor lang="ts">
-import { onMounted, onUnmounted, shallowRef } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, onUnmounted, shallowRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { call, client, errorText } from './api'
 import CollectionLibrary from './components/CollectionLibrary.vue'
+import PublicShare from './components/PublicShare.vue'
 import TelegramLogin from './components/TelegramLogin.vue'
 import AppToast from './components/ui/AppToast.vue'
 import CollectionSkeleton from './components/ui/CollectionSkeleton.vue'
@@ -10,13 +11,17 @@ import { host, setupHost } from './host'
 import { takeWidgetLogin, widgetLogin } from './login'
 import { followInternalLink, goBack } from './navigation'
 const router = useRouter()
+const route = useRoute()
+// A public link is read without logging in; the library asks for it only
+// once one of its own pages is shown.
+const shared = computed(() => !!route.meta.public)
 const ready = shallowRef(false)
 const error = shallowRef('')
 const loading = shallowRef(true)
 // Outside Telegram there is no initData; the browser logs in instead.
 const browserLogin = shallowRef(false)
 let cleanup = () => {}
-onMounted(async () => {
+onMounted(() => {
   const stopHost = setupHost(() => goBack(router))
   const follow = (event: MouseEvent) => followInternalLink(router, event)
   document.addEventListener('click', follow)
@@ -24,6 +29,18 @@ onMounted(async () => {
     stopHost()
     document.removeEventListener('click', follow)
   }
+  let started = false
+  watch(
+    shared,
+    (value) => {
+      if (value || started) return
+      started = true
+      void signIn()
+    },
+    { immediate: true },
+  )
+})
+async function signIn() {
   // Coming back from the Login Widget, sign in before checking the session.
   const login = takeWidgetLogin()
   const loginError = login ? await widgetLogin(login) : ''
@@ -46,12 +63,13 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-})
+}
 onUnmounted(() => cleanup())
 </script>
 
 <template>
-  <CollectionLibrary v-if="ready" />
+  <PublicShare v-if="shared" />
+  <CollectionLibrary v-else-if="ready" />
   <main v-else class="gate">
     <CollectionSkeleton v-if="loading" />
     <TelegramLogin v-else-if="browserLogin" :error="error" />

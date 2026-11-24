@@ -5,6 +5,7 @@ import {
   isProtected,
   profileVersion,
 } from './relations'
+import { collectionHref } from './share'
 import type { Asset, Collection, Entity } from './api'
 
 const LINE_BREAK = /\r?\n/
@@ -178,9 +179,9 @@ const social: Presenter = (a, root, options = {}) => {
     locked: isProtected(profile) ?? false,
     profileCollectionId: isProfile ? undefined : profile?.saved_collection_id,
     profileHref: isProfile
-      ? `#/collection/${a.id}`
+      ? collectionHref(a.id)
       : profile?.saved_collection_id
-        ? `#/collection/${profile.saved_collection_id}`
+        ? collectionHref(profile.saved_collection_id)
         : asText(profile?.data.username)
           ? `https://${profile?.type === 'instagram.profile' ? 'www.instagram.com' : 'x.com'}/${encodeURIComponent(asText(profile?.data.username)!)}`
           : profile?.type === 'x.profile' &&
@@ -390,7 +391,7 @@ export function mentionParts(collection: Collection, text: string): BodyPart[] {
       parts.push({ text: text.slice(offset, match.index) })
     parts.push({
       text: match[0],
-      href: `#/collection/${encodeURIComponent(id)}`,
+      href: collectionHref(id),
     })
     offset = match.index + match[0].length
   }

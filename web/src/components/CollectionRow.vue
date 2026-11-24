@@ -9,6 +9,7 @@ import {
   sourceStateNotice,
   storageSize,
 } from '../presentation'
+import { collectionHref } from '../share'
 import MediaThumbs from './MediaThumbs.vue'
 import PostRelations from './PostRelations.vue'
 import LoadingImage from './ui/LoadingImage.vue'
@@ -41,11 +42,7 @@ function open(event: MouseEvent) {
   )
     return
   if (event.ctrlKey || event.metaKey || event.shiftKey) {
-    window.open(
-      `#/collection/${encodeURIComponent(props.collection.id)}`,
-      '_blank',
-      'noopener',
-    )
+    window.open(collectionHref(props.collection.id), '_blank', 'noopener')
     return
   }
   emit('open', props.collection.id)
@@ -146,7 +143,7 @@ const storage = computed(() =>
         }}</span></a
       >
       <span class="content">
-        <a :href="`#/collection/${collection.id}`" class="head">
+        <a :href="collectionHref(collection.id)" class="head">
           <span class="identity"
             ><strong class="name">{{ view.name }}</strong
             ><LockIcon v-if="view.locked" class="lock" /><span

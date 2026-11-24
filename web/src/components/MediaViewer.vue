@@ -18,6 +18,7 @@ import {
 } from '../api'
 import { host } from '../host'
 import { present } from '../presentation'
+import { collectionHref } from '../share'
 import LoadingImage from './ui/LoadingImage.vue'
 import ViewerDetailButton from './ui/ViewerDetailButton.vue'
 import 'photoswipe/style.css'
@@ -410,7 +411,7 @@ watch(
         <div class="caption-content">
           <a
             v-if="caption.profileCollectionId"
-            :href="`#/collection/${caption.profileCollectionId}`"
+            :href="collectionHref(caption.profileCollectionId)"
             @click="close"
             >{{ caption.name
             }}<span v-if="caption.handle"> @{{ caption.handle }}</span></a

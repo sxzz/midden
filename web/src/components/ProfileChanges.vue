@@ -1,14 +1,8 @@
 <script setup vapor lang="ts">
 import { computed, onActivated, onUnmounted, shallowRef, watch } from 'vue'
-import {
-  call,
-  client,
-  errorText,
-  previewURL,
-  type Asset,
-  type ProfileChanges,
-} from '../api'
+import { errorText, previewURL, type Asset, type ProfileChanges } from '../api'
 import { changeDays, lineNote, type ImageLine } from '../changes'
+import { readProfileChanges } from '../reads'
 import MediaViewer from './MediaViewer.vue'
 import EyeIcon from './ui/EyeIcon.vue'
 import LoadingImage from './ui/LoadingImage.vue'
@@ -25,12 +19,7 @@ async function load() {
   const { signal } = controller
   loading.value = true
   try {
-    const result = await call(
-      client.collections[':id']['profile-changes'].$get(
-        { param: { id: props.id }, query: {} },
-        { init: { signal } },
-      ),
-    )
+    const result = await readProfileChanges(props.id, undefined, signal)
     if (signal.aborted) return
     changes.value = result
     error.value = ''

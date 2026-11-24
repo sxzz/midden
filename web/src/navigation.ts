@@ -1,7 +1,11 @@
+import { shareSlug } from './share'
 import type { Router } from 'vue-router'
 
+/** Back, or to the start: the library, or what a public link opens. */
 export function goBack(router: Router) {
   if (router.options.history.state.back) router.back()
+  else if (shareSlug.value)
+    void router.replace({ name: 'share', params: { slug: shareSlug.value } })
   else void router.replace({ name: 'collections' })
 }
 

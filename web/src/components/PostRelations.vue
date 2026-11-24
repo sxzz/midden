@@ -8,6 +8,7 @@ import {
   isProfileEntity,
   type RelationAuthor,
 } from '../relations'
+import { collectionHref } from '../share'
 import MediaThumbs from './MediaThumbs.vue'
 import LockIcon from './ui/LockIcon.vue'
 import type { Asset, Collection } from '../api'
@@ -28,7 +29,7 @@ function fillAccount(first?: RelationAuthor, second?: RelationAuthor) {
   }
 }
 function openCollection(id?: string) {
-  if (id) window.location.hash = `#/collection/${id}`
+  if (id) window.location.hash = collectionHref(id)
 }
 const props = defineProps<{
   collection: Collection
@@ -118,7 +119,7 @@ const relations = computed(() => {
           ? `https://x.com/${handle}`
           : ''
     const href = entity.saved_collection_id
-      ? `#/collection/${encodeURIComponent(entity.saved_collection_id)}`
+      ? collectionHref(entity.saved_collection_id)
       : externalURL
     if (!href) continue
     // A quoted or reposted post is kept by reference; its saved collection

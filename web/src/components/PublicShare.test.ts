@@ -1,0 +1,169 @@
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { createApp, nextTick, vaporInteropPlugin } from 'vue'
+import { APIError } from '../api'
+import App from '../App.vue'
+import { router } from '../router'
+import { followShare } from '../share'
+import { asset, collection, entity, mockApi } from '../testing/api'
+
+const SLUG = 'AbCdEfGhIjKlMnOpQrStUv_-'
+const POST = '00000000-0000-7000-8000-000000000001'
+const PROFILE = '00000000-0000-7000-8000-000000000002'
+const OTHER = '00000000-0000-7000-8000-000000000003'
+
+const post = collection({
+  id: POST,
+  text: '公开的帖子',
+  assets: [asset({ id: 'img', url: '/media/a', sensitive: true })],
+  graph: {
+    root: 'root',
+    entities: [
+      entity({ key: 'root', type: 'x.post', external_id: '1' }),
+      entity({
+        key: 'author',
+        type: 'x.profile',
+        external_id: '2',
+        data: { name: '作者', username: 'writer' },
+        saved_collection_id: PROFILE,
+      }),
+    ],
+    relations: [{ source: 'root', target: 'author', type: 'authored_by' }],
+  },
+})
+const profile = collection({
+  id: PROFILE,
+  text: '账号简介',
+  graph: {
+    root: 'root',
+    entities: [
+      entity({
+        key: 'root',
+        type: 'x.profile',
+        external_id: '2',
+        data: { name: '作者', username: 'writer' },
+      }),
+    ],
+    relations: [],
+  },
+})
+
+let share: unknown
+let api: ReturnType<typeof mockApi>
+const paths = () => api.mock.calls.map(([path]) => String(path))
+
+beforeEach(() => {
+  vi.spyOn(globalThis, 'scrollTo').mockImplementation(() => {})
+  api = mockApi((path) => {
+    if (!path.startsWith(`/public/${SLUG}`)) throw new APIError(401, '需要登录')
+    const rest = path.slice(`/public/${SLUG}`.length)
+    if (rest === '') {
+      if (!share) throw new APIError(404, '内容不存在或已删除')
+      return share
+    }
+    if (rest === '/collections' || rest.startsWith('/collections?'))
+      return {
+        items: [
+          new URLSearchParams(rest.split('?', 2)[1]).get('kind') === 'profile'
+            ? profile
+            : post,
+        ],
+      }
+    if (rest === `/collections/${POST}`) return post
+    if (rest === `/collections/${PROFILE}`) return profile
+    if (rest.includes('/history')) return { items: [] }
+    if (rest.includes('/counts')) return { points: [] }
+    if (rest.includes('/profile-changes')) return { items: [] }
+    throw new APIError(404, '内容不存在或已删除')
+  })
+})
+let unmount = () => {}
+afterEach(() => {
+  unmount()
+  document.body.replaceChildren()
+  location.hash = '/'
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
+
+followShare(router)
+
+async function mount(path: string) {
+  location.hash = path
+  await router.push(path)
+  const el = document.createElement('div')
+  document.body.append(el)
+  const app = createApp(App).use(vaporInteropPlugin).use(router)
+  await router.isReady()
+  app.mount(el)
+  unmount = () => app.unmount()
+  return el
+}
+const buttons = (el: HTMLElement) =>
+  [...el.querySelectorAll('button')].map((b) => b.textContent?.trim())
+
+it('opens a shared folder without login, with a tab per kind it holds', async () => {
+  share = { target: 'folder', name: '精选', posts: 1, profiles: 1 }
+  const el = await mount(`/s/${SLUG}`)
+  await vi.waitFor(() => expect(el.textContent).toContain('公开的帖子'))
+  expect(el.querySelector('h1')?.textContent).toBe('精选')
+  // Items open inside the share.
+  expect(
+    el.querySelector<HTMLAnchorElement>('a.head')?.getAttribute('href'),
+  ).toBe(`#/s/${SLUG}/collection/${POST}`)
+  // Nothing of the owner's: no filters, no batch update, no login.
+  expect(buttons(el)).not.toContain('批量更新')
+  expect(el.querySelector('.filters, form')).toBeNull()
+  expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
+
+  const tab = [...el.querySelectorAll<HTMLButtonElement>('[role=tab]')].find(
+    (b) => b.textContent?.trim() === '账号',
+  )!
+  tab.click()
+  await vi.waitFor(() => expect(el.textContent).toContain('账号简介'))
+  expect(paths()).toContain(`/public/${SLUG}/collections?kind=profile`)
+})
+
+it('shows a shared post read-only, its links kept inside the share', async () => {
+  share = { target: 'collection', collection_id: POST }
+  const el = await mount(`/s/${SLUG}`)
+  await vi.waitFor(() => expect(el.textContent).toContain('公开的帖子'))
+  for (const label of ['重新抓取', '删除这条收藏', '公开分享', '我的整理'])
+    expect(el.textContent).not.toContain(label)
+  expect(
+    [...el.querySelectorAll('a')].some(
+      (a) => a.getAttribute('href') === `#/s/${SLUG}/collection/${PROFILE}`,
+    ),
+  ).toBe(true)
+  // Sensitive media starts covered.
+  expect(el.querySelector('img[src="/media/a"]')).toBeNull()
+  expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
+
+  await router.push(`/s/${SLUG}/collection/${PROFILE}`)
+  await vi.waitFor(() => expect(el.textContent).toContain('账号简介'))
+  // The profile's posts are listed through the share.
+  await vi.waitFor(() =>
+    expect(paths()).toContainEqual(
+      expect.stringMatching(
+        new RegExp(
+          String.raw`^/public/${SLUG}/collections\?related_to=${PROFILE}`,
+        ),
+      ),
+    ),
+  )
+  expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
+  await nextTick()
+})
+
+it('says so when the link is gone', async () => {
+  share = undefined
+  const el = await mount(`/s/${SLUG}`)
+  await vi.waitFor(() =>
+    expect(el.querySelector('[role=alert]')?.textContent).toBe(
+      '链接不存在或已取消公开',
+    ),
+  )
+  expect(paths()).toEqual([`/public/${SLUG}`])
+  // A collection outside the share is not found either.
+  await router.push(`/s/${SLUG}/collection/${OTHER}`)
+  expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
+})

@@ -1,4 +1,5 @@
 import { previewURL, type Collection, type Entity } from './api'
+import { collectionHref } from './share'
 type Graph = NonNullable<Collection['graph']>
 export const isProfileEntity = (
   entity?: Entity,
@@ -123,7 +124,7 @@ export function authorIdentity(
     handle,
     avatar: avatar && previewURL(avatar),
     href: entity.saved_collection_id
-      ? `#/collection/${encodeURIComponent(entity.saved_collection_id)}`
+      ? collectionHref(entity.saved_collection_id)
       : undefined,
     protected: isProtected(entity),
   }

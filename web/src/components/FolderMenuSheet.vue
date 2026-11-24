@@ -1,7 +1,12 @@
 <script setup vapor lang="ts">
 import { useId, useTemplateRef, watch } from 'vue'
 const props = defineProps<{ open: boolean; name: string }>()
-const emit = defineEmits<{ rename: []; delete: []; cancel: [] }>()
+const emit = defineEmits<{
+  share: []
+  rename: []
+  delete: []
+  cancel: []
+}>()
 const titleId = useId()
 const dialog = useTemplateRef<HTMLDialogElement>('sheet')
 watch(
@@ -26,6 +31,9 @@ function backdrop(event: MouseEvent) {
   >
     <div class="group">
       <p :id="titleId" class="title">{{ name }}</p>
+      <button type="button" class="action" @click="emit('share')">
+        公开分享
+      </button>
       <button type="button" class="action" @click="emit('rename')">
         重命名
       </button>

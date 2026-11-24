@@ -9,6 +9,7 @@ import {
   storageSize,
   warningList,
 } from '../presentation'
+import { collectionHref } from '../share'
 import MediaGallery from './MediaGallery.vue'
 import MediaViewer from './MediaViewer.vue'
 import PostRelations from './PostRelations.vue'
@@ -99,7 +100,7 @@ const warnings = computed(() => warningList(props.collection.warnings))
       <a
         v-if="view.profileCollectionId"
         class="identity profile-link"
-        :href="`#/collection/${view.profileCollectionId}`"
+        :href="collectionHref(view.profileCollectionId)"
       >
         <strong class="name"
           >{{ view.name }}<LockIcon v-if="view.locked" class="lock"

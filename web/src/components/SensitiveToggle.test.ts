@@ -21,7 +21,7 @@ const collection = {
 mockApi((path) => {
   if (path === '/collections' || path.startsWith('/collections?'))
     return { items: [collection] }
-  if (path === '/tags') return []
+  if (path === '/tags' || path.startsWith('/shares')) return []
   if (path.endsWith('/annotation')) return { note: '', tags: [] }
   if (path.endsWith('/history')) return { items: [] }
   if (path.endsWith('/availability')) return { available: true }

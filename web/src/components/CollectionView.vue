@@ -6,6 +6,7 @@ import {
   listsProfiles,
   storageSize,
 } from '../presentation'
+import { shareSlug } from '../share'
 import BatchRefresh from './BatchRefresh.vue'
 import CollectionAlbum from './CollectionAlbum.vue'
 import CollectionFilters from './CollectionFilters.vue'
@@ -41,6 +42,9 @@ const emit = defineEmits<{
   more: []
   retry: []
 }>()
+// A public link lists without filters (they offer the owner's tags) or
+// batch updates.
+const shared = computed(() => !!shareSlug.value)
 // An album shows posts' media; accounts have none to show.
 const albums = computed(() => !listsProfiles(props.query))
 const layout = computed(() =>
@@ -107,7 +111,7 @@ const storage = computed(() =>
 <template>
   <p v-if="storage" class="storage">{{ storage }}</p>
   <CollectionFilters
-    v-if="!hideFilters"
+    v-if="!hideFilters && !shared"
     :query="query"
     :within-profile="withinProfile"
     :folder="folder"
@@ -119,7 +123,7 @@ const storage = computed(() =>
   >
     <slot name="actions" />
     <button
-      v-if="!selecting && items.length"
+      v-if="!selecting && items.length && !shared"
       type="button"
       class="batch"
       @click="startSelecting"

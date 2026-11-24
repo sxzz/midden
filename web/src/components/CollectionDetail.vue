@@ -1,15 +1,17 @@
 <script setup vapor lang="ts">
 import { computed, onUnmounted, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { safeURL, type Collection } from '../api'
+import { call, client, safeURL, type Collection, type Share } from '../api'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
 import { date, present } from '../presentation'
 import { isProfileEntity } from '../relations'
+import { collectionRoute, shareSlug } from '../share'
 import CollectionAnnotations from './CollectionAnnotations.vue'
 import CollectionPost from './CollectionPost.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
 import ProfileCollections from './ProfileCollections.vue'
 import RevisionTimeline from './RevisionTimeline.vue'
+import ShareSheet from './ShareSheet.vue'
 import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
@@ -76,11 +78,53 @@ const profileName = computed(() =>
 const link = computed(() => collection.value && safeURL(collection.value.url))
 const router = useRouter()
 function openTrends() {
-  void router.push({ name: 'collection-stats', params: { id: props.id } })
+  void router.push(collectionRoute(props.id, 'stats'))
 }
 function openChanges() {
-  void router.push({ name: 'collection-changes', params: { id: props.id } })
+  void router.push(collectionRoute(props.id, 'changes'))
 }
+// Behind a public link the page only reads: no capture, notes or deletion.
+const shared = computed(() => !!shareSlug.value)
+/** The owner's links that make this collection public, so none surprises. */
+const exposure = shallowRef<Share[]>([])
+const sharing = shallowRef(false)
+async function loadExposure() {
+  if (shared.value) return
+  const id = props.id
+  try {
+    const found = await call(client.shares.$get({ query: { collection: id } }))
+    if (id === props.id) exposure.value = found
+  } catch {
+    // Without an answer the row only offers to share.
+  }
+}
+watch(
+  () => props.id,
+  () => {
+    exposure.value = []
+    void loadExposure()
+  },
+  { immediate: true },
+)
+const sharedDirectly = computed(() =>
+  exposure.value.some(
+    (s) => s.target === 'collection' && s.target_id === props.id,
+  ),
+)
+const exposureHint = computed(() => {
+  const folders = exposure.value
+    .filter((s) => s.target === 'folder')
+    .map((s) => `「${s.name}」`)
+  const profile = exposure.value.some(
+    (s) => s.target === 'collection' && s.target_id !== props.id,
+  )
+  return [
+    folders.length && `已随收藏夹${folders.join('')}公开`,
+    profile && '已随所在账号公开',
+  ]
+    .filter(Boolean)
+    .join('；')
+})
 // Dragging the timeline passes many points: show the ones already fetched at
 // once, and fetch the others only where the drag rests.
 let pick: ReturnType<typeof setTimeout> | undefined
@@ -151,24 +195,34 @@ const version = computed(() =>
       />
       <ListButton v-if="link" label="打开原文" :href="link" />
       <ListButton
+        v-if="!shared"
+        label="公开分享"
+        :hint="exposureHint"
+        :trailing="sharedDirectly ? '已公开' : undefined"
+        @select="sharing = true"
+      />
+      <ListButton
+        v-if="!shared"
         label="重新抓取"
         :disabled="busy || loadingPoint || !available"
         @select="startRefresh"
       />
       <ListButton v-if="record" label="查看进度" chevron @select="openRecord" />
       <ListButton
-        v-if="!available"
+        v-if="!available && !shared"
         label="重试连接采集服务"
         @select="checkAvailability"
       />
       <!-- The reader's own notes, folded, then the one destructive action:
            every action on this collection in one card. -->
       <CollectionAnnotations
+        v-if="!shared"
         :id="id"
         :key="id"
         @saved="emit('annotationsSaved')"
       />
       <ListButton
+        v-if="!shared"
         label="删除这条收藏"
         variant="destructive"
         :disabled="busy"
@@ -190,7 +244,17 @@ const version = computed(() =>
       :show-sensitive="showSensitive"
       :reposted-by="profileName"
     />
+    <ShareSheet
+      v-if="!shared"
+      :id="id"
+      :open="sharing"
+      target="collection"
+      :title="isProfile ? '公开分享这个账号' : '公开分享这条收藏'"
+      @changed="loadExposure"
+      @cancel="sharing = false"
+    />
     <ConfirmSheet
+      v-if="!shared"
       :open="confirmDelete"
       title="删除这条收藏？"
       confirm-label="删除"

@@ -39,6 +39,7 @@ import ConfirmSheet from './ConfirmSheet.vue'
 import FolderMenuSheet from './FolderMenuSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
 import FolderStrip from './FolderStrip.vue'
+import ShareSheet from './ShareSheet.vue'
 // Remembered in this browser, so a reload does not cover the media again.
 const SENSITIVE_KEY = 'midden.showSensitive'
 const showSensitive = shallowRef(readFlag(SENSITIVE_KEY))
@@ -340,7 +341,7 @@ const modified = computed(
     folderModified(folderList.query.value, folder.value.filter),
 )
 const canSave = computed(() => !nested.value && hasFilters(shownQuery.value))
-type Sheet = '' | 'create' | 'menu' | 'rename' | 'delete'
+type Sheet = '' | 'create' | 'menu' | 'rename' | 'delete' | 'share'
 const sheet = shallowRef<Sheet>('')
 const busy = shallowRef(false)
 const sheetError = shallowRef('')
@@ -680,8 +681,17 @@ const viewProps = computed(() => {
       v-if="folder"
       :open="sheet === 'menu'"
       :name="folder.name"
+      @share="openSheet('share')"
       @rename="openSheet('rename')"
       @delete="openSheet('delete')"
+      @cancel="sheet = ''"
+    />
+    <ShareSheet
+      v-if="folder"
+      :id="folder.id"
+      :open="sheet === 'share'"
+      target="folder"
+      :title="`公开分享收藏夹「${folder.name}」`"
       @cancel="sheet = ''"
     />
     <ConfirmSheet
