@@ -10,6 +10,7 @@ import {
   hasFilters,
   listTab,
   localZone,
+  retagQuery,
   withTab,
 } from './folders'
 import { listSort, listsProfiles } from './presentation'
@@ -141,4 +142,25 @@ it('knows which tab and which filters a query has', () => {
   expect(hasFilters('entity_type=x.post')).toBe(true)
   expect(hasFilters('sort=saved')).toBe(true)
   expect(hasFilters('saved_within=7d')).toBe(true)
+})
+
+it('writes tag lists as sets, the way the server stores them', () => {
+  expect(folderFilter('tag=b,a,b&tag_mode=all&not_tag=c')).toBe(
+    'not_tag=c&tag=a%2Cb&tag_mode=all',
+  )
+  // One tag matches the same either way.
+  expect(folderFilter('tag=a&tag_mode=all')).toBe('tag=a')
+  expect(folderModified('tag=b,a', 'tag=a%2Cb')).toBe(false)
+})
+
+it('moves folder filters along with a merged or deleted tag', () => {
+  expect(retagQuery('q=x', 'a', 'b')).toBe('q=x')
+  expect(retagQuery('tag=a%2Cb&tag_mode=all', 'a', 'b')).toBe('tag=b')
+  expect(retagQuery('not_tag=d&tag=a%2Cc', 'a', 'b')).toBe(
+    'not_tag=d&tag=b%2Cc',
+  )
+  // Wanted and excluded at once after a merge: wanting it wins.
+  expect(retagQuery('tag=b&not_tag=a', 'a', 'b')).toBe('tag=b')
+  expect(retagQuery('not_tag=a&q=x', 'a')).toBe('q=x')
+  expect(retagQuery('tag=a%2Cc&tag_mode=all', 'a')).toBe('tag=c')
 })

@@ -47,7 +47,8 @@ export function listTags(db: Executor): Tag[] {
 }
 
 /**
- * Tags nothing uses any more go away. A folder filtering on a tag keeps it,
+ * Tags nothing uses any more go away. A folder filtering on a tag, wanted
+ * or excluded, keeps it,
  * so a tag used for grouping survives while its folder is empty.
  */
 export function pruneTags(tx: Transaction): void {
@@ -55,8 +56,12 @@ export function pruneTags(tx: Transaction): void {
     .select({ filter: folders.filter })
     .from(folders)
     .all()
-    .map((folder) => new URLSearchParams(folder.filter).get('tag'))
-    .filter((id): id is string => !!id)
+    .flatMap((folder) => {
+      const filter = new URLSearchParams(folder.filter)
+      return [filter.get('tag'), filter.get('not_tag')]
+        .filter((list): list is string => !!list)
+        .flatMap((list) => list.split(','))
+    })
   tx.delete(tags)
     .where(
       and(

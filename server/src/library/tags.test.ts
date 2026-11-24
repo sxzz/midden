@@ -117,22 +117,96 @@ describe('tags', () => {
     fails(() => deleteTag(c.db, missing), 'not_found')
   })
 
-  test('delete with their associations, unless a folder filters on them', async () => {
+  test('delete with their associations and out of folder filters', async () => {
     const { c, ids } = await setup()
     const made = updateAnnotation(c.db, ids[0]!, { tagNames: ['猫', '狗'] })
     const cat = made.tags.find((t) => t.name === '猫')!
     const dog = made.tags.find((t) => t.name === '狗')!
     updateAnnotation(c.db, ids[1]!, { tagIds: [cat.id] })
-    createFolder(c.db, { name: '狗狗', filter: `tag=${dog.id}` })
+    const only = createFolder(c.db, { name: '猫', filter: `tag=${cat.id}` })
+    const lists = createFolder(c.db, {
+      name: '猫狗',
+      filter: `tag=${cat.id},${dog.id}&tag_mode=all&q=post`,
+    })
+    const excluded = createFolder(c.db, {
+      name: '非猫',
+      filter: `not_tag=${cat.id}&q=post`,
+    })
 
     deleteTag(c.db, cat.id)
     expect(names(c, ids[0]!)).toEqual(['狗'])
     expect(names(c, ids[1]!)).toEqual([])
-    fails(
-      () => deleteTag(c.db, dog.id),
-      'conflict',
-      '收藏夹「狗狗」按此标签筛选，请先修改收藏夹',
-    )
     expect(listTags(c.db)).toEqual([dog])
+    const filters = Object.fromEntries(
+      (await listFolders(c.db)).map((f) => [f.id, f.filter]),
+    )
+    // An emptied list goes, and how its tags matched with it.
+    expect(filters[only.id]).toBe('')
+    expect(filters[lists.id]).toBe(`q=post&tag=${dog.id}`)
+    expect(filters[excluded.id]).toBe('q=post')
+  })
+
+  test('merge within wanted and excluded lists', async () => {
+    const { c, ids } = await setup()
+    const made = updateAnnotation(c.db, ids[0]!, {
+      tagNames: ['甲', '乙', '丙'],
+    })
+    const [a, b, d] = ['甲', '乙', '丙'].map(
+      (name) => made.tags.find((t) => t.name === name)!.id,
+    ) as [string, string, string]
+    const sorted = (...list: string[]) => list.toSorted().join(',')
+    const both = createFolder(c.db, {
+      name: 'all',
+      filter: `tag=${a},${b}&tag_mode=all`,
+    })
+    const three = createFolder(c.db, {
+      name: 'three',
+      filter: `tag=${a},${b},${d}&tag_mode=all`,
+    })
+    const against = createFolder(c.db, {
+      name: 'against',
+      filter: `tag=${b}&not_tag=${a},${d}`,
+    })
+    const away = createFolder(c.db, { name: 'away', filter: `not_tag=${a}` })
+
+    expect(renameTag(c.db, a, '乙').merged).toBe(true)
+    const filters = Object.fromEntries(
+      (await listFolders(c.db)).map((f) => [f.id, f.filter]),
+    )
+    // The two became one: a single tag needs no mode.
+    expect(filters[both.id]).toBe(`tag=${b}`)
+    expect(filters[three.id]).toBe(
+      new URLSearchParams({ tag: sorted(b, d), tag_mode: 'all' }).toString(),
+    )
+    // Wanted and excluded at once: wanting it wins.
+    expect(filters[against.id]).toBe(
+      new URLSearchParams({ not_tag: d, tag: b }).toString(),
+    )
+    expect(filters[away.id]).toBe(`not_tag=${b}`)
+  })
+
+  test('folders store tag lists as sets', async () => {
+    const { c, ids } = await setup()
+    const made = updateAnnotation(c.db, ids[0]!, { tagNames: ['甲', '乙'] })
+    const [a, b] = made.tags.map((t) => t.id).toSorted() as [string, string]
+    const folder = createFolder(c.db, {
+      name: 'f',
+      filter: `tag=${b},${a},${b}&tag_mode=any&not_tag=`,
+    })
+    expect(folder.filter).toBe(
+      new URLSearchParams({ tag: `${a},${b}` }).toString(),
+    )
+    fails(
+      () => createFolder(c.db, { name: 'g', filter: `tag=${a}&not_tag=${a}` }),
+      'invalid_filter',
+    )
+    // Excluded tags keep their tag alive like wanted ones.
+    createFolder(c.db, { name: 'h', filter: `not_tag=${b}` })
+    updateAnnotation(c.db, ids[0]!, { tagIds: [] })
+    expect(
+      listTags(c.db)
+        .map((t) => t.id)
+        .toSorted(),
+    ).toEqual([a, b])
   })
 })

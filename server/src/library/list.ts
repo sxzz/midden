@@ -37,7 +37,15 @@ export interface CollectionFilter {
   /** Author keys from `listAuthors`; any matches. */
   authors?: string[]
   sensitive?: string
+  /**
+   * Tag ids, comma-separated; a collection has a tag when it is tagged or
+   * its author's saved profile is. `tagMode` `all` asks for every one of
+   * them, otherwise any will do.
+   */
   tag?: string
+  tagMode?: string
+  /** Tag ids, comma-separated, none of which a collection may have. */
+  notTag?: string
   /** A saved collection the results relate to directly. */
   relatedTo?: string
   postType?: string
@@ -138,6 +146,24 @@ function parseTime(raw: string | undefined): number | undefined {
 
 const values = (raw: string | undefined) => (raw ? raw.split(',') : [])
 
+const MAX_TAGS = 100
+
+/** A comma-separated set of tag ids, each once and in order. */
+export const tagList = (raw: string | undefined) =>
+  [...new Set(values(raw))].toSorted().join(',')
+
+/** Ids, not too many, and none both wanted and excluded. */
+function validTags(tag: string, notTag: string): boolean {
+  const wanted = values(tag)
+  const excluded = values(notTag)
+  return (
+    wanted.length <= MAX_TAGS &&
+    excluded.length <= MAX_TAGS &&
+    [...wanted, ...excluded].every((id) => isUUID(id)) &&
+    wanted.every((id) => !excluded.includes(id))
+  )
+}
+
 interface Checked {
   filter: Required<Omit<CollectionFilter, 'authors'>> & { authors: string[] }
   authors: Identity[]
@@ -159,7 +185,10 @@ function check(input: CollectionFilter): Checked {
     order: input.order ?? '',
     authors: input.authors ?? [],
     sensitive: input.sensitive ?? '',
-    tag: input.tag ?? '',
+    // One set of tags is one filter, and one cursor fingerprint.
+    tag: tagList(input.tag),
+    tagMode: input.tagMode ?? '',
+    notTag: tagList(input.notTag),
     relatedTo: input.relatedTo ?? '',
     postType: input.postType ?? '',
   }
@@ -177,7 +206,8 @@ function check(input: CollectionFilter): Checked {
     ) ||
     values(filter.entityType).some((t) => !ENTITY_NAME.test(t)) ||
     (filter.relatedTo && !isUUID(filter.relatedTo)) ||
-    (filter.tag && !isUUID(filter.tag)) ||
+    !oneOf(filter.tagMode, ['any', 'all']) ||
+    !validTags(filter.tag, filter.notTag) ||
     filter.authors.length > MAX_AUTHORS
   )
     throw invalid()
@@ -250,17 +280,33 @@ function mediaSQL(kinds: string[]): SQL {
 }
 
 /**
- * Tagged directly, or written by an author whose saved collection is
- * tagged. Listed as one set, so SQLite starts from the few tagged rows
+ * Collections with any of these tags: tagged directly, or written by an
+ * author whose saved collection is tagged. Listed as one set from the
+ * `collection_tags` index, so SQLite starts from the few tagged rows
  * instead of testing every saved collection.
  */
-const tagSQL = (tag: string) => sql`k.collection_id IN (
-  SELECT ct.collection_id FROM collection_tags ct WHERE ct.tag_id = ${tag}
+const taggedSQL = (tags: string[]) => sql`(
+  SELECT ct.collection_id FROM collection_tags ct
+  WHERE ct.tag_id IN (SELECT value FROM json_each(${list(tags)}))
   UNION
   SELECT authored.collection_id FROM collection_tags ct
   JOIN catalog tagged ON tagged.collection_id = ct.collection_id
   JOIN catalog authored ON authored.author_entity_id = tagged.root_entity_id
-  WHERE ct.tag_id = ${tag})`
+  WHERE ct.tag_id IN (SELECT value FROM json_each(${list(tags)})))`
+
+/** Any of the tags, or each of them; and none of the excluded ones. */
+function tagSQL(tag: string, mode: string, notTag: string): SQL[] {
+  const wanted = values(tag)
+  const conditions =
+    mode === 'all'
+      ? wanted.map((id) => sql`k.collection_id IN ${taggedSQL([id])}`)
+      : wanted.length
+        ? [sql`k.collection_id IN ${taggedSQL(wanted)}`]
+        : []
+  if (notTag)
+    conditions.push(sql`k.collection_id NOT IN ${taggedSQL(values(notTag))}`)
+  return conditions
+}
 
 /** The newest revision of the collection named by `column`. */
 const headOf = (column: string) =>
@@ -424,7 +470,7 @@ function select(input: CollectionFilter): Selection {
     conditions.push(
       sql`k.has_sensitive = ${filter.sensitive === 'contains' ? 1 : 0}`,
     )
-  if (filter.tag) conditions.push(tagSQL(filter.tag))
+  conditions.push(...tagSQL(filter.tag, filter.tagMode, filter.notTag))
   if (filter.postType)
     conditions.push(sql`${postTypeSQL(!!related)} = ${filter.postType}`)
   return {

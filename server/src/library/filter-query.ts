@@ -1,6 +1,6 @@
 import * as v from 'valibot'
 import { AppError } from '#errors.ts'
-import type { CollectionFilter } from './list.ts'
+import { tagList, type CollectionFilter } from './list.ts'
 
 const text = v.optional(v.string())
 
@@ -19,6 +19,8 @@ export const FilterQuery = v.object({
   author: v.optional(v.union([v.string(), v.array(v.string())])),
   sensitive: text,
   tag: text,
+  tag_mode: text,
+  not_tag: text,
   related_to: text,
   post_type: text,
 })
@@ -42,6 +44,8 @@ export function collectionFilter(input: FilterParams): CollectionFilter {
     authors: typeof author === 'string' ? [author] : author,
     sensitive: input.sensitive || undefined,
     tag: input.tag || undefined,
+    tagMode: input.tag_mode || undefined,
+    notTag: input.not_tag || undefined,
     relatedTo: input.related_to || undefined,
     postType: input.post_type || undefined,
   }
@@ -70,6 +74,12 @@ export function parseFilterQuery(query: string): {
   if (!parsed.success) throw new AppError('invalid_filter')
   // A time zone only matters to a relative save date.
   if (!parsed.output.saved_within) parsed.output.time_zone = undefined
+  // Tags are sets; how they match only matters with more than one.
+  const output = parsed.output
+  output.tag = tagList(output.tag)
+  output.not_tag = tagList(output.not_tag)
+  if (output.tag_mode === 'any' || output.tag.split(',').length < 2)
+    output.tag_mode = undefined
   const canonical = new URLSearchParams()
   for (const key of KEYS) {
     const value = parsed.output[key as keyof FilterParams]

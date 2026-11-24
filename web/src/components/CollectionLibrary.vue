@@ -340,8 +340,7 @@ function saved() {
 }
 /** Lists filtered on an edited tag hold other items now. */
 function tagsChanged(change: TagChange) {
-  if (change.to && change.to.id !== change.from)
-    retagFolders(change.from, change.to.id)
+  if (change.to?.id !== change.from) retagFolders(change.from, change.to?.id)
   stale()
   void loadFolders()
 }

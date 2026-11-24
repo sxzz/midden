@@ -328,7 +328,7 @@ it('submits and clears a tag filter together with the existing filters', async (
   const el = mount(CollectionFilters, { query: 'q=test', onSearch: search })
   el.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click()
   await vi.waitFor(() => expect(el.textContent).toContain('研究'))
-  press(el, 'label', '研究')
+  press(el, 'button', '研究')
   await nextTick()
   expect(new URLSearchParams(search.mock.calls[0]![0]).get('tag')).toBe('tag')
   expect(new URLSearchParams(search.mock.calls[0]![0]).get('q')).toBe('test')
@@ -336,9 +336,8 @@ it('submits and clears a tag filter together with the existing filters', async (
   expect(search).toHaveBeenLastCalledWith('')
   await nextTick()
   // Clearing puts the choice back on “全部”, not just in the query string.
-  expect(
-    el.querySelector<HTMLInputElement>('input[type="radio"]')!.checked,
-  ).toBe(true)
+  expect(find(el, 'button', '全部')!.getAttribute('aria-pressed')).toBe('true')
+  expect(find(el, 'button', '研究')!.className).not.toContain('include')
 })
 it('starts folded and says what it holds', async () => {
   mockApi().mockImplementation(async (path) =>

@@ -124,7 +124,9 @@ it('renames a tag in place, the filter on it unchanged', async () => {
   expect(el.querySelector('[aria-label="编辑标签「丙」"]')).not.toBeNull()
   button(el, '完成').click()
   await nextTick()
-  expect(el.querySelector('[role="radiogroup"]')?.textContent).toContain('丙')
+  expect(el.querySelector('[aria-label="标签筛选"]')?.textContent).toContain(
+    '丙',
+  )
 })
 
 it('asks before merging into a tag that has the name, then follows it', async () => {
@@ -181,7 +183,7 @@ it('says nothing about a count a tag does not have', async () => {
 })
 
 it('shows why the server refused, back on the name', async () => {
-  refuse = new APIError(409, '收藏夹「猫」按此标签筛选，请先修改收藏夹')
+  refuse = new APIError(503, '服务暂时不可用')
   const { el, search } = await mount('tag=a')
   await edit(el, '甲')
   button(sheet() as HTMLElement, '删除标签').click()
@@ -191,9 +193,85 @@ it('shows why the server refused, back on the name', async () => {
   button(sheet() as HTMLElement, '删除标签').click()
   await vi.waitFor(() =>
     expect(sheet().querySelector('[role="alert"]')?.textContent).toBe(
-      '收藏夹「猫」按此标签筛选，请先修改收藏夹',
+      '服务暂时不可用',
     ),
   )
   expect(sheet().querySelector('input')).not.toBeNull()
   expect(search).not.toHaveBeenCalled()
+})
+
+const last = (search: ReturnType<typeof vi.fn>) =>
+  Object.fromEntries(new URLSearchParams(search.mock.calls.at(-1)![0]))
+
+it('wants several tags, any or all of them, and excludes some', async () => {
+  const { el, search } = await mount('')
+  const chip = (name: string) =>
+    el.querySelector<HTMLButtonElement>(
+      `button[aria-label^="${CSS.escape(name)}："]`,
+    )!
+  const summary = () => el.querySelector('.filter-summary')?.textContent
+  const mode = () => el.querySelector('[aria-label="标签匹配方式"]')
+  chip('甲').click()
+  await vi.waitFor(() => expect(last(search)).toEqual({ tag: 'a' }))
+  expect(mode()).toBeNull()
+  chip('乙').click()
+  await vi.waitFor(() => expect(last(search)).toEqual({ tag: 'a,b' }))
+  expect(summary()).toBe('甲、乙')
+  expect(chip('乙').getAttribute('aria-label')).toBe('乙：包含')
+  // Two wanted tags offer how they combine.
+  const all = mode()!.querySelector<HTMLInputElement>('input[value="all"]')!
+  all.click()
+  await vi.waitFor(() =>
+    expect(last(search)).toEqual({ tag: 'a,b', tag_mode: 'all' }),
+  )
+  expect(summary()).toBe('甲 且 乙')
+  // A second tap excludes the tag, which reads as such.
+  chip('乙').click()
+  await vi.waitFor(() =>
+    expect(last(search)).toEqual({ tag: 'a', not_tag: 'b' }),
+  )
+  expect(chip('乙').textContent?.trim()).toBe('非 乙')
+  expect(chip('乙').getAttribute('aria-label')).toBe('乙：排除')
+  expect(summary()).toBe('甲、非 乙')
+  expect(mode()).toBeNull()
+  // A third lets it go; “全部” lets every tag go.
+  chip('乙').click()
+  await vi.waitFor(() => expect(last(search)).toEqual({ tag: 'a' }))
+  chip('乙').click()
+  chip('乙').click()
+  await vi.waitFor(() =>
+    expect(last(search)).toEqual({ tag: 'a', not_tag: 'b' }),
+  )
+  button(el.querySelector('[aria-label="标签筛选"]')!, '全部').click()
+  await vi.waitFor(() => expect(search).toHaveBeenLastCalledWith(''))
+})
+
+it('reads tag lists from the address in either order', async () => {
+  const { el, search } = await mount('tag=b,a&tag_mode=all')
+  expect(el.querySelector('.filter-summary')?.textContent).toBe('乙 且 甲')
+  expect(
+    el.querySelector<HTMLInputElement>('input[value="all"]')!.checked,
+  ).toBe(true)
+  expect(search).not.toHaveBeenCalled()
+})
+
+it('merges a wanted tag into another wanted one', async () => {
+  const { el, search } = await mount('tag=a,b&tag_mode=all')
+  await edit(el, '甲')
+  await rename('乙')
+  await vi.waitFor(() => expect(sheet().textContent).toContain('将合并'))
+  button(sheet() as HTMLElement, '合并').click()
+  // One tag left: how tags combine no longer applies.
+  await vi.waitFor(() => expect(last(search)).toEqual({ tag: 'b' }))
+})
+
+it('deletes an excluded tag out of the filter', async () => {
+  const { el, search } = await mount('tag=b&not_tag=a')
+  await edit(el, '甲')
+  button(sheet() as HTMLElement, '删除标签').click()
+  await vi.waitFor(() =>
+    expect(sheet().textContent).toContain('删除标签「甲」'),
+  )
+  button(sheet() as HTMLElement, '删除标签').click()
+  await vi.waitFor(() => expect(last(search)).toEqual({ tag: 'b' }))
 })

@@ -424,7 +424,7 @@ describe('library listing', () => {
     })
     const p1 = (await capture(ctx, post('p1'))).collectionId
     const p2 = (await capture(ctx, post('p2'))).collectionId
-    await capture(ctx, post('p3'))
+    const p3 = (await capture(ctx, post('p3'))).collectionId
     const locked = (await capture(ctx, profile('300'))).collectionId
     expect(
       ids(all(ctx, { visibility: 'private', entityType: 'fake.post' })),
@@ -443,6 +443,44 @@ describe('library listing', () => {
     expect(ids(all(ctx, { tag: tag.id })).toSorted()).toEqual(
       [p1, p2, locked].toSorted(),
     )
+
+    // Several tags: any of them, or every one, with the same reach.
+    const other = updateAnnotation(ctx.db, p1, { tagNames: ['u'] }).tags[0]!
+    updateAnnotation(ctx.db, p3, { tagIds: [other.id] })
+    const both = `${tag.id},${other.id}`
+    const sorted = (filter: CollectionFilter) =>
+      ids(all(ctx, filter)).toSorted()
+    expect(sorted({ tag: both })).toEqual([p1, p2, p3, locked].toSorted())
+    expect(sorted({ tag: both, tagMode: 'any' })).toEqual(sorted({ tag: both }))
+    // p1 has `t` through its author and `u` of its own.
+    expect(sorted({ tag: both, tagMode: 'all' })).toEqual([p1])
+    expect(sorted({ tag: other.id, tagMode: 'all' })).toEqual(
+      [p1, p3].toSorted(),
+    )
+    // Excluding a tag excludes what its author's tag reaches too.
+    expect(sorted({ notTag: tag.id })).toEqual([p3])
+    expect(sorted({ notTag: both })).toEqual([])
+    expect(sorted({ tag: other.id, notTag: tag.id })).toEqual([p3])
+    expect(countCollections(ctx.db, { notTag: tag.id }).count).toBe(1)
+    expect(countCollections(ctx.db, { tag: both, tagMode: 'all' }).count).toBe(
+      1,
+    )
+    // The order of the ids is not part of the filter, nor of its pages.
+    const page = listCollections(ctx, { tag: both, entityType: 'fake.post' })
+    expect(() =>
+      listCollections(
+        ctx,
+        { tag: `${other.id},${tag.id}`, entityType: 'fake.post' },
+        page.next_cursor,
+      ),
+    ).not.toThrow()
+    for (const filter of [
+      { tag: both, notTag: tag.id },
+      { tag: `${tag.id},x` },
+      { notTag: 'x' },
+      { tag: tag.id, tagMode: 'some' },
+    ])
+      expect(() => listCollections(ctx, filter)).toThrow('筛选条件无效')
   })
 
   test('related collections need direct edges from or to the root', async () => {

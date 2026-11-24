@@ -1,5 +1,6 @@
 import { shallowRef } from 'vue'
 import { call, client, errorText, type Folder } from '../api'
+import { retagQuery } from '../folders'
 
 /** The saved folders (收藏夹) with their counts, and changes to them. */
 export function useFolders() {
@@ -54,15 +55,13 @@ export function useFolders() {
     folders.value = folders.value.filter((f) => f.id !== id)
   }
   /**
-   * A tag merged into another: the server moved the folders filtering on it
-   * along, so they read the same here until the next load says so too.
+   * A tag merged into another or deleted: the server rewrote the folders
+   * filtering on it, so they read the same here until the next load does.
    */
-  function retag(from: string, to: string) {
+  function retag(from: string, to?: string) {
     folders.value = folders.value.map((folder) => {
-      const filter = new URLSearchParams(folder.filter)
-      if (filter.get('tag') !== from) return folder
-      filter.set('tag', to)
-      return { ...folder, filter: filter.toString() }
+      const filter = retagQuery(folder.filter, from, to)
+      return filter === folder.filter ? folder : { ...folder, filter }
     })
   }
   return { folders, loaded, error, load, create, update, remove, retag }

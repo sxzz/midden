@@ -91,6 +91,7 @@ const filtered = computed(() => {
   const q = new URLSearchParams(props.query)
   return [
     'tag',
+    'not_tag',
     'post_type',
     'q',
     'author',

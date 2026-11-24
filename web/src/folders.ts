@@ -129,6 +129,53 @@ export function apiQuery(raw: string, kind?: Kind) {
   return q.toString()
 }
 
+const idList = (raw: string | null) => (raw ? raw.split(',') : [])
+
+/**
+ * Tag lists as the server keeps them: sets of ids in order, none both
+ * wanted and excluded, and a match mode only for more than one tag.
+ */
+function normalizeTags(q: URLSearchParams) {
+  const tag = [...new Set(idList(q.get('tag')))].toSorted()
+  const notTag = [...new Set(idList(q.get('not_tag')))]
+    .filter((id) => !tag.includes(id))
+    .toSorted()
+  for (const [key, list] of [
+    ['tag', tag],
+    ['not_tag', notTag],
+  ] as const)
+    if (list.length) q.set(key, list.join(','))
+    else q.delete(key)
+  if (q.get('tag_mode') !== 'all' || tag.length < 2) q.delete('tag_mode')
+  return q
+}
+
+/**
+ * A query with one tag merged into another, or deleted when there is none
+ * to take its place, the way the server rewrites a folder's filter.
+ */
+export function retagQuery(raw: string, from: string, to?: string) {
+  const q = new URLSearchParams(raw)
+  if (
+    [q.get('tag'), q.get('not_tag')].every(
+      (list) => !idList(list).includes(from),
+    )
+  )
+    return raw
+  for (const key of ['tag', 'not_tag'])
+    q.set(
+      key,
+      idList(q.get(key))
+        .flatMap((id) => (id === from ? (to ? [to] : []) : [id]))
+        .join(','),
+    )
+  // Keys in order, as the server writes a filter again.
+  const entries = [...normalizeTags(q)].toSorted(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  )
+  return new URLSearchParams(entries).toString()
+}
+
 /**
  * The filter a folder saves for an address query, written the way the
  * server stores it: no empty or non-filter values, keys in order, authors
@@ -137,9 +184,9 @@ export function apiQuery(raw: string, kind?: Kind) {
  * names its entity types itself.
  */
 export function folderFilter(raw: string, kind?: Kind) {
-  const entries = [...new URLSearchParams(apiQuery(raw, kind))].filter(
-    ([key, value]) => value && key !== 'cursor',
-  )
+  const entries = [
+    ...normalizeTags(new URLSearchParams(apiQuery(raw, kind))),
+  ].filter(([key, value]) => value && key !== 'cursor')
   entries.sort(([a, x], [b, y]) =>
     a < b ? -1 : a > b ? 1 : x < y ? -1 : x > y ? 1 : 0,
   )

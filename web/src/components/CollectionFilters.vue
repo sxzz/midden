@@ -21,7 +21,7 @@ import { listSort, listsProfiles } from '../presentation'
 import TagEditSheet from './TagEditSheet.vue'
 import ChevronIcon from './ui/ChevronIcon.vue'
 import MultiSelect from './ui/MultiSelect.vue'
-import TagChips from './ui/TagChips.vue'
+import TagFilterChips from './ui/TagFilterChips.vue'
 const tags = shallowRef<Tag[]>([])
 const tagError = shallowRef('')
 async function loadTags() {
@@ -55,12 +55,17 @@ function only<T extends string>(items: T[]): T | '' {
     ? items[0]!
     : ''
 }
+const ids = (raw: string | null) => (raw ? raw.split(',') : [])
 function read(query: string) {
   const params = new URLSearchParams(query)
   const types = (params.get('entity_type') || '').split(',').filter(Boolean)
   const platform = only(types.map((type) => type.split('.')[0] || ''))
   return {
-    tag: params.get('tag') || '',
+    /** Tags wanted, any of them unless `tagMode` is `all`. */
+    tag: ids(params.get('tag')),
+    tagMode: params.get('tag_mode') === 'all' ? 'all' : '',
+    /** Tags none of which may be there. */
+    notTag: ids(params.get('not_tag')),
     postType: params.get('post_type') || '',
     authors: params.getAll('author'),
     layout: params.get('layout') === 'album' ? 'album' : '',
@@ -178,7 +183,8 @@ const open = shallowRef(
   !!(
     form.postType ||
     form.platform ||
-    form.tag ||
+    form.tag.length ||
+    form.notTag.length ||
     form.authors.length ||
     form.media.length ||
     form.visibility ||
@@ -193,9 +199,7 @@ const active = computed(() =>
   [
     props.folder && form.kind ? kindNames[form.kind] : '',
     form.platform ? (form.platform === 'instagram' ? 'Instagram' : 'X') : '',
-    form.tag
-      ? tags.value.find((tag) => tag.id === form.tag)?.name || '已选标签'
-      : '',
+    tagSummary.value,
     form.media.map((type) => mediaNames[type]).join('、'),
     // Authors are selected by identity; only their names are worth showing.
     form.authors.map((id) => authorNames.value[id] || id).join('、'),
@@ -217,7 +221,10 @@ const active = computed(() =>
 function stringify(f: Form) {
   const q = new URLSearchParams()
   for (const [k, v] of [
-    ['tag', f.tag],
+    // Sets of ids, written in order the way a folder stores them.
+    ['tag', f.tag.toSorted().join(',')],
+    ['tag_mode', f.tag.length > 1 ? f.tagMode : ''],
+    ['not_tag', f.notTag.toSorted().join(',')],
     ['post_type', f.postType],
     ['q', f.q],
     ['layout', f.layout],
@@ -281,7 +288,9 @@ watch(
     form.kind,
     form.platform,
     form.postType,
-    form.tag,
+    form.tag.join(','),
+    form.tagMode,
+    form.notTag.join(','),
     form.sort,
     form.order,
     form.visibility,
@@ -424,15 +433,31 @@ async function tagChanged(change: TagChange) {
   await loadTags()
   if (!tags.value.length) managing.value = false
   // A filter on a tag merged away follows it; on a deleted one, it goes.
-  if (form.tag === change.from) form.tag = change.to?.id ?? ''
+  const swap = (list: string[]) => [
+    ...new Set(
+      list.flatMap((id) =>
+        id !== change.from ? [id] : change.to ? [change.to.id] : [],
+      ),
+    ),
+  ]
+  const tag = swap(form.tag)
+  const notTag = swap(form.notTag).filter((id) => !tag.includes(id))
+  if (tag.join() !== form.tag.join()) form.tag = tag
+  if (notTag.join() !== form.notTag.join()) form.notTag = notTag
 }
-// The API filters on one tag, so the chips are a single-choice group; the
-// query string keeps storing it as a scalar.
-const tagFilter = computed({
-  get: () => (form.tag ? [form.tag] : []),
-  set: (value) => {
-    form.tag = value[0] ?? ''
-  },
+const tagName = (id: string) => tags.value.find((tag) => tag.id === id)?.name
+/** Tags read by name; one no longer listed has none to show. */
+const tagSummary = computed(() => {
+  const wanted = form.tag.map(tagName).filter(Boolean)
+  return [
+    wanted.join(form.tagMode === 'all' ? ' 且 ' : '、'),
+    ...form.notTag
+      .map(tagName)
+      .filter(Boolean)
+      .map((name) => `非 ${name}`),
+  ]
+    .filter(Boolean)
+    .join('、')
 })
 </script>
 
@@ -523,7 +548,8 @@ const tagFilter = computed({
         /></span>
       </label>
       <!-- Tags are your own vocabulary, so they get the same chips as in the
-           collection itself, not a picker that hides them. -->
+           collection itself, not a picker that hides them. A tap wants a
+           tag, a second excludes it, a third lets it go. -->
       <div v-if="tags.length || tagError" class="tag-filter">
         <p class="tag-title">
           标签<button
@@ -566,13 +592,31 @@ const tagFilter = computed({
             </svg>
           </button>
         </div>
-        <TagChips
-          v-else-if="tags.length"
-          v-model="tagFilter"
-          label="标签筛选"
-          all-label="全部"
-          :tags="tags"
-        />
+        <template v-else-if="tags.length">
+          <TagFilterChips
+            v-model:include="form.tag"
+            v-model:exclude="form.notTag"
+            label="标签筛选"
+            :tags="tags"
+          />
+          <!-- How several wanted tags combine; one needs no choice. -->
+          <div
+            v-if="form.tag.length > 1"
+            class="tag-mode"
+            role="radiogroup"
+            aria-label="标签匹配方式"
+          >
+            <label
+              ><input v-model="form.tagMode" type="radio" value="" /><span
+                >任一</span
+              ></label
+            ><label
+              ><input v-model="form.tagMode" type="radio" value="all" /><span
+                >全部</span
+              ></label
+            >
+          </div>
+        </template>
         <p v-if="tagError" class="tag-error" role="alert">
           {{ tagError }}
           <button type="button" class="retry" @click="loadTags">重试</button>
@@ -814,6 +858,44 @@ const tagFilter = computed({
 .tag-chip svg {
   flex: none;
   color: var(--subtle);
+}
+/* A segmented pair under the chips, as small as the choice it makes. */
+.tag-mode {
+  display: inline-flex;
+  gap: 2px;
+  margin-top: 12px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--fill);
+}
+.tag-mode label {
+  position: relative;
+  cursor: pointer;
+}
+.tag-mode input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.tag-mode span {
+  display: block;
+  min-width: 56px;
+  padding: 5px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  text-align: center;
+}
+.tag-mode input:checked + span {
+  background: var(--card);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  font-weight: 600;
+}
+.tag-mode input:focus-visible + span {
+  outline: 2px solid var(--link);
+  outline-offset: 1px;
 }
 .tag-error {
   margin: 10px 0 0;

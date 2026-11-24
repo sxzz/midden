@@ -24,13 +24,31 @@ function find(tx: Transaction, id: string): Tag {
   return tag
 }
 
-/** Folders whose filter is on the tag. Filters hold at most one tag. */
-function foldersOn(tx: Transaction, id: string) {
-  return tx
-    .select()
-    .from(folders)
-    .all()
-    .filter((folder) => new URLSearchParams(folder.filter).get('tag') === id)
+const ids = (raw: string | null) => (raw ? raw.split(',') : [])
+
+/**
+ * Point every folder filter that names the tag at `into` instead, or drop
+ * it when there is none, then write the filter canonically again. A list
+ * left empty goes, and with it how its tags match. When a merge leaves one
+ * tag both wanted and excluded, wanting it wins: the folder was about it.
+ */
+function rewriteFolders(tx: Transaction, id: string, into?: string) {
+  for (const folder of tx.select().from(folders).all()) {
+    const params = new URLSearchParams(folder.filter)
+    const wanted = ids(params.get('tag'))
+    const excluded = ids(params.get('not_tag'))
+    if (!wanted.includes(id) && !excluded.includes(id)) continue
+    const swap = (list: string[]) =>
+      list.flatMap((tag) => (tag === id ? (into ? [into] : []) : [tag]))
+    const tag = swap(wanted)
+    const notTag = swap(excluded).filter((t) => !tag.includes(t))
+    params.set('tag', tag.join(','))
+    params.set('not_tag', notTag.join(','))
+    tx.update(folders)
+      .set({ filter: parseFilterQuery(params.toString()).canonical })
+      .where(eq(folders.id, folder.id))
+      .run()
+  }
 }
 
 /**
@@ -65,14 +83,7 @@ export function renameTag(db: Database, id: string, raw: string): TagRename {
       )
       .onConflictDoNothing()
       .run().changes
-    for (const folder of foldersOn(tx, id)) {
-      const params = new URLSearchParams(folder.filter)
-      params.set('tag', into.id)
-      tx.update(folders)
-        .set({ filter: parseFilterQuery(params.toString()).canonical })
-        .where(eq(folders.id, folder.id))
-        .run()
-    }
+    rewriteFolders(tx, id, into.id)
     // Its associations go with it; counts by filter are cached until the
     // next write, which this is.
     tx.delete(tags).where(eq(tags.id, id)).run()
@@ -81,18 +92,13 @@ export function renameTag(db: Database, id: string, raw: string): TagRename {
 }
 
 /**
- * Delete a tag and take it off every collection. A folder filtering on it
- * would silently select more, so the tag stays until no folder uses it.
+ * Delete a tag, take it off every collection and out of every folder
+ * filter that names it.
  */
 export function deleteTag(db: Database, id: string): void {
   db.transaction((tx) => {
     find(tx, id)
-    const using = foldersOn(tx, id)
-    if (using.length)
-      throw new AppError(
-        'conflict',
-        `收藏夹${using.map((f) => `「${f.name}」`).join('、')}按此标签筛选，请先修改收藏夹`,
-      )
+    rewriteFolders(tx, id)
     tx.delete(tags).where(eq(tags.id, id)).run()
   })
 }
