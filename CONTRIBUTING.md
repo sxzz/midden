@@ -2,7 +2,7 @@
 
 ## 环境
 
-需要 pnpm；Node.js 26 由根目录 `package.json` 的 `devEngines` 自动下载。缩略图相关测试需要 ffmpeg，通过环境变量 `FFMPEG` 指定路径，未设置时跳过。
+工具链由 mise 按根目录 `mise.toml` 提供（`mise trust && mise install`）：Node.js 与 pnpm 的版本只写在 `package.json` 的 `devEngines` 中，由 mise 读取；ffmpeg 的版本写在 `mise.toml`。不用 mise 时需自备 pnpm，它会按 `devEngines` 自动下载 Node.js。缩略图相关测试需要 ffmpeg，通过环境变量 `FFMPEG` 指定路径（用 mise 时为 `FFMPEG=ffmpeg`），未设置时跳过。
 
 ```sh
 pnpm install

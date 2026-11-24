@@ -1,0 +1,5 @@
+[settings]
+idiomatic_version_file_enable_tools = ["node", "pnpm"]
+
+[tools]
+ffmpeg = "9.1.0"
