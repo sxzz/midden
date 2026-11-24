@@ -57,6 +57,8 @@ const target = (id: number) => ({
   mediaTypes: [],
   postType: 'post',
   prefetch: Buffer.alloc(0),
+  listedAt: '',
+  pinned: false,
 })
 
 function setup(

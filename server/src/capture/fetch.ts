@@ -7,6 +7,7 @@ import {
   collections,
   connections,
   sourceResponses,
+  submissions,
 } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import {
@@ -41,6 +42,7 @@ import { validateGraph } from './graph.ts'
 import { canonicalJson, sha256Hex } from './json.ts'
 import { finalizeSettled, loadCapture, validateExecution } from './lifecycle.ts'
 import { isRemoved, mediaKey } from './media-key.ts'
+import { storedOptions } from './options.ts'
 import { resolveCaptureScope } from './scope.ts'
 import type { Payload } from './payload.ts'
 
@@ -63,6 +65,22 @@ export function holdConnection(id: string): () => void {
   if (busyConnections.has(id)) throw new SnoozeError(1000)
   busyConnections.add(id)
   return () => busyConnections.delete(id)
+}
+
+/**
+ * The date cutoff a collection page may stop reading at: the earliest of its
+ * runs', when every run sharing the page has one. Stopping early keeps the
+ * real next cursor, so a run that reads on loses nothing.
+ */
+function pageCutoff(ctx: CaptureContext, captureId: string): string {
+  const cutoffs = ctx.db
+    .select({ options: submissions.captureOptions })
+    .from(submissions)
+    .where(eq(submissions.captureId, captureId))
+    .all()
+    .map((row) => storedOptions(row.options).since ?? '')
+  if (!cutoffs.length || cutoffs.includes('')) return ''
+  return cutoffs.reduce((a, b) => (Date.parse(a) <= Date.parse(b) ? a : b))
 }
 
 /** Fetch a queued capture and stage its result for download and finalize. */
@@ -130,6 +148,7 @@ export async function runCapture(ctx: CaptureContext, job: Job): Promise<void> {
       pageCursor: capture.pageCursor,
       automatic: capture.automatic,
       prefetch: capture.prefetch ?? Buffer.alloc(0),
+      since: capture.isCollection ? pageCutoff(ctx, capture.id) : '',
     })
     const logger = ctx.logger.child({
       jobId: job.id,
@@ -426,6 +445,8 @@ function commit(
           publishedAt: target.publishedAt,
           mediaTypes: target.mediaTypes,
           postType: target.postType,
+          ...(target.listedAt ? { listedAt: target.listedAt } : {}),
+          ...(target.pinned ? { pinned: true } : {}),
           ...(target.prefetch.length
             ? { prefetch: Buffer.from(target.prefetch).toString('base64') }
             : {}),

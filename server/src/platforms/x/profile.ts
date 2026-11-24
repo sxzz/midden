@@ -8,6 +8,7 @@ import {
 } from '@fxembed/atmosphere/providers/twitter/graphql/validators'
 import { buildAPITwitterStatus } from '@fxembed/atmosphere/providers/twitter/processor'
 import { processTimelineInstructions } from '@fxembed/atmosphere/providers/twitter/search'
+import { pastCutoff } from '../listing.ts'
 import {
   FetchResponse,
   RelatedTarget,
@@ -142,30 +143,58 @@ export function normalizeProfile(
   return result
 }
 
+/** When and how a post sits on the timeline, if the source says more. */
+export interface Listing {
+  listedAt?: string
+  pinned?: boolean
+}
+
+/**
+ * The public API lists a repost as the original post, with its publication
+ * time; when it was reposted is not given. Nor does it mark the pinned post,
+ * which comes first on a page (on every page past the timeline's end), so
+ * the first entry of each page may be pinned.
+ */
+function publicListing(post: any, publishedAt: string, index: number): Listing {
+  return {
+    listedAt: post.reposted_by ? '' : publishedAt,
+    pinned: index === 0,
+  }
+}
+
 export function attachTimeline(
   result: FetchResponse,
   timeline: any,
   prefetch?: (post: any) => Buffer | undefined,
+  listing?: (post: any) => Listing | undefined,
 ): void {
   if (timeline?.code !== 200 || !Array.isArray(timeline.results))
     throw new ProviderError(status.UNAVAILABLE, '平台返回的时间线无效')
   const ids = new Map<string, RelatedTarget>()
-  for (const post of timeline.results) {
+  for (const [index, post] of (timeline.results as any[]).entries()) {
     if (
       post?.type === 'status' &&
       typeof post.id === 'string' &&
       /^\d+$/.test(post.id)
     ) {
+      const publishedAt = Number.isFinite(Date.parse(post.created_at))
+        ? new Date(post.created_at).toISOString()
+        : typeof post.created_timestamp === 'number'
+          ? new Date(post.created_timestamp * 1000).toISOString()
+          : ''
+      const listed = listing
+        ? listing(post)
+        : publicListing(post, publishedAt, index)
+      // A post listed twice keeps the first place; pinned there, it stays so.
+      const pinned = !!listed?.pinned || !!ids.get(post.id)?.pinned
       ids.set(
         post.id,
         RelatedTarget.fromPartial({
           url: `https://x.com/i/web/status/${post.id}`,
           updatedAt: postUpdatedAt(post),
-          publishedAt: Number.isFinite(Date.parse(post.created_at))
-            ? new Date(post.created_at).toISOString()
-            : typeof post.created_timestamp === 'number'
-              ? new Date(post.created_timestamp * 1000).toISOString()
-              : '',
+          publishedAt,
+          listedAt: listed?.listedAt ?? '',
+          pinned,
           mediaTypes: [
             ...new Set<string>(
               (
@@ -263,9 +292,11 @@ export async function collectTimeline(
   fetchPage: (cursor: string) => Promise<{
     timeline: any
     prefetch?: (post: any) => Buffer | undefined
+    listing?: (post: any) => Listing | undefined
   }>,
   cursor = '',
   pageSize = 0,
+  since = '',
 ): Promise<void> {
   const target = Math.min(pageSize || 100, 100)
   const targets = new Map(result.relatedTargets.map((t) => [t.url, t]))
@@ -285,8 +316,8 @@ export async function collectTimeline(
     visited.add(cursor)
     const page = FetchResponse.fromPartial({ graph: result.graph })
     // Advance the checkpoint only after successfully parsing the entire page.
-    const { timeline, prefetch } = await fetchPage(cursor)
-    attachTimeline(page, timeline, prefetch)
+    const { timeline, prefetch, listing } = await fetchPage(cursor)
+    attachTimeline(page, timeline, prefetch, listing)
     for (const item of page.relatedTargets) targets.set(item.url, item)
     result.graph = page.graph
     result.relatedTargets = [...targets.values()]
@@ -299,6 +330,9 @@ export async function collectTimeline(
     // pinned post. A page without a new post is the end of the timeline.
     result.nextPageCursor = visited.has(next) || posts === before ? '' : next
     if (!result.nextPageCursor) break
+    // Past the date cutoff the rest is older still; the cursor stays, so a
+    // later read can go on from here.
+    if (since && pastCutoff(page.relatedTargets, since)) break
     cursor = result.nextPageCursor
   }
 }
@@ -309,6 +343,7 @@ export async function fetchPublicTimeline(
   fetcher: typeof fetch = fetch,
   cursor = '',
   pageSize = 0,
+  since = '',
 ): Promise<void> {
   signal = AbortSignal.any([signal, AbortSignal.timeout(30_000)])
   try {
@@ -329,6 +364,7 @@ export async function fetchPublicTimeline(
       },
       cursor,
       pageSize,
+      since,
     )
   } catch {
     result.incomplete = true
@@ -378,20 +414,37 @@ function sessionPrefetch(node: any, sourceUrl: string): Buffer | undefined {
     node,
   })
 }
-function timelineNodes(instructions: any[]): any[] {
-  const nodes: any[] = []
-  const visit = (content: any) => {
+interface TimelineNode {
+  node: any
+  /** Listed by a `TimelinePinEntry` instruction. */
+  pinned: boolean
+  promoted: boolean
+}
+function timelineNodes(instructions: any[]): TimelineNode[] {
+  const nodes: TimelineNode[] = []
+  const visit = (content: any, pinned: boolean) => {
     const item = content?.itemContent ?? content?.content ?? content
     if (item?.__typename === 'TimelineTweet' && item.tweet_results?.result)
-      nodes.push(item.tweet_results.result)
+      nodes.push({
+        node: item.tweet_results.result,
+        pinned,
+        promoted: !!item.promotedMetadata,
+      })
   }
-  for (const instruction of instructions)
+  for (const instruction of instructions) {
+    const pinned =
+      (instruction?.type ?? instruction?.__typename) === 'TimelinePinEntry'
     for (const entry of instruction?.entries ??
       (instruction?.entry ? [instruction.entry] : [])) {
-      visit(entry?.content)
-      for (const item of entry?.content?.items ?? []) visit(item?.item)
+      visit(entry?.content, pinned)
+      for (const item of entry?.content?.items ?? []) visit(item?.item, pinned)
     }
+  }
   return nodes
+}
+function isoTime(value: unknown): string {
+  const time = typeof value === 'string' ? Date.parse(value) : NaN
+  return Number.isFinite(time) ? new Date(time).toISOString() : ''
 }
 // UserTweets lists posts in the same shape as the single-post response, so the
 // raw nodes can stand in for it. ProfileTimeline uses another shape.
@@ -422,7 +475,8 @@ async function sessionTimelinePage(
     getProfileStatusesTimelineInstructions(response.tweets.data) ?? []
   const results: any[] = []
   const nodes = new Map<string, any>()
-  for (const node of timelineNodes(instructions)) {
+  const listings = new Map<string, Listing>()
+  for (const { node, pinned, promoted } of timelineNodes(instructions)) {
     const tweet = node.tweet ?? node
     const status: any = await buildAPITwitterStatus(
       host,
@@ -436,12 +490,23 @@ async function sessionTimelinePage(
     const original = tweet.legacy?.retweeted_status_result?.result ?? node
     if ((original.tweet ?? original).rest_id === status.id)
       nodes.set(status.id, original)
+    // The listed tweet of a repost is the repost itself, so its time is when
+    // it was reposted. A promoted one is out of order.
+    if (!listings.has(status.id))
+      listings.set(status.id, {
+        listedAt: promoted ? '' : isoTime(tweet.legacy?.created_at),
+        pinned,
+      })
     results.push(status)
   }
   const bottom = processTimelineInstructions(instructions).cursors.find(
     (c) => c.cursorType === 'Bottom',
   )?.value
-  return { timeline: { code: 200, results, cursor: { bottom } }, nodes }
+  return {
+    timeline: { code: 200, results, cursor: { bottom } },
+    nodes,
+    listings,
+  }
 }
 
 export async function fetchSessionTimeline(
@@ -451,6 +516,7 @@ export async function fetchSessionTimeline(
   fetcher: typeof fetch = fetch,
   cursor = '',
   pageSize = 0,
+  since = '',
 ): Promise<void> {
   signal = AbortSignal.any([signal, AbortSignal.timeout(30_000)])
   const responses: SourceResponse[] = []
@@ -468,7 +534,7 @@ export async function fetchSessionTimeline(
       result,
       async (next) => {
         const recorded = responses.length
-        const { timeline, nodes } = await sessionTimelinePage(
+        const { timeline, nodes, listings } = await sessionTimelinePage(
           result.canonicalTarget!.externalId,
           Math.min(pageSize || 100, 100),
           next || null,
@@ -479,10 +545,12 @@ export async function fetchSessionTimeline(
           timeline,
           prefetch: (post: any) =>
             sessionPrefetch(nodes.get(post.id), sourceUrl),
+          listing: (post: any) => listings.get(post.id),
         }
       },
       cursor,
       pageSize,
+      since,
     )
   } catch {
     result.incomplete = true

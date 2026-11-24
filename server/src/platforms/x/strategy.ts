@@ -286,6 +286,7 @@ export class CaptureStrategy {
               undefined,
               cursor,
               req.pageSize,
+              req.since,
             )
           } else {
             result.incomplete = true
@@ -293,7 +294,14 @@ export class CaptureStrategy {
           }
         } else {
           // Fetch only the timeline here; reuse the profile response obtained above.
-          await this.timeline(result, signal, undefined, cursor, req.pageSize)
+          await this.timeline(
+            result,
+            signal,
+            undefined,
+            cursor,
+            req.pageSize,
+            req.since,
+          )
         }
       }
     } else if ((result = (await this.listedPost(req, signal, account))!)) {

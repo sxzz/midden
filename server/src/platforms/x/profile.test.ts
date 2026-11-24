@@ -434,3 +434,51 @@ test('timeline collection stops a source that never runs out of cursors', async 
   assert.equal(result.incomplete, true)
   assert.equal(result.nextPageCursor, `page-${calls + 1}`)
 })
+
+test('public timeline collection stops past the date cutoff, keeping the cursor', async () => {
+  const { collectTimeline } = await import('./profile.ts')
+  const day = (d: number) => `2026-11-${String(d).padStart(2, '0')}T00:00:00Z`
+  const pages = [
+    // The first entry may be the pinned post, old or not; a repost carries
+    // the original's time, not when it was reposted.
+    [
+      { id: '1', created_at: day(1) },
+      { id: '20', created_at: day(20) },
+      { id: '19', created_at: day(2), reposted_by: { id: '9' } },
+    ],
+    [
+      { id: '1', created_at: day(1) },
+      { id: '18', created_at: day(18) },
+      { id: '9', created_at: day(9) },
+    ],
+    [{ id: '8', created_at: day(8) }],
+  ]
+  const result = normalizeProfile(user, user.id, 'fxtwitter')
+  const cursors: string[] = []
+  await collectTimeline(
+    result,
+    async (cursor) => {
+      cursors.push(cursor)
+      const page = Number(cursor || 0)
+      return {
+        timeline: {
+          code: 200,
+          results: pages[page]!.map((post) => ({ type: 'status', ...post })),
+          cursor: { bottom: String(page + 1) },
+        },
+      }
+    },
+    '',
+    100,
+    day(15),
+  )
+  // The second page ends with a post older than the cutoff.
+  assert.deepEqual(cursors, ['', '1'])
+  assert.equal(result.nextPageCursor, '2')
+  const repost = result.relatedTargets.find((t) => t.url.endsWith('/19'))!
+  assert.equal(repost.listedAt, '')
+  assert.equal(
+    result.relatedTargets.find((t) => t.url.endsWith('/1'))!.pinned,
+    true,
+  )
+})

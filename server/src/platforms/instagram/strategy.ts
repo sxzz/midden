@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
+import { pastCutoff } from '../listing.ts'
 import {
   FetchResponse,
   RelatedTarget,
@@ -18,6 +19,19 @@ import {
 import { credentialRequired, ProviderError } from './errors.ts'
 import { shortcodeFromPk } from './resolve.ts'
 import type { SessionCredential } from './credential.ts'
+
+/**
+ * A post pinned to the top of the profile's grid. The feed marks it with the
+ * accounts it is pinned for.
+ */
+function isPinned(item: Node, userId: string): boolean {
+  const ids = item.timeline_pinned_user_ids
+  return (
+    (Array.isArray(ids) &&
+      ids.some((value: unknown) => String(value) === userId)) ||
+    item.is_pinned === true
+  )
+}
 
 interface Cursor {
   user: string
@@ -235,6 +249,7 @@ export class CaptureStrategy {
             status.UNAVAILABLE,
             'Instagram 时间线数据无效',
           )
+        const listed: RelatedTarget[] = []
         for (const item of page.items) {
           const postId = mediaId(item)
           members.set(postId, item)
@@ -245,13 +260,18 @@ export class CaptureStrategy {
               'Instagram 时间线超出单次翻页上限',
             )
           const url = `https://www.instagram.com/p/${shortcodeFromPk(postId)}/`
+          const publishedAt = timestamp(
+            item.taken_at ?? item.taken_at_timestamp,
+          )
+          // No reposts on a profile's grid: a post is listed when published.
+          const entry = { listedAt: publishedAt, pinned: isPinned(item, id) }
+          listed.push(RelatedTarget.fromPartial(entry))
           if (result.relatedTargets.every((target) => target.url !== url))
             result.relatedTargets.push(
               RelatedTarget.fromPartial({
                 url,
-                publishedAt: timestamp(
-                  item.taken_at ?? item.taken_at_timestamp,
-                ),
+                publishedAt,
+                ...entry,
                 mediaTypes: [
                   ...new Set<string>(
                     (item.carousel_media || [item]).map((media: any) =>
@@ -270,6 +290,8 @@ export class CaptureStrategy {
         }
         next = page.next
         if (!next || members.size >= target) break
+        // Past the date cutoff the rest is older still; the cursor stays.
+        if (req.since && pastCutoff(listed, req.since)) break
         if (pages === 11) {
           result.incomplete = true
           result.warnings.push('已达单次 Instagram 翻页上限。')

@@ -4,6 +4,7 @@ import { captures, collections, library, submissions } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError, isAppError } from '#errors.ts'
 import { SnoozeError, type Job } from '#jobs/queue.ts'
+import { pastCutoff } from '#platforms/listing.ts'
 import { budget, matchesOptions, storedOptions } from './options.ts'
 import { unsaveIfEmpty } from './scope.ts'
 import {
@@ -22,6 +23,9 @@ export interface StoredTarget {
   publishedAt: string
   mediaTypes: string[]
   postType: string
+  /** When it appeared on the timeline; absent when unknown. */
+  listedAt?: string
+  pinned?: boolean
   /** Base64; dropped once the targets were submitted. */
   prefetch?: string
 }
@@ -161,7 +165,14 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
     (limit === 0 ? options.posts === 'max' : limit > counted)
   let nextOptions = options
   let capped = false
-  if (capture.isCollection && options.finalPage) more = false
+  // The timeline is newest first: once it has moved past the date cutoff,
+  // later pages hold only posts the filter drops. Whichever of this and
+  // `until_existing`'s saved posts comes first ends the run, complete.
+  const dated =
+    capture.isCollection &&
+    !!options.since &&
+    pastCutoff(targets, options.since)
+  if (capture.isCollection && (options.finalPage || dated)) more = false
   else if (capture.isCollection && options.posts === 'until_existing') {
     // A post saved before this page was listed: read one page more, then stop.
     if (savedBefore(ctx, memberSubmissions))

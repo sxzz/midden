@@ -65,6 +65,12 @@ export interface FetchRequest {
   prefetch: Buffer
   /** credential.deferred/1: credential withheld; fail with trailer credential-required to get it. */
   credentialDeferred: boolean
+  /**
+   * Optional RFC 3339 date cutoff of a collection page: the adapter may stop
+   * reading upstream pages once its listing is past it (see `pastCutoff`),
+   * still returning the real next cursor.
+   */
+  since: string
 }
 
 export interface Resource {
@@ -146,6 +152,13 @@ export interface RelatedTarget {
   updatedAt: string
   /** capture.prefetch/1: adapter-owned observation of the target, at most 64 KiB, handed back once in FetchRequest.prefetch. */
   prefetch: Buffer
+  /**
+   * When the entry appeared on the listing in RFC 3339 (a repost: when it was
+   * reposted, not the original's publication); empty when unknown.
+   */
+  listedAt: string
+  /** Pinned to the top of the listing, out of date order (or possibly so). */
+  pinned: boolean
 }
 
 export interface FetchResponse {
@@ -316,6 +329,7 @@ function createBaseFetchRequest(): FetchRequest {
     automatic: false,
     prefetch: Buffer.alloc(0),
     credentialDeferred: false,
+    since: '',
   }
 }
 
@@ -340,6 +354,7 @@ export const FetchRequest = {
     message.automatic = object.automatic ?? false
     message.prefetch = object.prefetch ?? Buffer.alloc(0)
     message.credentialDeferred = object.credentialDeferred ?? false
+    message.since = object.since ?? ''
     return message
   },
 }
@@ -470,6 +485,8 @@ function createBaseRelatedTarget(): RelatedTarget {
     refreshAfterSeconds: 0,
     updatedAt: '',
     prefetch: Buffer.alloc(0),
+    listedAt: '',
+    pinned: false,
   }
 }
 
@@ -483,6 +500,8 @@ export const RelatedTarget = {
     message.refreshAfterSeconds = object.refreshAfterSeconds ?? 0
     message.updatedAt = object.updatedAt ?? ''
     message.prefetch = object.prefetch ?? Buffer.alloc(0)
+    message.listedAt = object.listedAt ?? ''
+    message.pinned = object.pinned ?? false
     return message
   },
 }

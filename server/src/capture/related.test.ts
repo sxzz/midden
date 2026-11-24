@@ -25,6 +25,8 @@ const member = (id: number, extra: Partial<RelatedTarget> = {}) => ({
   mediaTypes: [] as string[],
   postType: 'post',
   prefetch: Buffer.alloc(0),
+  listedAt: '',
+  pinned: false,
   ...extra,
 })
 

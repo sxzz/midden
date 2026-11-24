@@ -351,6 +351,52 @@ test('authenticated profiles keep complete pages, retry cursors and renamed stab
     )
 })
 
+test('a profile timeline stops past the date cutoff, pinned posts aside', async () => {
+  const day = 86_400
+  const now = 1_780_000_000
+  const post = (id: string, age: number, extra: Node = {}) => ({
+    ...photo(id),
+    taken_at: now - age * day,
+    ...extra,
+  })
+  const pages: Record<string, Node> = {
+    '': {
+      items: [post('2', 300, { timeline_pinned_user_ids: ['77'] })],
+      next_max_id: 'p2',
+    },
+    p2: { items: [post('3', 1), post('4', 30)], next_max_id: 'p3' },
+    p3: { items: [post('5', 40)], next_max_id: 'p4' },
+  }
+  const cursors: string[] = []
+  const fetcher: typeof fetch = async (_input, init) => {
+    const body = new URLSearchParams(init?.body as string)
+    if (
+      body.get('fb_api_req_friendly_name') === 'PolarisProfilePageContentQuery'
+    )
+      return json({ user })
+    const after = JSON.parse(body.get('variables') || '{}').after ?? ''
+    cursors.push(after)
+    return json({ ...pages[after], more_available: true })
+  }
+  const strategy = new CaptureStrategy(sessionFixture(fetcher))
+  const result = await strategy.fetch(
+    request('profile', 'instagram-session', {
+      since: new Date((now - 7 * day) * 1000).toISOString(),
+    }),
+    signal(),
+    session,
+  )
+  // The pinned post is old, the second page ends past the cutoff.
+  assert.deepEqual(cursors, ['', 'p2'])
+  assert.equal(JSON.parse(result.nextPageCursor).cursor, 'p3')
+  const pinned = result.relatedTargets.filter((t) => t.pinned)
+  assert.equal(pinned.length, 1)
+  assert.equal(
+    result.relatedTargets.at(-1)?.listedAt,
+    new Date((now - 30 * day) * 1000).toISOString(),
+  )
+})
+
 test('private profiles use their selected account for timelines and retain partial progress', async () => {
   const strategy = new CaptureStrategy(
     sessionFixture(async (input, init) => {

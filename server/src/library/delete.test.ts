@@ -27,6 +27,8 @@ const member = (id: string) => ({
   mediaTypes: [] as string[],
   postType: 'post',
   prefetch: Buffer.alloc(0),
+  listedAt: '',
+  pinned: false,
 })
 
 /**

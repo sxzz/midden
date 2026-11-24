@@ -66,6 +66,8 @@ function setup(timeline = TIMELINE, timelineCap?: number) {
                           mediaTypes: [],
                           postType: 'post',
                           prefetch: Buffer.alloc(0),
+                          listedAt: '',
+                          pinned: false,
                         },
                       ]
                     : [],
@@ -83,6 +85,8 @@ function setup(timeline = TIMELINE, timelineCap?: number) {
                 mediaTypes: p.media ? ['image'] : [],
                 postType: p.type,
                 prefetch: Buffer.alloc(0),
+                listedAt: '',
+                pinned: false,
               })),
               nextPageCursor: next < timeline.length ? String(next) : '',
               maxBatchSize: 1000,

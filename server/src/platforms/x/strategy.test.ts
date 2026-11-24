@@ -764,6 +764,99 @@ test("an account's timeline hands each post its raw node, a repost the reposted 
     0,
   )
 })
+test("an account's timeline lists reposts at their repost time and marks the pinned post", async () => {
+  const at = (date: string) => `${date} 00:00:00 +0000 2026`
+  const tweet = (id: string, created: string, author = '123') => {
+    const node = rawTweet(id, author)
+    node.legacy.created_at = at(created)
+    return node
+  }
+  const repost = tweet('51', 'Mon Nov 23')
+  repost.legacy.retweeted_status_result = {
+    result: tweet('41', 'Thu Jan 01', '456'),
+  }
+  const entry = (result: any, extra = {}) => ({
+    content: {
+      itemContent: {
+        __typename: 'TimelineTweet',
+        tweet_results: { result },
+        ...extra,
+      },
+    },
+  })
+  const read = async (since: string) => {
+    const r = normalizeProfile({ ...user, protected: true }, '123', 'fxtwitter')
+    const cursors: string[] = []
+    await fetchSessionTimeline(
+      r,
+      credential,
+      AbortSignal.timeout(2000),
+      async (input) => {
+        const url = new URL(
+          input instanceof Request ? input.url : String(input),
+        )
+        cursors.push(JSON.parse(url.searchParams.get('variables')!).cursor)
+        return Response.json({
+          data: {
+            user: {
+              result: {
+                timeline: {
+                  timeline: {
+                    instructions: [
+                      {
+                        type: 'TimelinePinEntry',
+                        entry: entry(tweet('10', 'Fri Jan 02')),
+                      },
+                      {
+                        type: 'TimelineAddEntries',
+                        entries: [
+                          entry(tweet('60', 'Tue Nov 24')),
+                          entry(repost),
+                          entry(tweet('70', 'Sat Jan 03'), {
+                            promotedMetadata: {},
+                          }),
+                          {
+                            entryId: 'cursor-bottom-1',
+                            content: {
+                              __typename: 'TimelineTimelineCursor',
+                              cursorType: 'Bottom',
+                              value: 'next-page',
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        })
+      },
+      '',
+      100,
+      since,
+    )
+    return { r, cursors }
+  }
+  // Past the pinned post and the repost's original, but not the repost.
+  const { r, cursors } = await read('2026-11-20T00:00:00Z')
+  const target = (id: string) =>
+    r.relatedTargets.find((t) => t.url.endsWith(`/${id}`))!
+  assert.equal(target('10').pinned, true)
+  assert.equal(target('60').pinned, false)
+  assert.equal(target('60').listedAt, '2026-11-24T00:00:00.000Z')
+  // The repost lists the original, published long before it was reposted.
+  assert.equal(target('41').publishedAt, '2026-01-01T00:00:00.000Z')
+  assert.equal(target('41').listedAt, '2026-11-23T00:00:00.000Z')
+  assert.equal(target('70').listedAt, '')
+  // Read on; the second page lists nothing new, which ends the timeline.
+  assert.deepEqual(cursors, [null, 'next-page'])
+  // The repost, the last post with a known time, is past this cutoff.
+  const past = await read('2026-11-23T12:00:00Z')
+  assert.deepEqual(past.cursors, [null])
+  assert.equal(past.r.nextPageCursor, 'next-page')
+})
 test("a post listed by an account's timeline needs neither its own request nor the account", async () => {
   const sessions: string[] = []
   let profiles = 0
