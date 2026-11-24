@@ -31,7 +31,7 @@ const OPTIMIZE_INTERVAL = 6 * 60 * 60_000
 const APP_PREFIX = /^\/app/
 
 const config = loadConfig()
-const logger = createLogger(config.logLevel)
+const logger = createLogger(config.logLevel, config.logFile)
 const db = openDatabase(config.databasePath)
 const catalogued = catalogMissing(db)
 if (catalogued) logger.info({ count: catalogued }, 'catalogued collections')

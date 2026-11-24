@@ -42,6 +42,8 @@ const Env = v.object({
 export interface Config {
   dataDir: string
   databasePath: string
+  /** Also written to stdout; this copy outlives the container. */
+  logFile: string
   mediaDir: string
   host: string
   port: number
@@ -73,6 +75,7 @@ export function loadConfig(
   return {
     dataDir,
     databasePath: path.join(dataDir, 'midden.db'),
+    logFile: path.join(dataDir, 'logs', 'midden.log'),
     mediaDir: path.join(dataDir, 'media'),
     host: parsed.HOST,
     port: parsed.PORT,

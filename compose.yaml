@@ -10,6 +10,13 @@ services:
       - ${DATA_PATH:-./data}:/data
     ports:
       - 127.0.0.1:${PORT:-8080}:8080
+    # The container's log goes away when a deploy recreates it; the server
+    # also keeps rotated logs in the data directory (logs/midden.log).
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '5'
     healthcheck:
       test: [CMD, wget, -qO-, http://127.0.0.1:8080/healthz]
       interval: 30s
