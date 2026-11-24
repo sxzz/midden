@@ -91,6 +91,14 @@ const profileName = computed(() =>
   collection.value ? present(collection.value).name : '',
 )
 const link = computed(() => collection.value && safeURL(collection.value.url))
+/** Whether the first group lists anything; behind a share it may not. */
+const pages = computed(
+  () =>
+    trendable.value ||
+    changeable.value ||
+    followChangeable.value ||
+    !!link.value,
+)
 const router = useRouter()
 function openTrends() {
   void router.push(collectionRoute(props.id, 'stats'))
@@ -216,7 +224,7 @@ const version = computed(() =>
         @more="historyPage(true)"
       />
     </ListSection>
-    <ListSection :footnote="version">
+    <ListSection v-if="pages || !shared" :footnote="version">
       <ListButton
         v-if="trendable"
         label="统计趋势"
@@ -243,9 +251,15 @@ const version = computed(() =>
         :trailing="sharedDirectly ? '已公开' : undefined"
         @select="sharing = true"
       />
-      <!-- Options of the update, right above the button that starts it. -->
-      <label v-if="isXProfile && !shared" class="option"
-        ><span>抓关系网</span
+    </ListSection>
+    <!-- The update in a group of its own: its option, the button that
+         starts it and the progress of the one started here. -->
+    <ListSection v-if="!shared" class="update">
+      <label v-if="isXProfile" class="option"
+        ><span
+          >抓关系网<small class="hint"
+            >更新时一并抓取关注和粉丝列表</small
+          ></span
         ><input
           v-model="withRelations"
           class="switch"
@@ -254,27 +268,25 @@ const version = computed(() =>
           :disabled="busy"
       /></label>
       <ListButton
-        v-if="!shared"
         label="重新抓取"
         :disabled="busy || loadingPoint || !available"
         @select="startRefresh"
       />
       <ListButton v-if="record" label="查看进度" chevron @select="openRecord" />
       <ListButton
-        v-if="!available && !shared"
+        v-if="!available"
         label="重试连接采集服务"
         @select="checkAvailability"
       />
-      <!-- The reader's own notes, folded, then the one destructive action:
-           every action on this collection in one card. -->
+    </ListSection>
+    <!-- The reader's own notes, folded, then the one destructive action. -->
+    <ListSection v-if="!shared">
       <CollectionAnnotations
-        v-if="!shared"
         :id="id"
         :key="id"
         @saved="emit('annotationsSaved')"
       />
       <ListButton
-        v-if="!shared"
         label="删除这条收藏"
         variant="destructive"
         :disabled="busy"
@@ -346,10 +358,13 @@ const version = computed(() =>
   margin-left: var(--inset);
   padding: 6px var(--inset) 6px 0;
   font-size: 16px;
-  /* Separated from the rows around it like they are from each other. */
-  box-shadow:
-    inset 0 1px 0 var(--separator),
-    inset 0 -1px 0 var(--separator);
+  /* The group's first row: an inset line below, like between buttons. */
+  box-shadow: inset 0 -1px 0 var(--separator);
+}
+.hint {
+  display: block;
+  font-size: 13px;
+  color: var(--subtle);
 }
 /* The switch of the capture options, for one option of an update. */
 .switch {

@@ -136,17 +136,21 @@ test('updates a profile with its lists and lists its follow changes', async ({
   await expect(counts.locator('dt')).toHaveText(['关注', '粉丝', '互关'])
   await expect(counts.locator('dd')).toHaveText(['2', '3', '1'])
 
-  // 抓关系网 is off until turned on, and goes along with the update.
-  const lists = page.getByRole('switch', { name: '抓关系网' })
+  // 抓关系网 is off until turned on, and goes along with the update: the
+  // two, and the update's progress, form a list group of their own.
+  const update = page.locator('section.update')
+  const lists = update.getByRole('switch', { name: '抓关系网' })
   await expect(lists).not.toBeChecked()
+  await expect(update).not.toContainText('打开原文')
+  await expect(update).not.toContainText('删除这条收藏')
   await lists.check()
-  await page.getByRole('button', { name: '重新抓取' }).click()
+  await update.getByRole('button', { name: '重新抓取' }).click()
   await expect(page.locator('.toast')).toHaveText('已开始重新抓取')
   expect(submitted).toEqual([
     { refresh_id: profileId, options: { relations: true } },
   ])
   // How the lists went is on the update's record.
-  await page.getByRole('button', { name: '查看进度' }).click()
+  await update.getByRole('button', { name: '查看进度' }).click()
   await expect(page).toHaveURL(new RegExp(`/captures/${recordId}$`))
   await expect(
     page.locator('.facts div').filter({ hasText: '关系网' }).locator('dd'),
