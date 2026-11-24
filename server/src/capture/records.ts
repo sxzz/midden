@@ -611,13 +611,24 @@ export function recordDetail(db: Executor, id: string): CaptureRecordDetail {
   }
 }
 
-const MEMBER_STATES: Record<string, string[] | undefined> = {
-  '': undefined,
-  problem: ['failed', 'partial'],
-  pending: ['queued', 'downloading'],
-  failed: ['failed'],
-  partial: ['partial'],
-  complete: ['complete'],
+type MemberFilter = (state: string, added: boolean | null) => boolean
+const isFinished = (state: string) =>
+  state === 'complete' || state === 'partial'
+
+/**
+ * Member filters. `added` and `updated` take finished members only, as the
+ * record's counts do: a running one is neither yet, a failed one saved
+ * nothing. Members from before `library_added` was recorded are in neither.
+ */
+const MEMBER_FILTERS: Record<string, MemberFilter> = {
+  '': () => true,
+  added: (state, added) => isFinished(state) && added === true,
+  updated: (state, added) => isFinished(state) && added === false,
+  problem: (state) => state === 'failed' || state === 'partial',
+  pending: isPending,
+  failed: (state) => state === 'failed',
+  partial: (state) => state === 'partial',
+  complete: (state) => state === 'complete',
 }
 
 export interface CaptureMember {
@@ -638,20 +649,28 @@ export function recordMembers(
   state: string,
   cursor?: string,
 ): { items: CaptureMember[]; next?: string } {
-  if (!(state in MEMBER_STATES)) throw new AppError('invalid_filter')
+  const wanted = Object.hasOwn(MEMBER_FILTERS, state)
+    ? MEMBER_FILTERS[state]
+    : undefined
+  if (!wanted) throw new AppError('invalid_filter')
   recordRow(db, id)
   const filter = `members:${id}:${state}`
   const after = cursor ? decodeCursor(cursor, filter) : undefined
   const pages = pageChains(db, [id])
     .get(id)!
     .map((p) => p.submission.id)
-  const wanted = MEMBER_STATES[state]
-  const members = [
-    ...new Map(
-      memberSubmissions(db, pages).map((m) => [m.capture.id, m.capture]),
-    ).values(),
-  ]
-    .filter((c) => !wanted || wanted.includes(c.state))
+  // A member listed on several pages is one, new if any listing was new
+  // (as `memberCounts` counts it).
+  const listed = new Map<string, { capture: Capture; added: boolean | null }>()
+  for (const { capture, submission } of memberSubmissions(db, pages)) {
+    const seen = listed.get(capture.id)
+    const added = submission.libraryAdded
+    if (!seen) listed.set(capture.id, { capture, added })
+    else if (added !== null && seen.added !== true) seen.added = added
+  }
+  const members = [...listed.values()]
+    .filter((m) => wanted(m.capture.state, m.added))
+    .map((m) => m.capture)
     .toSorted(
       (a, b) =>
         a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : 1),

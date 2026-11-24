@@ -45,11 +45,54 @@ const members = shallowRef<CaptureMember[]>([])
 const membersNext = shallowRef('')
 const membersLoading = shallowRef(false)
 const membersError = shallowRef('')
-const filter = shallowRef<'problem' | ''>('')
-const filters = [
-  { value: '', label: '全部帖子' },
-  { value: 'problem', label: '有问题的帖子' },
-] as const
+type Filter = 'added' | 'updated' | 'problem' | ''
+/** Unset until the record loads and picks the first tab with posts. */
+const filter = shallowRef<Filter>()
+/**
+ * New and updated posts count finished members only, so running ones show in
+ * no tab until they finish (the summary counts them). A record with members
+ * from before new and updated were told apart lists them all instead.
+ */
+const filters = computed(() => {
+  const m = record.value?.members
+  if (!m) return []
+  const problem = {
+    value: 'problem',
+    label: '异常记录',
+    count: m.failed + m.partial,
+    empty: '没有异常的帖子。',
+  } as const
+  if (m.added === undefined || m.updated === undefined)
+    return [
+      {
+        value: '',
+        label: '全部',
+        count: m.complete + m.partial + m.failed + m.pending,
+        empty: '没有帖子。',
+      },
+      problem,
+    ] as const
+  return [
+    {
+      value: 'added',
+      label: '新增记录',
+      count: m.added,
+      empty: '没有新增的帖子。',
+    },
+    {
+      value: 'updated',
+      label: '更新记录',
+      count: m.updated,
+      empty: '没有更新的帖子。',
+    },
+    problem,
+  ] as const
+})
+const currentFilter = computed(() =>
+  filters.value.find((option) => option.value === filter.value),
+)
+/** Pages loaded per tab, so going back to a tab shows it at once. */
+const cache = new Map<Filter, { items: CaptureMember[]; next: string }>()
 
 const status = computed(() => record.value && recordStatus(record.value))
 const counts = computed(() => (record.value ? recordCounts(record.value) : ''))
@@ -105,8 +148,19 @@ async function load() {
     const progressed =
       !!before?.members && before.members.pending !== result.members?.pending
     if (settled) emit('saved')
+    const options = filters.value
+    // Open on the first tab with posts; keep the one chosen while it exists.
+    const kept = options.some((option) => option.value === filter.value)
+    if (!kept) {
+      filter.value = (options.find((o) => o.count) ?? options[0])?.value
+      members.value = []
+      membersNext.value = ''
+    }
     // Members settle while the record runs; keep the list in step with them.
-    if (result.members && (!before || settled || progressed)) void loadMembers()
+    if (result.members && (!before || !kept || settled || progressed)) {
+      cache.clear()
+      void loadMembers()
+    }
     if (!result.done && visible) timer = setTimeout(load, 2500)
   } catch (e) {
     if (current !== run) return
@@ -121,6 +175,8 @@ async function load() {
 let membersRun = 0
 async function loadMembers(more = false) {
   if (more && (membersLoading.value || !membersNext.value)) return
+  const state = filter.value
+  if (state === undefined) return
   const current = ++membersRun
   membersLoading.value = true
   membersError.value = ''
@@ -129,7 +185,7 @@ async function loadMembers(more = false) {
       client.captures[':id'].members.$get({
         param: { id: props.id },
         query: {
-          ...(filter.value ? { state: filter.value } : {}),
+          ...(state ? { state } : {}),
           ...(more ? { cursor: membersNext.value } : {}),
         },
       }),
@@ -137,15 +193,26 @@ async function loadMembers(more = false) {
     if (current !== membersRun) return
     members.value = more ? [...members.value, ...page.items] : page.items
     membersNext.value = page.next_cursor || ''
+    cache.set(state, { items: members.value, next: membersNext.value })
   } catch (e) {
     if (current === membersRun) membersError.value = errorText(e)
   } finally {
     if (current === membersRun) membersLoading.value = false
   }
 }
-function setFilter(value: 'problem' | '') {
+function setFilter(value: Filter) {
   if (filter.value === value) return
   filter.value = value
+  const cached = cache.get(value)
+  if (cached) {
+    // Retires a page still loading for the tab left behind.
+    ++membersRun
+    membersLoading.value = false
+    membersError.value = ''
+    members.value = cached.items
+    membersNext.value = cached.next
+    return
+  }
   members.value = []
   membersNext.value = ''
   void loadMembers()
@@ -158,7 +225,8 @@ watch(
     membersNext.value = ''
     error.value = ''
     showAllMedia.value = false
-    filter.value = ''
+    filter.value = undefined
+    cache.clear()
     membersError.value = ''
     ++membersRun
     void load()
@@ -239,6 +307,7 @@ async function retryFailed(member?: CaptureMember) {
       }),
     )
     toast(count ? `正在重试 ${count} 条失败的帖子。` : '没有可重试的帖子。')
+    cache.clear()
     await Promise.all([load(), loadMembers()])
   } catch (e) {
     toast(errorText(e))
@@ -403,7 +472,7 @@ function openCollection(id: string, event?: MouseEvent) {
           :aria-selected="filter === option.value"
           @click="setFilter(option.value)"
         >
-          {{ option.label }}
+          {{ option.label }} <span class="tab-count">{{ option.count }}</span>
         </button>
       </div>
       <ListSection>
@@ -441,10 +510,10 @@ function openCollection(id: string, event?: MouseEvent) {
           </button>
         </div>
         <p
-          v-if="!members.length && (membersLoading || filter)"
+          v-if="!members.length && (membersLoading || !membersError)"
           class="line muted"
         >
-          {{ membersLoading ? '加载中…' : '没有问题。' }}
+          {{ membersLoading ? '加载中…' : currentFilter?.empty }}
         </p>
       </ListSection>
       <InfiniteLoader
@@ -630,11 +699,23 @@ function openCollection(id: string, event?: MouseEvent) {
   font-weight: 500;
   text-align: center;
   color: var(--subtle);
+  transition:
+    background 160ms ease,
+    color 160ms ease;
 }
 .tab.on {
   background: var(--card);
   color: var(--text);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  /* The ring keeps it apart in dark themes, where the card is darker than
+     the track. */
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--text) 12%, transparent),
+    0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.tab-count {
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--subtle);
 }
 .tab:focus-visible {
   outline: 2px solid var(--link);

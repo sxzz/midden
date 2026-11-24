@@ -107,6 +107,10 @@ describe('capture records', () => {
     expect(
       recordMembers(c.db, record.id, 'problem').items.map((m) => m.url),
     ).toEqual(['https://fake.test/p/2'])
+    // A failed member saved nothing: it is only a problem.
+    expect(
+      recordMembers(c.db, record.id, 'added').items.map((m) => m.url),
+    ).toEqual(['https://fake.test/p/1'])
 
     broken.clear()
     expect(retryMembers(c, record.id)).toBe(1)
@@ -169,6 +173,11 @@ describe('capture records', () => {
       { reason: 'lost', count: 11_000 },
     ])
     expect(recordMembers(c.db, record.id, 'failed').items).toHaveLength(50)
+    // Unclassified members are neither new nor updates.
+    expect(recordMembers(c.db, record.id, 'updated').items).toHaveLength(0)
+    expect(
+      recordMembers(c.db, record.id, 'added').items.map((m) => m.url),
+    ).toEqual(['https://fake.test/p/1', 'https://fake.test/p/2'])
     expect(() => stopCollection(c, job.submissionId)).not.toThrow()
     expect(listRecords(c.db).items[0]!.stopped).toBe(true)
   })
@@ -184,6 +193,12 @@ describe('capture records', () => {
     const profile = listRecords(c.db).items[0]!
     expect(profile.members).toMatchObject({ complete: 2, added: 1, updated: 1 })
     expect(profile.added).toBeUndefined()
+    const urls = (filter: string) =>
+      recordMembers(c.db, profile.id, filter).items.map((m) => m.url)
+    expect(urls('added')).toEqual(['https://fake.test/p/2'])
+    expect(urls('updated')).toEqual(['https://fake.test/p/1'])
+    expect(urls('problem')).toEqual([])
+    expect(() => urls('toString')).toThrow('筛选条件无效')
 
     submit(c, { url: 'https://fake.test/p/2' })
     await c.queue.drain()

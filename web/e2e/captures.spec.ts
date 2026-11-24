@@ -258,22 +258,22 @@ test('shows collection progress, member failures, stop and retry', async ({
   await expect(page.getByRole('heading', { name: /媒体/ })).toHaveCount(0)
   await expect(page.getByText('帖子不存在或已删除').first()).toBeVisible()
 
-  // All members are shown by default; problems remain available in their tab.
+  // Its members predate telling new posts from updates, so all are listed
+  // by default; problems remain available in their tab.
   const failed = page.getByRole('button', {
     name: /^x\.com\/fixture\/status\/2/,
   })
   await expect(failed).toContainText('失败')
-  await expect(page.getByRole('tab', { name: '全部帖子' })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  )
+  const all = page.getByRole('tab', { name: '全部 3' })
+  await expect(all).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('tab', { name: /^新增记录/ })).toHaveCount(0)
   await expect(page.getByText('x.com/fixture/status/3')).toBeVisible()
-  await page.getByRole('tab', { name: '有问题的帖子' }).click()
+  await page.getByRole('tab', { name: '异常记录 1' }).click()
   await expect(page.getByText('x.com/fixture/status/3')).toHaveCount(0)
-  await page.getByRole('tab', { name: '全部帖子' }).click()
+  await all.click()
   await expect(page.getByText('x.com/fixture/status/3')).toBeVisible()
-  expect(memberQueries.at(-1)).toBe('')
-  expect(memberQueries[0]).toBe('')
+  // The tab seen before shows again without loading.
+  expect(memberQueries).toEqual(['', 'problem'])
 
   // A running collection can be stopped, and only a finished one retried.
   const retryMember = page.getByRole('button', {
@@ -335,6 +335,7 @@ test('a finished profile record fetches more pages as its own record', async ({
     pages: { more: true, more_1000: true, failed: false },
   })
   const ops: string[] = []
+  const memberQueries: (string | null)[] = []
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {
     const request = r.request()
@@ -347,8 +348,10 @@ test('a finished profile record fetches more pages as its own record', async ({
         return r.fulfill({ status: 409, json: { error: '没有更多帖子了' } })
       return r.fulfill({ status: 202, json: { id: `job-${next}` } })
     }
-    if (path === `/v1/captures/${profile}/members`)
+    if (path === `/v1/captures/${profile}/members`) {
+      memberQueries.push(new URL(request.url()).searchParams.get('state'))
       return r.fulfill({ json: { items: [] } })
+    }
     if (path === '/v1/captures')
       return r.fulfill({
         json: {
@@ -367,6 +370,15 @@ test('a finished profile record fetches more pages as its own record', async ({
     '已完成 · 帖子 100/100 · 新增 40 · 更新 60',
   )
   await expect(page.getByText('新增 40，更新 60')).toBeVisible()
+  // Posts are split by what this record did to the library.
+  await expect(page.getByRole('tab', { name: '新增记录 40' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(page.getByRole('tab', { name: '更新记录 60' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: '异常记录 0' })).toBeVisible()
+  await expect(page.getByText('没有新增的帖子。')).toBeVisible()
+  expect(memberQueries).toEqual(['added'])
   await expect(page.getByRole('button', { name: '重试本页' })).toHaveCount(0)
   await page.getByRole('button', { name: '抓取 1000 条' }).click()
   await expect(page.getByText('没有更多帖子了')).toBeVisible()
@@ -411,6 +423,7 @@ test('loads more capture members automatically at the bottom', async ({
               members: {
                 total: 31,
                 complete: 31,
+                partial: 0,
                 pending: 0,
                 failed: 0,
                 done: true,
