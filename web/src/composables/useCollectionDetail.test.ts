@@ -357,7 +357,7 @@ it('never asks for the changes of anything but a profile', async () => {
   expect(calls('/collections/kept/profile-changes')).toBe(0)
   expect(detail!.changeable.value).toBe(false)
 })
-it('asks for the lists with a profile update, and shows what they found on return', async () => {
+it('reads older posts right away, and shows what the lists found on return', async () => {
   profile = true
   mount()
   await vi.advanceTimersByTimeAsync(0)
@@ -370,11 +370,11 @@ it('asks for the lists with a profile update, and shows what they found on retur
   expect(d.follows.value).toBeUndefined()
   expect(d.followChangeable.value).toBe(false)
 
-  await d.update({ relations: true })
+  await d.update({ older: true })
   const [, request] = api.mock.calls.find(([path]) => path === '/updates')!
   expect(JSON.parse(request.body!)).toEqual({
     target: { target: 'collection', id: 'kept' },
-    options: { relations: true },
+    older: true,
   })
   // The lists are followed on the record; coming back shows what they found.
   followCounts = { following: 2, followers: 0, mutual: 0 }

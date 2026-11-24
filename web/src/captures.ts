@@ -232,9 +232,7 @@ export function recordTitle(r: CaptureRecord) {
   if (!r.url) return '更新'
   if (r.kind !== 'profile') return `更新 ${linkTitle(r.url)}`
   const handle = profileHandle(r.url, u.handle)
-  return u.options.posts === 'older'
-    ? `抓取 ${handle} 更早的帖子`
-    : `更新 ${handle}`
+  return u.older ? `抓取 ${handle} 更早的帖子` : `更新 ${handle}`
 }
 
 /** What an update covers, e.g. 12 个账号、340 条帖子. */

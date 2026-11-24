@@ -41,10 +41,12 @@ test('select collections and update them as one record', async ({ page }) => {
   await expect(page).toHaveURL(/#\/$/)
   await expect(bar.getByText('已选 2 项')).toBeVisible()
   await page.getByRole('button', { name: '更新', exact: true }).click()
-  // The sheet says what the update covers; posts have no options.
+  // The sheet says what the update covers; posts have only their own.
   const sheet = page.getByRole('dialog', { name: '更新 2 条帖子' })
   await expect(sheet).toBeVisible()
   await expect(sheet.getByText('抓帖子')).toHaveCount(0)
+  await expect(sheet.getByText('抓关系网')).toHaveCount(0)
+  await expect(sheet.getByLabel('采集引用、转发的原帖')).toBeChecked()
   await sheet.getByRole('button', { name: '开始更新' }).click()
   // Selection ends; the bar confirms and links to the update's one record.
   await expect(page.getByRole('checkbox')).toHaveCount(0)
@@ -52,6 +54,14 @@ test('select collections and update them as one record', async ({ page }) => {
   await expect(page.getByRole('button', { name: '多选' })).toBeVisible()
   expect(started).toEqual({
     target: { target: 'many', ids: [items[0].id, items[2].id] },
+    options: {
+      posts: 'latest',
+      count: 100,
+      media_only: false,
+      include_shared: true,
+      capture_references: true,
+      relations: false,
+    },
   })
   await page.getByRole('button', { name: '查看进度' }).click()
   await expect(page).toHaveURL(/#\/captures\/record$/)

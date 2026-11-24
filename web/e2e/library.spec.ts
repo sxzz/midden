@@ -55,6 +55,10 @@ test('browse, filter, history, refresh and remove a saved post', async ({
         }
         break
       }
+      case '/v1/updates/preview': {
+        body = { posts: 1, profiles: 0, listable: 0 }
+        break
+      }
       case '/v1/collections/delete': {
         if (!r.request().postDataJSON().dry_run) deleted = true
         body = {
@@ -129,12 +133,24 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await page.keyboard.press('End')
   await expect(page.getByText(collection.text)).toBeVisible()
   await expect(page.locator('.timeline .when')).toContainText('最新版本')
-  // A post updates at once, without the sheet.
+  // A post's sheet has its references alone.
   await page.getByRole('button', { name: '更新', exact: true }).click()
+  const updateSheet = page.getByRole('dialog', { name: '更新 1 条帖子' })
+  await expect(updateSheet.getByLabel('采集引用、转发的原帖')).toBeChecked()
+  await expect(updateSheet.getByText('抓帖子')).toHaveCount(0)
+  await updateSheet.getByRole('button', { name: '开始更新' }).click()
   await page.getByRole('button', { name: '查看进度' }).click()
   await expect(page).toHaveURL(new RegExp(`/captures/${recordId}$`))
   expect(captureBodies.at(-1)).toEqual({
     target: { target: 'collection', id },
+    options: {
+      posts: 'latest',
+      count: 100,
+      media_only: false,
+      include_shared: true,
+      capture_references: true,
+      relations: false,
+    },
   })
   await page.getByRole('button', { name: '返回' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${id}$`))
@@ -450,14 +466,14 @@ test('sort selection resets pagination and carries into subsequent pages', async
   expect(last.get('cursor')).toBe('next-page')
 })
 
-test('a failed update shows a toast every time it is tried', async ({
-  page,
-}) => {
+test('a failed update says why every time it is tried', async ({ page }) => {
   let attempts = 0
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {
     const path = new URL(r.request().url()).pathname
     if (path === '/v1/session') return r.fulfill({ json: {} })
+    if (path === '/v1/updates/preview')
+      return r.fulfill({ json: { posts: 1, profiles: 0, listable: 0 } })
     if (path === '/v1/updates') {
       attempts++
       return r.fulfill({
@@ -476,12 +492,14 @@ test('a failed update shows a toast every time it is tried', async ({
   })
   await page.goto(`/app/#/collection/${id}`)
   await expect(page.getByText(collection.text)).toBeVisible()
-  const toast = page.locator('.toast')
+  await page.getByRole('button', { name: '更新', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: '更新 1 条帖子' })
   for (let i = 1; i <= 2; i++) {
-    await page.getByRole('button', { name: '更新', exact: true }).click()
+    await sheet.getByRole('button', { name: '开始更新' }).click()
     await expect.poll(() => attempts).toBe(i)
-    await expect(toast).toHaveText('采集服务暂时不可用')
+    await expect(sheet.getByRole('alert')).toHaveText('采集服务暂时不可用')
   }
+  await sheet.getByRole('button', { name: '取消' }).click()
   // The collection stays on screen instead of giving way to an error banner.
   await expect(page.getByText(collection.text)).toBeVisible()
   await expect(page.locator('.banner')).toHaveCount(0)

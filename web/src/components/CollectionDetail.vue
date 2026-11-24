@@ -203,15 +203,14 @@ function preview(point: string) {
   if (isSeen(point)) void showPoint(point)
   else pick = setTimeout(showPoint, 150, point)
 }
-/** The update sheet of a profile; a post updates right away. */
+/** The update sheet, with the options that apply to this collection. */
 const updateSheet = shallowRef(false)
 watch(
   () => props.id,
   () => (updateSheet.value = false),
 )
 function startUpdate() {
-  if (isProfile.value) updateSheet.value = true
-  else void update()
+  updateSheet.value = true
 }
 function updateStarted(recordId: string) {
   updateSheet.value = false
@@ -412,14 +411,14 @@ const version = computed(() =>
       :reposted-by="profileName"
       :older="older && !shared"
       :older-busy="busy || updating || !available"
-      @older="update({ posts: 'older' })"
+      @older="update({ older: true })"
       @deleted="(ids, withPosts) => emit('removed', ids, withPosts)"
     />
     <UpdateSheet
-      v-if="!shared && isProfile"
+      v-if="!shared"
       :open="updateSheet"
       :target="{ target: 'collection', id }"
-      :label="handle"
+      :label="isProfile ? handle : undefined"
       @started="updateStarted"
       @cancel="updateSheet = false"
     />

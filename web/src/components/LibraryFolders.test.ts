@@ -261,8 +261,19 @@ it('updates the open folder from its menu, then links to the progress', async ()
   await vi.waitFor(() => expect(button(el, '开始更新').disabled).toBe(false))
   button(el, '开始更新').click()
   await vi.waitFor(() => expect(sent('POST', '/updates')).toHaveLength(1))
+  // The defaults, as everywhere a capture starts.
   expect(sent('POST', '/updates')).toEqual([
-    { target: { target: 'folder', id: FOLDER } },
+    {
+      target: { target: 'folder', id: FOLDER },
+      options: {
+        posts: 'latest',
+        count: 100,
+        media_only: false,
+        include_shared: true,
+        capture_references: true,
+        relations: false,
+      },
+    },
   ])
   // The sheet closes once the update started.
   await vi.waitFor(() => expect(el.querySelector('dialog[open]')).toBeNull())

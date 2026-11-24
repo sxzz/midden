@@ -13,7 +13,6 @@ import {
   type Collection,
   type FollowCounts,
   type HistoryPoint,
-  type UpdateOptions,
 } from '../api'
 import {
   readCollection,
@@ -337,10 +336,11 @@ export function useCollectionDetail(
     }
   }
   /**
-   * Update the collection right away (a post, or a profile's older posts);
-   * a profile's other updates start from the sheet, which calls `started`.
+   * Update the collection right away with the default options: a post whose
+   * media came back, or a profile's older posts (`older`). Other updates
+   * start from the sheet, which calls `started`.
    */
-  async function update(options: UpdateOptions = {}) {
+  async function update(body: { older?: boolean } = {}) {
     if (busy.value) return
     busy.value = true
     try {
@@ -349,7 +349,7 @@ export function useCollectionDetail(
           {
             json: {
               target: { target: 'collection', id: id() },
-              ...(Object.keys(options).length ? { options } : {}),
+              ...(body.older ? { older: true } : {}),
             },
           },
           {
@@ -359,7 +359,7 @@ export function useCollectionDetail(
         ),
       )
       if (controller.signal.aborted) return
-      toast(options.posts === 'older' ? '已开始抓取更早的帖子' : '已开始更新')
+      toast(body.older ? '已开始抓取更早的帖子' : '已开始更新')
       started(result.id)
     } catch (e) {
       if (!controller.signal.aborted) report(e)

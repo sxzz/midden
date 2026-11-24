@@ -1,131 +1,205 @@
 <script setup vapor lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, ref } from 'vue'
+import {
+  DEFAULT_COUNT,
+  optionsSummary,
+  ranges,
+  scopeOf,
+  scopes,
+  withScope,
+  type Options,
+  type Scope,
+} from '../capture-options'
 import ChevronIcon from './ui/ChevronIcon.vue'
-import type { CaptureOptions } from '../api'
-const model = defineModel<CaptureOptions>({ required: true })
+/**
+ * The options of a capture or an update, the same wherever one starts. Only
+ * what applies to the target shows, and a choice's own options only while
+ * it is on.
+ */
+const {
+  profiles = true,
+  posts = true,
+  relations = true,
+  relationsHint = '',
+  collapsible = false,
+  disabled = false,
+} = defineProps<{
+  /** The target holds profiles: their timeline and lists. */
+  profiles?: boolean
+  /** The target holds single posts. */
+  posts?: boolean
+  /** A profile's lists can be fetched (抓关系网). */
+  relations?: boolean
+  relationsHint?: string
+  /** Folded under a summary line, as on the link form. */
+  collapsible?: boolean
+  disabled?: boolean
+}>()
+const model = defineModel<Options>({ required: true })
 const open = ref(false)
-const form = reactive({
-  mediaOnly: false,
-  includeShared: true,
-  captureReferences: true,
-  maxPosts: '',
-  days: '',
-  relations: false,
-})
-const ranges = [
-  { value: '', label: '全部' },
-  { value: '1', label: '最近 1 天' },
-  { value: '7', label: '最近 7 天' },
-  { value: '30', label: '最近 30 天' },
-  { value: '90', label: '最近 90 天' },
-  { value: '365', label: '最近一年' },
-]
-const options = computed<CaptureOptions>(() => {
-  const since = new Date()
-  if (form.days) since.setDate(since.getDate() - Number(form.days))
-  return {
-    media_only: form.mediaOnly,
-    omit_shared: !form.includeShared,
-    skip_references: !form.captureReferences,
-    max_posts: form.maxPosts ? Number(form.maxPosts) : undefined,
-    since: form.days ? since.toISOString() : undefined,
-    relations: form.relations || undefined,
-  }
-})
-// Shown while collapsed so a non-default choice is never hidden.
-const summary = computed(() => {
-  const parts: string[] = []
-  if (form.mediaOnly) parts.push('仅媒体')
-  if (!form.includeShared) parts.push('不含转帖')
-  if (!form.captureReferences) parts.push('原帖外链')
-  if (form.maxPosts) parts.push(`最多 ${form.maxPosts} 条`)
-  if (form.days) parts.push(ranges.find((r) => r.value === form.days)!.label)
-  if (form.relations) parts.push('抓关系网')
-  return parts.join(' · ') || '全部采集'
-})
-function update() {
-  model.value = options.value
+/** The scope and number 抓帖子 turns back on. */
+let last: Pick<Options, 'posts' | 'count'> = { posts: 'latest' }
+
+const timeline = computed(() => profiles && model.value.posts !== 'none')
+const scope = computed(() => scopeOf(model.value))
+const summary = computed(() => optionsSummary(model.value, { profiles, posts }))
+
+function set(patch: Partial<Options>) {
+  model.value = { ...model.value, ...patch }
 }
+function setPosts(on: boolean) {
+  if (on) model.value = { ...model.value, ...last }
+  else {
+    const { count, ...rest } = model.value
+    last = { posts: rest.posts, ...(count === undefined ? {} : { count }) }
+    model.value = { ...rest, posts: 'none' }
+  }
+}
+function setCount(event: Event) {
+  const input = event.target as HTMLInputElement
+  const value = Math.round(Number(input.value))
+  const count =
+    input.value && Number.isFinite(value)
+      ? Math.min(Math.max(value, 1), 100_000)
+      : DEFAULT_COUNT
+  input.value = String(count)
+  set({ count })
+}
+function setSince(value: string) {
+  const { since_days: _, ...rest } = model.value
+  model.value = value
+    ? { ...rest, since_days: Number(value) as Options['since_days'] }
+    : rest
+}
+const checked = (event: Event) => (event.target as HTMLInputElement).checked
+const chosen = (event: Event) => (event.target as HTMLSelectElement).value
 </script>
 
 <template>
-  <details
+  <component
+    :is="collapsible ? 'details' : 'div'"
     class="capture-options"
     @toggle="
       (event: Event) => (open = (event.target as HTMLDetailsElement).open)
     "
-    @change="update"
   >
-    <summary>
+    <summary v-if="collapsible">
       <span class="title">采集选项</span>
       <span class="summary">{{ summary }}</span>
       <ChevronIcon :open="open" />
     </summary>
-    <label class="row"
-      ><span>仅采集含图片或视频的帖子</span
-      ><input
-        v-model="form.mediaOnly"
-        class="switch"
-        type="checkbox"
-        role="switch"
-    /></label>
-    <label class="row"
-      ><span>包含引用转帖和纯转发</span
-      ><input
-        v-model="form.includeShared"
-        class="switch"
-        type="checkbox"
-        role="switch"
-    /></label>
-    <label class="row"
-      ><span>采集引用、转发的原帖</span
-      ><input
-        v-model="form.captureReferences"
-        class="switch"
-        type="checkbox"
-        role="switch"
-    /></label>
-    <label class="row"
-      ><span>最多采集帖子</span
-      ><input
-        v-model="form.maxPosts"
-        class="value"
-        type="number"
-        inputmode="numeric"
-        min="1"
-        max="100000"
-        step="1"
-        placeholder="不限"
-        aria-label="最多采集帖子"
-    /></label>
-    <label class="row"
-      ><span>发帖日期</span
-      ><span class="select"
-        ><select v-model="form.days" class="value" aria-label="采集发帖日期">
-          <option v-for="r in ranges" :key="r.value" :value="r.value">
-            {{ r.label }}
-          </option></select
-        ><ChevronIcon class="select-chevron" /></span
-    ></label>
-    <label class="row"
-      ><span>抓关系网<small class="hint">X 账号的关注和粉丝列表</small></span
-      ><input
-        v-model="form.relations"
-        class="switch"
-        type="checkbox"
-        role="switch"
-    /></label>
-    <p class="note">
-      以上条件用于账号主页的帖子采集；引用原帖选项也用于单条帖子{{
-        form.captureReferences ? '' : '，未保存的原帖保留外链'
-      }}。抓关系网只用于 X 账号主页，需要采集账号，超过 5000 人的列表不抓。
-    </p>
-  </details>
+    <fieldset :disabled="disabled">
+      <template v-if="profiles">
+        <label class="row"
+          ><span>抓帖子</span
+          ><input
+            class="switch"
+            type="checkbox"
+            role="switch"
+            :checked="model.posts !== 'none'"
+            @change="setPosts(checked($event))"
+        /></label>
+        <template v-if="timeline">
+          <label class="row sub"
+            ><span>帖子范围</span
+            ><span class="select"
+              ><select
+                class="value"
+                aria-label="帖子范围"
+                :value="scope"
+                @change="model = withScope(model, chosen($event) as Scope)"
+              >
+                <option v-for="s in scopes" :key="s.value" :value="s.value">
+                  {{ s.label }}
+                </option></select
+              ><ChevronIcon class="select-chevron" /></span
+          ></label>
+          <label v-if="scope === 'latest' || scope === 'max'" class="row sub"
+            ><span>条数</span
+            ><input
+              class="value"
+              type="number"
+              inputmode="numeric"
+              min="1"
+              max="100000"
+              step="1"
+              aria-label="条数"
+              :value="model.count ?? DEFAULT_COUNT"
+              @change="setCount"
+          /></label>
+          <label class="row sub"
+            ><span>发帖日期</span
+            ><span class="select"
+              ><select
+                class="value"
+                aria-label="发帖日期"
+                :value="String(model.since_days ?? '')"
+                @change="setSince(chosen($event))"
+              >
+                <option value="">全部</option>
+                <option
+                  v-for="r in ranges"
+                  :key="r.value"
+                  :value="String(r.value)"
+                >
+                  {{ r.label }}
+                </option></select
+              ><ChevronIcon class="select-chevron" /></span
+          ></label>
+          <label class="row sub"
+            ><span>仅采集含图片或视频的帖子</span
+            ><input
+              class="switch"
+              type="checkbox"
+              role="switch"
+              :checked="model.media_only"
+              @change="set({ media_only: checked($event) })"
+          /></label>
+          <label class="row sub"
+            ><span>包含引用转帖和纯转发</span
+            ><input
+              class="switch"
+              type="checkbox"
+              role="switch"
+              :checked="model.include_shared"
+              @change="set({ include_shared: checked($event) })"
+          /></label>
+        </template>
+      </template>
+      <label v-if="timeline || posts" class="row"
+        ><span>采集引用、转发的原帖</span
+        ><input
+          class="switch"
+          type="checkbox"
+          role="switch"
+          :checked="model.capture_references"
+          @change="set({ capture_references: checked($event) })"
+      /></label>
+      <label v-if="profiles && relations" class="row"
+        ><span
+          >抓关系网<small v-if="relationsHint" class="hint">{{
+            relationsHint
+          }}</small></span
+        ><input
+          class="switch"
+          type="checkbox"
+          role="switch"
+          :checked="model.relations"
+          @change="set({ relations: checked($event) })"
+      /></label>
+    </fieldset>
+  </component>
 </template>
 
 <style scoped>
 .capture-options {
   box-shadow: inset 0 1px 0 var(--separator);
+}
+fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 summary {
   display: flex;
@@ -173,6 +247,12 @@ summary:focus-visible {
   font-size: 15px;
   box-shadow: inset 0 1px 0 var(--separator);
 }
+div.capture-options > fieldset > .row:first-child {
+  box-shadow: none;
+}
+.row.sub {
+  margin-left: calc(var(--inset) * 2);
+}
 .hint {
   display: block;
   font-size: 13px;
@@ -209,6 +289,10 @@ summary:focus-visible {
 .switch:checked::after {
   transform: translateX(18px);
 }
+.switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .switch:focus-visible,
 .value:focus-visible {
   outline: 2px solid var(--link);
@@ -227,9 +311,6 @@ input.value {
   padding: 4px 10px;
   text-align: right;
 }
-input.value::placeholder {
-  color: var(--subtle);
-}
 .select {
   position: relative;
   flex: none;
@@ -244,14 +325,6 @@ select.value {
   right: 4px;
   top: calc(50% - 12px);
   pointer-events: none;
-}
-.note {
-  margin: 0;
-  padding: 8px var(--inset) 14px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--subtle);
-  box-shadow: inset 0 1px 0 var(--separator);
 }
 @media (prefers-reduced-motion: reduce) {
   .switch,

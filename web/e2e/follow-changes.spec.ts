@@ -67,7 +67,7 @@ const record = {
     handle: 'owner',
     posts: 0,
     profiles: 1,
-    options: { posts: 'latest', relations: true },
+    older: false,
     queued: 0,
     skipped: 0,
   },
@@ -210,7 +210,7 @@ test('updates a profile with its lists and lists its follow changes', async ({
   await expect(update).not.toContainText('查看进度')
   await update.getByRole('button', { name: '更新', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: '更新 @owner' })
-  const lists = sheet.getByRole('checkbox', { name: /抓关系网/ })
+  const lists = sheet.getByRole('switch', { name: /抓关系网/ })
   await expect(lists).not.toBeChecked()
   await expect(sheet).toContainText(
     '关注 2 · 粉丝 2 万（超过 5000，将跳过粉丝名单）',
@@ -221,7 +221,14 @@ test('updates a profile with its lists and lists its follow changes', async ({
   expect(submitted).toEqual([
     {
       target: { target: 'collection', id: profileId },
-      options: { posts: 'latest', relations: true },
+      options: {
+        posts: 'latest',
+        count: 100,
+        media_only: false,
+        include_shared: true,
+        capture_references: true,
+        relations: true,
+      },
     },
   ])
   // How each part went is on the update's record.

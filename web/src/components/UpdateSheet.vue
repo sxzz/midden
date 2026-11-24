@@ -7,8 +7,10 @@ import {
   type UpdatePreview,
   type UpdateTarget,
 } from '../api'
+import { defaultOptions, type Options } from '../capture-options'
 import { countText, coverText } from '../captures'
 import { toast } from '../composables/useToast'
+import CaptureOptions from './CaptureOptions.vue'
 const props = defineProps<{
   open: boolean
   target: UpdateTarget
@@ -28,10 +30,8 @@ const preview = shallowRef<UpdatePreview>()
 const loading = shallowRef(false)
 const busy = shallowRef(false)
 const error = shallowRef('')
-const posts = shallowRef(true)
-const mode = shallowRef<'latest' | 'until_existing'>('latest')
-/** Unchecked each time: fetching the lists costs many requests. */
-const relations = shallowRef(false)
+/** The defaults each time, as everywhere a capture starts. */
+const options = shallowRef<Options>(defaultOptions())
 let request = 0
 async function load() {
   const current = ++request
@@ -53,9 +53,7 @@ watch(
   () => props.open,
   (open) => {
     if (open) {
-      posts.value = true
-      mode.value = 'latest'
-      relations.value = false
+      options.value = defaultOptions()
       void load()
       dialog.value?.showModal()
     } else {
@@ -88,6 +86,7 @@ const counts = computed(() => {
     ? `${sizes}（超过 ${RELATION_LIMIT}，将跳过${skipped.join('和')}名单）`
     : sizes
 })
+const posts = computed(() => (preview.value?.posts ?? 0) > 0)
 const profiles = computed(() => (preview.value?.profiles ?? 0) > 0)
 const listable = computed(() => (preview.value?.listable ?? 0) > 0)
 async function start() {
@@ -100,16 +99,10 @@ async function start() {
         {
           json: {
             target: props.target,
-            ...(profiles.value
-              ? {
-                  options: {
-                    posts: posts.value ? mode.value : 'none',
-                    ...(listable.value && relations.value
-                      ? { relations: true }
-                      : {}),
-                  },
-                }
-              : {}),
+            options: {
+              ...options.value,
+              relations: listable.value && options.value.relations,
+            },
           },
         },
         { headers: { 'Idempotency-Key': crypto.randomUUID() } },
@@ -139,46 +132,15 @@ function backdrop(event: MouseEvent) {
     <div class="group">
       <p :id="titleId" class="head">{{ title }}</p>
       <p v-if="loading" class="note" role="status">加载中…</p>
-      <template v-if="preview && profiles">
-        <label class="option">
-          <input v-model="posts" type="checkbox" :disabled="busy" />
-          <span>抓帖子</span>
-        </label>
-        <div v-if="posts" class="choices" role="radiogroup" aria-label="抓帖子">
-          <label class="choice">
-            <input
-              v-model="mode"
-              type="radio"
-              value="latest"
-              :disabled="busy"
-            />
-            <span>最新 100 条</span>
-          </label>
-          <label class="choice">
-            <input
-              v-model="mode"
-              type="radio"
-              value="until_existing"
-              :disabled="busy"
-            />
-            <span>抓到已有数据为止</span>
-          </label>
-        </div>
-        <label v-if="listable" class="option">
-          <input v-model="relations" type="checkbox" :disabled="busy" />
-          <span
-            >抓关系网<small v-if="counts" class="hint">{{
-              counts
-            }}</small></span
-          >
-        </label>
-        <p
-          v-if="listable && relations && (preview.listable ?? 0) > 1"
-          class="note"
-        >
-          名单较多，可能需要较长时间
-        </p>
-      </template>
+      <CaptureOptions
+        v-if="preview"
+        v-model="options"
+        :profiles="profiles"
+        :posts="posts"
+        :relations="listable"
+        :relations-hint="counts"
+        :disabled="busy"
+      />
       <p v-if="error" class="note failed" role="alert">{{ error }}</p>
       <button
         type="button"
@@ -199,11 +161,13 @@ function backdrop(event: MouseEvent) {
 .sheet {
   width: 100%;
   max-width: 480px;
+  max-height: calc(100dvh - 16px);
   margin: auto auto 0;
   padding: 0 8px max(8px, env(safe-area-inset-bottom));
   border: 0;
   background: none;
   color: var(--text);
+  overflow-y: auto;
 }
 .sheet:not([open]) {
   display: none;
@@ -226,35 +190,6 @@ function backdrop(event: MouseEvent) {
   font-weight: 600;
   line-height: 1.5;
   overflow-wrap: anywhere;
-}
-.option,
-.choice {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 48px;
-  padding: 6px 16px;
-  font-size: 16px;
-  box-shadow: inset 0 1px 0 var(--separator);
-  cursor: pointer;
-}
-.choice {
-  min-height: 44px;
-  padding-left: 46px;
-  font-size: 15px;
-}
-.option input,
-.choice input {
-  flex: none;
-  width: 20px;
-  height: 20px;
-  margin: 0;
-  accent-color: var(--link);
-}
-.hint {
-  display: block;
-  font-size: 13px;
-  color: var(--subtle);
 }
 .note {
   margin: 0;

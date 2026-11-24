@@ -108,9 +108,18 @@ test('submits links and follows the record until it finishes', async ({
   await expect(page.getByRole('alert')).toHaveText(
     '已提交 1 条，1 条未提交：不支持的链接',
   )
+  // The defaults, the same as an update's.
+  const options = {
+    posts: 'latest',
+    count: 100,
+    media_only: false,
+    include_shared: true,
+    capture_references: true,
+    relations: false,
+  }
   expect(submitted).toEqual([
-    { url: 'https://fxtwitter.com/fixture/status/1', options: {} },
-    { url: 'https://unsupported.test/a', options: {} },
+    { url: 'https://fxtwitter.com/fixture/status/1', options },
+    { url: 'https://unsupported.test/a', options },
   ])
   // The link that failed stays to be corrected.
   await expect(page.getByLabel('链接')).toHaveValue(
@@ -471,7 +480,7 @@ test('an update reads as one record in the list', async ({ page }) => {
       name: '猫',
       posts: 10,
       profiles: 2,
-      options: { posts: 'latest', relations: false },
+      older: false,
       queued: 2,
       skipped: 0,
     },
@@ -495,7 +504,7 @@ test('an update reads as one record in the list', async ({ page }) => {
       target: 'many',
       posts: 3,
       profiles: 0,
-      options: { posts: 'latest', relations: false },
+      older: false,
       queued: 0,
       skipped: 0,
     },
@@ -551,7 +560,7 @@ test("an update's profile stopped by the post cap reads on in the same record", 
         handle: 'cat',
         posts: 0,
         profiles: 1,
-        options: { posts: 'until_existing', relations: false },
+        older: false,
         queued: 0,
         skipped: 0,
       },

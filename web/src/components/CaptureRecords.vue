@@ -6,13 +6,8 @@ import {
   onUnmounted,
   shallowRef,
 } from 'vue'
-import {
-  call,
-  client,
-  errorText,
-  type CaptureRecord,
-  type CaptureOptions as Options,
-} from '../api'
+import { call, client, errorText, type CaptureRecord } from '../api'
+import { defaultOptions, type Options } from '../capture-options'
 import {
   extractLinks,
   groupRecords,
@@ -36,7 +31,7 @@ const loading = shallowRef(true)
 const loaded = shallowRef(false)
 const error = shallowRef('')
 const text = shallowRef('')
-const options = shallowRef<Options>({})
+const options = shallowRef<Options>(defaultOptions())
 const submitting = shallowRef(false)
 const notice = shallowRef<{ text: string; failed?: boolean }>()
 const links = computed(() => extractLinks(text.value))
@@ -180,7 +175,7 @@ async function submit() {
           @keydown.enter.ctrl.prevent="submit"
         />
       </label>
-      <CaptureOptions v-model="options" />
+      <CaptureOptions v-model="options" collapsible />
       <p
         v-if="notice"
         class="notice"

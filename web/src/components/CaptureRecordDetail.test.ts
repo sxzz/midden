@@ -309,9 +309,16 @@ it('continues a profile the post cap stopped, inside the same record', async () 
       handle: 'cat',
       posts: 0,
       profiles: 1,
-      options: { posts: 'until_existing', relations: false },
+      older: false,
       queued: 0,
       skipped: 0,
+    },
+    options: {
+      posts: 'until_existing',
+      media_only: true,
+      include_shared: true,
+      capture_references: true,
+      relations: false,
     },
     profiles: [
       {
@@ -356,6 +363,8 @@ it('continues a profile the post cap stopped, inside the same record', async () 
   await vi.waitFor(() =>
     expect(el.textContent).toContain('资料 ✓ · 帖子 1000（未到已有数据）'),
   )
+  // What the update ran with stays visible.
+  expect(el.textContent).toContain('选项抓到已有数据为止 · 仅媒体')
   const button = [...el.querySelectorAll('button')].find(
     (b) => b.textContent?.trim() === '继续抓取',
   )!
@@ -363,4 +372,83 @@ it('continues a profile the post cap stopped, inside the same record', async () 
   await vi.waitFor(() => expect(el.textContent).toContain('帖子 1000/1100'))
   expect(sent).toEqual([{ collection_id: 'p1' }])
   expect(el.textContent).not.toContain('继续抓取')
+})
+
+it('shows the options a link ran with, and continues it where the cap stopped', async () => {
+  let continued = false
+  const record = () => ({
+    ...detail({ complete: 1000, partial: 0, failed: 0 }),
+    done: !continued,
+    options: {
+      posts: 'until_existing',
+      media_only: false,
+      include_shared: true,
+      capture_references: false,
+      since_days: 30,
+      relations: true,
+    },
+    ...(continued
+      ? {}
+      : {
+          pages: { more: true, more_1000: true, capped: true, failed: false },
+        }),
+  })
+  const sent: unknown[] = []
+  mockApi((path, request) => {
+    if (path === '/captures/record') return record()
+    if (path.startsWith('/captures/record/members')) return { items: [] }
+    if (path === '/captures/record/pages' && request.method === 'POST') {
+      sent.push(JSON.parse(request.body!))
+      continued = true
+      return { id: 'job', collection_id: 'profile', state: 'queued' }
+    }
+    throw new Error(`unexpected ${path}`)
+  })
+  const el = document.createElement('div')
+  document.body.append(el)
+  const app = createVaporApp(CaptureRecordDetail, { id: 'record' })
+  app.mount(el)
+  unmount = () => app.unmount()
+  await vi.waitFor(() =>
+    expect(el.textContent).toContain(
+      '选项抓到已有数据为止 · 不抓原帖 · 最近 30 天 · 抓关系网',
+    ),
+  )
+  const button = [...el.querySelectorAll('button')].find(
+    (b) => b.textContent?.trim() === '继续抓取',
+  )!
+  button.click()
+  await vi.waitFor(() => expect(sent).toEqual([{ op: 'continue' }]))
+  await vi.waitFor(() => expect(el.textContent).not.toContain('继续抓取'))
+})
+
+it('a post shows only its references, and nothing with the defaults', async () => {
+  const post = (references: boolean) => () => ({
+    ...detail({}),
+    kind: 'post',
+    members: undefined,
+    options: {
+      posts: 'latest',
+      count: 100,
+      media_only: true,
+      include_shared: true,
+      capture_references: references,
+      relations: false,
+    },
+  })
+  const one = mount(
+    post(false) as unknown as () => ReturnType<typeof detail>,
+    {},
+  )
+  await vi.waitFor(() => expect(one.el.textContent).toContain('选项不抓原帖'))
+  expect(one.el.textContent).not.toContain('仅媒体')
+  unmount()
+  unmount = () => {}
+  document.body.replaceChildren()
+  const two = mount(
+    post(true) as unknown as () => ReturnType<typeof detail>,
+    {},
+  )
+  await vi.waitFor(() => expect(two.el.textContent).toContain('提交时间'))
+  expect(two.el.textContent).not.toContain('选项')
 })

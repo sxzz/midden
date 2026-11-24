@@ -231,7 +231,7 @@ const update = (patch: Partial<UpdateInfo>): UpdateInfo => ({
   target: 'collection',
   posts: 0,
   profiles: 1,
-  options: { posts: 'latest', relations: false },
+  older: false,
   queued: 0,
   skipped: 0,
   ...patch,
@@ -249,7 +249,7 @@ test('an update is titled by what it covers', () => {
       ...profile,
       update: update({
         handle: 'cat',
-        options: { posts: 'older', relations: false },
+        older: true,
       }),
     }),
   ).toBe('抓取 @cat 更早的帖子')

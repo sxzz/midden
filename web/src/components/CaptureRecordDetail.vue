@@ -16,6 +16,7 @@ import {
   type CaptureMember,
   type CaptureRecordDetail,
 } from '../api'
+import { optionsSummary } from '../capture-options'
 import {
   canContinue,
   linkTitle,
@@ -336,17 +337,39 @@ async function retryFailed(member?: CaptureMember) {
     busy.value = false
   }
 }
-/** Read on where the post cap stopped a profile, inside this record. */
-async function continueTimeline(collectionId: string) {
+/** The options the record ran with, as far as they apply to its target. */
+const optionsText = computed(() => {
+  const r = record.value
+  if (!r?.options) return ''
+  return optionsSummary(
+    r.options,
+    r.update
+      ? { profiles: r.update.profiles > 0, posts: r.update.posts > 0 }
+      : { profiles: r.kind === 'profile', posts: r.kind !== 'profile' },
+  )
+})
+/**
+ * Read on where the post cap stopped a profile, inside this record: one of
+ * an update's profiles, or the record's own.
+ */
+async function continueTimeline(collectionId?: string) {
   if (busy.value) return
   busy.value = true
   try {
-    await call(
-      client.updates[':id'].continue.$post({
-        param: { id: props.id },
-        json: { collection_id: collectionId },
-      }),
-    )
+    if (collectionId)
+      await call(
+        client.updates[':id'].continue.$post({
+          param: { id: props.id },
+          json: { collection_id: collectionId },
+        }),
+      )
+    else
+      await call(
+        client.captures[':id'].pages.$post({
+          param: { id: props.id },
+          json: { op: 'continue' },
+        }),
+      )
     await load()
   } catch (e) {
     toast(errorText(e))
@@ -413,6 +436,10 @@ function openCollection(id: string, event?: MouseEvent) {
             <dt>完成时间</dt>
             <dd>{{ recordTime(record.finished_at) }}</dd>
           </div>
+          <div v-if="optionsText">
+            <dt>选项</dt>
+            <dd>{{ optionsText }}</dd>
+          </div>
           <div v-if="record.members && !record.update">
             <dt>帖子</dt>
             <dd>
@@ -456,6 +483,12 @@ function openCollection(id: string, event?: MouseEvent) {
         variant="destructive"
         :disabled="busy"
         @select="stop"
+      />
+      <ListButton
+        v-if="record.pages?.capped"
+        label="继续抓取"
+        :disabled="busy"
+        @select="continueTimeline()"
       />
       <ListButton
         v-if="record.pages?.more"

@@ -87,9 +87,6 @@ export type ProfilePart = NonNullable<CaptureRecordDetail['profiles']>[number]
 export type UpdateTarget = InferRequestType<
   typeof client.updates.$post
 >['json']['target']
-export type UpdateOptions = NonNullable<
-  InferRequestType<typeof client.updates.$post>['json']['options']
->
 export type UpdatePreview = Ok<typeof client.updates.preview.$post>
 export type CollectionUpdate = Ok<
   (typeof client.collections)[':id']['update']['$get']
@@ -122,11 +119,9 @@ export type PublicShareInfo = Ok<(typeof client.public)[':slug']['$get']>
 export type Annotation = Ok<
   (typeof client.collections)[':id']['annotation']['$get']
 >
+/** What a capture or an update does; the same for both. */
 export type CaptureOptions = NonNullable<
-  Extract<
-    InferRequestType<typeof client.captures.$post>['json'],
-    { url: string }
-  >['options']
+  InferRequestType<typeof client.updates.$post>['json']['options']
 >
 
 /** What to tell the user about a failed call: the server words its errors. */

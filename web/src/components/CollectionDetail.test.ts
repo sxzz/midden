@@ -79,13 +79,15 @@ async function mount(shown: Collection = profile) {
       return { following: 2, followers: 3, mutual: 1 }
     if (path === '/collections/profile/update') return update
     if (path === '/updates/preview')
-      return {
-        posts: 0,
-        profiles: 1,
-        listable: 1,
-        counts: { following: 320, followers: 21_000 },
-        older: false,
-      }
+      return shown === post
+        ? { posts: 1, profiles: 0, listable: 0 }
+        : {
+            posts: 0,
+            profiles: 1,
+            listable: 1,
+            counts: { following: 320, followers: 21_000 },
+            older: false,
+          }
     if (path === '/updates') {
       update = { record: { id: 'record', done: false }, older: false }
       return { id: 'record' }
@@ -123,7 +125,7 @@ const button = (root: Element, text: string) =>
     (b) => b.textContent?.trim() === text,
   )!
 
-it('puts 更新 and 查看进度 in a group of their own; a profile opens the sheet', async () => {
+it('puts 更新 and 查看进度 in a group of their own; 更新 opens the sheet', async () => {
   const { el, sent } = await mount()
   await vi.waitFor(() => expect(groups(el)).toContainEqual(['更新']))
   // Opening the original, sharing and deleting are elsewhere, and the lists
@@ -142,7 +144,7 @@ it('puts 更新 and 查看进度 in a group of their own; a profile opens the sh
   })
   await vi.waitFor(() => expect(sheet.textContent).toContain('抓关系网'))
   expect(sheet.textContent).toContain('更新 @synthetic')
-  expect(sheet.textContent).toContain('最新 100 条')
+  expect(sheet.textContent).toContain('帖子范围')
   expect(sheet.textContent).toContain(
     '关注 320 · 粉丝 2.1 万（超过 5000，将跳过粉丝名单）',
   )
@@ -161,26 +163,41 @@ it('puts 更新 and 查看进度 in a group of their own; a profile opens the sh
     path: '/updates',
     body: {
       target: { target: 'collection', id: 'profile' },
-      options: { posts: 'latest' },
+      options: {
+        posts: 'latest',
+        count: 100,
+        media_only: false,
+        include_shared: true,
+        capture_references: true,
+        relations: false,
+      },
     },
   })
 })
 
-it('updates a post right away, without the sheet', async () => {
+it('a post opens the sheet with its references alone', async () => {
   const { el, sent } = await mount(post)
   const update = el.querySelector<HTMLElement>('.update .section-body')!
   await vi.waitFor(() => expect(button(update, '更新').disabled).toBe(false))
   button(update, '更新').click()
+  const sheet = await vi.waitFor(() => {
+    const open = el.querySelector<HTMLDialogElement>('dialog.sheet[open]')
+    expect(open).not.toBeNull()
+    return open!
+  })
+  await vi.waitFor(() =>
+    expect(sheet.textContent).toContain('采集引用、转发的原帖'),
+  )
+  expect(sheet.textContent).not.toContain('抓帖子')
+  expect(sheet.textContent).not.toContain('抓关系网')
+  button(sheet, '开始更新').click()
   await vi.waitFor(() =>
     expect(groups(el)).toContainEqual(['正在更新…', '查看进度']),
   )
-  expect(el.querySelector('dialog.sheet[open]')).toBeNull()
-  expect(sent).toEqual([
-    {
-      path: '/updates',
-      body: { target: { target: 'collection', id: 'profile' } },
-    },
-  ])
+  expect(sent.at(-1)).toMatchObject({
+    path: '/updates',
+    body: { options: { capture_references: true } },
+  })
 })
 
 it('shows no update group behind a public link', async () => {

@@ -320,14 +320,23 @@ test('profile update links to its record and shows new posts on return', async (
   await expect(page.getByRole('button', { name: '查看进度' })).toHaveCount(0)
   await page.getByRole('button', { name: '更新', exact: true }).click()
   const sheet = page.getByRole('dialog')
-  await expect(sheet.getByRole('radio', { name: '最新 100 条' })).toBeChecked()
-  await sheet.getByRole('radio', { name: '抓到已有数据为止' }).check()
+  await expect(sheet.getByLabel('帖子范围')).toHaveValue('latest')
+  await expect(sheet.getByLabel('条数')).toHaveValue('100')
+  await sheet.getByLabel('帖子范围').selectOption('until_existing')
+  await expect(sheet.getByLabel('条数')).toHaveCount(0)
+  await sheet.getByLabel('仅采集含图片或视频的帖子').check()
   await sheet.getByRole('button', { name: '开始更新' }).click()
   await expect(page.locator('.toast')).toHaveText('已开始更新')
   expect(started).toEqual([
     {
       target: { target: 'collection', id: profileId },
-      options: { posts: 'until_existing' },
+      options: {
+        posts: 'until_existing',
+        media_only: true,
+        include_shared: true,
+        capture_references: true,
+        relations: false,
+      },
     },
   ])
   // Progress is not followed here: the page links to the update's record.
@@ -350,6 +359,6 @@ test('profile update links to its record and shows new posts on return', async (
   await expect(page.locator('.toast')).toHaveText('已开始抓取更早的帖子')
   expect(started.at(-1)).toEqual({
     target: { target: 'collection', id: profileId },
-    options: { posts: 'older' },
+    older: true,
   })
 })
