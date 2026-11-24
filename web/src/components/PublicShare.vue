@@ -51,6 +51,7 @@ const standalone = !host()?.initData
 const title = computed(() => {
   if (route.name === 'share-collection-stats') return '统计趋势'
   if (route.name === 'share-collection-changes') return '资料修改记录'
+  if (route.name === 'share-collection-follows') return '关注变化'
   if (nested.value || share.value?.target === 'collection') return '收藏详情'
   return share.value?.name ?? ''
 })

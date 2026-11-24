@@ -85,6 +85,13 @@ export const router = createRouter({
       meta: { public: true },
     },
     {
+      path: `${SHARE}/collection/:id([a-f0-9-]+)/follows`,
+      name: 'share-collection-follows',
+      component: FollowChanges,
+      props: idOnly,
+      meta: { public: true },
+    },
+    {
       path: `${SHARE}/collection/:id([a-f0-9-]+)/changes`,
       name: 'share-collection-changes',
       component: ProfileChanges,

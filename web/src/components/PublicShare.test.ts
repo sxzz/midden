@@ -73,6 +73,18 @@ beforeEach(() => {
     if (rest.includes('/history')) return { items: [] }
     if (rest.includes('/counts')) return { points: [] }
     if (rest.includes('/profile-changes')) return { items: [] }
+    if (rest === `/collections/${PROFILE}/follows`)
+      return { following: 3, followers: 5, mutual: 1 }
+    if (rest.startsWith(`/collections/${PROFILE}/follow-changes`))
+      return {
+        items: [
+          {
+            type: 'unfollow',
+            observed_at: '2026-11-02T00:00:00.000Z',
+            account: { entity_id: 'e', external_id: '9', name: '别人' },
+          },
+        ],
+      }
     throw new APIError(404, '内容不存在或已删除')
   })
 })
@@ -150,6 +162,17 @@ it('shows a shared post read-only, its links kept inside the share', async () =>
       ),
     ),
   )
+  // Its follows are shared with it, and their page stays in the share.
+  await vi.waitFor(() => expect(el.textContent).toContain('关系网'))
+  const follows = [...el.querySelectorAll('button')].find((b) =>
+    b.textContent?.trim().startsWith('关注变化'),
+  )!
+  follows.click()
+  await vi.waitFor(() =>
+    expect(router.currentRoute.value.name).toBe('share-collection-follows'),
+  )
+  await vi.waitFor(() => expect(el.textContent).toContain('别人'))
+  expect(el.querySelector('h1')?.textContent).toBe('关注变化')
   expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
   await nextTick()
 })

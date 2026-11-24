@@ -99,7 +99,7 @@ function openChanges() {
   void router.push(collectionRoute(props.id, 'changes'))
 }
 function openFollows() {
-  void router.push({ name: 'collection-follows', params: { id: props.id } })
+  void router.push(collectionRoute(props.id, 'follows'))
 }
 // Behind a public link the page only reads: no capture, notes or deletion.
 const shared = computed(() => !!shareSlug.value)

@@ -67,6 +67,30 @@ export function readProfileChanges(
   )
 }
 
+export function readFollows(id: string, signal?: AbortSignal) {
+  return call(
+    shareSlug.value
+      ? shared[':id'].follows.$get({ param: at(id) }, init(signal))
+      : own.follows.$get({ param: { id } }, init(signal)),
+  )
+}
+
+export function readFollowChanges(
+  id: string,
+  limit?: number,
+  signal?: AbortSignal,
+) {
+  const query = limit ? { limit: String(limit) } : {}
+  return call(
+    shareSlug.value
+      ? shared[':id']['follow-changes'].$get(
+          { param: at(id), query },
+          init(signal),
+        )
+      : own['follow-changes'].$get({ param: { id }, query }, init(signal)),
+  )
+}
+
 /**
  * One page of a list for the list's API query. A share lists only its
  * folder (one kind at a time) or a profile's posts, in their own order.

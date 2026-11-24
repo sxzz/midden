@@ -2,14 +2,14 @@
 import { computed, onActivated, onUnmounted, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  call,
-  client,
   errorText,
   previewURL,
   type FollowAccount,
   type FollowChanges,
 } from '../api'
 import { accountName, followDays, moment } from '../follows'
+import { readFollowChanges } from '../reads'
+import { collectionHref, collectionRoute } from '../share'
 import LoadingImage from './ui/LoadingImage.vue'
 import Spinner from './ui/Spinner.vue'
 const props = defineProps<{ id: string; showSensitive?: boolean }>()
@@ -23,12 +23,7 @@ async function load() {
   const { signal } = controller
   loading.value = true
   try {
-    const result = await call(
-      client.collections[':id']['follow-changes'].$get(
-        { param: { id: props.id }, query: {} },
-        { init: { signal } },
-      ),
-    )
+    const result = await readFollowChanges(props.id, undefined, signal)
     if (signal.aborted) return
     changes.value = result
     error.value = ''
@@ -58,13 +53,10 @@ const router = useRouter()
 function open(account: FollowAccount, event: MouseEvent) {
   if (!account.collection_id) return
   if (event.ctrlKey || event.metaKey || event.shiftKey) {
-    window.open(`#/collection/${account.collection_id}`, '_blank', 'noopener')
+    window.open(collectionHref(account.collection_id), '_blank', 'noopener')
     return
   }
-  void router.push({
-    name: 'collection',
-    params: { id: account.collection_id },
-  })
+  void router.push(collectionRoute(account.collection_id))
 }
 // A sensitive avatar stays blurred unless all sensitive media are shown.
 const blurred = (account: FollowAccount) =>

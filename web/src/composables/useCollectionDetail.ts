@@ -10,6 +10,8 @@ import {
 import {
   readCollection,
   readCounts,
+  readFollowChanges,
+  readFollows,
   readHistory,
   readHistoryPoint,
   readProfileChanges,
@@ -179,28 +181,17 @@ export function useCollectionDetail(
   }
   /**
    * The follows observed of a profile and whether they ever changed (the
-   * newest change is enough to tell). Neither is shown without data, nor
-   * behind a public link, which does not share them.
+   * newest change is enough to tell). Neither is shown without data.
    */
   async function checkFollows(result: Collection) {
     const graph = result.graph
     const root = graph?.entities.find((entity) => entity.key === graph.root)
-    if (shareSlug.value || !isProfileEntity(root)) return
+    if (!isProfileEntity(root)) return
     const signal = controller.signal
     try {
       const [counts, changes] = await Promise.all([
-        call(
-          collections.follows.$get(
-            { param: { id: id() } },
-            { init: { signal } },
-          ),
-        ),
-        call(
-          collections['follow-changes'].$get(
-            { param: { id: id() }, query: { limit: '1' } },
-            { init: { signal } },
-          ),
-        ),
+        readFollows(id(), signal),
+        readFollowChanges(id(), 1, signal),
       ])
       if (signal.aborted) return
       follows.value = counts.following === undefined ? undefined : counts
