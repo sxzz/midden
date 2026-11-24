@@ -482,6 +482,11 @@ describe('public shares', () => {
   })
 
   test('the follow graph shows every account, linking only those shared', async () => {
+    // The fake platform stands in for X, whose image addresses last.
+    REMOTE_IMAGES.add('fake')
+    onTestFinished(() => {
+      REMOTE_IMAGES.delete('fake')
+    })
     const { c, ids, read, owner } = await setup()
     const entityOf = (id: string) =>
       c.db.get<{ id: string }>(

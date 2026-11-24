@@ -584,6 +584,7 @@ describe('关系图谱', () => {
     )
 
   test('the center, then accounts by follower count, with follows among them', async () => {
+    useRemoteImages()
     const { ctx, id } = await world()
     const graph = followGraph(ctx, id)
     expect(names(graph)).toEqual(['100', '2', '4', '3', '1'])
