@@ -1,4 +1,5 @@
 import { sxzz } from '@sxzz/eslint-config'
+import { noClickNavigation } from './scripts/no-click-navigation.ts'
 
 export default sxzz(
   {
@@ -19,6 +20,17 @@ export default sxzz(
         // Mark intentionally unawaited UI work without changing its scheduling.
         'no-void': ['error', { allowAsStatement: true }],
       },
+    },
+    {
+      // Navigation is a link, so a modified click opens a new tab; see the
+      // rule for what stays programmatic.
+      files: ['web/src/**/*.vue'],
+      // The link primitive is where a click becomes navigation.
+      ignores: ['web/src/components/ui/AppLink.vue'],
+      plugins: {
+        midden: { rules: { 'no-click-navigation': noClickNavigation } },
+      },
+      rules: { 'midden/no-click-navigation': 'error' },
     },
     {
       files: ['web/src/composables/*.ts'],
