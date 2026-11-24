@@ -32,10 +32,10 @@ beforeEach(() => {
     if (path === '/tags') return []
     if (path.startsWith('/collections/perspectives')) {
       const q = new URLSearchParams(path.split('?', 2)[1])
-      const key = q.get('rel_of')
+      const keys = q.getAll('rel_of')
       return {
-        items: key
-          ? accounts.filter((item) => item.id === key)
+        items: keys.length
+          ? accounts.filter((item) => keys.includes(item.id))
           : accounts.filter((item) =>
               (item.username ?? '').includes(q.get('q') ?? ''),
             ),
@@ -93,7 +93,7 @@ it('reads a filter from the address by handle, with its note', async () => {
   )
 })
 
-it('picks one account, then a mode, and lets both go together', async () => {
+it('picks accounts, then a mode, and how many of them', async () => {
   const { el, search } = await mount('')
   expect(el.querySelector('[aria-label="关系方向"]')).toBeNull()
   const picker = el.querySelector<HTMLDetailsElement>('details.multi-select')!
@@ -103,11 +103,11 @@ it('picks one account, then a mode, and lets both go together', async () => {
   await vi.waitFor(() =>
     expect(picker.querySelectorAll('[role=option]')).toHaveLength(2),
   )
-  // Name first, the handle beside it; the list picks one at a time.
-  const options = [
+  // Name first, the handle beside it; several may be picked.
+  const options = () => [
     ...picker.querySelectorAll<HTMLButtonElement>('[role=option]'),
   ]
-  expect(options.map((o) => o.textContent)).toEqual([
+  expect(options().map((o) => o.textContent)).toEqual([
     '我 @owner',
     '朋友 @friend',
   ])
@@ -115,15 +115,18 @@ it('picks one account, then a mode, and lets both go together', async () => {
     picker
       .querySelector('[role=listbox]')!
       .getAttribute('aria-multiselectable'),
-  ).toBe('false')
-  options[1]!.click()
-  await vi.waitFor(() => expect(lastQuery(search).get('rel_of')).toBe(FRIEND))
+  ).toBe('true')
+  options()[1]!.click()
+  await vi.waitFor(() =>
+    expect(lastQuery(search).getAll('rel_of')).toEqual([FRIEND]),
+  )
   expect(lastQuery(search).get('rel')).toBe('following')
-  expect(picker.open).toBe(false)
   await vi.waitFor(() => expect(summary(el)).toBe('@friend 关注的'))
   expect(el.querySelector('.relation .note')?.textContent).toBe(
     '关注名单未抓取',
   )
+  // One account has no threshold to set.
+  expect(el.querySelector('[aria-label="至少几人"]')).toBeNull()
 
   el.querySelector<HTMLInputElement>('input[value=mutual]')!.click()
   await vi.waitFor(() => expect(lastQuery(search).get('rel')).toBe('mutual'))
@@ -132,14 +135,55 @@ it('picks one account, then a mode, and lets both go together', async () => {
     /^关注名单未抓取 · 粉丝名单 \d\d-\d\d 部分抓取$/,
   )
 
-  // Picking the same account again lets the filter go.
-  picker.open = true
-  picker.dispatchEvent(new Event('toggle'))
-  await nextTick()
-  picker.querySelectorAll<HTMLButtonElement>('[role=option]')[1]!.click()
+  // A second account: shared by both, by default.
+  options()[0]!.click()
+  await vi.waitFor(() =>
+    expect(lastQuery(search).getAll('rel_of')).toEqual([FRIEND, OWNER]),
+  )
+  expect(lastQuery(search).has('rel_min')).toBe(false)
+  await vi.waitFor(() =>
+    expect(summary(el)).toBe('与 @friend、@owner 中至少 2 人互关'),
+  )
+  const stepper = el.querySelector('[aria-label="至少几人"]')!
+  expect(stepper.textContent).toContain('2')
+  expect(
+    [...el.querySelectorAll('.relation .note li')].map((li) => li.textContent),
+  ).toEqual([
+    expect.stringMatching(/^@friend 关注未抓取、粉丝 \d\d-\d\d 部分$/),
+    expect.stringMatching(/^@owner 关注 \d\d-\d\d 完整、粉丝未抓取$/),
+  ])
+  // Two of two is the most.
+  expect(
+    stepper.querySelector<HTMLButtonElement>('[aria-label="增加"]')!.disabled,
+  ).toBe(true)
+  stepper.querySelector<HTMLButtonElement>('[aria-label="减少"]')!.click()
+  await vi.waitFor(() => expect(lastQuery(search).get('rel_min')).toBe('1'))
+  expect(summary(el)).toBe('与 @friend、@owner 中至少 1 人互关')
+
+  // Letting one go drops the threshold with it.
+  options()[0]!.click()
+  await vi.waitFor(() =>
+    expect(lastQuery(search).getAll('rel_of')).toEqual([FRIEND]),
+  )
+  expect(lastQuery(search).has('rel_min')).toBe(false)
+  // And the last one lets the filter go.
+  options()[1]!.click()
   await vi.waitFor(() => expect(lastQuery(search).has('rel_of')).toBe(false))
   expect(lastQuery(search).has('rel')).toBe(false)
   expect(el.querySelector('[aria-label="关系方向"]')).toBeNull()
+})
+
+it('reads several accounts and a threshold from the address', async () => {
+  const { el } = await mount(
+    `rel_of=${encodeURIComponent(OWNER)}&rel_of=${encodeURIComponent(FRIEND)}&rel=following&rel_min=1`,
+  )
+  await vi.waitFor(() =>
+    expect(summary(el)).toBe('@owner、@friend 中至少 1 人关注的'),
+  )
+  // Both are looked up at once.
+  expect(perspectiveCalls().map(([path]) => path)).toEqual([
+    `/collections/perspectives?rel_of=${encodeURIComponent(OWNER)}&rel_of=${encodeURIComponent(FRIEND)}`,
+  ])
 })
 
 it('searches accounts on the server', async () => {

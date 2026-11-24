@@ -164,3 +164,17 @@ it('moves folder filters along with a merged or deleted tag', () => {
   expect(retagQuery('not_tag=a&q=x', 'a')).toBe('q=x')
   expect(retagQuery('tag=a%2Cc&tag_mode=all', 'a')).toBe('tag=c')
 })
+
+it('saves perspectives as a set, the default threshold left out', () => {
+  const a = encodeURIComponent('x/x.profile/1')
+  const b = encodeURIComponent('x/x.profile/2')
+  expect(
+    folderFilter(`rel_of=${b}&rel=following&rel_of=${a}&rel_of=${b}&rel_min=2`),
+  ).toBe(`rel=following&rel_of=${a}&rel_of=${b}`)
+  expect(folderFilter(`rel_of=${b}&rel_of=${a}&rel=following&rel_min=1`)).toBe(
+    `rel=following&rel_min=1&rel_of=${a}&rel_of=${b}`,
+  )
+  expect(folderFilter(`rel_of=${a}&rel=mutual&rel_min=1`)).toBe(
+    `rel=mutual&rel_of=${a}`,
+  )
+})

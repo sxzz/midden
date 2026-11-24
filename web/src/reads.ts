@@ -111,6 +111,15 @@ export function readGraph(
   )
 }
 
+/** A list's API query for the client: repeated keys stay lists. */
+export function listQuery(params: URLSearchParams) {
+  return {
+    ...Object.fromEntries(params),
+    author: params.getAll('author'),
+    rel_of: params.getAll('rel_of'),
+  }
+}
+
 /**
  * One page of a list for the list's API query. A share lists its folder or a
  * profile's posts, narrowed by the same filters but tags, save dates and
@@ -144,11 +153,6 @@ export function readCount(params: URLSearchParams, signal?: AbortSignal) {
   )
 }
 
-const listQuery = (params: URLSearchParams) => ({
-  ...Object.fromEntries(params),
-  author: params.getAll('author'),
-})
-
 /** A list's query as a share takes it, without the filters it refuses. */
 function publicQuery(params: URLSearchParams) {
   params = new URLSearchParams(params)
@@ -163,7 +167,7 @@ function publicQuery(params: URLSearchParams) {
     ...RELATION_KEYS,
   ])
     params.delete(key)
-  return listQuery(params)
+  return { ...Object.fromEntries(params), author: params.getAll('author') }
 }
 
 /** Authors for the author filter: within the share when one is open. */

@@ -19,7 +19,7 @@ import {
 import { kindOf, KINDS, localDay, type Kind } from '../folders'
 import { listSort, listsProfiles } from '../presentation'
 import { readAuthors } from '../reads'
-import { isRel, type Rel } from '../relation-filter'
+import { defaultRelMin, isRel, relMinOf, type Rel } from '../relation-filter'
 import { shareSlug } from '../share'
 import RelationFilter from './RelationFilter.vue'
 import TagEditSheet from './TagEditSheet.vue'
@@ -70,6 +70,12 @@ function relMode(params: URLSearchParams): Rel | '' {
   const rel = params.get('rel')
   return !shared && isRel(rel) ? rel : ''
 }
+/** A threshold the address sets apart from the default, else 0. */
+function relMinParam(params: URLSearchParams): number {
+  const count = new Set(params.getAll('rel_of').filter(Boolean)).size
+  const min = relMinOf(params.get('rel_min'), count)
+  return min === defaultRelMin(count) ? 0 : min
+}
 function read(query: string) {
   const params = new URLSearchParams(query)
   const types = (params.get('entity_type') || '').split(',').filter(Boolean)
@@ -80,9 +86,11 @@ function read(query: string) {
     tagMode: !shared && params.get('tag_mode') === 'all' ? 'all' : '',
     /** Tags none of which may be there. */
     notTag: shared ? [] : ids(params.get('not_tag')),
-    /** The account whose follows select, and which of them. */
-    relOf: shared ? '' : params.get('rel_of') || '',
+    /** The accounts whose follows select, which of them, and how many. */
+    relOf: shared ? [] : [...new Set(params.getAll('rel_of').filter(Boolean))],
     rel: relMode(params),
+    /** 0 for the default. */
+    relMin: shared ? 0 : relMinParam(params),
     postType: params.get('post_type') || '',
     authors: params.getAll('author'),
     layout: params.get('layout') === 'album' ? 'album' : '',
@@ -210,7 +218,7 @@ const open = shallowRef(
     form.platform ||
     form.tag.length ||
     form.notTag.length ||
-    form.relOf ||
+    form.relOf.length ||
     form.authors.length ||
     form.media.length ||
     form.visibility ||
@@ -252,8 +260,11 @@ function stringify(f: Form) {
     ['tag', f.tag.toSorted().join(',')],
     ['tag_mode', f.tag.length > 1 ? f.tagMode : ''],
     ['not_tag', f.notTag.toSorted().join(',')],
-    ['rel_of', f.rel ? f.relOf : ''],
-    ['rel', f.relOf ? f.rel : ''],
+    ['rel', f.relOf.length ? f.rel : ''],
+    [
+      'rel_min',
+      f.rel && f.relOf.length > 1 && f.relMin ? String(f.relMin) : '',
+    ],
     ['post_type', f.postType],
     ['q', f.q],
     ['layout', f.layout],
@@ -272,6 +283,7 @@ function stringify(f: Form) {
   ])
     if (v) q.set(k, v)
   for (const author of f.authors) q.append('author', author)
+  if (f.rel) for (const key of f.relOf) q.append('rel_of', key)
   return q.toString()
 }
 const build = () => stringify(form)
@@ -320,8 +332,9 @@ watch(
     form.tag.join(','),
     form.tagMode,
     form.notTag.join(','),
-    form.relOf,
+    form.relOf.join('\n'),
     form.rel,
+    form.relMin,
     form.sort,
     form.order,
     form.visibility,
@@ -648,6 +661,7 @@ const tagSummary = computed(() => {
         v-if="!shared"
         v-model:rel-of="form.relOf"
         v-model:rel="form.rel"
+        v-model:rel-min="form.relMin"
         @summary="(text) => (relationSummary = text)"
       />
       <template v-if="posts">

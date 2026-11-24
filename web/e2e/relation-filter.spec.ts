@@ -30,12 +30,12 @@ test('the 关系 filter picks an account, then whose follows to list', async ({
     if (url.pathname === '/v1/tags' || url.pathname === '/v1/folders')
       return r.fulfill({ json: [] })
     if (url.pathname === '/v1/collections/perspectives') {
-      const key = url.searchParams.get('rel_of')
+      const keys = url.searchParams.getAll('rel_of')
       const q = url.searchParams.get('q') ?? ''
       return r.fulfill({
         json: {
           items: accounts.filter((a) =>
-            key ? a.id === key : a.username.includes(q),
+            keys.length ? keys.includes(a.id) : a.username.includes(q),
           ),
         },
       })
@@ -79,6 +79,29 @@ test('the 关系 filter picks an account, then whose follows to list', async ({
     '关注名单未抓取 · 粉丝名单未抓取',
   )
   await page.screenshot({ path: 'test-results/relation-filter.png' })
+
+  // A second account: those both are mutual with, by default.
+  if (!(await options.first().isVisible())) await picker.click()
+  await expect(options).toHaveCount(2)
+  await options.filter({ hasText: '@owner' }).click()
+  const several = () => {
+    const q = queries.at(-1)
+    return q && [q.getAll('rel_of'), q.get('rel'), q.get('rel_min')]
+  }
+  await expect.poll(several).toEqual([[FRIEND, OWNER], 'mutual', null])
+  await expect(page.locator('.filter-summary')).toHaveText(
+    '与 @friend、@owner 中至少 2 人互关',
+  )
+  const stepper = page.getByRole('group', { name: '至少几人' })
+  await expect(stepper.locator('output')).toHaveText('2')
+  await stepper.getByRole('button', { name: '减少' }).click()
+  await expect.poll(several).toEqual([[FRIEND, OWNER], 'mutual', '1'])
+  await expect(page.locator('.relation .note li')).toHaveCount(2)
+  await page.screenshot({ path: 'test-results/relation-filter-several.png' })
+  // Back to one.
+  if (!(await options.first().isVisible())) await picker.click()
+  await options.filter({ hasText: '@owner' }).click()
+  await expect.poll(several).toEqual([[FRIEND], 'mutual', null])
 
   // The address keeps it; a reload reads the account by its handle again.
   await expect(page).toHaveURL(/rel=mutual/)

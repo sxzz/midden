@@ -2,6 +2,8 @@
 // requests; the address keeps the list's own form of it (local dates, the
 // tab's entity types left out). These convert between the two.
 
+import { defaultRelMin } from './relation-filter'
+
 /** The list tab a query belongs to. */
 export type ListTab = 'x.post' | 'x.profile'
 
@@ -151,6 +153,19 @@ function normalizeTags(q: URLSearchParams) {
 }
 
 /**
+ * Perspectives as the server keeps them: a set, with the default threshold
+ * (two of several, else the one) left out.
+ */
+function normalizeRelations(q: URLSearchParams) {
+  const keys = [...new Set(q.getAll('rel_of').filter(Boolean))]
+  q.delete('rel_of')
+  for (const key of keys) q.append('rel_of', key)
+  if (keys.length && q.get('rel_min') === String(defaultRelMin(keys.length)))
+    q.delete('rel_min')
+  return q
+}
+
+/**
  * A query with one tag merged into another, or deleted when there is none
  * to take its place, the way the server rewrites a folder's filter.
  */
@@ -185,7 +200,9 @@ export function retagQuery(raw: string, from: string, to?: string) {
  */
 export function folderFilter(raw: string, kind?: Kind) {
   const entries = [
-    ...normalizeTags(new URLSearchParams(apiQuery(raw, kind))),
+    ...normalizeRelations(
+      normalizeTags(new URLSearchParams(apiQuery(raw, kind))),
+    ),
   ].filter(([key, value]) => value && key !== 'cursor')
   entries.sort(([a, x], [b, y]) =>
     a < b ? -1 : a > b ? 1 : x < y ? -1 : x > y ? 1 : 0,

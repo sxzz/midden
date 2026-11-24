@@ -36,6 +36,7 @@ import {
 } from '../folders'
 import { backButton, host } from '../host'
 import { goBack } from '../navigation'
+import { listQuery } from '../reads'
 import ConfirmSheet from './ConfirmSheet.vue'
 import FolderMenuSheet from './FolderMenuSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
@@ -221,7 +222,7 @@ async function kindsFor(filter: string, saved: Folder): Promise<Kind[]> {
     try {
       const { types } = await call(
         client.collections.count.$get({
-          query: { ...Object.fromEntries(q), author: q.getAll('author') },
+          query: listQuery(q),
         }),
       )
       counted = { filter, types }
