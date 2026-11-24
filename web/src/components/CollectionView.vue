@@ -11,6 +11,7 @@ import BatchRefresh from './BatchRefresh.vue'
 import CollectionAlbum from './CollectionAlbum.vue'
 import CollectionFilters from './CollectionFilters.vue'
 import CollectionRow from './CollectionRow.vue'
+import DeleteSheet from './DeleteSheet.vue'
 import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import InfiniteLoader from './ui/InfiniteLoader.vue'
 import LibraryLayoutToggle from './ui/LibraryLayoutToggle.vue'
@@ -34,7 +35,7 @@ const props = defineProps<{
   /** Display name of the account this list belongs to, for its reposts. */
   repostedBy?: string
 }>()
-/** `actions`: more buttons for the toolbar, styled like 批量更新. */
+/** `actions`: more buttons for the toolbar, styled like 多选. */
 const slots = useSlots()
 const emit = defineEmits<{
   search: [query: string]
@@ -42,8 +43,10 @@ const emit = defineEmits<{
   more: []
   retry: []
   tagsChanged: [change: TagChange]
+  /** Deleted from the selection; `withPosts` when accounts' posts went too. */
+  deleted: [ids: string[], withPosts: boolean]
 }>()
-// A public link has no batch updates; its filters leave out the owner's tags.
+// A public link has no selection; its filters leave out the owner's tags.
 const shared = computed(() => !!shareSlug.value)
 // An album shows posts' media; accounts have none to show.
 const albums = computed(() => !listsProfiles(props.query))
@@ -73,6 +76,13 @@ function startSelecting() {
 function closeBatch() {
   selecting.value = false
   batch.value = 0
+}
+const deleting = shallowRef(false)
+function deleted(withPosts: boolean) {
+  const ids = selected.value
+  deleting.value = false
+  closeBatch()
+  emit('deleted', ids, withPosts)
 }
 function toggle(id: string) {
   selected.value = selected.value.includes(id)
@@ -131,7 +141,7 @@ const storage = computed(() =>
       class="batch"
       @click="startSelecting"
     >
-      批量更新
+      多选
     </button>
     <LibraryLayoutToggle
       v-if="albums"
@@ -198,7 +208,16 @@ const storage = computed(() =>
     :listed="listed"
     @select="(value) => (selected = value)"
     @started="selecting = false"
+    @delete="deleting = true"
     @close="closeBatch"
+  />
+  <DeleteSheet
+    v-if="batch"
+    :open="deleting"
+    :ids="selected"
+    :title="`删除 ${selected.length} 项收藏？`"
+    @deleted="deleted"
+    @cancel="deleting = false"
   />
 </template>
 

@@ -11,6 +11,8 @@ const emit = defineEmits<{
   select: [ids: string[]]
   /** The update is running: selection ends, this bar stays to link to it. */
   started: []
+  /** Asks to delete the selection; the list confirms it. */
+  delete: []
   close: []
 }>()
 const router = useRouter()
@@ -36,7 +38,7 @@ function openRecord() {
 </script>
 
 <template>
-  <div class="toolbar" role="region" aria-label="批量更新">
+  <div class="toolbar" role="region" aria-label="多选">
     <template v-if="started">
       <p class="status" role="status">已开始更新 {{ started.count }} 项</p>
       <button type="button" class="action" @click="emit('close')">关闭</button>
@@ -55,6 +57,14 @@ function openRecord() {
       </button>
       <p class="status">已选 {{ selected.length }} 项</p>
       <button type="button" class="action" @click="emit('close')">取消</button>
+      <button
+        type="button"
+        class="action destructive"
+        :disabled="!selected.length"
+        @click="emit('delete')"
+      >
+        删除
+      </button>
       <button
         type="button"
         class="action strong"
@@ -108,6 +118,9 @@ function openRecord() {
 }
 .action.strong {
   font-weight: 600;
+}
+.action.destructive {
+  color: var(--destructive);
 }
 .action:disabled {
   color: var(--subtle);

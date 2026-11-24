@@ -10,7 +10,7 @@ import { isProfileEntity } from '../relations'
 import { collectionRoute, shareSlug } from '../share'
 import CollectionAnnotations from './CollectionAnnotations.vue'
 import CollectionPost from './CollectionPost.vue'
-import ConfirmSheet from './ConfirmSheet.vue'
+import DeleteSheet from './DeleteSheet.vue'
 import ProfileCollections from './ProfileCollections.vue'
 import RevisionTimeline from './RevisionTimeline.vue'
 import ShareSheet from './ShareSheet.vue'
@@ -24,7 +24,10 @@ const props = defineProps<{
   showSensitive?: boolean
 }>()
 const emit = defineEmits<{
-  deleted: [id: string]
+  /** This collection is deleted; `withPosts` when its posts went too. */
+  deleted: [id: string, withPosts: boolean]
+  /** Collections listed under it were deleted. */
+  removed: [ids: string[], withPosts: boolean]
   updated: [collection: Collection]
   annotationsSaved: []
 }>()
@@ -50,7 +53,6 @@ const {
   historyPage,
   showPoint,
   isSeen,
-  remove,
   update,
   started,
   updating,
@@ -59,7 +61,6 @@ const {
   membersVersion,
 } = useCollectionDetail(
   () => props.id,
-  (id) => emit('deleted', id),
   (collection) => emit('updated', collection),
 )
 // A historical revision does not carry the collection's own save date, so keep
@@ -341,6 +342,7 @@ const version = computed(() =>
       :older="older && !shared"
       :older-busy="busy || updating || !available"
       @older="update({ posts: 'older' })"
+      @deleted="(ids, withPosts) => emit('removed', ids, withPosts)"
     />
     <UpdateSheet
       v-if="!shared && isProfile"
@@ -359,13 +361,12 @@ const version = computed(() =>
       @changed="loadExposure"
       @cancel="sharing = false"
     />
-    <ConfirmSheet
+    <DeleteSheet
       v-if="!shared"
       :open="confirmDelete"
-      title="删除这条收藏？"
-      confirm-label="删除"
-      :busy="busy"
-      @confirm="remove"
+      :ids="[id]"
+      :title="isProfile ? '删除这个账号？' : '删除这条收藏？'"
+      @deleted="(withPosts) => emit('deleted', id, withPosts)"
       @cancel="confirmDelete = false"
     />
   </template>

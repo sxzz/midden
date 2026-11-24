@@ -318,13 +318,21 @@ function updated(collection: Collection) {
     )
   loadUsage()
 }
-function deleted(id: string) {
-  for (const { collection } of all) collection.remove(id)
+/**
+ * Collections are gone. Their accounts' posts may have gone with them, and
+ * which ones only the server knows: then every list reloads.
+ */
+function forget(ids: string[], withPosts: boolean) {
+  for (const { collection } of all) for (const id of ids) collection.remove(id)
   counted = undefined
-  removed.value = [...removed.value, id]
-  scrolls.delete(id)
-  void router.push(listRoute)
+  removed.value = [...removed.value, ...ids]
+  for (const id of ids) scrolls.delete(id)
+  if (withPosts) stale()
   loadUsage()
+}
+function deleted(id: string, withPosts: boolean) {
+  forget([id], withPosts)
+  void router.push(listRoute)
 }
 function search(q: string) {
   let target = `/${q ? `?${q}` : ''}`
@@ -469,6 +477,14 @@ function listProps(list: ReturnType<typeof createList>, error = '') {
     onRetry: () => {
       if (list.loadedQuery !== undefined) void collection.load(list.loadedQuery)
     },
+    onDeleted: (ids: string[], withPosts: boolean) => {
+      const shown = list.loadedQuery
+      forget(ids, withPosts)
+      if (withPosts && shown !== undefined) {
+        list.loadedQuery = shown
+        void collection.load(shown)
+      }
+    },
   }
 }
 const viewProps = computed(() => {
@@ -488,6 +504,7 @@ const viewProps = computed(() => {
       savedAt: savedAt.value,
       showSensitive: showSensitive.value,
       onDeleted: deleted,
+      onRemoved: forget,
       onAnnotationsSaved: stale,
       onUpdated: updated,
     }

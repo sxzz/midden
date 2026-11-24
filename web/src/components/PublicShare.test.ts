@@ -127,7 +127,7 @@ it('opens a shared folder without login, with a tab per kind it holds', async ()
     el.querySelector<HTMLAnchorElement>('a.head')?.getAttribute('href'),
   ).toBe(`#/s/${SLUG}/collection/${POST}`)
   // Nothing of the owner's: no batch update, no login.
-  expect(buttons(el)).not.toContain('批量更新')
+  expect(buttons(el)).not.toContain('多选')
   expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
 
   const tab = [...el.querySelectorAll<HTMLButtonElement>('[role=tab]')].find(

@@ -38,7 +38,6 @@ const availability = async (id: string, signal: AbortSignal) =>
   ).available
 export function useCollectionDetail(
   id: () => string,
-  deleted: (id: string) => void,
   updated: (collection: Collection) => void,
 ) {
   const available = shallowRef(false)
@@ -317,22 +316,6 @@ export function useCollectionDetail(
         loadingPoint.value = false
     }
   }
-  async function remove() {
-    busy.value = true
-    try {
-      await call(
-        collections.$delete(
-          { param: { id: id() } },
-          { init: { signal: controller.signal } },
-        ),
-      )
-      deleted(id())
-    } catch (e) {
-      report(e)
-    } finally {
-      busy.value = false
-    }
-  }
   /** Show the collection as it is now, keeping the page on screen meanwhile. */
   async function reload() {
     const signal = controller.signal
@@ -414,7 +397,6 @@ export function useCollectionDetail(
     showPoint,
     /** Whether a point shows without a request. */
     isSeen: (point: string) => seen.has(key(point)),
-    remove,
     update,
     started,
     updating,

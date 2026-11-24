@@ -70,7 +70,6 @@ const Detail = {
   setup(props: { id: string }) {
     const used = useCollectionDetail(
       () => props.id,
-      () => {},
       (value) => updates.push(value),
     )
     if (props.id === 'kept') {

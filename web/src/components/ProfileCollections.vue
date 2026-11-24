@@ -23,6 +23,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** Read the timeline's next page (抓取更早的帖子). */
   older: []
+  /** Posts deleted from this list, as `CollectionView` reports them. */
+  deleted: [ids: string[], withPosts: boolean]
 }>()
 const router = useRouter()
 // Newest posts first is already the default order of a list of posts.
@@ -95,6 +97,12 @@ function open(id: string) {
       @open="open"
       @more="more"
       @retry="load(request)"
+      @deleted="
+        (ids, withPosts) => {
+          void refresh()
+          emit('deleted', ids, withPosts)
+        }
+      "
     >
       <template #actions>
         <button

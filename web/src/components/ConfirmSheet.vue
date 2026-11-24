@@ -44,6 +44,8 @@ function backdrop(event: MouseEvent) {
           description
         }}</span>
       </p>
+      <!-- Options of the action, between its description and the button. -->
+      <slot />
       <label v-if="phrase" class="phrase">
         <span>输入「{{ phrase }}」以确认</span>
         <input
