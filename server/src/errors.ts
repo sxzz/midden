@@ -14,6 +14,7 @@ export type ErrorKind =
   | 'invalid_annotation'
   | 'invalid_filter'
   | 'invalid_folder'
+  | 'invalid_tag'
   | 'invalid_cursor'
   | 'invalid_request'
   | 'no_more_pages'
@@ -32,6 +33,7 @@ const messages: Record<ErrorKind, string> = {
   invalid_annotation: '备注最多 10000 字，标签名最多 64 字，标签最多 100 个',
   invalid_filter: '筛选条件无效',
   invalid_folder: '收藏夹名称不能为空，最多 64 字',
+  invalid_tag: '标签名不能为空，最多 64 字',
   invalid_cursor: '翻页位置无效，请刷新后重试',
   invalid_request: '请求无效',
   no_more_pages: '没有更多帖子了',

@@ -16,6 +16,7 @@ import {
 } from '#library/annotations.ts'
 import { deleteCollection } from '#library/delete.ts'
 import { storageUsed } from '#library/read.ts'
+import { deleteTag, renameTag } from '#library/tags.ts'
 import { json, type Env } from './validate.ts'
 
 const accountJson = (
@@ -90,6 +91,15 @@ export function accountRoutes(ctx: AccountsContext) {
     })
 
     .get('/tags', (c) => c.json(listTags(ctx.db)))
+
+    .patch('/tags/:id', json(v.strictObject({ name: v.string() })), (c) =>
+      c.json(renameTag(ctx.db, c.req.param('id'), c.req.valid('json').name)),
+    )
+
+    .delete('/tags/:id', (c) => {
+      deleteTag(ctx.db, c.req.param('id'))
+      return c.body(null, 204)
+    })
 
     .get('/collections/:id/annotation', (c) =>
       c.json(readAnnotation(ctx.db, c.req.param('id'))),

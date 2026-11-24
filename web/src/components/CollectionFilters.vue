@@ -8,9 +8,17 @@ import {
   shallowRef,
   watch,
 } from 'vue'
-import { call, client, errorText, type Author, type Tag } from '../api'
+import {
+  call,
+  client,
+  errorText,
+  type Author,
+  type Tag,
+  type TagChange,
+} from '../api'
 import { kindOf, KINDS, localDay, type Kind } from '../folders'
 import { listSort, listsProfiles } from '../presentation'
+import TagEditSheet from './TagEditSheet.vue'
 import ChevronIcon from './ui/ChevronIcon.vue'
 import MultiSelect from './ui/MultiSelect.vue'
 import TagChips from './ui/TagChips.vue'
@@ -36,7 +44,11 @@ const props = defineProps<{
    */
   folder?: boolean
 }>()
-const emit = defineEmits<{ search: [query: string] }>()
+const emit = defineEmits<{
+  search: [query: string]
+  /** A tag was renamed, merged into another or deleted. */
+  tagsChanged: [change: TagChange]
+}>()
 /** The one value all of these share, or nothing. */
 function only<T extends string>(items: T[]): T | '' {
   return items.length && items.every((item) => item === items[0])
@@ -403,6 +415,17 @@ const mediaOptions = Object.entries(mediaNames).map(([value, label]) => ({
   value,
   label,
 }))
+// Tags are managed where they are picked: each chip opens its editor.
+const managing = shallowRef(false)
+const editing = shallowRef<Tag>()
+async function tagChanged(change: TagChange) {
+  editing.value = undefined
+  emit('tagsChanged', change)
+  await loadTags()
+  if (!tags.value.length) managing.value = false
+  // A filter on a tag merged away follows it; on a deleted one, it goes.
+  if (form.tag === change.from) form.tag = change.to?.id ?? ''
+}
 // The API filters on one tag, so the chips are a single-choice group; the
 // query string keeps storing it as a scalar.
 const tagFilter = computed({
@@ -502,9 +525,49 @@ const tagFilter = computed({
       <!-- Tags are your own vocabulary, so they get the same chips as in the
            collection itself, not a picker that hides them. -->
       <div v-if="tags.length || tagError" class="tag-filter">
-        <p class="tag-title">标签</p>
+        <p class="tag-title">
+          标签<button
+            v-if="tags.length"
+            type="button"
+            class="manage"
+            :aria-pressed="managing"
+            @click="managing = !managing"
+          >
+            {{ managing ? '完成' : '编辑' }}
+          </button>
+        </p>
+        <div
+          v-if="managing"
+          class="tag-edit"
+          role="group"
+          aria-label="编辑标签"
+        >
+          <button
+            v-for="tag in tags"
+            :key="tag.id"
+            type="button"
+            class="tag-chip"
+            :aria-label="`编辑标签「${tag.name}」`"
+            @click="editing = tag"
+          >
+            {{ tag.name
+            }}<svg
+              viewBox="0 0 24 24"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M4 20h4L19 9l-4-4L4 16z" />
+            </svg>
+          </button>
+        </div>
         <TagChips
-          v-if="tags.length"
+          v-else-if="tags.length"
           v-model="tagFilter"
           label="标签筛选"
           all-label="全部"
@@ -605,6 +668,12 @@ const tagFilter = computed({
       </div>
     </div>
   </form>
+  <TagEditSheet
+    :tag="editing"
+    :tags="tags"
+    @changed="tagChanged"
+    @close="editing = undefined"
+  />
 </template>
 
 <style scoped>
@@ -703,8 +772,46 @@ const tagFilter = computed({
   padding: 10px var(--inset) 12px;
 }
 .tag-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin: 0 0 8px;
   font-size: 15px;
+}
+.manage {
+  min-height: 32px;
+  padding: 0 4px;
+  color: var(--link);
+  font-size: 14px;
+}
+/* Same pills as the picker, so editing reads as the same list. */
+.tag-edit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 228px;
+  margin: -6px -4px;
+  padding: 6px 4px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 34px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  background: var(--fill);
+  font-size: 14px;
+  line-height: 1.3;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.tag-chip svg {
+  flex: none;
+  color: var(--subtle);
 }
 .tag-error {
   margin: 10px 0 0;

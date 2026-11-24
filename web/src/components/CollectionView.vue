@@ -16,7 +16,7 @@ import InfiniteLoader from './ui/InfiniteLoader.vue'
 import LibraryLayoutToggle from './ui/LibraryLayoutToggle.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
-import type { Collection, Usage } from '../api'
+import type { Collection, TagChange, Usage } from '../api'
 const props = defineProps<{
   items: Collection[]
   showSensitive?: boolean
@@ -41,6 +41,7 @@ const emit = defineEmits<{
   open: [id: string]
   more: []
   retry: []
+  tagsChanged: [change: TagChange]
 }>()
 // A public link lists without filters (they offer the owner's tags) or
 // batch updates.
@@ -116,6 +117,7 @@ const storage = computed(() =>
     :within-profile="withinProfile"
     :folder="folder"
     @search="(value) => emit('search', value)"
+    @tags-changed="(change) => emit('tagsChanged', change)"
   />
   <div
     v-if="(!selecting && items.length) || albums || slots.actions"

@@ -53,5 +53,17 @@ export function useFolders() {
     await call(client.folders[':id'].$delete({ param: { id } }))
     folders.value = folders.value.filter((f) => f.id !== id)
   }
-  return { folders, loaded, error, load, create, update, remove }
+  /**
+   * A tag merged into another: the server moved the folders filtering on it
+   * along, so they read the same here until the next load says so too.
+   */
+  function retag(from: string, to: string) {
+    folders.value = folders.value.map((folder) => {
+      const filter = new URLSearchParams(folder.filter)
+      if (filter.get('tag') !== from) return folder
+      filter.set('tag', to)
+      return { ...folder, filter: filter.toString() }
+    })
+  }
+  return { folders, loaded, error, load, create, update, remove, retag }
 }

@@ -371,4 +371,45 @@ describe('api', () => {
       { name: '空' },
     ])
   })
+
+  test('renames, merges and deletes tags', async () => {
+    const { ctx, call } = setup()
+    const send = (method: string, path: string, body?: unknown) =>
+      call(path, {
+        method,
+        body: body === undefined ? undefined : JSON.stringify(body),
+      })
+    await send('POST', '/captures', { url: 'https://fake.test/p/1' })
+    await ctx.queue.drain()
+    const { items } = (await (await call('/collections')).json()) as {
+      items: { id: string }[]
+    }
+    const annotated = (await (
+      await send('PATCH', `/collections/${items[0]!.id}/annotation`, {
+        tag_names: ['甲', '乙'],
+      })
+    ).json()) as { tags: { id: string; name: string }[] }
+    const a = annotated.tags.find((t) => t.name === '甲')!
+    const b = annotated.tags.find((t) => t.name === '乙')!
+
+    const renamed = await send('PATCH', `/tags/${a.id}`, { name: '丙' })
+    expect(await renamed.json()).toEqual({
+      tag: { id: a.id, name: '丙' },
+      merged: false,
+      moved: 0,
+    })
+    const merged = await send('PATCH', `/tags/${a.id}`, { name: '乙' })
+    expect(await merged.json()).toEqual({
+      tag: { id: b.id, name: '乙' },
+      merged: true,
+      moved: 0,
+    })
+    const blank = await send('PATCH', `/tags/${b.id}`, { name: ' ' })
+    expect(blank.status).toBe(400)
+    expect(await blank.json()).toEqual({ error: '标签名不能为空，最多 64 字' })
+    expect((await send('PATCH', `/tags/${b.id}`, {})).status).toBe(400)
+    expect((await send('DELETE', `/tags/${b.id}`)).status).toBe(204)
+    expect((await send('DELETE', `/tags/${b.id}`)).status).toBe(404)
+    expect(await (await call('/tags')).json()).toEqual([])
+  })
 })

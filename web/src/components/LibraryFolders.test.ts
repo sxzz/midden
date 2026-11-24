@@ -350,3 +350,57 @@ it('saves a quick save-date range as a relative one', async () => {
   )
   expect(el.querySelector('.folder-status')).toBeNull()
 })
+
+it('follows a tag merged away in the open folder, still unmodified', async () => {
+  const from = '00000000-0000-7000-8000-0000000000a1'
+  const into = '00000000-0000-7000-8000-0000000000b1'
+  folders = [
+    folder({ filter: `entity_type=x.post%2Cinstagram.post&tag=${from}` }),
+  ]
+  let tags = [
+    { id: from, name: '甲' },
+    { id: into, name: '乙' },
+  ]
+  let merged = false
+  const base = api.getMockImplementation()!
+  api.mockImplementation((path, request) => {
+    if (path === '/tags') return tags
+    // The folders' reload is slow: the address already names the new tag.
+    if (path === '/folders' && merged) return new Promise(() => {})
+    if (path === `/tags/${from}`) {
+      merged = true
+      // The server moves the folder along with the tag.
+      tags = tags.filter((t) => t.id !== from)
+      folders = folders.map((f) => ({
+        ...f,
+        filter: f.filter.replace(from, into),
+      }))
+      return { tag: tags[0], merged: true, moved: 1 }
+    }
+    return base(path, request)
+  })
+  const el = await mount(`/folder/${FOLDER}`)
+  await vi.waitFor(() => expect(router.currentRoute.value.query.tag).toBe(from))
+  await vi.waitFor(() => expect(button(el, '编辑')).toBeDefined())
+  button(el, '编辑').click()
+  await nextTick()
+  el.querySelector<HTMLButtonElement>('[aria-label="编辑标签「甲」"]')!.click()
+  await nextTick()
+  const input = el.querySelector<HTMLInputElement>('dialog[open] input')!
+  input.value = '乙'
+  input.dispatchEvent(new Event('input'))
+  await nextTick()
+  input.form!.requestSubmit()
+  const merge = await vi.waitFor(() => {
+    const found = [
+      ...el.querySelectorAll<HTMLButtonElement>('dialog[open] button'),
+    ].find((b) => b.textContent?.trim() === '合并')
+    expect(found).toBeDefined()
+    return found!
+  })
+  merge.click()
+  await vi.waitFor(() => expect(router.currentRoute.value.query.tag).toBe(into))
+  await vi.waitFor(() => expect(listQueries().at(-1)?.get('tag')).toBe(into))
+  expect(el.querySelector('.folder-status')).toBeNull()
+  expect(sent('PATCH', `/folders/${FOLDER}`)).toEqual([])
+})

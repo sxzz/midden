@@ -12,6 +12,7 @@ const statuses: Record<ErrorKind, ContentfulStatusCode> = {
   invalid_request: 400,
   invalid_filter: 400,
   invalid_folder: 400,
+  invalid_tag: 400,
   invalid_annotation: 400,
   invalid_credential: 400,
   invalid_account: 400,

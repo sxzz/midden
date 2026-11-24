@@ -13,6 +13,7 @@ import {
   errorText,
   type Collection,
   type Folder,
+  type TagChange,
   type Usage,
 } from '../api'
 import { useCollection } from '../composables/useCollection'
@@ -131,6 +132,7 @@ const {
   create: createFolder,
   update: updateFolder,
   remove: removeFolder,
+  retag: retagFolders,
 } = useFolders()
 const folder = computed(() =>
   folders.value.find((f) => f.id === folderId.value),
@@ -336,6 +338,13 @@ function saved() {
   stale()
   loadUsage()
 }
+/** Lists filtered on an edited tag hold other items now. */
+function tagsChanged(change: TagChange) {
+  if (change.to && change.to.id !== change.from)
+    retagFolders(change.from, change.to.id)
+  stale()
+  void loadFolders()
+}
 /** What the current list shows, as an address query. */
 const shownQuery = computed(() =>
   folderId.value ? folderList.query.value : lists[tab.value].query.value,
@@ -435,6 +444,7 @@ function listProps(list: ReturnType<typeof createList>, error = '') {
     next: collection.next.value,
     usage: usage.value,
     onSearch: search,
+    onTagsChanged: tagsChanged,
     onOpen: open,
     onMore: collection.more,
     onRetry: () => {

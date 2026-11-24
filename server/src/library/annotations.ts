@@ -27,6 +27,17 @@ const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
 
 const runes = (value: string) => [...value].length
 
+/** A tag name as stored: trimmed, not empty, at most 64 characters. */
+export function checkTagName(
+  raw: string,
+  kind: 'invalid_annotation' | 'invalid_tag',
+): string {
+  const name = raw.trim()
+  if (!name || runes(name) > MAX_TAG_NAME || name.includes('\0'))
+    throw new AppError(kind)
+  return name
+}
+
 export function listTags(db: Executor): Tag[] {
   return db
     .select({ id: tags.id, name: tags.name })
@@ -85,11 +96,7 @@ function validate(update: AnnotationUpdate): void {
   if (update.tagNames !== undefined) {
     if (update.tagIds !== undefined || update.tagNames.length > MAX_TAGS)
       throw invalid()
-    for (const name of update.tagNames) {
-      const trimmed = name.trim()
-      if (!trimmed || runes(trimmed) > MAX_TAG_NAME || trimmed.includes('\0'))
-        throw invalid()
-    }
+    for (const name of update.tagNames) checkTagName(name, 'invalid_annotation')
   }
   if (
     update.tagIds !== undefined &&

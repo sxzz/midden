@@ -81,6 +81,13 @@ export type Accounts = Ok<typeof client.accounts.$get>
 export type Account = Accounts['accounts'][number]
 export type AccountPlatform = Accounts['platforms'][number]
 export type Tag = Ok<typeof client.tags.$get>[number]
+/** What became of an edited tag, for lists and filters that name it. */
+export interface TagChange {
+  /** The edited tag's id. */
+  from: string
+  /** The tag it now is: itself renamed, or the one it merged into. */
+  to?: Tag
+}
 export type Folder = Ok<typeof client.folders.$get>[number]
 export type Share = Ok<typeof client.shares.$get>[number]
 export type PublicShareInfo = Ok<(typeof client.public)[':slug']['$get']>
