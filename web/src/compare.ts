@@ -45,6 +45,49 @@ export function followMatrix(data: RelationCompare): boolean[][] {
   return matrix
 }
 
+/** A cell of the matrix: row `a` and column `b`, said as a sentence. */
+export interface FollowCell {
+  kind: 'self' | 'none' | 'follows' | 'mutual'
+  /** 「@a 关注了 @b」 or 「@a 与 @b 互关」; empty when there is nothing. */
+  text: string
+}
+
+/**
+ * The matrix as cells, each saying who follows whom: the row's account
+ * follows the column's. `names` are the accounts as the page names them.
+ */
+export function followCells(
+  matrix: boolean[][],
+  names: string[],
+): FollowCell[][] {
+  return matrix.map((row, a) =>
+    row.map((follows, b) => {
+      if (a === b) return { kind: 'self', text: '' }
+      if (!follows) return { kind: 'none', text: '' }
+      return matrix[b]?.[a]
+        ? { kind: 'mutual', text: `${names[a]} 与 ${names[b]} 互关` }
+        : { kind: 'follows', text: `${names[a]} 关注了 ${names[b]}` }
+    }),
+  )
+}
+
+/** The follows among the compared as sentences, mutual pairs first. */
+export function followSentences(
+  matrix: boolean[][],
+  names: string[],
+): string[] {
+  const mutual: string[] = []
+  const oneWay: string[] = []
+  matrix.forEach((row, a) =>
+    row.forEach((follows, b) => {
+      if (a === b || !follows) return
+      if (!matrix[b]?.[a]) oneWay.push(`${names[a]} 关注了 ${names[b]}`)
+      else if (a < b) mutual.push(`${names[a]} 与 ${names[b]} 互关`)
+    }),
+  )
+  return [...mutual, ...oneWay]
+}
+
 /** A compared account's own view, for avatars and the graph. */
 function accountView(
   account: CompareAccount,

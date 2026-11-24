@@ -138,10 +138,24 @@ test('compares accounts: who follows whom, shared accounts by subset, the thresh
     .toEqual([[A, B, C], 'following', OWN])
   await expect(page.locator('.center .name')).toHaveText(['甲', '乙', '丙'])
   // 甲 follows 乙; 乙 and 丙 each other.
-  const cells = page.locator('.matrix tbody tr')
-  await expect(cells.nth(0).locator('td')).toHaveText(['', '✓', ''])
-  await expect(cells.nth(1).locator('td')).toHaveText(['', '', '✓'])
-  await expect(cells.nth(2).locator('td')).toHaveText(['', '✓', ''])
+  const matrix = page.locator('.matrix')
+  await expect(matrix.locator('.corner')).toHaveText('关注者 → 被关注')
+  await expect(matrix.locator('th.axis')).toHaveText(['被关注', '关注者'])
+  const cells = matrix.locator('tbody tr')
+  await expect(cells.nth(0).locator('td')).toHaveText(['', '→', ''])
+  await expect(cells.nth(1).locator('td')).toHaveText(['', '', '⇄'])
+  await expect(cells.nth(2).locator('td')).toHaveText(['', '⇄', ''])
+  await expect(cells.nth(0).locator('td').nth(1)).toHaveAttribute(
+    'title',
+    '@alpha 关注了 @beta',
+  )
+  await expect(
+    cells.nth(2).getByRole('cell', { name: '@gamma 与 @beta 互关' }),
+  ).toBeVisible()
+  await expect(page.locator('.sentences li')).toHaveText([
+    '@beta 与 @gamma 互关',
+    '@alpha 关注了 @beta',
+  ])
   // Two in common by default: four subsets, the largest first.
   const rows = page.locator('.combos .row')
   await expect(rows).toHaveCount(4)

@@ -3,7 +3,9 @@ import {
   comboRows,
   compareLayout,
   compareModel,
+  followCells,
   followMatrix,
+  followSentences,
   parseSubset,
 } from './compare'
 import type { RelationCompare } from './api'
@@ -63,6 +65,42 @@ it('reads who follows whom among the compared', () => {
     [false, true],
     [false, false],
   ])
+})
+
+it('says each follow of the matrix as a sentence, mutual pairs first', () => {
+  // a follows b and c; b and c follow each other; d follows nobody.
+  const matrix = [
+    [false, true, true, false],
+    [false, false, true, false],
+    [false, true, false, false],
+    [false, false, false, false],
+  ]
+  const names = ['@a', '@b', '@c', '丁']
+  const cells = followCells(matrix, names)
+  expect(cells[0]).toEqual([
+    { kind: 'self', text: '' },
+    { kind: 'follows', text: '@a 关注了 @b' },
+    { kind: 'follows', text: '@a 关注了 @c' },
+    { kind: 'none', text: '' },
+  ])
+  // Both cells of a mutual pair say so, each from its own row.
+  expect(cells[1]![2]).toEqual({ kind: 'mutual', text: '@b 与 @c 互关' })
+  expect(cells[2]![1]).toEqual({ kind: 'mutual', text: '@c 与 @b 互关' })
+  expect(cells[1]![0]).toEqual({ kind: 'none', text: '' })
+  expect(followSentences(matrix, names)).toEqual([
+    '@b 与 @c 互关',
+    '@a 关注了 @b',
+    '@a 关注了 @c',
+  ])
+  expect(
+    followSentences(
+      [
+        [false, false],
+        [false, false],
+      ],
+      names,
+    ),
+  ).toEqual([])
 })
 
 it('takes a subset from the address only when it fits', () => {

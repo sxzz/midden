@@ -5,7 +5,9 @@ import { errorText, type RelationCompare } from '../api'
 import {
   accountViews,
   compareModel,
+  followCells,
   followMatrix,
+  followSentences,
   itemViews,
   parseSubset,
   SIDES,
@@ -175,6 +177,16 @@ const model = computed(() =>
   compareModel(data.value, side.value, props.showSensitive),
 )
 const matrix = computed(() => (data.value ? followMatrix(data.value) : []))
+/** The compared accounts as the matrix and its sentences name them. */
+const names = computed(() =>
+  (data.value?.accounts ?? []).map((account) =>
+    perspectiveName(account.key, account),
+  ),
+)
+const cells = computed(() => followCells(matrix.value, names.value))
+const sentences = computed(() => followSentences(matrix.value, names.value))
+/** Up to four, the sentences read at once; beyond, they stay for phones. */
+const SENTENCES_ALWAYS = 4
 const notes = computed(() =>
   (data.value?.accounts ?? []).map((account) =>
     briefFetchNote(
@@ -279,12 +291,16 @@ const libraryRoute = computed(() => ({
       </div>
       <div v-if="accounts.length > 1" class="matrix-wrap">
         <table class="matrix">
-          <caption>
-            行关注列
-          </caption>
           <thead>
             <tr>
-              <td />
+              <td class="corner" colspan="2" rowspan="2">
+                关注者 <span aria-hidden="true">→</span> 被关注
+              </td>
+              <th class="axis" scope="colgroup" :colspan="accounts.length">
+                被关注
+              </th>
+            </tr>
+            <tr>
               <th v-for="account in accounts" :key="account.key" scope="col">
                 <MiniAvatar :view="account" :size="22" />
                 <span class="sr">{{ account.label }}</span>
@@ -292,22 +308,46 @@ const libraryRoute = computed(() => ({
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, a) in matrix" :key="a">
+            <tr v-for="(row, a) in cells" :key="a">
+              <th
+                v-if="a === 0"
+                class="axis side"
+                scope="rowgroup"
+                :rowspan="cells.length"
+              >
+                关注者
+              </th>
               <th scope="row">
                 <MiniAvatar :view="accounts[a]!" :size="22" />
                 <span class="sr">{{ accounts[a]!.label }}</span>
               </th>
               <td
-                v-for="(follows, b) in row"
+                v-for="(cell, b) in row"
                 :key="b"
-                :class="{ self: a === b, yes: follows }"
+                :class="cell.kind"
+                :title="cell.text || undefined"
+                :aria-label="cell.text || undefined"
               >
-                {{ a === b ? '' : follows ? '✓' : '' }}
+                {{
+                  cell.kind === 'mutual'
+                    ? '⇄'
+                    : cell.kind === 'follows'
+                      ? '→'
+                      : ''
+                }}
               </td>
             </tr>
           </tbody>
         </table>
       </div>
+      <ul
+        v-if="sentences.length"
+        class="sentences"
+        :class="{ phone: accounts.length > SENTENCES_ALWAYS }"
+        aria-label="互相关注"
+      >
+        <li v-for="sentence in sentences" :key="sentence">{{ sentence }}</li>
+      </ul>
       <ul v-if="notes.length" class="notes">
         <li v-for="note in notes" :key="note">{{ note }}</li>
       </ul>
@@ -596,11 +636,26 @@ const libraryRoute = computed(() => ({
   border-collapse: collapse;
   font-size: 13px;
 }
-.matrix caption {
-  padding-bottom: 6px;
+.matrix .corner {
+  padding: 0 8px 4px 0;
   color: var(--subtle);
   font-size: 12px;
+  white-space: nowrap;
   text-align: left;
+  vertical-align: bottom;
+}
+.matrix th.axis {
+  height: auto;
+  padding-bottom: 2px;
+  color: var(--subtle);
+  font-size: 12px;
+  font-weight: 500;
+}
+.matrix th.side {
+  width: 18px;
+  padding-right: 4px;
+  writing-mode: vertical-rl;
+  letter-spacing: 2px;
 }
 .matrix th,
 .matrix td {
@@ -612,12 +667,35 @@ const libraryRoute = computed(() => ({
 .matrix td {
   box-shadow: inset 0 0 0 0.5px var(--separator);
 }
+.matrix td.corner {
+  box-shadow: none;
+}
 .matrix td.self {
   background: var(--fill);
 }
-.matrix td.yes {
+.matrix td.follows {
   color: var(--link);
   font-weight: 700;
+}
+.matrix td.mutual {
+  background: var(--link);
+  color: var(--card);
+  font-weight: 700;
+}
+.sentences {
+  margin: 8px 0 0;
+  padding: 8px var(--inset);
+  border-radius: var(--radius);
+  background: var(--card);
+  list-style: none;
+  font-size: 14px;
+  line-height: 1.7;
+}
+/* Many accounts make many sentences: the matrix says it on wide screens. */
+@media (min-width: 600px) {
+  .sentences.phone {
+    display: none;
+  }
 }
 .sr {
   position: absolute;
