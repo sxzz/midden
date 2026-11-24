@@ -246,7 +246,13 @@ describe('the batch bar', () => {
       listed: ['a', 'b'],
       onMediaRemoved: removed,
     })
-    buttons(el, '删除媒体')[0]!.click()
+    el.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click()
+    await nextTick()
+    const menu = el.querySelector<HTMLDialogElement>('dialog[open]')!
+    expect(menu.textContent).toContain('已选 2 项')
+    buttons(menu, '删除媒体')[0]!.click()
+    await nextTick()
+    expect(menu.open).toBe(false)
     const sheet = [...document.querySelectorAll('dialog')].find((d) =>
       d.textContent?.includes('删除 2 项的媒体？'),
     )!

@@ -3,6 +3,7 @@ import { computed, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { toast } from '../composables/useToast'
 import MediaRemovalSheet from './MediaRemovalSheet.vue'
+import SelectionMenuSheet from './SelectionMenuSheet.vue'
 import UpdateSheet from './UpdateSheet.vue'
 import type { RemovalEffect } from '../api'
 const props = defineProps<{
@@ -23,6 +24,13 @@ const emit = defineEmits<{
 const router = useRouter()
 const sheet = shallowRef(false)
 const removing = shallowRef(false)
+const menu = shallowRef(false)
+// The menu closes first: each choice is confirmed by its own sheet.
+function openFromMenu(choice: 'media' | 'delete') {
+  menu.value = false
+  if (choice === 'media') removing.value = true
+  else emit('delete')
+}
 function removed(effect: RemovalEffect) {
   removing.value = false
   toast(`已删除 ${effect.media} 个媒体`)
@@ -58,32 +66,18 @@ function openRecord() {
       </button>
     </template>
     <template v-else>
-      <button
-        type="button"
-        class="action"
-        :disabled="!listed.length"
-        @click="emit('select', allSelected ? [] : listed)"
-      >
-        {{ allSelected ? '取消全选' : '全选' }}
-      </button>
-      <p class="status">已选 {{ selected.length }} 项</p>
       <button type="button" class="action" @click="emit('close')">取消</button>
-      <button
-        type="button"
-        class="action destructive"
-        :disabled="!selected.length"
-        @click="emit('delete')"
-      >
-        删除
-      </button>
-      <button
-        type="button"
-        class="action destructive"
-        :disabled="!selected.length"
-        @click="removing = true"
-      >
-        删除媒体
-      </button>
+      <p class="status selection">
+        <span class="count">已选 {{ selected.length }} 项</span>
+        <button
+          type="button"
+          class="select-all"
+          :disabled="!listed.length"
+          @click="emit('select', allSelected ? [] : listed)"
+        >
+          {{ allSelected ? '取消全选' : '全选' }}
+        </button>
+      </p>
       <button
         type="button"
         class="action strong"
@@ -92,6 +86,26 @@ function openRecord() {
       >
         更新
       </button>
+      <button
+        type="button"
+        class="action more"
+        aria-label="更多操作"
+        title="更多操作"
+        :disabled="!selected.length"
+        @click="menu = true"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="22"
+          height="22"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <circle cx="5.5" cy="12" r="1.6" />
+          <circle cx="12" cy="12" r="1.6" />
+          <circle cx="18.5" cy="12" r="1.6" />
+        </svg>
+      </button>
     </template>
   </div>
   <UpdateSheet
@@ -99,6 +113,13 @@ function openRecord() {
     :target="{ target: 'many', ids: selected }"
     @started="onStarted"
     @cancel="sheet = false"
+  />
+  <SelectionMenuSheet
+    :open="menu"
+    :count="selected.length"
+    @remove-media="openFromMenu('media')"
+    @delete="openFromMenu('delete')"
+    @cancel="menu = false"
   />
   <MediaRemovalSheet
     :open="removing"
@@ -116,9 +137,9 @@ function openRecord() {
   z-index: 5;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   margin: 0 var(--gutter);
-  padding: 4px 8px;
+  padding: 4px;
   border-radius: var(--radius);
   background: var(--card);
   box-shadow:
@@ -134,9 +155,28 @@ function openRecord() {
   line-height: 1.4;
   color: var(--subtle);
 }
+.selection {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  padding: 0;
+}
+.count {
+  white-space: nowrap;
+  color: var(--text);
+}
+.select-all {
+  min-height: 44px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--link);
+  white-space: nowrap;
+}
 .action {
   min-height: 44px;
-  padding: 0 10px;
+  padding: 0 8px;
   border-radius: 8px;
   font-size: 15px;
   color: var(--link);
@@ -145,13 +185,18 @@ function openRecord() {
 .action.strong {
   font-weight: 600;
 }
-.action.destructive {
-  color: var(--destructive);
+.action.more {
+  display: grid;
+  place-items: center;
+  min-width: 40px;
+  padding: 0;
 }
-.action:disabled {
+.action:disabled,
+.select-all:disabled {
   color: var(--subtle);
 }
-.action:active:not(:disabled) {
+.action:active:not(:disabled),
+.select-all:active:not(:disabled) {
   background: var(--fill);
 }
 </style>

@@ -73,6 +73,7 @@ test('select all toggles every listed collection', async ({ page }) => {
   await expect(
     page.getByRole('button', { name: '更新', exact: true }),
   ).toBeDisabled()
+  await expect(page.getByRole('button', { name: '更多操作' })).toBeDisabled()
   await page.getByRole('button', { name: '取消', exact: true }).click()
   await expect(page.getByRole('checkbox')).toHaveCount(0)
 })
@@ -110,12 +111,14 @@ test("delete a selection, with the accounts' posts only when asked", async ({
   })
   await page.goto('/app/')
   await page.getByRole('button', { name: '多选' }).click()
-  await expect(
-    page.getByRole('button', { name: '删除', exact: true }),
-  ).toBeDisabled()
+  const more = page.getByRole('button', { name: '更多操作' })
+  await expect(more).toBeDisabled()
   await page.getByRole('checkbox', { name: /作者1/ }).click()
   await page.getByRole('checkbox', { name: /作者2/ }).click()
-  await page.getByRole('button', { name: '删除', exact: true }).click()
+  await more.click()
+  const menu = page.getByRole('dialog', { name: '已选 2 项' })
+  await menu.getByRole('button', { name: '删除', exact: true }).click()
+  await expect(menu).toBeHidden()
   const sheet = page.getByRole('dialog', { name: '删除 2 项收藏？' })
   await expect(sheet.getByText('将删除 1 个账号、1 条帖子')).toBeVisible()
   // The accounts' posts stay unless asked for.

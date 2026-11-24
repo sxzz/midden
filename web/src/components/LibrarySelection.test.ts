@@ -79,7 +79,8 @@ it('多选 shows a bar to update or delete the selection', async () => {
   button(el, '多选')!.click()
   await nextTick()
   const bar = el.querySelector<HTMLElement>('[aria-label="多选"]')!
-  expect(button(bar, '删除')!.disabled).toBe(true)
+  const more = bar.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!
+  expect(more.disabled).toBe(true)
   expect(button(bar, '更新')!.disabled).toBe(true)
   const rows = [...el.querySelectorAll<HTMLElement>('[role="checkbox"]')]
   rows[0]!.click()
@@ -87,8 +88,16 @@ it('多选 shows a bar to update or delete the selection', async () => {
   await nextTick()
   expect(bar.textContent).toContain('已选 2 项')
   expect(button(bar, '更新')!.disabled).toBe(false)
+  expect(more.disabled).toBe(false)
 
-  button(bar, '删除')!.click()
+  // The removals sit in the ⋯ menu, which hands over to their confirmation.
+  more.click()
+  await nextTick()
+  const menu = el.querySelector<HTMLDialogElement>('dialog[open]')!
+  expect(button(menu, '删除媒体')).toBeDefined()
+  button(menu, '删除')!.click()
+  await nextTick()
+  expect(menu.open).toBe(false)
   const sheet = () => el.querySelector<HTMLElement>('dialog[open]')
   await vi.waitFor(() =>
     expect(sheet()?.textContent).toContain('将删除 1 个账号、1 条帖子'),
