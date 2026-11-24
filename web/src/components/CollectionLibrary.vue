@@ -565,25 +565,28 @@ const viewProps = computed(() => {
       @cancel="sheet = ''"
     />
     <FolderNameSheet
+      v-if="folder"
       :open="sheet === 'rename'"
       title="重命名收藏夹"
       confirm-label="保存"
-      :name="folder?.name"
+      :name="folder.name"
       :busy="busy"
       :error="sheetError"
       @submit="rename"
       @cancel="sheet = ''"
     />
     <FolderMenuSheet
+      v-if="folder"
       :open="sheet === 'menu'"
-      :name="folder?.name ?? ''"
+      :name="folder.name"
       @rename="openSheet('rename')"
       @delete="openSheet('delete')"
       @cancel="sheet = ''"
     />
     <ConfirmSheet
+      v-if="folder"
       :open="sheet === 'delete'"
-      :title="`删除收藏夹「${folder?.name ?? ''}」`"
+      :title="`删除收藏夹「${folder.name}」`"
       description="收藏夹中的收藏不会被删除。"
       confirm-label="删除收藏夹"
       :busy="busy"

@@ -40,7 +40,7 @@ function submit() {
     @cancel.prevent="busy || emit('cancel')"
   >
     <form class="group" @submit.prevent="submit">
-      <p :id="titleId" class="head">{{ title }}</p>
+      <p :id="titleId" class="title">{{ title }}</p>
       <label class="field">
         <span class="visually-hidden">名称</span>
         <input
@@ -90,7 +90,7 @@ function submit() {
   background: var(--card);
   overflow: hidden;
 }
-.head {
+.title {
   margin: 0;
   padding: 16px 16px 4px;
   text-align: center;

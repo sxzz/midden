@@ -25,7 +25,7 @@ function backdrop(event: MouseEvent) {
     @cancel.prevent="emit('cancel')"
   >
     <div class="group">
-      <p :id="titleId" class="head">{{ name }}</p>
+      <p :id="titleId" class="title">{{ name }}</p>
       <button type="button" class="action" @click="emit('rename')">
         重命名
       </button>
@@ -62,7 +62,7 @@ function backdrop(event: MouseEvent) {
   background: var(--card);
   overflow: hidden;
 }
-.head {
+.title {
   margin: 0;
   padding: 14px 16px;
   text-align: center;
