@@ -12,8 +12,12 @@
     "typecheck": "vue-tsc"
   },
   "dependencies": {
+    "@sigma/node-image": "^4.0.2",
+    "graphology": "^0.26.0",
+    "graphology-layout-forceatlas2": "^0.10.1",
     "hono": "^4.13.21",
     "photoswipe": "^5.4.4",
+    "sigma": "^4.0.6",
     "vue": "^3.6.0-rc.16",
     "vue-router": "^5.5.1"
   },
@@ -22,6 +26,7 @@
     "@playwright/test": "^1.65.1",
     "@vitejs/plugin-vue": "^6.0.11",
     "@vue/compiler-sfc": "^3.6.0-rc.16",
+    "graphology-types": "^0.24.8",
     "jsdom": "^31.0.1",
     "typescript": "^6.0.3",
     "vite": "^8.3.8",

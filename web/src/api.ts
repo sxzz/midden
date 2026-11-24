@@ -69,6 +69,10 @@ export type FollowChanges = Ok<
 >
 export type FollowChange = FollowChanges['items'][number]
 export type FollowAccount = FollowChange['account']
+export type FollowGraph = Ok<
+  (typeof client.collections)[':id']['graph']['$get']
+>
+export type GraphNode = FollowGraph['nodes'][number]
 export type Job = Ok<(typeof client.jobs)[':id']['$get']>
 /** How a capture's following or followers list fetch went (抓关系网). */
 export type RelationProgress = NonNullable<Job['relations']>[number]

@@ -13,6 +13,9 @@ import FollowChanges from './components/FollowChanges.vue'
 import ProfileChanges from './components/ProfileChanges.vue'
 import PublicHome from './components/PublicHome.vue'
 
+// The graph page brings sigma and graphology: loaded only when opened.
+const RelationGraph = () => import('./components/RelationGraph.vue')
+
 const SHARE = String.raw`/s/:slug([\w-]+)`
 // Pages inside a share take the collection; the slug is the share's own.
 const idOnly = (route: RouteLocationNormalized) => ({
@@ -54,6 +57,12 @@ export const router = createRouter({
       component: FollowChanges,
       props: true,
     },
+    {
+      path: '/collection/:id([a-f0-9-]+)/graph',
+      name: 'collection-graph',
+      component: RelationGraph,
+      props: true,
+    },
     { path: '/accounts', name: 'accounts', component: AccountsView },
     { path: '/captures', name: 'captures', component: CaptureRecords },
     {
@@ -88,6 +97,13 @@ export const router = createRouter({
       path: `${SHARE}/collection/:id([a-f0-9-]+)/follows`,
       name: 'share-collection-follows',
       component: FollowChanges,
+      props: idOnly,
+      meta: { public: true },
+    },
+    {
+      path: `${SHARE}/collection/:id([a-f0-9-]+)/graph`,
+      name: 'share-collection-graph',
+      component: RelationGraph,
       props: idOnly,
       meta: { public: true },
     },

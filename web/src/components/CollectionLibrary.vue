@@ -113,6 +113,7 @@ const capture = computed(() => route.name === 'capture')
 const stats = computed(() => route.name === 'collection-stats')
 const changes = computed(() => route.name === 'collection-changes')
 const follows = computed(() => route.name === 'collection-follows')
+const graphPage = computed(() => route.name === 'collection-graph')
 /** Any page reached from the library, which is where back returns to. */
 const nested = computed(
   () =>
@@ -123,7 +124,8 @@ const nested = computed(
     capture.value ||
     stats.value ||
     changes.value ||
-    follows.value,
+    follows.value ||
+    graphPage.value,
 )
 const {
   folders,
@@ -151,11 +153,13 @@ const title = computed(() =>
             ? '资料修改记录'
             : follows.value
               ? '关注变化'
-              : id.value
-                ? '收藏详情'
-                : folderId.value
-                  ? folder.value?.name || '收藏夹'
-                  : '我的收藏',
+              : graphPage.value
+                ? '关系图谱'
+                : id.value
+                  ? '收藏详情'
+                  : folderId.value
+                    ? folder.value?.name || '收藏夹'
+                    : '我的收藏',
 )
 // Telegram draws its own back button; only stand in for it elsewhere.
 const standalone = !host()?.initData
@@ -185,6 +189,8 @@ function viewKey(target: RouteLocationNormalized) {
     return `changes:${String(target.params.id)}`
   if (target.name === 'collection-follows')
     return `follows:${String(target.params.id)}`
+  if (target.name === 'collection-graph')
+    return `graph:${String(target.params.id)}`
   const key = String(target.params.id)
   // Returning to a collection we deleted must reload, not show the cached copy.
   return removed.value.includes(key) ? `${key}#removed` : key
@@ -475,7 +481,7 @@ const viewProps = computed(() => {
     }
   if (captures.value || capture.value) return { onSaved: saved }
   if (stats.value) return {}
-  if (changes.value || follows.value)
+  if (changes.value || follows.value || graphPage.value)
     return { showSensitive: showSensitive.value }
   if (id.value)
     return {

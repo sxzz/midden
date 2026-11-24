@@ -24,7 +24,7 @@ export function collectionHref(id: string) {
 /** A collection's page, or one of its own pages, as a route. */
 export function collectionRoute(
   id: string,
-  page?: 'stats' | 'changes' | 'follows',
+  page?: 'stats' | 'changes' | 'follows' | 'graph',
 ): RouteLocationRaw {
   const name = page ? `collection-${page}` : 'collection'
   return shareSlug.value

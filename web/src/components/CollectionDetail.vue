@@ -121,6 +121,7 @@ const pages = computed(
     trendable.value ||
     changeable.value ||
     followChangeable.value ||
+    !!follows.value ||
     !!link.value,
 )
 const router = useRouter()
@@ -132,6 +133,9 @@ function openChanges() {
 }
 function openFollows() {
   void router.push(collectionRoute(props.id, 'follows'))
+}
+function openGraph() {
+  void router.push(collectionRoute(props.id, 'graph'))
 }
 // Behind a public link the page only reads: no capture, notes or deletion.
 const shared = computed(() => !!shareSlug.value)
@@ -281,6 +285,7 @@ const version = computed(() =>
         chevron
         @select="openFollows"
       />
+      <ListButton v-if="follows" label="关系图谱" chevron @select="openGraph" />
       <ListButton v-if="link" label="打开原文" :href="link" />
       <ListButton
         v-if="!shared"

@@ -93,6 +93,25 @@ export function readFollowChanges(
 }
 
 /**
+ * A profile's follow graph: the accounts of `kinds` (all when absent), the
+ * `limit` with the most followers.
+ */
+export function readGraph(
+  id: string,
+  options: { kinds?: readonly string[]; limit?: number } = {},
+  signal?: AbortSignal,
+) {
+  const query: Record<string, string> = {}
+  if (options.kinds) query.kinds = options.kinds.join(',')
+  if (options.limit) query.limit = String(options.limit)
+  return call(
+    shareSlug.value
+      ? shared[':id'].graph.$get({ param: at(id), query }, init(signal))
+      : own.graph.$get({ param: { id }, query }, init(signal)),
+  )
+}
+
+/**
  * One page of a list for the list's API query. A share lists its folder or a
  * profile's posts, narrowed by the same filters but tags, save dates and
  * follows, which it refuses.
