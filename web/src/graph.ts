@@ -1,5 +1,6 @@
 import { previewURL, type FollowGraph, type GraphNode } from './api'
 import { accountName } from './follows'
+import { byFollowers, ringOrder } from './graph-layout'
 
 // The follow graph (关系图谱) as the page draws it: what the server sends,
 // turned into nodes and edges with their looks. Kept free of sigma so it
@@ -28,19 +29,21 @@ export interface GraphNodeView {
   node: GraphNode
   center: boolean
   kind?: GraphKind
-  /** Bigger with more followers, the center biggest. */
+  /** Radius in layout units: the center biggest, others a little by followers. */
   size: number
   /** The avatar to draw, if any; else `initial` stands for it. */
   image?: string
   initial: string
+  /** The name in the card and the list. */
   label: string
+  /** The name under the avatar, cut to about an avatar's width. */
+  caption: string
 }
 
 /**
  * A follow between two shown accounts: one-way from `source` to `target`,
  * or both ways (`mutual`, drawn without an arrow). `kind` is the other
- * account's for the center's own; `peer` for one between two others,
- * drawn lighter.
+ * account's for the center's own; `peer` for one between two others.
  */
 export interface GraphEdgeView {
   key: string
@@ -62,13 +65,45 @@ export function initialOf(node: GraphNode): string {
   return first ? first.toUpperCase() : '?'
 }
 
-/** A node's size by its follower count, on a log scale. */
+/** The radius of an account's avatar, in layout units. */
+export const NODE_SIZE = 20
+const CENTER_SIZE = 30
+
+/**
+ * A node's size by its follower count, on a log scale but mildly: from
+ * 0.85 to 1.15 of the usual size, so no avatar is much smaller than another.
+ */
 export function nodeSize(followers?: number): number {
   const count = Math.max(0, followers ?? 0)
-  return Math.min(15, 5 + 1.5 * Math.log10(1 + count))
+  return NODE_SIZE * (0.85 + 0.3 * Math.min(1, Math.log10(1 + count) / 7))
 }
 
-const CENTER_SIZE = 18
+/** About an avatar's width of text, a wide (CJK) character counting two. */
+const CAPTION_WIDTH = 14
+
+export function caption(label: string, width = CAPTION_WIDTH): string {
+  let used = 0
+  let out = ''
+  for (const char of label) {
+    const wide = char.length > 1 || char.charCodeAt(0) >= 0x2e80
+    used += wide ? 2 : 1
+    if (used > width) return `${out.trimEnd()}…`
+    out += char
+  }
+  return out
+}
+
+/**
+ * X's own avatar addresses name a 48px image; the graph draws avatars
+ * larger, so it asks X for the 200px one.
+ */
+export function avatarURL(asset: NonNullable<GraphNode['avatar']>): string {
+  const url = previewURL(asset)
+  if (url !== asset.remote_url) return url
+  return url.replace(normalAvatar, '$1_200x200$2')
+}
+const normalAvatar =
+  /^(https:\/\/pbs\.twimg\.com\/profile_images\/.+)_normal(\.\w+)$/
 
 export function graphModel(
   graph: FollowGraph | undefined,
@@ -76,7 +111,8 @@ export function graphModel(
 ): GraphModel {
   if (!graph?.nodes.length) return { nodes: [], edges: [] }
   const nodes = graph.nodes.map((node, index): GraphNodeView => {
-    const image = node.avatar ? previewURL(node.avatar) : ''
+    const image = node.avatar ? avatarURL(node.avatar) : ''
+    const label = accountName(node)
     return {
       key: node.entity_id,
       node,
@@ -88,7 +124,8 @@ export function graphModel(
         ? { image }
         : {}),
       initial: initialOf(node),
-      label: accountName(node),
+      label,
+      caption: caption(label),
     }
   })
   // One edge per pair: both directions make it mutual.
@@ -109,6 +146,95 @@ export function graphModel(
   }
   return { nodes, edges }
 }
+
+/** From this share of accounts with a follow among the others, force layout. */
+export const PEER_SHARE = 0.1
+
+/** Accounts with a follow among the others (not only with the center). */
+export function linkedAccounts(model: GraphModel): Set<string> {
+  const linked = new Set<string>()
+  for (const edge of model.edges)
+    if (edge.kind === 'peer') linked.add(edge.source).add(edge.target)
+  return linked
+}
+
+/** The share of accounts besides the center with a follow among the others. */
+export function peerShare(model: GraphModel): number {
+  const others = model.nodes.length - 1
+  return others < 1 ? 0 : linkedAccounts(model).size / others
+}
+
+/**
+ * How to place the accounts. Usually only the center's own lists are
+ * known, so every follow is with the center and a force layout draws a
+ * star: rings by kind show the same compactly. Once enough follows among
+ * the others are known, the force layout groups their circles in the
+ * middle, and the accounts without such follows keep their rings around.
+ */
+export function layoutKind(model: GraphModel): 'rings' | 'force' {
+  const linked = peerShare(model) * (model.nodes.length - 1)
+  return peerShare(model) >= PEER_SHARE && linked >= 3 ? 'force' : 'rings'
+}
+
+/** The list's sections, in the rings' order from the inside out. */
+export const groupOrder: readonly GraphKind[] = ringOrder
+
+/** The accounts besides the center, by kind, most followed first. */
+export function graphGroups(model: GraphModel) {
+  return groupOrder
+    .map((kind) => ({
+      kind,
+      nodes: byFollowers(
+        model.nodes
+          .filter((view) => !view.center && view.kind === kind)
+          .map((view) => ({ view, followers: view.node.followers })),
+      ).map(({ view }) => view),
+    }))
+    .filter((group) => group.nodes.length)
+}
+
+/** What a hovered or tapped account brings forward. */
+export interface Focus {
+  /** The account and its neighbours. */
+  nodes: Set<string>
+  /** Its edges. */
+  edges: Set<string>
+}
+
+export function focusOf(
+  model: GraphModel,
+  key: string | undefined,
+): Focus | undefined {
+  if (!key || model.nodes.every((view) => view.key !== key)) return
+  const nodes = new Set([key])
+  const edges = new Set<string>()
+  for (const edge of model.edges) {
+    if (edge.source !== key && edge.target !== key) continue
+    edges.add(edge.key)
+    nodes.add(edge.source).add(edge.target)
+  }
+  return { nodes, edges }
+}
+
+/** How an edge is drawn: whether it is in the focus, and whether any is. */
+export function edgeLook(
+  kind: GraphEdgeView['kind'],
+  state: { highlighted: boolean; focusing: boolean },
+): { visible: boolean; opacity: number; size: number } {
+  if (state.highlighted) return { visible: true, opacity: 0.95, size: 2 }
+  // A follow with the center says no more than the ring's colour: shown
+  // only for the account in focus.
+  if (kind !== 'peer') return { visible: false, opacity: 0, size: 0 }
+  return state.focusing
+    ? { visible: true, opacity: 0.08, size: 1 }
+    : { visible: true, opacity: 0.6, size: 1.4 }
+}
+
+/** Accounts outside the focus fade back. */
+export const nodeOpacity = (state: {
+  highlighted: boolean
+  focusing: boolean
+}) => (state.focusing && !state.highlighted ? 0.22 : 1)
 
 /** A day as the completeness line names it, e.g. 11-20, with the year if not this one. */
 export function shortDay(value: string, now = new Date()): string {

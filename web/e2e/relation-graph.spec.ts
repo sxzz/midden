@@ -115,6 +115,33 @@ test('opens a profile’s follow graph, with kinds to choose and more to load', 
     .poll(() => asked.at(-1))
     .toBe(`?kinds=${encodeURIComponent('following,mutual')}&limit=300`)
 
+  // The same accounts as a list, by kind, most followed first.
+  const modes = page
+    .getByRole('group', { name: '显示方式' })
+    .getByRole('button')
+  await expect(modes).toHaveText(['图谱', '列表'])
+  await modes.nth(1).click()
+  await expect(modes.nth(1)).toHaveAttribute('aria-pressed', 'true')
+  const sections = page.locator('.list section')
+  // The mock answers every kind, 100 of each among the first 300.
+  await expect(sections.locator('h2')).toHaveText([
+    /^互关\s*100$/,
+    /^关注\s*100$/,
+    /^粉丝\s*100$/,
+  ])
+  await expect(sections.first().locator('.name').first()).toHaveText('账号 3')
+  await sections.nth(1).locator('.person').first().click()
+  const card = page.getByRole('region', { name: '账号' })
+  await expect(card.locator('.name')).toHaveText('账号 1')
+  await expect(card.locator('.actions button')).toHaveText([
+    '以他为中心',
+    '打开详情',
+  ])
+  await card.getByRole('button', { name: '以他为中心' }).click()
+  await expect(page).toHaveURL(new RegExp(`/collection/${friendId}/graph$`))
+  await page.goBack()
+  await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/graph$`))
+
   await page.getByRole('button', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
 })

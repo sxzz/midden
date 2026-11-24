@@ -12,6 +12,7 @@ const { push, canvas } = vi.hoisted(() => ({
     shown: [] as GraphModel[],
     onSelect: undefined as ((key: string | undefined) => void) | undefined,
     selected: [] as (string | undefined)[],
+    camera: [] as string[],
     killed: false,
   },
 }))
@@ -29,6 +30,9 @@ vi.mock('../graph-canvas', () => ({
       select: (key: string | undefined) => canvas.selected.push(key),
       setTheme: () => {},
       resize: () => {},
+      zoomIn: () => canvas.camera.push('in'),
+      zoomOut: () => canvas.camera.push('out'),
+      fit: () => canvas.camera.push('fit'),
       kill: () => (canvas.killed = true),
     }
   },
@@ -41,6 +45,7 @@ afterEach(() => {
   vi.resetAllMocks()
   canvas.shown = []
   canvas.selected = []
+  canvas.camera = []
   canvas.killed = false
 })
 
@@ -173,6 +178,77 @@ it('opens a card for the tapped account and goes from it', async () => {
   canvas.onSelect!(undefined)
   await settle()
   expect(el.querySelector('.card')).toBeNull()
+})
+
+it('zooms and frames the graph from its buttons', async () => {
+  const { el } = await mount(() => graph())
+  const buttons = [...el.querySelectorAll('.zoom button')]
+  expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual([
+    '放大',
+    '缩小',
+    '显示全部',
+  ])
+  for (const button of buttons) (button as HTMLButtonElement).click()
+  expect(canvas.camera).toEqual(['in', 'out', 'fit'])
+})
+
+it('lists the same accounts by kind, and opens the same card from the list', async () => {
+  const many: FollowGraph = {
+    ...graph(),
+    nodes: [
+      ...graph().nodes,
+      {
+        entity_id: 'p',
+        external_id: '3',
+        name: '大号',
+        followers: 9,
+        kind: 'followers',
+      },
+      {
+        entity_id: 'q',
+        external_id: '4',
+        name: '小号',
+        followers: 1,
+        kind: 'mutual',
+      },
+    ],
+  }
+  const { el } = await mount(() => many)
+  const modes = [...el.querySelectorAll('.modes button')]
+  expect(modes.map(text)).toEqual(['图谱', '列表'])
+  expect(modes[0]!.getAttribute('aria-pressed')).toBe('true')
+  expect(el.querySelector('.list')).toBeNull()
+  ;(modes[1] as HTMLButtonElement).click()
+  await settle()
+  expect(modes[1]!.getAttribute('aria-pressed')).toBe('true')
+  // The canvas stays, hidden, for coming back.
+  expect((el.querySelector('.surface') as HTMLElement).style.display).toBe(
+    'none',
+  )
+  expect(el.querySelector('.zoom')).toBeNull()
+  const sections = [...el.querySelectorAll('.list section')]
+  expect(sections.map((s) => text(s.querySelector('h2')))).toEqual([
+    '互关2',
+    '粉丝2',
+  ])
+  expect(
+    sections.map((s) => [...s.querySelectorAll('.name')].map(text)),
+  ).toEqual([
+    ['小林', '小号'],
+    ['大号', '@outside'],
+  ])
+  expect(text(sections[0]!.querySelector('.followers'))).toBe('粉丝 12,345')
+  // A sensitive or missing avatar is its initial.
+  expect(text(sections[1]!.querySelectorAll('.initial')[1])).toBe('O')
+  ;(sections[1]!.querySelector('.person') as HTMLButtonElement).click()
+  await settle()
+  expect(text(el.querySelector('.card .name'))).toBe('大号')
+  expect(sections[1]!.querySelector('.person')!.classList).toContain('on')
+  ;(modes[0] as HTMLButtonElement).click()
+  await settle()
+  // Back on the graph, the same account stays chosen.
+  expect(canvas.selected.at(-1)).toBe('p')
+  expect(text(el.querySelector('.card .name'))).toBe('大号')
 })
 
 it('kills the canvas with the page', async () => {

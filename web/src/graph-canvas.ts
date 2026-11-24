@@ -8,7 +8,23 @@ import {
   pathLine,
   sdfCircle,
 } from 'sigma/rendering'
-import type { GraphEdgeView, GraphModel, GraphNodeView } from './graph'
+import {
+  edgeLook,
+  focusOf,
+  layoutKind,
+  linkedAccounts,
+  nodeOpacity,
+  type Focus,
+  type GraphEdgeView,
+  type GraphModel,
+} from './graph'
+import {
+  LABEL_GAP,
+  LABEL_HEIGHT,
+  placeLabels,
+  type LabelCandidate,
+} from './graph-labels'
+import { ringLayout } from './graph-layout'
 import type { LayoutRequest, LayoutUpdate } from './graph-layout.worker'
 
 /**
@@ -17,8 +33,12 @@ import type { LayoutRequest, LayoutUpdate } from './graph-layout.worker'
  */
 const imageStyle: object = { image: { attribute: 'image' } }
 
-// The WebGL canvas of the follow graph: sigma draws, a worker lays out.
-// Imported only by the graph page, on demand, with sigma and graphology.
+const FONT =
+  '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif'
+
+// The WebGL canvas of the follow graph: sigma draws, the layout module or
+// a worker places. Imported only by the graph page, on demand, with sigma
+// and graphology.
 
 export interface GraphTheme {
   text: string
@@ -28,7 +48,10 @@ export interface GraphTheme {
   following: string
   followers: string
   mutual: string
+  /** Follows among the others. */
   peer: string
+  /** The stage behind the graph, outlining names over edges. */
+  card: string
 }
 
 /** The page's colours, read from its CSS tokens (Telegram's or ours). */
@@ -40,12 +63,13 @@ export function readTheme(element: Element = document.documentElement) {
   return {
     text: token('--text', '#000'),
     page: token('--page', '#efeff4'),
+    card: token('--card', '#fff'),
     fill: token('--fill', '#e6e6ec'),
     center: token('--link', '#3390ec'),
     following: dark ? '#5aa9f0' : '#2f7fd8',
     followers: dark ? '#f0a35a' : '#d9822b',
     mutual: dark ? '#5fcf8a' : '#2e9e5b',
-    peer: token('--subtle', '#707579'),
+    peer: dark ? '#b9a4f5' : '#6a4fc9',
   } satisfies GraphTheme
 }
 
@@ -55,27 +79,32 @@ interface NodeAttributes {
   size: number
   color: string
   image: string
-  label: string
+  caption: string
   center: boolean
   kind: string
   initial: string
+  followers: number
   [key: string]: unknown
 }
 
 interface EdgeAttributes {
-  kind: string
+  kind: GraphEdgeView['kind']
   mutual: boolean
   [key: string]: unknown
 }
 
 export interface GraphCanvas {
-  /** Show these nodes and edges; ones already shown keep their place. */
+  /** Show these nodes and edges, placed afresh and framed. */
   show: (model: GraphModel) => void
   /** Mark one node as chosen, or none. */
   select: (key: string | undefined) => void
   setTheme: (theme: GraphTheme) => void
   /** Follow a change of the container's size. */
   resize: () => void
+  zoomIn: () => void
+  zoomOut: () => void
+  /** Frame every node. */
+  fit: () => void
   kill: () => void
 }
 
@@ -88,35 +117,24 @@ function initialImage(
   const key = `${initial}|${theme.fill}|${theme.text}`
   let url = cache.get(key)
   if (url) return url
+  // Large enough to stay sharp on a high-density screen, zoomed in.
+  const side = 192
   const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = 96
+  canvas.width = canvas.height = side
   const g = canvas.getContext('2d')
   if (!g) return ''
   g.fillStyle = theme.fill
   g.beginPath()
-  g.arc(48, 48, 48, 0, Math.PI * 2)
+  g.arc(side / 2, side / 2, side / 2, 0, Math.PI * 2)
   g.fill()
   g.fillStyle = theme.text
-  g.font =
-    '600 46px -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif'
+  g.font = `600 ${side * 0.46}px ${FONT}`
   g.textAlign = 'center'
   g.textBaseline = 'middle'
-  g.fillText(initial, 48, 51)
+  g.fillText(initial, side / 2, side * 0.53)
   url = canvas.toDataURL('image/png')
   cache.set(key, url)
   return url
-}
-
-/** A starting place: the center in the middle, each kind in its sector. */
-function seed(node: GraphNodeView, index: number) {
-  if (node.center) return { x: 0, y: 0 }
-  const sector = { following: 0, mutual: 1, followers: 2 }[
-    node.kind ?? 'mutual'
-  ]
-  const angle =
-    ((sector + ((index * 0.618) % 1)) / 3) * Math.PI * 2 + Math.random() * 0.2
-  const radius = 40 + Math.random() * 60
-  return { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }
 }
 
 export function createGraphCanvas(
@@ -141,7 +159,7 @@ export function createGraphCanvas(
         // The fill shows as a ring in the kind's colour around the avatar.
         layers: [
           layerFill(),
-          layerImage({ imageAttribute: 'image', padding: 0.08 }),
+          layerImage({ imageAttribute: 'image', padding: 0.11 }),
         ],
       },
       edges: {
@@ -150,8 +168,6 @@ export function createGraphCanvas(
         layers: [layerPlain()],
       },
     },
-    // Sigma's conditional style rules are objects with `then`.
-    /* eslint-disable unicorn/no-thenable */
     styles: {
       nodes: [
         {
@@ -159,53 +175,196 @@ export function createGraphCanvas(
           y: { attribute: 'y' },
           size: { attribute: 'size' },
           color: (attributes) => nodeColor(attributes),
-          label: { attribute: 'label' },
           ...imageStyle,
-          labelColor: () => theme.text,
-          labelSize: 12,
-          depth: 'nodes',
-        },
-        {
-          whenState: 'isHighlighted',
-          then: { labelVisibility: 'visible', depth: 'topNodes' },
-        },
-        {
-          whenState: 'isHovered',
-          then: { labelVisibility: 'visible', depth: 'topNodes' },
+          opacity: (_attributes, state, graphState) =>
+            nodeOpacity({
+              highlighted: state.isHighlighted,
+              focusing: graphState.hasHighlighted,
+            }),
+          depth: (_attributes, state) =>
+            state.isHighlighted || state.isHovered ? 'topNodes' : 'nodes',
         },
       ],
       edges: [
         {
           color: (attributes) => edgeColor(attributes.kind),
-          // Edges among the others are thinner and fainter than the center's.
-          size: (attributes) => (attributes.kind === 'peer' ? 0.6 : 1.2),
-          opacity: (attributes) => (attributes.kind === 'peer' ? 0.3 : 0.75),
+          visibility: (attributes, state, graphState) =>
+            edgeLook(attributes.kind, {
+              highlighted: state.isHighlighted,
+              focusing: graphState.hasHighlighted,
+            }).visible
+              ? 'visible'
+              : 'hidden',
+          size: (attributes, state, graphState) =>
+            edgeLook(attributes.kind, {
+              highlighted: state.isHighlighted,
+              focusing: graphState.hasHighlighted,
+            }).size,
+          opacity: (attributes, state, graphState) =>
+            edgeLook(attributes.kind, {
+              highlighted: state.isHighlighted,
+              focusing: graphState.hasHighlighted,
+            }).opacity,
           head: (attributes) => (attributes.mutual ? 'none' : 'arrow'),
-          depth: 'edges',
-        },
-        {
-          whenState: 'isHighlighted',
-          then: { opacity: 1, size: 2, depth: 'topEdges' },
+          depth: (_attributes, state) =>
+            state.isHighlighted ? 'topEdges' : 'edges',
         },
       ],
     },
-    /* eslint-enable unicorn/no-thenable */
     settings: {
       gestureTarget: 'graph',
       enableNodeDrag: false,
-      labelRenderedSizeThreshold: 14,
-      minCameraRatio: 0.03,
-      maxCameraRatio: 3,
-      stagePadding: 24,
+      enableCameraRotation: false,
+      // Sizes are in layout units and grow with the zoom, like the gaps
+      // between them: zooming in makes room for names.
+      itemSizesReference: 'positions',
+      zoomToSizeRatioFunction: (ratio) => ratio,
+      // Names are drawn by the label layer below, not by sigma.
+      renderLabels: false,
+      minCameraRatio: 0.08,
+      maxCameraRatio: 2,
+      stagePadding: 28,
       // A cached page is kept hidden, with no size, until shown again.
       allowInvalidContainer: true,
-      itemSizesReference: 'screen',
-      // Frame the positions only: long names would shrink the graph.
-      autoRescaleContent: 'positions',
+      // Frame the avatars, not only their centers.
+      autoRescaleContent: 'nodes',
     },
   })
   sigma.on('clickNode', ({ node }) => options.onSelect(node))
   sigma.on('clickStage', () => options.onSelect(undefined))
+
+  let model: GraphModel = { nodes: [], edges: [] }
+  let selected: string | undefined
+  let hovered: string | undefined
+  let focus: Focus | undefined
+  sigma.on('enterNode', ({ node }) => {
+    hovered = node
+    applyFocus()
+  })
+  sigma.on('leaveNode', () => {
+    hovered = undefined
+    applyFocus()
+  })
+
+  /** Bring the hovered (or else the chosen) account and its follows forward. */
+  function applyFocus() {
+    const key = hovered ?? selected
+    if (focus) {
+      sigma.setNodesState(
+        [...focus.nodes].filter((n) => graph.hasNode(n)),
+        { isHighlighted: false },
+      )
+      sigma.setEdgesState(
+        [...focus.edges].filter((e) => graph.hasEdge(e)),
+        { isHighlighted: false },
+      )
+    }
+    focus = focusOf(model, key)
+    sigma.scheduleRender()
+    if (!focus) return
+    sigma.setNodesState(
+      [...focus.nodes].filter((n) => graph.hasNode(n)),
+      { isHighlighted: true },
+    )
+    sigma.setEdgesState(
+      [...focus.edges].filter((e) => graph.hasEdge(e)),
+      { isHighlighted: true },
+    )
+  }
+
+  // Names in 2D over the WebGL canvas (see graph-labels.ts for why).
+  const names = document.createElement('canvas')
+  names.className = 'graph-names'
+  Object.assign(names.style, {
+    position: 'absolute',
+    inset: '0',
+    width: '100%',
+    height: '100%',
+    pointerEvents: 'none',
+  })
+  container.append(names)
+  const widths = new Map<string, number>()
+  const LABEL_FONT = `500 12px ${FONT}`
+  sigma.on('afterRender', drawNames)
+
+  function drawNames() {
+    const { width, height } = sigma.getDimensions()
+    // The pixel ratio sigma draws the avatars at.
+    const ratio = sigma.getRenderParams().pixelRatio || 1
+    const w = Math.round(width * ratio)
+    const h = Math.round(height * ratio)
+    if (names.width !== w || names.height !== h) {
+      names.width = w
+      names.height = h
+    }
+    const g = names.getContext('2d')
+    if (!g) return
+    g.setTransform(ratio, 0, 0, ratio, 0, 0)
+    g.clearRect(0, 0, width, height)
+    if (!width || !height) return
+    g.font = LABEL_FONT
+    const key = hovered ?? selected
+    const candidates: LabelCandidate[] = []
+    graph.forEachNode((node, a) => {
+      const data = sigma.getNodeDisplayData(node)
+      if (!data) return
+      const at = sigma.framedGraphToViewport(data)
+      let measured = widths.get(a.caption)
+      if (measured === undefined) {
+        measured = g.measureText(a.caption).width
+        widths.set(a.caption, measured)
+      }
+      candidates.push({
+        key: node,
+        text: a.caption,
+        x: at.x,
+        y: at.y,
+        radius: sigma.scaleSize(data.size),
+        width: measured,
+        forced: node === key || a.center,
+        // The focused account, then its neighbours, the center, then by followers.
+        priority:
+          node === hovered
+            ? 4e9
+            : node === selected
+              ? 3e9
+              : a.center
+                ? 2e9
+                : focus?.nodes.has(node)
+                  ? 1e9 + a.followers
+                  : a.followers,
+        hidden: !!focus && !focus.nodes.has(node) && !a.center,
+      })
+    })
+    g.textAlign = 'center'
+    g.textBaseline = 'top'
+    g.lineJoin = 'round'
+    g.lineWidth = 3
+    for (const label of placeLabels(candidates, { width, height })) {
+      if (label.forced) {
+        // Over other avatars, on a plate of the stage's colour.
+        g.fillStyle = theme.card
+        g.shadowColor = 'rgba(0, 0, 0, 0.25)'
+        g.shadowBlur = 4
+        g.beginPath()
+        g.roundRect(
+          label.x - label.width / 2 - 6,
+          label.y - 1,
+          label.width + 12,
+          LABEL_HEIGHT + 2,
+          8,
+        )
+        g.fill()
+        g.shadowBlur = 0
+        g.shadowColor = 'transparent'
+      } else {
+        g.strokeStyle = theme.card
+        g.strokeText(label.text, label.x, label.y + 1)
+      }
+      g.fillStyle = theme.text
+      g.fillText(label.text, label.x, label.y + 1)
+    }
+  }
 
   const worker = new Worker(
     new URL('graph-layout.worker.ts', import.meta.url),
@@ -216,85 +375,186 @@ export function createGraphCanvas(
   worker.addEventListener('message', (event: MessageEvent<LayoutUpdate>) => {
     const { positions } = event.data
     if (event.data.run !== run) return
-    order.forEach((key, i) => {
-      if (!graph.hasNode(key)) return
-      graph.mergeNodeAttributes(key, {
-        x: positions[i * 2]!,
-        y: positions[i * 2 + 1]!,
-      })
-    })
+    placeAround(positions)
   })
 
-  function imageOf(node: GraphNodeView) {
+  function imageOf(node: GraphModel['nodes'][number]) {
     return node.image ?? initialImage(node.initial, theme, initials)
   }
 
-  function show(model: GraphModel) {
-    const wanted = new Set(model.nodes.map((n) => n.key))
-    for (const key of graph.nodes()) if (!wanted.has(key)) graph.dropNode(key)
-    model.nodes.forEach((node, index) => {
-      const attributes = {
+  /** The shape the graph is framed in: the stage less sigma's padding. */
+  function aspect() {
+    const { width, height } = sigma.getDimensions()
+    const pad = sigma.getStagePadding() * 2
+    return width > pad && height > pad ? (width - pad) / (height - pad) : 1
+  }
+
+  function show(next: GraphModel) {
+    applyFocusClear()
+    model = next
+    graph.clear()
+    for (const node of model.nodes)
+      graph.addNode(node.key, {
+        x: 0,
+        y: 0,
+        color: '',
         size: node.size,
         image: imageOf(node),
-        label: node.label,
+        caption: node.caption,
         center: node.center,
         kind: node.kind ?? '',
         initial: node.initial,
+        followers: node.node.followers ?? -1,
         // Not a style input: initials are redrawn from it on a theme change.
         avatar: node.image ?? '',
-      }
-      if (graph.hasNode(node.key))
-        graph.mergeNodeAttributes(node.key, attributes)
-      else
-        graph.addNode(node.key, {
-          ...seed(node, index),
-          color: '',
-          ...attributes,
+      })
+    for (const edge of model.edges)
+      if (graph.hasNode(edge.source) && graph.hasNode(edge.target))
+        graph.addDirectedEdgeWithKey(edge.key, edge.source, edge.target, {
+          kind: edge.kind,
+          mutual: edge.mutual,
         })
-    })
-    graph.clearEdges()
-    for (const edge of model.edges) addEdge(edge)
     layout()
+    applyFocus()
   }
 
-  function addEdge(edge: GraphEdgeView) {
-    if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) return
-    graph.addDirectedEdgeWithKey(edge.key, edge.source, edge.target, {
-      kind: edge.kind,
-      mutual: edge.mutual,
-    })
+  function applyFocusClear() {
+    hovered = undefined
+    focus = undefined
   }
 
+  let placedAspect = 0
+  let placedKind: 'rings' | 'force' = 'rings'
+  /**
+   * Rings at once; the force layout starts from them in the worker, and
+   * the rings stand until it is done.
+   */
   function layout() {
     run++
-    order = graph.nodes()
+    placedAspect = aspect()
+    placedKind = layoutKind(model)
+    const rings = ringLayout(
+      model.nodes.map((node) => ({
+        key: node.key,
+        size: node.size,
+        center: node.center,
+        ...(node.kind ? { kind: node.kind } : {}),
+        ...(node.node.followers === undefined
+          ? {}
+          : { followers: node.node.followers }),
+      })),
+      placedAspect,
+    )
+    for (const [key, point] of rings)
+      if (graph.hasNode(key))
+        graph.mergeNodeAttributes(key, { x: point.x, y: point.y })
+    fit(false)
+    if (placedKind === 'rings') return
+    // The force layout places the core: the center and the accounts with
+    // follows among the others. The rest go around it afterwards.
+    const linked = linkedAccounts(model)
+    order = model.nodes
+      .filter((node) => node.center || linked.has(node.key))
+      .map((node) => node.key)
+    const core = new Set(order)
+    // Follows among the others shape the circles; those with the center
+    // only hold the core together.
+    const edges: LayoutRequest['edges'] = []
+    graph.forEachEdge((_edge, attributes, source, target) => {
+      if (core.has(source) && core.has(target))
+        edges.push([source, target, attributes.kind === 'peer' ? 1 : 0.05])
+    })
     const request: LayoutRequest = {
       run,
       nodes: order.map((key) => {
         const a = graph.getNodeAttributes(key)
         return { key, x: a.x, y: a.y, size: a.size, fixed: a.center }
       }),
-      edges: graph.mapEdges((_edge, _attributes, source, target) => [
-        source,
-        target,
-      ]),
+      edges,
+      aspect: placedAspect,
     }
     worker.postMessage(request)
   }
 
-  let selected: string | undefined
-  function select(key: string | undefined) {
-    if (selected && graph.hasNode(selected)) {
-      sigma.setNodeState(selected, { isHighlighted: false })
-      sigma.setEdgesState(graph.edges(selected), { isHighlighted: false })
-    }
-    selected = key && graph.hasNode(key) ? key : undefined
-    if (!selected) {
-      return
-    }
+  /** The core where the force layout put it, the others in rings around. */
+  function placeAround(positions: Float32Array) {
+    const core = order.map((key, i) => ({
+      key,
+      x: positions[i * 2]!,
+      y: positions[i * 2 + 1]!,
+      size: graph.hasNode(key) ? graph.getNodeAttribute(key, 'size') : 0,
+    }))
+    const inCore = new Set(order)
+    const around = ringLayout(
+      model.nodes
+        .filter((node) => !inCore.has(node.key))
+        .map((node) => ({
+          key: node.key,
+          size: node.size,
+          ...(node.kind ? { kind: node.kind } : {}),
+          ...(node.node.followers === undefined
+            ? {}
+            : { followers: node.node.followers }),
+        })),
+      placedAspect,
+      core,
+    )
+    for (const point of core)
+      if (graph.hasNode(point.key))
+        graph.mergeNodeAttributes(point.key, { x: point.x, y: point.y })
+    for (const [key, point] of around)
+      if (graph.hasNode(key))
+        graph.mergeNodeAttributes(key, { x: point.x, y: point.y })
+    fit(false)
+  }
 
-    sigma.setNodeState(selected, { isHighlighted: true })
-    sigma.setEdgesState(graph.edges(selected), { isHighlighted: true })
+  /**
+   * The camera that frames every avatar and the names under the bottom
+   * row tightly: sigma's own framing (ratio 1) leaves room to spare.
+   */
+  function home() {
+    const base = { x: 0.5, y: 0.5, ratio: 1, angle: 0 }
+    const { width, height } = sigma.getDimensions()
+    const pad = sigma.getStagePadding()
+    // Positions as they are now, not as last drawn.
+    sigma.refresh()
+    let left = Infinity
+    let right = -Infinity
+    let top = Infinity
+    let bottom = -Infinity
+    graph.forEachNode((node) => {
+      const data = sigma.getNodeDisplayData(node)
+      if (!data) return
+      const at = sigma.framedGraphToViewport(data, { cameraState: base })
+      const r = sigma.scaleSize(data.size, 1)
+      left = Math.min(left, at.x - r)
+      right = Math.max(right, at.x + r)
+      top = Math.min(top, at.y - r)
+      bottom = Math.max(bottom, at.y + r + LABEL_GAP + LABEL_HEIGHT)
+    })
+    const k = Math.max(
+      (right - left) / (width - pad * 2),
+      (bottom - top) / (height - pad * 2),
+    )
+    if (!(k > 0) || !Number.isFinite(k)) return base
+    // Sizes grow with the zoom like distances, so the extent scales by k.
+    const middle = sigma.viewportToFramedGraph(
+      { x: (left + right) / 2, y: (top + bottom) / 2 },
+      { cameraState: base },
+    )
+    return { ...middle, ratio: k, angle: 0 }
+  }
+
+  function fit(animate = true) {
+    const camera = sigma.getCamera()
+    const target = home()
+    if (animate) void camera.animate(target, { duration: 250 })
+    else camera.setState(target)
+  }
+
+  function select(key: string | undefined) {
+    selected = key && graph.hasNode(key) ? key : undefined
+    applyFocus()
   }
 
   function setTheme(next: GraphTheme) {
@@ -316,10 +576,26 @@ export function createGraphCanvas(
     setTheme,
     resize: () => {
       sigma.resize()
+      // Rings take the new shape; a force layout keeps its own.
+      const now = aspect()
+      if (
+        placedKind === 'rings' &&
+        model.nodes.length &&
+        Math.abs(now / placedAspect - 1) > 0.08
+      )
+        layout()
     },
+    zoomIn() {
+      void sigma.getCamera().zoomIn({ factor: 1.5, duration: 200 })
+    },
+    zoomOut() {
+      void sigma.getCamera().zoomOut({ factor: 1.5, duration: 200 })
+    },
+    fit: () => fit(),
     kill() {
       worker.terminate()
       sigma.kill()
+      names.remove()
     },
   }
 }
