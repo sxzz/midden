@@ -18,6 +18,14 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
+/** The value at a JSON pointer in `data`, if there is one. */
+export function valueAt(data: unknown, pointer: string): unknown {
+  let value = data
+  for (const part of tokens(pointer) ?? [])
+    value = isObject(value) ? value[part] : undefined
+  return tokens(pointer) ? value : undefined
+}
+
 /** Remove the values at `paths` from a copy of `data` and return them. */
 export function splitMetrics<T>(
   data: T,

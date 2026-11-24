@@ -177,7 +177,7 @@ export class CaptureStrategy {
     const host: TwitterBuildHost = {
       t: (key) => key,
       twitterProxy: credential
-        ? accountTransport(credential, signal, fetch, responses)
+        ? accountTransport(credential, signal, { target: 'post', responses })
         : {
             // Async so callers see a rejection, as from a real request.
             // eslint-disable-next-line require-await

@@ -76,11 +76,14 @@ test('request-bound accounts cannot mix credentials; errors never retry anonymou
     await new Promise((r) => setTimeout(r, 5))
     return Response.json({ id_str: '1' })
   }
-  const a = accountTransport(credential, new AbortController().signal, fetcher)!
+  const a = accountTransport(credential, new AbortController().signal, {
+    target: 'api',
+    fetcher,
+  })!
   const b = accountTransport(
     { ...credential, authToken: 'c'.repeat(40) },
     new AbortController().signal,
-    fetcher,
+    { target: 'api', fetcher },
   )!
   await Promise.all([
     a.fetch('https://api.x.com/1.1/account/verify_credentials.json'),
@@ -89,14 +92,13 @@ test('request-bound accounts cannot mix credentials; errors never retry anonymou
   assert.equal(seen.length, 2)
   assert.notEqual(seen[0], seen[1])
   let count = 0
-  const rejected = accountTransport(
-    credential,
-    new AbortController().signal,
-    async () => {
+  const rejected = accountTransport(credential, new AbortController().signal, {
+    target: 'api',
+    fetcher: async () => {
       count++
       return new Response('', { status: 401 })
     },
-  )!
+  })!
   await assert.rejects(
     () =>
       rejected.fetch('https://api.x.com/1.1/account/verify_credentials.json'),
@@ -564,12 +566,17 @@ test("a repost's link is saved as the reposted post", async () => {
 
 test('missing posts are reported as not found, other failures stay generic', () => {
   for (const [error, message] of [
-    [responseError(404), '帖子不存在或已删除'],
+    [responseError(404, null, 'post'), '帖子不存在或已删除'],
+    [responseError(404, null, 'profile'), '账号不存在或已改名'],
+    // An X endpoint's 404 refuses the request; it says nothing about a post.
+    [responseError(404, null, 'api'), 'X 接口请求被拒绝'],
+    [responseError(404, null, 'list'), 'X 接口请求被拒绝'],
     [
       responseError(404, null, 'post', 'suspended'),
       '账号已被封禁，解封后可重新抓取',
     ],
-    [responseError(400), '无法获取该帖子'],
+    [responseError(400, null, 'post'), '无法获取该帖子'],
+    [responseError(400, null, 'list'), '无法获取关注列表'],
   ] as const) {
     assert.equal(error.message, message)
     assert.equal(error.code, status.FAILED_PRECONDITION)
@@ -611,5 +618,5 @@ test('the public post API marks a missing post deleted and a suspended one suspe
     server.close()
   }
   // GraphQL 404s mean a stale query, never a missing post.
-  assert.equal(sourceState(responseError(404)), undefined)
+  assert.equal(sourceState(responseError(404, null, 'api')), undefined)
 })

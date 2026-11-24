@@ -53,10 +53,9 @@ test('Viewer verifies the session owner directly, preserving large string IDs', 
 
 test('post GraphQL never needs the homepage or an inherited transaction ID', async () => {
   const calls: string[] = []
-  const transport = accountTransport(
-    credential,
-    AbortSignal.timeout(1000),
-    async (input, init) => {
+  const transport = accountTransport(credential, AbortSignal.timeout(1000), {
+    target: 'post',
+    fetcher: async (input, init) => {
       calls.push(String(input))
       assert.equal(
         new Headers(init?.headers).get('x-client-transaction-id'),
@@ -66,7 +65,7 @@ test('post GraphQL never needs the homepage or an inherited transaction ID', asy
         data: { tweetResult: { result: { __typename: 'Tweet' } } },
       })
     },
-  )!
+  })!
   await transport.fetch(
     'https://api.x.com/graphql/fixture/TweetResultByRestId',
     { headers: { 'x-client-transaction-id': 'stale' } },
@@ -78,17 +77,16 @@ test('post GraphQL never needs the homepage or an inherited transaction ID', asy
 
 test('required signing does not silently proceed after a homepage challenge', async () => {
   const calls: string[] = []
-  const transport = accountTransport(
-    credential,
-    AbortSignal.timeout(1000),
-    async (input) => {
+  const transport = accountTransport(credential, AbortSignal.timeout(1000), {
+    target: 'api',
+    fetcher: async (input) => {
       calls.push(String(input))
       return new Response('challenge', {
         status: 403,
         headers: { 'cf-mitigated': 'challenge' },
       })
     },
-  )!
+  })!
   await assert.rejects(
     () => transport.fetch('https://api.x.com/graphql/fixture/SearchTimeline'),
     (e: any) =>

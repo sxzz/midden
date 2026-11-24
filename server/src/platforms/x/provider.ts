@@ -13,6 +13,8 @@ import { attachEntities } from './entities.ts'
 export class ProviderError extends Error {
   metadata = new Metadata()
   code: status
+  /** The source answered 429 (or X's error 88). */
+  rateLimited = false
   constructor(code: status, message: string, retrySeconds = 0) {
     super(message)
     this.code = code
@@ -30,10 +32,35 @@ export function sourceState(error: unknown): SourceState | undefined {
   const [value] = error.metadata.get(sourceStateKey)
   return value === 'deleted' || value === 'suspended' ? value : undefined
 }
+/**
+ * What a failed request was for. An X GraphQL or web endpoint (`api`) never
+ * says the thing asked about is gone: its 404 means the request itself was
+ * refused (a missing transaction ID or an expired query).
+ */
+export type ErrorTarget = 'post' | 'profile' | 'list' | 'api'
+const forbidden: Record<ErrorTarget, string> = {
+  post: '采集账号无权访问该帖子',
+  profile: '采集账号无权访问该账号',
+  list: '采集账号无权查看该列表',
+  api: '采集账号无权访问该接口',
+}
+const failed: Record<ErrorTarget, string> = {
+  post: '无法获取该帖子',
+  profile: '无法获取该账号资料',
+  list: '无法获取关注列表',
+  api: 'X 接口请求失败',
+}
+/** Seconds from a `retry-after` value (delay or date); 0 when absent. */
+export function retrySeconds(retry: string | null): number {
+  if (!retry) return 0
+  if (/^\d+$/.test(retry)) return Number(retry)
+  const seconds = Math.ceil((Date.parse(retry) - Date.now()) / 1000)
+  return Number.isFinite(seconds) ? seconds : 0
+}
 export function responseError(
   code: number,
-  retry: string | null = null,
-  target: 'post' | 'profile' = 'post',
+  retry: string | null,
+  target: ErrorTarget,
   reason?: unknown,
 ): ProviderError {
   if (code === 401)
@@ -42,19 +69,16 @@ export function responseError(
       'X 登录已失效，请重新添加账号授权',
     )
   if (code === 403)
-    return new ProviderError(status.PERMISSION_DENIED, '采集账号无权访问该帖子')
+    return new ProviderError(status.PERMISSION_DENIED, forbidden[target])
   if (code === 429 || code >= 500) {
-    const seconds =
-      retry && /^\d+$/.test(retry)
-        ? Number(retry)
-        : retry
-          ? Math.ceil((Date.parse(retry) - Date.now()) / 1000)
-          : 0
-    return new ProviderError(
+    const seconds = retrySeconds(retry)
+    const error = new ProviderError(
       status.UNAVAILABLE,
-      '来源平台暂时不可用，请稍后重试',
+      code === 429 ? '来源平台限流' : '来源平台暂时不可用，请稍后重试',
       seconds,
     )
+    error.rateLimited = code === 429
+    return error
   }
   // Not retried within this job, but nothing is blocked: a suspension can be
   // lifted, and a later refresh or profile capture asks upstream again.
@@ -69,12 +93,13 @@ export function responseError(
   if (code === 404)
     return new ProviderError(
       status.FAILED_PRECONDITION,
-      target === 'profile' ? '账号不存在或已改名' : '帖子不存在或已删除',
+      target === 'post'
+        ? '帖子不存在或已删除'
+        : target === 'profile'
+          ? '账号不存在或已改名'
+          : 'X 接口请求被拒绝',
     )
-  return new ProviderError(
-    status.FAILED_PRECONDITION,
-    target === 'profile' ? '无法获取该账号资料' : '无法获取该帖子',
-  )
+  return new ProviderError(status.FAILED_PRECONDITION, failed[target])
 }
 // Only the public post API answers 404 for a post that no longer exists; it
 // answers 401 for one that exists but is protected. A 404 from the GraphQL

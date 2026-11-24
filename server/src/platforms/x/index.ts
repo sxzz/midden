@@ -110,6 +110,8 @@ export function createXPlatform(
       }),
     relations: {
       providerId: 'x-session',
+      publicProviderId: 'fxtwitter',
+      protectedPath: '/metadata/protected',
       counts: {
         following: '/metadata/following',
         followers: '/metadata/followers',

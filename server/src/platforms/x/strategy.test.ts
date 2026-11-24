@@ -227,7 +227,7 @@ test('ID-only public 401 falls back to selected account then refreshes profile p
   const strategy = new CaptureStrategy(
     async () => {
       calls.push('public-post')
-      throw responseError(401)
+      throw responseError(401, null, 'post')
     },
     async (id) => {
       calls.push('public-profile')
@@ -252,7 +252,7 @@ test('ID-only public 401 falls back to selected account then refreshes profile p
     let privateCalls = 0
     const failing = new CaptureStrategy(
       async () => {
-        throw responseError(code)
+        throw responseError(code, null, 'post')
       },
       undefined,
       async () => {
@@ -493,7 +493,7 @@ test('a post the account cannot read is reported gone when the public API says s
     async (id) =>
       normalizeProfile({ ...user, protected: true }, id, 'fxtwitter'),
     async () => {
-      throw responseError(403)
+      throw responseError(403, null, 'post')
     },
   )
   const fetch = () =>

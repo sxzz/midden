@@ -15,12 +15,18 @@ import {
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { RetryError, SnoozeError, type Job } from '#jobs/queue.ts'
-import { retryAfter } from './errors.ts'
+import {
+  isProviderFailure,
+  rateLimitedKey,
+  type RelationList,
+} from '#platforms/platform.ts'
+import { traceUpstream } from '#platforms/upstream.ts'
+import { classifyFailure, retryAfter } from './errors.ts'
 import { holdConnection, markReauth } from './fetch.ts'
+import { valueAt } from './metrics.ts'
 import { selectedConnection } from './records.ts'
 import { observeEdges, storeListed } from './relation-store.ts'
 import type { Executor, Transaction } from '#db/client.ts'
-import type { RelationList } from '#platforms/platform.ts'
 import type { CaptureContext } from './context.ts'
 import type { Metrics } from './payload.ts'
 
@@ -141,7 +147,9 @@ function listAccount(
 
 /**
  * Once the profile capture finished, decide from the counts it read whether
- * the list is fetched, and with which account. Returns whether to go on.
+ * the list is fetched, and from where: a public account's (`protected` is
+ * `false` in the profile just fetched) without an account from the public
+ * provider, any other with an account. Returns whether to go on.
  */
 function begin(ctx: CaptureContext, fetch: Fetch): boolean {
   const now = new Date(ctx.now?.() ?? Date.now())
@@ -170,6 +178,7 @@ function begin(ctx: CaptureContext, fetch: Fetch): boolean {
         id: entities.id,
         type: entities.kind,
         externalId: entities.externalId,
+        data: entityVersions.data,
       })
       .from(revisionEntities)
       .innerJoin(
@@ -208,19 +217,19 @@ function begin(ctx: CaptureContext, fetch: Fetch): boolean {
       )
       return false
     }
-    const account = listAccount(tx, capture, relations.providerId)
-    if (!account) {
-      settle(tx, fetch.id, 'failed', '抓关系网需要可用的采集账号', now, base)
-      return false
+    let source: { providerId: string; connectionId: string | null }
+    if (valueAt(root.data, relations.protectedPath) === false)
+      source = { providerId: relations.publicProviderId, connectionId: null }
+    else {
+      const account = listAccount(tx, capture, relations.providerId)
+      if (!account) {
+        settle(tx, fetch.id, 'failed', '抓关系网需要可用的采集账号', now, base)
+        return false
+      }
+      source = { providerId: account.providerId, connectionId: account.id }
     }
     tx.update(relationFetches)
-      .set({
-        ...base,
-        state: 'running',
-        providerId: account.providerId,
-        connectionId: account.id,
-        startedAt: now,
-      })
+      .set({ ...base, ...source, state: 'running', startedAt: now })
       .where(
         and(
           eq(relationFetches.id, fetch.id),
@@ -306,16 +315,22 @@ export async function runRelations(
     .innerJoin(captures, eq(captures.id, submissions.captureId))
     .where(eq(submissions.id, fetch.submissionId ?? ''))
     .get()
-  const connection = ctx.db
-    .select()
-    .from(connections)
-    .where(eq(connections.id, fetch.connectionId ?? ''))
-    .get()
+  // A public account's lists are read without one.
+  const connection = fetch.connectionId
+    ? ctx.db
+        .select()
+        .from(connections)
+        .where(eq(connections.id, fetch.connectionId))
+        .get()
+    : undefined
   if (!source) {
     failRelations(ctx, fetch.id, '采集请求已删除')
     return
   }
-  if (connection?.state !== 'ready' || !connection.credentialRef) {
+  if (
+    fetch.connectionId &&
+    (connection?.state !== 'ready' || !connection.credentialRef)
+  ) {
     failRelations(ctx, fetch.id, '采集账号不可用，请重新授权')
     return
   }
@@ -330,27 +345,48 @@ export async function runRelations(
     failRelations(ctx, fetch.id, '账号资料已删除')
     return
   }
-  const credential = {
-    data: Buffer.from(ctx.openCredential(connection.credentialRef)),
-  }
+  const credential = connection?.credentialRef
+    ? { data: Buffer.from(ctx.openCredential(connection.credentialRef)) }
+    : undefined
   const now = () => new Date(ctx.now?.() ?? Date.now())
-  const release = holdConnection(connection.id)
+  const logger = ctx.logger.child({
+    jobId: job.id,
+    jobType: job.type,
+    attempt: job.attempt,
+    maxAttempts: job.maxAttempts,
+    relationFetchId: fetch.id,
+    list: fetch.list,
+    providerId: fetch.providerId,
+    connectionId: fetch.connectionId,
+  })
+  const release = connection ? holdConnection(connection.id) : () => {}
   try {
     for (let i = 0; i < PAGES_PER_RUN; i++) {
       let page
       try {
-        page = await relations.list(
-          {
-            list: fetch.list,
-            externalId: subject.externalId,
-            cursor: fetch.cursor,
-            credential,
-          },
-          job.signal,
+        const req = {
+          list: fetch.list,
+          externalId: subject.externalId,
+          cursor: fetch.cursor,
+          providerId: fetch.providerId ?? relations.providerId,
+          credential,
+          logger,
+        }
+        page = await traceUpstream(
+          { logger, classify: (error) => classifyFailure(job, error) },
+          () => relations.list(req, job.signal),
         )
       } catch (error) {
-        markReauth(ctx, connection.id, connection.revision, error)
+        if (connection)
+          markReauth(ctx, connection.id, connection.revision, error)
         const seconds = retryAfter(error)
+        // Every way to ask is limited: waiting is not an attempt.
+        if (
+          seconds &&
+          isProviderFailure(error) &&
+          error.metadata.get(rateLimitedKey)[0] === '1'
+        )
+          throw new SnoozeError(seconds * 1000)
         if (seconds)
           throw new RetryError('来源平台暂时出错', seconds * 1000, {
             cause: error,

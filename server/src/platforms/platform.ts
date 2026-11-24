@@ -1,3 +1,4 @@
+import type { Logger } from '#log.ts'
 import type {
   CheckConnectionResponse,
   Credential,
@@ -34,7 +35,14 @@ export interface RelationsRequest {
   externalId: string
   /** Empty for the first page. */
   cursor: string
+  /**
+   * The provider the list is read through: `Relations.publicProviderId`
+   * without an account, or `Relations.providerId` with `credential`.
+   */
+  providerId: string
   credential: Credential | undefined
+  /** For what the platform does along the way, such as switching queries. */
+  logger: Logger
 }
 
 export interface RelationsPage {
@@ -48,12 +56,25 @@ export interface RelationsPage {
 }
 
 export interface Relations {
-  /** The provider the lists are read through; it needs an account. */
+  /** The provider a protected account's lists are read through, with an account. */
   providerId: string
+  /** The provider a public account's lists are read through, without one. */
+  publicProviderId: string
+  /**
+   * Pointer into the profile entity's data at whether the account is
+   * protected. Only `false` there sends its lists to the public provider.
+   */
+  protectedPath: string
   /** Pointers into the profile entity's data at each list's size. */
   counts: Record<RelationList, string>
   list: (req: RelationsRequest, signal: AbortSignal) => Promise<RelationsPage>
 }
+
+/**
+ * Trailer on a failure meaning every way to ask is rate-limited: wait for
+ * its `retry-after` rather than count the failure as an attempt.
+ */
+export const rateLimitedKey = 'rate-limited'
 
 /** Errors platform code raises on purpose, with a status the core classifies. */
 export interface ProviderFailure extends Error {

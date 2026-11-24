@@ -9,6 +9,7 @@ import {
   collections,
   entities,
   followEdges,
+  jobs,
   library,
   relationFetches,
   revisions,
@@ -62,6 +63,11 @@ interface World {
    * second, so with a step that long they would never let timers run.
    */
   step?: number
+  /**
+   * Accounts whose profiles say they are not protected, so their lists are
+   * read without an account; the others' profiles say nothing.
+   */
+  public?: string[]
   /** Make the request for a page fail. */
   fail?: (req: RelationsRequest) => Error | undefined
   requests: RelationsRequest[]
@@ -113,7 +119,11 @@ function setup(world: Partial<World> = {}) {
             return {
               ...fakeProfile(
                 id,
-                { name: `Name ${id}`, counts },
+                {
+                  name: `Name ${id}`,
+                  counts,
+                  ...(state.public?.includes(id) && { protected: false }),
+                },
                 state.avatars
                   ? { avatar: `https://m.test/real-${id}.jpg` }
                   : {},
@@ -132,6 +142,15 @@ function setup(world: Partial<World> = {}) {
   })
   ctx.queue.start()
   return { ctx, state }
+}
+
+/** Run jobs, letting the clock pass retry delays, until none is left. */
+async function settleJobs(c: AccountsContext) {
+  for (let i = 0; i < 500; i++) {
+    await c.queue.drain()
+    if (!c.db.select().from(jobs).get()) return
+  }
+  throw new Error('jobs never settled')
 }
 
 async function withAccount(c: AccountsContext) {
@@ -291,6 +310,105 @@ describe('抓关系网', () => {
       followers: 2,
       mutual: 0,
     })
+  })
+
+  test("a public account's lists come from the public source, without an account", async () => {
+    const { ctx, state } = setup({
+      counts: { '100': { following: 3, followers: 1 } },
+      lists: { '100': { following: ['1', '2', '3'], followers: ['9'] } },
+      public: ['100'],
+    })
+    await update(ctx)
+    expect(state.requests).not.toHaveLength(0)
+    for (const req of state.requests) {
+      expect(req.providerId).toBe('public')
+      expect(req.credential).toBeUndefined()
+    }
+    for (const list of ['following', 'followers'] as const)
+      expect(fetchesOf(ctx, list)[0]).toMatchObject({
+        state: 'complete',
+        providerId: 'public',
+        connectionId: null,
+      })
+    expect(openEdges(ctx)).toEqual(['100>1', '100>2', '100>3', '9>100'])
+  })
+
+  test("a protected account's lists are read with the account", async () => {
+    const { ctx, state } = setup({
+      counts: { '100': { following: 1, followers: 0 } },
+      lists: { '100': { following: ['1'] } },
+    })
+    await withAccount(ctx)
+    await update(ctx)
+    expect(state.requests).toHaveLength(2)
+    for (const req of state.requests) {
+      expect(req.providerId).toBe('session')
+      expect(Buffer.from(req.credential!.data).toString()).toBe('owner')
+    }
+    expect(fetchesOf(ctx, 'following')[0]).toMatchObject({
+      state: 'complete',
+      providerId: 'session',
+    })
+    expect(fetchesOf(ctx, 'following')[0]!.connectionId).toBeTruthy()
+  })
+
+  test('a transient failure is retried; once retries run out the list fails with the reason', async () => {
+    const { ctx, state } = setup({
+      counts: { '100': { following: 4, followers: 0 } },
+      lists: { '100': { following: ['1', '2', '3', '4'] } },
+      public: ['100'],
+    })
+    let failures = 1
+    state.fail = (req) =>
+      req.cursor === '2' && failures-- > 0
+        ? new FakeFailure(status.UNAVAILABLE, 'FxTwitter 公共接口返回 HTTP 500')
+        : undefined
+    await update(ctx)
+    await settleJobs(ctx)
+    expect(fetchesOf(ctx, 'following')[0]).toMatchObject({
+      state: 'complete',
+      fetched: 4,
+    })
+    const following = () =>
+      state.requests.filter((r) => r.list === 'following').map((r) => r.cursor)
+    expect(following()).toEqual(['', '2', '2'])
+
+    state.requests = []
+    state.fail = (req) =>
+      req.cursor === '2'
+        ? new FakeFailure(status.UNAVAILABLE, 'FxTwitter 公共接口返回 HTTP 500')
+        : undefined
+    await update(ctx)
+    await settleJobs(ctx)
+    expect(fetchesOf(ctx, 'following')[1]).toMatchObject({
+      state: 'failed',
+      error: 'FxTwitter 公共接口返回 HTTP 500',
+    })
+    // Five attempts at the failing page, after the first page went through.
+    expect(following()).toEqual(['', '2', '2', '2', '2', '2'])
+    // What the failed fetch saw is kept, and nothing ended.
+    expect(openEdges(ctx)).toEqual(['100>1', '100>2', '100>3', '100>4'])
+  })
+
+  test('when every way to ask is rate-limited, the wait uses no attempt', async () => {
+    const { ctx, state } = setup({
+      counts: { '100': { following: 1, followers: 0 } },
+      lists: { '100': { following: ['1'] } },
+    })
+    await withAccount(ctx)
+    state.fail = () =>
+      new FakeFailure(status.UNAVAILABLE, '关注列表的两个 X 接口均已限流', {
+        'retry-after': '600',
+        'rate-limited': '1',
+      })
+    await update(ctx)
+    const fetch = fetchesOf(ctx, 'following')[0]!
+    expect(fetch.state).toBe('running')
+    const row = ctx.db.select().from(jobs).where(eq(jobs.ref, fetch.id)).get()!
+    expect(row.attempt).toBe(0)
+    expect(row.runAt.getTime() - row.createdAt.getTime()).toBeGreaterThan(
+      500_000,
+    )
   })
 
   test('a list over 5000 is skipped, the other still fetched', async () => {

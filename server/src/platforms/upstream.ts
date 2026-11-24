@@ -104,11 +104,13 @@ export function describe(raw: string): { provider: string; operation: string } {
       provider: 'fxtwitter',
       operation: path.endsWith('/statuses')
         ? 'profile-timeline'
-        : path.startsWith('/2/profile/')
-          ? 'profile'
-          : path.startsWith('/2/status/')
-            ? 'status'
-            : path,
+        : /\/(?:followers|following)$/.test(path)
+          ? `profile-${path.split('/').pop()}`
+          : path.startsWith('/2/profile/')
+            ? 'profile'
+            : path.startsWith('/2/status/')
+              ? 'status'
+              : path,
     }
   if (/(?:^|\.)(?:x|twitter)\.com$/.test(host)) {
     const graphql = path.match(/\/graphql\/[^/]+\/(\w+)/)

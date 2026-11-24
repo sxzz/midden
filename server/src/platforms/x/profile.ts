@@ -456,7 +456,11 @@ export async function fetchSessionTimeline(
   const responses: SourceResponse[] = []
   const host: TwitterBuildHost = {
     t: (key) => key,
-    twitterProxy: accountTransport(credential, signal, fetcher, responses),
+    twitterProxy: accountTransport(credential, signal, {
+      target: 'profile',
+      fetcher,
+      responses,
+    }),
     shouldTranscodeGif: () => false,
   }
   try {

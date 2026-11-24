@@ -90,7 +90,11 @@ export async function accountBootstrap(
     )
   }
   if (!response.ok)
-    throw responseError(response.status, response.headers.get('retry-after'))
+    throw responseError(
+      response.status,
+      response.headers.get('retry-after'),
+      'api',
+    )
   const reader = response.body?.getReader()
   if (!reader) throw new ProviderError(status.UNAVAILABLE, '账号验证响应为空')
   const chunks: Uint8Array[] = []

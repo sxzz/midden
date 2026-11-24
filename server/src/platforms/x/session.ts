@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer'
+import { createHash } from 'node:crypto'
 import {
   getTwitterProviderEnv,
   setTwitterProviderEnv,
@@ -19,6 +20,7 @@ import {
   ProviderError,
   readJSON,
   responseError,
+  type ErrorTarget,
 } from './provider.ts'
 import type { TwitterBuildHost } from '@fxembed/atmosphere/providers/twitter/build-host'
 export { validateCredential } from './credential.ts'
@@ -32,14 +34,79 @@ setTwitterProviderEnv({
   friendlyUserAgent: 'Monitor/0.4',
 })
 
+/** Signs a request the way x.com's own client does. */
+export interface TransactionSigner {
+  generateTransactionId: (method: string, path: string) => Promise<string>
+}
+export type TransactionSource = (
+  credential: SessionCredential,
+  signal: AbortSignal,
+  fetcher: typeof fetch,
+) => Promise<TransactionSigner>
+
+// GraphQL queries X refuses (404) without `x-client-transaction-id`, besides
+// the ones Atmosphere lists. `Following` still works without it, but x.com's
+// own client signs it as it does `Followers`. The `*ByUserIDTimeline` queries
+// work without it and stay unsigned.
+const SIGNED_QUERIES = new Set(['Followers', 'Following'])
+
+function needsSigning(url: URL): boolean {
+  if (needsTransactionId(url.href)) return true
+  const graphql = /\/graphql\/[^/]+\/(\w+)$/.exec(url.pathname)
+  return !!graphql && SIGNED_QUERIES.has(graphql[1]!)
+}
+
+// The signer comes from the account's own x.com page; a list fetch signs a
+// request per page, so the page is read again only after this long.
+const SIGNER_TTL = 10 * 60_000
+const signers = new Map<
+  string,
+  { at: number; value: Promise<TransactionSigner> }
+>()
+
+/** The account's transaction signer, from its x.com page, kept a while. */
+export const accountTransactions: TransactionSource = (
+  credential,
+  signal,
+  fetcher,
+) => {
+  const key = createHash('sha256').update(credential.authToken).digest('hex')
+  const now = Date.now()
+  const cached = signers.get(key)
+  if (cached && now - cached.at < SIGNER_TTL) return cached.value
+  for (const [k, entry] of signers)
+    if (now - entry.at >= SIGNER_TTL) signers.delete(k)
+  const value = accountBootstrap(credential, signal, fetcher).then(
+    ({ html }): Promise<TransactionSigner> => ClientTransaction.fromHTML(html),
+  )
+  signers.set(key, { at: now, value })
+  value.catch(() => {
+    if (signers.get(key)?.value === value) signers.delete(key)
+  })
+  return value
+}
+
+export interface TransportOptions {
+  /** What the requests are for, which decides the wording of failures. */
+  target: ErrorTarget
+  fetcher?: typeof fetch
+  /** Collects the raw responses, as private sources. */
+  responses?: SourceResponse[]
+  transactions?: TransactionSource
+}
+
 export function accountTransport(
   credential: SessionCredential,
   signal: AbortSignal,
-  fetcher: typeof fetch = fetch,
-  responses?: SourceResponse[],
+  {
+    target,
+    fetcher = fetch,
+    responses,
+    transactions = accountTransactions,
+  }: TransportOptions,
 ): TwitterBuildHost['twitterProxy'] {
   validateCredential(credential)
-  let transaction: Promise<ClientTransaction> | undefined
+  let transaction: Promise<TransactionSigner> | undefined
   return {
     fetch: async (input, init = {}) => {
       const url = new URL(
@@ -66,11 +133,9 @@ export function accountTransport(
       headers.set('x-twitter-active-user', 'yes')
       headers.delete('x-guest-token')
       headers.delete('x-client-transaction-id')
-      if (needsTransactionId(url.href)) {
-        transaction ??= accountBootstrap(credential, signal, fetcher).then(
-          ({ html }) => ClientTransaction.fromHTML(html),
-        )
-        let generator: ClientTransaction
+      if (needsSigning(url)) {
+        transaction ??= transactions(credential, signal, fetcher)
+        let generator: TransactionSigner
         try {
           generator = await transaction
         } catch (e) {
@@ -105,6 +170,9 @@ export function accountTransport(
           response.status === 429
             ? retryHeader(response)
             : response.headers.get('retry-after'),
+          // X's endpoints answer 404 for a refused request, never for a
+          // missing post or account.
+          response.status === 404 ? 'api' : target,
         )
       }
       const data = await readJSON(response, (body) => {
@@ -128,10 +196,11 @@ export function accountTransport(
       if (Array.isArray(data.errors) && data.errors.length) {
         const codes = data.errors.map((e: any) => e.code)
         if (codes.some((c: number) => [32, 89, 135, 215, 326].includes(c)))
-          throw responseError(401)
-        if (codes.includes(88)) throw responseError(429, retryHeader(response))
+          throw responseError(401, null, target)
+        if (codes.includes(88))
+          throw responseError(429, retryHeader(response), target)
         if (codes.some((c: number) => [63, 179, 200].includes(c)))
-          throw responseError(403)
+          throw responseError(403, null, target)
         throw new ProviderError(status.UNAVAILABLE, '账号接口返回错误')
       }
       return Response.json(data)
@@ -250,7 +319,7 @@ async function sessionTweet(id: string, host: TwitterBuildHost): Promise<any> {
   const data = await fetchByRestId(id, host, true)
   const raw = data?.data?.tweetResult?.result
   if (unavailable(raw) || unavailable(unwrapTweet(raw)))
-    throw responseError(403)
+    throw responseError(403, null, 'post')
   return raw
 }
 export async function fetchSession(
@@ -261,7 +330,10 @@ export async function fetchSession(
   const responses: SourceResponse[] = []
   const host: TwitterBuildHost = {
     t: (key) => key,
-    twitterProxy: accountTransport(credential, signal, fetch, responses),
+    twitterProxy: accountTransport(credential, signal, {
+      target: 'post',
+      responses,
+    }),
     shouldTranscodeGif: () => false,
   }
   const raw = await sessionTweet(id, host)
@@ -332,7 +404,10 @@ export async function checkSession(
       responsive_web_graphql_timeline_navigation_enabled: true,
     }),
   )
-  const transport = accountTransport(credential, signal, fetcher)!
+  const transport = accountTransport(credential, signal, {
+    target: 'api',
+    fetcher,
+  })!
   const response = await transport.fetch(url)
   const data = await readJSON(response)
   const viewer = data?.data?.viewer

@@ -45,7 +45,8 @@ export type FakeRelations = (
 /**
  * A platform at `fake.test`: `/p/<id>` is a post, `/u/<handle>` a profile
  * (a collection). Tests decide what each fetch returns, and what each page of
- * a following or followers list holds (read with the `session` provider).
+ * a following or followers list holds (read with the `public` provider for
+ * a profile whose data has `protected: false`, else with `session`).
  */
 export function fakePlatform(
   fetch: { current: FakeFetch },
@@ -148,6 +149,8 @@ export function fakePlatform(
     ...(relations && {
       relations: {
         providerId: 'session',
+        publicProviderId: 'public',
+        protectedPath: '/protected',
         counts: {
           following: '/counts/following',
           followers: '/counts/followers',
