@@ -1,6 +1,6 @@
 # Capture pipeline: behavioral specification of the Go implementation
 
-This spec describes how the old Go service (`/home/paseo/workspace/midden-go`, branch `golang`) captures content. It is detailed enough to reimplement the pipeline without reading the Go code again. Where the TypeScript rewrite has already decided to differ (see `.ai/rewrite-plan.md`), the difference is pointed out but not resolved here.
+This spec describes how the old Go service (`/home/paseo/workspace/midden-go`, branch `golang`) captures content. It is detailed enough to reimplement the pipeline without reading the Go code again. Where the TypeScript rewrite has already decided to differ, the difference is pointed out but not resolved here.
 
 ## 0. Conventions and scope
 

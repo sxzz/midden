@@ -46,4 +46,4 @@ Drizzle 使用 Node 内置的 `node:sqlite`，查询与事务都是同步的，�
 - `README.md`：部署与使用。
 - `docs/architecture.md`：已实现的结构。
 - `docs/operations.md`：运维。
-- `.ai/`：重写计划与旧实现的行为规格，供开发参考。
+- `.ai/`：旧实现的行为规格，供开发参考。
