@@ -11,9 +11,8 @@ const item = (n: number) => ({
 })
 const items = [item(1), item(2), item(3)]
 
-test('select collections and refresh them', async ({ page }) => {
-  let started: { collection_ids: string[] } | undefined
-  let polled = false
+test('select collections and update them as one record', async ({ page }) => {
+  let started: unknown
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {
     const path = new URL(r.request().url()).pathname
@@ -23,11 +22,12 @@ test('select collections and refresh them', async ({ page }) => {
         json: { used_bytes: 0 },
       })
     if (path === '/v1/collections') return r.fulfill({ json: { items } })
-    if (path === '/v1/refresh-batches') {
+    if (path === '/v1/updates/preview')
+      return r.fulfill({ json: { posts: 2, profiles: 0, listable: 0 } })
+    if (path === '/v1/updates') {
       started = r.request().postDataJSON()
-      return r.fulfill({ status: 202, json: { id: 'batch', state: 'running' } })
+      return r.fulfill({ json: { id: 'record' } })
     }
-    if (path.startsWith('/v1/refresh-batches/')) polled = true
     return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
   await page.goto('/app/')
@@ -40,15 +40,20 @@ test('select collections and refresh them', async ({ page }) => {
   await expect(page).toHaveURL(/#\/$/)
   await expect(page.getByText('已选 2 项')).toBeVisible()
   await page.getByRole('button', { name: '更新', exact: true }).click()
-  // Selection ends; the page confirms and links to the records instead of
-  // following the batch itself.
+  // The sheet says what the update covers; posts have no options.
+  const sheet = page.getByRole('dialog', { name: '更新 2 条帖子' })
+  await expect(sheet).toBeVisible()
+  await expect(sheet.getByText('抓帖子')).toHaveCount(0)
+  await sheet.getByRole('button', { name: '开始更新' }).click()
+  // Selection ends; the bar confirms and links to the update's one record.
   await expect(page.getByRole('checkbox')).toHaveCount(0)
   await expect(page.getByText('已开始更新 2 项')).toBeVisible()
   await expect(page.getByRole('button', { name: '批量更新' })).toBeVisible()
-  expect(started).toEqual({ collection_ids: [items[0].id, items[2].id] })
+  expect(started).toEqual({
+    target: { target: 'many', ids: [items[0].id, items[2].id] },
+  })
   await page.getByRole('button', { name: '查看进度' }).click()
-  await expect(page).toHaveURL(/#\/captures$/)
-  expect(polled).toBe(false)
+  await expect(page).toHaveURL(/#\/captures\/record$/)
 })
 
 test('select all toggles every listed collection', async ({ page }) => {

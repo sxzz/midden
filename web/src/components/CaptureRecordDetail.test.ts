@@ -220,3 +220,81 @@ it("heads an old record's only list as the posts", async () => {
   expect(tabs()).toEqual([])
   expect(el.querySelector('h2')?.textContent).toBe('帖子')
 })
+
+it('an update: its target as the title, its profiles part by part, its lists as members', async () => {
+  const update = () => ({
+    ...detail({}),
+    url: '',
+    collection_id: '',
+    kind: '',
+    state: 'queued',
+    done: false,
+    members: {
+      total: 6,
+      complete: 3,
+      partial: 0,
+      failed: 1,
+      pending: 1,
+      done: false,
+      added: 1,
+      updated: 2,
+    },
+    update: {
+      target: 'folder',
+      target_id: 'folder',
+      name: '猫',
+      posts: 2,
+      profiles: 1,
+      options: { posts: 'latest', relations: true },
+      queued: 1,
+      skipped: 0,
+    },
+    profiles: [
+      {
+        collection_id: 'p1',
+        url: 'https://x.com/i/user/1',
+        handle: 'cat',
+        state: 'complete',
+        posts: { total: 100, finished: 34, pending: 66, done: false },
+        relations: [
+          { list: 'following', state: 'complete', fetched: 3 },
+          { list: 'followers', state: 'skipped', fetched: 0, expected: 6000 },
+        ],
+      },
+    ],
+  })
+  const { el, tabs, click } = mount(update as never, {
+    added: [member('4')],
+    pending: [
+      {
+        ...member('list'),
+        url: 'https://x.com/i/user/1',
+        state: 'queued',
+        list: 'following',
+        handle: 'cat',
+      } as never,
+    ],
+  })
+  await vi.waitFor(() => expect(el.textContent).toContain('更新收藏夹「猫」'))
+  expect(el.textContent).toContain(
+    '正在更新 · 新增 1 · 更新 2 · 异常 1 · 进行中 2',
+  )
+  expect(Number(el.querySelector('progress')?.value)).toBeCloseTo(4 / 6)
+  const profiles = [...el.querySelectorAll('.section')].find(
+    (s) => s.querySelector('h2')?.textContent === '账号',
+  )!
+  expect(profiles.textContent).toContain('@cat')
+  expect(profiles.textContent).toContain(
+    '资料 ✓ · 帖子 34/100 · 关注 ✓ · 粉丝 跳过',
+  )
+  // A folder has no link of its own.
+  expect(el.textContent).not.toContain('打开原链接')
+  expect(tabs().map((t) => t.name)).toEqual([
+    '新增记录 1',
+    '更新记录 2',
+    '异常记录 1',
+    '进行中 1',
+  ])
+  click('进行中')
+  await vi.waitFor(() => expect(el.textContent).toContain('@cat 关注名单'))
+})

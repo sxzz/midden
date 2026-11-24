@@ -66,14 +66,9 @@ test('browse, filter, history, refresh and remove a saved post', async ({
             text: '历史正文',
             observed_at: '2026-09-27T10:00:00Z',
           }
-        else if (path === '/v1/captures') {
+        else if (path === '/v1/updates') {
           captureBodies.push(r.request().postDataJSON())
-          body = {
-            id: 'job',
-            collection_id: id,
-            state: 'queued',
-            record_id: recordId,
-          }
+          body = { id: recordId }
         } else if (path === `/v1/collections/${id}`) {
           if (r.request().method() === 'DELETE') {
             deleted = true
@@ -116,10 +111,13 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await page.keyboard.press('End')
   await expect(page.getByText(collection.text)).toBeVisible()
   await expect(page.locator('.timeline .when')).toContainText('最新版本')
-  await page.getByRole('button', { name: '重新抓取' }).click()
+  // A post updates at once, without the sheet.
+  await page.getByRole('button', { name: '更新', exact: true }).click()
   await page.getByRole('button', { name: '查看进度' }).click()
   await expect(page).toHaveURL(new RegExp(`/captures/${recordId}$`))
-  expect(captureBodies.at(-1)).toEqual({ refresh_id: id })
+  expect(captureBodies.at(-1)).toEqual({
+    target: { target: 'collection', id },
+  })
   await page.getByRole('button', { name: '返回' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${id}$`))
   await page.getByRole('button', { name: '返回' }).click()
@@ -506,7 +504,7 @@ test('sort selection resets pagination and carries into subsequent pages', async
   expect(last.get('cursor')).toBe('next-page')
 })
 
-test('a failed refresh shows a toast every time it is tried', async ({
+test('a failed update shows a toast every time it is tried', async ({
   page,
 }) => {
   let attempts = 0
@@ -514,7 +512,7 @@ test('a failed refresh shows a toast every time it is tried', async ({
   await page.route('**/v1/**', (r) => {
     const path = new URL(r.request().url()).pathname
     if (path === '/v1/session') return r.fulfill({ json: {} })
-    if (path === '/v1/captures') {
+    if (path === '/v1/updates') {
       attempts++
       return r.fulfill({
         status: 503,
@@ -534,7 +532,7 @@ test('a failed refresh shows a toast every time it is tried', async ({
   await expect(page.getByText(collection.text)).toBeVisible()
   const toast = page.locator('.toast')
   for (let i = 1; i <= 2; i++) {
-    await page.getByRole('button', { name: '重新抓取' }).click()
+    await page.getByRole('button', { name: '更新', exact: true }).click()
     await expect.poll(() => attempts).toBe(i)
     await expect(toast).toHaveText('采集服务暂时不可用')
   }

@@ -1,4 +1,11 @@
-import { computed, onActivated, onUnmounted, shallowRef, watch } from 'vue'
+import {
+  computed,
+  onActivated,
+  onDeactivated,
+  onUnmounted,
+  shallowRef,
+  watch,
+} from 'vue'
 import {
   call,
   client,
@@ -6,6 +13,7 @@ import {
   type Collection,
   type FollowCounts,
   type HistoryPoint,
+  type UpdateOptions,
 } from '../api'
 import {
   readCollection,
@@ -37,8 +45,15 @@ export function useCollectionDetail(
   const collection = shallowRef<Collection>()
   const error = shallowRef('')
   const busy = shallowRef(false)
-  /** The capture record of the refresh started here, which shows its progress. */
+  /**
+   * The record of this collection's update while it runs or for a while
+   * after, which shows its progress; '' when there is none.
+   */
   const record = shallowRef('')
+  /** That update is still running. */
+  const updating = shallowRef(false)
+  /** A profile with older posts to read after its last page. */
+  const older = shallowRef(false)
   /** Captures where the content or counts changed, newest first. */
   const points = shallowRef<HistoryPoint[]>([])
   const next = shallowRef('')
@@ -81,6 +96,9 @@ export function useCollectionDetail(
     historical.value ? selected.value : latestPoint.value,
   )
   let controller = new AbortController()
+  /** Polls the running update; only while the page is shown. */
+  let updateTimer: ReturnType<typeof setTimeout> | undefined
+  let active = true
   // Once the collection is on screen, a failed action must not replace it or
   // land in a banner out of view: say so where the reader is looking.
   function report(e: unknown) {
@@ -122,6 +140,9 @@ export function useCollectionDetail(
       historyLoading.value = false
       next.value = ''
       record.value = ''
+      updating.value = false
+      older.value = false
+      clearTimeout(updateTimer)
       error.value = ''
       busy.value = false
       available.value = false
@@ -140,14 +161,52 @@ export function useCollectionDetail(
         void checkChanges(result)
         void checkFollows(result)
         // A public page offers no capture to check for.
-        if (!shareSlug.value) available.value = await availability(id, signal)
+        if (!shareSlug.value) {
+          void checkUpdate()
+          available.value = await availability(id, signal)
+        }
       } catch (e) {
         if (!signal.aborted) error.value = errorText(e)
       }
     },
     { immediate: true },
   )
-  onUnmounted(() => controller.abort())
+  onUnmounted(() => {
+    controller.abort()
+    clearTimeout(updateTimer)
+  })
+  onActivated(() => {
+    active = true
+    if (updating.value) void checkUpdate()
+  })
+  onDeactivated(() => {
+    active = false
+    clearTimeout(updateTimer)
+  })
+  /**
+   * The update of this collection to follow, polled while it runs. Once it
+   * ends the collection is read again, so the page shows what it saved.
+   */
+  async function checkUpdate() {
+    clearTimeout(updateTimer)
+    if (shareSlug.value) return
+    const signal = controller.signal
+    const was = updating.value
+    try {
+      const found = await call(
+        collections.update.$get({ param: { id: id() } }, { init: { signal } }),
+      )
+      if (signal.aborted) return
+      record.value = found.record?.id ?? ''
+      updating.value = !!found.record && !found.record.done
+      older.value = found.older
+      if (was && !updating.value) void reload()
+      if (updating.value && active) updateTimer = setTimeout(checkUpdate, 3000)
+    } catch {
+      // Without an answer there is no progress to link to; nothing else
+      // depends on it.
+    }
+  }
   /**
    * Whether the collection has trends: two readings are enough to tell, so
    * the detail asks for no more than that and leaves the series to its page.
@@ -294,17 +353,20 @@ export function useCollectionDetail(
       if (!signal.aborted) report(e)
     }
   }
-  /** Capture again; `relations` also fetches a profile's lists (抓关系网). */
-  async function refresh(options: { relations?: boolean } = {}) {
+  /**
+   * Update the collection right away (a post, or a profile's older posts);
+   * a profile's other updates start from the sheet, which calls `started`.
+   */
+  async function update(options: UpdateOptions = {}) {
     if (busy.value) return
     busy.value = true
     try {
-      const job = await call(
-        client.captures.$post(
+      const result = await call(
+        client.updates.$post(
           {
             json: {
-              refresh_id: id(),
-              ...(options.relations ? { options: { relations: true } } : {}),
+              target: { target: 'collection', id: id() },
+              ...(Object.keys(options).length ? { options } : {}),
             },
           },
           {
@@ -314,14 +376,20 @@ export function useCollectionDetail(
         ),
       )
       if (controller.signal.aborted) return
-      record.value = job.record_id
-      refreshed = true
-      toast('已开始重新抓取')
+      toast(options.posts === 'older' ? '已开始抓取更早的帖子' : '已开始更新')
+      started(result.id)
     } catch (e) {
       if (!controller.signal.aborted) report(e)
     } finally {
       busy.value = false
     }
+  }
+  /** An update of this collection started: follow it to its end. */
+  function started(recordId: string) {
+    record.value = recordId
+    updating.value = true
+    refreshed = true
+    void checkUpdate()
   }
   return {
     collection,
@@ -347,7 +415,10 @@ export function useCollectionDetail(
     /** Whether a point shows without a request. */
     isSeen: (point: string) => seen.has(key(point)),
     remove,
-    refresh,
+    update,
+    started,
+    updating,
+    older,
     checkAvailability,
     membersVersion,
   }

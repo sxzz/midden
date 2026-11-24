@@ -214,3 +214,27 @@ it('orders posts by when they were added or last updated, dated to match', async
   await vi.waitFor(() => expect(queries.at(-1)?.get('sort')).toBe('updated'))
   await vi.waitFor(() => expect(el.textContent).toContain('2024年3月4日'))
 })
+it('offers the posts before the last page read below the whole list', async () => {
+  const request = mockApi()
+  request.mockResolvedValue({ items: [], total_storage_bytes: 0 })
+  const older = vi.fn()
+  const el = document.createElement('div')
+  document.body.append(el)
+  const app = createVaporApp(ProfileCollections, {
+    id: 'profile',
+    revisionId: 'r1',
+    older: true,
+    onOlder: () => older,
+  })
+  app.mount(el)
+  unmount = () => app.unmount()
+  const button = await vi.waitFor(() => {
+    const found = [...el.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === '抓取更早的帖子',
+    )
+    expect(found).toBeDefined()
+    return found!
+  })
+  button.click()
+  expect(older).toHaveBeenCalledOnce()
+})

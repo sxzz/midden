@@ -1,16 +1,21 @@
 import { expect, test } from 'vitest'
 import {
+  countText,
+  coverText,
   extractLinks,
   groupRecords,
   linkTitle,
   mediaLabel,
+  profileHandle,
+  profilePartText,
   recordAdditions,
   recordCounts,
   recordProgress,
   recordRowTime,
   recordStatus,
+  recordTitle,
 } from './captures'
-import type { CaptureRecord } from './api'
+import type { CaptureRecord, UpdateInfo } from './api'
 
 const record = (patch: Partial<CaptureRecord>): CaptureRecord => ({
   id: 'r',
@@ -220,4 +225,117 @@ test('a profile record runs on while its lists are fetched', () => {
     members: { ...members, pending: 1, complete: 1, done: false },
   })
   expect(recordStatus(posts).label).toBe('正在保存帖子')
+})
+
+const update = (patch: Partial<UpdateInfo>): UpdateInfo => ({
+  target: 'collection',
+  posts: 0,
+  profiles: 1,
+  options: { posts: 'latest', relations: false },
+  queued: 0,
+  skipped: 0,
+  ...patch,
+})
+
+test('an update is titled by what it covers', () => {
+  const profile = record({
+    url: 'https://x.com/i/user/1',
+    kind: 'profile',
+    update: update({ handle: 'cat' }),
+  })
+  expect(recordTitle(profile)).toBe('更新 @cat')
+  expect(
+    recordTitle({
+      ...profile,
+      update: update({
+        handle: 'cat',
+        options: { posts: 'older', relations: false },
+      }),
+    }),
+  ).toBe('抓取 @cat 更早的帖子')
+  expect(
+    recordTitle(record({ update: update({ posts: 1, profiles: 0 }) })),
+  ).toBe('更新 x.com/fixture/status/1')
+  expect(
+    recordTitle(
+      record({ url: '', update: update({ target: 'folder', name: '猫' }) }),
+    ),
+  ).toBe('更新收藏夹「猫」')
+  expect(
+    recordTitle(
+      record({
+        url: '',
+        update: update({ target: 'many', posts: 9, profiles: 3 }),
+      }),
+    ),
+  ).toBe('更新 12 项')
+  expect(profileHandle('https://www.instagram.com/dog/')).toBe('@dog')
+  expect(coverText(340, 12)).toBe('12 个账号、340 条帖子')
+  expect(coverText(1, 0)).toBe('1 条帖子')
+  expect(countText(320)).toBe('320')
+  expect(countText(21_000)).toBe('2.1 万')
+  expect(countText(10_049)).toBe('1 万')
+})
+
+test('an update counts every member, waiting items as running', () => {
+  const running = record({
+    update: update({ target: 'many', queued: 2 }),
+    members: {
+      total: 10,
+      complete: 4,
+      partial: 1,
+      failed: 1,
+      pending: 2,
+      done: false,
+      added: 3,
+      updated: 2,
+    },
+  })
+  expect(recordStatus(running)).toEqual({ label: '正在更新', tone: 'active' })
+  expect(recordCounts(running)).toBe('新增 3 · 更新 2 · 异常 2 · 进行中 4')
+  expect(recordProgress(running)).toBe(0.6)
+  expect(recordStatus({ ...running, done: true, state: 'partial' })).toEqual({
+    label: '部分缺失',
+    tone: 'warn',
+  })
+})
+
+test('a profile of an update tells how each part went', () => {
+  const part = {
+    collection_id: 'p',
+    url: 'https://x.com/i/user/1',
+    state: 'complete',
+    posts: { total: 100, finished: 34, pending: 66, done: false },
+    relations: [
+      { list: 'following' as const, state: 'complete' as const, fetched: 3 },
+      {
+        list: 'followers' as const,
+        state: 'skipped' as const,
+        fetched: 0,
+        expected: 6000,
+      },
+    ],
+  }
+  expect(profilePartText(part)).toBe(
+    '资料 ✓ · 帖子 34/100 · 关注 ✓ · 粉丝 跳过',
+  )
+  expect(
+    profilePartText({
+      ...part,
+      state: 'queued',
+      posts: { total: 0, finished: 0, pending: 0, done: false },
+      relations: [
+        { list: 'following', state: 'waiting', fetched: 0 },
+        { list: 'followers', state: 'failed', fetched: 0 },
+      ],
+    }),
+  ).toBe('资料 进行中 · 帖子 0/0 · 关注 进行中 · 粉丝 失败')
+  expect(
+    profilePartText({
+      collection_id: 'p',
+      url: '',
+      state: 'complete',
+      posts: { total: 40, finished: 40, pending: 0, done: true },
+    }),
+  ).toBe('资料 ✓ · 帖子 40')
 })

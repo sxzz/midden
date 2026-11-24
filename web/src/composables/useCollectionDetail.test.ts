@@ -27,13 +27,10 @@ const collection = (id: string): Collection =>
       : {}),
   })
 let api = mockApi()
-/** What starting a capture answers with. */
-const job = {
-  id: 'job-1',
-  collection_id: 'kept',
-  state: 'queued',
-  record_id: 'record-1',
-}
+/** What starting an update answers with: its record. */
+const started = { id: 'record-1' }
+/** What the collection's update answers with. */
+let update: object = { older: false }
 /** The history every collection answers with. */
 let points: HistoryPoint[] = []
 /** The readings every collection's counts answer with. */
@@ -77,7 +74,7 @@ const Detail = {
       (value) => updates.push(value),
     )
     if (props.id === 'kept') {
-      refresh = () => used.refresh()
+      refresh = () => used.update()
       detail = used
     }
     return () => [h('p', { class: 'error' }, used.error.value)]
@@ -118,6 +115,7 @@ beforeEach(() => {
   followCounts = {}
   followChanges = 0
   detail = undefined
+  update = { older: false }
   api = mockApi(async (path) => {
     const gate = gates.get(path)
     if (gate) {
@@ -163,7 +161,8 @@ beforeEach(() => {
         observed_at: at.observed_at,
       }
     if (path.endsWith('/availability')) return { available: true }
-    if (path === '/captures') return job
+    if (path === '/updates') return started
+    if (path.endsWith('/update')) return update
     return collection(path.split('/', 3)[2]!)
   })
 })
@@ -176,18 +175,40 @@ afterEach(() => {
 })
 const calls = (prefix: string) =>
   api.mock.calls.filter(([path]) => path.startsWith(prefix)).length
-it('leaves a refresh to its record instead of following it', async () => {
+it('follows only whether its update runs, and reloads once it ends', async () => {
   mount()
   await vi.advanceTimersByTimeAsync(0)
   const d = detail!
   expect(d.record.value).toBe('')
+  expect(d.updating.value).toBe(false)
+  update = { record: { id: 'record-1', done: false }, older: false }
   await refresh()
   expect(d.record.value).toBe('record-1')
-  expect(toastState.value?.text).toBe('已开始重新抓取')
+  expect(d.updating.value).toBe(true)
+  expect(toastState.value?.text).toBe('已开始更新')
+  // While it runs, only the update is asked after; its record shows the rest.
   const before = api.mock.calls.length
-  await vi.advanceTimersByTimeAsync(10_000)
-  expect(api.mock.calls.length).toBe(before)
+  await vi.advanceTimersByTimeAsync(9000)
+  expect(
+    api.mock.calls.slice(before).every(([path]) => path.endsWith('/update')),
+  ).toBe(true)
   expect(updates).toEqual([])
+  update = { record: { id: 'record-1', done: true }, older: false }
+  await vi.advanceTimersByTimeAsync(3000)
+  expect(d.updating.value).toBe(false)
+  // 查看进度 stays for the finished update.
+  expect(d.record.value).toBe('record-1')
+  await vi.waitFor(() =>
+    expect(updates.map((value) => value.id)).toEqual(['kept']),
+  )
+})
+it('shows the running update of a collection it opens', async () => {
+  update = { record: { id: 'record-0', done: false }, older: true }
+  mount()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(detail!.record.value).toBe('record-0')
+  expect(detail!.updating.value).toBe(true)
+  expect(detail!.older.value).toBe(true)
 })
 it('shows what a refresh saved when the reader comes back', async () => {
   mount()
@@ -196,7 +217,9 @@ it('shows what a refresh saved when the reader comes back', async () => {
   // Coming back without a refresh keeps the cached view as it was.
   await show('other')
   await show('kept')
-  expect(calls('/collections/kept')).toBe(4)
+  // The collection, its history, counts and update; availability once.
+  expect(calls('/collections/kept')).toBe(5)
+  update = { record: { id: 'record-1', done: false }, older: false }
   await refresh()
   await show('other')
   await show('kept')
@@ -208,6 +231,7 @@ it('shows what a refresh saved when the reader comes back', async () => {
 it('reports a failed reload after a refresh as a toast', async () => {
   const view = mount()
   await vi.advanceTimersByTimeAsync(0)
+  update = { record: { id: 'record-1', done: false }, older: false }
   await refresh()
   await show('other')
   rejects.add('/collections/kept')
@@ -347,10 +371,10 @@ it('asks for the lists with a profile update, and shows what they found on retur
   expect(d.follows.value).toBeUndefined()
   expect(d.followChangeable.value).toBe(false)
 
-  await d.refresh({ relations: true })
-  const [, request] = api.mock.calls.find(([path]) => path === '/captures')!
+  await d.update({ relations: true })
+  const [, request] = api.mock.calls.find(([path]) => path === '/updates')!
   expect(JSON.parse(request.body!)).toEqual({
-    refresh_id: 'kept',
+    target: { target: 'collection', id: 'kept' },
     options: { relations: true },
   })
   // The lists are followed on the record; coming back shows what they found.
@@ -365,7 +389,9 @@ it('updates without the lists unless asked, and never asks a post for follows', 
   mount()
   await vi.advanceTimersByTimeAsync(0)
   await refresh()
-  const [, request] = api.mock.calls.find(([path]) => path === '/captures')!
-  expect(JSON.parse(request.body!)).toEqual({ refresh_id: 'kept' })
+  const [, request] = api.mock.calls.find(([path]) => path === '/updates')!
+  expect(JSON.parse(request.body!)).toEqual({
+    target: { target: 'collection', id: 'kept' },
+  })
   expect(calls('/collections/kept/follow')).toBe(0)
 })

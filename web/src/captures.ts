@@ -1,6 +1,11 @@
 import { relationsDone } from './follows'
 import { groupLabel } from './presentation'
-import type { CaptureMedia, CaptureRecord } from './api'
+import type {
+  CaptureMedia,
+  CaptureRecord,
+  ProfilePart,
+  RelationProgress,
+} from './api'
 
 const LINK_SEPARATOR = /[\s<>"'，。；、（）]+/
 const TRAILING_PUNCTUATION = /[),.;!?]+$/
@@ -8,6 +13,7 @@ const HTTP_SCHEME = /^https?:\/\//i
 const BARE_LINK = /^[\w-]+(?:\.[\w-]+)+\/\S+$/
 const WWW_PREFIX = /^www\./
 const TRAILING_SLASH = /\/$/
+const WHOLE = /\.0$/
 
 /**
  * Pull the links out of pasted text. A link may come without its scheme, the
@@ -67,6 +73,11 @@ export function stateStatus(
 
 /** The state of a whole record, members included. */
 export function recordStatus(r: CaptureRecord): RecordStatus {
+  if (r.update) {
+    if (!r.done) return { label: '正在更新', tone: 'active' }
+    if (r.stopped) return { label: '已中止', tone: 'warn' }
+    return stateStatus(r.state)
+  }
   const m = r.members
   if (!m || r.state === 'failed' || r.state === 'queued')
     return stateStatus(r.state, r.waiting)
@@ -86,6 +97,8 @@ export function recordStatus(r: CaptureRecord): RecordStatus {
 export function recordProgress(r: CaptureRecord) {
   if (r.done) return 1
   const m = r.members
+  if (r.update && m)
+    return m.total ? (m.total - m.pending - r.update.queued) / m.total : 0
   // The lists that follow the posts have no share to show.
   if (m?.done) return
   if (m) {
@@ -97,6 +110,15 @@ export function recordProgress(r: CaptureRecord) {
 /** Counts worth a line under the title; empty when there is nothing to count. */
 export function recordCounts(r: CaptureRecord) {
   const m = r.members
+  if (r.update && m)
+    return [
+      m.added && `新增 ${m.added}`,
+      m.updated && `更新 ${m.updated}`,
+      m.failed + m.partial && `异常 ${m.failed + m.partial}`,
+      m.pending + r.update.queued && `进行中 ${m.pending + r.update.queued}`,
+    ]
+      .filter(Boolean)
+      .join(' · ')
   if (m) {
     if (!m.total) return r.done ? '没有帖子' : ''
     return [
@@ -180,4 +202,75 @@ export function recordRowTime(value: string, now = new Date()) {
   return ['今天', '昨天'].includes(groupLabel(value, now))
     ? time
     : `${d.getMonth() + 1}月${d.getDate()}日 ${time}`
+}
+
+/**
+ * A profile as its handle, `@name`: the username when known, else the first
+ * path segment of an X or Instagram profile link; otherwise the link.
+ */
+export function profileHandle(url: string, username?: string) {
+  if (username) return `@${username}`
+  try {
+    const [name, ...rest] = new URL(url).pathname.split('/').filter(Boolean)
+    if (name && !rest.length) return `@${name}`
+  } catch {}
+  return linkTitle(url)
+}
+
+/** A count the way the sheet reads it: 2.1 万 rather than 21000. */
+export function countText(n: number) {
+  if (n < 10_000) return String(n)
+  return `${(Math.floor(n / 1000) / 10).toFixed(1).replace(WHOLE, '')} 万`
+}
+
+/** What a record is about: its link, or what its update covers. */
+export function recordTitle(r: CaptureRecord) {
+  const u = r.update
+  if (!u) return linkTitle(r.url)
+  if (u.target === 'folder') return `更新收藏夹「${u.name ?? ''}」`
+  if (u.target === 'many') return `更新 ${u.posts + u.profiles} 项`
+  if (!r.url) return '更新'
+  if (r.kind !== 'profile') return `更新 ${linkTitle(r.url)}`
+  const handle = profileHandle(r.url, u.handle)
+  return u.options.posts === 'older'
+    ? `抓取 ${handle} 更早的帖子`
+    : `更新 ${handle}`
+}
+
+/** What an update covers, e.g. 12 个账号、340 条帖子. */
+export function coverText(posts: number, profiles: number) {
+  return [profiles && `${profiles} 个账号`, posts && `${posts} 条帖子`]
+    .filter(Boolean)
+    .join('、')
+}
+
+const partMarks: Record<string, string> = {
+  complete: '✓',
+  partial: '✓',
+  failed: '✗',
+  skipped: '跳过',
+  waiting: '等待中',
+}
+
+function listPart(r: RelationProgress) {
+  const name = r.list === 'following' ? '关注' : '粉丝'
+  if (r.state === 'running' || r.state === 'waiting') return `${name} 进行中`
+  if (r.state === 'failed') return `${name} 失败`
+  return `${name} ${partMarks[r.state] ?? r.state}`
+}
+
+/**
+ * How each part of a profile's update went, e.g.
+ * 资料 ✓ · 帖子 34/100 · 关注 ✓ · 粉丝 跳过.
+ */
+export function profilePartText(p: ProfilePart) {
+  const parts = [`资料 ${partMarks[p.state] ?? '进行中'}`]
+  if (p.posts)
+    parts.push(
+      p.posts.done
+        ? `帖子 ${p.posts.total}`
+        : `帖子 ${p.posts.finished}/${p.posts.total}`,
+    )
+  for (const list of p.relations ?? []) parts.push(listPart(list))
+  return parts.join(' · ')
 }

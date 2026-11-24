@@ -1,8 +1,9 @@
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createVaporApp } from 'vue'
 import { shareSlug } from '../share'
-import { collection, mockApi } from '../testing/api'
+import { collection, mockApi, type Request } from '../testing/api'
 import CollectionDetail from './CollectionDetail.vue'
+import type { Collection } from '../api'
 const push = vi.fn()
 vi.mock('vue-router', () => ({
   useRouter: () => ({
@@ -14,6 +15,16 @@ vi.mock('vue-router', () => ({
 }))
 
 let unmount = () => {}
+beforeEach(() => {
+  HTMLDialogElement.prototype.showModal = vi.fn(function (
+    this: HTMLDialogElement,
+  ) {
+    this.open = true
+  })
+  HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) {
+    this.open = false
+  })
+})
 afterEach(() => {
   unmount()
   document.body.replaceChildren()
@@ -37,24 +48,48 @@ const profile = collection({
     ],
   },
 })
+const post = collection({
+  id: 'profile',
+  url: 'https://x.com/synthetic/status/2',
+  text: '合成帖子',
+  graph: {
+    root: 'post',
+    relations: [],
+    entities: [{ key: 'post', type: 'x.post', external_id: '2', data: {} }],
+  },
+})
 
-async function mount() {
-  mockApi((path) => {
+async function mount(shown: Collection = profile) {
+  /** What the collection's update answers, changed once one starts. */
+  let update: object = { older: false }
+  const sent: { path: string; body?: unknown }[] = []
+  mockApi((path, request: Request) => {
+    if (request.method === 'POST')
+      sent.push({
+        path,
+        ...(request.body ? { body: JSON.parse(request.body) } : {}),
+      })
     if (
       path === '/collections/profile' ||
       path === '/public/s/collections/profile'
     )
-      return profile
+      return shown
     if (path.endsWith('/availability')) return { available: true }
     if (path.endsWith('/profile/follows'))
       return { following: 2, followers: 3, mutual: 1 }
-    if (path === '/captures')
+    if (path === '/collections/profile/update') return update
+    if (path === '/updates/preview')
       return {
-        id: 'job',
-        collection_id: 'profile',
-        state: 'queued',
-        record_id: 'record',
+        posts: 0,
+        profiles: 1,
+        listable: 1,
+        counts: { following: 320, followers: 21_000 },
+        older: false,
       }
+    if (path === '/updates') {
+      update = { record: { id: 'record', done: false }, older: false }
+      return { id: 'record' }
+    }
     if (path.startsWith('/shares')) return []
     if (path.endsWith('/annotation')) return { tags: [], note: '' }
     if (path.startsWith('/tags')) return []
@@ -62,13 +97,18 @@ async function mount() {
       return { items: [] }
     return {}
   })
+  vi.stubGlobal('crypto', { randomUUID: () => 'key' })
   const el = document.createElement('div')
   document.body.append(el)
   const app = createVaporApp(CollectionDetail, { id: 'profile' })
   app.mount(el)
   unmount = () => app.unmount()
-  await vi.waitFor(() => expect(el.textContent).toContain('合成账号'))
-  return el
+  await vi.waitFor(() =>
+    expect(el.textContent).toContain(
+      shown === profile ? '合成账号' : '合成帖子',
+    ),
+  )
+  return { el, sent }
 }
 
 /** Each list group's rows, by the text that starts them. */
@@ -78,43 +118,81 @@ const groups = (el: HTMLElement) =>
       .map((row) => row.textContent?.trim().replace(/›$/, '').trim())
       .filter(Boolean),
   )
+const button = (root: Element, text: string) =>
+  [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.textContent?.trim() === text,
+  )!
 
-it('puts 抓关系网, 重新抓取 and 查看进度 in a list group of their own', async () => {
-  const el = await mount()
-  await vi.waitFor(() =>
-    expect(groups(el)).toContainEqual([
-      '抓关系网更新时一并抓取关注和粉丝列表',
-      '重新抓取',
-    ]),
-  )
+it('puts 更新 and 查看进度 in a group of their own; a profile opens the sheet', async () => {
+  const { el, sent } = await mount()
+  await vi.waitFor(() => expect(groups(el)).toContainEqual(['更新']))
+  // Opening the original, sharing and deleting are elsewhere, and the lists
+  // are an option of the sheet, not of the page.
   const update = el.querySelector<HTMLElement>('.update .section-body')!
-  ;[...update.querySelectorAll('button')]
-    .find((b) => b.textContent?.trim() === '重新抓取')!
-    .click()
-  // The progress of the update started here joins the same group.
-  await vi.waitFor(() => expect(update.textContent).toContain('查看进度'))
-  // The switch comes first, right above the button that starts the update.
-  expect(
-    update.firstElementChild?.querySelector('[role=switch]'),
-  ).not.toBeNull()
-  // Opening the original, sharing and deleting are elsewhere.
   for (const other of ['打开原文', '公开分享', '删除这条收藏']) {
     expect(update.textContent).not.toContain(other)
     expect(el.textContent).toContain(other)
   }
+  expect(el.textContent).not.toContain('抓关系网')
+  button(update, '更新').click()
+  const sheet = await vi.waitFor(() => {
+    const open = el.querySelector<HTMLDialogElement>('dialog.sheet[open]')
+    expect(open).not.toBeNull()
+    return open!
+  })
+  await vi.waitFor(() => expect(sheet.textContent).toContain('抓关系网'))
+  expect(sheet.textContent).toContain('更新 @synthetic')
+  expect(sheet.textContent).toContain('最新 100 条')
+  expect(sheet.textContent).toContain(
+    '关注 320 · 粉丝 2.1 万（超过 5000，将跳过粉丝名单）',
+  )
+  expect(sent).toEqual([
+    {
+      path: '/updates/preview',
+      body: { target: { target: 'collection', id: 'profile' } },
+    },
+  ])
+  button(sheet, '开始更新').click()
+  // The update's progress joins the same group; the button says it runs.
+  await vi.waitFor(() =>
+    expect(groups(el)).toContainEqual(['正在更新…', '查看进度']),
+  )
+  expect(sent.at(-1)).toEqual({
+    path: '/updates',
+    body: {
+      target: { target: 'collection', id: 'profile' },
+      options: { posts: 'latest' },
+    },
+  })
+})
+
+it('updates a post right away, without the sheet', async () => {
+  const { el, sent } = await mount(post)
+  const update = el.querySelector<HTMLElement>('.update .section-body')!
+  await vi.waitFor(() => expect(button(update, '更新').disabled).toBe(false))
+  button(update, '更新').click()
+  await vi.waitFor(() =>
+    expect(groups(el)).toContainEqual(['正在更新…', '查看进度']),
+  )
+  expect(el.querySelector('dialog.sheet[open]')).toBeNull()
+  expect(sent).toEqual([
+    {
+      path: '/updates',
+      body: { target: { target: 'collection', id: 'profile' } },
+    },
+  ])
 })
 
 it('shows no update group behind a public link', async () => {
   shareSlug.value = 's'
-  const el = await mount()
+  const { el } = await mount()
   expect(el.querySelector('.update')).toBeNull()
-  expect(el.querySelector('[role=switch]')).toBeNull()
-  expect(el.textContent).not.toContain('重新抓取')
+  expect(el.textContent).not.toContain('查看进度')
   expect(el.textContent).toContain('打开原文')
 })
 
 it('links each follow count to the library under the 关系 filter', async () => {
-  const el = await mount()
+  const { el } = await mount()
   await vi.waitFor(() =>
     expect(el.querySelectorAll('.follows a')).toHaveLength(3),
   )
@@ -145,7 +223,7 @@ it('links each follow count to the library under the 关系 filter', async () =>
 
 it('keeps the follow counts plain behind a public link', async () => {
   shareSlug.value = 's'
-  const el = await mount()
+  const { el } = await mount()
   await vi.waitFor(() =>
     expect(el.querySelector('.follows')?.textContent).toContain('互关'),
   )

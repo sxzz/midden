@@ -1,8 +1,7 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
-import { call, client, errorText } from '../api'
-import { toast } from '../composables/useToast'
+import UpdateSheet from './UpdateSheet.vue'
 const props = defineProps<{
   selected: string[]
   /** Every collection currently listed, for selecting them all at once. */
@@ -10,49 +9,38 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   select: [ids: string[]]
-  /** The batch is running: selection ends, this bar stays to link to it. */
+  /** The update is running: selection ends, this bar stays to link to it. */
   started: []
   close: []
 }>()
 const router = useRouter()
-const busy = shallowRef(false)
-/** How many collections the started batch refreshes; 0 before it starts. */
-const started = shallowRef(0)
+const sheet = shallowRef(false)
+/** The started update's record and how many it covers. */
+const started = shallowRef<{ record: string; count: number }>()
 const allSelected = computed(
   () =>
     props.listed.length > 0 &&
     props.listed.every((id) => props.selected.includes(id)),
 )
-// Each collection of the batch is a record of its own, so progress is
-// followed on the list of records rather than here.
-async function start() {
-  busy.value = true
-  try {
-    await call(
-      client['refresh-batches'].$post({
-        json: { collection_ids: props.selected },
-      }),
-    )
-    started.value = props.selected.length
-    emit('started')
-  } catch (e) {
-    toast(errorText(e))
-  } finally {
-    busy.value = false
-  }
+// The update is one record: its page follows the progress, not this bar.
+function onStarted(record: string) {
+  sheet.value = false
+  started.value = { record, count: props.selected.length }
+  emit('started')
 }
-function openRecords() {
+function openRecord() {
+  const record = started.value?.record
   emit('close')
-  void router.push({ name: 'captures' })
+  if (record) void router.push({ name: 'capture', params: { id: record } })
 }
 </script>
 
 <template>
   <div class="toolbar" role="region" aria-label="批量更新">
     <template v-if="started">
-      <p class="status" role="status">已开始更新 {{ started }} 项</p>
+      <p class="status" role="status">已开始更新 {{ started.count }} 项</p>
       <button type="button" class="action" @click="emit('close')">关闭</button>
-      <button type="button" class="action strong" @click="openRecords">
+      <button type="button" class="action strong" @click="openRecord">
         查看进度
       </button>
     </template>
@@ -70,13 +58,19 @@ function openRecords() {
       <button
         type="button"
         class="action strong"
-        :disabled="!selected.length || busy"
-        @click="start"
+        :disabled="!selected.length"
+        @click="sheet = true"
       >
         更新
       </button>
     </template>
   </div>
+  <UpdateSheet
+    :open="sheet"
+    :target="{ target: 'many', ids: selected }"
+    @started="onStarted"
+    @cancel="sheet = false"
+  />
 </template>
 
 <style scoped>

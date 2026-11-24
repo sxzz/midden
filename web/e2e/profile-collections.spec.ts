@@ -247,7 +247,7 @@ test('profile shows related collection rows and total storage, with internal bio
   expect(errors).toEqual([])
 })
 
-test('profile refresh links to its record and shows new posts on return', async ({
+test('profile update links to its record and shows new posts on return', async ({
   page,
 }) => {
   const postN = (n: number) => ({
@@ -259,7 +259,7 @@ test('profile refresh links to its record and shows new posts on return', async 
   })
   let saved = [postN(1)]
   let listLoads = 0
-  let polled = false
+  const started: unknown[] = []
   const recordId = '77777777-7777-4777-8777-777777777777'
   await page.route('https://telegram.org/**', (route) =>
     route.fulfill({ body: '' }),
@@ -268,47 +268,75 @@ test('profile refresh links to its record and shows new posts on return', async 
     const url = new URL(route.request().url())
     const path = url.pathname
     let json: unknown
-    if (path === '/v1/collections') {
-      listLoads++
-      json = { items: saved }
-    } else if (path === '/v1/captures') {
-      // The refresh saves its posts while the reader is elsewhere.
-      saved = [postN(3), postN(2), postN(1)]
-      json = {
-        id: 'job',
-        collection_id: profileId,
-        state: 'queued',
-        record_id: recordId,
+    switch (path) {
+      case '/v1/collections': {
+        listLoads++
+        json = { items: saved }
+        break
       }
-    } else if (path.startsWith('/v1/jobs/')) {
-      polled = true
-      json = {}
-    } else if (path.startsWith('/v1/captures/'))
-      return route.fulfill({
-        status: 404,
-        json: { error: '内容不存在或已删除' },
-      })
-    else if (path.endsWith('/history')) json = { items: [] }
-    else if (path.endsWith('/availability')) json = { available: true }
-    else if (path.endsWith('/annotation')) json = { note: '', tags: [] }
-    else if (path === '/v1/tags') json = []
-    else if (path === `/v1/collections/${profileId}`) json = profile
-    else json = {}
+      case '/v1/updates/preview': {
+        json = { posts: 0, profiles: 1, listable: 1, counts: {}, older: true }
+        break
+      }
+      case '/v1/updates': {
+        // The update saves its posts while the reader is elsewhere.
+        started.push(route.request().postDataJSON())
+        saved = [postN(3), postN(2), postN(1)]
+        json = { id: recordId }
+        break
+      }
+      case `/v1/collections/${profileId}/update`: {
+        json = started.length
+          ? { record: { id: recordId, done: true }, older: true }
+          : { older: true }
+        break
+      }
+      default:
+        if (path.startsWith('/v1/captures/'))
+          return route.fulfill({
+            status: 404,
+            json: { error: '内容不存在或已删除' },
+          })
+        else if (path.endsWith('/history')) json = { items: [] }
+        else if (path.endsWith('/availability')) json = { available: true }
+        else if (path.endsWith('/annotation')) json = { note: '', tags: [] }
+        else if (path === '/v1/tags') json = []
+        else if (path === `/v1/collections/${profileId}`) json = profile
+        else json = {}
+    }
     return route.fulfill({ json })
   })
   await page.goto(`/app/#/collection/${profileId}`)
   const related = page.getByRole('region', { name: '关联的收藏' })
   await expect(related.locator('.row')).toHaveCount(1)
-  await page.getByRole('button', { name: '重新抓取' }).click()
-  await expect(page.locator('.toast')).toHaveText('已开始重新抓取')
-  // Progress is not followed here: the page links to the refresh's record.
+  await expect(page.getByRole('button', { name: '查看进度' })).toHaveCount(0)
+  await page.getByRole('button', { name: '更新', exact: true }).click()
+  const sheet = page.getByRole('dialog')
+  await expect(sheet.getByRole('radio', { name: '最新 100 条' })).toBeChecked()
+  await sheet.getByRole('radio', { name: '抓到已有数据为止' }).check()
+  await sheet.getByRole('button', { name: '开始更新' }).click()
+  await expect(page.locator('.toast')).toHaveText('已开始更新')
+  expect(started).toEqual([
+    {
+      target: { target: 'collection', id: profileId },
+      options: { posts: 'until_existing' },
+    },
+  ])
+  // Progress is not followed here: the page links to the update's record.
   await page.getByRole('button', { name: '查看进度' }).click()
   await expect(page).toHaveURL(new RegExp(`/captures/${recordId}$`))
   await page.getByRole('button', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
   await expect(related.locator('.row')).toHaveCount(3)
   await expect(related.locator('.row').first()).toContainText('新帖子 3')
-  expect(polled).toBe(false)
+
+  // Below the whole list: the posts after the last page read.
+  await related.getByRole('button', { name: '抓取更早的帖子' }).click()
+  await expect(page.locator('.toast')).toHaveText('已开始抓取更早的帖子')
+  expect(started.at(-1)).toEqual({
+    target: { target: 'collection', id: profileId },
+    options: { posts: 'older' },
+  })
 
   // A soft refresh reloads the list in place.
   saved = [postN(4), ...saved]

@@ -15,17 +15,19 @@ import {
   errorText,
   type CaptureMember,
   type CaptureRecordDetail,
-  type Job,
 } from '../api'
 import {
   linkTitle,
   mediaLabel,
   mediaStates,
+  profileHandle,
+  profilePartText,
   recordAdditions,
   recordCounts,
   recordProgress,
   recordStatus,
   recordTime,
+  recordTitle,
   stateStatus,
 } from '../captures'
 import { toast } from '../composables/useToast'
@@ -263,7 +265,7 @@ onDeactivated(() => {
 onUnmounted(retire)
 
 /** Open the record a new capture created, or the list when it is not there. */
-async function follow(job: Job) {
+async function follow(job: { id: string }) {
   try {
     const page = await call(client.captures.$get({ query: {} }))
     const created = page.items.find((r) => r.job_id === job.id)
@@ -278,14 +280,14 @@ async function retry() {
   if (busy.value) return
   busy.value = true
   try {
-    const job = await call(
+    const { record_id: id } = await call(
       client.captures[':id'].retry.$post(
         { param: { id: props.id } },
         { headers: { 'Idempotency-Key': crypto.randomUUID() } },
       ),
     )
-    toast('已重新提交。')
-    await follow(job)
+    toast(record.value?.update ? '已开始更新' : '已重新提交。')
+    await router.replace({ name: 'capture', params: { id } })
   } catch (e) {
     toast(errorText(e))
   } finally {
@@ -346,6 +348,15 @@ async function stop() {
     busy.value = false
   }
 }
+/** A member's line: its link, or the profile list it stands for. */
+function memberTitle(m: CaptureMember) {
+  if (!m.list) return linkTitle(m.url)
+  return `${profileHandle(m.url, m.handle)} ${m.list === 'following' ? '关注' : '粉丝'}名单`
+}
+const retryLabel = computed(() => {
+  if (record.value?.update) return '再次更新'
+  return record.value?.state === 'failed' ? '重试' : '重新采集'
+})
 function openCollection(id: string, event?: MouseEvent) {
   if (event?.ctrlKey || event?.metaKey || event?.shiftKey) {
     window.open(`#/collection/${id}`, '_blank', 'noopener')
@@ -363,7 +374,7 @@ function openCollection(id: string, event?: MouseEvent) {
   <template v-else>
     <ListSection>
       <div class="summary">
-        <p class="title">{{ linkTitle(record.url) }}</p>
+        <p class="title">{{ recordTitle(record) }}</p>
         <p class="state" :class="status?.tone" role="status">
           {{ status?.label }}<template v-if="counts"> · {{ counts }}</template>
         </p>
@@ -383,7 +394,7 @@ function openCollection(id: string, event?: MouseEvent) {
             <dt>完成时间</dt>
             <dd>{{ recordTime(record.finished_at) }}</dd>
           </div>
-          <div v-if="record.members">
+          <div v-if="record.members && !record.update">
             <dt>帖子</dt>
             <dd>
               {{
@@ -394,6 +405,10 @@ function openCollection(id: string, event?: MouseEvent) {
           <div v-if="record.relations">
             <dt>关系网</dt>
             <dd>{{ relationsText(record.relations) }}</dd>
+          </div>
+          <div v-if="record.update?.skipped">
+            <dt>跳过</dt>
+            <dd>{{ record.update.skipped }} 项已删除或无法更新</dd>
           </div>
           <div v-if="additions">
             <dt>收藏</dt>
@@ -415,7 +430,7 @@ function openCollection(id: string, event?: MouseEvent) {
         chevron
         @select="openCollection(record.collection_id)"
       />
-      <ListButton label="打开原链接" :href="record.url" />
+      <ListButton v-if="record.url" label="打开原链接" :href="record.url" />
       <ListButton
         v-if="record.members && !record.done"
         label="中止"
@@ -449,10 +464,33 @@ function openCollection(id: string, event?: MouseEvent) {
       />
       <ListButton
         v-if="record.done"
-        :label="record.state === 'failed' ? '重试' : '重新采集'"
+        :label="retryLabel"
         :disabled="busy"
         @select="retry"
       />
+    </ListSection>
+    <!-- An update's profiles first, each with how its parts went. -->
+    <ListSection
+      v-if="record.profiles?.length"
+      title="账号"
+      :footnote="
+        record.more_profiles ? `另有 ${record.more_profiles} 个账号` : undefined
+      "
+    >
+      <button
+        v-for="p in record.profiles"
+        :key="p.collection_id"
+        type="button"
+        class="line profile"
+        @click="(event: MouseEvent) => openCollection(p.collection_id, event)"
+      >
+        <span class="line-text"
+          >{{ profileHandle(p.url, p.handle)
+          }}<small class="hint">{{ profilePartText(p) }}</small
+          ><small v-if="p.error" class="hint">{{ p.error }}</small></span
+        >
+        <span class="chevron" aria-hidden="true">›</span>
+      </button>
     </ListSection>
     <ListSection v-if="reasons.length" title="失败原因">
       <p v-for="reason in reasons" :key="reason.text" class="line">
@@ -502,13 +540,13 @@ function openCollection(id: string, event?: MouseEvent) {
           <button
             type="button"
             class="member-main"
-            :disabled="!m.saved || m.state === 'failed'"
+            :disabled="!m.saved || m.state === 'failed' || !!m.list"
             @click="
               (event: MouseEvent) => openCollection(m.collection_id, event)
             "
           >
             <span class="line-text"
-              >{{ linkTitle(m.url)
+              >{{ memberTitle(m)
               }}<small
                 v-for="reason in m.error ? [m.error] : m.reasons"
                 :key="reason"
@@ -523,10 +561,10 @@ function openCollection(id: string, event?: MouseEvent) {
             >
           </button>
           <button
-            v-if="m.state === 'failed' && !m.gone && record.done"
+            v-if="m.state === 'failed' && !m.gone && !m.list && record.done"
             type="button"
             class="member-retry"
-            :aria-label="`重试 ${linkTitle(m.url)}`"
+            :aria-label="`重试 ${memberTitle(m)}`"
             :disabled="busy"
             @click="retryFailed(m)"
           >
@@ -649,6 +687,17 @@ function openCollection(id: string, event?: MouseEvent) {
   inset: 0 0 auto var(--inset);
   height: 1px;
   background: var(--separator);
+}
+.profile {
+  width: 100%;
+  text-align: left;
+}
+.profile:active {
+  background: var(--fill);
+}
+.chevron {
+  flex-shrink: 0;
+  color: var(--subtle);
 }
 .line.muted {
   color: var(--subtle);

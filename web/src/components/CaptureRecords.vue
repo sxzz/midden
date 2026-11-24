@@ -16,11 +16,11 @@ import {
 import {
   extractLinks,
   groupRecords,
-  linkTitle,
   recordCounts,
   recordProgress,
   recordRowTime,
   recordStatus,
+  recordTitle,
 } from '../captures'
 import CaptureOptions from './CaptureOptions.vue'
 import InfiniteLoader from './ui/InfiniteLoader.vue'
@@ -216,7 +216,7 @@ async function submit() {
       :href="`#/captures/${r.id}`"
     >
       <span class="main">
-        <span class="title">{{ linkTitle(r.url) }}</span>
+        <span class="title">{{ recordTitle(r) }}</span>
         <span class="meta">
           {{ recordRowTime(r.created_at)
           }}<template v-if="recordCounts(r)"> · {{ recordCounts(r) }}</template>
@@ -227,7 +227,7 @@ async function submit() {
           class="bar"
           :value="recordProgress(r)"
           max="1"
-          :aria-label="`${linkTitle(r.url)} 进度`"
+          :aria-label="`${recordTitle(r)} 进度`"
         />
       </span>
       <span class="state" :class="recordStatus(r).tone">{{

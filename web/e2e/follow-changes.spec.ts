@@ -26,13 +26,24 @@ const profile = {
   },
 }
 const recordId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+const relations = [
+  { list: 'following', state: 'complete', expected: 2, fetched: 2 },
+  {
+    list: 'followers',
+    state: 'skipped',
+    expected: 20000,
+    fetched: 0,
+    error: '超过 5000 人，未抓取',
+  },
+]
+/** The update's one record, with the profile's parts. */
 const record = {
   id: recordId,
   job_id: 'job',
   collection_id: profileId,
   saved: true,
   url: profile.url,
-  input: profile.url,
+  input: '',
   platform: 'x',
   kind: 'profile',
   state: 'complete',
@@ -41,21 +52,33 @@ const record = {
   finished_at: '2026-11-05T08:01:00Z',
   done: true,
   members: {
-    total: 0,
-    complete: 0,
+    total: 3,
+    complete: 1,
     partial: 0,
     failed: 0,
     pending: 0,
     done: true,
+    added: 0,
+    updated: 1,
   },
-  relations: [
-    { list: 'following', state: 'complete', expected: 2, fetched: 2 },
+  update: {
+    target: 'collection',
+    target_id: profileId,
+    handle: 'owner',
+    posts: 0,
+    profiles: 1,
+    options: { posts: 'latest', relations: true },
+    queued: 0,
+    skipped: 0,
+  },
+  profiles: [
     {
-      list: 'followers',
-      state: 'skipped',
-      expected: 20000,
-      fetched: 0,
-      error: '超过 5000 人，未抓取',
+      collection_id: profileId,
+      url: profile.url,
+      handle: 'owner',
+      state: 'complete',
+      posts: { total: 0, finished: 0, pending: 0, done: true },
+      relations,
     },
   ],
   warnings: [],
@@ -130,6 +153,13 @@ test('updates a profile with its lists and lists its follow changes', async ({
     [`/v1/collections/${profileId}/history`]: { items: [] },
     [`/v1/collections/${profileId}/availability`]: { available: true },
     [`/v1/collections/${profileId}/annotation`]: { note: '', tags: [] },
+    '/v1/updates/preview': {
+      posts: 0,
+      profiles: 1,
+      listable: 1,
+      counts: { following: 2, followers: 20_000 },
+      older: false,
+    },
     [`/v1/captures/${recordId}`]: record,
     [`/v1/captures/${recordId}/members`]: { items: [] },
   }
@@ -140,17 +170,16 @@ test('updates a profile with its lists and lists its follow changes', async ({
       const limit = Number(url.searchParams.get('limit') || 1000)
       return route.fulfill({ json: { items: changes.items.slice(0, limit) } })
     }
-    if (path === '/v1/captures') {
+    if (path === '/v1/updates') {
       submitted.push(route.request().postDataJSON())
-      return route.fulfill({
-        json: {
-          id: 'job',
-          collection_id: profileId,
-          state: 'queued',
-          record_id: recordId,
-        },
-      })
+      return route.fulfill({ json: record })
     }
+    if (path === `/v1/collections/${profileId}/update`)
+      return route.fulfill({
+        json: submitted.length
+          ? { record: { id: recordId, done: true }, older: false }
+          : { older: false },
+      })
     return route.fulfill({ json: fixed[path] ?? {} })
   })
   await page.goto(`/app/#/collection/${profileId}`)
@@ -173,25 +202,35 @@ test('updates a profile with its lists and lists its follow changes', async ({
     rel: 'mutual',
   })
 
-  // 抓关系网 is off until turned on, and goes along with the update: the
-  // two, and the update's progress, form a list group of their own.
+  // The update and its progress form a list group of their own; 抓关系网
+  // is an option of the sheet the update opens, off until turned on.
   const update = page.locator('section.update')
-  const lists = update.getByRole('switch', { name: '抓关系网' })
-  await expect(lists).not.toBeChecked()
   await expect(update).not.toContainText('打开原文')
   await expect(update).not.toContainText('删除这条收藏')
+  await expect(update).not.toContainText('查看进度')
+  await update.getByRole('button', { name: '更新', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: '更新 @owner' })
+  const lists = sheet.getByRole('checkbox', { name: /抓关系网/ })
+  await expect(lists).not.toBeChecked()
+  await expect(sheet).toContainText(
+    '关注 2 · 粉丝 2 万（超过 5000，将跳过粉丝名单）',
+  )
   await lists.check()
-  await update.getByRole('button', { name: '重新抓取' }).click()
-  await expect(page.locator('.toast')).toHaveText('已开始重新抓取')
+  await sheet.getByRole('button', { name: '开始更新' }).click()
+  await expect(page.locator('.toast')).toHaveText('已开始更新')
   expect(submitted).toEqual([
-    { refresh_id: profileId, options: { relations: true } },
+    {
+      target: { target: 'collection', id: profileId },
+      options: { posts: 'latest', relations: true },
+    },
   ])
-  // How the lists went is on the update's record.
+  // How each part went is on the update's record.
   await update.getByRole('button', { name: '查看进度' }).click()
   await expect(page).toHaveURL(new RegExp(`/captures/${recordId}$`))
+  await expect(page.locator('.summary .title')).toHaveText('更新 @owner')
   await expect(
-    page.locator('.facts div').filter({ hasText: '关系网' }).locator('dd'),
-  ).toHaveText('关注 2 人 · 粉丝 超过 5000 人，未抓取')
+    page.locator('section').filter({ hasText: '账号' }).locator('.profile'),
+  ).toContainText('资料 ✓ · 帖子 0 · 关注 ✓ · 粉丝 跳过')
   await page.getByRole('button', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
 

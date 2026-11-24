@@ -41,6 +41,7 @@ import FolderMenuSheet from './FolderMenuSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
 import FolderStrip from './FolderStrip.vue'
 import ShareSheet from './ShareSheet.vue'
+import UpdateSheet from './UpdateSheet.vue'
 // Remembered in this browser, so a reload does not cover the media again.
 const SENSITIVE_KEY = 'midden.showSensitive'
 const showSensitive = shallowRef(readFlag(SENSITIVE_KEY))
@@ -355,13 +356,26 @@ const modified = computed(
     folderModified(folderList.query.value, folder.value.filter),
 )
 const canSave = computed(() => !nested.value && hasFilters(shownQuery.value))
-type Sheet = '' | 'create' | 'menu' | 'rename' | 'delete' | 'share'
+type Sheet = '' | 'create' | 'menu' | 'rename' | 'delete' | 'share' | 'update'
 const sheet = shallowRef<Sheet>('')
 const busy = shallowRef(false)
 const sheetError = shallowRef('')
 function openSheet(value: Sheet) {
   sheetError.value = ''
   sheet.value = value
+}
+/** Records of the folder updates started here, by folder. */
+const folderRecords = shallowRef<Record<string, string>>({})
+function folderUpdated(recordId: string) {
+  const current = folder.value
+  sheet.value = ''
+  if (current)
+    folderRecords.value = { ...folderRecords.value, [current.id]: recordId }
+}
+function openFolderRecord() {
+  const id = folder.value && folderRecords.value[folder.value.id]
+  sheet.value = ''
+  if (id) void router.push({ name: 'capture', params: { id } })
 }
 /** Save what the list shows as a new folder, and continue inside it. */
 async function saveFolder(name: string) {
@@ -697,9 +711,19 @@ const viewProps = computed(() => {
       v-if="folder"
       :open="sheet === 'menu'"
       :name="folder.name"
+      :progress="!!folderRecords[folder.id]"
+      @update="openSheet('update')"
+      @progress="openFolderRecord"
       @share="openSheet('share')"
       @rename="openSheet('rename')"
       @delete="openSheet('delete')"
+      @cancel="sheet = ''"
+    />
+    <UpdateSheet
+      v-if="folder"
+      :open="sheet === 'update'"
+      :target="{ target: 'folder', id: folder.id }"
+      @started="folderUpdated"
       @cancel="sheet = ''"
     />
     <ShareSheet

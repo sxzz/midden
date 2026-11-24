@@ -5,6 +5,8 @@ import { useCollection } from '../composables/useCollection'
 import { storageSize } from '../presentation'
 import { collectionRoute } from '../share'
 import CollectionView from './CollectionView.vue'
+import ListButton from './ui/ListButton.vue'
+import ListSection from './ui/ListSection.vue'
 const props = defineProps<{
   id: string
   revisionId: string
@@ -14,6 +16,13 @@ const props = defineProps<{
   showSensitive?: boolean
   /** This profile's display name, shown on the posts it reposted. */
   repostedBy?: string
+  /** The timeline goes on past the last page read: offer the next one. */
+  older?: boolean
+  olderBusy?: boolean
+}>()
+const emit = defineEmits<{
+  /** Read the timeline's next page (抓取更早的帖子). */
+  older: []
 }>()
 const router = useRouter()
 // Newest posts first is already the default order of a list of posts.
@@ -97,6 +106,14 @@ function open(id: string) {
         </button>
       </template>
     </CollectionView>
+    <!-- Below the whole list: the posts it lacks come after the last one. -->
+    <ListSection v-if="older && !next && !loading && !error" class="older">
+      <ListButton
+        label="抓取更早的帖子"
+        :disabled="olderBusy"
+        @select="emit('older')"
+      />
+    </ListSection>
   </section>
 </template>
 
@@ -108,6 +125,9 @@ function open(id: string) {
   margin: 0 0 8px;
   padding: 0 calc(var(--gutter) + 4px);
   font-size: 17px;
+}
+.older {
+  margin-top: 12px;
 }
 .storage {
   margin: 0 0 12px;

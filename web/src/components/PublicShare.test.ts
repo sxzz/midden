@@ -237,7 +237,13 @@ it('shows a shared post read-only, its links kept inside the share', async () =>
   share = { target: 'collection', collection_id: POST }
   const el = await mount(`/s/${SLUG}`)
   await vi.waitFor(() => expect(el.textContent).toContain('公开的帖子'))
-  for (const label of ['重新抓取', '删除这条收藏', '公开分享', '我的整理'])
+  for (const label of [
+    '正在更新',
+    '查看进度',
+    '删除这条收藏',
+    '公开分享',
+    '我的整理',
+  ])
     expect(el.textContent).not.toContain(label)
   expect(
     [...el.querySelectorAll('a')].some(

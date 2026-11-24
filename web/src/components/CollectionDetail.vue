@@ -2,6 +2,7 @@
 import { computed, onUnmounted, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { call, client, safeURL, type Collection, type Share } from '../api'
+import { profileHandle } from '../captures'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
 import { date, present } from '../presentation'
 import { accountKey, relationQuery, type Rel } from '../relation-filter'
@@ -16,6 +17,7 @@ import ShareSheet from './ShareSheet.vue'
 import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
+import UpdateSheet from './UpdateSheet.vue'
 const props = defineProps<{
   id: string
   savedAt?: string
@@ -49,7 +51,10 @@ const {
   showPoint,
   isSeen,
   remove,
-  refresh,
+  update,
+  started,
+  updating,
+  older,
   checkAvailability,
   membersVersion,
 } = useCollectionDetail(
@@ -66,19 +71,6 @@ watch(
     if (value) savedAt.value = value
   },
   { immediate: true },
-)
-/** An X profile: its update can also fetch its lists (抓关系网). */
-const isXProfile = computed(
-  () =>
-    collection.value?.graph?.entities.find(
-      (entity) => entity.key === collection.value?.graph?.root,
-    )?.type === 'x.profile',
-)
-/** Unchecked on every visit: fetching the lists costs many requests. */
-const withRelations = shallowRef(false)
-watch(
-  () => props.id,
-  () => (withRelations.value = false),
 )
 const isProfile = computed(() =>
   collection.value?.graph?.entities.some(
@@ -118,6 +110,11 @@ const profileName = computed(() =>
   collection.value ? present(collection.value).name : '',
 )
 const link = computed(() => collection.value && safeURL(collection.value.url))
+const handle = computed(() =>
+  collection.value
+    ? profileHandle(collection.value.url, present(collection.value).handle)
+    : '',
+)
 /** Whether the first group lists anything; behind a share it may not. */
 const pages = computed(
   () =>
@@ -188,8 +185,19 @@ function preview(point: string) {
   if (isSeen(point)) void showPoint(point)
   else pick = setTimeout(showPoint, 150, point)
 }
-function startRefresh() {
-  void refresh({ relations: isXProfile.value && withRelations.value })
+/** The update sheet of a profile; a post updates right away. */
+const updateSheet = shallowRef(false)
+watch(
+  () => props.id,
+  () => (updateSheet.value = false),
+)
+function startUpdate() {
+  if (isProfile.value) updateSheet.value = true
+  else void update()
+}
+function updateStarted(recordId: string) {
+  updateSheet.value = false
+  started(recordId)
 }
 function openRecord() {
   void router.push({ name: 'capture', params: { id: record.value } })
@@ -282,25 +290,13 @@ const version = computed(() =>
         @select="sharing = true"
       />
     </ListSection>
-    <!-- The update in a group of its own: its option, the button that
-         starts it and the progress of the one started here. -->
+    <!-- The update in a group of its own: the button that starts it and
+         the progress of the running or latest one. -->
     <ListSection v-if="!shared" class="update">
-      <label v-if="isXProfile" class="option"
-        ><span
-          >抓关系网<small class="hint"
-            >更新时一并抓取关注和粉丝列表</small
-          ></span
-        ><input
-          v-model="withRelations"
-          class="switch"
-          type="checkbox"
-          role="switch"
-          :disabled="busy"
-      /></label>
       <ListButton
-        label="重新抓取"
-        :disabled="busy || loadingPoint || !available"
-        @select="startRefresh"
+        :label="updating ? '正在更新…' : '更新'"
+        :disabled="busy || updating || loadingPoint || !available"
+        @select="startUpdate"
       />
       <ListButton v-if="record" label="查看进度" chevron @select="openRecord" />
       <ListButton
@@ -337,6 +333,17 @@ const version = computed(() =>
       :members-version="membersVersion"
       :show-sensitive="showSensitive"
       :reposted-by="profileName"
+      :older="older && !shared"
+      :older-busy="busy || updating || !available"
+      @older="update({ posts: 'older' })"
+    />
+    <UpdateSheet
+      v-if="!shared && isProfile"
+      :open="updateSheet"
+      :target="{ target: 'collection', id }"
+      :label="handle"
+      @started="updateStarted"
+      @cancel="updateSheet = false"
     />
     <ShareSheet
       v-if="!shared"
@@ -388,69 +395,6 @@ const version = computed(() =>
   font-size: 17px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-}
-.option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 48px;
-  margin-left: var(--inset);
-  padding: 6px var(--inset) 6px 0;
-  font-size: 16px;
-  /* The group's first row: an inset line below, like between buttons. */
-  box-shadow: inset 0 -1px 0 var(--separator);
-}
-.hint {
-  display: block;
-  font-size: 13px;
-  color: var(--subtle);
-}
-/* The switch of the capture options, for one option of an update. */
-.switch {
-  appearance: none;
-  -webkit-appearance: none;
-  position: relative;
-  flex: none;
-  width: 46px;
-  height: 28px;
-  margin: 0;
-  border-radius: 14px;
-  background: var(--fill);
-  cursor: pointer;
-  transition: background 160ms ease;
-}
-.switch::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-  transition: transform 160ms ease;
-}
-.switch:checked {
-  background: var(--link);
-}
-.switch:checked::after {
-  transform: translateX(18px);
-}
-.switch:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.switch:focus-visible {
-  outline: 2px solid var(--link);
-  outline-offset: 2px;
-}
-@media (prefers-reduced-motion: reduce) {
-  .switch,
-  .switch::after {
-    transition: none;
-  }
 }
 .banner {
   margin: 0;

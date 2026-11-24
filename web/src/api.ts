@@ -76,6 +76,20 @@ export type LibrarySize = Ok<typeof client.library.$get>
 export type CaptureRecord = Ok<typeof client.captures.$get>['items'][number]
 export type CaptureRecordDetail = Ok<(typeof client.captures)[':id']['$get']>
 export type CaptureMedia = CaptureRecordDetail['media_items'][number]
+/** What an update (更新) covers, on its record. */
+export type UpdateInfo = NonNullable<CaptureRecord['update']>
+/** One profile of an update and how each part of it went. */
+export type ProfilePart = NonNullable<CaptureRecordDetail['profiles']>[number]
+export type UpdateTarget = InferRequestType<
+  typeof client.updates.$post
+>['json']['target']
+export type UpdateOptions = NonNullable<
+  InferRequestType<typeof client.updates.$post>['json']['options']
+>
+export type UpdatePreview = Ok<typeof client.updates.preview.$post>
+export type CollectionUpdate = Ok<
+  (typeof client.collections)[':id']['update']['$get']
+>
 export type CaptureMember = Ok<
   (typeof client.captures)[':id']['members']['$get']
 >['items'][number]

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, vaporInteropPlugin } from 'vue'
+import { APIError, type Folder } from '../api'
 import { router } from '../router'
 import { mockApi, type Request } from '../testing/api'
 import CollectionLibrary from './CollectionLibrary.vue'
-import type { Folder } from '../api'
 
 const FOLDER = '00000000-0000-7000-8000-00000000000f'
 const folder = (fields: Partial<Folder>): Folder => ({
@@ -80,6 +80,10 @@ beforeEach(() => {
       }
     if (path.startsWith('/collections?')) return { items: [] }
     if (path === '/tags') return []
+    if (path === '/updates/preview')
+      return { posts: 3, profiles: 0, listable: 0, name: '图片' }
+    if (path === '/updates') return { id: 'record' }
+    if (path.startsWith('/captures/')) throw new APIError(404, '不存在')
     return { used_bytes: 0 }
   })
 })
@@ -209,6 +213,40 @@ it('renames and deletes the open folder', async () => {
       ([p, r]) => r.method === 'DELETE' && p === `/folders/${FOLDER}`,
     ),
   ).toBe(true)
+})
+
+it('updates the open folder from its menu, then links to the progress', async () => {
+  vi.stubGlobal('crypto', { randomUUID: () => 'key' })
+  const el = await mount(`/folder/${FOLDER}`)
+  await vi.waitFor(() =>
+    expect(el.querySelector('h1')!.textContent).toBe('图片'),
+  )
+  el.querySelector<HTMLButtonElement>('[aria-label="管理收藏夹"]')!.click()
+  await nextTick()
+  expect(button(el, '查看更新进度')).toBeUndefined()
+  button(el, '更新收藏夹').click()
+  await vi.waitFor(() =>
+    expect(el.querySelector('dialog[open] .head')?.textContent).toBe(
+      '更新 3 条帖子',
+    ),
+  )
+  await vi.waitFor(() => expect(button(el, '开始更新').disabled).toBe(false))
+  button(el, '开始更新').click()
+  await vi.waitFor(() => expect(sent('POST', '/updates')).toHaveLength(1))
+  expect(sent('POST', '/updates')).toEqual([
+    { target: { target: 'folder', id: FOLDER } },
+  ])
+  // The sheet closes once the update started.
+  await vi.waitFor(() => expect(el.querySelector('dialog[open]')).toBeNull())
+  el.querySelector<HTMLButtonElement>('[aria-label="管理收藏夹"]')!.click()
+  await vi.waitFor(() => expect(button(el, '查看更新进度')).toBeDefined())
+  button(el, '查看更新进度').click()
+  await vi.waitFor(() =>
+    expect(router.currentRoute.value).toMatchObject({
+      name: 'capture',
+      params: { id: 'record' },
+    }),
+  )
 })
 
 it('says so when the folder is gone', async () => {

@@ -234,7 +234,7 @@ test('shows collection progress, member failures, stop and retry', async ({
     }
     if (path === `/v1/captures/${profile}/retry`) {
       posted.push('retry')
-      return r.fulfill({ status: 202, json: { id: `job-${retried}` } })
+      return r.fulfill({ json: { record_id: retried } })
     }
     if (path === '/v1/captures')
       return r.fulfill({
@@ -444,4 +444,79 @@ test('loads more capture members automatically at the bottom', async ({
   await expect(
     page.getByRole('button', { name: '加载更多', exact: true }),
   ).toHaveCount(0)
+})
+
+test('an update reads as one record in the list', async ({ page }) => {
+  const folderUpdate = record({
+    id: retried,
+    job_id: '',
+    collection_id: '',
+    url: '',
+    input: '',
+    platform: '',
+    kind: '',
+    members: {
+      total: 14,
+      complete: 9,
+      partial: 0,
+      failed: 1,
+      pending: 2,
+      done: false,
+      added: 3,
+      updated: 6,
+    },
+    update: {
+      target: 'folder',
+      target_id: collection,
+      name: '猫',
+      posts: 10,
+      profiles: 2,
+      options: { posts: 'latest', relations: false },
+      queued: 2,
+      skipped: 0,
+    },
+  })
+  const selection = record({
+    id: profile,
+    url: '',
+    state: 'complete',
+    done: true,
+    members: {
+      total: 3,
+      complete: 3,
+      partial: 0,
+      failed: 0,
+      pending: 0,
+      done: true,
+      added: 0,
+      updated: 3,
+    },
+    update: {
+      target: 'many',
+      posts: 3,
+      profiles: 0,
+      options: { posts: 'latest', relations: false },
+      queued: 0,
+      skipped: 0,
+    },
+  })
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path === '/v1/session') return r.fulfill({ json: {} })
+    if (path === '/v1/captures')
+      return r.fulfill({ json: { items: [folderUpdate, selection] } })
+    return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
+  })
+  await page.goto('/app/#/captures')
+  const running = page.getByRole('link', { name: /更新收藏夹「猫」/ })
+  await expect(running).toContainText('正在更新')
+  await expect(running).toContainText('新增 3 · 更新 6 · 异常 1 · 进行中 4')
+  await expect(running.getByRole('progressbar')).toHaveAttribute(
+    'value',
+    String(10 / 14),
+  )
+  const done = page.getByRole('link', { name: /更新 3 项/ })
+  await expect(done).toContainText('已完成')
+  await expect(done).toContainText('更新 3')
 })

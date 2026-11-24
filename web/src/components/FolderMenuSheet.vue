@@ -1,7 +1,14 @@
 <script setup vapor lang="ts">
 import { useId, useTemplateRef, watch } from 'vue'
-const props = defineProps<{ open: boolean; name: string }>()
+const props = defineProps<{
+  open: boolean
+  name: string
+  /** An update of the folder was started here: link to its progress. */
+  progress?: boolean
+}>()
 const emit = defineEmits<{
+  update: []
+  progress: []
   share: []
   rename: []
   delete: []
@@ -31,6 +38,17 @@ function backdrop(event: MouseEvent) {
   >
     <div class="group">
       <p :id="titleId" class="title">{{ name }}</p>
+      <button type="button" class="action" @click="emit('update')">
+        更新收藏夹
+      </button>
+      <button
+        v-if="progress"
+        type="button"
+        class="action"
+        @click="emit('progress')"
+      >
+        查看更新进度
+      </button>
       <button type="button" class="action" @click="emit('share')">
         公开分享
       </button>

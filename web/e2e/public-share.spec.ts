@@ -139,8 +139,11 @@ test('a public link opens a folder and its items without login', async ({
   await page.getByText('公开的帖子').click()
   await expect(page).toHaveURL(new RegExp(`#/s/${slug}/collection/${postId}$`))
   await expect(page.locator('h1')).toHaveText('收藏详情')
-  for (const action of ['重新抓取', '删除这条收藏', '公开分享', '我的整理'])
+  for (const action of ['删除这条收藏', '公开分享', '我的整理'])
     await expect(page.getByText(action)).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: '更新', exact: true }),
+  ).toHaveCount(0)
 
   // The author is shared too, so its link stays inside the share.
   await page.locator('a.profile-link').click()
