@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { isAppError } from '#errors.ts'
 import { capture, entity, graph, libraryContext } from '#testing/library.ts'
 import { listTags, updateAnnotation } from './annotations.ts'
+import { filterCounts } from './counts.ts'
 import { deleteCollection } from './delete.ts'
 import { parseFilterQuery } from './filter-query.ts'
 import {
@@ -87,6 +88,8 @@ describe('folders', () => {
       (await listFolders(c.db)).map((folder) => folder.count)
     expect(await counts()).toEqual(queries.map((q) => listed(c, q)))
     expect(await counts()).toEqual([3, 3, 1, 1, 2, 3, 0, 0])
+    expect((await listFolders(c.db))[0]!.types).toEqual({ 'fake.post': 3 })
+    expect((await listFolders(c.db))[6]!.types).toEqual({})
 
     // New saves and deletions show up without touching the folders.
     const a3 = (await capture(c, post('a3'))).collectionId
@@ -113,6 +116,35 @@ describe('folders', () => {
     ).toMatchObject({ name: '合集', filter: 'entity_type=fake.post' })
   })
 
+  test('count a relative save date by the day it is counted on', async () => {
+    const c = setup()
+    await capture(c, post('a1'))
+    const filter = 'saved_within=1d&time_zone=Asia%2FShanghai'
+    expect(createFolder(c.db, { name: '今天', filter })).toMatchObject({
+      filter,
+      count: 1,
+      types: { 'fake.post': 1 },
+    })
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      // Nothing was written, yet a later day selects nothing.
+      vi.setSystemTime(Date.now() + 2 * 86_400_000)
+      expect(filterCounts(c.db, filter).count).toBe(0)
+      expect((await listFolders(c.db))[0]!.count).toBe(0)
+      expect(
+        filterCounts(c.db, 'saved_within=3d&time_zone=Asia/Shanghai'),
+      ).toEqual({ count: 1, types: { 'fake.post': 1 } })
+    } finally {
+      vi.useRealTimers()
+    }
+    // A zone only belongs to a relative date.
+    expect(
+      updateFolder(c.db, (await listFolders(c.db))[0]!.id, {
+        filter: 'time_zone=UTC&q=a&saved_within=',
+      }).filter,
+    ).toBe('q=a')
+  })
+
   test('reject what the list rejects, and bad names', () => {
     const c = setup()
     for (const filter of [
@@ -121,6 +153,9 @@ describe('folders', () => {
       'tag=not-a-uuid',
       'saved_from=yesterday',
       'saved_from=2026-02-01T00:00:00Z&saved_before=2026-01-01T00:00:00Z',
+      'saved_within=7',
+      'saved_within=7d&time_zone=Nowhere%2FCity',
+      'saved_within=7d&saved_from=2026-01-01T00:00:00Z',
       'media_type=audio',
       `q=${'x'.repeat(501)}`,
       'x'.repeat(20_000),

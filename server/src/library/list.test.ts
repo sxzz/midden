@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { collections, library } from '#db/schema.ts'
 import {
   capture,
@@ -11,7 +11,13 @@ import {
 } from '#testing/library.ts'
 import { updateAnnotation } from './annotations.ts'
 import { catalogCollections } from './catalog.ts'
-import { listAuthors, listCollections, type CollectionFilter } from './list.ts'
+import {
+  countCollections,
+  listAuthors,
+  listCollections,
+  savedSince,
+  type CollectionFilter,
+} from './list.ts'
 import { getCollection } from './read.ts'
 import type { CaptureContext } from '#capture/context.ts'
 import type { FetchResponse } from '#platforms/protocol.ts'
@@ -191,6 +197,12 @@ describe('library listing', () => {
         savedFrom: '2026-01-02T00:00:00Z',
         savedBefore: '2026-01-01T00:00:00Z',
       },
+      { savedWithin: '0d' },
+      { savedWithin: '7' },
+      { savedWithin: '1w' },
+      { savedWithin: '7d', timeZone: 'Nowhere/City' },
+      { savedWithin: '7d', savedFrom: '2026-01-01T00:00:00Z' },
+      { savedWithin: '7d', savedBefore: '2026-01-01T00:00:00Z' },
     ])
       expect(() => listCollections(ctx, filter)).toThrow('筛选条件无效')
   })
@@ -245,6 +257,15 @@ describe('library listing', () => {
       new Set(['img', 'nsfw', 'lost', 'avatar']),
     )
     expect(match({ entityType: 'fake.post,fake.profile' }).size).toBe(5)
+    // Counts split by root type; the untyped text entry is only in the total.
+    expect(countCollections(ctx.db)).toEqual({
+      count: 6,
+      types: { 'fake.post': 4, 'fake.profile': 1 },
+    })
+    expect(countCollections(ctx.db, { mediaType: 'text' })).toEqual({
+      count: 3,
+      types: { 'fake.post': 1, 'fake.profile': 1 },
+    })
     expect(match({ mediaType: 'text' })).toEqual(
       new Set(['text', 'avatar', 'profile']),
     )
@@ -260,6 +281,58 @@ describe('library listing', () => {
     const future = new Date(Date.now() + 3_600_000).toISOString()
     expect(match({ savedFrom: future }).size).toBe(0)
     expect(match({ savedBefore: future }).size).toBe(6)
+  })
+
+  test('relative save dates count whole days in the time zone', async () => {
+    const { ctx } = setup({
+      a: byAuthor('a'),
+      b: byAuthor('b'),
+      c: byAuthor('c'),
+    })
+    const saved: Record<string, string> = {}
+    // 20:00 on 10 March in Shanghai; that day began at 16:00 UTC on the 9th.
+    const at = {
+      a: '2026-03-09T17:00:00Z',
+      b: '2026-03-09T15:00:00Z',
+      c: '2026-03-01T12:00:00Z',
+    }
+    for (const [id, time] of Object.entries(at)) {
+      saved[id] = (await capture(ctx, post(id))).collectionId
+      ctx.db
+        .update(library)
+        .set({ createdAt: new Date(time) })
+        .where(eq(library.collectionId, saved[id]))
+        .run()
+    }
+    const match = (savedWithin: string, timeZone?: string) =>
+      all(ctx, { savedWithin, timeZone })
+        .map((c) => Object.entries(saved).find(([, id]) => id === c.id)![0])
+        .toSorted()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-03-10T12:00:00Z'))
+      expect(match('1d', 'Asia/Shanghai')).toEqual(['a'])
+      expect(match('7d', 'Asia/Shanghai')).toEqual(['a', 'b'])
+      expect(match('30d', 'Asia/Shanghai')).toEqual(['a', 'b', 'c'])
+      // Without a zone the days are UTC days.
+      expect(match('1d')).toEqual([])
+      expect(match('2d')).toEqual(['a', 'b'])
+      // The same filter moves with the clock.
+      vi.setSystemTime(new Date('2026-03-11T12:00:00Z'))
+      expect(match('1d', 'Asia/Shanghai')).toEqual([])
+      expect(match('2d', 'Asia/Shanghai')).toEqual(['a'])
+    } finally {
+      vi.useRealTimers()
+    }
+    // A day that is 23 hours long still starts at its own midnight.
+    const now = Date.parse('2026-03-09T12:00:00Z')
+    expect(savedSince('1d', 'America/New_York', now)).toBe(
+      Date.parse('2026-03-09T04:00:00Z'),
+    )
+    expect(savedSince('2d', 'America/New_York', now)).toBe(
+      Date.parse('2026-03-08T05:00:00Z'),
+    )
+    expect(savedSince('7d', 'Nowhere/City', now)).toBeUndefined()
   })
 
   test('authors are stable identities labelled with their newest name', async () => {

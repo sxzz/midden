@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import * as v from 'valibot'
 import { CHANGES_WINDOW, listProfileChanges } from '#library/changes.ts'
+import { filterCounts } from '#library/counts.ts'
 import { getEntity } from '#library/entities.ts'
 import { collectionFilter, FilterQuery } from '#library/filter-query.ts'
 import { listAuthors, listCollections } from '#library/list.ts'
@@ -53,57 +54,69 @@ const ChangesQuery = v.object({
 
 /** Reading the library: collections, their history, and entities. */
 export function libraryRoutes(ctx: AccountsContext) {
-  return new Hono<Env>()
-    .get('/collections', query(Filters), (c) => {
-      const input = c.req.valid('query')
-      return c.json(
-        listCollections(
-          ctx,
-          collectionFilter(input),
-          input.cursor || undefined,
+  return (
+    new Hono<Env>()
+      .get('/collections', query(Filters), (c) => {
+        const input = c.req.valid('query')
+        return c.json(
+          listCollections(
+            ctx,
+            collectionFilter(input),
+            input.cursor || undefined,
+          ),
+        )
+      })
+
+      // Cached like the folders' counts; the web asks before splitting a
+      // folder into post and account tabs.
+      .get('/collections/count', query(FilterQuery), (c) =>
+        c.json(filterCounts(ctx.db, new URL(c.req.url).search)),
+      )
+
+      .get('/collections/authors', query(AuthorFilters), (c) => {
+        const input = c.req.valid('query')
+        const author = input.author ?? []
+        return c.json(
+          listAuthors(ctx, {
+            q: input.q || undefined,
+            cursor: input.cursor || undefined,
+            authors: typeof author === 'string' ? [author] : author,
+          }),
+        )
+      })
+
+      .get('/collections/:id', (c) =>
+        c.json(getCollection(ctx, c.req.param('id'))),
+      )
+
+      .get('/collections/:id/history', query(Cursor), (c) =>
+        c.json(
+          listHistory(
+            ctx,
+            c.req.param('id'),
+            c.req.valid('query').cursor || undefined,
+          ),
         ),
       )
-    })
 
-    .get('/collections/authors', query(AuthorFilters), (c) => {
-      const input = c.req.valid('query')
-      const author = input.author ?? []
-      return c.json(
-        listAuthors(ctx, {
-          q: input.q || undefined,
-          cursor: input.cursor || undefined,
-          authors: typeof author === 'string' ? [author] : author,
-        }),
+      .get('/collections/:id/counts', query(CountsQuery), (c) =>
+        c.json(listCounts(ctx, c.req.param('id'), c.req.valid('query').limit)),
       )
-    })
 
-    .get('/collections/:id', (c) =>
-      c.json(getCollection(ctx, c.req.param('id'))),
-    )
-
-    .get('/collections/:id/history', query(Cursor), (c) =>
-      c.json(
-        listHistory(
-          ctx,
-          c.req.param('id'),
-          c.req.valid('query').cursor || undefined,
+      .get('/collections/:id/profile-changes', query(ChangesQuery), (c) =>
+        c.json(
+          listProfileChanges(
+            ctx,
+            c.req.param('id'),
+            c.req.valid('query').limit,
+          ),
         ),
-      ),
-    )
+      )
 
-    .get('/collections/:id/counts', query(CountsQuery), (c) =>
-      c.json(listCounts(ctx, c.req.param('id'), c.req.valid('query').limit)),
-    )
+      .get('/collections/:id/history/:capture', (c) =>
+        c.json(getHistoryPoint(ctx, c.req.param('id'), c.req.param('capture'))),
+      )
 
-    .get('/collections/:id/profile-changes', query(ChangesQuery), (c) =>
-      c.json(
-        listProfileChanges(ctx, c.req.param('id'), c.req.valid('query').limit),
-      ),
-    )
-
-    .get('/collections/:id/history/:capture', (c) =>
-      c.json(getHistoryPoint(ctx, c.req.param('id'), c.req.param('capture'))),
-    )
-
-    .get('/entities/:id', (c) => c.json(getEntity(ctx, c.req.param('id'))))
+      .get('/entities/:id', (c) => c.json(getEntity(ctx, c.req.param('id'))))
+  )
 }

@@ -22,6 +22,13 @@ export interface CollectionFilter {
   /** RFC 3339; save time, exclusive. */
   savedBefore?: string
   /**
+   * `<n>d`: saved on one of the last n calendar days, today included,
+   * resolved on every request. Not combined with the two above.
+   */
+  savedWithin?: string
+  /** IANA time zone whose days `savedWithin` counts; UTC by default. */
+  timeZone?: string
+  /**
    * `published`, `saved` (added to the library), `updated` (newest capture,
    * the default) or `storage`. `captured` is the old name of `updated`.
    */
@@ -90,6 +97,38 @@ function parseAuthorKey(key: string): Identity | undefined {
   return authorKey(author) === key ? author : undefined
 }
 
+const WITHIN = /^([1-9]\d{0,3})d$/
+
+/** A time zone Temporal knows, or undefined. */
+function zoneOf(raw: string): string | undefined {
+  if (raw.length > 64) return undefined
+  try {
+    return Temporal.Now.zonedDateTimeISO(raw).timeZoneId
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Where `saved_within` starts at `now`: the start of the day n - 1 days
+ * before today in the zone, as the web's date fields count days. Undefined
+ * when either value is invalid.
+ */
+export function savedSince(
+  within: string,
+  zone = 'UTC',
+  now = Date.now(),
+): number | undefined {
+  const days = WITHIN.exec(within)?.[1]
+  const id = zoneOf(zone)
+  if (!days || !id) return undefined
+  return Temporal.Instant.fromEpochMilliseconds(now)
+    .toZonedDateTimeISO(id)
+    .toPlainDate()
+    .subtract({ days: Number(days) - 1 })
+    .toZonedDateTime(id).epochMilliseconds
+}
+
 function parseTime(raw: string | undefined): number | undefined {
   if (!raw) return undefined
   const at = Date.parse(raw)
@@ -114,6 +153,8 @@ function check(input: CollectionFilter): Checked {
     visibility: input.visibility ?? '',
     savedFrom: input.savedFrom ?? '',
     savedBefore: input.savedBefore ?? '',
+    savedWithin: input.savedWithin ?? '',
+    timeZone: input.timeZone ?? '',
     // Old links name the newest capture `captured`; one name keeps one
     // cursor fingerprint for both.
     sort: input.sort === 'captured' ? 'updated' : (input.sort ?? ''),
@@ -147,10 +188,16 @@ function check(input: CollectionFilter): Checked {
     if (!author) throw invalid()
     return author
   })
-  const from = parseTime(filter.savedFrom)
+  let from = parseTime(filter.savedFrom)
   const before = parseTime(filter.savedBefore)
   if (from !== undefined && before !== undefined && from >= before)
     throw invalid()
+  if (filter.timeZone && !zoneOf(filter.timeZone)) throw invalid()
+  if (filter.savedWithin) {
+    if (from !== undefined || before !== undefined) throw invalid()
+    from = savedSince(filter.savedWithin, filter.timeZone || undefined)
+    if (from === undefined) throw invalid()
+  }
   return { filter, authors, from, before }
 }
 
@@ -395,18 +442,29 @@ export function checkFilter(input: CollectionFilter): void {
   check(input)
 }
 
-/** How many saved collections the list shows for a filter, over all pages. */
+/** How many saved collections a filter selects, over all pages. */
+export interface FilterCounts {
+  count: number
+  /** By the root's entity type; types with none are left out. */
+  types: Record<string, number>
+}
+
+/** What the list shows for a filter, counted over all pages by type. */
 export function countCollections(
   db: Executor,
   input: CollectionFilter = {},
-): number {
+): FilterCounts {
   const { ctes, source, where } = select(input)
-  return (
-    db.get<{ count: number }>(sql`
-      ${ctes}
-      SELECT count(*) AS count FROM ${sql.raw(source)} WHERE ${where}`)
-      ?.count ?? 0
-  )
+  const rows = db.all<{ type: string | null; count: number }>(sql`
+    ${ctes}
+    SELECT k.root_kind AS type, count(*) AS count
+    FROM ${sql.raw(source)} WHERE ${where} GROUP BY k.root_kind`)
+  const counts: FilterCounts = { count: 0, types: {} }
+  for (const row of rows) {
+    counts.count += row.count
+    if (row.type) counts.types[row.type] = row.count
+  }
+  return counts
 }
 
 /** The library, filtered, sorted and 20 per page. */

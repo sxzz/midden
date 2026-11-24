@@ -3,8 +3,9 @@ import { newId } from '#db/id.ts'
 import { folders } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { pruneTags } from './annotations.ts'
+import { countsCached, filterCounts } from './counts.ts'
 import { parseFilterQuery } from './filter-query.ts'
-import { checkFilter, countCollections } from './list.ts'
+import { checkFilter } from './list.ts'
 import type { Database, Executor } from '#db/client.ts'
 
 /** A saved library filter (收藏夹) and how many saved items it selects. */
@@ -14,6 +15,8 @@ export interface Folder {
   /** The list's query string, without a page cursor. */
   filter: string
   count: number
+  /** The count by the root's entity type, without the empty ones. */
+  types: Record<string, number>
   created_at: string
   updated_at: string
 }
@@ -43,61 +46,16 @@ function canonicalFilter(raw: string): string {
   return canonical
 }
 
-interface Counts {
-  stamp: string
-  byFilter: Map<string, number>
-}
-
-/**
- * Counts by filter, kept while nothing writes to the database. One count
- * reads the whole library (tens of milliseconds at 60k items), so a few
- * dozen folders are counted once per change rather than on every request.
- * `total_changes()` moves with this connection's writes, `data_version`
- * with another process's (the CLI).
- */
-const counts = new WeakMap<object, Counts>()
-
-function cachedCounts(db: Database): Counts {
-  const { stamp } = db.$client
-    .prepare(
-      `SELECT total_changes() || ':' || data_version AS stamp FROM pragma_data_version`,
-    )
-    .get() as { stamp: string }
-  let cache = counts.get(db.$client)
-  if (cache?.stamp !== stamp) {
-    cache = { stamp, byFilter: new Map() }
-    counts.set(db.$client, cache)
-  }
-  return cache
-}
-
-/** The order does not change what a filter selects. */
-function countKey(filter: string): string {
-  const params = new URLSearchParams(filter)
-  params.delete('sort')
-  params.delete('order')
-  return params.toString()
-}
-
-function countFolder(db: Database, filter: string): number {
-  const cache = cachedCounts(db)
-  const key = countKey(filter)
-  let count = cache.byFilter.get(key)
-  if (count === undefined) {
-    count = countCollections(db, parseFilterQuery(key).filter)
-    cache.byFilter.set(key, count)
-  }
-  return count
-}
-
 type Row = typeof folders.$inferSelect
 
-function view(row: Row, count: number): Folder {
+function view(db: Database, row: Row): Folder {
+  const { count, types } = filterCounts(db, row.filter)
   return {
     id: row.id,
     name: row.name,
     filter: row.filter,
     count,
+    types,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
   }
@@ -126,9 +84,9 @@ export async function listFolders(db: Database): Promise<Folder[]> {
     .all()
   const result: Folder[] = []
   for (const row of rows) {
-    if (!cachedCounts(db).byFilter.has(countKey(row.filter)))
+    if (!countsCached(db, row.filter))
       await new Promise((resolve) => setImmediate(resolve))
-    result.push(view(row, countFolder(db, row.filter)))
+    result.push(view(db, row))
   }
   return result
 }
@@ -148,7 +106,7 @@ export function createFolder(
       .returning()
       .get()
   })
-  return view(row, countFolder(db, row.filter))
+  return view(db, row)
 }
 
 /** Rename a folder and/or replace its filter. */
@@ -173,7 +131,7 @@ export function updateFolder(
     if (filter !== undefined) pruneTags(tx)
     return updated
   })
-  return view(row, countFolder(db, row.filter))
+  return view(db, row)
 }
 
 export function deleteFolder(db: Database, id: string): void {

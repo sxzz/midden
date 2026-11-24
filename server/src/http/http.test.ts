@@ -291,9 +291,17 @@ describe('api', () => {
     })
     await send('POST', '/folders', { name: '空', filter: 'q=nothing' })
     expect(await (await call('/folders')).json()).toMatchObject([
-      { id: folder.id, count: 1 },
-      { name: '空', count: 0 },
+      { id: folder.id, count: 1, types: { 'fake.post': 1 } },
+      { name: '空', count: 0, types: {} },
     ])
+    // Any filter, saved or not, counts the same way.
+    expect(
+      await (
+        await call('/collections/count?saved_within=7d&layout=album')
+      ).json(),
+    ).toEqual({ count: 1, types: { 'fake.post': 1 } })
+    for (const query of ['sort=nonsense', 'saved_within=0d'])
+      expect((await call(`/collections/count?${query}`)).status).toBe(400)
 
     const renamed = await send('PATCH', `/folders/${folder.id}`, {
       name: '全部帖子',

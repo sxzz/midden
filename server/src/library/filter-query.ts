@@ -12,6 +12,8 @@ export const FilterQuery = v.object({
   visibility: text,
   saved_from: text,
   saved_before: text,
+  saved_within: text,
+  time_zone: text,
   sort: text,
   order: text,
   author: v.optional(v.union([v.string(), v.array(v.string())])),
@@ -33,6 +35,8 @@ export function collectionFilter(input: FilterParams): CollectionFilter {
     visibility: input.visibility || undefined,
     savedFrom: input.saved_from || undefined,
     savedBefore: input.saved_before || undefined,
+    savedWithin: input.saved_within || undefined,
+    timeZone: input.time_zone || undefined,
     sort: input.sort || undefined,
     order: input.order || undefined,
     authors: typeof author === 'string' ? [author] : author,
@@ -64,6 +68,8 @@ export function parseFilterQuery(query: string): {
   }
   const parsed = v.safeParse(FilterQuery, raw)
   if (!parsed.success) throw new AppError('invalid_filter')
+  // A time zone only matters to a relative save date.
+  if (!parsed.output.saved_within) parsed.output.time_zone = undefined
   const canonical = new URLSearchParams()
   for (const key of KEYS) {
     const value = parsed.output[key as keyof FilterParams]

@@ -11,6 +11,7 @@ const folder = (fields: Partial<Folder>): Folder => ({
   name: '图片',
   filter: 'entity_type=x.post%2Cinstagram.post&media_type=image',
   count: 3,
+  types: { 'x.post': 3 },
   created_at: '2026-11-01T00:00:00.000Z',
   updated_at: '2026-11-01T00:00:00.000Z',
   ...fields,
