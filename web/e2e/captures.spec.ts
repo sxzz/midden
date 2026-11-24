@@ -275,7 +275,7 @@ test('shows collection progress, member failures, stop and retry', async ({
   // The tab seen before shows again without loading.
   expect(memberQueries).toEqual(['', 'problem'])
   // The post still running has its own tab while it lasts.
-  const running = page.getByRole('tab', { name: '正在采集 1' })
+  const running = page.getByRole('tab', { name: '进行中 1' })
   await expect(running).toBeVisible()
 
   // A running collection can be stopped, and only a finished one retried.
