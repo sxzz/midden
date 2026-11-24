@@ -25,16 +25,19 @@ const text = v.optional(v.string())
 
 /**
  * The private list's filters but those that would tell the owner's own
- * data: tags name them, and the save date and the `saved` and `storage`
- * orders tell when things were saved and how large they are, which public
- * views leave out. Strict, so any of these (or anything else unknown) is
- * refused, not ignored.
+ * data: tags name them, the save date and the `saved` and `storage` orders
+ * tell when things were saved and how large they are, which public views
+ * leave out, and follows (`rel_of`, `rel`) reach accounts beyond the share.
+ * Strict, so any of these (or anything else unknown) is refused, not
+ * ignored.
  */
 const ListQuery = v.strictObject({
   ...v.omit(FilterQuery, [
     'tag',
     'tag_mode',
     'not_tag',
+    'rel_of',
+    'rel',
     'saved_from',
     'saved_before',
     'saved_within',

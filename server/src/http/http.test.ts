@@ -290,6 +290,15 @@ describe('api', () => {
     ])
       expect((await call(`/collections?${authors}`)).status).toBe(200)
     expect((await call('/collections?tag=a&tag=b')).status).toBe(400)
+    // The 关系 filter and the accounts it can look from.
+    expect(
+      (await call('/collections?rel_of=x%2Fx.profile%2F1&rel=mutual')).status,
+    ).toBe(200)
+    expect((await call('/collections?rel=mutual')).status).toBe(400)
+    expect(await (await call('/collections/perspectives?q=a')).json()).toEqual({
+      items: [],
+    })
+    expect((await call('/collections/perspectives?cursor=x')).status).toBe(400)
   })
 
   test('saves library filters as folders', async () => {

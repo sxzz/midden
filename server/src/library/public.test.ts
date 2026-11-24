@@ -717,6 +717,33 @@ describe('public lists', () => {
     ).toBe(400)
   })
 
+  test('the 关系 filter is refused, and its accounts are not listed', async () => {
+    const { ids, read, slug, c } = await tagged('a1')
+    const pat = encodeURIComponent('fake/fake.profile/5')
+    for (const path of [
+      `/collections?rel_of=${pat}&rel=following`,
+      `/collections?rel_of=${pat}`,
+      '/collections?rel=mutual',
+      `/collections?related_to=${ids.five}&rel_of=${pat}&rel=followers`,
+      `/collections/authors?rel_of=${pat}&rel=following`,
+    ])
+      expect(await read(slug, path)).toMatchObject({
+        status: 400,
+        body: { error: '请求无效' },
+      })
+    // The perspective list is the owner's alone.
+    expect((await read(slug, '/collections/perspectives')).status).toBe(404)
+    const profile = share(c, 'collection', ids.five!)
+    expect(
+      (
+        await read(
+          profile,
+          `/collections?related_to=${ids.five}&rel_of=${pat}&rel=following`,
+        )
+      ).status,
+    ).toBe(400)
+  })
+
   test('the author list names only authors within the share, counted there', async () => {
     const { ids, authors, read, c, tag } = await tagged('a1')
     // Bob has five saved posts, none of them shared.

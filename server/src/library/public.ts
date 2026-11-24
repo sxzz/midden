@@ -58,14 +58,17 @@ export interface PublicShare {
 /**
  * A public list: a shared folder's, or the attached posts of a profile the
  * share shows. A visitor filters and orders it as the private list, except
- * by tag, which would name the owner's tags, and by save date or size,
- * which public views leave out.
+ * by tag, which would name the owner's tags, by save date or size, which
+ * public views leave out, and by follows (「关系」), whose accounts reach
+ * beyond the share.
  */
 export interface PublicListQuery extends Omit<
   FilterParams,
   | 'tag'
   | 'tag_mode'
   | 'not_tag'
+  | 'rel_of'
+  | 'rel'
   | 'related_to'
   | 'saved_from'
   | 'saved_before'

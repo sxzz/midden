@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm'
+import { sql, type SQL } from 'drizzle-orm'
 import { assertSaved } from './read.ts'
 import {
   assetsById,
@@ -53,6 +53,36 @@ export interface FollowChanges {
 }
 
 export const FOLLOW_CHANGES_LIMIT = 1000
+
+/** Which of an account's current follows a filter takes (「关系」). */
+export const FOLLOW_SETS = ['following', 'followers', 'mutual']
+
+export type FollowSet = 'following' | 'followers' | 'mutual'
+
+/**
+ * The entity ids of the accounts `of` follows, that follow it, or both, by
+ * follows not ended. Each reads one index range from the account's entity:
+ * `follow_edges_follower` or `follow_edges_followee`, and the open pair
+ * index for the way back.
+ */
+export function followSetSQL(
+  of: { platform: string; kind: string; external: string },
+  set: FollowSet,
+): SQL {
+  const account = sql`(SELECT id FROM entities WHERE platform = ${of.platform}
+    AND kind = ${of.kind} AND external_id = ${of.external})`
+  if (set === 'followers')
+    return sql`(SELECT f.follower_id FROM follow_edges f
+      WHERE f.followee_id = ${account} AND f.ended_at IS NULL)`
+  const back =
+    set === 'mutual'
+      ? sql` AND EXISTS (SELECT 1 FROM follow_edges b
+          WHERE b.follower_id = f.followee_id AND b.followee_id = f.follower_id
+            AND b.ended_at IS NULL)`
+      : sql``
+  return sql`(SELECT f.followee_id FROM follow_edges f
+    WHERE f.follower_id = ${account} AND f.ended_at IS NULL${back})`
+}
 
 /** The account a saved profile is about: the root of its newest revision. */
 function subjectOf(r: Reader, id: string): string | undefined {

@@ -10,6 +10,7 @@ import {
   listFollowChanges,
 } from '#library/follows.ts'
 import { listAuthors, listCollections } from '#library/list.ts'
+import { listPerspectives } from '#library/perspectives.ts'
 import {
   COUNTS_LIMIT,
   getCollection,
@@ -30,6 +31,8 @@ const AuthorFilters = v.object({
   cursor: text,
   author: v.optional(v.union([v.string(), v.array(v.string())])),
 })
+
+const PerspectiveFilters = v.object({ q: text, cursor: text, rel_of: text })
 
 /** How many of the newest readings to return, at most COUNTS_LIMIT. */
 export const CountsQuery = v.object({
@@ -99,6 +102,19 @@ export function libraryRoutes(ctx: AccountsContext) {
             q: input.q || undefined,
             cursor: input.cursor || undefined,
             authors: typeof author === 'string' ? [author] : author,
+          }),
+        )
+      })
+
+      // Accounts the 「关系」 filter can look from; owner only, since it
+      // names accounts no share reaches.
+      .get('/collections/perspectives', query(PerspectiveFilters), (c) => {
+        const input = c.req.valid('query')
+        return c.json(
+          listPerspectives(ctx, {
+            q: input.q || undefined,
+            cursor: input.cursor || undefined,
+            relOf: input.rel_of || undefined,
           }),
         )
       })

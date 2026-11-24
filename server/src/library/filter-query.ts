@@ -23,6 +23,8 @@ export const FilterQuery = v.object({
   not_tag: text,
   related_to: text,
   post_type: text,
+  rel_of: text,
+  rel: text,
 })
 
 export type FilterParams = v.InferOutput<typeof FilterQuery>
@@ -48,6 +50,8 @@ export function collectionFilter(input: FilterParams): CollectionFilter {
     notTag: input.not_tag || undefined,
     relatedTo: input.related_to || undefined,
     postType: input.post_type || undefined,
+    relOf: input.rel_of || undefined,
+    rel: input.rel || undefined,
   }
 }
 

@@ -3,6 +3,7 @@ import { sql, type SQL } from 'drizzle-orm'
 import { ENTITY_NAME } from '#capture/graph.ts'
 import { canonicalJson, sha256Hex } from '#capture/json.ts'
 import { AppError } from '#errors.ts'
+import { FOLLOW_SETS, followSetSQL, type FollowSet } from './follows.ts'
 import { collectionsById, isUUID } from './read.ts'
 import { list, type CollectionView, type Page } from './views.ts'
 import type { CaptureContext } from '#capture/context.ts'
@@ -49,6 +50,14 @@ export interface CollectionFilter {
   /** A saved collection the results relate to directly. */
   relatedTo?: string
   postType?: string
+  /**
+   * An account key (as an author's) whose current follows select: the
+   * accounts in `rel` of it, and posts by them. Given with `rel` or not at
+   * all.
+   */
+  relOf?: string
+  /** `following`, `followers` or `mutual`, as `relOf` sees them. */
+  rel?: string
 }
 
 export interface Author {
@@ -69,7 +78,7 @@ const RFC3339 =
 const invalid = () => new AppError('invalid_filter')
 const runes = (value: string) => [...value].length
 
-interface Identity {
+export interface Identity {
   platform: string
   kind: string
   external: string
@@ -77,7 +86,7 @@ interface Identity {
 
 // Each part is escaped, so the key is unambiguous whatever an external id
 // contains.
-function authorKey(author: Identity): string {
+export function authorKey(author: Identity): string {
   return [author.platform, author.kind, author.external]
     .map((part) => encodeURIComponent(part))
     .join('/')
@@ -85,7 +94,7 @@ function authorKey(author: Identity): string {
 
 // Only the canonical encoding names an identity, so one author never makes
 // two cursor fingerprints.
-function parseAuthorKey(key: string): Identity | undefined {
+export function parseAuthorKey(key: string): Identity | undefined {
   const parts = key.split('/')
   if (parts.length !== 3) return undefined
   const decoded: string[] = []
@@ -167,6 +176,8 @@ function validTags(tag: string, notTag: string): boolean {
 interface Checked {
   filter: Required<Omit<CollectionFilter, 'authors'>> & { authors: string[] }
   authors: Identity[]
+  /** The account whose follows select, with `filter.rel`. */
+  relOf?: Identity
   from?: number
   before?: number
   /** A narrowing's own filter, as part of the cursor's fingerprint. */
@@ -193,6 +204,8 @@ function check(input: CollectionFilter): Checked {
     notTag: tagList(input.notTag),
     relatedTo: input.relatedTo ?? '',
     postType: input.postType ?? '',
+    relOf: input.relOf ?? '',
+    rel: input.rel ?? '',
   }
   const oneOf = (value: string, allowed: string[]) =>
     !value || allowed.includes(value)
@@ -210,9 +223,15 @@ function check(input: CollectionFilter): Checked {
     (filter.relatedTo && !isUUID(filter.relatedTo)) ||
     !oneOf(filter.tagMode, ['any', 'all']) ||
     !validTags(filter.tag, filter.notTag) ||
-    filter.authors.length > MAX_AUTHORS
+    filter.authors.length > MAX_AUTHORS ||
+    !oneOf(filter.rel, FOLLOW_SETS) ||
+    // A perspective and a mode come together or not at all.
+    Boolean(filter.rel) !== Boolean(filter.relOf)
   )
     throw invalid()
+  // A perspective is an account: only accounts follow.
+  const relOf = filter.relOf ? parseAuthorKey(filter.relOf) : undefined
+  if (filter.relOf && !relOf?.kind.endsWith('.profile')) throw invalid()
   const authors = filter.authors.map((key) => {
     const author = parseAuthorKey(key)
     if (!author) throw invalid()
@@ -228,7 +247,7 @@ function check(input: CollectionFilter): Checked {
     from = savedSince(filter.savedWithin, filter.timeZone || undefined)
     if (from === undefined) throw invalid()
   }
-  return { filter, authors, from, before }
+  return { filter, authors, relOf, from, before }
 }
 
 interface Cursor {
@@ -475,6 +494,12 @@ function conditionsOf(checked: Checked, related: boolean): SQL[] {
       sql`k.has_sensitive = ${filter.sensitive === 'contains' ? 1 : 0}`,
     )
   conditions.push(...tagSQL(filter.tag, filter.tagMode, filter.notTag))
+  // An account's own profile and its posts share the subject, so one set of
+  // accounts selects both tabs; `catalog_subject` looks each one up.
+  if (checked.relOf)
+    conditions.push(
+      sql`k.subject_entity_id IN ${followSetSQL(checked.relOf, filter.rel as FollowSet)}`,
+    )
   if (filter.postType)
     conditions.push(sql`${postTypeSQL(related)} = ${filter.postType}`)
   return conditions
@@ -482,12 +507,19 @@ function conditionsOf(checked: Checked, related: boolean): SQL[] {
 
 /**
  * A filter that only narrows another one: its conditions are added to the
- * other's, so it can never select more. It names no related collection and
- * no tag (wanted or not), and the other filter's order stands.
+ * other's, so it can never select more. It names no related collection, no
+ * tag (wanted or not) and no follows, and the other filter's order stands.
  */
 export type Narrowing = Omit<
   CollectionFilter,
-  'relatedTo' | 'tag' | 'tagMode' | 'notTag' | 'sort' | 'order'
+  | 'relatedTo'
+  | 'tag'
+  | 'tagMode'
+  | 'notTag'
+  | 'relOf'
+  | 'rel'
+  | 'sort'
+  | 'order'
 >
 
 /**
@@ -500,8 +532,8 @@ function select(input: CollectionFilter, narrow?: Narrowing): Selection {
   const conditions = conditionsOf(checked, !!related)
   if (narrow) {
     const extra = check(narrow)
-    const { relatedTo, tag, tagMode, notTag } = extra.filter
-    if (relatedTo || tag || tagMode || notTag) throw invalid()
+    const { relatedTo, tag, tagMode, notTag, relOf, rel } = extra.filter
+    if (relatedTo || tag || tagMode || notTag || relOf || rel) throw invalid()
     conditions.push(...conditionsOf(extra, !!related))
     checked.narrow = extra.filter
   }
