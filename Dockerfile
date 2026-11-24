@@ -5,8 +5,7 @@ ARG NODE_VERSION
 
 # Build: install, build Atmosphere and the web app, then copy out the server
 # with only its production dependencies. The output is JavaScript, so it is
-# built once on the builder's own platform rather than under emulation for
-# each target.
+# built on the builder's own platform whatever the target.
 FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-alpine AS build
 WORKDIR /src
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./

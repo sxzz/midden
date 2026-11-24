@@ -30,11 +30,12 @@ jobs:
       - run: pnpm --filter @midden/web test:e2e
         env:
           PLAYWRIGHT_CHANNEL: chrome
-  # Every push builds and starts the image; main also publishes it for
-  # amd64 and arm64 once the checks and browser tests pass.
+  # Every push builds and starts the image; main also publishes it once the
+  # checks and browser tests pass. Production runs on an Apple-silicon Mac,
+  # so the image is arm64 only, built natively on an arm64 runner.
   image:
     needs: [checks, e2e]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     permissions:
       contents: read
@@ -63,8 +64,6 @@ jobs:
             echo "tags=midden:test" >> "$GITHUB_OUTPUT"
             echo "run=midden:test" >> "$GITHUB_OUTPUT"
           fi
-      - if: env.PUBLISH == 'true'
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - if: env.PUBLISH == 'true'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -75,7 +74,7 @@ jobs:
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          platforms: ${{ env.PUBLISH == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          platforms: linux/arm64
           push: ${{ env.PUBLISH == 'true' }}
           load: ${{ env.PUBLISH != 'true' }}
           build-args: |
