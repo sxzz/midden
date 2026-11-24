@@ -32,8 +32,14 @@ const props = defineProps<{
   initialId: string
   collectionId?: string
   collectionIds?: Record<string, string>
+  /** Offer 删除此媒体 for the media shown, on the owner's page. */
+  removable?: boolean
 }>()
-const emit = defineEmits<{ close: []; open: [id: string] }>()
+const emit = defineEmits<{
+  close: []
+  open: [id: string]
+  remove: [asset: Asset]
+}>()
 const index = shallowRef(
   Math.max(
     0,
@@ -364,6 +370,29 @@ watch(
         @select="emit('open', selectedCollection!)"
       />
       <button
+        v-if="removable && selected"
+        type="button"
+        class="glass remove"
+        aria-label="删除此媒体"
+        title="删除此媒体"
+        @click="emit('remove', selected)"
+      >
+        <svg
+          class="icon"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.9"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path
+            d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 11v5M14 11v5"
+          />
+        </svg>
+      </button>
+      <button
         type="button"
         class="glass save"
         :disabled="saving"
@@ -691,6 +720,7 @@ watch(
 /* Keyboard users keep a clear ring on every control. */
 .close:focus-visible,
 .save:focus-visible,
+.remove:focus-visible,
 .nav:focus-visible,
 .caption:focus-visible {
   outline: 2px solid #fff;
@@ -708,6 +738,18 @@ watch(
 }
 .save:disabled {
   opacity: 0.5;
+}
+.remove {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  margin-left: auto;
+  color: #fff;
+}
+.remove + .save {
+  margin-left: 0;
 }
 .save-error {
   position: absolute;

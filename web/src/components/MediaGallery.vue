@@ -1,16 +1,26 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
-import { assetURL, type Asset, type Collection } from '../api'
+import { assetURL, safeURL, type Asset, type Collection } from '../api'
 import { useSensitiveMedia } from '../composables/useSensitiveMedia'
-import { mediaNotice } from '../presentation'
+import { isRemoved, mediaNotice, removedLabel } from '../presentation'
 import MediaPreview from './MediaPreview.vue'
 import MediaViewer from './MediaViewer.vue'
 import EyeIcon from './ui/EyeIcon.vue'
+import LoadingImage from './ui/LoadingImage.vue'
 const props = defineProps<{
   assets: Asset[]
   showSensitive?: boolean
   collection?: Collection
+  /** The owner's page: media can be removed (删除此媒体) and restored. */
+  editable?: boolean
 }>()
+const emit = defineEmits<{ remove: [asset: Asset]; restore: [asset: Asset] }>()
+// Removed media has no copy here: the post's own page on the platform.
+const source = computed(() => props.collection && safeURL(props.collection.url))
+function removeSelected(asset: Asset) {
+  selected.value = undefined
+  emit('remove', asset)
+}
 const selected = shallowRef<Asset>()
 function view(asset: Asset) {
   selected.value = asset
@@ -47,7 +57,38 @@ watch(
     <!-- While one veil covers the group, nothing beneath it may be tabbed to. -->
     <div class="media" :inert="covered || undefined">
       <figure v-for="asset in assets" :key="asset.id" class="item">
-        <p v-if="asset.state !== 'ready'" class="notice">
+        <div
+          v-if="isRemoved(asset)"
+          class="frame removed"
+          :class="{ blurred: hidden(asset) }"
+        >
+          <LoadingImage
+            v-if="asset.thumbnail_url"
+            :src="asset.thumbnail_url"
+            :alt="asset.alt_text || ''"
+          />
+          <span class="removed-label">
+            <a
+              v-if="source"
+              :href="source"
+              target="_blank"
+              rel="noopener noreferrer"
+              >{{ removedLabel(asset) }} · 在原站查看 ›</a
+            ><span v-else>{{ removedLabel(asset) }}</span>
+            <template v-if="editable">
+              <small v-if="asset.download_again">下次更新时重新下载</small>
+              <button
+                v-else
+                type="button"
+                class="restore"
+                @click="emit('restore', asset)"
+              >
+                恢复下载
+              </button>
+            </template>
+          </span>
+        </div>
+        <p v-else-if="asset.state !== 'ready'" class="notice">
           {{ mediaNotice(asset) }}
         </p>
         <button
@@ -101,6 +142,8 @@ watch(
     :assets="previews"
     :initial-id="selected.id"
     :collection="collection"
+    :removable="editable"
+    @remove="removeSelected"
     @close="selected = undefined"
   />
 </template>
@@ -185,6 +228,47 @@ watch(
   padding: 8px;
   border-radius: 20px;
   font-size: 12px;
+}
+/* The kept thumbnail, dimmed under what became of the media. */
+.removed {
+  display: grid;
+  place-items: center;
+}
+.removed :deep(.image-shell) {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+}
+.removed :deep(img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.45;
+}
+.removed.blurred :deep(img) {
+  filter: blur(18px);
+}
+.removed-label {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 13px;
+  text-align: center;
+}
+.removed-label a {
+  color: inherit;
+  text-decoration: none;
+}
+.restore {
+  padding: 2px 8px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
 }
 .notice,
 .download {

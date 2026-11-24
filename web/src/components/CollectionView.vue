@@ -45,6 +45,7 @@ const emit = defineEmits<{
   tagsChanged: [change: TagChange]
   /** Deleted from the selection; `withPosts` when accounts' posts went too. */
   deleted: [ids: string[], withPosts: boolean]
+  mediaRemoved: []
 }>()
 // A public link has no selection; its filters leave out the owner's tags.
 const shared = computed(() => !!shareSlug.value)
@@ -210,6 +211,7 @@ const storage = computed(() =>
     @started="selecting = false"
     @delete="deleting = true"
     @close="closeBatch"
+    @media-removed="emit('mediaRemoved')"
   />
   <DeleteSheet
     v-if="batch"

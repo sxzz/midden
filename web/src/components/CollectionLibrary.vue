@@ -485,6 +485,11 @@ function listProps(list: ReturnType<typeof createList>, error = '') {
         void collection.load(shown)
       }
     },
+    // Sizes changed, and sorting by them may reorder the list.
+    onMediaRemoved: () => {
+      if (list.loadedQuery !== undefined) void collection.load(list.loadedQuery)
+      loadUsage()
+    },
   }
 }
 const viewProps = computed(() => {

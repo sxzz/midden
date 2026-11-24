@@ -1,10 +1,11 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
 import { useSensitiveMedia } from '../composables/useSensitiveMedia'
-import { readyMedia } from '../presentation'
+import { isRemoved, readyMedia, removedLabel } from '../presentation'
 import MediaPreview from './MediaPreview.vue'
 import MediaViewer from './MediaViewer.vue'
 import EyeIcon from './ui/EyeIcon.vue'
+import LoadingImage from './ui/LoadingImage.vue'
 import type { Asset, Collection } from '../api'
 const props = defineProps<{
   size?: 'small' | 'medium' | 'large'
@@ -31,7 +32,13 @@ function measure(event: Event) {
     )
 }
 const LIMIT = 4
-const media = computed(() => readyMedia(props.assets))
+// Removed media still shows, by the thumbnail its removal kept.
+const media = computed(() =>
+  props.assets.filter(
+    (asset) =>
+      asset.state === 'ready' || (isRemoved(asset) && !!asset.thumbnail_url),
+  ),
+)
 // Whether the group is uniformly sensitive is a property of the whole row, not
 // of the four tiles that happen to fit.
 const { covered, hidden, reveal, revealAll } = useSensitiveMedia(
@@ -41,7 +48,7 @@ const { covered, hidden, reveal, revealAll } = useSensitiveMedia(
 // Opening the viewer is itself the decision to look, so it carries the whole
 // group: paging from an uncovered image must not dead-end on a missing one.
 const previews = computed(() =>
-  media.value.filter(
+  readyMedia(media.value).filter(
     (asset) =>
       asset.mime?.startsWith('image/') || asset.mime?.startsWith('video/'),
   ),
@@ -51,6 +58,10 @@ function openCollection() {
   emit('open')
 }
 function view(asset: Asset) {
+  if (isRemoved(asset)) {
+    emit('open')
+    return
+  }
   if (!asset.mime?.startsWith('image/') && !asset.mime?.startsWith('video/')) {
     emit('open')
     return
@@ -96,21 +107,27 @@ const overflow = computed(() => media.value.length - tiles.value.length)
         type="button"
         class="tile"
         :aria-label="
-          asset.mime?.startsWith('image/')
-            ? hidden(asset) && !covered
-              ? '敏感内容，点按显示'
-              : '放大图片'
-            : asset.mime?.startsWith('video/')
+          isRemoved(asset)
+            ? `${removedLabel(asset)}，查看收藏详情`
+            : asset.mime?.startsWith('image/')
               ? hidden(asset) && !covered
                 ? '敏感内容，点按显示'
-                : '播放视频'
-              : '查看收藏详情'
+                : '放大图片'
+              : asset.mime?.startsWith('video/')
+                ? hidden(asset) && !covered
+                  ? '敏感内容，点按显示'
+                  : '播放视频'
+                : '查看收藏详情'
         "
         :class="{ blurred: hidden(asset) }"
         @click.stop="view(asset)"
       >
+        <template v-if="isRemoved(asset)">
+          <LoadingImage :src="asset.thumbnail_url!" alt="" />
+          <span class="removed">已移除</span>
+        </template>
         <MediaPreview
-          v-if="
+          v-else-if="
             asset.mime?.startsWith('image/') || asset.mime?.startsWith('video/')
           "
           :asset="asset"
@@ -261,6 +278,16 @@ const overflow = computed(() => media.value.length - tiles.value.length)
   color: white;
   pointer-events: none;
   font-size: 16px;
+}
+.removed {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 11px;
 }
 .more {
   position: absolute;

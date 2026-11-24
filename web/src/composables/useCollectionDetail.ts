@@ -397,6 +397,7 @@ export function useCollectionDetail(
     showPoint,
     /** Whether a point shows without a request. */
     isSeen: (point: string) => seen.has(key(point)),
+    reload,
     update,
     started,
     updating,

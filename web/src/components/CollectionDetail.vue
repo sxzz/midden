@@ -1,16 +1,28 @@
 <script setup vapor lang="ts">
 import { computed, onUnmounted, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { call, client, safeURL, type Collection, type Share } from '../api'
+import {
+  call,
+  client,
+  errorText,
+  safeURL,
+  type Asset,
+  type Collection,
+  type RemovalEffect,
+  type RemovalTarget,
+  type Share,
+} from '../api'
 import { profileHandle } from '../captures'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
-import { date, present } from '../presentation'
+import { toast } from '../composables/useToast'
+import { date, isRemoved, present } from '../presentation'
 import { accountKey, relationQuery, type Rel } from '../relation-filter'
 import { isProfileEntity } from '../relations'
 import { collectionRoute, shareSlug } from '../share'
 import CollectionAnnotations from './CollectionAnnotations.vue'
 import CollectionPost from './CollectionPost.vue'
 import DeleteSheet from './DeleteSheet.vue'
+import MediaRemovalSheet from './MediaRemovalSheet.vue'
 import ProfileCollections from './ProfileCollections.vue'
 import RevisionTimeline from './RevisionTimeline.vue'
 import ShareSheet from './ShareSheet.vue'
@@ -53,6 +65,7 @@ const {
   historyPage,
   showPoint,
   isSeen,
+  reload,
   update,
   started,
   updating,
@@ -207,6 +220,54 @@ function updateStarted(recordId: string) {
 function openRecord() {
   void router.push({ name: 'capture', params: { id: record.value } })
 }
+/** The removal being confirmed: one media item, or all of a post's. */
+const removal = shallowRef<{ target: RemovalTarget; title: string }>()
+watch(
+  () => props.id,
+  () => (removal.value = undefined),
+)
+/** A post's media still stored or to be stored, for 删除此帖所有媒体. */
+const removable = computed(
+  () =>
+    !isProfile.value &&
+    !!collection.value?.assets.some((asset) => !isRemoved(asset)),
+)
+function removeAll() {
+  removal.value = {
+    target: { ids: [props.id] },
+    title: '删除此帖所有媒体？',
+  }
+}
+function removeOne(asset: Asset) {
+  removal.value = {
+    target: { collection: props.id, asset: asset.id },
+    title: '删除此媒体？',
+  }
+}
+function removed(effect: RemovalEffect) {
+  removal.value = undefined
+  toast(`已删除 ${effect.media} 个媒体`)
+  void reload()
+}
+/**
+ * 恢复下载: clear the mark, then capture a post again at once, which brings
+ * the media back; a profile gets it with its next update.
+ */
+async function restore(asset: Asset) {
+  try {
+    await call(
+      client['media-removals'].restore.$post({
+        json: { collection: props.id, asset: asset.id },
+      }),
+    )
+  } catch (e) {
+    toast(errorText(e))
+    return
+  }
+  void reload()
+  if (!isProfile.value && available.value && !updating.value) void update()
+  else toast('已恢复下载')
+}
 const version = computed(() =>
   collection.value
     ? `${historical.value ? '历史' : '最新'}版本抓取于 ${date(collection.value.observed_at)}`
@@ -230,6 +291,9 @@ const version = computed(() =>
         :collection="collection"
         :saved-at="savedAt"
         :show-sensitive="showSensitive"
+        :editable="!shared"
+        @remove="removeOne"
+        @restore="restore"
       />
     </ListSection>
     <ListSection v-if="follows" title="关系网">
@@ -319,6 +383,13 @@ const version = computed(() =>
         @saved="emit('annotationsSaved')"
       />
       <ListButton
+        v-if="removable"
+        label="删除此帖所有媒体"
+        variant="destructive"
+        :disabled="busy"
+        @select="removeAll"
+      />
+      <ListButton
         label="删除这条收藏"
         variant="destructive"
         :disabled="busy"
@@ -360,6 +431,14 @@ const version = computed(() =>
       :title="isProfile ? '公开分享这个账号' : '公开分享这条收藏'"
       @changed="loadExposure"
       @cancel="sharing = false"
+    />
+    <MediaRemovalSheet
+      v-if="!shared"
+      :open="!!removal"
+      :target="removal?.target ?? { ids: [id] }"
+      :title="removal?.title ?? ''"
+      @removed="removed"
+      @cancel="removal = undefined"
     />
     <DeleteSheet
       v-if="!shared"

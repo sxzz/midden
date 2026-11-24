@@ -98,6 +98,11 @@ export type CaptureMember = Ok<
   (typeof client.captures)[':id']['members']['$get']
 >['items'][number]
 export type Usage = Ok<typeof client.usage.$get>
+/** What removing media (删除媒体) does, from its dry run. */
+export type RemovalEffect = Ok<(typeof client)['media-removals']['$post']>
+export type RemovalTarget = InferRequestType<
+  (typeof client)['media-removals']['$post']
+>['json']
 export type Accounts = Ok<typeof client.accounts.$get>
 export type Account = Accounts['accounts'][number]
 export type AccountPlatform = Accounts['platforms'][number]

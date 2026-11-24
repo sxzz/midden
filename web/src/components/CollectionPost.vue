@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
-import { previewURL, type Collection } from '../api'
+import { previewURL, type Asset, type Collection } from '../api'
 import {
   date,
   mentionParts,
@@ -20,7 +20,10 @@ const props = defineProps<{
   /** When the viewer already knows it, so revisions never drop the date. */
   savedAt?: string
   showSensitive?: boolean
+  /** The owner's page: media can be removed and restored. */
+  editable?: boolean
 }>()
+const emit = defineEmits<{ remove: [asset: Asset]; restore: [asset: Asset] }>()
 // Authors read as their newest profile unless asked for the captured one.
 const captured = shallowRef(false)
 const view = computed(() =>
@@ -143,6 +146,9 @@ const warnings = computed(() => warningList(props.collection.warnings))
       :assets="collection.assets || []"
       :collection="collection"
       :show-sensitive="showSensitive"
+      :editable="editable"
+      @remove="(asset) => emit('remove', asset)"
+      @restore="(asset) => emit('restore', asset)"
     />
     <PostRelations
       :collection="collection"

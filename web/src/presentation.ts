@@ -343,6 +343,29 @@ export function groupCollections(
 export function readyMedia(assets: Asset[] = []) {
   return assets.filter((a) => a.state === 'ready')
 }
+/**
+ * The effect a removal states before it is confirmed: the space it frees,
+ * and how many items stay stored because other collections use them.
+ */
+export function removalEffectText(effect: {
+  media: number
+  freed_bytes: number
+  shared: number
+}) {
+  if (!effect.media) return '没有可删除的媒体'
+  const freed = effect.freed_bytes
+    ? `可释放 ${storageSize(effect.freed_bytes)}`
+    : ''
+  if (!effect.shared) return freed || '这些媒体未保存，不占用空间'
+  if (!freed) return '其他收藏仍在使用，不会释放空间'
+  return `${freed}；其中 ${effect.shared} 个媒体其他收藏仍在使用，不会释放空间`
+}
+/** What a removed media item (已移除) says over its kept thumbnail. */
+export function removedLabel(asset: Asset) {
+  return asset.kind === 'video' ? '视频已移除' : '图片已移除'
+}
+/** Removed media, shown by the thumbnail its removal kept. */
+export const isRemoved = (asset: Asset) => asset.state === 'removed'
 /** Media state in words. Storage states never reach the reader. */
 export function mediaNotice(asset: Asset) {
   if (asset.state === 'pending') return '媒体保存中'

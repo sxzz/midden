@@ -1,7 +1,10 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
+import { toast } from '../composables/useToast'
+import MediaRemovalSheet from './MediaRemovalSheet.vue'
 import UpdateSheet from './UpdateSheet.vue'
+import type { RemovalEffect } from '../api'
 const props = defineProps<{
   selected: string[]
   /** Every collection currently listed, for selecting them all at once. */
@@ -14,9 +17,17 @@ const emit = defineEmits<{
   /** Asks to delete the selection; the list confirms it. */
   delete: []
   close: []
+  /** Media of the selection was removed (删除媒体): sizes changed. */
+  mediaRemoved: []
 }>()
 const router = useRouter()
 const sheet = shallowRef(false)
+const removing = shallowRef(false)
+function removed(effect: RemovalEffect) {
+  removing.value = false
+  toast(`已删除 ${effect.media} 个媒体`)
+  emit('mediaRemoved')
+}
 /** The started update's record and how many it covers. */
 const started = shallowRef<{ record: string; count: number }>()
 const allSelected = computed(
@@ -67,6 +78,14 @@ function openRecord() {
       </button>
       <button
         type="button"
+        class="action destructive"
+        :disabled="!selected.length"
+        @click="removing = true"
+      >
+        删除媒体
+      </button>
+      <button
+        type="button"
         class="action strong"
         :disabled="!selected.length"
         @click="sheet = true"
@@ -80,6 +99,13 @@ function openRecord() {
     :target="{ target: 'many', ids: selected }"
     @started="onStarted"
     @cancel="sheet = false"
+  />
+  <MediaRemovalSheet
+    :open="removing"
+    :target="{ ids: selected }"
+    :title="`删除 ${selected.length} 项的媒体？`"
+    @removed="removed"
+    @cancel="removing = false"
   />
 </template>
 
