@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
 import { createApi } from '#http/app.ts'
 import { createToken } from '#http/auth.ts'
@@ -25,7 +26,7 @@ afterEach(async () => {
 const post = (id: string) => `https://fake.test/p/${id}`
 const profile = (id: string) => `https://fake.test/u/${id}`
 
-const bob = () => entity('author', 'fake.profile', 'bob', { name: 'Bob' })
+const bob = () => entity('author', 'fake.profile', '600', { name: 'Bob' })
 const five = (key = 'profile') =>
   entity(key, 'fake.profile', '500', { name: 'Five', username: 'five' })
 
@@ -38,9 +39,9 @@ const routes: Record<string, () => Partial<FetchResponse>> = {
       ['root', 'reposted', 'post'],
     ),
   }),
-  bob: () => ({
+  600: () => ({
     text: 'profile bob',
-    graph: graph([entity('root', 'fake.profile', 'bob', { name: 'Bob' })]),
+    graph: graph([entity('root', 'fake.profile', '600', { name: 'Bob' })]),
   }),
   // Written by the profile, with an image.
   a1: () => ({
@@ -103,7 +104,7 @@ const routes: Record<string, () => Partial<FetchResponse>> = {
 
 async function setup() {
   const made = libraryContext((req) => {
-    const route = routes[req.externalId.replace(/^handle:/, '')]
+    const route = routes[req.externalId]
     if (!route) throw new Error(`no route for ${req.externalId}`)
     return route()
   })
@@ -111,7 +112,7 @@ async function setup() {
   ctx = c
   const ids: Record<string, string> = {}
   ids.five = (await capture(c, profile('500'))).collectionId
-  ids.bob = (await capture(c, profile('bob'))).collectionId
+  ids.bob = (await capture(c, profile('600'))).collectionId
   for (const id of ['a1', 'm1', 'r1', 'x1', 'q1', 'e3'])
     ids[id] = (await capture(c, post(id))).collectionId
   const app = createApi({ ctx: c })
@@ -382,6 +383,51 @@ describe('public shares', () => {
     }[])
       for (const entity of answer.graph.entities)
         expect(entity).not.toHaveProperty('id')
+  })
+
+  test('follows show every account, linking only those shared', async () => {
+    const { c, ids, read } = await setup()
+    const entityOf = (id: string) =>
+      c.db.get<{ id: string }>(
+        sql`SELECT root_entity_id AS id FROM catalog WHERE collection_id = ${id}`,
+      )!.id
+    const day = Date.parse('2026-11-01T00:00:00Z')
+    // Five unfollowed bob, whose profile is saved.
+    c.db.run(sql`INSERT INTO follow_edges
+      (follower_id, followee_id, first_seen_at, last_seen_at, ended_at)
+      VALUES (${entityOf(ids.five!)}, ${entityOf(ids.bob!)}, ${day},
+        ${day + 1000}, ${day + 2000})`)
+    type Changes = {
+      items: { account: { name?: string; collection_id?: string } }[]
+    }
+
+    const slug = share(c, 'collection', ids.five!)
+    expect((await read(slug, `/collections/${ids.five}/follows`)).status).toBe(
+      200,
+    )
+    const changes = await read(slug, `/collections/${ids.five}/follow-changes`)
+    expect(changes.status).toBe(200)
+    expect((changes.body as Changes).items.map((i) => i.account)).toEqual([
+      expect.objectContaining({ name: 'Bob' }),
+    ])
+    expect(
+      (changes.body as Changes).items[0]!.account.collection_id,
+    ).toBeUndefined()
+    for (const path of ['/follows', '/follow-changes'])
+      expect(await read(slug, `/collections/${ids.bob}${path}`)).toMatchObject(
+        NOT_FOUND,
+      )
+
+    // A folder holding both profiles links bob.
+    const folder = createFolder(c.db, {
+      name: '账号',
+      filter: 'entity_type=fake.profile',
+    })
+    const both = share(c, 'folder', folder.id)
+    const linked = await read(both, `/collections/${ids.five}/follow-changes`)
+    expect((linked.body as Changes).items[0]!.account.collection_id).toBe(
+      ids.bob,
+    )
   })
 
   test('revoked, unknown and malformed slugs are not found', async () => {

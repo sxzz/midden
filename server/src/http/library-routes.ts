@@ -58,7 +58,7 @@ export const ChangesQuery = v.object({
 })
 
 /** How many of the newest follow changes to return. */
-const FollowChangesQuery = v.object({
+export const FollowChangesQuery = v.object({
   limit: v.optional(
     v.pipe(
       v.string(),

@@ -2,14 +2,20 @@ import { Hono } from 'hono'
 import * as v from 'valibot'
 import {
   getPublicCollection,
+  getPublicFollowCounts,
   getPublicHistoryPoint,
   getPublicShare,
   listPublicCollections,
   listPublicCounts,
+  listPublicFollowChanges,
   listPublicHistory,
   listPublicProfileChanges,
 } from '#library/public.ts'
-import { ChangesQuery, CountsQuery } from './library-routes.ts'
+import {
+  ChangesQuery,
+  CountsQuery,
+  FollowChangesQuery,
+} from './library-routes.ts'
 import { Cursor, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
@@ -78,6 +84,26 @@ export function publicRoutes(ctx: AccountsContext) {
           c.req.valid('query').limit,
         ),
       ),
+    )
+
+    .get('/:slug/collections/:id/follows', (c) =>
+      c.json(
+        getPublicFollowCounts(ctx, c.req.param('slug'), c.req.param('id')),
+      ),
+    )
+
+    .get(
+      '/:slug/collections/:id/follow-changes',
+      query(FollowChangesQuery),
+      (c) =>
+        c.json(
+          listPublicFollowChanges(
+            ctx,
+            c.req.param('slug'),
+            c.req.param('id'),
+            c.req.valid('query').limit,
+          ),
+        ),
     )
 
     .get('/:slug/collections/:id/profile-changes', query(ChangesQuery), (c) =>

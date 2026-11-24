@@ -2,6 +2,12 @@ import { AppError } from '#errors.ts'
 import { listProfileChanges, type ProfileChanges } from './changes.ts'
 import { filterCounts } from './counts.ts'
 import { parseFilterQuery } from './filter-query.ts'
+import {
+  followCounts,
+  listFollowChanges,
+  type FollowChanges,
+  type FollowCounts,
+} from './follows.ts'
 import { listCollections } from './list.ts'
 import {
   getCollection,
@@ -275,4 +281,38 @@ export function listPublicProfileChanges(
 ): ProfileChanges {
   within(ctx, slug, id)
   return listProfileChanges(ctx, id, limit)
+}
+
+export function getPublicFollowCounts(
+  ctx: AccountsContext,
+  slug: string,
+  id: string,
+): FollowCounts {
+  within(ctx, slug, id)
+  return followCounts(ctx, id)
+}
+
+/**
+ * A shared profile's follow changes. Every account keeps its name and
+ * avatar; only those the share reaches link to their saved profile.
+ */
+export function listPublicFollowChanges(
+  ctx: AccountsContext,
+  slug: string,
+  id: string,
+  limit?: number,
+): FollowChanges {
+  const share = within(ctx, slug, id)
+  const changes = listFollowChanges(ctx, id, limit)
+  const linkable = share.scope.contains([
+    ...new Set(
+      changes.items.flatMap((item) =>
+        item.account.collection_id ? [item.account.collection_id] : [],
+      ),
+    ),
+  ])
+  for (const { account } of changes.items)
+    if (account.collection_id && !linkable.has(account.collection_id))
+      delete account.collection_id
+  return changes
 }
