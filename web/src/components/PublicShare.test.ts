@@ -60,6 +60,12 @@ beforeEach(() => {
       if (!share) throw new APIError(404, '内容不存在或已删除')
       return share
     }
+    if (rest.startsWith('/collections/count?'))
+      return (
+        new URLSearchParams(rest.split('?', 2)[1]).get('entity_type') ?? ''
+      ).includes('.profile')
+        ? { count: 56, types: { 'x.profile': 56 } }
+        : { count: 1234, types: { 'x.post': 1234 } }
     if (rest.startsWith('/collections/authors'))
       return { items: [{ id: 'x/x.profile/2', name: '作者', count: 1 }] }
     if (rest === '/collections' || rest.startsWith('/collections?'))
@@ -122,6 +128,10 @@ it('opens a shared folder without login, with a tab per kind it holds', async ()
   const el = await mount(`/s/${SLUG}`)
   await vi.waitFor(() => expect(el.textContent).toContain('公开的帖子'))
   expect(el.querySelector('h1')?.textContent).toBe('精选')
+  // Counted within the share, for the tab shown.
+  await vi.waitFor(() =>
+    expect(el.querySelector('.total')?.textContent).toBe('1,234 条'),
+  )
   // Items open inside the share.
   expect(
     el.querySelector<HTMLAnchorElement>('a.head')?.getAttribute('href'),
@@ -135,11 +145,18 @@ it('opens a shared folder without login, with a tab per kind it holds', async ()
   )!
   tab.click()
   await vi.waitFor(() => expect(el.textContent).toContain('账号简介'))
+  await vi.waitFor(() =>
+    expect(el.querySelector('.total')?.textContent).toBe('56 个账号'),
+  )
   // The tab is in the address, so it can be linked.
   expect(router.currentRoute.value.query.entity_type).toBe(
     'x.profile,instagram.profile',
   )
-  const query = new URLSearchParams(paths().at(-1)!.split('?', 2)[1])
+  const query = new URLSearchParams(
+    paths()
+      .findLast((path) => path.startsWith(`/public/${SLUG}/collections?`))!
+      .split('?', 2)[1],
+  )
   expect(query.get('entity_type')).toBe('x.profile,instagram.profile')
   // Accounts have no post time and their save time is the owner's: the
   // ones updated last come first, the only order offered.
@@ -164,6 +181,10 @@ it('filters a shared folder newest posts first, without tags', async () => {
   const listed = () =>
     paths()
       .filter((path) => path.startsWith(`/public/${SLUG}/collections?`))
+      .map((path) => new URLSearchParams(path.split('?', 2)[1]))
+  const counted = () =>
+    paths()
+      .filter((path) => path.startsWith(`/public/${SLUG}/collections/count?`))
       .map((path) => new URLSearchParams(path.split('?', 2)[1]))
   // Published, newest first, whatever the folder keeps.
   expect(listed()[0]!.get('sort')).toBe('published')
@@ -228,7 +249,8 @@ it('filters a shared folder newest posts first, without tags', async () => {
     'rel_of',
     'rel',
   ])
-    expect(listed().every((q) => !q.has(key))).toBe(true)
+    expect([...listed(), ...counted()].every((q) => !q.has(key))).toBe(true)
+  expect(counted().some((q) => q.get('post_type') === 'quote')).toBe(true)
   expect(listed().at(-1)!.get('sort')).toBe('published')
   expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
 })

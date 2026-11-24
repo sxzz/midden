@@ -49,7 +49,7 @@ const query = computed(() => {
     q.set('entity_type', PROFILES)
   return q.toString()
 })
-const { items, next, loading, error, load, more } = useCollection()
+const { items, next, total, loading, error, load, more } = useCollection()
 const folder = computed(() => props.share?.target === 'folder')
 // The layout is not part of what is listed.
 const listed = computed(() => {
@@ -106,6 +106,7 @@ function open(id: string) {
       :loading="loading"
       :error="error"
       :next="next"
+      :total="total"
       :show-sensitive="showSensitive"
       @search="search"
       @open="open"

@@ -469,6 +469,7 @@ function listProps(list: ReturnType<typeof createList>, error = '') {
     loading: collection.loading.value,
     error: error || collection.error.value,
     next: collection.next.value,
+    total: collection.total.value,
     usage: usage.value,
     onSearch: search,
     onTagsChanged: tagsChanged,
@@ -522,7 +523,12 @@ const viewProps = computed(() => {
     // Not this folder's items: another folder's, or none to show. Until its
     // tabs are known, it is loading.
     if (missing || folderList.path !== route.fullPath)
-      Object.assign(props, { items: [], next: '', loading: !missing })
+      Object.assign(props, {
+        items: [],
+        next: '',
+        total: undefined,
+        loading: !missing,
+      })
     Object.assign(props, { folder: true })
     if (missing) props.onRetry = loadFolders
     return props

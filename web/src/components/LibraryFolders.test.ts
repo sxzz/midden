@@ -74,11 +74,21 @@ beforeEach(() => {
       folders = folders.map((f) => (f.id === id ? changed : f))
       return changed
     }
-    if (path.startsWith('/collections/count?'))
+    if (path.startsWith('/collections/count?')) {
+      const named = new URLSearchParams(path.split('?', 2)[1])
+        .get('entity_type')
+        ?.split(',')
+        .filter(Boolean)
+      const types = Object.fromEntries(
+        Object.entries(counts).filter(
+          ([type]) => !named?.length || named.includes(type),
+        ),
+      )
       return {
-        count: Object.values(counts).reduce((a, b) => a + b, 0),
-        types: counts,
+        count: Object.values(types).reduce((a, b) => a + b, 0),
+        types,
       }
+    }
     if (path.startsWith('/collections?')) return { items: [] }
     if (path === '/tags') return []
     if (path === '/updates/preview')
@@ -117,6 +127,22 @@ const listQueries = () =>
     .map(([path]) => String(path))
     .filter((path) => path.startsWith('/collections?'))
     .map((path) => new URLSearchParams(path.split('?', 2)[1]))
+/**
+ * Counts asked to learn which kinds a folder's results hold: over both
+ * kinds, unlike the total each tab counts for itself.
+ */
+const kindCounts = () =>
+  api.mock.calls
+    .map(([path]) => String(path))
+    .filter((path) => path.startsWith('/collections/count?'))
+    .filter((path) => {
+      const types = new URLSearchParams(path.split('?', 2)[1])
+        .get('entity_type')
+        ?.split(',')
+      return (
+        !types || new Set(types.map((t) => t.endsWith('.profile'))).size > 1
+      )
+    })
 
 it('lists every folder and saves the current filters as one', async () => {
   const el = await mount('/?media_type=video')
@@ -289,9 +315,7 @@ it('splits a folder of posts and accounts into tabs, as a view', async () => {
   )
   expect(listQueries().at(-1)?.get('visibility')).toBe('private')
   // The folder's own counts said both kinds are there.
-  expect(api.mock.calls.some(([p]) => p.startsWith('/collections/count'))).toBe(
-    false,
-  )
+  expect(kindCounts()).toEqual([])
 
   el.querySelectorAll<HTMLAnchorElement>('[role="tab"]')[1]!.click()
   await vi.waitFor(() =>
@@ -318,12 +342,54 @@ it('splits a folder of posts and accounts into tabs, as a view', async () => {
       'x.profile,instagram.profile',
     ),
   )
-  expect(
-    api.mock.calls.filter(([p]) => p.startsWith('/collections/count')),
-  ).toHaveLength(1)
+  expect(kindCounts()).toHaveLength(1)
   expect(el.querySelector('.folder-status')?.textContent).toContain(
     '筛选条件已修改',
   )
+})
+
+it("shows each tab's own total, counted again for other filters", async () => {
+  counts = { 'x.post': 1234, 'instagram.post': 1, 'x.profile': 56 }
+  const total = (el: HTMLElement) => el.querySelector('.total')?.textContent
+  const totals = () =>
+    api.mock.calls
+      .map(([path]) => String(path))
+      .filter((path) => path.startsWith('/collections/count?'))
+      .map((path) => new URLSearchParams(path.split('?', 2)[1]))
+  const el = await mount('/')
+  await vi.waitFor(() => expect(total(el)).toBe('1,235 条'))
+
+  el.querySelectorAll<HTMLAnchorElement>('[role="tab"]')[1]!.click()
+  await vi.waitFor(() => expect(total(el)).toBe('56 个账号'))
+  expect(totals().at(-1)?.get('entity_type')).toBe(
+    'x.profile,instagram.profile',
+  )
+
+  // Back on a tab already shown: neither its list nor its total is asked again.
+  const asked = totals().length
+  el.querySelectorAll<HTMLAnchorElement>('[role="tab"]')[0]!.click()
+  await vi.waitFor(() => expect(total(el)).toBe('1,235 条'))
+  expect(totals()).toHaveLength(asked)
+
+  counts = { 'x.post': 3 }
+  await router.push('/?q=cat')
+  await vi.waitFor(() => expect(total(el)).toBe('3 条'))
+  expect(totals().at(-1)?.get('q')).toBe('cat')
+
+  // A folder's tab counts its own kind.
+  counts = { 'x.post': 3, 'instagram.profile': 2 }
+  folders.push(
+    folder({
+      id: MIXED,
+      name: '私密',
+      filter: 'visibility=private',
+      count: 5,
+      types: counts,
+    }),
+  )
+  await router.push(`/folder/${MIXED}?visibility=private&tab=profile`)
+  await vi.waitFor(() => expect(total(el)).toBe('2 个账号'))
+  expect(totals().at(-1)?.get('visibility')).toBe('private')
 })
 
 it('lists a folder holding one kind without tabs', async () => {

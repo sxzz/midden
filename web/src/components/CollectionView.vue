@@ -25,6 +25,8 @@ const props = defineProps<{
   loading: boolean
   error: string
   next: string
+  /** How many the list holds over all its pages, once counted. */
+  total?: number
   usage?: Usage
   hideFilters?: boolean
   /** One account's own list: no author or platform to filter by. */
@@ -116,6 +118,12 @@ const filtered = computed(() => {
 const empty = computed(
   () => !props.loading && !props.error && !props.items.length,
 )
+// Accounts are counted as accounts; anything else a list holds, as items.
+const totalText = computed(() =>
+  props.total === undefined
+    ? ''
+    : `${props.total.toLocaleString('zh-CN')} ${listsProfiles(props.query) ? '个账号' : '条'}`,
+)
 const storage = computed(() =>
   props.usage ? `已用 ${storageSize(props.usage.used_bytes)}` : '',
 )
@@ -132,9 +140,10 @@ const storage = computed(() =>
     @tags-changed="(change) => emit('tagsChanged', change)"
   />
   <div
-    v-if="(!selecting && items.length) || albums || slots.actions"
+    v-if="totalText || (!selecting && items.length) || albums || slots.actions"
     class="layout-bar"
   >
+    <span v-if="totalText" class="total">{{ totalText }}</span>
     <slot name="actions" />
     <button
       v-if="!selecting && items.length && !shared"
@@ -230,6 +239,13 @@ const storage = computed(() =>
   justify-content: flex-end;
   gap: 8px;
   margin: 12px var(--gutter) 16px;
+}
+/* The count leads; the buttons keep to the trailing edge. */
+.total {
+  margin-right: auto;
+  font-size: 13px;
+  color: var(--subtle);
+  font-variant-numeric: tabular-nums;
 }
 .batch,
 .layout-bar :slotted(button) {

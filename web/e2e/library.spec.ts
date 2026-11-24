@@ -47,6 +47,14 @@ test('browse, filter, history, refresh and remove a saved post', async ({
         body = { id: recordId }
         break
       }
+      case '/v1/collections/count': {
+        const none = deleted || u.searchParams.get('q') === '不存在'
+        body = {
+          count: none ? 0 : 1,
+          types: none ? {} : { 'x.post': 1 },
+        }
+        break
+      }
       case '/v1/collections/delete': {
         if (!r.request().postDataJSON().dry_run) deleted = true
         body = {
@@ -99,6 +107,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
     page.locator('.head').filter({ hasText: '测试作者' }).first().click()
   await page.goto('/app/')
   await expect(page.getByText(collection.text)).toBeVisible()
+  await expect(page.locator('.total')).toHaveText('1 条')
   await page.screenshot({
     path: 'test-results/library-mobile.png',
     fullPage: true,
@@ -133,6 +142,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await page.getByRole('searchbox').fill('不存在')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await expect(page.getByText('没有匹配的收藏', { exact: true })).toBeVisible()
+  await expect(page.locator('.total')).toHaveText('0 条')
   await page.getByRole('searchbox').fill('')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await openRow()

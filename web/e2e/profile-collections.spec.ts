@@ -190,7 +190,12 @@ test('profile shows related collection rows and total storage, with internal bio
         items: url.searchParams.get('related_to') === profileId ? [post] : [],
         total_storage_bytes: 2097152,
       }
-    } else if (path.endsWith('/history')) json = { items: [] }
+    } else if (path === '/v1/collections/count')
+      json =
+        url.searchParams.get('related_to') === profileId
+          ? { count: 1, types: { 'x.post': 1 } }
+          : { count: 0, types: {} }
+    else if (path.endsWith('/history')) json = { items: [] }
     else if (path.endsWith('/availability')) json = { available: true }
     else if (path.endsWith('/annotation')) json = { note: '', tags: [] }
     else if (path === '/v1/tags') json = []
@@ -205,6 +210,7 @@ test('profile shows related collection rows and total storage, with internal bio
   const related = page.getByRole('region', { name: '关联的收藏' })
   await expect(related.getByText('帖子占用总量 2.0 MB')).toBeVisible()
   await expect(related.locator('.row')).toHaveCount(1)
+  await expect(related.locator('.total')).toHaveText('1 条')
   await expect(related.locator('.row .repost')).toContainText('主账号 已转发')
   await expect(related.locator('.row .relation')).toContainText(
     '↘ 引用了这条帖子',

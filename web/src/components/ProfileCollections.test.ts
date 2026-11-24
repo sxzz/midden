@@ -102,6 +102,7 @@ it('restarts published-time pagination when changing order and preserves the sel
   const queries: URLSearchParams[] = []
   request.mockImplementation(async (path) => {
     if (path === '/tags') return []
+    if (path.startsWith('/collections/count?')) return { count: 2, types: {} }
     const query = new URL(String(path), 'https://example.test').searchParams
     queries.push(query)
     const order = query.get('order') ?? 'desc'
@@ -170,6 +171,7 @@ it('orders posts by when they were added or last updated, dated to match', async
   const queries: URLSearchParams[] = []
   request.mockImplementation(async (path) => {
     if (path === '/tags') return []
+    if (path.startsWith('/collections/count?')) return { count: 2, types: {} }
     queries.push(new URL(String(path), 'https://example.test').searchParams)
     return {
       items: [
@@ -237,4 +239,94 @@ it('offers the posts before the last page read below the whole list', async () =
   })
   button.click()
   expect(older).toHaveBeenCalledOnce()
+})
+
+it('shows the total beside the list, counted per filter and not per page', async () => {
+  let intersect = () => {}
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+        intersect = () => callback([{ isIntersecting: true }])
+      }
+      observe() {}
+      disconnect() {}
+    },
+  )
+  const request = mockApi()
+  let answer: (counted: { count: number; types: object }) => void = () => {}
+  request.mockImplementation((path) => {
+    if (path === '/tags') return []
+    if (path.startsWith('/collections/count?')) {
+      // Answered by hand: the list must not wait for it.
+      const pending = Promise.withResolvers<{ count: number; types: object }>()
+      answer = pending.resolve
+      return pending.promise
+    }
+    const query = new URL(String(path), 'https://example.test').searchParams
+    const second = query.has('cursor')
+    return {
+      items: [
+        {
+          id: `${query.get('q') || 'all'}-${second ? 2 : 1}`,
+          url: 'https://example.test/post',
+          text: second ? '第二页' : '第一页',
+          author_name: '作者',
+          observed_at: '2026-10-01T00:00:00Z',
+          visibility: 'public',
+          revision_id: 'r1',
+          assets: [],
+        },
+      ],
+      next_cursor: second ? '' : 'next',
+      total_storage_bytes: 0,
+    }
+  })
+  const counts = () =>
+    request.mock.calls
+      .map(([path]) => String(path))
+      .filter((path) => path.startsWith('/collections/count?'))
+      .map((path) => new URLSearchParams(path.split('?', 2)[1]))
+  const el = document.createElement('div')
+  document.body.append(el)
+  const app = createVaporApp(ProfileCollections, {
+    id: 'profile',
+    revisionId: 'r1',
+  })
+  app.mount(el)
+  unmount = () => app.unmount()
+  await vi.waitFor(() => expect(el.textContent).toContain('第一页'))
+  // Asked beside the first page; until it answers, nothing stands in.
+  expect(counts()).toHaveLength(1)
+  expect(counts()[0]!.get('related_to')).toBe('profile')
+  expect(counts()[0]!.get('entity_type')).toBe('x.post')
+  expect(el.querySelector('.total')).toBeNull()
+  answer({ count: 1234, types: { 'x.post': 1234 } })
+  await vi.waitFor(() =>
+    expect(el.querySelector('.total')?.textContent).toBe('1,234 条'),
+  )
+
+  await nextTick()
+  intersect()
+  await vi.waitFor(() => expect(el.textContent).toContain('第二页'))
+  expect(counts()).toHaveLength(1)
+  expect(el.querySelector('.total')?.textContent).toBe('1,234 条')
+
+  const input = el.querySelector<HTMLInputElement>(
+    'input[aria-label="搜索正文或作者"]',
+  )!
+  input.value = 'cat'
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  el.querySelector('form')!.dispatchEvent(
+    new Event('submit', { bubbles: true, cancelable: true }),
+  )
+  await vi.waitFor(() => expect(counts()).toHaveLength(2))
+  expect(counts()[1]!.get('q')).toBe('cat')
+  expect(counts()[1]!.has('cursor')).toBe(false)
+  // The old filter's total is gone until the new one is counted.
+  expect(el.querySelector('.total')).toBeNull()
+  answer({ count: 0, types: {} })
+  await vi.waitFor(() =>
+    expect(el.querySelector('.total')?.textContent).toBe('0 条'),
+  )
 })

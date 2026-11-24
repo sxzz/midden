@@ -117,12 +117,40 @@ export function readGraph(
  * follows, which it refuses.
  */
 export function readList(params: URLSearchParams, signal?: AbortSignal) {
-  const query = () => ({
-    ...Object.fromEntries(params),
-    author: params.getAll('author'),
-  })
-  if (!shareSlug.value)
-    return call(client.collections.$get({ query: query() }, init(signal)))
+  return call(
+    shareSlug.value
+      ? client.public[':slug'].collections.$get(
+          { param: { slug: shareSlug.value }, query: publicQuery(params) },
+          init(signal),
+        )
+      : client.collections.$get({ query: listQuery(params) }, init(signal)),
+  )
+}
+
+/** How much a list holds over all its pages, for the same query. */
+export function readCount(params: URLSearchParams, signal?: AbortSignal) {
+  params = new URLSearchParams(params)
+  params.delete('cursor')
+  return call(
+    shareSlug.value
+      ? client.public[':slug'].collections.count.$get(
+          { param: { slug: shareSlug.value }, query: publicQuery(params) },
+          init(signal),
+        )
+      : client.collections.count.$get(
+          { query: listQuery(params) },
+          init(signal),
+        ),
+  )
+}
+
+const listQuery = (params: URLSearchParams) => ({
+  ...Object.fromEntries(params),
+  author: params.getAll('author'),
+})
+
+/** A list's query as a share takes it, without the filters it refuses. */
+function publicQuery(params: URLSearchParams) {
   params = new URLSearchParams(params)
   for (const key of [
     'tag',
@@ -135,12 +163,7 @@ export function readList(params: URLSearchParams, signal?: AbortSignal) {
     ...RELATION_KEYS,
   ])
     params.delete(key)
-  return call(
-    client.public[':slug'].collections.$get(
-      { param: { slug: shareSlug.value }, query: query() },
-      init(signal),
-    ),
-  )
+  return listQuery(params)
 }
 
 /** Authors for the author filter: within the share when one is open. */

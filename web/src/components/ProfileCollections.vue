@@ -47,6 +47,7 @@ const {
   loading,
   refreshing,
   error,
+  total,
   totalStorageBytes,
   load,
   refresh,
@@ -89,6 +90,7 @@ function open(id: string) {
       :loading="loading"
       :error="error"
       :next="next"
+      :total="total"
       :show-sensitive="showSensitive"
       :reposted-by="repostedBy"
       within-profile

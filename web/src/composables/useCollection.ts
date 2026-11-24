@@ -2,9 +2,9 @@ import { onUnmounted, shallowRef } from 'vue'
 import { errorText, type Collection } from '../api'
 import { localZone } from '../folders'
 import { listSort } from '../presentation'
-import { readList } from '../reads'
-/** One page of the library list for a route query. */
-function page(params: string, cursor: string, signal: AbortSignal) {
+import { readCount, readList } from '../reads'
+/** The list's API query for a route query. */
+function request(params: string) {
   const q = new URLSearchParams(params)
   if (!q.has('entity_type')) q.set('entity_type', 'x.post,instagram.post')
   q.delete('layout')
@@ -26,6 +26,11 @@ function page(params: string, cursor: string, signal: AbortSignal) {
   if (q.get('saved_within') && !q.get('time_zone'))
     q.set('time_zone', localZone())
   q.set('q', q.get('q') || '')
+  return q
+}
+/** One page of the library list for a route query. */
+function page(params: string, cursor: string, signal: AbortSignal) {
+  const q = request(params)
   if (cursor) q.set('cursor', cursor)
   return readList(q, signal)
 }
@@ -33,6 +38,8 @@ export function useCollection() {
   const items = shallowRef<Collection[]>([])
   const next = shallowRef('')
   const totalStorageBytes = shallowRef<number>()
+  /** How many the list holds over all its pages, once counted. */
+  const total = shallowRef<number>()
   const loading = shallowRef(false)
   /** A soft refresh is running; the current items stay on screen meanwhile. */
   const refreshing = shallowRef(false)
@@ -40,6 +47,26 @@ export function useCollection() {
   let query = ''
   let controller: AbortController | undefined
   let generation = 0
+  // Counted apart from the pages, so paging neither waits for nor cancels it.
+  let counter: AbortController | undefined
+  let counting = 0
+  /**
+   * Count the query's results beside its first page. A failed count shows
+   * none, the list is whole without it. `keep` leaves the last count on
+   * screen until the new one is in.
+   */
+  async function count(params: string, keep = false) {
+    counter?.abort()
+    counter = new AbortController()
+    const version = ++counting
+    if (!keep) total.value = undefined
+    try {
+      const counted = await readCount(request(params), counter.signal)
+      if (version === counting) total.value = counted.count
+    } catch {
+      if (version === counting) total.value = undefined
+    }
+  }
   async function load(params: string, append = false) {
     if (append && (loading.value || !next.value)) return
     controller?.abort()
@@ -55,7 +82,10 @@ export function useCollection() {
     }
     query = params
     try {
-      const p = await page(params, append ? next.value : '', controller.signal)
+      const pending = page(params, append ? next.value : '', controller.signal)
+      // Beside the first page, never in its way.
+      if (!append) void count(params)
+      const p = await pending
       if (version !== generation) return
       items.value = append ? [...items.value, ...p.items] : p.items
       next.value = p.next_cursor || ''
@@ -83,6 +113,7 @@ export function useCollection() {
     loading.value = false
     refreshing.value = true
     const wanted = Math.max(items.value.length, 1)
+    void count(query, true)
     try {
       let collected: Collection[] = []
       let cursor = ''
@@ -110,10 +141,14 @@ export function useCollection() {
       if (version === generation) refreshing.value = false
     }
   }
-  onUnmounted(() => controller?.abort())
+  onUnmounted(() => {
+    controller?.abort()
+    counter?.abort()
+  })
   return {
     items,
     totalStorageBytes,
+    total,
     next,
     loading,
     refreshing,
@@ -122,7 +157,10 @@ export function useCollection() {
     refresh,
     more: () => load(query, true),
     remove: (id: string) => {
-      items.value = items.value.filter((a) => a.id !== id)
+      const kept = items.value.filter((a) => a.id !== id)
+      if (kept.length < items.value.length && total.value)
+        total.value = total.value - 1
+      items.value = kept
     },
   }
 }
