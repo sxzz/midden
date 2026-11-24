@@ -26,6 +26,7 @@ import {
   getCaptureCollection,
   getCollection,
   getHistoryPoint,
+  listCounts,
   listHistory,
 } from './read.ts'
 import { getSource, listSources } from './sources.ts'
@@ -316,6 +317,75 @@ describe('collection', () => {
     ])
   })
 
+  test('counts list every capture’s reading of the collection’s own entity', async () => {
+    let likes: unknown = 1
+    let quoteLikes = 5
+    let fail = false
+    const { ctx } = setup({
+      1: () => {
+        if (fail) throw new FakeFailure(status.FAILED_PRECONDITION, 'down')
+        return {
+          text: 'same',
+          graph: graph(
+            [
+              entity('root', 'fake.post', '1', {
+                text: 'same',
+                ...(likes === undefined ? {} : { likes }),
+              }),
+              entity('quote', 'fake.post', '2', { likes: quoteLikes }),
+            ],
+            ['root', 'quoted', 'quote'],
+          ),
+        }
+      },
+      100: () => ({
+        text: 'profile',
+        graph: graph([entity('root', 'fake.profile', '100', { name: 'A' })]),
+      }),
+    })
+    const first = await capture(ctx, post('1'))
+    const id = first.collectionId
+    const refresh = () => capture(ctx, { refreshId: id })
+    // The same reading again is a point of its own, unlike on the history.
+    const same = await refresh()
+    // The quoted post's counts belong to its own page.
+    quoteLikes = 6
+    const quoted = await refresh()
+    fail = true
+    await refresh()
+    fail = false
+    // Captures that recorded no count of their own, or no number, add nothing.
+    likes = undefined
+    await refresh()
+    likes = 'many'
+    await refresh()
+    likes = 3
+    const last = await refresh()
+
+    const point = (c: typeof first, likes: number) => ({
+      capture_id: c.id,
+      observed_at: c.finishedAt!.toISOString(),
+      counts: { '/likes': likes },
+    })
+    expect(listCounts(ctx, id)).toEqual({
+      entity_type: 'fake.post',
+      points: [
+        point(first, 1),
+        point(same, 1),
+        point(quoted, 1),
+        point(last, 3),
+      ],
+    })
+    // Past the limit the newest are kept, still oldest first.
+    expect(listCounts(ctx, id, 2)).toEqual({
+      entity_type: 'fake.post',
+      points: [point(quoted, 1), point(last, 3)],
+      truncated: true,
+    })
+    const other = await capture(ctx, profile('100'))
+    expect(listCounts(ctx, other.collectionId)).toEqual({ points: [] })
+  })
+
   /** A profile whose timeline, when read, lists two reposts. */
   function reposter(state: { timeline: boolean; name: string }) {
     return setup({
@@ -453,6 +523,7 @@ describe('collection', () => {
     for (const read of [
       () => getCollection(ctx, done.collectionId),
       () => listHistory(ctx, done.collectionId),
+      () => listCounts(ctx, done.collectionId),
       () => getHistoryPoint(ctx, done.collectionId, done.id),
       () => listSources(ctx, done.collectionId),
       () => getSource(ctx, source.id),

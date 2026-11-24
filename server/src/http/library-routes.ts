@@ -2,7 +2,13 @@ import { Hono } from 'hono'
 import * as v from 'valibot'
 import { getEntity } from '#library/entities.ts'
 import { listAuthors, listCollections } from '#library/list.ts'
-import { getCollection, getHistoryPoint, listHistory } from '#library/read.ts'
+import {
+  COUNTS_LIMIT,
+  getCollection,
+  getHistoryPoint,
+  listCounts,
+  listHistory,
+} from '#library/read.ts'
 import { getSource, listSources } from '#library/sources.ts'
 import { Cursor, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -31,6 +37,19 @@ const AuthorFilters = v.object({
   q: text,
   cursor: text,
   author: v.optional(v.union([v.string(), v.array(v.string())])),
+})
+
+/** How many of the newest readings to return, at most COUNTS_LIMIT. */
+const CountsQuery = v.object({
+  limit: v.optional(
+    v.pipe(
+      v.string(),
+      v.regex(/^\d{1,4}$/),
+      v.transform(Number),
+      v.minValue(1),
+      v.maxValue(COUNTS_LIMIT),
+    ),
+  ),
 })
 
 /** Reading the library: collections, their history, entities, raw sources. */
@@ -87,6 +106,10 @@ export function libraryRoutes(ctx: AccountsContext) {
             c.req.valid('query').cursor || undefined,
           ),
         ),
+      )
+
+      .get('/collections/:id/counts', query(CountsQuery), (c) =>
+        c.json(listCounts(ctx, c.req.param('id'), c.req.valid('query').limit)),
       )
 
       .get('/collections/:id/history/:capture', (c) =>

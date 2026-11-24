@@ -340,3 +340,88 @@ export function getHistoryPoint(
   collection.storage_bytes = collectionStorage(ctx, id)
   return collection
 }
+
+/** The counts one capture recorded for the entity a collection is about. */
+export interface CountsPoint {
+  capture_id: string
+  /** When the capture finished, as `observed_at` shows it. */
+  observed_at: string
+  /** By the JSON pointer the entity type keeps each count at. */
+  counts: Record<string, number>
+}
+
+export interface CountsSeries {
+  /** The type of that entity in the newest point, which names its counts. */
+  entity_type?: string
+  /** Oldest first. */
+  points: CountsPoint[]
+  /** Older captures with counts were left out. */
+  truncated?: boolean
+}
+
+/** Enough for years of daily refreshes, few enough for one phone request. */
+export const COUNTS_LIMIT = 1000
+
+const isCount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+
+/**
+ * Every saved capture of a collection that recorded counts for its own
+ * entity (never a post's author or quoted post), with those counts: the
+ * newest `limit`, oldest first. Unlike the history, captures that saw
+ * the same counts are all kept, so the series has a point per reading.
+ */
+export function listCounts(
+  ctx: CaptureContext,
+  id: string,
+  limit = COUNTS_LIMIT,
+): CountsSeries {
+  assertSaved(ctx, id)
+  const rows = ctx.db.all<{
+    id: string
+    finished_at: number
+    type: string
+    counts: string
+  }>(sql`
+    -- Materialized so each capture's counts are picked out once, not again
+    -- for the filter below.
+    WITH own AS MATERIALIZED (
+      SELECT c.id, c.finished_at, e.kind AS type,
+        -- Counts are keyed by type and external id, as the entity is stored.
+        (SELECT m.value FROM json_each(c.metrics) m
+          WHERE m.key = e.kind || '/' || e.external_id) AS counts
+      FROM captures c
+      JOIN revision_entities re ON re.revision_id = c.revision_id
+        AND re.is_root = 1
+      JOIN entity_versions v ON v.id = re.entity_version_id
+      JOIN entities e ON e.id = v.entity_id
+      WHERE c.collection_id = ${id} AND c.state IN ('complete', 'partial')
+        AND c.metrics IS NOT NULL)
+    SELECT id, finished_at, type, counts FROM own
+    -- Only readings count toward the limit: a count the source left out or
+    -- garbled is no point.
+    WHERE EXISTS (SELECT 1 FROM json_each(counts) n
+      WHERE n.type = 'integer' AND n.value >= 0)
+    ORDER BY finished_at DESC, id DESC
+    LIMIT ${limit + 1}`)
+  const points: CountsPoint[] = []
+  for (const row of rows.slice(0, limit).toReversed()) {
+    const recorded = parseJson<unknown>(row.counts)
+    if (!recorded || typeof recorded !== 'object' || Array.isArray(recorded))
+      continue
+    const counts = Object.fromEntries(
+      Object.entries(recorded).filter(([, value]) => isCount(value)),
+    )
+    if (Object.keys(counts).length)
+      points.push({
+        capture_id: row.id,
+        observed_at: iso(row.finished_at),
+        counts,
+      })
+  }
+  return {
+    ...(rows[0] ? { entity_type: rows[0].type } : {}),
+    points,
+    ...(rows.length > limit ? { truncated: true } : {}),
+  }
+}

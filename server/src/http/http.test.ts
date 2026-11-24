@@ -224,6 +224,14 @@ describe('api', () => {
       (await call(`/collections/${id}/history/${history.items[0]!.capture_id}`))
         .status,
     ).toBe(200)
+    for (const limit of ['', '?limit=2', '?limit=1000'])
+      expect(
+        await (await call(`/collections/${id}/counts${limit}`)).json(),
+      ).toMatchObject({ points: expect.any(Array) })
+    for (const limit of ['0', '1001', '2.5', 'all'])
+      expect(
+        (await call(`/collections/${id}/counts?limit=${limit}`)).status,
+      ).toBe(400)
     expect((await call('/collections/authors')).status).toBe(200)
     expect(await (await call(`/collections/${id}/sources`)).json()).toEqual([])
     expect((await call('/collections?sort=nonsense')).status).toBe(400)
