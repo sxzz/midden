@@ -747,6 +747,17 @@ describe('关系图谱', () => {
     expect(names(followGraph(ctx, id, { kinds: [] }))).toEqual(['100'])
   })
 
+  test('follows among the others come from any account’s list, not only the center’s', async () => {
+    const { ctx, state, id } = await world()
+    // 4 follows 3: only 3's own followers list tells.
+    state.counts['3'] = { following: 0, followers: 2 }
+    state.lists['3'] = { following: [], followers: ['100', '4'] }
+    await update(ctx, 'https://fake.test/u/3')
+    expect(pairs(followGraph(ctx, id)).toSorted()).toEqual(
+      ['100>1', '100>2', '100>3', '2>100', '4>100', '1>2', '4>3'].toSorted(),
+    )
+  })
+
   test('ended follows are left out', async () => {
     const { ctx, state, id } = await world()
     state.counts['100'] = { following: 2, followers: 1 }
