@@ -16,6 +16,7 @@ import {
   type Job,
   type MemberProgress,
 } from '../api'
+import { isProfileEntity } from '../relations'
 import { trends } from '../trends'
 import { toast } from './useToast'
 const collections = client.collections[':id']
@@ -64,6 +65,8 @@ export function useCollectionDetail(
   const confirmDelete = shallowRef(false)
   /** At least two captures read a count, so the page of trends has a line. */
   const trendable = shallowRef(false)
+  /** A profile whose shown fields changed at least once. */
+  const changeable = shallowRef(false)
   /** The newest point is the collection as it is now. */
   const latestPoint = computed(() => points.value[0]?.capture_id ?? '')
   /** The point on screen; '' is the current state. */
@@ -168,6 +171,7 @@ export function useCollectionDetail(
       available.value = false
       confirmDelete.value = false
       trendable.value = false
+      changeable.value = false
       try {
         const result = await getCollection(id, signal)
         if (signal.aborted) return
@@ -175,6 +179,7 @@ export function useCollectionDetail(
         latestRevision.value = result.revision_id
         void historyPage()
         void checkTrends()
+        void checkChanges(result)
         available.value = await availability(id, signal)
       } catch (e) {
         if (!signal.aborted) error.value = errorText(e)
@@ -201,6 +206,28 @@ export function useCollectionDetail(
         ),
       )
       if (!signal.aborted) trendable.value = trends(series).length > 0
+    } catch {
+      // Without an answer the page is not offered; nothing else depends on it.
+    }
+  }
+  /**
+   * Whether a profile has a record of changes: the newest one is enough to
+   * tell. Anything but a profile has none, so it is not asked.
+   */
+  async function checkChanges(result: Collection) {
+    const graph = result.graph
+    const root = graph?.entities.find((entity) => entity.key === graph.root)
+    if (changeable.value || !isProfileEntity(root)) return
+    const signal = controller.signal
+    try {
+      const changes = await call(
+        collections['profile-changes'].$get(
+          { param: { id: id() }, query: { limit: '1' } },
+          { init: { signal } },
+        ),
+      )
+      // An answer without a list, as from an older server, offers nothing.
+      if (!signal.aborted) changeable.value = !!changes.items?.length
     } catch {
       // Without an answer the page is not offered; nothing else depends on it.
     }
@@ -336,6 +363,7 @@ export function useCollectionDetail(
         })
       latestRevision.value = result.revision_id
       void checkTrends()
+      void checkChanges(result)
       await historyPage()
       // Landing here after the view was cached would push this job's result
       // into a list the user has already navigated away from.
@@ -422,6 +450,7 @@ export function useCollectionDetail(
     confirmDelete,
     available,
     trendable,
+    changeable,
     historyPage,
     showPoint,
     /** Whether a point shows without a request. */

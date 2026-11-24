@@ -53,6 +53,11 @@ export type HistoryPoint = Ok<
 export type CountsSeries = Ok<
   (typeof client.collections)[':id']['counts']['$get']
 >
+export type ProfileChanges = Ok<
+  (typeof client.collections)[':id']['profile-changes']['$get']
+>
+export type ProfileChange = ProfileChanges['items'][number]
+export type ProfileFieldChange = ProfileChange['fields'][number]
 export type Job = Ok<(typeof client.jobs)[':id']['$get']>
 export type MemberProgress = NonNullable<Job['members']>
 export type LibrarySize = Ok<typeof client.library.$get>

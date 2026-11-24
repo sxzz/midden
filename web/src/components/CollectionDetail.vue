@@ -39,6 +39,7 @@ const {
   confirmDelete,
   available,
   trendable,
+  changeable,
   historyPage,
   showPoint,
   isSeen,
@@ -76,6 +77,9 @@ const link = computed(() => collection.value && safeURL(collection.value.url))
 const router = useRouter()
 function openTrends() {
   void router.push({ name: 'collection-stats', params: { id: props.id } })
+}
+function openChanges() {
+  void router.push({ name: 'collection-changes', params: { id: props.id } })
 }
 // Dragging the timeline passes many points: show the ones already fetched at
 // once, and fetch the others only where the drag rests.
@@ -135,6 +139,12 @@ const version = computed(() =>
         label="统计趋势"
         chevron
         @select="openTrends"
+      />
+      <ListButton
+        v-if="changeable"
+        label="资料修改记录"
+        chevron
+        @select="openChanges"
       />
       <ListButton v-if="link" label="打开原文" :href="link" />
       <ListButton

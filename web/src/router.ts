@@ -5,6 +5,7 @@ import CaptureRecords from './components/CaptureRecords.vue'
 import CollectionDetail from './components/CollectionDetail.vue'
 import CollectionTrends from './components/CollectionTrends.vue'
 import CollectionView from './components/CollectionView.vue'
+import ProfileChanges from './components/ProfileChanges.vue'
 
 export const router = createRouter({
   history: createWebHashHistory(import.meta.env.BASE_URL),
@@ -20,6 +21,12 @@ export const router = createRouter({
       path: '/collection/:id([a-f0-9-]+)/stats',
       name: 'collection-stats',
       component: CollectionTrends,
+      props: true,
+    },
+    {
+      path: '/collection/:id([a-f0-9-]+)/changes',
+      name: 'collection-changes',
+      component: ProfileChanges,
       props: true,
     },
     { path: '/accounts', name: 'accounts', component: AccountsView },

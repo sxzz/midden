@@ -6,6 +6,8 @@ import { toastState } from './useToast'
 import type { Collection, HistoryPoint, Job } from '../api'
 const { replace } = vi.hoisted(() => ({ replace: vi.fn() }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ replace }) }))
+/** Whether collections answer as a profile rather than a post. */
+let profile = false
 const collection = (id: string): Collection =>
   fixture({
     id,
@@ -14,6 +16,17 @@ const collection = (id: string): Collection =>
     author_name: '合成作者',
     observed_at: '2026-10-01T00:00:00Z',
     revision_id: 'r1',
+    ...(profile
+      ? {
+          graph: {
+            root: 'profile',
+            relations: [],
+            entities: [
+              { key: 'profile', type: 'x.profile', external_id: '1', data: {} },
+            ],
+          },
+        }
+      : {}),
   })
 let api = mockApi()
 let job: Job = { id: 'job-1', collection_id: 'kept', state: 'queued' }
@@ -21,6 +34,8 @@ let job: Job = { id: 'job-1', collection_id: 'kept', state: 'queued' }
 let points: HistoryPoint[] = []
 /** The readings every collection's counts answer with. */
 let readings: number[] = []
+/** How many changes every profile's record answers with. */
+let changes = 0
 /** The kept collection's composable, for tests that step through points. */
 let detail: ReturnType<typeof useCollectionDetail> | undefined
 /** One shared refresh handle, so the test can start a capture and watch it. */
@@ -101,6 +116,8 @@ beforeEach(() => {
   rejects = new Set()
   points = []
   readings = []
+  profile = false
+  changes = 0
   detail = undefined
   api = mockApi(async (path) => {
     const gate = gates.get(path)
@@ -117,6 +134,15 @@ beforeEach(() => {
           capture_id: `c${i}`,
           observed_at: `2026-10-0${i + 1}T00:00:00Z`,
           counts: { '/metadata/followers': followers },
+        })),
+      }
+    if (path.includes('/profile-changes'))
+      return {
+        items: Array.from({ length: changes }, (_, i) => ({
+          capture_id: `c${i}`,
+          revision_id: `r${i}`,
+          observed_at: '2026-10-01T00:00:00Z',
+          fields: [{ field: 'name', before: 'A', after: 'B' }],
         })),
       }
     const point = /\/history\/(.+)$/.exec(path)?.[1]
@@ -315,4 +341,31 @@ it('offers trends once two captures read a count', async () => {
   await vi.advanceTimersByTimeAsync(2000)
   await vi.waitFor(() => expect(d.trendable.value).toBe(true))
   expect(calls('/collections/kept/counts')).toBe(2)
+})
+it('offers the record of changes once a profile changed', async () => {
+  profile = true
+  mount()
+  await vi.advanceTimersByTimeAsync(0)
+  const d = detail!
+  // The newest change is enough to tell.
+  expect(api).toHaveBeenCalledWith(
+    '/collections/kept/profile-changes?limit=1',
+    expect.anything(),
+  )
+  expect(d.changeable.value).toBe(false)
+  // A refresh that sees the profile change offers it.
+  changes = 1
+  await refresh()
+  job = { ...job, state: 'complete' }
+  await vi.advanceTimersByTimeAsync(2000)
+  await vi.waitFor(() => expect(d.changeable.value).toBe(true))
+  expect(calls('/collections/kept/profile-changes')).toBe(2)
+})
+it('never asks for the changes of anything but a profile', async () => {
+  changes = 1
+  mount()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(detail!.collection.value?.id).toBe('kept')
+  expect(calls('/collections/kept/profile-changes')).toBe(0)
+  expect(detail!.changeable.value).toBe(false)
 })

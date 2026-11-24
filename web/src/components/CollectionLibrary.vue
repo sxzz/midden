@@ -67,6 +67,7 @@ const accounts = computed(() => route.name === 'accounts')
 const captures = computed(() => route.name === 'captures')
 const capture = computed(() => route.name === 'capture')
 const stats = computed(() => route.name === 'collection-stats')
+const changes = computed(() => route.name === 'collection-changes')
 /** Any page reached from the library, which is where back returns to. */
 const nested = computed(
   () =>
@@ -74,7 +75,8 @@ const nested = computed(
     accounts.value ||
     captures.value ||
     capture.value ||
-    stats.value,
+    stats.value ||
+    changes.value,
 )
 const title = computed(() =>
   accounts.value
@@ -85,9 +87,11 @@ const title = computed(() =>
         ? '采集记录'
         : stats.value
           ? '统计趋势'
-          : id.value
-            ? '收藏详情'
-            : '我的收藏',
+          : changes.value
+            ? '资料修改记录'
+            : id.value
+              ? '收藏详情'
+              : '我的收藏',
 )
 // Telegram draws its own back button; only stand in for it elsewhere.
 const standalone = !host()?.initData
@@ -112,6 +116,8 @@ function viewKey(target: RouteLocationNormalized) {
   if (target.name === 'capture') return `capture:${String(target.params.id)}`
   if (target.name === 'collection-stats')
     return `stats:${String(target.params.id)}`
+  if (target.name === 'collection-changes')
+    return `changes:${String(target.params.id)}`
   const key = String(target.params.id)
   // Returning to a collection we deleted must reload, not show the cached copy.
   return removed.value.includes(key) ? `${key}#removed` : key
@@ -218,6 +224,7 @@ const viewProps = computed(() => {
     }
   if (captures.value || capture.value) return { onSaved: saved }
   if (stats.value) return {}
+  if (changes.value) return { showSensitive: showSensitive.value }
   if (id.value)
     return {
       savedAt: savedAt.value,
