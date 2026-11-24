@@ -47,6 +47,12 @@ jobs:
       IMAGE: ghcr.io/${{ github.repository_owner }}/midden
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The Dockerfile takes Node's version from devEngines, like mise does.
+      - name: Node version
+        id: node
+        run: |
+          version=$(jq -er .devEngines.runtime.version package.json)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Tags
         id: tags
         run: |
@@ -73,6 +79,7 @@ jobs:
           push: ${{ env.PUBLISH == 'true' }}
           load: ${{ env.PUBLISH != 'true' }}
           build-args: |
+            NODE_VERSION=${{ steps.node.outputs.version }}
             VCS_REF=${{ github.sha }}
           tags: ${{ steps.tags.outputs.tags }}
           labels: |

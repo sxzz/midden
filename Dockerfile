@@ -1,11 +1,16 @@
+# Node's version is written once, in devEngines in package.json; CI reads it
+# from there and passes it in. Without it the image reference is invalid and
+# the build stops.
+ARG NODE_VERSION
+
 # Build: install, build Atmosphere and the web app, then copy out the server
 # with only its production dependencies. The output is JavaScript, so it is
 # built once on the builder's own platform rather than under emulation for
 # each target.
-FROM --platform=$BUILDPLATFORM node:26.13.1-alpine AS build
-RUN npm install -g pnpm@12.23.0
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-alpine AS build
 WORKDIR /src
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN npm install -g "pnpm@$(node -p 'require("./package.json").devEngines.packageManager.version')"
 COPY server/package.json server/
 COPY shared/package.json shared/
 COPY third_party/atmosphere/package.json third_party/atmosphere/
@@ -19,7 +24,7 @@ COPY . .
 RUN pnpm build && pnpm --filter @midden/server deploy --prod /out/server
 
 # Run: Node executes the server's TypeScript directly.
-FROM node:26.13.1-alpine
+FROM node:${NODE_VERSION}-alpine
 RUN apk add --no-cache ffmpeg
 WORKDIR /srv
 COPY --from=build /out/server server
