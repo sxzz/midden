@@ -59,8 +59,14 @@ export function fakePlatform(fetch: { current: FakeFetch }): Platform {
           name: 'fake.post',
           jsonSchema: Buffer.alloc(0),
           metricPaths: ['/likes'],
+          volatilePaths: ['/facets'],
         },
-        { name: 'fake.profile', jsonSchema: Buffer.alloc(0), metricPaths: [] },
+        {
+          name: 'fake.profile',
+          jsonSchema: Buffer.alloc(0),
+          metricPaths: [],
+          volatilePaths: [],
+        },
       ],
       providers: [
         {

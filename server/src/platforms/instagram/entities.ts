@@ -57,6 +57,7 @@ export const entityTypes = Object.entries({
     name === 'instagram.post'
       ? ['/likes', '/replies']
       : ['/metadata/followers', '/metadata/following', '/metadata/statuses'],
+  volatilePaths: [],
 }))
 
 export function timestamp(raw: unknown): string {

@@ -9,6 +9,7 @@ import { KeyedLock } from '#blob/locks.ts'
 import { mediaRoutes } from '#blob/route.ts'
 import { MediaSigner } from '#blob/signer.ts'
 import { isPermanent } from '#capture/errors.ts'
+import { fillViewHashes } from '#capture/finalize.ts'
 import { captureHandlers } from '#capture/handlers.ts'
 import { runMaintenance } from '#capture/maintenance.ts'
 import { detectThumbnailer } from '#capture/thumbnail.ts'
@@ -62,6 +63,8 @@ ctx = {
   mediaLocks: new KeyedLock(),
   thumbnailer,
 }
+const viewed = fillViewHashes(db, ctx.platforms)
+if (viewed) logger.info({ count: viewed }, 'computed revision view hashes')
 
 let botUsername: string | undefined
 let bot: RunningBot | undefined

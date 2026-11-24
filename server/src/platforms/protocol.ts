@@ -87,6 +87,12 @@ export interface EntityType {
    * than content: kept with each capture and left out of versions.
    */
   metricPaths: string[]
+  /**
+   * JSON pointers into the entity's data at values the platform reports one
+   * way on one request and another on the next, and the app never shows:
+   * kept as received, but a change there alone is not a new revision.
+   */
+  volatilePaths: string[]
 }
 
 export interface Entity {
@@ -363,7 +369,12 @@ export const Resource = {
 }
 
 function createBaseEntityType(): EntityType {
-  return { name: '', jsonSchema: Buffer.alloc(0), metricPaths: [] }
+  return {
+    name: '',
+    jsonSchema: Buffer.alloc(0),
+    metricPaths: [],
+    volatilePaths: [],
+  }
 }
 
 export const EntityType = {
@@ -372,6 +383,7 @@ export const EntityType = {
     message.name = object.name ?? ''
     message.jsonSchema = object.jsonSchema ?? Buffer.alloc(0)
     message.metricPaths = object.metricPaths?.map((e) => e) || []
+    message.volatilePaths = object.volatilePaths?.map((e) => e) || []
     return message
   },
 }

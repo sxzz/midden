@@ -1,9 +1,14 @@
 import { Buffer } from 'node:buffer'
 import { describe, expect, test } from 'vitest'
 import { FetchResponse, type Provider } from '#platforms/protocol.ts'
+import { Platforms } from '#platforms/registry.ts'
+import { createXPlatform } from '#platforms/x/index.ts'
+import { normalizeProfile } from '#platforms/x/profile.ts'
+import { ignoredPaths, revisionDigest } from './finalize.ts'
 import { validateGraph } from './graph.ts'
 import { canonicalJson } from './json.ts'
 import { overlayMetrics, splitMetrics } from './metrics.ts'
+import type { Payload } from './payload.ts'
 
 describe('canonicalJson', () => {
   test('sorts keys at every depth', () => {
@@ -53,8 +58,18 @@ describe('validateGraph', () => {
     credentialHelp: '',
   }
   const types = [
-    { name: 'x.post', jsonSchema: Buffer.alloc(0), metricPaths: ['/likes'] },
-    { name: 'x.profile', jsonSchema: Buffer.alloc(0), metricPaths: [] },
+    {
+      name: 'x.post',
+      jsonSchema: Buffer.alloc(0),
+      metricPaths: ['/likes'],
+      volatilePaths: [],
+    },
+    {
+      name: 'x.profile',
+      jsonSchema: Buffer.alloc(0),
+      metricPaths: [],
+      volatilePaths: [],
+    },
   ]
   const entity = (
     key: string,
@@ -190,5 +205,70 @@ describe('validateGraph', () => {
         types,
       )?.graph.root,
     ).toBe('author')
+  })
+})
+
+describe('revision digest of an X profile', () => {
+  const platforms = new Platforms([createXPlatform()])
+  const x = platforms.byId('x').description
+  const provider = x.providers.find((p) => p.id === 'fxtwitter')!
+  const user = {
+    type: 'profile',
+    id: '123',
+    name: 'Name',
+    screen_name: 'name',
+    protected: false,
+    description: 'Bio @friend',
+    raw_description: { text: 'Bio @friend', facets: [] as object[] },
+    followers: 1,
+    about_account: { based_in: 'Japan' } as object | undefined,
+  }
+  function digest(profile: Partial<typeof user>): string {
+    const response = normalizeProfile(
+      { ...user, ...profile },
+      '123',
+      'fxtwitter',
+    )
+    const { graph, metricPaths } = validateGraph(
+      response,
+      provider,
+      x.entityTypes,
+    )!
+    const payload: Payload = {
+      text: response.text,
+      text_kind: response.textKind,
+      warnings: [],
+      adapter_version: response.adapterVersion,
+      graph,
+      metric_paths: metricPaths,
+    }
+    const context = new Set(
+      graph.entities
+        .filter((e) => e.context_only)
+        .map((e) => `${e.type}/${e.external_id}`),
+    )
+    return revisionDigest(
+      payload,
+      [],
+      context,
+      ignoredPaths(platforms, 'x', metricPaths),
+    )
+  }
+
+  test('mention facets and about_account that come and go count for nothing', () => {
+    const base = digest({})
+    // Seen on consecutive requests for the same bio.
+    const facet = { type: 'mention', indices: [4, 11], original: 'friend' }
+    expect(
+      digest({ raw_description: { text: user.description, facets: [facet] } }),
+    ).toBe(base)
+    expect(digest({ about_account: undefined })).toBe(base)
+    expect(digest({ followers: 2 })).toBe(base)
+    expect(
+      digest({
+        description: 'Other',
+        raw_description: { text: 'Other', facets: [] },
+      }),
+    ).not.toBe(base)
   })
 })

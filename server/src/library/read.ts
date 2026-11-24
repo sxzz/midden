@@ -230,19 +230,24 @@ function decodeHistoryCursor(cursor: string, filter: string) {
 }
 
 /**
- * A capture's counts in a form that compares equal whatever order their keys
- * were written in: every node with its path, sorted by path. Missing counts
- * give an empty list, so two captures without counts compare equal.
+ * The counts a capture's point shows, in a form that compares equal whatever
+ * order their keys were written in: every node with its path, sorted by
+ * path. A page shows only the counts of the entity it is about, not those of
+ * a post's author or quoted post; all count when that entity is unknown.
+ * Missing counts give an empty list, so two captures without counts compare
+ * equal.
  */
-const CANONICAL_COUNTS = `(SELECT json_group_array(
-    json_array(t.fullkey, t.type, t.atom) ORDER BY t.fullkey)
-  FROM json_tree(c.metrics) t)`
+const SHOWN_COUNTS = `(SELECT json_group_array(
+    json_array(m.key, t.fullkey, t.type, t.atom) ORDER BY m.key, t.fullkey)
+  FROM json_each(s.metrics) m, json_tree(m.value) t
+  WHERE s.root_key IS NULL OR m.key = s.root_key)`
 
 /**
  * A saved collection's history, newest first: its saved captures, each run
- * of captures that saw the same revision and counts kept only as its first.
- * Runs are found over all captures on every page, so where a page ends never
- * moves what counts as a change.
+ * of captures that look the same (revisions alike in what a point shows, and
+ * the same shown counts) kept only as its first. Runs are found over all
+ * captures on every page, so where a page ends never moves what counts as a
+ * change.
  */
 export function listHistory(
   ctx: CaptureContext,
@@ -256,19 +261,29 @@ export function listHistory(
     finished_at: number
     revision_id: string
   }>(sql`
+    WITH saved AS (
+      SELECT c.id, c.finished_at, c.revision_id, c.metrics,
+        coalesce(r.view_hash, r.id) AS shown,
+        -- Counts are keyed by type and external id, as the entity is stored.
+        (SELECT e.kind || '/' || e.external_id
+          FROM revision_entities re
+          JOIN entity_versions v ON v.id = re.entity_version_id
+          JOIN entities e ON e.id = v.entity_id
+          WHERE re.revision_id = r.id AND re.is_root = 1) AS root_key
+      FROM captures c
+      JOIN revisions r ON r.id = c.revision_id
+      WHERE c.collection_id = ${id} AND c.state IN ('complete', 'partial')
     -- Materialized so the counts are made comparable once per capture, not
     -- again for each window function that reads them.
-    WITH saved AS MATERIALIZED (
-      SELECT c.id, c.finished_at, c.revision_id,
-        ${sql.raw(CANONICAL_COUNTS)} AS counts
-      FROM captures c
-      WHERE c.collection_id = ${id} AND c.state IN ('complete', 'partial')
-        AND c.revision_id IS NOT NULL
+    ), compared AS MATERIALIZED (
+      SELECT s.id, s.finished_at, s.revision_id, s.shown,
+        ${sql.raw(SHOWN_COUNTS)} AS counts
+      FROM saved s
     ), points AS (
       SELECT id, finished_at, revision_id,
-        revision_id IS NOT lag(revision_id) OVER run
+        shown IS NOT lag(shown) OVER run
           OR counts IS NOT lag(counts) OVER run AS changed
-      FROM saved
+      FROM compared
       WINDOW run AS (ORDER BY finished_at, id)
     )
     SELECT id, finished_at, revision_id FROM points

@@ -272,6 +272,12 @@ export const revisions = sqliteTable(
       .unique()
       .references(() => captures.id),
     contentHash: text().notNull(),
+    /**
+     * Digest of what a history point shows of this revision: revisions equal
+     * here look the same, so the history folds them. Null until computed for
+     * a revision made before it existed.
+     */
+    viewHash: text(),
     payload: text({ mode: 'json' }).notNull(),
     contentBytes: integer().notNull(),
     createdAt: createdAt(),

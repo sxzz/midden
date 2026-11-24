@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import {
   assets,
@@ -23,8 +23,9 @@ import {
 import { splitMetrics } from './metrics.ts'
 import { unsaveIfEmpty } from './scope.ts'
 import { markUnreferenced } from './submit.ts'
-import type { Transaction } from '#db/client.ts'
+import type { Database, Transaction } from '#db/client.ts'
 import type { Job } from '#jobs/queue.ts'
+import type { Platforms } from '#platforms/registry.ts'
 import type { CaptureContext } from './context.ts'
 import type { Payload, PayloadGraph } from './payload.ts'
 
@@ -67,20 +68,65 @@ const identity = (entity: { type: string; external_id: string }) =>
   `${entity.type}/${entity.external_id}`
 
 /**
+ * Per entity type, the paths a revision leaves out of its digest: the
+ * observed counts, and what the platform reports inconsistently.
+ */
+export function ignoredPaths(
+  platforms: Platforms,
+  adapterId: string,
+  metricPaths: Record<string, string[]> = {},
+): Record<string, string[]> {
+  const paths: Record<string, string[]> = {}
+  for (const [type, list] of Object.entries(metricPaths))
+    paths[type] = [...list]
+  const platform = platforms
+    .all()
+    .find((p) => p.description.adapterId === adapterId)
+  for (const type of platform?.description.entityTypes ?? [])
+    paths[type.name] = [
+      ...new Set([
+        ...(paths[type.name] ?? []),
+        ...type.metricPaths,
+        ...type.volatilePaths,
+      ]),
+    ]
+  return paths
+}
+
+/**
  * What decides whether a capture is a new revision. Context entities (such
  * as a post's author) count only by identity, with their media; observed
- * counts and local key numbering never count.
+ * counts, values the platform reports inconsistently, and local key
+ * numbering never count.
+ *
+ * `view` leaves out what a history point does not show either: the posts a
+ * profile's timeline reposted. They are recorded so the profile's list can
+ * mark them, and that list draws on every revision; a capture that did not
+ * read the timeline (an automatic refresh) has none of them.
  */
 export function revisionDigest(
   payload: Payload,
   captureAssets: AssetState[],
   context: Set<string>,
-  metricPaths: Record<string, string[]>,
+  ignored: Record<string, string[]>,
+  view = false,
 ): string {
   // Comparable form: keys renamed to identities, context reduced to them.
   let graph: object | undefined
   const contextPositions = new Set<number>()
   const contentPositions = new Set<number>()
+  const omitted = new Set<string>()
+  let relations = payload.graph?.relations ?? []
+  if (payload.graph && view) {
+    const root = payload.graph.root
+    const listing = (r: { source: string; type: string }) =>
+      r.source === root && r.type === 'reposted'
+    relations = relations.filter((r) => !listing(r))
+    const kept = new Set(relations.flatMap((r) => [r.source, r.target]))
+    for (const r of payload.graph.relations)
+      if (listing(r) && r.target !== root && !kept.has(r.target))
+        omitted.add(r.target)
+  }
   if (payload.graph) {
     const rootIdentity = payload.graph.entities.find(
       (e) => e.key === payload.graph!.root,
@@ -91,12 +137,14 @@ export function revisionDigest(
     graph = {
       root: rootIdentity ? identity(rootIdentity) : payload.graph.root,
       entities: payload.graph.entities
-        .map((entity) => {
+        .flatMap((entity) => {
           const id = identity(entity)
           const isContext =
-            context.has(id) && entity.key !== payload.graph!.root
+            omitted.has(entity.key) ||
+            (context.has(id) && entity.key !== payload.graph!.root)
           for (const index of entity.resource_indices ?? [])
             (isContext ? contextPositions : contentPositions).add(index)
+          if (omitted.has(entity.key)) return []
           if (isContext)
             return {
               key: id,
@@ -107,13 +155,12 @@ export function revisionDigest(
             key: id,
             type: entity.type,
             external_id: entity.external_id,
-            data: splitMetrics(entity.data, metricPaths[entity.type] ?? [])
-              .data,
+            data: splitMetrics(entity.data, ignored[entity.type] ?? []).data,
             resource_indices: entity.resource_indices ?? [],
           }
         })
         .toSorted((a, b) => byteOrder(a.key, b.key)),
-      relations: payload.graph.relations
+      relations: relations
         .map((r) => ({
           source: keys.get(r.source) ?? r.source,
           target: keys.get(r.target) ?? r.target,
@@ -129,7 +176,10 @@ export function revisionDigest(
   }
   const hasContext =
     payload.graph?.entities.some(
-      (e) => context.has(identity(e)) && e.key !== payload.graph!.root,
+      (e) =>
+        context.has(identity(e)) &&
+        e.key !== payload.graph!.root &&
+        !omitted.has(e.key),
     ) ?? false
   return sha256Hex(
     canonicalJson({
@@ -156,6 +206,56 @@ export function revisionDigest(
         })),
     }),
   )
+}
+
+/**
+ * Compute what history points show for revisions stored before the digest
+ * was kept, a batch per transaction, so their look-alike points fold too.
+ * Returns how many were filled.
+ */
+export function fillViewHashes(
+  db: Database,
+  platforms: Platforms,
+  batch = 500,
+): number {
+  let filled = 0
+  for (;;) {
+    const rows = db
+      .select({
+        id: revisions.id,
+        captureId: revisions.captureId,
+        payload: revisions.payload,
+        adapterId: captures.adapterId,
+      })
+      .from(revisions)
+      .innerJoin(captures, eq(captures.id, revisions.captureId))
+      .where(isNull(revisions.viewHash))
+      .limit(batch)
+      .all()
+    if (!rows.length) return filled
+    db.transaction((tx) => {
+      for (const row of rows) {
+        const payload = row.payload as Payload
+        const context = new Set(
+          (payload.graph?.entities ?? [])
+            .filter((e) => e.context_only)
+            .map(identity),
+        )
+        const viewHash = revisionDigest(
+          payload,
+          captureAssets(tx, row.captureId),
+          context,
+          ignoredPaths(platforms, row.adapterId, payload.metric_paths),
+          true,
+        )
+        tx.update(revisions)
+          .set({ viewHash })
+          .where(eq(revisions.id, row.id))
+          .run()
+      }
+    })
+    filled += rows.length
+  }
 }
 
 /**
@@ -278,8 +378,12 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
         .filter((e) => e.context_only)
         .map(identity),
     )
-    const metricPaths = payload.metric_paths ?? {}
-    const digest = revisionDigest(payload, states, context, metricPaths)
+    const ignored = ignoredPaths(
+      ctx.platforms,
+      capture.adapterId,
+      payload.metric_paths,
+    )
+    const digest = revisionDigest(payload, states, context, ignored)
     const previous = tx
       .select()
       .from(revisions)
@@ -294,7 +398,7 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
         previous.payload as Payload,
         captureAssets(tx, previous.captureId),
         context,
-        metricPaths,
+        ignored,
       ) !== digest
     ) {
       revisionId = newId()
@@ -305,6 +409,7 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
           collectionId: collection.id,
           captureId: capture.id,
           contentHash: digest,
+          viewHash: revisionDigest(payload, states, context, ignored, true),
           payload,
           contentBytes: Buffer.byteLength(body),
           createdAt: now,

@@ -1,0 +1,1 @@
+ALTER TABLE `revisions` ADD `view_hash` text;

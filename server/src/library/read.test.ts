@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer'
 import { randomUUIDv7 } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
+import { fillViewHashes } from '#capture/finalize.ts'
 import {
   assets,
   blobs,
@@ -275,6 +276,121 @@ describe('collection', () => {
     expect(() => getHistoryPoint(ctx, id, failed.id)).toThrow(
       '内容不存在或已删除',
     )
+  })
+
+  test('values reported inconsistently and counts not shown make no point', async () => {
+    // The fake post type declares /facets volatile, as X does a bio's.
+    let facets: object[] = []
+    let quoteLikes = 5
+    let likes = 1
+    const { ctx } = setup({
+      1: () => ({
+        text: 'same',
+        graph: graph(
+          [
+            entity('root', 'fake.post', '1', { text: 'same', likes, facets }),
+            entity('quote', 'fake.post', '2', { likes: quoteLikes }),
+          ],
+          ['root', 'quoted', 'quote'],
+        ),
+      }),
+    })
+    const first = await capture(ctx, post('1'))
+    const id = first.collectionId
+    const refresh = () => capture(ctx, { refreshId: id })
+    facets = [{ type: 'mention', original: 'someone' }]
+    const flipped = await refresh()
+    facets = []
+    await refresh()
+    // The quoted post's counts are its own page's, not this one's.
+    quoteLikes = 6
+    await refresh()
+    likes = 2
+    const counted = await refresh()
+
+    expect(flipped.revisionId).toBe(first.revisionId)
+    expect(ctx.db.select().from(revisions).all()).toHaveLength(1)
+    expect(listHistory(ctx, id).items.map((p) => p.capture_id)).toEqual([
+      counted.id,
+      first.id,
+    ])
+  })
+
+  /** A profile whose timeline, when read, lists two reposts. */
+  function reposter(state: { timeline: boolean; name: string }) {
+    return setup({
+      100: () => ({
+        text: state.name,
+        graph: graph(
+          [
+            entity('root', 'fake.profile', '100', { name: state.name }),
+            ...(state.timeline
+              ? [
+                  entity('r1', 'fake.post', 'T1'),
+                  entity('r2', 'fake.post', 'T2'),
+                ]
+              : []),
+          ],
+          ...(state.timeline
+            ? ([
+                ['root', 'reposted', 'r1'],
+                ['root', 'reposted', 'r2'],
+              ] as [string, string, string][])
+            : []),
+        ),
+      }),
+    })
+  }
+
+  test('a profile timeline’s reposts make no point of their own', async () => {
+    const state = { timeline: true, name: 'name' }
+    const { ctx } = reposter(state)
+    const first = await capture(ctx, profile('100'))
+    const id = first.collectionId
+    const refresh = () => capture(ctx, { refreshId: id })
+    // An automatic refresh reads no timeline, then an explicit one does.
+    state.timeline = false
+    const bare = await refresh()
+    state.timeline = true
+    const again = await refresh()
+    state.name = 'renamed'
+    const renamed = await refresh()
+
+    // Still revisions of their own: the reposts they record mark posts in
+    // the profile's list and on the reposted posts.
+    expect(bare.revisionId).not.toBe(first.revisionId)
+    expect(again.revisionId).not.toBe(bare.revisionId)
+    expect(listHistory(ctx, id).items.map((p) => p.capture_id)).toEqual([
+      renamed.id,
+      first.id,
+    ])
+  })
+
+  test('revisions stored before view hashes fold once they are filled', async () => {
+    const state = { timeline: true, name: 'name' }
+    const { ctx } = reposter(state)
+    const first = await capture(ctx, profile('100'))
+    const id = first.collectionId
+    state.timeline = false
+    const bare = await refresh()
+    state.timeline = true
+    await refresh()
+    function refresh() {
+      return capture(ctx, { refreshId: id })
+    }
+    const points = () => listHistory(ctx, id).items.map((p) => p.capture_id)
+    const folded = points()
+    expect(folded).toEqual([first.id])
+
+    // As stored before: no view hash, so each revision is its own point.
+    ctx.db.update(revisions).set({ viewHash: null }).run()
+    expect(points()).toHaveLength(3)
+    expect(fillViewHashes(ctx.db, ctx.platforms, 2)).toBe(3)
+    expect(fillViewHashes(ctx.db, ctx.platforms)).toBe(0)
+    expect(points()).toEqual(folded)
+    const hashes = ctx.db.select().from(revisions).all()
+    expect(new Set(hashes.map((r) => r.viewHash)).size).toBe(1)
+    expect(new Set(hashes.map((r) => r.id))).toContain(bare.revisionId)
   })
 
   test('history pages 20 points at a time across folded captures', async () => {

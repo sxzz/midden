@@ -66,10 +66,18 @@ const metricPaths: Record<string, string[]> = {
     '/metadata/likes',
   ],
 }
+// The public API answers alike requests differently here, and the app shows
+// neither: a bio's mention facets come and go while its text stays the same,
+// and about_account comes from a second, optional lookup that is left out
+// when it fails.
+const volatilePaths: Record<string, string[]> = {
+  'x.profile': ['/metadata/raw_description/facets', '/metadata/about_account'],
+}
 export const entityTypes = Object.entries(entitySchemas).map(
   ([name, schema]) => ({
     name,
     jsonSchema: Buffer.from(JSON.stringify(schema)),
     metricPaths: metricPaths[name] ?? [],
+    volatilePaths: volatilePaths[name] ?? [],
   }),
 )
