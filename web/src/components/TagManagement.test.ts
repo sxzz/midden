@@ -105,6 +105,8 @@ const writes = () =>
 it('renames a tag in place, the filter on it unchanged', async () => {
   const { el, search, changed } = await mount('tag=a')
   expect(el.querySelector('.filter-summary')?.textContent).toBe('甲')
+  // The sheets stay out of lists until tags are being edited.
+  expect(document.querySelector('dialog')).toBeNull()
   await edit(el, '甲')
   expect(sheet().querySelector('input')!.value).toBe('甲')
   await rename(' 丙 ')

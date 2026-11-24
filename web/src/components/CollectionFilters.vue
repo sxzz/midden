@@ -668,7 +668,9 @@ const tagFilter = computed({
       </div>
     </div>
   </form>
+  <!-- Only while editing: most lists never manage their tags. -->
   <TagEditSheet
+    v-if="managing"
     :tag="editing"
     :tags="tags"
     @changed="tagChanged"
