@@ -568,12 +568,16 @@ export interface FilterCounts {
   types: Record<string, number>
 }
 
-/** What the list shows for a filter, counted over all pages by type. */
+/**
+ * What the list shows for a filter, counted over all pages by type; with a
+ * narrowing, only what it selects too.
+ */
 export function countCollections(
   db: Executor,
   input: CollectionFilter = {},
+  narrow?: Narrowing,
 ): FilterCounts {
-  const { ctes, source, where } = select(input)
+  const { ctes, source, where } = select(input, narrow)
   const rows = db.all<{ type: string | null; count: number }>(sql`
     ${ctes}
     SELECT k.root_kind AS type, count(*) AS count

@@ -1,5 +1,12 @@
+import { canonicalJson } from '#capture/json.ts'
 import { parseFilterQuery } from './filter-query.ts'
-import { countCollections, savedSince, type FilterCounts } from './list.ts'
+import {
+  countCollections,
+  savedSince,
+  type CollectionFilter,
+  type FilterCounts,
+  type Narrowing,
+} from './list.ts'
 import type { Database } from '#db/client.ts'
 
 interface Cache {
@@ -61,6 +68,33 @@ export function filterCounts(db: Database, query: string): FilterCounts {
   let counts = byFilter.get(key)
   if (!counts) {
     counts = countCollections(db, filter)
+    byFilter.set(key, counts)
+  }
+  return counts
+}
+
+/**
+ * What a list that starts from one filter and is narrowed by another shows,
+ * as a public list does, cached with the rest. Orders are left out of the
+ * key and a relative save date resolved, as for a single filter.
+ */
+export function narrowedCounts(
+  db: Database,
+  base: CollectionFilter,
+  narrow: Narrowing,
+): FilterCounts {
+  const since = base.savedWithin
+    ? savedSince(base.savedWithin, base.timeZone || undefined)
+    : undefined
+  const key = `narrowed:${canonicalJson({
+    base: { ...base, sort: undefined, order: undefined },
+    narrow,
+    since,
+  })}`
+  const byFilter = cache(db).byFilter
+  let counts = byFilter.get(key)
+  if (!counts) {
+    counts = countCollections(db, base, narrow)
     byFilter.set(key, counts)
   }
   return counts

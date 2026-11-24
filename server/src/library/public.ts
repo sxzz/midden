@@ -1,6 +1,6 @@
 import { AppError } from '#errors.ts'
 import { listProfileChanges, type ProfileChanges } from './changes.ts'
-import { filterCounts } from './counts.ts'
+import { filterCounts, narrowedCounts } from './counts.ts'
 import {
   collectionFilter,
   parseFilterQuery,
@@ -22,6 +22,8 @@ import {
   listCollections,
   type Author,
   type AuthorFilter,
+  type FilterCounts,
+  type Narrowing,
 } from './list.ts'
 import {
   getCollection,
@@ -220,42 +222,59 @@ function listedBy(share: OpenShare, relatedTo: string | undefined) {
 }
 
 /**
- * A shared folder's list, or the attached posts of a profile the share
- * shows. The visitor's filters only narrow it: they are added to the
- * folder's own, never in place of them. The visitor's order replaces the
- * folder's; without one, the newest posts come first.
+ * What a public list selects, and from where its page goes on: the shared
+ * folder's filter, or a profile's attached posts, narrowed by the visitor's
+ * filters, which are added to it, never in place of it. The visitor's order
+ * replaces the folder's; without one, the newest posts come first.
  */
+function publicSelection(share: OpenShare, query: PublicListQuery) {
+  const { related_to: relatedTo, cursor, ...params } = query
+  const base = listedBy(share, relatedTo || undefined)
+  const visitor = collectionFilter(params)
+  const narrow: Narrowing = {
+    q: visitor.q,
+    entityType: visitor.entityType,
+    mediaType: visitor.mediaType,
+    visibility: visitor.visibility,
+    authors: visitor.authors,
+    sensitive: visitor.sensitive,
+    postType: visitor.postType,
+  }
+  return {
+    base: {
+      ...base,
+      sort: visitor.sort ?? PUBLIC_SORT,
+      order: visitor.order ?? 'desc',
+    },
+    narrow,
+    cursor: cursor || undefined,
+  }
+}
+
+/** A shared folder's list, or the attached posts of a profile the share shows. */
 export function listPublicCollections(
   ctx: AccountsContext,
   slug: string,
   query: PublicListQuery,
 ): Page<CollectionView> {
   const share = openShare(ctx.db, slug)
-  const { related_to: relatedTo, cursor, ...params } = query
-  const base = listedBy(share, relatedTo || undefined)
-  const visitor = collectionFilter(params)
-  const page = listCollections(
-    ctx,
-    {
-      ...base,
-      sort: visitor.sort ?? PUBLIC_SORT,
-      order: visitor.order ?? 'desc',
-    },
-    cursor || undefined,
-    {
-      q: visitor.q,
-      entityType: visitor.entityType,
-      mediaType: visitor.mediaType,
-      visibility: visitor.visibility,
-      authors: visitor.authors,
-      sensitive: visitor.sensitive,
-      postType: visitor.postType,
-    },
-  )
+  const { base, narrow, cursor } = publicSelection(share, query)
+  const page = listCollections(ctx, base, cursor, narrow)
   return {
     items: publicViews(share, page.items),
     ...(page.next_cursor ? { next_cursor: page.next_cursor } : {}),
   }
+}
+
+/** How much a public list holds over all its pages, by root type. */
+export function countPublicCollections(
+  ctx: AccountsContext,
+  slug: string,
+  query: PublicListQuery,
+): FilterCounts {
+  const share = openShare(ctx.db, slug)
+  const { base, narrow } = publicSelection(share, query)
+  return narrowedCounts(ctx.db, base, narrow)
 }
 
 /**

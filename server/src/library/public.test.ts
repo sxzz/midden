@@ -853,6 +853,44 @@ describe('public lists', () => {
     const single = share(c, 'collection', ids.a1!)
     expect(await read(single, '/collections/authors')).toMatchObject(NOT_FOUND)
   })
+
+  test('the count is what the list shows over all its pages', async () => {
+    const { ids, list, read, slug, c, tag } = await tagged('a1', 'm1', 'x1')
+    const count = async (path: string, query = '') => {
+      const { status, body } = await read(path, `/collections/count${query}`)
+      expect(status).toBe(200)
+      return body as { count: number; types: Record<string, number> }
+    }
+    expect(await count(slug)).toEqual({ count: 3, types: { 'fake.post': 3 } })
+    for (const query of [
+      '?media_type=image',
+      '?sensitive=contains',
+      '?q=quotes',
+      '?entity_type=fake.profile',
+      '?q=&sort=updated&order=asc',
+    ])
+      expect((await count(slug, query)).count).toBe((await list(query)).length)
+    // A post tagged since then is counted again, not read from the cache.
+    updateAnnotation(c.db, ids.q1!, { tagIds: [tag.id] })
+    expect((await count(slug)).count).toBe(4)
+    // What the list refuses, the count refuses.
+    for (const query of [`?tag=${tag.id}`, '?saved_within=7d', '?rel=mutual'])
+      expect((await read(slug, `/collections/count${query}`)).status).toBe(400)
+
+    // A shared profile's attached posts, narrowed the same way.
+    const profile = share(c, 'collection', ids.five!)
+    expect((await count(profile, `?related_to=${ids.five}`)).count).toBe(3)
+    expect(
+      (await count(profile, `?related_to=${ids.five}&q=mentions`)).count,
+    ).toBe(1)
+    for (const path of ['', `?related_to=${ids.bob}`])
+      expect(await read(profile, `/collections/count${path}`)).toMatchObject(
+        NOT_FOUND,
+      )
+    expect(await read('no-such-slug', '/collections/count')).toMatchObject(
+      NOT_FOUND,
+    )
+  })
 })
 
 describe('custom slugs', () => {
