@@ -5,6 +5,12 @@ import { filterCounts } from '#library/counts.ts'
 import { getEntity } from '#library/entities.ts'
 import { collectionFilter, FilterQuery } from '#library/filter-query.ts'
 import {
+  followGraph,
+  GRAPH_MAX,
+  graphKinds,
+  type GraphKind,
+} from '#library/follow-graph.ts'
+import {
   FOLLOW_CHANGES_LIMIT,
   followCounts,
   listFollowChanges,
@@ -69,6 +75,30 @@ export const FollowChangesQuery = v.object({
       v.transform(Number),
       v.minValue(1),
       v.maxValue(FOLLOW_CHANGES_LIMIT),
+    ),
+  ),
+})
+
+/**
+ * Which kinds of accounts a follow graph shows, comma-separated (all when
+ * absent), and how many of them at most.
+ */
+export const GraphQuery = v.object({
+  kinds: v.optional(
+    v.pipe(
+      v.string(),
+      v.transform((value) => (value ? value.split(',') : [])),
+      v.array(v.picklist(graphKinds)),
+      v.transform((kinds): GraphKind[] => [...new Set(kinds)]),
+    ),
+  ),
+  limit: v.optional(
+    v.pipe(
+      v.string(),
+      v.regex(/^\d{1,5}$/),
+      v.transform(Number),
+      v.minValue(1),
+      v.maxValue(GRAPH_MAX),
     ),
   ),
 })
@@ -155,6 +185,10 @@ export function libraryRoutes(ctx: AccountsContext) {
         c.json(
           listFollowChanges(ctx, c.req.param('id'), c.req.valid('query').limit),
         ),
+      )
+
+      .get('/collections/:id/graph', query(GraphQuery), (c) =>
+        c.json(followGraph(ctx, c.req.param('id'), c.req.valid('query'))),
       )
 
       .get('/collections/:id/history/:capture', (c) =>

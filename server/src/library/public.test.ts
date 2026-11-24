@@ -481,6 +481,73 @@ describe('public shares', () => {
     ])
   })
 
+  test('the follow graph shows every account, linking only those shared', async () => {
+    const { c, ids, read, owner } = await setup()
+    const entityOf = (id: string) =>
+      c.db.get<{ id: string }>(
+        sql`SELECT root_entity_id AS id FROM catalog WHERE collection_id = ${id}`,
+      )!.id
+    const day = Date.parse('2026-11-01T00:00:00Z')
+    // Five and bob follow each other.
+    for (const [from, to] of [
+      [ids.five!, ids.bob!],
+      [ids.bob!, ids.five!],
+    ])
+      c.db.run(sql`INSERT INTO follow_edges
+        (follower_id, followee_id, first_seen_at, last_seen_at)
+        VALUES (${entityOf(from)}, ${entityOf(to)}, ${day}, ${day})`)
+    type Graph = {
+      nodes: {
+        name?: string
+        kind?: string
+        collection_id?: string
+        avatar?: { remote_url?: string }
+      }[]
+      edges: [number, number][]
+    }
+
+    const slug = share(c, 'collection', ids.five!)
+    const shown = await read(slug, `/collections/${ids.five}/graph`)
+    expect(shown.status).toBe(200)
+    const graph = shown.body as Graph
+    expect(graph.nodes).toEqual([
+      expect.objectContaining({ name: 'Five', collection_id: ids.five }),
+      expect.objectContaining({
+        name: 'Bob',
+        kind: 'mutual',
+        avatar: expect.objectContaining({
+          remote_url: 'https://m.test/missing/bob.jpg',
+        }),
+      }),
+    ])
+    // Bob is saved, but outside the share: no link to him.
+    expect(graph.nodes[1]).not.toHaveProperty('collection_id')
+    expect(graph.edges).toEqual([
+      [0, 1],
+      [1, 0],
+    ])
+    // The owner sees the link.
+    const own = (await (
+      await owner(`/collections/${ids.five}/graph`)
+    ).json()) as Graph
+    expect(own.nodes[1]!.collection_id).toBe(ids.bob)
+    // Bob is not in the share, nor is x1.
+    for (const other of [ids.bob!, ids.x1!, crypto.randomUUID()])
+      expect(await read(slug, `/collections/${other}/graph`)).toMatchObject(
+        NOT_FOUND,
+      )
+
+    // A folder holding both profiles links bob.
+    const folder = createFolder(c.db, {
+      name: '账号',
+      filter: 'entity_type=fake.profile',
+    })
+    const both = share(c, 'folder', folder.id)
+    const linked = (await read(both, `/collections/${ids.five}/graph`))
+      .body as Graph
+    expect(linked.nodes[1]!.collection_id).toBe(ids.bob)
+  })
+
   test('revoked, unknown and malformed slugs are not found', async () => {
     const { c, ids, read } = await setup()
     const made = createShare(c.db, { target: 'collection', id: ids.a1! })

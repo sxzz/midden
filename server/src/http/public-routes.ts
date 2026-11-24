@@ -4,6 +4,7 @@ import { FilterQuery } from '#library/filter-query.ts'
 import {
   getPublicCollection,
   getPublicFollowCounts,
+  getPublicFollowGraph,
   getPublicHistoryPoint,
   getPublicShare,
   listPublicAuthors,
@@ -17,6 +18,7 @@ import {
   ChangesQuery,
   CountsQuery,
   FollowChangesQuery,
+  GraphQuery,
 } from './library-routes.ts'
 import { Cursor, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -145,6 +147,17 @@ export function publicRoutes(ctx: AccountsContext) {
             c.req.valid('query').limit,
           ),
         ),
+    )
+
+    .get('/:slug/collections/:id/graph', query(GraphQuery), (c) =>
+      c.json(
+        getPublicFollowGraph(
+          ctx,
+          c.req.param('slug'),
+          c.req.param('id'),
+          c.req.valid('query'),
+        ),
+      ),
     )
 
     .get('/:slug/collections/:id/profile-changes', query(ChangesQuery), (c) =>

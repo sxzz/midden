@@ -274,6 +274,13 @@ describe('api', () => {
     expect(
       (await call(`/collections/${id}/follow-changes?limit=0`)).status,
     ).toBe(400)
+    expect(
+      await (
+        await call(`/collections/${id}/graph?kinds=mutual,following&limit=5`)
+      ).json(),
+    ).toMatchObject({ nodes: [], edges: [], total: 0 })
+    for (const query of ['kinds=friends', 'limit=0', 'limit=10001'])
+      expect((await call(`/collections/${id}/graph?${query}`)).status).toBe(400)
     // Updating it may ask for the lists, which only a profile has.
     const refreshed = await call('/updates', {
       method: 'POST',

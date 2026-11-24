@@ -7,6 +7,11 @@ import {
   type FilterParams,
 } from './filter-query.ts'
 import {
+  followGraph,
+  type FollowGraph,
+  type GraphQuery,
+} from './follow-graph.ts'
+import {
   followCounts,
   listFollowChanges,
   type FollowChanges,
@@ -348,4 +353,30 @@ export function listPublicFollowChanges(
     if (account.collection_id && !linkable.has(account.collection_id))
       delete account.collection_id
   return changes
+}
+
+/**
+ * A shared profile's follow graph, under the rule of its follow changes:
+ * every account keeps its name and avatar, only those the share reaches
+ * link to their saved profile.
+ */
+export function getPublicFollowGraph(
+  ctx: AccountsContext,
+  slug: string,
+  id: string,
+  query?: GraphQuery,
+): FollowGraph {
+  const share = within(ctx, slug, id)
+  const graph = followGraph(ctx, id, query)
+  const linkable = share.scope.contains([
+    ...new Set(
+      graph.nodes.flatMap((node) =>
+        node.collection_id ? [node.collection_id] : [],
+      ),
+    ),
+  ])
+  for (const node of graph.nodes)
+    if (node.collection_id && !linkable.has(node.collection_id))
+      delete node.collection_id
+  return graph
 }

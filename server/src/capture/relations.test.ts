@@ -14,6 +14,7 @@ import {
   revisions,
 } from '#db/schema.ts'
 import { listProfileChanges } from '#library/changes.ts'
+import { followGraph } from '#library/follow-graph.ts'
 import { followCounts, listFollowChanges } from '#library/follows.ts'
 import { listCollections } from '#library/list.ts'
 import { getCollection } from '#library/read.ts'
@@ -52,6 +53,8 @@ interface World {
   lists: Record<string, Partial<Record<RelationList, string[]>>>
   /** Accounts per page. */
   pageSize: number
+  /** Follower counts the lists give for their accounts. */
+  listed?: Record<string, number>
   /** Profiles fetched for real come with an avatar to download. */
   avatars?: boolean
   /**
@@ -86,7 +89,12 @@ function setup(world: Partial<World> = {}) {
       accounts: page.map((id) =>
         fakeProfile(
           id,
-          { name: `Name ${id}` },
+          {
+            name: `Name ${id}`,
+            ...(state.listed?.[id] !== undefined && {
+              counts: { followers: state.listed[id], following: 0 },
+            }),
+          },
           { avatar: `https://m.test/${id}.jpg` },
         ),
       ),
@@ -542,5 +550,121 @@ describe('抓关系网', () => {
     recapture(ctx, id, { relations: true })
     await ctx.queue.drain()
     expect(fetchesOf(ctx, 'following')[0]?.state).toBe('complete')
+  })
+})
+
+describe('关系图谱', () => {
+  /**
+   * 100 follows 1, 2 and 3; 2 and 4 follow it. 1 follows 2, which only 1's
+   * own list tells.
+   */
+  async function world() {
+    const { ctx, state } = setup({
+      counts: {
+        '100': { following: 3, followers: 2 },
+        '1': { following: 1, followers: 1 },
+      },
+      lists: {
+        '100': { following: ['1', '2', '3'], followers: ['2', '4'] },
+        '1': { following: ['2'], followers: ['100'] },
+      },
+      listed: { '1': 1, '2': 50, '3': 10, '4': 30 },
+    })
+    await withAccount(ctx)
+    await update(ctx)
+    await update(ctx, 'https://fake.test/u/1')
+    return { ctx, state, id: subjectCollection(ctx) }
+  }
+  const names = (graph: ReturnType<typeof followGraph>) =>
+    graph.nodes.map((n) => n.external_id)
+  const pairs = (graph: ReturnType<typeof followGraph>) =>
+    graph.edges.map(
+      ([a, b]) =>
+        `${graph.nodes[a]!.external_id}>${graph.nodes[b]!.external_id}`,
+    )
+
+  test('the center, then accounts by follower count, with follows among them', async () => {
+    const { ctx, id } = await world()
+    const graph = followGraph(ctx, id)
+    expect(names(graph)).toEqual(['100', '2', '4', '3', '1'])
+    expect(graph.nodes.map((n) => [n.kind, n.followers])).toEqual([
+      [undefined, 2],
+      ['mutual', 50],
+      ['followers', 30],
+      ['following', 10],
+      ['following', 1],
+    ])
+    expect(graph.nodes[1]).toMatchObject({
+      name: 'Name 2',
+      collection_id: expect.any(String),
+      avatar: { remote_url: 'https://m.test/2.jpg' },
+    })
+    expect(graph.nodes[0]).toMatchObject({ collection_id: id, following: 3 })
+    // 1>2 is between two others, seen only in 1's own list.
+    expect(pairs(graph).toSorted()).toEqual(
+      ['100>1', '100>2', '100>3', '2>100', '4>100', '1>2'].toSorted(),
+    )
+    expect(graph.total).toBe(4)
+    expect(graph.kinds).toEqual({ following: 2, followers: 1, mutual: 1 })
+    expect(graph.lists.following.complete_at).toBeDefined()
+    expect(graph.lists.followers.complete_at).toBeDefined()
+    expect(graph.lists.following.partial_at).toBeUndefined()
+  })
+
+  test('kinds and the cap choose the accounts, edges follow them', async () => {
+    const { ctx, id } = await world()
+    const top = followGraph(ctx, id, { limit: 2 })
+    expect(names(top)).toEqual(['100', '2', '4'])
+    expect(top.total).toBe(4)
+    expect(pairs(top).toSorted()).toEqual(['100>2', '2>100', '4>100'])
+
+    const following = followGraph(ctx, id, { kinds: ['following'] })
+    expect(names(following)).toEqual(['100', '3', '1'])
+    expect(following.total).toBe(2)
+    // 1 follows 2, but 2 is not shown.
+    expect(pairs(following).toSorted()).toEqual(['100>1', '100>3'])
+    // Counts by kind do not depend on the choice.
+    expect(following.kinds).toEqual({ following: 2, followers: 1, mutual: 1 })
+    expect(names(followGraph(ctx, id, { kinds: [] }))).toEqual(['100'])
+  })
+
+  test('ended follows are left out', async () => {
+    const { ctx, state, id } = await world()
+    state.counts['100'] = { following: 2, followers: 1 }
+    state.lists['100'] = { following: ['2', '3'], followers: ['2'] }
+    await update(ctx)
+    const graph = followGraph(ctx, id)
+    expect(names(graph)).toEqual(['100', '2', '3'])
+    // 1 still follows 2, but 1 is gone from the graph with its edge.
+    expect(pairs(graph).toSorted()).toEqual(['100>2', '100>3', '2>100'])
+    expect(graph.kinds).toEqual({ following: 1, followers: 0, mutual: 1 })
+  })
+
+  test('a partial list fetch is told apart, and a profile without follows is alone', async () => {
+    const { ctx } = setup({
+      counts: { '100': { following: 40, followers: 0 } },
+      lists: { '100': { following: ['1'], followers: [] } },
+    })
+    await withAccount(ctx)
+    await update(ctx)
+    const id = subjectCollection(ctx)
+    const graph = followGraph(ctx, id)
+    expect(graph.lists.following).toEqual({ partial_at: expect.any(String) })
+    expect(graph.lists.followers.complete_at).toBeDefined()
+    expect(names(graph)).toEqual(['100', '1'])
+
+    captureURL(ctx, 'https://fake.test/u/7')
+    await ctx.queue.drain()
+    const alone = ctx.db
+      .select({ id: collections.id })
+      .from(collections)
+      .where(eq(collections.externalId, '7'))
+      .get()!.id
+    expect(followGraph(ctx, alone)).toMatchObject({
+      nodes: [{ external_id: '7', collection_id: alone }],
+      edges: [],
+      total: 0,
+      lists: { following: {}, followers: {} },
+    })
   })
 })

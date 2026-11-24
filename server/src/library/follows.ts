@@ -85,7 +85,7 @@ export function followSetSQL(
 }
 
 /** The account a saved profile is about: the root of its newest revision. */
-function subjectOf(r: Reader, id: string): string | undefined {
+export function subjectOf(r: Reader, id: string): string | undefined {
   assertSaved(r, id)
   return (
     r.db.get<{ id: string | null }>(
