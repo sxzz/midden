@@ -81,11 +81,14 @@ function slugTaken(db: Executor, slug: string): boolean {
     .get()
 }
 
-/** A random slug no live link uses. */
+/**
+ * A random slug no live link uses. It never has the custom form (about one
+ * in 500 000 would), so the two kinds of slug tell themselves apart.
+ */
 function randomSlug(db: Executor): string {
   for (;;) {
     const slug = randomBytes(SLUG_BYTES).toString('base64url')
-    if (!slugTaken(db, slug)) return slug
+    if (!CUSTOM_SLUG.test(slug) && !slugTaken(db, slug)) return slug
   }
 }
 
