@@ -118,6 +118,29 @@ it('inspects one capture on every chart that read it', async () => {
   expect(el.querySelectorAll('.crosshair')).toHaveLength(0)
 })
 
+it('folds the data table behind a row that says how long it is', async () => {
+  const { el } = await mount()
+  const toggle = el.querySelector<HTMLButtonElement>('.table-view .toggle')!
+  const sheet = el.querySelector<HTMLElement>('.table-view .sheet')!
+  expect(el.querySelector('details')).toBeNull()
+  expect(toggle.querySelector('.title')?.textContent).toBe('数据表')
+  expect(toggle.querySelector('.rows')?.textContent).toBe('3 行')
+  expect(toggle.querySelector('.chevron')).not.toBeNull()
+  expect(toggle.getAttribute('aria-controls')).toBe(sheet.id)
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  expect(toggle.querySelector('.chevron.open')).toBeNull()
+  expect(sheet.style.display).toBe('none')
+  toggle.click()
+  await nextTick()
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  expect(toggle.querySelector('.chevron.open')).not.toBeNull()
+  expect(sheet.style.display).toBe('')
+  toggle.click()
+  await nextTick()
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  expect(sheet.style.display).toBe('none')
+})
+
 it('shows nothing when no count was read twice', async () => {
   const { el } = await mount({
     entity_type: 'x.profile',

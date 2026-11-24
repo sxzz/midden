@@ -4,6 +4,7 @@ import { call, client, errorText, type CountsSeries } from '../api'
 import { date } from '../presentation'
 import { axisDate, tableRows, trends } from '../trends'
 import TrendChart from './TrendChart.vue'
+import ChevronIcon from './ui/ChevronIcon.vue'
 import Spinner from './ui/Spinner.vue'
 const props = defineProps<{ id: string }>()
 const series = shallowRef<CountsSeries>()
@@ -11,6 +12,8 @@ const error = shallowRef('')
 const loading = shallowRef(false)
 /** The capture inspected on one chart, shown on every chart that read it. */
 const selected = shallowRef<string>()
+/** The table repeats what the charts show, so it stays folded until asked. */
+const tableOpen = shallowRef(false)
 let controller = new AbortController()
 async function load() {
   controller.abort()
@@ -87,29 +90,43 @@ function release(event: PointerEvent) {
           @inspect="(id: string | undefined) => (selected = id)"
         />
       </div>
-      <details class="table-view">
-        <summary>数据表</summary>
-        <div class="scroll">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">抓取时间</th>
-                <th v-for="trend in list" :key="trend.key" scope="col">
-                  {{ trend.label }}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in rows" :key="row.id">
-                <th scope="row">
-                  {{ date(new Date(row.at).toISOString()) }}
-                </th>
-                <td v-for="(value, i) in row.values" :key="i">{{ value }}</td>
-              </tr>
-            </tbody>
-          </table>
+      <!-- Folds like the detail page's 我的整理 row rather than a native
+           disclosure, so both pages open things the same way. -->
+      <div class="table-view">
+        <button
+          type="button"
+          class="toggle"
+          :aria-expanded="tableOpen"
+          :aria-controls="`trends-table-${id}`"
+          @click="tableOpen = !tableOpen"
+        >
+          <span class="title">数据表</span>
+          <span class="rows">{{ rows.length }} 行</span>
+          <ChevronIcon :open="tableOpen" />
+        </button>
+        <div v-show="tableOpen" :id="`trends-table-${id}`" class="sheet">
+          <div class="scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">抓取时间</th>
+                  <th v-for="trend in list" :key="trend.key" scope="col">
+                    {{ trend.label }}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in rows" :key="row.id">
+                  <th scope="row">
+                    {{ date(new Date(row.at).toISOString()) }}
+                  </th>
+                  <td v-for="(value, i) in row.values" :key="i">{{ value }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
-      </details>
+      </div>
     </template>
   </div>
 </template>
@@ -154,15 +171,46 @@ function release(event: PointerEvent) {
   border-radius: var(--radius);
   overflow: hidden;
 }
-.table-view summary {
+/* Same row as 我的整理 on the detail page: title left, quiet summary and
+   chevron right. */
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
   min-height: 48px;
-  padding: 12px var(--inset);
-  color: var(--link);
-  cursor: pointer;
+  padding: 11px var(--inset);
+  color: var(--text);
+  font-size: 16px;
+  text-align: left;
+}
+.toggle:active {
+  background: var(--fill);
+}
+.toggle .rows {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--subtle);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Open, the table hangs under the toggle behind the inset hairline the app's
+   grouped rows use. It sits outside the scroller so it stays put while the
+   table scrolls sideways. */
+.sheet {
+  position: relative;
+}
+.sheet::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto var(--inset);
+  height: 1px;
+  background: var(--separator);
 }
 .scroll {
   overflow-x: auto;
-  border-top: 1px solid var(--separator);
 }
 table {
   width: 100%;
