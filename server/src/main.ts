@@ -11,7 +11,6 @@ import { MediaSigner } from '#blob/signer.ts'
 import { isPermanent } from '#capture/errors.ts'
 import { fillViewHashes } from '#capture/finalize.ts'
 import { captureHandlers } from '#capture/handlers.ts'
-import { fillLegacyCounts } from '#capture/legacy-counts.ts'
 import { runMaintenance } from '#capture/maintenance.ts'
 import { detectThumbnailer } from '#capture/thumbnail.ts'
 import { loadConfig } from '#config.ts'
@@ -66,9 +65,6 @@ ctx = {
 }
 const viewed = fillViewHashes(db, ctx.platforms)
 if (viewed) logger.info({ count: viewed }, 'computed revision view hashes')
-const counted = fillLegacyCounts(db, ctx.platforms)
-if (counted)
-  logger.info({ count: counted }, 'recovered counts of imported captures')
 
 let botUsername: string | undefined
 let bot: RunningBot | undefined
