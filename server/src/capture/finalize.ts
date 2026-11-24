@@ -320,9 +320,11 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
     if (states.some((a) => a.state === 'pending')) return
     validateExecution(tx, capture)
     const payload = capture.payload as Payload
-    const ready = states.filter((a) => a.state === 'ready' && !a.purpose).length
-    const partial =
-      !!payload.incomplete || states.some((a) => a.state !== 'ready')
+    // Removed media (已移除) was left out on purpose: still content, and
+    // nothing missing.
+    const kept = (a: AssetState) => a.state === 'ready' || a.state === 'removed'
+    const ready = states.filter((a) => kept(a) && !a.purpose).length
+    const partial = !!payload.incomplete || states.some((a) => !kept(a))
     if (!payload.text && ready === 0 && !payload.graph) {
       failCapture(ctx, tx, capture.id, '没有可保存的正文或媒体')
       return

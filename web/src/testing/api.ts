@@ -45,6 +45,7 @@ export function mockApi(
 export const asset = (fields: Partial<Asset> & { id: string }): Asset => ({
   position: 0,
   state: 'ready',
+  kind: 'image',
   sensitive: false,
   size: 0,
   ...fields,

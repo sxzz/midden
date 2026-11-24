@@ -474,8 +474,12 @@ export const assets = sqliteTable(
     sensitive: bool().notNull().default(false),
     // sha256 of [platform, immutable key]: reuse across captures.
     cacheKey: text().notNull().default(''),
+    // The media itself, whatever rendition was picked (see
+    // `capture/media-key.ts`): what a removal mark names.
+    mediaKey: text().notNull().default(''),
     kind: text({ enum: ['image', 'video'] }).notNull(),
-    state: text({ enum: ['pending', 'ready', 'failed'] })
+    // `removed`: the owner removed the media (已移除); no blob, never fetched.
+    state: text({ enum: ['pending', 'ready', 'failed', 'removed'] })
       .notNull()
       .default('pending'),
     error: text().notNull().default(''),
@@ -487,6 +491,29 @@ export const assets = sqliteTable(
       .on(t.cacheKey)
       .where(sql`${t.state} = 'ready' AND ${t.cacheKey} <> ''`),
     index('assets_blob').on(t.blobId),
+    index('assets_media').on(t.mediaKey),
+  ],
+)
+
+/**
+ * Media the owner removed to save space (已移除), by media identity: every
+ * capture that lists it, of any collection, skips downloading it until the
+ * mark is cleared (恢复下载). The mark holds the removed media's thumbnail so
+ * posts still show it; media garbage spares a key still named here.
+ */
+export const removedMedia = sqliteTable(
+  'removed_media',
+  {
+    mediaKey: text().primaryKey(),
+    kind: text({ enum: ['image', 'video'] }).notNull(),
+    thumbnailKey: text(),
+    thumbnailMime: text(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('removed_media_thumbnail')
+      .on(t.thumbnailKey)
+      .where(sql`${t.thumbnailKey} IS NOT NULL`),
   ],
 )
 

@@ -24,6 +24,7 @@ import {
   jobs,
   library,
   mediaGarbage,
+  removedMedia,
   revisionEntities,
   revisions,
   sourceResponses,
@@ -184,26 +185,42 @@ function collectBatch(tx: Transaction): number {
         )
         .run()
   }
-  if (blobIds.length) {
-    const orphans = tx
-      .select({ id: blobs.id, hash: blobs.hash, thumbnail: blobThumbnails.key })
-      .from(blobs)
-      .leftJoin(blobThumbnails, eq(blobThumbnails.blobId, blobs.id))
-      .where(
-        and(
-          inArray(blobs.id, blobIds),
-          sql`NOT EXISTS (SELECT 1 FROM ${assets} WHERE ${assets.blobId} = ${blobs.id})`,
-        ),
-      )
-      .all()
-    for (const orphan of orphans) {
-      tx.delete(blobs).where(eq(blobs.id, orphan.id)).run()
-      for (const key of [orphan.hash, orphan.thumbnail])
-        if (key)
-          tx.insert(mediaGarbage).values({ key }).onConflictDoNothing().run()
-    }
-  }
+  releaseBlobs(tx, blobIds)
   return candidates.length
+}
+
+/**
+ * Forget the blobs among these that no asset uses any more; their files,
+ * and their thumbnails unless a removal mark keeps one, become garbage.
+ * Returns the bytes released.
+ */
+export function releaseBlobs(tx: Transaction, blobIds: string[]): number {
+  if (!blobIds.length) return 0
+  const orphans = tx
+    .select({
+      id: blobs.id,
+      hash: blobs.hash,
+      size: blobs.size,
+      thumbnail: blobThumbnails.key,
+    })
+    .from(blobs)
+    .leftJoin(blobThumbnails, eq(blobThumbnails.blobId, blobs.id))
+    .where(
+      and(
+        inJson(blobs.id, blobIds),
+        sql`NOT EXISTS (SELECT 1 FROM ${assets} WHERE ${assets.blobId} = ${blobs.id})`,
+      ),
+    )
+    .all()
+  let released = 0
+  for (const orphan of orphans) {
+    tx.delete(blobs).where(eq(blobs.id, orphan.id)).run()
+    released += orphan.size
+    for (const key of [orphan.hash, orphan.thumbnail])
+      if (key)
+        tx.insert(mediaGarbage).values({ key }).onConflictDoNothing().run()
+  }
+  return released
 }
 
 /**
@@ -276,6 +293,12 @@ export async function collectMedia(ctx: CaptureContext): Promise<number> {
           .select({ id: blobThumbnails.blobId })
           .from(blobThumbnails)
           .where(eq(blobThumbnails.key, garbage.key))
+          .get() ??
+        // The thumbnail a removed media item (已移除) is still shown by.
+        ctx.db
+          .select({ id: removedMedia.mediaKey })
+          .from(removedMedia)
+          .where(eq(removedMedia.thumbnailKey, garbage.key))
           .get()
       if (!used) {
         try {

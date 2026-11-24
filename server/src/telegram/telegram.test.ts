@@ -14,6 +14,7 @@ const asset = (id: string, extra: Partial<AssetView> = {}): AssetView => ({
   id,
   position: 0,
   state: 'ready',
+  kind: 'image',
   sensitive: false,
   size: 10,
   mime: 'image/png',

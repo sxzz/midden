@@ -14,6 +14,7 @@ import { captureRoutes } from './capture-routes.ts'
 import { errorResponse } from './errors.ts'
 import { folderRoutes } from './folder-routes.ts'
 import { libraryRoutes } from './library-routes.ts'
+import { mediaRoutes } from './media-routes.ts'
 import { passkeyAuthRoutes, passkeyRoutes } from './passkey-routes.ts'
 import { publicRoutes } from './public-routes.ts'
 import { shareRoutes } from './share-routes.ts'
@@ -128,6 +129,7 @@ export function createApi(options: HttpOptions) {
       .route('/', folderRoutes(ctx))
       .route('/', shareRoutes(ctx))
       .route('/passkeys', passkeyRoutes(passkeys))
+      .route('/', mediaRoutes(ctx))
   )
 }
 

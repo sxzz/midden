@@ -467,4 +467,42 @@ describe('api', () => {
     expect((await send('DELETE', `/tags/${b.id}`)).status).toBe(404)
     expect(await (await call('/tags')).json()).toEqual([])
   })
+
+  test('removes media and takes the removal back', async () => {
+    const { ctx, call } = setup()
+    await call('/captures', {
+      method: 'POST',
+      body: JSON.stringify({ url: 'https://fake.test/p/1' }),
+    })
+    await ctx.queue.drain()
+    const { items } = (await (await call('/collections')).json()) as {
+      items: { id: string }[]
+    }
+    const post = (path: string, body: unknown) =>
+      call(path, { method: 'POST', body: JSON.stringify(body) })
+    const ids = items.map((item) => item.id)
+    const nothing = { media: 0, freed_bytes: 0, shared: 0 }
+    const preview = await post('/media-removals/preview', { ids })
+    expect(await preview.json()).toEqual(nothing)
+    expect(await (await post('/media-removals', { ids })).json()).toEqual(
+      nothing,
+    )
+    expect((await post('/media-removals', { ids: [] })).status).toBe(400)
+    expect(
+      (
+        await post('/media-removals', {
+          collection: ids[0],
+          asset: 'missing',
+        })
+      ).status,
+    ).toBe(404)
+    expect(
+      (
+        await post('/media-removals/restore', {
+          collection: ids[0],
+          asset: 'missing',
+        })
+      ).status,
+    ).toBe(404)
+  })
 })

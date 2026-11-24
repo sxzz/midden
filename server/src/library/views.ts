@@ -32,6 +32,13 @@ export interface AssetView {
   /** The original as an attachment named `file_name`. */
   download_url?: string
   file_name?: string
+  /** `image` or `video`, kept when the media is removed. */
+  kind: string
+  /**
+   * Removed (`state` is `removed`, 已移除) and no longer marked so: the
+   * next capture downloads it again (恢复下载).
+   */
+  download_again?: true
   /**
    * The platform's own address of an avatar or banner that was never
    * downloaded (an account known only from a follow list, say), for the
@@ -147,6 +154,7 @@ interface AssetRow {
   size: number | null
   thumb_key: string | null
   thumb_mime: string | null
+  marked: number
   kind: string
   source_url: string
   platform: string
@@ -156,12 +164,17 @@ function assetRows(r: Reader, where: SQL): AssetRow[] {
   return r.db.all<AssetRow>(sql`
     SELECT a.capture_id, a.id, a.purpose, a.position, a.alt_text, a.sensitive,
       a.state, a.error, a.kind, a.source_url, b.hash, b.mime, b.size,
-      t.key AS thumb_key, t.mime AS thumb_mime, co.platform
+      coalesce(t.key, rm.thumbnail_key) AS thumb_key,
+      coalesce(t.mime, rm.thumbnail_mime) AS thumb_mime,
+      rm.media_key IS NOT NULL AS marked, co.platform
     FROM assets a
     JOIN captures ca ON ca.id = a.capture_id
     JOIN collections co ON co.id = ca.collection_id
     LEFT JOIN blobs b ON b.id = a.blob_id
     LEFT JOIN blob_thumbnails t ON t.blob_id = a.blob_id AND t.state = 'ready'
+    -- Removed media is shown by the thumbnail its mark kept.
+    LEFT JOIN removed_media rm
+      ON a.state = 'removed' AND rm.media_key = a.media_key
     WHERE ${where}
     ORDER BY a.capture_id, a.position`)
 }
@@ -195,7 +208,8 @@ function remoteURL(row: AssetRow): string | undefined {
 
 function assetView(r: Reader, row: AssetRow): AssetView {
   const ready = row.state === 'ready' && !!row.hash
-  const remote = ready ? undefined : remoteURL(row)
+  const removed = row.state === 'removed'
+  const remote = ready || removed ? undefined : remoteURL(row)
   const thumbnail = !!row.thumb_key && !!row.thumb_mime
   const fileName = `${row.id}.${EXTENSIONS[row.mime ?? ''] ?? 'bin'}`
   return {
@@ -203,6 +217,8 @@ function assetView(r: Reader, row: AssetRow): AssetView {
     ...(row.purpose ? { purpose: row.purpose } : {}),
     position: row.position,
     state: row.state,
+    kind: row.kind,
+    ...(removed && !row.marked ? { download_again: true as const } : {}),
     ...(row.error ? { error: row.error } : {}),
     ...(row.alt_text ? { alt_text: row.alt_text } : {}),
     sensitive: !!row.sensitive,
@@ -220,7 +236,7 @@ function assetView(r: Reader, row: AssetRow): AssetView {
           file_name: fileName,
         }
       : {}),
-    ...(ready && thumbnail
+    ...((ready || removed) && thumbnail
       ? {
           thumbnail_url: r.blobs.url(row.thumb_key!, {
             contentType: row.thumb_mime!,

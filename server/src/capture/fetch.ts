@@ -40,6 +40,7 @@ import {
 import { validateGraph } from './graph.ts'
 import { canonicalJson, sha256Hex } from './json.ts'
 import { finalizeSettled, loadCapture, validateExecution } from './lifecycle.ts'
+import { isRemoved, mediaKey } from './media-key.ts'
 import { resolveCaptureScope } from './scope.ts'
 import type { Payload } from './payload.ts'
 
@@ -455,6 +456,9 @@ function commit(
     }
     for (const [position, resource] of staged.resources.entries()) {
       const assetId = newId()
+      const key = mediaKey(collection.platform, resource)
+      // Media the owner removed is listed but never fetched again.
+      const removed = isRemoved(tx, key)
       tx.insert(assets)
         .values({
           id: assetId,
@@ -467,12 +471,14 @@ function commit(
                 canonicalJson([collection.platform, resource.immutableKey]),
               )
             : '',
+          mediaKey: key,
+          ...(removed ? { state: 'removed' as const } : {}),
           altText: resource.altText,
           sensitive: resource.sensitive,
           purpose: resource.purpose,
         })
         .run()
-      ctx.queue.enqueue(tx, 'download', assetId)
+      if (!removed) ctx.queue.enqueue(tx, 'download', assetId)
     }
     finalizeSettled(ctx, tx, captureId)
   })

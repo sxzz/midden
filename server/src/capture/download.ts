@@ -19,6 +19,7 @@ import {
   type Job,
 } from '#jobs/queue.ts'
 import { finalizeSettled, validateExecution } from './lifecycle.ts'
+import { isRemoved } from './media-key.ts'
 import { acceptsMediaType, sniffMediaType } from './media-type.ts'
 import { thumbnailsEnabled } from './thumbnail.ts'
 import type { Transaction } from '#db/client.ts'
@@ -113,6 +114,24 @@ function retryAfterMs(header: string | null): number {
   return Number.isNaN(at) ? 0 : Math.max(at - Date.now(), 0)
 }
 
+/**
+ * Media the owner removed after this asset was listed (in this collection
+ * or another one listing the same media) settles as removed, unfetched.
+ */
+function skipRemoved(ctx: CaptureContext, assetId: string): boolean {
+  return ctx.db.transaction((tx) => {
+    const row = loadAsset(tx, assetId)
+    if (row?.asset.state !== 'pending') return true
+    if (!isRemoved(tx, row.asset.mediaKey)) return false
+    tx.update(assets)
+      .set({ state: 'removed' })
+      .where(and(eq(assets.id, assetId), eq(assets.state, 'pending')))
+      .run()
+    finalizeSettled(ctx, tx, row.asset.captureId)
+    return true
+  })
+}
+
 /** Download one asset into the media store. */
 export async function runDownload(
   ctx: CaptureContext,
@@ -123,10 +142,15 @@ export async function runDownload(
     const row = ctx.db.transaction((tx) => loadAsset(tx, job.ref))
     if (row?.asset.state !== 'pending') return
     const { cacheKey } = row.asset
-    if (!cacheKey) return download(ctx, job)
+    if (!cacheKey) {
+      if (!skipRemoved(ctx, job.ref)) await download(ctx, job)
+      return
+    }
     // Identical renditions wait for the first download instead of repeating it.
     if (!(await waitFor(cacheLocks, cacheKey))) throw new SnoozeError(1000)
     await cacheLocks.run(cacheKey, async () => {
+      // Checked only now: the media may have been removed while waiting.
+      if (skipRemoved(ctx, job.ref)) return
       if (!reuseMedia(ctx, job.ref)) await download(ctx, job)
     })
   })
@@ -196,7 +220,15 @@ async function download(ctx: CaptureContext, job: Job): Promise<void> {
       await ctx.blobs.putFile(staged.hash, staged.path)
       ctx.db.transaction((tx) => {
         const current = loadAsset(tx, asset.id)
-        if (current?.asset.state !== 'pending') return
+        if (current?.asset.state !== 'pending') {
+          // Settled meanwhile (removed, say): the file stays only if shared.
+          if (!tx.select().from(blobs).where(eq(blobs.hash, staged.hash)).get())
+            tx.insert(mediaGarbage)
+              .values({ key: staged.hash })
+              .onConflictDoNothing()
+              .run()
+          return
+        }
         validateExecution(tx, current.capture)
         let blobId = tx
           .select({ id: blobs.id })
