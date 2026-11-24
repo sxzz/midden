@@ -7,10 +7,26 @@ import {
   useRouter,
   type RouteLocationNormalized,
 } from 'vue-router'
-import { call, client, type Collection, type Usage } from '../api'
+import { call, client, errorText, type Collection, type Usage } from '../api'
 import { useCollection } from '../composables/useCollection'
+import { useFolders } from '../composables/useFolders'
+import { toast } from '../composables/useToast'
+import {
+  apiQuery,
+  folderFilter,
+  folderModified,
+  folderQuery,
+  hasFilters,
+  listTab,
+  withTab,
+  type ListTab,
+} from '../folders'
 import { backButton, host } from '../host'
 import { goBack } from '../navigation'
+import ConfirmSheet from './ConfirmSheet.vue'
+import FolderMenuSheet from './FolderMenuSheet.vue'
+import FolderNameSheet from './FolderNameSheet.vue'
+import FolderStrip from './FolderStrip.vue'
 // Remembered in this browser, so a reload does not cover the media again.
 const SENSITIVE_KEY = 'midden.showSensitive'
 const showSensitive = shallowRef(readFlag(SENSITIVE_KEY))
@@ -39,7 +55,7 @@ const tabs = [
   { value: 'x.post', label: '帖子' },
   { value: 'x.profile', label: '账号' },
 ] as const
-type Tab = (typeof tabs)[number]['value']
+type Tab = ListTab
 const createList = (path: string) => ({
   collection: useCollection(),
   /** Where the tab was left, filters included. */
@@ -51,17 +67,20 @@ const lists: Record<Tab, ReturnType<typeof createList>> = {
   'x.post': createList('/'),
   'x.profile': createList('/?entity_type=x.profile,instagram.profile'),
 }
-const all = Object.values(lists)
+/** The open folder's list; one at a time, so opening another reloads it. */
+const folderList = createList('')
+const all = [...Object.values(lists), folderList]
+const queryOf = (target: RouteLocationNormalized) =>
+  target.fullPath.split('?')[1]?.split('#')[0] || ''
 function tabOf(target: RouteLocationNormalized): Tab {
-  return String(target.query.entity_type || '')
-    .split(',')
-    .some((type) => type.endsWith('.profile'))
-    ? 'x.profile'
-    : 'x.post'
+  return listTab(queryOf(target))
 }
 const tab = computed(() => tabOf(route))
 const id = computed(() =>
   route.name === 'collection' ? String(route.params.id) : '',
+)
+const folderId = computed(() =>
+  route.name === 'folder' ? String(route.params.id) : '',
 )
 const accounts = computed(() => route.name === 'accounts')
 const captures = computed(() => route.name === 'captures')
@@ -72,11 +91,24 @@ const changes = computed(() => route.name === 'collection-changes')
 const nested = computed(
   () =>
     !!id.value ||
+    !!folderId.value ||
     accounts.value ||
     captures.value ||
     capture.value ||
     stats.value ||
     changes.value,
+)
+const {
+  folders,
+  loaded: foldersLoaded,
+  error: foldersError,
+  load: loadFolders,
+  create: createFolder,
+  update: updateFolder,
+  remove: removeFolder,
+} = useFolders()
+const folder = computed(() =>
+  folders.value.find((f) => f.id === folderId.value),
 )
 const title = computed(() =>
   accounts.value
@@ -91,7 +123,9 @@ const title = computed(() =>
             ? '资料修改记录'
             : id.value
               ? '收藏详情'
-              : '我的收藏',
+              : folderId.value
+                ? folder.value?.name || '收藏夹'
+                : '我的收藏',
 )
 // Telegram draws its own back button; only stand in for it elsewhere.
 const standalone = !host()?.initData
@@ -111,6 +145,7 @@ const removed = shallowRef<string[]>([])
 /** Cache identity of a view: one entry per list tab, one per collection. */
 function viewKey(target: RouteLocationNormalized) {
   if (target.name === 'collections') return `collections:${tabOf(target)}`
+  if (target.name === 'folder') return 'folder'
   if (target.name === 'accounts') return 'accounts'
   if (target.name === 'captures') return 'captures'
   if (target.name === 'capture') return `capture:${String(target.params.id)}`
@@ -123,48 +158,45 @@ function viewKey(target: RouteLocationNormalized) {
   return removed.value.includes(key) ? `${key}#removed` : key
 }
 const scrolls = new Map<string, number>()
-function apiQuery(raw: string, type: Tab) {
-  const q = new URLSearchParams(raw)
-  q.delete('layout')
-  if (!q.has('entity_type'))
-    q.set(
-      'entity_type',
-      type === 'x.profile'
-        ? 'x.profile,instagram.profile'
-        : 'x.post,instagram.post',
-    )
-  const from = q.get('from_date')
-  const to = q.get('to_date')
-  q.delete('from_date')
-  q.delete('to_date')
-  if (from) {
-    const d = new Date(`${from}T00:00:00`)
-    if (Number.isFinite(d.getTime())) q.set('saved_from', d.toISOString())
+/** Show the list for the address, loading it unless already shown. */
+async function show(list: ReturnType<typeof createList>, key: string) {
+  listRoute = list.path = route.fullPath
+  list.query.value = queryOf(route)
+  const effectiveQuery = apiQuery(list.query.value, tab.value)
+  if (list.loadedQuery !== effectiveQuery) {
+    list.loadedQuery = effectiveQuery
+    scrolls.set(key, 0)
+    await list.collection.load(effectiveQuery)
   }
-  if (to) {
-    const d = new Date(`${to}T00:00:00`)
-    if (Number.isFinite(d.getTime())) {
-      d.setDate(d.getDate() + 1)
-      q.set('saved_before', d.toISOString())
-    }
-  }
-  return q.toString()
 }
+let shownKey = ''
 watch(
   () => route.fullPath,
   async () => {
     backButton(nested.value)
     const key = viewKey(route)
+    // Counts change with what was saved meanwhile; a list shown again
+    // refreshes them, filtering within it does not.
+    const arrived = key !== shownKey
+    shownKey = key
     if (!nested.value) {
-      const list = lists[tab.value]
-      listRoute = list.path = route.fullPath
-      list.query.value = route.fullPath.split('?')[1]?.split('#')[0] || ''
-      const effectiveQuery = apiQuery(list.query.value, tab.value)
-      if (list.loadedQuery !== effectiveQuery) {
-        list.loadedQuery = effectiveQuery
-        scrolls.set(key, 0)
-        await list.collection.load(effectiveQuery)
+      if (arrived) void loadFolders()
+      await show(lists[tab.value], key)
+    } else if (folderId.value) {
+      if (arrived || !foldersLoaded.value) await loadFolders()
+      const saved = folder.value
+      if (!saved || viewKey(route) !== key) return
+      // A bare folder address (a bookmark) shows the folder's filter.
+      const query = new URLSearchParams(queryOf(route))
+      const layout = query.get('layout')
+      query.delete('layout')
+      if (!query.size) {
+        const target = new URLSearchParams(folderQuery(saved.filter))
+        if (layout) target.set('layout', layout)
+        void router.replace(`/folder/${saved.id}?${target}`)
+        return
       }
+      await show(folderList, key)
     }
     // Wait for the cached view to be reinserted so its height is back.
     await nextTick()
@@ -204,15 +236,122 @@ function deleted(id: string) {
   loadUsage()
 }
 function search(q: string) {
-  const target = `/${q ? `?${q}` : ''}`
-  if (route.fullPath === target)
-    void lists[tab.value].collection.load(apiQuery(q, tab.value))
-  else void router.push(target)
+  let target = `/${q ? `?${q}` : ''}`
+  if (folderId.value) {
+    // An empty query would mean the folder's own filter, so the tab's entity
+    // types stay in it, which changes nothing the list shows.
+    target = `/folder/${folderId.value}?${withTab(q, tab.value)}`
+  }
+  if (route.fullPath === target) {
+    const list = folderId.value ? folderList : lists[tab.value]
+    void list.collection.load(apiQuery(q, tab.value))
+  } else void router.push(target)
 }
 // Captures change what the lists hold; reload them when they are next shown.
 function saved() {
   for (const list of all) list.loadedQuery = undefined
   loadUsage()
+}
+/** What the current list shows, as an address query. */
+const shownQuery = computed(() =>
+  folderId.value ? folderList.query.value : lists[tab.value].query.value,
+)
+const modified = computed(
+  () =>
+    !!folder.value &&
+    !!folderList.query.value &&
+    folderModified(folderList.query.value, folder.value.filter),
+)
+const canSave = computed(() => !nested.value && hasFilters(shownQuery.value))
+const listFolders = computed(() =>
+  folders.value.filter((f) => listTab(f.filter) === tab.value),
+)
+type Sheet = '' | 'create' | 'menu' | 'rename' | 'delete'
+const sheet = shallowRef<Sheet>('')
+const busy = shallowRef(false)
+const sheetError = shallowRef('')
+function openSheet(value: Sheet) {
+  sheetError.value = ''
+  sheet.value = value
+}
+/** Save what the list shows as a new folder, and continue inside it. */
+async function saveFolder(name: string) {
+  busy.value = true
+  sheetError.value = ''
+  const query = shownQuery.value
+  try {
+    const created = await createFolder(name, folderFilter(query))
+    sheet.value = ''
+    toast('已存为收藏夹')
+    const target = `/folder/${created.id}?${withTab(query, tab.value)}`
+    if (folderId.value) void router.replace(target)
+    else void router.push(target)
+  } catch (e) {
+    sheetError.value = errorText(e)
+  } finally {
+    busy.value = false
+  }
+}
+async function updateFilter() {
+  const current = folder.value
+  if (!current || busy.value) return
+  busy.value = true
+  try {
+    await updateFolder(current.id, {
+      filter: folderFilter(folderList.query.value),
+    })
+    toast('已更新收藏夹')
+  } catch (e) {
+    toast(errorText(e))
+  } finally {
+    busy.value = false
+  }
+}
+async function rename(name: string) {
+  const current = folder.value
+  if (!current) return
+  busy.value = true
+  sheetError.value = ''
+  try {
+    await updateFolder(current.id, { name })
+    sheet.value = ''
+  } catch (e) {
+    sheetError.value = errorText(e)
+  } finally {
+    busy.value = false
+  }
+}
+async function deleteFolder() {
+  const current = folder.value
+  if (!current) return
+  busy.value = true
+  try {
+    await removeFolder(current.id)
+    sheet.value = ''
+    toast('已删除收藏夹')
+    void router.push(lists[listTab(current.filter)].path)
+  } catch (e) {
+    toast(errorText(e))
+  } finally {
+    busy.value = false
+  }
+}
+function listProps(list: ReturnType<typeof createList>, error = '') {
+  const type = tab.value
+  const { collection, query } = list
+  return {
+    items: collection.items.value,
+    showSensitive: showSensitive.value,
+    query: query.value,
+    loading: collection.loading.value,
+    error: error || collection.error.value,
+    next: collection.next.value,
+    usage: usage.value,
+    onSearch: search,
+    onOpen: open,
+    onMore: collection.more,
+    onRetry: () => collection.load(apiQuery(query.value, type)),
+  }
 }
 const viewProps = computed(() => {
   if (accounts.value)
@@ -235,21 +374,19 @@ const viewProps = computed(() => {
       },
       onUpdated: updated,
     }
-  const type = tab.value
-  const { collection, query } = lists[type]
-  return {
-    items: collection.items.value,
-    showSensitive: showSensitive.value,
-    query: query.value,
-    loading: collection.loading.value,
-    error: collection.error.value,
-    next: collection.next.value,
-    usage: usage.value,
-    onSearch: search,
-    onOpen: open,
-    onMore: collection.more,
-    onRetry: () => collection.load(apiQuery(query.value, type)),
+  if (folderId.value) {
+    const missing = foldersLoaded.value && !folder.value
+    const props = listProps(
+      folderList,
+      missing ? foldersError.value || '收藏夹不存在或已删除' : '',
+    )
+    // Not this folder's items: another folder's, or none to show.
+    if (missing || folderList.path !== route.fullPath)
+      Object.assign(props, { items: [], next: '' })
+    if (missing) props.onRetry = loadFolders
+    return props
   }
+  return listProps(lists[tab.value])
 })
 </script>
 
@@ -334,6 +471,26 @@ const viewProps = computed(() => {
         </svg>
       </RouterLink>
       <button
+        v-if="folder"
+        type="button"
+        class="icon-button"
+        aria-label="管理收藏夹"
+        title="管理收藏夹"
+        @click="openSheet('menu')"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="22"
+          height="22"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <circle cx="5.5" cy="12" r="1.6" />
+          <circle cx="12" cy="12" r="1.6" />
+          <circle cx="18.5" cy="12" r="1.6" />
+        </svg>
+      </button>
+      <button
         v-if="!accounts && !captures && !capture && !stats"
         type="button"
         class="icon-button sensitive-toggle"
@@ -372,15 +529,67 @@ const viewProps = computed(() => {
         {{ option.label }}
       </RouterLink>
     </div>
+    <FolderStrip v-if="!nested" :folders="listFolders" />
+    <div v-if="modified" class="folder-status" role="status">
+      <span class="folder-status-text">筛选条件已修改</span>
+      <button type="button" :disabled="busy" @click="openSheet('create')">
+        另存为
+      </button>
+      <button
+        type="button"
+        class="primary"
+        :disabled="busy"
+        @click="updateFilter"
+      >
+        更新收藏夹
+      </button>
+    </div>
     <RouterView v-slot="{ Component, route: viewRoute }">
       <KeepAlive :max="cachedViews">
-        <component
-          :is="Component"
-          :key="viewKey(viewRoute)"
-          v-bind="viewProps"
-        />
+        <component :is="Component" :key="viewKey(viewRoute)" v-bind="viewProps">
+          <template v-if="canSave" #actions>
+            <button type="button" @click="openSheet('create')">
+              存为收藏夹
+            </button>
+          </template>
+        </component>
       </KeepAlive>
     </RouterView>
+    <FolderNameSheet
+      :open="sheet === 'create'"
+      :title="folder ? '另存为收藏夹' : '存为收藏夹'"
+      confirm-label="保存"
+      :busy="busy"
+      :error="sheetError"
+      @submit="saveFolder"
+      @cancel="sheet = ''"
+    />
+    <FolderNameSheet
+      :open="sheet === 'rename'"
+      title="重命名收藏夹"
+      confirm-label="保存"
+      :name="folder?.name"
+      :busy="busy"
+      :error="sheetError"
+      @submit="rename"
+      @cancel="sheet = ''"
+    />
+    <FolderMenuSheet
+      :open="sheet === 'menu'"
+      :name="folder?.name ?? ''"
+      @rename="openSheet('rename')"
+      @delete="openSheet('delete')"
+      @cancel="sheet = ''"
+    />
+    <ConfirmSheet
+      :open="sheet === 'delete'"
+      :title="`删除收藏夹「${folder?.name ?? ''}」`"
+      description="收藏夹中的收藏不会被删除。"
+      confirm-label="删除收藏夹"
+      :busy="busy"
+      @confirm="deleteFolder"
+      @cancel="sheet = ''"
+    />
   </main>
 </template>
 
@@ -479,8 +688,44 @@ const viewProps = computed(() => {
   padding-right: 2px;
 }
 h1 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   margin: 0;
   font-size: 17px;
   font-weight: 600;
+}
+/* A changed folder says so above its filters, with what can be done. */
+.folder-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 var(--gutter) 12px;
+  padding: 8px 8px 8px 14px;
+  border-radius: var(--radius);
+  background: var(--card);
+  font-size: 14px;
+}
+.folder-status-text {
+  margin-right: auto;
+  color: var(--subtle);
+}
+.folder-status button {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: var(--link);
+  background: var(--fill);
+}
+.folder-status .primary {
+  font-weight: 600;
+}
+.folder-status button:disabled {
+  opacity: 0.5;
+}
+.folder-status button:active:not(:disabled) {
+  opacity: 0.7;
 }
 </style>

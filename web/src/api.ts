@@ -72,6 +72,7 @@ export type Accounts = Ok<typeof client.accounts.$get>
 export type Account = Accounts['accounts'][number]
 export type AccountPlatform = Accounts['platforms'][number]
 export type Tag = Ok<typeof client.tags.$get>[number]
+export type Folder = Ok<typeof client.folders.$get>[number]
 export type Annotation = Ok<
   (typeof client.collections)[':id']['annotation']['$get']
 >

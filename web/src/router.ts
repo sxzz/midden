@@ -11,6 +11,13 @@ export const router = createRouter({
   history: createWebHashHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/', name: 'collections', component: CollectionView },
+    // A folder is the library list under its saved filter; the address
+    // carries the filter shown, so a changed one survives a reload.
+    {
+      path: '/folder/:id([a-f0-9-]+)',
+      name: 'folder',
+      component: CollectionView,
+    },
     {
       path: '/collection/:id([a-f0-9-]+)',
       name: 'collection',
