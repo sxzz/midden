@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 
 const A = '00000000-0000-7000-8000-00000000000a'
 const B = '00000000-0000-7000-8000-00000000000b'

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 
 test('filter changes apply immediately without collapsing controls', async ({
   page,

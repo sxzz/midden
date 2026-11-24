@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 const item = (n: number) => ({
   id: `11111111-1111-4111-8111-11111111111${n}`,
   url: `https://example.test/post/${n}`,

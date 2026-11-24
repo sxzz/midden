@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 
 const id = '22222222-2222-4222-8222-222222222222'
 const image = (n: number, sensitive: boolean) => ({

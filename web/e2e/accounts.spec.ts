@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 
 const main = '33333333-3333-4333-8333-333333333333'
 

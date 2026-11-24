@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './test'
 
 // A passkey's RP ID must be a domain name, so these pages run on localhost
 // rather than the configured 127.0.0.1.

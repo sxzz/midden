@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 
 const post = {
   id: 'aaaa',
@@ -56,7 +56,9 @@ test('restores sort controls and opens author links in a new tab', async ({
             ? { items: [post] }
             : path === '/v1/collections/aaaa'
               ? post
-              : {},
+              : path === '/v1/collections/aaaa/history'
+                ? { items: [] }
+                : {},
     })
   })
   await page.setViewportSize({ width: 1440, height: 1000 })

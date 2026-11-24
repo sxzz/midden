@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 
 const OWNER = 'x/x.profile/100'
 const FRIEND = 'x/x.profile/200'

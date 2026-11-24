@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 
 test('first list preview fits the image after dimensions arrive during opening', async ({
   page,

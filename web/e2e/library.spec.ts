@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 import { swipeImage } from './touch'
 const id = '11111111-1111-4111-8111-111111111111'
 /** The capture record a refresh of the collection answers with. */

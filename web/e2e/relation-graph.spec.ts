@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 
 const profileId = '77777777-7777-4777-8777-777777777777'
 const friendId = '66666666-6666-4666-8666-666666666666'

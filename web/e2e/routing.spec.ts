@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 
 const items = Array.from({ length: 30 }, (_, index) => ({
   id: `11111111-1111-4111-8111-${String(index).padStart(12, '0')}`,

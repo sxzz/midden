@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { expect, test } from '@playwright/test'
+import { expect, test } from './test'
 
 const profileId = '88888888-8888-4888-8888-888888888888'
 const friendId = '99999999-9999-4999-8999-999999999999'

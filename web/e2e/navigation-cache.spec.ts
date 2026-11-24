@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './test'
 
 const uuid = (n: number) =>
   `${String(n).padStart(8, '0')}-0000-4000-8000-000000000000`
