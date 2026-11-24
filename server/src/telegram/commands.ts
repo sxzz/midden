@@ -58,6 +58,35 @@ const LIST_PAGE = 10
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
 const GENERIC = '操作失败，使用 /help 查看用法。'
 
+const REPOSITORY = 'https://github.com/sxzz/midden'
+const REVISION = /^([\da-f]{40})(-dirty)?$/
+
+/**
+ * A build revision as its short sha linked to the commit; anything else,
+ * such as `dev`, as code. Telegram does not nest code inside a link.
+ */
+function versionLabel(version: string): {
+  text: string
+  entity: MessageEntity
+} {
+  const match = REVISION.exec(version)
+  if (!match)
+    return {
+      text: version,
+      entity: { type: 'code', offset: 0, length: version.length },
+    }
+  const text = match[1]!.slice(0, 7) + (match[2] ?? '')
+  return {
+    text,
+    entity: {
+      type: 'text_link',
+      offset: 0,
+      length: text.length,
+      url: `${REPOSITORY}/commit/${match[1]}`,
+    },
+  }
+}
+
 const menu = (text: string, extra: Partial<Reply> = {}): Reply => ({
   text,
   keyboard: MENU_BUTTONS,
@@ -110,12 +139,9 @@ function run(c: CommandContext, request: Request): Reply {
       const keyboard: Keyboard = [...MENU_BUTTONS]
       if (request.command === 'start') {
         text += '\n\n版本：'
-        entities.push({
-          type: 'code',
-          offset: text.length,
-          length: c.version.length,
-        })
-        text += c.version
+        const version = versionLabel(c.version)
+        entities.push({ ...version.entity, offset: text.length })
+        text += version.text
         if (c.webAppUrl)
           keyboard.push([{ text: '打开', web_app: { url: c.webAppUrl } }])
       }

@@ -171,6 +171,22 @@ describe('telegram commands', () => {
     expect(start.entities).toEqual([
       { type: 'code', offset: start.text!.length - 3, length: 3 },
     ])
+    const sha = '0123456789abcdef0123456789abcdef01234567'
+    for (const [version, label] of [
+      [sha, '0123456'],
+      [`${sha}-dirty`, '0123456-dirty'],
+    ]) {
+      const reply = handle({ ctx, version }, request({ command: 'start' }))
+      expect(reply.text).toContain(`\n\n版本：${label}`)
+      expect(reply.entities).toEqual([
+        {
+          type: 'text_link',
+          offset: reply.text!.length - label.length,
+          length: label.length,
+          url: `https://github.com/sxzz/midden/commit/${sha}`,
+        },
+      ])
+    }
     expect(handle(c, request({ command: 'list' }))).toEqual({
       text: '收藏列表是空的。',
       keyboard: [],
