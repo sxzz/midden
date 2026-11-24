@@ -72,6 +72,7 @@ test('a public link opens a folder and its items without login', async ({
   page,
 }) => {
   const requested: string[] = []
+  const lists: URLSearchParams[] = []
   // A visitor's page never asks telegram.org for anything.
   const telegram: string[] = []
   await page.route('https://telegram.org/**', (route) => {
@@ -89,6 +90,7 @@ test('a public link opens a folder and its items without login', async ({
     if (!path.startsWith(base))
       return route.fulfill({ status: 401, json: { error: '需要登录' } })
     const rest = path.slice(base.length)
+    if (rest === '/collections') lists.push(url.searchParams)
     const answers: Record<string, unknown> = {
       '': { target: 'folder', name: '公开收藏夹', posts: 1, profiles: 0 },
       '/collections': { items: [post] },
@@ -115,6 +117,21 @@ test('a public link opens a folder and its items without login', async ({
   await expect(
     page.getByRole('button', { name: '敏感内容，点按显示' }).first(),
   ).toBeVisible()
+
+  // The visitor filters and orders the list, newest posts first by default,
+  // with no tags; the choice is kept in the address.
+  expect(lists[0]?.get('sort')).toBe('published')
+  await expect(page.getByLabel('排序', { exact: true })).toHaveValue(
+    'published',
+  )
+  await page.getByRole('button', { name: '筛选' }).click()
+  await expect(page.getByText('帖子类型')).toBeVisible()
+  await expect(page.getByText('标签')).toHaveCount(0)
+  await page.getByLabel('排序', { exact: true }).selectOption('updated')
+  await expect(page).toHaveURL(/sort=updated/)
+  await expect.poll(() => lists.at(-1)?.get('sort')).toBe('updated')
+  await page.reload()
+  await expect(page.getByLabel('排序', { exact: true })).toHaveValue('updated')
 
   await page.getByText('公开的帖子').click()
   await expect(page).toHaveURL(new RegExp(`#/s/${slug}/collection/${postId}$`))

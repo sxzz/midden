@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, shallowRef, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useCollection } from '../composables/useCollection'
+import { listsProfiles } from '../presentation'
 import { collectionRoute } from '../share'
 import CollectionDetail from './CollectionDetail.vue'
 import CollectionView from './CollectionView.vue'
@@ -9,44 +10,68 @@ import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import ListSection from './ui/ListSection.vue'
 import type { PublicShareInfo } from '../api'
 // What a public link opens: the shared collection's page, or the shared
-// folder's list, with a tab per kind only when it holds both.
+// folder's list, with a tab per kind only when it holds both. The visitor's
+// filters, order and tab live in the address, so a filtered view can be
+// linked; the accounts tab is written as its entity types, as on the home
+// page.
 const props = defineProps<{
   share?: PublicShareInfo
   showSensitive?: boolean
 }>()
+const route = useRoute()
 const router = useRouter()
+const PROFILES = 'x.profile,instagram.profile'
 const tabs = [
-  { value: 'post', label: '帖子', types: 'x.post,instagram.post' },
-  { value: 'profile', label: '账号', types: 'x.profile,instagram.profile' },
+  { value: 'post', label: '帖子' },
+  { value: 'profile', label: '账号' },
 ] as const
 type Kind = (typeof tabs)[number]['value']
-const picked = shallowRef<Kind>()
-const kind = computed<Kind>(
-  () =>
-    picked.value ??
-    (!props.share?.posts && props.share?.profiles ? 'profile' : 'post'),
+/** The address's query while this page is shown; kept while away from it. */
+const address = computed<string>((previous) =>
+  route.name === 'share'
+    ? route.fullPath.split('?')[1]?.split('#')[0] || ''
+    : (previous ?? ''),
+)
+const onlyProfiles = computed(
+  () => !props.share?.posts && !!props.share?.profiles,
+)
+const kind = computed<Kind>(() =>
+  listsProfiles(address.value) ||
+  (onlyProfiles.value && !new URLSearchParams(address.value).has('entity_type'))
+    ? 'profile'
+    : 'post',
 )
 const both = computed(() => !!props.share?.posts && !!props.share?.profiles)
-const layout = shallowRef('')
+/** The list's query: the address, with the accounts tab when it is implied. */
 const query = computed(() => {
-  const q = new URLSearchParams({
-    entity_type: tabs.find((t) => t.value === kind.value)!.types,
-  })
-  if (layout.value) q.set('layout', layout.value)
+  const q = new URLSearchParams(address.value)
+  if (kind.value === 'profile' && !listsProfiles(q))
+    q.set('entity_type', PROFILES)
   return q.toString()
 })
 const { items, next, loading, error, load, more } = useCollection()
 const folder = computed(() => props.share?.target === 'folder')
+// The layout is not part of what is listed.
+const listed = computed(() => {
+  const q = new URLSearchParams(query.value)
+  q.delete('layout')
+  return q.toString()
+})
 watch(
-  () => folder.value && kind.value,
+  () => folder.value && listed.value,
   (value) => {
-    if (value) void load(query.value)
+    if (value !== false) void load(query.value)
   },
   { immediate: true },
 )
 function search(value: string) {
-  // Only the layout can change here; the folder decides what is listed.
-  layout.value = new URLSearchParams(value).get('layout') || ''
+  const slug = String(route.params.slug)
+  void router.push(`/s/${slug}${value ? `?${value}` : ''}`)
+}
+/** Another tab starts over, as on the home page. */
+function pick(value: Kind) {
+  if (value === kind.value) return
+  search(value === 'profile' ? `entity_type=${PROFILES}` : '')
 }
 function open(id: string) {
   void router.push(collectionRoute(id))
@@ -70,7 +95,7 @@ function open(id: string) {
         class="tab"
         :class="{ on: kind === option.value }"
         :aria-selected="kind === option.value"
-        @click="picked = option.value"
+        @click="pick(option.value)"
       >
         {{ option.label }}
       </button>

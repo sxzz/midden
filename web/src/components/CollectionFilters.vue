@@ -18,13 +18,19 @@ import {
 } from '../api'
 import { kindOf, KINDS, localDay, type Kind } from '../folders'
 import { listSort, listsProfiles } from '../presentation'
+import { readAuthors } from '../reads'
+import { shareSlug } from '../share'
 import TagEditSheet from './TagEditSheet.vue'
 import ChevronIcon from './ui/ChevronIcon.vue'
 import MultiSelect from './ui/MultiSelect.vue'
 import TagFilterChips from './ui/TagFilterChips.vue'
 const tags = shallowRef<Tag[]>([])
 const tagError = shallowRef('')
+// Behind a public link there are no tags to offer: their names are the
+// owner's, and the share refuses a tag filter.
+const shared = !!shareSlug.value
 async function loadTags() {
+  if (shared) return
   try {
     tags.value = await call(client.tags.$get())
     tagError.value = ''
@@ -62,10 +68,10 @@ function read(query: string) {
   const platform = only(types.map((type) => type.split('.')[0] || ''))
   return {
     /** Tags wanted, any of them unless `tagMode` is `all`. */
-    tag: ids(params.get('tag')),
-    tagMode: params.get('tag_mode') === 'all' ? 'all' : '',
+    tag: shared ? [] : ids(params.get('tag')),
+    tagMode: !shared && params.get('tag_mode') === 'all' ? 'all' : '',
     /** Tags none of which may be there. */
-    notTag: ids(params.get('not_tag')),
+    notTag: shared ? [] : ids(params.get('not_tag')),
     postType: params.get('post_type') || '',
     authors: params.getAll('author'),
     layout: params.get('layout') === 'album' ? 'album' : '',
@@ -343,16 +349,12 @@ async function loadAuthors(more = false) {
   authorsLoading.value = true
   authorError.value = ''
   try {
-    const data = await call(
-      client.collections.authors.$get(
-        {
-          query: {
-            q: authorQuery.value.trim() || undefined,
-            cursor: more ? authorsNext.value : undefined,
-          },
-        },
-        { init: { signal: controller.signal } },
-      ),
+    const data = await readAuthors(
+      {
+        q: authorQuery.value.trim() || undefined,
+        cursor: more ? authorsNext.value : undefined,
+      },
+      controller.signal,
     )
     // A newer search superseded this one.
     if (request !== authorRequest) return
@@ -387,14 +389,7 @@ watch(
     if (!missing.length || !wantsAuthors()) return
     try {
       remember(
-        (
-          await call(
-            client.collections.authors.$get(
-              { query: { author: missing } },
-              { init: { signal: controller.signal } },
-            ),
-          )
-        ).items,
+        (await readAuthors({ author: missing }, controller.signal)).items,
       )
     } catch {
       // The ids stand in for names.

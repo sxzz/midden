@@ -43,8 +43,7 @@ const emit = defineEmits<{
   retry: []
   tagsChanged: [change: TagChange]
 }>()
-// A public link lists without filters (they offer the owner's tags) or
-// batch updates.
+// A public link has no batch updates; its filters leave out the owner's tags.
 const shared = computed(() => !!shareSlug.value)
 // An album shows posts' media; accounts have none to show.
 const albums = computed(() => !listsProfiles(props.query))
@@ -113,7 +112,7 @@ const storage = computed(() =>
 <template>
   <p v-if="storage" class="storage">{{ storage }}</p>
   <CollectionFilters
-    v-if="!hideFilters && !shared"
+    v-if="!hideFilters"
     :query="query"
     :within-profile="withinProfile"
     :folder="folder"

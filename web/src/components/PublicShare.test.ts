@@ -60,10 +60,14 @@ beforeEach(() => {
       if (!share) throw new APIError(404, '内容不存在或已删除')
       return share
     }
+    if (rest.startsWith('/collections/authors'))
+      return { items: [{ id: 'x/x.profile/2', name: '作者', count: 1 }] }
     if (rest === '/collections' || rest.startsWith('/collections?'))
       return {
         items: [
-          new URLSearchParams(rest.split('?', 2)[1]).get('kind') === 'profile'
+          (
+            new URLSearchParams(rest.split('?', 2)[1]).get('entity_type') ?? ''
+          ).includes('.profile')
             ? profile
             : post,
         ],
@@ -122,9 +126,8 @@ it('opens a shared folder without login, with a tab per kind it holds', async ()
   expect(
     el.querySelector<HTMLAnchorElement>('a.head')?.getAttribute('href'),
   ).toBe(`#/s/${SLUG}/collection/${POST}`)
-  // Nothing of the owner's: no filters, no batch update, no login.
+  // Nothing of the owner's: no batch update, no login.
   expect(buttons(el)).not.toContain('批量更新')
-  expect(el.querySelector('.filters, form')).toBeNull()
   expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
 
   const tab = [...el.querySelectorAll<HTMLButtonElement>('[role=tab]')].find(
@@ -132,7 +135,72 @@ it('opens a shared folder without login, with a tab per kind it holds', async ()
   )!
   tab.click()
   await vi.waitFor(() => expect(el.textContent).toContain('账号简介'))
-  expect(paths()).toContain(`/public/${SLUG}/collections?kind=profile`)
+  // The tab is in the address, so it can be linked.
+  expect(router.currentRoute.value.query.entity_type).toBe(
+    'x.profile,instagram.profile',
+  )
+  expect(
+    new URLSearchParams(paths().at(-1)!.split('?', 2)[1]).get('entity_type'),
+  ).toBe('x.profile,instagram.profile')
+})
+
+it('filters a shared folder newest posts first, without tags', async () => {
+  share = { target: 'folder', name: '精选', posts: 1, profiles: 0 }
+  const el = await mount(`/s/${SLUG}`)
+  await vi.waitFor(() => expect(el.textContent).toContain('公开的帖子'))
+  const listed = () =>
+    paths()
+      .filter((path) => path.startsWith(`/public/${SLUG}/collections?`))
+      .map((path) => new URLSearchParams(path.split('?', 2)[1]))
+  // Published, newest first, whatever the folder keeps.
+  expect(listed()[0]!.get('sort')).toBe('published')
+  expect(listed()[0]!.get('order')).toBeNull()
+  const sort = el.querySelector<HTMLSelectElement>('select[aria-label=排序]')!
+  expect(sort.value).toBe('published')
+  expect([...sort.options].map((option) => option.textContent?.trim())).toEqual(
+    ['发帖时间', '添加时间', '更新时间', '存储空间'],
+  )
+  expect(
+    el.querySelector<HTMLSelectElement>('select[aria-label=排序方向]')!.value,
+  ).toBe('desc')
+
+  // The filters are there; the owner's tags are not.
+  ;[...el.querySelectorAll('button')]
+    .find((b) => b.textContent?.trim().startsWith('筛选'))!
+    .click()
+  await nextTick()
+  expect(el.querySelector('.panel')).not.toBeNull()
+  expect(el.textContent).not.toContain('标签')
+  expect(el.querySelector('[aria-label=标签筛选]')).toBeNull()
+
+  // A choice goes to the address and to the public list.
+  const postType = el.querySelector<HTMLSelectElement>(
+    'select[aria-label=帖子类型]',
+  )!
+  postType.value = 'quote'
+  postType.dispatchEvent(new Event('change'))
+  await vi.waitFor(() =>
+    expect(router.currentRoute.value.query.post_type).toBe('quote'),
+  )
+  await vi.waitFor(() =>
+    expect(listed().at(-1)!.get('post_type')).toBe('quote'),
+  )
+
+  // The author picker reads the share's own authors.
+  const picker = el.querySelector<HTMLDetailsElement>('details.multi-select')!
+  picker.open = true
+  picker.dispatchEvent(new Event('toggle'))
+  await vi.waitFor(() =>
+    expect(paths()).toContainEqual(
+      expect.stringMatching(new RegExp(`^/public/${SLUG}/collections/authors`)),
+    ),
+  )
+  // A tag in the address is never sent.
+  const before = listed().length
+  await router.push(`/s/${SLUG}?tag=00000000-0000-7000-8000-00000000000a`)
+  await vi.waitFor(() => expect(listed().length).toBeGreaterThan(before))
+  expect(listed().every((q) => !q.has('tag'))).toBe(true)
+  expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
 })
 
 it('shows a shared post read-only, its links kept inside the share', async () => {

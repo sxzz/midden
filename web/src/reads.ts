@@ -92,37 +92,38 @@ export function readFollowChanges(
 }
 
 /**
- * One page of a list for the list's API query. A share lists only its
- * folder (one kind at a time) or a profile's posts, in their own order.
+ * One page of a list for the list's API query. A share lists its folder or a
+ * profile's posts, narrowed by the same filters but tags, which it refuses.
  */
 export function readList(params: URLSearchParams, signal?: AbortSignal) {
+  const query = () => ({
+    ...Object.fromEntries(params),
+    author: params.getAll('author'),
+  })
   if (!shareSlug.value)
-    return call(
-      client.collections.$get(
-        {
-          query: {
-            ...Object.fromEntries(params),
-            author: params.getAll('author'),
-          },
-        },
-        init(signal),
-      ),
-    )
-  const related = params.get('related_to')
-  const query: Record<string, string> = {}
-  if (related) {
-    query.related_to = related
-    for (const key of ['sort', 'order'])
-      if (params.get(key)) query[key] = params.get(key)!
-  } else if ((params.get('entity_type') || '').includes('.profile'))
-    query.kind = 'profile'
-  const cursor = params.get('cursor')
-  if (cursor) query.cursor = cursor
+    return call(client.collections.$get({ query: query() }, init(signal)))
+  params = new URLSearchParams(params)
+  params.delete('tag')
   return call(
     client.public[':slug'].collections.$get(
-      { param: { slug: shareSlug.value }, query },
+      { param: { slug: shareSlug.value }, query: query() },
       init(signal),
     ),
+  )
+}
+
+/** Authors for the author filter: within the share when one is open. */
+export function readAuthors(
+  query: { q?: string; cursor?: string; author?: string[] },
+  signal?: AbortSignal,
+) {
+  return call(
+    shareSlug.value
+      ? client.public[':slug'].collections.authors.$get(
+          { param: { slug: shareSlug.value }, query },
+          init(signal),
+        )
+      : client.collections.authors.$get({ query }, init(signal)),
   )
 }
 
