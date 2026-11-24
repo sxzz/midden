@@ -162,8 +162,48 @@ function run(
   })
 }
 
+const COMMIT = /\b[\da-f]{40}\b/g
+
+interface TextLink {
+  type: 'text_link'
+  offset: number
+  length: number
+  url: string
+}
+
+/**
+ * Commit shas in `text` shortened to 7 characters and linked to the commit
+ * on GitHub through `text_link` entities, so the text needs no escaping.
+ */
+function linkCommits(
+  text: string,
+  repository: string,
+): { text: string; entities: TextLink[] } {
+  const entities: TextLink[] = []
+  let out = ''
+  let last = 0
+  for (const match of text.matchAll(COMMIT)) {
+    out += text.slice(last, match.index)
+    const short = match[0].slice(0, 7)
+    // Offsets count UTF-16 code units, as JavaScript string lengths do.
+    entities.push({
+      type: 'text_link',
+      offset: out.length,
+      length: short.length,
+      url: `https://github.com/${repository}/commit/${match[0]}`,
+    })
+    out += short
+    last = match.index + match[0].length
+  }
+  return { text: out + text.slice(last), entities }
+}
+
 /** Message the owner through the service's own bot, when configured. */
-async function notify(dir: string, text: string): Promise<void> {
+async function notify(
+  dir: string,
+  repository: string,
+  text: string,
+): Promise<void> {
   let env: Record<string, string | undefined> = {}
   try {
     env = parseEnv(readFileSync(path.join(dir, '.env'), 'utf8'))
@@ -177,7 +217,11 @@ async function notify(dir: string, text: string): Promise<void> {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chat, text: text.slice(0, 4000) }),
+        body: JSON.stringify({
+          chat_id: chat,
+          // Cut before linking: shortening never moves a link past the end.
+          ...linkCommits(text.slice(0, 4000), repository),
+        }),
       },
     )
     if (!response.ok)
@@ -191,7 +235,11 @@ async function notify(dir: string, text: string): Promise<void> {
  * Run deploy.ts as it is on origin/main, from outside the checkout it
  * switches. With `check`, only report what would be deployed.
  */
-async function deployLatest(dir: string, check = false): Promise<void> {
+async function deployLatest(
+  dir: string,
+  repository: string,
+  check = false,
+): Promise<void> {
   const logs = path.join(dir, '.local', 'deploy-webhook')
   mkdirSync(logs, { recursive: true, mode: 0o700 })
   const log = createWriteStream(
@@ -225,6 +273,7 @@ async function deployLatest(dir: string, check = false): Promise<void> {
     const tail = result.output.trim().split('\n').slice(-6).join('\n')
     await notify(
       dir,
+      repository,
       outcome.startsWith('deployed')
         ? `✅ midden ${outcome}`
         : `❌ midden 部署失败\n${tail}`,
@@ -232,7 +281,11 @@ async function deployLatest(dir: string, check = false): Promise<void> {
   } catch (error) {
     log.write(`${(error as Error).message}\n`)
     if (!check)
-      await notify(dir, `❌ midden 部署未开始\n${(error as Error).message}`)
+      await notify(
+        dir,
+        repository,
+        `❌ midden 部署未开始\n${(error as Error).message}`,
+      )
   } finally {
     rmSync(script, { force: true })
     log.end()
@@ -254,7 +307,7 @@ if (import.meta.main) {
   const repository = process.env.DEPLOY_WEBHOOK_REPOSITORY || 'sxzz/midden'
   // DEPLOY_WEBHOOK_CHECK=1 only runs `deploy.ts --check`, for trying it out.
   const check = process.env.DEPLOY_WEBHOOK_CHECK === '1'
-  const trigger = createDeployer(() => deployLatest(dir, check))
+  const trigger = createDeployer(() => deployLatest(dir, repository, check))
   createServer(createHandler({ secret, repository, trigger })).listen(
     port,
     '127.0.0.1',
