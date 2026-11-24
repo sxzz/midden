@@ -40,6 +40,12 @@ function buildVersion() {
 export default defineConfig({
   base: '/app/',
   plugins: [vue()],
+  optimizeDeps: {
+    // The dev server's scan starts from index.html and never reaches a
+    // worker's imports. Found later, they make Vite re-bundle and reload
+    // every open page, which in e2e lands in the middle of other tests.
+    entries: ['index.html', 'src/**/*.worker.ts'],
+  },
   define: {
     __VUE_OPTIONS_API__: false,
     __VUE_PROD_DEVTOOLS__: false,
