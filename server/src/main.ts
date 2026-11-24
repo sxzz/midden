@@ -68,7 +68,7 @@ let bot: RunningBot | undefined
 const api = createApi({
   ctx,
   telegram: config.telegram,
-  webOrigins: config.webOrigins,
+  webAppUrl: config.webAppUrl,
   challengeKey: deriveKey(config.secretKey, 'passkey-challenge'),
   notify: (text) => bot?.notify(text),
 })
@@ -100,7 +100,6 @@ if (config.telegram)
     token: config.telegram.token,
     owner: config.telegram.owner,
     webAppUrl: config.webAppUrl,
-    webOrigins: config.webOrigins,
     version: process.env.BUILD_REVISION || 'dev',
     ffmpeg: config.ffmpeg,
   })

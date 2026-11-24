@@ -18,6 +18,7 @@ import { stopCollection } from '#capture/related.ts'
 import { startUpdate } from '#capture/updates.ts'
 import { captures, connections, library } from '#db/schema.ts'
 import { AppError, isAppError } from '#errors.ts'
+import { allowedOrigins } from '#http/origins.ts'
 import { createPasskeyTokens } from '#http/passkeys.ts'
 import { deleteCollection } from '#library/delete.ts'
 import { getCollection, storageUsed } from '#library/read.ts'
@@ -57,8 +58,6 @@ export interface Reply {
 export interface CommandContext {
   ctx: AccountsContext
   webAppUrl?: string
-  /** Origins the web app is served on, for /passkey links. */
-  webOrigins?: string[]
   version: string
   now?: () => number
 }
@@ -144,7 +143,7 @@ function deliverSubmission(
  * address's fragment, which browsers never send to a server.
  */
 function passkey(c: CommandContext): Reply {
-  const origins = c.webOrigins ?? []
+  const origins = allowedOrigins(c.ctx.db, c.webAppUrl)
   if (origins.length === 0) return { text: '服务器未配置网页地址。' }
   const links = createPasskeyTokens(c.ctx.db, origins, (c.now ?? Date.now)())
   return {

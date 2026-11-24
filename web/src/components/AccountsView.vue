@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { computed, onActivated, shallowRef } from 'vue'
+import { computed, onActivated, shallowRef, useTemplateRef } from 'vue'
 import {
   call,
   client,
@@ -13,11 +13,13 @@ import { toast } from '../composables/useToast'
 import { host } from '../host'
 import AddAccountSheet from './AddAccountSheet.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
+import OriginList from './OriginList.vue'
 import PasskeyList from './PasskeyList.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 
 const AT_PREFIX = /^@/
+const passkeyList = useTemplateRef('passkeys')
 const data = shallowRef<Accounts>()
 const loading = shallowRef(true)
 const error = shallowRef('')
@@ -227,7 +229,8 @@ async function remove() {
     </template>
     <p v-if="!addable" class="status">没有支持添加账号的平台。</p>
   </template>
-  <PasskeyList />
+  <PasskeyList ref="passkeys" />
+  <OriginList @removed="passkeyList?.load()" />
   <ListSection title="数据">
     <ListButton
       label="删除全部收藏和采集记录"

@@ -192,6 +192,10 @@ test('the settings page lists, adds, renames and deletes passkeys', async ({
       return r.fulfill({ json: { platforms: [], accounts: [] } })
     if (path === '/v1/passkeys' && request.method() === 'GET')
       return r.fulfill({ json: passkeys })
+    if (path === '/v1/origins')
+      return r.fulfill({
+        json: [{ origin: 'https://midden.test', passkeys: 0 }],
+      })
     if (path === '/v1/passkeys/options')
       return r.fulfill({
         json: {
@@ -257,4 +261,79 @@ test('the settings page lists, adds, renames and deletes passkeys', async ({
   await page.getByRole('button', { name: '删除通行密钥' }).click()
   await expect(section).not.toContainText('旧电脑')
   await page.screenshot({ path: 'test-results/passkeys.png' })
+})
+
+test('the settings page adds a domain and removes it with its passkeys', async ({
+  page,
+}) => {
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  let origins: {
+    id?: string
+    origin: string
+    passkeys: number
+    created_at?: string
+  }[] = [{ origin: 'https://midden.test', passkeys: 0 }]
+  let passkeys = [
+    {
+      id: 'a',
+      name: 'iPhone',
+      rp_id: 'archive.example',
+      created_at: '2026-11-01T08:00:00.000Z',
+    },
+  ]
+  const added: unknown[] = []
+  await page.route('**/v1/**', (r) => {
+    const request = r.request()
+    const path = new URL(request.url()).pathname
+    if (path === '/v1/session') return r.fulfill({ status: 204 })
+    if (path === '/v1/accounts')
+      return r.fulfill({ json: { platforms: [], accounts: [] } })
+    if (path === '/v1/passkeys') return r.fulfill({ json: passkeys })
+    const method = request.method()
+    if (path === '/v1/origins' && method === 'GET')
+      return r.fulfill({ json: origins })
+    if (path === '/v1/origins') {
+      added.push(request.postDataJSON())
+      const origin = {
+        id: 'b',
+        origin: 'https://archive.example',
+        passkeys: 1,
+        created_at: '2026-11-25T00:00:00.000Z',
+      }
+      origins = [...origins, origin]
+      return r.fulfill({ json: origin })
+    }
+    if (path === '/v1/origins/b' && method === 'DELETE') {
+      origins = origins.filter((o) => o.id !== 'b')
+      passkeys = []
+      return r.fulfill({ json: { passkeys: 1 } })
+    }
+    return r.fulfill({ json: { items: [] } })
+  })
+  await page.goto(`${APP}#/accounts`)
+  const domains = page.locator('section', {
+    has: page.getByRole('heading', { name: '域名', exact: true }),
+  })
+  await expect(domains).toContainText('midden.test')
+  await expect(domains).toContainText('Mini App 地址')
+  await expect(
+    domains.getByRole('button', { name: '删除 midden.test' }),
+  ).toHaveCount(0)
+
+  await domains.getByRole('button', { name: '添加域名' }).click()
+  const sheet = page.getByRole('dialog', { name: '添加域名' })
+  await sheet.getByLabel('地址').fill('https://archive.example/app/')
+  await sheet.getByRole('button', { name: '添加', exact: true }).click()
+  await expect(domains).toContainText('archive.example')
+  expect(added).toEqual([{ origin: 'https://archive.example/app/' }])
+
+  await domains.getByRole('button', { name: '删除 archive.example' }).click()
+  const confirm = page.getByRole('dialog', { name: '删除 archive.example？' })
+  await expect(confirm).toContainText('将同时删除此域名的 1 个通行密钥')
+  await confirm.getByRole('button', { name: '删除域名' }).click()
+  await expect(domains).not.toContainText('archive.example')
+  const keys = page.locator('section', {
+    has: page.getByRole('heading', { name: '通行密钥', exact: true }),
+  })
+  await expect(keys).not.toContainText('iPhone')
 })

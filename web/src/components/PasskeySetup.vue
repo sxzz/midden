@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
 import { shallowRef } from 'vue'
 import { createPasskey, defaultPasskeyName, passkeyError } from '../passkey'
+import ListSection from './ui/ListSection.vue'
 // The /passkey link's token, from the address's fragment.
 const props = defineProps<{ token: string }>()
 const emit = defineEmits<{ done: [] }>()
@@ -25,33 +26,41 @@ async function create() {
 <template>
   <form class="setup" aria-label="添加通行密钥" @submit.prevent="create">
     <h1>添加通行密钥</h1>
-    <label class="field">
-      <span>名称</span>
-      <input v-model="name" maxlength="64" autocomplete="off" />
-    </label>
-    <button type="submit" class="primary" :disabled="busy">创建通行密钥</button>
+    <ListSection title="名称">
+      <label class="field">
+        <span class="visually-hidden">名称</span>
+        <input v-model="name" maxlength="64" autocomplete="off" />
+      </label>
+      <button type="submit" class="action strong" :disabled="busy">
+        创建通行密钥
+      </button>
+    </ListSection>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
   </form>
 </template>
 
 <style scoped>
 .setup {
-  display: grid;
-  gap: 14px;
   width: 100%;
-  max-width: 320px;
+  max-width: 420px;
 }
 h1 {
-  margin: 0 0 4px;
+  margin: 0 0 22px;
   text-align: center;
   font-size: 24px;
   font-weight: 700;
 }
 .field {
-  display: grid;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--subtle);
+  display: block;
+  padding: 12px 16px;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 input {
   display: block;
@@ -59,25 +68,31 @@ input {
   padding: 11px 13px;
   border: 0;
   border-radius: 12px;
-  background: var(--card);
+  background: var(--fill);
   font-size: 16px;
   line-height: 1.55;
-  color: var(--text);
 }
-.primary {
+.action {
+  display: block;
   width: 100%;
-  min-height: 48px;
-  border-radius: 12px;
-  background: var(--link);
+  min-height: 52px;
   font-size: 17px;
-  font-weight: 600;
-  color: #fff;
+  text-align: center;
+  color: var(--link);
+  box-shadow: inset 0 1px 0 var(--separator);
 }
-.primary:disabled {
-  opacity: 0.6;
+.action:disabled {
+  color: var(--subtle);
+}
+.action:active:not(:disabled) {
+  background: var(--fill);
+}
+.strong {
+  font-weight: 600;
 }
 .error {
   margin: 0;
+  padding: 0 calc(var(--gutter) + 4px);
   text-align: center;
   font-size: 15px;
   line-height: 1.6;

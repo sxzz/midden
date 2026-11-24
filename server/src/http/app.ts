@@ -17,6 +17,8 @@ import { errorResponse } from './errors.ts'
 import { folderRoutes } from './folder-routes.ts'
 import { libraryRoutes } from './library-routes.ts'
 import { mediaRoutes } from './media-routes.ts'
+import { originRoutes } from './origin-routes.ts'
+import { allowedOrigins } from './origins.ts'
 import { passkeyAuthRoutes, passkeyRoutes } from './passkey-routes.ts'
 import { publicRoutes } from './public-routes.ts'
 import { shareRoutes } from './share-routes.ts'
@@ -30,13 +32,13 @@ export interface HttpOptions {
   ctx: AccountsContext
   telegram?: { token: string; owner: string }
   /**
-   * The origins the web app is served on. Cookie sessions write only from
-   * these, and passkeys are made and used only on them.
+   * The Mini App's address. Its origin and the ones added on the web are
+   * where cookie sessions write from and passkeys are made and used.
    */
-  webOrigins?: string[]
+  webAppUrl?: string
   /** Signs WebAuthn challenges; derived from SECRET_KEY. */
   challengeKey?: Buffer
-  /** Tell the owner, through the bot, that a passkey came or went. */
+  /** Tell the owner, through the bot, that a passkey or domain came or went. */
   notify?: (text: string) => void
   now?: () => number
 }
@@ -49,16 +51,17 @@ export interface HttpOptions {
 export function createApi(options: HttpOptions) {
   const { ctx } = options
   const now = options.now ?? Date.now
-  const webOrigins = options.webOrigins ?? []
+  const { webAppUrl } = options
+  const origins = () => allowedOrigins(ctx.db, webAppUrl)
   const fromWeb = (origin: string | undefined) =>
-    !!origin && webOrigins.includes(origin)
+    !!origin && origins().includes(origin)
   const passkeys = {
     ctx,
     store: {
       db: ctx.db,
       challenges: new Challenges(options.challengeKey ?? randomBytes(32)),
     },
-    webOrigins,
+    origins,
     notify: options.notify,
     now,
   }
@@ -80,7 +83,7 @@ export function createApi(options: HttpOptions) {
         ),
         (c) => {
           const telegram = options.telegram
-          if (!telegram || webOrigins.length === 0)
+          if (!telegram || !webAppUrl)
             return c.json({ error: '服务器未配置 Telegram 登录' }, 404)
           if (!fromWeb(c.req.header('Origin')))
             return c.json({ error: '请求来源无效' }, 403)
@@ -112,8 +115,7 @@ export function createApi(options: HttpOptions) {
           return
         }
         const cookie = getCookie(c, SESSION_COOKIE)
-        if (!cookie || webOrigins.length === 0)
-          return c.json({ error: '需要登录' }, 401)
+        if (!cookie) return c.json({ error: '需要登录' }, 401)
         if (!sessionValid(ctx.db, cookie, now()))
           return c.json({ error: '登录已失效或令牌无效' }, 401)
         if (
@@ -138,6 +140,10 @@ export function createApi(options: HttpOptions) {
       .route('/', folderRoutes(ctx))
       .route('/', shareRoutes(ctx))
       .route('/passkeys', passkeyRoutes(passkeys))
+      .route(
+        '/origins',
+        originRoutes({ ctx, webAppUrl, notify: options.notify, now }),
+      )
       .route('/', mediaRoutes(ctx))
   )
 }

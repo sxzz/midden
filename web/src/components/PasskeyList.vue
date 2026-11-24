@@ -31,6 +31,7 @@ async function load() {
   }
 }
 onActivated(load)
+defineExpose({ load })
 
 const details = (p: Passkey) =>
   [

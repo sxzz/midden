@@ -116,6 +116,7 @@ export interface TagChange {
 }
 export type Folder = Ok<typeof client.folders.$get>[number]
 export type Passkey = Ok<typeof client.passkeys.$get>[number]
+export type WebOrigin = Ok<typeof client.origins.$get>[number]
 export type Share = Ok<typeof client.shares.$get>[number]
 export type PublicShareInfo = Ok<(typeof client.public)[':slug']['$get']>
 export type Annotation = Ok<

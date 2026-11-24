@@ -7,6 +7,11 @@ const props = defineProps<{
   /** The name the field starts with, such as the folder's current one. */
   name?: string
   placeholder?: string
+  /** What the field holds, for screen readers. */
+  label?: string
+  maxlength?: number
+  /** For an address rather than a name. */
+  url?: boolean
   busy?: boolean
   error?: string
 }>()
@@ -43,11 +48,14 @@ function submit() {
     <form class="group" @submit.prevent="submit">
       <p :id="titleId" class="title">{{ title }}</p>
       <label class="field">
-        <span class="visually-hidden">名称</span>
+        <span class="visually-hidden">{{ label ?? '名称' }}</span>
         <input
           v-model="value"
-          maxlength="64"
+          :maxlength="maxlength ?? 64"
           autocomplete="off"
+          :inputmode="url ? 'url' : undefined"
+          :autocapitalize="url ? 'off' : undefined"
+          :spellcheck="url ? false : undefined"
           :placeholder="placeholder ?? '收藏夹名称'"
           enterkeyhint="done"
         />

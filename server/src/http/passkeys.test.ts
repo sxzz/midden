@@ -8,6 +8,7 @@ import { softAuthenticator } from '#testing/authenticator.ts'
 import { testContext } from '#testing/context.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
 import { createToken } from './auth.ts'
+import { addOrigin } from './origins.ts'
 import { TOKEN_TTL } from './passkeys.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type {
@@ -35,11 +36,12 @@ function setup() {
     advance: (ms: number) => (time += ms),
     start,
   }
+  addOrigin(ctx.db, `${MAIN}/app/`, OTHER)
   const notices: string[] = []
   const app = createApi({
     ctx,
     telegram: { token: '1:x', owner: '42' },
-    webOrigins: [MAIN, OTHER],
+    webAppUrl: `${MAIN}/app/`,
     notify: (text) => notices.push(text),
     now: clock.now,
   })
@@ -61,7 +63,12 @@ function setup() {
   /** /passkey from the owner's chat: the link token for each origin. */
   const links = () => {
     const reply = handle(
-      { ctx: ctx!, webOrigins: [MAIN, OTHER], version: 'dev', now: clock.now },
+      {
+        ctx: ctx!,
+        webAppUrl: `${MAIN}/app/`,
+        version: 'dev',
+        now: clock.now,
+      },
       {
         command: 'passkey',
         arg: '',
@@ -176,7 +183,7 @@ describe('/passkey links', () => {
     ).toBe(false)
     const { ctx } = setup()
     expect(
-      handle({ ctx, webOrigins: [MAIN], version: 'dev' }, {
+      handle({ ctx, webAppUrl: `${MAIN}/app/`, version: 'dev' }, {
         command: 'passkey',
         group: true,
       } as Request).text,
@@ -558,6 +565,152 @@ describe('passkey management', () => {
         })
       ).status,
     ).toBe(200)
+  })
+
+  test('domains: lists, adds normalized https origins, refuses others', async () => {
+    const { call, notices } = await signedIn()
+    const list = async () =>
+      (await (await call('/origins')).json()) as {
+        id?: string
+        origin: string
+        passkeys: number
+      }[]
+    expect(await list()).toEqual([
+      { origin: MAIN, passkeys: 0 },
+      {
+        id: expect.any(String),
+        origin: OTHER,
+        passkeys: 0,
+        created_at: expect.any(String),
+      },
+    ])
+    const add = (origin: string) =>
+      call('/origins', { method: 'POST', body: JSON.stringify({ origin }) })
+    const added = await add('  https://New.Example/app/?x=1#y ')
+    expect(await added.json()).toMatchObject({
+      origin: 'https://new.example',
+      passkeys: 0,
+    })
+    expect(notices).toEqual(['已添加域名：new.example'])
+    for (const bad of [
+      'http://plain.test',
+      'ftp://x.test',
+      'x.test',
+      'https://user:pw@x.test',
+      '',
+    ])
+      expect((await add(bad)).status).toBe(400)
+    for (const dup of [MAIN, `${OTHER}/`, 'https://new.example'])
+      expect((await add(dup)).status).toBe(409)
+    expect((await list()).map((o) => o.origin)).toEqual([
+      MAIN,
+      OTHER,
+      'https://new.example',
+    ])
+    expect((await call('/origins/nope', { method: 'DELETE' })).status).toBe(404)
+    // A new domain can write and gets its own /passkey button.
+    expect(
+      (await call('/tags/none', { method: 'DELETE' }, 'https://new.example'))
+        .status,
+    ).not.toBe(403)
+  })
+
+  test('the bot offers a /passkey link for each domain in the list', async () => {
+    const { call, links } = await signedIn()
+    await call('/origins', {
+      method: 'POST',
+      body: JSON.stringify({ origin: 'https://new.example' }),
+    })
+    expect(links().reply.keyboard!.map((row) => row[0]!.text)).toEqual([
+      'midden.test',
+      'archive.example',
+      'new.example',
+    ])
+    const id = (
+      (await (await call('/origins')).json()) as { id?: string }[]
+    )[1]!.id!
+    await call(`/origins/${id}`, { method: 'DELETE' })
+    expect(links().reply.keyboard!.map((row) => row[0]!.text)).toEqual([
+      'midden.test',
+      'new.example',
+    ])
+  })
+
+  test('removing a domain deletes its passkeys and voids its links', async () => {
+    const { call, notices, links, registerWithLink, signIn, post } =
+      await signedIn()
+    const { authenticator } = await registerWithLink(
+      links().tokens[OTHER]!,
+      OTHER,
+    )
+    expect((await signIn(authenticator, OTHER)).status).toBe(204)
+    const outstanding = links().tokens[OTHER]!
+    const other = (
+      (await (await call('/origins')).json()) as {
+        id?: string
+        origin: string
+        passkeys: number
+      }[]
+    ).find((o) => o.origin === OTHER)!
+    expect(other.passkeys).toBe(1)
+    // The built-in domain is not removable.
+    expect(
+      (await call(`/origins/${encodeURIComponent(MAIN)}`, { method: 'DELETE' }))
+        .status,
+    ).toBe(404)
+    notices.length = 0
+    const removed = await call(`/origins/${other.id}`, { method: 'DELETE' })
+    expect(await removed.json()).toEqual({ passkeys: 1 })
+    expect(notices).toEqual([
+      '已删除域名：archive.example，同时删除了 1 个通行密钥',
+    ])
+    expect(
+      ((await (await call('/passkeys')).json()) as { rp_id: string }[]).map(
+        (p) => p.rp_id,
+      ),
+    ).toEqual(['midden.test'])
+    expect((await signIn(authenticator, OTHER)).status).toBe(403)
+    expect(
+      (
+        await post(
+          '/auth/passkey/register/options',
+          { token: outstanding },
+          OTHER,
+        )
+      ).status,
+    ).toBe(403)
+    // Re-adding the domain brings neither back.
+    await call('/origins', {
+      method: 'POST',
+      body: JSON.stringify({ origin: OTHER }),
+    })
+    expect((await signIn(authenticator, OTHER)).status).toBe(400)
+    expect(
+      (
+        await post(
+          '/auth/passkey/register/options',
+          { token: outstanding },
+          OTHER,
+        )
+      ).status,
+    ).toBe(403)
+  })
+
+  test('writes from a removed or unlisted domain are refused', async () => {
+    const { call } = await signedIn()
+    const id = (
+      (await (await call('/origins')).json()) as { id?: string }[]
+    )[1]!.id!
+    expect((await call(`/origins/${id}`, { method: 'DELETE' })).status).toBe(
+      200,
+    )
+    for (const origin of [OTHER, 'https://evil.test'])
+      expect(
+        (await call('/tags/none', { method: 'DELETE' }, origin)).status,
+      ).toBe(403)
+    expect((await call('/tags/none', { method: 'DELETE' })).status).not.toBe(
+      403,
+    )
   })
 })
 

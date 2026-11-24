@@ -818,6 +818,16 @@ export const passkeys = sqliteTable(
 )
 
 /**
+ * Origins the web app is served on besides WEB_APP_URL's own. Cookie
+ * sessions write and passkeys work only on these and that one.
+ */
+export const webOrigins = sqliteTable('web_origins', {
+  id: text().primaryKey(),
+  origin: text().notNull().unique(),
+  createdAt: createdAt(),
+})
+
+/**
  * Links from the bot's /passkey that register a passkey without signing in,
  * by the SHA-256 of their token. One per origin; gone once used.
  */

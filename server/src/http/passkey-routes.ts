@@ -26,8 +26,8 @@ import type {
 export interface PasskeyOptions {
   ctx: AccountsContext
   store: PasskeyStore
-  /** The origins the web app is served on; a passkey is made on one. */
-  webOrigins: string[]
+  /** The origins the web app is served on now; a passkey is made on one. */
+  origins: () => string[]
   /** Tell the owner a passkey came or went. */
   notify?: (text: string) => void
   now: () => number
@@ -70,13 +70,13 @@ export function passkeyAuthRoutes(o: PasskeyOptions) {
   const { ctx, store } = o
   return new Hono<Env>()
     .post('/options', async (c) =>
-      c.json(await loginOptions(store, originOf(c, o.webOrigins), o.now())),
+      c.json(await loginOptions(store, originOf(c, o.origins()), o.now())),
     )
     .post(
       '/',
       json(v.strictObject({ response: Authentication })),
       async (c) => {
-        const origin = originOf(c, o.webOrigins)
+        const origin = originOf(c, o.origins())
         await login(store, origin, c.req.valid('json').response, o.now())
         startSession(c, ctx.db, o.now())
         return c.body(null, 204)
@@ -89,7 +89,7 @@ export function passkeyAuthRoutes(o: PasskeyOptions) {
         c.json(
           await registrationOptions(
             store,
-            originOf(c, o.webOrigins),
+            originOf(c, o.origins()),
             c.req.valid('json'),
             o.now(),
           ),
@@ -101,7 +101,7 @@ export function passkeyAuthRoutes(o: PasskeyOptions) {
         v.strictObject({ token: TOKEN, name: NAME, response: Registration }),
       ),
       async (c) => {
-        const origin = originOf(c, o.webOrigins)
+        const origin = originOf(c, o.origins())
         const passkey = await register(
           store,
           origin,
@@ -124,7 +124,7 @@ export function passkeyRoutes(o: PasskeyOptions) {
       c.json(
         await registrationOptions(
           store,
-          originOf(c, o.webOrigins),
+          originOf(c, o.origins()),
           { caller: callerOf(c) },
           o.now(),
         ),
@@ -136,7 +136,7 @@ export function passkeyRoutes(o: PasskeyOptions) {
       async (c) => {
         const passkey = await register(
           store,
-          originOf(c, o.webOrigins),
+          originOf(c, o.origins()),
           { ...c.req.valid('json'), caller: callerOf(c) },
           o.now(),
         )

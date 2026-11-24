@@ -6,9 +6,10 @@ import {
   vaporInteropPlugin,
   type Component,
 } from 'vue'
-import { APIError, type Passkey } from '../api'
+import { APIError, type Passkey, type WebOrigin } from '../api'
 import { defaultPasskeyName } from '../passkey'
 import { mockApi } from '../testing/api'
+import OriginList from './OriginList.vue'
 import PasskeyList from './PasskeyList.vue'
 import PasskeyLogin from './PasskeyLogin.vue'
 import PasskeySetup from './PasskeySetup.vue'
@@ -255,6 +256,105 @@ describe('passkey management', () => {
     await vi.waitFor(() =>
       expect(el.querySelectorAll('.passkey')).toHaveLength(0),
     )
+  })
+})
+
+describe('domains', () => {
+  let origins: WebOrigin[]
+  let api: ReturnType<typeof mockApi>
+  beforeEach(() => {
+    origins = [
+      { origin: 'https://midden.test', passkeys: 0 },
+      {
+        id: 'b',
+        origin: 'https://archive.example',
+        passkeys: 2,
+        created_at: '2026-11-02T08:00:00.000Z',
+      },
+    ]
+    api = mockApi((path, request) => {
+      if (path === '/origins' && request.method === 'GET') return origins
+      if (path === '/origins') {
+        const { origin } = JSON.parse(request.body!) as { origin: string }
+        if (!origin.startsWith('https://'))
+          throw new APIError(400, '请输入 https 开头的地址')
+        const added = {
+          id: 'c',
+          origin: new URL(origin).origin,
+          passkeys: 0,
+          created_at: '2026-11-03T08:00:00.000Z',
+        }
+        origins = [...origins, added]
+        return added
+      }
+      const id = path.slice('/origins/'.length)
+      const removed = origins.find((o) => o.id === id)!
+      origins = origins.filter((o) => o.id !== id)
+      return { passkeys: removed.passkeys }
+    })
+  })
+
+  it('lists the built-in domain without a delete button', async () => {
+    const el = mount(OriginList)
+    await vi.waitFor(() =>
+      expect(el.querySelectorAll('.origin')).toHaveLength(2),
+    )
+    const rows = [...el.querySelectorAll('.origin')]
+    expect(rows[0]!.textContent).toContain('midden.test')
+    expect(rows[0]!.textContent).toContain('Mini App 地址')
+    expect(rows[0]!.querySelector('button')).toBeNull()
+    expect(rows[1]!.textContent).toContain('2 个通行密钥')
+    expect(() => button(el, '删除 archive.example')).not.toThrow()
+  })
+
+  it('adds a domain, showing what the server refuses', async () => {
+    const el = mount(OriginList)
+    await vi.waitFor(() =>
+      expect(el.querySelectorAll('.origin')).toHaveLength(2),
+    )
+    button(el, '添加域名').click()
+    await vi.waitFor(() =>
+      expect(el.querySelector('dialog[open] input')).not.toBeNull(),
+    )
+    const input = el.querySelector<HTMLInputElement>('dialog[open] input')!
+    expect(input.inputMode).toBe('url')
+    input.value = 'http://plain.test'
+    input.dispatchEvent(new Event('input'))
+    await vi.waitFor(() => expect(button(el, '添加').disabled).toBe(false))
+    button(el, '添加').click()
+    await vi.waitFor(() =>
+      expect(el.querySelector('[role=alert]')?.textContent).toContain(
+        '请输入 https 开头的地址',
+      ),
+    )
+    input.value = 'https://new.example/app/'
+    input.dispatchEvent(new Event('input'))
+    button(el, '添加').click()
+    await vi.waitFor(() =>
+      expect(el.querySelectorAll('.origin')).toHaveLength(3),
+    )
+    expect(bodies(api, '/origins')).toEqual([
+      { origin: 'http://plain.test' },
+      { origin: 'https://new.example/app/' },
+    ])
+  })
+
+  it('confirms removal with the passkeys it deletes, then reports it', async () => {
+    const removed = vi.fn()
+    const el = mount(OriginList, { onRemoved: removed })
+    await vi.waitFor(() =>
+      expect(el.querySelectorAll('.origin')).toHaveLength(2),
+    )
+    button(el, '删除 archive.example').click()
+    const sheet = () => el.querySelector('dialog[open]')
+    await vi.waitFor(() => expect(sheet()).not.toBeNull())
+    expect(sheet()!.textContent).toContain('将同时删除此域名的 2 个通行密钥')
+    expect(api.mock.calls.some(([, r]) => r.method === 'DELETE')).toBe(false)
+    button(el, '删除域名').click()
+    await vi.waitFor(() =>
+      expect(el.querySelectorAll('.origin')).toHaveLength(1),
+    )
+    expect(removed).toHaveBeenCalledOnce()
   })
 })
 

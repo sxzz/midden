@@ -18,8 +18,6 @@ export interface BotOptions {
   token: string
   owner: string
   webAppUrl?: string
-  /** Origins the web app is served on; /passkey links to each. */
-  webOrigins: string[]
   version: string
   ffmpeg: string
 }
@@ -109,7 +107,6 @@ export async function startBot(options: BotOptions): Promise<RunningBot> {
   const commandContext = {
     ctx,
     webAppUrl: options.webAppUrl,
-    webOrigins: options.webOrigins,
     version: options.version,
   }
 
