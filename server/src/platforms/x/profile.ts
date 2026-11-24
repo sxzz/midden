@@ -15,6 +15,7 @@ import {
   type SourceResponse,
 } from '../protocol.ts'
 import { status } from '../rpc.ts'
+import { upstream } from '../upstream.ts'
 import {
   addRelation,
   attachEntities,
@@ -230,7 +231,7 @@ async function publicJSON(
   responses: SourceResponse[],
   fetcher: typeof fetch = fetch,
 ): Promise<any> {
-  const response = await fetcher(url, {
+  const response = await upstream(fetcher, url, {
     signal,
     headers: { Accept: 'application/json', 'User-Agent': 'Monitor/0.4' },
   })

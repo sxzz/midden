@@ -14,6 +14,7 @@ import { Platforms } from '#platforms/registry.ts'
 import { createXPlatform } from '#platforms/x/index.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { CaptureContext } from '#capture/context.ts'
+import type { Logger } from '#log.ts'
 import type { Platform } from '#platforms/platform.ts'
 
 /** A capture context on a fresh in-memory database and temp media dir. */
@@ -24,11 +25,12 @@ export function testContext(
     now?: () => number
     fetch?: typeof fetch
     thumbnailer?: CaptureContext['thumbnailer']
+    logger?: Logger
   } = {},
 ): AccountsContext {
   const db = openDatabase(':memory:')
   const vault = new Vault(new Uint8Array(32).fill(7))
-  const logger = pino({ level: 'silent' })
+  const logger = options.logger ?? pino({ level: 'silent' })
   const dir = mkdtempSync(path.join(tmpdir(), 'midden-test-'))
   const signer = new MediaSigner({ secret: new TextEncoder().encode('test') })
   const noop: JobHandler = { queue: 'control', run: async () => {} }

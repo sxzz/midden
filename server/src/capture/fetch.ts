@@ -25,12 +25,18 @@ import {
 } from '#platforms/protocol.ts'
 import { provider as findProvider, supports } from '#platforms/registry.ts'
 import { status } from '#platforms/rpc.ts'
+import { traceUpstream } from '#platforms/upstream.ts'
 import {
   MAX_MEDIA,
   MAX_PURPOSED_MEDIA,
   type CaptureContext,
 } from './context.ts'
-import { credentialRequired, retryAfter, sourceState } from './errors.ts'
+import {
+  classifyFailure,
+  credentialRequired,
+  retryAfter,
+  sourceState,
+} from './errors.ts'
 import { validateGraph } from './graph.ts'
 import { canonicalJson, sha256Hex } from './json.ts'
 import { finalizeSettled, loadCapture, validateExecution } from './lifecycle.ts'
@@ -114,26 +120,44 @@ export async function runCapture(ctx: CaptureContext, job: Job): Promise<void> {
       automatic: capture.automatic,
       prefetch: capture.prefetch ?? Buffer.alloc(0),
     })
-    let response: FetchResponse
-    try {
-      if (deferred) {
-        // The account is lent only once the platform says it needs it.
+    const logger = ctx.logger.child({
+      jobId: job.id,
+      jobType: job.type,
+      attempt: job.attempt,
+      maxAttempts: job.maxAttempts,
+      captureId: capture.id,
+      platform: collection.platform,
+      providerId: capture.providerId,
+      connectionId: capture.connectionId,
+      target: {
+        kind: collection.kind,
+        externalId: collection.externalId,
+        url: collection.url,
+      },
+    })
+    const response = await traceUpstream(
+      { logger, classify: (error) => classifyFailure(job, error) },
+      async () => {
         try {
-          response = await platform.fetch(
-            { ...request, credentialDeferred: true },
-            signal,
-          )
+          if (deferred) {
+            // The account is lent only once the platform says it needs it.
+            try {
+              return await platform.fetch(
+                { ...request, credentialDeferred: true },
+                signal,
+              )
+            } catch (error) {
+              if (!credentialRequired(error)) throw error
+              take()
+              return await platform.fetch({ ...request, credential }, signal)
+            }
+          }
+          return await platform.fetch({ ...request, credential }, signal)
         } catch (error) {
-          if (!credentialRequired(error)) throw error
-          take()
-          response = await platform.fetch({ ...request, credential }, signal)
+          throw onFetchError(ctx, capture, revision, error)
         }
-      } else {
-        response = await platform.fetch({ ...request, credential }, signal)
-      }
-    } catch (error) {
-      throw onFetchError(ctx, capture, revision, error)
-    }
+      },
+    )
     const staged = stage(response, policy, platform.description.entityTypes, {
       externalId: collection.externalId,
       providerId: capture.providerId,

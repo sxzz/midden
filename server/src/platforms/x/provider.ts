@@ -7,6 +7,7 @@ import {
   type SourceResponse,
 } from '../protocol.ts'
 import { Metadata, status } from '../rpc.ts'
+import { upstream } from '../upstream.ts'
 import { attachEntities } from './entities.ts'
 
 export class ProviderError extends Error {
@@ -239,7 +240,7 @@ export async function fetchPublic(
   signal: AbortSignal,
   endpoint = 'https://api.fxtwitter.com/2/status',
 ): Promise<FetchResponse> {
-  const response = await fetch(`${endpoint}/${id}`, {
+  const response = await upstream(fetch, `${endpoint}/${id}`, {
     signal,
     headers: { Accept: 'application/json', 'User-Agent': 'Monitor/0.4' },
   })

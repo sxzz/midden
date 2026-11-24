@@ -1,7 +1,13 @@
 import { isAppError } from '#errors.ts'
-import { PermanentError, RetryError } from '#jobs/queue.ts'
+import {
+  PermanentError,
+  RetryError,
+  SnoozeError,
+  type Job,
+} from '#jobs/queue.ts'
 import { isProviderFailure } from '#platforms/platform.ts'
 import { status } from '#platforms/rpc.ts'
+import type { Classification } from '#platforms/upstream.ts'
 
 // Platform statuses that retrying cannot fix.
 const PERMANENT_STATUS = new Set<number>([
@@ -59,4 +65,37 @@ export function credentialRequired(error: unknown): boolean {
     isProviderFailure(error) &&
     error.metadata.get('credential-required')[0] === '1'
   )
+}
+
+const statusNames = new Map<number, string>(
+  Object.entries(status).map(([name, code]) => [code, name]),
+)
+
+/** A short code for an error in logs: the platform status or error kind. */
+export function errorCode(error: unknown): string {
+  if (error instanceof RetryError && error.cause !== undefined)
+    return errorCode(error.cause)
+  if (isProviderFailure(error))
+    return statusNames.get(error.code) ?? String(error.code)
+  if (isAppError(error)) return error.kind
+  return error instanceof Error ? error.name : 'unknown'
+}
+
+/** How the job queue will treat a failed attempt, as the logs report it. */
+export function classifyFailure(
+  job: Pick<Job, 'attempt' | 'maxAttempts'>,
+  error: unknown,
+): Classification | undefined {
+  if (error instanceof SnoozeError) return undefined
+  const cause =
+    error instanceof RetryError && error.cause !== undefined
+      ? error.cause
+      : error
+  const retryable = !isPermanent(error)
+  return {
+    code: errorCode(error),
+    message: cause instanceof Error ? cause.message : String(cause),
+    retryable,
+    final: !retryable || job.attempt >= job.maxAttempts,
+  }
 }

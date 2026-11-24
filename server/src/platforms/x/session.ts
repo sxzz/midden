@@ -9,6 +9,7 @@ import { needsTransactionId } from '@fxembed/atmosphere/providers/twitter/proxy/
 import { ClientTransaction } from '@fxembed/atmosphere/providers/twitter/proxy/transaction/transaction'
 import { Visibility, type SourceResponse } from '../protocol.ts'
 import { status } from '../rpc.ts'
+import { upstream } from '../upstream.ts'
 import { accountBootstrap, accountUserAgent } from './bootstrap.ts'
 import { validateCredential, type SessionCredential } from './credential.ts'
 import {
@@ -84,7 +85,7 @@ export function accountTransport(
           ),
         )
       }
-      const response = await fetcher(url, {
+      const response = await upstream(fetcher, url, {
         ...init,
         headers,
         signal,

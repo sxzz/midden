@@ -261,7 +261,7 @@ export class JobQueue {
       this.#db.delete(jobs).where(eq(jobs.id, row.id)).run()
       log.debug({ elapsedMs: this.#now() - started }, 'job finished')
     } catch (error) {
-      await this.#failed(row, job, handler, error, log)
+      await this.#failed(row, job, handler, error, log, this.#now() - started)
     }
   }
 
@@ -271,6 +271,7 @@ export class JobQueue {
     handler: JobHandler | undefined,
     error: unknown,
     log: Logger,
+    elapsedMs: number,
   ): Promise<void> {
     // Shutting down is not the job's fault: run it again on the next start.
     const snooze =
@@ -297,8 +298,16 @@ export class JobQueue {
       error instanceof PermanentError ||
       this.#isPermanent(error) ||
       row.attempt >= row.maxAttempts
+    // Each attempt is logged: the job row and its last error go away once
+    // the job ends, and a later retry overwrites what the record shows.
+    const fields = {
+      err: error,
+      maxAttempts: row.maxAttempts,
+      elapsedMs,
+      sinceQueuedMs: this.#now() - row.createdAt.getTime(),
+    }
     if (final) {
-      log.warn({ err: error }, 'job failed')
+      log.error({ ...fields, state: 'failed' }, 'job failed')
       try {
         await handler?.fail?.(job, error)
       } catch (failError) {
@@ -309,7 +318,7 @@ export class JobQueue {
     }
     const delay =
       error instanceof RetryError ? error.afterMs : backoff(row.attempt)
-    log.info({ err: error, retryInMs: delay }, 'job will retry')
+    log.warn({ ...fields, retryInMs: delay }, 'job will retry')
     this.#db
       .update(jobs)
       .set({

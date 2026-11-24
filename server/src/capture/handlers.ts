@@ -1,9 +1,11 @@
+import { eq } from 'drizzle-orm'
+import { collections } from '#db/schema.ts'
 import { failRefreshBatch, runRefreshBatch } from './batches.ts'
 import { failDownload, runDownload } from './download.ts'
-import { safeError } from './errors.ts'
+import { errorCode, safeError } from './errors.ts'
 import { runCapture } from './fetch.ts'
 import { runFinalize } from './finalize.ts'
-import { failCapture } from './lifecycle.ts'
+import { failCapture, isActive, loadCapture } from './lifecycle.ts'
 import { failRelated, runRelated } from './related.ts'
 import { failThumbnail, runThumbnail } from './thumbnail.ts'
 import type { Job, JobHandler } from '#jobs/queue.ts'
@@ -15,7 +17,42 @@ export function captureHandlers(
 ): Record<string, JobHandler> {
   const failCaptureJob = (job: Job, error: unknown) => {
     const ctx = context()
-    ctx.db.transaction((tx) => failCapture(ctx, tx, job.ref, safeError(error)))
+    const message = safeError(error)
+    const capture = ctx.db.transaction((tx) => {
+      const before = loadCapture(tx, job.ref)
+      failCapture(ctx, tx, job.ref, message)
+      return before && isActive(before) ? before : undefined
+    })
+    if (!capture) return
+    // The record keeps only the user-facing message, and a retry is a new
+    // record: this line ties the failure to its target for later.
+    const collection = ctx.db
+      .select()
+      .from(collections)
+      .where(eq(collections.id, capture.collectionId))
+      .get()
+    ctx.logger.error(
+      {
+        captureId: capture.id,
+        jobId: job.id,
+        jobType: job.type,
+        attempt: job.attempt,
+        maxAttempts: job.maxAttempts,
+        state: 'failed',
+        errorCode: errorCode(error),
+        errorMessage: message,
+        providerId: capture.providerId,
+        connectionId: capture.connectionId,
+        platform: collection?.platform,
+        target: collection && {
+          kind: collection.kind,
+          externalId: collection.externalId,
+          url: collection.url,
+        },
+        durationMs: (ctx.now?.() ?? Date.now()) - capture.createdAt.getTime(),
+      },
+      'capture failed',
+    )
   }
   return {
     capture: {

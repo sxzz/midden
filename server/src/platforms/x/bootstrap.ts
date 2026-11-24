@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { status } from '../rpc.ts'
+import { upstream } from '../upstream.ts'
 import { ProviderError, responseError } from './provider.ts'
 import type { SessionCredential } from './credential.ts'
 
@@ -55,7 +56,7 @@ export async function accountBootstrap(
   signal: AbortSignal,
   fetcher: typeof fetch = fetch,
 ) {
-  const response = await fetcher('https://x.com/home', {
+  const response = await upstream(fetcher, 'https://x.com/home', {
     headers: {
       cookie: `auth_token=${credential.authToken}; ct0=${credential.csrfToken}`,
       'user-agent': accountUserAgent,

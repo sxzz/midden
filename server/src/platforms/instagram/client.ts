@@ -16,6 +16,7 @@ import {
 import { instagramShortcodeToPk } from '@fxembed/atmosphere/providers/instagram/shortcode'
 import { SourceResponse, Visibility } from '../protocol.ts'
 import { status } from '../rpc.ts'
+import { upstream } from '../upstream.ts'
 import { ProviderError, responseError } from './errors.ts'
 import type { SessionCredential } from './credential.ts'
 import type { InstagramRequestContext } from '@fxembed/atmosphere/providers/instagram/account-proxy'
@@ -69,7 +70,7 @@ export class InstagramClient {
       )
     let response: Response
     try {
-      response = await this.fetcher(url, {
+      response = await upstream(this.fetcher, url, {
         ...options,
         redirect: 'manual',
         signal: this.signal,
