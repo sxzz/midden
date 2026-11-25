@@ -42,17 +42,18 @@ docker compose pull && docker compose up -d   # 更新
 `main` 的 test 工作流通过后会发布镜像 `ghcr.io/sxzz/midden:latest` 与 `:sha-<提交>`。部署机上的 webhook 收到这次运行完成的事件后，从 `origin/main` 取出 `scripts/deploy.ts` 执行：
 
 1. 确认部署目录（默认 `~/midden`）没有本地改动，最新镜像的提交在 `origin/main` 上，且与正在运行的版本不同；
-2. 正在运行的服务 `/healthz` 超过 2 秒才回应（或不回应）时推迟部署，结果为 `postponed …`，什么也不改（Bot 的部署消息显示为部署失败，末尾是这一行）。负载很高时下一步的备份会持有一个读事务好几分钟：WAL 随之变大（曾超过 500 MB），Litestream 做阻塞的 TRUNCATE 检查点，旧版本也会卡住，新版本更可能不健康而回滚。等负载下来后手动运行 `node scripts/deploy.ts`；确需立即部署时加 `--force`；
-3. 在线备份数据库到 `data/backups/deploy/`，不压缩，回滚时直接换上。保留最近 2 份：这次的与上一次的；启用 Litestream 时只保留这次的 1 份，因为上一次的只用于新版本运行一段时间后才发现问题的情况，Litestream 可以恢复到那之前的任一时刻；
-4. 切换到该提交，用 `:sha-<提交>` 镜像 `docker compose up -d --wait midden`，并检查 `/healthz`：最多 5 次，间隔 6 秒（约 30 秒），一次没有回应不算不健康。启用 Litestream 时随后 `docker compose up -d litestream`（`litestream.yml` 有改动时加 `--force-recreate`，compose 看不到文件内容的变化）；它启动失败不算部署失败，结果末尾加上 `; litestream did not start`；
-5. 新版本不健康时停掉它，恢复部署前的数据库，切回原来的版本。启用 Litestream 时：先停 Litestream 再停服务（它一直打开着数据库和 WAL，换文件时不能在运行）；换回数据库后删除它的本地状态 `data/.midden.db-litestream/`；原来的版本启动后（即使启动失败）再启动 Litestream。Litestream 发现本地数据库落后于存储桶，从存储桶取得位置，把换回的数据库整个作为下一个事务上传，回滚前的历史仍可恢复（见「Litestream」）。
+2. 停掉正在运行的服务，启用 Litestream 时随后停掉它（在服务之后：它先把服务最后写的内容复制走）。部署本来就要重启服务，停下来再复制，不会像在线备份那样在运行中的服务旁持有一个读事务好几分钟（那会让 WAL 涨过 500 MB，Litestream 随之做阻塞的 TRUNCATE 检查点，服务的写入因 `database is locked` 失败）；
+3. 备份数据库到 `data/backups/deploy/`：`-wal` 不为空时先用原来版本的镜像在一次性容器中（`docker compose run --rm --no-deps --entrypoint node midden -e …`）执行 `PRAGMA wal_checkpoint(TRUNCATE)`，再把 `midden.db` 复制过去（`copyFile` 的 `COPYFILE_FICLONE`：APFS 上是写时复制的克隆，几 GB 也立即完成，文件系统不支持时普通复制）。检查点失败时连同 `-wal` 一起复制，两者合起来是一致的。保留最近 2 份：这次的与上一次的；启用 Litestream 时只保留这次的 1 份，因为上一次的只用于新版本运行一段时间后才发现问题的情况，Litestream 可以恢复到那之前的任一时刻。复制失败时重新启动原来的版本（与 Litestream），结果为 `failed: could not back up the database; … is running again`；
+4. 切换到该提交，用 `:sha-<提交>` 镜像 `docker compose up -d --wait midden`，并检查 `/healthz`：最多 5 次，间隔 6 秒（约 30 秒），一次没有回应不算不健康。启用 Litestream 时随后再启动它（`docker compose up -d litestream`（`litestream.yml` 有改动时加 `--force-recreate`，compose 看不到文件内容的变化）；它启动失败不算部署失败，结果末尾加上 `; litestream did not start`；
+5. 新版本不健康时停掉它，换回第 3 步的副本（连同复制的 `-wal`，删掉 `-shm`），切回原来的版本。启用 Litestream 时：它这时还没有启动，同样先停 Litestream 再停服务（它一直打开着数据库和 WAL，换文件时不能在运行）；换回数据库后删除它的本地状态 `data/.midden.db-litestream/`；原来的版本启动后（即使启动失败）再启动 Litestream。Litestream 发现本地数据库落后于存储桶，从存储桶取得位置，把换回的数据库整个作为下一个事务上传，回滚前的历史仍可恢复（见「Litestream」）。
+
+服务在第 2 步到第 4 步之间停止，通常不到一分钟。Litestream 停止后 WAL 从头开始写，它再启动时上传一份完整快照（见「Litestream」）。
 
 结果通过 Bot 发给 `DEPLOY_NOTIFY_CHAT_ID`（默认 `OWNER_TELEGRAM_ID`），日志在 `.local/deploy-webhook/`。也可以手动运行：
 
 ```sh
 node scripts/deploy.ts --check   # 只检查，不改动
 node scripts/deploy.ts
-node scripts/deploy.ts --force   # 服务繁忙时也部署
 ```
 
 安装 webhook（macOS LaunchAgent，复制到 `~/.local/share/midden/`，监听 `127.0.0.1:18090/hooks/deploy`）：
@@ -362,7 +363,9 @@ Litestream 0.5 把 WAL 中新提交的页面写成 LTX 文件（按页 LZ4 压�
 
 #### 检查点
 
-服务的连接用 WAL、`synchronous = NORMAL`、5 秒的 busy timeout，保留 SQLite 默认的自动检查点（WAL 超过 1000 页时，PASSIVE）。Litestream 一直持有一个读事务，只有它自己的检查点能让 WAL 从头开始写（它做 PASSIVE 检查点时短暂持有写锁，写入在这期间等待，busy timeout 足够）；PASSIVE 检查点越不过它的读事务，所以服务的自动检查点不影响复制。服务中没有 `wal_checkpoint(RESTART)`、`wal_checkpoint(TRUNCATE)` 和 `VACUUM`：前两者会让 Litestream 重新上传整个数据库，`VACUUM` 把每一页写进 WAL，都不要加。`PRAGMA optimize`（启动时和每 6 小时）和 `PRAGMA incremental_vacuum`（见「维护任务」）是普通的写事务；`cli.ts backup` 只读数据库。数据库变小的事务（incremental vacuum 截短文件）在 Litestream 0.5.2 中会让同步报 `page number X out-of-bounds for commit size Y`（#875），之后由 #881 修复，固定的 0.5.18 已包含；用 0.5.18 在本地试过：一边复制，一边清空大量数据并分批 incremental vacuum，最新状态与其间三个时刻的恢复都通过完整性检查，最新状态的页数和内容与源数据库相同。WAL 超过约 500 MB 时 Litestream 先试 PASSIVE，不行再做阻塞的 TRUNCATE（默认设置，保留）。
+服务的连接用 WAL、`synchronous = NORMAL`、5 秒的 busy timeout，保留 SQLite 默认的自动检查点（WAL 超过 1000 页时，PASSIVE）。Litestream 一直持有一个读事务，只有它自己的检查点能让 WAL 从头开始写（它做 PASSIVE 检查点时短暂持有写锁，写入在这期间等待，busy timeout 足够）；PASSIVE 检查点越不过它的读事务，所以服务的自动检查点不影响复制。服务中没有 `wal_checkpoint(RESTART)`、`wal_checkpoint(TRUNCATE)` 和 `VACUUM`：前两者会让 Litestream 重新上传整个数据库，`VACUUM` 把每一页写进 WAL，都不要加。`PRAGMA optimize`（启动时和每 6 小时）和 `PRAGMA incremental_vacuum`（见「维护任务」）是普通的写事务；`cli.ts backup`（手动的在线备份，部署不再用它）只读数据库，但运行期间一直持有读事务。数据库变小的事务（incremental vacuum 截短文件）在 Litestream 0.5.2 中会让同步报 `page number X out-of-bounds for commit size Y`（#875），之后由 #881 修复，固定的 0.5.18 已包含；用 0.5.18 在本地试过：一边复制，一边清空大量数据并分批 incremental vacuum，最新状态与其间三个时刻的恢复都通过完整性检查，最新状态的页数和内容与源数据库相同。
+
+WAL 的大小：Litestream 做快照时（启动后 WAL 是新的时，例如每次部署之后；以及每天 00:00 UTC）直到上传完都不做检查点，WAL 随写入一直变大，负载高时几分钟就超过 1 GB。WAL 超过 `truncate-page-n` 时它先试 PASSIVE，不行再做阻塞的 TRUNCATE；0.5.18 在 TRUNCATE 之后总要在持有写锁的情况下把整个数据库写成一份快照（`checkpoint boundary snapshot`），这期间服务的每个写入都在等待，超过 5 秒就以 `database is locked` 失败，并且又上传一次整个数据库。默认的阈值约 500 MB，快照期间的增长就会越过它，所以 `litestream.yml` 把它设为 1,000,000 页（约 3.8 GiB），只作为最后的保护：快照结束后，下一次普通的 PASSIVE 检查点（WAL 超过 1000 页时，每次同步之后）把 WAL 写回数据库并从头开始。这个检查点期间 Litestream 也持有写锁，WAL 越大越久。磁盘上要留出 WAL 的空间。
 
 Litestream 在数据库中建两张表 `_litestream_seq`、`_litestream_lock`，恢复出的数据库中也有，不影响服务。
 
@@ -441,7 +444,7 @@ Litestream 的恢复在一个临时的 `litestream` 容器中运行（`docker co
 
 在另一台机器上恢复：取出仓库，放回 `.env`（同一个 `SECRET_KEY` 和 Litestream 的 token），把第 1 步的 `-o` 换成 `/data/midden.db` 直接恢复到空的数据目录，再 `docker compose up -d`。
 
-部署前的快照（`data/backups/deploy/`）同样按第 3 步换上，把 `mv data/restore/midden.db* data/` 换成 `cp data/backups/deploy/<文件> data/midden.db`。
+部署前的快照（`data/backups/deploy/`）同样按第 3 步换上，把 `mv data/restore/midden.db* data/` 换成 `cp data/backups/deploy/<文件> data/midden.db`（有同名的 `-wal` 时也复制为 `data/midden.db-wal`）。
 
 使用 R2 时，回收不再引用的媒体会同时删除 R2 中的对象，所以恢复较早的数据库后，在那之后删除的媒体不能再显示。`MEDIA_STORE=local` 时数据库与媒体分别备份，可能有少量新媒体在数据库备份中尚未出现（无害），或数据库引用了刚被回收的旧媒体，后者在维护时会被清理；需要严格一致时，先 `docker compose stop` 再备份。缩略图在请求时重新生成。
 

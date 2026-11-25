@@ -56,7 +56,7 @@ flowchart LR
 - 媒体按 SHA-256 存在 `media/ab/cd/<哈希>`，`blobs` 记录类型与大小，缩略图同样按内容存放。使用 R2 时原文件上传到存储桶的同名键，`blobs.remote_at` 记下上传得到确认的时间，之后删除本地原文件，见「媒体链接」。
 - 删除收藏后，维护任务在没有进行中的抓取时删除其内容；不再被引用的媒体文件 24 小时后删除。
 - 存储用量（`server/src/usage/`）：每 15 分钟从 Cloudflare 的 GraphQL Analytics API 读取 R2 各存储桶每天的存储与操作次数，与本机的数据库、缩略图、可用磁盘一起记在 `storage_snapshots`（每个 UTC 日一行），本月费用由其中本月的行按 R2 标准存储的价格算出；数据库组成每天一次在 worker 线程中由 `dbstat` 读出，存在 `settings` 表；越过阈值和回落时由 Bot 告诉所有者。见运维文档的「存储用量」。
-- 数据库可由单独的 `litestream` 容器（compose 的 `litestream` profile，`litestream.yml`）持续复制到 R2 的私有存储桶 `midden-backup`。它一直持有一个读事务，由它的检查点让 WAL 重新开始；服务只用 SQLite 默认的 PASSIVE 自动检查点，不做 RESTART、TRUNCATE 检查点和 `VACUUM`；删除留下的空闲页面由维护任务用 `incremental_vacuum` 分批还给文件系统，这是普通的写事务（数据库为 `auto_vacuum = INCREMENTAL`，新建的数据库默认如此）。设置了 `LITESTREAM_ACCESS_KEY_ID` 时，服务在只供容器之间访问的 8081 端口接收它的心跳，超过「备份心跳超时」（管理员设置，存在 `settings` 表，默认 20 分钟）没有收到就由 Bot 告诉所有者，管理员面板和 `GET /v1/instance` 显示上次心跳（`server/src/litestream.ts`）。见运维文档的「Litestream」。
+- 数据库可由单独的 `litestream` 容器（compose 的 `litestream` profile，`litestream.yml`）持续复制到 R2 的私有存储桶 `midden-backup`。它一直持有一个读事务，由它的检查点让 WAL 重新开始；服务只用 SQLite 默认的 PASSIVE 自动检查点，不做 RESTART、TRUNCATE 检查点和 `VACUUM`；`litestream.yml` 把它强制 TRUNCATE 检查点的阈值提高到约 3.8 GiB（见运维文档）。删除留下的空闲页面由维护任务用 `incremental_vacuum` 分批还给文件系统，这是普通的写事务（数据库为 `auto_vacuum = INCREMENTAL`，新建的数据库默认如此）。设置了 `LITESTREAM_ACCESS_KEY_ID` 时，服务在只供容器之间访问的 8081 端口接收它的心跳，超过「备份心跳超时」（管理员设置，存在 `settings` 表，默认 20 分钟）没有收到就由 Bot 告诉所有者，管理员面板和 `GET /v1/instance` 显示上次心跳（`server/src/litestream.ts`）。见运维文档的「Litestream」。
 - `catalog` 为每个有版本的收藏保存列表筛选与排序所需的字段（根实体类型、作者、媒体种类、发布时间、占用空间、搜索文本（见「搜索」）、账号的粉丝数与关注数等），由最新版本和最新一次带计数的抓取派生，在同一事务内随抓取完成、关注列表存入账号、删除媒体和原始响应清理更新。列表只读这张窄表；作者的最新资料、作者被打的标签、被保存的转发等跨收藏的条件在查询时通过索引计算。启动时会补齐缺失的行，所以改变它的派生方式时，在迁移中清空这张表即可重建；只涉及少数行时（如只有账号才有的计数）也可以在迁移中就地补齐，不必重建全表。
 - 列表排序（`sort`）：`updated`（最近一次抓取，默认）、`published`（发帖时间，没有时按抓取时间）、`saved`（加入收藏库的时间）、`storage`（占用空间）、`followers`（粉丝数）、`following`（关注数）、`relevance`（相关度，只在搜索时有意义，见「搜索」），`order` 为 `desc`（默认）或 `asc`，相同时按收藏 id 排。搜索时先按相关度分层，所选排序只在每层之内生效。翻页位置记下排序值和 id（搜索时还有层级和层内得分），与筛选条件的指纹一起编码，换了筛选或排序就失效。
 - 粉丝数、关注数是账号自己的计数：取这个收藏最新一次带计数（有 `capture_metrics`）的完成抓取中根实体（`<类型>/<平台 id>`）的 `/metadata/followers`、`/metadata/following`（X 与 Instagram 都放在这里），只认非负整数，其他都算未知。只从关注列表得到、还没抓过的账号，它的第一个版本来自列表，同时有一次带列表所给计数的抓取，所以同样有计数。最新一次抓取完全没有计数时沿用之前读到的，与详情页一致；给了别的计数而缺这一项时算未知。计数存在 `catalog.followers_count`、`following_count`，未知为空；每个方向另有一个虚拟生成列（`<计数>_desc` 为 `coalesce(<计数>, -1)`，`<计数>_asc` 为 `coalesce(<计数>, 2^53-1)`）和它加收藏 id 的索引，所以未知的无论正序倒序都排在最后。用生成列而不是表达式索引，是因为 SQLite 不能在表达式索引上按 `(排序值, id)` 定位翻页位置，每页都要从头扫。这两种排序只在列表只有账号时生效（筛选或公开页访客的 `entity_type` 只含 `.profile` 类型），否则按 `updated` 排：收藏夹的两个标签共用一个保存的排序，帖子标签不应因此出错，网页在帖子标签上也把它显示为更新时间。网页的排序菜单只在账号标签列出「粉丝数」「关注数」，方向写作「从多到少」「从少到多」，列表不按时间分组。
@@ -244,10 +244,12 @@ API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…
 `server/src/main.ts`：
 
 1. 读取配置、创建日志，随即注册 SIGTERM/SIGINT 的处理。之后每启动一样东西就登记它的关闭方法，关闭时按相反顺序执行，所以启动的任何阶段收到信号都会正常退出（退出码 0）。容器中 Node 是 PID 1，没有处理函数的 SIGTERM 会被忽略，等到被强制结束（137）；`compose.yaml` 另外设了 `init: true`。
-2. 打开数据库（应用迁移）、补齐 `catalog`、检测 ffmpeg。
+2. 打开数据库（应用迁移）、补齐 `catalog`、检测 ffmpeg。没有要做的事时这一步不需要写锁：`auto_vacuum` 只在新建的数据库上设置，`journal_mode` 已是 WAL 时不再设置，启动时的 `PRAGMA optimize` 拿不到锁就跳过（6 小时后再做），所以 Litestream 的检查点或别的写入持有写锁时也能启动。
 3. 有意阻塞启动的检查：`MEDIA_STORE=r2` 或 `RAW_R2_BUCKET` 用 `CF_API_TOKEN` 时验证它（每次请求 10 秒超时，共 3 次，最多约 33 秒）。失败就退出，`/healthz` 不响应，自动部署回滚。
 4. 创建任务队列、Litestream 心跳监听、存储用量与路由，开始监听 HTTP（日志 `listening`），然后启动任务队列。
 5. 在后台启动 Telegram Bot（`telegram/launch.ts`），不阻塞上面任何一步。
+
+后台循环（任务队列的领取、Telegram 发送、维护、`optimize`、Litestream 心跳检查）遇到数据库被锁（`database is locked`）时记 warn，下一轮再试；漏出去的这类错误也只记日志，不结束进程，其他未捕获的错误仍结束进程。
 
 `/healthz` 只反映 HTTP 服务与数据库（执行一次 `SELECT 1`，失败时 503），不看 Bot 的状态。Bot 的状态在 `GET /v1/instance` 的 `bot` 字段：`off`（未配置）、`starting`、`running`、`failed`、`stopped`。
 

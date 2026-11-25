@@ -9,6 +9,16 @@ dbs:
     # is a PUT to R2: at the default 1 s a busy day makes 86,400 of them.
     # 10 s caps it at 8,640 and loses at most ~10 s of writes with the disk.
     monitor-interval: 10s
+    # The WAL size (in 4 KiB pages; ~3.8 GiB) at which Litestream forces a
+    # TRUNCATE checkpoint; the default is ~500 MB. While Litestream takes a
+    # snapshot (on start after a deploy, and daily) it makes no checkpoints
+    # until the upload ends, so the WAL grows with every write meanwhile:
+    # over 1 GB in minutes under load. In 0.5.18 a forced TRUNCATE also
+    # writes a snapshot of the whole database while holding the write lock,
+    # so every write in the app waits or fails as locked for that long, and
+    # it uploads the database once more. Above this, the next ordinary
+    # (PASSIVE) checkpoint after the snapshot empties the WAL instead.
+    truncate-page-n: 1000000
     replica:
       url: s3://midden-backup/db
       endpoint: https://9183b1c394e4cd2f0a7d3c978bc53a29.r2.cloudflarestorage.com

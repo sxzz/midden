@@ -3,21 +3,21 @@
 // ~/midden), or with --check only report what would be deployed. Uses Node
 // built-ins only: the deploy webhook runs this file as it is on origin/main.
 //
-//   node scripts/deploy.ts [--check] [--force]
-//
-// --force deploys even while the running server is busy (slow to answer
-// /healthz), when the deployment would otherwise be postponed.
+//   node scripts/deploy.ts [--check]
 
 /* eslint-disable unicorn/no-exports-in-scripts -- for deploy.test.ts; the
    webhook runs this file alone, so the code cannot move to a module. */
 import { execFileSync } from 'node:child_process'
 import {
+  constants,
   copyFileSync,
+  existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   rmdirSync,
   rmSync,
+  statSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -32,10 +32,14 @@ const LITESTREAM = 'litestream'
 // it counts as unhealthy: one slow answer must not roll a deployment back.
 const HEALTH_ATTEMPTS = 5
 const HEALTH_RETRY_DELAY = 6000
-// The running server answering /healthz slower than this is busy: the
-// pre-deploy backup would hold a read transaction for minutes, growing the
-// WAL and stalling it further, so the deployment waits for another time.
-const BUSY_SECONDS = 2
+// Run with node in a one-off container while the app and Litestream are
+// stopped: moves the WAL into the database file, so the copy is one file.
+const CHECKPOINT = `const { DatabaseSync } = require('node:sqlite')
+const db = new DatabaseSync(process.env.DATA_DIR + '/midden.db', { timeout: 60000 })
+const result = db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get()
+db.close()
+console.log(JSON.stringify(result))
+if (result.busy) process.exit(1)`
 
 /** Runs a command in the checkout and returns its trimmed stdout. */
 export type Run = (
@@ -55,10 +59,19 @@ function message(error: unknown): string {
 export interface DeployOptions {
   /** Only report what would be deployed. */
   check?: boolean
-  /** Deploy even while the running server is busy. */
-  force?: boolean
   /** Blocks between health checks; tests pass a recorder. */
   sleep?: (ms: number) => void
+}
+
+/** A pre-deploy copy of the database, with its WAL if one was left. */
+interface Backup {
+  database: string
+  wal?: string
+}
+
+/** A copy-on-write clone where the file system allows, else a copy. */
+function clone(from: string, to: string) {
+  copyFileSync(from, to, constants.COPYFILE_FICLONE)
 }
 
 function sleepSync(ms: number) {
@@ -69,7 +82,7 @@ function sleepSync(ms: number) {
 export function deploy(
   dir: string,
   run: Run,
-  { check = false, force = false, sleep = sleepSync }: DeployOptions = {},
+  { check = false, sleep = sleepSync }: DeployOptions = {},
 ): string {
   function imageRevision(image: string): string {
     return run('docker', [
@@ -146,30 +159,6 @@ export function deploy(
     return `http://127.0.0.1:${settings().port}/healthz`
   }
 
-  /** Why the running server is too busy to back up now, if it is. */
-  function busy(): string | undefined {
-    let seconds: number
-    try {
-      seconds = Number(
-        run('curl', [
-          '-fsS',
-          '--max-time',
-          '10',
-          '-o',
-          '/dev/null',
-          '-w',
-          '%{time_total}',
-          healthz(),
-        ]),
-      )
-    } catch {
-      return 'did not answer /healthz'
-    }
-    if (!Number.isFinite(seconds)) return 'did not answer /healthz'
-    if (seconds > BUSY_SECONDS)
-      return `took ${seconds.toFixed(1)} s to answer /healthz`
-  }
-
   /**
    * Start Litestream, or apply a changed definition; `recreate` also picks
    * up a changed litestream.yml, which compose does not see. A failure is
@@ -201,30 +190,62 @@ export function deploy(
     }
   }
 
+  /** Stop the app, then Litestream, which copies what the app wrote last. */
+  function stopAll(litestream: boolean) {
+    run('docker', ['compose', 'stop', 'midden'])
+    if (litestream) run('docker', ['compose', 'stop', LITESTREAM])
+  }
+
   /**
-   * A consistent copy of the database, taken by the running server, keeping
-   * the newest `keep` copies.
+   * With both stopped, a copy of the database as `revision` left it, kept
+   * with the newest `keep` copies. Cloned (APFS, copy-on-write) where the
+   * file system can, so even a large database copies at once; no reader
+   * holds the WAL back meanwhile, as an online backup did.
    */
-  function snapshot(dataDir: string, keep: number): string {
-    const inside = run('docker', [
-      'compose',
-      'exec',
-      '-T',
-      'midden',
-      'node',
-      'server/src/cli.ts',
-      'backup',
-      '/data/backups/deploy',
-    ])
-    const file = path.join(dataDir, 'backups', 'deploy', path.basename(inside))
-    const older = readdirSync(path.dirname(file))
+  function snapshot(dataDir: string, revision: string, keep: number): Backup {
+    const database = path.join(dataDir, 'midden.db')
+    const walSize = () =>
+      existsSync(`${database}-wal`) ? statSync(`${database}-wal`).size : 0
+    if (walSize() > 0)
+      try {
+        const result = run(
+          'docker',
+          [
+            'compose',
+            'run',
+            '--rm',
+            '--no-deps',
+            '-T',
+            '--entrypoint',
+            'node',
+            'midden',
+            '-e',
+            CHECKPOINT,
+          ],
+          { MIDDEN_IMAGE: `${IMAGE}:sha-${revision}` },
+        )
+        console.info(`checkpoint: ${result}`)
+      } catch (error) {
+        // The copy then takes the WAL along; together they are consistent.
+        console.error(`checkpoint failed: ${message(error)}`)
+      }
+    const folder = path.join(dataDir, 'backups', 'deploy')
+    mkdirSync(folder, { recursive: true })
+    const stamp = new Date().toISOString().replaceAll(/[:.]/g, '-')
+    const backup: Backup = { database: path.join(folder, `midden-${stamp}.db`) }
+    clone(database, backup.database)
+    if (walSize() > 0) {
+      backup.wal = `${backup.database}-wal`
+      clone(`${database}-wal`, backup.wal)
+    }
+    const older = readdirSync(folder)
       .filter((name) => name.endsWith('.db'))
       .toSorted()
       .slice(0, -keep)
     for (const name of older)
       for (const suffix of ['', '-wal', '-shm'])
-        rmSync(path.join(path.dirname(file), name + suffix), { force: true })
-    return file
+        rmSync(path.join(folder, name + suffix), { force: true })
+    return backup
   }
 
   /**
@@ -260,7 +281,7 @@ export function deploy(
     }
   }
 
-  function restore(dataDir: string, file: string, litestream: boolean) {
+  function restore(dataDir: string, backup: Backup, litestream: boolean) {
     // Litestream holds the database and its WAL open: replacing them under
     // it breaks the file or its copy in R2. Stop it before the app.
     if (litestream) run('docker', ['compose', 'stop', LITESTREAM])
@@ -268,7 +289,8 @@ export function deploy(
     const database = path.join(dataDir, 'midden.db')
     for (const suffix of ['-wal', '-shm'])
       rmSync(database + suffix, { force: true })
-    copyFileSync(file, database)
+    clone(backup.database, database)
+    if (backup.wal) clone(backup.wal, `${database}-wal`)
     // Its local state describes the replaced file. Without it Litestream
     // reads its position from the bucket and uploads this file whole as the
     // next transaction, so the history before the rollback stays restorable.
@@ -305,19 +327,35 @@ export function deploy(
     throw new Error(`${IMAGE}:sha-${revision} has another revision`)
 
   const { dataDir, litestream } = settings()
-  let backup = ''
+  let backup: Backup | undefined
   if (current) {
-    const reason = force ? undefined : busy()
-    if (reason)
-      return `postponed ${revision}: the running server ${reason}; deploy later, or with --force`
     // Rolling back needs the running version's image under its own tag.
     run('docker', ['pull', '--quiet', `${IMAGE}:sha-${current}`])
-    step('backing up the database')
-    // This deployment's copy is what a rollback restores. The one before
-    // only guarded against a bad version found later; Litestream's history
-    // covers that, so it is kept only without Litestream.
-    backup = snapshot(dataDir, litestream ? 1 : 2)
-    console.info(backup)
+    // The app restarts anyway: stopped, the database copies at once and
+    // nothing has to wait for the copy.
+    step(`stopping ${current}`)
+    stopAll(litestream)
+    try {
+      step('backing up the database')
+      // This deployment's copy is what a rollback restores. The one before
+      // only guarded against a bad version found later; Litestream's
+      // history covers that, so it is kept only without Litestream.
+      backup = snapshot(dataDir, current, litestream ? 1 : 2)
+      console.info(backup.database)
+    } catch (error) {
+      console.error(message(error))
+      step(`starting ${current} again`)
+      let note = ''
+      try {
+        start(current)
+      } finally {
+        if (litestream) note = startLitestream(false)
+      }
+      throw new Error(
+        `could not back up the database; ${current} is running again${note}`,
+        { cause: error },
+      )
+    }
   }
   try {
     step(`starting ${revision}`)
@@ -328,14 +366,14 @@ export function deploy(
       throw new Error(`${revision} did not become healthy`, { cause: error })
     // Migrations may have run: put back the database the old version knew.
     step(`rolling back to ${current}`)
-    restore(dataDir, backup, litestream)
+    restore(dataDir, backup!, litestream)
     let note = ''
     try {
       start(current)
     } finally {
       if (litestream) note = startLitestream(false)
     }
-    return `rolled back ${revision}: unhealthy; running ${current} with the database from ${backup}${note}`
+    return `rolled back ${revision}: unhealthy; running ${current} with the database from ${backup!.database}${note}`
   }
   pruneImages([revision, current])
   const note = litestream
@@ -346,7 +384,6 @@ export function deploy(
 
 if (import.meta.main) {
   const check = process.argv.includes('--check')
-  const force = process.argv.includes('--force')
   const dir = path.resolve(
     process.env.MIDDEN_DIR || path.join(homedir(), 'midden'),
   )
@@ -370,10 +407,9 @@ if (import.meta.main) {
   }
   try {
     // The last line is the result, read by the deploy webhook.
-    const result = deploy(dir, run, { check, force })
+    const result = deploy(dir, run, { check })
     console.info(`result: ${result}`)
-    if (result.startsWith('rolled back') || result.startsWith('postponed'))
-      process.exitCode = 1
+    if (result.startsWith('rolled back')) process.exitCode = 1
   } catch (error) {
     console.error(`result: failed: ${message(error)}`)
     process.exitCode = 1
