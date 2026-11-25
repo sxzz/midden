@@ -148,6 +148,7 @@ function open(line: ImageLine, asset: Asset) {
       v-if="viewing"
       :assets="viewing.assets"
       :initial-id="viewing.id"
+      :collection-id="id"
       @close="viewing = undefined"
     />
   </div>

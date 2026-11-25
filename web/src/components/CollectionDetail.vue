@@ -14,6 +14,7 @@ import {
 import { profileHandle } from '../captures'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
 import { toast } from '../composables/useToast'
+import { mediaRemovals } from '../media-removals'
 import { date, isRemoved, present } from '../presentation'
 import { accountKey, relationQuery, type Rel } from '../relation-filter'
 import { isProfileEntity } from '../relations'
@@ -203,7 +204,7 @@ function updateStarted(recordId: string) {
   updateSheet.value = false
   started(recordId)
 }
-/** The removal being confirmed: one media item, or all of a post's. */
+/** The removal being confirmed: all of a post's media. */
 const removal = shallowRef<{ target: RemovalTarget; title: string }>()
 watch(
   () => props.id,
@@ -221,12 +222,10 @@ function removeAll() {
     title: '删除此帖所有媒体？',
   }
 }
-function removeOne(asset: Asset) {
-  removal.value = {
-    target: { collection: props.id, asset: asset.id },
-    title: '删除此媒体？',
-  }
-}
+// Media removed from the viewer, opened here or from a list.
+watch(mediaRemovals, () => {
+  void reload()
+})
 function removed(effect: RemovalEffect) {
   removal.value = undefined
   toast(`已删除 ${effect.media} 个媒体`)
@@ -275,7 +274,6 @@ const version = computed(() =>
         :saved-at="savedAt"
         :show-sensitive="showSensitive"
         :editable="!shared"
-        @remove="removeOne"
         @restore="restore"
       />
     </ListSection>

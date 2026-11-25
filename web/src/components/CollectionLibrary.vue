@@ -35,6 +35,7 @@ import {
   type ListTab,
 } from '../folders'
 import { backButton, host } from '../host'
+import { mediaRemovals } from '../media-removals'
 import { listQuery } from '../reads'
 import { tabOf as barTabOf, isTabRoot, type Tab as BarTab } from '../tabbar'
 import ConfirmSheet from './ConfirmSheet.vue'
@@ -370,6 +371,18 @@ function stale() {
   for (const list of all) list.loadedQuery = undefined
   counted = undefined
 }
+// Media removed from the viewer, which opens from every list: the list shown
+// loads again, the others when next shown.
+watch(mediaRemovals, () => {
+  const shown = folderId.value ? folderList : lists[tab.value]
+  const query = shown.loadedQuery
+  stale()
+  if (query !== undefined) {
+    shown.loadedQuery = query
+    void shown.collection.load(query)
+  }
+  loadUsage()
+})
 // Captures change what the lists hold.
 function saved() {
   stale()

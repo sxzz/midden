@@ -23,10 +23,13 @@ export interface Chrome {
 }
 
 // The text area may not squeeze the media below this share of the viewport.
-const MIN_MEDIA_SHARE = 0.4
+const MIN_MEDIA_SHARE = 0.45
 const MIN_MEDIA_HEIGHT = 160
 // The paging buttons and the area's padding always stay in view.
 const MIN_BOTTOM_AREA = 72
+// What the post text may show of the body: lines of it, by the room left.
+const FULL_CAPTION_ROOM = 250
+const SHORT_CAPTION_ROOM = 200
 
 /** The least height the media keeps, whatever the text below it. */
 export function minMediaHeight(viewportHeight: number) {
@@ -34,14 +37,24 @@ export function minMediaHeight(viewportHeight: number) {
 }
 
 /**
- * The tallest the bottom area may grow. Text beyond it scrolls inside the
- * area, so the media above keeps its minimum height.
+ * The tallest the bottom area (text and paging) may be. Its text is clipped
+ * to a few lines, so this only bites in a short viewport.
  */
 export function bottomBudget(viewportHeight: number, top: number) {
   return Math.max(
     MIN_BOTTOM_AREA,
     Math.floor(viewportHeight - top - minMediaHeight(viewportHeight)),
   )
+}
+
+/**
+ * How many lines of the post's text fit under the media: three when there
+ * is room, fewer in a short viewport (a phone on its side), so the media
+ * keeps its height and no line is cut through.
+ */
+export function captionLines(budget: number) {
+  if (budget >= FULL_CAPTION_ROOM) return 3
+  return budget >= SHORT_CAPTION_ROOM ? 2 : 1
 }
 
 /**

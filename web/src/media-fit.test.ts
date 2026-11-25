@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   bottomBudget,
+  captionLines,
   fitBox,
   mediaInsets,
   minMediaHeight,
@@ -22,12 +23,24 @@ const inside = (box: Box, viewport: Size, insets: Insets) =>
 
 describe('bottomBudget', () => {
   it('leaves the media its minimum height', () => {
-    expect(bottomBudget(844, 68)).toBe(844 - 68 - Math.ceil(844 * 0.4))
+    expect(bottomBudget(844, 68)).toBe(844 - 68 - Math.ceil(844 * 0.45))
     expect(minMediaHeight(300)).toBe(160)
   })
   it('keeps the paging area visible in a very short viewport', () => {
     expect(bottomBudget(320, 68)).toBe(92)
+    expect(bottomBudget(390, 68)).toBe(146)
     expect(bottomBudget(200, 68)).toBe(72)
+  })
+})
+
+describe('captionLines', () => {
+  it('shows three lines where there is room', () => {
+    expect(captionLines(bottomBudget(844, 68))).toBe(3)
+    expect(captionLines(bottomBudget(800, 68))).toBe(3)
+  })
+  it('shows fewer in a short viewport', () => {
+    expect(captionLines(bottomBudget(500, 68))).toBe(2)
+    expect(captionLines(bottomBudget(390, 68))).toBe(1)
   })
 })
 

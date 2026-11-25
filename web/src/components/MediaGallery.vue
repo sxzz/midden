@@ -11,16 +11,12 @@ const props = defineProps<{
   assets: Asset[]
   showSensitive?: boolean
   collection?: Collection
-  /** The owner's page: media can be removed (删除此媒体) and restored. */
+  /** The owner's page: removed media can be restored. */
   editable?: boolean
 }>()
-const emit = defineEmits<{ remove: [asset: Asset]; restore: [asset: Asset] }>()
+const emit = defineEmits<{ restore: [asset: Asset] }>()
 // Removed media has no copy here: the post's own page on the platform.
 const source = computed(() => props.collection && safeURL(props.collection.url))
-function removeSelected(asset: Asset) {
-  selected.value = undefined
-  emit('remove', asset)
-}
 const selected = shallowRef<Asset>()
 function view(asset: Asset) {
   selected.value = asset
@@ -142,8 +138,7 @@ watch(
     :assets="previews"
     :initial-id="selected.id"
     :collection="collection"
-    :removable="editable"
-    @remove="removeSelected"
+    :collection-id="collection?.id"
     @close="selected = undefined"
   />
 </template>

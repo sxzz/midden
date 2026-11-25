@@ -15,11 +15,20 @@ import {
   telegramDownload,
   type Asset,
   type Collection,
+  type RemovalEffect,
 } from '../api'
+import { toast } from '../composables/useToast'
 import { host } from '../host'
-import { bottomBudget, mediaInsets, type Chrome } from '../media-fit'
+import {
+  bottomBudget,
+  captionLines,
+  mediaInsets,
+  type Chrome,
+} from '../media-fit'
+import { mediaRemovals } from '../media-removals'
 import { present } from '../presentation'
-import { collectionHref } from '../share'
+import { collectionHref, shareSlug } from '../share'
+import MediaRemovalSheet from './MediaRemovalSheet.vue'
 import AppLink from './ui/AppLink.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 import ViewerDetailButton from './ui/ViewerDetailButton.vue'
@@ -32,15 +41,11 @@ const props = defineProps<{
   collection?: Collection
   collections?: Collection[]
   initialId: string
+  /** The collection the media belongs to, or each item's own. */
   collectionId?: string
   collectionIds?: Record<string, string>
-  /** Offer 删除此媒体 for the media shown, on the owner's page. */
-  removable?: boolean
 }>()
-const emit = defineEmits<{
-  close: []
-  remove: [asset: Asset]
-}>()
+const emit = defineEmits<{ close: [] }>()
 const index = shallowRef(
   Math.max(
     0,
@@ -53,7 +58,29 @@ const selectedCollection = computed(
     selected.value &&
     (props.collectionIds?.[selected.value.id] || props.collectionId),
 )
-const expanded = shallowRef(false)
+const menuOpen = shallowRef(false)
+const removing = shallowRef(false)
+// The same actions from every page, so what they need is read here rather
+// than handed down: the owner's post media can be removed, which a public
+// link, a profile picture (the server keeps those) or media without a
+// collection to remove it from cannot.
+const canRemove = computed(
+  () =>
+    !shareSlug.value &&
+    !!selectedCollection.value &&
+    !!selected.value &&
+    (!selected.value.purpose || selected.value.purpose === 'banner'),
+)
+function askRemove() {
+  menuOpen.value = false
+  removing.value = true
+}
+function removed(effect: RemovalEffect) {
+  removing.value = false
+  toast(`已删除 ${effect.media} 个媒体`)
+  mediaRemovals.value++
+  emit('close')
+}
 // A slide shown before the opening animation ends never gets activated, and
 // stays blank; moving waits for the viewer to be open.
 const opened = shallowRef(false)
@@ -64,7 +91,7 @@ const caption = computed(() => {
   return collection ? present(collection) : undefined
 })
 watch(index, () => {
-  expanded.value = false
+  menuOpen.value = false
 })
 const isVideo = computed(() => selected.value?.mime?.startsWith('video/'))
 const videos = new Set<HTMLVideoElement>()
@@ -112,6 +139,10 @@ let previousOverflow = ''
 let opener: HTMLElement | null = null
 let disposed = false
 function close() {
+  if (menuOpen.value) {
+    menuOpen.value = false
+    return
+  }
   if (!photoSwipe?.opener.isOpen) emit('close')
   else photoSwipe.close()
 }
@@ -137,9 +168,11 @@ function measure(el: HTMLElement) {
   if (!top || !bottom) return false
   const height = el.clientHeight || window.innerHeight
   const topHeight = Math.ceil(top.getBoundingClientRect().height)
+  const budget = bottomBudget(height, topHeight)
+  dialog.value?.style.setProperty('--bottom-max', `${budget}px`)
   dialog.value?.style.setProperty(
-    '--bottom-max',
-    `${bottomBudget(height, topHeight)}px`,
+    '--caption-lines',
+    String(captionLines(budget)),
   )
   const next: Chrome = {
     top: topHeight,
@@ -163,6 +196,15 @@ onMounted(() => {
   previousOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
   dialog.value?.showModal()
+  // A tap anywhere but the menu and its button puts the menu away.
+  dialog.value?.addEventListener(
+    'pointerdown',
+    (event) => {
+      if (menuOpen.value && !(event.target as Element).closest('.menu, .more'))
+        menuOpen.value = false
+    },
+    true,
+  )
   const el = stage.value
   const assets = props.assets
   measure(el)
@@ -417,108 +459,117 @@ watch(
       >
         {{ index + 1 }} / {{ assets.length }}
       </p>
-      <ViewerDetailButton
-        v-if="selectedCollection"
-        :href="collectionHref(selectedCollection)"
-        @navigate="emit('close')"
-      />
-      <button
-        v-if="removable && selected"
-        type="button"
-        class="glass remove"
-        aria-label="删除此媒体"
-        title="删除此媒体"
-        @click="emit('remove', selected)"
-      >
-        <svg
-          class="icon"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.9"
-          stroke-linecap="round"
-          stroke-linejoin="round"
+      <!-- One capsule of icon buttons, as in the iOS toolbar. -->
+      <div class="glass actions" role="toolbar" aria-label="操作">
+        <ViewerDetailButton
+          v-if="selectedCollection"
+          :href="collectionHref(selectedCollection)"
+          @navigate="emit('close')"
+        />
+        <button
+          type="button"
+          class="bar-button save"
+          :disabled="saving"
+          :aria-label="saving ? '准备中…' : '下载'"
+          :aria-busy="saving"
+          :title="saving ? '准备中…' : '下载'"
+          @click="save"
         >
-          <path
-            d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 11v5M14 11v5"
-          />
-        </svg>
-      </button>
-      <button
-        type="button"
-        class="glass save"
-        :disabled="saving"
-        :aria-label="saving ? '准备中…' : '保存'"
-        :aria-busy="saving"
-        :title="saving ? '准备中…' : '保存'"
-        @click="save"
-      >
-        <svg
-          class="icon"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.9"
-          stroke-linecap="round"
-          stroke-linejoin="round"
+          <svg
+            class="icon"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.9"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path v-if="saving" d="M5 12h.01M12 12h.01M19 12h.01" />
+            <path v-else d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4" />
+          </svg>
+        </button>
+        <button
+          v-if="canRemove"
+          type="button"
+          class="bar-button more"
+          aria-label="更多"
+          title="更多"
+          aria-haspopup="menu"
+          :aria-expanded="menuOpen"
+          @click="menuOpen = !menuOpen"
         >
-          <path v-if="saving" d="M5 12h.01M12 12h.01M19 12h.01" />
-          <path v-else d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4" />
-        </svg>
-      </button>
+          <svg
+            class="icon"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            fill="currentColor"
+          >
+            <circle cx="5.5" cy="12" r="1.6" />
+            <circle cx="12" cy="12" r="1.6" />
+            <circle cx="18.5" cy="12" r="1.6" />
+          </svg>
+        </button>
+        <div v-if="menuOpen" class="menu" role="menu" aria-label="更多">
+          <button
+            type="button"
+            role="menuitem"
+            class="danger"
+            @click="askRemove"
+          >
+            <svg
+              class="icon"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.9"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 11v5M14 11v5"
+              />
+            </svg>
+            删除此媒体
+          </button>
+        </div>
+      </div>
     </div>
     <p v-if="saveError" class="save-error" role="alert">{{ saveError }}</p>
 
     <!-- Kept in the page even when empty, so its size is always read. -->
     <div v-show="hasBottomBar" ref="bottomBar" class="chrome chrome-bottom">
       <div v-if="caption || selected?.alt_text" class="text">
-        <div v-if="caption" class="post-caption">
-          <component
-            :is="caption.profileHref ? AppLink : 'span'"
-            :href="caption.profileHref"
-            class="caption-avatar"
-            :aria-label="`查看${caption.name}的主页`"
-            @navigate="emit('close')"
-          >
+        <!-- The author and the text are one link to the post, which has the
+             whole of it. -->
+        <component
+          :is="selectedCollection ? AppLink : 'div'"
+          v-if="caption"
+          :href="selectedCollection && collectionHref(selectedCollection)"
+          class="post-caption"
+          @navigate="emit('close')"
+        >
+          <span class="caption-avatar" aria-hidden="true">
             <LoadingImage
               v-if="caption.avatar && !caption.avatar.sensitive"
               :src="previewURL(caption.avatar)"
               alt=""
             />
-            <span v-else aria-hidden="true">{{
-              caption.name.slice(0, 1)
-            }}</span>
-          </component>
-          <div class="caption-content">
-            <AppLink
-              v-if="caption.profileCollectionId"
-              :href="collectionHref(caption.profileCollectionId)"
-              @navigate="emit('close')"
-              >{{ caption.name
-              }}<span v-if="caption.handle">
-                @{{ caption.handle }}</span
-              ></AppLink
-            >
-            <strong v-else
+            <span v-else>{{ caption.name.slice(0, 1) }}</span>
+          </span>
+          <span class="caption-content">
+            <strong class="caption-author"
               >{{ caption.name
               }}<span v-if="caption.handle">
                 @{{ caption.handle }}</span
               ></strong
             >
-            <button
-              v-if="caption.body"
-              type="button"
-              class="caption-body"
-              :class="{ expanded }"
-              :aria-expanded="expanded"
-              @click="expanded = !expanded"
-            >
-              {{ caption.body }}
-            </button>
-          </div>
-        </div>
+            <span v-if="caption.body" class="caption-body">{{
+              caption.body
+            }}</span>
+          </span>
+        </component>
         <p v-if="selected?.alt_text" class="caption">{{ selected.alt_text }}</p>
       </div>
       <div v-if="assets.length > 1" class="glass remote">
@@ -572,6 +623,15 @@ watch(
         </button>
       </div>
     </div>
+
+    <MediaRemovalSheet
+      v-if="selectedCollection && selected"
+      :open="removing"
+      :target="{ collection: selectedCollection, asset: selected.id }"
+      title="删除此媒体？"
+      @removed="removed"
+      @cancel="removing = false"
+    />
   </dialog>
 </template>
 
@@ -602,44 +662,42 @@ watch(
   display: flex;
   gap: 10px;
   width: min(100%, 760px);
-  pointer-events: auto;
+  color: #fff;
   text-align: left;
+  pointer-events: auto;
 }
-.post-caption a {
-  color: white;
+.caption-author {
+  display: block;
+  overflow: hidden;
   font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
-.post-caption span {
+.caption-author span {
   color: var(--subtle);
+  font-weight: 400;
 }
+/* A few lines of the post, ended by an ellipsis; the post has the rest. The
+   count follows the room left (see captionLines). */
 .caption-body {
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: var(--caption-lines, 3);
   -webkit-box-orient: vertical;
   overflow: hidden;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
-  text-align: left;
-  color: white;
-  line-height: 1.5;
-  width: 100%;
-  /* Margin, not padding: a clamped box paints the next line in its padding. */
-  margin: 6px 0;
+  margin-top: 2px;
+  font-size: 14px;
+  line-height: 1.45;
 }
-.caption-body.expanded {
-  display: block;
-}
-/* Long text scrolls here, inside the cap on the bottom area, instead of
-   growing over the media. */
+/* The text never scrolls or grows: the media above keeps what it is given. */
 .text {
   display: grid;
   gap: 8px;
   justify-items: center;
   width: 100%;
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  pointer-events: auto;
+  overflow: hidden;
 }
 
 .viewer {
@@ -723,9 +781,9 @@ watch(
 }
 .chrome-top {
   top: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   padding: calc(env(safe-area-inset-top, 0px) + 12px)
     calc(env(safe-area-inset-right, 0px) + 14px) 12px
@@ -738,6 +796,7 @@ watch(
   align-items: center;
   gap: 8px;
   max-height: var(--bottom-max, 50dvh);
+  overflow: hidden;
   padding: 12px calc(env(safe-area-inset-right, 0px) + 14px)
     calc(env(safe-area-inset-bottom, 0px) + 8px)
     calc(env(safe-area-inset-left, 0px) + 14px);
@@ -781,6 +840,8 @@ watch(
 .close {
   display: grid;
   place-items: center;
+  grid-column: 1;
+  justify-self: start;
   width: 44px;
   height: 44px;
   color: #fff;
@@ -789,39 +850,78 @@ watch(
 .close:active {
   transform: scale(0.9);
 }
+/* The viewer's actions, one capsule of evenly spaced icon buttons. */
+.actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  grid-column: 3;
+  justify-self: end;
+  gap: 2px;
+  padding: 3px;
+  color: #fff;
+}
+.bar-button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  color: #fff;
+  transition:
+    transform 220ms cubic-bezier(0.32, 0.72, 0, 1),
+    background-color 160ms ease;
+}
+.bar-button:active:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.16);
+  transform: scale(0.9);
+}
+.bar-button:disabled {
+  opacity: 0.5;
+}
+.bar-button[aria-expanded='true'] {
+  background-color: rgba(255, 255, 255, 0.16);
+}
 /* Keyboard users keep a clear ring on every control. */
 .close:focus-visible,
-.save:focus-visible,
-.remove:focus-visible,
+.bar-button:focus-visible,
 .nav:focus-visible,
-.caption:focus-visible {
+.menu button:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 2px;
 }
-.save {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  margin-left: auto;
-  color: #fff;
-  font-size: 15px;
+.menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  min-width: 176px;
+  padding: 6px;
+  border-radius: 18px;
+  background-color: rgba(34, 34, 36, 0.94);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.12),
+    0 12px 36px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(26px) saturate(180%);
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  pointer-events: auto;
 }
-.save:disabled {
-  opacity: 0.5;
+.menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 12px;
+  font-size: 16px;
+  white-space: nowrap;
 }
-.remove {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  margin-left: auto;
-  color: #fff;
+.menu button:active {
+  background-color: rgba(255, 255, 255, 0.12);
 }
-.remove + .save {
-  margin-left: 0;
+.menu .danger {
+  color: #ff6a6a;
 }
 .save-error {
   position: absolute;
@@ -835,6 +935,7 @@ watch(
 .counter {
   display: flex;
   align-items: center;
+  grid-column: 2;
   min-height: 32px;
   margin: 0;
   padding: 0 13px;
@@ -846,17 +947,17 @@ watch(
   pointer-events: none;
 }
 .caption {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   max-width: 640px;
-  max-height: 4.6em;
   margin: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  overflow: hidden;
   color: rgba(235, 235, 245, 0.78);
   font-size: 13px;
   line-height: 1.45;
   text-align: center;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
-  pointer-events: auto;
 }
 
 /* Arrows and page dots read as one glass remote rather than loose buttons. */

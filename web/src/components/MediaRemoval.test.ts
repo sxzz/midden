@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, createVaporApp, nextTick, vaporInteropPlugin } from 'vue'
+import { mediaRemovals } from '../media-removals'
 import { removalEffectText } from '../presentation'
+import { shareSlug } from '../share'
 import { asset, collection, mockApi, type Request } from '../testing/api'
 import BatchRefresh from './BatchRefresh.vue'
 import CollectionDetail from './CollectionDetail.vue'
@@ -135,26 +137,57 @@ describe('removed media', () => {
   })
 
   it('removes one item from the viewer (删除此媒体)', async () => {
-    const remove = vi.fn()
-    const el = mountVue(MediaGallery, {
-      assets: [photo],
-      editable: true,
-      onRemove: remove,
+    const sent: { path: string; body?: unknown }[] = []
+    mockApi((path, request: Request) => {
+      if (request.method === 'POST')
+        sent.push({ path, body: JSON.parse(request.body ?? 'null') })
+      return { media: 1, freed_bytes: 1024, shared: 0 }
     })
+    const removals = mediaRemovals.value
+    const el = mountVue(MediaGallery, { assets: [photo], collection: post })
     el.querySelector<HTMLButtonElement>('.frame')!.click()
     await nextTick()
-    document
-      .querySelector<HTMLButtonElement>('[aria-label="删除此媒体"]')!
-      .click()
-    expect(remove).toHaveBeenCalledWith(photo)
+    document.querySelector<HTMLButtonElement>('[aria-label="更多"]')!.click()
+    await nextTick()
+    document.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click()
+    const sheet = await vi.waitFor(() => {
+      const found = [...document.querySelectorAll('dialog')].find(
+        (d) => d.open && d.textContent?.includes('删除此媒体？'),
+      )
+      expect(found?.textContent).toContain('可释放')
+      return found!
+    })
+    buttons(sheet, '删除')[0]!.click()
+    await vi.waitFor(() =>
+      expect(sent).toContainEqual({
+        path: '/media-removals',
+        body: { collection: 'post', asset: 'p' },
+      }),
+    )
+    await vi.waitFor(() => expect(mediaRemovals.value).toBe(removals + 1))
   })
 
-  it('the viewer offers no removal unless asked', async () => {
+  it('the viewer offers no removal without a collection or behind a link', async () => {
     const el = mountVue(MediaGallery, { assets: [photo] })
     el.querySelector<HTMLButtonElement>('.frame')!.click()
     await nextTick()
     expect(document.querySelector('dialog.viewer')).not.toBeNull()
-    expect(document.querySelector('[aria-label="删除此媒体"]')).toBeNull()
+    expect(document.querySelector('[aria-label="更多"]')).toBeNull()
+    unmount()
+    document.body.replaceChildren()
+    shareSlug.value = 'slug'
+    try {
+      const shared = mountVue(MediaGallery, {
+        assets: [photo],
+        collection: post,
+      })
+      shared.querySelector<HTMLButtonElement>('.frame')!.click()
+      await nextTick()
+      expect(document.querySelector('[aria-label="下载"]')).not.toBeNull()
+      expect(document.querySelector('[aria-label="更多"]')).toBeNull()
+    } finally {
+      shareSlug.value = ''
+    }
   })
 })
 
