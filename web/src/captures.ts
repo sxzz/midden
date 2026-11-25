@@ -51,6 +51,8 @@ const stateLabels: Record<CaptureRecord['state'], RecordStatus> = {
   complete: { label: '已完成', tone: 'ok' },
   partial: { label: '部分缺失', tone: 'warn' },
   failed: { label: '失败', tone: 'failed' },
+  // An update's item it could not capture when its turn came.
+  skipped: { label: '已跳过', tone: 'warn' },
 }
 const waitLabels: Record<NonNullable<CaptureRecord['waiting']>, string> = {
   queue: '排队中',

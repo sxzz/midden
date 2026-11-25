@@ -1,8 +1,11 @@
 import { Buffer } from 'node:buffer'
+import { readdirSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
 import { addAccount, type AccountsContext } from '#accounts/accounts.ts'
-import { collections, jobs, updates } from '#db/schema.ts'
+import { collections, jobs, library, updates, updateSkips } from '#db/schema.ts'
 import { SnoozeError } from '#jobs/queue.ts'
 import { createFolder } from '#library/folders.ts'
 import { status } from '#platforms/rpc.ts'
@@ -33,6 +36,8 @@ import {
   updateRecord,
 } from './updates.ts'
 import type { FetchRequest } from '#platforms/protocol.ts'
+
+const DRIZZLE = fileURLToPath(new URL('../../drizzle', import.meta.url))
 
 let ctx: AccountsContext | undefined
 afterEach(async () => {
@@ -438,6 +443,58 @@ describe('更新', () => {
       done: true,
       stopped: true,
     })
+  })
+
+  test('skipped items are recorded one by one, each with why', async () => {
+    const { ctx } = setup()
+    const kept = await save(ctx, 'https://fake.test/p/1')
+    const removed = await save(ctx, 'https://fake.test/p/2')
+    const saved = ctx.db
+      .select()
+      .from(library)
+      .where(eq(library.collectionId, removed))
+      .get()!
+    const update = startUpdate(ctx, { target: 'many', ids: [kept, removed] })
+    // Taken out of the library before its turn came.
+    ctx.db.delete(library).where(eq(library.collectionId, removed)).run()
+    await ctx.queue.drain()
+    expect(updateRecord(ctx.db, update)).toMatchObject({
+      state: 'partial',
+      retryable: 0,
+      update: { skipped: 1 },
+    })
+    const skipped = {
+      jobId: 'skipped:1',
+      collectionId: removed,
+      url: 'https://fake.test/p/2',
+      state: 'skipped',
+      saved: false,
+      retryable: false,
+    }
+    expect(updateMembers(ctx.db, update, 'problem').items).toEqual([
+      expect.objectContaining({ ...skipped, error: '已移出收藏库' }),
+    ])
+    expect(updateMembers(ctx.db, update, '').items.map((m) => m.state)).toEqual(
+      ['complete', 'skipped'],
+    )
+    // Not a failure to fetch again.
+    expect(retryRecordFailed(ctx, update)).toBe(0)
+
+    // Updates from before skips were kept get theirs from the migration:
+    // removed when no longer saved, otherwise without a reason.
+    ctx.db.delete(updateSkips).run()
+    ctx.db.insert(library).values(saved).run()
+    const migration = readdirSync(DRIZZLE).find((d) =>
+      d.endsWith('_update_skips'),
+    )!
+    const backfill = readFileSync(
+      path.join(DRIZZLE, migration, 'migration.sql'),
+      'utf8',
+    ).split('--> statement-breakpoint', 2)[1]!
+    ctx.db.$client.exec(backfill)
+    expect(updateMembers(ctx.db, update, 'problem').items).toEqual([
+      expect.objectContaining({ ...skipped, saved: true, error: '无法更新' }),
+    ])
   })
 
   test('failed items are retried within the same record', async () => {

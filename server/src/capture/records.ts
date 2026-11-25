@@ -771,7 +771,8 @@ const MEMBER_FILTERS: Record<string, MemberFilter> = {
   '': () => true,
   added: (state, added) => isFinished(state) && added === true,
   updated: (state, added) => isFinished(state) && added === false,
-  problem: (state) => state === 'failed' || state === 'partial',
+  problem: (state) =>
+    state === 'failed' || state === 'partial' || state === 'skipped',
   pending: isPending,
   failed: (state) => state === 'failed',
   partial: (state) => state === 'partial',

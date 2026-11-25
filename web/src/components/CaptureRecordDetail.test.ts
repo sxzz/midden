@@ -507,6 +507,63 @@ it('opens 账号 when it is the first tab, and heads it when it is the only one'
   expect(only.el.querySelector('h2')?.textContent).toBe('账号')
 })
 
+it("lists an update's skipped items one by one, each with why, among the problems", async () => {
+  const skipped = (id: string, error: string, saved: boolean) => ({
+    ...member(id, 'skipped'),
+    job_id: `skipped:${id}`,
+    saved,
+    error,
+  })
+  const { el, tabs } = mount(
+    () => ({
+      ...detail({ complete: 1, partial: 0, failed: 0, added: 0, updated: 1 }),
+      state: 'partial',
+      update: {
+        target: 'many',
+        posts: 3,
+        profiles: 0,
+        older: false,
+        queued: 0,
+        skipped: 2,
+      },
+    }),
+    {
+      updated: [member('1')],
+      problem: [
+        skipped('2', '已移出收藏库', false),
+        skipped('3', '没有可用的采集账号', true),
+      ],
+    },
+  )
+  await vi.waitFor(() => expect(el.textContent).toContain('status/1'))
+  expect(tabs()).toEqual([
+    { name: '更新记录 1', selected: true },
+    { name: '异常记录 2', selected: false },
+  ])
+  // Only a count up top: no summary of reasons.
+  expect(el.textContent).toContain('跳过2 项')
+  expect(el.textContent).not.toContain('已移出收藏库')
+  ;[...el.querySelectorAll<HTMLElement>('[role=tab]')].at(-1)!.click()
+  await vi.waitFor(() => expect(el.textContent).toContain('status/3'))
+  const rows = [...el.querySelectorAll('.member')].map((row) => ({
+    text: row.textContent,
+    link: !!row.querySelector('a'),
+    retry: !!row.querySelector('button'),
+  }))
+  expect(rows).toEqual([
+    {
+      text: expect.stringContaining('已移出收藏库已跳过'),
+      link: false,
+      retry: false,
+    },
+    {
+      text: expect.stringContaining('没有可用的采集账号已跳过'),
+      link: true,
+      retry: false,
+    },
+  ])
+})
+
 /** A profile record with something failed in each part. */
 const failing = (retried: boolean) => ({
   ...detail({ complete: 1, partial: 1, failed: 2, added: 2, updated: 0 }),

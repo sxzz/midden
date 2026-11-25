@@ -14,6 +14,8 @@ import {
   revisions,
   submissions,
   updates,
+  updateSkips,
+  type UpdateSkipReason,
   type UpdateTarget,
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
@@ -405,15 +407,15 @@ function submitItem(
   ctx: CaptureContext,
   update: Update,
   position: number,
-): Job | undefined {
+): Job | { skipped: UpdateSkipReason } {
   const collectionId = update.collectionIds[position]!
   const item = itemKinds(ctx.db, [collectionId]).get(collectionId)
-  if (!item) return undefined
+  if (!item) return { skipped: 'removed' }
   const key = `update:${update.id}:${position}`
   try {
     if (item.kind === 'profile' && update.older) {
       const page = lastPage(ctx.db, collectionId)
-      if (!page?.nextPageCursor) return undefined
+      if (!page?.nextPageCursor) return { skipped: 'no_more_pages' }
       return submit(ctx, {
         url: item.url,
         providerId: page.providerId,
@@ -431,20 +433,67 @@ function submitItem(
       options: update.options,
     })
   } catch (error) {
-    if (
-      isAppError(error) &&
-      [
-        'not_found',
-        'unsupported',
-        'connection',
-        'account_required',
-        'invalid_target',
-        'no_more_pages',
-      ].includes(error.kind)
-    )
-      return undefined
+    const reason = isAppError(error) ? SKIPS[error.kind] : undefined
+    if (reason) return { skipped: reason }
     throw error
   }
+}
+
+/** Why an item is skipped, by the error its submission gave. */
+const SKIPS: Partial<Record<string, UpdateSkipReason>> = {
+  not_found: 'removed',
+  unsupported: 'unsupported',
+  invalid_target: 'unsupported',
+  connection: 'account',
+  account_required: 'account',
+  no_more_pages: 'no_more_pages',
+}
+
+/** How a skipped item reads: why it was not updated. */
+export const SKIP_TEXT: Record<UpdateSkipReason, string> = {
+  removed: '已移出收藏库',
+  unsupported: '平台不支持采集',
+  account: '没有可用的采集账号',
+  no_more_pages: '没有更早的帖子',
+  unknown: '无法更新',
+}
+
+/** An update's skipped items, in update order. */
+function skipRows(db: Executor, id: string) {
+  return db
+    .select()
+    .from(updateSkips)
+    .where(eq(updateSkips.updateId, id))
+    .orderBy(updateSkips.position)
+    .all()
+}
+
+/** Record an item skipped when its turn came, and why. */
+function skipItem(
+  ctx: CaptureContext,
+  tx: Executor,
+  update: Update,
+  position: number,
+  reason: UpdateSkipReason,
+): void {
+  const collectionId = update.collectionIds[position]!
+  const url =
+    tx
+      .select({ url: collections.url })
+      .from(collections)
+      .where(eq(collections.id, collectionId))
+      .get()?.url ?? ''
+  tx.insert(updateSkips)
+    .values({
+      updateId: update.id,
+      position,
+      collectionId,
+      url,
+      reason,
+      createdAt: new Date(ctx.now?.() ?? Date.now()),
+    })
+    .onConflictDoNothing()
+    .run()
 }
 
 /** Items whose capture runs or whose timeline is still being submitted. */
@@ -477,14 +526,20 @@ export function runUpdate(ctx: CaptureContext, job: QueueJob): void {
       throw new SnoozeError(FEED_WAIT_MS)
     const position = update.position
     const submitted = submitItem(ctx, update, position)
-    db.update(updates)
-      .set({
-        position: position + 1,
-        ...(submitted ? {} : { skipped: update.skipped + 1 }),
-      })
-      .where(and(eq(updates.id, update.id), eq(updates.position, position)))
-      .run()
-    if (submitted && isPending(submitted.state)) running++
+    const current = update
+    db.transaction((tx) => {
+      const moved = tx
+        .update(updates)
+        .set({
+          position: position + 1,
+          ...('skipped' in submitted ? { skipped: current.skipped + 1 } : {}),
+        })
+        .where(and(eq(updates.id, current.id), eq(updates.position, position)))
+        .run()
+      if ('skipped' in submitted && Number(moved.changes))
+        skipItem(ctx, tx, current, position, submitted.skipped)
+    })
+    if ('state' in submitted && isPending(submitted.state)) running++
     update = load()
     if (update?.state !== 'running') return
   }
@@ -639,7 +694,7 @@ export function retryItem(
     .set({ idemKey: `retried:${item.id}`, updateId: null })
     .where(eq(submissions.id, item.id))
     .run()
-  if (submitItem(ctx, update, positionOf(item))) return true
+  if ('id' in submitItem(ctx, update, positionOf(item))) return true
   ctx.db.update(submissions).set(keep).where(eq(submissions.id, item.id)).run()
   return false
 }
@@ -1073,6 +1128,9 @@ function profileParts(db: Executor, g: Gathered): ProfilePart[] {
     return item ? [item.capture.id] : []
   })
   const missing = missingMedia(db, captureIds)
+  const skips = new Map(
+    skipRows(db, update.id).map((skip) => [skip.position, skip]),
+  )
   const failed = g.items.filter((i) => i.capture.state === 'failed')
   const saved = savedIds(
     db,
@@ -1085,13 +1143,14 @@ function profileParts(db: Executor, g: Gathered): ProfilePart[] {
   return positions.map(({ id, position }) => {
     const item = byPosition.get(position)
     const url = kinds.get(id)!.url
+    const skip = skips.get(position)
     if (!item)
       return {
         collectionId: id,
         url,
         handle: names.get(id) ?? '',
         state: position < update.position ? 'skipped' : 'waiting',
-        error: '',
+        error: skip ? SKIP_TEXT[skip.reason] : '',
         jobId: '',
         retryable: false,
       }
@@ -1335,13 +1394,32 @@ export function updateMembers(
         : {}),
     }
   })
+  // Items skipped when their turn came, each with why; one still saved
+  // links to its page.
+  const skipped = skipRows(db, id)
+  const stillSaved = savedIds(
+    db,
+    skipped.map((s) => s.collectionId),
+  )
+  const skips = skipped.map((skip): CaptureMember => ({
+    jobId: `skipped:${skip.position}`,
+    collectionId: skip.collectionId,
+    saved: stillSaved.has(skip.collectionId),
+    url: skip.url,
+    state: 'skipped',
+    error: SKIP_TEXT[skip.reason],
+    createdAt: skip.createdAt,
+    gone: false,
+    reasons: [],
+    retryable: false,
+  }))
   return memberPage(
     db,
     `update:${id}`,
     state,
     cursor,
     newestPerCollection([...g!.items, ...memberSubmissions(db, pages)]),
-    lists,
+    [...lists, ...skips],
     ({ capture, submission }) =>
       submission.updateId === id
         ? saved.has(capture.collectionId)

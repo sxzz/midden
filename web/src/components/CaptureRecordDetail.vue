@@ -80,6 +80,7 @@ const filters = computed((): FilterOption[] => {
     count: (r.profiles?.length ?? 0) + (r.more_profiles ?? 0),
   }
   if (!m) return profiles.count ? [profiles] : []
+  const skipped = r.update?.skipped ?? 0
   const options: FilterOption[] =
     m.added !== undefined && m.updated !== undefined
       ? [
@@ -99,14 +100,15 @@ const filters = computed((): FilterOption[] => {
           {
             value: '',
             label: '全部',
-            count: m.complete + m.partial + m.failed + m.pending,
+            count: m.complete + m.partial + m.failed + m.pending + skipped,
           },
           profiles,
         ]
   options.push({
     value: 'problem',
     label: '异常记录',
-    count: m.failed + m.partial,
+    // An update's skipped items are listed here, each with why.
+    count: m.failed + m.partial + skipped,
   })
   // Last, so the other tabs stay put when it goes away.
   options.push({ value: 'pending', label: '进行中', count: m.pending })
@@ -425,7 +427,8 @@ async function stop() {
 }
 /** A member's line: its link, or the profile list it stands for. */
 function memberTitle(m: CaptureMember) {
-  if (!m.list) return linkTitle(m.url)
+  // A skipped item whose collection is gone has no link left to name it.
+  if (!m.list) return m.url ? linkTitle(m.url) : '已删除的收藏'
   return `${profileHandle(m.url, m.handle)} ${m.list === 'following' ? '关注' : '粉丝'}名单`
 }
 const retryLabel = computed(() => {
@@ -487,7 +490,7 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
           </div>
           <div v-if="record.update?.skipped">
             <dt>跳过</dt>
-            <dd>{{ record.update.skipped }} 项已删除或无法更新</dd>
+            <dd>{{ record.update.skipped }} 项</dd>
           </div>
           <div v-if="additions">
             <dt>收藏</dt>

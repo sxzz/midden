@@ -659,7 +659,7 @@ test("an update's failed parts are retried one at a time or all at once", async 
         profiles: 1,
         older: false,
         queued: 0,
-        skipped: 0,
+        skipped: 1,
       },
       profiles: [
         {
@@ -711,19 +711,33 @@ test("an update's failed parts are retried one at a time or all at once", async 
       return r.fulfill({
         json: {
           items:
-            url.searchParams.get('state') === 'problem' &&
-            failed.has('post-job')
+            url.searchParams.get('state') === 'problem'
               ? [
+                  ...(failed.has('post-job')
+                    ? [
+                        {
+                          job_id: 'post-job',
+                          collection_id: collection,
+                          saved: true,
+                          url: 'https://x.com/fixture/status/9',
+                          state: 'failed',
+                          error: '帖子暂不可见',
+                          reasons: [],
+                          retryable: true,
+                          created_at: '2026-10-14T08:00:01Z',
+                        },
+                      ]
+                    : []),
+                  // Taken out of the library before its turn came.
                   {
-                    job_id: 'post-job',
-                    collection_id: collection,
-                    saved: true,
-                    url: 'https://x.com/fixture/status/9',
-                    state: 'failed',
-                    error: '帖子暂不可见',
+                    job_id: 'skipped:2',
+                    collection_id: post,
+                    saved: false,
+                    url: 'https://x.com/fixture/status/8',
+                    state: 'skipped',
+                    error: '已移出收藏库',
                     reasons: [],
-                    retryable: true,
-                    created_at: '2026-10-14T08:00:01Z',
+                    created_at: '2026-10-14T08:00:02Z',
                   },
                 ]
               : [],
@@ -746,4 +760,14 @@ test("an update's failed parts are retried one at a time or all at once", async 
   await expect(retry('全部重试')).toHaveCount(0)
   await expect(retry('重试 @cat 资料')).toHaveCount(0)
   expect(sent).toEqual([{ id: 'page-2' }, { id: 'following' }, {}])
+
+  // A skipped item is its own row with its own reason, and no retry.
+  await page.getByRole('tab', { name: /^异常记录/ }).click()
+  const skippedRow = page.locator('.member', {
+    hasText: 'x.com/fixture/status/8',
+  })
+  await expect(skippedRow).toContainText('已移出收藏库')
+  await expect(skippedRow).toContainText('已跳过')
+  await expect(skippedRow.getByRole('button')).toHaveCount(0)
+  await expect(skippedRow.getByRole('link')).toHaveCount(0)
 })

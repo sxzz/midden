@@ -795,6 +795,39 @@ export const updates = sqliteTable(
   (t) => [index('updates_created').on(t.createdAt, t.id)],
 )
 
+export const updateSkipReasons = [
+  // No longer in the library.
+  'removed',
+  // Its platform cannot capture it (any more).
+  'unsupported',
+  // No usable account to capture it with.
+  'account',
+  // 抓取更早的帖子: the profile has no older posts.
+  'no_more_pages',
+  // Skipped before reasons were kept.
+  'unknown',
+] as const
+export type UpdateSkipReason = (typeof updateSkipReasons)[number]
+
+/** An item of an update that could not be captured when its turn came. */
+export const updateSkips = sqliteTable(
+  'update_skips',
+  {
+    updateId: text()
+      .notNull()
+      .references(() => updates.id, { onDelete: 'cascade' }),
+    // Its place in `updates.collection_ids`.
+    position: integer().notNull(),
+    // Not a reference: the collection may be gone later.
+    collectionId: text().notNull(),
+    // Its link when skipped, to name it once the collection is gone.
+    url: text().notNull().default(''),
+    reason: text({ enum: updateSkipReasons }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.updateId, t.position] })],
+)
+
 export const tags = sqliteTable('tags', {
   id: text().primaryKey(),
   name: text().notNull().unique(),
