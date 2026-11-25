@@ -177,18 +177,22 @@ API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…
 
 ## 网页导航
 
-- 网页内去往另一页的地方都是带 `href` 的链接（`#/…`，由 `router.resolve` 得出），所以 Cmd/Ctrl 点击、中键、右键菜单「在新标签页打开」和状态栏地址都与普通链接一样。`ui/AppLink.vue` 是共用的链接：`to` 是路由，`href` 是地址，指向别的网站时加 `target="_blank" rel="noopener noreferrer"`；普通点击经路由跳转，其余点击交给浏览器，与 RouterLink 相同。`ListButton` 等有 `to` 时渲染成这样的链接；收藏列表的一行整体是标题链接的点击区域，行内的头像、引用和媒体在它之上。`返回`（`ui/BackLink.vue`）在有历史时后退，本身是指向首页（公开页是分享首页）的链接。
+- 网页内去往另一页的地方都是带 `href` 的链接（`#/…`，由 `router.resolve` 得出），所以 Cmd/Ctrl 点击、中键、右键菜单「在新标签页打开」和状态栏地址都与普通链接一样。`ui/AppLink.vue` 是共用的链接：`to` 是路由，`href` 是地址，指向别的网站时加 `target="_blank" rel="noopener noreferrer"`；普通点击经路由跳转，其余点击交给浏览器，与 RouterLink 相同。`ListButton` 等有 `to` 时渲染成这样的链接；收藏列表的一行整体是标题链接的点击区域，行内的头像、引用和媒体在它之上。`返回`（`ui/BackLink.vue`）在有历史时后退，本身是指向所在标签根页（公开页是分享首页）的链接。
 - 只在操作完成后才知道去处的跳转（存为收藏夹后打开、重新采集后打开新记录、删除后回到列表）、表单提交和只改当前页状态的 `router.replace` 仍由代码执行。lint 规则 `midden/no-click-navigation`（`scripts/no-click-navigation.ts`）在 `.vue` 的事件处理中发现同步的 `router.push` 或修改 `location`（包括经由组件内的函数）时报错；`async` 函数、`submit` 与 `search` 事件不算。
 - 图谱画布上的节点不是元素：Cmd/Ctrl/Shift 点击或中键时用 `window.open` 在新标签页打开它的详情。
 - Mini App 中没有标签页，新开的浏览器窗口也没有登录：修饰键和中键点击都在当前页打开（`navigation.ts` 的 `navigatesHere`），文档上的 `click`、`auxclick` 监听处理普通的 `#/` 链接。
+- 底部标签栏（`TabBar.vue`，规则在 `tabbar.ts`）：所有者的每一页都有，公开页、登录页和 `/passkey` 页没有。三个标签都是链接：「探索」（收藏库，回到离开时的帖子或账号标签）、「关系」（`#/relations`，回到离开时的账号）、「设置」（`#/settings`）。页面属于哪个标签只看路由：收藏库及从它打开的收藏详情、统计、资料修改记录、关注变化、采集与采集记录属于探索；`#/relations`、Profile 的关系图谱与关系对比属于关系；设置及其子页属于设置。所在标签高亮；在标签的根页再点它回到顶部，在更深的页面点它回到根页。页面向下滚动 12px 后标签栏移出屏幕，向上滚动同样距离后回来，在顶部和滚到底时总是显示；换页后 0.4 秒内的滚动（恢复位置）不算。多选时由多选栏取代它。高度加上 `env(safe-area-inset-bottom)`，Mini App 中改用 Telegram 给出的 `--tg-safe-area-inset-bottom` 与 `--tg-content-safe-area-inset-bottom`（取较大者）；页面底部留出它的高度，提示条在它显示时上移，图谱画布的高度扣除它。顶栏只有「返回」（不在标签根页时，Mini App 中由 Telegram 的返回按钮代替）、标题和本页的操作；探索的顶栏保留「采集」（采集链接与采集记录）。没有历史时「返回」回到所在标签的根页。
+- 关系（`#/relations?of=<键>`）：任意有关系数据的账号的图谱，与 Profile 的关系图谱是同一个组件，读 `GET /v1/collections/graph?of=<键>`（参数与 `/collections/:id/graph` 相同，账号不需要已保存，从未存过的账号是空图）。顶部「中心」是视角账号选择器。地址没有 `of` 时依次取所有者第一个有关系数据的采集账号、上次打开的图谱中心（任何图谱页打开时记在本地存储 `midden.graphCenter`）、视角账号列表的第一个；完全没有关系数据时只有选择器。标记账号与中心相同时不标记。
+- 设置（`#/settings`）：分组列表，「采集账号」（`#/settings/accounts`）、「通行密钥」（`#/settings/passkeys`）和「管理员面板」（`#/settings/admin`）是子页；「关于」列出版本（提交的短 sha，链接到 GitHub 上的提交，与 Bot 的 /start 相同）、构建时间和源代码仓库；浏览器中最后是「退出登录」。管理员面板放整个服务的设置：域名，以及开发模式下的「删除全部收藏和采集记录」。
+- 开发模式：`NODE_ENV` 不是 `production` 时（镜像设为 `production`，本地开发服务器不设）。`GET /v1/instance` 返回 `{ dev }`，网页只在开发模式显示删除全部；`POST /v1/library/delete-all` 在开发模式之外返回 403。
 
 ## 认证
 
-- 网页的来源：`WEB_APP_URL` 的来源（不能删除）加上 `web_origins` 表中的来源，后者在网页「采集账号 → 域名」中管理（`/v1/origins`）：添加时输入的地址规范为来源，只接受 https（以及开发用的 `http://localhost`）；删除时同一事务中删除这个域名主机名下的通行密钥（另有来源使用同一主机名时保留）和这个来源未用的 `/passkey` 链接。每次请求都读取当前列表。会话 Cookie `__Host-midden` 只属于签发它的域名（不设 Domain），有效 12 小时；`SameSite=None`，因为 Telegram 网页版在框架中打开 Mini App。带 Cookie 的写请求要求 Origin 在这些来源中。
+- 网页的来源：`WEB_APP_URL` 的来源（不能删除）加上 `web_origins` 表中的来源，后者在网页「设置 → 管理员面板 → 域名」中管理（`/v1/origins`）：添加时输入的地址规范为来源，只接受 https（以及开发用的 `http://localhost`）；删除时同一事务中删除这个域名主机名下的通行密钥（另有来源使用同一主机名时保留）和这个来源未用的 `/passkey` 链接。每次请求都读取当前列表。会话 Cookie `__Host-midden` 只属于签发它的域名（不设 Domain），有效 12 小时；`SameSite=None`，因为 Telegram 网页版在框架中打开 Mini App。带 Cookie 的写请求要求 Origin 在这些来源中。
 - Mini App：用 Telegram 签名的 initData 登录（`POST /v1/auth/telegram`），验签后只接受 `OWNER_TELEGRAM_ID`。
 - 浏览器：通行密钥（WebAuthn，`@simplewebauthn`）。RP ID 是请求的 Origin 的主机名，Origin 不在来源列表中时拒绝；每个通行密钥只能在创建它的域名上使用。登录用可发现凭据，不需要用户名：`POST /v1/auth/passkey/options` 取得挑战，`POST /v1/auth/passkey` 验证，只认当前 RP ID 下的通行密钥，要求用户验证并检查计数器，成功后签发与上面相同的会话 Cookie。
 - 第一个通行密钥：所有者私聊 Bot 发送 `/passkey`，Bot 为每个来源各生成一个 256 位随机令牌，回复按域名标注的按钮，链接为 `<来源>/app/#/passkey/<令牌>`（令牌在地址的片段中，不会发给服务器）。数据库只存令牌的哈希（`passkey_tokens`），10 分钟过期，只能在对应来源上使用，注册成功即删除；再次发送 `/passkey` 时之前的链接作废。注册页 `POST /v1/auth/passkey/register/options` 与 `POST /v1/auth/passkey/register` 都带令牌，注册成功后直接登录。
-- 登录后在「采集账号」页的「通行密钥」中查看（名称、域名、创建与上次使用时间）、重命名、删除，或为当前域名添加新的（`/v1/passkeys`）。删除最后一个也可以，之后用 `/passkey` 再加。添加和删除时 Bot 给所有者发一条消息（名称与域名）。
+- 登录后在「设置 → 通行密钥」中查看（名称、域名、创建与上次使用时间）、重命名、删除，或为当前域名添加新的（`/v1/passkeys`）。删除最后一个也可以，之后用 `/passkey` 再加。添加和删除时 Bot 给所有者发一条消息（名称与域名）。
 - 挑战不存数据库：由 16 字节随机数、过期时间（5 分钟）和 HMAC 组成，HMAC 的密钥由 `SECRET_KEY` 派生，覆盖用途（注册或登录）、来源，注册时还有来自哪个 `/passkey` 链接或哪个已登录的会话（令牌）。验证时只重新计算 HMAC 并检查过期，所以注册与登录、不同来源、不同链接或会话之间不能互用，篡改即失效。挑战只能用一次：答复过的随机数记在进程内存中直到过期；进程在 5 分钟内重启后，理论上可以重放一次重启前答复过的挑战，此时计数器检查与用户验证仍然有效。接口不限流。令牌与挑战不写入日志。
 - REST：Bearer token，数据库只存哈希。
 

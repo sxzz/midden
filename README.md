@@ -37,7 +37,7 @@ docker compose up -d
 | --- | --- |
 | `SECRET_KEY` | 必填，见上 |
 | `TELEGRAM_BOT_TOKEN`、`OWNER_TELEGRAM_ID` | Telegram Bot 的 token 与所有者的用户 ID，需同时设置；不设置则不启动 Bot，也无法添加第一个通行密钥 |
-| `WEB_APP_URL` | 网页的公开 HTTPS 地址，以 `/app/` 结尾，也是 Mini App 的地址；设置后才能登录网页。网页的其他域名在「采集账号 → 域名」中添加 |
+| `WEB_APP_URL` | 网页的公开 HTTPS 地址，以 `/app/` 结尾，也是 Mini App 的地址；设置后才能登录网页。网页的其他域名在「设置 → 管理员面板 → 域名」中添加 |
 | `DATA_PATH` | 宿主机上的数据目录，默认 `./data` |
 | `PORT` | 宿主机端口，默认 `8080` |
 | `LOG_LEVEL` | 日志级别，默认 `info` |
