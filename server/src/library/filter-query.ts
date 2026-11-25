@@ -59,6 +59,7 @@ export function collectionFilter(input: FilterParams): CollectionFilter {
 }
 
 const KEYS = Object.keys(FilterQuery.entries).toSorted()
+const SPACES = /\s+/g
 
 /**
  * A list query string as the list endpoint would read it: a repeated key is
@@ -83,6 +84,8 @@ export function parseFilterQuery(query: string): {
   if (!parsed.output.saved_within) parsed.output.time_zone = undefined
   // Tags are sets; how they match only matters with more than one.
   const output = parsed.output
+  // Search splits its terms at any white space.
+  output.q = output.q?.trim().replaceAll(SPACES, ' ')
   output.tag = tagList(output.tag)
   output.not_tag = tagList(output.not_tag)
   if (output.tag_mode === 'any' || output.tag.split(',').length < 2)

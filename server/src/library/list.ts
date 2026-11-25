@@ -5,6 +5,7 @@ import { canonicalJson, sha256Hex } from '#capture/json.ts'
 import { AppError } from '#errors.ts'
 import { FOLLOW_SETS, followSetSQL, type FollowSet } from './follows.ts'
 import { collectionsById, isUUID } from './read.ts'
+import { searchHits, type SearchHits } from './search.ts'
 import { list, type CollectionView, type Page } from './views.ts'
 import type { CaptureContext } from '#capture/context.ts'
 import type { Executor } from '#db/client.ts'
@@ -33,7 +34,9 @@ export interface CollectionFilter {
    * `published`, `saved` (added to the library), `updated` (newest capture,
    * the default), `storage`, or an account's `followers` or `following`
    * count, which only orders a list of accounts alone and is `updated`
-   * otherwise.
+   * otherwise. With a search, results come in relevance tiers first and
+   * these order each tier; `relevance`, the default then, orders a tier by
+   * how well each result matches, and is `updated` without a search.
    */
   sort?: string
   order?: string
@@ -236,6 +239,7 @@ function check(input: CollectionFilter): Checked {
     !oneOf(filter.postType, ['post', 'quote', 'repost']) ||
     !oneOf(filter.order, ['desc', 'asc']) ||
     !oneOf(filter.sort, [
+      'relevance',
       'saved',
       'updated',
       'published',
@@ -294,20 +298,32 @@ interface Cursor {
   at: number
   bytes: number
   id: string
+  /** With a search: the relevance tier and the score within it. */
+  tier: number
+  score: number
 }
 
-function encodeCursor(cursor: Cursor, fingerprint: string): string {
+function encodeCursor(
+  cursor: Cursor,
+  fingerprint: string,
+  ranked: boolean,
+): string {
   return Buffer.from(
     JSON.stringify({
       t: cursor.at,
       b: cursor.bytes,
       id: cursor.id,
+      ...(ranked ? { g: cursor.tier, s: cursor.score } : {}),
       f: fingerprint,
     }),
   ).toString('base64url')
 }
 
-function decodeCursor(cursor: string, fingerprint: string): Cursor {
+function decodeCursor(
+  cursor: string,
+  fingerprint: string,
+  ranked: boolean,
+): Cursor {
   try {
     const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'))
     if (
@@ -315,9 +331,20 @@ function decodeCursor(cursor: string, fingerprint: string): Cursor {
       Number.isSafeInteger(value.t) &&
       Number.isSafeInteger(value.b) &&
       value.b >= 0 &&
-      isUUID(value.id)
+      isUUID(value.id) &&
+      (!ranked ||
+        (Number.isSafeInteger(value.g) &&
+          value.g >= 1 &&
+          value.g <= 4 &&
+          Number.isFinite(value.s)))
     )
-      return { at: value.t, bytes: value.b, id: value.id }
+      return {
+        at: value.t,
+        bytes: value.b,
+        id: value.id,
+        tier: ranked ? value.g : 0,
+        score: ranked ? value.s : 0,
+      }
   } catch {}
   throw new AppError('invalid_cursor')
 }
@@ -526,9 +553,14 @@ interface Selection {
   checked: Checked
   /** The `WITH` clause the source needs, if any. */
   ctes: SQL
-  /** Saved collections as `k` and `l`, maybe narrowed to related ones. */
+  /**
+   * Saved collections as `k` and `l`, maybe narrowed to related ones; with
+   * a search, only what it finds, with its tier and score as `hits`.
+   */
   source: string
   where: SQL
+  /** Whether the source has `hits` to rank by. */
+  ranked: boolean
 }
 
 /**
@@ -539,12 +571,8 @@ interface Selection {
 function conditionsOf(checked: Checked, related: boolean): SQL[] {
   const { filter, authors, from, before } = checked
   const types = values(filter.entityType)
+  // The search (`q`) is not a condition here: `select` drives from it.
   const conditions: SQL[] = []
-  const q = filter.q.trim()
-  if (q)
-    conditions.push(
-      sql`k.search LIKE ${`%${q.replaceAll(/[\\%_]/g, String.raw`\$&`)}%`} ESCAPE '\\'`,
-    )
   if (filter.visibility) conditions.push(visibilitySQL(filter.visibility))
   if (from !== undefined) conditions.push(sql`l.created_at >= ${from}`)
   if (before !== undefined) conditions.push(sql`l.created_at < ${before}`)
@@ -593,9 +621,14 @@ export type Narrowing = Omit<
 
 /**
  * The saved collections a filter selects, unordered; with a narrowing, only
- * those it selects too.
+ * those it selects too. A search drives the query from what it finds; when
+ * both filters search, the narrowing's ranks and the other's only selects.
  */
-function select(input: CollectionFilter, narrow?: Narrowing): Selection {
+function select(
+  db: Executor,
+  input: CollectionFilter,
+  narrow?: Narrowing,
+): Selection {
   const checked = check(input)
   const related = checked.filter.relatedTo
   const conditions = conditionsOf(checked, !!related)
@@ -607,11 +640,32 @@ function select(input: CollectionFilter, narrow?: Narrowing): Selection {
     conditions.push(...conditionsOf(extra, !!related))
     checked.narrow = extra.filter
   }
+  const searches = [checked.filter.q, checked.narrow?.q ?? '']
+    .map((q, i) => searchHits(db, q, `hits_${i}`))
+    .filter((hits): hits is SearchHits => !!hits)
+  const ranked = searches.pop()
+  for (const other of searches)
+    conditions.push(sql`k.rowid IN (SELECT rowid FROM ${sql.raw(other.name)})`)
+  const ctes = [
+    ...(related ? [relatedSQL(related)] : []),
+    ...searches.map((s) => s.ctes),
+    ...(ranked ? [ranked.ctes] : []),
+  ]
+  // A search drives: SQLite starts from the few rows it finds.
+  const source = ranked
+    ? related
+      ? `${RELATED} JOIN ${ranked.name} hits ON hits.rowid = k.rowid`
+      : `${ranked.name} hits CROSS JOIN catalog k ON k.rowid = hits.rowid
+        JOIN library l ON l.collection_id = k.collection_id`
+    : related
+      ? RELATED
+      : SAVED
   return {
     checked,
-    ctes: related ? sql`WITH ${relatedSQL(related)}` : sql``,
-    source: related ? RELATED : SAVED,
+    ctes: ctes.length ? sql`WITH ${sql.join(ctes, sql`, `)}` : sql``,
+    source,
     where: conditions.length ? sql.join(conditions, sql` AND `) : sql`1 = 1`,
+    ranked: !!ranked,
   }
 }
 
@@ -636,7 +690,7 @@ export function countCollections(
   input: CollectionFilter = {},
   narrow?: Narrowing,
 ): FilterCounts {
-  const { ctes, source, where } = select(input, narrow)
+  const { ctes, source, where } = select(db, input, narrow)
   const rows = db.all<{ type: string | null; count: number }>(sql`
     ${ctes}
     SELECT k.root_kind AS type, count(*) AS count
@@ -656,7 +710,7 @@ export function selectedAmong(
   ids: readonly string[],
 ): Set<string> {
   if (!ids.length) return new Set()
-  const { ctes, source, where } = select(input)
+  const { ctes, source, where } = select(db, input)
   return new Set(
     db
       .all<{ id: string }>(
@@ -676,7 +730,7 @@ export function selectedIds(
   input: CollectionFilter,
   limit: number,
 ): string[] {
-  const { ctes, source, where } = select(input)
+  const { ctes, source, where } = select(db, input)
   return db
     .all<{ id: string }>(
       sql`
@@ -698,14 +752,16 @@ export function listCollections(
   cursor?: string,
   narrow?: Narrowing,
 ): Page<CollectionView> {
-  const { checked, ctes, source, where } = select(input, narrow)
+  const { checked, ctes, source, where, ranked } = select(ctx.db, input, narrow)
   const { filter } = checked
   const fingerprint = sha256Hex(
     canonicalJson(checked.narrow ? { filter, narrow: checked.narrow } : filter),
   )
-  const after = cursor ? decodeCursor(cursor, fingerprint) : undefined
+  const after = cursor ? decodeCursor(cursor, fingerprint, ranked) : undefined
   const related = filter.relatedTo
   const types = values(filter.entityType)
+  // Without a search there is nothing to be relevant to.
+  const relevance = ranked && (!filter.sort || filter.sort === 'relevance')
   const by = filter.sort === 'storage' ? 'bytes' : 'at'
   const asc = filter.order === 'asc'
   const direction = sql.raw(asc ? 'ASC' : 'DESC')
@@ -717,29 +773,37 @@ export function listCollections(
       : filter.sort === 'saved'
         ? 'l.created_at'
         : 'k.observed_at')
-  const rows = ctx.db.all<{
-    id: string
-    at: number
-    bytes: number
-    relations: string | null
-  }>(sql`
+  const key = (cursor: Cursor) => (by === 'bytes' ? cursor.bytes : cursor.at)
+  // Tiers come first, best first, each in the chosen order; under
+  // relevance the score orders a tier, lower first, then the newest.
+  const seek = after
+    ? relevance
+      ? sql`WHERE tier > ${after.tier} OR (tier = ${after.tier}
+          AND (score > ${after.score} OR (score = ${after.score} AND id < ${after.id})))`
+      : ranked
+        ? sql`WHERE tier > ${after.tier} OR (tier = ${after.tier}
+            AND (${sql.raw(by)}, id) ${sql.raw(asc ? '>' : '<')} (${key(after)}, ${after.id}))`
+        : sql`WHERE (${sql.raw(by)}, id) ${sql.raw(asc ? '>' : '<')} (${key(after)}, ${after.id})`
+    : sql``
+  const order = relevance
+    ? sql`tier, score, id DESC`
+    : sql`${sql.raw(ranked ? 'tier, ' : '')}${sql.raw(by)} ${direction}, id ${direction}`
+  const rows = ctx.db.all<Cursor & { relations: string | null }>(sql`
     ${ctes}
-    SELECT id, at, bytes, relations FROM (
+    SELECT id, at, bytes, relations, tier, score FROM (
       -- The id comes from the table whose index orders the page, so SQLite
       -- reads library_created in order for saved time instead of sorting.
       SELECT ${sql.raw(filter.sort === 'saved' ? 'l' : 'k')}.collection_id AS id,
         ${sql.raw(time)} AS at,
         k.storage_bytes AS bytes,
-        ${sql.raw(related ? 'related.kinds' : 'NULL')} AS relations
+        ${sql.raw(related ? 'related.kinds' : 'NULL')} AS relations,
+        ${sql.raw(ranked ? 'hits.tier' : '0')} AS tier,
+        ${sql.raw(ranked ? 'hits.score' : '0')} AS score
       FROM ${sql.raw(source)}
       WHERE ${where}
     )
-    ${
-      after
-        ? sql`WHERE (${sql.raw(by)}, id) ${sql.raw(asc ? '>' : '<')} (${by === 'bytes' ? after.bytes : after.at}, ${after.id})`
-        : sql``
-    }
-    ORDER BY ${sql.raw(by)} ${direction}, id ${direction}
+    ${seek}
+    ORDER BY ${order}
     LIMIT ${PAGE + 1}`)
   const page: Page<CollectionView> = { items: [] }
   if (related)
@@ -752,7 +816,7 @@ export function listCollections(
   const entries = rows.slice(0, PAGE)
   const last = entries.at(-1)
   if (rows.length > PAGE && last)
-    page.next_cursor = encodeCursor(last, fingerprint)
+    page.next_cursor = encodeCursor(last, fingerprint, ranked)
   const loaded = collectionsById(
     ctx,
     entries.map((e) => e.id),
@@ -808,7 +872,7 @@ export function listAuthors(
     (input.cursor && String(offset) !== input.cursor)
   )
     throw invalid()
-  const { ctes, source, where } = select(within)
+  const { ctes, source, where } = select(ctx.db, within)
   // One row per author, labelled by its newest captured name: the name rides
   // at the end of the key max() picks, which prefers a name, then the newest
   // revision. A unit separator ends the revision id.

@@ -321,7 +321,7 @@ describe('public shares', () => {
 
     // A new filter selects the profile; its attached posts come with it.
     updateFolder(c.db, folder.id, {
-      filter: 'entity_type=fake.profile&q=profile five',
+      filter: 'entity_type=fake.profile&q=five',
     })
     expect((await read(slug)).body).toMatchObject({ posts: 0, profiles: 1 })
     expect(
@@ -592,7 +592,7 @@ describe('public shares', () => {
     const { c, ids, owner } = await setup()
     const folder = createFolder(c.db, {
       name: '五',
-      filter: 'entity_type=fake.profile&q=profile five',
+      filter: 'entity_type=fake.profile&q=five',
     })
     const viaFolder = createShare(c.db, { target: 'folder', id: folder.id })
     const direct = createShare(c.db, { target: 'collection', id: ids.r1! })

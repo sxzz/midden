@@ -164,8 +164,17 @@ export const catalog = sqliteTable(
     hasSensitive: integer({ mode: 'boolean' }).notNull(),
     /** The root quotes another post. */
     quotes: integer({ mode: 'boolean' }).notNull(),
-    /** Text, summary and author name, for substring search. */
-    search: text().notNull(),
+    /**
+     * What search reads, folded (`library/search-text.ts`) and indexed by
+     * the `catalog_fts` table, which triggers keep in step: the author's or
+     * account's name and `@handle` (one per line), the post's text, the text
+     * and author of the posts it quotes or reposts, and media descriptions
+     * with an account's bio.
+     */
+    searchName: text().notNull().default(''),
+    searchText: text().notNull().default(''),
+    searchQuoted: text().notNull().default(''),
+    searchExtra: text().notNull().default(''),
     /**
      * An account's own counts as its newest capture with counts read them;
      * null for posts and when unknown.

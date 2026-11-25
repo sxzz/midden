@@ -51,7 +51,14 @@ const ListQuery = v.strictObject({
     'sort',
   ]).entries,
   sort: v.optional(
-    v.picklist(['', 'published', 'updated', 'followers', 'following']),
+    v.picklist([
+      '',
+      'relevance',
+      'published',
+      'updated',
+      'followers',
+      'following',
+    ]),
   ),
   cursor: text,
 })

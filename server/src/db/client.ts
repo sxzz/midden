@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 import { drizzle } from 'drizzle-orm/node-sqlite'
 import { migrate } from 'drizzle-orm/node-sqlite/migrator'
+import { cjkWords, fold, searchName } from '#library/search-text.ts'
 
 const MIGRATIONS = fileURLToPath(new URL('../../drizzle', import.meta.url))
 
@@ -21,10 +22,28 @@ export function openDatabase(file: string) {
   // RESTART or TRUNCATE checkpoints would make it upload the whole database
   // again, and VACUUM rewrites every page into the WAL: don't add them.
   client.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;')
+  searchFunctions(client)
   const db = drizzle({ client })
   migrate(db, { migrationsFolder: MIGRATIONS })
   optimize(db, true)
   return db
+}
+
+const text = (value: unknown) => (typeof value === 'string' ? value : '')
+
+/**
+ * The search folding (`library/search-text.ts`) as SQL functions: the
+ * catalog computes its search columns with them, and the trigger that keeps
+ * `catalog_cjk` in step calls one, so they are there before migrations run.
+ * A connection without them (the sqlite3 shell) cannot write those columns.
+ */
+function searchFunctions(client: DatabaseSync): void {
+  const options = { deterministic: true, directOnly: false }
+  client.function('search_fold', options, (value) => fold(text(value)))
+  client.function('search_names', options, (name, handle) =>
+    searchName(text(name), text(handle)),
+  )
+  client.function('search_words', options, (value) => cjkWords(text(value)))
 }
 
 /**

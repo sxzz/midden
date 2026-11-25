@@ -84,15 +84,16 @@ export interface PublicListQuery extends Omit<
   | 'time_zone'
   | 'sort'
 > {
-  sort?: '' | 'published' | 'updated' | 'followers' | 'following'
+  sort?: '' | 'relevance' | 'published' | 'updated' | 'followers' | 'following'
   /** A profile's attached posts instead of the folder's own list. */
   related_to?: string
   cursor?: string
 }
 
 /**
- * A public list without a chosen order shows the newest posts first. An
- * account has no post time and counts as published when last updated.
+ * A public list without a chosen order shows the newest posts first, or
+ * the visitor's search results by relevance. An account has no post time
+ * and counts as published when last updated.
  */
 const PUBLIC_SORT = 'published'
 
@@ -244,7 +245,7 @@ function publicSelection(share: OpenShare, query: PublicListQuery) {
   return {
     base: {
       ...base,
-      sort: visitor.sort ?? PUBLIC_SORT,
+      sort: visitor.sort ?? (visitor.q?.trim() ? 'relevance' : PUBLIC_SORT),
       order: visitor.order ?? 'desc',
     },
     narrow,

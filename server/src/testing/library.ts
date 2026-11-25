@@ -10,6 +10,7 @@ import { catalogMissing } from '#library/catalog.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, type FakeFetch } from '#testing/fake-platform.ts'
 import type { CaptureContext } from '#capture/context.ts'
+import type { Database } from '#db/client.ts'
 import type { Entity, EntityGraph, Resource } from '#platforms/protocol.ts'
 
 export const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4])
@@ -91,12 +92,60 @@ export function image(path: string, extra: Partial<Resource> = {}): Resource {
   }
 }
 
-/** The catalog as kept up to date matches one rebuilt from scratch. */
+/**
+ * Every token the search indexes hold, as `[table, term, rowid, column,
+ * offset]`, next to what indexes built afresh from the catalog's columns
+ * would.
+ */
+export function searchIndexes(db: Database) {
+  const client = db.$client
+  client.exec(`
+    CREATE VIRTUAL TABLE temp.fresh_fts USING fts5(text, name, quoted, extra,
+      tokenize = 'trigram', content = '', contentless_delete = 1);
+    CREATE VIRTUAL TABLE temp.fresh_cjk USING fts5(text, name, quoted, extra,
+      tokenize = 'unicode61 remove_diacritics 0', detail = 'column',
+      content = '', contentless_delete = 1);
+    INSERT INTO temp.fresh_fts (rowid, text, name, quoted, extra)
+      SELECT rowid, search_text, search_name, search_quoted, search_extra
+      FROM catalog;
+    INSERT INTO temp.fresh_cjk (rowid, text, name, quoted, extra)
+      SELECT rowid, search_words(search_text), search_words(search_name),
+        search_words(search_quoted), search_words(search_extra) FROM catalog;
+    CREATE VIRTUAL TABLE temp.kept_fts USING fts5vocab(main, catalog_fts, instance);
+    CREATE VIRTUAL TABLE temp.kept_cjk USING fts5vocab(main, catalog_cjk, instance);
+    CREATE VIRTUAL TABLE temp.fresh_fts_tokens USING fts5vocab(temp, fresh_fts, instance);
+    CREATE VIRTUAL TABLE temp.fresh_cjk_tokens USING fts5vocab(temp, fresh_cjk, instance);`)
+  const tokens = (...tables: string[]) =>
+    tables.flatMap((table) =>
+      client
+        .prepare(
+          `SELECT term, doc, col, offset FROM temp.${table} ORDER BY 1, 2, 3, 4`,
+        )
+        .all(),
+    )
+  const indexes = {
+    kept: tokens('kept_fts', 'kept_cjk'),
+    fresh: tokens('fresh_fts_tokens', 'fresh_cjk_tokens'),
+  }
+  client.exec(`DROP TABLE temp.kept_fts; DROP TABLE temp.kept_cjk;
+    DROP TABLE temp.fresh_fts_tokens; DROP TABLE temp.fresh_cjk_tokens;
+    DROP TABLE temp.fresh_fts; DROP TABLE temp.fresh_cjk;`)
+  return indexes
+}
+
+/**
+ * The catalog as kept up to date matches one rebuilt from scratch, and the
+ * search index matches the catalog both times.
+ */
 export function expectCatalogFresh(ctx: CaptureContext) {
   const rows = () =>
     ctx.db.select().from(catalog).orderBy(asc(catalog.collectionId)).all()
   const kept = rows()
+  const index = searchIndexes(ctx.db)
+  expect(index.kept).toEqual(index.fresh)
   ctx.db.delete(catalog).run()
   catalogMissing(ctx.db)
   expect(rows()).toEqual(kept)
+  const rebuilt = searchIndexes(ctx.db)
+  expect(rebuilt.kept).toEqual(rebuilt.fresh)
 }

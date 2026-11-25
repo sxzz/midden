@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm'
+import { sql, type SQL } from 'drizzle-orm'
 import { AUTHORED_BY } from './entities.ts'
 import { storageOf } from './read.ts'
 import { list } from './views.ts'
@@ -19,6 +19,11 @@ import type { Database, Executor } from '#db/client.ts'
  * To change what a row holds, empty the table in a migration; the server
  * refills it on start (`catalogMissing`). Columns only a few rows fill (an
  * account's counts) can be filled in place by the migration instead.
+ *
+ * The search columns of a post that quotes or reposts another also hold
+ * that post's catalogued name and text, so cataloguing a post refreshes them
+ * on the posts whose newest revision points at it. Triggers keep the search
+ * index (`catalog_fts`) in step with every insert, change and delete.
  */
 
 // Publication time when the payload has a valid one.
@@ -41,6 +46,56 @@ const accountCount = (name: 'followers' | 'following') => `(
   SELECT CASE WHEN typeof(n) = 'integer' AND n >= 0 THEN n END FROM (
     SELECT h.metrics -> (h.root_kind || '/' || h.root_external_id)
       ->> '/metadata/${name}' AS n))`
+
+const PROFILE = `h.root_kind LIKE '%.profile'`
+
+/**
+ * What the posts the root at `revision` and `rootKey` quotes or reposts say,
+ * folded: their own catalogued names and text where they are saved, else
+ * the text the revision captured with the reference.
+ */
+const quotedSearch = (revision: string, rootKey: string) => `coalesce((
+  SELECT search_fold(group_concat(coalesce(
+      (SELECT quoted.search_name || ' ' || quoted.search_text FROM catalog quoted
+        WHERE quoted.root_entity_id = tv.entity_id
+        ORDER BY quoted.revision_at DESC, quoted.collection_id LIMIT 1),
+      tv.data ->> 'text'), ' '))
+  FROM entity_relations edge
+  JOIN revision_entities target ON target.revision_id = edge.revision_id
+    AND target.entity_key = edge.target_key
+  JOIN entity_versions tv ON tv.id = target.entity_version_id
+  WHERE edge.revision_id = ${revision} AND edge.source_key = ${rootKey}
+    AND edge.kind IN ('quoted', 'reposted')), '')`
+
+/**
+ * Refresh the quoted text of every catalogued post whose newest revision
+ * quotes or reposts the root of one of these collections, them included.
+ */
+function refreshQuoting(db: Executor, targets: SQL) {
+  db.run(sql`
+    UPDATE catalog SET search_quoted = ${sql.raw(
+      quotedSearch(
+        'catalog.revision_id',
+        `(SELECT re.entity_key FROM revision_entities re
+          WHERE re.revision_id = catalog.revision_id AND re.is_root = 1)`,
+      ),
+    )}
+    WHERE collection_id IN (
+      SELECT quoting.collection_id
+      FROM json_each(${targets}) t
+      JOIN catalog quoted ON quoted.collection_id = t.value
+      JOIN entity_versions v ON v.entity_id = quoted.root_entity_id
+      JOIN revision_entities ref ON ref.entity_version_id = v.id
+        AND ref.is_root = 0
+      JOIN revisions rv ON rv.id = ref.revision_id
+      JOIN catalog quoting ON quoting.collection_id = rv.collection_id
+        AND quoting.revision_id = rv.id
+      JOIN revision_entities src ON src.revision_id = rv.id AND src.is_root = 1
+      JOIN entity_relations edge ON edge.revision_id = rv.id
+        AND edge.source_key = src.entity_key AND edge.target_key = ref.entity_key
+        AND edge.kind IN ('quoted', 'reposted')
+      WHERE quoting.root_kind NOT LIKE '%.profile')`)
+}
 
 /** Bring the catalog rows of these collections up to date. */
 export function catalogCollections(db: Executor, ids: readonly string[]) {
@@ -92,8 +147,8 @@ export function catalogCollections(db: Executor, ids: readonly string[]) {
     INSERT INTO catalog (collection_id, revision_id, revision_at, observed_at,
       published_at, storage_bytes, root_entity_id, root_kind, author_entity_id,
       author_name, subject_entity_id, subject_protected, has_media, has_image,
-      has_video, has_sensitive, quotes, search, followers_count,
-      following_count)
+      has_video, has_sensitive, quotes, search_name, search_text,
+      search_quoted, search_extra, followers_count, following_count)
     SELECT h.collection_id, h.revision_id, h.revision_at, h.observed_at,
       coalesce(${sql.raw(PUBLISHED_AT)}, h.observed_at),
       ${sql.raw(storageOf('h.collection_id'))},
@@ -109,8 +164,20 @@ export function catalogCollections(db: Executor, ids: readonly string[]) {
       EXISTS (SELECT 1 FROM entity_relations edge
         WHERE edge.revision_id = h.revision_id
           AND edge.source_key = h.root_key AND edge.kind = 'quoted'),
-      concat_ws(' ', h.payload ->> 'text', h.payload ->> 'summary',
-        h.payload ->> 'author_name'),
+      -- An account known only from a follow list has no author name.
+      search_names(coalesce(nullif(h.payload ->> 'author_name', ''),
+          coalesce(h.author_data, h.root_data) ->> 'name'),
+        coalesce(h.author_data, h.root_data) ->> 'username'),
+      -- An account's text is its bio, which ranks with media descriptions.
+      CASE WHEN ${sql.raw(PROFILE)} THEN '' ELSE search_fold(h.payload ->> 'text') END,
+      CASE WHEN ${sql.raw(PROFILE)} THEN ''
+        ELSE ${sql.raw(quotedSearch('h.revision_id', 'h.root_key'))} END,
+      search_fold(concat_ws(' ',
+        CASE WHEN ${sql.raw(PROFILE)} THEN coalesce(
+          h.root_data -> 'metadata' ->> 'description', h.payload ->> 'text') END,
+        (SELECT group_concat(m.alt_text, ' ') FROM assets m
+          WHERE m.capture_id = h.capture_id AND m.purpose = ''
+            AND m.alt_text <> ''))),
       ${sql.raw(accountCount('followers'))},
       ${sql.raw(accountCount('following'))}
     FROM h WHERE true
@@ -131,9 +198,13 @@ export function catalogCollections(db: Executor, ids: readonly string[]) {
       has_video = excluded.has_video,
       has_sensitive = excluded.has_sensitive,
       quotes = excluded.quotes,
-      search = excluded.search,
+      search_name = excluded.search_name,
+      search_text = excluded.search_text,
+      search_quoted = excluded.search_quoted,
+      search_extra = excluded.search_extra,
       followers_count = excluded.followers_count,
       following_count = excluded.following_count`)
+  refreshQuoting(db, targets)
 }
 
 /**

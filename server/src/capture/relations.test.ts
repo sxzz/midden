@@ -299,7 +299,7 @@ describe('抓关系网', () => {
     const row = (id: string) =>
       ctx.db
         .select({
-          search: catalog.search,
+          search: catalog.searchName,
           followers: catalog.followersCount,
           following: catalog.followingCount,
         })
@@ -307,7 +307,7 @@ describe('抓关系网', () => {
         .where(eq(catalog.collectionId, id))
         .get()
     expect(row(listed.id)).toEqual({
-      search: expect.stringContaining('Name 21'),
+      search: expect.stringContaining('name 21'),
       followers: 40,
       following: 0,
     })
