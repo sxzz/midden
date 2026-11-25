@@ -43,4 +43,9 @@ SELECT `id`, `prefetch`, `payload`, `target_prefetch` FROM (
 ALTER TABLE `captures` DROP COLUMN `payload`;--> statement-breakpoint
 ALTER TABLE `captures` DROP COLUMN `related_targets`;--> statement-breakpoint
 ALTER TABLE `captures` DROP COLUMN `prefetch`;--> statement-breakpoint
-ALTER TABLE `captures` DROP COLUMN `metrics`;
+ALTER TABLE `captures` DROP COLUMN `metrics`;--> statement-breakpoint
+-- Dropping the columns rewrote each row in place, leaving pages mostly
+-- empty. Moving every row past the last one (a new rowid; nothing refers
+-- to it) packs them at the end and frees the old pages, which maintenance
+-- hands back with incremental_vacuum. No VACUUM: Litestream (see db/client.ts).
+UPDATE `captures` SET `rowid` = `rowid` + (SELECT max(`rowid`) FROM `captures`);
