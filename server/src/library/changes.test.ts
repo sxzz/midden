@@ -8,6 +8,7 @@ import {
 } from '#testing/library.ts'
 import { listProfileChanges } from './changes.ts'
 import { deleteCollection } from './delete.ts'
+import { listHistory } from './read.ts'
 import type { CaptureContext } from '#capture/context.ts'
 import type { FetchResponse } from '#platforms/protocol.ts'
 
@@ -30,11 +31,13 @@ interface Profile {
   extra?: Record<string, unknown>
   text?: string
   reposts?: boolean
+  /** Ids of the pinned posts; absent when the capture could not tell. */
+  pinned?: string[]
 }
 
 function setup(state: Profile) {
   const made = libraryContext((req): Partial<FetchResponse> => {
-    if (req.externalId === '1') return { text: 'post' }
+    if (/^\d$/.test(req.externalId)) return { text: `post ${req.externalId}` }
     const resources = [
       ...(state.avatar ? [image(state.avatar, { purpose: 'avatar' })] : []),
       ...(state.banner ? [image(state.banner, { purpose: 'banner' })] : []),
@@ -59,6 +62,7 @@ function setup(state: Profile) {
                 ...(state.protected === undefined
                   ? {}
                   : { protected: state.protected }),
+                ...(state.pinned ? { pinned_posts: state.pinned } : {}),
                 ...state.extra,
               },
             },
@@ -250,4 +254,84 @@ test('only saved profiles have changes', async () => {
   expect(() => listProfileChanges(ctx, 'not-a-uuid')).toThrow(
     '内容不存在或已删除',
   )
+})
+
+test('pinned posts: set, changed, removed, and not known', async () => {
+  const state: Profile = { name: 'A', username: 'a' }
+  const ctx = setup(state)
+  const saved = await capture(ctx, 'https://fake.test/p/1')
+  const first = await capture(ctx, profile)
+  const id = first.collectionId
+  const refresh = () => capture(ctx, { refreshId: id })
+  // Known for the first time: not a change, nothing was known before.
+  state.pinned = []
+  const none = await refresh()
+  state.pinned = ['1']
+  const pinned = await refresh()
+  // A capture that could not tell makes no revision and no change, before
+  // and after it.
+  state.pinned = undefined
+  const unknown = await refresh()
+  expect(unknown.revisionId).toBe(pinned.revisionId)
+  state.pinned = ['1']
+  const again = await refresh()
+  expect(again.revisionId).toBe(pinned.revisionId)
+  // Nor when something else changed: the next capture that can tell
+  // compares with the posts last known.
+  state.pinned = undefined
+  state.name = 'B'
+  const renamed = await refresh()
+  expect(renamed.revisionId).not.toBe(pinned.revisionId)
+  state.pinned = ['1']
+  const known = await refresh()
+  expect(known.revisionId).toBe(renamed.revisionId)
+  state.pinned = ['2', '1']
+  const changed = await refresh()
+  // The same posts in another order are no change.
+  state.pinned = ['1', '2']
+  await refresh()
+  state.pinned = []
+  const removed = await refresh()
+
+  const at = (c: typeof first) => ({
+    capture_id: c.id,
+    revision_id: c.revisionId,
+  })
+  const one = { id: '1', collection_id: saved.collectionId, text: 'post 1' }
+  expect(listProfileChanges(ctx, id).items).toEqual([
+    {
+      ...at(removed),
+      observed_at: expect.any(String),
+      fields: [
+        {
+          field: 'pinned',
+          before: [one, { id: '2' }],
+          after: [],
+        },
+      ],
+    },
+    {
+      ...at(changed),
+      observed_at: expect.any(String),
+      fields: [{ field: 'pinned', before: [one], after: [{ id: '2' }, one] }],
+    },
+    {
+      ...at(renamed),
+      observed_at: expect.any(String),
+      fields: [{ field: 'name', before: 'A', after: 'B' }],
+    },
+    {
+      ...at(pinned),
+      observed_at: expect.any(String),
+      fields: [{ field: 'pinned', before: [], after: [one] }],
+    },
+  ])
+  // What was first known is kept, so later captures compare with it.
+  expect(none.revisionId).not.toBe(first.revisionId)
+  // A history point shows no pinned posts, so they make no point of their
+  // own: the profile looked different only when it was renamed.
+  expect(listHistory(ctx, id).items.map((p) => p.capture_id)).toEqual([
+    renamed.id,
+    first.id,
+  ])
 })

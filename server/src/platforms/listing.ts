@@ -1,3 +1,6 @@
+import { Buffer } from 'node:buffer'
+import type { FetchResponse } from './protocol.ts'
+
 /** A listed entry as far as the date stop is concerned. */
 export interface ListedEntry {
   listedAt?: string
@@ -27,4 +30,26 @@ export function pastCutoff(
     return time < cutoff
   }
   return false
+}
+
+/**
+ * Where a profile's data keeps the posts pinned to the top of its timeline:
+ * their platform ids, in the order listed, empty when none is pinned. A
+ * capture that could not tell leaves it out, which reads as not known
+ * rather than as unpinned.
+ */
+export const PINNED_POSTS = '/metadata/pinned_posts'
+
+/** Record the pinned posts a profile's timeline showed on its root entity. */
+export function recordPinnedPosts(
+  result: FetchResponse,
+  ids: readonly string[],
+): void {
+  const root = result.graph?.entities.find((e) => e.key === result.graph!.root)
+  if (!root) return
+  const data = JSON.parse(Buffer.from(root.dataJson).toString())
+  if (!data || typeof data !== 'object') return
+  data.metadata = { ...data.metadata, pinned_posts: [...new Set(ids)] }
+  // A new buffer: the entity may share its old one with a cached response.
+  root.dataJson = Buffer.from(JSON.stringify(data))
 }

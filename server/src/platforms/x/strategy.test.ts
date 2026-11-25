@@ -784,7 +784,7 @@ test("an account's timeline lists reposts at their repost time and marks the pin
       },
     },
   })
-  const read = async (since: string) => {
+  const read = async (since: string, cursor = '', pin = true) => {
     const r = normalizeProfile({ ...user, protected: true }, '123', 'fxtwitter')
     const cursors: string[] = []
     await fetchSessionTimeline(
@@ -803,10 +803,14 @@ test("an account's timeline lists reposts at their repost time and marks the pin
                 timeline: {
                   timeline: {
                     instructions: [
-                      {
-                        type: 'TimelinePinEntry',
-                        entry: entry(tweet('10', 'Fri Jan 02')),
-                      },
+                      ...(pin
+                        ? [
+                            {
+                              type: 'TimelinePinEntry',
+                              entry: entry(tweet('10', 'Fri Jan 02')),
+                            },
+                          ]
+                        : []),
                       {
                         type: 'TimelineAddEntries',
                         entries: [
@@ -833,12 +837,15 @@ test("an account's timeline lists reposts at their repost time and marks the pin
           },
         })
       },
-      '',
+      cursor,
       100,
       since,
     )
     return { r, cursors }
   }
+  const pinnedOf = (r: FetchResponse) =>
+    JSON.parse(Buffer.from(r.graph!.entities[0]!.dataJson).toString()).metadata
+      .pinned_posts
   // Past the pinned post and the repost's original, but not the repost.
   const { r, cursors } = await read('2026-11-20T00:00:00Z')
   const target = (id: string) =>
@@ -856,6 +863,11 @@ test("an account's timeline lists reposts at their repost time and marks the pin
   const past = await read('2026-11-23T12:00:00Z')
   assert.deepEqual(past.cursors, [null])
   assert.equal(past.r.nextPageCursor, 'next-page')
+  // The first page tells the profile which post is pinned, or that none is;
+  // a later page cannot tell, so it says nothing.
+  assert.deepEqual(pinnedOf(r), ['10'])
+  assert.deepEqual(pinnedOf((await read('', '', false)).r), [])
+  assert.equal(pinnedOf((await read('', 'older')).r), undefined)
 })
 test("a post listed by an account's timeline needs neither its own request nor the account", async () => {
   const sessions: string[] = []

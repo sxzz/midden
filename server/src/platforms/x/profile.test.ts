@@ -72,6 +72,13 @@ test('profile captures exact API responses and the entire first page, never foll
   assert.equal(Buffer.from(r.sourceResponses[1].body).toString(), timelineBody)
   assert.equal(new URL(urls[1]).searchParams.get('count'), '100')
   assert.ok(urls.every((url) => !new URL(url).searchParams.has('cursor')))
+  // The public API does not say which post is pinned, so the profile says
+  // nothing of it rather than that none is.
+  assert.equal(
+    JSON.parse(Buffer.from(r.graph!.entities[0].dataJson).toString()).metadata
+      .pinned_posts,
+    undefined,
+  )
 })
 
 test('automatic profile captures skip timeline; timeline failure keeps full profile', async () => {

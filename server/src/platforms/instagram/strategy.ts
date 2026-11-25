@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
-import { pastCutoff } from '../listing.ts'
+import { pastCutoff, recordPinnedPosts } from '../listing.ts'
 import {
   FetchResponse,
   RelatedTarget,
@@ -249,6 +249,14 @@ export class CaptureStrategy {
             status.UNAVAILABLE,
             'Instagram 时间线数据无效',
           )
+        // Pinned posts lead the first page. They are all there once a post
+        // that is not pinned follows them, or the timeline ends; a short page
+        // of pinned posts only may leave some out, so it cannot tell.
+        if (!pages && !cursor) {
+          const pinned = page.items.filter((item) => isPinned(item, id))
+          if (pinned.length < page.items.length || !page.next)
+            recordPinnedPosts(result, pinned.map(mediaId))
+        }
         const listed: RelatedTarget[] = []
         for (const item of page.items) {
           const postId = mediaId(item)

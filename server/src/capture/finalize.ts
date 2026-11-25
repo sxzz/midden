@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import {
   assets,
@@ -14,6 +14,7 @@ import {
   revisions,
 } from '#db/schema.ts'
 import { catalogCollections } from '#library/catalog.ts'
+import { PINNED_POSTS } from '#platforms/listing.ts'
 import { enqueueRawUpload } from '#raw/upload.ts'
 import { canonicalJson, sha256Hex } from './json.ts'
 import {
@@ -22,7 +23,7 @@ import {
   loadCapture,
   validateExecution,
 } from './lifecycle.ts'
-import { splitMetrics } from './metrics.ts'
+import { overlayMetrics, splitMetrics, valueAt } from './metrics.ts'
 import { unsaveIfEmpty } from './scope.ts'
 import { loadStaging, settleStaging } from './staging.ts'
 import { markUnreferenced } from './submit.ts'
@@ -103,9 +104,11 @@ export function ignoredPaths(
  * numbering never count.
  *
  * `view` leaves out what a history point does not show either: the posts a
- * profile's timeline reposted. They are recorded so the profile's list can
- * mark them, and that list draws on every revision; a capture that did not
- * read the timeline (an automatic refresh) has none of them.
+ * profile's timeline reposted, and the ones it pinned. The reposts are
+ * recorded so the profile's list can mark them, and that list draws on every
+ * revision; a capture that did not read the timeline (an automatic refresh)
+ * has none of them, nor knows what is pinned. Pinned posts are listed with
+ * the profile's changes instead.
  */
 export function revisionDigest(
   payload: Payload,
@@ -158,7 +161,12 @@ export function revisionDigest(
             key: id,
             type: entity.type,
             external_id: entity.external_id,
-            data: splitMetrics(entity.data, ignored[entity.type] ?? []).data,
+            data: splitMetrics(
+              entity.data,
+              view && entity.key === payload.graph!.root
+                ? [...(ignored[entity.type] ?? []), PINNED_POSTS]
+                : (ignored[entity.type] ?? []),
+            ).data,
             resource_indices: entity.resource_indices ?? [],
           }
         })
@@ -311,6 +319,54 @@ export function* chunks<T>(rows: T[], size = 1000): Generator<T[]> {
   for (let i = 0; i < rows.length; i += size) yield rows.slice(i, i + size)
 }
 
+const rootOf = (payload: Payload) =>
+  payload.graph?.entities.find((e) => e.key === payload.graph!.root)
+
+/**
+ * How a capture compares with the revision before it as far as a profile's
+ * pinned posts go. A capture that could not tell which posts are pinned
+ * changes nothing by them, so they are left out on both sides. One that
+ * could is compared with the last ones known, which the revision before it
+ * may not have recorded.
+ */
+function pinnedComparison(
+  tx: Transaction,
+  collectionId: string,
+  payload: Payload,
+  previous: Payload | undefined,
+  ignored: Record<string, string[]>,
+): { previous: Payload | undefined; ignored: Record<string, string[]> } {
+  const root = rootOf(payload)
+  if (!root || !previous) return { previous, ignored }
+  if (valueAt(root.data, PINNED_POSTS) === undefined)
+    return {
+      previous,
+      ignored: {
+        ...ignored,
+        [root.type]: [...(ignored[root.type] ?? []), PINNED_POSTS],
+      },
+    }
+  const before = rootOf(previous)
+  if (!before || valueAt(before.data, PINNED_POSTS) !== undefined)
+    return { previous, ignored }
+  const known = tx.get<{ pinned: string }>(sql`
+    SELECT v.data -> '$.metadata.pinned_posts' AS pinned
+    FROM revisions rv
+    JOIN revision_entities re ON re.revision_id = rv.id AND re.is_root = 1
+    JOIN entity_versions v ON v.id = re.entity_version_id
+    WHERE rv.collection_id = ${collectionId}
+      AND json_type(v.data, '$.metadata.pinned_posts') = 'array'
+    ORDER BY rv.created_at DESC, rv.id DESC
+    LIMIT 1`)
+  if (!known) return { previous, ignored }
+  const filled = structuredClone(previous)
+  const filledRoot = rootOf(filled)!
+  filledRoot.data = overlayMetrics(filledRoot.data, {
+    [PINNED_POSTS]: JSON.parse(known.pinned),
+  })
+  return { previous: filled, ignored }
+}
+
 /**
  * Turn a capture whose media have settled into a revision, or reuse the
  * newest one when nothing that counts as content changed.
@@ -356,7 +412,6 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
       capture.adapterId,
       payload.metric_paths,
     )
-    const digest = revisionDigest(payload, states, context, ignored)
     const previous = tx
       .select()
       .from(revisions)
@@ -364,14 +419,22 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
       .orderBy(desc(revisions.createdAt), desc(revisions.id))
       .limit(1)
       .get()
+    const compared = pinnedComparison(
+      tx,
+      collection.id,
+      payload,
+      previous?.payload as Payload | undefined,
+      ignored,
+    )
+    const digest = revisionDigest(payload, states, context, compared.ignored)
     let revisionId = previous?.id
     if (
       !previous ||
       revisionDigest(
-        previous.payload as Payload,
+        compared.previous!,
         captureAssets(tx, previous.captureId),
         context,
-        ignored,
+        compared.ignored,
       ) !== digest
     ) {
       revisionId = newId()

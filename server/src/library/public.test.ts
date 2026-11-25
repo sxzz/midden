@@ -31,12 +31,27 @@ const bob = () => entity('author', 'fake.profile', '600', { name: 'Bob' })
 const five = (key = 'profile') =>
   entity(key, 'fake.profile', '500', { name: 'Five', username: 'five' })
 
+/** The posts profile five pins, once a test says. */
+let pinned: string[] | undefined
+afterEach(() => {
+  pinned = undefined
+})
+
 const routes: Record<string, () => Partial<FetchResponse>> = {
   // A profile whose timeline reposts r1.
   500: () => ({
     text: 'profile five',
     graph: graph(
-      [five('root'), entity('post', 'fake.post', 'r1')],
+      [
+        pinned
+          ? entity('root', 'fake.profile', '500', {
+              name: 'Five',
+              username: 'five',
+              metadata: { pinned_posts: pinned },
+            })
+          : five('root'),
+        entity('post', 'fake.post', 'r1'),
+      ],
       ['root', 'reposted', 'post'],
     ),
   }),
@@ -232,6 +247,33 @@ describe('public shares', () => {
     expect(
       await read(slug, `/collections?related_to=${ids.five}`),
     ).toMatchObject(NOT_FOUND)
+  })
+
+  test("a shared profile's pinned posts link only within the share", async () => {
+    const { c, ids, read } = await setup()
+    pinned = []
+    await capture(c, { refreshId: ids.five! })
+    pinned = ['a1', 'x1']
+    await capture(c, { refreshId: ids.five! })
+    const slug = share(c, 'collection', ids.five!)
+    const changes = await read(slug, `/collections/${ids.five}/profile-changes`)
+    // a1 is the profile's own post, x1 is saved but not shared.
+    expect(changes.body).toEqual({
+      items: [
+        expect.objectContaining({
+          fields: [
+            {
+              field: 'pinned',
+              before: [],
+              after: [
+                { id: 'a1', collection_id: ids.a1, text: 'by five' },
+                { id: 'x1' },
+              ],
+            },
+          ],
+        }),
+      ],
+    })
   })
 
   test('a point of another collection is not found through a shared one', async () => {

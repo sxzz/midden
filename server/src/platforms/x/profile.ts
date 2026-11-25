@@ -8,7 +8,7 @@ import {
 } from '@fxembed/atmosphere/providers/twitter/graphql/validators'
 import { buildAPITwitterStatus } from '@fxembed/atmosphere/providers/twitter/processor'
 import { processTimelineInstructions } from '@fxembed/atmosphere/providers/twitter/search'
-import { pastCutoff } from '../listing.ts'
+import { pastCutoff, recordPinnedPosts } from '../listing.ts'
 import {
   FetchResponse,
   RelatedTarget,
@@ -476,8 +476,11 @@ async function sessionTimelinePage(
   const results: any[] = []
   const nodes = new Map<string, any>()
   const listings = new Map<string, Listing>()
+  // Read off the instruction, even when the post itself cannot be built.
+  const pins: string[] = []
   for (const { node, pinned, promoted } of timelineNodes(instructions)) {
     const tweet = node.tweet ?? node
+    if (pinned && /^\d+$/.test(tweet.rest_id ?? '')) pins.push(tweet.rest_id)
     const status: any = await buildAPITwitterStatus(
       host,
       tweet,
@@ -506,6 +509,7 @@ async function sessionTimelinePage(
     timeline: { code: 200, results, cursor: { bottom } },
     nodes,
     listings,
+    pins,
   }
 }
 
@@ -529,17 +533,23 @@ export async function fetchSessionTimeline(
     }),
     shouldTranscodeGif: () => false,
   }
+  // The first page carries the pinned post as an instruction of its own,
+  // whatever its size; without one nothing is pinned. Later pages cannot
+  // tell, nor can a timeline that was not read.
+  let pins: string[] | undefined
   try {
     await collectTimeline(
       result,
       async (next) => {
         const recorded = responses.length
-        const { timeline, nodes, listings } = await sessionTimelinePage(
+        const page = await sessionTimelinePage(
           result.canonicalTarget!.externalId,
           Math.min(pageSize || 100, 100),
           next || null,
           host,
         )
+        const { timeline, nodes, listings } = page
+        if (!next) pins = page.pins
         const sourceUrl = responses.slice(recorded).at(-1)?.sourceUrl ?? ''
         return {
           timeline,
@@ -556,5 +566,6 @@ export async function fetchSessionTimeline(
     result.incomplete = true
     result.warnings.push('帖子获取中断。')
   }
+  if (pins) recordPinnedPosts(result, pins)
   result.sourceResponses.push(...responses)
 }

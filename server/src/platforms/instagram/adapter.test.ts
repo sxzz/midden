@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { test } from 'vitest'
-import { FetchRequest, Visibility } from '../protocol.ts'
+import { FetchRequest, Visibility, type FetchResponse } from '../protocol.ts'
 import { status } from '../rpc.ts'
 import { InstagramClient, type Node } from './client.ts'
 import { decodeCredential, prepareCredential } from './credential.ts'
@@ -58,6 +58,10 @@ function request(
   })
 }
 const signal = () => new AbortController().signal
+/** The pinned posts a profile result records, if it could tell. */
+const pinnedOf = (result: FetchResponse) =>
+  JSON.parse(Buffer.from(result.graph!.entities[0]!.dataJson).toString())
+    .metadata.pinned_posts
 const rejectsCode = (promise: Promise<unknown>, code: status) =>
   assert.rejects(
     promise,
@@ -334,6 +338,10 @@ test('authenticated profiles keep complete pages, retry cursors and renamed stab
   )
   assert.equal(next.relatedTargets.length, 2)
   assert.equal(next.nextPageCursor, '')
+  // The first page leads with the pinned posts, so none is pinned here; a
+  // later page cannot tell.
+  assert.deepEqual(pinnedOf(result), [])
+  assert.equal(pinnedOf(next), undefined)
   for (const [id, mode] of [
     ['other', 'session'],
     ['77', 'public'],
@@ -395,6 +403,41 @@ test('a profile timeline stops past the date cutoff, pinned posts aside', async 
     result.relatedTargets.at(-1)?.listedAt,
     new Date((now - 30 * day) * 1000).toISOString(),
   )
+  // A first page of pinned posts only may hold just some of them.
+  assert.equal(pinnedOf(result), undefined)
+})
+
+test('the profile records the pinned posts its first page leads with', async () => {
+  const fetcher: typeof fetch = async (_input, init) => {
+    const body = new URLSearchParams(init?.body as string)
+    if (
+      body.get('fb_api_req_friendly_name') === 'PolarisProfilePageContentQuery'
+    )
+      return json({ user })
+    return json({
+      items: [
+        { ...photo('3'), timeline_pinned_user_ids: [77] },
+        { ...photo('2'), timeline_pinned_user_ids: ['77'] },
+        photo('4'),
+      ],
+      more_available: true,
+      next_max_id: 'p2',
+    })
+  }
+  const strategy = new CaptureStrategy(sessionFixture(fetcher))
+  const result = await strategy.fetch(
+    request('profile', 'instagram-session', { pageSize: 3 }),
+    signal(),
+    session,
+  )
+  assert.deepEqual(pinnedOf(result), ['3', '2'])
+  // An automatic refresh reads no timeline, so it cannot tell.
+  const refresh = await strategy.fetch(
+    request('profile', 'instagram-session', { automatic: true }),
+    signal(),
+    session,
+  )
+  assert.equal(pinnedOf(refresh), undefined)
 })
 
 test('private profiles use their selected account for timelines and retain partial progress', async () => {

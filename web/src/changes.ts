@@ -1,5 +1,10 @@
 import type { Asset, ProfileChanges, ProfileFieldChange } from './api'
 
+export type PinnedPost = Extract<
+  ProfileFieldChange,
+  { field: 'pinned' }
+>['after'][number]
+
 /** A changed text field: absent before when it was added, after when cleared. */
 export interface TextLine {
   kind: 'text'
@@ -24,7 +29,15 @@ export interface FlagLine {
   label: string
   locked: boolean
 }
-export type ChangeLine = TextLine | ImageLine | FlagLine
+/** The posts pinned before and after, in the order listed. */
+export interface PostsLine {
+  kind: 'posts'
+  key: string
+  label: string
+  before: PinnedPost[]
+  after: PinnedPost[]
+}
+export type ChangeLine = TextLine | ImageLine | FlagLine | PostsLine
 
 export interface ChangeEntry {
   id: string
@@ -49,6 +62,7 @@ const labels: Record<
   avatar: '头像',
   // As the capture records name the image.
   banner: '主页封面',
+  pinned: '置顶帖子',
 }
 
 /** A field change in the words and shape the page shows it in. */
@@ -59,6 +73,14 @@ export function changeLine(change: ProfileFieldChange): ChangeLine {
       key: change.field,
       label: change.after ? '设为受保护' : '取消受保护',
       locked: change.after,
+    }
+  if (change.field === 'pinned')
+    return {
+      kind: 'posts',
+      key: change.field,
+      label: labels[change.field],
+      before: change.before,
+      after: change.after,
     }
   if (change.field === 'avatar' || change.field === 'banner')
     return {
@@ -82,10 +104,26 @@ export function changeLine(change: ProfileFieldChange): ChangeLine {
 }
 
 /** What happened to a field that had or gained no value. */
-export function lineNote(line: TextLine | ImageLine): string {
+export function lineNote(line: TextLine | ImageLine | PostsLine): string {
+  if (line.kind === 'posts') {
+    if (!line.before.length) return '新增'
+    return line.after.length ? '' : '取消置顶'
+  }
   if (!line.before) return '新增'
   if (!line.after) return line.kind === 'text' ? '清空' : '移除'
   return ''
+}
+
+const SCHEME = /^https:\/\/(?:www\.)?/
+
+/**
+ * How a pinned post reads: its saved text, else its address on the
+ * platform without the scheme, else its id.
+ */
+export function postLabel(post: PinnedPost): string {
+  if (post.text) return post.text
+  if (post.url) return post.url.replace(SCHEME, '')
+  return post.id
 }
 
 const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate())

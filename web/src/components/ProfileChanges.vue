@@ -1,9 +1,17 @@
 <script setup vapor lang="ts">
 import { computed, onActivated, onUnmounted, shallowRef, watch } from 'vue'
 import { errorText, previewURL, type Asset, type ProfileChanges } from '../api'
-import { changeDays, lineNote, type ImageLine } from '../changes'
+import {
+  changeDays,
+  lineNote,
+  postLabel,
+  type ImageLine,
+  type PostsLine,
+} from '../changes'
 import { readProfileChanges } from '../reads'
+import { collectionRoute } from '../share'
 import MediaViewer from './MediaViewer.vue'
+import AppLink from './ui/AppLink.vue'
 import EyeIcon from './ui/EyeIcon.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 import LockIcon from './ui/LockIcon.vue'
@@ -58,6 +66,11 @@ const sides = (line: ImageLine) => [
   ...(line.before ? [{ side: '原', asset: line.before }] : []),
   ...(line.after ? [{ side: '新', asset: line.after }] : []),
 ]
+/** The pinned posts before, then after, each under its mark. */
+const postSides = (line: PostsLine) => [
+  ...line.before.map((post) => ({ side: '原', key: `b${post.id}`, post })),
+  ...line.after.map((post) => ({ side: '新', key: `a${post.id}`, post })),
+]
 /** The images of the line being looked at, and which one. */
 const viewing = shallowRef<{ assets: Asset[]; id: string }>()
 function open(line: ImageLine, asset: Asset) {
@@ -108,6 +121,32 @@ function open(line: ImageLine, asset: Asset) {
                   <p v-if="line.after" class="value after">
                     <span class="mark" aria-hidden="true">新</span
                     ><ins>{{ line.after }}</ins>
+                  </p>
+                </template>
+                <template v-else-if="line.kind === 'posts'">
+                  <!-- Each post links to its collection when saved, else to
+                       the platform. -->
+                  <p
+                    v-for="post in postSides(line)"
+                    :key="post.key"
+                    class="value post"
+                    :class="post.side === '原' ? 'before' : 'after'"
+                  >
+                    <span class="mark" aria-hidden="true">{{
+                      post.side
+                    }}</span><AppLink
+                      v-if="post.post.collection_id"
+                      :to="collectionRoute(post.post.collection_id)"
+                      class="post-link"
+                      >{{ postLabel(post.post) }}</AppLink
+                    ><AppLink
+                      v-else-if="post.post.url"
+                      :href="post.post.url"
+                      class="post-link"
+                      >{{ postLabel(post.post) }}</AppLink
+                    ><span v-else class="post-link">{{
+                      postLabel(post.post)
+                    }}</span>
                   </p>
                 </template>
                 <div v-else class="images" :class="line.shape">
@@ -285,6 +324,21 @@ function open(line: ImageLine, asset: Asset) {
 }
 .before del {
   color: var(--subtle);
+}
+/* A post reads as its link, two lines at most. */
+.post-link {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  color: var(--link);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+span.post-link {
+  color: inherit;
 }
 .images {
   display: flex;

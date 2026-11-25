@@ -338,8 +338,24 @@ export function listPublicProfileChanges(
   id: string,
   limit?: number,
 ): ProfileChanges {
-  within(ctx, slug, id)
-  return listProfileChanges(ctx, id, limit)
+  const share = within(ctx, slug, id)
+  const changes = listProfileChanges(ctx, id, limit)
+  // A pinned post the share does not reach is only its address on the
+  // platform, as an unsaved one is.
+  const posts = changes.items.flatMap((item) =>
+    item.fields.flatMap((f) =>
+      f.field === 'pinned' ? [...f.before, ...f.after] : [],
+    ),
+  )
+  const linkable = share.scope.contains([
+    ...new Set(posts.flatMap((post) => post.collection_id ?? [])),
+  ])
+  for (const post of posts)
+    if (post.collection_id && !linkable.has(post.collection_id)) {
+      delete post.collection_id
+      delete post.text
+    }
+  return changes
 }
 
 export function getPublicFollowCounts(

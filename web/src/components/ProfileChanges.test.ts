@@ -3,6 +3,10 @@ import { createVaporApp, nextTick } from 'vue'
 import { APIError, type ProfileChanges as Changes } from '../api'
 import { asset, mockApi } from '../testing/api'
 import ProfileChanges from './ProfileChanges.vue'
+vi.mock('vue-router', async () => {
+  const { resolve } = await import('../testing/router')
+  return { useRouter: () => ({ push: vi.fn(), resolve }) }
+})
 
 // jsdom has neither a modal dialog nor media queries; the viewer only needs to
 // reach the DOM here.
@@ -151,4 +155,72 @@ it('says when older revisions were not compared, and reports failures', async ()
     '内容不存在或已删除',
   )
   expect(failed.el.querySelector('.entry')).toBeNull()
+})
+
+it('links each pinned post to its collection, else to the platform', async () => {
+  const pinned: Changes = {
+    items: [
+      {
+        capture_id: 'c3',
+        revision_id: 'r3',
+        observed_at: today.toISOString(),
+        fields: [
+          {
+            field: 'pinned',
+            before: [{ id: '7', url: 'https://x.com/i/web/status/7' }],
+            after: [
+              {
+                id: '8',
+                url: 'https://x.com/i/web/status/8',
+                collection_id: 'saved',
+                text: '置顶的话',
+              },
+            ],
+          },
+        ],
+      },
+      {
+        capture_id: 'c2',
+        revision_id: 'r2',
+        observed_at: today.toISOString(),
+        fields: [
+          {
+            field: 'pinned',
+            before: [],
+            after: [{ id: '7', url: 'https://x.com/i/web/status/7' }],
+          },
+        ],
+      },
+      {
+        capture_id: 'c1',
+        revision_id: 'r1',
+        observed_at: today.toISOString(),
+        fields: [
+          {
+            field: 'pinned',
+            before: [{ id: '6', url: 'https://x.com/i/web/status/6' }],
+            after: [],
+          },
+        ],
+      },
+    ],
+  }
+  const { el } = await mount(() => pinned)
+  const [changed, set, unset] = [...el.querySelectorAll('.entry')]
+  expect(text(changed!.querySelector('.label'))).toBe('置顶帖子')
+  const links = [...changed!.querySelectorAll('a')]
+  expect(links.map(text)).toEqual(['x.com/i/web/status/7', '置顶的话'])
+  expect(links.map((a) => a.getAttribute('href'))).toEqual([
+    'https://x.com/i/web/status/7',
+    '#/collection/saved',
+  ])
+  expect(links[0]!.getAttribute('target')).toBe('_blank')
+  expect(
+    [...changed!.querySelectorAll('.post .mark')].map((m) => text(m)),
+  ).toEqual(['原', '新'])
+  expect(text(set!.querySelector('.label'))).toBe('置顶帖子新增')
+  expect(text(unset!.querySelector('.label'))).toBe('置顶帖子取消置顶')
+  expect(
+    [...unset!.querySelectorAll('.post .mark')].map((m) => text(m)),
+  ).toEqual(['原'])
 })

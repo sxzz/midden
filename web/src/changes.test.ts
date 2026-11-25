@@ -1,5 +1,11 @@
 import { expect, it } from 'vitest'
-import { changeDays, changeLine, dayLabel, lineNote } from './changes'
+import {
+  changeDays,
+  changeLine,
+  dayLabel,
+  lineNote,
+  postLabel,
+} from './changes'
 import { asset } from './testing/api'
 import type { ProfileChange } from './api'
 
@@ -67,6 +73,22 @@ it('says when a field was added, cleared or removed', () => {
   expect(note({ field: 'bio', before: 'a' })).toBe('清空')
   expect(note({ field: 'banner', after: now })).toBe('新增')
   expect(note({ field: 'banner', before: old })).toBe('移除')
+  const post = { id: '1' }
+  expect(note({ field: 'pinned', before: [], after: [post] })).toBe('新增')
+  expect(note({ field: 'pinned', before: [post], after: [] })).toBe('取消置顶')
+  expect(note({ field: 'pinned', before: [post], after: [{ id: '2' }] })).toBe(
+    '',
+  )
+})
+
+it('reads a pinned post as its text, else its address', () => {
+  expect(
+    postLabel({ id: '1', text: '你好', url: 'https://x.com/i/web/status/1' }),
+  ).toBe('你好')
+  expect(postLabel({ id: '2', url: 'https://www.instagram.com/p/B/' })).toBe(
+    'instagram.com/p/B/',
+  )
+  expect(postLabel({ id: '3' })).toBe('3')
 })
 
 it('heads days as today, yesterday, or their date', () => {

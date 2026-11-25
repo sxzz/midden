@@ -1,7 +1,9 @@
 import { sql } from 'drizzle-orm'
+import { shortcodeFromPk } from '#platforms/instagram/resolve.ts'
 import { assertSaved } from './read.ts'
 import {
   assetsById,
+  head,
   iso,
   list,
   parseJson,
@@ -29,7 +31,27 @@ export interface ImageChange {
   after?: AssetView
 }
 
-export type ProfileFieldChange = TextChange | ProtectedChange | ImageChange
+/** A post pinned to the top of the profile's timeline. */
+export interface PinnedPost {
+  /** The post's id on the platform. */
+  id: string
+  /** The post on the platform, where the app knows its address. */
+  url?: string
+  /** Its collection, when it is saved. */
+  collection_id?: string
+  /** What its saved collection says now. */
+  text?: string
+}
+
+/** The pinned posts, in the order listed; empty when none was pinned. */
+export interface PinnedChange {
+  field: 'pinned'
+  before: PinnedPost[]
+  after: PinnedPost[]
+}
+
+export type ProfileFieldChange =
+  TextChange | ProtectedChange | ImageChange | PinnedChange
 
 /** A capture that first saw the profile look different from before. */
 export interface ProfileChange {
@@ -37,7 +59,10 @@ export interface ProfileChange {
   revision_id: string
   /** When that capture finished, as `observed_at` shows it. */
   observed_at: string
-  /** Name, username, bio, protection, avatar, banner, as far as each changed. */
+  /**
+   * Name, username, bio, protection, avatar, banner, pinned posts, as far as
+   * each changed.
+   */
   fields: ProfileFieldChange[]
 }
 
@@ -67,6 +92,8 @@ interface Seen {
   protected?: boolean
   avatar?: Image | null
   banner?: Image | null
+  /** Ids of the pinned posts; `undefined` when the capture could not tell. */
+  pinned?: string[]
 }
 
 interface MediaRow {
@@ -103,6 +130,7 @@ function seen(
     if (username && lines[0]?.trim() === `@${username}`) lines.shift()
     bio = lines.join('\n').trim()
   }
+  const pinned = metadata.pinned_posts
   return {
     name: text(data.name),
     username,
@@ -112,6 +140,11 @@ function seen(
       : {}),
     avatar: image(media, 'avatar'),
     banner: image(media, 'banner'),
+    ...(Array.isArray(pinned)
+      ? {
+          pinned: pinned.filter((id): id is string => typeof id === 'string'),
+        }
+      : {}),
   }
 }
 
@@ -136,8 +169,8 @@ const BIO_TEXT = `CASE WHEN json_type(v.data, '$.metadata.description') = 'text'
 
 /**
  * The changes in what a saved profile shows: its name, username, bio,
- * protection, avatar and banner, never its counts or fields the page does not
- * show. Each is a revision whose shown profile differs from the revision
+ * protection, avatar, banner and pinned posts, never its counts or fields the
+ * page does not show. Each is a revision whose shown profile differs from the revision
  * before it, newest first; up to `limit` of them, found among the newest
  * CHANGES_WINDOW revisions. A collection about anything but a profile has
  * none.
@@ -231,6 +264,7 @@ export function listProfileChanges(
       protected: now.protected ?? last?.protected,
       avatar: now.avatar === undefined ? last?.avatar : now.avatar,
       banner: now.banner === undefined ? last?.banner : now.banner,
+      pinned: now.pinned ?? last?.pinned,
     }
   }
   const items = changes.toReversed().slice(0, limit)
@@ -244,10 +278,25 @@ export function listProfileChanges(
       )
       .filter((asset): asset is string => !!asset),
   )
+  const posts = pinnedPosts(
+    r,
+    revisions[0].type.split('.', 1)[0]!,
+    items.flatMap((item) =>
+      item.fields.flatMap((f) =>
+        'pinned' in f ? [...f.pinned.before, ...f.pinned.after] : [],
+      ),
+    ),
+  )
   return {
     items: items.map((item) => ({
       ...item,
       fields: item.fields.map((f): ProfileFieldChange => {
+        if ('pinned' in f)
+          return {
+            field: 'pinned',
+            before: f.pinned.before.map((id) => posts.get(id)!),
+            after: f.pinned.after.map((id) => posts.get(id)!),
+          }
         if (!('image' in f)) return f
         const before = f.image.before && assets.get(f.image.before)
         const after = f.image.after && assets.get(f.image.after)
@@ -262,7 +311,10 @@ export function listProfileChanges(
   }
 }
 
-/** A field change before its images are read: images by asset id. */
+/**
+ * A field change before its images and posts are read: images by asset id,
+ * posts by their platform id.
+ */
 type RawFieldChange =
   | TextChange
   | ProtectedChange
@@ -270,6 +322,51 @@ type RawFieldChange =
       field: 'avatar' | 'banner'
       image: { before?: string; after?: string }
     }
+  | { field: 'pinned'; pinned: { before: string[]; after: string[] } }
+
+/** A post on its platform, by the platform's id of it. */
+const postURLs: Record<string, (id: string) => string> = {
+  x: (id) => `https://x.com/i/web/status/${id}`,
+  instagram: (id) => `https://www.instagram.com/p/${shortcodeFromPk(id)}/`,
+}
+
+/** Pinned posts by id, with their saved collection where there is one. */
+function pinnedPosts(
+  r: Reader,
+  platform: string,
+  ids: readonly string[],
+): Map<string, PinnedPost> {
+  const posts = new Map<string, PinnedPost>()
+  const url = postURLs[platform]
+  for (const id of ids) posts.set(id, { id, ...(url ? { url: url(id) } : {}) })
+  if (!posts.size) return posts
+  const saved = r.db.all<{
+    post: string
+    collection: string
+    text: string | null
+  }>(sql`
+    SELECT c.external_id AS post, c.id AS collection,
+      coalesce(nullif(rv.payload ->> '$.text', ''), rv.payload ->> '$.summary')
+        AS text
+    FROM collections c
+    JOIN library l ON l.collection_id = c.id
+    JOIN revisions rv ON rv.id = ${sql.raw(head('c.id'))}
+    WHERE c.platform = ${platform} AND c.kind = 'post'
+      AND c.external_id IN (SELECT value FROM json_each(${list([...posts.keys()])}))
+    ORDER BY c.object_scope = '' DESC, l.created_at`)
+  for (const row of saved) {
+    const post = posts.get(row.post)!
+    if (post.collection_id) continue
+    post.collection_id = row.collection
+    const text = row.text?.trim()
+    if (text) post.text = text
+  }
+  return posts
+}
+
+/** Whether two lists of pinned posts hold the same posts. */
+const samePosts = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((id) => b.includes(id))
 
 function compare(before: Seen, after: Seen): RawFieldChange[] {
   const fields: RawFieldChange[] = []
@@ -305,5 +402,11 @@ function compare(before: Seen, after: Seen): RawFieldChange[] {
       },
     })
   }
+  // Known on both sides, as protection is; the order alone is no change.
+  if (before.pinned && after.pinned && !samePosts(before.pinned, after.pinned))
+    fields.push({
+      field: 'pinned',
+      pinned: { before: before.pinned, after: after.pinned },
+    })
   return fields
 }
