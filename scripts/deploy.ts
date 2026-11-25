@@ -4,6 +4,9 @@
 // built-ins only: the deploy webhook runs this file as it is on origin/main.
 //
 //   node scripts/deploy.ts [--check]
+
+/* eslint-disable unicorn/no-exports-in-scripts -- for deploy.test.ts; the
+   webhook runs this file alone, so the code cannot move to a module. */
 import { execFileSync } from 'node:child_process'
 import {
   copyFileSync,
@@ -20,152 +23,201 @@ import { parseEnv } from 'node:util'
 
 const IMAGE = 'ghcr.io/sxzz/midden'
 const REVISION = /^[\da-f]{40}$/
-// Database snapshots kept: this deployment's and the one before.
-const KEEP_SNAPSHOTS = 2
+// The compose profile, and service, of the Litestream sidecar.
+const LITESTREAM = 'litestream'
 
-const check = process.argv.includes('--check')
-const dir = path.resolve(
-  process.env.MIDDEN_DIR || path.join(homedir(), 'midden'),
-)
-const lock = path.join(dir, '.local', 'deploy.lock')
-
-function run(command: string, args: string[], env?: Record<string, string>) {
-  return execFileSync(command, args, {
-    cwd: dir,
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-    stdio: ['ignore', 'pipe', 'inherit'],
-  }).trim()
-}
+/** Runs a command in the checkout and returns its trimmed stdout. */
+export type Run = (
+  command: string,
+  args: string[],
+  env?: Record<string, string>,
+) => string
 
 function step(message: string) {
   console.info(`== ${message}`)
 }
 
-function imageRevision(image: string): string {
-  return run('docker', [
-    'image',
-    'inspect',
-    image,
-    '--format',
-    '{{index .Config.Labels "org.opencontainers.image.revision"}}',
-  ])
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
-/** The revision of the running container, or '' when none runs. */
-function runningRevision(): string {
-  const id = run('docker', ['compose', 'ps', '-q', 'midden'])
-  if (!id) return ''
-  const image = run('docker', ['inspect', id, '--format', '{{.Image}}'])
-  const revision = imageRevision(image)
-  return REVISION.test(revision) ? revision : ''
-}
-
-function settings() {
-  let env: Record<string, string | undefined> = {}
-  try {
-    env = parseEnv(readFileSync(path.join(dir, '.env'), 'utf8'))
-  } catch {}
-  return {
-    dataDir: path.resolve(dir, env.DATA_PATH || 'data'),
-    port: env.PORT || '8080',
-  }
-}
-
-/** Start `revision` and wait until it reports healthy. */
-function start(revision: string) {
-  run('git', ['checkout', '--quiet', '--detach', revision])
-  run(
-    'docker',
-    [
-      'compose',
-      'up',
-      '-d',
-      '--pull',
-      'never',
-      '--wait',
-      '--wait-timeout',
-      '180',
-    ],
-    { MIDDEN_IMAGE: `${IMAGE}:sha-${revision}` },
-  )
-  const { port } = settings()
-  const health = run('curl', [
-    '-fsS',
-    '--max-time',
-    '5',
-    `http://127.0.0.1:${port}/healthz`,
-  ])
-  if (health !== 'ok') throw new Error(`unexpected health response: ${health}`)
-}
-
-/** A consistent copy of the database, taken by the running server. */
-function snapshot(dataDir: string): string {
-  const inside = run('docker', [
-    'compose',
-    'exec',
-    '-T',
-    'midden',
-    'node',
-    'server/src/cli.ts',
-    'backup',
-    '/data/backups/deploy',
-  ])
-  const file = path.join(dataDir, 'backups', 'deploy', path.basename(inside))
-  const older = readdirSync(path.dirname(file))
-    .filter((name) => name.endsWith('.db'))
-    .toSorted()
-    .slice(0, -KEEP_SNAPSHOTS)
-  for (const name of older)
-    for (const suffix of ['', '-wal', '-shm'])
-      rmSync(path.join(path.dirname(file), name + suffix), { force: true })
-  return file
-}
-
-/**
- * Remove the service's images other than the running revision and the one
- * a rollback would return to. A failure here does not fail the deployment.
- */
-function pruneImages(keep: string[]) {
-  try {
-    const tags = run('docker', [
+/** Deploy, or with `check` only report; returns the result line. */
+export function deploy(dir: string, run: Run, check = false): string {
+  function imageRevision(image: string): string {
+    return run('docker', [
       'image',
-      'ls',
-      IMAGE,
+      'inspect',
+      image,
       '--format',
-      '{{.Tag}}',
-    ]).split('\n')
-    const stale = tags.filter(
-      (tag) =>
-        tag.startsWith('sha-') && !keep.includes(tag.slice('sha-'.length)),
-    )
-    if (stale.length)
-      run('docker', ['image', 'rm', ...stale.map((tag) => `${IMAGE}:${tag}`)])
-    // Earlier `latest` pulls left these untagged.
-    run('docker', [
-      'image',
-      'prune',
-      '--force',
-      '--filter',
-      `label=org.opencontainers.image.source=https://github.com/sxzz/midden`,
+      '{{index .Config.Labels "org.opencontainers.image.revision"}}',
     ])
-    if (stale.length) console.info(`removed images ${stale.join(', ')}`)
-  } catch (error) {
-    console.error(
-      `could not remove old images: ${error instanceof Error ? error.message : error}`,
-    )
   }
-}
 
-function restore(dataDir: string, file: string) {
-  run('docker', ['compose', 'stop', 'midden'])
-  const database = path.join(dataDir, 'midden.db')
-  for (const suffix of ['-wal', '-shm'])
-    rmSync(database + suffix, { force: true })
-  copyFileSync(file, database)
-}
+  /** The revision of the running container, or '' when none runs. */
+  function runningRevision(): string {
+    const id = run('docker', ['compose', 'ps', '-q', 'midden'])
+    if (!id) return ''
+    const image = run('docker', ['inspect', id, '--format', '{{.Image}}'])
+    const revision = imageRevision(image)
+    return REVISION.test(revision) ? revision : ''
+  }
 
-function deploy(): string {
+  function settings() {
+    let env: Record<string, string | undefined> = {}
+    try {
+      env = parseEnv(readFileSync(path.join(dir, '.env'), 'utf8'))
+    } catch {}
+    // Compose takes COMPOSE_PROFILES from the environment before .env.
+    const profiles = process.env.COMPOSE_PROFILES ?? env.COMPOSE_PROFILES ?? ''
+    return {
+      dataDir: path.resolve(dir, env.DATA_PATH || 'data'),
+      port: env.PORT || '8080',
+      litestream: profiles
+        .split(',')
+        .map((profile) => profile.trim())
+        .includes(LITESTREAM),
+    }
+  }
+
+  /** Start `revision` and wait until it reports healthy. */
+  function start(revision: string) {
+    run('git', ['checkout', '--quiet', '--detach', revision])
+    // The app alone: the sidecar must not hold up or fail a deployment.
+    run(
+      'docker',
+      [
+        'compose',
+        'up',
+        '-d',
+        '--pull',
+        'never',
+        '--wait',
+        '--wait-timeout',
+        '180',
+        'midden',
+      ],
+      { MIDDEN_IMAGE: `${IMAGE}:sha-${revision}` },
+    )
+    const { port } = settings()
+    const health = run('curl', [
+      '-fsS',
+      '--max-time',
+      '5',
+      `http://127.0.0.1:${port}/healthz`,
+    ])
+    if (health !== 'ok')
+      throw new Error(`unexpected health response: ${health}`)
+  }
+
+  /**
+   * Start Litestream, or apply a changed definition; `recreate` also picks
+   * up a changed litestream.yml, which compose does not see. A failure is
+   * reported in the result instead of failing the deployment.
+   */
+  function startLitestream(recreate: boolean): string {
+    step('starting litestream')
+    try {
+      run('docker', [
+        'compose',
+        'up',
+        '-d',
+        ...(recreate ? ['--force-recreate'] : []),
+        LITESTREAM,
+      ])
+      return ''
+    } catch (error) {
+      console.error(`could not start litestream: ${message(error)}`)
+      return '; litestream did not start'
+    }
+  }
+
+  function litestreamConfigChanged(from: string, to: string): boolean {
+    try {
+      run('git', ['diff', '--quiet', from, to, '--', 'litestream.yml'])
+      return false
+    } catch {
+      return true
+    }
+  }
+
+  /**
+   * A consistent copy of the database, taken by the running server, keeping
+   * the newest `keep` copies.
+   */
+  function snapshot(dataDir: string, keep: number): string {
+    const inside = run('docker', [
+      'compose',
+      'exec',
+      '-T',
+      'midden',
+      'node',
+      'server/src/cli.ts',
+      'backup',
+      '/data/backups/deploy',
+    ])
+    const file = path.join(dataDir, 'backups', 'deploy', path.basename(inside))
+    const older = readdirSync(path.dirname(file))
+      .filter((name) => name.endsWith('.db'))
+      .toSorted()
+      .slice(0, -keep)
+    for (const name of older)
+      for (const suffix of ['', '-wal', '-shm'])
+        rmSync(path.join(path.dirname(file), name + suffix), { force: true })
+    return file
+  }
+
+  /**
+   * Remove the service's images other than the running revision and the one
+   * a rollback would return to. A failure here does not fail the deployment.
+   */
+  function pruneImages(keep: string[]) {
+    try {
+      const tags = run('docker', [
+        'image',
+        'ls',
+        IMAGE,
+        '--format',
+        '{{.Tag}}',
+      ]).split('\n')
+      const stale = tags.filter(
+        (tag) =>
+          tag.startsWith('sha-') && !keep.includes(tag.slice('sha-'.length)),
+      )
+      if (stale.length)
+        run('docker', ['image', 'rm', ...stale.map((tag) => `${IMAGE}:${tag}`)])
+      // Earlier `latest` pulls left these untagged.
+      run('docker', [
+        'image',
+        'prune',
+        '--force',
+        '--filter',
+        `label=org.opencontainers.image.source=https://github.com/sxzz/midden`,
+      ])
+      if (stale.length) console.info(`removed images ${stale.join(', ')}`)
+    } catch (error) {
+      console.error(`could not remove old images: ${message(error)}`)
+    }
+  }
+
+  function restore(dataDir: string, file: string, litestream: boolean) {
+    // Litestream holds the database and its WAL open: replacing them under
+    // it breaks the file or its copy in R2. Stop it before the app.
+    if (litestream) run('docker', ['compose', 'stop', LITESTREAM])
+    run('docker', ['compose', 'stop', 'midden'])
+    const database = path.join(dataDir, 'midden.db')
+    for (const suffix of ['-wal', '-shm'])
+      rmSync(database + suffix, { force: true })
+    copyFileSync(file, database)
+    // Its local state describes the replaced file. Without it Litestream
+    // reads its position from the bucket and uploads this file whole as the
+    // next transaction, so the history before the rollback stays restorable.
+    if (litestream)
+      rmSync(path.join(dataDir, '.midden.db-litestream'), {
+        recursive: true,
+        force: true,
+      })
+  }
+
   if (run('git', ['status', '--porcelain', '--untracked-files=normal']))
     throw new Error(`${dir} has local changes; commit or move them first`)
 
@@ -191,51 +243,75 @@ function deploy(): string {
   if (imageRevision(`${IMAGE}:sha-${revision}`) !== revision)
     throw new Error(`${IMAGE}:sha-${revision} has another revision`)
 
-  const { dataDir } = settings()
+  const { dataDir, litestream } = settings()
   let backup = ''
   if (current) {
     // Rolling back needs the running version's image under its own tag.
     run('docker', ['pull', '--quiet', `${IMAGE}:sha-${current}`])
     step('backing up the database')
-    backup = snapshot(dataDir)
+    // This deployment's copy is what a rollback restores. The one before
+    // only guarded against a bad version found later; Litestream's history
+    // covers that, so it is kept only without Litestream.
+    backup = snapshot(dataDir, litestream ? 1 : 2)
     console.info(backup)
   }
   try {
     step(`starting ${revision}`)
     start(revision)
   } catch (error) {
-    console.error(error instanceof Error ? error.message : error)
+    console.error(message(error))
     if (!current)
       throw new Error(`${revision} did not become healthy`, { cause: error })
     // Migrations may have run: put back the database the old version knew.
     step(`rolling back to ${current}`)
-    restore(dataDir, backup)
-    start(current)
-    return `rolled back ${revision}: unhealthy; running ${current} with the database from ${backup}`
+    restore(dataDir, backup, litestream)
+    let note = ''
+    try {
+      start(current)
+    } finally {
+      if (litestream) note = startLitestream(false)
+    }
+    return `rolled back ${revision}: unhealthy; running ${current} with the database from ${backup}${note}`
   }
   pruneImages([revision, current])
-  return `deployed ${revision} (was ${current || 'nothing'})`
+  const note = litestream
+    ? startLitestream(!!current && litestreamConfigChanged(current, revision))
+    : ''
+  return `deployed ${revision} (was ${current || 'nothing'})${note}`
 }
 
-mkdirSync(path.dirname(lock), { recursive: true })
-try {
-  mkdirSync(lock)
-} catch {
-  console.error(
-    `another deployment holds ${lock}; remove it if none is running`,
+if (import.meta.main) {
+  const check = process.argv.includes('--check')
+  const dir = path.resolve(
+    process.env.MIDDEN_DIR || path.join(homedir(), 'midden'),
   )
-  process.exit(1)
-}
-try {
-  // The last line is the result, read by the deploy webhook.
-  const result = deploy()
-  console.info(`result: ${result}`)
-  if (result.startsWith('rolled back')) process.exitCode = 1
-} catch (error) {
-  console.error(
-    `result: failed: ${error instanceof Error ? error.message : error}`,
-  )
-  process.exitCode = 1
-} finally {
-  rmdirSync(lock)
+  const run: Run = (command, args, env) =>
+    execFileSync(command, args, {
+      cwd: dir,
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    }).trim()
+  const lock = path.join(dir, '.local', 'deploy.lock')
+
+  mkdirSync(path.dirname(lock), { recursive: true })
+  try {
+    mkdirSync(lock)
+  } catch {
+    console.error(
+      `another deployment holds ${lock}; remove it if none is running`,
+    )
+    process.exit(1)
+  }
+  try {
+    // The last line is the result, read by the deploy webhook.
+    const result = deploy(dir, run, check)
+    console.info(`result: ${result}`)
+    if (result.startsWith('rolled back')) process.exitCode = 1
+  } catch (error) {
+    console.error(`result: failed: ${message(error)}`)
+    process.exitCode = 1
+  } finally {
+    rmdirSync(lock)
+  }
 }

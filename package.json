@@ -23,7 +23,7 @@
     "lint": "eslint --max-warnings=0 .",
     "lint:fix": "eslint --fix .",
     "prepare": "simple-git-hooks && pnpm --filter @fxembed/atmosphere build",
-    "test": "pnpm -r run test",
+    "test": "node --test scripts/*.test.ts && pnpm -r run test",
     "typecheck": "tsrs --fast -p scripts && pnpm -r --parallel run typecheck"
   },
   "devDependencies": {
