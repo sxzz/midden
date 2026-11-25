@@ -22,6 +22,8 @@ test('browse, filter, history, refresh and remove a saved post', async ({
 }) => {
   let deleted = false
   const captureBodies: unknown[] = []
+  /** The order each list request asked for. */
+  const sorts: string[] = []
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', async (r) => {
     const u = new URL(r.request().url())
@@ -37,6 +39,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
         break
       }
       case '/v1/collections': {
+        sorts.push(u.searchParams.get('sort') ?? '')
         body = {
           items:
             deleted || u.searchParams.get('q') === '不存在' ? [] : [collection],
@@ -160,6 +163,18 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await expect(page.getByText('没有匹配的收藏', { exact: true })).toBeVisible()
   await expect(page.locator('.total')).toHaveText('0 条')
+  // A search is ordered by relevance; the other orders still apply within it.
+  const order = page.getByRole('combobox', { name: '排序', exact: true })
+  await expect(order).toHaveValue('relevance')
+  expect(sorts.at(-1)).toBe('relevance')
+  await expect(
+    page.getByRole('combobox', { name: '排序方向', exact: true }),
+  ).toHaveCount(0)
+  await order.selectOption('published')
+  await expect(page).toHaveURL(/sort=published/)
+  await expect.poll(() => sorts.at(-1)).toBe('published')
+  await order.selectOption('relevance')
+  await expect(page).not.toHaveURL(/sort=/)
   await page.getByRole('searchbox').fill('')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await openRow()

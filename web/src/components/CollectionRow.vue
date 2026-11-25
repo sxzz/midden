@@ -4,6 +4,7 @@ import { previewURL, type Collection } from '../api'
 import {
   collectionTime,
   excerpt,
+  markedExcerpt,
   present,
   shortDate,
   sourceStateNotice,
@@ -24,6 +25,8 @@ const props = defineProps<{
   repostedBy?: string
   /** Set while the list is selecting; the row then toggles instead of opening. */
   selected?: boolean
+  /** Search terms to mark in the preview. */
+  highlight?: string[]
 }>()
 const emit = defineEmits<{ toggle: [id: string] }>()
 const selectable = computed(() => props.selected !== undefined)
@@ -43,8 +46,13 @@ const reposter = computed(() =>
     ? props.repostedBy
     : undefined,
 )
-// A post previews its own text and a profile its own bio.
-const preview = computed(() => excerpt(view.value.bio ?? view.value.body))
+// A post previews its own text and a profile its own bio, around what a
+// search found in it.
+const preview = computed(() =>
+  props.highlight?.length
+    ? markedExcerpt(view.value.bio ?? view.value.body, props.highlight)
+    : [{ text: excerpt(view.value.bio ?? view.value.body), mark: false }],
+)
 const when = computed(() =>
   shortDate(
     props.sort
@@ -141,7 +149,12 @@ const storage = computed(() =>
             ></span
           ><span class="when">{{ when }}</span>
         </AppLink>
-        <span v-if="preview" class="preview">{{ preview }}</span>
+        <span v-if="preview.length && preview[0]!.text" class="preview"
+          ><template v-for="(part, i) in preview" :key="i"
+            ><mark v-if="part.mark">{{ part.text }}</mark
+            ><template v-else>{{ part.text }}</template></template
+          ></span
+        >
         <span v-if="meta" class="meta">{{ meta }}</span>
         <PostRelations
           :collection="collection"
@@ -271,6 +284,11 @@ const storage = computed(() =>
   width: 14px;
   height: 14px;
   flex-shrink: 0;
+}
+.preview mark {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--link) 22%, transparent);
+  color: inherit;
 }
 .repost-text {
   min-width: 0;

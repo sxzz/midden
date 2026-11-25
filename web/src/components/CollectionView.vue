@@ -13,6 +13,8 @@ import {
   groupCollections,
   listSort,
   listsProfiles,
+  searches,
+  searchTerms,
   storageSize,
 } from '../presentation'
 import { accountKey } from '../relation-filter'
@@ -123,8 +125,13 @@ const mediaTypes = computed(
   () => new URLSearchParams(props.query).get('media_type') || '',
 )
 const sort = computed(() => listSort(props.query))
+const highlight = computed(() => searchTerms(props.query))
 const groups = computed(() =>
-  groupCollections(props.items, new Date(), sort.value),
+  groupCollections(
+    props.items,
+    new Date(),
+    searches(props.query) ? 'relevance' : sort.value,
+  ),
 )
 const filtered = computed(() => {
   const q = new URLSearchParams(props.query)
@@ -223,6 +230,7 @@ const storage = computed(() =>
         :sort="sort"
         :show-sensitive="showSensitive"
         :reposted-by="repostedBy"
+        :highlight="highlight"
         :selected="selecting ? selected.includes(a.id) : undefined"
         @toggle="toggle"
       />

@@ -17,7 +17,7 @@ import {
   type TagChange,
 } from '../api'
 import { kindOf, KINDS, localDay, type Kind } from '../folders'
-import { listSort, listsProfiles } from '../presentation'
+import { listSort, listsProfiles, searches } from '../presentation'
 import { readAuthors } from '../reads'
 import { defaultRelMin, isRel, relMinOf, type Rel } from '../relation-filter'
 import { shareSlug } from '../share'
@@ -126,6 +126,9 @@ const shownKind = (f: Form): Kind =>
       : 'post'
 // Authors, media and sensitivity describe posts; an account has none of them.
 const posts = computed(() => shownKind(form) === 'post')
+/** The order a list of this kind has by default, searching `q` or not. */
+const defaultSort = (f: Form, q = f.q) =>
+  listSort(new URLSearchParams({ tab: shownKind(f), q }))
 /** How the two directions of the chosen order read. */
 const orderNames = computed(() =>
   form.sort === 'storage'
@@ -269,9 +272,11 @@ function stringify(f: Form) {
     ['q', f.q],
     ['layout', f.layout],
     ['tab', f.tab],
-    // The default order stays out of the address.
-    ['sort', f.sort === listSort(`tab=${shownKind(f)}`) ? '' : f.sort],
-    ['order', f.order === 'desc' ? '' : f.order],
+    // The default order stays out of the address; relevance is the default
+    // and only means something while searching.
+    ['sort', f.sort === defaultSort(f) || f.sort === 'relevance' ? '' : f.sort],
+    // Relevance has no direction.
+    ['order', f.order === 'desc' || f.sort === 'relevance' ? '' : f.order],
     ['media_type', f.media.join(',')],
     ['visibility', f.visibility],
     ['sensitive', f.sensitive],
@@ -291,11 +296,20 @@ const build = () => stringify(form)
     neither the auto-search watcher nor the `query` sync can echo one back —
     the router may re-encode or reorder what we emitted. */
 let settled = build()
+/** Whether the list shown searches; 相关度 is offered only then. */
+const searching = shallowRef(searches(settled))
 /** A range the user is still halfway through typing is not a filter yet. */
 const usable = () => !form.from || !form.to || !(form.from > form.to)
 function search() {
   if (!usable()) return
+  // Starting or ending a search moves a default order to the new default;
+  // an order the user chose stays.
+  const before = new URLSearchParams(settled).get('q') || ''
+  if (form.sort === defaultSort(form, before)) form.sort = defaultSort(form)
+  else if (form.sort === 'relevance' && !form.q.trim())
+    form.sort = defaultSort(form)
   const query = build()
+  searching.value = searches(query)
   if (query === settled) return
   settled = query
   emit('search', query)
@@ -311,6 +325,7 @@ function clear() {
   Object.assign(form, read(q.toString()))
   customRange.value = false
   settled = build()
+  searching.value = false
   emit('search', q.toString())
 }
 /** The tab, the layout and the account a list belongs to are not filters:
@@ -355,6 +370,7 @@ watch(
     const incoming = read(query)
     if (stringify(incoming) === settled) return
     settled = stringify(incoming)
+    searching.value = searches(settled)
     Object.assign(form, incoming)
     if (incoming.within || (!incoming.from && !incoming.to))
       customRange.value = false
@@ -544,6 +560,7 @@ const tagSummary = computed(() => {
       <span class="sort"
         ><span class="select"
           ><select v-model="form.sort" aria-label="排序">
+            <option v-if="searching" value="relevance">相关度</option>
             <option v-if="posts" value="published">发帖时间</option>
             <option v-if="!shared" value="saved">添加时间</option>
             <option value="updated">更新时间</option>
@@ -553,7 +570,7 @@ const tagSummary = computed(() => {
               <option value="following">关注数</option>
             </template></select
           ><ChevronIcon class="select-chevron" /></span
-        ><span class="select"
+        ><span v-if="form.sort !== 'relevance'" class="select"
           ><select v-model="form.order" aria-label="排序方向">
             <option value="desc">{{ orderNames.desc }}</option>
             <option value="asc">{{ orderNames.asc }}</option></select

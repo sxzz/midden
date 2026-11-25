@@ -11,8 +11,10 @@ import {
   collectionTime,
   groupCollections,
   listSort,
+  markedExcerpt,
   mentionParts,
   present,
+  searchTerms,
   shortDate,
   sourceStateNotice,
   warningList,
@@ -242,6 +244,49 @@ it('orders posts by posting time and accounts by when they were added', () => {
   expect(listSort('tab=profile&sort=following')).toBe('following')
   expect(listSort('sort=followers')).toBe('updated')
   expect(listSort('tab=post&sort=following')).toBe('updated')
+})
+it('marks search terms in an excerpt around the first of them', () => {
+  expect(searchTerms('q=%20Cat%20ＰＩＬＬＯＷ%20cat')).toEqual([
+    'pillow',
+    'cat',
+  ])
+  expect(markedExcerpt('A CAT on a Pillow', ['pillow', 'cat'])).toEqual([
+    { text: 'A ' },
+    { text: 'CAT', mark: true },
+    { text: ' on a ' },
+    { text: 'Pillow', mark: true },
+  ])
+  expect(markedExcerpt('ｃａｔｓ', ['cat'])).toEqual([
+    { text: 'ｃａｔ', mark: true },
+    { text: 'ｓ' },
+  ])
+  const long = `${'x'.repeat(200)} 终末地 ${'y'.repeat(200)}`
+  const parts = markedExcerpt(long, ['终末'], 40)
+  expect(parts[0]).toEqual({ text: `…${'x'.repeat(19)} ` })
+  expect(parts[1]).toEqual({ text: '终末', mark: true })
+  expect(parts.at(-1)).toEqual({ text: '…' })
+  expect(markedExcerpt('nothing here', ['cat'])).toEqual([
+    { text: 'nothing here' },
+  ])
+})
+it('orders search results by relevance unless asked otherwise', () => {
+  expect(listSort('q=cat')).toBe('relevance')
+  expect(listSort('q=cat&tab=profile')).toBe('relevance')
+  expect(listSort('q=cat&sort=published')).toBe('published')
+  expect(listSort('q=%20&sort=relevance')).toBe('published')
+  expect(listSort('sort=relevance&tab=profile')).toBe('saved')
+  shareSlug.value = 'abc'
+  expect(listSort('q=cat')).toBe('relevance')
+  expect(listSort('sort=relevance')).toBe('published')
+  shareSlug.value = ''
+  // Tiers run across time, so results are not grouped by it.
+  const items = [
+    collection({ id: 'a', observed_at: '2026-09-29T09:00:00Z' }),
+    collection({ id: 'b', observed_at: '2025-01-01T09:00:00Z' }),
+  ]
+  expect(groupCollections(items, new Date(), 'relevance')).toEqual([
+    { label: '搜索结果', items },
+  ])
 })
 it('lists by count without time groups', () => {
   const items = [

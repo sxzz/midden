@@ -42,6 +42,49 @@ async function choose(el: HTMLElement, label: string, value: string) {
   await nextTick()
 }
 const ACCOUNTS = 'entity_type=x.profile%2Cinstagram.profile'
+async function searchFor(el: HTMLElement, q: string) {
+  const input = el.querySelector<HTMLInputElement>(
+    'input[aria-label="搜索正文或作者"]',
+  )!
+  input.value = q
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  el.querySelector('form')!.dispatchEvent(
+    new Event('submit', { bubbles: true, cancelable: true }),
+  )
+  await nextTick()
+}
+
+it('orders a search by relevance, and by the chosen order within it', async () => {
+  const { el, search } = await mount('')
+  expect(options(el, '排序')).not.toContain('相关度')
+  expect(select(el, '排序').value).toBe('published')
+
+  await searchFor(el, 'cat')
+  expect(search).toHaveBeenLastCalledWith('q=cat')
+  expect(options(el, '排序')[0]).toBe('相关度')
+  expect(select(el, '排序').value).toBe('relevance')
+  // Relevance has no direction to pick.
+  expect(el.querySelector('select[aria-label="排序方向"]')).toBeNull()
+
+  await choose(el, '排序', 'published')
+  expect(search).toHaveBeenLastCalledWith('q=cat&sort=published')
+  expect(options(el, '排序方向')).toEqual(['从新到旧', '从旧到新'])
+  await choose(el, '排序', 'relevance')
+  expect(search).toHaveBeenLastCalledWith('q=cat')
+
+  // Ending the search ends relevance: the list's own default returns.
+  await searchFor(el, '')
+  expect(search).toHaveBeenLastCalledWith('')
+  expect(options(el, '排序')).not.toContain('相关度')
+  expect(select(el, '排序').value).toBe('published')
+  unmount()
+
+  // An order chosen before a search is kept by it.
+  const chosen = await mount('sort=updated')
+  await searchFor(chosen.el, 'cat')
+  expect(chosen.search).toHaveBeenLastCalledWith('q=cat&sort=updated')
+  expect(select(chosen.el, '排序').value).toBe('updated')
+})
 
 it('offers the count orders on the accounts tab only', async () => {
   const posts = await mount('')

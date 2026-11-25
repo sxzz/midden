@@ -329,18 +329,32 @@ const COUNT_SORTS = new Set(['followers', 'following'])
  * Orders a public link offers: when the owner saved and how much is theirs
  * stay hidden, while an account's counts are public.
  */
-const PUBLIC_SORTS = new Set(['published', 'updated', ...COUNT_SORTS])
+const PUBLIC_SORTS = new Set([
+  'relevance',
+  'published',
+  'updated',
+  ...COUNT_SORTS,
+])
+/** Whether a list query searches. */
+export const searches = (query: string | URLSearchParams) =>
+  !!new URLSearchParams(query).get('q')?.trim()
 /**
- * The order of a list: posts by when they were posted unless asked
- * otherwise; accounts have no such time, and are kept in the order they
- * were added, which a refresh never reshuffles. Behind a public link, which
- * has no save times, the accounts updated last come first. A folder keeps
- * one order for both tabs: on posts, an account count order is the update
- * time, as the server reads it.
+ * The order of a list: search results by relevance (相关度, which the server
+ * orders in tiers, each by the order chosen), otherwise posts by when they
+ * were posted unless asked otherwise; accounts have no such time, and are
+ * kept in the order they were added, which a refresh never reshuffles.
+ * Behind a public link, which has no save times, the accounts updated last
+ * come first. A folder keeps one order for both tabs: on posts, an account
+ * count order is the update time, as the server reads it. Relevance without
+ * a search is the default.
  */
 export function listSort(query: string | URLSearchParams) {
-  const sort = new URLSearchParams(query).get('sort')
-  const profiles = listsProfiles(query)
+  const params = new URLSearchParams(query)
+  const searching = searches(params)
+  let sort = params.get('sort')
+  if (sort === 'relevance' && !searching) sort = ''
+  if (!sort && searching) return 'relevance'
+  const profiles = listsProfiles(params)
   if (sort && COUNT_SORTS.has(sort) && !profiles) return 'updated'
   if (shareSlug.value)
     return sort && PUBLIC_SORTS.has(sort)
@@ -352,7 +366,11 @@ export function listSort(query: string | URLSearchParams) {
 }
 /** The time a list row shows and is grouped by, following its order. */
 export function collectionTime(item: Collection, sort: string) {
-  if (sort === 'published' && parseDate(item.published_at))
+  // A search result shows when it was posted, as a list of posts does.
+  if (
+    (sort === 'published' || sort === 'relevance') &&
+    parseDate(item.published_at)
+  )
     return item.published_at
   if (sort === 'saved' && item.saved_at) return item.saved_at
   return item.observed_at
@@ -362,7 +380,10 @@ export function groupCollections(
   now = new Date(),
   sort?: string,
 ) {
-  // Sizes and counts have no time to group by.
+  // Sizes and counts have no time to group by; search results come in
+  // relevance tiers, so no order of theirs runs through time.
+  if (sort === 'relevance')
+    return items.length ? [{ label: '搜索结果', items }] : []
   if (sort === 'storage' || (sort && COUNT_SORTS.has(sort)))
     return items.length ? [{ label: '全部收藏', items }] : []
   const groups: CollectionGroup[] = []
@@ -419,6 +440,66 @@ export function warningList(list?: string[] | null) {
 export function excerpt(text: string, limit = 120) {
   const flat = text.replaceAll(/\s+/g, ' ').trim()
   return flat.length > limit ? `${flat.slice(0, limit)}…` : flat
+}
+
+const SPACES = /\s+/
+/** Case and width as search folds them, one character at a time. */
+const foldChar = (c: string) => c.normalize('NFKC').toLowerCase()
+
+/** The terms of a list query's search, longest first, to mark in results. */
+export function searchTerms(query: string | URLSearchParams): string[] {
+  const q = new URLSearchParams(query).get('q') || ''
+  const terms = [...q].map(foldChar).join('').split(SPACES).filter(Boolean)
+  return [...new Set(terms)].toSorted((a, b) => b.length - a.length)
+}
+
+export interface Segment {
+  text: string
+  mark?: boolean
+}
+
+/**
+ * An excerpt with the search terms marked, starting a little before the
+ * first one when that is beyond the plain excerpt. Matching folds case and
+ * width as the server does; traditional and simplified characters are left
+ * as they are, so a match across them goes unmarked.
+ */
+export function markedExcerpt(
+  text: string,
+  terms: string[],
+  limit = 120,
+): Segment[] {
+  const chars = [...text.replaceAll(/\s+/g, ' ').trim()]
+  let folded = ''
+  /** The character each code unit of `folded` comes from. */
+  const from: number[] = []
+  chars.forEach((c, i) => {
+    const f = foldChar(c)
+    folded += f
+    for (let k = 0; k < f.length; k++) from.push(i)
+  })
+  const marked = chars.map(() => false)
+  for (const term of terms)
+    for (
+      let at = folded.indexOf(term);
+      at !== -1;
+      at = folded.indexOf(term, at + term.length)
+    )
+      for (let k = at; k < at + term.length; k++) marked[from[k]!] = true
+  const first = marked.indexOf(true)
+  const start = first > limit - 20 ? first - 20 : 0
+  const end = Math.min(chars.length, start + limit)
+  const segments: Segment[] = start ? [{ text: '…' }] : []
+  for (let i = start; i < end; i++) {
+    const last = segments.at(-1)
+    if (last && !!last.mark === marked[i]) last.text += chars[i]
+    else
+      segments.push(
+        marked[i] ? { text: chars[i]!, mark: true } : { text: chars[i]! },
+      )
+  }
+  if (end < chars.length) segments.push({ text: '…' })
+  return segments
 }
 
 export function storageSize(bytes: number) {
