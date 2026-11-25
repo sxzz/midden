@@ -482,7 +482,7 @@ function accountList(c: CommandContext, group: boolean): Reply {
       row.push({ text: '删除', callback_data: `/account_delete ${account.id}` })
     keyboard.push(row)
   }
-  const add = webRoute(c.webAppUrl, '添加账号', '/accounts')
+  const add = webRoute(c.webAppUrl, '添加账号', '/settings/accounts')
   if (!group && add && platforms.some((p) => p.canAdd)) keyboard.push([add])
   return { text, keyboard }
 }
@@ -515,7 +515,7 @@ function accountAdd(c: CommandContext, request: Request): Reply {
   const back = [{ text: '返回账号列表', callback_data: '/account' }]
   if (request.group)
     return { text: '在私聊中打开网页添加采集账号。', keyboard: [back] }
-  const add = webRoute(c.webAppUrl, '添加账号', '/accounts')
+  const add = webRoute(c.webAppUrl, '添加账号', '/settings/accounts')
   if (!add) return { text: '未配置网页入口。', keyboard: [back] }
   return {
     text: request.arg
