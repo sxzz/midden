@@ -1,9 +1,12 @@
 import { Buffer } from 'node:buffer'
+import process from 'node:process'
 import { expect, test, type Page } from './test'
 
 // A passkey's RP ID must be a domain name, so these pages run on localhost
 // rather than the configured 127.0.0.1.
-const APP = 'http://localhost:4173/app/'
+// The config exports the port it picked for this worktree.
+const HOST = `localhost:${process.env.E2E_PORT}`
+const APP = `http://${HOST}/app/`
 const TOKEN = 'T'.repeat(43)
 const challenge = (n: number) =>
   Buffer.from(`challenge-${n}-${'x'.repeat(20)}`).toString('base64url')
@@ -115,7 +118,7 @@ test('a /passkey link adds a passkey, which then signs in', async ({
   await page.goto(`${APP}#/passkey/${TOKEN}`)
   await expect(page.locator('h1')).toHaveText('添加通行密钥')
   // The page starts from a name with this domain in it.
-  await expect(page.getByLabel('名称')).toHaveValue(/localhost:4173$/)
+  await expect(page.getByLabel('名称')).toHaveValue(new RegExp(`${HOST}$`))
   await page.getByLabel('名称').fill('测试电脑')
   await page.getByRole('button', { name: '创建通行密钥' }).click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
@@ -244,7 +247,7 @@ test('the settings page lists, adds, renames and deletes passkeys', async ({
   await expect(section).toContainText('上次使用')
 
   await section.getByRole('button', { name: '添加通行密钥' }).click()
-  await expect(section).toContainText('localhost:4173')
+  await expect(section).toContainText(HOST)
   const { credentials } = await cdp.send('WebAuthn.getCredentials', {
     authenticatorId,
   })

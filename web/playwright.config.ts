@@ -6,6 +6,8 @@ import { defineConfig } from '@playwright/test'
 // different worktrees never share a server. E2E_PORT overrides it.
 const hash = createHash('sha1').update(process.cwd()).digest().readUInt16BE(0)
 const port = Number(process.env.E2E_PORT) || 20000 + (hash % 20000)
+// Workers inherit this, so specs that need the port (passkey) can read it.
+process.env.E2E_PORT = String(port)
 const origin = `http://127.0.0.1:${port}`
 
 export default defineConfig({
