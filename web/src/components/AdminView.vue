@@ -15,8 +15,9 @@ import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 
 // 设置 → 管理员面板: what concerns the whole server rather than one person's
-// settings. The domains the app may be used from; where Litestream replicates
-// the database, its heartbeat; on a development server, deleting everything.
+// settings. The domains the app may be used from; what storage is used;
+// where Litestream replicates the database, its heartbeat; on a development
+// server, deleting everything.
 const emit = defineEmits<{
   /** Everything saved was deleted; lists must not show it any more. */
   cleared: []
@@ -78,6 +79,14 @@ async function clearAll() {
 
 <template>
   <OriginList />
+  <ListSection>
+    <ListButton
+      label="存储用量"
+      variant="plain"
+      chevron
+      :to="{ name: 'settings-storage' }"
+    />
+  </ListSection>
   <BackupSection
     v-if="litestream"
     :status="litestream"

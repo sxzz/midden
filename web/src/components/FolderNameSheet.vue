@@ -14,6 +14,8 @@ const props = defineProps<{
   url?: boolean
   /** For a whole number. */
   numeric?: boolean
+  /** For a number with decimals. */
+  decimal?: boolean
   busy?: boolean
   error?: string
 }>()
@@ -55,7 +57,9 @@ function submit() {
           v-model="value"
           :maxlength="maxlength ?? 64"
           autocomplete="off"
-          :inputmode="url ? 'url' : numeric ? 'numeric' : undefined"
+          :inputmode="
+            url ? 'url' : numeric ? 'numeric' : decimal ? 'decimal' : undefined
+          "
           :autocapitalize="url ? 'off' : undefined"
           :spellcheck="url ? false : undefined"
           :placeholder="placeholder ?? '收藏夹名称'"

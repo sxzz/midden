@@ -21,6 +21,7 @@ import SettingsView from './components/SettingsView.vue'
 const RelationGraph = () => import('./components/RelationGraph.vue')
 const RelationCompare = () => import('./components/RelationCompare.vue')
 const RelationsView = () => import('./components/RelationsView.vue')
+const StorageView = () => import('./components/StorageView.vue')
 
 const SHARE = String.raw`/s/:slug([\w-]+)`
 // Pages inside a share take the collection; the slug is the share's own.
@@ -85,6 +86,12 @@ export const router = createRouter({
       component: PasskeyList,
     },
     { path: '/settings/admin', name: 'settings-admin', component: AdminView },
+    // Its charts load with it, not with the app.
+    {
+      path: '/settings/admin/storage',
+      name: 'settings-storage',
+      component: StorageView,
+    },
     { path: '/captures', name: 'captures', component: CaptureRecords },
     {
       path: '/captures/:id([a-f0-9-]+)',

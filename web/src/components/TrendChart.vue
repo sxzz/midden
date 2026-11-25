@@ -6,14 +6,13 @@ import {
   shallowRef,
   useTemplateRef,
 } from 'vue'
-import { date } from '../presentation'
 import {
-  change,
-  formatChange,
-  formatCount,
+  formatTrendChange,
+  formatValue,
   frame,
   geometry,
   nearest,
+  readingTime,
   type Trend,
 } from '../trends'
 const props = defineProps<{
@@ -90,20 +89,18 @@ function key(event: KeyboardEvent) {
   <article class="trend">
     <header class="head">
       <h3 class="label">{{ trend.label }}</h3>
-      <p class="value">{{ formatCount(shown.value) }}</p>
+      <p class="value">{{ formatValue(trend, shown.value) }}</p>
       <p class="meta">
         <time v-if="active >= 0" :datetime="new Date(shown.at).toISOString()">{{
-          date(new Date(shown.at).toISOString())
-        }}</time><template v-else
-          >期间 {{ formatChange(change(trend)) }}</template
-        >
+          readingTime(trend, shown.at)
+        }}</time><template v-else>期间 {{ formatTrendChange(trend) }}</template>
       </p>
     </header>
     <div
       ref="plot"
       class="plot"
       tabindex="0"
-      :aria-label="`${trend.label}趋势，左右方向键查看每次抓取`"
+      :aria-label="`${trend.label}趋势，左右方向键查看${trend.daily ? '每天' : '每次抓取'}`"
       @pointerdown="pick"
       @pointermove="move"
       @pointerleave="leave"

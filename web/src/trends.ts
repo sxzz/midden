@@ -1,4 +1,4 @@
-import { countFields } from './presentation'
+import { countFields, date, storageSize } from './presentation'
 import type { CountsSeries } from './api'
 
 /** One reading of a count: the capture that saw it, when, and the value. */
@@ -12,6 +12,10 @@ export interface Trend {
   key: string
   label: string
   points: TrendPoint[]
+  /** Sizes in bytes rather than counts. */
+  unit?: 'bytes'
+  /** One reading a day: inspecting one shows its day, without the time. */
+  daily?: boolean
 }
 
 const isCount = (value: unknown): value is number =>
@@ -45,6 +49,31 @@ const signed = new Intl.NumberFormat('zh-CN', { signDisplay: 'exceptZero' })
 export const formatCount = (value: number) => full.format(value)
 export const formatChange = (value: number) =>
   value ? signed.format(value) : '无变化'
+
+/** A reading as its trend counts it. */
+export const formatValue = (trend: Trend, value: number) =>
+  trend.unit === 'bytes' ? storageSize(value) : formatCount(value)
+/** The change over the page, as its trend counts it. */
+export function formatTrendChange(trend: Trend) {
+  const value = change(trend)
+  if (trend.unit !== 'bytes' || !value) return formatChange(value)
+  return `${value > 0 ? '+' : '−'}${storageSize(Math.abs(value))}`
+}
+/** When a reading was taken: the day alone for daily trends. */
+export function readingTime(trend: Trend, at: number) {
+  const d = new Date(at)
+  return trend.daily
+    ? `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
+    : date(d.toISOString())
+}
+
+const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const
+/** The binary unit the largest reading is shown in, as storageSize picks it. */
+function byteUnit(top: number): [number, string] {
+  let index = 0
+  while (top >= 1024 ** (index + 1) && index < BYTE_UNITS.length - 1) index++
+  return [1024 ** index, BYTE_UNITS[index]!]
+}
 /**
  * Axis labels stay short: in full while the axis stays below 10,000, then
  * every label in 万 (or 亿), with as many decimals as its step needs, so one
@@ -72,13 +101,16 @@ export function axisDate(at: number, span: number, now = new Date()) {
     : `${d.getFullYear()}年${day}`
 }
 
-/** A round step that cuts `span` into about `count` parts; whole numbers only. */
-function step(span: number, count: number) {
+/**
+ * A round step that cuts `span` into about `count` parts; whole numbers only
+ * unless `fractions` allows less than 1.
+ */
+function step(span: number, count: number, fractions = false) {
   const raw = span / count
   const magnitude = 10 ** Math.floor(Math.log10(raw))
   const norm = raw / magnitude
   const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10
-  return Math.max(1, nice * magnitude)
+  return fractions ? nice * magnitude : Math.max(1, nice * magnitude)
 }
 
 export interface ValueScale {
@@ -93,16 +125,20 @@ export interface ValueScale {
  * little against their size, so it starts near the lowest reading, not at
  * zero. A count that never moved sits in the middle, between round ticks.
  */
-export function valueScale(values: readonly number[], count = 3): ValueScale {
+export function valueScale(
+  values: readonly number[],
+  count = 3,
+  fractions = false,
+): ValueScale {
   const low = Math.min(...values)
   const high = Math.max(...values)
   let by: number, min: number, max: number
   if (low === high) {
-    by = step(Math.max(2, high * 0.2), 2)
+    by = step(Math.max(fractions ? 0.2 : 2, high * 0.2), 2, fractions)
     min = Math.max(0, low - by)
     max = low + by
   } else {
-    by = step(high - low, count)
+    by = step(high - low, count, fractions)
     min = Math.floor(low / by) * by
     max = Math.ceil(high / by) * by
   }
@@ -151,14 +187,25 @@ export interface Geometry {
 export function geometry(trend: Trend, box: Frame, now = new Date()): Geometry {
   const first = trend.points[0]!.at
   const span = trend.points.at(-1)!.at - first
-  const scale = valueScale(trend.points.map((p) => p.value))
+  // Sizes are drawn in the unit of the largest, so ticks fall on round
+  // numbers of it: 1.5 GB, 2 GB rather than 1,500,000,000.
+  const [divisor, unit] =
+    trend.unit === 'bytes'
+      ? byteUnit(Math.max(...trend.points.map((p) => p.value)))
+      : [1, '']
+  const scale = valueScale(
+    trend.points.map((p) => p.value / divisor),
+    3,
+    trend.unit === 'bytes',
+  )
   const x = (at: number) =>
     span ? box.left + ((at - first) / span) * (box.right - box.left) : box.right
   const y = (value: number) =>
     box.bottom -
     ((value - scale.min) / (scale.max - scale.min)) * (box.bottom - box.top)
   const xs = trend.points.map((p) => x(p.at))
-  const ys = trend.points.map((p) => y(p.value))
+  const ys = trend.points.map((p) => y(p.value / divisor))
+  const decimals = Math.min(3, Math.max(0, Math.ceil(-Math.log10(scale.by))))
   return {
     xs,
     ys,
@@ -168,7 +215,9 @@ export function geometry(trend: Trend, box: Frame, now = new Date()): Geometry {
     ticks: scale.ticks.map((value) => ({
       value,
       y: y(value),
-      label: axisCount(value, scale.max, scale.by),
+      label: unit
+        ? `${Number(value.toFixed(decimals))} ${unit}`
+        : axisCount(value, scale.max, scale.by),
     })),
     start: axisDate(first, span, now),
     end: axisDate(first + span, span, now),

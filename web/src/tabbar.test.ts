@@ -32,6 +32,7 @@ describe('which tab a page belongs to', () => {
       'settings-accounts',
       'settings-passkeys',
       'settings-admin',
+      'settings-storage',
     ])
       expect(tabOf(name)).toBe('settings')
     // Public and setup pages are no tab's.

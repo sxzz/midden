@@ -17,6 +17,7 @@ const PATHS: Record<string, string> = {
   'settings-accounts': '/settings/accounts',
   'settings-passkeys': '/settings/passkeys',
   'settings-admin': '/settings/admin',
+  'settings-storage': '/settings/admin/storage',
   captures: '/captures',
   capture: '/captures/:id',
   share: '/s/:slug',

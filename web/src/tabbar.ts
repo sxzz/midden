@@ -38,6 +38,7 @@ const owners: Record<string, Tab> = {
   'settings-accounts': 'settings',
   'settings-passkeys': 'settings',
   'settings-admin': 'settings',
+  'settings-storage': 'settings',
 }
 
 export function tabOf(name: RouteRecordNameGeneric): Tab | undefined {
