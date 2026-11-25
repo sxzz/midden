@@ -3,7 +3,10 @@
 // ~/midden), or with --check only report what would be deployed. Uses Node
 // built-ins only: the deploy webhook runs this file as it is on origin/main.
 //
-//   node scripts/deploy.ts [--check]
+//   node scripts/deploy.ts [--check] [--force]
+//
+// --force deploys even while the running server is busy (slow to answer
+// /healthz), when the deployment would otherwise be postponed.
 
 /* eslint-disable unicorn/no-exports-in-scripts -- for deploy.test.ts; the
    webhook runs this file alone, so the code cannot move to a module. */
@@ -25,6 +28,14 @@ const IMAGE = 'ghcr.io/sxzz/midden'
 const REVISION = /^[\da-f]{40}$/
 // The compose profile, and service, of the Litestream sidecar.
 const LITESTREAM = 'litestream'
+// A started version gets this many tries at /healthz, this far apart, before
+// it counts as unhealthy: one slow answer must not roll a deployment back.
+const HEALTH_ATTEMPTS = 5
+const HEALTH_RETRY_DELAY = 6000
+// The running server answering /healthz slower than this is busy: the
+// pre-deploy backup would hold a read transaction for minutes, growing the
+// WAL and stalling it further, so the deployment waits for another time.
+const BUSY_SECONDS = 2
 
 /** Runs a command in the checkout and returns its trimmed stdout. */
 export type Run = (
@@ -41,8 +52,25 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+export interface DeployOptions {
+  /** Only report what would be deployed. */
+  check?: boolean
+  /** Deploy even while the running server is busy. */
+  force?: boolean
+  /** Blocks between health checks; tests pass a recorder. */
+  sleep?: (ms: number) => void
+}
+
+function sleepSync(ms: number) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
 /** Deploy, or with `check` only report; returns the result line. */
-export function deploy(dir: string, run: Run, check = false): string {
+export function deploy(
+  dir: string,
+  run: Run,
+  { check = false, force = false, sleep = sleepSync }: DeployOptions = {},
+): string {
   function imageRevision(image: string): string {
     return run('docker', [
       'image',
@@ -98,15 +126,48 @@ export function deploy(dir: string, run: Run, check = false): string {
       ],
       { MIDDEN_IMAGE: `${IMAGE}:sha-${revision}` },
     )
-    const { port } = settings()
-    const health = run('curl', [
-      '-fsS',
-      '--max-time',
-      '5',
-      `http://127.0.0.1:${port}/healthz`,
-    ])
-    if (health !== 'ok')
-      throw new Error(`unexpected health response: ${health}`)
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const health = run('curl', ['-fsS', '--max-time', '5', healthz()])
+        if (health !== 'ok')
+          throw new Error(`unexpected health response: ${health}`)
+        return
+      } catch (error) {
+        if (attempt >= HEALTH_ATTEMPTS) throw error
+        console.error(
+          `health check ${attempt}/${HEALTH_ATTEMPTS} failed: ${message(error)}; trying again in ${HEALTH_RETRY_DELAY / 1000} s`,
+        )
+        sleep(HEALTH_RETRY_DELAY)
+      }
+    }
+  }
+
+  function healthz(): string {
+    return `http://127.0.0.1:${settings().port}/healthz`
+  }
+
+  /** Why the running server is too busy to back up now, if it is. */
+  function busy(): string | undefined {
+    let seconds: number
+    try {
+      seconds = Number(
+        run('curl', [
+          '-fsS',
+          '--max-time',
+          '10',
+          '-o',
+          '/dev/null',
+          '-w',
+          '%{time_total}',
+          healthz(),
+        ]),
+      )
+    } catch {
+      return 'did not answer /healthz'
+    }
+    if (!Number.isFinite(seconds)) return 'did not answer /healthz'
+    if (seconds > BUSY_SECONDS)
+      return `took ${seconds.toFixed(1)} s to answer /healthz`
   }
 
   /**
@@ -246,6 +307,9 @@ export function deploy(dir: string, run: Run, check = false): string {
   const { dataDir, litestream } = settings()
   let backup = ''
   if (current) {
+    const reason = force ? undefined : busy()
+    if (reason)
+      return `postponed ${revision}: the running server ${reason}; deploy later, or with --force`
     // Rolling back needs the running version's image under its own tag.
     run('docker', ['pull', '--quiet', `${IMAGE}:sha-${current}`])
     step('backing up the database')
@@ -282,6 +346,7 @@ export function deploy(dir: string, run: Run, check = false): string {
 
 if (import.meta.main) {
   const check = process.argv.includes('--check')
+  const force = process.argv.includes('--force')
   const dir = path.resolve(
     process.env.MIDDEN_DIR || path.join(homedir(), 'midden'),
   )
@@ -305,9 +370,10 @@ if (import.meta.main) {
   }
   try {
     // The last line is the result, read by the deploy webhook.
-    const result = deploy(dir, run, check)
+    const result = deploy(dir, run, { check, force })
     console.info(`result: ${result}`)
-    if (result.startsWith('rolled back')) process.exitCode = 1
+    if (result.startsWith('rolled back') || result.startsWith('postponed'))
+      process.exitCode = 1
   } catch (error) {
     console.error(`result: failed: ${message(error)}`)
     process.exitCode = 1

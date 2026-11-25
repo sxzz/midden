@@ -17,6 +17,9 @@ import { deploy, type Run } from './deploy.ts'
 const IMAGE = 'ghcr.io/sxzz/midden'
 const OLD = 'a'.repeat(40)
 const NEW = 'b'.repeat(40)
+const HEALTH = 'curl -fsS --max-time 5 http://127.0.0.1:8080/healthz'
+const BUSY_CHECK =
+  'curl -fsS --max-time 10 -o /dev/null -w %{time_total} http://127.0.0.1:8080/healthz'
 
 interface Fake {
   calls: string[]
@@ -32,6 +35,8 @@ interface Fake {
 function host(
   dir: string,
   fail: (call: string) => boolean,
+  /** How long the running server takes to answer /healthz. */
+  seconds = '0.012',
 ): Fake & { run: Run } {
   const data = path.join(dir, 'data')
   const database = path.join(data, 'midden.db')
@@ -63,7 +68,7 @@ function host(
       look('up litestream')
     if (call.startsWith('docker compose up -d --force-recreate litestream'))
       look('up litestream')
-    if (command === 'curl') return 'ok'
+    if (command === 'curl') return args.includes('-w') ? seconds : 'ok'
     return ''
   }
   return { ...fake, run }
@@ -126,6 +131,7 @@ describe('deploy', () => {
       'docker image inspect sha256:old --format {{index .Config.Labels "org.opencontainers.image.revision"}}',
       `docker pull --quiet ${IMAGE}:sha-${NEW}`,
       `docker image inspect ${IMAGE}:sha-${NEW} --format {{index .Config.Labels "org.opencontainers.image.revision"}}`,
+      BUSY_CHECK,
       `docker pull --quiet ${IMAGE}:sha-${OLD}`,
       'docker compose exec -T midden node server/src/cli.ts backup /data/backups/deploy',
       `git checkout --quiet --detach ${NEW}`,
@@ -133,7 +139,7 @@ describe('deploy', () => {
       'docker compose stop midden',
       `git checkout --quiet --detach ${OLD}`,
       up(OLD),
-      'curl -fsS --max-time 5 http://127.0.0.1:8080/healthz',
+      HEALTH,
     ])
     assert.equal(readFileSync(path.join(data, 'midden.db'), 'utf8'), 'snapshot')
     assert.ok(!existsSync(path.join(data, 'midden.db-wal')))
@@ -220,5 +226,60 @@ describe('deploy', () => {
       deploy(dir, fake.run),
       `deployed ${NEW} (was ${OLD}); litestream did not start`,
     )
+  })
+
+  test('a slow health check is tried again before rolling back', () => {
+    env('SECRET_KEY=x\n')
+    let checks = 0
+    const fake = host(dir, (call) => call === HEALTH && ++checks <= 3)
+    const waits: number[] = []
+    const result = deploy(dir, fake.run, { sleep: (ms) => waits.push(ms) })
+
+    assert.equal(result, `deployed ${NEW} (was ${OLD})`)
+    assert.equal(fake.calls.filter((call) => call === HEALTH).length, 4)
+    assert.deepEqual(waits, [6000, 6000, 6000])
+    assert.ok(!fake.calls.includes('docker compose stop midden'))
+  })
+
+  test('the new version is rolled back after five failed health checks', () => {
+    env('SECRET_KEY=x\n')
+    let checks = 0
+    const fake = host(dir, (call) => call === HEALTH && ++checks <= 5)
+    const waits: number[] = []
+    const result = deploy(dir, fake.run, { sleep: (ms) => waits.push(ms) })
+
+    assert.match(result, new RegExp(`^rolled back ${NEW}: unhealthy`))
+    const stop = fake.calls.indexOf('docker compose stop midden')
+    assert.equal(
+      fake.calls.slice(0, stop).filter((call) => call === HEALTH).length,
+      5,
+    )
+    assert.equal(waits.length, 4)
+    // The old version answers at once.
+    assert.equal(fake.calls.at(-1), HEALTH)
+  })
+
+  for (const [name, seconds, fail] of [
+    ['slow', '5.4', false],
+    ['silent', '', true],
+  ] as const)
+    test(`a ${name} running server postpones the deployment before the backup`, () => {
+      env('SECRET_KEY=x\n')
+      const fake = host(dir, (call) => fail && call === BUSY_CHECK, seconds)
+      const result = deploy(dir, fake.run)
+
+      assert.match(result, new RegExp(`^postponed ${NEW}: the running server`))
+      assert.equal(fake.calls.at(-1), BUSY_CHECK)
+      assert.ok(fake.calls.every((call) => !call.includes('backup')))
+      assert.equal(snapshots().length, 2)
+    })
+
+  test('--force deploys while the running server is busy', () => {
+    env('SECRET_KEY=x\n')
+    const fake = host(dir, () => false, '5.4')
+    const result = deploy(dir, fake.run, { force: true })
+
+    assert.equal(result, `deployed ${NEW} (was ${OLD})`)
+    assert.ok(!fake.calls.includes(BUSY_CHECK))
   })
 })

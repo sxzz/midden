@@ -33,6 +33,8 @@ docker compose logs --tail=100 litestream     # 启用 Litestream 时
 docker compose pull && docker compose up -d   # 更新
 ```
 
+服务启动的顺序见 [架构](architecture.md#启动顺序)：先监听 HTTP，Telegram Bot 在后台启动，Telegram 慢或不可用不影响 `/healthz`。`compose.yaml` 的健康检查超时 10 秒，启动后 2 分钟内（`start_period`）的失败不计入。
+
 数据库迁移在启动时自动应用；随后补齐收藏列表的索引表 `catalog` 中缺失的行（首次部署或导入数据后可能需要几秒）。
 
 ## 自动部署
@@ -40,15 +42,17 @@ docker compose pull && docker compose up -d   # 更新
 `main` 的 test 工作流通过后会发布镜像 `ghcr.io/sxzz/midden:latest` 与 `:sha-<提交>`。部署机上的 webhook 收到这次运行完成的事件后，从 `origin/main` 取出 `scripts/deploy.ts` 执行：
 
 1. 确认部署目录（默认 `~/midden`）没有本地改动，最新镜像的提交在 `origin/main` 上，且与正在运行的版本不同；
-2. 在线备份数据库到 `data/backups/deploy/`，不压缩，回滚时直接换上。保留最近 2 份：这次的与上一次的；启用 Litestream 时只保留这次的 1 份，因为上一次的只用于新版本运行一段时间后才发现问题的情况，Litestream 可以恢复到那之前的任一时刻；
-3. 切换到该提交，用 `:sha-<提交>` 镜像 `docker compose up -d --wait midden`，并检查 `/healthz`。启用 Litestream 时随后 `docker compose up -d litestream`（`litestream.yml` 有改动时加 `--force-recreate`，compose 看不到文件内容的变化）；它启动失败不算部署失败，结果末尾加上 `; litestream did not start`；
-4. 新版本不健康时停掉它，恢复部署前的数据库，切回原来的版本。启用 Litestream 时：先停 Litestream 再停服务（它一直打开着数据库和 WAL，换文件时不能在运行）；换回数据库后删除它的本地状态 `data/.midden.db-litestream/`；原来的版本启动后（即使启动失败）再启动 Litestream。Litestream 发现本地数据库落后于存储桶，从存储桶取得位置，把换回的数据库整个作为下一个事务上传，回滚前的历史仍可恢复（见「Litestream」）。
+2. 正在运行的服务 `/healthz` 超过 2 秒才回应（或不回应）时推迟部署，结果为 `postponed …`，什么也不改（Bot 的部署消息显示为部署失败，末尾是这一行）。负载很高时下一步的备份会持有一个读事务好几分钟：WAL 随之变大（曾超过 500 MB），Litestream 做阻塞的 TRUNCATE 检查点，旧版本也会卡住，新版本更可能不健康而回滚。等负载下来后手动运行 `node scripts/deploy.ts`；确需立即部署时加 `--force`；
+3. 在线备份数据库到 `data/backups/deploy/`，不压缩，回滚时直接换上。保留最近 2 份：这次的与上一次的；启用 Litestream 时只保留这次的 1 份，因为上一次的只用于新版本运行一段时间后才发现问题的情况，Litestream 可以恢复到那之前的任一时刻；
+4. 切换到该提交，用 `:sha-<提交>` 镜像 `docker compose up -d --wait midden`，并检查 `/healthz`：最多 5 次，间隔 6 秒（约 30 秒），一次没有回应不算不健康。启用 Litestream 时随后 `docker compose up -d litestream`（`litestream.yml` 有改动时加 `--force-recreate`，compose 看不到文件内容的变化）；它启动失败不算部署失败，结果末尾加上 `; litestream did not start`；
+5. 新版本不健康时停掉它，恢复部署前的数据库，切回原来的版本。启用 Litestream 时：先停 Litestream 再停服务（它一直打开着数据库和 WAL，换文件时不能在运行）；换回数据库后删除它的本地状态 `data/.midden.db-litestream/`；原来的版本启动后（即使启动失败）再启动 Litestream。Litestream 发现本地数据库落后于存储桶，从存储桶取得位置，把换回的数据库整个作为下一个事务上传，回滚前的历史仍可恢复（见「Litestream」）。
 
 结果通过 Bot 发给 `DEPLOY_NOTIFY_CHAT_ID`（默认 `OWNER_TELEGRAM_ID`），日志在 `.local/deploy-webhook/`。也可以手动运行：
 
 ```sh
 node scripts/deploy.ts --check   # 只检查，不改动
 node scripts/deploy.ts
+node scripts/deploy.ts --force   # 服务繁忙时也部署
 ```
 
 安装 webhook（macOS LaunchAgent，复制到 `~/.local/share/midden/`，监听 `127.0.0.1:18090/hooks/deploy`）：
@@ -92,7 +96,7 @@ GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<域名>/hooks/
 
 `MEDIA_STORE=r2` 时前五项必填，缺少时启动失败并列出缺少的变量；错误信息不含密钥。启动日志 `media store` 写明当前的 `store`。
 
-S3 密钥由 `CF_API_TOKEN` 派生（[Cloudflare 文档](https://developers.cloudflare.com/r2/api/tokens/)）：Access Key ID 是这个 token 的 id，Secret Access Key 是 token 值的 SHA-256（十六进制）。服务启动时、开始监听之前请求 `GET https://api.cloudflare.com/client/v4/accounts/<R2_ACCOUNT_ID>/tokens/verify` 取得 id（网络错误、5xx、429 时共试 3 次），进程运行期间一直使用。成功记 `cloudflare token verified`；失败记 `cloudflare token verification failed`（error，`reason` 是状态码与 Cloudflare 的错误信息），随后以 `Invalid configuration: CF_API_TOKEN could not be verified: …` 退出，与缺少变量一样：`/healthz` 不会响应，自动部署因此回滚。日志与错误信息都不含 token 和派生的密钥。`media-migrate`、`media-prune-local` 同样先验证。
+S3 密钥由 `CF_API_TOKEN` 派生（[Cloudflare 文档](https://developers.cloudflare.com/r2/api/tokens/)）：Access Key ID 是这个 token 的 id，Secret Access Key 是 token 值的 SHA-256（十六进制）。服务启动时、开始监听之前请求 `GET https://api.cloudflare.com/client/v4/accounts/<R2_ACCOUNT_ID>/tokens/verify` 取得 id（每次请求 10 秒超时；网络错误、超时、5xx、429 时共试 3 次，最多约 33 秒），进程运行期间一直使用。成功记 `cloudflare token verified`；失败记 `cloudflare token verification failed`（error，`reason` 是状态码与 Cloudflare 的错误信息），随后以 `Invalid configuration: CF_API_TOKEN could not be verified: …` 退出，与缺少变量一样：`/healthz` 不会响应，自动部署因此回滚。日志与错误信息都不含 token 和派生的密钥。`media-migrate`、`media-prune-local` 同样先验证。
 
 `CF_API_TOKEN` 与 `R2_ACCOUNT_ID` 都设置时（不论 `MEDIA_STORE`），「存储用量」读取 R2 的分析数据，见「存储用量」。
 
@@ -546,7 +550,7 @@ Cloudflare 的 GraphQL Analytics API（`POST https://api.cloudflare.com/client/v
 
 ## 排查
 
-- `GET /healthz` 返回 `ok` 表示进程正常。
+- `GET /healthz` 返回 `ok` 表示 HTTP 服务与数据库正常，不含 Telegram；Bot 的状态看 `GET /v1/instance` 的 `bot`，或日志中的 `telegram bot started`、`telegram bot start failed; retrying`、`telegram bot could not start`。
 - 日志为 JSON，`job failed` 表示任务最终失败，`delivery rejected` 表示 Telegram 拒绝了某条消息。
 - 抓取失败：每次尝试都有记录，自动重试不会覆盖之前的日志。`upstream request failed` 是失败的上游请求：`upstream` 中有来源（`fxtwitter`、`x-graphql`、`instagram` 等）、接口、去掉凭据与查询 token 的 URL、状态码、`retry-after` 与 `x-rate-limit-*` 等响应头、响应开头 2 KB（已遮盖 token），另有任务编号与次数、`captureId`、目标和错误分类（`errorCode`、`retryable`、`final`）。之后还会重试的为 warn，不再重试的为 error，抓取最终仍成功的为 info。`job will retry` / `job failed` 是任务每次失败的结果与耗时，`capture failed` 是抓取记录最终失败。抓关系网的任务（`jobType` 为 `relations`）带 `relationFetchId`、`list` 与 `providerId`（`fxtwitter` 或 `x-session`）；用采集账号读时，查询限流后的切换记为 `relations query rate-limited; switching to the other query`，两个查询都限流时记为 `both relations queries rate-limited; waiting for the earlier reset`。
 - 日志位置：容器标准输出（`docker compose logs`，json-file 按 10 MB × 5 轮转，部署重建容器后清空），以及数据目录中的 `logs/midden.log`（按 10 MB 轮转，保留 `midden.log` 与 `.1`～`.4` 共 5 个文件，跨部署保留）。查找某个账号的失败：

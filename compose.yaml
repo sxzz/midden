@@ -2,6 +2,9 @@ services:
   midden:
     image: ${MIDDEN_IMAGE:-ghcr.io/sxzz/midden:latest}
     restart: unless-stopped
+    # A small init as PID 1 passes signals on; Node as PID 1 ignores a
+    # SIGTERM that arrives before its handler is registered.
+    init: true
     env_file: .env
     environment:
       DATA_DIR: /data
@@ -20,7 +23,10 @@ services:
     healthcheck:
       test: [CMD, wget, -qO-, http://127.0.0.1:8080/healthz]
       interval: 30s
-      timeout: 5s
+      # A busy server can take several seconds to answer.
+      timeout: 10s
+      # Startup (migrations, the R2 token check) does not count against it.
+      start_period: 2m
 
   # Continuous copy of the database to R2 (litestream.yml). Off unless .env
   # has COMPOSE_PROFILES=litestream; see docs/operations.md.
