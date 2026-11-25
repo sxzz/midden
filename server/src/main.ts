@@ -20,6 +20,7 @@ import { pruneSessions } from '#http/auth.ts'
 import { prunePasskeys } from '#http/passkeys.ts'
 import { JobQueue } from '#jobs/queue.ts'
 import { catalogMissing } from '#library/catalog.ts'
+import { watchLitestream } from '#litestream.ts'
 import { createLogger } from '#log.ts'
 import { createInstagramPlatform } from '#platforms/instagram/index.ts'
 import { Platforms } from '#platforms/registry.ts'
@@ -130,6 +131,13 @@ const maintenance = setInterval(() => {
     .finally(() => (maintaining = false))
 }, MAINTENANCE_INTERVAL)
 const optimizing = setInterval(optimize, OPTIMIZE_INTERVAL, db)
+const litestream = config.litestream
+  ? watchLitestream({
+      host: config.host,
+      logger,
+      notify: (text) => bot?.notify(text),
+    })
+  : undefined
 
 const server = serve(
   { fetch: app.fetch, port: config.port, hostname: config.host },
@@ -144,6 +152,7 @@ async function shutdown(signal: NodeJS.Signals) {
   logger.info({ signal }, 'shutting down')
   clearInterval(maintenance)
   clearInterval(optimizing)
+  litestream?.close()
   server.close()
   await bot?.stop()
   await queue.stop()

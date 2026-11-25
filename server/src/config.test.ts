@@ -88,3 +88,13 @@ describe('media store configuration', () => {
       )
   })
 })
+
+test('the Litestream heartbeat watch follows its access key', () => {
+  expect(loadConfig({ SECRET_KEY }).litestream).toBe(false)
+  expect(
+    loadConfig({ SECRET_KEY, LITESTREAM_ACCESS_KEY_ID: '' }).litestream,
+  ).toBe(false)
+  expect(
+    loadConfig({ SECRET_KEY, LITESTREAM_ACCESS_KEY_ID: 'key' }).litestream,
+  ).toBe(true)
+})

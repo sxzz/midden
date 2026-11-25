@@ -86,6 +86,9 @@ const Env = v.object({
   CF_PURGE_TOKEN: v.optional(
     v.pipe(v.string(), v.nonEmpty('CF_PURGE_TOKEN is empty')),
   ),
+  // The Litestream sidecar's bucket token (compose.yaml); only its presence
+  // matters here: the server then expects the sidecar's heartbeats.
+  LITESTREAM_ACCESS_KEY_ID: v.optional(v.string()),
 })
 
 const TRAILING_SLASHES = /\/+$/
@@ -127,6 +130,8 @@ export interface Config {
   telegram?: { token: string; owner: string }
   webAppUrl?: string
   media: MediaConfig
+  /** Litestream replicates the database: watch for its heartbeats. */
+  litestream: boolean
   /**
    * Development mode: anywhere NODE_ENV is not `production`, which the
    * image sets. Unlocks tools that would hurt real data, such as deleting
@@ -180,6 +185,7 @@ export function loadConfig(
       : {}),
     ...(parsed.WEB_APP_URL ? { webAppUrl: parsed.WEB_APP_URL } : {}),
     media: mediaConfig(parsed),
+    litestream: !!parsed.LITESTREAM_ACCESS_KEY_ID,
     dev: parsed.NODE_ENV !== 'production',
   }
 }

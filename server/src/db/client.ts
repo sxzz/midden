@@ -14,7 +14,12 @@ export function openDatabase(file: string) {
     enableForeignKeyConstraints: true,
     timeout: 5000,
   })
-  // WAL lets readers proceed while the single writer commits.
+  // WAL lets readers proceed while the single writer commits. Litestream
+  // (litestream.yml) may replicate the file from its WAL, holding a read
+  // transaction so that only its own checkpoints restart the WAL. SQLite's
+  // automatic checkpoints are PASSIVE and cannot, so they stay on. Explicit
+  // RESTART or TRUNCATE checkpoints would make it upload the whole database
+  // again, and VACUUM rewrites every page into the WAL: don't add them.
   client.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;')
   const db = drizzle({ client })
   migrate(db, { migrationsFolder: MIGRATIONS })
