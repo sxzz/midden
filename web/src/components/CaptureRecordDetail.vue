@@ -100,7 +100,13 @@ const filters = computed((): FilterOption[] => {
           {
             value: '',
             label: '全部',
-            count: m.complete + m.partial + m.failed + m.pending + skipped,
+            count:
+              m.complete +
+              m.partial +
+              m.failed +
+              m.pending +
+              skipped +
+              (m.known ?? 0),
           },
           profiles,
         ]
@@ -140,7 +146,8 @@ const reasons = computed(() => {
     const text = reason?.trim()
     if (text) found.set(text, (found.get(text) || 0) + count)
   }
-  add(r.error)
+  // Saying again what the source is known to be is no failure.
+  if (!r.source_state) add(r.error)
   // A collection's reasons already count its members' media and warnings.
   if (r.members) for (const item of r.reasons) add(item.reason, item.count)
   else {
@@ -667,7 +674,11 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
               <span class="line-text"
                 >{{ memberTitle(m)
                 }}<small
-                  v-for="reason in m.error ? [m.error] : m.reasons"
+                  v-for="reason in m.source_state
+                    ? []
+                    : m.error
+                      ? [m.error]
+                      : m.reasons"
                   :key="reason"
                   class="hint"
                   >{{ reason }}</small
@@ -675,8 +686,10 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
               >
               <span
                 class="line-trailing"
-                :class="stateStatus(m.state, m.waiting).tone"
-                >{{ stateStatus(m.state, m.waiting).label }}</span
+                :class="stateStatus(m.state, m.waiting, m.source_state).tone"
+                >{{
+                  stateStatus(m.state, m.waiting, m.source_state).label
+                }}</span
               >
             </component>
             <button

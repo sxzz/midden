@@ -72,6 +72,7 @@ function memberProgress(m: NonNullable<CaptureRecord['members']>) {
     partial: m.partial,
     failed: m.failed,
     pending: m.pending,
+    ...(m.known ? { known: m.known } : {}),
     done: m.done,
     ...(m.added === undefined ? {} : { added: m.added, updated: m.updated }),
   }
@@ -148,6 +149,9 @@ function recordJson(r: CaptureRecord | UpdateRecord) {
     ...(r.finishedAt ? { finished_at: r.finishedAt.toISOString() } : {}),
     ...(r.members ? { members: memberProgress(r.members) } : {}),
     ...(r.added === undefined ? {} : { added: r.added }),
+    ...('sourceState' in r && r.sourceState
+      ? { source_state: r.sourceState }
+      : {}),
     ...(r.stopped === undefined ? {} : { stopped: r.stopped }),
     ...(r.paused ? { paused: true } : {}),
     ...(r.pausedAll ? { paused_all: true } : {}),
@@ -208,6 +212,7 @@ function memberJson(m: CaptureMember) {
     reasons: m.reasons,
     ...(m.gone ? { gone: true } : {}),
     ...(m.retryable ? { retryable: true } : {}),
+    ...(m.sourceState ? { source_state: m.sourceState } : {}),
     ...(m.list ? { list: m.list } : {}),
     ...(m.handle ? { handle: m.handle } : {}),
     created_at: m.createdAt.toISOString(),

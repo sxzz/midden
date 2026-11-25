@@ -1,3 +1,4 @@
+import { monthDay } from './presentation'
 import type { Asset, ProfileChanges, ProfileFieldChange } from './api'
 
 export type PinnedPost = Extract<
@@ -63,14 +64,6 @@ const labels: Record<
   // As the capture records name the image.
   banner: '主页封面',
   pinned: '置顶帖子',
-}
-
-/** A day as the timeline names a state's start or end: 11月5日. */
-export function monthDay(d: Date, now = new Date()): string {
-  const date = `${d.getMonth() + 1}月${d.getDate()}日`
-  return d.getFullYear() === now.getFullYear()
-    ? date
-    : `${d.getFullYear()}年${date}`
 }
 
 /**

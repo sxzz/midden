@@ -135,3 +135,32 @@ it('offers the count orders behind a public link too', async () => {
   expect(options(el, '排序')).toEqual(['更新时间', '粉丝数', '关注数'])
   expect(select(el, '排序').value).toBe('following')
 })
+
+it('filters deleted posts and suspended accounts, behind a share too', async () => {
+  const posts = await mount('')
+  expect(options(posts.el, '原站状态')).toEqual([
+    '全部',
+    '原站已删除的帖子',
+    '作者被封禁的帖子',
+  ])
+  await choose(posts.el, '原站状态', 'deleted')
+  expect(posts.search).toHaveBeenLastCalledWith('source_state=deleted')
+  unmount()
+
+  const accounts = await mount(ACCOUNTS)
+  expect(options(accounts.el, '原站状态')).toEqual([
+    '全部',
+    '被封禁的账号',
+    '已不存在的账号',
+  ])
+  await choose(accounts.el, '原站状态', 'suspended')
+  expect(accounts.search).toHaveBeenLastCalledWith(
+    `source_state=suspended&${ACCOUNTS}`,
+  )
+  unmount()
+
+  // Public on the platform, so a visitor can ask for it.
+  shareSlug.value = 's'
+  const shared = await mount('source_state=deleted')
+  expect(select(shared.el, '原站状态').value).toBe('deleted')
+})

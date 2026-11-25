@@ -14,6 +14,7 @@ import {
   recordRowTime,
   recordStatus,
   recordTitle,
+  stateStatus,
 } from './captures'
 import type { CaptureRecord, UpdateInfo } from './api'
 
@@ -366,4 +367,16 @@ test('a profile of an update tells how each part went', () => {
       },
     }),
   ).toBe('资料 ✓ · 帖子 1000（未到已有数据）')
+})
+
+test('a capture that saw its source gone again reads as that, not as a failure', () => {
+  expect(
+    recordStatus(
+      record({ state: 'failed', done: true, source_state: 'suspended' }),
+    ),
+  ).toEqual({ label: '账号已被封禁', tone: 'ok' })
+  expect(stateStatus('failed', undefined, 'deleted')).toEqual({
+    label: '原站已删除',
+    tone: 'ok',
+  })
 })

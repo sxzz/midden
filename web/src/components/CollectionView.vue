@@ -145,6 +145,7 @@ const filtered = computed(() => {
     'media_type',
     'visibility',
     'sensitive',
+    'source_state',
     'from_date',
     'to_date',
   ].some((key) => !!q.get(key))

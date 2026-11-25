@@ -243,16 +243,22 @@ export function sourceStateNotice(a: Collection): string {
   if (!a.source_state) return ''
   const root = a.graph?.entities.find((e) => e.key === a.graph?.root)
   const profile = isProfileEntity(root)
-  const label =
-    a.source_state === 'suspended'
-      ? profile
-        ? '账号已被封禁'
-        : '作者已被封禁'
-      : profile
-        ? '账号已不存在'
-        : '原帖已删除'
-  const at = date(a.source_state_at)
-  return at ? `${label} · ${at} 发现` : label
+  const who = profile ? '账号' : '作者'
+  const suspended = a.source_state === 'suspended'
+  const gone = profile ? '账号已不存在' : '原帖已删除'
+  // Since the first capture that saw it; the archived content stays.
+  const since = a.source_state_at ? new Date(a.source_state_at) : undefined
+  if (!since || !Number.isFinite(since.getTime()))
+    return suspended ? `${who}已被封禁` : gone
+  return `${monthDay(since)}起${suspended ? `${who}被封禁` : gone}`
+}
+
+/** A day as a state names its start or end: 11月5日, with another year's. */
+export function monthDay(d: Date, now = new Date()): string {
+  const date = `${d.getMonth() + 1}月${d.getDate()}日`
+  return d.getFullYear() === now.getFullYear()
+    ? date
+    : `${d.getFullYear()}年${date}`
 }
 
 function parseDate(value?: string) {

@@ -541,11 +541,31 @@ it('notes a source found gone', () => {
   expect(sourceStateNotice({ ...a, source_state: 'deleted' })).toBe(
     '原帖已删除',
   )
+  expect(sourceStateNotice({ ...a, source_state: 'suspended' })).toBe(
+    '作者已被封禁',
+  )
+  // Since the first capture that saw it.
+  const since = new Date(new Date().getFullYear(), 10, 5, 9).toISOString()
   expect(
-    sourceStateNotice({ ...a, source_state: 'suspended' }).startsWith(
-      '作者已被封禁',
-    ),
-  ).toBe(true)
+    sourceStateNotice({
+      ...a,
+      source_state: 'deleted',
+      source_state_at: since,
+    }),
+  ).toBe('11月5日起原帖已删除')
+  const profile = collection({
+    source_state: 'suspended',
+    source_state_at: since,
+    graph: {
+      root: 'p',
+      relations: [],
+      entities: [entity({ key: 'p', type: 'x.profile', data: {} })],
+    },
+  })
+  expect(sourceStateNotice(profile)).toBe('11月5日起账号被封禁')
+  expect(sourceStateNotice({ ...profile, source_state: 'deleted' })).toBe(
+    '11月5日起账号已不存在',
+  )
 })
 
 it("shows an account's avatar from the platform until one is saved here", () => {

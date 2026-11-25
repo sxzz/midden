@@ -59,11 +59,22 @@ const waitLabels: Record<NonNullable<CaptureRecord['waiting']>, string> = {
   retry: '等待重试',
   paused: '已暂停',
 }
+/**
+ * What a capture says that only found again what its source is known to be:
+ * no failure, the archived content stays.
+ */
+const sourceStateLabels: Record<'deleted' | 'suspended', string> = {
+  deleted: '原站已删除',
+  suspended: '账号已被封禁',
+}
+
 /** The state of a single capture, such as one member of a collection. */
 export function stateStatus(
   state: CaptureRecord['state'],
   waiting?: CaptureRecord['waiting'],
+  sourceState?: 'deleted' | 'suspended',
 ): RecordStatus {
+  if (sourceState) return { label: sourceStateLabels[sourceState], tone: 'ok' }
   if (state === 'queued' && waiting)
     return { label: waitLabels[waiting] ?? '排队中', tone: 'active' }
   return stateLabels[state] ?? { label: state, tone: 'active' }
@@ -80,7 +91,7 @@ export function recordStatus(r: CaptureRecord): RecordStatus {
   }
   const m = r.members
   if (!m || r.state === 'failed' || r.state === 'queued')
-    return stateStatus(r.state, r.waiting)
+    return stateStatus(r.state, r.waiting, r.source_state)
   if (!r.done)
     return {
       label:

@@ -107,6 +107,8 @@ function read(query: string) {
     media: (params.get('media_type') || '').split(',').filter(Boolean),
     visibility: params.get('visibility') || '',
     sensitive: params.get('sensitive') || '',
+    /** What the platform now says of it: `deleted` or `suspended`. */
+    sourceState: params.get('source_state') || '',
     from: (!shared && params.get('from_date')) || '',
     to: (!shared && params.get('to_date')) || '',
     /** A relative range such as `7d`, counted again on every visit. */
@@ -169,6 +171,12 @@ const sensitiveNames: Record<string, string> = {
   contains: '包含敏感内容',
   not_contains: '不含敏感内容',
 }
+/** 原站状态 as each tab names it: posts deleted, accounts suspended. */
+const sourceStateNames = computed<Record<string, string>>(() =>
+  posts.value
+    ? { deleted: '原站已删除的帖子', suspended: '作者被封禁的帖子' }
+    : { suspended: '被封禁的账号', deleted: '已不存在的账号' },
+)
 /** Local calendar day `days` before today, as a date input writes it. */
 function daysAgo(days: number) {
   const d = new Date()
@@ -225,6 +233,7 @@ const open = shallowRef(
     form.media.length ||
     form.visibility ||
     form.sensitive ||
+    form.sourceState ||
     form.from ||
     form.to ||
     form.within
@@ -241,6 +250,7 @@ const active = computed(() =>
     postTypeNames[form.postType],
     visibilityNames[form.visibility],
     sensitiveNames[form.sensitive],
+    sourceStateNames.value[form.sourceState],
     withinLabel(form.within) ||
       (form.from && form.to
         ? `${form.from} 至 ${form.to}`
@@ -277,6 +287,7 @@ function stringify(f: Form) {
     ['media_type', f.media.join(',')],
     ['visibility', f.visibility],
     ['sensitive', f.sensitive],
+    ['source_state', f.sourceState],
     ['from_date', f.from],
     ['to_date', f.to],
     ['saved_within', f.within],
@@ -351,6 +362,7 @@ watch(
     form.order,
     form.visibility,
     form.sensitive,
+    form.sourceState,
     form.from,
     form.to,
     form.within,
@@ -723,6 +735,20 @@ const tagSummary = computed(() => {
             <option value="">全部</option>
             <option value="contains">包含</option>
             <option value="not_contains">不包含</option></select
+          ><ChevronIcon class="select-chevron" /></span
+      ></label>
+      <!-- Public on the platform, so a share filters by it too. -->
+      <label class="option"
+        >原站状态<span class="select"
+          ><select v-model="form.sourceState" aria-label="原站状态">
+            <option value="">全部</option>
+            <option
+              v-for="(name, value) in sourceStateNames"
+              :key="value"
+              :value="value"
+            >
+              {{ name }}
+            </option></select
           ><ChevronIcon class="select-chevron" /></span
       ></label>
       <label v-if="!shared" class="option"
