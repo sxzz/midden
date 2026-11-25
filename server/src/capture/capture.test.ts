@@ -6,6 +6,7 @@ import {
   captureStaging,
   collectionIdentityAliases,
   collections,
+  collectionStates,
   entities,
   entityVersions,
   jobs,
@@ -109,7 +110,7 @@ describe('capture and finalize', () => {
     expect(await refresh()).toBe(2)
   })
 
-  test('a gone post fails the capture and marks the source', async () => {
+  test('a gone post fails the capture; one answer marks nothing yet', async () => {
     const { ctx } = setup(() => {
       throw new FakeFailure(status.FAILED_PRECONDITION, '帖子不存在或已删除', {
         'source-state': 'deleted',
@@ -120,7 +121,17 @@ describe('capture and finalize', () => {
       state: 'failed',
       error: '帖子不存在或已删除',
     })
-    expect(ctx.db.select().from(collections).get()?.sourceState).toBe('deleted')
+    expect(ctx.db.select().from(collections).get()?.sourceState).toBeNull()
+    // The answer waits for a second one, asked for an hour later.
+    expect(ctx.db.select().from(collectionStates).all()).toMatchObject([
+      { state: 'deleted', confirmedAt: null },
+    ])
+    const check = ctx.db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.type, 'source-check'))
+      .get()!
+    expect(check.runAt.getTime() - Date.now()).toBeGreaterThan(59 * 60_000)
   })
 
   test('a rate limit retries at the time the platform names', async () => {

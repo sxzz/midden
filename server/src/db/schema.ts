@@ -67,6 +67,9 @@ export const jobs = sqliteTable(
   ],
 )
 
+/** What a platform says of content that is gone: see `collectionStates`. */
+export const sourceStates = ['deleted', 'suspended'] as const
+
 /** One object on a platform (a post, a profile), however it was captured. */
 export const collections = sqliteTable(
   'collections',
@@ -84,7 +87,9 @@ export const collections = sqliteTable(
     unreferencedAt: timestamp(),
     createdAt: createdAt(),
     observedAt: createdAt(),
-    sourceState: text({ enum: ['deleted', 'suspended'] }),
+    // The confirmed state on the platform (see `collectionStates`), and
+    // since when: 原帖已删除, 账号已被封禁, 账号已不存在.
+    sourceState: text({ enum: sourceStates }),
     sourceStateAt: timestamp(),
   },
   (t) => [
@@ -97,7 +102,36 @@ export const collections = sqliteTable(
     index('collections_unreferenced')
       .on(t.unreferencedAt)
       .where(sql`${t.unreferencedAt} IS NOT NULL`),
+    // The library's filter on it reads only the few that have one.
+    index('collections_source_state')
+      .on(t.sourceState)
+      .where(sql`${t.sourceState} IS NOT NULL`),
   ],
+)
+
+/**
+ * Each time a collection was found gone on its platform: deleted, or its
+ * account suspended. A first answer that is not explicit waits for a second
+ * one (`confirmedAt` empty) and is dropped when the content comes back
+ * first; a confirmed one ends (`endedAt`) once the content is read again.
+ */
+export const collectionStates = sqliteTable(
+  'collection_states',
+  {
+    id: text().primaryKey(),
+    collectionId: text()
+      .notNull()
+      .references(() => collections.id, { onDelete: 'cascade' }),
+    state: text({ enum: sourceStates }).notNull(),
+    // The first capture that saw it.
+    since: timestamp().notNull(),
+    // When an agreeing second answer, or an explicit first one, came.
+    confirmedAt: timestamp(),
+    // The latest capture that saw it.
+    seenAt: timestamp().notNull(),
+    endedAt: timestamp(),
+  },
+  (t) => [index('collection_states_collection').on(t.collectionId, t.since)],
 )
 
 /** An external id that a fetch revealed to be another name of a collection. */

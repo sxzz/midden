@@ -33,6 +33,23 @@ function isPinned(item: Node, userId: string): boolean {
   )
 }
 
+const rethrow = (error: unknown): never => {
+  throw error
+}
+/**
+ * Instagram answers 404 for the post or account asked about when it is
+ * gone: say so to the core, which waits for a second answer to agree.
+ */
+function gone(message: string) {
+  return (error: unknown): never => {
+    if (error instanceof ProviderError && error.code === status.NOT_FOUND) {
+      error.message = message
+      error.metadata.set('source-state', 'deleted')
+    }
+    throw error
+  }
+}
+
 interface Cursor {
   user: string
   mode: 'session'
@@ -148,7 +165,7 @@ export class CaptureStrategy {
     const client = new InstagramClient(signal, credential, this.fetcher)
     let result: FetchResponse
     if (req.kind === 'post') {
-      const node = await client.post(req.externalId)
+      const node = await client.post(req.externalId).catch(gone('原帖已删除'))
       result = postResult(node, req.externalId, Visibility.VISIBILITY_PRIVATE)
       const author = node.user ?? node.owner
       if (author?.pk || author?.id) {
@@ -179,7 +196,11 @@ export class CaptureStrategy {
         }
       }
     } else {
-      const user = await client.profile(req.externalId)
+      // Asked by its id, an account not found no longer exists; a handle
+      // may only have been renamed.
+      const user = await client
+        .profile(req.externalId)
+        .catch(/^\d+$/.test(req.externalId) ? gone('账号已不存在') : rethrow)
       result = profileResult(
         user,
         req.externalId,

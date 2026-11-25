@@ -5,7 +5,10 @@ import {
   setTwitterProviderEnv,
 } from '@fxembed/atmosphere/providers/twitter-runtime'
 import { fetchByRestId } from '@fxembed/atmosphere/providers/twitter/conversation'
-import { buildAPITwitterStatus } from '@fxembed/atmosphere/providers/twitter/processor'
+import {
+  buildAPITwitterStatus,
+  twitterTweetTombstoneFromGraphQL,
+} from '@fxembed/atmosphere/providers/twitter/processor'
 import { needsTransactionId } from '@fxembed/atmosphere/providers/twitter/proxy/allowlist'
 import { ClientTransaction } from '@fxembed/atmosphere/providers/twitter/proxy/transaction/transaction'
 import { Visibility, type SourceResponse } from '../protocol.ts'
@@ -20,6 +23,8 @@ import {
   ProviderError,
   readJSON,
   responseError,
+  sourceStateExplicitKey,
+  sourceStateKey,
   type ErrorTarget,
 } from './provider.ts'
 import type { TwitterBuildHost } from '@fxembed/atmosphere/providers/twitter/build-host'
@@ -315,11 +320,40 @@ function unwrapTweet(node: any): any {
     ? value.tweet
     : value
 }
+/**
+ * What the account was told of a post it cannot read, when X says why: a
+ * tombstone's text or an unavailable post's reason. Being the account's own
+ * view, it needs no second answer.
+ */
+export function unavailableState(
+  node: any,
+): 'deleted' | 'suspended' | undefined {
+  if (node?.__typename === 'TweetUnavailable') {
+    const reason = String(node.reason ?? '')
+    if (/suspend/i.test(reason)) return 'suspended'
+    if (/delete/i.test(reason)) return 'deleted'
+    return
+  }
+  if (node?.__typename !== 'TweetTombstone') return
+  const { reason } = twitterTweetTombstoneFromGraphQL(node) as {
+    reason?: string
+  }
+  return reason === 'deleted' || reason === 'suspended' ? reason : undefined
+}
 async function sessionTweet(id: string, host: TwitterBuildHost): Promise<any> {
   const data = await fetchByRestId(id, host, true)
   const raw = data?.data?.tweetResult?.result
-  if (unavailable(raw) || unavailable(unwrapTweet(raw)))
-    throw responseError(403, null, 'post')
+  if (unavailable(raw) || unavailable(unwrapTweet(raw))) {
+    const state = unavailableState(raw) ?? unavailableState(unwrapTweet(raw))
+    if (!state) throw responseError(403, null, 'post')
+    const error =
+      state === 'suspended'
+        ? responseError(404, null, 'post', 'suspended')
+        : new ProviderError(status.FAILED_PRECONDITION, '原帖已删除')
+    error.metadata.set(sourceStateKey, state)
+    error.metadata.set(sourceStateExplicitKey, '1')
+    throw error
+  }
   return raw
 }
 export async function fetchSession(

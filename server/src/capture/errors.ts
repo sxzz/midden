@@ -60,6 +60,17 @@ export function sourceState(
   return value === 'deleted' || value === 'suspended' ? value : undefined
 }
 
+/**
+ * Whether the platform said so in so many words (an account's view of a
+ * tombstone or suspension), which needs no second answer.
+ */
+export function sourceStateExplicit(error: unknown): boolean {
+  return (
+    isProviderFailure(error) &&
+    error.metadata.get('source-state-explicit')[0] === '1'
+  )
+}
+
 export function credentialRequired(error: unknown): boolean {
   return (
     isProviderFailure(error) &&

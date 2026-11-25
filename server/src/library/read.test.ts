@@ -661,6 +661,7 @@ describe('entity links', () => {
       if (gone)
         throw new FakeFailure(status.FAILED_PRECONDITION, 'entry is gone', {
           'source-state': 'deleted',
+          'source-state-explicit': '1',
         })
       return {
         text: id,

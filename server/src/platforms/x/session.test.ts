@@ -6,6 +6,7 @@ import {
   accountTransport,
   checkSession,
   parseSessionResult,
+  unavailableState,
 } from './session.ts'
 
 const credential = { authToken: 'a'.repeat(40), csrfToken: 'b'.repeat(64) }
@@ -209,4 +210,34 @@ test('session Fetch lists no restricted embedded posts: their content is not kep
       text: '',
     })
   }
+})
+
+test("the account's tombstones and unavailable reasons say why a post is gone", () => {
+  const tombstone = (text: string) => ({
+    __typename: 'TweetTombstone',
+    tombstone: { text: { text, entities: [] } },
+  })
+  assert.equal(
+    unavailableState(tombstone('This Post was deleted by the Post author.')),
+    'deleted',
+  )
+  assert.equal(
+    unavailableState(tombstone('This Post is from a suspended account.')),
+    'suspended',
+  )
+  assert.equal(
+    unavailableState({ __typename: 'TweetUnavailable', reason: 'Suspended' }),
+    'suspended',
+  )
+  // A protected author's post is only unreadable, which is no state.
+  assert.equal(
+    unavailableState({ __typename: 'TweetUnavailable', reason: 'Protected' }),
+    undefined,
+  )
+  assert.equal(
+    unavailableState(
+      tombstone('This Post is from an account that limits who can view.'),
+    ),
+    undefined,
+  )
 })

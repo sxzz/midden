@@ -15,6 +15,8 @@ export class ProviderError extends Error {
   code: status
   /** The source answered 429 (or X's error 88). */
   rateLimited = false
+  /** The source answered 404 for the thing asked about. */
+  notFound = false
   constructor(code: status, message: string, retrySeconds = 0) {
     super(message)
     this.code = code
@@ -26,6 +28,8 @@ export class ProviderError extends Error {
 export const credentialRequiredKey = 'credential-required'
 /** Trailer telling the core the post itself is gone, not merely unreadable. */
 export const sourceStateKey = 'source-state'
+/** Trailer saying the account was told so explicitly: no second answer. */
+export const sourceStateExplicitKey = 'source-state-explicit'
 export type SourceState = 'deleted' | 'suspended'
 export function sourceState(error: unknown): SourceState | undefined {
   if (!(error instanceof ProviderError)) return
@@ -90,8 +94,8 @@ export function responseError(
     error.metadata.set(sourceStateKey, 'suspended')
     return error
   }
-  if (code === 404)
-    return new ProviderError(
+  if (code === 404) {
+    const error = new ProviderError(
       status.FAILED_PRECONDITION,
       target === 'post'
         ? '帖子不存在或已删除'
@@ -99,6 +103,9 @@ export function responseError(
           ? '账号不存在或已改名'
           : 'X 接口请求被拒绝',
     )
+    error.notFound = target !== 'api'
+    return error
+  }
   return new ProviderError(status.FAILED_PRECONDITION, failed[target])
 }
 // Only the public post API answers 404 for a post that no longer exists; it

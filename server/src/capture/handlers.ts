@@ -8,6 +8,7 @@ import { runFinalize } from './finalize.ts'
 import { failCapture, isActive, loadCapture } from './lifecycle.ts'
 import { failRelated, runRelated } from './related.ts'
 import { failRelations, runRelations } from './relations.ts'
+import { runSourceCheck } from './source-state.ts'
 import { failThumbnail, runThumbnail } from './thumbnail.ts'
 import { failUpdate, runUpdate } from './updates.ts'
 import { failUpload, runUpload, UPLOAD_ATTEMPTS } from './upload.ts'
@@ -112,6 +113,14 @@ export function captureHandlers(
         return Promise.resolve()
       },
       fail: (job, error) => failUpdate(context(), job.ref, safeError(error)),
+    },
+    // Asks again about content first found gone, an hour later.
+    'source-check': {
+      queue: 'control',
+      run: (job) => {
+        runSourceCheck(context(), job)
+        return Promise.resolve()
+      },
     },
     finalize: {
       queue: 'control',

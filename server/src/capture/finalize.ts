@@ -25,6 +25,7 @@ import {
 } from './lifecycle.ts'
 import { overlayMetrics, splitMetrics, valueAt } from './metrics.ts'
 import { unsaveIfEmpty } from './scope.ts'
+import { endSourceStates } from './source-state.ts'
 import { loadStaging, settleStaging } from './staging.ts'
 import { markUnreferenced } from './submit.ts'
 import type { Transaction } from '#db/client.ts'
@@ -497,10 +498,12 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
         .run()
     settleStaging(tx, staging)
     enqueueRawUpload(ctx, tx, capture.id)
+    // Read normally: whatever it was found to be is over.
     tx.update(collections)
       .set({ observedAt: now, sourceState: null, sourceStateAt: null })
       .where(eq(collections.id, collection.id))
       .run()
+    endSourceStates(tx, [collection.id], now)
     catalogCollections(tx, [collection.id])
     // A refresh that turned out to be another collection (canonicalized).
     if (capture.refreshFrom && capture.refreshFrom !== collection.id) {

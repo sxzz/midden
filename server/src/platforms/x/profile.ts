@@ -29,6 +29,8 @@ import {
   ProviderError,
   readJSON,
   responseError,
+  sourceState,
+  sourceStateKey,
   upstreamError,
 } from './provider.ts'
 import { accountTransport } from './session.ts'
@@ -382,9 +384,25 @@ export async function fetchPublicProfile(
   const responses: SourceResponse[] = []
   const get = (url: string) => publicJSON(url, signal, responses, fetcher)
   const handle = id.startsWith('handle:') ? id.slice(7) : `id:${id}`
-  const data = await get(
-    `${endpoint}/${encodeURIComponent(handle)}?about_account=1`,
-  )
+  let data: any
+  try {
+    data = await get(
+      `${endpoint}/${encodeURIComponent(handle)}?about_account=1`,
+    )
+  } catch (error) {
+    // Asked by its id, an account not found no longer exists (deactivated
+    // or deleted); a handle may only have been renamed.
+    if (
+      !id.startsWith('handle:') &&
+      error instanceof ProviderError &&
+      error.notFound &&
+      !sourceState(error)
+    ) {
+      error.message = '账号已不存在'
+      error.metadata.set(sourceStateKey, 'deleted')
+    }
+    throw error
+  }
   const result = normalizeProfile(data.user, id, 'fxtwitter')
   if (expand) {
     try {

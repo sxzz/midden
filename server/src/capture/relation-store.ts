@@ -24,6 +24,7 @@ import {
   revisionDigest,
   type AssetState,
 } from './finalize.ts'
+import { endSourceStates } from './source-state.ts'
 import type { Transaction } from '#db/client.ts'
 import type { Platform, RelationList } from '#platforms/platform.ts'
 import type { FetchResponse } from '#platforms/protocol.ts'
@@ -429,6 +430,11 @@ function storeVersions(
       observed_at = ${now.getTime()}, source_state = NULL, source_state_at = NULL
     FROM json_each(${JSON.stringify(heads)}) j
     WHERE collections.id = j.value ->> 0`)
+  endSourceStates(
+    tx,
+    made.map((row) => row.collectionId),
+    now,
+  )
   catalogCollections(
     tx,
     made.map((row) => row.collectionId),

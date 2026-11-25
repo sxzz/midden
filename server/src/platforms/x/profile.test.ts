@@ -326,9 +326,9 @@ test("timeline targets carry each post's latest known change", () => {
 })
 
 test('profile failures name suspension and missing accounts without blocking retries', async () => {
-  const profile = (status: number, body: unknown) =>
+  const profile = (status: number, body: unknown, id = user.id) =>
     fetchPublicProfile(
-      user.id,
+      id,
       true,
       new AbortController().signal,
       'https://provider.test/profile',
@@ -352,11 +352,25 @@ test('profile failures name suspension and missing accounts without blocking ret
     }),
     failure('账号已被封禁，解封后可重新抓取'),
   )
+  // Asked by its id, an account not found is gone; by a handle it may only
+  // have been renamed.
   await assert.rejects(
     profile(404, { code: 404, message: 'User not found' }),
+    (e: any) =>
+      failure('账号已不存在')(e) &&
+      e.metadata.get('source-state')[0] === 'deleted' &&
+      !e.metadata.get('source-state-explicit').length,
+  )
+  await assert.rejects(
+    profile(404, { code: 404, message: 'User not found' }, 'handle:fixture'),
+    (e: any) =>
+      failure('账号不存在或已改名')(e) &&
+      !e.metadata.get('source-state').length,
+  )
+  await assert.rejects(
+    profile(404, 'not json', 'handle:fixture'),
     failure('账号不存在或已改名'),
   )
-  await assert.rejects(profile(404, 'not json'), failure('账号不存在或已改名'))
   await assert.rejects(
     profile(410, { code: 410 }),
     failure('无法获取该账号资料'),

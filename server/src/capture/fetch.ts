@@ -38,6 +38,7 @@ import {
   credentialRequired,
   retryAfter,
   sourceState,
+  sourceStateExplicit,
 } from './errors.ts'
 import { validateGraph } from './graph.ts'
 import { canonicalJson, sha256Hex } from './json.ts'
@@ -45,6 +46,7 @@ import { finalizeSettled, loadCapture, validateExecution } from './lifecycle.ts'
 import { isRemoved, mediaKey } from './media-key.ts'
 import { storedOptions } from './options.ts'
 import { resolveCaptureScope } from './scope.ts'
+import { observeSourceState } from './source-state.ts'
 import { loadStaging, stageResult } from './staging.ts'
 import type { Payload } from './payload.ts'
 
@@ -231,18 +233,16 @@ function onFetchError(
   revision: number | null,
   error: unknown,
 ): unknown {
-  const { db } = ctx
   if (capture.connectionId)
     markReauth(ctx, capture.connectionId, revision, error)
   const gone = sourceState(error)
   if (gone)
-    db.update(collections)
-      .set({
-        sourceState: gone,
-        sourceStateAt: new Date(ctx.now?.() ?? Date.now()),
-      })
-      .where(eq(collections.id, capture.collectionId))
-      .run()
+    observeSourceState(
+      ctx,
+      capture.collectionId,
+      gone,
+      sourceStateExplicit(error),
+    )
   const seconds = retryAfter(error)
   if (seconds)
     return new RetryError('来源平台暂时出错', seconds * 1000, {
