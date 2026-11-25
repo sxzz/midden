@@ -27,6 +27,8 @@ pnpm test
 
 lint 在根目录对整个仓库运行，只有一份配置；`third_party/` 是上游代码，`server/drizzle/` 是生成的迁移，均不参与。`scripts/` 下的脚本使用 `.ts`。e2e 测试：`pnpm --filter @midden/web test:e2e`。
 
+e2e 默认由 Playwright 启动自己的 Vite，端口由当前工作目录路径的哈希决定（20000–39999），不同 worktree 同时运行互不干扰；端口已被占用时直接报错，不会复用。可用 `E2E_PORT` 指定端口。要对手动启动的服务器运行，设置 `E2E_REUSE_SERVER=1` 并让 `E2E_PORT` 指向它（服务器需提供 `/app/`），此时需自行确认它来自当前 worktree。CI 不受影响。
+
 ## 数据库
 
 表结构在 `server/src/db/schema.ts`。修改后生成迁移：
