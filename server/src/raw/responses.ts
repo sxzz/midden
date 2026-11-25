@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { and, asc, eq, isNull, sql } from 'drizzle-orm'
+import { asc, eq, sql } from 'drizzle-orm'
 import { rawGarbage, sourceResponses } from '#db/schema.ts'
 import type { Database, Executor, Transaction } from '#db/client.ts'
 import type { RawStore } from './store.ts'
@@ -35,9 +35,12 @@ export function deleteSourceResponses(
 
 /**
  * Record bodies confirmed in the bucket and clear them here, in one
- * transaction. A row deleted meanwhile leaves its object to garbage
- * collection, which deletes it unless another row uses it. Returns the
- * rows recorded.
+ * transaction. Each row also moves to the end of the table (a new rowid):
+ * cleared in place, a row would keep the page its body began on, mostly
+ * empty; moved, it joins the other small rows at the end, and the pages it
+ * left empty go to the freelist, which `incremental_vacuum` returns. A row
+ * deleted meanwhile leaves its object to garbage collection, which deletes
+ * it unless another row uses it. Returns the rows recorded.
  */
 export function markStored(
   db: Database,
@@ -48,17 +51,13 @@ export function markStored(
   return db.transaction((tx) => {
     let marked = 0
     for (const row of rows) {
-      const { changes } = tx
-        .update(sourceResponses)
-        .set({ body: EMPTY, remoteAt: now })
-        .where(
-          and(
-            eq(sourceResponses.id, row.id),
-            eq(sourceResponses.sha256, row.sha256),
-            isNull(sourceResponses.remoteAt),
-          ),
-        )
-        .run()
+      const { changes } = tx.run(sql`
+        UPDATE ${sourceResponses}
+        SET body = ${EMPTY}, remote_at = ${now.getTime()},
+          rowid = (SELECT max(rowid) + 1 FROM ${sourceResponses})
+        WHERE ${sourceResponses.id} = ${row.id}
+          AND ${sourceResponses.sha256} = ${row.sha256}
+          AND ${sourceResponses.remoteAt} IS NULL`)
       if (changes) {
         marked++
         continue

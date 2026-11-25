@@ -152,7 +152,9 @@ export async function migrateRaw(
         summary.compressed += pack(row.body, row.sha256).bytes.length
         return
       }
-      summary.compressed += await raw!.put(row.sha256, row.body)
+      // Not `+= await`: that reads the total before other workers add to it.
+      const stored = await raw!.put(row.sha256, row.body)
+      summary.compressed += stored
       summary.stored++
       pending.push(row)
       if (pending.length >= MARK_BATCH || now() - flushedAt >= MARK_EVERY_MS)

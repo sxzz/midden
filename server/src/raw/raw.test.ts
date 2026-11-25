@@ -303,6 +303,11 @@ describe('raw-migrate', () => {
   test('stores, verifies and clears in limited runs that resume', async () => {
     const { c, run } = await existing()
     const bodies = new Map(rows(c).map((row) => [row.id, row.body]))
+    const rowids = () =>
+      c.db.all<{ rowid: number }>(
+        'SELECT rowid FROM source_responses ORDER BY rowid',
+      )
+    const last = rowids().at(-1)!.rowid
     expect(await run(s3.rawStore(), { limit: 2 })).toMatchObject({
       responses: 2,
       stored: 2,
@@ -321,6 +326,9 @@ describe('raw-migrate', () => {
       expect(row.body).toEqual(Buffer.alloc(0))
       expect(await sourceBody(s3.rawStore(), row)).toEqual(bodies.get(row.id))
     }
+    // Cleared rows moved past the ones that held bodies, so the pages
+    // those used empty out.
+    expect(rowids().every((row) => row.rowid > last)).toBe(true)
     // Nothing is left.
     expect(await run(s3.rawStore())).toMatchObject({ responses: 0 })
   })
