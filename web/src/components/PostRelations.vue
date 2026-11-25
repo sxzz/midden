@@ -80,6 +80,7 @@ const relations = computed(() => {
       outgoing: boolean
       assets: Asset[]
       collectionId?: string
+      icon: string
       label: string
       text: string
       href: string
@@ -136,15 +137,15 @@ const relations = computed(() => {
         ? entity.data.published_at
         : ''
     const external = !entity.saved_collection_id
-    const kind = !postLink
-      ? '转发此帖的账号'
+    const [icon, kind] = !postLink
+      ? ['↻', '转发此帖的账号']
       : outgoing
         ? type === 'quoted'
-          ? '↘ 引用了这条帖子'
-          : '↻ 转发了这条帖子'
+          ? ['↘', '引用了这条帖子']
+          : ['↻', '转发了这条帖子']
         : type === 'quoted'
-          ? '↖ 这条帖子引用了当前帖子'
-          : '↖ 这条帖子转发了当前帖子'
+          ? ['↖', '这条帖子引用了当前帖子']
+          : ['↖', '这条帖子转发了当前帖子']
     const prior = cards.get(key)
     const account = postLink
       ? undefined
@@ -168,6 +169,7 @@ const relations = computed(() => {
       published: published || prior?.published || '',
       publishedLabel: shortDate(published) || prior?.publishedLabel || '',
       key,
+      icon,
       // Where the link leads belongs with its kind, not in a footer of its own.
       label: external
         ? `${kind} · 在 ${entity.type.startsWith('instagram.') ? 'Instagram' : 'X'}`
@@ -181,6 +183,27 @@ const relations = computed(() => {
   }
   return [...cards.values()]
 })
+/** Consecutive cards of one kind share a single context line above them. */
+const groups = computed(() => {
+  const result: {
+    key: string
+    icon: string
+    label: string
+    items: (typeof relations.value)[number][]
+  }[] = []
+  for (const card of relations.value) {
+    const last = result.at(-1)
+    if (last && last.label === card.label) last.items.push(card)
+    else
+      result.push({
+        key: card.key,
+        icon: card.icon,
+        label: card.label,
+        items: [card],
+      })
+  }
+  return result
+})
 </script>
 
 <template>
@@ -190,85 +213,91 @@ const relations = computed(() => {
     :class="{ compact }"
     aria-label="帖子关联"
   >
-    <div
-      v-for="relation in relations"
-      :key="relation.key"
-      class="quote"
-      :class="{ incoming: !relation.outgoing }"
-    >
-      <!-- The author stands beside the post link, never inside it, so a saved
-           profile stays a link of its own. -->
-      <div v-if="relation.author || relation.publishedLabel" class="head">
-        <component
-          :is="relation.author?.href ? 'a' : 'span'"
-          v-if="relation.author"
-          class="relation-author"
-          :class="{ saved: !!relation.author.href }"
-          :href="relation.author.href"
-        >
-          <img
-            v-if="relation.author.avatar"
-            class="avatar"
-            :src="relation.author.avatar"
-            alt=""
-            loading="lazy"
-            referrerpolicy="no-referrer"
-          />
-          <span v-if="relation.author.name" class="author-name">{{
-            relation.author.name
-          }}</span><LockIcon v-if="relation.author.protected" class="lock" />
-          <span v-if="relation.author.handle" class="author-handle"
-            >@{{ relation.author.handle }}</span
-          >
-        </component>
-        <time
-          v-if="relation.publishedLabel"
-          class="published"
-          :datetime="relation.published"
-          >{{ relation.publishedLabel }}</time
-        >
-      </div>
-      <a
-        class="relation"
-        :href="relation.href"
-        :target="relation.external ? '_blank' : undefined"
-        :rel="relation.external ? 'noopener noreferrer' : undefined"
+    <section v-for="group in groups" :key="group.key" class="group">
+      <!-- Plain text: the card below stays the only link. -->
+      <p class="context">
+        <span class="icon" aria-hidden="true">{{ group.icon }}</span>
+        <span>{{ group.label }}</span>
+      </p>
+      <div
+        v-for="relation in group.items"
+        :key="relation.key"
+        class="quote"
+        :class="{ incoming: !relation.outgoing }"
       >
-        <span class="label">{{ relation.label }}</span>
-        <!-- The account reads like a quoted post's author row. -->
-        <span v-if="relation.account" class="account">
-          <img
-            v-if="relation.account.avatar"
-            class="avatar"
-            :src="relation.account.avatar"
-            alt=""
-            loading="lazy"
-            referrerpolicy="no-referrer"
-          />
-          <span v-if="relation.account.name" class="author-name">{{
-            relation.account.name
-          }}</span><LockIcon v-if="relation.account.protected" class="lock" />
-          <span v-if="relation.account.handle" class="author-handle"
-            >@{{ relation.account.handle }}</span
+        <!-- The author stands beside the post link, never inside it, so a saved
+             profile stays a link of its own. -->
+        <div v-if="relation.author || relation.publishedLabel" class="head">
+          <component
+            :is="relation.author?.href ? 'a' : 'span'"
+            v-if="relation.author"
+            class="relation-author"
+            :class="{ saved: !!relation.author.href }"
+            :href="relation.author.href"
           >
-        </span>
-        <span v-else class="text">{{ relation.text }}</span>
-      </a>
-      <MediaThumbs
-        v-if="relation.assets.length"
-        :assets="relation.assets"
-        :collection="{
-          ...collection,
-          graph: undefined,
-          id: relation.collectionId || collection.id,
-          text: relation.text,
-          author_name: relation.author?.name || relation.author?.handle || '',
-          assets: relation.assets,
-        }"
-        :show-sensitive="showSensitive"
-        :collection-id="relation.collectionId"
-      />
-    </div>
+            <img
+              v-if="relation.author.avatar"
+              class="avatar"
+              :src="relation.author.avatar"
+              alt=""
+              loading="lazy"
+              referrerpolicy="no-referrer"
+            />
+            <span v-if="relation.author.name" class="author-name">{{
+              relation.author.name
+            }}</span><LockIcon v-if="relation.author.protected" class="lock" />
+            <span v-if="relation.author.handle" class="author-handle"
+              >@{{ relation.author.handle }}</span
+            >
+          </component>
+          <time
+            v-if="relation.publishedLabel"
+            class="published"
+            :datetime="relation.published"
+            >{{ relation.publishedLabel }}</time
+          >
+        </div>
+        <a
+          class="relation"
+          :href="relation.href"
+          :target="relation.external ? '_blank' : undefined"
+          :rel="relation.external ? 'noopener noreferrer' : undefined"
+        >
+          <!-- The account reads like a quoted post's author row. -->
+          <span v-if="relation.account" class="account">
+            <img
+              v-if="relation.account.avatar"
+              class="avatar"
+              :src="relation.account.avatar"
+              alt=""
+              loading="lazy"
+              referrerpolicy="no-referrer"
+            />
+            <span v-if="relation.account.name" class="author-name">{{
+              relation.account.name
+            }}</span><LockIcon v-if="relation.account.protected" class="lock" />
+            <span v-if="relation.account.handle" class="author-handle"
+              >@{{ relation.account.handle }}</span
+            >
+          </span>
+          <span v-else class="text">{{ relation.text }}</span>
+        </a>
+        <MediaThumbs
+          v-if="relation.assets.length"
+          :assets="relation.assets"
+          :collection="{
+            ...collection,
+            graph: undefined,
+            id: relation.collectionId || collection.id,
+            text: relation.text,
+            author_name: relation.author?.name || relation.author?.handle || '',
+            assets: relation.assets,
+          }"
+          :show-sensitive="showSensitive"
+          :collection-id="relation.collectionId"
+        />
+      </div>
+    </section>
   </div>
 </template>
 
@@ -304,10 +333,24 @@ const relations = computed(() => {
 .incoming {
   border-left: 3px solid var(--link);
 }
-.label {
+/* Like X's "转发了" header: small, subtle, outside the card. */
+.group {
+  display: grid;
+  gap: 6px;
+}
+.context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding-left: 2px;
+  color: var(--subtle);
+  font-size: 13px;
   font-weight: 600;
-  color: var(--link);
-  font-size: 12px;
+  line-height: 1.3;
+}
+.icon {
+  font-weight: 400;
 }
 .text {
   display: -webkit-box;
@@ -374,8 +417,11 @@ const relations = computed(() => {
 .compact .published {
   font-size: 12px;
 }
-.compact .label {
-  font-size: 13px;
+.compact .group {
+  gap: 4px;
+}
+.compact .context {
+  font-size: 12px;
 }
 /* In a list row a referenced post stays secondary to the row's own text. */
 .compact .text {

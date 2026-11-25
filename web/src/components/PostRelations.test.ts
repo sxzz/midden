@@ -47,7 +47,8 @@ it('shows the quoted post as an internal collection link with its text', () => {
     relations: [{ source: 'post', target: 'quote', type: 'quoted' }],
   })
   const link = el.querySelector<HTMLAnchorElement>('.relation')!
-  expect(link.textContent).toContain('↘ 引用了这条帖子')
+  expect(el.querySelector('.context')?.textContent).toContain('引用了这条帖子')
+  expect(link.textContent).not.toContain('引用了这条帖子')
   expect(link.textContent).toContain('引用的原帖正文')
   expect(link.getAttribute('href')).toBe('#/collection/saved-quote')
   expect(link.getAttribute('target')).toBeNull()
@@ -82,7 +83,7 @@ it('shows a quoted post kept by reference with its saved summary, or as an X lin
   unmount()
   document.body.replaceChildren()
   const unsaved = quote(false)
-  expect(unsaved.textContent).toContain('在 X')
+  expect(document.querySelector('.context')?.textContent).toContain('在 X')
   expect(unsaved.textContent).toContain('帖子 456')
   expect(unsaved.getAttribute('href')).toBe('https://x.com/i/web/status/456')
 })
@@ -129,8 +130,10 @@ it('links an unsaved repost to its X status without using untrusted payload URLs
     relations: [{ source: 'post', target: 'repost', type: 'reposted' }],
   })
   const link = el.querySelector<HTMLAnchorElement>('.relation')!
-  expect(link.textContent).toContain('↻ 转发了这条帖子')
-  expect(link.textContent).toContain('在 X')
+  expect(el.querySelector('.context')?.textContent).toContain(
+    '转发了这条帖子 · 在 X',
+  )
+  expect(link.textContent).not.toContain('在 X')
   expect(link.getAttribute('href')).toBe('https://x.com/i/web/status/456')
   expect(link.getAttribute('target')).toBe('_blank')
   expect(link.getAttribute('rel')).toBe('noopener noreferrer')
@@ -151,7 +154,7 @@ it('shows profile repost attribution without confusing it with a quoted post', (
     relations: [{ source: 'reposter', target: 'post', type: 'reposted' }],
   })
   const link = el.querySelector<HTMLAnchorElement>('.relation')!
-  expect(link.textContent).toContain('转发此帖的账号')
+  expect(el.querySelector('.context')?.textContent).toContain('转发此帖的账号')
   expect(link.textContent).toContain('转发账号')
   expect(link.getAttribute('href')).toBe('#/collection/profile')
 })
@@ -311,7 +314,9 @@ it('attributes an incoming quote to the author the relation supplies', () => {
     },
   ])
   const link = el.querySelector<HTMLAnchorElement>('.relation')!
-  expect(link.textContent).toContain('↖ 这条帖子引用了当前帖子')
+  expect(el.querySelector('.context')?.textContent).toContain(
+    '这条帖子引用了当前帖子',
+  )
   expect(link.textContent).toContain('合成引用内容')
   const author = el.querySelector<HTMLAnchorElement>('.relation-author')!
   expect(author.getAttribute('href')).toBe('#/collection/saved-author')
@@ -335,7 +340,7 @@ it('keeps an incoming repost account card free of a repeated self attribution', 
   const el = mount({ root: 'post', entities: [root], relations: [] }, [
     { type: 'reposted', entity: profile, author: profile },
   ])
-  expect(el.querySelector('.relation')?.textContent).toContain('转发此帖的账号')
+  expect(el.querySelector('.context')?.textContent).toContain('转发此帖的账号')
   expect(el.querySelector('.relation-author')).toBeNull()
 })
 it('shows a repost account card with its own saved avatar, never a sensitive one', () => {
@@ -473,11 +478,14 @@ it('shows saved incoming repost accounts and quote/repost posts without duplicat
   )
   const links = [...el.querySelectorAll<HTMLAnchorElement>('.relation')]
   expect(links).toHaveLength(3)
-  expect(links[0]?.textContent).toContain('转发此帖的账号')
+  const contexts = [...el.querySelectorAll('.context')].map(
+    (c) => c.textContent,
+  )
+  expect(contexts[0]).toContain('转发此帖的账号')
+  expect(contexts[1]).toContain('这条帖子引用了当前帖子')
+  expect(contexts[2]).toContain('这条帖子转发了当前帖子')
   expect(links[0]?.getAttribute('href')).toBe('#/collection/saved-profile')
-  expect(links[1]?.textContent).toContain('↖ 这条帖子引用了当前帖子')
   expect(links[1]?.getAttribute('href')).toBe('#/collection/saved-quote')
-  expect(links[2]?.textContent).toContain('↖ 这条帖子转发了当前帖子')
   expect(links[2]?.getAttribute('href')).toBe('https://x.com/i/web/status/567')
 })
 it('shows a quoted post’s author as last seen, with its lock', () => {
@@ -539,5 +547,34 @@ it('shows saved quote media inside its card without mixing it into the root gall
     '/v1/assets/quoted-image?inline=1',
   )
   expect(el.querySelector('.post > .media-group')).toBeNull()
-  expect(el.querySelector('.quote')?.textContent).toContain('↘ 引用了这条帖子')
+  expect(el.querySelector('.context')?.textContent).toContain('引用了这条帖子')
+  expect(el.querySelector('.quote')?.textContent).not.toContain(
+    '引用了这条帖子',
+  )
+})
+it('shares one context line between consecutive relations of the same kind', () => {
+  const el = mount({
+    root: 'post',
+    entities: [
+      root,
+      entity({
+        key: 'a',
+        type: 'x.post',
+        external_id: '1',
+        data: { text: '甲' },
+      }),
+      entity({
+        key: 'b',
+        type: 'x.post',
+        external_id: '2',
+        data: { text: '乙' },
+      }),
+    ],
+    relations: [
+      { source: 'post', target: 'a', type: 'quoted' },
+      { source: 'post', target: 'b', type: 'quoted' },
+    ],
+  })
+  expect(el.querySelectorAll('.context')).toHaveLength(1)
+  expect(el.querySelectorAll('.quote')).toHaveLength(2)
 })

@@ -87,7 +87,7 @@ it('preserves root text while showing a compact quote and direct relation labels
   expect(el.querySelector('.preview')?.textContent).toBe('根帖自己的内容')
   expect(el.querySelector('.meta')?.textContent).toContain('转发 · 提及')
   const quote = el.querySelector<HTMLAnchorElement>('.relation')!
-  expect(quote.textContent).toContain('↘ 引用了这条帖子')
+  expect(el.querySelector('.context')?.textContent).toContain('引用了这条帖子')
   expect(quote.textContent).toContain('被引用帖的独立内容')
   expect(quote.getAttribute('href')).toBe('#/collection/quote')
   expect(quote.closest('button')).toBeNull()
