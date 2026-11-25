@@ -52,7 +52,7 @@ async function startServer() {
       FFMPEG: path.join(dir, 'no-ffmpeg'),
       TELEGRAM_BOT_TOKEN: '1:test',
       OWNER_TELEGRAM_ID: '7',
-      TELEGRAM_API_ROOT: telegram.apiRoot,
+      MIDDEN_TEST_TELEGRAM_API_ROOT: telegram.apiRoot,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })

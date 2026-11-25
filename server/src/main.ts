@@ -189,8 +189,9 @@ if (config.telegram) {
     webAppUrl: config.webAppUrl,
     version: process.env.BUILD_REVISION || 'dev',
     ffmpeg: config.ffmpeg,
-    ...(config.telegram.apiRoot
-      ? { client: { apiRoot: config.telegram.apiRoot } }
+    // Only main.test.ts sets this, to point the bot at a fake Telegram.
+    ...(process.env.MIDDEN_TEST_TELEGRAM_API_ROOT
+      ? { client: { apiRoot: process.env.MIDDEN_TEST_TELEGRAM_API_ROOT } }
       : {}),
   })
   bot = handle
