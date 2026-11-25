@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync } from 'node:fs'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { isAppError } from '#errors.ts'
 import { capture, entity, graph, libraryContext } from '#testing/library.ts'
@@ -105,15 +106,64 @@ describe('folders', () => {
       filter:
         'sort=saved&q=&layout=album&cursor=abc&entity_type=fake.post&author=fake/u/2&author=fake/u/1&order=asc',
     })
+    // A folder shows posts and accounts in tabs: its entity types name
+    // platforms, with both kinds of each.
     expect(folder).toMatchObject({
       name: '合集',
       filter:
-        'author=fake%2Fu%2F1&author=fake%2Fu%2F2&entity_type=fake.post&order=asc&sort=saved',
+        'author=fake%2Fu%2F1&author=fake%2Fu%2F2&entity_type=fake.post%2Cfake.profile&order=asc&sort=saved',
       count: 0,
     })
     expect(
-      updateFolder(c.db, folder.id, { filter: '?entity_type=fake.post' }),
-    ).toMatchObject({ name: '合集', filter: 'entity_type=fake.post' })
+      updateFolder(c.db, folder.id, {
+        filter: '?entity_type=x.profile,fake.post',
+      }),
+    ).toMatchObject({
+      name: '合集',
+      filter: 'entity_type=fake.post%2Cfake.profile%2Cx.post%2Cx.profile',
+    })
+  })
+
+  test('the migration leaves the kind out of saved filters', () => {
+    const c = setup()
+    const before = [
+      'entity_type=x.post%2Cinstagram.post',
+      'author=a&entity_type=x.profile%2Cinstagram.profile&q=b',
+      'entity_type=x.profile&tag=t',
+      'entity_type=instagram.post',
+      'entity_type=instagram.post%2Cinstagram.profile&q=a',
+      'q=x.post',
+      '',
+    ]
+    const insert = c.db.$client.prepare(
+      `INSERT INTO folders (id, name, filter, created_at, updated_at)
+        VALUES (?, ?, ?, 0, 0)`,
+    )
+    for (const [i, filter] of before.entries())
+      insert.run(`00000000-0000-7000-8000-00000000000${i}`, `f${i}`, filter)
+    const folder = new URL('../../drizzle/', import.meta.url)
+    const name = readdirSync(folder).find((n) =>
+      n.endsWith('_folder_kindless_filters'),
+    )
+    c.db.$client.exec(
+      readFileSync(new URL(`${name}/migration.sql`, folder), 'utf8'),
+    )
+    const after = c.db.$client
+      .prepare('SELECT filter FROM folders ORDER BY id')
+      .all()
+      .map((row) => row.filter as string)
+    expect(after).toEqual([
+      '',
+      'author=a&q=b',
+      'entity_type=x.post%2Cx.profile&tag=t',
+      'entity_type=instagram.post%2Cinstagram.profile',
+      'entity_type=instagram.post%2Cinstagram.profile&q=a',
+      'q=x.post',
+      '',
+    ])
+    // As a folder saves them now.
+    for (const filter of after)
+      expect(parseFilterQuery(filter).canonical).toBe(filter)
   })
 
   test('count a relative save date by the day it is counted on', async () => {

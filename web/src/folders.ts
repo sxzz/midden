@@ -1,6 +1,7 @@
 // A folder (收藏夹) stores the library list's API query, the one the list
-// requests; the address keeps the list's own form of it (local dates, the
-// tab's entity types left out). These convert between the two.
+// requests, without the kind: it shows posts and accounts in tabs of their
+// own. The address keeps the list's own form of it (local dates, the tab's
+// entity types left out). These convert between the two.
 
 import { defaultRelMin } from './relation-filter'
 
@@ -12,9 +13,11 @@ export type Kind = 'post' | 'profile'
 
 export const KINDS: Kind[] = ['post', 'profile']
 
+const PLATFORMS = ['x', 'instagram']
+
 const KIND_TYPES: Record<Kind, string[]> = {
-  post: ['x.post', 'instagram.post'],
-  profile: ['x.profile', 'instagram.profile'],
+  post: PLATFORMS.map((p) => `${p}.post`),
+  profile: PLATFORMS.map((p) => `${p}.profile`),
 }
 
 const TAB_TYPES: Record<ListTab, string> = {
@@ -39,29 +42,30 @@ export function listTab(query: string | URLSearchParams): ListTab {
 const typesOf = (q: URLSearchParams) =>
   (q.get('entity_type') || '').split(',').filter(Boolean)
 
-/** The kinds a filter's entity types cover; naming none covers both. */
-export function filterKinds(filter: string | URLSearchParams): Kind[] {
-  const types = typesOf(new URLSearchParams(filter))
-  return types.length
-    ? KINDS.filter((kind) => types.some((type) => kindOf(type) === kind))
-    : KINDS
+/**
+ * Entity types as a folder keeps them: only the platforms they name, each
+ * with both kinds. Every platform is no filter at all.
+ */
+function platformTypes(types: string[]) {
+  const named = PLATFORMS.filter((p) =>
+    types.some((type) => type.split('.', 1)[0] === p),
+  )
+  return named.length === PLATFORMS.length
+    ? ''
+    : named.flatMap((p) => KINDS.map((kind) => `${p}.${kind}`)).join(',')
 }
 
 /**
- * The tabs a folder's list needs: the kinds its filter covers that have
- * results, by the counts by entity type when known. With none, the list
- * still shows one kind, empty.
+ * The tabs a folder's list needs: the kinds with results, by the counts by
+ * entity type when known, else both. With none, the list still shows one
+ * kind, empty.
  */
-export function folderKinds(
-  filter: string,
-  types?: Record<string, number>,
-): Kind[] {
-  const named = filterKinds(filter)
-  if (named.length < 2 || !types) return named
-  const found = named.filter((kind) =>
+export function folderKinds(types?: Record<string, number>): Kind[] {
+  if (!types) return KINDS
+  const found = KINDS.filter((kind) =>
     Object.entries(types).some(([type, n]) => n > 0 && kindOf(type) === kind),
   )
-  return found.length ? found : named.slice(0, 1)
+  return found.length ? found : ['post']
 }
 
 /** The browser's time zone, the one its date fields count days in. */
@@ -73,13 +77,6 @@ const pad = (n: number) => String(n).padStart(2, '0')
 /** A local calendar day as a date input writes it. */
 export function localDay(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
-
-/** An address query that names its tab's entity types, if it named none. */
-export function withTab(raw: string, tab: ListTab = listTab(raw)) {
-  const q = new URLSearchParams(raw)
-  if (!q.get('entity_type')) q.set('entity_type', TAB_TYPES[tab])
-  return q.toString()
 }
 
 /**
@@ -194,16 +191,15 @@ export function retagQuery(raw: string, from: string, to?: string) {
 /**
  * The filter a folder saves for an address query, written the way the
  * server stores it: no empty or non-filter values, keys in order, authors
- * sorted. Equal filters compare equal as strings. A home tab's list gives
- * its kind, which an address there leaves implicit; a folder's address
- * names its entity types itself.
+ * sorted, and the kind left out, whichever tab the address shows. Equal
+ * filters compare equal as strings.
  */
-export function folderFilter(raw: string, kind?: Kind) {
-  const entries = [
-    ...normalizeRelations(
-      normalizeTags(new URLSearchParams(apiQuery(raw, kind))),
-    ),
-  ].filter(([key, value]) => value && key !== 'cursor')
+export function folderFilter(raw: string) {
+  const q = normalizeRelations(
+    normalizeTags(new URLSearchParams(apiQuery(raw))),
+  )
+  q.set('entity_type', platformTypes(typesOf(q)))
+  const entries = [...q].filter(([key, value]) => value && key !== 'cursor')
   entries.sort(([a, x], [b, y]) =>
     a < b ? -1 : a > b ? 1 : x < y ? -1 : x > y ? 1 : 0,
   )
@@ -236,7 +232,8 @@ export function folderQuery(filter: string) {
 
 /**
  * Whether an address query shows something other than the folder's filter.
- * The layout and the tab are how the list looks, not what it holds.
+ * The layout and the tab (posts or accounts) are how the list looks, not
+ * what it holds.
  */
 export function folderModified(raw: string, filter: string) {
   return folderFilter(raw) !== filter

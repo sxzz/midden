@@ -248,12 +248,15 @@ describe('account count orders', () => {
       filter: 'entity_type=fake.profile&sort=following&order=asc',
     })
     expect(folder.filter).toBe(
-      'entity_type=fake.profile&order=asc&sort=following',
+      'entity_type=fake.post%2Cfake.profile&order=asc&sort=following',
     )
     const slug = createShare(c.db, { target: 'folder', id: folder.id }).slug
     const app = createApi({ ctx: c as AccountsContext })
     const read = async (query: string) => {
-      const response = await app.request(`/public/${slug}/collections${query}`)
+      // The visitor's 账号 tab.
+      const response = await app.request(
+        `/public/${slug}/collections?entity_type=fake.profile${query}`,
+      )
       return {
         status: response.status,
         body: (await response.json()) as {
@@ -262,21 +265,21 @@ describe('account count orders', () => {
         },
       }
     }
-    const first = await read('?sort=followers')
+    const first = await read('&sort=followers')
     expect(first.status).toBe(200)
     const second = await read(
-      `?sort=followers&cursor=${first.body.next_cursor}`,
+      `&sort=followers&cursor=${first.body.next_cursor}`,
     )
     expect(
       [...first.body.items, ...second.body.items].map((item) => item.id),
     ).toEqual(expected(counts, ids, 'followers', 'desc'))
-    const following = await read('?sort=following&order=asc')
+    const following = await read('&sort=following&order=asc')
     expect(following.body.items.map((item) => item.id)).toEqual(
       expected(counts, ids, 'following', 'asc').slice(0, 20),
     )
     // The default stays the update time.
     expect((await read('')).body.items.map((item) => item.id)).toEqual(
-      (await read('?sort=updated')).body.items.map((item) => item.id),
+      (await read('&sort=updated')).body.items.map((item) => item.id),
     )
   })
 })

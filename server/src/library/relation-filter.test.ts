@@ -189,9 +189,10 @@ describe('the 关系 filter', () => {
       name: '互关',
       filter: `rel=mutual&rel_of=${pat}&entity_type=fake.profile`,
     })
+    // Alice and her post: a folder keeps the platform, not the kind.
     expect(folder).toMatchObject({
-      filter: `entity_type=fake.profile&rel=mutual&rel_of=${pat}`,
-      count: 1,
+      filter: `entity_type=fake.post%2Cfake.profile&rel=mutual&rel_of=${pat}`,
+      count: 2,
     })
     for (const query of [
       'rel=following',
@@ -394,11 +395,11 @@ describe('the 关系 filter with several perspectives', () => {
     ).toBe(`rel=following&rel_of=${pat}`)
     const folder = createFolder(c.db, {
       name: '共同关注',
-      filter: `rel_of=${pat}&rel_of=${alice}&rel=following&entity_type=fake.profile`,
+      filter: `rel_of=${pat}&rel_of=${alice}&rel=following`,
     })
     expect(folder).toMatchObject({
-      filter: `entity_type=fake.profile&rel=following&rel_of=${alice}&rel_of=${pat}`,
-      count: 1,
+      filter: `rel=following&rel_of=${alice}&rel_of=${pat}`,
+      count: 2,
     })
     // Counted apart by threshold, cached by the canonical form.
     const count = (query: string) => filterCounts(c.db, query).count

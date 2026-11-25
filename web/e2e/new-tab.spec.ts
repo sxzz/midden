@@ -115,7 +115,7 @@ const record = {
 const folder = {
   id: folderId,
   name: '帖子夹',
-  filter: 'entity_type=x.post%2Cinstagram.post',
+  filter: '',
   count: 1,
   types: { 'x.post': 1 },
   created_at: '2026-11-01T00:00:00.000Z',

@@ -39,10 +39,33 @@ function checkName(raw: string): string {
   return name
 }
 
+/**
+ * A folder holds posts and accounts alike, and its list shows each kind in a
+ * tab of its own, so its entity types only name platforms: whichever kind a
+ * type names, the folder keeps both kinds of that platform.
+ */
+function platformsOnly(raw: string): string {
+  const params = new URLSearchParams(raw)
+  const types = params.get('entity_type')
+  if (!types) return raw
+  const platforms = new Set(
+    types.split(',').map((type) => type.split('.', 1)[0]),
+  )
+  platforms.delete('')
+  params.set(
+    'entity_type',
+    [...platforms]
+      .toSorted()
+      .flatMap((p) => [`${p}.post`, `${p}.profile`])
+      .join(','),
+  )
+  return params.toString()
+}
+
 /** The canonical query string, if the list accepts the filter. */
 function canonicalFilter(raw: string): string {
   if (raw.length > MAX_FILTER) throw new AppError('invalid_filter')
-  const { filter, canonical } = parseFilterQuery(raw)
+  const { filter, canonical } = parseFilterQuery(platformsOnly(raw))
   checkFilter(filter)
   return canonical
 }

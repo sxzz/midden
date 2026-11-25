@@ -1,7 +1,6 @@
 import { expect, it } from 'vitest'
 import {
   apiQuery,
-  filterKinds,
   folderAddress,
   folderFilter,
   folderKinds,
@@ -11,24 +10,21 @@ import {
   listTab,
   localZone,
   retagQuery,
-  withTab,
 } from './folders'
 import { listSort, listsProfiles } from './presentation'
 
 it('saves the API query of what the list shows, in the server’s form', () => {
-  // A home tab gives its kind; the address leaves it out.
   expect(
     folderFilter(
       'tag=t1&layout=album&q=&author=x%2Fp%2F2&author=x%2Fp%2F1&sort=saved',
-      'post',
     ),
-  ).toBe(
-    'author=x%2Fp%2F1&author=x%2Fp%2F2&entity_type=x.post%2Cinstagram.post&sort=saved&tag=t1',
+  ).toBe('author=x%2Fp%2F1&author=x%2Fp%2F2&sort=saved&tag=t1')
+  // A folder holds both kinds: the 账号 tab's types are no filter, and a
+  // platform keeps both of its kinds.
+  expect(folderFilter('entity_type=x.profile,instagram.profile')).toBe('')
+  expect(folderFilter('entity_type=instagram.profile&q=a')).toBe(
+    'entity_type=instagram.post%2Cinstagram.profile&q=a',
   )
-  expect(folderFilter('entity_type=x.profile,instagram.profile')).toBe(
-    'entity_type=x.profile%2Cinstagram.profile',
-  )
-  // A folder's address names its types itself, or none: every kind.
   expect(folderFilter('tag=t1&entity_type=&tab=profile')).toBe('tag=t1')
   expect(folderFilter('entity_type=x.post,x.profile&tab=post')).toBe(
     'entity_type=x.post%2Cx.profile',
@@ -66,10 +62,9 @@ it('keeps a relative save date relative, in the browser’s time zone', () => {
 
 it('opens a folder at the address query it was saved from', () => {
   const address = 'from_date=2026-03-01&to_date=2026-03-31&media_type=image'
-  const saved = folderFilter(address, 'post')
+  const saved = folderFilter(address)
   const query = new URLSearchParams(folderQuery(saved))
   expect(Object.fromEntries(query)).toEqual({
-    entity_type: 'x.post,instagram.post',
     from_date: '2026-03-01',
     to_date: '2026-03-31',
     media_type: 'image',
@@ -84,31 +79,27 @@ it('opens a folder at the address query it was saved from', () => {
 })
 
 it('tells a changed filter from a changed layout or tab', () => {
-  const filter = folderFilter('media_type=video', 'post')
+  const filter = folderFilter('media_type=video')
   const shown = folderQuery(filter)
   expect(folderModified(`${shown}&layout=album`, filter)).toBe(false)
   expect(folderModified(`${shown}&tab=profile`, filter)).toBe(false)
+  expect(folderModified(`${shown}&tab=post`, filter)).toBe(false)
   expect(folderModified(`${shown}&order=asc`, filter)).toBe(true)
-  expect(folderModified('entity_type=x.post', filter)).toBe(true)
+  // One platform is a filter.
+  expect(folderModified(`${shown}&entity_type=x.post`, filter)).toBe(true)
+  const x = folderFilter('media_type=video&entity_type=x.post')
+  expect(folderModified(`${folderQuery(x)}&tab=profile`, x)).toBe(false)
 })
 
 it('splits a folder into the kinds its results hold', () => {
-  expect(filterKinds('')).toEqual(['post', 'profile'])
-  expect(filterKinds('entity_type=x.profile')).toEqual(['profile'])
-  expect(filterKinds('entity_type=x.post,instagram.profile')).toEqual([
+  // The counts decide, and unknown counts keep both.
+  expect(folderKinds()).toEqual(['post', 'profile'])
+  expect(folderKinds({ 'x.post': 2, 'instagram.profile': 1 })).toEqual([
     'post',
     'profile',
   ])
-  // One kind named needs no counts.
-  expect(folderKinds('entity_type=x.post', {})).toEqual(['post'])
-  // Both named or none: the counts decide, and unknown counts keep both.
-  expect(folderKinds('q=a')).toEqual(['post', 'profile'])
-  expect(folderKinds('q=a', { 'x.post': 2, 'instagram.profile': 1 })).toEqual([
-    'post',
-    'profile',
-  ])
-  expect(folderKinds('q=a', { 'instagram.profile': 1 })).toEqual(['profile'])
-  expect(folderKinds('q=a', {})).toEqual(['post'])
+  expect(folderKinds({ 'instagram.profile': 1 })).toEqual(['profile'])
+  expect(folderKinds({})).toEqual(['post'])
   // Each tab asks for its own kind, within the filter's types.
   expect(apiQuery('q=a&tab=profile', 'profile')).toBe(
     'q=a&entity_type=x.profile%2Cinstagram.profile',
@@ -125,10 +116,6 @@ it('splits a folder into the kinds its results hold', () => {
 it('knows which tab and which filters a query has', () => {
   expect(listTab('entity_type=instagram.profile')).toBe('x.profile')
   expect(listTab('q=a')).toBe('x.post')
-  expect(withTab('q=a', 'x.profile')).toBe(
-    'q=a&entity_type=x.profile%2Cinstagram.profile',
-  )
-  expect(withTab('entity_type=x.post')).toBe('entity_type=x.post')
   expect(apiQuery('layout=album', 'post')).toBe(
     'entity_type=x.post%2Cinstagram.post',
   )

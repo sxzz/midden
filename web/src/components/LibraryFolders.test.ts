@@ -10,7 +10,7 @@ const FOLDER = '00000000-0000-7000-8000-00000000000f'
 const folder = (fields: Partial<Folder>): Folder => ({
   id: FOLDER,
   name: '图片',
-  filter: 'entity_type=x.post%2Cinstagram.post&media_type=image',
+  filter: 'media_type=image',
   count: 3,
   types: { 'x.post': 3 },
   created_at: '2026-11-01T00:00:00.000Z',
@@ -42,7 +42,7 @@ beforeEach(() => {
     folder({
       id: '00000000-0000-7000-8000-0000000000aa',
       name: '账号们',
-      filter: 'entity_type=x.profile%2Cinstagram.profile&visibility=private',
+      filter: 'visibility=private',
       count: 1,
       types: { 'x.profile': 1 },
     }),
@@ -55,6 +55,8 @@ beforeEach(() => {
           ...JSON.parse(request.body!),
           id: '00000000-0000-7000-8000-0000000000bb',
           count: 7,
+          // Counted as the server would, when a test says.
+          ...(Object.keys(counts).length ? { types: counts } : {}),
         })
         folders = [...folders, created]
         return created
@@ -159,14 +161,35 @@ it('lists every folder and saves the current filters as one', async () => {
   input.dispatchEvent(new Event('input'))
   input.form!.requestSubmit()
   await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('folder'))
+  // Posts and accounts alike: the folder opens on the tab it was saved
+  // from, which is not part of its filter.
   expect(sent('POST', '/folders')).toEqual([
-    {
-      name: '视频',
-      filter: 'entity_type=x.post%2Cinstagram.post&media_type=video',
-    },
+    { name: '视频', filter: 'media_type=video' },
   ])
+  expect(router.currentRoute.value.query.tab).toBe('post')
   await vi.waitFor(() =>
     expect(el.querySelector('h1')!.textContent).toBe('视频'),
+  )
+  expect(el.querySelector('.folder-status')).toBeNull()
+})
+
+it('saves the 账号 tab as a folder of both kinds, opened on accounts', async () => {
+  counts = { 'x.post': 4, 'x.profile': 7 }
+  const el = await mount('/?entity_type=x.profile,instagram.profile&q=cat')
+  await vi.waitFor(() => expect(button(el, '存为收藏夹')).toBeDefined())
+  button(el, '存为收藏夹').click()
+  await nextTick()
+  const input = el.querySelector<HTMLInputElement>('dialog[open] input')!
+  input.value = '猫'
+  input.dispatchEvent(new Event('input'))
+  input.form!.requestSubmit()
+  await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('folder'))
+  expect(sent('POST', '/folders')).toEqual([{ name: '猫', filter: 'q=cat' }])
+  expect(router.currentRoute.value.query.tab).toBe('profile')
+  await vi.waitFor(() =>
+    expect(listQueries().at(-1)?.get('entity_type')).toBe(
+      'x.profile,instagram.profile',
+    ),
   )
   expect(el.querySelector('.folder-status')).toBeNull()
 })
@@ -188,9 +211,7 @@ it('opens a bare folder address at its filter and updates it once changed', asyn
   // Saving only applies to a list that is not a folder already.
   expect(button(el, '存为收藏夹')).toBeUndefined()
 
-  await router.push(
-    `/folder/${FOLDER}?entity_type=x.post,instagram.post&media_type=image&order=asc`,
-  )
+  await router.push(`/folder/${FOLDER}?media_type=image&order=asc`)
   await vi.waitFor(() =>
     expect(el.querySelector('.folder-status')?.textContent).toContain(
       '筛选条件已修改',
@@ -200,9 +221,7 @@ it('opens a bare folder address at its filter and updates it once changed', asyn
   await vi.waitFor(() => expect(el.querySelector('.folder-status')).toBeNull())
   expect(toastState.value?.text).toBe('已保存条件')
   expect(sent('PATCH', `/folders/${FOLDER}`)).toEqual([
-    {
-      filter: 'entity_type=x.post%2Cinstagram.post&media_type=image&order=asc',
-    },
+    { filter: 'media_type=image&order=asc' },
   ])
 })
 
@@ -343,10 +362,9 @@ it('splits a folder of posts and accounts into tabs, as a view', async () => {
     ['账号', 'true'],
   ])
   expect(listQueries().at(-1)?.get('sort')).toBe('saved')
-  // Another tab is not another filter.
+  // Another tab is not another filter, nor one the filters offer.
   expect(el.querySelector('.folder-status')).toBeNull()
-  // The filters offer the kind as one of the folder's own conditions.
-  expect(el.querySelector('select[aria-label="类型"]')).not.toBeNull()
+  expect(el.querySelector('select[aria-label="类型"]')).toBeNull()
 
   // A changed filter asks for its own counts: only accounts are left.
   counts = { 'x.profile': 1 }
@@ -361,6 +379,12 @@ it('splits a folder of posts and accounts into tabs, as a view', async () => {
   expect(el.querySelector('.folder-status')?.textContent).toContain(
     '筛选条件已修改',
   )
+  // Saved from the 账号 tab, the filter still holds both kinds.
+  button(el, '保存条件').click()
+  await vi.waitFor(() => expect(el.querySelector('.folder-status')).toBeNull())
+  expect(sent('PATCH', `/folders/${MIXED}`)).toEqual([
+    { filter: 'visibility=public' },
+  ])
 })
 
 it("shows each tab's own total, counted again for other filters", async () => {
@@ -461,7 +485,6 @@ it('saves a quick save-date range as a relative one', async () => {
   await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('folder'))
   expect(sent('POST', '/folders')[0].filter).toBe(
     new URLSearchParams({
-      entity_type: 'x.post,instagram.post',
       saved_within: '7d',
       time_zone: zone,
     }).toString(),
@@ -475,9 +498,7 @@ it('saves a quick save-date range as a relative one', async () => {
 it('follows a tag merged away in the open folder, still unmodified', async () => {
   const from = '00000000-0000-7000-8000-0000000000a1'
   const into = '00000000-0000-7000-8000-0000000000b1'
-  folders = [
-    folder({ filter: `entity_type=x.post%2Cinstagram.post&tag=${from}` }),
-  ]
+  folders = [folder({ filter: `tag=${from}` })]
   let tags = [
     { id: from, name: '甲' },
     { id: into, name: '乙' },

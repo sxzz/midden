@@ -21,16 +21,15 @@ import { useFolders } from '../composables/useFolders'
 import { toast } from '../composables/useToast'
 import {
   apiQuery,
-  filterKinds,
   folderAddress,
   folderFilter,
   folderKinds,
   folderModified,
   folderQuery,
   hasFilters,
+  KINDS,
   listTab,
   tabKind,
-  withTab,
   type Kind,
   type ListTab,
 } from '../folders'
@@ -93,9 +92,9 @@ const lists: Record<Tab, ReturnType<typeof createList>> = {
 const folderList = createList('')
 const kindLabels: Record<Kind, string> = { post: '帖子', profile: '账号' }
 /**
- * A folder may hold posts and accounts alike; each is its own list, and the
+ * A folder holds posts and accounts alike; each is its own list, and the
  * tabs only show when its results have both. Which one is shown is a view
- * choice (`tab` in the address), not part of the folder's filter.
+ * choice (`tab` in the address), never part of the folder's filter.
  */
 const folderKindsShown = shallowRef<Kind[]>([])
 const folderKind = shallowRef<Kind>('post')
@@ -248,11 +247,10 @@ async function show(
     await list.collection.load(effectiveQuery)
   }
 }
-/** The kinds a folder filter's results hold; asked only when it names both. */
+/** The kinds a folder filter's results hold. */
 async function kindsFor(filter: string, saved: Folder): Promise<Kind[]> {
-  if (filterKinds(filter).length < 2) return filterKinds(filter)
   // The folders were just loaded with their own counts.
-  if (filter === saved.filter) return folderKinds(filter, saved.types)
+  if (filter === saved.filter) return folderKinds(saved.types)
   if (counted?.filter !== filter) {
     const q = new URLSearchParams(filter)
     try {
@@ -264,10 +262,10 @@ async function kindsFor(filter: string, saved: Folder): Promise<Kind[]> {
       counted = { filter, types }
     } catch {
       // Unknown, so both tabs stay available.
-      return filterKinds(filter)
+      return KINDS
     }
   }
-  return folderKinds(filter, counted.types)
+  return folderKinds(counted.types)
 }
 /** Show the open folder's list for the address, on the tab it asks for. */
 async function showFolder(saved: Folder, key: string) {
@@ -435,23 +433,24 @@ function folderUpdated(recordId: string) {
   if (current)
     folderRecords.value = { ...folderRecords.value, [current.id]: recordId }
 }
-/** Save what the list shows as a new folder, and continue inside it. */
+/**
+ * Save what the list shows as a new folder, and continue inside it on the
+ * kind shown.
+ */
 async function saveFolder(name: string) {
   busy.value = true
   sheetError.value = ''
   const query = shownQuery.value
-  // A home tab's address leaves its kind implicit; a folder's names it.
-  const inFolder = !!folderId.value
+  const kind = folderId.value ? folderKind.value : tabKind(tab.value)
   try {
-    const created = await createFolder(
-      name,
-      inFolder ? folderFilter(query) : folderFilter(query, tabKind(tab.value)),
-    )
+    const created = await createFolder(name, folderFilter(query))
     sheet.value = ''
     toast('已存为收藏夹')
-    const target = `/folder/${created.id}?${
-      inFolder ? folderAddress(query) : withTab(query, tab.value)
-    }`
+    const address = new URLSearchParams(folderQuery(created.filter))
+    const layout = new URLSearchParams(query).get('layout')
+    if (layout) address.set('layout', layout)
+    address.set('tab', kind)
+    const target = `/folder/${created.id}?${address}`
     if (folderId.value) void router.replace(target)
     else void router.push(target)
   } catch (e) {
@@ -497,7 +496,9 @@ async function deleteFolder() {
     await removeFolder(current.id)
     sheet.value = ''
     toast('已删除收藏夹')
-    void router.push(lists[listTab(current.filter)].path)
+    void router.push(
+      lists[folderKind.value === 'profile' ? 'x.profile' : 'x.post'].path,
+    )
   } catch (e) {
     toast(errorText(e))
   } finally {

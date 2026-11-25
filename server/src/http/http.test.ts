@@ -518,7 +518,8 @@ describe('api', () => {
     const folder = (await created.json()) as { id: string }
     expect(folder).toMatchObject({
       name: '帖子',
-      filter: 'entity_type=fake.post',
+      // A folder keeps the platform only; its tabs choose the kind.
+      filter: 'entity_type=fake.post%2Cfake.profile',
       count: 1,
       created_at: expect.any(String),
       updated_at: expect.any(String),
@@ -542,7 +543,7 @@ describe('api', () => {
     })
     expect(await renamed.json()).toMatchObject({
       name: '全部帖子',
-      filter: 'entity_type=fake.post',
+      filter: 'entity_type=fake.post%2Cfake.profile',
     })
     const refiltered = await send('PATCH', `/folders/${folder.id}`, {
       filter: 'q=post&sort=saved',

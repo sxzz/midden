@@ -319,11 +319,11 @@ describe('public shares', () => {
       NOT_FOUND,
     )
 
-    // A new filter selects the profile; its attached posts come with it.
-    updateFolder(c.db, folder.id, {
-      filter: 'entity_type=fake.profile&q=five',
-    })
-    expect((await read(slug)).body).toMatchObject({ posts: 0, profiles: 1 })
+    // A new filter selects the profile and, through its tag, the post it
+    // wrote; the rest of its attached posts come with it.
+    const own = updateAnnotation(c.db, ids.five!, { tagNames: ['五'] }).tags[0]!
+    updateFolder(c.db, folder.id, { filter: `tag=${own.id}` })
+    expect((await read(slug)).body).toMatchObject({ posts: 1, profiles: 1 })
     expect(
       (
         (await read(slug, '/collections?entity_type=fake.profile')).body as {
@@ -334,10 +334,10 @@ describe('public shares', () => {
     expect(
       (
         (await read(slug, '/collections?entity_type=fake.post')).body as {
-          items: unknown[]
+          items: { id: string }[]
         }
-      ).items,
-    ).toEqual([])
+      ).items.map((i) => i.id),
+    ).toEqual([ids.a1])
     for (const id of ['five', 'a1', 'm1', 'r1'])
       expect((await read(slug, `/collections/${ids[id]}`)).status).toBe(200)
     for (const id of ['x1', 'q1', 'e3', 'bob'])
@@ -592,7 +592,7 @@ describe('public shares', () => {
     const { c, ids, owner } = await setup()
     const folder = createFolder(c.db, {
       name: '五',
-      filter: 'entity_type=fake.profile&q=five',
+      filter: 'q=five',
     })
     const viaFolder = createShare(c.db, { target: 'folder', id: folder.id })
     const direct = createShare(c.db, { target: 'collection', id: ids.r1! })
@@ -713,16 +713,17 @@ describe('public lists', () => {
       filter: 'entity_type=fake.profile&sort=saved&order=asc',
     })
     const slug = share(c, 'folder', folder.id)
+    // The visitor's 账号 tab.
     const list = async (query = '') =>
-      ((await read(slug, `/collections${query}`)).body as Listed).items.map(
-        (item) => item.id,
-      )
+      (
+        (await read(slug, `/collections?entity_type=fake.profile${query}`))
+          .body as Listed
+      ).items.map((item) => item.id)
     // Bob was saved after five, which is captured again now.
     await capture(c, profile('500'))
     expect(await list()).toEqual([ids.five, ids.bob])
-    expect(await list('?entity_type=fake.profile')).toEqual([ids.five, ids.bob])
-    expect(await list('?order=asc')).toEqual([ids.bob, ids.five])
-    expect(await list('?sort=updated&order=desc')).toEqual(await list())
+    expect(await list('&order=asc')).toEqual([ids.bob, ids.five])
+    expect(await list('&sort=updated&order=desc')).toEqual(await list())
   })
 
   test("a visitor's filters only narrow the folder's", async () => {

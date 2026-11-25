@@ -1,6 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
 import { capture, entity, graph, libraryContext } from '#testing/library.ts'
-import { createFolder } from './folders.ts'
 import { listCollections } from './list.ts'
 import { collectionScope, folderScope } from './share-scope.ts'
 import type { CaptureContext } from '#capture/context.ts'
@@ -133,12 +132,8 @@ test("a folder's profiles bring exactly the posts their page lists", async () =>
   }).items.map((item) => item.id)
   expect(listed.length).toBe(4)
   const all = Object.values(saved)
-  const folder = createFolder(ctx.db, {
-    name: 'profiles',
-    filter: 'entity_type=fake.profile',
-  })
   for (const scope of [
-    folderScope(ctx.db, folder.filter),
+    folderScope(ctx.db, 'entity_type=fake.profile'),
     collectionScope(ctx.db, owner),
   ]) {
     expect([...scope.contains(all)].toSorted()).toEqual(listed.toSorted())

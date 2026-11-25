@@ -48,8 +48,9 @@ const props = defineProps<{
   /** One account's own list: its platform and author are given. */
   withinProfile?: boolean
   /**
-   * A folder's list: its filter may name posts, accounts or both, where a
-   * home tab's list is one of them.
+   * A folder's list: its filter covers posts and accounts alike, and the
+   * folder's tab (`tab`) shows one of them, where a home tab's list is one
+   * kind by its entity types.
    */
   folder?: boolean
 }>()
@@ -97,8 +98,7 @@ function read(query: string) {
     order: params.get('order') || 'desc',
     sort: listSort(params),
     q: params.get('q') || '',
-    // Which tab this form belongs to; it rides along, and only a folder's
-    // form edits the kind.
+    // Which tab this form belongs to; it rides along.
     entity: params.get('entity_type') || '',
     kind: only(types.map(kindOf)),
     /** The kind a folder holding both shows; it rides along. */
@@ -139,19 +139,18 @@ const orderNames = computed(() =>
 )
 /**
  * The entity types the form selects. A home tab's kind is fixed and its
- * posts are the default, left out of the address; in a folder, no kind and
- * no platform select everything.
+ * posts are the default, left out of the address; a folder covers both
+ * kinds, so only a platform names any.
  */
 function entityTypes(f: Form) {
-  if (props.folder && !f.kind && !f.platform) return ''
+  if (props.folder && !f.platform) return ''
   if (!props.folder && f.kind !== 'profile' && !f.platform) return ''
-  const kinds = f.kind ? [f.kind] : props.folder ? KINDS : ['post']
+  const kinds = props.folder ? KINDS : f.kind ? [f.kind] : ['post']
   const platforms = f.platform ? [f.platform] : ['x', 'instagram']
   return kinds
     .flatMap((kind) => platforms.map((name) => `${name}.${kind}`))
     .join(',')
 }
-const kindNames: Record<Kind, string> = { post: '帖子', profile: '账号' }
 const postTypeNames: Record<string, string> = {
   post: '贴文',
   quote: '引用',
@@ -228,13 +227,11 @@ const open = shallowRef(
     form.sensitive ||
     form.from ||
     form.to ||
-    form.within ||
-    (props.folder && form.kind)
+    form.within
   ),
 )
 const active = computed(() =>
   [
-    props.folder && form.kind ? kindNames[form.kind] : '',
     form.platform ? (form.platform === 'instagram' ? 'Instagram' : 'X') : '',
     tagSummary.value,
     relationSummary.value,
@@ -581,15 +578,6 @@ const tagSummary = computed(() => {
          word or two of it. -->
     <p v-if="active" class="filter-summary">{{ active }}</p>
     <div v-show="open" class="panel">
-      <label v-if="folder" class="option">
-        类型<span class="select"
-          ><select v-model="form.kind" aria-label="类型">
-            <option value="">全部</option>
-            <option value="post">帖子</option>
-            <option value="profile">账号</option></select
-          ><ChevronIcon class="select-chevron"
-        /></span>
-      </label>
       <label v-if="!withinProfile" class="option">
         平台<span class="select"
           ><select v-model="form.platform" aria-label="平台">
