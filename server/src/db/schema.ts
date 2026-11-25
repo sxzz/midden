@@ -879,6 +879,32 @@ export const settings = sqliteTable('settings', {
 })
 
 /**
+ * Storage usage, one row per UTC day (`#usage/snapshots.ts`): R2 per bucket
+ * from Cloudflare's analytics, and the local figures as last read that day.
+ * A part is null when it was not read that day.
+ */
+export const storageSnapshots = sqliteTable('storage_snapshots', {
+  // YYYY-MM-DD, UTC.
+  day: text().primaryKey(),
+  // JSON: { [bucket]: { bytes, objects, class_a, class_b } }, the day's
+  // peak storage and its operations.
+  r2: text({ mode: 'json' }).$type<Record<string, BucketDay>>(),
+  dbBytes: integer(),
+  thumbnailBytes: integer(),
+  freeBytes: integer(),
+  updatedAt: timestamp().notNull(),
+})
+
+/** One bucket on one day, in a storage snapshot. */
+export interface BucketDay {
+  /** Peak payload and metadata size that day; null without a reading. */
+  bytes: number | null
+  objects: number | null
+  class_a: number
+  class_b: number
+}
+
+/**
  * Links from the bot's /passkey that register a passkey without signing in,
  * by the SHA-256 of their token. One per origin; gone once used.
  */

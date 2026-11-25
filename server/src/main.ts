@@ -26,6 +26,7 @@ import { createInstagramPlatform } from '#platforms/instagram/index.ts'
 import { Platforms } from '#platforms/registry.ts'
 import { createXPlatform } from '#platforms/x/index.ts'
 import { startBot, type RunningBot } from '#telegram/bot.ts'
+import { StorageUsage } from '#usage/storage.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
 const MAINTENANCE_INTERVAL = 60_000
@@ -79,12 +80,22 @@ const litestream = config.litestream
       notify: (text) => bot?.notify(text),
     })
   : undefined
+const storage = new StorageUsage({
+  db,
+  dataDir: config.dataDir,
+  databasePath: config.databasePath,
+  mediaDir: config.mediaDir,
+  cloudflare: config.cloudflare,
+  logger,
+  notify: (text) => bot?.notify(text),
+})
 const api = createApi({
   ctx,
   telegram: config.telegram,
   webAppUrl: config.webAppUrl,
   dev: config.dev,
   litestream,
+  storage,
   challengeKey: deriveKey(config.secretKey, 'passkey-challenge'),
   notify: (text) => bot?.notify(text),
 })
@@ -142,6 +153,12 @@ const maintenance = setInterval(() => {
   runMaintenance(ctx)
     .catch(() => {})
     .finally(() => (maintaining = false))
+  // Paced by itself: every 15 minutes, and the composition once a day.
+  storage
+    .tick()
+    .catch((error: unknown) =>
+      logger.error({ err: error }, 'storage usage failed'),
+    )
 }, MAINTENANCE_INTERVAL)
 const optimizing = setInterval(optimize, OPTIMIZE_INTERVAL, db)
 const server = serve(
