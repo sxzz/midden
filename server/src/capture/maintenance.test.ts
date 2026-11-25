@@ -1,6 +1,12 @@
 import { Buffer } from 'node:buffer'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { eq } from 'drizzle-orm'
+import { pino } from 'pino'
 import { afterEach, describe, expect, test } from 'vitest'
+import { openDatabase } from '#db/client.ts'
 import {
   blobs,
   captures,
@@ -21,6 +27,7 @@ import {
   collectMedia,
   failStaleCaptures,
   pruneSourceResponses,
+  releaseFreePages,
 } from './maintenance.ts'
 import { submit } from './submit.ts'
 import type { CaptureContext } from './context.ts'
@@ -144,5 +151,65 @@ describe('maintenance', () => {
     expect(c.db.select().from(sourceResponses).all()).toHaveLength(2)
     // Storage in the catalog follows the pruned responses.
     expectCatalogFresh(c)
+  })
+
+  test('free pages go back to the file system a bounded number at a time', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'midden-vacuum-'))
+    const clock = { now: Date.now() }
+    const open = (file: string) =>
+      ({
+        db: openDatabase(path.join(dir, file)),
+        now: () => clock.now,
+        logger: pino({ level: 'silent' }),
+      }) as unknown as CaptureContext
+    const c = open('new.db')
+    const pages = () => ({
+      total: c.db.get<{ n: number }>(
+        'SELECT page_count AS n FROM pragma_page_count',
+      )!.n,
+      free: c.db.get<{ n: number }>(
+        'SELECT freelist_count AS n FROM pragma_freelist_count',
+      )!.n,
+    })
+    // About 6000 pages of rows, then deleted.
+    c.db.$client.exec(`CREATE TABLE scratch (b BLOB);
+      WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1500)
+      INSERT INTO scratch SELECT randomblob(16000) FROM n;
+      DROP TABLE scratch;`)
+    const before = pages()
+    expect(before.free).toBeGreaterThan(5000)
+    expect(releaseFreePages(c)).toBe(4096)
+    // The file shrinks by those pages, and the pointer-map pages they needed.
+    expect(pages().free).toBe(before.free - 4096)
+    expect(pages().total).toBeLessThanOrEqual(before.total - 4096)
+    // Not again for a quarter of an hour.
+    clock.now += 14 * 60_000
+    expect(releaseFreePages(c)).toBe(0)
+    clock.now += 2 * 60_000
+    expect(releaseFreePages(c)).toBe(before.free - 4096)
+    expect(pages().free).toBe(0)
+    // Too few free pages to bother with.
+    clock.now += 16 * 60_000
+    c.db.$client.exec(`CREATE TABLE scratch (b BLOB);
+      WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 100)
+      INSERT INTO scratch SELECT randomblob(16000) FROM n;
+      DROP TABLE scratch;`)
+    expect(pages().free).toBeGreaterThan(300)
+    expect(releaseFreePages(c)).toBe(0)
+    c.db.$client.close()
+
+    // A database made before INCREMENTAL keeps its mode: nothing to do.
+    const legacy = new DatabaseSync(path.join(dir, 'old.db'))
+    legacy.exec(`CREATE TABLE scratch (b BLOB);
+      WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1500)
+      INSERT INTO scratch SELECT randomblob(16000) FROM n;
+      DROP TABLE scratch;`)
+    legacy.close()
+    const old = open('old.db')
+    expect(old.db.get('SELECT * FROM pragma_auto_vacuum')).toEqual({
+      auto_vacuum: 0,
+    })
+    expect(releaseFreePages(old)).toBe(0)
+    old.db.$client.close()
   })
 })

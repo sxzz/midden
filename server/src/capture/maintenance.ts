@@ -44,7 +44,18 @@ const BATCH = 100
 const THUMBNAIL_BACKFILL = 2000
 const PRUNE_BATCH = 500
 
+// Free pages go back to the file system 16 MiB at a time, at most every 15
+// minutes, once there are 4 MiB of them: a quarter-hour's deletions are far
+// less, and a backlog (after moving raw responses out) drains at 64 MiB an
+// hour without long writes.
+const VACUUM_EVERY = 15 * 60_000
+const VACUUM_PAGES = 4096
+const VACUUM_MIN_FREE = 1024
+/** SQLite's `auto_vacuum` value for INCREMENTAL. */
+const INCREMENTAL = 2
+
 const thumbnailsCaughtUp = new WeakSet<CaptureContext>()
+const vacuumedAt = new WeakMap<CaptureContext, number>()
 const BUDGET = 30_000
 
 /** One maintenance pass. Steps are independent; errors are collected. */
@@ -64,6 +75,7 @@ export async function runMaintenance(ctx: CaptureContext): Promise<void> {
   await step('staged data', () => pruneStaging(ctx))
   await step('media', () => collectMedia(ctx))
   await step('thumbnails', () => backfillThumbnails(ctx))
+  await step('free pages', () => releaseFreePages(ctx))
   if (errors.length) throw new AggregateError(errors, 'maintenance failed')
 }
 
@@ -352,4 +364,34 @@ export function backfillThumbnails(ctx: CaptureContext): number {
   })
   if (missing.length < THUMBNAIL_BACKFILL) thumbnailsCaughtUp.add(ctx)
   return missing.length
+}
+
+function pragma(ctx: CaptureContext, name: string): number {
+  const row = ctx.db.$client.prepare(`PRAGMA ${name}`).get()
+  return Number(Object.values(row ?? {})[0] ?? 0)
+}
+
+/**
+ * Hand a bounded number of free pages back to the file system: deletions
+ * leave pages free inside the file, and with `auto_vacuum = INCREMENTAL`
+ * `incremental_vacuum` moves the last pages into free ones and truncates.
+ * It is an ordinary write transaction, so Litestream replicates it like any
+ * other, unlike VACUUM, which rewrites every page (see `db/client.ts`).
+ * Returns the pages released.
+ */
+export function releaseFreePages(ctx: CaptureContext): number {
+  const at = now(ctx)
+  const last = vacuumedAt.get(ctx)
+  if (last !== undefined && at - last < VACUUM_EVERY) return 0
+  if (pragma(ctx, 'auto_vacuum') !== INCREMENTAL) return 0
+  const free = pragma(ctx, 'freelist_count')
+  if (free < VACUUM_MIN_FREE) return 0
+  vacuumedAt.set(ctx, at)
+  ctx.db.$client.exec(`PRAGMA incremental_vacuum(${VACUUM_PAGES})`)
+  const left = pragma(ctx, 'freelist_count')
+  ctx.logger.info(
+    { released: free - left, free: left, pages: pragma(ctx, 'page_count') },
+    'released free database pages',
+  )
+  return free - left
 }

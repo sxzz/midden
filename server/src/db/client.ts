@@ -21,6 +21,10 @@ export function openDatabase(file: string) {
   // automatic checkpoints are PASSIVE and cannot, so they stay on. Explicit
   // RESTART or TRUNCATE checkpoints would make it upload the whole database
   // again, and VACUUM rewrites every page into the WAL: don't add them.
+  // Pages freed by deletions can then go back to the file system a few at a
+  // time (`incremental_vacuum` in maintenance). It only takes on a new
+  // database; an existing one keeps its mode until a VACUUM.
+  client.exec('PRAGMA auto_vacuum = INCREMENTAL')
   client.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;')
   searchFunctions(client)
   const db = drizzle({ client })
