@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
 import { addAccount, type AccountsContext } from '#accounts/accounts.ts'
-import { collections, updates } from '#db/schema.ts'
+import { collections, jobs, updates } from '#db/schema.ts'
 import { SnoozeError } from '#jobs/queue.ts'
 import { createFolder } from '#library/folders.ts'
 import { status } from '#platforms/rpc.ts'
@@ -21,7 +21,9 @@ import {
   collectionUpdate,
   continueTimeline,
   listRecords,
+  pauseUpdate,
   previewUpdate,
+  resumeUpdate,
   retryUpdateFailed,
   runUpdate,
   startUpdate,
@@ -134,6 +136,14 @@ function savedPosts(c: AccountsContext) {
 }
 
 const records = (c: AccountsContext) => listRecords(c.db).items
+
+/** The jobs an update owns. */
+const jobsOf = (c: AccountsContext, update: string) =>
+  c.db
+    .select({ type: jobs.type, state: jobs.state })
+    .from(jobs)
+    .where(eq(jobs.updateId, update))
+    .all()
 
 describe('更新', () => {
   test('a post updates as one record of its own', async () => {
@@ -455,6 +465,73 @@ describe('更新', () => {
       members: { total: 2, complete: 2, failed: 0 },
     })
     expect(records(ctx)).toHaveLength(before)
+  })
+
+  test('a paused update waits from where it was, while other work goes on', async () => {
+    const { ctx } = setup({ timelines: { '100': [1, 2, 3, 4, 5, 6] } })
+    const profile = await save(ctx, 'https://fake.test/u/100')
+    const other = await save(ctx, 'https://fake.test/p/9')
+    const update = startUpdate(
+      ctx,
+      { target: 'collection', id: profile },
+      { options: resolveOptions({ count: 6 }) },
+    )
+    pauseUpdate(ctx, update)
+    expect(updateRecord(ctx.db, update)).toMatchObject({
+      done: false,
+      paused: true,
+    })
+    // Another update of something else runs meanwhile.
+    const second = startUpdate(ctx, { target: 'collection', id: other })
+    await ctx.queue.drain()
+    expect(updateRecord(ctx.db, second)).toMatchObject({ done: true })
+    expect(updateRecord(ctx.db, update)).toMatchObject({
+      done: false,
+      paused: true,
+    })
+    expect(jobsOf(ctx, update)).toEqual([{ type: 'update', state: 'paused' }])
+
+    resumeUpdate(ctx, update)
+    await ctx.queue.drain()
+    expect(updateRecord(ctx.db, update)).toMatchObject({
+      state: 'complete',
+      done: true,
+    })
+    expect(updateRecord(ctx.db, update).paused).toBeUndefined()
+  })
+
+  test("pausing mid-way holds the jobs the update's captures queued", async () => {
+    const { ctx } = setup({ timelines: { '100': [1, 2, 3] } }, { run: false })
+    const profile = captureURL(
+      ctx,
+      'https://fake.test/u/100',
+      undefined,
+      resolveOptions({ posts: 'none' }),
+    ).collectionId
+    ctx.queue.start()
+    await ctx.queue.drain()
+    await ctx.queue.stop()
+    const update = startUpdate(
+      ctx,
+      { target: 'collection', id: profile },
+      { options: resolveOptions({ count: 3 }) },
+    )
+    pauseUpdate(ctx, update)
+    expect(jobsOf(ctx, update)).toEqual([{ type: 'update', state: 'paused' }])
+    // Stopping a paused update lets what it queued finish.
+    stopUpdate(ctx, update)
+    expect(jobsOf(ctx, update)).toEqual([
+      { type: 'update', state: 'available' },
+    ])
+    expect(updateRecord(ctx.db, update).paused).toBeUndefined()
+  })
+
+  test('a finished update cannot be paused', async () => {
+    const { ctx } = setup()
+    const id = await save(ctx, 'https://fake.test/p/1')
+    const update = startUpdate(ctx, { target: 'collection', id })
+    await ctx.queue.drain()
+    expect(() => pauseUpdate(ctx, update)).toThrow()
   })
 
   test('targets must be saved', () => {

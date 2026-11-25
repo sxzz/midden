@@ -11,6 +11,8 @@ const worker: NonNullable<QueueState['worker']> = {
   idle: false,
 }
 const state = (over: Partial<QueueState> = {}): QueueState => ({
+  control: { paused: false, types: [] },
+  pausable: ['thumbnail', 'upload', 'raw-upload'],
   backlog: [],
   worker,
   web: null,
@@ -18,7 +20,10 @@ const state = (over: Partial<QueueState> = {}): QueueState => ({
 })
 
 describe('后台任务', () => {
-  test('the status says missing, slowed down or running', () => {
+  test('the status says paused, missing, slowed down or running', () => {
+    expect(
+      queueStatus(state({ control: { paused: true, types: [] } })).label,
+    ).toBe('已暂停')
     expect(queueStatus(state({ worker: null }))).toEqual({
       label: '后台进程没有响应',
       tone: 'failed',

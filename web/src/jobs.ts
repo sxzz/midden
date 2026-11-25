@@ -23,8 +23,9 @@ export interface QueueStatusText {
   tone: 'ok' | 'active' | 'failed'
 }
 
-/** One line: missing, stopped, slowed down, or running. */
+/** One line: paused, stopped, slowed down, or running. */
 export function queueStatus(state: QueueState): QueueStatusText {
+  if (state.control.paused) return { label: '已暂停', tone: 'active' }
   const { worker } = state
   if (!worker) return { label: '后台进程没有响应', tone: 'failed' }
   if (worker.held) return { label: '已停止领取任务', tone: 'failed' }

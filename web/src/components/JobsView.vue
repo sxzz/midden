@@ -1,15 +1,19 @@
 <script setup vapor lang="ts">
 import { computed, onActivated, onDeactivated, shallowRef } from 'vue'
 import { call, client, errorText, type QueueState } from '../api'
+import { toast } from '../composables/useToast'
 import { jobTypeLabel, queueStatus, webLatency } from '../jobs'
+import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 
 // 设置 → 管理员面板 → 后台任务: what the worker is doing and how far behind
-// it is; how fast the web process has answered lately. Read again every few
-// seconds while open.
+// it is; pausing all of it, or the job types that only tidy up; how fast
+// the web process has answered lately. Read again every few seconds while
+// open.
 const REFRESH = 5000
 const state = shallowRef<QueueState>()
 const error = shallowRef('')
+const busy = shallowRef(false)
 let timer: ReturnType<typeof setInterval> | undefined
 
 async function load() {
@@ -26,6 +30,30 @@ onActivated(() => {
 })
 onDeactivated(() => clearInterval(timer))
 
+async function save(json: { paused?: boolean; types?: string[] }) {
+  if (busy.value) return
+  busy.value = true
+  try {
+    state.value = await call(
+      client.queue.control.$put({
+        json: json as Parameters<typeof client.queue.control.$put>[0]['json'],
+      }),
+    )
+  } catch (e) {
+    toast(errorText(e))
+  } finally {
+    busy.value = false
+  }
+}
+function toggleType(type: string) {
+  const types = state.value?.control.types ?? []
+  void save({
+    types: types.includes(type)
+      ? types.filter((t) => t !== type)
+      : [...types, type],
+  })
+}
+
 const status = computed(() => state.value && queueStatus(state.value))
 const latency = computed(() => state.value?.web && webLatency(state.value.web))
 </script>
@@ -40,15 +68,29 @@ const latency = computed(() => state.value?.web && webLatency(state.value.web))
       <p class="state" :class="status?.tone" role="status">
         {{ status?.label }}
       </p>
+      <ListButton
+        :label="state.control.paused ? '继续' : '暂停全部'"
+        :disabled="busy"
+        @select="save({ paused: !state.control.paused })"
+      />
+    </ListSection>
+    <ListSection title="按类型暂停">
+      <ListButton
+        v-for="type in state.pausable"
+        :key="type"
+        :label="jobTypeLabel(type)"
+        :trailing="state.control.types.includes(type) ? '已暂停' : '运行'"
+        :disabled="busy"
+        @select="toggleType(type)"
+      />
     </ListSection>
     <ListSection v-if="state.backlog.length" title="队列">
       <div v-for="row in state.backlog" :key="row.type" class="line">
         <span>{{ jobTypeLabel(row.type) }}</span>
         <span class="figures"
           >等待 {{ row.waiting
-          }}<template v-if="row.running">
-            · 进行中 {{ row.running }}</template
-          ></span
+          }}<template v-if="row.running"> · 进行中 {{ row.running }}</template
+          ><template v-if="row.paused"> · 暂停 {{ row.paused }}</template></span
         >
       </div>
     </ListSection>

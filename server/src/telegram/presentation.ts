@@ -90,6 +90,7 @@ export function webRoute(
 /** What a queued capture waits for: see `captureWaits`. */
 export function waitLabel(waiting: string | undefined): string {
   if (waiting === 'retry') return '等待重试'
+  if (waiting === 'paused') return '已暂停'
   return waiting ? '排队中' : '正在采集'
 }
 
@@ -286,6 +287,8 @@ export interface ProgressInput {
   updated?: number
   done: boolean
   stopped: boolean
+  /** Its update is paused, or all background work is. */
+  paused?: boolean
   next: string
   maxBatch: number
   pageError: boolean
@@ -323,7 +326,13 @@ export function progressMessage(
   if (p.rootState === 'failed') {
     body = `帖子列表获取失败\n输入：${p.input}\n${p.rootError}`
   } else {
-    const heading = p.stopped ? '采集已中止' : p.done ? '采集完成' : '正在采集…'
+    const heading = p.stopped
+      ? '采集已中止'
+      : p.done
+        ? '采集完成'
+        : p.paused
+          ? '已暂停'
+          : '正在采集…'
     const running = Math.max(0, p.total - p.complete - p.partial - p.failed)
     body = `${heading}\n${p.url}\n\n本次 ${p.total} 项：已保存 ${p.complete} · 内容不完整 ${p.partial} · 失败 ${p.failed} · 进行中 ${running}`
     if (p.added !== undefined && p.added + (p.updated ?? 0) > 0)

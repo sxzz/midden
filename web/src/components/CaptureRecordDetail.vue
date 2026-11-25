@@ -378,6 +378,20 @@ async function continueTimeline(collectionId?: string) {
     busy.value = false
   }
 }
+/** Pause an update, or resume it from where it stopped. */
+async function pause(paused: boolean) {
+  if (busy.value) return
+  busy.value = true
+  try {
+    const route = client.updates[':id'][paused ? 'pause' : 'resume']
+    await call(route.$post({ param: { id: props.id } }))
+    await load()
+  } catch (e) {
+    toast(errorText(e))
+  } finally {
+    busy.value = false
+  }
+}
 async function stop() {
   if (busy.value) return
   busy.value = true
@@ -478,6 +492,12 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
         :to="collectionPage(record.collection_id)"
       />
       <ListButton v-if="record.url" label="打开原链接" :href="record.url" />
+      <ListButton
+        v-if="record.update && !record.done"
+        :label="record.paused ? '继续' : '暂停'"
+        :disabled="busy"
+        @select="pause(!record.paused)"
+      />
       <ListButton
         v-if="record.members && !record.done"
         label="中止"

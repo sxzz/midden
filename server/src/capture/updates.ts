@@ -18,7 +18,13 @@ import {
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError, isAppError } from '#errors.ts'
-import { SnoozeError, withOrigin, type Job as QueueJob } from '#jobs/queue.ts'
+import { readJobControl } from '#jobs/control.ts'
+import {
+  setUpdateJobsPaused,
+  SnoozeError,
+  withOrigin,
+  type Job as QueueJob,
+} from '#jobs/queue.ts'
 import { parseFilterQuery } from '#library/filter-query.ts'
 import { updateSelection } from '#library/list.ts'
 import {
@@ -456,7 +462,9 @@ export function runUpdate(ctx: CaptureContext, job: QueueJob): void {
   if (update?.state !== 'running') return
   let running = inFlight(db, update.id)
   while (update.position < update.collectionIds.length) {
-    if (running >= WINDOW) throw new SnoozeError(FEED_WAIT_MS)
+    // Paused meanwhile: the queue keeps the job paused until it resumes.
+    if (running >= WINDOW || update.pausedAt)
+      throw new SnoozeError(FEED_WAIT_MS)
     const position = update.position
     const submitted = submitItem(ctx, update, position)
     db.update(updates)
@@ -521,13 +529,19 @@ const positionOf = (submission: Submission) =>
  */
 export function stopUpdate(ctx: CaptureContext, id: string): void {
   loadUpdate(ctx.db, id)
-  ctx.db
-    .update(updates)
-    .set({ state: 'stopped' })
-    .where(
-      and(eq(updates.id, id), inArray(updates.state, ['running', 'complete'])),
-    )
-    .run()
+  ctx.db.transaction((tx) => {
+    tx.update(updates)
+      .set({ state: 'stopped', pausedAt: null })
+      .where(
+        and(
+          eq(updates.id, id),
+          inArray(updates.state, ['running', 'complete']),
+        ),
+      )
+      .run()
+    // What was queued finishes, as when it was not paused.
+    setUpdateJobsPaused(tx, id, false)
+  })
   const items = itemRows(ctx.db, [id])
   for (const { submission, capture } of items)
     if (capture.isCollection && !submission.collectionStopped)
@@ -546,6 +560,37 @@ export function stopUpdate(ctx: CaptureContext, id: string): void {
     )
     .all())
     failRelations(ctx, fetch.id, '已中止')
+}
+
+/**
+ * Pause an update: it submits no further items, and its waiting jobs (the
+ * captures, pages, downloads it queued) are not taken until it resumes.
+ * Jobs already running finish. A finished or stopped update cannot pause.
+ */
+export function pauseUpdate(ctx: CaptureContext, id: string): void {
+  const update = loadUpdate(ctx.db, id)
+  if (update.pausedAt) return
+  if (
+    !['running', 'complete'].includes(update.state) ||
+    updateRecord(ctx.db, id).done
+  )
+    throw new AppError('unsupported')
+  ctx.db.transaction((tx) => {
+    tx.update(updates)
+      .set({ pausedAt: new Date(ctx.now?.() ?? Date.now()) })
+      .where(eq(updates.id, id))
+      .run()
+    setUpdateJobsPaused(tx, id, true)
+  })
+}
+
+/** Resume a paused update from where it stopped. */
+export function resumeUpdate(ctx: CaptureContext, id: string): void {
+  loadUpdate(ctx.db, id)
+  ctx.db.transaction((tx) => {
+    tx.update(updates).set({ pausedAt: null }).where(eq(updates.id, id)).run()
+    setUpdateJobsPaused(tx, id, false)
+  })
 }
 
 /** Start the same update again, as a new record. */
@@ -934,6 +979,8 @@ function toUpdateRecord(db: Executor, g: Gathered): UpdateRecord {
     done,
     members,
     stopped,
+    ...(update.pausedAt && !done ? { paused: true } : {}),
+    ...(!done && readJobControl(db).paused ? { pausedAll: true } : {}),
     ...(done ? { retryable: counts.retryable } : {}),
     options: update.options,
     update: {

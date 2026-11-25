@@ -1,5 +1,16 @@
 import { Buffer } from 'node:buffer'
-import { and, asc, desc, eq, isNull, like, notLike, or, sql } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  like,
+  notLike,
+  or,
+  sql,
+} from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import {
   accountSelections,
@@ -16,6 +27,7 @@ import {
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError } from '#errors.ts'
+import { readJobControl } from '#jobs/control.ts'
 import {
   DEFAULT_OPTIONS,
   publicOptions,
@@ -403,7 +415,7 @@ export function collectionReasons(db: Executor, pages: Page[]) {
 // --- Waiting --------------------------------------------------------------
 
 /** Why a queued capture is not being fetched yet. */
-export type CaptureWait = 'queue' | 'retry'
+export type CaptureWait = 'queue' | 'retry' | 'paused'
 
 /**
  * Queued captures whose capture job is not running: it waits for a free slot
@@ -416,14 +428,16 @@ export function captureWaits(
   captureIds: string[],
 ): Map<string, CaptureWait> {
   if (!captureIds.length) return new Map()
+  // Paused: its update is, or the owner paused all background work.
+  const allPaused = readJobControl(db).paused
   return new Map(
     db
-      .select({ ref: jobs.ref, attempt: jobs.attempt })
+      .select({ ref: jobs.ref, attempt: jobs.attempt, state: jobs.state })
       .from(jobs)
       .where(
         and(
           eq(jobs.type, 'capture'),
-          eq(jobs.state, 'available'),
+          inArray(jobs.state, ['available', 'paused']),
           inJson(jobs.ref, captureIds),
         ),
       )
@@ -431,7 +445,11 @@ export function captureWaits(
       // A busy account gives its attempt back, so only failures count here.
       .map((job): [string, CaptureWait] => [
         job.ref,
-        job.attempt > 0 ? 'retry' : 'queue',
+        allPaused || job.state === 'paused'
+          ? 'paused'
+          : job.attempt > 0
+            ? 'retry'
+            : 'queue',
       ]),
   )
 }
@@ -462,6 +480,10 @@ export interface CaptureRecord {
   /** A record without members that saved its target: whether it was new. */
   added?: boolean
   stopped?: boolean
+  /** An update the owner paused (`pauseUpdate`). */
+  paused?: boolean
+  /** Unfinished while all background work is paused (管理员面板). */
+  pausedAll?: boolean
   /** `capped`: the post cap stopped `until_existing`; it can continue. */
   pages?: {
     more: boolean

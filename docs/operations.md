@@ -34,8 +34,9 @@ docker compose logs --tail=100 litestream      # 启用 Litestream 时
 docker compose pull && docker compose up -d    # 更新（自动部署见下）
 ```
 
-手动 `docker compose up -d` 先换网页进程（它应用迁移），再换 worker；其间旧的 worker 若发现数据库有它不认识的迁移，就停止取任务，等被换掉。自动部署先停 worker，见下。`docker compose stop midden-worker` 停下全部任务（正在运行的回到队列），网页照常服务，新的任务排队等它回来。
+手动 `docker compose up -d` 先换网页进程（它应用迁移），再换 worker；其间旧的 worker 若发现数据库有它不认识的迁移，就停止取任务，等被换掉。自动部署先停 worker，见下。
 
+暂停后台任务（例如在数据库上做别的事之前）：网页「设置 → 管理员面板 → 后台任务」的「暂停全部」，或只暂停缩略图、上传、原始响应移出；采集记录页可以暂停单次更新。暂停存在数据库中，重启和部署后仍然有效，要手动「继续」。`docker compose stop midden-worker` 也能停下全部任务（正在运行的回到队列），网页照常服务，新的任务排队等它回来。
 
 服务启动的顺序见 [架构](architecture.md#启动顺序)：先监听 HTTP，Telegram Bot 在后台启动，Telegram 慢或不可用不影响 `/healthz`。`compose.yaml` 的健康检查超时 10 秒，启动后 2 分钟内（`start_period`）的失败不计入；两个容器都一样。
 

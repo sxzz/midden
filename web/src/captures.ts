@@ -60,6 +60,7 @@ const stateLabels: Record<CaptureRecord['state'], RecordStatus> = {
 const waitLabels: Record<NonNullable<CaptureRecord['waiting']>, string> = {
   queue: '排队中',
   retry: '等待重试',
+  paused: '已暂停',
 }
 /** The state of a single capture, such as one member of a collection. */
 export function stateStatus(
@@ -74,6 +75,8 @@ export function stateStatus(
 /** The state of a whole record, members included. */
 export function recordStatus(r: CaptureRecord): RecordStatus {
   if (r.update) {
+    if (!r.done && (r.paused || r.paused_all))
+      return { label: '已暂停', tone: 'warn' }
     if (!r.done) return { label: '正在更新', tone: 'active' }
     if (r.stopped) return { label: '已中止', tone: 'warn' }
     return stateStatus(r.state)

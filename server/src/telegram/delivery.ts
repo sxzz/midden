@@ -1,4 +1,4 @@
-import { and, asc, eq, lte } from 'drizzle-orm'
+import { and, asc, eq, isNotNull, lte } from 'drizzle-orm'
 import { GrammyError, type Api } from 'grammy'
 import {
   captureWaits,
@@ -14,6 +14,7 @@ import {
   telegramDeliveries,
   updates,
 } from '#db/schema.ts'
+import { readJobControl } from '#jobs/control.ts'
 import { getCaptureCollection, getCollection } from '#library/read.ts'
 import { deliveryParts, type Part } from './parts.ts'
 import {
@@ -390,6 +391,7 @@ export class DeliveryWorker {
             updated: progress.updated,
             done: progress.done,
             stopped: progress.stopped,
+            paused: pausedRecord(db, recordId),
             next: progress.next,
             maxBatch: progress.maxBatch,
             pageError: progress.error === 'partial_pages',
@@ -515,4 +517,14 @@ export class DeliveryWorker {
       this.#update(delivery.id, { progress, messageId: header })
     }
   }
+}
+
+/** An update record that is paused, or any record while all work is. */
+function pausedRecord(db: CaptureContext['db'], recordId: string): boolean {
+  if (readJobControl(db).paused) return true
+  return !!db
+    .select({ id: updates.id })
+    .from(updates)
+    .where(and(eq(updates.id, recordId), isNotNull(updates.pausedAt)))
+    .get()
 }

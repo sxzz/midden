@@ -23,8 +23,10 @@ import {
   continueTimeline,
   isUpdate,
   listRecords,
+  pauseUpdate,
   previewUpdate,
   repeatUpdate,
+  resumeUpdate,
   retryUpdateFailed,
   startUpdate,
   stopUpdate,
@@ -130,6 +132,8 @@ function recordJson(r: CaptureRecord | UpdateRecord) {
     ...(r.members ? { members: memberProgress(r.members) } : {}),
     ...(r.added === undefined ? {} : { added: r.added }),
     ...(r.stopped === undefined ? {} : { stopped: r.stopped }),
+    ...(r.paused ? { paused: true } : {}),
+    ...(r.pausedAll ? { paused_all: true } : {}),
     ...(r.retryable === undefined ? {} : { retryable: r.retryable }),
     ...(r.relations ? { relations: r.relations.map(relationJson) } : {}),
     ...(r.options ? { options: optionsJson(r.options) } : {}),
@@ -354,6 +358,16 @@ export function captureRoutes(
         if (isUpdate(ctx.db, id)) stopUpdate(ctx, id)
         else stopCollection(ctx, id)
         return c.body(null, 204)
+      })
+
+      // Pause or resume an update: its waiting jobs wait until it resumes.
+      .post('/updates/:id/pause', (c) => {
+        pauseUpdate(ctx, c.req.param('id'))
+        return c.json(recordJson(updateRecord(ctx.db, c.req.param('id'))))
+      })
+      .post('/updates/:id/resume', (c) => {
+        resumeUpdate(ctx, c.req.param('id'))
+        return c.json(recordJson(updateRecord(ctx.db, c.req.param('id'))))
       })
 
       .get('/jobs/:id', (c) => c.json(jobJson(ctx, { id: c.req.param('id') })))

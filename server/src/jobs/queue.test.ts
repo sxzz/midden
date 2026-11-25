@@ -1,18 +1,21 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { eq } from 'drizzle-orm'
 import { pino } from 'pino'
 import { afterEach, describe, expect, test } from 'vitest'
 import { openDatabase, type Database } from '#db/client.ts'
 import { jobs, updates } from '#db/schema.ts'
 import { recordingLogger } from '#testing/logs.ts'
+import { readJobControl, writeJobControl } from './control.ts'
 import {
   backoff,
   JobQueue,
   PermanentError,
   RANK,
   RetryError,
+  setUpdateJobsPaused,
   SnoozeError,
   withOrigin,
   type Job,
@@ -318,6 +321,113 @@ describe('JobQueue', () => {
     })
     web.enqueue(db, 'echo', 'from the web')
     await expect.poll(() => seen).toEqual(['from the web'])
+  })
+
+  test('nothing is claimed while all background work is paused', async () => {
+    const seen: string[] = []
+    const { db, queue } = setup({
+      echo: {
+        queue: 'main',
+        run: async (job) => {
+          seen.push(job.ref)
+        },
+      },
+    })
+    writeJobControl(db, { paused: true, types: [] })
+    queue.start()
+    queue.enqueue(db, 'echo', 'a')
+    await queue.drain()
+    expect(seen).toEqual([])
+    expect(rows(db)).toMatchObject([{ state: 'available', attempt: 0 }])
+
+    writeJobControl(db, { paused: false, types: [] })
+    await queue.drain()
+    expect(seen).toEqual(['a'])
+  })
+
+  test('the pause outlasts a restart', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'midden-queue-'))
+    try {
+      const file = path.join(dir, 'midden.db')
+      const seen: string[] = []
+      const handlers = {
+        echo: {
+          queue: 'main',
+          run: async (job: Job) => {
+            seen.push(job.ref)
+          },
+        },
+      }
+      const first = setup(handlers, { db: openDatabase(file) })
+      writeJobControl(first.db, { paused: true, types: [] })
+      first.queue.enqueue(first.db, 'echo', 'a')
+      await first.queue.stop()
+      first.db.$client.close()
+
+      const second = setup(handlers, { db: openDatabase(file) })
+      expect(readJobControl(second.db).paused).toBe(true)
+      second.queue.start()
+      await second.queue.drain()
+      expect(seen).toEqual([])
+      second.db.$client.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('a paused type waits while the others in its queue run', async () => {
+    const seen: string[] = []
+    const run = async (job: Job) => {
+      seen.push(job.type)
+    }
+    const { db, queue } = setup(
+      {
+        download: { queue: 'download', run },
+        thumbnail: { queue: 'download', priority: 4, run },
+      },
+      { concurrency: { download: 2 } },
+    )
+    writeJobControl(db, { paused: false, types: ['thumbnail'] })
+    queue.enqueue(db, 'thumbnail', 't')
+    queue.enqueue(db, 'download', 'd')
+    queue.start()
+    await queue.drain()
+    expect(seen).toEqual(['download'])
+    writeJobControl(db, { paused: false, types: [] })
+    await queue.drain()
+    expect(seen).toEqual(['download', 'thumbnail'])
+  })
+
+  test("a paused update's jobs wait, and what they enqueue does too", async () => {
+    const seen: string[] = []
+    const { db, queue } = setup({
+      echo: {
+        queue: 'main',
+        run: async (job) => {
+          seen.push(job.ref)
+          if (job.ref === 'parent') queue.enqueue(db, 'echo', 'child')
+        },
+      },
+    })
+    addUpdate(db, 'u1')
+    addUpdate(db, 'u2')
+    queue.enqueue(db, 'echo', 'parent', { updateId: 'u1' })
+    queue.enqueue(db, 'echo', 'other', { updateId: 'u2' })
+    db.update(updates)
+      .set({ pausedAt: new Date() })
+      .where(eq(updates.id, 'u1'))
+      .run()
+    setUpdateJobsPaused(db, 'u1', true)
+    queue.start()
+    await queue.drain()
+    // The other update goes on.
+    expect(seen).toEqual(['other'])
+    expect(rows(db)).toMatchObject([{ ref: 'parent', state: 'paused' }])
+
+    db.update(updates).set({ pausedAt: null }).where(eq(updates.id, 'u1')).run()
+    setUpdateJobsPaused(db, 'u1', false)
+    await queue.drain()
+    expect(seen).toEqual(['other', 'parent', 'child'])
   })
 
   test('manual work runs before an update, and both before maintenance', async () => {

@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { and, asc, eq, inArray, lt, lte, sql } from 'drizzle-orm'
-import { jobs } from '#db/schema.ts'
+import { and, asc, eq, inArray, isNotNull, lt, lte, sql } from 'drizzle-orm'
+import { jobs, updates } from '#db/schema.ts'
+import { readJobControl, type JobControl } from './control.ts'
 import type { Database, Executor } from '#db/client.ts'
 import type { Logger } from '#log.ts'
 
@@ -138,6 +139,7 @@ export interface QueueStatus {
   limits: Record<string, number>
   /** Idle queues may run. */
   idle: boolean
+  control: JobControl
   /** Why claiming stopped, other than a pause (e.g. a newer schema). */
   held: string | null
 }
@@ -148,6 +150,8 @@ const DEFAULT_ATTEMPTS = 3
 const LEASE_GRACE = 60_000
 const RESCUE_EVERY = 5000
 const IDLE_AFTER = 10_000
+/** Types whose priorities no other type in their queue shares. */
+export const PAUSABLE_TYPES = ['thumbnail', 'upload', 'raw-upload'] as const
 
 /** Exponential backoff from 2 s, capped at about four minutes. */
 export function backoff(attempt: number): number {
@@ -177,6 +181,7 @@ export class JobQueue {
   #reset = false
   #rescuedAt = -Infinity
   #foregroundAt = -Infinity
+  #control: JobControl = { paused: false, types: [] }
   /** Queues whose last job snoozed: not pumped until the next look. */
   readonly #snoozing = new Set<string>()
   #held: string | null = null
@@ -201,6 +206,20 @@ export class JobQueue {
         type,
         RANKS.map((rank) => base + rank),
       )
+    }
+    // Pausing a type leaves out its priorities when claiming, so no other
+    // type in its queue may share them.
+    for (const type of PAUSABLE_TYPES) {
+      const own = this.#priorities.get(type)
+      if (!own) continue
+      const queue = this.#handlers[type]!.queue
+      for (const [other, handler] of Object.entries(this.#handlers))
+        if (
+          other !== type &&
+          handler.queue === queue &&
+          this.#priorities.get(other)!.some((p) => own.includes(p))
+        )
+          throw new Error(`${type} shares priorities with ${other}`)
     }
   }
 
@@ -234,6 +253,8 @@ export class JobQueue {
         ref,
         queue: handler.queue,
         priority: (handler.priority ?? 0) + rank,
+        state:
+          updateId && updatePaused(executor, updateId) ? 'paused' : 'available',
         maxAttempts: handler.maxAttempts ?? DEFAULT_ATTEMPTS,
         runAt: new Date(now + (options.delayMs ?? 0)),
         createdAt: new Date(now),
@@ -273,6 +294,7 @@ export class JobQueue {
   /** Wait until no job is running or due now. Meant for tests. */
   async drain(): Promise<void> {
     for (;;) {
+      this.#refreshControl()
       this.#snoozing.clear()
       for (const queue of Object.keys(this.#concurrency)) this.#pump(queue)
       const running = [...this.#running.values()].flatMap((set) => [...set])
@@ -302,6 +324,7 @@ export class JobQueue {
       running,
       limits,
       idle: this.#idle(),
+      control: this.#control,
       held: this.#held,
     }
   }
@@ -309,12 +332,13 @@ export class JobQueue {
   #tick(): void {
     if (!this.#started) return
     try {
+      this.#refreshControl()
       if (!this.#reset) {
         // Only one process runs jobs: anything still marked running was cut
         // off by a restart.
         this.#db
           .update(jobs)
-          .set({ state: 'available', leaseUntil: null })
+          .set({ state: this.#waitingState(), leaseUntil: null })
           .where(eq(jobs.state, 'running'))
           .run()
         this.#reset = true
@@ -329,6 +353,10 @@ export class JobQueue {
     this.#timer.unref()
   }
 
+  #refreshControl(): void {
+    this.#control = readJobControl(this.#db)
+  }
+
   // A handler that ignores its abort signal keeps its slot; once its lease
   // runs out the job is offered again rather than lost. Looked for with a
   // read first: an UPDATE takes the write lock even when nothing matches.
@@ -339,16 +367,26 @@ export class JobQueue {
       lt(jobs.leaseUntil, new Date(this.#now())),
     )
     const lost = this.#db
-      .select({ id: jobs.id })
+      .select({ id: jobs.id, updateId: jobs.updateId })
       .from(jobs)
       .where(expired)
       .all()
     for (const row of lost)
       this.#db
         .update(jobs)
-        .set({ state: 'available', leaseUntil: null })
+        .set({ state: this.#waitingState(row.updateId), leaseUntil: null })
         .where(and(eq(jobs.id, row.id), expired))
         .run()
+  }
+
+  /** `available`, or `paused` while the job's update is paused. */
+  #waitingState(updateId?: string | null) {
+    if (updateId === undefined)
+      // Every job: a CASE per row.
+      return sql<
+        'available' | 'paused'
+      >`CASE WHEN ${jobs.updateId} IN (SELECT ${updates.id} FROM ${updates} WHERE ${isNotNull(updates.pausedAt)}) THEN 'paused' ELSE 'available' END`
+    return updateId && updatePaused(this.#db, updateId) ? 'paused' : 'available'
   }
 
   /** How many jobs of the queue may run now. */
@@ -368,17 +406,17 @@ export class JobQueue {
     )
   }
 
-  /** Priorities the queue's jobs can have. */
+  /** Priorities of the queue's types that are not paused. */
   #claimable(queue: string): number[] {
     const priorities: number[] = []
     for (const [type, handler] of Object.entries(this.#handlers))
-      if (handler.queue === queue)
+      if (handler.queue === queue && !this.#control.types.includes(type))
         priorities.push(...this.#priorities.get(type)!)
     return [...new Set(priorities)]
   }
 
   #pump(queue: string): void {
-    if (this.#stop.signal.aborted || this.#held) return
+    if (this.#stop.signal.aborted || this.#control.paused || this.#held) return
     if (this.#snoozing.has(queue)) return
     let running = this.#running.get(queue)
     if (!running) this.#running.set(queue, (running = new Set()))
@@ -529,7 +567,7 @@ export class JobQueue {
       this.#db
         .update(jobs)
         .set({
-          state: 'available',
+          state: this.#waitingState(row.updateId),
           leaseUntil: null,
           attempt: row.attempt - 1,
           runAt: new Date(this.#now() + snooze),
@@ -567,7 +605,7 @@ export class JobQueue {
     this.#db
       .update(jobs)
       .set({
-        state: 'available',
+        state: this.#waitingState(row.updateId),
         leaseUntil: null,
         lastError: message,
         runAt: new Date(this.#now() + delay),
@@ -576,4 +614,34 @@ export class JobQueue {
       .run()
     return 'failed'
   }
+}
+
+function updatePaused(executor: Executor, updateId: string): boolean {
+  return !!executor
+    .select({ id: updates.id })
+    .from(updates)
+    .where(and(eq(updates.id, updateId), isNotNull(updates.pausedAt)))
+    .get()
+}
+
+/**
+ * Pause or resume an update's waiting jobs. Running ones finish; the queue
+ * keeps what they enqueue paused while the update is (`enqueue`).
+ */
+export function setUpdateJobsPaused(
+  executor: Executor,
+  updateId: string,
+  paused: boolean,
+): number {
+  const { changes } = executor
+    .update(jobs)
+    .set({ state: paused ? 'paused' : 'available' })
+    .where(
+      and(
+        eq(jobs.updateId, updateId),
+        eq(jobs.state, paused ? 'available' : 'paused'),
+      ),
+    )
+    .run()
+  return Number(changes)
 }

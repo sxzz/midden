@@ -39,7 +39,9 @@ export const jobs = sqliteTable(
     // Lower runs first within a queue: the handler's own priority plus the
     // origin's rank (manual, update, maintenance; `#jobs/queue.ts`).
     priority: integer().notNull().default(0),
-    state: text({ enum: ['available', 'running'] })
+    // `paused` while its update is paused (`updates.paused_at`); the worker
+    // claims only `available` jobs.
+    state: text({ enum: ['available', 'running', 'paused'] })
       .notNull()
       .default('available'),
     attempt: integer().notNull().default(0),
@@ -49,7 +51,7 @@ export const jobs = sqliteTable(
     lastError: text().notNull().default(''),
     createdAt: timestamp().notNull(),
     // The update (更新) whose work this is, inherited from the job that
-    // enqueued it.
+    // enqueued it; pausing the update pauses these.
     updateId: text(),
   },
   (t) => [
@@ -780,6 +782,8 @@ export const updates = sqliteTable(
       .notNull()
       .default('running'),
     error: text().notNull().default(''),
+    // Set while paused: its jobs wait as `paused` and it submits no items.
+    pausedAt: timestamp(),
     // A repeat of the same request starts nothing new.
     idemKey: text().unique(),
     createdAt: createdAt(),
