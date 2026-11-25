@@ -8,9 +8,13 @@ import {
   type ImageLine,
   type PostsLine,
 } from '../changes'
-import { readProfileChanges } from '../reads'
+import { useHistory } from '../composables/useHistory'
+import { toast } from '../composables/useToast'
+import { readCollection, readProfileChanges } from '../reads'
 import { collectionRoute } from '../share'
+import CollectionPost from './CollectionPost.vue'
 import MediaViewer from './MediaViewer.vue'
+import RevisionTimeline from './RevisionTimeline.vue'
 import AppLink from './ui/AppLink.vue'
 import EyeIcon from './ui/EyeIcon.vue'
 import LoadingImage from './ui/LoadingImage.vue'
@@ -37,21 +41,63 @@ async function load() {
     if (!signal.aborted) loading.value = false
   }
 }
+
+/**
+ * The profile at each point of its history, moved through with the
+ * timeline; the detail page shows only the current one.
+ */
+let historyController = new AbortController()
+const history = useHistory(() => props.id, {
+  signal: () => historyController.signal,
+  report: (e) => toast(errorText(e)),
+})
+const {
+  collection: shown,
+  points,
+  next,
+  shownPoint,
+  latestPoint,
+  historyLoading,
+  loadingPoint,
+} = history
+async function loadHistory() {
+  const { signal } = historyController
+  try {
+    const result = await readCollection(props.id, signal)
+    if (signal.aborted) return
+    history.show(result)
+    void history.historyPage()
+  } catch {
+    // The list of changes says what went wrong; without the profile there
+    // is no timeline to show.
+  }
+}
+
 watch(
   () => props.id,
   () => {
     changes.value = undefined
     void load()
+    historyController.abort()
+    historyController = new AbortController()
+    history.reset()
+    void loadHistory()
   },
   { immediate: true },
 )
 // Kept in the navigation cache: coming back after a refresh shows its change.
 let mounted = false
 onActivated(() => {
-  if (mounted) void load()
+  if (mounted) {
+    void load()
+    void loadHistory()
+  }
   mounted = true
 })
-onUnmounted(() => controller.abort())
+onUnmounted(() => {
+  controller.abort()
+  historyController.abort()
+})
 const days = computed(() => changeDays(changes.value))
 
 // Sensitive images stay covered until tapped, unless all are shown.
@@ -91,14 +137,38 @@ function open(line: ImageLine, asset: Asset) {
     <p v-if="!changes && loading" class="loading">
       <Spinner label="正在加载" />
     </p>
+    <!-- The profile at the point the timeline rests on. -->
+    <section v-if="shown && points.length > 1" class="versions">
+      <h2 class="heading">资料版本</h2>
+      <div class="card">
+        <CollectionPost
+          :class="{ fetching: loadingPoint }"
+          :collection="shown"
+          :show-sensitive="showSensitive"
+          history
+        />
+        <div class="slider">
+          <RevisionTimeline
+            :points="points"
+            :selected-id="shownPoint"
+            :latest-id="latestPoint"
+            :more="!!next"
+            :loading="historyLoading"
+            label="资料版本"
+            @select="history.preview"
+            @more="history.historyPage(true)"
+          />
+        </div>
+      </div>
+    </section>
     <section
       v-for="day in days"
       :key="day.label"
       class="day"
       :class="{ fetching: loading }"
     >
-      <h2 class="day-label">{{ day.label }}</h2>
-      <ol class="timeline">
+      <h2 class="heading day-label">{{ day.label }}</h2>
+      <ol class="entries">
         <li v-for="entry in day.entries" :key="entry.id" class="entry">
           <time class="time" :datetime="entry.datetime">{{ entry.time }}</time>
           <div class="card">
@@ -219,14 +289,25 @@ function open(line: ImageLine, asset: Asset) {
 .day.fetching {
   opacity: 0.6;
 }
-.day-label {
+.versions {
+  margin: 0 0 22px;
+}
+.slider {
+  border-top: 1px solid var(--separator);
+}
+/* The post stays on screen while the timeline fetches a point. */
+.versions .fetching {
+  opacity: 0.6;
+  transition: opacity 0.2s ease 0.1s;
+}
+.heading {
   margin: 0 0 8px;
   padding: 0 4px;
   font-size: 15px;
   font-weight: 600;
   color: var(--subtle);
 }
-.timeline {
+.entries {
   margin: 0;
   padding: 0;
   list-style: none;

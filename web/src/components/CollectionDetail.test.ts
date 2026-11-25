@@ -3,7 +3,7 @@ import { createVaporApp } from 'vue'
 import { shareSlug } from '../share'
 import { collection, mockApi, type Request } from '../testing/api'
 import CollectionDetail from './CollectionDetail.vue'
-import type { Collection } from '../api'
+import type { Collection, HistoryPoint } from '../api'
 const push = vi.fn()
 vi.mock('vue-router', async () => {
   const { resolve } = await import('../testing/router')
@@ -21,10 +21,13 @@ beforeEach(() => {
     this.open = false
   })
 })
+/** The history every collection answers with. */
+let history: HistoryPoint[] = []
 afterEach(() => {
   unmount()
   document.body.replaceChildren()
   shareSlug.value = ''
+  history = []
   vi.unstubAllGlobals()
 })
 
@@ -91,8 +94,8 @@ async function mount(shown: Collection = profile) {
     if (path.startsWith('/shares')) return []
     if (path.endsWith('/annotation')) return { tags: [], note: '' }
     if (path.startsWith('/tags')) return []
-    if (path.includes('/collections?') || path.includes('/history'))
-      return { items: [] }
+    if (path.includes('/history')) return { items: history }
+    if (path.includes('/collections?')) return { items: [] }
     return {}
   })
   vi.stubGlobal('crypto', { randomUUID: () => 'key' })
@@ -244,4 +247,32 @@ it('keeps the follow counts plain behind a public link', async () => {
   expect(
     [...el.querySelectorAll('.follows dd')].map((dd) => dd.textContent),
   ).toEqual(['2', '3', '1'])
+})
+
+it("moves a profile's timeline to its 资料修改记录 page; a post keeps its own", async () => {
+  history = ['c2', 'c1'].map((id) => ({
+    capture_id: id,
+    revision_id: id,
+    observed_at: '2026-03-02T03:00:00.000Z',
+  }))
+  const { el } = await mount()
+  // Two versions are enough for the page, with no change listed yet.
+  const link = await vi.waitFor(() => {
+    const found = [...el.querySelectorAll('a')].find(
+      (a) => a.textContent?.trim().replace(/›$/, '').trim() === '资料修改记录',
+    )
+    expect(found).toBeDefined()
+    return found!
+  })
+  expect(link.getAttribute('href')).toBe('#/collection/profile/changes')
+  expect(el.querySelector('input[type="range"]')).toBeNull()
+  expect(el.textContent).not.toContain('资料变化')
+  unmount()
+  document.body.replaceChildren()
+  const shown = await mount(post)
+  await vi.waitFor(() =>
+    expect(shown.el.querySelector('input[type="range"]')).not.toBeNull(),
+  )
+  expect(shown.el.textContent).toContain('内容变化')
+  expect(shown.el.textContent).not.toContain('资料修改记录')
 })

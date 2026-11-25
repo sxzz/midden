@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer'
 import { expect, test } from './test'
 
 const profileId = '77777777-7777-4777-8777-777777777777'
+const postId = '99999999-9999-4999-8999-999999999999'
 const profile = {
   id: profileId,
   url: 'https://example.test/owner',
@@ -56,9 +57,51 @@ const changes = {
       capture_id: 'capture-2',
       revision_id: 'revision-2',
       observed_at: '2026-11-02T08:00:00Z',
-      fields: [{ field: 'bio', before: '旧简介', after: '合成简介' }],
+      fields: [
+        { field: 'bio', before: '旧简介', after: '合成简介' },
+        {
+          field: 'pinned',
+          before: [],
+          after: [
+            {
+              id: '9',
+              url: 'https://x.com/i/web/status/9',
+              collection_id: postId,
+              text: '置顶的合成帖子',
+            },
+          ],
+        },
+      ],
     },
   ],
+}
+/** Two versions of the profile, the older under its old name. */
+const history = {
+  items: [
+    {
+      capture_id: 'capture-3',
+      revision_id: 'revision-3',
+      observed_at: '2026-11-05T08:00:00Z',
+    },
+    {
+      capture_id: 'capture-1',
+      revision_id: 'revision-1',
+      observed_at: '2026-11-01T08:00:00Z',
+    },
+  ],
+}
+const older = {
+  ...profile,
+  revision_id: 'revision-1',
+  graph: {
+    ...profile.graph,
+    entities: [
+      {
+        ...profile.graph.entities[0]!,
+        data: { name: '旧名字', username: 'owner', metadata: {} },
+      },
+    ],
+  },
 }
 
 test('lists a profile’s changes from its detail and returns to it', async ({
@@ -79,7 +122,8 @@ test('lists a profile’s changes from its detail and returns to it', async ({
       const limit = Number(url.searchParams.get('limit') || 1000)
       json = { items: changes.items.slice(0, limit) }
     } else if (path.endsWith('/counts')) json = { points: [] }
-    else if (path.endsWith('/history')) json = { items: [] }
+    else if (path.endsWith('/history')) json = history
+    else if (path.endsWith('/history/capture-1')) json = older
     else if (path.endsWith('/availability')) json = { available: true }
     else if (path.endsWith('/annotation')) json = { note: '', tags: [] }
     else if (path === '/v1/tags') json = []
@@ -87,9 +131,25 @@ test('lists a profile’s changes from its detail and returns to it', async ({
     return route.fulfill({ json })
   })
   await page.goto(`/app/#/collection/${profileId}`)
+  // The detail shows the profile as it is now; its versions are read on the
+  // page of changes.
+  await expect(page.locator('.post .name')).toHaveText('合成账号')
+  await expect(page.getByRole('slider')).toHaveCount(0)
   await page.getByRole('link', { name: '资料修改记录' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/changes$`))
   await expect(page.locator('h1')).toHaveText('资料修改记录')
+
+  const versions = page.locator('.versions')
+  await expect(versions.locator('.name')).toHaveText('合成账号')
+  await expect(versions).not.toContainText('保存于')
+  await expect(versions).not.toContainText('UID')
+  const slider = page.getByRole('slider', { name: '资料版本' })
+  await slider.focus()
+  await page.keyboard.press('Home')
+  await expect(versions.locator('.name')).toHaveText('旧名字')
+  await expect(versions.locator('.when')).toContainText('2026年11月1日')
+  await page.keyboard.press('End')
+  await expect(versions.locator('.name')).toHaveText('合成账号')
 
   const entries = page.locator('.entry')
   await expect(entries).toHaveCount(2)
@@ -102,6 +162,9 @@ test('lists a profile’s changes from its detail and returns to it', async ({
   await expect(latest.locator('del')).toHaveText('旧名字')
   await expect(latest.locator('ins')).toHaveText('合成账号')
   await expect(entries.nth(1).locator('ins')).toHaveText('合成简介')
+  // A newly pinned post links to its collection.
+  const pinned = entries.nth(1).getByRole('link', { name: '置顶的合成帖子' })
+  await expect(pinned).toHaveAttribute('href', `#/collection/${postId}`)
 
   // The sensitive new avatar is covered; a tap uncovers it, the next opens it.
   const covered = latest.getByRole('button', { name: '敏感内容，点按显示' })

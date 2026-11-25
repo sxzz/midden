@@ -1,31 +1,22 @@
-import {
-  computed,
-  onActivated,
-  onDeactivated,
-  onUnmounted,
-  shallowRef,
-  watch,
-} from 'vue'
+import { onActivated, onDeactivated, onUnmounted, shallowRef, watch } from 'vue'
 import {
   call,
   client,
   errorText,
   type Collection,
   type FollowCounts,
-  type HistoryPoint,
 } from '../api'
 import {
   readCollection,
   readCounts,
   readFollowChanges,
   readFollows,
-  readHistory,
-  readHistoryPoint,
   readProfileChanges,
 } from '../reads'
 import { isProfileEntity } from '../relations'
 import { shareSlug } from '../share'
 import { trends } from '../trends'
+import { useHistory } from './useHistory'
 import { toast } from './useToast'
 const collections = client.collections[':id']
 const getCollection = readCollection
@@ -40,7 +31,6 @@ export function useCollectionDetail(
   updated: (collection: Collection) => void,
 ) {
   const available = shallowRef(false)
-  const collection = shallowRef<Collection>()
   const error = shallowRef('')
   const busy = shallowRef(false)
   /**
@@ -52,12 +42,6 @@ export function useCollectionDetail(
   const updating = shallowRef(false)
   /** A profile with older posts to read after its last page. */
   const older = shallowRef(false)
-  /** Captures where the content or counts changed, newest first. */
-  const points = shallowRef<HistoryPoint[]>([])
-  const next = shallowRef('')
-  const latestRevision = shallowRef('')
-  const loadingPoint = shallowRef(false)
-  const historyLoading = shallowRef(false)
   const confirmDelete = shallowRef(false)
   /** At least two captures read a count, so the page of trends has a line. */
   const trendable = shallowRef(false)
@@ -67,32 +51,11 @@ export function useCollectionDetail(
   const follows = shallowRef<FollowCounts>()
   /** A profile whose follows changed at least once. */
   const followChangeable = shallowRef(false)
-  /** The newest point is the collection as it is now. */
-  const latestPoint = computed(() => points.value[0]?.capture_id ?? '')
-  /** The point on screen; '' is the current state. */
-  const selected = shallowRef('')
-  const key = (point: string) => (point === latestPoint.value ? '' : point)
-  /**
-   * Points already fetched, by `key`, so moving back to one shows it at once.
-   * The current state is kept under '' rather than its point, which a
-   * refresh can move on from.
-   */
-  const seen = new Map<string, Collection>()
-  const show = (result: Collection) => {
-    seen.set('', result)
-    selected.value = ''
-    collection.value = result
-  }
   /**
    * Bumped whenever the collection is reloaded after a refresh, so lists of
    * its members (such as a profile's posts) know to reload too.
    */
   const membersVersion = shallowRef(0)
-  const historical = computed(() => key(selected.value) !== '')
-  /** The point the timeline marks as shown. */
-  const shownPoint = computed(() =>
-    historical.value ? selected.value : latestPoint.value,
-  )
   let controller = new AbortController()
   /** Polls the running update; only while the page is shown. */
   let updateTimer: ReturnType<typeof setTimeout> | undefined
@@ -114,7 +77,12 @@ export function useCollectionDetail(
       }
     }
   }
-  let pointRequest = 0
+  const history = useHistory(id, {
+    signal: () => controller.signal,
+    report,
+    blocked: () => busy.value,
+  })
+  const { collection, show, historyPage } = history
   // Progress is followed on the refresh's record, not here. Coming back from
   // there shows whatever the refresh has saved by then.
   let refreshed = false
@@ -128,15 +96,7 @@ export function useCollectionDetail(
       controller = new AbortController()
       refreshed = false
       const signal = controller.signal
-      ++pointRequest
-      collection.value = undefined
-      seen.clear()
-      selected.value = ''
-      points.value = []
-      latestRevision.value = ''
-      loadingPoint.value = false
-      historyLoading.value = false
-      next.value = ''
+      history.reset()
       record.value = ''
       updating.value = false
       older.value = false
@@ -153,7 +113,6 @@ export function useCollectionDetail(
         const result = await getCollection(id, signal)
         if (signal.aborted) return
         show(result)
-        latestRevision.value = result.revision_id
         void historyPage()
         void checkTrends()
         void checkChanges(result)
@@ -257,74 +216,13 @@ export function useCollectionDetail(
       // Without an answer nothing is shown; nothing else depends on it.
     }
   }
-  async function historyPage(more = false) {
-    if (historyLoading.value || (more && !next.value)) return
-    const signal = controller.signal
-    historyLoading.value = true
-    try {
-      const p = await readHistory(id(), more ? next.value : '', signal)
-      if (signal.aborted) return
-      points.value = more ? [...points.value, ...p.items] : p.items
-      next.value = p.next_cursor || ''
-    } catch (e) {
-      if (!signal.aborted) report(e)
-    } finally {
-      if (!signal.aborted) historyLoading.value = false
-    }
-  }
-  /**
-   * Show a point of the history, or the current state without one. A newer
-   * request supersedes one still loading, so a timeline can be dragged
-   * across points.
-   */
-  async function showPoint(point?: string) {
-    if (busy.value) return
-    const target = key(point ?? '')
-    // Any request still loading is superseded, even by moving back to the
-    // point shown.
-    ++pointRequest
-    if (target === key(selected.value)) {
-      loadingPoint.value = false
-      return
-    }
-    const known = seen.get(target)
-    if (known) {
-      selected.value = target
-      collection.value = known
-      loadingPoint.value = false
-      return
-    }
-    const request = pointRequest
-    const signal = controller.signal
-    loadingPoint.value = true
-    error.value = ''
-    try {
-      const result = target
-        ? await readHistoryPoint(id(), target, signal)
-        : await getCollection(id(), signal)
-      if (signal.aborted) return
-      seen.set(target, result)
-      if (request !== pointRequest) return
-      selected.value = target
-      collection.value = result
-      if (!target) latestRevision.value = result.revision_id
-    } catch (e) {
-      if (!signal.aborted && request === pointRequest) report(e)
-    } finally {
-      if (!signal.aborted && request === pointRequest)
-        loadingPoint.value = false
-    }
-  }
   /** Show the collection as it is now, keeping the page on screen meanwhile. */
   async function reload() {
     const signal = controller.signal
     try {
       const result = await getCollection(id(), signal)
       if (signal.aborted) return
-      ++pointRequest
-      loadingPoint.value = false
       show(result)
-      latestRevision.value = result.revision_id
       void checkTrends()
       void checkChanges(result)
       void checkFollows(result)
@@ -379,14 +277,14 @@ export function useCollectionDetail(
     error,
     busy,
     record,
-    points,
-    next,
-    historical,
-    latestPoint,
-    shownPoint,
-    latestRevision,
-    historyLoading,
-    loadingPoint,
+    points: history.points,
+    next: history.next,
+    historical: history.historical,
+    latestPoint: history.latestPoint,
+    shownPoint: history.shownPoint,
+    latestRevision: history.latestRevision,
+    historyLoading: history.historyLoading,
+    loadingPoint: history.loadingPoint,
     confirmDelete,
     available,
     trendable,
@@ -394,9 +292,10 @@ export function useCollectionDetail(
     follows,
     followChangeable,
     historyPage,
-    showPoint,
+    showPoint: history.showPoint,
+    preview: history.preview,
     /** Whether a point shows without a request. */
-    isSeen: (point: string) => seen.has(key(point)),
+    isSeen: history.isSeen,
     reload,
     update,
     started,

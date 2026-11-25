@@ -23,6 +23,12 @@ const props = defineProps<{
   showSensitive?: boolean
   /** The owner's page: removed media can be restored. */
   editable?: boolean
+  /**
+   * A point of a profile's history: only what can change between points,
+   * none of the record's own facts (保存于, UID, UUID, 占用), the source's
+   * current state or the capture's warnings.
+   */
+  history?: boolean
 }>()
 const emit = defineEmits<{ restore: [asset: Asset] }>()
 // Authors read as their newest profile unless asked for the captured one.
@@ -30,13 +36,16 @@ const captured = shallowRef(false)
 const view = computed(() =>
   present(props.collection, { captured: captured.value }),
 )
-const notice = computed(() => sourceStateNotice(props.collection))
+const notice = computed(() =>
+  props.history ? '' : sourceStateNotice(props.collection),
+)
 const bodyParts = computed(() =>
   mentionParts(props.collection, view.value.body),
 )
 /** "Saved at" belongs with the other timestamps, right after the source's
     own publication date, rather than in a separate footnote. */
 const details = computed(() => {
+  if (props.history) return []
   const list = [...view.value.details]
   if (props.collection.storage_bytes !== undefined)
     list.push({
@@ -68,7 +77,9 @@ const viewable = computed(() => avatarAssets.value[0]?.state === 'ready')
 watch(avatarAssets, () => {
   previewAvatar.value = false
 })
-const warnings = computed(() => warningList(props.collection.warnings))
+const warnings = computed(() =>
+  props.history ? [] : warningList(props.collection.warnings),
+)
 </script>
 
 <template>

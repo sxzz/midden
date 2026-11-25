@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { computed, onUnmounted, shallowRef, watch } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import {
   call,
   client,
@@ -65,8 +65,7 @@ const {
   follows,
   followChangeable,
   historyPage,
-  showPoint,
-  isSeen,
+  preview,
   reload,
   update,
   started,
@@ -133,11 +132,18 @@ const handle = computed(() =>
     ? profileHandle(collection.value.url, present(collection.value).handle)
     : '',
 )
+/**
+ * A profile's history is read on its 资料修改记录 page, with the timeline
+ * through its versions; the page is there once either has anything.
+ */
+const changesPage = computed(
+  () => isProfile.value && (changeable.value || points.value.length > 1),
+)
 /** Whether the first group lists anything; behind a share it may not. */
 const pages = computed(
   () =>
     trendable.value ||
-    changeable.value ||
+    changesPage.value ||
     followChangeable.value ||
     !!follows.value ||
     !!link.value,
@@ -185,15 +191,6 @@ const exposureHint = computed(() => {
     .filter(Boolean)
     .join('；')
 })
-// Dragging the timeline passes many points: show the ones already fetched at
-// once, and fetch the others only where the drag rests.
-let pick: ReturnType<typeof setTimeout> | undefined
-onUnmounted(() => clearTimeout(pick))
-function preview(point: string) {
-  clearTimeout(pick)
-  if (isSeen(point)) void showPoint(point)
-  else pick = setTimeout(showPoint, 150, point)
-}
 /** The update sheet, with the options that apply to this collection. */
 const updateSheet = shallowRef(false)
 watch(
@@ -299,17 +296,15 @@ const version = computed(() =>
         </div>
       </dl>
     </ListSection>
-    <ListSection
-      v-if="points.length > 1"
-      :title="isProfile ? '资料变化' : '内容变化'"
-    >
+    <!-- A profile's timeline is on its 资料修改记录 page. -->
+    <ListSection v-if="!isProfile && points.length > 1" title="内容变化">
       <RevisionTimeline
         :points="points"
         :selected-id="shownPoint"
         :latest-id="latestPoint"
         :more="!!next"
         :loading="historyLoading"
-        :label="isProfile ? '资料版本' : '内容版本'"
+        label="内容版本"
         @select="preview"
         @more="historyPage(true)"
       />
@@ -322,7 +317,7 @@ const version = computed(() =>
         :to="collectionRoute(id, 'stats')"
       />
       <ListButton
-        v-if="changeable"
+        v-if="changesPage"
         label="资料修改记录"
         chevron
         :to="collectionRoute(id, 'changes')"
