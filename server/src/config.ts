@@ -59,12 +59,11 @@ const Env = v.object({
       ),
     ),
   ),
-  // Credentials: validators here never echo the value.
-  R2_ACCESS_KEY_ID: v.optional(
-    v.pipe(v.string(), v.nonEmpty('R2_ACCESS_KEY_ID is empty')),
-  ),
-  R2_SECRET_ACCESS_KEY: v.optional(
-    v.pipe(v.string(), v.nonEmpty('R2_SECRET_ACCESS_KEY is empty')),
+  // One Cloudflare account API token for everything the server does there:
+  // R2 objects (its S3 keys derive from it), cache purge and analytics.
+  // Validators here never echo the value.
+  CF_API_TOKEN: v.optional(
+    v.pipe(v.string(), v.nonEmpty('CF_API_TOKEN is empty')),
   ),
   // The bucket's public custom domain; an object's URL is this plus its key.
   MEDIA_PUBLIC_URL: v.optional(
@@ -76,15 +75,12 @@ const Env = v.object({
       ),
     ),
   ),
-  // Cloudflare zone of MEDIA_PUBLIC_URL and a token allowed to purge it.
+  // Cloudflare zone of MEDIA_PUBLIC_URL, purged with CF_API_TOKEN.
   CF_ZONE_ID: v.optional(
     v.pipe(
       v.string(),
       v.regex(/^[0-9a-f]{32}$/, 'CF_ZONE_ID must be 32 hex digits'),
     ),
-  ),
-  CF_PURGE_TOKEN: v.optional(
-    v.pipe(v.string(), v.nonEmpty('CF_PURGE_TOKEN is empty')),
   ),
   // The Litestream sidecar's bucket token (compose.yaml); only its presence
   // matters here: the server then expects the sidecar's heartbeats.
@@ -96,21 +92,24 @@ const TRAILING_SLASHES = /\/+$/
 const R2_SETTINGS = [
   'R2_ACCOUNT_ID',
   'R2_BUCKET',
-  'R2_ACCESS_KEY_ID',
-  'R2_SECRET_ACCESS_KEY',
+  'CF_API_TOKEN',
   'MEDIA_PUBLIC_URL',
 ] as const
+
+/** The Cloudflare account and its API token (`#cloudflare.ts`). */
+export interface CloudflareConfig {
+  accountId: string
+  apiToken: string
+  /** The zone of the media domain, for cache purges. */
+  zoneId?: string
+}
 
 export interface R2Config {
   /** The S3 API, which the server alone uses. */
   endpoint: string
   bucket: string
-  accessKeyId: string
-  secretAccessKey: string
   /** Where browsers read originals, without a trailing slash. */
   publicUrl: string
-  /** Edge cache purging on deletion; skipped when absent. */
-  purge?: { zoneId: string; token: string }
 }
 
 export type MediaConfig = { store: 'local' } | { store: 'r2'; r2: R2Config }
@@ -130,6 +129,11 @@ export interface Config {
   telegram?: { token: string; owner: string }
   webAppUrl?: string
   media: MediaConfig
+  /**
+   * R2's S3 keys derive from the token (`r2Credentials`), which also purges
+   * the edge cache and reads the storage analytics.
+   */
+  cloudflare?: CloudflareConfig
   /** Litestream replicates the database: watch for its heartbeats. */
   litestream: boolean
   /**
@@ -156,10 +160,6 @@ export function loadConfig(
     throw new Error(
       'Invalid configuration:\nTELEGRAM_BOT_TOKEN and OWNER_TELEGRAM_ID are set together',
     )
-  if (!!parsed.CF_ZONE_ID !== !!parsed.CF_PURGE_TOKEN)
-    throw new Error(
-      'Invalid configuration:\nCF_ZONE_ID and CF_PURGE_TOKEN are set together',
-    )
   const dataDir = path.resolve(parsed.DATA_DIR)
   return {
     dataDir,
@@ -185,6 +185,15 @@ export function loadConfig(
       : {}),
     ...(parsed.WEB_APP_URL ? { webAppUrl: parsed.WEB_APP_URL } : {}),
     media: mediaConfig(parsed),
+    ...(parsed.R2_ACCOUNT_ID && parsed.CF_API_TOKEN
+      ? {
+          cloudflare: {
+            accountId: parsed.R2_ACCOUNT_ID,
+            apiToken: parsed.CF_API_TOKEN,
+            ...(parsed.CF_ZONE_ID ? { zoneId: parsed.CF_ZONE_ID } : {}),
+          },
+        }
+      : {}),
     litestream: !!parsed.LITESTREAM_ACCESS_KEY_ID,
     dev: parsed.NODE_ENV !== 'production',
   }
@@ -202,12 +211,7 @@ function mediaConfig(parsed: v.InferOutput<typeof Env>): MediaConfig {
     r2: {
       endpoint: `https://${parsed.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
       bucket: parsed.R2_BUCKET!,
-      accessKeyId: parsed.R2_ACCESS_KEY_ID!,
-      secretAccessKey: parsed.R2_SECRET_ACCESS_KEY!,
       publicUrl: parsed.MEDIA_PUBLIC_URL!.replace(TRAILING_SLASHES, ''),
-      ...(parsed.CF_ZONE_ID && parsed.CF_PURGE_TOKEN
-        ? { purge: { zoneId: parsed.CF_ZONE_ID, token: parsed.CF_PURGE_TOKEN } }
-        : {}),
     },
   }
 }

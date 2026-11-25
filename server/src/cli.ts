@@ -5,7 +5,7 @@ import { backup } from 'node:sqlite'
 import { parseArgs } from 'node:util'
 import { pino } from 'pino'
 import { mediaCommand } from '#blob/migrate.ts'
-import { openBucketStore } from '#blob/open.ts'
+import { openR2Store } from '#blob/open.ts'
 import { MediaSigner } from '#blob/signer.ts'
 import { loadConfig } from '#config.ts'
 import { deriveKey } from '#crypto.ts'
@@ -55,9 +55,9 @@ if (command === 'token' && args[0] === 'create') {
         limit: { type: 'string' },
       },
     })
-    const store = openBucketStore(
+    const store = await openR2Store(
+      config,
       config.media.r2,
-      config.mediaDir,
       new MediaSigner({ secret: deriveKey(config.secretKey, 'media-url') }),
       pino({ level: 'warn' }),
     )

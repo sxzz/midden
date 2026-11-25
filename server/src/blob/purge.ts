@@ -1,16 +1,17 @@
+import { CLOUDFLARE_API, envelopeErrors } from '#cloudflare.ts'
 import type { Logger } from '#log.ts'
 
 export interface PurgeOptions {
+  /** The zone of the public media domain; without it nothing is purged. */
   zoneId?: string
-  /** An API token with the zone's Cache Purge permission. */
-  token?: string
+  /** CF_API_TOKEN, which has the zone's Cache Purge permission. */
+  token: string
   logger: Logger
   fetch?: typeof fetch
   /** Overridden in tests. */
   apiBase?: string
 }
 
-const API = 'https://api.cloudflare.com/client/v4'
 const TIMEOUT = 30_000
 
 /** Drops URLs from Cloudflare's edge cache. */
@@ -18,16 +19,16 @@ export type Purge = (url: string) => Promise<void>
 
 /**
  * Cached copies outlive a deleted object, so a deletion purges its public
- * URL. Without a token the purge is skipped and logged.
+ * URL. Without the zone the purge is skipped and logged.
  */
 export function cachePurge(options: PurgeOptions): Purge {
   const { zoneId, token, logger } = options
-  if (!zoneId || !token)
+  if (!zoneId)
     return (url) => {
-      logger.warn({ url }, 'cache purge skipped: no purge token configured')
+      logger.warn({ url }, 'cache purge skipped: no CF_ZONE_ID configured')
       return Promise.resolve()
     }
-  const endpoint = `${options.apiBase ?? API}/zones/${zoneId}/purge_cache`
+  const endpoint = `${options.apiBase ?? CLOUDFLARE_API}/zones/${zoneId}/purge_cache`
   const send = options.fetch ?? fetch
   return async (url) => {
     const response = await send(endpoint, {
@@ -43,9 +44,7 @@ export function cachePurge(options: PurgeOptions): Purge {
       | { success?: boolean; errors?: { code?: number; message?: string }[] }
       | undefined
     if (!response.ok || !body?.success) {
-      const errors = (body?.errors ?? [])
-        .map((error) => `${error.code ?? ''} ${error.message ?? ''}`.trim())
-        .join('; ')
+      const errors = envelopeErrors(body)
       throw new Error(
         `cache purge failed: ${response.status}${errors ? ` ${errors}` : ''}`,
       )

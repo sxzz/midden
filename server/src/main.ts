@@ -44,6 +44,10 @@ const vault = new Vault(deriveKey(config.secretKey, 'credentials'))
 const thumbnailer = await detectThumbnailer(config.ffmpeg)
 if (!thumbnailer) logger.warn('ffmpeg not found; thumbnails are disabled')
 logger.info({ store: config.media.store }, 'media store')
+// Before anything listens: without working R2 credentials this throws and
+// the process exits, as with any invalid configuration, so /healthz never
+// answers and a deploy rolls back.
+const blobs = await openMediaStore(config, signer, logger)
 
 let ctx!: AccountsContext
 const queue = new JobQueue({
@@ -58,7 +62,7 @@ ctx = {
   queue,
   logger,
   platforms: new Platforms([createXPlatform(), createInstagramPlatform()]),
-  blobs: openMediaStore(config.media, config.mediaDir, signer, logger),
+  blobs,
   stagingDir: path.join(config.dataDir, 'tmp'),
   vault,
   openCredential: (ref) => vault.open(db, ref),

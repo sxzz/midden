@@ -1,14 +1,17 @@
-// An in-memory S3 bucket and Cloudflare purge API on a local port, for the
-// media store tests. It checks what R2 checks of an upload (length, MD5,
-// signed payload hash) and records every request.
+// An in-memory S3 bucket and Cloudflare's token verify and purge APIs on a
+// local port, for the media store tests. It checks what R2 checks of an
+// upload (length, MD5, signed payload hash) and records every request. The
+// bucket accepts only the S3 key pair derived from FAKE_TOKEN.
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
+import { AwsV4Signer } from 'aws4fetch'
 import { BucketBlobStore } from '#blob/bucket-store.ts'
 import { FsBlobStore } from '#blob/fs-store.ts'
 import { cachePurge } from '#blob/purge.ts'
 import { parseRange } from '#blob/route.ts'
 import { S3Bucket } from '#blob/s3.ts'
+import { r2Credentials } from '#cloudflare.ts'
 import type { MediaSigner } from '#blob/signer.ts'
 import type { Logger } from '#log.ts'
 
@@ -33,10 +36,15 @@ export interface FakeRequest {
 export const FAKE_BUCKET = 'media'
 export const FAKE_PUBLIC = 'https://media.test'
 export const FAKE_ZONE = 'f'.repeat(32)
-export const FAKE_TOKEN = 'purge-token'
-const ACCESS_KEY = 'test-access-key'
+export const FAKE_ACCOUNT = 'a'.repeat(32)
+/** The account API token, and the id its verify endpoint gives. */
+export const FAKE_TOKEN = 'cloudflare-api-token'
+export const FAKE_TOKEN_ID = 'f00dfeed'
+const ACCESS_KEY = FAKE_TOKEN_ID
 
 const md5 = (body: Buffer) => createHash('md5').update(body).digest()
+const AUTHORIZATION =
+  /^AWS4-HMAC-SHA256 Credential=([^,]+), SignedHeaders=([^,]+), Signature=/
 const xml = (code: string) =>
   `<?xml version="1.0" encoding="UTF-8"?><Error><Code>${code}</Code></Error>`
 
@@ -44,6 +52,8 @@ export class FakeS3 {
   readonly objects = new Map<string, FakeObject>()
   readonly requests: FakeRequest[] = []
   readonly purged: string[] = []
+  /** Token verify requests answered. */
+  verified = 0
   /** Answer this many coming S3 requests with a 500. */
   failNext = 0
   /** Answer every request for these keys with a 500. */
@@ -94,29 +104,75 @@ export class FakeS3 {
     })
   }
 
+  /** The Cloudflare API base of this fake. */
+  get apiBase(): string {
+    return `${this.endpoint}/client/v4`
+  }
+
   /** A media store over `dir` backed by this bucket. */
   store(
     media: { dir: string; signer: MediaSigner; logger: Logger },
-    options: { purgeToken?: boolean } = {},
+    options: { zone?: boolean } = {},
   ): BucketBlobStore {
     return new BucketBlobStore({
       local: new FsBlobStore(media.dir, media.signer),
       bucket: new S3Bucket({
         endpoint: this.endpoint,
         bucket: FAKE_BUCKET,
-        accessKeyId: ACCESS_KEY,
-        secretAccessKey: 'test-secret',
+        ...r2Credentials(FAKE_TOKEN_ID, FAKE_TOKEN),
         retryDelayMs: 1,
       }),
       publicUrl: FAKE_PUBLIC,
       purge: cachePurge({
-        ...(options.purgeToken === false
-          ? {}
-          : { zoneId: FAKE_ZONE, token: FAKE_TOKEN }),
+        ...(options.zone === false ? {} : { zoneId: FAKE_ZONE }),
+        token: FAKE_TOKEN,
         logger: media.logger,
         apiBase: `${this.endpoint}/client/v4`,
       }),
     })
+  }
+
+  /**
+   * Whether the request carries a valid SigV4 signature made with the key
+   * pair derived from FAKE_TOKEN: signed again here and compared.
+   */
+  async #signedByToken(req: IncomingMessage, url: URL): Promise<boolean> {
+    const query = url.searchParams
+    const presigned = query.has('X-Amz-Signature')
+    const auth = AUTHORIZATION.exec(req.headers.authorization ?? '')
+    const credential = presigned ? query.get('X-Amz-Credential') : auth?.[1]
+    const signedHeaders = presigned
+      ? query.get('X-Amz-SignedHeaders')
+      : auth?.[2]
+    const datetime = presigned
+      ? query.get('X-Amz-Date')
+      : String(req.headers['x-amz-date'] ?? '')
+    if (
+      !credential?.startsWith(`${ACCESS_KEY}/`) ||
+      !signedHeaders ||
+      !datetime
+    )
+      return false
+    const target = new URL(`${this.endpoint}${req.url}`)
+    target.searchParams.delete('X-Amz-Signature')
+    const headers: Record<string, string> = {}
+    for (const name of signedHeaders.split(';'))
+      if (name !== 'host') headers[name] = String(req.headers[name] ?? '')
+    const signer = new AwsV4Signer({
+      url: target.href,
+      method: req.method!,
+      headers,
+      service: 's3',
+      region: credential.split('/', 3)[2],
+      datetime,
+      signQuery: presigned,
+      ...r2Credentials(FAKE_TOKEN_ID, FAKE_TOKEN),
+    })
+    const expected = await signer.sign()
+    return presigned
+      ? expected.url.searchParams.get('X-Amz-Signature') ===
+          query.get('X-Amz-Signature')
+      : expected.headers.get('authorization') === req.headers.authorization
   }
 
   async #handle(req: IncomingMessage): Promise<{
@@ -125,6 +181,25 @@ export class FakeS3 {
     body?: Buffer | string
   }> {
     const url = new URL(req.url!, 'http://fake')
+    if (url.pathname === `/client/v4/accounts/${FAKE_ACCOUNT}/tokens/verify`) {
+      this.verified++
+      if (req.headers.authorization !== `Bearer ${FAKE_TOKEN}`)
+        return {
+          status: 401,
+          body: JSON.stringify({
+            success: false,
+            errors: [{ code: 1000, message: 'Invalid API Token' }],
+          }),
+        }
+      return {
+        status: 200,
+        body: JSON.stringify({
+          success: true,
+          errors: [],
+          result: { id: FAKE_TOKEN_ID, status: 'active' },
+        }),
+      }
+    }
     const chunks: Buffer[] = []
     for await (const chunk of req) chunks.push(chunk as Buffer)
     const body = Buffer.concat(chunks)
@@ -156,12 +231,8 @@ export class FakeS3 {
       headers,
       ...(req.headers.range ? { range: req.headers.range } : {}),
     })
-    const signed = presigned
-      ? url.searchParams.get('X-Amz-Credential')?.startsWith(`${ACCESS_KEY}/`)
-      : req.headers.authorization?.startsWith(
-          `AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/`,
-        )
-    if (!signed) return { status: 403, body: xml('AccessDenied') }
+    if (!(await this.#signedByToken(req, url)))
+      return { status: 403, body: xml('AccessDenied') }
     if (this.failNext > 0 || this.failKeys.has(key)) {
       if (this.failNext > 0) this.failNext--
       return { status: 500, body: xml('InternalError') }

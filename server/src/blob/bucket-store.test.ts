@@ -145,7 +145,7 @@ describe('bucket store', () => {
     const logs = recordingLogger()
     const unpurged = s3.store(
       { dir: path.join(dir, 'media'), signer, logger: logs.logger },
-      { purgeToken: false },
+      { zone: false },
     )
     s3.seed(objectPath(KEY), BODY)
     await unpurged.delete(KEY)
@@ -153,7 +153,7 @@ describe('bucket store', () => {
     expect(s3.purged).toEqual([])
     expect(logs.entries).toContainEqual(
       expect.objectContaining({
-        msg: 'cache purge skipped: no purge token configured',
+        msg: 'cache purge skipped: no CF_ZONE_ID configured',
         url: `${FAKE_PUBLIC}/${objectPath(KEY)}`,
       }),
     )

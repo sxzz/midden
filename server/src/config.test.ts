@@ -1,3 +1,9 @@
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import process from 'node:process'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'vitest'
 import { loadConfig } from './config.ts'
 
@@ -7,8 +13,7 @@ const R2 = {
   MEDIA_STORE: 'r2',
   R2_ACCOUNT_ID: ACCOUNT,
   R2_BUCKET: 'midden',
-  R2_ACCESS_KEY_ID: 'access-key-id',
-  R2_SECRET_ACCESS_KEY: 'very-secret-value',
+  CF_API_TOKEN: 'very-secret-value',
   MEDIA_PUBLIC_URL: 'https://midden-media.sxzz.moe/',
 }
 
@@ -26,29 +31,55 @@ describe('media store configuration', () => {
       r2: {
         endpoint: `https://${ACCOUNT}.r2.cloudflarestorage.com`,
         bucket: 'midden',
-        accessKeyId: 'access-key-id',
-        secretAccessKey: 'very-secret-value',
         publicUrl: 'https://midden-media.sxzz.moe',
       },
     })
+    expect(loadConfig({ SECRET_KEY, ...R2 }).cloudflare).toEqual({
+      accountId: ACCOUNT,
+      apiToken: 'very-secret-value',
+    })
   })
 
-  test('purging needs both the zone and the token', () => {
+  test('the zone to purge comes with the same token', () => {
     const zone = 'a'.repeat(32)
     expect(
-      loadConfig({ SECRET_KEY, ...R2, CF_ZONE_ID: zone, CF_PURGE_TOKEN: 't' })
-        .media,
-    ).toMatchObject({ r2: { purge: { zoneId: zone, token: 't' } } })
-    expect(() => loadConfig({ SECRET_KEY, ...R2, CF_ZONE_ID: zone })).toThrow(
-      'CF_ZONE_ID and CF_PURGE_TOKEN are set together',
-    )
+      loadConfig({ SECRET_KEY, ...R2, CF_ZONE_ID: zone }).cloudflare,
+    ).toEqual({
+      accountId: ACCOUNT,
+      apiToken: 'very-secret-value',
+      zoneId: zone,
+    })
   })
 
   test('r2 names what is missing', () => {
-    const { R2_SECRET_ACCESS_KEY: _, MEDIA_PUBLIC_URL: __, ...partial } = R2
+    const { CF_API_TOKEN: _, MEDIA_PUBLIC_URL: __, ...partial } = R2
     expect(() => loadConfig({ SECRET_KEY, ...partial })).toThrow(
-      'MEDIA_STORE=r2 needs R2_SECRET_ACCESS_KEY, MEDIA_PUBLIC_URL',
+      'MEDIA_STORE=r2 needs CF_API_TOKEN, MEDIA_PUBLIC_URL',
     )
+  })
+
+  test('r2 without CF_API_TOKEN does not start, old keys or not', () => {
+    const { CF_API_TOKEN: _, ...partial } = R2
+    expect(() =>
+      loadConfig({
+        SECRET_KEY,
+        ...partial,
+        R2_ACCESS_KEY_ID: 'old-id',
+        R2_SECRET_ACCESS_KEY: 'old-secret',
+        CF_PURGE_TOKEN: 'old-purge',
+      }),
+    ).toThrow('MEDIA_STORE=r2 needs CF_API_TOKEN')
+  })
+
+  test('the analytics need the account and the token, not R2', () => {
+    expect(loadConfig({ SECRET_KEY }).cloudflare).toBeUndefined()
+    expect(
+      loadConfig({
+        SECRET_KEY,
+        R2_ACCOUNT_ID: ACCOUNT,
+        CF_API_TOKEN: 'token',
+      }).cloudflare,
+    ).toEqual({ accountId: ACCOUNT, apiToken: 'token' })
   })
 
   test.each([
@@ -66,7 +97,7 @@ describe('media store configuration', () => {
       'MEDIA_PUBLIC_URL must be an https URL without query',
     ],
     ['CF_ZONE_ID', 'zone', 'CF_ZONE_ID must be 32 hex digits'],
-    ['R2_SECRET_ACCESS_KEY', '', 'R2_SECRET_ACCESS_KEY is empty'],
+    ['CF_API_TOKEN', '', 'CF_API_TOKEN is empty'],
   ])('rejects %s=%j', (name, value, message) => {
     expect(() => loadConfig({ SECRET_KEY, ...R2, [name]: value })).toThrow(
       message,
@@ -76,14 +107,12 @@ describe('media store configuration', () => {
   test('errors never repeat a credential', () => {
     for (const env of [
       { ...R2, R2_ACCOUNT_ID: 'x' },
-      { ...R2, CF_ZONE_ID: 'x', CF_PURGE_TOKEN: 'secret-purge-token' },
+      { ...R2, CF_ZONE_ID: 'x' },
       { ...R2, MEDIA_PUBLIC_URL: undefined },
     ])
       expect(() => loadConfig({ SECRET_KEY, ...env })).toThrow(
         expect.objectContaining({
-          message: expect.not.stringMatching(
-            /very-secret-value|secret-purge-token|access-key-id/,
-          ),
+          message: expect.not.stringMatching(/very-secret-value/),
         }),
       )
   })
@@ -97,4 +126,26 @@ test('the Litestream heartbeat watch follows its access key', () => {
   expect(
     loadConfig({ SECRET_KEY, LITESTREAM_ACCESS_KEY_ID: 'key' }).litestream,
   ).toBe(true)
+})
+
+test('the server exits before listening when r2 lacks CF_API_TOKEN', () => {
+  // So /healthz never answers and the deploy rolls back (scripts/deploy.ts).
+  const { CF_API_TOKEN: _, ...partial } = R2
+  const result = spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL('main.ts', import.meta.url))],
+    {
+      env: {
+        SECRET_KEY,
+        ...partial,
+        DATA_DIR: mkdtempSync(path.join(tmpdir(), 'midden-config-')),
+        PORT: '1',
+      },
+      encoding: 'utf8',
+      timeout: 30_000,
+    },
+  )
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain('MEDIA_STORE=r2 needs CF_API_TOKEN')
+  expect(result.stdout).not.toContain('listening')
 })
