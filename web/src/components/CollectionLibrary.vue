@@ -36,11 +36,13 @@ import {
 } from '../folders'
 import { backButton, host } from '../host'
 import { listQuery } from '../reads'
+import { tabOf as barTabOf, isTabRoot, type Tab as BarTab } from '../tabbar'
 import ConfirmSheet from './ConfirmSheet.vue'
 import FolderMenuSheet from './FolderMenuSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
 import FolderStrip from './FolderStrip.vue'
 import ShareSheet from './ShareSheet.vue'
+import TabBar from './TabBar.vue'
 import BackLink from './ui/BackLink.vue'
 import UpdateSheet from './UpdateSheet.vue'
 // Remembered in this browser, so a reload does not cover the media again.
@@ -108,7 +110,6 @@ const id = computed(() =>
 const folderId = computed(() =>
   route.name === 'folder' ? String(route.params.id) : '',
 )
-const accounts = computed(() => route.name === 'accounts')
 const captures = computed(() => route.name === 'captures')
 const capture = computed(() => route.name === 'capture')
 const stats = computed(() => route.name === 'collection-stats')
@@ -116,20 +117,12 @@ const changes = computed(() => route.name === 'collection-changes')
 const follows = computed(() => route.name === 'collection-follows')
 const graphPage = computed(() => route.name === 'collection-graph')
 const comparePage = computed(() => route.name === 'compare')
-/** Any page reached from the library, which is where back returns to. */
-const nested = computed(
-  () =>
-    !!id.value ||
-    !!folderId.value ||
-    accounts.value ||
-    captures.value ||
-    capture.value ||
-    stats.value ||
-    changes.value ||
-    follows.value ||
-    graphPage.value ||
-    comparePage.value,
-)
+const relationsPage = computed(() => route.name === 'relations')
+const adminPage = computed(() => route.name === 'settings-admin')
+/** The library's own lists: 探索's root. */
+const home = computed(() => route.name === 'collections')
+/** Any page below a tab's root, which back returns from. */
+const nested = computed(() => !isTabRoot(route.name))
 const {
   folders,
   loaded: foldersLoaded,
@@ -143,28 +136,34 @@ const {
 const folder = computed(() =>
   folders.value.find((f) => f.id === folderId.value),
 )
+const titles: Record<string, string> = {
+  collections: '我的收藏',
+  collection: '收藏详情',
+  captures: '采集',
+  capture: '采集记录',
+  'collection-stats': '统计趋势',
+  'collection-changes': '资料修改记录',
+  'collection-follows': '关注变化',
+  'collection-graph': '关系图谱',
+  compare: '关系对比',
+  relations: '关系',
+  settings: '设置',
+  'settings-accounts': '采集账号',
+  'settings-passkeys': '通行密钥',
+  'settings-admin': '管理员面板',
+}
 const title = computed(() =>
-  accounts.value
-    ? '采集账号'
-    : captures.value
-      ? '采集'
-      : capture.value
-        ? '采集记录'
-        : stats.value
-          ? '统计趋势'
-          : changes.value
-            ? '资料修改记录'
-            : follows.value
-              ? '关注变化'
-              : graphPage.value
-                ? '关系图谱'
-                : comparePage.value
-                  ? '关系对比'
-                  : id.value
-                    ? '收藏详情'
-                    : folderId.value
-                      ? folder.value?.name || '收藏夹'
-                      : '我的收藏',
+  folderId.value
+    ? folder.value?.name || '收藏夹'
+    : titles[String(route.name)] || '我的收藏',
+)
+/** Settings and capture records have no media to cover. */
+const sensitiveShown = computed(
+  () =>
+    barTabOf(route.name) !== 'settings' &&
+    !captures.value &&
+    !capture.value &&
+    !stats.value,
 )
 // Telegram draws its own back button; only stand in for it elsewhere.
 const standalone = !host()?.initData
@@ -176,6 +175,17 @@ const savedAt = computed(() => {
   return undefined
 })
 let listRoute = '/'
+/**
+ * Where each tab of the bottom bar leads: 探索 to the list it was left on
+ * (posts or accounts), 关系 to the account it was left on.
+ */
+const homePath = shallowRef('/')
+const relationsPath = shallowRef('/relations')
+const tabLinks = computed<Record<BarTab, string>>(() => ({
+  explore: homePath.value,
+  relations: relationsPath.value,
+  settings: '/settings',
+}))
 // Both lists plus a few recent details stay alive so going back neither
 // refetches nor rebuilds their scroll, order and paging state. Bounded so a long
 // chain of profile hops cannot keep every visited detail in memory.
@@ -185,8 +195,14 @@ const removed = shallowRef<string[]>([])
 function viewKey(target: RouteLocationNormalized) {
   if (target.name === 'collections') return `collections:${tabOf(target)}`
   if (target.name === 'folder') return 'folder'
-  if (target.name === 'accounts') return 'accounts'
-  if (target.name === 'captures') return 'captures'
+  // Pages without parameters are one view each.
+  if (
+    typeof target.name === 'string' &&
+    (target.name === 'captures' ||
+      target.name === 'relations' ||
+      target.name.startsWith('settings'))
+  )
+    return target.name
   if (target.name === 'capture') return `capture:${String(target.params.id)}`
   if (target.name === 'collection-stats')
     return `stats:${String(target.params.id)}`
@@ -268,7 +284,10 @@ watch(
     // refreshes them, filtering within it does not.
     const arrived = key !== shownKey
     shownKey = key
-    if (!nested.value) {
+    if (relationsPage.value && route.query.of)
+      relationsPath.value = route.fullPath
+    if (home.value) {
+      homePath.value = route.fullPath
       if (arrived) void loadFolders()
       await show(lists[tab.value], key)
     } else if (folderId.value) {
@@ -372,7 +391,7 @@ const modified = computed(
     !!folderList.query.value &&
     folderModified(folderList.query.value, folder.value.filter),
 )
-const canSave = computed(() => !nested.value && hasFilters(shownQuery.value))
+const canSave = computed(() => home.value && hasFilters(shownQuery.value))
 type Sheet = '' | 'create' | 'menu' | 'rename' | 'delete' | 'share' | 'update'
 const sheet = shallowRef<Sheet>('')
 const busy = shallowRef(false)
@@ -491,7 +510,7 @@ function listProps(list: ReturnType<typeof createList>, error = '') {
   }
 }
 const viewProps = computed(() => {
-  if (accounts.value)
+  if (adminPage.value)
     return {
       onCleared: () => {
         for (const { collection } of all) collection.items.value = []
@@ -499,8 +518,14 @@ const viewProps = computed(() => {
       },
     }
   if (captures.value || capture.value) return { onSaved: saved }
-  if (stats.value) return {}
-  if (changes.value || follows.value || graphPage.value || comparePage.value)
+  if (stats.value || barTabOf(route.name) === 'settings') return {}
+  if (
+    changes.value ||
+    follows.value ||
+    graphPage.value ||
+    comparePage.value ||
+    relationsPage.value
+  )
     return { showSensitive: showSensitive.value }
   if (id.value)
     return {
@@ -536,36 +561,14 @@ const viewProps = computed(() => {
 
 <template>
   <main class="page">
-    <header class="bar" :class="{ nested }">
-      <RouterLink
-        v-if="nested"
-        to="/"
-        class="icon-button"
-        aria-label="Home"
-        title="返回首页"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          width="22"
-          height="22"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M4 10.5 12 4l8 6.5" />
-          <path d="M6 9v11h12V9" />
-          <path d="M10 20v-6h4v6" />
-        </svg>
-      </RouterLink>
+    <header class="bar" :class="{ spaced: !home }">
       <BackLink v-if="nested && standalone" class="back">
         <span class="chevron" aria-hidden="true">‹</span>返回
       </BackLink>
       <h1>{{ title }}</h1>
+      <!-- Capturing adds to the library, so it opens from 探索. -->
       <RouterLink
-        v-if="!nested"
+        v-if="home"
         to="/captures"
         class="icon-button captures-link"
         aria-label="采集"
@@ -585,28 +588,6 @@ const viewProps = computed(() => {
           <path d="M12 4v11" />
           <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
           <path d="M5 20h14" />
-        </svg>
-      </RouterLink>
-      <RouterLink
-        v-if="!nested"
-        to="/accounts"
-        class="icon-button accounts-link"
-        aria-label="采集账号"
-        title="采集账号"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          width="22"
-          height="22"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="12" cy="8" r="4" />
-          <path d="M4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5" />
         </svg>
       </RouterLink>
       <button
@@ -630,7 +611,7 @@ const viewProps = computed(() => {
         </svg>
       </button>
       <button
-        v-if="!accounts && !captures && !capture && !stats"
+        v-if="sensitiveShown"
         type="button"
         class="icon-button sensitive-toggle"
         aria-label="显示敏感内容"
@@ -655,7 +636,7 @@ const viewProps = computed(() => {
         </svg>
       </button>
     </header>
-    <div v-if="!nested" class="tabs" role="tablist" aria-label="类型">
+    <div v-if="home" class="tabs" role="tablist" aria-label="类型">
       <RouterLink
         v-for="option in tabs"
         :key="option.value"
@@ -668,7 +649,7 @@ const viewProps = computed(() => {
         {{ option.label }}
       </RouterLink>
     </div>
-    <FolderStrip v-if="!nested" :folders="folders" />
+    <FolderStrip v-if="home" :folders="folders" />
     <div
       v-if="folderId && folderKindsShown.length > 1"
       class="tabs"
@@ -770,6 +751,7 @@ const viewProps = computed(() => {
       @confirm="deleteFolder"
       @cancel="sheet = ''"
     />
+    <TabBar :links="tabLinks" />
   </main>
 </template>
 
@@ -779,7 +761,8 @@ const viewProps = computed(() => {
   margin: 0 auto;
   min-height: 100dvh;
   padding-top: var(--tg-content-safe-area-inset-top, 0px);
-  padding-bottom: max(32px, env(safe-area-inset-bottom));
+  /* The bottom bar's room, and some more so the end does not touch it. */
+  padding-bottom: calc(var(--tab-bar-space, 16px) + 16px);
 }
 .bar {
   display: flex;
@@ -796,13 +779,10 @@ const viewProps = computed(() => {
   border-radius: 50%;
   color: var(--subtle);
 }
-/* Inner pages start with a section title, which needs room from the bar. */
-.bar.nested {
+/* Pages other than the lists start with a section, which needs room from
+   the bar. */
+.bar.spaced {
   padding-bottom: 12px;
-}
-/* The home glyph, not its tap target, lines up with the text below. */
-.bar > .icon-button:first-child {
-  margin-left: -11px;
 }
 /* Header actions sit at the trailing edge whichever of them are shown. */
 .bar > h1 {

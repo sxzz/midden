@@ -13,7 +13,14 @@ import { toastState } from '../../composables/useToast'
 <style scoped>
 .toast-region {
   position: fixed;
-  inset: auto 0 max(24px, env(safe-area-inset-bottom));
+  /* Above the bottom bar while it is up. */
+  inset: auto 0
+    max(
+      24px,
+      env(safe-area-inset-bottom),
+      calc(var(--tab-bar-offset, 0px) + 12px)
+    );
+  transition: bottom 220ms ease;
   z-index: 50;
   display: flex;
   justify-content: center;

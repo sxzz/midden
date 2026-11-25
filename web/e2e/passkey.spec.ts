@@ -238,7 +238,7 @@ test('the settings page lists, adds, renames and deletes passkeys', async ({
     }
     return r.fulfill({ json: { items: [] } })
   })
-  await page.goto(`${APP}#/accounts`)
+  await page.goto(`${APP}#/settings/passkeys`)
   const section = page.locator('section', { hasText: '通行密钥' })
   await expect(section).toContainText('Mac Safari · midden.test')
   await expect(section).toContainText('上次使用')
@@ -310,7 +310,7 @@ test('the settings page adds a domain and removes it with its passkeys', async (
     }
     return r.fulfill({ json: { items: [] } })
   })
-  await page.goto(`${APP}#/accounts`)
+  await page.goto(`${APP}#/settings/admin`)
   const domains = page.locator('section', {
     has: page.getByRole('heading', { name: '域名', exact: true }),
   })
@@ -332,8 +332,11 @@ test('the settings page adds a domain and removes it with its passkeys', async (
   await expect(confirm).toContainText('将同时删除此域名的 1 个通行密钥')
   await confirm.getByRole('button', { name: '删除域名' }).click()
   await expect(domains).not.toContainText('archive.example')
+  // The passkeys page reads them again when it is opened.
+  await page.goto(`${APP}#/settings/passkeys`)
   const keys = page.locator('section', {
     has: page.getByRole('heading', { name: '通行密钥', exact: true }),
   })
+  await expect(keys).toBeVisible()
   await expect(keys).not.toContainText('iPhone')
 })

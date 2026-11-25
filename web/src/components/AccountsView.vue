@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { computed, onActivated, shallowRef, useTemplateRef } from 'vue'
+import { computed, onActivated, shallowRef } from 'vue'
 import {
   call,
   client,
@@ -7,19 +7,15 @@ import {
   type Account,
   type AccountPlatform,
   type Accounts,
-  type LibrarySize,
 } from '../api'
 import { toast } from '../composables/useToast'
-import { host } from '../host'
 import AddAccountSheet from './AddAccountSheet.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
-import OriginList from './OriginList.vue'
-import PasskeyList from './PasskeyList.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 
+// 设置 → 采集账号: the accounts each platform captures with.
 const AT_PREFIX = /^@/
-const passkeyList = useTemplateRef('passkeys')
 const data = shallowRef<Accounts>()
 const loading = shallowRef(true)
 const error = shallowRef('')
@@ -28,67 +24,7 @@ const busy = shallowRef(false)
 const adding = shallowRef<AccountPlatform>()
 const addError = shallowRef('')
 const removing = shallowRef<Account>()
-const emit = defineEmits<{
-  /** Everything saved was deleted; lists must not show it any more. */
-  cleared: []
-}>()
-/** What deleting everything would remove, read when the sheet opens. */
-const library = shallowRef<LibrarySize>()
-const clearing = shallowRef(false)
-const clearDescription = computed(() => {
-  const v = library.value
-  if (!v) return ''
-  return `${v.collections} 条收藏、${v.records} 条采集记录${v.running ? `（${v.running} 条进行中）` : ''}，无法恢复。`
-})
-async function askClear() {
-  if (busy.value) return
-  busy.value = true
-  try {
-    library.value = await call(client.library.$get())
-    clearing.value = true
-  } catch (e) {
-    toast(errorText(e))
-  } finally {
-    busy.value = false
-  }
-}
-async function clearAll() {
-  if (busy.value) return
-  busy.value = true
-  try {
-    const v = await call(
-      client.library['delete-all'].$post({ json: { confirm: 'delete all' } }),
-    )
-    clearing.value = false
-    toast(`已删除 ${v.collections} 条收藏和 ${v.records} 条采集记录。`)
-    emit('cleared')
-  } catch (e) {
-    toast(errorText(e))
-  } finally {
-    busy.value = false
-  }
-}
 const addable = computed(() => data.value?.platforms.some((p) => p.can_add))
-const version = /^([0-9a-f]{40})(-dirty)?$/.exec(__BUILD_VERSION__)
-const versionText = version
-  ? version[1].slice(0, 7) + (version[2] || '')
-  : __BUILD_VERSION__
-// Inside Telegram the Mini App signs in again on every open; only a browser
-// session is worth ending by hand.
-const browser = !host()?.initData
-async function logout() {
-  busy.value = true
-  try {
-    await call(client.session.$delete())
-    location.reload()
-  } catch (e) {
-    error.value = errorText(e)
-    busy.value = false
-  }
-}
-const versionURL = version
-  ? `https://github.com/sxzz/midden/commit/${version[1]}`
-  : ''
 
 async function load() {
   loading.value = true
@@ -229,35 +165,6 @@ async function remove() {
     </template>
     <p v-if="!addable" class="status">没有支持添加账号的平台。</p>
   </template>
-  <PasskeyList ref="passkeys" />
-  <OriginList @removed="passkeyList?.load()" />
-  <ListSection title="数据">
-    <ListButton
-      label="删除全部收藏和采集记录"
-      variant="destructive"
-      :disabled="busy"
-      @select="askClear"
-    />
-  </ListSection>
-  <ListSection v-if="browser">
-    <ListButton
-      label="退出登录"
-      variant="destructive"
-      :disabled="busy"
-      @select="logout"
-    />
-  </ListSection>
-  <p class="version">
-    版本
-    <a
-      v-if="versionURL"
-      :href="versionURL"
-      target="_blank"
-      rel="noopener noreferrer"
-      ><code>{{ versionText }}</code></a
-    >
-    <code v-else>{{ versionText }}</code>
-  </p>
   <ConfirmSheet
     :open="!!removing"
     :title="`删除 ${removing ? label(removing) : ''}？`"
@@ -279,16 +186,6 @@ async function remove() {
     :error="addError"
     @submit="add"
     @cancel="adding = undefined"
-  />
-  <ConfirmSheet
-    :open="clearing"
-    title="删除全部收藏和采集记录？"
-    :description="clearDescription"
-    confirm-label="永久删除"
-    phrase="删除全部"
-    :busy="busy"
-    @confirm="clearAll"
-    @cancel="clearing = false"
   />
 </template>
 
@@ -370,20 +267,5 @@ async function remove() {
   padding: 0 var(--inset);
   font-size: 15px;
   color: var(--destructive);
-}
-.version {
-  margin: 0;
-  padding: 8px calc(var(--gutter) + 4px) 24px;
-  font-size: 13px;
-  line-height: 1.5;
-  text-align: center;
-  color: var(--subtle);
-}
-.version a {
-  color: var(--link);
-}
-.version code {
-  font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 </style>

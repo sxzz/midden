@@ -4,19 +4,23 @@ import {
   type RouteLocationNormalized,
 } from 'vue-router'
 import AccountsView from './components/AccountsView.vue'
+import AdminView from './components/AdminView.vue'
 import CaptureRecordDetail from './components/CaptureRecordDetail.vue'
 import CaptureRecords from './components/CaptureRecords.vue'
 import CollectionDetail from './components/CollectionDetail.vue'
 import CollectionTrends from './components/CollectionTrends.vue'
 import CollectionView from './components/CollectionView.vue'
 import FollowChanges from './components/FollowChanges.vue'
+import PasskeyList from './components/PasskeyList.vue'
 import PasskeySetup from './components/PasskeySetup.vue'
 import ProfileChanges from './components/ProfileChanges.vue'
 import PublicHome from './components/PublicHome.vue'
+import SettingsView from './components/SettingsView.vue'
 
 // The graph page brings sigma and graphology: loaded only when opened.
 const RelationGraph = () => import('./components/RelationGraph.vue')
 const RelationCompare = () => import('./components/RelationCompare.vue')
+const RelationsView = () => import('./components/RelationsView.vue')
 
 const SHARE = String.raw`/s/:slug([\w-]+)`
 // Pages inside a share take the collection; the slug is the share's own.
@@ -67,7 +71,20 @@ export const router = createRouter({
     },
     // Several accounts' relations side by side; the owner's alone.
     { path: '/compare', name: 'compare', component: RelationCompare },
-    { path: '/accounts', name: 'accounts', component: AccountsView },
+    // The 关系 tab: the graph of any account with relation data (`of`).
+    { path: '/relations', name: 'relations', component: RelationsView },
+    { path: '/settings', name: 'settings', component: SettingsView },
+    {
+      path: '/settings/accounts',
+      name: 'settings-accounts',
+      component: AccountsView,
+    },
+    {
+      path: '/settings/passkeys',
+      name: 'settings-passkeys',
+      component: PasskeyList,
+    },
+    { path: '/settings/admin', name: 'settings-admin', component: AdminView },
     { path: '/captures', name: 'captures', component: CaptureRecords },
     {
       path: '/captures/:id([a-f0-9-]+)',

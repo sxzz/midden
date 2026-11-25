@@ -1,4 +1,4 @@
-import { expect, test } from './test'
+import { expect, test, type Page } from './test'
 
 const main = '33333333-3333-4333-8333-333333333333'
 
@@ -85,7 +85,7 @@ test('Instagram and X choose their accounts independently', async ({
     return r.fulfill({ json: path === '/v1/accounts' ? state : { items: [] } })
   })
   await page.goto('/app/')
-  await page.getByRole('link', { name: '采集账号' }).click()
+  await openSettings(page, '采集账号')
   await expect(
     page.getByText('Instagram 需要先添加并选择一个账号才能采集。'),
   ).toBeVisible()
@@ -206,14 +206,25 @@ test('adds, selects and deletes an X account', async ({ page }) => {
     return r.fulfill({ json: { items: [] } })
   })
   await page.goto('/app/')
-  await page.getByRole('link', { name: '采集账号' }).click()
-  await expect(page.locator('h1')).toHaveText('采集账号')
-  // Same build version as the bot's /start: a commit, or dev outside git.
+  await page
+    .getByRole('navigation', { name: '主导航' })
+    .getByRole('link', { name: '设置' })
+    .click()
+  await expect(page.locator('h1')).toHaveText('设置')
+  // 关于: the same build version as the bot's /start, a commit or dev
+  // outside git, and the source.
   const version = page.getByRole('link', { name: /^[0-9a-f]{7}(-dirty)?$/ })
   await expect(version).toHaveAttribute(
     'href',
     /^https:\/\/github\.com\/sxzz\/midden\/commit\/[0-9a-f]{40}$/,
   )
+  await expect(page.getByRole('link', { name: /^源代码/ })).toHaveAttribute(
+    'href',
+    'https://github.com/sxzz/midden',
+  )
+  await expect(page.getByText('构建时间')).toBeVisible()
+  await page.getByRole('link', { name: '采集账号' }).click()
+  await expect(page.locator('h1')).toHaveText('采集账号')
   // The form stays out of the source list until asked for.
   await expect(page.getByLabel('凭据')).toBeHidden()
   await page.getByRole('button', { name: '添加账号' }).click()
@@ -257,7 +268,7 @@ test('adds, selects and deletes an X account', async ({ page }) => {
   await expect(account).toHaveCount(0)
 
   await page.getByRole('link', { name: '返回' }).click()
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('h1')).toHaveText('设置')
 })
 
 test('deleting everything shows what goes and needs the phrase typed', async ({
@@ -297,11 +308,12 @@ test('deleting everything shows what goes and needs the phrase typed', async ({
     }
     if (path === '/v1/collections')
       return r.fulfill({ json: { items: listed } })
+    if (path === '/v1/instance') return r.fulfill({ json: { dev: true } })
     return r.fulfill({ json: {} })
   })
   await page.goto('/app/')
   await expect(page.getByText('要删除的收藏')).toBeVisible()
-  await page.getByRole('link', { name: '采集账号' }).click()
+  await openSettings(page, '管理员面板')
   await page
     .getByRole('button', { name: '删除全部收藏和采集记录', exact: true })
     .click()
@@ -326,8 +338,47 @@ test('deleting everything shows what goes and needs the phrase typed', async ({
     page.getByText('已删除 12 条收藏和 30 条采集记录。'),
   ).toBeVisible()
   expect(deleted).toEqual({ confirm: 'delete all' })
-  await page.getByRole('link', { name: '返回' }).click()
+  await page
+    .getByRole('navigation', { name: '主导航' })
+    .getByRole('link', { name: '探索' })
+    .click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
   await expect(page.locator('.row')).toHaveCount(0)
   await expect(page.getByText(/暂无/)).toHaveCount(0)
 })
+
+test('deleting everything is not offered outside development', async ({
+  page,
+}) => {
+  let asked = false
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path === '/v1/session') return r.fulfill({ json: {} })
+    if (path === '/v1/origins')
+      return r.fulfill({
+        json: [{ origin: 'https://midden.test', passkeys: 0 }],
+      })
+    if (path === '/v1/instance') return r.fulfill({ json: { dev: false } })
+    if (path === '/v1/library/delete-all') asked = true
+    return r.fulfill({ json: { items: [] } })
+  })
+  await page.goto('/app/#/settings/admin')
+  await expect(page.locator('h1')).toHaveText('管理员面板')
+  await expect(
+    page.getByRole('heading', { name: '域名', exact: true }),
+  ).toBeVisible()
+  await expect(page.getByText('删除全部收藏和采集记录')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '开发模式' })).toHaveCount(0)
+  expect(asked).toBe(false)
+})
+
+/** 设置, through the bottom bar, then one of its pages. */
+async function openSettings(page: Page, name: string) {
+  await page
+    .getByRole('navigation', { name: '主导航' })
+    .getByRole('link', { name: '设置' })
+    .click()
+  await page.getByRole('link', { name, exact: true }).click()
+  await expect(page.locator('h1')).toHaveText(name)
+}

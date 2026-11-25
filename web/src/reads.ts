@@ -113,6 +113,24 @@ export function readGraph(
   return call(own.graph.$get({ param: { id }, query }, init(signal)))
 }
 
+/** The graph of any account with relation data, by its key; the owner's. */
+export function readAccountGraph(
+  key: string,
+  options: { kinds?: readonly string[]; limit?: number; viewer?: string } = {},
+  signal?: AbortSignal,
+) {
+  const query: {
+    of: string
+    kinds?: string
+    limit?: string
+    viewer?: string
+  } = { of: key }
+  if (options.kinds) query.kinds = options.kinds.join(',')
+  if (options.limit) query.limit = String(options.limit)
+  if (options.viewer) query.viewer = options.viewer
+  return call(client.collections.graph.$get({ query }, init(signal)))
+}
+
 /** Several accounts' relations side by side; the owner's alone. */
 export function readCompare(
   query: {

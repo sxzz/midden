@@ -9,6 +9,7 @@ import {
 import { useRouter } from 'vue-router'
 import { navigatesHere, openInNewTab } from '../navigation'
 import { collectionRoute } from '../share'
+import { tabBarHeight } from '../tabbar'
 import type { GraphModel } from '../graph'
 import type { GraphCanvas } from '../graph-canvas'
 
@@ -57,7 +58,8 @@ export function useGraphCanvas(options: {
     height.value = Math.max(
       320,
       options.minHeight?.() ?? 0,
-      window.innerHeight - top - 12,
+      // The bottom bar covers the end of the viewport whenever it is up.
+      window.innerHeight - top - 12 - tabBarHeight(),
     )
   }
   let disposed = false

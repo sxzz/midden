@@ -51,6 +51,7 @@ export default defineConfig({
     __VUE_PROD_DEVTOOLS__: false,
     __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false,
     __BUILD_VERSION__: JSON.stringify(buildVersion()),
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
   },
   server: {
     proxy: {

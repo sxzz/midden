@@ -91,8 +91,12 @@ test('restores sort controls and opens author links in a new tab', async ({
     'href',
     '#/collection/bbbb',
   )
-  await page.getByRole('link', { name: 'Home', exact: true }).click()
-  await expect(page).toHaveURL(/#\/$/)
+  // 探索 returns to the list as it was left.
+  await page
+    .getByRole('navigation', { name: '主导航' })
+    .getByRole('link', { name: '探索' })
+    .click()
+  await expect(page).toHaveURL(/#\/\?sort=published&order=asc$/)
 })
 
 test('authors load with skeletons once their list opens; post type filters update the request', async ({

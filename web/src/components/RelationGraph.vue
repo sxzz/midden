@@ -12,7 +12,8 @@ import {
   listsText,
   type GraphKind,
 } from '../graph'
-import { readGraph } from '../reads'
+import { rememberCenter } from '../graph-center'
+import { readAccountGraph, readGraph } from '../reads'
 import { perspectiveName } from '../relation-filter'
 import { shareSlug } from '../share'
 import { formatCount } from '../trends'
@@ -25,8 +26,13 @@ import ViewerMark from './ViewerMark.vue'
 // 关系图谱: a profile, the accounts it follows and that follow it, and the
 // follows among them, drawn with sigma (the renderer loads with this page),
 // or listed by kind. The owner may mark the accounts by another account's
-// follows (the viewer) and compare the profile with others.
-const props = defineProps<{ id: string; showSensitive?: boolean }>()
+// follows (the viewer) and compare the profile with others. The profile is
+// a saved collection (`id`), or under 关系 any account by its key (`center`).
+const props = defineProps<{
+  id?: string
+  center?: string
+  showSensitive?: boolean
+}>()
 const graph = shallowRef<FollowGraph>()
 const error = shallowRef('')
 const loading = shallowRef(false)
@@ -51,18 +57,22 @@ async function load() {
   loading.value = true
   try {
     const all = kinds.value.length === graphKinds.length
-    const result = await readGraph(
-      props.id,
-      {
-        ...(all ? {} : { kinds: kinds.value }),
-        limit: limit.value,
-        ...(viewer.value ? { viewer: viewer.value } : {}),
-      },
-      signal,
-    )
+    // An account marked by its own follows would only repeat the rings.
+    const marking = viewer.value && viewer.value !== props.center
+    const options = {
+      ...(all ? {} : { kinds: kinds.value }),
+      limit: limit.value,
+      ...(marking ? { viewer: viewer.value } : {}),
+    }
+    const result = props.center
+      ? await readAccountGraph(props.center, options, signal)
+      : await readGraph(props.id ?? '', options, signal)
     if (signal.aborted) return
     graph.value = result
     error.value = ''
+    // 关系 opens on it next time, unless the owner's own account leads.
+    const center = result.nodes[0]?.key
+    if (center && !shared.value) rememberCenter(center)
   } catch (e) {
     if (!signal.aborted) error.value = errorText(e)
   } finally {
@@ -71,7 +81,7 @@ async function load() {
 }
 // The first read waits for the viewer, so the graph comes marked at once.
 watch(
-  () => (ready.value ? props.id : ''),
+  () => (ready.value ? props.center || props.id || '' : ''),
   (id) => {
     if (!id) return
     graph.value = undefined

@@ -1,5 +1,14 @@
 <script setup vapor lang="ts">
-import { computed, shallowRef, useSlots } from 'vue'
+import {
+  computed,
+  onActivated,
+  onDeactivated,
+  onUnmounted,
+  shallowRef,
+  useId,
+  useSlots,
+  watch,
+} from 'vue'
 import {
   groupCollections,
   listSort,
@@ -9,6 +18,7 @@ import {
 import { accountKey } from '../relation-filter'
 import { isProfileEntity } from '../relations'
 import { shareSlug } from '../share'
+import { suppressTabBar } from '../tabbar'
 import BatchRefresh from './BatchRefresh.vue'
 import CollectionAlbum from './CollectionAlbum.vue'
 import CollectionFilters from './CollectionFilters.vue'
@@ -91,6 +101,12 @@ function closeBatch() {
   selecting.value = false
   batch.value = 0
 }
+// The 多选 bar takes the bottom bar's place while it shows, on this page.
+const barKey = `selection:${useId()}`
+watch(batch, (shown) => suppressTabBar(barKey, !!shown))
+onActivated(() => suppressTabBar(barKey, !!batch.value))
+onDeactivated(() => suppressTabBar(barKey, false))
+onUnmounted(() => suppressTabBar(barKey, false))
 const deleting = shallowRef(false)
 function deleted(withPosts: boolean) {
   const ids = selected.value

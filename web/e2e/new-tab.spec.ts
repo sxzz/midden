@@ -262,10 +262,11 @@ test('the detail page opens its pages and relation counts in a new tab', async (
   )
   await page.getByRole('link', { name: '关系图谱' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/graph$`))
+  // Opened directly, 返回 leads to the root of its tab, 关系.
   await opensInNewTab(
     page,
     page.getByRole('link', { name: '返回', exact: true }),
-    /#\/$/,
+    /#\/relations$/,
   )
 })
 

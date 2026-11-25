@@ -1,18 +1,27 @@
 import { host } from './host'
 import { shareSlug } from './share'
-import type { RouteLocationRaw, Router } from 'vue-router'
+import { tabOf, tabRoute } from './tabbar'
+import type {
+  RouteLocationRaw,
+  Router,
+  RouteRecordNameGeneric,
+} from 'vue-router'
 
-/** The start: the library, or what a public link opens. */
-export function homeRoute(): RouteLocationRaw {
-  return shareSlug.value
-    ? { name: 'share', params: { slug: shareSlug.value } }
-    : { name: 'collections' }
+/**
+ * The start: what a public link opens, or the root of the tab the page
+ * (`from`) belongs to, the library by default.
+ */
+export function homeRoute(from?: RouteRecordNameGeneric): RouteLocationRaw {
+  if (shareSlug.value)
+    return { name: 'share', params: { slug: shareSlug.value } }
+  const tab = tabOf(from)
+  return tab ? tabRoute(tab) : { name: 'collections' }
 }
 
-/** Back, or to the start when the page was opened directly. */
+/** Back, or to the tab's start when the page was opened directly. */
 export function goBack(router: Router) {
   if (router.options.history.state.back) router.back()
-  else void router.replace(homeRoute())
+  else void router.replace(homeRoute(router.currentRoute?.value.name))
 }
 
 /**
