@@ -17,7 +17,7 @@ afterEach(async () => {
   ctx = undefined
 })
 
-function setup() {
+function setup({ dev = false } = {}) {
   ctx = testContext({
     platforms: [
       fakePlatform({
@@ -34,6 +34,7 @@ function setup() {
     ctx,
     telegram: { token: BOT, owner: OWNER },
     webAppUrl: WEB,
+    dev,
   })
   const token = createToken(ctx.db, 'test')
   const call = (path: string, init: RequestInit = {}) =>
@@ -276,6 +277,43 @@ describe('api', () => {
     )
     expect(await (await call('/accounts')).json()).toMatchObject({
       accounts: [],
+    })
+  })
+
+  test('deletes everything only in development mode', async () => {
+    const save = async (call: ReturnType<typeof setup>['call']) => {
+      await call('/captures', {
+        method: 'POST',
+        body: JSON.stringify({ url: 'https://fake.test/p/1' }),
+      })
+      await ctx!.queue.drain()
+    }
+    const clear = (call: ReturnType<typeof setup>['call']) =>
+      call('/library/delete-all', {
+        method: 'POST',
+        body: JSON.stringify({ confirm: 'delete all' }),
+      })
+    const production = setup()
+    await save(production.call)
+    expect(await (await production.call('/instance')).json()).toEqual({
+      dev: false,
+    })
+    const refused = await clear(production.call)
+    expect(refused.status).toBe(403)
+    expect(await refused.json()).toEqual({ error: '只在开发模式中可用' })
+    expect(await (await production.call('/library')).json()).toMatchObject({
+      collections: 1,
+    })
+    await ctx!.queue.stop()
+
+    const dev = setup({ dev: true })
+    await save(dev.call)
+    expect(await (await dev.call('/instance')).json()).toEqual({ dev: true })
+    expect(await (await clear(dev.call)).json()).toMatchObject({
+      collections: 1,
+    })
+    expect(await (await dev.call('/library')).json()).toMatchObject({
+      collections: 0,
     })
   })
 

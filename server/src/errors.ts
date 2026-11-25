@@ -20,6 +20,7 @@ export type ErrorKind =
   | 'invalid_request'
   | 'no_more_pages'
   | 'collection_stopped'
+  | 'dev_only'
 
 const messages: Record<ErrorKind, string> = {
   invalid_target: '不支持的链接',
@@ -40,6 +41,7 @@ const messages: Record<ErrorKind, string> = {
   invalid_request: '请求无效',
   no_more_pages: '没有更多帖子了',
   collection_stopped: '采集已中止',
+  dev_only: '只在开发模式中可用',
 }
 
 export class AppError extends Error {

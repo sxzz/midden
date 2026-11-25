@@ -33,6 +33,8 @@ const Env = v.object({
   // The built web app served under /app/.
   WEB_DIR: v.optional(v.pipe(v.string(), v.nonEmpty())),
   FFMPEG: v.optional(v.pipe(v.string(), v.nonEmpty()), 'ffmpeg'),
+  // Docker sets it to production; the dev server leaves it unset.
+  NODE_ENV: v.optional(v.string()),
   SECRET_KEY: v.pipe(
     v.string('SECRET_KEY is required'),
     v.minLength(32, 'SECRET_KEY must be at least 32 characters'),
@@ -53,6 +55,12 @@ export interface Config {
   webDir: string
   telegram?: { token: string; owner: string }
   webAppUrl?: string
+  /**
+   * Development mode: anywhere NODE_ENV is not `production`, which the
+   * image sets. Unlocks tools that would hurt real data, such as deleting
+   * everything.
+   */
+  dev: boolean
 }
 
 export function loadConfig(
@@ -95,5 +103,6 @@ export function loadConfig(
         }
       : {}),
     ...(parsed.WEB_APP_URL ? { webAppUrl: parsed.WEB_APP_URL } : {}),
+    dev: parsed.NODE_ENV !== 'production',
   }
 }

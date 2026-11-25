@@ -41,6 +41,8 @@ export interface HttpOptions {
   /** Tell the owner, through the bot, that a passkey or domain came or went. */
   notify?: (text: string) => void
   now?: () => number
+  /** Development mode, where deleting everything is allowed. */
+  dev?: boolean
 }
 
 /**
@@ -134,7 +136,9 @@ export function createApi(options: HttpOptions) {
         deleteCookie(c, SESSION_COOKIE, { path: '/', secure: true })
         return c.body(null, 204)
       })
-      .route('/', captureRoutes(ctx))
+      // What the web app shows only on a development server.
+      .get('/instance', (c) => c.json({ dev: !!options.dev }))
+      .route('/', captureRoutes(ctx, { dev: !!options.dev }))
       .route('/', accountRoutes(ctx))
       .route('/', libraryRoutes(ctx))
       .route('/', folderRoutes(ctx))

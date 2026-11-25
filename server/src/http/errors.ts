@@ -17,6 +17,7 @@ const statuses: Record<ErrorKind, ContentfulStatusCode> = {
   invalid_annotation: 400,
   invalid_credential: 400,
   invalid_account: 400,
+  dev_only: 403,
   not_found: 404,
   conflict: 409,
   no_more_pages: 409,

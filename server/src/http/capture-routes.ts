@@ -236,7 +236,10 @@ const idempotencyKey = (c: {
   req: { header: (name: string) => string | undefined }
 }) => c.req.header('Idempotency-Key') || undefined
 
-export function captureRoutes(ctx: AccountsContext) {
+export function captureRoutes(
+  ctx: AccountsContext,
+  { dev = false }: { dev?: boolean } = {},
+) {
   return (
     new Hono<Env>()
       .post(
@@ -443,6 +446,8 @@ export function captureRoutes(ctx: AccountsContext) {
         json(v.strictObject({ confirm: v.literal('delete all') })),
         (c) => {
           c.req.valid('json')
+          // Real data is never one request away from gone.
+          if (!dev) throw new AppError('dev_only')
           return c.json({ ...deleteAll(ctx.db), running: 0 })
         },
       )
