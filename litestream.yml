@@ -1,0 +1,37 @@
+# Litestream copies the database to the private R2 bucket midden-backup as
+# it changes. It runs as the `litestream` service in compose.yaml, enabled by
+# COMPOSE_PROFILES=litestream; it reads the bucket's token from
+# LITESTREAM_ACCESS_KEY_ID and LITESTREAM_SECRET_ACCESS_KEY. Restart it after
+# changing this file. Intervals and costs: docs/operations.md.
+dbs:
+  - path: /data/midden.db
+    # Every check that finds new WAL pages writes one LTX file, and each one
+    # is a PUT to R2: at the default 1 s a busy day makes 86,400 of them.
+    # 10 s caps it at 8,640 and loses at most ~10 s of writes with the disk.
+    monitor-interval: 10s
+    replica:
+      url: s3://midden-backup/db
+      endpoint: https://9183b1c394e4cd2f0a7d3c978bc53a29.r2.cloudflarestorage.com
+      region: auto
+      # Upload each file as soon as it is written.
+      sync-interval: 1s
+
+# Compaction: per-minute files are the restore points for the whole
+# retention; hourly ones keep a restore from replaying a day of minutes.
+levels:
+  - interval: 1m
+  - interval: 1h
+
+# A full snapshot daily (at 00:00 UTC), kept 8 days: every moment of the last
+# 7 days then has a snapshot before it to restore from.
+snapshot:
+  interval: 24h
+  retention: 192h
+
+# Each check lists every per-minute file in the bucket (a Class A operation
+# per 1,000); every 15 s by default, hourly is enough without read replicas.
+l0-retention-check-interval: 1h
+
+# Sent only while syncs succeed; midden tells the owner when they stop.
+heartbeat-url: http://midden:8081/litestream/heartbeat
+heartbeat-interval: 5m
