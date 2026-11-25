@@ -235,9 +235,14 @@ test('updates a profile with its lists and lists its follow changes', async ({
   await update.getByRole('link', { name: '查看进度' }).click()
   await expect(page).toHaveURL(new RegExp(`/captures/${recordId}$`))
   await expect(page.locator('.summary .title')).toHaveText('更新 @owner')
-  await expect(
-    page.locator('section').filter({ hasText: '账号' }).locator('.profile'),
-  ).toContainText('资料 ✓ · 帖子 0 · 关注 ✓ · 粉丝 跳过')
+  // No new posts: 账号 is the first tab, open.
+  await expect(page.getByRole('tab', { name: '账号 1' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(page.locator('.profile')).toContainText(
+    '资料 ✓ · 帖子 0 · 关注 ✓ · 粉丝 跳过',
+  )
   await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
 

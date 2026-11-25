@@ -609,17 +609,20 @@ test("an update's profile stopped by the post cap reads on in the same record", 
     return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
   await page.goto(`/app/#/captures/${retried}`)
-  const profiles = page.locator('.section').filter({
-    has: page.getByRole('heading', { name: '账号' }),
-  })
+  // The profiles are a tab, left of the updated posts.
+  await expect(page.getByRole('tab')).toHaveText([
+    '新增记录 1000',
+    '账号 1',
+    '更新记录 1',
+  ])
+  await page.getByRole('tab', { name: '账号 1' }).click()
+  const profiles = page.locator('body')
   await expect(profiles).toContainText('资料 ✓ · 帖子 1000（未到已有数据）')
-  await profiles.getByRole('button', { name: '继续抓取' }).click()
+  await page.getByRole('button', { name: '继续抓取' }).click()
   // The same record, now reading on.
   await expect(profiles).toContainText('资料 ✓ · 帖子 1000/1100')
   await expect(page).toHaveURL(new RegExp(`#/captures/${retried}$`))
-  await expect(profiles.getByRole('button', { name: '继续抓取' })).toHaveCount(
-    0,
-  )
+  await expect(page.getByRole('button', { name: '继续抓取' })).toHaveCount(0)
   expect(sent).toEqual([{ collection_id: profile }])
 })
 

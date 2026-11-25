@@ -52,24 +52,34 @@ const members = shallowRef<CaptureMember[]>([])
 const membersNext = shallowRef('')
 const membersLoading = shallowRef(false)
 const membersError = shallowRef('')
-type Filter = 'added' | 'updated' | 'problem' | 'pending' | ''
+type MemberFilter = 'added' | 'updated' | 'problem' | 'pending' | ''
+/** A tab: members by state, or `profiles`, each profile part by part. */
+type Filter = MemberFilter | 'profiles'
 interface FilterOption {
   value: Filter
   label: string
   count: number
 }
-/** Unset until the record loads, and while no tab has posts. */
+/** Unset until the record loads, and while no tab has anything. */
 const filter = shallowRef<Filter>()
 /**
- * Only tabs with posts are shown, so an empty one says nothing at all.
+ * Only tabs with something in them are shown, so an empty one says nothing
+ * at all. 账号 lists the profiles part by part, before the updated posts.
  * Running members are only under 进行中, shown while there are any; once
  * finished they move to the tab of their outcome. New and updated count
  * finished members only, like the record's counts. A record with members
  * from before new and updated were told apart lists them all instead.
  */
 const filters = computed((): FilterOption[] => {
-  const m = record.value?.members
-  if (!m) return []
+  const r = record.value
+  if (!r) return []
+  const m = r.members
+  const profiles: FilterOption = {
+    value: 'profiles',
+    label: '账号',
+    count: (r.profiles?.length ?? 0) + (r.more_profiles ?? 0),
+  }
+  if (!m) return profiles.count ? [profiles] : []
   const options: FilterOption[] =
     m.added !== undefined && m.updated !== undefined
       ? [
@@ -78,6 +88,7 @@ const filters = computed((): FilterOption[] => {
             label: '新增记录',
             count: m.added,
           },
+          profiles,
           {
             value: 'updated',
             label: '更新记录',
@@ -90,6 +101,7 @@ const filters = computed((): FilterOption[] => {
             label: '全部',
             count: m.complete + m.partial + m.failed + m.pending,
           },
+          profiles,
         ]
   options.push({
     value: 'problem',
@@ -110,7 +122,7 @@ const heading = computed(() => {
   return only.value ? only.label : '帖子'
 })
 /** Pages loaded per tab, so going back to a tab shows it at once. */
-const cache = new Map<Filter, { items: CaptureMember[]; next: string }>()
+const cache = new Map<MemberFilter, { items: CaptureMember[]; next: string }>()
 
 const status = computed(() => record.value && recordStatus(record.value))
 const counts = computed(() => (record.value ? recordCounts(record.value) : ''))
@@ -173,8 +185,8 @@ async function load() {
       filter.value = options[0]?.value
       members.value = []
       membersNext.value = ''
-      // With no tab left, retire a page still loading for the last one.
-      if (filter.value === undefined) {
+      // With no member tab open, retire a page still loading for the last one.
+      if (filter.value === undefined || filter.value === 'profiles') {
         ++membersRun
         membersLoading.value = false
         membersError.value = ''
@@ -200,7 +212,7 @@ let membersRun = 0
 async function loadMembers(more = false) {
   if (more && (membersLoading.value || !membersNext.value)) return
   const state = filter.value
-  if (state === undefined) return
+  if (state === undefined || state === 'profiles') return
   const current = ++membersRun
   membersLoading.value = true
   membersError.value = ''
@@ -227,7 +239,9 @@ async function loadMembers(more = false) {
 function setFilter(value: Filter) {
   if (filter.value === value) return
   filter.value = value
-  const cached = cache.get(value)
+  // 账号 comes with the record: nothing to load.
+  const cached =
+    value === 'profiles' ? { items: [], next: '' } : cache.get(value)
   if (cached) {
     // Retires a page still loading for the tab left behind.
     ++membersRun
@@ -546,48 +560,6 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
         @select="retry"
       />
     </ListSection>
-    <!-- An update's profiles first, each with how its parts went. -->
-    <ListSection
-      v-if="record.profiles?.length"
-      title="账号"
-      :footnote="
-        record.more_profiles ? `另有 ${record.more_profiles} 个账号` : undefined
-      "
-    >
-      <template v-for="p in record.profiles" :key="p.collection_id">
-        <AppLink class="line profile" :to="collectionPage(p.collection_id)">
-          <span class="line-text"
-            >{{ profileHandle(p.url, p.handle)
-            }}<small class="hint">{{ profilePartText(p) }}</small
-            ><small v-if="p.error" class="hint">{{ p.error }}</small></span
-          >
-          <span class="chevron" aria-hidden="true">›</span>
-        </AppLink>
-        <div v-for="part in retryParts(p)" :key="part.id" class="member part">
-          <span class="member-main"
-            ><span class="line-text"
-              >{{ part.label
-              }}<small class="hint">{{ part.detail }}</small></span
-            ></span
-          >
-          <button
-            type="button"
-            class="member-retry"
-            :aria-label="`重试 ${profileHandle(p.url, p.handle)} ${part.label}`"
-            :disabled="busy"
-            @click="retryFailed(part.id)"
-          >
-            重试
-          </button>
-        </div>
-        <ListButton
-          v-if="canContinue(p)"
-          label="继续抓取"
-          :disabled="busy"
-          @select="continueTimeline(p.collection_id)"
-        />
-      </template>
-    </ListSection>
     <ListSection v-if="reasons.length" title="失败原因">
       <p v-for="reason in reasons" :key="reason.text" class="line">
         <span class="line-text">{{ reason.text }}</span>
@@ -622,8 +594,8 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
         @select="retryFailed(record.job_id)"
       />
     </ListSection>
-    <template v-if="record.members && filters.length">
-      <div v-if="!heading" class="tabs" role="tablist" aria-label="帖子明细">
+    <template v-if="filters.length">
+      <div v-if="!heading" class="tabs" role="tablist" aria-label="记录明细">
         <button
           v-for="option in filters"
           :key="option.value"
@@ -637,49 +609,95 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
           {{ option.label }} <span class="tab-count">{{ option.count }}</span>
         </button>
       </div>
-      <ListSection :title="heading">
-        <div v-for="m in members" :key="m.job_id" class="member">
-          <component
-            :is="linked(m) ? AppLink : 'span'"
-            class="member-main"
-            :to="linked(m) ? collectionPage(m.collection_id) : undefined"
-          >
+      <!-- The profiles, each with how its parts went. -->
+      <ListSection
+        v-if="filter === 'profiles'"
+        :title="heading"
+        :footnote="
+          record.more_profiles
+            ? `另有 ${record.more_profiles} 个账号`
+            : undefined
+        "
+      >
+        <template v-for="p in record.profiles" :key="p.collection_id">
+          <AppLink class="line profile" :to="collectionPage(p.collection_id)">
             <span class="line-text"
-              >{{ memberTitle(m)
-              }}<small
-                v-for="reason in m.error ? [m.error] : m.reasons"
-                :key="reason"
-                class="hint"
-                >{{ reason }}</small
+              >{{ profileHandle(p.url, p.handle)
+              }}<small class="hint">{{ profilePartText(p) }}</small
+              ><small v-if="p.error" class="hint">{{ p.error }}</small></span
+            >
+            <span class="chevron" aria-hidden="true">›</span>
+          </AppLink>
+          <div v-for="part in retryParts(p)" :key="part.id" class="member part">
+            <span class="member-main"
+              ><span class="line-text"
+                >{{ part.label
+                }}<small class="hint">{{ part.detail }}</small></span
               ></span
             >
-            <span
-              class="line-trailing"
-              :class="stateStatus(m.state, m.waiting).tone"
-              >{{ stateStatus(m.state, m.waiting).label }}</span
+            <button
+              type="button"
+              class="member-retry"
+              :aria-label="`重试 ${profileHandle(p.url, p.handle)} ${part.label}`"
+              :disabled="busy"
+              @click="retryFailed(part.id)"
             >
-          </component>
-          <button
-            v-if="m.retryable"
-            type="button"
-            class="member-retry"
-            :aria-label="`重试 ${memberTitle(m)}`"
+              重试
+            </button>
+          </div>
+          <ListButton
+            v-if="canContinue(p)"
+            label="继续抓取"
             :disabled="busy"
-            @click="retryFailed(m.job_id)"
-          >
-            重试
-          </button>
-        </div>
-        <p v-if="!members.length && membersLoading" class="line muted">
-          加载中…
-        </p>
+            @select="continueTimeline(p.collection_id)"
+          />
+        </template>
       </ListSection>
-      <InfiniteLoader
-        v-if="membersNext || membersError"
-        :loading="membersLoading"
-        :error="membersError"
-        @more="loadMembers(!!membersNext)"
-      />
+      <template v-else>
+        <ListSection :title="heading">
+          <div v-for="m in members" :key="m.job_id" class="member">
+            <component
+              :is="linked(m) ? AppLink : 'span'"
+              class="member-main"
+              :to="linked(m) ? collectionPage(m.collection_id) : undefined"
+            >
+              <span class="line-text"
+                >{{ memberTitle(m)
+                }}<small
+                  v-for="reason in m.error ? [m.error] : m.reasons"
+                  :key="reason"
+                  class="hint"
+                  >{{ reason }}</small
+                ></span
+              >
+              <span
+                class="line-trailing"
+                :class="stateStatus(m.state, m.waiting).tone"
+                >{{ stateStatus(m.state, m.waiting).label }}</span
+              >
+            </component>
+            <button
+              v-if="m.retryable"
+              type="button"
+              class="member-retry"
+              :aria-label="`重试 ${memberTitle(m)}`"
+              :disabled="busy"
+              @click="retryFailed(m.job_id)"
+            >
+              重试
+            </button>
+          </div>
+          <p v-if="!members.length && membersLoading" class="line muted">
+            加载中…
+          </p>
+        </ListSection>
+        <InfiniteLoader
+          v-if="membersNext || membersError"
+          :loading="membersLoading"
+          :error="membersError"
+          @more="loadMembers(!!membersNext)"
+        />
+      </template>
     </template>
   </template>
 </template>

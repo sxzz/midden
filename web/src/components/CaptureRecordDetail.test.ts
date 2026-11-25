@@ -283,21 +283,25 @@ it('an update: its target as the title, its profiles part by part, its lists as 
     '正在更新 · 新增 1 · 更新 2 · 异常 1 · 进行中 2',
   )
   expect(Number(el.querySelector('progress')?.value)).toBeCloseTo(4 / 6)
-  const profiles = [...el.querySelectorAll('.section')].find(
-    (s) => s.querySelector('h2')?.textContent === '账号',
-  )!
-  expect(profiles.textContent).toContain('@cat')
-  expect(profiles.textContent).toContain(
-    '资料 ✓ · 帖子 34/100 · 关注 ✓ · 粉丝 跳过',
-  )
   // A folder has no link of its own.
   expect(el.textContent).not.toContain('打开原链接')
+  // The profiles are a tab of their own, before the updated posts.
   expect(tabs().map((t) => t.name)).toEqual([
     '新增记录 1',
+    '账号 1',
     '更新记录 2',
     '异常记录 1',
     '进行中 1',
   ])
+  expect(el.textContent).not.toContain('资料 ✓')
+  click('账号')
+  await vi.waitFor(() =>
+    expect(el.textContent).toContain(
+      '资料 ✓ · 帖子 34/100 · 关注 ✓ · 粉丝 跳过',
+    ),
+  )
+  expect(el.textContent).toContain('@cat')
+  expect(el.textContent).not.toContain('status/4')
   click('进行中')
   await vi.waitFor(() => expect(el.textContent).toContain('@cat 关注名单'))
 })
@@ -363,6 +367,10 @@ it('continues a profile the post cap stopped, inside the same record', async () 
   const app = createVaporApp(CaptureRecordDetail, { id: 'record' })
   app.mount(el)
   unmount = () => app.unmount()
+  await vi.waitFor(() => expect(el.querySelector('[role=tab]')).not.toBeNull())
+  ;[...el.querySelectorAll<HTMLElement>('[role=tab]')]
+    .find((tab) => tab.textContent!.startsWith('账号'))!
+    .click()
   await vi.waitFor(() =>
     expect(el.textContent).toContain('资料 ✓ · 帖子 1000（未到已有数据）'),
   )
@@ -456,6 +464,49 @@ it('a post shows only its references, and nothing with the defaults', async () =
   expect(two.el.textContent).not.toContain('选项')
 })
 
+it('opens 账号 when it is the first tab, and heads it when it is the only one', async () => {
+  const part = {
+    collection_id: 'p1',
+    url: 'https://x.com/i/user/1',
+    handle: 'cat',
+    state: 'complete',
+  }
+  const first = mount(
+    () => ({
+      ...detail({ complete: 2, partial: 0, failed: 0, added: 0, updated: 2 }),
+      profiles: [part],
+    }),
+    { updated: [member('1'), member('2')] },
+  )
+  await vi.waitFor(() => expect(first.el.textContent).toContain('资料 ✓'))
+  expect(first.tabs()).toEqual([
+    { name: '账号 1', selected: true },
+    { name: '更新记录 2', selected: false },
+  ])
+  // Nothing to load for it.
+  expect(first.queried).toEqual([])
+  first.click('更新记录')
+  await vi.waitFor(() => expect(first.el.textContent).toContain('status/2'))
+  expect(first.el.textContent).not.toContain('资料 ✓')
+  unmount()
+  unmount = () => {}
+  document.body.replaceChildren()
+
+  // A profile captured without its posts: its parts are all there is.
+  const only = mount(
+    () =>
+      ({
+        ...detail({}),
+        members: undefined,
+        profiles: [part],
+      }) as never,
+    {},
+  )
+  await vi.waitFor(() => expect(only.el.textContent).toContain('资料 ✓'))
+  expect(only.tabs()).toEqual([])
+  expect(only.el.querySelector('h2')?.textContent).toBe('账号')
+})
+
 /** A profile record with something failed in each part. */
 const failing = (retried: boolean) => ({
   ...detail({ complete: 1, partial: 1, failed: 2, added: 2, updated: 0 }),
@@ -536,6 +587,12 @@ it('offers a retry next to each failed or incomplete part, and all at once', asy
     [...el.querySelectorAll('button')].map(
       (b) => b.getAttribute('aria-label') ?? b.textContent!.trim(),
     )
+  const tab = (name: string) =>
+    [...el.querySelectorAll<HTMLElement>('[role=tab]')]
+      .find((t) => t.textContent!.startsWith(name))!
+      .click()
+  await vi.waitFor(() => expect(el.querySelector('[role=tab]')).not.toBeNull())
+  tab('账号')
   await vi.waitFor(() => expect(el.textContent).toContain('帖子第 2 页'))
   expect(buttons()).toEqual(
     expect.arrayContaining([
@@ -548,20 +605,21 @@ it('offers a retry next to each failed or incomplete part, and all at once', asy
   )
   // Skipped over 5000 is not a failure.
   expect(buttons()).not.toContain('重试 @cat 粉丝名单')
-  ;[...el.querySelectorAll<HTMLElement>('[role=tab]')]
-    .find((tab) => tab.textContent!.startsWith('异常记录'))!
-    .click()
+  tab('异常记录')
   await vi.waitFor(() => expect(el.textContent).toContain('status/gone'))
   expect(buttons()).toContain('重试 x.com/fixture/status/failed')
   expect(buttons()).toContain('重试 x.com/fixture/status/partial')
   expect(buttons()).not.toContain('重试 x.com/fixture/status/gone')
 
+  tab('账号')
+  await vi.waitFor(() => expect(el.textContent).toContain('帖子第 2 页'))
   el.querySelector<HTMLElement>('[aria-label="重试 @cat 帖子第 2 页"]')!.click()
   await vi.waitFor(() => expect(sent).toEqual([{ id: 'page-2' }]))
   // Retries under way show as running, with nothing left to retry.
   await vi.waitFor(() => expect(buttons()).not.toContain('全部重试'))
   expect(buttons().filter((b) => b.startsWith('重试'))).toEqual([])
   expect(el.textContent).toContain('资料 进行中')
+  tab('异常记录')
   await vi.waitFor(() => expect(el.textContent).toContain('正在保存媒体'))
 })
 
