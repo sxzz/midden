@@ -131,12 +131,12 @@ test('a clip taller than the viewer is contained and follows the viewport', asyn
     const { x, y, width, height } = (await video.boundingBox())!
     return [x, y, width, height].map(Math.round)
   }
-  // The slide fills what the chrome leaves free and the frame is fitted
+  // The slide fills what the bars leave free and the frame is fitted
   // inside it, whatever the clip's own proportions.
-  await expect.poll(box).toEqual([12, 72, 366, 622])
+  await expect.poll(box).toEqual([14, 68, 362, 611])
   await expect(video).toHaveCSS('object-fit', 'contain')
   await page.setViewportSize({ width: 844, height: 390 })
-  await expect.poll(box).toEqual([12, 72, 820, 168])
+  await expect.poll(box).toEqual([14, 68, 816, 160])
 })
 
 test('detail image and video thumbnails have equal rows with uncropped media', async ({

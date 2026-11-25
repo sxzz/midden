@@ -45,28 +45,29 @@ test('first list preview fits the image after dimensions arrive during opening',
   const image = page
     .getByRole('dialog')
     .locator('.pswp__item[aria-hidden="false"] img.pswp__img')
-  // No thumbnail dimensions are known yet, so the slide spans the viewport
-  // and the picture is contained instead of stretched to a guessed ratio.
+  // No thumbnail dimensions are known yet, so the slide spans the area the
+  // bars leave free (68px above, the 80px caption area below) and the picture
+  // is contained instead of stretched to a guessed ratio.
   await expect(image).toHaveCSS('object-fit', 'contain')
   await expect
     .poll(async () => {
       const box = await image.boundingBox()
       return [Math.round(box?.width || 0), Math.round(box?.height || 0)]
     })
-    .toEqual([390, 844])
+    .toEqual([390, 696])
   release()
   await expect
     .poll(async () => {
       const box = await image.boundingBox()
       return Math.round(box?.height || 0)
     })
-    .toBe(844)
+    .toBe(696)
   await expect
     .poll(async () => {
       const box = await image.boundingBox()
       return Math.round(box?.width || 0)
     })
-    .toBe(281)
+    .toBe(232)
   // The fitted size follows the viewer when the viewport changes.
   await page.setViewportSize({ width: 844, height: 390 })
   await expect
@@ -74,11 +75,11 @@ test('first list preview fits the image after dimensions arrive during opening',
       const box = await image.boundingBox()
       return [Math.round(box?.width || 0), Math.round(box?.height || 0)]
     })
-    .toEqual([130, 390])
+    .toEqual([81, 242])
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('button', { name: '关闭图片' }).click()
   await page.getByRole('button', { name: '放大图片', exact: true }).click()
   await expect
     .poll(async () => Math.round((await image.boundingBox())?.height || 0))
-    .toBe(844)
+    .toBe(696)
 })

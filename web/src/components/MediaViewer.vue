@@ -17,6 +17,7 @@ import {
   type Collection,
 } from '../api'
 import { host } from '../host'
+import { bottomBudget, mediaInsets, type Chrome } from '../media-fit'
 import { present } from '../presentation'
 import { collectionHref } from '../share'
 import AppLink from './ui/AppLink.vue'
@@ -53,6 +54,9 @@ const selectedCollection = computed(
     (props.collectionIds?.[selected.value.id] || props.collectionId),
 )
 const expanded = shallowRef(false)
+// A slide shown before the opening animation ends never gets activated, and
+// stays blank; moving waits for the viewer to be open.
+const opened = shallowRef(false)
 const caption = computed(() => {
   const collection =
     props.collections?.find((item) => item.id === selectedCollection.value) ||
@@ -66,6 +70,12 @@ const isVideo = computed(() => selected.value?.mime?.startsWith('video/'))
 const videos = new Set<HTMLVideoElement>()
 const dialog = useTemplateRef<HTMLDialogElement>('viewer')
 const stage = useTemplateRef<HTMLDivElement>('stage')
+const topBar = useTemplateRef<HTMLDivElement>('topBar')
+const bottomBar = useTemplateRef<HTMLDivElement>('bottomBar')
+const hasBottomBar = computed(
+  () =>
+    !!caption.value || !!selected.value?.alt_text || props.assets.length > 1,
+)
 const saving = shallowRef(false)
 const saveError = shallowRef('')
 function save() {
@@ -93,9 +103,9 @@ function save() {
     link.remove()
   }
 }
-// Keeps the native video controls clear of the floating chrome.
-const videoPadding = { top: 72, bottom: 80, left: 12, right: 12 }
-const noPadding = { top: 0, bottom: 0, left: 0, right: 0 }
+// What the floating bars take of the stage. Media is fitted in the rest, so at
+// its default zoom it never lies under the text, the captions or the buttons.
+let chrome: Chrome = { top: 0, bottom: 0, side: 0 }
 let photoSwipe: PhotoSwipe | undefined
 let resizeObserver: ResizeObserver | undefined
 let previousOverflow = ''
@@ -106,6 +116,7 @@ function close() {
   else photoSwipe.close()
 }
 function move(delta: number) {
+  if (!opened.value) return
   photoSwipe?.mainScroll.moveIndexBy(
     delta,
     !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -118,6 +129,31 @@ function keydown(event: KeyboardEvent) {
     move(event.key === 'ArrowLeft' ? -1 : 1)
   }
 }
+// Caps the bottom area (text beyond the cap scrolls inside it), then reads
+// the bars' sizes. Returns whether they changed since the last reading.
+function measure(el: HTMLElement) {
+  const top = topBar.value
+  const bottom = bottomBar.value
+  if (!top || !bottom) return false
+  const height = el.clientHeight || window.innerHeight
+  const topHeight = Math.ceil(top.getBoundingClientRect().height)
+  dialog.value?.style.setProperty(
+    '--bottom-max',
+    `${bottomBudget(height, topHeight)}px`,
+  )
+  const next: Chrome = {
+    top: topHeight,
+    bottom: Math.ceil(bottom.getBoundingClientRect().height),
+    // The top bar's side padding already holds the safe areas.
+    side: Number.parseFloat(getComputedStyle(top).paddingLeft) || 0,
+  }
+  const changed =
+    next.top !== chrome.top ||
+    next.bottom !== chrome.bottom ||
+    next.side !== chrome.side
+  chrome = next
+  return changed
+}
 onMounted(() => {
   if (!stage.value) return
   opener =
@@ -129,6 +165,7 @@ onMounted(() => {
   dialog.value?.showModal()
   const el = stage.value
   const assets = props.assets
+  measure(el)
   // Slide geometry is decided in `calcSlideSize` below; these dimensions only
   // have to be non-zero for PhotoSwipe to treat the item as sized.
   const dataSource = assets.map((image) => {
@@ -171,10 +208,17 @@ onMounted(() => {
     tapAction: false,
     doubleTapAction: 'zoom',
     errorMsg: '媒体加载失败',
-    paddingFn: (_viewport, item) =>
-      item.type === 'video'
-        ? { ...videoPadding, bottom: caption.value ? 150 : videoPadding.bottom }
-        : noPadding,
+    // The default (fitted) zoom stays inside this padding; a zoomed image may
+    // pan over it. A video has no zoom, so it never leaves it.
+    paddingFn: (viewport, item) =>
+      mediaInsets(
+        { width: viewport.x, height: viewport.y },
+        chrome,
+        item.type === 'video',
+      ),
+    // A video cannot be pinched larger than its free area; 0 keeps PhotoSwipe's
+    // own maximum for images.
+    maxZoomLevel: (level) => (level.itemData.type === 'video' ? 1 : 0),
   })
   photoSwipe = pswp
   // The single place a slide gets its size, run again on every viewport
@@ -192,8 +236,15 @@ onMounted(() => {
     slide.zoomLevels.update(slide.width, slide.height, slide.panAreaSize)
   })
   if (typeof ResizeObserver !== 'undefined') {
-    resizeObserver = new ResizeObserver(() => pswp.updateSize())
+    // The stage follows the window, the host viewport and rotation; the bars
+    // follow the text shown. Either one moves the free area.
+    resizeObserver = new ResizeObserver(() => {
+      if (disposed) return
+      pswp.updateSize(measure(el))
+    })
     resizeObserver.observe(el)
+    if (topBar.value) resizeObserver.observe(topBar.value)
+    if (bottomBar.value) resizeObserver.observe(bottomBar.value)
   }
   pswp.on('contentLoad', (event) => {
     const { content } = event
@@ -249,6 +300,7 @@ onMounted(() => {
   })
   pswp.on('openingAnimationEnd', () => {
     if (disposed) pswp.destroy()
+    else opened.value = true
   })
   pswp.on('change', () => {
     index.value = pswp.currIndex
@@ -338,7 +390,7 @@ watch(
          still reaches the controls, and their rings stay visible. -->
     <div ref="stage" class="stage" tabindex="-1" autofocus />
 
-    <div class="chrome chrome-top">
+    <div ref="topBar" class="chrome chrome-top">
       <button
         type="button"
         class="glass close"
@@ -419,55 +471,61 @@ watch(
     </div>
     <p v-if="saveError" class="save-error" role="alert">{{ saveError }}</p>
 
-    <div
-      v-if="caption || selected?.alt_text || assets.length > 1"
-      class="chrome chrome-bottom"
-    >
-      <div v-if="caption" class="post-caption">
-        <component
-          :is="caption.profileHref ? AppLink : 'span'"
-          :href="caption.profileHref"
-          class="caption-avatar"
-          :aria-label="`查看${caption.name}的主页`"
-          @navigate="emit('close')"
-        >
-          <LoadingImage
-            v-if="caption.avatar && !caption.avatar.sensitive"
-            :src="previewURL(caption.avatar)"
-            alt=""
-          />
-          <span v-else aria-hidden="true">{{ caption.name.slice(0, 1) }}</span>
-        </component>
-        <div class="caption-content">
-          <AppLink
-            v-if="caption.profileCollectionId"
-            :href="collectionHref(caption.profileCollectionId)"
+    <!-- Kept in the page even when empty, so its size is always read. -->
+    <div v-show="hasBottomBar" ref="bottomBar" class="chrome chrome-bottom">
+      <div v-if="caption || selected?.alt_text" class="text">
+        <div v-if="caption" class="post-caption">
+          <component
+            :is="caption.profileHref ? AppLink : 'span'"
+            :href="caption.profileHref"
+            class="caption-avatar"
+            :aria-label="`查看${caption.name}的主页`"
             @navigate="emit('close')"
-            >{{ caption.name
-            }}<span v-if="caption.handle"> @{{ caption.handle }}</span></AppLink
           >
-          <strong v-else
-            >{{ caption.name
-            }}<span v-if="caption.handle"> @{{ caption.handle }}</span></strong
-          >
-          <button
-            v-if="caption.body"
-            type="button"
-            class="caption-body"
-            :class="{ expanded }"
-            :aria-expanded="expanded"
-            @click="expanded = !expanded"
-          >
-            {{ caption.body }}
-          </button>
+            <LoadingImage
+              v-if="caption.avatar && !caption.avatar.sensitive"
+              :src="previewURL(caption.avatar)"
+              alt=""
+            />
+            <span v-else aria-hidden="true">{{
+              caption.name.slice(0, 1)
+            }}</span>
+          </component>
+          <div class="caption-content">
+            <AppLink
+              v-if="caption.profileCollectionId"
+              :href="collectionHref(caption.profileCollectionId)"
+              @navigate="emit('close')"
+              >{{ caption.name
+              }}<span v-if="caption.handle">
+                @{{ caption.handle }}</span
+              ></AppLink
+            >
+            <strong v-else
+              >{{ caption.name
+              }}<span v-if="caption.handle">
+                @{{ caption.handle }}</span
+              ></strong
+            >
+            <button
+              v-if="caption.body"
+              type="button"
+              class="caption-body"
+              :class="{ expanded }"
+              :aria-expanded="expanded"
+              @click="expanded = !expanded"
+            >
+              {{ caption.body }}
+            </button>
+          </div>
         </div>
+        <p v-if="selected?.alt_text" class="caption">{{ selected.alt_text }}</p>
       </div>
-      <p v-if="selected?.alt_text" class="caption">{{ selected.alt_text }}</p>
       <div v-if="assets.length > 1" class="glass remote">
         <button
           type="button"
           class="nav"
-          :disabled="index === 0"
+          :disabled="!opened || index === 0"
           aria-label="上一张"
           @click="move(-1)"
         >
@@ -495,7 +553,7 @@ watch(
         <button
           type="button"
           class="nav"
-          :disabled="index === assets.length - 1"
+          :disabled="!opened || index === assets.length - 1"
           aria-label="下一张"
           @click="move(1)"
         >
@@ -565,12 +623,23 @@ watch(
   color: white;
   line-height: 1.5;
   width: 100%;
-  padding: 6px 0;
+  /* Margin, not padding: a clamped box paints the next line in its padding. */
+  margin: 6px 0;
 }
 .caption-body.expanded {
   display: block;
-  max-height: 40dvh;
+}
+/* Long text scrolls here, inside the cap on the bottom area, instead of
+   growing over the media. */
+.text {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  width: 100%;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
 }
 
 .viewer {
@@ -664,9 +733,11 @@ watch(
 }
 .chrome-bottom {
   bottom: 0;
-  display: grid;
-  justify-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 8px;
+  max-height: var(--bottom-max, 50dvh);
   padding: 12px calc(env(safe-area-inset-right, 0px) + 14px)
     calc(env(safe-area-inset-bottom, 0px) + 8px)
     calc(env(safe-area-inset-left, 0px) + 14px);
@@ -790,6 +861,7 @@ watch(
 
 /* Arrows and page dots read as one glass remote rather than loose buttons. */
 .remote {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 2px;

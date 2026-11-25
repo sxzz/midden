@@ -63,6 +63,8 @@ test('album reuses loaded data and opens the currently previewed collection', as
   await page.locator('.album button').first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByText('1 / 3')).toBeVisible()
+  // Moving waits for the opening animation; the buttons enable when it ends.
+  await expect(dialog.getByRole('button', { name: '下一张' })).toBeEnabled()
   await page.keyboard.press('ArrowRight')
   await expect(dialog.getByText('2 / 3')).toBeVisible()
   await page.keyboard.press('ArrowRight')
