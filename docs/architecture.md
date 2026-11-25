@@ -48,7 +48,7 @@ flowchart LR
 - 统计趋势不折叠：`GET /v1/collections/:id/counts` 列出每次成功抓取为根实体记下的计数（按指针，如 `/metadata/followers`），最旧的在前，最多最近 1000 次（`limit` 可取更少，详情页只取 2 次来判断是否有趋势）。至少两次抓取读到同一项计数时，详情页提供「统计趋势」页，每项计数一张折线图。
 - 资料修改记录：`GET /v1/collections/:id/profile-changes` 按时间比较 Profile 相邻的版本，列出页面显示的资料（昵称、用户名、简介、受保护、头像、主页封面）有变化的版本，最新的在前，每条给出变化的字段及其前后的值。只比较网页显示的部分，读法与网页相同（简介没有 `description` 时取版本文本）；计数、不稳定字段、时间线记下的转发等不显示的部分不算。图片按内容哈希比较；抓取未能保存的图片、未说明是否受保护的抓取视为未知，不算变化。只比较最近 1000 个版本（`limit` 可取更少的条目）；不是 Profile 的收藏返回空列表。Profile 至少有一条记录时（详情页只取 1 条来判断），详情页提供「资料修改记录」页，按天分组的时间线，最新的在上。
 - 实体（帖子、账号）按平台身份共享，`entity_versions` 按内容去重。
-- 媒体按 SHA-256 存在 `media/ab/cd/<哈希>`，`blobs` 记录类型与大小，缩略图同样按内容存放。使用 R2 时原文件另存到存储桶的同名键，`blobs.remote_at` 记下上传得到确认的时间，见「媒体链接」。
+- 媒体按 SHA-256 存在 `media/ab/cd/<哈希>`，`blobs` 记录类型与大小，缩略图同样按内容存放。使用 R2 时原文件上传到存储桶的同名键，`blobs.remote_at` 记下上传得到确认的时间，之后删除本地原文件，见「媒体链接」。
 - 删除收藏后，维护任务在没有进行中的抓取时删除其内容；不再被引用的媒体文件 24 小时后删除。
 - `catalog` 为每个有版本的收藏保存列表筛选与排序所需的字段（根实体类型、作者、媒体种类、发布时间、占用空间、搜索文本、账号的粉丝数与关注数等），由最新版本和最新一次带计数的抓取派生，在同一事务内随抓取完成、关注列表存入账号、删除媒体和原始响应清理更新。列表只读这张窄表；作者的最新资料、作者被打的标签、被保存的转发等跨收藏的条件在查询时通过索引计算。启动时会补齐缺失的行，所以改变它的派生方式时，在迁移中清空这张表即可重建；只涉及少数行时（如只有账号才有的计数）也可以在迁移中就地补齐，不必重建全表。
 - 列表排序（`sort`）：`updated`（最近一次抓取，默认）、`published`（发帖时间，没有时按抓取时间）、`saved`（加入收藏库的时间）、`storage`（占用空间）、`followers`（粉丝数）、`following`（关注数），`order` 为 `desc`（默认）或 `asc`，相同时按收藏 id 排。翻页位置记下排序值和 id，与筛选条件的指纹一起编码，换了筛选或排序就失效。
@@ -181,8 +181,10 @@ API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…
 
 - `local`（`blob/fs-store.ts`）：只有本地目录，所有链接都是上面的签名链接。
 - `r2`（`blob/bucket-store.ts`，S3 通用，经 `blob/s3.ts` 用 SigV4 调用）：本地目录在前，R2 存储桶在后。下载先写本地，新 blob 排一个 `upload` 任务（`capture/upload.ts`，`upload` 队列 4 个并发），上传后读回确认，再写 `blobs.remote_at`。`url()` 只对 `remote_at` 已有、且不带文件名的原文件给出公开地址 `MEDIA_PUBLIC_URL/ab/cd/<哈希>`；缩略图（只存本地）、尚未确认的原文件和带文件名的下载（需要 `Content-Disposition`）仍是签名链接。读取（`read`、`stat`）先本地后 R2；`source()` 给 ffmpeg/ffprobe 一个本地路径，或 R2 的预签名 URL（1 小时），让它们只读需要的字节范围。`delete()` 删除本地文件，R2 中有对象时先清除边缘缓存再删对象。
+- 删除本地原文件：同一个 `upload` 任务在写下 `remote_at` 之后，在 `mediaLocks` 这个键的锁内（下载写入和回收删除同一个键时也取它）再次确认 `remote_at`，调用 `deleteLocal()` 删除本地文件，此后 R2 中是唯一的一份。`blob/local-copy.ts` 的 `localCopyHold` 决定暂不删除的情况：这个键同时是缩略图的文件（`blob_thumbnails.key` 或 `removed_media.thumbnail_key`），或这个 blob 还没有 `blob_thumbnails` 行而 `jobs` 中有它的 `thumbnail` 任务。缩略图任务结束（`runThumbnail` 返回或 `failThumbnail`）时调用 `thumbnailDone`，blob 已有 `remote_at` 就再排一个 `upload` 任务，它跳过上传、只删除。两边都是先写自己的结果再查对方的，所以总有一边会删。删除失败由任务重试，不清除 `remote_at`。下载在同一个锁内发现相同内容的 blob 已有 `remote_at` 时不写本地文件。
+- 删除时的读取：`read()` 等文件打开（`open` 事件）才返回流，打开后文件被删仍能读完，打开前被删则改读 R2，所以 Telegram 发送（grammY 的 `InputFile` 调用 `read()`）和 `/media/` 路由不受影响。ffmpeg、ffprobe 经 `withSource()`（`blob/store.ts`）运行：给的是本地路径而运行失败、此时 `source()` 已变为别处（本地文件被删）时，用新的来源再运行一次。`media-migrate` 在另一个进程中运行，锁管不到它：它只在自己写下 `remote_at` 之后删除，依靠的是同样的回退；其间同内容的下载最多留下一个本地副本，由 `media-prune-local` 清理。
 - `/media/` 路由在 `r2` 时让图片和缩略图可被 CDN 缓存（`public, max-age=31536000, immutable`），视频和下载仍为 `private`；签名有效但文件不存在时，若它是某个 blob 的缩略图，就从原文件重新生成（`regenerateThumbnail`，同一个键的并发请求只生成一次），生成的字节不同则记到新键并 307 重定向。
-- 迁移与清理：`blob/migrate.ts`（CLI 的 `media-migrate`、`media-prune-local`），见运维文档。
+- 迁移与清理：`blob/migrate.ts`（CLI 的 `media-migrate`、`media-prune-local`），见运维文档。`media-migrate` 记下后按 `localCopyHold` 删除本地原文件；只按大小相符的对象不算确认，重新上传。`media-prune-local` 处理之前留下的本地原文件。
 
 关系图谱用 WebGL 绘制头像，sigma 以 `crossOrigin="anonymous"` 加载图片；R2 的公开域名对所有响应（包括缓存命中）都返回 `Access-Control-Allow-Origin: *`，所以同一页中普通 `<img>` 与 CORS 方式加载同一地址不会因浏览器缓存冲突（Chromium 中已验证两种先后顺序），不需要给其他图片加 `crossorigin`。网页的 CSP（`scripts/prepare-web-assets.ts`）在 `img-src` 与 `media-src` 中允许 `https://midden-media.sxzz.moe`。
 

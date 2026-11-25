@@ -39,7 +39,7 @@ docker compose pull && docker compose up -d   # 更新
 `main` 的 test 工作流通过后会发布镜像 `ghcr.io/sxzz/midden:latest` 与 `:sha-<提交>`。部署机上的 webhook 收到这次运行完成的事件后，从 `origin/main` 取出 `scripts/deploy.ts` 执行：
 
 1. 确认部署目录（默认 `~/midden`）没有本地改动，最新镜像的提交在 `origin/main` 上，且与正在运行的版本不同；
-2. 在线备份数据库到 `data/backups/deploy/`（保留最近 5 份）；
+2. 在线备份数据库到 `data/backups/deploy/`（未压缩，保留最近 2 份：这次的与上一次的）；
 3. 切换到该提交，用 `:sha-<提交>` 镜像 `docker compose up -d --wait`，并检查 `/healthz`；
 4. 新版本不健康时停掉它，恢复部署前的数据库，切回原来的版本。
 
@@ -64,11 +64,18 @@ GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<域名>/hooks/
 
 - 原文件（图片、视频）另存到 R2 存储桶，对象键与本地路径相同：`ab/cd/<sha256>`。浏览器直接从公开域名读取 `MEDIA_PUBLIC_URL/ab/cd/<sha256>`（`https://midden-media.sxzz.moe/ab/cd/<sha256>`），由 Cloudflare 边缘缓存；每个对象都带 `Content-Type` 与 `Cache-Control: public, max-age=31536000, immutable`。
 - 新下载先写入本地 `media/`，再由后台任务 `upload` 上传。上传带 `Content-MD5` 和签名的 SHA-256，R2 收到的内容不符会拒绝；上传后读回大小、ETag（即 MD5）和两个响应头，确认后才在 `blobs.remote_at` 记下，接口从此给出公开地址，之前仍给本地签名链接。上传失败从 30 秒起翻倍重试、最长间隔 1 小时，共 12 次（约 7 小时），每次记 `job will retry`，放弃时记 `media upload gave up; the file stays local`，这些媒体由 `media-migrate` 补传。
-- 上传后本地文件保留，直到运行 `media-prune-local`。
+- 上传确认、记下 `remote_at` 后，同一个 `upload` 任务立即删除本地原文件，此后 R2 中是唯一的一份（没有其他备份，见「R2 的保护」）。删除在这个媒体的键的锁内进行（下载写入、回收删除同一个键时也取这个锁），并在锁内再次确认 `remote_at` 仍在。以下情况暂不删除：
+  - 这个媒体的缩略图任务还没结束：缩略图要从本地文件生成。缩略图任务结束（生成成功或失败）后会再排一个 `upload` 任务，那时删除；
+  - 这个键同时是某个缩略图的文件（缩略图只存本地）。
+
+  删除失败时任务按上传的间隔重试（记 `job will retry`），`remote_at` 不会被清除；重试用完时记 `deleting the local copy of uploaded media gave up; media-prune-local removes it`。
+
+- 删除时正在读这个文件的地方不受影响：Telegram 发送、带文件名的下载和 `/media/…` 都先打开文件再读，已打开的文件删除后仍能读完；打开前已删除时改从 R2 读。ffmpeg、ffprobe 拿到的是本地路径，若在它们打开之前文件被删，就改用预签名 URL 再运行一次。之后再下载到相同内容（已在 R2 中的媒体）时不再写本地文件。
 - 缩略图只存本地，作为缓存，经本服务提供，响应头为 `Cache-Control: public, max-age=31536000, immutable`（图片同样；视频和带文件名的下载仍为 `private`，不进 CDN）。缩略图文件丢失时，请求它的 `/media/…` 当场从原文件重新生成：原文件在本地就读本地，否则 ffmpeg 通过预签名 URL 只读取需要的字节范围。生成的字节不同（例如换了 ffmpeg）时记在新的键下，并把请求重定向过去。
 - 带文件名的下载经本服务从本地或 R2 流式返回，带 `Content-Disposition`。服务端的读取（Telegram 发送、缩略图、下载）都先读本地，没有时通过 S3 API 读 R2，不经公开域名。
-- 不另设本地原文件缓存：新媒体在本地保留到 prune，缩略图在下载时就从本地文件生成，Telegram 按 `file_id` 复用已上传的文件，只有缩略图丢失、下载和第一次发送旧媒体时才读 R2，视频只读部分字节。
-- 删除：不再被引用的媒体（删除收藏、删除媒体）24 小时后删除本地文件；R2 中有对象时先清除其公开地址的边缘缓存（`purge_cache`），再删除对象。清除失败时对象保留，稍后重试；没有配置清除用的 token 时记 `cache purge skipped: no purge token configured` 并跳过清除。
+- 不另设本地原文件缓存：缩略图在删除本地原文件之前从本地文件生成；Telegram 按 `file_id` 复用已上传的文件；其余读取（第一次发送到 Telegram、缩略图丢失、带文件名的下载）在本地原文件删除后都读 R2，视频只读部分字节。
+- 设为 `r2` 并运行后，不能再改回 `local`：本地实现不读 R2，已删除本地原文件的媒体会缺失。要回退，先把存储桶下载回 `media/`（如 `rclone copy r2:midden ~/midden/data/media`）再改。
+- 删除：不再被引用的媒体（删除收藏、删除媒体）24 小时后删除本地文件（还在时）；R2 中有对象时先清除其公开地址的边缘缓存（`purge_cache`），再删除对象。清除失败时对象保留，稍后重试；没有配置清除用的 token 时记 `cache purge skipped: no purge token configured` 并跳过清除。
 - 存储类别为存储桶默认的 Standard。
 
 ### 配置
@@ -102,13 +109,14 @@ GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<域名>/hooks/
 1. 计算本地文件的 SHA-256 与 MD5，SHA-256 与键不符时报告 `hash mismatch` 并跳过，不上传。
 2. 读取 R2 中同键对象的大小和响应头（HEAD）：
    - 不存在，或大小不同：上传，读回确认。
-   - 大小相同：用对象带的校验值与本地比较，依次是 `x-amz-checksum-sha256`、ETag（单段上传时即 MD5；分段上传的 ETag 带 `-<段数>`，不能用）、rclone 为分段上传记下的 `x-amz-meta-md5chksum`。有一项不符就重新上传；都相符则保留，不重新传输。一项都没有时只能按大小认定（汇总中记为 `by size`）；加 `--verify-download` 则下载并计算 SHA-256。
+   - 大小相同：用对象带的校验值与本地比较，依次是 `x-amz-checksum-sha256`、ETag（单段上传时即 MD5；分段上传的 ETag 带 `-<段数>`，不能用）、rclone 为分段上传记下的 `x-amz-meta-md5chksum`。有一项不符就重新上传；都相符则保留，不重新传输。一项都没有时重新上传（记 `replacing <哈希>: no checksum to compare`，计入 `replaced`），因为记下后本地文件随即删除，只按大小认定不够；加 `--verify-download` 则改为下载并计算 SHA-256，相符就保留。
    - 保留的对象 `Content-Type` 或 `Cache-Control` 不对时，在服务端把对象复制到自身（`CopyObject`，`x-amz-metadata-directive: REPLACE`）改正，其他元数据照旧，不重新传输，再读回确认。
 3. 在 `blobs.remote_at` 记下，网页从此使用公开地址。
+4. 删除本地原文件，规则与上传任务相同：缩略图任务还没结束的、同时是缩略图文件的保留（汇总中计入 `kept … for thumbnails`），之后由缩略图任务或 `media-prune-local` 删除。
 
-本地文件缺失时，只有加 `--verify-download` 且 R2 中的对象哈希相符才记下，否则报告 `missing locally`。从不删除本地文件；可以随时中断，再次运行时跳过已记下的，其余重新检查，已上传但未记下的按校验值保留。`--concurrency N`（默认 4）同时处理的数量，`--limit N` 只处理前 N 个。每 5 秒输出一次进度，结束时输出汇总，并给出一个已记下媒体的公开地址；有失败、哈希不符或缺失时退出码为 1。R2 中不属于任何媒体的对象（如 rclone 一并复制的缩略图）不会被读取或修改；它们的键以后被回收时随之删除。
+本地文件缺失时，只有加 `--verify-download` 且 R2 中的对象哈希相符才记下，否则报告 `missing locally`。命令与服务同时运行：服务的上传任务在此期间已记下（并删除本地文件）的媒体计入 `by the server meanwhile`，不算问题。可以随时中断，再次运行时跳过已记下的，其余重新检查，已上传但未记下的按校验值保留；中断在记下与删除之间、或删除失败（计入 `failed`）时，本地文件留给 `media-prune-local`。`--dry-run` 不上传、不写入、不删除，汇总中的 `would delete N local files` 是会删除的本地原文件数与大小。`--concurrency N`（默认 4）同时处理的数量，`--limit N` 只处理前 N 个。每 5 秒输出一次进度，结束时输出汇总，并给出一个已记下媒体的公开地址；有失败、哈希不符或缺失时退出码为 1。R2 中不属于任何媒体的对象（如 rclone 一并复制的缩略图）不会被读取或修改；它们的键以后被回收时随之删除。
 
-`media-prune-local` 删除已记为在 R2 中、且再次确认过的本地原文件：对象存在，大小、`Content-Type`、`Cache-Control` 正确，并且上述校验值之一与本地文件相符（或加 `--verify-download` 后下载比较）。没有校验值的对象保留本地文件并列出；对象不对时保留本地文件、清除 `remote_at`（网页改回本地链接，下次 `media-migrate` 重新上传）。缩略图（包括同时是缩略图的原文件）一律保留。新媒体上传后同样留在本地，可以定期再运行一次。
+`media-prune-local` 删除已记为在 R2 中、且再次确认过的本地原文件：对象存在，大小、`Content-Type`、`Cache-Control` 正确，并且上述校验值之一与本地文件相符（或加 `--verify-download` 后下载比较）。没有校验值的对象保留本地文件并列出；对象不对时保留本地文件、清除 `remote_at`（网页改回本地链接，下次 `media-migrate` 重新上传）。缩略图（包括同时是缩略图的原文件）一律保留，缩略图任务还没结束的原文件也暂时保留。上传任务和 `media-migrate` 已经自动删除本地原文件，这个命令只处理剩下的：在自动删除之前就已记下的、当时因缩略图保留而缩略图任务之后没有删掉的、删除失败或中断留下的。
 
 预先用 rclone 复制（可选，代码上线前即可进行）：
 
@@ -139,7 +147,7 @@ rclone copy ~/midden/data/media r2:midden \
 ### 步骤
 
 1. 在部署目录的 `.env` 中设置上面的变量（`MEDIA_STORE=r2` 及 R2、清除缓存的变量）。
-2. 部署：`docker compose up -d --force-recreate`（或推送后自动部署），日志中 `media store` 的 `store` 应为 `r2`。此后新下载的媒体会自动上传。
+2. 部署：`docker compose up -d --force-recreate`（或推送后自动部署），日志中 `media store` 的 `store` 应为 `r2`。此后新下载的媒体会自动上传，确认后删除本地原文件；从这一步起不能再改回 `local`（见上）。
 3. 迁移：
 
    ```sh
@@ -148,7 +156,7 @@ rclone copy ~/midden/data/media r2:midden \
    docker compose exec midden node server/src/cli.ts media-migrate --concurrency 8
    ```
 
-   先试运行看汇总（会读取所有本地文件并对每个对象做 HEAD，不写入），再迁移少量抽查，最后全部迁移。中断后重新运行即可。
+   先试运行看汇总（会读取所有本地文件并对每个对象做 HEAD，不写入、不删除，列出会删除的本地文件数），再迁移少量抽查，最后全部迁移。每个媒体记下后即删除本地原文件。中断后重新运行即可。
 
 4. 抽查汇总中给出的地址（或网页中任一原图的地址），连续请求两次：
 
@@ -159,14 +167,24 @@ rclone copy ~/midden/data/media r2:midden \
    应看到 `content-type` 为媒体类型、`cache-control: public, max-age=31536000, immutable`、`access-control-allow-origin: *`，第二次 `cf-cache-status: HIT`。带 `Range: bytes=0-1` 请求视频应返回 206。
 
 5. 不需要单独切换：每个媒体在上传确认后即改用 R2 地址。
-6. 确认无误后（可以过一段时间）：
+6. 不需要单独删除本地原文件：新上传的媒体由上传任务删除，迁移的由 `media-migrate` 删除。`media-prune-local` 只处理剩下的（见上），可以在迁移之后运行一次，以后偶尔再运行：
 
    ```sh
    docker compose exec midden node server/src/cli.ts media-prune-local --dry-run
    docker compose exec midden node server/src/cli.ts media-prune-local
    ```
 
-prune 之前可以改回 `MEDIA_STORE=local` 回退，网页回到本地链接；prune 之后本地已没有这些原文件，不能再改回 `local`。prune 后自动备份的 `rsync` 只复制仍在本地的文件，已删除的原文件以 R2 为准（备份目录中原有的副本不会被删除）。
+7. 自动备份从 `r2` 起不再复制媒体。旧的媒体镜像保留，确认 R2 无误后手动删除，见「自动备份」。
+
+### R2 的保护
+
+R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没有其他媒体备份。R2 提供存储桶锁（Bucket locks），可以作为一个选项，目前没有配置：一条规则让某个前缀（或整个存储桶）下的对象在一段时间内（按对象存在的时长、到某个日期或无限期）不能被删除或覆盖，对现有和以后的对象都生效，优先于生命周期规则。在 Cloudflare 的「R2 → 存储桶 → Settings → Bucket lock rules」中添加，或用 `npx wrangler r2 bucket lock add <存储桶>`。
+
+启用前要知道：
+
+- 被锁住的对象删除时返回 409（`ObjectLockedByBucketPolicy`）。回收不再引用的媒体（删除收藏、删除媒体之后）会失败并按 `media_garbage` 的间隔重试，直到保留期结束才删掉，期间日志有 `maintenance step failed`，存储照常计费；清除边缘缓存在删除之前，每次重试都会再清除一次。
+- 覆盖同样被拒绝：`media-migrate` 改正响应头（复制到自身）和重新上传（`replaced`）会失败，所以要在迁移完成之后再启用。删除后在保留期内又下载到相同内容时，上传任务的上传也是覆盖，会失败，媒体留在本地；`media-migrate` 按校验值保留 R2 中的对象并记下。
+- 按存在时长的规则（如 30 天）能挡住这段时间内的误删，代价是删除的媒体在 R2 中多留这么久；无限期规则会让回收永远失败，不适合这里。
 
 ## 备份与恢复
 
@@ -178,7 +196,7 @@ prune 之前可以改回 `MEDIA_STORE=local` 回退，网页回到本地链接�
    docker compose exec midden node server/src/cli.ts backup /data/backups
    ```
 
-2. 媒体：`media/` 中的文件写入后不再修改，增量复制即可（使用 R2 并 prune 后，原文件以 R2 为准，见上）：
+2. 媒体（`MEDIA_STORE=local`）：`media/` 中的文件写入后不再修改，增量复制即可。使用 R2 时原文件只在 R2 中，本地只剩缩略图和正在上传的原文件，不复制。
 
    ```sh
    rsync -a data/media/ <备份位置>/media/
@@ -189,8 +207,24 @@ prune 之前可以改回 `MEDIA_STORE=local` 回退，网页回到本地链接�
 `scripts/backup.ts` 每天备份一次：
 
 - 数据库：服务在线备份，检查完整性后 gzip 压缩，与 `.env` 及当前提交一起存到 `<目标>/daily/<时间>/`，保留 7 天（最新一份总是保留）；
-- 媒体：`rsync` 增量镜像到 `<目标>/media/`，不删除；
+- 媒体：部署目录的 `.env` 中 `MEDIA_STORE` 不是 `r2` 时，`rsync` 增量镜像到 `<目标>/media/`，不删除；是 `r2` 时跳过，日志记 `media: skipped, MEDIA_STORE=r2 keeps the originals in R2`；
 - 部署进行中时等部署结束；失败时通过 Bot 通知 `DEPLOY_NOTIFY_CHAT_ID`（默认 `OWNER_TELEGRAM_ID`）。
+
+改为 `r2` 后，原来的镜像 `<目标>/media/`（默认 `~/backups/midden/auto/media/`）不再更新，脚本也不会删除它。确认 R2 无误后手动删除：
+
+1. `media-migrate --dry-run` 显示 `0 blobs not yet in the bucket`，最后一次迁移的汇总没有 `missing`、`hash mismatch`、`failed`；
+2. 按「步骤」第 4 步抽查过几个公开地址，网页中的图片和视频正常；
+3. 可选，逐个核对镜像中的文件在 R2 中的内容（单段上传的对象按 MD5 比较）：
+
+   ```sh
+   rclone check ~/backups/midden/auto/media r2:midden --one-way
+   ```
+
+   不应有内容不同（`differences`）的文件；R2 中缺少的只应是缩略图（迁移不上传）和已被回收删除的媒体。
+
+4. 删除：`rm -rf ~/backups/midden/auto/media`。
+
+此后 R2 中的原文件是唯一的一份（见「R2 的保护」）。
 
 目标默认 `~/backups/midden/auto`。安装为每天 12:00 运行的 LaunchAgent，直接运行部署目录里的脚本，随部署更新：
 
@@ -203,9 +237,9 @@ launchctl kickstart gui/$(id -u)/org.midden.backup      # 立即运行一次
 
 ### 恢复
 
-恢复时停止服务，将备份的数据库文件放回 `data/midden.db`（自动备份的 `midden.db.gz` 先 `gunzip`），删除旁边的 `midden.db-wal` 与 `midden.db-shm`，媒体放回 `data/media/`，使用原来的 `SECRET_KEY` 启动。
+恢复时停止服务，将备份的数据库文件放回 `data/midden.db`（自动备份的 `midden.db.gz` 先 `gunzip`），删除旁边的 `midden.db-wal` 与 `midden.db-shm`，媒体放回 `data/media/`（使用 R2 时原文件在 R2 中，不需要放回，缩略图在请求时重新生成），使用原来的 `SECRET_KEY` 启动。
 
-数据库与媒体分别备份时，可能有少量新媒体在数据库备份中尚未出现（无害），或数据库引用了刚被回收的旧媒体；后者在维护时会被清理。需要严格一致时，先 `docker compose stop` 再备份。
+数据库与媒体分别备份时，可能有少量新媒体在数据库备份中尚未出现（无害），或数据库引用了刚被回收的旧媒体；后者在维护时会被清理。需要严格一致时，先 `docker compose stop` 再备份。使用 R2 时，回收会同时删除 R2 中的对象，所以恢复较早的数据库后，在那之后删除的媒体不能再显示。
 
 ## 维护任务
 

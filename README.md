@@ -8,7 +8,7 @@
 - Profile 会连同时间线中的帖子一起保存，可按条件筛选、继续翻页或中止。
 - 网页（含 Telegram Mini App）用于浏览、筛选、多选更新与删除、标签与备注、管理采集账号。
 
-所有数据保存在一个目录中：SQLite 数据库 `midden.db` 和按内容哈希存放的 `media/`。媒体原文件也可以存到 Cloudflare R2。
+所有数据保存在一个目录中：SQLite 数据库 `midden.db` 和按内容哈希存放的 `media/`。媒体原文件也可以存到 Cloudflare R2，上传确认后本地只留缩略图。
 
 ## 部署
 
@@ -79,7 +79,7 @@ docker compose pull && docker compose up -d
 docker compose exec midden node server/src/cli.ts backup /data/backups
 ```
 
-媒体文件写入后不再修改，用 `rsync` 等工具增量复制 `data/media/` 即可。详见 [运维文档](docs/operations.md)。
+媒体文件写入后不再修改，用 `rsync` 等工具增量复制 `data/media/` 即可；使用 R2 时原文件只在 R2 中，不需要复制。详见 [运维文档](docs/operations.md)。
 
 ## 开发
 
