@@ -22,6 +22,7 @@ import { finalizeSettled, validateExecution } from './lifecycle.ts'
 import { isRemoved } from './media-key.ts'
 import { acceptsMediaType, sniffMediaType } from './media-type.ts'
 import { thumbnailsEnabled } from './thumbnail.ts'
+import { enqueueUpload } from './upload.ts'
 import type { Transaction } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
 
@@ -240,6 +241,7 @@ async function download(ctx: CaptureContext, job: Job): Promise<void> {
           tx.insert(blobs)
             .values({ id: blobId, hash: staged.hash, size: staged.size, mime })
             .run()
+          enqueueUpload(ctx, tx, blobId)
         }
         attach(ctx, tx, current.asset, blobId)
       })

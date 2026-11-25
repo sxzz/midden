@@ -9,6 +9,7 @@ import { failRelated, runRelated } from './related.ts'
 import { failRelations, runRelations } from './relations.ts'
 import { failThumbnail, runThumbnail } from './thumbnail.ts'
 import { failUpdate, runUpdate } from './updates.ts'
+import { failUpload, runUpload, UPLOAD_ATTEMPTS } from './upload.ts'
 import type { Job, JobHandler } from '#jobs/queue.ts'
 import type { CaptureContext } from './context.ts'
 
@@ -72,6 +73,13 @@ export function captureHandlers(
       priority: 4,
       run: (job) => runThumbnail(context(), job),
       fail: (job, error) => failThumbnail(context(), job.ref, safeError(error)),
+    },
+    // Copies a new blob to the remote media store, if there is one.
+    upload: {
+      queue: 'upload',
+      maxAttempts: UPLOAD_ATTEMPTS,
+      run: (job) => runUpload(context(), job),
+      fail: (job, error) => failUpload(context(), job.ref, error),
     },
     // Pages of an account's following or followers list, read with the
     // account like a capture.

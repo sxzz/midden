@@ -1,9 +1,4 @@
 import { execFile } from 'node:child_process'
-import { createWriteStream } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
-import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
 import { and, eq } from 'drizzle-orm'
 import { GrammyError, InputFile, type Api } from 'grammy'
@@ -145,13 +140,9 @@ export class Media {
   }
 
   async #probe(asset: AssetView) {
-    const dir = await mkdtemp(path.join(tmpdir(), 'midden-video-'))
     try {
-      const file = path.join(dir, 'video.mp4')
-      await pipeline(
-        await this.#s.blobs.read(asset.sha256!),
-        createWriteStream(file),
-      )
+      // A local path, or a URL ffprobe reads only the ranges it needs from.
+      const input = await this.#s.blobs.source(asset.sha256!)
       const { stdout } = await run(
         this.#s.ffprobe,
         [
@@ -163,7 +154,7 @@ export class Media {
           'stream=width,height,sample_aspect_ratio:stream_side_data=rotation',
           '-of',
           'json',
-          file,
+          input,
         ],
         { timeout: PROBE_TIMEOUT },
       )
@@ -176,8 +167,6 @@ export class Media {
       return size
     } catch (error) {
       throw error instanceof ProbeError ? error : new ProbeError(String(error))
-    } finally {
-      await rm(dir, { recursive: true, force: true })
     }
   }
 

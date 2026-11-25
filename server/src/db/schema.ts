@@ -479,7 +479,12 @@ export const relationFetches = sqliteTable(
   ],
 )
 
-/** Stored media bytes; the hash is also the media store key. */
+/**
+ * Stored media bytes; the hash is also the media store key. Every blob is
+ * written to the local media directory first; `remoteAt` records when its
+ * upload to the remote store (R2) was confirmed. Only then does the web get
+ * the public URL, and only then may the local file be pruned.
+ */
 export const blobs = sqliteTable(
   'blobs',
   {
@@ -487,6 +492,7 @@ export const blobs = sqliteTable(
     hash: text().notNull().unique(),
     size: integer().notNull(),
     mime: text().notNull(),
+    remoteAt: timestamp(),
     createdAt: createdAt(),
   },
   (t) => [index('blobs_size').on(t.size)],

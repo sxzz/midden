@@ -1,6 +1,11 @@
 import { Readable } from 'node:stream'
 import { Hono } from 'hono'
-import { isBlobKey, type BlobStore, type ByteRange } from './store.ts'
+import {
+  IMMUTABLE,
+  isBlobKey,
+  type BlobStore,
+  type ByteRange,
+} from './store.ts'
 import type { MediaSigner } from './signer.ts'
 
 const RANGE = /^bytes=(\d*)-(\d*)$/
@@ -34,8 +39,28 @@ function contentDisposition(filename: string): string {
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`
 }
 
+export interface MediaRouteOptions {
+  /**
+   * Let shared caches (the CDN in front) keep images and thumbnails for
+   * good. Off, every response is private to the browser and expires with
+   * its URL.
+   */
+  sharedCache?: boolean
+  /**
+   * Make a missing object again, if it is one that can be (a thumbnail):
+   * the key it is now stored under, which may differ.
+   */
+  regenerate?: (
+    key: string,
+  ) => Promise<{ key: string; contentType: string } | undefined>
+}
+
 /** Serves `/media/:key` for stores whose URLs point back at this process. */
-export function mediaRoutes(store: BlobStore, signer: MediaSigner): Hono {
+export function mediaRoutes(
+  store: BlobStore,
+  signer: MediaSigner,
+  options: MediaRouteOptions = {},
+): Hono {
   const app = new Hono()
   app.get('/media/:key', async (c) => {
     const key = c.req.param('key')
@@ -43,15 +68,32 @@ export function mediaRoutes(store: BlobStore, signer: MediaSigner): Hono {
       ? signer.verify(key, new URL(c.req.url).searchParams)
       : undefined
     if (!media) return c.body(null, 403)
-    const size = await store.stat(key)
+    let size = await store.stat(key)
+    if (size === undefined && options.regenerate) {
+      const made = await options.regenerate(key)
+      if (made && made.key !== key)
+        return c.redirect(
+          signer.sign({ key: made.key, contentType: made.contentType }),
+          307,
+        )
+      if (made) size = await store.stat(key)
+    }
     if (size === undefined) return c.body(null, 404)
 
+    // Video stays out of the CDN in front of this process: its terms allow
+    // that only for video hosted on R2 and the like. Downloads stay private.
+    const shared =
+      options.sharedCache &&
+      !media.filename &&
+      !media.contentType.startsWith('video/')
     const headers = new Headers({
       'Accept-Ranges': 'bytes',
       'Content-Type': media.contentType,
       // The key is the content hash: the bytes never change.
       ETag: `"${key}"`,
-      'Cache-Control': `private, max-age=${Math.max(Math.floor((media.expiresAt - Date.now()) / 1000), 0)}, immutable`,
+      'Cache-Control': shared
+        ? IMMUTABLE
+        : `private, max-age=${Math.max(Math.floor((media.expiresAt - Date.now()) / 1000), 0)}, immutable`,
       'X-Content-Type-Options': 'nosniff',
     })
     if (media.filename)

@@ -1,17 +1,22 @@
 import { execFile } from 'node:child_process'
-import { createReadStream, createWriteStream } from 'node:fs'
+import { createReadStream } from 'node:fs'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import path from 'node:path'
-import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
-import { eq } from 'drizzle-orm'
-import { stage } from '#blob/staging.ts'
-import { blobs, blobThumbnails, mediaGarbage } from '#db/schema.ts'
+import { and, eq } from 'drizzle-orm'
+import { stage, type StagedFile } from '#blob/staging.ts'
+import {
+  blobs,
+  blobThumbnails,
+  mediaGarbage,
+  removedMedia,
+} from '#db/schema.ts'
 import type { Job } from '#jobs/queue.ts'
 import type { CaptureContext, Thumbnailer } from './context.ts'
 
 const run = promisify(execFile)
 const RENDER_TIMEOUT = 60_000
+const URL_INPUT = /^https?:/
 const SOURCE_TYPES = new Set([
   'image/jpeg',
   'image/png',
@@ -65,6 +70,72 @@ function record(
   })
 }
 
+type Blob = typeof blobs.$inferSelect
+
+/**
+ * Render a blob's thumbnail into a staged file, reading the original where
+ * the store has it: the local file, or else ffmpeg fetches only the byte
+ * ranges it needs from a presigned URL. Resolves to the reason when the
+ * media cannot be rendered; a missing original rejects.
+ */
+async function render(
+  ctx: CaptureContext,
+  thumbnailer: Thumbnailer,
+  blob: Blob,
+  signal: AbortSignal,
+): Promise<{ staged: StagedFile; mime: string } | { error: string }> {
+  if (!SOURCE_TYPES.has(blob.mime)) return { error: '不支持的媒体格式' }
+  const input = await ctx.blobs.source(blob.hash)
+  await mkdir(ctx.stagingDir, { recursive: true })
+  const dir = await mkdtemp(path.join(ctx.stagingDir, 'thumbnail-'))
+  try {
+    const output = path.join(dir, 'thumbnail')
+    const encode =
+      thumbnailer.encoder === 'libwebp'
+        ? ['-c:v', 'libwebp', '-quality', '75', '-f', 'webp']
+        : ['-c:v', 'mjpeg', '-q:v', '5', '-pix_fmt', 'yuvj420p', '-f', 'image2']
+    const remote = URL_INPUT.test(input)
+    try {
+      await run(
+        thumbnailer.ffmpeg,
+        [
+          '-nostdin',
+          '-v',
+          'error',
+          '-y',
+          // Give up on a stalled connection (microseconds).
+          ...(remote ? ['-rw_timeout', '30000000'] : []),
+          '-i',
+          input,
+          '-map',
+          '0:v:0',
+          '-frames:v',
+          '1',
+          '-vf',
+          SCALE,
+          ...encode,
+          output,
+        ],
+        { timeout: RENDER_TIMEOUT, signal },
+      )
+    } catch {
+      if (signal.aborted) throw new Error('thumbnail rendering interrupted')
+      return { error: 'thumbnail rendering failed' }
+    }
+    const staged = await stage(ctx.stagingDir, createReadStream(output))
+    if (staged.size === 0) {
+      await staged.discard()
+      return { error: 'thumbnail rendering failed' }
+    }
+    return {
+      staged,
+      mime: thumbnailer.encoder === 'libwebp' ? 'image/webp' : 'image/jpeg',
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
 /** Render one blob's thumbnail. A render failure is final, not retried. */
 export async function runThumbnail(
   ctx: CaptureContext,
@@ -80,59 +151,13 @@ export async function runThumbnail(
     .where(eq(blobThumbnails.blobId, blob.id))
     .get()
   if (done) return
-  if (!SOURCE_TYPES.has(blob.mime)) {
-    record(ctx, blob.id, { state: 'failed', error: '不支持的媒体格式' })
+  const result = await render(ctx, thumbnailer, blob, job.signal)
+  if ('error' in result) {
+    record(ctx, blob.id, { state: 'failed', error: result.error })
     return
   }
-  await mkdir(ctx.stagingDir, { recursive: true })
-  const dir = await mkdtemp(path.join(ctx.stagingDir, 'thumbnail-'))
+  const { staged, mime } = result
   try {
-    const source = path.join(dir, 'source')
-    await pipeline(await ctx.blobs.read(blob.hash), createWriteStream(source))
-    const output = path.join(dir, 'thumbnail')
-    const encode =
-      thumbnailer.encoder === 'libwebp'
-        ? ['-c:v', 'libwebp', '-quality', '75', '-f', 'webp']
-        : ['-c:v', 'mjpeg', '-q:v', '5', '-pix_fmt', 'yuvj420p', '-f', 'image2']
-    try {
-      await run(
-        thumbnailer.ffmpeg,
-        [
-          '-nostdin',
-          '-v',
-          'error',
-          '-y',
-          '-i',
-          source,
-          '-map',
-          '0:v:0',
-          '-frames:v',
-          '1',
-          '-vf',
-          SCALE,
-          ...encode,
-          output,
-        ],
-        { timeout: RENDER_TIMEOUT, signal: job.signal },
-      )
-    } catch {
-      if (job.signal.aborted) throw new Error('thumbnail rendering interrupted')
-      record(ctx, blob.id, {
-        state: 'failed',
-        error: 'thumbnail rendering failed',
-      })
-      return
-    }
-    const staged = await stage(ctx.stagingDir, createReadStream(output))
-    if (staged.size === 0) {
-      await staged.discard()
-      record(ctx, blob.id, {
-        state: 'failed',
-        error: 'thumbnail rendering failed',
-      })
-      return
-    }
-    const mime = thumbnailer.encoder === 'libwebp' ? 'image/webp' : 'image/jpeg'
     await ctx.mediaLocks.run(staged.hash, async () => {
       ctx.db.delete(mediaGarbage).where(eq(mediaGarbage.key, staged.hash)).run()
       await ctx.blobs.putFile(staged.hash, staged.path)
@@ -151,7 +176,99 @@ export async function runThumbnail(
           .run()
     })
   } finally {
-    await rm(dir, { recursive: true, force: true })
+    await staged.discard()
+  }
+}
+
+export interface RegeneratedThumbnail {
+  key: string
+  contentType: string
+}
+
+const regenerating = new Map<
+  string,
+  Promise<RegeneratedThumbnail | undefined>
+>()
+
+/**
+ * Thumbnails are a local cache: when one's file is missing, render it again
+ * from the original, wherever that lives. The bytes may differ from the
+ * lost ones (another ffmpeg, say); then the thumbnail is recorded under its
+ * new key, which the caller sends the browser to. Undefined when the key is
+ * no blob's thumbnail (a removed media item's, whose original is gone) or
+ * rendering fails.
+ */
+export function regenerateThumbnail(
+  ctx: CaptureContext,
+  key: string,
+): Promise<RegeneratedThumbnail | undefined> {
+  let pending = regenerating.get(key)
+  if (!pending) {
+    pending = rerender(ctx, key).finally(() => regenerating.delete(key))
+    regenerating.set(key, pending)
+  }
+  return pending
+}
+
+async function rerender(
+  ctx: CaptureContext,
+  key: string,
+): Promise<RegeneratedThumbnail | undefined> {
+  const thumbnailer = ctx.thumbnailer
+  if (!thumbnailer) return
+  const row = ctx.db
+    .select({ blob: blobs })
+    .from(blobThumbnails)
+    .innerJoin(blobs, eq(blobs.id, blobThumbnails.blobId))
+    .where(and(eq(blobThumbnails.key, key), eq(blobThumbnails.state, 'ready')))
+    .get()
+  if (!row) return
+  let result: Awaited<ReturnType<typeof render>>
+  try {
+    result = await render(
+      ctx,
+      thumbnailer,
+      row.blob,
+      AbortSignal.timeout(RENDER_TIMEOUT),
+    )
+  } catch (error) {
+    ctx.logger.warn({ err: error, key }, 'thumbnail regeneration failed')
+    return
+  }
+  if ('error' in result) {
+    ctx.logger.warn(
+      { key, error: result.error },
+      'thumbnail regeneration failed',
+    )
+    return
+  }
+  const { staged, mime } = result
+  try {
+    return await ctx.mediaLocks.run(staged.hash, async () => {
+      ctx.db.delete(mediaGarbage).where(eq(mediaGarbage.key, staged.hash)).run()
+      await ctx.blobs.putFile(staged.hash, staged.path)
+      if (staged.hash !== key)
+        ctx.db.transaction((tx) => {
+          // Whatever showed the lost file shows the new one.
+          tx.update(blobThumbnails)
+            .set({ key: staged.hash, size: staged.size, mime })
+            .where(eq(blobThumbnails.key, key))
+            .run()
+          tx.update(removedMedia)
+            .set({ thumbnailKey: staged.hash, thumbnailMime: mime })
+            .where(eq(removedMedia.thumbnailKey, key))
+            .run()
+          // A stray copy of the old key (in the bucket, say) is collected.
+          tx.insert(mediaGarbage).values({ key }).onConflictDoNothing().run()
+        })
+      ctx.logger.info(
+        { key, regenerated: staged.hash },
+        'thumbnail regenerated',
+      )
+      return { key: staged.hash, contentType: mime }
+    })
+  } finally {
+    await staged.discard()
   }
 }
 

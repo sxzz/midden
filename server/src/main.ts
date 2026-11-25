@@ -4,14 +4,14 @@ import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { Vault } from '#accounts/vault.ts'
-import { FsBlobStore } from '#blob/fs-store.ts'
 import { KeyedLock } from '#blob/locks.ts'
+import { openMediaStore } from '#blob/open.ts'
 import { mediaRoutes } from '#blob/route.ts'
 import { MediaSigner } from '#blob/signer.ts'
 import { isPermanent } from '#capture/errors.ts'
 import { captureHandlers } from '#capture/handlers.ts'
 import { runMaintenance } from '#capture/maintenance.ts'
-import { detectThumbnailer } from '#capture/thumbnail.ts'
+import { detectThumbnailer, regenerateThumbnail } from '#capture/thumbnail.ts'
 import { loadConfig } from '#config.ts'
 import { deriveKey } from '#crypto.ts'
 import { openDatabase, optimize } from '#db/client.ts'
@@ -42,13 +42,14 @@ const signer = new MediaSigner({
 const vault = new Vault(deriveKey(config.secretKey, 'credentials'))
 const thumbnailer = await detectThumbnailer(config.ffmpeg)
 if (!thumbnailer) logger.warn('ffmpeg not found; thumbnails are disabled')
+logger.info({ store: config.media.store }, 'media store')
 
 let ctx!: AccountsContext
 const queue = new JobQueue({
   db,
   logger,
   handlers: captureHandlers(() => ctx),
-  concurrency: { capture: 4, download: 8, control: 4 },
+  concurrency: { capture: 4, download: 8, control: 4, upload: 4 },
   isPermanent,
 })
 ctx = {
@@ -56,7 +57,7 @@ ctx = {
   queue,
   logger,
   platforms: new Platforms([createXPlatform(), createInstagramPlatform()]),
-  blobs: new FsBlobStore(config.mediaDir, signer),
+  blobs: openMediaStore(config.media, config.mediaDir, signer, logger),
   stagingDir: path.join(config.dataDir, 'tmp'),
   vault,
   openCredential: (ref) => vault.open(db, ref),
@@ -77,7 +78,21 @@ const api = createApi({
 const app = new Hono()
 app.get('/healthz', (c) => c.text('ok'))
 app.route('/v1', api)
-app.route('/', mediaRoutes(ctx.blobs, signer))
+// With R2, this serves thumbnails (a local cache, rendered again when lost),
+// downloads, and originals until their upload is confirmed.
+app.route(
+  '/',
+  mediaRoutes(
+    ctx.blobs,
+    signer,
+    config.media.store === 'r2'
+      ? {
+          sharedCache: true,
+          regenerate: (key) => regenerateThumbnail(ctx, key),
+        }
+      : {},
+  ),
+)
 // The built web app; unknown paths under /app/ load the app itself. Public
 // links open inside it, and neither it nor they belong in search results.
 app.use('/app/*', async (c, next) => {

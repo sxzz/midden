@@ -152,6 +152,8 @@ interface AssetRow {
   hash: string | null
   mime: string | null
   size: number | null
+  /** The blob's upload to the remote store is confirmed. */
+  remote: number | null
   thumb_key: string | null
   thumb_mime: string | null
   marked: number
@@ -164,6 +166,7 @@ function assetRows(r: Reader, where: SQL): AssetRow[] {
   return r.db.all<AssetRow>(sql`
     SELECT a.capture_id, a.id, a.purpose, a.position, a.alt_text, a.sensitive,
       a.state, a.error, a.kind, a.source_url, b.hash, b.mime, b.size,
+      b.remote_at IS NOT NULL AS remote,
       coalesce(t.key, rm.thumbnail_key) AS thumb_key,
       coalesce(t.mime, rm.thumbnail_mime) AS thumb_mime,
       rm.media_key IS NOT NULL AS marked, co.platform
@@ -228,7 +231,10 @@ function assetView(r: Reader, row: AssetRow): AssetView {
     ...(thumbnail ? { thumbnail: true } : {}),
     ...(ready
       ? {
-          url: r.blobs.url(row.hash!, { contentType: row.mime! }),
+          url: r.blobs.url(row.hash!, {
+            contentType: row.mime!,
+            remote: !!row.remote,
+          }),
           download_url: r.blobs.url(row.hash!, {
             contentType: row.mime!,
             filename: fileName,

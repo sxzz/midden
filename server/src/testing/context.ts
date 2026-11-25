@@ -27,6 +27,12 @@ export function testContext(
     thumbnailer?: CaptureContext['thumbnailer']
     logger?: Logger
     timelineCap?: number
+    /** Another media store over the same directory and signer. */
+    blobs?: (media: {
+      dir: string
+      signer: MediaSigner
+      logger: Logger
+    }) => CaptureContext['blobs']
   } = {},
 ): AccountsContext {
   const db = openDatabase(':memory:')
@@ -40,6 +46,7 @@ export function testContext(
     capture: { ...noop, queue: 'capture' },
     download: { ...noop, queue: 'download' },
     thumbnail: { ...noop, queue: 'download', priority: 4 },
+    upload: { ...noop, queue: 'upload' },
     finalize: noop,
     related: noop,
     relations: { ...noop, queue: 'capture' },
@@ -50,7 +57,7 @@ export function testContext(
     db,
     logger,
     handlers,
-    concurrency: { capture: 4, download: 8, control: 4 },
+    concurrency: { capture: 4, download: 8, control: 4, upload: 4 },
     now: options.now,
     isPermanent,
   })
@@ -61,7 +68,9 @@ export function testContext(
     platforms: new Platforms(
       options.platforms ?? [createXPlatform(), createInstagramPlatform()],
     ),
-    blobs: new FsBlobStore(path.join(dir, 'media'), signer),
+    blobs:
+      options.blobs?.({ dir: path.join(dir, 'media'), signer, logger }) ??
+      new FsBlobStore(path.join(dir, 'media'), signer),
     stagingDir: path.join(dir, 'tmp'),
     vault,
     openCredential: (ref) => vault.open(db, ref),

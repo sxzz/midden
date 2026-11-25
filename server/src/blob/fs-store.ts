@@ -4,6 +4,8 @@ import { copyFile, mkdir, open, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import {
   assertBlobKey,
+  notFound,
+  objectPath,
   type BlobStore,
   type ByteRange,
   type MediaUrlOptions,
@@ -21,14 +23,13 @@ export class FsBlobStore implements BlobStore {
     this.#signer = signer
   }
 
-  #path(key: string): string {
-    assertBlobKey(key)
-    // Two levels of fan-out keep directories small.
-    return path.join(this.#root, key.slice(0, 2), key.slice(2, 4), key)
+  /** The object's file, whether or not it exists. */
+  path(key: string): string {
+    return path.join(this.#root, objectPath(key))
   }
 
   async putFile(key: string, file: string): Promise<void> {
-    const target = this.#path(key)
+    const target = this.path(key)
     // Content-addressed: an existing object already holds these bytes.
     if ((await this.stat(key)) !== undefined) {
       await rm(file, { force: true })
@@ -53,7 +54,7 @@ export class FsBlobStore implements BlobStore {
 
   async stat(key: string): Promise<number | undefined> {
     try {
-      return (await stat(this.#path(key))).size
+      return (await stat(this.path(key))).size
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
       throw error
@@ -61,7 +62,7 @@ export class FsBlobStore implements BlobStore {
   }
 
   read(key: string, range?: ByteRange): Promise<Readable> {
-    const stream = createReadStream(this.#path(key), range)
+    const stream = createReadStream(this.path(key), range)
     // Surface a missing file as a rejection instead of a stream error.
     return new Promise((resolve, reject) => {
       stream.once('open', () => resolve(stream))
@@ -70,11 +71,20 @@ export class FsBlobStore implements BlobStore {
   }
 
   async delete(key: string): Promise<void> {
-    await rm(this.#path(key), { force: true })
+    await rm(this.path(key), { force: true })
   }
 
   url(key: string, options: MediaUrlOptions): string {
     assertBlobKey(key)
-    return this.#signer.sign({ key, ...options })
+    return this.#signer.sign({
+      key,
+      contentType: options.contentType,
+      ...(options.filename ? { filename: options.filename } : {}),
+    })
+  }
+
+  async source(key: string): Promise<string> {
+    if ((await this.stat(key)) === undefined) throw notFound(key)
+    return this.path(key)
   }
 }
