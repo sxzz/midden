@@ -14,6 +14,7 @@ import {
   revisions,
 } from '#db/schema.ts'
 import { catalogCollections } from '#library/catalog.ts'
+import { enqueueRawUpload } from '#raw/upload.ts'
 import { canonicalJson, sha256Hex } from './json.ts'
 import {
   deliveries,
@@ -428,6 +429,7 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
         .values({ captureId: capture.id, metrics: payload.metrics })
         .run()
     settleStaging(tx, staging)
+    enqueueRawUpload(ctx, tx, capture.id)
     tx.update(collections)
       .set({ observedAt: now, sourceState: null, sourceStateAt: null })
       .where(eq(collections.id, collection.id))

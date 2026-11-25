@@ -71,7 +71,7 @@ function context(fetch: FakeFetch): AccountsContext {
     db,
     logger,
     handlers: captureHandlers(() => ctx!),
-    concurrency: { capture: 4, download: 8, control: 4 },
+    concurrency: { capture: 4, download: 8, control: 4, upload: 4, raw: 4 },
     isPermanent,
   })
   ctx = {

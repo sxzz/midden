@@ -32,6 +32,8 @@ import {
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { catalogCollections } from '#library/catalog.ts'
+import { deleteSourceResponses } from '#raw/responses.ts'
+import { collectRawGarbage } from '#raw/upload.ts'
 import { failCapture } from './lifecycle.ts'
 import { pruneStaging } from './staging.ts'
 import type { Transaction } from '#db/client.ts'
@@ -74,6 +76,7 @@ export async function runMaintenance(ctx: CaptureContext): Promise<void> {
   await step('raw responses', () => pruneSourceResponses(ctx))
   await step('staged data', () => pruneStaging(ctx))
   await step('media', () => collectMedia(ctx))
+  await step('raw garbage', () => collectRawGarbage(ctx))
   await step('thumbnails', () => backfillThumbnails(ctx))
   await step('free pages', () => releaseFreePages(ctx))
   if (errors.length) throw new AggregateError(errors, 'maintenance failed')
@@ -109,13 +112,15 @@ export function collectCollections(ctx: CaptureContext): number {
   const started = Date.now()
   let removed = 0
   for (;;) {
-    const count = ctx.db.transaction((tx) => collectBatch(tx))
+    const count = ctx.db.transaction((tx) =>
+      collectBatch(tx, new Date(now(ctx))),
+    )
     removed += count
     if (count < BATCH || Date.now() - started > BUDGET) return removed
   }
 }
 
-function collectBatch(tx: Transaction): number {
+function collectBatch(tx: Transaction, at: Date): number {
   const candidates = tx
     .select({ id: collections.id })
     .from(collections)
@@ -168,6 +173,7 @@ function collectBatch(tx: Transaction): number {
       .where(inArray(submissions.captureId, captureIds))
       .run()
     tx.delete(assets).where(inArray(assets.captureId, captureIds)).run()
+    deleteSourceResponses(tx, captureIds, at)
   }
   tx.delete(revisions).where(inArray(revisions.collectionId, candidates)).run()
   if (captureIds.length)
@@ -259,14 +265,11 @@ export function pruneSourceResponses(ctx: CaptureContext): number {
     .all()
   if (superseded.length)
     ctx.db.transaction((tx) => {
-      tx.delete(sourceResponses)
-        .where(
-          inArray(
-            sourceResponses.captureId,
-            superseded.map((row) => row.id),
-          ),
-        )
-        .run()
+      deleteSourceResponses(
+        tx,
+        superseded.map((row) => row.id),
+        new Date(now(ctx)),
+      )
       // Raw responses count toward storage.
       catalogCollections(
         tx,

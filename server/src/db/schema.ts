@@ -637,7 +637,14 @@ export const mediaGarbage = sqliteTable('media_garbage', {
   retryAt: timestamp(),
 })
 
-/** Raw upstream responses of a capture, byte for byte. */
+/**
+ * Raw upstream responses of a capture, byte for byte. With a raw bucket
+ * configured, each body moves there once the capture finished (see
+ * `raw/`), compressed, under its hash: `remoteAt` records when the copy was
+ * confirmed, and `body` is then empty (a NOT NULL column cannot become
+ * nullable without rebuilding the table). Delete rows with
+ * `deleteSourceResponses`, so that objects nothing uses any more go too.
+ */
 export const sourceResponses = sqliteTable(
   'source_responses',
   {
@@ -649,16 +656,32 @@ export const sourceResponses = sqliteTable(
     body: blob({ mode: 'buffer' }).$type<Buffer>().notNull(),
     contentType: text().notNull(),
     sourceUrl: text().notNull(),
+    // Of the body as received, also the object's key.
     sha256: text().notNull(),
     size: integer().notNull(),
     createdAt: createdAt(),
+    remoteAt: timestamp(),
   },
   (t) => [
     uniqueIndex('source_responses_position').on(t.captureId, t.position),
     // Sizes without reading the bodies stored before them.
     index('source_responses_size').on(t.captureId, t.size),
+    // Whether any row still uses an object, and whether one is stored.
+    index('source_responses_sha256').on(t.sha256, t.remoteAt),
   ],
 )
+
+/**
+ * Keys of raw response objects whose last row was deleted. They are
+ * deleted from the bucket after a grace period, and only if no row uses
+ * the key again by then.
+ */
+export const rawGarbage = sqliteTable('raw_garbage', {
+  key: text().primaryKey(),
+  since: createdAt(),
+  attempts: integer().notNull().default(0),
+  retryAt: timestamp(),
+})
 
 /**
  * A request for a capture: user input, a member of a collection page, or a

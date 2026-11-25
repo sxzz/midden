@@ -2,6 +2,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import * as v from 'valibot'
+import type { S3Credentials } from '#cloudflare.ts'
 
 const port = v.pipe(
   v.optional(v.string(), '8080'),
@@ -82,6 +83,25 @@ const Env = v.object({
       v.regex(/^[0-9a-f]{32}$/, 'CF_ZONE_ID must be 32 hex digits'),
     ),
   ),
+  // A private bucket for raw upstream responses, in the same R2 account; the
+  // database keeps them when unset. Never the public media bucket: they
+  // hold what the platform showed the signed-in account. Its S3 keys are
+  // the pair below, or else derive from CF_API_TOKEN.
+  RAW_R2_BUCKET: v.optional(
+    v.pipe(
+      v.string(),
+      v.regex(
+        /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/,
+        'RAW_R2_BUCKET must be a bucket name',
+      ),
+    ),
+  ),
+  RAW_R2_ACCESS_KEY_ID: v.optional(
+    v.pipe(v.string(), v.nonEmpty('RAW_R2_ACCESS_KEY_ID is empty')),
+  ),
+  RAW_R2_SECRET_ACCESS_KEY: v.optional(
+    v.pipe(v.string(), v.nonEmpty('RAW_R2_SECRET_ACCESS_KEY is empty')),
+  ),
   // The Litestream sidecar's bucket token (compose.yaml); only its presence
   // matters here: the server then expects the sidecar's heartbeats.
   LITESTREAM_ACCESS_KEY_ID: v.optional(v.string()),
@@ -114,6 +134,14 @@ export interface R2Config {
 
 export type MediaConfig = { store: 'local' } | { store: 'r2'; r2: R2Config }
 
+/** The private bucket raw responses move to (`raw/`). */
+export interface RawConfig {
+  endpoint: string
+  bucket: string
+  /** Its own S3 keys; without them, R2's keys from CF_API_TOKEN. */
+  credentials?: S3Credentials
+}
+
 export interface Config {
   dataDir: string
   databasePath: string
@@ -134,6 +162,8 @@ export interface Config {
    * the edge cache and reads the storage analytics.
    */
   cloudflare?: CloudflareConfig
+  /** Where raw responses go once stored; unset, they stay in the database. */
+  raw?: RawConfig
   /** Litestream replicates the database: watch for its heartbeats. */
   litestream: boolean
   /**
@@ -194,6 +224,7 @@ export function loadConfig(
           },
         }
       : {}),
+    ...rawConfig(parsed),
     litestream: !!parsed.LITESTREAM_ACCESS_KEY_ID,
     dev: parsed.NODE_ENV !== 'production',
   }
@@ -212,6 +243,47 @@ function mediaConfig(parsed: v.InferOutput<typeof Env>): MediaConfig {
       endpoint: `https://${parsed.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
       bucket: parsed.R2_BUCKET!,
       publicUrl: parsed.MEDIA_PUBLIC_URL!.replace(TRAILING_SLASHES, ''),
+    },
+  }
+}
+
+function rawConfig(parsed: v.InferOutput<typeof Env>): { raw?: RawConfig } {
+  const id = parsed.RAW_R2_ACCESS_KEY_ID
+  const secret = parsed.RAW_R2_SECRET_ACCESS_KEY
+  if (!!id !== !!secret)
+    throw new Error(
+      'Invalid configuration:\nRAW_R2_ACCESS_KEY_ID and RAW_R2_SECRET_ACCESS_KEY are set together',
+    )
+  if (!parsed.RAW_R2_BUCKET) {
+    if (id)
+      throw new Error(
+        'Invalid configuration:\nRAW_R2_ACCESS_KEY_ID needs RAW_R2_BUCKET',
+      )
+    return {}
+  }
+  const missing = [
+    ...(parsed.R2_ACCOUNT_ID ? [] : ['R2_ACCOUNT_ID']),
+    ...(id || parsed.CF_API_TOKEN
+      ? []
+      : [
+          'CF_API_TOKEN (or RAW_R2_ACCESS_KEY_ID and RAW_R2_SECRET_ACCESS_KEY)',
+        ]),
+  ]
+  if (missing.length)
+    throw new Error(
+      `Invalid configuration:\nRAW_R2_BUCKET needs ${missing.join(', ')}`,
+    )
+  if (parsed.RAW_R2_BUCKET === parsed.R2_BUCKET)
+    throw new Error(
+      'Invalid configuration:\nRAW_R2_BUCKET must not be the public media bucket R2_BUCKET',
+    )
+  return {
+    raw: {
+      endpoint: `https://${parsed.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      bucket: parsed.RAW_R2_BUCKET,
+      ...(id && secret
+        ? { credentials: { accessKeyId: id, secretAccessKey: secret } }
+        : {}),
     },
   }
 }

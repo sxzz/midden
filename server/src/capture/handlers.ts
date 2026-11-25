@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { collections } from '#db/schema.ts'
+import { failRawUpload, RAW_ATTEMPTS, runRawUpload } from '#raw/upload.ts'
 import { failDownload, runDownload } from './download.ts'
 import { errorCode, safeError } from './errors.ts'
 import { runCapture } from './fetch.ts'
@@ -80,6 +81,13 @@ export function captureHandlers(
       maxAttempts: UPLOAD_ATTEMPTS,
       run: (job) => runUpload(context(), job),
       fail: (job, error) => failUpload(context(), job.ref, error),
+    },
+    // Moves a finished capture's raw responses to the raw bucket, if any.
+    'raw-upload': {
+      queue: 'raw',
+      maxAttempts: RAW_ATTEMPTS,
+      run: (job) => runRawUpload(context(), job),
+      fail: (job, error) => failRawUpload(context(), job.ref, error),
     },
     // Pages of an account's following or followers list, read with the
     // account like a capture.

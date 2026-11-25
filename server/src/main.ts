@@ -25,6 +25,7 @@ import { createLogger } from '#log.ts'
 import { createInstagramPlatform } from '#platforms/instagram/index.ts'
 import { Platforms } from '#platforms/registry.ts'
 import { createXPlatform } from '#platforms/x/index.ts'
+import { openRawStore } from '#raw/store.ts'
 import { startBot, type RunningBot } from '#telegram/bot.ts'
 import { StorageUsage } from '#usage/storage.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -49,13 +50,15 @@ logger.info({ store: config.media.store }, 'media store')
 // the process exits, as with any invalid configuration, so /healthz never
 // answers and a deploy rolls back.
 const blobs = await openMediaStore(config, signer, logger)
+const raw = await openRawStore(config, logger)
+logger.info({ store: raw ? 'r2' : 'database' }, 'raw responses store')
 
 let ctx!: AccountsContext
 const queue = new JobQueue({
   db,
   logger,
   handlers: captureHandlers(() => ctx),
-  concurrency: { capture: 4, download: 8, control: 4, upload: 4 },
+  concurrency: { capture: 4, download: 8, control: 4, upload: 4, raw: 4 },
   isPermanent,
 })
 ctx = {
@@ -68,6 +71,7 @@ ctx = {
   vault,
   openCredential: (ref) => vault.open(db, ref),
   mediaLocks: new KeyedLock(),
+  ...(raw ? { raw } : {}),
   thumbnailer,
 }
 

@@ -4,6 +4,7 @@ import type { Database } from '#db/client.ts'
 import type { JobQueue } from '#jobs/queue.ts'
 import type { Logger } from '#log.ts'
 import type { Platforms } from '#platforms/registry.ts'
+import type { RawStore } from '#raw/store.ts'
 
 /** Everything the capture pipeline works with. */
 export interface CaptureContext {
@@ -19,6 +20,11 @@ export interface CaptureContext {
   now?: () => number
   /** Serializes writes and deletions of one media key. */
   mediaLocks: KeyedLock
+  /**
+   * The private bucket raw responses move to once their capture finished;
+   * without it they stay in the database.
+   */
+  raw?: RawStore
   /** HTTP client for media downloads. */
   fetch?: typeof fetch
   /** How to render thumbnails; none are made without ffmpeg. */

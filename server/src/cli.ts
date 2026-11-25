@@ -11,12 +11,16 @@ import { loadConfig } from '#config.ts'
 import { deriveKey } from '#crypto.ts'
 import { openDatabase } from '#db/client.ts'
 import { createToken } from '#http/auth.ts'
+import { rawGetCommand, rawMigrateCommand } from '#raw/migrate.ts'
+import { openRawStore } from '#raw/store.ts'
 
 const USAGE = `usage: node src/cli.ts <command>
   token create [name]
   backup <directory>
   media-migrate [--dry-run] [--concurrency N] [--verify-download] [--limit N]
-  media-prune-local [--dry-run] [--concurrency N] [--verify-download]`
+  media-prune-local [--dry-run] [--concurrency N] [--verify-download]
+  raw-migrate [--dry-run] [--limit N] [--concurrency N]
+  raw-get <capture id> [position]`
 
 function count(value: string | undefined): number | undefined {
   if (value === undefined) return undefined
@@ -72,6 +76,48 @@ if (command === 'token' && args[0] === 'create') {
     console.error(`${command} needs MEDIA_STORE=r2 and the R2 settings`)
     process.exitCode = 1
   }
+} else if (command === 'raw-migrate') {
+  const { values } = parseArgs({
+    args,
+    options: {
+      'dry-run': { type: 'boolean' },
+      concurrency: { type: 'string' },
+      limit: { type: 'string' },
+    },
+  })
+  if (config.raw || values['dry-run']) {
+    process.exitCode = await rawMigrateCommand(
+      db,
+      await openRawStore(config, pino({ level: 'warn' })),
+      {
+        dryRun: values['dry-run'],
+        concurrency: count(values.concurrency),
+        limit: count(values.limit),
+        print: (line) => console.info(line),
+      },
+    )
+  } else {
+    console.error(
+      'raw-migrate needs RAW_R2_BUCKET, RAW_R2_ACCESS_KEY_ID, RAW_R2_SECRET_ACCESS_KEY and R2_ACCOUNT_ID',
+    )
+    process.exitCode = 1
+  }
+} else if (command === 'raw-get' && args[0]) {
+  const position = args[1] === undefined ? undefined : Number(args[1])
+  if (position !== undefined && !Number.isSafeInteger(position)) {
+    console.error(USAGE)
+    process.exit(1)
+  }
+  process.exitCode = await rawGetCommand(
+    db,
+    await openRawStore(config, pino({ level: 'warn' })),
+    args[0],
+    position,
+    {
+      print: (line) => console.info(line),
+      write: (bytes) => process.stdout.write(bytes),
+    },
+  )
 } else {
   console.error(USAGE)
   process.exitCode = 1

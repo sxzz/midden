@@ -27,6 +27,8 @@ export function testContext(
     thumbnailer?: CaptureContext['thumbnailer']
     logger?: Logger
     timelineCap?: number
+    /** The raw response bucket. */
+    raw?: CaptureContext['raw']
     /** Another media store over the same directory and signer. */
     blobs?: (media: {
       dir: string
@@ -47,6 +49,7 @@ export function testContext(
     download: { ...noop, queue: 'download' },
     thumbnail: { ...noop, queue: 'download', priority: 4 },
     upload: { ...noop, queue: 'upload' },
+    'raw-upload': { ...noop, queue: 'raw' },
     finalize: noop,
     related: noop,
     relations: { ...noop, queue: 'capture' },
@@ -57,7 +60,7 @@ export function testContext(
     db,
     logger,
     handlers,
-    concurrency: { capture: 4, download: 8, control: 4, upload: 4 },
+    concurrency: { capture: 4, download: 8, control: 4, upload: 4, raw: 4 },
     now: options.now,
     isPermanent,
   })
@@ -76,6 +79,7 @@ export function testContext(
     openCredential: (ref) => vault.open(db, ref),
     now: options.now,
     mediaLocks: new KeyedLock(),
+    raw: options.raw,
     fetch: options.fetch,
     thumbnailer: options.thumbnailer,
     timelineCap: options.timelineCap,

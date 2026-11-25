@@ -12,6 +12,7 @@ import { cachePurge } from '#blob/purge.ts'
 import { parseRange } from '#blob/route.ts'
 import { S3Bucket } from '#blob/s3.ts'
 import { r2Credentials } from '#cloudflare.ts'
+import { RawStore } from '#raw/store.ts'
 import type { MediaSigner } from '#blob/signer.ts'
 import type { Logger } from '#log.ts'
 
@@ -66,8 +67,10 @@ export class FakeS3 {
   overwrite: Partial<FakeObject> | undefined
   #server: Server
   endpoint = ''
+  readonly bucket: string
 
-  constructor() {
+  constructor(options: { bucket?: string } = {}) {
+    this.bucket = options.bucket ?? FAKE_BUCKET
     this.#server = createServer(async (req, res) => {
       try {
         const { status, headers = {}, body } = await this.#handle(req)
@@ -109,6 +112,21 @@ export class FakeS3 {
     return `${this.endpoint}/client/v4`
   }
 
+  /** The raw response store, backed by this bucket. */
+  rawStore(): RawStore {
+    return new RawStore(this.s3())
+  }
+
+  /** A client of this bucket. */
+  s3(): S3Bucket {
+    return new S3Bucket({
+      endpoint: this.endpoint,
+      bucket: this.bucket,
+      ...r2Credentials(FAKE_TOKEN_ID, FAKE_TOKEN),
+      retryDelayMs: 1,
+    })
+  }
+
   /** A media store over `dir` backed by this bucket. */
   store(
     media: { dir: string; signer: MediaSigner; logger: Logger },
@@ -116,12 +134,7 @@ export class FakeS3 {
   ): BucketBlobStore {
     return new BucketBlobStore({
       local: new FsBlobStore(media.dir, media.signer),
-      bucket: new S3Bucket({
-        endpoint: this.endpoint,
-        bucket: FAKE_BUCKET,
-        ...r2Credentials(FAKE_TOKEN_ID, FAKE_TOKEN),
-        retryDelayMs: 1,
-      }),
+      bucket: this.s3(),
       publicUrl: FAKE_PUBLIC,
       purge: cachePurge({
         ...(options.zone === false ? {} : { zoneId: FAKE_ZONE }),
@@ -217,7 +230,7 @@ export class FakeS3 {
       this.purged.push(...(JSON.parse(body.toString()).files as string[]))
       return { status: 200, body: '{"success":true}' }
     }
-    const prefix = `/${FAKE_BUCKET}/`
+    const prefix = `/${this.bucket}/`
     if (!url.pathname.startsWith(prefix)) return { status: 400 }
     const key = url.pathname.slice(prefix.length)
     const presigned = url.searchParams.has('X-Amz-Signature')
@@ -280,7 +293,7 @@ export class FakeS3 {
 
   #copy(key: string, req: IncomingMessage) {
     const source = this.objects.get(
-      String(req.headers['x-amz-copy-source']).replace(`/${FAKE_BUCKET}/`, ''),
+      String(req.headers['x-amz-copy-source']).replace(`/${this.bucket}/`, ''),
     )
     if (!source) return { status: 404, body: xml('NoSuchKey') }
     const replace = req.headers['x-amz-metadata-directive'] === 'REPLACE'

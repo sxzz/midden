@@ -5,10 +5,10 @@ import {
   captures,
   connections,
   relationFetches,
-  sourceResponses,
   submissions,
 } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
+import { deleteSourceResponses } from '#raw/responses.ts'
 import { dropStaging } from './staging.ts'
 import type { Transaction } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
@@ -109,16 +109,11 @@ export function failCapture(
     .set({ state: 'failed', error: message })
     .where(and(eq(assets.captureId, captureId), eq(assets.state, 'pending')))
     .run()
-  tx.delete(sourceResponses)
-    .where(eq(sourceResponses.captureId, captureId))
-    .run()
+  const now = new Date(ctx.now?.() ?? Date.now())
+  deleteSourceResponses(tx, [captureId], now)
   dropStaging(tx, captureId)
   tx.update(captures)
-    .set({
-      state: 'failed',
-      error: message,
-      finishedAt: new Date(ctx.now?.() ?? Date.now()),
-    })
+    .set({ state: 'failed', error: message, finishedAt: now })
     .where(and(eq(captures.id, captureId), captureRunning))
     .run()
   deliveries(ctx, tx, captureId)

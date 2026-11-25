@@ -32,11 +32,13 @@ export interface ObjectHead {
 export interface PutOptions {
   size: number
   contentType: string
-  cacheControl: string
+  cacheControl?: string
   /** Hex SHA-256 of the bytes: signed as the payload hash, so checked. */
   sha256: string
   /** Base64 MD5 of the bytes, checked by the service. */
   md5: string
+  /** User metadata (`x-amz-meta-*`), by lowercase name without the prefix. */
+  metadata?: Record<string, string>
   signal?: AbortSignal
 }
 
@@ -120,7 +122,7 @@ export class S3Bucket {
     key: string,
     headers: Record<string, string>,
     init: {
-      body?: () => ReadableStream
+      body?: () => ReadableStream | Uint8Array
       signal?: AbortSignal
       timeout?: number | false
       ok?: (status: number) => boolean
@@ -184,22 +186,33 @@ export class S3Bucket {
     }
   }
 
-  /** Upload a local file in one request. */
-  async put(key: string, file: string, options: PutOptions): Promise<void> {
+  /** Upload a local file, or bytes in memory, in one request. */
+  async put(
+    key: string,
+    source: string | Uint8Array,
+    options: PutOptions,
+  ): Promise<void> {
     const response = await this.#send(
       'PutObject',
       'PUT',
       key,
       {
+        ...metaHeaders(options.metadata),
         'Content-Length': String(options.size),
         'Content-Type': options.contentType,
-        'Cache-Control': options.cacheControl,
+        ...(options.cacheControl
+          ? { 'Cache-Control': options.cacheControl }
+          : {}),
         'Content-MD5': options.md5,
         'X-Amz-Content-Sha256': options.sha256,
       },
       {
         body: () =>
-          Readable.toWeb(createReadStream(file)) as unknown as ReadableStream,
+          typeof source === 'string'
+            ? (Readable.toWeb(
+                createReadStream(source),
+              ) as unknown as ReadableStream)
+            : source,
         signal: options.signal,
         // Large files take as long as the uplink needs.
         timeout: false,
@@ -254,14 +267,8 @@ export class S3Bucket {
       metadata?: Record<string, string>
     },
   ): Promise<void> {
-    const meta = Object.fromEntries(
-      Object.entries(headers.metadata ?? {}).map(([name, value]) => [
-        `${META}${name}`,
-        value,
-      ]),
-    )
     const response = await this.#send('CopyObject', 'PUT', key, {
-      ...meta,
+      ...metaHeaders(headers.metadata),
       'Content-Type': headers.contentType,
       'Cache-Control': headers.cacheControl,
       'x-amz-copy-source': `/${this.#bucket}/${key}`,
@@ -286,6 +293,14 @@ export class S3Bucket {
     )
     return signed.url.href
   }
+}
+
+function metaHeaders(
+  metadata: Record<string, string> = {},
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(metadata).map(([name, value]) => [`${META}${name}`, value]),
+  )
 }
 
 function xmlCode(body: string): string {
