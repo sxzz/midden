@@ -239,6 +239,24 @@ API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…
 - 挑战不存数据库：由 16 字节随机数、过期时间（5 分钟）和 HMAC 组成，HMAC 的密钥由 `SECRET_KEY` 派生，覆盖用途（注册或登录）、来源，注册时还有来自哪个 `/passkey` 链接或哪个已登录的会话（令牌）。验证时只重新计算 HMAC 并检查过期，所以注册与登录、不同来源、不同链接或会话之间不能互用，篡改即失效。挑战只能用一次：答复过的随机数记在进程内存中直到过期；进程在 5 分钟内重启后，理论上可以重放一次重启前答复过的挑战，此时计数器检查与用户验证仍然有效。接口不限流。令牌与挑战不写入日志。
 - REST：Bearer token，数据库只存哈希。
 
+## 启动顺序
+
+`server/src/main.ts`：
+
+1. 读取配置、创建日志，随即注册 SIGTERM/SIGINT 的处理。之后每启动一样东西就登记它的关闭方法，关闭时按相反顺序执行，所以启动的任何阶段收到信号都会正常退出（退出码 0）。容器中 Node 是 PID 1，没有处理函数的 SIGTERM 会被忽略，等到被强制结束（137）；`compose.yaml` 另外设了 `init: true`。
+2. 打开数据库（应用迁移）、补齐 `catalog`、检测 ffmpeg。
+3. 有意阻塞启动的检查：`MEDIA_STORE=r2` 或 `RAW_R2_BUCKET` 用 `CF_API_TOKEN` 时验证它（每次请求 10 秒超时，共 3 次，最多约 33 秒）。失败就退出，`/healthz` 不响应，自动部署回滚。
+4. 创建任务队列、Litestream 心跳监听、存储用量与路由，开始监听 HTTP（日志 `listening`），然后启动任务队列。
+5. 在后台启动 Telegram Bot（`telegram/launch.ts`），不阻塞上面任何一步。
+
+`/healthz` 只反映 HTTP 服务与数据库（执行一次 `SELECT 1`，失败时 503），不看 Bot 的状态。Bot 的状态在 `GET /v1/instance` 的 `bot` 字段：`off`（未配置）、`starting`、`running`、`failed`、`stopped`。
+
 ## Telegram Bot
+
+启动（`launchBot`）：`getMe`、两次 `setMyCommands`、两次 `setChatMenuButton`，每个请求 15 秒超时，全部成功后才开始长轮询和发送 `telegram_deliveries`，所以失败的一次尝试不留下任何在运行的东西。失败（超时、网络错误、5xx、429）后整组重试，间隔从 5 秒起翻倍，最长 5 分钟；Telegram 给出 `retry_after` 且更长时按它等待。日志：每次失败 `telegram bot start failed; retrying`（warn，带 `attempt`、`retryInMs`），成功 `telegram bot started`（带 `attempt`）。Telegram 拒绝请求本身（429 以外的 4xx，如 token 被撤销）时不再重试，记 `telegram bot could not start`（error），状态为 `failed`，服务照常运行，只是没有 Bot。
+
+Bot 未运行时：发给所有者的通知（Litestream 心跳、存储用量提醒、通行密钥与域名的变动）先留在内存中（最多 20 条），Bot 启动后发出；Bot 失败或停止时丢弃并记 `telegram notice dropped`。抓取结果等发送存在 `telegram_deliveries` 中，Bot 启动后照常发出。Mini App 登录只用 token 验签，不需要 Bot 在运行。部署结果由部署机上的 webhook 直接调用 Bot API 发送，与服务无关。停止时最多等 Telegram 5 秒（grammY 停止长轮询时还要确认一次更新，用的是它默认 500 秒的超时）。
+
+只用长轮询，没有 webhook 模式。
 
 长轮询，只处理所有者的消息与按钮。每个需要发送的结果（抓取状态与结果、`/show`、Profile 进度）是一条 `telegram_deliveries`，按段发送并记录进度，重启后从中断处继续。上传过的媒体按 Bot 记录 `file_id`，再次发送时直接复用。

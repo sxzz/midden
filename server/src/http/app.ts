@@ -27,6 +27,7 @@ import { storageRoutes } from './storage-routes.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { LitestreamWatch } from '#litestream.ts'
+import type { BotState } from '#telegram/launch.ts'
 import type { StorageUsage } from '#usage/storage.ts'
 import type { Buffer } from 'node:buffer'
 
@@ -49,6 +50,8 @@ export interface HttpOptions {
   dev?: boolean
   /** Present when Litestream replicates the database. */
   litestream?: LitestreamWatch
+  /** The Telegram bot's state; absent without a bot. */
+  botState?: () => BotState
   /** 存储用量; the routes answer 404 without it. */
   storage?: StorageUsage
 }
@@ -148,6 +151,7 @@ export function createApi(options: HttpOptions) {
       .get('/instance', (c) =>
         c.json({
           dev: !!options.dev,
+          bot: options.botState?.() ?? ('off' as const),
           litestream: options.litestream?.status() ?? {
             enabled: false,
             last_heartbeat_at: null,

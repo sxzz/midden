@@ -26,6 +26,10 @@ const Env = v.object({
   TELEGRAM_BOT_TOKEN: v.optional(v.pipe(v.string(), v.regex(/^\d+:[\w-]+$/))),
   // The only Telegram user allowed in.
   OWNER_TELEGRAM_ID: v.optional(v.pipe(v.string(), v.regex(/^\d+$/))),
+  // Another Bot API server (a local one, or a fake in tests); no trailing /.
+  TELEGRAM_API_ROOT: v.optional(
+    v.pipe(v.string(), v.url(), v.regex(/^https?:\/\/[^?#]*[^/?#]$/)),
+  ),
   // Public HTTPS address of the web app (ending in /app/), opened as the
   // Mini App; enables cookie sessions.
   WEB_APP_URL: v.optional(
@@ -154,7 +158,7 @@ export interface Config {
   secretKey: string
   ffmpeg: string
   webDir: string
-  telegram?: { token: string; owner: string }
+  telegram?: { token: string; owner: string; apiRoot?: string }
   webAppUrl?: string
   media: MediaConfig
   /**
@@ -210,6 +214,9 @@ export function loadConfig(
           telegram: {
             token: parsed.TELEGRAM_BOT_TOKEN,
             owner: parsed.OWNER_TELEGRAM_ID,
+            ...(parsed.TELEGRAM_API_ROOT
+              ? { apiRoot: parsed.TELEGRAM_API_ROOT }
+              : {}),
           },
         }
       : {}),

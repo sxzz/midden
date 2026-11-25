@@ -356,6 +356,7 @@ describe('api', () => {
     await save(production.call)
     expect(await (await production.call('/instance')).json()).toEqual({
       dev: false,
+      bot: 'off',
       litestream: NO_LITESTREAM,
     })
     const refused = await clear(production.call)
@@ -370,6 +371,7 @@ describe('api', () => {
     await save(dev.call)
     expect(await (await dev.call('/instance')).json()).toEqual({
       dev: true,
+      bot: 'off',
       litestream: NO_LITESTREAM,
     })
     expect(await (await clear(dev.call)).json()).toMatchObject({

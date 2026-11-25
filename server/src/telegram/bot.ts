@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { Bot, type Context } from 'grammy'
+import { Bot, type ApiClientOptions, type Context } from 'grammy'
 import { handle, type Reply, type Request } from './commands.ts'
 import {
   DeliveryWorker,
@@ -20,7 +20,12 @@ export interface BotOptions {
   webAppUrl?: string
   version: string
   ffmpeg: string
+  /** grammY's API client options; tests point `apiRoot` at a fake. */
+  client?: ApiClientOptions
 }
+
+// grammY types its signals with an AbortSignal shim of its own.
+type ApiSignal = Parameters<Bot['api']['getMe']>[0]
 
 const TEXT_LIMIT = 3500
 const FIELDS = /\s+/
@@ -57,10 +62,37 @@ export interface RunningBot {
   notify: (text: string) => void
 }
 
-export async function startBot(options: BotOptions): Promise<RunningBot> {
+/**
+ * One attempt to set the bot up and start polling. Every setup request is
+ * cut off after `timeoutMs`, and all of them when `signal` aborts; polling
+ * and the delivery worker start only once all of them succeeded, so a
+ * failed attempt leaves nothing running.
+ */
+export async function startBot(
+  options: BotOptions,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<RunningBot> {
   const { ctx, owner } = options
-  const bot = new Bot(options.token)
-  await bot.init()
+  const bot = new Bot(options.token, { client: options.client })
+  async function request<T>(
+    method: string,
+    send: (signal: ApiSignal) => Promise<T>,
+  ): Promise<T> {
+    const timeout = AbortSignal.timeout(timeoutMs)
+    try {
+      return await send(AbortSignal.any([signal, timeout]) as ApiSignal)
+    } catch (error) {
+      if (timeout.aborted && !signal.aborted)
+        throw new Error(`Telegram ${method} timed out after ${timeoutMs} ms`, {
+          cause: error,
+        })
+      throw error
+    }
+  }
+
+  // Not bot.init(): that retries by itself, with no timeout of its own.
+  bot.botInfo = await request('getMe', (s) => bot.api.getMe(s))
   const username = bot.botInfo.username ?? ''
   const media = new Media({
     api: bot.api,
@@ -79,15 +111,22 @@ export async function startBot(options: BotOptions): Promise<RunningBot> {
     webAppUrl: options.webAppUrl,
   })
 
-  await bot.api.setMyCommands(
-    COMMANDS.map((c) => ({ command: c.name, description: c.description })),
+  await request('setMyCommands', (s) =>
+    bot.api.setMyCommands(
+      COMMANDS.map((c) => ({ command: c.name, description: c.description })),
+      undefined,
+      s,
+    ),
   )
-  await bot.api.setMyCommands(
-    COMMANDS.filter((c) => !c.privateOnly).map((c) => ({
-      command: c.name,
-      description: c.description,
-    })),
-    { scope: { type: 'all_group_chats' } },
+  await request('setMyCommands', (s) =>
+    bot.api.setMyCommands(
+      COMMANDS.filter((c) => !c.privateOnly).map((c) => ({
+        command: c.name,
+        description: c.description,
+      })),
+      { scope: { type: 'all_group_chats' } },
+      s,
+    ),
   )
   const menuButton = options.webAppUrl
     ? ({
@@ -96,13 +135,17 @@ export async function startBot(options: BotOptions): Promise<RunningBot> {
         web_app: { url: options.webAppUrl },
       } as const)
     : ({ type: 'commands' } as const)
-  await bot.api.setChatMenuButton({ menu_button: menuButton })
+  await request('setChatMenuButton', (s) =>
+    bot.api.setChatMenuButton({ menu_button: menuButton }, s),
+  )
   // A menu button set in BotFather outranks the default one; the owner's own
   // chat setting outranks both.
-  await bot.api.setChatMenuButton({
-    chat_id: Number(owner),
-    menu_button: menuButton,
-  })
+  await request('setChatMenuButton', (s) =>
+    bot.api.setChatMenuButton(
+      { chat_id: Number(owner), menu_button: menuButton },
+      s,
+    ),
+  )
 
   const commandContext = {
     ctx,

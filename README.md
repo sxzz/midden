@@ -27,7 +27,7 @@ docker compose up -d
 | `/app/` | 网页 |
 | `/v1/` | REST API |
 | `/media/` | 签名的媒体链接 |
-| `/healthz` | 健康检查 |
+| `/healthz` | 健康检查：HTTP 服务与数据库可用，与 Telegram 无关 |
 
 数据保存在 `./data`（可用 `DATA_PATH` 修改）。`SECRET_KEY` 用于加密已保存的账号凭据、签名媒体链接与通行密钥挑战：务必与数据一起备份，更换后已保存的账号需要重新添加。
 
@@ -37,6 +37,7 @@ docker compose up -d
 | --- | --- |
 | `SECRET_KEY` | 必填，见上 |
 | `TELEGRAM_BOT_TOKEN`、`OWNER_TELEGRAM_ID` | Telegram Bot 的 token 与所有者的用户 ID，需同时设置；不设置则不启动 Bot，也无法添加第一个通行密钥 |
+| `TELEGRAM_API_ROOT` | 可选，另一个 Bot API 服务器的地址（如自建的本地服务器），末尾不带 `/`；默认 `https://api.telegram.org` |
 | `WEB_APP_URL` | 网页的公开 HTTPS 地址，以 `/app/` 结尾，也是 Mini App 的地址；设置后才能登录网页。网页的其他域名在「设置 → 管理员面板 → 域名」中添加 |
 | `DATA_PATH` | 宿主机上的数据目录，默认 `./data` |
 | `PORT` | 宿主机端口，默认 `8080` |

@@ -26,7 +26,7 @@ import { createInstagramPlatform } from '#platforms/instagram/index.ts'
 import { Platforms } from '#platforms/registry.ts'
 import { createXPlatform } from '#platforms/x/index.ts'
 import { openRawStore } from '#raw/store.ts'
-import { startBot, type RunningBot } from '#telegram/bot.ts'
+import { launchBot, type BotHandle } from '#telegram/launch.ts'
 import { StorageUsage } from '#usage/storage.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
@@ -36,7 +36,31 @@ const APP_PREFIX = /^\/app/
 
 const config = loadConfig()
 const logger = createLogger(config.logLevel, config.logFile)
+
+// Registered before anything else: in the container this process is PID 1,
+// for which a signal without a handler does nothing, so a stop during
+// startup would wait for the kill. Each step that starts something adds
+// how to end it; they run newest first.
+const cleanups: (() => unknown)[] = []
+let stopping = false
+async function shutdown(signal: NodeJS.Signals) {
+  if (stopping) return
+  stopping = true
+  logger.info({ signal }, 'shutting down')
+  for (const cleanup of cleanups.toReversed()) {
+    try {
+      await cleanup()
+    } catch (error) {
+      logger.error({ err: error }, 'shutdown step failed')
+    }
+  }
+  process.exit(0)
+}
+process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown)
+
 const db = openDatabase(config.databasePath)
+cleanups.push(() => db.$client.close())
 const catalogued = catalogMissing(db)
 if (catalogued) logger.info({ count: catalogued }, 'catalogued collections')
 const signer = new MediaSigner({
@@ -48,7 +72,8 @@ if (!thumbnailer) logger.warn('ffmpeg not found; thumbnails are disabled')
 logger.info({ store: config.media.store }, 'media store')
 // Before anything listens: without working R2 credentials this throws and
 // the process exits, as with any invalid configuration, so /healthz never
-// answers and a deploy rolls back.
+// answers and a deploy rolls back. The token check has short timeouts, so a
+// stalled network fails it well within the deploy's wait.
 const blobs = await openMediaStore(config, signer, logger)
 const raw = await openRawStore(config, logger)
 logger.info({ store: raw ? 'r2' : 'database' }, 'raw responses store')
@@ -61,6 +86,7 @@ const queue = new JobQueue({
   concurrency: { capture: 4, download: 8, control: 4, upload: 4, raw: 4 },
   isPermanent,
 })
+cleanups.push(() => queue.stop())
 ctx = {
   db,
   queue,
@@ -75,15 +101,13 @@ ctx = {
   thumbnailer,
 }
 
-let bot: RunningBot | undefined
+// Started after the server listens; until it runs, notices wait in it.
+let bot: BotHandle | undefined
+const notify = (text: string) => bot?.notify(text)
 const litestream = config.litestream
-  ? watchLitestream({
-      db,
-      host: config.host,
-      logger,
-      notify: (text) => bot?.notify(text),
-    })
+  ? watchLitestream({ db, host: config.host, logger, notify })
   : undefined
+if (litestream) cleanups.push(() => litestream.close())
 const storage = new StorageUsage({
   db,
   dataDir: config.dataDir,
@@ -91,7 +115,7 @@ const storage = new StorageUsage({
   mediaDir: config.mediaDir,
   cloudflare: config.cloudflare,
   logger,
-  notify: (text) => bot?.notify(text),
+  notify,
 })
 const api = createApi({
   ctx,
@@ -101,11 +125,20 @@ const api = createApi({
   litestream,
   storage,
   challengeKey: deriveKey(config.secretKey, 'passkey-challenge'),
-  notify: (text) => bot?.notify(text),
+  notify,
+  ...(config.telegram ? { botState: () => bot?.state() ?? 'starting' } : {}),
 })
 
 const app = new Hono()
-app.get('/healthz', (c) => c.text('ok'))
+// The process serves and its database answers; Telegram is not part of it.
+app.get('/healthz', (c) => {
+  try {
+    db.$client.prepare('SELECT 1').get()
+  } catch {
+    return c.text('database unavailable', 503)
+  }
+  return c.text('ok')
+})
 app.route('/v1', api)
 // With R2, this serves thumbnails (a local cache, rendered again when lost),
 // downloads, and originals until their upload is confirmed.
@@ -138,16 +171,32 @@ app.use(
 app.get('/app/*', serveStatic({ root: config.webDir, path: 'index.html' }))
 app.get('/', (c) => c.redirect('/app/'))
 
+const server = serve(
+  { fetch: app.fetch, port: config.port, hostname: config.host },
+  (info) =>
+    logger.info({ address: info.address, port: info.port }, 'listening'),
+)
+cleanups.push(() => server.close())
 queue.start()
-if (config.telegram)
-  bot = await startBot({
+
+// In the background: Telegram being slow or down must not keep the server
+// from serving. Deliveries wait in the database until the bot runs.
+if (config.telegram) {
+  const handle = launchBot({
     ctx,
     token: config.telegram.token,
     owner: config.telegram.owner,
     webAppUrl: config.webAppUrl,
     version: process.env.BUILD_REVISION || 'dev',
     ffmpeg: config.ffmpeg,
+    ...(config.telegram.apiRoot
+      ? { client: { apiRoot: config.telegram.apiRoot } }
+      : {}),
   })
+  bot = handle
+  cleanups.push(() => handle.stop())
+}
+
 let maintaining = false
 const maintenance = setInterval(() => {
   if (maintaining) return
@@ -165,25 +214,7 @@ const maintenance = setInterval(() => {
     )
 }, MAINTENANCE_INTERVAL)
 const optimizing = setInterval(optimize, OPTIMIZE_INTERVAL, db)
-const server = serve(
-  { fetch: app.fetch, port: config.port, hostname: config.host },
-  (info) =>
-    logger.info({ address: info.address, port: info.port }, 'listening'),
-)
-
-let stopping = false
-async function shutdown(signal: NodeJS.Signals) {
-  if (stopping) return
-  stopping = true
-  logger.info({ signal }, 'shutting down')
+cleanups.push(() => {
   clearInterval(maintenance)
   clearInterval(optimizing)
-  litestream?.close()
-  server.close()
-  await bot?.stop()
-  await queue.stop()
-  db.$client.close()
-  process.exit(0)
-}
-process.once('SIGINT', shutdown)
-process.once('SIGTERM', shutdown)
+})

@@ -92,6 +92,26 @@ describe('R2 credentials from the API token', () => {
     expect(calls).toBe(3)
   })
 
+  test('a request that never answers fails after its timeout', async () => {
+    let calls = 0
+    const stalled: typeof fetch = (_input, init) => {
+      calls++
+      return new Promise((_resolve, reject) =>
+        init?.signal?.addEventListener('abort', () =>
+          reject(init.signal!.reason),
+        ),
+      )
+    }
+    await expect(
+      verifyToken(cloudflare(), {
+        fetch: stalled,
+        timeoutMs: 20,
+        retryDelayMs: 1,
+      }),
+    ).rejects.toThrow('token verify request failed')
+    expect(calls).toBe(3)
+  })
+
   test('a disabled token is refused', async () => {
     const disabled: typeof fetch = async () =>
       Response.json({

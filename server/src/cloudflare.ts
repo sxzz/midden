@@ -5,7 +5,9 @@ import type { Logger } from '#log.ts'
 
 /** Cloudflare's REST API; tests point this at a fake. */
 export const CLOUDFLARE_API = 'https://api.cloudflare.com/client/v4'
-const TIMEOUT = 30_000
+// Startup waits on this before it serves: a stalled network must fail it
+// (3 attempts, about 33 s) well within the deploy's wait.
+const TIMEOUT = 10_000
 const ATTEMPTS = 3
 
 export interface CloudflareOptions {
@@ -13,6 +15,8 @@ export interface CloudflareOptions {
   apiBase?: string
   /** Base delay between attempts. */
   retryDelayMs?: number
+  /** Limit for each request. */
+  timeoutMs?: number
 }
 
 /** An S3 key pair for R2. */
@@ -52,7 +56,7 @@ export async function verifyToken(
     try {
       response = await send(url, {
         headers: { Authorization: `Bearer ${cloudflare.apiToken}` },
-        signal: AbortSignal.timeout(TIMEOUT),
+        signal: AbortSignal.timeout(options.timeoutMs ?? TIMEOUT),
       })
     } catch (error) {
       lastError = new Error(`token verify request failed: ${String(error)}`)
