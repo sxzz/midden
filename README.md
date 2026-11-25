@@ -8,7 +8,7 @@
 - Profile 会连同时间线中的帖子一起保存，可按条件筛选、继续翻页或中止。
 - 网页（含 Telegram Mini App）用于浏览、筛选、多选更新与删除、标签与备注、管理采集账号。
 
-所有数据保存在一个目录中：SQLite 数据库 `midden.db` 和按内容哈希存放的 `media/`。
+所有数据保存在一个目录中：SQLite 数据库 `midden.db` 和按内容哈希存放的 `media/`。媒体原文件也可以存到 Cloudflare R2。
 
 ## 部署
 
@@ -41,6 +41,7 @@ docker compose up -d
 | `DATA_PATH` | 宿主机上的数据目录，默认 `./data` |
 | `PORT` | 宿主机端口，默认 `8080` |
 | `LOG_LEVEL` | 日志级别，默认 `info` |
+| `MEDIA_STORE` 等 | 可选，把媒体原文件存到 Cloudflare R2，见 [运维](docs/operations.md#媒体存储cloudflare-r2) |
 
 ### 接入 Telegram
 

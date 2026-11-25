@@ -19,7 +19,9 @@ flowchart LR
     Queue --> Platforms
     Platforms --> Upstream[FxTwitter / X / Instagram]
     Queue --> Media[(media/ 目录)]
+    Queue -.->|上传，可选| R2[(R2 存储桶)]
     Web -->|签名链接| Media
+    Web -->|公开地址| R2
 ```
 
 ## 代码结构
@@ -31,7 +33,7 @@ flowchart LR
 | `server/src/library/`   | 读取：收藏详情、筛选列表、作者、版本、删除、标签备注、收藏夹、公开分享、关注变化、关系图谱            |
 | `server/src/accounts/`  | 采集账号与加密凭据                                                                                    |
 | `server/src/jobs/`      | 存在 SQLite 中的持久化任务队列                                                                        |
-| `server/src/blob/`      | 媒体存储接口、本地目录实现、签名链接                                                                  |
+| `server/src/blob/`      | 媒体存储接口、本地目录与 R2（S3）实现、签名链接、迁移与清理本地原文件                                 |
 | `server/src/http/`      | Hono 路由与认证                                                                                       |
 | `server/src/telegram/`  | Bot：命令、消息渲染与分段、投递、媒体发送                                                             |
 | `server/drizzle/`       | 由 drizzle-kit 生成的数据库迁移，启动时自动应用                                                       |
@@ -46,7 +48,7 @@ flowchart LR
 - 统计趋势不折叠：`GET /v1/collections/:id/counts` 列出每次成功抓取为根实体记下的计数（按指针，如 `/metadata/followers`），最旧的在前，最多最近 1000 次（`limit` 可取更少，详情页只取 2 次来判断是否有趋势）。至少两次抓取读到同一项计数时，详情页提供「统计趋势」页，每项计数一张折线图。
 - 资料修改记录：`GET /v1/collections/:id/profile-changes` 按时间比较 Profile 相邻的版本，列出页面显示的资料（昵称、用户名、简介、受保护、头像、主页封面）有变化的版本，最新的在前，每条给出变化的字段及其前后的值。只比较网页显示的部分，读法与网页相同（简介没有 `description` 时取版本文本）；计数、不稳定字段、时间线记下的转发等不显示的部分不算。图片按内容哈希比较；抓取未能保存的图片、未说明是否受保护的抓取视为未知，不算变化。只比较最近 1000 个版本（`limit` 可取更少的条目）；不是 Profile 的收藏返回空列表。Profile 至少有一条记录时（详情页只取 1 条来判断），详情页提供「资料修改记录」页，按天分组的时间线，最新的在上。
 - 实体（帖子、账号）按平台身份共享，`entity_versions` 按内容去重。
-- 媒体按 SHA-256 存在 `media/ab/cd/<哈希>`，`blobs` 记录类型与大小，缩略图同样按内容存放。
+- 媒体按 SHA-256 存在 `media/ab/cd/<哈希>`，`blobs` 记录类型与大小，缩略图同样按内容存放。使用 R2 时原文件另存到存储桶的同名键，`blobs.remote_at` 记下上传得到确认的时间，见「媒体链接」。
 - 删除收藏后，维护任务在没有进行中的抓取时删除其内容；不再被引用的媒体文件 24 小时后删除。
 - `catalog` 为每个有版本的收藏保存列表筛选与排序所需的字段（根实体类型、作者、媒体种类、发布时间、占用空间、搜索文本、账号的粉丝数与关注数等），由最新版本和最新一次带计数的抓取派生，在同一事务内随抓取完成、关注列表存入账号、删除媒体和原始响应清理更新。列表只读这张窄表；作者的最新资料、作者被打的标签、被保存的转发等跨收藏的条件在查询时通过索引计算。启动时会补齐缺失的行，所以改变它的派生方式时，在迁移中清空这张表即可重建；只涉及少数行时（如只有账号才有的计数）也可以在迁移中就地补齐，不必重建全表。
 - 列表排序（`sort`）：`updated`（最近一次抓取，默认）、`published`（发帖时间，没有时按抓取时间）、`saved`（加入收藏库的时间）、`storage`（占用空间）、`followers`（粉丝数）、`following`（关注数），`order` 为 `desc`（默认）或 `asc`，相同时按收藏 id 排。翻页位置记下排序值和 id，与筛选条件的指纹一起编码，换了筛选或排序就失效。
@@ -57,7 +59,7 @@ flowchart LR
 - 为节省空间，可以删除帖子的媒体（视频和图片）。被删除的是这条收藏对它的引用，覆盖它所有的抓取和版本，否则空间不会释放。可删除的是内容媒体（`purpose` 为空）和 Profile 的主页封面；头像不删除，同一账号的每条帖子都显示同一个头像。
 - 媒体身份：`assets.media_key` 是平台给出的媒体身份（`capture/media-key.ts`），不是地址：X 即不可变键（`x:media:<类型>:<id>`）的哈希，与 `cache_key` 相同；Instagram 的不可变键末尾带有所选的清晰度（类型、尺寸、码率），身份去掉这三段，所以换一个清晰度仍是同一媒体；平台没有给出不可变键时用 `url:<地址>`。迁移按 `cache_key`（没有时按地址）补齐旧的行，因此 Instagram 在此之前保存的媒体只按原清晰度认出。
 - 「已移除」标记是 `removed_media(media_key, kind, thumbnail_key, thumbnail_mime)`，按媒体身份，不属于某条收藏。之后任何收藏的抓取（这条帖子的更新，或转发、引用了同一媒体的其他帖子）列出这个媒体时，资产直接记为 `removed`、不排下载任务；标记之前已排队的下载在开始前（等待同一媒体的下载锁之后）再查一次，同样记为 `removed`；已经在下载的照常完成，但资产已不是 `pending` 时文件只在有别的 blob 使用时保留，否则进入 `media_garbage`。`removed` 不算缺失：抓取仍为 `complete`，也不使它成为「没有可保存的内容」。资产不带 blob，所以与删除时一致，删除后再抓取不产生新版本。
-- 删除（`POST /v1/media-removals`，`{ ids }` 为若干收藏的全部媒体，最多 500 条；`{ collection, asset }` 为一条收藏中的一个媒体，按这条收藏所有抓取中同一 `media_key` 的资产）在一个事务内：记下标记，把这些资产改为 `removed` 并去掉 `blob_id`，等待它们的下载中抓取重新判断是否可以完成，再释放不再有资产引用的 blob（与删除收藏时的维护相同，`releaseBlobs`：删除 `blobs` 行，文件和缩略图的键进入 `media_garbage`，24 小时后删除），并更新这些收藏的 `catalog`（`storage_bytes` 随之减少，列表的占用合计、`/v1/usage` 同样）。媒体种类筛选仍按平台列出的媒体，删除后帖子仍算有视频。
+- 删除（`POST /v1/media-removals`，`{ ids }` 为若干收藏的全部媒体，最多 500 条；`{ collection, asset }` 为一条收藏中的一个媒体，按这条收藏所有抓取中同一 `media_key` 的资产）在一个事务内：记下标记，把这些资产改为 `removed` 并去掉 `blob_id`，等待它们的下载中抓取重新判断是否可以完成，再释放不再有资产引用的 blob（与删除收藏时的维护相同，`releaseBlobs`：删除 `blobs` 行，文件和缩略图的键进入 `media_garbage`，24 小时后删除；R2 中的对象同时删除，并先清除其公开地址的边缘缓存），并更新这些收藏的 `catalog`（`storage_bytes` 随之减少，列表的占用合计、`/v1/usage` 同样）。媒体种类筛选仍按平台列出的媒体，删除后帖子仍算有视频。
 - 缩略图：`blob_thumbnails` 以 `blob_id` 为键、随 blob 级联删除，所以删除时把这个媒体已有的缩略图的键和类型复制到标记上；维护删除 `media_garbage` 中的键之前，除了 `blobs`、`blob_thumbnails`，也检查是否仍是某个标记的缩略图，是则保留文件。没有缩略图（未配置 ffmpeg 或尚未生成）时标记不带缩略图。
 - 试算：`POST /v1/media-removals/preview` 用同一个查询算出删除会做什么：`media`（媒体数，按 `media_key`）、`freed_bytes`（只被这次删除的资产引用的 blob 的大小之和）、`shared`（其 blob 还被其他资产引用、不会释放空间的媒体数）。删除的响应是同样的数字。
 - 恢复下载：`POST /v1/media-removals/restore`（`{ collection, asset }`）删除标记，保留的缩略图进入 `media_garbage`；已删除的资产保持 `removed`，下一次抓取重新下载，内容因此不同而产生新版本。
@@ -167,13 +169,22 @@ flowchart LR
 
 ## 任务
 
-任务保存在 `jobs` 表，按队列限制并发：`capture` 4、`download` 8（缩略图共用，优先级较低）、`control` 4。失败按 2、4、8… 秒退避，最多 3 次；平台给出的 `retry-after` 优先；无法通过重试解决的错误直接失败。进程重启时，运行中的任务回到队列。
+任务保存在 `jobs` 表，按队列限制并发：`capture` 4、`download` 8（缩略图共用，优先级较低）、`control` 4、`upload` 4（上传到 R2，重试另有间隔，见运维文档）。失败按 2、4、8… 秒退避，最多 3 次；平台给出的 `retry-after` 优先；无法通过重试解决的错误直接失败。进程重启时，运行中的任务回到队列。
 
 抓取的状态在结果保存前一直是 `queued`，所以它本身分不出排队与正在抓取。采集记录、成员列表、`GET /v1/jobs/:id` 和 Telegram 按抓取任务在 `jobs` 中的状态区分：任务尚未运行时给出 `waiting`（`queue`：等待空闲的并发位置或账号；`retry`：失败后等待重试），网页显示「排队中」「等待重试」，否则显示「正在采集」。
 
 ## 媒体链接
 
-API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…`），浏览器直接请求，不依赖登录 Cookie。链接在 12 小时的时间窗内保持不变，便于浏览器缓存。`BlobStore` 是可替换的接口，将来可以加入 S3 等远端实现，届时由它返回远端的预签名链接。
+API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…`），浏览器直接请求，不依赖登录 Cookie。链接在 12 小时的时间窗内保持不变，便于浏览器缓存。
+
+存储由 `BlobStore` 接口抽象，`MEDIA_STORE` 选择实现：
+
+- `local`（`blob/fs-store.ts`）：只有本地目录，所有链接都是上面的签名链接。
+- `r2`（`blob/bucket-store.ts`，S3 通用，经 `blob/s3.ts` 用 SigV4 调用）：本地目录在前，R2 存储桶在后。下载先写本地，新 blob 排一个 `upload` 任务（`capture/upload.ts`，`upload` 队列 4 个并发），上传后读回确认，再写 `blobs.remote_at`。`url()` 只对 `remote_at` 已有、且不带文件名的原文件给出公开地址 `MEDIA_PUBLIC_URL/ab/cd/<哈希>`；缩略图（只存本地）、尚未确认的原文件和带文件名的下载（需要 `Content-Disposition`）仍是签名链接。读取（`read`、`stat`）先本地后 R2；`source()` 给 ffmpeg/ffprobe 一个本地路径，或 R2 的预签名 URL（1 小时），让它们只读需要的字节范围。`delete()` 删除本地文件，R2 中有对象时先清除边缘缓存再删对象。
+- `/media/` 路由在 `r2` 时让图片和缩略图可被 CDN 缓存（`public, max-age=31536000, immutable`），视频和下载仍为 `private`；签名有效但文件不存在时，若它是某个 blob 的缩略图，就从原文件重新生成（`regenerateThumbnail`，同一个键的并发请求只生成一次），生成的字节不同则记到新键并 307 重定向。
+- 迁移与清理：`blob/migrate.ts`（CLI 的 `media-migrate`、`media-prune-local`），见运维文档。
+
+关系图谱用 WebGL 绘制头像，sigma 以 `crossOrigin="anonymous"` 加载图片；R2 的公开域名对所有响应（包括缓存命中）都返回 `Access-Control-Allow-Origin: *`，所以同一页中普通 `<img>` 与 CORS 方式加载同一地址不会因浏览器缓存冲突（Chromium 中已验证两种先后顺序），不需要给其他图片加 `crossorigin`。网页的 CSP（`scripts/prepare-web-assets.ts`）在 `img-src` 与 `media-src` 中允许 `https://midden-media.sxzz.moe`。
 
 ## 网页导航
 
