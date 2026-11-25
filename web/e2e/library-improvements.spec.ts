@@ -134,7 +134,7 @@ test('authors load with skeletons once their list opens; post type filters updat
   await expect.poll(() => query.get('post_type')).toBe('quote')
 })
 
-test('album captions and the media viewer include expandable post text', async ({
+test('album captions and the media viewer link the post text to its detail', async ({
   page,
 }) => {
   await page.route('**/v1/**', (route) => {
@@ -153,29 +153,32 @@ test('album captions and the media viewer include expandable post text', async (
           ? []
           : path === '/v1/collections'
             ? { items: [post] }
-            : {},
+            : path === '/v1/collections/aaaa'
+              ? post
+              : path.endsWith('/availability')
+                ? { available: true }
+                : path.endsWith('/history')
+                  ? { items: [] }
+                  : {},
     })
   })
   await page.goto('/app/#/?layout=album')
   await expect(page.locator('.caption-text')).toContainText('第一行内容')
   await page.locator('.album .tile').click()
   const viewer = page.getByRole('dialog')
-  await expect(viewer.locator('.post-caption')).toContainText('测试作者')
+  // The author and the text are one link to the post; the text is cut to a
+  // few lines, and the post has the rest.
+  const caption = viewer.locator('.post-caption')
+  await expect(caption).toContainText('测试作者')
+  await expect(caption).toHaveAttribute('href', '#/collection/aaaa')
   await expect(viewer.locator('.caption-avatar img')).toBeVisible()
-  await expect(viewer.locator('.caption-avatar')).toHaveAttribute(
-    'href',
-    '#/collection/bbbb',
+  await expect(viewer.locator('.caption-body')).toHaveCSS(
+    '-webkit-line-clamp',
+    '3',
   )
-  await expect(viewer.locator('.chrome-bottom')).toHaveCSS(
-    'padding-top',
-    '12px',
-  )
-  const body = viewer.locator('.caption-body')
-  await expect(body).toHaveAttribute('aria-expanded', 'false')
-  await body.click()
-  await expect(body).toHaveAttribute('aria-expanded', 'true')
-  await expect(body).toContainText('第四行内容')
-  await viewer.getByRole('button', { name: '关闭图片' }).click()
+  await caption.click()
+  await expect(page).toHaveURL(/#\/collection\/aaaa$/)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
 test('capture options are submitted with links, summed up while folded', async ({

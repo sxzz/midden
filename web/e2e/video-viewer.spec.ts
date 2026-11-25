@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import { expect, test } from './test'
+import { thumb } from './viewer'
 
 const collection = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -66,7 +67,7 @@ for (const entry of ['list', 'detail']) {
     const opener = page.getByRole('button', { name: '播放视频' })
     await opener.click()
     const dialog = page.getByRole('dialog', { name: '视频预览' })
-    const video = dialog.locator('video')
+    const video = dialog.locator('.stage video')
     await expect(video).toBeVisible()
     await expect(video).toHaveAttribute('controls', '')
     await expect
@@ -76,17 +77,14 @@ for (const entry of ['list', 'detail']) {
     expect(await element!.evaluate((v: HTMLVideoElement) => v.paused)).toBe(
       false,
     )
-    await dialog.getByRole('button', { name: '下一张' }).click()
+    await thumb(page, 2).click()
     await expect(page.getByRole('dialog').getByRole('status')).toHaveText(
       '2 / 2',
     )
     expect(await element!.evaluate((v: HTMLVideoElement) => v.paused)).toBe(
       true,
     )
-    await page
-      .getByRole('dialog')
-      .getByRole('button', { name: '上一张' })
-      .click()
+    await thumb(page, 1).click()
     await expect(video).toBeVisible()
     await expect
       .poll(() => video.evaluate((v: HTMLVideoElement) => v.paused))
@@ -107,7 +105,7 @@ test('video errors remain closable and can navigate to images', async ({
   await page.route('**/v1/assets/clip?*', (r) => r.fulfill({ status: 404 }))
   await page.getByRole('button', { name: '播放视频' }).click()
   await expect(page.getByRole('alert')).toContainText('视频无法播放')
-  await page.getByRole('button', { name: '下一张' }).click()
+  await thumb(page, 2).click()
   await expect(page.getByRole('dialog').getByAltText('测试图片')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).toHaveCount(0)
@@ -123,7 +121,7 @@ test('a clip taller than the viewer is contained and follows the viewport', asyn
     }),
   )
   await page.getByRole('button', { name: '播放视频' }).click()
-  const video = page.getByRole('dialog').locator('video')
+  const video = page.getByRole('dialog').locator('.stage video')
   await expect
     .poll(() => video.evaluate((v: HTMLVideoElement) => v.videoHeight))
     .toBe(240)
@@ -133,10 +131,10 @@ test('a clip taller than the viewer is contained and follows the viewport', asyn
   }
   // The slide fills what the bars leave free and the frame is fitted
   // inside it, whatever the clip's own proportions.
-  await expect.poll(box).toEqual([14, 68, 362, 611])
+  await expect.poll(box).toEqual([14, 74, 362, 596])
   await expect(video).toHaveCSS('object-fit', 'contain')
   await page.setViewportSize({ width: 844, height: 390 })
-  await expect.poll(box).toEqual([14, 68, 816, 160])
+  await expect.poll(box).toEqual([14, 74, 816, 165])
 })
 
 test('detail image and video thumbnails have equal rows with uncropped media', async ({

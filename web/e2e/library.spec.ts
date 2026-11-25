@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer'
 import { expect, test } from './test'
 import { swipeImage } from './touch'
+import { thumb } from './viewer'
 const id = '11111111-1111-4111-8111-111111111111'
 /** The capture record a refresh of the collection answers with. */
 const recordId = '99999999-9999-4999-8999-999999999999'
@@ -344,13 +345,13 @@ test('loading skeletons, one revision and touch image navigation', async ({
   await page.getByRole('button', { name: '放大图片' }).first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('status')).toHaveText('1 / 2')
-  await expect(dialog.getByRole('button', { name: '上一张' })).toBeDisabled()
+  await expect(thumb(page, 1)).toHaveAttribute('aria-current', 'true')
   await swipeImage(page)
   await expect(dialog.getByRole('status')).toHaveText('2 / 2')
-  await expect(dialog.getByRole('button', { name: '下一张' })).toBeDisabled()
+  await expect(thumb(page, 2)).toHaveAttribute('aria-current', 'true')
   await expect(dialog.getByAltText('图片2')).toHaveCSS('opacity', '1')
   await page.screenshot({ path: 'test-results/viewer-mobile.png' })
-  await dialog.getByRole('button', { name: '上一张' }).click()
+  await thumb(page, 1).click()
   await expect(dialog.getByRole('status')).toHaveText('1 / 2')
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)

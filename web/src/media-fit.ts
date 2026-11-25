@@ -16,14 +16,14 @@ export interface Box extends Size {
 export interface Chrome {
   /** Height of the top bar (close, counter, save), safe area included. */
   top: number
-  /** Height of the text and paging area at the bottom; 0 when it is hidden. */
+  /** Height of the bar at the bottom (the thumbnail strip, the safe area). */
   bottom: number
   /** Margin kept free beside a video: the bars' side padding. */
   side: number
 }
 
 // The text area may not squeeze the media below this share of the viewport.
-const MIN_MEDIA_SHARE = 0.45
+const MIN_MEDIA_SHARE = 0.4
 const MIN_MEDIA_HEIGHT = 160
 // The paging buttons and the area's padding always stay in view.
 const MIN_BOTTOM_AREA = 72
@@ -37,8 +37,9 @@ export function minMediaHeight(viewportHeight: number) {
 }
 
 /**
- * The tallest the bottom area (text and paging) may be. Its text is clipped
- * to a few lines, so this only bites in a short viewport.
+ * The tallest the bottom may be: the strip of thumbnails and the caption
+ * above it. The caption is clipped to a few lines, so this only bites in a
+ * short viewport.
  */
 export function bottomBudget(viewportHeight: number, top: number) {
   return Math.max(
@@ -58,19 +59,24 @@ export function captionLines(budget: number) {
 }
 
 /**
- * The padding that leaves the media a free area clear of the chrome. An image
- * sits in it at its default zoom and may be zoomed over it; a video, which has
- * no zoom, also keeps clear of the sides.
+ * The padding that leaves the media a free area clear of the chrome and of
+ * its own caption (`caption`, the height it takes above the bottom bar). An
+ * image sits in it at its default zoom and may be zoomed over it; a video,
+ * which has no zoom, also keeps clear of the sides.
  */
 export function mediaInsets(
   viewport: Size,
   chrome: Chrome,
   video: boolean,
+  caption = 0,
 ): Insets {
   const side = video ? chrome.side : 0
   return {
     top: chrome.top,
-    bottom: Math.min(chrome.bottom, bottomBudget(viewport.height, chrome.top)),
+    bottom: Math.min(
+      chrome.bottom + caption,
+      bottomBudget(viewport.height, chrome.top),
+    ),
     left: side,
     right: side,
   }

@@ -8,6 +8,7 @@ import {
   useTemplateRef,
   watch,
 } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   assetURL,
   errorText,
@@ -26,11 +27,11 @@ import {
   type Chrome,
 } from '../media-fit'
 import { mediaRemovals } from '../media-removals'
-import { present } from '../presentation'
+import { navigatesHere } from '../navigation'
+import { isRemoved, present } from '../presentation'
 import { collectionHref, shareSlug } from '../share'
+import MediaPreview from './MediaPreview.vue'
 import MediaRemovalSheet from './MediaRemovalSheet.vue'
-import AppLink from './ui/AppLink.vue'
-import LoadingImage from './ui/LoadingImage.vue'
 import ViewerDetailButton from './ui/ViewerDetailButton.vue'
 import 'photoswipe/style.css'
 // The API carries no dimensions, so an image's natural size is learned when it
@@ -84,12 +85,6 @@ function removed(effect: RemovalEffect) {
 // A slide shown before the opening animation ends never gets activated, and
 // stays blank; moving waits for the viewer to be open.
 const opened = shallowRef(false)
-const caption = computed(() => {
-  const collection =
-    props.collections?.find((item) => item.id === selectedCollection.value) ||
-    props.collection
-  return collection ? present(collection) : undefined
-})
 watch(index, () => {
   menuOpen.value = false
 })
@@ -99,10 +94,9 @@ const dialog = useTemplateRef<HTMLDialogElement>('viewer')
 const stage = useTemplateRef<HTMLDivElement>('stage')
 const topBar = useTemplateRef<HTMLDivElement>('topBar')
 const bottomBar = useTemplateRef<HTMLDivElement>('bottomBar')
-const hasBottomBar = computed(
-  () =>
-    !!caption.value || !!selected.value?.alt_text || props.assets.length > 1,
-)
+const measurer = useTemplateRef<HTMLDivElement>('measurer')
+const strip = useTemplateRef<HTMLDivElement>('strip')
+const router = useRouter()
 const saving = shallowRef(false)
 const saveError = shallowRef('')
 function save() {
@@ -129,6 +123,161 @@ function save() {
     link.click()
     link.remove()
   }
+}
+/**
+ * The author and text of the post an item belongs to, with the item's own
+ * description: built as plain DOM because it lives inside the slide, so it
+ * travels with the media when the slides move. It is one link to the post.
+ */
+function captionOf(slot: number) {
+  const item = props.assets[slot]
+  if (!item) return
+  const id = props.collectionIds?.[item.id] || props.collectionId
+  const source =
+    props.collections?.find((entry) => entry.id === id) || props.collection
+  const view = source ? present(source) : undefined
+  if (!view && !item.alt_text) return
+  const root = document.createElement('div')
+  root.className = 'slide-caption'
+  if (view) {
+    const post = document.createElement(id ? 'a' : 'div')
+    post.className = 'post-caption'
+    if (post instanceof HTMLAnchorElement && id) post.href = collectionHref(id)
+    const avatar = document.createElement('span')
+    avatar.className = 'caption-avatar'
+    avatar.setAttribute('aria-hidden', 'true')
+    if (view.avatar && !view.avatar.sensitive) {
+      const image = document.createElement('img')
+      image.alt = ''
+      image.draggable = false
+      image.src = previewURL(view.avatar)
+      avatar.append(image)
+    } else avatar.textContent = view.name.slice(0, 1)
+    const content = document.createElement('span')
+    content.className = 'caption-content'
+    const author = document.createElement('strong')
+    author.className = 'caption-author'
+    author.textContent = view.name
+    if (view.handle) {
+      const handle = document.createElement('span')
+      handle.textContent = ` @${view.handle}`
+      author.append(handle)
+    }
+    content.append(author)
+    if (view.body) {
+      const body = document.createElement('span')
+      body.className = 'caption-body'
+      body.textContent = view.body
+      content.append(body)
+    }
+    post.append(avatar, content)
+    root.append(post)
+  }
+  if (item.alt_text) {
+    const alt = document.createElement('p')
+    alt.className = 'alt'
+    alt.textContent = item.alt_text
+    root.append(alt)
+  }
+  return root
+}
+// How tall each item's caption is at the current width, which the item's
+// free area gives up; measured once off screen, as the slide that shows it
+// is sized before it has the caption.
+const captionHeights = new Map<number, number>()
+let captionKey = ''
+function captionHeight(slot: number) {
+  const known = captionHeights.get(slot)
+  if (known !== undefined) return known
+  const caption = captionOf(slot)
+  let height = 0
+  if (caption && measurer.value) {
+    measurer.value.append(caption)
+    height = Math.ceil(caption.getBoundingClientRect().height)
+    caption.remove()
+  }
+  captionHeights.set(slot, height)
+  return height
+}
+/** A tap on the caption follows its link as AppLink does. */
+function captionClick(event: MouseEvent) {
+  const link = (event.target as Element).closest('a.post-caption')
+  if (!(link instanceof HTMLAnchorElement) || !navigatesHere(event)) return
+  event.preventDefault()
+  emit('close')
+  void router?.push(link.getAttribute('href')!.slice(1))
+}
+
+// The strip of thumbnails: scrolling it moves the viewer to the thumbnail
+// at its centre, and the viewer moving scrolls it. `scrubbing` is true while
+// a hand is on the strip and until its momentum ends, so the strip's own
+// scrolling is never taken for the hand's.
+let scrubbing = false
+let settle: ReturnType<typeof setTimeout> | undefined
+const reducedMotion = () =>
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches
+function scrubFor(ms?: number) {
+  scrubbing = true
+  clearTimeout(settle)
+  if (ms !== undefined)
+    settle = setTimeout(() => {
+      scrubbing = false
+    }, ms)
+}
+const pitch = () => {
+  const [first, second] = strip.value?.children ?? []
+  return first instanceof HTMLElement && second instanceof HTMLElement
+    ? second.offsetLeft - first.offsetLeft
+    : 0
+}
+function stripScrolled() {
+  if (!scrubbing || !opened.value || !strip.value) return
+  scrubFor(160)
+  const step = pitch()
+  if (!step) return
+  const slot = Math.min(
+    props.assets.length - 1,
+    Math.max(0, Math.round(strip.value.scrollLeft / step)),
+  )
+  if (slot !== index.value) photoSwipe?.goTo(slot)
+}
+function followStrip(smooth: boolean) {
+  if (scrubbing || !strip.value) return
+  const left = index.value * pitch()
+  // (A document without layout, as in tests, cannot scroll smoothly.)
+  if (smooth && !reducedMotion() && 'scrollTo' in strip.value)
+    strip.value.scrollTo({ left, behavior: 'smooth' })
+  else strip.value.scrollLeft = left
+}
+// A mouse drags the strip as a finger would.
+let drag: { x: number; left: number; moved: boolean } | undefined
+function dragStart(event: PointerEvent) {
+  if (event.pointerType !== 'mouse' || !strip.value) return
+  drag = { x: event.clientX, left: strip.value.scrollLeft, moved: false }
+}
+function dragMove(event: PointerEvent) {
+  if (!drag || !strip.value) return
+  const delta = event.clientX - drag.x
+  if (!drag.moved && Math.abs(delta) > 4) {
+    drag.moved = true
+    scrubFor()
+  }
+  if (drag.moved) strip.value.scrollLeft = drag.left - delta
+}
+function dragEnd() {
+  if (!drag) return
+  if (drag.moved) {
+    scrubFor(160)
+    // The click that ends a drag is not a tap on a thumbnail.
+    window.addEventListener('click', (e) => e.stopPropagation(), {
+      capture: true,
+      once: true,
+    })
+  }
+  drag = undefined
+}
+function jump(slot: number) {
+  if (opened.value) photoSwipe?.goTo(slot)
 }
 // What the floating bars take of the stage. Media is fitted in the rest, so at
 // its default zoom it never lies under the text, the captions or the buttons.
@@ -160,8 +309,8 @@ function keydown(event: KeyboardEvent) {
     move(event.key === 'ArrowLeft' ? -1 : 1)
   }
 }
-// Caps the bottom area (text beyond the cap scrolls inside it), then reads
-// the bars' sizes. Returns whether they changed since the last reading.
+// Reads the bars' sizes and how much text the room allows. Returns whether
+// the free area changed since the last reading.
 function measure(el: HTMLElement) {
   const top = topBar.value
   const bottom = bottomBar.value
@@ -169,18 +318,25 @@ function measure(el: HTMLElement) {
   const height = el.clientHeight || window.innerHeight
   const topHeight = Math.ceil(top.getBoundingClientRect().height)
   const budget = bottomBudget(height, topHeight)
-  dialog.value?.style.setProperty('--bottom-max', `${budget}px`)
-  dialog.value?.style.setProperty(
-    '--caption-lines',
-    String(captionLines(budget)),
-  )
+  const lines = captionLines(budget)
+  const bottomHeight = Math.ceil(bottom.getBoundingClientRect().height)
+  dialog.value?.style.setProperty('--caption-lines', String(lines))
+  dialog.value?.style.setProperty('--chrome-bottom', `${bottomHeight}px`)
+  if (dialog.value) dialog.value.dataset.lines = String(lines)
+  // Captions wrap to the width and clamp to the lines, so a new width or
+  // line count measures them again.
+  const key = `${el.clientWidth}:${lines}`
+  const reflowed = key !== captionKey
+  if (reflowed) captionHeights.clear()
+  captionKey = key
   const next: Chrome = {
     top: topHeight,
-    bottom: Math.ceil(bottom.getBoundingClientRect().height),
+    bottom: bottomHeight,
     // The top bar's side padding already holds the safe areas.
     side: Number.parseFloat(getComputedStyle(top).paddingLeft) || 0,
   }
   const changed =
+    reflowed ||
     next.top !== chrome.top ||
     next.bottom !== chrome.bottom ||
     next.side !== chrome.side
@@ -196,6 +352,7 @@ onMounted(() => {
   previousOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
   dialog.value?.showModal()
+  stage.value.addEventListener('click', captionClick)
   // A tap anywhere but the menu and its button puts the menu away.
   dialog.value?.addEventListener(
     'pointerdown',
@@ -252,11 +409,12 @@ onMounted(() => {
     errorMsg: '媒体加载失败',
     // The default (fitted) zoom stays inside this padding; a zoomed image may
     // pan over it. A video has no zoom, so it never leaves it.
-    paddingFn: (viewport, item) =>
+    paddingFn: (viewport, item, slot) =>
       mediaInsets(
         { width: viewport.x, height: viewport.y },
         chrome,
         item.type === 'video',
+        captionHeight(slot),
       ),
     // A video cannot be pinched larger than its free area; 0 keeps PhotoSwipe's
     // own maximum for images.
@@ -318,13 +476,28 @@ onMounted(() => {
   })
   // Native playback and seeking controls must not start a gallery drag.
   pswp.on('pointerDown', (event) => {
-    if (event.originalEvent.target instanceof HTMLVideoElement)
+    const target = event.originalEvent.target
+    if (
+      target instanceof HTMLVideoElement ||
+      (target instanceof Element && target.closest('.slide-caption'))
+    )
       event.preventDefault()
   })
   pswp.on('contentActivate', ({ content }) => {
     const video = content.element?.querySelector('video')
     // Only the active slide plays; native controls remain available if blocked.
     if (video) void video.play().catch(() => {})
+  })
+  // The caption is a child of the slide's holder, so it moves with it.
+  pswp.on('afterSetContent', ({ slide }) => {
+    const holder = slide.holderElement
+    if (!holder) return
+    holder.querySelector(':scope > .slide-caption')?.remove()
+    const caption = captionOf(slide.index)
+    if (caption) holder.append(caption)
+  })
+  pswp.on('slideDestroy', ({ slide }) => {
+    slide.holderElement?.querySelector(':scope > .slide-caption')?.remove()
   })
   pswp.on('contentDeactivate', ({ content }) => {
     content.element?.querySelector('video')?.pause()
@@ -346,6 +519,7 @@ onMounted(() => {
   })
   pswp.on('change', () => {
     index.value = pswp.currIndex
+    followStrip(true)
   })
   pswp.on('afterInit', () => {
     pswp.element?.removeAttribute('role')
@@ -397,6 +571,7 @@ onMounted(() => {
     if (!disposed) emit('close')
   })
   pswp.init()
+  followStrip(false)
 })
 onBeforeUnmount(() => {
   disposed = true
@@ -538,91 +713,42 @@ watch(
     </div>
     <p v-if="saveError" class="save-error" role="alert">{{ saveError }}</p>
 
-    <!-- Kept in the page even when empty, so its size is always read. -->
-    <div v-show="hasBottomBar" ref="bottomBar" class="chrome chrome-bottom">
-      <div v-if="caption || selected?.alt_text" class="text">
-        <!-- The author and the text are one link to the post, which has the
-             whole of it. -->
-        <component
-          :is="selectedCollection ? AppLink : 'div'"
-          v-if="caption"
-          :href="selectedCollection && collectionHref(selectedCollection)"
-          class="post-caption"
-          @navigate="emit('close')"
-        >
-          <span class="caption-avatar" aria-hidden="true">
-            <LoadingImage
-              v-if="caption.avatar && !caption.avatar.sensitive"
-              :src="previewURL(caption.avatar)"
-              alt=""
-            />
-            <span v-else>{{ caption.name.slice(0, 1) }}</span>
-          </span>
-          <span class="caption-content">
-            <strong class="caption-author"
-              >{{ caption.name
-              }}<span v-if="caption.handle">
-                @{{ caption.handle }}</span
-              ></strong
-            >
-            <span v-if="caption.body" class="caption-body">{{
-              caption.body
-            }}</span>
-          </span>
-        </component>
-        <p v-if="selected?.alt_text" class="caption">{{ selected.alt_text }}</p>
-      </div>
-      <div v-if="assets.length > 1" class="glass remote">
+    <!-- Always in the page, so the room it leaves is always read: the strip of
+         thumbnails when there are several items, else just the safe area. -->
+    <div ref="bottomBar" class="chrome chrome-bottom">
+      <div
+        v-if="assets.length > 1"
+        ref="strip"
+        class="strip"
+        role="group"
+        aria-label="媒体缩略图"
+        @scroll.passive="stripScrolled"
+        @touchstart.passive="scrubFor()"
+        @touchend.passive="scrubFor(300)"
+        @touchcancel.passive="scrubFor(300)"
+        @wheel.passive="scrubFor(300)"
+        @pointerdown="dragStart"
+        @pointermove="dragMove"
+        @pointerup="dragEnd"
+        @pointercancel="dragEnd"
+      >
         <button
+          v-for="(item, slot) in assets"
+          :key="item.id"
           type="button"
-          class="nav"
-          :disabled="!opened || index === 0"
-          aria-label="上一张"
-          @click="move(-1)"
+          class="thumb"
+          :class="{ on: slot === index, removed: isRemoved(item) }"
+          :disabled="!opened"
+          :aria-label="`第 ${slot + 1} 项，共 ${assets.length} 项`"
+          :aria-current="slot === index || undefined"
+          @click="jump(slot)"
         >
-          <svg
-            class="icon"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M14.5 5.5 8 12l6.5 6.5" />
-          </svg>
-        </button>
-        <span v-if="assets.length <= 8" class="dots" aria-hidden="true">
-          <span
-            v-for="(image, slot) in assets"
-            :key="image.id"
-            class="dot"
-            :class="{ on: slot === index }"
-          />
-        </span>
-        <button
-          type="button"
-          class="nav"
-          :disabled="!opened || index === assets.length - 1"
-          aria-label="下一张"
-          @click="move(1)"
-        >
-          <svg
-            class="icon"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M9.5 5.5 16 12l-6.5 6.5" />
-          </svg>
+          <MediaPreview :asset="item" thumbnail />
         </button>
       </div>
     </div>
+    <!-- Off screen: captions are measured here before their slides exist. -->
+    <div ref="measurer" class="measurer" aria-hidden="true" />
 
     <MediaRemovalSheet
       v-if="selectedCollection && selected"
@@ -636,70 +762,6 @@ watch(
 </template>
 
 <style scoped>
-.caption-avatar {
-  display: grid;
-  place-items: center;
-  align-self: start;
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.15);
-}
-.caption-avatar :deep(.image-shell),
-.caption-avatar :deep(img) {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  object-fit: cover;
-}
-.caption-content {
-  flex: 1;
-  min-width: 0;
-}
-.post-caption {
-  display: flex;
-  gap: 10px;
-  width: min(100%, 760px);
-  color: #fff;
-  text-align: left;
-  pointer-events: auto;
-}
-.caption-author {
-  display: block;
-  overflow: hidden;
-  font-weight: 600;
-  line-height: 1.4;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.caption-author span {
-  color: var(--subtle);
-  font-weight: 400;
-}
-/* A few lines of the post, ended by an ellipsis; the post has the rest. The
-   count follows the room left (see captionLines). */
-.caption-body {
-  display: -webkit-box;
-  -webkit-line-clamp: var(--caption-lines, 3);
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  margin-top: 2px;
-  font-size: 14px;
-  line-height: 1.45;
-}
-/* The text never scrolls or grows: the media above keeps what it is given. */
-.text {
-  display: grid;
-  gap: 8px;
-  justify-items: center;
-  width: 100%;
-  min-height: 0;
-  overflow: hidden;
-}
-
 .viewer {
   position: fixed;
   inset: 0;
@@ -791,21 +853,74 @@ watch(
 }
 .chrome-bottom {
   bottom: 0;
+  padding: 10px 0 calc(env(safe-area-inset-bottom, 0px) + 8px);
+  background: rgba(0, 0, 0, 0.55);
+}
+/* The thumbnails, as in the iOS Photos viewer: the item shown sits in the
+   middle, the rest scroll past it. Scrolling is native, with snapping. */
+.strip {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  max-height: var(--bottom-max, 50dvh);
+  gap: 4px;
+  overflow-x: auto;
+  /* Half a strip each side lets the first and the last thumbnail centre. */
+  padding: 4px calc(50% - 18px);
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+  pointer-events: auto;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.strip::-webkit-scrollbar {
+  display: none;
+}
+.thumb {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 48px;
   overflow: hidden;
-  padding: 12px calc(env(safe-area-inset-right, 0px) + 14px)
-    calc(env(safe-area-inset-bottom, 0px) + 8px)
-    calc(env(safe-area-inset-left, 0px) + 14px);
-  background: linear-gradient(
-    to top,
-    rgba(0, 0, 0, 0.62),
-    rgba(0, 0, 0, 0.22) 52%,
-    transparent
-  );
+  border-radius: 6px;
+  background: #1c1c1e;
+  opacity: 0.55;
+  scroll-snap-align: center;
+  transform: scale(0.92);
+  transition:
+    transform 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 200ms ease;
+}
+.thumb.on {
+  opacity: 1;
+  transform: scale(1.2);
+  box-shadow: 0 0 0 1.5px #fff;
+  z-index: 1;
+}
+.thumb:disabled {
+  cursor: default;
+}
+.thumb :deep(.media-preview) {
+  height: 100%;
+}
+.thumb :deep(img),
+.thumb :deep(video) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+/* Media removed to save space shows by the thumbnail it kept, dimmed. */
+.thumb.removed :deep(img) {
+  filter: grayscale(1) brightness(0.7);
+}
+.measurer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* One glass family: a tinted pane, a specular top edge and a lifted shadow. */
@@ -886,7 +1001,7 @@ watch(
 /* Keyboard users keep a clear ring on every control. */
 .close:focus-visible,
 .bar-button:focus-visible,
-.nav:focus-visible,
+.thumb:focus-visible,
 .menu button:focus-visible {
   outline: 2px solid #fff;
   outline-offset: 2px;
@@ -946,7 +1061,95 @@ watch(
   letter-spacing: 0.02em;
   pointer-events: none;
 }
-.caption {
+.icon {
+  display: block;
+  width: 21px;
+  height: 21px;
+}
+
+/* style.css already neutralises durations; restated so the intent is local. */
+@media (prefers-reduced-motion: reduce) {
+  .thumb,
+  .bar-button,
+  .close {
+    transition: none;
+  }
+}
+</style>
+
+<style>
+/* The caption is built as DOM inside each slide, so scoped styles cannot
+   reach it. */
+.viewer .slide-caption {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  padding: 24px calc(env(safe-area-inset-right, 0px) + 14px) 8px
+    calc(env(safe-area-inset-left, 0px) + 14px);
+  color: #fff;
+}
+.viewer .pswp__item > .slide-caption {
+  position: absolute;
+  right: 0;
+  bottom: var(--chrome-bottom, 0px);
+  left: 0;
+  z-index: 2;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent);
+}
+.viewer .post-caption {
+  display: flex;
+  gap: 10px;
+  width: min(100%, 760px);
+  color: #fff;
+  text-align: left;
+  text-decoration: none;
+  pointer-events: auto;
+}
+.viewer .caption-avatar {
+  display: grid;
+  place-items: center;
+  align-self: start;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.15);
+}
+.viewer .caption-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.viewer .caption-content {
+  flex: 1;
+  min-width: 0;
+}
+.viewer .caption-author {
+  display: block;
+  overflow: hidden;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.viewer .caption-author span {
+  color: rgba(235, 235, 245, 0.6);
+  font-weight: 400;
+}
+/* A few lines of the post, ended by an ellipsis; the post has the rest. The
+   count follows the room left (see captionLines). */
+.viewer .caption-body {
+  display: -webkit-box;
+  -webkit-line-clamp: var(--caption-lines, 3);
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  margin-top: 2px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.viewer .slide-caption .alt {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -958,62 +1161,10 @@ watch(
   line-height: 1.45;
   text-align: center;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
 }
-
-/* Arrows and page dots read as one glass remote rather than loose buttons. */
-.remote {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-}
-.nav {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  color: #fff;
-  transition: transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
-}
-.nav:active:not(:disabled) {
-  transform: scale(0.88);
-}
-.nav:disabled {
-  opacity: 0.32;
-}
-.icon {
-  display: block;
-  width: 21px;
-  height: 21px;
-}
-.dots {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 8px;
-}
-.dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(235, 235, 245, 0.34);
-  transition:
-    width 320ms cubic-bezier(0.32, 0.72, 0, 1),
-    background-color 320ms ease;
-}
-.dot.on {
-  width: 17px;
-  background: rgba(255, 255, 255, 0.95);
-}
-
-/* style.css already neutralises durations; restated so the intent is local. */
-@media (prefers-reduced-motion: reduce) {
-  .dot,
-  .nav,
-  .close {
-    transition: none;
-  }
+/* In a short viewport the post's text is all there is room for. */
+.viewer[data-lines='1'] .slide-caption .alt {
+  display: none;
 }
 </style>

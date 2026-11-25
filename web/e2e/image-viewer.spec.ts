@@ -1,5 +1,6 @@
 import { expect, test } from './test'
 import { swipeImage } from './touch'
+import { thumb } from './viewer'
 
 const collection = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -85,8 +86,9 @@ test('icon controls, keyboard navigation and native image context menu', async (
   page,
 }) => {
   const dialog = page.getByRole('dialog')
-  const next = dialog.getByRole('button', { name: '下一张' })
-  await expect(next.locator('svg')).toBeVisible()
+  await expect(
+    dialog.getByRole('link', { name: '收藏详情', exact: true }),
+  ).toBeVisible()
   await expect(
     dialog.getByRole('button', { name: '关闭图片' }).locator('svg'),
   ).toBeVisible()
@@ -98,11 +100,15 @@ test('icon controls, keyboard navigation and native image context menu', async (
     ),
   )
   expect(nativeMenuAllowed).toBe(true)
-  await next.click()
+  await thumb(page, 2).click()
   await expect(dialog.getByRole('status').first()).toHaveText('2 / 3')
   await page.keyboard.press('ArrowRight')
   await expect(dialog.getByRole('status').first()).toHaveText('3 / 3')
-  await expect(next).toBeDisabled()
+  await expect(thumb(page, 3)).toHaveAttribute('aria-current', 'true')
+  await page.keyboard.press('ArrowLeft')
+  await expect(dialog.getByRole('status').first()).toHaveText('2 / 3')
+  await expect(thumb(page, 2)).toHaveAttribute('aria-current', 'true')
+  await page.keyboard.press('ArrowRight')
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
   await expect(
@@ -132,14 +138,13 @@ test('touch swipe animates and long press keeps the current image', async ({
   await page.screenshot({ path: 'test-results/glass-viewer-mobile.png' })
 })
 
-test('reduced motion keeps button navigation immediate', async ({ page }) => {
+test('reduced motion keeps thumbnail navigation immediate', async ({
+  page,
+}) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.getByRole('dialog').getByRole('button', { name: '下一张' }).click()
+  await thumb(page, 2).click()
   await expect(page.getByRole('dialog').getByRole('status')).toHaveText('2 / 3')
-  await expect(page.locator('.dot').first()).toHaveCSS(
-    'transition-property',
-    'none',
-  )
+  await expect(thumb(page, 2)).toHaveCSS('transition-property', 'none')
 })
 
 test('save sends the selected image to Telegram native download', async ({
@@ -158,11 +163,11 @@ test('save sends the selected image to Telegram native download', async ({
       },
     })
   })
-  await page.getByRole('button', { name: '下一张' }).click()
+  await thumb(page, 2).click()
   await expect(page.getByRole('dialog').getByRole('status')).toHaveText('2 / 3')
   await page
     .getByRole('dialog')
-    .getByRole('button', { name: '保存', exact: true })
+    .getByRole('button', { name: '下载', exact: true })
     .click()
   await expect(page.locator('body')).toHaveAttribute(
     'data-download',
@@ -189,7 +194,7 @@ test('save reports download failures and can retry', async ({ page }) => {
   })
   await page
     .getByRole('dialog')
-    .getByRole('button', { name: '保存', exact: true })
+    .getByRole('button', { name: '下载', exact: true })
     .click()
   // The page behind the viewer carries alerts of its own; only the one inside
   // the dialog reports this save.
@@ -197,7 +202,7 @@ test('save reports download failures and can retry', async ({ page }) => {
     '下载失败',
   )
   await expect(
-    page.getByRole('dialog').getByRole('button', { name: '保存', exact: true }),
+    page.getByRole('dialog').getByRole('button', { name: '下载', exact: true }),
   ).toBeEnabled()
 })
 
@@ -211,7 +216,7 @@ test('opens the clicked list image without navigating and restores focus', async
   const url = page.url()
   await thumbnail.click()
   await expect(page.getByRole('dialog').getByRole('status')).toHaveText('2 / 3')
-  await page.getByRole('dialog').getByRole('button', { name: '下一张' }).click()
+  await thumb(page, 3).click()
   await expect(page.getByRole('dialog').getByRole('status')).toHaveText('3 / 3')
   expect(page.url()).toBe(url)
   await page.keyboard.press('Escape')
@@ -248,7 +253,7 @@ test('profile avatar opens its own preview and returns focus on close', async ({
     'src',
     '/v1/assets/avatar?inline=1',
   )
-  await expect(dialog.getByRole('button', { name: '下一张' })).toHaveCount(0)
+  await expect(dialog.getByRole('group', { name: '媒体缩略图' })).toHaveCount(0)
   await dialog.getByRole('button', { name: '关闭图片' }).click()
   await expect(dialog).toHaveCount(0)
   await expect(avatar).toBeFocused()

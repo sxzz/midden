@@ -1,4 +1,5 @@
 import { expect, test, type Page } from './test'
+import { thumb } from './viewer'
 const first = '11111111-1111-4111-8111-111111111111'
 const second = '22222222-2222-4222-8222-222222222222'
 const asset = (id: string, mime = 'image/png', sensitive = false) => ({
@@ -63,13 +64,13 @@ test('album reuses loaded data and opens the currently previewed collection', as
   await page.locator('.album button').first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByText('1 / 3')).toBeVisible()
-  // Moving waits for the opening animation; the buttons enable when it ends.
-  await expect(dialog.getByRole('button', { name: '下一张' })).toBeEnabled()
+  // Moving waits for the opening animation; the thumbnails enable when it ends.
+  await expect(thumb(page, 2)).toBeEnabled()
   await page.keyboard.press('ArrowRight')
   await expect(dialog.getByText('2 / 3')).toBeVisible()
   await page.keyboard.press('ArrowRight')
   await expect(dialog.getByText('3 / 3')).toBeVisible()
-  await dialog.getByRole('link', { name: '打开收藏详情' }).click()
+  await dialog.getByRole('link', { name: '收藏详情', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${second}$`))
   await expect(dialog).toHaveCount(0)
   await expect(page.locator('body')).not.toHaveCSS('overflow', 'hidden')
@@ -128,7 +129,7 @@ test('feed preview can open its collection and return to the feed', async ({
     .click()
   await page
     .getByRole('dialog')
-    .getByRole('link', { name: '打开收藏详情' })
+    .getByRole('link', { name: '收藏详情', exact: true })
     .click()
   await expect(page).toHaveURL(new RegExp(`/collection/${first}$`))
   await expect(page.getByRole('dialog')).toHaveCount(0)

@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import { expect, test, type Locator, type Page } from './test'
+import { thumb } from './viewer'
 
 const longText = Array.from(
   { length: 40 },
@@ -93,21 +94,24 @@ const overlaps = (
 async function chromeBoxes(page: Page) {
   const dialog = page.getByRole('dialog')
   const parts = dialog.locator(
-    '.chrome-top .glass, .post-caption, .caption, .remote, .chrome-bottom .text',
+    '.chrome-top .glass, .chrome-bottom, .pswp__item > .slide-caption',
   )
   const boxes = []
-  for (const part of await parts.all())
-    if (await part.isVisible()) boxes.push(await box(part))
+  for (const part of await parts.all()) {
+    // A caption can be replaced while the others are read.
+    const found = await part.boundingBox().catch(() => null)
+    if (found) boxes.push(found)
+  }
   return boxes
 }
 
 /** The chrome parts the media lies under, none when it is clear of them. */
 async function covered(page: Page, media: Locator) {
-  const found = await box(media)
+  const found = await media.boundingBox().catch(() => null)
+  // Not laid out yet: not clear either.
+  if (!found) return ['not shown']
   return (await chromeBoxes(page)).filter((part) => overlaps(found, part))
 }
-const next = (page: Page) =>
-  page.getByRole('dialog').getByRole('button', { name: '下一张' })
 
 for (const viewport of [
   { width: 390, height: 844 },
@@ -119,18 +123,14 @@ for (const viewport of [
   }) => {
     await page.setViewportSize(viewport)
     const dialog = page.getByRole('dialog')
-    const steps = [
-      { alt: '竖图', expand: false },
-      { alt: '竖图', expand: true },
-      { alt: '横图', expand: false },
-    ]
-    for (const [i, step] of steps.entries()) {
-      if (step.expand) await dialog.locator('.caption-body').click()
-      else if (i > 0) await next(page).click()
-      const image = dialog.getByAltText(step.alt)
+    for (const [slot, alt] of [
+      [1, '竖图'],
+      [2, '横图'],
+    ] as const) {
+      await thumb(page, slot).click()
+      const image = dialog.getByAltText(alt)
       await expect(image).toBeVisible()
-      // The slide settles once the image's own size is known and the text
-      // area has its final height.
+      // The slide settles once the image's own size is known.
       await expect.poll(() => covered(page, image)).toEqual([])
       expect((await box(image)).width).toBeGreaterThan(50)
     }
@@ -139,11 +139,9 @@ for (const viewport of [
 
 test('a video never overlaps the text, in any viewport', async ({ page }) => {
   const dialog = page.getByRole('dialog')
-  await next(page).click()
-  await expect(dialog.getByRole('status').first()).toHaveText('2 / 3')
-  await next(page).click()
+  await thumb(page, 3).click()
   await expect(dialog.getByRole('status').first()).toHaveText('3 / 3')
-  const video = dialog.locator('video')
+  const video = dialog.locator('.stage video')
   await expect(video).toBeVisible()
   for (const viewport of [
     { width: 390, height: 844 },
@@ -158,25 +156,88 @@ test('a video never overlaps the text, in any viewport', async ({ page }) => {
     expect(media.x + media.width).toBeLessThanOrEqual(viewport.width)
     expect(media.height).toBeGreaterThan(100)
   }
-  // The text area at its tallest still leaves the video its own space.
-  await dialog.locator('.caption-body').click()
-  await expect.poll(() => covered(page, video)).toEqual([])
-  expect((await box(video)).height).toBeGreaterThan(300)
 })
 
-test('a long caption scrolls inside its cap and the image keeps its height', async ({
+test('a long caption is cut to a few lines and the image keeps its height', async ({
   page,
 }) => {
   const dialog = page.getByRole('dialog')
-  await dialog.locator('.caption-body').click()
-  const text = dialog.locator('.chrome-bottom .text')
-  await expect
-    .poll(() => text.evaluate((el) => el.scrollHeight > el.clientHeight))
-    .toBe(true)
+  const caption = dialog.locator('.pswp__item > .slide-caption').first()
+  await expect(caption).toBeVisible()
+  // Author row plus three lines: well under a third of the screen.
+  expect((await box(caption)).height).toBeLessThan(844 * 0.3)
+  await expect(dialog.locator('.caption-body').first()).toHaveCSS(
+    '-webkit-line-clamp',
+    '3',
+  )
   const image = dialog.getByAltText('竖图')
-  await expect.poll(async () => (await box(image)).height).toBeGreaterThan(300)
-  const viewer = await box(dialog)
-  expect(
-    (await box(dialog.locator('.chrome-bottom'))).height,
-  ).toBeLessThanOrEqual(viewer.height * 0.6)
+  await expect.poll(async () => (await box(image)).height).toBeGreaterThan(450)
+})
+
+test('the caption travels with its slide while swiping', async ({ page }) => {
+  const dialog = page.getByRole('dialog')
+  await expect(thumb(page, 2)).toBeEnabled()
+  const first = dialog.locator('.pswp__item > .slide-caption').first()
+  const before = (await box(first)).x
+  const client = await page.context().newCDPSession(page)
+  try {
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: 300, y: 300 }],
+    })
+    for (const x of [280, 240, 200, 160]) {
+      await client.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x, y: 300 }],
+      })
+      await page.waitForTimeout(30)
+    }
+    // Half a swipe: this slide's caption has moved off with its image, and
+    // the next slide's has come in with its own.
+    await expect
+      .poll(async () => (await box(first)).x)
+      .toBeLessThan(before - 100)
+    const captions = dialog.locator('.pswp__item > .slide-caption')
+    const xs = await Promise.all(
+      (await captions.all()).map(async (c) => (await box(c)).x),
+    )
+    expect(xs.some((x) => x > 0 && x < 390)).toBe(true)
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchEnd',
+      touchPoints: [],
+    })
+  } finally {
+    await client.detach()
+  }
+  await expect(dialog.getByRole('status').first()).toHaveText('2 / 3')
+})
+
+test('the thumbnail strip follows the viewer and scrubs it', async ({
+  page,
+}) => {
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('group', { name: '媒体缩略图' })).toBeVisible()
+  await expect(thumb(page, 1)).toHaveAttribute('aria-current', 'true')
+  await thumb(page, 3).click()
+  await expect(dialog.getByRole('status').first()).toHaveText('3 / 3')
+  await page.keyboard.press('ArrowLeft')
+  await expect(thumb(page, 2)).toHaveAttribute('aria-current', 'true')
+  // The shown item's thumbnail rests in the middle of the strip.
+  const centre = async () => {
+    const strip = await box(dialog.locator('.strip'))
+    const current = await box(dialog.locator('.thumb.on'))
+    return Math.round(
+      current.x + current.width / 2 - (strip.x + strip.width / 2),
+    )
+  }
+  await expect.poll(centre).toBeLessThanOrEqual(2)
+  // Dragging the strip moves the viewer to the thumbnail it stops on.
+  const strip = await box(dialog.locator('.strip'))
+  const y = strip.y + strip.height / 2
+  await page.mouse.move(strip.x + strip.width / 2, y)
+  await page.mouse.down()
+  await page.mouse.move(strip.x + strip.width / 2 + 40, y, { steps: 6 })
+  await page.mouse.up()
+  await expect(dialog.getByRole('status').first()).toHaveText('1 / 3')
+  await expect(thumb(page, 1)).toHaveAttribute('aria-current', 'true')
 })

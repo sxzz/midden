@@ -23,12 +23,12 @@ const inside = (box: Box, viewport: Size, insets: Insets) =>
 
 describe('bottomBudget', () => {
   it('leaves the media its minimum height', () => {
-    expect(bottomBudget(844, 68)).toBe(844 - 68 - Math.ceil(844 * 0.45))
+    expect(bottomBudget(844, 68)).toBe(844 - 68 - Math.ceil(844 * 0.4))
     expect(minMediaHeight(300)).toBe(160)
   })
   it('keeps the paging area visible in a very short viewport', () => {
     expect(bottomBudget(320, 68)).toBe(92)
-    expect(bottomBudget(390, 68)).toBe(146)
+    expect(bottomBudget(390, 68)).toBe(162)
     expect(bottomBudget(200, 68)).toBe(72)
   })
 })
@@ -65,8 +65,12 @@ describe('mediaInsets', () => {
       minMediaHeight(844),
     )
   })
-  it('reserves nothing below when there is no text area', () => {
+  it('reserves nothing below when there is neither bar nor caption', () => {
     expect(mediaInsets(phone, { ...chrome, bottom: 0 }, false).bottom).toBe(0)
+  })
+  it('adds the media’s own caption to the bar at the bottom', () => {
+    expect(mediaInsets(phone, chrome, false, 90).bottom).toBe(110 + 90)
+    expect(mediaInsets(phone, chrome, false, 0).bottom).toBe(110)
   })
 })
 
