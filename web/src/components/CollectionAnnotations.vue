@@ -318,24 +318,20 @@ async function saveNote() {
 </template>
 
 <style scoped>
-/* Hairlines above and below, as between the card's other rows. */
+/* A hairline only below, parting it from the next row of the card. As the
+   first row it has none above, and as the last none below: the card's edge
+   already bounds it. */
 .annotations-block {
   position: relative;
 }
-.annotations-block::before,
-.annotations-block::after {
+.annotations-block:not(:last-child)::after {
   content: '';
   position: absolute;
   left: var(--inset);
   right: 0;
+  bottom: 0;
   height: 1px;
   background: var(--separator);
-}
-.annotations-block::before {
-  top: 0;
-}
-.annotations-block::after {
-  bottom: 0;
 }
 .toggle {
   display: flex;
