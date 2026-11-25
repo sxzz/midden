@@ -308,7 +308,8 @@ test('deleting everything shows what goes and needs the phrase typed', async ({
     }
     if (path === '/v1/collections')
       return r.fulfill({ json: { items: listed } })
-    if (path === '/v1/instance') return r.fulfill({ json: { dev: true } })
+    if (path === '/v1/instance')
+      return r.fulfill({ json: { dev: true, litestream: { enabled: false } } })
     return r.fulfill({ json: {} })
   })
   await page.goto('/app/')
@@ -359,7 +360,8 @@ test('deleting everything is not offered outside development', async ({
       return r.fulfill({
         json: [{ origin: 'https://midden.test', passkeys: 0 }],
       })
-    if (path === '/v1/instance') return r.fulfill({ json: { dev: false } })
+    if (path === '/v1/instance')
+      return r.fulfill({ json: { dev: false, litestream: { enabled: false } } })
     if (path === '/v1/library/delete-all') asked = true
     return r.fulfill({ json: { items: [] } })
   })

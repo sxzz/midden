@@ -78,7 +78,8 @@ async function mock(page: Page, perspectives = [OWN, OTHER]) {
       graphs.push(of)
       return r.fulfill({ json: graphOf(of) })
     }
-    if (path === '/v1/instance') return r.fulfill({ json: { dev: false } })
+    if (path === '/v1/instance')
+      return r.fulfill({ json: { dev: false, litestream: { enabled: false } } })
     if (path === '/v1/accounts')
       return r.fulfill({ json: { platforms: [], accounts: [] } })
     const item = [...items, profile].find(
