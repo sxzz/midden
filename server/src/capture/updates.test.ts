@@ -17,6 +17,7 @@ import {
 import { captureHandlers } from './handlers.ts'
 import { resolveOptions } from './options.ts'
 import { captureURL } from './records.ts'
+import { retryRecordFailed } from './retries.ts'
 import {
   collectionUpdate,
   continueTimeline,
@@ -24,7 +25,6 @@ import {
   pauseUpdate,
   previewUpdate,
   resumeUpdate,
-  retryUpdateFailed,
   runUpdate,
   startUpdate,
   stopUpdate,
@@ -206,7 +206,7 @@ describe('更新', () => {
     })
     expect(records(ctx)).toHaveLength(before + 1)
     const detail = updateDetail(ctx.db, update)
-    expect(detail.profiles).toEqual([
+    expect(detail.profiles).toMatchObject([
       {
         collectionId: id,
         url: 'https://fake.test/u/100',
@@ -253,7 +253,7 @@ describe('更新', () => {
         .map((r) => r.pageCursor),
     ).toEqual(['', '3', '6'])
     // Saved posts came before the cap.
-    expect(updateDetail(ctx.db, update).profiles[0]!.posts).toEqual({
+    expect(updateDetail(ctx.db, update).profiles[0]!.posts).toMatchObject({
       total: 9,
       finished: 9,
       pending: 0,
@@ -291,7 +291,7 @@ describe('更新', () => {
       ...Array.from({ length: 12 }, (_, i) => i + 1),
       18,
     ])
-    expect(updateDetail(ctx.db, update).profiles[0]!.posts).toEqual({
+    expect(updateDetail(ctx.db, update).profiles[0]!.posts).toMatchObject({
       total: 12,
       finished: 12,
       pending: 0,
@@ -309,7 +309,7 @@ describe('更新', () => {
     expect(pages().slice(3)).toEqual(['12', '16', '20'])
     // Nothing is lost between the two reads.
     expect(savedPosts(ctx)).toEqual(Array.from({ length: 24 }, (_, i) => i + 1))
-    expect(updateDetail(ctx.db, update).profiles[0]!.posts).toEqual({
+    expect(updateDetail(ctx.db, update).profiles[0]!.posts).toMatchObject({
       total: 24,
       finished: 24,
       pending: 0,
@@ -457,7 +457,7 @@ describe('更新', () => {
     ])
     const before = records(ctx).length
     state.broken.clear()
-    expect(retryUpdateFailed(ctx, update)).toBe(1)
+    expect(retryRecordFailed(ctx, update)).toBe(1)
     await ctx.queue.drain()
     expect(updateRecord(ctx.db, update)).toMatchObject({
       state: 'complete',

@@ -430,13 +430,65 @@ export async function runRelations(
   ctx.queue.enqueue(ctx.db, 'relations', job.ref)
 }
 
+/**
+ * Fetch a list again that failed or fell short (see `retry-units.ts`). One
+ * that failed partway reads on from its cursor with the same source, so
+ * what it listed already counts; otherwise it starts over, choosing its
+ * source again. Goes through the same job, so a rate limit pauses it as
+ * any other fetch. Returns whether it was queued.
+ */
+export function retryRelations(ctx: CaptureContext, id: string): boolean {
+  return ctx.db.transaction((tx) => {
+    const fetch = loadFetch(tx, id)
+    if (fetch?.state !== 'failed' && fetch?.state !== 'partial') return false
+    const connection = fetch.connectionId
+      ? tx
+          .select()
+          .from(connections)
+          .where(eq(connections.id, fetch.connectionId))
+          .get()
+      : undefined
+    const resume =
+      fetch.state === 'failed' &&
+      !!fetch.startedAt &&
+      !!fetch.entityId &&
+      !!fetch.cursor &&
+      (!fetch.connectionId ||
+        (connection?.state === 'ready' && !!connection.credentialRef))
+    tx.update(relationFetches)
+      .set(
+        resume
+          ? { state: 'running', error: '', finishedAt: null }
+          : {
+              state: 'waiting',
+              error: '',
+              finishedAt: null,
+              startedAt: null,
+              cursor: '',
+              pages: 0,
+              fetched: 0,
+              providerId: null,
+              connectionId: null,
+            },
+      )
+      .where(eq(relationFetches.id, id))
+      .run()
+    ctx.queue.enqueue(tx, 'relations', id)
+    return true
+  })
+}
+
 /** What a request's list fetches have done, for its record and job. */
 export interface RelationProgress {
+  /** The fetch, which a retry names. */
+  id: string
   list: RelationList
   state: RelationFetchState
   expected?: number
   fetched: number
   error?: string
+  /** Set by records: whether a retry would fetch it again. */
+  retryable?: boolean
 }
 
 /** The list fetches of each submission, following before followers. */
@@ -455,6 +507,7 @@ export function relationProgresses(
   for (const row of rows) {
     const items = out.get(row.submissionId!) ?? []
     items.push({
+      id: row.id,
       list: row.list,
       state: row.state,
       ...(row.expected === null ? {} : { expected: row.expected }),

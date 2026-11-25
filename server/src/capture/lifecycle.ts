@@ -26,13 +26,16 @@ export function isActive(capture: Capture): boolean {
 /**
  * The account a capture fetched with must still be the one stored: a
  * rotated or revoked credential discards the work done with the old one.
+ * A finished capture downloading its failed media again (it has a revision)
+ * keeps what it fetched: media addresses need no account.
  */
 export function validateExecution(
   tx: Transaction,
-  capture: Pick<Capture, 'connectionId' | 'credentialRevision'>,
+  capture: Pick<Capture, 'connectionId' | 'credentialRevision'> &
+    Partial<Pick<Capture, 'revisionId'>>,
   revision = capture.credentialRevision,
 ): void {
-  if (!capture.connectionId) return
+  if (!capture.connectionId || capture.revisionId) return
   const connection = tx
     .select({ state: connections.state, revision: connections.revision })
     .from(connections)
@@ -110,6 +113,16 @@ export function failCapture(
     .where(and(eq(assets.captureId, captureId), eq(assets.state, 'pending')))
     .run()
   const now = new Date(ctx.now?.() ?? Date.now())
+  if (capture.revisionId) {
+    // Its failed media were being downloaded again: it keeps what it saved
+    // and is missing media as before.
+    tx.update(captures)
+      .set({ state: 'partial', finishedAt: now })
+      .where(and(eq(captures.id, captureId), captureRunning))
+      .run()
+    deliveries(ctx, tx, captureId)
+    return
+  }
   deleteSourceResponses(tx, [captureId], now)
   dropStaging(tx, captureId)
   tx.update(captures)

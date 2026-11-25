@@ -40,6 +40,15 @@ import {
   relationsDone,
   type RelationProgress,
 } from './relations.ts'
+import {
+  failedPages,
+  isRetryableList,
+  isRetryablePage,
+  missingMedia,
+  missingMediaSQL,
+  pagesMissingMedia,
+  type FailedPage,
+} from './retry-units.ts'
 import { submit, type Job } from './submit.ts'
 import type { Executor } from '#db/client.ts'
 import type { RelationList } from '#platforms/platform.ts'
@@ -137,9 +146,15 @@ export interface CollectionProgress extends MemberProgress {
   next: string
   maxBatch: number
   error: '' | 'partial_pages'
-  /** Failed members a retry would fetch again. */
+  /**
+   * What a retry would fetch again: failed members, members and later pages
+   * missing media, and failed pages.
+   */
   retryable: number
   pages: Page[]
+  failedPages: FailedPage[]
+  /** Pages after the first missing media. */
+  pagesMissingMedia: string[]
 }
 
 /** Each record's pages: its submission and the continuation chain, in order. */
@@ -180,10 +195,6 @@ export function pageChains(db: Executor, roots: string[]): Map<string, Page[]> {
 
 export const isPending = (state: string) =>
   state === 'queued' || state === 'downloading'
-
-export const isRetryablePage = (page: Page) =>
-  page.submission.relatedState === 'complete' &&
-  !page.submission.collectionStopped
 
 export function memberSubmissions(db: Executor, pageIds: string[]) {
   if (!pageIds.length) return []
@@ -245,7 +256,8 @@ function memberCounts(
     })),
   )
   if (!pages.length) return counts
-  // Retryable: failed members of finished pages whose source still exists.
+  // Retryable: failed members of pages that can submit them again, whose
+  // source still exists, and members missing media.
   const rows = db.all<{
     root: string
     state: string
@@ -256,8 +268,8 @@ function memberCounts(
   }>(sql`
     WITH members AS (
       SELECT p.value ->> '$.root' AS root, c.id AS id, c.state AS state,
-        max(p.value ->> '$.retry' AND c.state = 'failed'
-          AND a.source_state IS NULL) AS retryable,
+        max((p.value ->> '$.retry' AND c.state = 'failed'
+          AND a.source_state IS NULL) OR ${missingMediaSQL}) AS retryable,
         max(s.library_added) AS added
       FROM json_each(${JSON.stringify(pages)}) p
       JOIN submissions s ON s.parent_submission = p.value ->> '$.id'
@@ -302,7 +314,11 @@ function memberCounts(
   return counts
 }
 
-function progressOf(pages: Page[], counts: MemberCounts): CollectionProgress {
+function progressOf(
+  pages: Page[],
+  counts: MemberCounts,
+  missing: string[],
+): CollectionProgress {
   const urls = new Set<string>()
   for (const page of pages)
     for (const target of page.targets ?? []) urls.add(target.url)
@@ -324,9 +340,13 @@ function progressOf(pages: Page[], counts: MemberCounts): CollectionProgress {
       p.capture.state === 'partial' ||
       p.submission.relatedState === 'failed',
   )
+  const failed = failedPages(pages)
   return {
     total: urls.size,
     ...counts,
+    retryable: counts.retryable + failed.length + missing.length,
+    failedPages: failed,
+    pagesMissingMedia: missing,
     done,
     stopped: pages.some((p) => p.submission.collectionStopped),
     next: last?.nextPageCursor ?? '',
@@ -343,10 +363,11 @@ export function collectionProgresses(
 ): Map<string, CollectionProgress> {
   const chains = pageChains(db, roots)
   const counts = memberCounts(db, chains)
+  const missing = pagesMissingMedia(db, chains)
   return new Map(
     [...chains].map(([root, pages]) => [
       root,
-      progressOf(pages, counts.get(root)!),
+      progressOf(pages, counts.get(root)!, missing.get(root)!),
     ]),
   )
 }
@@ -491,7 +512,10 @@ export interface CaptureRecord {
     capped: boolean
     failed: boolean
   }
-  retryable?: number
+  /** Parts a retry would fetch again, each counted once. */
+  retryable: number
+  /** Its own capture is missing media a retry would download. */
+  mediaRetryable: boolean
   /** The following and followers lists it asked for (抓关系网). */
   relations?: RelationProgress[]
   /** The options it ran with; none on rows from before they were kept. */
@@ -537,13 +561,6 @@ function recordRows(
     .all()
 }
 
-/** Members to retry: failed ones on finished pages whose source still exists. */
-function retryableMembers(db: Executor, pageIds: string[]) {
-  return memberSubmissions(db, pageIds).filter(
-    (m) => m.capture.state === 'failed',
-  )
-}
-
 type RecordRow = ReturnType<typeof recordRows>[number]
 
 /** Records for rows, with a fixed number of queries for any number of rows. */
@@ -585,6 +602,10 @@ function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
       .map((row) => row.submission.id),
   )
   const waits = captureWaits(db, queuedIds(rows.map((row) => row.capture)))
+  const missing = missingMedia(
+    db,
+    rows.map((row) => row.capture.id),
+  )
   const relations = relationProgresses(
     db,
     rows.map((row) => row.submission.id),
@@ -605,14 +626,26 @@ function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
       finishedAt: capture.finishedAt,
       media: media.get(capture.id) ?? { total: 0, ready: 0, failed: 0 },
       done: ['complete', 'partial', 'failed'].includes(capture.state),
+      retryable: missing.has(capture.id) ? 1 : 0,
+      mediaRetryable: missing.has(capture.id),
     }
     const waiting = waits.get(capture.id)
     if (waiting) record.waiting = waiting
     const progress = progresses.get(submission.id)
     if (progress) {
-      const { pages, stopped, next, maxBatch, error, retryable, ...members } =
-        progress
+      const {
+        pages,
+        stopped,
+        next,
+        maxBatch,
+        error,
+        retryable,
+        failedPages: _,
+        pagesMissingMedia: __,
+        ...members
+      } = progress
       record.members = members
+      record.retryable += retryable
       record.stopped = stopped
       record.done = members.done || stopped
       if (record.done && !stopped)
@@ -625,7 +658,6 @@ function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
             capture.state === 'failed' ||
             capture.state === 'partial',
         }
-      if (record.done) record.retryable = retryable
     } else if (
       (capture.state === 'complete' || capture.state === 'partial') &&
       submission.libraryAdded !== null
@@ -635,7 +667,14 @@ function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
       record.options = publicOptions(submission.captureOptions)
     const lists = relations.get(submission.id)
     if (lists) {
-      record.relations = lists
+      record.relations = lists.map((list) => ({
+        ...list,
+        retryable: isRetryableList(list.state, {
+          captureState: capture.state,
+          stopped: submission.collectionStopped,
+        }),
+      }))
+      record.retryable += record.relations.filter((l) => l.retryable).length
       // The lists are fetched after the profile; the record runs until then.
       record.done &&= relationsDone(lists)
     }
@@ -669,7 +708,7 @@ export function requestRecords(
   return toRecords(db, rows)
 }
 
-function recordRow(db: Executor, id: string) {
+export function recordRow(db: Executor, id: string) {
   const row = recordRows(db, eq(submissions.id, id), 1, true)[0]
   if (!row) throw new AppError('not_found')
   return row
@@ -750,6 +789,8 @@ export interface CaptureMember {
   createdAt: Date
   gone: boolean
   reasons: string[]
+  /** Whether a retry would fetch it again (or its missing media). */
+  retryable: boolean
   /** A profile's following or followers list rather than a capture. */
   list?: RelationList
   /** That profile's username. */
@@ -763,15 +804,21 @@ export function recordMembers(
   cursor?: string,
 ): { items: CaptureMember[]; next?: string } {
   recordRow(db, id)
-  const pages = pageChains(db, [id])
-    .get(id)!
-    .map((p) => p.submission.id)
+  const pages = pageChains(db, [id]).get(id)!
+  const resubmit = new Set(
+    pages.filter(isRetryablePage).map((p) => p.submission.id),
+  )
   return memberPage(
     db,
     `members:${id}`,
     state,
     cursor,
-    memberSubmissions(db, pages),
+    memberSubmissions(
+      db,
+      pages.map((p) => p.submission.id),
+    ),
+    [],
+    (listing) => resubmit.has(listing.submission.parentSubmission ?? ''),
   )
 }
 
@@ -779,6 +826,8 @@ export function recordMembers(
  * A page of members by state, oldest first. A capture listed several times
  * is one member, new if any listing was new (as `memberCounts` counts it).
  * `extra` are members that are not captures, such as a profile's lists.
+ * A failed capture is retryable when one of its listings can submit it
+ * again (`resubmits`) and its source still exists.
  */
 export function memberPage(
   db: Executor,
@@ -787,6 +836,10 @@ export function memberPage(
   cursor: string | undefined,
   listings: { capture: Capture; submission: Submission }[],
   extra: CaptureMember[] = [],
+  resubmits: (listing: {
+    capture: Capture
+    submission: Submission
+  }) => boolean = () => false,
 ): { items: CaptureMember[]; next?: string } {
   const wanted = Object.hasOwn(MEMBER_FILTERS, state)
     ? MEMBER_FILTERS[state]
@@ -795,11 +848,15 @@ export function memberPage(
   const filter = `${key}:${state}`
   const after = cursor ? decodeCursor(cursor, filter) : undefined
   const listed = new Map<string, { capture: Capture; added: boolean | null }>()
-  for (const { capture, submission } of listings) {
+  const resubmitted = new Set<string>()
+  for (const listing of listings) {
+    const { capture, submission } = listing
     const seen = listed.get(capture.id)
     const added = submission.libraryAdded
     if (!seen) listed.set(capture.id, { capture, added })
     else if (added !== null && seen.added !== true) seen.added = added
+    if (capture.state === 'failed' && resubmits(listing))
+      resubmitted.add(capture.id)
   }
   type Entry = {
     id: string
@@ -834,6 +891,7 @@ export function memberPage(
     memberViews(
       db,
       page.flatMap((m) => (m.capture ? [m.capture] : [])),
+      resubmitted,
     ).map((view) => [view.jobId, view]),
   )
   const items = page.map((m) => m.view ?? views.get(m.id)!)
@@ -847,7 +905,11 @@ export function memberPage(
 }
 
 /** Captures as members of a record, with why each fell short. */
-function memberViews(db: Executor, page: Capture[]): CaptureMember[] {
+function memberViews(
+  db: Executor,
+  page: Capture[],
+  resubmitted: Set<string>,
+): CaptureMember[] {
   const ids = page.map((c) => c.id)
   const targets = new Map(
     (page.length
@@ -886,9 +948,11 @@ function memberViews(db: Executor, page: Capture[]): CaptureMember[] {
         AND c.state = 'partial'`))
       reasons.get(row.capture)!.add(row.reason)
   const waits = captureWaits(db, queuedIds(page))
+  const missing = missingMedia(db, ids)
   return page.map((capture): CaptureMember => {
     const collection = targets.get(capture.collectionId)!
     const waiting = waits.get(capture.id)
+    const gone = collection.sourceState !== null
     return {
       jobId: capture.id,
       collectionId: collection.id,
@@ -898,8 +962,10 @@ function memberViews(db: Executor, page: Capture[]): CaptureMember[] {
       ...(waiting ? { waiting } : {}),
       error: capture.error,
       createdAt: capture.createdAt,
-      gone: collection.sourceState !== null,
+      gone,
       reasons: [...reasons.get(capture.id)!].toSorted(),
+      retryable:
+        missing.has(capture.id) || (resubmitted.has(capture.id) && !gone),
     }
   })
 }
@@ -965,74 +1031,6 @@ export function retryRecord(
   // Deleted from the library since: saving it again is all that is left.
   if (!row.saved) return captureURL(ctx, row.collection.url, key, options)
   return recapture(ctx, row.collection.id, { key, options })
-}
-
-/**
- * Fetch again the failed members of a finished collection record (or just
- * one of them). Their pages submit them anew; returns how many.
- */
-export function retryMembers(
-  ctx: CaptureContext,
-  id: string,
-  memberJobId?: string,
-): number {
-  const { db } = ctx
-  recordRow(db, id)
-  return retryFailed(
-    ctx,
-    collectionProgress(db, id)
-      .pages.filter(isRetryablePage)
-      .map((p) => p.submission.id),
-    memberJobId,
-  )
-}
-
-export function retryFailed(
-  ctx: CaptureContext,
-  pageIds: string[],
-  memberJobId?: string,
-): number {
-  return ctx.db.transaction((tx) => {
-    const failed = retryableMembers(tx, pageIds).filter(
-      (m) => !memberJobId || m.capture.id === memberJobId,
-    )
-    const goneIds = new Set(
-      failed.length
-        ? tx
-            .select({ id: collections.id })
-            .from(collections)
-            .where(
-              and(
-                inJson(
-                  collections.id,
-                  failed.map((m) => m.capture.collectionId),
-                ),
-                sql`${collections.sourceState} IS NOT NULL`,
-              ),
-            )
-            .all()
-            .map((row) => row.id)
-        : [],
-    )
-    const retry = failed.filter((m) => !goneIds.has(m.capture.collectionId))
-    const pages = new Set<string>()
-    for (const member of retry) {
-      // Frees the original key, so the page submits the target anew.
-      tx.update(submissions)
-        .set({ idemKey: `retried:${member.submission.id}` })
-        .where(eq(submissions.id, member.submission.id))
-        .run()
-      pages.add(member.submission.parentSubmission!)
-    }
-    for (const page of pages) {
-      tx.update(submissions)
-        .set({ relatedState: 'pending' })
-        .where(eq(submissions.id, page))
-        .run()
-      ctx.queue.enqueue(tx, 'related', page)
-    }
-    return new Set(retry.map((m) => m.capture.id)).size
-  })
 }
 
 /**

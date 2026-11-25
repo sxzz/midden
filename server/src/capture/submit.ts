@@ -280,6 +280,8 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
           sql`coalesce(${captures.connectionId}, '') = ${connectionId}`,
           eq(captures.adapterId, adapterId),
           captureRunning,
+          // A finished capture fetching its failed media again: not a fetch.
+          isNull(captures.revisionId),
           eq(captures.pageCursor, pageCursor),
           eq(captures.pageSize, pageSize),
           // An explicit collection request expands; it never joins a capture

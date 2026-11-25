@@ -1,0 +1,2 @@
+DROP INDEX `captures_one_active`;--> statement-breakpoint
+CREATE UNIQUE INDEX `captures_one_active` ON `captures` (`collection_id`,`adapter_id`,`provider_id`,coalesce("connection_id", ''),`page_cursor`,`page_size`,`automatic`) WHERE "captures"."state" IN ('queued', 'downloading') AND "captures"."revision_id" IS NULL;

@@ -31,26 +31,28 @@ import {
   budget,
   checkOptions,
   DEFAULT_OPTIONS,
+  storedOptions,
   type CaptureOptions,
 } from './options.ts'
 import {
   captureWaits,
+  collectionProgress,
   collectionProgresses,
   decodeCursor,
   encodeCursor,
   failureReasons,
   isPending,
-  isRetryablePage,
   memberPage,
   memberSubmissions,
   pageChains,
   recapture,
   RECORD_PAGE_SIZE,
+  recordRow,
   requestRecords,
-  retryFailed,
   type CaptureMember,
   type CaptureRecord,
   type CaptureRecordDetail,
+  type CollectionProgress,
   type MemberProgress,
   type Page,
 } from './records.ts'
@@ -60,6 +62,14 @@ import {
   relationProgresses,
   type RelationProgress,
 } from './relations.ts'
+import {
+  failedPages,
+  isRetryableList,
+  isRetryablePage,
+  missingMedia,
+  missingMediaSQL,
+  pagesMissingMedia,
+} from './retry-units.ts'
 import { submit, type Job } from './submit.ts'
 import type { Executor } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
@@ -109,7 +119,7 @@ interface Resolved {
   collectionIds: string[]
 }
 
-function savedIds(db: Executor, ids: string[]): Set<string> {
+export function savedIds(db: Executor, ids: string[]): Set<string> {
   return new Set(
     ids.length
       ? db
@@ -496,7 +506,7 @@ export function failUpdate(
     .run()
 }
 
-function loadUpdate(db: Executor, id: string): Update {
+export function loadUpdate(db: Executor, id: string): Update {
   const update = db.select().from(updates).where(eq(updates.id, id)).get()
   if (!update) throw new AppError('not_found')
   return update
@@ -510,7 +520,7 @@ export function isUpdate(db: Executor, id: string): boolean {
     .get()
 }
 
-function itemRows(db: Executor, ids: string[]) {
+export function itemRows(db: Executor, ids: string[]) {
   if (!ids.length) return []
   return db
     .select({ submission: submissions, capture: captures })
@@ -614,66 +624,24 @@ export function repeatUpdate(ctx: CaptureContext, id: string): string {
 }
 
 /**
- * Fetch again the failed captures of a finished update, or just one: posts
- * and profiles it updated and posts of their timelines. Returns how many.
+ * Capture a failed item of an update again, in its place: its key is freed
+ * and the failed request leaves the record. Returns whether it was
+ * submitted; one that cannot be stays as it was.
  */
-export function retryUpdateFailed(
+export function retryItem(
   ctx: CaptureContext,
-  id: string,
-  jobId?: string,
-): number {
-  // The retried work is the update's: its rank, and paused with it.
-  return withOrigin({ updateId: id }, () => retryFailedOf(ctx, id, jobId))
-}
-
-function retryFailedOf(
-  ctx: CaptureContext,
-  id: string,
-  jobId?: string,
-): number {
-  const update = loadUpdate(ctx.db, id)
-  const items = itemRows(ctx.db, [id])
-  const roots = items
-    .filter(
-      (i) => i.capture.isCollection && i.submission.relatedState !== 'none',
-    )
-    .map((i) => i.submission.id)
-  const pages = [...pageChains(ctx.db, roots).values()].flatMap((chain) =>
-    chain.filter(isRetryablePage).map((p) => p.submission.id),
-  )
-  let count = retryFailed(ctx, pages, jobId)
-  const failed = items.filter(
-    (i) => i.capture.state === 'failed' && (!jobId || i.capture.id === jobId),
-  )
-  const gone = new Set(
-    failed.length
-      ? ctx.db
-          .select({ id: collections.id })
-          .from(collections)
-          .where(
-            and(
-              inJson(
-                collections.id,
-                failed.map((i) => i.capture.collectionId),
-              ),
-              isNotNull(collections.sourceState),
-            ),
-          )
-          .all()
-          .map((row) => row.id)
-      : [],
-  )
-  for (const item of failed) {
-    if (gone.has(item.capture.collectionId)) continue
-    // Frees the item's key and leaves the failed request out of the record.
-    ctx.db
-      .update(submissions)
-      .set({ idemKey: `retried:${item.submission.id}`, updateId: null })
-      .where(eq(submissions.id, item.submission.id))
-      .run()
-    if (submitItem(ctx, update, positionOf(item.submission))) count++
-  }
-  return count
+  update: Update,
+  item: Submission,
+): boolean {
+  const keep = { idemKey: item.idemKey, updateId: item.updateId }
+  ctx.db
+    .update(submissions)
+    .set({ idemKey: `retried:${item.id}`, updateId: null })
+    .where(eq(submissions.id, item.id))
+    .run()
+  if (submitItem(ctx, update, positionOf(item))) return true
+  ctx.db.update(submissions).set(keep).where(eq(submissions.id, item.id)).run()
+  return false
 }
 
 /**
@@ -726,6 +694,10 @@ export interface ProfilePart {
   /** The profile's own capture; `waiting` before its turn, `skipped` if none. */
   state: string
   error: string
+  /** That capture, '' when there is none. */
+  jobId: string
+  /** Whether a retry would fetch it again, or its missing media. */
+  retryable: boolean
   /** Its timeline posts, unless the update left them out. */
   posts?: {
     total: number
@@ -734,8 +706,50 @@ export interface ProfilePart {
     done: boolean
     /** Stopped by the post cap before reaching saved posts; can continue. */
     capped: boolean
+    /** Members and later pages a retry would fetch again. */
+    retryable: number
+    /** What a retry of all of them names. */
+    retryId: string
+    /** Pages that failed, numbered from 1. */
+    pages: { id: string; number: number; error: string }[]
   }
   relations?: RelationProgress[]
+}
+
+/** A profile's timeline as its part says it: progress and what failed. */
+function postsPart(
+  progress: CollectionProgress,
+  root: string,
+  continuable: boolean,
+): NonNullable<ProfilePart['posts']> {
+  return {
+    total: progress.total,
+    finished: progress.complete + progress.partial + progress.failed,
+    pending: progress.pending,
+    done: progress.done || progress.stopped,
+    capped: !!progress.pages.at(-1)?.submission.timelineCapped && continuable,
+    retryable: progress.retryable,
+    retryId: `posts:${root}`,
+    pages: progress.failedPages.map(({ page, index }) => ({
+      id: page.submission.id,
+      number: index + 1,
+      error: page.capture.error || page.submission.relatedError,
+    })),
+  }
+}
+
+/** Lists of a request, with whether a retry would fetch each again. */
+function retryableLists(
+  lists: RelationProgress[],
+  item: { submission: Submission; capture: Capture },
+): RelationProgress[] {
+  return lists.map((list) => ({
+    ...list,
+    retryable: isRetryableList(list.state, {
+      captureState: item.capture.state,
+      stopped: item.submission.collectionStopped,
+    }),
+  }))
 }
 
 export interface UpdateRecord extends CaptureRecord {
@@ -807,7 +821,11 @@ function memberCounts(db: Executor, g: Gathered) {
     finished: number | null
   }>(sql`
     WITH src(capture_id, added, retry) AS (
-      SELECT s.capture_id, s.library_added, 1 FROM submissions s
+      -- An item is captured again while it is still saved.
+      SELECT s.capture_id, s.library_added, EXISTS (
+          SELECT 1 FROM captures i JOIN library l ON l.collection_id = i.collection_id
+          WHERE i.id = s.capture_id)
+      FROM submissions s
       WHERE s.update_id = ${g.update.id}
       UNION ALL
       SELECT s.capture_id, s.library_added, p.value ->> '$.retry'
@@ -819,8 +837,8 @@ function memberCounts(db: Executor, g: Gathered) {
       SELECT c.id AS id, c.collection_id AS collection, c.state AS state,
         c.created_at AS created, c.finished_at AS finished,
         max(src.added) AS added,
-        max(src.retry AND c.state = 'failed' AND a.source_state IS NULL)
-          AS retryable
+        max((src.retry AND c.state = 'failed' AND a.source_state IS NULL)
+          OR ${missingMediaSQL}) AS retryable
       FROM src
       JOIN captures c ON c.id = src.capture_id
       JOIN collections a ON a.id = c.collection_id
@@ -872,6 +890,22 @@ function memberCounts(db: Executor, g: Gathered) {
   return counts
 }
 
+/** An update's list fetches, with whether a retry would fetch each again. */
+function listsOf(g: Gathered): RelationProgress[] {
+  const items = new Map(g.items.map((i) => [i.submission.id, i]))
+  return [...g.relations].flatMap(([submission, lists]) =>
+    retryableLists(lists, items.get(submission)!),
+  )
+}
+
+/** Failed pages and later pages missing media, over an update's timelines. */
+function pageRetries(db: Executor, g: Gathered): number {
+  let count = 0
+  for (const pages of g.pages.values()) count += failedPages(pages).length
+  for (const ids of pagesMissingMedia(db, g.pages).values()) count += ids.length
+  return count
+}
+
 const listPending = (r: RelationProgress) =>
   r.state === 'waiting' || r.state === 'running'
 
@@ -886,7 +920,7 @@ function toUpdateRecord(db: Executor, g: Gathered): UpdateRecord {
     else if (kind) posts++
   }
   const counts = memberCounts(db, g)
-  const lists = [...g.relations.values()].flat()
+  const lists = listsOf(g)
   const listsPending = lists.filter(listPending).length
   const listsFailed = lists.filter((r) => r.state === 'failed').length
   const queued =
@@ -981,7 +1015,11 @@ function toUpdateRecord(db: Executor, g: Gathered): UpdateRecord {
     stopped,
     ...(update.pausedAt && !done ? { paused: true } : {}),
     ...(!done && readJobControl(db).paused ? { pausedAll: true } : {}),
-    ...(done ? { retryable: counts.retryable } : {}),
+    retryable:
+      counts.retryable +
+      pageRetries(db, g) +
+      lists.filter((r) => r.retryable).length,
+    mediaRetryable: !!only && missingMedia(db, [only.id]).has(only.id),
     options: update.options,
     update: {
       target: update.target,
@@ -1030,6 +1068,20 @@ function profileParts(db: Executor, g: Gathered): ProfilePart[] {
         : []
     }),
   )
+  const captureIds = positions.flatMap(({ position }) => {
+    const item = byPosition.get(position)
+    return item ? [item.capture.id] : []
+  })
+  const missing = missingMedia(db, captureIds)
+  const failed = g.items.filter((i) => i.capture.state === 'failed')
+  const saved = savedIds(
+    db,
+    failed.map((i) => i.capture.collectionId),
+  )
+  const gone = goneIds(
+    db,
+    failed.map((i) => i.capture.collectionId),
+  )
   return positions.map(({ id, position }) => {
     const item = byPosition.get(position)
     const url = kinds.get(id)!.url
@@ -1040,31 +1092,86 @@ function profileParts(db: Executor, g: Gathered): ProfilePart[] {
         handle: names.get(id) ?? '',
         state: position < update.position ? 'skipped' : 'waiting',
         error: '',
+        jobId: '',
+        retryable: false,
       }
     const progress = progresses.get(item.submission.id)
     const relations = g.relations.get(item.submission.id)
+    const collection = item.capture.collectionId
     return {
-      collectionId: item.capture.collectionId,
+      collectionId: collection,
       url,
       handle: names.get(id) ?? '',
       state: item.capture.state,
       error: item.capture.error,
+      jobId: item.capture.id,
+      retryable:
+        missing.has(item.capture.id) ||
+        (item.capture.state === 'failed' &&
+          saved.has(collection) &&
+          !gone.has(collection)),
       ...(update.options.posts !== 'none' && progress
         ? {
-            posts: {
-              total: progress.total,
-              finished: progress.complete + progress.partial + progress.failed,
-              pending: progress.pending,
-              done: progress.done || progress.stopped,
-              capped:
-                !!progress.pages.at(-1)?.submission.timelineCapped &&
-                update.state !== 'stopped',
-            },
+            posts: postsPart(
+              progress,
+              item.submission.id,
+              update.state !== 'stopped',
+            ),
           }
         : {}),
-      ...(relations ? { relations } : {}),
+      ...(relations ? { relations: retryableLists(relations, item) } : {}),
     }
   })
+}
+
+/** Collections among these the source reported gone. */
+export function goneIds(db: Executor, ids: string[]): Set<string> {
+  if (!ids.length) return new Set()
+  return new Set(
+    db
+      .select({ id: collections.id })
+      .from(collections)
+      .where(
+        and(inJson(collections.id, ids), isNotNull(collections.sourceState)),
+      )
+      .all()
+      .map((row) => row.id),
+  )
+}
+
+/**
+ * A profile record's own part, as an update's profiles show theirs: its
+ * profile, timeline and lists. Its own failed capture is not retried here
+ * but by capturing it again as a new record.
+ */
+export function recordProfiles(
+  db: Executor,
+  record: CaptureRecord,
+): ProfilePart[] {
+  if (record.kind !== 'profile') return []
+  const row = recordRow(db, record.id)
+  if (!row.capture.isCollection) return []
+  const progress =
+    row.submission.relatedState === 'none'
+      ? undefined
+      : collectionProgress(db, record.id)
+  const options = storedOptions(row.submission.captureOptions)
+  return [
+    {
+      collectionId: row.collection.id,
+      url: row.collection.url,
+      handle: handles(db, [row.collection.id]).get(row.collection.id) ?? '',
+      state: row.capture.state,
+      error: row.capture.error,
+      jobId: row.capture.id,
+      retryable: record.mediaRetryable,
+      ...(options.posts !== 'none' && progress
+        ? // The record reads on itself (its 继续抓取), not its part.
+          { posts: postsPart(progress, record.id, false) }
+        : {}),
+      ...(record.relations ? { relations: record.relations } : {}),
+    },
+  ]
 }
 
 export function updateDetail(db: Executor, id: string): UpdateRecordDetail {
@@ -1157,6 +1264,15 @@ export function updateMembers(
 ): { items: CaptureMember[]; next?: string } {
   const [g] = gather(db, [loadUpdate(db, id)])
   const pages = allPages(g!).map((p) => p.submission.id)
+  const resubmit = new Set(
+    allPages(g!)
+      .filter(isRetryablePage)
+      .map((p) => p.submission.id),
+  )
+  const saved = savedIds(
+    db,
+    g!.items.map((i) => i.capture.collectionId),
+  )
   const urls = new Map(
     (g!.items.length
       ? db
@@ -1193,7 +1309,7 @@ export function updateMembers(
     db,
     g!.items.map((i) => i.capture.collectionId),
   )
-  const lists = fetches.map(({ fetch }): CaptureMember => {
+  const lists = fetches.map(({ fetch, submission }): CaptureMember => {
     const capture = captureOf.get(fetch.submissionId!)!
     let listState = 'complete'
     if (fetch.state === 'waiting' || fetch.state === 'running')
@@ -1209,6 +1325,10 @@ export function updateMembers(
       createdAt: fetch.createdAt,
       gone: false,
       reasons: [],
+      retryable: isRetryableList(fetch.state, {
+        captureState: capture.state,
+        stopped: submission.collectionStopped,
+      }),
       list: fetch.list,
       ...(names.has(capture.collectionId)
         ? { handle: names.get(capture.collectionId) }
@@ -1222,6 +1342,10 @@ export function updateMembers(
     cursor,
     newestPerCollection([...g!.items, ...memberSubmissions(db, pages)]),
     lists,
+    ({ capture, submission }) =>
+      submission.updateId === id
+        ? saved.has(capture.collectionId)
+        : resubmit.has(submission.parentSubmission ?? ''),
   )
 }
 

@@ -10,7 +10,6 @@ import {
   recordDetail,
   recordMembers,
   recordPage,
-  retryMembers,
   retryRecord,
   type CaptureMember,
   type CaptureRecord,
@@ -18,6 +17,7 @@ import {
 } from '#capture/records.ts'
 import { stopCollection } from '#capture/related.ts'
 import { captureRelations, type RelationProgress } from '#capture/relations.ts'
+import { retryRecordFailed } from '#capture/retries.ts'
 import {
   collectionUpdate,
   continueTimeline,
@@ -25,9 +25,9 @@ import {
   listRecords,
   pauseUpdate,
   previewUpdate,
+  recordProfiles,
   repeatUpdate,
   resumeUpdate,
-  retryUpdateFailed,
   startUpdate,
   stopUpdate,
   updateDetail,
@@ -79,11 +79,13 @@ function memberProgress(m: NonNullable<CaptureRecord['members']>) {
 
 function relationJson(r: RelationProgress) {
   return {
+    id: r.id,
     list: r.list,
     state: r.state,
     ...(r.expected === undefined ? {} : { expected: r.expected }),
     fetched: r.fetched,
     ...(r.error ? { error: r.error } : {}),
+    ...(r.retryable ? { retryable: true } : {}),
   }
 }
 
@@ -108,7 +110,22 @@ function profilePartJson(p: ProfilePart) {
     ...(p.handle ? { handle: p.handle } : {}),
     state: p.state,
     ...(p.error ? { error: p.error } : {}),
-    ...(p.posts ? { posts: p.posts } : {}),
+    ...(p.jobId ? { job_id: p.jobId } : {}),
+    ...(p.retryable ? { retryable: true } : {}),
+    ...(p.posts
+      ? {
+          posts: {
+            total: p.posts.total,
+            finished: p.posts.finished,
+            pending: p.posts.pending,
+            done: p.posts.done,
+            capped: p.posts.capped,
+            retryable: p.posts.retryable,
+            retry_id: p.posts.retryId,
+            pages: p.posts.pages,
+          },
+        }
+      : {}),
     ...(p.relations ? { relations: p.relations.map(relationJson) } : {}),
   }
 }
@@ -134,7 +151,8 @@ function recordJson(r: CaptureRecord | UpdateRecord) {
     ...(r.stopped === undefined ? {} : { stopped: r.stopped }),
     ...(r.paused ? { paused: true } : {}),
     ...(r.pausedAll ? { paused_all: true } : {}),
-    ...(r.retryable === undefined ? {} : { retryable: r.retryable }),
+    retryable: r.retryable,
+    ...(r.mediaRetryable ? { media_retryable: true } : {}),
     ...(r.relations ? { relations: r.relations.map(relationJson) } : {}),
     ...(r.options ? { options: optionsJson(r.options) } : {}),
     ...(r.pages
@@ -152,7 +170,10 @@ function recordJson(r: CaptureRecord | UpdateRecord) {
   }
 }
 
-function detailJson(r: CaptureRecordDetail | UpdateRecordDetail) {
+function detailJson(
+  r: CaptureRecordDetail | UpdateRecordDetail,
+  profiles: ProfilePart[],
+) {
   return {
     ...recordJson(r),
     ...('profiles' in r
@@ -160,7 +181,9 @@ function detailJson(r: CaptureRecordDetail | UpdateRecordDetail) {
           profiles: r.profiles.map(profilePartJson),
           ...(r.moreProfiles ? { more_profiles: r.moreProfiles } : {}),
         }
-      : {}),
+      : profiles.length
+        ? { profiles: profiles.map(profilePartJson) }
+        : {}),
     warnings: r.warnings,
     media_items: r.mediaItems.map((m) => ({
       position: m.position,
@@ -184,6 +207,7 @@ function memberJson(m: CaptureMember) {
     ...(m.error ? { error: m.error } : {}),
     reasons: m.reasons,
     ...(m.gone ? { gone: true } : {}),
+    ...(m.retryable ? { retryable: true } : {}),
     ...(m.list ? { list: m.list } : {}),
     ...(m.handle ? { handle: m.handle } : {}),
     created_at: m.createdAt.toISOString(),
@@ -280,13 +304,10 @@ export function captureRoutes(
 
       .get('/captures/:id', (c) => {
         const id = c.req.param('id')
-        return c.json(
-          detailJson(
-            isUpdate(ctx.db, id)
-              ? updateDetail(ctx.db, id)
-              : recordDetail(ctx.db, id),
-          ),
-        )
+        if (isUpdate(ctx.db, id))
+          return c.json(detailJson(updateDetail(ctx.db, id), []))
+        const detail = recordDetail(ctx.db, id)
+        return c.json(detailJson(detail, recordProfiles(ctx.db, detail)))
       })
 
       .get(
@@ -323,20 +344,19 @@ export function captureRoutes(
         })
       })
 
+      // Fetch again what failed, all of it or the part `id` names: a
+      // member's job id, a list's or page's id, a profile's posts.
       .post(
         '/captures/:id/retry-failed',
-        json(v.strictObject({ job_id: v.optional(v.string()) })),
-        (c) => {
-          const input = c.req.valid('json')
-          const id = c.req.param('id')
-          return c.json({
-            count: (isUpdate(ctx.db, id) ? retryUpdateFailed : retryMembers)(
+        json(v.strictObject({ id: v.optional(v.string()) })),
+        (c) =>
+          c.json({
+            count: retryRecordFailed(
               ctx,
-              id,
-              input.job_id,
+              c.req.param('id'),
+              c.req.valid('json').id,
             ),
-          })
-        },
+          }),
       )
 
       .post(

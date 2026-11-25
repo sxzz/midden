@@ -319,7 +319,7 @@ describe('抓关系网', () => {
     // The record runs until its lists are done, and tells how they went.
     const record = recordDetail(ctx.db, job.submissionId)
     expect(record.done).toBe(true)
-    expect(record.relations).toEqual([
+    expect(record.relations).toMatchObject([
       { list: 'following', state: 'complete', expected: 13, fetched: 13 },
       { list: 'followers', state: 'complete', expected: 2, fetched: 2 },
     ])

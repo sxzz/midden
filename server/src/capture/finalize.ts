@@ -377,6 +377,10 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
     if (capture?.state !== 'downloading') return
     const states = captureAssets(tx, capture.id)
     if (states.some((a) => a.state === 'pending')) return
+    if (capture.revisionId) {
+      settleRetriedMedia(ctx, tx, capture, states)
+      return
+    }
     validateExecution(tx, capture)
     const staging = loadStaging(tx, capture.id)
     const payload = staging?.payload
@@ -505,4 +509,79 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
     }
     deliveries(ctx, tx, capture.id)
   })
+}
+
+/**
+ * A finished capture downloaded its failed media again (see
+ * `capture/retries.ts`): its revision, when it made one, now shows them,
+ * so the hashes that compare it are those of what it holds now. Nothing
+ * was fetched, so the collection is not observed anew, and a newer
+ * revision stays the current one.
+ */
+function settleRetriedMedia(
+  ctx: CaptureContext,
+  tx: Transaction,
+  capture: NonNullable<ReturnType<typeof loadCapture>>,
+  states: AssetState[],
+): void {
+  const own = tx
+    .select()
+    .from(revisions)
+    .where(eq(revisions.captureId, capture.id))
+    .get()
+  const shown =
+    own ??
+    tx
+      .select()
+      .from(revisions)
+      .where(eq(revisions.id, capture.revisionId!))
+      .get()
+  const payload = shown?.payload as Payload | undefined
+  const kept = (a: AssetState) => a.state === 'ready' || a.state === 'removed'
+  const partial = !!payload?.incomplete || states.some((a) => !kept(a))
+  const now = new Date(ctx.now?.() ?? Date.now())
+  if (own && payload) {
+    const collection = tx
+      .select()
+      .from(collections)
+      .where(eq(collections.id, capture.collectionId))
+      .get()!
+    if (payload.graph)
+      persistEntities(tx, collection.platform, payload.graph, states, now)
+    const context = new Set(
+      (payload.graph?.entities ?? [])
+        .filter((e) => e.context_only)
+        .map(identity),
+    )
+    const ignored = ignoredPaths(
+      ctx.platforms,
+      capture.adapterId,
+      payload.metric_paths,
+    )
+    tx.update(revisions)
+      .set({
+        payload,
+        contentHash: revisionDigest(payload, states, context, ignored),
+        viewHash: revisionDigest(payload, states, context, ignored, true),
+        contentBytes: Buffer.byteLength(JSON.stringify(payload)),
+      })
+      .where(eq(revisions.id, own.id))
+      .run()
+    for (const entity of payload.graph?.entities ?? [])
+      tx.update(revisionEntities)
+        .set({ entityVersionId: entity.version_id! })
+        .where(
+          and(
+            eq(revisionEntities.revisionId, own.id),
+            eq(revisionEntities.entityKey, entity.key),
+          ),
+        )
+        .run()
+    catalogCollections(tx, [collection.id])
+  }
+  tx.update(captures)
+    .set({ state: partial ? 'partial' : 'complete', finishedAt: now })
+    .where(eq(captures.id, capture.id))
+    .run()
+  deliveries(ctx, tx, capture.id)
 }

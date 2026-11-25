@@ -276,7 +276,9 @@ export const captures = sqliteTable(
   },
   (t) => [
     index('captures_collection').on(t.collectionId, t.createdAt),
-    // Identical requests in flight share one capture.
+    // Identical requests in flight share one capture. A finished capture
+    // downloading its failed media again (it has a revision) is not a fetch
+    // to share.
     uniqueIndex('captures_one_active')
       .on(
         t.collectionId,
@@ -287,7 +289,9 @@ export const captures = sqliteTable(
         t.pageSize,
         t.automatic,
       )
-      .where(sql`${t.state} IN ('queued', 'downloading')`),
+      .where(
+        sql`${t.state} IN ('queued', 'downloading') AND ${t.revisionId} IS NULL`,
+      ),
     index('captures_active')
       .on(t.state, t.createdAt)
       .where(sql`${t.state} IN ('queued', 'downloading')`),

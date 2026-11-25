@@ -13,10 +13,10 @@ import {
   recordDetail,
   recordMembers,
   recordPage,
-  retryMembers,
   retryRecord,
 } from './records.ts'
 import { stopCollection } from './related.ts'
+import { retryRecordFailed } from './retries.ts'
 import { submit } from './submit.ts'
 import { listRecords } from './updates.ts'
 import type { CaptureContext } from './context.ts'
@@ -128,7 +128,7 @@ describe('capture records', () => {
     ).toEqual(['https://fake.test/p/1'])
 
     broken.clear()
-    expect(retryMembers(c, record.id)).toBe(1)
+    expect(retryRecordFailed(c, record.id)).toBe(1)
     await c.queue.drain()
     record = listRecords(c.db).items[0]!
     expect(record.members).toMatchObject({ total: 2, complete: 2, failed: 0 })
