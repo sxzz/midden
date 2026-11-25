@@ -1,4 +1,5 @@
 import { sql } from 'drizzle-orm'
+import { stateHistory, type SourceState } from '#capture/source-state.ts'
 import { shortcodeFromPk } from '#platforms/instagram/resolve.ts'
 import { assertSaved } from './read.ts'
 import {
@@ -50,18 +51,34 @@ export interface PinnedChange {
   after: PinnedPost[]
 }
 
+/**
+ * The account found suspended (封禁) or gone (已不存在) on its platform, from
+ * `since`, or that state over (`ended`): 解封, 恢复.
+ */
+export interface StateChange {
+  field: 'state'
+  state: SourceState
+  ended: boolean
+}
+
 export type ProfileFieldChange =
-  TextChange | ProtectedChange | ImageChange | PinnedChange
+  TextChange | ProtectedChange | ImageChange | PinnedChange | StateChange
 
 /** A capture that first saw the profile look different from before. */
 export interface ProfileChange {
-  capture_id: string
-  revision_id: string
-  /** When that capture finished, as `observed_at` shows it. */
+  /** The revision's id, or the state's with how it changed. */
+  id: string
+  /** The revision first showing the change; a state has none. */
+  capture_id?: string
+  revision_id?: string
+  /**
+   * When that capture finished, as `observed_at` shows it; for a state,
+   * when it was first seen or found over.
+   */
   observed_at: string
   /**
    * Name, username, bio, protection, avatar, banner, pinned posts, as far as
-   * each changed.
+   * each changed; or the account's state.
    */
   fields: ProfileFieldChange[]
 }
@@ -170,10 +187,10 @@ const BIO_TEXT = `CASE WHEN json_type(v.data, '$.metadata.description') = 'text'
 /**
  * The changes in what a saved profile shows: its name, username, bio,
  * protection, avatar, banner and pinned posts, never its counts or fields the
- * page does not show. Each is a revision whose shown profile differs from the revision
- * before it, newest first; up to `limit` of them, found among the newest
- * CHANGES_WINDOW revisions. A collection about anything but a profile has
- * none.
+ * page does not show, and when it was suspended or gone and back. Newest
+ * first, up to `limit` of them; shown fields are compared among the newest
+ * CHANGES_WINDOW revisions, states all kept. A collection about anything but
+ * a profile has none.
  */
 export function listProfileChanges(
   r: Reader,
@@ -182,6 +199,47 @@ export function listProfileChanges(
   /** Revisions compared; tests make it small. */
   span = CHANGES_WINDOW,
 ): ProfileChanges {
+  const { profile, ...changes } = fieldChanges(r, id, limit, span)
+  if (!profile) return changes
+  const states = stateHistory(r, id).flatMap((row, i): ProfileChange[] => [
+    {
+      id: `state:${i}:since`,
+      observed_at: iso(row.since),
+      fields: [{ field: 'state', state: row.state, ended: false }],
+    },
+    ...(row.endedAt
+      ? [
+          {
+            id: `state:${i}:ended`,
+            observed_at: iso(row.endedAt),
+            fields: [
+              { field: 'state' as const, state: row.state, ended: true },
+            ],
+          },
+        ]
+      : []),
+  ])
+  if (!states.length) return changes
+  return {
+    ...changes,
+    items: [...changes.items, ...states]
+      .toSorted((a, b) => byteOrder(b.observed_at, a.observed_at))
+      .slice(0, limit),
+  }
+}
+
+const byteOrder = (a: string, b: string) => (a === b ? 0 : a < b ? -1 : 1)
+
+/**
+ * The revisions whose shown profile differs from the revision before it,
+ * newest first, up to `limit` of them; and whether it is a profile.
+ */
+function fieldChanges(
+  r: Reader,
+  id: string,
+  limit: number,
+  span: number,
+): ProfileChanges & { profile: boolean } {
   assertSaved(r, id)
   // Cheap first pass: a revision whose root entity version did not move
   // shows the same profile, since a version is the entity's data together
@@ -205,14 +263,16 @@ export function listProfileChanges(
     -- The window, the revision before it to compare its oldest against,
     -- and one more to tell whether anything was left out.
     LIMIT ${span + 2}`)
-  if (!revisions[0]?.type.endsWith('.profile')) return { items: [] }
+  if (!revisions[0]?.type.endsWith('.profile'))
+    return { items: [], profile: false }
   const truncated = revisions.length > span + 1
   const window = revisions.slice(0, span + 1).toReversed()
   const moved = window.filter((row, i) => {
     const before = window[i - 1]
     return !before || row.version !== before.version || row.text !== before.text
   })
-  if (moved.length < 2) return { items: [], ...(truncated && { truncated }) }
+  if (moved.length < 2)
+    return { items: [], profile: true, ...(truncated && { truncated }) }
   const rows = r.db.all<{
     id: string
     capture_id: string
@@ -252,6 +312,7 @@ export function listProfileChanges(
       const fields = compare(last, now)
       if (fields.length)
         changes.push({
+          id: row.id,
           capture_id: row.capture_id,
           revision_id: row.id,
           observed_at: iso(row.finished_at),
@@ -307,6 +368,7 @@ export function listProfileChanges(
         }
       }),
     })),
+    profile: true,
     ...(truncated && { truncated }),
   }
 }

@@ -44,6 +44,11 @@ export interface CollectionFilter {
   authors?: string[]
   sensitive?: string
   /**
+   * `deleted` or `suspended`: what the platform is confirmed to say of it
+   * now (原站已删除, 账号已被封禁); its archived content stays.
+   */
+  sourceState?: string
+  /**
    * Tag ids, comma-separated; a collection has a tag when it is tagged or
    * its author's saved profile is. `tagMode` `all` asks for every one of
    * them, otherwise any will do.
@@ -228,6 +233,7 @@ function check(input: CollectionFilter): Checked {
     notTag: tagList(input.notTag),
     relatedTo: input.relatedTo ?? '',
     postType: input.postType ?? '',
+    sourceState: input.sourceState ?? '',
     // One set of perspectives is one filter, and one cursor fingerprint.
     relOf: [...new Set(input.relOf)].toSorted(),
     rel: input.rel ?? '',
@@ -249,6 +255,7 @@ function check(input: CollectionFilter): Checked {
     ]) ||
     !oneOf(filter.visibility, ['public', 'private']) ||
     !oneOf(filter.sensitive, ['contains', 'not_contains']) ||
+    !oneOf(filter.sourceState, ['deleted', 'suspended']) ||
     runes(filter.q) > MAX_QUERY ||
     values(filter.mediaType).some(
       (m) => !['image', 'video', 'text'].includes(m),
@@ -598,6 +605,12 @@ function conditionsOf(checked: Checked, related: boolean): SQL[] {
     )
   if (filter.postType)
     conditions.push(sql`${postTypeSQL(related)} = ${filter.postType}`)
+  // Few have one, so the partial index lists them all.
+  if (filter.sourceState)
+    conditions.push(
+      sql`k.collection_id IN (SELECT id FROM collections
+        WHERE source_state = ${filter.sourceState})`,
+    )
   return conditions
 }
 

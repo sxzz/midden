@@ -101,6 +101,7 @@ it('heads days as today, yesterday, or their date', () => {
 
 it('files changes under their local day, newest first as given', () => {
   const change = (id: string, at: Date): ProfileChange => ({
+    id,
     capture_id: `c-${id}`,
     revision_id: id,
     observed_at: at.toISOString(),
@@ -140,4 +141,23 @@ it('files changes under their local day, newest first as given', () => {
     new Date(2026, 10, 24, 9, 5).toISOString(),
   )
   expect(changeDays(undefined)).toEqual([])
+})
+
+it('names the day an account was suspended or gone, and when it was back', () => {
+  const now = new Date(2026, 10, 24, 18)
+  const line = (state: 'deleted' | 'suspended', ended: boolean, at: Date) =>
+    changeLine({ field: 'state', state, ended }, at, now)
+  expect(line('suspended', false, new Date(2026, 10, 5))).toMatchObject({
+    kind: 'flag',
+    label: '11月5日起账号被封禁',
+  })
+  expect(line('suspended', true, new Date(2026, 10, 20)).label).toBe(
+    '11月20日解封',
+  )
+  expect(line('deleted', false, new Date(2025, 0, 2)).label).toBe(
+    '2025年1月2日起账号已不存在',
+  )
+  expect(line('deleted', true, new Date(2026, 10, 20)).label).toBe(
+    '11月20日账号恢复',
+  )
 })

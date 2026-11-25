@@ -11,6 +11,7 @@ import {
 } from '#testing/library.ts'
 import { updateAnnotation } from './annotations.ts'
 import { catalogCollections } from './catalog.ts'
+import { parseFilterQuery } from './filter-query.ts'
 import {
   countCollections,
   listAuthors,
@@ -631,4 +632,46 @@ describe('library listing', () => {
       ).toSorted(),
     ).toEqual([saved.e1, saved.e2, saved.c1].toSorted())
   })
+})
+
+test('deleted posts and suspended accounts, in lists, folders and counts', async () => {
+  const { ctx } = setup({
+    p1: byAuthor('p1'),
+    p2: byAuthor('p2'),
+    501: () => ({
+      text: 'a1',
+      graph: graph([entity('root', 'fake.profile', '501')]),
+    }),
+    502: () => ({
+      text: 'a2',
+      graph: graph([entity('root', 'fake.profile', '502')]),
+    }),
+  })
+  const saved: Record<string, string> = {}
+  for (const id of ['p1', 'p2'])
+    saved[id] = (await capture(ctx, post(id))).collectionId
+  for (const id of ['501', '502'])
+    saved[id] = (await capture(ctx, profile(id))).collectionId
+  const mark = (id: string, state: 'deleted' | 'suspended') =>
+    ctx.db
+      .update(collections)
+      .set({ sourceState: state, sourceStateAt: new Date() })
+      .where(eq(collections.id, id))
+      .run()
+  mark(saved.p2!, 'deleted')
+  mark(saved['501']!, 'suspended')
+  expect(ids(all(ctx, { sourceState: 'deleted' }))).toEqual([saved.p2])
+  expect(
+    ids(all(ctx, { sourceState: 'suspended', entityType: 'fake.profile' })),
+  ).toEqual([saved['501']])
+  // A folder keeps it in its filter, and counts by it.
+  const { filter, canonical } = parseFilterQuery(
+    'source_state=suspended&entity_type=fake.profile',
+  )
+  expect(canonical).toBe('entity_type=fake.profile&source_state=suspended')
+  expect(countCollections(ctx.db, filter)).toEqual({
+    count: 1,
+    types: { 'fake.profile': 1 },
+  })
+  expect(() => all(ctx, { sourceState: 'gone' })).toThrow()
 })

@@ -1,5 +1,6 @@
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { afterEach, describe, expect, onTestFinished, test } from 'vitest'
+import { collections } from '#db/schema.ts'
 import { createApi } from '#http/app.ts'
 import { createToken } from '#http/auth.ts'
 import {
@@ -247,6 +248,35 @@ describe('public shares', () => {
     expect(
       await read(slug, `/collections?related_to=${ids.five}`),
     ).toMatchObject(NOT_FOUND)
+  })
+
+  test('a shared profile shows that it is suspended, and filters by it', async () => {
+    const { c, ids, read } = await setup()
+    const since = new Date('2026-11-02T00:00:00Z')
+    c.db
+      .update(collections)
+      .set({ sourceState: 'suspended', sourceStateAt: since })
+      .where(eq(collections.id, ids.five!))
+      .run()
+    c.db
+      .update(collections)
+      .set({ sourceState: 'deleted', sourceStateAt: since })
+      .where(eq(collections.id, ids.a1!))
+      .run()
+    const slug = share(c, 'collection', ids.five!)
+    expect((await read(slug, `/collections/${ids.five}`)).body).toMatchObject({
+      source_state: 'suspended',
+      source_state_at: since.toISOString(),
+    })
+    // Its posts gone from the platform, as a visitor may ask for them.
+    const gone = await read(
+      slug,
+      `/collections?related_to=${ids.five}&source_state=deleted`,
+    )
+    expect(gone.status).toBe(200)
+    expect(
+      (gone.body as { items: { id: string }[] }).items.map((i) => i.id),
+    ).toEqual([ids.a1])
   })
 
   test("a shared profile's pinned posts link only within the share", async () => {

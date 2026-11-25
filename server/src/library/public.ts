@@ -241,6 +241,8 @@ function publicSelection(share: OpenShare, query: PublicListQuery) {
     authors: visitor.authors,
     sensitive: visitor.sensitive,
     postType: visitor.postType,
+    // Public on the platform too.
+    sourceState: visitor.sourceState,
   }
   return {
     base: {

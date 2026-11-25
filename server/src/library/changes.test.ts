@@ -1,4 +1,5 @@
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
+import { collectionStates } from '#db/schema.ts'
 import {
   capture,
   entity,
@@ -294,6 +295,7 @@ test('pinned posts: set, changed, removed, and not known', async () => {
   const removed = await refresh()
 
   const at = (c: typeof first) => ({
+    id: c.revisionId,
     capture_id: c.id,
     revision_id: c.revisionId,
   })
@@ -334,4 +336,60 @@ test('pinned posts: set, changed, removed, and not known', async () => {
     renamed.id,
     first.id,
   ])
+})
+
+test('the account suspended and back, among the other changes', async () => {
+  const state: Profile = { name: 'A', username: 'a' }
+  const ctx = setup(state)
+  const first = await capture(ctx, profile)
+  const id = first.collectionId
+  const at = (ms: number) => new Date(first.finishedAt!.getTime() + ms)
+  // Confirmed history rows, as the capture pipeline writes them; one still
+  // waiting for its second answer is not shown.
+  ctx.db
+    .insert(collectionStates)
+    .values([
+      {
+        id: 's1',
+        collectionId: id,
+        state: 'suspended',
+        since: at(1000),
+        confirmedAt: at(2000),
+        seenAt: at(2000),
+        endedAt: at(5000),
+      },
+      {
+        id: 's2',
+        collectionId: id,
+        state: 'deleted',
+        since: at(9000),
+        seenAt: at(9000),
+      },
+    ])
+    .run()
+  vi.setSystemTime(at(3000))
+  state.name = 'B'
+  const renamed = await capture(ctx, { refreshId: id })
+  vi.useRealTimers()
+  expect(
+    listProfileChanges(ctx, id).items.map((item) => [
+      item.observed_at,
+      item.fields[0],
+    ]),
+  ).toEqual([
+    [
+      at(5000).toISOString(),
+      { field: 'state', state: 'suspended', ended: true },
+    ],
+    [
+      renamed.finishedAt!.toISOString(),
+      { field: 'name', before: 'A', after: 'B' },
+    ],
+    [
+      at(1000).toISOString(),
+      { field: 'state', state: 'suspended', ended: false },
+    ],
+  ])
+  // Enough for the detail to offer the page, with nothing else changed.
+  expect(listProfileChanges(ctx, id, 1).items).toHaveLength(1)
 })

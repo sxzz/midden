@@ -53,7 +53,7 @@ export interface ChangeDay {
 }
 
 const labels: Record<
-  Exclude<ProfileFieldChange['field'], 'protected'>,
+  Exclude<ProfileFieldChange['field'], 'protected' | 'state'>,
   string
 > = {
   name: '昵称',
@@ -65,8 +65,45 @@ const labels: Record<
   pinned: '置顶帖子',
 }
 
-/** A field change in the words and shape the page shows it in. */
-export function changeLine(change: ProfileFieldChange): ChangeLine {
+/** A day as the timeline names a state's start or end: 11月5日. */
+export function monthDay(d: Date, now = new Date()): string {
+  const date = `${d.getMonth() + 1}月${d.getDate()}日`
+  return d.getFullYear() === now.getFullYear()
+    ? date
+    : `${d.getFullYear()}年${date}`
+}
+
+/**
+ * How the account's state reads on the day it began or ended: suspended
+ * (封禁) and lifted (解封), or gone (已不存在) and back (恢复).
+ */
+export function stateLabel(
+  state: 'deleted' | 'suspended',
+  ended: boolean,
+  at: Date,
+  now = new Date(),
+): string {
+  const day = monthDay(at, now)
+  if (state === 'suspended') return ended ? `${day}解封` : `${day}起账号被封禁`
+  return ended ? `${day}账号恢复` : `${day}起账号已不存在`
+}
+
+/**
+ * A field change in the words and shape the page shows it in; `at` is when
+ * it was seen, which a state's line names.
+ */
+export function changeLine(
+  change: ProfileFieldChange,
+  at = new Date(),
+  now = new Date(),
+): ChangeLine {
+  if (change.field === 'state')
+    return {
+      kind: 'flag',
+      key: `state-${change.ended ? 'ended' : 'since'}`,
+      label: stateLabel(change.state, change.ended, at, now),
+      locked: false,
+    }
   if (change.field === 'protected')
     return {
       kind: 'flag',
@@ -157,10 +194,10 @@ export function changeDays(
     if (!Number.isFinite(at.getTime()) || !item.fields.length) continue
     const label = dayLabel(at, now)
     const entry: ChangeEntry = {
-      id: item.revision_id,
+      id: item.id,
       datetime: item.observed_at,
       time: clock(at),
-      lines: item.fields.map(changeLine),
+      lines: item.fields.map((field) => changeLine(field, at, now)),
     }
     const last = days.at(-1)
     if (last?.label === label) last.entries.push(entry)

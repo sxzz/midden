@@ -52,6 +52,7 @@ const changes: Changes = {
     {
       capture_id: 'c2',
       revision_id: 'r2',
+      id: 'r2',
       observed_at: today.toISOString(),
       fields: [
         { field: 'name', before: '小林', after: '小林 🌸' },
@@ -63,6 +64,7 @@ const changes: Changes = {
     {
       capture_id: 'c1',
       revision_id: 'r1',
+      id: 'r1',
       observed_at: '2025-03-02T03:00:00.000Z',
       fields: [
         { field: 'username', before: 'old', after: 'new' },
@@ -211,6 +213,7 @@ it('links each pinned post to its collection, else to the platform', async () =>
       {
         capture_id: 'c3',
         revision_id: 'r3',
+        id: 'r3',
         observed_at: today.toISOString(),
         fields: [
           {
@@ -230,6 +233,7 @@ it('links each pinned post to its collection, else to the platform', async () =>
       {
         capture_id: 'c2',
         revision_id: 'r2',
+        id: 'r2',
         observed_at: today.toISOString(),
         fields: [
           {
@@ -242,6 +246,7 @@ it('links each pinned post to its collection, else to the platform', async () =>
       {
         capture_id: 'c1',
         revision_id: 'r1',
+        id: 'r1',
         observed_at: today.toISOString(),
         fields: [
           {
