@@ -264,9 +264,13 @@ R2 Standard：存储 $0.015/GB·月，Class A 操作（PUT、分段上传、LIST
 
 #### 监控
 
-`litestream.yml` 的 `heartbeat-url` 指向服务的 8081 端口（`server/src/litestream.ts`；compose 只发布 8080，这个端口只有同一网络中的容器能访问）。Litestream 只在最近 5 分钟内的同步都成功时每 5 分钟发一次心跳：容器没有运行、token 错误、网络或 R2 故障时都没有心跳。
+`litestream.yml` 的 `heartbeat-url` 指向服务的 8081 端口（`server/src/litestream.ts`；compose 只发布 8080，这个端口只有同一网络中的容器能访问）。Litestream 只在最近 5 分钟内的同步都成功时每 5 分钟发一次心跳：容器没有运行、token 错误、网络或 R2 故障时都没有心跳。数据库没有写入时仍有心跳：Litestream 0.5.18 的复制循环在没有新数据时按 `sync-interval` 空转一次，没有文件要上传也记为同步成功（`replica.go`，注释「so idle databases continue recording sync health for heartbeats」），所以不需要服务定期写一行来保持心跳；只有从未写入过的空数据库不发。
 
-服务设置了 `LITESTREAM_ACCESS_KEY_ID` 时监听这个端口：20 分钟没有收到心跳（从服务启动时算起）就由 Bot 告诉所有者「数据库备份：20 分钟没有收到 Litestream 的心跳」，日志记 `litestream heartbeat missing`（error）；之后收到心跳时发「数据库备份：Litestream 的心跳已恢复」，记 `litestream heartbeat resumed`。Litestream 上传失败后按 1 秒起翻倍、最长 5 分钟的间隔重试，所以故障排除后几分钟内才恢复。没有配置 Bot 时只记日志。服务重启后重新计时，故障持续时每次部署后会再提醒一次。
+服务设置了 `LITESTREAM_ACCESS_KEY_ID` 时监听这个端口：超过「备份心跳超时」（默认 20 分钟，从服务启动时算起）没有收到心跳，就由 Bot 告诉所有者「数据库备份：20 分钟没有收到 Litestream 的心跳」，日志记 `litestream heartbeat missing`（error）；之后收到心跳时发「数据库备份：Litestream 的心跳已恢复」，记 `litestream heartbeat resumed`。服务启动后的第一次心跳记 `litestream heartbeat received`（info），之后的心跳不记日志，所以确认备份在工作不必再等 20 分钟：看这条日志，或看下面的管理员面板。Litestream 上传失败后按 1 秒起翻倍、最长 5 分钟的间隔重试，所以故障排除后几分钟内才恢复。没有配置 Bot 时只记日志。服务重启后重新计时，故障持续时每次部署后会再提醒一次。
+
+「备份心跳超时」是管理员设置，不是环境变量：网页「设置 → 管理员面板 → 数据库备份」中修改，存在数据库的 `settings` 表（键 `litestream_timeout_minutes`，整数 1 到 1440 分钟，没有设置时为 20），监控每次检查时读取，改后立即生效，不必重启。Litestream 每 5 分钟发一次心跳（`litestream.yml` 的 `heartbeat-interval`），低于 5 分钟的值会让正常的备份也被报告，只在测试告警时有意义。
+
+同一面板显示「上次心跳 3 分钟前」，超时则显示「超过 20 分钟没有心跳」；`GET /v1/instance` 的 `litestream` 字段给出同样的内容：`enabled`、`last_heartbeat_at`（没有收到过为 `null`）、`stale`、`stale_after_minutes`；没有设置 `LITESTREAM_ACCESS_KEY_ID` 时 `enabled` 为 `false`，面板不显示这一部分。`PUT /v1/instance/litestream` 修改超时（`{"stale_after_minutes": 20}`）。上次心跳的时间也存在 `settings` 表（`litestream_last_heartbeat_at`），重启后仍能显示，但超时仍从服务启动时算起。每次心跳（每 5 分钟）写一次这一行，Litestream 随之多上传一个很小的文件。
 
 部署时 Litestream 启动失败，部署消息末尾有 `; litestream did not start`。整台机器离线时这些都发不出来，服务本身也不可用。
 
@@ -379,4 +383,4 @@ rm ~/Library/LaunchAgents/org.midden.backup.plist
   ```
 
 - 找不到 ffmpeg 时启动日志会提示，缩略图停用；之后装上 ffmpeg，维护任务会补做缩略图。
-- Litestream：`litestream heartbeat missing` 表示 20 分钟没有收到它的心跳，看 `docker compose logs litestream` 中的 `monitor error`、`sync error`（如 token 错误时的 403、网络错误）；`litestream heartbeat listener failed` 表示服务没能监听 8081 端口。见「Litestream」。
+- Litestream：`litestream heartbeat missing` 表示超过「备份心跳超时」（默认 20 分钟）没有收到它的心跳，看 `docker compose logs litestream` 中的 `monitor error`、`sync error`（如 token 错误时的 403、网络错误）；`litestream heartbeat listener failed` 表示服务没能监听 8081 端口。见「Litestream」。

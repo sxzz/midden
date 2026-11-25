@@ -92,9 +92,20 @@ describe('设置', () => {
 })
 
 describe('管理员面板', () => {
-  const api = (dev: boolean) =>
-    mockApi((path) => {
-      if (path === '/instance') return { dev }
+  const NO_BACKUP = {
+    enabled: false,
+    last_heartbeat_at: null,
+    stale: false,
+    stale_after_minutes: null,
+  }
+  const api = (dev: boolean, litestream: object = NO_BACKUP) =>
+    mockApi((path, request) => {
+      if (path === '/instance') return { dev, litestream }
+      if (path === '/instance/litestream' && request.method === 'PUT')
+        return {
+          ...litestream,
+          ...JSON.parse(request.body!),
+        }
       if (path === '/origins')
         return [
           {
@@ -147,5 +158,78 @@ describe('管理员面板', () => {
       ),
     ).toBe(true)
     expect(cleared).toHaveBeenCalledOnce()
+  })
+
+  it('shows no backup section where Litestream is not configured', async () => {
+    api(false)
+    const el = mount(AdminView)
+    await settle()
+    expect(el.textContent).not.toContain('数据库备份')
+  })
+
+  it('says when the last heartbeat arrived', async () => {
+    api(false, {
+      enabled: true,
+      last_heartbeat_at: new Date(Date.now() - 3 * 60_000).toISOString(),
+      stale: false,
+      stale_after_minutes: 20,
+    })
+    const el = mount(AdminView)
+    await settle()
+    expect(titles(el)).toEqual(['域名', '数据库备份'])
+    expect(el.textContent).toContain('上次心跳 3 分钟前')
+    expect(el.textContent).toContain('20 分钟')
+  })
+
+  it('says how long there has been no heartbeat', async () => {
+    api(false, {
+      enabled: true,
+      last_heartbeat_at: null,
+      stale: true,
+      stale_after_minutes: 20,
+    })
+    const el = mount(AdminView)
+    await settle()
+    expect(el.textContent).toContain('超过 20 分钟没有心跳')
+  })
+
+  it('edits the heartbeat timeout', async () => {
+    const calls = api(false, {
+      enabled: true,
+      last_heartbeat_at: null,
+      stale: false,
+      stale_after_minutes: 20,
+    })
+    const el = mount(AdminView)
+    await settle()
+    const button = (label: string) =>
+      [...el.querySelectorAll('button')].find((b) =>
+        b.textContent?.includes(label),
+      )!
+    button('备份心跳超时').click()
+    await settle()
+    const input = el.querySelector<HTMLInputElement>('dialog[open] input')!
+    expect(input.value).toBe('20')
+    input.value = '0'
+    input.dispatchEvent(new Event('input'))
+    await settle()
+    el.querySelector<HTMLButtonElement>('dialog[open] [type=submit]')!.click()
+    await settle()
+    expect(
+      el.querySelector('dialog[open] [role=alert]')?.textContent,
+    ).toContain('1 到 1440')
+    expect(calls.mock.calls.some(([p]) => p === '/instance/litestream')).toBe(
+      false,
+    )
+
+    input.value = '5'
+    input.dispatchEvent(new Event('input'))
+    await settle()
+    el.querySelector<HTMLButtonElement>('dialog[open] [type=submit]')!.click()
+    await settle()
+    const put = calls.mock.calls.find(([p]) => p === '/instance/litestream')!
+    expect(JSON.parse(put[1].body!)).toEqual({ stale_after_minutes: 5 })
+    expect(el.textContent).toContain('5 分钟')
+    expect(el.querySelector('dialog[open]')).toBeNull()
   })
 })

@@ -12,6 +12,8 @@ const props = defineProps<{
   maxlength?: number
   /** For an address rather than a name. */
   url?: boolean
+  /** For a whole number. */
+  numeric?: boolean
   busy?: boolean
   error?: string
 }>()
@@ -53,7 +55,7 @@ function submit() {
           v-model="value"
           :maxlength="maxlength ?? 64"
           autocomplete="off"
-          :inputmode="url ? 'url' : undefined"
+          :inputmode="url ? 'url' : numeric ? 'numeric' : undefined"
           :autocapitalize="url ? 'off' : undefined"
           :spellcheck="url ? false : undefined"
           :placeholder="placeholder ?? '收藏夹名称'"

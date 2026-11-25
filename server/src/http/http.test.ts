@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto'
 import { afterEach, describe, expect, test } from 'vitest'
 import { captureHandlers } from '#capture/handlers.ts'
+import { watchLitestream, type LitestreamWatch } from '#litestream.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, postGraph } from '#testing/fake-platform.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
@@ -11,13 +12,26 @@ const BOT = '123:secret-token'
 const OWNER = '42'
 const WEB = 'https://midden.test/app/'
 
+const NO_LITESTREAM = {
+  enabled: false,
+  last_heartbeat_at: null,
+  stale: false,
+  stale_after_minutes: null,
+}
+
 let ctx: AccountsContext | undefined
+let watch: LitestreamWatch | undefined
 afterEach(async () => {
+  watch?.close()
+  watch = undefined
   await ctx?.queue.stop()
   ctx = undefined
 })
 
-function setup({ dev = false } = {}) {
+function setup({
+  dev = false,
+  litestream,
+}: { dev?: boolean; litestream?: boolean } = {}) {
   ctx = testContext({
     platforms: [
       fakePlatform({
@@ -30,11 +44,21 @@ function setup({ dev = false } = {}) {
     handlers: captureHandlers,
   })
   ctx.queue.start()
+  watch = litestream
+    ? watchLitestream({
+        db: ctx.db,
+        host: '127.0.0.1',
+        port: 0,
+        logger: ctx.logger,
+        notify: () => {},
+      })
+    : undefined
   const app = createApi({
     ctx,
     telegram: { token: BOT, owner: OWNER },
     webAppUrl: WEB,
     dev,
+    litestream: watch,
   })
   const token = createToken(ctx.db, 'test')
   const call = (path: string, init: RequestInit = {}) =>
@@ -46,7 +70,7 @@ function setup({ dev = false } = {}) {
         ...init.headers,
       },
     })
-  return { ctx, app, call }
+  return { ctx, app, call, watch }
 }
 
 function initData(user: number, authDate = Math.floor(Date.now() / 1000)) {
@@ -280,6 +304,41 @@ describe('api', () => {
     })
   })
 
+  test('shows Litestream and edits its heartbeat timeout only when configured', async () => {
+    const put = (call: ReturnType<typeof setup>['call'], body: unknown) =>
+      call('/instance/litestream', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      })
+    const without = setup()
+    expect((await put(without.call, { stale_after_minutes: 5 })).status).toBe(
+      404,
+    )
+    await ctx!.queue.stop()
+
+    const { call, watch } = setup({ litestream: true })
+    expect(await (await call('/instance')).json()).toMatchObject({
+      litestream: {
+        enabled: true,
+        last_heartbeat_at: null,
+        stale: false,
+        stale_after_minutes: 20,
+      },
+    })
+    watch!.beat()
+    const saved = await put(call, { stale_after_minutes: 7 })
+    expect(await saved.json()).toMatchObject({
+      enabled: true,
+      last_heartbeat_at: expect.any(String),
+      stale: false,
+      stale_after_minutes: 7,
+    })
+    expect(watch!.status().stale_after_minutes).toBe(7)
+    for (const bad of [0, 1.5, 1441, '5', null, undefined])
+      expect((await put(call, { stale_after_minutes: bad })).status).toBe(400)
+    expect(watch!.status().stale_after_minutes).toBe(7)
+  })
+
   test('deletes everything only in development mode', async () => {
     const save = async (call: ReturnType<typeof setup>['call']) => {
       await call('/captures', {
@@ -297,6 +356,7 @@ describe('api', () => {
     await save(production.call)
     expect(await (await production.call('/instance')).json()).toEqual({
       dev: false,
+      litestream: NO_LITESTREAM,
     })
     const refused = await clear(production.call)
     expect(refused.status).toBe(403)
@@ -308,7 +368,10 @@ describe('api', () => {
 
     const dev = setup({ dev: true })
     await save(dev.call)
-    expect(await (await dev.call('/instance')).json()).toEqual({ dev: true })
+    expect(await (await dev.call('/instance')).json()).toEqual({
+      dev: true,
+      litestream: NO_LITESTREAM,
+    })
     expect(await (await clear(dev.call)).json()).toMatchObject({
       collections: 1,
     })

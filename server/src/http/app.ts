@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { Hono } from 'hono'
 import { deleteCookie, getCookie } from 'hono/cookie'
 import * as v from 'valibot'
+import { HEARTBEAT_TIMEOUT, setHeartbeatTimeoutMinutes } from '#settings.ts'
 import { accountRoutes } from './account-routes.ts'
 import {
   deleteSession,
@@ -24,6 +25,7 @@ import { publicRoutes } from './public-routes.ts'
 import { shareRoutes } from './share-routes.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
+import type { LitestreamWatch } from '#litestream.ts'
 import type { Buffer } from 'node:buffer'
 
 export { SESSION_COOKIE }
@@ -43,6 +45,8 @@ export interface HttpOptions {
   now?: () => number
   /** Development mode, where deleting everything is allowed. */
   dev?: boolean
+  /** Present when Litestream replicates the database. */
+  litestream?: LitestreamWatch
 }
 
 /**
@@ -137,7 +141,40 @@ export function createApi(options: HttpOptions) {
         return c.body(null, 204)
       })
       // What the web app shows only on a development server.
-      .get('/instance', (c) => c.json({ dev: !!options.dev }))
+      .get('/instance', (c) =>
+        c.json({
+          dev: !!options.dev,
+          litestream: options.litestream?.status() ?? {
+            enabled: false,
+            last_heartbeat_at: null,
+            stale: false,
+            stale_after_minutes: null,
+          },
+        }),
+      )
+      .put(
+        '/instance/litestream',
+        json(
+          v.strictObject({
+            stale_after_minutes: v.pipe(
+              v.number(),
+              v.integer(),
+              v.minValue(HEARTBEAT_TIMEOUT.min),
+              v.maxValue(HEARTBEAT_TIMEOUT.max),
+            ),
+          }),
+        ),
+        (c) => {
+          const litestream = options.litestream
+          if (!litestream)
+            return c.json({ error: '服务器未配置 Litestream' }, 404)
+          setHeartbeatTimeoutMinutes(
+            ctx.db,
+            c.req.valid('json').stale_after_minutes,
+          )
+          return c.json(litestream.status())
+        },
+      )
       .route('/', captureRoutes(ctx, { dev: !!options.dev }))
       .route('/', accountRoutes(ctx))
       .route('/', libraryRoutes(ctx))

@@ -1,25 +1,38 @@
 <script setup vapor lang="ts">
 import { computed, onActivated, shallowRef } from 'vue'
-import { call, client, errorText, type LibrarySize } from '../api'
+import {
+  call,
+  client,
+  errorText,
+  type LibrarySize,
+  type LitestreamStatus,
+} from '../api'
 import { toast } from '../composables/useToast'
+import BackupSection from './BackupSection.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
 import OriginList from './OriginList.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 
 // 设置 → 管理员面板: what concerns the whole server rather than one person's
-// settings. The domains the app may be used from; on a development server,
-// deleting everything.
+// settings. The domains the app may be used from; where Litestream replicates
+// the database, its heartbeat; on a development server, deleting everything.
 const emit = defineEmits<{
   /** Everything saved was deleted; lists must not show it any more. */
   cleared: []
 }>()
 const dev = shallowRef(false)
+const litestream = shallowRef<LitestreamStatus>()
 async function loadInstance() {
   try {
-    dev.value = (await call(client.instance.$get())).dev
+    const instance = await call(client.instance.$get())
+    dev.value = instance.dev
+    litestream.value = instance.litestream.enabled
+      ? instance.litestream
+      : undefined
   } catch {
     dev.value = false
+    litestream.value = undefined
   }
 }
 onActivated(loadInstance)
@@ -65,6 +78,11 @@ async function clearAll() {
 
 <template>
   <OriginList />
+  <BackupSection
+    v-if="litestream"
+    :status="litestream"
+    @saved="litestream = $event"
+  />
   <ListSection v-if="dev" title="开发模式">
     <ListButton
       label="删除全部收藏和采集记录"

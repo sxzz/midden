@@ -67,11 +67,20 @@ ctx = {
 }
 
 let bot: RunningBot | undefined
+const litestream = config.litestream
+  ? watchLitestream({
+      db,
+      host: config.host,
+      logger,
+      notify: (text) => bot?.notify(text),
+    })
+  : undefined
 const api = createApi({
   ctx,
   telegram: config.telegram,
   webAppUrl: config.webAppUrl,
   dev: config.dev,
+  litestream,
   challengeKey: deriveKey(config.secretKey, 'passkey-challenge'),
   notify: (text) => bot?.notify(text),
 })
@@ -131,14 +140,6 @@ const maintenance = setInterval(() => {
     .finally(() => (maintaining = false))
 }, MAINTENANCE_INTERVAL)
 const optimizing = setInterval(optimize, OPTIMIZE_INTERVAL, db)
-const litestream = config.litestream
-  ? watchLitestream({
-      host: config.host,
-      logger,
-      notify: (text) => bot?.notify(text),
-    })
-  : undefined
-
 const server = serve(
   { fetch: app.fetch, port: config.port, hostname: config.host },
   (info) =>

@@ -7,6 +7,7 @@ import {
   type Entity,
 } from './api'
 import {
+  ago,
   collectionTime,
   groupCollections,
   listSort,
@@ -265,6 +266,15 @@ it('orders a public list only by times the owner shares', () => {
   } finally {
     shareSlug.value = ''
   }
+})
+it('says how long ago in the coarsest whole unit', () => {
+  const now = new Date(2026, 8, 29, 12, 0)
+  const before = (ms: number) => new Date(+now - ms).toISOString()
+  expect(ago(before(20_000), now)).toBe('不到 1 分钟前')
+  expect(ago(before(3 * 60_000 + 59_000), now)).toBe('3 分钟前')
+  expect(ago(before(125 * 60_000), now)).toBe('2 小时前')
+  expect(ago(before(50 * 3600_000), now)).toBe('2 天前')
+  expect(ago(undefined, now)).toBe('')
 })
 it('writes list timestamps the way the chat list does', () => {
   const now = new Date(2026, 8, 29, 12, 0)

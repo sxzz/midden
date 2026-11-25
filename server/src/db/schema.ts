@@ -860,6 +860,16 @@ export const webOrigins = sqliteTable('web_origins', {
 })
 
 /**
+ * Server settings the owner edits in the web app's admin panel, and a few
+ * values the server itself keeps across restarts. Values are text; the code
+ * that reads a key parses it (`#settings.ts`).
+ */
+export const settings = sqliteTable('settings', {
+  key: text().primaryKey(),
+  value: text().notNull(),
+})
+
+/**
  * Links from the bot's /passkey that register a passkey without signing in,
  * by the SHA-256 of their token. One per origin; gone once used.
  */

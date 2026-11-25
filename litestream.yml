@@ -32,6 +32,8 @@ snapshot:
 # per 1,000); every 15 s by default, hourly is enough without read replicas.
 l0-retention-check-interval: 1h
 
-# Sent only while syncs succeed; midden tells the owner when they stop.
+# Sent only while syncs succeed (an idle database included); midden tells the
+# owner when they stop for longer than the admin setting 备份心跳超时 (20
+# minutes by default; values below this interval only make sense in tests).
 heartbeat-url: http://midden:8081/litestream/heartbeat
 heartbeat-interval: 5m

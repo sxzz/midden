@@ -1,6 +1,11 @@
 import { once } from 'node:events'
 import { afterEach, describe, expect, test } from 'vitest'
+import { openDatabase } from '#db/client.ts'
 import { watchLitestream, type LitestreamWatch } from '#litestream.ts'
+import {
+  heartbeatTimeoutMinutes,
+  setHeartbeatTimeoutMinutes,
+} from '#settings.ts'
 import { levels, recordingLogger } from '#testing/logs.ts'
 import type { AddressInfo } from 'node:net'
 
@@ -10,11 +15,12 @@ describe('Litestream heartbeat watch', () => {
   let watch: LitestreamWatch | undefined
   afterEach(() => watch?.close())
 
-  function start() {
-    let clock = 0
+  function start(db = openDatabase(':memory:'), begin = 0) {
+    let clock = begin
     const notices: string[] = []
     const { logger, entries } = recordingLogger()
     watch = watchLitestream({
+      db,
       host: '127.0.0.1',
       port: 0,
       logger,
@@ -22,6 +28,7 @@ describe('Litestream heartbeat watch', () => {
       now: () => clock,
     })
     return {
+      db,
       watch,
       notices,
       entries,
@@ -79,5 +86,90 @@ describe('Litestream heartbeat watch', () => {
     expect(notices).toHaveLength(1)
     expect((await fetch(`${url}/litestream/heartbeat`)).status).toBe(204)
     expect(notices).toHaveLength(2)
+  })
+
+  test('logs the first heartbeat and each recovery, not every heartbeat', () => {
+    const { watch, entries, advance } = start()
+    const info = () =>
+      entries
+        .filter((entry) => entry.level === levels.info)
+        .map((entry) => entry.msg)
+    for (let i = 0; i < 5; i++) {
+      advance(5 * MINUTE)
+      watch.beat()
+    }
+    expect(info()).toEqual(['litestream heartbeat received'])
+
+    advance(20 * MINUTE)
+    watch.beat()
+    watch.beat()
+    expect(info()).toEqual([
+      'litestream heartbeat received',
+      'litestream heartbeat resumed',
+    ])
+  })
+
+  test('reports the last heartbeat and whether it is stale', () => {
+    const { watch, advance } = start()
+    expect(watch.status()).toEqual({
+      enabled: true,
+      last_heartbeat_at: null,
+      stale: false,
+      stale_after_minutes: 20,
+    })
+    advance(3 * MINUTE)
+    watch.beat()
+    advance(19 * MINUTE)
+    expect(watch.status()).toMatchObject({
+      last_heartbeat_at: new Date(3 * MINUTE).toISOString(),
+      stale: false,
+    })
+    advance(MINUTE)
+    expect(watch.status().stale).toBe(true)
+    watch.beat()
+    expect(watch.status().stale).toBe(false)
+  })
+
+  test('reads the threshold from the setting on every check', () => {
+    const { watch, db, notices, advance } = start()
+    setHeartbeatTimeoutMinutes(db, 3)
+    advance(2 * MINUTE)
+    expect(notices).toEqual([])
+    expect(watch.status().stale_after_minutes).toBe(3)
+    advance(MINUTE)
+    expect(notices).toEqual(['数据库备份：3 分钟没有收到 Litestream 的心跳'])
+
+    watch.beat()
+    setHeartbeatTimeoutMinutes(db, 60)
+    advance(59 * MINUTE)
+    expect(notices).toHaveLength(2)
+    advance(MINUTE)
+    expect(notices.at(-1)).toBe('数据库备份：60 分钟没有收到 Litestream 的心跳')
+  })
+
+  test('keeps the last heartbeat across a restart, counting silence from the start', () => {
+    const first = start()
+    first.advance(5 * MINUTE)
+    first.watch.beat()
+    first.watch.close()
+
+    const second = start(first.db, 8 * MINUTE)
+    expect(second.watch.status()).toMatchObject({
+      last_heartbeat_at: new Date(5 * MINUTE).toISOString(),
+      stale: false,
+    })
+    second.advance(19 * MINUTE)
+    expect(second.notices).toEqual([])
+    second.advance(MINUTE)
+    expect(second.notices).toHaveLength(1)
+  })
+
+  test('the threshold defaults to 20 minutes and ignores bad values', () => {
+    const { db } = start()
+    expect(heartbeatTimeoutMinutes(db)).toBe(20)
+    db.$client.exec(
+      "INSERT INTO settings VALUES ('litestream_timeout_minutes', '0')",
+    )
+    expect(heartbeatTimeoutMinutes(db)).toBe(20)
   })
 })
