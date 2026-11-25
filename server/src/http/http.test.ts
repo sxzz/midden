@@ -376,6 +376,14 @@ describe('api', () => {
     ).toMatchObject({ nodes: [], edges: [], total: 0 })
     for (const query of ['kinds=friends', 'limit=0', 'limit=10001'])
       expect((await call(`/collections/${id}/graph?${query}`)).status).toBe(400)
+    // Any account, by its key: one never stored is the empty graph.
+    expect(
+      await (
+        await call('/collections/graph?of=fake/fake.profile/1&limit=5')
+      ).json(),
+    ).toMatchObject({ nodes: [], total: 0 })
+    for (const query of ['', 'of=', 'of=fake/fake.post/1', 'of=x&limit=0'])
+      expect((await call(`/collections/graph?${query}`)).status).toBe(400)
     // Updating it may ask for the lists, which only a profile has.
     const refreshed = await call('/updates', {
       method: 'POST',

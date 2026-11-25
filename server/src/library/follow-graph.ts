@@ -329,7 +329,33 @@ export function followGraph(
   id: string,
   query: GraphQuery = {},
 ): FollowGraph {
-  const subject = subjectOf(ctx, id)
+  return graphOf(ctx, subjectOf(ctx, id), query)
+}
+
+/**
+ * The same graph centred on any account by its key, saved or not: the
+ * accounts with relation data are mostly ones never saved themselves.
+ * An account never stored is the empty graph.
+ */
+export function accountGraph(
+  ctx: Reader & Pick<CaptureContext, 'platforms'>,
+  key: string,
+  query: GraphQuery = {},
+): FollowGraph {
+  const account = parseAuthorKey(key)
+  if (!account?.kind.endsWith('.profile')) throw new AppError('invalid_filter')
+  const id = ctx.db.get<{ id: string }>(
+    sql`SELECT id FROM entities WHERE platform = ${account.platform}
+      AND kind = ${account.kind} AND external_id = ${account.external}`,
+  )?.id
+  return graphOf(ctx, id, query)
+}
+
+function graphOf(
+  ctx: Reader & Pick<CaptureContext, 'platforms'>,
+  subject: string | undefined,
+  query: GraphQuery,
+): FollowGraph {
   const kinds = new Set(query.kinds ?? graphKinds)
   const limit = query.limit ?? GRAPH_LIMIT
   const empty = {

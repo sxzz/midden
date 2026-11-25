@@ -8,7 +8,7 @@ import { compareRelations } from './compare.ts'
 import { filterCounts } from './counts.ts'
 import { parseFilterQuery } from './filter-query.ts'
 import { createFolder } from './folders.ts'
-import { followGraph } from './follow-graph.ts'
+import { accountGraph, followGraph } from './follow-graph.ts'
 import { listCollections, type CollectionFilter } from './list.ts'
 import { listPerspectives } from './perspectives.ts'
 import type { CaptureContext } from '#capture/context.ts'
@@ -625,5 +625,21 @@ describe('a viewer', () => {
       ['eve', ''],
     ])
     invalid(() => followGraph(c, ids.pat!, { viewer: 'fake/fake.post/p1' }))
+  })
+})
+
+describe('an account graph', () => {
+  test('centres on an account by its key, as its saved profile would', async () => {
+    const { c, ids } = await several()
+    const byKey = accountGraph(c, key('pat'), { viewer: key('alice') })
+    expect(byKey).toEqual(followGraph(c, ids.pat!, { viewer: key('alice') }))
+    expect(byKey.nodes[0]).toMatchObject({ key: key('pat') })
+    // An account never stored has no graph; a post is no account.
+    expect(accountGraph(c, 'fake/fake.profile/999')).toMatchObject({
+      nodes: [],
+      total: 0,
+    })
+    invalid(() => accountGraph(c, 'fake/fake.post/p1'))
+    invalid(() => accountGraph(c, 'nonsense'))
   })
 })

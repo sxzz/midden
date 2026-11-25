@@ -6,6 +6,7 @@ import { filterCounts } from '#library/counts.ts'
 import { getEntity } from '#library/entities.ts'
 import { collectionFilter, FilterQuery } from '#library/filter-query.ts'
 import {
+  accountGraph,
   followGraph,
   GRAPH_MAX,
   graphKinds,
@@ -110,6 +111,11 @@ export const GraphQuery = v.object({
 
 /** The owner's graph may be seen from an account (`viewer`). */
 const OwnGraphQuery = v.object({ ...GraphQuery.entries, viewer: text })
+/** The graph of any account with relation data, by its key (`of`). */
+const AccountGraphQuery = v.object({
+  ...OwnGraphQuery.entries,
+  of: v.pipe(v.string(), v.nonEmpty()),
+})
 
 const count = (max: number, digits: number) =>
   v.pipe(
@@ -203,6 +209,15 @@ export function libraryRoutes(ctx: AccountsContext) {
             limit: input.limit,
             viewer: input.viewer || undefined,
           }),
+        )
+      })
+
+      // 关系 opens on an account, saved or not; owner only, like the
+      // perspectives it is picked from.
+      .get('/collections/graph', query(AccountGraphQuery), (c) => {
+        const { of, viewer, ...input } = c.req.valid('query')
+        return c.json(
+          accountGraph(ctx, of, { ...input, viewer: viewer || undefined }),
         )
       })
 
