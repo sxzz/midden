@@ -30,6 +30,7 @@ import {
   recordStatus,
   recordTime,
   recordTitle,
+  retryParts,
   stateStatus,
 } from '../captures'
 import { toast } from '../composables/useToast'
@@ -318,18 +319,21 @@ async function page(op: 'more' | 'more1000' | 'page_retry') {
     busy.value = false
   }
 }
-/** Fetch failed posts again inside this record, all of them or just one. */
-async function retryFailed(member?: CaptureMember) {
+/**
+ * Fetch again inside this record what failed or is incomplete: all of it,
+ * or the part `id` names (a member, a page, a list, a profile's posts).
+ */
+async function retryFailed(id?: string) {
   if (busy.value) return
   busy.value = true
   try {
     const { count } = await call(
       client.captures[':id']['retry-failed'].$post({
         param: { id: props.id },
-        json: member ? { job_id: member.job_id } : {},
+        json: id ? { id } : {},
       }),
     )
-    toast(count ? `正在重试 ${count} 条失败的帖子。` : '没有可重试的帖子。')
+    toast(count ? `正在重试 ${count} 项。` : '没有可重试的项目。')
     cache.clear()
     await Promise.all([load(), loadMembers()])
   } catch (e) {
@@ -531,7 +535,7 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
       />
       <ListButton
         v-if="record.retryable"
-        :label="`重试失败的帖子（${record.retryable}）`"
+        label="全部重试"
         :disabled="busy"
         @select="retryFailed()"
       />
@@ -559,6 +563,23 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
           >
           <span class="chevron" aria-hidden="true">›</span>
         </AppLink>
+        <div v-for="part in retryParts(p)" :key="part.id" class="member part">
+          <span class="member-main"
+            ><span class="line-text"
+              >{{ part.label
+              }}<small class="hint">{{ part.detail }}</small></span
+            ></span
+          >
+          <button
+            type="button"
+            class="member-retry"
+            :aria-label="`重试 ${profileHandle(p.url, p.handle)} ${part.label}`"
+            :disabled="busy"
+            @click="retryFailed(part.id)"
+          >
+            重试
+          </button>
+        </div>
         <ListButton
           v-if="canContinue(p)"
           label="继续抓取"
@@ -593,6 +614,12 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
         v-if="!showAllMedia && failedMedia.length < record.media_items.length"
         :label="`显示全部 ${record.media_items.length} 项`"
         @select="showAllMedia = true"
+      />
+      <ListButton
+        v-if="record.media_retryable && !record.profiles?.length"
+        label="重试下载"
+        :disabled="busy"
+        @select="retryFailed(record.job_id)"
       />
     </ListSection>
     <template v-if="record.members && filters.length">
@@ -633,12 +660,12 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
             >
           </component>
           <button
-            v-if="m.state === 'failed' && !m.gone && !m.list && record.done"
+            v-if="m.retryable"
             type="button"
             class="member-retry"
             :aria-label="`重试 ${memberTitle(m)}`"
             :disabled="busy"
-            @click="retryFailed(m)"
+            @click="retryFailed(m.job_id)"
           >
             重试
           </button>

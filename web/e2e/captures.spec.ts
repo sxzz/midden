@@ -200,6 +200,7 @@ test('shows collection progress, member failures, stop and retry', async ({
         url: 'https://x.com/fixture/status/2',
         state: 'failed',
         error: '帖子不存在或已删除',
+        retryable: true,
         reasons: [],
         created_at: '2026-10-14T08:00:01Z',
       }
@@ -214,6 +215,7 @@ test('shows collection progress, member failures, stop and retry', async ({
       const gone = {
         ...failed,
         job_id: 'member-gone',
+        retryable: undefined,
         url: 'https://x.com/fixture/status/4',
         gone: true,
       }
@@ -236,7 +238,7 @@ test('shows collection progress, member failures, stop and retry', async ({
     }
     if (path === `/v1/captures/${profile}/retry-failed`) {
       const body = request.postDataJSON()
-      posted.push(`retry-failed:${body.job_id ?? 'all'}`)
+      posted.push(`retry-failed:${body.id ?? 'all'}`)
       const count = current.retryable ?? 0
       current = { ...current, retryable: 0 }
       return r.fulfill({ status: 202, json: { count } })
@@ -288,11 +290,12 @@ test('shows collection progress, member failures, stop and retry', async ({
   const running = page.getByRole('tab', { name: '进行中 1' })
   await expect(running).toBeVisible()
 
-  // A running collection can be stopped, and only a finished one retried.
+  // A failed post can be retried while the rest still runs; the record as
+  // a whole only once it finished.
   const retryMember = page.getByRole('button', {
     name: '重试 x.com/fixture/status/2',
   })
-  await expect(retryMember).toHaveCount(0)
+  await expect(retryMember).toBeVisible()
   await expect(
     page.getByRole('button', { name: '重新采集', exact: true }),
   ).toHaveCount(0)
@@ -301,18 +304,18 @@ test('shows collection progress, member failures, stop and retry', async ({
   await expect(page.getByRole('progressbar')).toHaveCount(0)
   await expect(running).toHaveCount(0)
 
-  // Failed posts are fetched again inside this record, all or one at a time;
+  // What failed is fetched again inside this record, all or one at a time;
   // one the source reported gone is not offered.
   await expect(
     page.getByRole('button', { name: '重试 x.com/fixture/status/4' }),
   ).toHaveCount(0)
-  await page.getByRole('button', { name: '重试失败的帖子（1）' }).click()
-  await expect(page.getByText('正在重试 1 条失败的帖子。')).toBeVisible()
+  await page.getByRole('button', { name: '全部重试', exact: true }).click()
+  await expect(page.getByText('正在重试 1 项。')).toBeVisible()
   await expect(
-    page.getByRole('button', { name: /重试失败的帖子/ }),
+    page.getByRole('button', { name: '全部重试', exact: true }),
   ).toHaveCount(0)
   await retryMember.click()
-  await expect(page.getByText('没有可重试的帖子。')).toBeVisible()
+  await expect(page.getByText('没有可重试的项目。')).toBeVisible()
 
   await page.getByRole('button', { name: '重新采集', exact: true }).click()
   // Retrying the whole record opens the record it created.
@@ -618,4 +621,126 @@ test("an update's profile stopped by the post cap reads on in the same record", 
     0,
   )
   expect(sent).toEqual([{ collection_id: profile }])
+})
+
+test("an update's failed parts are retried one at a time or all at once", async ({
+  page,
+}) => {
+  // What is still failed: the profile, a page of its posts, its following
+  // list, a post of the update.
+  const failed = new Set(['profile-job', 'page-2', 'following', 'post-job'])
+  const update = () =>
+    detail({
+      id: retried,
+      job_id: '',
+      collection_id: '',
+      saved: false,
+      url: '',
+      kind: '',
+      state: failed.size ? 'partial' : 'complete',
+      done: true,
+      retryable: failed.size,
+      members: {
+        total: 4,
+        complete: 3,
+        partial: 0,
+        failed: failed.has('post-job') ? 1 : 0,
+        pending: failed.has('post-job') ? 0 : 1,
+        done: true,
+        added: 0,
+        updated: 3,
+      },
+      update: {
+        target: 'many',
+        posts: 1,
+        profiles: 1,
+        older: false,
+        queued: 0,
+        skipped: 0,
+      },
+      profiles: [
+        {
+          collection_id: profile,
+          url: 'https://x.com/cat',
+          handle: 'cat',
+          state: failed.has('profile-job') ? 'failed' : 'queued',
+          job_id: 'profile-job',
+          retryable: failed.has('profile-job'),
+          posts: {
+            total: 4,
+            finished: 2,
+            pending: 0,
+            done: true,
+            capped: false,
+            retryable: failed.has('page-2') ? 1 : 0,
+            retry_id: `posts:${profile}`,
+            pages: failed.has('page-2')
+              ? [{ id: 'page-2', number: 2, error: '时间线读取失败' }]
+              : [],
+          },
+          relations: [
+            {
+              id: 'following',
+              list: 'following',
+              state: failed.has('following') ? 'failed' : 'running',
+              fetched: 2,
+              retryable: failed.has('following'),
+            },
+          ],
+        },
+      ],
+    })
+  const sent: unknown[] = []
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const request = r.request()
+    const url = new URL(request.url())
+    const path = url.pathname
+    if (path === '/v1/session') return r.fulfill({ json: {} })
+    if (path === `/v1/captures/${retried}/retry-failed`) {
+      const body = request.postDataJSON()
+      sent.push(body)
+      const ids = body.id ? [body.id] : [...failed]
+      for (const id of ids) failed.delete(id)
+      return r.fulfill({ json: { count: ids.length } })
+    }
+    if (path === `/v1/captures/${retried}/members`)
+      return r.fulfill({
+        json: {
+          items:
+            url.searchParams.get('state') === 'problem' &&
+            failed.has('post-job')
+              ? [
+                  {
+                    job_id: 'post-job',
+                    collection_id: collection,
+                    saved: true,
+                    url: 'https://x.com/fixture/status/9',
+                    state: 'failed',
+                    error: '帖子暂不可见',
+                    reasons: [],
+                    retryable: true,
+                    created_at: '2026-10-14T08:00:01Z',
+                  },
+                ]
+              : [],
+        },
+      })
+    if (path === `/v1/captures/${retried}`) return r.fulfill({ json: update() })
+    return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
+  })
+  await page.goto(`/app/#/captures/${retried}`)
+  const retry = (name: string) =>
+    page.getByRole('button', { name, exact: true })
+  await expect(retry('重试 @cat 资料')).toBeVisible()
+  await expect(page.getByText('时间线读取失败')).toBeVisible()
+  await retry('重试 @cat 帖子第 2 页').click()
+  await expect(retry('重试 @cat 帖子第 2 页')).toHaveCount(0)
+  await retry('重试 @cat 关注名单').click()
+  await expect(retry('重试 @cat 关注名单')).toHaveCount(0)
+  // The rest at once: the profile and the failed post.
+  await retry('全部重试').click()
+  await expect(retry('全部重试')).toHaveCount(0)
+  await expect(retry('重试 @cat 资料')).toHaveCount(0)
+  expect(sent).toEqual([{ id: 'page-2' }, { id: 'following' }, {}])
 })

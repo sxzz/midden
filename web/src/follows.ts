@@ -8,6 +8,9 @@ import type {
 
 type ChangeType = FollowChange['type']
 
+/** How a list fetch went, as the texts read it; the id only names it. */
+export type ListProgress = Omit<RelationProgress, 'id' | 'retryable'>
+
 /** In the order a time's changes are listed: the account's own, then others'. */
 const order: ChangeType[] = [
   'follow',
@@ -113,7 +116,7 @@ const lists: Record<RelationProgress['list'], string> = {
 }
 
 /** How one list fetch went, in a few words. */
-function listText(item: RelationProgress): string {
+function listText(item: ListProgress): string {
   const total = item.expected === undefined ? '' : `/${item.expected}`
   switch (item.state) {
     case 'waiting':
@@ -132,11 +135,11 @@ function listText(item: RelationProgress): string {
 }
 
 /** The lists a capture fetched, e.g. 关注 120/300 · 粉丝 超过 5000 人，未抓取. */
-export function relationsText(items: readonly RelationProgress[]): string {
+export function relationsText(items: readonly ListProgress[]): string {
   return items
     .map((item) => `${lists[item.list]} ${listText(item)}`)
     .join(' · ')
 }
 
-export const relationsDone = (items: readonly RelationProgress[] = []) =>
+export const relationsDone = (items: readonly ListProgress[] = []) =>
   items.every((item) => item.state !== 'waiting' && item.state !== 'running')

@@ -455,3 +455,159 @@ it('a post shows only its references, and nothing with the defaults', async () =
   await vi.waitFor(() => expect(two.el.textContent).toContain('提交时间'))
   expect(two.el.textContent).not.toContain('选项')
 })
+
+/** A profile record with something failed in each part. */
+const failing = (retried: boolean) => ({
+  ...detail({ complete: 1, partial: 1, failed: 2, added: 2, updated: 0 }),
+  state: 'partial',
+  retryable: retried ? 0 : 5,
+  profiles: [
+    {
+      collection_id: 'p1',
+      url: 'https://x.com/i/user/1',
+      handle: 'cat',
+      state: retried ? 'queued' : 'failed',
+      job_id: 'profile-job',
+      ...(retried ? {} : { retryable: true }),
+      posts: {
+        total: 4,
+        finished: 4,
+        pending: 0,
+        done: true,
+        capped: false,
+        retryable: retried ? 0 : 3,
+        retry_id: 'posts:record',
+        pages: retried
+          ? []
+          : [{ id: 'page-2', number: 2, error: '时间线读取失败' }],
+      },
+      relations: [
+        {
+          id: 'following',
+          list: 'following',
+          state: retried ? 'running' : 'failed',
+          fetched: 2,
+          ...(retried ? {} : { error: '关注列表读取失败', retryable: true }),
+        },
+        {
+          id: 'followers',
+          list: 'followers',
+          state: 'skipped',
+          fetched: 0,
+          error: '超过 5000 人，未抓取',
+        },
+      ],
+    },
+  ],
+})
+
+it('offers a retry next to each failed or incomplete part, and all at once', async () => {
+  let retried = false
+  const sent: unknown[] = []
+  const problems = () => [
+    { ...member('failed', 'failed'), ...(retried ? {} : { retryable: true }) },
+    {
+      ...member('partial', retried ? 'downloading' : 'partial'),
+      ...(retried ? {} : { retryable: true }),
+    },
+    // The source reported it gone: nothing to fetch again.
+    { ...member('gone', 'failed'), gone: true },
+  ]
+  mockApi((path, request) => {
+    const url = new URL(path, 'http://localhost')
+    if (url.pathname === '/captures/record') return failing(retried)
+    if (url.pathname === '/captures/record/members')
+      return {
+        items: url.searchParams.get('state') === 'problem' ? problems() : [],
+      }
+    if (url.pathname === '/captures/record/retry-failed') {
+      sent.push(JSON.parse(request.body!))
+      retried = true
+      return { count: 1 }
+    }
+    throw new Error(`unexpected ${path}`)
+  })
+  const el = document.createElement('div')
+  document.body.append(el)
+  const app = createVaporApp(CaptureRecordDetail, { id: 'record' })
+  app.mount(el)
+  unmount = () => app.unmount()
+  const buttons = () =>
+    [...el.querySelectorAll('button')].map(
+      (b) => b.getAttribute('aria-label') ?? b.textContent!.trim(),
+    )
+  await vi.waitFor(() => expect(el.textContent).toContain('帖子第 2 页'))
+  expect(buttons()).toEqual(
+    expect.arrayContaining([
+      '全部重试',
+      '重试 @cat 资料',
+      '重试 @cat 帖子第 2 页',
+      '重试 @cat 帖子',
+      '重试 @cat 关注名单',
+    ]),
+  )
+  // Skipped over 5000 is not a failure.
+  expect(buttons()).not.toContain('重试 @cat 粉丝名单')
+  ;[...el.querySelectorAll<HTMLElement>('[role=tab]')]
+    .find((tab) => tab.textContent!.startsWith('异常记录'))!
+    .click()
+  await vi.waitFor(() => expect(el.textContent).toContain('status/gone'))
+  expect(buttons()).toContain('重试 x.com/fixture/status/failed')
+  expect(buttons()).toContain('重试 x.com/fixture/status/partial')
+  expect(buttons()).not.toContain('重试 x.com/fixture/status/gone')
+
+  el.querySelector<HTMLElement>('[aria-label="重试 @cat 帖子第 2 页"]')!.click()
+  await vi.waitFor(() => expect(sent).toEqual([{ id: 'page-2' }]))
+  // Retries under way show as running, with nothing left to retry.
+  await vi.waitFor(() => expect(buttons()).not.toContain('全部重试'))
+  expect(buttons().filter((b) => b.startsWith('重试'))).toEqual([])
+  expect(el.textContent).toContain('资料 进行中')
+  await vi.waitFor(() => expect(el.textContent).toContain('正在保存媒体'))
+})
+
+it('retries everything from the record, and a post its missing media', async () => {
+  const sent: unknown[] = []
+  mockApi((path, request) => {
+    if (path === '/captures/record')
+      return {
+        ...detail({}),
+        kind: 'post',
+        state: 'partial',
+        members: undefined,
+        retryable: 1,
+        media_retryable: true,
+        media: { total: 2, ready: 1, failed: 1 },
+        media_items: [
+          { position: 0, kind: 'image', state: 'ready' },
+          {
+            position: 1,
+            kind: 'video',
+            state: 'failed',
+            error: '媒体下载被中断',
+          },
+        ],
+      }
+    if (path === '/captures/record/retry-failed') {
+      sent.push(JSON.parse(request.body!))
+      return { count: 1 }
+    }
+    throw new Error(`unexpected ${path}`)
+  })
+  const el = document.createElement('div')
+  document.body.append(el)
+  const app = createVaporApp(CaptureRecordDetail, { id: 'record' })
+  app.mount(el)
+  unmount = () => app.unmount()
+  const press = async (label: string) => {
+    const button = [...el.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent?.trim() === label,
+    )!
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+    button.click()
+  }
+  await vi.waitFor(() => expect(el.textContent).toContain('未保存的媒体'))
+  await press('重试下载')
+  await vi.waitFor(() => expect(sent).toEqual([{ id: 'job' }]))
+  await press('全部重试')
+  await vi.waitFor(() => expect(sent).toEqual([{ id: 'job' }, {}]))
+})

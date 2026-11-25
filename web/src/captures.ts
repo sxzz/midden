@@ -1,11 +1,6 @@
-import { relationsDone } from './follows'
+import { relationsDone, type ListProgress } from './follows'
 import { groupLabel } from './presentation'
-import type {
-  CaptureMedia,
-  CaptureRecord,
-  ProfilePart,
-  RelationProgress,
-} from './api'
+import type { CaptureMedia, CaptureRecord, ProfilePart } from './api'
 
 const LINK_SEPARATOR = /[\s<>"'，。；、（）]+/
 const TRAILING_PUNCTUATION = /[),.;!?]+$/
@@ -253,21 +248,31 @@ const partMarks: Record<string, string> = {
   waiting: '等待中',
 }
 
-function listPart(r: RelationProgress) {
+function listPart(r: ListProgress) {
   const name = r.list === 'following' ? '关注' : '粉丝'
   if (r.state === 'running' || r.state === 'waiting') return `${name} 进行中`
   if (r.state === 'failed') return `${name} 失败`
   return `${name} ${partMarks[r.state] ?? r.state}`
 }
 
+/** What the part texts read of a profile's part. */
+type PartSummary = Pick<ProfilePart, 'state'> &
+  Partial<Omit<ProfilePart, 'state' | 'posts' | 'relations'>> & {
+    posts?: Pick<
+      NonNullable<ProfilePart['posts']>,
+      'total' | 'finished' | 'pending' | 'done' | 'capped'
+    >
+    relations?: readonly ListProgress[]
+  }
+
 /** The post cap stopped the timeline before saved posts; it can read on. */
-export const canContinue = (p: ProfilePart) => !!p.posts?.done && p.posts.capped
+export const canContinue = (p: PartSummary) => !!p.posts?.done && p.posts.capped
 
 /**
  * How each part of a profile's update went, e.g.
  * 资料 ✓ · 帖子 34/100 · 关注 ✓ · 粉丝 跳过.
  */
-export function profilePartText(p: ProfilePart) {
+export function profilePartText(p: PartSummary) {
   const parts = [`资料 ${partMarks[p.state] ?? '进行中'}`]
   if (p.posts && canContinue(p))
     parts.push(`帖子 ${p.posts.finished}（未到已有数据）`)
@@ -279,4 +284,48 @@ export function profilePartText(p: ProfilePart) {
     )
   for (const list of p.relations ?? []) parts.push(listPart(list))
   return parts.join(' · ')
+}
+
+/** A part of a profile a retry fetches again, and the id that names it. */
+export interface RetryPart {
+  id: string
+  label: string
+  detail: string
+}
+
+/**
+ * The parts of a profile that failed or are incomplete and can be fetched
+ * again, each on its own: its profile, each failed page of its posts, the
+ * rest of its posts together, each list.
+ */
+export function retryParts(p: ProfilePart): RetryPart[] {
+  const parts: RetryPart[] = []
+  if (p.retryable && p.job_id)
+    parts.push({
+      id: p.job_id,
+      label: '资料',
+      detail: p.state === 'failed' ? '失败' : '不完整',
+    })
+  const pages = p.posts?.pages ?? []
+  for (const page of pages)
+    parts.push({
+      id: page.id,
+      label: `帖子第 ${page.number} 页`,
+      detail: page.error || '失败',
+    })
+  const rest = (p.posts?.retryable ?? 0) - pages.length
+  if (p.posts && rest > 0)
+    parts.push({
+      id: p.posts.retry_id,
+      label: '帖子',
+      detail: `失败或不完整 ${rest} 项`,
+    })
+  for (const list of p.relations ?? [])
+    if (list.retryable)
+      parts.push({
+        id: list.id,
+        label: list.list === 'following' ? '关注名单' : '粉丝名单',
+        detail: list.error || (list.state === 'partial' ? '不完整' : '失败'),
+      })
+  return parts
 }

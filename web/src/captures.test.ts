@@ -30,6 +30,7 @@ const record = (patch: Partial<CaptureRecord>): CaptureRecord => ({
   media: { total: 0, ready: 0, failed: 0 },
   created_at: '2026-10-14T08:00:00Z',
   done: false,
+  retryable: 0,
   ...patch,
 })
 
@@ -209,8 +210,14 @@ test('a profile record runs on while its lists are fetched', () => {
     state: 'complete',
     members,
     relations: [
-      { list: 'following', state: 'running', expected: 30, fetched: 10 },
-      { list: 'followers', state: 'waiting', fetched: 0 },
+      {
+        id: 'f1',
+        list: 'following',
+        state: 'running',
+        expected: 30,
+        fetched: 10,
+      },
+      { id: 'f2', list: 'followers', state: 'waiting', fetched: 0 },
     ],
   })
   expect(recordStatus(fetching)).toEqual({
