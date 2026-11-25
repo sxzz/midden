@@ -1,5 +1,6 @@
 /* Telegram grouped-list tokens. host.ts overrides these from themeParams;
-   without Telegram we fall back to the system colour scheme. */
+   without Telegram we fall back to the system colour scheme, whose dark
+   palette is neutral grey (no blue tint). */
 :root {
   --page: #efeff4;
   --card: #ffffff;
@@ -25,26 +26,26 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --page: #17212b;
-    --card: #222d3b;
-    --fill: #2b3848;
+    --page: #121212;
+    --card: #1e1e1e;
+    --fill: #2a2a2a;
     --text: #f5f5f5;
-    --subtle: #8b98a5;
+    --subtle: #9b9b9b;
     --link: #6ab7ff;
     --destructive: #ff6a6a;
-    --separator: rgba(255, 255, 255, 0.08);
+    --separator: rgba(255, 255, 255, 0.1);
     color-scheme: dark;
   }
 }
 :root[data-theme='dark'] {
-  --page: #17212b;
-  --card: #222d3b;
-  --fill: #2b3848;
+  --page: #121212;
+  --card: #1e1e1e;
+  --fill: #2a2a2a;
   --text: #f5f5f5;
-  --subtle: #8b98a5;
+  --subtle: #9b9b9b;
   --link: #6ab7ff;
   --destructive: #ff6a6a;
-  --separator: rgba(255, 255, 255, 0.08);
+  --separator: rgba(255, 255, 255, 0.1);
   color-scheme: dark;
 }
 @media (max-width: 360px) {
