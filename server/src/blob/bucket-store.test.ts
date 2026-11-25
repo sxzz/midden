@@ -141,7 +141,7 @@ describe('bucket store', () => {
     expect(s3.purged).toHaveLength(1)
   })
 
-  test('without a purge token, the purge is logged and skipped', async () => {
+  test('without the zone, the purge is logged and skipped', async () => {
     const logs = recordingLogger()
     const unpurged = s3.store(
       { dir: path.join(dir, 'media'), signer, logger: logs.logger },

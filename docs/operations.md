@@ -76,21 +76,25 @@ GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<域名>/hooks/
 - 带文件名的下载经本服务从本地或 R2 流式返回，带 `Content-Disposition`。服务端的读取（Telegram 发送、缩略图、下载）都先读本地，没有时通过 S3 API 读 R2，不经公开域名。
 - 不另设本地原文件缓存：缩略图在删除本地原文件之前从本地文件生成；Telegram 按 `file_id` 复用已上传的文件；其余读取（第一次发送到 Telegram、缩略图丢失、带文件名的下载）在本地原文件删除后都读 R2，视频只读部分字节。
 - 设为 `r2` 并运行后，不能再改回 `local`：本地实现不读 R2，已删除本地原文件的媒体会缺失。要回退，先把存储桶下载回 `media/`（如 `rclone copy r2:midden ~/midden/data/media`）再改。
-- 删除：不再被引用的媒体（删除收藏、删除媒体）24 小时后删除本地文件（还在时）；R2 中有对象时先清除其公开地址的边缘缓存（`purge_cache`），再删除对象。清除失败时对象保留，稍后重试；没有配置清除用的 token 时记 `cache purge skipped: no purge token configured` 并跳过清除。
+- 删除：不再被引用的媒体（删除收藏、删除媒体）24 小时后删除本地文件（还在时）；R2 中有对象时先清除其公开地址的边缘缓存（`purge_cache`），再删除对象。清除失败时对象保留，稍后重试；没有设置 `CF_ZONE_ID` 时记 `cache purge skipped: no CF_ZONE_ID configured` 并跳过清除。
 - 存储类别为存储桶默认的 Standard。
 
 ### 配置
 
-| 变量                                       | 说明                                                                                   |
-| ------------------------------------------ | -------------------------------------------------------------------------------------- |
-| `MEDIA_STORE`                              | `local`（默认）或 `r2`                                                                 |
-| `R2_ACCOUNT_ID`                            | Cloudflare 账户 ID（32 位十六进制）；S3 端点为 `https://<ID>.r2.cloudflarestorage.com` |
-| `R2_BUCKET`                                | 存储桶名，如 `midden`                                                                  |
-| `R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY` | R2 API token 的访问密钥                                                                |
-| `MEDIA_PUBLIC_URL`                         | 存储桶的公开域名，如 `https://midden-media.sxzz.moe`                                   |
-| `CF_ZONE_ID`、`CF_PURGE_TOKEN`             | 公开域名所在 zone 的 ID 和清除缓存的 token，需同时设置；不设置则删除时不清除边缘缓存   |
+| 变量               | 说明                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------- |
+| `MEDIA_STORE`      | `local`（默认）或 `r2`                                                                       |
+| `R2_ACCOUNT_ID`    | Cloudflare 账户 ID（32 位十六进制）；S3 端点为 `https://<ID>.r2.cloudflarestorage.com`       |
+| `R2_BUCKET`        | 存储桶名，如 `midden`                                                                        |
+| `MEDIA_PUBLIC_URL` | 存储桶的公开域名，如 `https://midden-media.sxzz.moe`                                         |
+| `CF_API_TOKEN`     | Cloudflare 账户 API token（见下）：R2 的 S3 密钥由它派生，清除缓存与存储用量的分析数据也用它 |
+| `CF_ZONE_ID`       | 公开域名所在 zone 的 ID；不设置则删除时不清除边缘缓存                                        |
 
 `MEDIA_STORE=r2` 时前五项必填，缺少时启动失败并列出缺少的变量；错误信息不含密钥。启动日志 `media store` 写明当前的 `store`。
+
+S3 密钥由 `CF_API_TOKEN` 派生（[Cloudflare 文档](https://developers.cloudflare.com/r2/api/tokens/)）：Access Key ID 是这个 token 的 id，Secret Access Key 是 token 值的 SHA-256（十六进制）。服务启动时、开始监听之前请求 `GET https://api.cloudflare.com/client/v4/accounts/<R2_ACCOUNT_ID>/tokens/verify` 取得 id（网络错误、5xx、429 时共试 3 次），进程运行期间一直使用。成功记 `cloudflare token verified`；失败记 `cloudflare token verification failed`（error，`reason` 是状态码与 Cloudflare 的错误信息），随后以 `Invalid configuration: CF_API_TOKEN could not be verified: …` 退出，与缺少变量一样：`/healthz` 不会响应，自动部署因此回滚。日志与错误信息都不含 token 和派生的密钥。`media-migrate`、`media-prune-local` 同样先验证。
+
+`CF_API_TOKEN` 与 `R2_ACCOUNT_ID` 都设置时（不论 `MEDIA_STORE`），「存储用量」读取 R2 的分析数据，见「存储用量」。
 
 ### Cloudflare
 
@@ -99,9 +103,14 @@ GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<域名>/hooks/
 还需要：
 
 1. Smart Tiered Cache：`sxzz.moe` zone →「Caching → Tiered Cache」，选 Smart Tiered Caching。边缘未命中时先问上层节点，减少回源 R2 的读取次数。
-2. R2 API token：「R2 → Manage API tokens → Create API token」，权限 **Object Read & Write**，范围只选存储桶 `midden`（不需要 Admin 权限）。得到的 Access Key ID 与 Secret Access Key 填入 `R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`；rclone 也用这一对。
-3. 清除缓存的 token：「My Profile → API Tokens → Create Custom Token」，权限 **Zone → Cache Purge → Purge**，Zone Resources 为 Include → Specific zone → `sxzz.moe`。填入 `CF_PURGE_TOKEN`；zone 的 Overview 页右侧的 Zone ID 填入 `CF_ZONE_ID`。
-4. 缩略图的边缘缓存（可选）：在应用所在域名加一条 Cache Rule，匹配路径以 `/media/` 开头，Eligible for cache，Edge TTL 选「Use cache-control header if present」，这样 `private` 的视频与下载不进缓存；缓存键保留查询串（签名在其中）。
+2. 一个账户 API token（Account API Tokens 中自定义创建），权限：
+   - **Workers R2 Storage Bucket Item Write**，存储桶 `midden` 与 `midden-backup`；
+   - Zone → **Cache Purge**，zone `sxzz.moe`；
+   - **Account Analytics Read**。
+
+   token 值填入 `CF_API_TOKEN`；zone 的 Overview 页右侧的 Zone ID 填入 `CF_ZONE_ID`。rclone 用由它派生的 S3 密钥，见「迁移现有媒体」。
+
+3. 缩略图的边缘缓存（可选）：在应用所在域名加一条 Cache Rule，匹配路径以 `/media/` 开头，Eligible for cache，Edge TTL 选「Use cache-control header if present」，这样 `private` 的视频与下载不进缓存；缓存键保留查询串（签名在其中）。
 
 ### 迁移现有媒体
 
@@ -119,15 +128,28 @@ GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<域名>/hooks/
 
 `media-prune-local` 删除已记为在 R2 中、且再次确认过的本地原文件：对象存在，大小、`Content-Type`、`Cache-Control` 正确，并且上述校验值之一与本地文件相符（或加 `--verify-download` 后下载比较）。没有校验值的对象保留本地文件并列出；对象不对时保留本地文件、清除 `remote_at`（网页改回本地链接，下次 `media-migrate` 重新上传）。缩略图（包括同时是缩略图的原文件）一律保留，缩略图任务还没结束的原文件也暂时保留。上传任务和 `media-migrate` 已经自动删除本地原文件，这个命令只处理剩下的：在自动删除之前就已记下的、当时因缩略图保留而缩略图任务之后没有删掉的、删除失败或中断留下的。
 
-预先用 rclone 复制（可选，代码上线前即可进行）：
+预先用 rclone 复制（可选，代码上线前即可进行）。rclone 不会自己派生密钥，先在 macOS 的终端算出这一对（`jq` 用 `brew install jq` 安装；Linux 上把 `shasum -a 256` 换成 `sha256sum`）：
+
+```sh
+read -rs TOKEN    # 粘贴 CF_API_TOKEN 后回车，不显示、不进 shell 历史
+ACCOUNT=9183b1c394e4cd2f0a7d3c978bc53a29
+# access_key_id：token 的 id
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/tokens/verify" | jq -r .result.id
+# secret_access_key：token 值的 SHA-256
+printf %s "$TOKEN" | shasum -a 256 | cut -d' ' -f1
+unset TOKEN
+```
+
+`printf %s` 不带换行；用 `echo` 会多一个换行，算出的值就不对。`CF_API_TOKEN` 换了（轮换或重新创建）之后这一对随之改变，要重新计算。
 
 ```ini
 # ~/.config/rclone/rclone.conf
 [r2]
 type = s3
 provider = Cloudflare
-access_key_id = <R2_ACCESS_KEY_ID>
-secret_access_key = <R2_SECRET_ACCESS_KEY>
+access_key_id = <token 的 id>
+secret_access_key = <token 值的 SHA-256>
 endpoint = https://9183b1c394e4cd2f0a7d3c978bc53a29.r2.cloudflarestorage.com
 region = auto
 no_check_bucket = true
@@ -147,7 +169,7 @@ rclone copy ~/midden/data/media r2:midden \
 
 ### 步骤
 
-1. 在部署目录的 `.env` 中设置上面的变量（`MEDIA_STORE=r2` 及 R2、清除缓存的变量）。
+1. 在部署目录的 `.env` 中设置上面的变量（`MEDIA_STORE=r2`、R2 的变量、`CF_API_TOKEN` 与 `CF_ZONE_ID`）。
 2. 部署：`docker compose up -d --force-recreate`（或推送后自动部署），日志中 `media store` 的 `store` 应为 `r2`。此后新下载的媒体会自动上传，确认后删除本地原文件；从这一步起不能再改回 `local`（见上）。
 3. 迁移：
 
@@ -176,6 +198,41 @@ rclone copy ~/midden/data/media r2:midden \
    ```
 
 7. 原来的每日备份脚本已删除，它留下的媒体镜像确认 R2 无误后手动删除，见「旧的每日备份」。
+
+### 改用 `CF_API_TOKEN`（一次性的切换）
+
+从这个版本起服务只读 `CF_API_TOKEN`，不再读 `R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`CF_PURGE_TOKEN`，也不兼容它们；`MEDIA_STORE=r2` 而没有 `CF_API_TOKEN`，或它验证失败时，新版本不启动。所以顺序是：
+
+1. **推送之前**，在部署目录（`~/midden`）的 `.env` 中加上 `CF_API_TOKEN=<token>`。旧的三个变量先留着：在切换前仍在运行的旧版本用它们，新版本忽略它们。先在部署机上确认这个 token 有效：
+
+   ```sh
+   cd ~/midden
+   TOKEN=$(grep '^CF_API_TOKEN=' .env | cut -d= -f2-)
+   ACCOUNT=$(grep '^R2_ACCOUNT_ID=' .env | cut -d= -f2-)
+   curl -s -H "Authorization: Bearer $TOKEN" \
+     "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/tokens/verify" | jq '{success, status: .result.status}'
+   ```
+
+   应为 `"success": true`、`"status": "active"`。
+
+2. 推送到 `main`。自动部署用新镜像重建容器（同时读入新的 `.env`），日志中应有 `cloudflare token verified` 和 `listening`。没有 `CF_API_TOKEN` 或验证失败时新版本退出，`/healthz` 不响应，部署回滚到旧版本，Bot 发来 `rolled back …`；改好 `.env` 后在部署目录运行 `node scripts/deploy.ts` 重新部署。
+3. 验证：
+   - 上传：采集一个带图片的帖子。上传任务先 PUT 再读回（HEAD）确认，所以几秒后网页中这张图的地址变为 `https://midden-media.sxzz.moe/…` 就说明写和读都可用；失败时日志有 `jobType` 为 `upload` 的 `job will retry`，带 `S3 PutObject failed: 403` 之类的原因。
+   - 清除缓存：用同一个 token 直接请求一次（清除一个不存在的地址无害）：
+
+     ```sh
+     ZONE=$(grep '^CF_ZONE_ID=' .env | cut -d= -f2-)
+     curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+       -d '{"files":["https://midden-media.sxzz.moe/cutover-check"]}' \
+       "https://api.cloudflare.com/client/v4/zones/$ZONE/purge_cache" | jq .success
+     ```
+
+     应为 `true`。服务回收媒体时清除成功记 `cache purged`。
+
+   - 分析数据：「设置 → 管理员面板 → 存储用量」显示 R2 的两个存储桶和「本月费用」；日志中没有 `storage analytics unavailable`。
+
+4. 从 `.env` 删去 `R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`CF_PURGE_TOKEN`（服务已不读它们，不必重启），`unset TOKEN`。rclone 的配置改用派生的一对（见「迁移现有媒体」）。
+5. 在 Cloudflare 撤销旧 token：「R2 → Manage API tokens」中媒体用的那个（`midden` 的 Object Read & Write），以及「My Profile → API Tokens」中清除缓存的那个。Litestream 的 token 保留：它仍用自己的密钥（见「Litestream」）；只有把 `LITESTREAM_*` 改成由 `CF_API_TOKEN` 派生的一对、`docker compose up -d litestream` 之后心跳正常，才可以撤销它。
 
 ### R2 的保护
 
@@ -213,7 +270,10 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
 启用：
 
-1. Cloudflare「R2」中建私有存储桶 `midden-backup`（不绑定域名、不开公开访问）；「R2 → Manage API tokens → Create API token」，权限 **Object Read & Write**，范围只选 `midden-backup`，与媒体的 token 分开。
+1. Cloudflare「R2」中建私有存储桶 `midden-backup`（不绑定域名、不开公开访问）；「R2 → Manage API tokens → Create API token」，权限 **Object Read & Write**，范围只选 `midden-backup`。
+
+   Litestream 只认 S3 的一对密钥，不能像服务那样由 `CF_API_TOKEN` 派生，所以它有自己的两个变量。值可以是这个 R2 token 的 Access Key ID 与 Secret Access Key，也可以是由 `CF_API_TOKEN` 派生的一对（那个 token 也有 `midden-backup` 的权限，算法见「迁移现有媒体」）；用后者时 `CF_API_TOKEN` 轮换后要一并更新，否则 Litestream 上传失败、心跳停止。
+
 2. 部署目录的 `.env`：
 
    ```sh
@@ -356,6 +416,65 @@ rm ~/Library/LaunchAgents/org.midden.backup.plist
 
 此后 R2 中的原文件是唯一的一份（见「R2 的保护」）。
 
+## 存储用量
+
+「设置 → 管理员面板 → 存储用量」（`GET /v1/storage`，代码在 `server/src/usage/`）分为几组：
+
+- R2：每个存储桶的存储（最近一天的最大值，载荷加元数据）、对象数、本月的 Class A 与 Class B 次数，以及读取分析数据的时间；「刷新」立即重读（距上次不到 1 分钟时不重读）。
+- 本月费用：存储、Class A、Class B 各自的已用量、免费额度、已用比例和金额，以及合计（见「费用」）。
+- 本机：可用磁盘与总容量、数据库文件（空闲页与 WAL）、缩略图、媒体目录（每天统计）、部署前的数据库备份，以及「按占用空间排列收藏」（收藏库按占用空间排序，`#/?sort=storage`）。
+- 数据库：最大的 15 个表和索引及占比、其余合计、总计和统计时间。
+- 趋势：每天一点的折线图（与「统计趋势」同一个图表），30 天、90 天或全部：每个存储桶的存储、每天的 Class A 与 Class B 次数、数据库文件、缩略图、可用磁盘。少于两天读数的不画。
+- 提醒阈值：见「提醒」。
+
+分析数据不可用时（没有设置 `CF_API_TOKEN` 或 `R2_ACCOUNT_ID`、token 没有 Account Analytics Read、请求失败），页面只有本机的部分：没有 R2、本月费用、R2 的趋势和 R2 的两个阈值。失败记 `storage analytics unavailable`（warn，`reason` 是 Cloudflare 的错误信息）。
+
+### 数据来源
+
+Cloudflare 的 GraphQL Analytics API（`POST https://api.cloudflare.com/client/v4/graphql`，Bearer `CF_API_TOKEN`，[文档](https://developers.cloudflare.com/r2/platform/metrics-analytics/)），一次请求两个数据集：
+
+- `r2StorageAdaptiveGroups`：`max { objectCount payloadSize metadataSize }`，按 `dimensions { date bucketName }` 分组，即每个存储桶每天的最大值（R2 按每天的峰值计费）。
+- `r2OperationsAdaptiveGroups`：`sum { requests }`，按 `dimensions { date bucketName actionType }` 分组。`actionType` 按价格页的列表归为 Class A、Class B 或免费（`DeleteObject`、`DeleteBucket`、`AbortMultipartUpload`）；列表外的按名称归类：`Get`、`Head` 开头为 B，`Delete`、`Abort` 开头为免费，其余为 A。成功与失败的请求都计入。
+
+一次查询最多 31 天、每个数据集最多 10000 行（返回达到上限时算作失败）。服务第一次读取时还查询账户的 `settings`（两个数据集的 `maxDuration`、`notOlderThan`），起点取较小的范围与保留期之内第一个完整 UTC 日的 0 点，终点是现在（今天到此刻）；查不到时按 31 天。每 15 分钟读一次（服务每分钟的维护计时器，到时才读），服务启动后第一次打开页面时若还没读过就先读。
+
+### 历史
+
+`storage_snapshots` 每个 UTC 日一行：`r2`（JSON，每个存储桶的 `bytes`、`objects`、`class_a`、`class_b`）、`db_bytes`、`thumbnail_bytes`、`free_bytes`。每次读到分析数据，覆盖其中每一天的 `r2`：过去的日子已是定值，今天的随之增长；分析数据已不覆盖的日子保留原值，所以历史比数据集的保留期长。第一次读取会补出之前约 30 天的 R2 数据。本机的三项每 15 分钟写入今天这一行（当天最后一次的读数），从部署这个版本开始有。每次写入 Litestream 随之多传一个很小的文件。
+
+### 费用
+
+价格是 `server/src/usage/cost.ts` 中的常量 `R2_PRICES`（R2 Standard，[价格页](https://developers.cloudflare.com/r2/pricing/)）：存储 $0.015/GB·月，每月免费 10 GB·月；Class A $4.50/百万次，免费 100 万次；Class B $0.36/百万次，免费 1000 万次；流出免费。只算本月（UTC）到今天，不预测整月：
+
+- GB·月：每天把各存储桶的最大值相加，按 1 GB = 10^9 字节（Cloudflare 的 R2 价格计算器如此；价格页没写明）换算，除以本月的天数后累加。到月底就是每天峰值的月平均。
+- 每项金额 = max(0, 已用 − 每月免费额度) × 单价，免费额度按整月扣，账户内的存储桶共用。不按账单的进位（不足一个计费单位按一个算）。
+- 例：11 月前 15 天每天 40 GB，累计 15 × 40 / 30 = 20 GB·月，计费 10 GB·月，$0.15。
+
+### 本机
+
+- 数据库文件：`PRAGMA page_count × page_size`，空闲页 `freelist_count`，以及 `midden.db-wal` 的大小。
+- 缩略图：`blob_thumbnails` 中已生成的个数与 `size` 之和。
+- 媒体目录：每天随数据库组成在 worker 线程中遍历 `media/`，统计文件数与大小（使用 R2 时就是缩略图和尚未上传完的原文件）。
+- 部署前的数据库备份：`data/backups/deploy/` 中的文件。
+- 可用磁盘：数据目录所在卷的 `statfs`（容器内看到的卷；GB 为 2^30 字节，与网页中其他大小相同）。
+
+### 数据库组成
+
+每天一次（距上次满 24 小时；服务启动后第一分钟就会检查），在 worker 线程中用单独的只读连接运行 `SELECT name, pgsize FROM dbstat WHERE aggregate = TRUE`，线程的 nice 值设为 19。生产库（2.3 GB）约 18 秒，期间服务的事件循环和写入照常进行（WAL 下读不阻塞写）。结果存在 `settings` 表的 `db_composition`（最大的 15 个、其余合计、总计、耗时、媒体目录），日志 `database composition read`，失败记 `database composition failed`。
+
+### 提醒
+
+阈值是管理员设置，存在 `settings` 表，在页面中修改（`PUT /v1/storage/alerts`）：
+
+| 键                           | 默认 | 条件                                                                        |
+| ---------------------------- | ---- | --------------------------------------------------------------------------- |
+| `storage_alert_cost_usd`     | 5    | 本月 R2 费用超过（美元，0.01–10000）                                        |
+| `storage_alert_ops_percent`  | 80   | 本月 Class A 或 Class B 次数超过各自免费额度的这个百分比（1–100，分别提醒） |
+| `storage_alert_free_disk_gb` | 10   | 可用磁盘低于（GB，1–100000）                                                |
+| `storage_alert_db_gb`        | 5    | 数据库文件超过（GB，1–100000）                                              |
+
+每 15 分钟检查一次。越过阈值时 Bot 给所有者发一条，如「存储用量：本月 R2 费用 $5.12，超过 $5」「存储用量：数据盘可用 9.5 GB，低于 10 GB」「存储用量：数据库文件 5.5 GB，超过 5 GB」「存储用量：本月 R2 Class A 操作 812,345 次，超过免费额度 100 万次的 80%」；回到阈值以内时再发一条「…，不再超过 …」（磁盘为「不再低于」）。条件一直成立时不重复。已提醒的状态存在 `settings` 表的 `storage_alert_state`，重启后不会重发。按月的三项（费用、两类操作）到下个月自动结束，不发回落的消息。分析数据不可用时不检查这三项，状态不变。阈值修改在下一次检查时生效，调高阈值使条件不再成立时也会发回落的消息。没有配置 Bot 时不发。
+
 ## 维护任务
 
 服务每分钟运行一次维护：
@@ -365,7 +484,8 @@ rm ~/Library/LaunchAgents/org.midden.backup.plist
 - 原始响应保留 7 天；没有产生新版本、也不是最新一次的抓取，其原始响应随后删除；
 - 不再被引用的媒体文件 24 小时后删除（使用 R2 时同时删除对象并清除边缘缓存）；
 - 为缺少缩略图的媒体补做缩略图；
-- 清理过期的网页会话、通行密钥挑战与 `/passkey` 链接。
+- 清理过期的网页会话、通行密钥挑战与 `/passkey` 链接；
+- 每 15 分钟读取存储用量并检查提醒，每天一次统计数据库组成（见「存储用量」）。
 
 ## 从 Go 版迁移
 
@@ -383,4 +503,5 @@ rm ~/Library/LaunchAgents/org.midden.backup.plist
   ```
 
 - 找不到 ffmpeg 时启动日志会提示，缩略图停用；之后装上 ffmpeg，维护任务会补做缩略图。
+- Cloudflare：`cloudflare token verification failed` 表示启动时 `CF_API_TOKEN` 没有通过验证，服务随即退出（见「配置」）；`storage analytics unavailable` 表示存储用量读不到分析数据，页面只显示本机部分。
 - Litestream：`litestream heartbeat missing` 表示超过「备份心跳超时」（默认 20 分钟）没有收到它的心跳，看 `docker compose logs litestream` 中的 `monitor error`、`sync error`（如 token 错误时的 403、网络错误）；`litestream heartbeat listener failed` 表示服务没能监听 8081 端口。见「Litestream」。

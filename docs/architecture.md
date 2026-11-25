@@ -36,6 +36,7 @@ flowchart LR
 | `server/src/jobs/`      | 存在 SQLite 中的持久化任务队列                                                                        |
 | `server/src/blob/`      | 媒体存储接口、本地目录与 R2（S3）实现、签名链接、迁移与清理本地原文件                                 |
 | `server/src/http/`      | Hono 路由与认证                                                                                       |
+| `server/src/usage/`     | 存储用量：R2 分析数据、本月费用、本机与数据库组成、每天的记录、提醒                                   |
 | `server/src/telegram/`  | Bot：命令、消息渲染与分段、投递、媒体发送                                                             |
 | `server/drizzle/`       | 由 drizzle-kit 生成的数据库迁移，启动时自动应用                                                       |
 | `web/`                  | Vue 网页，构建后由 server 在 `/app/` 提供                                                             |
@@ -51,6 +52,7 @@ flowchart LR
 - 实体（帖子、账号）按平台身份共享，`entity_versions` 按内容去重。
 - 媒体按 SHA-256 存在 `media/ab/cd/<哈希>`，`blobs` 记录类型与大小，缩略图同样按内容存放。使用 R2 时原文件上传到存储桶的同名键，`blobs.remote_at` 记下上传得到确认的时间，之后删除本地原文件，见「媒体链接」。
 - 删除收藏后，维护任务在没有进行中的抓取时删除其内容；不再被引用的媒体文件 24 小时后删除。
+- 存储用量（`server/src/usage/`）：每 15 分钟从 Cloudflare 的 GraphQL Analytics API 读取 R2 各存储桶每天的存储与操作次数，与本机的数据库、缩略图、可用磁盘一起记在 `storage_snapshots`（每个 UTC 日一行），本月费用由其中本月的行按 R2 标准存储的价格算出；数据库组成每天一次在 worker 线程中由 `dbstat` 读出，存在 `settings` 表；越过阈值和回落时由 Bot 告诉所有者。见运维文档的「存储用量」。
 - 数据库可由单独的 `litestream` 容器（compose 的 `litestream` profile，`litestream.yml`）持续复制到 R2 的私有存储桶 `midden-backup`。它一直持有一个读事务，由它的检查点让 WAL 重新开始；服务只用 SQLite 默认的 PASSIVE 自动检查点，不做 RESTART、TRUNCATE 检查点和 `VACUUM`。设置了 `LITESTREAM_ACCESS_KEY_ID` 时，服务在只供容器之间访问的 8081 端口接收它的心跳，超过「备份心跳超时」（管理员设置，存在 `settings` 表，默认 20 分钟）没有收到就由 Bot 告诉所有者，管理员面板和 `GET /v1/instance` 显示上次心跳（`server/src/litestream.ts`）。见运维文档的「Litestream」。
 - `catalog` 为每个有版本的收藏保存列表筛选与排序所需的字段（根实体类型、作者、媒体种类、发布时间、占用空间、搜索文本（见「搜索」）、账号的粉丝数与关注数等），由最新版本和最新一次带计数的抓取派生，在同一事务内随抓取完成、关注列表存入账号、删除媒体和原始响应清理更新。列表只读这张窄表；作者的最新资料、作者被打的标签、被保存的转发等跨收藏的条件在查询时通过索引计算。启动时会补齐缺失的行，所以改变它的派生方式时，在迁移中清空这张表即可重建；只涉及少数行时（如只有账号才有的计数）也可以在迁移中就地补齐，不必重建全表。
 - 列表排序（`sort`）：`updated`（最近一次抓取，默认）、`published`（发帖时间，没有时按抓取时间）、`saved`（加入收藏库的时间）、`storage`（占用空间）、`followers`（粉丝数）、`following`（关注数）、`relevance`（相关度，只在搜索时有意义，见「搜索」），`order` 为 `desc`（默认）或 `asc`，相同时按收藏 id 排。搜索时先按相关度分层，所选排序只在每层之内生效。翻页位置记下排序值和 id（搜索时还有层级和层内得分），与筛选条件的指纹一起编码，换了筛选或排序就失效。
@@ -193,7 +195,7 @@ API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…
 存储由 `BlobStore` 接口抽象，`MEDIA_STORE` 选择实现：
 
 - `local`（`blob/fs-store.ts`）：只有本地目录，所有链接都是上面的签名链接。
-- `r2`（`blob/bucket-store.ts`，S3 通用，经 `blob/s3.ts` 用 SigV4 调用）：本地目录在前，R2 存储桶在后。下载先写本地，新 blob 排一个 `upload` 任务（`capture/upload.ts`，`upload` 队列 4 个并发），上传后读回确认，再写 `blobs.remote_at`。`url()` 只对 `remote_at` 已有、且不带文件名的原文件给出公开地址 `MEDIA_PUBLIC_URL/ab/cd/<哈希>`；缩略图（只存本地）、尚未确认的原文件和带文件名的下载（需要 `Content-Disposition`）仍是签名链接。读取（`read`、`stat`）先本地后 R2；`source()` 给 ffmpeg/ffprobe 一个本地路径，或 R2 的预签名 URL（1 小时），让它们只读需要的字节范围。`delete()` 删除本地文件，R2 中有对象时先清除边缘缓存再删对象。
+- `r2`（`blob/bucket-store.ts`，S3 通用，经 `blob/s3.ts` 用 SigV4 调用；密钥在启动时由 `CF_API_TOKEN` 派生，`cloudflare.ts`）：本地目录在前，R2 存储桶在后。下载先写本地，新 blob 排一个 `upload` 任务（`capture/upload.ts`，`upload` 队列 4 个并发），上传后读回确认，再写 `blobs.remote_at`。`url()` 只对 `remote_at` 已有、且不带文件名的原文件给出公开地址 `MEDIA_PUBLIC_URL/ab/cd/<哈希>`；缩略图（只存本地）、尚未确认的原文件和带文件名的下载（需要 `Content-Disposition`）仍是签名链接。读取（`read`、`stat`）先本地后 R2；`source()` 给 ffmpeg/ffprobe 一个本地路径，或 R2 的预签名 URL（1 小时），让它们只读需要的字节范围。`delete()` 删除本地文件，R2 中有对象时先清除边缘缓存再删对象。
 - 删除本地原文件：同一个 `upload` 任务在写下 `remote_at` 之后，在 `mediaLocks` 这个键的锁内（下载写入和回收删除同一个键时也取它）再次确认 `remote_at`，调用 `deleteLocal()` 删除本地文件，此后 R2 中是唯一的一份。`blob/local-copy.ts` 的 `localCopyHold` 决定暂不删除的情况：这个键同时是缩略图的文件（`blob_thumbnails.key` 或 `removed_media.thumbnail_key`），或这个 blob 还没有 `blob_thumbnails` 行而 `jobs` 中有它的 `thumbnail` 任务。缩略图任务结束（`runThumbnail` 返回或 `failThumbnail`）时调用 `thumbnailDone`，blob 已有 `remote_at` 就再排一个 `upload` 任务，它跳过上传、只删除。两边都是先写自己的结果再查对方的，所以总有一边会删。删除失败由任务重试，不清除 `remote_at`。下载在同一个锁内发现相同内容的 blob 已有 `remote_at` 时不写本地文件。
 - 删除时的读取：`read()` 等文件打开（`open` 事件）才返回流，打开后文件被删仍能读完，打开前被删则改读 R2，所以 Telegram 发送（grammY 的 `InputFile` 调用 `read()`）和 `/media/` 路由不受影响。ffmpeg、ffprobe 经 `withSource()`（`blob/store.ts`）运行：给的是本地路径而运行失败、此时 `source()` 已变为别处（本地文件被删）时，用新的来源再运行一次。`media-migrate` 在另一个进程中运行，锁管不到它：它只在自己写下 `remote_at` 之后删除，依靠的是同样的回退；其间同内容的下载最多留下一个本地副本，由 `media-prune-local` 清理。
 - `/media/` 路由在 `r2` 时让图片和缩略图可被 CDN 缓存（`public, max-age=31536000, immutable`），视频和下载仍为 `private`；签名有效但文件不存在时，若它是某个 blob 的缩略图，就从原文件重新生成（`regenerateThumbnail`，同一个键的并发请求只生成一次），生成的字节不同则记到新键并 307 重定向。
@@ -211,7 +213,7 @@ API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…
 - 标签状态（`tab-state.ts`，`main.ts` 中 `trackTabs` 在第一次导航前接上路由）：像 X 一样，每个标签记着离开时的页面（完整地址）和它的滚动位置，以及在这个标签中打开的页面链（每页的「返回」去处是链中的前一页，链的第一页可以是打开它的别的标签的页面，如图谱节点打开的详情；根页清空链）。存在 sessionStorage 的 `midden.tabs`，同一个浏览器标签页中重新加载后仍在，新窗口从根页开始。底栏中别的标签的链接 `href` 就是它离开时的页面，所以 Cmd/Ctrl 点击在新标签页打开那一页；所在标签的链接是它的根页，与点击的结果一致。切换标签是普通的 push，浏览器历史仍是实际走过的顺序，后退回到上一个标签；底栏的链接在历史条目上标记 `tabSwitch`。在这样恢复的页面上，「返回」（和 Telegram 的返回按钮）不后退到别的标签，而是用 replace 去往链中的前一页或根页，浏览器的后退仍回到切换前的标签；其他页面上的「返回」仍是后退。滚动位置：收藏库按视图记下离开时的位置，换回时恢复；内容仍在加载时（缓存已释放的详情、重新加载后）随页面长高继续滚到原处，最多 3 秒，读者先滚动或点按则停止。`KeepAlive` 最多保留 10 个视图（两个列表、各标签的根页和离开时的页面，以及最近的几个详情），所以切回时通常不重新请求。删除的收藏从链中去掉。
 - 页面标题：收藏详情的标题是「帖子」或「账号」（根实体是 Profile 时为账号，与页面本身的判断相同），加载完之前为空；分享中的详情相同。浏览器标签页的标题是「<页面标题> · Midden」。查看器中通往详情的按钮与列表缩略图的链接写作「查看帖子」或「查看账号」（不知道是账号时是帖子）。
 - 关系（`#/relations?of=<键>`）：任意有关系数据的账号的图谱，与 Profile 的关系图谱是同一个组件，读 `GET /v1/collections/graph?of=<键>`（参数与 `/collections/:id/graph` 相同，账号不需要已保存，从未存过的账号是空图）。顶部「中心」是视角账号选择器。地址没有 `of` 时依次取所有者第一个有关系数据的采集账号、上次打开的图谱中心（任何图谱页打开时记在本地存储 `midden.graphCenter`）、视角账号列表的第一个；完全没有关系数据时只有选择器。标记账号与中心相同时不标记。
-- 设置（`#/settings`）：分组列表，「采集账号」（`#/settings/accounts`）、「通行密钥」（`#/settings/passkeys`）和「管理员面板」（`#/settings/admin`）是子页；「关于」列出版本（提交的短 sha，链接到 GitHub 上的提交，与 Bot 的 /start 相同）、构建时间和源代码仓库；浏览器中最后是「退出登录」。管理员面板放整个服务的设置：域名，以及开发模式下的「删除全部收藏和采集记录」。
+- 设置（`#/settings`）：分组列表，「采集账号」（`#/settings/accounts`）、「通行密钥」（`#/settings/passkeys`）和「管理员面板」（`#/settings/admin`）是子页；「关于」列出版本（提交的短 sha，链接到 GitHub 上的提交，与 Bot 的 /start 相同）、构建时间和源代码仓库；浏览器中最后是「退出登录」。管理员面板放整个服务的设置：域名、「存储用量」（`#/settings/admin/storage`）、数据库备份，以及开发模式下的「删除全部收藏和采集记录」。
 - 开发模式：`NODE_ENV` 不是 `production` 时（镜像设为 `production`，本地开发服务器不设）。`GET /v1/instance` 返回 `{ dev }`，网页只在开发模式显示删除全部；`POST /v1/library/delete-all` 在开发模式之外返回 403。
 
 ## 认证
