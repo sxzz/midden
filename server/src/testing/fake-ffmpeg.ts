@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -12,11 +13,14 @@ import type { Thumbnailer } from '#capture/context.ts'
 // Reads its input as ffmpeg does a video: the start, then the end (where an
 // MP4 may keep its index), by byte ranges from a URL. The "thumbnail" is a
 // JPEG marker, the input's first 16 bytes and the contents of `version`.
+// While a `hold` file exists it waits before opening its input.
 const SCRIPT = String.raw`#!/usr/bin/env node
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { setTimeout } from 'node:timers/promises'
 const dir = new URL('.', import.meta.url)
 const args = process.argv.slice(2)
 appendFileSync(new URL('calls', dir), JSON.stringify(args) + '\n')
+while (existsSync(new URL('hold', dir))) await setTimeout(10)
 const input = args[args.indexOf('-i') + 1]
 const output = args.at(-1)
 let head
@@ -59,6 +63,13 @@ export function fakeFfmpeg() {
     /** Change what it renders from now on, as another ffmpeg might. */
     setVersion(version: string) {
       writeFileSync(path.join(dir, 'version'), version)
+    },
+    /** Make calls wait, once started, before they open their input. */
+    hold() {
+      writeFileSync(path.join(dir, 'hold'), '')
+    },
+    release() {
+      rmSync(path.join(dir, 'hold'), { force: true })
     },
   }
 }

@@ -66,9 +66,10 @@ export function storedProblem(
 /**
  * Media in an S3 bucket (Cloudflare R2), served publicly from its own
  * domain, with a local directory in front: downloads land there first and
- * a job uploads them (see `capture/upload.ts`), thumbnails only ever live
- * there, and reads prefer it. Only uploads confirmed in the bucket get its
- * public URL; everything else goes through this process's signed URLs.
+ * a job uploads them, then deletes the local original (see
+ * `capture/upload.ts`); thumbnails only ever live there, and reads prefer
+ * it. Only uploads confirmed in the bucket get its public URL; everything
+ * else goes through this process's signed URLs.
  */
 export class BucketBlobStore implements BlobStore {
   readonly local: FsBlobStore
@@ -105,6 +106,10 @@ export class BucketBlobStore implements BlobStore {
       if (!isNotFound(error)) throw error
       return this.bucket.get(objectPath(key), range)
     }
+  }
+
+  deleteLocal(key: string): Promise<void> {
+    return this.local.delete(key)
   }
 
   /** Local copy, bucket object and the edge's cached copy. */

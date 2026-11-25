@@ -218,7 +218,17 @@ async function download(ctx: CaptureContext, job: Job): Promise<void> {
     await ctx.mediaLocks.run(staged.hash, async () => {
       // Claim the key back from garbage collection before writing it.
       ctx.db.delete(mediaGarbage).where(eq(mediaGarbage.key, staged.hash)).run()
-      await ctx.blobs.putFile(staged.hash, staged.path)
+      // The bucket holds these bytes already, and they need no local copy
+      // (see `upload.ts`). Nothing is awaited from this check on, so the
+      // blob is still there when the transaction below attaches it.
+      const inBucket =
+        !!ctx.blobs.deleteLocal &&
+        !!ctx.db
+          .select({ remoteAt: blobs.remoteAt })
+          .from(blobs)
+          .where(eq(blobs.hash, staged.hash))
+          .get()?.remoteAt
+      if (!inBucket) await ctx.blobs.putFile(staged.hash, staged.path)
       ctx.db.transaction((tx) => {
         const current = loadAsset(tx, asset.id)
         if (current?.asset.state !== 'pending') {

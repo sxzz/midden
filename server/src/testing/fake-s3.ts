@@ -52,6 +52,8 @@ export class FakeS3 {
   failPurge = false
   /** Held before an upload is stored, while set. */
   gate: Promise<void> | undefined
+  /** Stored over what uploads send, while set, as a faulty bucket might. */
+  overwrite: Partial<FakeObject> | undefined
   #server: Server
   endpoint = ''
 
@@ -200,6 +202,7 @@ export class FakeS3 {
       cacheControl: req.headers['cache-control'],
       etag: digest.toString('hex'),
       metadata: metadataOf(req),
+      ...this.overwrite,
     })
     return { status: 200, headers: { ETag: `"${digest.toString('hex')}"` } }
   }

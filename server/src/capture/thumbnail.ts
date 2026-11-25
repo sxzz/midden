@@ -5,12 +5,14 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 import { and, eq } from 'drizzle-orm'
 import { stage, type StagedFile } from '#blob/staging.ts'
+import { withSource } from '#blob/store.ts'
 import {
   blobs,
   blobThumbnails,
   mediaGarbage,
   removedMedia,
 } from '#db/schema.ts'
+import { thumbnailDone } from './upload.ts'
 import type { Job } from '#jobs/queue.ts'
 import type { CaptureContext, Thumbnailer } from './context.ts'
 
@@ -72,6 +74,11 @@ function record(
 
 type Blob = typeof blobs.$inferSelect
 
+/** ffmpeg could not render the media; trying again would not help. */
+class RenderError extends Error {
+  override name = 'RenderError'
+}
+
 /**
  * Render a blob's thumbnail into a staged file, reading the original where
  * the store has it: the local file, or else ffmpeg fetches only the byte
@@ -85,7 +92,6 @@ async function render(
   signal: AbortSignal,
 ): Promise<{ staged: StagedFile; mime: string } | { error: string }> {
   if (!SOURCE_TYPES.has(blob.mime)) return { error: '不支持的媒体格式' }
-  const input = await ctx.blobs.source(blob.hash)
   await mkdir(ctx.stagingDir, { recursive: true })
   const dir = await mkdtemp(path.join(ctx.stagingDir, 'thumbnail-'))
   try {
@@ -94,33 +100,41 @@ async function render(
       thumbnailer.encoder === 'libwebp'
         ? ['-c:v', 'libwebp', '-quality', '75', '-f', 'webp']
         : ['-c:v', 'mjpeg', '-q:v', '5', '-pix_fmt', 'yuvj420p', '-f', 'image2']
-    const remote = URL_INPUT.test(input)
+    const ffmpeg = async (input: string) => {
+      try {
+        await run(
+          thumbnailer.ffmpeg,
+          [
+            '-nostdin',
+            '-v',
+            'error',
+            '-y',
+            // Give up on a stalled connection (microseconds).
+            ...(URL_INPUT.test(input) ? ['-rw_timeout', '30000000'] : []),
+            '-i',
+            input,
+            '-map',
+            '0:v:0',
+            '-frames:v',
+            '1',
+            '-vf',
+            SCALE,
+            ...encode,
+            output,
+          ],
+          { timeout: RENDER_TIMEOUT, signal },
+        )
+      } catch (error) {
+        if (signal.aborted)
+          throw new Error('thumbnail rendering interrupted', { cause: error })
+        throw new RenderError('thumbnail rendering failed', { cause: error })
+      }
+    }
     try {
-      await run(
-        thumbnailer.ffmpeg,
-        [
-          '-nostdin',
-          '-v',
-          'error',
-          '-y',
-          // Give up on a stalled connection (microseconds).
-          ...(remote ? ['-rw_timeout', '30000000'] : []),
-          '-i',
-          input,
-          '-map',
-          '0:v:0',
-          '-frames:v',
-          '1',
-          '-vf',
-          SCALE,
-          ...encode,
-          output,
-        ],
-        { timeout: RENDER_TIMEOUT, signal },
-      )
-    } catch {
-      if (signal.aborted) throw new Error('thumbnail rendering interrupted')
-      return { error: 'thumbnail rendering failed' }
+      await withSource(ctx.blobs, blob.hash, ffmpeg)
+    } catch (error) {
+      if (error instanceof RenderError) return { error: error.message }
+      throw error
     }
     const staged = await stage(ctx.stagingDir, createReadStream(output))
     if (staged.size === 0) {
@@ -136,11 +150,19 @@ async function render(
   }
 }
 
-/** Render one blob's thumbnail. A render failure is final, not retried. */
+/**
+ * Render one blob's thumbnail. A render failure is final, not retried.
+ * Either way the blob's local original no longer waits for it.
+ */
 export async function runThumbnail(
   ctx: CaptureContext,
   job: Job,
 ): Promise<void> {
+  await renderThumbnail(ctx, job)
+  thumbnailDone(ctx, job.ref)
+}
+
+async function renderThumbnail(ctx: CaptureContext, job: Job): Promise<void> {
   const thumbnailer = ctx.thumbnailer
   if (!thumbnailer) return
   const blob = ctx.db.select().from(blobs).where(eq(blobs.id, job.ref)).get()
@@ -279,4 +301,5 @@ export function failThumbnail(
   message: string,
 ): void {
   record(ctx, blobId, { state: 'failed', error: message })
+  thumbnailDone(ctx, blobId)
 }

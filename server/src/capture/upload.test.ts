@@ -1,7 +1,9 @@
 import { Buffer } from 'node:buffer'
 import { rm } from 'node:fs/promises'
+import { buffer } from 'node:stream/consumers'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { FsBlobStore } from '#blob/fs-store.ts'
 import { mediaRoutes } from '#blob/route.ts'
 import { IMMUTABLE, objectPath } from '#blob/store.ts'
 import { assets, blobs, blobThumbnails, captures, jobs } from '#db/schema.ts'
@@ -41,12 +43,16 @@ afterEach(async () => {
   await s3.stop()
 })
 
-/** A capture context whose media store is the fake bucket. */
-function setup(options: { thumbnailer?: Thumbnailer } = {}) {
+/**
+ * A capture context whose media store is the fake bucket, or with `local`
+ * the media directory alone.
+ */
+function setup(options: { thumbnailer?: Thumbnailer; local?: boolean } = {}) {
   const clock = { now: Date.now() }
   const media: Record<string, Partial<Resource>[]> = {}
   const files: Record<string, Buffer> = {
     'https://m.test/a.jpg': JPEG,
+    'https://m.test/a.jpg?copy': JPEG,
     'https://m.test/v.mp4': VIDEO,
   }
   const logs = recordingLogger()
@@ -86,7 +92,7 @@ function setup(options: { thumbnailer?: Thumbnailer } = {}) {
     },
     blobs: (m) => {
       signer = m.signer
-      return s3.store(m)
+      return options.local ? new FsBlobStore(m.dir, m.signer) : s3.store(m)
     },
   })
   ctx = c
@@ -104,8 +110,11 @@ function setup(options: { thumbnailer?: Thumbnailer } = {}) {
   return { c, clock, media, logs, store, capture, route }
 }
 
+const uploads = (c: CaptureContext) =>
+  c.db.select().from(jobs).where(eq(jobs.type, 'upload')).all()
+
 describe('media in R2', () => {
-  test('a download is local first; the web gets the public URL once the upload is confirmed', async () => {
+  test('a download is local first; once the upload is confirmed the web gets the public URL and the local original goes', async () => {
     const { c, media, store } = setup()
     media['1'] = [{ url: 'https://m.test/a.jpg' }]
     let release!: () => void
@@ -147,17 +156,21 @@ describe('media in R2', () => {
     expect(view.download_url).toMatch(
       new RegExp(String.raw`^/media/${blob.hash}\?`),
     )
-    // The local copy stays until media-prune-local.
-    expect(await store.local.stat(blob.hash)).toBe(JPEG.length)
+    // The bucket has the only copy now, and reads go there.
+    expect(await store.local.stat(blob.hash)).toBeUndefined()
+    expect(await buffer(await store.read(blob.hash))).toEqual(JPEG)
+    expect(uploads(c)).toEqual([])
   })
 
   test('a failed upload is retried later and logged; the media stays local meanwhile', async () => {
-    const { c, clock, media, logs, capture } = setup()
+    const { c, clock, media, logs, store, capture } = setup()
     media['1'] = [{ url: 'https://m.test/a.jpg' }]
     s3.failNext = 3
     const done = await capture('1')
     expect(done.state).toBe('complete')
+    const { hash } = c.db.select().from(blobs).get()!
     expect(c.db.select().from(blobs).get()!.remoteAt).toBeNull()
+    expect(await store.local.stat(hash)).toBe(JPEG.length)
     const waiting = c.db
       .select()
       .from(jobs)
@@ -171,7 +184,130 @@ describe('media in R2', () => {
     clock.now += 31_000
     await c.queue.drain()
     expect(c.db.select().from(blobs).get()!.remoteAt).toBeInstanceOf(Date)
+    expect(await store.local.stat(hash)).toBeUndefined()
     expect(c.db.select().from(jobs).all()).toEqual([])
+  })
+
+  test('an upload that reads back wrong is not recorded, and the local file stays', async () => {
+    const { c, clock, media, store, capture } = setup()
+    media['1'] = [{ url: 'https://m.test/a.jpg' }]
+    s3.overwrite = { cacheControl: 'no-store' }
+    await capture('1')
+    const blob = c.db.select().from(blobs).get()!
+    expect(blob.remoteAt).toBeNull()
+    expect(await store.local.stat(blob.hash)).toBe(JPEG.length)
+    const waiting = uploads(c)[0]!
+    expect(waiting).toMatchObject({ type: 'upload', attempt: 1 })
+    expect(waiting.lastError).toMatch(
+      /reads back wrong: Cache-Control no-store/,
+    )
+
+    s3.overwrite = undefined
+    clock.now += 31_000
+    await c.queue.drain()
+    expect(c.db.select().from(blobs).get()!.remoteAt).toBeInstanceOf(Date)
+    expect(await store.local.stat(blob.hash)).toBeUndefined()
+  })
+
+  test('a failed deletion of the local copy is retried; the blob stays recorded in the bucket', async () => {
+    const { c, clock, media, logs, store, capture } = setup()
+    media['1'] = [{ url: 'https://m.test/a.jpg' }]
+    const deleteLocal = vi
+      .spyOn(store, 'deleteLocal')
+      .mockRejectedValueOnce(new Error('EBUSY: resource busy'))
+    await capture('1')
+    const blob = c.db.select().from(blobs).get()!
+    expect(blob.remoteAt).toBeInstanceOf(Date)
+    expect(await store.local.stat(blob.hash)).toBe(JPEG.length)
+    const waiting = uploads(c)[0]!
+    expect(waiting).toMatchObject({ type: 'upload', attempt: 1 })
+    expect(waiting.runAt.getTime() - clock.now).toBe(30_000)
+    expect(logs.entries).toContainEqual(
+      expect.objectContaining({ msg: 'job will retry', jobType: 'upload' }),
+    )
+    // Recorded once; the retry only deletes.
+    const puts = s3.requests.filter((r) => r.method === 'PUT').length
+    clock.now += 31_000
+    await c.queue.drain()
+    expect(deleteLocal).toHaveBeenCalledTimes(2)
+    expect(await store.local.stat(blob.hash)).toBeUndefined()
+    expect(c.db.select().from(blobs).get()!.remoteAt).toEqual(blob.remoteAt)
+    expect(s3.requests.filter((r) => r.method === 'PUT')).toHaveLength(puts)
+  })
+
+  test('the thumbnail is rendered from the local file before the file goes', async () => {
+    const ffmpeg = fakeFfmpeg()
+    const { c, media, store } = setup({ thumbnailer: ffmpeg.thumbnailer })
+    media['1'] = [
+      { url: 'https://m.test/v.mp4', kind: 'video', immutableKey: 'x:v:1' },
+    ]
+    // ffmpeg has its path but has not opened it when the upload is confirmed.
+    ffmpeg.hold()
+    submit(c, { url: 'https://fake.test/p/1' })
+    await vi.waitFor(() => {
+      expect(ffmpeg.calls()).toHaveLength(1)
+      expect(c.db.select().from(blobs).get()?.remoteAt).toBeInstanceOf(Date)
+    })
+    const blob = c.db.select().from(blobs).get()!
+    await vi.waitFor(async () => expect(uploads(c)).toEqual([]))
+    expect(await store.local.stat(blob.hash)).toBe(VIDEO.length)
+
+    ffmpeg.release()
+    await c.queue.drain()
+    const thumbnail = c.db.select().from(blobThumbnails).get()!
+    expect(thumbnail.state).toBe('ready')
+    const input = ffmpeg.calls()[0]!
+    expect(input[input.indexOf('-i') + 1]).toBe(store.local.path(blob.hash))
+    // Then the original went; the thumbnail stays local.
+    expect(await store.local.stat(blob.hash)).toBeUndefined()
+    expect(await store.local.stat(thumbnail.key!)).toBe(thumbnail.size)
+    expect(s3.requests.some((r) => r.presigned)).toBe(false)
+  })
+
+  test('a read open while the local copy goes keeps reading it; later reads use the bucket', async () => {
+    const { c, media, store } = setup()
+    media['1'] = [{ url: 'https://m.test/a.jpg' }]
+    let release!: () => void
+    s3.gate = new Promise((resolve) => (release = resolve))
+    const job = submit(c, { url: 'https://fake.test/p/1' })
+    await vi.waitFor(() =>
+      expect(
+        c.db.select().from(captures).where(eq(captures.id, job.id)).get()
+          ?.state,
+      ).toBe('complete'),
+    )
+    const { hash } = c.db.select().from(blobs).get()!
+    // What a Telegram send hands grammY's InputFile to read.
+    const sending = await c.blobs.read(hash)
+    release()
+    s3.gate = undefined
+    await c.queue.drain()
+    expect(await store.local.stat(hash)).toBeUndefined()
+    expect(s3.requests.filter((r) => r.method === 'GET')).toEqual([])
+    expect(await buffer(sending)).toEqual(JPEG)
+
+    expect(await buffer(await c.blobs.read(hash))).toEqual(JPEG)
+    expect(
+      s3.requests.filter((r) => r.method === 'GET' && !r.presigned),
+    ).toHaveLength(1)
+  })
+
+  test('downloading bytes already in the bucket writes no local copy', async () => {
+    const { c, media, store, capture } = setup()
+    media['1'] = [{ url: 'https://m.test/a.jpg' }]
+    media['2'] = [{ url: 'https://m.test/a.jpg?copy' }]
+    await capture('1')
+    const blob = c.db.select().from(blobs).get()!
+    expect(await store.local.stat(blob.hash)).toBeUndefined()
+    const done = await capture('2')
+    expect(done.state).toBe('complete')
+    expect(c.db.select().from(blobs).all()).toHaveLength(1)
+    expect(
+      c.db.select().from(assets).where(eq(assets.captureId, done.id)).get()!
+        .blobId,
+    ).toBe(blob.id)
+    expect(await store.local.stat(blob.hash)).toBeUndefined()
+    expect(uploads(c)).toEqual([])
   })
 
   test('collecting an unreferenced blob deletes its object and purges its URL', async () => {
@@ -233,8 +369,8 @@ describe('media in R2', () => {
     // The thumbnail was never uploaded.
     expect(s3.objects.has(objectPath(thumbnail.key!))).toBe(false)
 
-    // Both the local original and the thumbnail go.
-    await rm(store.local.path(blob.hash))
+    // The local original went after the upload; now the thumbnail goes too.
+    expect(await store.local.stat(blob.hash)).toBeUndefined()
     await rm(store.local.path(thumbnail.key!))
     const url = getCollection(c, done.collectionId).assets[0]!.thumbnail_url!
     s3.requests.length = 0
@@ -278,5 +414,32 @@ describe('media in R2', () => {
       store.url(key, { contentType: 'image/jpeg' }),
     )
     expect(response.status).toBe(404)
+  })
+})
+
+describe('media in the local directory only', () => {
+  test('nothing is uploaded and the local original stays', async () => {
+    const ffmpeg = fakeFfmpeg()
+    const { c, media, capture } = setup({
+      local: true,
+      thumbnailer: ffmpeg.thumbnailer,
+    })
+    media['1'] = [
+      { url: 'https://m.test/v.mp4', kind: 'video', immutableKey: 'x:v:1' },
+    ]
+    media['2'] = [{ url: 'https://m.test/a.jpg' }]
+    media['3'] = [{ url: 'https://m.test/a.jpg?copy' }]
+    for (const id of ['1', '2', '3'])
+      expect((await capture(id)).state).toBe('complete')
+    const all = c.db.select().from(blobs).all()
+    expect(all).toHaveLength(2)
+    for (const blob of all) {
+      expect(blob.remoteAt).toBeNull()
+      expect(await c.blobs.stat(blob.hash)).toBe(blob.size)
+    }
+    expect(c.blobs.deleteLocal).toBeUndefined()
+    expect(c.db.select().from(blobThumbnails).all()).toHaveLength(2)
+    expect(uploads(c)).toEqual([])
+    expect(s3.requests).toEqual([])
   })
 })

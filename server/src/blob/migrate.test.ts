@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { eq } from 'drizzle-orm'
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { newId } from '#db/id.ts'
 import { blobs, blobThumbnails } from '#db/schema.ts'
 import { testContext } from '#testing/context.ts'
@@ -57,15 +57,29 @@ const writes = () =>
 describe('media-migrate', () => {
   test('a dry run reads and reports, and writes nothing', async () => {
     const a = await addBlob('a')
-    await addBlob('b')
+    const b = await addBlob('b')
     const summary = await migrateMedia(ctx.db, store, { dryRun: true, print })
-    expect(summary).toMatchObject({ blobs: 2, uploaded: 2, marked: 2 })
+    expect(summary).toMatchObject({
+      blobs: 2,
+      uploaded: 2,
+      marked: 2,
+      localDeleted: 2,
+      localBytes: 2,
+    })
     expect(writes()).toEqual([])
     expect(remoteAt(a.id)).toBeNull()
+    for (const blob of [a, b]) expect(await store.local.stat(blob.hash)).toBe(1)
     expect(lines[0]).toBe('[dry run] 2 blobs not yet in the bucket')
+    expect(
+      await mediaCommand('media-migrate', ctx.db, store, {
+        dryRun: true,
+        print,
+      }),
+    ).toBe(0)
+    expect(lines.at(-1)).toContain('would delete 2 local files (2 B)')
   })
 
-  test('uploads with the right headers, records each blob, and finds nothing left after', async () => {
+  test('uploads with the right headers, records each blob, deletes its local file, and finds nothing left after', async () => {
     const a = await addBlob('a', { mime: 'video/mp4' })
     const b = await addBlob('b')
     const summary = await migrateMedia(ctx.db, store, { print })
@@ -75,6 +89,8 @@ describe('media-migrate', () => {
       marked: 2,
       failed: 0,
       bytesUploaded: 2,
+      localDeleted: 2,
+      localBytes: 2,
     })
     expect(s3.objects.get(a.key)).toMatchObject({
       contentType: 'video/mp4',
@@ -82,8 +98,11 @@ describe('media-migrate', () => {
     })
     expect(s3.objects.get(b.key)!.body.equals(b.body)).toBe(true)
     expect(remoteAt(a.id)).toBeInstanceOf(Date)
-    // Local files stay.
-    expect(await store.local.stat(a.hash)).toBe(1)
+    // The bucket has the only copy now.
+    for (const blob of [a, b]) {
+      expect(await store.local.stat(blob.hash)).toBeUndefined()
+      expect(await store.stat(blob.hash)).toBe(1)
+    }
     s3.requests.length = 0
     expect(await migrateMedia(ctx.db, store, { print })).toMatchObject({
       blobs: 0,
@@ -133,9 +152,84 @@ describe('media-migrate', () => {
         'uploaded 1 (1 B), replaced 0',
         'already in the bucket 0, headers fixed 0',
         `recorded in the bucket 1, e.g. ${FAKE_PUBLIC}/${a.key}`,
+        'deleted 1 local files (1 B), kept 0 for thumbnails',
         'missing locally 0, hash mismatch 0, failed 0',
       ].join('\n'),
     )
+  })
+
+  test('keeps the local file of a blob whose thumbnail is still to be made, or that is a thumbnail', async () => {
+    const due = await addBlob('due')
+    const thumbnail = await addBlob('thumbnail')
+    const plain = await addBlob('plain')
+    ctx.queue.enqueue(ctx.db, 'thumbnail', due.id)
+    ctx.db
+      .insert(blobThumbnails)
+      .values({
+        blobId: plain.id,
+        state: 'ready',
+        key: thumbnail.hash,
+        size: 1,
+        mime: 'image/jpeg',
+      })
+      .run()
+    const dry = await migrateMedia(ctx.db, store, { print, dryRun: true })
+    expect(dry).toMatchObject({ localDeleted: 1, localKept: 2 })
+    const summary = await migrateMedia(ctx.db, store, { print })
+    expect(summary).toMatchObject({ marked: 3, localDeleted: 1, localKept: 2 })
+    expect(await store.local.stat(plain.hash)).toBeUndefined()
+    for (const kept of [due, thumbnail])
+      expect(await store.local.stat(kept.hash)).toBe(kept.body.length)
+    expect(remoteAt(due.id)).toBeInstanceOf(Date)
+  })
+
+  test('a blob the server uploads while it runs is no problem', async () => {
+    const first = await addBlob('first')
+    const second = await addBlob('second')
+    let release!: () => void
+    s3.gate = new Promise((resolve) => (release = resolve))
+    const running = mediaCommand('media-migrate', ctx.db, store, {
+      print,
+      concurrency: 1,
+    })
+    await vi.waitFor(() =>
+      expect(s3.requests.some((r) => r.method === 'PUT')).toBe(true),
+    )
+    // The server's upload job records `second` and deletes its local file.
+    ctx.db
+      .update(blobs)
+      .set({ remoteAt: new Date() })
+      .where(eq(blobs.id, second.id))
+      .run()
+    await store.deleteLocal(second.hash)
+    release()
+    s3.gate = undefined
+    expect(await running).toBe(0)
+    expect(remoteAt(first.id)).toBeInstanceOf(Date)
+    expect(lines.at(-1)).toContain(
+      'recorded in the bucket 1 (and 1 by the server meanwhile)',
+    )
+    expect(lines.at(-1)).toContain(
+      'missing locally 0, hash mismatch 0, failed 0',
+    )
+  })
+
+  test('a failed deletion of the local file keeps the record and counts as a failure', async () => {
+    const a = await addBlob('a')
+    vi.spyOn(store, 'deleteLocal').mockRejectedValueOnce(new Error('EBUSY'))
+    expect(await mediaCommand('media-migrate', ctx.db, store, { print })).toBe(
+      1,
+    )
+    expect(remoteAt(a.id)).toBeInstanceOf(Date)
+    expect(await store.local.stat(a.hash)).toBe(1)
+    expect(lines).toContain(
+      `recorded, but deleting the local file failed: ${a.hash}: EBUSY`,
+    )
+    // media-prune-local takes it from there.
+    expect(await pruneLocalMedia(ctx.db, store, { print })).toMatchObject({
+      deleted: 1,
+    })
+    expect(await store.local.stat(a.hash)).toBeUndefined()
   })
 
   test('a local file that does not match its hash is reported, not uploaded', async () => {
@@ -150,7 +244,7 @@ describe('media-migrate', () => {
     )
   })
 
-  test('objects copied by rclone are kept when they check out, and their headers fixed on the server', async () => {
+  test('objects copied by rclone are kept when a checksum checks out, and their headers fixed on the server', async () => {
     // One part: the ETag is the MD5. rclone set Cache-Control but not the type.
     const single = await addBlob('single', { mime: 'video/mp4' })
     s3.seed(single.key, single.body, {
@@ -170,7 +264,7 @@ describe('media-migrate', () => {
     // Truncated.
     const short = await addBlob('short')
     s3.seed(short.key, Buffer.from('sho'))
-    // No checksum at all.
+    // No checksum at all: its size alone is not enough.
     const bare = await addBlob('bare')
     s3.seed(bare.key, bare.body, { etag: 'def-3' })
     // A thumbnail rclone copied too: no blob names it.
@@ -180,12 +274,17 @@ describe('media-migrate', () => {
     const summary = await migrateMedia(ctx.db, store, { print })
     expect(summary).toMatchObject({
       uploaded: 0,
-      replaced: 2,
-      present: { etag: 1, 'rclone-md5': 1, size: 1, download: 0, sha256: 0 },
-      headersFixed: 3,
+      replaced: 3,
+      present: { etag: 1, 'rclone-md5': 1, download: 0, sha256: 0 },
+      headersFixed: 2,
       marked: 5,
+      localDeleted: 5,
       failed: 0,
     })
+    expect(lines).toContain(`replacing ${bare.hash}: no checksum to compare`)
+    expect(lines).toContain(`replacing ${corrupt.hash}: content differs`)
+    expect(lines).toContain(`replacing ${short.hash}: size 3, expected 5`)
+    expect(s3.objects.get(bare.key)!.etag).toBe(md5(bare.body).digest('hex'))
     for (const blob of [single, multi, corrupt, short, bare])
       expect(s3.objects.get(blob.key)).toMatchObject({
         contentType: blob === single ? 'video/mp4' : 'image/jpeg',
@@ -196,7 +295,7 @@ describe('media-migrate', () => {
     // Fixed by a copy onto itself; other metadata kept.
     const copies = s3.requests.filter((r) => r.headers['x-amz-copy-source'])
     expect(copies.map((r) => r.key).toSorted()).toEqual(
-      [single.key, multi.key, bare.key].toSorted(),
+      [single.key, multi.key].toSorted(),
     )
     expect(
       copies.every((r) => r.headers['x-amz-metadata-directive'] === 'REPLACE'),
@@ -260,12 +359,18 @@ describe('media-prune-local', () => {
     const wrong = await addBlob('wrong')
     const bare = await addBlob('bare')
     const shared = await addBlob('also a thumbnail')
-    await migrateMedia(ctx.db, store, { print })
-    ctx.db
-      .update(blobs)
-      .set({ remoteAt: null })
-      .where(eq(blobs.id, pending.id))
-      .run()
+    const due = await addBlob('thumbnail due')
+    // Recorded with their local files kept, as before local files went
+    // with the upload.
+    for (const blob of [confirmed, wrong, bare, shared, due]) {
+      await store.upload(blob.hash, 'image/jpeg')
+      ctx.db
+        .update(blobs)
+        .set({ remoteAt: new Date() })
+        .where(eq(blobs.id, blob.id))
+        .run()
+    }
+    ctx.queue.enqueue(ctx.db, 'thumbnail', due.id)
     // Changed in the bucket since: the ETag no longer matches.
     s3.objects.get(wrong.key)!.etag = '0'.repeat(32)
     // Without a checksum to compare.
@@ -286,22 +391,22 @@ describe('media-prune-local', () => {
       deleted: 1,
       mismatched: 1,
       unverified: 1,
-      thumbnails: 1,
+      thumbnails: 2,
     })
     expect(await store.local.stat(confirmed.hash)).toBeDefined()
     expect(remoteAt(wrong.id)).toBeInstanceOf(Date)
 
     const summary = await pruneLocalMedia(ctx.db, store, { print })
     expect(summary).toMatchObject({
-      blobs: 4,
+      blobs: 5,
       deleted: 1,
       bytes: confirmed.body.length,
       mismatched: 1,
       unverified: 1,
-      thumbnails: 1,
+      thumbnails: 2,
     })
     expect(await store.local.stat(confirmed.hash)).toBeUndefined()
-    for (const kept of [pending, wrong, bare, shared])
+    for (const kept of [pending, wrong, bare, shared, due])
       expect(await store.local.stat(kept.hash)).toBeDefined()
     // The wrong copy is no longer handed out; the next migration redoes it.
     expect(remoteAt(wrong.id)).toBeNull()

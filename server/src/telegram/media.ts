@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { and, eq } from 'drizzle-orm'
 import { GrammyError, InputFile, type Api } from 'grammy'
+import { withSource, type BlobStore } from '#blob/store.ts'
 import { telegramMedia } from '#db/schema.ts'
-import type { BlobStore } from '#blob/store.ts'
 import type { Database } from '#db/client.ts'
 import type { AssetView } from '#library/views.ts'
 import type { InlineKeyboardMarkup, Message, MessageEntity } from 'grammy/types'
@@ -142,21 +142,25 @@ export class Media {
   async #probe(asset: AssetView) {
     try {
       // A local path, or a URL ffprobe reads only the ranges it needs from.
-      const input = await this.#s.blobs.source(asset.sha256!)
-      const { stdout } = await run(
-        this.#s.ffprobe,
-        [
-          '-v',
-          'error',
-          '-select_streams',
-          'v:0',
-          '-show_entries',
-          'stream=width,height,sample_aspect_ratio:stream_side_data=rotation',
-          '-of',
-          'json',
-          input,
-        ],
-        { timeout: PROBE_TIMEOUT },
+      const { stdout } = await withSource(
+        this.#s.blobs,
+        asset.sha256!,
+        (input) =>
+          run(
+            this.#s.ffprobe,
+            [
+              '-v',
+              'error',
+              '-select_streams',
+              'v:0',
+              '-show_entries',
+              'stream=width,height,sample_aspect_ratio:stream_side_data=rotation',
+              '-of',
+              'json',
+              input,
+            ],
+            { timeout: PROBE_TIMEOUT },
+          ),
       )
       const stream = JSON.parse(stdout).streams?.[0] ?? {}
       const rotation = stream.side_data_list?.find(
