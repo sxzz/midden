@@ -68,6 +68,20 @@ textarea {
   font: inherit;
   color: inherit;
 }
+/* iOS zooms the page when a field below 16px gets focus. Components size
+   their fields as they like; on touch screens none may go under it. */
+@media (pointer: coarse) {
+  input:not([type='checkbox'], [type='radio'], [type='range']),
+  select,
+  textarea {
+    font-size: max(16px, 1em) !important;
+  }
+}
+/* A double tap is a tap, not a zoom. Pinching the page still works, and the
+   media viewer does its own double-tap and pinch zoom. */
+html {
+  touch-action: manipulation;
+}
 button {
   margin: 0;
   padding: 0;
