@@ -244,9 +244,59 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 - 覆盖同样被拒绝：`media-migrate` 改正响应头（复制到自身）和重新上传（`replaced`）会失败，所以要在迁移完成之后再启用。删除后在保留期内又下载到相同内容时，上传任务的上传也是覆盖，会失败，媒体留在本地；`media-migrate` 按校验值保留 R2 中的对象并记下。
 - 按存在时长的规则（如 30 天）能挡住这段时间内的误删，代价是删除的媒体在 R2 中多留这么久；无限期规则会让回收永远失败，不适合这里。
 
+## 原始响应（R2）
+
+默认原始响应在数据库中（`source_responses.body`）。设置 `RAW_R2_BUCKET` 后，每次抓取完成即把原始响应移到这个私有存储桶的 `raw/` 下（zstd 压缩，按内容的 SHA-256 命名），数据库只留下元数据和 `remote_at`，见架构文档「原始响应」。生产环境中它们占数据库的大部分（2026-11-25：`source_responses` 878 MB，其中 `body` 732 MB，128,844 条）。
+
+| 变量                                               | 说明                                                                                                                            |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `RAW_R2_BUCKET`                                    | 私有存储桶，如 `midden-backup`（与 Litestream 的 `db/` 共用，各在自己的前缀下）                                                 |
+| `R2_ACCOUNT_ID`、`CF_API_TOKEN`                    | 与媒体共用：S3 密钥由 token 派生（见「媒体存储」的「配置」），token 要有这个存储桶的写权限，上面的 token 已包括 `midden-backup` |
+| `RAW_R2_ACCESS_KEY_ID`、`RAW_R2_SECRET_ACCESS_KEY` | 可选，这个存储桶自己的一对 S3 密钥，需同时设置；设置后不用 `CF_API_TOKEN`                                                       |
+
+部署这一版本时的迁移给 `source_responses` 加 `remote_at` 列和按 `sha256` 的索引，与是否设置这些变量无关；建索引要读一遍整张表，在 128,844 条、757 MB 的合成副本上约 2.3 秒。
+
+设置了 `RAW_R2_BUCKET` 才启用；还需要 `R2_ACCOUNT_ID`，以及 `CF_API_TOKEN` 或那一对密钥，缺少时启动失败并列出缺少的变量；`RAW_R2_BUCKET` 不能是公开的媒体存储桶 `R2_BUCKET`。用 `CF_API_TOKEN` 时，服务在开始监听之前验证它（与媒体相同），验证失败就不启动，自动部署因此回滚。启动日志 `raw responses store` 的 `store` 为 `r2`（未启用时为 `database`）。`raw-migrate`、`raw-get` 同样先验证。
+
+- 存储桶必须是私有的（不绑定域名、不开公开访问）：原始响应中有平台给登录账号看的内容。用 `midden-backup` 时，不要给它加作用于整个存储桶的生命周期规则（Litestream 自己管理 `db/` 下的文件）。
+- 已设置 `CF_API_TOKEN` 时不需要新的密钥。单独的一对密钥可以在「R2 → Manage API tokens → Create API token」中创建（Object Read & Write，只选这个存储桶），或沿用 Litestream 那一对；R2 的密钥不能限定前缀，所以它们也能读写 `db/`。
+- 费用：按 4 倍压缩，现有的约 180 MB，存储每月约 $0.003；回填约 13 万次 PUT 和同样多的 HEAD，在每月免费额度内。之后每条新的原始响应一次 PUT、一次 HEAD，删除时一次 DELETE。「存储用量」中 `midden-backup` 的存储和操作次数包括 `raw/`。
+- 读取一条：`docker compose exec midden node server/src/cli.ts raw-get <抓取 id>` 列出这次抓取的原始响应（序号、`bucket` 或 `database`、大小、类型、地址），加上序号输出那一条的原始字节。
+- 关闭：删去 `RAW_R2_BUCKET`（和那一对密钥）即可，之后新的原始响应留在数据库中；已在存储桶中的仍在那里，读取它们（`raw-get`）和回收删除都需要这个存储桶，所以只在不再需要它们时关闭。
+
+### 启用与回填
+
+1. 在部署目录的 `.env` 中加上 `RAW_R2_BUCKET=midden-backup`（已设置 `R2_ACCOUNT_ID` 与 `CF_API_TOKEN` 时只需这一行）。
+2. `docker compose up -d`（或推送后自动部署），日志中 `raw responses store` 的 `store` 应为 `r2`。此后完成的抓取由服务自己移走。
+3. 回填已有的原始响应：
+
+   ```sh
+   docker compose exec midden node server/src/cli.ts raw-migrate --dry-run
+   docker compose exec midden node server/src/cli.ts raw-migrate --limit 100
+   docker compose exec midden node server/src/cli.ts raw-migrate --concurrency 16
+   ```
+
+   试运行不访问存储桶、不改动数据库，读出所有还在数据库中的原始响应并在本地压缩，汇总条数、原始大小与压缩后的大小。`--limit 100` 先移 100 条抽查（见第 4 步），最后全部移走。每条先压缩、上传、读回核对（大小、ETag 即压缩后字节的 MD5、元数据中的 SHA-256），每批最多 100 条在一个事务中记下并清空，所以任何时候中断都不会丢失：已上传还没记下的，下次重新上传（同一个键，同样的内容）。重新运行即从剩下的继续。只处理 10 分钟以前的行，更新的留给服务。每 5 秒输出一次进度，结束时输出汇总；有失败或与哈希不符的行时退出码为 1，这些行原样留在数据库中，重新运行即可。服务照常运行，抓取不受影响。13 万条在一台本地的模拟存储桶上约 4 分钟，实际取决于到 R2 的延迟（每条两次请求），`--concurrency 16` 时估计半小时左右。
+
+4. 抽查：
+
+   ```sh
+   docker compose run --rm --entrypoint sqlite3 litestream -readonly /data/midden.db \
+     "SELECT remote_at IS NOT NULL, count(*), sum(size) FROM source_responses GROUP BY 1;
+      SELECT capture_id FROM source_responses WHERE remote_at IS NOT NULL LIMIT 1;"
+   docker compose exec midden node server/src/cli.ts raw-get <抓取 id>
+   docker compose exec midden node server/src/cli.ts raw-get <抓取 id> 0 | head -c 300
+   ```
+
+   第一条给出仍在数据库中（`0`）和已在存储桶中（`1`）的条数与原始大小，回填结束后前者只剩最近 10 分钟的，以及一个已移走的抓取 id；`raw-get` 列出它的原始响应（应为 `bucket`），再输出第一条，应是原始的 JSON。回填结束后 `raw-migrate --dry-run` 应显示 `0 raw responses in the database to move`。
+
+5. 数据库变小：清空的原始响应留下的页面成为空闲页面，维护任务每 15 分钟最多还给文件系统 16 MiB（见「维护任务」），不需要 `VACUUM`。在 147,000 条抓取、128,844 条原始响应（757 MB）的合成副本上（迁移后 1,369 MB），回填后空闲页面约 877 MB，55 次（约 14 小时）后数据库降到 492 MB，`source_responses` 只剩 27 MB。生产环境的数据库因此应从 2.32 GB 降到约 1.4–1.5 GB（减去 `source_responses` 的约 850 MB），约 13–14 小时后到达。日志 `released free database pages` 的 `free` 逐次减少，降到 1024 以下就停止。这些改动照常经 Litestream 复制：在同一个合成副本上，回填共写入约 3.2 GB 的 WAL（每批记下的行移到表尾，并改动它们的索引项、所在的页面和空闲页面列表），incremental vacuum 追上又写入约 0.9 GB。Litestream 的每个文件中同一页面只存一次，并以 LZ4 压缩，所以上传的量少于这个数；多出的 L1、L2 文件按保留期在约 9 天后删除。
+
+恢复较早的数据库（见「恢复」）时，那之后被删除的原始响应会回到数据库中，而它们在存储桶中的对象在删除 24 小时后就被回收了，读取这些原始响应会失败；其他原始响应不受影响。原始响应在存储桶中只有这一份，与 R2 中的媒体一样没有其他备份。
+
 ## 备份与恢复
 
-需要备份的是数据库、媒体与 `.env`：
+需要备份的是数据库、媒体与 `.env`（原始响应移到存储桶后只在那里，见「原始响应（R2）」）：
 
 - 数据库：Litestream 持续复制到 R2 的私有存储桶 `midden-backup`，可以恢复到最近 7 天内的任一时刻，见「Litestream」。不启用时，自己定期做在线备份（服务运行中即可）：
 
@@ -308,7 +358,7 @@ Litestream 0.5 把 WAL 中新提交的页面写成 LTX 文件（按页 LZ4 压�
 
 #### 检查点
 
-服务的连接用 WAL、`synchronous = NORMAL`、5 秒的 busy timeout，保留 SQLite 默认的自动检查点（WAL 超过 1000 页时，PASSIVE）。Litestream 一直持有一个读事务，只有它自己的检查点能让 WAL 从头开始写（它做 PASSIVE 检查点时短暂持有写锁，写入在这期间等待，busy timeout 足够）；PASSIVE 检查点越不过它的读事务，所以服务的自动检查点不影响复制。服务中没有 `wal_checkpoint(RESTART)`、`wal_checkpoint(TRUNCATE)` 和 `VACUUM`：前两者会让 Litestream 重新上传整个数据库，`VACUUM` 把每一页写进 WAL，都不要加。`PRAGMA optimize`（启动时和每 6 小时）是普通的写事务；`cli.ts backup` 只读数据库。WAL 超过约 500 MB 时 Litestream 先试 PASSIVE，不行再做阻塞的 TRUNCATE（默认设置，保留）。
+服务的连接用 WAL、`synchronous = NORMAL`、5 秒的 busy timeout，保留 SQLite 默认的自动检查点（WAL 超过 1000 页时，PASSIVE）。Litestream 一直持有一个读事务，只有它自己的检查点能让 WAL 从头开始写（它做 PASSIVE 检查点时短暂持有写锁，写入在这期间等待，busy timeout 足够）；PASSIVE 检查点越不过它的读事务，所以服务的自动检查点不影响复制。服务中没有 `wal_checkpoint(RESTART)`、`wal_checkpoint(TRUNCATE)` 和 `VACUUM`：前两者会让 Litestream 重新上传整个数据库，`VACUUM` 把每一页写进 WAL，都不要加。`PRAGMA optimize`（启动时和每 6 小时）和 `PRAGMA incremental_vacuum`（见「维护任务」）是普通的写事务；`cli.ts backup` 只读数据库。数据库变小的事务（incremental vacuum 截短文件）在 Litestream 0.5.2 中会让同步报 `page number X out-of-bounds for commit size Y`（#875），之后由 #881 修复，固定的 0.5.18 已包含；用 0.5.18 在本地试过：一边复制，一边清空大量数据并分批 incremental vacuum，最新状态与其间三个时刻的恢复都通过完整性检查，最新状态的页数和内容与源数据库相同。WAL 超过约 500 MB 时 Litestream 先试 PASSIVE，不行再做阻塞的 TRUNCATE（默认设置，保留）。
 
 Litestream 在数据库中建两张表 `_litestream_seq`、`_litestream_lock`，恢复出的数据库中也有，不影响服务。
 
@@ -483,9 +533,12 @@ Cloudflare 的 GraphQL Analytics API（`POST https://api.cloudflare.com/client/v
 - 删除不再保存、也没有进行中抓取的收藏及其独有内容；
 - 没有产生新版本的抓取，其原始响应保留 3 天，之后只要不是这个收藏最新一次的抓取就删除；产生了新版本的抓取的原始响应一直保留；
 - 不再被引用的媒体文件 24 小时后删除（使用 R2 时同时删除对象并清除边缘缓存）；
+- 不再有任何原始响应使用的存储桶对象 24 小时后删除（见「原始响应（R2）」）；
+- 删除抓取结束一天以上仍留着的暂存数据（`capture_staging`，没能提交的列表目标的预取）；
 - 为缺少缩略图的媒体补做缩略图；
 - 清理过期的网页会话、通行密钥挑战与 `/passkey` 链接；
-- 每 15 分钟读取存储用量并检查提醒，每天一次统计数据库组成（见「存储用量」）。
+- 每 15 分钟读取存储用量并检查提醒，每天一次统计数据库组成（见「存储用量」）；
+- 把空闲页面还给文件系统：空闲页面达到 1024 页（4 MiB）时运行 `PRAGMA incremental_vacuum(4096)`，每次最多 16 MiB，两次之间至少 15 分钟，所以积压最多每小时释放 64 MiB；日志 `released free database pages` 给出这次释放的页数、剩余空闲页数（`free`）和总页数（`pages`）。这要求数据库是 `auto_vacuum = INCREMENTAL`：新建的数据库默认如此，已有的数据库要 `VACUUM` 一次才能切换（生产环境已于 2026-11-25 切换），否则这一步什么也不做。
 
 ## 从 Go 版迁移
 
