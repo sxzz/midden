@@ -12,7 +12,7 @@ import { cachePurge } from '#blob/purge.ts'
 import { parseRange } from '#blob/route.ts'
 import { S3Bucket } from '#blob/s3.ts'
 import { r2Credentials } from '#cloudflare.ts'
-import { RawStore } from '#raw/store.ts'
+import { RawStore, type RawStoreOptions } from '#raw/store.ts'
 import type { MediaSigner } from '#blob/signer.ts'
 import type { Logger } from '#log.ts'
 
@@ -57,6 +57,18 @@ export class FakeS3 {
   verified = 0
   /** Answer this many coming S3 requests with a 500. */
   failNext = 0
+  /** Answer this many coming S3 requests with a 429, as a rate limit. */
+  rateLimitNext = 0
+  /** Sent as `Retry-After` with those 429s, when set. */
+  retryAfter: string | undefined
+  /**
+   * Answer a write to a key while another write to it is under way with a
+   * 429, as R2 limits writes to one key to about one a second.
+   */
+  oneWritePerKey = false
+  /** Requests answered with a 429. */
+  limited = 0
+  readonly #writing = new Set<string>()
   /** Answer every request for these keys with a 500. */
   readonly failKeys = new Set<string>()
   /** Answer purges with an error. */
@@ -113,8 +125,8 @@ export class FakeS3 {
   }
 
   /** The raw response store, backed by this bucket. */
-  rawStore(): RawStore {
-    return new RawStore(this.s3())
+  rawStore(options: RawStoreOptions = {}): RawStore {
+    return new RawStore(this.s3(), { pauseMs: 10, ...options })
   }
 
   /** A client of this bucket. */
@@ -250,6 +262,10 @@ export class FakeS3 {
       if (this.failNext > 0) this.failNext--
       return { status: 500, body: xml('InternalError') }
     }
+    if (this.rateLimitNext > 0) {
+      this.rateLimitNext--
+      return this.#limit()
+    }
     switch (req.method) {
       case 'PUT':
         return req.headers['x-amz-copy-source']
@@ -266,7 +282,28 @@ export class FakeS3 {
     }
   }
 
+  #limit(): { status: number; headers: Record<string, string>; body: string } {
+    this.limited++
+    const headers: Record<string, string> = {}
+    if (this.retryAfter) headers['Retry-After'] = this.retryAfter
+    return { status: 429, headers, body: xml('TooManyRequests') }
+  }
+
   async #put(key: string, req: IncomingMessage, body: Buffer) {
+    if (this.oneWritePerKey) {
+      if (this.#writing.has(key)) return this.#limit()
+      this.#writing.add(key)
+    }
+    try {
+      // Long enough for writes sent together to overlap.
+      if (this.oneWritePerKey) await new Promise((r) => setTimeout(r, 20))
+      return await this.#store(key, req, body)
+    } finally {
+      if (this.oneWritePerKey) this.#writing.delete(key)
+    }
+  }
+
+  async #store(key: string, req: IncomingMessage, body: Buffer) {
     await this.gate
     if (Number(req.headers['content-length']) !== body.length)
       return { status: 400, body: xml('IncompleteBody') }

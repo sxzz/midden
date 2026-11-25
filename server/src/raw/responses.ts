@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 import { rawGarbage, sourceResponses } from '#db/schema.ts'
 import type { Database, Executor, Transaction } from '#db/client.ts'
 import type { RawStore } from './store.ts'
@@ -34,47 +34,99 @@ export function deleteSourceResponses(
 }
 
 /**
- * Record bodies confirmed in the bucket and clear them here, in one
- * transaction. Each row also moves to the end of the table (a new rowid):
- * cleared in place, a row would keep the page its body began on, mostly
- * empty; moved, it joins the other small rows at the end, and the pages it
- * left empty go to the freelist, which `incremental_vacuum` returns. A row
- * deleted meanwhile leaves its object to garbage collection, which deletes
- * it unless another row uses it. Returns the rows recorded.
+ * Record a body confirmed in the bucket and clear it here. The row also
+ * moves to the end of the table (a new rowid): cleared in place, it would
+ * keep the page its body began on, mostly empty; moved, it joins the other
+ * small rows at the end, and the pages it left empty go to the freelist,
+ * which `incremental_vacuum` returns. A row deleted meanwhile leaves its
+ * object to garbage collection, which deletes it unless another row uses
+ * it. Whether the row was recorded.
  */
+function markRow(
+  tx: Transaction,
+  row: Pick<SourceResponse, 'id' | 'sha256'>,
+  now: Date,
+): boolean {
+  // One row at a time: a statement moving several would give them all the
+  // same new rowid.
+  const { changes } = tx.run(sql`
+    UPDATE ${sourceResponses}
+    SET body = ${EMPTY}, remote_at = ${now.getTime()},
+      rowid = (SELECT max(rowid) + 1 FROM ${sourceResponses})
+    WHERE ${sourceResponses.id} = ${row.id}
+      AND ${sourceResponses.sha256} = ${row.sha256}
+      AND ${sourceResponses.remoteAt} IS NULL`)
+  if (changes) return true
+  const gone = !tx
+    .select({ id: sourceResponses.id })
+    .from(sourceResponses)
+    .where(eq(sourceResponses.id, row.id))
+    .get()
+  if (gone)
+    tx.insert(rawGarbage)
+      .values({ key: row.sha256, since: now })
+      .onConflictDoNothing()
+      .run()
+  return false
+}
+
+/** Rows that still hold this body here. */
+export function localRows(
+  db: Executor,
+  sha256: string,
+): Pick<SourceResponse, 'id' | 'sha256'>[] {
+  return db
+    .select({ id: sourceResponses.id, sha256: sourceResponses.sha256 })
+    .from(sourceResponses)
+    .where(
+      and(eq(sourceResponses.sha256, sha256), isNull(sourceResponses.remoteAt)),
+    )
+    .all()
+}
+
+/** Whether a row recorded this body in the bucket already. */
+export function storedBefore(db: Executor, sha256: string): boolean {
+  return !!db
+    .select({ id: sourceResponses.id })
+    .from(sourceResponses)
+    .where(
+      and(
+        eq(sourceResponses.sha256, sha256),
+        isNotNull(sourceResponses.remoteAt),
+      ),
+    )
+    .get()
+}
+
+/** Record these rows' bodies as in the bucket, in one transaction. */
 export function markStored(
   db: Database,
   rows: readonly Pick<SourceResponse, 'id' | 'sha256'>[],
   now: Date,
 ): number {
   if (!rows.length) return 0
-  return db.transaction((tx) => {
-    let marked = 0
-    for (const row of rows) {
-      const { changes } = tx.run(sql`
-        UPDATE ${sourceResponses}
-        SET body = ${EMPTY}, remote_at = ${now.getTime()},
-          rowid = (SELECT max(rowid) + 1 FROM ${sourceResponses})
-        WHERE ${sourceResponses.id} = ${row.id}
-          AND ${sourceResponses.sha256} = ${row.sha256}
-          AND ${sourceResponses.remoteAt} IS NULL`)
-      if (changes) {
-        marked++
-        continue
-      }
-      const gone = !tx
-        .select({ id: sourceResponses.id })
-        .from(sourceResponses)
-        .where(eq(sourceResponses.id, row.id))
-        .get()
-      if (gone)
-        tx.insert(rawGarbage)
-          .values({ key: row.sha256, since: now })
-          .onConflictDoNothing()
-          .run()
-    }
-    return marked
-  })
+  return db.transaction(
+    (tx) => rows.filter((row) => markRow(tx, row, now)).length,
+  )
+}
+
+/**
+ * Record every row still holding one of these bodies, confirmed in the
+ * bucket, in one transaction: rows sharing a body share its object.
+ * Returns the rows recorded.
+ */
+export function markStoredKeys(
+  db: Database,
+  keys: readonly string[],
+  now: Date,
+): number {
+  if (!keys.length) return 0
+  return db.transaction(
+    (tx) =>
+      keys
+        .flatMap((key) => localRows(tx, key))
+        .filter((row) => markRow(tx, row, now)).length,
+  )
 }
 
 /** The raw responses of a capture, in order, bodies left where they are. */

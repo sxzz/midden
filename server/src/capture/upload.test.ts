@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { FsBlobStore } from '#blob/fs-store.ts'
 import { mediaRoutes } from '#blob/route.ts'
+import { S3_ATTEMPTS } from '#blob/s3.ts'
 import { IMMUTABLE, objectPath } from '#blob/store.ts'
 import { assets, blobs, blobThumbnails, captures, jobs } from '#db/schema.ts'
 import { deleteCollection } from '#library/delete.ts'
@@ -165,7 +166,8 @@ describe('media in R2', () => {
   test('a failed upload is retried later and logged; the media stays local meanwhile', async () => {
     const { c, clock, media, logs, store, capture } = setup()
     media['1'] = [{ url: 'https://m.test/a.jpg' }]
-    s3.failNext = 3
+    // Every try of the request.
+    s3.failNext = S3_ATTEMPTS
     const done = await capture('1')
     expect(done.state).toBe('complete')
     const { hash } = c.db.select().from(blobs).get()!

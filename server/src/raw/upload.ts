@@ -1,8 +1,13 @@
 import { and, asc, eq, isNull, lte, or } from 'drizzle-orm'
 import { rawGarbage, sourceResponses } from '#db/schema.ts'
-import { PermanentError, RetryError, type Job } from '#jobs/queue.ts'
-import { markStored } from './responses.ts'
-import { CorruptRawError, type RawStore } from './store.ts'
+import {
+  PermanentError,
+  RetryError,
+  SnoozeError,
+  type Job,
+} from '#jobs/queue.ts'
+import { localRows, markStored, storedBefore } from './responses.ts'
+import { CorruptRawError, RawRateLimitError, type RawStore } from './store.ts'
 import type { CaptureContext } from '#capture/context.ts'
 import type { Transaction } from '#db/client.ts'
 
@@ -41,8 +46,12 @@ export function enqueueRawUpload(
 }
 
 /**
- * Store one body in the bucket and record it, clearing it here: written
- * and read back first, cleared after.
+ * Store one body in the bucket and record every row holding it here,
+ * clearing them: written and read back first, cleared after. Under the
+ * key's lock, so no two jobs store one key at once (R2 rejects writes to a
+ * key faster than about one a second); a job that finds its row recorded
+ * by another meanwhile has nothing left to do, and one whose body another
+ * row stored before only checks the object. Returns the rows recorded.
  */
 export function storeResponse(
   ctx: CaptureContext,
@@ -51,8 +60,13 @@ export function storeResponse(
   signal?: AbortSignal,
 ): Promise<number> {
   return ctx.mediaLocks.run(rawLock(row.sha256), async () => {
-    await raw.put(row.sha256, row.body, signal)
-    return markStored(ctx.db, [row], now(ctx))
+    const rows = localRows(ctx.db, row.sha256)
+    if (rows.every((local) => local.id !== row.id)) return 0
+    await raw.store(row.sha256, row.body, {
+      check: storedBefore(ctx.db, row.sha256),
+      signal,
+    })
+    return markStored(ctx.db, rows, now(ctx))
   })
 }
 
@@ -63,6 +77,9 @@ export async function runRawUpload(
 ): Promise<void> {
   const raw = ctx.raw
   if (!raw) return
+  // Waiting out the bucket's pause is no attempt.
+  const paused = raw.pausedFor()
+  if (paused) throw new SnoozeError(paused)
   const rows = ctx.db
     .select({
       id: sourceResponses.id,
@@ -83,6 +100,14 @@ export async function runRawUpload(
       await storeResponse(ctx, raw, row, job.signal)
     } catch (error) {
       if (job.signal.aborted) throw error
+      if (error instanceof RawRateLimitError) {
+        if (error.started)
+          ctx.logger.warn(
+            { afterMs: error.afterMs, err: error.cause },
+            'raw bucket rate-limited; pausing raw uploads',
+          )
+        throw new SnoozeError(error.afterMs)
+      }
       if (error instanceof CorruptRawError)
         throw new PermanentError(String(error), { cause: error })
       throw new RetryError(
@@ -139,6 +164,8 @@ export async function collectRawGarbage(ctx: CaptureContext): Promise<number> {
           await raw.delete(garbage.key)
           deleted++
         } catch (error) {
+          // The bucket is pausing: the next pass tries again, no attempt lost.
+          if (error instanceof RawRateLimitError) return
           failures.push(new Error(`raw ${garbage.key}: ${String(error)}`))
           ctx.db
             .update(rawGarbage)

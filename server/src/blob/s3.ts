@@ -47,14 +47,66 @@ export class S3Error extends Error {
   override name = 'S3Error'
   readonly status: number
   readonly code: string
-  constructor(operation: string, status: number, code: string) {
+  /** How long the service asked to wait (`Retry-After`), if it did. */
+  readonly retryAfterMs: number | undefined
+  constructor(
+    operation: string,
+    status: number,
+    code: string,
+    retryAfterMs?: number,
+  ) {
     super(`S3 ${operation} failed: ${status}${code ? ` ${code}` : ''}`)
     this.status = status
     this.code = code
+    this.retryAfterMs = retryAfterMs
+  }
+
+  /**
+   * Too many requests: R2 answers 429 to writes of one key faster than
+   * about one a second, S3 503 SlowDown. Waiting is the remedy.
+   */
+  get rateLimited(): boolean {
+    return this.status === 429 || this.status === 503
   }
 }
 
-const ATTEMPTS = 3
+export function isRateLimited(error: unknown): error is S3Error {
+  return error instanceof S3Error && error.rateLimited
+}
+
+/** Tries of one request before its error reaches the caller. */
+export const S3_ATTEMPTS = 5
+// A longer Retry-After is not waited out inside one request: the error
+// carries it, and the caller pauses for it.
+const LONGEST_WAIT = 30_000
+const SECONDS = /^\d+$/
+
+/** `Retry-After` in ms: seconds or an HTTP date; undefined if absent. */
+export function retryAfterMs(
+  header: string | null,
+  now = Date.now(),
+): number | undefined {
+  if (!header) return undefined
+  if (SECONDS.test(header.trim())) return Number(header) * 1000
+  const at = Date.parse(header)
+  return Number.isNaN(at) ? undefined : Math.max(at - now, 0)
+}
+
+/**
+ * The wait before attempt `attempt + 1`: what the service asked for, else
+ * exponential from `base` with jitter (0.5 to 1.5 times), so that requests
+ * failing together do not come back together.
+ */
+export function backoffMs(
+  attempt: number,
+  base: number,
+  retryAfter?: number,
+  random = Math.random,
+): number {
+  if (retryAfter !== undefined) return retryAfter
+  return Math.round(base * 2 ** (attempt - 1) * (0.5 + random()))
+}
+
 const REQUEST_TIMEOUT = 60_000
 const META = 'x-amz-meta-'
 const TRAILING_SLASHES = /\/+$/
@@ -113,8 +165,10 @@ export class S3Bucket {
   }
 
   /**
-   * Send a request, again on network errors, 5xx and 429. The body is made
-   * per attempt, so a file can be streamed each time.
+   * Send a request, again on network errors, 5xx and 429, after the wait
+   * the service asked for (`Retry-After`) or an exponential one with
+   * jitter. The body is made per attempt, so a file can be streamed each
+   * time.
    */
   async #send(
     operation: string,
@@ -129,7 +183,7 @@ export class S3Bucket {
     } = {},
   ): Promise<Response> {
     let lastError: unknown
-    for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    for (let attempt = 1; attempt <= S3_ATTEMPTS; attempt++) {
       const signed = await this.#sign(method, key, headers)
       const signals = [init.signal].filter((s) => s !== undefined)
       if (init.timeout !== false)
@@ -147,14 +201,18 @@ export class S3Bucket {
         lastError = new Error(`S3 ${operation} failed: ${String(error)}`, {
           cause: error,
         })
-        await sleep(attempt * this.#retryDelay)
+        if (attempt < S3_ATTEMPTS)
+          await sleep(backoffMs(attempt, this.#retryDelay))
         continue
       }
       if (response.ok || init.ok?.(response.status)) return response
       const code = await errorCode(response)
-      lastError = new S3Error(operation, response.status, code)
-      if (response.status < 500 && response.status !== 429) throw lastError
-      await sleep(attempt * this.#retryDelay)
+      const after = retryAfterMs(response.headers.get('retry-after'))
+      const failure = new S3Error(operation, response.status, code, after)
+      lastError = failure
+      if (response.status < 500 && response.status !== 429) throw failure
+      if (attempt === S3_ATTEMPTS || (after ?? 0) > LONGEST_WAIT) throw failure
+      await sleep(backoffMs(attempt, this.#retryDelay, after))
     }
     throw lastError
   }
