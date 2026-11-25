@@ -20,7 +20,7 @@ import { inJson } from '#db/sql.ts'
 import { AppError, isAppError } from '#errors.ts'
 import { SnoozeError, type Job as QueueJob } from '#jobs/queue.ts'
 import { parseFilterQuery } from '#library/filter-query.ts'
-import { selectedIds } from '#library/list.ts'
+import { updateSelection } from '#library/list.ts'
 import {
   budget,
   checkOptions,
@@ -133,7 +133,8 @@ function resolveTarget(db: Executor, input: UpdateTargetInput): Resolved {
       ? db.select().from(folders).where(eq(folders.id, input.id)).get()
       : undefined
     if (!folder) throw new AppError('not_found')
-    const ids = selectedIds(
+    // Posts there only through an account the update covers come with it.
+    const ids = updateSelection(
       db,
       parseFilterQuery(folder.filter).filter,
       MAX_FOLDER + 1,

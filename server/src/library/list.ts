@@ -724,19 +724,62 @@ export function selectedAmong(
   )
 }
 
-/** Every collection a filter selects, up to `limit`, in no set order. */
-export function selectedIds(
+/**
+ * Whether `k` meets the filter on its own, not through its author. Two
+ * conditions reach a post through its author: a wanted tag the author's
+ * saved profile carries, and the 关系 filter, whose set is accounts and
+ * which selects posts by their author. Everything else (search, media,
+ * dates, the author filter, visibility, `related_to`, the post type) is
+ * about the item itself; an excluded tag only takes items out.
+ */
+function directSQL(checked: Checked): SQL {
+  const { tag, tagMode } = checked.filter
+  const own = (tags: string[]) => sql`k.collection_id IN (
+    SELECT ct.collection_id FROM collection_tags ct
+    WHERE ct.tag_id IN (SELECT value FROM json_each(${list(tags)})))`
+  const wanted = values(tag)
+  const conditions =
+    tagMode === 'all'
+      ? wanted.map((id) => own([id]))
+      : wanted.length
+        ? [own(wanted)]
+        : []
+  // An account is its own subject; a post's is its author.
+  if (checked.relOf.length)
+    conditions.push(sql`k.subject_entity_id = k.root_entity_id`)
+  return conditions.length ? sql.join(conditions, sql` AND `) : sql`1`
+}
+
+/**
+ * What updating everything a filter selects covers, up to `limit`, in no set
+ * order: every account it selects, and every post except those it selects
+ * only through their author (see `directSQL`) when that author's profile is
+ * among the accounts, whose own update reads its posts as the update's
+ * options say. A post it selects on its own merits is updated by itself
+ * even then: the profile's update need not reach it.
+ */
+export function updateSelection(
   db: Executor,
   input: CollectionFilter,
   limit: number,
 ): string[] {
-  const { ctes, source, where } = select(db, input)
+  const { checked, ctes, source, where } = select(db, input)
   return db
     .all<{ id: string }>(
       sql`
       ${ctes}
-      SELECT k.collection_id AS id FROM ${sql.raw(source)}
-      WHERE ${where}
+      SELECT id FROM (
+        SELECT id, profile, direct, account,
+          max(profile) OVER (PARTITION BY account) AS covered
+        FROM (
+          SELECT k.collection_id AS id,
+            coalesce(k.root_kind LIKE '%.profile', 0) AS profile,
+            ${directSQL(checked)} AS direct,
+            CASE WHEN k.root_kind LIKE '%.profile' THEN k.root_entity_id
+              ELSE k.author_entity_id END AS account
+          FROM ${sql.raw(source)}
+          WHERE ${where}))
+      WHERE profile OR direct OR account IS NULL OR NOT covered
       LIMIT ${limit}`,
     )
     .map((row) => row.id)
