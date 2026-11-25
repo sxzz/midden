@@ -2,7 +2,9 @@
 // Back up the deployment in MIDDEN_DIR (default ~/midden): a consistent
 // database snapshot with .env, kept per day, and a mirror of the media,
 // which never change once written, so the mirror plus any snapshot restores
-// completely. Run daily by the LaunchAgent from install-backup.ts.
+// completely. With MEDIA_STORE=r2 in .env the media originals live in R2
+// alone and are not mirrored. Run daily by the LaunchAgent from
+// install-backup.ts.
 //
 //   node scripts/backup.ts [--to ~/backups/midden/auto] [--keep-days 7]
 import { execFileSync } from 'node:child_process'
@@ -141,14 +143,20 @@ async function backup() {
     throw error
   }
 
-  // After the snapshot: media are written before the rows that use them.
-  step('media')
-  mkdirSync(path.join(target, 'media'), { recursive: true })
-  run('rsync', [
-    '-a',
-    `${path.join(dataDir, 'media')}/`,
-    `${path.join(target, 'media')}/`,
-  ])
+  if (env.MEDIA_STORE === 'r2') {
+    // The server deletes each local original once R2 holds it; what stays
+    // is thumbnails, which it renders again, and originals on their way.
+    step('media: skipped, MEDIA_STORE=r2 keeps the originals in R2')
+  } else {
+    // After the snapshot: media are written before the rows that use them.
+    step('media')
+    mkdirSync(path.join(target, 'media'), { recursive: true })
+    run('rsync', [
+      '-a',
+      `${path.join(dataDir, 'media')}/`,
+      `${path.join(target, 'media')}/`,
+    ])
+  }
 
   // Prune only after a successful backup, and never the newest one.
   const days = readdirSync(daily)
