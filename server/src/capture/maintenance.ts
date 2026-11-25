@@ -37,7 +37,7 @@ import type { Transaction } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
 
 const STALE_CAPTURE = 60 * 60_000
-const RAW_KEEP = 7 * 24 * 60 * 60_000
+const RAW_KEEP = 3 * 24 * 60 * 60_000
 const MEDIA_GRACE = 24 * 60 * 60_000
 const BATCH = 100
 const THUMBNAIL_BACKFILL = 2000
@@ -224,8 +224,8 @@ export function releaseBlobs(tx: Transaction, blobIds: string[]): number {
 }
 
 /**
- * Raw responses of captures that changed nothing are kept for a week and
- * while their capture is the newest of its collection.
+ * Raw responses of captures that changed nothing are kept for three days
+ * and while their capture is the newest of its collection.
  */
 export function pruneSourceResponses(ctx: CaptureContext): number {
   const cutoff = new Date(now(ctx) - RAW_KEEP)

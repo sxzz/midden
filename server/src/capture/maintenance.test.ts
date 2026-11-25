@@ -136,7 +136,9 @@ describe('maintenance', () => {
     text = 'v2'
     await refresh() // new revision
     expect(c.db.select().from(sourceResponses).all()).toHaveLength(3)
-    clock.now += 8 * 24 * 60 * 60_000
+    clock.now += 71 * 60 * 60_000
+    expect(pruneSourceResponses(c)).toBe(0)
+    clock.now += 2 * 60 * 60_000
     expect(pruneSourceResponses(c)).toBe(1)
     // The first (a revision) and the newest stay.
     expect(c.db.select().from(sourceResponses).all()).toHaveLength(2)
