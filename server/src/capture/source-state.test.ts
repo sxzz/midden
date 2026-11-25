@@ -7,6 +7,7 @@ import {
   jobs,
   submissions,
 } from '#db/schema.ts'
+import { RANK } from '#jobs/queue.ts'
 import { status } from '#platforms/rpc.ts'
 import { testContext } from '#testing/context.ts'
 import {
@@ -15,9 +16,16 @@ import {
   postGraph,
   type FakeFetch,
 } from '#testing/fake-platform.ts'
+import { entity, graph } from '#testing/library.ts'
 import { captureHandlers } from './handlers.ts'
 import { CONFIRM_GAP_MS, RECHECK_KEY, RECHECK_MS } from './source-state.ts'
 import { submit, type SubmitInput } from './submit.ts'
+import {
+  listRecords,
+  startUpdate,
+  updateMembers,
+  updateRecord,
+} from './updates.ts'
 import type { CaptureContext } from './context.ts'
 
 let ctx: CaptureContext | undefined
@@ -27,6 +35,8 @@ afterEach(async () => {
 })
 
 const post = 'https://fake.test/p/1'
+/** A profile: captured again whenever asked, as an update asks. */
+const profile = 'https://fake.test/u/7'
 const HOUR = 60 * 60_000
 
 /** What the platform answers: the post, or that it is gone. */
@@ -35,9 +45,11 @@ type Answer = 'ok' | 'gone' | 'explicit' | 'suspended'
 function setup() {
   let clock = Date.parse('2026-11-01T00:00:00Z')
   const state = { answer: 'ok' as Answer }
-  const fetch: FakeFetch = () => {
+  const fetch: FakeFetch = (req) => {
     if (state.answer === 'ok')
-      return { text: 'hello', graph: postGraph('1', { text: 'hello' }) }
+      return req.externalId === '7'
+        ? { text: 'bio', graph: graph([entity('root', 'fake.profile', '7')]) }
+        : { text: 'hello', graph: postGraph('1', { text: 'hello' }) }
     throw new FakeFailure(
       status.FAILED_PRECONDITION,
       state.answer === 'suspended' ? '账号已被封禁' : '帖子不存在或已删除',
@@ -180,4 +192,52 @@ test('another state, once confirmed, ends the one before', async () => {
     ['deleted', true],
     ['suspended', false],
   ])
+})
+
+test('seeing a known state again is no anomaly, nor anything to retry', async () => {
+  const { ctx, state, advance } = setup()
+  const { collectionId: id } = await capture(ctx, { url: profile })
+  // Before it is known, a gone post is a failure like any other.
+  state.answer = 'gone'
+  const first = startUpdate(ctx, { target: 'collection', id })
+  await ctx.queue.drain()
+  expect(updateRecord(ctx.db, first)).toMatchObject({
+    state: 'failed',
+    members: { failed: 1, known: 0 },
+  })
+  // Its re-check is the worker's own background work, not the update's.
+  expect(
+    ctx.db
+      .select({ updateId: jobs.updateId, priority: jobs.priority })
+      .from(jobs)
+      .where(eq(jobs.type, 'source-check'))
+      .all(),
+  ).toEqual([{ updateId: null, priority: RANK.maintenance }])
+  state.answer = 'explicit'
+  advance(HOUR)
+  const again = startUpdate(ctx, { target: 'collection', id })
+  await ctx.queue.drain()
+  expect(updateRecord(ctx.db, again)).toMatchObject({
+    state: 'complete',
+    members: { failed: 0, known: 1, updated: 1 },
+    retryable: 0,
+  })
+  expect(updateMembers(ctx.db, again, 'problem').items).toEqual([])
+  expect(updateMembers(ctx.db, again, 'updated').items).toMatchObject([
+    {
+      collectionId: id,
+      state: 'failed',
+      sourceState: 'deleted',
+      retryable: false,
+    },
+  ])
+  // A capture of its link on its own says so too.
+  advance(HOUR)
+  const single = await capture(ctx, { refreshId: id, key: 'again' })
+  expect(single.state).toBe('failed')
+  expect(
+    listRecords(ctx.db).items.find(
+      (r) => 'jobId' in r && r.jobId === single.id,
+    ),
+  ).toMatchObject({ sourceState: 'deleted' })
 })

@@ -282,6 +282,8 @@ export interface ProgressInput {
   complete: number
   partial: number
   failed: number
+  /** Members that only said again they are deleted or suspended. */
+  known: number
   /** Saved members new to the library and already saved; absent if unknown. */
   added?: number
   updated?: number
@@ -333,8 +335,11 @@ export function progressMessage(
         : p.paused
           ? '已暂停'
           : '正在采集…'
-    const running = Math.max(0, p.total - p.complete - p.partial - p.failed)
-    body = `${heading}\n${p.url}\n\n本次 ${p.total} 项：已保存 ${p.complete} · 内容不完整 ${p.partial} · 失败 ${p.failed} · 进行中 ${running}`
+    const running = Math.max(
+      0,
+      p.total - p.complete - p.partial - p.failed - p.known,
+    )
+    body = `${heading}\n${p.url}\n\n本次 ${p.total} 项：已保存 ${p.complete} · 内容不完整 ${p.partial} · 失败 ${p.failed}${p.known ? ` · 原站已删除或封禁 ${p.known}` : ''} · 进行中 ${running}`
     if (p.added !== undefined && p.added + (p.updated ?? 0) > 0)
       body += `\n其中新增 ${p.added} · 更新 ${p.updated ?? 0}`
   }

@@ -49,6 +49,12 @@ import {
   pagesMissingMedia,
   type FailedPage,
 } from './retry-units.ts'
+import {
+  knownGone,
+  knownGoneSQL,
+  RECHECK_KEY,
+  type SourceState,
+} from './source-state.ts'
 import { submit, type Job } from './submit.ts'
 import type { Executor } from '#db/client.ts'
 import type { RelationList } from '#platforms/platform.ts'
@@ -59,7 +65,13 @@ const RECORD_PAGE = 30
 const MEMBER_PAGE = 50
 const MAX_DEPTH = 1000
 // Keys of submissions made by the pipeline itself, not by a request.
-const INTERNAL_KEYS = ['related:%', 'related-expand:%', 'batch:%', 'retried:%']
+const INTERNAL_KEYS = [
+  'related:%',
+  'related-expand:%',
+  'batch:%',
+  'retried:%',
+  `${RECHECK_KEY}%`,
+]
 
 type Submission = typeof submissions.$inferSelect
 type Capture = typeof captures.$inferSelect
@@ -125,6 +137,11 @@ export interface MemberProgress {
   partial: number
   failed: number
   pending: number
+  /**
+   * Failed only by saying again what they are known to be, deleted or
+   * suspended: no anomaly, and nothing to retry.
+   */
+  known: number
   done: boolean
   /**
    * Finished members new to the library and ones already saved; absent
@@ -217,6 +234,7 @@ type MemberCounts = Pick<
   | 'partial'
   | 'failed'
   | 'pending'
+  | 'known'
   | 'retryable'
   | 'added'
   | 'updated'
@@ -242,6 +260,7 @@ function memberCounts(
       partial: 0,
       failed: 0,
       pending: 0,
+      known: 0,
       retryable: 0,
       added: 0,
       updated: 0,
@@ -267,7 +286,9 @@ function memberCounts(
     updated: number
   }>(sql`
     WITH members AS (
-      SELECT p.value ->> '$.root' AS root, c.id AS id, c.state AS state,
+      SELECT p.value ->> '$.root' AS root, c.id AS id,
+        CASE WHEN ${sql.raw(knownGoneSQL('c', 'a'))} THEN 'known'
+          ELSE c.state END AS state,
         max((p.value ->> '$.retry' AND c.state = 'failed'
           AND a.source_state IS NULL) OR ${missingMediaSQL}) AS retryable,
         max(s.library_added) AS added
@@ -297,6 +318,14 @@ function memberCounts(
       }
       case 'failed': {
         count.failed += row.n
+        break
+      }
+      // Already saved, and checked: new or updated as the finished are.
+      case 'known': {
+        count.known += row.n
+        addition.added += row.added
+        addition.updated += row.updated
+        addition.unknown += row.n - row.added - row.updated
         break
       }
       default:
@@ -500,6 +529,8 @@ export interface CaptureRecord {
   members?: MemberProgress
   /** A record without members that saved its target: whether it was new. */
   added?: boolean
+  /** Failed only by saying again what its target is known to be. */
+  sourceState?: SourceState
   stopped?: boolean
   /** An update the owner paused (`pauseUpdate`). */
   paused?: boolean
@@ -631,6 +662,8 @@ function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
     }
     const waiting = waits.get(capture.id)
     if (waiting) record.waiting = waiting
+    const known = knownGone(capture, collection)
+    if (known) record.sourceState = known
     const progress = progresses.get(submission.id)
     if (progress) {
       const {
@@ -769,8 +802,10 @@ const isFinished = (state: string) =>
  */
 const MEMBER_FILTERS: Record<string, MemberFilter> = {
   '': () => true,
-  added: (state, added) => isFinished(state) && added === true,
-  updated: (state, added) => isFinished(state) && added === false,
+  added: (state, added) =>
+    (isFinished(state) || state === 'known') && added === true,
+  updated: (state, added) =>
+    (isFinished(state) || state === 'known') && added === false,
   problem: (state) =>
     state === 'failed' || state === 'partial' || state === 'skipped',
   pending: isPending,
@@ -789,6 +824,8 @@ export interface CaptureMember {
   error: string
   createdAt: Date
   gone: boolean
+  /** Failed only by saying again what its source is known to be. */
+  sourceState?: SourceState
   reasons: string[]
   /** Whether a retry would fetch it again (or its missing media). */
   retryable: boolean
@@ -865,9 +902,17 @@ export function memberPage(
     capture?: Capture
     view?: CaptureMember
   }
+  const known = knownCaptures(
+    db,
+    [...listed.values()].flatMap((m) =>
+      m.capture.state === 'failed' ? [m.capture.id] : [],
+    ),
+  )
   const members = [
     ...[...listed.values()]
-      .filter((m) => wanted(m.capture.state, m.added))
+      .filter((m) =>
+        wanted(known.has(m.capture.id) ? 'known' : m.capture.state, m.added),
+      )
       .map((m): Entry => ({
         id: m.capture.id,
         createdAt: m.capture.createdAt,
@@ -905,6 +950,22 @@ export function memberPage(
   }
 }
 
+/** Of these failed captures, the ones that only saw a known state again. */
+export function knownCaptures(db: Executor, ids: string[]): Set<string> {
+  if (!ids.length) return new Set()
+  return new Set(
+    db
+      .all<{ id: string }>(
+        sql`
+        SELECT c.id FROM captures c
+        JOIN collections a ON a.id = c.collection_id
+        WHERE c.id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
+          AND ${sql.raw(knownGoneSQL('c', 'a'))}`,
+      )
+      .map((row) => row.id),
+  )
+}
+
 /** Captures as members of a record, with why each fell short. */
 function memberViews(
   db: Executor,
@@ -919,6 +980,7 @@ function memberViews(
             id: collections.id,
             url: collections.url,
             sourceState: collections.sourceState,
+            sourceStateAt: collections.sourceStateAt,
             saved:
               sql<boolean>`EXISTS (SELECT 1 FROM ${library} WHERE ${library.collectionId} = ${collections.id})`.mapWith(
                 Boolean,
@@ -954,6 +1016,7 @@ function memberViews(
     const collection = targets.get(capture.collectionId)!
     const waiting = waits.get(capture.id)
     const gone = collection.sourceState !== null
+    const known = knownGone(capture, collection)
     return {
       jobId: capture.id,
       collectionId: collection.id,
@@ -964,6 +1027,7 @@ function memberViews(
       error: capture.error,
       createdAt: capture.createdAt,
       gone,
+      ...(known ? { sourceState: known } : {}),
       reasons: [...reasons.get(capture.id)!].toSorted(),
       retryable:
         missing.has(capture.id) || (resubmitted.has(capture.id) && !gone),

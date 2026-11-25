@@ -199,3 +199,29 @@ export function stateHistory(
     .orderBy(collectionStates.since, sql`rowid`)
     .all()
 }
+
+/**
+ * A failed capture that saw what its collection is known to be, deleted or
+ * suspended: it says so again, which is no anomaly and needs no retry.
+ * `c` is the capture's table alias, `a` its collection's.
+ */
+export const knownGoneSQL = (c: string, a: string) =>
+  `(${c}.state = 'failed' AND ${a}.source_state IS NOT NULL
+    AND coalesce(${c}.finished_at, ${c}.created_at) >= ${a}.source_state_at)`
+
+/** The state a failed capture saw again, as `knownGoneSQL` tells it. */
+export function knownGone(
+  capture: { state: string; finishedAt: Date | null; createdAt: Date },
+  collection: { sourceState: SourceState | null; sourceStateAt: Date | null },
+): SourceState | undefined {
+  if (
+    capture.state !== 'failed' ||
+    !collection.sourceState ||
+    !collection.sourceStateAt
+  )
+    return
+  const at = (capture.finishedAt ?? capture.createdAt).getTime()
+  return at >= collection.sourceStateAt.getTime()
+    ? collection.sourceState
+    : undefined
+}

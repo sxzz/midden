@@ -168,6 +168,7 @@ describe('presentation', () => {
       complete: 2,
       partial: 2,
       failed: 1,
+      known: 0,
       done: false,
       stopped: false,
       next: 'n',

@@ -44,6 +44,7 @@ import {
   encodeCursor,
   failureReasons,
   isPending,
+  knownCaptures,
   memberPage,
   memberSubmissions,
   pageChains,
@@ -72,6 +73,7 @@ import {
   missingMediaSQL,
   pagesMissingMedia,
 } from './retry-units.ts'
+import { knownGoneSQL } from './source-state.ts'
 import { submit, type Job } from './submit.ts'
 import type { Executor } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
@@ -889,7 +891,9 @@ function memberCounts(db: Executor, g: Gathered) {
       WHERE s.idem_key LIKE 'related:%'
     ),
     captured AS (
-      SELECT c.id AS id, c.collection_id AS collection, c.state AS state,
+      SELECT c.id AS id, c.collection_id AS collection,
+        CASE WHEN ${sql.raw(knownGoneSQL('c', 'a'))} THEN 'known'
+          ELSE c.state END AS state,
         c.created_at AS created, c.finished_at AS finished,
         max(src.added) AS added,
         max((src.retry AND c.state = 'failed' AND a.source_state IS NULL)
@@ -924,6 +928,7 @@ function memberCounts(db: Executor, g: Gathered) {
     partial: 0,
     failed: 0,
     pending: 0,
+    known: 0,
     retryable: 0,
     added: 0,
     updated: 0,
@@ -934,7 +939,11 @@ function memberCounts(db: Executor, g: Gathered) {
     counts.total += row.n
     counts.retryable += row.retryable
     counts.finishedAt = Math.max(counts.finishedAt, row.finished ?? 0)
-    if (row.state === 'complete' || row.state === 'partial') {
+    if (
+      row.state === 'complete' ||
+      row.state === 'partial' ||
+      row.state === 'known'
+    ) {
       counts[row.state] += row.n
       counts.added += row.added
       counts.updated += row.updated
@@ -1000,10 +1009,20 @@ function toUpdateRecord(db: Executor, g: Gathered): UpdateRecord {
     partial: counts.partial,
     failed: counts.failed + listsFailed,
     pending: counts.pending + listsPending,
+    known: counts.known,
     done,
     ...(counts.unknown ? {} : { added: counts.added, updated: counts.updated }),
   }
-  const failedItems = g.items.filter((i) => i.capture.state === 'failed').length
+  // An item that only said again what it is known to be did not fail.
+  const known = knownCaptures(
+    db,
+    g.items.flatMap((i) =>
+      i.capture.state === 'failed' ? [i.capture.id] : [],
+    ),
+  )
+  const failedItems = g.items.filter(
+    (i) => i.capture.state === 'failed' && !known.has(i.capture.id),
+  ).length
   let state = 'queued'
   if (done)
     if (
