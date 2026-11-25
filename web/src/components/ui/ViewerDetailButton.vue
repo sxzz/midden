@@ -1,8 +1,11 @@
 <script setup vapor lang="ts">
+import { computed } from 'vue'
+import { detailTitles, type DetailKind } from '../../titles'
 import AppLink from './AppLink.vue'
-// The viewer's link to the post it shows, an icon in its action capsule;
-// `navigate` closes the viewer.
-defineProps<{ href: string }>()
+// The viewer's link to the post (or account) it shows, an icon in its
+// action capsule named as that page is; `navigate` closes the viewer.
+const props = defineProps<{ href: string; kind: DetailKind }>()
+const label = computed(() => `查看${detailTitles[props.kind]}`)
 const emit = defineEmits<{ navigate: [] }>()
 </script>
 
@@ -10,8 +13,8 @@ const emit = defineEmits<{ navigate: [] }>()
   <AppLink
     class="detail"
     :href="href"
-    aria-label="收藏详情"
-    title="收藏详情"
+    :aria-label="label"
+    :title="label"
     @navigate="emit('navigate')"
   >
     <svg

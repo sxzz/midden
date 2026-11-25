@@ -87,7 +87,7 @@ test('icon controls, keyboard navigation and native image context menu', async (
 }) => {
   const dialog = page.getByRole('dialog')
   await expect(
-    dialog.getByRole('link', { name: '收藏详情', exact: true }),
+    dialog.getByRole('link', { name: '查看帖子', exact: true }),
   ).toBeVisible()
   await expect(
     dialog.getByRole('button', { name: '关闭图片' }).locator('svg'),

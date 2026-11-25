@@ -82,8 +82,8 @@ async function actions(page: Page) {
     .evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')))
 }
 
-const owner = ['收藏详情', '下载', '更多']
-const visitor = ['收藏详情', '下载']
+const owner = ['查看帖子', '下载', '更多']
+const visitor = ['查看帖子', '下载']
 
 test('the owner’s viewer has the same actions from the list, the album and the post', async ({
   page,

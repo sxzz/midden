@@ -40,6 +40,7 @@ import { listQuery } from '../reads'
 import { restoreScroll } from '../scroll-restore'
 import { forgetPages, lastPage, leftScroll, tabStates } from '../tab-state'
 import { tabOf as barTabOf, tabs as barTabs, isTabRoot } from '../tabbar'
+import { detailTitle, setDocumentTitle } from '../titles'
 import ConfirmSheet from './ConfirmSheet.vue'
 import FolderMenuSheet from './FolderMenuSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
@@ -145,7 +146,6 @@ const folder = computed(() =>
 )
 const titles: Record<string, string> = {
   collections: '我的收藏',
-  collection: '收藏详情',
   captures: '采集',
   capture: '采集记录',
   'collection-stats': '统计趋势',
@@ -159,11 +159,17 @@ const titles: Record<string, string> = {
   'settings-passkeys': '通行密钥',
   'settings-admin': '管理员面板',
 }
-const title = computed(() =>
-  folderId.value
-    ? folder.value?.name || '收藏夹'
-    : titles[String(route.name)] || '我的收藏',
-)
+const title = computed(() => {
+  if (folderId.value) return folder.value?.name || '收藏夹'
+  if (id.value) {
+    const listed = all
+      .flatMap(({ collection }) => collection.items.value)
+      .find((item) => item.id === id.value)
+    return detailTitle(id.value, listed)
+  }
+  return titles[String(route.name)] || '我的收藏'
+})
+watch(title, (value) => setDocumentTitle(value), { immediate: true })
 /** Settings and capture records have no media to cover. */
 const sensitiveShown = computed(
   () =>

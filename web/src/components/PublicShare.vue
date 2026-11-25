@@ -10,6 +10,7 @@ import {
 import { APIError, errorText, type PublicShareInfo } from '../api'
 import { backButton, host } from '../host'
 import { readShare } from '../reads'
+import { detailTitle, setDocumentTitle } from '../titles'
 import BackLink from './ui/BackLink.vue'
 import ListSection from './ui/ListSection.vue'
 // The frame of a public link (分享): what the share opens, then pages of
@@ -53,9 +54,12 @@ const title = computed(() => {
   if (route.name === 'share-collection-changes') return '资料修改记录'
   if (route.name === 'share-collection-follows') return '关注变化'
   if (route.name === 'share-collection-graph') return '关系图谱'
-  if (nested.value || share.value?.target === 'collection') return '收藏详情'
+  if (nested.value) return detailTitle(String(route.params.id))
+  if (share.value?.target === 'collection')
+    return detailTitle(share.value.collection_id ?? '')
   return share.value?.name ?? ''
 })
+watch(title, (value) => setDocumentTitle(value), { immediate: true })
 const home = computed(() => ({ name: 'share', params: { slug: slug.value } }))
 /** One cached view per page, as in the library. */
 function viewKey(target: RouteLocationNormalized) {

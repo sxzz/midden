@@ -19,6 +19,7 @@ import { date, isRemoved, present } from '../presentation'
 import { accountKey, relationQuery, type Rel } from '../relation-filter'
 import { isProfileEntity } from '../relations'
 import { collectionRoute, shareSlug } from '../share'
+import { rememberKind } from '../titles'
 import CollectionAnnotations from './CollectionAnnotations.vue'
 import CollectionPost from './CollectionPost.vue'
 import DeleteSheet from './DeleteSheet.vue'
@@ -87,6 +88,8 @@ watch(
   },
   { immediate: true },
 )
+// The frame's title names what this is once it is known.
+watch(collection, (value) => value && rememberKind(value), { immediate: true })
 const isProfile = computed(() =>
   collection.value?.graph?.entities.some(
     (entity) =>

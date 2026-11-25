@@ -131,7 +131,7 @@ describe('removed media', () => {
       collectionId: 'post',
     })
     const tile = el.querySelector<HTMLAnchorElement>('a.tile')!
-    expect(tile.getAttribute('aria-label')).toBe('视频已移除，查看收藏详情')
+    expect(tile.getAttribute('aria-label')).toBe('视频已移除，查看帖子')
     expect(tile.textContent).toContain('已移除')
     expect(tile.getAttribute('href')).toBe('#/collection/post')
   })

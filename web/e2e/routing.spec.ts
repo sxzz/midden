@@ -51,7 +51,7 @@ for (const back of ['button', 'history'] as const) {
     const original = await img.elementHandle()
     const scroll = await page.evaluate(() => window.scrollY)
     await row.locator('.head').click()
-    await expect(page.locator('h1')).toHaveText('收藏详情')
+    await expect(page.locator('h1')).toHaveText('帖子')
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
     if (back === 'button')
       await page.getByRole('link', { name: '返回' }).click()
@@ -69,7 +69,7 @@ for (const back of ['button', 'history'] as const) {
     }
 
     await page.goForward()
-    await expect(page.locator('h1')).toHaveText('收藏详情')
+    await expect(page.locator('h1')).toHaveText('帖子')
     await page.reload()
     await expect(page.getByText('收藏 15', { exact: true })).toBeVisible()
     await page.getByRole('link', { name: '返回' }).click()
@@ -121,7 +121,7 @@ test('Telegram back from a directly opened collection returns home', async ({
     })
   })
   await page.goto(`/app/#/collection/${items[0]!.id}`)
-  await expect(page.locator('h1')).toHaveText('收藏详情')
+  await expect(page.locator('h1')).toHaveText('帖子')
   await page.evaluate(() =>
     (globalThis as unknown as { telegramBack: () => void }).telegramBack(),
   )

@@ -3,6 +3,7 @@ import { computed, shallowRef, watch } from 'vue'
 import { useSensitiveMedia } from '../composables/useSensitiveMedia'
 import { isRemoved, readyMedia, removedLabel } from '../presentation'
 import { collectionHref } from '../share'
+import { detailTitles, kindOf } from '../titles'
 import MediaPreview from './MediaPreview.vue'
 import MediaViewer from './MediaViewer.vue'
 import AppLink from './ui/AppLink.vue'
@@ -57,6 +58,11 @@ const previews = computed(() =>
 const viewable = (asset: Asset) =>
   !isRemoved(asset) &&
   (!!asset.mime?.startsWith('image/') || !!asset.mime?.startsWith('video/'))
+/** What the tiles' link opens, named as that page is. */
+const detailLabel = computed(
+  () =>
+    `查看${detailTitles[(props.collectionId && kindOf(props.collectionId, props.collection)) || 'post']}`,
+)
 /** A removed media item or a file has nothing to view: it links to its post. */
 const tileLink = (asset: Asset) =>
   props.collectionId && !viewable(asset)
@@ -108,7 +114,7 @@ const overflow = computed(() => media.value.length - tiles.value.length)
         class="tile"
         :aria-label="
           isRemoved(asset)
-            ? `${removedLabel(asset)}，查看收藏详情`
+            ? `${removedLabel(asset)}，${detailLabel}`
             : asset.mime?.startsWith('image/')
               ? hidden(asset) && !covered
                 ? '敏感内容，点按显示'
@@ -117,7 +123,7 @@ const overflow = computed(() => media.value.length - tiles.value.length)
                 ? hidden(asset) && !covered
                   ? '敏感内容，点按显示'
                   : '播放视频'
-                : '查看收藏详情'
+                : detailLabel
         "
         :class="{ blurred: hidden(asset) }"
         @click.stop="view(asset)"

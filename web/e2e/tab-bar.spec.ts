@@ -15,6 +15,26 @@ items[0]!.text = Array.from(
   { length: 60 },
   (_, line) => `第 ${line + 1} 段：一段足够长的正文。`,
 ).join('\n\n')
+const PROFILE_ID = '22222222-2222-4222-8222-222222222222'
+const profile = {
+  ...items[1]!,
+  id: PROFILE_ID,
+  text: '',
+  author_name: '账号',
+  url: 'https://x.com/someone',
+  graph: {
+    root: 'x/x.profile/7',
+    entities: [
+      {
+        key: 'x/x.profile/7',
+        type: 'x.profile',
+        external_id: '7',
+        data: { name: '某人', username: 'someone', metadata: {} },
+      },
+    ],
+    relations: [],
+  },
+}
 const OWN = 'x/x.profile/1'
 const OTHER = 'x/x.profile/2'
 const graphOf = (key: string) => ({
@@ -61,7 +81,9 @@ async function mock(page: Page, perspectives = [OWN, OTHER]) {
     if (path === '/v1/instance') return r.fulfill({ json: { dev: false } })
     if (path === '/v1/accounts')
       return r.fulfill({ json: { platforms: [], accounts: [] } })
-    const item = items.find((i) => path === `/v1/collections/${i.id}`)
+    const item = [...items, profile].find(
+      (i) => path === `/v1/collections/${i.id}`,
+    )
     if (item) return r.fulfill({ json: item })
     return r.fulfill({
       json: path.endsWith('/availability')
@@ -133,7 +155,7 @@ test('moves between the three tabs, lighting the one shown', async ({
   await tab(page, '探索').click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
   await page.locator('.row').first().locator('.head').click()
-  await expect(page.locator('h1')).toHaveText('收藏详情')
+  await expect(page.locator('h1')).toHaveText('帖子')
   await expect(tab(page, '探索')).toHaveAttribute('aria-current', 'page')
   await tab(page, '探索').click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
@@ -232,7 +254,7 @@ test('each tab returns to the page and scroll it was left on', async ({
   await mock(page)
   await page.goto('/app/')
   await page.locator('.row').first().locator('.head').click()
-  await expect(page.locator('h1')).toHaveText('收藏详情')
+  await expect(page.locator('h1')).toHaveText('帖子')
   const detail = page.url()
   await page.evaluate(() =>
     window.scrollTo(0, (document.body.scrollHeight - innerHeight) / 2),
@@ -251,13 +273,13 @@ test('each tab returns to the page and scroll it was left on', async ({
   )
   await tab(page, '探索').click()
   await expect(page).toHaveURL(detail)
-  await expect(page.locator('h1')).toHaveText('收藏详情')
+  await expect(page.locator('h1')).toHaveText('帖子')
   await expect.poll(() => scrollY(page)).toBe(left)
   // 设置 kept its sub-page too.
   await expect(tab(page, '设置')).toHaveAttribute('href', '#/settings/accounts')
   // A reload keeps every tab where it was.
   await page.reload()
-  await expect(page.locator('h1')).toHaveText('收藏详情')
+  await expect(page.locator('h1')).toHaveText('帖子')
   await expect.poll(() => scrollY(page)).toBe(left)
   await expect(tab(page, '设置')).toHaveAttribute('href', '#/settings/accounts')
   // 返回 goes where it would have without the detour: 探索's list. The
@@ -277,7 +299,7 @@ test('the open tab, tapped, goes to its root, then to the top', async ({
   await mock(page)
   await page.goto('/app/')
   await page.locator('.row').nth(5).locator('.head').click()
-  await expect(page.locator('h1')).toHaveText('收藏详情')
+  await expect(page.locator('h1')).toHaveText('帖子')
   await tab(page, '探索').click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
   await expect(page).toHaveURL(/#\/$/)
@@ -288,4 +310,16 @@ test('the open tab, tapped, goes to its root, then to the top', async ({
   await shown(page)
   await tab(page, '探索').click()
   await expect.poll(() => scrollY(page)).toBe(0)
+})
+
+test('titles a post and an account by what they are', async ({ page }) => {
+  await mock(page)
+  await page.goto(`/app/#/collection/${items[0]!.id}`)
+  await expect(page.locator('h1')).toHaveText('帖子')
+  await expect(page).toHaveTitle('帖子 · Midden')
+  await page.goto(`/app/#/collection/${PROFILE_ID}`)
+  await expect(page.locator('h1')).toHaveText('账号')
+  await expect(page).toHaveTitle('账号 · Midden')
+  await page.goto('/app/#/settings')
+  await expect(page).toHaveTitle('设置 · Midden')
 })

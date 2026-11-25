@@ -70,7 +70,7 @@ test('album reuses loaded data and opens the currently previewed collection', as
   await expect(dialog.getByText('2 / 3')).toBeVisible()
   await page.keyboard.press('ArrowRight')
   await expect(dialog.getByText('3 / 3')).toBeVisible()
-  await dialog.getByRole('link', { name: '收藏详情', exact: true }).click()
+  await dialog.getByRole('link', { name: '查看帖子', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${second}$`))
   await expect(dialog).toHaveCount(0)
   await expect(page.locator('body')).not.toHaveCSS('overflow', 'hidden')
@@ -129,7 +129,7 @@ test('feed preview can open its collection and return to the feed', async ({
     .click()
   await page
     .getByRole('dialog')
-    .getByRole('link', { name: '收藏详情', exact: true })
+    .getByRole('link', { name: '查看帖子', exact: true })
     .click()
   await expect(page).toHaveURL(new RegExp(`/collection/${first}$`))
   await expect(page.getByRole('dialog')).toHaveCount(0)

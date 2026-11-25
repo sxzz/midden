@@ -30,6 +30,7 @@ import { mediaRemovals } from '../media-removals'
 import { navigatesHere } from '../navigation'
 import { isRemoved, present } from '../presentation'
 import { collectionHref, shareSlug } from '../share'
+import { kindOf } from '../titles'
 import MediaPreview from './MediaPreview.vue'
 import MediaRemovalSheet from './MediaRemovalSheet.vue'
 import ViewerDetailButton from './ui/ViewerDetailButton.vue'
@@ -85,6 +86,17 @@ function removed(effect: RemovalEffect) {
 // A slide shown before the opening animation ends never gets activated, and
 // stays blank; moving waits for the viewer to be open.
 const opened = shallowRef(false)
+// Media belongs to a post unless its collection is known to be an account.
+const detailKind = computed(() =>
+  selectedCollection.value
+    ? (kindOf(
+        selectedCollection.value,
+        props.collections?.find(
+          (item) => item.id === selectedCollection.value,
+        ) || props.collection,
+      ) ?? 'post')
+    : 'post',
+)
 watch(index, () => {
   menuOpen.value = false
 })
@@ -639,6 +651,7 @@ watch(
         <ViewerDetailButton
           v-if="selectedCollection"
           :href="collectionHref(selectedCollection)"
+          :kind="detailKind"
           @navigate="emit('close')"
         />
         <button

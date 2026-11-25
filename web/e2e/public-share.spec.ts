@@ -140,7 +140,7 @@ test('a public link opens a folder and its items without login', async ({
 
   await page.locator('.row .head').click()
   await expect(page).toHaveURL(new RegExp(`#/s/${slug}/collection/${postId}$`))
-  await expect(page.locator('h1')).toHaveText('收藏详情')
+  await expect(page.locator('h1')).toHaveText('帖子')
   for (const action of ['删除这条收藏', '公开分享', '我的整理'])
     await expect(page.getByText(action)).toHaveCount(0)
   await expect(

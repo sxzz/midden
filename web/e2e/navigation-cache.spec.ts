@@ -139,7 +139,7 @@ test('a profile keeps its related order, layout and pages after a nested post', 
   await list.locator('.album button').first().click()
   await page
     .getByRole('dialog')
-    .getByRole('link', { name: '收藏详情', exact: true })
+    .getByRole('link', { name: '查看帖子', exact: true })
     .click()
   await expect(page).toHaveURL(new RegExp(`/collection/${relatedIds[0]}$`))
   await expect(page.locator('.post .body')).toHaveText('合成帖子 1')
