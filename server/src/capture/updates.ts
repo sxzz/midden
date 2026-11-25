@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import {
   assets,
+  captureMetrics,
   captures,
   collections,
   entities,
@@ -56,7 +57,7 @@ import {
 import { submit, type Job } from './submit.ts'
 import type { Executor } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
-import type { Metrics, Payload } from './payload.ts'
+import type { Payload } from './payload.ts'
 
 /** A library selection updates at most this many collections. */
 const MAX_SELECTION = 500
@@ -248,13 +249,13 @@ function profileCounts(
   if (!relations) return {}
   const row = ctx.db
     .select({
-      metrics: captures.metrics,
+      metrics: captureMetrics.metrics,
       type: entities.kind,
       externalId: entities.externalId,
     })
     .from(collections)
     .innerJoin(revisions, eq(revisions.id, collections.currentRevision))
-    .innerJoin(captures, eq(captures.id, revisions.captureId))
+    .leftJoin(captureMetrics, eq(captureMetrics.captureId, revisions.captureId))
     .innerJoin(revisionEntities, eq(revisionEntities.revisionId, revisions.id))
     .innerJoin(
       entityVersions,
@@ -265,9 +266,7 @@ function profileCounts(
       and(eq(collections.id, collectionId), eq(revisionEntities.isRoot, true)),
     )
     .get()
-  const counts = (row?.metrics as Metrics | null)?.[
-    `${row?.type}/${row?.externalId}`
-  ]
+  const counts = row?.metrics?.[`${row?.type}/${row?.externalId}`]
   const read = (pointer: string) => {
     const value = counts?.[pointer]
     return typeof value === 'number' && Number.isSafeInteger(value)

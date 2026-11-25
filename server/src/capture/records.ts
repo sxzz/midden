@@ -6,6 +6,7 @@ import {
   assets,
   captureRunning,
   captures,
+  captureTargets,
   collections,
   jobs,
   library,
@@ -112,7 +113,12 @@ export interface MemberProgress {
   updated?: number
 }
 
-export type Page = { submission: Submission; capture: Capture }
+export type Page = {
+  submission: Submission
+  capture: Capture
+  /** What the page listed, once fetched. */
+  targets: StoredTarget[] | null
+}
 
 export interface CollectionProgress extends MemberProgress {
   stopped: boolean
@@ -139,9 +145,14 @@ export function pageChains(db: Executor, roots: string[]): Map<string, Page[]> {
     SELECT root, id FROM chain ORDER BY depth`)
   const rows = new Map(
     db
-      .select({ submission: submissions, capture: captures })
+      .select({
+        submission: submissions,
+        capture: captures,
+        targets: captureTargets.targets,
+      })
       .from(submissions)
       .innerJoin(captures, eq(captures.id, submissions.captureId))
+      .leftJoin(captureTargets, eq(captureTargets.captureId, captures.id))
       .where(inJson(submissions.id, [...new Set(links.map((link) => link.id))]))
       .all()
       .map((row) => [row.submission.id, row]),
@@ -282,8 +293,7 @@ function memberCounts(
 function progressOf(pages: Page[], counts: MemberCounts): CollectionProgress {
   const urls = new Set<string>()
   for (const page of pages)
-    for (const target of page.capture.relatedTargets as StoredTarget[])
-      urls.add(target.url)
+    for (const target of page.targets ?? []) urls.add(target.url)
   const first = pages[0]?.capture
   const last = pages.at(-1)?.capture
   const pagePending = pages.some(

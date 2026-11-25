@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import {
   assets,
+  captureMetrics,
   captures,
   collections,
   entities,
@@ -360,10 +361,19 @@ function storeVersions(
           createdAt: now,
           finishedAt: now,
           revisionId: row.revisionId,
-          metrics: row.payload.metrics ?? null,
         })),
       )
       .run()
+    const counted = batch.filter((row) => row.payload.metrics)
+    if (counted.length)
+      tx.insert(captureMetrics)
+        .values(
+          counted.map((row) => ({
+            captureId: row.captureId,
+            metrics: row.payload.metrics!,
+          })),
+        )
+        .run()
     tx.insert(revisions)
       .values(
         batch.map((row) => ({

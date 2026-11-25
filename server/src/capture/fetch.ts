@@ -4,6 +4,7 @@ import { newId } from '#db/id.ts'
 import {
   assets,
   captures,
+  captureTargets,
   collections,
   connections,
   sourceResponses,
@@ -44,6 +45,7 @@ import { finalizeSettled, loadCapture, validateExecution } from './lifecycle.ts'
 import { isRemoved, mediaKey } from './media-key.ts'
 import { storedOptions } from './options.ts'
 import { resolveCaptureScope } from './scope.ts'
+import { loadStaging, stageResult } from './staging.ts'
 import type { Payload } from './payload.ts'
 
 const FETCH_DEADLINE = 45_000
@@ -147,7 +149,7 @@ export async function runCapture(ctx: CaptureContext, job: Job): Promise<void> {
       pageSize: capture.pageSize,
       pageCursor: capture.pageCursor,
       automatic: capture.automatic,
-      prefetch: capture.prefetch ?? Buffer.alloc(0),
+      prefetch: loadStaging(db, capture.id)?.prefetch ?? Buffer.alloc(0),
       since: capture.isCollection ? pageCutoff(ctx, capture.id) : '',
     })
     const logger = ctx.logger.child({
@@ -436,29 +438,43 @@ function commit(
       .get()!
     tx.update(captures)
       .set({
-        prefetch: null,
         credentialRevision: revision,
-        relatedTargets: response.relatedTargets.map((target) => ({
-          url: target.url,
-          refreshAfterSeconds: target.refreshAfterSeconds,
-          updatedAt: target.updatedAt,
-          publishedAt: target.publishedAt,
-          mediaTypes: target.mediaTypes,
-          postType: target.postType,
-          ...(target.listedAt ? { listedAt: target.listedAt } : {}),
-          ...(target.pinned ? { pinned: true } : {}),
-          ...(target.prefetch.length
-            ? { prefetch: Buffer.from(target.prefetch).toString('base64') }
-            : {}),
-        })),
         nextPageCursor: response.nextPageCursor,
         maxBatchSize: response.maxBatchSize,
         state: 'downloading',
-        payload: staged.payload,
         adapterVersion: response.adapterVersion,
       })
       .where(eq(captures.id, captureId))
       .run()
+    const targets = response.relatedTargets
+    if (targets.length)
+      tx.insert(captureTargets)
+        .values({
+          captureId,
+          targets: targets.map((target) => ({
+            url: target.url,
+            refreshAfterSeconds: target.refreshAfterSeconds,
+            updatedAt: target.updatedAt,
+            publishedAt: target.publishedAt,
+            mediaTypes: target.mediaTypes,
+            postType: target.postType,
+            ...(target.listedAt ? { listedAt: target.listedAt } : {}),
+            ...(target.pinned ? { pinned: true } : {}),
+          })),
+        })
+        .run()
+    // Prefetches are only needed until the targets are submitted.
+    const prefetches = targets.map((target) =>
+      target.prefetch.length
+        ? Buffer.from(target.prefetch).toString('base64')
+        : null,
+    )
+    stageResult(
+      tx,
+      captureId,
+      staged.payload,
+      prefetches.some((prefetch) => prefetch !== null) ? prefetches : null,
+    )
     for (const [position, source] of staged.sources.entries()) {
       const body = Buffer.from(source.body)
       tx.insert(sourceResponses)

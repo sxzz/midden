@@ -5,11 +5,11 @@ import { attachIncomingRelations, linkSavedEntities } from './entities.ts'
 import {
   applyMetrics,
   assetsByCapture,
-  captureMetrics,
   head,
   hydrate,
   iso,
   list,
+  metricsOf,
   parseJson,
   type CollectionView,
   type Page,
@@ -120,9 +120,9 @@ export function collectionsById(
   if (!ids.length) return out
   const rows = r.db.all<RevisionRow & { metrics: string | null }>(sql`
     SELECT ${sql.raw(REVISION_COLUMNS)},
-      (SELECT c.metrics FROM captures c
-        WHERE c.collection_id = a.id AND c.metrics IS NOT NULL
-          AND c.state IN ('complete', 'partial')
+      (SELECT m.metrics FROM captures c
+        JOIN capture_metrics m ON m.capture_id = c.id
+        WHERE c.collection_id = a.id AND c.state IN ('complete', 'partial')
         ORDER BY c.finished_at DESC, c.id DESC LIMIT 1) AS metrics
     FROM collections a
     JOIN revisions r ON r.id = ${sql.raw(head('a.id'))}
@@ -192,7 +192,7 @@ export function getCaptureCollection(
   )
   applyMetrics(
     collection.graph,
-    captureMetrics(ctx, captureId) ?? captureMetrics(ctx, row.capture_id),
+    metricsOf(ctx, captureId) ?? metricsOf(ctx, row.capture_id),
   )
   return collection
 }
@@ -262,7 +262,7 @@ export function listHistory(
     revision_id: string
   }>(sql`
     WITH saved AS (
-      SELECT c.id, c.finished_at, c.revision_id, c.metrics,
+      SELECT c.id, c.finished_at, c.revision_id, m.metrics,
         coalesce(r.view_hash, r.id) AS shown,
         -- Counts are keyed by type and external id, as the entity is stored.
         (SELECT e.kind || '/' || e.external_id
@@ -272,6 +272,7 @@ export function listHistory(
           WHERE re.revision_id = r.id AND re.is_root = 1) AS root_key
       FROM captures c
       JOIN revisions r ON r.id = c.revision_id
+      LEFT JOIN capture_metrics m ON m.capture_id = c.id
       WHERE c.collection_id = ${id} AND c.state IN ('complete', 'partial')
     -- Materialized so the counts are made comparable once per capture, not
     -- again for each window function that reads them.
@@ -334,7 +335,7 @@ export function getHistoryPoint(
     parseJson<Payload>(row.payload),
     assetsByCapture(ctx, [row.capture_id]).get(row.capture_id) ?? [],
   )
-  applyMetrics(collection.graph, captureMetrics(ctx, captureId))
+  applyMetrics(collection.graph, metricsOf(ctx, captureId))
   linkSavedEntities(ctx, collection)
   attachIncomingRelations(ctx, collection)
   collection.storage_bytes = collectionStorage(ctx, id)
@@ -388,15 +389,15 @@ export function listCounts(
     WITH own AS MATERIALIZED (
       SELECT c.id, c.finished_at, e.kind AS type,
         -- Counts are keyed by type and external id, as the entity is stored.
-        (SELECT m.value FROM json_each(c.metrics) m
+        (SELECT m.value FROM json_each(cm.metrics) m
           WHERE m.key = e.kind || '/' || e.external_id) AS counts
       FROM captures c
+      JOIN capture_metrics cm ON cm.capture_id = c.id
       JOIN revision_entities re ON re.revision_id = c.revision_id
         AND re.is_root = 1
       JOIN entity_versions v ON v.id = re.entity_version_id
       JOIN entities e ON e.id = v.entity_id
-      WHERE c.collection_id = ${id} AND c.state IN ('complete', 'partial')
-        AND c.metrics IS NOT NULL)
+      WHERE c.collection_id = ${id} AND c.state IN ('complete', 'partial'))
     SELECT id, finished_at, type, counts FROM own
     -- Only readings count toward the limit: a count the source left out or
     -- garbled is no point.

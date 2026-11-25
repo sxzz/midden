@@ -8,6 +8,7 @@ import {
   type PayloadRelation,
 } from '#capture/payload.ts'
 import type { CaptureContext } from '#capture/context.ts'
+import type { Executor } from '#db/client.ts'
 
 /** What reads need from the capture context. */
 export type Reader = Pick<CaptureContext, 'db' | 'blobs'>
@@ -365,12 +366,13 @@ export function applyMetrics(
     entity.data = overlayMetrics(entity.data, metrics[metricKey(entity)])
 }
 
-export function captureMetrics(
-  r: Reader,
+/** The counts a capture observed, if any. */
+export function metricsOf(
+  r: { db: Executor },
   captureId: string,
 ): Metrics | undefined {
-  const row = r.db.get<{ metrics: string | null }>(
-    sql`SELECT metrics FROM captures WHERE id = ${captureId}`,
+  const row = r.db.get<{ metrics: string }>(
+    sql`SELECT metrics FROM capture_metrics WHERE capture_id = ${captureId}`,
   )
-  return row?.metrics ? parseJson<Metrics>(row.metrics) : undefined
+  return row ? parseJson<Metrics>(row.metrics) : undefined
 }

@@ -1,7 +1,9 @@
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
 import {
+  captureMetrics,
   captures,
+  captureStaging,
   collectionIdentityAliases,
   collections,
   entities,
@@ -57,11 +59,12 @@ describe('capture and finalize', () => {
       graph: postGraph('1', { text: 'hello', likes: 3 }),
     }))
     const done = await capture(ctx, post)
-    expect(done).toMatchObject({
-      state: 'complete',
-      payload: null,
-      metrics: { 'fake.post/1': { '/likes': 3 } },
-    })
+    expect(done).toMatchObject({ state: 'complete' })
+    // Counts are kept beside the capture; what it staged is gone.
+    expect(ctx.db.select().from(captureMetrics).all()).toEqual([
+      { captureId: done.id, metrics: { 'fake.post/1': { '/likes': 3 } } },
+    ])
+    expect(ctx.db.select().from(captureStaging).all()).toEqual([])
     const revision = ctx.db.select().from(revisions).get()!
     expect(revision.captureId).toBe(done.id)
     expect(revision.payload).toMatchObject({

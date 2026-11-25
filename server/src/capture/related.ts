@@ -1,12 +1,19 @@
 import { Buffer } from 'node:buffer'
 import { and, eq } from 'drizzle-orm'
-import { captures, collections, library, submissions } from '#db/schema.ts'
+import {
+  captures,
+  captureTargets,
+  collections,
+  library,
+  submissions,
+} from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError, isAppError } from '#errors.ts'
 import { SnoozeError, type Job } from '#jobs/queue.ts'
 import { pastCutoff } from '#platforms/listing.ts'
 import { budget, matchesOptions, storedOptions } from './options.ts'
 import { unsaveIfEmpty } from './scope.ts'
+import { dropStaging, loadStaging } from './staging.ts'
 import {
   isSaved,
   markUnreferenced,
@@ -26,8 +33,6 @@ export interface StoredTarget {
   /** When it appeared on the timeline; absent when unknown. */
   listedAt?: string
   pinned?: boolean
-  /** Base64; dropped once the targets were submitted. */
-  prefetch?: string
 }
 
 const PAGE_TARGET = 100
@@ -127,7 +132,13 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
     return
   }
   const limit = submission.collectionLimit
-  const targets = capture.relatedTargets as StoredTarget[]
+  const targets =
+    db
+      .select({ targets: captureTargets.targets })
+      .from(captureTargets)
+      .where(eq(captureTargets.captureId, capture.id))
+      .get()?.targets ?? []
+  const prefetches = loadStaging(db, capture.id)?.targetPrefetch ?? []
   // Timeline posts as listed, and those that passed the filters.
   let listed = 0
   let kept = 0
@@ -147,8 +158,8 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
       url: target.url,
       automatic: true,
       refreshAfterSeconds: target.refreshAfterSeconds,
-      prefetch: target.prefetch
-        ? Buffer.from(target.prefetch, 'base64')
+      prefetch: prefetches[index]
+        ? Buffer.from(prefetches[index], 'base64')
         : undefined,
       key: `related:${submission.id}:${index}`,
     })
@@ -274,20 +285,8 @@ function finish(
   capped = false,
 ) {
   ctx.db.transaction((tx) => {
-    const capture = tx
-      .select({ targets: captures.relatedTargets })
-      .from(captures)
-      .where(eq(captures.id, captureId))
-      .get()
-    if (capture)
-      tx.update(captures)
-        .set({
-          relatedTargets: (capture.targets as StoredTarget[]).map(
-            ({ prefetch: _, ...rest }) => rest,
-          ),
-        })
-        .where(eq(captures.id, captureId))
-        .run()
+    // The targets are submitted: their prefetches have served.
+    dropStaging(tx, captureId)
     tx.update(submissions)
       .set({ relatedState: 'complete', timelineCapped: capped })
       .where(

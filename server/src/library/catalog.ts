@@ -110,9 +110,9 @@ export function catalogCollections(db: Executor, ids: readonly string[]) {
         r.created_at AS revision_at, r.capture_id, r.payload,
         -- An account known only from a follow list has the capture that
         -- list made, with the counts the list gave.
-        (SELECT cp.metrics FROM captures cp
-          WHERE cp.collection_id = c.id AND cp.metrics IS NOT NULL
-            AND cp.state IN ('complete', 'partial')
+        (SELECT m.metrics FROM captures cp
+          JOIN capture_metrics m ON m.capture_id = cp.id
+          WHERE cp.collection_id = c.id AND cp.state IN ('complete', 'partial')
           ORDER BY cp.finished_at DESC, cp.id DESC LIMIT 1) AS metrics
       FROM json_each(${targets}) t
       JOIN collections c ON c.id = t.value

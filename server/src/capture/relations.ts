@@ -15,6 +15,7 @@ import {
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { RetryError, SnoozeError, type Job } from '#jobs/queue.ts'
+import { metricsOf } from '#library/views.ts'
 import {
   isProviderFailure,
   rateLimitedKey,
@@ -28,7 +29,6 @@ import { selectedConnection } from './records.ts'
 import { observeEdges, storeListed } from './relation-store.ts'
 import type { Executor, Transaction } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
-import type { Metrics } from './payload.ts'
 
 /** A list longer than this is not fetched: too many requests for one update. */
 export const RELATION_LIMIT = 5000
@@ -197,7 +197,7 @@ function begin(ctx: CaptureContext, fetch: Fetch): boolean {
       settle(tx, fetch.id, 'failed', '平台不支持抓关系网', now)
       return false
     }
-    const count = (capture.metrics as Metrics | null)?.[
+    const count = metricsOf({ db: tx }, capture.id)?.[
       `${root.type}/${root.externalId}`
     ]?.[relations.counts[fetch.list]]
     const known = typeof count === 'number' && Number.isSafeInteger(count)

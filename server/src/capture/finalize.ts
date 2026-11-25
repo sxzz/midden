@@ -4,6 +4,7 @@ import { newId } from '#db/id.ts'
 import {
   assets,
   blobs,
+  captureMetrics,
   captures,
   collections,
   entities,
@@ -22,6 +23,7 @@ import {
 } from './lifecycle.ts'
 import { splitMetrics } from './metrics.ts'
 import { unsaveIfEmpty } from './scope.ts'
+import { loadStaging, settleStaging } from './staging.ts'
 import { markUnreferenced } from './submit.ts'
 import type { Transaction } from '#db/client.ts'
 import type { Job } from '#jobs/queue.ts'
@@ -319,7 +321,12 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
     const states = captureAssets(tx, capture.id)
     if (states.some((a) => a.state === 'pending')) return
     validateExecution(tx, capture)
-    const payload = capture.payload as Payload
+    const staging = loadStaging(tx, capture.id)
+    const payload = staging?.payload
+    if (!staging || !payload) {
+      failCapture(ctx, tx, capture.id, '采集被中断')
+      return
+    }
     // Removed media (已移除) was left out on purpose: still content, and
     // nothing missing.
     const kept = (a: AssetState) => a.state === 'ready' || a.state === 'removed'
@@ -411,13 +418,16 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
     tx.update(captures)
       .set({
         state: partial ? 'partial' : 'complete',
-        payload: null,
         finishedAt: now,
         revisionId,
-        metrics: payload.metrics ?? null,
       })
       .where(eq(captures.id, capture.id))
       .run()
+    if (payload.metrics)
+      tx.insert(captureMetrics)
+        .values({ captureId: capture.id, metrics: payload.metrics })
+        .run()
+    settleStaging(tx, staging)
     tx.update(collections)
       .set({ observedAt: now, sourceState: null, sourceStateAt: null })
       .where(eq(collections.id, collection.id))

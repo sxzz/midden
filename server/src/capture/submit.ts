@@ -27,6 +27,7 @@ import {
   type StoredOptions,
 } from './options.ts'
 import { requestRelations } from './relations.ts'
+import { stagePrefetch } from './staging.ts'
 import type { Transaction } from '#db/client.ts'
 import type { Buffer } from 'node:buffer'
 
@@ -327,10 +328,11 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
           pageCursor,
           pageSize,
           isCollection: explicitCollection,
-          // Only a capture its listing created may skip asking upstream.
-          prefetch: automatic && input.prefetch?.length ? input.prefetch : null,
         })
         .run()
+      // Only a capture its listing created may skip asking upstream.
+      if (automatic && input.prefetch?.length)
+        stagePrefetch(tx, captureId, input.prefetch)
       ctx.queue.enqueue(tx, 'capture', captureId)
     }
 

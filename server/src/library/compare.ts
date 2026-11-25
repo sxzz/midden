@@ -111,7 +111,8 @@ function countedAccounts(
       accounts AS (
         SELECT e.id, e.platform, e.kind, e.external_id, c.id AS collection_id,
           (SELECT cp.id FROM captures cp
-            WHERE cp.collection_id = c.id AND cp.metrics IS NOT NULL
+            JOIN capture_metrics m ON m.capture_id = cp.id
+            WHERE cp.collection_id = c.id
               AND cp.state IN ('complete', 'partial')
             ORDER BY cp.finished_at DESC, cp.id DESC LIMIT 1) AS capture_id
         FROM ids JOIN entities e ON e.id = ids.id
@@ -124,7 +125,7 @@ function countedAccounts(
       SELECT a.id, a.platform, a.kind, a.external_id, a.collection_id,
         ${count(paths?.followers)} AS followers,
         ${count(paths?.following)} AS following
-      FROM accounts a LEFT JOIN captures cp ON cp.id = a.capture_id`)
+      FROM accounts a LEFT JOIN capture_metrics cp ON cp.capture_id = a.capture_id`)
     for (const row of rows) found.set(row.id, row)
   }
   return found

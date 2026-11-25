@@ -203,7 +203,8 @@ function rankable(
           WHEN o THEN 'following' ELSE 'followers' END AS kind,
         e.external_id, c.id AS collection_id,
         (SELECT cp.id FROM captures cp
-          WHERE cp.collection_id = c.id AND cp.metrics IS NOT NULL
+          JOIN capture_metrics m ON m.capture_id = cp.id
+          WHERE cp.collection_id = c.id
             AND cp.state IN ('complete', 'partial')
           ORDER BY cp.finished_at DESC, cp.id DESC LIMIT 1) AS capture_id
       FROM rel
@@ -219,7 +220,7 @@ function rankable(
       ${count(paths?.following)} AS following
     FROM accounts a
     JOIN entities e ON e.id = a.id
-    LEFT JOIN captures cp ON cp.id = a.capture_id`)
+    LEFT JOIN capture_metrics cp ON cp.capture_id = a.capture_id`)
 }
 
 interface Shown {

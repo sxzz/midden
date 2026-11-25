@@ -7,10 +7,10 @@ import {
   assetsByCapture,
   assetsById,
   avatarOf,
-  captureMetrics,
   head,
   hydrate,
   list,
+  metricsOf,
   parseJson,
   type AssetView,
   type CollectionView,
@@ -293,7 +293,7 @@ function attachCurrentProfiles(r: Reader, views: readonly WithGraph[]): void {
     metrics: string | null
     avatar: string | null
   }>(sql`
-    SELECT wanted.value AS entity, ev.id AS version, ev.data, c.metrics,
+    SELECT wanted.value AS entity, ev.id AS version, ev.data, m.metrics,
       ${sql.raw(avatarOf('r', 're.entity_key'))} AS avatar
     FROM json_each(${list(ids)}) wanted
     -- The account's newest capture as a root or a root's author.
@@ -301,7 +301,7 @@ function attachCurrentProfiles(r: Reader, views: readonly WithGraph[]): void {
       SELECT s.rowid FROM catalog s WHERE s.subject_entity_id = wanted.value
       ORDER BY s.revision_at DESC, s.revision_id DESC LIMIT 1)
     JOIN revisions r ON r.id = k.revision_id
-    JOIN captures c ON c.id = r.capture_id
+    LEFT JOIN capture_metrics m ON m.capture_id = r.capture_id
     JOIN revision_entities re ON re.revision_id = r.id
     JOIN entity_versions ev ON ev.id = re.entity_version_id
       AND ev.entity_id = wanted.value`)
@@ -467,7 +467,7 @@ export function getEntity(r: Reader, id: string): EntityView {
     parseJson<Payload>(row.payload),
     assetsByCapture(r, [row.capture_id]).get(row.capture_id) ?? [],
   )
-  applyMetrics(view.graph, captureMetrics(r, row.capture_id))
+  applyMetrics(view.graph, metricsOf(r, row.capture_id))
   const entity = view.graph?.entities.find(
     (e) => e.id === id && e.version_id === row.version,
   )

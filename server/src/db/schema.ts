@@ -9,6 +9,8 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core'
 import type { CaptureOptions, StoredOptions } from '#capture/options.ts'
+import type { Metrics, Payload } from '#capture/payload.ts'
+import type { StoredTarget } from '#capture/related.ts'
 import type { Buffer } from 'node:buffer'
 
 // Columns are declared in camelCase and stored in snake_case.
@@ -251,25 +253,17 @@ export const captures = sqliteTable(
     scope: text().notNull(),
     state: text({ enum: captureStates }).notNull().default('queued'),
     error: text().notNull().default(''),
-    // Staged result between the fetch and finalize.
-    payload: text({ mode: 'json' }),
     adapterVersion: text().notNull().default(''),
     createdAt: createdAt(),
     finishedAt: timestamp(),
     // The revision this capture produced or found unchanged.
     revisionId: text(),
     automatic: bool().notNull().default(false),
-    relatedTargets: text({ mode: 'json' })
-      .notNull()
-      .default(sql`'[]'`),
     pageSize: integer().notNull().default(0),
     pageCursor: text().notNull().default(''),
     nextPageCursor: text().notNull().default(''),
     isCollection: bool().notNull().default(false),
     maxBatchSize: integer().notNull().default(0),
-    prefetch: blob({ mode: 'buffer' }).$type<Buffer>(),
-    // Observed counts: { "<type>/<externalId>": { "<pointer>": value } }.
-    metrics: text({ mode: 'json' }),
   },
   (t) => [
     index('captures_collection').on(t.collectionId, t.createdAt),
@@ -294,6 +288,48 @@ export const captures = sqliteTable(
       .where(sql`${t.state} IN ('complete', 'partial')`),
   ],
 )
+
+// A capture row is written at its final size: what a capture learns later,
+// or holds only while it runs, lives in the tables below, each row written
+// once. Rows of `captures` that grew after their page filled split it, and
+// staged bulk that went away left it mostly empty.
+
+/**
+ * What a capture holds only while it runs, removed once it is no longer
+ * needed: the listing's prefetch until the fetch, the fetched result until
+ * finalize, and the prefetches of the targets it lists until they are
+ * submitted (see `capture/staging.ts`).
+ */
+export const captureStaging = sqliteTable('capture_staging', {
+  captureId: text()
+    .primaryKey()
+    .references(() => captures.id, { onDelete: 'cascade' }),
+  // What the listing that created the capture already read.
+  prefetch: blob({ mode: 'buffer' }).$type<Buffer>(),
+  // The fetched result, between the fetch and finalize.
+  payload: text({ mode: 'json' }).$type<Payload>(),
+  // Base64 prefetch of each listed target by position, null where none.
+  targetPrefetch: text({ mode: 'json' }).$type<(string | null)[]>(),
+})
+
+/** What a fetch listed (members, references), written with its result. */
+export const captureTargets = sqliteTable('capture_targets', {
+  captureId: text()
+    .primaryKey()
+    .references(() => captures.id, { onDelete: 'cascade' }),
+  targets: text({ mode: 'json' }).$type<StoredTarget[]>().notNull(),
+})
+
+/**
+ * Counts a finished capture observed:
+ * `{ "<type>/<externalId>": { "<pointer>": value } }`.
+ */
+export const captureMetrics = sqliteTable('capture_metrics', {
+  captureId: text()
+    .primaryKey()
+    .references(() => captures.id, { onDelete: 'cascade' }),
+  metrics: text({ mode: 'json' }).$type<Metrics>().notNull(),
+})
 
 // Written out rather than bound (`inArray` sends `IN (?, ?)`): SQLite only
 // matches the partial indexes above against literal lists.

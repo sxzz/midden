@@ -33,6 +33,7 @@ import {
 import { inJson } from '#db/sql.ts'
 import { catalogCollections } from '#library/catalog.ts'
 import { failCapture } from './lifecycle.ts'
+import { pruneStaging } from './staging.ts'
 import type { Transaction } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
 
@@ -60,6 +61,7 @@ export async function runMaintenance(ctx: CaptureContext): Promise<void> {
   await step('stale captures', () => failStaleCaptures(ctx))
   await step('collections', () => collectCollections(ctx))
   await step('raw responses', () => pruneSourceResponses(ctx))
+  await step('staged data', () => pruneStaging(ctx))
   await step('media', () => collectMedia(ctx))
   await step('thumbnails', () => backfillThumbnails(ctx))
   if (errors.length) throw new AggregateError(errors, 'maintenance failed')

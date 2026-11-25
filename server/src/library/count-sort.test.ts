@@ -222,6 +222,10 @@ describe('account count orders', () => {
       }
       client.exec(`ALTER TABLE catalog DROP COLUMN ${name}_count`)
     }
+    // The backfill read counts from where captures kept them then.
+    client.exec(`ALTER TABLE captures ADD metrics text;
+      UPDATE captures SET metrics = (SELECT metrics FROM capture_metrics
+        WHERE capture_id = captures.id)`)
     const folder = new URL('../../drizzle/', import.meta.url)
     const migrations = readdirSync(folder)
       .filter((name) => /_catalog_follow_counts(?:_backfill)?$/.test(name))
@@ -233,6 +237,7 @@ describe('account count orders', () => {
         'utf8',
       ).split('--> statement-breakpoint'))
         client.exec(statement)
+    client.exec('ALTER TABLE captures DROP COLUMN metrics')
     expect(rows()).toEqual(kept)
   })
 

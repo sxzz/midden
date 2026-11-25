@@ -9,6 +9,7 @@ import {
   submissions,
 } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
+import { dropStaging } from './staging.ts'
 import type { Transaction } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
 
@@ -111,12 +112,11 @@ export function failCapture(
   tx.delete(sourceResponses)
     .where(eq(sourceResponses.captureId, captureId))
     .run()
+  dropStaging(tx, captureId)
   tx.update(captures)
     .set({
       state: 'failed',
       error: message,
-      prefetch: null,
-      payload: null,
       finishedAt: new Date(ctx.now?.() ?? Date.now()),
     })
     .where(and(eq(captures.id, captureId), captureRunning))
