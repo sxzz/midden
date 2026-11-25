@@ -110,7 +110,13 @@ export function watchLitestream(options: {
     ),
   )
   server.listen(options.port ?? HEARTBEAT_PORT, options.host)
-  const timer = setInterval(check, CHECK_INTERVAL)
+  const timer = setInterval(() => {
+    try {
+      check()
+    } catch (error) {
+      options.logger.warn({ err: error }, 'litestream heartbeat check failed')
+    }
+  }, CHECK_INTERVAL)
   timer.unref()
 
   return {

@@ -182,13 +182,20 @@ export class DeliveryWorker {
     this.#stopped = false
     const tick = async () => {
       if (this.#stopped) return
-      await this.runDue()
+      try {
+        await this.runDue()
+      } catch (error) {
+        // Such as the database being locked: the deliveries wait in it.
+        this.#d.ctx.logger.warn(
+          { err: error },
+          'delivering failed; trying again in a second',
+        )
+      }
+      if (this.#stopped) return
       this.#timer = setTimeout(tick, 1000)
       this.#timer.unref()
     }
-    tick().catch((error) =>
-      this.#d.ctx.logger.error({ err: error }, 'delivery worker stopped'),
-    )
+    tick().catch(() => {})
   }
 
   stop(): void {

@@ -85,6 +85,7 @@ export class JobQueue {
   readonly #stop = new AbortController()
   #timer: NodeJS.Timeout | undefined
   #started = false
+  #reset = false
 
   constructor(options: QueueOptions) {
     this.#db = options.db
@@ -137,13 +138,17 @@ export class JobQueue {
   start(): void {
     if (this.#started) return
     this.#started = true
-    // Single process: anything still marked running was cut off by a restart.
-    this.#db
-      .update(jobs)
-      .set({ state: 'available', leaseUntil: null })
-      .where(eq(jobs.state, 'running'))
-      .run()
     this.#tick()
+  }
+
+  // Every database call here can find the write lock held for longer than
+  // the busy timeout (a checkpoint, a long write): log it and try again on
+  // the next tick, never let it escape a timer and end the process.
+  #retryLater(error: unknown, what: string, fields: object = {}): void {
+    this.#logger.warn(
+      { err: error, ...fields },
+      `${what} failed; trying again on the next tick`,
+    )
   }
 
   /** Stop claiming work and wait for running jobs to settle. */
@@ -168,7 +173,21 @@ export class JobQueue {
 
   #tick(): void {
     if (!this.#started) return
-    this.#rescue()
+    try {
+      if (!this.#reset) {
+        // Single process: anything still marked running was cut off by a
+        // restart.
+        this.#db
+          .update(jobs)
+          .set({ state: 'available', leaseUntil: null })
+          .where(eq(jobs.state, 'running'))
+          .run()
+        this.#reset = true
+      }
+      this.#rescue()
+    } catch (error) {
+      this.#retryLater(error, 'releasing lost jobs')
+    }
     for (const queue of Object.keys(this.#concurrency)) this.#pump(queue)
     this.#timer = setTimeout(() => this.#tick(), this.#pollMs)
     this.#timer.unref()
@@ -195,7 +214,13 @@ export class JobQueue {
     let running = this.#running.get(queue)
     if (!running) this.#running.set(queue, (running = new Set()))
     while (running.size < limit) {
-      const row = this.#claim(queue)
+      let row
+      try {
+        row = this.#claim(queue)
+      } catch (error) {
+        this.#retryLater(error, 'claiming a job', { queue })
+        return
+      }
       if (!row) return
       const task = this.#execute(row).finally(() => {
         running.delete(task)
@@ -255,13 +280,22 @@ export class JobQueue {
       attempt: row.attempt,
     })
     const started = this.#now()
+    let error: unknown
     try {
       if (!handler) throw new PermanentError(`Unknown job type ${row.type}`)
       await handler.run(job)
-      this.#db.delete(jobs).where(eq(jobs.id, row.id)).run()
-      log.debug({ elapsedMs: this.#now() - started }, 'job finished')
-    } catch (error) {
-      await this.#failed(row, job, handler, error, log, this.#now() - started)
+    } catch (error_) {
+      error = error_ ?? new Error('job failed')
+    }
+    try {
+      if (error === undefined) {
+        this.#db.delete(jobs).where(eq(jobs.id, row.id)).run()
+        log.debug({ elapsedMs: this.#now() - started }, 'job finished')
+      } else
+        await this.#failed(row, job, handler, error, log, this.#now() - started)
+    } catch (bookkeeping) {
+      // The row stays running: once its lease ends, #rescue offers it again.
+      log.error({ err: bookkeeping }, 'recording a job outcome failed')
     }
   }
 

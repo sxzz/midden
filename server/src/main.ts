@@ -14,7 +14,7 @@ import { runMaintenance } from '#capture/maintenance.ts'
 import { detectThumbnailer, regenerateThumbnail } from '#capture/thumbnail.ts'
 import { loadConfig } from '#config.ts'
 import { deriveKey } from '#crypto.ts'
-import { openDatabase, optimize } from '#db/client.ts'
+import { isBusy, openDatabase, optimize } from '#db/client.ts'
 import { createApi } from '#http/app.ts'
 import { pruneSessions } from '#http/auth.ts'
 import { prunePasskeys } from '#http/passkeys.ts'
@@ -58,6 +58,17 @@ async function shutdown(signal: NodeJS.Signals) {
 }
 process.on('SIGINT', shutdown)
 process.on('SIGTERM', shutdown)
+// The last resort for a locked database that escaped a loop's own handling:
+// the lock passes, the process must stay. Anything else still ends it.
+for (const event of ['uncaughtException', 'unhandledRejection'] as const)
+  process.on(event, (error: unknown) => {
+    if (isBusy(error)) {
+      logger.error({ err: error, event }, 'database locked; continuing')
+      return
+    }
+    logger.fatal({ err: error, event }, 'crashed')
+    process.exit(1)
+  })
 
 const db = openDatabase(config.databasePath)
 cleanups.push(() => db.$client.close())
@@ -202,8 +213,13 @@ let maintaining = false
 const maintenance = setInterval(() => {
   if (maintaining) return
   maintaining = true
-  pruneSessions(db)
-  prunePasskeys(db)
+  try {
+    pruneSessions(db)
+    prunePasskeys(db)
+  } catch (error) {
+    // Such as the database being locked; the next minute tries again.
+    logger.warn({ err: error }, 'pruning sessions failed')
+  }
   runMaintenance(ctx)
     .catch(() => {})
     .finally(() => (maintaining = false))
@@ -214,7 +230,13 @@ const maintenance = setInterval(() => {
       logger.error({ err: error }, 'storage usage failed'),
     )
 }, MAINTENANCE_INTERVAL)
-const optimizing = setInterval(optimize, OPTIMIZE_INTERVAL, db)
+const optimizing = setInterval(() => {
+  try {
+    optimize(db)
+  } catch (error) {
+    logger.warn({ err: error }, 'optimize failed')
+  }
+}, OPTIMIZE_INTERVAL)
 cleanups.push(() => {
   clearInterval(maintenance)
   clearInterval(optimizing)

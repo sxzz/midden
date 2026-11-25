@@ -1,7 +1,12 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { pino } from 'pino'
 import { afterEach, describe, expect, test } from 'vitest'
 import { openDatabase, type Database } from '#db/client.ts'
 import { jobs } from '#db/schema.ts'
+import { recordingLogger } from '#testing/logs.ts'
 import {
   backoff,
   JobQueue,
@@ -235,5 +240,51 @@ describe('JobQueue', () => {
     queue.start()
     await queue.drain()
     expect(rows(db)).toMatchObject([{ attempt: 0, runAt: new Date(1500) }])
+  })
+
+  test('a locked database delays claims; the loop keeps going', async () => {
+    const file = path.join(
+      mkdtempSync(path.join(tmpdir(), 'midden-q-')),
+      'q.db',
+    )
+    const db = openDatabase(file)
+    // Fail at once instead of after the usual 5 s.
+    db.$client.exec('PRAGMA busy_timeout = 0')
+    const { logger: recording, entries } = recordingLogger()
+    const seen: string[] = []
+    queue = new JobQueue({
+      db,
+      logger: recording,
+      handlers: {
+        echo: {
+          queue: 'main',
+          run: async (job) => {
+            seen.push(job.ref)
+          },
+        },
+      },
+      concurrency: { main: 1 },
+      pollMs: 10,
+    })
+    queue.enqueue(db, 'echo', 'a')
+    // As Litestream's forced TRUNCATE checkpoint holds it.
+    const writer = new DatabaseSync(file)
+    writer.exec('BEGIN IMMEDIATE')
+    queue.start()
+    await expect
+      .poll(
+        () =>
+          entries.filter(
+            (e) =>
+              e.msg === 'claiming a job failed; trying again on the next tick',
+          ).length,
+      )
+      .toBeGreaterThan(2)
+    expect(seen).toEqual([])
+    writer.exec('ROLLBACK')
+    writer.close()
+    await expect.poll(() => seen).toEqual(['a'])
+    expect(rows(db)).toEqual([])
+    db.$client.close()
   })
 })

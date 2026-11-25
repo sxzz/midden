@@ -13,6 +13,7 @@ export function openDatabase(file: string) {
   if (file !== ':memory:') mkdirSync(path.dirname(file), { recursive: true })
   const client = new DatabaseSync(file, {
     enableForeignKeyConstraints: true,
+    // Restored to this after the opening optimize below.
     timeout: 5000,
   })
   // WAL lets readers proceed while the single writer commits. Litestream
@@ -24,13 +25,46 @@ export function openDatabase(file: string) {
   // Pages freed by deletions can then go back to the file system a few at a
   // time (`incremental_vacuum` in maintenance). It only takes on a new
   // database; an existing one keeps its mode until a VACUUM.
-  client.exec('PRAGMA auto_vacuum = INCREMENTAL')
-  client.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;')
+  // Both are set only where they change something: setting them takes the
+  // write lock, which a checkpoint or another writer may hold for a while,
+  // and a start must not fail on that.
+  if (pragma(client, 'page_count') === 0)
+    client.exec('PRAGMA auto_vacuum = INCREMENTAL')
+  if (pragma(client, 'journal_mode') !== 'wal')
+    client.exec('PRAGMA journal_mode = WAL')
+  client.exec('PRAGMA synchronous = NORMAL')
   searchFunctions(client)
   const db = drizzle({ client })
   migrate(db, { migrationsFolder: MIGRATIONS })
-  optimize(db, true)
+  // Fresh statistics can wait for the next run (every 6 hours) rather than
+  // hold up a start while another writer has the lock.
+  client.exec('PRAGMA busy_timeout = 0')
+  try {
+    optimize(db, true)
+  } catch (error) {
+    if (!isBusy(error)) throw error
+  } finally {
+    client.exec('PRAGMA busy_timeout = 5000')
+  }
   return db
+}
+
+function pragma(client: DatabaseSync, name: string): unknown {
+  return client.prepare(`PRAGMA ${name}`).get()?.[name]
+}
+
+/**
+ * SQLite could not get a lock in time (SQLITE_BUSY or SQLITE_LOCKED, with
+ * their extended codes): another writer or a checkpoint held it. Waiting
+ * and trying again is the fix.
+ */
+export function isBusy(error: unknown): boolean {
+  // Drizzle wraps the driver's error as the cause of its own.
+  for (let e = error; e instanceof Error; e = e.cause) {
+    const code = (e as { errcode?: unknown }).errcode
+    if (typeof code === 'number' && [5, 6].includes(code & 0xff)) return true
+  }
+  return false
 }
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
