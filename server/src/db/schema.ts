@@ -607,6 +607,9 @@ export const removedMedia = sqliteTable(
     kind: text({ enum: ['image', 'video'] }).notNull(),
     thumbnailKey: text(),
     thumbnailMime: text(),
+    // The thumbnail's pixel size, as in `blobThumbnails`.
+    thumbnailWidth: integer(),
+    thumbnailHeight: integer(),
     createdAt: createdAt(),
   },
   (t) => [
@@ -628,6 +631,11 @@ export const blobThumbnails = sqliteTable(
     key: text(),
     size: integer(),
     mime: text(),
+    // Pixel size of the thumbnail, in the original's proportions: what the
+    // web reserves a box by before the media loads. Null until read; 0 when
+    // the file cannot be read.
+    width: integer(),
+    height: integer(),
     error: text().notNull().default(''),
     createdAt: createdAt(),
   },

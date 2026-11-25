@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
 import { useSensitiveMedia } from '../composables/useSensitiveMedia'
+import { layoutMedia, ratioOf } from '../media-layout'
 import { isRemoved, readyMedia, removedLabel } from '../presentation'
 import { collectionHref } from '../share'
 import { detailTitles, kindOf } from '../titles'
@@ -19,19 +20,22 @@ const props = defineProps<{
   collectionId?: string
 }>()
 const selected = shallowRef<Asset>()
-const singleRatio = shallowRef(1)
+// Shapes read from the media once it loads, for what the server has no size.
+const measured = shallowRef<Record<string, number>>({})
 function measure(event: Event) {
-  const image = event.target
-  if (image instanceof HTMLImageElement && image.naturalHeight)
-    singleRatio.value = Math.max(
-      0.75,
-      Math.min(2, image.naturalWidth / image.naturalHeight),
-    )
-  else if (image instanceof HTMLVideoElement && image.videoHeight)
-    singleRatio.value = Math.max(
-      0.75,
-      Math.min(2, image.videoWidth / image.videoHeight),
-    )
+  const target = event.target
+  const id =
+    target instanceof Element
+      ? target.closest<HTMLElement>('[data-asset]')?.dataset.asset
+      : undefined
+  const ratio =
+    target instanceof HTMLImageElement
+      ? ratioOf({ width: target.naturalWidth, height: target.naturalHeight })
+      : target instanceof HTMLVideoElement
+        ? ratioOf({ width: target.videoWidth, height: target.videoHeight })
+        : undefined
+  if (id && ratio && measured.value[id] !== ratio)
+    measured.value = { ...measured.value, [id]: ratio }
 }
 const LIMIT = 4
 // Removed media still shows, by the thumbnail its removal kept.
@@ -80,13 +84,33 @@ watch(
     selected.value = undefined
   },
 )
-watch(
-  () => media.value[0]?.id,
-  () => {
-    singleRatio.value = 1
-  },
-)
 const tiles = computed(() => media.value.slice(0, LIMIT))
+/**
+ * One or two tiles take the media's own shape (see `layoutMedia`), so a wide
+ * screenshot is not letterboxed in a square. More keep the fixed grid.
+ */
+const shape = computed(() => {
+  if (tiles.value.length > 2) return
+  const rows = layoutMedia(
+    tiles.value.map((asset) => ({
+      asset,
+      ratio: ratioOf(asset) ?? measured.value[asset.id],
+    })),
+  )
+  const ratios = rows.map((row) => row.ratio!)
+  return {
+    // Stacked rows are as tall as their widths make them, one above the other.
+    ratio:
+      rows.length === 1
+        ? ratios[0]!
+        : 1 / ratios.reduce((n, r) => n + 1 / r, 0),
+    columns: rows[0]!.cells
+      .map((cell) => `minmax(0, ${cell.flex}fr)`)
+      .join(' '),
+    // Proportional to height; fr values summing under 1 would not fill the box.
+    rows: rows.map((row) => `minmax(0, ${1000 / row.ratio!}fr)`).join(' '),
+  }
+})
 const overflow = computed(() => media.value.length - tiles.value.length)
 </script>
 
@@ -99,12 +123,21 @@ const overflow = computed(() => media.value.length - tiles.value.length)
       `desktop-${desktopSize || 'medium'}`,
       `count-${tiles.length}`,
     ]"
-    :style="{ '--preview-ratio': tiles.length === 1 ? singleRatio : 2 }"
+    :style="{ '--preview-ratio': shape?.ratio ?? 2 }"
     @load.capture="measure"
     @loadedmetadata.capture="measure"
   >
     <!-- While one veil covers the group, nothing beneath it may be tabbed to. -->
-    <span class="thumbs" :inert="covered || undefined">
+    <span
+      class="thumbs"
+      :class="{ shaped: shape }"
+      :style="
+        shape
+          ? { gridTemplateColumns: shape.columns, gridTemplateRows: shape.rows }
+          : undefined
+      "
+      :inert="covered || undefined"
+    >
       <component
         :is="tileLink(asset) ? AppLink : 'button'"
         v-for="(asset, index) in tiles"
@@ -126,6 +159,7 @@ const overflow = computed(() => media.value.length - tiles.value.length)
                 : detailLabel
         "
         :class="{ blurred: hidden(asset) }"
+        :data-asset="asset.id"
         @click.stop="view(asset)"
       >
         <template v-if="isRemoved(asset)">
@@ -230,8 +264,11 @@ const overflow = computed(() => media.value.length - tiles.value.length)
   outline: 2px solid #fff;
   outline-offset: -3px;
 }
-.thumbs:has(.tile:only-child) {
-  grid-template-columns: 1fr;
+.thumbs.shaped {
+  /* Not stretched to the group: the height comes from the ratio. */
+  align-self: flex-start;
+  height: auto;
+  aspect-ratio: var(--preview-ratio);
 }
 .count-3 .thumbs {
   grid-template-rows: repeat(2, minmax(0, 1fr));

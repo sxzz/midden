@@ -2,6 +2,12 @@
 import { computed, shallowRef, watch } from 'vue'
 import { assetURL, safeURL, type Asset, type Collection } from '../api'
 import { useSensitiveMedia } from '../composables/useSensitiveMedia'
+import {
+  layoutMedia,
+  ratioOf,
+  REMOVED_MAX_RATIO,
+  type LayoutItem,
+} from '../media-layout'
 import { isRemoved, mediaNotice, removedLabel } from '../presentation'
 import MediaPreview from './MediaPreview.vue'
 import MediaViewer from './MediaViewer.vue'
@@ -24,6 +30,43 @@ function view(asset: Asset) {
 const { covered, hidden, reveal, revealAll } = useSensitiveMedia(
   () => props.assets,
   () => props.showSensitive,
+)
+const isMedia = (asset: Asset) =>
+  !!asset.mime?.startsWith('image/') || !!asset.mime?.startsWith('video/')
+// Shapes read from the media once it loads, for what the server has no size.
+const measured = shallowRef<Record<string, number>>({})
+function measure(event: Event) {
+  const target = event.target
+  const id =
+    target instanceof Element
+      ? target.closest<HTMLElement>('[data-asset]')?.dataset.asset
+      : undefined
+  const ratio =
+    target instanceof HTMLImageElement
+      ? ratioOf({ width: target.naturalWidth, height: target.naturalHeight })
+      : target instanceof HTMLVideoElement
+        ? ratioOf({ width: target.videoWidth, height: target.videoHeight })
+        : undefined
+  if (id && ratio && measured.value[id] !== ratio)
+    measured.value = { ...measured.value, [id]: ratio }
+}
+interface Slot extends LayoutItem {
+  asset: Asset
+}
+// The box is reserved from the stored size, so nothing moves as media loads.
+const rows = computed(() =>
+  layoutMedia(
+    props.assets.map((asset): Slot => {
+      const removed = isRemoved(asset)
+      const ratio = ratioOf(asset) ?? measured.value[asset.id]
+      return {
+        asset,
+        box: removed || (asset.state === 'ready' && isMedia(asset)),
+        // The label of removed media needs room.
+        ratio: removed && ratio ? Math.min(ratio, REMOVED_MAX_RATIO) : ratio,
+      }
+    }),
+  ),
 )
 // Opening the viewer is itself the decision to look, so it carries the whole
 // group: paging from an uncovered image must not dead-end on a missing one.
@@ -51,77 +94,113 @@ watch(
 <template>
   <div v-if="assets.length" class="media-group">
     <!-- While one veil covers the group, nothing beneath it may be tabbed to. -->
-    <div class="media" :inert="covered || undefined">
-      <figure v-for="asset in assets" :key="asset.id" class="item">
-        <div
-          v-if="isRemoved(asset)"
-          class="frame removed"
-          :class="{ blurred: hidden(asset) }"
+    <div
+      class="media"
+      :class="{ many: assets.length > 4 }"
+      :inert="covered || undefined"
+      @load.capture="measure"
+      @loadedmetadata.capture="measure"
+    >
+      <div
+        v-for="row in rows"
+        :key="row.cells[0]!.item.asset.id"
+        class="row"
+        :class="{ boxed: row.ratio }"
+        :style="
+          row.ratio
+            ? {
+                '--row-ratio': row.ratio,
+                gridTemplateColumns: row.cells
+                  .map((cell) => `minmax(0, ${cell.flex}fr)`)
+                  .join(' '),
+              }
+            : undefined
+        "
+      >
+        <figure
+          v-for="{ item, flex } in row.cells"
+          :key="item.asset.id"
+          class="item"
+          :class="{ boxed: row.ratio }"
+          :style="row.ratio ? { '--cell-ratio': flex } : undefined"
+          :data-asset="item.asset.id"
         >
-          <LoadingImage
-            v-if="asset.thumbnail_url"
-            :src="asset.thumbnail_url"
-            :alt="asset.alt_text || ''"
-          />
-          <span class="removed-label">
-            <a
-              v-if="source"
-              :href="source"
-              target="_blank"
-              rel="noopener noreferrer"
-              >{{ removedLabel(asset) }} · 在原站查看 ›</a
-            ><span v-else>{{ removedLabel(asset) }}</span>
-            <template v-if="editable">
-              <small v-if="asset.download_again">下次更新时重新下载</small>
-              <button
-                v-else
-                type="button"
-                class="restore"
-                @click="emit('restore', asset)"
-              >
-                恢复下载
-              </button>
-            </template>
-          </span>
-        </div>
-        <p v-else-if="asset.state !== 'ready'" class="notice">
-          {{ mediaNotice(asset) }}
-        </p>
-        <button
-          v-else-if="
-            asset.mime?.startsWith('image/') || asset.mime?.startsWith('video/')
-          "
-          type="button"
-          class="frame"
-          :class="{ sensitive: hidden(asset) }"
-          :aria-label="
-            hidden(asset) && !covered
-              ? '敏感内容，点按显示'
-              : asset.mime?.startsWith('video/')
-                ? '播放视频'
-                : '放大图片'
-          "
-          @click="hidden(asset) ? reveal(asset.id) : view(asset)"
-        >
-          <MediaPreview
-            :asset="asset"
-            fit="contain"
-            eager
-            :alt="asset.alt_text"
-            :class="{ blurred: hidden(asset) }"
-          />
-          <span v-if="hidden(asset) && !covered" class="sensitive-label"
-            ><EyeIcon
-          /></span>
-          <span
-            v-else-if="!hidden(asset) && asset.mime?.startsWith('video/')"
-            class="play"
-            aria-hidden="true"
-            >▶</span
+          <div
+            v-if="isRemoved(item.asset)"
+            class="frame removed"
+            :class="{ blurred: hidden(item.asset) }"
           >
-        </button>
-        <a v-else class="download" :href="assetURL(asset, false)">下载文件</a>
-      </figure>
+            <LoadingImage
+              v-if="item.asset.thumbnail_url"
+              :src="item.asset.thumbnail_url"
+              :alt="item.asset.alt_text || ''"
+            />
+            <span class="removed-label">
+              <a
+                v-if="source"
+                :href="source"
+                target="_blank"
+                rel="noopener noreferrer"
+                >{{ removedLabel(item.asset) }} · 在原站查看 ›</a
+              ><span v-else>{{ removedLabel(item.asset) }}</span>
+              <template v-if="editable">
+                <small v-if="item.asset.download_again"
+                  >下次更新时重新下载</small
+                >
+                <button
+                  v-else
+                  type="button"
+                  class="restore"
+                  @click="emit('restore', item.asset)"
+                >
+                  恢复下载
+                </button>
+              </template>
+            </span>
+          </div>
+          <p v-else-if="item.asset.state !== 'ready'" class="notice">
+            {{ mediaNotice(item.asset) }}
+          </p>
+          <button
+            v-else-if="isMedia(item.asset)"
+            type="button"
+            class="frame"
+            :class="{ sensitive: hidden(item.asset) }"
+            :aria-label="
+              hidden(item.asset) && !covered
+                ? '敏感内容，点按显示'
+                : item.asset.mime?.startsWith('video/')
+                  ? '播放视频'
+                  : '放大图片'
+            "
+            @click="
+              hidden(item.asset) ? reveal(item.asset.id) : view(item.asset)
+            "
+          >
+            <MediaPreview
+              :asset="item.asset"
+              fit="contain"
+              eager
+              :alt="item.asset.alt_text"
+              :class="{ blurred: hidden(item.asset) }"
+            />
+            <span v-if="hidden(item.asset) && !covered" class="sensitive-label"
+              ><EyeIcon
+            /></span>
+            <span
+              v-else-if="
+                !hidden(item.asset) && item.asset.mime?.startsWith('video/')
+              "
+              class="play"
+              aria-hidden="true"
+              >▶</span
+            >
+          </button>
+          <a v-else class="download" :href="assetURL(item.asset, false)"
+            >下载文件</a
+          >
+        </figure>
+      </div>
     </div>
     <button
       v-if="covered"
@@ -149,12 +228,24 @@ watch(
   margin-top: 12px;
   max-width: 640px;
 }
+/* A row is as tall as its media's shape makes it, and no taller than the
+   tallest single box would be. */
 .media {
+  --media-max-height: min(480px, 70vh);
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
-  max-height: min(360px, 50vh);
+}
+/* Past four items the group scrolls instead of running down the page. */
+.media.many {
+  max-height: var(--media-max-height);
   overflow-y: auto;
+}
+.row {
+  display: grid;
+  gap: 4px;
+}
+.row.boxed {
+  width: min(100%, calc(var(--media-max-height) * var(--row-ratio)));
 }
 /* One veil for the whole group, sized to it, so the label has room to read. */
 .group-veil {
@@ -172,22 +263,21 @@ watch(
   outline: 2px solid #fff;
   outline-offset: -4px;
 }
-.media:has(.item:only-child) {
-  grid-template-columns: 1fr;
-}
-.item:only-child .frame {
-  aspect-ratio: auto;
-  height: min(360px, 50vh);
-}
 .item {
   margin: 0;
   min-width: 0;
+  min-height: 0;
+}
+/* Each cell is the shape its width share is, so a row of two has no gap's
+   worth of bars. */
+.item.boxed {
+  aspect-ratio: var(--cell-ratio);
 }
 .frame {
   position: relative;
   display: block;
   width: 100%;
-  height: min(180px, 25vh);
+  height: 100%;
   padding: 0;
   overflow: hidden;
   border-radius: 8px;

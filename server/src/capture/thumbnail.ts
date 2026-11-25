@@ -1,6 +1,7 @@
+import { Buffer } from 'node:buffer'
 import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { and, eq } from 'drizzle-orm'
@@ -12,6 +13,7 @@ import {
   mediaGarbage,
   removedMedia,
 } from '#db/schema.ts'
+import { HEADER_BYTES, imageSize, type ImageSize } from './image-size.ts'
 import { thumbnailDone } from './upload.ts'
 import type { Job } from '#jobs/queue.ts'
 import type { CaptureContext, Thumbnailer } from './context.ts'
@@ -74,6 +76,17 @@ function record(
 
 type Blob = typeof blobs.$inferSelect
 
+async function fileSize(file: string): Promise<ImageSize | undefined> {
+  const handle = await open(file, 'r')
+  try {
+    const header = Buffer.alloc(HEADER_BYTES)
+    const { bytesRead } = await handle.read(header, 0, HEADER_BYTES, 0)
+    return imageSize(header.subarray(0, bytesRead))
+  } finally {
+    await handle.close()
+  }
+}
+
 /** ffmpeg could not render the media; trying again would not help. */
 class RenderError extends Error {
   override name = 'RenderError'
@@ -90,7 +103,9 @@ async function render(
   thumbnailer: Thumbnailer,
   blob: Blob,
   signal: AbortSignal,
-): Promise<{ staged: StagedFile; mime: string } | { error: string }> {
+): Promise<
+  { staged: StagedFile; mime: string; size?: ImageSize } | { error: string }
+> {
   if (!SOURCE_TYPES.has(blob.mime)) return { error: '不支持的媒体格式' }
   await mkdir(ctx.stagingDir, { recursive: true })
   const dir = await mkdtemp(path.join(ctx.stagingDir, 'thumbnail-'))
@@ -144,6 +159,7 @@ async function render(
     return {
       staged,
       mime: thumbnailer.encoder === 'libwebp' ? 'image/webp' : 'image/jpeg',
+      size: await fileSize(staged.path),
     }
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -178,7 +194,7 @@ async function renderThumbnail(ctx: CaptureContext, job: Job): Promise<void> {
     record(ctx, blob.id, { state: 'failed', error: result.error })
     return
   }
-  const { staged, mime } = result
+  const { staged, mime, size } = result
   try {
     await ctx.mediaLocks.run(staged.hash, async () => {
       ctx.db.delete(mediaGarbage).where(eq(mediaGarbage.key, staged.hash)).run()
@@ -188,6 +204,8 @@ async function renderThumbnail(ctx: CaptureContext, job: Job): Promise<void> {
         key: staged.hash,
         size: staged.size,
         mime,
+        width: size?.width ?? 0,
+        height: size?.height ?? 0,
       })
       // The blob went away meanwhile; the file is garbage unless shared.
       if (!attached)
@@ -264,7 +282,7 @@ async function rerender(
     )
     return
   }
-  const { staged, mime } = result
+  const { staged, mime, size } = result
   try {
     return await ctx.mediaLocks.run(staged.hash, async () => {
       ctx.db.delete(mediaGarbage).where(eq(mediaGarbage.key, staged.hash)).run()
@@ -273,11 +291,22 @@ async function rerender(
         ctx.db.transaction((tx) => {
           // Whatever showed the lost file shows the new one.
           tx.update(blobThumbnails)
-            .set({ key: staged.hash, size: staged.size, mime })
+            .set({
+              key: staged.hash,
+              size: staged.size,
+              mime,
+              width: size?.width ?? 0,
+              height: size?.height ?? 0,
+            })
             .where(eq(blobThumbnails.key, key))
             .run()
           tx.update(removedMedia)
-            .set({ thumbnailKey: staged.hash, thumbnailMime: mime })
+            .set({
+              thumbnailKey: staged.hash,
+              thumbnailMime: mime,
+              thumbnailWidth: size?.width ?? 0,
+              thumbnailHeight: size?.height ?? 0,
+            })
             .where(eq(removedMedia.thumbnailKey, key))
             .run()
           // A stray copy of the old key (in the bucket, say) is collected.

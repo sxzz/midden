@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import {
   and,
   asc,
@@ -35,6 +36,7 @@ import { catalogCollections } from '#library/catalog.ts'
 import { deleteSourceResponses } from '#raw/responses.ts'
 import { collectRawGarbage } from '#raw/upload.ts'
 import { pace, type CaptureContext } from './context.ts'
+import { HEADER_BYTES, imageSize } from './image-size.ts'
 import { failCapture } from './lifecycle.ts'
 import { pruneStaging } from './staging.ts'
 import type { Transaction } from '#db/client.ts'
@@ -56,7 +58,10 @@ const VACUUM_MIN_FREE = 1024
 /** SQLite's `auto_vacuum` value for INCREMENTAL. */
 const INCREMENTAL = 2
 
+const SIZE_BACKFILL = 200
+
 const thumbnailsCaughtUp = new WeakSet<CaptureContext>()
+const sizesCaughtUp = new WeakSet<CaptureContext>()
 const vacuumedAt = new WeakMap<CaptureContext, number>()
 const BUDGET = 30_000
 
@@ -87,6 +92,7 @@ export async function runMaintenance(
   await step('media', () => collectMedia(ctx))
   if (slim) await step('raw garbage', () => collectRawGarbage(ctx))
   await step('thumbnails', () => backfillThumbnails(ctx))
+  if (slim) await step('thumbnail sizes', () => backfillThumbnailSizes(ctx))
   if (slim) await step('free pages', () => releaseFreePages(ctx))
   if (errors.length) throw new AggregateError(errors, 'maintenance failed')
 }
@@ -378,6 +384,79 @@ export function backfillThumbnails(ctx: CaptureContext): number {
   })
   if (missing.length < THUMBNAIL_BACKFILL) thumbnailsCaughtUp.add(ctx)
   return missing.length
+}
+
+/** A thumbnail's pixel size from the start of its file; 0 when unreadable. */
+async function sizeOf(ctx: CaptureContext, key: string) {
+  try {
+    const chunks: Buffer[] = []
+    for await (const chunk of await ctx.blobs.read(key, {
+      start: 0,
+      end: HEADER_BYTES - 1,
+    }))
+      chunks.push(chunk as Buffer)
+    return imageSize(Buffer.concat(chunks)) ?? { width: 0, height: 0 }
+  } catch {
+    return { width: 0, height: 0 }
+  }
+}
+
+/**
+ * Thumbnails made before their size was recorded get it now, read from the
+ * file. A file that cannot be read is marked 0 by 0, as the web shows it
+ * without a size; a regenerated thumbnail records its own.
+ */
+export async function backfillThumbnailSizes(
+  ctx: CaptureContext,
+): Promise<number> {
+  if (sizesCaughtUp.has(ctx)) return 0
+  const plain = ctx.db
+    .select({ key: blobThumbnails.key })
+    .from(blobThumbnails)
+    .where(
+      and(
+        eq(blobThumbnails.state, 'ready'),
+        isNotNull(blobThumbnails.key),
+        isNull(blobThumbnails.width),
+      ),
+    )
+    .limit(SIZE_BACKFILL)
+    .all()
+  const removed = ctx.db
+    .select({ key: removedMedia.thumbnailKey })
+    .from(removedMedia)
+    .where(
+      and(
+        isNotNull(removedMedia.thumbnailKey),
+        isNull(removedMedia.thumbnailWidth),
+      ),
+    )
+    .limit(SIZE_BACKFILL)
+    .all()
+  for (const { key } of plain) {
+    const size = await sizeOf(ctx, key!)
+    ctx.db
+      .update(blobThumbnails)
+      .set(size)
+      .where(and(eq(blobThumbnails.key, key!), isNull(blobThumbnails.width)))
+      .run()
+  }
+  for (const { key } of removed) {
+    const size = await sizeOf(ctx, key!)
+    ctx.db
+      .update(removedMedia)
+      .set({ thumbnailWidth: size.width, thumbnailHeight: size.height })
+      .where(
+        and(
+          eq(removedMedia.thumbnailKey, key!),
+          isNull(removedMedia.thumbnailWidth),
+        ),
+      )
+      .run()
+  }
+  if (plain.length < SIZE_BACKFILL && removed.length < SIZE_BACKFILL)
+    sizesCaughtUp.add(ctx)
+  return plain.length + removed.length
 }
 
 function pragma(ctx: CaptureContext, name: string): number {

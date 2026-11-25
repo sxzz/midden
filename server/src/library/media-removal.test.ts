@@ -156,6 +156,8 @@ async function addThumbnail(c: CaptureContext, blobId: string) {
       key: THUMB_KEY,
       size: THUMB.length,
       mime: 'image/jpeg',
+      width: 300,
+      height: 100,
     })
     .run()
 }
@@ -235,6 +237,8 @@ describe('media removal', () => {
       kind: 'video',
       thumbnailKey: THUMB_KEY,
       thumbnailMime: 'image/jpeg',
+      thumbnailWidth: 300,
+      thumbnailHeight: 100,
     })
     expect(c.db.select().from(blobThumbnails).all()).toEqual([])
     clock.now += 25 * HOUR
@@ -248,6 +252,8 @@ describe('media removal', () => {
       state: 'removed',
       kind: 'video',
       thumbnail: true,
+      width: 300,
+      height: 100,
       size: 0,
     })
     expect(view.assets[0]!.thumbnail_url).toContain(THUMB_KEY)

@@ -169,7 +169,11 @@ describe('media', () => {
     await capture(ctx, '1')
     const thumbnails = ctx.db.select().from(blobThumbnails).all()
     expect(thumbnails).toHaveLength(1)
-    expect(thumbnails[0]).toMatchObject({ state: 'ready' })
+    expect(thumbnails[0]).toMatchObject({
+      state: 'ready',
+      width: 800,
+      height: 400,
+    })
     const out = path.join(dir, 'thumb')
     const { pipeline } = await import('node:stream/promises')
     const { createWriteStream } = await import('node:fs')

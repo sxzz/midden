@@ -159,8 +159,13 @@ function mark(tx: Transaction, rows: Row[], target: RemovalTarget): void {
     const blobIds = rows
       .filter((row) => row.media_key === key && row.blob_id)
       .map((row) => row.blob_id!)
-    const thumbnail = tx.get<{ key: string; mime: string }>(sql`
-      SELECT key, mime FROM blob_thumbnails
+    const thumbnail = tx.get<{
+      key: string
+      mime: string
+      width: number | null
+      height: number | null
+    }>(sql`
+      SELECT key, mime, width, height FROM blob_thumbnails
       WHERE state = 'ready' AND key IS NOT NULL
         AND blob_id IN (SELECT value FROM json_each(${list(blobIds)}))
       LIMIT 1`)
@@ -170,12 +175,16 @@ function mark(tx: Transaction, rows: Row[], target: RemovalTarget): void {
         kind,
         thumbnailKey: thumbnail?.key ?? null,
         thumbnailMime: thumbnail?.mime ?? null,
+        thumbnailWidth: thumbnail?.width ?? null,
+        thumbnailHeight: thumbnail?.height ?? null,
       })
       .onConflictDoUpdate({
         target: removedMedia.mediaKey,
         set: {
           thumbnailKey: sql`coalesce(${removedMedia.thumbnailKey}, excluded.thumbnail_key)`,
           thumbnailMime: sql`coalesce(${removedMedia.thumbnailMime}, excluded.thumbnail_mime)`,
+          thumbnailWidth: sql`coalesce(${removedMedia.thumbnailWidth}, excluded.thumbnail_width)`,
+          thumbnailHeight: sql`coalesce(${removedMedia.thumbnailHeight}, excluded.thumbnail_height)`,
         },
       })
       .run()

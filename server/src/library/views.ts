@@ -27,6 +27,12 @@ export interface AssetView {
   size: number
   /** A small derived image exists. */
   thumbnail?: boolean
+  /**
+   * The thumbnail's pixel size, in the original's proportions: for the
+   * aspect ratio only (the thumbnail is smaller than the original).
+   */
+  width?: number
+  height?: number
   /** The original, for ready media. */
   url?: string
   thumbnail_url?: string
@@ -157,6 +163,8 @@ interface AssetRow {
   remote: number | null
   thumb_key: string | null
   thumb_mime: string | null
+  thumb_width: number | null
+  thumb_height: number | null
   marked: number
   kind: string
   source_url: string
@@ -170,6 +178,8 @@ function assetRows(r: Reader, where: SQL): AssetRow[] {
       b.remote_at IS NOT NULL AS remote,
       coalesce(t.key, rm.thumbnail_key) AS thumb_key,
       coalesce(t.mime, rm.thumbnail_mime) AS thumb_mime,
+      coalesce(t.width, rm.thumbnail_width) AS thumb_width,
+      coalesce(t.height, rm.thumbnail_height) AS thumb_height,
       rm.media_key IS NOT NULL AS marked, co.platform
     FROM assets a
     JOIN captures ca ON ca.id = a.capture_id
@@ -230,6 +240,9 @@ function assetView(r: Reader, row: AssetRow): AssetView {
     ...(row.mime ? { mime: row.mime } : {}),
     size: row.size ?? 0,
     ...(thumbnail ? { thumbnail: true } : {}),
+    ...(thumbnail && row.thumb_width && row.thumb_height
+      ? { width: row.thumb_width, height: row.thumb_height }
+      : {}),
     ...(ready
       ? {
           url: r.blobs.url(row.hash!, {

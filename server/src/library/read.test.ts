@@ -100,6 +100,8 @@ describe('collection', () => {
         key: 'f'.repeat(64),
         size: 3,
         mime: 'image/webp',
+        width: 400,
+        height: 200,
       })
       .run()
 
@@ -125,6 +127,8 @@ describe('collection', () => {
         sensitive: false,
         mime: 'image/jpeg',
         thumbnail: true,
+        width: 400,
+        height: 200,
         url: expect.stringMatching(/^\/media\/[\da-f]{64}\?/),
         thumbnail_url: expect.stringMatching(/^\/media\/f{64}\?/),
       }),

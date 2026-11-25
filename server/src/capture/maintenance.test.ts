@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -9,11 +9,13 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { openDatabase } from '#db/client.ts'
 import {
   blobs,
+  blobThumbnails,
   captures,
   collections,
   entities,
   jobs,
   mediaGarbage,
+  removedMedia,
   revisions,
   sourceResponses,
 } from '#db/schema.ts'
@@ -23,6 +25,7 @@ import { fakePlatform, postGraph } from '#testing/fake-platform.ts'
 import { expectCatalogFresh } from '#testing/library.ts'
 import { captureHandlers } from './handlers.ts'
 import {
+  backfillThumbnailSizes,
   collectCollections,
   collectMedia,
   failStaleCaptures,
@@ -77,7 +80,89 @@ function setup(clock: { now: number }, text = () => 'post') {
   return ctx
 }
 
+/** A WebP header of the extended kind, `width` by `height` pixels. */
+function webpOf(width: number, height: number) {
+  const b = Buffer.alloc(30)
+  b.write('RIFF', 0)
+  b.write('WEBP', 8)
+  b.write('VP8X', 12)
+  b.writeUIntLE(width - 1, 24, 3)
+  b.writeUIntLE(height - 1, 27, 3)
+  return b
+}
+
 describe('maintenance', () => {
+  test('thumbnails stored before sizes were recorded are measured once', async () => {
+    const c = setup({ now: Date.now() })
+    await c.queue.drain()
+    const dir = mkdtempSync(path.join(tmpdir(), 'midden-sizes-'))
+    const put = async (key: string, bytes: Buffer) => {
+      const file = path.join(dir, key)
+      writeFileSync(file, bytes)
+      await c.blobs.putFile(key, file)
+    }
+    await put('a'.repeat(64), webpOf(1200, 200))
+    await put('b'.repeat(64), webpOf(300, 400))
+    await put('c'.repeat(64), Buffer.from('not an image at all, just text....'))
+    const blob = (id: string) => ({
+      id,
+      hash: id.repeat(64),
+      size: 1,
+      mime: 'image/jpeg',
+    })
+    for (const id of ['a', 'c']) c.db.insert(blobs).values(blob(id)).run()
+    c.db
+      .insert(blobThumbnails)
+      .values([
+        {
+          blobId: 'a',
+          state: 'ready',
+          key: 'a'.repeat(64),
+          mime: 'image/webp',
+        },
+        {
+          blobId: 'c',
+          state: 'ready',
+          key: 'c'.repeat(64),
+          mime: 'image/webp',
+        },
+      ])
+      .run()
+    c.db
+      .insert(removedMedia)
+      .values([
+        { mediaKey: 'm1', kind: 'image', thumbnailKey: 'b'.repeat(64) },
+        { mediaKey: 'm2', kind: 'image', thumbnailKey: 'd'.repeat(64) },
+      ])
+      .run()
+    expect(await backfillThumbnailSizes(c)).toBe(4)
+    expect(
+      c.db
+        .select({ w: blobThumbnails.width, h: blobThumbnails.height })
+        .from(blobThumbnails)
+        .orderBy(blobThumbnails.blobId)
+        .all(),
+    ).toEqual([
+      { w: 1200, h: 200 },
+      // Unreadable: marked, so it is not read again.
+      { w: 0, h: 0 },
+    ])
+    expect(
+      c.db
+        .select({
+          w: removedMedia.thumbnailWidth,
+          h: removedMedia.thumbnailHeight,
+        })
+        .from(removedMedia)
+        .orderBy(removedMedia.mediaKey)
+        .all(),
+    ).toEqual([
+      { w: 300, h: 400 },
+      { w: 0, h: 0 },
+    ])
+    expect(await backfillThumbnailSizes(c)).toBe(0)
+  })
+
   test('a deleted collection is removed with what only it used', async () => {
     const clock = { now: Date.now() }
     const c = setup(clock)
