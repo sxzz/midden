@@ -43,6 +43,8 @@ Drizzle 使用 Node 内置的 `node:sqlite`，查询与事务都是同步的，�
 
 采集相关测试使用 `server/src/testing/` 中的内存数据库上下文与假平台（`fake.test`），通过真实的任务队列驱动抓取，不访问网络。Telegram 测试使用记录调用的假 API。
 
+`scripts/` 的测试（`scripts/*.test.ts`）用 Node 自带的 `node --test` 运行，`pnpm test` 包含它们。`deploy.test.ts` 用记录调用的假命令代替 docker、git 与 curl，数据目录是临时目录。
+
 ## 文档
 
 - `README.md`：部署与使用。

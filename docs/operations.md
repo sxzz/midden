@@ -2,7 +2,7 @@
 
 ## 部署结构
 
-生产环境使用 `compose.yaml` 运行一个容器，镜像内含 Node.js 26 与 ffmpeg（用于缩略图和视频尺寸探测）。容器以非 root 用户运行，数据目录挂载到 `/data`。
+生产环境使用 `compose.yaml` 运行一个容器，镜像内含 Node.js 26 与 ffmpeg（用于缩略图和视频尺寸探测）。容器以非 root 用户运行，数据目录挂载到 `/data`。可选的第二个容器 `litestream` 把数据库持续复制到 R2，见「Litestream」。
 
 对外访问需要 HTTPS 反向代理（例如 Cloudflare Tunnel），把整个域名转发到服务端口，至少包括 `/app/`、`/v1/`、`/media/`。Mini App 与通行密钥都要求 HTTPS。
 
@@ -29,6 +29,7 @@
 ```sh
 docker compose ps
 docker compose logs --tail=100 midden
+docker compose logs --tail=100 litestream     # 启用 Litestream 时
 docker compose pull && docker compose up -d   # 更新
 ```
 
@@ -39,9 +40,9 @@ docker compose pull && docker compose up -d   # 更新
 `main` 的 test 工作流通过后会发布镜像 `ghcr.io/sxzz/midden:latest` 与 `:sha-<提交>`。部署机上的 webhook 收到这次运行完成的事件后，从 `origin/main` 取出 `scripts/deploy.ts` 执行：
 
 1. 确认部署目录（默认 `~/midden`）没有本地改动，最新镜像的提交在 `origin/main` 上，且与正在运行的版本不同；
-2. 在线备份数据库到 `data/backups/deploy/`（未压缩，保留最近 2 份：这次的与上一次的）；
-3. 切换到该提交，用 `:sha-<提交>` 镜像 `docker compose up -d --wait`，并检查 `/healthz`；
-4. 新版本不健康时停掉它，恢复部署前的数据库，切回原来的版本。
+2. 在线备份数据库到 `data/backups/deploy/`，不压缩，回滚时直接换上。保留最近 2 份：这次的与上一次的；启用 Litestream 时只保留这次的 1 份，因为上一次的只用于新版本运行一段时间后才发现问题的情况，Litestream 可以恢复到那之前的任一时刻；
+3. 切换到该提交，用 `:sha-<提交>` 镜像 `docker compose up -d --wait midden`，并检查 `/healthz`。启用 Litestream 时随后 `docker compose up -d litestream`（`litestream.yml` 有改动时加 `--force-recreate`，compose 看不到文件内容的变化）；它启动失败不算部署失败，结果末尾加上 `; litestream did not start`；
+4. 新版本不健康时停掉它，恢复部署前的数据库，切回原来的版本。启用 Litestream 时：先停 Litestream 再停服务（它一直打开着数据库和 WAL，换文件时不能在运行）；换回数据库后删除它的本地状态 `data/.midden.db-litestream/`；原来的版本启动后（即使启动失败）再启动 Litestream。Litestream 发现本地数据库落后于存储桶，从存储桶取得位置，把换回的数据库整个作为下一个事务上传，回滚前的历史仍可恢复（见「Litestream」）。
 
 结果通过 Bot 发给 `DEPLOY_NOTIFY_CHAT_ID`（默认 `OWNER_TELEGRAM_ID`），日志在 `.local/deploy-webhook/`。也可以手动运行：
 
@@ -174,7 +175,7 @@ rclone copy ~/midden/data/media r2:midden \
    docker compose exec midden node server/src/cli.ts media-prune-local
    ```
 
-7. 自动备份从 `r2` 起不再复制媒体。旧的媒体镜像保留，确认 R2 无误后手动删除，见「自动备份」。
+7. 原来的每日备份脚本已删除，它留下的媒体镜像确认 R2 无误后手动删除，见「旧的每日备份」。
 
 ### R2 的保护
 
@@ -188,29 +189,154 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
 ## 备份与恢复
 
-需要备份的是数据目录与 `.env`（其中的 `SECRET_KEY` 用于解密账号凭据）。
+需要备份的是数据库、媒体与 `.env`：
 
-1. 数据库：服务运行中即可做一致的在线备份：
+- 数据库：Litestream 持续复制到 R2 的私有存储桶 `midden-backup`，可以恢复到最近 7 天内的任一时刻，见「Litestream」。不启用时，自己定期做在线备份（服务运行中即可）：
+
+  ```sh
+  docker compose exec midden node server/src/cli.ts backup /data/backups
+  ```
+
+  这个命令也用于一次性的副本，例如改动数据之前。
+
+- 媒体：使用 R2 时原文件只在 R2 中（见「R2 的保护」），本地只剩缩略图和正在上传的原文件，不复制。`MEDIA_STORE=local` 时 `media/` 中的文件写入后不再修改，增量复制即可：
+
+  ```sh
+  rsync -a data/media/ <备份位置>/media/
+  ```
+
+- `.env`：不在任何自动备份中。其中的 `SECRET_KEY` 用于解密已保存的账号凭据，没有它，恢复的数据库中的账号要重新添加。改动后自己另存一份（例如密码管理器），Litestream 的 token 也在其中，在另一台机器上恢复时需要它。
+
+### Litestream
+
+`compose.yaml` 中的 `litestream` 服务运行官方镜像 `litestream/litestream`（版本和摘要固定），与服务共用数据目录，按仓库根目录的 `litestream.yml` 把 `data/midden.db` 的改动持续复制到 `s3://midden-backup/db`（R2 的 S3 端点）。它是单独的容器：出问题时服务照常运行，部署也不等它。以 midden 的用户（1000）运行，它在数据库旁边建的文件服务也能写。
+
+启用：
+
+1. Cloudflare「R2」中建私有存储桶 `midden-backup`（不绑定域名、不开公开访问）；「R2 → Manage API tokens → Create API token」，权限 **Object Read & Write**，范围只选 `midden-backup`，与媒体的 token 分开。
+2. 部署目录的 `.env`：
 
    ```sh
-   docker compose exec midden node server/src/cli.ts backup /data/backups
+   COMPOSE_PROFILES=litestream
+   LITESTREAM_ACCESS_KEY_ID=<Access Key ID>
+   LITESTREAM_SECRET_ACCESS_KEY=<Secret Access Key>
    ```
 
-2. 媒体（`MEDIA_STORE=local`）：`media/` 中的文件写入后不再修改，增量复制即可。使用 R2 时原文件只在 R2 中，本地只剩缩略图和正在上传的原文件，不复制。
+   `COMPOSE_PROFILES` 让 compose 启动 `litestream` 服务，没有它就没有这个容器；服务读到 `LITESTREAM_ACCESS_KEY_ID` 就等待 Litestream 的心跳（见「监控」）。两个密钥只传给 Litestream 的容器和服务（`.env` 整个传给服务），不写入日志。
+
+3. `docker compose up -d`：创建 `litestream` 容器，并重建服务的容器以读入新变量。Litestream 第一次启动时上传整个数据库，日志中有 `snapshot complete`。
+4. 检查（见「检查复制」），几天后按「恢复」试一次。
+
+关闭：先 `docker compose rm -sf litestream`，再删去这三行，`docker compose up -d`（服务不再等待心跳）。存储桶中的文件不会自动删除。
+
+`litestream.yml` 改动后 `docker compose restart litestream`；自动部署在它有改动时会重建容器。
+
+#### 设置
+
+Litestream 0.5 把 WAL 中新提交的页面写成 LTX 文件（按页 LZ4 压缩），每个文件一个事务编号（TXID），连续递增；文件逐级合并，每天另做一份完整快照。
+
+| 设置                                  | 值                     | 原因                                                                                                                                                            |
+| ------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `monitor-interval`                    | `10s`                  | 每 10 秒检查一次 WAL，有新页面就写一个 L0 文件，每个文件是一次 PUT。默认 1 秒时持续写入的一天有 86,400 个，10 秒最多 8,640 个。机器损坏时最多丢失约 10 秒的写入 |
+| `sync-interval`                       | `1s`                   | 文件写好后 1 秒内上传。0.5 中 PUT 的次数由上一项决定，这一项只是上传的间隔                                                                                      |
+| `levels`                              | `1m`、`1h`             | 每分钟把 L0 合并成一个 L1 文件，它们是保留期内的恢复点；每小时再合并成 L2，恢复时少下载文件                                                                     |
+| `snapshot`                            | 每 `24h`，保留 `192h`  | 每天 00:00 UTC 一份完整快照，保留 8 天：最近 7 天内的任一时刻之前都有一份快照可用                                                                               |
+| `l0-retention-check-interval`         | `1h`                   | 每次检查都列出存储桶中全部 L1 文件（每 1000 个一次 Class A 操作），默认每 15 秒一次太多                                                                         |
+| `heartbeat-url`、`heartbeat-interval` | 服务的 8081 端口，`5m` | 见「监控」                                                                                                                                                      |
+
+恢复点：最近 5 分钟到 1 小时内（L0 文件还在）约每 10 秒一个，更早的每分钟一个（L1 的边界），8 天前的不能恢复。没有写入的时段没有文件。
+
+#### 检查点
+
+服务的连接用 WAL、`synchronous = NORMAL`、5 秒的 busy timeout，保留 SQLite 默认的自动检查点（WAL 超过 1000 页时，PASSIVE）。Litestream 一直持有一个读事务，只有它自己的检查点能让 WAL 从头开始写（它做 PASSIVE 检查点时短暂持有写锁，写入在这期间等待，busy timeout 足够）；PASSIVE 检查点越不过它的读事务，所以服务的自动检查点不影响复制。服务中没有 `wal_checkpoint(RESTART)`、`wal_checkpoint(TRUNCATE)` 和 `VACUUM`：前两者会让 Litestream 重新上传整个数据库，`VACUUM` 把每一页写进 WAL，都不要加。`PRAGMA optimize`（启动时和每 6 小时）是普通的写事务；`cli.ts backup` 只读数据库。WAL 超过约 500 MB 时 Litestream 先试 PASSIVE，不行再做阻塞的 TRUNCATE（默认设置，保留）。
+
+Litestream 在数据库中建两张表 `_litestream_seq`、`_litestream_lock`，恢复出的数据库中也有，不影响服务。
+
+Litestream 停止期间服务继续写入；服务做的检查点让 WAL 从头开始写之后，Litestream 再启动时上传一份完整快照（日志中 `snap=true`）。整套服务停止时（例如重启 Mac），服务的连接若最后关闭会删除 WAL，也是这样。数据不会缺，只多一次约 1.2 GB 的上传。
+
+#### 费用
+
+R2 Standard：存储 $0.015/GB·月，Class A 操作（PUT、分段上传、LIST）$4.50/百万次，Class B（GET、HEAD）$0.36/百万次，流出免费。每月免费 10 GB·月、100 万次 Class A、1000 万次 Class B，与媒体的存储桶 `midden` 共用。按数据库 2.3 GB、LZ4 后约 52%（开发库实测）估计，一份完整副本约 1.2 GB：
+
+- 存储：8 份快照约 9.6 GB；L1、L2 保留约 9 天的增量，按每天 100–300 MB 改动估计约 1–2 GB；启用后、每次回滚后和 Litestream 重新上传整个数据库（见上）后的 9 天内，L1、L2 中各多一份完整副本（约 2.4 GB）。平时约 11–12 GB，约 $0.18/月（媒体已用完免费额度时；否则更少）。
+- Class A，最坏情况（整月每 10 秒都有写入）：L0 上传 259,200；L1 合并 43,200 次写入加 43,200 次列出 L0；L2 合并 720 次写入加约 9,400 次列出 L1；L0 保留检查约 10,000；快照分段上传（每段 5 MiB）约 7,000；快照保留清理约 450。合计约 37 万次，在免费额度内；全部计费也只有约 $1.7/月。写入是间歇的，实际应在一半以下。
+- Class B：L2 合并时下载 L1 文件，每月最多约 4.3 万次，另有恢复时的下载，免费额度内。
+
+#### 监控
+
+`litestream.yml` 的 `heartbeat-url` 指向服务的 8081 端口（`server/src/litestream.ts`；compose 只发布 8080，这个端口只有同一网络中的容器能访问）。Litestream 只在最近 5 分钟内的同步都成功时每 5 分钟发一次心跳：容器没有运行、token 错误、网络或 R2 故障时都没有心跳。
+
+服务设置了 `LITESTREAM_ACCESS_KEY_ID` 时监听这个端口：20 分钟没有收到心跳（从服务启动时算起）就由 Bot 告诉所有者「数据库备份：20 分钟没有收到 Litestream 的心跳」，日志记 `litestream heartbeat missing`（error）；之后收到心跳时发「数据库备份：Litestream 的心跳已恢复」，记 `litestream heartbeat resumed`。Litestream 上传失败后按 1 秒起翻倍、最长 5 分钟的间隔重试，所以故障排除后几分钟内才恢复。没有配置 Bot 时只记日志。服务重启后重新计时，故障持续时每次部署后会再提醒一次。
+
+部署时 Litestream 启动失败，部署消息末尾有 `; litestream did not start`。整台机器离线时这些都发不出来，服务本身也不可用。
+
+#### 检查复制
+
+```sh
+docker compose ps litestream
+docker compose logs --tail=50 litestream                                # sync error、monitor error、compaction failed
+docker compose exec litestream litestream ltx -level 9 /data/midden.db    # 快照：应有一份当天 00:00 UTC 之后的
+docker compose exec litestream litestream ltx -level all /data/midden.db  # 全部文件：有写入时 L0 的最新时间应在一分钟内
+docker compose exec litestream litestream status                          # 本地 TXID 与 WAL 大小
+```
+
+Litestream 0.5 没有 0.3 的 `generations`、`snapshots` 命令：不再分 generation，事务编号一直连续；快照就是 `ltx -level 9` 列出的文件。
+
+### 恢复
+
+Litestream 的恢复在一个临时的 `litestream` 容器中运行（`docker compose run`，同样的镜像、配置和 token），写到数据目录中的新文件，服务照常运行。
+
+1. 恢复到新文件：
 
    ```sh
-   rsync -a data/media/ <备份位置>/media/
+   # 最新的状态
+   docker compose run --rm litestream restore -integrity-check full \
+     -o /data/restore/midden.db /data/midden.db
+   # 某一时刻之前的最后一个恢复点（UTC，RFC 3339）
+   docker compose run --rm litestream restore -integrity-check full \
+     -timestamp 2026-11-20T08:00:00Z -o /data/restore/midden.db /data/midden.db
    ```
 
-### 自动备份
+   加 `-dry-run` 先列出要下载的文件。`-o` 的文件不能已存在，每次换一个文件名或先删掉。`-integrity-check full` 在恢复后运行 `PRAGMA integrity_check`，日志中应有 `post-restore integrity check passed`。
 
-`scripts/backup.ts` 每天备份一次：
+2. 检查恢复的文件：
 
-- 数据库：服务在线备份，检查完整性后 gzip 压缩，与 `.env` 及当前提交一起存到 `<目标>/daily/<时间>/`，保留 7 天（最新一份总是保留）；
-- 媒体：部署目录的 `.env` 中 `MEDIA_STORE` 不是 `r2` 时，`rsync` 增量镜像到 `<目标>/media/`，不删除；是 `r2` 时跳过，日志记 `media: skipped, MEDIA_STORE=r2 keeps the originals in R2`；
-- 部署进行中时等部署结束；失败时通过 Bot 通知 `DEPLOY_NOTIFY_CHAT_ID`（默认 `OWNER_TELEGRAM_ID`）。
+   ```sh
+   docker compose run --rm --entrypoint sqlite3 litestream /data/restore/midden.db \
+     "PRAGMA integrity_check; SELECT count(*), datetime(max(created_at) / 1000, 'unixepoch') FROM captures"
+   ```
 
-改为 `r2` 后，原来的镜像 `<目标>/media/`（默认 `~/backups/midden/auto/media/`）不再更新，脚本也不会删除它。确认 R2 无误后手动删除：
+   应输出 `ok`，最后一次抓取的时间（UTC）应在恢复点之前不久。
+
+3. 换上，先停 Litestream 再停服务：
+
+   ```sh
+   docker compose stop litestream
+   docker compose stop midden
+   mkdir data/before-restore && mv data/midden.db* data/before-restore/
+   mv data/restore/midden.db* data/
+   rm -rf data/.midden.db-litestream
+   docker compose up -d
+   ```
+
+   原来的数据库连同 WAL 留在 `data/before-restore/`，确认无误后删除。删去 Litestream 的本地状态后，它把换上的数据库整个作为下一个事务上传，换之前的历史仍可恢复。
+
+在另一台机器上恢复：取出仓库，放回 `.env`（同一个 `SECRET_KEY` 和 Litestream 的 token），把第 1 步的 `-o` 换成 `/data/midden.db` 直接恢复到空的数据目录，再 `docker compose up -d`。
+
+部署前的快照（`data/backups/deploy/`）同样按第 3 步换上，把 `mv data/restore/midden.db* data/` 换成 `cp data/backups/deploy/<文件> data/midden.db`。
+
+使用 R2 时，回收不再引用的媒体会同时删除 R2 中的对象，所以恢复较早的数据库后，在那之后删除的媒体不能再显示。`MEDIA_STORE=local` 时数据库与媒体分别备份，可能有少量新媒体在数据库备份中尚未出现（无害），或数据库引用了刚被回收的旧媒体，后者在维护时会被清理；需要严格一致时，先 `docker compose stop` 再备份。缩略图在请求时重新生成。
+
+### 旧的每日备份
+
+`scripts/backup.ts` 与 `install-backup.ts` 已删除：数据库由 Litestream 复制，媒体在 R2。已安装的 LaunchAgent 这样卸载：
+
+```sh
+launchctl bootout gui/$(id -u)/org.midden.backup
+rm ~/Library/LaunchAgents/org.midden.backup.plist
+```
+
+它留下的 `~/backups/midden/auto/`：`daily/` 中是每天的数据库快照（`midden.db.gz`）和 `.env`，Litestream 运行几天、按「恢复」试过一次后可以删除，`.env` 另存一份。`media/` 是改为 R2 之前的媒体镜像，确认 R2 无误后删除：
 
 1. `media-migrate --dry-run` 显示 `0 blobs not yet in the bucket`，最后一次迁移的汇总没有 `missing`、`hash mismatch`、`failed`；
 2. 按「步骤」第 4 步抽查过几个公开地址，网页中的图片和视频正常；
@@ -225,21 +351,6 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 4. 删除：`rm -rf ~/backups/midden/auto/media`。
 
 此后 R2 中的原文件是唯一的一份（见「R2 的保护」）。
-
-目标默认 `~/backups/midden/auto`。安装为每天 12:00 运行的 LaunchAgent，直接运行部署目录里的脚本，随部署更新：
-
-```sh
-node scripts/install-backup.ts --dir ~/midden            # --to <目标> --at HH:MM
-launchctl kickstart gui/$(id -u)/org.midden.backup      # 立即运行一次
-```
-
-日志在 `.local/backup/`。升级 Node 后重新运行安装命令。
-
-### 恢复
-
-恢复时停止服务，将备份的数据库文件放回 `data/midden.db`（自动备份的 `midden.db.gz` 先 `gunzip`），删除旁边的 `midden.db-wal` 与 `midden.db-shm`，媒体放回 `data/media/`（使用 R2 时原文件在 R2 中，不需要放回，缩略图在请求时重新生成），使用原来的 `SECRET_KEY` 启动。
-
-数据库与媒体分别备份时，可能有少量新媒体在数据库备份中尚未出现（无害），或数据库引用了刚被回收的旧媒体；后者在维护时会被清理。需要严格一致时，先 `docker compose stop` 再备份。使用 R2 时，回收会同时删除 R2 中的对象，所以恢复较早的数据库后，在那之后删除的媒体不能再显示。
 
 ## 维护任务
 
@@ -268,3 +379,4 @@ launchctl kickstart gui/$(id -u)/org.midden.backup      # 立即运行一次
   ```
 
 - 找不到 ffmpeg 时启动日志会提示，缩略图停用；之后装上 ffmpeg，维护任务会补做缩略图。
+- Litestream：`litestream heartbeat missing` 表示 20 分钟没有收到它的心跳，看 `docker compose logs litestream` 中的 `monitor error`、`sync error`（如 token 错误时的 403、网络错误）；`litestream heartbeat listener failed` 表示服务没能监听 8081 端口。见「Litestream」。

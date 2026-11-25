@@ -42,6 +42,7 @@ docker compose up -d
 | `PORT` | 宿主机端口，默认 `8080` |
 | `LOG_LEVEL` | 日志级别，默认 `info` |
 | `MEDIA_STORE` 等 | 可选，把媒体原文件存到 Cloudflare R2，见 [运维](docs/operations.md#媒体存储cloudflare-r2) |
+| `COMPOSE_PROFILES=litestream`、`LITESTREAM_ACCESS_KEY_ID`、`LITESTREAM_SECRET_ACCESS_KEY` | 可选，用 Litestream 把数据库持续复制到 R2，见 [运维](docs/operations.md#litestream) |
 
 ### 接入 Telegram
 
@@ -73,13 +74,13 @@ curl -H "Authorization: Bearer <token>" -H 'Content-Type: application/json' \
 docker compose pull && docker compose up -d
 ```
 
-备份数据库（服务运行中即可）：
+数据库可以由可选的 `litestream` 容器持续复制到 R2，能恢复到最近 7 天内的任一时刻；也可以手动备份（服务运行中即可）：
 
 ```sh
 docker compose exec midden node server/src/cli.ts backup /data/backups
 ```
 
-媒体文件写入后不再修改，用 `rsync` 等工具增量复制 `data/media/` 即可；使用 R2 时原文件只在 R2 中，不需要复制。详见 [运维文档](docs/operations.md)。
+媒体文件写入后不再修改，用 `rsync` 等工具增量复制 `data/media/` 即可；使用 R2 时原文件只在 R2 中，不需要复制。`.env` 自己另存一份。详见 [运维文档](docs/operations.md#备份与恢复)。
 
 ## 开发
 
