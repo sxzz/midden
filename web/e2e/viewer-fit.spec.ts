@@ -202,6 +202,15 @@ test('the caption travels with its slide while swiping', async ({ page }) => {
       (await captions.all()).map(async (c) => (await box(c)).x),
     )
     expect(xs.some((x) => x > 0 && x < 390)).toBe(true)
+    // Let go past half way. The slide changes then whatever the speed; short
+    // of it, PhotoSwipe needs a fast flick, and the pause the reads above take
+    // would let the finger's speed die away.
+    for (const x of [120, 80, 40]) {
+      await client.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x, y: 300 }],
+      })
+    }
     await client.send('Input.dispatchTouchEvent', {
       type: 'touchEnd',
       touchPoints: [],
@@ -222,15 +231,30 @@ test('the thumbnail strip follows the viewer and scrubs it', async ({
   await expect(dialog.getByRole('status').first()).toHaveText('3 / 3')
   await page.keyboard.press('ArrowLeft')
   await expect(thumb(page, 2)).toHaveAttribute('aria-current', 'true')
-  // The shown item's thumbnail rests in the middle of the strip.
-  const centre = async () => {
+  // The shown item's thumbnail comes to rest in the middle of the strip: on
+  // either side of it counts as not there yet.
+  const offCentre = async () => {
     const strip = await box(dialog.locator('.strip'))
     const current = await box(dialog.locator('.thumb.on'))
-    return Math.round(
-      current.x + current.width / 2 - (strip.x + strip.width / 2),
+    return Math.abs(
+      Math.round(current.x + current.width / 2 - (strip.x + strip.width / 2)),
     )
   }
-  await expect.poll(centre).toBeLessThanOrEqual(2)
+  await expect.poll(offCentre).toBeLessThanOrEqual(1)
+  // Still, once it has stopped: a scroll in flight would be read as a hand's.
+  await expect
+    .poll(() =>
+      dialog.locator('.strip').evaluate(
+        (el) =>
+          new Promise<number>((resolve) => {
+            const at = el.scrollLeft
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => resolve(el.scrollLeft - at)),
+            )
+          }),
+      ),
+    )
+    .toBe(0)
   // Dragging the strip moves the viewer to the thumbnail it stops on.
   const strip = await box(dialog.locator('.strip'))
   const y = strip.y + strip.height / 2

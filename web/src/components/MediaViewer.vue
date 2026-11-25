@@ -263,7 +263,12 @@ function followStrip(smooth: boolean) {
 }
 // A mouse drags the strip as a finger would.
 let drag: { x: number; left: number; moved: boolean } | undefined
+// Set when a drag ended: the click that may follow it is not a tap on a
+// thumbnail. Cleared by the next press, so a browser that sends no such click
+// cannot make a later, real one count for nothing.
+let dragged = false
 function dragStart(event: PointerEvent) {
+  dragged = false
   if (event.pointerType !== 'mouse' || !strip.value) return
   drag = { x: event.clientX, left: strip.value.scrollLeft, moved: false }
 }
@@ -280,22 +285,19 @@ function dragEnd() {
   if (!drag) return
   if (drag.moved) {
     scrubFor(160)
-    // The click that ends a drag is not a tap on a thumbnail.
-    window.addEventListener('click', (e) => e.stopPropagation(), {
-      capture: true,
-      once: true,
-    })
+    dragged = true
   }
   drag = undefined
 }
 function jump(slot: number) {
-  if (opened.value) photoSwipe?.goTo(slot)
+  if (opened.value && !dragged) photoSwipe?.goTo(slot)
 }
 // What the floating bars take of the stage. Media is fitted in the rest, so at
 // its default zoom it never lies under the text, the captions or the buttons.
 let chrome: Chrome = { top: 0, bottom: 0, side: 0 }
 let photoSwipe: PhotoSwipe | undefined
 let resizeObserver: ResizeObserver | undefined
+let relayout = 0
 let previousOverflow = ''
 let opener: HTMLElement | null = null
 let disposed = false
@@ -450,9 +452,16 @@ onMounted(() => {
   if (typeof ResizeObserver !== 'undefined') {
     // The stage follows the window, the host viewport and rotation; the bars
     // follow the text shown. Either one moves the free area.
+    // Laying out again resizes what is observed (the bars follow the text
+    // lines, the slides the bars), so it waits for the next frame: inside
+    // the callback it ends the observer's loop with undelivered
+    // notifications, which the browser reports as an error.
     resizeObserver = new ResizeObserver(() => {
-      if (disposed) return
-      pswp.updateSize(measure(el))
+      if (relayout || disposed) return
+      relayout = requestAnimationFrame(() => {
+        relayout = 0
+        if (!disposed) pswp.updateSize(measure(el))
+      })
     })
     resizeObserver.observe(el)
     if (topBar.value) resizeObserver.observe(topBar.value)
@@ -594,6 +603,7 @@ onBeforeUnmount(() => {
   }
   videos.clear()
   resizeObserver?.disconnect()
+  cancelAnimationFrame(relayout)
   photoSwipe?.destroy()
   dialog.value?.close()
   document.body.style.overflow = previousOverflow
