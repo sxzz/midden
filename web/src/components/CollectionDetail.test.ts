@@ -199,12 +199,36 @@ it('a post opens the sheet with its references alone', async () => {
   })
 })
 
+it('puts the update group first, the date of the version under it', async () => {
+  const { el } = await mount()
+  await vi.waitFor(() => expect(groups(el)).toContainEqual(['更新']))
+  const list = groups(el)
+  const update = list.findIndex((rows) => rows[0] === '更新')
+  const pages = list.findIndex((rows) =>
+    rows.some((row) => row?.startsWith('公开分享')),
+  )
+  expect(update).toBeGreaterThanOrEqual(0)
+  expect(pages).toBe(update + 1)
+  const sections = [...el.querySelectorAll('.section')]
+  const footnotes = sections.map((section) =>
+    section.querySelector('.section-footnote')?.textContent?.trim(),
+  )
+  expect(footnotes[sections.indexOf(el.querySelector('.update')!)]).toMatch(
+    /^最新版本抓取于 /,
+  )
+  expect(footnotes.filter(Boolean)).toHaveLength(1)
+})
+
 it('shows no update group behind a public link', async () => {
   shareSlug.value = 's'
   const { el } = await mount()
   expect(el.querySelector('.update')).toBeNull()
   expect(el.textContent).not.toContain('查看进度')
   expect(el.textContent).toContain('打开原文')
+  // The date of the version stays, under the group of pages.
+  const footnote = el.querySelector('.section-footnote')
+  expect(footnote?.textContent).toMatch(/^最新版本抓取于 /)
+  expect(footnote?.parentElement?.textContent).toContain('打开原文')
 })
 
 it('links each follow count to the library under the 关系 filter', async () => {

@@ -309,7 +309,32 @@ const version = computed(() =>
         @more="historyPage(true)"
       />
     </ListSection>
-    <ListSection v-if="pages || !shared" :footnote="version">
+    <!-- The update in a group of its own, first: the button that starts it
+         and the progress of the running or latest one, over the date of the
+         version on screen. -->
+    <ListSection v-if="!shared" class="update" :footnote="version">
+      <ListButton
+        :label="updating ? '正在更新…' : '更新'"
+        :disabled="busy || updating || loadingPoint || !available"
+        @select="startUpdate"
+      />
+      <ListButton
+        v-if="record"
+        label="查看进度"
+        chevron
+        :to="{ name: 'capture', params: { id: record } }"
+      />
+      <ListButton
+        v-if="!available"
+        label="重试连接采集服务"
+        @select="checkAvailability"
+      />
+    </ListSection>
+    <!-- Behind a public link there is no update, so the date goes here. -->
+    <ListSection
+      v-if="pages || !shared"
+      :footnote="shared ? version : undefined"
+    >
       <ListButton
         v-if="trendable"
         label="统计趋势"
@@ -341,26 +366,6 @@ const version = computed(() =>
         :hint="exposureHint"
         :trailing="sharedDirectly ? '已公开' : undefined"
         @select="sharing = true"
-      />
-    </ListSection>
-    <!-- The update in a group of its own: the button that starts it and
-         the progress of the running or latest one. -->
-    <ListSection v-if="!shared" class="update">
-      <ListButton
-        :label="updating ? '正在更新…' : '更新'"
-        :disabled="busy || updating || loadingPoint || !available"
-        @select="startUpdate"
-      />
-      <ListButton
-        v-if="record"
-        label="查看进度"
-        chevron
-        :to="{ name: 'capture', params: { id: record } }"
-      />
-      <ListButton
-        v-if="!available"
-        label="重试连接采集服务"
-        @select="checkAvailability"
       />
     </ListSection>
     <!-- The reader's own notes, folded, then the one destructive action. -->

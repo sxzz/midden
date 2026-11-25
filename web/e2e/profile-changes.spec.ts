@@ -135,6 +135,15 @@ test('lists a profile’s changes from its detail and returns to it', async ({
   // page of changes.
   await expect(page.locator('.post .name')).toHaveText('合成账号')
   await expect(page.getByRole('slider')).toHaveCount(0)
+  // 更新 comes before the pages about the profile, with the date of the
+  // version under it.
+  const update = page.locator('.section.update')
+  await expect(update.locator('.section-footnote')).toHaveText(
+    /^最新版本抓取于 /,
+  )
+  await expect(
+    update.locator('xpath=following-sibling::section[1]'),
+  ).toContainText('资料修改记录')
   await page.getByRole('link', { name: '资料修改记录' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/changes$`))
   await expect(page.locator('h1')).toHaveText('资料修改记录')
