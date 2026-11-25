@@ -4,10 +4,16 @@ import type { RouteLocationRaw, RouteRecordNameGeneric } from 'vue-router'
 /** The app's three destinations, as the bottom bar lists them. */
 export type Tab = 'explore' | 'relations' | 'settings'
 
-export const tabs: readonly { value: Tab; label: string; root: string }[] = [
-  { value: 'explore', label: '探索', root: 'collections' },
-  { value: 'relations', label: '关系', root: 'relations' },
-  { value: 'settings', label: '设置', root: 'settings' },
+export const tabs: readonly {
+  value: Tab
+  label: string
+  /** The root page's route name and plain address. */
+  root: string
+  path: string
+}[] = [
+  { value: 'explore', label: '探索', root: 'collections', path: '/' },
+  { value: 'relations', label: '关系', root: 'relations', path: '/relations' },
+  { value: 'settings', label: '设置', root: 'settings', path: '/settings' },
 ]
 
 /**
@@ -82,6 +88,16 @@ export function nextScroll(
   if (travel >= threshold) return { y, hidden: !state.hidden, travel: 0 }
   return { y, hidden: state.hidden, travel }
 }
+
+/**
+ * Until when scrolling is the page restoring its position rather than the
+ * reader, which does not move the bar.
+ */
+let settledAt = 0
+export function settleBar(ms: number) {
+  settledAt = Math.max(settledAt, performance.now() + ms)
+}
+export const barSettling = () => performance.now() < settledAt
 
 /**
  * Pages that hide the bar while they show something in its place, such as

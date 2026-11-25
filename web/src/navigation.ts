@@ -1,5 +1,6 @@
 import { host } from './host'
 import { shareSlug } from './share'
+import { backIsHistory, backPath } from './tab-state'
 import { tabOf, tabRoute } from './tabbar'
 import type {
   RouteLocationRaw,
@@ -18,10 +19,23 @@ export function homeRoute(from?: RouteRecordNameGeneric): RouteLocationRaw {
   return tab ? tabRoute(tab) : { name: 'collections' }
 }
 
-/** Back, or to the tab's start when the page was opened directly. */
+/**
+ * Where 返回 leads (see `backPath`): the page before this one in its tab,
+ * else the start.
+ */
+export function backRoute(router: Router): RouteLocationRaw {
+  return backPath(router) ?? homeRoute(router.currentRoute?.value.name)
+}
+
+/**
+ * 返回: a step back through history when that is where it leads. A page the
+ * bottom bar brought back has another tab's page behind it in history, so
+ * it replaces itself with the page before it in its own tab instead, and
+ * the browser's back still returns to the other tab.
+ */
 export function goBack(router: Router) {
-  if (router.options.history.state.back) router.back()
-  else void router.replace(homeRoute(router.currentRoute?.value.name))
+  if (backIsHistory(router)) router.back()
+  else void router.replace(backRoute(router))
 }
 
 /**

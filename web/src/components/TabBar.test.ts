@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createVaporApp, nextTick } from 'vue'
+import { emptyStates, SWITCH_STATE, tabStates } from '../tab-state'
 import { suppressTabBar } from '../tabbar'
 import TabBar from './TabBar.vue'
 
@@ -13,7 +14,20 @@ vi.mock('vue-router', async () => {
   const current = reactive(route)
   Object.assign(route, { current })
   return {
-    useRouter: () => ({ ...router, resolve }),
+    useRouter: () => ({
+      ...router,
+      // A remembered address, as the router splits it.
+      resolve: (to: string | object) => {
+        if (typeof to !== 'string') return resolve(to as never)
+        const [path, query = ''] = to.split('?', 2)
+        return {
+          href: `#${to}`,
+          path,
+          query: Object.fromEntries(new URLSearchParams(query)),
+          hash: '',
+        }
+      },
+    }),
     useRoute: () => current,
   }
 })
@@ -33,17 +47,27 @@ afterEach(() => {
   vi.clearAllMocks()
   vi.restoreAllMocks()
   at('collections', '/')
+  tabStates.value = emptyStates()
 })
 
-const links = {
-  explore: '/?entity_type=x.profile,instagram.profile',
-  relations: '/relations?of=x%2Fx.profile%2F1',
-  settings: '/settings',
+const ACCOUNTS = '/?entity_type=x.profile,instagram.profile'
+const CENTRE = '/relations?of=x%2Fx.profile%2F1'
+/** Each tab as it was left: 探索 on a post, 设置 on a sub-page. */
+function leftOn() {
+  tabStates.value = {
+    explore: { root: ACCOUNTS, stack: [ACCOUNTS, '/collection/1'], scroll: 0 },
+    relations: { root: CENTRE, stack: [CENTRE], scroll: 0 },
+    settings: {
+      root: '/settings',
+      stack: ['/settings', '/settings/accounts'],
+      scroll: 0,
+    },
+  }
 }
 function mount() {
   const el = document.createElement('div')
   document.body.append(el)
-  const app = createVaporApp(TabBar, { links: () => links })
+  const app = createVaporApp(TabBar)
   app.mount(el)
   unmount = () => app.unmount()
   return el
@@ -64,15 +88,25 @@ const click = (target: Element, init: MouseEventInit = {}) => {
   return event
 }
 
-it('links each tab to where it was left, as a real link', () => {
+it('links each other tab to the page it was left on, as a real link', async () => {
+  leftOn()
+  at('relations', CENTRE)
   const el = mount()
-  expect(tab(el, '探索').getAttribute('href')).toBe(
-    '#/?entity_type=x.profile,instagram.profile',
-  )
-  expect(tab(el, '关系').getAttribute('href')).toBe(
-    '#/relations?of=x%2Fx.profile%2F1',
-  )
-  expect(tab(el, '设置').getAttribute('href')).toBe('#/settings')
+  expect(tab(el, '探索').getAttribute('href')).toBe('#/collection/1')
+  expect(tab(el, '设置').getAttribute('href')).toBe('#/settings/accounts')
+  leftOn()
+  tabStates.value = {
+    ...tabStates.value,
+    settings: { root: '/settings', stack: ['/settings?a=1'], scroll: 0 },
+  }
+  await nextTick()
+  expect(tab(el, '设置').getAttribute('href')).toBe('#/settings?a=1')
+  // The open tab leads to its root, as tapping it does.
+  expect(tab(el, '关系').getAttribute('href')).toBe(`#${CENTRE}`)
+  at('collection', '/collection/1')
+  await nextTick()
+  expect(tab(el, '探索').getAttribute('href')).toBe(`#${ACCOUNTS}`)
+  expect(tab(el, '关系').getAttribute('href')).toBe(`#${CENTRE}`)
   expect(el.querySelector('nav')?.getAttribute('aria-label')).toBe('主导航')
 })
 
@@ -103,15 +137,21 @@ it('scrolls to the top when the open tab is tapped on its root', () => {
 })
 
 it('goes to the tab’s root when tapped below it', async () => {
+  leftOn()
   const el = mount()
   at('collection', '/collection/1')
   await nextTick()
   click(tab(el, '探索'))
   expect(window.scrollTo).not.toHaveBeenCalled()
-  expect(router.push).toHaveBeenCalledWith(links.explore)
-  // Another tab is a plain link to its own.
+  expect(router.push).toHaveBeenCalledWith(ACCOUNTS)
+  // Another tab returns to where it was left, marked as the bar's.
   click(tab(el, '设置'))
-  expect(router.push).toHaveBeenLastCalledWith('/settings')
+  expect(router.push).toHaveBeenLastCalledWith({
+    path: '/settings/accounts',
+    query: {},
+    hash: '',
+    state: SWITCH_STATE,
+  })
 })
 
 it('leaves a modified click to the browser, for a new tab', () => {

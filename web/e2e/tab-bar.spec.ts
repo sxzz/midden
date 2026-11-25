@@ -10,6 +10,11 @@ const items = Array.from({ length: 40 }, (_, index) => ({
   revision_id: 'r1',
   assets: [],
 }))
+// The first post is long enough for its page to scroll.
+items[0]!.text = Array.from(
+  { length: 60 },
+  (_, line) => `第 ${line + 1} 段：一段足够长的正文。`,
+).join('\n\n')
 const OWN = 'x/x.profile/1'
 const OTHER = 'x/x.profile/2'
 const graphOf = (key: string) => ({
@@ -217,4 +222,70 @@ test('a public link has no bottom bar', async ({ page }) => {
   expect(
     await page.evaluate(() => document.body.dataset.tabBar),
   ).toBeUndefined()
+})
+
+const scrollY = (page: Page) => page.evaluate(() => Math.round(window.scrollY))
+
+test('each tab returns to the page and scroll it was left on', async ({
+  page,
+}) => {
+  await mock(page)
+  await page.goto('/app/')
+  await page.locator('.row').first().locator('.head').click()
+  await expect(page.locator('h1')).toHaveText('收藏详情')
+  const detail = page.url()
+  await page.evaluate(() =>
+    window.scrollTo(0, (document.body.scrollHeight - innerHeight) / 2),
+  )
+  const left = await scrollY(page)
+  expect(left).toBeGreaterThan(300)
+  // Switching away and back: the same post, at the same place.
+  await expect(tab(page, '探索')).toHaveAttribute('href', '#/')
+  await tab(page, '设置').click()
+  await expect(page.locator('h1')).toHaveText('设置')
+  await page.getByRole('link', { name: '采集账号' }).click()
+  await expect(page.locator('h1')).toHaveText('采集账号')
+  await expect(tab(page, '探索')).toHaveAttribute(
+    'href',
+    `#/collection/${items[0]!.id}`,
+  )
+  await tab(page, '探索').click()
+  await expect(page).toHaveURL(detail)
+  await expect(page.locator('h1')).toHaveText('收藏详情')
+  await expect.poll(() => scrollY(page)).toBe(left)
+  // 设置 kept its sub-page too.
+  await expect(tab(page, '设置')).toHaveAttribute('href', '#/settings/accounts')
+  // A reload keeps every tab where it was.
+  await page.reload()
+  await expect(page.locator('h1')).toHaveText('收藏详情')
+  await expect.poll(() => scrollY(page)).toBe(left)
+  await expect(tab(page, '设置')).toHaveAttribute('href', '#/settings/accounts')
+  // 返回 goes where it would have without the detour: 探索's list. The
+  // browser's back still returns to 设置.
+  await expect(
+    page.getByRole('link', { name: '返回', exact: true }),
+  ).toHaveAttribute('href', '#/')
+  await page.getByRole('link', { name: '返回', exact: true }).click()
+  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await page.goBack()
+  await expect(page.locator('h1')).toHaveText('采集账号')
+})
+
+test('the open tab, tapped, goes to its root, then to the top', async ({
+  page,
+}) => {
+  await mock(page)
+  await page.goto('/app/')
+  await page.locator('.row').nth(5).locator('.head').click()
+  await expect(page.locator('h1')).toHaveText('收藏详情')
+  await tab(page, '探索').click()
+  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page).toHaveURL(/#\/$/)
+  await page.mouse.move(195, 400)
+  await page.mouse.wheel(0, 600)
+  await expect.poll(() => scrollY(page)).toBeGreaterThan(0)
+  await page.mouse.wheel(0, -60)
+  await shown(page)
+  await tab(page, '探索').click()
+  await expect.poll(() => scrollY(page)).toBe(0)
 })

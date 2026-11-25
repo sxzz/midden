@@ -155,14 +155,14 @@ it('renders a list row as a link with `to`, another site with `href`, an action 
   expect(select).toHaveBeenCalledOnce()
 })
 
-it('goes back through history, linking to the start for a new tab', () => {
+it('goes back through history, linking to the same page for a new tab', () => {
   router.options.history.state.back = '/collection/c1'
   const el = mount(BackLink, {})
   const link = el.querySelector('a')!
-  expect(link.getAttribute('href')).toBe('#/')
+  expect(link.getAttribute('href')).toBe('#/collection/c1')
   expect(click(link).defaultPrevented).toBe(true)
   expect(router.back).toHaveBeenCalledOnce()
-  // A new tab opens the start; this page stays.
+  // A new tab opens it; this page stays.
   expect(click(link, { metaKey: true }).defaultPrevented).toBe(false)
   expect(router.back).toHaveBeenCalledOnce()
   unmount()

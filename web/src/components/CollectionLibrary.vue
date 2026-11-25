@@ -37,7 +37,9 @@ import {
 import { backButton, host } from '../host'
 import { mediaRemovals } from '../media-removals'
 import { listQuery } from '../reads'
-import { tabOf as barTabOf, isTabRoot, type Tab as BarTab } from '../tabbar'
+import { restoreScroll } from '../scroll-restore'
+import { forgetPages, lastPage, leftScroll, tabStates } from '../tab-state'
+import { tabOf as barTabOf, tabs as barTabs, isTabRoot } from '../tabbar'
 import ConfirmSheet from './ConfirmSheet.vue'
 import FolderMenuSheet from './FolderMenuSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
@@ -99,9 +101,13 @@ const folderKind = shallowRef<Kind>('post')
 /** Counts by entity type for the last filter the open folder showed. */
 let counted: { filter: string; types: Record<string, number> } | undefined
 const all = [...Object.values(lists), folderList]
-const queryOf = (target: RouteLocationNormalized) =>
+/** A route, shown or only resolved (a tab's last page). */
+type ViewRoute = Pick<RouteLocationNormalized, 'fullPath' | 'params'> & {
+  name?: RouteLocationNormalized['name'] | null
+}
+const queryOf = (target: ViewRoute) =>
   target.fullPath.split('?')[1]?.split('#')[0] || ''
-function tabOf(target: RouteLocationNormalized): Tab {
+function tabOf(target: ViewRoute): Tab {
   return listTab(queryOf(target))
 }
 const tab = computed(() => tabOf(route))
@@ -176,24 +182,14 @@ const savedAt = computed(() => {
   return undefined
 })
 let listRoute = '/'
-/**
- * Where each tab of the bottom bar leads: 探索 to the list it was left on
- * (posts or accounts), 关系 to the account it was left on.
- */
-const homePath = shallowRef('/')
-const relationsPath = shallowRef('/relations')
-const tabLinks = computed<Record<BarTab, string>>(() => ({
-  explore: homePath.value,
-  relations: relationsPath.value,
-  settings: '/settings',
-}))
-// Both lists plus a few recent details stay alive so going back neither
-// refetches nor rebuilds their scroll, order and paging state. Bounded so a long
-// chain of profile hops cannot keep every visited detail in memory.
-const cachedViews = 7
+// Both lists, each tab's root and the page it was left on, plus a few recent
+// details stay alive, so going back or switching tabs neither refetches nor
+// rebuilds their scroll, order and paging state. Bounded so a long chain of
+// profile hops cannot keep every visited detail in memory.
+const cachedViews = 10
 const removed = shallowRef<string[]>([])
 /** Cache identity of a view: one entry per list tab, one per collection. */
-function viewKey(target: RouteLocationNormalized) {
+function viewKey(target: ViewRoute) {
   if (target.name === 'collections') return `collections:${tabOf(target)}`
   if (target.name === 'folder') return 'folder'
   // Pages without parameters are one view each.
@@ -219,6 +215,17 @@ function viewKey(target: RouteLocationNormalized) {
   return removed.value.includes(key) ? `${key}#removed` : key
 }
 const scrolls = new Map<string, number>()
+/**
+ * Where each tab's last page was scrolled when the app was last open in this
+ * browser tab (see tab-state): used once, when the page is first shown.
+ */
+const leftAt = new Map<string, number>()
+for (const { value } of barTabs) {
+  const states = tabStates.value
+  const target = router.resolve(lastPage(states, value))
+  const y = leftScroll(states, value, target.fullPath)
+  if (y) leftAt.set(viewKey(target), y)
+}
 /** Show the list for the address, loading it unless already shown. */
 async function show(
   list: ReturnType<typeof createList>,
@@ -285,10 +292,9 @@ watch(
     // refreshes them, filtering within it does not.
     const arrived = key !== shownKey
     shownKey = key
-    if (relationsPage.value && route.query.of)
-      relationsPath.value = route.fullPath
+    const left = leftAt.get(key)
+    leftAt.delete(key)
     if (home.value) {
-      homePath.value = route.fullPath
       if (arrived) void loadFolders()
       await show(lists[tab.value], key)
     } else if (folderId.value) {
@@ -316,7 +322,7 @@ watch(
     }
     // Wait for the cached view to be reinserted so its height is back.
     await nextTick()
-    if (viewKey(route) === key) window.scrollTo(0, scrolls.get(key) || 0)
+    if (viewKey(route) === key) restoreScroll(left ?? scrolls.get(key) ?? 0)
   },
   { immediate: true },
 )
@@ -350,6 +356,7 @@ function forget(ids: string[], withPosts: boolean) {
   counted = undefined
   removed.value = [...removed.value, ...ids]
   for (const id of ids) scrolls.delete(id)
+  forgetPages((path) => ids.some((id) => path.startsWith(`/collection/${id}`)))
   if (withPosts) stale()
   loadUsage()
 }
@@ -764,7 +771,7 @@ const viewProps = computed(() => {
       @confirm="deleteFolder"
       @cancel="sheet = ''"
     />
-    <TabBar :links="tabLinks" />
+    <TabBar />
   </main>
 </template>
 

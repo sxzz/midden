@@ -1,11 +1,14 @@
 <script setup vapor lang="ts">
 import { computed, onMounted, onUnmounted, shallowRef, watch } from 'vue'
-import { useRoute, type RouteLocationRaw } from 'vue-router'
+import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import { navigatesHere } from '../navigation'
+import { lastPage, SWITCH_STATE, tabStates } from '../tab-state'
 import {
+  barSettling,
   isTabRoot,
   nextScroll,
   scrollStart,
+  settleBar,
   tabBarSuppressed,
   tabOf,
   tabs,
@@ -14,12 +17,29 @@ import {
 import AppLink from './ui/AppLink.vue'
 // The bottom bar of the owner's app: 探索, 关系, 设置. It slides away while
 // the page scrolls down and back as soon as it scrolls up, as X's does.
-const props = defineProps<{
-  /** Where each tab leads: its root, as it was last left. */
-  links: Record<Tab, RouteLocationRaw>
-}>()
 const route = useRoute()
+const router = useRouter()
 const active = computed(() => tabOf(route.name))
+/**
+ * Where each tab leads, which its link's address says too: another tab to
+ * the page it was left on, the open one to its root (as last shown). The
+ * bar's own entry is marked so 返回 there knows the reader did not come
+ * from the page before it in history.
+ */
+function linkTo(tab: Tab): RouteLocationRaw {
+  const states = tabStates.value
+  if (tab === active.value) return states[tab].root
+  // History state rides only on a location object, whose `path` cannot
+  // carry the query.
+  const { path, query, hash } = router.resolve(lastPage(states, tab))
+  return { path, query, hash, state: SWITCH_STATE }
+}
+const links = computed(
+  () =>
+    Object.fromEntries(
+      tabs.map(({ value }) => [value, linkTo(value)]),
+    ) as Record<Tab, RouteLocationRaw>,
+)
 const scroll = shallowRef(scrollStart())
 /**
  * On a touch screen the keyboard is up while a text field has focus; the
@@ -48,10 +68,9 @@ const hidden = computed(
 )
 // A page shown again restores its scroll position; that jump is not the
 // reader scrolling, so the bar stays up for a moment after each change.
-let settleUntil = 0
 function onScroll() {
   const y = window.scrollY
-  if (performance.now() < settleUntil) {
+  if (barSettling()) {
     scroll.value = scrollStart(y)
     return
   }
@@ -61,7 +80,7 @@ function onScroll() {
 watch(
   () => route.fullPath,
   () => {
-    settleUntil = performance.now() + 400
+    settleBar(400)
     scroll.value = scrollStart(window.scrollY)
   },
 )
@@ -86,8 +105,8 @@ onUnmounted(() => {
   delete document.body.dataset.tabBar
 })
 /**
- * Tapping the tab already open: on its root, back to the top; deeper, the
- * link itself leads to the root.
+ * Tapping the tab already open: on its root, back to the top; deeper, its
+ * link leads to the root.
  */
 function tap(event: MouseEvent) {
   const link =
@@ -120,7 +139,7 @@ function tap(event: MouseEvent) {
         :key="tab.value"
         class="item"
         :class="{ on: active === tab.value }"
-        :to="props.links[tab.value]"
+        :to="links[tab.value]"
         :data-tab="tab.value"
         :aria-current="active === tab.value ? 'page' : undefined"
       >

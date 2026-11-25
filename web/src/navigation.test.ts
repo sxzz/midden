@@ -31,15 +31,22 @@ it('returns through router history, with home only as the deep-link fallback', (
   goBack(router)
   expect(router.replace).toHaveBeenCalledWith({ name: 'collections' })
   // A page opened directly goes back to its tab's root.
-  Object.assign(router, { currentRoute: { value: { name: 'settings-admin' } } })
-  goBack(router)
-  expect(router.replace).toHaveBeenLastCalledWith({ name: 'settings' })
   Object.assign(router, {
-    currentRoute: { value: { name: 'collection-graph' } },
+    currentRoute: {
+      value: { name: 'settings-admin', fullPath: '/settings/admin' },
+    },
   })
   goBack(router)
-  expect(router.replace).toHaveBeenLastCalledWith({ name: 'relations' })
+  expect(router.replace).toHaveBeenLastCalledWith('/settings')
+  Object.assign(router, {
+    currentRoute: { value: { name: 'collection-graph', fullPath: '/g' } },
+  })
+  goBack(router)
+  expect(router.replace).toHaveBeenLastCalledWith('/relations')
   // Inside a public link, its start.
+  Object.assign(router, {
+    currentRoute: { value: { name: 'share-collection', fullPath: '/s' } },
+  })
   shareSlug.value = 'slug'
   goBack(router)
   expect(router.replace).toHaveBeenLastCalledWith({
