@@ -36,7 +36,8 @@ export const jobs = sqliteTable(
     // The record the job works on, interpreted by the job type's handler.
     ref: text().notNull(),
     queue: text().notNull(),
-    // Lower runs first within a queue.
+    // Lower runs first within a queue: the handler's own priority plus the
+    // origin's rank (manual, update, maintenance; `#jobs/queue.ts`).
     priority: integer().notNull().default(0),
     state: text({ enum: ['available', 'running'] })
       .notNull()
@@ -47,11 +48,17 @@ export const jobs = sqliteTable(
     leaseUntil: timestamp(),
     lastError: text().notNull().default(''),
     createdAt: timestamp().notNull(),
+    // The update (更新) whose work this is, inherited from the job that
+    // enqueued it.
+    updateId: text(),
   },
   (t) => [
     index('jobs_claim').on(t.queue, t.state, t.priority, t.runAt),
     index('jobs_ref').on(t.ref),
-    // Expired leases are looked for every second.
+    index('jobs_update')
+      .on(t.updateId)
+      .where(sql`${t.updateId} IS NOT NULL`),
+    // Expired leases are looked for every few seconds.
     index('jobs_running')
       .on(t.leaseUntil)
       .where(sql`${t.state} = 'running'`),

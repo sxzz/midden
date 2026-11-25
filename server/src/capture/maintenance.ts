@@ -34,10 +34,10 @@ import { inJson } from '#db/sql.ts'
 import { catalogCollections } from '#library/catalog.ts'
 import { deleteSourceResponses } from '#raw/responses.ts'
 import { collectRawGarbage } from '#raw/upload.ts'
+import { pace, type CaptureContext } from './context.ts'
 import { failCapture } from './lifecycle.ts'
 import { pruneStaging } from './staging.ts'
 import type { Transaction } from '#db/client.ts'
-import type { CaptureContext } from './context.ts'
 
 const STALE_CAPTURE = 60 * 60_000
 const RAW_KEEP = 3 * 24 * 60 * 60_000
@@ -60,8 +60,17 @@ const thumbnailsCaughtUp = new WeakSet<CaptureContext>()
 const vacuumedAt = new WeakMap<CaptureContext, number>()
 const BUDGET = 30_000
 
-/** One maintenance pass. Steps are independent; errors are collected. */
-export async function runMaintenance(ctx: CaptureContext): Promise<void> {
+/**
+ * One maintenance pass. Steps are independent; errors are collected.
+ * Without `slim` (the worker is busy), the steps that only give back space
+ * wait for another pass: removing deleted collections and old raw
+ * responses, raw garbage, free pages.
+ */
+export async function runMaintenance(
+  ctx: CaptureContext,
+  options: { slim?: boolean } = {},
+): Promise<void> {
+  const slim = options.slim ?? true
   const errors: unknown[] = []
   const step = async (name: string, fn: () => unknown) => {
     try {
@@ -72,13 +81,13 @@ export async function runMaintenance(ctx: CaptureContext): Promise<void> {
     }
   }
   await step('stale captures', () => failStaleCaptures(ctx))
-  await step('collections', () => collectCollections(ctx))
-  await step('raw responses', () => pruneSourceResponses(ctx))
+  if (slim) await step('collections', () => collectCollections(ctx))
+  if (slim) await step('raw responses', () => pruneSourceResponses(ctx))
   await step('staged data', () => pruneStaging(ctx))
   await step('media', () => collectMedia(ctx))
-  await step('raw garbage', () => collectRawGarbage(ctx))
+  if (slim) await step('raw garbage', () => collectRawGarbage(ctx))
   await step('thumbnails', () => backfillThumbnails(ctx))
-  await step('free pages', () => releaseFreePages(ctx))
+  if (slim) await step('free pages', () => releaseFreePages(ctx))
   if (errors.length) throw new AggregateError(errors, 'maintenance failed')
 }
 
@@ -108,7 +117,7 @@ export function failStaleCaptures(ctx: CaptureContext): number {
  * Remove collections nothing saves any more, once no capture of them is
  * running, with everything only they used.
  */
-export function collectCollections(ctx: CaptureContext): number {
+export async function collectCollections(ctx: CaptureContext): Promise<number> {
   const started = Date.now()
   let removed = 0
   for (;;) {
@@ -117,6 +126,8 @@ export function collectCollections(ctx: CaptureContext): number {
     )
     removed += count
     if (count < BATCH || Date.now() - started > BUDGET) return removed
+    // Batch after batch would keep the write lock from the web process.
+    await pace(ctx)
   }
 }
 

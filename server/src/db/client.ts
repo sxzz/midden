@@ -1,20 +1,48 @@
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
+import { performance } from 'node:perf_hooks'
 import { DatabaseSync } from 'node:sqlite'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
+import { sql } from 'drizzle-orm'
+import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { drizzle } from 'drizzle-orm/node-sqlite'
 import { migrate } from 'drizzle-orm/node-sqlite/migrator'
 import { cjkWords, fold, searchName } from '#library/search-text.ts'
+import { WriteStats } from './writes.ts'
 
 const MIGRATIONS = fileURLToPath(new URL('../../drizzle', import.meta.url))
+const MIGRATIONS_TABLE = '__drizzle_migrations'
+
+export interface OpenOptions {
+  /**
+   * How long a statement waits for the write lock before failing with
+   * `database is locked`. node:sqlite waits synchronously, freezing the
+   * process meanwhile, so the web process keeps it short.
+   */
+  busyTimeoutMs?: number
+  /**
+   * Apply pending migrations. Only one process may: two would both see a
+   * migration pending and apply it twice. The others wait for it
+   * (`waitForMigrations`).
+   */
+  migrate?: boolean
+  /**
+   * Run SQLite's automatic PASSIVE checkpoints from this connection, after
+   * its commits. The web process leaves them to the worker and Litestream,
+   * so a request never copies WAL pages into the database.
+   */
+  autoCheckpoint?: boolean
+}
 
 /** Open (creating if needed) the database and apply pending migrations. */
-export function openDatabase(file: string) {
+export function openDatabase(file: string, options: OpenOptions = {}) {
   if (file !== ':memory:') mkdirSync(path.dirname(file), { recursive: true })
+  const busyTimeout = options.busyTimeoutMs ?? 5000
   const client = new DatabaseSync(file, {
     enableForeignKeyConstraints: true,
     // Restored to this after the opening optimize below.
-    timeout: 5000,
+    timeout: busyTimeout,
   })
   // WAL lets readers proceed while the single writer commits. Litestream
   // (litestream.yml) may replicate the file from its WAL, holding a read
@@ -33,9 +61,11 @@ export function openDatabase(file: string) {
   if (pragma(client, 'journal_mode') !== 'wal')
     client.exec('PRAGMA journal_mode = WAL')
   client.exec('PRAGMA synchronous = NORMAL')
+  if (options.autoCheckpoint === false)
+    client.exec('PRAGMA wal_autocheckpoint = 0')
   searchFunctions(client)
-  const db = drizzle({ client })
-  migrate(db, { migrationsFolder: MIGRATIONS })
+  const db = immediateWrites(drizzle({ client }))
+  if (options.migrate !== false) migrate(db, { migrationsFolder: MIGRATIONS })
   // Fresh statistics can wait for the next run (every 6 hours) rather than
   // hold up a start while another writer has the lock.
   client.exec('PRAGMA busy_timeout = 0')
@@ -44,7 +74,9 @@ export function openDatabase(file: string) {
   } catch (error) {
     if (!isBusy(error)) throw error
   } finally {
-    client.exec('PRAGMA busy_timeout = 5000')
+    // PRAGMA takes no bound parameters; this is a number from the caller.
+    // eslint-disable-next-line unicorn/no-unsafe-sqlite-interpolation
+    client.exec(`PRAGMA busy_timeout = ${Math.trunc(busyTimeout)}`)
   }
   return db
 }
@@ -65,6 +97,49 @@ export function isBusy(error: unknown): boolean {
     if (typeof code === 'number' && [5, 6].includes(code & 0xff)) return true
   }
   return false
+}
+
+/**
+ * Every transaction begins IMMEDIATE unless it asks otherwise: it takes the
+ * write lock up front, waiting for it with the busy timeout. A DEFERRED one
+ * reads first and asks for the lock at its first write; if another process
+ * committed in between, SQLite fails it at once (SQLITE_BUSY_SNAPSHOT,
+ * without waiting), and with two processes writing that happens. Read-only
+ * transactions pass `{ behavior: 'deferred' }`. The time spent waiting for
+ * the lock and holding it is counted in `$writes`.
+ */
+function immediateWrites<
+  D extends { transaction: (...args: never[]) => unknown },
+>(db: D): D & { $writes: WriteStats } {
+  const writes = new WriteStats()
+  const begin = db.transaction.bind(db) as (
+    fn: (tx: unknown) => unknown,
+    config?: { behavior?: string },
+  ) => unknown
+  const transaction = (
+    fn: (tx: unknown) => unknown,
+    config?: { behavior?: string },
+  ) => {
+    const behavior = config?.behavior ?? 'immediate'
+    if (behavior === 'deferred') return begin(fn, config)
+    const asked = performance.now()
+    let locked = asked
+    try {
+      return begin(
+        (tx) => {
+          locked = performance.now()
+          return fn(tx)
+        },
+        { ...config, behavior },
+      )
+    } finally {
+      writes.record(locked - asked, performance.now() - locked)
+    }
+  }
+  return Object.assign(db, {
+    transaction: transaction as unknown as D['transaction'],
+    $writes: writes,
+  })
 }
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '')
@@ -93,6 +168,68 @@ export function optimize(db: Database, opening = false): void {
   db.$client.exec(
     `PRAGMA analysis_limit = 400; PRAGMA optimize${opening ? ' = 0x10002' : ''};`,
   )
+}
+
+interface AppliedMigration {
+  name: string | null
+  hash: string
+}
+
+function applied(db: Database): AppliedMigration[] {
+  const table = db.get<{ n: number }>(
+    sql`SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table' AND name = ${MIGRATIONS_TABLE}`,
+  )
+  if (!table?.n) return []
+  return db.all<AppliedMigration>(
+    sql`SELECT name, hash FROM ${sql.identifier(MIGRATIONS_TABLE)}`,
+  )
+}
+
+/** Migrations this version has that the database does not yet. */
+export function pendingMigrations(db: Database): number {
+  const rows = applied(db)
+  const known = new Set(rows.flatMap((row) => [row.name, row.hash]))
+  return readMigrationFiles({ migrationsFolder: MIGRATIONS }).filter(
+    (migration) => !known.has(migration.name) && !known.has(migration.hash),
+  ).length
+}
+
+/**
+ * Migrations this version does not know: a newer version migrated the
+ * database, and this one must not write to it any more.
+ */
+export function unknownMigrations(db: Database): number {
+  const local = new Set(
+    readMigrationFiles({ migrationsFolder: MIGRATIONS }).flatMap((m) => [
+      m.name,
+      m.hash,
+    ]),
+  )
+  return applied(db).filter(
+    (row) => (!row.name || !local.has(row.name)) && !local.has(row.hash),
+  ).length
+}
+
+/**
+ * Wait until another process (the web process) has applied every migration
+ * this version has. Resolves at once when none is pending.
+ */
+export async function waitForMigrations(
+  db: Database,
+  options: {
+    signal?: AbortSignal
+    intervalMs?: number
+    onWait?: (pending: number) => void
+  } = {},
+): Promise<void> {
+  for (let first = true; ; first = false) {
+    const pending = pendingMigrations(db)
+    if (!pending) return
+    if (first) options.onWait?.(pending)
+    await sleep(options.intervalMs ?? 1000, undefined, {
+      signal: options.signal,
+    })
+  }
 }
 
 export type Database = ReturnType<typeof openDatabase>

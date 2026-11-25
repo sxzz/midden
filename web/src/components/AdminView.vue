@@ -16,6 +16,7 @@ import ListSection from './ui/ListSection.vue'
 
 // 设置 → 管理员面板: what concerns the whole server rather than one person's
 // settings. The domains the app may be used from; what storage is used;
+// the background jobs;
 // where Litestream replicates the database, its heartbeat; on a development
 // server, deleting everything.
 const emit = defineEmits<{
@@ -85,6 +86,12 @@ async function clearAll() {
       variant="plain"
       chevron
       :to="{ name: 'settings-storage' }"
+    />
+    <ListButton
+      label="后台任务"
+      variant="plain"
+      chevron
+      :to="{ name: 'settings-jobs' }"
     />
   </ListSection>
   <BackupSection

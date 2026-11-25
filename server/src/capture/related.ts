@@ -9,8 +9,8 @@ import {
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError, isAppError } from '#errors.ts'
-import { SnoozeError, type Job } from '#jobs/queue.ts'
 import { pastCutoff } from '#platforms/listing.ts'
+import { pace, type CaptureContext } from './context.ts'
 import { budget, matchesOptions, storedOptions } from './options.ts'
 import { unsaveIfEmpty } from './scope.ts'
 import { dropStaging, loadStaging } from './staging.ts'
@@ -20,7 +20,7 @@ import {
   submit,
   type Job as SubmitJob,
 } from './submit.ts'
-import type { CaptureContext } from './context.ts'
+import type { Job } from '#jobs/queue.ts'
 
 /** A related target as stored on its capture. */
 export interface StoredTarget {
@@ -36,13 +36,29 @@ export interface StoredTarget {
 }
 
 const PAGE_TARGET = 100
+/** Members submitted between pauses (`pace`), so others can write. */
+const PACE_EVERY = 10
+// Submissions being expanded here: a second job for one (the fallback and
+// the one its capture queued at its end) leaves it to the first.
+const expanding = new Set<string>()
 
 /**
  * Submit what a capture page lists (members and references) and, while the
  * budget lasts, the next page. The budget is soft: a page is always submitted
  * whole, since the next page starts after it and would skip what is left.
+ * Each member is its own transaction, with a pause every few (`pace`).
  */
-export function runRelated(ctx: CaptureContext, job: Job): void {
+export async function runRelated(ctx: CaptureContext, job: Job): Promise<void> {
+  if (expanding.has(job.ref)) return
+  expanding.add(job.ref)
+  try {
+    await expand(ctx, job)
+  } finally {
+    expanding.delete(job.ref)
+  }
+}
+
+async function expand(ctx: CaptureContext, job: Job): Promise<void> {
   const { db } = ctx
   const loaded = db
     .select({
@@ -59,8 +75,10 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
   const { submission, capture } = loaded
   if (submission.relatedState !== 'pending' || submission.collectionStopped)
     return
-  if (capture.state === 'queued' || capture.state === 'downloading')
-    throw new SnoozeError(2000)
+  // Still running: when it ends it queues this again (`deliveries`). Waiting
+  // here instead would claim and snooze every such job every few seconds,
+  // and an update has thousands.
+  if (capture.state === 'queued' || capture.state === 'downloading') return
   if (capture.state === 'failed') {
     failRelated(ctx, submission.id, '所在页面采集失败')
     return
@@ -144,6 +162,7 @@ export function runRelated(ctx: CaptureContext, job: Job): void {
   let kept = 0
   const memberSubmissions: string[] = []
   for (const [index, target] of targets.entries()) {
+    if (index % PACE_EVERY === PACE_EVERY - 1) await pace(ctx)
     let member = true
     if (capture.isCollection || !options.captureReferences)
       member = !ctx.platforms.resolve(target.url).target.collection

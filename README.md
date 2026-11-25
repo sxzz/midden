@@ -20,7 +20,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-服务监听本机 `127.0.0.1:8080`：
+`compose.yaml` 启动两个容器，共用数据目录和 `.env`：`midden` 提供网页、API 和 Telegram Bot，`midden-worker` 运行采集、下载等后台任务。服务监听本机 `127.0.0.1:8080`：
 
 | 路径 | 用途 |
 | --- | --- |

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { and, asc, eq, inArray, lt, lte, sql } from 'drizzle-orm'
 import { jobs } from '#db/schema.ts'
 import type { Database, Executor } from '#db/client.ts'
@@ -47,77 +48,184 @@ export interface JobHandler {
   fail?: (job: Job, error: unknown) => Promise<void> | void
 }
 
+/**
+ * Where work comes from, added to the handler's priority: what the owner
+ * asked for runs before what an update (or a watch) does, and both before
+ * maintenance.
+ */
+export const RANK = { manual: 0, update: 1, maintenance: 2 } as const
+export type Rank = (typeof RANK)[keyof typeof RANK]
+const RANKS: Rank[] = Object.values(RANK)
+
+/** What jobs enqueued here belong to; jobs inherit it from the job running. */
+export interface JobOrigin {
+  /** The update (更新) the work is part of. */
+  updateId?: string | null
+  rank?: Rank
+}
+
+interface Scope {
+  updateId: string | null
+  rank: Rank
+  /** The job running, for logs. */
+  job?: { id: number; type: string; ref: string }
+}
+
+const scope = new AsyncLocalStorage<Scope>()
+
+/**
+ * Run `fn` with jobs it enqueues belonging to `origin`, e.g. the worker's
+ * maintenance (lowest rank) or an action on an update from the web.
+ */
+export function withOrigin<T>(origin: JobOrigin, fn: () => T): T {
+  const current = scope.getStore()
+  return scope.run(
+    {
+      updateId:
+        origin.updateId === undefined
+          ? (current?.updateId ?? null)
+          : origin.updateId,
+      rank: origin.rank ?? current?.rank ?? RANK.manual,
+    },
+    fn,
+  )
+}
+
+/** The job this code runs for, if any. */
+export function currentJob(): Scope['job'] {
+  return scope.getStore()?.job
+}
+
+/**
+ * Lowers how many jobs run while the web process is slow or the write lock
+ * is contended (`throttle.ts`).
+ */
+export interface QueueThrottle {
+  /** How many jobs of `queue` may run now, out of its configured `base`. */
+  limit: (queue: string, base: number) => number
+  /** Whether work that waits for an idle worker may run. */
+  calm: () => boolean
+}
+
 export interface QueueOptions {
   db: Database
   logger: Logger
   handlers: Record<string, JobHandler>
   /** Concurrent jobs per queue. */
   concurrency: Record<string, number>
+  /**
+   * Queues that run only while the others have had nothing to run for a
+   * while (`idleAfterMs`) and the throttle is calm, such as moving raw
+   * responses out of the database.
+   */
+  idleQueues?: string[]
+  idleAfterMs?: number
+  throttle?: QueueThrottle
   timeoutMs?: number
+  /**
+   * How often to look for due jobs. Jobs enqueued in this process start at
+   * once; ones another process (the web) enqueues wait for the next look.
+   */
   pollMs?: number
   now?: () => number
   /** Failures retrying cannot fix, besides `PermanentError`. */
   isPermanent?: (error: unknown) => boolean
 }
 
+/** What the worker is doing, for the admin page and its status file. */
+export interface QueueStatus {
+  running: Record<string, number>
+  limits: Record<string, number>
+  /** Idle queues may run. */
+  idle: boolean
+  /** Why claiming stopped, other than a pause (e.g. a newer schema). */
+  held: string | null
+}
+
 const DEFAULT_TIMEOUT = 10 * 60_000
 const DEFAULT_ATTEMPTS = 3
 // A job running past its timeout plus this grace is assumed lost.
 const LEASE_GRACE = 60_000
+const RESCUE_EVERY = 5000
+const IDLE_AFTER = 10_000
 
 /** Exponential backoff from 2 s, capped at about four minutes. */
 export function backoff(attempt: number): number {
   return 2 ** Math.min(Math.max(attempt, 1), 8) * 1000
 }
 
+type Row = typeof jobs.$inferSelect
+
 export class JobQueue {
   readonly #db: Database
   readonly #logger: Logger
   readonly #handlers: Record<string, JobHandler>
   readonly #concurrency: Record<string, number>
+  readonly #idleQueues: Set<string>
+  readonly #idleAfterMs: number
+  readonly #throttle: QueueThrottle | undefined
   readonly #timeoutMs: number
   readonly #pollMs: number
   readonly #now: () => number
   readonly #isPermanent: (error: unknown) => boolean
   readonly #running = new Map<string, Set<Promise<void>>>()
-  /** The priorities each queue's jobs can have, for claiming by index. */
+  /** The priorities each type's jobs can have, for claiming by index. */
   readonly #priorities = new Map<string, number[]>()
   readonly #stop = new AbortController()
   #timer: NodeJS.Timeout | undefined
   #started = false
   #reset = false
+  #rescuedAt = -Infinity
+  #foregroundAt = -Infinity
+  /** Queues whose last job snoozed: not pumped until the next look. */
+  readonly #snoozing = new Set<string>()
+  #held: string | null = null
 
   constructor(options: QueueOptions) {
     this.#db = options.db
     this.#logger = options.logger
     this.#handlers = options.handlers
     this.#concurrency = options.concurrency
+    this.#idleQueues = new Set(options.idleQueues)
+    this.#idleAfterMs = options.idleAfterMs ?? IDLE_AFTER
+    this.#throttle = options.throttle
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT
     this.#pollMs = options.pollMs ?? 1000
     this.#now = options.now ?? Date.now
     this.#isPermanent = options.isPermanent ?? (() => false)
-    for (const handler of Object.values(this.#handlers)) {
+    for (const [type, handler] of Object.entries(this.#handlers)) {
       if (!this.#concurrency[handler.queue])
         throw new Error(`No concurrency configured for queue ${handler.queue}`)
-      const priorities = this.#priorities.get(handler.queue) ?? []
-      const priority = handler.priority ?? 0
-      if (!priorities.includes(priority)) priorities.push(priority)
-      this.#priorities.set(handler.queue, priorities)
+      const base = handler.priority ?? 0
+      this.#priorities.set(
+        type,
+        RANKS.map((rank) => base + rank),
+      )
     }
   }
 
   /**
    * Add a job. Pass the open transaction when the job belongs to a write, so
-   * the job exists exactly when the write commits.
+   * the job exists exactly when the write commits. It belongs to the update
+   * the running job (or `withOrigin`) belongs to, unless `updateId` says.
    */
   enqueue(
     executor: Executor,
     type: string,
     ref: string,
-    options: { delayMs?: number } = {},
+    options: { delayMs?: number } & JobOrigin = {},
   ): void {
     const handler = this.#handlers[type]
     if (!handler) throw new Error(`Unknown job type ${type}`)
+    const current = scope.getStore()
+    const updateId =
+      options.updateId === undefined
+        ? (current?.updateId ?? null)
+        : options.updateId
+    const rank = Math.max(
+      options.rank ?? current?.rank ?? RANK.manual,
+      updateId ? RANK.update : RANK.manual,
+    )
     const now = this.#now()
     executor
       .insert(jobs)
@@ -125,10 +233,11 @@ export class JobQueue {
         type,
         ref,
         queue: handler.queue,
-        priority: handler.priority ?? 0,
+        priority: (handler.priority ?? 0) + rank,
         maxAttempts: handler.maxAttempts ?? DEFAULT_ATTEMPTS,
         runAt: new Date(now + (options.delayMs ?? 0)),
         createdAt: new Date(now),
+        updateId,
       })
       .run()
     // After the caller's transaction commits; a rolled-back job is not found.
@@ -164,6 +273,7 @@ export class JobQueue {
   /** Wait until no job is running or due now. Meant for tests. */
   async drain(): Promise<void> {
     for (;;) {
+      this.#snoozing.clear()
       for (const queue of Object.keys(this.#concurrency)) this.#pump(queue)
       const running = [...this.#running.values()].flatMap((set) => [...set])
       if (running.length === 0) return
@@ -171,12 +281,37 @@ export class JobQueue {
     }
   }
 
+  /**
+   * Stop claiming (`reason`) or claim again (null), e.g. while a newer
+   * version's migrations are in the database. Running jobs go on.
+   */
+  hold(reason: string | null): void {
+    this.#held = reason
+    if (!reason)
+      for (const queue of Object.keys(this.#concurrency)) this.#pump(queue)
+  }
+
+  status(): QueueStatus {
+    const running: Record<string, number> = {}
+    const limits: Record<string, number> = {}
+    for (const queue of Object.keys(this.#concurrency)) {
+      running[queue] = this.#running.get(queue)?.size ?? 0
+      limits[queue] = this.#limit(queue)
+    }
+    return {
+      running,
+      limits,
+      idle: this.#idle(),
+      held: this.#held,
+    }
+  }
+
   #tick(): void {
     if (!this.#started) return
     try {
       if (!this.#reset) {
-        // Single process: anything still marked running was cut off by a
-        // restart.
+        // Only one process runs jobs: anything still marked running was cut
+        // off by a restart.
         this.#db
           .update(jobs)
           .set({ state: 'available', leaseUntil: null })
@@ -184,53 +319,106 @@ export class JobQueue {
           .run()
         this.#reset = true
       }
-      this.#rescue()
+      if (this.#now() - this.#rescuedAt >= RESCUE_EVERY) this.#rescue()
     } catch (error) {
       this.#retryLater(error, 'releasing lost jobs')
     }
+    this.#snoozing.clear()
     for (const queue of Object.keys(this.#concurrency)) this.#pump(queue)
     this.#timer = setTimeout(() => this.#tick(), this.#pollMs)
     this.#timer.unref()
   }
 
   // A handler that ignores its abort signal keeps its slot; once its lease
-  // runs out the job is offered again rather than lost.
+  // runs out the job is offered again rather than lost. Looked for with a
+  // read first: an UPDATE takes the write lock even when nothing matches.
   #rescue(): void {
-    this.#db
-      .update(jobs)
-      .set({ state: 'available', leaseUntil: null })
-      .where(
-        and(
-          eq(jobs.state, 'running'),
-          lt(jobs.leaseUntil, new Date(this.#now())),
-        ),
-      )
-      .run()
+    this.#rescuedAt = this.#now()
+    const expired = and(
+      eq(jobs.state, 'running'),
+      lt(jobs.leaseUntil, new Date(this.#now())),
+    )
+    const lost = this.#db
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(expired)
+      .all()
+    for (const row of lost)
+      this.#db
+        .update(jobs)
+        .set({ state: 'available', leaseUntil: null })
+        .where(and(eq(jobs.id, row.id), expired))
+        .run()
+  }
+
+  /** How many jobs of the queue may run now. */
+  #limit(queue: string): number {
+    const base = this.#concurrency[queue] ?? 0
+    if (this.#idleQueues.has(queue) && !this.#idle()) return 0
+    return this.#throttle ? this.#throttle.limit(queue, base) : base
+  }
+
+  #idle(): boolean {
+    for (const [queue, running] of this.#running)
+      if (!this.#idleQueues.has(queue) && running.size)
+        this.#foregroundAt = this.#now()
+    return (
+      this.#now() - this.#foregroundAt >= this.#idleAfterMs &&
+      (this.#throttle?.calm() ?? true)
+    )
+  }
+
+  /** Priorities the queue's jobs can have. */
+  #claimable(queue: string): number[] {
+    const priorities: number[] = []
+    for (const [type, handler] of Object.entries(this.#handlers))
+      if (handler.queue === queue)
+        priorities.push(...this.#priorities.get(type)!)
+    return [...new Set(priorities)]
   }
 
   #pump(queue: string): void {
-    if (this.#stop.signal.aborted) return
-    const limit = this.#concurrency[queue] ?? 0
+    if (this.#stop.signal.aborted || this.#held) return
+    if (this.#snoozing.has(queue)) return
     let running = this.#running.get(queue)
     if (!running) this.#running.set(queue, (running = new Set()))
-    while (running.size < limit) {
+    if (running.size >= this.#limit(queue)) return
+    const priorities = this.#claimable(queue)
+    if (!priorities.length) return
+    while (running.size < this.#limit(queue)) {
       let row
       try {
-        row = this.#claim(queue)
+        row = this.#claim(queue, priorities)
       } catch (error) {
         this.#retryLater(error, 'claiming a job', { queue })
         return
       }
       if (!row) return
-      const task = this.#execute(row).finally(() => {
+      if (!this.#idleQueues.has(queue)) this.#foregroundAt = this.#now()
+      const settled = (outcome: 'done' | 'snoozed' | 'failed') => {
         running.delete(task)
-        this.#pump(queue)
-      })
+        // A job that snoozed (its account busy, say) is likely followed by
+        // others waiting on the same: claiming them one after another
+        // would only snooze each again. Wait for the next look, or for a
+        // job of the queue to end.
+        if (outcome === 'snoozed') this.#snoozing.add(queue)
+        else this.#snoozing.delete(queue)
+        // A turn of the event loop first: claiming straight from here
+        // chains microtasks, and a queue of quick jobs would keep requests
+        // and timers waiting until it ran dry.
+        setImmediate(() => this.#pump(queue))
+      }
+      const task: Promise<void> = this.#execute(row).then(settled, () =>
+        settled('failed'),
+      )
       running.add(task)
     }
   }
 
-  #claim(queue: string) {
+  // Looked for with a read, then taken by id: most looks find nothing, and
+  // a read does not take the write lock. Only this process claims, so the
+  // job cannot be taken in between; the state check guards it anyway.
+  #claim(queue: string, priorities: number[]): Row | undefined {
     const now = this.#now()
     const next = this.#db
       .select({ id: jobs.id })
@@ -241,12 +429,14 @@ export class JobQueue {
           eq(jobs.state, 'available'),
           // Naming the priorities lets the index skip to due jobs at each one
           // instead of walking every delayed job.
-          inArray(jobs.priority, this.#priorities.get(queue) ?? [0]),
+          inArray(jobs.priority, priorities),
           lte(jobs.runAt, new Date(now)),
         ),
       )
       .orderBy(asc(jobs.priority), asc(jobs.runAt), asc(jobs.id))
       .limit(1)
+      .get()
+    if (!next) return undefined
     return this.#db
       .update(jobs)
       .set({
@@ -254,12 +444,12 @@ export class JobQueue {
         attempt: sql`${jobs.attempt} + 1`,
         leaseUntil: new Date(now + this.#timeoutMs + LEASE_GRACE),
       })
-      .where(and(inArray(jobs.id, next), eq(jobs.state, 'available')))
+      .where(and(eq(jobs.id, next.id), eq(jobs.state, 'available')))
       .returning()
       .get()
   }
 
-  async #execute(row: typeof jobs.$inferSelect): Promise<void> {
+  #execute(row: Row): Promise<'done' | 'snoozed' | 'failed'> {
     const handler = this.#handlers[row.type]
     const signal = AbortSignal.any([
       this.#stop.signal,
@@ -280,33 +470,54 @@ export class JobQueue {
       attempt: row.attempt,
     })
     const started = this.#now()
-    let error: unknown
-    try {
-      if (!handler) throw new PermanentError(`Unknown job type ${row.type}`)
-      await handler.run(job)
-    } catch (error_) {
-      error = error_ ?? new Error('job failed')
+    const base = this.#handlers[row.type]?.priority ?? 0
+    const context: Scope = {
+      updateId: row.updateId,
+      rank: Math.min(
+        Math.max(row.priority - base, 0),
+        RANK.maintenance,
+      ) as Rank,
+      job: { id: row.id, type: row.type, ref: row.ref },
     }
-    try {
-      if (error === undefined) {
-        this.#db.delete(jobs).where(eq(jobs.id, row.id)).run()
-        log.debug({ elapsedMs: this.#now() - started }, 'job finished')
-      } else
-        await this.#failed(row, job, handler, error, log, this.#now() - started)
-    } catch (bookkeeping) {
-      // The row stays running: once its lease ends, #rescue offers it again.
-      log.error({ err: bookkeeping }, 'recording a job outcome failed')
-    }
+    return scope.run(context, async () => {
+      let error: unknown
+      try {
+        if (!handler) throw new PermanentError(`Unknown job type ${row.type}`)
+        await handler.run(job)
+      } catch (error_) {
+        error = error_ ?? new Error('job failed')
+      }
+      try {
+        if (error === undefined) {
+          this.#db.delete(jobs).where(eq(jobs.id, row.id)).run()
+          log.debug({ elapsedMs: this.#now() - started }, 'job finished')
+          return 'done'
+        }
+        return await this.#failed(
+          row,
+          job,
+          handler,
+          error,
+          log,
+          this.#now() - started,
+        )
+      } catch (bookkeeping) {
+        // The row stays running: once its lease ends, #rescue offers it
+        // again.
+        log.error({ err: bookkeeping }, 'recording a job outcome failed')
+        return 'failed'
+      }
+    })
   }
 
   async #failed(
-    row: typeof jobs.$inferSelect,
+    row: Row,
     job: Job,
     handler: JobHandler | undefined,
     error: unknown,
     log: Logger,
     elapsedMs: number,
-  ): Promise<void> {
+  ): Promise<'snoozed' | 'failed'> {
     // Shutting down is not the job's fault: run it again on the next start.
     const snooze =
       error instanceof SnoozeError
@@ -325,7 +536,7 @@ export class JobQueue {
         })
         .where(eq(jobs.id, row.id))
         .run()
-      return
+      return 'snoozed'
     }
     const message = error instanceof Error ? error.message : String(error)
     const final =
@@ -348,7 +559,7 @@ export class JobQueue {
         log.error({ err: failError }, 'recording job failure failed')
       }
       this.#db.delete(jobs).where(eq(jobs.id, row.id)).run()
-      return
+      return 'failed'
     }
     const delay =
       error instanceof RetryError ? error.afterMs : backoff(row.attempt)
@@ -363,5 +574,6 @@ export class JobQueue {
       })
       .where(eq(jobs.id, row.id))
       .run()
+    return 'failed'
   }
 }

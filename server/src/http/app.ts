@@ -22,6 +22,7 @@ import { originRoutes } from './origin-routes.ts'
 import { allowedOrigins } from './origins.ts'
 import { passkeyAuthRoutes, passkeyRoutes } from './passkey-routes.ts'
 import { publicRoutes } from './public-routes.ts'
+import { queueRoutes, type QueueInfo } from './queue-routes.ts'
 import { shareRoutes } from './share-routes.ts'
 import { storageRoutes } from './storage-routes.ts'
 import { json, type Env } from './validate.ts'
@@ -54,6 +55,8 @@ export interface HttpOptions {
   botState?: () => BotState
   /** 存储用量; the routes answer 404 without it. */
   storage?: StorageUsage
+  /** 后台任务: the worker's and this process's state. */
+  queue?: QueueInfo
 }
 
 /**
@@ -184,6 +187,10 @@ export function createApi(options: HttpOptions) {
         },
       )
       .route('/storage', storageRoutes(options.storage))
+      .route(
+        '/queue',
+        queueRoutes(ctx.db, options.queue ?? { worker: () => undefined }),
+      )
       .route('/', captureRoutes(ctx, { dev: !!options.dev }))
       .route('/', accountRoutes(ctx))
       .route('/', libraryRoutes(ctx))

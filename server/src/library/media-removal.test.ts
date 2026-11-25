@@ -216,7 +216,7 @@ describe('media removal', () => {
     expect(c.db.select().from(mediaGarbage).all()).toEqual([])
 
     deleteCollection(c.db, two.collectionId)
-    collectCollections(c)
+    await collectCollections(c)
     expect(c.db.select().from(blobs).all()).toEqual([])
     const hash = c.db.select().from(mediaGarbage).get()!.key
     clock.now += 25 * HOUR

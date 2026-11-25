@@ -320,7 +320,7 @@ describe('media in R2', () => {
     const key = objectPath(blob.hash)
     expect(s3.objects.has(key)).toBe(true)
     deleteCollection(c.db, done.collectionId)
-    collectCollections(c)
+    await collectCollections(c)
     expect(c.db.select().from(blobs).all()).toEqual([])
     // The grace period first.
     await collectMedia(c)

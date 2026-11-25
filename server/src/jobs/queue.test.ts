@@ -5,15 +5,18 @@ import { DatabaseSync } from 'node:sqlite'
 import { pino } from 'pino'
 import { afterEach, describe, expect, test } from 'vitest'
 import { openDatabase, type Database } from '#db/client.ts'
-import { jobs } from '#db/schema.ts'
+import { jobs, updates } from '#db/schema.ts'
 import { recordingLogger } from '#testing/logs.ts'
 import {
   backoff,
   JobQueue,
   PermanentError,
+  RANK,
   RetryError,
   SnoozeError,
+  withOrigin,
   type Job,
+  type QueueOptions,
 } from './queue.ts'
 
 const logger = pino({ level: 'silent' })
@@ -25,19 +28,25 @@ afterEach(async () => {
 })
 
 function setup(
-  handlers: ConstructorParameters<typeof JobQueue>[0]['handlers'],
-  options: { concurrency?: Record<string, number>; now?: () => number } = {},
+  handlers: QueueOptions['handlers'],
+  options: Partial<QueueOptions> = {},
 ) {
-  const db = openDatabase(':memory:')
+  const db = options.db ?? openDatabase(':memory:')
   queue = new JobQueue({
     db,
     logger,
+    pollMs: 10,
+    ...options,
     handlers,
     concurrency: options.concurrency ?? { main: 2 },
-    now: options.now,
-    pollMs: 10,
   })
   return { db, queue }
+}
+
+function addUpdate(db: Database, id: string) {
+  db.insert(updates)
+    .values({ id, target: 'many', collectionIds: [], options: {} as never })
+    .run()
 }
 
 function rows(db: Database) {
@@ -286,5 +295,144 @@ describe('JobQueue', () => {
     await expect.poll(() => seen).toEqual(['a'])
     expect(rows(db)).toEqual([])
     db.$client.close()
+  })
+
+  test('a job enqueued by another process runs at the next look', async () => {
+    const seen: string[] = []
+    const handlers = {
+      echo: {
+        queue: 'main',
+        run: async (job: Job) => {
+          seen.push(job.ref)
+        },
+      },
+    }
+    const { db, queue } = setup(handlers)
+    queue.start()
+    // The web process's queue: it enqueues and never starts.
+    const web = new JobQueue({
+      db,
+      logger,
+      handlers,
+      concurrency: { main: 2 },
+    })
+    web.enqueue(db, 'echo', 'from the web')
+    await expect.poll(() => seen).toEqual(['from the web'])
+  })
+
+  test('manual work runs before an update, and both before maintenance', async () => {
+    const order: string[] = []
+    const { db, queue } = setup(
+      {
+        echo: {
+          queue: 'main',
+          run: async (job) => {
+            order.push(job.ref)
+          },
+        },
+      },
+      { concurrency: { main: 1 } },
+    )
+    addUpdate(db, 'u')
+    withOrigin({ rank: RANK.maintenance }, () =>
+      queue.enqueue(db, 'echo', 'maintenance'),
+    )
+    queue.enqueue(db, 'echo', 'update', { updateId: 'u' })
+    queue.enqueue(db, 'echo', 'manual')
+    queue.start()
+    await queue.drain()
+    expect(order).toEqual(['manual', 'update', 'maintenance'])
+  })
+
+  test('idle queues wait until the others have been quiet a while', async () => {
+    let clock = 0
+    const seen: string[] = []
+    const run = async (job: Job) => {
+      seen.push(job.ref)
+    }
+    const { db, queue } = setup(
+      { work: { queue: 'main', run }, tidy: { queue: 'idle', run } },
+      {
+        concurrency: { main: 1, idle: 1 },
+        idleQueues: ['idle'],
+        idleAfterMs: 1000,
+        now: () => clock,
+      },
+    )
+    queue.enqueue(db, 'tidy', 'raw')
+    queue.enqueue(db, 'work', 'capture')
+    queue.start()
+    await queue.drain()
+    expect(seen).toEqual(['capture'])
+    clock += 1000
+    await queue.drain()
+    expect(seen).toEqual(['capture', 'raw'])
+  })
+
+  test('the throttle lowers how many jobs run at once', async () => {
+    let active = 0
+    let peak = 0
+    const { db, queue } = setup(
+      {
+        work: {
+          queue: 'main',
+          run: async () => {
+            peak = Math.max(peak, ++active)
+            await new Promise((resolve) => setTimeout(resolve, 5))
+            active--
+          },
+        },
+      },
+      {
+        concurrency: { main: 4 },
+        throttle: { limit: (_queue, base) => base / 4, calm: () => true },
+      },
+    )
+    for (let i = 0; i < 6; i++) queue.enqueue(db, 'work', String(i))
+    queue.start()
+    await queue.drain()
+    expect(peak).toBe(1)
+  })
+
+  test('after a snooze the queue waits for its next look', async () => {
+    let runs = 0
+    const { db, queue } = setup(
+      {
+        busy: {
+          queue: 'main',
+          run: async () => {
+            runs++
+            throw new SnoozeError(0)
+          },
+        },
+      },
+      { concurrency: { main: 1 }, pollMs: 60_000 },
+    )
+    for (let i = 0; i < 50; i++) queue.enqueue(db, 'busy', String(i))
+    queue.start()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    // One claim, not fifty snoozes in a row.
+    expect(runs).toBe(1)
+  })
+
+  test('held, it claims nothing until released', async () => {
+    const seen: string[] = []
+    const { db, queue } = setup({
+      echo: {
+        queue: 'main',
+        run: async (job) => {
+          seen.push(job.ref)
+        },
+      },
+    })
+    queue.hold('newer schema')
+    queue.enqueue(db, 'echo', 'a')
+    queue.start()
+    await queue.drain()
+    expect(seen).toEqual([])
+    expect(queue.status().held).toBe('newer schema')
+    queue.hold(null)
+    await queue.drain()
+    expect(seen).toEqual(['a'])
   })
 })

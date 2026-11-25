@@ -1,21 +1,24 @@
 # 架构
 
-Midden 是单用户、单进程的 TypeScript 应用。一个 Node.js 进程同时提供 HTTP API、网页、Telegram Bot、后台任务和采集。
+Midden 是单用户的 TypeScript 应用。生产环境由同一个镜像运行两个进程，共用一个 SQLite 数据库（WAL）：网页进程提供 HTTP API、网页和 Telegram Bot，只把任务写进队列；worker 进程运行任务队列（采集、下载、上传等）和定时的维护。开发时一个进程做全部（见「进程」）。
 
 ```mermaid
 flowchart LR
     TG[Telegram] <--> Bot
     Web[网页 / Mini App] --> API
     Script[REST 客户端] --> API
-    subgraph Server[server 进程]
+    subgraph WebProcess[网页进程 midden]
         API[HTTP API /v1]
         Bot[grammY Bot]
+    end
+    subgraph Worker[worker 进程 midden-worker]
         Queue[任务队列]
         Platforms[X / Instagram 采集]
     end
     API --> DB[(SQLite)]
     Bot --> DB
     Queue --> DB
+    Worker -.->|通知，Bot API| TG
     Queue --> Platforms
     Platforms --> Upstream[FxTwitter / X / Instagram]
     Queue --> Media[(media/ 目录)]
@@ -33,7 +36,8 @@ flowchart LR
 | `server/src/capture/`   | 采集链路：提交、抓取、下载、缩略图、版本、related 展开与续页、关系网列表、记录与进度、更新、维护      |
 | `server/src/library/`   | 读取：收藏详情、筛选列表与搜索、作者、版本、删除、标签备注、收藏夹、公开分享、关注变化、关系图谱      |
 | `server/src/accounts/`  | 采集账号与加密凭据                                                                                    |
-| `server/src/jobs/`      | 存在 SQLite 中的持久化任务队列                                                                        |
+| `server/src/runtime/`   | 进程的启动：共用的部分、网页进程、worker，两者的状态文件                                              |
+| `server/src/jobs/`      | 存在 SQLite 中的持久化任务队列、暂停、worker 的节流                                                   |
 | `server/src/blob/`      | 媒体存储接口、本地目录与 R2（S3）实现、签名链接、迁移与清理本地原文件                                 |
 | `server/src/raw/`       | 原始响应移到私有 R2 存储桶：压缩与存储、上传任务、读取、回收、`raw-migrate` 与 `raw-get`              |
 | `server/src/http/`      | Hono 路由与认证                                                                                       |
@@ -55,8 +59,8 @@ flowchart LR
 - 实体（帖子、账号）按平台身份共享，`entity_versions` 按内容去重。
 - 媒体按 SHA-256 存在 `media/ab/cd/<哈希>`，`blobs` 记录类型与大小，缩略图同样按内容存放。使用 R2 时原文件上传到存储桶的同名键，`blobs.remote_at` 记下上传得到确认的时间，之后删除本地原文件，见「媒体链接」。
 - 删除收藏后，维护任务在没有进行中的抓取时删除其内容；不再被引用的媒体文件 24 小时后删除。
-- 存储用量（`server/src/usage/`）：每 15 分钟从 Cloudflare 的 GraphQL Analytics API 读取 R2 各存储桶每天的存储与操作次数，与本机的数据库、缩略图、可用磁盘一起记在 `storage_snapshots`（每个 UTC 日一行），本月费用由其中本月的行按 R2 标准存储的价格算出；数据库组成每天一次在 worker 线程中由 `dbstat` 读出，存在 `settings` 表；越过阈值和回落时由 Bot 告诉所有者。见运维文档的「存储用量」。
-- 数据库可由单独的 `litestream` 容器（compose 的 `litestream` profile，`litestream.yml`）持续复制到 R2 的私有存储桶 `midden-backup`。它一直持有一个读事务，由它的检查点让 WAL 重新开始；服务只用 SQLite 默认的 PASSIVE 自动检查点，不做 RESTART、TRUNCATE 检查点和 `VACUUM`；`litestream.yml` 把它强制 TRUNCATE 检查点的阈值提高到约 3.8 GiB（见运维文档）。删除留下的空闲页面由维护任务用 `incremental_vacuum` 分批还给文件系统，这是普通的写事务（数据库为 `auto_vacuum = INCREMENTAL`，新建的数据库默认如此）。设置了 `LITESTREAM_ACCESS_KEY_ID` 时，服务在只供容器之间访问的 8081 端口接收它的心跳，超过「备份心跳超时」（管理员设置，存在 `settings` 表，默认 20 分钟）没有收到就由 Bot 告诉所有者，管理员面板和 `GET /v1/instance` 显示上次心跳（`server/src/litestream.ts`）。见运维文档的「Litestream」。
+- 存储用量（`server/src/usage/`）：worker 每 15 分钟从 Cloudflare 的 GraphQL Analytics API 读取 R2 各存储桶每天的存储与操作次数，与本机的数据库、缩略图、可用磁盘一起记在 `storage_snapshots`（每个 UTC 日一行），本月费用由其中本月的行按 R2 标准存储的价格算出；数据库组成每天一次在 worker 线程中由 `dbstat` 读出（它在一个读事务中读遍每一页，其间 WAL 不能从头开始，所以只在 worker 空闲时读），存在 `settings` 表；越过阈值和回落时由 Bot 告诉所有者。见运维文档的「存储用量」。
+- 数据库可由单独的 `litestream` 容器（compose 的 `litestream` profile，`litestream.yml`）持续复制到 R2 的私有存储桶 `midden-backup`。它一直持有一个读事务，由它的检查点让 WAL 重新开始；worker 只用 SQLite 默认的 PASSIVE 自动检查点，网页进程关闭了自动检查点（请求中不复制 WAL），都不做 RESTART、TRUNCATE 检查点和 `VACUUM`；`litestream.yml` 把它强制 TRUNCATE 检查点的阈值提高到约 3.8 GiB（见运维文档）。删除留下的空闲页面由维护任务用 `incremental_vacuum` 分批还给文件系统，这是普通的写事务（数据库为 `auto_vacuum = INCREMENTAL`，新建的数据库默认如此）。设置了 `LITESTREAM_ACCESS_KEY_ID` 时，网页进程在只供容器之间访问的 8081 端口接收它的心跳，超过「备份心跳超时」（管理员设置，存在 `settings` 表，默认 20 分钟）没有收到就由 Bot 告诉所有者，管理员面板和 `GET /v1/instance` 显示上次心跳（`server/src/litestream.ts`）。见运维文档的「Litestream」。
 - `catalog` 为每个有版本的收藏保存列表筛选与排序所需的字段（根实体类型、作者、媒体种类、发布时间、占用空间、搜索文本（见「搜索」）、账号的粉丝数与关注数等），由最新版本和最新一次带计数的抓取派生，在同一事务内随抓取完成、关注列表存入账号、删除媒体和原始响应清理更新。列表只读这张窄表；作者的最新资料、作者被打的标签、被保存的转发等跨收藏的条件在查询时通过索引计算。启动时会补齐缺失的行，所以改变它的派生方式时，在迁移中清空这张表即可重建；只涉及少数行时（如只有账号才有的计数）也可以在迁移中就地补齐，不必重建全表。
 - 列表排序（`sort`）：`updated`（最近一次抓取，默认）、`published`（发帖时间，没有时按抓取时间）、`saved`（加入收藏库的时间）、`storage`（占用空间）、`followers`（粉丝数）、`following`（关注数）、`relevance`（相关度，只在搜索时有意义，见「搜索」），`order` 为 `desc`（默认）或 `asc`，相同时按收藏 id 排。搜索时先按相关度分层，所选排序只在每层之内生效。翻页位置记下排序值和 id（搜索时还有层级和层内得分），与筛选条件的指纹一起编码，换了筛选或排序就失效。
 - 粉丝数、关注数是账号自己的计数：取这个收藏最新一次带计数（有 `capture_metrics`）的完成抓取中根实体（`<类型>/<平台 id>`）的 `/metadata/followers`、`/metadata/following`（X 与 Instagram 都放在这里），只认非负整数，其他都算未知。只从关注列表得到、还没抓过的账号，它的第一个版本来自列表，同时有一次带列表所给计数的抓取，所以同样有计数。最新一次抓取完全没有计数时沿用之前读到的，与详情页一致；给了别的计数而缺这一项时算未知。计数存在 `catalog.followers_count`、`following_count`，未知为空；每个方向另有一个虚拟生成列（`<计数>_desc` 为 `coalesce(<计数>, -1)`，`<计数>_asc` 为 `coalesce(<计数>, 2^53-1)`）和它加收藏 id 的索引，所以未知的无论正序倒序都排在最后。用生成列而不是表达式索引，是因为 SQLite 不能在表达式索引上按 `(排序值, id)` 定位翻页位置，每页都要从头扫。这两种排序只在列表只有账号时生效（筛选或公开页访客的 `entity_type` 只含 `.profile` 类型），否则按 `updated` 排：收藏夹的两个标签共用一个保存的排序，帖子标签不应因此出错，网页在帖子标签上也把它显示为更新时间。网页的排序菜单只在账号标签列出「粉丝数」「关注数」，方向写作「从多到少」「从少到多」，列表不按时间分组。
@@ -186,11 +190,52 @@ flowchart LR
 - 旧版导入的数据：提交按原样导入，保留了 `parent_submission` 和键，时间线和引用带来的帖子有父提交，单独提交的帖子是顶层记录，所以同样能分辨；Telegram `/show` 留下的顶层提交没有输入，不算保存。旧版的单条刷新同样记在 `captures.refresh_from`。
 - 网页：列表工具栏的「多选」进入选择，底部工具栏左侧是「取消」，中间是已选数量和「全选」（全部选中时为「取消全选」），右侧是「更新」和「⋯」，选中后两者可用；「⋯」打开的菜单中有「删除媒体」和红色的「删除」，各自打开原有的确认面板。「删除」与详情页的「删除这条收藏」打开同一个确认面板，先预演一次（带上账号的帖子）再显示确切数量，如「将删除 3 个账号、2 条帖子」；选中账号时有「同时删除关联的帖子」，默认不勾，勾选后写成「将删除 3 个账号、412 条帖子（保留 37 条：其他账号也关联 12 条、单独收藏 20 条、已整理 5 条）」。删除后选择结束；带上帖子时各列表重新读取，因为删了哪些帖子只有服务端知道。
 
+## 进程
+
+`MIDDEN_ROLE` 决定一个进程做什么（`server/src/runtime/`，`main.ts` 调用 `run.ts`）：
+
+| 角色             | 内容                                                                                                                                                                                                                       |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `web`            | HTTP（API、媒体、网页，`/healthz`）、Telegram Bot（长轮询、命令、`telegram_deliveries` 的发送）、Litestream 心跳（8081 端口）与它的提醒。应用迁移、补齐 `catalog`。把任务写进 `jobs`，自己不运行任务。                    |
+| `worker`         | 任务队列（采集、下载、缩略图、上传、原始响应、related 展开、关系网列表、更新、finalize）和定时的工作：维护（每分钟）、存储用量与数据库组成、`PRAGMA optimize`（每 6 小时）、清理过期的会话与 `/passkey` 链接。自己的健康检查。 |
+| `all`（默认）    | 以上全部，在一个进程中。`pnpm dev` 与测试用它。                                                                                                                                                                            |
+
+生产环境（`compose.yaml`）是两个容器：`midden`（`web`）和 `midden-worker`（`worker`），同一个镜像、同一个数据目录和 `.env`。这样任务的数据库写入、CPU 和同步等待（node:sqlite 等锁时整个进程停住）都不在响应请求的进程中。
+
+- 迁移：只有网页进程应用迁移（两个进程同时应用会各执行一次）。worker 启动时等到它这个版本的迁移都已应用（日志 `waiting for the web process to migrate`），再开始取任务；运行中每 10 秒看一次 `schema_version`，数据库出现它不认识的迁移（更新的版本已经启动）时停止取任务（`a newer version migrated the database; no longer taking jobs`），等部署换掉它。
+- 唤醒：网页进程写入的任务由 worker 每 250 毫秒查一次（只读，不取写锁）发现；同一进程中写入的任务立即开始。
+- Telegram：只有网页进程运行 Bot（同一个 token 只能有一个长轮询）。worker 的通知（存储用量提醒）直接调用 Bot API 的 `sendMessage` 发给所有者，不经过 Bot，失败只记日志。部署结果由部署机的 webhook 发送，与两个进程无关。
+- 定时器：每样只在一个进程中运行（上面的表），所以不会重复。
+- 两个进程通过数据目录的 `run/` 中的小文件互相报告状态，不占数据库的写锁：网页进程每 2 秒写 `run/web.json`（最近几秒的事件循环延迟和慢请求，worker 的节流用），worker 每 2 秒写 `run/worker.json`（并发、节流，管理员面板用）。超过 10–15 秒没有更新视为不存在。
+- 日志：网页进程写 `logs/midden.log`，worker 写 `logs/worker.log`（两个进程不能轮换同一个文件），各行带 `role`。
+- 关闭：两个进程都在启动最开始注册 SIGTERM/SIGINT；worker 停止取任务，正在运行的任务收到中止信号，作为未用掉次数的任务回到队列。
+
+### 写锁
+
+两个进程（加上 Litestream）写同一个数据库，SQLite 同时只允许一个写事务：
+
+- 事务一律 `BEGIN IMMEDIATE`（`db/client.ts` 包装了 `db.transaction`）：开始时就取写锁，取不到时按 busy timeout 等待。默认的 DEFERRED 事务先读、第一次写时才要锁，若其间另一个进程提交过，SQLite 立即报 `database is locked`（SQLITE_BUSY_SNAPSHOT，busy timeout 不等待这种情况）。只读的事务写明 `{ behavior: 'deferred' }`。
+- busy timeout：网页进程 2 秒，worker 10 秒。node:sqlite 同步地等待，等待中整个进程停住，所以网页进程要短；worker 慢一点只是任务慢一点。
+- 网页进程关闭自动检查点（`wal_autocheckpoint = 0`），由 worker 和 Litestream 做。
+- worker 中一个长任务分批写入时，批之间用 `ctx.pace()` 停一下（平时 2 毫秒，有争用时 120 毫秒，比 SQLite 等锁时最长的一次睡眠 100 毫秒更长），让等着写的网页进程拿到锁：展开时间线一页的帖子（每条一个事务，每 10 条停一下）、维护删除已删除收藏的内容（每批之间）。
+- 写事务持有锁超过 200 毫秒或等锁超过 1 秒时，worker 记 `slow write transaction`（带所属任务，10 秒内最多一条）。
+
+### 网页进程的监控
+
+`http/load.ts`：请求超过 500 毫秒记 `slow request`（方法、路径、状态、毫秒数），事件循环一秒内停顿超过 200 毫秒记 `event loop lag`；两种各自 10 秒内最多一条，其余计入下一条的 `skipped`。最近一分钟的请求耗时（中位、p95、最长）和最长停顿显示在管理员面板的「后台任务」页。
+
 ## 任务
 
-任务保存在 `jobs` 表，按队列限制并发：`capture` 4、`download` 8（缩略图共用，优先级较低）、`control` 4、`upload` 4（上传到 R2，重试另有间隔，见运维文档）、`raw` 4（原始响应移到私有存储桶，见「原始响应」）。失败按 2、4、8… 秒退避，最多 3 次；平台给出的 `retry-after` 优先；无法通过重试解决的错误直接失败。进程重启时，运行中的任务回到队列。
+任务保存在 `jobs` 表，按队列限制并发：`capture` 4、`download` 8（缩略图共用，优先级较低）、`control` 4、`upload` 4（上传到 R2，重试另有间隔，见运维文档）、`raw` 4（原始响应移到私有存储桶，见「原始响应」；只在空闲时）。失败按 2、4、8… 秒退避，最多 3 次；平台给出的 `retry-after` 优先；无法通过重试解决的错误直接失败。worker 启动时，运行中的任务回到队列。
+
+- 优先级：同一队列中先按任务类型自己的优先级，再加上来源的级别：所有者直接要求的（采集链接、Bot、网页的操作）0，更新（以后的定时更新也是）1，维护 2。任务继承创建它的任务的来源和所属更新（`jobs.update_id`，经 AsyncLocalStorage），所以一次更新的抓取、下载、缩略图、related 展开都属于这次更新，排在手动采集之后。
+- 只在空闲时：`raw` 队列（原始响应移到存储桶）只在其他队列 10 秒内都没有在运行的任务、且节流处于平静时运行；维护中只为腾出空间的步骤（删除已删除收藏的内容、过期的原始响应、原始响应的回收、归还空闲页面）和每天的数据库组成也一样。大批更新期间它们等到更新结束。
+- 节流（`jobs/throttle.ts`）：worker 每秒看三样：网页进程最近几秒的事件循环延迟和慢请求（`run/web.json`）、自己等写锁的时间、自己持有写锁的时间占比。网页进程停顿超过 200 毫秒、有慢请求、等锁超过 500 毫秒或持锁超过六成时，各队列的并发减半（最低四分之一，每个队列至少 1）；平静 3 秒后每秒加回八分之一。变化时记 `worker slowing down` / `worker speeding up`（带原因）。
+- 等待（snooze）：任务因账号正忙等原因推迟时不用掉次数。同一队列中一个任务推迟后，这个队列等到下一次查看（250 毫秒）或有任务结束再取下一个，否则排在后面的同类任务会一个接一个被取出又推迟。取下一个任务之前先让出一次事件循环，快速的任务不会连成一串微任务挡住请求和定时器。related 展开在所在页面的抓取还没结束时直接结束：抓取结束时会再排它（`deliveries`），不再每 2 秒取出、推迟一次。
 
 抓取的状态在结果保存前一直是 `queued`，所以它本身分不出排队与正在抓取。采集记录、成员列表、`GET /v1/jobs/:id` 和 Telegram 按抓取任务在 `jobs` 中的状态区分：任务尚未运行时给出 `waiting`（`queue`：等待空闲的并发位置或账号；`retry`：失败后等待重试），网页显示「排队中」「等待重试」，否则显示「正在采集」。
+
+`GET /v1/queue`（管理员面板「后台任务」）：各类型等待与运行中的任务数、worker 的报告（并发比例、是否空闲、是否停止取任务，`run/worker.json` 超过 15 秒没有更新时为 `null`）和网页进程最近一分钟的响应。
 
 ## 媒体链接
 
@@ -210,7 +255,7 @@ API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…
 ## 原始响应
 
 - 每次抓取保存平台的原始响应（`source_responses`，逐字节，每次抓取最多 4 MiB），用于排查和以后重新解析，不在任何接口中提供。产生了新版本的抓取的原始响应一直保留；其余的保留 3 天，之后只要不是这个收藏最新一次的抓取就由维护任务删除。
-- 存储桶：设置了 `RAW_R2_BUCKET` 时（S3 密钥由 `CF_API_TOKEN` 派生，或用这个存储桶自己的一对，见运维文档「原始响应（R2）」），抓取完成后由任务 `raw-upload`（`raw` 队列，4 个并发）把这次抓取的原始响应移到私有存储桶。每条用 zstd（`node:zlib`，级别 3）压缩，先在本地解压核对，再存为 `raw/<sha256>.zst`：键是原始字节的 SHA-256（即 `sha256` 列），同样的内容只存一份，重复存入无害。上传带 `Content-MD5` 和签名的 SHA-256，之后读回（HEAD）核对大小、ETag（压缩后字节的 MD5）和元数据中的 `sha256`，都相符才在一个事务中记下 `remote_at` 并清空 `body`。`body` 是 NOT NULL 列，改成可空要重建整张表，所以清空为零长度的 BLOB，与 NULL 占用相同。清空的行同时移到表的末尾（新的 rowid）：原地清空时它原来所在的页面几乎全空却仍被占用，移走后这些页面整页空出，由 incremental vacuum 还给文件系统。
+- 存储桶：设置了 `RAW_R2_BUCKET` 时（S3 密钥由 `CF_API_TOKEN` 派生，或用这个存储桶自己的一对，见运维文档「原始响应（R2）」），抓取完成后由任务 `raw-upload`（`raw` 队列，4 个并发，只在 worker 空闲时运行，见「任务」）把这次抓取的原始响应移到私有存储桶。每条用 zstd（`node:zlib`，级别 3）压缩，先在本地解压核对，再存为 `raw/<sha256>.zst`：键是原始字节的 SHA-256（即 `sha256` 列），同样的内容只存一份，重复存入无害。上传带 `Content-MD5` 和签名的 SHA-256，之后读回（HEAD）核对大小、ETag（压缩后字节的 MD5）和元数据中的 `sha256`，都相符才在一个事务中记下 `remote_at` 并清空 `body`。`body` 是 NOT NULL 列，改成可空要重建整张表，所以清空为零长度的 BLOB，与 NULL 占用相同。清空的行同时移到表的末尾（新的 rowid）：原地清空时它原来所在的页面几乎全空却仍被占用，移走后这些页面整页空出，由 incremental vacuum 还给文件系统。
 - 同样内容的原始响应共用一个对象，一个键同时只由一处写入：R2 对同一个键的写入每秒约一次，更快的回答 429。任务在这个键的锁内（与回收同一个锁）先看这一行是否已被别的任务记下，是则什么都不做；之前已有别的行把这个内容存进存储桶时，先读回（HEAD）核对，对象相符就不再上传；存好后把仍在数据库中、内容相同的所有行一起记下并清空。
 - 限流：S3 请求遇到 429（或 503）时按响应的 `Retry-After` 等待，没有时从 0.5 秒起按指数增长并加随机抖动（0.5 到 1.5 倍），一个请求共试 5 次；`Retry-After` 超过 30 秒时不在请求中等待。仍被限流时，存储桶的所有请求暂停（没有 `Retry-After` 时从 5 秒起，连续限流时翻倍，最长 5 分钟）：暂停期间任务不发请求，以 snooze 推迟，不算尝试次数，开始暂停时记 `raw bucket rate-limited; pausing raw uploads`（warn）。这与采集账号限流时的做法相同：限流时这个接口的任务都等它恢复。
 - 其他失败从 30 秒起翻倍重试，最长间隔 1 小时，共 12 次（约 7 小时），放弃时记 `raw response upload gave up; the bodies stay in the database`，原始响应留在数据库中，由 `raw-migrate` 补传。原始字节与 `sha256` 不符时不上传，任务直接失败。没有设置存储桶时原始响应照旧留在数据库中，什么都不变。
@@ -243,13 +288,13 @@ API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…
 
 ## 启动顺序
 
-`server/src/main.ts`：
+`server/src/runtime/run.ts`（每个进程都一样，按角色省去不属于它的部分）：
 
 1. 读取配置、创建日志，随即注册 SIGTERM/SIGINT 的处理。之后每启动一样东西就登记它的关闭方法，关闭时按相反顺序执行，所以启动的任何阶段收到信号都会正常退出（退出码 0）。容器中 Node 是 PID 1，没有处理函数的 SIGTERM 会被忽略，等到被强制结束（137）；`compose.yaml` 另外设了 `init: true`。
-2. 打开数据库（应用迁移）、补齐 `catalog`、检测 ffmpeg。没有要做的事时这一步不需要写锁：`auto_vacuum` 只在新建的数据库上设置，`journal_mode` 已是 WAL 时不再设置，启动时的 `PRAGMA optimize` 拿不到锁就跳过（6 小时后再做），所以 Litestream 的检查点或别的写入持有写锁时也能启动。
+2. 打开数据库：网页进程应用迁移、补齐 `catalog`；worker 等待迁移（见「进程」）。检测 ffmpeg。没有要做的事时这一步不需要写锁：`auto_vacuum` 只在新建的数据库上设置，`journal_mode` 已是 WAL 时不再设置，启动时的 `PRAGMA optimize` 拿不到锁就跳过（6 小时后再做），所以 Litestream 的检查点或别的写入持有写锁时也能启动。
 3. 有意阻塞启动的检查：`MEDIA_STORE=r2` 或 `RAW_R2_BUCKET` 用 `CF_API_TOKEN` 时验证它（每次请求 10 秒超时，共 3 次，最多约 33 秒）。失败就退出，`/healthz` 不响应，自动部署回滚。
-4. 创建任务队列、Litestream 心跳监听、存储用量与路由，开始监听 HTTP（日志 `listening`），然后启动任务队列。
-5. 在后台启动 Telegram Bot（`telegram/launch.ts`），不阻塞上面任何一步。
+4. 网页进程：Litestream 心跳监听、存储用量与路由，开始监听 HTTP（日志 `listening`）；在后台启动 Telegram Bot（`telegram/launch.ts`），不阻塞上面任何一步。
+5. worker：启动任务队列和定时器，在 127.0.0.1 的 `WORKER_HEALTH_PORT`（默认 8082）上回答 `/healthz`（日志 `worker listening`），容器的健康检查用它。
 
 后台循环（任务队列的领取、Telegram 发送、维护、`optimize`、Litestream 心跳检查）遇到数据库被锁（`database is locked`）时记 warn，下一轮再试；漏出去的这类错误也只记日志，不结束进程，其他未捕获的错误仍结束进程。
 
@@ -259,7 +304,7 @@ API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…
 
 启动（`launchBot`）：`getMe`、两次 `setMyCommands`、两次 `setChatMenuButton`，每个请求 15 秒超时，全部成功后才开始长轮询和发送 `telegram_deliveries`，所以失败的一次尝试不留下任何在运行的东西。失败（超时、网络错误、5xx、429）后整组重试，间隔从 5 秒起翻倍，最长 5 分钟；Telegram 给出 `retry_after` 且更长时按它等待。日志：每次失败 `telegram bot start failed; retrying`（warn，带 `attempt`、`retryInMs`），成功 `telegram bot started`（带 `attempt`）。Telegram 拒绝请求本身（429 以外的 4xx，如 token 被撤销）时不再重试，记 `telegram bot could not start`（error），状态为 `failed`，服务照常运行，只是没有 Bot。
 
-Bot 未运行时：发给所有者的通知（Litestream 心跳、存储用量提醒、通行密钥与域名的变动）先留在内存中（最多 20 条），Bot 启动后发出；Bot 失败或停止时丢弃并记 `telegram notice dropped`。抓取结果等发送存在 `telegram_deliveries` 中，Bot 启动后照常发出。Mini App 登录只用 token 验签，不需要 Bot 在运行。部署结果由部署机上的 webhook 直接调用 Bot API 发送，与服务无关。停止时最多等 Telegram 5 秒（grammY 停止长轮询时还要确认一次更新，用的是它默认 500 秒的超时）。
+Bot 在网页进程中运行。worker 的通知（存储用量提醒）不经过它，直接调用 Bot API 发送。Bot 未运行时：网页进程发给所有者的通知（Litestream 心跳、通行密钥与域名的变动）先留在内存中（最多 20 条），Bot 启动后发出；Bot 失败或停止时丢弃并记 `telegram notice dropped`。抓取结果等发送存在 `telegram_deliveries` 中，Bot 启动后照常发出。Mini App 登录只用 token 验签，不需要 Bot 在运行。部署结果由部署机上的 webhook 直接调用 Bot API 发送，与服务无关。停止时最多等 Telegram 5 秒（grammY 停止长轮询时还要确认一次更新，用的是它默认 500 秒的超时）。
 
 只用长轮询，没有 webhook 模式。
 

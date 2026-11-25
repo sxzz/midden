@@ -105,6 +105,23 @@ const Env = v.object({
   // The Litestream sidecar's bucket token (compose.yaml); only its presence
   // matters here: the server then expects the sidecar's heartbeats.
   LITESTREAM_ACCESS_KEY_ID: v.optional(v.string()),
+  // Which part of the server this process runs: `web` (HTTP, the bot),
+  // `worker` (the job queue and timers), or `all` of it in one process.
+  MIDDEN_ROLE: v.optional(
+    v.picklist(
+      ['all', 'web', 'worker'],
+      'MIDDEN_ROLE must be all, web or worker',
+    ),
+    'all',
+  ),
+  // The worker's health check (/healthz), on loopback only.
+  WORKER_HEALTH_PORT: v.pipe(
+    v.optional(v.string(), '8082'),
+    v.transform(Number),
+    v.integer(),
+    v.minValue(1),
+    v.maxValue(65_535),
+  ),
 })
 
 const TRAILING_SLASHES = /\/+$/
@@ -142,10 +159,25 @@ export interface RawConfig {
   credentials?: S3Credentials
 }
 
+/**
+ * The web process serves HTTP and runs the bot; it enqueues jobs but runs
+ * none. The worker runs the job queue and the timers. `all` is both in one
+ * process, for development and tests.
+ */
+export type Role = 'all' | 'web' | 'worker'
+
 export interface Config {
+  role: Role
+  /** The worker's /healthz port, on 127.0.0.1. */
+  workerHealthPort: number
   dataDir: string
+  /** Status files the web process and the worker leave for each other. */
+  runDir: string
   databasePath: string
-  /** Also written to stdout; this copy outlives the container. */
+  /**
+   * Also written to stdout; this copy outlives the container. The worker
+   * has its own (`worker.log`): two processes cannot rotate one file.
+   */
   logFile: string
   mediaDir: string
   host: string
@@ -194,7 +226,14 @@ export function loadConfig(
   return {
     dataDir,
     databasePath: path.join(dataDir, 'midden.db'),
-    logFile: path.join(dataDir, 'logs', 'midden.log'),
+    role: parsed.MIDDEN_ROLE,
+    workerHealthPort: parsed.WORKER_HEALTH_PORT,
+    runDir: path.join(dataDir, 'run'),
+    logFile: path.join(
+      dataDir,
+      'logs',
+      parsed.MIDDEN_ROLE === 'worker' ? 'worker.log' : 'midden.log',
+    ),
     mediaDir: path.join(dataDir, 'media'),
     host: parsed.HOST,
     port: parsed.PORT,

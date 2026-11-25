@@ -11,6 +11,8 @@ SECRET_KEY=$(openssl rand -base64 48) pnpm dev   # 启动服务端，数据在 s
 pnpm --filter @midden/web dev                     # 网页开发服务器，代理 /v1 到 8080
 ```
 
+`pnpm dev` 在一个进程中运行全部（`MIDDEN_ROLE` 默认 `all`），测试也是这样。生产环境分成网页进程和 worker 两个进程（见 `docs/architecture.md`「进程」），本地要试时在两个终端分别运行 `MIDDEN_ROLE=web pnpm dev` 与 `MIDDEN_ROLE=worker pnpm dev`，数据目录相同；worker 的健康检查端口是 `WORKER_HEALTH_PORT`（默认 8082）。
+
 server 不编译：Node 直接运行 `.ts`，因此只能使用可擦除的 TypeScript 语法（不能用 enum、参数属性）。包内导入使用 `#` 子路径，如 `#db/client.ts`。
 
 ## 检查
@@ -42,6 +44,15 @@ Drizzle 使用 Node 内置的 `node:sqlite`，查询与事务都是同步的，�
 ## 测试
 
 采集相关测试使用 `server/src/testing/` 中的内存数据库上下文与假平台（`fake.test`），通过真实的任务队列驱动抓取，不访问网络。Telegram 测试使用记录调用的假 API。
+
+负载测试：`server/scripts/bench-load.ts` 在数据库副本上做一次大批更新（假平台每页 100 条帖子，每条有图片、一成有视频，媒体上传到假的 R2，原始响应移到假的存储桶，缩略图用 ffmpeg），同时从外面每 100 毫秒请求 `/healthz`、每 500 毫秒请求一页收藏、每秒改一次备注，最后给出各自的 p50 / p95 / p99 / 最长、`database is locked` 的次数等，存在数据目录的 `bench/result.json`。可以一并运行 Litestream（`litestream=<可执行文件>`，复制到本地目录，用 `litestream.yml` 的检查点设置）和一个持续若干秒的读事务（`pin=60`，模拟备份）：
+
+```sh
+cp server/data/midden.db /tmp/bench/ && cd server
+FFMPEG=ffmpeg node scripts/bench-load.ts /tmp/bench split profiles=10 count=300 litestream=/path/to/litestream pin=60
+```
+
+`split` 是两个进程，`all` 是一个进程；`entry=<文件>` 运行另一个版本的单进程入口（它要接受 `scripts/bench-load/fakes.ts` 的假对象），用来和旧版本比较。
 
 `scripts/` 的测试（`scripts/*.test.ts`）用 Node 自带的 `node --test` 运行，`pnpm test` 包含它们。`deploy.test.ts` 用记录调用的假命令代替 docker、git 与 curl，数据目录是临时目录。
 

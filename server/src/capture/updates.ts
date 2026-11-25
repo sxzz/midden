@@ -18,7 +18,7 @@ import {
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError, isAppError } from '#errors.ts'
-import { SnoozeError, type Job as QueueJob } from '#jobs/queue.ts'
+import { SnoozeError, withOrigin, type Job as QueueJob } from '#jobs/queue.ts'
 import { parseFilterQuery } from '#library/filter-query.ts'
 import { updateSelection } from '#library/list.ts'
 import {
@@ -379,7 +379,7 @@ export function startUpdate(
         createdAt: new Date(ctx.now?.() ?? Date.now()),
       })
       .run()
-    ctx.queue.enqueue(tx, 'update', id)
+    ctx.queue.enqueue(tx, 'update', id, { updateId: id })
     return id
   })
 }
@@ -577,6 +577,15 @@ export function retryUpdateFailed(
   id: string,
   jobId?: string,
 ): number {
+  // The retried work is the update's: its rank, and paused with it.
+  return withOrigin({ updateId: id }, () => retryFailedOf(ctx, id, jobId))
+}
+
+function retryFailedOf(
+  ctx: CaptureContext,
+  id: string,
+  jobId?: string,
+): number {
   const update = loadUpdate(ctx.db, id)
   const items = itemRows(ctx.db, [id])
   const roots = items
@@ -642,7 +651,7 @@ export function continueTimeline(
   if (!root) throw new AppError('not_found')
   const last = g!.pages.get(root.submission.id)?.at(-1)
   if (update.state === 'stopped' || !last) throw new AppError('unsupported')
-  continuePages(ctx, last)
+  withOrigin({ updateId: id }, () => continuePages(ctx, last))
 }
 
 // --- Records ----------------------------------------------------------------

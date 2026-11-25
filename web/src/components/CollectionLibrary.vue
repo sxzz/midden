@@ -158,6 +158,7 @@ const titles: Record<string, string> = {
   'settings-passkeys': '通行密钥',
   'settings-admin': '管理员面板',
   'settings-storage': '存储用量',
+  'settings-jobs': '后台任务',
 }
 const title = computed(() => {
   if (folderId.value) return folder.value?.name || '收藏夹'

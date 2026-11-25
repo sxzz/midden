@@ -18,8 +18,11 @@ const IMAGE = 'ghcr.io/sxzz/midden'
 const OLD = 'a'.repeat(40)
 const NEW = 'b'.repeat(40)
 const HEALTH = 'curl -fsS --max-time 5 http://127.0.0.1:8080/healthz'
-const up = (revision: string) =>
-  `docker compose up -d --pull never --wait --wait-timeout 180 midden [${IMAGE}:sha-${revision}]`
+const SERVICES = 'docker compose config --services'
+const upService = (service: string, revision: string) =>
+  `docker compose up -d --pull never --wait --wait-timeout 180 ${service} [${IMAGE}:sha-${revision}]`
+const up = (revision: string) => upService('midden', revision)
+const upWorker = (revision: string) => upService('midden-worker', revision)
 const isCheckpoint = (call: string) =>
   call.startsWith(
     'docker compose run --rm --no-deps -T --entrypoint node midden -e ',
@@ -35,15 +38,19 @@ interface Fake {
  * A deployment host with OLD running and NEW published: commands are
  * recorded, answered from these canned replies, and `fail` makes a command
  * throw. Starting NEW migrates the database first, failing or not; the
- * checkpoint empties the WAL.
+ * checkpoint empties the WAL. `workers` are the revisions whose compose.yaml
+ * has the worker.
  */
 function host(
   dir: string,
   fail: (call: string) => boolean,
+  workers: string[] = [],
 ): Fake & { run: Run } {
   const data = path.join(dir, 'data')
   const database = path.join(data, 'midden.db')
   const fake: Fake = { calls: [], seen: {} }
+  // The checkout is at the running version until a deployment moves it.
+  let checkedOut = OLD
   const look = (name: string) =>
     (fake.seen[name] = {
       database: readFileSync(database, 'utf8'),
@@ -63,6 +70,13 @@ function host(
       return image === `${IMAGE}:latest` || image.endsWith(NEW) ? NEW : OLD
     }
     if (call === 'docker compose ps -q midden') return 'container'
+    if (call.startsWith('git checkout')) checkedOut = args.at(-1)!
+    if (call === SERVICES)
+      return [
+        'midden',
+        ...(workers.includes(checkedOut) ? ['midden-worker'] : []),
+        'litestream',
+      ].join('\n')
     if (call.startsWith('docker inspect container')) return 'sha256:old'
     if (isCheckpoint(call)) {
       look('checkpoint')
@@ -70,6 +84,7 @@ function host(
       return '{"busy":0,"log":0,"checkpointed":0}'
     }
     if (call === 'docker compose stop midden') look('stop midden')
+    if (call === 'docker compose stop midden-worker') look('stop worker')
     if (call === 'docker compose stop litestream') look('stop litestream')
     if (call.startsWith('docker compose up -d litestream'))
       look('up litestream')
@@ -143,14 +158,17 @@ describe('deploy', () => {
         `docker pull --quiet ${IMAGE}:sha-${NEW}`,
         `docker image inspect ${IMAGE}:sha-${NEW} --format {{index .Config.Labels "org.opencontainers.image.revision"}}`,
         `docker pull --quiet ${IMAGE}:sha-${OLD}`,
+        SERVICES,
         'docker compose stop midden',
         `checkpoint [${IMAGE}:sha-${OLD}]`,
         `git checkout --quiet --detach ${NEW}`,
         up(NEW),
+        SERVICES,
         'docker compose stop midden',
         `git checkout --quiet --detach ${OLD}`,
         up(OLD),
         HEALTH,
+        SERVICES,
       ],
     )
     // The checkpoint ran with the app stopped, the WAL still full.
@@ -294,7 +312,7 @@ describe('deploy', () => {
     )
     assert.equal(waits.length, 4)
     // The old version answers at once.
-    assert.equal(fake.calls.at(-1), HEALTH)
+    assert.equal(fake.calls.at(-2), HEALTH)
   })
 
   test('a failed checkpoint keeps the WAL with the copy, and a rollback puts both back', () => {
@@ -335,12 +353,84 @@ describe('deploy', () => {
       () => deploy(dir, fake.run),
       new RegExp(`could not back up the database; ${OLD} is running again`),
     )
-    assert.deepEqual(fake.calls.slice(-4), [
+    assert.deepEqual(fake.calls.slice(-5), [
       `git checkout --quiet --detach ${OLD}`,
       up(OLD),
       HEALTH,
+      SERVICES,
       'docker compose up -d litestream',
     ])
     assert.ok(!fake.calls.includes(up(NEW)))
+  })
+
+  const steps = (fake: Fake) =>
+    fake.calls.filter(
+      (call) =>
+        call.startsWith('docker compose up') ||
+        call.startsWith('docker compose stop') ||
+        call.startsWith('git checkout') ||
+        isCheckpoint(call) ||
+        call === HEALTH,
+    )
+
+  test('the worker stops first and starts after the web process', () => {
+    env('SECRET_KEY=x\nCOMPOSE_PROFILES=litestream\n')
+    const fake = host(dir, () => false, [OLD, NEW])
+    const result = deploy(dir, fake.run)
+
+    assert.equal(result, `deployed ${NEW} (was ${OLD})`)
+    assert.deepEqual(
+      steps(fake).map((call) => (isCheckpoint(call) ? 'checkpoint' : call)),
+      [
+        'docker compose stop midden-worker',
+        'docker compose stop midden',
+        'docker compose stop litestream',
+        'checkpoint',
+        `git checkout --quiet --detach ${NEW}`,
+        up(NEW),
+        HEALTH,
+        upWorker(NEW),
+        'docker compose up -d litestream',
+      ],
+    )
+  })
+
+  test('the first version with a worker starts it; the old one had none to stop', () => {
+    env('SECRET_KEY=x\n')
+    const fake = host(dir, () => false, [NEW])
+    deploy(dir, fake.run)
+
+    assert.ok(!fake.calls.includes('docker compose stop midden-worker'))
+    assert.ok(fake.calls.includes(upWorker(NEW)))
+  })
+
+  test('a worker that does not become healthy rolls back both', () => {
+    env('SECRET_KEY=x\nCOMPOSE_PROFILES=litestream\n')
+    const fake = host(dir, (call) => call === upWorker(NEW), [OLD, NEW])
+    const result = deploy(dir, fake.run)
+
+    assert.match(result, new RegExp(`^rolled back ${NEW}: unhealthy`))
+    assert.deepEqual(steps(fake).slice(5), [
+      up(NEW),
+      HEALTH,
+      upWorker(NEW),
+      'docker compose stop litestream',
+      'docker compose stop midden-worker',
+      'docker compose stop midden',
+      `git checkout --quiet --detach ${OLD}`,
+      up(OLD),
+      HEALTH,
+      upWorker(OLD),
+      'docker compose up -d litestream',
+    ])
+    // The database is put back only once all three have stopped.
+    assert.equal(
+      fake.seen['stop midden']!.database,
+      'migrated by the new version',
+    )
+    assert.equal(
+      readFileSync(path.join(data, 'midden.db'), 'utf8'),
+      'as the old version left it',
+    )
   })
 })

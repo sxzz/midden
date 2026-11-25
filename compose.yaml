@@ -1,25 +1,34 @@
+# The server runs as two processes of one image on the same data: `midden`
+# serves HTTP (the API, media, the web app), runs the Telegram bot and takes
+# Litestream's heartbeats; `midden-worker` runs the jobs and timers. The
+# jobs' database work then never stalls a request.
+x-midden: &midden
+  image: ${MIDDEN_IMAGE:-ghcr.io/sxzz/midden:latest}
+  restart: unless-stopped
+  # A small init as PID 1 passes signals on; Node as PID 1 ignores a
+  # SIGTERM that arrives before its handler is registered.
+  init: true
+  env_file: .env
+  volumes:
+    # SQLite database and media; back this directory up.
+    - ${DATA_PATH:-./data}:/data
+  # The container's log goes away when a deploy recreates it; the server
+  # also keeps rotated logs in the data directory (logs/midden.log and
+  # logs/worker.log).
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: '5'
+
 services:
   midden:
-    image: ${MIDDEN_IMAGE:-ghcr.io/sxzz/midden:latest}
-    restart: unless-stopped
-    # A small init as PID 1 passes signals on; Node as PID 1 ignores a
-    # SIGTERM that arrives before its handler is registered.
-    init: true
-    env_file: .env
+    <<: *midden
     environment:
       DATA_DIR: /data
-    volumes:
-      # SQLite database and media; back this directory up.
-      - ${DATA_PATH:-./data}:/data
+      MIDDEN_ROLE: web
     ports:
       - 127.0.0.1:${PORT:-8080}:8080
-    # The container's log goes away when a deploy recreates it; the server
-    # also keeps rotated logs in the data directory (logs/midden.log).
-    logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: '5'
     healthcheck:
       test: [CMD, wget, -qO-, http://127.0.0.1:8080/healthz]
       interval: 30s
@@ -27,6 +36,25 @@ services:
       timeout: 10s
       # Startup (migrations, the R2 token check) does not count against it.
       start_period: 2m
+
+  midden-worker:
+    <<: *midden
+    environment:
+      DATA_DIR: /data
+      MIDDEN_ROLE: worker
+    # The web process applies the migrations; the worker waits for them.
+    depends_on:
+      midden:
+        condition: service_healthy
+    healthcheck:
+      # Its own health check, on loopback inside the container.
+      test: [CMD, wget, -qO-, http://127.0.0.1:8082/healthz]
+      interval: 30s
+      timeout: 10s
+      start_period: 2m
+    # Stopping hands running jobs back to the queue; a download or ffmpeg
+    # may take a moment to notice.
+    stop_grace_period: 30s
 
   # Continuous copy of the database to R2 (litestream.yml). Off unless .env
   # has COMPOSE_PROFILES=litestream; see docs/operations.md.

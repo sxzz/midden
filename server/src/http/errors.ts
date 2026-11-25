@@ -1,4 +1,5 @@
 import { HTTPException } from 'hono/http-exception'
+import { isBusy } from '#db/client.ts'
 import { isAppError, type ErrorKind } from '#errors.ts'
 import { isProviderFailure } from '#platforms/platform.ts'
 import { status } from '#platforms/rpc.ts'
@@ -31,6 +32,13 @@ const statuses: Record<ErrorKind, ContentfulStatusCode> = {
 export function errorResponse(c: Context, error: unknown, logger: Logger) {
   if (error instanceof HTTPException)
     return c.json({ error: error.message }, error.status)
+  // The write waited for the worker or a checkpoint as long as the web
+  // process may: trying again shortly succeeds.
+  if (isBusy(error)) {
+    logger.warn({ path: c.req.path }, 'request found the database locked')
+    c.header('Retry-After', '1')
+    return c.json({ error: '数据库繁忙，请重试' }, 503)
+  }
   if (isAppError(error))
     return c.json({ error: error.message }, statuses[error.kind])
   if (

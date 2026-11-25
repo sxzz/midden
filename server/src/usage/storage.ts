@@ -47,6 +47,11 @@ export interface StorageUsageOptions {
   apiBase?: string
   /** Tests replace the worker thread. */
   readComposition?: (input: CompositionInput) => Promise<CompositionOutput>
+  /**
+   * Whether the daily composition may be read now; it is put off while this
+   * says no (the worker passes whether it is idle).
+   */
+  composeWhen?: () => boolean
 }
 
 /** One bucket now: its latest storage reading and the month's operations. */
@@ -163,7 +168,11 @@ export class StorageUsage {
   async tick(): Promise<void> {
     const now = this.#now()
     // Not awaited: it takes long, in a worker thread, and logs its failures.
-    if (compositionDue(this.#options.db, now)) this.compose().catch(() => {})
+    if (
+      compositionDue(this.#options.db, now) &&
+      (this.#options.composeWhen?.() ?? true)
+    )
+      this.compose().catch(() => {})
     if (now - this.#lastTick < REFRESH_INTERVAL) return
     this.#lastTick = now
     await this.refreshR2()

@@ -31,6 +31,17 @@ export interface CaptureContext {
   thumbnailer?: Thumbnailer
   /** Overrides `TIMELINE_CAP`, so tests need not read a thousand posts. */
   timelineCap?: number
+  /**
+   * Waits between the write transactions of one long task, longer while
+   * the worker's throttle sees contention, so that another process waiting
+   * for the write lock (the web process) gets it in between.
+   */
+  pace?: () => Promise<void>
+}
+
+/** `ctx.pace`, or a turn of the event loop without one. */
+export function pace(ctx: Pick<CaptureContext, 'pace'>): Promise<void> {
+  return ctx.pace ? ctx.pace() : new Promise((resolve) => setImmediate(resolve))
 }
 
 export interface Thumbnailer {

@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -22,26 +22,27 @@ async function freePort(): Promise<number> {
 
 let telegram: FakeTelegram
 let dir: string
-let child: ChildProcess | undefined
+let children: ChildProcess[] = []
 beforeEach(async () => {
   telegram = await new FakeTelegram().start()
   dir = mkdtempSync(path.join(tmpdir(), 'midden-main-'))
 })
 afterEach(async () => {
-  if (child && child.exitCode === null) {
-    child.kill('SIGKILL')
-    await once(child, 'exit')
-  }
-  child = undefined
+  for (const child of children)
+    if (child.exitCode === null) {
+      child.kill('SIGKILL')
+      await once(child, 'exit')
+    }
+  children = []
   await telegram.stop()
   rmSync(dir, { recursive: true, force: true })
 })
 
 /** The server as the container runs it, its log lines collected. */
-async function startServer() {
-  const port = await freePort()
+async function startServer(env: Record<string, string> = {}) {
+  const port = Number(env.PORT ?? (await freePort()))
   const lines: string[] = []
-  child = spawn(process.execPath, [MAIN], {
+  const child = spawn(process.execPath, [MAIN], {
     env: {
       PATH: process.env.PATH,
       DATA_DIR: dir,
@@ -53,9 +54,11 @@ async function startServer() {
       TELEGRAM_BOT_TOKEN: '1:test',
       OWNER_TELEGRAM_ID: '7',
       MIDDEN_TEST_TELEGRAM_API_ROOT: telegram.apiRoot,
+      ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
+  children.push(child)
   let buffered = ''
   child.stdout!.on('data', (chunk: Buffer) => {
     buffered += chunk.toString('utf8')
@@ -89,4 +92,48 @@ describe('startup', () => {
     expect(Date.now() - started).toBeLessThan(5000)
     expect(server.logged('shutting down')).toBe(true)
   }, 30_000)
+})
+
+describe('two processes', () => {
+  test('the worker waits for the web process to migrate; each stops on SIGTERM', async () => {
+    const port = await freePort()
+    const healthPort = await freePort()
+    const worker = await startServer({
+      PORT: String(port),
+      MIDDEN_ROLE: 'worker',
+      WORKER_HEALTH_PORT: String(healthPort),
+    })
+    await expect
+      .poll(() => worker.logged('waiting for the web process to migrate'), {
+        timeout: 20_000,
+      })
+      .toBe(true)
+    const web = await startServer({ PORT: String(port), MIDDEN_ROLE: 'web' })
+    await expect
+      .poll(() => worker.logged('worker listening'), { timeout: 20_000 })
+      .toBe(true)
+    const health = await fetch(`http://127.0.0.1:${healthPort}/healthz`)
+    expect(await health.text()).toBe('ok')
+    await expect
+      .poll(() => web.logged('listening'), { timeout: 20_000 })
+      .toBe(true)
+    // The web process owns the bot; the worker only sends.
+    await expect
+      .poll(() => web.logged('telegram bot started'), { timeout: 20_000 })
+      .toBe(true)
+    expect(worker.logged('telegram bot started')).toBe(false)
+    // Each tells the other how it does through a status file.
+    for (const name of ['worker.json', 'web.json'])
+      await expect
+        .poll(() => existsSync(path.join(dir, 'run', name)), {
+          timeout: 10_000,
+        })
+        .toBe(true)
+
+    for (const server of [worker, web]) {
+      server.child.kill('SIGTERM')
+      const [code] = await once(server.child, 'exit')
+      expect(code).toBe(0)
+    }
+  }, 60_000)
 })

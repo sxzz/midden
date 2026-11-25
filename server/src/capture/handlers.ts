@@ -101,10 +101,7 @@ export function captureHandlers(
     },
     related: {
       queue: 'control',
-      run: (job) => {
-        runRelated(context(), job)
-        return Promise.resolve()
-      },
+      run: (job) => runRelated(context(), job),
       fail: (job, error) => failRelated(context(), job.ref, safeError(error)),
     },
     // Feeds an update's items to the capture queue a few at a time.

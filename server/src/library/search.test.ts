@@ -328,7 +328,7 @@ describe('library search', () => {
         .prepare('SELECT count(*) AS n FROM catalog_fts_docsize')
         .get() as { n: number }
     expect(rowids().n).toBe(3)
-    collectCollections(ctx)
+    await collectCollections(ctx)
     expect(rowids().n).toBe(2)
 
     // Emptied and refilled, as a migration that changes the catalog does.

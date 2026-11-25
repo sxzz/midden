@@ -22,6 +22,7 @@ const RelationGraph = () => import('./components/RelationGraph.vue')
 const RelationCompare = () => import('./components/RelationCompare.vue')
 const RelationsView = () => import('./components/RelationsView.vue')
 const StorageView = () => import('./components/StorageView.vue')
+const JobsView = () => import('./components/JobsView.vue')
 
 const SHARE = String.raw`/s/:slug([\w-]+)`
 // Pages inside a share take the collection; the slug is the share's own.
@@ -91,6 +92,11 @@ export const router = createRouter({
       path: '/settings/admin/storage',
       name: 'settings-storage',
       component: StorageView,
+    },
+    {
+      path: '/settings/admin/jobs',
+      name: 'settings-jobs',
+      component: JobsView,
     },
     { path: '/captures', name: 'captures', component: CaptureRecords },
     {

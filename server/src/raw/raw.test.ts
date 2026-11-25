@@ -196,7 +196,7 @@ describe('raw responses in the bucket', () => {
     expect(rows(c).every((row) => row.remoteAt)).toBe(true)
 
     deleteCollection(c.db, one.collectionId)
-    expect(collectCollections(c)).toBe(1)
+    expect(await collectCollections(c)).toBe(1)
     expect(c.db.select().from(rawGarbage).all()).toHaveLength(1)
     // Kept through the grace period, then kept for the other row.
     expect(await collectRawGarbage(c)).toBe(0)
@@ -206,7 +206,7 @@ describe('raw responses in the bucket', () => {
     expect(c.db.select().from(rawGarbage).all()).toEqual([])
 
     deleteCollection(c.db, two.collectionId)
-    expect(collectCollections(c)).toBe(1)
+    expect(await collectCollections(c)).toBe(1)
     clock.now += 25 * HOUR
     expect(await collectRawGarbage(c)).toBe(1)
     expect(s3.objects.size).toBe(0)

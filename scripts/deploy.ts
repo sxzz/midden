@@ -28,6 +28,9 @@ const IMAGE = 'ghcr.io/sxzz/midden'
 const REVISION = /^[\da-f]{40}$/
 // The compose profile, and service, of the Litestream sidecar.
 const LITESTREAM = 'litestream'
+// The job worker, beside the web process `midden` (versions before the
+// split have none).
+const WORKER = 'midden-worker'
 // A started version gets this many tries at /healthz, this far apart, before
 // it counts as unhealthy: one slow answer must not roll a deployment back.
 const HEALTH_ATTEMPTS = 5
@@ -123,28 +126,16 @@ export function deploy(
   /** Start `revision` and wait until it reports healthy. */
   function start(revision: string) {
     run('git', ['checkout', '--quiet', '--detach', revision])
-    // The app alone: the sidecar must not hold up or fail a deployment.
-    run(
-      'docker',
-      [
-        'compose',
-        'up',
-        '-d',
-        '--pull',
-        'never',
-        '--wait',
-        '--wait-timeout',
-        '180',
-        'midden',
-      ],
-      { MIDDEN_IMAGE: `${IMAGE}:sha-${revision}` },
-    )
+    // The app alone: the sidecar must not hold up or fail a deployment. The
+    // web process first: it applies the migrations, which the worker waits
+    // for.
+    up('midden', revision)
     for (let attempt = 1; ; attempt++) {
       try {
         const health = run('curl', ['-fsS', '--max-time', '5', healthz()])
         if (health !== 'ok')
           throw new Error(`unexpected health response: ${health}`)
-        return
+        break
       } catch (error) {
         if (attempt >= HEALTH_ATTEMPTS) throw error
         console.error(
@@ -153,6 +144,7 @@ export function deploy(
         sleep(HEALTH_RETRY_DELAY)
       }
     }
+    if (hasWorker()) up(WORKER, revision)
   }
 
   function healthz(): string {
@@ -190,8 +182,46 @@ export function deploy(
     }
   }
 
-  /** Stop the app, then Litestream, which copies what the app wrote last. */
+  /** Whether the checked-out compose.yaml defines the worker. */
+  function hasWorker(): boolean {
+    return run('docker', ['compose', 'config', '--services'])
+      .split('\n')
+      .includes(WORKER)
+  }
+
+  /**
+   * Stop the worker of the checked-out version, if it has one. Running
+   * jobs go back to the queue and run again under the next version.
+   */
+  function stopWorker() {
+    if (hasWorker()) run('docker', ['compose', 'stop', WORKER])
+  }
+
+  /** Start a service of `revision` and wait for its health check. */
+  function up(service: string, revision: string) {
+    run(
+      'docker',
+      [
+        'compose',
+        'up',
+        '-d',
+        '--pull',
+        'never',
+        '--wait',
+        '--wait-timeout',
+        '180',
+        service,
+      ],
+      { MIDDEN_IMAGE: `${IMAGE}:sha-${revision}` },
+    )
+  }
+
+  /**
+   * Stop the worker, the web process, then Litestream, which copies what
+   * they wrote last.
+   */
   function stopAll(litestream: boolean) {
+    stopWorker()
     run('docker', ['compose', 'stop', 'midden'])
     if (litestream) run('docker', ['compose', 'stop', LITESTREAM])
   }
@@ -285,6 +315,7 @@ export function deploy(
     // Litestream holds the database and its WAL open: replacing them under
     // it breaks the file or its copy in R2. Stop it before the app.
     if (litestream) run('docker', ['compose', 'stop', LITESTREAM])
+    stopWorker()
     run('docker', ['compose', 'stop', 'midden'])
     const database = path.join(dataDir, 'midden.db')
     for (const suffix of ['-wal', '-shm'])

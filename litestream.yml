@@ -17,7 +17,9 @@ dbs:
     # writes a snapshot of the whole database while holding the write lock,
     # so every write in the app waits or fails as locked for that long, and
     # it uploads the database once more. Above this, the next ordinary
-    # (PASSIVE) checkpoint after the snapshot empties the WAL instead.
+    # (PASSIVE) checkpoint after the snapshot empties the WAL instead. A
+    # reader held for minutes grows the WAL the same way. 0 would not turn
+    # it off: since 0.5.16 it means the default.
     truncate-page-n: 1000000
     replica:
       url: s3://midden-backup/db

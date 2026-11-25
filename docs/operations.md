@@ -2,7 +2,7 @@
 
 ## 部署结构
 
-生产环境使用 `compose.yaml` 运行一个容器，镜像内含 Node.js 26 与 ffmpeg（用于缩略图和视频尺寸探测）。容器以非 root 用户运行，数据目录挂载到 `/data`。可选的第二个容器 `litestream` 把数据库持续复制到 R2，见「Litestream」。
+生产环境使用 `compose.yaml` 运行同一个镜像的两个容器，镜像内含 Node.js 26 与 ffmpeg（用于缩略图和视频尺寸探测）：`midden` 是网页进程（`MIDDEN_ROLE=web`：HTTP、Telegram Bot、Litestream 心跳），`midden-worker` 运行任务队列和定时的维护（`MIDDEN_ROLE=worker`），见[架构](architecture.md#进程)。两个容器读同一个 `.env`，以非 root 用户运行，数据目录都挂载到 `/data`。`midden-worker` 等 `midden` 健康后才启动（迁移由网页进程应用），它的健康检查是容器内 `127.0.0.1:8082/healthz`，不对外发布端口。可选的第三个容器 `litestream` 把数据库持续复制到 R2，见「Litestream」。
 
 对外访问需要 HTTPS 反向代理（例如 Cloudflare Tunnel），把整个域名转发到服务端口，至少包括 `/app/`、`/v1/`、`/media/`。Mini App 与通行密钥都要求 HTTPS。
 
@@ -28,24 +28,30 @@
 
 ```sh
 docker compose ps
-docker compose logs --tail=100 midden
-docker compose logs --tail=100 litestream     # 启用 Litestream 时
-docker compose pull && docker compose up -d   # 更新
+docker compose logs --tail=100 midden          # 网页进程
+docker compose logs --tail=100 midden-worker   # 任务
+docker compose logs --tail=100 litestream      # 启用 Litestream 时
+docker compose pull && docker compose up -d    # 更新（自动部署见下）
 ```
 
-服务启动的顺序见 [架构](architecture.md#启动顺序)：先监听 HTTP，Telegram Bot 在后台启动，Telegram 慢或不可用不影响 `/healthz`。`compose.yaml` 的健康检查超时 10 秒，启动后 2 分钟内（`start_period`）的失败不计入。
+手动 `docker compose up -d` 先换网页进程（它应用迁移），再换 worker；其间旧的 worker 若发现数据库有它不认识的迁移，就停止取任务，等被换掉。自动部署先停 worker，见下。`docker compose stop midden-worker` 停下全部任务（正在运行的回到队列），网页照常服务，新的任务排队等它回来。
 
-数据库迁移在启动时自动应用；随后补齐收藏列表的索引表 `catalog` 中缺失的行（首次部署或导入数据后可能需要几秒）。
+
+服务启动的顺序见 [架构](architecture.md#启动顺序)：先监听 HTTP，Telegram Bot 在后台启动，Telegram 慢或不可用不影响 `/healthz`。`compose.yaml` 的健康检查超时 10 秒，启动后 2 分钟内（`start_period`）的失败不计入；两个容器都一样。
+
+数据库迁移在网页进程启动时自动应用；随后补齐收藏列表的索引表 `catalog` 中缺失的行（首次部署或导入数据后可能需要几秒）。worker 等迁移应用完再开始。
+
+日志也写在数据目录：网页进程 `logs/midden.log`，worker `logs/worker.log`。
 
 ## 自动部署
 
 `main` 的 test 工作流通过后会发布镜像 `ghcr.io/sxzz/midden:latest` 与 `:sha-<提交>`。部署机上的 webhook 收到这次运行完成的事件后，从 `origin/main` 取出 `scripts/deploy.ts` 执行：
 
 1. 确认部署目录（默认 `~/midden`）没有本地改动，最新镜像的提交在 `origin/main` 上，且与正在运行的版本不同；
-2. 停掉正在运行的服务，启用 Litestream 时随后停掉它（在服务之后：它先把服务最后写的内容复制走）。部署本来就要重启服务，停下来再复制，不会像在线备份那样在运行中的服务旁持有一个读事务好几分钟（那会让 WAL 涨过 500 MB，Litestream 随之做阻塞的 TRUNCATE 检查点，服务的写入因 `database is locked` 失败）；
+2. 依次停掉正在运行的 worker（`docker compose stop midden-worker`，正在运行的任务回到队列；那个版本没有 worker 时跳过，由它的 `compose.yaml` 判断：`docker compose config --services`）、网页进程，启用 Litestream 时随后停掉它（在服务之后：它先把服务最后写的内容复制走）。部署本来就要重启服务，停下来再复制，不会像在线备份那样在运行中的服务旁持有一个读事务好几分钟（那会让 WAL 涨过 500 MB，Litestream 随之做阻塞的 TRUNCATE 检查点，服务的写入因 `database is locked` 失败）；旧的 worker 也不会在新版本迁移之后继续写；
 3. 备份数据库到 `data/backups/deploy/`：`-wal` 不为空时先用原来版本的镜像在一次性容器中（`docker compose run --rm --no-deps --entrypoint node midden -e …`）执行 `PRAGMA wal_checkpoint(TRUNCATE)`，再把 `midden.db` 复制过去（`copyFile` 的 `COPYFILE_FICLONE`：APFS 上是写时复制的克隆，几 GB 也立即完成，文件系统不支持时普通复制）。检查点失败时连同 `-wal` 一起复制，两者合起来是一致的。保留最近 2 份：这次的与上一次的；启用 Litestream 时只保留这次的 1 份，因为上一次的只用于新版本运行一段时间后才发现问题的情况，Litestream 可以恢复到那之前的任一时刻。复制失败时重新启动原来的版本（与 Litestream），结果为 `failed: could not back up the database; … is running again`；
-4. 切换到该提交，用 `:sha-<提交>` 镜像 `docker compose up -d --wait midden`，并检查 `/healthz`：最多 5 次，间隔 6 秒（约 30 秒），一次没有回应不算不健康。启用 Litestream 时随后再启动它（`docker compose up -d litestream`（`litestream.yml` 有改动时加 `--force-recreate`，compose 看不到文件内容的变化）；它启动失败不算部署失败，结果末尾加上 `; litestream did not start`；
-5. 新版本不健康时停掉它，换回第 3 步的副本（连同复制的 `-wal`，删掉 `-shm`），切回原来的版本。启用 Litestream 时：它这时还没有启动，同样先停 Litestream 再停服务（它一直打开着数据库和 WAL，换文件时不能在运行）；换回数据库后删除它的本地状态 `data/.midden.db-litestream/`；原来的版本启动后（即使启动失败）再启动 Litestream。Litestream 发现本地数据库落后于存储桶，从存储桶取得位置，把换回的数据库整个作为下一个事务上传，回滚前的历史仍可恢复（见「Litestream」）。
+4. 切换到该提交，用 `:sha-<提交>` 镜像 `docker compose up -d --wait midden`，并检查 `/healthz`：最多 5 次，间隔 6 秒（约 30 秒），一次没有回应不算不健康。然后 `docker compose up -d --wait midden-worker`（该版本有 worker 时），它的健康检查不通过也算不健康。启用 Litestream 时随后再启动它（`docker compose up -d litestream`（`litestream.yml` 有改动时加 `--force-recreate`，compose 看不到文件内容的变化）；它启动失败不算部署失败，结果末尾加上 `; litestream did not start`；
+5. 新版本不健康时停掉它（先 worker 后网页进程），换回第 3 步的副本（连同复制的 `-wal`，删掉 `-shm`），切回原来的版本，先启动网页进程、再启动 worker。启用 Litestream 时：它这时还没有启动，同样先停 Litestream 再停服务（它一直打开着数据库和 WAL，换文件时不能在运行）；换回数据库后删除它的本地状态 `data/.midden.db-litestream/`；原来的版本启动后（即使启动失败）再启动 Litestream。Litestream 发现本地数据库落后于存储桶，从存储桶取得位置，把换回的数据库整个作为下一个事务上传，回滚前的历史仍可恢复（见「Litestream」）。
 
 服务在第 2 步到第 4 步之间停止，通常不到一分钟。Litestream 停止后 WAL 从头开始写，它再启动时上传一份完整快照（见「Litestream」）。
 
@@ -358,14 +364,17 @@ Litestream 0.5 把 WAL 中新提交的页面写成 LTX 文件（按页 LZ4 压�
 | `snapshot`                            | 每 `24h`，保留 `192h`  | 每天 00:00 UTC 一份完整快照，保留 8 天：最近 7 天内的任一时刻之前都有一份快照可用                                                                               |
 | `l0-retention-check-interval`         | `1h`                   | 每次检查都列出存储桶中全部 L1 文件（每 1000 个一次 Class A 操作），默认每 15 秒一次太多                                                                         |
 | `heartbeat-url`、`heartbeat-interval` | 服务的 8081 端口，`5m` | 见「监控」                                                                                                                                                      |
+| `truncate-page-n`                     | `1000000`（约 3.8 GiB）| 见「检查点」。`checkpoint-interval`（`1m`）、`min-checkpoint-page-count`（1000 页）用默认值                                                                     |
 
 恢复点：最近 5 分钟到 1 小时内（L0 文件还在）约每 10 秒一个，更早的每分钟一个（L1 的边界），8 天前的不能恢复。没有写入的时段没有文件。
 
 #### 检查点
 
-服务的连接用 WAL、`synchronous = NORMAL`、5 秒的 busy timeout，保留 SQLite 默认的自动检查点（WAL 超过 1000 页时，PASSIVE）。Litestream 一直持有一个读事务，只有它自己的检查点能让 WAL 从头开始写（它做 PASSIVE 检查点时短暂持有写锁，写入在这期间等待，busy timeout 足够）；PASSIVE 检查点越不过它的读事务，所以服务的自动检查点不影响复制。服务中没有 `wal_checkpoint(RESTART)`、`wal_checkpoint(TRUNCATE)` 和 `VACUUM`：前两者会让 Litestream 重新上传整个数据库，`VACUUM` 把每一页写进 WAL，都不要加。`PRAGMA optimize`（启动时和每 6 小时）和 `PRAGMA incremental_vacuum`（见「维护任务」）是普通的写事务；`cli.ts backup`（手动的在线备份，部署不再用它）只读数据库，但运行期间一直持有读事务。数据库变小的事务（incremental vacuum 截短文件）在 Litestream 0.5.2 中会让同步报 `page number X out-of-bounds for commit size Y`（#875），之后由 #881 修复，固定的 0.5.18 已包含；用 0.5.18 在本地试过：一边复制，一边清空大量数据并分批 incremental vacuum，最新状态与其间三个时刻的恢复都通过完整性检查，最新状态的页数和内容与源数据库相同。
+两个进程的连接都用 WAL、`synchronous = NORMAL`；网页进程 busy timeout 2 秒、关闭自动检查点，worker 10 秒、保留 SQLite 默认的自动检查点（WAL 超过 1000 页时，PASSIVE）。Litestream 一直持有一个读事务，只有它自己的检查点能让 WAL 从头开始写；PASSIVE 检查点越不过它的读事务，所以 worker 的自动检查点不影响复制，把 WAL 页面写回数据库的实际是 Litestream 的检查点。它做 PASSIVE 检查点时持有写锁（向 `_litestream_lock` 写一行作为屏障），把上次以来的 WAL 页面写回数据库，写入在这期间等待：`monitor-interval` 为 10 秒时最多是 10 秒的写入量，几十到几百毫秒，两个进程的 busy timeout 都足够。服务中没有 `wal_checkpoint(RESTART)`、`wal_checkpoint(TRUNCATE)` 和 `VACUUM`：前两者会让 Litestream 重新上传整个数据库，`VACUUM` 把每一页写进 WAL，都不要加。`PRAGMA optimize`（启动时和每 6 小时）和 `PRAGMA incremental_vacuum`（见「维护任务」）是普通的写事务；`cli.ts backup`（手动的在线备份，部署不再用它）只读数据库，但运行期间一直持有读事务。数据库变小的事务（incremental vacuum 截短文件）在 Litestream 0.5.2 中会让同步报 `page number X out-of-bounds for commit size Y`（#875），之后由 #881 修复，固定的 0.5.18 已包含；用 0.5.18 在本地试过：一边复制，一边清空大量数据并分批 incremental vacuum，最新状态与其间三个时刻的恢复都通过完整性检查，最新状态的页数和内容与源数据库相同。
 
-WAL 的大小：Litestream 做快照时（启动后 WAL 是新的时，例如每次部署之后；以及每天 00:00 UTC）直到上传完都不做检查点，WAL 随写入一直变大，负载高时几分钟就超过 1 GB。WAL 超过 `truncate-page-n` 时它先试 PASSIVE，不行再做阻塞的 TRUNCATE；0.5.18 在 TRUNCATE 之后总要在持有写锁的情况下把整个数据库写成一份快照（`checkpoint boundary snapshot`），这期间服务的每个写入都在等待，超过 5 秒就以 `database is locked` 失败，并且又上传一次整个数据库。默认的阈值约 500 MB，快照期间的增长就会越过它，所以 `litestream.yml` 把它设为 1,000,000 页（约 3.8 GiB），只作为最后的保护：快照结束后，下一次普通的 PASSIVE 检查点（WAL 超过 1000 页时，每次同步之后）把 WAL 写回数据库并从头开始。这个检查点期间 Litestream 也持有写锁，WAL 越大越久。磁盘上要留出 WAL 的空间。
+WAL 的大小：Litestream 做快照时（启动后 WAL 是新的时，例如每次部署之后；以及每天 00:00 UTC）直到上传完都不做检查点，WAL 随写入一直变大，负载高时几分钟就超过 1 GB。WAL 超过 `truncate-page-n` 时它先试 PASSIVE，不行再做阻塞的 TRUNCATE；0.5.18 在 TRUNCATE 之后总要在持有写锁的情况下把整个数据库写成一份快照（`checkpoint boundary snapshot`），这期间服务的每个写入都在等待，超过 busy timeout 就以 `database is locked` 失败，并且又上传一次整个数据库。默认的阈值约 500 MB，快照期间的增长就会越过它；一个持续几分钟的读事务（例如每天的数据库组成）也会，所以组成只在 worker 空闲时读。`litestream.yml` 把它设为 1,000,000 页（约 3.8 GiB），只作为最后的保护：快照或读事务结束后，下一次普通的 PASSIVE 检查点（WAL 超过 1000 页时，每次同步之后）把 WAL 写回数据库并从头开始。这个检查点期间 Litestream 也持有写锁，WAL 越大越久。磁盘上要留出 WAL 的空间。设为 `0` 不能关闭它：0.5.16 起 0 表示默认值（#1348），与 Litestream 的文档不同。
+
+负载测试（`server/scripts/bench-load.ts`，见 CONTRIBUTING）中，一边做 3,000 条帖子的更新、一边持有 60 秒读事务：默认的阈值下 WAL 涨到 2.3 GB，Litestream 强制 TRUNCATE 9 次；阈值提高后 0 次，读事务结束后 WAL 照常从头开始。
 
 Litestream 在数据库中建两张表 `_litestream_seq`、`_litestream_lock`，恢复出的数据库中也有，不影响服务。
 
@@ -534,18 +543,18 @@ Cloudflare 的 GraphQL Analytics API（`POST https://api.cloudflare.com/client/v
 
 ## 维护任务
 
-服务每分钟运行一次维护：
+worker 每分钟运行一次维护。标 *空闲时* 的步骤只为腾出空间，只在 worker 空闲时做（其他任务 10 秒内都没有运行，且没有在节流），大批更新期间等它结束：
 
 - 超过 1 小时仍未完成且没有对应任务的抓取标记为中断；
-- 删除不再保存、也没有进行中抓取的收藏及其独有内容；
-- 没有产生新版本的抓取，其原始响应保留 3 天，之后只要不是这个收藏最新一次的抓取就删除；产生了新版本的抓取的原始响应一直保留；
+- 删除不再保存、也没有进行中抓取的收藏及其独有内容（*空闲时*；每批之间停一下，让网页进程能写入）；
+- 没有产生新版本的抓取，其原始响应保留 3 天，之后只要不是这个收藏最新一次的抓取就删除；产生了新版本的抓取的原始响应一直保留（*空闲时*）；
 - 不再被引用的媒体文件 24 小时后删除（使用 R2 时同时删除对象并清除边缘缓存）；
-- 不再有任何原始响应使用的存储桶对象 24 小时后删除（见「原始响应（R2）」）；
+- 不再有任何原始响应使用的存储桶对象 24 小时后删除（见「原始响应（R2）」，*空闲时*）；
 - 删除抓取结束一天以上仍留着的暂存数据（`capture_staging`，没能提交的列表目标的预取）；
 - 为缺少缩略图的媒体补做缩略图；
 - 清理过期的网页会话、通行密钥挑战与 `/passkey` 链接；
-- 每 15 分钟读取存储用量并检查提醒，每天一次统计数据库组成（见「存储用量」）；
-- 把空闲页面还给文件系统：空闲页面达到 1024 页（4 MiB）时运行 `PRAGMA incremental_vacuum(4096)`，每次最多 16 MiB，两次之间至少 15 分钟，所以积压最多每小时释放 64 MiB；日志 `released free database pages` 给出这次释放的页数、剩余空闲页数（`free`）和总页数（`pages`）。这要求数据库是 `auto_vacuum = INCREMENTAL`：新建的数据库默认如此，已有的数据库要 `VACUUM` 一次才能切换（生产环境已于 2026-11-25 切换），否则这一步什么也不做。
+- 每 15 分钟读取存储用量并检查提醒，每天一次统计数据库组成（见「存储用量」，统计在 *空闲时*）；
+- 把空闲页面还给文件系统（*空闲时*）：空闲页面达到 1024 页（4 MiB）时运行 `PRAGMA incremental_vacuum(4096)`，每次最多 16 MiB，两次之间至少 15 分钟，所以积压最多每小时释放 64 MiB；日志 `released free database pages` 给出这次释放的页数、剩余空闲页数（`free`）和总页数（`pages`）。这要求数据库是 `auto_vacuum = INCREMENTAL`：新建的数据库默认如此，已有的数据库要 `VACUUM` 一次才能切换（生产环境已于 2026-11-25 切换），否则这一步什么也不做。
 
 ## 从 Go 版迁移
 
@@ -553,13 +562,15 @@ Cloudflare 的 GraphQL Analytics API（`POST https://api.cloudflare.com/client/v
 
 ## 排查
 
+- 两个进程：`docker compose ps` 中 `midden` 与 `midden-worker` 都应是 healthy。worker 不健康或没在运行时网页照常服务，任务排队；管理员面板「后台任务」显示「后台进程没有响应」。
+- 网页慢：日志 `slow request`（超过 500 毫秒的请求，带路径和毫秒数）和 `event loop lag`（网页进程停顿超过 200 毫秒），各自 10 秒内最多一条，`skipped` 是其间省略的条数；「后台任务」页显示最近一分钟的请求耗时。worker 的 `slow write transaction`（持有写锁超过 200 毫秒或等锁超过 1 秒，带任务）、`worker slowing down`（节流降低并发，带原因：`web lag`、`slow web requests`、`lock wait`、`write duty`）说明是谁在占用数据库。`database is locked` 是等写锁超过 busy timeout（网页进程 2 秒，worker 10 秒）。
 - `GET /healthz` 返回 `ok` 表示 HTTP 服务与数据库正常，不含 Telegram；Bot 的状态看 `GET /v1/instance` 的 `bot`，或日志中的 `telegram bot started`、`telegram bot start failed; retrying`、`telegram bot could not start`。
 - 日志为 JSON，`job failed` 表示任务最终失败，`delivery rejected` 表示 Telegram 拒绝了某条消息。
 - 抓取失败：每次尝试都有记录，自动重试不会覆盖之前的日志。`upstream request failed` 是失败的上游请求：`upstream` 中有来源（`fxtwitter`、`x-graphql`、`instagram` 等）、接口、去掉凭据与查询 token 的 URL、状态码、`retry-after` 与 `x-rate-limit-*` 等响应头、响应开头 2 KB（已遮盖 token），另有任务编号与次数、`captureId`、目标和错误分类（`errorCode`、`retryable`、`final`）。之后还会重试的为 warn，不再重试的为 error，抓取最终仍成功的为 info。`job will retry` / `job failed` 是任务每次失败的结果与耗时，`capture failed` 是抓取记录最终失败。抓关系网的任务（`jobType` 为 `relations`）带 `relationFetchId`、`list` 与 `providerId`（`fxtwitter` 或 `x-session`）；用采集账号读时，查询限流后的切换记为 `relations query rate-limited; switching to the other query`，两个查询都限流时记为 `both relations queries rate-limited; waiting for the earlier reset`。
-- 日志位置：容器标准输出（`docker compose logs`，json-file 按 10 MB × 5 轮转，部署重建容器后清空），以及数据目录中的 `logs/midden.log`（按 10 MB 轮转，保留 `midden.log` 与 `.1`～`.4` 共 5 个文件，跨部署保留）。查找某个账号的失败：
+- 日志位置：容器标准输出（`docker compose logs`，json-file 按 10 MB × 5 轮转，部署重建容器后清空），以及数据目录中的 `logs/midden.log`（网页进程）和 `logs/worker.log`（任务，抓取失败在这里），各按 10 MB 轮转，保留 5 个文件，跨部署保留。查找某个账号的失败：
 
   ```sh
-  grep -h xiaomouzovo data/logs/midden.log* | grep -E '"level":(40|50)'
+  grep -h xiaomouzovo data/logs/worker.log* | grep -E '"level":(40|50)'
   ```
 
 - 找不到 ffmpeg 时启动日志会提示，缩略图停用；之后装上 ffmpeg，维护任务会补做缩略图。

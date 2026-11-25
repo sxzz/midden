@@ -88,13 +88,13 @@ describe('maintenance', () => {
     expect(blob).toBeDefined()
 
     deleteCollection(c.db, one.collectionId)
-    expect(collectCollections(c)).toBe(1)
+    expect(await collectCollections(c)).toBe(1)
     expect(c.db.select().from(collections).all()).toHaveLength(1)
     // The other post still uses the same image.
     expect(c.db.select().from(blobs).all()).toHaveLength(1)
 
     deleteCollection(c.db, two.collectionId)
-    expect(collectCollections(c)).toBe(1)
+    expect(await collectCollections(c)).toBe(1)
     expect(c.db.select().from(revisions).all()).toEqual([])
     expect(c.db.select().from(entities).all()).toEqual([])
     expect(c.db.select().from(blobs).all()).toEqual([])
@@ -109,11 +109,11 @@ describe('maintenance', () => {
     expect(c.db.select().from(mediaGarbage).all()).toEqual([])
   })
 
-  test('a collection being captured is kept until it finishes', () => {
+  test('a collection being captured is kept until it finishes', async () => {
     const c = setup({ now: Date.now() })
     const job = submit(c, { url: 'https://fake.test/p/1' })
     deleteCollection(c.db, job.collectionId)
-    expect(collectCollections(c)).toBe(0)
+    expect(await collectCollections(c)).toBe(0)
   })
 
   test('captures left without a job fail after an hour', () => {
