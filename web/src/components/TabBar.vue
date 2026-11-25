@@ -4,7 +4,9 @@ import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import { navigatesHere } from '../navigation'
 import { lastPage, SWITCH_STATE, tabStates } from '../tab-state'
 import {
+  barHidden,
   barSettling,
+  DESKTOP,
   isTabRoot,
   nextScroll,
   scrollStart,
@@ -15,8 +17,9 @@ import {
   type Tab,
 } from '../tabbar'
 import AppLink from './ui/AppLink.vue'
-// The bottom bar of the owner's app: 探索, 关系, 设置. It slides away while
-// the page scrolls down and back as soon as it scrolls up, as X's does.
+// The bottom bar of the owner's app: 探索, 关系, 设置. On a phone it slides
+// away while the page scrolls down and back as soon as it scrolls up, as
+// X's does; on a desktop it stays.
 const route = useRoute()
 const router = useRouter()
 const active = computed(() => tabOf(route.name))
@@ -41,6 +44,9 @@ const links = computed(
     ) as Record<Tab, RouteLocationRaw>,
 )
 const scroll = shallowRef(scrollStart())
+const desktop = shallowRef(false)
+let desktopQuery: MediaQueryList | undefined
+const desktopChanged = () => (desktop.value = !!desktopQuery?.matches)
 /**
  * On a touch screen the keyboard is up while a text field has focus; the
  * bar would ride on top of it and cover what is being typed.
@@ -63,8 +69,13 @@ function focusIn(event: FocusEvent) {
 function focusOut(event: FocusEvent) {
   typing.value = touch() && isTextField(event.relatedTarget)
 }
-const hidden = computed(
-  () => scroll.value.hidden || typing.value || tabBarSuppressed.value.size > 0,
+const hidden = computed(() =>
+  barHidden({
+    scrolled: scroll.value.hidden,
+    typing: typing.value,
+    suppressed: tabBarSuppressed.value.size > 0,
+    desktop: desktop.value,
+  }),
 )
 // A page shown again restores its scroll position; that jump is not the
 // reader scrolling, so the bar stays up for a moment after each change.
@@ -94,11 +105,15 @@ watch(
   { immediate: true },
 )
 onMounted(() => {
+  desktopQuery = globalThis.matchMedia?.(DESKTOP)
+  desktopChanged()
+  desktopQuery?.addEventListener?.('change', desktopChanged)
   window.addEventListener('scroll', onScroll, { passive: true })
   document.addEventListener('focusin', focusIn)
   document.addEventListener('focusout', focusOut)
 })
 onUnmounted(() => {
+  desktopQuery?.removeEventListener?.('change', desktopChanged)
   window.removeEventListener('scroll', onScroll)
   document.removeEventListener('focusin', focusIn)
   document.removeEventListener('focusout', focusOut)
@@ -252,6 +267,48 @@ body[data-tab-bar='shown'] {
   outline: 2px solid var(--link);
   outline-offset: -4px;
   border-radius: 12px;
+}
+/* A desktop (the same query as DESKTOP in tabbar.ts): the bar stays, its
+   items span the page's column, each with its label beside the icon and a
+   hover state, as a row of buttons under the content. */
+@media (hover: hover) and (pointer: fine) and (min-width: 900px) {
+  .items {
+    max-width: 960px;
+    height: var(--tab-bar-height);
+    padding: 6px var(--gutter);
+    gap: 8px;
+  }
+  .item {
+    flex-direction: row;
+    gap: 8px;
+    border-radius: var(--radius);
+    font-size: 15px;
+    cursor: pointer;
+    transition:
+      background 120ms ease,
+      color 120ms ease;
+  }
+  .item svg {
+    width: 22px;
+    height: 22px;
+  }
+  .item:hover {
+    color: var(--text);
+    background: var(--fill);
+  }
+  .item.on {
+    color: var(--link);
+  }
+  .item:active svg {
+    transform: none;
+  }
+  .item:active {
+    background: color-mix(in srgb, var(--fill) 70%, var(--text) 8%);
+  }
+  .item:focus-visible {
+    outline-offset: 0;
+    border-radius: var(--radius);
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .tab-bar,

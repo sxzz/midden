@@ -323,3 +323,29 @@ test('titles a post and an account by what they are', async ({ page }) => {
   await page.goto('/app/#/settings')
   await expect(page).toHaveTitle('设置 · Midden')
 })
+
+test.describe('on a desktop', () => {
+  test.use({ viewport: { width: 1280, height: 800 } })
+
+  test('never slides away', async ({ page }) => {
+    await mock(page)
+    await page.goto('/app/')
+    await expect(page.locator('.row')).toHaveCount(40)
+    await shown(page)
+    await page.mouse.move(640, 400)
+    for (let i = 0; i < 8; i++) await page.mouse.wheel(0, 300)
+    await expect.poll(() => scrollY(page)).toBeGreaterThan(1000)
+    // Give the bar every chance to leave.
+    await page.waitForTimeout(400)
+    expect(await page.evaluate(() => document.body.dataset.tabBar)).toBe(
+      'shown',
+    )
+    await expect(bar(page)).toHaveCSS('opacity', '1')
+    await expect(bar(page)).toHaveCSS('transform', 'none')
+    // Its items line up with the page's column.
+    const column = await page.locator('main.page').boundingBox()
+    const items = await bar(page).locator('.items').boundingBox()
+    expect(Math.round(items!.x)).toBe(Math.round(column!.x))
+    expect(Math.round(items!.width)).toBe(Math.round(column!.width))
+  })
+})

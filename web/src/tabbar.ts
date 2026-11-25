@@ -90,6 +90,29 @@ export function nextScroll(
 }
 
 /**
+ * A desktop: a mouse and a window wide enough for the content column. The
+ * bar there is always on the page; there is room for it, and a bar that
+ * slides away under a mouse is a target that moves.
+ */
+export const DESKTOP =
+  '(hover: hover) and (pointer: fine) and (min-width: 900px)'
+
+/** Whether the bar is off the page. */
+export function barHidden(state: {
+  /** Scrolled away (see `nextScroll`). */
+  scrolled: boolean
+  /** The on-screen keyboard is up. */
+  typing: boolean
+  /** Something takes its place, as the 多选 bar does. */
+  suppressed: boolean
+  desktop: boolean
+}) {
+  return (
+    state.suppressed || (!state.desktop && (state.scrolled || state.typing))
+  )
+}
+
+/**
  * Until when scrolling is the page restoring its position rather than the
  * reader, which does not move the bar.
  */

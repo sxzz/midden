@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { defaultCenter } from './graph-center'
 import { buildFacts } from './settings'
 import {
+  barHidden,
   isTabRoot,
   nextScroll,
   scrollStart,
@@ -132,5 +133,17 @@ it('states the build: its commit linked, and when it was built', () => {
     version: 'dev',
     commitURL: '',
     builtAt: expect.stringContaining('2026'),
+  })
+})
+
+describe('desktop', () => {
+  const state = { scrolled: false, typing: false, suppressed: false }
+  it('never hides the bar on scrolling there, only for the 多选 bar', () => {
+    expect(barHidden({ ...state, scrolled: true, desktop: true })).toBe(false)
+    expect(barHidden({ ...state, typing: true, desktop: true })).toBe(false)
+    expect(barHidden({ ...state, suppressed: true, desktop: true })).toBe(true)
+    expect(barHidden({ ...state, scrolled: true, desktop: false })).toBe(true)
+    expect(barHidden({ ...state, typing: true, desktop: false })).toBe(true)
+    expect(barHidden({ ...state, desktop: false })).toBe(false)
   })
 })

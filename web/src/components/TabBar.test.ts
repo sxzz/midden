@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createVaporApp, nextTick } from 'vue'
 import { emptyStates, SWITCH_STATE, tabStates } from '../tab-state'
-import { suppressTabBar } from '../tabbar'
+import { DESKTOP, suppressTabBar } from '../tabbar'
 import TabBar from './TabBar.vue'
 
 const { router, route } = vi.hoisted(() => ({
@@ -64,6 +64,13 @@ function leftOn() {
     },
   }
 }
+/** A media query list that matches only the queries given. */
+const media = (...matching: string[]) =>
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: matching.includes(query),
+    addEventListener() {},
+    removeEventListener() {},
+  }))
 function mount() {
   const el = document.createElement('div')
   document.body.append(el)
@@ -201,8 +208,36 @@ it('hides while the page scrolls down and while a page holds it down', async () 
   Object.defineProperty(globalThis, 'scrollY', { configurable: true, value: 0 })
 })
 
+it('never slides away on a desktop', async () => {
+  vi.spyOn(performance, 'now').mockReturnValue(10_000)
+  Object.defineProperty(document.documentElement, 'scrollHeight', {
+    configurable: true,
+    value: 5000,
+  })
+  media(DESKTOP)
+  const el = mount()
+  const nav = el.querySelector('nav')!
+  for (const y of [100, 300, 900]) {
+    Object.defineProperty(globalThis, 'scrollY', {
+      configurable: true,
+      value: y,
+    })
+    dispatchEvent(new Event('scroll'))
+    await nextTick()
+  }
+  expect(nav.classList.contains('hidden')).toBe(false)
+  expect(document.body.dataset.tabBar).toBe('shown')
+  // The 多选 bar still takes its place.
+  suppressTabBar('test', true)
+  await nextTick()
+  expect(nav.classList.contains('hidden')).toBe(true)
+  suppressTabBar('test', false)
+  vi.unstubAllGlobals()
+  Object.defineProperty(globalThis, 'scrollY', { configurable: true, value: 0 })
+})
+
 it('stays out of the keyboard’s way on a touch screen', async () => {
-  vi.stubGlobal('matchMedia', () => ({ matches: true }))
+  media('(pointer: coarse)')
   const el = mount()
   const nav = el.querySelector('nav')!
   const field = document.createElement('textarea')
