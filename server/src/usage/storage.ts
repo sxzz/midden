@@ -6,10 +6,15 @@ import {
   type DatasetLimits,
 } from './analytics.ts'
 import {
-  compositionDue,
+  compositionJob,
+  compositionReason,
+  finishComposition,
   recordComposition,
+  requestComposition,
+  startComposition,
   storedComposition,
   type Composition,
+  type CompositionJob,
 } from './composition.ts'
 import { monthCost, type MonthCost } from './cost.ts'
 import { localUsage, type LocalUsage } from './local.ts'
@@ -32,6 +37,8 @@ import type {
 export const REFRESH_INTERVAL = 15 * 60_000
 /** A refresh asked for on the page waits at least this long after the last. */
 const MANUAL_REFRESH = 60_000
+/** After a failed reading the worker waits this long before its own next. */
+const COMPOSE_RETRY = 10 * 60_000
 
 export interface StorageUsageOptions {
   db: Database
@@ -48,8 +55,9 @@ export interface StorageUsageOptions {
   /** Tests replace the worker thread. */
   readComposition?: (input: CompositionInput) => Promise<CompositionOutput>
   /**
-   * Whether the daily composition may be read now; it is put off while this
-   * says no (the worker passes whether it is idle).
+   * Whether the composition may be read now on the worker's own account
+   * (daily, or after a change); it is put off while this says no (the worker
+   * passes whether it is idle). A reading the page asks for is not.
    */
   composeWhen?: () => boolean
 }
@@ -71,6 +79,8 @@ export interface StorageReport {
   cost: MonthCost | null
   local: LocalUsage
   composition: Composition | null
+  /** A reading the page asked for that the worker has not finished. */
+  composition_job: CompositionJob | null
   /** Every day recorded, oldest first. */
   history: SnapshotDay[]
   alerts: AlertThresholds
@@ -80,7 +90,8 @@ export interface StorageReport {
  * 存储用量: R2 from Cloudflare's analytics, the server's own disk, the
  * database's composition, a daily history and the alerts on them. `tick`
  * runs from the server's minute timer and does its work every 15 minutes;
- * the composition is read once a day in a worker thread.
+ * the composition is read in a worker thread: once a day, soon after a
+ * change (see `compositionReason`), and when the page asks.
  */
 export class StorageUsage {
   readonly #options: StorageUsageOptions
@@ -92,6 +103,8 @@ export class StorageUsage {
   #fetchedAt: number | undefined
   #refreshing: Promise<void> | undefined
   #composing: Promise<void> | undefined
+  /** After a failed reading the worker's own readings wait until then. */
+  #composeRetry = -Infinity
 
   constructor(options: StorageUsageOptions) {
     this.#options = options
@@ -168,11 +181,15 @@ export class StorageUsage {
   async tick(): Promise<void> {
     const now = this.#now()
     // Not awaited: it takes long, in a worker thread, and logs its failures.
-    if (
-      compositionDue(this.#options.db, now) &&
-      (this.#options.composeWhen?.() ?? true)
-    )
-      this.compose().catch(() => {})
+    if (!this.poll() && now >= this.#composeRetry) {
+      const reason = compositionReason(
+        this.#options.db,
+        now,
+        this.#options.databasePath,
+      )
+      if (reason && (this.#options.composeWhen?.() ?? true))
+        this.compose(reason).catch(() => {})
+    }
     if (now - this.#lastTick < REFRESH_INTERVAL) return
     this.#lastTick = now
     await this.refreshR2()
@@ -201,10 +218,32 @@ export class StorageUsage {
     )
   }
 
+  /**
+   * Take up the page's request for a reading, if there is one; true when a
+   * reading is under way for it or any other. Cheap: the worker calls it
+   * every few seconds so the page's button does not wait for the minute.
+   */
+  poll(): boolean {
+    if (this.#composing) return true
+    const job = compositionJob(this.#options.db, this.#now())
+    // One still marked running when nothing here is reading was left by a
+    // worker that stopped: it is taken up again.
+    if (!job) return false
+    this.compose('requested', job).catch(() => {})
+    return true
+  }
+
+  /** Ask for a reading now; the web process only writes this request. */
+  requestComposition(): CompositionJob {
+    return requestComposition(this.#options.db, this.#now())
+  }
+
   /** Read the database's composition, unless a reading is under way. */
-  compose(): Promise<void> {
+  compose(reason = 'requested', job?: CompositionJob): Promise<void> {
     const { db, databasePath, mediaDir, logger } = this.#options
     this.#composing ??= (async () => {
+      const started = this.#now()
+      if (job) startComposition(db, job)
       try {
         const composition = await recordComposition(
           db,
@@ -213,11 +252,19 @@ export class StorageUsage {
           this.#options.readComposition,
         )
         logger.info(
-          { seconds: composition.seconds, bytes: composition.total_bytes },
+          {
+            reason,
+            seconds: composition.seconds,
+            ms: this.#now() - started,
+            bytes: composition.total_bytes,
+          },
           'database composition read',
         )
       } catch (error) {
-        logger.warn({ err: error }, 'database composition failed')
+        this.#composeRetry = this.#now() + COMPOSE_RETRY
+        logger.warn({ err: error, reason }, 'database composition failed')
+      } finally {
+        finishComposition(db, started)
       }
     })().finally(() => (this.#composing = undefined))
     return this.#composing
@@ -254,6 +301,7 @@ export class StorageUsage {
       cost,
       local: await this.#local(),
       composition: storedComposition(db) ?? null,
+      composition_job: compositionJob(db, now),
       history,
       alerts: alertThresholds(db),
     }

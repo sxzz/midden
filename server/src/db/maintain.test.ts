@@ -11,6 +11,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { collectCollections } from '#capture/maintenance.ts'
 import { deleteCollections } from '#library/delete.ts'
 import { listCollections } from '#library/list.ts'
+import { readSetting } from '#settings.ts'
 import {
   capture,
   entity,
@@ -134,6 +135,8 @@ describe('maintain', () => {
     ])
 
     const db = reopen(file)
+    // The page's database composition is read again when the worker starts.
+    expect(readSetting(db, 'db_composition_stale')).toContain('"at"')
     expect(results({ ...c, db })).toEqual(before)
     const index = searchIndexes(db)
     expect(index.kept).toEqual(index.fresh)

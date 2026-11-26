@@ -33,6 +33,11 @@ export function storageRoutes(storage: StorageUsage | undefined) {
           return c.json(await storage.report(!!c.req.valid('query').refresh))
         },
       )
+      // The web process only records the request; the worker reads dbstat.
+      .post('/composition', (c) => {
+        if (!storage) return c.json({ error: '服务器未提供存储用量' }, 404)
+        return c.json(storage.requestComposition())
+      })
       .put(
         '/alerts',
         json(

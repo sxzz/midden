@@ -8,6 +8,7 @@ import {
   type StorageReport,
 } from '../api'
 import { onShown } from '../composables/useShown'
+import { toast } from '../composables/useToast'
 import { ago, date, storageSize } from '../presentation'
 import {
   gbMonths,
@@ -34,25 +35,71 @@ import Spinner from './ui/Spinner.vue'
 const report = shallowRef<StorageReport>()
 const error = shallowRef('')
 const loading = shallowRef(false)
+async function fetchReport(refresh = false) {
+  report.value = await call(
+    client.storage.$get({ query: refresh ? { refresh: '1' } : {} }),
+  )
+  error.value = ''
+}
 async function load(refresh = false) {
   loading.value = true
   try {
-    report.value = await call(
-      client.storage.$get({ query: refresh ? { refresh: '1' } : {} }),
-    )
-    error.value = ''
+    await fetchReport(refresh)
   } catch (e) {
     error.value = errorText(e)
   } finally {
     loading.value = false
   }
+  watchJob()
 }
-onShown(() => load())
+
+// 重新统计 asks the worker, which reads the database's make-up in its own
+// time; the page looks again every few seconds until the request is gone.
+const JOB_POLL = 2000
+let shown = false
+let timer: ReturnType<typeof setTimeout> | undefined
+function watchJob() {
+  clearTimeout(timer)
+  if (!shown || !report.value?.composition_job) return
+  timer = setTimeout(async () => {
+    try {
+      await fetchReport()
+    } catch {
+      // The next look tries again.
+    }
+    watchJob()
+  }, JOB_POLL)
+}
+const requesting = shallowRef(false)
+async function recompute() {
+  if (requesting.value || !report.value) return
+  requesting.value = true
+  try {
+    const composition_job = await call(client.storage.composition.$post())
+    report.value = { ...report.value, composition_job }
+    watchJob()
+  } catch (e) {
+    toast(errorText(e))
+  } finally {
+    requesting.value = false
+  }
+}
+onShown(
+  () => {
+    shown = true
+    void load()
+  },
+  () => {
+    shown = false
+    clearTimeout(timer)
+  },
+)
 
 const r2 = computed(() => report.value?.r2 ?? undefined)
 const cost = computed(() => report.value?.cost ?? undefined)
 const local = computed(() => report.value?.local)
 const composition = computed(() => report.value?.composition ?? undefined)
+const counting = computed(() => !!report.value?.composition_job)
 
 const costMonth = computed(() => {
   const c = cost.value
@@ -291,7 +338,7 @@ async function save(text: string) {
       <ListSection
         v-if="composition"
         title="数据库"
-        :footnote="`${date(composition.computed_at)} 统计，用时 ${composition.seconds} 秒，每天一次。`"
+        :footnote="`统计于${ago(composition.computed_at)}（${date(composition.computed_at)}），用时 ${composition.seconds} 秒。`"
       >
         <div v-for="item in composition.items" :key="item.name" class="fact">
           <span class="name"
@@ -315,6 +362,11 @@ async function save(text: string) {
           <span class="name">合计</span>
           <span class="value">{{ storageSize(composition.total_bytes) }}</span>
         </div>
+        <ListButton
+          :label="counting ? '统计中…' : '重新统计'"
+          :disabled="counting || requesting"
+          @select="recompute"
+        />
       </ListSection>
 
       <ListSection v-if="trends.length" title="趋势" plain>

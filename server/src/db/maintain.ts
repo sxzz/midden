@@ -17,6 +17,7 @@ import {
   optimizeSearchIndexes,
   rebuildSearchIndexes,
 } from '#library/search-index.ts'
+import { markCompositionStale } from '#usage/composition.ts'
 import {
   openDatabase,
   pendingMigrations,
@@ -221,6 +222,9 @@ function finish(db: Database, options: MaintainOptions): number {
     print(`integrity check failed:\n${problems.slice(0, 20).join('\n')}`)
     return 1
   }
+  // The page's figures describe the database as it was; the worker reads
+  // them again when it starts.
+  markCompositionStale(db)
   return 0
 }
 

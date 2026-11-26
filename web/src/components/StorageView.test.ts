@@ -31,6 +31,7 @@ beforeEach(() => {
 afterEach(() => {
   unmount()
   document.body.replaceChildren()
+  vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
@@ -143,6 +144,7 @@ const FULL: StorageReport = {
     rest: { count: 40, bytes: 0.8 * GiB },
     media: { files: 35_000, bytes: 1.3 * GiB },
   },
+  composition_job: null,
   history: [day(yesterday, 39 * GiB), day(today, 40 * GiB)],
   alerts: ALERTS,
 }
@@ -320,5 +322,82 @@ describe('存储用量', () => {
       '/storage?refresh=1',
       expect.anything(),
     )
+  })
+
+  it('says when the database was counted, and counts again on request', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    vi.setSystemTime(new Date('2026-11-26T06:00:00.000Z'))
+    let report = FULL
+    const calls = mockApi((path, request) => {
+      if (path === '/storage/composition' && request.method === 'POST')
+        return (report = {
+          ...report,
+          composition_job: {
+            state: 'queued',
+            at: new Date().toISOString(),
+          },
+        }).composition_job
+      if (path.startsWith('/storage')) return report
+      return
+    })
+    const el = mount(StorageView)
+    await settle()
+    // Three hours after the reading.
+    expect(text(el)).toContain('统计于3 小时前')
+    expect(button(el, '重新统计').disabled).toBe(false)
+
+    button(el, '重新统计').click()
+    await settle()
+    expect(calls).toHaveBeenCalledWith(
+      '/storage/composition',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(button(el, '统计中…').disabled).toBe(true)
+    expect(text(el)).not.toContain('重新统计')
+
+    // While it runs the page looks again; when the request is gone it shows
+    // the new reading.
+    report = {
+      ...report,
+      composition_job: { state: 'running', at: new Date().toISOString() },
+    }
+    await vi.advanceTimersByTimeAsync(2000)
+    await settle()
+    expect(button(el, '统计中…').disabled).toBe(true)
+    report = {
+      ...report,
+      composition_job: null,
+      composition: {
+        ...report.composition!,
+        computed_at: new Date().toISOString(),
+        seconds: 1.5,
+      },
+    }
+    await vi.advanceTimersByTimeAsync(2000)
+    await settle()
+    expect(button(el, '重新统计').disabled).toBe(false)
+    expect(text(el)).toContain('统计于不到 1 分钟前')
+    expect(text(el)).toContain('用时 1.5 秒')
+    const reads = calls.mock.calls.length
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(calls.mock.calls.length).toBe(reads)
+    vi.useRealTimers()
+  })
+
+  it('shows a reading under way when the page is opened', async () => {
+    mockApi((path) =>
+      path.startsWith('/storage')
+        ? {
+            ...FULL,
+            composition_job: {
+              state: 'running',
+              at: new Date().toISOString(),
+            },
+          }
+        : undefined,
+    )
+    const el = mount(StorageView)
+    await settle()
+    expect(button(el, '统计中…').disabled).toBe(true)
   })
 })

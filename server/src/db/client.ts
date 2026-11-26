@@ -214,6 +214,15 @@ function applied(db: Database): AppliedMigration[] {
   )
 }
 
+/** The newest migration the database has applied; names start with a timestamp. */
+export function latestMigration(db: Database): string | undefined {
+  return applied(db)
+    .map((row) => row.name)
+    .filter((name): name is string => !!name)
+    .toSorted()
+    .at(-1)
+}
+
 /** Migrations this version has that the database does not yet. */
 export function pendingMigrations(db: Database): number {
   const rows = applied(db)

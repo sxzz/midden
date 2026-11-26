@@ -390,7 +390,7 @@ Litestream 0.5 把 WAL 中新提交的页面写成 LTX 文件（按页 LZ4 压�
 
 两个进程的连接都用 WAL、`synchronous = NORMAL`；网页进程 busy timeout 2 秒、关闭自动检查点，worker 10 秒、保留 SQLite 默认的自动检查点（WAL 超过 1000 页时，PASSIVE）。Litestream 一直持有一个读事务，只有它自己的检查点能让 WAL 从头开始写；PASSIVE 检查点越不过它的读事务，所以 worker 的自动检查点不影响复制，把 WAL 页面写回数据库的实际是 Litestream 的检查点。它做 PASSIVE 检查点时持有写锁（向 `_litestream_lock` 写一行作为屏障），把上次以来的 WAL 页面写回数据库，写入在这期间等待：`monitor-interval` 为 10 秒时最多是 10 秒的写入量，几十到几百毫秒，两个进程的 busy timeout 都足够。服务中没有 `wal_checkpoint(RESTART)`、`wal_checkpoint(TRUNCATE)` 和 `VACUUM`：前两者会让 Litestream 重新上传整个数据库，`VACUUM` 把每一页写进 WAL，都不要加；整理数据库在服务全部停止时做（见「数据库整理」）。`PRAGMA optimize`（启动时和每 6 小时）和 `PRAGMA incremental_vacuum`（见「维护任务」）是普通的写事务；`cli.ts backup`（手动的在线备份，部署不再用它）只读数据库，但运行期间一直持有读事务。数据库变小的事务（incremental vacuum 截短文件）在 Litestream 0.5.2 中会让同步报 `page number X out-of-bounds for commit size Y`（#875），之后由 #881 修复，固定的 0.5.18 已包含；用 0.5.18 在本地试过：一边复制，一边清空大量数据并分批 incremental vacuum，最新状态与其间三个时刻的恢复都通过完整性检查，最新状态的页数和内容与源数据库相同。
 
-WAL 的大小：Litestream 做快照时（每天 00:00 UTC；以及它丢了在 WAL 中的位置、重新上传整个数据库时，见「部署与 WAL 中的位置」）直到上传完都不做检查点，WAL 随写入一直变大，负载高时几分钟就超过 1 GB。WAL 超过 `truncate-page-n` 时它先试 PASSIVE，不行再做阻塞的 TRUNCATE；0.5.18 在 TRUNCATE 之后总要在持有写锁的情况下把整个数据库写成一份快照（`checkpoint boundary snapshot`），这期间服务的每个写入都在等待，超过 busy timeout 就以 `database is locked` 失败，并且又上传一次整个数据库。默认的阈值约 500 MB，快照期间的增长就会越过它；一个持续几分钟的读事务（例如每天的数据库组成）也会，所以组成只在 worker 空闲时读。`litestream.yml` 把它设为 1,000,000 页（约 3.8 GiB），只作为最后的保护：快照或读事务结束后，下一次普通的 PASSIVE 检查点（WAL 超过 1000 页时，每次同步之后）把 WAL 写回数据库并从头开始。这个检查点期间 Litestream 也持有写锁，WAL 越大越久。磁盘上要留出 WAL 的空间。设为 `0` 不能关闭它：0.5.16 起 0 表示默认值（#1348），与 Litestream 的文档不同。
+WAL 的大小：Litestream 做快照时（每天 00:00 UTC；以及它丢了在 WAL 中的位置、重新上传整个数据库时，见「部署与 WAL 中的位置」）直到上传完都不做检查点，WAL 随写入一直变大，负载高时几分钟就超过 1 GB。WAL 超过 `truncate-page-n` 时它先试 PASSIVE，不行再做阻塞的 TRUNCATE；0.5.18 在 TRUNCATE 之后总要在持有写锁的情况下把整个数据库写成一份快照（`checkpoint boundary snapshot`），这期间服务的每个写入都在等待，超过 busy timeout 就以 `database is locked` 失败，并且又上传一次整个数据库。默认的阈值约 500 MB，快照期间的增长就会越过它；一个持续几分钟的读事务（例如每天的数据库组成）也会，所以组成只在 worker 空闲时读（网页上点「重新统计」除外）。`litestream.yml` 把它设为 1,000,000 页（约 3.8 GiB），只作为最后的保护：快照或读事务结束后，下一次普通的 PASSIVE 检查点（WAL 超过 1000 页时，每次同步之后）把 WAL 写回数据库并从头开始。这个检查点期间 Litestream 也持有写锁，WAL 越大越久。磁盘上要留出 WAL 的空间。设为 `0` 不能关闭它：0.5.16 起 0 表示默认值（#1348），与 Litestream 的文档不同。
 
 负载测试（`server/scripts/bench-load.ts`，见 CONTRIBUTING）中，一边做 3,000 条帖子的更新、一边持有 60 秒读事务：默认的阈值下 WAL 涨到 2.3 GB，Litestream 强制 TRUNCATE 9 次；阈值提高后 0 次，读事务结束后 WAL 照常从头开始。
 
@@ -553,13 +553,28 @@ Cloudflare 的 GraphQL Analytics API（`POST https://api.cloudflare.com/client/v
 
 - 数据库文件：`PRAGMA page_count × page_size`，空闲页 `freelist_count`，以及 `midden.db-wal` 的大小。
 - 缩略图：`blob_thumbnails` 中已生成的个数与 `size` 之和，加上已移除的媒体保留的缩略图（`removed_media` 的 `thumbnail_key`，同一个文件只算一次，不在 `blob_thumbnails` 中的才算；大小是标记记下的 `thumbnail_size`，记下大小之前的标记只计个数）。
-- 媒体目录：每天随数据库组成在 worker 线程中遍历 `media/`，统计文件数与大小（使用 R2 时就是缩略图和尚未上传完的原文件）。
+- 媒体目录：随每次数据库组成在 worker 线程中遍历 `media/`，统计文件数与大小（使用 R2 时就是缩略图和尚未上传完的原文件）。
 - 部署前的数据库备份：`data/backups/deploy/` 中的文件。
 - 可用磁盘：数据目录所在卷的 `statfs`（容器内看到的卷；GB 为 2^30 字节，与网页中其他大小相同）。
 
 ### 数据库组成
 
-每天一次（距上次满 24 小时；服务启动后第一分钟就会检查），在 worker 线程中用单独的只读连接运行 `SELECT name, pgsize FROM dbstat WHERE aggregate = TRUE`，线程的 nice 值设为 19。生产库（2.3 GB）约 18 秒，期间服务的事件循环和写入照常进行（WAL 下读不阻塞写）。结果存在 `settings` 表的 `db_composition`（最大的 15 个、其余合计、总计、耗时、媒体目录），日志 `database composition read`，失败记 `database composition failed`。
+在 worker 线程中用单独的只读连接运行 `SELECT name, pgsize FROM dbstat WHERE aggregate = TRUE`（聚合模式，每个 b-tree 一行），线程的 nice 值设为 19。生产库（2.3 GB）约 18 秒，期间服务的事件循环和写入照常进行（WAL 下读不阻塞写），但它在一个读事务中读遍每一页，WAL 不能从头开始。所以 worker 自己发起的统计只在空闲时进行；只有网页上点「重新统计」是立即的。网页进程从不运行 `dbstat`，只写请求。
+
+结果存在 `settings` 表的 `db_composition`（最大的 15 个、其余合计、总计、耗时、统计时的最新迁移 `migration` 与数据库文件大小 `file_bytes`、媒体目录），页面上写「统计于 3 小时前（时间）」。日志 `database composition read`（带 `reason`、`seconds`、`ms`），失败记 `database composition failed`，失败后 worker 自己的统计 10 分钟内不再试。
+
+重新统计的时机（worker 每分钟检查，空闲时才开始；`reason` 是日志中的原因）：
+
+| `reason`     | 条件                                                                                                                |
+| ------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `missing`    | 还没有统计                                                                                                          |
+| `old`        | 距上次满 24 小时                                                                                                    |
+| `marked`     | 离线维护（`cli.ts maintain`）成功结束时在 `settings` 的 `db_composition_stale` 做了标记，下一个空闲时刻读，读完清除 |
+| `migrations` | 统计时的最新迁移与现在数据库中的不同（部署带来了迁移；升级前的旧统计没有这个字段，也算）                            |
+| `size`       | 数据库文件大小与统计时相比变了 10% 以上（原始响应搬到 R2、清理后等）                                                |
+| `requested`  | 网页上点了「重新统计」                                                                                              |
+
+「重新统计」（`POST /v1/storage/composition`）在 `settings` 的 `db_composition_job` 写 `{ state: 'queued', at }`，一条语句完成，所以已有排队或正在运行的请求时不会再写一条，返回现有的。worker 每 5 秒看一次这个键（不等分钟计时器），取到后改为 `running`，不管是否空闲立即开始，结束后删除（读的过程中又来的请求保留，再读一次）。15 分钟没有被处理的请求视为丢失（worker 没在运行），可以再点。页面在请求存在期间每 2 秒读一次报告（`composition_job`），按钮显示「统计中…」，完成后显示新的数字。
 
 ### 提醒
 
@@ -587,7 +602,7 @@ worker 每分钟运行一次维护。标 _空闲时_ 的步骤只为腾出空间
 - 删除抓取结束一天以上仍留着的暂存数据（`capture_staging`，没能提交的列表目标的预取）；
 - 为缺少缩略图的媒体补做缩略图；
 - 清理过期的网页会话、通行密钥挑战与 `/passkey` 链接；
-- 每 15 分钟读取存储用量并检查提醒，每天一次统计数据库组成（见「存储用量」，统计在 _空闲时_）；
+- 每 15 分钟读取存储用量并检查提醒，每天一次以及数据库变动后统计数据库组成（见「存储用量」，worker 自己发起的统计在 _空闲时_）；
 - 把空闲页面还给文件系统（_空闲时_）：空闲页面达到 1024 页（4 MiB）时运行 `PRAGMA incremental_vacuum(4096)`，每次最多 16 MiB，两次之间至少 15 分钟，所以积压最多每小时释放 64 MiB；日志 `released free database pages` 给出这次释放的页数、剩余空闲页数（`free`）和总页数（`pages`）。这要求数据库是 `auto_vacuum = INCREMENTAL`：新建的数据库默认如此，已有的数据库要 `VACUUM` 一次才能切换（生产环境已于 2026-11-25 切换；`cli.ts maintain --vacuum` 也会切换），否则这一步什么也不做。
 
 ## 定期更新
@@ -610,7 +625,7 @@ worker 每分钟检查一次到时间的定期更新（见[架构](architecture.
 3. 带 `--vacuum` 时：`VACUUM INTO` 在同一目录写出整理后的副本 `midden.db.vacuum-<时间>`，设为 `auto_vacuum = INCREMENTAL`。不用原地的 `VACUUM`：它先写一个临时数据库，再把每一页经 WAL 写回（WAL 涨到与数据库一样大）；`VACUUM INTO` 只写一遍，原文件不动，它就是备份。
 4. 在副本上（不带 `--vacuum` 时在原数据库上）：检查搜索索引，两个 FTS5 表的文档与 catalog 的 `id` 一一对应（按 `<表>_docsize`），并通过 FTS5 自己的 `integrity-check`；不对应（或带 `--rebuild-search`）时从 catalog 重建（`delete-all` 后重新插入），再检查一次。然后合并索引段（FTS5 的 `optimize`）、`PRAGMA incremental_vacuum` 归还空闲页面、`ANALYZE`（`analysis_limit = 400`，与服务的 `PRAGMA optimize` 一样），再做一次完整性检查。
 5. 都通过后换上副本：原数据库（连同 WAL）移到 `data/backups/maintain/midden-<时间>.db`，副本改名为 `midden.db`，删去旧的 `-shm`；`backups/maintain/` 中更早的备份删除，只留这一份。任何一步失败都删去副本，原数据库不变（输出 `the original database is unchanged`）。
-6. 输出每一步的耗时，以及前后的大小（页面、其中空闲的、文件与 WAL）。
+6. 输出每一步的耗时，以及前后的大小（页面、其中空闲的、文件与 WAL）。成功时在结果数据库的 `settings` 标记「数据库组成」过时（`db_composition_stale`），worker 启动后在空闲时重新统计，见「存储用量」。
 
 磁盘上要有副本的空间，约为数据库中有效数据的大小；原数据库留到下一次整理。
 

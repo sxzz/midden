@@ -26,6 +26,7 @@ export interface WorkerHandle {
 
 const MAINTENANCE_INTERVAL = 60_000
 const WATCH_INTERVAL = 60_000
+const COMPOSITION_POLL = 5000
 const OPTIMIZE_INTERVAL = 6 * 60 * 60_000
 const THROTTLE_STEP = 1000
 const STATUS_EVERY = 2000
@@ -145,7 +146,7 @@ export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
     cloudflare: config.cloudflare,
     logger,
     notify: options.notify,
-    // The daily composition reads every page in one read transaction, which
+    // The composition reads every page in one read transaction, which
     // holds the WAL back meanwhile: only while the worker is idle.
     composeWhen: () => ctx.queue.status().idle,
   })
@@ -165,12 +166,21 @@ export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
         .catch(() => {})
         .finally(() => (maintaining = false))
     })
-    // Paced by itself: every 15 minutes, and the composition once a day.
+    // Paced by itself: every 15 minutes, and the composition once a day or
+    // after a change.
     storage
       .tick()
       .catch((error: unknown) =>
         logger.error({ err: error }, 'storage usage failed'),
       )
+  })
+  // A reading the page asked for starts within seconds, not at the minute.
+  every(COMPOSITION_POLL, () => {
+    try {
+      storage.poll()
+    } catch (error) {
+      logger.warn({ err: error }, 'composition request check failed')
+    }
   })
   // 定期更新: start the runs of watches that are due. Not while held: a
   // newer version owns the database.

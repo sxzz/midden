@@ -9,7 +9,13 @@ import { levels, recordingLogger } from '#testing/logs.ts'
 import { tokenSecret } from '#testing/tokens.ts'
 import { checkAlerts, setAlertThresholds, type AlertFacts } from './alerts.ts'
 import { datasetLimits, fetchR2Usage } from './analytics.ts'
-import { compositionDue, storedComposition } from './composition.ts'
+import {
+  compositionDue,
+  compositionJob,
+  compositionReason,
+  markCompositionStale,
+  storedComposition,
+} from './composition.ts'
 import { monthCost, operationClass, type R2Day } from './cost.ts'
 import { snapshots } from './snapshots.ts'
 import { StorageUsage } from './storage.ts'
@@ -347,6 +353,7 @@ describe('storage usage', () => {
       db?: Database
       dataDir?: string
       databasePath?: string
+      composeWhen?: () => boolean
     } = {},
   ) {
     const dataDir =
@@ -369,6 +376,7 @@ describe('storage usage', () => {
       logger,
       notify: (text) => sent.push(text),
       now: () => clock,
+      composeWhen: options.composeWhen,
       readComposition: async (input) => {
         composed.push(input.databasePath)
         return {
@@ -522,6 +530,160 @@ describe('storage usage', () => {
     advance(60 * 60_000)
     await storage.tick()
     await vi.waitFor(() => expect(composed).toHaveLength(2))
+  })
+
+  test('a reading is taken again soon after a change, not only daily', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'midden-stale-'))
+    const databasePath = path.join(dataDir, 'midden.db')
+    const db = openDatabase(databasePath)
+    let idle = false
+    const { storage, composed, advance } = setup({
+      db,
+      dataDir,
+      databasePath,
+      composeWhen: () => idle,
+    })
+    const now = () => at('2026-11-26T08:00:00Z')
+    expect(compositionReason(db, now(), databasePath)).toBe('missing')
+    // The worker's own reading waits for an idle moment.
+    await storage.tick()
+    expect(composed).toHaveLength(0)
+    idle = true
+    advance(60_000)
+    await storage.tick()
+    await vi.waitFor(() => expect(storedComposition(db)).toBeDefined())
+    const stored = storedComposition(db)!
+    expect(stored.migration).toMatch(/^\d{14}_/)
+    expect(stored.file_bytes).toBeGreaterThan(0)
+    const later = now() + 60_000
+    expect(compositionReason(db, later, databasePath)).toBeUndefined()
+
+    // Offline maintenance marks it; the next idle tick reads again and
+    // clears the mark.
+    markCompositionStale(db, later)
+    expect(compositionReason(db, later, databasePath)).toBe('marked')
+    idle = false
+    advance(60_000)
+    await storage.tick()
+    expect(composed).toHaveLength(1)
+    idle = true
+    await storage.tick()
+    await vi.waitFor(() => expect(composed).toHaveLength(2))
+    await vi.waitFor(() =>
+      expect(compositionReason(db, later, databasePath)).toBeUndefined(),
+    )
+
+    // Another set of migrations than the reading was taken on.
+    const cached = storedComposition(db)!
+    db.$client
+      .prepare("UPDATE settings SET value = ? WHERE key = 'db_composition'")
+      .run(JSON.stringify({ ...cached, migration: '20200101000000_old' }))
+    expect(compositionReason(db, later, databasePath)).toBe('migrations')
+    // A reading made before the field existed counts as taken on others.
+    const { migration: _, ...older } = cached
+    db.$client
+      .prepare("UPDATE settings SET value = ? WHERE key = 'db_composition'")
+      .run(JSON.stringify(older))
+    expect(compositionReason(db, later, databasePath)).toBe('migrations')
+
+    // The file 10% larger or smaller than when it was read.
+    const sized = (file_bytes: number) =>
+      db.$client
+        .prepare("UPDATE settings SET value = ? WHERE key = 'db_composition'")
+        .run(JSON.stringify({ ...cached, file_bytes }))
+    const bytes = cached.file_bytes!
+    sized(Math.round(bytes * 1.05))
+    expect(compositionReason(db, later, databasePath)).toBeUndefined()
+    sized(Math.round(bytes * 1.2))
+    expect(compositionReason(db, later, databasePath)).toBe('size')
+    sized(Math.round(bytes * 0.7))
+    expect(compositionReason(db, later, databasePath)).toBe('size')
+    // A day old is still due.
+    expect(compositionReason(db, later + 2 * DAY, databasePath)).toBe('old')
+  })
+
+  test('a reading asked for on the page is queued once and runs at once', async () => {
+    const { db, storage, composed, advance } = setup({
+      composeWhen: () => false,
+    })
+    const now = () => at('2026-11-26T08:00:00Z')
+    const first = storage.requestComposition()
+    expect(first).toEqual({ state: 'queued', at: '2026-11-26T08:00:00.000Z' })
+    advance(30_000)
+    // A second click while it waits changes nothing, and nor does a third
+    // from another process.
+    expect(storage.requestComposition()).toEqual(first)
+    expect(setup({ db }).storage.requestComposition()).toEqual(first)
+    expect((await storage.report()).composition_job).toEqual(first)
+    expect(composed).toHaveLength(0)
+
+    // The worker takes it up without waiting for idle, marks it running and
+    // does not start a second reading for a repeated poll.
+    expect(storage.poll()).toBe(true)
+    expect(compositionJob(db, now() + 30_000)).toMatchObject({
+      state: 'running',
+      at: first.at,
+    })
+    expect(storage.requestComposition()).toMatchObject({ state: 'running' })
+    expect(storage.poll()).toBe(true)
+    await vi.waitFor(() => expect(storedComposition(db)).toBeDefined())
+    await vi.waitFor(() =>
+      expect(compositionJob(db, now() + 30_000)).toBeNull(),
+    )
+    expect(composed).toHaveLength(1)
+    expect((await storage.report()).composition_job).toBeNull()
+    expect(storage.poll()).toBe(false)
+
+    // A worker that stopped in the middle left it running: the next one
+    // takes it up again.
+    storage.requestComposition()
+    expect(storage.poll()).toBe(true)
+    await vi.waitFor(() => expect(composed).toHaveLength(2))
+    await vi.waitFor(() =>
+      expect(compositionJob(db, now() + 30_000)).toBeNull(),
+    )
+    db.$client
+      .prepare(
+        "INSERT INTO settings (key, value) VALUES ('db_composition_job', ?)",
+      )
+      .run(
+        JSON.stringify({
+          state: 'running',
+          at: new Date(now() + 30_000).toISOString(),
+        }),
+      )
+    expect(storage.poll()).toBe(true)
+    await vi.waitFor(() => expect(composed).toHaveLength(3))
+    await vi.waitFor(() =>
+      expect(compositionJob(db, now() + 30_000)).toBeNull(),
+    )
+
+    // A request nobody answered for a quarter of an hour is let go, and the
+    // next click queues a new one.
+    storage.requestComposition()
+    advance(16 * 60_000)
+    expect(compositionJob(db, now() + 30_000 + 16 * 60_000)).toBeNull()
+    expect(storage.requestComposition()).toMatchObject({
+      state: 'queued',
+      at: '2026-11-26T08:16:30.000Z',
+    })
+  })
+
+  test('the API queues a reading without running it', async () => {
+    const { db, storage, composed } = setup()
+    ctx = testContext()
+    const app = createApi({ ctx, storage })
+    const token = tokenSecret(ctx.db)
+    const post = () =>
+      app.request('/storage/composition', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    const first = (await (await post()).json()) as { state: string }
+    expect(first.state).toBe('queued')
+    expect(await (await post()).json()).toEqual(first)
+    expect(composed).toHaveLength(0)
+    expect(storedComposition(db)).toBeUndefined()
   })
 
   test('the worker reads every table and index with dbstat', async () => {
