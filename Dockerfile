@@ -36,6 +36,8 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 WORKDIR /srv
 COPY --from=build /out/server server
 COPY --from=build /src/web/dist web/dist
+# The agent API's guide, served at /agent.md (server/src/agent/doc.ts).
+COPY docs/agent.md docs/agent.md
 COPY LICENSE /usr/share/licenses/midden/LICENSE
 ENV DATA_DIR=/data WEB_DIR=/srv/web/dist NODE_ENV=production
 RUN mkdir /data && chown node:node /data

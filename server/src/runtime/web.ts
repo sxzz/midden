@@ -2,6 +2,10 @@ import process from 'node:process'
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
+import { createAgentApi } from '#agent/app.ts'
+import { agentDocRoutes } from '#agent/doc.ts'
+import { QueryPool, READ_THREAD } from '#agent/pool.ts'
+import { pooledReads, typeCatalog } from '#agent/runner.ts'
 import { mediaRoutes } from '#blob/route.ts'
 import { regenerateThumbnail } from '#capture/thumbnail.ts'
 import { deriveKey } from '#crypto.ts'
@@ -12,6 +16,7 @@ import { launchBot, type BotHandle } from '#telegram/launch.ts'
 import { TokenUsage } from '#tokens/usage.ts'
 import { StorageUsage } from '#usage/storage.ts'
 import { writeStatus, type Stamped, type WorkerReport } from './status-file.ts'
+import type { ReadThreadData } from '#agent/worker.ts'
 import type { WebLoadSignal } from '#jobs/throttle.ts'
 import type { Runtime } from './context.ts'
 
@@ -79,6 +84,29 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
     tokenUsage,
     ...(config.telegram ? { botState: () => bot?.state() ?? 'starting' } : {}),
   })
+  // The agent API reads on threads of its own, started with its first
+  // request (`agent/pool.ts`).
+  const types = typeCatalog(ctx.platforms)
+  const pool = new QueryPool({
+    script: READ_THREAD,
+    workerData: {
+      databasePath: config.databasePath,
+      mediaDir: config.mediaDir,
+      mediaKey: deriveKey(config.secretKey, 'media-url'),
+      ...(config.media.store === 'r2'
+        ? { publicUrl: config.media.r2.publicUrl }
+        : {}),
+      types,
+    } satisfies ReadThreadData,
+    logger,
+  })
+  cleanups.push(() => pool.close())
+  const agent = createAgentApi({
+    ctx,
+    reads: pooledReads(pool),
+    reader: { db, blobs: ctx.blobs, types },
+    usage: tokenUsage,
+  })
 
   const app = new Hono()
   app.use(load.middleware())
@@ -92,6 +120,9 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
     return c.text('ok')
   })
   app.route('/v1', api)
+  // For AI agents and scripts; its guide is public.
+  app.route('/', agent)
+  app.route('/', agentDocRoutes())
   // With R2, this serves thumbnails (a local cache, rendered again when
   // lost), downloads, and originals until their upload is confirmed.
   app.route(

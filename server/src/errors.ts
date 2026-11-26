@@ -53,6 +53,10 @@ export class AppError extends Error {
   }
 }
 
+/** Whether the error says only what its kind says by default. */
+export const hasDefaultMessage = (error: AppError) =>
+  error.message === messages[error.kind]
+
 export function isAppError(
   error: unknown,
   kind?: ErrorKind,

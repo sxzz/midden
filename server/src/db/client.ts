@@ -39,12 +39,26 @@ export interface OpenOptions {
    * one too): for offline maintenance, which must not run beside the app.
    */
   exclusive?: boolean
+  /**
+   * Only read, as the agent API's read threads do: the file must exist and
+   * be migrated; nothing is set up, and `query_only` refuses any write.
+   */
+  readOnly?: boolean
 }
 
 /** Open (creating if needed) the database and apply pending migrations. */
 export function openDatabase(file: string, options: OpenOptions = {}) {
-  if (file !== ':memory:') mkdirSync(path.dirname(file), { recursive: true })
   const busyTimeout = options.busyTimeoutMs ?? 5000
+  if (options.readOnly) {
+    const client = new DatabaseSync(file, {
+      readOnly: true,
+      timeout: busyTimeout,
+    })
+    client.exec('PRAGMA query_only = 1')
+    searchFunctions(client)
+    return immediateWrites(drizzle({ client }))
+  }
+  if (file !== ':memory:') mkdirSync(path.dirname(file), { recursive: true })
   const client = new DatabaseSync(file, {
     enableForeignKeyConstraints: true,
     // Restored to this after the opening optimize below.

@@ -878,14 +878,15 @@ export function updateSelection(
 }
 
 /**
- * The library, filtered, sorted and 20 per page; with a narrowing, only what
- * it selects too.
+ * The library, filtered, sorted and 20 per page (or `size`); with a
+ * narrowing, only what it selects too.
  */
 export function listCollections(
-  ctx: CaptureContext,
+  ctx: Pick<CaptureContext, 'db' | 'blobs'>,
   input: CollectionFilter = {},
   cursor?: string,
   narrow?: Narrowing,
+  size = PAGE,
 ): Page<CollectionView> {
   const { checked, ctes, source, where, ranked } = select(ctx.db, input, narrow)
   const { filter } = checked
@@ -939,7 +940,7 @@ export function listCollections(
     )
     ${seek}
     ORDER BY ${order}
-    LIMIT ${PAGE + 1}`)
+    LIMIT ${size + 1}`)
   const page: Page<CollectionView> = { items: [] }
   if (related)
     page.total_storage_bytes =
@@ -948,9 +949,9 @@ export function listCollections(
         SELECT coalesce(sum(k.storage_bytes), 0) AS bytes
         FROM ${sql.raw(RELATED)}
         WHERE ${types.length ? rootTypeSQL(types) : sql`1 = 1`}`)?.bytes ?? 0
-  const entries = rows.slice(0, PAGE)
+  const entries = rows.slice(0, size)
   const last = entries.at(-1)
-  if (rows.length > PAGE && last)
+  if (rows.length > size && last)
     page.next_cursor = encodeCursor(last, fingerprint, ranked)
   const loaded = collectionsById(
     ctx,

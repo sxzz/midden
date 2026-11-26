@@ -373,7 +373,7 @@ const isCount = (value: unknown): value is number =>
  * the same counts are all kept, so the series has a point per reading.
  */
 export function listCounts(
-  ctx: CaptureContext,
+  ctx: Reader,
   id: string,
   limit = COUNTS_LIMIT,
 ): CountsSeries {

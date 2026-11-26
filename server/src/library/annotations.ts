@@ -162,3 +162,62 @@ export function updateAnnotation(
     return readAnnotation(tx, collectionId)
   })
 }
+
+/**
+ * A tag by name, made if there is none. One nothing uses (no collection, no
+ * folder filter) goes the next time tags are pruned.
+ */
+export function ensureTag(tx: Executor, raw: string): Tag {
+  const name = checkTagName(raw, 'invalid_tag')
+  tx.insert(tags).values({ id: newId(), name }).onConflictDoNothing().run()
+  return tx
+    .select({ id: tags.id, name: tags.name })
+    .from(tags)
+    .where(eq(tags.name, name))
+    .get()!
+}
+
+/**
+ * Put one more tag on a saved collection: an existing one by id, or one by
+ * name, made if new. Its other tags stay.
+ */
+export function addTag(
+  db: Database,
+  collectionId: string,
+  tag: { id: string } | { name: string },
+): Annotation {
+  return db.transaction((tx) => {
+    const before = readAnnotation(tx, collectionId)
+    const id =
+      'name' in tag
+        ? ensureTag(tx, tag.name).id
+        : tx.select({ id: tags.id }).from(tags).where(eq(tags.id, tag.id)).get()
+            ?.id
+    if (!id) throw new AppError('not_found')
+    if (before.tags.some((t) => t.id === id)) return before
+    if (before.tags.length >= MAX_TAGS) throw new AppError('invalid_annotation')
+    tx.insert(collectionTags).values({ collectionId, tagId: id }).run()
+    return readAnnotation(tx, collectionId)
+  })
+}
+
+/** Take one tag off a saved collection; a tag left unused goes. */
+export function removeTag(
+  db: Database,
+  collectionId: string,
+  tagId: string,
+): Annotation {
+  return db.transaction((tx) => {
+    readAnnotation(tx, collectionId)
+    tx.delete(collectionTags)
+      .where(
+        and(
+          eq(collectionTags.collectionId, collectionId),
+          eq(collectionTags.tagId, tagId),
+        ),
+      )
+      .run()
+    pruneTags(tx)
+    return readAnnotation(tx, collectionId)
+  })
+}
