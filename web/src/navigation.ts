@@ -1,3 +1,4 @@
+import { appPath } from './app-path'
 import { host } from './host'
 import { shareSlug } from './share'
 import { backIsHistory, backPath } from './tab-state'
@@ -71,9 +72,9 @@ export function openInNewTab(router: Router, to: RouteLocationRaw) {
 }
 
 /**
- * Route clicks on the app's own links (`#/…`) through the router. RouterLink
- * already does this for itself; plain anchors with a hash address rely on
- * it. Clicks the browser should open elsewhere are left alone, except in the
+ * Route clicks on the app's own links (`/app/…`) through the router.
+ * RouterLink already does this for itself; plain anchors with an address of
+ * the app rely on it. Clicks the browser should open elsewhere are left alone, except in the
  * Mini App, where they navigate in place. Listen to both `click` and
  * `auxclick` (the middle button) on the document.
  */
@@ -82,13 +83,14 @@ export function followInternalLink(router: Router, event: MouseEvent) {
   const anchor =
     event.target instanceof Element ? event.target.closest('a') : null
   const href = anchor?.getAttribute('href')
+  const path = href ? appPath(href) : undefined
   if (
     !anchor ||
-    !href?.startsWith('#/') ||
+    path === undefined ||
     anchor.hasAttribute('download') ||
     (anchor.target && anchor.target !== '_self')
   )
     return
   event.preventDefault()
-  void router.push(href.slice(1))
+  void router.push(path)
 }

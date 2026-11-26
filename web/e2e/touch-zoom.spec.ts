@@ -33,7 +33,7 @@ test('fields are at least 16px on a touch screen, so focusing one never zooms', 
   const library = await smallest()
   expect(library.length).toBeGreaterThan(1)
   expect(Math.min(...library)).toBeGreaterThanOrEqual(16)
-  await page.goto('/app/#/captures')
+  await page.goto('/app/captures')
   await expect(page.getByLabel('链接', { exact: true })).toBeVisible()
   const captures = await smallest()
   expect(captures.length).toBeGreaterThan(0)

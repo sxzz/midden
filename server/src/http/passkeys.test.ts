@@ -87,7 +87,7 @@ function setup() {
       tokens: Object.fromEntries(
         urls.map((url) => [
           new URL(url).origin,
-          url.split('#/passkey/', 2)[1]!,
+          url.split('/app/passkey#', 2)[1]!,
         ]),
       ),
     }

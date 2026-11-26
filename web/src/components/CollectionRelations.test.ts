@@ -89,7 +89,7 @@ it('preserves root text while showing a compact quote and direct relation labels
   const quote = el.querySelector<HTMLAnchorElement>('.relation')!
   expect(el.querySelector('.context')?.textContent).toContain('引用了这条帖子')
   expect(quote.textContent).toContain('被引用帖的独立内容')
-  expect(quote.getAttribute('href')).toBe('#/collection/quote')
+  expect(quote.getAttribute('href')).toBe('/app/collection/quote')
   expect(quote.closest('button')).toBeNull()
   expect(el.textContent).not.toContain('不要在列表展示的反向引用')
 })
@@ -98,7 +98,7 @@ it('heads the compact quote with its author and keeps that profile separately cl
   const quote = el.querySelector<HTMLAnchorElement>('.relation')!
   const author = el.querySelector<HTMLAnchorElement>('.relation-author')!
   expect(author.tagName).toBe('A')
-  expect(author.getAttribute('href')).toBe('#/collection/quote-author')
+  expect(author.getAttribute('href')).toBe('/app/collection/quote-author')
   expect(author.textContent).toContain('被引用账号')
   expect(author.textContent).toContain('@quoted_account')
   expect(author.querySelector('img')?.getAttribute('src')).toBe(

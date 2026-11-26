@@ -1,12 +1,17 @@
 import { createApp, vaporInteropPlugin } from 'vue'
+import { legacyAddress } from './app-path'
 import App from './App.vue'
 import { loadHost } from './host'
 import { followShare } from './share'
 import { trackTabs } from './tab-state'
 import './style.css'
-// Telegram's script reads the Mini App's launch data from the address, and
-// creating the router already rewrites it (`#tgWebAppData=…` becomes
-// `#/tgWebAppData=…`), so the router module loads only after the script.
+// An old address (`/app/#/captures`, from a bookmark, an old share link or
+// an old bot message) becomes the address it means now, before anything
+// reads it. Any other fragment is left alone: Telegram's launch data.
+const legacy = legacyAddress(location.hash)
+if (legacy !== undefined) history.replaceState(history.state, '', legacy)
+// Telegram's script reads the Mini App's launch data from the address
+// (`#tgWebAppData=…`), so the router loads only after the script.
 void loadHost()
   .then(() => import('./router'))
   .then(({ router }) => {

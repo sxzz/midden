@@ -90,7 +90,7 @@ it('presents Instagram profiles, comments, dotted mentions, and absent counts', 
   ])
   expect(mentionParts(a, a.text)).toEqual([
     { text: 'Hello ' },
-    { text: '@fixture.name', href: '#/collection/saved-profile' },
+    { text: '@fixture.name', href: '/app/collection/saved-profile' },
   ])
   const profile = { ...a, text: 'Bio', graph: { ...a.graph!, root: 'author' } }
   expect(present(profile).body).toBe('Bio')
@@ -408,7 +408,7 @@ it('links saved mention identities without linking emails or unsaved profiles', 
     mentionParts(collection, 'Hello @FRIEND! @unknown mail@friend.test'),
   ).toEqual([
     { text: 'Hello ' },
-    { text: '@FRIEND', href: '#/collection/friend-id' },
+    { text: '@FRIEND', href: '/app/collection/friend-id' },
     { text: '! @unknown mail@friend.test' },
   ])
 })

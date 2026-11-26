@@ -65,17 +65,20 @@ test.describe('from 700px', () => {
     await expect(item(page, '采集')).toHaveAttribute('aria-current', 'page')
     await expect(item(page, '探索')).not.toHaveAttribute('aria-current')
     // 探索 still returns to the post it was left on, not to 采集.
-    await expect(item(page, '探索')).toHaveAttribute('href', /#\/collection\//)
+    await expect(item(page, '探索')).toHaveAttribute(
+      'href',
+      /\/app\/collection\//,
+    )
     await item(page, '设置').click()
     await expect(page.locator('h1')).toHaveText('设置')
-    await expect(item(page, '采集')).toHaveAttribute('href', '#/captures')
+    await expect(item(page, '采集')).toHaveAttribute('href', '/app/captures')
     await item(page, '探索').click()
     await expect(page.locator('h1')).toHaveText('帖子')
 
     const opened = context.waitForEvent('page')
     await item(page, '关系').click({ modifiers: ['ControlOrMeta'] })
     const other = await opened
-    await expect(other).toHaveURL(/#\/relations/)
+    await expect(other).toHaveURL(/\/app\/relations/)
     await other.close()
     await expect(page.locator('h1')).toHaveText('帖子')
   })
@@ -116,7 +119,7 @@ test.describe('from 1280px', () => {
     // On the library's lists: its folders, and the list's count.
     await expect(
       sidebar(page).getByRole('link', { name: /风景摄影/ }),
-    ).toHaveAttribute('href', /#\/folder\//)
+    ).toHaveAttribute('href', /\/app\/folder\//)
     await expect(sidebar(page)).toContainText('1,280 条')
     // Who is signed in to Midden (one owner for now), and the instance's
     // menu; the capture accounts are 采集's.
@@ -124,7 +127,7 @@ test.describe('from 1280px', () => {
     await page.getByRole('button', { name: '账号菜单' }).click()
     await expect(
       page.getByRole('menuitem', { name: '管理员面板' }),
-    ).toHaveAttribute('href', '#/settings/admin')
+    ).toHaveAttribute('href', '/app/settings/admin')
     await expect(page.getByRole('menuitem', { name: '退出登录' })).toBeVisible()
     await expect(page.getByRole('menuitem', { name: '采集账号' })).toHaveCount(
       0,
@@ -135,12 +138,12 @@ test.describe('from 1280px', () => {
 
   test('the sidebar searches the library', async ({ page }) => {
     const { searches } = await mockDesktop(page)
-    await page.goto('/app/#/captures')
+    await page.goto('/app/captures')
     const box = sidebar(page).getByRole('searchbox', { name: '搜索收藏' })
     await box.fill('云海')
     await box.press('Enter')
     await expect(page.locator('h1')).toHaveText('我的收藏')
-    await expect(page).toHaveURL(/#\/\?q=%E4%BA%91%E6%B5%B7$/)
+    await expect(page).toHaveURL(/\/app\/\?q=%E4%BA%91%E6%B5%B7$/)
     await expect.poll(() => searches).toContain('云海')
     // The list has its own search box, so the sidebar's goes.
     await expect(box).toHaveCount(0)
@@ -150,7 +153,7 @@ test.describe('from 1280px', () => {
     page,
   }) => {
     await mockDesktop(page)
-    await page.goto(`/app/#/collection/${PROFILE_ID}`)
+    await page.goto(`/app/collection/${PROFILE_ID}`)
     await expect(page.locator('h1')).toHaveText('账号')
     await expect(page.locator('.subtitle')).toHaveText('@mountain_log')
     const relations = sidebar(page).getByRole('region', { name: '关系网' })
@@ -177,7 +180,7 @@ test.describe('at 1280px, scrolled', () => {
 
   test('the rail and the sidebar stay in the window', async ({ page }) => {
     await mockDesktop(page)
-    await page.goto(`/app/#/collection/${PROFILE_ID}`)
+    await page.goto(`/app/collection/${PROFILE_ID}`)
     await expect(
       sidebar(page).getByRole('region', { name: '关系网' }),
     ).toBeVisible()
@@ -204,9 +207,9 @@ for (const width of [390, 800, 1024, 1280, 1600]) {
     for (const [address, ready] of [
       ['/app/', '.row'],
       // A long bio, URL, place and counts, a banner, wide pictures.
-      [`/app/#/collection/${PROFILE_ID}`, '.row'],
-      [`/app/#/collection/${POST_ID}`, '.post'],
-      ['/app/#/settings/admin/origins', '.pane'],
+      [`/app/collection/${PROFILE_ID}`, '.row'],
+      [`/app/collection/${POST_ID}`, '.post'],
+      ['/app/settings/admin/origins', '.pane'],
     ] as const) {
       await page.goto(address)
       await page.locator(ready).first().waitFor()
@@ -228,7 +231,7 @@ test.describe('采集', () => {
   }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await mockDesktop(page)
-    await page.goto('/app/#/captures')
+    await page.goto('/app/captures')
     const tabs = page.getByRole('navigation', { name: '采集', exact: true })
     await expect(tabs.getByRole('link')).toHaveText([
       '采集记录',
@@ -240,7 +243,7 @@ test.describe('采集', () => {
       'page',
     )
     await tabs.getByRole('link', { name: '定期更新' }).click()
-    await expect(page).toHaveURL(/#\/captures\/watches$/)
+    await expect(page).toHaveURL(/\/app\/captures\/watches$/)
     await expect(tabs.getByRole('link', { name: '定期更新' })).toHaveAttribute(
       'aria-current',
       'page',
@@ -251,7 +254,7 @@ test.describe('采集', () => {
     await expect(accounts).toHaveAttribute('title', '采集账号')
     await accounts.click()
     // Over the tab it was opened from, which stays.
-    await expect(page).toHaveURL(/#\/captures\/watches\?dialog=accounts$/)
+    await expect(page).toHaveURL(/\/app\/captures\/watches\?dialog=accounts$/)
     const dialog = page.getByRole('dialog', { name: '采集账号' })
     await expect(dialog).toContainText('X 采集来源')
     await expect(tabs.getByRole('link', { name: '定期更新' })).toHaveAttribute(
@@ -263,7 +266,7 @@ test.describe('采集', () => {
     expect(Math.abs(box.y + box.height / 2 - 450)).toBeLessThan(40)
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
-    await expect(page).toHaveURL(/#\/captures\/watches$/)
+    await expect(page).toHaveURL(/\/app\/captures\/watches$/)
   })
 
   for (const [tab, path] of [
@@ -274,13 +277,13 @@ test.describe('采集', () => {
       page,
     }) => {
       await mockDesktop(page)
-      await page.goto(`/app/#${path}`)
+      await page.goto(`/app${path}`)
       const tabs = page.getByRole('navigation', { name: '采集', exact: true })
       const shown = tabs.getByRole('link', { name: tab })
       await expect(shown).toHaveAttribute('aria-current', 'page')
-      const url = new RegExp(`#${path.replaceAll('/', String.raw`\/`)}$`)
+      const url = new RegExp(`/app${path.replaceAll('/', String.raw`\/`)}$`)
       const withDialog = new RegExp(
-        String.raw`#${path.replaceAll('/', String.raw`\/`)}\?dialog=accounts$`,
+        String.raw`/app${path.replaceAll('/', String.raw`\/`)}\?dialog=accounts$`,
       )
       const dialog = page.getByRole('dialog', { name: '采集账号' })
       for (const close of ['button', 'back'] as const) {
@@ -296,7 +299,7 @@ test.describe('采集', () => {
         await expect(shown).toHaveAttribute('aria-current', 'page')
       }
       // A link opens the tab with the dialog over it; closing stays there.
-      await page.goto(`/app/#${path}?dialog=accounts`)
+      await page.goto(`/app${path}?dialog=accounts`)
       await expect(dialog).toBeVisible()
       await expect(shown).toHaveAttribute('aria-current', 'page')
       await dialog.getByRole('button', { name: '关闭' }).click()
@@ -309,13 +312,13 @@ test.describe('采集', () => {
     page,
   }) => {
     await mockDesktop(page)
-    await page.goto('/app/#/captures?dialog=accounts')
+    await page.goto('/app/captures?dialog=accounts')
     const dialog = page.getByRole('dialog', { name: '采集账号' })
     await expect(dialog).toContainText('X 采集来源')
     const box = (await dialog.boundingBox())!
     expect(Math.round(box.y + box.height)).toBeGreaterThan(844 - 20)
     await dialog.getByRole('button', { name: '关闭' }).click()
-    await expect(page).toHaveURL(/#\/captures$/)
+    await expect(page).toHaveURL(/\/app\/captures$/)
     const tabs = page.getByRole('navigation', { name: '采集', exact: true })
     await expect(tabs).toBeVisible()
     await expect(tabs).toHaveCSS('position', 'sticky')
@@ -324,7 +327,7 @@ test.describe('采集', () => {
 
 test('the icons are linked, also from a public link', async ({ page }) => {
   await mockDesktop(page)
-  for (const address of ['/app/', `/app/#/s/${FOLDER_SLUG}`]) {
+  for (const address of ['/app/', `/app/s/${FOLDER_SLUG}`]) {
     await page.goto(address)
     for (const [selector, path] of [
       ['link[rel=icon][type="image/svg+xml"]', '/app/favicon.svg'],
@@ -365,7 +368,7 @@ test('below 700px the phone layout stays', async ({ page }) => {
 test.describe('a public link', () => {
   test('keeps its column on a phone', async ({ page }) => {
     await mockDesktop(page)
-    await page.goto(`/app/#/s/${FOLDER_SLUG}`)
+    await page.goto(`/app/s/${FOLDER_SLUG}`)
     await expect(page.locator('h1')).toHaveText('公开的风景')
     await expect(page.locator('.row').first()).toBeVisible()
     await expect(sidebar(page)).toHaveCount(0)
@@ -377,7 +380,7 @@ test.describe('a public link', () => {
   }) => {
     const { searches } = await mockDesktop(page)
     await page.setViewportSize({ width: 800, height: 900 })
-    await page.goto(`/app/#/s/${FOLDER_SLUG}`)
+    await page.goto(`/app/s/${FOLDER_SLUG}`)
     await expect(page.locator('h1')).toHaveText('公开的风景')
     const column = await page.locator('main.page').boundingBox()
     expect(Math.round(column!.width)).toBe(600)
@@ -398,7 +401,7 @@ test.describe('a public link', () => {
     await box.fill('湖')
     await box.press('Enter')
     await expect(page).toHaveURL(
-      new RegExp(String.raw`#/s/${FOLDER_SLUG}\?q=%E6%B9%96$`),
+      new RegExp(String.raw`/app/s/${FOLDER_SLUG}\?q=%E6%B9%96$`),
     )
     await expect.poll(() => searches).toContain('湖')
     expect(await fits(page)).toBe(true)
@@ -409,7 +412,7 @@ test.describe('a public link', () => {
   }) => {
     await mockDesktop(page)
     await page.setViewportSize({ width: 1280, height: 900 })
-    await page.goto(`/app/#/s/${PROFILE_SLUG}`)
+    await page.goto(`/app/s/${PROFILE_SLUG}`)
     await expect(page.locator('h1')).toHaveText('账号')
     const shared = sidebar(page).getByRole('region', { name: '公开分享' })
     await expect(shared).toContainText('山野记录')
@@ -420,9 +423,9 @@ test.describe('a public link', () => {
     // stays within the share.
     await expect(relations.getByRole('link', { name: /粉丝/ })).toHaveCount(0)
     const links = await sidebar(page)
-      .locator('a[href^="#"]')
+      .locator('a[href^="/app/"]')
       .evaluateAll((all) => all.map((a) => a.getAttribute('href')))
     expect(links.length).toBeGreaterThan(0)
-    for (const href of links) expect(href).toMatch(/^#\/s\//)
+    for (const href of links) expect(href).toMatch(/^\/app\/s\//)
   })
 })

@@ -117,12 +117,12 @@ test('moves between the three tabs, lighting the one shown', async ({
   await page.goto('/app/')
   await expect(page.locator('h1')).toHaveText('我的收藏')
   await expect(tab(page, '探索')).toHaveAttribute('aria-current', 'page')
-  await expect(tab(page, '探索')).toHaveAttribute('href', '#/')
+  await expect(tab(page, '探索')).toHaveAttribute('href', '/app/')
   // The top bar no longer carries what the bottom one does.
   await expect(page.getByRole('link', { name: '采集账号' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Home' })).toHaveCount(0)
   // Capturing is a tab of its own, so the top bar no longer carries it.
-  await expect(tab(page, '采集')).toHaveAttribute('href', '#/captures')
+  await expect(tab(page, '采集')).toHaveAttribute('href', '/app/captures')
   await expect(
     page.locator('.bar').getByRole('link', { name: '采集' }),
   ).toHaveCount(0)
@@ -130,7 +130,7 @@ test('moves between the three tabs, lighting the one shown', async ({
   // 关系 opens on the owner's own account.
   await tab(page, '关系').click()
   await expect(page.locator('h1')).toHaveText('关系')
-  await expect(page).toHaveURL(/#\/relations\?of=x\/x\.profile\/1$/)
+  await expect(page).toHaveURL(/\/app\/relations\?of=x\/x\.profile\/1$/)
   await expect(tab(page, '关系')).toHaveAttribute('aria-current', 'page')
   await expect(page.getByRole('button', { name: /互关/ })).toBeVisible()
   expect(graphs).toEqual([OWN])
@@ -138,7 +138,7 @@ test('moves between the three tabs, lighting the one shown', async ({
   await page.getByRole('group', { name: '显示方式' }).waitFor()
   await page.locator('summary', { hasText: '中心' }).click()
   await page.getByRole('option', { name: /friend/ }).click()
-  await expect(page).toHaveURL(/#\/relations\?of=x\/x\.profile\/2$/)
+  await expect(page).toHaveURL(/\/app\/relations\?of=x\/x\.profile\/2$/)
   await expect.poll(() => graphs.at(-1)).toBe(OTHER)
 
   await tab(page, '设置').click()
@@ -147,7 +147,7 @@ test('moves between the three tabs, lighting the one shown', async ({
   // A section is a page below it, which keeps it lit; tapping it goes
   // back to its root.
   await page.getByRole('link', { name: '管理员面板' }).click()
-  await expect(page).toHaveURL(/#\/settings\/admin$/)
+  await expect(page).toHaveURL(/\/app\/settings\/admin$/)
   await expect(page.locator('h1')).toHaveText('管理员面板')
   await expect(tab(page, '设置')).toHaveAttribute('aria-current', 'page')
   await tab(page, '设置').click()
@@ -160,13 +160,13 @@ test('moves between the three tabs, lighting the one shown', async ({
     .getByRole('navigation', { name: '采集', exact: true })
     .getByRole('link', { name: '定期更新' })
     .click()
-  await expect(page).toHaveURL(/#\/captures\/watches$/)
+  await expect(page).toHaveURL(/\/app\/captures\/watches$/)
   await expect(tab(page, '采集')).toHaveAttribute('aria-current', 'page')
 
   // 关系 returns to the account it was left on.
   await expect(tab(page, '关系')).toHaveAttribute(
     'href',
-    '#/relations?of=x/x.profile/2',
+    '/app/relations?of=x/x.profile/2',
   )
   await tab(page, '探索').click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
@@ -197,7 +197,7 @@ test('hides on scrolling down and returns on scrolling up', async ({
   await shown(page)
   await tab(page, '探索').click()
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
-  await expect(page).toHaveURL(/#\/$/)
+  await expect(page).toHaveURL(/\/app\/$/)
   // The list ends above the bar, not behind it.
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
   await shown(page)
@@ -229,19 +229,19 @@ test('each tab opens in a new tab with Cmd or Ctrl', async ({
   const opened = context.waitForEvent('page')
   await tab(page, '设置').click({ modifiers: ['ControlOrMeta'] })
   const other = await opened
-  await expect(other).toHaveURL(/#\/settings$/)
+  await expect(other).toHaveURL(/\/app\/settings$/)
   await other.close()
   // This page stays where it was.
-  await expect(page).toHaveURL(/#\/$/)
+  await expect(page).toHaveURL(/\/app\/$/)
   await expect(page.locator('h1')).toHaveText('我的收藏')
 })
 
 test('关系 shows only the picker without relation data', async ({ page }) => {
   const graphs = await mock(page, [])
-  await page.goto('/app/#/relations')
+  await page.goto('/app/relations')
   await expect(page.locator('h1')).toHaveText('关系')
   await expect(page.locator('summary', { hasText: '中心' })).toBeVisible()
-  await expect(page).toHaveURL(/#\/relations$/)
+  await expect(page).toHaveURL(/\/app\/relations$/)
   await expect(page.locator('.graph-page')).toHaveCount(0)
   expect(graphs).toEqual([])
 })
@@ -254,7 +254,7 @@ test('a public link has no bottom bar', async ({ page }) => {
         : { target: 'folder', name: '公开收藏夹', posts: 0, profiles: 0 },
     }),
   )
-  await page.goto('/app/#/s/AbCdEfGhIjKlMnOpQrStUv_-')
+  await page.goto('/app/s/AbCdEfGhIjKlMnOpQrStUv_-')
   await expect(page.getByText('公开收藏夹').first()).toBeVisible()
   await expect(page.getByRole('navigation', { name: '主导航' })).toHaveCount(0)
   expect(
@@ -278,35 +278,35 @@ test('each tab returns to the page and scroll it was left on', async ({
   const left = await scrollY(page)
   expect(left).toBeGreaterThan(300)
   // Switching away and back: the same post, at the same place.
-  await expect(tab(page, '探索')).toHaveAttribute('href', '#/')
+  await expect(tab(page, '探索')).toHaveAttribute('href', '/app/')
   await tab(page, '设置').click()
   await expect(page.locator('h1')).toHaveText('设置')
   await page.getByRole('link', { name: '管理员面板' }).click()
-  await expect(page).toHaveURL(/#\/settings\/admin$/)
+  await expect(page).toHaveURL(/\/app\/settings\/admin$/)
   await expect(tab(page, '探索')).toHaveAttribute(
     'href',
-    `#/collection/${items[0]!.id}`,
+    `/app/collection/${items[0]!.id}`,
   )
   await tab(page, '探索').click()
   await expect(page).toHaveURL(detail)
   await expect(page.locator('h1')).toHaveText('帖子')
   await expect.poll(() => scrollY(page)).toBe(left)
   // 设置 kept its section too.
-  await expect(tab(page, '设置')).toHaveAttribute('href', '#/settings/admin')
+  await expect(tab(page, '设置')).toHaveAttribute('href', '/app/settings/admin')
   // A reload keeps every tab where it was.
   await page.reload()
   await expect(page.locator('h1')).toHaveText('帖子')
   await expect.poll(() => scrollY(page)).toBe(left)
-  await expect(tab(page, '设置')).toHaveAttribute('href', '#/settings/admin')
+  await expect(tab(page, '设置')).toHaveAttribute('href', '/app/settings/admin')
   // 返回 goes where it would have without the detour: 探索's list. The
   // browser's back still returns to 设置.
   await expect(
     page.getByRole('link', { name: '返回', exact: true }),
-  ).toHaveAttribute('href', '#/')
+  ).toHaveAttribute('href', '/app/')
   await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
   await page.goBack()
-  await expect(page).toHaveURL(/#\/settings\/admin$/)
+  await expect(page).toHaveURL(/\/app\/settings\/admin$/)
   await expect(page.locator('h1')).toHaveText('管理员面板')
 })
 
@@ -319,7 +319,7 @@ test('the open tab, tapped, goes to its root, then to the top', async ({
   await expect(page.locator('h1')).toHaveText('帖子')
   await tab(page, '探索').click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
-  await expect(page).toHaveURL(/#\/$/)
+  await expect(page).toHaveURL(/\/app\/$/)
   await page.mouse.move(195, 400)
   await page.mouse.wheel(0, 600)
   await expect.poll(() => scrollY(page)).toBeGreaterThan(0)
@@ -331,12 +331,12 @@ test('the open tab, tapped, goes to its root, then to the top', async ({
 
 test('titles a post and an account by what they are', async ({ page }) => {
   await mock(page)
-  await page.goto(`/app/#/collection/${items[0]!.id}`)
+  await page.goto(`/app/collection/${items[0]!.id}`)
   await expect(page.locator('h1')).toHaveText('帖子')
   await expect(page).toHaveTitle('帖子 · Midden')
-  await page.goto(`/app/#/collection/${PROFILE_ID}`)
+  await page.goto(`/app/collection/${PROFILE_ID}`)
   await expect(page.locator('h1')).toHaveText('账号')
   await expect(page).toHaveTitle('账号 · Midden')
-  await page.goto('/app/#/settings')
+  await page.goto('/app/settings')
   await expect(page).toHaveTitle('设置 · Midden')
 })

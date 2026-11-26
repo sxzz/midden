@@ -92,7 +92,7 @@ test('watch a profile from its detail, then edit the watch', async ({
   page,
 }) => {
   const { sent, setLastRun } = await serve(page)
-  await page.goto(`/app/#/collection/${profileId}`)
+  await page.goto(`/app/collection/${profileId}`)
   const update = page.locator('.section.update')
   const row = update.getByRole('button', { name: /^定期更新/ })
   await expect(row).toBeVisible()
@@ -156,12 +156,12 @@ test('watch a profile from its detail, then edit the watch', async ({
   await row.click()
   await expect(
     sheet.getByRole('link', { name: /^上次 今天 .* · 已完成$/ }),
-  ).toHaveAttribute('href', /#\/captures\/run$/)
+  ).toHaveAttribute('href', /\/app\/captures\/run$/)
 })
 
 test('采集 lists the watches; one can be turned off', async ({ page }) => {
   const { sent } = await serve(page)
-  await page.goto(`/app/#/collection/${profileId}`)
+  await page.goto(`/app/collection/${profileId}`)
   await page
     .locator('.section.update')
     .getByRole('button', { name: /^定期更新/ })
@@ -170,12 +170,12 @@ test('采集 lists the watches; one can be turned off', async ({ page }) => {
   await expect(page.getByText('已开启定期更新')).toBeVisible()
 
   // 采集's second tab.
-  await page.goto('/app/#/captures')
+  await page.goto('/app/captures')
   await page
     .getByRole('navigation', { name: '采集', exact: true })
     .getByRole('link', { name: '定期更新' })
     .click()
-  await expect(page).toHaveURL(/#\/captures\/watches$/)
+  await expect(page).toHaveURL(/\/app\/captures\/watches$/)
   await expect(page.locator('h1')).toHaveText('采集')
   const item = page.locator('.watch')
   await expect(item.getByRole('link', { name: '@owner' })).toBeVisible()
@@ -257,7 +257,7 @@ test('watch a folder from its menu', async ({ page }) => {
     }
     return route.fulfill({ json })
   })
-  await page.goto(`/app/#/folder/${folderId}`)
+  await page.goto(`/app/folder/${folderId}`)
   await page.getByRole('button', { name: '管理收藏夹' }).click()
   await page.getByRole('button', { name: '定期更新', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: '定期更新 收藏夹「猫」' })

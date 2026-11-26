@@ -98,7 +98,7 @@ test('lists tokens with their expiry and use, and makes one shown once', async (
 }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const sent = await mock(page)
-  await page.goto('/app/#/settings/tokens')
+  await page.goto('/app/settings/tokens')
   const listed = row(page, '研究')
   await expect(listed).toContainText('只读')
   await expect(listed).toContainText('过期 · 剩 6 天')
@@ -148,7 +148,7 @@ test('lists tokens with their expiry and use, and makes one shown once', async (
 
 test('edits, rolls and revokes a token', async ({ page }) => {
   const sent = await mock(page)
-  await page.goto('/app/#/settings/tokens')
+  await page.goto('/app/settings/tokens')
   await row(page, '研究').click()
   await expect(sheet(page)).toContainText('最近 30 天 5 次')
   await expect(sheet(page)).toContainText('GET /agent/v1/posts')

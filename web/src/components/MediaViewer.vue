@@ -18,6 +18,7 @@ import {
   type Collection,
   type RemovalEffect,
 } from '../api'
+import { appPath } from '../app-path'
 import { toast } from '../composables/useToast'
 import { host } from '../host'
 import {
@@ -217,7 +218,8 @@ function captionClick(event: MouseEvent) {
   if (!(link instanceof HTMLAnchorElement) || !navigatesHere(event)) return
   event.preventDefault()
   emit('close')
-  void router?.push(link.getAttribute('href')!.slice(1))
+  const path = appPath(link.getAttribute('href')!)
+  if (path !== undefined) void router?.push(path)
 }
 
 // The strip of thumbnails: scrolling it moves the viewer to the thumbnail

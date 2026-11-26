@@ -67,6 +67,8 @@ export function groupKeyboard(
     .filter((row) => row.length > 0)
 }
 
+const LEADING_SLASH = /^\//
+
 /** A web_app button to a route of the Mini App, if it is served over HTTPS. */
 export function webRoute(
   webAppUrl: string | undefined,
@@ -76,13 +78,29 @@ export function webRoute(
   if (!webAppUrl) return undefined
   let url: URL
   try {
-    url = new URL(webAppUrl)
+    url = appURL(webAppUrl, route)
   } catch {
     return undefined
   }
   if (url.protocol !== 'https:' || !url.host) return undefined
-  url.hash = route
   return { text, web_app: { url: url.href } }
+}
+
+/**
+ * The address of a route of the web app (`/captures?dialog=accounts`): a
+ * path under the app's own (`WEB_APP_URL`, ending in /app/), which keeps
+ * that address's query, such as a cache-buster for the Mini App.
+ */
+export function appURL(webAppUrl: string, route: string): URL {
+  const app = new URL(webAppUrl)
+  const base = new URL(
+    app.pathname.endsWith('/') ? app.pathname : `${app.pathname}/`,
+    app,
+  )
+  const url = new URL(route.replace(LEADING_SLASH, ''), base)
+  for (const [key, value] of app.searchParams)
+    if (!url.searchParams.has(key)) url.searchParams.append(key, value)
+  return url
 }
 
 // --- Texts -----------------------------------------------------------------

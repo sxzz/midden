@@ -1,6 +1,6 @@
 import {
   createRouter,
-  createWebHashHistory,
+  createWebHistory,
   type RouteLocationNormalized,
 } from 'vue-router'
 import CaptureRecordDetail from './components/CaptureRecordDetail.vue'
@@ -27,7 +27,7 @@ const idOnly = (route: RouteLocationNormalized) => ({
 })
 
 export const router = createRouter({
-  history: createWebHashHistory(import.meta.env.BASE_URL),
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/', name: 'collections', component: CollectionView },
     // A folder is the library list under its saved filter; the address
@@ -145,7 +145,9 @@ export const router = createRouter({
     // A /passkey link from the bot: registers a passkey without signing in.
     // App shows it in place of the library.
     {
-      path: String.raw`/passkey/:token([\w-]+)`,
+      // The token is in the fragment (`/passkey#<token>`), which no server
+      // and no log sees.
+      path: '/passkey',
       name: 'passkey',
       component: PasskeySetup,
       meta: { setup: true },

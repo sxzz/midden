@@ -79,7 +79,7 @@ onUnmounted(() => cleanup())
 <template>
   <div v-if="shared" class="shell"><PublicShare /></div>
   <main v-else-if="setup" class="gate">
-    <PasskeySetup :token="String(route.params.token)" @done="passkeyAdded" />
+    <PasskeySetup :token="route.hash.slice(1)" @done="passkeyAdded" />
   </main>
   <!-- From 700px the library's rail, column and sidebar sit side by side,
        centred together (CollectionLibrary, layout.ts); a public link's

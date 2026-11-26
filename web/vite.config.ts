@@ -63,6 +63,7 @@ export default defineConfig({
     alias: testAliases,
     server: { deps: { inline: ['vue-router'] } },
     environment: 'jsdom',
+    setupFiles: ['src/testing/setup.ts'],
     include: ['src/**/*.test.ts'],
   },
 })

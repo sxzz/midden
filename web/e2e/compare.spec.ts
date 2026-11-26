@@ -125,7 +125,7 @@ test('compares accounts: who follows whom, shared accounts by subset, the thresh
   page,
 }) => {
   const { asked, listed } = await mock(page)
-  await page.goto(`/app/#/compare?rel_of=${A}&rel_of=${B}&rel_of=${C}`)
+  await page.goto(`/app/compare?rel_of=${A}&rel_of=${B}&rel_of=${C}`)
   await expect(page.locator('h1')).toHaveText('关系对比')
   const last = () => asked.at(-1)
   // The owner's own account marks the accounts by default.
@@ -230,7 +230,7 @@ test('compares accounts: who follows whom, shared accounts by subset, the thresh
 
 test('adds and removes compared accounts', async ({ page }) => {
   const { asked } = await mock(page)
-  await page.goto(`/app/#/compare?rel_of=${A}&viewer=`)
+  await page.goto(`/app/compare?rel_of=${A}&viewer=`)
   await expect(page.locator('.center')).toHaveCount(1)
   // Nobody to mark with: no viewer in the request.
   await expect.poll(() => asked.at(-1)?.has('viewer')).toBe(false)
@@ -254,7 +254,7 @@ for (const [name, viewport] of [
       await page.emulateMedia({ colorScheme: scheme })
       await mock(page)
       await page.goto(
-        `/app/#/compare?rel_of=${A}&rel_of=${B}&rel_of=${C}&rel_min=1`,
+        `/app/compare?rel_of=${A}&rel_of=${B}&rel_of=${C}&rel_min=1`,
       )
       await expect(page.locator('.grid .person').first()).toBeVisible()
       await page.screenshot({

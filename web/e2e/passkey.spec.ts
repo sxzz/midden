@@ -115,7 +115,7 @@ test('a /passkey link adds a passkey, which then signs in', async ({
     return r.fulfill({ json: {} })
   })
 
-  await page.goto(`${APP}#/passkey/${TOKEN}`)
+  await page.goto(`${APP}passkey#${TOKEN}`)
   await expect(page.locator('h1')).toHaveText('添加通行密钥')
   // The page starts from a name with this domain in it.
   await expect(page.getByLabel('名称')).toHaveValue(new RegExp(`${HOST}$`))
@@ -166,7 +166,7 @@ test('a link that no longer works says so', async ({ page }) => {
       json: { error: '链接已失效，请在 Telegram 中重新发送 /passkey' },
     }),
   )
-  await page.goto(`${APP}#/passkey/${TOKEN}`)
+  await page.goto(`${APP}passkey#${TOKEN}`)
   await page.getByRole('button', { name: '创建通行密钥' }).click()
   await expect(page.getByRole('alert')).toHaveText(
     '链接已失效，请在 Telegram 中重新发送 /passkey',
@@ -241,7 +241,7 @@ test('the settings page lists, adds, renames and deletes passkeys', async ({
     }
     return r.fulfill({ json: { items: [] } })
   })
-  await page.goto(`${APP}#/settings/passkeys`)
+  await page.goto(`${APP}settings/passkeys`)
   // 设置's 通行密钥 section.
   const section = page.getByRole('region', { name: '通行密钥' })
   await expect(section).toContainText('Mac Safari · midden.test')
@@ -314,7 +314,7 @@ test('the settings page adds a domain and removes it with its passkeys', async (
     }
     return r.fulfill({ json: { items: [] } })
   })
-  await page.goto(`${APP}#/settings/admin/origins`)
+  await page.goto(`${APP}settings/admin/origins`)
   const domains = page.getByRole('region', { name: '域名' })
   await expect(domains).toContainText('midden.test')
   await expect(domains).toContainText('Mini App 地址')
@@ -335,7 +335,7 @@ test('the settings page adds a domain and removes it with its passkeys', async (
   await confirm.getByRole('button', { name: '删除域名' }).click()
   await expect(domains).not.toContainText('archive.example')
   // The passkeys page reads them again when it is opened.
-  await page.goto(`${APP}#/settings/passkeys`)
+  await page.goto(`${APP}settings/passkeys`)
   const keys = page.getByRole('region', { name: '通行密钥' })
   await expect(keys).toBeVisible()
   await expect(keys).not.toContainText('iPhone')

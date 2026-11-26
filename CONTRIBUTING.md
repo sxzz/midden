@@ -8,7 +8,7 @@
 pnpm install
 pnpm build          # 构建 Atmosphere 与网页
 SECRET_KEY=$(openssl rand -base64 48) pnpm dev   # 启动服务端，数据在 server/data
-pnpm --filter @midden/web dev                     # 网页开发服务器，代理 /v1 到 8080
+pnpm --filter @midden/web dev                     # 网页开发服务器（/app/ 下的路径都回到网页），代理 /v1 到 8080
 ```
 
 `pnpm dev` 在一个进程中运行全部（`MIDDEN_ROLE` 默认 `all`），测试也是这样。生产环境分成网页进程和 worker 两个进程（见 `docs/architecture.md`「进程」），本地要试时在两个终端分别运行 `MIDDEN_ROLE=web pnpm dev` 与 `MIDDEN_ROLE=worker pnpm dev`，数据目录相同；worker 的健康检查端口是 `WORKER_HEALTH_PORT`（默认 8082）。

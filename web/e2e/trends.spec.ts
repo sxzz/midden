@@ -63,7 +63,7 @@ test('charts a profile’s counts from its detail and returns to it', async ({
     else if (path === `/v1/collections/${profileId}`) json = profile
     return route.fulfill({ json })
   })
-  await page.goto(`/app/#/collection/${profileId}`)
+  await page.goto(`/app/collection/${profileId}`)
   await page.getByRole('link', { name: '统计趋势' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/stats$`))
   await expect(page.locator('h1')).toHaveText('统计趋势')

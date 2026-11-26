@@ -21,7 +21,7 @@ vi.mock('vue-router', async () => {
         if (typeof to !== 'string') return resolve(to as never)
         const [path, query = ''] = to.split('?', 2)
         return {
-          href: `#${to}`,
+          href: `/app${to}`,
           path,
           query: Object.fromEntries(new URLSearchParams(query)),
           hash: '',
@@ -104,22 +104,22 @@ it('links each other tab to the page it was left on, as a real link', async () =
   leftOn()
   at('relations', CENTRE)
   const el = mount()
-  expect(tab(el, '探索').getAttribute('href')).toBe('#/collection/1')
-  expect(tab(el, '设置').getAttribute('href')).toBe('#/settings/admin')
-  expect(tab(el, '采集').getAttribute('href')).toBe('#/captures/1')
+  expect(tab(el, '探索').getAttribute('href')).toBe('/app/collection/1')
+  expect(tab(el, '设置').getAttribute('href')).toBe('/app/settings/admin')
+  expect(tab(el, '采集').getAttribute('href')).toBe('/app/captures/1')
   leftOn()
   tabStates.value = {
     ...tabStates.value,
     settings: { root: '/settings', stack: ['/settings?a=1'], scroll: 0 },
   }
   await nextTick()
-  expect(tab(el, '设置').getAttribute('href')).toBe('#/settings?a=1')
+  expect(tab(el, '设置').getAttribute('href')).toBe('/app/settings?a=1')
   // The open tab leads to its root, as tapping it does.
-  expect(tab(el, '关系').getAttribute('href')).toBe(`#${CENTRE}`)
+  expect(tab(el, '关系').getAttribute('href')).toBe(`/app${CENTRE}`)
   at('collection', '/collection/1')
   await nextTick()
-  expect(tab(el, '探索').getAttribute('href')).toBe(`#${ACCOUNTS}`)
-  expect(tab(el, '关系').getAttribute('href')).toBe(`#${CENTRE}`)
+  expect(tab(el, '探索').getAttribute('href')).toBe(`/app${ACCOUNTS}`)
+  expect(tab(el, '关系').getAttribute('href')).toBe(`/app${CENTRE}`)
   expect(el.querySelector('nav')?.getAttribute('aria-label')).toBe('主导航')
 })
 

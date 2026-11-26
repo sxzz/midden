@@ -418,7 +418,7 @@ The owner's public links (公开分享): a folder, a post or an account anyone w
   "items": [
     {
       "id": "01f0…",
-      "url": "https://<host>/app/#/s/cats-2026",
+      "url": "https://<host>/app/s/cats-2026",
       "target": "folder",
       "target_id": "01b0…",
       "name": "猫",

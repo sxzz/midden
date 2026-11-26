@@ -265,7 +265,7 @@ it('links each pinned post to its collection, else to the platform', async () =>
   expect(links.map(text)).toEqual(['x.com/i/web/status/7', '置顶的话'])
   expect(links.map((a) => a.getAttribute('href'))).toEqual([
     'https://x.com/i/web/status/7',
-    '#/collection/saved',
+    '/app/collection/saved',
   ])
   expect(links[0]!.getAttribute('target')).toBe('_blank')
   expect(

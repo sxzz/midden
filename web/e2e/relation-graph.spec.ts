@@ -83,7 +83,7 @@ test('opens a profile’s follow graph, with kinds to choose and more to load', 
     }
     return route.fulfill({ json: fixed[url.pathname] ?? {} })
   })
-  await page.goto(`/app/#/collection/${profileId}`)
+  await page.goto(`/app/collection/${profileId}`)
 
   await page.getByRole('link', { name: '关系图谱' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/graph$`))
@@ -210,7 +210,7 @@ test('marks the graph by a viewer account, and starts a comparison from it', asy
       })
     return route.fulfill({ json: url.pathname === '/v1/tags' ? [] : {} })
   })
-  await page.goto(`/app/#/collection/${profileId}/graph`)
+  await page.goto(`/app/collection/${profileId}/graph`)
   // The owner's own account marks the graph by default.
   await expect.poll(() => asked.at(-1)?.get('viewer')).toBe(OWN)
   expect(asked).toHaveLength(1)
@@ -255,7 +255,7 @@ test('marks the graph by a viewer account, and starts a comparison from it', asy
   await expect(options).toHaveText(['我 @me', '别人 @other'])
   await options.filter({ hasText: '@me' }).click()
   await page.getByRole('link', { name: '对比 2 个账号' }).click()
-  await expect(page).toHaveURL(/#\/compare\?/)
+  await expect(page).toHaveURL(/\/app\/compare\?/)
   const address = new URLSearchParams(page.url().split('?', 2)[1])
   expect(address.getAll('rel_of')).toEqual(['x/x.profile/100', OWN])
   expect(address.get('viewer')).toBe(OTHER)

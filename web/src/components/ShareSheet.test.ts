@@ -10,10 +10,10 @@ const FOLDER = '00000000-0000-7000-8000-00000000000f'
 const SHARE = '00000000-0000-7000-8000-0000000000aa'
 const SLUG = 'AbCdEfGhIjKlMnOpQrStUv_-'
 // The app's own address with the share's route: /app/ when built.
-const LINK = `${location.origin}${import.meta.env.BASE_URL}#/s/${SLUG}`
+const LINK = `${location.origin}${import.meta.env.BASE_URL}s/${SLUG}`
 const RANDOM = 'ZyXwVuTsRqPoNmLkJiHgFeDc'
 const linkTo = (slug: string) =>
-  `${location.origin}${import.meta.env.BASE_URL}#/s/${slug}`
+  `${location.origin}${import.meta.env.BASE_URL}s/${slug}`
 
 let shares: Share[] = []
 let api: ReturnType<typeof mockApi>
@@ -181,7 +181,7 @@ it('shares a folder from its menu, showing the link it already has', async () =>
   expect(sheet.textContent).toContain('公开分享收藏夹「精选」')
   await vi.waitFor(() =>
     expect(sheet.querySelector('input')?.value).toBe(
-      `${location.origin}${import.meta.env.BASE_URL}#/s/Folder_Slug_000000000000`,
+      `${location.origin}${import.meta.env.BASE_URL}s/Folder_Slug_000000000000`,
     ),
   )
   expect(button(sheet, '取消公开')).toBeTruthy()

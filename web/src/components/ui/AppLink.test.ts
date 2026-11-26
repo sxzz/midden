@@ -66,7 +66,7 @@ it('links to a route by its hash address and follows a plain click through the r
   const navigate = vi.fn()
   const el = mount(AppLink, { to: COLLECTION, onNavigate: navigate })
   const link = el.querySelector('a')!
-  expect(link.getAttribute('href')).toBe('#/collection/c1')
+  expect(link.getAttribute('href')).toBe('/app/collection/c1')
   expect(link.hasAttribute('target')).toBe(false)
   const event = click(link)
   expect(event.defaultPrevented).toBe(true)
@@ -106,7 +106,7 @@ it('replaces the entry when asked', () => {
 })
 
 it('takes an app address as href, and opens another site in a new tab', () => {
-  const inside = mount(AppLink, { href: '#/collection/c2' })
+  const inside = mount(AppLink, { href: '/app/collection/c2' })
   click(inside.querySelector('a')!)
   expect(router.push).toHaveBeenCalledWith('/collection/c2')
   unmount()
@@ -132,7 +132,7 @@ it('renders a list row as a link with `to`, another site with `href`, an action 
     onNavigate: navigate,
   })
   const row = el.querySelector('a.row')!
-  expect(row.getAttribute('href')).toBe('#/collection/c1/stats')
+  expect(row.getAttribute('href')).toBe('/app/collection/c1/stats')
   expect(row.textContent).toContain('统计趋势')
   expect(row.querySelector('.chevron')).not.toBeNull()
   click(row)
@@ -159,7 +159,7 @@ it('goes back through history, linking to the same page for a new tab', () => {
   router.options.history.state.back = '/collection/c1'
   const el = mount(BackLink, {})
   const link = el.querySelector('a')!
-  expect(link.getAttribute('href')).toBe('#/collection/c1')
+  expect(link.getAttribute('href')).toBe('/app/collection/c1')
   expect(click(link).defaultPrevented).toBe(true)
   expect(router.back).toHaveBeenCalledOnce()
   // A new tab opens it; this page stays.
@@ -170,7 +170,7 @@ it('goes back through history, linking to the same page for a new tab', () => {
   router.options.history.state.back = null
   shareSlug.value = 'slug'
   const shared = mount(BackLink, {})
-  expect(shared.querySelector('a')!.getAttribute('href')).toBe('#/s/slug')
+  expect(shared.querySelector('a')!.getAttribute('href')).toBe('/app/s/slug')
   click(shared.querySelector('a')!)
   expect(router.replace).toHaveBeenCalledWith({
     name: 'share',

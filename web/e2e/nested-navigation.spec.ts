@@ -76,7 +76,7 @@ for (const deep of [false, true]) {
           ) || {}
       return route.fulfill({ json })
     })
-    await page.goto(deep ? `/app/#/collection/${postId}` : '/app/#/?q=fixture')
+    await page.goto(deep ? `/app/collection/${postId}` : '/app/?q=fixture')
     if (!deep) await page.locator('.row .head').click()
     await page.locator('.post .profile-link').click()
     await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
@@ -87,7 +87,7 @@ for (const deep of [false, true]) {
     await page.getByRole('link', { name: '返回', exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`/collection/${postId}$`))
     await page.getByRole('link', { name: '返回', exact: true }).click()
-    await expect(page).toHaveURL(deep ? /#\/$/ : /#\/\?q=fixture$/)
+    await expect(page).toHaveURL(deep ? /\/app\/$/ : /\/app\/\?q=fixture$/)
     await expect(page.locator('h1')).toHaveText('我的收藏')
   })
 }

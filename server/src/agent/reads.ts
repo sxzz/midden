@@ -598,7 +598,7 @@ function sharesOf(r: AgentReader, input: { of?: string; origin: string }) {
   return {
     items: shares.map((share) => ({
       id: share.id,
-      url: `${input.origin}/app/#/s/${share.slug}`,
+      url: `${input.origin}/app/s/${share.slug}`,
       target:
         share.target === 'folder'
           ? 'folder'

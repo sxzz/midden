@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { deliveryParts } from './parts.ts'
 import {
+  appURL,
   collectionMessage,
   groupKeyboard,
   jobState,
@@ -119,7 +120,7 @@ describe('presentation', () => {
     expect(message.keyboard.at(-1)).toEqual([
       {
         text: '在小程序中打开',
-        web_app: { url: `https://midden.test/app/?v=1#/collection/${id}` },
+        web_app: { url: `https://midden.test/app/collection/${id}?v=1` },
       },
     ])
   })
@@ -256,5 +257,30 @@ describe('deliveryParts', () => {
         entities: [],
       },
     ])
+  })
+})
+
+describe('the web app’s addresses', () => {
+  test('are plain paths under the app, with no fragment', () => {
+    expect(appURL('https://midden.test/app/', '/captures/x').href).toBe(
+      'https://midden.test/app/captures/x',
+    )
+    expect(appURL('https://midden.test/app', '/settings/admin').href).toBe(
+      'https://midden.test/app/settings/admin',
+    )
+    // The route's query, then the app address's own (a cache-buster).
+    expect(
+      appURL('https://midden.test/app/?v=2', '/captures?dialog=accounts').href,
+    ).toBe('https://midden.test/app/captures?dialog=accounts&v=2')
+    expect(
+      webRoute(
+        'https://midden.test/app/',
+        '添加账号',
+        '/captures?dialog=accounts',
+      ),
+    ).toEqual({
+      text: '添加账号',
+      web_app: { url: 'https://midden.test/app/captures?dialog=accounts' },
+    })
   })
 })

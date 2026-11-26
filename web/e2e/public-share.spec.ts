@@ -110,7 +110,7 @@ test('a public link opens a folder and its items without login', async ({
     return route.fulfill({ json })
   })
 
-  await page.goto(`/app/#/s/${slug}`)
+  await page.goto(`/app/s/${slug}`)
   await expect(page.locator('h1')).toHaveText('公开收藏夹')
   await expect(page.getByText('公开的帖子')).toBeVisible()
   await expect(page.locator('.total')).toHaveText('1 条')
@@ -139,7 +139,9 @@ test('a public link opens a folder and its items without login', async ({
   await expect(page.getByLabel('排序', { exact: true })).toHaveValue('updated')
 
   await page.locator('.row .head').click()
-  await expect(page).toHaveURL(new RegExp(`#/s/${slug}/collection/${postId}$`))
+  await expect(page).toHaveURL(
+    new RegExp(`/app/s/${slug}/collection/${postId}$`),
+  )
   await expect(page.locator('h1')).toHaveText('帖子')
   for (const action of ['删除这条收藏', '公开分享', '我的整理'])
     await expect(page.getByText(action)).toHaveCount(0)
@@ -150,7 +152,7 @@ test('a public link opens a folder and its items without login', async ({
   // The author is shared too, so its link stays inside the share.
   await page.locator('a.profile-link').click()
   await expect(page).toHaveURL(
-    new RegExp(`#/s/${slug}/collection/${profileId}$`),
+    new RegExp(`/app/s/${slug}/collection/${profileId}$`),
   )
   await expect(page.getByText('作者简介')).toBeVisible()
 
@@ -168,6 +170,6 @@ test('a revoked link says so', async ({ page }) => {
   await page.route('**/v1/**', (route) =>
     route.fulfill({ status: 404, json: { error: '内容不存在或已删除' } }),
   )
-  await page.goto(`/app/#/s/${slug}`)
+  await page.goto(`/app/s/${slug}`)
   await expect(page.getByRole('alert')).toHaveText('链接不存在或已取消公开')
 })

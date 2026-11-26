@@ -343,7 +343,7 @@ it("moves a profile's timeline to its 资料修改记录 page; a post keeps its 
     expect(found).toBeDefined()
     return found!
   })
-  expect(link.getAttribute('href')).toBe('#/collection/profile/changes')
+  expect(link.getAttribute('href')).toBe('/app/collection/profile/changes')
   expect(el.querySelector('input[type="range"]')).toBeNull()
   expect(el.textContent).not.toContain('资料变化')
   unmount()

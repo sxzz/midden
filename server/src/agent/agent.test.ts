@@ -710,7 +710,7 @@ describe('writes', () => {
     expect(listed.json.items).toEqual([
       {
         id: share.id,
-        url: `http://localhost/app/#/s/${share.slug}`,
+        url: `http://localhost/app/s/${share.slug}`,
         target: 'account',
         target_id: f.ids['7'],
         created_at: expect.any(String),

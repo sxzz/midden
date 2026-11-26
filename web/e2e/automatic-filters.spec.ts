@@ -67,7 +67,7 @@ test('filter changes apply immediately without collapsing controls', async ({
   expect(queries.length).toBe(requests)
   await page.getByRole('button', { name: '清除', exact: true }).click()
   await expect.poll(() => queries.at(-1)?.getAll('author')).toEqual([])
-  await expect(page).toHaveURL(/#\/$/)
+  await expect(page).toHaveURL(/\/app\/$/)
   await expect(panel).toHaveAttribute('aria-expanded', 'true')
   await expect(list).toBeVisible()
   await expect(list.getByRole('option', { name: '作者甲' })).toHaveAttribute(

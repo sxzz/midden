@@ -1,9 +1,10 @@
 <script setup vapor lang="ts">
 import { computed } from 'vue'
 import { useRouter, type RouteLocationRaw } from 'vue-router'
+import { appPath } from '../../app-path'
 import { navigatesHere } from '../../navigation'
 /**
- * A link: to a route of the app (`to`, or an `href` starting with `#/`), or
+ * A link: to a route of the app (`to`, or an `href` under `/app/`), or
  * to another site (`href`), which opens in a new tab. A plain click on an
  * app link navigates through the router; any other click is the browser's,
  * so Cmd/Ctrl-click, the middle button and the context menu open it in a new
@@ -22,7 +23,10 @@ const address = computed(() =>
 )
 const external = computed(
   () =>
-    props.to === undefined && !!address.value && !address.value.startsWith('#'),
+    props.to === undefined &&
+    !!address.value &&
+    !address.value.startsWith('#') &&
+    appPath(address.value) === undefined,
 )
 function click(event: MouseEvent) {
   if (
@@ -34,7 +38,7 @@ function click(event: MouseEvent) {
     return
   event.preventDefault()
   emit('navigate')
-  const to = props.to ?? address.value.slice(1)
+  const to = props.to ?? appPath(address.value)!
   void (props.replace ? router.replace(to) : router.push(to))
 }
 </script>

@@ -135,7 +135,7 @@ it('opens a shared folder without login, with a tab per kind it holds', async ()
   // Items open inside the share.
   expect(
     el.querySelector<HTMLAnchorElement>('a.head')?.getAttribute('href'),
-  ).toBe(`#/s/${SLUG}/collection/${POST}`)
+  ).toBe(`/app/s/${SLUG}/collection/${POST}`)
   // Nothing of the owner's: no batch update, no login.
   expect(buttons(el)).not.toContain('多选')
   expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
@@ -269,7 +269,7 @@ it('shows a shared post read-only, its links kept inside the share', async () =>
     expect(el.textContent).not.toContain(label)
   expect(
     [...el.querySelectorAll('a')].some(
-      (a) => a.getAttribute('href') === `#/s/${SLUG}/collection/${PROFILE}`,
+      (a) => a.getAttribute('href') === `/app/s/${SLUG}/collection/${PROFILE}`,
     ),
   ).toBe(true)
   // Sensitive media starts covered.
@@ -294,7 +294,7 @@ it('shows a shared post read-only, its links kept inside the share', async () =>
     a.textContent?.trim().startsWith('关注变化'),
   )!
   expect(follows.getAttribute('href')).toBe(
-    `#/s/${SLUG}/collection/${PROFILE}/follows`,
+    `/app/s/${SLUG}/collection/${PROFILE}/follows`,
   )
   follows.click()
   await vi.waitFor(() =>

@@ -166,7 +166,7 @@ it('shows and edits a watch: next run, last run, removal', async () => {
   expect(facts[0]).toMatch(/^下次 (今天|明天) \d+:\d\d$/)
   expect(facts[1]).toMatch(/^上次 今天 \d+:\d\d · 已完成$/)
   expect(el.querySelector('.fact a')?.getAttribute('href')).toBe(
-    '#/captures/run',
+    '/app/captures/run',
   )
   expect(el.querySelector('.action.strong')?.textContent?.trim()).toBe('保存')
   el.querySelector<HTMLButtonElement>('.action.destructive')!.click()
@@ -222,7 +222,7 @@ it('settings list every watch, and turn one off or remove it', async () => {
   const rows = [...el.querySelectorAll('.watch')]
   expect(rows[0]!.querySelector('.name')?.textContent).toBe('@cat')
   expect(rows[0]!.querySelector('.name')?.getAttribute('href')).toBe(
-    '#/collection/p',
+    '/app/collection/p',
   )
   expect(rows[0]!.textContent).toContain('每天 · 最新 100 条')
   expect(rows[1]!.querySelector('.name')?.textContent).toBe('收藏夹「猫」')

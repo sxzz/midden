@@ -277,7 +277,7 @@ describe('telegram commands', () => {
     expect(add.keyboard![0]).toEqual([
       {
         text: '添加账号',
-        web_app: { url: 'https://midden.test/app/#/captures?dialog=accounts' },
+        web_app: { url: 'https://midden.test/app/captures?dialog=accounts' },
       },
     ])
   })

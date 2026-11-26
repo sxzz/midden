@@ -7,6 +7,7 @@ import {
   shallowRef,
 } from 'vue'
 import { call, client, errorText, type CaptureRecord } from '../api'
+import { appHref } from '../app-path'
 import { defaultOptions, type Options } from '../capture-options'
 import {
   extractLinks,
@@ -208,7 +209,7 @@ async function submit() {
       v-for="r in group.items"
       :key="r.id"
       class="record"
-      :href="`#/captures/${r.id}`"
+      :href="appHref(`/captures/${r.id}`)"
     >
       <span class="main">
         <span class="title">{{ recordTitle(r) }}</span>

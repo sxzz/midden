@@ -28,7 +28,7 @@ const PATHS: Record<string, string> = {
 }
 
 export function resolveHref(to: RouteLocationRaw): string {
-  if (typeof to === 'string') return `#${to}`
+  if (typeof to === 'string') return `/app${to}`
   const named = to as {
     name?: string
     path?: string
@@ -47,7 +47,7 @@ export function resolveHref(to: RouteLocationRaw): string {
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(named.query ?? {}))
     for (const item of [value ?? []].flat()) query.append(key, item)
-  return `#${path}${query.size ? `?${query}` : ''}`
+  return `/app${path}${query.size ? `?${query}` : ''}`
 }
 
 /** `router.resolve` of the mocked router. */

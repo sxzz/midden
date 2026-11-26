@@ -63,10 +63,10 @@ test('platform filter merges Instagram and X and preserves legacy X links', asyn
   await page.getByRole('button', { name: /^筛选/ }).click()
   await page.getByLabel('平台', { exact: true }).selectOption('instagram')
   await expect.poll(() => query.get('entity_type')).toBe('instagram.profile')
-  await page.goto('/app/#/?entity_type=x.post')
+  await page.goto('/app/?entity_type=x.post')
   await expect.poll(() => query.get('entity_type')).toBe('x.post')
   await expect(page.getByLabel('平台', { exact: true })).toHaveValue('x')
-  await page.goto('/app/#/?entity_type=x.profile')
+  await page.goto('/app/?entity_type=x.profile')
   await expect.poll(() => query.get('entity_type')).toBe('x.profile')
   await expect(
     page.getByRole('tab', { name: '账号', exact: true }),

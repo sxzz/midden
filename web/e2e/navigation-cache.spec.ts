@@ -119,7 +119,7 @@ test('a profile keeps its related order, layout and pages after a nested post', 
   const counts = await setup(page)
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
-  await page.goto(`/app/#/collection/${profileId}`)
+  await page.goto(`/app/collection/${profileId}`)
   const list = page.getByRole('region', { name: '关联的收藏' })
   await expect(list.locator('.row')).toHaveCount(3)
   await expect(list.locator('.row').first()).toContainText('合成帖子 5')
@@ -160,7 +160,7 @@ test('the list and a profile each return to their own scroll position', async ({
   page,
 }) => {
   const counts = await setup(page)
-  await page.goto('/app/#/?q=fixture')
+  await page.goto('/app/?q=fixture')
   await expect(page.locator('.row')).toHaveCount(13)
   const listScroll = await scrollTo(page, 300)
   expect(listScroll).toBeGreaterThan(0)
@@ -189,7 +189,7 @@ test('the list and a profile each return to their own scroll position', async ({
   await expect(list.locator('.row')).toHaveCount(5)
 
   await backButton(page).click()
-  await expect(page).toHaveURL(/#\/\?q=fixture$/)
+  await expect(page).toHaveURL(/\/app\/\?q=fixture$/)
   await expect.poll(() => scrollY(page)).toBe(listScroll)
   await expect(page.locator('.row')).toHaveCount(13)
   expect(counts.detailLoads(profileId)).toBe(1)

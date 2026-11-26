@@ -264,7 +264,7 @@ test('shows collection progress, member failures, stop and retry', async ({
       })
     return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
-  await page.goto(`/app/#/captures/${profile}`)
+  await page.goto(`/app/captures/${profile}`)
   // The toast region is a status too; this is the record's own line.
   const status = page.locator('p[role=status]')
   await expect(status).toContainText('正在保存帖子 · 帖子 2/3 · 失败 1')
@@ -325,7 +325,7 @@ test('shows collection progress, member failures, stop and retry', async ({
 
   await page.getByRole('button', { name: '重新采集', exact: true }).click()
   // Retrying the whole record opens the record it created.
-  await expect(page).toHaveURL(new RegExp(`#/captures/${retried}$`))
+  await expect(page).toHaveURL(new RegExp(`/app/captures/${retried}$`))
   expect(posted).toEqual([
     'stop',
     'retry-failed:all',
@@ -388,7 +388,7 @@ test('a finished profile record fetches more pages as its own record', async ({
       })
     return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
-  await page.goto(`/app/#/captures/${profile}`)
+  await page.goto(`/app/captures/${profile}`)
   await expect(page.locator('p[role=status]')).toContainText(
     '已完成 · 帖子 100/100 · 新增 40 · 更新 60',
   )
@@ -406,7 +406,7 @@ test('a finished profile record fetches more pages as its own record', async ({
   await page.getByRole('button', { name: '抓取 1000 条' }).click()
   await expect(page.getByText('没有更多帖子了')).toBeVisible()
   await page.getByRole('button', { name: '抓取更多' }).click()
-  await expect(page).toHaveURL(new RegExp(`#/captures/${next}$`))
+  await expect(page).toHaveURL(new RegExp(`/app/captures/${next}$`))
   // The next page is still running, so it offers nothing to continue yet.
   await expect(page.getByRole('button', { name: '抓取更多' })).toHaveCount(0)
   expect(ops).toEqual(['more1000', 'more'])
@@ -455,7 +455,7 @@ test('loads more capture members automatically at the bottom', async ({
           : {},
     })
   })
-  await page.goto(`/app/#/captures/${profile}`)
+  await page.goto(`/app/captures/${profile}`)
   await expect(page.locator('.member')).toHaveCount(30)
   await page.locator('.member').last().scrollIntoViewIfNeeded()
   await expect(page.locator('.member')).toHaveCount(31)
@@ -527,7 +527,7 @@ test('an update reads as one record in the list', async ({ page }) => {
       return r.fulfill({ json: { items: [folderUpdate, selection] } })
     return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
-  await page.goto('/app/#/captures')
+  await page.goto('/app/captures')
   const running = page.getByRole('link', { name: /更新收藏夹「猫」/ })
   await expect(running).toContainText('正在更新')
   await expect(running).toContainText('新增 3 · 更新 6 · 异常 1 · 进行中 4')
@@ -614,7 +614,7 @@ test("an update's profile stopped by the post cap reads on in the same record", 
     if (path === `/v1/captures/${retried}`) return r.fulfill({ json: update() })
     return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
-  await page.goto(`/app/#/captures/${retried}`)
+  await page.goto(`/app/captures/${retried}`)
   // The profiles are a tab, left of the updated posts.
   await expect(page.getByRole('tab')).toHaveText([
     '新增记录 1000',
@@ -627,7 +627,7 @@ test("an update's profile stopped by the post cap reads on in the same record", 
   await page.getByRole('button', { name: '继续抓取' }).click()
   // The same record, now reading on.
   await expect(profiles).toContainText('资料 ✓ · 帖子 1000/1100')
-  await expect(page).toHaveURL(new RegExp(`#/captures/${retried}$`))
+  await expect(page).toHaveURL(new RegExp(`/app/captures/${retried}$`))
   await expect(page.getByRole('button', { name: '继续抓取' })).toHaveCount(0)
   expect(sent).toEqual([{ collection_id: profile }])
 })
@@ -752,7 +752,7 @@ test("an update's failed parts are retried one at a time or all at once", async 
     if (path === `/v1/captures/${retried}`) return r.fulfill({ json: update() })
     return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
-  await page.goto(`/app/#/captures/${retried}`)
+  await page.goto(`/app/captures/${retried}`)
   const retry = (name: string) =>
     page.getByRole('button', { name, exact: true })
   await expect(retry('重试 @cat 资料')).toBeVisible()

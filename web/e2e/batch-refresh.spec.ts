@@ -38,7 +38,7 @@ test('select collections and update them as one record', async ({ page }) => {
   await page.getByRole('checkbox', { name: /作者1/ }).click()
   await page.getByRole('checkbox', { name: /作者3/ }).click()
   await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(2)
-  await expect(page).toHaveURL(/#\/$/)
+  await expect(page).toHaveURL(/\/app\/$/)
   await expect(bar.getByText('已选 2 项')).toBeVisible()
   await page.getByRole('button', { name: '更新', exact: true }).click()
   // The sheet says what the update covers; posts have only their own.
@@ -64,7 +64,7 @@ test('select collections and update them as one record', async ({ page }) => {
     },
   })
   await page.getByRole('link', { name: '查看进度' }).click()
-  await expect(page).toHaveURL(/#\/captures\/record$/)
+  await expect(page).toHaveURL(/\/app\/captures\/record$/)
 })
 
 test('select all toggles every listed collection', async ({ page }) => {

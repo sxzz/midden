@@ -194,7 +194,7 @@ const related = computed(() => {
       <AppLink
         v-if="detail.record && !shared"
         class="aside-more"
-        :href="`#/captures/${detail.record}`"
+        :to="{ name: 'capture', params: { id: detail.record } }"
         >{{ detail.updating ? '更新中，查看进度' : '最近一次更新' }}</AppLink
       >
       <AppLink

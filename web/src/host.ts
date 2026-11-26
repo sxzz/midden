@@ -1,3 +1,4 @@
+import { appHref } from './app-path'
 interface Telegram {
   isVersionAtLeast?: (version: string) => boolean
   downloadFile?: (
@@ -32,10 +33,11 @@ export function host() {
 
 const SDK = 'https://telegram.org/js/telegram-web-app.js'
 let loading: Promise<void> | undefined
-/** Whether an address is a public link's (分享), read by visitors. */
-export const isPublicAddress = (hash: string) => hash.startsWith('#/s/')
+/** Whether an address (a path) is a public link's (分享), read by visitors. */
+export const isPublicAddress = (path: string) => path.startsWith(appHref('/s/'))
 /** A /passkey link, opened in a browser to add a passkey. */
-const isPasskeyAddress = (hash: string) => hash.startsWith('#/passkey/')
+const isPasskeyAddress = (path: string) =>
+  path === appHref('/passkey') || path.startsWith(appHref('/passkey/'))
 /**
  * Load Telegram's Mini App script once, for the owner's app only: a public
  * page or a /passkey link never asks telegram.org for anything. Settles
@@ -43,8 +45,8 @@ const isPasskeyAddress = (hash: string) => hash.startsWith('#/passkey/')
  * router first reads the address, as the script takes the launch data
  * (`tgWebAppData`) from it.
  */
-export function loadHost(hash = location.hash): Promise<void> {
-  if (host() || isPublicAddress(hash) || isPasskeyAddress(hash))
+export function loadHost(path = location.pathname): Promise<void> {
+  if (host() || isPublicAddress(path) || isPasskeyAddress(path))
     return Promise.resolve()
   loading ??= new Promise((resolve) => {
     const script = document.createElement('script')

@@ -71,10 +71,10 @@ it.each([
 it('opens a route in a new tab by its hash address', () => {
   const open = vi.spyOn(globalThis, 'open').mockReturnValue(null)
   const router = {
-    resolve: () => ({ href: '#/collection/c' }),
+    resolve: () => ({ href: '/app/collection/c' }),
   } as unknown as Router
   openInNewTab(router, { name: 'collection', params: { id: 'c' } })
-  expect(open).toHaveBeenCalledWith('#/collection/c', '_blank', 'noopener')
+  expect(open).toHaveBeenCalledWith('/app/collection/c', '_blank', 'noopener')
   open.mockRestore()
 })
 it.each([{ metaKey: true }, { button: 1 }])(
@@ -83,7 +83,7 @@ it.each([{ metaKey: true }, { button: 1 }])(
     miniApp()
     const router = fixture()
     const link = document.createElement('a')
-    link.href = '#/collection/detail'
+    link.href = '/app/collection/detail'
     const event = new MouseEvent('click', { cancelable: true, ...options })
     Object.defineProperty(event, 'target', { value: link })
     followInternalLink(router, event)
@@ -101,7 +101,7 @@ it.each([
 ])('preserves native link gestures %o', (options) => {
   const router = fixture()
   const link = document.createElement('a')
-  link.href = '#/collection/detail'
+  link.href = '/app/collection/detail'
   const event = new MouseEvent('click', { cancelable: true, ...options })
   Object.defineProperty(event, 'target', { value: link })
   followInternalLink(router, event)

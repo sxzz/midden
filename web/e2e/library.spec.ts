@@ -506,7 +506,7 @@ test('a failed update says why every time it is tried', async ({ page }) => {
     if (path === '/v1/tags') return r.fulfill({ json: [] })
     return r.fulfill({ json: {} })
   })
-  await page.goto(`/app/#/collection/${id}`)
+  await page.goto(`/app/collection/${id}`)
   await expect(page.getByText(collection.text)).toBeVisible()
   await page.getByRole('button', { name: '更新', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: '更新 1 条帖子' })

@@ -1,4 +1,5 @@
 import { shallowRef } from 'vue'
+import { appHref } from './app-path'
 import type { RouteLocationRaw, Router } from 'vue-router'
 
 /**
@@ -18,7 +19,7 @@ export function followShare(router: Router) {
 /** The address of a collection, inside the share when one is open. */
 export function collectionHref(id: string) {
   const path = `/collection/${encodeURIComponent(id)}`
-  return shareSlug.value ? `#/s/${shareSlug.value}${path}` : `#${path}`
+  return appHref(shareSlug.value ? `/s/${shareSlug.value}${path}` : path)
 }
 
 /** A collection's page, or one of its own pages, as a route. */
@@ -34,5 +35,5 @@ export function collectionRoute(
 
 /** The public address of a link, as the owner copies it. */
 export function shareURL(slug: string) {
-  return new URL(`${import.meta.env.BASE_URL}#/s/${slug}`, location.origin).href
+  return new URL(appHref(`/s/${slug}`), location.origin).href
 }

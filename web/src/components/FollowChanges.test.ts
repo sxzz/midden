@@ -109,7 +109,7 @@ it('opens a saved account, and leaves an unsaved one as text', async () => {
   const { el } = await mount(() => changes)
   const links = el.querySelectorAll<HTMLAnchorElement>('a.account-row')
   expect(links).toHaveLength(1)
-  expect(links[0]!.getAttribute('href')).toBe('#/collection/c1')
+  expect(links[0]!.getAttribute('href')).toBe('/app/collection/c1')
   links[0]!.click()
   expect(push).toHaveBeenCalledWith({
     name: 'collection',

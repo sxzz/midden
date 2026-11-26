@@ -50,7 +50,7 @@ it('shows the quoted post as an internal collection link with its text', () => {
   expect(el.querySelector('.context')?.textContent).toContain('引用了这条帖子')
   expect(link.textContent).not.toContain('引用了这条帖子')
   expect(link.textContent).toContain('引用的原帖正文')
-  expect(link.getAttribute('href')).toBe('#/collection/saved-quote')
+  expect(link.getAttribute('href')).toBe('/app/collection/saved-quote')
   expect(link.getAttribute('target')).toBeNull()
   // A saved quote is an indented aside, not a card with its own footer.
   expect(link.textContent).not.toContain('在 X')
@@ -79,7 +79,7 @@ it('shows a quoted post kept by reference with its saved summary, or as an X lin
     }).querySelector<HTMLAnchorElement>('.relation')!
   const saved = quote(true)
   expect(saved.textContent).toContain('原作者：已保存的原帖')
-  expect(saved.getAttribute('href')).toBe('#/collection/saved-quote')
+  expect(saved.getAttribute('href')).toBe('/app/collection/saved-quote')
   unmount()
   document.body.replaceChildren()
   const unsaved = quote(false)
@@ -111,7 +111,7 @@ it('heads a quoted post kept by reference with its saved author', () => {
     relations: [{ source: 'post', target: 'quote', type: 'quoted' }],
   })
   const author = el.querySelector<HTMLAnchorElement>('.relation-author')!
-  expect(author.getAttribute('href')).toBe('#/collection/saved-author')
+  expect(author.getAttribute('href')).toBe('/app/collection/saved-author')
   expect(author.textContent).toContain('原帖作者')
   expect(author.textContent).toContain('@quoted_account')
 })
@@ -156,7 +156,7 @@ it('shows profile repost attribution without confusing it with a quoted post', (
   const link = el.querySelector<HTMLAnchorElement>('.relation')!
   expect(el.querySelector('.context')?.textContent).toContain('转发此帖的账号')
   expect(link.textContent).toContain('转发账号')
-  expect(link.getAttribute('href')).toBe('#/collection/profile')
+  expect(link.getAttribute('href')).toBe('/app/collection/profile')
 })
 it('does not invent links for invalid identifiers or unrelated graph edges', () => {
   const el = mount({
@@ -216,10 +216,10 @@ it('heads an outgoing quote with its graph author, avatar and date, linking the 
     ],
   })
   const link = el.querySelector<HTMLAnchorElement>('.relation')!
-  expect(link.getAttribute('href')).toBe('#/collection/saved-quote')
+  expect(link.getAttribute('href')).toBe('/app/collection/saved-quote')
   const author = el.querySelector<HTMLAnchorElement>('.relation-author')!
   expect(author.tagName).toBe('A')
-  expect(author.getAttribute('href')).toBe('#/collection/saved-author')
+  expect(author.getAttribute('href')).toBe('/app/collection/saved-author')
   expect(author.textContent).toContain('被引用账号')
   expect(author.textContent).toContain('@quoted_account')
   // Avatars come from assets already saved here, never from a remote source.
@@ -319,7 +319,7 @@ it('attributes an incoming quote to the author the relation supplies', () => {
   )
   expect(link.textContent).toContain('合成引用内容')
   const author = el.querySelector<HTMLAnchorElement>('.relation-author')!
-  expect(author.getAttribute('href')).toBe('#/collection/saved-author')
+  expect(author.getAttribute('href')).toBe('/app/collection/saved-author')
   expect(author.textContent).toContain('引用此帖的账号')
   expect(author.textContent).toContain('@quoting_account')
   // No avatar was saved for this author, so the header simply omits one.
@@ -484,8 +484,8 @@ it('shows saved incoming repost accounts and quote/repost posts without duplicat
   expect(contexts[0]).toContain('转发此帖的账号')
   expect(contexts[1]).toContain('这条帖子引用了当前帖子')
   expect(contexts[2]).toContain('这条帖子转发了当前帖子')
-  expect(links[0]?.getAttribute('href')).toBe('#/collection/saved-profile')
-  expect(links[1]?.getAttribute('href')).toBe('#/collection/saved-quote')
+  expect(links[0]?.getAttribute('href')).toBe('/app/collection/saved-profile')
+  expect(links[1]?.getAttribute('href')).toBe('/app/collection/saved-quote')
   expect(links[2]?.getAttribute('href')).toBe('https://x.com/i/web/status/567')
 })
 it('shows a quoted post’s author as last seen, with its lock', () => {

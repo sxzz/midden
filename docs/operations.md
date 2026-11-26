@@ -17,7 +17,7 @@
 - 新增域名：在已登录的域名上打开「设置 → 管理员面板 → 域名」，输入新域名的 https 地址添加；然后在 Telegram 发送 `/passkey`，点开新域名的按钮，在那里创建它的第一个通行密钥。
 - 删除域名：同时删除这个域名的通行密钥，之前发出的这个域名的 `/passkey` 链接失效。`WEB_APP_URL` 的域名不能删除。添加和删除域名时 Bot 给所有者发一条消息。
 
-网页也可以继续单独部署在 Cloudflare 静态托管（`pnpm --filter @midden/web run deploy`），此时代理需把同域的 `/v1/` 与 `/media/` 转发到本服务。
+网页也可以继续单独部署在 Cloudflare 静态托管（`pnpm --filter @midden/web run deploy`），此时代理需把同域的 `/v1/` 与 `/media/` 转发到本服务。网页的地址是 `/app/` 下的普通路径（如 `/app/settings/admin/jobs`），不是文件的路径都要返回 `index.html`：本服务自己这样回答；Cloudflare 上由 `web/wrangler.json` 的 `not_found_handling: "single-page-application"` 回答（资源根目录的 `index.html`，由 `scripts/prepare-web-assets.ts` 放入），随部署生效，不需要在控制台另外设置。其他反向代理或静态托管也需要同样的回退，且不能改写 `/v1`、`/media`、`/agent`、`/agent.md`、`/healthz`。
 
 ## API 令牌
 
@@ -521,7 +521,7 @@ rm ~/Library/LaunchAgents/org.midden.backup.plist
 
 - R2：每个存储桶的存储（最近一天的最大值，载荷加元数据）、对象数、本月的 Class A 与 Class B 次数，以及读取分析数据的时间；「刷新」立即重读（距上次不到 1 分钟时不重读）。
 - 本月费用：存储、Class A、Class B 各自的已用量、免费额度、已用比例和金额，以及合计（见「费用」）。
-- 本机：可用磁盘与总容量、数据库文件（空闲页与 WAL）、缩略图、媒体目录（每天统计）、部署前的数据库备份，以及「按占用空间排列收藏」（收藏库按占用空间排序，`#/?sort=storage`）。
+- 本机：可用磁盘与总容量、数据库文件（空闲页与 WAL）、缩略图、媒体目录（每天统计）、部署前的数据库备份，以及「按占用空间排列收藏」（收藏库按占用空间排序，`/app/?sort=storage`）。
 - 数据库：最大的 15 个表和索引及占比、其余合计、总计和统计时间。
 - 趋势：每天一点的折线图（与「统计趋势」同一个图表），30 天、90 天或全部：每个存储桶的存储、每天的 Class A 与 Class B 次数、数据库文件、缩略图、可用磁盘。少于两天读数的不画。
 - 提醒阈值：见「提醒」。

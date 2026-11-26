@@ -67,7 +67,7 @@ async function detail(page: Page, assets: unknown[]) {
   await page.goto('about:blank')
   await page.unrouteAll()
   await serve(page, assets)
-  await page.goto(`/app/#/collection/${id}`)
+  await page.goto(`/app/collection/${id}`)
   await expect(page.locator('.media .frame').first()).toBeVisible()
 }
 
@@ -235,7 +235,7 @@ test('the box is reserved before the image arrives', async ({ page }) => {
   await serve(page, [image(1, 1200, 200)])
   // Hold the file back: the box must already be its final size.
   await page.route('**/v1/assets/**', () => {})
-  await page.goto(`/app/#/collection/${id}`)
+  await page.goto(`/app/collection/${id}`)
   const frame = page.locator('.media .frame')
   await expect(frame).toBeVisible()
   expect((await box(frame)).ratio).toBeCloseTo(6, 0)

@@ -80,7 +80,7 @@ test('a wholly sensitive group is covered once in the list and the detail', asyn
   await groupVeil(page).click()
   // Revealing must not open the viewer, nor navigate into the collection.
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page).toHaveURL(/#\/$/)
+  await expect(page).toHaveURL(/\/app\/$/)
   await expect(groupVeil(page)).toHaveCount(0)
   await page.getByRole('button', { name: '放大图片' }).first().click()
   const dialog = page.getByRole('dialog')
