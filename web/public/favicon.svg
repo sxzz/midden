@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Midden's mark: a heap, three layers. Dark on light tabs, light on dark. -->
+  <style>
+    .tile { fill: #1e1e1e }
+    .heap { fill: #f5f5f5 }
+    @media (prefers-color-scheme: dark) {
+      .tile { fill: #f5f5f5 }
+      .heap { fill: #1e1e1e }
+    }
+  </style>
+  <rect class="tile" width="32" height="32" rx="7" />
+  <g class="heap">
+    <rect x="11" y="7" width="10" height="4" rx="2" />
+    <rect x="8" y="14" width="16" height="4" rx="2" />
+    <rect x="5" y="21" width="22" height="4" rx="2" />
+  </g>
+</svg>
