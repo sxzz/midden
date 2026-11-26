@@ -9,11 +9,16 @@
 // takes the fakes of bench-load/fakes.ts (to measure an older version).
 //
 // Options: profiles=40 (profiles updated), count=300 (posts each, 100 a
-// page), seconds=900 (longest wait), litestream=<binary> (replicate to a
+// page), seconds=900 (longest wait), rounds=1 (updates; all but the last
+// run before the measurement, so the last one captures posts already
+// saved, unchanged), litestream=<binary> (replicate to a
 // local directory with the checkpoint settings of litestream.yml),
 // litestream-config=<file> (another litestream.yml to take them from),
 // pin=<seconds> (30 s into the update, hold a read transaction that long,
-// as a backup or a long report would).
+// as a backup or a long report would), wal=1 (`all` only: turn off the
+// checkpoints and count what each write transaction adds to the WAL during
+// the update, by code and by table, with bench-load/wal-meter.ts; the report
+// is in bench/wal.txt).
 //
 // Every post has an image, one in ten a video too; media upload to a fake
 // R2 bucket, raw responses to a fake raw bucket, thumbnails go through
@@ -30,7 +35,9 @@ import { DatabaseSync } from 'node:sqlite'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { FakeS3 } from '#testing/fake-s3.ts'
+import { PageOwners, walReport } from './bench-load/wal-report.ts'
 import type { Sample } from './bench-load/probe.ts'
+import type { WalLog } from './bench-load/wal-meter.ts'
 import type { Buffer } from 'node:buffer'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -51,6 +58,11 @@ const DATA = path.resolve(dataArg)
 const DB = path.join(DATA, 'midden.db')
 const FFMPEG = process.env.FFMPEG || 'ffmpeg'
 const SECRET = 's'.repeat(48)
+const WAL_LOG = options.wal ? path.join(DATA, 'bench', 'wal-log.json') : ''
+if (WAL_LOG && mode !== 'all') {
+  console.error('wal=1 needs the `all` mode: one process, one connection')
+  process.exit(2)
+}
 
 async function freePort(): Promise<number> {
   const server = createServer()
@@ -180,6 +192,7 @@ const env = {
   BENCH_S3_RAW: s3Raw.endpoint,
   BENCH_IMAGE: media.image,
   BENCH_VIDEO: media.video,
+  ...(WAL_LOG ? { BENCH_WAL_LOG: WAL_LOG } : {}),
 }
 const server = path.join(HERE, 'bench-load', 'server.ts')
 const servers =
@@ -285,6 +298,17 @@ for (let p = 0; p < PROFILES; p++) {
 while (busy()) await sleep(500)
 console.info(`${PROFILES} profiles saved`)
 
+const drained = () => Object.keys(backlog()).length === 0
+for (let round = 1; round < Number(options.rounds ?? 1); round++) {
+  await api('/updates', {
+    target: { target: 'many', ids },
+    options: { posts: 'latest', count: COUNT },
+  })
+  await sleep(1000)
+  while (!drained()) await sleep(1000)
+  console.info(`update ${round} done`)
+}
+
 const probe = start(
   'probe',
   process.execPath,
@@ -300,6 +324,7 @@ const finishedBefore = (
     .get() as { n: number }
 ).n
 const t0 = performance.now()
+const walFrom = statSync(`${DB}-wal`, { throwIfNoEntry: false })?.size ?? 0
 await api('/updates', {
   target: { target: 'many', ids },
   options: { posts: 'latest', count: COUNT },
@@ -316,6 +341,10 @@ const walTimer = setInterval(
   () => (walMax = Math.max(walMax, walBytes())),
   1000,
 )
+const owners = new PageOwners()
+const ownersTimer = WAL_LOG
+  ? setInterval(() => owners.take(reader), 5000)
+  : undefined
 if (options.pin) {
   const pinned = new DatabaseSync(DB, { readOnly: true })
   setTimeout(() => {
@@ -355,6 +384,11 @@ for (;;) {
   if (elapsed > SECONDS) break
 }
 const loadSeconds = (performance.now() - t0) / 1000
+// The WAL report counts the work the update left behind too (uploads,
+// thumbnails, raw responses).
+if (WAL_LOG)
+  while (!drained() && (performance.now() - t0) / 1000 < SECONDS)
+    await sleep(1000)
 const captured =
   (
     reader
@@ -365,6 +399,7 @@ const captured =
   ).n - finishedBefore
 const leftBehind = backlog()
 clearInterval(walTimer)
+clearInterval(ownersTimer)
 await sleep(2000)
 probe.child.kill('SIGTERM')
 await once(probe.child, 'exit')
@@ -422,6 +457,13 @@ writeFileSync(
 )
 writeFileSync(path.join(DATA, 'bench', 'probe.json'), JSON.stringify(probed))
 console.info(JSON.stringify(result, null, 2))
+if (WAL_LOG) {
+  // The reader is still open, so the server's exit left the WAL in place.
+  const log = JSON.parse(readFileSync(WAL_LOG, 'utf8')) as WalLog
+  const report = walReport(DB, log, owners, captured, walFrom)
+  writeFileSync(path.join(DATA, 'bench', 'wal.txt'), `${report}\n`)
+  console.info(report)
+}
 reader.close()
 await s3Media.stop()
 await s3Raw.stop()

@@ -54,6 +54,12 @@ FFMPEG=ffmpeg node scripts/bench-load.ts /tmp/bench split profiles=10 count=300 
 
 `split` 是两个进程，`all` 是一个进程；`entry=<文件>` 运行另一个版本的单进程入口（它要接受 `scripts/bench-load/fakes.ts` 的假对象），用来和旧版本比较。
 
+WAL 的写入量：`all wal=1` 关闭检查点，记下每个写事务提交后 WAL 的长度和开始它的代码（`scripts/bench-load/wal-meter.ts`），更新及其留下的任务（上传、缩略图、原始响应）全部做完后读 WAL 的每一帧，按代码和按表或索引（`dbstat`，运行中每 5 秒记一次各页面属于谁）汇总，写到 `bench/wal.txt`：总量、每次抓取多少 KiB、每 10 秒窗口内不同的页面（Litestream 的 L0 文件大致就是这些）。`rounds=2` 先做一次不计入的更新，计入的那次再抓取已保存、内容未变的帖子，接近生产环境中的更新：
+
+```sh
+FFMPEG=ffmpeg node scripts/bench-load.ts /tmp/bench all wal=1 profiles=10 count=300 rounds=2
+```
+
 `scripts/` 的测试（`scripts/*.test.ts`）用 Node 自带的 `node --test` 运行，`pnpm test` 包含它们。`deploy.test.ts` 用记录调用的假命令代替 docker、git 与 curl，数据目录是临时目录。
 
 ## 文档
