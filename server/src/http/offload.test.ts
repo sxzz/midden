@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { backup } from 'node:sqlite'
+import { Hono } from 'hono'
 import { afterEach, describe, expect, test } from 'vitest'
 import { createFolder } from '#library/folders.ts'
 import { createShare } from '#library/shares.ts'
@@ -95,6 +96,31 @@ describe('GET requests on the read threads', () => {
     // An unknown path is not worth a thread.
     expect((await call('/nothing-here')).status).toBe(404)
     expect(forwarded).toHaveLength(1)
+    // Mounted as the web process mounts it, under an app with an error
+    // handler of its own, which wraps the routes' handlers.
+    const outer = new Hono().onError(
+      () => new Response('outer', { status: 500 }),
+    )
+    outer.route(
+      '/v1',
+      createApi({ ctx, reads, webAppUrl: 'https://midden.test/app/' }),
+    )
+    const session = createSession(ctx.db)
+    const mounted = (route: string) =>
+      outer.request(route, {
+        headers: { Cookie: `${SESSION_COOKIE}=${session}` },
+      })
+    expect(await (await mounted('/v1/accounts')).json()).toMatchObject({
+      accounts: [],
+    })
+    expect(await (await mounted('/v1/captures')).json()).toEqual({
+      thread: true,
+    })
+    expect(forwarded.at(-1)).toMatchObject({
+      base: '/v1',
+      url: 'http://localhost/v1/captures',
+    })
+    forwarded.pop()
     // Without a login nothing is read.
     expect((await createApi({ ctx, reads }).request('/captures')).status).toBe(
       401,
@@ -110,6 +136,28 @@ describe('GET requests on the read threads', () => {
     expect(forwarded).toMatchObject([
       { url: 'http://localhost/public/some-slug', session: false },
     ])
+  })
+
+  test('every write tells what the threads keep is out of date', async () => {
+    ctx = testContext()
+    let writes = 0
+    const call = signedIn(
+      createApi({
+        ctx,
+        webAppUrl: 'https://midden.test/app/',
+        onWrite: () => writes++,
+      }),
+      ctx.db,
+    )
+    await call('/folders')
+    expect(writes).toBe(0)
+    await call('/folders', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'All', filter: '' }),
+    })
+    // Even one that failed: it may have written part of its work.
+    await call('/folders', { method: 'POST', body: '{}' })
+    expect(writes).toBe(2)
   })
 
   test('a thread answers them from its own connection, as this process would', async () => {

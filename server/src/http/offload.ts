@@ -61,11 +61,20 @@ export function staysInline(c: Context): boolean {
   if (!first) return true
   return routes.some(
     (r) =>
-      r.path === first.path &&
-      r.method === first.method &&
-      r.handler === inline,
+      r.path === first.path && r.method === first.method && isInline(r.handler),
   )
 }
+
+/**
+ * Mounted in an app with another error handler (`/v1` in the web process),
+ * a route's handlers are wrapped; Hono keeps each one it wrapped.
+ */
+function isInline(handler: unknown): boolean {
+  for (let h = handler; h; h = (h as Record<string, unknown>)[WRAPPED])
+    if (h === inline) return true
+  return false
+}
+const WRAPPED = '__COMPOSED_HANDLER'
 
 /**
  * Forwards `GET` requests to the read threads unless their route is
