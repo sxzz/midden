@@ -131,8 +131,12 @@ function submit() {
 <style scoped>
 /* 350px wide, 30px from the column, as X's; narrower until 1100px, so the
    rail, the column and it fit from 1000px (layout.ts). */
+/* Sticky as the row's item, as the rail (see SideRail). */
 .aside {
+  position: sticky;
+  top: 0;
   flex: none;
+  align-self: flex-start;
   width: 290px;
   margin-left: 16px;
 }
@@ -142,13 +146,11 @@ function submit() {
     margin-left: 30px;
   }
 }
-/* The sidebar stays in view; a long one scrolls on its own. */
+/* A long sidebar scrolls on its own, and only up and down. */
 .sticky {
-  position: sticky;
-  top: 0;
   max-height: 100dvh;
   padding-bottom: 32px;
-  overflow-y: auto;
+  overflow: hidden auto;
   scrollbar-width: none;
 }
 .search {

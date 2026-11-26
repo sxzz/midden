@@ -3,15 +3,12 @@ import {
   createWebHashHistory,
   type RouteLocationNormalized,
 } from 'vue-router'
-import AccountsView from './components/AccountsView.vue'
-import AdminView from './components/AdminView.vue'
 import CaptureRecordDetail from './components/CaptureRecordDetail.vue'
 import CaptureRecords from './components/CaptureRecords.vue'
 import CollectionDetail from './components/CollectionDetail.vue'
 import CollectionTrends from './components/CollectionTrends.vue'
 import CollectionView from './components/CollectionView.vue'
 import FollowChanges from './components/FollowChanges.vue'
-import PasskeyList from './components/PasskeyList.vue'
 import PasskeySetup from './components/PasskeySetup.vue'
 import ProfileChanges from './components/ProfileChanges.vue'
 import PublicHome from './components/PublicHome.vue'
@@ -22,8 +19,6 @@ import WatchesView from './components/WatchesView.vue'
 const RelationGraph = () => import('./components/RelationGraph.vue')
 const RelationCompare = () => import('./components/RelationCompare.vue')
 const RelationsView = () => import('./components/RelationsView.vue')
-const StorageView = () => import('./components/StorageView.vue')
-const JobsView = () => import('./components/JobsView.vue')
 
 const SHARE = String.raw`/s/:slug([\w-]+)`
 // Pages inside a share take the collection; the slug is the share's own.
@@ -76,35 +71,26 @@ export const router = createRouter({
     { path: '/compare', name: 'compare', component: RelationCompare },
     // The 关系 tab: the graph of any account with relation data (`of`).
     { path: '/relations', name: 'relations', component: RelationsView },
-    { path: '/settings', name: 'settings', component: SettingsView },
+    // 设置 is one page of sections that open in place; the address names
+    // the open section and, under 管理员面板, the open entry.
     {
-      path: '/settings/accounts',
-      name: 'settings-accounts',
-      component: AccountsView,
+      path: '/settings/:section(passkeys|tokens|admin)?/:entry(storage|jobs)?',
+      name: 'settings',
+      component: SettingsView,
     },
+    // 采集's tabs: the records, and 定期更新; the capture accounts open over
+    // the records as a dialog.
+    { path: '/captures', name: 'captures', component: CaptureRecords },
     {
-      path: '/settings/passkeys',
-      name: 'settings-passkeys',
-      component: PasskeyList,
-    },
-    {
-      path: '/settings/watches',
-      name: 'settings-watches',
+      path: '/captures/watches',
+      name: 'captures-watches',
       component: WatchesView,
     },
-    { path: '/settings/admin', name: 'settings-admin', component: AdminView },
-    // Its charts load with it, not with the app.
     {
-      path: '/settings/admin/storage',
-      name: 'settings-storage',
-      component: StorageView,
+      path: '/captures/accounts',
+      name: 'captures-accounts',
+      component: CaptureRecords,
     },
-    {
-      path: '/settings/admin/jobs',
-      name: 'settings-jobs',
-      component: JobsView,
-    },
-    { path: '/captures', name: 'captures', component: CaptureRecords },
     {
       path: '/captures/:id([a-f0-9-]+)',
       name: 'capture',

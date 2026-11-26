@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { computed, onActivated, shallowRef } from 'vue'
+import { computed, shallowRef } from 'vue'
 import {
   call,
   client,
@@ -7,6 +7,7 @@ import {
   type StorageAlerts,
   type StorageReport,
 } from '../api'
+import { onShown } from '../composables/useShown'
 import { ago, date, storageSize } from '../presentation'
 import {
   gbMonths,
@@ -46,7 +47,7 @@ async function load(refresh = false) {
     loading.value = false
   }
 }
-onActivated(() => load())
+onShown(() => load())
 
 const r2 = computed(() => report.value?.r2 ?? undefined)
 const cost = computed(() => report.value?.cost ?? undefined)

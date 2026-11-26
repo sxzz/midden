@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
-import { computed, onActivated, shallowRef } from 'vue'
+import { computed, shallowRef } from 'vue'
 import { call, client, errorText, type Passkey } from '../api'
+import { onShown } from '../composables/useShown'
 import { toast } from '../composables/useToast'
 import {
   createPasskey,
@@ -13,6 +14,8 @@ import ConfirmSheet from './ConfirmSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
+/** Under a heading of its own (设置's section), without its title. */
+defineProps<{ bare?: boolean }>()
 
 const items = shallowRef<Passkey[]>()
 const error = shallowRef('')
@@ -30,7 +33,7 @@ async function load() {
     error.value = errorText(e)
   }
 }
-onActivated(load)
+onShown(load)
 defineExpose({ load })
 
 const details = (p: Passkey) =>
@@ -95,7 +98,7 @@ async function remove() {
 </script>
 
 <template>
-  <ListSection v-if="items || error" title="通行密钥">
+  <ListSection v-if="items || error" :title="bare ? undefined : '通行密钥'">
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
     <div v-for="p in items" :key="p.id" class="passkey">
       <span class="label"

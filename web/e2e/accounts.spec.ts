@@ -86,7 +86,7 @@ test('Instagram and X choose their accounts independently', async ({
     return r.fulfill({ json: path === '/v1/accounts' ? state : { items: [] } })
   })
   await page.goto('/app/')
-  await openSettings(page, '采集账号')
+  await openAccounts(page)
   await expect(
     page.getByText('Instagram 需要先添加并选择一个账号才能采集。'),
   ).toBeVisible()
@@ -225,8 +225,9 @@ test('adds, selects and deletes an X account', async ({ page }) => {
     'https://github.com/sxzz/midden',
   )
   await expect(page.getByText('构建时间')).toBeVisible()
-  await page.getByRole('link', { name: '采集账号' }).click()
-  await expect(page.locator('h1')).toHaveText('采集账号')
+  // The capture accounts are 采集's now, not a page of 设置.
+  await expect(page.getByRole('link', { name: '采集账号' })).toHaveCount(0)
+  await openAccounts(page)
   // The form stays out of the source list until asked for.
   await expect(page.getByLabel('凭据')).toBeHidden()
   await page.getByRole('button', { name: '添加账号' }).click()
@@ -269,8 +270,13 @@ test('adds, selects and deletes an X account', async ({ page }) => {
   await page.getByRole('button', { name: '删除账号' }).click()
   await expect(account).toHaveCount(0)
 
-  await page.getByRole('link', { name: '返回' }).click()
-  await expect(page.locator('h1')).toHaveText('设置')
+  // Closing the dialog returns to the records it opened over.
+  await page
+    .getByRole('dialog', { name: '采集账号' })
+    .getByRole('button', { name: '关闭' })
+    .click()
+  await expect(page).toHaveURL(/#\/captures$/)
+  await expect(page.getByRole('dialog', { name: '采集账号' })).toBeHidden()
 })
 
 test('deleting everything shows what goes and needs the phrase typed', async ({
@@ -369,7 +375,7 @@ test('deleting everything is not offered outside development', async ({
     return r.fulfill({ json: { items: [] } })
   })
   await page.goto('/app/#/settings/admin')
-  await expect(page.locator('h1')).toHaveText('管理员面板')
+  await expect(page.locator('h1')).toHaveText('设置')
   await expect(
     page.getByRole('heading', { name: '域名', exact: true }),
   ).toBeVisible()
@@ -378,12 +384,25 @@ test('deleting everything is not offered outside development', async ({
   expect(asked).toBe(false)
 })
 
-/** 设置, through the bottom bar, then one of its pages. */
+/** 设置, through the bottom bar, then one of its sections, opened in place. */
 async function openSettings(page: Page, name: string) {
   await page
     .getByRole('navigation', { name: '主导航' })
     .getByRole('link', { name: '设置' })
     .click()
-  await page.getByRole('link', { name, exact: true }).click()
-  await expect(page.locator('h1')).toHaveText(name)
+  const section = page.getByRole('link', { name, exact: true })
+  await section.click()
+  await expect(section).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.locator('h1')).toHaveText('设置')
+}
+
+/** 采集, through the bottom bar, then its 采集账号 dialog. */
+async function openAccounts(page: Page) {
+  await page
+    .getByRole('navigation', { name: '主导航' })
+    .getByRole('link', { name: '采集' })
+    .click()
+  await page.getByRole('link', { name: '采集账号' }).click()
+  await expect(page).toHaveURL(/#\/captures\/accounts$/)
+  await expect(page.getByRole('dialog', { name: '采集账号' })).toBeVisible()
 }

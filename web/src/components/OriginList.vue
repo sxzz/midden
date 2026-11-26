@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
-import { computed, onActivated, shallowRef } from 'vue'
+import { computed, shallowRef } from 'vue'
 import { call, client, errorText, type WebOrigin } from '../api'
+import { onShown } from '../composables/useShown'
 import { toast } from '../composables/useToast'
 import { date } from '../presentation'
 import ConfirmSheet from './ConfirmSheet.vue'
@@ -28,7 +29,7 @@ async function load() {
     error.value = errorText(e)
   }
 }
-onActivated(load)
+onShown(load)
 
 const hostOf = (o: WebOrigin) => new URL(o.origin).host
 const details = (o: WebOrigin) =>

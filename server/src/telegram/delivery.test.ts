@@ -269,7 +269,7 @@ describe('telegram commands', () => {
       handle(c, request({ command: 'account_delete', arg: `confirm:${id}` }))
         .text,
     ).toBe('账号已删除。')
-    // Accounts are added on the web, in 设置 → 采集账号.
+    // Accounts are added on the web, in 采集 → 采集账号.
     const add = handle(
       { ...c, webAppUrl: 'https://midden.test/app/' },
       request({ command: 'account_add' }),
@@ -277,7 +277,7 @@ describe('telegram commands', () => {
     expect(add.keyboard![0]).toEqual([
       {
         text: '添加账号',
-        web_app: { url: 'https://midden.test/app/#/settings/accounts' },
+        web_app: { url: 'https://midden.test/app/#/captures/accounts' },
       },
     ])
   })

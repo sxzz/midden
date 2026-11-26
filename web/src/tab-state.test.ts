@@ -30,7 +30,7 @@ function go(
   return visit(states, {
     tab: tabOf(name)!,
     path,
-    root: ['collections', 'relations', 'settings'].includes(name),
+    root: ['collections', 'captures', 'relations', 'settings'].includes(name),
     move,
     from: from && { tab: tabOf(from[0]), path: from[1] },
   })
@@ -107,23 +107,23 @@ describe('recording each tab', () => {
       '/',
     ])
     states = leave(states, 'explore', '/collection/a', 640)
-    states = go(states, 'settings', '/settings', 'switch', [
+    states = go(states, 'captures', '/captures', 'switch', [
       'collection',
       '/collection/a',
     ])
-    states = go(states, 'settings-admin', '/settings/admin', 'push', [
-      'settings',
-      '/settings',
+    states = go(states, 'capture', '/captures/1', 'push', [
+      'captures',
+      '/captures',
     ])
     const before = states.explore
     states = go(states, 'collection', '/collection/a', 'switch', [
-      'settings-admin',
-      '/settings/admin',
+      'capture',
+      '/captures/1',
     ])
     expect(states.explore).toBe(before)
     expect(leftScroll(states, 'explore', '/collection/a')).toBe(640)
     expect(backTarget(states, 'explore')).toBe('/')
-    expect(lastPage(states, 'settings')).toBe('/settings/admin')
+    expect(lastPage(states, 'captures')).toBe('/captures/1')
     // Leaving another page than the last does not move its scroll.
     expect(leave(states, 'explore', '/collection/b', 10)).toBe(states)
     expect(leftScroll(states, 'explore', '/collection/b')).toBeUndefined()
@@ -138,14 +138,9 @@ describe('recording each tab', () => {
   })
 
   it('goes back to the root from a page opened directly', () => {
-    const states = go(
-      emptyStates(),
-      'settings-admin',
-      '/settings/admin',
-      'load',
-    )
-    expect(states.settings.stack).toEqual(['/settings/admin'])
-    expect(backTarget(states, 'settings')).toBe('/settings')
+    const states = go(emptyStates(), 'capture', '/captures/1', 'load')
+    expect(states.captures.stack).toEqual(['/captures/1'])
+    expect(backTarget(states, 'captures')).toBe('/captures')
   })
 
   it('forgets the pages of deleted collections', () => {
@@ -168,16 +163,16 @@ describe('the session', () => {
   it('is read back from session storage, and anything unreadable ignored', () => {
     const saved = {
       ...emptyStates(),
-      settings: {
-        root: '/settings',
-        stack: ['/settings', '/settings/admin'],
+      captures: {
+        root: '/captures',
+        stack: ['/captures', '/captures/1'],
         scroll: 120,
       },
       relations: { root: 3, stack: [], scroll: 0 },
     }
     sessionStorage.setItem('midden.tabs', JSON.stringify(saved))
     const states = readStates()
-    expect(states.settings).toEqual(saved.settings)
+    expect(states.captures).toEqual(saved.captures)
     expect(states.relations).toEqual(emptyStates().relations)
     sessionStorage.setItem('midden.tabs', '{')
     expect(readStates()).toEqual(emptyStates())
@@ -196,8 +191,8 @@ describe('following the router', () => {
       routes: [
         { path: '/', name: 'collections', component: view },
         { path: '/collection/:id', name: 'collection', component: view },
-        { path: '/settings', name: 'settings', component: view },
-        { path: '/settings/admin', name: 'settings-admin', component: view },
+        { path: '/captures', name: 'captures', component: view },
+        { path: '/captures/:id', name: 'capture', component: view },
       ],
     })
     trackTabs(router)
@@ -218,19 +213,19 @@ describe('following the router', () => {
     await start('/')
     await router.push('/collection/a')
     // Another tab, then the bar's link back.
-    await router.push({ path: '/settings', state: SWITCH_STATE })
-    await router.push('/settings/admin')
-    expect(lastPage(tabStates.value, 'settings')).toBe('/settings/admin')
+    await router.push({ path: '/captures', state: SWITCH_STATE })
+    await router.push('/captures/1')
+    expect(lastPage(tabStates.value, 'captures')).toBe('/captures/1')
     await router.push({ path: '/collection/a', state: SWITCH_STATE })
     expect(tabStates.value.explore.stack).toEqual(['/', '/collection/a'])
-    // History holds 设置 behind it; 返回 goes to 探索's root instead,
-    // in place, and the browser's back still reaches 设置.
-    expect(router.options.history.state.back).toBe('/settings/admin')
+    // History holds 采集 behind it; 返回 goes to 探索's root instead,
+    // in place, and the browser's back still reaches 采集.
+    expect(router.options.history.state.back).toBe('/captures/1')
     expect(backRoute(router)).toBe('/')
     goBack(router)
     await arrived('/')
     expect(router.currentRoute.value.fullPath).toBe('/')
-    expect(router.options.history.state.back).toBe('/settings/admin')
+    expect(router.options.history.state.back).toBe('/captures/1')
     // Without a switch, 返回 is a step back through history.
     await router.push('/collection/b')
     expect(backRoute(router)).toBe('/')
@@ -240,7 +235,7 @@ describe('following the router', () => {
     expect(tabStates.value.explore.stack).toEqual(['/'])
     // Saved for the session.
     expect(
-      JSON.parse(sessionStorage.getItem('midden.tabs')!).settings.stack,
-    ).toEqual(['/settings', '/settings/admin'])
+      JSON.parse(sessionStorage.getItem('midden.tabs')!).captures.stack,
+    ).toEqual(['/captures', '/captures/1'])
   })
 })

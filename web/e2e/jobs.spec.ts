@@ -35,6 +35,8 @@ test('后台任务 lists rate limits and ends one early', async ({ page }) => {
       return r.fulfill({ json: view(limits) })
     }
     if (path === '/v1/queue') return r.fulfill({ json: view(limits) })
+    // 后台任务 opens inside 管理员面板, which lists the domains too.
+    if (path === '/v1/origins') return r.fulfill({ json: [] })
     return r.fulfill({ json: { items: [] } })
   })
   await page.goto('/app/#/settings/admin/jobs')

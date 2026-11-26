@@ -32,18 +32,16 @@ const owners: Record<string, Tab> = {
   'collection-changes': 'explore',
   'collection-follows': 'explore',
   captures: 'captures',
+  'captures-watches': 'captures',
+  'captures-accounts': 'captures',
   capture: 'captures',
   relations: 'relations',
   'collection-graph': 'relations',
   compare: 'relations',
   settings: 'settings',
-  'settings-accounts': 'settings',
-  'settings-passkeys': 'settings',
-  'settings-watches': 'settings',
-  'settings-admin': 'settings',
-  'settings-storage': 'settings',
-  'settings-jobs': 'settings',
 }
+/** Pages that are a tab's root as well as the tab's own: 采集's other tabs. */
+const roots = new Set(['captures-watches', 'captures-accounts'])
 
 export function tabOf(name: RouteRecordNameGeneric): Tab | undefined {
   return typeof name === 'string' ? owners[name] : undefined
@@ -51,7 +49,10 @@ export function tabOf(name: RouteRecordNameGeneric): Tab | undefined {
 
 /** Whether the page is a tab's own root rather than one opened from it. */
 export function isTabRoot(name: RouteRecordNameGeneric) {
-  return tabs.some((tab) => tab.root === name)
+  return (
+    tabs.some((tab) => tab.root === name) ||
+    (typeof name === 'string' && roots.has(name))
+  )
 }
 
 /** A tab's root page. */

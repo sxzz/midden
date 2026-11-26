@@ -12,14 +12,31 @@ const PUBLIC = /^\/v1\/public\/([\w-]+)(\/.*)?$/
 const image = (hue: number) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><defs><linearGradient id="s" x2="0" y2="1"><stop stop-color="hsl(${hue} 45% 35%)"/><stop offset="1" stop-color="hsl(${hue + 40} 55% 75%)"/></linearGradient></defs><path fill="url(#s)" d="M0 0h1200v800H0z"/><circle cx="880" cy="260" r="90" fill="#ffe6af"/><path d="M0 560 380 300 760 560 1200 420v380H0" fill="rgba(0,0,0,.35)"/></svg>`
 
+/** Long words that do not wrap by themselves, as X accounts have them. */
+const LONG_URL =
+  'https://example.com/a-very-long-path/that/never/breaks/on/its/own/because-it-has-no-spaces/and-keeps-going?utm_source=midden&utm_medium=profile&utm_campaign=overflow'
 const author = {
   key: 'author',
   type: 'x.profile',
   external_id: '7',
   saved_collection_id: PROFILE_ID,
-  data: { name: '山野记录', username: 'mountain_log' },
+  data: {
+    name: '山野记录',
+    username: 'mountain_log',
+    metadata: {
+      description: `记录山野与城市之间的日常。摄影、徒步、偶尔写字。\n${LONG_URL}\n#一个很长很长的标签没有空格一个很长很长的标签没有空格一个很长很长的标签没有空格`,
+      location:
+        'Somewhere-over-the-rainbow-way-up-high-and-the-dreams-that-you-dream-of',
+      url: LONG_URL,
+      followers: 123_456_789,
+      following: 98_765,
+      statuses: 1_234_567,
+      media_count: 45_678,
+      likes: 9_876_543,
+    },
+  },
 }
-const photo = (id: string) => ({
+const photo = (id: string, width = 1200, height = 800) => ({
   id,
   url: `/v1/assets/${id}?inline=1`,
   download_url: `/v1/assets/${id}?download=1`,
@@ -27,8 +44,8 @@ const photo = (id: string) => ({
   state: 'ready',
   mime: 'image/svg+xml',
   sensitive: false,
-  width: 1200,
-  height: 800,
+  width,
+  height,
 })
 export const posts = Array.from({ length: 24 }, (_, index) => ({
   id: `11111111-1111-4111-8111-${String(index).padStart(12, '0')}`,
@@ -43,7 +60,11 @@ export const posts = Array.from({ length: 24 }, (_, index) => ({
   published_at: '2026-11-24T08:00:00Z',
   revision_id: `r${index}`,
   storage_bytes: 2_400_000 + index * 10_000,
-  assets: index % 3 === 0 ? [photo(`p${index}`)] : [],
+  // Some wide, as banners and panoramas are.
+  assets:
+    index % 3 === 0
+      ? [index % 2 ? photo(`p${index}`, 3000, 1000) : photo(`p${index}`)]
+      : [],
   graph: {
     root: 'post',
     entities: [
@@ -77,13 +98,13 @@ export const posts = Array.from({ length: 24 }, (_, index) => ({
 export const profile = {
   id: PROFILE_ID,
   url: 'https://x.com/mountain_log',
-  text: '记录山野与城市之间的日常。摄影、徒步、偶尔写字。',
+  text: `记录山野与城市之间的日常。摄影、徒步、偶尔写字。\n${LONG_URL}\n#一个很长很长的标签没有空格一个很长很长的标签没有空格一个很长很长的标签没有空格`,
   author_name: '山野记录',
   saved_at: '2026-10-01T10:00:00Z',
   observed_at: '2026-11-25T10:00:00Z',
   revision_id: 'rp',
   storage_bytes: 182_000_000,
-  assets: [],
+  assets: [{ ...photo('banner', 1500, 500), purpose: 'banner' }],
   graph: {
     root: 'author',
     entities: [author],
@@ -250,6 +271,15 @@ export async function mockDesktop(page: Page) {
                 },
               ]
             : [],
+      })
+    if (path === '/v1/queue')
+      return json({
+        control: { paused: false, types: [] },
+        pausable: ['thumbnail', 'upload', 'raw-upload'],
+        backlog: [{ type: 'capture', waiting: 3, running: 1, paused: 0 }],
+        rate_limits: [],
+        worker: null,
+        web: null,
       })
     if (path === '/v1/shares') return json([])
     if (

@@ -24,18 +24,16 @@ describe('which tab a page belongs to', () => {
     ])
       expect(tabOf(name)).toBe('explore')
     // 采集 is a tab of its own: leaving 探索 from it does not leave 探索 there.
-    for (const name of ['captures', 'capture'])
+    for (const name of [
+      'captures',
+      'captures-watches',
+      'captures-accounts',
+      'capture',
+    ])
       expect(tabOf(name)).toBe('captures')
     for (const name of ['relations', 'collection-graph', 'compare'])
       expect(tabOf(name)).toBe('relations')
-    for (const name of [
-      'settings',
-      'settings-accounts',
-      'settings-passkeys',
-      'settings-admin',
-      'settings-storage',
-    ])
-      expect(tabOf(name)).toBe('settings')
+    for (const name of ['settings']) expect(tabOf(name)).toBe('settings')
     // Public and setup pages are no tab's.
     for (const name of ['share', 'share-collection', 'passkey', undefined])
       expect(tabOf(name)).toBeUndefined()

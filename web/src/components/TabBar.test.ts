@@ -64,7 +64,7 @@ function leftOn() {
     relations: { root: CENTRE, stack: [CENTRE], scroll: 0 },
     settings: {
       root: '/settings',
-      stack: ['/settings', '/settings/accounts'],
+      stack: ['/settings', '/settings/admin'],
       scroll: 0,
     },
   }
@@ -105,7 +105,7 @@ it('links each other tab to the page it was left on, as a real link', async () =
   at('relations', CENTRE)
   const el = mount()
   expect(tab(el, '探索').getAttribute('href')).toBe('#/collection/1')
-  expect(tab(el, '设置').getAttribute('href')).toBe('#/settings/accounts')
+  expect(tab(el, '设置').getAttribute('href')).toBe('#/settings/admin')
   expect(tab(el, '采集').getAttribute('href')).toBe('#/captures/1')
   leftOn()
   tabStates.value = {
@@ -134,7 +134,7 @@ it('lights the tab of the page shown, nested pages included', async () => {
     ['collection-graph', '关系'],
     ['compare', '关系'],
     ['settings', '设置'],
-    ['settings-admin', '设置'],
+    ['captures-watches', '采集'],
   ]) {
     at(name!, `/${name}`)
     await nextTick()
@@ -161,7 +161,7 @@ it('goes to the tab’s root when tapped below it', async () => {
   // Another tab returns to where it was left, marked as the bar's.
   click(tab(el, '设置'))
   expect(router.push).toHaveBeenLastCalledWith({
-    path: '/settings/accounts',
+    path: '/settings/admin',
     query: {},
     hash: '',
     state: SWITCH_STATE,

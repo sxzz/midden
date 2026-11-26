@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
-import { computed, onActivated, onDeactivated, shallowRef } from 'vue'
+import { computed, shallowRef } from 'vue'
 import { call, client, errorText, type QueueState } from '../api'
+import { onShown } from '../composables/useShown'
 import { toast } from '../composables/useToast'
 import {
   jobTypeLabel,
@@ -32,11 +33,13 @@ async function load() {
     error.value = errorText(e)
   }
 }
-onActivated(() => {
-  void load()
-  timer = setInterval(load, REFRESH)
-})
-onDeactivated(() => clearInterval(timer))
+onShown(
+  () => {
+    void load()
+    timer = setInterval(load, REFRESH)
+  },
+  () => clearInterval(timer),
+)
 
 async function save(json: { paused?: boolean; types?: string[] }) {
   if (busy.value) return

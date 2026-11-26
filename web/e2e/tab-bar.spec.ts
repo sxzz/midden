@@ -144,12 +144,22 @@ test('moves between the three tabs, lighting the one shown', async ({
   await tab(page, '设置').click()
   await expect(page.locator('h1')).toHaveText('设置')
   await expect(tab(page, '设置')).toHaveAttribute('aria-current', 'page')
-  await page.getByRole('link', { name: '采集账号' }).click()
-  await expect(page.locator('h1')).toHaveText('采集账号')
-  // A page below a tab keeps it lit; tapping it goes back to its root.
-  await expect(tab(page, '设置')).toHaveAttribute('aria-current', 'page')
-  await tab(page, '设置').click()
+  // Its sections open in place, the address saying which.
+  await page.getByRole('link', { name: '管理员面板' }).click()
+  await expect(page).toHaveURL(/#\/settings\/admin$/)
   await expect(page.locator('h1')).toHaveText('设置')
+  await expect(tab(page, '设置')).toHaveAttribute('aria-current', 'page')
+
+  // 采集's tabs are its pages; a page below it keeps it lit, and tapping
+  // it goes back to its root.
+  await tab(page, '采集').click()
+  await expect(page.locator('h1')).toHaveText('采集')
+  await page
+    .getByRole('navigation', { name: '采集', exact: true })
+    .getByRole('link', { name: '定期更新' })
+    .click()
+  await expect(page).toHaveURL(/#\/captures\/watches$/)
+  await expect(tab(page, '采集')).toHaveAttribute('aria-current', 'page')
 
   // 关系 returns to the account it was left on.
   await expect(tab(page, '关系')).toHaveAttribute(
@@ -269,8 +279,8 @@ test('each tab returns to the page and scroll it was left on', async ({
   await expect(tab(page, '探索')).toHaveAttribute('href', '#/')
   await tab(page, '设置').click()
   await expect(page.locator('h1')).toHaveText('设置')
-  await page.getByRole('link', { name: '采集账号' }).click()
-  await expect(page.locator('h1')).toHaveText('采集账号')
+  await page.getByRole('link', { name: '管理员面板' }).click()
+  await expect(page).toHaveURL(/#\/settings\/admin$/)
   await expect(tab(page, '探索')).toHaveAttribute(
     'href',
     `#/collection/${items[0]!.id}`,
@@ -279,13 +289,13 @@ test('each tab returns to the page and scroll it was left on', async ({
   await expect(page).toHaveURL(detail)
   await expect(page.locator('h1')).toHaveText('帖子')
   await expect.poll(() => scrollY(page)).toBe(left)
-  // 设置 kept its sub-page too.
-  await expect(tab(page, '设置')).toHaveAttribute('href', '#/settings/accounts')
+  // 设置 kept its open section too.
+  await expect(tab(page, '设置')).toHaveAttribute('href', '#/settings/admin')
   // A reload keeps every tab where it was.
   await page.reload()
   await expect(page.locator('h1')).toHaveText('帖子')
   await expect.poll(() => scrollY(page)).toBe(left)
-  await expect(tab(page, '设置')).toHaveAttribute('href', '#/settings/accounts')
+  await expect(tab(page, '设置')).toHaveAttribute('href', '#/settings/admin')
   // 返回 goes where it would have without the detour: 探索's list. The
   // browser's back still returns to 设置.
   await expect(
@@ -294,7 +304,8 @@ test('each tab returns to the page and scroll it was left on', async ({
   await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
   await page.goBack()
-  await expect(page.locator('h1')).toHaveText('采集账号')
+  await expect(page).toHaveURL(/#\/settings\/admin$/)
+  await expect(page.locator('h1')).toHaveText('设置')
 })
 
 test('the open tab, tapped, goes to its root, then to the top', async ({

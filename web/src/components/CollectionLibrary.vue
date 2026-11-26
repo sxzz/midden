@@ -46,6 +46,7 @@ import { restoreScroll } from '../scroll-restore'
 import { forgetPages, lastPage, leftScroll, tabStates } from '../tab-state'
 import { tabOf as barTabOf, tabs as barTabs, isTabRoot } from '../tabbar'
 import { detailTitle, setDocumentTitle } from '../titles'
+import AccountsDialog from './AccountsDialog.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
 import FolderMenuSheet from './FolderMenuSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
@@ -54,7 +55,9 @@ import ShareSheet from './ShareSheet.vue'
 import SideAside from './SideAside.vue'
 import SideRail from './SideRail.vue'
 import TabBar from './TabBar.vue'
+import AppLink from './ui/AppLink.vue'
 import BackLink from './ui/BackLink.vue'
+import PageTabs from './ui/PageTabs.vue'
 import UpdateSheet from './UpdateSheet.vue'
 import WatchSheet from './WatchSheet.vue'
 // Remembered in this browser, so a reload does not cover the media again.
@@ -126,7 +129,28 @@ const id = computed(() =>
 const folderId = computed(() =>
   route.name === 'folder' ? String(route.params.id) : '',
 )
-const captures = computed(() => route.name === 'captures')
+/** 采集's records, with or without the accounts' dialog over them. */
+const captures = computed(
+  () => route.name === 'captures' || route.name === 'captures-accounts',
+)
+/** 采集's own pages, which its tab bar switches between. */
+const capturesTab = computed(
+  () => captures.value || route.name === 'captures-watches',
+)
+const accountsOpen = computed(() => route.name === 'captures-accounts')
+const captureTabs = computed(() => [
+  { label: '采集记录', to: { name: 'captures' }, on: captures.value },
+  {
+    label: '定期更新',
+    to: { name: 'captures-watches' },
+    on: route.name === 'captures-watches',
+  },
+])
+/** Back to the records: through history when the dialog was opened there. */
+function closeAccounts() {
+  if (router.options.history.state.back === '/captures') router.back()
+  else void router.replace({ name: 'captures' })
+}
 const capture = computed(() => route.name === 'capture')
 const stats = computed(() => route.name === 'collection-stats')
 const changes = computed(() => route.name === 'collection-changes')
@@ -134,7 +158,7 @@ const follows = computed(() => route.name === 'collection-follows')
 const graphPage = computed(() => route.name === 'collection-graph')
 const comparePage = computed(() => route.name === 'compare')
 const relationsPage = computed(() => route.name === 'relations')
-const adminPage = computed(() => route.name === 'settings-admin')
+const settingsPage = computed(() => route.name === 'settings')
 /** The library's own lists: 探索's root. */
 const home = computed(() => route.name === 'collections')
 /** Any page below a tab's root, which back returns from. */
@@ -163,6 +187,8 @@ function watchChanged(w: Watch | undefined) {
 const titles: Record<string, string> = {
   collections: '我的收藏',
   captures: '采集',
+  'captures-watches': '采集',
+  'captures-accounts': '采集',
   capture: '采集记录',
   'collection-stats': '统计趋势',
   'collection-changes': '资料修改记录',
@@ -171,12 +197,6 @@ const titles: Record<string, string> = {
   compare: '关系对比',
   relations: '关系',
   settings: '设置',
-  'settings-accounts': '采集账号',
-  'settings-passkeys': '通行密钥',
-  'settings-watches': '定期更新',
-  'settings-admin': '管理员面板',
-  'settings-storage': '存储用量',
-  'settings-jobs': '后台任务',
 }
 const title = computed(() => {
   if (folderId.value) return folder.value?.name || '收藏夹'
@@ -189,12 +209,11 @@ const title = computed(() => {
   return titles[String(route.name)] || '我的收藏'
 })
 watch(title, (value) => setDocumentTitle(value), { immediate: true })
-/** Settings and capture records have no media to cover. */
+/** Settings and 采集 have no media to cover. */
 const sensitiveShown = computed(
   () =>
     barTabOf(route.name) !== 'settings' &&
-    !captures.value &&
-    !capture.value &&
+    barTabOf(route.name) !== 'captures' &&
     !stats.value,
 )
 /**
@@ -253,12 +272,14 @@ const removed = shallowRef<string[]>([])
 function viewKey(target: ViewRoute) {
   if (target.name === 'collections') return `collections:${tabOf(target)}`
   if (target.name === 'folder') return 'folder'
-  // Pages without parameters are one view each.
+  // The accounts' dialog opens over the records' own view.
+  if (target.name === 'captures-accounts') return 'captures'
+  // Pages without parameters are one view each; 设置's sections are one.
   if (
-    typeof target.name === 'string' &&
-    (target.name === 'captures' ||
-      target.name === 'relations' ||
-      target.name.startsWith('settings'))
+    target.name === 'captures' ||
+    target.name === 'captures-watches' ||
+    target.name === 'relations' ||
+    target.name === 'settings'
   )
     return target.name
   if (target.name === 'capture') return `capture:${String(target.params.id)}`
@@ -594,7 +615,7 @@ function listProps(list: ReturnType<typeof createList>, error = '') {
   }
 }
 const viewProps = computed(() => {
-  if (adminPage.value)
+  if (settingsPage.value)
     return {
       onCleared: () => {
         for (const { collection } of all) collection.items.value = []
@@ -602,7 +623,7 @@ const viewProps = computed(() => {
       },
     }
   if (captures.value || capture.value) return { onSaved: saved }
-  if (stats.value || barTabOf(route.name) === 'settings') return {}
+  if (stats.value || route.name === 'captures-watches') return {}
   if (
     changes.value ||
     follows.value ||
@@ -722,6 +743,33 @@ const viewProps = computed(() => {
         </svg>
       </button>
     </header>
+    <PageTabs v-if="capturesTab" label="采集" :tabs="captureTabs">
+      <template #end>
+        <AppLink
+          class="tabs-end"
+          :to="{ name: 'captures-accounts' }"
+          aria-label="采集账号"
+          title="采集账号"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="22"
+            height="22"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="9" cy="8" r="3.5" />
+            <path d="M2.5 20c.6-3.6 3.2-6 6.5-6 1.4 0 2.6.4 3.6 1.1" />
+            <circle cx="17.5" cy="15.5" r="2.5" />
+            <path d="m19.3 17.3 2.7 2.7M21 19l-1 1" />
+          </svg>
+        </AppLink>
+      </template>
+    </PageTabs>
     <div v-if="home" class="tabs" role="tablist" aria-label="类型">
       <RouterLink
         v-for="option in tabs"
@@ -848,6 +896,11 @@ const viewProps = computed(() => {
       @confirm="deleteFolder"
       @cancel="sheet = ''"
     />
+    <AccountsDialog
+      v-if="capturesTab"
+      :open="accountsOpen"
+      @close="closeAccounts"
+    />
     <TabBar v-if="!wide" />
   </main>
   <SideAside
@@ -863,6 +916,10 @@ const viewProps = computed(() => {
   max-width: 960px;
   margin: 0 auto;
   min-height: 100dvh;
+  /* Nothing in the column widens the page sideways: a word or box too
+     wide for it is cut at its edge. Unlike hidden, this leaves the column
+     no scroller, so its header still sticks to the window. */
+  overflow-x: clip;
   padding-top: var(--tg-content-safe-area-inset-top, 0px);
   /* The bottom bar's room, and some more so the end does not touch it. */
   padding-bottom: calc(var(--tab-bar-space, 16px) + 16px);
@@ -908,6 +965,17 @@ const viewProps = computed(() => {
 .back-arrow {
   margin: 0 12px 0 -10px;
   color: var(--text);
+}
+/* 采集账号, at the right of 采集's tabs where X has its +. */
+.tabs-end {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 53px;
+  color: var(--text);
+}
+.tabs-end:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 .sensitive-toggle[aria-pressed='true'] {
   color: var(--link);
@@ -1014,6 +1082,8 @@ h1 {
    header stays at the top as the page scrolls. */
 @media (min-width: 700px) {
   .page {
+    /* Where what sticks under the header (PageTabs) stops. */
+    --page-header-height: 53px;
     flex: 0 1 600px;
     min-width: 0;
     max-width: 600px;

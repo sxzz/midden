@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
-import { onActivated, shallowRef } from 'vue'
+import { shallowRef } from 'vue'
 import { call, client, errorText, type ApiToken } from '../api'
+import { onShown } from '../composables/useShown'
 import { toast } from '../composables/useToast'
 import { shortDate } from '../presentation'
 import { expiryText, permissionLabels, type TokenForm } from '../tokens'
@@ -12,6 +13,8 @@ import AppLink from './ui/AppLink.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 import UsageBars from './UsageBars.vue'
+/** Under a heading of its own (设置's section), without its title. */
+defineProps<{ bare?: boolean }>()
 
 // 设置 → API 令牌: tokens for scripts and AI agents. Only a signed-in owner
 // manages them; a token itself cannot.
@@ -35,7 +38,7 @@ async function load() {
     error.value = errorText(e)
   }
 }
-onActivated(load)
+onShown(load)
 defineExpose({ load })
 
 const lastUsed = (t: ApiToken) =>
@@ -109,7 +112,7 @@ async function confirm() {
 </script>
 
 <template>
-  <ListSection v-if="items || error" title="API 令牌">
+  <ListSection v-if="items || error" :title="bare ? undefined : 'API 令牌'">
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
     <button
       v-for="t in items"

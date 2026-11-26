@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { computed, onActivated, shallowRef } from 'vue'
+import { computed, onMounted, shallowRef } from 'vue'
 import {
   call,
   client,
@@ -14,7 +14,8 @@ import ConfirmSheet from './ConfirmSheet.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 
-// 设置 → 采集账号: the accounts each platform captures with.
+// 采集 → 采集账号: the accounts each platform captures with, in a dialog
+// (AccountsDialog).
 const AT_PREFIX = /^@/
 const data = shallowRef<Accounts>()
 const loading = shallowRef(true)
@@ -41,8 +42,8 @@ async function load() {
     loading.value = false
   }
 }
-// The bot can change the selection too; refresh whenever the page reappears.
-onActivated(load)
+// The bot can change the selection too; read it whenever the dialog opens.
+onMounted(load)
 
 function label(a: Account) {
   if (!a.username) return a.name

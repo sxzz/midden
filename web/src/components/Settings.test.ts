@@ -11,9 +11,15 @@ import { mockApi } from '../testing/api'
 import AdminView from './AdminView.vue'
 import SettingsView from './SettingsView.vue'
 
+const route = vi.hoisted(() => ({
+  params: {} as Record<string, string>,
+}))
 vi.mock('vue-router', async () => {
   const { resolve } = await import('../testing/router')
-  return { useRouter: () => ({ push: vi.fn(), resolve }) }
+  return {
+    useRouter: () => ({ push: vi.fn(), resolve }),
+    useRoute: () => route,
+  }
 })
 
 let unmount = () => {}
@@ -28,6 +34,7 @@ beforeEach(() => {
   })
 })
 afterEach(() => {
+  route.params = {}
   unmount()
   document.body.replaceChildren()
   vi.restoreAllMocks()
@@ -62,15 +69,18 @@ const links = (el: HTMLElement) =>
   )
 
 describe('设置', () => {
-  it('lists its pages as links, then the facts about this build', () => {
+  it('lists its sections as links that open them, then the facts', () => {
     mockApi()
     const el = mount(SettingsView)
     expect(links(el)).toMatchObject({
-      '采集账号›': '#/settings/accounts',
-      '通行密钥›': '#/settings/passkeys',
-      '管理员面板›': '#/settings/admin',
+      通行密钥: '#/settings/passkeys',
+      API令牌: '#/settings/tokens',
+      管理员面板: '#/settings/admin',
       '源代码github.com/sxzz/midden↗': 'https://github.com/sxzz/midden',
     })
+    // 采集账号 and 定期更新 are 采集's now.
+    expect(el.textContent).not.toContain('采集账号')
+    expect(el.textContent).not.toContain('定期更新')
     expect(titles(el)).toEqual(['关于'])
     expect(el.textContent).toContain('版本')
     expect(el.textContent).toContain('构建时间')
@@ -81,6 +91,24 @@ describe('设置', () => {
       a.textContent?.includes('源代码'),
     )!
     expect(source.target).toBe('_blank')
+  })
+
+  it('opens the section the address names, in place', async () => {
+    route.params = { section: 'admin' }
+    mockApi()
+    const el = mount(SettingsView)
+    await settle()
+    const admin = [...el.querySelectorAll('a')].find(
+      (a) => a.textContent?.trim() === '管理员面板',
+    )!
+    // Open, its heading closes it; its entries open under it.
+    expect(admin.getAttribute('aria-expanded')).toBe('true')
+    expect(links(el)).toMatchObject({
+      管理员面板: '#/settings',
+      通行密钥: '#/settings/passkeys',
+      存储用量: '#/settings/admin/storage',
+      后台任务: '#/settings/admin/jobs',
+    })
   })
 
   it('has no logout in the Mini App, which signs in on every open', () => {

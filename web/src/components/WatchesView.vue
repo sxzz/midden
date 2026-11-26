@@ -8,7 +8,7 @@ import AppLink from './ui/AppLink.vue'
 import ListSection from './ui/ListSection.vue'
 import WatchSheet from './WatchSheet.vue'
 
-// 设置 → 定期更新: every watched profile and folder.
+// 采集 → 定期更新: every watched profile and folder.
 const items = shallowRef<Watch[]>()
 const error = shallowRef('')
 const busy = shallowRef(false)

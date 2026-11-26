@@ -4,13 +4,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { pageAside } from '../aside'
 import { folderQuery } from '../folders'
 import { buildFacts, REPOSITORY } from '../settings'
-import { tabOf } from '../tabbar'
 import AsideDetail from './AsideDetail.vue'
 import SidebarFrame from './SidebarFrame.vue'
 import AppLink from './ui/AppLink.vue'
 import type { Folder } from '../api'
 // The owner's sidebar from 1000px (layout.ts): a search of the library,
-// then what goes with the page shown, then the small print.
+// then what goes with the page shown (nothing on 设置, whose sections are
+// all in the column), then the small print.
 const props = defineProps<{
   folders: Folder[]
   /** The list's count and the space used, on the library's lists. */
@@ -35,15 +35,6 @@ const detail = computed(() =>
     ? pageAside.value
     : undefined,
 )
-const settingsPages = [
-  { name: 'settings-accounts', label: '采集账号' },
-  { name: 'settings-passkeys', label: '通行密钥' },
-  { name: 'settings-watches', label: '定期更新' },
-  { name: 'settings-admin', label: '管理员面板' },
-  { name: 'settings-storage', label: '存储用量' },
-  { name: 'settings-jobs', label: '后台任务' },
-]
-const settings = computed(() => tabOf(route.name) === 'settings')
 const about = buildFacts(__BUILD_VERSION__, __BUILD_TIME__)
 const folderShown = computed(() =>
   route.name === 'folder' ? String(route.params.id) : '',
@@ -77,18 +68,6 @@ const facts = computed(() =>
       </section>
     </template>
     <AsideDetail v-else-if="detail" :detail="detail" />
-    <nav v-else-if="settings" class="aside-box" aria-label="设置的页面">
-      <h2>设置</h2>
-      <AppLink
-        v-for="page in settingsPages"
-        :key="page.name"
-        class="aside-row"
-        :to="{ name: page.name }"
-        :aria-current="route.name === page.name ? 'page' : undefined"
-      >
-        <span class="aside-row-name">{{ page.label }}</span>
-      </AppLink>
-    </nav>
     <template #footer>
       <AppLink v-if="about.commitURL" :href="about.commitURL"
         >版本 {{ about.version }}</AppLink

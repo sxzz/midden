@@ -159,7 +159,7 @@ test('watch a profile from its detail, then edit the watch', async ({
   ).toHaveAttribute('href', /#\/captures\/run$/)
 })
 
-test('settings list the watches; one can be turned off', async ({ page }) => {
+test('采集 lists the watches; one can be turned off', async ({ page }) => {
   const { sent } = await serve(page)
   await page.goto(`/app/#/collection/${profileId}`)
   await page
@@ -169,9 +169,14 @@ test('settings list the watches; one can be turned off', async ({ page }) => {
   await page.getByRole('button', { name: '开启定期更新' }).click()
   await expect(page.getByText('已开启定期更新')).toBeVisible()
 
-  await page.goto('/app/#/settings')
-  await page.getByRole('link', { name: '定期更新' }).click()
-  await expect(page).toHaveURL(/#\/settings\/watches$/)
+  // 采集's second tab.
+  await page.goto('/app/#/captures')
+  await page
+    .getByRole('navigation', { name: '采集', exact: true })
+    .getByRole('link', { name: '定期更新' })
+    .click()
+  await expect(page).toHaveURL(/#\/captures\/watches$/)
+  await expect(page.locator('h1')).toHaveText('采集')
   const item = page.locator('.watch')
   await expect(item.getByRole('link', { name: '@owner' })).toBeVisible()
   await expect(item).toContainText('每天 · 最新 100 条')

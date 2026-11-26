@@ -242,7 +242,13 @@ test('the settings page lists, adds, renames and deletes passkeys', async ({
     return r.fulfill({ json: { items: [] } })
   })
   await page.goto(`${APP}#/settings/passkeys`)
-  const section = page.locator('section', { hasText: '通行密钥' })
+  // 设置's 通行密钥 section, open in place.
+  const section = page.locator('section.disclosure', {
+    has: page.getByRole('link', { name: '通行密钥', exact: true }),
+  })
+  await expect(
+    section.getByRole('link', { name: '通行密钥', exact: true }),
+  ).toHaveAttribute('aria-expanded', 'true')
   await expect(section).toContainText('Mac Safari · midden.test')
   await expect(section).toContainText('上次使用')
 
@@ -314,7 +320,7 @@ test('the settings page adds a domain and removes it with its passkeys', async (
     return r.fulfill({ json: { items: [] } })
   })
   await page.goto(`${APP}#/settings/admin`)
-  const domains = page.locator('section', {
+  const domains = page.locator('section.section', {
     has: page.getByRole('heading', { name: '域名', exact: true }),
   })
   await expect(domains).toContainText('midden.test')
@@ -337,8 +343,8 @@ test('the settings page adds a domain and removes it with its passkeys', async (
   await expect(domains).not.toContainText('archive.example')
   // The passkeys page reads them again when it is opened.
   await page.goto(`${APP}#/settings/passkeys`)
-  const keys = page.locator('section', {
-    has: page.getByRole('heading', { name: '通行密钥', exact: true }),
+  const keys = page.locator('section.disclosure', {
+    has: page.getByRole('link', { name: '通行密钥', exact: true }),
   })
   await expect(keys).toBeVisible()
   await expect(keys).not.toContainText('iPhone')

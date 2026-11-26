@@ -1,15 +1,39 @@
 <script setup vapor lang="ts">
-import { shallowRef } from 'vue'
+import { computed, shallowRef } from 'vue'
+import { useRoute } from 'vue-router'
 import { call, client, errorText } from '../api'
 import { toast } from '../composables/useToast'
 import { host } from '../host'
 import { buildFacts, REPOSITORY } from '../settings'
+import AdminView from './AdminView.vue'
 import ApiTokens from './ApiTokens.vue'
+import PasskeyList from './PasskeyList.vue'
 import AppLink from './ui/AppLink.vue'
+import Disclosure from './ui/Disclosure.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 
-// 设置: a list of its pages, iOS style, then the facts about this build.
+// 设置: sections that open in place, one at a time, two levels at most
+// (管理员面板's entries); the address names what is open
+// (/settings/admin/storage), so a link opens it so. Then the facts about
+// this build.
+const emit = defineEmits<{
+  /** Everything saved was deleted (管理员面板, development only). */
+  cleared: []
+}>()
+const route = useRoute()
+const section = computed(() => String(route.params.section || ''))
+const entry = computed(() => String(route.params.entry || ''))
+const sections = [
+  { value: 'passkeys', label: '通行密钥' },
+  { value: 'tokens', label: 'API 令牌' },
+  { value: 'admin', label: '管理员面板' },
+] as const
+/** A heading leads to its section open, or to 设置 when it is open. */
+const toggle = (value: string) => ({
+  name: 'settings',
+  params: section.value === value ? {} : { section: value },
+})
 const about = buildFacts(__BUILD_VERSION__, __BUILD_TIME__)
 // Inside Telegram the Mini App signs in again on every open; only a browser
 // session is worth ending by hand.
@@ -28,35 +52,17 @@ async function logout() {
 </script>
 
 <template>
-  <ListSection>
-    <ListButton
-      label="采集账号"
-      variant="plain"
-      chevron
-      :to="{ name: 'settings-accounts' }"
-    />
-    <ListButton
-      label="通行密钥"
-      variant="plain"
-      chevron
-      :to="{ name: 'settings-passkeys' }"
-    />
-    <ListButton
-      label="定期更新"
-      variant="plain"
-      chevron
-      :to="{ name: 'settings-watches' }"
-    />
-  </ListSection>
-  <ApiTokens />
-  <ListSection>
-    <ListButton
-      label="管理员面板"
-      variant="plain"
-      chevron
-      :to="{ name: 'settings-admin' }"
-    />
-  </ListSection>
+  <Disclosure
+    v-for="item in sections"
+    :key="item.value"
+    :label="item.label"
+    :open="section === item.value"
+    :to="toggle(item.value)"
+  >
+    <PasskeyList v-if="item.value === 'passkeys'" bare />
+    <ApiTokens v-else-if="item.value === 'tokens'" bare />
+    <AdminView v-else :entry="entry" @cleared="emit('cleared')" />
+  </Disclosure>
   <ListSection title="关于">
     <div class="fact">
       <span class="name">版本</span>

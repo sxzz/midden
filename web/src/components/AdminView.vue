@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { computed, onActivated, shallowRef } from 'vue'
+import { computed, defineAsyncComponent, shallowRef } from 'vue'
 import {
   call,
   client,
@@ -7,10 +7,12 @@ import {
   type LibrarySize,
   type LitestreamStatus,
 } from '../api'
+import { onShown } from '../composables/useShown'
 import { toast } from '../composables/useToast'
 import BackupSection from './BackupSection.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
 import OriginList from './OriginList.vue'
+import Disclosure from './ui/Disclosure.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 
@@ -19,6 +21,22 @@ import ListSection from './ui/ListSection.vue'
 // the background jobs;
 // where Litestream replicates the database, its heartbeat; on a development
 // server, deleting everything.
+// The charts and the job list load with their entries, not with the app.
+const StorageView = defineAsyncComponent(() => import('./StorageView.vue'))
+const JobsView = defineAsyncComponent(() => import('./JobsView.vue'))
+/** The entry open under it, from the address (see SettingsView). */
+const props = defineProps<{ entry?: string }>()
+const entries = [
+  { value: 'storage', label: '存储用量' },
+  { value: 'jobs', label: '后台任务' },
+] as const
+const toggle = (value: string) => ({
+  name: 'settings',
+  params:
+    props.entry === value
+      ? { section: 'admin' }
+      : { section: 'admin', entry: value },
+})
 const emit = defineEmits<{
   /** Everything saved was deleted; lists must not show it any more. */
   cleared: []
@@ -37,7 +55,7 @@ async function loadInstance() {
     litestream.value = undefined
   }
 }
-onActivated(loadInstance)
+onShown(loadInstance)
 
 const busy = shallowRef(false)
 /** What deleting everything would remove, read when the sheet opens. */
@@ -80,20 +98,17 @@ async function clearAll() {
 
 <template>
   <OriginList />
-  <ListSection>
-    <ListButton
-      label="存储用量"
-      variant="plain"
-      chevron
-      :to="{ name: 'settings-storage' }"
-    />
-    <ListButton
-      label="后台任务"
-      variant="plain"
-      chevron
-      :to="{ name: 'settings-jobs' }"
-    />
-  </ListSection>
+  <Disclosure
+    v-for="item in entries"
+    :key="item.value"
+    :label="item.label"
+    :open="entry === item.value"
+    :to="toggle(item.value)"
+    nested
+  >
+    <StorageView v-if="item.value === 'storage'" />
+    <JobsView v-else />
+  </Disclosure>
   <BackupSection
     v-if="litestream"
     :status="litestream"

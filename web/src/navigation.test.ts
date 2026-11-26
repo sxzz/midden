@@ -33,11 +33,11 @@ it('returns through router history, with home only as the deep-link fallback', (
   // A page opened directly goes back to its tab's root.
   Object.assign(router, {
     currentRoute: {
-      value: { name: 'settings-admin', fullPath: '/settings/admin' },
+      value: { name: 'capture', fullPath: '/captures/1' },
     },
   })
   goBack(router)
-  expect(router.replace).toHaveBeenLastCalledWith('/settings')
+  expect(router.replace).toHaveBeenLastCalledWith('/captures')
   Object.assign(router, {
     currentRoute: { value: { name: 'collection-graph', fullPath: '/g' } },
   })

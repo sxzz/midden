@@ -13,14 +13,10 @@ const PATHS: Record<string, string> = {
   'collection-graph': '/collection/:id/graph',
   compare: '/compare',
   relations: '/relations',
-  settings: '/settings',
-  'settings-accounts': '/settings/accounts',
-  'settings-passkeys': '/settings/passkeys',
-  'settings-watches': '/settings/watches',
-  'settings-admin': '/settings/admin',
-  'settings-storage': '/settings/admin/storage',
-  'settings-jobs': '/settings/admin/jobs',
+  settings: '/settings/:section/:entry',
   captures: '/captures',
+  'captures-watches': '/captures/watches',
+  'captures-accounts': '/captures/accounts',
   capture: '/captures/:id',
   share: '/s/:slug',
   'share-collection': '/s/:slug/collection/:id',
@@ -40,9 +36,13 @@ export function resolveHref(to: RouteLocationRaw): string {
   }
   const template = named.name ? PATHS[named.name] : named.path
   if (template === undefined) throw new Error(`no route ${named.name}`)
-  const path = template.replaceAll(/:(\w+)/g, (_, key: string) =>
-    encodeURIComponent(named.params?.[key] ?? ''),
-  )
+  // Optional parameters left out leave no segment, as the router's.
+  const path =
+    template
+      .replaceAll(/:(\w+)/g, (_, key: string) =>
+        encodeURIComponent(named.params?.[key] ?? ''),
+      )
+      .replaceAll(/\/+(?=\/|$)/g, '') || '/'
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(named.query ?? {}))
     for (const item of [value ?? []].flat()) query.append(key, item)

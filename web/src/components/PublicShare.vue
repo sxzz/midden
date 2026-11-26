@@ -175,6 +175,10 @@ const viewProps = computed(() =>
   max-width: 960px;
   margin: 0 auto;
   min-height: 100dvh;
+  /* Nothing in the column widens the page sideways: a word or box too
+     wide for it is cut at its edge. Unlike hidden, this leaves the column
+     no scroller, so its header still sticks to the window. */
+  overflow-x: clip;
   padding-top: var(--tg-content-safe-area-inset-top, 0px);
   padding-bottom: max(32px, env(safe-area-inset-bottom));
 }
