@@ -37,6 +37,7 @@ const owners: Record<string, Tab> = {
   settings: 'settings',
   'settings-accounts': 'settings',
   'settings-passkeys': 'settings',
+  'settings-watches': 'settings',
   'settings-admin': 'settings',
   'settings-storage': 'settings',
   'settings-jobs': 'settings',

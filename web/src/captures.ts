@@ -238,12 +238,14 @@ export function countText(n: number) {
 export function recordTitle(r: CaptureRecord) {
   const u = r.update
   if (!u) return linkTitle(r.url)
-  if (u.target === 'folder') return `更新收藏夹「${u.name ?? ''}」`
-  if (u.target === 'many') return `更新 ${u.posts + u.profiles} 项`
-  if (!r.url) return '更新'
-  if (r.kind !== 'profile') return `更新 ${linkTitle(r.url)}`
+  // A watch's run (定期更新) says so.
+  const update = u.watch ? '定期更新' : '更新'
+  if (u.target === 'folder') return `${update}收藏夹「${u.name ?? ''}」`
+  if (u.target === 'many') return `${update} ${u.posts + u.profiles} 项`
+  if (!r.url) return update
+  if (r.kind !== 'profile') return `${update} ${linkTitle(r.url)}`
   const handle = profileHandle(r.url, u.handle)
-  return u.older ? `抓取 ${handle} 更早的帖子` : `更新 ${handle}`
+  return u.older ? `抓取 ${handle} 更早的帖子` : `${update} ${handle}`
 }
 
 /** What an update covers, e.g. 12 个账号、340 条帖子. */

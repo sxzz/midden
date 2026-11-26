@@ -6,9 +6,12 @@ const props = defineProps<{
   name: string
   /** The record of an update of the folder started here, to link to. */
   progress?: string
+  /** Its 定期更新 in short (每天), when it has one. */
+  watching?: string
 }>()
 const emit = defineEmits<{
   update: []
+  watch: []
   /** A link here navigates: the sheet should close. */
   navigate: []
   share: []
@@ -51,6 +54,9 @@ function backdrop(event: MouseEvent) {
       >
         查看更新进度
       </AppLink>
+      <button type="button" class="action" @click="emit('watch')">
+        {{ watching ? `定期更新 · ${watching}` : '定期更新' }}
+      </button>
       <button type="button" class="action" @click="emit('share')">
         公开分享
       </button>

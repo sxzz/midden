@@ -15,10 +15,12 @@ import {
   type Folder,
   type TagChange,
   type Usage,
+  type Watch,
 } from '../api'
 import { useCollection } from '../composables/useCollection'
 import { useFolders } from '../composables/useFolders'
 import { toast } from '../composables/useToast'
+import { useWatch } from '../composables/useWatch'
 import {
   apiQuery,
   folderAddress,
@@ -48,6 +50,7 @@ import ShareSheet from './ShareSheet.vue'
 import TabBar from './TabBar.vue'
 import BackLink from './ui/BackLink.vue'
 import UpdateSheet from './UpdateSheet.vue'
+import WatchSheet from './WatchSheet.vue'
 // Remembered in this browser, so a reload does not cover the media again.
 const SENSITIVE_KEY = 'midden.showSensitive'
 const showSensitive = shallowRef(readFlag(SENSITIVE_KEY))
@@ -143,6 +146,14 @@ const {
 const folder = computed(() =>
   folders.value.find((f) => f.id === folderId.value),
 )
+/** The open folder's 定期更新, named in its menu. */
+const { trailing: watchTrailing, changed: watchSaved } = useWatch(() =>
+  folderId.value ? { target: 'folder', id: folderId.value } : undefined,
+)
+function watchChanged(w: Watch | undefined) {
+  watchSaved(w)
+  sheet.value = ''
+}
 const titles: Record<string, string> = {
   collections: '我的收藏',
   captures: '采集',
@@ -156,6 +167,7 @@ const titles: Record<string, string> = {
   settings: '设置',
   'settings-accounts': '采集账号',
   'settings-passkeys': '通行密钥',
+  'settings-watches': '定期更新',
   'settings-admin': '管理员面板',
   'settings-storage': '存储用量',
   'settings-jobs': '后台任务',
@@ -418,7 +430,8 @@ const modified = computed(
     folderModified(folderList.query.value, folder.value.filter),
 )
 const canSave = computed(() => home.value && hasFilters(shownQuery.value))
-type Sheet = '' | 'create' | 'menu' | 'rename' | 'delete' | 'share' | 'update'
+type Sheet =
+  '' | 'create' | 'menu' | 'rename' | 'delete' | 'share' | 'update' | 'watch'
 const sheet = shallowRef<Sheet>('')
 const busy = shallowRef(false)
 const sheetError = shallowRef('')
@@ -748,7 +761,9 @@ const viewProps = computed(() => {
       :open="sheet === 'menu'"
       :name="folder.name"
       :progress="folderRecords[folder.id]"
+      :watching="watchTrailing"
       @update="openSheet('update')"
+      @watch="openSheet('watch')"
       @navigate="sheet = ''"
       @share="openSheet('share')"
       @rename="openSheet('rename')"
@@ -760,6 +775,15 @@ const viewProps = computed(() => {
       :open="sheet === 'update'"
       :target="{ target: 'folder', id: folder.id }"
       @started="folderUpdated"
+      @cancel="sheet = ''"
+    />
+    <WatchSheet
+      v-if="folder"
+      :open="sheet === 'watch'"
+      :target="{ target: 'folder', id: folder.id }"
+      :label="`收藏夹「${folder.name}」`"
+      @changed="watchChanged"
+      @navigate="sheet = ''"
       @cancel="sheet = ''"
     />
     <ShareSheet

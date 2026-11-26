@@ -40,6 +40,12 @@ async function logout() {
       chevron
       :to="{ name: 'settings-passkeys' }"
     />
+    <ListButton
+      label="定期更新"
+      variant="plain"
+      chevron
+      :to="{ name: 'settings-watches' }"
+    />
   </ListSection>
   <ListSection>
     <ListButton

@@ -11,11 +11,13 @@ import {
   type RemovalTarget,
   type Share,
   type VideoRemoval,
+  type Watch,
 } from '../api'
 import { profileHandle } from '../captures'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
 import { toast } from '../composables/useToast'
 import { useVideoRemoval } from '../composables/useVideoRemoval'
+import { useWatch } from '../composables/useWatch'
 import { mediaRemovals } from '../media-removals'
 import { date, isRemoved, present } from '../presentation'
 import { accountKey, relationQuery, type Rel } from '../relation-filter'
@@ -35,6 +37,7 @@ import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 import UpdateSheet from './UpdateSheet.vue'
 import VideoRemovalSheet from './VideoRemovalSheet.vue'
+import WatchSheet from './WatchSheet.vue'
 const props = defineProps<{
   id: string
   savedAt?: string
@@ -207,6 +210,25 @@ function updateStarted(recordId: string) {
   updateSheet.value = false
   started(recordId)
 }
+/** A profile's 定期更新, edited in a sheet of its own. */
+const {
+  trailing: watchTrailing,
+  hint: watchHint,
+  changed: watchSaved,
+} = useWatch(() =>
+  isProfile.value && !shared.value
+    ? { target: 'collection', id: props.id }
+    : undefined,
+)
+const watchSheet = shallowRef(false)
+watch(
+  () => props.id,
+  () => (watchSheet.value = false),
+)
+function watchChanged(w: Watch | undefined) {
+  watchSaved(w)
+  watchSheet.value = false
+}
 /** The removal being confirmed: all of a post's media. */
 const removal = shallowRef<{ target: RemovalTarget; title: string }>()
 watch(
@@ -347,6 +369,14 @@ const version = computed(() =>
         :to="{ name: 'capture', params: { id: record } }"
       />
       <ListButton
+        v-if="isProfile"
+        label="定期更新"
+        :hint="watchHint"
+        :trailing="watchTrailing"
+        chevron
+        @select="watchSheet = true"
+      />
+      <ListButton
         v-if="!available"
         label="重试连接采集服务"
         @select="checkAvailability"
@@ -445,6 +475,15 @@ const version = computed(() =>
       :label="isProfile ? handle : undefined"
       @started="updateStarted"
       @cancel="updateSheet = false"
+    />
+    <WatchSheet
+      v-if="!shared && isProfile"
+      :open="watchSheet"
+      :target="{ target: 'collection', id }"
+      :label="handle"
+      @changed="watchChanged"
+      @navigate="watchSheet = false"
+      @cancel="watchSheet = false"
     />
     <ShareSheet
       v-if="!shared"

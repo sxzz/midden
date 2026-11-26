@@ -16,6 +16,7 @@ const PATHS: Record<string, string> = {
   settings: '/settings',
   'settings-accounts': '/settings/accounts',
   'settings-passkeys': '/settings/passkeys',
+  'settings-watches': '/settings/watches',
   'settings-admin': '/settings/admin',
   'settings-storage': '/settings/admin/storage',
   'settings-jobs': '/settings/admin/jobs',

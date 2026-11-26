@@ -277,6 +277,18 @@ test('an update is titled by what it covers', () => {
       }),
     ),
   ).toBe('更新 12 项')
+  // A watch's run (定期更新).
+  expect(
+    recordTitle({ ...profile, update: update({ handle: 'cat', watch: true }) }),
+  ).toBe('定期更新 @cat')
+  expect(
+    recordTitle(
+      record({
+        url: '',
+        update: update({ target: 'folder', name: '猫', watch: true }),
+      }),
+    ),
+  ).toBe('定期更新收藏夹「猫」')
   expect(profileHandle('https://www.instagram.com/dog/')).toBe('@dog')
   expect(coverText(340, 12)).toBe('12 个账号、340 条帖子')
   expect(coverText(1, 0)).toBe('1 条帖子')

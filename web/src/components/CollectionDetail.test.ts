@@ -3,7 +3,7 @@ import { createVaporApp } from 'vue'
 import { shareSlug } from '../share'
 import { collection, mockApi, type Request } from '../testing/api'
 import CollectionDetail from './CollectionDetail.vue'
-import type { Collection, HistoryPoint } from '../api'
+import type { Collection, HistoryPoint, Watch } from '../api'
 const push = vi.fn()
 vi.mock('vue-router', async () => {
   const { resolve } = await import('../testing/router')
@@ -23,11 +23,14 @@ beforeEach(() => {
 })
 /** The history every collection answers with. */
 let history: HistoryPoint[] = []
+/** The profile's watches (定期更新). */
+let watches: Watch[] = []
 afterEach(() => {
   unmount()
   document.body.replaceChildren()
   shareSlug.value = ''
   history = []
+  watches = []
   vi.unstubAllGlobals()
 })
 
@@ -91,6 +94,7 @@ async function mount(shown: Collection = profile) {
       update = { record: { id: 'record', done: false }, older: false }
       return { id: 'record' }
     }
+    if (path.startsWith('/watches?')) return { items: watches }
     if (path.startsWith('/shares')) return []
     if (path.endsWith('/annotation')) return { tags: [], note: '' }
     if (path.startsWith('/tags')) return []
@@ -126,7 +130,9 @@ const button = (root: Element, text: string) =>
 
 it('puts 更新 and 查看进度 in a group of their own; 更新 opens the sheet', async () => {
   const { el, sent } = await mount()
-  await vi.waitFor(() => expect(groups(el)).toContainEqual(['更新']))
+  await vi.waitFor(() =>
+    expect(groups(el)).toContainEqual(['更新', '定期更新']),
+  )
   // Opening the original, sharing and deleting are elsewhere, and the lists
   // are an option of the sheet, not of the page.
   const update = el.querySelector<HTMLElement>('.update .section-body')!
@@ -156,7 +162,7 @@ it('puts 更新 and 查看进度 in a group of their own; 更新 opens the sheet
   button(sheet, '开始更新').click()
   // The update's progress joins the same group; the button says it runs.
   await vi.waitFor(() =>
-    expect(groups(el)).toContainEqual(['正在更新…', '查看进度']),
+    expect(groups(el)).toContainEqual(['正在更新…', '查看进度', '定期更新']),
   )
   expect(sent.at(-1)).toEqual({
     path: '/updates',
@@ -201,7 +207,9 @@ it('a post opens the sheet with its references alone', async () => {
 
 it('puts the update group first, the date of the version under it', async () => {
   const { el } = await mount()
-  await vi.waitFor(() => expect(groups(el)).toContainEqual(['更新']))
+  await vi.waitFor(() =>
+    expect(groups(el)).toContainEqual(['更新', '定期更新']),
+  )
   const list = groups(el)
   const update = list.findIndex((rows) => rows[0] === '更新')
   const pages = list.findIndex((rows) =>
@@ -217,6 +225,53 @@ it('puts the update group first, the date of the version under it', async () => 
     /^最新版本抓取于 /,
   )
   expect(footnotes.filter(Boolean)).toHaveLength(1)
+})
+
+it('a watched profile says how often and when next; the row opens its sheet', async () => {
+  const next = new Date()
+  next.setHours(23, 5, 0, 0)
+  watches = [
+    {
+      id: 'w',
+      target: 'collection',
+      target_id: 'profile',
+      handle: 'synthetic',
+      url: 'https://x.com/i/user/1',
+      frequency: '6h',
+      options: {
+        posts: 'latest',
+        count: 100,
+        media_only: false,
+        include_shared: true,
+        capture_references: true,
+        relations: false,
+      },
+      enabled: true,
+      next_run_at: next.toISOString(),
+      created_at: '2026-11-20T00:00:00Z',
+    },
+  ]
+  const { el } = await mount()
+  const update = el.querySelector<HTMLElement>('.update .section-body')!
+  await vi.waitFor(() =>
+    expect(update.textContent).toContain('定期更新下次 今天 23:05每 6 小时'),
+  )
+  ;[...update.querySelectorAll('button')]
+    .find((b) => b.textContent?.startsWith('定期更新'))!
+    .click()
+  const sheet = await vi.waitFor(() => {
+    const open = el.querySelector<HTMLDialogElement>('dialog.sheet[open]')
+    expect(open?.textContent).toContain('定期更新 @synthetic')
+    return open!
+  })
+  await vi.waitFor(() => expect(sheet.textContent).toContain('取消定期更新'))
+  expect(sheet.querySelector('select')?.value).toBe('6h')
+})
+
+it('a post has no 定期更新', async () => {
+  const { el } = await mount(post)
+  await vi.waitFor(() => expect(groups(el)).toContainEqual(['更新']))
+  expect(el.textContent).not.toContain('定期更新')
 })
 
 it('shows no update group behind a public link', async () => {

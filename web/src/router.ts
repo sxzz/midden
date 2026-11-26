@@ -16,6 +16,7 @@ import PasskeySetup from './components/PasskeySetup.vue'
 import ProfileChanges from './components/ProfileChanges.vue'
 import PublicHome from './components/PublicHome.vue'
 import SettingsView from './components/SettingsView.vue'
+import WatchesView from './components/WatchesView.vue'
 
 // The graph page brings sigma and graphology: loaded only when opened.
 const RelationGraph = () => import('./components/RelationGraph.vue')
@@ -85,6 +86,11 @@ export const router = createRouter({
       path: '/settings/passkeys',
       name: 'settings-passkeys',
       component: PasskeyList,
+    },
+    {
+      path: '/settings/watches',
+      name: 'settings-watches',
+      component: WatchesView,
     },
     { path: '/settings/admin', name: 'settings-admin', component: AdminView },
     // Its charts load with it, not with the app.
