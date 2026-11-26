@@ -149,6 +149,9 @@ const DEFAULT_ATTEMPTS = 3
 // A job running past its timeout plus this grace is assumed lost.
 const LEASE_GRACE = 60_000
 const RESCUE_EVERY = 5000
+// A finished job's row is deleted with the next claim, or this much later
+// on its own: one write for many jobs, rather than one each.
+const FINISH_DELAY = 50
 const IDLE_AFTER = 10_000
 /** Types whose priorities no other type in their queue shares. */
 export const PAUSABLE_TYPES = ['thumbnail', 'upload', 'raw-upload'] as const
@@ -185,6 +188,9 @@ export class JobQueue {
   /** Queues whose last job snoozed: not pumped until the next look. */
   readonly #snoozing = new Set<string>()
   #held: string | null = null
+  /** Jobs that finished, their rows not yet deleted. */
+  readonly #finished = new Set<number>()
+  #finishTimer: NodeJS.Timeout | undefined
 
   constructor(options: QueueOptions) {
     this.#db = options.db
@@ -289,6 +295,8 @@ export class JobQueue {
     await Promise.allSettled(
       [...this.#running.values()].flatMap((set) => [...set]),
     )
+    clearTimeout(this.#finishTimer)
+    this.#deleteFinished()
   }
 
   /** Wait until no job is running or due now. Meant for tests. */
@@ -298,7 +306,10 @@ export class JobQueue {
       this.#snoozing.clear()
       for (const queue of Object.keys(this.#concurrency)) this.#pump(queue)
       const running = [...this.#running.values()].flatMap((set) => [...set])
-      if (running.length === 0) return
+      if (running.length === 0) {
+        this.#deleteFinished()
+        return
+      }
       await Promise.allSettled(running)
     }
   }
@@ -360,9 +371,11 @@ export class JobQueue {
   // A handler that ignores its abort signal keeps its slot; once its lease
   // runs out the job is offered again rather than lost. Looked for with a
   // read first: an UPDATE takes the write lock even when nothing matches.
+  // Every queue named, so the claim index finds the running jobs.
   #rescue(): void {
     this.#rescuedAt = this.#now()
     const expired = and(
+      inArray(jobs.queue, Object.keys(this.#concurrency)),
       eq(jobs.state, 'running'),
       lt(jobs.leaseUntil, new Date(this.#now())),
     )
@@ -371,6 +384,8 @@ export class JobQueue {
       .from(jobs)
       .where(expired)
       .all()
+      // Finished, its row still to be deleted (the database was locked).
+      .filter((row) => !this.#finished.has(row.id))
     for (const row of lost)
       this.#db
         .update(jobs)
@@ -423,16 +438,17 @@ export class JobQueue {
     if (running.size >= this.#limit(queue)) return
     const priorities = this.#claimable(queue)
     if (!priorities.length) return
-    while (running.size < this.#limit(queue)) {
-      let row
-      try {
-        row = this.#claim(queue, priorities)
-      } catch (error) {
-        this.#retryLater(error, 'claiming a job', { queue })
-        return
-      }
-      if (!row) return
-      if (!this.#idleQueues.has(queue)) this.#foregroundAt = this.#now()
+    const free = this.#limit(queue) - running.size
+    let rows
+    try {
+      rows = this.#claim(queue, priorities, free)
+    } catch (error) {
+      this.#retryLater(error, 'claiming a job', { queue })
+      return
+    }
+    if (rows.length && !this.#idleQueues.has(queue))
+      this.#foregroundAt = this.#now()
+    for (const row of rows) {
       const settled = (outcome: 'done' | 'snoozed' | 'failed') => {
         running.delete(task)
         // A job that snoozed (its account busy, say) is likely followed by
@@ -455,8 +471,9 @@ export class JobQueue {
 
   // Looked for with a read, then taken by id: most looks find nothing, and
   // a read does not take the write lock. Only this process claims, so the
-  // job cannot be taken in between; the state check guards it anyway.
-  #claim(queue: string, priorities: number[]): Row | undefined {
+  // jobs cannot be taken in between; the state check guards it anyway.
+  // The same transaction deletes the rows of jobs that finished.
+  #claim(queue: string, priorities: number[], limit: number): Row[] {
     const now = this.#now()
     const next = this.#db
       .select({ id: jobs.id })
@@ -472,19 +489,60 @@ export class JobQueue {
         ),
       )
       .orderBy(asc(jobs.priority), asc(jobs.runAt), asc(jobs.id))
-      .limit(1)
-      .get()
-    if (!next) return undefined
-    return this.#db
-      .update(jobs)
-      .set({
-        state: 'running',
-        attempt: sql`${jobs.attempt} + 1`,
-        leaseUntil: new Date(now + this.#timeoutMs + LEASE_GRACE),
-      })
-      .where(and(eq(jobs.id, next.id), eq(jobs.state, 'available')))
-      .returning()
-      .get()
+      .limit(limit)
+      .all()
+    if (!next.length) return []
+    const finished = [...this.#finished]
+    const rows = this.#db.transaction((tx) => {
+      if (finished.length)
+        tx.delete(jobs).where(inArray(jobs.id, finished)).run()
+      return tx
+        .update(jobs)
+        .set({
+          state: 'running',
+          attempt: sql`${jobs.attempt} + 1`,
+          leaseUntil: new Date(now + this.#timeoutMs + LEASE_GRACE),
+        })
+        .where(
+          and(
+            inArray(
+              jobs.id,
+              next.map((row) => row.id),
+            ),
+            eq(jobs.state, 'available'),
+          ),
+        )
+        .returning()
+        .all()
+    })
+    for (const id of finished) this.#finished.delete(id)
+    // In the order they were looked for; RETURNING follows no order.
+    const order = new Map(next.map((row, i) => [row.id, i]))
+    return rows.toSorted((a, b) => order.get(a.id)! - order.get(b.id)!)
+  }
+
+  /** Delete a finished job's row soon, with others (`FINISH_DELAY`). */
+  #finish(id: number): void {
+    this.#finished.add(id)
+    if (this.#finishTimer) return
+    this.#finishTimer = setTimeout(() => {
+      this.#finishTimer = undefined
+      this.#deleteFinished()
+    }, FINISH_DELAY)
+    this.#finishTimer.unref()
+  }
+
+  #deleteFinished(): void {
+    if (!this.#finished.size) return
+    const finished = [...this.#finished]
+    try {
+      this.#db.delete(jobs).where(inArray(jobs.id, finished)).run()
+      for (const id of finished) this.#finished.delete(id)
+    } catch (error) {
+      // The rows stay running and the ids here, so #rescue leaves them be.
+      this.#retryLater(error, 'deleting finished jobs')
+      if (this.#started) this.#finish(finished[0]!)
+    }
   }
 
   #execute(row: Row): Promise<'done' | 'snoozed' | 'failed'> {
@@ -527,7 +585,7 @@ export class JobQueue {
       }
       try {
         if (error === undefined) {
-          this.#db.delete(jobs).where(eq(jobs.id, row.id)).run()
+          this.#finish(row.id)
           log.debug({ elapsedMs: this.#now() - started }, 'job finished')
           return 'done'
         }

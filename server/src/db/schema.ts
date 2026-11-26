@@ -55,15 +55,14 @@ export const jobs = sqliteTable(
     updateId: text(),
   },
   (t) => [
+    // Also how expired leases are found: running jobs are few, and naming
+    // every queue reaches them through it (`#jobs/queue.ts`), so no index
+    // of their own is updated on every claim and finish.
     index('jobs_claim').on(t.queue, t.state, t.priority, t.runAt),
     index('jobs_ref').on(t.ref),
     index('jobs_update')
       .on(t.updateId)
       .where(sql`${t.updateId} IS NOT NULL`),
-    // Expired leases are looked for every few seconds.
-    index('jobs_running')
-      .on(t.leaseUntil)
-      .where(sql`${t.state} = 'running'`),
   ],
 )
 

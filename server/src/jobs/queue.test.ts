@@ -74,6 +74,77 @@ describe('JobQueue', () => {
     expect(rows(db)).toEqual([])
   })
 
+  test('claims free slots together and deletes finished rows with the next claim', async () => {
+    const started: string[] = []
+    const { db, queue } = setup(
+      {
+        echo: {
+          queue: 'main',
+          run: async (job) => {
+            started.push(job.ref)
+            // Let every slot fill before any job ends.
+            await new Promise((resolve) => setTimeout(resolve, 5))
+          },
+        },
+      },
+      { concurrency: { main: 3 } },
+    )
+    for (const ref of ['a', 'b', 'c', 'd', 'e', 'f'])
+      queue.enqueue(db, 'echo', ref)
+    // Commits that change jobs: transactions, and statements outside one.
+    let commits = 0
+    const prepare = db.$client.prepare.bind(db.$client)
+    db.$client.prepare = ((text: string) => {
+      if (
+        text === 'commit' ||
+        (!db.$client.isTransaction &&
+          /^(?:update|delete from) "jobs"/.test(text))
+      )
+        commits++
+      return prepare(text)
+    }) as typeof db.$client.prepare
+    queue.start()
+    await queue.drain()
+    expect(started.toSorted()).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
+    expect(rows(db)).toEqual([])
+    // One to claim and one to delete each job would be 12.
+    expect(commits).toBeLessThan(8)
+  })
+
+  test('a finished job whose row cannot be deleted yet runs once', async () => {
+    let runs = 0
+    let now = 0
+    const { db, queue } = setup(
+      {
+        echo: {
+          queue: 'main',
+          run: async () => {
+            runs++
+          },
+        },
+      },
+      { now: () => now, timeoutMs: 1000 },
+    )
+    queue.enqueue(db, 'echo', 'a')
+    // Deletes fail as if the database were locked; the row stays running.
+    const run = db.$client.prepare.bind(db.$client)
+    let locked = true
+    db.$client.prepare = ((text: string) => {
+      if (locked && /^delete from "jobs"/i.test(text))
+        throw Object.assign(new Error('database is locked'), { errcode: 5 })
+      return run(text)
+    }) as typeof db.$client.prepare
+    queue.start()
+    await expect.poll(() => runs).toBe(1)
+    // Long past its lease: a lost job would be offered again.
+    now = 10 * 60_000
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(runs).toBe(1)
+    locked = false
+    await expect.poll(() => rows(db)).toEqual([])
+    expect(runs).toBe(1)
+  })
+
   test('a job enqueued in a rolled-back transaction never runs', async () => {
     const seen: string[] = []
     const { db, queue } = setup({
@@ -296,7 +367,8 @@ describe('JobQueue', () => {
     writer.exec('ROLLBACK')
     writer.close()
     await expect.poll(() => seen).toEqual(['a'])
-    expect(rows(db)).toEqual([])
+    // Its row goes with the next write (FINISH_DELAY).
+    await expect.poll(() => rows(db)).toEqual([])
     db.$client.close()
   })
 
