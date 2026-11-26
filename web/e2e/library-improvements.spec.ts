@@ -67,7 +67,10 @@ test('restores sort controls and opens author links in a new tab', async ({
   await expect(
     page.getByRole('link', { name: 'Home', exact: true }),
   ).toHaveCount(0)
-  await expect(page.locator('.thumbs')).toHaveCSS('height', '180px')
+  // A box takes its media's shape: 180px to within a width's rounding.
+  await expect
+    .poll(async () => (await page.locator('.thumbs').boundingBox())?.height)
+    .toBeCloseTo(180, 0)
   await expect(page.locator('.avatar-link')).toHaveCSS('height', '40px')
   await expect(sort).toHaveValue('published')
   expect(await page.locator('.page').evaluate((el) => el.clientWidth)).toBe(960)
