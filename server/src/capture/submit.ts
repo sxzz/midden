@@ -270,9 +270,15 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
         })
         .onConflictDoNothing()
         .run()
+    // Guarded: an UPDATE writes its row's page even when nothing changes.
     tx.update(collections)
       .set({ unreferencedAt: null })
-      .where(eq(collections.id, collectionId))
+      .where(
+        and(
+          eq(collections.id, collectionId),
+          isNotNull(collections.unreferencedAt),
+        ),
+      )
       .run()
 
     const explicitCollection = target.collection && !automatic

@@ -423,7 +423,6 @@ export const entities = sqliteTable(
     // The entity type, e.g. `x.post`.
     kind: text().notNull(),
     externalId: text().notNull(),
-    observedAt: createdAt(),
   },
   (t) => [
     uniqueIndex('entities_identity').on(t.platform, t.kind, t.externalId),

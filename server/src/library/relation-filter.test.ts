@@ -550,11 +550,8 @@ describe('comparing accounts', () => {
     const accounts = Array.from({ length: 8000 }, (_, i) => `syn-a${i}`)
     const perspectives = Array.from({ length: 20 }, (_, i) => `syn-p${i}`)
     c.db.$client.exec(`INSERT INTO entities
-      (id, platform, kind, external_id, observed_at) VALUES ${[
-        ...accounts,
-        ...perspectives,
-      ]
-        .map((id) => `('${id}', 'fake', 'fake.profile', '${id}', ${now})`)
+      (id, platform, kind, external_id) VALUES ${[...accounts, ...perspectives]
+        .map((id) => `('${id}', 'fake', 'fake.profile', '${id}')`)
         .join(',')}`)
     const edges: string[] = []
     perspectives.forEach((p, i) => {

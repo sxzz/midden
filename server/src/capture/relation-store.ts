@@ -112,7 +112,6 @@ export function storeListed(
       type: item.type,
       externalId: item.externalId,
     })),
-    now,
   )
   const accountIds = new Map(
     items.map((item) => [
@@ -202,7 +201,6 @@ export function storeListed(
 function upsertEntities(
   tx: Transaction,
   wanted: { platform: string; type: string; externalId: string }[],
-  now: Date,
 ): Map<string, string> {
   const ids = new Map<string, string>()
   const groups = Map.groupBy(wanted, (e) => `${e.platform}\n${e.type}`)
@@ -217,13 +215,9 @@ function upsertEntities(
             platform,
             kind: type,
             externalId,
-            observedAt: now,
           })),
         )
-        .onConflictDoUpdate({
-          target: [entities.platform, entities.kind, entities.externalId],
-          set: { observedAt: now },
-        })
+        .onConflictDoNothing()
         .run()
     for (const row of tx
       .select({ id: entities.id, externalId: entities.externalId })
@@ -263,7 +257,6 @@ function storeVersions(
         externalId: e.external_id,
       })),
     ),
-    now,
   )
   const prepared = rows.map((row) => {
     const payload: Payload = structuredClone(row.staged.payload)

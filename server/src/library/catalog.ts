@@ -97,10 +97,76 @@ function refreshQuoting(db: Executor, targets: SQL) {
       WHERE quoting.root_kind NOT LIKE '%.profile')`)
 }
 
+// How an existing row's columns are updated: each index's columns
+// together, the unindexed ones last. The search columns' trigger
+// refreshes the search index only when one of them changed.
+export const UPDATE_GROUPS = [
+  ['observed_at'],
+  ['published_at'],
+  ['storage_bytes'],
+  ['followers_count'],
+  ['following_count'],
+  ['root_entity_id'],
+  [
+    'revision_id',
+    'revision_at',
+    'author_entity_id',
+    'author_name',
+    'subject_entity_id',
+  ],
+  [
+    'root_kind',
+    'subject_protected',
+    'has_media',
+    'has_image',
+    'has_video',
+    'has_sensitive',
+    'quotes',
+    'search_name',
+    'search_text',
+    'search_quoted',
+    'search_extra',
+  ],
+]
+// In the order the query below selects them; the groups above cover each
+// but `collection_id` once (list.test.ts).
+export const COLUMNS = [
+  'collection_id',
+  'revision_id',
+  'revision_at',
+  'observed_at',
+  'published_at',
+  'storage_bytes',
+  'root_entity_id',
+  'root_kind',
+  'author_entity_id',
+  'author_name',
+  'subject_entity_id',
+  'subject_protected',
+  'has_media',
+  'has_image',
+  'has_video',
+  'has_sensitive',
+  'quotes',
+  'search_name',
+  'search_text',
+  'search_quoted',
+  'search_extra',
+  'followers_count',
+  'following_count',
+]
+
 /** Bring the catalog rows of these collections up to date. */
 export function catalogCollections(db: Executor, ids: readonly string[]) {
   if (!ids.length) return
   const targets = list([...new Set(ids)])
+  // The rows as they should be, compared below with the stored ones. A
+  // temporary table lives outside the database file and its WAL.
+  db.run(
+    sql.raw(
+      `CREATE TEMP TABLE IF NOT EXISTS catalog_next (${COLUMNS.join(', ')})`,
+    ),
+  )
   db.run(sql`DELETE FROM catalog WHERE collection_id IN (
     SELECT value FROM json_each(${targets}) t
     WHERE NOT EXISTS (SELECT 1 FROM revisions r WHERE r.collection_id = t.value))`)
@@ -144,11 +210,7 @@ export function catalogCollections(db: Executor, ids: readonly string[]) {
       LEFT JOIN entity_versions author_version
         ON author_version.id = author.entity_version_id
     )
-    INSERT INTO catalog (collection_id, revision_id, revision_at, observed_at,
-      published_at, storage_bytes, root_entity_id, root_kind, author_entity_id,
-      author_name, subject_entity_id, subject_protected, has_media, has_image,
-      has_video, has_sensitive, quotes, search_name, search_text,
-      search_quoted, search_extra, followers_count, following_count)
+    INSERT INTO temp.catalog_next (${sql.raw(COLUMNS.join(', '))})
     SELECT h.collection_id, h.revision_id, h.revision_at, h.observed_at,
       coalesce(${sql.raw(PUBLISHED_AT)}, h.observed_at),
       ${sql.raw(storageOf('h.collection_id'))},
@@ -180,30 +242,25 @@ export function catalogCollections(db: Executor, ids: readonly string[]) {
             AND m.alt_text <> ''))),
       ${sql.raw(accountCount('followers'))},
       ${sql.raw(accountCount('following'))}
-    FROM h WHERE true
-    ON CONFLICT (collection_id) DO UPDATE SET
-      revision_id = excluded.revision_id,
-      revision_at = excluded.revision_at,
-      observed_at = excluded.observed_at,
-      published_at = excluded.published_at,
-      storage_bytes = excluded.storage_bytes,
-      root_entity_id = excluded.root_entity_id,
-      root_kind = excluded.root_kind,
-      author_entity_id = excluded.author_entity_id,
-      author_name = excluded.author_name,
-      subject_entity_id = excluded.subject_entity_id,
-      subject_protected = excluded.subject_protected,
-      has_media = excluded.has_media,
-      has_image = excluded.has_image,
-      has_video = excluded.has_video,
-      has_sensitive = excluded.has_sensitive,
-      quotes = excluded.quotes,
-      search_name = excluded.search_name,
-      search_text = excluded.search_text,
-      search_quoted = excluded.search_quoted,
-      search_extra = excluded.search_extra,
-      followers_count = excluded.followers_count,
-      following_count = excluded.following_count`)
+    FROM h`)
+  // New rows go in whole. A row already there gets only the columns that
+  // changed, in groups by index: an UPDATE rewrites the entry of every index
+  // on a column it sets, changed or not, and the observation time changes
+  // with every capture while the rest mostly does not.
+  db.run(sql`INSERT INTO catalog (${sql.raw(COLUMNS.join(', '))})
+    SELECT ${sql.raw(COLUMNS.join(', '))} FROM temp.catalog_next WHERE true
+    ON CONFLICT (collection_id) DO NOTHING`)
+  for (const group of UPDATE_GROUPS) {
+    const set = group.map((c) => `${c} = n.${c}`).join(', ')
+    const mine = group.map((c) => `catalog.${c}`).join(', ')
+    const next = group.map((c) => `n.${c}`).join(', ')
+    db.run(
+      sql.raw(`UPDATE catalog SET ${set} FROM temp.catalog_next n
+        WHERE n.collection_id = catalog.collection_id
+          AND (${mine}) IS NOT (${next})`),
+    )
+  }
+  db.run(sql`DELETE FROM temp.catalog_next`)
   refreshQuoting(db, targets)
 }
 

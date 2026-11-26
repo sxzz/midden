@@ -258,7 +258,6 @@ function persistEntities(
   platform: string,
   graph: PayloadGraph,
   captureAssets: AssetState[],
-  now: Date,
 ): void {
   const hashOf = entityContentHashes(captureAssets)
   for (const entity of graph.entities) {
@@ -274,12 +273,7 @@ function persistEntities(
         ),
       )
       .get()?.id
-    if (entityId)
-      tx.update(entities)
-        .set({ observedAt: now })
-        .where(eq(entities.id, entityId))
-        .run()
-    else {
+    if (!entityId) {
       entityId = newId()
       tx.insert(entities)
         .values({
@@ -287,7 +281,6 @@ function persistEntities(
           platform,
           kind: entity.type,
           externalId: entity.external_id,
-          observedAt: now,
         })
         .run()
     }
@@ -405,7 +398,7 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
       .where(eq(collections.id, capture.collectionId))
       .get()!
     if (payload.graph)
-      persistEntities(tx, collection.platform, payload.graph, states, now)
+      persistEntities(tx, collection.platform, payload.graph, states)
 
     const context = new Set(
       (payload.graph?.entities ?? [])
@@ -550,7 +543,7 @@ function settleRetriedMedia(
       .where(eq(collections.id, capture.collectionId))
       .get()!
     if (payload.graph)
-      persistEntities(tx, collection.platform, payload.graph, states, now)
+      persistEntities(tx, collection.platform, payload.graph, states)
     const context = new Set(
       (payload.graph?.entities ?? [])
         .filter((e) => e.context_only)
