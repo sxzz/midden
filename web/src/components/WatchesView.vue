@@ -81,7 +81,8 @@ const checked = (event: Event) => (event.target as HTMLInputElement).checked
 </script>
 
 <template>
-  <ListSection v-if="items || error" title="定期更新">
+  <!-- Under 采集's 定期更新 tab, which names it already. -->
+  <ListSection v-if="items || error">
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
     <p v-else-if="!items?.length" class="banner empty">没有定期更新</p>
     <div v-for="w in items" :key="w.id" class="watch">
