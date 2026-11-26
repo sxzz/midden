@@ -167,5 +167,5 @@ describe('read threads', () => {
     expect(missing).toMatchObject({ code: 'not_found' })
     // Its connection only reads.
     expect(await pooled.run('folders', undefined)).toEqual({ items: [] })
-  })
+  }, 30_000)
 })

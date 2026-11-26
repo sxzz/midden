@@ -7,6 +7,7 @@
 import { performance } from 'node:perf_hooks'
 import process from 'node:process'
 import { desc } from 'drizzle-orm'
+import { keepFinishedRecords } from '#capture/record-cache.ts'
 import { recordDetail } from '#capture/records.ts'
 import {
   listRecords,
@@ -83,6 +84,10 @@ const rows = db
   .all()
 console.info(`${rows.length} updates; runs=${RUNS}`)
 time('listRecords (first page)', () => listRecords(db))
+// As a read thread answers it: finished records kept between polls.
+keepFinishedRecords()
+time('listRecords, finished ones kept', () => listRecords(db))
+keepFinishedRecords(false)
 for (const row of rows.slice(0, 3)) {
   const n = (
     client

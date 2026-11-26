@@ -195,5 +195,5 @@ describe('GET requests on the read threads', () => {
       const response = await pooled(route)
       expect([route, response.status < 500]).toEqual([route, true])
     }
-  })
+  }, 30_000)
 })

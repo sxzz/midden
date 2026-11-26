@@ -55,7 +55,7 @@ async function stream(
       )
       const body = await response.arrayBuffer()
       ok = response.ok
-      if (ok && name === 'captures')
+      if (ok && name === 'records')
         newest =
           (
             JSON.parse(new TextDecoder().decode(body)) as {
@@ -84,7 +84,7 @@ await Promise.all([
   stream('healthz', '/healthz', 100),
   ...(ui
     ? [
-        stream('captures', '/v1/captures', 1000),
+        stream('records', '/v1/captures', 1000),
         stream(
           'record',
           () => (newest ? `/v1/captures/${newest}` : '/v1/captures'),
