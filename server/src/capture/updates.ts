@@ -112,6 +112,8 @@ export interface UpdateOptions {
   older?: boolean
   /** Idempotency key: a repeat returns the update it started. */
   key?: string
+  /** The watch (定期更新) starting it; its work ranks below manual work. */
+  watchId?: string
 }
 
 // --- Targets ----------------------------------------------------------------
@@ -202,7 +204,7 @@ function itemKinds(db: Executor, ids: string[]) {
 }
 
 /** Saved profiles' usernames as their current version says, by id. */
-function handles(db: Executor, ids: string[]): Map<string, string> {
+export function handles(db: Executor, ids: string[]): Map<string, string> {
   if (!ids.length) return new Map()
   const rows = db
     .select({ id: collections.id, data: entityVersions.data })
@@ -396,6 +398,9 @@ export function startUpdate(
         options: captureOptions,
         older: options.older ?? false,
         idemKey: options.key ?? null,
+        ...(options.watchId
+          ? { origin: 'watch' as const, watchId: options.watchId }
+          : {}),
         createdAt: new Date(ctx.now?.() ?? Date.now()),
       })
       .run()
@@ -741,6 +746,8 @@ export interface UpdateInfo {
   queued: number
   /** Items that could not be captured when their turn came. */
   skipped: number
+  /** Started by a watch (定期更新) rather than by hand. */
+  watch: boolean
 }
 
 export interface ProfilePart {
@@ -1108,6 +1115,7 @@ function toUpdateRecord(db: Executor, g: Gathered): UpdateRecord {
       older: update.older,
       queued,
       skipped: update.skipped,
+      watch: update.origin === 'watch',
     },
   }
 }

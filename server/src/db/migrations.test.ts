@@ -171,3 +171,41 @@ describe('catalog_id', () => {
     })
   })
 })
+
+describe('watches', () => {
+  test('queued maintenance work moves to the rank below watch runs', () => {
+    const db = migratedBefore('watches')
+    const jobs: [string, number][] = [
+      ['capture', 0],
+      ['capture', 1],
+      ['capture', 2],
+      ['thumbnail', 4],
+      ['thumbnail', 5],
+      ['thumbnail', 6],
+    ]
+    for (const [i, [type, priority]] of jobs.entries())
+      insertRow(db, 'jobs', { id: i + 1, type, ref: `r${i}`, priority })
+    insertRow(db, 'updates', { id: 'u1', collection_ids: '[]', options: '{}' })
+
+    migrateRest(db)
+
+    expect(
+      db.$client
+        .prepare('SELECT type, priority FROM jobs ORDER BY id')
+        .all()
+        .map((row) => [row.type, row.priority]),
+    ).toEqual([
+      ['capture', 0],
+      ['capture', 1],
+      ['capture', 3],
+      ['thumbnail', 4],
+      ['thumbnail', 5],
+      ['thumbnail', 7],
+    ])
+    // Updates so far were all started by hand.
+    expect(
+      db.$client.prepare('SELECT origin, watch_id FROM updates').all(),
+    ).toEqual([{ origin: 'manual', watch_id: null }])
+    expect(db.$client.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+  })
+})

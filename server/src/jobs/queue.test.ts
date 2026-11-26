@@ -46,9 +46,19 @@ function setup(
   return { db, queue }
 }
 
-function addUpdate(db: Database, id: string) {
+function addUpdate(
+  db: Database,
+  id: string,
+  origin: 'manual' | 'watch' = 'manual',
+) {
   db.insert(updates)
-    .values({ id, target: 'many', collectionIds: [], options: {} as never })
+    .values({
+      id,
+      target: 'many',
+      collectionIds: [],
+      options: {} as never,
+      origin,
+    })
     .run()
 }
 
@@ -502,7 +512,7 @@ describe('JobQueue', () => {
     expect(seen).toEqual(['other', 'parent', 'child'])
   })
 
-  test('manual work runs before an update, and both before maintenance', async () => {
+  test('manual work runs first, then an update, a watch run, maintenance', async () => {
     const order: string[] = []
     const { db, queue } = setup(
       {
@@ -510,20 +520,36 @@ describe('JobQueue', () => {
           queue: 'main',
           run: async (job) => {
             order.push(job.ref)
+            // What a job enqueues ranks as it does.
+            if (job.ref === 'watch') queue.enqueue(db, 'echo', 'watch child')
           },
         },
       },
       { concurrency: { main: 1 } },
     )
     addUpdate(db, 'u')
+    addUpdate(db, 'w', 'watch')
     withOrigin({ rank: RANK.maintenance }, () =>
       queue.enqueue(db, 'echo', 'maintenance'),
     )
+    queue.enqueue(db, 'echo', 'watch', { updateId: 'w' })
     queue.enqueue(db, 'echo', 'update', { updateId: 'u' })
     queue.enqueue(db, 'echo', 'manual')
+    expect(
+      Object.fromEntries(rows(db).map((row) => [row.ref, row.priority])),
+    ).toEqual({ maintenance: 3, watch: 2, update: 1, manual: 0 })
+    // A retry from the web, outside any job: still the watch run's rank.
+    queue.enqueue(db, 'echo', 'watch retry', { updateId: 'w' })
     queue.start()
     await queue.drain()
-    expect(order).toEqual(['manual', 'update', 'maintenance'])
+    expect(order).toEqual([
+      'manual',
+      'update',
+      'watch',
+      'watch retry',
+      'watch child',
+      'maintenance',
+    ])
   })
 
   test('idle queues wait until the others have been quiet a while', async () => {

@@ -1,12 +1,14 @@
 import { sql } from 'drizzle-orm'
 import {
   blob,
+  check,
   index,
   integer,
   primaryKey,
   sqliteTableCreator,
   text,
   uniqueIndex,
+  type AnySQLiteColumn,
 } from 'drizzle-orm/sqlite-core'
 import type { CaptureOptions, StoredOptions } from '#capture/options.ts'
 import type { Metrics, Payload } from '#capture/payload.ts'
@@ -38,7 +40,7 @@ export const jobs = sqliteTable(
     ref: text().notNull(),
     queue: text().notNull(),
     // Lower runs first within a queue: the handler's own priority plus the
-    // origin's rank (manual, update, maintenance; `#jobs/queue.ts`).
+    // origin's rank (manual, update, watch, maintenance; `#jobs/queue.ts`).
     priority: integer().notNull().default(0),
     // `paused` while its update is paused (`updates.paused_at`); the worker
     // claims only `available` jobs.
@@ -898,9 +900,22 @@ export const updates = sqliteTable(
     pausedAt: timestamp(),
     // A repeat of the same request starts nothing new.
     idemKey: text().unique(),
+    // The watch (定期更新) that started it; its jobs rank below manual work.
+    // `origin` stays when the watch is removed.
+    origin: text({ enum: ['manual', 'watch'] })
+      .notNull()
+      .default('manual'),
+    watchId: text().references((): AnySQLiteColumn => watches.id, {
+      onDelete: 'set null',
+    }),
     createdAt: createdAt(),
   },
-  (t) => [index('updates_created').on(t.createdAt, t.id)],
+  (t) => [
+    index('updates_created').on(t.createdAt, t.id),
+    index('updates_watch')
+      .on(t.watchId, t.createdAt)
+      .where(sql`${t.watchId} IS NOT NULL`),
+  ],
 )
 
 export const updateSkipReasons = [
@@ -934,6 +949,43 @@ export const updateSkips = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [primaryKey({ columns: [t.updateId, t.position] })],
+)
+
+export const watchFrequencies = ['6h', 'daily', 'weekly'] as const
+export type WatchFrequency = (typeof watchFrequencies)[number]
+
+/**
+ * 定期更新: a saved profile or a folder updated on a schedule, with options
+ * of its own. Exactly one target; removing it removes the watch.
+ */
+export const watches = sqliteTable(
+  'watches',
+  {
+    id: text().primaryKey(),
+    collectionId: text().references(() => library.collectionId, {
+      onDelete: 'cascade',
+    }),
+    folderId: text().references(() => folders.id, { onDelete: 'cascade' }),
+    frequency: text({ enum: watchFrequencies }).notNull(),
+    // What each run captures, as an update started by hand would.
+    options: text({ mode: 'json' }).$type<CaptureOptions>().notNull(),
+    enabled: bool().notNull().default(true),
+    // The next slot: its frequency from a fixed offset of its own, so
+    // watches do not all start at once (`capture/watches.ts`).
+    nextRunAt: timestamp().notNull(),
+    // Why the last slot started nothing (the folder was empty, say).
+    error: text().notNull().default(''),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('watches_collection').on(t.collectionId),
+    uniqueIndex('watches_folder').on(t.folderId),
+    index('watches_due').on(t.enabled, t.nextRunAt),
+    check(
+      'watches_one_target',
+      sql`(${t.collectionId} IS NULL) <> (${t.folderId} IS NULL)`,
+    ),
+  ],
 )
 
 export const tags = sqliteTable('tags', {

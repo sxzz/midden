@@ -51,10 +51,10 @@ export interface JobHandler {
 
 /**
  * Where work comes from, added to the handler's priority: what the owner
- * asked for runs before what an update (or a watch) does, and both before
- * maintenance.
+ * asked for runs first, then an update started by hand, then a watch's
+ * (定期更新), then maintenance.
  */
-export const RANK = { manual: 0, update: 1, maintenance: 2 } as const
+export const RANK = { manual: 0, update: 1, watch: 2, maintenance: 3 } as const
 export type Rank = (typeof RANK)[keyof typeof RANK]
 const RANKS: Rank[] = Object.values(RANK)
 
@@ -247,9 +247,12 @@ export class JobQueue {
       options.updateId === undefined
         ? (current?.updateId ?? null)
         : options.updateId
+    // An update's work ranks at least as its update does, whoever enqueues
+    // it (a retry from the web, say).
+    const update = updateId ? updateOf(executor, updateId) : undefined
     const rank = Math.max(
       options.rank ?? current?.rank ?? RANK.manual,
-      updateId ? RANK.update : RANK.manual,
+      update?.rank ?? RANK.manual,
     )
     const now = this.#now()
     executor
@@ -259,8 +262,7 @@ export class JobQueue {
         ref,
         queue: handler.queue,
         priority: (handler.priority ?? 0) + rank,
-        state:
-          updateId && updatePaused(executor, updateId) ? 'paused' : 'available',
+        state: update?.paused ? 'paused' : 'available',
         maxAttempts: handler.maxAttempts ?? DEFAULT_ATTEMPTS,
         runAt: new Date(now + (options.delayMs ?? 0)),
         createdAt: new Date(now),
@@ -675,11 +677,23 @@ export class JobQueue {
 }
 
 function updatePaused(executor: Executor, updateId: string): boolean {
-  return !!executor
-    .select({ id: updates.id })
+  return !!updateOf(executor, updateId)?.paused
+}
+
+/** Whether an update is paused, and the rank of its work. */
+function updateOf(
+  executor: Executor,
+  updateId: string,
+): { paused: boolean; rank: Rank } {
+  const row = executor
+    .select({ pausedAt: updates.pausedAt, origin: updates.origin })
     .from(updates)
-    .where(and(eq(updates.id, updateId), isNotNull(updates.pausedAt)))
+    .where(eq(updates.id, updateId))
     .get()
+  return {
+    paused: !!row?.pausedAt,
+    rank: row?.origin === 'watch' ? RANK.watch : RANK.update,
+  }
 }
 
 /**

@@ -26,6 +26,7 @@ import { queueRoutes, type QueueInfo } from './queue-routes.ts'
 import { shareRoutes } from './share-routes.ts'
 import { storageRoutes } from './storage-routes.ts'
 import { json, type Env } from './validate.ts'
+import { watchRoutes } from './watch-routes.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { LitestreamWatch } from '#litestream.ts'
 import type { BotState } from '#telegram/launch.ts'
@@ -195,6 +196,7 @@ export function createApi(options: HttpOptions) {
       .route('/', accountRoutes(ctx))
       .route('/', libraryRoutes(ctx))
       .route('/', folderRoutes(ctx))
+      .route('/', watchRoutes(ctx))
       .route('/', shareRoutes(ctx))
       .route('/passkeys', passkeyRoutes(passkeys))
       .route(

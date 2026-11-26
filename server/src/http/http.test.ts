@@ -586,6 +586,73 @@ describe('api', () => {
     ])
   })
 
+  test('watches a profile or a folder (定期更新)', async () => {
+    const { ctx, call } = setup()
+    const send = (method: string, path: string, body?: unknown) =>
+      call(path, {
+        method,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+    const job = (await (
+      await send('POST', '/captures', { url: 'https://fake.test/u/100' })
+    ).json()) as { id: string }
+    await ctx.queue.drain()
+    const { collection_id: profile } = (await (
+      await call(`/jobs/${job.id}`)
+    ).json()) as { collection_id: string }
+
+    const created = await send('PUT', '/watches', {
+      target: 'collection',
+      id: profile,
+      frequency: 'daily',
+      options: { posts: 'until_existing', relations: true },
+    })
+    expect(created.status).toBe(200)
+    const watch = (await created.json()) as { id: string }
+    expect(watch).toMatchObject({
+      target: 'collection',
+      target_id: profile,
+      url: 'https://fake.test/u/100',
+      frequency: 'daily',
+      enabled: true,
+      options: { posts: 'until_existing', relations: true, media_only: false },
+      next_run_at: expect.any(String),
+    })
+    expect(watch).not.toHaveProperty('last_run')
+    expect(
+      await (await call(`/watches?target=collection&id=${profile}`)).json(),
+    ).toMatchObject({ items: [{ id: watch.id }] })
+    expect(
+      await (await call(`/watches?target=folder&id=${profile}`)).json(),
+    ).toEqual({ items: [] })
+
+    expect(
+      await (
+        await send('PATCH', `/watches/${watch.id}`, {
+          enabled: false,
+          frequency: 'weekly',
+          options: { posts: 'latest', count: 20 },
+        })
+      ).json(),
+    ).toMatchObject({
+      enabled: false,
+      frequency: 'weekly',
+      options: { posts: 'latest', count: 20, relations: false },
+    })
+    expect(
+      (
+        await send('PUT', '/watches', {
+          target: 'collection',
+          id: profile,
+          frequency: 'hourly',
+        })
+      ).status,
+    ).toBe(400)
+    expect((await send('DELETE', `/watches/${watch.id}`)).status).toBe(204)
+    expect((await send('DELETE', `/watches/${watch.id}`)).status).toBe(404)
+    expect(await (await call('/watches')).json()).toEqual({ items: [] })
+  })
+
   test('renames, merges and deletes tags', async () => {
     const { ctx, call } = setup()
     const send = (method: string, path: string, body?: unknown) =>

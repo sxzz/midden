@@ -101,6 +101,7 @@ function updateJson(u: UpdateInfo) {
     older: u.older,
     queued: u.queued,
     skipped: u.skipped,
+    ...(u.watch ? { watch: true } : {}),
   }
 }
 

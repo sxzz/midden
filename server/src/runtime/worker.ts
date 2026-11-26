@@ -3,6 +3,7 @@ import { performance } from 'node:perf_hooks'
 import process from 'node:process'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { runMaintenance } from '#capture/maintenance.ts'
+import { runWatches } from '#capture/watches.ts'
 import { optimize, unknownMigrations } from '#db/client.ts'
 import { pruneSessions } from '#http/auth.ts'
 import { prunePasskeys } from '#http/passkeys.ts'
@@ -24,6 +25,7 @@ export interface WorkerHandle {
 }
 
 const MAINTENANCE_INTERVAL = 60_000
+const WATCH_INTERVAL = 60_000
 const OPTIMIZE_INTERVAL = 6 * 60 * 60_000
 const THROTTLE_STEP = 1000
 const STATUS_EVERY = 2000
@@ -169,6 +171,16 @@ export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
       .catch((error: unknown) =>
         logger.error({ err: error }, 'storage usage failed'),
       )
+  })
+  // 定期更新: start the runs of watches that are due. Not while held: a
+  // newer version owns the database.
+  every(WATCH_INTERVAL, () => {
+    if (ctx.queue.status().held) return
+    try {
+      withOrigin({ rank: RANK.watch, updateId: null }, () => runWatches(ctx))
+    } catch (error) {
+      logger.error({ err: error }, 'starting watch runs failed')
+    }
   })
   every(OPTIMIZE_INTERVAL, () => {
     try {
