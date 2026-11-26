@@ -89,7 +89,9 @@ async function mock(page: Page, perspectives = [OWN, OTHER]) {
     return r.fulfill({
       json: path.endsWith('/availability')
         ? { available: true }
-        : path.endsWith('/origins') || path.endsWith('/passkeys')
+        : path.endsWith('/origins') ||
+            path.endsWith('/passkeys') ||
+            path.endsWith('/tokens')
           ? []
           : { items: [] },
     })

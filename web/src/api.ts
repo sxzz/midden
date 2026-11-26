@@ -131,6 +131,9 @@ export interface TagChange {
 }
 export type Folder = Ok<typeof client.folders.$get>[number]
 export type Passkey = Ok<typeof client.passkeys.$get>[number]
+/** An API token (API 令牌), with its use over the last 30 days. */
+export type ApiToken = Ok<typeof client.tokens.$get>[number]
+export type ApiTokenUsage = Ok<(typeof client.tokens)[':id']['usage']['$get']>
 export type Instance = Ok<typeof client.instance.$get>
 export type LitestreamStatus = Instance['litestream']
 export type StorageReport = Ok<typeof client.storage.$get>

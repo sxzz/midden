@@ -4,6 +4,7 @@ import { call, client, errorText } from '../api'
 import { toast } from '../composables/useToast'
 import { host } from '../host'
 import { buildFacts, REPOSITORY } from '../settings'
+import ApiTokens from './ApiTokens.vue'
 import AppLink from './ui/AppLink.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
@@ -47,6 +48,7 @@ async function logout() {
       :to="{ name: 'settings-watches' }"
     />
   </ListSection>
+  <ApiTokens />
   <ListSection>
     <ListButton
       label="管理员面板"

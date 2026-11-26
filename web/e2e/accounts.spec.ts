@@ -77,7 +77,8 @@ test('Instagram and X choose their accounts independently', async ({
       }
       return r.fulfill({ json: state })
     }
-    if (path === '/v1/passkeys') return r.fulfill({ json: [] })
+    if (path === '/v1/passkeys' || path === '/v1/tokens')
+      return r.fulfill({ json: [] })
     if (path === '/v1/origins')
       return r.fulfill({
         json: [{ origin: 'https://midden.test', passkeys: 0 }],
@@ -194,7 +195,8 @@ test('adds, selects and deletes an X account', async ({ page }) => {
       return r.fulfill({ status: 204 })
     }
     if (path === '/v1/accounts') return r.fulfill({ json: state })
-    if (path === '/v1/passkeys') return r.fulfill({ json: [] })
+    if (path === '/v1/passkeys' || path === '/v1/tokens')
+      return r.fulfill({ json: [] })
     if (path === '/v1/origins')
       return r.fulfill({
         json: [{ origin: 'https://midden.test', passkeys: 0 }],
@@ -292,7 +294,8 @@ test('deleting everything shows what goes and needs the phrase typed', async ({
     const request = r.request()
     const path = new URL(request.url()).pathname
     if (path === '/v1/session') return r.fulfill({ json: {} })
-    if (path === '/v1/passkeys') return r.fulfill({ json: [] })
+    if (path === '/v1/passkeys' || path === '/v1/tokens')
+      return r.fulfill({ json: [] })
     if (path === '/v1/origins')
       return r.fulfill({
         json: [{ origin: 'https://midden.test', passkeys: 0 }],

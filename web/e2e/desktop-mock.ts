@@ -235,7 +235,12 @@ export async function mockDesktop(page: Page) {
             : [],
       })
     if (path === '/v1/shares') return json([])
-    if (path === '/v1/origins' || path.endsWith('/passkeys')) return json([])
+    if (
+      path === '/v1/origins' ||
+      path === '/v1/tokens' ||
+      path.endsWith('/passkeys')
+    )
+      return json([])
     const item = [...posts, profile].find(
       (i) => path === `/v1/collections/${i.id}`,
     )
