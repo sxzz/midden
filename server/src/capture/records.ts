@@ -93,6 +93,7 @@ export function captureURL(
   raw: string,
   key?: string,
   options: CaptureOptions = DEFAULT_OPTIONS,
+  refetch = false,
 ): Job {
   const { platform, target } = ctx.platforms.resolve(raw)
   return submit(ctx, {
@@ -100,6 +101,7 @@ export function captureURL(
     input: raw,
     connectionId:
       selectedConnection(ctx.db, platform.description.adapterId) || undefined,
+    refetch,
     key,
     options,
   })
@@ -1040,6 +1042,7 @@ function memberViews(
 /**
  * Fetch a saved collection again: through the source that saved it, or,
  * when its last capture failed (or `restart`), with the account selected now.
+ * Either way it is fetched, never answered from what is stored.
  */
 export function recapture(
   ctx: CaptureContext,
@@ -1078,6 +1081,7 @@ export function recapture(
     input: collection.url,
     connectionId:
       selectedConnection(ctx.db, platform.description.adapterId) || undefined,
+    refetch: true,
     key: options.key,
     options: options.options,
     updateId: options.updateId,
@@ -1094,7 +1098,7 @@ export function retryRecord(
   // The same options, with the date range counted from now.
   const options = publicOptions(storedOptions(row.submission.captureOptions))
   // Deleted from the library since: saving it again is all that is left.
-  if (!row.saved) return captureURL(ctx, row.collection.url, key, options)
+  if (!row.saved) return captureURL(ctx, row.collection.url, key, options, true)
   return recapture(ctx, row.collection.id, { key, options })
 }
 

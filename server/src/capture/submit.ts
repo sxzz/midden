@@ -37,6 +37,12 @@ export interface SubmitInput {
   input?: string
   /** Refresh this saved collection through the source that saved it. */
   refreshId?: string
+  /**
+   * Fetch the target even when stored content would answer the request:
+   * asking again for something saved means seeing it now. A refresh always
+   * does.
+   */
+  refetch?: boolean
   connectionId?: string
   providerId?: string
   /** Idempotency key; a repeat with the same request returns the same job. */
@@ -296,6 +302,7 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
       !pageCursor &&
       !recheck &&
       !input.refreshId &&
+      !input.refetch &&
       (automatic || !target.refreshOnSubmit)
     ) {
       const head = tx

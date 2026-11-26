@@ -18,6 +18,7 @@ import {
 } from '#testing/fake-platform.ts'
 import { entity, graph } from '#testing/library.ts'
 import { captureHandlers } from './handlers.ts'
+import { retryRecordFailed } from './retries.ts'
 import { CONFIRM_GAP_MS, RECHECK_KEY, RECHECK_MS } from './source-state.ts'
 import { submit, type SubmitInput } from './submit.ts'
 import {
@@ -35,7 +36,7 @@ afterEach(async () => {
 })
 
 const post = 'https://fake.test/p/1'
-/** A profile: captured again whenever asked, as an update asks. */
+/** A profile: a request for it always fetches, unlike a post's. */
 const profile = 'https://fake.test/u/7'
 const HOUR = 60 * 60_000
 
@@ -44,8 +45,9 @@ type Answer = 'ok' | 'gone' | 'explicit' | 'suspended'
 
 function setup() {
   let clock = Date.parse('2026-11-01T00:00:00Z')
-  const state = { answer: 'ok' as Answer }
+  const state = { answer: 'ok' as Answer, fetches: 0 }
   const fetch: FakeFetch = (req) => {
+    state.fetches++
     if (state.answer === 'ok')
       return req.externalId === '7'
         ? { text: 'bio', graph: graph([entity('root', 'fake.profile', '7')]) }
@@ -194,50 +196,94 @@ test('another state, once confirmed, ends the one before', async () => {
   ])
 })
 
-test('seeing a known state again is no anomaly, nor anything to retry', async () => {
-  const { ctx, state, advance } = setup()
-  const { collectionId: id } = await capture(ctx, { url: profile })
-  // Before it is known, a gone post is a failure like any other.
-  state.answer = 'gone'
-  const first = startUpdate(ctx, { target: 'collection', id })
-  await ctx.queue.drain()
-  expect(updateRecord(ctx.db, first)).toMatchObject({
-    state: 'failed',
-    members: { failed: 1, known: 0 },
-  })
-  // Its re-check is the worker's own background work, not the update's.
-  expect(
-    ctx.db
-      .select({ updateId: jobs.updateId, priority: jobs.priority })
-      .from(jobs)
-      .where(eq(jobs.type, 'source-check'))
-      .all(),
-  ).toEqual([{ updateId: null, priority: RANK.maintenance }])
-  state.answer = 'explicit'
-  advance(HOUR)
-  const again = startUpdate(ctx, { target: 'collection', id })
-  await ctx.queue.drain()
-  expect(updateRecord(ctx.db, again)).toMatchObject({
-    state: 'complete',
-    members: { failed: 0, known: 1, updated: 1 },
-    retryable: 0,
-  })
-  expect(updateMembers(ctx.db, again, 'problem').items).toEqual([])
-  expect(updateMembers(ctx.db, again, 'updated').items).toMatchObject([
-    {
-      collectionId: id,
+test.each([
+  ['a post', post],
+  ['a profile', profile],
+])(
+  'seeing a known state again is no anomaly, nor anything to retry: %s',
+  async (_, url) => {
+    const { ctx, state, advance } = setup()
+    const { collectionId: id } = await capture(ctx, { url })
+    // Before it is known, a gone source is a failure like any other.
+    state.answer = 'gone'
+    const first = startUpdate(ctx, { target: 'collection', id })
+    await ctx.queue.drain()
+    expect(updateRecord(ctx.db, first)).toMatchObject({
       state: 'failed',
-      sourceState: 'deleted',
-      retryable: false,
-    },
-  ])
-  // A capture of its link on its own says so too.
-  advance(HOUR)
-  const single = await capture(ctx, { refreshId: id, key: 'again' })
-  expect(single.state).toBe('failed')
-  expect(
-    listRecords(ctx.db).items.find(
-      (r) => 'jobId' in r && r.jobId === single.id,
-    ),
-  ).toMatchObject({ sourceState: 'deleted' })
+      members: { failed: 1, known: 0 },
+    })
+    // Its re-check is the worker's own background work, not the update's.
+    expect(
+      ctx.db
+        .select({ updateId: jobs.updateId, priority: jobs.priority })
+        .from(jobs)
+        .where(eq(jobs.type, 'source-check'))
+        .all(),
+    ).toEqual([{ updateId: null, priority: RANK.maintenance }])
+    state.answer = 'explicit'
+    advance(HOUR)
+    const again = startUpdate(ctx, { target: 'collection', id })
+    await ctx.queue.drain()
+    expect(updateRecord(ctx.db, again)).toMatchObject({
+      state: 'complete',
+      members: { failed: 0, known: 1, updated: 1 },
+      retryable: 0,
+    })
+    expect(updateMembers(ctx.db, again, 'problem').items).toEqual([])
+    expect(updateMembers(ctx.db, again, 'updated').items).toMatchObject([
+      {
+        collectionId: id,
+        state: 'failed',
+        sourceState: 'deleted',
+        retryable: false,
+      },
+    ])
+    // A capture of its link on its own says so too.
+    advance(HOUR)
+    const single = await capture(ctx, { refreshId: id, key: 'again' })
+    expect(single.state).toBe('failed')
+    expect(
+      listRecords(ctx.db).items.find(
+        (r) => 'jobId' in r && r.jobId === single.id,
+      ),
+    ).toMatchObject({ sourceState: 'deleted' })
+  },
+)
+
+test('an update of a post whose last capture failed fetches it, and so confirms or clears its state', async () => {
+  const { ctx, state } = setup()
+  const { collectionId: id } = await capture(ctx, { url: post })
+  const update = async () => {
+    const before = state.fetches
+    const updateId = startUpdate(ctx, { target: 'collection', id })
+    await ctx.queue.drain()
+    return {
+      record: updateRecord(ctx.db, updateId),
+      fetched: state.fetches - before,
+    }
+  }
+  state.answer = 'gone'
+  const first = await update()
+  expect(first).toMatchObject({ record: { state: 'failed' }, fetched: 1 })
+  // Not the content stored before it failed.
+  expect(await update()).toMatchObject({
+    record: { state: 'failed' },
+    fetched: 1,
+  })
+  const before = state.fetches
+  expect(retryRecordFailed(ctx, first.record.id)).toBe(1)
+  await ctx.queue.drain()
+  expect(state.fetches - before).toBe(1)
+  state.answer = 'explicit'
+  expect(await update()).toMatchObject({
+    record: { members: { known: 1 } },
+    fetched: 1,
+  })
+  expect(marked(ctx).state).toBe('deleted')
+  state.answer = 'ok'
+  expect(await update()).toMatchObject({
+    record: { state: 'complete', members: { known: 0, updated: 1 } },
+    fetched: 1,
+  })
+  expect(marked(ctx).state).toBe(null)
 })
