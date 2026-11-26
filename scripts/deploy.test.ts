@@ -19,17 +19,18 @@ const OLD = 'a'.repeat(40)
 const NEW = 'b'.repeat(40)
 const HEALTH = 'curl -fsS --max-time 5 http://127.0.0.1:8080/healthz'
 const SERVICES = 'docker compose config --services'
+const UP_LITESTREAM = 'docker compose up -d litestream'
+// The default monitor interval (10 s) and the margin after it.
+const SETTLE = 'sleep 15000'
 const upService = (service: string, revision: string) =>
   `docker compose up -d --pull never --wait --wait-timeout 180 ${service} [${IMAGE}:sha-${revision}]`
 const up = (revision: string) => upService('midden', revision)
 const upWorker = (revision: string) => upService('midden-worker', revision)
-const isCheckpoint = (call: string) =>
-  call.startsWith(
-    'docker compose run --rm --no-deps -T --entrypoint node midden -e ',
-  ) && call.includes('wal_checkpoint(TRUNCATE)')
 
 interface Fake {
+  /** Commands, and the waits between them as `sleep <ms>`. */
   calls: string[]
+  sleep: (ms: number) => void
   /** State of the data directory seen by named commands. */
   seen: Record<string, { database: string; wal: boolean; state: boolean }>
 }
@@ -37,9 +38,8 @@ interface Fake {
 /**
  * A deployment host with OLD running and NEW published: commands are
  * recorded, answered from these canned replies, and `fail` makes a command
- * throw. Starting NEW migrates the database first, failing or not; the
- * checkpoint empties the WAL. `workers` are the revisions whose compose.yaml
- * has the worker.
+ * throw. Starting NEW migrates the database first, failing or not.
+ * `workers` are the revisions whose compose.yaml has the worker.
  */
 function host(
   dir: string,
@@ -48,7 +48,11 @@ function host(
 ): Fake & { run: Run } {
   const data = path.join(dir, 'data')
   const database = path.join(data, 'midden.db')
-  const fake: Fake = { calls: [], seen: {} }
+  const fake: Fake = {
+    calls: [],
+    sleep: (ms) => fake.calls.push(`sleep ${ms}`),
+    seen: {},
+  }
   // The checkout is at the running version until a deployment moves it.
   let checkedOut = OLD
   const look = (name: string) =>
@@ -78,11 +82,6 @@ function host(
         'litestream',
       ].join('\n')
     if (call.startsWith('docker inspect container')) return 'sha256:old'
-    if (isCheckpoint(call)) {
-      look('checkpoint')
-      writeFileSync(`${database}-wal`, '')
-      return '{"busy":0,"log":0,"checkpointed":0}'
-    }
     if (call === 'docker compose stop midden') look('stop midden')
     if (call === 'docker compose stop midden-worker') look('stop worker')
     if (call === 'docker compose stop litestream') look('stop litestream')
@@ -94,6 +93,18 @@ function host(
     return ''
   }
   return { ...fake, run }
+}
+
+/** The starts, stops, checkouts, waits and health checks, in order. */
+function steps(fake: Fake) {
+  return fake.calls.filter(
+    (call) =>
+      call.startsWith('docker compose up') ||
+      call.startsWith('docker compose stop') ||
+      call.startsWith('git checkout') ||
+      call.startsWith('sleep ') ||
+      call === HEALTH,
+  )
 }
 
 describe('deploy', () => {
@@ -126,10 +137,9 @@ describe('deploy', () => {
   })
 
   const env = (text: string) => writeFileSync(path.join(dir, '.env'), text)
-  const snapshots = () =>
-    readdirSync(path.join(data, 'backups', 'deploy')).filter((name) =>
-      name.endsWith('.db'),
-    )
+  const backupFiles = () =>
+    readdirSync(path.join(data, 'backups', 'deploy')).toSorted()
+  const snapshots = () => backupFiles().filter((name) => name.endsWith('.db'))
   const unhealthy = (call: string) =>
     call.startsWith('docker compose up -d --pull never') &&
     call.endsWith(`[${IMAGE}:sha-${NEW}]`)
@@ -137,85 +147,70 @@ describe('deploy', () => {
   test('without Litestream a rollback restores the copy taken while stopped', () => {
     env('SECRET_KEY=x\n')
     const fake = host(dir, unhealthy)
-    const result = deploy(dir, fake.run)
+    const result = deploy(dir, fake.run, fake)
 
     assert.match(result, new RegExp(`^rolled back ${NEW}: unhealthy`))
-    assert.deepEqual(
-      fake.calls.map((call) =>
-        isCheckpoint(call)
-          ? `checkpoint ${call.slice(call.lastIndexOf('['))}`
-          : call,
-      ),
-      [
-        'git status --porcelain --untracked-files=normal',
-        `docker pull --quiet ${IMAGE}:latest`,
-        `docker image inspect ${IMAGE}:latest --format {{index .Config.Labels "org.opencontainers.image.revision"}}`,
-        'git fetch --quiet origin main',
-        `git merge-base --is-ancestor ${NEW} origin/main`,
-        'docker compose ps -q midden',
-        'docker inspect container --format {{.Image}}',
-        'docker image inspect sha256:old --format {{index .Config.Labels "org.opencontainers.image.revision"}}',
-        `docker pull --quiet ${IMAGE}:sha-${NEW}`,
-        `docker image inspect ${IMAGE}:sha-${NEW} --format {{index .Config.Labels "org.opencontainers.image.revision"}}`,
-        `docker pull --quiet ${IMAGE}:sha-${OLD}`,
-        SERVICES,
-        'docker compose stop midden',
-        `checkpoint [${IMAGE}:sha-${OLD}]`,
-        `git checkout --quiet --detach ${NEW}`,
-        up(NEW),
-        SERVICES,
-        'docker compose stop midden',
-        `git checkout --quiet --detach ${OLD}`,
-        up(OLD),
-        HEALTH,
-        SERVICES,
-      ],
-    )
-    // The checkpoint ran with the app stopped, the WAL still full.
-    assert.deepEqual(fake.seen.checkpoint, {
-      database: 'as the old version left it',
-      wal: true,
-      state: true,
-    })
+    assert.deepEqual(fake.calls, [
+      'git status --porcelain --untracked-files=normal',
+      `docker pull --quiet ${IMAGE}:latest`,
+      `docker image inspect ${IMAGE}:latest --format {{index .Config.Labels "org.opencontainers.image.revision"}}`,
+      'git fetch --quiet origin main',
+      `git merge-base --is-ancestor ${NEW} origin/main`,
+      'docker compose ps -q midden',
+      'docker inspect container --format {{.Image}}',
+      'docker image inspect sha256:old --format {{index .Config.Labels "org.opencontainers.image.revision"}}',
+      `docker pull --quiet ${IMAGE}:sha-${NEW}`,
+      `docker image inspect ${IMAGE}:sha-${NEW} --format {{index .Config.Labels "org.opencontainers.image.revision"}}`,
+      `docker pull --quiet ${IMAGE}:sha-${OLD}`,
+      SERVICES,
+      'docker compose stop midden',
+      `git checkout --quiet --detach ${NEW}`,
+      up(NEW),
+      SERVICES,
+      'docker compose stop midden',
+      `git checkout --quiet --detach ${OLD}`,
+      up(OLD),
+      HEALTH,
+      SERVICES,
+    ])
+    // The database and its WAL as the old version left them: no checkpoint
+    // ran on them.
     assert.equal(
       readFileSync(path.join(data, 'midden.db'), 'utf8'),
       'as the old version left it',
     )
-    assert.ok(!existsSync(path.join(data, 'midden.db-wal')))
-    // The previous deployment's snapshot stays as well, without a WAL: the
-    // checkpoint emptied it.
-    assert.equal(snapshots().length, 2)
-    assert.ok(snapshots().includes('midden-2026-11-02.db'))
-    assert.ok(
-      readdirSync(path.join(data, 'backups', 'deploy')).every(
-        (name) => !name.endsWith('-wal'),
-      ),
-    )
+    assert.equal(readFileSync(path.join(data, 'midden.db-wal'), 'utf8'), 'wal')
+    assert.ok(!existsSync(path.join(data, 'midden.db-shm')))
+    // The previous deployment's copy stays as well.
+    const copy = snapshots().at(-1)!
+    assert.deepEqual(backupFiles(), [
+      'midden-2026-11-02.db',
+      copy,
+      `${copy}-wal`,
+    ])
   })
 
-  test('a rollback stops Litestream first and starts it once the old version runs', () => {
+  test('a rollback stops Litestream first and starts it before the old version', () => {
     env('SECRET_KEY=x\nCOMPOSE_PROFILES=litestream\n')
     const fake = host(dir, unhealthy)
-    const result = deploy(dir, fake.run)
+    const result = deploy(dir, fake.run, fake)
 
     assert.match(result, new RegExp(`^rolled back ${NEW}: unhealthy`))
-    const compose = fake.calls.filter(
-      (call) =>
-        call.startsWith('docker compose up') ||
-        call.startsWith('docker compose stop') ||
-        call.startsWith('git checkout'),
-    )
-    assert.deepEqual(compose, [
+    assert.deepEqual(steps(fake), [
       // The app first: Litestream copies what it wrote last.
       'docker compose stop midden',
       'docker compose stop litestream',
       `git checkout --quiet --detach ${NEW}`,
-      `docker compose up -d --pull never --wait --wait-timeout 180 midden [${IMAGE}:sha-${NEW}]`,
+      UP_LITESTREAM,
+      SETTLE,
+      up(NEW),
       'docker compose stop litestream',
       'docker compose stop midden',
       `git checkout --quiet --detach ${OLD}`,
-      `docker compose up -d --pull never --wait --wait-timeout 180 midden [${IMAGE}:sha-${OLD}]`,
-      'docker compose up -d litestream',
+      UP_LITESTREAM,
+      SETTLE,
+      up(OLD),
+      HEALTH,
     ])
     // The files are put back only once both have stopped.
     assert.deepEqual(fake.seen['stop litestream'], {
@@ -223,61 +218,72 @@ describe('deploy', () => {
       wal: true,
       state: true,
     })
-    // Litestream comes back to the restored file without its old state,
+    // Litestream comes back to the restored files without its old state,
     // so it starts over from the bucket with a full copy.
     assert.deepEqual(fake.seen['up litestream'], {
       database: 'as the old version left it',
-      wal: false,
+      wal: true,
       state: false,
     })
-    // Only this deployment's snapshot is kept.
+    // Only this deployment's copy is kept.
     assert.equal(snapshots().length, 1)
   })
 
-  test('Litestream is started again even when the old version fails too', () => {
+  test('Litestream runs again even when the old version fails too', () => {
     env('COMPOSE_PROFILES=litestream\n')
     const fake = host(dir, (call) =>
       call.startsWith('docker compose up -d --pull never'),
     )
-    assert.throws(() => deploy(dir, fake.run), /docker compose up/)
-    assert.equal(fake.calls.at(-1), 'docker compose up -d litestream')
+    assert.throws(() => deploy(dir, fake.run, fake), /docker compose up/)
+    assert.deepEqual(fake.calls.slice(-3), [UP_LITESTREAM, SETTLE, up(OLD)])
   })
 
-  test('a deployment starts Litestream after the app is healthy', () => {
+  test('Litestream starts before the app, a monitor interval ahead of it', () => {
     env('COMPOSE_PROFILES=litestream\n')
+    writeFileSync(
+      path.join(dir, 'litestream.yml'),
+      'dbs:\n  - path: /data/midden.db\n    monitor-interval: 3s\n',
+    )
     const fake = host(dir, () => false)
-    const result = deploy(dir, fake.run)
+    const result = deploy(dir, fake.run, fake)
 
     assert.equal(result, `deployed ${NEW} (was ${OLD})`)
-    assert.deepEqual(fake.calls.slice(-3), [
-      `docker image prune --force --filter label=org.opencontainers.image.source=https://github.com/sxzz/midden`,
-      `git diff --quiet ${OLD} ${NEW} -- litestream.yml`,
-      'docker compose up -d litestream',
+    assert.deepEqual(steps(fake), [
+      'docker compose stop midden',
+      'docker compose stop litestream',
+      `git checkout --quiet --detach ${NEW}`,
+      UP_LITESTREAM,
+      'sleep 8000',
+      up(NEW),
+      HEALTH,
     ])
-    // Stopped for the copy, and started only once the new version is up.
-    const stopped = fake.calls.indexOf('docker compose stop litestream')
-    assert.ok(stopped > fake.calls.indexOf('docker compose stop midden'))
-    assert.ok(stopped < fake.calls.findIndex(isCheckpoint))
+    // It finds the database, the WAL and its own state as it left them.
+    assert.deepEqual(fake.seen['up litestream'], {
+      database: 'as the old version left it',
+      wal: true,
+      state: true,
+    })
     assert.equal(snapshots().length, 1)
   })
 
   test('a changed litestream.yml recreates the sidecar', () => {
     process.env.COMPOSE_PROFILES = 'litestream'
     const fake = host(dir, (call) => call.startsWith('git diff'))
-    deploy(dir, fake.run)
-    assert.equal(
-      fake.calls.at(-1),
+    deploy(dir, fake.run, fake)
+    const recreate = fake.calls.indexOf(
       'docker compose up -d --force-recreate litestream',
     )
+    assert.ok(recreate !== -1 && recreate < fake.calls.indexOf(up(NEW)))
   })
 
   test('Litestream failing to start does not fail the deployment', () => {
     env('COMPOSE_PROFILES=litestream\n')
-    const fake = host(dir, (call) => call === 'docker compose up -d litestream')
+    const fake = host(dir, (call) => call === UP_LITESTREAM)
     assert.equal(
-      deploy(dir, fake.run),
+      deploy(dir, fake.run, fake),
       `deployed ${NEW} (was ${OLD}); litestream did not start`,
     )
+    assert.ok(!fake.calls.includes(SETTLE))
   })
 
   test('a slow health check is tried again before rolling back', () => {
@@ -315,31 +321,12 @@ describe('deploy', () => {
     assert.equal(fake.calls.at(-2), HEALTH)
   })
 
-  test('a failed checkpoint keeps the WAL with the copy, and a rollback puts both back', () => {
-    env('SECRET_KEY=x\n')
-    const fake = host(dir, (call) => unhealthy(call) || isCheckpoint(call))
-    const result = deploy(dir, fake.run)
-
-    assert.match(result, new RegExp(`^rolled back ${NEW}: unhealthy`))
-    assert.equal(
-      readFileSync(path.join(data, 'midden.db'), 'utf8'),
-      'as the old version left it',
-    )
-    assert.equal(readFileSync(path.join(data, 'midden.db-wal'), 'utf8'), 'wal')
-    assert.ok(!existsSync(path.join(data, 'midden.db-shm')))
-    const copy = snapshots().find((name) => name !== 'midden-2026-11-02.db')!
-    assert.equal(
-      readFileSync(path.join(data, 'backups', 'deploy', `${copy}-wal`), 'utf8'),
-      'wal',
-    )
-  })
-
-  test('without a WAL left there is no checkpoint', () => {
+  test('without a WAL the copy is the database alone', () => {
     env('SECRET_KEY=x\n')
     rmSync(path.join(data, 'midden.db-wal'))
     const fake = host(dir, () => false)
-    assert.equal(deploy(dir, fake.run), `deployed ${NEW} (was ${OLD})`)
-    assert.ok(!fake.calls.some(isCheckpoint))
+    assert.equal(deploy(dir, fake.run, fake), `deployed ${NEW} (was ${OLD})`)
+    assert.ok(backupFiles().every((name) => !name.endsWith('-wal')))
   })
 
   test('the running version starts again when the copy fails', () => {
@@ -350,55 +337,43 @@ describe('deploy', () => {
     const fake = host(dir, () => false)
 
     assert.throws(
-      () => deploy(dir, fake.run),
+      () => deploy(dir, fake.run, fake),
       new RegExp(`could not back up the database; ${OLD} is running again`),
     )
-    assert.deepEqual(fake.calls.slice(-5), [
+    assert.deepEqual(fake.calls.slice(-6), [
       `git checkout --quiet --detach ${OLD}`,
+      UP_LITESTREAM,
+      SETTLE,
       up(OLD),
       HEALTH,
       SERVICES,
-      'docker compose up -d litestream',
     ])
     assert.ok(!fake.calls.includes(up(NEW)))
   })
 
-  const steps = (fake: Fake) =>
-    fake.calls.filter(
-      (call) =>
-        call.startsWith('docker compose up') ||
-        call.startsWith('docker compose stop') ||
-        call.startsWith('git checkout') ||
-        isCheckpoint(call) ||
-        call === HEALTH,
-    )
-
   test('the worker stops first and starts after the web process', () => {
     env('SECRET_KEY=x\nCOMPOSE_PROFILES=litestream\n')
     const fake = host(dir, () => false, [OLD, NEW])
-    const result = deploy(dir, fake.run)
+    const result = deploy(dir, fake.run, fake)
 
     assert.equal(result, `deployed ${NEW} (was ${OLD})`)
-    assert.deepEqual(
-      steps(fake).map((call) => (isCheckpoint(call) ? 'checkpoint' : call)),
-      [
-        'docker compose stop midden-worker',
-        'docker compose stop midden',
-        'docker compose stop litestream',
-        'checkpoint',
-        `git checkout --quiet --detach ${NEW}`,
-        up(NEW),
-        HEALTH,
-        upWorker(NEW),
-        'docker compose up -d litestream',
-      ],
-    )
+    assert.deepEqual(steps(fake), [
+      'docker compose stop midden-worker',
+      'docker compose stop midden',
+      'docker compose stop litestream',
+      `git checkout --quiet --detach ${NEW}`,
+      UP_LITESTREAM,
+      SETTLE,
+      up(NEW),
+      HEALTH,
+      upWorker(NEW),
+    ])
   })
 
   test('the first version with a worker starts it; the old one had none to stop', () => {
     env('SECRET_KEY=x\n')
     const fake = host(dir, () => false, [NEW])
-    deploy(dir, fake.run)
+    deploy(dir, fake.run, fake)
 
     assert.ok(!fake.calls.includes('docker compose stop midden-worker'))
     assert.ok(fake.calls.includes(upWorker(NEW)))
@@ -407,10 +382,10 @@ describe('deploy', () => {
   test('a worker that does not become healthy rolls back both', () => {
     env('SECRET_KEY=x\nCOMPOSE_PROFILES=litestream\n')
     const fake = host(dir, (call) => call === upWorker(NEW), [OLD, NEW])
-    const result = deploy(dir, fake.run)
+    const result = deploy(dir, fake.run, fake)
 
     assert.match(result, new RegExp(`^rolled back ${NEW}: unhealthy`))
-    assert.deepEqual(steps(fake).slice(5), [
+    assert.deepEqual(steps(fake).slice(6), [
       up(NEW),
       HEALTH,
       upWorker(NEW),
@@ -418,10 +393,11 @@ describe('deploy', () => {
       'docker compose stop midden-worker',
       'docker compose stop midden',
       `git checkout --quiet --detach ${OLD}`,
+      UP_LITESTREAM,
+      SETTLE,
       up(OLD),
       HEALTH,
       upWorker(OLD),
-      'docker compose up -d litestream',
     ])
     // The database is put back only once all three have stopped.
     assert.equal(

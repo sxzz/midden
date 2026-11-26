@@ -8,11 +8,14 @@ dbs:
     # Every check that finds new WAL pages writes one LTX file, and each one
     # is a PUT to R2: at the default 1 s a busy day makes 86,400 of them.
     # 10 s caps it at 8,640 and loses at most ~10 s of writes with the disk.
+    # scripts/deploy.ts reads it: after a restart Litestream must sync once
+    # before the app writes, or it loses its place in the WAL and uploads
+    # the whole database again.
     monitor-interval: 10s
     # The WAL size (in 4 KiB pages; ~3.8 GiB) at which Litestream forces a
     # TRUNCATE checkpoint; the default is ~500 MB. While Litestream takes a
-    # snapshot (on start after a deploy, and daily) it makes no checkpoints
-    # until the upload ends, so the WAL grows with every write meanwhile:
+    # snapshot (daily, or after losing its place in the WAL) it makes no
+    # checkpoints until the upload ends, so the WAL grows with every write:
     # over 1 GB in minutes under load. In 0.5.18 a forced TRUNCATE also
     # writes a snapshot of the whole database while holding the write lock,
     # so every write in the app waits or fails as locked for that long, and
@@ -27,15 +30,27 @@ dbs:
       region: auto
       # Upload each file as soon as it is written.
       sync-interval: 1s
+      # Multipart uploads (the daily snapshot): 0.5.18's defaults for R2,
+      # written out to tune here. Each part is one request of this size,
+      # this many at a time.
+      concurrency: 2
+      part-size: 5MiB
 
 # Compaction: per-minute files are the restore points for the whole
-# retention; hourly ones keep a restore from replaying a day of minutes.
+# retention. They are made from the local L0 files, so compaction downloads
+# nothing. No hourly level: compacting into it downloads every per-minute
+# file since the last one at once, one connection each and all of them
+# streaming until the merge ends; that exhausted the host's network buffers
+# and failed (and its backlog, and the daily snapshot, with it). A restore
+# replays up to a day of per-minute files after the snapshot instead.
 levels:
   - interval: 1m
-  - interval: 1h
 
 # A full snapshot daily (at 00:00 UTC), kept 8 days: every moment of the last
-# 7 days then has a snapshot before it to restore from.
+# 7 days then has a snapshot before it to restore from. Per-minute files go
+# once they are older than the oldest snapshot kept. The bucket locks
+# db/0009/ for 7 days, which must stay within this retention, or deleting an
+# expired snapshot fails (docs/operations.md, Litestream).
 snapshot:
   interval: 24h
   retention: 192h

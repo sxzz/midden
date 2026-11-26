@@ -49,12 +49,12 @@ docker compose pull && docker compose up -d    # 更新（自动部署见下）
 `main` 的 test 工作流通过后会发布镜像 `ghcr.io/sxzz/midden:latest` 与 `:sha-<提交>`。部署机上的 webhook 收到这次运行完成的事件后，从 `origin/main` 取出 `scripts/deploy.ts` 执行：
 
 1. 确认部署目录（默认 `~/midden`）没有本地改动，最新镜像的提交在 `origin/main` 上，且与正在运行的版本不同；
-2. 依次停掉正在运行的 worker（`docker compose stop midden-worker`，正在运行的任务回到队列；那个版本没有 worker 时跳过，由它的 `compose.yaml` 判断：`docker compose config --services`）、网页进程，启用 Litestream 时随后停掉它（在服务之后：它先把服务最后写的内容复制走）。部署本来就要重启服务，停下来再复制，不会像在线备份那样在运行中的服务旁持有一个读事务好几分钟（那会让 WAL 涨过 500 MB，Litestream 随之做阻塞的 TRUNCATE 检查点，服务的写入因 `database is locked` 失败）；旧的 worker 也不会在新版本迁移之后继续写；
-3. 备份数据库到 `data/backups/deploy/`：`-wal` 不为空时先用原来版本的镜像在一次性容器中（`docker compose run --rm --no-deps --entrypoint node midden -e …`）执行 `PRAGMA wal_checkpoint(TRUNCATE)`，再把 `midden.db` 复制过去（`copyFile` 的 `COPYFILE_FICLONE`：APFS 上是写时复制的克隆，几 GB 也立即完成，文件系统不支持时普通复制）。检查点失败时连同 `-wal` 一起复制，两者合起来是一致的。保留最近 2 份：这次的与上一次的；启用 Litestream 时只保留这次的 1 份，因为上一次的只用于新版本运行一段时间后才发现问题的情况，Litestream 可以恢复到那之前的任一时刻。复制失败时重新启动原来的版本（与 Litestream），结果为 `failed: could not back up the database; … is running again`；
-4. 切换到该提交，用 `:sha-<提交>` 镜像 `docker compose up -d --wait midden`，并检查 `/healthz`：最多 5 次，间隔 6 秒（约 30 秒），一次没有回应不算不健康。然后 `docker compose up -d --wait midden-worker`（该版本有 worker 时），它的健康检查不通过也算不健康。启用 Litestream 时随后再启动它（`docker compose up -d litestream`（`litestream.yml` 有改动时加 `--force-recreate`，compose 看不到文件内容的变化）；它启动失败不算部署失败，结果末尾加上 `; litestream did not start`；
-5. 新版本不健康时停掉它（先 worker 后网页进程），换回第 3 步的副本（连同复制的 `-wal`，删掉 `-shm`），切回原来的版本，先启动网页进程、再启动 worker。启用 Litestream 时：它这时还没有启动，同样先停 Litestream 再停服务（它一直打开着数据库和 WAL，换文件时不能在运行）；换回数据库后删除它的本地状态 `data/.midden.db-litestream/`；原来的版本启动后（即使启动失败）再启动 Litestream。Litestream 发现本地数据库落后于存储桶，从存储桶取得位置，把换回的数据库整个作为下一个事务上传，回滚前的历史仍可恢复（见「Litestream」）。
+2. 依次停掉正在运行的 worker（`docker compose stop midden-worker`，正在运行的任务回到队列；那个版本没有 worker 时跳过，由它的 `compose.yaml` 判断：`docker compose config --services`）、网页进程，启用 Litestream 时随后停掉它（在服务之后：服务关闭时它还持有数据库，服务的关闭就不是最后一个连接，不会把 WAL 写回并重置；它先把服务最后写的内容复制走，自己关闭时再把 WAL 写回数据库）。部署本来就要重启服务，停下来再复制，不会像在线备份那样在运行中的服务旁持有一个读事务好几分钟（那会让 WAL 涨过 500 MB，Litestream 随之做阻塞的 TRUNCATE 检查点，服务的写入因 `database is locked` 失败）；旧的 worker 也不会在新版本迁移之后继续写；
+3. 备份数据库到 `data/backups/deploy/`：把 `midden.db` 和不为空的 `-wal` 复制过去（`copyFile` 的 `COPYFILE_FICLONE`：APFS 上是写时复制的克隆，几 GB 也立即完成，文件系统不支持时普通复制）。全部停止时两者合起来是一致的。不做检查点：截短 WAL 会让 Litestream 找不到它上次同步到的位置，重新上传整个数据库（见「Litestream」的「部署与 WAL 中的位置」）。保留最近 2 份：这次的与上一次的；启用 Litestream 时只保留这次的 1 份，因为上一次的只用于新版本运行一段时间后才发现问题的情况，Litestream 可以恢复到那之前的任一时刻。复制失败时重新启动原来的版本（与 Litestream），结果为 `failed: could not back up the database; … is running again`；
+4. 切换到该提交。启用 Litestream 时先启动它（`docker compose up -d litestream`，`litestream.yml` 有改动时加 `--force-recreate`，compose 看不到文件内容的变化），再等它的一次 `monitor-interval`（从该提交的 `litestream.yml` 读取，读不到时按 10 秒）加 5 秒：它启动后第一次同步时核对并占住自己在 WAL 中的位置，此前服务的写入可能从头覆盖 WAL，让它重新上传整个数据库。它启动失败不算部署失败，不再等待，结果末尾加上 `; litestream did not start`。然后用 `:sha-<提交>` 镜像 `docker compose up -d --wait midden`，并检查 `/healthz`：最多 5 次，间隔 6 秒（约 30 秒），一次没有回应不算不健康。然后 `docker compose up -d --wait midden-worker`（该版本有 worker 时），它的健康检查不通过也算不健康；
+5. 新版本不健康时停掉它（先 worker 后网页进程），换回第 3 步的副本（连同复制的 `-wal`，删掉 `-shm`），切回原来的版本，先启动网页进程、再启动 worker。启用 Litestream 时：先停 Litestream 再停服务（它一直打开着数据库和 WAL，换文件时不能在运行）；换回数据库后删除它的本地状态 `data/.midden.db-litestream/`；切回后同样先启动 Litestream（即使原来的版本随后启动失败，它也在运行）。Litestream 发现本地数据库落后于存储桶，从存储桶取得位置，把换回的数据库整个作为下一个事务上传，回滚前的历史仍可恢复（见「Litestream」）。
 
-服务在第 2 步到第 4 步之间停止，通常不到一分钟。Litestream 停止后 WAL 从头开始写，它再启动时上传一份完整快照（见「Litestream」）。
+服务在第 2 步到第 4 步之间停止，通常不到一分钟，启用 Litestream 时多约 15 秒。部署不会让 Litestream 重新上传整个数据库；回滚会（换回的数据库与它的位置对不上）。
 
 结果通过 Bot 发给 `DEPLOY_NOTIFY_CHAT_ID`（默认 `OWNER_TELEGRAM_ID`），日志在 `.local/deploy-webhook/`。也可以手动运行：
 
@@ -248,7 +248,7 @@ rclone copy ~/midden/data/media r2:midden \
 
 ### R2 的保护
 
-R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没有其他媒体备份。R2 提供存储桶锁（Bucket locks），可以作为一个选项，目前没有配置：一条规则让某个前缀（或整个存储桶）下的对象在一段时间内（按对象存在的时长、到某个日期或无限期）不能被删除或覆盖，对现有和以后的对象都生效，优先于生命周期规则。在 Cloudflare 的「R2 → 存储桶 → Settings → Bucket lock rules」中添加，或用 `npx wrangler r2 bucket lock add <存储桶>`。
+R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没有其他媒体备份。R2 提供存储桶锁（Bucket locks），可以作为一个选项，媒体的存储桶 `midden` 目前没有配置（`midden-backup` 的快照有一条，见「Litestream」）：一条规则让某个前缀（或整个存储桶）下的对象在一段时间内（按对象存在的时长、到某个日期或无限期）不能被删除或覆盖，对现有和以后的对象都生效，优先于生命周期规则。在 Cloudflare 的「R2 → 存储桶 → Settings → Bucket lock rules」中添加，或用 `npx wrangler r2 bucket lock add <存储桶>`。
 
 启用前要知道：
 
@@ -357,37 +357,54 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
 Litestream 0.5 把 WAL 中新提交的页面写成 LTX 文件（按页 LZ4 压缩），每个文件一个事务编号（TXID），连续递增；文件逐级合并，每天另做一份完整快照。
 
-| 设置                                  | 值                     | 原因                                                                                                                                                            |
-| ------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `monitor-interval`                    | `10s`                  | 每 10 秒检查一次 WAL，有新页面就写一个 L0 文件，每个文件是一次 PUT。默认 1 秒时持续写入的一天有 86,400 个，10 秒最多 8,640 个。机器损坏时最多丢失约 10 秒的写入 |
-| `sync-interval`                       | `1s`                   | 文件写好后 1 秒内上传。0.5 中 PUT 的次数由上一项决定，这一项只是上传的间隔                                                                                      |
-| `levels`                              | `1m`、`1h`             | 每分钟把 L0 合并成一个 L1 文件，它们是保留期内的恢复点；每小时再合并成 L2，恢复时少下载文件                                                                     |
-| `snapshot`                            | 每 `24h`，保留 `192h`  | 每天 00:00 UTC 一份完整快照，保留 8 天：最近 7 天内的任一时刻之前都有一份快照可用                                                                               |
-| `l0-retention-check-interval`         | `1h`                   | 每次检查都列出存储桶中全部 L1 文件（每 1000 个一次 Class A 操作），默认每 15 秒一次太多                                                                         |
-| `heartbeat-url`、`heartbeat-interval` | 服务的 8081 端口，`5m` | 见「监控」                                                                                                                                                      |
-| `truncate-page-n`                     | `1000000`（约 3.8 GiB）| 见「检查点」。`checkpoint-interval`（`1m`）、`min-checkpoint-page-count`（1000 页）用默认值                                                                     |
+| 设置                                  | 值                      | 原因                                                                                                                                                            |
+| ------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `monitor-interval`                    | `10s`                   | 每 10 秒检查一次 WAL，有新页面就写一个 L0 文件，每个文件是一次 PUT。默认 1 秒时持续写入的一天有 86,400 个，10 秒最多 8,640 个。机器损坏时最多丢失约 10 秒的写入 |
+| `sync-interval`                       | `1s`                    | 文件写好后 1 秒内上传。0.5 中 PUT 的次数由上一项决定，这一项只是上传的间隔                                                                                      |
+| `concurrency`、`part-size`            | `2`、`5MiB`             | 分段上传（每天的快照）同时上传 2 段、每段 5 MiB，是 0.5.18 对 R2 的默认值，写出来以便调整（见「网络」）                                                         |
+| `levels`                              | `1m`                    | 每分钟把 L0 合并成一个 L1 文件，它们是保留期内的恢复点。合并读的是本地的 L0 文件，不下载。没有每小时的 L2，见「网络」                                           |
+| `snapshot`                            | 每 `24h`，保留 `192h`   | 每天 00:00 UTC 一份完整快照，保留 8 天：最近 7 天内的任一时刻之前都有一份快照可用。比最早保留的快照更早的 L1 文件随之删除。不能短于存储桶锁的 7 天（见下）      |
+| `l0-retention-check-interval`         | `1h`                    | 每次检查都列出存储桶中全部 L1 文件（每 1000 个一次 Class A 操作），默认每 15 秒一次太多                                                                         |
+| `heartbeat-url`、`heartbeat-interval` | 服务的 8081 端口，`5m`  | 见「监控」                                                                                                                                                      |
+| `truncate-page-n`                     | `1000000`（约 3.8 GiB） | 见「检查点」。`checkpoint-interval`（`1m`）、`min-checkpoint-page-count`（1000 页）用默认值                                                                     |
 
-恢复点：最近 5 分钟到 1 小时内（L0 文件还在）约每 10 秒一个，更早的每分钟一个（L1 的边界），8 天前的不能恢复。没有写入的时段没有文件。
+恢复点：最近 5 分钟到 1 小时内（L0 文件还在）约每 10 秒一个，更早的每分钟一个（L1 的边界），8 天前的不能恢复。没有写入的时段没有文件。恢复时下载最近的一份快照和它之后的 L1 文件，最多约一天的 1,440 个。
+
+存储桶锁：`midden-backup` 有一条存储桶锁规则（2026-11-25 设置），`db/0009/`（快照）下的对象存在 7 天内不能删除或覆盖，误删或被盗用的密钥也删不掉最近的快照。这个时长必须不超过 `snapshot` 的 `retention`（现在 192 小时，7 天是 168 小时）：否则 Litestream 删除过期快照时收到 409（`ObjectLockedByBucketPolicy`），日志记 `retention enforcement failed`，旧快照和更早的 L1 文件都留下。锁同样挡住中止分段上传：`db/0009/` 下没传完的分段上传在锁到期之前不能中止。存储桶另有一条生命周期规则，自动中止 `db/` 下未完成的分段上传。
 
 #### 检查点
 
 两个进程的连接都用 WAL、`synchronous = NORMAL`；网页进程 busy timeout 2 秒、关闭自动检查点，worker 10 秒、保留 SQLite 默认的自动检查点（WAL 超过 1000 页时，PASSIVE）。Litestream 一直持有一个读事务，只有它自己的检查点能让 WAL 从头开始写；PASSIVE 检查点越不过它的读事务，所以 worker 的自动检查点不影响复制，把 WAL 页面写回数据库的实际是 Litestream 的检查点。它做 PASSIVE 检查点时持有写锁（向 `_litestream_lock` 写一行作为屏障），把上次以来的 WAL 页面写回数据库，写入在这期间等待：`monitor-interval` 为 10 秒时最多是 10 秒的写入量，几十到几百毫秒，两个进程的 busy timeout 都足够。服务中没有 `wal_checkpoint(RESTART)`、`wal_checkpoint(TRUNCATE)` 和 `VACUUM`：前两者会让 Litestream 重新上传整个数据库，`VACUUM` 把每一页写进 WAL，都不要加。`PRAGMA optimize`（启动时和每 6 小时）和 `PRAGMA incremental_vacuum`（见「维护任务」）是普通的写事务；`cli.ts backup`（手动的在线备份，部署不再用它）只读数据库，但运行期间一直持有读事务。数据库变小的事务（incremental vacuum 截短文件）在 Litestream 0.5.2 中会让同步报 `page number X out-of-bounds for commit size Y`（#875），之后由 #881 修复，固定的 0.5.18 已包含；用 0.5.18 在本地试过：一边复制，一边清空大量数据并分批 incremental vacuum，最新状态与其间三个时刻的恢复都通过完整性检查，最新状态的页数和内容与源数据库相同。
 
-WAL 的大小：Litestream 做快照时（启动后 WAL 是新的时，例如每次部署之后；以及每天 00:00 UTC）直到上传完都不做检查点，WAL 随写入一直变大，负载高时几分钟就超过 1 GB。WAL 超过 `truncate-page-n` 时它先试 PASSIVE，不行再做阻塞的 TRUNCATE；0.5.18 在 TRUNCATE 之后总要在持有写锁的情况下把整个数据库写成一份快照（`checkpoint boundary snapshot`），这期间服务的每个写入都在等待，超过 busy timeout 就以 `database is locked` 失败，并且又上传一次整个数据库。默认的阈值约 500 MB，快照期间的增长就会越过它；一个持续几分钟的读事务（例如每天的数据库组成）也会，所以组成只在 worker 空闲时读。`litestream.yml` 把它设为 1,000,000 页（约 3.8 GiB），只作为最后的保护：快照或读事务结束后，下一次普通的 PASSIVE 检查点（WAL 超过 1000 页时，每次同步之后）把 WAL 写回数据库并从头开始。这个检查点期间 Litestream 也持有写锁，WAL 越大越久。磁盘上要留出 WAL 的空间。设为 `0` 不能关闭它：0.5.16 起 0 表示默认值（#1348），与 Litestream 的文档不同。
+WAL 的大小：Litestream 做快照时（每天 00:00 UTC；以及它丢了在 WAL 中的位置、重新上传整个数据库时，见「部署与 WAL 中的位置」）直到上传完都不做检查点，WAL 随写入一直变大，负载高时几分钟就超过 1 GB。WAL 超过 `truncate-page-n` 时它先试 PASSIVE，不行再做阻塞的 TRUNCATE；0.5.18 在 TRUNCATE 之后总要在持有写锁的情况下把整个数据库写成一份快照（`checkpoint boundary snapshot`），这期间服务的每个写入都在等待，超过 busy timeout 就以 `database is locked` 失败，并且又上传一次整个数据库。默认的阈值约 500 MB，快照期间的增长就会越过它；一个持续几分钟的读事务（例如每天的数据库组成）也会，所以组成只在 worker 空闲时读。`litestream.yml` 把它设为 1,000,000 页（约 3.8 GiB），只作为最后的保护：快照或读事务结束后，下一次普通的 PASSIVE 检查点（WAL 超过 1000 页时，每次同步之后）把 WAL 写回数据库并从头开始。这个检查点期间 Litestream 也持有写锁，WAL 越大越久。磁盘上要留出 WAL 的空间。设为 `0` 不能关闭它：0.5.16 起 0 表示默认值（#1348），与 Litestream 的文档不同。
 
 负载测试（`server/scripts/bench-load.ts`，见 CONTRIBUTING）中，一边做 3,000 条帖子的更新、一边持有 60 秒读事务：默认的阈值下 WAL 涨到 2.3 GB，Litestream 强制 TRUNCATE 9 次；阈值提高后 0 次，读事务结束后 WAL 照常从头开始。
 
 Litestream 在数据库中建两张表 `_litestream_seq`、`_litestream_lock`，恢复出的数据库中也有，不影响服务。
 
-Litestream 停止期间服务继续写入；服务做的检查点让 WAL 从头开始写之后，Litestream 再启动时上传一份完整快照（日志中 `snap=true`）。整套服务停止时（例如重启 Mac），服务的连接若最后关闭会删除 WAL，也是这样。数据不会缺，只多一次约 1.2 GB 的上传。
+#### 部署与 WAL 中的位置
+
+Litestream 重新启动后的第一次同步（启动一个 `monitor-interval` 之后）核对自己上次同步到的位置（`db.go` 的 `verify`）：上次最后一个 L0 文件记下的 WAL 偏移处，那一帧的盐值和页面内容必须与它当时写出的一致（`lastPageMatch`）。WAL 比这个偏移短（被截短或删除，日志 `wal truncated by another process`），或那一帧已被覆盖（`last page does not exist in last ltx file, wal overwritten by another process`），或 WAL 从头开始而它只同步到第一帧（`wal header salt reset, snapshotting`），它就把整个数据库作为一个新的 L0 文件上传（`snap=true`），每分钟的合并再把它写成同样大的 L1 文件，在存储桶中留到比它更早的快照都过期。
+
+以前每次部署都这样：部署的检查点 `wal_checkpoint(TRUNCATE)` 截短了 WAL（它的结果 `log` 总是 0，因为 TRUNCATE 在读计数之前就重置了 WAL，并不说明 WAL 原本是空的）；即使不截短，服务先于 Litestream 启动，第一次写入发现 WAL 已全部写回，就从头开始写，写过 Litestream 的偏移后同样如此。Litestream 用 `PERSIST_WAL` 打开数据库，自己最后关闭时把 WAL 写回数据库但保留文件和内容，位置因此还在。所以部署：先停服务、再停 Litestream，复制时不做检查点，先启动 Litestream、等它同步一次（它这时持有读事务，服务的写入接在 WAL 后面，不再从头开始），再启动服务。在本地用 Litestream 0.5.18 和 S3 兼容的服务器试过这个顺序：一边每秒写入约 2 MB、一边部署三次，没有新的完整上传；不等待就启动服务时一次就重新上传，带检查点时也是；从存储桶恢复出的数据库与原库行数一致、通过完整性检查。
+
+仍会重新上传整个数据库的情况：回滚（换回的数据库与它的位置对不上，删去本地状态后从存储桶取得位置）；Litestream 没有运行时服务在写（例如单独 `docker compose stop litestream` 很久，或 Litestream 启动失败）；本地状态 `data/.midden.db-litestream/` 丢失。数据不会缺，只多一次约 1.4 GB 的上传，和一个同样大的 L1 文件。
+
+#### 网络
+
+合并到某一级时，Litestream 一次打开上一级中所有待合并的文件（`compactor.go` 的 `Compact`：每个文件一个 GET，各占一个连接，同时流式读到合并结束），没有限制同时打开的数目，也不能分段读取。L1 文件不在本地，所以以前每小时合并 L2 都要同时下载至少 60 个 L1 文件；L2 一旦失败，下一次要合并的就是从上次成功以来的全部 L1 文件（其中还有部署后重新上传的、每个约 1.4 GB 的文件），同时打开的连接数以千计。部署机（OrbStack 的网络栈）上这时 `netstat -m` 的 requests for memory denied 大增，Tailscale 报 `no buffer space`，GET 与分段上传以 `StatusCode: 0, request send failed … EOF` 失败（重试 8 次后放弃，`s3/replica_client.go` 的 `transportRetryMaxAttempts`），同时进行的每日快照也失败。在本地数过：合并 L2 时客户端到 S3 的连接数等于待合并的 L1 文件数，只保留 L1 时始终只有 1 个。所以不再有 L2：L1 由本地的 L0 文件合并，快照读本地的数据库，Litestream 平时不再从存储桶下载任何东西，只有恢复时下载。
+
+上传的设置：快照分段上传，同时 `concurrency` 段（2）、每段 `part-size`（5 MiB），这是 0.5.18 对 R2 的默认值（按端点识别 R2，`sign-payload` 也默认开启，R2 需要签名的请求体）；同时在途的数据不超过约 15 MiB。还有网络缓冲不足的迹象时，先把 `concurrency` 降到 1；`part-size` 越大请求越少，但每段在内存中缓冲。改动 `litestream.yml` 后自动部署会重建它的容器。
+
+不再使用的 L2：存储桶中以前的 `db/0002/` 文件 Litestream 不再管理（保留只按配置中的级别执行），也不再写入新的；恢复时仍可能用到其中与快照衔接的文件，结果正确。比最早的快照更早之后可以手动删除。
 
 #### 费用
 
 R2 Standard：存储 $0.015/GB·月，Class A 操作（PUT、分段上传、LIST）$4.50/百万次，Class B（GET、HEAD）$0.36/百万次，流出免费。每月免费 10 GB·月、100 万次 Class A、1000 万次 Class B，与媒体的存储桶 `midden` 共用。按数据库 2.3 GB、LZ4 后约 52%（开发库实测）估计，一份完整副本约 1.2 GB：
 
-- 存储：8 份快照约 9.6 GB；L1、L2 保留约 9 天的增量，按每天 100–300 MB 改动估计约 1–2 GB；启用后、每次回滚后和 Litestream 重新上传整个数据库（见上）后的 9 天内，L1、L2 中各多一份完整副本（约 2.4 GB）。平时约 11–12 GB，约 $0.18/月（媒体已用完免费额度时；否则更少）。
-- Class A，最坏情况（整月每 10 秒都有写入）：L0 上传 259,200；L1 合并 43,200 次写入加 43,200 次列出 L0；L2 合并 720 次写入加约 9,400 次列出 L1；L0 保留检查约 10,000；快照分段上传（每段 5 MiB）约 7,000；快照保留清理约 450。合计约 37 万次，在免费额度内；全部计费也只有约 $1.7/月。写入是间歇的，实际应在一半以下。
-- Class B：L2 合并时下载 L1 文件，每月最多约 4.3 万次，另有恢复时的下载，免费额度内。
+- 存储：8 份快照约 9.6 GB；L1 保留约 9 天的增量，按每天 100–300 MB 改动估计约 1–2 GB；启用后、每次回滚后和 Litestream 重新上传整个数据库（见上）后的 9 天内，L1 中多一份完整副本（约 1.2 GB）。平时约 11–12 GB，约 $0.18/月（媒体已用完免费额度时；否则更少）。
+- Class A，最坏情况（整月每 10 秒都有写入）：L0 上传 259,200；L1 合并 43,200 次写入加 43,200 次列出 L0；L0 保留检查约 10,000；快照分段上传（每段 5 MiB）约 7,000；快照保留清理约 450。合计约 36 万次，在免费额度内；全部计费也只有约 $1.7/月。写入是间歇的，实际应在一半以下。
+- Class B：平时没有下载，只有恢复时的下载。
 
 #### 监控
 
@@ -405,7 +422,8 @@ R2 Standard：存储 $0.015/GB·月，Class A 操作（PUT、分段上传、LIST
 
 ```sh
 docker compose ps litestream
-docker compose logs --tail=50 litestream                                # sync error、monitor error、compaction failed
+docker compose logs --tail=50 litestream                                # sync error、monitor error、compaction failed、retention enforcement failed
+docker compose logs litestream | grep -E 'snap=true|reason='            # 整个数据库重新上传的原因（需要 debug 日志）
 docker compose exec litestream litestream ltx -level 9 /data/midden.db    # 快照：应有一份当天 00:00 UTC 之后的
 docker compose exec litestream litestream ltx -level all /data/midden.db  # 全部文件：有写入时 L0 的最新时间应在一分钟内
 docker compose exec litestream litestream status                          # 本地 TXID 与 WAL 大小
@@ -544,18 +562,18 @@ Cloudflare 的 GraphQL Analytics API（`POST https://api.cloudflare.com/client/v
 
 ## 维护任务
 
-worker 每分钟运行一次维护。标 *空闲时* 的步骤只为腾出空间，只在 worker 空闲时做（其他任务 10 秒内都没有运行，且没有在节流），大批更新期间等它结束：
+worker 每分钟运行一次维护。标 _空闲时_ 的步骤只为腾出空间，只在 worker 空闲时做（其他任务 10 秒内都没有运行，且没有在节流），大批更新期间等它结束：
 
 - 超过 1 小时仍未完成且没有对应任务的抓取标记为中断；
-- 删除不再保存、也没有进行中抓取的收藏及其独有内容（*空闲时*；每批之间停一下，让网页进程能写入）；
-- 没有产生新版本的抓取，其原始响应保留 3 天，之后只要不是这个收藏最新一次的抓取就删除；产生了新版本的抓取的原始响应一直保留（*空闲时*）；
+- 删除不再保存、也没有进行中抓取的收藏及其独有内容（_空闲时_；每批之间停一下，让网页进程能写入）；
+- 没有产生新版本的抓取，其原始响应保留 3 天，之后只要不是这个收藏最新一次的抓取就删除；产生了新版本的抓取的原始响应一直保留（_空闲时_）；
 - 不再被引用的媒体文件 24 小时后删除（使用 R2 时同时删除对象并清除边缘缓存）；
-- 不再有任何原始响应使用的存储桶对象 24 小时后删除（见「原始响应（R2）」，*空闲时*）；
+- 不再有任何原始响应使用的存储桶对象 24 小时后删除（见「原始响应（R2）」，_空闲时_）；
 - 删除抓取结束一天以上仍留着的暂存数据（`capture_staging`，没能提交的列表目标的预取）；
 - 为缺少缩略图的媒体补做缩略图；
 - 清理过期的网页会话、通行密钥挑战与 `/passkey` 链接；
-- 每 15 分钟读取存储用量并检查提醒，每天一次统计数据库组成（见「存储用量」，统计在 *空闲时*）；
-- 把空闲页面还给文件系统（*空闲时*）：空闲页面达到 1024 页（4 MiB）时运行 `PRAGMA incremental_vacuum(4096)`，每次最多 16 MiB，两次之间至少 15 分钟，所以积压最多每小时释放 64 MiB；日志 `released free database pages` 给出这次释放的页数、剩余空闲页数（`free`）和总页数（`pages`）。这要求数据库是 `auto_vacuum = INCREMENTAL`：新建的数据库默认如此，已有的数据库要 `VACUUM` 一次才能切换（生产环境已于 2026-11-25 切换），否则这一步什么也不做。
+- 每 15 分钟读取存储用量并检查提醒，每天一次统计数据库组成（见「存储用量」，统计在 _空闲时_）；
+- 把空闲页面还给文件系统（_空闲时_）：空闲页面达到 1024 页（4 MiB）时运行 `PRAGMA incremental_vacuum(4096)`，每次最多 16 MiB，两次之间至少 15 分钟，所以积压最多每小时释放 64 MiB；日志 `released free database pages` 给出这次释放的页数、剩余空闲页数（`free`）和总页数（`pages`）。这要求数据库是 `auto_vacuum = INCREMENTAL`：新建的数据库默认如此，已有的数据库要 `VACUUM` 一次才能切换（生产环境已于 2026-11-25 切换），否则这一步什么也不做。
 
 ## 从 Go 版迁移
 

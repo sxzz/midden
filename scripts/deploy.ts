@@ -35,14 +35,12 @@ const WORKER = 'midden-worker'
 // it counts as unhealthy: one slow answer must not roll a deployment back.
 const HEALTH_ATTEMPTS = 5
 const HEALTH_RETRY_DELAY = 6000
-// Run with node in a one-off container while the app and Litestream are
-// stopped: moves the WAL into the database file, so the copy is one file.
-const CHECKPOINT = `const { DatabaseSync } = require('node:sqlite')
-const db = new DatabaseSync(process.env.DATA_DIR + '/midden.db', { timeout: 60000 })
-const result = db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get()
-db.close()
-console.log(JSON.stringify(result))
-if (result.busy) process.exit(1)`
+// Litestream's first sync after it starts comes one monitor interval later
+// (litestream.yml; this if it names none), plus time to check its place.
+const MONITOR_INTERVAL = 10_000
+const LITESTREAM_SETTLE = 5000
+const INTERVAL = /^\s*monitor-interval:\s*(\d+)(ms|s|m)\s*$/m
+const UNIT: Record<string, number> = { ms: 1, s: 1000, m: 60_000 }
 
 /** Runs a command in the checkout and returns its trimmed stdout. */
 export type Run = (
@@ -123,12 +121,23 @@ export function deploy(
     }
   }
 
-  /** Start `revision` and wait until it reports healthy. */
-  function start(revision: string) {
+  /**
+   * Start `revision` and wait until it reports healthy. With `litestream`,
+   * Litestream comes first: its place in the WAL survives only if nothing
+   * writes before its first sync after the restart. The app's first write
+   * starts the WAL over; overwriting the frame Litestream synced last makes
+   * it lose its place and upload the whole database again. Litestream
+   * failing to start does not hold up the app; the note says so.
+   */
+  function start(revision: string, litestream?: { recreate: boolean }): string {
     run('git', ['checkout', '--quiet', '--detach', revision])
-    // The app alone: the sidecar must not hold up or fail a deployment. The
-    // web process first: it applies the migrations, which the worker waits
-    // for.
+    let note = ''
+    if (litestream) {
+      note = startLitestream(litestream.recreate)
+      if (!note) sleep(litestreamSettle())
+    }
+    // The web process first: it applies the migrations, which the worker
+    // waits for.
     up('midden', revision)
     for (let attempt = 1; ; attempt++) {
       try {
@@ -145,6 +154,19 @@ export function deploy(
       }
     }
     if (hasWorker()) up(WORKER, revision)
+    return note
+  }
+
+  /** How long Litestream takes to sync once after it starts. */
+  function litestreamSettle(): number {
+    let interval = MONITOR_INTERVAL
+    try {
+      const match = INTERVAL.exec(
+        readFileSync(path.join(dir, 'litestream.yml'), 'utf8'),
+      )
+      if (match) interval = Number(match[1]) * UNIT[match[2]!]!
+    } catch {}
+    return interval + LITESTREAM_SETTLE
   }
 
   function healthz(): string {
@@ -227,38 +249,16 @@ export function deploy(
   }
 
   /**
-   * With both stopped, a copy of the database as `revision` left it, kept
-   * with the newest `keep` copies. Cloned (APFS, copy-on-write) where the
-   * file system can, so even a large database copies at once; no reader
-   * holds the WAL back meanwhile, as an online backup did.
+   * With everything stopped, a copy of the database and its WAL, kept with
+   * the newest `keep` copies. Cloned (APFS, copy-on-write) where the file
+   * system can, so even a large database copies at once. No checkpoint:
+   * resetting the WAL would lose Litestream its place (see start); the two
+   * files together are consistent.
    */
-  function snapshot(dataDir: string, revision: string, keep: number): Backup {
+  function snapshot(dataDir: string, keep: number): Backup {
     const database = path.join(dataDir, 'midden.db')
     const walSize = () =>
       existsSync(`${database}-wal`) ? statSync(`${database}-wal`).size : 0
-    if (walSize() > 0)
-      try {
-        const result = run(
-          'docker',
-          [
-            'compose',
-            'run',
-            '--rm',
-            '--no-deps',
-            '-T',
-            '--entrypoint',
-            'node',
-            'midden',
-            '-e',
-            CHECKPOINT,
-          ],
-          { MIDDEN_IMAGE: `${IMAGE}:sha-${revision}` },
-        )
-        console.info(`checkpoint: ${result}`)
-      } catch (error) {
-        // The copy then takes the WAL along; together they are consistent.
-        console.error(`checkpoint failed: ${message(error)}`)
-      }
     const folder = path.join(dataDir, 'backups', 'deploy')
     mkdirSync(folder, { recursive: true })
     const stamp = new Date().toISOString().replaceAll(/[:.]/g, '-')
@@ -371,26 +371,29 @@ export function deploy(
       // This deployment's copy is what a rollback restores. The one before
       // only guarded against a bad version found later; Litestream's
       // history covers that, so it is kept only without Litestream.
-      backup = snapshot(dataDir, current, litestream ? 1 : 2)
+      backup = snapshot(dataDir, litestream ? 1 : 2)
       console.info(backup.database)
     } catch (error) {
       console.error(message(error))
       step(`starting ${current} again`)
-      let note = ''
-      try {
-        start(current)
-      } finally {
-        if (litestream) note = startLitestream(false)
-      }
+      const note = start(current, litestream ? { recreate: false } : undefined)
       throw new Error(
         `could not back up the database; ${current} is running again${note}`,
         { cause: error },
       )
     }
   }
+  let note: string
   try {
     step(`starting ${revision}`)
-    start(revision)
+    note = start(
+      revision,
+      litestream
+        ? {
+            recreate: !!current && litestreamConfigChanged(current, revision),
+          }
+        : undefined,
+    )
   } catch (error) {
     console.error(message(error))
     if (!current)
@@ -398,18 +401,15 @@ export function deploy(
     // Migrations may have run: put back the database the old version knew.
     step(`rolling back to ${current}`)
     restore(dataDir, backup!, litestream)
-    let note = ''
-    try {
-      start(current)
-    } finally {
-      if (litestream) note = startLitestream(false)
-    }
-    return `rolled back ${revision}: unhealthy; running ${current} with the database from ${backup!.database}${note}`
+    const back = start(
+      current,
+      litestream
+        ? { recreate: litestreamConfigChanged(revision, current) }
+        : undefined,
+    )
+    return `rolled back ${revision}: unhealthy; running ${current} with the database from ${backup!.database}${back}`
   }
   pruneImages([revision, current])
-  const note = litestream
-    ? startLitestream(!!current && litestreamConfigChanged(current, revision))
-    : ''
   return `deployed ${revision} (was ${current || 'nothing'})${note}`
 }
 
