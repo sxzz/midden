@@ -4,20 +4,21 @@ import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { createAgentApi } from '#agent/app.ts'
 import { agentDocRoutes } from '#agent/doc.ts'
-import { QueryPool, READ_THREAD } from '#agent/pool.ts'
 import { pooledReads, typeCatalog } from '#agent/runner.ts'
 import { mediaRoutes } from '#blob/route.ts'
 import { regenerateThumbnail } from '#capture/thumbnail.ts'
 import { deriveKey } from '#crypto.ts'
 import { createApi } from '#http/app.ts'
 import { WebLoad } from '#http/load.ts'
+import { pooledWebReads } from '#http/offload.ts'
 import { watchLitestream } from '#litestream.ts'
+import { QueryPool, READ_THREAD } from '#reads/pool.ts'
 import { launchBot, type BotHandle } from '#telegram/launch.ts'
 import { TokenUsage } from '#tokens/usage.ts'
 import { StorageUsage } from '#usage/storage.ts'
 import { writeStatus, type Stamped, type WorkerReport } from './status-file.ts'
-import type { ReadThreadData } from '#agent/worker.ts'
 import type { WebLoadSignal } from '#jobs/throttle.ts'
+import type { ReadThreadData } from '#reads/thread.ts'
 import type { Runtime } from './context.ts'
 
 /** The web process's status file: its recent load, for the throttle. */
@@ -71,21 +72,8 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
   const tokenUsage = new TokenUsage({ db, logger })
   tokenUsage.start()
   cleanups.push(() => tokenUsage.stop())
-  const api = createApi({
-    ctx,
-    telegram: config.telegram,
-    webAppUrl: config.webAppUrl,
-    dev: config.dev,
-    litestream,
-    storage,
-    queue: { worker: options.worker, web: () => load.report() },
-    challengeKey: deriveKey(config.secretKey, 'passkey-challenge'),
-    notify,
-    tokenUsage,
-    ...(config.telegram ? { botState: () => bot?.state() ?? 'starting' } : {}),
-  })
-  // The agent API reads on threads of its own, started with its first
-  // request (`agent/pool.ts`).
+  // Reads run on threads with connections of their own (`reads/pool.ts`):
+  // the web app's `GET /v1` requests and the agent API's reads.
   const types = typeCatalog(ctx.platforms)
   const pool = new QueryPool({
     script: READ_THREAD,
@@ -97,10 +85,29 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
         ? { publicUrl: config.media.r2.publicUrl }
         : {}),
       types,
+      webAppUrl: config.webAppUrl,
+      dev: config.dev,
+      logLevel: logger.level,
     } satisfies ReadThreadData,
     logger,
   })
   cleanups.push(() => pool.close())
+  // The web app's first requests need not wait for threads to start.
+  pool.warm(2)
+  const api = createApi({
+    ctx,
+    telegram: config.telegram,
+    webAppUrl: config.webAppUrl,
+    dev: config.dev,
+    litestream,
+    storage,
+    queue: { worker: options.worker, web: () => load.report() },
+    challengeKey: deriveKey(config.secretKey, 'passkey-challenge'),
+    notify,
+    tokenUsage,
+    reads: pooledWebReads(pool),
+    ...(config.telegram ? { botState: () => bot?.state() ?? 'starting' } : {}),
+  })
   const agent = createAgentApi({
     ctx,
     reads: pooledReads(pool),

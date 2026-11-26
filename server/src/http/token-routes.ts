@@ -10,6 +10,7 @@ import {
   type TokenView,
 } from '#tokens/tokens.ts'
 import { ownerOnly } from './auth.ts'
+import { inline } from './offload.ts'
 import { json, type Env } from './validate.ts'
 import type { Database } from '#db/client.ts'
 import type { TokenUsage } from '#tokens/usage.ts'
@@ -53,7 +54,8 @@ export function tokenRoutes(
   return (
     new Hono<Env>()
       .use(ownerOnly)
-      .get('/', (c) => c.json(withUsage(listTokens(db, now()))))
+      // Usage not written yet is in this process's memory.
+      .get('/', inline, (c) => c.json(withUsage(listTokens(db, now()))))
       .post(
         '/',
         json(
@@ -107,7 +109,7 @@ export function tokenRoutes(
           secret: issued.secret,
         })
       })
-      .get('/:id/usage', (c) => {
+      .get('/:id/usage', inline, (c) => {
         const id = c.req.param('id')
         const [token] = withUsage(
           listTokens(db, now()).filter((t) => t.id === id),

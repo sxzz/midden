@@ -5,6 +5,7 @@ import { connections, jobs } from '#db/schema.ts'
 import { readJobControl, writeJobControl } from '#jobs/control.ts'
 import { PAUSABLE_TYPES } from '#jobs/queue.ts'
 import { activeRateLimits, clearRateLimit } from '#jobs/rate-limits.ts'
+import { inline } from './offload.ts'
 import { json, type Env } from './validate.ts'
 import type { Database } from '#db/client.ts'
 import type { WorkerReport } from '#runtime/status-file.ts'
@@ -110,7 +111,8 @@ export function queueRoutes(
   }
   return (
     new Hono<Env>()
-      .get('/', (c) => c.json(view()))
+      // With the worker's report and this process's load: answered here.
+      .get('/', inline, (c) => c.json(view()))
       .put(
         '/control',
         json(

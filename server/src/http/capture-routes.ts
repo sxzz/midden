@@ -43,6 +43,7 @@ import { captures, collections, library, submissions } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { deleteAll } from '#library/delete.ts'
 import { ownerOnly } from './auth.ts'
+import { inline } from './offload.ts'
 import { Cursor, json, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { Job } from '#capture/submit.ts'
@@ -463,8 +464,9 @@ export function captureRoutes(
       })
 
       // Whether a saved collection can be captured again. Platforms run in
-      // process, so this holds for any saved collection on a known platform.
-      .get('/collections/:id/availability', (c) => {
+      // process, so this holds for any saved collection on a known platform;
+      // they are this process's, so it stays here (one small read).
+      .get('/collections/:id/availability', inline, (c) => {
         const saved = ctx.db
           .select({ url: collections.url })
           .from(library)

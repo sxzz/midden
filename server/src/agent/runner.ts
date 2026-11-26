@@ -1,3 +1,5 @@
+import { PoolError, ThreadError, type QueryPool } from '#reads/pool.ts'
+import { AgentError, type ErrorBody } from './errors.ts'
 import {
   runRead,
   type ReadInput,
@@ -5,7 +7,6 @@ import {
   type ReadOutput,
 } from './reads.ts'
 import type { Platforms } from '#platforms/registry.ts'
-import type { QueryPool } from './pool.ts'
 import type { AgentReader, TypeCatalog } from './query.ts'
 
 /** Where the agent API's reads run. */
@@ -17,11 +18,37 @@ export interface Reads {
   close: () => Promise<void>
 }
 
-/** On the read threads of a pool: what the web process uses. */
+/** What the agent API answers when the pool could not run a read. */
+function agentError(error: unknown): unknown {
+  if (error instanceof ThreadError) {
+    const body = error.body as ErrorBody
+    return new AgentError(body.error, body.message, body.detail)
+  }
+  if (!(error instanceof PoolError)) return error
+  switch (error.code) {
+    case 'busy':
+      return new AgentError('busy', error.message)
+    case 'timeout':
+      return new AgentError(
+        'query_timeout',
+        `The query took longer than ${error.timeoutMs / 1000} s. Narrow it (a folder, dates, an author, fewer words) and retry.`,
+      )
+    case 'lost':
+      return new AgentError('internal', 'Internal error.')
+  }
+}
+
+/**
+ * On the read threads of the pool the web app shares: what the web process
+ * uses. The pool closes with the web process, not with the agent API.
+ */
 export function pooledReads(pool: QueryPool): Reads {
   return {
-    run: (name, input) => pool.run(name, input) as Promise<never>,
-    close: () => pool.close(),
+    run: (name, input) =>
+      pool.run('agent', name, input).catch((error: unknown) => {
+        throw agentError(error)
+      }) as Promise<never>,
+    close: () => Promise.resolve(),
   }
 }
 

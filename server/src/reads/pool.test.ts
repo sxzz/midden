@@ -4,12 +4,11 @@ import path from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { backup, DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, test } from 'vitest'
+import { AgentError } from '#agent/errors.ts'
+import { inlineReads, pooledReads } from '#agent/runner.ts'
 import { agentFixture, type AgentFixture } from '#testing/agent.ts'
-import { AgentError } from './errors.ts'
-import { Gate } from './gate.ts'
-import { QueryPool, READ_THREAD } from './pool.ts'
-import { inlineReads, pooledReads, type Reads } from './runner.ts'
-import type { ReadThreadData } from './worker.ts'
+import { PoolError, QueryPool, READ_THREAD } from './pool.ts'
+import type { ReadThreadData } from './thread.ts'
 
 const SLOW = new URL('../testing/slow-thread.ts', import.meta.url)
 
@@ -43,9 +42,11 @@ describe('read threads', () => {
   test('a slow query runs on its own thread; the event loop keeps going', async () => {
     pool = new QueryPool({ script: SLOW, workerData: null })
     // Started, so the measure is the query's alone.
-    await pool.run('echo', 1)
+    await pool.run('web', 'echo', 1)
     const started = performance.now()
-    const stall = await longestStall(() => pool!.run('slow', { ms: 800 }))
+    const stall = await longestStall(() =>
+      pool!.run('web', 'slow', { ms: 800 }),
+    )
     expect(performance.now() - started).toBeGreaterThanOrEqual(790)
     expect(stall).toBeLessThan(100)
 
@@ -62,36 +63,75 @@ describe('read threads', () => {
     expect(inline).toBeGreaterThanOrEqual(790)
   })
 
-  test('two reads run at once, one on each thread', async () => {
+  test('reads run at once, one on each thread', async () => {
     pool = new QueryPool({ script: SLOW, workerData: null })
+    pool.warm(3)
+    await Promise.all([1, 2, 3].map(() => pool!.run('web', 'echo', 0)))
     const started = performance.now()
     await Promise.all([
-      pool.run('slow', { ms: 400 }),
-      pool.run('slow', { ms: 400 }),
+      pool.run('web', 'slow', { ms: 400 }),
+      pool.run('web', 'slow', { ms: 400 }),
+      pool.run('agent', 'slow', { ms: 400 }),
     ])
     expect(performance.now() - started).toBeLessThan(750)
-    expect(pool.threads).toEqual({ live: 2, retiring: 0 })
+    expect(pool.threads).toEqual({ live: 3, retiring: 0 })
   })
 
-  test('past its timeout a read answers query_timeout; a new thread takes over', async () => {
-    pool = new QueryPool({ script: SLOW, workerData: null, timeoutMs: 200 })
-    await pool.run('echo', 1)
+  test('the agent lane holds at most its share; the web app’s reads go first', async () => {
+    pool = new QueryPool({ script: SLOW, workerData: null, size: 3 })
+    pool.warm()
+    await Promise.all([1, 2, 3].map(() => pool!.run('web', 'echo', 0)))
+    const ended: string[] = []
+    const run = (lane: 'web' | 'agent', name: string, ms: number) =>
+      pool!.run(lane, 'slow', { ms }).then(() => ended.push(name))
     const started = performance.now()
-    await expect(pool.run('slow', { ms: 1500 })).rejects.toMatchObject({
-      code: 'query_timeout',
+    // Two agent reads hold two threads; a third waits though one is free.
+    const agents = [run('agent', 'a1', 300), run('agent', 'a2', 300)]
+    const third = run('agent', 'a3', 50)
+    // The free thread is the web app's at once.
+    await run('web', 'w1', 50)
+    expect(performance.now() - started).toBeLessThan(250)
+    expect(ended).toEqual(['w1'])
+    await Promise.all([...agents, third])
+    // It ran only once one of the two had ended.
+    expect(ended.indexOf('a3')).toBeGreaterThan(
+      Math.min(ended.indexOf('a1'), ended.indexOf('a2')),
+    )
+  })
+
+  test('past its timeout a read fails; a new thread takes over', async () => {
+    pool = new QueryPool({
+      script: SLOW,
+      workerData: null,
+      lanes: { agent: { timeoutMs: 200 } },
     })
+    await pool.run('agent', 'echo', 1)
+    const started = performance.now()
+    const error = await pool
+      .run('agent', 'slow', { ms: 1500 })
+      .catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(PoolError)
+    expect(error).toMatchObject({ code: 'timeout' })
     expect(performance.now() - started).toBeLessThan(700)
     // The old thread ends when SQLite gives it back; meanwhile another reads.
     expect(pool.threads.retiring).toBe(1)
-    expect(await pool.run('echo', 'still here')).toBe('still here')
+    expect(await pool.run('agent', 'echo', 'still here')).toBe('still here')
     await expect.poll(() => pool!.threads.retiring, { timeout: 5000 }).toBe(0)
   })
 
-  test('a read that throws answers the API’s error', async () => {
-    pool = new QueryPool({ script: SLOW, workerData: null })
-    const error = await pool.run('nonsense', {}).catch((e: unknown) => e)
-    expect(error).toBeInstanceOf(AgentError)
-    expect(error).toMatchObject({ code: 'internal' })
+  test('the agent API answers query_timeout, and internal for the unexpected', async () => {
+    pool = new QueryPool({
+      script: SLOW,
+      workerData: null,
+      lanes: { agent: { timeoutMs: 200 } },
+    })
+    const reads = pooledReads(pool)
+    const run = (op: string, input: unknown) =>
+      reads.run(op as never, input as never).catch((e: unknown) => e)
+    const timedOut = await run('slow', { ms: 1000 })
+    expect(timedOut).toBeInstanceOf(AgentError)
+    expect(timedOut).toMatchObject({ code: 'query_timeout' })
+    expect(await run('nonsense', {})).toMatchObject({ code: 'internal' })
   })
 
   test('the real read thread answers exactly as reads in place do', async () => {
@@ -127,77 +167,5 @@ describe('read threads', () => {
     expect(missing).toMatchObject({ code: 'not_found' })
     // Its connection only reads.
     expect(await pooled.run('folders', undefined)).toEqual({ items: [] })
-  })
-})
-
-describe('in flight', () => {
-  /** Reads that wait until the test lets them answer. */
-  function heldReads() {
-    const waiting: (() => void)[] = []
-    const reads: Reads = {
-      run: () =>
-        new Promise((resolve) =>
-          waiting.push(() => resolve({ items: [] } as never)),
-        ),
-      close: () => Promise.resolve(),
-    }
-    return { reads, release: () => waiting.shift()?.() }
-  }
-
-  test('a third request waits for a turn, then is turned away busy', async () => {
-    const held = heldReads()
-    fixture = await agentFixture({
-      reads: () => held.reads,
-      gate: new Gate({ limit: 2, waitMs: 150 }),
-    })
-    const f = fixture
-    const first = f.call('/folders')
-    const second = f.call('/folders')
-    const started = performance.now()
-    const third = await f.call('/folders')
-    expect(performance.now() - started).toBeGreaterThanOrEqual(140)
-    expect(third.status).toBe(503)
-    expect(third.json.error).toBe('busy')
-    expect(third.headers.get('Retry-After')).toBe('2')
-    held.release()
-    held.release()
-    expect((await first).status).toBe(200)
-    expect((await second).status).toBe(200)
-  })
-
-  test('a waiting request runs as soon as one ends', async () => {
-    const held = heldReads()
-    fixture = await agentFixture({
-      reads: () => held.reads,
-      gate: new Gate({ limit: 2, waitMs: 2000 }),
-    })
-    const f = fixture
-    const calls = [f.call('/folders'), f.call('/folders'), f.call('/folders')]
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    held.release()
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    held.release()
-    held.release()
-    expect((await Promise.all(calls)).map((r) => r.status)).toEqual([
-      200, 200, 200,
-    ])
-  })
-
-  test('a read that times out answers 503 query_timeout', async () => {
-    fixture = await agentFixture({
-      reads: () => ({
-        run: () =>
-          Promise.reject(
-            new AgentError('query_timeout', 'The query took longer than 5 s.'),
-          ),
-        close: () => Promise.resolve(),
-      }),
-    })
-    const response = await fixture.call('/posts?q=cat')
-    expect(response.status).toBe(503)
-    expect(response.json).toEqual({
-      error: 'query_timeout',
-      message: 'The query took longer than 5 s.',
-    })
   })
 })

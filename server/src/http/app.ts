@@ -20,6 +20,12 @@ import { errorResponse } from './errors.ts'
 import { folderRoutes } from './folder-routes.ts'
 import { libraryRoutes } from './library-routes.ts'
 import { mediaRoutes } from './media-routes.ts'
+import {
+  inline,
+  offload,
+  type ForwardedRequest,
+  type WebReads,
+} from './offload.ts'
 import { originRoutes } from './origin-routes.ts'
 import { allowedOrigins } from './origins.ts'
 import { passkeyAuthRoutes, passkeyRoutes } from './passkey-routes.ts'
@@ -63,12 +69,28 @@ export interface HttpOptions {
   queue?: QueueInfo
   /** Counts requests per API token; one is made when absent (tests). */
   tokenUsage?: TokenUsage
+  /**
+   * Where `GET` requests run (`offload.ts`): the read threads in the web
+   * process; in place when absent (tests, and the threads themselves).
+   */
+  reads?: WebReads
+  /**
+   * On a read thread: requests come from the web process, which checked
+   * the login and passes what it found (`forwarded` in the request's env).
+   */
+  trusted?: boolean
+}
+
+/** What a read thread's API finds in each request's env. */
+export interface ForwardedEnv {
+  forwarded: Pick<ForwardedRequest, 'session' | 'token'>
 }
 
 /**
  * The `/v1` API: passkey or Mini App login for the owner, then everything
  * else behind a token or the owner's session. Its type is the web app's API
- * client.
+ * client. `GET` requests run on the read threads (`offload.ts`) unless their
+ * route says `inline`.
  */
 export function createApi(options: HttpOptions) {
   const { ctx } = options
@@ -78,6 +100,7 @@ export function createApi(options: HttpOptions) {
   const origins = () => allowedOrigins(ctx.db, webAppUrl)
   const fromWeb = (origin: string | undefined) =>
     !!origin && origins().includes(origin)
+  const toThreads = offload(options.reads)
   const passkeys = {
     ctx,
     store: {
@@ -125,9 +148,17 @@ export function createApi(options: HttpOptions) {
       )
       .route('/auth/passkey', passkeyAuthRoutes(passkeys))
       // Public links need no login; they read only what was shared.
+      .use('/public/*', toThreads)
       .route('/public', publicRoutes(ctx))
       // Everything below needs a token or the owner's session.
       .use(async (c, next) => {
+        if (options.trusted) {
+          const { forwarded } = (c.env ?? {}) as Partial<ForwardedEnv>
+          if (!forwarded) return c.json({ error: '需要登录' }, 401)
+          c.set('session', forwarded.session)
+          if (forwarded.token) c.set('token', forwarded.token)
+          return next()
+        }
         const header = c.req.header('Authorization')
         if (header !== undefined) {
           const auth = authenticate(ctx.db, bearer(header), now())
@@ -169,16 +200,18 @@ export function createApi(options: HttpOptions) {
         c.set('session', true)
         await next()
       })
+      .use(toThreads)
       // Answers only whether the request is signed in.
-      .get('/session', (c) => c.body(null, 204))
+      .get('/session', inline, (c) => c.body(null, 204))
       .delete('/session', (c) => {
         const cookie = getCookie(c, SESSION_COOKIE)
         if (cookie) deleteSession(ctx.db, cookie)
         deleteCookie(c, SESSION_COOKIE, { path: '/', secure: true })
         return c.body(null, 204)
       })
-      // What the web app shows only on a development server.
-      .get('/instance', (c) =>
+      // What the web app shows only on a development server. This process's
+      // own state: it stays here.
+      .get('/instance', inline, (c) =>
         c.json({
           dev: !!options.dev,
           bot: options.botState?.() ?? ('off' as const),

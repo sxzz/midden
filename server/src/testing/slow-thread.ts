@@ -1,10 +1,10 @@
 // A read thread for the pool's tests: `slow` keeps SQLite busy in one
 // statement for `ms` milliseconds, as a heavy query would; `echo` answers at
-// once; `fail` throws. Started by path, like `agent/worker.ts`.
+// once; `fail` throws. Started by path, like `reads/thread.ts`.
 import { DatabaseSync } from 'node:sqlite'
 import { parentPort } from 'node:worker_threads'
 import { errorBody } from '#agent/errors.ts'
-import type { PoolRequest, PoolResponse } from '#agent/pool.ts'
+import type { PoolRequest, PoolResponse } from '#reads/pool.ts'
 
 if (parentPort) {
   const port = parentPort

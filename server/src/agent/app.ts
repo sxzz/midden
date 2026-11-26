@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono'
 import * as v from 'valibot'
 import { endpointOf } from '#http/auth.ts'
+import { LANES } from '#reads/pool.ts'
 import { authenticate, bearer } from '#tokens/tokens.ts'
 import { AgentError, errorBody, invalid, notFound } from './errors.ts'
 import { Gate } from './gate.ts'
@@ -11,7 +12,6 @@ import {
   queries,
   type AgentEnv,
 } from './http.ts'
-import { QUERY_TIMEOUT_MS } from './pool.ts'
 import { MAX_PAGE_SIZE, type AgentReader } from './query.ts'
 import { BATCH_MAX } from './reads.ts'
 import { VIEWS, type View } from './shape.ts'
@@ -48,8 +48,9 @@ function viewParam(c: Context, fallback: View): View {
 
 /**
  * The agent API, `/agent/v1`: JSON for AI agents and scripts, with an API
- * token only. Reads run on read threads, so a slow query never holds up the
- * web app; at most `IN_FLIGHT` requests run at once across every token.
+ * token only. Reads run on the read threads the web app shares (in their
+ * `agent` lane), so a slow query never holds up the web app; at most
+ * `IN_FLIGHT` requests run at once across every token.
  * Nothing here deletes: what deletes is on `/v1`, for the owner's session.
  */
 export function createAgentApi(o: AgentOptions) {
@@ -106,7 +107,7 @@ export function createAgentApi(o: AgentOptions) {
         in_flight: gate.limit,
         page_size_max: MAX_PAGE_SIZE,
         batch_max: BATCH_MAX,
-        query_timeout_ms: QUERY_TIMEOUT_MS,
+        query_timeout_ms: LANES.agent.timeoutMs,
       },
     })
   })

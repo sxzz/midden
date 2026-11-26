@@ -1,6 +1,9 @@
 import { AgentError } from './errors.ts'
 
-/** Requests in flight across all tokens; the read pool has as many threads. */
+/**
+ * Requests in flight across all tokens; the read pool lets the agent lane
+ * hold as many threads (`LANES.agent.max`).
+ */
 export const IN_FLIGHT = 2
 /** How long a request beyond them waits for a turn before `busy`. */
 export const QUEUE_WAIT_MS = 3000
