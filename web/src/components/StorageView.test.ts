@@ -8,7 +8,6 @@ import {
   type Component,
 } from 'vue'
 import { mockApi } from '../testing/api'
-import AdminView from './AdminView.vue'
 import StorageView from './StorageView.vue'
 import type { StorageReport } from '../api'
 
@@ -162,27 +161,6 @@ function api(report: StorageReport) {
 }
 
 describe('存储用量', () => {
-  it('is a page of the admin panel', () => {
-    mockApi((path) =>
-      path === '/instance'
-        ? {
-            dev: false,
-            litestream: {
-              enabled: false,
-              last_heartbeat_at: null,
-              stale: false,
-              stale_after_minutes: null,
-            },
-          }
-        : [],
-    )
-    const el = mount(AdminView)
-    const link = [...el.querySelectorAll('a')].find((a) =>
-      a.textContent?.includes('存储用量'),
-    )!
-    expect(link.getAttribute('href')).toBe('#/settings/admin/storage')
-  })
-
   it('groups R2, the bill, this machine, the database, trends and thresholds', async () => {
     api(FULL)
     const el = mount(StorageView)

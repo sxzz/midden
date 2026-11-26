@@ -12,31 +12,19 @@ import { toast } from '../composables/useToast'
 import BackupSection from './BackupSection.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
 import OriginList from './OriginList.vue'
-import Disclosure from './ui/Disclosure.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 
 // 设置 → 管理员面板: what concerns the whole server rather than one person's
-// settings. The domains the app may be used from; what storage is used;
-// the background jobs;
-// where Litestream replicates the database, its heartbeat; on a development
-// server, deleting everything.
+// settings. Its entries (settings-sections.ts) are shown here one at a
+// time: the domains the app may be used from; what storage is used; the
+// background jobs; where Litestream replicates the database. Without an
+// entry, on a development server, deleting everything.
 // The charts and the job list load with their entries, not with the app.
 const StorageView = defineAsyncComponent(() => import('./StorageView.vue'))
 const JobsView = defineAsyncComponent(() => import('./JobsView.vue'))
-/** The entry open under it, from the address (see SettingsView). */
-const props = defineProps<{ entry?: string }>()
-const entries = [
-  { value: 'storage', label: '存储用量' },
-  { value: 'jobs', label: '后台任务' },
-] as const
-const toggle = (value: string) => ({
-  name: 'settings',
-  params:
-    props.entry === value
-      ? { section: 'admin' }
-      : { section: 'admin', entry: value },
-})
+/** The entry shown, from the address (see SettingsView). */
+defineProps<{ entry?: string }>()
 const emit = defineEmits<{
   /** Everything saved was deleted; lists must not show it any more. */
   cleared: []
@@ -97,24 +85,19 @@ async function clearAll() {
 </script>
 
 <template>
-  <OriginList />
-  <Disclosure
-    v-for="item in entries"
-    :key="item.value"
-    :label="item.label"
-    :open="entry === item.value"
-    :to="toggle(item.value)"
-    nested
-  >
-    <StorageView v-if="item.value === 'storage'" />
-    <JobsView v-else />
-  </Disclosure>
-  <BackupSection
-    v-if="litestream"
-    :status="litestream"
-    @saved="litestream = $event"
-  />
-  <ListSection v-if="dev" title="开发模式">
+  <OriginList v-if="entry === 'origins'" bare />
+  <StorageView v-else-if="entry === 'storage'" />
+  <JobsView v-else-if="entry === 'jobs'" />
+  <template v-else-if="entry === 'backup'">
+    <BackupSection
+      v-if="litestream"
+      :status="litestream"
+      bare
+      @saved="litestream = $event"
+    />
+    <p v-else class="none">没有配置 Litestream。</p>
+  </template>
+  <ListSection v-else-if="dev" title="开发模式">
     <ListButton
       label="删除全部收藏和采集记录"
       variant="destructive"
@@ -134,3 +117,12 @@ async function clearAll() {
     @cancel="clearing = false"
   />
 </template>
+
+<style scoped>
+.none {
+  margin: 0 var(--gutter) 22px;
+  padding: 0 4px;
+  font-size: 15px;
+  color: var(--subtle);
+}
+</style>

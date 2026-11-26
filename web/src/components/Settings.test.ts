@@ -69,46 +69,63 @@ const links = (el: HTMLElement) =>
   )
 
 describe('设置', () => {
-  it('lists its sections as links that open them, then the facts', () => {
+  it('lists its sections, each a page of its own, and the logout', () => {
     mockApi()
     const el = mount(SettingsView)
-    expect(links(el)).toMatchObject({
-      通行密钥: '#/settings/passkeys',
-      API令牌: '#/settings/tokens',
-      管理员面板: '#/settings/admin',
-      '源代码github.com/sxzz/midden↗': 'https://github.com/sxzz/midden',
+    expect(links(el)).toEqual({
+      '通行密钥›': '#/settings/passkeys',
+      'API令牌›': '#/settings/tokens',
+      '管理员面板›': '#/settings/admin',
+      '关于›': '#/settings/about',
     })
     // 采集账号 and 定期更新 are 采集's now.
     expect(el.textContent).not.toContain('采集账号')
     expect(el.textContent).not.toContain('定期更新')
-    expect(titles(el)).toEqual(['关于'])
-    expect(el.textContent).toContain('版本')
-    expect(el.textContent).toContain('构建时间')
     // Outside Telegram a browser session can be ended here.
     expect(el.textContent).toContain('退出登录')
-    // Another site opens in a new tab.
-    const source = [...el.querySelectorAll('a')].find((a) =>
-      a.textContent?.includes('源代码'),
-    )!
-    expect(source.target).toBe('_blank')
   })
 
-  it('opens the section the address names, in place', async () => {
+  it('searches its sections and entries by name and line', async () => {
+    mockApi()
+    const el = mount(SettingsView)
+    const input = el.querySelector<HTMLInputElement>('input[type=search]')!
+    input.value = '任务'
+    input.dispatchEvent(new Event('input'))
+    await settle()
+    expect(Object.values(links(el))).toEqual(['#/settings/admin/jobs'])
+    expect(el.querySelector('mark')?.textContent).toBe('任务')
+    expect(el.textContent).not.toContain('退出登录')
+    input.value = '没有这一项'
+    input.dispatchEvent(new Event('input'))
+    await settle()
+    expect(el.textContent).toContain('没有找到「没有这一项」')
+  })
+
+  it('shows a section with its line and entries', async () => {
     route.params = { section: 'admin' }
     mockApi()
     const el = mount(SettingsView)
     await settle()
-    const admin = [...el.querySelectorAll('a')].find(
-      (a) => a.textContent?.trim() === '管理员面板',
-    )!
-    // Open, its heading closes it; its entries open under it.
-    expect(admin.getAttribute('aria-expanded')).toBe('true')
+    expect(el.textContent).toContain('整个服务的设置。')
     expect(links(el)).toMatchObject({
-      管理员面板: '#/settings',
-      通行密钥: '#/settings/passkeys',
-      存储用量: '#/settings/admin/storage',
-      后台任务: '#/settings/admin/jobs',
+      '域名可以打开网页、用通行密钥登录的地址›': '#/settings/admin/origins',
+      '存储用量媒体、原始响应与数据库占用的空间›': '#/settings/admin/storage',
+      '后台任务队列、暂停与限流›': '#/settings/admin/jobs',
     })
+  })
+
+  it('shows 关于: the build and the source', () => {
+    route.params = { section: 'about' }
+    mockApi()
+    const el = mount(SettingsView)
+    expect(el.textContent).toContain('版本')
+    expect(el.textContent).toContain('构建时间')
+    // Another site opens in a new tab.
+    const source = [...el.querySelectorAll('a')].find((a) =>
+      a.textContent?.includes('源代码'),
+    )!
+    expect(source.href).toBe('https://github.com/sxzz/midden')
+    expect(source.target).toBe('_blank')
   })
 
   it('has no logout in the Mini App, which signs in on every open', () => {
@@ -151,11 +168,15 @@ describe('管理员面板', () => {
 
   it('holds the domains, and nothing to delete outside development', async () => {
     api(false)
-    const el = mount(AdminView)
+    const el = mount(AdminView, { entry: 'origins' })
     await settle()
-    expect(titles(el)).toEqual(['域名'])
+    // Its own heading names it.
+    expect(titles(el)).toEqual([])
     expect(el.textContent).toContain('midden.test')
     expect(el.textContent).not.toContain('删除全部')
+    const plain = mount(AdminView)
+    await settle()
+    expect(plain.textContent).not.toContain('删除全部')
   })
 
   it('offers deleting everything on a development server', async () => {
@@ -163,7 +184,7 @@ describe('管理员面板', () => {
     const cleared = vi.fn()
     const el = mount(AdminView, { onCleared: cleared })
     await settle()
-    expect(titles(el)).toEqual(['域名', '开发模式'])
+    expect(titles(el)).toEqual(['开发模式'])
     const button = [...el.querySelectorAll('button')].find(
       (b) => b.textContent?.trim() === '删除全部收藏和采集记录',
     )!
@@ -188,11 +209,11 @@ describe('管理员面板', () => {
     expect(cleared).toHaveBeenCalledOnce()
   })
 
-  it('shows no backup section where Litestream is not configured', async () => {
+  it('says so where Litestream is not configured', async () => {
     api(false)
-    const el = mount(AdminView)
+    const el = mount(AdminView, { entry: 'backup' })
     await settle()
-    expect(el.textContent).not.toContain('数据库备份')
+    expect(el.textContent).toContain('没有配置 Litestream。')
   })
 
   it('says when the last heartbeat arrived', async () => {
@@ -202,9 +223,9 @@ describe('管理员面板', () => {
       stale: false,
       stale_after_minutes: 20,
     })
-    const el = mount(AdminView)
+    const el = mount(AdminView, { entry: 'backup' })
     await settle()
-    expect(titles(el)).toEqual(['域名', '数据库备份'])
+    expect(titles(el)).toEqual([])
     expect(el.textContent).toContain('上次心跳 3 分钟前')
     expect(el.textContent).toContain('20 分钟')
   })
@@ -216,7 +237,7 @@ describe('管理员面板', () => {
       stale: true,
       stale_after_minutes: 20,
     })
-    const el = mount(AdminView)
+    const el = mount(AdminView, { entry: 'backup' })
     await settle()
     expect(el.textContent).toContain('超过 20 分钟没有心跳')
   })
@@ -228,7 +249,7 @@ describe('管理员面板', () => {
       stale: false,
       stale_after_minutes: 20,
     })
-    const el = mount(AdminView)
+    const el = mount(AdminView, { entry: 'backup' })
     await settle()
     const button = (label: string) =>
       [...el.querySelectorAll('button')].find((b) =>

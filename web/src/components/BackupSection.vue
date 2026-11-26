@@ -11,7 +11,11 @@ import ListSection from './ui/ListSection.vue'
 // as a failure.
 const MIN = 1
 const MAX = 1440
-const props = defineProps<{ status: LitestreamStatus }>()
+const props = defineProps<{
+  status: LitestreamStatus
+  /** Under a heading of its own (设置's entry), without its title. */
+  bare?: boolean
+}>()
 const emit = defineEmits<{ saved: [status: LitestreamStatus] }>()
 const editing = shallowRef(false)
 const busy = shallowRef(false)
@@ -54,7 +58,10 @@ async function save(text: string) {
 </script>
 
 <template>
-  <ListSection title="数据库备份" footnote="Litestream 每 5 分钟发一次心跳。">
+  <ListSection
+    :title="bare ? undefined : '数据库备份'"
+    footnote="Litestream 每 5 分钟发一次心跳。"
+  >
     <p class="state" :class="{ stale: status.stale }">{{ state }}</p>
     <ListButton
       label="备份心跳超时"

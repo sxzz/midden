@@ -71,11 +71,18 @@ export const router = createRouter({
     { path: '/compare', name: 'compare', component: RelationCompare },
     // The 关系 tab: the graph of any account with relation data (`of`).
     { path: '/relations', name: 'relations', component: RelationsView },
-    // 设置 is one page of sections that open in place; the address names
-    // the open section and, under 管理员面板, the open entry.
+    // 设置 as X has it (settings-sections.ts): a list of sections, a section
+    // with its entries, an entry. On a wide window one view shows the list
+    // beside what is chosen; on a narrow one each is a page below the last.
+    { path: '/settings', name: 'settings', component: SettingsView },
     {
-      path: '/settings/:section(passkeys|tokens|admin)?/:entry(storage|jobs)?',
-      name: 'settings',
+      path: '/settings/:section(passkeys|tokens|admin|about)',
+      name: 'settings-section',
+      component: SettingsView,
+    },
+    {
+      path: '/settings/:section(admin)/:entry(origins|storage|jobs|backup)',
+      name: 'settings-entry',
       component: SettingsView,
     },
     // 采集's tabs: the records, and 定期更新; the capture accounts open over

@@ -67,7 +67,7 @@ onUnmounted(() => {
       <AppLink
         class="menu-item"
         role="menuitem"
-        :to="{ name: 'settings', params: { section: 'admin' } }"
+        :to="{ name: 'settings-section', params: { section: 'admin' } }"
         @navigate="menu = false"
         >管理员面板</AppLink
       >

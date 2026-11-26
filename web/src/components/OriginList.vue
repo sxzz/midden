@@ -8,6 +8,8 @@ import ConfirmSheet from './ConfirmSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
+/** Under a heading of its own (设置's entry), without its title. */
+defineProps<{ bare?: boolean }>()
 
 const emit = defineEmits<{
   /** A domain went, and its passkeys with it. */
@@ -84,7 +86,7 @@ async function remove() {
 </script>
 
 <template>
-  <ListSection v-if="items || error" title="域名">
+  <ListSection v-if="items || error" :title="bare ? undefined : '域名'">
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
     <div v-for="o in items" :key="o.origin" class="origin">
       <span class="label"

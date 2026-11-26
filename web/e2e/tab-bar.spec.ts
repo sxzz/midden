@@ -144,14 +144,16 @@ test('moves between the three tabs, lighting the one shown', async ({
   await tab(page, '设置').click()
   await expect(page.locator('h1')).toHaveText('设置')
   await expect(tab(page, '设置')).toHaveAttribute('aria-current', 'page')
-  // Its sections open in place, the address saying which.
+  // A section is a page below it, which keeps it lit; tapping it goes
+  // back to its root.
   await page.getByRole('link', { name: '管理员面板' }).click()
   await expect(page).toHaveURL(/#\/settings\/admin$/)
-  await expect(page.locator('h1')).toHaveText('设置')
+  await expect(page.locator('h1')).toHaveText('管理员面板')
   await expect(tab(page, '设置')).toHaveAttribute('aria-current', 'page')
+  await tab(page, '设置').click()
+  await expect(page.locator('h1')).toHaveText('设置')
 
-  // 采集's tabs are its pages; a page below it keeps it lit, and tapping
-  // it goes back to its root.
+  // 采集's tabs are its pages.
   await tab(page, '采集').click()
   await expect(page.locator('h1')).toHaveText('采集')
   await page
@@ -289,7 +291,7 @@ test('each tab returns to the page and scroll it was left on', async ({
   await expect(page).toHaveURL(detail)
   await expect(page.locator('h1')).toHaveText('帖子')
   await expect.poll(() => scrollY(page)).toBe(left)
-  // 设置 kept its open section too.
+  // 设置 kept its section too.
   await expect(tab(page, '设置')).toHaveAttribute('href', '#/settings/admin')
   // A reload keeps every tab where it was.
   await page.reload()
@@ -305,7 +307,7 @@ test('each tab returns to the page and scroll it was left on', async ({
   await expect(page.locator('h1')).toHaveText('我的收藏')
   await page.goBack()
   await expect(page).toHaveURL(/#\/settings\/admin$/)
-  await expect(page.locator('h1')).toHaveText('设置')
+  await expect(page.locator('h1')).toHaveText('管理员面板')
 })
 
 test('the open tab, tapped, goes to its root, then to the top', async ({

@@ -43,6 +43,7 @@ import { listsProfiles, present, storageSize } from '../presentation'
 import { listQuery } from '../reads'
 import { isProfileEntity } from '../relations'
 import { restoreScroll } from '../scroll-restore'
+import { findEntry, findSection } from '../settings-sections'
 import { forgetPages, lastPage, leftScroll, tabStates } from '../tab-state'
 import { tabOf as barTabOf, tabs as barTabs, isTabRoot } from '../tabbar'
 import { detailTitle, setDocumentTitle } from '../titles'
@@ -158,7 +159,7 @@ const follows = computed(() => route.name === 'collection-follows')
 const graphPage = computed(() => route.name === 'collection-graph')
 const comparePage = computed(() => route.name === 'compare')
 const relationsPage = computed(() => route.name === 'relations')
-const settingsPage = computed(() => route.name === 'settings')
+const settingsPage = computed(() => barTabOf(route.name) === 'settings')
 /** The library's own lists: 探索's root. */
 const home = computed(() => route.name === 'collections')
 /** Any page below a tab's root, which back returns from. */
@@ -206,6 +207,12 @@ const title = computed(() => {
       .find((item) => item.id === id.value)
     return detailTitle(id.value, listed)
   }
+  // A section or an entry of 设置 is titled by its own name.
+  if (route.name === 'settings-entry')
+    return findEntry(String(route.params.section), String(route.params.entry))!
+      .label
+  if (route.name === 'settings-section')
+    return findSection(String(route.params.section))!.label
   return titles[String(route.name)] || '我的收藏'
 })
 watch(title, (value) => setDocumentTitle(value), { immediate: true })
@@ -224,9 +231,19 @@ const sensitiveShown = computed(
 const wide = useMedia(RAIL)
 const sidebarRoom = useMedia(SIDEBAR)
 const roomy = computed(
-  () => graphPage.value || comparePage.value || relationsPage.value,
+  () =>
+    graphPage.value ||
+    comparePage.value ||
+    relationsPage.value ||
+    settingsSplit.value,
 )
 const sidebar = computed(() => sidebarRoom.value && !roomy.value)
+/**
+ * 设置 from 1000px is two columns of its own, the list and what is chosen,
+ * each with its heading (SettingsView): the sidebar's room is the second
+ * column's, and the page's header is theirs.
+ */
+const settingsSplit = computed(() => settingsPage.value && sidebarRoom.value)
 /** The shown list's count, for the header's second line or the sidebar. */
 const shownTotal = computed(() => {
   if (!home.value && !folderId.value) return ''
@@ -278,10 +295,11 @@ function viewKey(target: ViewRoute) {
   if (
     target.name === 'captures' ||
     target.name === 'captures-watches' ||
-    target.name === 'relations' ||
-    target.name === 'settings'
+    target.name === 'relations'
   )
     return target.name
+  // 设置's list, sections and entries are one view, which shows them.
+  if (barTabOf(target.name ?? undefined) === 'settings') return 'settings'
   if (target.name === 'capture') return `capture:${String(target.params.id)}`
   if (target.name === 'collection-stats')
     return `stats:${String(target.params.id)}`
@@ -667,7 +685,7 @@ const viewProps = computed(() => {
 <template>
   <SideRail v-if="wide" />
   <main class="page" :class="{ roomy }">
-    <header class="bar" :class="{ spaced: !home }">
+    <header v-if="!settingsSplit" class="bar" :class="{ spaced: !home }">
       <!-- On a desktop an arrow, as X's header has it. -->
       <BackLink
         v-if="nested && standalone && wide"

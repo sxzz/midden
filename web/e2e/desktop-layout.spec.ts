@@ -135,10 +135,7 @@ test.describe('from 1280px', () => {
 
   test('the sidebar searches the library', async ({ page }) => {
     const { searches } = await mockDesktop(page)
-    await page.goto('/app/#/settings')
-    // 设置's sections are all in the column: the sidebar only searches.
-    await expect(sidebar(page).getByRole('region')).toHaveCount(0)
-    await expect(sidebar(page).getByRole('navigation')).toHaveCount(0)
+    await page.goto('/app/#/captures')
     const box = sidebar(page).getByRole('searchbox', { name: '搜索收藏' })
     await box.fill('云海')
     await box.press('Enter')
@@ -209,7 +206,7 @@ for (const width of [390, 800, 1024, 1280, 1600]) {
       // A long bio, URL, place and counts, a banner, wide pictures.
       [`/app/#/collection/${PROFILE_ID}`, '.row'],
       [`/app/#/collection/${POST_ID}`, '.post'],
-      ['/app/#/settings/admin', '.disclosure.open'],
+      ['/app/#/settings/admin/origins', '.pane'],
     ] as const) {
       await page.goto(address)
       await page.locator(ready).first().waitFor()

@@ -39,6 +39,8 @@ const owners: Record<string, Tab> = {
   'collection-graph': 'relations',
   compare: 'relations',
   settings: 'settings',
+  'settings-section': 'settings',
+  'settings-entry': 'settings',
 }
 /** Pages that are a tab's root as well as the tab's own: 采集's other tabs. */
 const roots = new Set(['captures-watches', 'captures-accounts'])

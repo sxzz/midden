@@ -213,9 +213,13 @@ test('adds, selects and deletes an X account', async ({ page }) => {
     .getByRole('link', { name: '设置' })
     .click()
   await expect(page.locator('h1')).toHaveText('设置')
+  // The capture accounts are 采集's now, not a page of 设置.
+  await expect(page.getByRole('link', { name: '采集账号' })).toHaveCount(0)
   // 关于: the same build version as the bot's /start, a commit or dev
   // outside git, and the source.
-  const version = page.getByRole('link', { name: /^[0-9a-f]{7}(-dirty)?$/ })
+  await page.getByRole('link', { name: '关于' }).click()
+  await expect(page.locator('h1')).toHaveText('关于')
+  const version = page.getByRole('link', { name: /^[0-9a-f]{7}(-dirty)? ↗$/ })
   await expect(version).toHaveAttribute(
     'href',
     /^https:\/\/github\.com\/sxzz\/midden\/commit\/[0-9a-f]{40}$/,
@@ -225,8 +229,6 @@ test('adds, selects and deletes an X account', async ({ page }) => {
     'https://github.com/sxzz/midden',
   )
   await expect(page.getByText('构建时间')).toBeVisible()
-  // The capture accounts are 采集's now, not a page of 设置.
-  await expect(page.getByRole('link', { name: '采集账号' })).toHaveCount(0)
   await openAccounts(page)
   // The form stays out of the source list until asked for.
   await expect(page.getByLabel('凭据')).toBeHidden()
@@ -375,25 +377,21 @@ test('deleting everything is not offered outside development', async ({
     return r.fulfill({ json: { items: [] } })
   })
   await page.goto('/app/#/settings/admin')
-  await expect(page.locator('h1')).toHaveText('设置')
-  await expect(
-    page.getByRole('heading', { name: '域名', exact: true }),
-  ).toBeVisible()
+  await expect(page.locator('h1')).toHaveText('管理员面板')
+  await expect(page.getByRole('link', { name: /^域名/ })).toBeVisible()
   await expect(page.getByText('删除全部收藏和采集记录')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: '开发模式' })).toHaveCount(0)
   expect(asked).toBe(false)
 })
 
-/** 设置, through the bottom bar, then one of its sections, opened in place. */
+/** 设置, through the bottom bar, then one of its sections, a page of its own. */
 async function openSettings(page: Page, name: string) {
   await page
     .getByRole('navigation', { name: '主导航' })
     .getByRole('link', { name: '设置' })
     .click()
-  const section = page.getByRole('link', { name, exact: true })
-  await section.click()
-  await expect(section).toHaveAttribute('aria-expanded', 'true')
-  await expect(page.locator('h1')).toHaveText('设置')
+  await page.getByRole('link', { name }).click()
+  await expect(page.locator('h1')).toHaveText(name)
 }
 
 /** 采集, through the bottom bar, then its 采集账号 dialog. */
