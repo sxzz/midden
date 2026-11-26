@@ -221,10 +221,10 @@ export class RawStore {
 }
 
 /**
- * The raw response store, when a raw bucket is configured: with its own
- * keys, or R2's keys from the Cloudflare API token, verified now. Rejects
- * with a configuration error when that fails, as the media store does: the
- * server must not start without working credentials.
+ * The raw response store, when a raw bucket is configured, with R2's keys
+ * from the Cloudflare API token, verified now. Rejects with a configuration
+ * error when that fails, as the media store does: the server must not start
+ * without working credentials.
  */
 export async function openRawStore(
   config: Pick<Config, 'raw' | 'cloudflare'>,
@@ -232,9 +232,8 @@ export async function openRawStore(
 ): Promise<RawStore | undefined> {
   const raw = config.raw
   if (!raw) return undefined
-  // loadConfig requires the token and account without the bucket's own keys.
-  const credentials =
-    raw.credentials ?? (await resolveR2Credentials(config.cloudflare!, logger))
+  // loadConfig requires the token and account with the bucket.
+  const credentials = await resolveR2Credentials(config.cloudflare!, logger)
   return new RawStore(
     new S3Bucket({
       endpoint: raw.endpoint,

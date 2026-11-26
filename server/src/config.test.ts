@@ -152,10 +152,6 @@ test('the server exits before listening when r2 lacks CF_API_TOKEN', () => {
 
 describe('raw response bucket configuration', () => {
   const RAW = { R2_ACCOUNT_ID: ACCOUNT, RAW_R2_BUCKET: 'midden-backup' }
-  const KEYS = {
-    RAW_R2_ACCESS_KEY_ID: 'raw-access-key-id',
-    RAW_R2_SECRET_ACCESS_KEY: 'raw-very-secret-value',
-  }
   const endpoint = `https://${ACCOUNT}.r2.cloudflarestorage.com`
 
   test('raw responses stay in the database without it', () => {
@@ -174,28 +170,16 @@ describe('raw response bucket configuration', () => {
     })
   })
 
-  test('or a key pair of its own', () => {
-    expect(loadConfig({ SECRET_KEY, ...RAW, ...KEYS }).raw).toEqual({
-      endpoint,
-      bucket: 'midden-backup',
-      credentials: {
-        accessKeyId: 'raw-access-key-id',
-        secretAccessKey: 'raw-very-secret-value',
-      },
-    })
-  })
-
   test('names what is missing', () => {
     expect(() => loadConfig({ SECRET_KEY, RAW_R2_BUCKET: 'b-raw' })).toThrow(
-      'RAW_R2_BUCKET needs R2_ACCOUNT_ID, CF_API_TOKEN (or RAW_R2_ACCESS_KEY_ID and RAW_R2_SECRET_ACCESS_KEY)',
+      'RAW_R2_BUCKET needs R2_ACCOUNT_ID, CF_API_TOKEN',
     )
-    const { RAW_R2_SECRET_ACCESS_KEY: _, ...half } = KEYS
-    expect(() => loadConfig({ SECRET_KEY, ...RAW, ...half })).toThrow(
-      'RAW_R2_ACCESS_KEY_ID and RAW_R2_SECRET_ACCESS_KEY are set together',
+    expect(() => loadConfig({ SECRET_KEY, ...RAW })).toThrow(
+      'RAW_R2_BUCKET needs CF_API_TOKEN',
     )
-    expect(() => loadConfig({ SECRET_KEY, ...KEYS })).toThrow(
-      'RAW_R2_ACCESS_KEY_ID needs RAW_R2_BUCKET',
-    )
+    expect(() =>
+      loadConfig({ SECRET_KEY, RAW_R2_BUCKET: 'b-raw', CF_API_TOKEN: 'token' }),
+    ).toThrow('RAW_R2_BUCKET needs R2_ACCOUNT_ID')
   })
 
   test('never the public media bucket', () => {
@@ -204,18 +188,16 @@ describe('raw response bucket configuration', () => {
     ).toThrow('RAW_R2_BUCKET must not be the public media bucket R2_BUCKET')
   })
 
-  test('errors never repeat a credential', () => {
+  test('errors never repeat the API token', () => {
+    const CF_API_TOKEN = 'very-secret-token'
     for (const env of [
-      { ...RAW, ...KEYS, R2_ACCOUNT_ID: undefined },
-      { ...RAW, ...KEYS, RAW_R2_BUCKET: 'Bad_Bucket' },
-      { ...R2, ...RAW, ...KEYS, RAW_R2_BUCKET: 'midden' },
-      { ...RAW, RAW_R2_ACCESS_KEY_ID: 'raw-access-key-id' },
+      { ...RAW, CF_API_TOKEN, R2_ACCOUNT_ID: undefined },
+      { ...RAW, CF_API_TOKEN, RAW_R2_BUCKET: 'Bad_Bucket' },
+      { ...R2, ...RAW, CF_API_TOKEN, RAW_R2_BUCKET: 'midden' },
     ])
       expect(() => loadConfig({ SECRET_KEY, ...env })).toThrow(
         expect.objectContaining({
-          message: expect.not.stringMatching(
-            /raw-very-secret|raw-access-key|very-secret-value/,
-          ),
+          message: expect.not.stringContaining(CF_API_TOKEN),
         }),
       )
   })

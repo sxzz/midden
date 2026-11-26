@@ -2,7 +2,6 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import * as v from 'valibot'
-import type { S3Credentials } from '#cloudflare.ts'
 
 const port = v.pipe(
   v.optional(v.string(), '8080'),
@@ -85,8 +84,8 @@ const Env = v.object({
   ),
   // A private bucket for raw upstream responses, in the same R2 account; the
   // database keeps them when unset. Never the public media bucket: they
-  // hold what the platform showed the signed-in account. Its S3 keys are
-  // the pair below, or else derive from CF_API_TOKEN.
+  // hold what the platform showed the signed-in account. Its S3 keys derive
+  // from CF_API_TOKEN, as the media bucket's do.
   RAW_R2_BUCKET: v.optional(
     v.pipe(
       v.string(),
@@ -95,12 +94,6 @@ const Env = v.object({
         'RAW_R2_BUCKET must be a bucket name',
       ),
     ),
-  ),
-  RAW_R2_ACCESS_KEY_ID: v.optional(
-    v.pipe(v.string(), v.nonEmpty('RAW_R2_ACCESS_KEY_ID is empty')),
-  ),
-  RAW_R2_SECRET_ACCESS_KEY: v.optional(
-    v.pipe(v.string(), v.nonEmpty('RAW_R2_SECRET_ACCESS_KEY is empty')),
   ),
   // The Litestream sidecar's bucket token (compose.yaml); only its presence
   // matters here: the server then expects the sidecar's heartbeats.
@@ -133,6 +126,8 @@ const R2_SETTINGS = [
   'MEDIA_PUBLIC_URL',
 ] as const
 
+const RAW_SETTINGS = ['R2_ACCOUNT_ID', 'CF_API_TOKEN'] as const
+
 /** The Cloudflare account and its API token (`#cloudflare.ts`). */
 export interface CloudflareConfig {
   accountId: string
@@ -155,8 +150,6 @@ export type MediaConfig = { store: 'local' } | { store: 'r2'; r2: R2Config }
 export interface RawConfig {
   endpoint: string
   bucket: string
-  /** Its own S3 keys; without them, R2's keys from CF_API_TOKEN. */
-  credentials?: S3Credentials
 }
 
 /**
@@ -287,27 +280,8 @@ function mediaConfig(parsed: v.InferOutput<typeof Env>): MediaConfig {
 }
 
 function rawConfig(parsed: v.InferOutput<typeof Env>): { raw?: RawConfig } {
-  const id = parsed.RAW_R2_ACCESS_KEY_ID
-  const secret = parsed.RAW_R2_SECRET_ACCESS_KEY
-  if (!!id !== !!secret)
-    throw new Error(
-      'Invalid configuration:\nRAW_R2_ACCESS_KEY_ID and RAW_R2_SECRET_ACCESS_KEY are set together',
-    )
-  if (!parsed.RAW_R2_BUCKET) {
-    if (id)
-      throw new Error(
-        'Invalid configuration:\nRAW_R2_ACCESS_KEY_ID needs RAW_R2_BUCKET',
-      )
-    return {}
-  }
-  const missing = [
-    ...(parsed.R2_ACCOUNT_ID ? [] : ['R2_ACCOUNT_ID']),
-    ...(id || parsed.CF_API_TOKEN
-      ? []
-      : [
-          'CF_API_TOKEN (or RAW_R2_ACCESS_KEY_ID and RAW_R2_SECRET_ACCESS_KEY)',
-        ]),
-  ]
+  if (!parsed.RAW_R2_BUCKET) return {}
+  const missing = RAW_SETTINGS.filter((name) => !parsed[name])
   if (missing.length)
     throw new Error(
       `Invalid configuration:\nRAW_R2_BUCKET needs ${missing.join(', ')}`,
@@ -320,9 +294,6 @@ function rawConfig(parsed: v.InferOutput<typeof Env>): { raw?: RawConfig } {
     raw: {
       endpoint: `https://${parsed.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
       bucket: parsed.RAW_R2_BUCKET,
-      ...(id && secret
-        ? { credentials: { accessKeyId: id, secretAccessKey: secret } }
-        : {}),
     },
   }
 }
