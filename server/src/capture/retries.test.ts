@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq, gt } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
 import { addAccount, type AccountsContext } from '#accounts/accounts.ts'
 import {
@@ -30,7 +30,9 @@ import {
 } from './records.ts'
 import { retryRecordFailed } from './retries.ts'
 import {
+  pauseUpdate,
   recordProfiles,
+  resumeUpdate,
   startUpdate,
   updateDetail,
   updateMembers,
@@ -525,9 +527,25 @@ describe('retrying what failed in a record', () => {
     world.brokenMedia.clear()
     world.listFail = undefined
     reset(world)
+    // Earlier captures leave only fallback runs of their pages, due later.
+    const before =
+      ctx.db.select({ id: jobs.id }).from(jobs).orderBy(desc(jobs.id)).get()
+        ?.id ?? 0
     // The profile's posts on their own first.
     expect(retryRecordFailed(ctx, update, part!.posts!.retryId)).toBe(1)
+    // What a retry queues is the update's work: paused with it.
+    pauseUpdate(ctx, update)
     expect(retryRecordFailed(ctx, update)).toBe(2)
+    const queued = ctx.db
+      .select({ updateId: jobs.updateId, state: jobs.state })
+      .from(jobs)
+      .where(gt(jobs.id, before))
+      .all()
+    expect(queued.length).toBeGreaterThan(0)
+    expect(queued).toEqual(
+      queued.map(() => ({ updateId: update, state: 'paused' })),
+    )
+    resumeUpdate(ctx, update)
     await ctx.queue.drain()
     // The timeline is not read again: only its missing image.
     expect(world.fetched.filter((f) => f.startsWith('page:'))).toEqual([])
