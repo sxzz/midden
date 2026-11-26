@@ -121,10 +121,11 @@ test('moves between the three tabs, lighting the one shown', async ({
   // The top bar no longer carries what the bottom one does.
   await expect(page.getByRole('link', { name: '采集账号' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Home' })).toHaveCount(0)
-  // Capturing stays on 探索's top bar.
+  // Capturing is a tab of its own, so the top bar no longer carries it.
+  await expect(tab(page, '采集')).toHaveAttribute('href', '#/captures')
   await expect(
-    page.getByRole('link', { name: '采集', exact: true }),
-  ).toBeVisible()
+    page.locator('.bar').getByRole('link', { name: '采集' }),
+  ).toHaveCount(0)
 
   // 关系 opens on the owner's own account.
   await tab(page, '关系').click()

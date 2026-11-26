@@ -9,8 +9,10 @@ import {
 } from 'vue-router'
 import { APIError, errorText, type PublicShareInfo } from '../api'
 import { backButton, host } from '../host'
+import { SIDEBAR, useMedia } from '../layout'
 import { readShare } from '../reads'
 import { detailTitle, setDocumentTitle } from '../titles'
+import ShareAside from './ShareAside.vue'
 import BackLink from './ui/BackLink.vue'
 import ListSection from './ui/ListSection.vue'
 // The frame of a public link (分享): what the share opens, then pages of
@@ -49,6 +51,14 @@ onUnmounted(() => controller.abort())
 const nested = computed(() => route.name !== 'share')
 watch(nested, (value) => backButton(value), { immediate: true })
 const standalone = !host()?.initData
+/**
+ * From 700px the page is a 600px column between thin lines, and from 1000px
+ * the share's sidebar sits beside it (layout.ts); a visitor has no rail. A
+ * graph takes the sidebar's room instead.
+ */
+const graph = computed(() => route.name === 'share-collection-graph')
+const sidebarRoom = useMedia(SIDEBAR)
+const sidebar = computed(() => sidebarRoom.value && !graph.value)
 const title = computed(() => {
   if (route.name === 'share-collection-stats') return '统计趋势'
   if (route.name === 'share-collection-changes') return '资料修改记录'
@@ -89,7 +99,7 @@ const viewProps = computed(() =>
 </script>
 
 <template>
-  <main class="page">
+  <main class="page" :class="{ roomy: graph }">
     <header class="bar" :class="{ nested }">
       <RouterLink
         v-if="nested"
@@ -157,6 +167,7 @@ const viewProps = computed(() =>
       </KeepAlive>
     </RouterView>
   </main>
+  <ShareAside v-if="sidebar && !error" :share="share" />
 </template>
 
 <style scoped>
@@ -223,6 +234,41 @@ h1 {
   margin: 0;
   font-size: 17px;
   font-weight: 600;
+}
+/* The desktop column, as the owner's (CollectionLibrary), centred with the
+   sidebar by App's .shell. */
+@media (min-width: 700px) {
+  .page {
+    flex: 0 1 600px;
+    min-width: 0;
+    max-width: 600px;
+    margin: 0;
+    box-shadow:
+      -1px 0 0 var(--separator),
+      1px 0 0 var(--separator);
+  }
+  .page.roomy {
+    flex-basis: 980px;
+    max-width: 980px;
+  }
+  .bar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    min-height: 53px;
+    margin-bottom: 8px;
+    padding: 4px calc(var(--gutter) + 4px);
+    background: color-mix(in srgb, var(--page) 85%, transparent);
+    -webkit-backdrop-filter: saturate(180%) blur(12px);
+    backdrop-filter: saturate(180%) blur(12px);
+  }
+  .bar.nested {
+    padding-bottom: 4px;
+  }
+  .bar h1 {
+    font-size: 19px;
+    font-weight: 700;
+  }
 }
 .banner {
   margin: 0;

@@ -8,7 +8,6 @@ import {
 } from 'vue'
 import { call, client, errorText, type CaptureRecord } from '../api'
 import { defaultOptions, type Options } from '../capture-options'
-import { submitLinks } from '../capture-submit'
 import {
   extractLinks,
   groupRecords,
@@ -131,10 +130,30 @@ async function submit() {
   if (!targets.length || submitting.value) return
   submitting.value = true
   notice.value = undefined
-  const result = await submitLinks(targets, options.value)
+  const failed: string[] = []
+  let reason = ''
+  for (const url of targets) {
+    try {
+      await call(
+        client.captures.$post(
+          { json: { url, options: options.value } },
+          { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+        ),
+      )
+    } catch (e) {
+      failed.push(url)
+      reason ||= errorText(e)
+    }
+  }
   // What could not be submitted stays in the box to correct or send again.
-  text.value = result.failed.join('\n')
-  notice.value = result.notice
+  text.value = failed.join('\n')
+  const sent = targets.length - failed.length
+  notice.value = failed.length
+    ? {
+        text: `${sent ? `已提交 ${sent} 条，` : ''}${failed.length} 条未提交：${reason}`,
+        failed: true,
+      }
+    : { text: `已提交 ${sent} 条。` }
   submitting.value = false
   await refresh()
 }

@@ -56,6 +56,11 @@ const CENTRE = '/relations?of=x%2Fx.profile%2F1'
 function leftOn() {
   tabStates.value = {
     explore: { root: ACCOUNTS, stack: [ACCOUNTS, '/collection/1'], scroll: 0 },
+    captures: {
+      root: '/captures',
+      stack: ['/captures', '/captures/1'],
+      scroll: 0,
+    },
     relations: { root: CENTRE, stack: [CENTRE], scroll: 0 },
     settings: {
       root: '/settings',
@@ -101,6 +106,7 @@ it('links each other tab to the page it was left on, as a real link', async () =
   const el = mount()
   expect(tab(el, '探索').getAttribute('href')).toBe('#/collection/1')
   expect(tab(el, '设置').getAttribute('href')).toBe('#/settings/accounts')
+  expect(tab(el, '采集').getAttribute('href')).toBe('#/captures/1')
   leftOn()
   tabStates.value = {
     ...tabStates.value,
@@ -122,7 +128,8 @@ it('lights the tab of the page shown, nested pages included', async () => {
   expect(current(el)).toEqual(['探索'])
   for (const [name, label] of [
     ['collection', '探索'],
-    ['captures', '探索'],
+    ['captures', '采集'],
+    ['capture', '采集'],
     ['relations', '关系'],
     ['collection-graph', '关系'],
     ['compare', '关系'],

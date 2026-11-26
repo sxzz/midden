@@ -37,7 +37,7 @@ import {
   type ListTab,
 } from '../folders'
 import { backButton, host } from '../host'
-import { FULL, RAIL, useMedia } from '../layout'
+import { RAIL, SIDEBAR, useMedia } from '../layout'
 import { mediaRemovals } from '../media-removals'
 import { listsProfiles, present, storageSize } from '../presentation'
 import { listQuery } from '../reads'
@@ -46,7 +46,6 @@ import { restoreScroll } from '../scroll-restore'
 import { forgetPages, lastPage, leftScroll, tabStates } from '../tab-state'
 import { tabOf as barTabOf, tabs as barTabs, isTabRoot } from '../tabbar'
 import { detailTitle, setDocumentTitle } from '../titles'
-import CaptureSheet from './CaptureSheet.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
 import FolderMenuSheet from './FolderMenuSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
@@ -200,17 +199,16 @@ const sensitiveShown = computed(
 )
 /**
  * The desktop layout (layout.ts): the rail in the bottom bar's place, and
- * from 1280px the sidebar. Relation graphs need the room more than a
+ * from 1000px the sidebar. Relation graphs need the room more than a
  * sidebar would fill it: there the column takes the sidebar's width too.
  */
 const wide = useMedia(RAIL)
-const full = useMedia(FULL)
+const sidebarRoom = useMedia(SIDEBAR)
 const roomy = computed(
   () => graphPage.value || comparePage.value || relationsPage.value,
 )
-const sidebar = computed(() => full.value && !roomy.value)
-const capturing = shallowRef(false)
-/** The shown list's count, for the header's second line and the sidebar. */
+const sidebar = computed(() => sidebarRoom.value && !roomy.value)
+/** The shown list's count, for the header's second line or the sidebar. */
 const shownTotal = computed(() => {
   if (!home.value && !folderId.value) return ''
   const list = folderId.value ? folderList : lists[tab.value]
@@ -222,9 +220,12 @@ const shownTotal = computed(() => {
 const usedText = computed(() =>
   usage.value ? `已用 ${storageSize(usage.value.used_bytes)}` : '',
 )
-/** Under the title on a desktop, as X's header gives a count or a handle. */
+/**
+ * Under the title on a desktop, as X's header gives a count or a handle.
+ * The count only while there is no sidebar, whose 结果 says it.
+ */
 const subtitle = computed(() => {
-  if (shownTotal.value) return shownTotal.value
+  if (shownTotal.value) return sidebar.value ? '' : shownTotal.value
   const detail = pageAside.value
   const graph = detail?.collection?.graph
   const root = graph?.entities.find((entity) => entity.key === graph.root)
@@ -643,7 +644,7 @@ const viewProps = computed(() => {
 </script>
 
 <template>
-  <SideRail v-if="wide" @capture="capturing = true" />
+  <SideRail v-if="wide" />
   <main class="page" :class="{ roomy }">
     <header class="bar" :class="{ spaced: !home }">
       <!-- On a desktop an arrow, as X's header has it. -->
@@ -675,31 +676,6 @@ const viewProps = computed(() => {
         <p v-if="subtitle" class="subtitle">{{ subtitle }}</p>
       </div>
       <h1 v-else>{{ title }}</h1>
-      <!-- Capturing adds to the library, so it opens from 探索; the rail
-         has its own 采集. -->
-      <RouterLink
-        v-if="home && !wide"
-        to="/captures"
-        class="icon-button captures-link"
-        aria-label="采集"
-        title="采集"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          width="22"
-          height="22"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M12 4v11" />
-          <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
-          <path d="M5 20h14" />
-        </svg>
-      </RouterLink>
       <button
         v-if="folder"
         type="button"
@@ -880,7 +856,6 @@ const viewProps = computed(() => {
     :total="shownTotal"
     :storage="usedText"
   />
-  <CaptureSheet v-if="wide" :open="capturing" @close="capturing = false" />
 </template>
 
 <style scoped>

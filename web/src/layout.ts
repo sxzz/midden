@@ -3,12 +3,13 @@ import { readonly, shallowRef, type Ref } from 'vue'
 /**
  * The owner's app on wider screens, as X lays out its web app: from 700px a
  * rail of icons on the left takes the bottom bar's place, beside a column
- * of about 600px; from 1280px the rail has labels and a sidebar sits on the
- * right. Below 700px the phone layout stays as it is. The same widths are
- * written in the components' CSS; keep them in step.
+ * of about 600px; from 1000px a sidebar sits on the right (290px, 350px
+ * from 1100px); from 1280px the rail has labels. Below 700px the phone
+ * layout stays as it is. The same widths are written in the components'
+ * CSS; keep them in step.
  */
 export const RAIL = '(min-width: 700px)'
-export const FULL = '(min-width: 1280px)'
+export const SIDEBAR = '(min-width: 1000px)'
 
 const queries = new Map<string, Readonly<Ref<boolean>>>()
 

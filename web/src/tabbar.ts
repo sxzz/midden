@@ -1,8 +1,8 @@
 import { shallowRef } from 'vue'
 import type { RouteLocationRaw, RouteRecordNameGeneric } from 'vue-router'
 
-/** The app's three destinations, as the bottom bar and the rail list them. */
-export type Tab = 'explore' | 'relations' | 'settings'
+/** The app's destinations, as the bottom bar and the rail list them. */
+export type Tab = 'explore' | 'captures' | 'relations' | 'settings'
 
 export const tabs: readonly {
   value: Tab
@@ -12,6 +12,7 @@ export const tabs: readonly {
   path: string
 }[] = [
   { value: 'explore', label: '探索', root: 'collections', path: '/' },
+  { value: 'captures', label: '采集', root: 'captures', path: '/captures' },
   { value: 'relations', label: '关系', root: 'relations', path: '/relations' },
   { value: 'settings', label: '设置', root: 'settings', path: '/settings' },
 ]
@@ -19,8 +20,9 @@ export const tabs: readonly {
 /**
  * Which tab a page belongs to, by its route alone: the same page always
  * lights the same tab, however it was reached. Relation pages (a profile's
- * graph, a comparison) are 关系's; settings pages 设置's; everything else
- * opens from the library. Public and setup pages have none.
+ * graph, a comparison) are 关系's; capture records 采集's; settings pages
+ * 设置's; everything else opens from the library. Public and setup pages
+ * have none.
  */
 const owners: Record<string, Tab> = {
   collections: 'explore',
@@ -29,8 +31,8 @@ const owners: Record<string, Tab> = {
   'collection-stats': 'explore',
   'collection-changes': 'explore',
   'collection-follows': 'explore',
-  captures: 'explore',
-  capture: 'explore',
+  captures: 'captures',
+  capture: 'captures',
   relations: 'relations',
   'collection-graph': 'relations',
   compare: 'relations',

@@ -4,6 +4,10 @@ import type { Page } from '@playwright/test'
 export const PROFILE_ID = '22222222-2222-4222-8222-222222222222'
 export const POST_ID = '11111111-1111-4111-8111-000000000000'
 export const QUOTED_ID = '33333333-3333-4333-8333-333333333333'
+/** Public links: a folder's, and the account's. */
+export const FOLDER_SLUG = 'FolderShareFolderShare01'
+export const PROFILE_SLUG = 'ProfileShareProfileShar1'
+const PUBLIC = /^\/v1\/public\/([\w-]+)(\/.*)?$/
 
 const image = (hue: number) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><defs><linearGradient id="s" x2="0" y2="1"><stop stop-color="hsl(${hue} 45% 35%)"/><stop offset="1" stop-color="hsl(${hue + 40} 55% 75%)"/></linearGradient></defs><path fill="url(#s)" d="M0 0h1200v800H0z"/><circle cx="880" cy="260" r="90" fill="#ffe6af"/><path d="M0 560 380 300 760 560 1200 420v380H0" fill="rgba(0,0,0,.35)"/></svg>`
@@ -131,21 +135,34 @@ const DIGITS = /\d+/
 /** Answer the app's requests from the library above. */
 export async function mockDesktop(page: Page) {
   const searches: string[] = []
-  const captured: string[] = []
   await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
   await page.route('**/v1/**', (r) => {
     const url = new URL(r.request().url())
-    const path = url.pathname
+    let path = url.pathname
+    // A public link reads the same library through its own address.
+    const shared = PUBLIC.exec(path)
+    if (shared) {
+      const [, slug, rest] = shared
+      if (!rest)
+        return r.fulfill({
+          json:
+            slug === PROFILE_SLUG
+              ? { target: 'collection', collection_id: PROFILE_ID }
+              : {
+                  target: 'folder',
+                  name: '公开的风景',
+                  posts: 128,
+                  profiles: 0,
+                },
+        })
+      path = `/v1${rest}`
+    }
     const json = (body: unknown) => r.fulfill({ json: body })
     if (path.startsWith('/v1/assets/'))
       return r.fulfill({
         contentType: 'image/svg+xml',
         body: image((Number(DIGITS.exec(path)?.[0]) || 0) * 37),
       })
-    if (path === '/v1/captures' && r.request().method() === 'POST') {
-      captured.push((r.request().postDataJSON() as { url: string }).url)
-      return json({ id: 'record-1' })
-    }
     if (path === '/v1/collections') {
       if (url.searchParams.get('q')) searches.push(url.searchParams.get('q')!)
       return json({ items: posts })
@@ -253,5 +270,5 @@ export async function mockDesktop(page: Page) {
       })
     return json({ items: [] })
   })
-  return { searches, captured }
+  return { searches }
 }

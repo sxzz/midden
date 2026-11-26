@@ -152,7 +152,13 @@ test('submits links and follows the record until it finishes', async ({
 
   // Finished captures changed the library, so its list loads again.
   await page.getByRole('link', { name: '返回' }).click()
-  await page.getByRole('link', { name: '返回' }).click()
+  await expect(page.locator('h1')).toHaveText('采集')
+  // 采集 is a tab's root, with no 返回: the library is 探索's.
+  await expect(page.getByRole('link', { name: '返回' })).toHaveCount(0)
+  await page
+    .getByRole('navigation', { name: '主导航' })
+    .getByRole('link', { name: '探索' })
+    .click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
   await expect.poll(() => listReloads).toBeGreaterThan(before)
 })

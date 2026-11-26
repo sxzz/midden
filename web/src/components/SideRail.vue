@@ -1,59 +1,16 @@
 <script setup vapor lang="ts">
 import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
-import { useRoute, type RouteLocationRaw } from 'vue-router'
 import { call, client, errorText } from '../api'
 import { useTabLinks } from '../composables/useTabLinks'
 import { toast } from '../composables/useToast'
 import { host } from '../host'
-import { navigatesHere } from '../navigation'
-import { tabs, type Tab } from '../tabbar'
+import { tabs } from '../tabbar'
 import AppLink from './ui/AppLink.vue'
 import TabIcon from './ui/TabIcon.vue'
 // The desktop rail, in the bottom bar's place from 700px (layout.ts): the
-// app's name, the tabs and 采集, 抓取, and who is signed in. Icons only
-// until 1280px, labels beside them from there.
-const emit = defineEmits<{ capture: [] }>()
-const route = useRoute()
+// app's name, the tabs, and who is signed in. Icons only until 1280px,
+// labels beside them from there.
 const { active, links, tap } = useTabLinks()
-/** 采集 is lit on its own pages; they still belong to 探索's history. */
-const capturing = computed(
-  () => route.name === 'captures' || route.name === 'capture',
-)
-const CAPTURES: RouteLocationRaw = { name: 'captures' }
-/** The tabs, with 采集 after 探索, whose pages it opens from on a phone. */
-const items = computed(() => {
-  const [explore, ...rest] = tabs.map((tab) => ({
-    value: tab.value as Tab | 'captures',
-    label: tab.label,
-    to: links.value[tab.value],
-    on:
-      active.value === tab.value &&
-      (tab.value !== 'explore' || !capturing.value),
-  }))
-  return [
-    explore!,
-    {
-      value: 'captures' as const,
-      label: '采集',
-      to: CAPTURES,
-      on: capturing.value,
-    },
-    ...rest,
-  ]
-})
-function click(event: MouseEvent) {
-  // 采集 on 采集 itself goes back to the top, as the tabs do on their root.
-  const link =
-    event.target instanceof Element
-      ? event.target.closest<HTMLElement>('[data-rail="captures"]')
-      : null
-  if (link && route.name === 'captures' && navigatesHere(event)) {
-    event.preventDefault()
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-    return
-  }
-  tap(event)
-}
 
 /** The collecting account in use, as who this library belongs to. */
 const account = shallowRef<{ name: string; username?: string }>()
@@ -135,45 +92,26 @@ const initial = computed(() =>
         </svg>
         <span class="label name">Midden</span>
       </AppLink>
-      <nav class="items" aria-label="主导航" @click.capture="click">
+      <nav class="items" aria-label="主导航" @click.capture="tap">
         <AppLink
-          v-for="item in items"
-          :key="item.value"
+          v-for="tab in tabs"
+          :key="tab.value"
           class="item"
-          :class="{ on: item.on }"
-          :to="item.to"
-          :data-tab="item.value === 'captures' ? undefined : item.value"
-          :data-rail="item.value"
-          :aria-current="item.on ? 'page' : undefined"
-          :aria-label="item.label"
-          :title="item.label"
+          :class="{ on: active === tab.value }"
+          :to="links[tab.value]"
+          :data-tab="tab.value"
+          :aria-current="active === tab.value ? 'page' : undefined"
+          :aria-label="tab.label"
+          :title="tab.label"
         >
-          <TabIcon :name="item.value" :active="item.on" :size="26" />
-          <span class="label">{{ item.label }}</span>
+          <TabIcon
+            :name="tab.value"
+            :active="active === tab.value"
+            :size="26"
+          />
+          <span class="label">{{ tab.label }}</span>
         </AppLink>
       </nav>
-      <button
-        type="button"
-        class="capture"
-        aria-label="抓取"
-        title="抓取链接"
-        @click="emit('capture')"
-      >
-        <svg
-          class="plus"
-          viewBox="0 0 24 24"
-          width="24"
-          height="24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.2"
-          stroke-linecap="round"
-          aria-hidden="true"
-        >
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        <span class="label">抓取</span>
-      </button>
       <div class="who">
         <button
           type="button"
@@ -287,26 +225,6 @@ const initial = computed(() =>
   outline-offset: -2px;
   border-radius: 999px;
 }
-.capture {
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
-  margin-top: 16px;
-  border-radius: 999px;
-  /* The strongest contrast the theme has, as X's 发帖 button. */
-  background: var(--text);
-  color: var(--page);
-  font-size: 17px;
-  font-weight: 700;
-  transition: filter 120ms ease;
-}
-.capture:hover {
-  filter: opacity(0.9);
-}
-.capture:active {
-  filter: opacity(0.8);
-}
 .who {
   position: relative;
   margin-top: auto;
@@ -405,13 +323,6 @@ const initial = computed(() =>
   .lines {
     display: flex;
   }
-  .capture {
-    width: 100%;
-    height: 52px;
-  }
-  .capture .plus {
-    display: none;
-  }
   .account {
     width: 100%;
     text-align: left;
@@ -420,8 +331,7 @@ const initial = computed(() =>
 @media (prefers-reduced-motion: reduce) {
   .logo,
   .item,
-  .account,
-  .capture {
+  .account {
     transition: none;
   }
 }

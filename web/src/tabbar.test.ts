@@ -21,10 +21,11 @@ describe('which tab a page belongs to', () => {
       'collection-stats',
       'collection-changes',
       'collection-follows',
-      'captures',
-      'capture',
     ])
       expect(tabOf(name)).toBe('explore')
+    // 采集 is a tab of its own: leaving 探索 from it does not leave 探索 there.
+    for (const name of ['captures', 'capture'])
+      expect(tabOf(name)).toBe('captures')
     for (const name of ['relations', 'collection-graph', 'compare'])
       expect(tabOf(name)).toBe('relations')
     for (const name of [
@@ -41,11 +42,17 @@ describe('which tab a page belongs to', () => {
   })
 
   it('knows the roots from the pages below them', () => {
-    expect(['collections', 'relations', 'settings'].every(isTabRoot)).toBe(true)
     expect(
-      ['collection', 'folder', 'collection-graph', 'settings-admin'].some(
-        isTabRoot,
-      ),
+      ['collections', 'captures', 'relations', 'settings'].every(isTabRoot),
+    ).toBe(true)
+    expect(
+      [
+        'collection',
+        'folder',
+        'capture',
+        'collection-graph',
+        'settings-admin',
+      ].some(isTabRoot),
     ).toBe(false)
   })
 })

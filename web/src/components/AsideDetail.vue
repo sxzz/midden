@@ -1,7 +1,7 @@
 <script setup vapor lang="ts">
 import { computed } from 'vue'
 import { safeURL, type Entity } from '../api'
-import { date, present, storageSize } from '../presentation'
+import { date, storageSize } from '../presentation'
 import { accountKey, relationQuery, type Rel } from '../relation-filter'
 import {
   authoredBy,
@@ -10,7 +10,7 @@ import {
   isPostEntity,
   isProfileEntity,
 } from '../relations'
-import { collectionRoute } from '../share'
+import { collectionRoute, shareSlug } from '../share'
 import AppLink from './ui/AppLink.vue'
 import type { DetailAside } from '../aside'
 // The sidebar beside a collection's page: what the page loaded, as a
@@ -29,9 +29,12 @@ const followRows = [
   { rel: 'followers', label: '粉丝' },
   { rel: 'mutual', label: '互关' },
 ] as const
+// Behind a public link the counts stay plain numbers and the owner's update
+// records stay out, as on the page itself.
+const shared = computed(() => !!shareSlug.value)
 const relationLink = (rel: Rel) => {
   const entity = root.value
-  return entity && isProfileEntity(entity)
+  return !shared.value && entity && isProfileEntity(entity)
     ? { name: 'collections', query: relationQuery(accountKey(entity), rel) }
     : undefined
 }
@@ -47,9 +50,6 @@ const storage = computed(() =>
     : storageSize(collection.value.storage_bytes),
 )
 const source = computed(() => collection.value && safeURL(collection.value.url))
-const handle = computed(() =>
-  collection.value ? present(collection.value).handle : '',
-)
 const author = computed(() => {
   const graph = collection.value?.graph
   if (!graph || profile.value) return undefined
@@ -158,10 +158,6 @@ const related = computed(() => {
     <section class="aside-box" aria-label="采集信息">
       <h2>采集</h2>
       <dl class="facts">
-        <div v-if="profile && handle">
-          <dt>账号</dt>
-          <dd>@{{ handle }}</dd>
-        </div>
         <div v-if="detail.savedAt">
           <dt>保存于</dt>
           <dd>{{ date(detail.savedAt) }}</dd>
@@ -196,7 +192,7 @@ const related = computed(() => {
         </li>
       </ol>
       <AppLink
-        v-if="detail.record"
+        v-if="detail.record && !shared"
         class="aside-more"
         :href="`#/captures/${detail.record}`"
         >{{ detail.updating ? '更新中，查看进度' : '最近一次更新' }}</AppLink
