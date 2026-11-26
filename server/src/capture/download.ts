@@ -1,17 +1,11 @@
 import { Buffer } from 'node:buffer'
 import { open } from 'node:fs/promises'
 import { Readable } from 'node:stream'
-import { and, eq, ne } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { KeyedLock } from '#blob/locks.ts'
 import { stage, type StagedFile } from '#blob/staging.ts'
 import { newId } from '#db/id.ts'
-import {
-  assets,
-  blobs,
-  blobThumbnails,
-  captures,
-  mediaGarbage,
-} from '#db/schema.ts'
+import { assets, blobs, captures, mediaGarbage } from '#db/schema.ts'
 import {
   PermanentError,
   RetryError,
@@ -20,8 +14,8 @@ import {
 } from '#jobs/queue.ts'
 import { finalizeSettled, validateExecution } from './lifecycle.ts'
 import { isRemoved } from './media-key.ts'
+import { cachedBlob, enqueueThumbnail } from './media-reuse.ts'
 import { acceptsMediaType, sniffMediaType } from './media-type.ts'
-import { thumbnailsEnabled } from './thumbnail.ts'
 import { enqueueUpload } from './upload.ts'
 import type { Transaction } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
@@ -43,21 +37,6 @@ function loadAsset(tx: Transaction, id: string) {
     .get()
 }
 
-/** A ready asset makes its blob's thumbnail due. */
-export function enqueueThumbnail(
-  ctx: CaptureContext,
-  tx: Transaction,
-  blobId: string,
-): void {
-  if (!thumbnailsEnabled(ctx)) return
-  const done = tx
-    .select({ id: blobThumbnails.blobId })
-    .from(blobThumbnails)
-    .where(eq(blobThumbnails.blobId, blobId))
-    .get()
-  if (!done) ctx.queue.enqueue(tx, 'thumbnail', blobId)
-}
-
 function attach(
   ctx: CaptureContext,
   tx: Transaction,
@@ -74,27 +53,17 @@ function attach(
 
 /**
  * Reuse a blob another capture stored for the same rendition (immutable
- * key). Returns whether the asset is settled.
+ * key), when it was stored after this asset was listed (`fetch.ts` reuses
+ * those stored before). Returns whether the asset is settled.
  */
 function reuseMedia(ctx: CaptureContext, assetId: string): boolean {
   return ctx.db.transaction((tx) => {
     const row = loadAsset(tx, assetId)
     if (row?.asset.state !== 'pending') return true
     validateExecution(tx, row.capture)
-    const cached = tx
-      .select({ blobId: assets.blobId })
-      .from(assets)
-      .where(
-        and(
-          eq(assets.cacheKey, row.asset.cacheKey),
-          eq(assets.state, 'ready'),
-          // Spelled out so SQLite can use the partial index `assets_cache`.
-          ne(assets.cacheKey, ''),
-        ),
-      )
-      .get()
-    if (!cached?.blobId) return false
-    attach(ctx, tx, row.asset, cached.blobId)
+    const cached = cachedBlob(tx, row.asset.cacheKey)
+    if (!cached) return false
+    attach(ctx, tx, row.asset, cached)
     return true
   })
 }

@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
   assets,
   blobs,
@@ -110,6 +110,23 @@ describe('media', () => {
     await capture(ctx, '3')
     expect(requests).toHaveLength(2)
     expect(ctx.db.select().from(blobs).all()).toHaveLength(1)
+  })
+
+  test('media stored before under its immutable key needs no download job', async () => {
+    const { ctx } = setup(
+      () => [{ url: 'https://m.test/a.jpg', immutableKey: 'photo-1' }],
+      { 'https://m.test/a.jpg': JPEG },
+    )
+    await capture(ctx, '1')
+    const enqueue = vi.spyOn(ctx.queue, 'enqueue')
+    const again = await capture(ctx, '2')
+    expect(again.state).toBe('complete')
+    expect(enqueue.mock.calls.map((call) => call[1])).not.toContain('download')
+    const [first, second] = ctx.db
+      .select({ state: assets.state, blobId: assets.blobId })
+      .from(assets)
+      .all()
+    expect(second).toEqual({ state: 'ready', blobId: first!.blobId })
   })
 
   test('rejected and unsupported media leave a partial capture', async () => {
