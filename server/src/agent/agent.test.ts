@@ -1,5 +1,7 @@
+import { Buffer } from 'node:buffer'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
+import { addAccount } from '#accounts/accounts.ts'
 import { newId } from '#db/id.ts'
 import {
   apiTokens,
@@ -8,6 +10,7 @@ import {
   followEdges,
   relationFetches,
 } from '#db/schema.ts'
+import { createShare } from '#library/shares.ts'
 import {
   ACCOUNTS,
   agentFixture,
@@ -695,6 +698,59 @@ describe('writes', () => {
         })
       ).status,
     ).toBe(403)
+  })
+
+  test('public links and capture accounts are listed, and revoked by an rw token', async () => {
+    const f = await setup()
+    const share = createShare(f.ctx.db, {
+      target: 'collection',
+      id: f.ids['7']!,
+    })
+    const listed = await f.call('/shares')
+    expect(listed.json.items).toEqual([
+      {
+        id: share.id,
+        url: `http://localhost/app/#/s/${share.slug}`,
+        target: 'account',
+        target_id: f.ids['7'],
+        created_at: expect.any(String),
+      },
+    ])
+    // Her posts are public through her account's link; Bob's are not.
+    expect(ids((await f.call(`/shares?of=${f.ids.p1}`)).json.items)).toEqual([
+      share.id,
+    ])
+    expect((await f.call(`/shares?of=${f.ids.p3}`)).json.items).toEqual([])
+    const ro = f.token('ro')
+    const unshare = (token?: string) =>
+      f.call(`/shares/${share.id}/revoke`, { token, method: 'POST' })
+    expect((await unshare(ro)).status).toBe(403)
+    expect((await unshare()).json).toEqual({ id: share.id, revoked: true })
+    expect((await f.call('/shares')).json.items).toEqual([])
+    expect((await unshare()).status).toBe(404)
+
+    const { id } = await addAccount(f.ctx, 'fake', {
+      credential: Buffer.from('alice'),
+      name: '工作号',
+    })
+    expect(
+      (await f.call('/capture-accounts', { token: ro })).json.items,
+    ).toEqual([
+      {
+        id,
+        platform: 'fake',
+        name: '工作号',
+        username: 'fake',
+        state: 'ready',
+        selected: true,
+      },
+    ])
+    const remove = (token?: string) =>
+      f.call(`/capture-accounts/${id}/revoke`, { token, method: 'POST' })
+    expect((await remove(ro)).status).toBe(403)
+    expect((await remove()).json).toEqual({ id, revoked: true })
+    expect((await f.call('/capture-accounts')).json.items).toEqual([])
+    expect((await remove()).status).toBe(404)
   })
 
   test('background work pauses and resumes', async () => {

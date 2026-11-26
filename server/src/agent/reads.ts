@@ -1,12 +1,12 @@
 // The agent API's reads. Each runs on a read thread (`worker.ts`) with its
 // own read-only connection, never on the web process's event loop; tests
 // run them in place (`inlineReads`). Inputs and results are plain JSON.
-import { sql } from 'drizzle-orm'
+import { asc, ne, sql } from 'drizzle-orm'
 import { optionsJson } from '#capture/options.ts'
 import { recordDetail, type CaptureRecord } from '#capture/records.ts'
 import { isUpdate, updateRecord } from '#capture/updates.ts'
 import { listWatches, type WatchView } from '#capture/watches.ts'
-import { jobs } from '#db/schema.ts'
+import { accountSelections, connections, jobs } from '#db/schema.ts'
 import { readJobControl } from '#jobs/control.ts'
 import { PAUSABLE_TYPES } from '#jobs/queue.ts'
 import { listTags } from '#library/annotations.ts'
@@ -22,6 +22,7 @@ import { listsOf } from '#library/follow-graph.ts'
 import { followCounts, listFollowChanges } from '#library/follows.ts'
 import { authorKey, listCollections } from '#library/list.ts'
 import { collectionsById, isUUID, listCounts } from '#library/read.ts'
+import { listShares } from '#library/shares.ts'
 import { invalid, notFound } from './errors.ts'
 import {
   checkKeys,
@@ -578,6 +579,66 @@ function watchesOf(r: AgentReader, input: { id?: string } = {}) {
   }
 }
 
+/**
+ * Public links (公开分享), all of them or those that make a post or account
+ * public (`of`): its own, a folder holding it, a shared account listing it.
+ */
+function sharesOf(r: AgentReader, input: { of?: string; origin: string }) {
+  const shares = listShares(r.db, input.of?.toLowerCase())
+  const kinds = new Map(
+    r.db
+      .all<{ id: string; kind: string | null }>(
+        sql`SELECT collection_id AS id, root_kind AS kind FROM catalog
+          WHERE collection_id IN (SELECT value FROM json_each(${JSON.stringify(
+            shares.map((s) => s.target_id),
+          )}))`,
+      )
+      .map((row) => [row.id, row.kind]),
+  )
+  return {
+    items: shares.map((share) => ({
+      id: share.id,
+      url: `${input.origin}/app/#/s/${share.slug}`,
+      target:
+        share.target === 'folder'
+          ? 'folder'
+          : kinds.get(share.target_id)?.endsWith('.profile')
+            ? 'account'
+            : 'post',
+      target_id: share.target_id,
+      ...(share.name ? { name: share.name } : {}),
+      created_at: share.created_at,
+    })),
+  }
+}
+
+/** The owner's capture accounts (采集账号), without their credentials. */
+function captureAccountsOf(r: AgentReader) {
+  const selected = new Set(
+    r.db
+      .select({ id: accountSelections.connectionId })
+      .from(accountSelections)
+      .all()
+      .map((row) => row.id),
+  )
+  return {
+    items: r.db
+      .select()
+      .from(connections)
+      .where(ne(connections.state, 'revoked'))
+      .orderBy(asc(connections.name), asc(connections.id))
+      .all()
+      .map((c) => ({
+        id: c.id,
+        platform: c.adapterId,
+        name: c.name,
+        ...(c.username ? { username: c.username } : {}),
+        state: c.state,
+        selected: selected.has(c.id),
+      })),
+  }
+}
+
 /** Every read, by name. */
 export const READS = {
   search,
@@ -592,6 +653,8 @@ export const READS = {
   status,
   queue,
   watches: watchesOf,
+  shares: sharesOf,
+  captureAccounts: captureAccountsOf,
 } satisfies Record<string, (r: AgentReader, input: never) => unknown>
 
 export type ReadName = keyof typeof READS

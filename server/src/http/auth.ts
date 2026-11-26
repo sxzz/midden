@@ -117,8 +117,8 @@ export function pruneSessions(db: Database, now = Date.now()): void {
 }
 
 /**
- * Routes that delete (收藏, 媒体, 所有视频, 标签, 收藏夹, 分享, 定期更新,
- * 采集账号, 通行密钥, 域名) or manage API tokens: the owner's web session only, never
+ * Routes that delete (收藏, 媒体, 所有视频, 标签, 收藏夹, 定期更新, 通行密钥,
+ * 域名) or manage API tokens: the owner's web session only, never
  * an API token, whatever its permission. `createApi` decides what is a
  * session.
  */

@@ -189,6 +189,18 @@ export function createAgentApi(o: AgentOptions) {
   )
   app.get('/jobs', async (c) => c.json(await reads.run('queue', undefined)))
   app.get('/watches', async (c) => c.json(await reads.run('watches', {})))
+  app.get('/shares', async (c) => {
+    const of = c.req.query('of')
+    return c.json(
+      await reads.run('shares', {
+        ...(of ? { of } : {}),
+        origin: originOf(c),
+      }),
+    )
+  })
+  app.get('/capture-accounts', async (c) =>
+    c.json(await reads.run('captureAccounts', undefined)),
+  )
 
   writeRoutes(app, { ctx, reader: o.reader, reads })
 

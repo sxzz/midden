@@ -3,13 +3,14 @@
 // process like the web app's own: each is a small transaction that at most
 // enqueues jobs. Nothing deletes content: that is the owner's, in the web
 // app, signed in (`ownerOnly` on /v1).
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import * as v from 'valibot'
+import { revokeAccount, type AccountsContext } from '#accounts/accounts.ts'
 import { OptionsBody, resolveOptions } from '#capture/options.ts'
 import { captureURL } from '#capture/records.ts'
 import { pauseUpdate, resumeUpdate, startUpdate } from '#capture/updates.ts'
 import { editWatch, setWatch } from '#capture/watches.ts'
-import { watchFrequencies } from '#db/schema.ts'
+import { connections, watchFrequencies } from '#db/schema.ts'
 import { readJobControl, writeJobControl } from '#jobs/control.ts'
 import { PAUSABLE_TYPES } from '#jobs/queue.ts'
 import {
@@ -21,6 +22,7 @@ import {
 } from '#library/annotations.ts'
 import { createFolder, updateFolder, type Folder } from '#library/folders.ts'
 import { isUUID } from '#library/read.ts'
+import { revokeShare } from '#library/shares.ts'
 import { renameTag } from '#library/tags.ts'
 import { AgentError, invalid, notFound } from './errors.ts'
 import { body, type AgentEnv } from './http.ts'
@@ -38,7 +40,6 @@ import {
   type Params,
 } from './query.ts'
 import { runRead } from './reads.ts'
-import type { AccountsContext } from '#accounts/accounts.ts'
 import type { Reads } from './runner.ts'
 import type { Context, Hono, MiddlewareHandler } from 'hono'
 import type { BlankSchema } from 'hono/types'
@@ -310,6 +311,27 @@ export function writeRoutes(
       enabled: input.enabled,
     })
     return c.json(watchOf(id.toLowerCase()))
+  })
+
+  // --- Public links and capture accounts --------------------------------
+  // Neither deletes content: a revoked link stops showing what it showed,
+  // and a revoked capture account's credential goes, its captures stay.
+  app.post('/shares/:id/revoke', writes, (c) => {
+    const id = c.req.param('id')
+    revokeShare(ctx.db, id)
+    return c.json({ id, revoked: true })
+  })
+  app.post('/capture-accounts/:id/revoke', writes, (c) => {
+    const id = c.req.param('id')
+    const found = ctx.db
+      .select({ state: connections.state })
+      .from(connections)
+      .where(eq(connections.id, id))
+      .get()
+    if (!found || found.state === 'revoked')
+      throw notFound('No capture account has this id.')
+    revokeAccount(ctx, id)
+    return c.json({ id, revoked: true })
   })
 
   // --- Tags -------------------------------------------------------------

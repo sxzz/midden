@@ -48,8 +48,6 @@ const OWNER_ONLY: [string, string, unknown?][] = [
   ['POST', `/collections/${ID}/video-removal`],
   ['DELETE', `/tags/${ID}`],
   ['DELETE', `/folders/${ID}`],
-  ['DELETE', `/shares/${ID}`],
-  ['DELETE', `/accounts/${ID}`],
   ['DELETE', `/passkeys/${ID}`],
   ['DELETE', `/origins/${ID}`],
   ['DELETE', `/watches/${ID}`],
@@ -104,6 +102,42 @@ describe('API tokens on /v1', () => {
         guarded: path === '/library/delete-all',
       })
     }
+  })
+
+  test('a read and write token unshares and removes capture accounts: they delete no content', async () => {
+    const { request } = setup()
+    const rw = tokenSecret(ctx!.db, 'rw')
+    const ro = tokenSecret(ctx!.db, 'ro')
+    const folder = (await (
+      await request(
+        '/folders',
+        { token: rw },
+        {
+          method: 'POST',
+          body: { name: 'cats', filter: 'q=cat' },
+        },
+      )
+    ).json()) as { id: string }
+    const share = (await (
+      await request(
+        '/shares',
+        { token: rw },
+        {
+          method: 'POST',
+          body: { target: 'folder', id: folder.id },
+        },
+      )
+    ).json()) as { id: string }
+    const unshare = (token: string) =>
+      request(`/shares/${share.id}`, { token }, { method: 'DELETE' })
+    expect((await unshare(ro)).status).toBe(403)
+    expect((await unshare(rw)).status).toBe(204)
+    expect(await (await request('/shares', { token: rw })).json()).toEqual([])
+    // Past the permission check: there is no such account.
+    const remove = (token: string) =>
+      request(`/accounts/${ID}`, { token }, { method: 'DELETE' })
+    expect((await remove(ro)).status).toBe(403)
+    expect((await remove(rw)).status).toBe(404)
   })
 
   test('on a development server a read and write token stands in for the session', async () => {

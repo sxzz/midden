@@ -6,7 +6,6 @@ import {
   revokeShare,
   setShareSlug,
 } from '#library/shares.ts'
-import { ownerOnly } from './auth.ts'
 import { json, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
@@ -42,7 +41,7 @@ export function shareRoutes(ctx: AccountsContext) {
           ),
       )
 
-      .delete('/shares/:id', ownerOnly, (c) => {
+      .delete('/shares/:id', (c) => {
         revokeShare(ctx.db, c.req.param('id'))
         return c.body(null, 204)
       })

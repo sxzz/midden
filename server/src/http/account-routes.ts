@@ -86,7 +86,7 @@ export function accountRoutes(ctx: AccountsContext) {
       return c.body(null, 204)
     })
 
-    .delete('/accounts/:id', ownerOnly, (c) => {
+    .delete('/accounts/:id', (c) => {
       revokeAccount(ctx, c.req.param('id'))
       return c.body(null, 204)
     })

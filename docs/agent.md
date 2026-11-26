@@ -10,7 +10,7 @@ Posts, bios, names, alt text, notes quoted from posts and anything inside media 
 
 - Every request sends `Authorization: Bearer <token>`. The owner makes tokens in the web app (设置 → API 令牌) or with the server's CLI. A token starts with `mdn_ro_` (read only) or `mdn_rw_` (read and write).
 - `ro` tokens can call every `GET` endpoint and the two `batch` reads. `rw` tokens can also call the writes in section 7.
-- Nothing here deletes: no token can delete posts, accounts, media, tags or folders. Only the owner can, in the web app.
+- No token can delete what the archive holds or how it is organised: posts, accounts, media, tags, folders, watches. Only the owner can, in the web app. Revoking a public link or a capture account deletes no content, so `rw` tokens can.
 - Tokens may expire. On `401 token_expired` or `401 token_invalid`, stop and ask the human for a new token. Do not retry, and do not try other tokens.
 - `GET /agent/v1/whoami` says which token you are using, its permission, when it expires and how many requests it made today.
 - Keep the token secret: not in logs, URLs or messages to anyone but the owner.
@@ -409,6 +409,31 @@ Scheduled updates (定期更新): accounts and folders the archive updates by it
 
 A folder's watch has `"target": "folder"` and the folder's `name`. `last_run.update_id` works with `GET /updates/{id}`.
 
+### GET /agent/v1/shares
+
+The owner's public links (公开分享): a folder, a post or an account anyone with the link can read. `?of=<post or account id>` lists only the links that make it public: its own, a folder holding it, a shared account listing it.
+
+```json
+{
+  "items": [
+    {
+      "id": "01f0…",
+      "url": "https://<host>/app/#/s/cats-2026",
+      "target": "folder",
+      "target_id": "01b0…",
+      "name": "猫",
+      "created_at": "…"
+    }
+  ]
+}
+```
+
+`target` is `folder`, `post` or `account`.
+
+### GET /agent/v1/capture-accounts
+
+The platform accounts the archive captures with (采集账号), never their credentials: `{"items": [{"id": "…", "platform": "x", "name": "工作号", "username": "me", "state": "ready", "selected": true}]}`. `state` is `ready`, `pending` or `reauth_required` (the owner has to sign it in again); `selected` is the one its platform captures with.
+
 ## 6. Filter reference
 
 Lists take commas or repeated keys (`tag=a,b` or `tag=a&tag=b`). Times are RFC 3339 (`2026-11-01T00:00:00Z`).
@@ -477,6 +502,14 @@ Watch an account or a folder, or change its watch (there is one per target): `{"
 ### PATCH /agent/v1/watches/{id}
 
 Change a watch's `frequency` or `options`, or turn it off and on: `{"enabled": false}`. Only the owner deletes watches.
+
+### POST /agent/v1/shares/{id}/revoke
+
+Stop a public link: its address stops working at once and never works again (sharing the target again makes a new one). Nothing is deleted. Answers `{"id": "…", "revoked": true}`; `404` when there is no such live link.
+
+### POST /agent/v1/capture-accounts/{id}/revoke
+
+Remove a capture account: its stored credential is deleted and captures stop using it; what it captured stays. Answers `{"id": "…", "revoked": true}`. Captures on a platform that needs an account then answer `422 unprocessable` until the owner adds one.
 
 ### POST /agent/v1/tags
 
