@@ -1,52 +1,24 @@
 <script setup vapor lang="ts">
 import { computed, onMounted, onUnmounted, shallowRef, watch } from 'vue'
-import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
-import { navigatesHere } from '../navigation'
-import { lastPage, SWITCH_STATE, tabStates } from '../tab-state'
+import { useRoute } from 'vue-router'
+import { useTabLinks } from '../composables/useTabLinks'
 import {
   barHidden,
   barSettling,
-  DESKTOP,
-  isTabRoot,
   nextScroll,
   scrollStart,
   settleBar,
   tabBarSuppressed,
-  tabOf,
   tabs,
-  type Tab,
 } from '../tabbar'
 import AppLink from './ui/AppLink.vue'
-// The bottom bar of the owner's app: 探索, 关系, 设置. On a phone it slides
+import TabIcon from './ui/TabIcon.vue'
+// The bottom bar of the owner's app on a phone: 探索, 关系, 设置. It slides
 // away while the page scrolls down and back as soon as it scrolls up, as
-// X's does; on a desktop it stays.
+// X's does. Wider windows have the rail (SideRail) instead.
 const route = useRoute()
-const router = useRouter()
-const active = computed(() => tabOf(route.name))
-/**
- * Where each tab leads, which its link's address says too: another tab to
- * the page it was left on, the open one to its root (as last shown). The
- * bar's own entry is marked so 返回 there knows the reader did not come
- * from the page before it in history.
- */
-function linkTo(tab: Tab): RouteLocationRaw {
-  const states = tabStates.value
-  if (tab === active.value) return states[tab].root
-  // History state rides only on a location object, whose `path` cannot
-  // carry the query.
-  const { path, query, hash } = router.resolve(lastPage(states, tab))
-  return { path, query, hash, state: SWITCH_STATE }
-}
-const links = computed(
-  () =>
-    Object.fromEntries(
-      tabs.map(({ value }) => [value, linkTo(value)]),
-    ) as Record<Tab, RouteLocationRaw>,
-)
+const { active, links, tap } = useTabLinks()
 const scroll = shallowRef(scrollStart())
-const desktop = shallowRef(false)
-let desktopQuery: MediaQueryList | undefined
-const desktopChanged = () => (desktop.value = !!desktopQuery?.matches)
 /**
  * On a touch screen the keyboard is up while a text field has focus; the
  * bar would ride on top of it and cover what is being typed.
@@ -74,7 +46,6 @@ const hidden = computed(() =>
     scrolled: scroll.value.hidden,
     typing: typing.value,
     suppressed: tabBarSuppressed.value.size > 0,
-    desktop: desktop.value,
   }),
 )
 // A page shown again restores its scroll position; that jump is not the
@@ -105,39 +76,16 @@ watch(
   { immediate: true },
 )
 onMounted(() => {
-  desktopQuery = globalThis.matchMedia?.(DESKTOP)
-  desktopChanged()
-  desktopQuery?.addEventListener?.('change', desktopChanged)
   window.addEventListener('scroll', onScroll, { passive: true })
   document.addEventListener('focusin', focusIn)
   document.addEventListener('focusout', focusOut)
 })
 onUnmounted(() => {
-  desktopQuery?.removeEventListener?.('change', desktopChanged)
   window.removeEventListener('scroll', onScroll)
   document.removeEventListener('focusin', focusIn)
   document.removeEventListener('focusout', focusOut)
   delete document.body.dataset.tabBar
 })
-/**
- * Tapping the tab already open: on its root, back to the top; deeper, its
- * link leads to the root.
- */
-function tap(event: MouseEvent) {
-  const link =
-    event.target instanceof Element
-      ? event.target.closest<HTMLElement>('[data-tab]')
-      : null
-  if (
-    !link ||
-    link.dataset.tab !== active.value ||
-    !isTabRoot(route.name) ||
-    !navigatesHere(event)
-  )
-    return
-  event.preventDefault()
-  window.scrollTo({ top: 0, behavior: 'smooth' })
-}
 </script>
 
 <template>
@@ -158,34 +106,7 @@ function tap(event: MouseEvent) {
         :data-tab="tab.value"
         :aria-current="active === tab.value ? 'page' : undefined"
       >
-        <svg
-          viewBox="0 0 24 24"
-          width="24"
-          height="24"
-          fill="none"
-          stroke="currentColor"
-          :stroke-width="active === tab.value ? 2.3 : 1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <template v-if="tab.value === 'explore'">
-            <circle cx="10.5" cy="10.5" r="6.5" />
-            <path d="m15.5 15.5 5 5" />
-          </template>
-          <template v-else-if="tab.value === 'relations'">
-            <circle cx="12" cy="5.5" r="2.5" />
-            <circle cx="5" cy="18" r="2.5" />
-            <circle cx="19" cy="18" r="2.5" />
-            <path d="M10.8 7.7 6.2 15.8M13.2 7.7l4.6 8.1M7.5 18h9" />
-          </template>
-          <template v-else>
-            <circle cx="12" cy="12" r="3" />
-            <path
-              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
-            />
-          </template>
-        </svg>
+        <TabIcon :name="tab.value" :active="active === tab.value" />
         <span class="label">{{ tab.label }}</span>
       </AppLink>
     </div>
@@ -267,48 +188,6 @@ body[data-tab-bar='shown'] {
   outline: 2px solid var(--link);
   outline-offset: -4px;
   border-radius: 12px;
-}
-/* A desktop (the same query as DESKTOP in tabbar.ts): the bar stays, its
-   items span the page's column, each with its label beside the icon and a
-   hover state, as a row of buttons under the content. */
-@media (hover: hover) and (pointer: fine) and (min-width: 900px) {
-  .items {
-    max-width: 960px;
-    height: var(--tab-bar-height);
-    padding: 6px var(--gutter);
-    gap: 8px;
-  }
-  .item {
-    flex-direction: row;
-    gap: 8px;
-    border-radius: var(--radius);
-    font-size: 15px;
-    cursor: pointer;
-    transition:
-      background 120ms ease,
-      color 120ms ease;
-  }
-  .item svg {
-    width: 22px;
-    height: 22px;
-  }
-  .item:hover {
-    color: var(--text);
-    background: var(--fill);
-  }
-  .item.on {
-    color: var(--link);
-  }
-  .item:active svg {
-    transform: none;
-  }
-  .item:active {
-    background: color-mix(in srgb, var(--fill) 70%, var(--text) 8%);
-  }
-  .item:focus-visible {
-    outline-offset: 0;
-    border-radius: var(--radius);
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .tab-bar,

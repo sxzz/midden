@@ -144,3 +144,12 @@ video {
     background-position: -100% 0;
   }
 }
+
+/* From the rail's width up (layout.ts), a sheet is a dialog in the middle of
+   the window rather than one rising from its bottom edge. `[open]` outranks
+   each sheet's own scoped margin. */
+@media (min-width: 700px) {
+  dialog.sheet[open] {
+    margin: auto;
+  }
+}

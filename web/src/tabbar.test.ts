@@ -137,14 +137,12 @@ it('states the build: its commit linked, and when it was built', () => {
   })
 })
 
-describe('desktop', () => {
+describe('when the bar is off the page', () => {
   const state = { scrolled: false, typing: false, suppressed: false }
-  it('never hides the bar on scrolling there, only for the 多选 bar', () => {
-    expect(barHidden({ ...state, scrolled: true, desktop: true })).toBe(false)
-    expect(barHidden({ ...state, typing: true, desktop: true })).toBe(false)
-    expect(barHidden({ ...state, suppressed: true, desktop: true })).toBe(true)
-    expect(barHidden({ ...state, scrolled: true, desktop: false })).toBe(true)
-    expect(barHidden({ ...state, typing: true, desktop: false })).toBe(true)
-    expect(barHidden({ ...state, desktop: false })).toBe(false)
+  it('hides on scrolling, for the keyboard and for the 多选 bar', () => {
+    expect(barHidden({ ...state, scrolled: true })).toBe(true)
+    expect(barHidden({ ...state, typing: true })).toBe(true)
+    expect(barHidden({ ...state, suppressed: true })).toBe(true)
+    expect(barHidden(state)).toBe(false)
   })
 })

@@ -17,6 +17,7 @@ import {
   type Usage,
   type Watch,
 } from '../api'
+import { pageAside } from '../aside'
 import { useCollection } from '../composables/useCollection'
 import { useFolders } from '../composables/useFolders'
 import { toast } from '../composables/useToast'
@@ -36,17 +37,23 @@ import {
   type ListTab,
 } from '../folders'
 import { backButton, host } from '../host'
+import { FULL, RAIL, useMedia } from '../layout'
 import { mediaRemovals } from '../media-removals'
+import { listsProfiles, present, storageSize } from '../presentation'
 import { listQuery } from '../reads'
+import { isProfileEntity } from '../relations'
 import { restoreScroll } from '../scroll-restore'
 import { forgetPages, lastPage, leftScroll, tabStates } from '../tab-state'
 import { tabOf as barTabOf, tabs as barTabs, isTabRoot } from '../tabbar'
 import { detailTitle, setDocumentTitle } from '../titles'
+import CaptureSheet from './CaptureSheet.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
 import FolderMenuSheet from './FolderMenuSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
 import FolderStrip from './FolderStrip.vue'
 import ShareSheet from './ShareSheet.vue'
+import SideAside from './SideAside.vue'
+import SideRail from './SideRail.vue'
 import TabBar from './TabBar.vue'
 import BackLink from './ui/BackLink.vue'
 import UpdateSheet from './UpdateSheet.vue'
@@ -191,6 +198,40 @@ const sensitiveShown = computed(
     !capture.value &&
     !stats.value,
 )
+/**
+ * The desktop layout (layout.ts): the rail in the bottom bar's place, and
+ * from 1280px the sidebar. Relation graphs need the room more than a
+ * sidebar would fill it: there the column takes the sidebar's width too.
+ */
+const wide = useMedia(RAIL)
+const full = useMedia(FULL)
+const roomy = computed(
+  () => graphPage.value || comparePage.value || relationsPage.value,
+)
+const sidebar = computed(() => full.value && !roomy.value)
+const capturing = shallowRef(false)
+/** The shown list's count, for the header's second line and the sidebar. */
+const shownTotal = computed(() => {
+  if (!home.value && !folderId.value) return ''
+  const list = folderId.value ? folderList : lists[tab.value]
+  const total = list.collection.total.value
+  return total === undefined
+    ? ''
+    : `${total.toLocaleString('zh-CN')} ${listsProfiles(list.query.value) ? '个账号' : '条'}`
+})
+const usedText = computed(() =>
+  usage.value ? `已用 ${storageSize(usage.value.used_bytes)}` : '',
+)
+/** Under the title on a desktop, as X's header gives a count or a handle. */
+const subtitle = computed(() => {
+  if (shownTotal.value) return shownTotal.value
+  const detail = pageAside.value
+  const graph = detail?.collection?.graph
+  const root = graph?.entities.find((entity) => entity.key === graph.root)
+  if (!id.value || detail?.id !== id.value || !isProfileEntity(root)) return ''
+  const handle = present(detail.collection!).handle
+  return handle ? `@${handle}` : ''
+})
 // Telegram draws its own back button; only stand in for it elsewhere.
 const standalone = !host()?.initData
 const savedAt = computed(() => {
@@ -602,15 +643,42 @@ const viewProps = computed(() => {
 </script>
 
 <template>
-  <main class="page">
+  <SideRail v-if="wide" @capture="capturing = true" />
+  <main class="page" :class="{ roomy }">
     <header class="bar" :class="{ spaced: !home }">
-      <BackLink v-if="nested && standalone" class="back">
+      <!-- On a desktop an arrow, as X's header has it. -->
+      <BackLink
+        v-if="nested && standalone && wide"
+        class="icon-button back-arrow"
+        aria-label="返回"
+        title="返回"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="22"
+          height="22"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M19 12H5M11 6l-6 6 6 6" />
+        </svg>
+      </BackLink>
+      <BackLink v-else-if="nested && standalone" class="back">
         <span class="chevron" aria-hidden="true">‹</span>返回
       </BackLink>
-      <h1>{{ title }}</h1>
-      <!-- Capturing adds to the library, so it opens from 探索. -->
+      <div v-if="wide" class="heading">
+        <h1>{{ title }}</h1>
+        <p v-if="subtitle" class="subtitle">{{ subtitle }}</p>
+      </div>
+      <h1 v-else>{{ title }}</h1>
+      <!-- Capturing adds to the library, so it opens from 探索; the rail
+         has its own 采集. -->
       <RouterLink
-        v-if="home"
+        v-if="home && !wide"
         to="/captures"
         class="icon-button captures-link"
         aria-label="采集"
@@ -804,8 +872,15 @@ const viewProps = computed(() => {
       @confirm="deleteFolder"
       @cancel="sheet = ''"
     />
-    <TabBar />
+    <TabBar v-if="!wide" />
   </main>
+  <SideAside
+    v-if="sidebar"
+    :folders="folders"
+    :total="shownTotal"
+    :storage="usedText"
+  />
+  <CaptureSheet v-if="wide" :open="capturing" @close="capturing = false" />
 </template>
 
 <style scoped>
@@ -838,8 +913,26 @@ const viewProps = computed(() => {
   padding-bottom: 12px;
 }
 /* Header actions sit at the trailing edge whichever of them are shown. */
-.bar > h1 {
+.bar > h1,
+.heading {
   margin-right: auto;
+}
+.heading {
+  min-width: 0;
+}
+.subtitle {
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.back-arrow {
+  margin: 0 12px 0 -10px;
+  color: var(--text);
 }
 .sensitive-toggle[aria-pressed='true'] {
   color: var(--link);
@@ -940,5 +1033,45 @@ h1 {
 }
 .folder-status button:active:not(:disabled) {
   opacity: 0.7;
+}
+/* The desktop layout (layout.ts), X's: the rail, a 600px column between
+   thin lines, the sidebar, centred together (App's .shell). The column's
+   header stays at the top as the page scrolls. */
+@media (min-width: 700px) {
+  .page {
+    flex: 0 1 600px;
+    min-width: 0;
+    max-width: 600px;
+    margin: 0;
+    box-shadow:
+      -1px 0 0 var(--separator),
+      1px 0 0 var(--separator);
+  }
+  /* A graph takes the sidebar's room as well. */
+  .page.roomy {
+    flex-basis: 980px;
+    max-width: 980px;
+  }
+  .bar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    min-height: 53px;
+    margin-bottom: 8px;
+    padding: 4px calc(var(--gutter) + 4px);
+    background: color-mix(in srgb, var(--page) 85%, transparent);
+    -webkit-backdrop-filter: saturate(180%) blur(12px);
+    backdrop-filter: saturate(180%) blur(12px);
+  }
+  .bar.spaced {
+    padding-bottom: 4px;
+  }
+  .icon-button:hover {
+    background: var(--fill);
+  }
+  .bar h1 {
+    font-size: 19px;
+    font-weight: 700;
+  }
 }
 </style>

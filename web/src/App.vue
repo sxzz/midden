@@ -81,7 +81,9 @@ onUnmounted(() => cleanup())
   <main v-else-if="setup" class="gate">
     <PasskeySetup :token="String(route.params.token)" @done="passkeyAdded" />
   </main>
-  <CollectionLibrary v-else-if="ready" />
+  <!-- From 700px the library's rail, column and sidebar sit side by side,
+       centred together (CollectionLibrary, layout.ts). -->
+  <div v-else-if="ready" class="shell"><CollectionLibrary /></div>
   <main v-else class="gate">
     <CollectionSkeleton v-if="loading" />
     <PasskeyLogin v-else-if="browserLogin" @done="signedIn" />
@@ -91,6 +93,13 @@ onUnmounted(() => cleanup())
 </template>
 
 <style scoped>
+@media (min-width: 700px) {
+  .shell {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+  }
+}
 .gate {
   display: grid;
   width: 100%;

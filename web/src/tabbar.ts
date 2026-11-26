@@ -1,7 +1,7 @@
 import { shallowRef } from 'vue'
 import type { RouteLocationRaw, RouteRecordNameGeneric } from 'vue-router'
 
-/** The app's three destinations, as the bottom bar lists them. */
+/** The app's three destinations, as the bottom bar and the rail list them. */
 export type Tab = 'explore' | 'relations' | 'settings'
 
 export const tabs: readonly {
@@ -92,14 +92,6 @@ export function nextScroll(
   return { y, hidden: state.hidden, travel }
 }
 
-/**
- * A desktop: a mouse and a window wide enough for the content column. The
- * bar there is always on the page; there is room for it, and a bar that
- * slides away under a mouse is a target that moves.
- */
-export const DESKTOP =
-  '(hover: hover) and (pointer: fine) and (min-width: 900px)'
-
 /** Whether the bar is off the page. */
 export function barHidden(state: {
   /** Scrolled away (see `nextScroll`). */
@@ -108,11 +100,8 @@ export function barHidden(state: {
   typing: boolean
   /** Something takes its place, as the 多选 bar does. */
   suppressed: boolean
-  desktop: boolean
 }) {
-  return (
-    state.suppressed || (!state.desktop && (state.scrolled || state.typing))
-  )
+  return state.suppressed || state.scrolled || state.typing
 }
 
 /**
