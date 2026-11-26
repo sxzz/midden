@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'vitest'
-import { jobTypeLabel, queueStatus, webLatency } from './jobs'
+import {
+  jobTypeLabel,
+  queueStatus,
+  rateLimitEnd,
+  rateLimitName,
+  webLatency,
+  type RateLimit,
+} from './jobs'
 import type { QueueState } from './api'
 
 const worker: NonNullable<QueueState['worker']> = {
@@ -14,6 +21,7 @@ const state = (over: Partial<QueueState> = {}): QueueState => ({
   control: { paused: false, types: [] },
   pausable: ['thumbnail', 'upload', 'raw-upload'],
   backlog: [],
+  rate_limits: [],
   worker,
   web: null,
   ...over,
@@ -40,6 +48,37 @@ describe('后台任务', () => {
   test('job types have names; unknown ones show as they are', () => {
     expect(jobTypeLabel('raw-upload')).toBe('原始响应移到存储桶')
     expect(jobTypeLabel('later')).toBe('later')
+  })
+
+  test('a rate limit names what is limited and when it ends', () => {
+    const limit = (over: Partial<RateLimit>): RateLimit => ({
+      scope: 'fxtwitter:public',
+      platform: 'fxtwitter',
+      until: new Date(2026, 10, 26, 15, 30).toISOString(),
+      since: new Date(2026, 10, 26, 15, 0).toISOString(),
+      hits: 1,
+      reason: 'HTTP 429',
+      waiting: 2,
+      ...over,
+    })
+    expect(rateLimitName(limit({}))).toBe('FxTwitter 公共接口')
+    expect(
+      rateLimitName(
+        limit({ platform: 'x', account: '@me', endpoint: 'UserTweets' }),
+      ),
+    ).toBe('X @me · UserTweets')
+    expect(
+      rateLimitName(limit({ platform: 'instagram', account: '@me' })),
+    ).toBe('Instagram @me')
+    expect(rateLimitEnd(limit({}), new Date(2026, 10, 26, 15, 18))).toBe(
+      '15:30 恢复，还有 12 分钟',
+    )
+    expect(rateLimitEnd(limit({}), new Date(2026, 10, 26, 15, 29, 30))).toBe(
+      '15:30 恢复，不到 1 分钟',
+    )
+    expect(rateLimitEnd(limit({}), new Date(2026, 10, 25, 14, 0))).toBe(
+      '11月26日 15:30 恢复，还有 25 小时 30 分钟',
+    )
   })
 
   test('the web latency reads as two lines', () => {

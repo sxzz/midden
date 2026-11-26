@@ -467,24 +467,32 @@ export function collectionReasons(db: Executor, pages: Page[]) {
 // --- Waiting --------------------------------------------------------------
 
 /** Why a queued capture is not being fetched yet. */
-export type CaptureWait = 'queue' | 'retry' | 'paused'
+export type CaptureWait = 'queue' | 'retry' | 'paused' | 'rate_limit'
 
 /**
  * Queued captures whose capture job is not running: it waits for a free slot
- * in the capture queue (or for its account to be free), or for the backoff
- * after a failed attempt. A queued capture missing here is being fetched:
+ * in the capture queue (or for its account to be free), for the backoff
+ * after a failed attempt, or for the end of a rate limit of the API it asks
+ * (`#jobs/rate-limits.ts`). A queued capture missing here is being fetched:
  * the capture state stays `queued` until the fetch is stored.
  */
 export function captureWaits(
   db: Executor,
   captureIds: string[],
+  now = Date.now(),
 ): Map<string, CaptureWait> {
   if (!captureIds.length) return new Map()
   // Paused: its update is, or the owner paused all background work.
   const allPaused = readJobControl(db).paused
   return new Map(
     db
-      .select({ ref: jobs.ref, attempt: jobs.attempt, state: jobs.state })
+      .select({
+        ref: jobs.ref,
+        attempt: jobs.attempt,
+        state: jobs.state,
+        rateScope: jobs.rateScope,
+        runAt: jobs.runAt,
+      })
       .from(jobs)
       .where(
         and(
@@ -499,10 +507,36 @@ export function captureWaits(
         job.ref,
         allPaused || job.state === 'paused'
           ? 'paused'
-          : job.attempt > 0
-            ? 'retry'
-            : 'queue',
+          : job.rateScope && job.runAt.getTime() > now
+            ? 'rate_limit'
+            : job.attempt > 0
+              ? 'retry'
+              : 'queue',
       ]),
+  )
+}
+
+/**
+ * How many captures of a collection record's pages (the pages and their
+ * members) wait for the end of a rate limit. Read from the few jobs that
+ * wait for one.
+ */
+export function rateLimitedMembers(
+  db: Executor,
+  pageIds: string[],
+  now = Date.now(),
+): number {
+  if (!pageIds.length) return 0
+  const pages = JSON.stringify(pageIds)
+  return (
+    db.get<{ n: number }>(sql`
+      SELECT count(DISTINCT j.ref) AS n FROM jobs j
+      JOIN submissions s ON s.capture_id = j.ref
+      WHERE j.rate_scope IS NOT NULL AND j.type = 'capture'
+        AND j.state <> 'running' AND j.run_at > ${now}
+        AND (s.id IN (SELECT value FROM json_each(${pages}))
+          OR (s.parent_submission IN (SELECT value FROM json_each(${pages}))
+            AND s.idem_key LIKE 'related:%'))`)?.n ?? 0
   )
 }
 

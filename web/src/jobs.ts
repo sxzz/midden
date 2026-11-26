@@ -37,6 +37,39 @@ export function queueStatus(state: QueueState): QueueStatusText {
   return { label: worker.idle ? '空闲' : '运行中', tone: 'ok' }
 }
 
+export type RateLimit = QueueState['rate_limits'][number]
+
+const PLATFORMS: Record<string, string> = {
+  fxtwitter: 'FxTwitter 公共接口',
+  x: 'X',
+  instagram: 'Instagram',
+}
+
+/** What is limited: FxTwitter 公共接口, X @foo · UserTweets, Instagram @foo. */
+export function rateLimitName(limit: RateLimit): string {
+  const platform = PLATFORMS[limit.platform] ?? limit.platform
+  const name = limit.account ? `${platform} ${limit.account}` : platform
+  return limit.endpoint ? `${name} · ${limit.endpoint}` : name
+}
+
+/** When it ends and how long that is: 11月26日 15:30 恢复，还有 12 分钟. */
+export function rateLimitEnd(limit: RateLimit, now = new Date()): string {
+  const until = new Date(limit.until)
+  const time = `${until.getHours()}:${String(until.getMinutes()).padStart(2, '0')}`
+  const at =
+    until.toDateString() === now.toDateString()
+      ? time
+      : `${until.getMonth() + 1}月${until.getDate()}日 ${time}`
+  const minutes = Math.ceil((+until - +now) / 60_000)
+  const hours = Math.floor(minutes / 60)
+  if (minutes <= 1) return `${at} 恢复，不到 1 分钟`
+  const left =
+    minutes < 60
+      ? `${minutes} 分钟`
+      : `${hours} 小时${minutes % 60 ? ` ${minutes % 60} 分钟` : ''}`
+  return `${at} 恢复，还有 ${left}`
+}
+
 /** The web process's last minute, as two lines. */
 export function webLatency(web: NonNullable<QueueState['web']>) {
   const { requests } = web

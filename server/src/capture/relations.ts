@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, isNotNull, sql } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import {
   captureRunning,
@@ -7,6 +7,7 @@ import {
   connections,
   entities,
   entityVersions,
+  jobs,
   relationFetches,
   relationLists,
   revisionEntities,
@@ -14,20 +15,22 @@ import {
   type RelationFetchState,
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
-import { RetryError, SnoozeError, type Job } from '#jobs/queue.ts'
-import { metricsOf } from '#library/views.ts'
 import {
-  isProviderFailure,
-  rateLimitedKey,
-  type RelationList,
-} from '#platforms/platform.ts'
+  RateLimitError,
+  RetryError,
+  SnoozeError,
+  type Job,
+} from '#jobs/queue.ts'
+import { metricsOf } from '#library/views.ts'
 import { traceUpstream } from '#platforms/upstream.ts'
 import { classifyFailure, retryAfter } from './errors.ts'
 import { holdConnection, markReauth } from './fetch.ts'
 import { valueAt } from './metrics.ts'
+import { rateGate, rateLimitWait } from './rate-limits.ts'
 import { selectedConnection } from './records.ts'
 import { observeEdges, storeListed } from './relation-store.ts'
 import type { Executor, Transaction } from '#db/client.ts'
+import type { RelationList } from '#platforms/platform.ts'
 import type { CaptureContext } from './context.ts'
 
 /** A list longer than this is not fetched: too many requests for one update. */
@@ -363,6 +366,7 @@ export async function runRelations(
   try {
     for (let i = 0; i < PAGES_PER_RUN; i++) {
       let page
+      const gate = rateGate(ctx, fetch.connectionId)
       try {
         const req = {
           list: fetch.list,
@@ -373,20 +377,22 @@ export async function runRelations(
           logger,
         }
         page = await traceUpstream(
-          { logger, classify: (error) => classifyFailure(job, error) },
-          () => relations.list(req, job.signal),
+          { logger, classify: (error) => classifyFailure(job, error), gate },
+          async () => {
+            try {
+              return await relations.list(req, job.signal)
+            } catch (error) {
+              // Every way to ask is limited: waiting is not an attempt.
+              throw rateLimitWait(gate, error) ?? error
+            }
+          },
         )
       } catch (error) {
+        if (error instanceof RateLimitError || error instanceof SnoozeError)
+          throw error
         if (connection)
           markReauth(ctx, connection.id, connection.revision, error)
         const seconds = retryAfter(error)
-        // Every way to ask is limited: waiting is not an attempt.
-        if (
-          seconds &&
-          isProviderFailure(error) &&
-          error.metadata.get(rateLimitedKey)[0] === '1'
-        )
-          throw new SnoozeError(seconds * 1000)
         if (seconds)
           throw new RetryError('来源平台暂时出错', seconds * 1000, {
             cause: error,
@@ -489,12 +495,15 @@ export interface RelationProgress {
   error?: string
   /** Set by records: whether a retry would fetch it again. */
   retryable?: boolean
+  /** Its job waits for the end of a rate limit. */
+  rateLimited?: boolean
 }
 
 /** The list fetches of each submission, following before followers. */
 export function relationProgresses(
   db: Executor,
   submissionIds: readonly string[],
+  now = Date.now(),
 ): Map<string, RelationProgress[]> {
   const out = new Map<string, RelationProgress[]>()
   if (!submissionIds.length) return out
@@ -504,6 +513,27 @@ export function relationProgresses(
     .where(inJson(relationFetches.submissionId, submissionIds))
     .orderBy(desc(relationFetches.list))
     .all()
+  const running = rows.filter((row) => row.state === 'running')
+  const limited = new Set(
+    running.length
+      ? db
+          .select({ ref: jobs.ref })
+          .from(jobs)
+          .where(
+            and(
+              eq(jobs.type, 'relations'),
+              isNotNull(jobs.rateScope),
+              gt(jobs.runAt, new Date(now)),
+              inJson(
+                jobs.ref,
+                running.map((row) => row.id),
+              ),
+            ),
+          )
+          .all()
+          .map((row) => row.ref)
+      : [],
+  )
   for (const row of rows) {
     const items = out.get(row.submissionId!) ?? []
     items.push({
@@ -513,6 +543,7 @@ export function relationProgresses(
       ...(row.expected === null ? {} : { expected: row.expected }),
       fetched: row.fetched,
       ...(row.error ? { error: row.error } : {}),
+      ...(limited.has(row.id) ? { rateLimited: true } : {}),
     })
     out.set(row.submissionId!, items)
   }

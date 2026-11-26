@@ -14,6 +14,7 @@ import {
   InstagramSessionProvider,
 } from '@fxembed/atmosphere/providers/instagram/session'
 import { instagramShortcodeToPk } from '@fxembed/atmosphere/providers/instagram/shortcode'
+import { rateLimitedKey } from '../platform.ts'
 import { SourceResponse, Visibility } from '../protocol.ts'
 import { status } from '../rpc.ts'
 import { upstream } from '../upstream.ts'
@@ -175,13 +176,15 @@ export class InstagramClient {
         429: status.RESOURCE_EXHAUSTED,
       }
       // Atmosphere words its errors in English; ours say the same by status.
-      throw new ProviderError(
+      const failure = new ProviderError(
         codes[error.status] ?? status.UNAVAILABLE,
         error.status === 400
           ? 'Instagram 返回的数据无效'
           : responseError(error.status, true).message,
         error.retryAfter,
       )
+      if (error.status === 429) failure.metadata.set(rateLimitedKey, '1')
+      throw failure
     }
   }
 

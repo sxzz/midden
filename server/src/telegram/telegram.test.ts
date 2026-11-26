@@ -153,6 +153,7 @@ describe('presentation', () => {
     expect(jobState('queued')).toBe('正在采集')
     expect(jobState('queued', 'queue')).toBe('排队中')
     expect(jobState('queued', 'retry')).toBe('等待重试')
+    expect(jobState('queued', 'rate_limit')).toBe('限流中')
     expect(jobState('downloading', 'queue')).toBe('正在保存媒体')
   })
 
@@ -203,6 +204,11 @@ describe('presentation', () => {
     expect(
       progressMessage({ ...base, added: 3, updated: 4 }, { group: true }).text,
     ).toContain('其中新增 3 · 更新 4')
+    // Of those in progress, the ones waiting for a rate limit.
+    const limited = { ...base, complete: 0, limited: 2 }
+    expect(progressMessage(limited, { group: true }).text).toContain(
+      '进行中 2（限流中 2）',
+    )
   })
 })
 

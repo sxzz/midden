@@ -661,6 +661,7 @@ docker compose up -d --wait midden && docker compose up -d --wait midden-worker
 - `GET /healthz` 返回 `ok` 表示 HTTP 服务与数据库正常，不含 Telegram；Bot 的状态看 `GET /v1/instance` 的 `bot`，或日志中的 `telegram bot started`、`telegram bot start failed; retrying`、`telegram bot could not start`。
 - 日志为 JSON，`job failed` 表示任务最终失败，`delivery rejected` 表示 Telegram 拒绝了某条消息。
 - 抓取失败：每次尝试都有记录，自动重试不会覆盖之前的日志。`upstream request failed` 是失败的上游请求：`upstream` 中有来源（`fxtwitter`、`x-graphql`、`instagram` 等）、接口、去掉凭据与查询 token 的 URL、状态码、`retry-after` 与 `x-rate-limit-*` 等响应头、响应开头 2 KB（已遮盖 token），另有任务编号与次数、`captureId`、目标和错误分类（`errorCode`、`retryable`、`final`）。之后还会重试的为 warn，不再重试的为 error，抓取最终仍成功的为 info。`job will retry` / `job failed` 是任务每次失败的结果与耗时，`capture failed` 是抓取记录最终失败。抓关系网的任务（`jobType` 为 `relations`）带 `relationFetchId`、`list` 与 `providerId`（`fxtwitter` 或 `x-session`）；用采集账号读时，查询限流后的切换记为 `relations query rate-limited; switching to the other query`，两个查询都限流时记为 `both relations queries rate-limited; waiting for the earlier reset`。
+- 限流：接口回答 429（或 X 的错误 88、Instagram 的「please wait」）时，用到它的任务等到限流结束，日志 `job waits for a rate limit`（带 `scope`、`until`），不算尝试。「后台任务」页的「限流」一栏列出仍在限流中的范围、恢复时间和等待的任务数，「解除」立即放行（见架构文档「限流」）。没有结束时间的限流按 15 分钟（采集账号）或 5 分钟（FxTwitter）计。
 - 日志位置：容器标准输出（`docker compose logs`，json-file 按 10 MB × 5 轮转，部署重建容器后清空），以及数据目录中的 `logs/midden.log`（网页进程）和 `logs/worker.log`（任务，抓取失败在这里），各按 10 MB 轮转，保留 5 个文件，跨部署保留。查找某个账号的失败：
 
   ```sh

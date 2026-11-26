@@ -30,6 +30,25 @@ export class SnoozeError extends Error {
   }
 }
 
+/**
+ * The API the job asks is rate-limited (`rate-limits.ts`): wait for the
+ * limit's end without using an attempt.
+ */
+export class RateLimitError extends Error {
+  override name = 'RateLimitError'
+  readonly scope: string
+  /** Epoch ms. */
+  readonly until: number
+  constructor(scope: string, until: number, options?: ErrorOptions) {
+    super(
+      `rate-limited (${scope}) until ${new Date(until).toISOString()}`,
+      options,
+    )
+    this.scope = scope
+    this.until = until
+  }
+}
+
 export interface Job {
   id: number
   type: string
@@ -631,10 +650,33 @@ export class JobQueue {
           leaseUntil: null,
           attempt: row.attempt - 1,
           runAt: new Date(this.#now() + snooze),
+          rateScope: null,
         })
         .where(eq(jobs.id, row.id))
         .run()
       return 'snoozed'
+    }
+    // Not the job's fault either. Its due time is the limit's end, so it is
+    // not looked at again until then. Not a snooze: the next job of the
+    // queue may well ask another API, and one asking this API gives up at
+    // once without a request.
+    if (error instanceof RateLimitError) {
+      log.info(
+        { scope: error.scope, until: new Date(error.until).toISOString() },
+        'job waits for a rate limit',
+      )
+      this.#db
+        .update(jobs)
+        .set({
+          state: this.#waitingState(row.updateId),
+          leaseUntil: null,
+          attempt: row.attempt - 1,
+          runAt: new Date(Math.max(error.until, this.#now())),
+          rateScope: error.scope,
+        })
+        .where(eq(jobs.id, row.id))
+        .run()
+      return 'failed'
     }
     const message = error instanceof Error ? error.message : String(error)
     const final =
@@ -669,6 +711,7 @@ export class JobQueue {
         leaseUntil: null,
         lastError: message,
         runAt: new Date(this.#now() + delay),
+        rateScope: null,
       })
       .where(eq(jobs.id, row.id))
       .run()

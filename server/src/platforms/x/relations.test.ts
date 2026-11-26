@@ -343,7 +343,7 @@ describe('X following and followers lists, with the account', () => {
     expect(queriesOf(urls)).toEqual(['Following', 'FollowingByUserIDTimeline'])
   })
 
-  test('a limit without a reset time is an ordinary failure', async () => {
+  test('a limit without a reset time still says it is one', async () => {
     const { fetcher } = source(
       () => new Response('Rate limit exceeded', { status: 429 }),
     )
@@ -351,7 +351,9 @@ describe('X following and followers lists, with the account', () => {
       listRelations(request(), signal(), deps(fetcher)),
     )
     expect(error.code).toBe(status.UNAVAILABLE)
-    expect(error.metadata.get(rateLimitedKey)).toEqual([])
+    // The core waits its fallback (`FALLBACK_LIMIT_MS`).
+    expect(error.metadata.get(rateLimitedKey)).toEqual(['1'])
+    expect(error.metadata.get('retry-after')).toEqual([])
   })
 
   test('needs the account', async () => {
@@ -538,7 +540,10 @@ describe('public account lists, from FxTwitter', () => {
       expect(error.code).toBe(status.UNAVAILABLE)
       expect(error.message).toBe(message)
       expect(error.metadata.get('retry-after')).toEqual(retry)
-      expect(error.metadata.get(rateLimitedKey)).toEqual([])
+      // Only a 429 is a rate limit, which the core waits for.
+      expect(error.metadata.get(rateLimitedKey)).toEqual(
+        message === 'FxTwitter 公共接口限流' ? ['1'] : [],
+      )
     }
   })
 })

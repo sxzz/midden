@@ -26,6 +26,7 @@ export interface Exchange {
 
 interface Trace {
   exchanges: Exchange[]
+  gate?: RateGate
 }
 
 /** How a failed platform call is treated, for the log entry. */
@@ -41,7 +42,63 @@ export interface TraceOptions {
   logger: Logger
   /** `undefined` when the error is not a failure (e.g. the job was snoozed). */
   classify: (error: unknown) => Classification | undefined
+  /** Keeps the call's requests to APIs that rate-limited us from going out. */
+  gate?: RateGate
 }
+
+/** The rate limits a gate consults and adds to (`#jobs/rate-limits.ts`). */
+export interface RateLimitStore {
+  /** When the scope's limit ends (epoch ms), while it lasts. */
+  until: (scope: string) => number | undefined
+  record: (hit: { scope: string; until: number; reason: string }) => void
+}
+
+/** A rate limit a call ran into. */
+export interface RateHit {
+  scope: string
+  /** Epoch ms. */
+  until: number
+  /** Known before the call: no request went out. */
+  known: boolean
+}
+
+/**
+ * Rate limits for one platform call. A request to a scope that is limited
+ * gets a 429 answered here, with the limit's end, so the platform code
+ * reacts as to the API's own (switches to another query, or fails); a 429
+ * from the API itself is recorded. Either way the call's `hits` name it.
+ */
+export class RateGate {
+  readonly hits: RateHit[] = []
+  /**
+   * The last request with a scope and when its limit would end: what a
+   * limit reported in a successful response's body (X's error 88,
+   * Instagram's "please wait") belongs to.
+   */
+  last: Omit<RateHit, 'known'> | undefined
+  /** The account the call uses (`connections.id`), if any. */
+  readonly connectionId: string | null
+  readonly store: RateLimitStore
+  readonly now: () => number
+  constructor(
+    connectionId: string | null,
+    store: RateLimitStore,
+    now: () => number = Date.now,
+  ) {
+    this.connectionId = connectionId
+    this.store = store
+    this.now = now
+  }
+}
+
+/** A limit's length when the answer names no end. */
+export const FALLBACK_LIMIT_MS = {
+  /** X's windows are 15 minutes; Instagram names none. */
+  session: 15 * 60_000,
+  /** The public FxTwitter instance limits only against abuse. */
+  public: 5 * 60_000,
+}
+const MAX_LIMIT_MS = 86_400_000
 
 const traces = new AsyncLocalStorage<Trace>()
 const EXCERPT_BYTES = 2048
@@ -122,6 +179,61 @@ export function describe(raw: string): { provider: string; operation: string } {
   return { provider: host, operation: template(path) }
 }
 
+/**
+ * Which rate limit a request counts against; none for hosts that are not an
+ * API we keep limits for (media servers). The scopes follow how each
+ * platform limits:
+ * - the public FxTwitter instance: one limit for all our requests;
+ * - X: each endpoint for each account, as its `x-rate-limit-*` headers
+ *   count, and one GraphQL query still answers while another is limited;
+ * - Instagram: the account as a whole; it names neither endpoint nor end.
+ */
+export function rateScope(
+  raw: string,
+  connectionId: string | null,
+): string | undefined {
+  const { provider, operation } = describe(raw)
+  if (provider === 'fxtwitter') return 'fxtwitter:public'
+  const account = connectionId ? `session:${connectionId}` : 'public'
+  if (provider === 'x-graphql' || provider === 'x-web')
+    return `x:${account}:${operation}`
+  if (provider === 'instagram') return `instagram:${account}`
+}
+
+/**
+ * When a limit ends (epoch ms): `retry-after` (seconds or a date), else X's
+ * `x-rate-limit-reset` (epoch seconds), else `FALLBACK_LIMIT_MS`.
+ */
+export function limitEnd(headers: Headers, scope: string, now: number): number {
+  let end: number | undefined
+  const retry = headers.get('retry-after')?.trim()
+  if (retry && /^\d+$/.test(retry)) end = now + Number(retry) * 1000
+  else if (retry && !Number.isNaN(Date.parse(retry))) end = Date.parse(retry)
+  const reset = Number(headers.get('x-rate-limit-reset'))
+  if (end === undefined && Number.isFinite(reset) && reset * 1000 > now)
+    end = reset * 1000
+  end ??=
+    now +
+    (scope.startsWith('fxtwitter:')
+      ? FALLBACK_LIMIT_MS.public
+      : FALLBACK_LIMIT_MS.session)
+  return Math.min(Math.max(end, now + 1000), now + MAX_LIMIT_MS)
+}
+
+/** The 429 a limited scope gets without asking, shaped like X's own. */
+function limitedResponse(until: number, now: number): Response {
+  return Response.json(
+    { errors: [{ code: 88, message: 'Rate limit exceeded' }] },
+    {
+      status: 429,
+      headers: {
+        'retry-after': String(Math.max(1, Math.ceil((until - now) / 1000))),
+        'x-rate-limit-reset': String(Math.ceil(until / 1000)),
+      },
+    },
+  )
+}
+
 // Numeric and media IDs vary per request; the shape names the endpoint.
 const template = (path: string) =>
   path.replaceAll(/\/(?:\d+|[\w-]{20,})(?=\/|$)/g, '/:id')
@@ -171,6 +283,15 @@ export async function upstream(
   const trace = traces.getStore()
   if (!trace) return fetcher(input, init)
   const url = requestURL(input)
+  const gate = trace.gate
+  const scope = gate && rateScope(url, gate.connectionId)
+  if (gate && scope) {
+    const until = gate.store.until(scope)
+    if (until !== undefined) {
+      gate.hits.push({ scope, until, known: true })
+      return limitedResponse(until, gate.now())
+    }
+  }
   const started = performance.now()
   const exchange: Exchange = {
     ...describe(url),
@@ -194,6 +315,14 @@ export async function upstream(
   }
   exchange.durationMs = Math.round(performance.now() - started)
   exchange.status = response.status
+  if (gate && scope) {
+    const until = limitEnd(response.headers, scope, gate.now())
+    gate.last = { scope, until }
+    if (response.status === 429) {
+      gate.hits.push({ scope, until, known: false })
+      gate.store.record({ scope, until, reason: 'HTTP 429' })
+    }
+  }
   const headers: Record<string, string> = {}
   for (const name of HEADERS) {
     const value = response.headers.get(name)
@@ -221,7 +350,7 @@ export async function traceUpstream<T>(
   options: TraceOptions,
   run: () => Promise<T>,
 ): Promise<T> {
-  const trace: Trace = { exchanges: [] }
+  const trace: Trace = { exchanges: [], gate: options.gate }
   try {
     const result = await traces.run(trace, run)
     for (const exchange of trace.exchanges.filter(failed))

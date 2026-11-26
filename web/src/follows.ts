@@ -122,7 +122,7 @@ function listText(item: ListProgress): string {
     case 'waiting':
       return '等待中'
     case 'running':
-      return `${item.fetched}${total}`
+      return `${item.fetched}${total}${item.rate_limited ? '，限流中' : ''}`
     case 'complete':
       return `${item.fetched} 人`
     case 'partial':

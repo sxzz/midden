@@ -1,6 +1,7 @@
 import { isAppError } from '#errors.ts'
 import {
   PermanentError,
+  RateLimitError,
   RetryError,
   SnoozeError,
   type Job,
@@ -19,7 +20,8 @@ const PERMANENT_STATUS = new Set<number>([
 ])
 
 export function isPermanent(error: unknown): boolean {
-  if (error instanceof RetryError) return false
+  if (error instanceof RetryError || error instanceof RateLimitError)
+    return false
   if (error instanceof PermanentError) return true
   if (isAppError(error))
     return ['not_found', 'unsupported', 'connection'].includes(error.kind)
@@ -28,8 +30,12 @@ export function isPermanent(error: unknown): boolean {
 
 /** The message stored on failed captures and assets and shown to users. */
 export function safeError(error: unknown): string {
-  if (error instanceof RetryError && error.cause !== undefined)
+  if (
+    (error instanceof RetryError || error instanceof RateLimitError) &&
+    error.cause !== undefined
+  )
     return safeError(error.cause)
+  if (error instanceof RateLimitError) return '来源平台限流'
   if (isAppError(error, 'account_required'))
     return '此平台需要账号，请先在采集账号中添加并选择一个账号。'
   if (isAppError(error, 'connection'))
@@ -84,7 +90,10 @@ const statusNames = new Map<number, string>(
 
 /** A short code for an error in logs: the platform status or error kind. */
 export function errorCode(error: unknown): string {
-  if (error instanceof RetryError && error.cause !== undefined)
+  if (
+    (error instanceof RetryError || error instanceof RateLimitError) &&
+    error.cause !== undefined
+  )
     return errorCode(error.cause)
   if (isProviderFailure(error))
     return statusNames.get(error.code) ?? String(error.code)
@@ -98,8 +107,12 @@ export function classifyFailure(
   error: unknown,
 ): Classification | undefined {
   if (error instanceof SnoozeError) return undefined
+  // Known before the call, so nothing was asked: not worth a log entry.
+  if (error instanceof RateLimitError && error.cause === undefined)
+    return undefined
   const cause =
-    error instanceof RetryError && error.cause !== undefined
+    (error instanceof RetryError || error instanceof RateLimitError) &&
+    error.cause !== undefined
       ? error.cause
       : error
   const retryable = !isPermanent(error)
@@ -107,6 +120,9 @@ export function classifyFailure(
     code: errorCode(error),
     message: cause instanceof Error ? cause.message : String(cause),
     retryable,
-    final: !retryable || job.attempt >= job.maxAttempts,
+    // A rate limit uses no attempt: the job runs again once it ends.
+    final:
+      !retryable ||
+      (!(error instanceof RateLimitError) && job.attempt >= job.maxAttempts),
   }
 }

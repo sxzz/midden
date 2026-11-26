@@ -87,6 +87,7 @@ function relationJson(r: RelationProgress) {
     fetched: r.fetched,
     ...(r.error ? { error: r.error } : {}),
     ...(r.retryable ? { retryable: true } : {}),
+    ...(r.rateLimited ? { rate_limited: true } : {}),
   }
 }
 

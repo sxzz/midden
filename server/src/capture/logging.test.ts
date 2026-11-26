@@ -92,6 +92,35 @@ describe('capture failure logs', () => {
   test('a failure that will be retried is a warning', async () => {
     const { ctx, entries } = setup(
       async () =>
+        new Response('unavailable', {
+          status: 503,
+          headers: { 'retry-after': '60' },
+        }),
+    )
+    submit(ctx, { url })
+    await ctx.queue.drain()
+    expect(
+      entries.find((e) => e.msg === 'upstream request failed'),
+    ).toMatchObject({
+      level: levels.warn,
+      attempt: 1,
+      errorCode: 'UNAVAILABLE',
+      retryable: true,
+      final: false,
+      upstream: { status: 503, headers: { 'retry-after': '60' } },
+    })
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        level: levels.warn,
+        msg: 'job will retry',
+        retryInMs: 60_000,
+      }),
+    )
+  })
+
+  test('a rate limit is a warning, and the job waits for its end', async () => {
+    const { ctx, entries } = setup(
+      async () =>
         new Response('rate limited', {
           status: 429,
           headers: { 'retry-after': '60', 'x-rate-limit-remaining': '0' },
@@ -115,10 +144,11 @@ describe('capture failure logs', () => {
     })
     expect(entries).toContainEqual(
       expect.objectContaining({
-        level: levels.warn,
-        msg: 'job will retry',
-        retryInMs: 60_000,
+        level: levels.info,
+        msg: 'job waits for a rate limit',
+        scope: 'fxtwitter:public',
       }),
     )
+    expect(entries.some((e) => e.msg === 'job will retry')).toBe(false)
   })
 })

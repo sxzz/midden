@@ -1,9 +1,10 @@
-import { sql } from 'drizzle-orm'
+import { inArray, sql } from 'drizzle-orm'
 import { Hono } from 'hono'
 import * as v from 'valibot'
-import { jobs } from '#db/schema.ts'
+import { connections, jobs } from '#db/schema.ts'
 import { readJobControl, writeJobControl } from '#jobs/control.ts'
 import { PAUSABLE_TYPES } from '#jobs/queue.ts'
+import { activeRateLimits, clearRateLimit } from '#jobs/rate-limits.ts'
 import { json, type Env } from './validate.ts'
 import type { Database } from '#db/client.ts'
 import type { WorkerReport } from '#runtime/status-file.ts'
@@ -35,16 +36,61 @@ function backlog(db: Database) {
 }
 
 /**
- * 管理员面板 → 后台任务: what the worker is doing and how far behind it is,
- * pausing all of it or some job types, and the web process's latency.
+ * APIs that rate-limited us and have not reset yet, each with what it is
+ * (`fxtwitter:public`, `x:session:<account>:<endpoint>`,
+ * `instagram:session:<account>`) and the account by name.
  */
-export function queueRoutes(db: Database, info: QueueInfo) {
+function rateLimitsView(db: Database, now: number) {
+  const limits = activeRateLimits(db, now).map((limit) => {
+    const [platform = '', kind = '', ...rest] = limit.scope.split(':')
+    const account = kind === 'session' ? (rest.shift() ?? '') : ''
+    return { limit, platform, account, endpoint: rest.join(':') }
+  })
+  const ids = [...new Set(limits.map((l) => l.account).filter(Boolean))]
+  const names = new Map(
+    (ids.length
+      ? db
+          .select({
+            id: connections.id,
+            name: connections.name,
+            username: connections.username,
+          })
+          .from(connections)
+          .where(inArray(connections.id, ids))
+          .all()
+      : []
+    ).map((row) => [row.id, row.username ? `@${row.username}` : row.name]),
+  )
+  return limits.map(({ limit, platform, account, endpoint }) => ({
+    scope: limit.scope,
+    platform,
+    ...(account ? { account: names.get(account) ?? account } : {}),
+    ...(endpoint ? { endpoint } : {}),
+    until: limit.until.toISOString(),
+    since: limit.since.toISOString(),
+    hits: limit.hits,
+    reason: limit.reason,
+    waiting: limit.waiting,
+  }))
+}
+
+/**
+ * 管理员面板 → 后台任务: what the worker is doing and how far behind it is,
+ * pausing all of it or some job types, the APIs that rate-limited us, and
+ * the web process's latency.
+ */
+export function queueRoutes(
+  db: Database,
+  info: QueueInfo,
+  now: () => number = Date.now,
+) {
   const view = () => {
     const worker = info.worker()
     return {
       control: readJobControl(db),
       pausable: [...PAUSABLE_TYPES],
       backlog: backlog(db),
+      rate_limits: rateLimitsView(db, now()),
       worker: worker
         ? {
             reported_at: new Date(worker.at).toISOString(),
@@ -62,24 +108,38 @@ export function queueRoutes(db: Database, info: QueueInfo) {
       web: info.web?.() ?? null,
     }
   }
-  return new Hono<Env>()
-    .get('/', (c) => c.json(view()))
-    .put(
-      '/control',
-      json(
-        v.strictObject({
-          paused: v.optional(v.boolean()),
-          types: v.optional(v.array(v.picklist(PAUSABLE_TYPES))),
-        }),
-      ),
-      (c) => {
-        const input = c.req.valid('json')
-        const control = readJobControl(db)
-        writeJobControl(db, {
-          paused: input.paused ?? control.paused,
-          types: input.types ?? control.types,
-        })
-        return c.json(view())
-      },
-    )
+  return (
+    new Hono<Env>()
+      .get('/', (c) => c.json(view()))
+      .put(
+        '/control',
+        json(
+          v.strictObject({
+            paused: v.optional(v.boolean()),
+            types: v.optional(v.array(v.picklist(PAUSABLE_TYPES))),
+          }),
+        ),
+        (c) => {
+          const input = c.req.valid('json')
+          const control = readJobControl(db)
+          writeJobControl(db, {
+            paused: input.paused ?? control.paused,
+            types: input.types ?? control.types,
+          })
+          return c.json(view())
+        },
+      )
+      // End a limit early (解除): its jobs run at once, and a request still
+      // limited is answered with a new limit.
+      .post(
+        '/rate-limits/clear',
+        json(v.strictObject({ scope: v.pipe(v.string(), v.maxLength(1024)) })),
+        (c) => {
+          db.transaction((tx) =>
+            clearRateLimit(tx, c.req.valid('json').scope, now()),
+          )
+          return c.json(view())
+        },
+      )
+  )
 }

@@ -2,6 +2,8 @@ import { describe, expect, test } from 'vitest'
 import { levels, recordingLogger } from '#testing/logs.ts'
 import {
   describe as describeURL,
+  limitEnd,
+  rateScope,
   redactText,
   redactURL,
   traceUpstream,
@@ -188,5 +190,37 @@ describe('upstream request logs', () => {
       provider: 'x-web',
       operation: '/home',
     })
+  })
+})
+
+describe('rate limit scopes', () => {
+  test('FxTwitter is one scope; X each endpoint of an account; Instagram the account', () => {
+    expect(rateScope('https://api.fxtwitter.com/2/status/1', 'a')).toBe(
+      'fxtwitter:public',
+    )
+    expect(
+      rateScope('https://x.com/i/api/graphql/abc/UserTweets?variables=1', 'a'),
+    ).toBe('x:session:a:UserTweets')
+    expect(rateScope('https://x.com/i/api/graphql/abc/UserTweets', null)).toBe(
+      'x:public:UserTweets',
+    )
+    expect(
+      rateScope('https://www.instagram.com/api/v1/feed/user/1/', 'b'),
+    ).toBe('instagram:session:b')
+    expect(rateScope('https://pbs.twimg.com/media/a.jpg', 'a')).toBeUndefined()
+  })
+
+  test('the end comes from retry-after, else x-rate-limit-reset, else a fallback', () => {
+    const now = 1_000_000
+    const end = (headers: Record<string, string>, scope = 'x:session:a:Q') =>
+      limitEnd(new Headers(headers), scope, now)
+    expect(end({ 'retry-after': '30' })).toBe(now + 30_000)
+    expect(end({ 'x-rate-limit-reset': String(now / 1000 + 900) })).toBe(
+      now + 900_000,
+    )
+    expect(end({})).toBe(now + 15 * 60_000)
+    expect(end({}, 'fxtwitter:public')).toBe(now + 5 * 60_000)
+    // A reset already past is no end.
+    expect(end({ 'x-rate-limit-reset': '1' })).toBe(now + 15 * 60_000)
   })
 })

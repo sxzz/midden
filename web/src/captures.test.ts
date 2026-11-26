@@ -66,6 +66,7 @@ test('a post reports its own capture and media', () => {
   expect(recordStatus(record({})).label).toBe('正在采集')
   expect(recordStatus(record({ waiting: 'queue' })).label).toBe('排队中')
   expect(recordStatus(record({ waiting: 'retry' })).label).toBe('等待重试')
+  expect(recordStatus(record({ waiting: 'rate_limit' })).label).toBe('限流中')
   expect(recordStatus(record({ state: 'failed', done: true }))).toEqual({
     label: '失败',
     tone: 'failed',

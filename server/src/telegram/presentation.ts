@@ -91,6 +91,7 @@ export function webRoute(
 export function waitLabel(waiting: string | undefined): string {
   if (waiting === 'retry') return '等待重试'
   if (waiting === 'paused') return '已暂停'
+  if (waiting === 'rate_limit') return '限流中'
   return waiting ? '排队中' : '正在采集'
 }
 
@@ -291,6 +292,8 @@ export interface ProgressInput {
   stopped: boolean
   /** Its update is paused, or all background work is. */
   paused?: boolean
+  /** Unfinished members waiting for the end of a rate limit. */
+  limited?: number
   next: string
   maxBatch: number
   pageError: boolean
@@ -340,6 +343,7 @@ export function progressMessage(
       p.total - p.complete - p.partial - p.failed - p.known,
     )
     body = `${heading}\n${p.url}\n\n本次 ${p.total} 项：已保存 ${p.complete} · 内容不完整 ${p.partial} · 失败 ${p.failed}${p.known ? ` · 原站已删除或封禁 ${p.known}` : ''} · 进行中 ${running}`
+    if (p.limited && !p.done && !p.stopped) body += `（限流中 ${p.limited}）`
     if (p.added !== undefined && p.added + (p.updated ?? 0) > 0)
       body += `\n其中新增 ${p.added} · 更新 ${p.updated ?? 0}`
   }

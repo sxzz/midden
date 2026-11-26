@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer'
+import { rateLimitedKey } from '../platform.ts'
 import {
   FetchResponse,
   ResolveResponse,
@@ -81,7 +82,10 @@ export function responseError(
       code === 429 ? '来源平台限流' : '来源平台暂时不可用，请稍后重试',
       seconds,
     )
-    error.rateLimited = code === 429
+    if (code === 429) {
+      error.rateLimited = true
+      error.metadata.set(rateLimitedKey, '1')
+    }
     return error
   }
   // Not retried within this job, but nothing is blocked: a suspension can be

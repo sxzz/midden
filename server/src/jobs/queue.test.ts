@@ -14,6 +14,7 @@ import {
   JobQueue,
   PermanentError,
   RANK,
+  RateLimitError,
   RetryError,
   setUpdateJobsPaused,
   SnoozeError,
@@ -21,6 +22,7 @@ import {
   type Job,
   type QueueOptions,
 } from './queue.ts'
+import { limitedUntil, recordRateLimit } from './rate-limits.ts'
 
 const logger = pino({ level: 'silent' })
 let queue: JobQueue | undefined
@@ -255,6 +257,139 @@ describe('JobQueue', () => {
     queue.start()
     await queue.drain()
     expect(rows(db)[0]?.runAt.getTime()).toBe(clock + 30_000)
+  })
+
+  test('a rate-limited job waits for the end without an attempt; others run', async () => {
+    let clock = 5000
+    const seen: string[] = []
+    const limited = new Set(['a', 'b'])
+    const { db, queue } = setup(
+      {
+        ask: {
+          queue: 'main',
+          maxAttempts: 1,
+          run: async (job) => {
+            if (limited.has(job.ref))
+              throw new RateLimitError('api:one', clock + 60_000)
+            seen.push(job.ref)
+          },
+        },
+      },
+      { now: () => clock },
+    )
+    for (const ref of ['a', 'b', 'c']) queue.enqueue(db, 'ask', ref)
+    queue.start()
+    await queue.drain()
+    // Out of attempts were it a failure; a limit is no failure.
+    expect(seen).toEqual(['c'])
+    expect(
+      rows(db).map((row) => [row.ref, row.attempt, row.rateScope, +row.runAt]),
+    ).toEqual([
+      ['a', 0, 'api:one', 65_000],
+      ['b', 0, 'api:one', 65_000],
+    ])
+    // Nothing is looked at again before the end.
+    clock += 59_000
+    await queue.drain()
+    expect(seen).toEqual(['c'])
+    limited.clear()
+    clock += 1000
+    await queue.drain()
+    expect(seen).toEqual(['c', 'a', 'b'])
+    expect(rows(db)).toEqual([])
+  })
+
+  test('a job waiting for a rate limit keeps its update and its rank; a retry clears the scope', async () => {
+    const clock = 5000
+    let limited = true
+    const { db, queue } = setup(
+      {
+        ask: {
+          queue: 'main',
+          run: async () => {
+            if (limited) throw new RateLimitError('api:one', clock + 60_000)
+            throw new Error('flaky')
+          },
+        },
+      },
+      { now: () => clock },
+    )
+    addUpdate(db, 'w', 'watch')
+    queue.enqueue(db, 'ask', 'a', { updateId: 'w' })
+    const [before] = rows(db)
+    queue.start()
+    await queue.drain()
+    expect(rows(db)).toMatchObject([
+      {
+        updateId: 'w',
+        priority: before!.priority,
+        attempt: 0,
+        rateScope: 'api:one',
+      },
+    ])
+    expect(before!.priority).toBe(RANK.watch)
+    // Once it runs and fails otherwise, it no longer waits for the limit.
+    limited = false
+    db.update(jobs)
+      .set({ runAt: new Date(clock) })
+      .run()
+    await queue.drain()
+    expect(rows(db)).toMatchObject([
+      { updateId: 'w', attempt: 1, rateScope: null, lastError: 'flaky' },
+    ])
+  })
+
+  test('a rate limit and the jobs waiting for it outlast a restart', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'midden-queue-'))
+    try {
+      const file = path.join(dir, 'midden.db')
+      let clock = 5000
+      const seen: string[] = []
+      const handlers = {
+        ask: {
+          queue: 'main',
+          run: async (job: Job) => {
+            const until = limitedUntil(db(), 'api:one', clock)
+            if (until) throw new RateLimitError('api:one', until)
+            seen.push(job.ref)
+          },
+        },
+      }
+      let current: Database
+      const db = () => current
+      const first = setup(handlers, {
+        db: (current = openDatabase(file)),
+        now: () => clock,
+      })
+      recordRateLimit(
+        first.db,
+        { scope: 'api:one', until: clock + 60_000, reason: 'HTTP 429' },
+        clock,
+      )
+      first.queue.enqueue(first.db, 'ask', 'a')
+      first.queue.start()
+      await first.queue.drain()
+      await first.queue.stop()
+      first.db.$client.close()
+
+      const second = setup(handlers, {
+        db: (current = openDatabase(file)),
+        now: () => clock,
+      })
+      expect(limitedUntil(second.db, 'api:one', clock)).toBe(65_000)
+      expect(rows(second.db)).toMatchObject([
+        { ref: 'a', attempt: 0, rateScope: 'api:one' },
+      ])
+      second.queue.start()
+      await second.queue.drain()
+      expect(seen).toEqual([])
+      clock += 60_000
+      await second.queue.drain()
+      expect(seen).toEqual(['a'])
+      second.db.$client.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test('fails permanent errors without retrying', async () => {

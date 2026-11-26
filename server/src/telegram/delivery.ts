@@ -4,6 +4,7 @@ import {
   captureWaits,
   collectionProgress,
   collectionReasons,
+  rateLimitedMembers,
 } from '#capture/records.ts'
 import { updateRecord } from '#capture/updates.ts'
 import { newId } from '#db/id.ts'
@@ -393,6 +394,10 @@ export class DeliveryWorker {
             done: progress.done,
             stopped: progress.stopped,
             paused: pausedRecord(db, recordId),
+            limited: rateLimitedMembers(
+              db,
+              progress.pages.map((page) => page.submission.id),
+            ),
             next: progress.next,
             maxBatch: progress.maxBatch,
             pageError: progress.error === 'partial_pages',

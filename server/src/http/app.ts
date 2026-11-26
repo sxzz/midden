@@ -190,7 +190,11 @@ export function createApi(options: HttpOptions) {
       .route('/storage', storageRoutes(options.storage))
       .route(
         '/queue',
-        queueRoutes(ctx.db, options.queue ?? { worker: () => undefined }),
+        queueRoutes(
+          ctx.db,
+          options.queue ?? { worker: () => undefined },
+          ctx.now,
+        ),
       )
       .route('/', captureRoutes(ctx, { dev: !!options.dev }))
       .route('/', accountRoutes(ctx))

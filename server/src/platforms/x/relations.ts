@@ -160,12 +160,16 @@ async function listPublic(
   })
   if (!response.ok) {
     await response.body?.cancel()
-    if (response.status === 429)
-      throw new ProviderError(
+    if (response.status === 429) {
+      const error = new ProviderError(
         status.UNAVAILABLE,
         'FxTwitter 公共接口限流',
         retrySeconds(response.headers.get('retry-after')),
       )
+      error.rateLimited = true
+      error.metadata.set(rateLimitedKey, '1')
+      throw error
+    }
     throw new ProviderError(
       status.UNAVAILABLE,
       `FxTwitter 公共接口返回 HTTP ${response.status}`,

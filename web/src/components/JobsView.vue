@@ -2,16 +2,23 @@
 import { computed, onActivated, onDeactivated, shallowRef } from 'vue'
 import { call, client, errorText, type QueueState } from '../api'
 import { toast } from '../composables/useToast'
-import { jobTypeLabel, queueStatus, webLatency } from '../jobs'
+import {
+  jobTypeLabel,
+  queueStatus,
+  rateLimitEnd,
+  rateLimitName,
+  webLatency,
+} from '../jobs'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 
 // 设置 → 管理员面板 → 后台任务: what the worker is doing and how far behind
-// it is; pausing all of it, or the job types that only tidy up; how fast
-// the web process has answered lately. Read again every few seconds while
-// open.
+// it is; pausing all of it, or the job types that only tidy up; the APIs
+// that rate-limited us, whose jobs wait for the end; how fast the web
+// process has answered lately. Read again every few seconds while open.
 const REFRESH = 5000
 const state = shallowRef<QueueState>()
+const now = shallowRef(new Date())
 const error = shallowRef('')
 const busy = shallowRef(false)
 let timer: ReturnType<typeof setInterval> | undefined
@@ -19,6 +26,7 @@ let timer: ReturnType<typeof setInterval> | undefined
 async function load() {
   try {
     state.value = await call(client.queue.$get())
+    now.value = new Date()
     error.value = ''
   } catch (e) {
     error.value = errorText(e)
@@ -39,6 +47,22 @@ async function save(json: { paused?: boolean; types?: string[] }) {
         json: json as Parameters<typeof client.queue.control.$put>[0]['json'],
       }),
     )
+  } catch (e) {
+    toast(errorText(e))
+  } finally {
+    busy.value = false
+  }
+}
+// Ends a limit early: its jobs run at once, and an API still limiting us
+// says so again.
+async function clearLimit(scope: string) {
+  if (busy.value) return
+  busy.value = true
+  try {
+    state.value = await call(
+      client.queue['rate-limits'].clear.$post({ json: { scope } }),
+    )
+    now.value = new Date()
   } catch (e) {
     toast(errorText(e))
   } finally {
@@ -82,6 +106,17 @@ const latency = computed(() => state.value?.web && webLatency(state.value.web))
         :trailing="state.control.types.includes(type) ? '已暂停' : '运行'"
         :disabled="busy"
         @select="toggleType(type)"
+      />
+    </ListSection>
+    <ListSection v-if="state.rate_limits.length" title="限流">
+      <ListButton
+        v-for="limit in state.rate_limits"
+        :key="limit.scope"
+        :label="rateLimitName(limit)"
+        :hint="`${rateLimitEnd(limit, now)} · 等待 ${limit.waiting}`"
+        trailing="解除"
+        :disabled="busy"
+        @select="clearLimit(limit.scope)"
       />
     </ListSection>
     <ListSection v-if="state.backlog.length" title="队列">

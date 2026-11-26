@@ -1,3 +1,4 @@
+import { rateLimitedKey } from '../platform.ts'
 import { Metadata, status } from '../rpc.ts'
 
 export class ProviderError extends Error {
@@ -31,12 +32,15 @@ export function responseError(
   account: boolean,
   retry?: string | null,
 ): ProviderError {
-  if (code === 429)
-    return new ProviderError(
+  if (code === 429) {
+    const error = new ProviderError(
       status.RESOURCE_EXHAUSTED,
       'Instagram 请求过于频繁，请稍后重试',
       retry,
     )
+    error.metadata.set(rateLimitedKey, '1')
+    return error
+  }
   if (code >= 500)
     return new ProviderError(
       status.UNAVAILABLE,

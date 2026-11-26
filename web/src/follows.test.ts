@@ -97,6 +97,17 @@ describe('list fetches', () => {
         { list: 'followers', state: 'waiting', fetched: 0 },
       ]),
     ).toBe('关注 失败：账号不可用 · 粉丝 等待中')
+    expect(
+      relationsText([
+        {
+          list: 'following',
+          state: 'running',
+          expected: 300,
+          fetched: 120,
+          rate_limited: true,
+        },
+      ]),
+    ).toBe('关注 120/300，限流中')
     expect(relationsDone(undefined)).toBe(true)
   })
 })

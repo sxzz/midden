@@ -58,6 +58,7 @@ const waitLabels: Record<NonNullable<CaptureRecord['waiting']>, string> = {
   queue: '排队中',
   retry: '等待重试',
   paused: '已暂停',
+  rate_limit: '限流中',
 }
 /**
  * What a capture says that only found again what its source is known to be:

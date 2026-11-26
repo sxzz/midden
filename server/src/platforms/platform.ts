@@ -71,8 +71,9 @@ export interface Relations {
 }
 
 /**
- * Trailer on a failure meaning every way to ask is rate-limited: wait for
- * its `retry-after` rather than count the failure as an attempt.
+ * Trailer on a failure caused by a rate limit (HTTP 429, X's error 88,
+ * Instagram's "please wait"): the job waits for the limit's end rather than
+ * count the failure as an attempt (`#capture/rate-limits.ts`).
  */
 export const rateLimitedKey = 'rate-limited'
 

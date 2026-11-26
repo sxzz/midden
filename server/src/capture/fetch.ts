@@ -28,7 +28,7 @@ import {
 } from '#platforms/protocol.ts'
 import { provider as findProvider, supports } from '#platforms/registry.ts'
 import { status } from '#platforms/rpc.ts'
-import { traceUpstream } from '#platforms/upstream.ts'
+import { traceUpstream, type RateGate } from '#platforms/upstream.ts'
 import {
   MAX_MEDIA,
   MAX_PURPOSED_MEDIA,
@@ -47,6 +47,7 @@ import { finalizeSettled, loadCapture, validateExecution } from './lifecycle.ts'
 import { cacheKey, isRemoved, mediaKey } from './media-key.ts'
 import { cachedBlob, enqueueThumbnail, reuseKey } from './media-reuse.ts'
 import { storedOptions } from './options.ts'
+import { rateGate, rateLimitWait } from './rate-limits.ts'
 import { resolveCaptureScope } from './scope.ts'
 import { observeSourceState } from './source-state.ts'
 import { loadStaging, stageResult } from './staging.ts'
@@ -171,8 +172,9 @@ export async function runCapture(ctx: CaptureContext, job: Job): Promise<void> {
         url: collection.url,
       },
     })
+    const gate = rateGate(ctx, capture.connectionId)
     const response = await traceUpstream(
-      { logger, classify: (error) => classifyFailure(job, error) },
+      { logger, classify: (error) => classifyFailure(job, error), gate },
       async () => {
         try {
           if (deferred) {
@@ -190,7 +192,7 @@ export async function runCapture(ctx: CaptureContext, job: Job): Promise<void> {
           }
           return await platform.fetch({ ...request, credential }, signal)
         } catch (error) {
-          throw onFetchError(ctx, capture, revision, error)
+          throw onFetchError(ctx, capture, revision, error, gate)
         }
       },
     )
@@ -234,7 +236,10 @@ function onFetchError(
   capture: { connectionId: string | null; collectionId: string },
   revision: number | null,
   error: unknown,
+  gate: RateGate,
 ): unknown {
+  const limited = rateLimitWait(gate, error)
+  if (limited) return limited
   if (capture.connectionId)
     markReauth(ctx, capture.connectionId, revision, error)
   const gone = sourceState(error)

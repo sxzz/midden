@@ -56,6 +56,9 @@ export const jobs = sqliteTable(
     // The update (更新) whose work this is, inherited from the job that
     // enqueued it; pausing the update pauses these.
     updateId: text(),
+    // The rate limit (`rate_limits.scope`) the job waits for, its `run_at`
+    // the limit's end; cleared when the job next fails or snoozes.
+    rateScope: text(),
   },
   (t) => [
     // Also how expired leases are found: running jobs are few, and naming
@@ -66,8 +69,28 @@ export const jobs = sqliteTable(
     index('jobs_update')
       .on(t.updateId)
       .where(sql`${t.updateId} IS NOT NULL`),
+    index('jobs_rate_scope')
+      .on(t.rateScope)
+      .where(sql`${t.rateScope} IS NOT NULL`),
   ],
 )
+
+/**
+ * APIs that rate-limited us, by scope (`#jobs/rate-limits.ts`): the jobs
+ * that ask one wait until `until`, without using an attempt. A row stays
+ * after it ends; the next limit of the scope starts over.
+ */
+export const rateLimits = sqliteTable('rate_limits', {
+  // `fxtwitter:public`, `x:session:<connection>:<endpoint>`,
+  // `instagram:session:<connection>`.
+  scope: text().primaryKey(),
+  until: timestamp().notNull(),
+  // What the platform said, e.g. `HTTP 429`.
+  reason: text().notNull(),
+  // Rate-limited answers since the limit started.
+  hits: integer().notNull(),
+  since: timestamp().notNull(),
+})
 
 /** What a platform says of content that is gone: see `collectionStates`. */
 export const sourceStates = ['deleted', 'suspended'] as const
