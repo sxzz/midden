@@ -26,6 +26,22 @@ export function mediaKey(
     : `url:${resource.url}`
 }
 
+/**
+ * What `assets.cache_key` holds: the rendition's own key (the sha256 of the
+ * platform and the whole immutable key), which reuse of a stored blob is
+ * looked up by. NULL where it is the media key, so the same hash is not
+ * stored twice; '' where there is no immutable key, which is never reused.
+ */
+export function cacheKey(
+  platform: string,
+  resource: { immutableKey: string },
+  key: string,
+): string | null {
+  if (!resource.immutableKey) return ''
+  const own = sha256Hex(canonicalJson([platform, resource.immutableKey]))
+  return own === key ? null : own
+}
+
 /** Whether the owner removed this media (已移除), so it is not fetched. */
 export function isRemoved(db: Executor, key: string): boolean {
   return !!db

@@ -14,7 +14,7 @@ import {
 } from '#jobs/queue.ts'
 import { finalizeSettled, validateExecution } from './lifecycle.ts'
 import { isRemoved } from './media-key.ts'
-import { cachedBlob, enqueueThumbnail } from './media-reuse.ts'
+import { cachedBlob, enqueueThumbnail, reuseKey } from './media-reuse.ts'
 import { acceptsMediaType, sniffMediaType } from './media-type.ts'
 import { enqueueUpload } from './upload.ts'
 import type { Transaction } from '#db/client.ts'
@@ -61,7 +61,7 @@ function reuseMedia(ctx: CaptureContext, assetId: string): boolean {
     const row = loadAsset(tx, assetId)
     if (row?.asset.state !== 'pending') return true
     validateExecution(tx, row.capture)
-    const cached = cachedBlob(tx, row.asset.cacheKey)
+    const cached = cachedBlob(tx, reuseKey(row.asset))
     if (!cached) return false
     attach(ctx, tx, row.asset, cached)
     return true
@@ -111,14 +111,14 @@ export async function runDownload(
   await assetLocks.run(job.ref, async () => {
     const row = ctx.db.transaction((tx) => loadAsset(tx, job.ref))
     if (row?.asset.state !== 'pending') return
-    const { cacheKey } = row.asset
-    if (!cacheKey) {
+    const key = reuseKey(row.asset)
+    if (!key) {
       if (!skipRemoved(ctx, job.ref)) await download(ctx, job)
       return
     }
     // Identical renditions wait for the first download instead of repeating it.
-    if (!(await waitFor(cacheLocks, cacheKey))) throw new SnoozeError(1000)
-    await cacheLocks.run(cacheKey, async () => {
+    if (!(await waitFor(cacheLocks, key))) throw new SnoozeError(1000)
+    await cacheLocks.run(key, async () => {
       // Checked only now: the media may have been removed while waiting.
       if (skipRemoved(ctx, job.ref)) return
       if (!reuseMedia(ctx, job.ref)) await download(ctx, job)

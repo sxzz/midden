@@ -42,10 +42,10 @@ import {
   sourceStateExplicit,
 } from './errors.ts'
 import { validateGraph } from './graph.ts'
-import { canonicalJson, sha256Hex } from './json.ts'
+import { sha256Hex } from './json.ts'
 import { finalizeSettled, loadCapture, validateExecution } from './lifecycle.ts'
-import { isRemoved, mediaKey } from './media-key.ts'
-import { cachedBlob, enqueueThumbnail } from './media-reuse.ts'
+import { cacheKey, isRemoved, mediaKey } from './media-key.ts'
+import { cachedBlob, enqueueThumbnail, reuseKey } from './media-reuse.ts'
 import { storedOptions } from './options.ts'
 import { resolveCaptureScope } from './scope.ts'
 import { observeSourceState } from './source-state.ts'
@@ -499,14 +499,14 @@ function commit(
     for (const [position, resource] of staged.resources.entries()) {
       const assetId = newId()
       const key = mediaKey(collection.platform, resource)
-      const cacheKey = resource.immutableKey
-        ? sha256Hex(canonicalJson([collection.platform, resource.immutableKey]))
-        : ''
+      const cache = cacheKey(collection.platform, resource, key)
       // Media the owner removed is listed but never fetched again.
       const removed = isRemoved(tx, key)
       // Media stored before under the same immutable key is ready at once,
       // with no download job: most media of a capture made again.
-      const reused = removed ? undefined : cachedBlob(tx, cacheKey)
+      const reused = removed
+        ? undefined
+        : cachedBlob(tx, reuseKey({ cacheKey: cache, mediaKey: key }))
       tx.insert(assets)
         .values({
           id: assetId,
@@ -514,7 +514,7 @@ function commit(
           position,
           sourceUrl: resource.url,
           kind: resource.kind as 'image' | 'video',
-          cacheKey,
+          cacheKey: cache,
           mediaKey: key,
           ...(removed ? { state: 'removed' as const } : {}),
           ...(reused ? { state: 'ready' as const, blobId: reused } : {}),

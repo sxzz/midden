@@ -611,8 +611,13 @@ export const assets = sqliteTable(
     purpose: text().notNull().default(''),
     altText: text().notNull().default(''),
     sensitive: bool().notNull().default(false),
-    // sha256 of [platform, immutable key]: reuse across captures.
-    cacheKey: text().notNull().default(''),
+    // What names this rendition for reuse across captures (sha256 of
+    // [platform, immutable key]), stored only where it is not `media_key`:
+    // NULL means the same as `media_key` (every X media; an Instagram one
+    // whose key has no rendition), so the key is not kept twice. '' means
+    // no immutable key, which is never reused (`media_key` is then
+    // `url:<address>`). See `capture/media-key.ts` `cacheKey`.
+    cacheKey: text(),
     // The media itself, whatever rendition was picked (see
     // `capture/media-key.ts`): what a removal mark names.
     mediaKey: text().notNull().default(''),
@@ -626,6 +631,8 @@ export const assets = sqliteTable(
   },
   (t) => [
     uniqueIndex('assets_position').on(t.captureId, t.position),
+    // Rows whose `cache_key` is NULL (the same as `media_key`) are found with
+    // `assets_media`; rows with a key of their own with this index.
     index('assets_cache')
       .on(t.cacheKey)
       .where(sql`${t.state} = 'ready' AND ${t.cacheKey} <> ''`),

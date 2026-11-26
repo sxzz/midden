@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
+import { sql } from 'drizzle-orm'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
   assets,
@@ -15,6 +16,7 @@ import {
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, postGraph } from '#testing/fake-platform.ts'
 import { captureHandlers } from './handlers.ts'
+import { cachedBlob } from './media-reuse.ts'
 import { submit } from './submit.ts'
 import { detectThumbnailer } from './thumbnail.ts'
 import type { Resource } from '#platforms/protocol.ts'
@@ -127,6 +129,107 @@ describe('media', () => {
       .from(assets)
       .all()
     expect(second).toEqual({ state: 'ready', blobId: first!.blobId })
+  })
+
+  describe('the key media is reused by', () => {
+    const keys = (c: CaptureContext) =>
+      c.db
+        .select({ cacheKey: assets.cacheKey, mediaKey: assets.mediaKey })
+        .from(assets)
+        .orderBy(sql`rowid`)
+        .all()
+
+    test('an X media key is also its media key, so it is stored once', async () => {
+      const { ctx, requests } = setup(
+        () => [{ url: 'https://m.test/a.jpg', immutableKey: 'x:media:img:1' }],
+        { 'https://m.test/a.jpg': JPEG },
+      )
+      await capture(ctx, '1')
+      const enqueue = vi.spyOn(ctx.queue, 'enqueue')
+      await capture(ctx, '2')
+      expect(requests).toHaveLength(1)
+      expect(enqueue.mock.calls.map((call) => call[1])).not.toContain(
+        'download',
+      )
+      const rows = keys(ctx)
+      expect(rows.map((row) => row.cacheKey)).toEqual([null, null])
+      expect(rows[0]!.mediaKey).toBe(rows[1]!.mediaKey)
+      expect(rows[0]!.mediaKey).toMatch(/^[0-9a-f]{64}$/)
+      expect(ctx.db.select({ state: assets.state }).from(assets).all()).toEqual(
+        [{ state: 'ready' }, { state: 'ready' }],
+      )
+    })
+
+    test('an Instagram media key keeps each quality apart, by its own cache key', async () => {
+      let quality = 'video:720x1280:1000'
+      const { ctx, requests } = setup(
+        () => [
+          {
+            url: `https://m.test/${quality}.jpg`,
+            immutableKey: `instagram:media:9:${quality}`,
+          },
+        ],
+        {
+          'https://m.test/video:720x1280:1000.jpg': JPEG,
+          'https://m.test/video:1080x1920:3000.jpg': JPEG2,
+        },
+      )
+      await capture(ctx, '1')
+      await capture(ctx, '2')
+      expect(requests).toHaveLength(1)
+      quality = 'video:1080x1920:3000'
+      await capture(ctx, '3')
+      // Another quality is another download, though the same media.
+      expect(requests).toHaveLength(2)
+      await capture(ctx, '4')
+      expect(requests).toHaveLength(2)
+      const rows = keys(ctx)
+      expect(new Set(rows.map((row) => row.mediaKey)).size).toBe(1)
+      expect(rows.every((row) => /^[0-9a-f]{64}$/.test(row.cacheKey!))).toBe(
+        true,
+      )
+      expect(new Set(rows.map((row) => row.cacheKey)).size).toBe(2)
+      expect(rows.every((row) => row.cacheKey !== row.mediaKey)).toBe(true)
+      expect(ctx.db.select().from(blobs).all()).toHaveLength(2)
+    })
+
+    test('media without an immutable key is never reused, though it has a media key', async () => {
+      const { ctx, requests } = setup(() => [{ url: 'https://m.test/a.jpg' }], {
+        'https://m.test/a.jpg': JPEG,
+      })
+      await capture(ctx, '1')
+      await capture(ctx, '2')
+      expect(requests).toHaveLength(2)
+      expect(keys(ctx)).toEqual([
+        { cacheKey: '', mediaKey: 'url:https://m.test/a.jpg' },
+        { cacheKey: '', mediaKey: 'url:https://m.test/a.jpg' },
+      ])
+      expect(ctx.db.select().from(blobs).all()).toHaveLength(1)
+    })
+
+    test('a key finds a row with none by its media key, only when ready', () => {
+      const { ctx } = setup(() => [], {})
+      const hash = 'a'.repeat(64)
+      ctx.db.$client.exec('PRAGMA foreign_keys = OFF')
+      let position = 0
+      const add = (id: string, cacheKey: string | null, state: string) =>
+        ctx.db.$client
+          .prepare(
+            `INSERT INTO assets (id, capture_id, position, source_url, cache_key, media_key, kind, state, blob_id)
+             VALUES (?, 'k', ?, 'u', ?, ?, 'image', ?, ?)`,
+          )
+          .run(id, position++, cacheKey, hash, state, `blob-${id}`)
+      const find = (key: string) =>
+        ctx.db.transaction((tx) => cachedBlob(tx, key))
+      add('pending', null, 'pending')
+      expect(find(hash)).toBeUndefined()
+      // No immutable key: not reusable, whatever its media key is.
+      add('empty', '', 'ready')
+      expect(find(hash)).toBeUndefined()
+      add('ready', null, 'ready')
+      expect(find(hash)).toBe('blob-ready')
+      expect(find('')).toBeUndefined()
+    })
   })
 
   test('rejected and unsupported media leave a partial capture', async () => {
