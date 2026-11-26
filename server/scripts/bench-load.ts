@@ -18,7 +18,11 @@
 // as a backup or a long report would), wal=1 (`all` only: turn off the
 // checkpoints and count what each write transaction adds to the WAL during
 // the update, by code and by table, with bench-load/wal-meter.ts; the report
-// is in bench/wal.txt).
+// is in bench/wal.txt), ui=1 (poll what the web app polls during an
+// update instead of the library alone: bench-load/probe.ts).
+//
+// The web process records its event-loop delay each second
+// (bench/lag.json); the result gives its distribution during the update.
 //
 // Every post has an image, one in ten a video too; media upload to a fake
 // R2 bucket, raw responses to a fake raw bucket, thumbnails go through
@@ -59,6 +63,7 @@ const DB = path.join(DATA, 'midden.db')
 const FFMPEG = process.env.FFMPEG || 'ffmpeg'
 const SECRET = 's'.repeat(48)
 const WAL_LOG = options.wal ? path.join(DATA, 'bench', 'wal-log.json') : ''
+const LAG_LOG = path.join(DATA, 'bench', 'lag.json')
 if (WAL_LOG && mode !== 'all') {
   console.error('wal=1 needs the `all` mode: one process, one connection')
   process.exit(2)
@@ -99,7 +104,7 @@ function token(): string {
   const value = `md_bench${Date.now()}`
   const db = new DatabaseSync(DB)
   db.prepare(
-    'INSERT INTO api_tokens (id, digest, name, created_at) VALUES (?, ?, ?, ?)',
+    'INSERT INTO api_tokens (id, digest, label, created_at) VALUES (?, ?, ?, ?)',
   ).run(
     `bench${Date.now()}`,
     createHash('sha256').update(value).digest('hex'),
@@ -192,6 +197,7 @@ const env = {
   BENCH_S3_RAW: s3Raw.endpoint,
   BENCH_IMAGE: media.image,
   BENCH_VIDEO: media.video,
+  BENCH_LAG_LOG: LAG_LOG,
   ...(WAL_LOG ? { BENCH_WAL_LOG: WAL_LOG } : {}),
 }
 const server = path.join(HERE, 'bench-load', 'server.ts')
@@ -312,7 +318,13 @@ for (let round = 1; round < Number(options.rounds ?? 1); round++) {
 const probe = start(
   'probe',
   process.execPath,
-  [path.join(HERE, 'bench-load', 'probe.ts'), base, apiToken, ids[0]!],
+  [
+    path.join(HERE, 'bench-load', 'probe.ts'),
+    base,
+    apiToken,
+    ids[0]!,
+    ...(options.ui ? ['ui'] : []),
+  ],
   {},
 )
 await sleep(10_000)
@@ -324,6 +336,7 @@ const finishedBefore = (
     .get() as { n: number }
 ).n
 const t0 = performance.now()
+const lagFrom = Date.now()
 const walFrom = statSync(`${DB}-wal`, { throwIfNoEntry: false })?.size ?? 0
 await api('/updates', {
   target: { target: 'many', ids },
@@ -416,6 +429,28 @@ await Promise.all(
   children.filter((c) => c.exitCode === null).map((c) => once(c, 'exit')),
 )
 const logs = servers.map((s) => s.text()).join('\n')
+/** The web process's per-second event-loop delay during the update. */
+function lagStats() {
+  let seconds: { at: number; max: number }[] = []
+  try {
+    seconds = JSON.parse(readFileSync(LAG_LOG, 'utf8')) as typeof seconds
+  } catch {}
+  const during = seconds
+    .filter((s) => s.at >= lagFrom && s.at <= lagFrom + loadSeconds * 1000)
+    .map((s) => s.max)
+    .toSorted((a, b) => a - b)
+  const at = (p: number) =>
+    Math.round(
+      during[Math.min(during.length - 1, Math.floor(during.length * p))] ?? 0,
+    )
+  return {
+    seconds: during.length,
+    p50_ms: at(0.5),
+    p95_ms: at(0.95),
+    max_ms: Math.round(during.at(-1) ?? 0),
+    over200: during.filter((v) => v >= 200).length,
+  }
+}
 const count = (pattern: string) => logs.split(pattern).length - 1
 const result = {
   mode,
@@ -426,13 +461,17 @@ const result = {
   captures: captured,
   captures_per_second: Math.round((captured / loadSeconds) * 10) / 10,
   backlog_after: leftBehind,
-  healthz: stats(during(probed.healthz!)),
-  list: stats(during(probed.list!)),
-  write: stats(during(probed.write!)),
-  baseline: {
-    healthz: stats(probed.healthz!.filter((s) => s.t < 10_000)),
-    list: stats(probed.list!.filter((s) => s.t < 10_000)),
-  },
+  ...Object.fromEntries(
+    Object.entries(probed)
+      .filter(([, list]) => list.length)
+      .map(([name, list]) => [name, stats(during(list))]),
+  ),
+  lag: lagStats(),
+  baseline: Object.fromEntries(
+    Object.entries(probed)
+      .filter(([name, list]) => list.length && name !== 'write')
+      .map(([name, list]) => [name, stats(list.filter((s) => s.t < 10_000))]),
+  ),
   log: {
     locked: count('database is locked'),
     slow_requests: count('"msg":"slow request"'),
