@@ -155,22 +155,6 @@ const pages = computed(
     !!follows.value ||
     !!link.value,
 )
-// The desktop sidebar shows what this page loaded, beside it.
-useAside(() => ({
-  id: props.id,
-  collection: collection.value,
-  savedAt: savedAt.value,
-  follows: follows.value,
-  points: points.value,
-  morePoints: !!next.value,
-  record: record.value,
-  updating: updating.value,
-  pages: {
-    stats: trendable.value,
-    changes: !!changesPage.value,
-    follows: followChangeable.value,
-  },
-}))
 // Behind a public link the page only reads: no capture, notes or deletion.
 const shared = computed(() => !!shareSlug.value)
 /** The owner's links that make this collection public, so none surprises. */
@@ -237,6 +221,25 @@ const {
     ? { target: 'collection', id: props.id }
     : undefined,
 )
+// The desktop sidebar shows what this page loaded, beside it.
+useAside(() => ({
+  id: props.id,
+  collection: collection.value,
+  savedAt: savedAt.value,
+  follows: follows.value,
+  points: points.value,
+  morePoints: !!next.value,
+  record: record.value,
+  updating: updating.value,
+  pages: {
+    stats: trendable.value,
+    changes: !!changesPage.value,
+    follows: followChangeable.value,
+  },
+  watch: watchTrailing.value
+    ? { label: watchTrailing.value, hint: watchHint.value }
+    : undefined,
+}))
 const watchSheet = shallowRef(false)
 watch(
   () => props.id,

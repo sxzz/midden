@@ -19,6 +19,8 @@ export interface DetailAside {
   updating: boolean
   /** Which of the collection's own pages have anything to show. */
   pages: { stats: boolean; changes: boolean; follows: boolean }
+  /** A profile's 定期更新: how often, and when it runs next. */
+  watch?: { label: string; hint?: string }
 }
 
 /** The shown page's context; pages kept alive but hidden have none here. */

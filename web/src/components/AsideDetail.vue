@@ -174,6 +174,15 @@ const related = computed(() => {
           <dt>占用空间</dt>
           <dd>{{ storage }}</dd>
         </div>
+        <div v-if="profile && detail.watch">
+          <dt>定期更新</dt>
+          <dd>
+            {{ detail.watch.label
+            }}<template v-if="detail.watch.hint">
+              · {{ detail.watch.hint }}</template
+            >
+          </dd>
+        </div>
         <div v-if="source">
           <dt>来源</dt>
           <dd>

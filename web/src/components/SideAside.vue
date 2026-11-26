@@ -42,6 +42,7 @@ const detail = computed(() =>
 const settingsPages = [
   { name: 'settings-accounts', label: '采集账号' },
   { name: 'settings-passkeys', label: '通行密钥' },
+  { name: 'settings-watches', label: '定期更新' },
   { name: 'settings-admin', label: '管理员面板' },
   { name: 'settings-storage', label: '存储用量' },
   { name: 'settings-jobs', label: '后台任务' },

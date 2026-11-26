@@ -218,6 +218,22 @@ export async function mockDesktop(page: Page) {
     if (path.endsWith('/availability')) return json({ available: true })
     if (path.endsWith('/annotation')) return json({ note: '', tags: [] })
     if (path.endsWith('/update')) return json({ older: false })
+    if (path === '/v1/watches')
+      return json({
+        items:
+          url.searchParams.get('id') === PROFILE_ID
+            ? [
+                {
+                  id: 'w1',
+                  target: 'collection',
+                  target_id: PROFILE_ID,
+                  frequency: 'daily',
+                  enabled: true,
+                  next_run_at: '2026-11-27T03:00:00Z',
+                },
+              ]
+            : [],
+      })
     if (path === '/v1/shares') return json([])
     if (path === '/v1/origins' || path.endsWith('/passkeys')) return json([])
     const item = [...posts, profile].find(

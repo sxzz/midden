@@ -123,6 +123,7 @@ test.describe('from 1280px', () => {
     const captures = sidebar(page).getByRole('region', { name: '采集信息' })
     await expect(captures).toContainText('3 次')
     await expect(captures).toContainText('173.6 MB')
+    await expect(captures).toContainText(/定期更新\s*每天 · 下次/)
     // A graph has the sidebar's room instead.
     await relations.getByRole('link', { name: '关系图谱' }).click()
     await expect(page.locator('h1')).toHaveText('关系图谱')
