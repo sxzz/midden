@@ -1,6 +1,14 @@
+import process from 'node:process'
 import { test as base, expect, type Page } from '@playwright/test'
 
 export { expect, type Page }
+
+/**
+ * A Chromium already running, reached over CDP at `E2E_CDP`
+ * (`http://localhost:9222`), when Playwright's own cannot start here. Tests
+ * get contexts of their own in it, and leave it running. Off unless set.
+ */
+const CDP = process.env.E2E_CDP
 
 /**
  * Playwright's test, failing any test during which a page threw an uncaught
@@ -8,6 +16,19 @@ export { expect, type Page }
  * where no assertion looks, and the test still passes.
  */
 export const test = base.extend<{ pageErrors: Error[] }>({
+  ...(CDP
+    ? {
+        browser: [
+          async ({ playwright }, use) => {
+            const browser = await playwright.chromium.connectOverCDP(CDP)
+            await use(browser)
+            // Disconnects, closing only the contexts the tests made.
+            await browser.close()
+          },
+          { scope: 'worker' },
+        ],
+      }
+    : {}),
   pageErrors: [
     async ({ context }, use) => {
       const errors: Error[] = []
