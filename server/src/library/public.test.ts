@@ -2,7 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import { afterEach, describe, expect, onTestFinished, test } from 'vitest'
 import { collections } from '#db/schema.ts'
 import { createApi } from '#http/app.ts'
-import { createToken } from '#http/auth.ts'
+import { createSession, SESSION_COOKIE } from '#http/auth.ts'
 import {
   capture,
   entity,
@@ -148,13 +148,15 @@ async function setup() {
   ids.bob = (await capture(c, profile('600'))).collectionId
   for (const id of ['a1', 'm1', 'r1', 'x1', 'q1', 'e3'])
     ids[id] = (await capture(c, post(id))).collectionId
-  const app = createApi({ ctx: c })
-  const token = createToken(c.db, 'test')
+  const app = createApi({ ctx: c, webAppUrl: 'https://midden.test/app/' })
+  // The owner, signed in to the web app: revoking a share is theirs alone.
+  const session = createSession(c.db)
   const owner = (path: string, init: RequestInit = {}) =>
     app.request(path, {
       ...init,
       headers: {
-        Authorization: `Bearer ${token}`,
+        Cookie: `${SESSION_COOKIE}=${session}`,
+        Origin: 'https://midden.test',
         'Content-Type': 'application/json',
       },
     })

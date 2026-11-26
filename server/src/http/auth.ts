@@ -7,10 +7,11 @@ import {
 } from 'node:crypto'
 import { eq, lt } from 'drizzle-orm'
 import { setCookie } from 'hono/cookie'
-import { newId } from '#db/id.ts'
-import { apiTokens, webSessions } from '#db/schema.ts'
+import { matchedRoutes } from 'hono/route'
+import { webSessions } from '#db/schema.ts'
 import type { Database } from '#db/client.ts'
-import type { Context } from 'hono'
+import type { Env } from './validate.ts'
+import type { Context, MiddlewareHandler } from 'hono'
 
 const INIT_DATA_MAX_AGE = 300
 const CLOCK_SKEW = 30
@@ -115,19 +116,25 @@ export function pruneSessions(db: Database, now = Date.now()): void {
     .run()
 }
 
-/** Make an API token; only its digest is kept, so show it once. */
-export function createToken(db: Database, name: string): string {
-  const value = `md_${randomBytes(24).toString('base64url')}`
-  db.insert(apiTokens)
-    .values({ id: newId(), digest: digest(value), name })
-    .run()
-  return value
+/**
+ * Routes that delete (收藏, 媒体, 所有视频, 标签, 收藏夹, 分享, 定期更新,
+ * 采集账号, 通行密钥, 域名) or manage API tokens: the owner's web session only, never
+ * an API token, whatever its permission. `createApi` decides what is a
+ * session.
+ */
+export const ownerOnly: MiddlewareHandler<Env> = async (c, next) => {
+  if (!c.get('session'))
+    return c.json({ error: '只能在网页中登录后进行此操作' }, 403)
+  await next()
 }
 
-export function tokenValid(db: Database, value: string): boolean {
-  return !!db
-    .select({ id: apiTokens.id })
-    .from(apiTokens)
-    .where(eq(apiTokens.digest, digest(value)))
-    .get()
+/**
+ * The route a request reached, as usage counts name it: the method and the
+ * pattern (`GET /v1/collections/:id`), not the path with its ids.
+ */
+export function endpointOf(c: Context): string {
+  const route = matchedRoutes(c).findLast(
+    (r) => r.method !== 'ALL' && !r.path.endsWith('*'),
+  )
+  return `${c.req.method} ${route?.path ?? c.req.path}`
 }

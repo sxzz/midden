@@ -9,6 +9,7 @@ import { createApi } from '#http/app.ts'
 import { WebLoad } from '#http/load.ts'
 import { watchLitestream } from '#litestream.ts'
 import { launchBot, type BotHandle } from '#telegram/launch.ts'
+import { TokenUsage } from '#tokens/usage.ts'
 import { StorageUsage } from '#usage/storage.ts'
 import { writeStatus, type Stamped, type WorkerReport } from './status-file.ts'
 import type { WebLoadSignal } from '#jobs/throttle.ts'
@@ -61,6 +62,10 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
     logger,
     notify,
   })
+  // Requests per API token, written about once a minute.
+  const tokenUsage = new TokenUsage({ db, logger })
+  tokenUsage.start()
+  cleanups.push(() => tokenUsage.stop())
   const api = createApi({
     ctx,
     telegram: config.telegram,
@@ -71,6 +76,7 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
     queue: { worker: options.worker, web: () => load.report() },
     challengeKey: deriveKey(config.secretKey, 'passkey-challenge'),
     notify,
+    tokenUsage,
     ...(config.telegram ? { botState: () => bot?.state() ?? 'starting' } : {}),
   })
 

@@ -17,6 +17,7 @@ import {
 import { deleteCollection, deleteCollections } from '#library/delete.ts'
 import { storageUsed } from '#library/read.ts'
 import { deleteTag, renameTag } from '#library/tags.ts'
+import { ownerOnly } from './auth.ts'
 import { json, type Env } from './validate.ts'
 
 const accountJson = (
@@ -85,7 +86,7 @@ export function accountRoutes(ctx: AccountsContext) {
       return c.body(null, 204)
     })
 
-    .delete('/accounts/:id', (c) => {
+    .delete('/accounts/:id', ownerOnly, (c) => {
       revokeAccount(ctx, c.req.param('id'))
       return c.body(null, 204)
     })
@@ -96,7 +97,7 @@ export function accountRoutes(ctx: AccountsContext) {
       c.json(renameTag(ctx.db, c.req.param('id'), c.req.valid('json').name)),
     )
 
-    .delete('/tags/:id', (c) => {
+    .delete('/tags/:id', ownerOnly, (c) => {
       deleteTag(ctx.db, c.req.param('id'))
       return c.body(null, 204)
     })
@@ -126,13 +127,14 @@ export function accountRoutes(ctx: AccountsContext) {
       },
     )
 
-    .delete('/collections/:id', (c) => {
+    .delete('/collections/:id', ownerOnly, (c) => {
       deleteCollection(ctx.db, c.req.param('id'))
       return c.body(null, 204)
     })
 
     .post(
       '/collections/delete',
+      ownerOnly,
       json(
         v.strictObject({
           ids: v.pipe(v.array(v.string()), v.minLength(1)),

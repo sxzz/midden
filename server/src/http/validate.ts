@@ -1,8 +1,13 @@
 import { sValidator } from '@hono/standard-validator'
 import * as v from 'valibot'
+import type { TokenInfo } from '#tokens/tokens.ts'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 
-export type Env = { Variables: { session: boolean } }
+/**
+ * `session`: the owner's web session, which alone may delete (`ownerOnly`);
+ * `token`: the API token the request came with, if any.
+ */
+export type Env = { Variables: { session: boolean; token?: TokenInfo } }
 
 const invalid = (
   result: { success: boolean },

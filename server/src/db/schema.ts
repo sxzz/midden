@@ -1118,13 +1118,43 @@ export const webSessions = sqliteTable(
   (t) => [index('web_sessions_expires').on(t.expiresAt)],
 )
 
-/** REST API tokens, by the SHA-256 of the token. */
+/**
+ * API tokens (API 令牌), by the SHA-256 of the secret, which is shown once.
+ * Rolling one replaces the digest and keeps the row, so its label,
+ * permission and usage stay.
+ */
 export const apiTokens = sqliteTable('api_tokens', {
   id: text().primaryKey(),
   digest: text().notNull().unique(),
-  name: text().notNull(),
+  label: text().notNull(),
+  /** `ro` reads; `rw` also writes, except what deletes (owner session only). */
+  permission: text({ enum: ['ro', 'rw'] })
+    .notNull()
+    .default('rw'),
   createdAt: createdAt(),
+  /** Null: never expires. */
+  expiresAt: timestamp(),
+  /** Kept in memory and written with the usage counts, a minute late at most. */
+  lastUsedAt: timestamp(),
 })
+
+/**
+ * Requests made with each token, per UTC day (YYYY-MM-DD) and endpoint
+ * (method and route pattern). The web process counts in memory and adds
+ * its counts here about once a minute (`#tokens/usage.ts`).
+ */
+export const apiTokenUsage = sqliteTable(
+  'api_token_usage',
+  {
+    tokenId: text()
+      .notNull()
+      .references(() => apiTokens.id, { onDelete: 'cascade' }),
+    day: text().notNull(),
+    endpoint: text().notNull(),
+    count: integer().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.tokenId, t.day, t.endpoint] })],
+)
 
 /**
  * The owner's passkeys. Each is bound to the RP ID (the host name) of the

@@ -6,8 +6,8 @@ import { handle, type Request } from '#telegram/commands.ts'
 import { COMMANDS } from '#telegram/presentation.ts'
 import { softAuthenticator } from '#testing/authenticator.ts'
 import { testContext } from '#testing/context.ts'
+import { tokenSecret } from '#testing/tokens.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
-import { createToken } from './auth.ts'
 import { addOrigin } from './origins.ts'
 import { TOKEN_TTL } from './passkeys.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -538,7 +538,7 @@ describe('passkey management', () => {
       ).status,
     ).toBe(400)
     // Nor through another caller's session.
-    const other = createToken(ctx!.db, 'other')
+    const other = tokenSecret(ctx!.db)
     const response = await app.request('/passkeys', {
       method: 'POST',
       headers: {
@@ -557,7 +557,7 @@ describe('passkey management', () => {
   test('needs a session or token', async () => {
     const { app, ctx } = setup()
     expect((await app.request('/passkeys')).status).toBe(401)
-    const token = createToken(ctx.db, 't')
+    const token = tokenSecret(ctx.db)
     expect(
       (
         await app.request('/passkeys', {

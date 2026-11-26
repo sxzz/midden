@@ -4,9 +4,9 @@ import path from 'node:path'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { openDatabase, type Database } from '#db/client.ts'
 import { createApi } from '#http/app.ts'
-import { createToken } from '#http/auth.ts'
 import { testContext } from '#testing/context.ts'
 import { levels, recordingLogger } from '#testing/logs.ts'
+import { tokenSecret } from '#testing/tokens.ts'
 import { checkAlerts, setAlertThresholds, type AlertFacts } from './alerts.ts'
 import { datasetLimits, fetchR2Usage } from './analytics.ts'
 import { compositionDue, storedComposition } from './composition.ts'
@@ -560,7 +560,7 @@ describe('storage usage', () => {
     const { db, storage } = setup()
     ctx = testContext()
     const app = createApi({ ctx, storage })
-    const token = createToken(ctx.db, 'test')
+    const token = tokenSecret(ctx.db)
     const call = (url: string, init: RequestInit = {}) =>
       app.request(url, {
         ...init,

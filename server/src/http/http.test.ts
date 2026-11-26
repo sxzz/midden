@@ -4,8 +4,9 @@ import { captureHandlers } from '#capture/handlers.ts'
 import { watchLitestream, type LitestreamWatch } from '#litestream.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, fakeProfile, postGraph } from '#testing/fake-platform.ts'
+import { tokenSecret } from '#testing/tokens.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
-import { createToken } from './auth.ts'
+import { createSession } from './auth.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
 const BOT = '123:secret-token'
@@ -60,17 +61,33 @@ function setup({
     dev,
     litestream: watch,
   })
-  const token = createToken(ctx.db, 'test')
+  // The owner in the web app, signed in: what most of the API is for.
+  const session = createSession(ctx.db)
   const call = (path: string, init: RequestInit = {}) =>
     app.request(path, {
       ...init,
       headers: {
-        Authorization: `Bearer ${token}`,
+        Cookie: `${SESSION_COOKIE}=${session}`,
+        Origin: new URL(WEB).origin,
         'Content-Type': 'application/json',
         ...init.headers,
       },
     })
-  return { ctx, app, call, watch }
+  /** The same with an API token instead of the session. */
+  const withToken =
+    (permission: 'ro' | 'rw') =>
+    (path: string, init: RequestInit = {}) => {
+      const token = tokenSecret(ctx!.db, permission)
+      return app.request(path, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...init.headers,
+        },
+      })
+    }
+  return { ctx, app, call, watch, withToken }
 }
 
 function initData(user: number, authDate = Math.floor(Date.now() / 1000)) {

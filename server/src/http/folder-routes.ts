@@ -6,6 +6,7 @@ import {
   listFolders,
   updateFolder,
 } from '#library/folders.ts'
+import { ownerOnly } from './auth.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
@@ -32,7 +33,7 @@ export function folderRoutes(ctx: AccountsContext) {
         c.json(updateFolder(ctx.db, c.req.param('id'), c.req.valid('json'))),
     )
 
-    .delete('/folders/:id', (c) => {
+    .delete('/folders/:id', ownerOnly, (c) => {
       deleteFolder(ctx.db, c.req.param('id'))
       return c.body(null, 204)
     })

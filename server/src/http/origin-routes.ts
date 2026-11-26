@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import * as v from 'valibot'
+import { ownerOnly } from './auth.ts'
 import { addOrigin, listOrigins, removeOrigin } from './origins.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -30,7 +31,7 @@ export function originRoutes(o: {
         return c.json(added)
       },
     )
-    .delete('/:id', (c) => {
+    .delete('/:id', ownerOnly, (c) => {
       const removed = removeOrigin(db, o.webAppUrl, c.req.param('id'))
       if (!removed) return c.json({ error: '域名不存在' }, 404)
       o.notify?.(

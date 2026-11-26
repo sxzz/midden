@@ -11,6 +11,7 @@ import {
   previewVideoRemoval,
   startVideoRemoval,
 } from '#library/video-removal.ts'
+import { ownerOnly } from './auth.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
@@ -32,7 +33,7 @@ export function mediaRoutes(ctx: AccountsContext) {
       .post('/media-removals/preview', json(Target), (c) =>
         c.json(previewRemoval(ctx, c.req.valid('json'))),
       )
-      .post('/media-removals', json(Target), (c) =>
+      .post('/media-removals', ownerOnly, json(Target), (c) =>
         c.json(removeMedia(ctx, c.req.valid('json'))),
       )
       .post('/media-removals/restore', json(Item), (c) => {
@@ -45,7 +46,7 @@ export function mediaRoutes(ctx: AccountsContext) {
       .post('/collections/:id/video-removal/preview', (c) =>
         c.json(previewVideoRemoval(ctx, c.req.param('id'))),
       )
-      .post('/collections/:id/video-removal', (c) =>
+      .post('/collections/:id/video-removal', ownerOnly, (c) =>
         c.json(startVideoRemoval(ctx, c.req.param('id')), 202),
       )
       .get('/collections/:id/video-removal', (c) => {

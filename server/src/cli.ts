@@ -11,12 +11,12 @@ import { loadConfig } from '#config.ts'
 import { deriveKey } from '#crypto.ts'
 import { openDatabase } from '#db/client.ts'
 import { maintainDatabase } from '#db/maintain.ts'
-import { createToken } from '#http/auth.ts'
 import { rawGetCommand } from '#raw/get.ts'
 import { openRawStore } from '#raw/store.ts'
+import { tokenCreate } from '#tokens/cli.ts'
 
 const USAGE = `usage: node src/cli.ts <command>
-  token create [name]
+  token create --ro|--rw [--label <label>] [--expires <ISO time|30m|12h|7d|never>]
   backup <directory>
   media-migrate [--dry-run] [--concurrency N] [--verify-download] [--limit N]
   media-prune-local [--dry-run] [--concurrency N] [--verify-download]
@@ -58,8 +58,10 @@ if (command === 'maintain') {
 const db = openDatabase(config.databasePath)
 
 if (command === 'token' && args[0] === 'create') {
-  // Printed once: only a digest is stored.
-  console.info(createToken(db, args[1] || 'api'))
+  process.exitCode = tokenCreate(db, args.slice(1), {
+    out: (line) => console.info(line),
+    err: (line) => console.error(line),
+  })
 } else if (command === 'backup' && args[0]) {
   // A consistent copy of the database while the server keeps running.
   // Media files never change once written; copy them with rsync.

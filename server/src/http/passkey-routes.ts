@@ -3,7 +3,7 @@ import { Hono, type Context } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { HTTPException } from 'hono/http-exception'
 import * as v from 'valibot'
-import { SESSION_COOKIE, startSession } from './auth.ts'
+import { ownerOnly, SESSION_COOKIE, startSession } from './auth.ts'
 import {
   deletePasskey,
   listPasskeys,
@@ -153,7 +153,7 @@ export function passkeyRoutes(o: PasskeyOptions) {
       if (!passkey) return c.json({ error: '通行密钥不存在' }, 404)
       return c.json(passkey)
     })
-    .delete('/:id', (c) => {
+    .delete('/:id', ownerOnly, (c) => {
       const passkey = deletePasskey(ctx.db, c.req.param('id'))
       if (!passkey) return c.json({ error: '通行密钥不存在' }, 404)
       o.notify?.(`已删除通行密钥：${describe(passkey)}`)

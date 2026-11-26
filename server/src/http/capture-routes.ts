@@ -42,6 +42,7 @@ import {
 import { captures, collections, library, submissions } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { deleteAll } from '#library/delete.ts'
+import { ownerOnly } from './auth.ts'
 import { Cursor, json, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { Job } from '#capture/submit.ts'
@@ -484,6 +485,7 @@ export function captureRoutes(
 
       .post(
         '/library/delete-all',
+        ownerOnly,
         json(v.strictObject({ confirm: v.literal('delete all') })),
         (c) => {
           c.req.valid('json')

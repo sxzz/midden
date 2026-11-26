@@ -3,14 +3,16 @@ import { Hono } from 'hono'
 import { deleteCookie, getCookie } from 'hono/cookie'
 import * as v from 'valibot'
 import { HEARTBEAT_TIMEOUT, setHeartbeatTimeoutMinutes } from '#settings.ts'
+import { authenticate, bearer } from '#tokens/tokens.ts'
+import { TokenUsage } from '#tokens/usage.ts'
 import { accountRoutes } from './account-routes.ts'
 import {
   deleteSession,
+  endpointOf,
   initDataUser,
   SESSION_COOKIE,
   sessionValid,
   startSession,
-  tokenValid,
 } from './auth.ts'
 import { captureRoutes } from './capture-routes.ts'
 import { Challenges } from './challenges.ts'
@@ -25,6 +27,7 @@ import { publicRoutes } from './public-routes.ts'
 import { queueRoutes, type QueueInfo } from './queue-routes.ts'
 import { shareRoutes } from './share-routes.ts'
 import { storageRoutes } from './storage-routes.ts'
+import { tokenRoutes } from './token-routes.ts'
 import { json, type Env } from './validate.ts'
 import { watchRoutes } from './watch-routes.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -58,6 +61,8 @@ export interface HttpOptions {
   storage?: StorageUsage
   /** 后台任务: the worker's and this process's state. */
   queue?: QueueInfo
+  /** Counts requests per API token; one is made when absent (tests). */
+  tokenUsage?: TokenUsage
 }
 
 /**
@@ -68,6 +73,7 @@ export interface HttpOptions {
 export function createApi(options: HttpOptions) {
   const { ctx } = options
   const now = options.now ?? Date.now
+  const usage = options.tokenUsage ?? new TokenUsage({ db: ctx.db, now })
   const { webAppUrl } = options
   const origins = () => allowedOrigins(ctx.db, webAppUrl)
   const fromWeb = (origin: string | undefined) =>
@@ -124,21 +130,41 @@ export function createApi(options: HttpOptions) {
       .use(async (c, next) => {
         const header = c.req.header('Authorization')
         if (header !== undefined) {
-          const token = header.startsWith('Bearer ') ? header.slice(7) : ''
-          if (!token || !tokenValid(ctx.db, token))
-            return c.json({ error: '登录已失效或令牌无效' }, 401)
-          c.set('session', false)
-          await next()
+          const auth = authenticate(ctx.db, bearer(header), now())
+          if (!auth.ok)
+            return c.json(
+              {
+                error:
+                  auth.error === 'token_expired'
+                    ? '令牌已过期'
+                    : '登录已失效或令牌无效',
+              },
+              401,
+            )
+          const { token } = auth
+          if (token.permission === 'ro' && !READS.has(c.req.method)) {
+            usage.record(token.id, endpointOf(c))
+            return c.json({ error: '只读令牌不能修改内容' }, 403)
+          }
+          // A token is never the owner's session, so it cannot delete
+          // (`ownerOnly`). The one exception is a development server, whose
+          // local proxy signs the web app in with a token: there a read and
+          // write token stands in for the session. Production
+          // (NODE_ENV=production) never does this.
+          c.set('session', !!options.dev && token.permission === 'rw')
+          c.set('token', token)
+          try {
+            await next()
+          } finally {
+            usage.record(token.id, endpointOf(c))
+          }
           return
         }
         const cookie = getCookie(c, SESSION_COOKIE)
         if (!cookie) return c.json({ error: '需要登录' }, 401)
         if (!sessionValid(ctx.db, cookie, now()))
           return c.json({ error: '登录已失效或令牌无效' }, 401)
-        if (
-          !['GET', 'HEAD'].includes(c.req.method) &&
-          !fromWeb(c.req.header('Origin'))
-        )
+        if (!READS.has(c.req.method) && !fromWeb(c.req.header('Origin')))
           return c.json({ error: '请求来源无效' }, 403)
         c.set('session', true)
         await next()
@@ -203,6 +229,7 @@ export function createApi(options: HttpOptions) {
       .route('/', watchRoutes(ctx))
       .route('/', shareRoutes(ctx))
       .route('/passkeys', passkeyRoutes(passkeys))
+      .route('/tokens', tokenRoutes(ctx.db, usage, now))
       .route(
         '/origins',
         originRoutes({ ctx, webAppUrl, notify: options.notify, now }),
@@ -212,3 +239,5 @@ export function createApi(options: HttpOptions) {
 }
 
 export type Api = ReturnType<typeof createApi>
+
+const READS = new Set(['GET', 'HEAD'])
