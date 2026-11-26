@@ -4,7 +4,7 @@
 
 生产环境使用 `compose.yaml` 运行同一个镜像的两个容器，镜像内含 Node.js 26 与 ffmpeg（用于缩略图和视频尺寸探测）：`midden` 是网页进程（`MIDDEN_ROLE=web`：HTTP、Telegram Bot、Litestream 心跳），`midden-worker` 运行任务队列和定时的维护（`MIDDEN_ROLE=worker`），见[架构](architecture.md#进程)。两个容器读同一个 `.env`，以非 root 用户运行，数据目录都挂载到 `/data`。`midden-worker` 等 `midden` 健康后才启动（迁移由网页进程应用），它的健康检查是容器内 `127.0.0.1:8082/healthz`，不对外发布端口。可选的第三个容器 `litestream` 把数据库持续复制到 R2，见「Litestream」。
 
-对外访问需要 HTTPS 反向代理（例如 Cloudflare Tunnel），把整个域名转发到服务端口，至少包括 `/app/`、`/v1/`、`/media/`。Mini App 与通行密钥都要求 HTTPS。
+对外访问需要 HTTPS 反向代理（例如 Cloudflare Tunnel），把整个域名转发到服务端口，至少包括 `/app/`、`/v1/`、`/media/`，给 AI agent 用时还有 `/agent/v1/` 与 `/agent.md`。Mini App 与通行密钥都要求 HTTPS。
 
 ## 网页登录
 
@@ -18,6 +18,24 @@
 - 删除域名：同时删除这个域名的通行密钥，之前发出的这个域名的 `/passkey` 链接失效。`WEB_APP_URL` 的域名不能删除。添加和删除域名时 Bot 给所有者发一条消息。
 
 网页也可以继续单独部署在 Cloudflare 静态托管（`pnpm --filter @midden/web run deploy`），此时代理需把同域的 `/v1/` 与 `/media/` 转发到本服务。
+
+## API 令牌
+
+脚本和 AI agent 用 API 令牌访问 `/v1` 与 `/agent/v1`（见[架构](architecture.md#agent-api)；给 agent 的说明在 `https://<域名>/agent.md`，把这个地址和令牌交给它即可）。
+
+- 网页「设置 → API 令牌」：创建（名称、只读或读写、过期时间或永不过期），令牌只显示一次；之后可改名称和过期时间、轮换、撤销，并看到上次使用时间和最近 30 天的请求次数。只有登录网页的所有者能管理令牌，令牌自己不能。
+- 命令行（在部署目录；本地开发用 `pnpm --filter @midden/server cli token create …`）：
+
+  ```sh
+  docker compose exec midden node server/src/cli.ts token create --ro --label research --expires 7d
+  docker compose exec midden node server/src/cli.ts token create --rw --label sync --expires 2027-01-01T00:00:00Z
+  ```
+
+  `--ro` 或 `--rw` 必须给一个；`--label` 默认 `cli`；`--expires` 是 ISO 时间、`30m`/`12h`/`7d` 这样从现在算起的时长，或 `never`（默认）。标准输出只有令牌本身，名称、权限和过期时间写在标准错误。
+
+- 令牌不能删除任何东西（收藏、媒体、标签、收藏夹等），只读令牌不能写入。agent 接口所有令牌合计同时最多 2 个请求。
+- 这个版本之前创建的令牌迁移为读写、永不过期，原来的名字成为名称，原令牌照常可用。
+- 本地开发服务器（`.local/dev.sh`）的 Vite 代理用 `.local/dev-token` 中的令牌替网页登录。它迁移为读写令牌后照常可用；开发模式（不设 `NODE_ENV=production`）下读写令牌在 `/v1` 上等同网页会话，所以开发服务器上的删除和令牌管理也照常可用。生产环境没有这个例外。
 
 ## 发布
 
