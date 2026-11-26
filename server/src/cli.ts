@@ -10,6 +10,7 @@ import { MediaSigner } from '#blob/signer.ts'
 import { loadConfig } from '#config.ts'
 import { deriveKey } from '#crypto.ts'
 import { openDatabase } from '#db/client.ts'
+import { maintainDatabase } from '#db/maintain.ts'
 import { createToken } from '#http/auth.ts'
 import { rawGetCommand } from '#raw/get.ts'
 import { openRawStore } from '#raw/store.ts'
@@ -19,7 +20,8 @@ const USAGE = `usage: node src/cli.ts <command>
   backup <directory>
   media-migrate [--dry-run] [--concurrency N] [--verify-download] [--limit N]
   media-prune-local [--dry-run] [--concurrency N] [--verify-download]
-  raw-get <capture id> [position]`
+  raw-get <capture id> [position]
+  maintain [--vacuum] [--rebuild-search]   (web, worker and Litestream stopped)`
 
 function count(value: string | undefined): number | undefined {
   if (value === undefined) return undefined
@@ -34,6 +36,25 @@ function count(value: string | undefined): number | undefined {
 // Administrative commands; run with `node src/cli.ts <command>`.
 const [command, ...args] = process.argv.slice(2)
 const config = loadConfig()
+
+if (command === 'maintain') {
+  // Opens the database itself, alone: before anything else does here.
+  const { values } = parseArgs({
+    args,
+    options: {
+      vacuum: { type: 'boolean' },
+      'rebuild-search': { type: 'boolean' },
+    },
+  })
+  process.exit(
+    maintainDatabase(config.databasePath, {
+      vacuum: values.vacuum,
+      rebuildSearch: values['rebuild-search'],
+      print: (line) => console.info(line),
+    }),
+  )
+}
+
 const db = openDatabase(config.databasePath)
 
 if (command === 'token' && args[0] === 'create') {

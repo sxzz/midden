@@ -346,7 +346,8 @@ describe('library search', () => {
     const rows = () =>
       ctx.db.select().from(catalog).orderBy(asc(catalog.collectionId)).all()
     const kept = rows()
-    // Back to the catalog before the migrations, then through them.
+    // Back to the catalog before the migrations, then through them (and
+    // the one that gives it its id, as the first rebuilds the table).
     const client = ctx.db.$client
     client.exec(`DROP TRIGGER catalog_search_insert;
       DROP TRIGGER catalog_search_update;
@@ -362,9 +363,11 @@ describe('library search', () => {
       UPDATE catalog SET search = 'the old text';`)
     const folder = new URL('../../drizzle/', import.meta.url)
     const migrations = readdirSync(folder)
-      .filter((name) => /_(?:search_columns|catalog_fts)$/.test(name))
+      .filter((name) =>
+        /_(?:search_columns|catalog_fts|catalog_id)$/.test(name),
+      )
       .toSorted()
-    expect(migrations).toHaveLength(2)
+    expect(migrations).toHaveLength(3)
     const started = performance.now()
     for (const name of migrations)
       for (const statement of readFileSync(

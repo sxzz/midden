@@ -79,12 +79,15 @@ function sleepSync(ms: number) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 }
 
-/** Deploy, or with `check` only report; returns the result line. */
-export function deploy(
+/**
+ * Starting and stopping the services of the checkout in `dir`, in the
+ * order deploy and maintenance (scripts/maintain.ts) share.
+ */
+export function services(
   dir: string,
   run: Run,
-  { check = false, sleep = sleepSync }: DeployOptions = {},
-): string {
+  sleep: (ms: number) => void = sleepSync,
+) {
   function imageRevision(image: string): string {
     return run('docker', [
       'image',
@@ -247,6 +250,34 @@ export function deploy(
     run('docker', ['compose', 'stop', 'midden'])
     if (litestream) run('docker', ['compose', 'stop', LITESTREAM])
   }
+
+  return {
+    imageRevision,
+    runningRevision,
+    settings,
+    start,
+    litestreamConfigChanged,
+    hasWorker,
+    stopWorker,
+    stopAll,
+  }
+}
+
+/** Deploy, or with `check` only report; returns the result line. */
+export function deploy(
+  dir: string,
+  run: Run,
+  { check = false, sleep = sleepSync }: DeployOptions = {},
+): string {
+  const {
+    imageRevision,
+    runningRevision,
+    settings,
+    start,
+    litestreamConfigChanged,
+    stopWorker,
+    stopAll,
+  } = services(dir, run, sleep)
 
   /**
    * With everything stopped, a copy of the database and its WAL, kept with

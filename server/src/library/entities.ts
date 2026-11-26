@@ -297,8 +297,8 @@ function attachCurrentProfiles(r: Reader, views: readonly WithGraph[]): void {
       ${sql.raw(avatarOf('r', 're.entity_key'))} AS avatar
     FROM json_each(${list(ids)}) wanted
     -- The account's newest capture as a root or a root's author.
-    JOIN catalog k ON k.rowid = (
-      SELECT s.rowid FROM catalog s WHERE s.subject_entity_id = wanted.value
+    JOIN catalog k ON k.id = (
+      SELECT s.id FROM catalog s WHERE s.subject_entity_id = wanted.value
       ORDER BY s.revision_at DESC, s.revision_id DESC LIMIT 1)
     JOIN revisions r ON r.id = k.revision_id
     LEFT JOIN capture_metrics m ON m.capture_id = r.capture_id

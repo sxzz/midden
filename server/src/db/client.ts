@@ -33,6 +33,12 @@ export interface OpenOptions {
    * so a request never copies WAL pages into the database.
    */
   autoCheckpoint?: boolean
+  /**
+   * Hold the database alone until closed, or fail at once with
+   * `database is locked` while any other connection has it open (an idle
+   * one too): for offline maintenance, which must not run beside the app.
+   */
+  exclusive?: boolean
 }
 
 /** Open (creating if needed) the database and apply pending migrations. */
@@ -42,8 +48,15 @@ export function openDatabase(file: string, options: OpenOptions = {}) {
   const client = new DatabaseSync(file, {
     enableForeignKeyConstraints: true,
     // Restored to this after the opening optimize below.
-    timeout: busyTimeout,
+    timeout: options.exclusive ? 0 : busyTimeout,
   })
+  if (options.exclusive) {
+    // The first write takes an exclusive lock on the file and keeps it.
+    // Every other connection holds a shared lock on it for as long as it is
+    // open, in WAL mode too, so this fails while one is.
+    client.exec('PRAGMA locking_mode = EXCLUSIVE')
+    client.exec('BEGIN IMMEDIATE; COMMIT')
+  }
   // WAL lets readers proceed while the single writer commits. Litestream
   // (litestream.yml) may replicate the file from its WAL, holding a read
   // transaction so that only its own checkpoints restart the WAL. SQLite's
@@ -66,6 +79,8 @@ export function openDatabase(file: string, options: OpenOptions = {}) {
   searchFunctions(client)
   const db = immediateWrites(drizzle({ client }))
   if (options.migrate !== false) migrate(db, { migrationsFolder: MIGRATIONS })
+  // Maintenance writes its statistics itself, when it writes at all.
+  if (options.exclusive) return db
   // Fresh statistics can wait for the next run (every 6 hours) rather than
   // hold up a start while another writer has the lock.
   client.exec('PRAGMA busy_timeout = 0')

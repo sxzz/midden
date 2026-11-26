@@ -73,7 +73,7 @@ function candidatesSQL(query: SearchQuery): SQL {
   if (trigrams ?? pairs) return (trigrams ?? pairs)!
   // Nothing either index can find: every row is a candidate, scored by the
   // columns that hold the query.
-  return sql`SELECT k.rowid AS rowid, -(
+  return sql`SELECT k.id AS rowid, -(
       8 * (instr(k.search_name, ${query.folded}) > 0)
       + 4 * (instr(k.search_text, ${query.folded}) > 0)
       + 2 * (instr(k.search_quoted, ${query.folded}) > 0)
@@ -90,7 +90,7 @@ function strictSQL(query: SearchQuery): SQL {
         WHEN ${phraseIn(query.folded)} THEN 2 ELSE 3 END AS tier,
       c.score AS score
     FROM (${candidatesSQL(query)}) c
-    CROSS JOIN catalog k ON k.rowid = c.rowid
+    CROSS JOIN catalog k ON k.id = c.rowid
     ${short.length ? sql`WHERE ${sql.join(short, sql` AND `)}` : sql``}`
 }
 

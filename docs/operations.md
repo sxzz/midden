@@ -371,7 +371,7 @@ Litestream 0.5 把 WAL 中新提交的页面写成 LTX 文件（按页 LZ4 压�
 
 #### 检查点
 
-两个进程的连接都用 WAL、`synchronous = NORMAL`；网页进程 busy timeout 2 秒、关闭自动检查点，worker 10 秒、保留 SQLite 默认的自动检查点（WAL 超过 1000 页时，PASSIVE）。Litestream 一直持有一个读事务，只有它自己的检查点能让 WAL 从头开始写；PASSIVE 检查点越不过它的读事务，所以 worker 的自动检查点不影响复制，把 WAL 页面写回数据库的实际是 Litestream 的检查点。它做 PASSIVE 检查点时持有写锁（向 `_litestream_lock` 写一行作为屏障），把上次以来的 WAL 页面写回数据库，写入在这期间等待：`monitor-interval` 为 10 秒时最多是 10 秒的写入量，几十到几百毫秒，两个进程的 busy timeout 都足够。服务中没有 `wal_checkpoint(RESTART)`、`wal_checkpoint(TRUNCATE)` 和 `VACUUM`：前两者会让 Litestream 重新上传整个数据库，`VACUUM` 把每一页写进 WAL，都不要加。`PRAGMA optimize`（启动时和每 6 小时）和 `PRAGMA incremental_vacuum`（见「维护任务」）是普通的写事务；`cli.ts backup`（手动的在线备份，部署不再用它）只读数据库，但运行期间一直持有读事务。数据库变小的事务（incremental vacuum 截短文件）在 Litestream 0.5.2 中会让同步报 `page number X out-of-bounds for commit size Y`（#875），之后由 #881 修复，固定的 0.5.18 已包含；用 0.5.18 在本地试过：一边复制，一边清空大量数据并分批 incremental vacuum，最新状态与其间三个时刻的恢复都通过完整性检查，最新状态的页数和内容与源数据库相同。
+两个进程的连接都用 WAL、`synchronous = NORMAL`；网页进程 busy timeout 2 秒、关闭自动检查点，worker 10 秒、保留 SQLite 默认的自动检查点（WAL 超过 1000 页时，PASSIVE）。Litestream 一直持有一个读事务，只有它自己的检查点能让 WAL 从头开始写；PASSIVE 检查点越不过它的读事务，所以 worker 的自动检查点不影响复制，把 WAL 页面写回数据库的实际是 Litestream 的检查点。它做 PASSIVE 检查点时持有写锁（向 `_litestream_lock` 写一行作为屏障），把上次以来的 WAL 页面写回数据库，写入在这期间等待：`monitor-interval` 为 10 秒时最多是 10 秒的写入量，几十到几百毫秒，两个进程的 busy timeout 都足够。服务中没有 `wal_checkpoint(RESTART)`、`wal_checkpoint(TRUNCATE)` 和 `VACUUM`：前两者会让 Litestream 重新上传整个数据库，`VACUUM` 把每一页写进 WAL，都不要加；整理数据库在服务全部停止时做（见「数据库整理」）。`PRAGMA optimize`（启动时和每 6 小时）和 `PRAGMA incremental_vacuum`（见「维护任务」）是普通的写事务；`cli.ts backup`（手动的在线备份，部署不再用它）只读数据库，但运行期间一直持有读事务。数据库变小的事务（incremental vacuum 截短文件）在 Litestream 0.5.2 中会让同步报 `page number X out-of-bounds for commit size Y`（#875），之后由 #881 修复，固定的 0.5.18 已包含；用 0.5.18 在本地试过：一边复制，一边清空大量数据并分批 incremental vacuum，最新状态与其间三个时刻的恢复都通过完整性检查，最新状态的页数和内容与源数据库相同。
 
 WAL 的大小：Litestream 做快照时（每天 00:00 UTC；以及它丢了在 WAL 中的位置、重新上传整个数据库时，见「部署与 WAL 中的位置」）直到上传完都不做检查点，WAL 随写入一直变大，负载高时几分钟就超过 1 GB。WAL 超过 `truncate-page-n` 时它先试 PASSIVE，不行再做阻塞的 TRUNCATE；0.5.18 在 TRUNCATE 之后总要在持有写锁的情况下把整个数据库写成一份快照（`checkpoint boundary snapshot`），这期间服务的每个写入都在等待，超过 busy timeout 就以 `database is locked` 失败，并且又上传一次整个数据库。默认的阈值约 500 MB，快照期间的增长就会越过它；一个持续几分钟的读事务（例如每天的数据库组成）也会，所以组成只在 worker 空闲时读。`litestream.yml` 把它设为 1,000,000 页（约 3.8 GiB），只作为最后的保护：快照或读事务结束后，下一次普通的 PASSIVE 检查点（WAL 超过 1000 页时，每次同步之后）把 WAL 写回数据库并从头开始。这个检查点期间 Litestream 也持有写锁，WAL 越大越久。磁盘上要留出 WAL 的空间。设为 `0` 不能关闭它：0.5.16 起 0 表示默认值（#1348），与 Litestream 的文档不同。
 
@@ -571,7 +571,76 @@ worker 每分钟运行一次维护。标 _空闲时_ 的步骤只为腾出空间
 - 为缺少缩略图的媒体补做缩略图；
 - 清理过期的网页会话、通行密钥挑战与 `/passkey` 链接；
 - 每 15 分钟读取存储用量并检查提醒，每天一次统计数据库组成（见「存储用量」，统计在 _空闲时_）；
-- 把空闲页面还给文件系统（_空闲时_）：空闲页面达到 1024 页（4 MiB）时运行 `PRAGMA incremental_vacuum(4096)`，每次最多 16 MiB，两次之间至少 15 分钟，所以积压最多每小时释放 64 MiB；日志 `released free database pages` 给出这次释放的页数、剩余空闲页数（`free`）和总页数（`pages`）。这要求数据库是 `auto_vacuum = INCREMENTAL`：新建的数据库默认如此，已有的数据库要 `VACUUM` 一次才能切换（生产环境已于 2026-11-25 切换），否则这一步什么也不做。
+- 把空闲页面还给文件系统（_空闲时_）：空闲页面达到 1024 页（4 MiB）时运行 `PRAGMA incremental_vacuum(4096)`，每次最多 16 MiB，两次之间至少 15 分钟，所以积压最多每小时释放 64 MiB；日志 `released free database pages` 给出这次释放的页数、剩余空闲页数（`free`）和总页数（`pages`）。这要求数据库是 `auto_vacuum = INCREMENTAL`：新建的数据库默认如此，已有的数据库要 `VACUUM` 一次才能切换（生产环境已于 2026-11-25 切换；`cli.ts maintain --vacuum` 也会切换），否则这一步什么也不做。
+
+## 数据库整理
+
+`cli.ts maintain` 在网页进程、worker 和 Litestream 全部停止时整理数据库（`server/src/db/maintain.ts`）。平时不需要：删除留下的空闲页面由维护任务的 incremental vacuum 归还。用于一次性收回大量空闲页面和半空的页面（例如原始响应移走之后），或怀疑数据库、搜索索引有问题时。
+
+它做的事：
+
+1. 独占打开数据库（`locking_mode = EXCLUSIVE`，取得文件的排他锁）。WAL 模式下每个打开着数据库的连接都持有共享锁，空闲的也一样，所以网页进程、worker 或 Litestream 还开着它时立即失败（`could not take the database for itself …`），什么都不改；整理期间别的进程也打不开它。这个版本有未应用的迁移、或数据库已被更新的版本迁移过时同样拒绝。
+2. 完整性检查（`PRAGMA integrity_check`），不通过就停止，数据库不变。
+3. 带 `--vacuum` 时：`VACUUM INTO` 在同一目录写出整理后的副本 `midden.db.vacuum-<时间>`，设为 `auto_vacuum = INCREMENTAL`。不用原地的 `VACUUM`：它先写一个临时数据库，再把每一页经 WAL 写回（WAL 涨到与数据库一样大）；`VACUUM INTO` 只写一遍，原文件不动，它就是备份。
+4. 在副本上（不带 `--vacuum` 时在原数据库上）：检查搜索索引，两个 FTS5 表的文档与 catalog 的 `id` 一一对应（按 `<表>_docsize`），并通过 FTS5 自己的 `integrity-check`；不对应（或带 `--rebuild-search`）时从 catalog 重建（`delete-all` 后重新插入），再检查一次。然后合并索引段（FTS5 的 `optimize`）、`PRAGMA incremental_vacuum` 归还空闲页面、`ANALYZE`（`analysis_limit = 400`，与服务的 `PRAGMA optimize` 一样），再做一次完整性检查。
+5. 都通过后换上副本：原数据库（连同 WAL）移到 `data/backups/maintain/midden-<时间>.db`，副本改名为 `midden.db`，删去旧的 `-shm`；`backups/maintain/` 中更早的备份删除，只留这一份。任何一步失败都删去副本，原数据库不变（输出 `the original database is unchanged`）。
+6. 输出每一步的耗时，以及前后的大小（页面、其中空闲的、文件与 WAL）。
+
+磁盘上要有副本的空间，约为数据库中有效数据的大小；原数据库留到下一次整理。
+
+耗时：在 3.1 GB 的合成数据库上（开发库加上它所有普通表的 5 份副本，有效数据 2.0 GiB、空闲 0.9 GiB，放在 macOS 的目录中经 OrbStack 访问，与部署机相同）两次分别用了 33 秒和 37 秒：完整性检查 10.6–16.0 秒，`VACUUM INTO` 6.9–8.4 秒，检查搜索索引 0.2 秒（6 万行的 catalog，强制重建 0.8 秒），统计 1 秒，再次完整性检查 9.6–10.9 秒；结果 2.0 GiB。同一个库上原地 `VACUUM` 一步就要 38 秒，并写出 2 GiB 的 WAL。生产环境的 2.8 GB 预计整理 1 分钟左右（文件不在缓存中时读得慢些，按 2 分钟准备），加上停止（worker 最多等 30 秒）与启动（Litestream 15 秒、网页进程和 worker 的健康检查），服务中断约 2–4 分钟。
+
+### 步骤
+
+`scripts/maintain.ts` 在部署机上做完全部步骤，与自动部署用同一个锁（`.local/deploy.lock`，整理期间不会部署），停止与启动的顺序与部署相同：
+
+```sh
+cd ~/midden && node scripts/maintain.ts
+```
+
+加 `--rebuild-search` 总是重建搜索索引，`--no-vacuum` 不整理文件、只做检查、搜索索引和统计。它：
+
+1. 取得部署锁，读出正在运行的版本（整理用这个版本的镜像，它的迁移与数据库一致；没有在运行的版本时不做）；
+2. 依次停掉 worker、网页进程、Litestream（同「自动部署」第 2 步：Litestream 最后停，先把服务最后写的内容复制走）；
+3. `docker compose run --rm --no-deps -T midden node server/src/cli.ts maintain --vacuum`，镜像为 `:sha-<正在运行的提交>`；
+4. 删去 Litestream 的本地状态 `data/.midden.db-litestream/`（整理失败时也删：停止期间的任何写入都让它对不上位置）；
+5. 先启动 Litestream，等一次 `monitor-interval` 加 5 秒，再启动网页进程并检查 `/healthz`，然后启动 worker（同「自动部署」第 4 步）；
+6. 最后一行是结果：`result: maintained the database; <提交> is running again`，失败时 `result: failed: maintenance did not finish (…); <提交> is running again`，此时数据库不变。
+
+手动做时（命令与脚本相同）：
+
+```sh
+cd ~/midden
+mkdir .local/deploy.lock      # 挡住自动部署
+REV=$(docker image inspect "$(docker inspect "$(docker compose ps -q midden)" --format '{{.Image}}')" \
+  --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
+export MIDDEN_IMAGE=ghcr.io/sxzz/midden:sha-$REV
+docker compose stop midden-worker && docker compose stop midden && docker compose stop litestream
+docker compose run --rm --no-deps -T midden node server/src/cli.ts maintain --vacuum
+rm -rf data/.midden.db-litestream
+docker compose up -d litestream && sleep 15
+docker compose up -d --wait midden && docker compose up -d --wait midden-worker
+rmdir .local/deploy.lock
+```
+
+### Litestream
+
+整理换掉了整个文件，Litestream 在 WAL 中的位置随之失效。删去本地状态后，它启动时从存储桶取得位置，把整理后的数据库整个作为下一个事务上传（约为整理后的大小，预计 1.5–2 GB，与回滚之后相同，见「部署与 WAL 中的位置」），每分钟的合并再写成一个同样大的 L1 文件，留到比它更早的快照都过期（约 9 天），这期间存储桶多占同样的空间。这次上传可以接受，但每次整理都有一次，所以不要经常整理。上传期间 Litestream 不做检查点，WAL 随写入变大（见「WAL 的大小」），所以选没有大批更新的时候。整理之前的任一时刻仍可从存储桶恢复，历史不中断。
+
+不启用 Litestream 时没有这些：脚本只停、启服务。
+
+### 回退
+
+整理后的数据库有问题时，换回 `data/backups/maintain/` 中的原数据库（整理之后的写入随之丢失）：与部署的回滚一样，先停 Litestream 再停服务，换上文件并删去新数据库的 `-wal`、`-shm` 和 Litestream 的本地状态，再按顺序启动：
+
+```sh
+docker compose stop litestream && docker compose stop midden-worker && docker compose stop midden
+rm -f data/midden.db-wal data/midden.db-shm
+mv data/backups/maintain/midden-<时间>.db data/midden.db   # 有 -wal 时一并改名为 data/midden.db-wal
+rm -rf data/.midden.db-litestream
+docker compose up -d litestream && sleep 15
+docker compose up -d --wait midden && docker compose up -d --wait midden-worker
+```
 
 ## 从 Go 版迁移
 

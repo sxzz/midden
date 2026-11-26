@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import { collections, collectionStates, library } from '#db/schema.ts'
 import { RANK, type Job } from '#jobs/queue.ts'
@@ -196,7 +196,7 @@ export function stateHistory(
         isNotNull(collectionStates.confirmedAt),
       ),
     )
-    .orderBy(collectionStates.since, sql`rowid`)
+    .orderBy(collectionStates.since, collectionStates.id)
     .all()
 }
 

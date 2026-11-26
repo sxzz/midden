@@ -8,8 +8,9 @@ describe('catalog', () => {
     expect(new Set(grouped).size).toBe(grouped.length)
     expect(grouped.toSorted()).toEqual(COLUMNS.slice(1).toSorted())
     const db = openDatabase(':memory:')
+    // But the id, which SQLite assigns.
     const stored = db.$client
-      .prepare('SELECT name FROM pragma_table_info(?)')
+      .prepare(`SELECT name FROM pragma_table_info(?) WHERE name <> 'id'`)
       .all('catalog')
       .map((row) => row.name)
     expect(COLUMNS.toSorted()).toEqual(stored.toSorted())

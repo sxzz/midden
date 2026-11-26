@@ -183,8 +183,15 @@ const UNKNOWN_LAST = String(Number.MAX_SAFE_INTEGER)
 export const catalog = sqliteTable(
   'catalog',
   {
+    /**
+     * The key of the search indexes (`catalog_fts`, `catalog_cjk`). An
+     * INTEGER PRIMARY KEY is the rowid itself, which VACUUM keeps; the
+     * implicit rowid of a table without one it may renumber.
+     */
+    id: integer().primaryKey(),
     collectionId: text()
-      .primaryKey()
+      .notNull()
+      .unique()
       .references(() => collections.id, { onDelete: 'cascade' }),
     revisionId: text().notNull(),
     revisionAt: integer().notNull(),

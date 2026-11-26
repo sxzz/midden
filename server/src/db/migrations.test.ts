@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { describe, expect, test } from 'vitest'
+import { checkSearchIndexes, intact } from '#library/search-index.ts'
 import { insertRow, migratedBefore, migrateRest } from '#testing/migrations.ts'
 import { openDatabase, type Database } from './client.ts'
 
@@ -93,6 +94,78 @@ describe('raw_response_bodies', () => {
       db.$client.prepare('SELECT response_id FROM raw_upload_failures').all(),
     ).toEqual([{ response_id: 'l2' }])
     expect(db.$client.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(db.$client.prepare('PRAGMA integrity_check').get()).toEqual({
+      integrity_check: 'ok',
+    })
+  })
+})
+
+describe('catalog_id', () => {
+  /** The collections an index finds for a query: by the rowid, before and after. */
+  const find = (db: Database, index: string, query: string) =>
+    db.$client
+      .prepare(
+        `SELECT k.collection_id AS id FROM ${index} f JOIN catalog k ON k.rowid = f.rowid
+          WHERE ${index} MATCH ? ORDER BY 1`,
+      )
+      .all(query)
+      .map((row) => row.id)
+
+  test('a fresh database keys the catalog by an INTEGER PRIMARY KEY', () => {
+    const db = openDatabase(':memory:')
+    expect(
+      db.$client
+        .prepare(
+          `SELECT name, type, pk FROM pragma_table_info('catalog') WHERE pk > 0`,
+        )
+        .all(),
+    ).toEqual([{ name: 'id', type: 'INTEGER', pk: 1 }])
+  })
+
+  test('rows keep their rowids as ids, so the search indexes stay as they are', () => {
+    const db = migratedBefore('catalog_id')
+    const add = (id: string, text: string) => {
+      insertRow(db, 'collections', { id, external_id: id })
+      insertRow(db, 'catalog', { collection_id: id, search_text: text })
+    }
+    for (let i = 1; i <= 20; i++)
+      add(
+        `c${String(i).padStart(2, '0')}`,
+        `post number ${i} ${i % 2 ? '猫咪' : '小狗'}`,
+      )
+    // Gaps, as deletions leave them.
+    db.$client.exec(
+      `DELETE FROM catalog WHERE collection_id IN ('c03', 'c06', 'c09', 'c12')`,
+    )
+    const keys = db.$client
+      .prepare('SELECT rowid AS id, collection_id FROM catalog ORDER BY rowid')
+      .all()
+    const cats = find(db, 'catalog_cjk', '"猫咪"')
+    const numbers = find(db, 'catalog_fts', '"number 1"')
+    expect(cats).toHaveLength(8)
+
+    migrateRest(db)
+
+    expect(
+      db.$client
+        .prepare('SELECT id, collection_id FROM catalog ORDER BY id')
+        .all(),
+    ).toEqual(keys)
+    expect(find(db, 'catalog_cjk', '"猫咪"')).toEqual(cats)
+    expect(find(db, 'catalog_fts', '"number 1"')).toEqual(numbers)
+    expect(checkSearchIndexes(db).every(intact)).toBe(true)
+
+    // The triggers follow the new key.
+    add('c21', 'brand new')
+    expect(find(db, 'catalog_fts', '"brand new"')).toEqual(['c21'])
+    db.$client.exec(
+      `UPDATE catalog SET search_text = 'renamed' WHERE collection_id = 'c21'`,
+    )
+    expect(find(db, 'catalog_fts', '"brand new"')).toEqual([])
+    expect(find(db, 'catalog_fts', '"renamed"')).toEqual(['c21'])
+    db.$client.exec(`DELETE FROM catalog WHERE collection_id = 'c21'`)
+    expect(find(db, 'catalog_fts', '"renamed"')).toEqual([])
+    expect(checkSearchIndexes(db).every(intact)).toBe(true)
     expect(db.$client.prepare('PRAGMA integrity_check').get()).toEqual({
       integrity_check: 'ok',
     })

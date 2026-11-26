@@ -60,7 +60,7 @@ WAL 的写入量：`all wal=1` 关闭检查点，记下每个写事务提交后 
 FFMPEG=ffmpeg node scripts/bench-load.ts /tmp/bench all wal=1 profiles=10 count=300 rounds=2
 ```
 
-`scripts/` 的测试（`scripts/*.test.ts`）用 Node 自带的 `node --test` 运行，`pnpm test` 包含它们。`deploy.test.ts` 用记录调用的假命令代替 docker、git 与 curl，数据目录是临时目录。
+`scripts/` 的测试（`scripts/*.test.ts`）用 Node 自带的 `node --test` 运行，`pnpm test` 包含它们。`deploy.test.ts` 与 `maintain.test.ts` 用记录调用的假命令代替 docker、git 与 curl，数据目录是临时目录。
 
 ## 文档
 

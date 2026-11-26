@@ -682,7 +682,7 @@ function select(
     .filter((hits): hits is SearchHits => !!hits)
   const ranked = searches.pop()
   for (const other of searches)
-    conditions.push(sql`k.rowid IN (SELECT rowid FROM ${sql.raw(other.name)})`)
+    conditions.push(sql`k.id IN (SELECT rowid FROM ${sql.raw(other.name)})`)
   const ctes = [
     ...(related ? [relatedSQL(related)] : []),
     ...searches.map((s) => s.ctes),
@@ -691,8 +691,8 @@ function select(
   // A search drives: SQLite starts from the few rows it finds.
   const source = ranked
     ? related
-      ? `${RELATED} JOIN ${ranked.name} hits ON hits.rowid = k.rowid`
-      : `${ranked.name} hits CROSS JOIN catalog k ON k.rowid = hits.rowid
+      ? `${RELATED} JOIN ${ranked.name} hits ON hits.rowid = k.id`
+      : `${ranked.name} hits CROSS JOIN catalog k ON k.id = hits.rowid
         JOIN library l ON l.collection_id = k.collection_id`
     : related
       ? RELATED

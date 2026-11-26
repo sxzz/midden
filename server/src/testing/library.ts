@@ -1,7 +1,7 @@
 // Test helpers for the library read side: captures run through the real
 // pipeline against the fake platform.
 import { Buffer } from 'node:buffer'
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, getColumns } from 'drizzle-orm'
 import { expect } from 'vitest'
 import { captureHandlers } from '#capture/handlers.ts'
 import { submit, type SubmitInput } from '#capture/submit.ts'
@@ -106,10 +106,10 @@ export function searchIndexes(db: Database) {
       tokenize = 'unicode61 remove_diacritics 0', detail = 'column',
       content = '', contentless_delete = 1);
     INSERT INTO temp.fresh_fts (rowid, text, name, quoted, extra)
-      SELECT rowid, search_text, search_name, search_quoted, search_extra
+      SELECT id, search_text, search_name, search_quoted, search_extra
       FROM catalog;
     INSERT INTO temp.fresh_cjk (rowid, text, name, quoted, extra)
-      SELECT rowid, search_words(search_text), search_words(search_name),
+      SELECT id, search_words(search_text), search_words(search_name),
         search_words(search_quoted), search_words(search_extra) FROM catalog;
     CREATE VIRTUAL TABLE temp.kept_fts USING fts5vocab(main, catalog_fts, instance);
     CREATE VIRTUAL TABLE temp.kept_cjk USING fts5vocab(main, catalog_cjk, instance);
@@ -138,8 +138,14 @@ export function searchIndexes(db: Database) {
  * search index matches the catalog both times.
  */
 export function expectCatalogFresh(ctx: CaptureContext) {
+  // Ids are assigned anew when rows are.
+  const { id: _, ...columns } = getColumns(catalog)
   const rows = () =>
-    ctx.db.select().from(catalog).orderBy(asc(catalog.collectionId)).all()
+    ctx.db
+      .select(columns)
+      .from(catalog)
+      .orderBy(asc(catalog.collectionId))
+      .all()
   const kept = rows()
   const index = searchIndexes(ctx.db)
   expect(index.kept).toEqual(index.fresh)
