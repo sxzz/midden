@@ -572,6 +572,15 @@ worker 每分钟运行一次维护。标 _空闲时_ 的步骤只为腾出空间
 - 每 15 分钟读取存储用量并检查提醒，每天一次统计数据库组成（见「存储用量」，统计在 _空闲时_）；
 - 把空闲页面还给文件系统（_空闲时_）：空闲页面达到 1024 页（4 MiB）时运行 `PRAGMA incremental_vacuum(4096)`，每次最多 16 MiB，两次之间至少 15 分钟，所以积压最多每小时释放 64 MiB；日志 `released free database pages` 给出这次释放的页数、剩余空闲页数（`free`）和总页数（`pages`）。这要求数据库是 `auto_vacuum = INCREMENTAL`：新建的数据库默认如此，已有的数据库要 `VACUUM` 一次才能切换（生产环境已于 2026-11-25 切换；`cli.ts maintain --vacuum` 也会切换），否则这一步什么也不做。
 
+## 定期更新
+
+worker 每分钟检查一次到时间的定期更新（见[架构](architecture.md#定期更新)），开始的每次运行是一条普通的更新记录，没有 Telegram 消息。
+
+- 日志：`watch run started`（`watchId`、`updateId`）；`watch slot skipped: its last run still goes`（上一次还没结束，这次跳过）；`watch run not started`（带原因，如收藏夹是空的，原因也显示在设置页）。
+- 同时最多 2 个定期更新在进行，多出的仍是到期状态，等前面的结束。全部暂停或账号限流期间，已开始的运行等着，之后到期的会因为上一次还没结束而跳过，恢复后不会补跑。
+- 部署和重启不影响时间：下一次运行的时刻存在 `watches.next_run_at`，停机期间错过的只补一次。
+- 要立即运行一次，在账号或收藏夹上手动「更新」即可；手动的更新不影响定期更新的时刻。
+
 ## 数据库整理
 
 `cli.ts maintain` 在网页进程、worker 和 Litestream 全部停止时整理数据库（`server/src/db/maintain.ts`）。平时不需要：删除留下的空闲页面由维护任务的 incremental vacuum 归还。用于一次性收回大量空闲页面和半空的页面（例如原始响应移走之后），或怀疑数据库、搜索索引有问题时。
