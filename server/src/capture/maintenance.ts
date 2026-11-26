@@ -58,7 +58,12 @@ const VACUUM_MIN_FREE = 1024
 /** SQLite's `auto_vacuum` value for INCREMENTAL. */
 const INCREMENTAL = 2
 
-const SIZE_BACKFILL = 200
+// Sizes are read from the first 64 KiB of each thumbnail, several at a time
+// (from the remote store, a request each). A pass runs batches for up to
+// SIZE_BUDGET, so a backlog of 100,000 clears in an hour or two, not a day.
+const SIZE_BATCH = 400
+const SIZE_READS = 8
+const SIZE_BUDGET = 20_000
 
 const thumbnailsCaughtUp = new WeakSet<CaptureContext>()
 const sizesCaughtUp = new WeakSet<CaptureContext>()
@@ -403,60 +408,76 @@ async function sizeOf(ctx: CaptureContext, key: string) {
 
 /**
  * Thumbnails made before their size was recorded get it now, read from the
- * file. A file that cannot be read is marked 0 by 0, as the web shows it
- * without a size; a regenerated thumbnail records its own.
+ * file: batch after batch while the pass has time, a few at once. A file that
+ * cannot be read is marked 0 by 0, as the web shows it without a size; a
+ * regenerated thumbnail records its own.
  */
 export async function backfillThumbnailSizes(
   ctx: CaptureContext,
 ): Promise<number> {
-  if (sizesCaughtUp.has(ctx)) return 0
-  const plain = ctx.db
-    .select({ key: blobThumbnails.key })
-    .from(blobThumbnails)
-    .where(
-      and(
-        eq(blobThumbnails.state, 'ready'),
-        isNotNull(blobThumbnails.key),
-        isNull(blobThumbnails.width),
-      ),
-    )
-    .limit(SIZE_BACKFILL)
-    .all()
-  const removed = ctx.db
-    .select({ key: removedMedia.thumbnailKey })
-    .from(removedMedia)
-    .where(
-      and(
-        isNotNull(removedMedia.thumbnailKey),
-        isNull(removedMedia.thumbnailWidth),
-      ),
-    )
-    .limit(SIZE_BACKFILL)
-    .all()
-  for (const { key } of plain) {
-    const size = await sizeOf(ctx, key!)
-    ctx.db
-      .update(blobThumbnails)
-      .set(size)
-      .where(and(eq(blobThumbnails.key, key!), isNull(blobThumbnails.width)))
-      .run()
-  }
-  for (const { key } of removed) {
-    const size = await sizeOf(ctx, key!)
-    ctx.db
-      .update(removedMedia)
-      .set({ thumbnailWidth: size.width, thumbnailHeight: size.height })
+  const started = Date.now()
+  let done = 0
+  while (!sizesCaughtUp.has(ctx)) {
+    const plain = ctx.db
+      .select({ key: blobThumbnails.key })
+      .from(blobThumbnails)
       .where(
         and(
-          eq(removedMedia.thumbnailKey, key!),
+          eq(blobThumbnails.state, 'ready'),
+          isNotNull(blobThumbnails.key),
+          isNull(blobThumbnails.width),
+        ),
+      )
+      .limit(SIZE_BATCH)
+      .all()
+      .map((row) => row.key!)
+    const removed = ctx.db
+      .select({ key: removedMedia.thumbnailKey })
+      .from(removedMedia)
+      .where(
+        and(
+          isNotNull(removedMedia.thumbnailKey),
           isNull(removedMedia.thumbnailWidth),
         ),
       )
-      .run()
+      .limit(SIZE_BATCH)
+      .all()
+      .map((row) => row.key!)
+    const sizes = new Map<string, { width: number; height: number }>()
+    const keys = [...new Set([...plain, ...removed])]
+    for (let i = 0; i < keys.length; i += SIZE_READS)
+      await Promise.all(
+        keys.slice(i, i + SIZE_READS).map(async (key) => {
+          sizes.set(key, await sizeOf(ctx, key))
+        }),
+      )
+    ctx.db.transaction((tx) => {
+      for (const key of plain)
+        tx.update(blobThumbnails)
+          .set(sizes.get(key)!)
+          .where(and(eq(blobThumbnails.key, key), isNull(blobThumbnails.width)))
+          .run()
+      for (const key of removed) {
+        const size = sizes.get(key)!
+        tx.update(removedMedia)
+          .set({ thumbnailWidth: size.width, thumbnailHeight: size.height })
+          .where(
+            and(
+              eq(removedMedia.thumbnailKey, key),
+              isNull(removedMedia.thumbnailWidth),
+            ),
+          )
+          .run()
+      }
+    })
+    done += plain.length + removed.length
+    if (plain.length < SIZE_BATCH && removed.length < SIZE_BATCH)
+      sizesCaughtUp.add(ctx)
+    else if (Date.now() - started > SIZE_BUDGET) break
+    // Batch after batch would keep the write lock from the web process.
+    else await pace(ctx)
   }
-  if (plain.length < SIZE_BACKFILL && removed.length < SIZE_BACKFILL)
-    sizesCaughtUp.add(ctx)
-  return plain.length + removed.length
+  return done
 }
 
 function pragma(ctx: CaptureContext, name: string): number {

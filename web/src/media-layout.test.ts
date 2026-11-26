@@ -5,6 +5,7 @@ import {
   MIN_RATIO,
   ratioOf,
   singleBox,
+  track,
   UNKNOWN_RATIO,
 } from './media-layout'
 
@@ -31,10 +32,15 @@ describe('singleBox', () => {
     expect(singleBox(5.5)).toBe(5.5)
   })
 
-  it('stops portraits at 3:4 and panoramas at 6:1', () => {
-    expect(singleBox(9 / 16)).toBe(MIN_RATIO)
+  it('keeps every ordinary portrait as it is, down to 1:3', () => {
+    for (const ratio of [9 / 16, 3 / 4, 4 / 5, 1 / 3])
+      expect(singleBox(ratio)).toBe(ratio)
+  })
+
+  it('stops what is narrower than 1:3 and wider than 6:1', () => {
+    expect(singleBox(1 / 5)).toBe(MIN_RATIO)
     expect(singleBox(12)).toBe(MAX_RATIO)
-    expect(MIN_RATIO).toBe(0.75)
+    expect(MIN_RATIO).toBeCloseTo(1 / 3)
     expect(MAX_RATIO).toBe(6)
   })
 
@@ -73,11 +79,11 @@ describe('layoutMedia', () => {
     ])
   })
 
-  it('holds tall pairs to 3:4 cells', () => {
-    const rows = layoutMedia([item(9 / 16), item(9 / 16)])
+  it('shares a row between tall items at their own shapes', () => {
+    const rows = layoutMedia([item(9 / 16), item(3 / 4)])
     expect(rows).toHaveLength(1)
-    expect(rows[0]!.ratio).toBe(1.5)
-    expect(rows[0]!.cells.map((cell) => cell.flex)).toEqual([0.75, 0.75])
+    expect(rows[0]!.ratio).toBeCloseTo(9 / 16 + 3 / 4)
+    expect(rows[0]!.cells.map((cell) => cell.flex)).toEqual([9 / 16, 3 / 4])
   })
 
   it('takes items two at a time, the last alone', () => {
@@ -101,5 +107,12 @@ describe('layoutMedia', () => {
   it('leaves what is not media as a plain row, never in a pair', () => {
     const rows = layoutMedia([item(1), item(undefined, false), item(1)])
     expect(rows.map((row) => row.ratio)).toEqual([1, undefined, 1])
+  })
+})
+
+describe('track', () => {
+  it('scales a share up so a lone portrait still fills its row', () => {
+    expect(track(9 / 16)).toBe('minmax(0, 562.5fr)')
+    expect(track(2)).toBe('minmax(0, 2000fr)')
   })
 })

@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { eq } from 'drizzle-orm'
+import { eq, isNull } from 'drizzle-orm'
 import { pino } from 'pino'
 import { afterEach, describe, expect, test } from 'vitest'
 import { openDatabase } from '#db/client.ts'
@@ -161,6 +161,58 @@ describe('maintenance', () => {
       { w: 0, h: 0 },
     ])
     expect(await backfillThumbnailSizes(c)).toBe(0)
+  })
+
+  test('a backlog of thumbnail sizes is read in one pass, batch after batch', async () => {
+    const c = setup({ now: Date.now() })
+    await c.queue.drain()
+    const file = path.join(
+      mkdtempSync(path.join(tmpdir(), 'midden-sizes-')),
+      'f',
+    )
+    writeFileSync(file, webpOf(450, 800))
+    await c.blobs.putFile('e'.repeat(64), file)
+    const rows = Array.from({ length: 900 }, (_, i) => `blob-${i}`)
+    // One file per thumbnail, as stored; here they are all the same bytes.
+    for (const [i] of rows.entries()) {
+      const copy = path.join(path.dirname(file), `c${i}`)
+      writeFileSync(copy, webpOf(450, 800))
+      await c.blobs.putFile(String(i).padStart(64, 'e'), copy)
+    }
+    c.db
+      .insert(blobs)
+      .values(
+        rows.map((id, i) => ({
+          id,
+          hash: String(i).padStart(64, '0'),
+          size: 1,
+          mime: 'image/jpeg',
+        })),
+      )
+      .run()
+    c.db
+      .insert(blobThumbnails)
+      .values(
+        rows.map((blobId) => ({
+          blobId,
+          state: 'ready' as const,
+          key: String(rows.indexOf(blobId)).padStart(64, 'e'),
+          mime: 'image/webp',
+        })),
+      )
+      .run()
+    expect(await backfillThumbnailSizes(c)).toBe(900)
+    expect(
+      c.db
+        .select({ w: blobThumbnails.width, h: blobThumbnails.height })
+        .from(blobThumbnails)
+        .where(isNull(blobThumbnails.width))
+        .all(),
+    ).toEqual([])
+    expect(c.db.select().from(blobThumbnails).get()).toMatchObject({
+      width: 450,
+      height: 800,
+    })
   })
 
   test('a deleted collection is removed with what only it used', async () => {

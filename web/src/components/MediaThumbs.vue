@@ -1,7 +1,7 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
 import { useSensitiveMedia } from '../composables/useSensitiveMedia'
-import { layoutMedia, ratioOf } from '../media-layout'
+import { layoutMedia, ratioOf, track } from '../media-layout'
 import { isRemoved, readyMedia, removedLabel } from '../presentation'
 import { collectionHref } from '../share'
 import { detailTitles, kindOf } from '../titles'
@@ -104,11 +104,8 @@ const shape = computed(() => {
       rows.length === 1
         ? ratios[0]!
         : 1 / ratios.reduce((n, r) => n + 1 / r, 0),
-    columns: rows[0]!.cells
-      .map((cell) => `minmax(0, ${cell.flex}fr)`)
-      .join(' '),
-    // Proportional to height; fr values summing under 1 would not fill the box.
-    rows: rows.map((row) => `minmax(0, ${1000 / row.ratio!}fr)`).join(' '),
+    columns: rows[0]!.cells.map((cell) => track(cell.flex)).join(' '),
+    rows: rows.map((row) => track(1 / row.ratio!)).join(' '),
   }
 })
 const overflow = computed(() => media.value.length - tiles.value.length)
@@ -176,7 +173,7 @@ const overflow = computed(() => media.value.length - tiles.value.length)
         />
         <span v-else class="veil">文件</span>
         <span
-          v-if="asset.mime?.startsWith('video/')"
+          v-if="asset.mime?.startsWith('video/') && !hidden(asset)"
           class="play"
           aria-hidden="true"
           >▶</span

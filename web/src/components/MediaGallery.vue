@@ -6,6 +6,8 @@ import {
   layoutMedia,
   ratioOf,
   REMOVED_MAX_RATIO,
+  REMOVED_MIN_RATIO,
+  track,
   type LayoutItem,
 } from '../media-layout'
 import { isRemoved, mediaNotice, removedLabel } from '../presentation'
@@ -63,10 +65,18 @@ const rows = computed(() =>
         asset,
         box: removed || (asset.state === 'ready' && isMedia(asset)),
         // The label of removed media needs room.
-        ratio: removed && ratio ? Math.min(ratio, REMOVED_MAX_RATIO) : ratio,
+        ratio:
+          removed && ratio
+            ? Math.min(Math.max(ratio, REMOVED_MIN_RATIO), REMOVED_MAX_RATIO)
+            : ratio,
       }
     }),
   ),
+)
+// The group is as wide as its widest row, so the veil over it covers the
+// media and not the empty width beside a narrowed box.
+const groupRatio = computed(() =>
+  Math.max(0, ...rows.value.map((row) => row.ratio ?? 0)),
 )
 // Opening the viewer is itself the decision to look, so it carries the whole
 // group: paging from an uncovered image must not dead-end on a missing one.
@@ -92,7 +102,12 @@ watch(
 </script>
 
 <template>
-  <div v-if="assets.length" class="media-group">
+  <div
+    v-if="assets.length"
+    class="media-group"
+    :class="{ sized: groupRatio }"
+    :style="groupRatio ? { '--group-ratio': groupRatio } : undefined"
+  >
     <!-- While one veil covers the group, nothing beneath it may be tabbed to. -->
     <div
       class="media"
@@ -111,7 +126,7 @@ watch(
             ? {
                 '--row-ratio': row.ratio,
                 gridTemplateColumns: row.cells
-                  .map((cell) => `minmax(0, ${cell.flex}fr)`)
+                  .map((cell) => track(cell.flex))
                   .join(' '),
               }
             : undefined
@@ -224,14 +239,17 @@ watch(
 
 <style scoped>
 .media-group {
+  /* A row is as tall as its media's shape makes it, and no taller than the
+     tallest single box would be: a tall one is narrowed to keep its shape. */
+  --media-max-height: min(480px, 70vh);
   position: relative;
   margin-top: 12px;
   max-width: 640px;
 }
-/* A row is as tall as its media's shape makes it, and no taller than the
-   tallest single box would be. */
+.media-group.sized {
+  width: min(100%, calc(var(--media-max-height) * var(--group-ratio)));
+}
 .media {
-  --media-max-height: min(480px, 70vh);
   display: grid;
   gap: 4px;
 }

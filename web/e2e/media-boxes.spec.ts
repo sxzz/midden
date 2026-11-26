@@ -117,16 +117,108 @@ test('a wide single image gets a short box that its image fills', async ({
   expect(img.width).toBeCloseTo(frame.width, 0)
 })
 
-test('tall images stop at 3:4 and stay within the screen', async ({ page }) => {
-  await detail(page, [image(1, 450, 800)])
+const portraits = [
+  ['9:16', 450, 800],
+  ['3:4', 600, 800],
+  ['4:5', 640, 800],
+  ['1:3', 300, 900],
+] as const
+const screens = [
+  [390, 844],
+  [844, 390],
+  [1440, 900],
+] as const
+
+for (const [vw, vh] of screens)
+  for (const [name, w, h] of portraits) {
+    test(`a ${name} image takes its own shape at ${vw}x${vh}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: vw, height: vh })
+      await detail(page, [image(1, w, h)])
+      const frame = await box(page.locator('.media .frame'))
+      // The shape of the media, unless the height cap narrows it first, and
+      // then the box is narrower rather than barred.
+      expect(frame.ratio).toBeCloseTo(w / h, 1)
+      expect(frame.height).toBeLessThanOrEqual(Math.min(480, vh * 0.7) + 1)
+      const img = await box(page.locator('.media .frame img'))
+      expect(img.width).toBeCloseTo(frame.width, 0)
+      expect(img.height).toBeCloseTo(frame.height, 0)
+      // Aligned with the text, not centred in a wider box.
+      const text = await box(page.getByText('媒体比例').first())
+      expect(frame.x).toBeCloseTo(text.x, 0)
+      const card = await box(page.locator('.media-group').locator('..'))
+      if (frame.height > Math.min(480, vh * 0.7) - 2)
+        expect(frame.width).toBeLessThan(card.width - 32)
+    })
+
+    test(`a ${name} image in a list row is as wide as its height makes it at ${vw}x${vh}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: vw, height: vh })
+      await serve(page, [image(1, w, h)])
+      await page.goto('/app/')
+      const tile = page.locator('.thumbs .tile')
+      await expect(tile).toBeVisible()
+      const rect = await box(tile)
+      expect(rect.ratio).toBeCloseTo(w / h, 1)
+      expect(rect.width).toBeCloseTo(rect.height * (w / h), 0)
+      const img = await box(tile.locator('img'))
+      expect(img.width).toBeCloseTo(rect.width, 0)
+    })
+  }
+
+for (const [vw, vh] of screens)
+  test(`a portrait image with no stored size settles on its own shape at ${vw}x${vh}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: vw, height: vh })
+    await detail(page, [image(1, 450, 800, false)])
+    const frame = page.locator('.media .frame')
+    await expect
+      .poll(async () => (await box(frame)).ratio)
+      .toBeCloseTo(450 / 800, 1)
+    const img = await box(frame.locator('img'))
+    expect(img.width).toBeCloseTo((await box(frame)).width, 0)
+    await page.goto('about:blank')
+    await page.unrouteAll()
+    await serve(page, [image(1, 450, 800, false)])
+    await page.goto('/app/')
+    const tile = page.locator('.thumbs .tile')
+    await expect
+      .poll(async () => (await box(tile)).ratio)
+      .toBeCloseTo(450 / 800, 1)
+  })
+
+test('a portrait video is boxed by its poster, narrower than the card', async ({
+  page,
+}) => {
+  await detail(page, [
+    { ...image(1, 450, 800), mime: 'video/mp4', url: '/v1/assets/clip' },
+  ])
   const frame = await box(page.locator('.media .frame'))
-  expect(frame.ratio).toBeCloseTo(0.75, 1)
-  expect(frame.height).toBeLessThan(844 * 0.7 + 1)
-  // Letterboxed rather than cropped: the whole image stays visible.
-  await expect(page.locator('.media .frame img')).toHaveCSS(
-    'object-fit',
-    'contain',
+  expect(frame.ratio).toBeCloseTo(450 / 800, 1)
+  expect(frame.width).toBeLessThan(
+    (await box(page.locator('.media-group').locator('..'))).width - 40,
   )
+})
+
+test('portrait and landscape in one album share a height, without bars', async ({
+  page,
+}) => {
+  await detail(page, [image(1, 450, 800), image(2, 1600, 900)])
+  const [left, right] = await page.locator('.media .frame').all()
+  const l = await box(left!)
+  const r = await box(right!)
+  expect(l.height).toBeCloseTo(r.height, 0)
+  expect(l.ratio).toBeCloseTo(450 / 800, 1)
+  expect(r.ratio).toBeCloseTo(16 / 9, 1)
+  for (const frame of [left!, right!]) {
+    const f = await box(frame)
+    const img = await box(frame.locator('img'))
+    expect(img.width).toBeCloseTo(f.width, 0)
+    expect(img.height).toBeCloseTo(f.height, 0)
+  }
 })
 
 test('a square keeps its shape and is not taller than the cap', async ({
@@ -186,4 +278,90 @@ test('a list row boxes a single wide image by its shape', async ({ page }) => {
   expect(rect.ratio).toBeCloseTo(6, 0)
   const img = await box(tile.locator('img'))
   expect(img.height).toBeCloseTo(rect.height, 0)
+})
+
+const sensitiveVideo = (width: number, height: number, sized = true) => ({
+  ...image(1, width, height, sized),
+  mime: 'video/mp4',
+  url: '/v1/assets/clip',
+  sensitive: true,
+  thumbnail: true,
+  thumbnail_url: `/v1/assets/shape-0-${Math.round(width / 4)}x${Math.round(height / 4)}`,
+})
+
+for (const [vw, vh] of screens)
+  for (const sized of [true, false])
+    test(`a sensitive portrait video keeps its box while blurred at ${vw}x${vh}${sized ? '' : ' with no stored size'}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: vw, height: vh })
+      await serve(page, [sensitiveVideo(450, 800, sized)])
+      await page.goto('/app/')
+      const tile = page.locator('.thumbs .tile')
+      await expect(tile).toBeVisible()
+      await expect(tile.locator('img')).toBeVisible()
+      // Without a stored size the box is 4:3 until the picture has loaded.
+      await expect
+        .poll(async () => (await box(tile)).ratio)
+        .toBeCloseTo(450 / 800, 1)
+      const blurred = await box(tile)
+      expect(blurred.ratio).toBeCloseTo(450 / 800, 1)
+      // The blurred picture covers the whole box: no flat strip beside it.
+      const img = await box(tile.locator('img'))
+      expect(img.x).toBeLessThanOrEqual(blurred.x + 1)
+      expect(img.x + img.width).toBeGreaterThanOrEqual(
+        blurred.x + blurred.width - 1,
+      )
+      expect(img.y).toBeLessThanOrEqual(blurred.y + 1)
+      expect(img.y + img.height).toBeGreaterThanOrEqual(
+        blurred.y + blurred.height - 1,
+      )
+      // One reveal icon over the whole box, in its middle; no play glyph by it.
+      await expect(tile.locator('.play')).toHaveCount(0)
+      const veil = page.locator('.group-veil')
+      const cover = await box(veil)
+      expect(cover.width).toBeCloseTo(blurred.width, 0)
+      expect(cover.height).toBeCloseTo(blurred.height, 0)
+      const eye = await box(veil.locator('svg'))
+      expect(eye.x + eye.width / 2).toBeCloseTo(
+        blurred.x + blurred.width / 2,
+        0,
+      )
+      expect(eye.y + eye.height / 2).toBeCloseTo(
+        blurred.y + blurred.height / 2,
+        0,
+      )
+      // Revealing changes nothing about the box.
+      await veil.click()
+      await expect(veil).toHaveCount(0)
+      await expect(tile.locator('.play')).toHaveCount(1)
+      const revealed = await box(tile)
+      expect(revealed.width).toBeCloseTo(blurred.width, 0)
+      expect(revealed.height).toBeCloseTo(blurred.height, 0)
+      const sharp = await box(tile.locator('img'))
+      expect(sharp.width).toBeCloseTo(revealed.width, 0)
+      expect(sharp.height).toBeCloseTo(revealed.height, 0)
+    })
+
+test('a sensitive portrait video in the detail page is boxed alike, blurred or not', async ({
+  page,
+}) => {
+  await detail(page, [sensitiveVideo(450, 800)])
+  const frame = page.locator('.media .frame')
+  const blurred = await box(frame)
+  expect(blurred.ratio).toBeCloseTo(450 / 800, 1)
+  await expect(frame.locator('.play')).toHaveCount(0)
+  const veil = page.locator('.group-veil')
+  const cover = await box(veil)
+  expect(cover.width).toBeCloseTo(blurred.width, 0)
+  expect(cover.height).toBeCloseTo(blurred.height, 0)
+  const eye = await box(veil.locator('svg'))
+  expect(eye.x + eye.width / 2).toBeCloseTo(blurred.x + blurred.width / 2, 0)
+  expect(eye.y + eye.height / 2).toBeCloseTo(blurred.y + blurred.height / 2, 0)
+  await veil.click()
+  await expect(veil).toHaveCount(0)
+  const revealed = await box(frame)
+  expect(revealed.width).toBeCloseTo(blurred.width, 0)
+  expect(revealed.height).toBeCloseTo(blurred.height, 0)
+  await expect(frame.locator('.play')).toHaveCount(1)
 })

@@ -4,8 +4,12 @@
  * the clamps below keep extreme shapes usable.
  */
 
-/** The tallest a single box gets: 3:4, which an ordinary phone photo fills. */
-export const MIN_RATIO = 0.75
+/**
+ * The narrowest shape a box follows: 1:3. Taller media is held to it and
+ * contained. Anything above that is a tall box, and the height cap narrows
+ * it (see `--media-max-height`) instead of cropping or barring the media.
+ */
+export const MIN_RATIO = 1 / 3
 /** The widest: a 6:1 box is still about 60px tall on a phone. */
 export const MAX_RATIO = 6
 /** Reserved before an image's shape is known, and for media without one. */
@@ -14,7 +18,7 @@ export const UNKNOWN_RATIO = 4 / 3
  * Side by side, each of two items is held to this range, so a panorama does
  * not shrink its neighbour to a sliver.
  */
-const PAIR_MIN_RATIO = 0.75
+const PAIR_MIN_RATIO = MIN_RATIO
 const PAIR_MAX_RATIO = 2.5
 /**
  * Two items share a row only while their ratios add up to at most this: the
@@ -24,6 +28,7 @@ const PAIR_MAX_RATIO = 2.5
 export const PAIR_MAX_SUM = 3
 /** Where a removed item's label still fits. */
 export const REMOVED_MAX_RATIO = 3
+export const REMOVED_MIN_RATIO = 0.75
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -103,3 +108,11 @@ export function layoutMedia<T extends LayoutItem>(items: T[]): LayoutRow<T>[] {
   }
   return rows
 }
+
+/**
+ * A grid track sized in proportion to `share`. Scaled up because `fr`
+ * values that add up to less than 1 take only that part of the space: a
+ * lone portrait (a share of 0.56) would be a narrow strip in a wide row.
+ */
+export const track = (share: number) =>
+  `minmax(0, ${+(share * 1000).toFixed(3)}fr)`

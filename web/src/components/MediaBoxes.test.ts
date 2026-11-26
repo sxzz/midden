@@ -59,7 +59,7 @@ describe('detail gallery boxes', () => {
   it('sizes a wide single image by its own shape, not a tall fixed box', () => {
     const el = mount(MediaGallery, [photo('a', [1200, 200])])
     expect(rows(el)).toEqual([
-      { ratio: 6, columns: 'minmax(0px, 6fr)', cells: 1 },
+      { ratio: 6, columns: 'minmax(0px, 6000fr)', cells: 1 },
     ])
     // Contained, never cropped, whatever the box.
     expect(fits(el)).toEqual(['contain'])
@@ -75,9 +75,17 @@ describe('detail gallery boxes', () => {
     ).toBeCloseTo(16 / 9)
   })
 
-  it('stops tall images at 3:4', () => {
-    const el = mount(MediaGallery, [photo('a', [900, 1600])])
-    expect(rows(el)[0]!.ratio).toBe(0.75)
+  it('keeps a tall image its own shape, for the height cap to narrow', () => {
+    for (const [w, h] of [
+      [900, 1600],
+      [600, 800],
+      [640, 800],
+      [300, 900],
+    ] as const) {
+      const el = mount(MediaGallery, [photo('a', [w, h])])
+      expect(rows(el)[0]!.ratio).toBeCloseTo(w / h)
+      unmount()
+    }
   })
 
   it('stops extreme panoramas at 6:1', () => {
@@ -108,7 +116,11 @@ describe('detail gallery boxes', () => {
       photo('b', [2000, 1000]),
     ])
     expect(rows(el)).toEqual([
-      { ratio: 3, columns: 'minmax(0px, 1fr) minmax(0px, 2fr)', cells: 2 },
+      {
+        ratio: 3,
+        columns: 'minmax(0px, 1000fr) minmax(0px, 2000fr)',
+        cells: 2,
+      },
     ])
   })
 
@@ -184,10 +196,10 @@ describe('list thumbnails', () => {
     expect(el.querySelector('.thumbs.shaped')).not.toBeNull()
   })
 
-  it('holds a tall single image to 3:4', () => {
-    expect(Number(style(mount(MediaThumbs, [photo('a', [900, 1600])])))).toBe(
-      0.75,
-    )
+  it('keeps a tall single image its own shape', () => {
+    expect(
+      Number(style(mount(MediaThumbs, [photo('a', [900, 1600])]))),
+    ).toBeCloseTo(9 / 16)
   })
 
   it('puts a pair side by side, or stacks wide ones', () => {
