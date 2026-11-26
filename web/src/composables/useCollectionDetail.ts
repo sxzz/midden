@@ -216,8 +216,18 @@ export function useCollectionDetail(
       // Without an answer nothing is shown; nothing else depends on it.
     }
   }
-  /** Show the collection as it is now, keeping the page on screen meanwhile. */
-  async function reload() {
+  /**
+   * Show the collection as it is now, keeping the page on screen meanwhile.
+   * Coming back to the page after an update can ask twice at once (the
+   * update's end, and the return itself): one read answers both, so its
+   * related list reloads once.
+   */
+  let reloading: Promise<void> | undefined
+  function reload() {
+    reloading ??= read().finally(() => (reloading = undefined))
+    return reloading
+  }
+  async function read() {
     const signal = controller.signal
     try {
       const result = await getCollection(id(), signal)

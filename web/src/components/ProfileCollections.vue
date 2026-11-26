@@ -64,7 +64,7 @@ watch(
 watch(
   () => [props.revisionId, props.membersVersion],
   () => {
-    if (!loading.value) void refresh()
+    if (!loading.value && !refreshing.value) void refresh()
   },
 )
 function search(value: string) {
