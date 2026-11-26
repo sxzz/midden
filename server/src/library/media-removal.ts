@@ -30,7 +30,8 @@ export interface RemovalEffect {
   shared: number
 }
 
-interface Row {
+/** One asset a removal changes. */
+export interface RemovalRow {
   id: string
   capture_id: string
   collection_id: string
@@ -45,11 +46,11 @@ interface Row {
 const REMOVABLE = `a.purpose IN ('', 'banner')`
 
 /** The assets a removal changes, across all captures of its collections. */
-function plan(db: Executor, target: RemovalTarget): Row[] {
+function plan(db: Executor, target: RemovalTarget): RemovalRow[] {
   const columns = `a.id, a.capture_id, c.collection_id, a.media_key, a.kind,
     a.state, a.blob_id`
   if ('ids' in target)
-    return db.all<Row>(sql`
+    return db.all<RemovalRow>(sql`
       SELECT ${sql.raw(columns)} FROM assets a
       JOIN captures c ON c.id = a.capture_id
       WHERE c.collection_id IN (SELECT value FROM json_each(${list(target.ids)}))
@@ -60,14 +61,21 @@ function plan(db: Executor, target: RemovalTarget): Row[] {
     WHERE a.id = ${target.asset} AND c.collection_id = ${target.collection}
       AND ${sql.raw(REMOVABLE)}`)
   if (!named) throw new AppError('not_found')
-  return db.all<Row>(sql`
+  return db.all<RemovalRow>(sql`
     SELECT ${sql.raw(columns)} FROM assets a
     JOIN captures c ON c.id = a.capture_id
     WHERE c.collection_id = ${target.collection}
       AND a.media_key = ${named.media_key} AND a.state <> 'removed'`)
 }
 
-function effect(db: Executor, rows: Row[]): RemovalEffect {
+/**
+ * What removing these assets does: the media items, the bytes of the blobs
+ * only they use, and the items whose blob another asset still uses.
+ */
+export function removalEffect(
+  db: Executor,
+  rows: readonly RemovalRow[],
+): RemovalEffect {
   const ids = rows.map((row) => row.id)
   const blobIds = [
     ...new Set(rows.flatMap((row) => (row.blob_id ? [row.blob_id] : []))),
@@ -106,7 +114,7 @@ export function previewRemoval(
   target: RemovalTarget,
 ): RemovalEffect {
   checkIds(target)
-  return ctx.db.transaction((tx) => effect(tx, plan(tx, target)))
+  return ctx.db.transaction((tx) => removalEffect(tx, plan(tx, target)))
 }
 
 /**
@@ -122,35 +130,56 @@ export function removeMedia(
   checkIds(target)
   return ctx.db.transaction((tx) => {
     const rows = plan(tx, target)
-    const result = effect(tx, rows)
-    if (!rows.length && 'ids' in target) return result
-    mark(tx, rows, target)
-    const ids = rows.map((row) => row.id)
-    tx.update(assets)
-      .set({ state: 'removed', blobId: null, error: '' })
-      .where(inJson(assets.id, ids))
-      .run()
-    // A capture still downloading may have waited on nothing else.
-    for (const capture of new Set(
-      rows.filter((row) => row.state === 'pending').map((r) => r.capture_id),
-    ))
-      finalizeSettled(ctx, tx, capture)
-    releaseBlobs(tx, [
-      ...new Set(rows.flatMap((row) => (row.blob_id ? [row.blob_id] : []))),
-    ])
-    catalogCollections(tx, [...new Set(rows.map((row) => row.collection_id))])
+    const result = removalEffect(tx, rows)
+    if (rows.length) removeRows(ctx, tx, rows)
+    // One item already removed everywhere here is marked again, as asked.
+    else if ('asset' in target) mark(tx, rows, target)
     return result
   })
 }
 
-/** Record the marks, each with a thumbnail of the media where one exists. */
-function mark(tx: Transaction, rows: Row[], target: RemovalTarget): void {
-  const media = new Map<string, Row['kind']>(
+/**
+ * Remove the media of these assets in the open transaction, as
+ * `removeMedia` does: mark each item, take the blob off every asset, let
+ * captures that waited on them finish, release the blobs nothing else uses
+ * and catalog their collections again.
+ */
+export function removeRows(
+  ctx: CaptureContext,
+  tx: Transaction,
+  rows: readonly RemovalRow[],
+): void {
+  mark(tx, rows)
+  const ids = rows.map((row) => row.id)
+  tx.update(assets)
+    .set({ state: 'removed', blobId: null, error: '' })
+    .where(inJson(assets.id, ids))
+    .run()
+  // A capture still downloading may have waited on nothing else.
+  for (const capture of new Set(
+    rows.filter((row) => row.state === 'pending').map((r) => r.capture_id),
+  ))
+    finalizeSettled(ctx, tx, capture)
+  releaseBlobs(tx, [
+    ...new Set(rows.flatMap((row) => (row.blob_id ? [row.blob_id] : []))),
+  ])
+  catalogCollections(tx, [...new Set(rows.map((row) => row.collection_id))])
+}
+
+/**
+ * Record the marks, each with a thumbnail of the media where one exists;
+ * with nothing left to remove, the one item `target` names.
+ */
+function mark(
+  tx: Transaction,
+  rows: readonly RemovalRow[],
+  target?: RemovalTarget,
+): void {
+  const media = new Map<string, RemovalRow['kind']>(
     rows.map((row) => [row.media_key, row.kind]),
   )
-  // One item already removed everywhere here is marked again, as asked.
-  if (!media.size && 'asset' in target) {
-    const named = tx.get<{ media_key: string; kind: Row['kind'] }>(
+  if (!media.size && target && 'asset' in target) {
+    const named = tx.get<{ media_key: string; kind: RemovalRow['kind'] }>(
       sql`SELECT media_key, kind FROM assets WHERE id = ${target.asset}`,
     )
     if (named) media.set(named.media_key, named.kind)
@@ -164,8 +193,9 @@ function mark(tx: Transaction, rows: Row[], target: RemovalTarget): void {
       mime: string
       width: number | null
       height: number | null
+      size: number | null
     }>(sql`
-      SELECT key, mime, width, height FROM blob_thumbnails
+      SELECT key, mime, width, height, size FROM blob_thumbnails
       WHERE state = 'ready' AND key IS NOT NULL
         AND blob_id IN (SELECT value FROM json_each(${list(blobIds)}))
       LIMIT 1`)
@@ -177,6 +207,7 @@ function mark(tx: Transaction, rows: Row[], target: RemovalTarget): void {
         thumbnailMime: thumbnail?.mime ?? null,
         thumbnailWidth: thumbnail?.width ?? null,
         thumbnailHeight: thumbnail?.height ?? null,
+        thumbnailSize: thumbnail?.size ?? null,
       })
       .onConflictDoUpdate({
         target: removedMedia.mediaKey,
@@ -185,6 +216,7 @@ function mark(tx: Transaction, rows: Row[], target: RemovalTarget): void {
           thumbnailMime: sql`coalesce(${removedMedia.thumbnailMime}, excluded.thumbnail_mime)`,
           thumbnailWidth: sql`coalesce(${removedMedia.thumbnailWidth}, excluded.thumbnail_width)`,
           thumbnailHeight: sql`coalesce(${removedMedia.thumbnailHeight}, excluded.thumbnail_height)`,
+          thumbnailSize: sql`coalesce(${removedMedia.thumbnailSize}, excluded.thumbnail_size)`,
         },
       })
       .run()

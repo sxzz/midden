@@ -10,10 +10,12 @@ import {
   type RemovalEffect,
   type RemovalTarget,
   type Share,
+  type VideoRemoval,
 } from '../api'
 import { profileHandle } from '../captures'
 import { useCollectionDetail } from '../composables/useCollectionDetail'
 import { toast } from '../composables/useToast'
+import { useVideoRemoval } from '../composables/useVideoRemoval'
 import { mediaRemovals } from '../media-removals'
 import { date, isRemoved, present } from '../presentation'
 import { accountKey, relationQuery, type Rel } from '../relation-filter'
@@ -32,6 +34,7 @@ import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 import UpdateSheet from './UpdateSheet.vue'
+import VideoRemovalSheet from './VideoRemovalSheet.vue'
 const props = defineProps<{
   id: string
   savedAt?: string
@@ -222,6 +225,25 @@ function removeAll() {
     title: '删除此帖所有媒体？',
   }
 }
+/** 删除所有视频 of a profile: its confirmation, then the job it starts. */
+const videoSheet = shallowRef(false)
+watch(
+  () => props.id,
+  () => (videoSheet.value = false),
+)
+const videoRemoval = useVideoRemoval(() =>
+  isProfile.value && !shared.value ? props.id : undefined,
+)
+const videoProgress = computed(() => {
+  const running = videoRemoval.running.value
+  return running?.effect
+    ? `${running.removed} / ${running.effect.videos}`
+    : undefined
+})
+function videoRemovalStarted(removal: VideoRemoval) {
+  videoSheet.value = false
+  videoRemoval.started(removal)
+}
 // Media removed from the viewer, opened here or from a list.
 watch(mediaRemovals, () => {
   void reload()
@@ -368,7 +390,7 @@ const version = computed(() =>
         @select="sharing = true"
       />
     </ListSection>
-    <!-- The reader's own notes, folded, then the one destructive action. -->
+    <!-- The reader's own notes, folded, then the destructive actions. -->
     <ListSection v-if="!shared">
       <CollectionAnnotations
         :id="id"
@@ -381,6 +403,14 @@ const version = computed(() =>
         variant="destructive"
         :disabled="busy"
         @select="removeAll"
+      />
+      <ListButton
+        v-if="isProfile"
+        :label="videoRemoval.running.value ? '正在删除视频…' : '删除所有视频'"
+        :trailing="videoProgress"
+        variant="destructive"
+        :disabled="busy || !!videoRemoval.running.value"
+        @select="videoSheet = true"
       />
       <ListButton
         label="删除这条收藏"
@@ -432,6 +462,13 @@ const version = computed(() =>
       :title="removal?.title ?? ''"
       @removed="removed"
       @cancel="removal = undefined"
+    />
+    <VideoRemovalSheet
+      v-if="!shared && isProfile"
+      :id="id"
+      :open="videoSheet"
+      @started="videoRemovalStarted"
+      @cancel="videoSheet = false"
     />
     <DeleteSheet
       v-if="!shared"

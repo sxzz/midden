@@ -1,7 +1,7 @@
 import { readdir, stat, statfs } from 'node:fs/promises'
 import path from 'node:path'
 import { sql } from 'drizzle-orm'
-import { blobThumbnails } from '#db/schema.ts'
+import { blobThumbnails, removedMedia } from '#db/schema.ts'
 import type { Database } from '#db/client.ts'
 
 /** Where the deploy keeps its database copies (scripts/deploy.ts). */
@@ -68,7 +68,7 @@ export async function localUsage(options: {
   const { db, dataDir } = options
   const pageSize = pragma(db, 'page_size')
   const pages = pragma(db, 'page_count')
-  const thumbnails = db
+  const made = db
     .select({
       count: sql<number>`count(*)`.mapWith(Number),
       bytes: sql<number>`coalesce(sum(${blobThumbnails.size}), 0)`.mapWith(
@@ -78,6 +78,19 @@ export async function localUsage(options: {
     .from(blobThumbnails)
     .where(sql`${blobThumbnails.state} = 'ready'`)
     .get() ?? { count: 0, bytes: 0 }
+  // Removed media (已移除) keeps its thumbnail once the blob, and with it
+  // the row above, is gone; each file once.
+  const kept = db.get<{ count: number; bytes: number }>(sql`
+    SELECT count(*) AS count, coalesce(sum(size), 0) AS bytes FROM (
+      SELECT max(${removedMedia.thumbnailSize}) AS size FROM ${removedMedia}
+      WHERE ${removedMedia.thumbnailKey} IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM ${blobThumbnails}
+        WHERE ${blobThumbnails.key} = ${removedMedia.thumbnailKey})
+      GROUP BY ${removedMedia.thumbnailKey})`)
+  const thumbnails = {
+    count: made.count + Number(kept?.count ?? 0),
+    bytes: made.bytes + Number(kept?.bytes ?? 0),
+  }
   const disk = await statfs(dataDir)
   return {
     database: {

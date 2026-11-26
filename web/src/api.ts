@@ -103,6 +103,14 @@ export type RemovalEffect = Ok<(typeof client)['media-removals']['$post']>
 export type RemovalTarget = InferRequestType<
   (typeof client)['media-removals']['$post']
 >['json']
+/** What 删除所有视频 of a profile does, from its dry run. */
+export type VideoRemovalEffect = Ok<
+  (typeof client.collections)[':id']['video-removal']['preview']['$post']
+>
+/** 删除所有视频 of a profile, as its job goes. */
+export type VideoRemoval = NonNullable<
+  Ok<(typeof client.collections)[':id']['video-removal']['$get']>['removal']
+>
 export type Accounts = Ok<typeof client.accounts.$get>
 export type Account = Accounts['accounts'][number]
 export type AccountPlatform = Accounts['platforms'][number]

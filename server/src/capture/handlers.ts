@@ -1,5 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { collections } from '#db/schema.ts'
+import { isAppError } from '#errors.ts'
+import { failVideoRemoval, runVideoRemoval } from '#library/video-removal.ts'
 import { failRawUpload, RAW_ATTEMPTS, runRawUpload } from '#raw/upload.ts'
 import { failDownload, runDownload } from './download.ts'
 import { errorCode, safeError } from './errors.ts'
@@ -129,6 +131,18 @@ export function captureHandlers(
         return Promise.resolve()
       },
       fail: failCaptureJob,
+    },
+    // 删除所有视频 of a profile, a batch of videos per write transaction.
+    'video-removal': {
+      queue: 'control',
+      run: (job) => runVideoRemoval(context(), job),
+      // Such as the profile having left the library meanwhile.
+      fail: (job, error) =>
+        failVideoRemoval(
+          context(),
+          job.ref,
+          isAppError(error) ? error.message : safeError(error),
+        ),
     },
   }
 }

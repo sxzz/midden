@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { captureHandlers } from '#capture/handlers.ts'
 import { watchLitestream, type LitestreamWatch } from '#litestream.ts'
 import { testContext } from '#testing/context.ts'
-import { fakePlatform, postGraph } from '#testing/fake-platform.ts'
+import { fakePlatform, fakeProfile, postGraph } from '#testing/fake-platform.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
 import { createToken } from './auth.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -35,10 +35,10 @@ function setup({
   ctx = testContext({
     platforms: [
       fakePlatform({
-        current: (req) => ({
-          text: 'post',
-          graph: postGraph(req.externalId, {}),
-        }),
+        current: (req) =>
+          req.kind === 'profile'
+            ? fakeProfile(req.externalId)
+            : { text: 'post', graph: postGraph(req.externalId, {}) },
       }),
     ],
     handlers: captureHandlers,
@@ -663,5 +663,52 @@ describe('api', () => {
         })
       ).status,
     ).toBe(404)
+  })
+
+  test('removes a profile’s videos as a job and follows it', async () => {
+    const { ctx, call } = setup()
+    const capture = (url: string) =>
+      call('/captures', { method: 'POST', body: JSON.stringify({ url }) })
+    await capture('https://fake.test/u/1')
+    await capture('https://fake.test/p/2')
+    await ctx.queue.drain()
+    const { items } = (await (await call('/collections')).json()) as {
+      items: { id: string; url: string }[]
+    }
+    const profile = items.find((item) => item.url.includes('/u/'))!.id
+    const post = items.find((item) => item.url.includes('/p/'))!.id
+    const path = (id: string) => `/collections/${id}/video-removal`
+    const nothing = {
+      posts: 0,
+      videos: 0,
+      freed_bytes: 0,
+      shared: 0,
+      kept: { listed: 0, saved: 0, annotated: 0, quoted: 0 },
+      elsewhere: 0,
+    }
+    const preview = await call(`${path(profile)}/preview`, { method: 'POST' })
+    expect(await preview.json()).toEqual(nothing)
+    // Only of a saved profile.
+    for (const id of [post, 'missing']) {
+      expect(
+        (await call(`${path(id)}/preview`, { method: 'POST' })).status,
+      ).toBe(404)
+      expect((await call(path(id), { method: 'POST' })).status).toBe(404)
+    }
+    expect(await (await call(path(profile))).json()).toEqual({})
+    const started = await call(path(profile), { method: 'POST' })
+    expect(started.status).toBe(202)
+    const { id } = (await started.json()) as { id: string }
+    await ctx.queue.drain()
+    expect(await (await call(path(profile))).json()).toEqual({
+      removal: {
+        id,
+        state: 'complete',
+        effect: nothing,
+        removed: 0,
+        created_at: expect.any(String),
+        finished_at: expect.any(String),
+      },
+    })
   })
 })

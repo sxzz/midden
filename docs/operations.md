@@ -533,7 +533,7 @@ Cloudflare 的 GraphQL Analytics API（`POST https://api.cloudflare.com/client/v
 ### 本机
 
 - 数据库文件：`PRAGMA page_count × page_size`，空闲页 `freelist_count`，以及 `midden.db-wal` 的大小。
-- 缩略图：`blob_thumbnails` 中已生成的个数与 `size` 之和。
+- 缩略图：`blob_thumbnails` 中已生成的个数与 `size` 之和，加上已移除的媒体保留的缩略图（`removed_media` 的 `thumbnail_key`，同一个文件只算一次，不在 `blob_thumbnails` 中的才算；大小是标记记下的 `thumbnail_size`，记下大小之前的标记只计个数）。
 - 媒体目录：每天随数据库组成在 worker 线程中遍历 `media/`，统计文件数与大小（使用 R2 时就是缩略图和尚未上传完的原文件）。
 - 部署前的数据库备份：`data/backups/deploy/` 中的文件。
 - 可用磁盘：数据目录所在卷的 `statfs`（容器内看到的卷；GB 为 2^30 字节，与网页中其他大小相同）。

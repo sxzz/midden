@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, createVaporApp, nextTick, vaporInteropPlugin } from 'vue'
+import { toastState } from '../composables/useToast'
 import { mediaRemovals } from '../media-removals'
 import { removalEffectText } from '../presentation'
 import { shareSlug } from '../share'
@@ -261,6 +262,112 @@ describe('the post detail', () => {
       ]),
     )
     expect(sent[0]!.body).toEqual({ collection: 'post', asset: 'v' })
+  })
+})
+
+describe('the profile detail', () => {
+  const profile = collection({
+    id: 'profile',
+    url: 'https://x.com/synthetic',
+    text: '合成账号',
+    graph: {
+      root: 'profile',
+      relations: [],
+      entities: [
+        {
+          key: 'profile',
+          type: 'x.profile',
+          external_id: '1',
+          data: { username: 'synthetic' },
+        },
+      ],
+    },
+  })
+  const effect = {
+    posts: 5,
+    videos: 7,
+    freed_bytes: 3 * 1024 * 1024,
+    shared: 0,
+    kept: { listed: 0, saved: 2, annotated: 1, quoted: 0 },
+    elsewhere: 0,
+  }
+
+  it('removes all of its videos as a job, stating the counts first', async () => {
+    const sent: string[] = []
+    const removal = {
+      id: 'removal',
+      created_at: '2026-01-01T00:00:00.000Z',
+      state: 'queued',
+      removed: 0,
+    }
+    // What each look at the removal finds once it started.
+    const looks = [
+      { ...removal, state: 'running', effect, removed: 3 },
+      { ...removal, state: 'complete', effect, removed: 7 },
+    ]
+    let started = false
+    mockApi((path, request: Request) => {
+      if (request.method === 'POST') sent.push(path)
+      if (path === '/collections/profile') return profile
+      if (path.endsWith('/availability')) return { available: true }
+      if (path === '/collections/profile/update') return { older: false }
+      if (path === '/collections/profile/video-removal/preview') return effect
+      if (path === '/collections/profile/video-removal') {
+        if (request.method === 'POST') {
+          started = true
+          return removal
+        }
+        if (!started) return {}
+        return { removal: looks.length > 1 ? looks.shift() : looks[0] }
+      }
+      if (path.startsWith('/shares')) return []
+      if (path.endsWith('/annotation')) return { tags: [], note: '' }
+      if (path.startsWith('/tags')) return []
+      if (path.includes('/collections?') || path.includes('/history'))
+        return { items: [] }
+      return {}
+    })
+    const before = mediaRemovals.value
+    const el = document.createElement('div')
+    document.body.append(el)
+    const app = createVaporApp(CollectionDetail, { id: 'profile' })
+    app.mount(el)
+    unmount = () => app.unmount()
+    await vi.waitFor(() => expect(buttons(el, '删除所有视频')).toHaveLength(1))
+    buttons(el, '删除所有视频')[0]!.click()
+    const sheet = await vi.waitFor(() => {
+      const found = [...document.querySelectorAll('dialog')].find(
+        (d) => d.open && d.textContent?.includes('删除所有视频？'),
+      )
+      expect(found?.textContent).toContain(
+        '将删除 5 条帖子的 7 个视频，可释放 3.0 MB（保留 3 条帖子的视频：单独收藏 2 条、已整理 1 条）',
+      )
+      return found!
+    })
+    buttons(sheet, '删除')[0]!.click()
+    await vi.waitFor(() => expect(buttons(el, '正在删除视频…')).toHaveLength(1))
+    expect(sheet.open).toBe(false)
+    // Followed while it runs, with how far it got.
+    await vi.waitFor(
+      () =>
+        expect(
+          [...el.querySelectorAll('button')].some((b) =>
+            b.textContent?.includes('正在删除视频…3 / 7'),
+          ),
+        ).toBe(true),
+      { timeout: 3000 },
+    )
+    await vi.waitFor(
+      () => expect(buttons(el, '删除所有视频')).toHaveLength(1),
+      { timeout: 3000 },
+    )
+    expect(toastState.value?.text).toBe('已删除 7 个视频')
+    // The pages listing the media load again.
+    expect(mediaRemovals.value).toBe(before + 1)
+    expect(sent).toEqual([
+      '/collections/profile/video-removal/preview',
+      '/collections/profile/video-removal',
+    ])
   })
 })
 

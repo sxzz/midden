@@ -54,6 +54,7 @@ export function testContext(
     related: noop,
     relations: { ...noop, queue: 'capture' },
     update: noop,
+    'video-removal': noop,
     ...options.handlers?.(() => ctx!),
   }
   const queue = new JobQueue({

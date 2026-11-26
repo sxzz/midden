@@ -11,6 +11,7 @@ import {
 import type { CaptureOptions, StoredOptions } from '#capture/options.ts'
 import type { Metrics, Payload } from '#capture/payload.ts'
 import type { StoredTarget } from '#capture/related.ts'
+import type { VideoRemovalEffect } from '#library/video-removal.ts'
 import type { Buffer } from 'node:buffer'
 
 // Columns are declared in camelCase and stored in snake_case.
@@ -642,6 +643,8 @@ export const removedMedia = sqliteTable(
     // The thumbnail's pixel size, as in `blobThumbnails`.
     thumbnailWidth: integer(),
     thumbnailHeight: integer(),
+    // Its bytes, so 存储用量 still counts it; unknown for older marks.
+    thumbnailSize: integer(),
     createdAt: createdAt(),
   },
   (t) => [
@@ -649,6 +652,32 @@ export const removedMedia = sqliteTable(
       .on(t.thumbnailKey)
       .where(sql`${t.thumbnailKey} IS NOT NULL`),
   ],
+)
+
+/**
+ * 删除所有视频 of a profile: a job removes the videos of the posts that
+ * deleting the profile with its posts would take (`library/video-removal.ts`).
+ */
+export const videoRemovals = sqliteTable(
+  'video_removals',
+  {
+    id: text().primaryKey(),
+    // The profile.
+    collectionId: text()
+      .notNull()
+      .references(() => collections.id, { onDelete: 'cascade' }),
+    state: text({ enum: ['queued', 'running', 'complete', 'failed'] })
+      .notNull()
+      .default('queued'),
+    // What it removes, planned once when the job starts.
+    effect: text({ mode: 'json' }).$type<VideoRemovalEffect>(),
+    // Videos removed so far.
+    removed: integer().notNull().default(0),
+    error: text().notNull().default(''),
+    createdAt: createdAt(),
+    finishedAt: timestamp(),
+  },
+  (t) => [index('video_removals_collection').on(t.collectionId, t.createdAt)],
 )
 
 /** One thumbnail attempt per blob; a failure is final. */

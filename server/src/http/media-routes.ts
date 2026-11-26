@@ -6,6 +6,11 @@ import {
   removeMedia,
   restoreMedia,
 } from '#library/media-removal.ts'
+import {
+  latestVideoRemoval,
+  previewVideoRemoval,
+  startVideoRemoval,
+} from '#library/video-removal.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
@@ -34,6 +39,18 @@ export function mediaRoutes(ctx: AccountsContext) {
         const input = c.req.valid('json')
         restoreMedia(ctx, input.collection, input.asset)
         return c.body(null, 204)
+      })
+      // 删除所有视频 of a profile: the dry run, the job, and the newest one
+      // to follow while it runs.
+      .post('/collections/:id/video-removal/preview', (c) =>
+        c.json(previewVideoRemoval(ctx, c.req.param('id'))),
+      )
+      .post('/collections/:id/video-removal', (c) =>
+        c.json(startVideoRemoval(ctx, c.req.param('id')), 202),
+      )
+      .get('/collections/:id/video-removal', (c) => {
+        const removal = latestVideoRemoval(ctx.db, c.req.param('id'))
+        return c.json({ ...(removal ? { removal } : {}) })
       })
   )
 }

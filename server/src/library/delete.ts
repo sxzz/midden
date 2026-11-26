@@ -34,8 +34,14 @@ export interface DeleteCounts {
    * (`annotated`), or a saved post that stays quotes or reposts them
    * (`quoted`). Related and kept are all zero without `withPosts`.
    */
-  kept: { listed: number; saved: number; annotated: number; quoted: number }
+  kept: Record<KeepReason, number>
 }
+
+/**
+ * Why a post of an account stays when the account goes with its posts; see
+ * `DeleteCounts.kept`.
+ */
+export type KeepReason = 'listed' | 'saved' | 'annotated' | 'quoted'
 
 const SELECTED = 'temp.delete_selected'
 const RELATED = 'temp.delete_related'
@@ -222,6 +228,49 @@ function collectRelated(tx: Transaction): void {
   while (more) more = keep('quoted', sql`id IN (${quotedByRemainingSQL})`) > 0
 }
 
+/** The saved collections among `ids` into `SELECTED`, accounts marked. */
+function select(tx: Transaction, ids: readonly string[]): void {
+  dropTemp(tx)
+  tx.run(
+    sql.raw(`CREATE TEMP TABLE ${SELECTED.slice(5)} (
+      id TEXT PRIMARY KEY, profile INTEGER NOT NULL
+    ) WITHOUT ROWID`),
+  )
+  tx.run(sql`
+    INSERT INTO ${sql.raw(SELECTED)} (id, profile)
+    SELECT l.collection_id,
+      coalesce(k.root_kind LIKE '%.profile', c.kind = 'profile')
+    FROM library l
+    JOIN collections c ON c.id = l.collection_id
+    LEFT JOIN catalog k ON k.collection_id = l.collection_id
+    WHERE l.collection_id IN (SELECT value FROM json_each(${list(ids)}))`)
+}
+
+/** A post of an account and why it stays, or null when it goes with it. */
+export interface AccountPost {
+  id: string
+  reason: KeepReason | null
+}
+
+/**
+ * The posts of the saved accounts among `ids` exactly as deleting them with
+ * their posts (`withPosts`) picks them, changing nothing: each with the
+ * first reason it would stay for, or null when it would go with them.
+ * Other saved accounts stay, so they hold what they list.
+ */
+export function accountPosts(
+  tx: Transaction,
+  ids: readonly string[],
+): AccountPost[] {
+  select(tx, ids)
+  collectRelated(tx)
+  const posts = tx.all<AccountPost>(
+    sql`SELECT id, reason FROM ${sql.raw(RELATED)} ORDER BY id`,
+  )
+  dropTemp(tx)
+  return posts
+}
+
 /**
  * Remove saved collections from the library in one transaction; their
  * content is collected by maintenance once no capture of them is running.
@@ -240,20 +289,7 @@ export function deleteCollections(
   options: DeleteOptions = {},
 ): DeleteCounts {
   return db.transaction((tx) => {
-    dropTemp(tx)
-    tx.run(
-      sql.raw(`CREATE TEMP TABLE ${SELECTED.slice(5)} (
-        id TEXT PRIMARY KEY, profile INTEGER NOT NULL
-      ) WITHOUT ROWID`),
-    )
-    tx.run(sql`
-      INSERT INTO ${sql.raw(SELECTED)} (id, profile)
-      SELECT l.collection_id,
-        coalesce(k.root_kind LIKE '%.profile', c.kind = 'profile')
-      FROM library l
-      JOIN collections c ON c.id = l.collection_id
-      LEFT JOIN catalog k ON k.collection_id = l.collection_id
-      WHERE l.collection_id IN (SELECT value FROM json_each(${list(ids)}))`)
+    select(tx, ids)
     const profiles = count(
       tx,
       sql`SELECT 1 FROM ${sql.raw(SELECTED)} WHERE profile`,
