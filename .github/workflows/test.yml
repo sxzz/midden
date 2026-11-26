@@ -30,11 +30,12 @@ jobs:
       - run: pnpm --filter @midden/web test:e2e
         env:
           PLAYWRIGHT_CHANNEL: chrome
-  # Every push builds and starts the image; main also publishes it once the
-  # checks and browser tests pass. Production runs on an Apple-silicon Mac,
-  # so the image is arm64 only, built natively on an arm64 runner.
+  # Every push builds and starts the image, alongside the checks and browser
+  # tests rather than after them. On main it pushes `sha-<commit>` straight
+  # away; `latest`, which deploys read, moves only in `publish`, once all
+  # three pass. Production runs on an Apple-silicon Mac, so the image is
+  # arm64 only, built natively on an arm64 runner.
   image:
-    needs: [checks, e2e]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     permissions:
@@ -58,7 +59,7 @@ jobs:
         id: tags
         run: |
           if [ "$PUBLISH" = true ]; then
-            { echo 'tags<<EOF'; echo "$IMAGE:latest"; echo "$IMAGE:sha-$GITHUB_SHA"; echo EOF; } >> "$GITHUB_OUTPUT"
+            echo "tags=$IMAGE:sha-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
             echo "run=$IMAGE:sha-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           else
             echo "tags=midden:test" >> "$GITHUB_OUTPUT"
@@ -95,3 +96,25 @@ jobs:
           for i in $(seq 30); do curl -fsS http://127.0.0.1:8080/healthz && exit 0; sleep 1; done
           docker logs midden
           exit 1
+  # Point `latest` at the image tested above; a manifest copy in the
+  # registry, no rebuild.
+  publish:
+    needs: [checks, e2e, image]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/midden
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE:sha-$GITHUB_SHA"

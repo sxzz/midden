@@ -21,7 +21,7 @@
 
 ## 发布
 
-- 镜像：`main` 上每次推送，`test` 工作流的 `image` 任务在检查与浏览器测试通过后在 arm64 运行器上构建 arm64 镜像（生产环境是 Apple 芯片的 Mac，只发布 arm64），发布为 `ghcr.io/sxzz/midden:latest` 和 `ghcr.io/sxzz/midden:sha-<提交>`。其他分支与 PR 只构建并做健康检查，不发布。服务器上用 `docker compose pull && docker compose up -d` 更新。
+- 镜像：`main` 上每次推送，`test` 工作流的 `image` 任务与检查、浏览器测试同时在 arm64 运行器上构建 arm64 镜像（生产环境是 Apple 芯片的 Mac，只发布 arm64），立即推送 `ghcr.io/sxzz/midden:sha-<提交>`；三者都通过后，`publish` 任务把 `ghcr.io/sxzz/midden:latest` 指向它（在镜像仓库中复制清单，不重新构建）。部署读的是 `latest`，所以没通过检查的提交不会部署。其他分支与 PR 只构建并做健康检查，不发布。服务器上用 `docker compose pull && docker compose up -d` 更新。
 - 网页：`test` 在 `main` 上通过后，`web` 工作流把网页部署到 Cloudflare 静态托管（仓库变量 `MIDDEN_WEB_HOSTNAME` 指定域名，路由 `<域名>/app/*`）。
 
 ## 日常操作
