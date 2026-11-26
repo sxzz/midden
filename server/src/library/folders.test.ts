@@ -99,6 +99,40 @@ describe('folders', () => {
     expect(await counts()).toEqual([3, 3, 1, 1, 2, 3, 0, 0])
   })
 
+  test('count again only when the library changed, not when anything is written', async () => {
+    const c = setup()
+    const a1 = (await capture(c, post('a1'))).collectionId
+    await capture(c, post('b1'))
+    const version = () =>
+      (
+        c.db.$client
+          .prepare('SELECT n FROM library_version WHERE id = 1')
+          .get() as { n: number }
+      ).n
+    const first = filterCounts(c.db, 'entity_type=fake.post')
+    const v0 = version()
+    // Jobs, observation times, sizes and notes select nothing.
+    c.queue.enqueue(c.db, 'finalize', 'x', { delayMs: 60_000 })
+    c.db.$client.exec(
+      `UPDATE catalog SET observed_at = observed_at + 1, storage_bytes = 7`,
+    )
+    updateAnnotation(c.db, a1, { note: 'a note' })
+    expect(version()).toBe(v0)
+    expect(filterCounts(c.db, 'entity_type=fake.post')).toBe(first)
+    // A tag, a save, a deletion do.
+    const tag = updateAnnotation(c.db, a1, { tagNames: ['读'] }).tags[0]!
+    expect(version()).toBeGreaterThan(v0)
+    expect(filterCounts(c.db, `tag=${tag.id}`).count).toBe(1)
+    const v1 = version()
+    const a2 = (await capture(c, post('a2'))).collectionId
+    expect(version()).toBeGreaterThan(v1)
+    expect(filterCounts(c.db, 'entity_type=fake.post').count).toBe(3)
+    const v2 = version()
+    deleteCollection(c.db, a2)
+    expect(version()).toBeGreaterThan(v2)
+    expect(filterCounts(c.db, 'entity_type=fake.post').count).toBe(2)
+  })
+
   test('count together what the list shows, filter by filter, in every pass', async () => {
     const c = setup()
     const a1 = (await capture(c, post('a1'))).collectionId

@@ -17,20 +17,20 @@ interface Cache {
 }
 
 /**
- * Counts by filter, kept while nothing writes to the database. One count
- * reads the whole library (tens of milliseconds at 60k items), so a few
- * dozen folders are counted once per change rather than on every request.
- * `total_changes()` moves with this connection's writes, `data_version`
- * with another process's (the CLI).
+ * Counts by filter, kept while the library stays as it was. One count reads
+ * the whole library (tens of milliseconds at 60k items), so a few dozen
+ * folders are counted once per change rather than on every request. The
+ * stamp is `library_version`, which the database's triggers move with every
+ * write that may change what a filter selects, from any connection; jobs,
+ * downloads and observation times leave it, and the counts, alone.
  */
 const caches = new WeakMap<object, Cache>()
 
 function cache(db: Database): Cache {
-  const { stamp } = db.$client
-    .prepare(
-      `SELECT total_changes() || ':' || data_version AS stamp FROM pragma_data_version`,
-    )
-    .get() as { stamp: string }
+  const row = db.$client
+    .prepare('SELECT n FROM library_version WHERE id = 1')
+    .get() as { n: number } | undefined
+  const stamp = String(row?.n)
   let cached = caches.get(db.$client)
   if (cached?.stamp !== stamp) {
     cached = { stamp, byFilter: new Map() }

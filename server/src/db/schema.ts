@@ -200,6 +200,19 @@ export const library = sqliteTable(
 const UNKNOWN_LAST = String(Number.MAX_SAFE_INTEGER)
 
 /**
+ * One row whose `n` moves whenever what a library filter selects may have
+ * changed: the triggers of migration `library_version` count every write to
+ * the catalog's filtered columns, the library, tags on collections, follow
+ * edges and source states. Counts of the folders and the lists are kept
+ * while it stays (`library/counts.ts`), whatever else is written (jobs,
+ * media, observation times).
+ */
+export const libraryVersion = sqliteTable('library_version', {
+  id: integer().primaryKey(),
+  n: integer().notNull().default(0),
+})
+
+/**
  * What the library list filters and sorts on, one row per collection with a
  * revision, derived from its newest revision (see `library/catalog.ts`).
  * Facts that depend on other collections (the author's newest profile, tags
