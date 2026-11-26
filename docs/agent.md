@@ -378,6 +378,37 @@ Poll it every 10 seconds or more until `done` is true. `paused` or `paused_all` 
 
 Background work: `paused` (everything), `paused_types`, `pausable_types` and the backlog of jobs per type.
 
+### GET /agent/v1/watches
+
+Scheduled updates (定期更新): accounts and folders the archive updates by itself.
+
+```json
+{
+  "items": [
+    {
+      "id": "01e0…",
+      "target": "account",
+      "target_id": "01a1…",
+      "handle": "alice",
+      "url": "https://x.com/alice",
+      "frequency": "daily",
+      "options": { "posts": "until_existing", "relations": false, "…": "…" },
+      "enabled": true,
+      "next_run_at": "2026-11-27T03:12:00.000Z",
+      "created_at": "…",
+      "last_run": {
+        "update_id": "01d0…",
+        "state": "complete",
+        "done": true,
+        "created_at": "…"
+      }
+    }
+  ]
+}
+```
+
+A folder's watch has `"target": "folder"` and the folder's `name`. `last_run.update_id` works with `GET /updates/{id}`.
+
 ## 6. Filter reference
 
 Lists take commas or repeated keys (`tag=a,b` or `tag=a&tag=b`). Times are RFC 3339 (`2026-11-01T00:00:00Z`).
@@ -438,6 +469,14 @@ Resume it.
 ### PATCH /agent/v1/jobs
 
 Pause or resume all background work, or some job types: `{"paused": true}`, `{"paused_types": ["thumbnail", "upload"]}`. Answers as `GET /jobs`.
+
+### PUT /agent/v1/watches
+
+Watch an account or a folder, or change its watch (there is one per target): `{"target": {"account": "x:@alice"}, "frequency": "daily", "options": {"posts": "until_existing"}}`. `target` is `{"account": ref}` (a saved account) or `{"folder": id}`; `frequency` is `6h`, `daily` or `weekly`; `options` as for updates. Each run is an ordinary update, ranked below the owner's own work. Answers the watch as `GET /watches` lists it.
+
+### PATCH /agent/v1/watches/{id}
+
+Change a watch's `frequency` or `options`, or turn it off and on: `{"enabled": false}`. Only the owner deletes watches.
 
 ### POST /agent/v1/tags
 

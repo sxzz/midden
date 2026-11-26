@@ -8,6 +8,8 @@ import * as v from 'valibot'
 import { OptionsBody, resolveOptions } from '#capture/options.ts'
 import { captureURL } from '#capture/records.ts'
 import { pauseUpdate, resumeUpdate, startUpdate } from '#capture/updates.ts'
+import { editWatch, setWatch } from '#capture/watches.ts'
+import { watchFrequencies } from '#db/schema.ts'
 import { readJobControl, writeJobControl } from '#jobs/control.ts'
 import { PAUSABLE_TYPES } from '#jobs/queue.ts'
 import {
@@ -245,6 +247,69 @@ export function writeRoutes(
       types: input.paused_types ?? control.types,
     })
     return c.json(runRead(reader, 'queue', {}))
+  })
+
+  // --- 定期更新 -----------------------------------------------------------
+  // Watching an account or a folder: one watch per target, so a second
+  // PUT changes it. Turning one off is `enabled: false`; deleting is the
+  // owner's, in the web app.
+  const watchOf = (id: string) => {
+    const [watch] = (
+      runRead(reader, 'watches', { id }) as {
+        items: unknown[]
+      }
+    ).items
+    if (!watch) throw notFound()
+    return watch
+  }
+  app.put('/watches', writes, async (c) => {
+    const input = await parse(
+      c,
+      v.strictObject({
+        target: v.union([
+          v.strictObject({
+            account: v.string(),
+            platform: v.optional(v.string()),
+          }),
+          v.strictObject({ folder: v.string() }),
+        ]),
+        frequency: v.picklist(watchFrequencies),
+        options: v.optional(OptionsBody),
+      }),
+    )
+    const t = input.target
+    const id = setWatch(
+      ctx,
+      'folder' in t
+        ? { target: 'folder', id: findFolder(reader.db, t.folder).id }
+        : {
+            target: 'collection',
+            id: savedAccount(reader, t.account, t.platform),
+          },
+      {
+        frequency: input.frequency,
+        options: resolveOptions(input.options),
+      },
+    )
+    return c.json(watchOf(id))
+  })
+  app.patch('/watches/:id', writes, async (c) => {
+    const input = await parse(
+      c,
+      v.strictObject({
+        frequency: v.optional(v.picklist(watchFrequencies)),
+        options: v.optional(OptionsBody),
+        enabled: v.optional(v.boolean()),
+      }),
+    )
+    const id = c.req.param('id')
+    if (!isUUID(id)) throw notFound()
+    editWatch(ctx, id.toLowerCase(), {
+      frequency: input.frequency,
+      options: input.options && resolveOptions(input.options),
+      enabled: input.enabled,
+    })
+    return c.json(watchOf(id.toLowerCase()))
   })
 
   // --- Tags -------------------------------------------------------------

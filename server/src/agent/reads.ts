@@ -2,8 +2,10 @@
 // own read-only connection, never on the web process's event loop; tests
 // run them in place (`inlineReads`). Inputs and results are plain JSON.
 import { sql } from 'drizzle-orm'
+import { optionsJson } from '#capture/options.ts'
 import { recordDetail, type CaptureRecord } from '#capture/records.ts'
 import { isUpdate, updateRecord } from '#capture/updates.ts'
+import { listWatches, type WatchView } from '#capture/watches.ts'
 import { jobs } from '#db/schema.ts'
 import { readJobControl } from '#jobs/control.ts'
 import { PAUSABLE_TYPES } from '#jobs/queue.ts'
@@ -540,6 +542,42 @@ function queue(r: AgentReader) {
   }
 }
 
+/** 定期更新: scheduled updates of an account or a folder. */
+function watchJson(w: WatchView) {
+  return {
+    id: w.id,
+    target: w.target === 'folder' ? 'folder' : 'account',
+    target_id: w.targetId,
+    ...(w.name ? { name: w.name } : {}),
+    ...(w.handle ? { handle: w.handle } : {}),
+    ...(w.url ? { url: w.url } : {}),
+    frequency: w.frequency,
+    options: optionsJson(w.options),
+    enabled: w.enabled,
+    next_run_at: w.nextRunAt.toISOString(),
+    ...(w.error ? { error: w.error } : {}),
+    created_at: w.createdAt.toISOString(),
+    ...(w.lastRun
+      ? {
+          last_run: {
+            update_id: w.lastRun.id,
+            state: w.lastRun.state,
+            done: w.lastRun.done,
+            ...(w.lastRun.paused ? { paused: true } : {}),
+            ...(w.lastRun.stopped ? { stopped: true } : {}),
+            created_at: w.lastRun.createdAt.toISOString(),
+          },
+        }
+      : {}),
+  }
+}
+
+function watchesOf(r: AgentReader, input: { id?: string } = {}) {
+  return {
+    items: listWatches(r.db, input.id ? { id: input.id } : {}).map(watchJson),
+  }
+}
+
 /** Every read, by name. */
 export const READS = {
   search,
@@ -553,6 +591,7 @@ export const READS = {
   tags: tagsOf,
   status,
   queue,
+  watches: watchesOf,
 } satisfies Record<string, (r: AgentReader, input: never) => unknown>
 
 export type ReadName = keyof typeof READS

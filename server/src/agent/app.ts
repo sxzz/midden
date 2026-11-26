@@ -188,6 +188,7 @@ export function createAgentApi(o: AgentOptions) {
     c.json(await reads.run('status', { id: c.req.param('id') })),
   )
   app.get('/jobs', async (c) => c.json(await reads.run('queue', undefined)))
+  app.get('/watches', async (c) => c.json(await reads.run('watches', {})))
 
   writeRoutes(app, { ctx, reader: o.reader, reads })
 

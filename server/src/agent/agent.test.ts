@@ -622,6 +622,81 @@ describe('writes', () => {
     ).toBe('invalid_request')
   })
 
+  test('watches an account or a folder; turning one off is all it can do to one', async () => {
+    const f = await setup()
+    const made = await f.call('/watches', {
+      method: 'PUT',
+      body: { target: { account: 'fake:@alice' }, frequency: 'daily' },
+    })
+    expect(made.status).toBe(200)
+    expect(made.json).toEqual(
+      expect.objectContaining({
+        target: 'account',
+        target_id: f.ids['7'],
+        frequency: 'daily',
+        enabled: true,
+        next_run_at: expect.any(String),
+      }),
+    )
+    // One watch per target: watching it again changes it.
+    const again = await f.call('/watches', {
+      method: 'PUT',
+      body: {
+        target: { account: f.ids['7'] },
+        frequency: 'weekly',
+        options: { posts: 'none' },
+      },
+    })
+    expect(again.json.id).toBe(made.json.id)
+    expect(again.json.frequency).toBe('weekly')
+    expect(again.json.options.posts).toBe('none')
+    const off = await f.call(`/watches/${made.json.id}`, {
+      method: 'PATCH',
+      body: { enabled: false },
+    })
+    expect(off.json.enabled).toBe(false)
+    expect((await f.call('/watches')).json.items).toEqual([off.json])
+    const folder = (
+      await f.call('/folders', { body: { name: 'Cats', filter: { q: 'cat' } } })
+    ).json
+    expect(
+      (
+        await f.call('/watches', {
+          method: 'PUT',
+          body: { target: { folder: folder.id }, frequency: '6h' },
+        })
+      ).json,
+    ).toEqual(
+      expect.objectContaining({
+        target: 'folder',
+        name: 'Cats',
+        frequency: '6h',
+      }),
+    )
+    expect(
+      (
+        await f.call('/watches', {
+          method: 'PUT',
+          body: { target: { account: 'fake:@carol' }, frequency: 'daily' },
+        })
+      ).status,
+    ).toBe(404)
+    expect(
+      (await f.call(`/watches/${made.json.id}`, { method: 'DELETE' })).status,
+    ).toBe(404)
+    const ro = f.token('ro')
+    expect((await f.call('/watches', { token: ro })).status).toBe(200)
+    expect(
+      (
+        await f.call(`/watches/${made.json.id}`, {
+          token: ro,
+          method: 'PATCH',
+          body: { enabled: true },
+        })
+      ).status,
+    ).toBe(403)
+  })
+
   test('background work pauses and resumes', async () => {
     const f = await setup()
     const paused = await f.call('/jobs', {
