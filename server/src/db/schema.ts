@@ -720,11 +720,11 @@ export const mediaGarbage = sqliteTable('media_garbage', {
 })
 
 /**
- * Raw upstream responses of a capture, byte for byte. With a raw bucket
- * configured, each body moves there once the capture finished (see
- * `raw/`), compressed, under its hash: `remoteAt` records when the copy was
- * confirmed, and `body` is then empty (a NOT NULL column cannot become
- * nullable without rebuilding the table). Delete rows with
+ * Raw upstream responses of a capture: what was fetched, its hash and size.
+ * The bytes are in `source_response_bodies` while they are kept here; with
+ * a raw bucket configured, each body moves there once the capture finished
+ * (see `raw/`), compressed, under its hash, and its body row goes. A row
+ * without a body row is in the bucket. Delete rows with
  * `deleteSourceResponses`, so that objects nothing uses any more go too.
  */
 export const sourceResponses = sqliteTable(
@@ -735,28 +735,33 @@ export const sourceResponses = sqliteTable(
       .notNull()
       .references(() => captures.id, { onDelete: 'cascade' }),
     position: integer().notNull(),
-    body: blob({ mode: 'buffer' }).$type<Buffer>().notNull(),
     contentType: text().notNull(),
     sourceUrl: text().notNull(),
     // Of the body as received, also the object's key.
     sha256: text().notNull(),
     size: integer().notNull(),
     createdAt: createdAt(),
-    remoteAt: timestamp(),
   },
   (t) => [
     uniqueIndex('source_responses_position').on(t.captureId, t.position),
-    // Sizes without reading the bodies stored before them.
-    index('source_responses_size').on(t.captureId, t.size),
     // Whether any row still uses an object, and whether one is stored.
-    index('source_responses_sha256').on(t.sha256, t.remoteAt),
-    // Bodies still here, for the sweep that queues their upload; empty
-    // once everything is in the bucket.
-    index('source_responses_local')
-      .on(t.createdAt, t.captureId, t.id)
-      .where(sql`${t.remoteAt} IS NULL`),
+    index('source_responses_sha256').on(t.sha256),
   ],
 )
+
+/**
+ * The bytes of the raw responses kept in the database, byte for byte: all
+ * of them without a raw bucket, else those not yet stored there (and ones
+ * whose bytes do not match their hash). Storing a body in the bucket
+ * deletes its row, which leaves the metadata in `source_responses` alone;
+ * the rows here are the sweep's backlog.
+ */
+export const sourceResponseBodies = sqliteTable('source_response_bodies', {
+  responseId: text()
+    .primaryKey()
+    .references(() => sourceResponses.id, { onDelete: 'cascade' }),
+  body: blob({ mode: 'buffer' }).$type<Buffer>().notNull(),
+})
 
 /**
  * Raw responses whose upload job gave up: the sweep (`sweepRawUploads`)

@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { zstdDecompressSync } from 'node:zlib'
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, getColumns, sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { backoffMs, retryAfterMs } from '#blob/s3.ts'
 import { captureHandlers } from '#capture/handlers.ts'
@@ -14,6 +14,7 @@ import {
   jobs,
   rawGarbage,
   rawUploadFailures,
+  sourceResponseBodies,
   sourceResponses,
 } from '#db/schema.ts'
 import { RetryError, SnoozeError, type Job } from '#jobs/queue.ts'
@@ -88,12 +89,18 @@ function setup(
   return { c: ctx, clock }
 }
 
+/** The rows, each with its body while it is in the database, else null. */
 const rows = (c: CaptureContext) =>
   c.db
-    .select()
+    .select({ ...getColumns(sourceResponses), body: sourceResponseBodies.body })
     .from(sourceResponses)
+    .leftJoin(
+      sourceResponseBodies,
+      eq(sourceResponseBodies.responseId, sourceResponses.id),
+    )
     .orderBy(asc(sourceResponses.sourceUrl))
     .all()
+const stored = (row?: { body: Buffer | null }) => row?.body === null
 
 const job = (ref: string, attempt = 1): Job => ({
   id: 1,
@@ -119,9 +126,8 @@ describe('raw responses in the bucket', () => {
     expect(row).toMatchObject({
       sha256: sha(body),
       size: body.length,
-      body: Buffer.alloc(0),
+      body: null,
     })
-    expect(row!.remoteAt).toBeInstanceOf(Date)
     const object = s3.objects.get(rawKey(sha(body)))!
     expect(object.contentType).toBe('application/zstd')
     expect(object.metadata).toEqual({
@@ -136,8 +142,8 @@ describe('raw responses in the bucket', () => {
       `HEAD ${rawKey(sha(body))}`,
     ])
     // Read on demand, checked against the hash.
-    expect(await sourceBody(c.raw, row!)).toEqual(body)
-    await expect(sourceBody(undefined, row!)).rejects.toThrow(
+    expect(await sourceBody(c.db, c.raw, row!)).toEqual(body)
+    await expect(sourceBody(c.db, undefined, row!)).rejects.toThrow(
       'RAW_R2_BUCKET is not set',
     )
   })
@@ -146,9 +152,36 @@ describe('raw responses in the bucket', () => {
     const { c } = setup({ raw: false })
     await capture(c, '1')
     const [row] = rows(c)
-    expect(row).toMatchObject({ body: bodyOf('1'), remoteAt: null })
-    expect(await sourceBody(undefined, row!)).toEqual(bodyOf('1'))
+    expect(row).toMatchObject({ body: bodyOf('1') })
+    expect(await sourceBody(c.db, undefined, row!)).toEqual(bodyOf('1'))
     expect(s3.requests).toEqual([])
+  })
+
+  test('storing a body deletes its body row; the row itself stays where it was', async () => {
+    const { c } = setup({ raw: false })
+    const done = await capture(c, '1')
+    const place = () =>
+      c.db.all<{ rowid: number; id: string }>(
+        sql`SELECT rowid, id FROM source_responses`,
+      )
+    const before = place()
+    expect(c.db.select().from(sourceResponseBodies).all()).toHaveLength(1)
+    c.raw = s3.rawStore()
+    await runRawUpload(c, job(done.id))
+    expect(place()).toEqual(before)
+    expect(c.db.select().from(sourceResponseBodies).all()).toEqual([])
+  })
+
+  test('deleting raw responses takes the bodies still here with them', async () => {
+    const { c, clock } = setup({ raw: false })
+    const done = await capture(c, '1')
+    c.db.transaction((tx) =>
+      deleteSourceResponses(tx, [done.id], new Date(clock.now)),
+    )
+    expect(rows(c)).toEqual([])
+    expect(c.db.select().from(sourceResponseBodies).all()).toEqual([])
+    // Never in the bucket: no object to collect.
+    expect(c.db.select().from(rawGarbage).all()).toEqual([])
   })
 
   test('a failed upload is retried, and the body stays until it is stored', async () => {
@@ -160,10 +193,10 @@ describe('raw responses in the bucket', () => {
     const failed = await runRawUpload(c, job(done.id)).catch((error) => error)
     expect(failed).toBeInstanceOf(RetryError)
     expect(failed.afterMs).toBe(30_000)
-    expect(rows(c)[0]).toMatchObject({ body: bodyOf('1'), remoteAt: null })
+    expect(rows(c)[0]).toMatchObject({ body: bodyOf('1') })
     s3.failKeys.delete(key)
     await runRawUpload(c, job(done.id, 2))
-    expect(rows(c)[0]!.remoteAt).toBeInstanceOf(Date)
+    expect(stored(rows(c)[0])).toBe(true)
   })
 
   test('a copy that reads back wrong is not trusted', async () => {
@@ -174,7 +207,7 @@ describe('raw responses in the bucket', () => {
     await expect(runRawUpload(c, job(done.id))).rejects.toThrow(
       /reads back wrong: ETag/,
     )
-    expect(rows(c)[0]).toMatchObject({ body: bodyOf('1'), remoteAt: null })
+    expect(rows(c)[0]).toMatchObject({ body: bodyOf('1') })
   })
 
   test('a body that does not match its hash is never stored, and left alone', async () => {
@@ -202,7 +235,7 @@ describe('raw responses in the bucket', () => {
     const two = await capture(c, '2')
     const key = rawKey(sha(bodyOf('1', ['1'])))
     expect([...s3.objects.keys()]).toEqual([key])
-    expect(rows(c).every((row) => row.remoteAt)).toBe(true)
+    expect(rows(c).every((row) => stored(row))).toBe(true)
 
     deleteCollection(c.db, one.collectionId)
     expect(await collectCollections(c)).toBe(1)
@@ -314,7 +347,7 @@ describe('the sweep', () => {
     // Queued already: not again.
     expect(sweepRawUploads(c)).toBe(0)
     await c.queue.drain()
-    expect(rows(c).every((row) => row.remoteAt)).toBe(true)
+    expect(rows(c).every((row) => stored(row))).toBe(true)
     expect(sweepRawUploads(c)).toBe(0)
   })
 
@@ -325,7 +358,7 @@ describe('the sweep', () => {
     clock.now += 61 * 60_000
     expect(sweepRawUploads(c)).toBe(12)
     await c.queue.drain()
-    expect(rows(c).every((row) => row.remoteAt)).toBe(true)
+    expect(rows(c).every((row) => stored(row))).toBe(true)
     expect(s3.requests.filter((r) => r.method === 'PUT')).toHaveLength(5)
     expect(s3.limited).toBe(0)
   })
@@ -363,7 +396,7 @@ describe('the sweep', () => {
     expect(sweepRawUploads(c)).toBe(1)
     // Stored at last: the record goes.
     await runRawUpload(c, job(captured[0]!))
-    expect(rows(c)[0]!.remoteAt).toBeInstanceOf(Date)
+    expect(stored(rows(c)[0])).toBe(true)
     expect(c.db.select().from(rawUploadFailures).all()).toEqual([])
   })
 
@@ -394,7 +427,7 @@ describe('raw-get', () => {
     const { c } = setup()
     await capture(c, '1')
     const [row] = rows(c)
-    expect(row!.remoteAt).toBeInstanceOf(Date)
+    expect(stored(row)).toBe(true)
     const printed: string[] = []
     const written: Buffer[] = []
     const out = {
@@ -410,6 +443,25 @@ describe('raw-get', () => {
     expect(
       await rawGetCommand(c.db, s3.rawStore(), row!.captureId, 0, out),
     ).toBe(0)
+    expect(written).toEqual([bodyOf('1')])
+  })
+  test('writes a body still in the database', async () => {
+    const { c } = setup({ raw: false })
+    await capture(c, '1')
+    const [row] = rows(c)
+    const printed: string[] = []
+    const written: Buffer[] = []
+    const out = {
+      print: (line: string) => printed.push(line),
+      write: (bytes: Buffer) => written.push(bytes),
+    }
+    expect(
+      await rawGetCommand(c.db, undefined, row!.captureId, undefined, out),
+    ).toBe(0)
+    expect(printed).toEqual([
+      `0\tdatabase\t${row!.size}\tapplication/json\t${row!.sourceUrl}`,
+    ])
+    expect(await rawGetCommand(c.db, undefined, row!.captureId, 0, out)).toBe(0)
     expect(written).toEqual([bodyOf('1')])
   })
 })
@@ -449,7 +501,7 @@ describe('rate limits', () => {
     const second = await runRawUpload(c, job(done.id)).catch((e) => e)
     expect(second).toBeInstanceOf(SnoozeError)
     expect(s3.requests.length).toBe(asked)
-    expect(rows(c)[0]).toMatchObject({ body: bodyOf('1'), remoteAt: null })
+    expect(rows(c)[0]).toMatchObject({ body: bodyOf('1') })
     // A Retry-After too long to wait out in the request sets the pause.
     clock.now += 61_000
     s3.rateLimitNext = 1
@@ -459,7 +511,7 @@ describe('rate limits', () => {
     expect(third.afterMs).toBe(120_000)
     clock.now += 121_000
     await runRawUpload(c, job(done.id))
-    expect(rows(c)[0]!.remoteAt).toBeInstanceOf(Date)
+    expect(stored(rows(c)[0])).toBe(true)
   })
 
   test('two jobs with one body store it once and record both rows', async () => {
@@ -474,7 +526,7 @@ describe('rate limits', () => {
     ])
     expect(s3.requests.filter((r) => r.method === 'PUT')).toHaveLength(1)
     expect(s3.limited).toBe(0)
-    expect(rows(c).every((row) => row.remoteAt)).toBe(true)
+    expect(rows(c).every((row) => stored(row))).toBe(true)
   })
 
   test('a job whose body another row stored only checks the object', async () => {
@@ -486,6 +538,6 @@ describe('rate limits', () => {
     expect(s3.requests.map((r) => `${r.method} ${r.key}`)).toEqual([
       `HEAD ${key}`,
     ])
-    expect(rows(c).every((row) => row.remoteAt)).toBe(true)
+    expect(rows(c).every((row) => stored(row))).toBe(true)
   })
 })

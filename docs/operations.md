@@ -258,7 +258,7 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
 ## 原始响应（R2）
 
-默认原始响应在数据库中（`source_responses.body`）。设置 `RAW_R2_BUCKET` 后，每次抓取完成即把原始响应移到这个私有存储桶的 `raw/` 下（zstd 压缩，按内容的 SHA-256 命名），数据库只留下元数据和 `remote_at`，见架构文档「原始响应」。生产环境中它们占数据库的大部分（2026-11-25：`source_responses` 878 MB，其中 `body` 732 MB，128,844 条）。
+默认原始响应在数据库中（正文在 `source_response_bodies`，元数据在 `source_responses`）。设置 `RAW_R2_BUCKET` 后，每次抓取完成即把原始响应移到这个私有存储桶的 `raw/` 下（zstd 压缩，按内容的 SHA-256 命名），数据库只留下 `source_responses` 中的元数据，正文行随之删去，见架构文档「原始响应」。移走之前它们占数据库的大部分（2026-11-25：`source_responses` 878 MB，其中正文 732 MB，128,844 条）。
 
 | 变量                                               | 说明                                                                                                                            |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
@@ -280,24 +280,26 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
 1. 在部署目录的 `.env` 中加上 `RAW_R2_BUCKET=midden-backup`（已设置 `R2_ACCOUNT_ID` 与 `CF_API_TOKEN` 时只需这一行）。
 2. `docker compose up -d`（或推送后自动部署），日志中 `raw responses store` 的 `store` 应为 `r2`。此后完成的抓取由 worker 的 `raw-upload` 任务移走。
-3. 已在数据库中的原始响应不需要手动处理。worker 的维护任务每分钟找出一小时以前、仍在数据库中、没有上传任务的原始响应，按抓取排 `raw-upload` 任务，同时等待的最多 500 个；它们在 `raw` 队列中只在 worker 空闲时运行，受节流，优先级与维护相同，所以积压逐步移走，不挤占采集。这一步查的是只含仍在数据库中的行的索引（`source_responses_local`），全部移走后几乎不花时间。排了任务时记 `queued raw responses still in the database for upload`（`captures` 为这次排的抓取数）。
-   - 同样内容（同一个 SHA-256）的原始响应共用一个对象：任务在这个键的锁内存储，然后把仍在数据库中、内容相同的所有行一起记下并清空，所以每个内容只上传一次，同一个键不会同时写入（R2 对同一个键的写入每秒约一次，更快的回答 429）。
+3. 已在数据库中的原始响应不需要手动处理。worker 的维护任务每分钟找出一小时以前、仍在数据库中、没有上传任务的原始响应，按抓取排 `raw-upload` 任务，同时等待的最多 500 个；它们在 `raw` 队列中只在 worker 空闲时运行，受节流，优先级与维护相同，所以积压逐步移走，不挤占采集。这一步从只含仍在数据库中的正文的 `source_response_bodies` 查起，全部移走后几乎不花时间。排了任务时记 `queued raw responses still in the database for upload`（`captures` 为这次排的抓取数）。
+   - 同样内容（同一个 SHA-256）的原始响应共用一个对象：任务在这个键的锁内存储，然后把仍在数据库中、内容相同的所有行一起记下并删去正文，所以每个内容只上传一次，同一个键不会同时写入（R2 对同一个键的写入每秒约一次，更快的回答 429）。
    - 上传任务放弃（12 次后）的原始响应记在 `raw_upload_failures`：一小时后再排，每放弃一次等待加倍，最长一天，存储桶长时间不可用之后会自己恢复。
    - 与哈希不符的原始响应不上传，也不再尝试：记在 `raw_upload_failures`（`retry_at` 为空），记一次 `raw response does not match its hash; it stays in the database and is not retried`（error），字节原样留在数据库中。
 4. 抽查：
 
    ```sh
    docker compose run --rm --entrypoint sqlite3 litestream -readonly /data/midden.db \
-     "SELECT remote_at IS NOT NULL, count(*), sum(size) FROM source_responses GROUP BY 1;
+     "SELECT r.id NOT IN (SELECT response_id FROM source_response_bodies), count(*), sum(size)
+        FROM source_responses r GROUP BY 1;
       SELECT retry_at IS NULL, count(*) FROM raw_upload_failures GROUP BY 1;
-      SELECT capture_id FROM source_responses WHERE remote_at IS NOT NULL LIMIT 1;"
+      SELECT capture_id FROM source_responses
+        WHERE id NOT IN (SELECT response_id FROM source_response_bodies) LIMIT 1;"
    docker compose exec midden node server/src/cli.ts raw-get <抓取 id>
    docker compose exec midden node server/src/cli.ts raw-get <抓取 id> 0 | head -c 300
    ```
 
    第一条给出仍在数据库中（`0`）和已在存储桶中（`1`）的条数与原始大小，积压移走后前者只剩最近的、正在等待重试的和与哈希不符的；第二条是等待重试（`0`）和与哈希不符（`1`）的条数；第三条是一个已移走的抓取 id，`raw-get` 列出它的原始响应（应为 `bucket`），再输出第一条，应是原始的 JSON。
 
-5. 数据库变小：清空的原始响应留下的页面成为空闲页面，维护任务每 15 分钟最多还给文件系统 16 MiB（见「维护任务」），不需要 `VACUUM`。在 147,000 条抓取、128,844 条原始响应（757 MB）的合成副本上（迁移后 1,369 MB），全部移走后空闲页面约 877 MB，55 次（约 14 小时）后数据库降到 492 MB，`source_responses` 只剩 27 MB。生产环境的数据库因此应从 2.32 GB 降到约 1.4–1.5 GB（减去 `source_responses` 的约 850 MB），在积压移走之后约 13–14 小时到达。日志 `released free database pages` 的 `free` 逐次减少，降到 1024 以下就停止。这些改动照常经 Litestream 复制：每条记下的行移到表尾，并改动它的索引项、原来所在的页面和空闲页面列表；在同一个合成副本上，每批 100 行地移走全部积压写入约 3.2 GB 的 WAL，incremental vacuum 追上又写入约 0.9 GB。Litestream 的每个文件中同一页面只存一次，并以 LZ4 压缩，所以上传的量少于这个数；多出的 L1、L2 文件按保留期在约 9 天后删除。
+5. 数据库变小：清空的原始响应留下的页面成为空闲页面，维护任务每 15 分钟最多还给文件系统 16 MiB（见「维护任务」），不需要 `VACUUM`。在 147,000 条抓取、128,844 条原始响应（757 MB）的合成副本上（迁移后 1,369 MB），全部移走后空闲页面约 877 MB，55 次（约 14 小时）后数据库降到 492 MB，`source_responses` 只剩 27 MB。生产环境的数据库因此应从 2.32 GB 降到约 1.4–1.5 GB（减去 `source_responses` 的约 850 MB），在积压移走之后约 13–14 小时到达。日志 `released free database pages` 的 `free` 逐次减少，降到 1024 以下就停止。这些改动照常经 Litestream 复制：当时每条记下的行移到表尾，并改动它的索引项、原来所在的页面和空闲页面列表（现在正文在自己的表中，记下只删除正文行）；在同一个合成副本上，每批 100 行地移走全部积压写入约 3.2 GB 的 WAL，incremental vacuum 追上又写入约 0.9 GB。Litestream 的每个文件中同一页面只存一次，并以 LZ4 压缩，所以上传的量少于这个数；多出的 L1、L2 文件按保留期在约 9 天后删除。
 
 恢复较早的数据库（见「恢复」）时，那之后被删除的原始响应会回到数据库中，而它们在存储桶中的对象在删除 24 小时后就被回收了，读取这些原始响应会失败；其他原始响应不受影响。原始响应在存储桶中只有这一份，与 R2 中的媒体一样没有其他备份。
 

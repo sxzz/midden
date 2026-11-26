@@ -19,7 +19,7 @@ export async function rawGetCommand(
     if (!rows.length) out.print(`no raw responses for capture ${captureId}`)
     for (const row of rows)
       out.print(
-        `${row.position}\t${row.remoteAt ? 'bucket' : 'database'}\t${row.size}\t${row.contentType}\t${row.sourceUrl}`,
+        `${row.position}\t${row.local ? 'database' : 'bucket'}\t${row.size}\t${row.contentType}\t${row.sourceUrl}`,
       )
     return rows.length ? 0 : 1
   }
@@ -28,6 +28,6 @@ export async function rawGetCommand(
     out.print(`no raw response ${position} for capture ${captureId}`)
     return 1
   }
-  out.write(await sourceBody(raw, row))
+  out.write(await sourceBody(db, raw, row))
   return 0
 }

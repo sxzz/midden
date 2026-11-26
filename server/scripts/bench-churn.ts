@@ -132,6 +132,7 @@ const TABLES = [
   'capture_metrics',
   'capture_staging',
   'source_responses',
+  'source_response_bodies',
 ]
 
 function report(ctx: AccountsContext, label: string) {

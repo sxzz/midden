@@ -1,18 +1,23 @@
-import { Buffer } from 'node:buffer'
-import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
-import { rawGarbage, rawUploadFailures, sourceResponses } from '#db/schema.ts'
+import { and, asc, eq, not, sql } from 'drizzle-orm'
+import {
+  rawGarbage,
+  rawUploadFailures,
+  sourceResponseBodies,
+  sourceResponses,
+} from '#db/schema.ts'
 import type { Database, Executor, Transaction } from '#db/client.ts'
 import type { RawStore } from './store.ts'
-
-// A stored body is cleared to this: the column is NOT NULL.
-const EMPTY = Buffer.alloc(0)
+import type { Buffer } from 'node:buffer'
 
 export type SourceResponse = typeof sourceResponses.$inferSelect
 
+/** A row whose body is still in the database. */
+export const isLocal = sql`EXISTS (SELECT 1 FROM ${sourceResponseBodies} WHERE ${sourceResponseBodies.responseId} = ${sourceResponses.id})`
+
 /**
- * Delete the raw responses of these captures. The keys of those stored in
- * the bucket become garbage: maintenance deletes each object once no row
- * uses it (see `collectRawGarbage`).
+ * Delete the raw responses of these captures, with their bodies. The keys
+ * of those stored in the bucket become garbage: maintenance deletes each
+ * object once no row uses it (see `collectRawGarbage`).
  */
 export function deleteSourceResponses(
   tx: Transaction,
@@ -26,7 +31,7 @@ export function deleteSourceResponses(
     SELECT DISTINCT ${sourceResponses.sha256}, ${now.getTime()}
     FROM ${sourceResponses}
     WHERE ${sourceResponses.captureId} IN (SELECT value FROM json_each(${ids}))
-      AND ${sourceResponses.remoteAt} IS NOT NULL
+      AND NOT ${isLocal}
     ON CONFLICT (key) DO NOTHING`)
   tx.run(sql`
     DELETE FROM ${sourceResponses}
@@ -34,28 +39,22 @@ export function deleteSourceResponses(
 }
 
 /**
- * Record a body confirmed in the bucket and clear it here. The row also
- * moves to the end of the table (a new rowid): cleared in place, it would
- * keep the page its body began on, mostly empty; moved, it joins the other
- * small rows at the end, and the pages it left empty go to the freelist,
- * which `incremental_vacuum` returns. A row deleted meanwhile leaves its
- * object to garbage collection, which deletes it unless another row uses
- * it. Whether the row was recorded.
+ * Record a body confirmed in the bucket: its body row goes, the metadata
+ * row stays as it is. A row deleted meanwhile leaves its object to garbage
+ * collection, which deletes it unless another row uses it. Whether the row
+ * was recorded.
  */
 function markRow(
   tx: Transaction,
   row: Pick<SourceResponse, 'id' | 'sha256'>,
   now: Date,
 ): boolean {
-  // One row at a time: a statement moving several would give them all the
-  // same new rowid.
   const { changes } = tx.run(sql`
-    UPDATE ${sourceResponses}
-    SET body = ${EMPTY}, remote_at = ${now.getTime()},
-      rowid = (SELECT max(rowid) + 1 FROM ${sourceResponses})
-    WHERE ${sourceResponses.id} = ${row.id}
-      AND ${sourceResponses.sha256} = ${row.sha256}
-      AND ${sourceResponses.remoteAt} IS NULL`)
+    DELETE FROM ${sourceResponseBodies}
+    WHERE ${sourceResponseBodies.responseId} = ${row.id}
+      AND EXISTS (SELECT 1 FROM ${sourceResponses}
+        WHERE ${sourceResponses.id} = ${row.id}
+          AND ${sourceResponses.sha256} = ${row.sha256})`)
   if (changes) {
     tx.delete(rawUploadFailures)
       .where(eq(rawUploadFailures.responseId, row.id))
@@ -89,13 +88,7 @@ export function localRows(
   return db
     .select({ id: sourceResponses.id, sha256: sourceResponses.sha256 })
     .from(sourceResponses)
-    .where(
-      and(
-        eq(sourceResponses.sha256, sha256),
-        isNull(sourceResponses.remoteAt),
-        notCorrupt,
-      ),
-    )
+    .where(and(eq(sourceResponses.sha256, sha256), isLocal, notCorrupt))
     .all()
 }
 
@@ -104,12 +97,7 @@ export function storedBefore(db: Executor, sha256: string): boolean {
   return !!db
     .select({ id: sourceResponses.id })
     .from(sourceResponses)
-    .where(
-      and(
-        eq(sourceResponses.sha256, sha256),
-        isNotNull(sourceResponses.remoteAt),
-      ),
-    )
+    .where(and(eq(sourceResponses.sha256, sha256), not(isLocal)))
     .get()
 }
 
@@ -125,13 +113,26 @@ export function markStored(
   )
 }
 
-/** The raw responses of a capture, in order, bodies left where they are. */
+/** A raw response as listed: where its body is kept. */
+export type ListedResponse = SourceResponse & { local: boolean }
+
+/** The raw responses of a capture, in order, without their bodies. */
 export function captureResponses(
   db: Executor,
   captureId: string,
-): SourceResponse[] {
+): ListedResponse[] {
   return db
-    .select()
+    .select({
+      id: sourceResponses.id,
+      captureId: sourceResponses.captureId,
+      position: sourceResponses.position,
+      contentType: sourceResponses.contentType,
+      sourceUrl: sourceResponses.sourceUrl,
+      sha256: sourceResponses.sha256,
+      size: sourceResponses.size,
+      createdAt: sourceResponses.createdAt,
+      local: sql<boolean>`(${isLocal})`.mapWith(Boolean),
+    })
     .from(sourceResponses)
     .where(eq(sourceResponses.captureId, captureId))
     .orderBy(asc(sourceResponses.position))
@@ -140,11 +141,17 @@ export function captureResponses(
 
 /** A raw response's body, from the database or the raw bucket. */
 export function sourceBody(
+  db: Executor,
   raw: RawStore | undefined,
-  row: Pick<SourceResponse, 'body' | 'sha256' | 'remoteAt'>,
+  row: Pick<SourceResponse, 'id' | 'sha256'>,
   signal?: AbortSignal,
 ): Promise<Buffer> {
-  if (!row.remoteAt) return Promise.resolve(row.body)
+  const local = db
+    .select({ body: sourceResponseBodies.body })
+    .from(sourceResponseBodies)
+    .where(eq(sourceResponseBodies.responseId, row.id))
+    .get()
+  if (local) return Promise.resolve(local.body)
   if (!raw)
     return Promise.reject(
       new Error(

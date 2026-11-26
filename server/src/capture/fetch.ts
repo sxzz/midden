@@ -7,6 +7,7 @@ import {
   captureTargets,
   collections,
   connections,
+  sourceResponseBodies,
   sourceResponses,
   submissions,
 } from '#db/schema.ts'
@@ -478,12 +479,13 @@ function commit(
     )
     for (const [position, source] of staged.sources.entries()) {
       const body = Buffer.from(source.body)
-      tx.insert(sourceResponses)
+      const id = newId()
+      const { changes } = tx
+        .insert(sourceResponses)
         .values({
-          id: newId(),
+          id,
           captureId,
           position,
-          body,
           contentType: source.contentType,
           sourceUrl: source.sourceUrl,
           sha256: sha256Hex(body),
@@ -491,6 +493,8 @@ function commit(
         })
         .onConflictDoNothing()
         .run()
+      if (changes)
+        tx.insert(sourceResponseBodies).values({ responseId: id, body }).run()
     }
     for (const [position, resource] of staged.resources.entries()) {
       const assetId = newId()

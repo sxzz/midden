@@ -5,10 +5,17 @@ import {
   jobs,
   rawGarbage,
   rawUploadFailures,
+  sourceResponseBodies,
   sourceResponses,
 } from '#db/schema.ts'
 import { RetryError, SnoozeError, type Job } from '#jobs/queue.ts'
-import { localRows, markStored, notCorrupt, storedBefore } from './responses.ts'
+import {
+  isLocal,
+  localRows,
+  markStored,
+  notCorrupt,
+  storedBefore,
+} from './responses.ts'
 import { CorruptRawError, RawRateLimitError, type RawStore } from './store.ts'
 import type { CaptureContext } from '#capture/context.ts'
 
@@ -56,7 +63,7 @@ export function enqueueRawUpload(
 
 /**
  * Store one body in the bucket and record every row holding it here,
- * clearing them: written and read back first, cleared after. Under the
+ * deleting their bodies: written and read back first, deleted after. Under the
  * key's lock, so no two jobs store one key at once (R2 rejects writes to a
  * key faster than about one a second); a job that finds its row recorded
  * by another meanwhile has nothing left to do, and one whose body another
@@ -126,16 +133,14 @@ export async function runRawUpload(
     .select({
       id: sourceResponses.id,
       sha256: sourceResponses.sha256,
-      body: sourceResponses.body,
+      body: sourceResponseBodies.body,
     })
     .from(sourceResponses)
-    .where(
-      and(
-        eq(sourceResponses.captureId, job.ref),
-        isNull(sourceResponses.remoteAt),
-        notCorrupt,
-      ),
+    .innerJoin(
+      sourceResponseBodies,
+      eq(sourceResponseBodies.responseId, sourceResponses.id),
     )
+    .where(and(eq(sourceResponses.captureId, job.ref), notCorrupt))
     .orderBy(asc(sourceResponses.position))
     .all()
   for (const row of rows) {
@@ -191,13 +196,7 @@ export function failRawUpload(
         rawUploadFailures,
         eq(rawUploadFailures.responseId, sourceResponses.id),
       )
-      .where(
-        and(
-          eq(sourceResponses.captureId, captureId),
-          isNull(sourceResponses.remoteAt),
-          notCorrupt,
-        ),
-      )
+      .where(and(eq(sourceResponses.captureId, captureId), isLocal, notCorrupt))
       .all()
     for (const row of rows) {
       const failures = (row.failures ?? 0) + 1
@@ -238,14 +237,14 @@ export function sweepRawUploads(ctx: CaptureContext): number {
     .get()!.n
   const room = SWEEP_QUEUED - waiting
   if (room <= 0) return 0
-  // Named: the planner otherwise walks a full index of every row for it,
-  // where this one holds only the rows still here.
+  // From the bodies: they are the rows still here, and only those.
   const captureIds = ctx.db
     .all<{ id: string }>(
       sql`
       SELECT DISTINCT sr.capture_id AS id
-      FROM ${sourceResponses} sr INDEXED BY source_responses_local
-      WHERE sr.remote_at IS NULL AND sr.created_at <= ${at - SWEEP_GRACE}
+      FROM ${sourceResponseBodies} b
+      CROSS JOIN ${sourceResponses} sr ON sr.id = b.response_id
+      WHERE sr.created_at <= ${at - SWEEP_GRACE}
         AND NOT EXISTS (SELECT 1 FROM ${rawUploadFailures} f
           WHERE f.response_id = sr.id AND (f.retry_at IS NULL OR f.retry_at > ${at}))
         AND NOT EXISTS (SELECT 1 FROM ${jobs} j
