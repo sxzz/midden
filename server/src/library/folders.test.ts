@@ -99,6 +99,52 @@ describe('folders', () => {
     expect(await counts()).toEqual([3, 3, 1, 1, 2, 3, 0, 0])
   })
 
+  test('count together what the list shows, filter by filter, in every pass', async () => {
+    const c = setup()
+    const a1 = (await capture(c, post('a1'))).collectionId
+    await capture(c, post('a2'))
+    await capture(c, post('b1'))
+    const tag = updateAnnotation(c.db, a1, { tagNames: ['读'] }).tags[0]!
+    // More than one pass of the shared count takes, with the kinds that
+    // are counted alone among them and a filter twice.
+    const queries = [
+      'visibility=public',
+      'visibility=private',
+      'entity_type=fake.post,fake.profile',
+      'media_type=text',
+      'media_type=image',
+      'sensitive=contains',
+      'sensitive=none',
+      'post_type=post',
+      'post_type=repost',
+      'saved_within=1d',
+      `not_tag=${tag.id}`,
+      `tag=${tag.id}&not_tag=${tag.id}x`,
+      'q=post',
+      `tag=${tag.id}`,
+      'author=fake/fake.profile/bob',
+      'visibility=public',
+    ].filter((q) => {
+      try {
+        listed(c, q)
+        return true
+      } catch {
+        return false
+      }
+    })
+    expect(queries.length).toBeGreaterThan(10)
+    for (const [i, filter] of queries.entries())
+      createFolder(c.db, { name: `f${i}`, filter })
+    const folders = await listFolders(c.db)
+    expect(folders.map((folder) => folder.count)).toEqual(
+      queries.map((q) => listed(c, q)),
+    )
+    for (const folder of folders)
+      expect({ count: folder.count, types: folder.types }).toEqual(
+        filterCounts(c.db, folder.filter),
+      )
+  })
+
   test('store the filter in one canonical form', () => {
     const c = setup()
     const folder = createFolder(c.db, {

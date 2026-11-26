@@ -2,7 +2,9 @@ import { canonicalJson } from '#capture/json.ts'
 import { parseFilterQuery } from './filter-query.ts'
 import {
   countCollections,
+  countCollectionsTogether,
   savedSince,
+  sharesCountPass,
   type CollectionFilter,
   type FilterCounts,
   type Narrowing,
@@ -52,11 +54,6 @@ function countKey(canonical: string): string {
   return since === undefined ? params.toString() : `${params}#${since}`
 }
 
-/** Whether a canonical filter's counts are at hand without a query. */
-export function countsCached(db: Database, canonical: string): boolean {
-  return cache(db).byFilter.has(countKey(canonical))
-}
-
 /**
  * What the list shows for a query string, in total and by entity type.
  * Throws `invalid_filter` for what the list rejects.
@@ -71,6 +68,59 @@ export function filterCounts(db: Database, query: string): FilterCounts {
     byFilter.set(key, counts)
   }
   return counts
+}
+
+/** Filters counted in one pass; a pass is one stretch of blocked loop. */
+const TOGETHER = 8
+
+/**
+ * `filterCounts` for several query strings. The uncached ones that test every
+ * saved collection are counted together, a few to a pass (see
+ * `countCollectionsTogether`), the rest one by one, with a turn for other
+ * requests between passes, since each blocks the event loop.
+ */
+export async function filterCountsOf(
+  db: Database,
+  queries: readonly string[],
+): Promise<FilterCounts[]> {
+  const parsed = queries.map((query) => parseFilterQuery(query))
+  const result = new Map<string, FilterCounts>()
+  const shared = new Map<string, CollectionFilter>()
+  const alone = new Map<string, CollectionFilter>()
+  const byFilter = cache(db).byFilter
+  for (const { filter, canonical } of parsed) {
+    const key = countKey(canonical)
+    const counts = byFilter.get(key)
+    if (counts) result.set(key, counts)
+    else if (sharesCountPass(filter)) shared.set(key, filter)
+    else alone.set(key, filter)
+  }
+  let first = true
+  const turn = async () => {
+    if (!first) await new Promise((resolve) => setImmediate(resolve))
+    first = false
+  }
+  // A write while others had their turn starts the cache over; what was
+  // counted before it is only kept for this answer.
+  const keep = (key: string, counts: FilterCounts) => {
+    result.set(key, counts)
+    cache(db).byFilter.set(key, counts)
+  }
+  const keys = [...shared.keys()]
+  for (let at = 0; at < keys.length; at += TOGETHER) {
+    await turn()
+    const chunk = keys.slice(at, at + TOGETHER)
+    const counted = countCollectionsTogether(
+      db,
+      chunk.map((key) => shared.get(key)!),
+    )
+    for (const [i, key] of chunk.entries()) keep(key, counted[i]!)
+  }
+  for (const [key, filter] of alone) {
+    await turn()
+    keep(key, countCollections(db, filter))
+  }
+  return parsed.map(({ canonical }) => result.get(countKey(canonical))!)
 }
 
 /**

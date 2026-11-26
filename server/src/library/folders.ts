@@ -3,9 +3,9 @@ import { newId } from '#db/id.ts'
 import { folders } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { pruneTags } from './annotations.ts'
-import { countsCached, filterCounts } from './counts.ts'
+import { filterCounts, filterCountsOf } from './counts.ts'
 import { parseFilterQuery } from './filter-query.ts'
-import { checkFilter } from './list.ts'
+import { checkFilter, type FilterCounts } from './list.ts'
 import { revokeOrphanedShares } from './shares.ts'
 import type { Database, Executor } from '#db/client.ts'
 
@@ -72,8 +72,7 @@ function canonicalFilter(raw: string): string {
 
 type Row = typeof folders.$inferSelect
 
-function view(db: Database, row: Row): Folder {
-  const { count, types } = filterCounts(db, row.filter)
+function view(row: Row, { count, types }: FilterCounts): Folder {
   return {
     id: row.id,
     name: row.name,
@@ -97,8 +96,9 @@ function sameName(db: Executor, name: string, except?: string): boolean {
 const duplicate = () => new AppError('conflict', '已有同名的收藏夹')
 
 /**
- * Every folder in the order they were made, with their counts. Counting is
- * synchronous, so other requests get a turn between folders not yet counted.
+ * Every folder in the order they were made, with their counts. The folders
+ * not counted yet are counted together, eight at a time, with a turn for
+ * other requests between.
  */
 export async function listFolders(db: Database): Promise<Folder[]> {
   const rows = db
@@ -106,13 +106,11 @@ export async function listFolders(db: Database): Promise<Folder[]> {
     .from(folders)
     .orderBy(asc(folders.createdAt), asc(folders.id))
     .all()
-  const result: Folder[] = []
-  for (const row of rows) {
-    if (!countsCached(db, row.filter))
-      await new Promise((resolve) => setImmediate(resolve))
-    result.push(view(db, row))
-  }
-  return result
+  const counts = await filterCountsOf(
+    db,
+    rows.map((row) => row.filter),
+  )
+  return rows.map((row, i) => view(row, counts[i]!))
 }
 
 export function createFolder(
@@ -130,7 +128,7 @@ export function createFolder(
       .returning()
       .get()
   })
-  return view(db, row)
+  return view(row, filterCounts(db, row.filter))
 }
 
 /** Rename a folder and/or replace its filter. */
@@ -155,7 +153,7 @@ export function updateFolder(
     if (filter !== undefined) pruneTags(tx)
     return updated
   })
-  return view(db, row)
+  return view(row, filterCounts(db, row.filter))
 }
 
 export function deleteFolder(db: Database, id: string): void {

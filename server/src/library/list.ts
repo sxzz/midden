@@ -377,11 +377,28 @@ function countColumn(checked: Checked, asc: boolean): string | undefined {
 const rootTypeSQL = (types: string[]) =>
   sql`k.root_kind IN (SELECT value FROM json_each(${list(types)}))`
 
-/** Whose newest catalogued state counts: the account's latest capture. */
-const visibilitySQL = (visibility: string) => sql`(
-  SELECT s.subject_protected FROM catalog s
-  WHERE s.subject_entity_id = k.subject_entity_id
-  ORDER BY s.revision_at DESC, s.revision_id DESC LIMIT 1) = ${visibility === 'private' ? 1 : 0}`
+/**
+ * Whose newest catalogued state counts: the account's latest capture. A
+ * page of the list asks it of the few collections it reads. Reading all of
+ * them (`whole`, a count), it is asked once for each account (an account's
+ * posts are many) and each collection looks itself up in that set; the `+`
+ * keeps SQLite from starting at the accounts and reading `k` through its
+ * index, which is slower when most collections are selected.
+ */
+function visibilitySQL(visibility: string, whole: boolean): SQL {
+  const protectedAs = visibility === 'private' ? 1 : 0
+  const newest = (account: string) => `(
+    SELECT s.subject_protected FROM catalog s
+    WHERE s.subject_entity_id = ${account}
+    ORDER BY s.revision_at DESC, s.revision_id DESC LIMIT 1)`
+  return whole
+    ? sql`+k.subject_entity_id IN (
+        SELECT account.id FROM (
+          SELECT DISTINCT subject_entity_id AS id FROM catalog
+          WHERE subject_entity_id IS NOT NULL) account
+        WHERE ${sql.raw(newest('account.id'))} = ${protectedAs})`
+    : sql`${sql.raw(newest('k.subject_entity_id'))} = ${protectedAs}`
+}
 
 function mediaSQL(kinds: string[]): SQL {
   const any: string[] = []
@@ -575,12 +592,17 @@ interface Selection {
  * post's type is relative to the requested collection when the list is one
  * collection's related ones.
  */
-function conditionsOf(checked: Checked, related: boolean): SQL[] {
+function conditionsOf(
+  checked: Checked,
+  related: boolean,
+  whole: boolean,
+): SQL[] {
   const { filter, authors, from, before } = checked
   const types = values(filter.entityType)
   // The search (`q`) is not a condition here: `select` drives from it.
   const conditions: SQL[] = []
-  if (filter.visibility) conditions.push(visibilitySQL(filter.visibility))
+  if (filter.visibility)
+    conditions.push(visibilitySQL(filter.visibility, whole))
   if (from !== undefined) conditions.push(sql`l.created_at >= ${from}`)
   if (before !== undefined) conditions.push(sql`l.created_at < ${before}`)
   if (filter.mediaType) conditions.push(mediaSQL(values(filter.mediaType)))
@@ -636,21 +658,23 @@ export type Narrowing = Omit<
  * The saved collections a filter selects, unordered; with a narrowing, only
  * those it selects too. A search drives the query from what it finds; when
  * both filters search, the narrowing's ranks and the other's only selects.
+ * `whole` is for reading every collection it selects, not a page of them.
  */
 function select(
   db: Executor,
   input: CollectionFilter,
   narrow?: Narrowing,
+  whole = false,
 ): Selection {
   const checked = check(input)
   const related = checked.filter.relatedTo
-  const conditions = conditionsOf(checked, !!related)
+  const conditions = conditionsOf(checked, !!related, whole)
   if (narrow) {
     const extra = check(narrow)
     const { relatedTo, tag, tagMode, notTag, relOf, rel, relMin } = extra.filter
     if (relatedTo || tag || tagMode || notTag || relOf.length || rel || relMin)
       throw invalid()
-    conditions.push(...conditionsOf(extra, !!related))
+    conditions.push(...conditionsOf(extra, !!related, whole))
     checked.narrow = extra.filter
   }
   const searches = [checked.filter.q, checked.narrow?.q ?? '']
@@ -703,7 +727,13 @@ export function countCollections(
   input: CollectionFilter = {},
   narrow?: Narrowing,
 ): FilterCounts {
-  const { ctes, source, where } = select(db, input, narrow)
+  return countSelection(db, select(db, input, narrow, true))
+}
+
+function countSelection(
+  db: Executor,
+  { ctes, source, where }: Selection,
+): FilterCounts {
   const rows = db.all<{ type: string | null; count: number }>(sql`
     ${ctes}
     SELECT k.root_kind AS type, count(*) AS count
@@ -714,6 +744,55 @@ export function countCollections(
     if (row.type) counts.types[row.type] = row.count
   }
   return counts
+}
+
+/**
+ * Whether a filter's count tests every saved collection, so that it can share
+ * a pass with others (`countCollectionsTogether`). One that starts from a few
+ * rows (a search, related collections, tags, authors, accounts' follows) is
+ * cheaper counted on its own, as its plan does.
+ */
+export function sharesCountPass(input: CollectionFilter): boolean {
+  const { filter, relOf } = check(input)
+  return (
+    !filter.q &&
+    !filter.relatedTo &&
+    !filter.tag &&
+    !filter.authors.length &&
+    !relOf.length
+  )
+}
+
+/**
+ * Counts for filters that `sharesCountPass`, as `countCollections` gives
+ * each, from one pass over the library with each filter as a `FILTER` clause
+ * of the same aggregate. Reading the catalog is most of what a count costs,
+ * and a library of folders would read it once per folder.
+ */
+export function countCollectionsTogether(
+  db: Executor,
+  inputs: readonly CollectionFilter[],
+): FilterCounts[] {
+  const result = inputs.map((): FilterCounts => ({ count: 0, types: {} }))
+  if (!inputs.length) return result
+  const columns = inputs.map((input, i) => {
+    const { source, where } = select(db, input, undefined, true)
+    // Anything but the saved collections would count a different set.
+    if (source !== SAVED) throw invalid()
+    return sql`count(*) FILTER (WHERE ${where}) AS ${sql.raw(`c${i}`)}`
+  })
+  const rows = db.all<Record<string, number | string | null>>(sql`
+    SELECT k.root_kind AS type, ${sql.join(columns, sql`, `)}
+    FROM ${sql.raw(SAVED)} GROUP BY k.root_kind`)
+  for (const row of rows) {
+    for (const [i, counts] of result.entries()) {
+      const count = row[`c${i}`] as number
+      if (!count) continue
+      counts.count += count
+      if (row.type) counts.types[row.type as string] = count
+    }
+  }
+  return result
 }
 
 /** Which of these collections the list shows for a filter, on any page. */
