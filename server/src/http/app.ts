@@ -79,6 +79,8 @@ export interface HttpOptions {
    * the login and passes what it found (`forwarded` in the request's env).
    */
   trusted?: boolean
+  /** After every request that may have written (not `GET`). */
+  onWrite?: () => void
 }
 
 /** What a read thread's API finds in each request's env. */
@@ -116,7 +118,12 @@ export function createApi(options: HttpOptions) {
     new Hono<Env>()
       .onError((error, c) => errorResponse(c, error, ctx.logger))
       .use(async (c, next) => {
-        await next()
+        try {
+          await next()
+        } finally {
+          // What the read threads keep may be out of date now.
+          if (!READS.has(c.req.method)) options.onWrite?.()
+        }
         c.header('Cache-Control', 'no-store')
       })
       // The Mini App signs in with the launch data Telegram signed.

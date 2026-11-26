@@ -94,6 +94,9 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
   cleanups.push(() => pool.close())
   // The web app's first requests need not wait for threads to start.
   pool.warm(2)
+  // Finished capture records the threads keep between polls may be out of
+  // date after a write (`capture/record-cache.ts`).
+  const forget = () => pool.broadcast('forget')
   const api = createApi({
     ctx,
     telegram: config.telegram,
@@ -106,6 +109,7 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
     notify,
     tokenUsage,
     reads: pooledWebReads(pool),
+    onWrite: forget,
     ...(config.telegram ? { botState: () => bot?.state() ?? 'starting' } : {}),
   })
   const agent = createAgentApi({
@@ -113,6 +117,7 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
     reads: pooledReads(pool),
     reader: { db, blobs: ctx.blobs, types },
     usage: tokenUsage,
+    onWrite: forget,
   })
 
   const app = new Hono()
@@ -193,6 +198,7 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
       webAppUrl: config.webAppUrl,
       version: process.env.BUILD_REVISION || 'dev',
       ffmpeg: config.ffmpeg,
+      onWrite: forget,
       // Only main.test.ts sets this, to point the bot at a fake Telegram.
       ...(process.env.MIDDEN_TEST_TELEGRAM_API_ROOT
         ? { client: { apiRoot: process.env.MIDDEN_TEST_TELEGRAM_API_ROOT } }

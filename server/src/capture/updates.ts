@@ -36,6 +36,7 @@ import {
   storedOptions,
   type CaptureOptions,
 } from './options.ts'
+import { keepRecord, keptRecord } from './record-cache.ts'
 import {
   captureWaits,
   collectionProgress,
@@ -56,6 +57,7 @@ import {
   type CaptureRecord,
   type CaptureRecordDetail,
   type CollectionProgress,
+  type Listing,
   type MemberProgress,
   type Page,
 } from './records.ts'
@@ -1120,8 +1122,35 @@ function toUpdateRecord(db: Executor, g: Gathered): UpdateRecord {
   }
 }
 
+/** What of an update's own row a kept record must still match. */
+const updateStamp = (row: Update) =>
+  JSON.stringify([
+    row.state,
+    row.position,
+    row.skipped,
+    row.error,
+    row.pausedAt?.getTime(),
+  ])
+
 export function updateRecords(db: Executor, rows: Update[]): UpdateRecord[] {
-  return gather(db, rows).map((g) => toUpdateRecord(db, g))
+  // Finished updates kept on a read thread are not counted again.
+  const kept = new Map<string, UpdateRecord>()
+  for (const row of rows) {
+    const record = keptRecord<UpdateRecord>(row.id, updateStamp(row))
+    if (record) kept.set(row.id, record)
+  }
+  const counted = new Map(
+    gather(
+      db,
+      rows.filter((row) => !kept.has(row.id)),
+    ).map((g) => [g.update.id, toUpdateRecord(db, g)]),
+  )
+  return rows.map((row) => {
+    const record = kept.get(row.id) ?? counted.get(row.id)!
+    if (record.done && !kept.has(row.id))
+      keepRecord(row.id, updateStamp(row), record)
+    return record
+  })
 }
 
 export function updateRecord(db: Executor, id: string): UpdateRecord {
@@ -1313,10 +1342,8 @@ export function updateDetail(db: Executor, id: string): UpdateRecordDetail {
  * One listing per collection, of its newest capture, new if any listing of
  * the collection was (as `memberCounts` counts them).
  */
-function newestPerCollection(
-  listings: { submission: Submission; capture: Capture }[],
-) {
-  const newest = new Map<string, { submission: Submission; capture: Capture }>()
+function newestPerCollection(listings: Listing[]) {
+  const newest = new Map<string, Listing>()
   const added = new Map<string, boolean | null>()
   for (const listing of listings) {
     const key = listing.capture.collectionId

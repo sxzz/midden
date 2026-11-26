@@ -34,6 +34,7 @@ import {
   storedOptions,
   type CaptureOptions,
 } from './options.ts'
+import { keepRecord, keptRecord } from './record-cache.ts'
 import { continuePages, type StoredTarget } from './related.ts'
 import {
   relationProgresses,
@@ -215,10 +216,42 @@ export function pageChains(db: Executor, roots: string[]): Map<string, Page[]> {
 export const isPending = (state: string) =>
   state === 'queued' || state === 'downloading'
 
-export function memberSubmissions(db: Executor, pageIds: string[]) {
+/**
+ * A member's listing on a page and its capture: only what member lists and
+ * retries read, since a profile's pages can list tens of thousands.
+ */
+export interface Listing {
+  submission: Pick<
+    Submission,
+    'id' | 'parentSubmission' | 'updateId' | 'libraryAdded'
+  >
+  capture: MemberCapture
+}
+
+export type MemberCapture = Pick<
+  Capture,
+  'id' | 'state' | 'createdAt' | 'finishedAt' | 'collectionId' | 'error'
+>
+
+export function memberSubmissions(db: Executor, pageIds: string[]): Listing[] {
   if (!pageIds.length) return []
   return db
-    .select({ submission: submissions, capture: captures })
+    .select({
+      submission: {
+        id: submissions.id,
+        parentSubmission: submissions.parentSubmission,
+        updateId: submissions.updateId,
+        libraryAdded: submissions.libraryAdded,
+      },
+      capture: {
+        id: captures.id,
+        state: captures.state,
+        createdAt: captures.createdAt,
+        finishedAt: captures.finishedAt,
+        collectionId: captures.collectionId,
+        error: captures.error,
+      },
+    })
     .from(submissions)
     .innerJoin(captures, eq(captures.id, submissions.captureId))
     .where(
@@ -540,7 +573,7 @@ export function rateLimitedMembers(
   )
 }
 
-export const queuedIds = (list: Capture[]) =>
+export const queuedIds = (list: Pick<Capture, 'id' | 'state'>[]) =>
   list.filter((c) => c.state === 'queued').map((c) => c.id)
 
 // --- Records --------------------------------------------------------------
@@ -774,8 +807,35 @@ export function requestRecords(
       : undefined,
     limit,
   )
-  return toRecords(db, rows)
+  // Finished records kept on a read thread are not counted again.
+  const kept = new Map<string, CaptureRecord>()
+  for (const row of rows) {
+    const record = keptRecord<CaptureRecord>(row.submission.id, rowStamp(row))
+    if (record) kept.set(row.submission.id, record)
+  }
+  const counted = new Map(
+    toRecords(
+      db,
+      rows.filter((row) => !kept.has(row.submission.id)),
+    ).map((record) => [record.id, record]),
+  )
+  return rows.map((row) => {
+    const id = row.submission.id
+    const record = kept.get(id) ?? counted.get(id)!
+    if (record.done && !kept.has(id)) keepRecord(id, rowStamp(row), record)
+    return record
+  })
 }
+
+/** What of a record's own rows a kept record must still match. */
+const rowStamp = (row: RecordRow) =>
+  JSON.stringify([
+    row.capture.state,
+    row.capture.finishedAt?.getTime(),
+    row.submission.relatedState,
+    row.submission.collectionStopped,
+    row.saved,
+  ])
 
 export function recordRow(db: Executor, id: string) {
   const row = recordRows(db, eq(submissions.id, id), 1, true)[0]
@@ -908,12 +968,9 @@ export function memberPage(
   key: string,
   state: string,
   cursor: string | undefined,
-  listings: { capture: Capture; submission: Submission }[],
+  listings: Listing[],
   extra: CaptureMember[] = [],
-  resubmits: (listing: {
-    capture: Capture
-    submission: Submission
-  }) => boolean = () => false,
+  resubmits: (listing: Listing) => boolean = () => false,
 ): { items: CaptureMember[]; next?: string } {
   const wanted = Object.hasOwn(MEMBER_FILTERS, state)
     ? MEMBER_FILTERS[state]
@@ -921,7 +978,10 @@ export function memberPage(
   if (!wanted) throw new AppError('invalid_filter')
   const filter = `${key}:${state}`
   const after = cursor ? decodeCursor(cursor, filter) : undefined
-  const listed = new Map<string, { capture: Capture; added: boolean | null }>()
+  const listed = new Map<
+    string,
+    { capture: MemberCapture; added: boolean | null }
+  >()
   const resubmitted = new Set<string>()
   for (const listing of listings) {
     const { capture, submission } = listing
@@ -935,7 +995,7 @@ export function memberPage(
   type Entry = {
     id: string
     createdAt: Date
-    capture?: Capture
+    capture?: MemberCapture
     view?: CaptureMember
   }
   const known = knownCaptures(
@@ -1005,7 +1065,7 @@ export function knownCaptures(db: Executor, ids: string[]): Set<string> {
 /** Captures as members of a record, with why each fell short. */
 function memberViews(
   db: Executor,
-  page: Capture[],
+  page: MemberCapture[],
   resubmitted: Set<string>,
 ): CaptureMember[] {
   const ids = page.map((c) => c.id)

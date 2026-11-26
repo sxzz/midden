@@ -43,7 +43,7 @@ export const LANES: Record<Lane, LaneLimits> = {
  */
 const MAX_RETIRING = 2
 
-/** What the main thread sends a read thread. */
+/** What the main thread sends a read thread; `id` 0 wants no answer. */
 export interface PoolRequest {
   id: number
   op: string
@@ -172,6 +172,19 @@ export class QueryPool {
       this.#queues[lane].push(task)
       this.#dispatch()
     })
+  }
+
+  /**
+   * Tell every thread something that needs no answer, before any read it
+   * takes next (`forget`: what was kept between reads is out of date).
+   */
+  broadcast(op: string): void {
+    for (const thread of this.#threads)
+      thread.worker.postMessage({
+        id: 0,
+        op,
+        input: null,
+      } satisfies PoolRequest)
   }
 
   async close(): Promise<void> {

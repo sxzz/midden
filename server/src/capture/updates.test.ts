@@ -19,6 +19,7 @@ import {
 } from '#testing/fake-platform.ts'
 import { captureHandlers } from './handlers.ts'
 import { resolveOptions } from './options.ts'
+import { forgetRecords, keepFinishedRecords } from './record-cache.ts'
 import { captureURL } from './records.ts'
 import { retryRecordFailed } from './retries.ts'
 import {
@@ -522,6 +523,37 @@ describe('更新', () => {
       members: { total: 2, complete: 2, failed: 0 },
     })
     expect(records(ctx)).toHaveLength(before)
+  })
+
+  test('finished records are kept until something is written', async () => {
+    const { ctx, state } = setup()
+    const ok = await save(ctx, 'https://fake.test/p/1')
+    const bad = await save(ctx, 'https://fake.test/p/2')
+    state.broken.add('2')
+    const update = startUpdate(ctx, { target: 'many', ids: [ok, bad] })
+    await ctx.queue.drain()
+    keepFinishedRecords()
+    try {
+      const first = records(ctx)
+      expect(first[0]).toMatchObject({ id: update, state: 'partial' })
+      // A retry changes nothing the update's own row says; what was kept is
+      // answered until the write is announced.
+      state.broken.clear()
+      retryRecordFailed(ctx, update)
+      await ctx.queue.drain()
+      expect(records(ctx)).toEqual(first)
+      forgetRecords()
+      expect(records(ctx)[0]).toMatchObject({ id: update, state: 'complete' })
+      // A change to the update's row is seen at once.
+      ctx.db
+        .update(updates)
+        .set({ error: 'x' })
+        .where(eq(updates.id, update))
+        .run()
+      expect(records(ctx)[0]).toMatchObject({ id: update, error: 'x' })
+    } finally {
+      keepFinishedRecords(false)
+    }
   })
 
   test('a paused update waits from where it was, while other work goes on', async () => {

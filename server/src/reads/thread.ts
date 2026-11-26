@@ -13,6 +13,7 @@ import { BucketBlobStore } from '#blob/bucket-store.ts'
 import { FsBlobStore } from '#blob/fs-store.ts'
 import { KeyedLock } from '#blob/locks.ts'
 import { MediaSigner } from '#blob/signer.ts'
+import { forgetRecords, keepFinishedRecords } from '#capture/record-cache.ts'
 import { openDatabase } from '#db/client.ts'
 import { createApi, type ForwardedEnv } from '#http/app.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -143,7 +144,12 @@ if (parentPort) {
   )
   const reader = threadReader(data)
   const web = threadApi(threadContext(reader, logger), data)
+  keepFinishedRecords()
   port.on('message', async (request: PoolRequest) => {
+    if (request.op === 'forget') {
+      forgetRecords()
+      return
+    }
     let response: PoolResponse
     let transfer: ArrayBuffer[] = []
     try {

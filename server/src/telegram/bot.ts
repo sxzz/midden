@@ -22,6 +22,8 @@ export interface BotOptions {
   ffmpeg: string
   /** grammY's API client options; tests point `apiRoot` at a fake. */
   client?: ApiClientOptions
+  /** After each message or button handled, which may have written. */
+  onWrite?: () => void
 }
 
 // grammY types its signals with an AbortSignal shim of its own.
@@ -75,6 +77,13 @@ export async function startBot(
 ): Promise<RunningBot> {
   const { ctx, owner } = options
   const bot = new Bot(options.token, { client: options.client })
+  bot.use(async (_update, next) => {
+    try {
+      await next()
+    } finally {
+      options.onWrite?.()
+    }
+  })
   async function request<T>(
     method: string,
     send: (signal: ApiSignal) => Promise<T>,

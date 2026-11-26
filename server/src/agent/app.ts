@@ -29,6 +29,8 @@ export interface AgentOptions {
   usage: TokenUsage
   gate?: Gate
   now?: () => number
+  /** After every request that may have written (not `GET`). */
+  onWrite?: () => void
 }
 
 const Batch = v.strictObject({
@@ -89,6 +91,7 @@ export function createAgentApi(o: AgentOptions) {
       }
     } finally {
       usage.record(auth.token.id, endpointOf(c))
+      if (c.req.method !== 'GET') o.onWrite?.()
     }
   })
 
