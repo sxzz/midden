@@ -401,6 +401,6 @@ async function openAccounts(page: Page) {
     .getByRole('link', { name: '采集' })
     .click()
   await page.getByRole('link', { name: '采集账号' }).click()
-  await expect(page).toHaveURL(/#\/captures\/accounts$/)
+  await expect(page).toHaveURL(/#\/captures\?dialog=accounts$/)
   await expect(page.getByRole('dialog', { name: '采集账号' })).toBeVisible()
 }

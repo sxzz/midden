@@ -250,22 +250,66 @@ test.describe('采集', () => {
     const accounts = tabs.getByRole('link', { name: '采集账号' })
     await expect(accounts).toHaveAttribute('title', '采集账号')
     await accounts.click()
-    await expect(page).toHaveURL(/#\/captures\/accounts$/)
+    // Over the tab it was opened from, which stays.
+    await expect(page).toHaveURL(/#\/captures\/watches\?dialog=accounts$/)
     const dialog = page.getByRole('dialog', { name: '采集账号' })
     await expect(dialog).toContainText('X 采集来源')
+    await expect(tabs.getByRole('link', { name: '定期更新' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
     const box = (await dialog.boundingBox())!
     expect(box.y).toBeGreaterThan(20)
     expect(Math.abs(box.y + box.height / 2 - 450)).toBeLessThan(40)
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
-    await expect(page).toHaveURL(/#\/captures$/)
+    await expect(page).toHaveURL(/#\/captures\/watches$/)
   })
+
+  for (const [tab, path] of [
+    ['采集记录', '/captures'],
+    ['定期更新', '/captures/watches'],
+  ] as const) {
+    test(`opens the capture accounts over ${tab}, and closes back to it`, async ({
+      page,
+    }) => {
+      await mockDesktop(page)
+      await page.goto(`/app/#${path}`)
+      const tabs = page.getByRole('navigation', { name: '采集', exact: true })
+      const shown = tabs.getByRole('link', { name: tab })
+      await expect(shown).toHaveAttribute('aria-current', 'page')
+      const url = new RegExp(`#${path.replaceAll('/', String.raw`\/`)}$`)
+      const withDialog = new RegExp(
+        String.raw`#${path.replaceAll('/', String.raw`\/`)}\?dialog=accounts$`,
+      )
+      const dialog = page.getByRole('dialog', { name: '采集账号' })
+      for (const close of ['button', 'back'] as const) {
+        await tabs.getByRole('link', { name: '采集账号' }).click()
+        await expect(page).toHaveURL(withDialog)
+        await expect(dialog).toBeVisible()
+        await expect(shown).toHaveAttribute('aria-current', 'page')
+        if (close === 'button')
+          await dialog.getByRole('button', { name: '关闭' }).click()
+        else await page.goBack()
+        await expect(dialog).toBeHidden()
+        await expect(page).toHaveURL(url)
+        await expect(shown).toHaveAttribute('aria-current', 'page')
+      }
+      // A link opens the tab with the dialog over it; closing stays there.
+      await page.goto(`/app/#${path}?dialog=accounts`)
+      await expect(dialog).toBeVisible()
+      await expect(shown).toHaveAttribute('aria-current', 'page')
+      await dialog.getByRole('button', { name: '关闭' }).click()
+      await expect(page).toHaveURL(url)
+      await expect(shown).toHaveAttribute('aria-current', 'page')
+    })
+  }
 
   test('on a phone, the tabs stay under the header and the dialog is a sheet', async ({
     page,
   }) => {
     await mockDesktop(page)
-    await page.goto('/app/#/captures/accounts')
+    await page.goto('/app/#/captures?dialog=accounts')
     const dialog = page.getByRole('dialog', { name: '采集账号' })
     await expect(dialog).toContainText('X 采集来源')
     const box = (await dialog.boundingBox())!

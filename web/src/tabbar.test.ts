@@ -24,12 +24,7 @@ describe('which tab a page belongs to', () => {
     ])
       expect(tabOf(name)).toBe('explore')
     // 采集 is a tab of its own: leaving 探索 from it does not leave 探索 there.
-    for (const name of [
-      'captures',
-      'captures-watches',
-      'captures-accounts',
-      'capture',
-    ])
+    for (const name of ['captures', 'captures-watches', 'capture'])
       expect(tabOf(name)).toBe('captures')
     for (const name of ['relations', 'collection-graph', 'compare'])
       expect(tabOf(name)).toBe('relations')

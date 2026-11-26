@@ -130,15 +130,23 @@ const id = computed(() =>
 const folderId = computed(() =>
   route.name === 'folder' ? String(route.params.id) : '',
 )
-/** 采集's records, with or without the accounts' dialog over them. */
-const captures = computed(
-  () => route.name === 'captures' || route.name === 'captures-accounts',
-)
+const captures = computed(() => route.name === 'captures')
 /** 采集's own pages, which its tab bar switches between. */
 const capturesTab = computed(
   () => captures.value || route.name === 'captures-watches',
 )
-const accountsOpen = computed(() => route.name === 'captures-accounts')
+/**
+ * The capture accounts open as a dialog over whichever tab is shown, which
+ * the address says (`?dialog=accounts`), so the tab stays as it was and a
+ * link opens both.
+ */
+const accountsOpen = computed(
+  () => capturesTab.value && route.query.dialog === 'accounts',
+)
+const accountsLink = computed(() => ({
+  path: route.path,
+  query: { ...route.query, dialog: 'accounts' },
+}))
 const captureTabs = computed(() => [
   { label: '采集记录', to: { name: 'captures' }, on: captures.value },
   {
@@ -147,10 +155,12 @@ const captureTabs = computed(() => [
     on: route.name === 'captures-watches',
   },
 ])
-/** Back to the records: through history when the dialog was opened there. */
+/** Back to the tab under it: through history when it was opened there. */
 function closeAccounts() {
-  if (router.options.history.state.back === '/captures') router.back()
-  else void router.replace({ name: 'captures' })
+  const { dialog: _, ...query } = route.query
+  const under = router.resolve({ path: route.path, query }).fullPath
+  if (router.options.history.state.back === under) router.back()
+  else void router.replace(under)
 }
 const capture = computed(() => route.name === 'capture')
 const stats = computed(() => route.name === 'collection-stats')
@@ -189,7 +199,6 @@ const titles: Record<string, string> = {
   collections: '我的收藏',
   captures: '采集',
   'captures-watches': '采集',
-  'captures-accounts': '采集',
   capture: '采集记录',
   'collection-stats': '统计趋势',
   'collection-changes': '资料修改记录',
@@ -289,8 +298,6 @@ const removed = shallowRef<string[]>([])
 function viewKey(target: ViewRoute) {
   if (target.name === 'collections') return `collections:${tabOf(target)}`
   if (target.name === 'folder') return 'folder'
-  // The accounts' dialog opens over the records' own view.
-  if (target.name === 'captures-accounts') return 'captures'
   // Pages without parameters are one view each; 设置's sections are one.
   if (
     target.name === 'captures' ||
@@ -765,7 +772,7 @@ const viewProps = computed(() => {
       <template #end>
         <AppLink
           class="tabs-end"
-          :to="{ name: 'captures-accounts' }"
+          :to="accountsLink"
           aria-label="采集账号"
           title="采集账号"
         >

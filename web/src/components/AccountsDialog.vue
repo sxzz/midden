@@ -3,7 +3,8 @@ import { useId, useTemplateRef, watch } from 'vue'
 import AccountsView from './AccountsView.vue'
 // 采集 → 采集账号: the capture accounts over the records, a sheet from the
 // bottom on a phone and a dialog in the middle from 700px (style.css). Its
-// address is /captures/accounts, so the bot can link to it.
+// address is the tab's own with `?dialog=accounts`, so the bot can link to
+// it.
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const titleId = useId()

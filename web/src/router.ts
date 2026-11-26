@@ -86,17 +86,12 @@ export const router = createRouter({
       component: SettingsView,
     },
     // 采集's tabs: the records, and 定期更新; the capture accounts open over
-    // the records as a dialog.
+    // either as a dialog (`?dialog=accounts`).
     { path: '/captures', name: 'captures', component: CaptureRecords },
     {
       path: '/captures/watches',
       name: 'captures-watches',
       component: WatchesView,
-    },
-    {
-      path: '/captures/accounts',
-      name: 'captures-accounts',
-      component: CaptureRecords,
     },
     {
       path: '/captures/:id([a-f0-9-]+)',

@@ -18,7 +18,6 @@ const PATHS: Record<string, string> = {
   'settings-entry': '/settings/:section/:entry',
   captures: '/captures',
   'captures-watches': '/captures/watches',
-  'captures-accounts': '/captures/accounts',
   capture: '/captures/:id',
   share: '/s/:slug',
   'share-collection': '/s/:slug/collection/:id',

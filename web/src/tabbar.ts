@@ -33,7 +33,6 @@ const owners: Record<string, Tab> = {
   'collection-follows': 'explore',
   captures: 'captures',
   'captures-watches': 'captures',
-  'captures-accounts': 'captures',
   capture: 'captures',
   relations: 'relations',
   'collection-graph': 'relations',
@@ -43,7 +42,7 @@ const owners: Record<string, Tab> = {
   'settings-entry': 'settings',
 }
 /** Pages that are a tab's root as well as the tab's own: 采集's other tabs. */
-const roots = new Set(['captures-watches', 'captures-accounts'])
+const roots = new Set(['captures-watches'])
 
 export function tabOf(name: RouteRecordNameGeneric): Tab | undefined {
   return typeof name === 'string' ? owners[name] : undefined
