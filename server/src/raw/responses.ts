@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
-import { rawGarbage, sourceResponses } from '#db/schema.ts'
+import { rawGarbage, rawUploadFailures, sourceResponses } from '#db/schema.ts'
 import type { Database, Executor, Transaction } from '#db/client.ts'
 import type { RawStore } from './store.ts'
 
@@ -56,7 +56,12 @@ function markRow(
     WHERE ${sourceResponses.id} = ${row.id}
       AND ${sourceResponses.sha256} = ${row.sha256}
       AND ${sourceResponses.remoteAt} IS NULL`)
-  if (changes) return true
+  if (changes) {
+    tx.delete(rawUploadFailures)
+      .where(eq(rawUploadFailures.responseId, row.id))
+      .run()
+    return true
+  }
   const gone = !tx
     .select({ id: sourceResponses.id })
     .from(sourceResponses)
@@ -70,7 +75,13 @@ function markRow(
   return false
 }
 
-/** Rows that still hold this body here. */
+/**
+ * A row whose bytes did not match its hash: it is never stored, so its
+ * bytes stay as they are, and nothing retries it.
+ */
+export const notCorrupt = sql`NOT EXISTS (SELECT 1 FROM ${rawUploadFailures} WHERE ${rawUploadFailures.responseId} = ${sourceResponses.id} AND ${rawUploadFailures.retryAt} IS NULL)`
+
+/** Rows that still hold this body here, but for ones found corrupt. */
 export function localRows(
   db: Executor,
   sha256: string,
@@ -79,7 +90,11 @@ export function localRows(
     .select({ id: sourceResponses.id, sha256: sourceResponses.sha256 })
     .from(sourceResponses)
     .where(
-      and(eq(sourceResponses.sha256, sha256), isNull(sourceResponses.remoteAt)),
+      and(
+        eq(sourceResponses.sha256, sha256),
+        isNull(sourceResponses.remoteAt),
+        notCorrupt,
+      ),
     )
     .all()
 }
@@ -110,25 +125,6 @@ export function markStored(
   )
 }
 
-/**
- * Record every row still holding one of these bodies, confirmed in the
- * bucket, in one transaction: rows sharing a body share its object.
- * Returns the rows recorded.
- */
-export function markStoredKeys(
-  db: Database,
-  keys: readonly string[],
-  now: Date,
-): number {
-  if (!keys.length) return 0
-  return db.transaction(
-    (tx) =>
-      keys
-        .flatMap((key) => localRows(tx, key))
-        .filter((row) => markRow(tx, row, now)).length,
-  )
-}
-
 /** The raw responses of a capture, in order, bodies left where they are. */
 export function captureResponses(
   db: Executor,
@@ -152,7 +148,7 @@ export function sourceBody(
   if (!raw)
     return Promise.reject(
       new Error(
-        `raw response ${row.sha256} is in the raw bucket, but RAW_R2_BUCKET and its keys are not set`,
+        `raw response ${row.sha256} is in the raw bucket, but RAW_R2_BUCKET is not set`,
       ),
     )
   return raw.get(row.sha256, signal)

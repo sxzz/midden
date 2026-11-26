@@ -34,7 +34,7 @@ export class RawMismatchError extends Error {
 const digest = (algorithm: string, bytes: Uint8Array) =>
   createHash(algorithm).update(bytes).digest('hex')
 
-export interface Packed {
+interface Packed {
   bytes: Buffer
   /** Hex, as the bucket reports it in the ETag of a one-part object. */
   md5: string
@@ -44,7 +44,7 @@ export interface Packed {
  * Compress a body for the bucket. The body must match its hash, and the
  * compressed bytes must give it back before they are stored anywhere.
  */
-export function pack(body: Uint8Array, sha256: string): Packed {
+function pack(body: Uint8Array, sha256: string): Packed {
   if (digest('sha256', body) !== sha256)
     throw new CorruptRawError(`raw response ${sha256} does not match its hash`)
   const bytes = zstdCompressSync(body, {
@@ -111,8 +111,8 @@ export interface Stored {
 
 /**
  * Raw upstream responses in a private bucket, compressed with zstd under
- * `raw/`. Only this process and `raw-migrate` write there; the bucket must
- * never be the public media bucket.
+ * `raw/`. Only the worker writes there; the bucket must never be the
+ * public media bucket.
  *
  * R2 takes about one write a second to one key and answers faster ones
  * with 429. The S3 client waits and tries again a few times; when the

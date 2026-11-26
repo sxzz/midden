@@ -10,21 +10,26 @@ import {
   pruneSourceResponses,
 } from '#capture/maintenance.ts'
 import { submit } from '#capture/submit.ts'
-import { rawGarbage, sourceResponses } from '#db/schema.ts'
 import {
-  PermanentError,
-  RetryError,
-  SnoozeError,
-  type Job,
-} from '#jobs/queue.ts'
+  jobs,
+  rawGarbage,
+  rawUploadFailures,
+  sourceResponses,
+} from '#db/schema.ts'
+import { RetryError, SnoozeError, type Job } from '#jobs/queue.ts'
 import { deleteCollection } from '#library/delete.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, postGraph } from '#testing/fake-platform.ts'
 import { FakeS3 } from '#testing/fake-s3.ts'
-import { migrateRaw, rawGetCommand } from './migrate.ts'
+import { rawGetCommand } from './get.ts'
 import { deleteSourceResponses, sourceBody } from './responses.ts'
-import { rawKey, type RawStore } from './store.ts'
-import { collectRawGarbage, runRawUpload } from './upload.ts'
+import { rawKey } from './store.ts'
+import {
+  collectRawGarbage,
+  failRawUpload,
+  runRawUpload,
+  sweepRawUploads,
+} from './upload.ts'
 import type { CaptureContext } from '#capture/context.ts'
 
 const HOUR = 60 * 60_000
@@ -133,7 +138,7 @@ describe('raw responses in the bucket', () => {
     // Read on demand, checked against the hash.
     expect(await sourceBody(c.raw, row!)).toEqual(body)
     await expect(sourceBody(undefined, row!)).rejects.toThrow(
-      'RAW_R2_BUCKET and its keys are not set',
+      'RAW_R2_BUCKET is not set',
     )
   })
 
@@ -172,7 +177,7 @@ describe('raw responses in the bucket', () => {
     expect(rows(c)[0]).toMatchObject({ body: bodyOf('1'), remoteAt: null })
   })
 
-  test('a body that does not match its hash is never stored', async () => {
+  test('a body that does not match its hash is never stored, and left alone', async () => {
     const { c } = setup({ raw: false })
     const done = await capture(c, '1')
     c.raw = s3.rawStore()
@@ -180,11 +185,15 @@ describe('raw responses in the bucket', () => {
       .update(sourceResponses)
       .set({ sha256: 'a'.repeat(64) })
       .run()
-    await expect(runRawUpload(c, job(done.id))).rejects.toBeInstanceOf(
-      PermanentError,
-    )
+    // The job goes on; the row is recorded so that nothing tries it again.
+    await runRawUpload(c, job(done.id))
     expect(s3.requests).toEqual([])
     expect(rows(c)[0]!.body).toEqual(bodyOf('1'))
+    expect(c.db.select().from(rawUploadFailures).all()).toMatchObject([
+      { failures: 1, retryAt: null, error: expect.stringMatching(/hash/) },
+    ])
+    await runRawUpload(c, job(done.id))
+    expect(s3.requests).toEqual([])
   })
 
   test('the same body is stored once, and its object stays while a row uses it', async () => {
@@ -277,178 +286,115 @@ describe('raw responses in the bucket', () => {
   })
 })
 
-describe('raw-migrate', () => {
-  /** Captured before the bucket was set up, more than ten minutes ago. */
-  async function existing(ids = ['1', '2', '3', '4', '5'], same = ['3', '4']) {
+describe('the sweep', () => {
+  /** Captured before the bucket was set up; their bodies are still here. */
+  async function existing(ids = ['1', '2', '3'], same: string[] = []) {
     const { c, clock } = setup({ raw: false, same })
-    for (const id of ids) await capture(c, id)
-    clock.now += 11 * 60_000
-    const lines: string[] = []
-    const run = (raw: RawStore | undefined, options = {}) =>
-      migrateRaw(c.db, raw, {
-        print: (line) => lines.push(line),
-        now: () => clock.now,
-        ...options,
-      })
-    return { c, clock, run, lines }
+    const captured: string[] = []
+    for (const id of ids) captured.push((await capture(c, id)).id)
+    c.raw = s3.rawStore()
+    return { c, clock, captured }
   }
-  const puts = () => s3.requests.filter((r) => r.method === 'PUT')
-  const distinct = (c: CaptureContext) =>
-    [...new Set(rows(c).map((row) => row.sha256))].toSorted()
+  const queued = (c: CaptureContext) =>
+    c.db
+      .select({ ref: jobs.ref })
+      .from(jobs)
+      .where(eq(jobs.type, 'raw-upload'))
+      .all()
+      .map((row) => row.ref)
+      .toSorted()
 
-  test('a dry run reports what would move and changes nothing', async () => {
-    const { c, run, lines } = await existing()
-    const before = rows(c)
-    const summary = await run(undefined, { dryRun: true })
-    expect(summary).toMatchObject({
-      objects: 4,
-      responses: 5,
-      uploaded: 0,
-      marked: 0,
-    })
-    // Each body once: two rows share one.
-    expect(summary.bytes).toBe(
-      before.reduce((n, row) => n + row.size, 0) - bodyOf('3', ['3']).length,
-    )
-    expect(summary.compressed).toBeGreaterThan(0)
-    expect(summary.compressed).toBeLessThan(summary.bytes / 3)
-    expect(rows(c)).toEqual(before)
-    expect(s3.requests).toEqual([])
-    expect(lines[0]).toBe(
-      '[dry run] 5 raw responses in the database to move, 4 distinct bodies',
-    )
+  test('queues the upload of bodies an hour old that no job moves', async () => {
+    const { c, clock, captured } = await existing()
+    // Newer ones have their own job from finalize.
+    expect(sweepRawUploads(c)).toBe(0)
+    clock.now += 61 * 60_000
+    expect(sweepRawUploads(c)).toBe(3)
+    expect(queued(c)).toEqual(captured.toSorted())
+    // Queued already: not again.
+    expect(sweepRawUploads(c)).toBe(0)
+    await c.queue.drain()
+    expect(rows(c).every((row) => row.remoteAt)).toBe(true)
+    expect(sweepRawUploads(c)).toBe(0)
   })
 
-  test('stores each body once, verifies and clears in limited runs that resume', async () => {
-    const { c, run } = await existing()
-    const bodies = new Map(rows(c).map((row) => [row.id, row.body]))
-    const keys = distinct(c)
-    const rowids = () =>
-      c.db.all<{ rowid: number }>(
-        'SELECT rowid FROM source_responses ORDER BY rowid',
-      )
-    const last = rowids().at(-1)!.rowid
-    const holding = (shas: string[]) =>
-      rows(c).filter((row) => shas.includes(row.sha256)).length
-    expect(await run(s3.rawStore(), { limit: 2 })).toMatchObject({
-      objects: 2,
-      uploaded: 2,
-      marked: holding(keys.slice(0, 2)),
-    })
-    expect(rows(c).filter((row) => row.remoteAt)).toHaveLength(
-      holding(keys.slice(0, 2)),
-    )
-    // The next run picks up the rest.
-    expect(await run(s3.rawStore(), { concurrency: 3 })).toMatchObject({
-      objects: 2,
-      uploaded: 2,
-      marked: holding(keys.slice(2)),
-      failed: 0,
-    })
-    expect(s3.objects.size).toBe(4)
-    expect(puts()).toHaveLength(4)
-    for (const row of rows(c)) {
-      expect(row.body).toEqual(Buffer.alloc(0))
-      expect(await sourceBody(s3.rawStore(), row)).toEqual(bodies.get(row.id))
-    }
-    // Cleared rows moved past the ones that held bodies, so the pages
-    // those used empty out.
-    expect(rowids().every((row) => row.rowid > last)).toBe(true)
-    // Nothing is left.
-    expect(await run(s3.rawStore())).toMatchObject({ objects: 0 })
-  })
-
-  test('many rows with one body make one upload, and every row is recorded', async () => {
-    const ids = Array.from({ length: 40 }, (_, i) => String(i + 1))
-    const same = ids.slice(0, 30)
-    const { c, run } = await existing(ids, same)
-    // As R2 does: a second write to a key under way is refused.
+  test('a database full of bodies drains through it, each body stored once', async () => {
+    const ids = Array.from({ length: 12 }, (_, i) => String(i + 1))
+    const { c, clock } = await existing(ids, ids.slice(0, 8))
     s3.oneWritePerKey = true
-    const summary = await run(s3.rawStore(), { concurrency: 8 })
-    expect(summary).toMatchObject({
-      objects: 11,
-      responses: 40,
-      uploaded: 11,
-      marked: 40,
-      pauses: 0,
-      failed: 0,
-    })
-    expect(puts()).toHaveLength(11)
-    expect(new Set(puts().map((r) => r.key)).size).toBe(11)
+    clock.now += 61 * 60_000
+    expect(sweepRawUploads(c)).toBe(12)
+    await c.queue.drain()
+    expect(rows(c).every((row) => row.remoteAt)).toBe(true)
+    expect(s3.requests.filter((r) => r.method === 'PUT')).toHaveLength(5)
     expect(s3.limited).toBe(0)
-    expect(rows(c).every((row) => row.remoteAt)).toBe(true)
   })
 
-  test('an object already in the bucket is checked and kept, not uploaded', async () => {
-    const { c, run } = await existing()
-    const [row, other] = rows(c).filter(
-      (r, i, all) => all.findIndex((x) => x.sha256 === r.sha256) === i,
-    )
-    // Stored earlier by a run cut off before recording it.
-    await s3.rawStore().store(row!.sha256, row!.body)
-    // Something else under another key: it does not read back right.
-    s3.seed(rawKey(other!.sha256), Buffer.from('junk'), {
-      metadata: { sha256: other!.sha256 },
+  test('nothing is queued without a bucket', async () => {
+    const { c, clock } = await existing()
+    c.raw = undefined
+    clock.now += 61 * 60_000
+    expect(sweepRawUploads(c)).toBe(0)
+    expect(queued(c)).toEqual([])
+  })
+
+  test('a job that gave up is queued again after a wait that grows', async () => {
+    const { c, clock, captured } = await existing(['1'])
+    clock.now += 61 * 60_000
+    failRawUpload(c, captured[0]!, new Error('bucket down'))
+    expect(c.db.select().from(rawUploadFailures).get()).toMatchObject({
+      failures: 1,
+      retryAt: new Date(clock.now + HOUR),
+      error: 'bucket down',
     })
-    s3.requests.length = 0
-    const summary = await run(s3.rawStore())
-    expect(summary).toMatchObject({ uploaded: 3, present: 1, marked: 5 })
-    const methods = (sha256: string) =>
-      s3.requests.filter((r) => r.key === rawKey(sha256)).map((r) => r.method)
-    expect(methods(row!.sha256)).toEqual(['HEAD'])
-    expect(methods(other!.sha256)).toEqual(['HEAD', 'PUT', 'HEAD'])
-    expect(await sourceBody(s3.rawStore(), rows(c)[1]!)).toEqual(other!.body)
+    expect(sweepRawUploads(c)).toBe(0)
+    clock.now += HOUR + 1
+    expect(sweepRawUploads(c)).toBe(1)
+    // Gave up again: twice as long.
+    c.db.delete(jobs).run()
+    failRawUpload(c, captured[0]!, new Error('bucket down'))
+    expect(c.db.select().from(rawUploadFailures).get()).toMatchObject({
+      failures: 2,
+      retryAt: new Date(clock.now + 2 * HOUR),
+    })
+    clock.now += HOUR
+    expect(sweepRawUploads(c)).toBe(0)
+    clock.now += HOUR + 1
+    expect(sweepRawUploads(c)).toBe(1)
+    // Stored at last: the record goes.
+    await runRawUpload(c, job(captured[0]!))
+    expect(rows(c)[0]!.remoteAt).toBeInstanceOf(Date)
+    expect(c.db.select().from(rawUploadFailures).all()).toEqual([])
   })
 
-  test('a 429 is tried again after a jittered backoff, and nothing fails', async () => {
-    const { c, run } = await existing()
-    s3.rateLimitNext = 3
-    s3.retryAfter = '0'
-    const summary = await run(s3.rawStore(), { concurrency: 1 })
-    expect(s3.limited).toBe(3)
-    expect(summary).toMatchObject({ failed: 0, pauses: 0, marked: 5 })
-    expect(rows(c).every((row) => row.remoteAt)).toBe(true)
+  test('leaves a body that does not match its hash alone', async () => {
+    const { c, clock, captured } = await existing(['1', '2'])
+    const [bad] = rows(c)
+    c.db
+      .update(sourceResponses)
+      .set({ sha256: 'b'.repeat(64) })
+      .where(eq(sourceResponses.id, bad!.id))
+      .run()
+    clock.now += 61 * 60_000
+    expect(sweepRawUploads(c)).toBe(2)
+    await c.queue.drain()
+    expect(c.db.select().from(rawUploadFailures).all()).toMatchObject([
+      { responseId: bad!.id, retryAt: null },
+    ])
+    // Days later it is still not queued.
+    clock.now += 10 * 24 * HOUR
+    expect(sweepRawUploads(c)).toBe(0)
+    expect(queued(c)).toEqual([])
+    expect(captured).toContain(bad!.captureId)
   })
+})
 
-  test('a rate limit outlasting the retries pauses the run, which then goes on', async () => {
-    const { c, run, lines } = await existing()
-    // More 429s in a row than the client tries a request.
-    s3.rateLimitNext = 7
-    const summary = await run(s3.rawStore(), { concurrency: 1 })
-    expect(summary).toMatchObject({ failed: 0, pauses: 1, marked: 5 })
-    expect(lines).toContain('the bucket is rate-limiting; waiting 1 s')
-    expect(rows(c).every((row) => row.remoteAt)).toBe(true)
-  })
-
-  test('leaves rows newer than ten minutes to the server', async () => {
-    const { c, clock, run } = await existing()
-    clock.now -= 11 * 60_000
-    expect(await run(s3.rawStore())).toMatchObject({ objects: 0 })
-    expect(rows(c).every((row) => !row.remoteAt)).toBe(true)
-  })
-
-  test('a failure leaves the body in place and is reported', async () => {
-    const { c, run, lines } = await existing()
-    const [first] = rows(c)
-    s3.failKeys.add(rawKey(first!.sha256))
-    const summary = await run(s3.rawStore())
-    expect(summary).toMatchObject({ objects: 4, failed: 1, marked: 4 })
-    expect(
-      c.db
-        .select()
-        .from(sourceResponses)
-        .where(eq(sourceResponses.id, first!.id))
-        .get(),
-    ).toMatchObject({ body: first!.body, remoteAt: null })
-    expect(
-      lines.some((line) => line.startsWith(`failed ${first!.sha256} (1 rows)`)),
-    ).toBe(true)
-  })
-
-  test('raw-get lists a capture and writes a body from wherever it is', async () => {
-    const { c, run } = await existing()
+describe('raw-get', () => {
+  test('lists a capture and writes a body from wherever it is', async () => {
+    const { c } = setup()
+    await capture(c, '1')
     const [row] = rows(c)
-    await run(s3.rawStore())
+    expect(row!.remoteAt).toBeInstanceOf(Date)
     const printed: string[] = []
     const written: Buffer[] = []
     const out = {
@@ -464,7 +410,7 @@ describe('raw-migrate', () => {
     expect(
       await rawGetCommand(c.db, s3.rawStore(), row!.captureId, 0, out),
     ).toBe(0)
-    expect(written).toEqual([row!.body])
+    expect(written).toEqual([bodyOf('1')])
   })
 })
 

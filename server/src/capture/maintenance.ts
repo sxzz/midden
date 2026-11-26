@@ -34,7 +34,7 @@ import {
 import { inJson } from '#db/sql.ts'
 import { catalogCollections } from '#library/catalog.ts'
 import { deleteSourceResponses } from '#raw/responses.ts'
-import { collectRawGarbage } from '#raw/upload.ts'
+import { collectRawGarbage, sweepRawUploads } from '#raw/upload.ts'
 import { pace, type CaptureContext } from './context.ts'
 import { HEADER_BYTES, imageSize } from './image-size.ts'
 import { failCapture } from './lifecycle.ts'
@@ -96,6 +96,7 @@ export async function runMaintenance(
   await step('staged data', () => pruneStaging(ctx))
   await step('media', () => collectMedia(ctx))
   if (slim) await step('raw garbage', () => collectRawGarbage(ctx))
+  await step('raw uploads', () => sweepRawUploads(ctx))
   await step('thumbnails', () => backfillThumbnails(ctx))
   if (slim) await step('thumbnail sizes', () => backfillThumbnailSizes(ctx))
   if (slim) await step('free pages', () => releaseFreePages(ctx))

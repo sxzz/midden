@@ -721,8 +721,28 @@ export const sourceResponses = sqliteTable(
     index('source_responses_size').on(t.captureId, t.size),
     // Whether any row still uses an object, and whether one is stored.
     index('source_responses_sha256').on(t.sha256, t.remoteAt),
+    // Bodies still here, for the sweep that queues their upload; empty
+    // once everything is in the bucket.
+    index('source_responses_local')
+      .on(t.createdAt, t.captureId, t.id)
+      .where(sql`${t.remoteAt} IS NULL`),
   ],
 )
+
+/**
+ * Raw responses whose upload job gave up: the sweep (`sweepRawUploads`)
+ * queues them again after `retryAt`. A body that does not match its hash
+ * is never retried (`retryAt` null). Gone once the row is stored.
+ */
+export const rawUploadFailures = sqliteTable('raw_upload_failures', {
+  responseId: text()
+    .primaryKey()
+    .references(() => sourceResponses.id, { onDelete: 'cascade' }),
+  // Times the job gave up on it.
+  failures: integer().notNull(),
+  retryAt: timestamp(),
+  error: text().notNull(),
+})
 
 /**
  * Keys of raw response objects whose last row was deleted. They are

@@ -268,41 +268,36 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
 部署这一版本时的迁移给 `source_responses` 加 `remote_at` 列和按 `sha256` 的索引，与是否设置这些变量无关；建索引要读一遍整张表，在 128,844 条、757 MB 的合成副本上约 2.3 秒。
 
-设置了 `RAW_R2_BUCKET` 才启用；还需要 `R2_ACCOUNT_ID`，以及 `CF_API_TOKEN` 或那一对密钥，缺少时启动失败并列出缺少的变量；`RAW_R2_BUCKET` 不能是公开的媒体存储桶 `R2_BUCKET`。用 `CF_API_TOKEN` 时，服务在开始监听之前验证它（与媒体相同），验证失败就不启动，自动部署因此回滚。启动日志 `raw responses store` 的 `store` 为 `r2`（未启用时为 `database`）。`raw-migrate`、`raw-get` 同样先验证。
+设置了 `RAW_R2_BUCKET` 才启用；还需要 `R2_ACCOUNT_ID`，以及 `CF_API_TOKEN` 或那一对密钥，缺少时启动失败并列出缺少的变量；`RAW_R2_BUCKET` 不能是公开的媒体存储桶 `R2_BUCKET`。用 `CF_API_TOKEN` 时，服务在开始监听之前验证它（与媒体相同），验证失败就不启动，自动部署因此回滚。启动日志 `raw responses store` 的 `store` 为 `r2`（未启用时为 `database`）。`raw-get` 同样先验证。
 
 - 存储桶必须是私有的（不绑定域名、不开公开访问）：原始响应中有平台给登录账号看的内容。用 `midden-backup` 时，不要给它加作用于整个存储桶的生命周期规则（Litestream 自己管理 `db/` 下的文件）。
 - 已设置 `CF_API_TOKEN` 时不需要新的密钥。单独的一对密钥可以在「R2 → Manage API tokens → Create API token」中创建（Object Read & Write，只选这个存储桶），或沿用 Litestream 那一对；R2 的密钥不能限定前缀，所以它们也能读写 `db/`。
-- 费用：按 4 倍压缩，现有的约 180 MB，存储每月约 $0.003；回填约 13 万次 PUT 和同样多的 HEAD，在每月免费额度内。之后每条新的原始响应一次 PUT、一次 HEAD，删除时一次 DELETE。「存储用量」中 `midden-backup` 的存储和操作次数包括 `raw/`。
+- 费用：按 4 倍压缩，现有的约 180 MB，存储每月约 $0.003；移走已有的约 13 万条用了同样多的 PUT 和 HEAD，在每月免费额度内。之后每条新的原始响应一次 PUT、一次 HEAD，删除时一次 DELETE。「存储用量」中 `midden-backup` 的存储和操作次数包括 `raw/`。
 - 读取一条：`docker compose exec midden node server/src/cli.ts raw-get <抓取 id>` 列出这次抓取的原始响应（序号、`bucket` 或 `database`、大小、类型、地址），加上序号输出那一条的原始字节。
 - 关闭：删去 `RAW_R2_BUCKET`（和那一对密钥）即可，之后新的原始响应留在数据库中；已在存储桶中的仍在那里，读取它们（`raw-get`）和回收删除都需要这个存储桶，所以只在不再需要它们时关闭。
 
-### 启用与回填
+### 启用
 
 1. 在部署目录的 `.env` 中加上 `RAW_R2_BUCKET=midden-backup`（已设置 `R2_ACCOUNT_ID` 与 `CF_API_TOKEN` 时只需这一行）。
-2. `docker compose up -d`（或推送后自动部署），日志中 `raw responses store` 的 `store` 应为 `r2`。此后完成的抓取由服务自己移走。
-3. 回填已有的原始响应：
-
-   ```sh
-   docker compose exec midden node server/src/cli.ts raw-migrate --dry-run
-   docker compose exec midden node server/src/cli.ts raw-migrate --limit 100
-   docker compose exec midden node server/src/cli.ts raw-migrate --concurrency 16
-   ```
-
-   按内容处理：同样内容的原始响应（同一个 SHA-256）共用一个对象，每个内容只处理一次，`--concurrency` 是同时处理的不同内容数，同一个键不会同时写入（R2 对同一个键的写入每秒约一次，更快的回答 429）。试运行不访问存储桶、不改动数据库，读出还在数据库中的每个内容并在本地压缩，汇总条数、不同内容数、原始大小（每个内容一次）与压缩后的大小。`--limit 100` 先移 100 个内容抽查（见第 4 步），最后全部移走。每个内容先压缩，再读回存储桶中的同名对象（HEAD）：大小、ETag（压缩后字节的 MD5）和元数据中的 SHA-256 都相符就保留、不上传，否则上传后再读回核对；然后数据库中内容相同的所有行在一个事务中记下并清空（几个内容合并为一个事务，每批最多 100 行）。所以任何时候中断都不会丢失：已上传还没记下的，下次读回相符即直接记下。重新运行即从剩下的继续。存储桶限流时，单个请求先按 `Retry-After` 或指数退避重试几次，仍被限流就整个运行暂停（输出 `the bucket is rate-limiting; waiting N s`），之后接着处理，不算失败；汇总中的 `rate-limit pauses` 是暂停的次数。只处理 10 分钟以前的行，更新的留给服务。每 5 秒输出一次进度，结束时输出汇总；有失败或与哈希不符的行时退出码为 1，这些行原样留在数据库中，重新运行即可。服务照常运行，抓取不受影响。13 万条在一台本地的模拟存储桶上约 4 分钟，实际取决于到 R2 的延迟（每个内容两到三次请求），`--concurrency 16` 时估计半小时左右。
-
+2. `docker compose up -d`（或推送后自动部署），日志中 `raw responses store` 的 `store` 应为 `r2`。此后完成的抓取由 worker 的 `raw-upload` 任务移走。
+3. 已在数据库中的原始响应不需要手动处理。worker 的维护任务每分钟找出一小时以前、仍在数据库中、没有上传任务的原始响应，按抓取排 `raw-upload` 任务，同时等待的最多 500 个；它们在 `raw` 队列中只在 worker 空闲时运行，受节流，优先级与维护相同，所以积压逐步移走，不挤占采集。这一步查的是只含仍在数据库中的行的索引（`source_responses_local`），全部移走后几乎不花时间。排了任务时记 `queued raw responses still in the database for upload`（`captures` 为这次排的抓取数）。
+   - 同样内容（同一个 SHA-256）的原始响应共用一个对象：任务在这个键的锁内存储，然后把仍在数据库中、内容相同的所有行一起记下并清空，所以每个内容只上传一次，同一个键不会同时写入（R2 对同一个键的写入每秒约一次，更快的回答 429）。
+   - 上传任务放弃（12 次后）的原始响应记在 `raw_upload_failures`：一小时后再排，每放弃一次等待加倍，最长一天，存储桶长时间不可用之后会自己恢复。
+   - 与哈希不符的原始响应不上传，也不再尝试：记在 `raw_upload_failures`（`retry_at` 为空），记一次 `raw response does not match its hash; it stays in the database and is not retried`（error），字节原样留在数据库中。
 4. 抽查：
 
    ```sh
    docker compose run --rm --entrypoint sqlite3 litestream -readonly /data/midden.db \
      "SELECT remote_at IS NOT NULL, count(*), sum(size) FROM source_responses GROUP BY 1;
+      SELECT retry_at IS NULL, count(*) FROM raw_upload_failures GROUP BY 1;
       SELECT capture_id FROM source_responses WHERE remote_at IS NOT NULL LIMIT 1;"
    docker compose exec midden node server/src/cli.ts raw-get <抓取 id>
    docker compose exec midden node server/src/cli.ts raw-get <抓取 id> 0 | head -c 300
    ```
 
-   第一条给出仍在数据库中（`0`）和已在存储桶中（`1`）的条数与原始大小，回填结束后前者只剩最近 10 分钟的，以及一个已移走的抓取 id；`raw-get` 列出它的原始响应（应为 `bucket`），再输出第一条，应是原始的 JSON。回填结束后 `raw-migrate --dry-run` 应显示 `0 raw responses in the database to move`。
+   第一条给出仍在数据库中（`0`）和已在存储桶中（`1`）的条数与原始大小，积压移走后前者只剩最近的、正在等待重试的和与哈希不符的；第二条是等待重试（`0`）和与哈希不符（`1`）的条数；第三条是一个已移走的抓取 id，`raw-get` 列出它的原始响应（应为 `bucket`），再输出第一条，应是原始的 JSON。
 
-5. 数据库变小：清空的原始响应留下的页面成为空闲页面，维护任务每 15 分钟最多还给文件系统 16 MiB（见「维护任务」），不需要 `VACUUM`。在 147,000 条抓取、128,844 条原始响应（757 MB）的合成副本上（迁移后 1,369 MB），回填后空闲页面约 877 MB，55 次（约 14 小时）后数据库降到 492 MB，`source_responses` 只剩 27 MB。生产环境的数据库因此应从 2.32 GB 降到约 1.4–1.5 GB（减去 `source_responses` 的约 850 MB），约 13–14 小时后到达。日志 `released free database pages` 的 `free` 逐次减少，降到 1024 以下就停止。这些改动照常经 Litestream 复制：在同一个合成副本上，回填共写入约 3.2 GB 的 WAL（每批记下的行移到表尾，并改动它们的索引项、所在的页面和空闲页面列表），incremental vacuum 追上又写入约 0.9 GB。Litestream 的每个文件中同一页面只存一次，并以 LZ4 压缩，所以上传的量少于这个数；多出的 L1、L2 文件按保留期在约 9 天后删除。
+5. 数据库变小：清空的原始响应留下的页面成为空闲页面，维护任务每 15 分钟最多还给文件系统 16 MiB（见「维护任务」），不需要 `VACUUM`。在 147,000 条抓取、128,844 条原始响应（757 MB）的合成副本上（迁移后 1,369 MB），全部移走后空闲页面约 877 MB，55 次（约 14 小时）后数据库降到 492 MB，`source_responses` 只剩 27 MB。生产环境的数据库因此应从 2.32 GB 降到约 1.4–1.5 GB（减去 `source_responses` 的约 850 MB），在积压移走之后约 13–14 小时到达。日志 `released free database pages` 的 `free` 逐次减少，降到 1024 以下就停止。这些改动照常经 Litestream 复制：每条记下的行移到表尾，并改动它的索引项、原来所在的页面和空闲页面列表；在同一个合成副本上，每批 100 行地移走全部积压写入约 3.2 GB 的 WAL，incremental vacuum 追上又写入约 0.9 GB。Litestream 的每个文件中同一页面只存一次，并以 LZ4 压缩，所以上传的量少于这个数；多出的 L1、L2 文件按保留期在约 9 天后删除。
 
 恢复较早的数据库（见「恢复」）时，那之后被删除的原始响应会回到数据库中，而它们在存储桶中的对象在删除 24 小时后就被回收了，读取这些原始响应会失败；其他原始响应不受影响。原始响应在存储桶中只有这一份，与 R2 中的媒体一样没有其他备份。
 
@@ -569,6 +564,7 @@ worker 每分钟运行一次维护。标 _空闲时_ 的步骤只为腾出空间
 - 没有产生新版本的抓取，其原始响应保留 3 天，之后只要不是这个收藏最新一次的抓取就删除；产生了新版本的抓取的原始响应一直保留（_空闲时_）；
 - 不再被引用的媒体文件 24 小时后删除（使用 R2 时同时删除对象并清除边缘缓存）；
 - 不再有任何原始响应使用的存储桶对象 24 小时后删除（见「原始响应（R2）」，_空闲时_）；
+- 设置了 `RAW_R2_BUCKET` 时，为一小时以前仍在数据库中、没有上传任务的原始响应排上传任务，同时等待的最多 500 个（见「原始响应（R2）」）；
 - 删除抓取结束一天以上仍留着的暂存数据（`capture_staging`，没能提交的列表目标的预取）；
 - 为缺少缩略图的媒体补做缩略图；
 - 清理过期的网页会话、通行密钥挑战与 `/passkey` 链接；
