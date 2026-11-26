@@ -264,11 +264,12 @@ for (const [width, homeHeight, profileHeight] of [
       })
     })
     await page.goto('/app/')
-    await expect(page.locator('.thumbs')).toHaveCSS('height', `${homeHeight}px`)
+    // A box takes its media's shape, so its height is the size to within
+    // the rounding of its width.
+    const height = (selector: string) => async () =>
+      (await page.locator(selector).boundingBox())?.height ?? 0
+    await expect.poll(height('.thumbs')).toBeCloseTo(homeHeight!, 0)
     await page.locator('.avatar-link').click()
-    await expect(page.locator('.related .thumbs')).toHaveCSS(
-      'height',
-      `${profileHeight}px`,
-    )
+    await expect.poll(height('.related .thumbs')).toBeCloseTo(profileHeight!, 0)
   })
 }
