@@ -192,7 +192,7 @@ test('Chinese filters support multiple media, date bounds and storage order', as
   // A quick range stays relative: the server counts the days each time.
   await range.selectOption('7d')
   await expect.poll(() => query.get('saved_within')).toBe('7d')
-  expect(query.get('time_zone')).toBeTruthy()
+  expect(query.get('tz')).toBeTruthy()
   expect(query.get('saved_from')).toBeNull()
   expect(query.get('saved_before')).toBeNull()
   await expect(page.locator('.filter-summary')).toContainText('最近 7 天')

@@ -47,7 +47,7 @@ import {
   type QueryNode,
 } from './ast.ts'
 import { printQuery } from './print.ts'
-import type { Database } from '#db/client.ts'
+import type { Database, Executor } from '#db/client.ts'
 
 /** The entity types of the archive's platforms. */
 export interface Types {
@@ -138,6 +138,64 @@ const holds = (alias: string, folded: string) =>
     sql` OR `,
   )})`
 
+/** The platforms `x:@alice` names (`x`), or all of them for `@alice`. */
+function platformsOf(types: Types, value: string, at: number): string[] {
+  const colon = PLATFORM_PREFIX.exec(value)
+  if (!colon) return types.platforms
+  if (!types.platforms.includes(colon[1]!))
+    throw new QueryError(
+      `Unknown platform ${colon[1]}; the archive has ${types.platforms.join(', ')}.`,
+      at,
+    )
+  return [colon[1]!]
+}
+
+/**
+ * The accounts a reference names, by identity: an account key, a saved
+ * account's id, or a handle any catalogued item gives its author or itself
+ * (so authors whose profile is not saved are found too, under any handle
+ * they used). None when the archive has no such account: `from:` and the
+ * agent API's `author` then select nothing. A platform the archive does not
+ * have is a `QueryError`.
+ */
+export function resolveAccounts(
+  db: Executor,
+  types: Types,
+  value: string,
+  at = 0,
+): Identity[] {
+  if (UUID.test(value)) {
+    const row = db.get<Identity>(sql`
+      SELECT e.platform, e.kind, e.external_id AS external FROM catalog k
+      JOIN library l ON l.collection_id = k.collection_id
+      JOIN entities e ON e.id = k.root_entity_id
+      WHERE k.collection_id = ${value.toLowerCase()}
+        AND k.root_kind LIKE '%.profile'`)
+    return row ? [row] : []
+  }
+  const key = parseAuthorKey(value)
+  if (key) return [key]
+  const handle = handleOf(value)
+  const platforms = platformsOf(types, value, at)
+  const line = `@${fold(handle)}`
+  const named = sql`instr(char(10) || k.search_name || char(10),
+    ${`\n${line}\n`}) > 0`
+  // The name column of the trigram index holds `@handle` lines; shorter
+  // ones are matched row by row.
+  const indexed = [...line].length >= 3
+  return db.all<Identity>(sql`
+    SELECT DISTINCT e.platform, e.kind, e.external_id AS external
+    FROM ${
+      indexed
+        ? sql`catalog_fts f CROSS JOIN catalog k ON k.id = f.rowid`
+        : sql`catalog k`
+    }
+    JOIN entities e ON e.id = k.subject_entity_id
+    WHERE ${indexed ? sql`catalog_fts MATCH ${`name : "${line.replaceAll('"', '""')}"`} AND ` : sql``}${named}
+      AND e.kind LIKE '%.profile'
+      AND e.platform IN (SELECT value FROM json_each(${list(platforms)}))`)
+}
+
 class Compiler {
   readonly ctes: SQL[] = []
   #searches = 0
@@ -156,54 +214,11 @@ class Compiler {
   // --- Looking things up ---------------------------------------------------
 
   platformsOf(value: string, at: number): string[] {
-    const colon = PLATFORM_PREFIX.exec(value)
-    if (!colon) return this.o.types.platforms
-    if (!this.o.types.platforms.includes(colon[1]!))
-      throw new QueryError(
-        `Unknown platform ${colon[1]}; the archive has ${this.o.types.platforms.join(', ')}.`,
-        at,
-      )
-    return [colon[1]!]
+    return platformsOf(this.o.types, value, at)
   }
 
-  /**
-   * The accounts a reference names, by identity: an account key, a saved
-   * account's id, or a handle any catalogued item gives its author or
-   * itself (so authors whose profile is not saved are found too, under
-   * any handle they used).
-   */
   accounts(value: string, at: number): Identity[] {
-    if (UUID.test(value)) {
-      const row = this.o.db.get<Identity>(sql`
-        SELECT e.platform, e.kind, e.external_id AS external FROM catalog k
-        JOIN library l ON l.collection_id = k.collection_id
-        JOIN entities e ON e.id = k.root_entity_id
-        WHERE k.collection_id = ${value} AND k.root_kind LIKE '%.profile'`)
-      if (!row)
-        throw new QueryError(`No saved account has the id ${value}.`, at)
-      return [row]
-    }
-    const key = parseAuthorKey(value)
-    if (key) return [key]
-    const handle = handleOf(value)
-    const platforms = this.platformsOf(value, at)
-    const line = `@${fold(handle)}`
-    const named = sql`instr(char(10) || k.search_name || char(10),
-      ${`\n${line}\n`}) > 0`
-    // The name column of the trigram index holds `@handle` lines; shorter
-    // ones are matched row by row.
-    const rows = this.o.db.all<Identity>(sql`
-      SELECT DISTINCT e.platform, e.kind, e.external_id AS external
-      FROM ${
-        [...line].length >= 3
-          ? sql`catalog_fts f CROSS JOIN catalog k ON k.id = f.rowid`
-          : sql`catalog k`
-      }
-      JOIN entities e ON e.id = k.subject_entity_id
-      WHERE ${[...line].length >= 3 ? sql`catalog_fts MATCH ${`name : "${line.replaceAll('"', '""')}"`} AND ` : sql``}${named}
-        AND e.kind LIKE '%.profile'
-        AND e.platform IN (SELECT value FROM json_each(${list(platforms)}))`)
-    return rows
+    return resolveAccounts(this.o.db, this.o.types, value, at)
   }
 
   tagId(name: string, at: number): string {
@@ -306,6 +321,31 @@ class Compiler {
     }
   }
 
+  /**
+   * Catalog rows these accounts reposted: the targets of a `reposted`
+   * relation of the root of anything of theirs, in any revision (a
+   * profile's timeline lists its reposts; a repost of theirs points at the
+   * post it reposts). From the accounts' rows (`catalog_subject`), their
+   * revisions (`revisions_head`), the root (`revision_entities_root`), its
+   * relations (their key), to the reposted entity's rows (`catalog_root`).
+   */
+  repostedBy(accounts: SQL): Part {
+    return {
+      set: sql`SELECT kp.id FROM catalog own
+        CROSS JOIN revisions rv ON rv.collection_id = own.collection_id
+        CROSS JOIN revision_entities src ON src.revision_id = rv.id
+          AND src.is_root = 1
+        CROSS JOIN entity_relations edge ON edge.revision_id = rv.id
+          AND edge.source_key = src.entity_key AND edge.kind = 'reposted'
+        CROSS JOIN revision_entities target ON target.revision_id = rv.id
+          AND target.entity_key = edge.target_key
+        CROSS JOIN entity_versions tv ON tv.id = target.entity_version_id
+        CROSS JOIN catalog kp ON kp.root_entity_id = tv.entity_id
+        WHERE own.subject_entity_id IN ${accounts}`,
+      cost: 6,
+    }
+  }
+
   /** The root entities of a post id, or of every post by an account. */
   roots(value: string, at: number): SQL {
     if (UUID.test(value))
@@ -390,6 +430,11 @@ class Compiler {
         return this.pointing('quoted', this.roots(value, at))
       case 'reposts':
         return this.pointing('reposted', this.roots(value, at))
+      case 'reposted-by': {
+        const accounts = this.accounts(value, at)
+        if (!accounts.length) return FALSE
+        return this.repostedBy(this.entityIds(accounts))
+      }
       case 'folder': {
         const folder = this.folder(value, at)
         const inner = wholeSelection(this.o.db, folder.filter)

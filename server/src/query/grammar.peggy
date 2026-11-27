@@ -12,7 +12,8 @@
 {{
   // Keys longest first, so that `saved` does not take `saved-since`.
   const KEYS = [
-    'saved-since', 'saved-until', 'sensitive', 'mentions', 'platform',
+    'reposted-by', 'saved-since', 'saved-until', 'sensitive', 'mentions',
+    'platform',
     'reposts', 'quotes', 'domain', 'folder', 'within', 'saved', 'since',
     'until', 'state', 'from', 'lang', 'type', 'has', 'rel', 'tag', 'is',
   ]

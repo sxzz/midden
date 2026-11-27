@@ -80,6 +80,20 @@ const perspective = db.$client
   )
   .get() as { platform: string; kind: string; external: string } | undefined
 
+// The account whose timeline lists the most reposts.
+const reposter = db.$client
+  .prepare(
+    `SELECT e.platform, e.kind, e.external_id AS external
+     FROM entity_relations edge
+     JOIN revision_entities src ON src.revision_id = edge.revision_id
+       AND src.entity_key = edge.source_key AND src.is_root = 1
+     JOIN entity_versions v ON v.id = src.entity_version_id
+     JOIN entities e ON e.id = v.entity_id
+     WHERE edge.kind = 'reposted' AND e.kind LIKE '%.profile'
+     GROUP BY e.id ORDER BY count(*) DESC LIMIT 1`,
+  )
+  .get() as { platform: string; kind: string; external: string } | undefined
+
 const searches: string[] = [
   '#tag7',
   '#tag7 OR #tag8 OR #tag9',
@@ -98,6 +112,7 @@ const searches: string[] = [
   'within:30d',
   '#tag7 lang:zh type:post',
   '-#tag1 -#tag2 saved:30d',
+  ...(reposter ? [`reposted-by:${authorKey(reposter)}`] : []),
   ...(perspective
     ? [`rel:following:${authorKey(perspective)} (#tag1 OR mentions:@user1)`]
     : []),

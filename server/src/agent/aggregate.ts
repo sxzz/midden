@@ -6,7 +6,9 @@
 import { sql, type SQL } from 'drizzle-orm'
 import { authorKey, postTypeSQL, wholeSelection } from '#library/list.ts'
 import { list } from '#library/views.ts'
+import { parseQuery, usesKey, type QueryNode } from '#query/ast.ts'
 import { compileQuery } from '#query/compile.ts'
+import { printQuery } from '#query/print.ts'
 import { describeQuery } from '#reads/slow.ts'
 import { invalid } from './errors.ts'
 import { checkKeys, type AgentReader, type Params } from './query.ts'
@@ -89,6 +91,24 @@ function offsetSQL(r: AgentReader, zone: string): SQL {
   )} ELSE ${last} END)`
 }
 
+/** `type:post` before a query (or alone): what an untyped one counts. */
+function impliedPosts(node: QueryNode | undefined): QueryNode {
+  const posts: QueryNode = {
+    type: 'atom',
+    key: 'type',
+    value: 'post',
+    start: 0,
+    end: 0,
+  }
+  if (!node) return posts
+  return {
+    type: 'and',
+    items: [posts, ...(node.type === 'and' ? node.items : [node])],
+    start: 0,
+    end: 0,
+  }
+}
+
 /** A time zone Temporal knows, or undefined. */
 function zoneOf(raw: string): string | undefined {
   if (raw.length > 64) return undefined
@@ -121,21 +141,24 @@ export function aggregate(r: AgentReader, input: { params: Params }) {
       `limit must be a whole number from 1 to ${AGGREGATE_LIMIT_MAX}.`,
     )
   const q = one(params, 'q')
+  // Posts unless the query says otherwise (`type:profile`, or both).
+  const node = q ? parseQuery(q) : undefined
+  const typed = !!node && usesKey(node, 'type')
+  const scope = typed ? {} : { entityType: r.types.posts.join(',') }
   const compiled = q
     ? compileQuery(q, {
         db: r.db,
         types: r.types,
         kind: 'all',
-        filter: {},
+        filter: scope,
         timeZone: zone,
       })
     : undefined
-  describeQuery(
-    JSON.stringify({ q: compiled?.parsed ?? '', by, tz: zone, limit }),
-  )
+  const parsed = typed ? compiled!.parsed : printQuery(impliedPosts(node))
+  describeQuery(JSON.stringify({ q: parsed, by, tz: zone, limit }))
   const base = compiled?.folder
     ? compiled.folder.filter
-    : (compiled?.filter ?? {})
+    : (compiled?.filter ?? scope)
   const narrow = compiled?.folder ? compiled.filter : undefined
   const selection = wholeSelection(r.db, base, narrow, compiled?.extra)
   const local = sql`(m.at + ${TIME.has(by) ? offsetSQL(r, zone) : sql`0`}) / 1000`
@@ -263,7 +286,7 @@ export function aggregate(r: AgentReader, input: { params: Params }) {
     samples: JSON.parse(row.samples) as string[],
   }))
   return {
-    ...(compiled ? { parsed: compiled.parsed } : {}),
+    parsed,
     by,
     ...(TIME.has(by) ? { tz: zone } : {}),
     total,

@@ -212,7 +212,7 @@ function publicQuery(params: URLSearchParams) {
     'saved_from',
     'saved_before',
     'saved_within',
-    'time_zone',
+    'tz',
     ...RELATION_KEYS,
   ])
     params.delete(key)

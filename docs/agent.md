@@ -92,7 +92,7 @@ GET /agent/v1/posts?q=猫&platform=x&saved_within=30d&size=2
     "q": "猫",
     "platform": ["x"],
     "saved_within": "30d",
-    "time_zone": "UTC",
+    "tz": "UTC",
     "sort": "relevance"
   },
   "items": [
@@ -136,7 +136,7 @@ GET /agent/v1/posts?q=猫&platform=x&saved_within=30d&size=2
 - Compact items cut `text` and `note` at 280 characters (`text_truncated: true`), give media as counts, and tags as names.
 - Full items add the whole text, `media` (each with `kind`, `state`, `url`, `thumbnail_url`, `alt_text`, `sensitive`, `width`/`height`), `edited_at`, `mentions`, `reposted_by` (accounts whose timelines show it reposted), and tags as `{id, name}`.
 - `media[].url` is the original: a public CDN address, or a link this server signed, valid for at least 12 hours. `thumbnail_url` is a smaller image. `state: "removed"` means the owner deleted the file to save space; the thumbnail may remain.
-- Errors: `400 invalid_request`, `400 query_invalid`, `400 cursor_mismatch`, `404 not_found` (unknown `folder`, `author`, `rel_of`), `503 busy`, `503 query_timeout`.
+- Errors: `400 invalid_request`, `400 query_invalid`, `400 cursor_mismatch`, `404 not_found` (unknown `folder`, `rel_of`); an `author` the archive has no account for selects nothing, `503 busy`, `503 query_timeout`.
 
 ### GET /agent/v1/accounts
 
@@ -168,15 +168,15 @@ Full accounts add `likes`, `media_count`, `location`, `website`, `joined`, `avat
 
 ### GET /agent/v1/aggregate
 
-How what a query selects falls into buckets: `q` (section 6; without it, the whole archive, posts and accounts), `by` (below), `tz` (an IANA zone for the time buckets and the query's dates, default `UTC`) and `limit` (buckets, 1–1000, default 100).
+How what a query selects falls into buckets: `q` (section 6), `by` (below), `tz` (an IANA zone for the time buckets and the query's dates, default `UTC`) and `limit` (buckets, 1–1000, default 100).
 
 ```
-GET /agent/v1/aggregate?by=month&tz=Asia/Tokyo&q=%23猫%20type:post%20since:2026-01-01
+GET /agent/v1/aggregate?by=month&tz=Asia/Tokyo&q=%23猫%20since:2026-01-01
 ```
 
 ```json
 {
-  "parsed": "#猫 type:post since:2026-01-01",
+  "parsed": "type:post #猫 since:2026-01-01",
   "by": "month",
   "tz": "Asia/Tokyo",
   "total": 812,
@@ -193,12 +193,14 @@ GET /agent/v1/aggregate?by=month&tz=Asia/Tokyo&q=%23猫%20type:post%20since:2026
 }
 ```
 
+Without a `type:` term the query counts posts: `type:post` is implied, and `parsed` says so (`type:post #猫 since:2026-01-01`; with no `q`, `type:post`). `type:profile` counts accounts, `type:post OR type:profile` both.
+
 | `by`                           | Bucket `key`                                                                             |
 | ------------------------------ | ---------------------------------------------------------------------------------------- |
 | `author`                       | The account key (with `handle` and `name`); an account counts under itself.              |
 | `day`, `week`, `month`         | `2026-11-26`, the Monday a week starts (`2026-11-23`), `2026-11`; in `tz`. Newest first. |
 | `hour`, `weekday`              | `0`–`23`; `1` (Monday) – `7` (Sunday); in `tz`. In that order.                           |
-| `type`                         | `original`, `quote`, `repost`, `profile` (an account).                                   |
+| `type`                         | `original`, `quote`, `repost`; `profile` (an account) with `type:profile`.               |
 | `media`                        | `image`, `video`, `image+video`, `other`, `none`.                                        |
 | `tag`                          | The owner's tag name (with `id`); an account's tag counts for its posts.                 |
 | `hashtag`, `mention`, `domain` | `猫`, `x:alice`, `youtube.com`, as `#`, `mentions:` and `domain:` match them.            |
@@ -508,19 +510,20 @@ Syntax:
 | `mentions:@h`                                               | Posts that mention it (`x:@h` for one platform).                                                                                                                                                                                                |
 | `quotes:<post id or @h>`                                    | Posts that quote that post, or any post by `@h`.                                                                                                                                                                                                |
 | `reposts:<post id or @h>`                                   | Posts and accounts that reposted that post, or a post by `@h`.                                                                                                                                                                                  |
+| `reposted-by:@h`                                            | Posts `@h` reposted: on its timeline, or by a repost of its own. `@h` as for `from:`.                                                                                                                                                           |
 | `rel:following:@a` `rel:followers:@a` `rel:mutual:@a`       | Accounts `@a` follows, that follow `@a`, or both, and their posts (as `rel_of` and `rel`).                                                                                                                                                      |
 | `is:original` `is:quote` `is:repost`                        | The post type (as `post_type`). The archive does not record replies, so there is no `is:reply`.                                                                                                                                                 |
 | `has:image` `has:video` `has:media` `has:link`              | Posts with images, videos, either, or a link.                                                                                                                                                                                                   |
 | `domain:youtube.com`                                        | Posts linking to the site: its registrable domain, so `music.youtube.com` and `www.youtube.com` are `youtube.com`.                                                                                                                              |
 | `lang:ja`                                                   | The language detected from the text: `ja`, `zh`, `ko`, `en`, `es`, `fr`, `de`, `pt`, `it`, `id`, `nl`, `tr`, `ru`, `uk`, `ar`, `fa`, `he`, `el`, `th`, `hi`. Latin-script languages are told by their small words; short posts often have none. |
 | `platform:x` `platform:instagram`                           | As `platform`.                                                                                                                                                                                                                                  |
-| `since:2026-01-01` `until:2026-02-01`                       | Published from that day on, or before that day (so these two are January), in `time_zone` (`tz` for aggregate), UTC by default.                                                                                                                 |
+| `since:2026-01-01` `until:2026-02-01`                       | Published from that day on, or before that day (so these two are January), in `tz`, UTC by default.                                                                                                                                             |
 | `within:30d` `within:12h`                                   | Published in the last 30 days (today included) or 12 hours.                                                                                                                                                                                     |
 | `saved:2026-11-01` `saved:7d` `saved-since:` `saved-until:` | Saved by the owner on that day, in the last 7 days (or hours: `12h`), from that day on, or before it.                                                                                                                                           |
 | `tag:<name or id>`                                          | The owner's tags; an account's tag counts for its posts.                                                                                                                                                                                        |
 | `folder:<id or name>`                                       | What the folder selects. Alone at the top level, the search starts from it, as `folder=` does.                                                                                                                                                  |
 | `state:deleted` `state:suspended`                           | As `source_state`.                                                                                                                                                                                                                              |
-| `type:post` `type:profile`                                  | Posts or accounts (for `GET /aggregate`; `/posts` and `/accounts` hold one kind already).                                                                                                                                                       |
+| `type:post` `type:profile`                                  | Posts or accounts. `GET /aggregate` counts posts unless its query names a type; `/posts` and `/accounts` hold one kind already.                                                                                                                 |
 | `sensitive:yes` `sensitive:no`                              | As `sensitive`.                                                                                                                                                                                                                                 |
 
 Limits, so that one query cannot read everything many times over: at most 16 terms; operators (AND, OR, `-`) nested at most 4 deep; at most 8 alternatives in one `OR`; values of at most 64 characters. A query of nothing but exclusions (`-#ad`) needs something to start from: a term that is not excluded, or the `author`, `tag`, `folder`, `saved_*`, `rel_of` or `related_to` parameters.
@@ -560,8 +563,8 @@ Lists take commas or repeated keys (`tag=a,b` or `tag=a&tag=b`). Times are RFC 3
 | `protected`                  | `true`: from protected (private) accounts; `false`: public ones. As the account is now.                                                                                                                                                |
 | `sensitive`                  | `true`: has media marked sensitive; `false`: has none.                                                                                                                                                                                 |
 | `saved_from`, `saved_before` | When the owner saved it: from (inclusive), before (exclusive).                                                                                                                                                                         |
-| `saved_within`, `time_zone`  | `7d`: saved on one of the last 7 days, today included, counted in `time_zone` (IANA, default `UTC`). Not with `saved_from` / `saved_before`.                                                                                           |
-| `author`                     | Posts by these accounts (list of account references, section 5).                                                                                                                                                                       |
+| `saved_within`, `tz`         | `7d`: saved on one of the last 7 days, today included, counted in `tz` (IANA, default `UTC`); `tz` is also where the dates of `q` are counted. Not with `saved_from` / `saved_before`.                                                 |
+| `author`                     | Posts by these accounts (list of account references, section 5), found as `from:` finds them; one the archive has no account for selects nothing.                                                                                      |
 | `related_to`                 | Posts and accounts directly related to this one: for an account, its posts, reposts and mentions; for a post, what it quotes and what quotes it.                                                                                       |
 | `tag`, `tag_mode`, `not_tag` | Tags by id or exact name: any of `tag` (or all, with `tag_mode=all`), none of `not_tag`. An account's tags also count for its posts. Give a name with a comma by its id.                                                               |
 | `post_type`                  | `post`, `quote` or `repost` (posts only).                                                                                                                                                                                              |

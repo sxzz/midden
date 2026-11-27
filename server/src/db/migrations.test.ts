@@ -487,3 +487,38 @@ describe('handle_profiles', () => {
     ).toContain('entity_versions_username')
   })
 })
+
+describe('folder_filter_tz', () => {
+  test('folders saved with time_zone say tz, and nothing else changes', () => {
+    const db = migratedBefore('folder_filter_tz')
+    const filters = {
+      zoned: 'saved_within=7d&sort=saved&time_zone=Asia%2FTokyo',
+      first: 'time_zone=UTC',
+      // A search for the words is no key.
+      words: 'q=time_zone%3DUTC',
+      plain: 'media_type=image',
+    }
+    for (const [id, filter] of Object.entries(filters))
+      insertRow(db, 'folders', {
+        id,
+        name: id,
+        filter,
+        created_at: 1,
+        updated_at: 1,
+      })
+    migrateRest(db)
+    expect(
+      Object.fromEntries(
+        db.$client
+          .prepare('SELECT id, filter FROM folders')
+          .all()
+          .map((row) => [row.id, row.filter]),
+      ),
+    ).toEqual({
+      zoned: 'saved_within=7d&sort=saved&tz=Asia%2FTokyo',
+      first: 'tz=UTC',
+      words: 'q=time_zone%3DUTC',
+      plain: 'media_type=image',
+    })
+  })
+})

@@ -489,11 +489,17 @@ describe('api', () => {
     expect((await call('/collections/authors')).status).toBe(200)
     expect((await call('/collections?sort=nonsense')).status).toBe(400)
     // One author or several: both are a filter, not a malformed query.
+    // An author the archive does not have selects nothing.
     for (const authors of [
       'author=x/user/1',
       'author=x/user/1&author=x/user/2',
-    ])
-      expect((await call(`/collections?${authors}`)).status).toBe(200)
+    ]) {
+      const list = await call(`/collections?${authors}`)
+      expect(list.status).toBe(200)
+      expect(((await list.json()) as { items: unknown[] }).items).toEqual([])
+      const count = await call(`/collections/count?${authors}`)
+      expect(await count.json()).toEqual({ count: 0, types: {} })
+    }
     expect((await call('/collections?tag=a&tag=b')).status).toBe(400)
     // The 关系 filter and the accounts it can look from.
     expect(

@@ -25,6 +25,7 @@ export const KEYS = [
   'mentions',
   'quotes',
   'reposts',
+  'reposted-by',
   'rel',
   'is',
   'has',
@@ -190,9 +191,10 @@ function canonicalValue(key: Key, raw: string): string | { error: string } {
   if (!value) return { error: `${key}: needs a value.` }
   switch (key) {
     case 'from':
+    case 'reposted-by':
       return (
         account(value) ?? {
-          error: `from: takes @handle, x:@handle, an account key or an account id, not ${value}.`,
+          error: `${key}: takes @handle, x:@handle, an account key or an account id, not ${value}.`,
         }
       )
     case 'mentions': {

@@ -123,8 +123,8 @@ export function apiQuery(raw: string, kind?: Kind) {
       q.set('saved_before', d.toISOString())
     }
   }
-  if (!q.get('saved_within')) q.delete('time_zone')
-  else if (!q.get('time_zone')) q.set('time_zone', localZone())
+  if (!q.get('saved_within')) q.delete('tz')
+  else if (!q.get('tz')) q.set('tz', localZone())
   return q.toString()
 }
 
@@ -226,7 +226,7 @@ export function folderQuery(filter: string) {
     }
   }
   // This browser's own zone goes without saying.
-  if (q.get('time_zone') === localZone()) q.delete('time_zone')
+  if (q.get('tz') === localZone()) q.delete('tz')
   return folderAddress(q.toString())
 }
 

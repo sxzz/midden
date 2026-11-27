@@ -112,15 +112,24 @@ const POSTS = posts()
 function route(id: string): Partial<FetchResponse> {
   const account = ACCOUNTS[id as keyof typeof ACCOUNTS]
   if (account) {
+    const reposted = TIMELINE_REPOSTS[id]
     const response: Partial<FetchResponse> = {
       text: account.name,
-      graph: graph([
-        entity('root', 'fake.profile', id, {
-          username: account.username,
-          name: account.name,
-          metadata: { description: account.bio },
-        }),
-      ]),
+      graph: graph(
+        [
+          entity('root', 'fake.profile', id, {
+            username: account.username,
+            name: account.name,
+            metadata: { description: account.bio },
+          }),
+          ...(reposted
+            ? [entity('reposted', 'fake.post', reposted, { text: '' })]
+            : []),
+        ],
+        ...(reposted
+          ? [['root', 'reposted', 'reposted'] as [string, string, string]]
+          : []),
+      ),
     }
     return response
   }
@@ -183,6 +192,8 @@ function route(id: string): Partial<FetchResponse> {
 let ctx: CaptureContext
 let reader: AgentReader
 const ids: Record<string, string> = {}
+/** Reposts an account's timeline lists, by account. */
+const TIMELINE_REPOSTS: Partial<Record<string, string>> = { '3': 'p0' }
 const DELETED = new Set(['p5', 'p17'])
 const FOLLOWS: [Handle, Handle][] = [
   ['alice', 'bob'],
@@ -246,6 +257,8 @@ interface Row {
   type: 'original' | 'quote' | 'repost'
   quotes?: string
   reposts?: string
+  /** Who reposted it: by a post of theirs or on their timeline. */
+  repostedBy: Handle[]
   published: number
   saved: number
   tags: string[]
@@ -262,7 +275,13 @@ function rows(): Row[] {
       )
       .map((r) => [r.id, r]),
   )
-  const reposted = new Set(POSTS.flatMap((p) => (p.reposts ? [p.reposts] : [])))
+  const repostedBy = new Map<string, Handle[]>()
+  const repost = (post: string, by: Handle) =>
+    repostedBy.set(post, [...(repostedBy.get(post) ?? []), by])
+  for (const p of POSTS)
+    if (p.reposts) repost(p.reposts, ACCOUNTS[p.author].username)
+  for (const [id, post] of Object.entries(TIMELINE_REPOSTS))
+    repost(post!, ACCOUNTS[id as keyof typeof ACCOUNTS].username)
   const nameOf = (a: (typeof ACCOUNTS)[keyof typeof ACCOUNTS]) =>
     `${fold(a.name)}\n@${a.username}`
   const out: Row[] = []
@@ -282,6 +301,8 @@ function rows(): Row[] {
       video: false,
       sensitive: false,
       type: 'original',
+      ...(TIMELINE_REPOSTS[id] ? { reposts: TIMELINE_REPOSTS[id] } : {}),
+      repostedBy: [],
       published: t.published,
       saved: t.saved,
       tags: id === '2' ? ['blue'] : [],
@@ -313,13 +334,14 @@ function rows(): Row[] {
       image: post.image,
       video: post.video,
       sensitive: post.sensitive && (post.image || post.video),
-      type: reposted.has(post.id)
+      type: repostedBy.has(post.id)
         ? 'repost'
         : post.quotes
           ? 'quote'
           : 'original',
       ...(post.quotes ? { quotes: post.quotes } : {}),
       ...(post.reposts ? { reposts: post.reposts } : {}),
+      repostedBy: repostedBy.get(post.id) ?? [],
       published: t.published,
       saved: t.saved,
       tags: [
@@ -420,6 +442,8 @@ function matches(row: Row, node: QueryNode, all: Row[]): boolean {
           ? follower
           : following && follower
     }
+    case 'reposted-by':
+      return row.repostedBy.includes(handleOf(v) as Handle)
     case 'quotes':
     case 'reposts': {
       const pointed = leaf.key === 'quotes' ? row.quotes : row.reposts
@@ -460,6 +484,7 @@ function leafText(next: () => number, ref: (id: string) => string): string {
       `rel:${pick(['following', 'followers', 'mutual'])}:@${pick(['alice', 'carol'])}`,
     () => `quotes:${pick([ref(post()), '@alice', '@bob'])}`,
     () => `reposts:${pick([ref(post()), '@carol'])}`,
+    () => `reposted-by:@${pick(['alice', 'bob', 'carol', 'nobody'])}`,
   ])()
 }
 
@@ -641,6 +666,14 @@ describe('plans', () => {
     ['state:deleted OR #cats', /collections_source_state/],
     ['quotes:@alice', /revision_entities_version \(entity_version_id=\?\)/],
     ['reposts:@carol', /entity_relations|revision_entities_version/],
+    // From each revision of the account's rows, through its root and that
+    // root's reposted relations, to the reposted posts' rows: each an index
+    // seek. (Here the account's own rows are few enough to scan; on the
+    // development copy they are read through catalog_subject.)
+    [
+      'reposted-by:@carol',
+      /SEARCH rv USING (COVERING )?INDEX revisions_head \(collection_id=\?\)[\s\S]*SEARCH src USING INDEX revision_entities_root \(revision_id=\?\)[\s\S]*SEARCH edge USING COVERING INDEX sqlite_autoindex_entity_relations_1 \(revision_id=\? AND source_key=\? AND kind=\?\)[\s\S]*SEARCH kp USING (COVERING )?INDEX catalog_root \(root_entity_id=\?\)/,
+    ],
     ['folder:imgs #cats', /SEARCH post_hashtags/],
   ])('%s', (text, pattern) => {
     expect(plan(text)).toMatch(pattern)

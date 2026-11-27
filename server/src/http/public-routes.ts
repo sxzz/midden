@@ -47,7 +47,7 @@ const ListQuery = v.strictObject({
     'saved_from',
     'saved_before',
     'saved_within',
-    'time_zone',
+    'tz',
     'sort',
   ]).entries,
   sort: v.optional(

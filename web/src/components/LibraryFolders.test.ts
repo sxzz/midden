@@ -471,7 +471,7 @@ it('saves a quick save-date range as a relative one', async () => {
   await vi.waitFor(() =>
     expect(listQueries().at(-1)?.get('saved_within')).toBe('7d'),
   )
-  expect(listQueries().at(-1)?.get('time_zone')).toBe(zone)
+  expect(listQueries().at(-1)?.get('tz')).toBe(zone)
   expect(listQueries().at(-1)?.has('saved_from')).toBe(false)
   expect(router.currentRoute.value.query.saved_within).toBe('7d')
   await vi.waitFor(() =>
@@ -488,7 +488,7 @@ it('saves a quick save-date range as a relative one', async () => {
   expect(sent('POST', '/folders')[0].filter).toBe(
     new URLSearchParams({
       saved_within: '7d',
-      time_zone: zone,
+      tz: zone,
     }).toString(),
   )
   await vi.waitFor(() =>

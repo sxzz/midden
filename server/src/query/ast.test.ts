@@ -67,8 +67,8 @@ describe('reading', () => {
     expect(read('tag:"my tag" folder:猫')).toEqual({
       and: ['tag:my tag', 'folder:猫'],
     })
-    expect(read('from:X:@Alice mentions:@Bob')).toEqual({
-      and: ['from:x:@alice', 'mentions:@bob'],
+    expect(read('from:X:@Alice mentions:@Bob reposted-by:@Carol')).toEqual({
+      and: ['from:x:@alice', 'mentions:@bob', 'reposted-by:@carol'],
     })
     expect(read('domain:https://www.YouTube.com/watch')).toBe(
       'domain:youtube.com',
@@ -159,6 +159,7 @@ const LEAVES = [
   '#猫',
   'from:@alice',
   'from:x:@bob',
+  'reposted-by:@carol',
   'mentions:@bob',
   'domain:a.test',
   'lang:ja',

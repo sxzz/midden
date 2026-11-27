@@ -23,8 +23,7 @@ function request(params: string) {
     q.set(apiKey, date.toISOString())
   }
   // A relative save date counts days where the reader is.
-  if (q.get('saved_within') && !q.get('time_zone'))
-    q.set('time_zone', localZone())
+  if (q.get('saved_within') && !q.get('tz')) q.set('tz', localZone())
   q.set('q', q.get('q') || '')
   return q
 }

@@ -81,7 +81,7 @@ export interface PublicListQuery extends Omit<
   | 'saved_from'
   | 'saved_before'
   | 'saved_within'
-  | 'time_zone'
+  | 'tz'
   | 'sort'
 > {
   sort?: '' | 'relevance' | 'published' | 'updated' | 'followers' | 'following'

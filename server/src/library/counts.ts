@@ -50,7 +50,7 @@ export function countKey(canonical: string): string {
   params.delete('order')
   const within = params.get('saved_within')
   const since = within
-    ? savedSince(within, params.get('time_zone') || undefined)
+    ? savedSince(within, params.get('tz') || undefined)
     : undefined
   return since === undefined ? params.toString() : `${params}#${since}`
 }

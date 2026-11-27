@@ -46,18 +46,18 @@ it('keeps a relative save date relative, in the browser’s time zone', () => {
   const filter = folderFilter('saved_within=7d&tab=post')
   expect(Object.fromEntries(new URLSearchParams(filter))).toEqual({
     saved_within: '7d',
-    time_zone: localZone(),
+    tz: localZone(),
   })
   // The browser's own zone goes without saying in the address.
   expect(folderQuery(filter)).toBe('saved_within=7d')
   expect(folderModified('saved_within=7d', filter)).toBe(false)
   expect(folderModified('saved_within=30d', filter)).toBe(true)
   // Another zone, saved elsewhere, stays the folder's.
-  const elsewhere = 'saved_within=1d&time_zone=Pacific%2FKiritimati'
+  const elsewhere = 'saved_within=1d&tz=Pacific%2FKiritimati'
   expect(folderQuery(elsewhere)).toBe(elsewhere)
   expect(folderModified(folderQuery(elsewhere), elsewhere)).toBe(false)
   // A zone without a relative date means nothing.
-  expect(apiQuery('time_zone=UTC&q=a')).toBe('q=a')
+  expect(apiQuery('tz=UTC&q=a')).toBe('q=a')
 })
 
 it('opens a folder at the address query it was saved from', () => {

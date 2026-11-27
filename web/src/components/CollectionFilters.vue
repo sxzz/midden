@@ -114,7 +114,7 @@ function read(query: string) {
     /** A relative range such as `7d`, counted again on every visit. */
     within: (!shared && params.get('saved_within')) || '',
     /** Where its days are counted, when not this browser's zone. */
-    zone: (!shared && params.get('time_zone')) || '',
+    zone: (!shared && params.get('tz')) || '',
   }
 }
 type Form = ReturnType<typeof read>
@@ -291,7 +291,7 @@ function stringify(f: Form) {
     ['from_date', f.from],
     ['to_date', f.to],
     ['saved_within', f.within],
-    ['time_zone', f.within ? f.zone : ''],
+    ['tz', f.within ? f.zone : ''],
     ['entity_type', entityTypes(f)],
   ])
     if (v) q.set(k, v)

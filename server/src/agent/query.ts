@@ -18,7 +18,7 @@ import {
 } from '#library/list.ts'
 import { isUUID } from '#library/read.ts'
 import { fold } from '#library/search-text.ts'
-import { compileQuery } from '#query/compile.ts'
+import { compileQuery, resolveAccounts } from '#query/compile.ts'
 import { describeQuery } from '#reads/slow.ts'
 import { AgentError, invalid, notFound } from './errors.ts'
 import { VIEWS, type View } from './shape.ts'
@@ -54,7 +54,7 @@ const FILTER_KEYS = [
   'saved_from',
   'saved_before',
   'saved_within',
-  'time_zone',
+  'tz',
   'author',
   'tag',
   'tag_mode',
@@ -320,11 +320,61 @@ function typesOf(
   return r.types[kind].filter(on).toSorted().join(',')
 }
 
-/** The filter the parameters describe, resolved, for a list of `kind`. */
+/**
+ * The account keys `author` names, as `from:` finds them (`resolveAccounts`):
+ * any handle the archive gives an author or account, a key, or a saved
+ * account's id. A bare `@handle` needs `platform`. Without `unknown`, a
+ * reference the archive has no account for is `not_found` (a folder must
+ * not save what selects nothing); with it, it is listed there and selects
+ * nothing.
+ */
+function authorKeys(
+  r: AgentReader,
+  refs: string[],
+  platform: string | undefined,
+  unknown?: string[],
+): string[] {
+  const keys = new Set<string>()
+  for (const ref of refs) {
+    const handle = REF.exec(ref)
+    if (handle && !handle[1] && !platform)
+      throw invalid(
+        `${ref} names a handle without a platform: write x:${ref} or instagram:${ref}, or give platform.`,
+      )
+    const identity = parseAuthorKey(ref)
+    if (!handle && !isUUID(ref) && !identity?.kind.endsWith('.profile'))
+      throw invalid(
+        `${ref} is not an account: give a collection id, an account key (x/x.profile/123) or x:@handle.`,
+      )
+    let found
+    try {
+      found = resolveAccounts(
+        r.db,
+        r.types,
+        handle ? `${handle[1] ?? platform}:@${handle[2]!.toLowerCase()}` : ref,
+      )
+    } catch (error) {
+      throw invalid((error as Error).message)
+    }
+    if (!found.length) {
+      if (!unknown) throw notFound(`The archive has no account ${ref}.`)
+      unknown.push(ref)
+    }
+    for (const account of found) keys.add(authorKey(account))
+  }
+  return [...keys]
+}
+
+/**
+ * The filter the parameters describe, resolved, for a list of `kind`. With
+ * `unknown`, author references the archive has no account for are listed
+ * there instead of answering `not_found`.
+ */
 export function filterOf(
   r: AgentReader,
   kind: Kind | 'folder',
   params: Params,
+  unknown?: string[],
 ): CollectionFilter {
   const platforms = [...new Set(values(params, 'platform'))].toSorted()
   for (const p of platforms)
@@ -361,7 +411,7 @@ export function filterOf(
   const order = single(params, 'order')
   if (order) oneOf('order', order, ['desc', 'asc'])
   const relatedTo = single(params, 'related_to')
-  const timeZone = single(params, 'time_zone')
+  const timeZone = single(params, 'tz')
   const q = single(params, 'q')?.replaceAll(/\s+/g, ' ')
   return {
     q,
@@ -385,9 +435,7 @@ export function filterOf(
     savedBefore: single(params, 'saved_before'),
     savedWithin: single(params, 'saved_within'),
     timeZone,
-    authors: values(params, 'author').map(
-      (ref) => findAccount(r, ref, platform).key,
-    ),
+    authors: authorKeys(r, values(params, 'author'), platform, unknown),
     tag: findTags(r.db, values(params, 'tag'))
       .map((t) => t.id)
       .join(','),
@@ -451,7 +499,7 @@ export function describe(
     ...(filter.savedWithin
       ? {
           saved_within: filter.savedWithin,
-          time_zone: filter.timeZone || 'UTC',
+          tz: filter.timeZone || 'UTC',
         }
       : {}),
     ...(filter.authors?.length
@@ -489,7 +537,7 @@ export function filterQueryString(filter: CollectionFilter): string {
   set('saved_from', filter.savedFrom)
   set('saved_before', filter.savedBefore)
   set('saved_within', filter.savedWithin)
-  set('time_zone', filter.timeZone)
+  set('tz', filter.timeZone)
   set('sort', filter.sort)
   set('order', filter.order)
   for (const author of filter.authors ?? []) params.append('author', author)
@@ -517,6 +565,8 @@ export interface Search {
   extra?: QueryExtra
   /** The query in its canonical form. */
   parsed?: string
+  /** Its authors are all accounts the archive does not have: nothing. */
+  empty?: boolean
   applied: Record<string, unknown>
   /** What a cursor is bound to. */
   bound: string
@@ -569,7 +619,8 @@ export function readSearch(r: AgentReader, kind: Kind, params: Params): Search {
   // `q` is the query language; the rest the list's own filter.
   const { q: _, ...structured } = params
   const q = single(params, 'q')
-  const own = filterOf(r, kind, structured)
+  const unknown: string[] = []
+  const own = filterOf(r, kind, structured, unknown)
   const compiled = q
     ? compileQuery(q, {
         db: r.db,
@@ -610,8 +661,16 @@ export function readSearch(r: AgentReader, kind: Kind, params: Params): Search {
   let sort = filter.sort || ''
   if (!SORTS[kind].includes(sort)) sort = ''
   if (!sort || sort === 'relevance') sort = searching ? 'relevance' : 'updated'
+  const described = describe(r, own, kind)
+  // Authors the archive has no account for select nothing; they are
+  // listed as given.
+  if (unknown.length)
+    described.author = [
+      ...((described.author as string[] | undefined) ?? []),
+      ...unknown,
+    ].toSorted()
   const applied = {
-    ...describe(r, own, kind),
+    ...described,
     ...(compiled ? { q: compiled.parsed } : {}),
     ...(folder ? { folder: { id: folder.id, name: folder.name } } : {}),
     sort,
@@ -627,6 +686,7 @@ export function readSearch(r: AgentReader, kind: Kind, params: Params): Search {
     narrow,
     ...(compiled?.extra ? { extra: compiled.extra } : {}),
     ...(compiled ? { parsed: compiled.parsed } : {}),
+    ...(unknown.length && !own.authors?.length ? { empty: true } : {}),
     applied,
     bound,
     size,

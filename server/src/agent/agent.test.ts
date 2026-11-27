@@ -195,8 +195,24 @@ describe('posts and accounts', () => {
       })
       expect(json.message).toContain(message)
     }
+    // An author the archive has no account for selects nothing, as
+    // from: does; with one it has, that one's posts.
     const unknown = await f.call('/posts?author=fake:@nobody')
-    expect(unknown.status).toBe(404)
+    expect(unknown.status).toBe(200)
+    expect(unknown.json).toEqual({
+      applied: { author: ['fake:@nobody'], sort: 'updated', order: 'desc' },
+      items: [],
+      total: 0,
+      has_more: false,
+    })
+    const either = await f.call('/posts?author=fake:@nobody,fake:@bob')
+    expect(either.json.total).toBe(2)
+    expect(either.json.applied.author).toEqual([
+      'fake/fake.profile/8',
+      'fake:@nobody',
+    ])
+    const query = await f.call(`/posts?q=${encodeURIComponent('from:@nobody')}`)
+    expect(query.json).toMatchObject({ items: [], total: 0 })
   })
 
   test('compact cuts and counts; full has everything', async () => {
@@ -449,11 +465,30 @@ describe('aggregate', () => {
         samples: expect.arrayContaining([f.ids.p3, f.ids.p4]),
       },
     ])
+    // Without type:, posts only, and parsed says so.
     const types = await f.call('/aggregate?by=type&limit=1')
-    expect(types.json.total).toBe(6)
+    expect(types.json.parsed).toBe('type:post')
+    expect(types.json.total).toBe(4)
     expect(types.json.buckets).toHaveLength(1)
     expect(types.json.buckets[0]).toMatchObject({ key: 'original', count: 3 })
     expect(types.json.truncated).toBe(true)
+    const implied = await f.call(
+      `/aggregate?by=type&q=${encodeURIComponent('dog OR cat')}`,
+    )
+    expect(implied.json.parsed).toBe('type:post (dog OR cat)')
+    expect(implied.json.total).toBe(4)
+    const accounts = await f.call(
+      `/aggregate?by=type&q=${encodeURIComponent('type:profile')}`,
+    )
+    expect(accounts.json).toMatchObject({
+      parsed: 'type:profile',
+      total: 2,
+      buckets: [{ key: 'profile', count: 2 }],
+    })
+    const both = await f.call(
+      `/aggregate?by=type&q=${encodeURIComponent('type:post OR type:profile')}`,
+    )
+    expect(both.json.total).toBe(6)
     const months = await f.call('/aggregate?by=month&tz=Asia/Tokyo')
     expect(months.json.tz).toBe('Asia/Tokyo')
     expect(months.json.buckets[0].key).toMatch(/^\d{4}-\d{2}$/)
@@ -462,7 +497,7 @@ describe('aggregate', () => {
         (n: number, b: { count: number }) => n + b.count,
         0,
       ),
-    ).toBe(6)
+    ).toBe(4)
     for (const [path, error] of [
       ['/aggregate', 'invalid_request'],
       ['/aggregate?by=colour', 'invalid_request'],

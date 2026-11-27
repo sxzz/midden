@@ -100,6 +100,15 @@ export interface SearchInput {
 
 function search(r: AgentReader, input: SearchInput) {
   const s = readSearch(r, input.kind, input.params)
+  // Only authors the archive has no account for: nothing to read.
+  if (s.empty)
+    return {
+      ...(s.parsed === undefined ? {} : { parsed: s.parsed }),
+      applied: s.applied,
+      items: [],
+      ...(s.cursor ? {} : { total: 0 }),
+      has_more: false,
+    }
   const inner = s.cursor ? decodeCursor(s.bound, s.cursor) : undefined
   const page = listCollections(r, s.filter, inner, s.narrow, s.size, s.extra)
   const toItem = shaper(

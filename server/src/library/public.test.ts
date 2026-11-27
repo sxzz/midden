@@ -854,8 +854,8 @@ describe('public lists', () => {
       '/collections?saved_from=2026-01-01',
       '/collections?saved_before=2026-01-01',
       '/collections?saved_within=7d',
-      '/collections?saved_within=7d&time_zone=Asia/Shanghai',
-      '/collections?time_zone=UTC',
+      '/collections?saved_within=7d&tz=Asia/Shanghai',
+      '/collections?tz=UTC',
       '/collections?saved_from=',
       `/collections?related_to=${ids.five}&saved_within=7d`,
     ])
