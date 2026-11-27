@@ -378,6 +378,8 @@ Progress of a capture or an update (the `record_id` or `update_id` a write retur
 
 Poll it every 10 seconds or more until `done` is true. `paused` or `paused_all` mean the owner (or you) paused it.
 
+`notes` (`[{"url": "…", "text": "…"}]`, when there are any) are accounts captured completely but with a remark, counted as `complete`: a protected account whose posts the capture account may not see says `锁推账号，采集账号无权查看帖子（未关注或请求未通过）`. That is no failure and is not retried by itself; an update after the account may see them reads the posts.
+
 ### GET /agent/v1/jobs
 
 Background work: `paused` (everything), `paused_types`, `pausable_types` and the backlog of jobs per type.
