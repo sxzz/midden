@@ -89,6 +89,12 @@ node scripts/install-deploy-webhook.ts --dir ~/midden
 
 GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<域名>/hooks/deploy`，密钥与 `.local/deploy-webhook.secret` 相同；隧道把该路径转发到 18090 端口。升级 Node 后重新运行安装命令。修改 `scripts/deploy-webhook.ts` 后同样要重新运行安装命令：安装的是副本，安装脚本会 `bootout` 再 `bootstrap` LaunchAgent `org.midden.deploy-webhook`，即重启它。
 
+## 依赖更新
+
+Renovate（账号级安装的 GitHub App）按 `.github/renovate.json5` 每周开一批 PR：配置继承 `github>sxzz/renovate-config`（每周、非主版本合并为一个 PR），并开启 `automerge`。PR 的 test 工作流通过后自动合并，合并到 `main` 即触发上面的自动部署。`third_party/**`（vendored 的 Atmosphere）不在更新范围内。GitHub Actions 的更新保持开启：工作流按提交摘要固定并带版本注释，Renovate 会同时更新摘要和注释。
+
+预设不会更新 `package.json` 的 `devEngines`（Node、pnpm 版本）和 Dockerfile 的 `ALPINE_VERSION`，这些需要手动升级。
+
 ## 媒体存储（Cloudflare R2）
 
 默认 `MEDIA_STORE=local`：媒体只在数据目录的 `media/` 中，网页通过本服务的签名链接 `/media/…` 读取。设为 `r2` 后：

@@ -1,0 +1,6 @@
+{
+  extends: ['github>sxzz/renovate-config'],
+  automerge: true,
+  // Vendored fork; updated by hand from upstream.
+  ignorePaths: ['third_party/**'],
+}
