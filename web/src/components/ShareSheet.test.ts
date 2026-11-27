@@ -109,6 +109,8 @@ afterEach(() => {
   location.hash = '/'
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  Reflect.deleteProperty(navigator, 'clipboard')
+  Reflect.deleteProperty(navigator, 'permissions')
 })
 
 async function mount(path: string) {
@@ -128,8 +130,30 @@ const button = (el: ParentNode, text: string) =>
   )!
 
 it('shares a collection, copies its link and stops it, saying how it is public', async () => {
-  const writeText = vi.fn(async () => {})
-  vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+  // useClipboard writes a ClipboardItem once clipboard-write is allowed, on
+  // the navigator it found at import, so these go on that one.
+  const write = vi.fn<(items: { text: string }[]) => Promise<void>>(
+    async () => {},
+  )
+  vi.stubGlobal(
+    'ClipboardItem',
+    class {
+      text: string
+      constructor(data: Record<string, string>) {
+        this.text = data['text/plain']
+      }
+    },
+  )
+  Object.defineProperties(navigator, {
+    clipboard: { value: { write }, configurable: true },
+    permissions: {
+      value: {
+        query: async () =>
+          Object.assign(new EventTarget(), { state: 'granted' as const }),
+      },
+      configurable: true,
+    },
+  })
   const el = await mount(`/collection/${ID}`)
   await vi.waitFor(() =>
     expect(button(el, '公开分享')?.textContent).toContain(
@@ -152,7 +176,7 @@ it('shares a collection, copies its link and stops it, saying how it is public',
   )
 
   button(sheet, '复制链接').click()
-  await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(LINK))
+  await vi.waitFor(() => expect(write.mock.calls[0]?.[0][0].text).toBe(LINK))
 
   button(sheet, '取消公开').click()
   await vi.waitFor(() => expect(button(sheet, '创建公开链接')).toBeTruthy())

@@ -1,4 +1,5 @@
 <script setup vapor lang="ts">
+import { useClipboard } from '@vueuse/core'
 import { computed, useTemplateRef } from 'vue'
 import { apiAddress } from '../api'
 import { toast } from '../composables/useToast'
@@ -15,19 +16,18 @@ const handoff = computed(
   () =>
     `说明：${location.origin}/agent.md\nAPI地址：${apiAddress()}\n令牌：${props.secret}`,
 )
+const { copy: write, copied } = useClipboard()
 async function copy(
   text: string,
+  what: string,
   into: HTMLInputElement | HTMLTextAreaElement | null,
-  what = '',
 ) {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast(`已复制${what}`)
-  } catch {
-    // Some web views refuse the clipboard; leave it selected instead.
-    into?.select()
-    toast(`请手动复制${what}`)
-  }
+  // Its fallback, execCommand, can throw where it is gone.
+  await write(text).catch(() => {})
+  if (copied.value) return toast(`已复制${what}`)
+  // No clipboard (plain http, some web views): selected, to copy by hand.
+  into?.select()
+  toast(`请手动复制${what}`)
 }
 </script>
 
@@ -67,11 +67,15 @@ async function copy(
       <button
         type="button"
         class="action primary"
-        @click="copy(secret, field, '令牌')"
+        @click="copy(secret, '令牌', field)"
       >
-        复制
+        复制令牌
       </button>
-      <button type="button" class="action" @click="copy(handoff, handoffField)">
+      <button
+        type="button"
+        class="action"
+        @click="copy(handoff, '', handoffField)"
+      >
         复制给AI agent
       </button>
     </template>

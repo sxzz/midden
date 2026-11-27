@@ -1,4 +1,5 @@
 <script setup vapor lang="ts">
+import { useClipboard } from '@vueuse/core'
 import { computed, shallowRef, useId, useTemplateRef, watch } from 'vue'
 import { call, client, errorText, type Share } from '../api'
 import { toast } from '../composables/useToast'
@@ -120,15 +121,14 @@ async function revoke() {
     busy.value = false
   }
 }
+const { copy: write, copied } = useClipboard()
 async function copy() {
-  try {
-    await navigator.clipboard.writeText(link.value)
-    toast('已复制链接')
-  } catch {
-    // Some web views refuse the clipboard; leave the link selected instead.
-    field.value?.select()
-    toast('请手动复制链接')
-  }
+  // Its fallback, execCommand, can throw where it is gone.
+  await write(link.value).catch(() => {})
+  if (copied.value) return toast('已复制链接')
+  // No clipboard (plain http, some web views): selected, to copy by hand.
+  field.value?.select()
+  toast('请手动复制链接')
 }
 /** A custom link typed and not saved yet. */
 const dirty = computed(

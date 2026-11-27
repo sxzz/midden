@@ -122,11 +122,11 @@ test('lists tokens with their expiry and use, and makes one shown once', async (
   await expect(sheet(page).getByRole('textbox', { name: '令牌' })).toHaveValue(
     'mdn_rw_first-secret',
   )
-  await sheet(page).getByRole('button', { name: '复制', exact: true }).click()
+  await sheet(page).getByRole('button', { name: '复制令牌' }).click()
   await expect(page.getByText('已复制令牌')).toBeVisible()
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-    'mdn_rw_first-secret',
-  )
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe('mdn_rw_first-secret')
   // What an agent needs in one paste; the API is this origin here (no
   // VITE_API_URL), the guide is the web app's.
   const origin = new URL(page.url()).origin
@@ -139,9 +139,9 @@ test('lists tokens with their expiry and use, and makes one shown once', async (
     sheet(page).getByRole('textbox', { name: '给AI agent' }),
   ).toHaveValue(handoff)
   await sheet(page).getByRole('button', { name: '复制给AI agent' }).click()
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-    handoff,
-  )
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(handoff)
   await sheet(page).getByRole('button', { name: '完成' }).click()
   await expect(sheet(page)).toHaveCount(0)
 
