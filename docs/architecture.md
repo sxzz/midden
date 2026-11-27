@@ -90,13 +90,26 @@ flowchart LR
 ## 原站状态
 
 - 收藏的内容在平台上可能已不在：帖子被作者删除（`deleted`，原帖已删除），账号被封禁（`suspended`；帖子则是作者被封禁），账号已不存在（账号的 `deleted`，如停用、注销）。账号转为受保护不算状态，抓取照常因此失败。状态从不删除已保存的内容，最后的版本一直保留。
-- 来源：平台在抓取失败时随错误给出 `source-state`。X 公开接口（FxTwitter）帖子 404 或 tombstone 为删除，资料或 tombstone 的 `reason: suspended` 为封禁，按 id 查的资料 404 为账号已不存在（按用户名查的 404 可能只是改名，不算）；X 采集账号读帖子时，`TweetTombstone` 的说明或 `TweetUnavailable` 的 `reason`（`Suspended`、`Deleted`）给出删除或封禁，另带 `source-state-explicit`。Instagram 帖子或按 id 查的账号 404 为删除、账号已不存在。
-- 确认：公共实例对自己查询失败也答「不存在」，所以不明确的第一个答案只记下，不标记：在 `collection_states` 记一行（`since` 为第一次看到的时间，`confirmed_at` 为空），并排一个 `source-check` 任务，1 小时后像自动刷新一样再抓一次（不读时间线和名单，提交键 `source-check:<行>`，不成为采集记录）。之后与它一致、且相隔至少 50 分钟的答案才确认它；采集账号明确给出的原因（`source-state-explicit`）一次即确认。确认时这一行写上 `confirmed_at`，`collections.source_state` / `source_state_at` 记下当前状态和它的 `since`，此前确认的另一种状态随之结束。不一致的答案取代还在等待的那个。
+- 来源：平台在抓取失败时随错误给出 `source-state`。X 公开接口（FxTwitter）：帖子不带原因的 404 为删除；资料或帖子 tombstone 的 `reason: suspended` 为封禁，tombstone 的 `reason: deleted` 为删除，这两个原因是 FxTwitter 转述的 X 自己的回答（`UserUnavailable` / `TweetUnavailable` 的 `reason`），另带 `source-state-explicit`；tombstone 的其他原因（`private`、`blocked`、`unavailable`）说的是还在的帖子，不是状态（「无法获取该帖子」）；按 id 查的资料 404 为账号已不存在。按用户名查的资料 404 不带原因时什么也不说明（见「按用户名保存的账号」），是暂时错误。X 采集账号读帖子时，`TweetTombstone` 的说明或 `TweetUnavailable` 的 `reason`（`Suspended`、`Deleted`）给出删除或封禁，同样带 `source-state-explicit`。Instagram 帖子或按 id 查的账号 404 为删除、账号已不存在。
+- 确认：公共实例对自己查询失败也答「不存在」，所以不明确的第一个答案只记下，不标记：在 `collection_states` 记一行（`since` 为第一次看到的时间，`confirmed_at` 为空），并排一个 `source-check` 任务，1 小时后像自动刷新一样再抓一次（不读时间线和名单，提交键 `source-check:<行>`，不成为采集记录）。之后与它一致、且相隔至少 50 分钟的答案才确认它；平台明确给出的原因（`source-state-explicit`：采集账号读到的，或 FxTwitter 转述的 X 的 `suspended`、`deleted`）一次即确认，不排 `source-check`。确认时这一行写上 `confirmed_at`，`collections.source_state` / `source_state_at` 记下当前状态和它的 `since`，此前确认的另一种状态随之结束。不一致的答案取代还在等待的那个。
 - 结束：任何一次正常保存（抓取完成，或关注列表给出账号的第一个版本）删除还在等待的答案，给确认过的状态写上 `ended_at`，并清空 `collections.source_state`。`collection_states` 保留每段状态：开始、确认、最后一次看到（`seen_at`）、结束的时间。
-- 已知状态的重复：状态确认之后、又看到同一状态的抓取仍是失败的抓取，但不是异常：记录中它与完成的成员一样计为新增或更新（`members.known`），不在异常记录中，不能重试，状态显示为「原站已删除」或「账号已被封禁」，没有失败原因；全是这样的成员的更新算完成；单独提交的记录同样给出 `source_state`。Telegram 进度另写「原站已删除或封禁 N」。
+- 已知状态的重复：状态确认之后的失败抓取（`knownGoneSQL`：失败在 `source_state_at` 之后，不论这次的错误是同一状态还是说明不了什么的失败，如按用户名查不到或接口出错）仍是失败的抓取，但不是异常：记录中它与完成的成员一样计为新增或更新（`members.known`），不在异常记录中，不能重试，状态显示为「原站已删除」或「账号已被封禁」，没有失败原因，也不计入记录的「失败原因」（连同因它而没能列出成员的页面的「所在页面采集失败」）；更新的「账号」一栏中这样的 Profile 写「资料 账号已被封禁」（`profiles[].source_state`），不显示错误；全是这样的成员的更新算完成；单独提交的记录同样给出 `source_state`。Telegram 进度另写「原站已删除或封禁 N」。
 - 锁推账号的帖子看不到：采集账号读受保护账号的时间线（UserTweets），X 只回答 `UserUnavailable`（`{"data":{"user":{"result":{"__typename":"UserUnavailable"}}}}`），而刚取得的资料说明账号受保护时，判定为采集账号无权查看它的帖子，不另发请求确认。X 不区分未关注、关注请求未通过与被屏蔽，所以写作「锁推账号，采集账号无权查看帖子（未关注或请求未通过）」。资料、头像、主页封面照常保存；这次抓取是完整的（`complete`），这句话是它的警告，完成时写进 `captures.error` 作为说明（完整的抓取只有这种警告，见 `finalize.ts` 的 `noted`）：记录和成员显示它而不是失败原因，Telegram 进度写在计数之后，Agent API `updates/:id` 列在 `notes` 中。它不算异常，不自动重试，但与原站状态不同，「重试本页」（单独的采集记录与 Telegram）、「重新采集」「再次更新」都照常可用：采集账号关注之后或请求通过后，下一次抓取照常读到帖子。已读到帖子之后才这样回答的仍是不完整的抓取。
 - 显示：详情页在作者下方写出「11月5日起原帖已删除」「11月5日起账号被封禁」「11月5日起账号已不存在」「11月5日起作者被封禁」（日期为 `since`），列表行同样；公开页相同。资料修改记录按时间穿插确认过的状态：「11月5日起账号被封禁」与「11月20日解封」，「11月5日起账号已不存在」与「11月20日账号恢复」。资料版本中不显示状态。
 - 筛选：列表参数 `source_state=deleted|suspended` 选中当前处于这个状态的收藏（`collections_source_state` 部分索引只含有状态的行），收藏夹与计数同样可用，公开接口也接受（这是平台上的公开信息）。网页筛选中「原站状态」：帖子为「原站已删除的帖子」「作者被封禁的帖子」，账号为「被封禁的账号」「已不存在的账号」。
+
+## 按用户名保存的账号
+
+X（和 Instagram）的账号链接 `x.com/<用户名>` 解析为 `handle:<小写用户名>`，抓到之后才知道账号的 id（`canonicalTarget`）。用户名会改、会转给别的账号，FxTwitter 按用户名查也不可靠（见下），所以只要知道 id 就按 id 查：
+
+- 链接保留写法：`resolveTarget` 只把身份（`external_id`）转为小写，链接（`collections.url`、提及与引用的 `relatedTargets`）保留原来的大小写，按用户名查时用链接中的写法（`profileLookup`）。帖子作者的资料同样按帖子链接中作者的写法查。
+- 已知的 id（`capture/stable-id.ts` 的 `knownStableId`，随 `FetchRequest.stableId` 交给平台）：依次是别名（`collection_identity_aliases` 中这个用户名指向的按 id 保存的收藏）、这个收藏自己的当前版本的根实体、唯一一个最新版本以这个用户名为名的账号实体（关注列表、帖子作者等处存下的，不区分大小写；有两个或最新版本已改名的不算）。最后一项经 `entity_versions_username` 部分索引（`lower(data ->> '$.username')`，只有账号的版本有 `username`）查找。X 平台有 `stableId` 时按 `id:<数字>` 查，回答仍是这个 `handle:` 目标的。
+- 按用户名查到 FxTwitter 不带 `reason` 的 404 时，平台先看本进程最近按这个用户名读到过的 id，有就按 id 再问一次；X 明确的回答（封禁）照用，其他结果与没有 id 时一样按暂时错误（UNAVAILABLE，「暂时无法读取（平台按用户名查询失败）」）处理：任务照常重试，不是 `notFound`，不记原站状态。只有按 id 查的 404（或明确的 `reason`）才算账号不在了。
+- 抓到之后：没有别的收藏是这个 id、且这个收藏的当前版本没有显示另一个按 id 记下的账号时，按用户名保存的收藏就地改为 id（`external_id`、`url` 改为 `x.com/i/user/<id>`，`scope.ts` 的 `renameInPlace`），收藏库、标签、备注、定期更新、版本、原站状态都随它保留，并记下别名；否则同以前一样把抓取移到 id 的收藏（已有那个收藏，或它的版本是之前用这个用户名的另一个账号）。
+- 迁移 `handle_profiles` 对已有的行做了同样的事（只有 X）：按当前版本的根实体、或（没有版本，或版本的根只是按用户名记下的账号时）唯一的账号实体得到 id。跳过的：已有收藏是这个 id 的（重复的收藏；下一次抓取按 id 查后移到那里，没有内容的用户名收藏随之离开收藏库，有内容的两份都留着）、同一账号的多个用户名收藏中除最早的以外的、实体有歧义或已改名的。
+- 显示：记录成员（`members`）、更新的「账号」一栏（`profiles`）和单独的 Profile 记录带上存下的 `name` 与 `handle`（当前版本的，没有时取账号实体最新的版本），网页写作「Harel @Raffel12310」，不再是 `x.com/i/user/<id>`。成员另带 `kind` 与 `library_id`：在收藏库中且有内容的收藏（自己，或按用户名保存的账号已按 id 保存的那个），网页链接到它，没有时 Profile 链接到平台上的主页。
+
+FxTwitter 的已知问题（待向上游报告）：`/2/profile/<用户名>` 对存在且公开的账号有时回答 `404 {"code":404,"message":"User not found"}`，没有 `reason`、约 2.2 秒后才回答（真正的封禁在 0.15–1.2 秒内回答，带 `reason: "suspended"` 和 id），有的用户名只在某种大小写下失败：2026-11-27 一次 927 个成员的更新中 24 个失败，其中 12 个是这样，如 `vueuse` 为 404，而 `VueUse` 或 `id:1375391728614604800` 为 200；受保护账号同样出现过。按 id 查没有出现这种情况。
 
 ## 搜索
 
