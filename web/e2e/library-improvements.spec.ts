@@ -95,12 +95,18 @@ test('restores sort controls and opens author links in a new tab', async ({
     'href',
     '/collection/bbbb',
   )
-  // 探索 returns to the list as it was left.
+  // 返回 goes to the list as it was left; 探索, the open tab, resets it.
+  await expect(
+    page.getByRole('link', { name: '返回', exact: true }),
+  ).toHaveAttribute('href', '/app/?sort=published&order=asc')
   await page
     .getByRole('navigation', { name: '主导航' })
     .getByRole('link', { name: '探索' })
     .click()
-  await expect(page).toHaveURL(/\/\?sort=published&order=asc$/)
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.getByRole('combobox', { name: '排序方向' })).toHaveValue(
+    'desc',
+  )
 })
 
 test('authors load with skeletons once their list opens; post type filters update the request', async ({
