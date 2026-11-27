@@ -28,6 +28,7 @@ import { createSession } from './sessions.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { ReadName } from '#agent/reads.ts'
 import type { ReadThreadData } from '#reads/thread.ts'
+import type { Principal } from '#users/principal.ts'
 
 let pool: QueryPool | undefined
 let fixture: AgentFixture | undefined
@@ -82,9 +83,9 @@ describe('GET requests on the read threads', () => {
             .buffer as ArrayBuffer,
         }
       },
-      read: ((name: ReadName, input: never) => {
+      read: ((principal: Principal, name: ReadName, input: never) => {
         named.push(name)
-        return inPlace(name, input)
+        return inPlace(principal, name, input)
       }) as NamedRead,
     }
     return { reads, forwarded, named }
@@ -103,11 +104,15 @@ describe('GET requests on the read threads', () => {
     // The login was checked here; the thread gets what it found, and no
     // cookie or token.
     expect(forwarded).toMatchObject([
-      { base: '/', url: 'http://localhost/captures?cursor=x', session: true },
+      {
+        base: '/',
+        url: 'http://localhost/captures?cursor=x',
+        principal: { userId: adminId(ctx.db), role: 'admin', via: 'session' },
+      },
     ])
     expect(forwarded[0]!.headers.map(([name]) => name)).not.toContain('cookie')
     // Answered by this process: the session check, the platforms, a write.
-    expect((await call('/session')).status).toBe(204)
+    expect((await call('/session')).status).toBe(200)
     expect(await (await call('/accounts')).json()).toMatchObject({
       accounts: [],
     })
@@ -179,7 +184,7 @@ describe('GET requests on the read threads', () => {
       expect(sent).toMatchObject({
         method: 'POST',
         url: `http://localhost${route}`,
-        session: true,
+        principal: expect.objectContaining({ role: 'admin', via: 'session' }),
       })
       expect(
         body === undefined
@@ -234,7 +239,7 @@ describe('GET requests on the read threads', () => {
     const api = createApi({ ctx, reads })
     expect((await api.request('/public/some-slug')).status).toBe(200)
     expect(forwarded).toMatchObject([
-      { url: 'http://localhost/public/some-slug', session: false },
+      { url: 'http://localhost/public/some-slug', principal: undefined },
     ])
   })
 

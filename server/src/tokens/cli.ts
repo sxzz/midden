@@ -28,7 +28,8 @@ const MIN_PREFIX = 8
 
 /**
  * `token create`: the secret alone on stdout, so a script can capture it,
- * and what it is on stderr. Exit code 1 when the token is refused.
+ * and what it is on stderr. Exit code 1 when the token is refused. The
+ * CLI makes, lists and changes the admin's tokens only.
  */
 export function tokenCreate(
   db: Database,
@@ -93,7 +94,7 @@ function idPrefixes(ids: readonly string[]): Map<string, string> {
 }
 
 function listed(db: Database, now: number): ListedToken[] {
-  const tokens = listTokens(db, now)
+  const tokens = listTokens(db, adminId(db), now)
   const prefixes = idPrefixes(tokens.map((t) => t.id))
   const usage = new TokenUsage({ db, now: () => now }).summaries(
     db,
@@ -184,7 +185,7 @@ function pick(
   print: Print,
   now: number,
 ): TokenView | undefined {
-  const tokens = listTokens(db, now)
+  const tokens = listTokens(db, adminId(db), now)
   const matches = resolve(tokens, ref)
   if (!matches.length) {
     print.err(`no token has the id or label ${JSON.stringify(ref)}`)
@@ -214,7 +215,7 @@ export function tokenRevoke(
 ): number {
   const token = pick(db, ref, print, now)
   if (!token) return 1
-  revokeToken(db, token.id)
+  revokeToken(db, adminId(db), token.id)
   print.err(`revoked ${token.label} (${token.permission})`)
   if (options.json) print.out(JSON.stringify({ revoked: token.label }))
   return 0
@@ -237,6 +238,7 @@ export function tokenExpires(
   try {
     const updated = updateToken(
       db,
+      adminId(db),
       token.id,
       { expiresAt: parseExpiry(when, now) },
       now,

@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { and, desc, eq, isNull, lt, ne } from 'drizzle-orm'
 import { setCookie } from 'hono/cookie'
 import { newId } from '#db/id.ts'
-import { webSessions } from '#db/schema.ts'
+import { users, webSessions, type UserRole } from '#db/schema.ts'
 import type { Database, Executor } from '#db/client.ts'
 import type { Context } from 'hono'
 
@@ -106,6 +106,9 @@ export function startSession(
 export interface CheckedSession {
   /** The session's public id. */
   id: string
+  /** Whose it is, and their role now. */
+  userId: string
+  role: UserRole
   /** This request renewed it: the response carries a fresh cookie. */
   renewed: boolean
 }
@@ -117,6 +120,7 @@ export interface CheckedSession {
  * `SESSION_TTL` by a day or more renews: sessions from before sliding
  * expiry (12 hours) renew on their first request. A renewal that cannot
  * write (the database is busy) is skipped; the next request tries again.
+ * A revoked user's session is none (revoking deletes it too).
  */
 export function checkSession(
   db: Database,
@@ -125,14 +129,22 @@ export function checkSession(
 ): CheckedSession | undefined {
   const digest = digestOf(value)
   const row = db
-    .select({ id: webSessions.id, expiresAt: webSessions.expiresAt })
+    .select({
+      id: webSessions.id,
+      expiresAt: webSessions.expiresAt,
+      userId: webSessions.userId,
+      role: users.role,
+      revokedAt: users.revokedAt,
+    })
     .from(webSessions)
+    .innerJoin(users, eq(users.id, webSessions.userId))
     .where(eq(webSessions.digest, digest))
     .get()
-  if (!row || row.expiresAt.getTime() <= now) return undefined
+  if (!row || row.revokedAt || row.expiresAt.getTime() <= now) return undefined
+  const checked = { id: row.id, userId: row.userId, role: row.role }
   const due =
     row.expiresAt.getTime() - now <= (SESSION_TTL - SESSION_RENEW_AFTER) * 1000
-  if (!due) return { id: row.id, renewed: false }
+  if (!due) return { ...checked, renewed: false }
   try {
     db.update(webSessions)
       .set({
@@ -142,9 +154,9 @@ export function checkSession(
       .where(eq(webSessions.digest, digest))
       .run()
   } catch {
-    return { id: row.id, renewed: false }
+    return { ...checked, renewed: false }
   }
-  return { id: row.id, renewed: true }
+  return { ...checked, renewed: true }
 }
 
 export function deleteSession(db: Executor, value: string): void {
@@ -195,12 +207,14 @@ export function replaceMiniAppSession(
 /** The sessions not expired, this one first, then the most recently used. */
 export function listSessions(
   db: Database,
+  user: string,
   current: string | undefined,
   now = Date.now(),
 ): SessionView[] {
   return db
     .select()
     .from(webSessions)
+    .where(eq(webSessions.userId, user))
     .orderBy(desc(webSessions.lastUsedAt), desc(webSessions.createdAt))
     .all()
     .filter((row) => row.expiresAt.getTime() > now)
@@ -217,23 +231,30 @@ export function listSessions(
     .toSorted((a, b) => Number(b.current) - Number(a.current))
 }
 
-/** Sign one session out; false when there is none by that id. */
-export function revokeSession(db: Database, id: string): boolean {
-  return (
-    Number(db.delete(webSessions).where(eq(webSessions.id, id)).run().changes) >
-    0
-  )
+/** Sign one of `user`'s sessions out; false when they have none by that id. */
+export function revokeSession(db: Database, user: string, id: string): boolean {
+  const deleted = db
+    .delete(webSessions)
+    .where(and(eq(webSessions.id, id), eq(webSessions.userId, user)))
+    .run()
+  return Number(deleted.changes) > 0
 }
 
-/** Sign out everywhere but `keep`; how many sessions ended. */
+/** Sign `user` out everywhere but `keep`; how many sessions ended. */
 export function revokeOtherSessions(
   db: Executor,
+  user: string,
   keep: string | undefined,
 ): number {
   return Number(
     db
       .delete(webSessions)
-      .where(keep ? ne(webSessions.id, keep) : undefined)
+      .where(
+        and(
+          eq(webSessions.userId, user),
+          keep ? ne(webSessions.id, keep) : undefined,
+        ),
+      )
       .run().changes,
   )
 }

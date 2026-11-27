@@ -47,7 +47,7 @@ function setup(overrides: Partial<CliContext> = {}) {
 }
 
 const secrets = (db: Database) =>
-  listTokens(db, NOW).map((t) => ({ label: t.label, id: t.id }))
+  listTokens(db, adminId(db), NOW).map((t) => ({ label: t.label, id: t.id }))
 
 describe('parsing and dispatch', () => {
   test('--help lists every command, each has its own help, --version prints the version', async () => {
@@ -131,7 +131,7 @@ describe('token create', () => {
   test('defaults: label cli, never expires; --rw makes a read-write token', async () => {
     const { db, run } = setup()
     expect(await run('token', 'create', '--rw')).toBe(0)
-    expect(listTokens(db, NOW)).toEqual([
+    expect(listTokens(db, adminId(db), NOW)).toEqual([
       expect.objectContaining({
         label: 'cli',
         permission: 'rw',
@@ -143,13 +143,13 @@ describe('token create', () => {
   test('a label that looks like a number stays text, and a bad expiry fails with 1', async () => {
     const { db, err, run } = setup()
     expect(await run('token', 'create', '--ro', '--label', '12345')).toBe(0)
-    expect(listTokens(db, NOW)[0]!.label).toBe('12345')
+    expect(listTokens(db, adminId(db), NOW)[0]!.label).toBe('12345')
     err.length = 0
     expect(await run('token', 'create', '--ro', '--expires', 'yesterday')).toBe(
       1,
     )
     expect(err[0]).toContain('--expires')
-    expect(listTokens(db, NOW)).toHaveLength(1)
+    expect(listTokens(db, adminId(db), NOW)).toHaveLength(1)
   })
 })
 
@@ -353,15 +353,17 @@ describe('token expires', () => {
       NOW,
     )
     expect(await run('token', 'expires', 'smoke', '7d')).toBe(0)
-    expect(listTokens(db, NOW)[0]!.expires_at).toBe(
+    expect(listTokens(db, adminId(db), NOW)[0]!.expires_at).toBe(
       new Date(NOW + 7 * 24 * HOUR).toISOString(),
     )
     expect(await run('token', 'expires', 'smoke', '2027-01-01T00:00:00Z')).toBe(
       0,
     )
-    expect(listTokens(db, NOW)[0]!.expires_at).toBe('2027-01-01T00:00:00.000Z')
+    expect(listTokens(db, adminId(db), NOW)[0]!.expires_at).toBe(
+      '2027-01-01T00:00:00.000Z',
+    )
     expect(await run('token', 'expires', 'smoke', 'never')).toBe(0)
-    expect(listTokens(db, NOW)[0]!.expires_at).toBeNull()
+    expect(listTokens(db, adminId(db), NOW)[0]!.expires_at).toBeNull()
     expect(err.at(-1)).toBe('smoke: never expires')
   })
 
@@ -395,7 +397,7 @@ describe('token expires', () => {
     expect(await run('token', 'expires', 'old', 'soon')).toBe(1)
     expect(await run('token', 'expires', 'old', '2020-01-01')).toBe(1)
     expect(err.at(-1)).toContain('--expires')
-    expect(listTokens(db, NOW)[0]!.expires_at).toBe(
+    expect(listTokens(db, adminId(db), NOW)[0]!.expires_at).toBe(
       new Date(NOW + 24 * HOUR).toISOString(),
     )
     expect(await run('token', 'expires', 'ghost', '1d')).toBe(1)

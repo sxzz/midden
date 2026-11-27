@@ -2,7 +2,8 @@
 // and viewers, who only read. Sessions, passkeys and API tokens each
 // belong to a user.
 import { eq } from 'drizzle-orm'
-import { users } from '#db/schema.ts'
+import { users, type UserRole } from '#db/schema.ts'
+import { AppError } from '#errors.ts'
 import type { Executor } from '#db/client.ts'
 
 /**
@@ -18,4 +19,22 @@ export function adminId(db: Executor): string {
     .get()
   if (!row) throw new Error('no admin user; the users migration makes one')
   return row.id
+}
+
+/** A user as the app shows them. */
+export interface UserView {
+  id: string
+  name: string
+  role: UserRole
+}
+
+/** The user by id: who a session or token signed in. */
+export function userView(db: Executor, id: string): UserView {
+  const row = db
+    .select({ id: users.id, name: users.name, role: users.role })
+    .from(users)
+    .where(eq(users.id, id))
+    .get()
+  if (!row) throw new AppError('not_found')
+  return row
 }

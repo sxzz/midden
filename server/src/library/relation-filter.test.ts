@@ -10,6 +10,7 @@ import {
   graph,
   libraryContext,
 } from '#testing/library.ts'
+import { SYSTEM } from '#users/principal.ts'
 import { updateAnnotation } from './annotations.ts'
 import { compareRelations } from './compare.ts'
 import { filterCounts } from './counts.ts'
@@ -89,7 +90,8 @@ async function setup() {
           ),
         }
   })
-  const c = made.ctx
+  // Reads see as the admin; captures ignore it.
+  const c = { ...made.ctx, principal: SYSTEM }
   ctx = c
   const ids: Record<string, string> = {}
   for (const handle of [...Object.values(AUTHORS), 'eve'])
@@ -117,14 +119,17 @@ async function setup() {
     items
       .map((item) => Object.entries(ids).find(([, id]) => id === item.id)![0])
       .toSorted()
-  const read: CaptureContext =
+  const read: CaptureContext & { principal: typeof SYSTEM } =
     view === 'read thread'
-      ? threadContext(
-          c,
-          c.platforms.countPointers(),
-          c.logger,
-          c.platforms.types(),
-        )
+      ? {
+          ...threadContext(
+            c,
+            c.platforms.countPointers(),
+            c.logger,
+            c.platforms.types(),
+          ),
+          principal: SYSTEM,
+        }
       : c
   const list = (filter: CollectionFilter) =>
     named(listCollections(read, filter).items)

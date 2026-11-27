@@ -23,7 +23,13 @@ if (parentPort) {
   port.on('message', (request: PoolRequest) => {
     let response: PoolResponse
     try {
-      const input = request.input as { ms?: number }
+      // Named reads say whom they are for, as the real thread's do.
+      const named = request.input as { input?: unknown } | null
+      const input = (
+        typeof named === 'object' && named && 'principal' in named
+          ? named.input
+          : request.input
+      ) as { ms?: number }
       if (request.op === 'slow')
         response = {
           id: request.id,

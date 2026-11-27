@@ -4,7 +4,7 @@ import { getCookie } from 'hono/cookie'
 import { HTTPException } from 'hono/http-exception'
 import * as v from 'valibot'
 import { adminId } from '#users/users.ts'
-import { ownerOnly } from './auth.ts'
+import { sessionOnly, viewers } from './auth.ts'
 import {
   deletePasskey,
   listPasskeys,
@@ -72,7 +72,7 @@ const passkeySession = (c: Context, origin: string): SessionStart => ({
 
 /**
  * The signed-in caller: its session cookie, or on a development server the
- * read and write token standing in for the session (`ownerOnly`).
+ * admin's read and write token standing in for their session.
  */
 const callerOf = (c: Context) =>
   createHash('sha256')
@@ -145,17 +145,20 @@ export function passkeyAuthRoutes(o: PasskeyOptions) {
 }
 
 /**
- * The owner's passkeys, signed in: list, add on this domain, rename, delete.
- * Only the web session, never an API token: a passkey signs in, so a token
- * that could add one could make itself a session (`ownerOnly`).
+ * A user's own passkeys, signed in, viewers' too: list, add on this domain,
+ * rename, delete. Only a web session, never an API token: a passkey signs
+ * in, so a token that could add one could make itself a session
+ * (`sessionOnly`).
  */
 export function passkeyRoutes(o: PasskeyOptions) {
   const { ctx, store } = o
   return (
     new Hono<Env>()
-      .use(ownerOnly)
-      .get('/', (c) => c.json(listPasskeys(ctx.db)))
-      .post('/options', async (c) =>
+      .use(sessionOnly)
+      .get('/', viewers, (c) =>
+        c.json(listPasskeys(ctx.db, c.get('principal').userId)),
+      )
+      .post('/options', viewers, async (c) =>
         c.json(
           await registrationOptions(
             store,
@@ -167,25 +170,30 @@ export function passkeyRoutes(o: PasskeyOptions) {
       )
       .post(
         '/',
+        viewers,
         json(v.strictObject({ name: NAME, response: Registration })),
         async (c) => {
+          const principal = c.get('principal')
           const passkey = await register(
             store,
             originOf(c, o.origins()),
             {
               ...c.req.valid('json'),
               caller: callerOf(c),
-              user: adminId(ctx.db),
+              user: principal.userId,
             },
             o.now(),
           )
-          o.notify?.(`已添加通行密钥：${describe(passkey)}`)
+          // The bot tells the admin of their own passkeys only.
+          if (principal.role === 'admin')
+            o.notify?.(`已添加通行密钥：${describe(passkey)}`)
           return c.json(passkey)
         },
       )
-      .patch('/:id', json(v.strictObject({ name: NAME })), (c) => {
+      .patch('/:id', viewers, json(v.strictObject({ name: NAME })), (c) => {
         const passkey = renamePasskey(
           ctx.db,
+          c.get('principal').userId,
           c.req.param('id'),
           c.req.valid('json').name,
         )
@@ -195,16 +203,24 @@ export function passkeyRoutes(o: PasskeyOptions) {
       // `sign_out_others`: and end every other session, as the sheet offers.
       .delete(
         '/:id',
+        viewers,
         query(v.object({ sign_out_others: v.optional(v.literal('true')) })),
         (c) => {
           const others = !!c.req.valid('query').sign_out_others
+          const principal = c.get('principal')
           const passkey = ctx.db.transaction((tx) => {
-            const deleted = deletePasskey(tx, c.req.param('id'))
-            if (deleted && others) revokeOtherSessions(tx, c.get('sessionId'))
+            const deleted = deletePasskey(
+              tx,
+              principal.userId,
+              c.req.param('id'),
+            )
+            if (deleted && others)
+              revokeOtherSessions(tx, principal.userId, c.get('sessionId'))
             return deleted
           })
           if (!passkey) return c.json({ error: '通行密钥不存在' }, 404)
-          o.notify?.(`已删除通行密钥：${describe(passkey)}`)
+          if (principal.role === 'admin')
+            o.notify?.(`已删除通行密钥：${describe(passkey)}`)
           return c.body(null, 204)
         },
       )

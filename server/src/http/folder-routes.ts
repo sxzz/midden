@@ -8,7 +8,8 @@ import {
   listFolders,
   updateFolder,
 } from '#library/folders.ts'
-import { ownerOnly } from './auth.ts'
+import { SYSTEM } from '#users/principal.ts'
+import { adminSession } from './auth.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { NamedRead } from './offload.ts'
@@ -36,7 +37,8 @@ export function folderRoutes(ctx: AccountsContext, read: NamedRead) {
     await countWrittenFolder(
       ctx.db,
       id,
-      (folderId) => read('folderCounts', { id: folderId }),
+      // Stored for everyone, as the worker counts it.
+      (folderId) => read(SYSTEM, 'folderCounts', { id: folderId }),
       ctx.logger,
       types(),
     )
@@ -73,7 +75,7 @@ export function folderRoutes(ctx: AccountsContext, read: NamedRead) {
       },
     )
 
-    .delete('/folders/:id', ownerOnly, (c) => {
+    .delete('/folders/:id', adminSession, (c) => {
       deleteFolder(ctx.db, c.req.param('id'))
       return c.body(null, 204)
     })

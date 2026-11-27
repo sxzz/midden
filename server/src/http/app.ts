@@ -6,9 +6,16 @@ import { typeCatalog } from '#agent/runner.ts'
 import { HEARTBEAT_TIMEOUT, setHeartbeatTimeoutMinutes } from '#settings.ts'
 import { authenticate, bearer } from '#tokens/tokens.ts'
 import { TokenUsage } from '#tokens/usage.ts'
-import { adminId } from '#users/users.ts'
+import { abilities } from '#users/principal.ts'
+import { adminId, userView } from '#users/users.ts'
 import { accountRoutes } from './account-routes.ts'
-import { endpointOf, initDataUser } from './auth.ts'
+import {
+  endpointOf,
+  initDataUser,
+  NOT_FOR_VIEWERS,
+  openToViewers,
+  viewers,
+} from './auth.ts'
 import { captureRoutes } from './capture-routes.ts'
 import { Challenges } from './challenges.ts'
 import { errorResponse } from './errors.ts'
@@ -92,14 +99,16 @@ export interface HttpOptions {
 
 /** What a read thread's API finds in each request's env. */
 export interface ForwardedEnv {
-  forwarded: Pick<ForwardedRequest, 'session' | 'token'>
+  forwarded: Pick<ForwardedRequest, 'principal' | 'token'>
 }
 
 /**
- * The `/v1` API: passkey or Mini App login for the owner, then everything
- * else behind a token or the owner's session. Its type is the web app's API
- * client. `GET` requests run on the read threads (`offload.ts`) unless their
- * route says `inline`, and so do dry runs whose route says `readOnly`.
+ * The `/v1` API: passkey or Mini App login, then everything else behind a
+ * token or a user's web session. Its type is the web app's API client.
+ * `GET` requests run on the read threads (`offload.ts`) unless their route
+ * says `inline`, and so do dry runs whose route says `readOnly`. Viewers
+ * reach only the routes that say `viewers`, and only with their session:
+ * their tokens are for the agent API.
  */
 export function createApi(options: HttpOptions) {
   const { ctx } = options
@@ -186,13 +195,15 @@ export function createApi(options: HttpOptions) {
       // Public links need no login; they read only what was shared.
       .use('/public/*', toThreads)
       .route('/public', publicRoutes(ctx))
-      // Everything below needs a token or the owner's session.
+      // Everything below needs a token or a user's session.
       .use(async (c, next) => {
         if (options.trusted) {
           const { forwarded } = (c.env ?? {}) as Partial<ForwardedEnv>
           if (!forwarded) return c.json({ error: '需要登录' }, 401)
-          c.set('session', forwarded.session)
+          c.set('principal', forwarded.principal)
           if (forwarded.token) c.set('token', forwarded.token)
+          // Checked again here: the same app, so nothing to keep in step.
+          if (!openToViewers(c)) return c.json({ error: NOT_FOR_VIEWERS }, 403)
           return next()
         }
         const header = c.req.header('Authorization')
@@ -209,17 +220,29 @@ export function createApi(options: HttpOptions) {
               401,
             )
           const { token } = auth
+          // A viewer's tokens are for the agent API alone: /v1 is the web
+          // app's own API, and only the agent API is filtered for scripts.
+          if (token.role !== 'admin') {
+            usage.record(token.id, endpointOf(c))
+            return c.json({ error: '这个令牌只能用于 Agent API' }, 403)
+          }
           if (token.permission === 'ro' && !onlyReads(c)) {
             usage.record(token.id, endpointOf(c))
             return c.json({ error: '只读令牌不能修改内容' }, 403)
           }
-          // A token is never the owner's session, so it cannot delete, nor
-          // make or change a token, session, passkey or domain (`ownerOnly`):
-          // it can never become a session. The one exception is a development server, whose
-          // local proxy signs the web app in with a token: there a read and
-          // write token stands in for the session. Production
+          // A token is never a session, so it cannot delete, nor make or
+          // change a token, session, passkey or domain (`adminSession`,
+          // `sessionOnly`): it can never become a session. The one
+          // exception is a development server, whose local proxy signs the
+          // web app in with the admin's token: there their read and write
+          // token stands in for their session. Production
           // (NODE_ENV=production) never does this.
-          c.set('session', !!options.dev && token.permission === 'rw')
+          c.set('principal', {
+            userId: token.userId,
+            role: token.role,
+            via: options.dev && token.permission === 'rw' ? 'session' : 'token',
+            permission: token.permission,
+          })
           c.set('token', token)
           try {
             await next()
@@ -234,8 +257,14 @@ export function createApi(options: HttpOptions) {
         if (!session) return c.json({ error: '登录已失效或令牌无效' }, 401)
         if (!READS.has(c.req.method) && !fromWeb(c.req.header('Origin')))
           return c.json({ error: '请求来源无效' }, 403)
-        c.set('session', true)
+        c.set('principal', {
+          userId: session.userId,
+          role: session.role,
+          via: 'session',
+        })
         c.set('sessionId', session.id)
+        // Before the read threads: a refused request takes none.
+        if (!openToViewers(c)) return c.json({ error: NOT_FOR_VIEWERS }, 403)
         await next()
         // Renewed: the browser keeps the cookie as long as the server. Set
         // on the response made (which may come from a read thread), unless
@@ -246,9 +275,16 @@ export function createApi(options: HttpOptions) {
         if (session.renewed && !ended) setSessionCookie(c, cookie)
       })
       .use(toThreads)
-      // Answers only whether the request is signed in.
-      .get('/session', inline, (c) => c.body(null, 204))
-      .delete('/session', (c) => {
+      // Who is signed in, and what the web app offers them (`can`); the
+      // server still decides each request.
+      .get('/session', inline, viewers, (c) => {
+        const principal = c.get('principal')
+        return c.json({
+          user: userView(ctx.db, principal.userId),
+          can: abilities(principal),
+        })
+      })
+      .delete('/session', viewers, (c) => {
         const cookie = getCookie(c, SESSION_COOKIE)
         if (cookie) deleteSession(ctx.db, cookie)
         deleteCookie(c, SESSION_COOKIE, { path: '/', secure: true })

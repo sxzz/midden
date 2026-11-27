@@ -20,6 +20,7 @@ import {
 } from '#testing/agent.ts'
 import { capture } from '#testing/library.ts'
 import { revokeToken, rollToken } from '#tokens/tokens.ts'
+import { adminId } from '#users/users.ts'
 
 let fixture: AgentFixture | undefined
 afterEach(async () => {
@@ -64,12 +65,12 @@ describe('tokens', () => {
     const f = await setup()
     const token = f.token('ro')
     const { id } = f.ctx.db.select().from(apiTokens).all().at(-1)!
-    const rolled = rollToken(f.ctx.db, id).secret
+    const rolled = rollToken(f.ctx.db, adminId(f.ctx.db), id).secret
     expect((await f.call('/whoami', { token })).json.error).toBe(
       'token_invalid',
     )
     expect((await f.call('/whoami', { token: rolled })).status).toBe(200)
-    revokeToken(f.ctx.db, id)
+    revokeToken(f.ctx.db, adminId(f.ctx.db), id)
     expect((await f.call('/whoami', { token: rolled })).status).toBe(401)
   })
 

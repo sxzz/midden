@@ -15,6 +15,7 @@ import {
   listPublicHistory,
   listPublicProfileChanges,
 } from '#library/public.ts'
+import { SYSTEM } from '#users/principal.ts'
 import {
   ChangesQuery,
   CountsQuery,
@@ -23,6 +24,7 @@ import {
 } from './library-routes.ts'
 import { Cursor, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
+import type { ReadContext } from '#library/views.ts'
 
 const text = v.optional(v.string())
 
@@ -76,7 +78,10 @@ const AuthorQuery = v.strictObject({
  * one checks the share's scope (`library/public.ts`); search engines are
  * asked to stay out.
  */
-export function publicRoutes(ctx: AccountsContext) {
+export function publicRoutes(context: AccountsContext) {
+  // A share is the admin's: what it holds is read as they see it, then
+  // stripped on the way out (`library/public.ts`). Visitors are nobody.
+  const ctx: ReadContext = { ...context, principal: SYSTEM }
   return (
     new Hono<Env>()
       .use(async (c, next) => {

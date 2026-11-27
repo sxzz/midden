@@ -42,20 +42,28 @@ function setup({ dev = false } = {}) {
 }
 
 /**
- * Every route that deletes, and every one that makes or changes a way in
- * (tokens, sessions, passkeys, domains): the session's alone.
+ * Every route that deletes, and adding or removing a domain: the admin's
+ * session alone (`adminSession`). A domain is where cookie sessions write
+ * from and passkeys are made.
  */
-const OWNER_ONLY: [string, string, unknown?][] = [
+const ADMIN_SESSION: [string, string, unknown?][] = [
   ['DELETE', `/collections/${ID}`],
   ['POST', '/collections/delete', { ids: [ID] }],
   ['POST', '/media-removals', { ids: [ID] }],
   ['POST', `/collections/${ID}/video-removal`],
   ['DELETE', `/tags/${ID}`],
   ['DELETE', `/folders/${ID}`],
-  ['DELETE', `/passkeys/${ID}`],
   ['DELETE', `/origins/${ID}`],
   ['DELETE', `/watches/${ID}`],
   ['POST', '/library/delete-all', { confirm: 'delete all' }],
+  ['POST', '/origins', { origin: 'https://new.test' }],
+]
+
+/**
+ * Every route that makes or changes a way in (tokens, sessions, passkeys):
+ * a session alone, each user's for their own (`sessionOnly`).
+ */
+const SESSION_ONLY: [string, string, unknown?][] = [
   ['GET', '/tokens'],
   ['POST', '/tokens', { label: 'x', permission: 'ro', expires_at: null }],
   ['PATCH', `/tokens/${ID}`, { label: 'x' }],
@@ -71,13 +79,15 @@ const OWNER_ONLY: [string, string, unknown?][] = [
   ['POST', '/passkeys/options'],
   ['POST', '/passkeys', { name: 'x', response: { id: 'x', response: {} } }],
   ['PATCH', `/passkeys/${ID}`, { name: 'x' }],
-  // A domain is where cookie sessions write from and passkeys are made.
-  ['POST', '/origins', { origin: 'https://new.test' }],
+  ['DELETE', `/passkeys/${ID}`],
 ]
 
+/** No token gets past either. */
+const SESSION_ALONE = [...ADMIN_SESSION, ...SESSION_ONLY]
+
 /**
- * Where tokens, sessions, passkeys and domains (and, later, users and
- * invites) are managed. A new route here must join `OWNER_ONLY`.
+ * Where tokens, sessions, passkeys, domains, users and invites are
+ * managed. A new route here must join `ADMIN_SESSION` or `SESSION_ONLY`.
  */
 const CREDENTIALS =
   /^\/(?:tokens|sessions|passkeys|origins|users|invites)(?:\/|$)/
@@ -109,7 +119,7 @@ describe('API tokens on /v1', () => {
     const { request } = setup()
     const rw = tokenSecret(ctx!.db, 'rw')
     const ro = tokenSecret(ctx!.db, 'ro')
-    for (const [method, path, body] of OWNER_ONLY) {
+    for (const [method, path, body] of SESSION_ALONE) {
       for (const token of [rw, ro]) {
         const response = await request(path, { token }, { method, body })
         expect({ method, path, status: response.status }).toEqual({
@@ -131,7 +141,7 @@ describe('API tokens on /v1', () => {
   test('every route that manages tokens, sessions, passkeys or domains is for the session alone', async () => {
     const { app, request } = setup()
     const listed = new Set(
-      OWNER_ONLY.map(
+      SESSION_ALONE.map(
         ([method, path]) => `${method} ${path.replaceAll(ID, ':id')}`,
       ),
     )

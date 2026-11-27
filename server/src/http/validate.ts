@@ -1,17 +1,18 @@
 import { sValidator } from '@hono/standard-validator'
 import * as v from 'valibot'
 import type { TokenInfo } from '#tokens/tokens.ts'
+import type { Principal } from '#users/principal.ts'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 /**
- * `session`: the owner's web session, which alone may delete and manage
- * tokens, sessions, passkeys and domains (`ownerOnly`);
- * `sessionId`: that session's public id, when a cookie signed the request
+ * `principal`: who the request is, once the login is checked (not on the
+ * routes before it: signing in and the public pages);
+ * `sessionId`: the session's public id, when a cookie signed the request
  * in (not on a read thread, nor a development token standing in for it);
  * `token`: the API token the request came with, if any.
  */
 export type Env = {
-  Variables: { session: boolean; sessionId?: string; token?: TokenInfo }
+  Variables: { principal: Principal; sessionId?: string; token?: TokenInfo }
 }
 
 const invalid = (

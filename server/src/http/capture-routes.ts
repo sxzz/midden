@@ -41,11 +41,12 @@ import {
 import { captures, collections, library, submissions } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { deleteAll } from '#library/delete.ts'
-import { ownerOnly } from './auth.ts'
+import { adminSession } from './auth.ts'
 import { inline, readOnly, type NamedRead } from './offload.ts'
 import { Cursor, json, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { Job } from '#capture/submit.ts'
+import type { Principal } from '#users/principal.ts'
 
 /** What an update (更新) covers: a collection, a folder or a selection. */
 const UpdateTargetBody = v.union([
@@ -287,10 +288,12 @@ export function captureRoutes(
   read: NamedRead,
   { dev = false }: { dev?: boolean } = {},
 ) {
-  // An update's record as a read thread counts it, once written.
-  const recordOf = async (id: string) =>
-    recordJson(await read('updateRecord', { id }))
-  const plan = (input: UpdateTargetInput) => read('updatePlan', input)
+  // An update's record as a read thread counts it, once written. Only
+  // the admin writes these, and the reads are theirs.
+  const recordOf = async (principal: Principal, id: string) =>
+    recordJson(await read(principal, 'updateRecord', { id }))
+  const plan = (principal: Principal) => (input: UpdateTargetInput) =>
+    read(principal, 'updatePlan', input)
   return (
     new Hono<Env>()
       .post(
@@ -374,7 +377,12 @@ export function captureRoutes(
           })
         const { input, options } = repeatOf(ctx.db, id)
         return c.json({
-          record_id: await startPlannedUpdate(ctx, input, options, plan),
+          record_id: await startPlannedUpdate(
+            ctx,
+            input,
+            options,
+            plan(c.get('principal')),
+          ),
         })
       })
 
@@ -387,7 +395,7 @@ export function captureRoutes(
         async (c) => {
           const id = c.req.param('id')
           const target = c.req.valid('json').id
-          const plan = await read('retryPlan', {
+          const plan = await read(c.get('principal'), 'retryPlan', {
             id,
             ...(target === undefined ? {} : { target }),
           })
@@ -415,7 +423,7 @@ export function captureRoutes(
         const id = c.req.param('id')
         if (isUpdate(ctx.db, id)) {
           haltUpdate(ctx, id)
-          stopParts(ctx, await read('stopPlan', { id }))
+          stopParts(ctx, await read(c.get('principal'), 'stopPlan', { id }))
         } else {
           stopCollection(ctx, id)
         }
@@ -426,12 +434,13 @@ export function captureRoutes(
       // Whether it is done, and its record, are counted on a read thread.
       .post('/updates/:id/pause', async (c) => {
         const id = c.req.param('id')
-        pauseUpdate(ctx, id, await read('updateRecord', { id }))
-        return c.json(await recordOf(id))
+        const principal = c.get('principal')
+        pauseUpdate(ctx, id, await read(principal, 'updateRecord', { id }))
+        return c.json(await recordOf(principal, id))
       })
       .post('/updates/:id/resume', async (c) => {
         resumeUpdate(ctx, c.req.param('id'))
-        return c.json(await recordOf(c.req.param('id')))
+        return c.json(await recordOf(c.get('principal'), c.req.param('id')))
       })
 
       .get('/jobs/:id', (c) => c.json(jobJson(ctx, { id: c.req.param('id') })))
@@ -458,9 +467,9 @@ export function captureRoutes(
               older: input.older,
               key: idempotencyKey(c),
             },
-            plan,
+            plan(c.get('principal')),
           )
-          return c.json(await recordOf(id))
+          return c.json(await recordOf(c.get('principal'), id))
         },
       )
 
@@ -472,7 +481,10 @@ export function captureRoutes(
         async (c) => {
           const id = c.req.param('id')
           const collection = c.req.valid('json').collection_id
-          const plan = await read('continuePlan', { id, collection })
+          const plan = await read(c.get('principal'), 'continuePlan', {
+            id,
+            collection,
+          })
           continueTimeline(ctx, id, collection, plan)
           return c.body(null, 204)
         },
@@ -530,7 +542,7 @@ export function captureRoutes(
 
       .post(
         '/library/delete-all',
-        ownerOnly,
+        adminSession,
         json(v.strictObject({ confirm: v.literal('delete all') })),
         (c) => {
           c.req.valid('json')

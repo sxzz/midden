@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import * as v from 'valibot'
-import { ownerOnly } from './auth.ts'
+import { adminSession } from './auth.ts'
 import { addOrigin, listOrigins, removeOrigin } from './origins.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -9,7 +9,7 @@ const hostOf = (origin: string) => new URL(origin).host
 
 /**
  * The web app's domains, signed in: list, add, remove. Adding and removing
- * are the web session's alone (`ownerOnly`): a domain is where cookie
+ * are the admin's web session's alone (`adminSession`): a domain is where cookie
  * sessions write from (SameSite=None, so the Origin check is what stops
  * another site) and where passkeys are made and /passkey links point.
  */
@@ -24,7 +24,7 @@ export function originRoutes(o: {
     .get('/', (c) => c.json(listOrigins(db, o.webAppUrl)))
     .post(
       '/',
-      ownerOnly,
+      adminSession,
       json(v.strictObject({ origin: v.pipe(v.string(), v.maxLength(2048)) })),
       (c) => {
         const added = addOrigin(
@@ -37,7 +37,7 @@ export function originRoutes(o: {
         return c.json(added)
       },
     )
-    .delete('/:id', ownerOnly, (c) => {
+    .delete('/:id', adminSession, (c) => {
       const removed = removeOrigin(db, o.webAppUrl, c.req.param('id'))
       if (!removed) return c.json({ error: '域名不存在' }, 404)
       o.notify?.(

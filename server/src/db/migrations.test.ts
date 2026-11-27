@@ -358,7 +358,7 @@ describe('web_session_devices', () => {
     const response = await createApi({ ctx }).request('/session', {
       headers: { Cookie: `${SESSION_COOKIE}=a` },
     })
-    expect(response.status).toBe(204)
+    expect(response.status).toBe(200)
     expect(response.headers.get('set-cookie')).toContain(
       `Max-Age=${SESSION_TTL}`,
     )
@@ -751,7 +751,7 @@ describe('users', () => {
           headers: { Cookie: `${SESSION_COOKIE}=cookie` },
         })
       ).status,
-    ).toBe(204)
+    ).toBe(200)
     expect(
       (
         await app.request('/tags', {

@@ -54,6 +54,8 @@ describe('tokens', () => {
       ok: true,
       token: {
         id: ro.token.id,
+        userId: adminId(db),
+        role: 'admin',
         label: 'reader',
         permission: 'ro',
         createdAt: new Date(NOW),
@@ -103,12 +105,23 @@ describe('tokens', () => {
     // Extended, it works again with the same secret.
     const later = NOW + 2 * HOUR
     expect(
-      updateToken(db, token.id, { expiresAt: new Date(later + HOUR) }, later)
-        .expired,
+      updateToken(
+        db,
+        adminId(db),
+        token.id,
+        { expiresAt: new Date(later + HOUR) },
+        later,
+      ).expired,
     ).toBe(false)
     expect(authenticate(db, secret, later).ok).toBe(true)
     expect(
-      updateToken(db, token.id, { expiresAt: null, label: 'kept' }, later),
+      updateToken(
+        db,
+        adminId(db),
+        token.id,
+        { expiresAt: null, label: 'kept' },
+        later,
+      ),
     ).toEqual(
       expect.objectContaining({
         label: 'kept',
@@ -117,7 +130,13 @@ describe('tokens', () => {
       }),
     )
     expect(() =>
-      updateToken(db, token.id, { expiresAt: new Date(later - 1) }, later),
+      updateToken(
+        db,
+        adminId(db),
+        token.id,
+        { expiresAt: new Date(later - 1) },
+        later,
+      ),
     ).toThrow('过期时间必须晚于现在')
   })
 
@@ -133,17 +152,17 @@ describe('tokens', () => {
       },
       NOW,
     )
-    const rolled = rollToken(db, made.token.id, NOW)
+    const rolled = rollToken(db, adminId(db), made.token.id, NOW)
     expect(rolled.secret).toMatch(/^mdn_ro_/)
     expect(rolled.secret).not.toBe(made.secret)
     expect(rolled.token).toEqual(made.token)
     expect(authenticate(db, made.secret, NOW).ok).toBe(false)
     expect(authenticate(db, rolled.secret, NOW).ok).toBe(true)
-    revokeToken(db, made.token.id)
+    revokeToken(db, adminId(db), made.token.id)
     expect(authenticate(db, rolled.secret, NOW).ok).toBe(false)
-    expect(listTokens(db, NOW)).toEqual([])
-    expect(() => rollToken(db, made.token.id, NOW)).toThrow()
-    expect(() => revokeToken(db, made.token.id)).toThrow()
+    expect(listTokens(db, adminId(db), NOW)).toEqual([])
+    expect(() => rollToken(db, adminId(db), made.token.id, NOW)).toThrow()
+    expect(() => revokeToken(db, adminId(db), made.token.id)).toThrow()
   })
 
   test('the CLI’s expiry', () => {
@@ -200,9 +219,9 @@ describe('usage', () => {
         count: 1,
       },
     ])
-    expect(listTokens(db).find((t) => t.id === a.id)!.last_used_at).toBe(
-      new Date(NOW).toISOString(),
-    )
+    expect(
+      listTokens(db, adminId(db)).find((t) => t.id === a.id)!.last_used_at,
+    ).toBe(new Date(NOW).toISOString())
     // The next day, and a flush that adds to the row already there.
     usage.record(a.id, 'GET /agent/v1/posts')
     usage.flush()
@@ -221,7 +240,7 @@ describe('usage', () => {
       { endpoint: 'GET /agent/v1/posts', count: 4 },
     ])
     // A token revoked before its counts are written takes them along.
-    revokeToken(db, b.id)
+    revokeToken(db, adminId(db), b.id)
     usage.record(b.id, 'GET /agent/v1/tags')
     usage.flush()
     expect(

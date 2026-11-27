@@ -11,7 +11,7 @@ import {
   previewVideoRemoval,
   startVideoRemoval,
 } from '#library/video-removal.ts'
-import { ownerOnly } from './auth.ts'
+import { adminSession } from './auth.ts'
 import { readOnly, type NamedRead } from './offload.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -35,9 +35,9 @@ export function mediaRoutes(ctx: AccountsContext, read: NamedRead) {
         c.json(previewRemoval(ctx, c.req.valid('json'))),
       )
       // Planned on a read thread, then written a batch at a time.
-      .post('/media-removals', ownerOnly, json(Target), async (c) => {
+      .post('/media-removals', adminSession, json(Target), async (c) => {
         const target = c.req.valid('json')
-        const plan = await read('removalPlan', target)
+        const plan = await read(c.get('principal'), 'removalPlan', target)
         return c.json(await removeMedia(ctx, target, { plan }))
       })
       // Linked back at once, or the download job that brings it back.
@@ -50,7 +50,7 @@ export function mediaRoutes(ctx: AccountsContext, read: NamedRead) {
       .post('/collections/:id/video-removal/preview', readOnly, (c) =>
         c.json(previewVideoRemoval(ctx, c.req.param('id'))),
       )
-      .post('/collections/:id/video-removal', ownerOnly, (c) =>
+      .post('/collections/:id/video-removal', adminSession, (c) =>
         c.json(startVideoRemoval(ctx, c.req.param('id')), 202),
       )
       .get('/collections/:id/video-removal', (c) => {

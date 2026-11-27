@@ -11,7 +11,7 @@ import {
 import { and, asc, eq, lt } from 'drizzle-orm'
 import { HTTPException } from 'hono/http-exception'
 import { newId } from '#db/id.ts'
-import { passkeys, passkeyTokens } from '#db/schema.ts'
+import { passkeys, passkeyTokens, users } from '#db/schema.ts'
 import { adminId } from '#users/users.ts'
 import type { Database, Executor } from '#db/client.ts'
 import type { Challenges } from './challenges.ts'
@@ -265,12 +265,16 @@ export async function login(
   now = Date.now(),
 ): Promise<string> {
   const rpID = rpIdOf(origin)
-  const row = db
-    .select()
+  const found = db
+    .select({ row: passkeys, revokedAt: users.revokedAt })
     .from(passkeys)
+    .innerJoin(users, eq(users.id, passkeys.userId))
     .where(and(eq(passkeys.credentialId, response.id), eq(passkeys.rpId, rpID)))
     .get()
-  if (!row) throw fail(400, '找不到这个通行密钥')
+  // A revoked user's passkeys are deleted with the revocation; this is a
+  // second guard.
+  if (!found || found.revokedAt) throw fail(400, '找不到这个通行密钥')
+  const { row } = found
   let taken = false
   let info
   try {
@@ -302,10 +306,15 @@ export async function login(
 
 // --- Management ----------------------------------------------------------------
 
-export function listPasskeys(db: Database): PasskeyView[] {
+// Each user sees and changes their own; another's id is as good as none.
+const own = (user: string, id: string) =>
+  and(eq(passkeys.id, id), eq(passkeys.userId, user))
+
+export function listPasskeys(db: Database, user: string): PasskeyView[] {
   return db
     .select()
     .from(passkeys)
+    .where(eq(passkeys.userId, user))
     .orderBy(asc(passkeys.createdAt), asc(passkeys.id))
     .all()
     .map(view)
@@ -313,13 +322,14 @@ export function listPasskeys(db: Database): PasskeyView[] {
 
 export function renamePasskey(
   db: Database,
+  user: string,
   id: string,
   name: string,
 ): PasskeyView | undefined {
   const row = db
     .update(passkeys)
     .set({ name })
-    .where(eq(passkeys.id, id))
+    .where(own(user, id))
     .returning()
     .get()
   return row && view(row)
@@ -327,9 +337,10 @@ export function renamePasskey(
 
 export function deletePasskey(
   db: Executor,
+  user: string,
   id: string,
 ): PasskeyView | undefined {
-  const row = db.delete(passkeys).where(eq(passkeys.id, id)).returning().get()
+  const row = db.delete(passkeys).where(own(user, id)).returning().get()
   return row && view(row)
 }
 

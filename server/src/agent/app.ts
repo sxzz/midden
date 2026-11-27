@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import * as v from 'valibot'
-import { endpointOf } from '#http/auth.ts'
+import { endpointOf, openToViewers, viewers } from '#http/auth.ts'
 import { LANES } from '#reads/pool.ts'
 import { authenticate, bearer } from '#tokens/tokens.ts'
 import { AgentError, errorBody, invalid, notFound } from './errors.ts'
@@ -12,7 +12,7 @@ import {
   queries,
   type AgentEnv,
 } from './http.ts'
-import { MAX_PAGE_SIZE, type AgentReader } from './query.ts'
+import { MAX_PAGE_SIZE, type ReadBase } from './query.ts'
 import { BATCH_MAX } from './reads.ts'
 import { VIEWS, type View } from './shape.ts'
 import { writeRoutes } from './writes.ts'
@@ -25,7 +25,7 @@ export interface AgentOptions {
   /** Where reads run: a pool of read threads, or in place in tests. */
   reads: Reads
   /** Reads on this thread, for what writes look up and answer. */
-  reader: AgentReader
+  reader: ReadBase
   usage: TokenUsage
   gate?: Gate
   now?: () => number
@@ -52,8 +52,9 @@ function viewParam(c: Context, fallback: View): View {
  * The agent API, `/agent/v1`: JSON for AI agents and scripts, with an API
  * token only. Reads run on the read threads the web app shares (in their
  * `agent` lane), so a slow query never holds up the web app; at most
- * `IN_FLIGHT` requests run at once across every token.
- * Nothing here deletes: what deletes is on `/v1`, for the owner's session.
+ * `IN_FLIGHT` requests run at once across every token. A viewer's token
+ * reaches only the routes that say `viewers`, and only reads.
+ * Nothing here deletes: what deletes is on `/v1`, for the admin's session.
  */
 export function createAgentApi(o: AgentOptions) {
   const { ctx, reads, usage } = o
@@ -81,8 +82,21 @@ export function createAgentApi(o: AgentOptions) {
           ? 'This token has expired. Stop and ask the owner for a new one.'
           : 'This token is not valid (revoked, rolled or mistyped). Stop and ask the owner for a new one.',
       )
-    c.set('token', auth.token)
+    const { token } = auth
+    c.set('token', token)
+    c.set('principal', {
+      userId: token.userId,
+      role: token.role,
+      via: 'token',
+      permission: token.permission,
+    })
     try {
+      // Before the gate: a refused request waits for nothing.
+      if (!openToViewers(c))
+        throw new AgentError(
+          'forbidden',
+          'This endpoint is for the admin only. See /agent.md.',
+        )
       const leave = await gate.enter()
       try {
         await next()
@@ -95,7 +109,7 @@ export function createAgentApi(o: AgentOptions) {
     }
   })
 
-  app.get('/whoami', (c) => {
+  app.get('/whoami', viewers, (c) => {
     const token = c.get('token')
     return c.json({
       token: {
@@ -119,7 +133,7 @@ export function createAgentApi(o: AgentOptions) {
   for (const kind of ['posts', 'accounts'] as const) {
     app.get(`/${kind}`, async (c) =>
       c.json(
-        await reads.run('search', {
+        await reads.run(c.get('principal'), 'search', {
           kind,
           params: queries(c),
           origin: originOf(c),
@@ -129,7 +143,7 @@ export function createAgentApi(o: AgentOptions) {
     app.post(`/${kind}/batch`, async (c) => {
       const input = await body(c, Batch)
       return c.json(
-        await reads.run('get', {
+        await reads.run(c.get('principal'), 'get', {
           kind,
           refs: input.ids,
           view: input.view ?? 'full',
@@ -140,7 +154,7 @@ export function createAgentApi(o: AgentOptions) {
     })
     app.get(`/${kind}/:id/metrics`, async (c) =>
       c.json(
-        await reads.run('metrics', {
+        await reads.run(c.get('principal'), 'metrics', {
           kind,
           ref: c.req.param('id'),
           params: queries(c),
@@ -149,7 +163,7 @@ export function createAgentApi(o: AgentOptions) {
     )
     app.get(`/${kind}/:id`, async (c) => {
       const ref = c.req.param('id')
-      const { items } = await reads.run('get', {
+      const { items } = await reads.run(c.get('principal'), 'get', {
         kind,
         refs: [ref],
         view: viewParam(c, 'full'),
@@ -163,11 +177,15 @@ export function createAgentApi(o: AgentOptions) {
     })
   }
   app.get('/aggregate', async (c) =>
-    c.json(await reads.run('aggregate', { params: queries(c) })),
+    c.json(
+      await reads.run(c.get('principal'), 'aggregate', {
+        params: queries(c),
+      }),
+    ),
   )
   app.get('/posts/:id/context', async (c) =>
     c.json(
-      await reads.run('context', {
+      await reads.run(c.get('principal'), 'context', {
         id: c.req.param('id'),
         origin: originOf(c),
       }),
@@ -176,7 +194,7 @@ export function createAgentApi(o: AgentOptions) {
   const accountRead =
     (name: 'history' | 'relations' | 'relationChanges') => async (c: Context) =>
       c.json(
-        await reads.run(name, {
+        await reads.run(c.get('principal'), name, {
           ref: c.req.param('id')!,
           params: queries(c),
           origin: originOf(c),
@@ -188,25 +206,33 @@ export function createAgentApi(o: AgentOptions) {
 
   // --- Folders, tags, captures --------------------------------------------
   app.get('/folders', async (c) =>
-    c.json(await reads.run('folders', undefined)),
+    c.json(await reads.run(c.get('principal'), 'folders', undefined)),
   )
-  app.get('/tags', async (c) => c.json(await reads.run('tags', undefined)))
+  app.get('/tags', async (c) =>
+    c.json(await reads.run(c.get('principal'), 'tags', undefined)),
+  )
   app.get('/updates/:id', async (c) =>
-    c.json(await reads.run('status', { id: c.req.param('id') })),
+    c.json(
+      await reads.run(c.get('principal'), 'status', { id: c.req.param('id') }),
+    ),
   )
-  app.get('/jobs', async (c) => c.json(await reads.run('queue', undefined)))
-  app.get('/watches', async (c) => c.json(await reads.run('watches', {})))
+  app.get('/jobs', async (c) =>
+    c.json(await reads.run(c.get('principal'), 'queue', undefined)),
+  )
+  app.get('/watches', async (c) =>
+    c.json(await reads.run(c.get('principal'), 'watches', {})),
+  )
   app.get('/shares', async (c) => {
     const of = c.req.query('of')
     return c.json(
-      await reads.run('shares', {
+      await reads.run(c.get('principal'), 'shares', {
         ...(of ? { of } : {}),
         origin: originOf(c),
       }),
     )
   })
   app.get('/capture-accounts', async (c) =>
-    c.json(await reads.run('captureAccounts', undefined)),
+    c.json(await reads.run(c.get('principal'), 'captureAccounts', undefined)),
   )
 
   writeRoutes(app, { ctx, reader: o.reader, reads })

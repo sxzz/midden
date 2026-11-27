@@ -10,6 +10,7 @@ import {
 import type { CaptureContext } from '#capture/context.ts'
 import type { Executor } from '#db/client.ts'
 import type { PlatformFacts } from '#platforms/registry.ts'
+import type { Principal } from '#users/principal.ts'
 
 /** What reads need from the capture context. */
 export type Reader = Pick<CaptureContext, 'db' | 'blobs'>
@@ -22,6 +23,12 @@ export type Reader = Pick<CaptureContext, 'db' | 'blobs'>
  */
 export interface ReadContext extends Reader {
   platforms: PlatformFacts
+  /**
+   * Whom the read is for, which decides what it may show (`sees`): a
+   * route's comes from its request (`readCtx`), the worker's and the
+   * public pages' are `SYSTEM`.
+   */
+  principal: Principal
 }
 
 /** A media item as the web shows it, with signed URLs to fetch it. */

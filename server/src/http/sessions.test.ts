@@ -99,7 +99,7 @@ describe('sliding expiry', () => {
     const before = changes()
     for (const path of ['/session', '/collections', '/sessions']) {
       const response = await request(cookie, path)
-      expect(response.status).toBe(200 + (path === '/session' ? 4 : 0))
+      expect(response.status).toBe(200)
       expect(response.headers.get('set-cookie')).toBeNull()
     }
     expect(changes()).toBe(before)
@@ -109,7 +109,7 @@ describe('sliding expiry', () => {
     // A day after: pushed to 30 days from now, the cookie refreshed.
     clock.advance(2 * HOUR)
     const renewed = await request(cookie)
-    expect(renewed.status).toBe(204)
+    expect(renewed.status).toBe(200)
     expect(changes()).toBe(before + 1)
     expect(maxAgeOf(renewed)).toBe(String(SESSION_TTL))
     expect(renewed.headers.get('set-cookie')).toContain(
@@ -147,7 +147,7 @@ describe('sliding expiry', () => {
     // Used every 20 days for 100 days.
     for (let i = 0; i < 5; i++) {
       clock.advance(20 * DAY)
-      expect((await request(cookie)).status).toBe(204)
+      expect((await request(cookie)).status).toBe(200)
     }
     clock.advance(30 * DAY + 1)
     const expired = await request(cookie)
@@ -266,7 +266,7 @@ describe('session management', () => {
       expect((await as(`/sessions/${id}`, 'DELETE')).status).toBe(403)
     }
     expect(db.select().from(webSessions).all()).toHaveLength(3)
-    expect((await request(here)).status).toBe(204)
+    expect((await request(here)).status).toBe(200)
   })
 })
 
@@ -299,7 +299,7 @@ describe('the Mini App', () => {
     // Launched again, with the cookie or without it (the web view lost it).
     const again = cookieOf(await login(IPHONE, cookie))
     expect((await request(cookie)).status).toBe(401)
-    expect((await request(again)).status).toBe(204)
+    expect((await request(again)).status).toBe(200)
     const third = cookieOf(await login(IPHONE))
     expect((await request(again)).status).toBe(401)
     expect(db.select().from(webSessions).all()).toHaveLength(1)

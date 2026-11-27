@@ -14,6 +14,7 @@ import { CaptureStrategy } from '#platforms/x/strategy.ts'
 import { progressMessage } from '#telegram/presentation.ts'
 import { testContext } from '#testing/context.ts'
 import { levels, recordingLogger } from '#testing/logs.ts'
+import { SYSTEM } from '#users/principal.ts'
 import { captureHandlers } from './handlers.ts'
 import {
   captureURL,
@@ -280,7 +281,7 @@ describe('a protected account whose posts the capture account may not see', () =
       expect.objectContaining({ state: 'complete', error: protectedPostsNote }),
     ])
     expect(retryRecordFailed(ctx, update)).toBe(0)
-    const status = reader(ctx).run('status', { id: update }) as any
+    const status = reader(ctx).run(SYSTEM, 'status', { id: update }) as any
     expect(await status).toMatchObject({
       kind: 'update',
       state: 'complete',
@@ -305,7 +306,7 @@ describe('a protected account whose posts the capture account may not see', () =
       posts: { total: 1 },
     })
     expect(
-      (await reader(ctx).run('status', { id: again })) as any,
+      (await reader(ctx).run(SYSTEM, 'status', { id: again })) as any,
     ).not.toHaveProperty('notes')
   })
 })

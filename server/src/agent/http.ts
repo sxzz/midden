@@ -2,10 +2,13 @@ import * as v from 'valibot'
 import { AGENT_ERRORS, errorBody, invalid } from './errors.ts'
 import { RETRY_AFTER_S } from './gate.ts'
 import type { TokenInfo } from '#tokens/tokens.ts'
+import type { Principal } from '#users/principal.ts'
 import type { Params } from './query.ts'
 import type { Context } from 'hono'
 
-export type AgentEnv = { Variables: { token: TokenInfo } }
+export type AgentEnv = {
+  Variables: { token: TokenInfo; principal: Principal }
+}
 
 /** Scheme and host as the client called them, for absolute links. */
 export function originOf(c: Context): string {

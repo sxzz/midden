@@ -34,6 +34,7 @@ import {
 import { suggest, SUGGEST_KINDS } from '#library/suggest.ts'
 import { OWNER_LIMITS } from '#query/ast.ts'
 import { compileQuery } from '#query/compile.ts'
+import { readCtx } from './auth.ts'
 import { Cursor, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
@@ -257,7 +258,7 @@ export function libraryRoutes(ctx: AccountsContext) {
       .get('/collections/compare', query(CompareQuery), (c) => {
         const input = c.req.valid('query')
         return c.json(
-          compareRelations(ctx, {
+          compareRelations(readCtx(ctx, c), {
             relOf: input.rel_of,
             rel: input.rel,
             min: input.rel_min,
@@ -273,7 +274,10 @@ export function libraryRoutes(ctx: AccountsContext) {
       .get('/collections/graph', query(AccountGraphQuery), (c) => {
         const { of, viewer, ...input } = c.req.valid('query')
         return c.json(
-          accountGraph(ctx, of, { ...input, viewer: viewer || undefined }),
+          accountGraph(readCtx(ctx, c), of, {
+            ...input,
+            viewer: viewer || undefined,
+          }),
         )
       })
 
@@ -317,7 +321,7 @@ export function libraryRoutes(ctx: AccountsContext) {
 
       .get('/collections/:id/graph', query(OwnGraphQuery), (c) =>
         c.json(
-          followGraph(ctx, c.req.param('id'), {
+          followGraph(readCtx(ctx, c), c.req.param('id'), {
             ...c.req.valid('query'),
             viewer: c.req.valid('query').viewer || undefined,
           }),

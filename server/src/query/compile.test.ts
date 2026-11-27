@@ -33,6 +33,7 @@ import {
   image,
   libraryContext,
 } from '#testing/library.ts'
+import { SYSTEM } from '#users/principal.ts'
 import { parseQuery, QueryError, type Leaf, type QueryNode } from './ast.ts'
 import { compileQuery, type CompileOptions } from './compile.ts'
 import { filterToQuery, wordTerm } from './convert.ts'
@@ -242,7 +243,12 @@ beforeAll(async () => {
       VALUES (${entityOf(a)}, ${entityOf(b)}, 1, 1)`)
   createFolder(ctx.db, { name: 'imgs', filter: 'media_type=image' })
   ctx.db.$client.exec('ANALYZE')
-  reader = { db: ctx.db, blobs: ctx.blobs, types: typeCatalog(ctx.platforms) }
+  reader = {
+    db: ctx.db,
+    blobs: ctx.blobs,
+    types: typeCatalog(ctx.platforms),
+    principal: SYSTEM,
+  }
 })
 
 afterAll(async () => {

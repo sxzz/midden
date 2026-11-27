@@ -207,7 +207,7 @@ describe('/passkey links', () => {
     )
     expect(
       (await app.request('/session', { headers: { Cookie: cookie } })).status,
-    ).toBe(204)
+    ).toBe(200)
     expect(notices).toEqual(['已添加通行密钥：测试设备（midden.test）'])
     // The link is gone, for this and any other authenticator.
     const again = await registerWithLink(tokens[MAIN]!)
@@ -277,7 +277,7 @@ describe('passkey login', () => {
     const cookie = cookieOf(ok)!
     expect(
       (await app.request('/session', { headers: { Cookie: cookie } })).status,
-    ).toBe(204)
+    ).toBe(200)
     // A replayed or lower counter is refused.
     authenticator.counter = 0
     expect((await signIn(authenticator)).status).toBe(400)

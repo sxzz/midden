@@ -36,7 +36,8 @@ export function threadContext(
   logger: Logger,
   types: TypeCatalog,
 ): AccountsContext {
-  const read: ReadContext = {
+  // Whom a read is for comes with each request (`readCtx`).
+  const read: Omit<ReadContext, 'principal'> = {
     db: reader.db,
     blobs: reader.blobs,
     platforms: { countPointers: () => countPointers, types: () => types },

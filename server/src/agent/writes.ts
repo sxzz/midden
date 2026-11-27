@@ -1,8 +1,8 @@
-// The agent API's writes, for `rw` tokens: capturing, updating, tags,
-// notes, folders, and pausing background work. They run on the web
-// process like the web app's own: each is a small transaction that at most
-// enqueues jobs. Nothing deletes content: that is the owner's, in the web
-// app, signed in (`ownerOnly` on /v1).
+// The agent API's writes, for the admin's `rw` tokens: capturing,
+// updating, tags, notes, folders, and pausing background work. They run on
+// the web process like the web app's own: each is a small transaction that
+// at most enqueues jobs. Nothing deletes content: that is the admin's, in
+// the web app, signed in (`adminSession` on /v1).
 import { eq, sql } from 'drizzle-orm'
 import * as v from 'valibot'
 import { revokeAccount, type AccountsContext } from '#accounts/accounts.ts'
@@ -27,6 +27,7 @@ import { createFolder, folderView, updateFolder } from '#library/folders.ts'
 import { isUUID } from '#library/read.ts'
 import { revokeShare } from '#library/shares.ts'
 import { renameTag } from '#library/tags.ts'
+import { writes as canWrite, SYSTEM } from '#users/principal.ts'
 import { AgentError, invalid, notFound } from './errors.ts'
 import { body, type AgentEnv } from './http.ts'
 import {
@@ -35,15 +36,16 @@ import {
   savedAccount,
   type AgentReader,
   type Kind,
+  type ReadBase,
 } from './query.ts'
 import { folderJson, runRead } from './reads.ts'
 import type { Reads } from './runner.ts'
 import type { Context, Hono, MiddlewareHandler } from 'hono'
 import type { BlankSchema } from 'hono/types'
 
-/** Writes need a read and write token. */
+/** Writes need the admin's read and write token; a viewer's only reads. */
 const writes: MiddlewareHandler<AgentEnv> = async (c, next) => {
-  if (c.get('token').permission !== 'rw')
+  if (!canWrite(c.get('principal')))
     throw new AgentError(
       'forbidden',
       'This token only reads. Writing needs a read and write (rw) token from the owner.',
@@ -97,14 +99,25 @@ function savedPost(r: AgentReader, ref: string): string {
 /** The writes, on the agent API's app. */
 export function writeRoutes(
   app: Hono<AgentEnv, BlankSchema, '/agent/v1'>,
-  o: { ctx: AccountsContext; reader: AgentReader; reads: Reads },
+  o: { ctx: AccountsContext; reader: ReadBase; reads: Reads },
 ) {
-  const { ctx, reader, reads } = o
+  const { ctx, reads } = o
+  const { types } = o.reader
   const parse = body
-  const target = (kind: Kind, ref: string, platform?: string) =>
+  // What a write reads first, as the request's principal (the admin).
+  const as = (c: Context<AgentEnv>): AgentReader => ({
+    ...o.reader,
+    principal: c.get('principal'),
+  })
+  const target = (
+    c: Context<AgentEnv>,
+    kind: Kind,
+    ref: string,
+    platform?: string,
+  ) =>
     kind === 'posts'
-      ? savedPost(reader, ref)
-      : savedAccount(reader, ref, platform)
+      ? savedPost(as(c), ref)
+      : savedAccount(as(c), ref, platform)
 
   // --- Capturing ----------------------------------------------------------
   app.post('/captures', writes, async (c) => {
@@ -157,27 +170,27 @@ export function writeRoutes(
     const id = await startPlannedUpdate(
       ctx,
       'post' in t
-        ? { target: 'collection', id: savedPost(reader, t.post) }
+        ? { target: 'collection', id: savedPost(as(c), t.post) }
         : 'account' in t
           ? {
               target: 'collection',
-              id: savedAccount(reader, t.account, t.platform),
+              id: savedAccount(as(c), t.account, t.platform),
             }
           : 'folder' in t
-            ? { target: 'folder', id: findFolder(reader.db, t.folder).id }
+            ? { target: 'folder', id: findFolder(ctx.db, t.folder).id }
             : { target: 'many', ids: t.ids.map((ref) => ref.toLowerCase()) },
       {
         options: resolveOptions(input.options),
         older: input.older,
         key: idempotencyKey(c),
       },
-      (target) => reads.run('updatePlan', target),
+      (target) => reads.run(c.get('principal'), 'updatePlan', target),
     )
     return c.json(
       {
         update_id: id,
         status_url: statusUrl(id),
-        ...(await reads.run('status', { id })),
+        ...(await reads.run(c.get('principal'), 'status', { id })),
       },
       202,
     )
@@ -188,10 +201,11 @@ export function writeRoutes(
       const raw = c.req.param('id')
       if (!isUUID(raw)) throw notFound()
       const id = raw.toLowerCase()
+      const principal = c.get('principal')
       if (op === 'pause')
-        pauseUpdate(ctx, id, await reads.run('updateRecord', { id }))
+        pauseUpdate(ctx, id, await reads.run(principal, 'updateRecord', { id }))
       else resumeUpdate(ctx, id)
-      return c.json(await reads.run('status', { id }))
+      return c.json(await reads.run(principal, 'status', { id }))
     })
 
   // All background work, or some job types (管理员面板 → 后台任务).
@@ -208,16 +222,16 @@ export function writeRoutes(
       paused: input.paused ?? control.paused,
       types: input.paused_types ?? control.types,
     })
-    return c.json(runRead(reader, 'queue', {}))
+    return c.json(runRead(as(c), 'queue', {}))
   })
 
   // --- 定期更新 -----------------------------------------------------------
   // Watching an account or a folder: one watch per target, so a second
   // PUT changes it. Turning one off is `enabled: false`; deleting is the
   // owner's, in the web app.
-  const watchOf = (id: string) => {
+  const watchOf = (c: Context<AgentEnv>, id: string) => {
     const [watch] = (
-      runRead(reader, 'watches', { id }) as {
+      runRead(as(c), 'watches', { id }) as {
         items: unknown[]
       }
     ).items
@@ -244,10 +258,10 @@ export function writeRoutes(
     const id = setWatch(
       ctx,
       'folder' in t
-        ? { target: 'folder', id: findFolder(reader.db, t.folder).id }
+        ? { target: 'folder', id: findFolder(ctx.db, t.folder).id }
         : {
             target: 'collection',
-            id: savedAccount(reader, t.account, t.platform),
+            id: savedAccount(as(c), t.account, t.platform),
           },
       {
         every: input.every,
@@ -255,7 +269,7 @@ export function writeRoutes(
         options: resolveOptions(input.options),
       },
     )
-    return c.json(watchOf(id))
+    return c.json(watchOf(c, id))
   })
   app.patch('/watches/:id', writes, async (c) => {
     const input = await parse(
@@ -275,7 +289,7 @@ export function writeRoutes(
       options: input.options && resolveOptions(input.options),
       enabled: input.enabled,
     })
-    return c.json(watchOf(id.toLowerCase()))
+    return c.json(watchOf(c, id.toLowerCase()))
   })
 
   // --- Public links and capture accounts --------------------------------
@@ -324,7 +338,7 @@ export function writeRoutes(
   for (const kind of ['posts', 'accounts'] as const) {
     app.post(`/${kind}/:id/tags`, writes, async (c) => {
       const { tag } = await parse(c, v.strictObject({ tag: v.string() }))
-      const id = target(kind, c.req.param('id'), c.req.query('platform'))
+      const id = target(c, kind, c.req.param('id'), c.req.query('platform'))
       return c.json(
         annotationJson(
           id,
@@ -337,17 +351,17 @@ export function writeRoutes(
       )
     })
     app.delete(`/${kind}/:id/tags/:tag`, writes, (c) => {
-      const id = target(kind, c.req.param('id'), c.req.query('platform'))
+      const id = target(c, kind, c.req.param('id'), c.req.query('platform'))
       const [tag] = findTags(ctx.db, [c.req.param('tag')])
       return c.json(annotationJson(id, removeTag(ctx.db, id, tag!.id)))
     })
     app.put(`/${kind}/:id/note`, writes, async (c) => {
       const { note } = await parse(c, v.strictObject({ note: v.string() }))
-      const id = target(kind, c.req.param('id'), c.req.query('platform'))
+      const id = target(c, kind, c.req.param('id'), c.req.query('platform'))
       return c.json(annotationJson(id, updateAnnotation(ctx.db, id, { note })))
     })
     app.delete(`/${kind}/:id/note`, writes, (c) => {
-      const id = target(kind, c.req.param('id'), c.req.query('platform'))
+      const id = target(c, kind, c.req.param('id'), c.req.query('platform'))
       return c.json(
         annotationJson(id, updateAnnotation(ctx.db, id, { note: '' })),
       )
@@ -360,11 +374,12 @@ export function writeRoutes(
     await countWrittenFolder(
       ctx.db,
       id,
-      (folderId) => reads.run('folderCounts', { id: folderId }),
+      // Stored for everyone, as the worker counts it.
+      (folderId) => reads.run(SYSTEM, 'folderCounts', { id: folderId }),
       ctx.logger,
-      reader.types,
+      types,
     )
-    return folderView(ctx.db, id, reader.types)
+    return folderView(ctx.db, id, types)
   }
   app.post('/folders', writes, async (c) => {
     const input = await parse(
@@ -375,8 +390,8 @@ export function writeRoutes(
         query: FolderBody.query.wrapped,
       }),
     )
-    const { id } = createFolder(ctx.db, input, reader.types)
-    return c.json(folderJson(reader, await counted(id)), 201)
+    const { id } = createFolder(ctx.db, input, types)
+    return c.json(folderJson(as(c), await counted(id)), 201)
   })
 
   app.patch('/folders/:id', writes, async (c) => {
@@ -385,8 +400,8 @@ export function writeRoutes(
       v.strictObject({ name: v.optional(v.string()), ...FolderBody }),
     )
     const { id } = findFolder(ctx.db, c.req.param('id'))
-    const folder = updateFolder(ctx.db, id, input, reader.types)
+    const folder = updateFolder(ctx.db, id, input, types)
     const changed = [input.query, input.tz].some((x) => x !== undefined)
-    return c.json(folderJson(reader, changed ? await counted(id) : folder))
+    return c.json(folderJson(as(c), changed ? await counted(id) : folder))
   })
 }

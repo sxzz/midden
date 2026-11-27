@@ -1,13 +1,14 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
-import { apiTokens } from '#db/schema.ts'
+import { apiTokens, users, type UserRole } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import type { Database, Executor } from '#db/client.ts'
 
 /**
  * `ro` reads; `rw` reads and writes, but never deletes, nor manages tokens,
- * sessions, passkeys or domains (see `ownerOnly`).
+ * sessions, passkeys or domains (`adminSession`, `sessionOnly`). A viewer's
+ * token reads only, whatever it says.
  */
 export type Permission = 'ro' | 'rw'
 export const PERMISSIONS: readonly Permission[] = ['ro', 'rw']
@@ -15,6 +16,9 @@ export const PERMISSIONS: readonly Permission[] = ['ro', 'rw']
 /** What a request authenticated with a token knows of it. */
 export interface TokenInfo {
   id: string
+  /** Whose it is, and their role now (read with the token, every request). */
+  userId: string
+  role: UserRole
   label: string
   permission: Permission
   createdAt: Date
@@ -112,8 +116,12 @@ export function tokenView(row: Row, now = Date.now()): TokenView {
   }
 }
 
-function find(db: Executor, id: string): Row {
-  const row = db.select().from(apiTokens).where(eq(apiTokens.id, id)).get()
+/** `user`'s token by this id; another user's is as good as none. */
+const own = (user: string, id: string) =>
+  and(eq(apiTokens.id, id), eq(apiTokens.userId, user))
+
+function find(db: Executor, user: string, id: string): Row {
+  const row = db.select().from(apiTokens).where(own(user, id)).get()
   if (!row) throw new AppError('not_found')
   return row
 }
@@ -151,22 +159,29 @@ export function createToken(
   return { token: tokenView(row, now), secret }
 }
 
-/** Every token, oldest first. */
-export function listTokens(db: Executor, now = Date.now()): TokenView[] {
+/** A user's tokens, oldest first. */
+export function listTokens(
+  db: Executor,
+  user: string,
+  now = Date.now(),
+): TokenView[] {
   return db
     .select()
     .from(apiTokens)
+    .where(eq(apiTokens.userId, user))
     .orderBy(asc(apiTokens.createdAt), asc(apiTokens.id))
     .all()
     .map((row) => tokenView(row, now))
 }
 
 /**
- * Rename a token, or move its expiry (later, earlier, or `null` for never);
- * the secret stays. An expired token given a new expiry works again.
+ * Rename one of `user`'s tokens, or move its expiry (later, earlier, or
+ * `null` for never); the secret stays. An expired token given a new expiry
+ * works again.
  */
 export function updateToken(
   db: Database,
+  user: string,
   id: string,
   update: { label?: string; expiresAt?: Date | null },
   now = Date.now(),
@@ -177,10 +192,13 @@ export function updateToken(
     update.expiresAt === undefined
       ? undefined
       : checkExpiry(update.expiresAt, now)
+  // Nothing to change: as it is.
+  if (label === undefined && expiresAt === undefined)
+    return tokenView(find(db, user, id), now)
   const row = db
     .update(apiTokens)
     .set({ label, expiresAt })
-    .where(eq(apiTokens.id, id))
+    .where(own(user, id))
     .returning()
     .get()
   if (!row) throw new AppError('not_found')
@@ -193,24 +211,25 @@ export function updateToken(
  */
 export function rollToken(
   db: Database,
+  user: string,
   id: string,
   now = Date.now(),
 ): IssuedToken {
-  const { permission } = find(db, id)
+  const { permission } = find(db, user, id)
   const secret = newSecret(permission)
   const row = db
     .update(apiTokens)
     .set({ digest: tokenDigest(secret) })
-    .where(eq(apiTokens.id, id))
+    .where(own(user, id))
     .returning()
     .get()
   if (!row) throw new AppError('not_found')
   return { token: tokenView(row, now), secret }
 }
 
-/** Revoke a token: it and its usage are gone. */
-export function revokeToken(db: Database, id: string): void {
-  const row = db.delete(apiTokens).where(eq(apiTokens.id, id)).returning().get()
+/** Revoke one of `user`'s tokens: it and its usage are gone. */
+export function revokeToken(db: Database, user: string, id: string): void {
+  const row = db.delete(apiTokens).where(own(user, id)).returning().get()
   if (!row) throw new AppError('not_found')
 }
 
@@ -219,9 +238,10 @@ export type Authentication =
   | { ok: false; error: 'token_invalid' | 'token_expired' }
 
 /**
- * The token a secret belongs to: one indexed look-up by its digest. A
- * revoked or rolled secret is not found; an expired token is known, so the
- * caller can say why.
+ * The token a secret belongs to, and its user: one indexed look-up by its
+ * digest. A revoked or rolled secret is not found, nor is a revoked user's
+ * (their tokens are deleted with the revocation; this is a second guard);
+ * an expired token is known, so the caller can say why.
  */
 export function authenticate(
   db: Executor,
@@ -229,18 +249,22 @@ export function authenticate(
   now = Date.now(),
 ): Authentication {
   if (!secret) return { ok: false, error: 'token_invalid' }
-  const row = db
-    .select()
+  const found = db
+    .select({ row: apiTokens, role: users.role, revokedAt: users.revokedAt })
     .from(apiTokens)
+    .innerJoin(users, eq(users.id, apiTokens.userId))
     .where(eq(apiTokens.digest, tokenDigest(secret)))
     .get()
-  if (!row) return { ok: false, error: 'token_invalid' }
+  if (!found || found.revokedAt) return { ok: false, error: 'token_invalid' }
+  const { row } = found
   if (row.expiresAt && row.expiresAt.getTime() <= now)
     return { ok: false, error: 'token_expired' }
   return {
     ok: true,
     token: {
       id: row.id,
+      userId: row.userId,
+      role: found.role,
       label: row.label,
       permission: row.permission,
       createdAt: row.createdAt,

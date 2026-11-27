@@ -21,8 +21,12 @@ import { createApi, type ForwardedEnv } from '#http/app.ts'
 import { threadContext } from './context.ts'
 import { inScope, SLOW_QUERY_MS, watchStatements } from './slow.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
-import type { AgentReader, TypeCatalog } from '#agent/query.ts'
-import type { ForwardedRequest, ForwardedResponse } from '#http/offload.ts'
+import type { ReadBase, TypeCatalog } from '#agent/query.ts'
+import type {
+  ForwardedRequest,
+  ForwardedResponse,
+  NamedReadRequest,
+} from '#http/offload.ts'
 import type { CountPointers } from '#platforms/registry.ts'
 import type { PoolRequest, PoolResponse } from './pool.ts'
 
@@ -45,7 +49,7 @@ export interface ReadThreadData {
 }
 
 /** The reader a thread works with. */
-export function threadReader(data: ReadThreadData): AgentReader {
+export function threadReader(data: ReadThreadData): ReadBase {
   const db = openDatabase(data.databasePath, {
     readOnly: true,
     busyTimeoutMs: 1000,
@@ -87,7 +91,7 @@ export function threadApi(
     }
     const env: ForwardedEnv = {
       forwarded: {
-        session: request.session,
+        principal: request.principal,
         ...(request.token ? { token: request.token } : {}),
       },
     }
@@ -124,7 +128,7 @@ function scopeOf(request: PoolRequest): [route: string, query: string] {
     const url = new URL(forwarded.url)
     return [`${forwarded.method} ${url.pathname}`, queryOf(url.searchParams)]
   }
-  const input = request.input as {
+  const input = (request.input as NamedReadRequest | undefined)?.input as {
     kind?: string
     params?: Record<string, string[]>
   } | null
@@ -182,7 +186,13 @@ if (parentPort) {
           transfer = [value.body]
           response = { id: request.id, ok: true, value }
         } else {
-          const value = await runRead(reader, request.op, request.input)
+          // A read by name says whom it is for.
+          const { principal, input } = request.input as NamedReadRequest
+          const value = await runRead(
+            { ...reader, principal },
+            request.op,
+            input,
+          )
           response = { id: request.id, ok: true, value }
         }
       })

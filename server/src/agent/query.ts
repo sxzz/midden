@@ -23,6 +23,7 @@ import { AgentError, invalid, notFound } from './errors.ts'
 import { VIEWS, type View } from './shape.ts'
 import type { Executor } from '#db/client.ts'
 import type { Reader } from '#library/views.ts'
+import type { Principal } from '#users/principal.ts'
 
 /** The entity types the archive's platforms keep, by kind. */
 export interface TypeCatalog {
@@ -32,8 +33,13 @@ export interface TypeCatalog {
 }
 
 /** What reads need: the database, media links and the entity types. */
-export interface AgentReader extends Reader {
+export interface ReadBase extends Reader {
   types: TypeCatalog
+}
+
+/** ... and whom they are for, which decides what they may show (`sees`). */
+export interface AgentReader extends ReadBase {
+  principal: Principal
 }
 
 /** Query parameters; a repeated key has several values. */

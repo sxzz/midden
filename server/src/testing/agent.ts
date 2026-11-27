@@ -10,7 +10,7 @@ import { fakeProfile } from './fake-platform.ts'
 import { capture, entity, graph, image, libraryContext } from './library.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { Gate } from '#agent/gate.ts'
-import type { AgentReader } from '#agent/query.ts'
+import type { ReadBase } from '#agent/query.ts'
 import type { FetchResponse } from '#platforms/protocol.ts'
 
 export const post = (id: string) => `https://fake.test/p/${id}`
@@ -80,7 +80,7 @@ const ROUTES: Record<string, () => Partial<FetchResponse>> = {
 
 export interface AgentFixture {
   ctx: AccountsContext
-  reader: AgentReader
+  reader: ReadBase
   usage: TokenUsage
   ids: Record<string, string>
   app: ReturnType<typeof createAgentApi>
@@ -93,7 +93,7 @@ export interface AgentFixture {
 }
 
 export async function agentFixture(
-  options: { reads?: (reader: AgentReader) => Reads; gate?: Gate } = {},
+  options: { reads?: (reader: ReadBase) => Reads; gate?: Gate } = {},
 ): Promise<AgentFixture> {
   const { ctx } = libraryContext((req) => {
     const route = ROUTES[req.externalId]
@@ -105,7 +105,7 @@ export async function agentFixture(
     ids[id] = (await capture(ctx, profile(id))).collectionId
   for (const id of ['p1', 'p2', 'p3', 'p4'])
     ids[id] = (await capture(ctx, post(id))).collectionId
-  const reader: AgentReader = {
+  const reader: ReadBase = {
     db: ctx.db,
     blobs: ctx.blobs,
     types: typeCatalog(ctx.platforms),

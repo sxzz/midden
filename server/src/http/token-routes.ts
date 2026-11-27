@@ -9,8 +9,7 @@ import {
   updateToken,
   type TokenView,
 } from '#tokens/tokens.ts'
-import { adminId } from '#users/users.ts'
-import { ownerOnly } from './auth.ts'
+import { sessionOnly, viewers } from './auth.ts'
 import { inline } from './offload.ts'
 import { json, type Env } from './validate.ts'
 import type { Database } from '#db/client.ts'
@@ -26,8 +25,9 @@ const Expiry = v.nullable(
 )
 
 /**
- * 设置 → API 令牌: the owner's tokens, with when each was last used and its
- * requests over the last 30 days. Only a web session manages them.
+ * 设置 → API 令牌: a user's own tokens, viewers' too, with when each was
+ * last used and its requests over the last 30 days. Only a web session
+ * manages them.
  */
 export function tokenRoutes(
   db: Database,
@@ -54,11 +54,14 @@ export function tokenRoutes(
   }
   return (
     new Hono<Env>()
-      .use(ownerOnly)
+      .use(sessionOnly)
       // Usage not written yet is in this process's memory.
-      .get('/', inline, (c) => c.json(withUsage(listTokens(db, now()))))
+      .get('/', inline, viewers, (c) =>
+        c.json(withUsage(listTokens(db, c.get('principal').userId, now()))),
+      )
       .post(
         '/',
+        viewers,
         json(
           v.strictObject({
             label: v.string(),
@@ -71,7 +74,7 @@ export function tokenRoutes(
           const issued = createToken(
             db,
             {
-              user: adminId(db),
+              user: c.get('principal').userId,
               label: input.label,
               permission: input.permission,
               expiresAt: input.expires_at,
@@ -86,6 +89,7 @@ export function tokenRoutes(
       )
       .patch(
         '/:id',
+        viewers,
         json(
           v.strictObject({
             label: v.optional(v.string()),
@@ -96,6 +100,7 @@ export function tokenRoutes(
           const input = c.req.valid('json')
           const token = updateToken(
             db,
+            c.get('principal').userId,
             c.req.param('id'),
             { label: input.label, expiresAt: input.expires_at },
             now(),
@@ -104,17 +109,24 @@ export function tokenRoutes(
         },
       )
       // A new secret for the same token; the old one stops working now.
-      .post('/:id/roll', (c) => {
-        const issued = rollToken(db, c.req.param('id'), now())
+      .post('/:id/roll', viewers, (c) => {
+        const issued = rollToken(
+          db,
+          c.get('principal').userId,
+          c.req.param('id'),
+          now(),
+        )
         return c.json({
           token: withUsage([issued.token])[0]!,
           secret: issued.secret,
         })
       })
-      .get('/:id/usage', inline, (c) => {
+      .get('/:id/usage', inline, viewers, (c) => {
         const id = c.req.param('id')
         const [token] = withUsage(
-          listTokens(db, now()).filter((t) => t.id === id),
+          listTokens(db, c.get('principal').userId, now()).filter(
+            (t) => t.id === id,
+          ),
         )
         if (!token) return c.json({ error: '令牌不存在' }, 404)
         return c.json({
@@ -122,8 +134,8 @@ export function tokenRoutes(
           endpoints: usage.endpoints(db, id),
         })
       })
-      .delete('/:id', (c) => {
-        revokeToken(db, c.req.param('id'))
+      .delete('/:id', viewers, (c) => {
+        revokeToken(db, c.get('principal').userId, c.req.param('id'))
         return c.body(null, 204)
       })
   )

@@ -10,7 +10,7 @@ import {
   type WatchView,
 } from '#capture/watches.ts'
 import { AppError } from '#errors.ts'
-import { ownerOnly } from './auth.ts'
+import { adminSession } from './auth.ts'
 import { json, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
@@ -122,7 +122,7 @@ export function watchRoutes(ctx: AccountsContext) {
         },
       )
 
-      .delete('/watches/:id', ownerOnly, (c) => {
+      .delete('/watches/:id', adminSession, (c) => {
         deleteWatch(ctx.db, c.req.param('id'))
         return c.body(null, 204)
       })

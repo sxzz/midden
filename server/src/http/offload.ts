@@ -18,8 +18,10 @@ import {
 } from '#agent/reads.ts'
 import { AppError } from '#errors.ts'
 import { PoolError, ThreadError, type QueryPool } from '#reads/pool.ts'
-import type { AgentReader } from '#agent/query.ts'
+import { routeHas } from './markers.ts'
+import type { ReadBase } from '#agent/query.ts'
 import type { TokenInfo } from '#tokens/tokens.ts'
+import type { Principal } from '#users/principal.ts'
 import type { Env } from './validate.ts'
 import type { Context, MiddlewareHandler } from 'hono'
 
@@ -48,7 +50,7 @@ export interface ForwardedRequest {
   /** A `readOnly` route's JSON body. */
   body?: ArrayBuffer
   /** What the login middleware found, which the thread does not redo. */
-  session: boolean
+  principal: Principal
   token?: TokenInfo
 }
 
@@ -58,11 +60,18 @@ export interface ForwardedResponse {
   body: ArrayBuffer
 }
 
-/** A read by name (`agent/reads.ts`). */
+/** A read by name (`agent/reads.ts`), for `principal`. */
 export type NamedRead = <N extends ReadName>(
+  principal: Principal,
   name: N,
   input: ReadInput<N>,
 ) => Promise<ReadOutput<N>>
+
+/** A read by name as a thread receives it: what, and for whom. */
+export interface NamedReadRequest {
+  principal: Principal
+  input: unknown
+}
 
 /** Where forwarded requests are answered. */
 export interface WebReads {
@@ -82,9 +91,12 @@ export interface WebReads {
 /** On the read threads of the pool, in its `web` lane. */
 export function pooledWebReads(pool: QueryPool): WebReads {
   return {
-    read: (async (name: string, input: unknown) => {
+    read: (async (principal: Principal, name: string, input: unknown) => {
       try {
-        return await pool.run('web', name, input)
+        return await pool.run('web', name, {
+          principal,
+          input,
+        } satisfies NamedReadRequest)
       } catch (error) {
         throw unavailable(error)
       }
@@ -107,13 +119,15 @@ export function pooledWebReads(pool: QueryPool): WebReads {
  */
 export function namedReads(
   reads: WebReads | undefined,
-  reader: () => AgentReader,
+  reader: () => ReadBase,
 ): NamedRead {
   if (reads) return reads.read
-  return ((name: ReadName, input: unknown) => {
+  return ((principal: Principal, name: ReadName, input: unknown) => {
     // What it throws is a rejection, as from a thread.
     try {
-      return Promise.resolve(structuredClone(runRead(reader(), name, input)))
+      return Promise.resolve(
+        structuredClone(runRead({ ...reader(), principal }, name, input)),
+      )
     } catch (error) {
       return Promise.reject(error)
     }
@@ -144,22 +158,6 @@ export function threadTiming(request: Request): ThreadTiming | undefined {
 const PRIVATE_HEADERS = new Set(['authorization', 'cookie'])
 
 /**
- * Whether the route this request reaches has `marker` among its handlers.
- * The first route that matches answers it, so that route's handlers decide.
- */
-function routeHas(c: Context, marker: MiddlewareHandler): boolean {
-  const routes = matchedRoutes(c)
-  const first = routes.find((r) => r.method !== 'ALL')
-  if (!first) return false
-  return routes.some(
-    (r) =>
-      r.path === first.path &&
-      r.method === first.method &&
-      wraps(r.handler, marker),
-  )
-}
-
-/**
  * Whether the route this request reaches runs here: it says `inline`, or no
  * route matches.
  */
@@ -174,17 +172,6 @@ export function onlyReads(c: Context): boolean {
   return READ_METHODS.has(c.req.method) || routeHas(c, readOnly)
 }
 const READ_METHODS = new Set(['GET', 'HEAD'])
-
-/**
- * Mounted in an app with another error handler (`/v1` in the web process),
- * a route's handlers are wrapped; Hono keeps each one it wrapped.
- */
-function wraps(handler: unknown, marker: MiddlewareHandler): boolean {
-  for (let h = handler; h; h = (h as Record<string, unknown>)[WRAPPED])
-    if (h === marker) return true
-  return false
-}
-const WRAPPED = '__COMPOSED_HANDLER'
 
 /** Whether the request goes to the read threads. */
 function forwarded(c: Context): boolean {
@@ -215,7 +202,7 @@ export function offload(reads: WebReads | undefined): MiddlewareHandler<Env> {
             ([name]) => !PRIVATE_HEADERS.has(name),
           ),
           ...(body?.byteLength ? { body } : {}),
-          session: !!c.get('session'),
+          principal: c.get('principal'),
           ...(c.get('token') ? { token: c.get('token') } : {}),
         },
         () => (started = performance.now()),

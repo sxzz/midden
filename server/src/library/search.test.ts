@@ -12,6 +12,7 @@ import {
   libraryContext,
   searchIndexes,
 } from '#testing/library.ts'
+import { SYSTEM } from '#users/principal.ts'
 import { catalogMissing } from './catalog.ts'
 import { filterCounts } from './counts.ts'
 import { deleteCollections } from './delete.ts'
@@ -289,7 +290,7 @@ describe('library search', () => {
     expect(all({ q: 'Whale' })).toEqual(['c', 'a'])
 
     const slug = createShare(ctx.db, { target: 'folder', id: folder.id }).slug
-    const accounts = ctx as AccountsContext
+    const accounts = { ...(ctx as AccountsContext), principal: SYSTEM }
     const listed = (q: string) =>
       listPublicCollections(accounts, slug, { q }).items.map((c) => c.id)
     expect(listed('')).toHaveLength(2)

@@ -21,7 +21,7 @@ import {
 } from '#library/delete.ts'
 import { storageUsed } from '#library/read.ts'
 import { deleteTag, renameTag } from '#library/tags.ts'
-import { ownerOnly } from './auth.ts'
+import { adminSession } from './auth.ts'
 import { inline, readOnly, type NamedRead } from './offload.ts'
 import { json, type Env } from './validate.ts'
 
@@ -110,7 +110,7 @@ export function accountRoutes(ctx: AccountsContext, read: NamedRead) {
         c.json(renameTag(ctx.db, c.req.param('id'), c.req.valid('json').name)),
       )
 
-      .delete('/tags/:id', ownerOnly, (c) => {
+      .delete('/tags/:id', adminSession, (c) => {
         deleteTag(ctx.db, c.req.param('id'))
         return c.body(null, 204)
       })
@@ -140,7 +140,7 @@ export function accountRoutes(ctx: AccountsContext, read: NamedRead) {
         },
       )
 
-      .delete('/collections/:id', ownerOnly, (c) => {
+      .delete('/collections/:id', adminSession, (c) => {
         deleteCollection(ctx.db, c.req.param('id'))
         return c.body(null, 204)
       })
@@ -154,13 +154,16 @@ export function accountRoutes(ctx: AccountsContext, read: NamedRead) {
         )
       })
       // Planned on a read thread; written as planned unless that changed.
-      .post('/collections/delete', ownerOnly, json(Deletion), async (c) => {
+      .post('/collections/delete', adminSession, json(Deletion), async (c) => {
         const input = c.req.valid('json')
         const withPosts = !!input.with_posts
         return c.json(
           deleteCollections(ctx.db, input.ids, {
             withPosts,
-            plan: await read('deletionPlan', { ids: input.ids, withPosts }),
+            plan: await read(c.get('principal'), 'deletionPlan', {
+              ids: input.ids,
+              withPosts,
+            }),
           }),
         )
       })

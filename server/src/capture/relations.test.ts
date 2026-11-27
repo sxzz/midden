@@ -29,6 +29,7 @@ import {
   type FakeRelations,
 } from '#testing/fake-platform.ts'
 import { JPEG } from '#testing/library.ts'
+import { SYSTEM } from '#users/principal.ts'
 import { captureHandlers } from './handlers.ts'
 import { DEFAULT_OPTIONS } from './options.ts'
 import { captureURL, recapture, recordDetail } from './records.ts'
@@ -722,7 +723,7 @@ describe('关系图谱', () => {
   test('the center, then accounts by follower count, with follows among them', async () => {
     useRemoteImages()
     const { ctx, id } = await world()
-    const graph = followGraph(ctx, id)
+    const graph = followGraph({ ...ctx, principal: SYSTEM }, id)
     expect(names(graph)).toEqual(['100', '2', '4', '3', '1'])
     expect(graph.nodes.map((n) => [n.kind, n.followers])).toEqual([
       [undefined, 2],
@@ -750,19 +751,23 @@ describe('关系图谱', () => {
 
   test('kinds and the cap choose the accounts, edges follow them', async () => {
     const { ctx, id } = await world()
-    const top = followGraph(ctx, id, { limit: 2 })
+    const top = followGraph({ ...ctx, principal: SYSTEM }, id, { limit: 2 })
     expect(names(top)).toEqual(['100', '2', '4'])
     expect(top.total).toBe(4)
     expect(pairs(top).toSorted()).toEqual(['100>2', '2>100', '4>100'])
 
-    const following = followGraph(ctx, id, { kinds: ['following'] })
+    const following = followGraph({ ...ctx, principal: SYSTEM }, id, {
+      kinds: ['following'],
+    })
     expect(names(following)).toEqual(['100', '3', '1'])
     expect(following.total).toBe(2)
     // 1 follows 2, but 2 is not shown.
     expect(pairs(following).toSorted()).toEqual(['100>1', '100>3'])
     // Counts by kind do not depend on the choice.
     expect(following.kinds).toEqual({ following: 2, followers: 1, mutual: 1 })
-    expect(names(followGraph(ctx, id, { kinds: [] }))).toEqual(['100'])
+    expect(
+      names(followGraph({ ...ctx, principal: SYSTEM }, id, { kinds: [] })),
+    ).toEqual(['100'])
   })
 
   test('follows among the others come from any account’s list, not only the center’s', async () => {
@@ -771,7 +776,9 @@ describe('关系图谱', () => {
     state.counts['3'] = { following: 0, followers: 2 }
     state.lists['3'] = { following: [], followers: ['100', '4'] }
     await update(ctx, 'https://fake.test/u/3')
-    expect(pairs(followGraph(ctx, id)).toSorted()).toEqual(
+    expect(
+      pairs(followGraph({ ...ctx, principal: SYSTEM }, id)).toSorted(),
+    ).toEqual(
       ['100>1', '100>2', '100>3', '2>100', '4>100', '1>2', '4>3'].toSorted(),
     )
   })
@@ -781,7 +788,7 @@ describe('关系图谱', () => {
     state.counts['100'] = { following: 2, followers: 1 }
     state.lists['100'] = { following: ['2', '3'], followers: ['2'] }
     await update(ctx)
-    const graph = followGraph(ctx, id)
+    const graph = followGraph({ ...ctx, principal: SYSTEM }, id)
     expect(names(graph)).toEqual(['100', '2', '3'])
     // 1 still follows 2, but 1 is gone from the graph with its edge.
     expect(pairs(graph).toSorted()).toEqual(['100>2', '100>3', '2>100'])
@@ -796,7 +803,7 @@ describe('关系图谱', () => {
     await withAccount(ctx)
     await update(ctx)
     const id = subjectCollection(ctx)
-    const graph = followGraph(ctx, id)
+    const graph = followGraph({ ...ctx, principal: SYSTEM }, id)
     expect(graph.lists.following).toEqual({ partial_at: expect.any(String) })
     expect(graph.lists.followers.complete_at).toBeDefined()
     expect(names(graph)).toEqual(['100', '1'])
@@ -808,7 +815,7 @@ describe('关系图谱', () => {
       .from(collections)
       .where(eq(collections.externalId, '7'))
       .get()!.id
-    expect(followGraph(ctx, alone)).toMatchObject({
+    expect(followGraph({ ...ctx, principal: SYSTEM }, alone)).toMatchObject({
       nodes: [{ external_id: '7', collection_id: alone }],
       edges: [],
       total: 0,

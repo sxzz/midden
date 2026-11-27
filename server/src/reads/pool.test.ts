@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { AgentError } from '#agent/errors.ts'
 import { inlineReads, pooledReads } from '#agent/runner.ts'
 import { agentFixture, type AgentFixture } from '#testing/agent.ts'
+import { SYSTEM } from '#users/principal.ts'
 import { PoolError, QueryPool, READ_THREAD } from './pool.ts'
 import type { SlowQuery } from './slow.ts'
 import type { ReadThreadData } from './thread.ts'
@@ -128,7 +129,7 @@ describe('read threads', () => {
     })
     const reads = pooledReads(pool)
     const run = (op: string, input: unknown) =>
-      reads.run(op as never, input as never).catch((e: unknown) => e)
+      reads.run(SYSTEM, op as never, input as never).catch((e: unknown) => e)
     const timedOut = await run('slow', { ms: 1000 })
     expect(timedOut).toBeInstanceOf(AgentError)
     expect(timedOut).toMatchObject({ code: 'query_timeout' })
@@ -164,9 +165,9 @@ describe('read threads', () => {
       params: { q: ['cat'], view: ['full'] },
       origin: 'https://midden.test',
     }
-    const answer = await pooled.run('search', input)
+    const answer = await pooled.run(SYSTEM, 'search', input)
     expect(answer.items.length).toBe(2)
-    expect(answer).toEqual(await inline.run('search', input))
+    expect(answer).toEqual(await inline.run(SYSTEM, 'search', input))
     // Its statements are timed and reported with the request they ran for,
     // named by its canonical query.
     expect(slow.length).toBeGreaterThan(0)
@@ -177,12 +178,19 @@ describe('read threads', () => {
       ms: expect.any(Number),
     })
     const missing = await pooled
-      .run('context', { id: fixture.ids['7']!, origin: '' })
+      .run(SYSTEM, 'context', { id: fixture.ids['7']!, origin: '' })
       .catch((e: unknown) => e)
     expect(missing).toMatchObject({ code: 'not_found' })
     // Its connection only reads.
-    expect(await pooled.run('folders', undefined)).toEqual({ items: [] })
+    expect(await pooled.run(SYSTEM, 'folders', undefined)).toEqual({
+      items: [],
+    })
     // A folder the web process just wrote is counted there.
-    expect(await pool.run('web', 'folderCounts', { id: 'none' })).toBeNull()
+    expect(
+      await pool.run('web', 'folderCounts', {
+        principal: SYSTEM,
+        input: { id: 'none' },
+      }),
+    ).toBeNull()
   }, 30_000)
 })

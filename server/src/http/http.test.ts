@@ -274,7 +274,7 @@ describe('api', () => {
     expect(cookie.startsWith(`${SESSION_COOKIE}=`)).toBe(true)
     expect(
       (await app.request('/session', { headers: { Cookie: cookie } })).status,
-    ).toBe(204)
+    ).toBe(200)
     const write = (origin?: string) =>
       app.request('/captures', {
         method: 'POST',
