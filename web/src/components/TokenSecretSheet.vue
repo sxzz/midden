@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
 import { useId, useTemplateRef, watch } from 'vue'
 import { toast } from '../composables/useToast'
+import { showSheet } from '../sheet-focus'
 
 // A token's secret, right after it was made or rolled: the server keeps only
 // its digest, so this is the one time it shows.
@@ -12,7 +13,7 @@ const field = useTemplateRef<HTMLInputElement>('field')
 watch(
   () => props.open,
   (open) => {
-    if (open) dialog.value?.showModal()
+    if (open) showSheet(dialog.value)
     else dialog.value?.close()
   },
 )

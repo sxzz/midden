@@ -1,5 +1,6 @@
 <script setup vapor lang="ts">
 import { useId, useTemplateRef, watch } from 'vue'
+import { showSheet } from '../sheet-focus'
 import AccountsView from './AccountsView.vue'
 // 采集 → 采集账号: the capture accounts over the records, a sheet from the
 // bottom on a phone and a dialog in the middle from 700px (style.css). Its
@@ -13,7 +14,7 @@ watch(
   [() => props.open, dialog],
   ([open, el]) => {
     if (!el) return
-    if (open && !el.open) el.showModal()
+    if (open && !el.open) showSheet(el)
     else if (!open && el.open) el.close()
   },
   { immediate: true },

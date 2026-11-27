@@ -5,9 +5,9 @@ import {
   openDropdown,
   placeMenu,
   swallowClick,
-  trackPointer,
   type MenuOpener,
 } from '../../action-menu'
+import { showSheet } from '../../sheet-focus'
 /**
  * A list of actions (see action-menu.ts): opened with a mouse, a dropdown
  * under the button it was opened from, with no title and no 取消; else an
@@ -30,7 +30,6 @@ const menu = useTemplateRef<HTMLDivElement>('menu')
 const router = useRouter()
 const itemAttrs = { role: 'menuitem', tabindex: -1 }
 const noAttrs = {}
-trackPointer()
 
 watch(
   () => props.open,
@@ -49,12 +48,7 @@ onBeforeUnmount(hide)
 function openSheet() {
   const dialog = sheet.value
   if (!dialog) return
-  dialog.showModal()
-  // showModal focuses the first action, which some browsers (Safari on
-  // touch) then ring as if a key had moved there. Only the keyboard starts
-  // on it; otherwise the sheet itself holds focus, and Tab still reaches
-  // the actions.
-  if (!props.opener?.keyboard) dialog.focus({ preventScroll: true })
+  showSheet(dialog)
 }
 function backdrop(event: MouseEvent) {
   if (event.target === sheet.value) emit('cancel')

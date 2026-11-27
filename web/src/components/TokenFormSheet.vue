@@ -1,5 +1,6 @@
 <script setup vapor lang="ts">
 import { shallowRef, useId, useTemplateRef, watch } from 'vue'
+import { showSheet } from '../sheet-focus'
 import {
   DEFAULT_EXPIRY_MS,
   expiryPresets,
@@ -44,7 +45,7 @@ watch(
         : Date.now() + DEFAULT_EXPIRY_MS,
     )
     problem.value = ''
-    dialog.value?.showModal()
+    showSheet(dialog.value)
   },
 )
 function preset(ms: number) {

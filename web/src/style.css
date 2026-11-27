@@ -116,6 +116,10 @@ video {
   outline-offset: 2px;
   border-radius: 6px;
 }
+/* A sheet holding focus itself (sheet-focus.ts) is not a control to ring. */
+dialog:focus {
+  outline: none;
+}
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,

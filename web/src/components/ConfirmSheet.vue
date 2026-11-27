@@ -1,5 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, useId, useTemplateRef, watch } from 'vue'
+import { showSheet } from '../sheet-focus'
 const props = defineProps<{
   open: boolean
   title: string
@@ -17,7 +18,7 @@ watch(
   () => props.open,
   (open) => {
     typed.value = ''
-    if (open) dialog.value?.showModal()
+    if (open) showSheet(dialog.value)
     else dialog.value?.close()
   },
 )

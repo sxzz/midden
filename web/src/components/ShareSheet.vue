@@ -3,6 +3,7 @@ import { computed, shallowRef, useId, useTemplateRef, watch } from 'vue'
 import { call, client, errorText, type Share } from '../api'
 import { toast } from '../composables/useToast'
 import { shareURL } from '../share'
+import { showSheet } from '../sheet-focus'
 const props = defineProps<{
   open: boolean
   target: 'folder' | 'collection'
@@ -90,7 +91,7 @@ watch(
   (open) => {
     if (open) {
       void load()
-      dialog.value?.showModal()
+      showSheet(dialog.value)
     } else dialog.value?.close()
   },
 )

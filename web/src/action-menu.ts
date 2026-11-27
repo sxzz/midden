@@ -1,3 +1,5 @@
+import { lastInput } from './sheet-focus'
+
 /**
  * A menu of actions (a folder's ⋯, the 多选 bar's ⋯) opens as a dropdown
  * under its button when it is opened with a mouse or trackpad, as X's ⋯
@@ -45,26 +47,13 @@ export function menuKind(
   return finePointer ? 'dropdown' : 'sheet'
 }
 
-let lastPointer = ''
-let tracking = false
-/** Starts noting the pointer last pressed; a menu does when it is set up. */
-export function trackPointer() {
-  if (tracking) return
-  tracking = true
-  addEventListener(
-    'pointerdown',
-    (event) => (lastPointer = event.pointerType),
-    { capture: true, passive: true },
-  )
-}
-
 /** How the click `event` on a menu's button opens the menu. */
 export function menuOpener(event: MouseEvent): MenuOpener {
   const anchor =
     event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined
   const fine = !!globalThis.matchMedia?.(FINE_POINTER).matches
   return {
-    kind: menuKind(event as Activation, lastPointer, fine),
+    kind: menuKind(event as Activation, lastInput(), fine),
     anchor,
     keyboard: event.detail === 0,
   }

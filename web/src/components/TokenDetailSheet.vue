@@ -8,6 +8,7 @@ import {
   type ApiTokenUsage,
 } from '../api'
 import { date } from '../presentation'
+import { showSheet } from '../sheet-focus'
 import { expiryText, permissionLabels } from '../tokens'
 import UsageBars from './UsageBars.vue'
 
@@ -31,7 +32,7 @@ watch(
       dialog.value?.close()
       return
     }
-    dialog.value?.showModal()
+    showSheet(dialog.value)
     usage.value = undefined
     error.value = ''
     const id = props.token?.id

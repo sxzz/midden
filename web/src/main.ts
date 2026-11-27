@@ -3,6 +3,7 @@ import { legacyAddress } from './app-path'
 import App from './App.vue'
 import { loadHost } from './host'
 import { followShare } from './share'
+import { trackInput } from './sheet-focus'
 import { trackTabs } from './tab-state'
 import './style.css'
 // An old address (`/app/#/captures`, from a bookmark, an old share link or
@@ -10,6 +11,8 @@ import './style.css'
 // reads it. Any other fragment is left alone: Telegram's launch data.
 const legacy = legacyAddress(location.hash)
 if (legacy !== undefined) history.replaceState(history.state, '', legacy)
+// Sheets start focus by what opened them (sheet-focus.ts).
+trackInput()
 // Telegram's script reads the Mini App's launch data from the address
 // (`#tgWebAppData=…`), so the router loads only after the script.
 void loadHost()

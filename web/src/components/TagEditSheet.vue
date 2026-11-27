@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
 import { shallowRef, useId, useTemplateRef, watch } from 'vue'
 import { call, client, errorText, type Tag, type TagChange } from '../api'
+import { showSheet } from '../sheet-focus'
 import ConfirmSheet from './ConfirmSheet.vue'
 
 const props = defineProps<{
@@ -30,7 +31,7 @@ watch(
   },
 )
 watch(step, (value) => {
-  if (value === 'edit') dialog.value?.showModal()
+  if (value === 'edit') showSheet(dialog.value)
   else dialog.value?.close()
 })
 

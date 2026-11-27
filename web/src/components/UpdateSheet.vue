@@ -10,6 +10,7 @@ import {
 import { defaultOptions, type Options } from '../capture-options'
 import { countText, coverText } from '../captures'
 import { toast } from '../composables/useToast'
+import { showSheet } from '../sheet-focus'
 import CaptureOptions from './CaptureOptions.vue'
 import SkeletonBox from './ui/SkeletonBox.vue'
 const props = defineProps<{
@@ -56,7 +57,7 @@ watch(
     if (open) {
       options.value = defaultOptions()
       void load()
-      dialog.value?.showModal()
+      showSheet(dialog.value)
     } else {
       ++request
       dialog.value?.close()

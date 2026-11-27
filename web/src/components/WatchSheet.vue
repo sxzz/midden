@@ -12,6 +12,7 @@ import {
 } from '../api'
 import { defaultOptions, type Options } from '../capture-options'
 import { toast } from '../composables/useToast'
+import { showSheet } from '../sheet-focus'
 import {
   DEFAULT_EVERY,
   fitCount,
@@ -87,7 +88,7 @@ watch(
   (open) => {
     if (open) {
       void load()
-      dialog.value?.showModal()
+      showSheet(dialog.value)
     } else {
       ++request
       dialog.value?.close()

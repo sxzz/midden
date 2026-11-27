@@ -31,6 +31,7 @@ import { mediaRemovals } from '../media-removals'
 import { navigatesHere } from '../navigation'
 import { isRemoved, present } from '../presentation'
 import { collectionHref, shareSlug } from '../share'
+import { showSheet } from '../sheet-focus'
 import { kindOf } from '../titles'
 import MediaPreview from './MediaPreview.vue'
 import MediaRemovalSheet from './MediaRemovalSheet.vue'
@@ -367,7 +368,7 @@ onMounted(() => {
       : null
   previousOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
-  dialog.value?.showModal()
+  showSheet(dialog.value)
   stage.value.addEventListener('click', captionClick)
   // A tap anywhere but the menu and its button puts the menu away.
   dialog.value?.addEventListener(
