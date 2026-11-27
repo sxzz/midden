@@ -22,6 +22,9 @@
   /* The edge of a media tile (see MediaGallery). */
   --media-edge: rgba(0, 0, 0, 0.1);
   --radius: 10px;
+  /* How far a focus ring reaches past its control: its width and offset
+     (`:focus-visible` below). Scrollers keep this much room. */
+  --ring-room: 4px;
   --inset: 16px;
   --gutter: 16px;
   font-family:

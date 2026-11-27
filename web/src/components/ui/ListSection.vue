@@ -32,6 +32,13 @@ defineProps<{ title?: string; footnote?: string; plain?: boolean }>()
   border-radius: 0;
   overflow: visible;
 }
+/* The card clips its rows to its round corners, and so the ring a row
+   draws around itself: a row's ring is drawn inside it instead, as round
+   as the card, so it meets the card's corners on the first and last row. */
+.section-body:not(.plain) > :deep(:focus-visible) {
+  outline-offset: -2px;
+  border-radius: var(--radius);
+}
 .section-footnote {
   margin: 8px 0 0;
   padding: 0 calc(var(--gutter) + 4px);

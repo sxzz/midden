@@ -207,6 +207,14 @@ dialog.sheet-dialog::backdrop {
   font-weight: 600;
   box-shadow: none;
 }
+/* Rows edge to edge of a group that clips them to its corners: their rings
+   go inside, as round as the group. From 700px they are buttons and ring
+   outside again (below). */
+.sheet-actions > .action:focus-visible,
+.sheet-cancel:focus-visible {
+  outline-offset: -2px;
+  border-radius: 14px;
+}
 .sheet-close {
   display: none;
 }
@@ -284,10 +292,18 @@ dialog.sheet-page {
     font-size: 18px;
     font-weight: 700;
   }
-  /* The content scrolls between the title and the buttons. */
+  /* The content scrolls between the title and the buttons. A scroller
+     clips what its children draw past its edges, focus rings included
+     (2px wide, 2px out: style.css), so it reaches a ring's width further
+     out than its content on each end, into the title's and the buttons'
+     padding, and a field at the top or the bottom keeps its whole ring.
+     Sideways the content keeps its inset, and rows that run edge to edge
+     draw their rings inside (below). */
   .sheet-body {
     flex: 1 1 auto;
     min-height: 0;
+    margin-block: calc(-1 * var(--ring-room));
+    padding-block: var(--ring-room);
     overflow-y: auto;
   }
   .sheet-actions {
@@ -319,6 +335,10 @@ dialog.sheet-page {
   }
   .sheet-actions > .action:hover:not(:disabled) {
     background: var(--raised-fill);
+  }
+  .sheet-actions > .action:focus-visible {
+    outline-offset: 2px;
+    border-radius: 8px;
   }
   .sheet-actions > .action:disabled {
     color: var(--text);
