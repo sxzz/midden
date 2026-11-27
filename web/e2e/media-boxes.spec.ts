@@ -292,7 +292,7 @@ test('a list row keeps a gap and an edge between two tiles', async ({
   page,
 }) => {
   await serve(page, [image(1, 1200, 200), image(2, 1200, 240)])
-  await page.goto('/app/')
+  await page.goto('/')
   const tiles = page.locator('.thumbs .tile')
   await expect(tiles).toHaveCount(2)
   const a = await box(tiles.nth(0))

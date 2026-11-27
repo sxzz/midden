@@ -177,7 +177,7 @@ it("puts 更新, 打开原文 and ⋯ in the card's corner; 更新 opens the she
   )
   expect(
     el.querySelector('.card-actions a.card-pill')?.getAttribute('href'),
-  ).toMatch(/^\/app\/captures\//)
+  ).toMatch(/^\/captures\//)
   expect(sent.at(-1)).toEqual({
     path: '/updates',
     body: {

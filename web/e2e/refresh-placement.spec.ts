@@ -20,14 +20,11 @@ const alone = (page: Page) =>
   )
 
 const pages = [
-  ['/app/', 'main .row'],
-  ['/app/?entity_type=x.profile,instagram.profile', 'main .layout-bar'],
-  ['/app/captures', 'button[aria-label="刷新"]'],
-  [
-    `/app/collection/${PROFILE_ID}/history/follows`,
-    'button[aria-label="刷新"]',
-  ],
-  [`/app/s/${FOLDER_SLUG}`, 'main .row'],
+  ['/', 'main .row'],
+  ['/?entity_type=x.profile,instagram.profile', 'main .layout-bar'],
+  ['/captures', 'button[aria-label="刷新"]'],
+  [`/collection/${PROFILE_ID}/history/follows`, 'button[aria-label="刷新"]'],
+  [`/s/${FOLDER_SLUG}`, 'main .row'],
 ] as const
 
 for (const width of [390, 1280]) {
@@ -41,11 +38,11 @@ for (const width of [390, 1280]) {
       expect(await alone(page), address).toEqual([])
     }
     // 关注 and 采集 have no toolbar: 刷新 is in the header.
-    await page.goto(`/app/collection/${PROFILE_ID}/history/follows`)
+    await page.goto(`/collection/${PROFILE_ID}/history/follows`)
     await expect(
       page.locator('header').getByRole('button', { name: '刷新' }),
     ).toBeVisible()
-    await page.goto('/app/captures')
+    await page.goto('/captures')
     await expect(
       page.locator('header').getByRole('button', { name: '刷新' }),
     ).toBeVisible()

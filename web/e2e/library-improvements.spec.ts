@@ -98,7 +98,7 @@ test('restores sort controls and opens author links in a new tab', async ({
   // 返回 goes to the list as it was left; 探索, the open tab, resets it.
   await expect(
     page.getByRole('link', { name: '返回', exact: true }),
-  ).toHaveAttribute('href', '/app/?sort=published&order=asc')
+  ).toHaveAttribute('href', '/?sort=published&order=asc')
   await page
     .getByRole('navigation', { name: '主导航' })
     .getByRole('link', { name: '探索' })

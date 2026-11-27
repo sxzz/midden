@@ -17,7 +17,7 @@ test.describe('on a desktop', () => {
   }) => {
     await page.emulateMedia({ colorScheme: 'light' })
     await mockDesktop(page)
-    await page.goto('/app/')
+    await page.goto('/')
     await expect(page.locator('h1')).toHaveText('收藏库')
     await expect(html(page)).not.toHaveClass(/\bdark\b/)
     await rail(page).getByRole('button', { name: '切换到深色模式' }).click()
@@ -54,7 +54,7 @@ for (const width of [1000, 1440]) {
 
     test('beside the account, not set as a tab', async ({ page }) => {
       await mockDesktop(page)
-      await page.goto('/app/')
+      await page.goto('/')
       const toggle = rail(page).getByRole('button', {
         name: '切换到深色模式',
       })
@@ -84,7 +84,7 @@ for (const width of [1000, 1440]) {
 test('on a phone 设置 has 深色模式', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' })
   await mockDesktop(page)
-  await page.goto('/app/settings')
+  await page.goto('/settings')
   const toggle = page.getByRole('switch', { name: '深色模式' })
   await expect(toggle).not.toBeChecked()
   // A row as the others in the list.
@@ -126,10 +126,10 @@ test('inside Telegram there is no toggle: its theme rules', async ({
     }),
   )
   await page.route('**/v1/auth/telegram', (r) => r.fulfill({ json: {} }))
-  await page.goto('/app/#tgWebAppData=user%3D42%26hash%3Dabc')
+  await page.goto('/#tgWebAppData=user%3D42%26hash%3Dabc')
   await expect(page.locator('h1')).toHaveText('收藏库')
   await expect(html(page)).toHaveClass(/\bdark\b/)
   await expect(page.getByRole('button', { name: /^切换到/ })).toHaveCount(0)
-  await page.goto('/app/settings#tgWebAppData=user%3D42%26hash%3Dabc')
+  await page.goto('/settings#tgWebAppData=user%3D42%26hash%3Dabc')
   await expect(page.getByRole('switch', { name: '深色模式' })).toHaveCount(0)
 })

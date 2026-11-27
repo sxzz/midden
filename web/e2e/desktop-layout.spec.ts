@@ -184,7 +184,7 @@ test.describe('the widths from 1280px', () => {
     test(`at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await mockDesktop(page)
-      await page.goto('/app/')
+      await page.goto('/')
       await expect(sidebar(page)).toBeVisible()
       expect(await fits(page)).toBe(true)
       const [r, c, s] = await Promise.all(
@@ -488,7 +488,7 @@ for (const width of [390, 800])
   }) => {
     await page.setViewportSize({ width, height: 900 })
     await mockDesktop(page)
-    await page.goto(`/app/collection/${PROFILE_ID}`)
+    await page.goto(`/collection/${PROFILE_ID}`)
     await expect
       .poll(() => corner(page))
       .toEqual(['更新', '打开原文', '更多操作'])
@@ -504,7 +504,7 @@ test('at 1280px the card has 打开原文 and ⋯, the sidebar 更新', async ({
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await mockDesktop(page)
-  await page.goto(`/app/collection/${PROFILE_ID}`)
+  await page.goto(`/collection/${PROFILE_ID}`)
   await expect.poll(() => corner(page)).toEqual(['打开原文', '更多操作'])
   await expect(
     sidebar(page)

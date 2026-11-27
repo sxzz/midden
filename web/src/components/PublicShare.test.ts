@@ -318,7 +318,7 @@ it('shows a shared post read-only, its links kept inside the share', async () =>
     return found!
   })
   expect(tab.getAttribute('href')).toBe(
-    `/app/s/${SLUG}/collection/${PROFILE}/history/follows`,
+    `/s/${SLUG}/collection/${PROFILE}/history/follows`,
   )
   tab.click()
   await vi.waitFor(() =>

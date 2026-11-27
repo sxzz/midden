@@ -50,7 +50,7 @@ test.describe('in a dialog', () => {
     }) => {
       await page.emulateMedia({ colorScheme: scheme })
       await mockDesktop(page)
-      await page.goto('/app/settings/admin/origins')
+      await page.goto('/settings/admin/origins')
       await page.getByRole('button', { name: '添加域名' }).click()
       const dialog = page.getByRole('dialog', { name: '添加域名' })
       const field = dialog.getByRole('textbox', { name: '地址' })
@@ -95,7 +95,7 @@ test.describe('a composite field', () => {
     }) => {
       await page.emulateMedia({ colorScheme: scheme })
       await mockDesktop(page)
-      await page.goto(`/app/collection/${POST_ID}`)
+      await page.goto(`/collection/${POST_ID}`)
       await page.getByRole('button', { name: /我的整理/ }).click()
       const field = page.getByRole('textbox', { name: '新标签名称' })
       await field.focus()
@@ -118,7 +118,7 @@ test.describe('a composite field', () => {
 
   test('the search box rings as one', async ({ page }) => {
     await mockDesktop(page)
-    await page.goto('/app/')
+    await page.goto('/')
     const field = page.locator('main .query .field')
     await field.focus()
     const bar = field.locator('xpath=..')
@@ -134,7 +134,7 @@ test.describe('a composite field', () => {
     }) => {
       await page.emulateMedia({ colorScheme: scheme })
       await mockDesktop(page)
-      await page.goto('/app/captures')
+      await page.goto('/captures')
       const field = page
         .getByRole('complementary', { name: '侧栏' })
         .getByRole('combobox', { name: '搜索收藏' })

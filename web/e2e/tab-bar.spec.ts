@@ -333,7 +333,7 @@ test('the open tab, tapped again, resets it; the first tap still restores it', a
   page,
 }) => {
   await mock(page)
-  await page.goto('/app/?q=%E6%94%B6%E8%97%8F&sort=saved&order=asc')
+  await page.goto('/?q=%E6%94%B6%E8%97%8F&sort=saved&order=asc')
   const box = page.getByRole('combobox').first()
   await expect(box).toHaveValue('收藏')
   await page.mouse.move(195, 400)
@@ -345,30 +345,30 @@ test('the open tab, tapped again, resets it; the first tap still restores it', a
   await tab(page, '采集').click()
   await expect(page.locator('h1')).toHaveText('采集')
   await tab(page, '探索').click()
-  await expect(page).toHaveURL(/\/app\/\?q=.*sort=saved/)
+  await expect(page).toHaveURL(/\/\?q=.*sort=saved/)
   await expect(box).toHaveValue('收藏')
   // Tapped again: the plain list, its search box empty, at the top.
-  await expect(tab(page, '探索')).toHaveAttribute('href', '/app/')
+  await expect(tab(page, '探索')).toHaveAttribute('href', '/')
   await tab(page, '探索').click()
-  await expect(page).toHaveURL(/\/app\/$/)
+  await expect(page).toHaveURL(/:\d+\/$/)
   await expect(box).toHaveValue('')
   await expect.poll(() => scrollY(page)).toBe(0)
   // That is what the tab now keeps.
   await tab(page, '采集').click()
-  await expect(tab(page, '探索')).toHaveAttribute('href', '/app/')
+  await expect(tab(page, '探索')).toHaveAttribute('href', '/')
 
   // 采集, on its other tab: back to 采集记录, at the top. (The accounts
   // dialog is modal, so the bar cannot be tapped while it is open.)
   await page.getByRole('link', { name: '定期更新' }).click()
-  await expect(page).toHaveURL(/\/app\/captures\/watches$/)
-  await expect(tab(page, '采集')).toHaveAttribute('href', '/app/captures')
+  await expect(page).toHaveURL(/\/captures\/watches$/)
+  await expect(tab(page, '采集')).toHaveAttribute('href', '/captures')
   await tab(page, '采集').click()
-  await expect(page).toHaveURL(/\/app\/captures$/)
+  await expect(page).toHaveURL(/\/captures$/)
   await expect(page.locator('h1')).toHaveText('采集')
   await expect.poll(() => scrollY(page)).toBe(0)
   // Another tab, and back: 采集 kept its reset state.
   await tab(page, '设置').click()
-  await expect(tab(page, '采集')).toHaveAttribute('href', '/app/captures')
+  await expect(tab(page, '采集')).toHaveAttribute('href', '/captures')
 })
 
 test('titles a post and an account by what they are', async ({ page }) => {

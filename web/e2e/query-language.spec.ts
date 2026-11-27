@@ -409,7 +409,7 @@ for (const scheme of ['light', 'dark'] as const) {
   }) => {
     await page.emulateMedia({ colorScheme: scheme })
     await mock(page)
-    await page.goto('/app/')
+    await page.goto('/')
     await expect(page.getByText('第 1 只猫')).toBeVisible()
     await box(page).fill('cat')
     const toggle = page.getByRole('button', { name: '查询语法' })
@@ -491,7 +491,7 @@ for (const scheme of ['light', 'dark'] as const) {
   }) => {
     await page.emulateMedia({ colorScheme: scheme })
     await mock(page)
-    await page.goto('/app/')
+    await page.goto('/')
     await expect(page.getByText('第 1 只猫')).toBeVisible()
     await box(page).click()
     await page.keyboard.type('ta')
@@ -532,7 +532,7 @@ for (const scheme of ['light', 'dark'] as const) {
   test(`the focus ring is the whole box (${scheme})`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: scheme })
     await mock(page)
-    await page.goto('/app/')
+    await page.goto('/')
     await box(page).fill('cat')
     await box(page).focus()
     const bar = page.locator('.query .bar')

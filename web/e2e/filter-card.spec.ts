@@ -21,7 +21,7 @@ test.describe('at 1280px', () => {
     page,
   }) => {
     await mockDesktop(page)
-    await page.goto('/app/')
+    await page.goto('/')
     await expect(page.locator('h1')).toHaveText('收藏库')
     await expect(card(page)).toBeVisible()
     // Not in the column as well.
@@ -72,7 +72,7 @@ test.describe('at 1280px', () => {
 
     // 重置 clears everything.
     await card(page).getByRole('button', { name: '重置' }).click()
-    await expect(page).toHaveURL(/\/app\/$/)
+    await expect(page).toHaveURL(/:\d+\/$/)
     await expect(box(page)).toHaveValue('')
     await expect(
       card(page).getByRole('radio', { name: '全部', exact: true }).first(),
@@ -83,11 +83,11 @@ test.describe('at 1280px', () => {
     page,
   }) => {
     await mockDesktop(page)
-    await page.goto('/app/')
+    await page.goto('/')
     await expect(kindTab(page, '帖子')).toHaveAttribute('aria-current', 'page')
     await kindTab(page, '账号').click()
     await expect(page).toHaveURL(
-      /\/app\/\?entity_type=x\.profile,instagram\.profile$/,
+      /\/\?entity_type=x\.profile,instagram\.profile$/,
     )
     await expect(kindTab(page, '账号')).toHaveAttribute('aria-current', 'page')
     // An account has no post type to filter by; one card at a time.
@@ -96,7 +96,7 @@ test.describe('at 1280px', () => {
       card(page).getByRole('radiogroup', { name: '帖子类型' }),
     ).toHaveCount(0)
     await kindTab(page, '帖子').click()
-    await expect(page).toHaveURL(/\/app\/$/)
+    await expect(page).toHaveURL(/:\d+\/$/)
     await expect(
       card(page).getByRole('radiogroup', { name: '帖子类型' }),
     ).toBeVisible()
@@ -109,7 +109,7 @@ test.describe('at 1280px', () => {
         json: { target: 'folder', name: '公开的风景', posts: 128, profiles: 3 },
       }),
     )
-    await page.goto(`/app/s/${FOLDER_SLUG}`)
+    await page.goto(`/s/${FOLDER_SLUG}`)
     await expect(page.locator('h1')).toHaveText('公开的风景')
     await expect(kindTab(page, '帖子')).toHaveAttribute('aria-current', 'page')
     await expect(card(page)).toBeVisible()
@@ -129,9 +129,9 @@ test.describe('in a short window', () => {
 
   test('a wheel over the card moves it, down to its foot', async ({ page }) => {
     await mockDesktop(page)
-    await page.goto('/app/')
+    await page.goto('/')
     // Everything set, so 更多条件 is open and the card is at its tallest.
-    await page.goto('/app/?visibility=public&post_type=quote')
+    await page.goto('/?visibility=public&post_type=quote')
     await expect(card(page)).toBeVisible()
     const foot = card(page).getByRole('button', { name: '查询语法' })
     await expect(foot).not.toBeInViewport()
@@ -159,7 +159,7 @@ test.describe('at 800px', () => {
 
   test('the filters stay in the column', async ({ page }) => {
     await mockDesktop(page)
-    await page.goto('/app/')
+    await page.goto('/')
     await expect(page.locator('h1')).toHaveText('收藏库')
     await expect(sidebar(page)).toHaveCount(0)
     await expect(page.locator('.filter-card')).toHaveCount(0)
