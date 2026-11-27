@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Deploy the newest published image to the checkout in MIDDEN_DIR (default
-// ~/midden), or with --check only report what would be deployed. Uses Node
-// built-ins only: the deploy webhook runs this file as it is on origin/main.
+// ~/midden), or with --check only report what would be deployed. A version
+// that is not healthy, or fails the smoke test of its main endpoints, is
+// rolled back. Uses Node built-ins (and curl) only: the deploy webhook runs
+// this file as it is on origin/main.
 //
 //   node scripts/deploy.ts [--check]
 
@@ -21,6 +23,7 @@ import {
 } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
+import { performance } from 'node:perf_hooks'
 import process from 'node:process'
 import { parseEnv } from 'node:util'
 
@@ -41,6 +44,12 @@ const MONITOR_INTERVAL = 10_000
 const LITESTREAM_SETTLE = 5000
 const INTERVAL = /^\s*monitor-interval:\s*(\d+)(ms|s|m)\s*$/m
 const UNIT: Record<string, number> = { ms: 1, s: 1000, m: 60_000 }
+// The smoke test after a start: each request gets this many seconds, with a
+// read-only token that expires on its own should revoking it fail.
+const SMOKE_TIMEOUT = 15
+const SMOKE_EXPIRES = '15m'
+// What `midden token create --ro` prints on stdout, alone.
+const SECRET = /^mdn_ro_[\w-]+$/
 
 /** Runs a command in the checkout and returns its trimmed stdout. */
 export type Run = (
@@ -48,6 +57,86 @@ export type Run = (
   args: string[],
   env?: Record<string, string>,
 ) => string
+
+/** An answer to a smoke test request; `error` when none came. */
+export interface Response {
+  status: number
+  body: string
+  error?: string
+}
+
+/** GET `url` with the bearer `token`; never throws. */
+export type Get = (url: string, token: string) => Response
+
+/**
+ * curl, as for /healthz. The header goes in on stdin (`-H @-`): a secret in
+ * the arguments would show in `ps` and in the message of a failed command.
+ */
+export function curlGet(
+  url: string,
+  token: string,
+  timeout = SMOKE_TIMEOUT,
+): Response {
+  try {
+    const output = execFileSync(
+      'curl',
+      [
+        '-sS',
+        '--max-time',
+        String(timeout),
+        '-H',
+        '@-',
+        '-w',
+        '\n%{http_code}',
+        url,
+      ],
+      {
+        input: `Authorization: Bearer ${token}\n`,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        maxBuffer: 64 * 1024 * 1024,
+        timeout: (timeout + 5) * 1000,
+      },
+    )
+    const end = output.lastIndexOf('\n')
+    return {
+      status: Number(output.slice(end + 1)),
+      body: output.slice(0, end),
+    }
+  } catch (error) {
+    const { status, stderr } = error as { status?: number; stderr?: string }
+    return {
+      status: 0,
+      body: '',
+      // curl exits 28 on --max-time.
+      error:
+        status === 28
+          ? 'timed out'
+          : stderr?.trim().split('\n').at(-1) || message(error),
+    }
+  }
+}
+
+/** A smoke test check that did not pass: the deployment rolls back. */
+class SmokeFailure extends Error {}
+
+/**
+ * The key `/v1/collections/graph?of=` takes for an account collection, as
+ * the web writes it: platform, entity type and the platform's id, escaped.
+ */
+function accountKey(collection: {
+  graph?: {
+    root?: string
+    entities?: { key?: string; type?: string; external_id?: string }[]
+  }
+}): string | undefined {
+  const graph = collection.graph
+  const root = graph?.entities?.find((entity) => entity.key === graph.root)
+  if (!root?.type?.endsWith('.profile') || !root.external_id) return undefined
+  return [root.type.split('.', 1)[0]!, root.type, root.external_id]
+    .map((part) => encodeURIComponent(part))
+    .join('/')
+}
 
 function step(message: string) {
   console.info(`== ${message}`)
@@ -62,6 +151,10 @@ export interface DeployOptions {
   check?: boolean
   /** Blocks between health checks; tests pass a recorder. */
   sleep?: (ms: number) => void
+  /** The smoke test's requests; tests pass a fake. */
+  get?: Get
+  /** Milliseconds, for the smoke test's durations. */
+  clock?: () => number
 }
 
 /** A pre-deploy copy of the database, with its WAL if one was left. */
@@ -173,7 +266,12 @@ export function services(
   }
 
   function healthz(): string {
-    return `http://127.0.0.1:${settings().port}/healthz`
+    return `${base()}/healthz`
+  }
+
+  /** Where the started version answers on this host. */
+  function base(): string {
+    return `http://127.0.0.1:${settings().port}`
   }
 
   /**
@@ -255,6 +353,7 @@ export function services(
     imageRevision,
     runningRevision,
     settings,
+    base,
     start,
     litestreamConfigChanged,
     hasWorker,
@@ -267,12 +366,18 @@ export function services(
 export function deploy(
   dir: string,
   run: Run,
-  { check = false, sleep = sleepSync }: DeployOptions = {},
+  {
+    check = false,
+    sleep = sleepSync,
+    get = curlGet,
+    clock = () => performance.now(),
+  }: DeployOptions = {},
 ): string {
   const {
     imageRevision,
     runningRevision,
     settings,
+    base,
     start,
     litestreamConfigChanged,
     stopWorker,
@@ -363,6 +468,146 @@ export function deploy(
       })
   }
 
+  /** `midden` in the running web container. */
+  function cli(...args: string[]): string {
+    return run('docker', ['compose', 'exec', '-T', 'midden', 'midden', ...args])
+  }
+
+  /**
+   * Read the main endpoints of the started version with a read-only token
+   * made for it and revoked afterwards, whatever happens; returns the
+   * summary for the result line. Throws a SmokeFailure naming what failed.
+   */
+  function smokeTest(revision: string): string {
+    step('smoke test')
+    // Unique, so revoking by label never meets an older token.
+    const label = `deploy-smoke-${revision.slice(0, 12)}-${Date.now().toString(36)}`
+    let token: string
+    try {
+      token = cli(
+        'token',
+        'create',
+        '--ro',
+        '--label',
+        label,
+        '--expires',
+        SMOKE_EXPIRES,
+      )
+      // Never the output in the message: it may be the secret.
+      if (!SECRET.test(token))
+        throw new Error('token create printed no read-only token')
+    } catch (error) {
+      revoke(label)
+      throw new SmokeFailure(
+        `smoke failed: could not make a token: ${message(error)}`,
+      )
+    }
+    try {
+      return smokeChecks(token)
+    } finally {
+      revoke(label)
+    }
+  }
+
+  /** Revoke the smoke test token; a failure is reported, not thrown. */
+  function revoke(label: string) {
+    try {
+      cli('token', 'revoke', label)
+    } catch (error) {
+      console.error(
+        `could not revoke the smoke test token ${label} (it expires in ${SMOKE_EXPIRES}): ${message(error)}`,
+      )
+    }
+  }
+
+  /**
+   * The checks, in order; the ones that need a collection or an account
+   * are skipped when the library has none (a new or empty install).
+   */
+  function smokeChecks(token: string): string {
+    const origin = base()
+    const results: { name: string; seconds: number; problem?: string }[] = []
+    let skipped = 0
+    /** The JSON of a 2xx answer; undefined when the check failed. */
+    const check = (name: string, target: string): any => {
+      const started = clock()
+      let response: Response
+      try {
+        response = get(origin + target, token)
+      } catch (error) {
+        response = { status: 0, body: '', error: message(error) }
+      }
+      const seconds = (clock() - started) / 1000
+      let problem =
+        response.error ??
+        (response.status >= 200 && response.status < 300
+          ? undefined
+          : String(response.status))
+      let json: unknown
+      if (!problem)
+        try {
+          json = JSON.parse(response.body)
+        } catch {
+          problem = `${response.status}, not JSON`
+        }
+      const endpoint = `GET ${target.split('?', 1)[0]}`
+      console.info(
+        `${problem ? 'FAIL' : 'ok'} ${endpoint} ${problem ?? response.status} ${seconds.toFixed(2)}s`,
+      )
+      results.push({
+        name,
+        seconds,
+        ...(problem ? { problem: `${endpoint} ${problem}` } : {}),
+      })
+      return problem ? undefined : json
+    }
+    const skip = (what: string) => {
+      skipped++
+      console.info(`skipped ${what}`)
+    }
+
+    check('session', '/v1/session')
+    const list = check('collections', '/v1/collections?limit=20')
+    check('count', '/v1/collections/count')
+    check('stats', '/v1/library/stats')
+    check('folders', '/v1/folders')
+    check('captures', '/v1/captures')
+    const first = list?.items?.[0]?.id
+    if (typeof first === 'string')
+      check('detail', `/v1/collections/${encodeURIComponent(first)}`)
+    else if (list) skip('a collection: the library has none')
+    const profiles = check(
+      'profiles',
+      `/v1/collections?q=${encodeURIComponent('type:profile')}&limit=1`,
+    )
+    let profile = profiles?.items?.[0]
+    // The list carries the graph; the collection itself, should it not.
+    if (profile && !accountKey(profile) && typeof profile.id === 'string')
+      profile = check(
+        'profile',
+        `/v1/collections/${encodeURIComponent(profile.id)}`,
+      )
+    const key = profile && accountKey(profile)
+    if (key)
+      check(
+        'graph',
+        `/v1/collections/graph?of=${encodeURIComponent(key)}&kinds=following,followers&limit=50`,
+      )
+    else if (profiles) skip('the relation graph: the library has no account')
+    check('whoami', '/agent/v1/whoami')
+    check('posts', '/agent/v1/posts?size=5')
+    check('aggregate', '/agent/v1/aggregate?by=month')
+
+    const failed = results.filter((result) => result.problem)
+    const passed = results.length - failed.length
+    if (failed.length)
+      throw new SmokeFailure(
+        `smoke failed ${passed}/${results.length}: ${failed.map((result) => result.problem).join(', ')}`,
+      )
+    const slowest = results.reduce((a, b) => (b.seconds > a.seconds ? b : a))
+    return `smoke ${passed}/${results.length}${skipped ? `, ${skipped} skipped` : ''}, slowest ${slowest.name} ${slowest.seconds.toFixed(1)}s`
+  }
+
   if (run('git', ['status', '--porcelain', '--untracked-files=normal']))
     throw new Error(`${dir} has local changes; commit or move them first`)
 
@@ -415,6 +660,7 @@ export function deploy(
     }
   }
   let note: string
+  let smoked: string
   try {
     step(`starting ${revision}`)
     note = start(
@@ -425,11 +671,19 @@ export function deploy(
           }
         : undefined,
     )
+    smoked = smokeTest(revision)
   } catch (error) {
     console.error(message(error))
+    const smoke = error instanceof SmokeFailure
     if (!current)
-      throw new Error(`${revision} did not become healthy`, { cause: error })
+      throw new Error(
+        smoke
+          ? `${revision} ${error.message}`
+          : `${revision} did not become healthy`,
+        { cause: error },
+      )
     // Migrations may have run: put back the database the old version knew.
+    // What the new version wrote since it started goes with it.
     step(`rolling back to ${current}`)
     restore(dataDir, backup!, litestream)
     const back = start(
@@ -438,10 +692,10 @@ export function deploy(
         ? { recreate: litestreamConfigChanged(revision, current) }
         : undefined,
     )
-    return `rolled back ${revision}: unhealthy; running ${current} with the database from ${backup!.database}${back}`
+    return `rolled back ${revision}: ${smoke ? error.message : 'unhealthy'}; running ${current} with the database from ${backup!.database}${back}`
   }
   pruneImages([revision, current])
-  return `deployed ${revision} (was ${current || 'nothing'})${note}`
+  return `deployed ${revision} (was ${current || 'nothing'}); ${smoked}${note}`
 }
 
 if (import.meta.main) {

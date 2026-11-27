@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { once } from 'node:events'
 import {
   existsSync,
   mkdirSync,
@@ -12,7 +14,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { afterEach, beforeEach, describe, mock, test } from 'node:test'
-import { deploy, type Run } from './deploy.ts'
+import { curlGet, deploy, type Get, type Response, type Run } from './deploy.ts'
 
 const IMAGE = 'ghcr.io/sxzz/midden'
 const OLD = 'a'.repeat(40)
@@ -26,13 +28,41 @@ const upService = (service: string, revision: string) =>
   `docker compose up -d --pull never --wait --wait-timeout 180 ${service} [${IMAGE}:sha-${revision}]`
 const up = (revision: string) => upService('midden', revision)
 const upWorker = (revision: string) => upService('midden-worker', revision)
+const TOKEN = 'mdn_ro_smoke-test-secret'
+const CLI = 'docker compose exec -T midden midden'
+const CREATE = new RegExp(
+  String.raw`^${CLI} token create --ro --label (deploy-smoke-${NEW.slice(0, 12)}-\w+) --expires 15m$`,
+)
+const LIST = '/v1/collections?limit=20'
+const PROFILES = '/v1/collections?q=type%3Aprofile&limit=1'
+const GRAPH = `/v1/collections/graph?of=${encodeURIComponent('x/x.profile/42')}&kinds=following,followers&limit=50`
+// Every request, in order, on a library with a collection and an account.
+const SMOKE = [
+  '/v1/session',
+  LIST,
+  '/v1/collections/count',
+  '/v1/library/stats',
+  '/v1/folders',
+  '/v1/captures',
+  '/v1/collections/c1',
+  PROFILES,
+  GRAPH,
+  '/agent/v1/whoami',
+  '/agent/v1/posts?size=5',
+  '/agent/v1/aggregate?by=month',
+].map((target) => `GET ${target}`)
+const DEPLOYED = `deployed ${NEW} (was ${OLD}); smoke 12/12, slowest graph 0.4s`
 
 interface Fake {
-  /** Commands, and the waits between them as `sleep <ms>`. */
+  /** Commands, requests as `GET <path>`, and waits as `sleep <ms>`. */
   calls: string[]
   sleep: (ms: number) => void
   /** State of the data directory seen by named commands. */
   seen: Record<string, { database: string; wal: boolean; state: boolean }>
+  /** Answers by path; anything else is 200 `{}`. */
+  answers: Record<string, Response>
+  get: Get
+  clock: () => number
 }
 
 /**
@@ -48,10 +78,37 @@ function host(
 ): Fake & { run: Run } {
   const data = path.join(dir, 'data')
   const database = path.join(data, 'midden.db')
+  let now = 0
   const fake: Fake = {
     calls: [],
     sleep: (ms) => fake.calls.push(`sleep ${ms}`),
     seen: {},
+    answers: {
+      [LIST]: { status: 200, body: JSON.stringify({ items: [{ id: 'c1' }] }) },
+      [PROFILES]: {
+        status: 200,
+        body: JSON.stringify({
+          items: [
+            {
+              id: 'p1',
+              graph: {
+                root: 'r',
+                entities: [{ key: 'r', type: 'x.profile', external_id: '42' }],
+              },
+            },
+          ],
+        }),
+      },
+    },
+    // Requests take 50 ms, the graph 400 ms.
+    get: (url, token) => {
+      assert.equal(token, TOKEN)
+      const target = url.slice('http://127.0.0.1:8080'.length)
+      fake.calls.push(`GET ${target}`)
+      now += target.startsWith('/v1/collections/graph') ? 400 : 50
+      return fake.answers[target] ?? { status: 200, body: '{}' }
+    },
+    clock: () => now,
   }
   // The checkout is at the running version until a deployment moves it.
   let checkedOut = OLD
@@ -90,6 +147,7 @@ function host(
     if (call.startsWith('docker compose up -d --force-recreate litestream'))
       look('up litestream')
     if (command === 'curl') return 'ok'
+    if (CREATE.test(call)) return TOKEN
     return ''
   }
   return { ...fake, run }
@@ -247,7 +305,7 @@ describe('deploy', () => {
     const fake = host(dir, () => false)
     const result = deploy(dir, fake.run, fake)
 
-    assert.equal(result, `deployed ${NEW} (was ${OLD})`)
+    assert.equal(result, DEPLOYED)
     assert.deepEqual(steps(fake), [
       'docker compose stop midden',
       'docker compose stop litestream',
@@ -281,7 +339,7 @@ describe('deploy', () => {
     const fake = host(dir, (call) => call === UP_LITESTREAM)
     assert.equal(
       deploy(dir, fake.run, fake),
-      `deployed ${NEW} (was ${OLD}); litestream did not start`,
+      `${DEPLOYED}; litestream did not start`,
     )
     assert.ok(!fake.calls.includes(SETTLE))
   })
@@ -291,9 +349,12 @@ describe('deploy', () => {
     let checks = 0
     const fake = host(dir, (call) => call === HEALTH && ++checks <= 3)
     const waits: number[] = []
-    const result = deploy(dir, fake.run, { sleep: (ms) => waits.push(ms) })
+    const result = deploy(dir, fake.run, {
+      ...fake,
+      sleep: (ms) => waits.push(ms),
+    })
 
-    assert.equal(result, `deployed ${NEW} (was ${OLD})`)
+    assert.equal(result, DEPLOYED)
     assert.equal(fake.calls.filter((call) => call === HEALTH).length, 4)
     assert.deepEqual(waits, [6000, 6000, 6000])
     // Only for the copy.
@@ -308,7 +369,10 @@ describe('deploy', () => {
     let checks = 0
     const fake = host(dir, (call) => call === HEALTH && ++checks <= 5)
     const waits: number[] = []
-    const result = deploy(dir, fake.run, { sleep: (ms) => waits.push(ms) })
+    const result = deploy(dir, fake.run, {
+      ...fake,
+      sleep: (ms) => waits.push(ms),
+    })
 
     assert.match(result, new RegExp(`^rolled back ${NEW}: unhealthy`))
     const stop = fake.calls.lastIndexOf('docker compose stop midden')
@@ -325,7 +389,7 @@ describe('deploy', () => {
     env('SECRET_KEY=x\n')
     rmSync(path.join(data, 'midden.db-wal'))
     const fake = host(dir, () => false)
-    assert.equal(deploy(dir, fake.run, fake), `deployed ${NEW} (was ${OLD})`)
+    assert.equal(deploy(dir, fake.run, fake), DEPLOYED)
     assert.ok(backupFiles().every((name) => !name.endsWith('-wal')))
   })
 
@@ -356,7 +420,7 @@ describe('deploy', () => {
     const fake = host(dir, () => false, [OLD, NEW])
     const result = deploy(dir, fake.run, fake)
 
-    assert.equal(result, `deployed ${NEW} (was ${OLD})`)
+    assert.equal(result, DEPLOYED)
     assert.deepEqual(steps(fake), [
       'docker compose stop midden-worker',
       'docker compose stop midden',
@@ -408,5 +472,218 @@ describe('deploy', () => {
       readFileSync(path.join(data, 'midden.db'), 'utf8'),
       'as the old version left it',
     )
+  })
+
+  describe('smoke test', () => {
+    /** The token commands and requests, after the new version started. */
+    const smoke = (fake: Fake) =>
+      fake.calls.filter(
+        (call) => call.startsWith(CLI) || call.startsWith('GET '),
+      )
+    const label = (fake: Fake) =>
+      CREATE.exec(fake.calls.find((call) => CREATE.test(call))!)![1]
+    /** Everything printed, through console.info and console.error. */
+    const printed = () =>
+      [console.info, console.error]
+        .flatMap((fn) => (fn as any).mock.calls)
+        .map((call: { arguments: unknown[] }) => call.arguments.join(' '))
+        .join('\n')
+
+    test('after the worker is up, a read-only token reads the main endpoints and is revoked', () => {
+      env('SECRET_KEY=x\nCOMPOSE_PROFILES=litestream\n')
+      const fake = host(dir, () => false, [OLD, NEW])
+      assert.equal(deploy(dir, fake.run, fake), DEPLOYED)
+
+      const created = fake.calls.findIndex((call) => CREATE.test(call))
+      assert.ok(created > fake.calls.indexOf(upWorker(NEW)))
+      assert.deepEqual(smoke(fake).slice(1), [
+        ...SMOKE,
+        `${CLI} token revoke ${label(fake)}`,
+      ])
+    })
+
+    test('a failing endpoint rolls the deployment back and is named in the result', () => {
+      env('SECRET_KEY=x\nCOMPOSE_PROFILES=litestream\n')
+      const fake = host(dir, () => false, [OLD, NEW])
+      fake.answers['/v1/folders'] = { status: 500, body: '{"error":"x"}' }
+      fake.answers['/v1/session'] = { status: 200, body: '<html>' }
+      fake.answers['/agent/v1/whoami'] = {
+        status: 0,
+        body: '',
+        error: 'timed out',
+      }
+      const result = deploy(dir, fake.run, fake)
+
+      assert.match(
+        result,
+        new RegExp(
+          `^rolled back ${NEW}: smoke failed 9/12: GET /v1/session 200, not JSON, GET /v1/folders 500, GET /agent/v1/whoami timed out; running ${OLD} with the database from `,
+        ),
+      )
+      // Every check ran; the token went before anything stopped, then the
+      // rollback as for an unhealthy version.
+      const revoked = fake.calls.indexOf(`${CLI} token revoke ${label(fake)}`)
+      assert.equal(
+        fake.calls.lastIndexOf('GET /agent/v1/aggregate?by=month'),
+        revoked - 1,
+      )
+      assert.deepEqual(steps(fake).slice(9), [
+        'docker compose stop litestream',
+        'docker compose stop midden-worker',
+        'docker compose stop midden',
+        `git checkout --quiet --detach ${OLD}`,
+        UP_LITESTREAM,
+        SETTLE,
+        up(OLD),
+        HEALTH,
+        upWorker(OLD),
+      ])
+      assert.ok(
+        fake.calls.indexOf('docker compose stop litestream', revoked) > revoked,
+      )
+      assert.equal(
+        readFileSync(path.join(data, 'midden.db'), 'utf8'),
+        'as the old version left it',
+      )
+      // The old version gets no smoke test.
+      assert.equal(fake.calls.filter((call) => CREATE.test(call)).length, 1)
+    })
+
+    test('the token is revoked when a request throws, and when making it goes wrong', () => {
+      env('SECRET_KEY=x\n')
+      let fake = host(dir, () => false)
+      const get = fake.get
+      fake.get = (url, token) => {
+        if (url.endsWith('/v1/captures')) throw new Error('boom')
+        return get(url, token)
+      }
+      assert.match(
+        deploy(dir, fake.run, fake),
+        /^rolled back \w+: smoke failed 11\/12: GET \/v1\/captures boom;/,
+      )
+      assert.equal(smoke(fake).at(-1), `${CLI} token revoke ${label(fake)}`)
+
+      // A token that is not read only is never used, nor shown.
+      fake = host(dir, () => false)
+      const run = fake.run
+      fake.run = (command, args, extra) =>
+        CREATE.test([command, ...args].join(' '))
+          ? (run(command, args, extra), 'mdn_rw_not-this-one')
+          : run(command, args, extra)
+      const result = deploy(dir, fake.run, fake)
+      assert.match(
+        result,
+        /^rolled back \w+: smoke failed: could not make a token: token create printed no read-only token;/,
+      )
+      assert.deepEqual(smoke(fake).slice(1), [
+        `${CLI} token revoke ${label(fake)}`,
+      ])
+      assert.ok(!`${result}\n${printed()}`.includes('mdn_rw_not-this-one'))
+    })
+
+    test('a token that cannot be revoked is reported and does not fail the deployment', () => {
+      env('SECRET_KEY=x\n')
+      const fake = host(dir, (call) => call.includes(' token revoke '))
+      assert.equal(deploy(dir, fake.run, fake), DEPLOYED)
+      assert.match(
+        printed(),
+        /could not revoke the smoke test token deploy-smoke-\w+-\w+ \(it expires in 15m\)/,
+      )
+    })
+
+    test('the secret is in no command, log line or result', () => {
+      env('SECRET_KEY=x\n')
+      const ok = host(dir, () => false)
+      const deployed = deploy(dir, ok.run, ok)
+      const failing = host(dir, () => false)
+      failing.answers['/v1/library/stats'] = { status: 503, body: '' }
+      const rolledBack = deploy(dir, failing.run, failing)
+
+      assert.match(rolledBack, /GET \/v1\/library\/stats 503/)
+      for (const text of [
+        deployed,
+        rolledBack,
+        printed(),
+        ...ok.calls,
+        ...failing.calls,
+      ])
+        assert.ok(!text.includes(TOKEN), text)
+    })
+
+    test('an empty library skips the detail and the relation graph', () => {
+      env('SECRET_KEY=x\n')
+      const fake = host(dir, () => false)
+      fake.answers[LIST] = { status: 200, body: '{"items":[]}' }
+      fake.answers[PROFILES] = { status: 200, body: '{"items":[]}' }
+      assert.match(
+        deploy(dir, fake.run, fake),
+        new RegExp(
+          String.raw`^deployed ${NEW} \(was ${OLD}\); smoke 10/10, 2 skipped, slowest session 0\.1s$`,
+        ),
+      )
+      assert.ok(!fake.calls.includes('GET /v1/collections/c1'))
+      assert.ok(
+        fake.calls.every(
+          (call) => !call.startsWith('GET /v1/collections/graph'),
+        ),
+      )
+    })
+
+    test('an account listed without its graph is read whole for its key', () => {
+      env('SECRET_KEY=x\n')
+      const fake = host(dir, () => false)
+      const profile = JSON.parse(fake.answers[PROFILES]!.body).items[0]
+      fake.answers['/v1/collections/p1'] = {
+        status: 200,
+        body: JSON.stringify(profile),
+      }
+      fake.answers[PROFILES] = { status: 200, body: '{"items":[{"id":"p1"}]}' }
+      assert.match(
+        deploy(dir, fake.run, fake),
+        /; smoke 13\/13, slowest graph 0\.4s$/,
+      )
+      const read = fake.calls.indexOf('GET /v1/collections/p1')
+      assert.ok(read !== -1 && fake.calls[read + 1] === `GET ${GRAPH}`)
+    })
+  })
+})
+
+describe('curlGet', () => {
+  // In a child process: curlGet blocks this one until curl returns.
+  let server: ChildProcess
+  let origin: string
+  beforeEach(async () => {
+    server = spawn(
+      process.execPath,
+      [
+        '-e',
+        `const s = require('node:http').createServer((q, r) => {
+          r.statusCode = q.url === '/down' ? 503 : 200
+          r.end(JSON.stringify({ authorization: q.headers.authorization }))
+        }).listen(0, '127.0.0.1', () => console.log(s.address().port))`,
+      ],
+      { stdio: ['ignore', 'pipe', 'inherit'] },
+    )
+    const [port] = (await once(server.stdout!, 'data')) as [unknown]
+    origin = `http://127.0.0.1:${String(port).trim()}`
+  })
+  afterEach(() => {
+    server.kill()
+  })
+
+  test('sends the token as a bearer header and returns the status and body', () => {
+    assert.deepEqual(curlGet(`${origin}/ok`, TOKEN), {
+      status: 200,
+      body: JSON.stringify({ authorization: `Bearer ${TOKEN}` }),
+    })
+    assert.equal(curlGet(`${origin}/down`, TOKEN).status, 503)
+  })
+
+  test('no answer is an error without the token in it', () => {
+    server.kill()
+    const response = curlGet('http://127.0.0.1:1/', TOKEN, 2)
+    assert.equal(response.status, 0)
+    assert.match(response.error!, /curl|connect/i)
+    assert.ok(!response.error!.includes(TOKEN))
   })
 })

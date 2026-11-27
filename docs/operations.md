@@ -110,7 +110,7 @@ midden token expires sync never
 midden token revoke sync
 ```
 
-冒烟测试（部署后确认 agent 接口可用），令牌 1 小时后自动过期，用完立即撤销：
+自动部署每次都做冒烟测试（见「自动部署」第 5 步）。手动确认 agent 接口可用时，令牌 1 小时后自动过期，用完立即撤销：
 
 ```sh
 SECRET=$(docker compose exec -T midden midden token create --ro --label smoke --expires 1h)
@@ -151,7 +151,8 @@ docker compose pull && docker compose up -d    # 更新（自动部署见下）
 2. 依次停掉正在运行的 worker（`docker compose stop midden-worker`，正在运行的任务回到队列；那个版本没有 worker 时跳过，由它的 `compose.yaml` 判断：`docker compose config --services`）、网页进程，启用 Litestream 时随后停掉它（在服务之后：服务关闭时它还持有数据库，服务的关闭就不是最后一个连接，不会把 WAL 写回并重置；它先把服务最后写的内容复制走，自己关闭时再把 WAL 写回数据库）。部署本来就要重启服务，停下来再复制，不会像在线备份那样在运行中的服务旁持有一个读事务好几分钟（那会让 WAL 涨过 500 MB，Litestream 随之做阻塞的 TRUNCATE 检查点，服务的写入因 `database is locked` 失败）；旧的 worker 也不会在新版本迁移之后继续写；
 3. 备份数据库到 `data/backups/deploy/`：把 `midden.db` 和不为空的 `-wal` 复制过去（`copyFile` 的 `COPYFILE_FICLONE`：APFS 上是写时复制的克隆，几 GB 也立即完成，文件系统不支持时普通复制）。全部停止时两者合起来是一致的。不做检查点：截短 WAL 会让 Litestream 找不到它上次同步到的位置，重新上传整个数据库（见「Litestream」的「部署与 WAL 中的位置」）。保留最近 2 份：这次的与上一次的；启用 Litestream 时只保留这次的 1 份，因为上一次的只用于新版本运行一段时间后才发现问题的情况，Litestream 可以恢复到那之前的任一时刻。复制失败时重新启动原来的版本（与 Litestream），结果为 `failed: could not back up the database; … is running again`；
 4. 切换到该提交。启用 Litestream 时先启动它（`docker compose up -d litestream`，`litestream.yml` 有改动时加 `--force-recreate`，compose 看不到文件内容的变化），再等它的一次 `monitor-interval`（从该提交的 `litestream.yml` 读取，读不到时按 10 秒）加 5 秒：它启动后第一次同步时核对并占住自己在 WAL 中的位置，此前服务的写入可能从头覆盖 WAL，让它重新上传整个数据库。它启动失败不算部署失败，不再等待，结果末尾加上 `; litestream did not start`。然后用 `:sha-<提交>` 镜像 `docker compose up -d --wait midden`，并检查 `/healthz`：最多 5 次，间隔 6 秒（约 30 秒），一次没有回应不算不健康。然后 `docker compose up -d --wait midden-worker`（该版本有 worker 时），它的健康检查不通过也算不健康；
-5. 新版本不健康时停掉它（先 worker 后网页进程），换回第 3 步的副本（连同复制的 `-wal`，删掉 `-shm`），切回原来的版本，先启动网页进程、再启动 worker。启用 Litestream 时：先停 Litestream 再停服务（它一直打开着数据库和 WAL，换文件时不能在运行）；换回数据库后删除它的本地状态 `data/.midden.db-litestream/`；切回后同样先启动 Litestream（即使原来的版本随后启动失败，它也在运行）。Litestream 发现本地数据库落后于存储桶，从存储桶取得位置，把换回的数据库整个作为下一个事务上传，回滚前的历史仍可恢复（见「Litestream」）。
+5. 冒烟测试：在新版本的网页容器里建一个只读令牌（`docker compose exec -T midden midden token create --ro --label deploy-smoke-<提交前 12 位>-<时间> --expires 15m`），用它依次请求 `http://127.0.0.1:<PORT>` 上的 `/v1/session`、`/v1/collections?limit=20`、`/v1/collections/count`、`/v1/library/stats`、`/v1/folders`、`/v1/captures`、列表中第一条收藏的 `/v1/collections/<id>`、`/v1/collections?q=type:profile&limit=1` 找到的账号的关系图 `/v1/collections/graph?of=<账号>&kinds=following,followers&limit=50`（列表项没有 `graph` 时先读这条收藏），以及 `/agent/v1/whoami`、`/agent/v1/posts?size=5`、`/agent/v1/aggregate?by=month`。每个请求 15 秒超时，返回 2xx 且是 JSON 才算通过，记录耗时。库中没有收藏或没有账号时（新装、空库）跳过需要它们的那一项。结束后不论成败都撤销令牌（按标签）；撤销失败只记一行，令牌 15 分钟后自己过期。请求用 curl，令牌从 stdin 传入（`-H @-`），不出现在命令行、日志和结果中。全部通过时结果是 `deployed <提交> (was <提交>); smoke 12/12, slowest graph 0.4s`（有跳过时加 `, 2 skipped`）；任何一项失败、或建不了令牌，都按不健康处理，进入第 6 步，结果是 `rolled back <提交>: smoke failed 11/12: GET /v1/folders 500; …`，列出每个失败的接口和状态（或 `timed out`、`not JSON`）；
+6. 新版本不健康时停掉它（先 worker 后网页进程），换回第 3 步的副本（连同复制的 `-wal`，删掉 `-shm`），切回原来的版本，先启动网页进程、再启动 worker。启用 Litestream 时：先停 Litestream 再停服务（它一直打开着数据库和 WAL，换文件时不能在运行）；换回数据库后删除它的本地状态 `data/.midden.db-litestream/`；切回后同样先启动 Litestream（即使原来的版本随后启动失败，它也在运行）。Litestream 发现本地数据库落后于存储桶，从存储桶取得位置，把换回的数据库整个作为下一个事务上传，回滚前的历史仍可恢复（见「Litestream」）。新版本启动后写入的内容（迁移、worker 在冒烟测试期间完成的任务、冒烟测试的令牌）随副本的换回一起丢弃，与健康检查失败时相同。
 
 服务在第 2 步到第 4 步之间停止，通常不到一分钟，启用 Litestream 时多约 15 秒。部署不会让 Litestream 重新上传整个数据库；回滚会（换回的数据库与它的位置对不上）。
 
