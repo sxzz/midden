@@ -24,6 +24,15 @@ import type { Page } from './records.ts'
 
 const finished = (state: string) => state === 'complete' || state === 'partial'
 
+/**
+ * A failed capture that saw what its collection is known to be, deleted or
+ * suspended: it says so again, which is no anomaly and needs no retry.
+ * `c` is the capture's table alias, `a` its collection's.
+ */
+export const knownGoneSQL = (c: string, a: string) =>
+  `(${c}.state = 'failed' AND ${a}.source_state IS NOT NULL
+    AND coalesce(${c}.finished_at, ${c}.created_at) >= ${a}.source_state_at)`
+
 /** SQL: whether capture `c` is missing media a retry would download. */
 export const missingMediaSQL = sql`(c.state = 'partial' AND EXISTS (
   SELECT 1 FROM assets x WHERE x.capture_id = c.id AND x.state = 'failed'))`

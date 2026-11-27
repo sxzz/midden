@@ -955,6 +955,68 @@ export const updates = sqliteTable(
 )
 
 /**
+ * An update's members, kept as members come and go (`capture/progress.ts`):
+ * one row per collection, of its newest capture, new if any listing of it
+ * was. What the update's progress counts are made of; kept exact by the
+ * worker from `member_events`, which triggers fill.
+ */
+export const updateMembers = sqliteTable(
+  'update_members',
+  {
+    updateId: text().notNull(),
+    collectionId: text().notNull(),
+    captureId: text().notNull(),
+    // The capture's own state; `known` is told apart when read.
+    state: text().notNull(),
+    added: bool(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.updateId, t.collectionId] }),
+    index('update_members_state').on(t.updateId, t.state, t.added),
+    index('update_members_capture').on(t.captureId),
+  ],
+)
+
+/** The timeline pages of an update's profiles, each profile's chain. */
+export const updatePages = sqliteTable(
+  'update_pages',
+  {
+    pageId: text().primaryKey(),
+    updateId: text().notNull(),
+  },
+  (t) => [index('update_pages_update').on(t.updateId)],
+)
+
+/** An update's members counted by their capture's state; one row each. */
+export const updateProgress = sqliteTable('update_progress', {
+  updateId: text().primaryKey(),
+  total: integer().notNull(),
+  complete: integer().notNull(),
+  completeAdded: integer().notNull(),
+  completeUpdated: integer().notNull(),
+  partial: integer().notNull(),
+  partialAdded: integer().notNull(),
+  partialUpdated: integer().notNull(),
+  failed: integer().notNull(),
+  pending: integer().notNull(),
+})
+
+/**
+ * What changed that an update's members may depend on, written by triggers
+ * and taken up by the worker (`kind`: `s` a submission, `c` a capture, `u`
+ * an update, `p` a page).
+ */
+export const memberEvents = sqliteTable(
+  'member_events',
+  {
+    id: integer().primaryKey(),
+    kind: text().notNull(),
+    ref: text().notNull(),
+  },
+  (t) => [uniqueIndex('member_events_ref').on(t.kind, t.ref)],
+)
+
+/**
  * The counted view of a capture record (an update, or a request's record)
  * that has finished, kept so reading the list does not count its members
  * again (`capture/record-summaries.ts`). Written by the worker only; a row

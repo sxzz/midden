@@ -3,6 +3,8 @@ import { performance } from 'node:perf_hooks'
 import process from 'node:process'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { runMaintenance } from '#capture/maintenance.ts'
+import { checkProgress } from '#capture/progress-check.ts'
+import { adoptUpdates, settleProgress } from '#capture/progress.ts'
 import { refreshSummaries } from '#capture/summary-sweep.ts'
 import { runWatches } from '#capture/watches.ts'
 import { optimize, unknownMigrations } from '#db/client.ts'
@@ -34,6 +36,10 @@ const SUMMARY_INTERVAL = 10_000
 // Folders are counted in the background (`library/folder-counts.ts`): new
 // and edited ones within this, the rest as the sweep's debounce allows.
 const FOLDER_POLL = 2000
+// Updates' progress is kept as members change (`progress.ts`), and some of
+// it checked against a full count now and then.
+const PROGRESS_INTERVAL = 1000
+const PROGRESS_CHECK_INTERVAL = 60_000
 const OPTIMIZE_INTERVAL = 6 * 60 * 60_000
 const THROTTLE_STEP = 1000
 const STATUS_EVERY = 2000
@@ -201,6 +207,24 @@ export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
         logger.warn({ err: error }, 'counting folders failed'),
       )
       .finally(() => (counting = false))
+  })
+  every(PROGRESS_INTERVAL, () => {
+    if (ctx.queue.status().held) return
+    try {
+      settleProgress(db)
+      // Updates from before it was kept wait for the worker to be idle.
+      adoptUpdates(db, 2, !ctx.queue.status().idle)
+    } catch (error) {
+      logger.warn({ err: error }, 'keeping the progress of updates failed')
+    }
+  })
+  every(PROGRESS_CHECK_INTERVAL, () => {
+    if (ctx.queue.status().held) return
+    try {
+      checkProgress(ctx)
+    } catch (error) {
+      logger.warn({ err: error }, 'checking the progress of updates failed')
+    }
   })
   every(SUMMARY_INTERVAL, () => {
     if (ctx.queue.status().held) return

@@ -36,6 +36,7 @@ import {
   storedOptions,
   type CaptureOptions,
 } from './options.ts'
+import { keptCounts, readyProgress, verifyMembers } from './progress.ts'
 import { keepRecord, keptRecord } from './record-cache.ts'
 import { detailKey, dropSummaries, loadSummaries } from './record-summaries.ts'
 import {
@@ -874,8 +875,45 @@ function gather(db: Executor, rows: Update[]): Gathered[] {
 
 const allPages = (g: Gathered) => [...g.pages.values()].flat()
 
-/** Captures of an update by state, with new and updated among the finished. */
+/**
+ * Captures of an update by state, with new and updated among the finished,
+ * from what the worker keeps (`progress.ts`) where it keeps it, counted over
+ * all of the members otherwise.
+ */
 function memberCounts(db: Executor, g: Gathered) {
+  const pages = allPages(g).map((page) => ({
+    id: page.submission.id,
+    retry: isRetryablePage(page) ? 1 : 0,
+  }))
+  return (
+    (readyProgress(db, g.update.id)
+      ? keptCounts(db, g.update.id, pages)
+      : undefined) ?? countMembersFull(db, g)
+  )
+}
+
+/**
+ * Compare the kept progress of an update with a count over all of its
+ * members; what differs, as text (nothing when exact).
+ */
+export function verifyProgress(db: Executor, id: string): string[] {
+  const [g] = gather(db, [loadUpdate(db, id)])
+  const problems = verifyMembers(db, id)
+  const pages = allPages(g!).map((page) => ({
+    id: page.submission.id,
+    retry: isRetryablePage(page) ? 1 : 0,
+  }))
+  const kept = keptCounts(db, id, pages)
+  if (!kept) return problems
+  const full = countMembersFull(db, g!)
+  for (const key of Object.keys(full) as (keyof typeof full)[])
+    if (kept[key] !== full[key])
+      problems.push(`${key}: kept ${kept[key]}, counted ${full[key]}`)
+  return problems
+}
+
+/** The same counted over all of the members: what the kept ones must equal. */
+function countMembersFull(db: Executor, g: Gathered) {
   const pages = allPages(g).map((page) => ({
     id: page.submission.id,
     retry: isRetryablePage(page) ? 1 : 0,

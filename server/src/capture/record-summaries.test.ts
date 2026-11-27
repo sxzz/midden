@@ -65,14 +65,14 @@ async function save(c: AccountsContext, id: number) {
   return job.collectionId
 }
 
-/** How many times the members of updates were counted while `run` ran. */
+/** How many times the progress of updates was read while `run` ran. */
 function countingMembers<T>(c: AccountsContext, run: () => T) {
   const client = c.db.$client
   const prepare = client.prepare.bind(client)
   let counted = 0
   client.prepare = ((text: string) => {
     const statement = prepare(text)
-    if (!text.includes('WITH src(capture_id')) return statement
+    if (!text.includes('SELECT * FROM update_progress WHERE')) return statement
     const all = statement.all.bind(statement)
     statement.all = ((...args: never[]) => {
       counted++

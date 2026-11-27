@@ -67,6 +67,20 @@ console.info(
 )
 
 if (write) {
+  // What the worker does: keep the progress of the updates (once, for the
+  // ones that were there before it was kept), then write finished records down.
+  const progress = await import('#capture/progress.ts').catch(() => undefined)
+  if (progress) {
+    const t = cpu()
+    let adopted = 0
+    for (let n = 1; n;) {
+      n = progress.adoptUpdates(db, 5)
+      adopted += n
+    }
+    console.info(
+      `kept the progress of ${adopted} updates in ${((cpu() - t) / 1000).toFixed(1)} s of CPU`,
+    )
+  }
   const { refreshSummaries } = await import('#capture/summary-sweep.ts')
   const worker = { db }
   const ctx = worker as Parameters<typeof refreshSummaries>[0]
@@ -81,6 +95,9 @@ if (write) {
   )
 }
 
+// From here on as a read thread: it reads what the worker settled.
+const progress = await import('#capture/progress.ts').catch(() => undefined)
+progress?.readOnlyProgress()
 polls('list, polls only', () => {})
 polls('list, a write before every poll', forgetRecords)
 

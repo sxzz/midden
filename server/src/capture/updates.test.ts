@@ -8,16 +8,7 @@ import { addAccount, type AccountsContext } from '#accounts/accounts.ts'
 import { collections, jobs, library, updates, updateSkips } from '#db/schema.ts'
 import { SnoozeError } from '#jobs/queue.ts'
 import { createFolder } from '#library/folders.ts'
-import { status } from '#platforms/rpc.ts'
-import { testContext } from '#testing/context.ts'
-import {
-  FakeFailure,
-  fakePlatform,
-  fakeProfile,
-  postGraph,
-  type FakeRelations,
-} from '#testing/fake-platform.ts'
-import { captureHandlers } from './handlers.ts'
+import { save, setup, stopWorld } from '#testing/updates-world.ts'
 import { resolveOptions } from './options.ts'
 import { forgetRecords, keepFinishedRecords } from './record-cache.ts'
 import { captureURL } from './records.ts'
@@ -36,99 +27,10 @@ import {
   updateMembers,
   updateRecord,
 } from './updates.ts'
-import type { FetchRequest } from '#platforms/protocol.ts'
 
 const DRIZZLE = fileURLToPath(new URL('../../drizzle', import.meta.url))
 
-let ctx: AccountsContext | undefined
-afterEach(async () => {
-  await ctx?.queue.stop()
-  ctx = undefined
-})
-
-/** What the fake source says now. */
-interface World {
-  /** Post ids on each profile's timeline, newest first. */
-  timelines: Record<string, number[]>
-  pageSize: number
-  counts: Record<string, { following: number; followers: number }>
-  lists: Record<string, { following?: string[]; followers?: string[] }>
-  broken: Set<string>
-  requests: FetchRequest[]
-}
-
-const target = (id: number) => ({
-  url: `https://fake.test/p/${id}`,
-  refreshAfterSeconds: 0,
-  updatedAt: '',
-  publishedAt: '',
-  mediaTypes: [],
-  postType: 'post',
-  prefetch: Buffer.alloc(0),
-  listedAt: '',
-  pinned: false,
-})
-
-function setup(
-  world: Partial<World> = {},
-  options: { run?: boolean; timelineCap?: number } = {},
-) {
-  const state: World = {
-    timelines: {},
-    pageSize: 3,
-    counts: {},
-    lists: {},
-    broken: new Set(),
-    requests: [],
-    ...world,
-  }
-  const relations: FakeRelations = (req) => ({
-    accounts: (state.lists[req.externalId]?.[req.list] ?? []).map((id) =>
-      fakeProfile(id),
-    ),
-    nextCursor: '',
-  })
-  ctx = testContext({
-    platforms: [
-      fakePlatform(
-        {
-          current: (req) => {
-            state.requests.push(req)
-            if (state.broken.has(req.externalId))
-              throw new FakeFailure(status.PERMISSION_DENIED, 'no access')
-            if (req.kind === 'post')
-              return { text: 'post', graph: postGraph(req.externalId, {}) }
-            const id = req.externalId
-            const posts = state.timelines[id] ?? []
-            const start = Number(req.pageCursor || 0)
-            const next = start + state.pageSize
-            return {
-              ...fakeProfile(id, {
-                username: `u${id}`,
-                metadata: state.counts[id] ?? { following: 0, followers: 0 },
-              }),
-              providerId: req.providerId,
-              relatedTargets: posts.slice(start, next).map(target),
-              nextPageCursor: next < posts.length ? String(next) : '',
-            }
-          },
-        },
-        { current: relations },
-      ),
-    ],
-    handlers: captureHandlers,
-    timelineCap: options.timelineCap,
-  })
-  if (options.run !== false) ctx.queue.start()
-  return { ctx, state }
-}
-
-/** Save a link; a profile with its first page, as the world pages by 3. */
-async function save(c: AccountsContext, url: string) {
-  const job = captureURL(c, url, undefined, resolveOptions({ count: 3 }))
-  await c.queue.drain()
-  return job.collectionId
-}
+afterEach(stopWorld)
 
 /** Post ids saved in the library. */
 function savedPosts(c: AccountsContext) {

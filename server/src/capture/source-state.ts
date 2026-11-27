@@ -200,14 +200,7 @@ export function stateHistory(
     .all()
 }
 
-/**
- * A failed capture that saw what its collection is known to be, deleted or
- * suspended: it says so again, which is no anomaly and needs no retry.
- * `c` is the capture's table alias, `a` its collection's.
- */
-export const knownGoneSQL = (c: string, a: string) =>
-  `(${c}.state = 'failed' AND ${a}.source_state IS NOT NULL
-    AND coalesce(${c}.finished_at, ${c}.created_at) >= ${a}.source_state_at)`
+export { knownGoneSQL } from './retry-units.ts'
 
 /** The state a failed capture saw again, as `knownGoneSQL` tells it. */
 export function knownGone(

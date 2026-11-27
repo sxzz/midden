@@ -12,6 +12,7 @@ import { runRead } from '#agent/reads.ts'
 import { BucketBlobStore } from '#blob/bucket-store.ts'
 import { FsBlobStore } from '#blob/fs-store.ts'
 import { MediaSigner } from '#blob/signer.ts'
+import { readOnlyProgress } from '#capture/progress.ts'
 import { forgetRecords, keepFinishedRecords } from '#capture/record-cache.ts'
 import { openDatabase } from '#db/client.ts'
 import { createApi, type ForwardedEnv } from '#http/app.ts'
@@ -113,6 +114,9 @@ if (parentPort) {
   const reader = threadReader(data)
   const web = threadApi(threadContext(reader, data.countPointers, logger), data)
   keepFinishedRecords()
+  // Its connection reads only: the progress of updates is what the worker
+  // settled last (`capture/progress.ts`).
+  readOnlyProgress()
   port.on('message', async (request: PoolRequest) => {
     if (request.op === 'forget') {
       forgetRecords()
