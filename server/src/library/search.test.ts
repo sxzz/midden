@@ -15,6 +15,7 @@ import {
 import { catalogMissing } from './catalog.ts'
 import { filterCounts } from './counts.ts'
 import { deleteCollections } from './delete.ts'
+import { indexFacets } from './facets.ts'
 import { createFolder } from './folders.ts'
 import {
   countCollections,
@@ -343,8 +344,14 @@ describe('library search', () => {
       a: { text: '終末地 Ｆａｎ art', author: 'Ann', handle: 'ann_x' },
       b: { text: 'quoting', quotes: 'a', alt: 'Sunset' },
     })
+    // The language came later, with the facets.
     const rows = () =>
-      ctx.db.select().from(catalog).orderBy(asc(catalog.collectionId)).all()
+      ctx.db
+        .select()
+        .from(catalog)
+        .orderBy(asc(catalog.collectionId))
+        .all()
+        .map(({ lang: _, ...row }) => row)
     const kept = rows()
     // Back to the catalog before the migrations, then through them (and
     // the one that gives it its id, as the first rebuilds the table).
@@ -376,6 +383,17 @@ describe('library search', () => {
       ).split('--> statement-breakpoint'))
         client.exec(statement)
     expect(performance.now() - started).toBeLessThan(1000)
+    // The later migration that adds the language, filled as maintenance
+    // fills it.
+    client.exec('ALTER TABLE catalog ADD lang text')
+    indexFacets(
+      ctx.db,
+      ctx.db
+        .select({ id: catalog.id })
+        .from(catalog)
+        .all()
+        .map((row) => row.id),
+    )
     expect(rows()).toEqual(kept)
     const index = searchIndexes(ctx.db)
     expect(index.kept.length).toBeGreaterThan(0)

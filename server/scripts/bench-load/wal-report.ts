@@ -67,6 +67,8 @@ export function walReport(
   captures: number,
   /** WAL offset to start at: what was written before is left out. */
   from = 32,
+  /** Tables and indexes to list whatever their rank (`wal-focus=`). */
+  focus?: RegExp,
 ): string {
   const wal = `${database}-wal`
   const fd = openSync(wal, 'r')
@@ -184,6 +186,15 @@ export function walReport(
     lines.push(
       `${(bytes(n) / MB).toFixed(1).padStart(8)} ${((n / frames) * 100).toFixed(1).padStart(5)}%  ${name}`,
     )
+  if (focus) {
+    lines.push('', `matching ${focus.source}: MB, % of WAL, KiB/capture`)
+    for (const [name, n] of [...byOwner]
+      .filter(([name]) => focus.test(name))
+      .toSorted((a, b) => b[1] - a[1]))
+      lines.push(
+        `${(bytes(n) / MB).toFixed(2).padStart(8)} ${((n / frames) * 100).toFixed(2).padStart(6)}% ${captures ? (bytes(n) / captures / 1024).toFixed(2).padStart(8) : ''}  ${name}`,
+      )
+  }
   return lines.join('\n')
 }
 

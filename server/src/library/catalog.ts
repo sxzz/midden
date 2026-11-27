@@ -1,5 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm'
 import { AUTHORED_BY } from './entities.ts'
+import { indexFacets } from './facets.ts'
 import { storageOf } from './read.ts'
 import { list } from './views.ts'
 import type { Database, Executor } from '#db/client.ts'
@@ -243,6 +244,15 @@ export function catalogCollections(db: Executor, ids: readonly string[]) {
       ${sql.raw(accountCount('followers'))},
       ${sql.raw(accountCount('following'))}
     FROM h`)
+  // Rows new or on another revision: their facets follow (facets.ts). An
+  // unchanged capture keeps its revision and costs them nothing.
+  const revised = db
+    .all<{ id: string }>(
+      sql`SELECT n.collection_id AS id FROM temp.catalog_next n
+        LEFT JOIN catalog k ON k.collection_id = n.collection_id
+        WHERE k.revision_id IS NOT n.revision_id`,
+    )
+    .map((row) => row.id)
   // New rows go in whole. A row already there gets only the columns that
   // changed, in groups by index: an UPDATE rewrites the entry of every index
   // on a column it sets, changed or not, and the observation time changes
@@ -261,6 +271,16 @@ export function catalogCollections(db: Executor, ids: readonly string[]) {
     )
   }
   db.run(sql`DELETE FROM temp.catalog_next`)
+  if (revised.length)
+    indexFacets(
+      db,
+      db
+        .all<{ id: number }>(
+          sql`SELECT id FROM catalog WHERE collection_id IN (
+            SELECT value FROM json_each(${list(revised)}))`,
+        )
+        .map((row) => row.id),
+    )
   refreshQuoting(db, targets)
 }
 

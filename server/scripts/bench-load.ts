@@ -20,7 +20,10 @@ import { Buffer } from 'node:buffer'
 // checkpoints and count what each write transaction adds to the WAL during
 // the update, by code and by table, with bench-load/wal-meter.ts; the report
 // is in bench/wal.txt), ui=1 (poll what the web app polls during an
-// update instead of the library alone: bench-load/probe.ts).
+// update instead of the library alone: bench-load/probe.ts), facets=1
+// (posts carry hashtags, links and mentions, for the facet tables),
+// wal-focus=<regex> (also list these tables and indexes in the WAL report,
+// whatever their rank).
 //
 // The web process records its event-loop delay each second
 // (bench/lag.json); the result gives its distribution during the update.
@@ -201,6 +204,7 @@ const env = {
   BENCH_VIDEO: media.video,
   BENCH_LAG_LOG: LAG_LOG,
   ...(WAL_LOG ? { BENCH_WAL_LOG: WAL_LOG } : {}),
+  ...(options.facets ? { BENCH_FACETS: '1' } : {}),
 }
 const server = path.join(HERE, 'bench-load', 'server.ts')
 const servers =
@@ -501,7 +505,14 @@ console.info(JSON.stringify(result, null, 2))
 if (WAL_LOG) {
   // The reader is still open, so the server's exit left the WAL in place.
   const log = JSON.parse(readFileSync(WAL_LOG, 'utf8')) as WalLog
-  const report = walReport(DB, log, owners, captured, walFrom)
+  const report = walReport(
+    DB,
+    log,
+    owners,
+    captured,
+    walFrom,
+    options['wal-focus'] ? new RegExp(options['wal-focus']) : undefined,
+  )
   writeFileSync(path.join(DATA, 'bench', 'wal.txt'), `${report}\n`)
   console.info(report)
 }

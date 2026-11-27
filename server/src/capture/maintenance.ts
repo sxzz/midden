@@ -33,6 +33,7 @@ import {
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { catalogCollections } from '#library/catalog.ts'
+import { backfillBatch } from '#library/facets.ts'
 import { deleteSourceResponses } from '#raw/responses.ts'
 import { collectRawGarbage, sweepRawUploads } from '#raw/upload.ts'
 import { pace, type CaptureContext } from './context.ts'
@@ -66,7 +67,15 @@ const SIZE_BATCH = 400
 const SIZE_READS = 8
 const SIZE_BUDGET = 20_000
 
+// Facets (`library/facets.ts`) of rows catalogued before them: 500 rows a
+// write transaction, for up to FACETS_BUDGET a pass while the worker stays
+// idle. On a copy of the development database (60,000 rows) a batch takes
+// 11 ms at the median, 35 ms at most, and the whole backfill 1.5 s.
+const FACETS_BATCH = 500
+const FACETS_BUDGET = 20_000
+
 const sizesCaughtUp = new WeakSet<CaptureContext>()
+const facetsCaughtUp = new WeakSet<CaptureContext>()
 const vacuumedAt = new WeakMap<CaptureContext, number>()
 const BUDGET = 30_000
 
@@ -98,6 +107,10 @@ export async function runMaintenance(
   if (slim) await step('raw garbage', () => collectRawGarbage(ctx))
   await step('raw uploads', () => sweepRawUploads(ctx))
   if (slim) await step('thumbnail sizes', () => backfillThumbnailSizes(ctx))
+  if (slim)
+    await step('facets', () =>
+      backfillFacets(ctx, () => ctx.queue.status().idle),
+    )
   if (slim)
     await step('thumbnails to the remote store', () =>
       moveThumbnails(ctx, () => ctx.queue.status().idle),
@@ -483,6 +496,36 @@ export async function backfillThumbnailSizes(
     else await pace(ctx)
   }
   return done
+}
+
+/**
+ * Fill the facets of rows catalogued before they existed, a batch at a
+ * time, resuming where the last pass stopped (the progress is kept in
+ * `settings` with each batch), while the worker has nothing else to do.
+ * Returns the batches written.
+ */
+export async function backfillFacets(
+  ctx: CaptureContext,
+  idle: () => boolean = () => true,
+  size = FACETS_BATCH,
+): Promise<number> {
+  const started = Date.now()
+  let batches = 0
+  while (
+    !facetsCaughtUp.has(ctx) &&
+    idle() &&
+    Date.now() - started < FACETS_BUDGET
+  ) {
+    batches++
+    if (!backfillBatch(ctx.db, size)) {
+      facetsCaughtUp.add(ctx)
+      ctx.logger.info({ batches }, 'facets filled')
+      break
+    }
+    // Batch after batch would keep the write lock from the web process.
+    await pace(ctx)
+  }
+  return batches
 }
 
 function pragma(ctx: CaptureContext, name: string): number {

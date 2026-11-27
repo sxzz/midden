@@ -153,8 +153,16 @@ function respond(
         ]
       : []),
   ]
+  // With facets (BENCH_FACETS=1), posts carry hashtags, a link in a third
+  // of them and a mention in a quarter, as `library/facets.ts` reads them.
+  const facets = env('BENCH_FACETS', '') === '1'
+  const seed = seedOf(id)
+  const lead = facets
+    ? `#bench${seed % 40} #tag${seed % 7} ${seed % 3 === 0 ? `https://site${seed % 25}.example/p/${id} ` : ''}`
+    : ''
+  const mention = facets && seed % 4 === 0 ? `u${seed % 30}` : undefined
   const response: Partial<FetchResponse> = {
-    text: json(next, 300 + next() * 600),
+    text: lead + json(next, 300 + next() * 600),
     resources,
     graph: {
       root: 'post',
@@ -165,7 +173,7 @@ function respond(
           externalId: id,
           dataJson: Buffer.from(
             JSON.stringify({
-              text: json(next, 200 + next() * 400),
+              text: lead + json(next, 200 + next() * 400),
               likes: Math.floor(next() * 1e4),
             }),
           ),
@@ -180,8 +188,27 @@ function respond(
           resourceIndices: [],
           contextOnly: true,
         },
+        ...(mention
+          ? [
+              {
+                key: 'mention',
+                type: 'fake.profile',
+                externalId: `handle:${mention}`,
+                dataJson: Buffer.from(
+                  JSON.stringify({ username: mention, name: mention }),
+                ),
+                resourceIndices: [],
+                contextOnly: true,
+              },
+            ]
+          : []),
       ],
-      relations: [{ source: 'post', target: 'author', type: 'authored_by' }],
+      relations: [
+        { source: 'post', target: 'author', type: 'authored_by' },
+        ...(mention
+          ? [{ source: 'post', target: 'mention', type: 'mentions' }]
+          : []),
+      ],
     },
     sourceResponses: [source(json(next, 3000 + next() * 5000))],
   }

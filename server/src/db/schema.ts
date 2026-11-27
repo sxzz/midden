@@ -271,6 +271,13 @@ export const catalog = sqliteTable(
      */
     followersCount: integer(),
     followingCount: integer(),
+    /**
+     * The language of the item's own text (post text, account bio) as
+     * `library/facets.ts` detects it: `ja`, `zh`, `en`…; null when it cannot
+     * tell. Written with the side tables below, only when the revision
+     * changes, and filled for older rows by maintenance.
+     */
+    lang: text(),
     // The counts as the list orders them, unknown last either way: below
     // every count from the top, above every count from the bottom. Real
     // columns rather than expression indexes, which SQLite cannot seek a
@@ -312,6 +319,39 @@ export const catalog = sqliteTable(
     index('catalog_subject').on(t.subjectEntityId, t.revisionAt, t.revisionId),
   ],
 )
+
+/**
+ * What a catalogued item's newest revision says, one row per value, for the
+ * query language (`#tag`, `mentions:`, `domain:`) and aggregation
+ * (`library/facets.ts`): hashtags folded (NFKC, lower case), mentioned
+ * handles as `<platform>:<handle>` in lower case, and the registrable
+ * domains its links point at. Keyed by value first so an atom reads one
+ * index range; the catalog id index serves rewriting a row's values and the
+ * cascade. The migration makes them WITHOUT ROWID (Drizzle cannot say so),
+ * so each is two b-trees, not three.
+ *
+ * Written only when a row's revision changes (an unchanged capture writes
+ * nothing here), and only the values that differ. They do not move
+ * `library_version`: no folder can select by them yet.
+ */
+const facetTable = (name: string) =>
+  sqliteTable(
+    name,
+    {
+      catalogId: integer()
+        .notNull()
+        .references(() => catalog.id, { onDelete: 'cascade' }),
+      value: text().notNull(),
+    },
+    (t) => [
+      primaryKey({ columns: [t.value, t.catalogId] }),
+      index(`${name}_catalog`).on(t.catalogId),
+    ],
+  )
+
+export const postHashtags = facetTable('post_hashtags')
+export const postMentions = facetTable('post_mentions')
+export const postDomains = facetTable('post_domains')
 
 export const captureStates = [
   'queued',

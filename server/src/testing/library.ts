@@ -142,12 +142,28 @@ export function searchIndexes(db: Database) {
 export function expectCatalogFresh(ctx: CaptureContext) {
   // Ids are assigned anew when rows are.
   const { id: _, ...columns } = getColumns(catalog)
-  const rows = () =>
-    ctx.db
+  const facets = () =>
+    ctx.db.$client
+      .prepare(
+        ['post_hashtags', 'post_mentions', 'post_domains']
+          .map(
+            (
+              table,
+            ) => `SELECT '${table}' AS t, k.collection_id AS c, f.value AS v
+              FROM ${table} f JOIN catalog k ON k.id = f.catalog_id`,
+          )
+          .join(' UNION ALL ')
+          .concat(' ORDER BY t, c, v'),
+      )
+      .all()
+  const rows = () => ({
+    rows: ctx.db
       .select(columns)
       .from(catalog)
       .orderBy(asc(catalog.collectionId))
-      .all()
+      .all(),
+    facets: facets(),
+  })
   const kept = rows()
   const index = searchIndexes(ctx.db)
   expect(index.kept).toEqual(index.fresh)

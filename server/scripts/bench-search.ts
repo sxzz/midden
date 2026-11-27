@@ -5,6 +5,7 @@
 //   node scripts/bench-search.ts seed <db>
 //   node scripts/bench-search.ts run <db> [out.json] [runs=40]
 //   node scripts/bench-search.ts compare <before.json> <after.json>
+//   node scripts/bench-search.ts backfill <db>
 //
 // `seed` adds what a development copy lacks: a dozen folders and follows of
 // five accounts (2000 each way, some mutual), once. `run` opens the copy
@@ -12,7 +13,9 @@
 // counts are counted again), times each case `runs` times after a warm-up,
 // and records the plan (`EXPLAIN QUERY PLAN`) of every statement a case
 // ran. `compare` prints both side by side, flags a class more than 10%
-// slower at p50 or p95, and any plan that changed.
+// slower at p50 or p95, and any plan that changed. `backfill` fills the
+// facets of every row as maintenance would (`library/facets.ts`), timing
+// each batch.
 //
 // Point it at a copy: `seed` and `run` write to it.
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -24,6 +27,7 @@ import { FsBlobStore } from '#blob/fs-store.ts'
 import { MediaSigner } from '#blob/signer.ts'
 import { openDatabase, type Database } from '#db/client.ts'
 import { filterCountsOf } from '#library/counts.ts'
+import { backfillBatch } from '#library/facets.ts'
 import { createFolder, listFolders } from '#library/folders.ts'
 import {
   authorKey,
@@ -503,7 +507,34 @@ function compare(beforeFile: string, afterFile: string) {
   console.info(`${slower} slower, ${changed} with another plan`)
 }
 
+function backfill(file: string) {
+  const db = openDatabase(file)
+  const times: number[] = []
+  const started = performance.now()
+  for (let more = true; more;) {
+    const at = performance.now()
+    more = backfillBatch(db)
+    times.push(performance.now() - at)
+  }
+  times.sort((a, b) => a - b)
+  const total = performance.now() - started
+  const rows = (table: string) =>
+    (
+      db.$client.prepare(`SELECT count(*) AS n FROM ${table}`).get() as {
+        n: number
+      }
+    ).n
+  console.info(
+    `${times.length} batches in ${(total / 1000).toFixed(1)} s: p50 ${percentile(times, 0.5).toFixed(0)} ms, p95 ${percentile(times, 0.95).toFixed(0)} ms, longest ${times.at(-1)!.toFixed(0)} ms`,
+  )
+  console.info(
+    `hashtags ${rows('post_hashtags')}, mentions ${rows('post_mentions')}, domains ${rows('post_domains')}, with a language ${rows('catalog WHERE lang IS NOT NULL')} of ${rows('catalog')}`,
+  )
+  db.$client.close()
+}
+
 if (command === 'seed' && args[0]) seed(args[0])
+else if (command === 'backfill' && args[0]) backfill(args[0])
 else if (command === 'run' && args[0])
   await run(args[0], args[1], Number(args[2] ?? 40))
 else if (command === 'compare' && args[0] && args[1]) compare(args[0], args[1])
