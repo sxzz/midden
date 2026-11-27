@@ -31,6 +31,26 @@ export const scopes: { value: Scope; label: string }[] = [
   { value: 'all', label: '全部' },
 ]
 
+/**
+ * Saved options over the defaults. The default number is only the latest
+ * scope's, so it must not turn a saved 全部 into 最多 100.
+ */
+export function restoreOptions(saved: CaptureOptions): Options {
+  const { count: _, ...base } = defaultOptions()
+  return { ...base, ...saved }
+}
+
+/**
+ * What a form sends: a number only where the scope uses one, since the
+ * field is hidden otherwise and the server refuses it.
+ */
+export function optionsBody(o: Options): CaptureOptions {
+  const { count, ...rest } = o
+  return o.posts === 'latest' || o.posts === 'max'
+    ? { ...rest, ...(count === undefined ? {} : { count }) }
+    : rest
+}
+
 export function scopeOf(o: Pick<Options, 'posts' | 'count'>): Scope {
   if (o.posts === 'max' && o.count === undefined) return 'all'
   return o.posts === 'none' ? 'latest' : o.posts

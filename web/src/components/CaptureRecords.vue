@@ -8,7 +8,7 @@ import {
 } from 'vue'
 import { call, client, errorText, type CaptureRecord } from '../api'
 import { appHref } from '../app-path'
-import { defaultOptions, type Options } from '../capture-options'
+import { defaultOptions, optionsBody, type Options } from '../capture-options'
 import {
   extractLinks,
   groupRecords,
@@ -150,7 +150,7 @@ async function submit() {
     try {
       await call(
         client.captures.$post(
-          { json: { url, options: options.value } },
+          { json: { url, options: optionsBody(options.value) } },
           { headers: { 'Idempotency-Key': crypto.randomUUID() } },
         ),
       )

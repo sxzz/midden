@@ -7,7 +7,7 @@ import {
   type UpdatePreview,
   type UpdateTarget,
 } from '../api'
-import { defaultOptions, type Options } from '../capture-options'
+import { defaultOptions, optionsBody, type Options } from '../capture-options'
 import { countText, coverText } from '../captures'
 import { toast } from '../composables/useToast'
 import { showSheet } from '../sheet-focus'
@@ -102,7 +102,7 @@ async function start() {
           json: {
             target: props.target,
             options: {
-              ...options.value,
+              ...optionsBody(options.value),
               relations: listable.value && options.value.relations,
             },
           },

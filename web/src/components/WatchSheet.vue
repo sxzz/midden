@@ -10,7 +10,12 @@ import {
   type WatchEvery,
   type WatchTarget,
 } from '../api'
-import { defaultOptions, type Options } from '../capture-options'
+import {
+  defaultOptions,
+  optionsBody,
+  restoreOptions,
+  type Options,
+} from '../capture-options'
 import { toast } from '../composables/useToast'
 import { showSheet } from '../sheet-focus'
 import {
@@ -76,8 +81,7 @@ async function load() {
     current.value = w
     if (w) {
       every.value = w.every
-      const restored: Options = { ...defaultOptions(), ...w.options }
-      options.value = restored
+      options.value = restoreOptions(w.options)
     }
   }
   if (covers.status === 'fulfilled') preview.value = covers.value
@@ -127,7 +131,7 @@ async function save() {
           // Months and years count in the owner's zone: this browser's.
           time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           options: {
-            ...options.value,
+            ...optionsBody(options.value),
             relations: listable.value && options.value.relations,
           },
         },
