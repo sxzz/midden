@@ -278,7 +278,7 @@ test.describe('the admin', () => {
     // From the account's menu.
     await page.goto('/settings/admin')
     await expect(
-      page.getByRole('link', { name: /^用户\s*查看者与邀请/ }),
+      page.getByRole('link', { name: '用户', exact: true }),
     ).toBeVisible()
     await page.getByRole('button', { name: '账号菜单' }).click()
     await expect(page.getByRole('menuitem')).toHaveText([
@@ -306,7 +306,9 @@ test.describe('the admin', () => {
     await expect(link.getByRole('textbox')).toHaveValue(
       'https://midden.test/invite#secret-token',
     )
-    await expect(link).toContainText('链接只显示这一次。')
+    await expect(link).toContainText(
+      '链接只显示这一次。7天内有效，只能用一次。',
+    )
     await link.getByRole('button', { name: '复制链接' }).click()
     await expect(
       page.getByRole('status').filter({ hasText: /复制链接/ }),
@@ -333,9 +335,7 @@ test.describe('the admin', () => {
     await pane.locator('button.user').click()
     await page.getByRole('menuitem', { name: '撤销' }).click()
     const revoke = page.getByRole('dialog', { name: '撤销小明明？' })
-    await expect(revoke).toContainText(
-      '将删除2个通行密钥、3个登录、1个令牌，立即退出，用户保留为已撤销。',
-    )
+    await expect(revoke).toContainText('将删除2个通行密钥、3个登录、1个令牌。')
     await revoke.getByRole('button', { name: '撤销', exact: true }).click()
     await expect(pane.locator('button.user')).toContainText('已撤销')
     await expect(pane.locator('.user.revoked')).toHaveCount(1)

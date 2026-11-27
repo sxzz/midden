@@ -46,7 +46,7 @@ export const settingsSections: readonly SettingsSection[] = [
       {
         value: 'users',
         label: '用户',
-        hint: '查看者与邀请',
+        hint: '',
         icon: 'users',
       },
       {
@@ -88,17 +88,14 @@ export function findEntry(section: string, value: string) {
 
 /**
  * The sections a user has: a viewer (`admin` false) has none of the
- * admin's, and their tokens only read.
+ * admin's, and their tokens, which only read, say nothing of reading and
+ * writing.
  */
 export function shownSections(admin: boolean): readonly SettingsSection[] {
   if (admin) return settingsSections
   return settingsSections
     .filter((s) => !s.admin)
-    .map((s) =>
-      s.value === 'tokens'
-        ? { ...s, hint: '脚本与AI代理读取收藏用的令牌。' }
-        : s,
-    )
+    .map((s) => (s.value === 'tokens' ? { ...s, hint: '' } : s))
 }
 
 /**

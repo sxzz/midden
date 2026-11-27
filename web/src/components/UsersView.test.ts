@@ -76,9 +76,7 @@ const openSheet = () =>
   document.querySelector<HTMLDialogElement>('dialog.sheet[open]')!
 
 it('says what revoking and deleting take, and how long an invite is good', () => {
-  expect(revokeEffect(friend)).toBe(
-    '将删除2个通行密钥、3个登录、1个令牌，立即退出，用户保留为已撤销。',
-  )
+  expect(revokeEffect(friend)).toBe('将删除2个通行密钥、3个登录、1个令牌。')
   expect(deleteEffect(friend)).toBe(
     '将删除这个用户和2个通行密钥、3个登录、1个令牌。',
   )

@@ -25,7 +25,7 @@ async function copy(url: string) {
   <SheetDialog
     :open="open"
     :title="title"
-    description="链接只显示这一次。7天内有效，只能注册一次。"
+    description="链接只显示这一次。7天内有效，只能用一次。"
     cancel-label="完成"
     dirty
     @cancel="emit('done')"

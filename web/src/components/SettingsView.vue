@@ -129,7 +129,9 @@ async function logout() {
                 ><template v-else>{{ part.text }}</template></template
               ></span
             >
-            <small v-if="query" class="row-hint">{{ item.hint }}</small>
+            <small v-if="query && item.hint" class="row-hint">{{
+              item.hint
+            }}</small>
           </span>
           <span class="chevron" aria-hidden="true">›</span>
         </AppLink>
@@ -154,7 +156,10 @@ async function logout() {
                 ><template v-else>{{ part.text }}</template></template
               ></span
             >
-            <small class="row-hint">{{ owner.label }} · {{ item.hint }}</small>
+            <small class="row-hint"
+              >{{ owner.label
+              }}<template v-if="item.hint"> · {{ item.hint }}</template></small
+            >
           </span>
           <span class="chevron" aria-hidden="true">›</span>
         </AppLink>
@@ -216,7 +221,9 @@ async function logout() {
         </AppLink>
         <h2>{{ entry?.label ?? section.label }}</h2>
       </header>
-      <p class="pane-hint">{{ entry?.hint ?? section.hint }}</p>
+      <p v-if="entry ? entry.hint : section.hint" class="pane-hint">
+        {{ entry ? entry.hint : section.hint }}
+      </p>
       <template v-if="entry">
         <UsersView v-if="entry.value === 'users'" />
         <AdminView
@@ -289,7 +296,7 @@ async function logout() {
             </svg>
             <span class="row-text">
               <span class="row-label">{{ item.label }}</span>
-              <small class="row-hint">{{ item.hint }}</small>
+              <small v-if="item.hint" class="row-hint">{{ item.hint }}</small>
             </span>
             <span class="chevron" aria-hidden="true">›</span>
           </AppLink>

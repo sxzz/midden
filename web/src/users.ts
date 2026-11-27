@@ -16,7 +16,7 @@ export function waysIn(
 
 /** What 撤销 does to a user, said before it is done. */
 export function revokeEffect(user: AppUser) {
-  return `将删除${waysIn(user)}，立即退出，用户保留为已撤销。`
+  return `将删除${waysIn(user)}。`
 }
 
 /** What 删除 does to a user, said before it is done. */

@@ -108,6 +108,10 @@ describe('the session', () => {
       'API令牌',
       '关于',
     ])
+    // A viewer's tokens only read: no line about reading and writing.
+    expect(
+      shownSections(can.admin).find((s) => s.value === 'tokens')?.hint,
+    ).toBe('')
     expect(redirectFor({ name: 'captures', params: {} })).toBe('/')
     expect(redirectFor({ name: 'capture', params: { id: 'r' } })).toBe('/')
     expect(
