@@ -462,7 +462,14 @@ class Compiler {
         }
       case 'lang':
         this.facets = true
-        return { where: sql`k.lang = ${value}`, cost: 4 }
+        // A language without a script takes its scripts too: `zh` is
+        // `zh-Hans`, `zh-Hant` and Chinese of no telling script.
+        return {
+          where: value.includes('-')
+            ? sql`k.lang = ${value}`
+            : sql`(k.lang = ${value} OR k.lang GLOB ${`${value}-*`})`,
+          cost: 4,
+        }
       case 'platform':
         return { where: rootTypeSQL(this.typesOf(value, at)), cost: 4 }
       case 'type':

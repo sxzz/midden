@@ -4,10 +4,12 @@
 // list's filter can say running as that filter does.
 import { sql } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, test } from 'vitest'
+import { aggregate } from '#agent/aggregate.ts'
 import { readSearch, type AgentReader } from '#agent/query.ts'
 import { typeCatalog } from '#agent/runner.ts'
+import { detectLang, langMatches } from '#lang/detect.ts'
 import { updateAnnotation } from '#library/annotations.ts'
-import { detectLang, domainsOf, hashtagsOf } from '#library/facets.ts'
+import { domainsOf, hashtagsOf } from '#library/facets.ts'
 import { createFolder } from '#library/folders.ts'
 import {
   countCollections,
@@ -55,6 +57,7 @@ const SNIPPETS = [
   'a sky of tea',
   '今日は猫の日です',
   '今天天气很好 犬',
+  '今天天氣很好',
   'el sol y la luna',
   'sun sun sun',
 ]
@@ -296,7 +299,7 @@ function rows(): Row[] {
       hashtags: hashtagsOf(account.bio),
       mentions: [],
       domains: domainsOf(account.bio),
-      lang: detectLang(account.bio),
+      lang: detectLang(account.bio).lang,
       image: false,
       video: false,
       sensitive: false,
@@ -330,7 +333,7 @@ function rows(): Row[] {
       hashtags: hashtagsOf(post.text),
       mentions: post.mentions.map((m) => `fake:${m}`),
       domains: domainsOf(post.text),
-      lang: detectLang(post.text),
+      lang: detectLang(post.text).lang,
       image: post.image,
       video: post.video,
       sensitive: post.sensitive && (post.image || post.video),
@@ -390,7 +393,7 @@ function matches(row: Row, node: QueryNode, all: Row[]): boolean {
     case 'domain':
       return row.domains.includes(v)
     case 'lang':
-      return row.lang === v
+      return row.lang !== null && langMatches(row.lang, v)
     case 'has':
       return v === 'link'
         ? row.domains.length > 0
@@ -467,7 +470,7 @@ function leafText(next: () => number, ref: (id: string) => string): string {
     () => `from:@${pick(['alice', 'bob', 'carol', 'nobody'])}`,
     () => `mentions:@${pick(['alice', 'bob', 'carol'])}`,
     () => `domain:${pick(['a.test', 'b.test', 'alice.test'])}`,
-    () => `lang:${pick(['ja', 'zh', 'en', 'es'])}`,
+    () => `lang:${pick(['ja', 'zh', 'zh-Hans', 'en', 'es'])}`,
     () => `has:${pick(['image', 'video', 'media', 'link'])}`,
     () => `is:${pick(['original', 'quote', 'repost'])}`,
     () => `type:${pick(['post', 'profile'])}`,
@@ -648,6 +651,60 @@ function plan(text: string): string {
     .map((r) => r.detail)
     .join('\n')
 }
+
+describe('languages', () => {
+  const langs = () => {
+    const counts: Record<string, number> = {}
+    for (const row of rows()) {
+      const key = row.lang ?? 'und'
+      counts[key] = (counts[key] ?? 0) + 1
+    }
+    return counts
+  }
+
+  test('lang: takes a language with its scripts, or one script', () => {
+    const counts = langs()
+    // The archive has Chinese of both scripts, and Japanese.
+    expect(counts['zh-Hans']).toBeGreaterThan(0)
+    expect(counts['zh-Hant']).toBeGreaterThan(0)
+    expect(counts.ja).toBeGreaterThan(0)
+    const total = (q: string) => {
+      const compiled = compileQuery(q, {
+        db: ctx.db,
+        types: reader.types,
+        kind: 'all',
+        filter: {},
+        scoped: true,
+      })!
+      return {
+        parsed: compiled.parsed,
+        count: countCollections(
+          ctx.db,
+          compiled.filter,
+          undefined,
+          compiled.extra,
+        ).count,
+      }
+    }
+    expect(total('lang:zh')).toEqual({
+      parsed: 'lang:zh',
+      count:
+        (counts['zh-Hans'] ?? 0) + (counts['zh-Hant'] ?? 0) + (counts.zh ?? 0),
+    })
+    expect(total('lang:ZH-hant')).toEqual({
+      parsed: 'lang:zh-Hant',
+      count: counts['zh-Hant'],
+    })
+    expect(total('lang:ja')).toEqual({ parsed: 'lang:ja', count: counts.ja })
+  })
+
+  test('aggregate by=lang: a bucket per stored value', () => {
+    const result = aggregate(reader, { params: { by: ['lang'] } })
+    expect(
+      Object.fromEntries(result.buckets.map((b) => [b.key, b.count])),
+    ).toEqual(langs())
+  })
+})
 
 describe('plans', () => {
   test.each([

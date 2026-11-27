@@ -5,7 +5,7 @@
 //
 // Neither platform's stored data names hashtags, links or a language, so
 // they are read from the item's own text: a post's text, an account's bio
-// (and its website). Mentions are what the platforms recorded as `mentions`
+// (and its website); the language as `lang/detect.ts` tells it. Mentions are what the platforms recorded as `mentions`
 // relations of the root (X from facets and the text, Instagram from the
 // caption).
 //
@@ -24,6 +24,7 @@
 // backfill writes them on its own, so it would move the version once per
 // batch that changed anything.
 import { sql } from 'drizzle-orm'
+import { detectLang } from '#lang/detect.ts'
 import { readSetting } from '#settings.ts'
 import { list } from './views.ts'
 import type { Database, Executor } from '#db/client.ts'
@@ -156,123 +157,10 @@ export function domainsOf(text: string, also: string[] = []): string[] {
   return [...domains]
 }
 
-// --- Language -------------------------------------------------------------
+// --- Reading and writing --------------------------------------------------
 
-/** Words common in one language and rare elsewhere, by language. */
-const STOPWORDS: Record<string, string> = {
-  en: 'the and is are was were to of for you this that it with on my be have not what just your our we but at from they will can i me so if',
-  es: 'el los las que y en un una por con para es se lo más pero muy como del al su está esto yo',
-  fr: 'le les des et est une pour qui dans pas je vous sur ce avec mais très du au il elle sont',
-  de: 'der die das und ist nicht ich ein eine mit auf für zu den dem sie wir auch sich aus',
-  pt: 'os as do da em um uma não é com mais eu você isso muito na no ao dos das',
-  it: 'il lo gli di che è per con non sono mi ma anche questo della nel una un',
-  id: 'yang dan di ini itu dengan untuk tidak ada aku saya kamu dari ke akan juga',
-  nl: 'het een en van dat niet ik op met voor zijn maar ook wat er',
-  tr: 've bir bu için ile çok ama ben sen gibi daha var değil',
-}
-const STOPWORD_LANG = new Map<string, string[]>()
-for (const [lang, words] of Object.entries(STOPWORDS))
-  for (const word of words.split(' '))
-    STOPWORD_LANG.set(word, [...(STOPWORD_LANG.get(word) ?? []), lang])
-
-const SCRIPTS: [string, RegExp][] = [
-  ['kana', /[\p{sc=Hiragana}\p{sc=Katakana}]/u],
-  ['han', /\p{sc=Han}/u],
-  ['hangul', /\p{sc=Hangul}/u],
-  ['latin', /\p{sc=Latin}/u],
-  ['cyrillic', /\p{sc=Cyrillic}/u],
-  ['arabic', /\p{sc=Arabic}/u],
-  ['hebrew', /\p{sc=Hebrew}/u],
-  ['greek', /\p{sc=Greek}/u],
-  ['thai', /\p{sc=Thai}/u],
-  ['devanagari', /\p{sc=Devanagari}/u],
-]
-
-/** One CJK character says about as much as a few Latin letters. */
-const WEIGHT: Record<string, number> = { kana: 3, han: 3, hangul: 2 }
-
-const NOT_TEXT = /(?<![\w@])@\w+|[#＃][\p{L}\p{M}\p{Nd}_]+/gu
-const UKRAINIAN = /[іїєґ]/iu
-const PERSIAN = /[پچژگ]/u
 const HANDLE_ID = /^handle:/
 const NUMERIC = /^\d+$/
-const WORD = /[\p{L}\p{M}']+/gu
-
-/**
- * The language of a text, from its scripts and, for Latin script, its
- * commonest small words: `ja`, `zh`, `ko`, `en`, `es`, `fr`, `de`, `pt`,
- * `it`, `id`, `nl`, `tr`, `ru`, `uk`, `ar`, `fa`, `he`, `el`, `th`, `hi`.
- * Null when it cannot tell (no letters, or Latin without any of those
- * words). Japanese is told from Chinese by its kana.
- */
-export function detectLang(text: string | null | undefined): string | null {
-  if (!text) return null
-  const plain = text
-    .replaceAll(URL_PATTERN, ' ')
-    .replaceAll(NOT_TEXT, ' ')
-    .normalize('NFKC')
-  const counts: Record<string, number> = {}
-  for (const char of plain)
-    for (const [script, pattern] of SCRIPTS)
-      if (pattern.test(char)) {
-        counts[script] = (counts[script] ?? 0) + 1
-        break
-      }
-  const kana = counts.kana ?? 0
-  const han = counts.han ?? 0
-  // Japanese writes kana between its kanji; Chinese may borrow a の.
-  const japanese = kana > 0 && kana >= (kana + han) * 0.2
-  const groups: Record<string, number> = {}
-  for (const [script, n] of Object.entries(counts)) {
-    const group =
-      script === 'kana' || script === 'han'
-        ? japanese
-          ? 'ja'
-          : script === 'han'
-            ? 'zh'
-            : 'ja'
-        : script
-    groups[group] = (groups[group] ?? 0) + n * (WEIGHT[script] ?? 1)
-  }
-  const top = Object.entries(groups).toSorted((a, b) => b[1] - a[1])[0]
-  if (!top) return null
-  switch (top[0]) {
-    case 'ja':
-    case 'zh':
-      return top[0]
-    case 'hangul':
-      return 'ko'
-    case 'cyrillic':
-      return UKRAINIAN.test(plain) ? 'uk' : 'ru'
-    case 'arabic':
-      return PERSIAN.test(plain) ? 'fa' : 'ar'
-    case 'hebrew':
-      return 'he'
-    case 'greek':
-      return 'el'
-    case 'thai':
-      return 'th'
-    case 'devanagari':
-      return 'hi'
-    case 'latin':
-      return latinLang(plain)
-    default:
-      return null
-  }
-}
-
-function latinLang(text: string): string | null {
-  const score: Record<string, number> = {}
-  for (const [word] of text.toLowerCase().matchAll(WORD))
-    for (const lang of STOPWORD_LANG.get(word) ?? [])
-      score[lang] = (score[lang] ?? 0) + 1
-  const ranked = Object.entries(score).toSorted(
-    (a, b) => b[1] - a[1] || (a[0] === 'en' ? -1 : b[0] === 'en' ? 1 : 0),
-  )
-  return ranked[0]?.[0] ?? null
-}
-
-// --- Reading and writing --------------------------------------------------
 
 interface Source {
   id: number
@@ -339,7 +227,7 @@ export function facetsOf(
         )
       : []
     out.set(row.id, {
-      lang: detectLang(text),
+      lang: detectLang(text).lang,
       hashtags: hashtagsOf(text),
       mentions: [...(mentions.get(row.id) ?? [])],
       domains: domainsOf(text, sites),
@@ -401,9 +289,10 @@ export function indexFacets(db: Executor, ids: readonly number[]): number {
 
 /**
  * Bumped when what is extracted changes, so the backfill goes over every
- * row again.
+ * row again: 2 detects languages with fastText and tells simplified from
+ * traditional Chinese.
  */
-export const FACETS_VERSION = 1
+export const FACETS_VERSION = 2
 export const BACKFILL_KEY = 'facets_backfill'
 
 export interface BackfillState {

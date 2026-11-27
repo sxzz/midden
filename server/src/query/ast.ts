@@ -155,7 +155,9 @@ const HANDLE = /^@[\w.]{1,64}$/
 const PLATFORM_HANDLE = /^[a-z][\w-]*:@[\w.]{1,64}$/
 const ACCOUNT_KEY = /^[^/\s]+\/[^/\s]+\.profile\/[^/\s]+$/
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
-const LANG = /^[a-z]{2,3}$/
+// A language, optionally with its script (`zh-Hant`), as `catalog.lang`
+// stores them.
+const LANG = /^([a-z]{2,3})(?:-([a-z]{4}))?$/i
 const PLATFORM = /^[a-z][\w-]*$/
 
 const choices: Partial<Record<Key, Record<string, string>>> = {
@@ -224,10 +226,14 @@ function canonicalValue(key: Key, raw: string): string | { error: string } {
       return domain ?? { error: `domain: takes a domain such as x.com.` }
     }
     case 'lang': {
-      const lower = value.toLowerCase()
-      return LANG.test(lower)
-        ? lower
-        : { error: `lang: takes a language code such as ja, zh or en.` }
+      const [, lang, script] = LANG.exec(value) ?? []
+      if (!lang)
+        return {
+          error: `lang: takes a language code such as ja, zh, zh-Hant or en.`,
+        }
+      return script
+        ? `${lang.toLowerCase()}-${script[0]!.toUpperCase()}${script.slice(1).toLowerCase()}`
+        : lang.toLowerCase()
     }
     case 'platform': {
       const lower = value.toLowerCase()

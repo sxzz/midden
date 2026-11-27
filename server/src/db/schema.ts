@@ -274,7 +274,8 @@ export const catalog = sqliteTable(
     followingCount: integer(),
     /**
      * The language of the item's own text (post text, account bio) as
-     * `library/facets.ts` detects it: `ja`, `zh`, `en`…; null when it cannot
+     * `lang/detect.ts` detects it, a BCP 47 tag: `ja`, `en`, `zh-Hans`,
+     * `zh-Hant`, `zh` (Chinese of no telling script)…; null when it cannot
      * tell. Written with the side tables below, only when the revision
      * changes, and filled for older rows by maintenance.
      */

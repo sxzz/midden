@@ -8,6 +8,7 @@ import { deriveKey } from '#crypto.ts'
 import { openDatabase, waitForMigrations, type Database } from '#db/client.ts'
 import { JobQueue } from '#jobs/queue.ts'
 import { Throttle } from '#jobs/throttle.ts'
+import { loadLangModel } from '#lang/detect.ts'
 import { catalogMissing } from '#library/catalog.ts'
 import { createInstagramPlatform } from '#platforms/instagram/index.ts'
 import { Platforms } from '#platforms/registry.ts'
@@ -70,6 +71,9 @@ export async function openRuntime(
     autoCheckpoint: role !== 'web',
   })
   cleanups.push(() => db.$client.close())
+  // Both processes write the catalog (captures, media removals, the
+  // catalogue below), which detects languages synchronously.
+  await loadLangModel()
   if (worker)
     await waitForMigrations(db, {
       signal,

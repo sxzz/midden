@@ -242,6 +242,9 @@ importers:
       drizzle-orm:
         specifier: ^1.0.0-rc.6
         version: 1.0.0-rc.6(valibot@1.5.0(typescript@6.0.3))(zod@4.6.7)
+      fasttext.wasm.js:
+        specifier: ^1.0.0
+        version: 1.0.0
       grammy:
         specifier: ^1.48.0
         version: 1.48.0(supports-color@10.2.2)
@@ -1312,6 +1315,9 @@ packages:
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
+  '@types/emscripten@1.41.6':
+    resolution: {integrity: sha512-uN+9i8bFT5CUcZfyIEYDrSueACEyKGbUs5kC/72DGlZZoinh84sJfVV0i8UOJD1asdzkvLPBRrKs41kZ8MdEXg==}
+
   '@types/esrecurse@4.3.1':
     resolution: {integrity: sha512-xJBAbDifo5hpffDBuHl0Y8ywswbiAp/Wi7Y/GtAgSlZyIABppyurxVueOPE8LUQOxdlgi6Zqce7uoEpqNTeiUw==}
 
@@ -2360,6 +2366,9 @@ packages:
 
   fast-levenshtein@2.0.6:
     resolution: {integrity: sha512-DCXu6Ifhqcks7TZKY3Hxp3y6qphY5SJZmrWMDrKcERSOXWQdMhU9Ig/PYrzyw/ul9jOIyh0N4M0tbC5hodg8dw==}
+
+  fasttext.wasm.js@1.0.0:
+    resolution: {integrity: sha512-Rv2DyM9ZaJ/r09FRIYeVXxsSRFu45CVH3Zu7nheTe/EPCH0Sew1wKf0zQ4VCBmibGRBpeHlpMuRdsp+VC/YwZw==}
 
   fault@2.0.1:
     resolution: {integrity: sha512-WtySTkS4OKev5JtpHXnib4Gxiurzh5NCGvWrFaZ34m6JehfTUhKZvn9njTfw48t6JumVQOmrKqpmGcdwxnhqBQ==}
@@ -4684,6 +4693,8 @@ snapshots:
 
   '@types/deep-eql@4.0.2': {}
 
+  '@types/emscripten@1.41.6': {}
+
   '@types/esrecurse@4.3.1': {}
 
   '@types/estree@1.0.10': {}
@@ -5720,6 +5731,10 @@ snapshots:
   fast-json-stable-stringify@2.1.0: {}
 
   fast-levenshtein@2.0.6: {}
+
+  fasttext.wasm.js@1.0.0:
+    dependencies:
+      '@types/emscripten': 1.41.6
 
   fault@2.0.1:
     dependencies:

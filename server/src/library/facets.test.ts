@@ -2,9 +2,10 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { backfillFacets } from '#capture/maintenance.ts'
 import { capture, entity, graph, libraryContext } from '#testing/library.ts'
 import {
+  BACKFILL_KEY,
   backfillState,
-  detectLang,
   domainOf,
+  FACETS_VERSION,
   hashtagsOf,
   registrableDomain,
 } from './facets.ts'
@@ -32,22 +33,6 @@ describe('values', () => {
     expect(domainOf('pixiv.net')).toBe('pixiv.net')
     expect(domainOf('https://t.co/abc')).toBeUndefined()
     expect(domainOf('mailto:a@b.c')).toBeUndefined()
-  })
-
-  test('language: from the scripts, and Latin from its small words', () => {
-    expect(detectLang('今日は猫の日です')).toBe('ja')
-    expect(detectLang('鏡音レン')).toBe('ja')
-    expect(detectLang('今天天气很好')).toBe('zh')
-    expect(detectLang('我の猫今天很可爱很可爱')).toBe('zh')
-    expect(detectLang('오늘 날씨가 좋네요')).toBe('ko')
-    expect(detectLang('The cat is on the mat')).toBe('en')
-    expect(detectLang('El gato está en la casa')).toBe('es')
-    expect(detectLang("C'est une très belle journée pour le chat")).toBe('fr')
-    expect(detectLang('Привет, как дела?')).toBe('ru')
-    expect(detectLang('今日はcodingした')).toBe('ja')
-    expect(detectLang('lol')).toBeNull()
-    expect(detectLang('🎉🎉 https://a.test @alice #tag')).toBeNull()
-    expect(detectLang('')).toBeNull()
   })
 })
 
@@ -167,6 +152,46 @@ describe('facets of captured items', () => {
     ])
   })
 
+  test('language: detected again when the text changes, from the bio for an account', async () => {
+    const routes: Record<string, () => Partial<FetchResponse>> = {
+      p1: post('p1', 'The cat sat on the mat all afternoon'),
+      8: () => ({
+        text: 'Bob',
+        graph: graph([
+          entity('root', 'fake.profile', '8', {
+            username: 'bob',
+            name: 'Bob',
+            metadata: { description: '画画的，偶尔发日常。约稿请私信' },
+          }),
+        ]),
+      }),
+    }
+    const c = setup(routes)
+    await capture(c, 'https://fake.test/p/p1')
+    await capture(c, 'https://fake.test/u/8')
+    const langs = () =>
+      Object.fromEntries(
+        (
+          c.db.$client
+            .prepare(
+              'SELECT root_kind AS kind, lang FROM catalog ORDER BY root_kind',
+            )
+            .all() as { kind: string; lang: string | null }[]
+        ).map((r) => [r.kind, r.lang]),
+      )
+    expect(langs()).toEqual({ 'fake.post': 'en', 'fake.profile': 'zh-Hans' })
+    const writes = logFacetWrites(c)
+    routes.p1 = post('p1', '今日は猫の日です。一日中ずっと寝ていました')
+    await capture(c, { url: 'https://fake.test/p/p1', refetch: true })
+    expect(langs()).toEqual({ 'fake.post': 'ja', 'fake.profile': 'zh-Hans' })
+    expect(writes()).toEqual(['catalog lang'])
+    // A new text in the same language: a new revision, the same language,
+    // so nothing written for it.
+    routes.p1 = post('p1', '明日は雨が降るらしいので、傘を持っていきます')
+    await capture(c, { url: 'https://fake.test/p/p1', refetch: true })
+    expect(writes()).toEqual(['catalog lang'])
+  })
+
   test('go with the catalog row', async () => {
     const c = setup({ p1: post('p1', '#a #b https://a.test', ['bob']) })
     await capture(c, 'https://fake.test/p/p1')
@@ -203,5 +228,27 @@ describe('facets of captured items', () => {
     expect(await backfillFacets(c, () => true, 2)).toBe(2)
     expect(backfillState(c.db).done).toBe(true)
     expect(facetRows(c)).toEqual(filled)
+  })
+
+  test('are filled again from the start when the version moves', async () => {
+    const c = setup({ p1: post('p1', '今天天气很好，我们去公园散步吧') })
+    await capture(c, 'https://fake.test/p/p1')
+    expect(facetRows(c).lang).toEqual(['zh-Hans'])
+    // As the previous version left it: done, with its own language.
+    c.db.$client.exec("UPDATE catalog SET lang = 'zh'")
+    c.db.$client
+      .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+      .run(
+        BACKFILL_KEY,
+        JSON.stringify({ version: FACETS_VERSION - 1, after: 99, done: true }),
+      )
+    expect(backfillState(c.db)).toEqual({
+      version: FACETS_VERSION,
+      after: 0,
+      done: false,
+    })
+    await backfillFacets(c)
+    expect(backfillState(c.db).done).toBe(true)
+    expect(facetRows(c).lang).toEqual(['zh-Hans'])
   })
 })
