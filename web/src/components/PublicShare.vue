@@ -261,6 +261,8 @@ h1 {
   .bar {
     position: sticky;
     top: 0;
+    /* Where what sticks under the header (PageTabs) stops. */
+    --page-header-height: 53px;
     z-index: 10;
     min-height: 53px;
     margin-bottom: 8px;

@@ -159,7 +159,7 @@ test('submits links and follows the record until it finishes', async ({
     .getByRole('navigation', { name: '主导航' })
     .getByRole('link', { name: '探索' })
     .click()
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('h1')).toHaveText('收藏库')
   await expect.poll(() => listReloads).toBeGreaterThan(before)
 })
 

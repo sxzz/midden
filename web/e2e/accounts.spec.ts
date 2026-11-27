@@ -352,7 +352,7 @@ test('deleting everything shows what goes and needs the phrase typed', async ({
     .getByRole('navigation', { name: '主导航' })
     .getByRole('link', { name: '探索' })
     .click()
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('h1')).toHaveText('收藏库')
   await expect(page.locator('.row')).toHaveCount(0)
   await expect(page.getByText(/暂无/)).toHaveCount(0)
 })

@@ -187,7 +187,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await expect(sheet.getByText('将删除1条帖子')).toBeVisible()
   await expect(sheet.getByRole('checkbox')).toHaveCount(0)
   await sheet.getByRole('button', { name: '删除', exact: true }).click()
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('h1')).toHaveText('收藏库')
   await expect(page.locator('.row')).toHaveCount(0)
   await expect(page.getByText(/暂无/)).toHaveCount(0)
 })
@@ -227,7 +227,7 @@ test('the Mini App signs in with the launch data in its address', async ({
     return r.fulfill({ json: {} })
   })
   await page.goto('/#tgWebAppData=user%3D42%26hash%3Dabc')
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('h1')).toHaveText('收藏库')
   expect(logins).toEqual([{ init_data: 'user=42&hash=abc' }])
   // Its theme is applied from the start.
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')

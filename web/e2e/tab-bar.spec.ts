@@ -115,7 +115,7 @@ test('moves between the three tabs, lighting the one shown', async ({
 }) => {
   const graphs = await mock(page)
   await page.goto('/')
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('h1')).toHaveText('收藏库')
   await expect(tab(page, '探索')).toHaveAttribute('aria-current', 'page')
   await expect(tab(page, '探索')).toHaveAttribute('href', '/')
   // The top bar no longer carries what the bottom one does.
@@ -169,12 +169,12 @@ test('moves between the three tabs, lighting the one shown', async ({
     '/relations?of=x/x.profile/2',
   )
   await tab(page, '探索').click()
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('h1')).toHaveText('收藏库')
   await page.locator('.row').first().locator('.head').click()
   await expect(page.locator('h1')).toHaveText('帖子')
   await expect(tab(page, '探索')).toHaveAttribute('aria-current', 'page')
   await tab(page, '探索').click()
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('h1')).toHaveText('收藏库')
 })
 
 test('hides on scrolling down and returns on scrolling up', async ({
@@ -225,15 +225,15 @@ test('each tab opens in a new tab with Cmd or Ctrl', async ({
 }) => {
   await mock(page)
   await page.goto('/')
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('h1')).toHaveText('收藏库')
   const opened = context.waitForEvent('page')
   await tab(page, '设置').click({ modifiers: ['ControlOrMeta'] })
   const other = await opened
   await expect(other).toHaveURL(/\/settings$/)
   await other.close()
   // This page stays where it was.
-  await expect(page).toHaveURL(/:\d+\/$/)
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.locator('h1')).toHaveText('收藏库')
 })
 
 test('关系 shows only the picker without relation data', async ({ page }) => {
@@ -304,7 +304,7 @@ test('each tab returns to the page and scroll it was left on', async ({
     page.getByRole('link', { name: '返回', exact: true }),
   ).toHaveAttribute('href', '/')
   await page.getByRole('link', { name: '返回', exact: true }).click()
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('h1')).toHaveText('收藏库')
   await page.goBack()
   await expect(page).toHaveURL(/\/settings\/admin$/)
   await expect(page.locator('h1')).toHaveText('管理员面板')
@@ -318,8 +318,8 @@ test('the open tab, tapped, goes to its root, then to the top', async ({
   await page.locator('.row').nth(5).locator('.head').click()
   await expect(page.locator('h1')).toHaveText('帖子')
   await tab(page, '探索').click()
-  await expect(page.locator('h1')).toHaveText('我的收藏')
-  await expect(page).toHaveURL(/:\d+\/$/)
+  await expect(page.locator('h1')).toHaveText('收藏库')
+  await expect(page).toHaveURL(/\/$/)
   await page.mouse.move(195, 400)
   await page.mouse.wheel(0, 600)
   await expect.poll(() => scrollY(page)).toBeGreaterThan(0)

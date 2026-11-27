@@ -54,6 +54,8 @@ const props = defineProps<{
   /** A refresh (`refresh`) is reading the list again. */
   refreshing?: boolean
 }>()
+  /** From 1000px its filters go to the sidebar (CollectionFilters). */
+  asideFilters?: boolean
 /** `actions`: more buttons for the toolbar, styled like 多选. */
 const slots = useSlots()
 const emit = defineEmits<{
@@ -190,6 +192,8 @@ const storage = computed(() =>
     class="layout-bar"
   >
     <span v-if="totalText" class="total">{{ totalText }}</span>
+    :aside="asideFilters"
+    :total="totalText"
     <slot name="actions" />
     <button
       v-if="!selecting && items.length && !shared"

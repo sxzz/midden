@@ -326,9 +326,9 @@ it('says so when the folder is gone', async () => {
 
 const MIXED = '00000000-0000-7000-8000-0000000000cc'
 const tabs = (el: HTMLElement) =>
-  [...el.querySelectorAll('[role="tab"]')].map((tab) => [
+  [...el.querySelectorAll('nav[aria-label="类型"] a')].map((tab) => [
     tab.textContent?.trim(),
-    tab.getAttribute('aria-selected'),
+    tab.getAttribute('aria-current') === 'page' ? 'true' : 'false',
   ])
 
 it('splits a folder of posts and accounts into tabs, as a view', async () => {
@@ -357,7 +357,7 @@ it('splits a folder of posts and accounts into tabs, as a view', async () => {
   // The folder's own counts said both kinds are there.
   expect(kindCounts()).toEqual([])
 
-  el.querySelectorAll<HTMLAnchorElement>('[role="tab"]')[1]!.click()
+  el.querySelectorAll<HTMLAnchorElement>('nav[aria-label="类型"] a')[1]!.click()
   await vi.waitFor(() =>
     expect(listQueries().at(-1)?.get('entity_type')).toBe(
       'x.profile,instagram.profile',
@@ -404,7 +404,7 @@ it("shows each tab's own total, counted again for other filters", async () => {
   const el = await mount('/')
   await vi.waitFor(() => expect(total(el)).toBe('1,235条'))
 
-  el.querySelectorAll<HTMLAnchorElement>('[role="tab"]')[1]!.click()
+  el.querySelectorAll<HTMLAnchorElement>('nav[aria-label="类型"] a')[1]!.click()
   await vi.waitFor(() => expect(total(el)).toBe('56个账号'))
   expect(totals().at(-1)?.get('entity_type')).toBe(
     'x.profile,instagram.profile',
@@ -412,7 +412,7 @@ it("shows each tab's own total, counted again for other filters", async () => {
 
   // Back on a tab already shown: neither its list nor its total is asked again.
   const asked = totals().length
-  el.querySelectorAll<HTMLAnchorElement>('[role="tab"]')[0]!.click()
+  el.querySelectorAll<HTMLAnchorElement>('nav[aria-label="类型"] a')[0]!.click()
   await vi.waitFor(() => expect(total(el)).toBe('1,235条'))
   expect(totals()).toHaveLength(asked)
 

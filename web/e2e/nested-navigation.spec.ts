@@ -87,7 +87,7 @@ for (const deep of [false, true]) {
     await page.getByRole('link', { name: '返回', exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`/collection/${postId}$`))
     await page.getByRole('link', { name: '返回', exact: true }).click()
-    await expect(page).toHaveURL(deep ? /:\d+\/$/ : /\/\?q=fixture$/)
-    await expect(page.locator('h1')).toHaveText('我的收藏')
+    await expect(page).toHaveURL(deep ? /\/$/ : /\/\?q=fixture$/)
+    await expect(page.locator('h1')).toHaveText('收藏库')
   })
 }

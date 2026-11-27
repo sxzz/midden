@@ -30,7 +30,7 @@ test.describe('from 700px', () => {
   test('the rail of icons takes the bottom bar’s place', async ({ page }) => {
     await mockDesktop(page)
     await page.goto('/')
-    await expect(page.locator('h1')).toHaveText('我的收藏')
+    await expect(page.locator('h1')).toHaveText('收藏库')
     await expect(rail(page)).toBeVisible()
     await expect(page.locator('[data-tab-bar-nav]')).toHaveCount(0)
     expect(
@@ -142,7 +142,7 @@ test.describe('from 1280px', () => {
     const box = sidebar(page).getByRole('combobox', { name: '搜索收藏' })
     await box.fill('云海')
     await box.press('Enter')
-    await expect(page.locator('h1')).toHaveText('我的收藏')
+    await expect(page.locator('h1')).toHaveText('收藏库')
     await expect(page).toHaveURL(/\/\?q=%E4%BA%91%E6%B5%B7$/)
     await expect.poll(() => searches).toContain('云海')
     // The list has its own search box, so the sidebar's goes.
@@ -388,7 +388,7 @@ test('below 700px the phone layout stays', async ({ page }) => {
   await page.setViewportSize({ width: 699, height: 900 })
   await mockDesktop(page)
   await page.goto('/')
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('h1')).toHaveText('收藏库')
   const bar = page.locator('[data-tab-bar-nav]')
   await expect(bar).toBeVisible()
   await expect(rail(page)).toHaveCount(0)

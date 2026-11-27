@@ -9,6 +9,8 @@ import type { RouteLocationRaw } from 'vue-router'
 defineProps<{
   label: string
   tabs: { label: string; to: RouteLocationRaw; on: boolean }[]
+  /** Switching tabs replaces the address rather than adding to history. */
+  replace?: boolean
 }>()
 </script>
 
@@ -20,6 +22,7 @@ defineProps<{
       class="tab"
       :class="{ on: tab.on }"
       :to="tab.to"
+      :replace="replace"
       :aria-current="tab.on ? 'page' : undefined"
     >
       <span class="text">{{ tab.label }}</span>

@@ -32,7 +32,7 @@ test('an old hash address leads to its plain one', async ({ page }) => {
   expect(await page.evaluate(() => history.length)).toBe(2)
   await page.goto('/#/')
   await expect(page).toHaveURL('/')
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('h1')).toHaveText('收藏库')
 })
 
 test('an old public link leads to the share, without Telegram', async ({

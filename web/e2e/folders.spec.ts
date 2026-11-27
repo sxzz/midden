@@ -85,14 +85,14 @@ test('a folder shows posts and accounts in tabs, and updates as expanded', async
     return route.fulfill({ json })
   })
   await page.goto(`/folder/${folderId}`)
-  const tabs = page.getByRole('tablist', { name: '类型' })
-  await expect(tabs.getByRole('tab', { name: '帖子' })).toHaveAttribute(
-    'aria-selected',
-    'true',
+  const tabs = page.getByRole('navigation', { name: '类型' })
+  await expect(tabs.getByRole('link', { name: '帖子' })).toHaveAttribute(
+    'aria-current',
+    'page',
   )
   await expect(page.getByText('一只猫')).toBeVisible()
 
-  await tabs.getByRole('tab', { name: '账号' }).click()
+  await tabs.getByRole('link', { name: '账号' }).click()
   await expect(page).toHaveURL(/tab=profile/)
   await expect(page.getByText('猫咪账号').first()).toBeVisible()
   expect(lists.at(-1)).toContain('q=cat')

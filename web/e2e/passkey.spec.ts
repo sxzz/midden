@@ -121,7 +121,7 @@ test('a /passkey link adds a passkey, which then signs in', async ({
   await expect(page.getByLabel('名称')).toHaveValue(new RegExp(`${HOST}$`))
   await page.getByLabel('名称').fill('测试电脑')
   await page.getByRole('button', { name: '创建通行密钥' }).click()
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('h1')).toHaveText('收藏库')
   expect(registered).toEqual([
     {
       token: TOKEN,
@@ -148,7 +148,7 @@ test('a /passkey link adds a passkey, which then signs in', async ({
   ).toBeVisible()
   await page.screenshot({ path: 'test-results/passkey-login.png' })
   await page.getByRole('button', { name: '使用通行密钥登录' }).click()
-  await expect(page.locator('h1')).toHaveText('我的收藏')
+  await expect(page.locator('h1')).toHaveText('收藏库')
   expect(logins).toHaveLength(1)
   expect(logins[0]!.response.id).toBe(registered[0]!.response.id)
   expect(

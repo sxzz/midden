@@ -63,7 +63,11 @@ const shared = computed(() => {
 </script>
 
 <template>
-  <SidebarFrame :search="search" @search="find">
+  <SidebarFrame
+    :search="search"
+    :filters="folder && route.name === 'share'"
+    @search="find"
+  >
     <section v-if="shared" class="aside-box" aria-label="公开分享">
       <h2 :lang="shared.lang">{{ shared.name }}</h2>
       <p class="aside-facts">

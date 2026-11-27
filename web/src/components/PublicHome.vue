@@ -5,9 +5,9 @@ import { useCollection } from '../composables/useCollection'
 import { listsProfiles } from '../presentation'
 import CollectionDetail from './CollectionDetail.vue'
 import CollectionView from './CollectionView.vue'
-import AppLink from './ui/AppLink.vue'
 import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import ListSection from './ui/ListSection.vue'
+import PageTabs from './ui/PageTabs.vue'
 import type { PublicShareInfo } from '../api'
 // What a public link opens: the shared collection's page, or the shared
 // folder's list, with a tab per kind only when it holds both. The visitor's
@@ -75,6 +75,14 @@ function tabLink(value: Kind) {
   const slug = String(route.params.slug)
   return `/s/${slug}${value === 'profile' ? `?entity_type=${PROFILES}` : ''}`
 }
+/** 帖子 and 账号 as X's tabs, as on the owner's library. */
+const pageTabs = computed(() =>
+  tabs.map((option) => ({
+    label: option.label,
+    to: tabLink(option.value),
+    on: kind.value === option.value,
+  })),
+)
 </script>
 
 <template>
@@ -85,19 +93,7 @@ function tabLink(value: Kind) {
     :show-sensitive="showSensitive"
   />
   <template v-else>
-    <div v-if="both" class="tabs" role="tablist" aria-label="类型">
-      <AppLink
-        v-for="option in tabs"
-        :key="option.value"
-        role="tab"
-        class="tab"
-        :class="{ on: kind === option.value }"
-        :aria-selected="kind === option.value"
-        :to="tabLink(option.value)"
-      >
-        {{ option.label }}
-      </AppLink>
-    </div>
+    <PageTabs v-if="both" label="类型" :tabs="pageTabs" />
     <CollectionView
       :items="items"
       :query="query"
@@ -107,6 +103,7 @@ function tabLink(value: Kind) {
       :total="total"
       :show-sensitive="showSensitive"
       :refreshing="refreshing"
+      aside-filters
       @search="search"
       @refresh="refresh"
       @more="more"
@@ -114,39 +111,3 @@ function tabLink(value: Kind) {
     />
   </template>
 </template>
-
-<style scoped>
-.tabs {
-  display: flex;
-  gap: 2px;
-  margin: 4px var(--gutter) 12px;
-  padding: 2px;
-  border-radius: 10px;
-  background: var(--fill);
-}
-.tab {
-  flex: 1;
-  display: grid;
-  place-items: center;
-  min-height: 32px;
-  text-align: center;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--subtle);
-  transition:
-    background 160ms ease,
-    color 160ms ease;
-}
-.tab.on {
-  background: var(--card);
-  color: var(--text);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--text) 12%, transparent),
-    0 1px 3px rgba(0, 0, 0, 0.12);
-}
-.tab:focus-visible {
-  outline: 2px solid var(--link);
-  outline-offset: 1px;
-}
-</style>

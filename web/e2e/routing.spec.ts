@@ -56,7 +56,7 @@ for (const back of ['button', 'history'] as const) {
     if (back === 'button')
       await page.getByRole('link', { name: '返回' }).click()
     else await page.goBack()
-    await expect(page.locator('h1')).toHaveText('我的收藏')
+    await expect(page.locator('h1')).toHaveText('收藏库')
     await expect(page).toHaveURL(/\/\?q=test$/)
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scroll)
     expect(await img.evaluate((node, saved) => node === saved, original)).toBe(
@@ -125,6 +125,6 @@ test('Telegram back from a directly opened collection returns home', async ({
   await page.evaluate(() =>
     (globalThis as unknown as { telegramBack: () => void }).telegramBack(),
   )
-  await expect(page.locator('h1')).toHaveText('我的收藏')
-  await expect(page).toHaveURL(/:\d+\/$/)
+  await expect(page.locator('h1')).toHaveText('收藏库')
+  await expect(page).toHaveURL(/\/$/)
 })

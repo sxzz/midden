@@ -1,4 +1,10 @@
-import { expect, test } from './test'
+import { expect, test, type Page } from './test'
+
+/** The library's 帖子 and 账号 tabs. */
+const kindTab = (page: Page, name: string) =>
+  page
+    .getByRole('navigation', { name: '类型' })
+    .getByRole('link', { name, exact: true })
 
 const id = '11111111-1111-4111-8111-111111111111'
 const profile = {
@@ -56,7 +62,7 @@ test('platform filter merges Instagram and X and preserves legacy X links', asyn
   await expect
     .poll(() => query.get('entity_type'))
     .toBe('x.post,instagram.post')
-  await page.getByRole('tab', { name: '账号', exact: true }).click()
+  await kindTab(page, '账号').click()
   await expect
     .poll(() => query.get('entity_type'))
     .toBe('x.profile,instagram.profile')
@@ -68,9 +74,7 @@ test('platform filter merges Instagram and X and preserves legacy X links', asyn
   await expect(page.getByLabel('平台', { exact: true })).toHaveValue('x')
   await page.goto('/?entity_type=x.profile')
   await expect.poll(() => query.get('entity_type')).toBe('x.profile')
-  await expect(
-    page.getByRole('tab', { name: '账号', exact: true }),
-  ).toHaveAttribute('aria-selected', 'true')
+  await expect(kindTab(page, '账号')).toHaveAttribute('aria-current', 'page')
 })
 
 test('entity tabs keep their own filters and mobile statistic layout', async ({
@@ -96,14 +100,14 @@ test('entity tabs keep their own filters and mobile statistic layout', async ({
     page.locator('.head').filter({ hasText: '测试账号' }),
   ).toBeVisible()
   expect(type()).toBe('x.post,instagram.post')
-  const posts = page.getByRole('tab', { name: '帖子' })
-  const accounts = page.getByRole('tab', { name: '账号' })
-  await expect(posts).toHaveAttribute('aria-selected', 'true')
+  const posts = kindTab(page, '帖子')
+  const accounts = kindTab(page, '账号')
+  await expect(posts).toHaveAttribute('aria-current', 'page')
   await page.getByRole('button', { name: /^筛选/ }).click()
   await page.getByLabel('可见性').selectOption('public')
   await expect.poll(() => queries.at(-1)?.get('visibility')).toBe('public')
   await accounts.click()
-  await expect(accounts).toHaveAttribute('aria-selected', 'true')
+  await expect(accounts).toHaveAttribute('aria-current', 'page')
   await expect.poll(type).toBe('x.profile,instagram.profile')
   // The posts tab's filter stays with the posts tab.
   expect(queries.at(-1)?.get('visibility')).toBeNull()
@@ -123,14 +127,14 @@ test('entity tabs keep their own filters and mobile statistic layout', async ({
   // Both lists were cached, so neither switch reached the server.
   expect(queries.length).toBe(requests)
   await page.reload()
-  await expect(accounts).toHaveAttribute('aria-selected', 'true')
+  await expect(accounts).toHaveAttribute('aria-current', 'page')
   await expect.poll(type).toBe('x.profile,instagram.profile')
   expect(queries.at(-1)?.get('visibility')).toBe('private')
   // Clearing drops the filters, not the tab.
   await page.getByRole('button', { name: '清除', exact: true }).click()
   await expect.poll(() => queries.at(-1)?.get('visibility')).toBeNull()
   expect(type()).toBe('x.profile,instagram.profile')
-  await expect(accounts).toHaveAttribute('aria-selected', 'true')
+  await expect(accounts).toHaveAttribute('aria-current', 'page')
   await expect(page.getByRole('button', { name: '清除' })).toHaveCount(0)
   // Accounts also order by their counts, most first unless asked; posts
   // have none to order by.

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, shallowRef, watch } from 'vue'
 import {
-  RouterLink,
   RouterView,
   useRoute,
   useRouter,
@@ -212,7 +211,7 @@ function watchChanged(w: Watch | undefined) {
   sheet.value = ''
 }
 const titles: Record<string, string> = {
-  collections: '我的收藏',
+  collections: '收藏库',
   captures: '采集',
   'captures-watches': '采集',
   capture: '采集记录',
@@ -238,7 +237,7 @@ const title = computed(() => {
   // A post's 历史 is its counts alone (CollectionHistory).
   if (historyPage.value)
     return kindOf(String(route.params.id)) === 'post' ? '统计趋势' : '历史'
-  return titles[String(route.name)] || '我的收藏'
+  return titles[String(route.name)] || '收藏库'
 })
 watch(title, (value) => setDocumentTitle(value), { immediate: true })
 /** Settings and 采集 have no media to cover. */
@@ -402,6 +401,21 @@ function folderTabLink(kind: Kind) {
 }
 let shownKey = ''
 watch(
+/** 帖子 and 账号 as X's tabs, each to its list as it was left. */
+const homeTabs = computed(() =>
+  tabs.map((option) => ({
+    label: option.label,
+    to: lists[option.value].path,
+    on: tab.value === option.value,
+  })),
+)
+const folderTabs = computed(() =>
+  folderKindsShown.value.map((kind) => ({
+    label: kindLabels[kind],
+    to: folderTabLink(kind),
+    on: folderKind.value === kind,
+  })),
+)
   () => route.fullPath,
   async () => {
     backButton(nested.value)
@@ -665,6 +679,7 @@ function listProps(list: ReturnType<typeof createList>, error = '') {
     usage: usage.value,
     onSearch: search,
     onRefresh: () => {
+    asideFilters: true,
       if (list.loadedQuery !== undefined) void collection.refresh()
     },
     onTagsChanged: tagsChanged,
@@ -844,39 +859,14 @@ const viewProps = computed(() => {
         </AppLink>
       </template>
     </PageTabs>
-    <div v-if="home" class="tabs" role="tablist" aria-label="类型">
-      <RouterLink
-        v-for="option in tabs"
-        :key="option.value"
-        role="tab"
-        class="tab"
-        :class="{ on: tab === option.value }"
-        :aria-selected="tab === option.value"
-        :to="lists[option.value].path"
-      >
-        {{ option.label }}
-      </RouterLink>
-    </div>
+    <PageTabs v-if="home" label="类型" :tabs="homeTabs" />
     <FolderStrip v-if="home" :folders="folders" />
-    <div
+    <PageTabs
       v-if="folderId && folderKindsShown.length > 1"
-      class="tabs"
-      role="tablist"
-      aria-label="类型"
-    >
-      <RouterLink
-        v-for="kind in folderKindsShown"
-        :key="kind"
-        role="tab"
-        class="tab"
-        :class="{ on: folderKind === kind }"
-        :aria-selected="folderKind === kind"
-        :to="folderTabLink(kind)"
-        replace
-      >
-        {{ kindLabels[kind] }}
-      </RouterLink>
-    </div>
+      label="类型"
+      :tabs="folderTabs"
+      replace
+    />
     <div v-if="modified" class="folder-status" role="status">
       <span class="folder-status-text">筛选条件已修改</span>
       <button type="button" :disabled="busy" @click="openSheet('create')">
@@ -1061,41 +1051,6 @@ const viewProps = computed(() => {
 .icon-button:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 2px;
-}
-.tabs {
-  display: flex;
-  gap: 2px;
-  margin: 4px var(--gutter) 12px;
-  padding: 2px;
-  border-radius: 10px;
-  background: var(--fill);
-}
-.tab {
-  flex: 1;
-  /* Tabs are links now, so centre the label vertically ourselves. */
-  display: grid;
-  place-items: center;
-  min-height: 32px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--subtle);
-  transition:
-    background 160ms ease,
-    color 160ms ease;
-}
-.tab.on {
-  background: var(--card);
-  color: var(--text);
-  /* The ring keeps it apart in dark themes, where the card is darker than
-     the track. */
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--text) 12%, transparent),
-    0 1px 3px rgba(0, 0, 0, 0.12);
-}
-.tab:focus-visible {
-  outline: 2px solid var(--link);
-  outline-offset: 1px;
 }
 .back {
   display: flex;

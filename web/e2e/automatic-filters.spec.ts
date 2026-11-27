@@ -51,14 +51,20 @@ test('filter changes apply immediately without collapsing controls', async ({
   expect(tags[1]!.x).toBeGreaterThan(tags[0]!.x)
   // The other tab is its own list with its own filters; coming back finds
   // this one as it was left, without asking the server again.
-  await page.getByRole('tab', { name: '账号' }).click()
+  await page
+    .getByRole('navigation', { name: '类型' })
+    .getByRole('link', { name: '账号' })
+    .click()
   await expect
     .poll(() => queries.at(-1)?.get('entity_type'))
     .toBe('x.profile,instagram.profile')
   expect(queries.at(-1)?.getAll('author')).toEqual([])
   await expect(panel).toHaveAttribute('aria-expanded', 'false')
   const requests = queries.length
-  await page.getByRole('tab', { name: '帖子' }).click()
+  await page
+    .getByRole('navigation', { name: '类型' })
+    .getByRole('link', { name: '帖子' })
+    .click()
   await expect(panel).toHaveAttribute('aria-expanded', 'true')
   await expect(list.getByRole('option', { name: '作者乙' })).toHaveAttribute(
     'aria-selected',

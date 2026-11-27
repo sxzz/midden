@@ -2,7 +2,7 @@
 import { computed, onUnmounted, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { call, client, type CaptureRecord, type Folder } from '../api'
-import { pageAside } from '../aside'
+import { filterCardShown, pageAside } from '../aside'
 import { recordProgress, recordTitle } from '../captures'
 import { useStale } from '../composables/useStale'
 import { folderLink } from '../folders'
@@ -106,9 +106,19 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <SidebarFrame :search="lists ? undefined : '搜索收藏'" query @search="search">
+  <SidebarFrame
+    :search="lists ? undefined : '搜索收藏'"
+    query
+    :filters="lists"
+    @search="search"
+  >
     <template v-if="lists">
-      <section v-if="total" class="aside-box" aria-label="结果">
+      <!-- The 筛选 card says the count at its foot; without it, here. -->
+      <section
+        v-if="total && !filterCardShown"
+        class="aside-box"
+        aria-label="结果"
+      >
         <h2>结果</h2>
         <p class="aside-facts">{{ total }}</p>
       </section>

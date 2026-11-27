@@ -68,3 +68,13 @@ export function useAside(source: () => DetailAside | undefined) {
   })
   onUnmounted(withdraw)
 }
+
+/**
+ * Where the list's 筛选 card goes from 1000px: an element the sidebar holds
+ * at its top while it shows a list (SidebarFrame's `filters`), into which
+ * the shown list's filters teleport (CollectionFilters). None while the
+ * sidebar shows no list.
+ */
+export const filterSlot = shallowRef<HTMLElement | null>(null)
+/** Whether a list's 筛选 card is in the sidebar now, saying its count. */
+export const filterCardShown = shallowRef(false)

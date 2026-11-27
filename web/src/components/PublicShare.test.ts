@@ -148,9 +148,9 @@ it('opens a shared folder without login, with a tab per kind it holds', async ()
   expect(buttons(el)).not.toContain('多选')
   expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
 
-  const tab = [...el.querySelectorAll<HTMLButtonElement>('[role=tab]')].find(
-    (b) => b.textContent?.trim() === '账号',
-  )!
+  const tab = [
+    ...el.querySelectorAll<HTMLAnchorElement>('nav[aria-label="类型"] a'),
+  ].find((b) => b.textContent?.trim() === '账号')!
   tab.click()
   await vi.waitFor(() => expect(el.textContent).toContain('账号简介'))
   await vi.waitFor(() =>

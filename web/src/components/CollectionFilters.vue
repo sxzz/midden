@@ -2,10 +2,13 @@
 import {
   computed,
   onActivated,
+  onDeactivated,
   onMounted,
   onUnmounted,
+  provide,
   reactive,
   shallowRef,
+  useTemplateRef,
   watch,
 } from 'vue'
 import {
@@ -16,12 +19,16 @@ import {
   type Tag,
   type TagChange,
 } from '../api'
+import { filterCardShown, filterSlot } from '../aside'
+import { FILTER_CARD } from '../filter-card'
 import { kindOf, KINDS, localDay, type Kind } from '../folders'
+import { SIDEBAR, useMedia } from '../layout'
 import { listSort, listsProfiles, searches } from '../presentation'
 import { composeQuery, hasTerms, readQuery, splitQuery } from '../query'
 import { readAuthors } from '../reads'
 import { defaultRelMin, isRel, relMinOf, type Rel } from '../relation-filter'
 import { shareSlug } from '../share'
+import FilterCard from './FilterCard.vue'
 import QueryBox from './QueryBox.vue'
 import RelationFilter from './RelationFilter.vue'
 import TagEditSheet from './TagEditSheet.vue'
@@ -58,6 +65,13 @@ const props = defineProps<{
    * kind by its entity types.
    */
   folder?: boolean
+  /**
+   * From 1000px the controls may go to the sidebar as its 筛选 card (the
+   * library's lists, a folder's, a share's), the query box staying here.
+   */
+  aside?: boolean
+  /** The list's count, which the card says at its foot. */
+  total?: string
 }>()
 const emit = defineEmits<{
   /** `replace`: the same list, said by the controls where they can. */
@@ -586,6 +600,30 @@ const mediaOptions = Object.entries(mediaNames).map(([value, label]) => ({
 // Tags are managed where they are picked: each chip opens its editor.
 const managing = shallowRef(false)
 const editing = shallowRef<Tag>()
+
+// --- The sidebar's 筛选 card ---------------------------------------------------
+// The same form, its controls in the sidebar while it has room and a place
+// for them, and only for the list shown: a list kept alive but hidden
+// takes its card back, so the next one shown puts its own there.
+const sidebarRoom = useMedia(SIDEBAR)
+const shown = shallowRef(true)
+onActivated(() => (shown.value = true))
+onDeactivated(() => (shown.value = false))
+const slotTarget = computed(() => filterSlot.value)
+const inAside = computed(
+  () => !!props.aside && sidebarRoom.value && shown.value && !!slotTarget.value,
+)
+watch(
+  inAside,
+  (now, before) => {
+    if (now) filterCardShown.value = true
+    else if (before) filterCardShown.value = false
+  },
+  { immediate: true },
+)
+onUnmounted(() => {
+  if (inAside.value) filterCardShown.value = false
+})
 async function tagChanged(change: TagChange) {
   editing.value = undefined
   emit('tagsChanged', change)
@@ -619,10 +657,48 @@ const tagSummary = computed(() => {
     .filter(Boolean)
     .join('、')
 })
+const formEl = useTemplateRef<HTMLFormElement>('formEl')
+provide(FILTER_CARD, {
+  form,
+  posts,
+  shared,
+  withinProfile: computed(() => !!props.withinProfile),
+  searching,
+  orderNames,
+  tags,
+  tagError,
+  loadTags,
+  managing,
+  toggleManaging: () => (managing.value = !managing.value),
+  editTag: (tag) => (editing.value = tag),
+  authors: {
+    options: computed(() => authorOptions.value),
+    names: authorNames,
+    loading: authorsLoading,
+    more: computed(() => !!authorsNext.value),
+    error: authorError,
+    open: openAuthors,
+    search: searchAuthors,
+    load: loadAuthors,
+  },
+  mediaOptions,
+  range,
+  rangeOptions,
+  sourceStateNames,
+  relationSummary,
+  clearable,
+  clear,
+  total: computed(() => props.total ?? ''),
+  // The query box's own ? opens it, in the column, where the box is.
+  openHelp: () =>
+    formEl.value
+      ?.querySelector<HTMLButtonElement>('button[aria-label="查询语法"]')
+      ?.click(),
+})
 </script>
 
 <template>
-  <form class="filters" @submit.prevent="search">
+  <form ref="formEl" class="filters" @submit.prevent="search">
     <QueryBox v-if="!shared" v-model="boxText" @submit="submitQuery" />
     <div v-else class="bar ring-within">
       <svg
@@ -647,245 +723,249 @@ const tagSummary = computed(() => {
         maxlength="500"
       /><button type="submit" class="submit">搜索</button>
     </div>
-    <!-- Filter summary and sort share one line; the sort pickers are named
+    <!-- Beside the sidebar the controls are its 筛选 card (below). -->
+    <template v-if="!inAside">
+      <!-- Filter summary and sort share one line; the sort pickers are named
          by their own values, so they need no visible label. -->
-    <div class="toggles">
-      <button
-        type="button"
-        class="toggle"
-        :aria-expanded="open"
-        @click="open = !open"
-      >
-        筛选
-        <ChevronIcon :open="open" />
-      </button>
-      <button
-        v-if="clearable"
-        type="button"
-        class="toggle reset"
-        @click="clear"
-      >
-        清除
-      </button>
-      <span class="sort"
-        ><span class="select"
-          ><select v-model="form.sort" aria-label="排序">
-            <option v-if="searching" value="relevance">相关度</option>
-            <option v-if="posts" value="published">发帖时间</option>
-            <option v-if="!shared" value="saved">添加时间</option>
-            <option value="updated">更新时间</option>
-            <option v-if="!shared" value="storage">存储空间</option>
-            <template v-if="!posts">
-              <option value="followers">粉丝数</option>
-              <option value="following">关注数</option>
-            </template></select
-          ><ChevronIcon class="select-chevron" /></span
-        ><span v-if="form.sort !== 'relevance'" class="select"
-          ><select v-model="form.order" aria-label="排序方向">
-            <option value="desc">{{ orderNames.desc }}</option>
-            <option value="asc">{{ orderNames.asc }}</option></select
-          ><ChevronIcon class="select-chevron" /></span
-      ></span>
-    </div>
-    <!-- On its own line: beside the sort pickers a phone has room for a
+      <div class="toggles">
+        <button
+          type="button"
+          class="toggle"
+          :aria-expanded="open"
+          @click="open = !open"
+        >
+          筛选
+          <ChevronIcon :open="open" />
+        </button>
+        <button
+          v-if="clearable"
+          type="button"
+          class="toggle reset"
+          @click="clear"
+        >
+          清除
+        </button>
+        <span class="sort"
+          ><span class="select"
+            ><select v-model="form.sort" aria-label="排序">
+              <option v-if="searching" value="relevance">相关度</option>
+              <option v-if="posts" value="published">发帖时间</option>
+              <option v-if="!shared" value="saved">添加时间</option>
+              <option value="updated">更新时间</option>
+              <option v-if="!shared" value="storage">存储空间</option>
+              <template v-if="!posts">
+                <option value="followers">粉丝数</option>
+                <option value="following">关注数</option>
+              </template></select
+            ><ChevronIcon class="select-chevron" /></span
+          ><span v-if="form.sort !== 'relevance'" class="select"
+            ><select v-model="form.order" aria-label="排序方向">
+              <option value="desc">{{ orderNames.desc }}</option>
+              <option value="asc">{{ orderNames.asc }}</option></select
+            ><ChevronIcon class="select-chevron" /></span
+        ></span>
+      </div>
+      <!-- On its own line: beside the sort pickers a phone has room for a
          word or two of it. -->
-    <p v-if="active" class="filter-summary">{{ active }}</p>
-    <div v-show="open" class="panel">
-      <label v-if="!withinProfile" class="option">
-        平台<span class="select"
-          ><select v-model="form.platform" aria-label="平台">
-            <option value="">全部</option>
-            <option value="x">X</option>
-            <option value="instagram">Instagram</option></select
-          ><ChevronIcon class="select-chevron"
-        /></span>
-      </label>
-      <!-- Tags are your own vocabulary, so they get the same chips as in the
+      <p v-if="active" class="filter-summary">{{ active }}</p>
+      <div v-show="open" class="panel">
+        <label v-if="!withinProfile" class="option">
+          平台<span class="select"
+            ><select v-model="form.platform" aria-label="平台">
+              <option value="">全部</option>
+              <option value="x">X</option>
+              <option value="instagram">Instagram</option></select
+            ><ChevronIcon class="select-chevron"
+          /></span>
+        </label>
+        <!-- Tags are your own vocabulary, so they get the same chips as in the
            collection itself, not a picker that hides them. A tap wants a
            tag, a second excludes it, a third lets it go. -->
-      <div v-if="tags.length || tagError" class="tag-filter">
-        <p class="tag-title">
-          标签<button
-            v-if="tags.length"
-            type="button"
-            class="manage"
-            :aria-pressed="managing"
-            @click="managing = !managing"
-          >
-            {{ managing ? '完成' : '编辑' }}
-          </button>
-        </p>
-        <div
-          v-if="managing"
-          class="tag-edit"
-          role="group"
-          aria-label="编辑标签"
-        >
-          <button
-            v-for="tag in tags"
-            :key="tag.id"
-            type="button"
-            class="tag-chip"
-            :aria-label="`编辑标签「${tag.name}」`"
-            @click="editing = tag"
-          >
-            {{ tag.name
-            }}<svg
-              viewBox="0 0 24 24"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
+        <div v-if="tags.length || tagError" class="tag-filter">
+          <p class="tag-title">
+            标签<button
+              v-if="tags.length"
+              type="button"
+              class="manage"
+              :aria-pressed="managing"
+              @click="managing = !managing"
             >
-              <path d="M4 20h4L19 9l-4-4L4 16z" />
-            </svg>
-          </button>
-        </div>
-        <template v-else-if="tags.length">
-          <TagFilterChips
-            v-model:include="form.tag"
-            v-model:exclude="form.notTag"
-            label="标签筛选"
-            :tags="tags"
-          />
-          <!-- How several wanted tags combine; one needs no choice. -->
+              {{ managing ? '完成' : '编辑' }}
+            </button>
+          </p>
           <div
-            v-if="form.tag.length > 1"
-            class="tag-mode"
-            role="radiogroup"
-            aria-label="标签匹配方式"
+            v-if="managing"
+            class="tag-edit"
+            role="group"
+            aria-label="编辑标签"
           >
-            <label
-              ><input v-model="form.tagMode" type="radio" value="" /><span
-                >任一</span
-              ></label
-            ><label
-              ><input v-model="form.tagMode" type="radio" value="all" /><span
-                >全部</span
-              ></label
+            <button
+              v-for="tag in tags"
+              :key="tag.id"
+              type="button"
+              class="tag-chip"
+              :aria-label="`编辑标签「${tag.name}」`"
+              @click="editing = tag"
             >
+              {{ tag.name
+              }}<svg
+                viewBox="0 0 24 24"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 20h4L19 9l-4-4L4 16z" />
+              </svg>
+            </button>
           </div>
+          <template v-else-if="tags.length">
+            <TagFilterChips
+              v-model:include="form.tag"
+              v-model:exclude="form.notTag"
+              label="标签筛选"
+              :tags="tags"
+            />
+            <!-- How several wanted tags combine; one needs no choice. -->
+            <div
+              v-if="form.tag.length > 1"
+              class="tag-mode"
+              role="radiogroup"
+              aria-label="标签匹配方式"
+            >
+              <label
+                ><input v-model="form.tagMode" type="radio" value="" /><span
+                  >任一</span
+                ></label
+              ><label
+                ><input v-model="form.tagMode" type="radio" value="all" /><span
+                  >全部</span
+                ></label
+              >
+            </div>
+          </template>
+          <p v-if="tagError" class="tag-error" role="alert">
+            {{ tagError }}
+            <button type="button" class="retry" @click="loadTags">重试</button>
+          </p>
+        </div>
+        <RelationFilter
+          v-if="!shared"
+          v-model:rel-of="form.relOf"
+          v-model:rel="form.rel"
+          v-model:rel-min="form.relMin"
+          @summary="(text) => (relationSummary = text)"
+        />
+        <template v-if="posts">
+          <MultiSelect
+            v-if="!withinProfile"
+            v-model="form.authors"
+            label="作者"
+            remote
+            :options="authorOptions"
+            :names="authorNames"
+            :loading="authorsLoading"
+            :more="!!authorsNext"
+            @open="openAuthors"
+            @search="searchAuthors"
+            @more="loadAuthors(true)"
+          />
+          <p v-if="!withinProfile && authorError" class="hint" role="alert">
+            {{ authorError }}
+            <button type="button" class="retry" @click="loadAuthors()">
+              重试
+            </button>
+          </p>
+          <MultiSelect
+            v-model="form.media"
+            label="媒体类型"
+            :options="mediaOptions"
+            :searchable="false"
+          />
         </template>
-        <p v-if="tagError" class="tag-error" role="alert">
-          {{ tagError }}
-          <button type="button" class="retry" @click="loadTags">重试</button>
-        </p>
-      </div>
-      <RelationFilter
-        v-if="!shared"
-        v-model:rel-of="form.relOf"
-        v-model:rel="form.rel"
-        v-model:rel-min="form.relMin"
-        @summary="(text) => (relationSummary = text)"
-      />
-      <template v-if="posts">
-        <MultiSelect
-          v-if="!withinProfile"
-          v-model="form.authors"
-          label="作者"
-          remote
-          :options="authorOptions"
-          :names="authorNames"
-          :loading="authorsLoading"
-          :more="!!authorsNext"
-          @open="openAuthors"
-          @search="searchAuthors"
-          @more="loadAuthors(true)"
-        />
-        <p v-if="!withinProfile && authorError" class="hint" role="alert">
-          {{ authorError }}
-          <button type="button" class="retry" @click="loadAuthors()">
-            重试
-          </button>
-        </p>
-        <MultiSelect
-          v-model="form.media"
-          label="媒体类型"
-          :options="mediaOptions"
-          :searchable="false"
-        />
-      </template>
-      <label v-if="posts" class="option"
-        >帖子类型<span class="select"
-          ><select v-model="form.postType" aria-label="帖子类型">
-            <option value="">全部</option>
-            <option value="post">贴文</option>
-            <option value="quote">引用</option>
-            <option value="repost">转发</option></select
-          ><ChevronIcon class="select-chevron" /></span
-      ></label>
-      <label class="option"
-        >{{ posts ? '作者可见性' : '可见性'
-        }}<span class="select"
-          ><select
-            v-model="form.visibility"
-            :aria-label="posts ? '作者可见性' : '可见性'"
-          >
-            <option value="">全部</option>
-            <option value="public">公开</option>
-            <option value="private">私密</option></select
-          ><ChevronIcon class="select-chevron" /></span
-      ></label>
-      <label v-if="posts" class="option"
-        >敏感内容<span class="select"
-          ><select v-model="form.sensitive" aria-label="敏感内容">
-            <option value="">全部</option>
-            <option value="contains">包含</option>
-            <option value="not_contains">不包含</option></select
-          ><ChevronIcon class="select-chevron" /></span
-      ></label>
-      <!-- Public on the platform, so a share filters by it too. -->
-      <label class="option"
-        >原站状态<span class="select"
-          ><select v-model="form.sourceState" aria-label="原站状态">
-            <option value="">全部</option>
-            <option
-              v-for="(name, value) in sourceStateNames"
-              :key="value"
-              :value="value"
+        <label v-if="posts" class="option"
+          >帖子类型<span class="select"
+            ><select v-model="form.postType" aria-label="帖子类型">
+              <option value="">全部</option>
+              <option value="post">贴文</option>
+              <option value="quote">引用</option>
+              <option value="repost">转发</option></select
+            ><ChevronIcon class="select-chevron" /></span
+        ></label>
+        <label class="option"
+          >{{ posts ? '作者可见性' : '可见性'
+          }}<span class="select"
+            ><select
+              v-model="form.visibility"
+              :aria-label="posts ? '作者可见性' : '可见性'"
             >
-              {{ name }}
-            </option></select
-          ><ChevronIcon class="select-chevron" /></span
-      ></label>
-      <label v-if="!shared" class="option"
-        >收藏日期<span class="select"
-          ><select v-model="range" aria-label="收藏日期">
-            <option value="">全部</option>
-            <option
-              v-for="option in rangeOptions"
-              :key="option.value"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </option>
-            <option value="custom">自定义</option></select
-          ><ChevronIcon class="select-chevron" /></span
-      ></label>
-      <div
-        v-if="range === 'custom'"
-        class="option dates"
-        role="group"
-        aria-label="自定义收藏日期"
-      >
-        起止日期<span class="range"
-          ><input
-            v-model="form.from"
-            type="date"
-            aria-label="收藏开始日期" /><span aria-hidden="true">–</span
-          ><input
-            v-model="form.to"
-            type="date"
-            :min="form.from"
-            aria-label="收藏结束日期"
-        /></span>
+              <option value="">全部</option>
+              <option value="public">公开</option>
+              <option value="private">私密</option></select
+            ><ChevronIcon class="select-chevron" /></span
+        ></label>
+        <label v-if="posts" class="option"
+          >敏感内容<span class="select"
+            ><select v-model="form.sensitive" aria-label="敏感内容">
+              <option value="">全部</option>
+              <option value="contains">包含</option>
+              <option value="not_contains">不包含</option></select
+            ><ChevronIcon class="select-chevron" /></span
+        ></label>
+        <!-- Public on the platform, so a share filters by it too. -->
+        <label class="option"
+          >原站状态<span class="select"
+            ><select v-model="form.sourceState" aria-label="原站状态">
+              <option value="">全部</option>
+              <option
+                v-for="(name, value) in sourceStateNames"
+                :key="value"
+                :value="value"
+              >
+                {{ name }}
+              </option></select
+            ><ChevronIcon class="select-chevron" /></span
+        ></label>
+        <label v-if="!shared" class="option"
+          >收藏日期<span class="select"
+            ><select v-model="range" aria-label="收藏日期">
+              <option value="">全部</option>
+              <option
+                v-for="option in rangeOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+              <option value="custom">自定义</option></select
+            ><ChevronIcon class="select-chevron" /></span
+        ></label>
+        <div
+          v-if="range === 'custom'"
+          class="option dates"
+          role="group"
+          aria-label="自定义收藏日期"
+        >
+          起止日期<span class="range"
+            ><input
+              v-model="form.from"
+              type="date"
+              aria-label="收藏开始日期" /><span aria-hidden="true">–</span
+            ><input
+              v-model="form.to"
+              type="date"
+              :min="form.from"
+              aria-label="收藏结束日期"
+          /></span>
+        </div>
       </div>
-    </div>
+    </template>
   </form>
+  <Teleport v-if="inAside" :to="slotTarget"><FilterCard /></Teleport>
   <!-- Only while editing: most lists never manage their tags. -->
   <TagEditSheet
     v-if="managing"

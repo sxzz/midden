@@ -86,7 +86,7 @@ it('toggles sensitive media across the collection and detail without losing the 
   expect(image()).not.toBeNull()
   expect(image()?.closest('.blurred, .sensitive')).not.toBeNull()
   el.querySelector<HTMLButtonElement>('.back')!.click()
-  await vi.waitFor(() => expect(el.textContent).toContain('我的收藏'))
+  await vi.waitFor(() => expect(el.textContent).toContain('收藏库'))
   expect(toggle().getAttribute('aria-pressed')).toBe('false')
   expect(image()).not.toBeNull()
   expect(image()?.closest('.blurred, .sensitive')).not.toBeNull()

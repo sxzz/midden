@@ -1,12 +1,23 @@
 <script setup vapor lang="ts">
-import { shallowRef } from 'vue'
+import { onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
+import { filterSlot } from '../aside'
 import QueryBox from './QueryBox.vue'
 // The desktop sidebar's frame, as X has it beside the column: a search box
 // at the top while `search` names what it searches, the page's boxes, then
 // the small print. The owner's app (SideAside) and a public link
 // (ShareAside) fill it; the owner's box takes the query language (`query`).
-defineProps<{ search?: string; query?: boolean }>()
+defineProps<{
+  search?: string
+  query?: boolean
+  /** A list is shown: its 筛选 card goes at the top (see `filterSlot`). */
+  filters?: boolean
+}>()
 const emit = defineEmits<{ search: [q: string] }>()
+const slot = useTemplateRef<HTMLElement>('slotEl')
+watch(slot, (el) => (filterSlot.value = el ?? null), { immediate: true })
+onUnmounted(() => {
+  if (filterSlot.value === slot.value) filterSlot.value = null
+})
 const text = shallowRef('')
 function submit() {
   const q = text.value.trim()
@@ -56,6 +67,7 @@ function submit() {
         />
       </form>
       <div class="content">
+        <div v-if="filters" ref="slotEl" class="filter-slot" />
         <slot />
       </div>
       <footer class="aside-footer">
