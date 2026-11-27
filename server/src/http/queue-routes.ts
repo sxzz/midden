@@ -8,12 +8,12 @@ import { activeRateLimits, clearRateLimit } from '#jobs/rate-limits.ts'
 import { inline } from './offload.ts'
 import { json, type Env } from './validate.ts'
 import type { Database } from '#db/client.ts'
-import type { WorkerReport } from '#runtime/status-file.ts'
+import type { WorkerReport } from '#runtime/report.ts'
 import type { WebLoadReport } from './load.ts'
 
 export interface QueueInfo {
-  /** The worker's last report; undefined when it has not reported lately. */
-  worker: () => WorkerReport | undefined
+  /** The worker's report; undefined when it did not answer. */
+  worker: () => Promise<WorkerReport | undefined>
   /** This (web) process's last minute. */
   web?: () => WebLoadReport
 }
@@ -85,8 +85,8 @@ export function queueRoutes(
   info: QueueInfo,
   now: () => number = Date.now,
 ) {
-  const view = () => {
-    const worker = info.worker()
+  const view = async () => {
+    const worker = await info.worker()
     return {
       control: readJobControl(db),
       pausable: [...PAUSABLE_TYPES],
@@ -121,7 +121,7 @@ export function queueRoutes(
   return (
     new Hono<Env>()
       // With the worker's report and this process's load: answered here.
-      .get('/', inline, (c) => c.json(view()))
+      .get('/', inline, async (c) => c.json(await view()))
       .put(
         '/control',
         json(
@@ -130,14 +130,14 @@ export function queueRoutes(
             types: v.optional(v.array(v.picklist(PAUSABLE_TYPES))),
           }),
         ),
-        (c) => {
+        async (c) => {
           const input = c.req.valid('json')
           const control = readJobControl(db)
           writeJobControl(db, {
             paused: input.paused ?? control.paused,
             types: input.types ?? control.types,
           })
-          return c.json(view())
+          return c.json(await view())
         },
       )
       // End a limit early (解除): its jobs run at once, and a request still
@@ -145,11 +145,11 @@ export function queueRoutes(
       .post(
         '/rate-limits/clear',
         json(v.strictObject({ scope: v.pipe(v.string(), v.maxLength(1024)) })),
-        (c) => {
+        async (c) => {
           db.transaction((tx) =>
             clearRateLimit(tx, c.req.valid('json').scope, now()),
           )
-          return c.json(view())
+          return c.json(await view())
         },
       )
   )

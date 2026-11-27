@@ -4,18 +4,14 @@ import { isBusy } from '#db/client.ts'
 import { createLogger, type Logger } from '#log.ts'
 import { sendOnlyNotifier } from '#telegram/notify.ts'
 import { openRuntime, type RuntimeOverrides } from './context.ts'
-import { readStatus, type WorkerReport } from './status-file.ts'
-import { startWeb, type WebHandle, type WebStatus } from './web.ts'
+import { fetchWorkerReport, WebProbe } from './internal.ts'
+import { startWeb, type WebHandle } from './web.ts'
 import { startWorker, type WorkerHandle } from './worker.ts'
 
 // What one process does depends on MIDDEN_ROLE (`#config.ts`): `web` serves
 // HTTP and runs the bot, `worker` runs the jobs and timers, `all` (the
 // default, for development) both. Production runs one process of each, so
 // the jobs' database work never stalls a request.
-
-// A status file older than this means its process is not running.
-const WORKER_REPORT_AGE = 15_000
-const WEB_STATUS_AGE = 10_000
 
 /**
  * The server process, as main.ts starts it. The load test
@@ -28,7 +24,7 @@ export async function run(
   ) => RuntimeOverrides | Promise<RuntimeOverrides> = () => ({}),
 ): Promise<void> {
   const config = loadConfig()
-  const base = createLogger(config.logLevel, config.logFile)
+  const base = createLogger(config.logLevel)
   const logger =
     config.role === 'all' ? base : base.child({ role: config.role })
 
@@ -80,15 +76,11 @@ export async function run(
   let web: WebHandle | undefined
   if (config.role !== 'worker')
     web = startWeb(rt, {
+      // In this process, or asked of the worker's port.
       worker:
         config.role === 'all'
-          ? () => worker?.report()
-          : () =>
-              readStatus<WorkerReport>(
-                config.runDir,
-                'worker',
-                WORKER_REPORT_AGE,
-              ),
+          ? () => Promise.resolve(worker?.report())
+          : () => fetchWorkerReport(config.workerInternalUrl),
     })
   if (config.role === 'web') return
   const notify =
@@ -105,11 +97,13 @@ export async function run(
         })
       : () => {})
   const load = web?.load
-  worker = startWorker(rt, {
-    notify,
-    webSignal: load
-      ? () => load.signal()
-      : () =>
-          readStatus<WebStatus>(config.runDir, 'web', WEB_STATUS_AGE)?.signal,
-  })
+  let webSignal = () => load?.signal()
+  if (!load) {
+    // Asked of the web process's internal port every second.
+    const probe = new WebProbe(config.webInternalUrl)
+    probe.start()
+    cleanups.push(() => probe.stop())
+    webSignal = () => probe.signal()
+  }
+  worker = startWorker(rt, { notify, webSignal })
 }

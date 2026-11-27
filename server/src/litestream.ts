@@ -13,7 +13,7 @@ import type { Logger } from '#log.ts'
  * and not through the reverse proxy.
  */
 export const HEARTBEAT_PORT = 8081
-const HEARTBEAT_PATH = '/litestream/heartbeat'
+export const HEARTBEAT_PATH = '/litestream/heartbeat'
 const CHECK_INTERVAL = 60_000
 /** The last heartbeat, in epoch milliseconds, kept across restarts. */
 const LAST_BEAT_KEY = 'litestream_last_heartbeat_at'
@@ -27,7 +27,8 @@ export interface LitestreamStatus {
 }
 
 export interface LitestreamWatch {
-  server: Server
+  /** Its own listener; absent when another server routes the path here. */
+  server?: Server
   /** Record a heartbeat, as a request to the heartbeat path does. */
   beat: () => void
   /** Tell the owner once heartbeats have been missing too long. */
@@ -47,6 +48,11 @@ export function watchLitestream(options: {
   db: Database
   host: string
   port?: number
+  /**
+   * Listen on `port` for the heartbeat path; the web process instead routes
+   * it from its internal server (`runtime/internal.ts`) to `beat`.
+   */
+  listen?: boolean
   logger: Logger
   notify: (text: string) => void
   now?: () => number
@@ -97,19 +103,22 @@ export function watchLitestream(options: {
     stale_after_minutes: heartbeatTimeoutMinutes(db),
   })
 
-  const server = createServer((req, res) => {
-    if (req.method === 'GET' && req.url === HEARTBEAT_PATH) {
-      beat()
-      res.writeHead(204).end()
-    } else res.writeHead(404).end()
-  })
-  server.on('error', (error) =>
-    options.logger.error(
-      { err: error },
-      'litestream heartbeat listener failed',
-    ),
-  )
-  server.listen(options.port ?? HEARTBEAT_PORT, options.host)
+  let server: Server | undefined
+  if (options.listen !== false) {
+    server = createServer((req, res) => {
+      if (req.method === 'GET' && req.url === HEARTBEAT_PATH) {
+        beat()
+        res.writeHead(204).end()
+      } else res.writeHead(404).end()
+    })
+    server.on('error', (error) =>
+      options.logger.error(
+        { err: error },
+        'litestream heartbeat listener failed',
+      ),
+    )
+    server.listen(options.port ?? HEARTBEAT_PORT, options.host)
+  }
   const timer = setInterval(() => {
     try {
       check()
@@ -126,7 +135,7 @@ export function watchLitestream(options: {
     status,
     close: () => {
       clearInterval(timer)
-      server.close()
+      server?.close()
     },
   }
 }

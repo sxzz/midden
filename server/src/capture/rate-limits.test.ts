@@ -281,7 +281,11 @@ describe('rate limits', () => {
         ? new Response('', { status: 429, headers: { 'retry-after': '600' } })
         : undefined
     const limited = await capture(ctx, '91', a)
-    const routes = queueRoutes(ctx.db, { worker: () => undefined }, now)
+    const routes = queueRoutes(
+      ctx.db,
+      { worker: () => Promise.resolve(undefined) },
+      now,
+    )
     const view = async (response: Response | Promise<Response>) =>
       ((await (await response).json()) as { rate_limits: unknown[] })
         .rate_limits

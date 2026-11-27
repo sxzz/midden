@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -155,23 +155,23 @@ describe('agent API', () => {
 
 describe('two processes', () => {
   test('the worker waits for the web process to migrate; each stops on SIGTERM', async () => {
-    const port = await freePort()
-    const healthPort = await freePort()
-    const worker = await startServer({
-      PORT: String(port),
-      MIDDEN_ROLE: 'worker',
-      WORKER_HEALTH_PORT: String(healthPort),
-    })
+    const ports = {
+      PORT: String(await freePort()),
+      WORKER_HEALTH_PORT: String(await freePort()),
+      WEB_INTERNAL_PORT: String(await freePort()),
+    }
+    const worker = await startServer({ ...ports, MIDDEN_ROLE: 'worker' })
     await expect
       .poll(() => worker.logged('waiting for the web process to migrate'), {
         timeout: 20_000,
       })
       .toBe(true)
-    const web = await startServer({ PORT: String(port), MIDDEN_ROLE: 'web' })
+    const web = await startServer({ ...ports, MIDDEN_ROLE: 'web' })
     await expect
       .poll(() => worker.logged('worker listening'), { timeout: 20_000 })
       .toBe(true)
-    const health = await fetch(`http://127.0.0.1:${healthPort}/healthz`)
+    const workerUrl = `http://127.0.0.1:${ports.WORKER_HEALTH_PORT}`
+    const health = await fetch(`${workerUrl}/healthz`)
     expect(await health.text()).toBe('ok')
     await expect
       .poll(() => web.logged('listening'), { timeout: 20_000 })
@@ -181,13 +181,23 @@ describe('two processes', () => {
       .poll(() => web.logged('telegram bot started'), { timeout: 20_000 })
       .toBe(true)
     expect(worker.logged('telegram bot started')).toBe(false)
-    // Each tells the other how it does through a status file.
-    for (const name of ['worker.json', 'web.json'])
-      await expect
-        .poll(() => existsSync(path.join(dir, 'run', name)), {
-          timeout: 10_000,
-        })
-        .toBe(true)
+    // Each asks the other how it does, on ports compose does not publish.
+    await expect
+      .poll(() => web.logged('internal port listening'), { timeout: 20_000 })
+      .toBe(true)
+    const load = (await (
+      await fetch(`http://127.0.0.1:${ports.WEB_INTERNAL_PORT}/internal/load`)
+    ).json()) as Record<string, unknown>
+    expect(load).toMatchObject({ slowRequests: 0, threadSlowRequests: 0 })
+    const report = (await (await fetch(`${workerUrl}/status`)).json()) as {
+      throttle: { factor: number }
+    }
+    expect(report.throttle.factor).toBe(1)
+    // Nothing but the database (and its WAL) in the data directory: logs
+    // go to stdout.
+    expect(
+      readdirSync(dir).filter((name) => !name.startsWith('midden.db')),
+    ).toEqual([])
 
     for (const server of [worker, web]) {
       server.child.kill('SIGTERM')

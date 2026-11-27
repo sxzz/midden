@@ -11,24 +11,19 @@ import { deriveKey } from '#crypto.ts'
 import { createApi } from '#http/app.ts'
 import { WebLoad } from '#http/load.ts'
 import { pooledWebReads } from '#http/offload.ts'
-import { watchLitestream } from '#litestream.ts'
+import { HEARTBEAT_PATH, watchLitestream } from '#litestream.ts'
 import { QueryPool, READ_THREAD } from '#reads/pool.ts'
 import { launchBot, type BotHandle } from '#telegram/launch.ts'
 import { TokenUsage } from '#tokens/usage.ts'
 import { StorageUsage } from '#usage/storage.ts'
-import { writeStatus, type Stamped, type WorkerReport } from './status-file.ts'
-import type { WebLoadSignal } from '#jobs/throttle.ts'
+import { internalServer, LOAD_PATH, type InternalAnswer } from './internal.ts'
 import type { ReadThreadData } from '#reads/thread.ts'
 import type { Runtime } from './context.ts'
-
-/** The web process's status file: its recent load, for the throttle. */
-export interface WebStatus extends Stamped {
-  signal: WebLoadSignal
-}
+import type { WorkerReport } from './report.ts'
 
 export interface WebOptions {
-  /** The worker's report: in this process, or from its status file. */
-  worker: () => WorkerReport | undefined
+  /** The worker's report: in this process, or asked of the worker. */
+  worker: () => Promise<WorkerReport | undefined>
 }
 
 export interface WebHandle {
@@ -38,7 +33,6 @@ export interface WebHandle {
 }
 
 const APP_PREFIX = /^\/app/
-const STATUS_EVERY = 2000
 
 /**
  * The web process: HTTP (the API, media, the web app), the Telegram bot and
@@ -54,8 +48,9 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
   // Started after the server listens; until it runs, notices wait in it.
   let bot: BotHandle | undefined
   const notify = (text: string) => bot?.notify(text)
+  // Its heartbeats arrive on the internal port, below.
   const litestream = config.litestream
-    ? watchLitestream({ db, host: config.host, logger, notify })
+    ? watchLitestream({ db, host: config.host, logger, notify, listen: false })
     : undefined
   if (litestream) cleanups.push(() => litestream.close())
   // The page's figures; the worker records them (its `tick`).
@@ -174,19 +169,24 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
   )
   cleanups.push(() => server.close())
 
-  if (config.role === 'web') {
-    let writing = false
-    const timer = setInterval(() => {
-      if (writing) return
-      writing = true
-      const status: WebStatus = { at: Date.now(), signal: load.signal() }
-      writeStatus(config.runDir, 'web', status)
-        .catch((error: unknown) =>
-          logger.warn({ err: error }, 'web status not written'),
-        )
-        .finally(() => (writing = false))
-    }, STATUS_EVERY)
-    cleanups.push(() => clearInterval(timer))
+  // The internal port, which compose does not publish: Litestream's
+  // heartbeats, and this process's load for the worker's throttle.
+  const routes: Record<string, () => InternalAnswer> = {}
+  if (litestream)
+    routes[HEARTBEAT_PATH] = () => {
+      litestream.beat()
+      return { status: 204 }
+    }
+  if (config.role === 'web') routes[LOAD_PATH] = () => ({ json: load.signal() })
+  if (Object.keys(routes).length) {
+    const internal = internalServer({
+      host: config.host,
+      port: config.webInternalPort,
+      logger,
+      name: 'internal port',
+      routes,
+    })
+    cleanups.push(() => internal.close())
   }
 
   // In the background: Telegram being slow or down must not keep the server

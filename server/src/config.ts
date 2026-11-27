@@ -11,6 +11,11 @@ const port = v.pipe(
   v.maxValue(65_535),
 )
 
+const internalUrl = v.pipe(
+  v.string(),
+  v.regex(/^http:\/\/[^/?#]+$/, 'an internal URL is http://host:port'),
+)
+
 const Env = v.object({
   DATA_DIR: v.optional(v.pipe(v.string(), v.nonEmpty()), 'data'),
   HOST: v.optional(v.pipe(v.string(), v.nonEmpty()), '0.0.0.0'),
@@ -115,6 +120,19 @@ const Env = v.object({
     v.minValue(1),
     v.maxValue(65_535),
   ),
+  // The web process's internal port: Litestream's heartbeats, and the load
+  // the worker asks for. compose does not publish it.
+  WEB_INTERNAL_PORT: v.pipe(
+    v.optional(v.string(), '8081'),
+    v.transform(Number),
+    v.integer(),
+    v.minValue(1),
+    v.maxValue(65_535),
+  ),
+  // Where each process reaches the other's internal port (compose sets the
+  // service names; without them, both run on this machine).
+  WEB_INTERNAL_URL: v.optional(internalUrl),
+  WORKER_INTERNAL_URL: v.optional(internalUrl),
 })
 
 const TRAILING_SLASHES = /\/+$/
@@ -161,17 +179,16 @@ export type Role = 'all' | 'web' | 'worker'
 
 export interface Config {
   role: Role
-  /** The worker's /healthz port, on 127.0.0.1. */
+  /** The worker's port: /healthz, and /status for the web process. */
   workerHealthPort: number
+  /** The web process's internal port (`runtime/internal.ts`). */
+  webInternalPort: number
+  /** Where the worker asks the web process for its load. */
+  webInternalUrl: string
+  /** Where the web process asks the worker for its report. */
+  workerInternalUrl: string
   dataDir: string
-  /** Status files the web process and the worker leave for each other. */
-  runDir: string
   databasePath: string
-  /**
-   * Also written to stdout; this copy outlives the container. The worker
-   * has its own (`worker.log`): two processes cannot rotate one file.
-   */
-  logFile: string
   mediaDir: string
   host: string
   port: number
@@ -221,12 +238,12 @@ export function loadConfig(
     databasePath: path.join(dataDir, 'midden.db'),
     role: parsed.MIDDEN_ROLE,
     workerHealthPort: parsed.WORKER_HEALTH_PORT,
-    runDir: path.join(dataDir, 'run'),
-    logFile: path.join(
-      dataDir,
-      'logs',
-      parsed.MIDDEN_ROLE === 'worker' ? 'worker.log' : 'midden.log',
-    ),
+    webInternalPort: parsed.WEB_INTERNAL_PORT,
+    webInternalUrl:
+      parsed.WEB_INTERNAL_URL ?? `http://127.0.0.1:${parsed.WEB_INTERNAL_PORT}`,
+    workerInternalUrl:
+      parsed.WORKER_INTERNAL_URL ??
+      `http://127.0.0.1:${parsed.WORKER_HEALTH_PORT}`,
     mediaDir: path.join(dataDir, 'media'),
     host: parsed.HOST,
     port: parsed.PORT,

@@ -1,7 +1,9 @@
 # The server runs as two processes of one image on the same data: `midden`
 # serves HTTP (the API, media, the web app), runs the Telegram bot and takes
 # Litestream's heartbeats; `midden-worker` runs the jobs and timers. The
-# jobs' database work then never stalls a request.
+# jobs' database work then never stalls a request. Each asks the other how
+# it does on a port compose does not publish: the web process on 8081, the
+# worker on 8082.
 x-midden: &midden
   image: ${MIDDEN_IMAGE:-ghcr.io/sxzz/midden:latest}
   restart: unless-stopped
@@ -12,9 +14,8 @@ x-midden: &midden
   volumes:
     # SQLite database and media; back this directory up.
     - ${DATA_PATH:-./data}:/data
-  # The container's log goes away when a deploy recreates it; the server
-  # also keeps rotated logs in the data directory (logs/midden.log and
-  # logs/worker.log).
+  # The server logs to stdout only (`docker compose logs`); a deploy
+  # recreates the containers, and their logs go with them.
   logging:
     driver: json-file
     options:
@@ -27,6 +28,7 @@ services:
     environment:
       DATA_DIR: /data
       MIDDEN_ROLE: web
+      WORKER_INTERNAL_URL: http://midden-worker:8082
     ports:
       - 127.0.0.1:${PORT:-8080}:8080
     healthcheck:
@@ -42,12 +44,13 @@ services:
     environment:
       DATA_DIR: /data
       MIDDEN_ROLE: worker
+      WEB_INTERNAL_URL: http://midden:8081
     # The web process applies the migrations; the worker waits for them.
     depends_on:
       midden:
         condition: service_healthy
     healthcheck:
-      # Its own health check, on loopback inside the container.
+      # Its own health check, on its internal port.
       test: [CMD, wget, -qO-, http://127.0.0.1:8082/healthz]
       interval: 30s
       timeout: 10s

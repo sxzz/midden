@@ -258,7 +258,7 @@ export function createApi(options: HttpOptions) {
         '/queue',
         queueRoutes(
           ctx.db,
-          options.queue ?? { worker: () => undefined },
+          options.queue ?? { worker: () => Promise.resolve(undefined) },
           ctx.now,
         ),
       )

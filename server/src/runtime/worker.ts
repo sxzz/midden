@@ -1,4 +1,3 @@
-import { createServer } from 'node:http'
 import { performance } from 'node:perf_hooks'
 import process from 'node:process'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -10,9 +9,10 @@ import { pruneSessions } from '#http/auth.ts'
 import { prunePasskeys } from '#http/passkeys.ts'
 import { currentJob, RANK, withOrigin } from '#jobs/queue.ts'
 import { StorageUsage } from '#usage/storage.ts'
-import { writeStatus, type WorkerReport } from './status-file.ts'
+import { internalServer, STATUS_PATH } from './internal.ts'
 import type { WebLoadSignal } from '#jobs/throttle.ts'
 import type { Runtime } from './context.ts'
+import type { WorkerReport } from './report.ts'
 
 export interface WorkerOptions {
   /** A short message to the owner. */
@@ -32,7 +32,6 @@ const COMPOSITION_POLL = 5000
 const SUMMARY_INTERVAL = 10_000
 const OPTIMIZE_INTERVAL = 6 * 60 * 60_000
 const THROTTLE_STEP = 1000
-const STATUS_EVERY = 2000
 const SCHEMA_CHECK = 10_000
 // A write transaction holding the lock this long, or waiting this long for
 // it, is logged with the job it ran for (at most one line in 10 s).
@@ -49,7 +48,7 @@ const PACE_CONTENDED = 120
  * The worker: runs the job queue and the timers (maintenance, storage
  * usage, statistics), adapting its concurrency to how the web process and
  * the write lock are doing. In the `worker` role it also answers its own
- * health check and writes its status file.
+ * health check and the report the web process asks for.
  */
 export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
   const { config, logger, db, ctx, cleanups } = rt
@@ -221,29 +220,19 @@ export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
   })
 
   if (config.role === 'worker') {
-    let writing = false
-    every(STATUS_EVERY, () => {
-      if (writing) return
-      writing = true
-      writeStatus(config.runDir, 'worker', report())
-        .catch((error: unknown) =>
-          logger.warn({ err: error }, 'worker status not written'),
-        )
-        .finally(() => (writing = false))
+    // The container's health check (the process answers and its event loop
+    // turns) and the report the web process's admin page asks for. compose
+    // does not publish the port.
+    const health = internalServer({
+      host: config.host,
+      port: config.workerHealthPort,
+      logger,
+      name: 'worker',
+      routes: {
+        '/healthz': () => ({ text: 'ok' }),
+        [STATUS_PATH]: () => ({ json: report() }),
+      },
     })
-    // The container's health check: the process answers and its event loop
-    // turns. Loopback only; nothing else needs it.
-    const health = createServer((req, res) => {
-      if (req.method === 'GET' && req.url === '/healthz')
-        res.writeHead(200, { 'Content-Type': 'text/plain' }).end('ok')
-      else res.writeHead(404).end()
-    })
-    health.on('error', (error) =>
-      logger.error({ err: error }, 'worker health listener failed'),
-    )
-    health.listen(config.workerHealthPort, '127.0.0.1', () =>
-      logger.info({ port: config.workerHealthPort }, 'worker listening'),
-    )
     cleanups.push(() => health.close())
   }
   return { report }

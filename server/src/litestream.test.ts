@@ -73,8 +73,8 @@ describe('Litestream heartbeat watch', () => {
 
   test('counts a GET of the heartbeat path, nothing else', async () => {
     const { watch, notices, advance } = start()
-    await once(watch.server, 'listening')
-    const { port } = watch.server.address() as AddressInfo
+    await once(watch.server!, 'listening')
+    const { port } = watch.server!.address() as AddressInfo
     const url = `http://127.0.0.1:${port}`
 
     advance(25 * MINUTE)

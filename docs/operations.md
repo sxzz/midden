@@ -2,7 +2,7 @@
 
 ## 部署结构
 
-生产环境使用 `compose.yaml` 运行同一个镜像的两个容器，镜像内含 Node.js 26 与 ffmpeg（用于缩略图和视频尺寸探测）：`midden` 是网页进程（`MIDDEN_ROLE=web`：HTTP、Telegram Bot、Litestream 心跳），`midden-worker` 运行任务队列和定时的维护（`MIDDEN_ROLE=worker`），见[架构](architecture.md#进程)。两个容器读同一个 `.env`，以非 root 用户运行，数据目录都挂载到 `/data`。`midden-worker` 等 `midden` 健康后才启动（迁移由网页进程应用），它的健康检查是容器内 `127.0.0.1:8082/healthz`，不对外发布端口。可选的第三个容器 `litestream` 把数据库持续复制到 R2，见「Litestream」。
+生产环境使用 `compose.yaml` 运行同一个镜像的两个容器，镜像内含 Node.js 26 与 ffmpeg（用于缩略图和视频尺寸探测）：`midden` 是网页进程（`MIDDEN_ROLE=web`：HTTP、Telegram Bot、Litestream 心跳），`midden-worker` 运行任务队列和定时的维护（`MIDDEN_ROLE=worker`），见[架构](architecture.md#进程)。两个容器读同一个 `.env`，以非 root 用户运行，数据目录都挂载到 `/data`。`midden-worker` 等 `midden` 健康后才启动（迁移由网页进程应用），它的健康检查是容器内 `127.0.0.1:8082/healthz`。两个进程在不对外发布的端口上互相询问状态（网页进程 8081、worker 8082，`compose.yaml` 中的 `WEB_INTERNAL_URL`、`WORKER_INTERNAL_URL`）；除了数据库和媒体，服务不在数据目录中写别的文件，日志只在标准输出。可选的第三个容器 `litestream` 把数据库持续复制到 R2，见「Litestream」。
 
 对外访问需要 HTTPS 反向代理（例如 Cloudflare Tunnel），把整个域名转发到服务端口，至少包括 `/app/`、`/v1/`、`/media/`，给 AI agent 用时还有 `/agent/v1/` 与 `/agent.md`。Mini App 与通行密钥都要求 HTTPS。
 
@@ -60,7 +60,7 @@ docker compose pull && docker compose up -d    # 更新（自动部署见下）
 
 数据库迁移在网页进程启动时自动应用；随后补齐收藏列表的索引表 `catalog` 中缺失的行（首次部署或导入数据后可能需要几秒）。worker 等迁移应用完再开始。
 
-日志也写在数据目录：网页进程 `logs/midden.log`，worker `logs/worker.log`。
+日志只在容器的标准输出：`docker compose logs midden`、`docker compose logs midden-worker`。部署重建容器后之前的日志随之没有。
 
 ## 自动部署
 
@@ -697,10 +697,10 @@ docker compose up -d --wait midden && docker compose up -d --wait midden-worker
 - 日志为 JSON，`job failed` 表示任务最终失败，`delivery rejected` 表示 Telegram 拒绝了某条消息。
 - 抓取失败：每次尝试都有记录，自动重试不会覆盖之前的日志。`upstream request failed` 是失败的上游请求：`upstream` 中有来源（`fxtwitter`、`x-graphql`、`instagram` 等）、接口、去掉凭据与查询 token 的 URL、状态码、`retry-after` 与 `x-rate-limit-*` 等响应头、响应开头 2 KB（已遮盖 token），另有任务编号与次数、`captureId`、目标和错误分类（`errorCode`、`retryable`、`final`）。之后还会重试的为 warn，不再重试的为 error，抓取最终仍成功的为 info。`job will retry` / `job failed` 是任务每次失败的结果与耗时，`capture failed` 是抓取记录最终失败。抓关系网的任务（`jobType` 为 `relations`）带 `relationFetchId`、`list` 与 `providerId`（`fxtwitter` 或 `x-session`）；用采集账号读时，查询限流后的切换记为 `relations query rate-limited; switching to the other query`，两个查询都限流时记为 `both relations queries rate-limited; waiting for the earlier reset`。
 - 限流：接口回答 429（或 X 的错误 88、Instagram 的「please wait」）时，用到它的任务等到限流结束，日志 `job waits for a rate limit`（带 `scope`、`until`），不算尝试。「后台任务」页的「限流」一栏列出仍在限流中的范围、恢复时间和等待的任务数，「解除」立即放行（见架构文档「限流」）。没有结束时间的限流按 15 分钟（采集账号）或 5 分钟（FxTwitter）计。
-- 日志位置：容器标准输出（`docker compose logs`，json-file 按 10 MB × 5 轮转，部署重建容器后清空），以及数据目录中的 `logs/midden.log`（网页进程）和 `logs/worker.log`（任务，抓取失败在这里），各按 10 MB 轮转，保留 5 个文件，跨部署保留。查找某个账号的失败：
+- 日志位置：只在容器的标准输出（`docker compose logs`，json-file 按 10 MB × 5 轮转，部署重建容器后清空）；服务不写日志文件。抓取失败在 worker 的日志中。查找某个账号的失败：
 
   ```sh
-  grep -h xiaomouzovo data/logs/worker.log* | grep -E '"level":(40|50)'
+  docker compose logs --no-log-prefix midden-worker | grep xiaomouzovo | grep -E '"level":(40|50)'
   ```
 
 - 找不到 ffmpeg 时启动日志会提示，缩略图停用；之后装上 ffmpeg，维护任务会补做缩略图。
