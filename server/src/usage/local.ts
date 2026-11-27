@@ -18,8 +18,16 @@ export interface LocalUsage {
     /** The write-ahead log beside it; 0 when there is none. */
     wal_bytes: number
   }
-  /** Thumbnails, by the sizes recorded when they were made. */
-  thumbnails: { count: number; bytes: number }
+  /**
+   * Thumbnails, by the sizes recorded when they were made; `local_*` those
+   * not yet moved to the remote store (all of them without one).
+   */
+  thumbnails: {
+    count: number
+    bytes: number
+    local_count: number
+    local_bytes: number
+  }
   deploy_backups: { files: number; bytes: number }
   /** The volume holding the data directory, as this process may use it. */
   disk: { free_bytes: number; total_bytes: number }
@@ -68,28 +76,35 @@ export async function localUsage(options: {
   const { db, dataDir } = options
   const pageSize = pragma(db, 'page_size')
   const pages = pragma(db, 'page_count')
-  const made = db
-    .select({
-      count: sql<number>`count(*)`.mapWith(Number),
-      bytes: sql<number>`coalesce(sum(${blobThumbnails.size}), 0)`.mapWith(
-        Number,
-      ),
-    })
-    .from(blobThumbnails)
-    .where(sql`${blobThumbnails.state} = 'ready'`)
-    .get() ?? { count: 0, bytes: 0 }
   // Removed media (已移除) keeps its thumbnail once the blob, and with it
-  // the row above, is gone; each file once.
-  const kept = db.get<{ count: number; bytes: number }>(sql`
-    SELECT count(*) AS count, coalesce(sum(size), 0) AS bytes FROM (
-      SELECT max(${removedMedia.thumbnailSize}) AS size FROM ${removedMedia}
-      WHERE ${removedMedia.thumbnailKey} IS NOT NULL AND NOT EXISTS (
-        SELECT 1 FROM ${blobThumbnails}
-        WHERE ${blobThumbnails.key} = ${removedMedia.thumbnailKey})
-      GROUP BY ${removedMedia.thumbnailKey})`)
+  // its `blob_thumbnails` row, is gone; each file once.
+  const files = sql`
+    SELECT ${blobThumbnails.size} AS size,
+      ${blobThumbnails.remoteAt} IS NULL AS local
+    FROM ${blobThumbnails} WHERE ${blobThumbnails.state} = 'ready'
+    UNION ALL
+    SELECT max(${removedMedia.thumbnailSize}),
+      max(${removedMedia.thumbnailRemoteAt} IS NULL)
+    FROM ${removedMedia}
+    WHERE ${removedMedia.thumbnailKey} IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM ${blobThumbnails}
+      WHERE ${blobThumbnails.key} = ${removedMedia.thumbnailKey})
+    GROUP BY ${removedMedia.thumbnailKey}`
+  const sums = db.get<{
+    count: number
+    bytes: number
+    local_count: number
+    local_bytes: number
+  }>(sql`
+    SELECT count(*) AS count, coalesce(sum(size), 0) AS bytes,
+      coalesce(sum(local), 0) AS local_count,
+      coalesce(sum(CASE WHEN local THEN size END), 0) AS local_bytes
+    FROM (${files})`)
   const thumbnails = {
-    count: made.count + Number(kept?.count ?? 0),
-    bytes: made.bytes + Number(kept?.bytes ?? 0),
+    count: Number(sums?.count ?? 0),
+    bytes: Number(sums?.bytes ?? 0),
+    local_count: Number(sums?.local_count ?? 0),
+    local_bytes: Number(sums?.local_bytes ?? 0),
   }
   const disk = await statfs(dataDir)
   return {

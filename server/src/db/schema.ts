@@ -705,6 +705,9 @@ export const removedMedia = sqliteTable(
     thumbnailHeight: integer(),
     // Its bytes, so 存储用量 still counts it; unknown for older marks.
     thumbnailSize: integer(),
+    // When the thumbnail's upload to the remote store was confirmed, as in
+    // `blobThumbnails`.
+    thumbnailRemoteAt: timestamp(),
     createdAt: createdAt(),
   },
   (t) => [
@@ -761,6 +764,10 @@ export const blobThumbnails = sqliteTable(
     // file cannot be read.
     width: integer(),
     height: integer(),
+    // When the file's upload to the remote store (R2) was confirmed: from
+    // then on the web gets its public URL and the local file is gone, as
+    // for originals (`blobs.remoteAt`). Null while it is only local.
+    remoteAt: timestamp(),
     error: text().notNull().default(''),
     createdAt: createdAt(),
   },
@@ -769,6 +776,10 @@ export const blobThumbnails = sqliteTable(
     index('blob_thumbnails_key')
       .on(t.key)
       .where(sql`${t.key} IS NOT NULL`),
+    // Thumbnails still to move to the remote store: none, once all have.
+    index('blob_thumbnails_local')
+      .on(t.key)
+      .where(sql`${t.key} IS NOT NULL AND ${t.remoteAt} IS NULL`),
   ],
 )
 

@@ -303,7 +303,11 @@ async function save(text: string) {
         <div class="fact">
           <span class="name"
             >缩略图<small class="hint"
-              >{{ formatCount(local.thumbnails.count) }} 个</small
+              >{{ formatCount(local.thumbnails.count) }} 个{{
+                local.thumbnails.local_count < local.thumbnails.count
+                  ? `，本机 ${formatCount(local.thumbnails.local_count)} 个（${storageSize(local.thumbnails.local_bytes)}），其余在 R2`
+                  : ''
+              }}</small
             ></span
           >
           <span class="value">{{ storageSize(local.thumbnails.bytes) }}</span>

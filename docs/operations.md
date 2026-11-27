@@ -165,12 +165,12 @@ Renovate（账号级安装的 GitHub App）按 `.github/renovate.json5` 每周�
 
 - 原文件（图片、视频）另存到 R2 存储桶，对象键与本地路径相同：`ab/cd/<sha256>`。浏览器直接从公开域名读取 `MEDIA_PUBLIC_URL/ab/cd/<sha256>`（`https://midden-media.sxzz.moe/ab/cd/<sha256>`），由 Cloudflare 边缘缓存；每个对象都带 `Content-Type` 与 `Cache-Control: public, max-age=31536000, immutable`。
 - 新下载先写入本地 `media/`，再由后台任务 `upload` 上传。上传带 `Content-MD5` 和签名的 SHA-256，R2 收到的内容不符会拒绝；上传后读回大小、ETag（即 MD5）和两个响应头，确认后才在 `blobs.remote_at` 记下，接口从此给出公开地址，之前仍给本地签名链接。上传失败从 30 秒起翻倍重试、最长间隔 1 小时，共 12 次（约 7 小时），每次记 `job will retry`，放弃时记 `media upload gave up; the file stays local`，这些媒体由 `media-migrate` 补传。
-- 上传确认、记下 `remote_at` 后，同一个 `upload` 任务立即删除本地原文件，此后 R2 中是唯一的一份（没有其他备份，见「R2 的保护」）。删除在这个媒体的键的锁内进行（下载写入、回收删除同一个键时也取这个锁），并在锁内再次确认 `remote_at` 仍在。这个键同时是某个缩略图的文件时不删除（缩略图只存本地）；缩略图从平台下载，不读原文件，所以不必等它。
+- 上传确认、记下 `remote_at` 后，同一个 `upload` 任务立即删除本地原文件，此后 R2 中是唯一的一份（没有其他备份，见「R2 的保护」）。删除在这个媒体的键的锁内进行（下载写入、回收删除同一个键时也取这个锁），并在锁内再次确认 `remote_at` 仍在。这个键同时是某个还没移到 R2 的缩略图的文件时不删除（它从本地提供，移走后再删）；缩略图从平台下载，不读原文件，所以不必等它。
 
   删除失败时任务按上传的间隔重试（记 `job will retry`），`remote_at` 不会被清除；重试用完时记 `deleting the local copy of uploaded media gave up; media-prune-local removes it`。
 
 - 删除时正在读这个文件的地方不受影响：Telegram 发送、带文件名的下载和 `/media/…` 都先打开文件再读，已打开的文件删除后仍能读完；打开前已删除时改从 R2 读。之后再下载到相同内容（已在 R2 中的媒体）时不再写本地文件。
-- 缩略图只存本地，作为缓存，经本服务提供，响应头为 `Cache-Control: public, max-age=31536000, immutable`（图片同样；视频和带文件名的下载仍为 `private`，不进 CDN）。缩略图文件丢失时，请求它的 `/media/…` 当场从平台再下载一次（资产记下的 `thumbnail_url`）；字节不同时记在新的键下，并把请求重定向过去。平台不再提供时（Instagram 的地址会过期、帖子已删除），图片重定向到原文件，视频返回 404。
+- 缩略图同样存到 R2（同名键），确认后删除本地文件，浏览器从公开域名读取（原因见[架构](architecture.md#缩略图)）。下载时随即上传，失败的和这一版之前只在本地的缩略图由维护任务在 worker 空闲时移走（见「维护任务」），日志 `moved thumbnails to the remote store`（`moved` 个数）；R2 中已有相同字节的对象（以前 rclone 复制过去的）直接沿用，不再上传。还没移走的缩略图经本服务提供，响应头为 `Cache-Control: public, max-age=31536000, immutable`（视频和带文件名的下载仍为 `private`，不进 CDN）。本地和 R2 中都找不到缩略图文件时，请求它的 `/media/…` 当场从平台再下载一次（资产记下的 `thumbnail_url`）并移到 R2；字节不同时记在新的键下，并把请求重定向过去。平台不再提供时（Instagram 的地址会过期、帖子已删除），图片重定向到原文件，视频返回 404。
 - 带文件名的下载经本服务从本地或 R2 流式返回，带 `Content-Disposition`。服务端的读取（Telegram 发送、下载）都先读本地，没有时通过 S3 API 读 R2，不经公开域名。
 - 不另设本地原文件缓存：缩略图从平台下载，不读原文件；Telegram 按 `file_id` 复用已上传的文件；其余读取（第一次发送到 Telegram、带文件名的下载）在本地原文件删除后都读 R2。
 - 设为 `r2` 并运行后，不能再改回 `local`：本地实现不读 R2，已删除本地原文件的媒体会缺失。要回退，先把存储桶下载回 `media/`（如 `rclone copy r2:midden ~/midden/data/media`）再改。
@@ -208,7 +208,7 @@ S3 密钥由 `CF_API_TOKEN` 派生（[Cloudflare 文档](https://developers.clou
 
    token 值填入 `CF_API_TOKEN`；zone 的 Overview 页右侧的 Zone ID 填入 `CF_ZONE_ID`。rclone 用由它派生的 S3 密钥，见「迁移现有媒体」。
 
-3. 缩略图的边缘缓存（可选）：在应用所在域名加一条 Cache Rule，匹配路径以 `/media/` 开头，Eligible for cache，Edge TTL 选「Use cache-control header if present」，这样 `private` 的视频与下载不进缓存；缓存键保留查询串（签名在其中）。
+3. 缩略图的边缘缓存（可选，只用于还没移到 R2 的旧缩略图，全部移走后可删）：在应用所在域名加一条 Cache Rule，匹配路径以 `/media/` 开头，Eligible for cache，Edge TTL 选「Use cache-control header if present」，这样 `private` 的视频与下载不进缓存；缓存键保留查询串（签名在其中）。
 
 ### 迁移现有媒体
 
@@ -224,7 +224,7 @@ S3 密钥由 `CF_API_TOKEN` 派生（[Cloudflare 文档](https://developers.clou
 
 本地文件缺失时，只有加 `--verify-download` 且 R2 中的对象哈希相符才记下，否则报告 `missing locally`。命令与服务同时运行：服务的上传任务在此期间已记下（并删除本地文件）的媒体计入 `by the server meanwhile`，不算问题。可以随时中断，再次运行时跳过已记下的，其余重新检查，已上传但未记下的按校验值保留；中断在记下与删除之间、或删除失败（计入 `failed`）时，本地文件留给 `media-prune-local`。`--dry-run` 不上传、不写入、不删除，汇总中的 `would delete N local files` 是会删除的本地原文件数与大小。`--concurrency N`（默认 4）同时处理的数量，`--limit N` 只处理前 N 个。每 5 秒输出一次进度，结束时输出汇总，并给出一个已记下媒体的公开地址；有失败、哈希不符或缺失时退出码为 1。R2 中不属于任何媒体的对象（如 rclone 一并复制的缩略图）不会被读取或修改；它们的键以后被回收时随之删除。
 
-`media-prune-local` 删除已记为在 R2 中、且再次确认过的本地原文件：对象存在，大小、`Content-Type`、`Cache-Control` 正确，并且上述校验值之一与本地文件相符（或加 `--verify-download` 后下载比较）。没有校验值的对象保留本地文件并列出；对象不对时保留本地文件、清除 `remote_at`（网页改回本地链接，下次 `media-migrate` 重新上传）。缩略图（包括同时是缩略图的原文件）一律保留。上传任务和 `media-migrate` 已经自动删除本地原文件，这个命令只处理剩下的：在自动删除之前就已记下的、以前为等缩略图生成而保留的、删除失败或中断留下的。
+`media-prune-local` 删除已记为在 R2 中、且再次确认过的本地原文件：对象存在，大小、`Content-Type`、`Cache-Control` 正确，并且上述校验值之一与本地文件相符（或加 `--verify-download` 后下载比较）。没有校验值的对象保留本地文件并列出；对象不对时保留本地文件、清除 `remote_at`（网页改回本地链接，下次 `media-migrate` 重新上传）。还没移到 R2 的缩略图（包括同时是这种缩略图的原文件）保留。上传任务和 `media-migrate` 已经自动删除本地原文件，这个命令只处理剩下的：在自动删除之前就已记下的、以前为等缩略图生成而保留的、删除失败或中断留下的。
 
 预先用 rclone 复制（可选，代码上线前即可进行）。rclone 不会自己派生密钥，先在 macOS 的终端算出这一对（`jq` 用 `brew install jq` 安装；Linux 上把 `shasum -a 256` 换成 `sha256sum`）：
 
@@ -400,7 +400,7 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
   这个命令也用于一次性的副本，例如改动数据之前。
 
-- 媒体：使用 R2 时原文件只在 R2 中（见「R2 的保护」），本地只剩缩略图和正在上传的原文件，不复制。`MEDIA_STORE=local` 时 `media/` 中的文件写入后不再修改，增量复制即可：
+- 媒体：使用 R2 时原文件只在 R2 中（见「R2 的保护」），本地只剩正在上传的原文件和还没移到 R2 的缩略图，不复制。`MEDIA_STORE=local` 时 `media/` 中的文件写入后不再修改，增量复制即可：
 
   ```sh
   rsync -a data/media/ <备份位置>/media/
@@ -577,7 +577,7 @@ rm ~/Library/LaunchAgents/org.midden.backup.plist
    rclone check ~/backups/midden/auto/media r2:midden --one-way
    ```
 
-   不应有内容不同（`differences`）的文件；R2 中缺少的只应是缩略图（迁移不上传）和已被回收删除的媒体。
+   不应有内容不同（`differences`）的文件；R2 中缺少的只应是还没移走的缩略图和已被回收删除的媒体。
 
 4. 删除：`rm -rf ~/backups/midden/auto/media`。
 
@@ -620,8 +620,8 @@ Cloudflare 的 GraphQL Analytics API（`POST https://api.cloudflare.com/client/v
 ### 本机
 
 - 数据库文件：`PRAGMA page_count × page_size`，空闲页 `freelist_count`，以及 `midden.db-wal` 的大小。
-- 缩略图：`blob_thumbnails` 中已生成的个数与 `size` 之和，加上已移除的媒体保留的缩略图（`removed_media` 的 `thumbnail_key`，同一个文件只算一次，不在 `blob_thumbnails` 中的才算；大小是标记记下的 `thumbnail_size`，记下大小之前的标记只计个数）。
-- 媒体目录：随每次数据库组成在 worker 线程中遍历 `media/`，统计文件数与大小（使用 R2 时就是缩略图和尚未上传完的原文件）。
+- 缩略图：`blob_thumbnails` 中已生成的个数与 `size` 之和，加上已移除的媒体保留的缩略图（`removed_media` 的 `thumbnail_key`，同一个文件只算一次，不在 `blob_thumbnails` 中的才算；大小是标记记下的 `thumbnail_size`，记下大小之前的标记只计个数）。其中还没移到 R2 的单独给出（`local_count`、`local_bytes`），网页写成「缩略图 N 个，本机 M 个（大小），其余在 R2」，全部移走后只写个数；移走的缩略图在 R2 的存储中也计入一次。
+- 媒体目录：随每次数据库组成在 worker 线程中遍历 `media/`，统计文件数与大小（使用 R2 时就是还没移走的缩略图和尚未上传完的原文件）。
 - 部署前的数据库备份：`data/backups/deploy/` 中的文件。
 - 可用磁盘：数据目录所在卷的 `statfs`（容器内看到的卷；GB 为 2^30 字节，与网页中其他大小相同）。
 
@@ -669,6 +669,7 @@ worker 每分钟运行一次维护。标 _空闲时_ 的步骤只为腾出空间
 - 设置了 `RAW_R2_BUCKET` 时，为一小时以前仍在数据库中、没有上传任务的原始响应排上传任务，同时等待的最多 500 个（见「原始响应（R2）」）；
 - 删除抓取结束一天以上仍留着的暂存数据（`capture_staging`，没能提交的列表目标的预取）；
 - 为缩略图补记文件头中的宽高（记下尺寸之前生成的缩略图，_空闲时_）；
+- 使用 R2 时，把还只在本地的缩略图移到 R2（_空闲时_，每次最多 20 秒，受节流；见[架构](architecture.md#缩略图)）；
 - 清理过期的网页会话、通行密钥挑战与 `/passkey` 链接；
 - 每 15 分钟读取存储用量并检查提醒，每天一次以及数据库变动后统计数据库组成（见「存储用量」，worker 自己发起的统计在 _空闲时_）；
 - 把空闲页面还给文件系统（_空闲时_）：空闲页面达到 1024 页（4 MiB）时运行 `PRAGMA incremental_vacuum(4096)`，每次最多 16 MiB，两次之间至少 15 分钟，所以积压最多每小时释放 64 MiB；日志 `released free database pages` 给出这次释放的页数、剩余空闲页数（`free`）和总页数（`pages`）。这要求数据库是 `auto_vacuum = INCREMENTAL`：新建的数据库默认如此，已有的数据库要 `VACUUM` 一次才能切换（生产环境已于 2026-11-25 切换；`cli.ts maintain --vacuum` 也会切换），否则这一步什么也不做。

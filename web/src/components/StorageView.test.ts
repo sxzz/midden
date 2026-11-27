@@ -80,7 +80,12 @@ const LOCAL: StorageReport['local'] = {
     freelist_pages: 1000,
     wal_bytes: 4 * 2 ** 20,
   },
-  thumbnails: { count: 34_567, bytes: 1.2 * GiB },
+  thumbnails: {
+    count: 34_567,
+    bytes: 1.2 * GiB,
+    local_count: 34_567,
+    local_bytes: 1.2 * GiB,
+  },
   deploy_backups: { files: 1, bytes: 2.3 * GiB },
   disk: { free_bytes: 120 * GiB, total_bytes: 460 * GiB },
 }
@@ -161,6 +166,26 @@ function api(report: StorageReport) {
 }
 
 describe('存储用量', () => {
+  it('says how many thumbnails are still on this machine while they move to R2', async () => {
+    api({
+      ...FULL,
+      local: {
+        ...LOCAL,
+        thumbnails: {
+          count: 34_567,
+          bytes: 1.2 * GiB,
+          local_count: 1000,
+          local_bytes: 30 * 2 ** 20,
+        },
+      },
+    })
+    const el = mount(StorageView)
+    await settle()
+    expect(text(el)).toContain(
+      '缩略图 34,567 个，本机 1,000 个（30.0 MB），其余在 R2 1.2 GB',
+    )
+  })
+
   it('groups R2, the bill, this machine, the database, trends and thresholds', async () => {
     api(FULL)
     const el = mount(StorageView)

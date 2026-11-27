@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer'
-import { rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { rmSync } from 'node:fs'
 import { buffer } from 'node:stream/consumers'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
@@ -19,6 +20,7 @@ import { recordingLogger } from '#testing/logs.ts'
 import { captureHandlers } from './handlers.ts'
 import { collectCollections, collectMedia } from './maintenance.ts'
 import { submit } from './submit.ts'
+import { moveThumbnails } from './thumbnail-remote.ts'
 import { regenerateThumbnail } from './thumbnail.ts'
 import type { BucketBlobStore } from '#blob/bucket-store.ts'
 import type { MediaSigner } from '#blob/signer.ts'
@@ -113,6 +115,21 @@ function setup(options: { local?: boolean } = {}) {
   })
   return { c, clock, media, files, logs, store, capture, route }
 }
+
+/**
+ * Lose every thumbnail's file, in the bucket too, as if it had stayed
+ * local and the media directory went.
+ */
+function loseThumbnails(c: CaptureContext) {
+  for (const row of c.db.select().from(blobThumbnails).all()) {
+    s3.objects.delete(objectPath(row.key!))
+    rmSync((c.blobs as BucketBlobStore).local.path(row.key!), { force: true })
+  }
+  c.db.update(blobThumbnails).set({ remoteAt: null }).run()
+}
+
+const sha256 = (bytes: Buffer) =>
+  createHash('sha256').update(bytes).digest('hex')
 
 const uploads = (c: CaptureContext) =>
   c.db.select().from(jobs).where(eq(jobs.type, 'upload')).all()
@@ -240,7 +257,7 @@ describe('media in R2', () => {
     expect(s3.requests.filter((r) => r.method === 'PUT')).toHaveLength(puts)
   })
 
-  test('the poster of a video is its thumbnail: kept locally, never uploaded, and the original still goes', async () => {
+  test('the poster of a video is its thumbnail, moved to the bucket as the original is', async () => {
     const { c, media, store, capture } = setup()
     media['1'] = [
       {
@@ -263,11 +280,49 @@ describe('media in R2', () => {
       width: 400,
       height: 225,
     })
+    expect(thumbnail.remoteAt).toBeInstanceOf(Date)
     expect(blob.remoteAt).toBeInstanceOf(Date)
     expect(await store.local.stat(blob.hash)).toBeUndefined()
-    expect(await store.local.stat(thumbnail.key!)).toBe(POSTER.length)
-    expect(s3.objects.has(objectPath(thumbnail.key!))).toBe(false)
-    expect(s3.requests.some((r) => r.presigned)).toBe(false)
+    expect(await store.local.stat(thumbnail.key!)).toBeUndefined()
+    expect(s3.objects.get(objectPath(thumbnail.key!))).toMatchObject({
+      contentType: 'image/jpeg',
+      cacheControl: IMMUTABLE,
+    })
+    // Served from the bucket's public address, as originals are.
+    expect(getCollection(c, done.collectionId).assets[0]!.thumbnail_url).toBe(
+      `${FAKE_PUBLIC}/${objectPath(thumbnail.key!)}`,
+    )
+  })
+
+  test('a thumbnail whose upload fails stays local and is served from here until maintenance moves it', async () => {
+    const { c, media, store, capture } = setup()
+    media['1'] = [
+      {
+        url: 'https://m.test/a.jpg',
+        thumbnailUrl: 'https://m.test/a-small.jpg',
+      },
+    ]
+    const upload = store.upload.bind(store)
+    const spy = vi
+      .spyOn(store, 'upload')
+      .mockImplementation((key, ...rest) =>
+        key === sha256(SMALL)
+          ? Promise.reject(new Error('bucket down'))
+          : upload(key, ...rest),
+      )
+    const done = await capture('1')
+    const thumbnail = c.db.select().from(blobThumbnails).get()!
+    expect(thumbnail.remoteAt).toBeNull()
+    expect(await store.local.stat(thumbnail.key!)).toBe(SMALL.length)
+    expect(
+      getCollection(c, done.collectionId).assets[0]!.thumbnail_url,
+    ).toMatch(new RegExp(String.raw`^/media/${thumbnail.key}\?`))
+    spy.mockRestore()
+    expect(await moveThumbnails(c)).toBe(1)
+    expect(await store.local.stat(thumbnail.key!)).toBeUndefined()
+    expect(getCollection(c, done.collectionId).assets[0]!.thumbnail_url).toBe(
+      `${FAKE_PUBLIC}/${objectPath(thumbnail.key!)}`,
+    )
   })
 
   test('a read open while the local copy goes keeps reading it; later reads use the bucket', async () => {
@@ -353,7 +408,7 @@ describe('media in R2', () => {
   })
 
   test('a lost thumbnail is fetched again from the platform, under a new key if its bytes changed', async () => {
-    const { c, media, files, store, route, capture } = setup()
+    const { c, media, files, route, capture } = setup()
     media['1'] = [
       {
         url: 'https://m.test/v.mp4',
@@ -364,18 +419,22 @@ describe('media in R2', () => {
     ]
     const done = await capture('1')
     const thumbnail = c.db.select().from(blobThumbnails).get()!
-    await rm(store.local.path(thumbnail.key!))
+    loseThumbnails(c)
     const url = getCollection(c, done.collectionId).assets[0]!.thumbnail_url!
     const response = await route.request(url)
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe(IMMUTABLE)
     expect(Buffer.from(await response.arrayBuffer())).toEqual(POSTER)
-    expect(await store.local.stat(thumbnail.key!)).toBe(POSTER.length)
+    // Back in the bucket.
+    expect(s3.objects.has(objectPath(thumbnail.key!))).toBe(true)
+    expect(c.db.select().from(blobThumbnails).get()!.remoteAt).toBeInstanceOf(
+      Date,
+    )
 
     // The platform sends other bytes now: recorded under their own key.
     const other = jpegOf(400, 225, 'poster, again')
     files['https://m.test/v.jpg'] = other
-    await rm(store.local.path(thumbnail.key!))
+    loseThumbnails(c)
     const moved = await route.request(url)
     expect(moved.status).toBe(307)
     const now = c.db.select().from(blobThumbnails).get()!
@@ -387,12 +446,12 @@ describe('media in R2', () => {
     const followed = await route.request(moved.headers.get('location')!)
     expect(followed.status).toBe(200)
     expect(getCollection(c, done.collectionId).assets[0]!.thumbnail_url).toBe(
-      moved.headers.get('location'),
+      `${FAKE_PUBLIC}/${objectPath(now.key!)}`,
     )
   })
 
   test('a lost image thumbnail the platform no longer serves stands in by its original; a lost video thumbnail does not', async () => {
-    const { c, media, files, store, route, capture } = setup()
+    const { c, media, files, route, capture } = setup()
     media['1'] = [
       {
         url: 'https://m.test/a.jpg',
@@ -408,9 +467,8 @@ describe('media in R2', () => {
     const done = await capture('1')
     delete files['https://m.test/a-small.jpg']
     delete files['https://m.test/v.jpg']
+    loseThumbnails(c)
     const [image, video] = getCollection(c, done.collectionId).assets
-    for (const row of c.db.select().from(blobThumbnails).all())
-      await rm(store.local.path(row.key!))
     const original = await route.request(image!.thumbnail_url!)
     expect(original.status).toBe(307)
     expect(original.headers.get('location')).toMatch(

@@ -12,6 +12,7 @@ import { HEADER_BYTES, imageSize } from './image-size.ts'
 import { fetchMedia, mediaURL, readHead } from './media-fetch.ts'
 import { thumbnailDue } from './media-reuse.ts'
 import { acceptsMediaType, sniffMediaType } from './media-type.ts'
+import { moveNewThumbnail } from './thumbnail-remote.ts'
 import type { StagedFile } from '#blob/staging.ts'
 import type { Executor } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
@@ -19,8 +20,9 @@ import type { CaptureContext } from './context.ts'
 // Thumbnails are the platforms' own smaller renditions (see
 // `platforms/x/thumbnails.ts`, `platforms/instagram/thumbnails.ts`), named
 // by the asset's `thumbnail_url` when it is listed and downloaded right
-// after the original, by the same job (`download.ts`). They live only in
-// the local media directory, by content hash like any media. An image the
+// after the original, by the same job (`download.ts`). They are stored by
+// content hash like any media, and with a remote store (R2) moved there
+// as originals are (`thumbnail-remote.ts`). An image the
 // platform has no smaller size of has no thumbnail: the web shows the
 // original, which is no larger. A video without a poster has none either.
 
@@ -127,7 +129,12 @@ export async function downloadThumbnail(
       // The platform sent the original itself: it stands for itself, and
       // recording it as a thumbnail would keep its local copy for good.
       if (fetched.staged.hash === blob.hash) return
-      await storeFile(ctx, fetched, () => attachThumbnail(ctx, blob, fetched))
+      let attached = false
+      await storeFile(ctx, fetched, () => {
+        attached = attachThumbnail(ctx, blob, fetched)
+      })
+      if (attached)
+        await moveNewThumbnail(ctx, fetched.staged.hash, fetched.mime)
     } finally {
       await fetched.staged.discard()
     }
@@ -138,8 +145,8 @@ function attachThumbnail(
   ctx: CaptureContext,
   blob: Blob,
   { staged, mime, width, height }: Fetched,
-): void {
-  ctx.db.transaction((tx) => {
+): boolean {
+  return ctx.db.transaction((tx) => {
     const attached =
       !!tx.select().from(blobs).where(eq(blobs.id, blob.id)).get() &&
       tx
@@ -161,6 +168,7 @@ function attachThumbnail(
         .values({ key: staged.hash })
         .onConflictDoNothing()
         .run()
+    return attached
   })
 }
 
@@ -175,8 +183,8 @@ const regenerating = new Map<
 >()
 
 /**
- * Thumbnails are a local cache: when one's file is missing (the media
- * directory was lost, say), fetch it again from the platform, where its
+ * When a thumbnail's file is missing (the media directory was lost before
+ * it moved to the remote store, say), fetch it again from the platform, where its
  * address still works. The bytes may differ from the lost ones; then the
  * thumbnail is recorded under its new key, which the caller sends the
  * browser to. Where it cannot be fetched, an image's thumbnail is its
@@ -237,7 +245,14 @@ async function refetch(
       ctx.db.transaction((tx) => {
         // Whatever showed the lost file shows the new one.
         tx.update(blobThumbnails)
-          .set({ key: staged.hash, size: staged.size, mime, width, height })
+          .set({
+            key: staged.hash,
+            size: staged.size,
+            mime,
+            width,
+            height,
+            remoteAt: null,
+          })
           .where(eq(blobThumbnails.key, key))
           .run()
         tx.update(removedMedia)
@@ -247,6 +262,7 @@ async function refetch(
             thumbnailWidth: width,
             thumbnailHeight: height,
             thumbnailSize: staged.size,
+            thumbnailRemoteAt: null,
           })
           .where(eq(removedMedia.thumbnailKey, key))
           .run()
@@ -254,6 +270,8 @@ async function refetch(
         tx.insert(mediaGarbage).values({ key }).onConflictDoNothing().run()
       })
     })
+    // Into the remote store again, which lost it too if the row said so.
+    await moveNewThumbnail(ctx, staged.hash, mime)
     ctx.logger.info({ key, regenerated: staged.hash }, 'thumbnail regenerated')
     return { key: staged.hash, contentType: mime }
   } finally {

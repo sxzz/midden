@@ -33,13 +33,14 @@ export interface BlobStore {
   url: (key: string, options: MediaUrlOptions) => string
   /**
    * Copy the local object to the remote store and confirm it arrived
-   * intact. Only stores with a remote side have it.
+   * intact; `present` when the remote store held it already. Only stores
+   * with a remote side have it.
    */
   upload?: (
     key: string,
     contentType: string,
     signal?: AbortSignal,
-  ) => Promise<void>
+  ) => Promise<'uploaded' | 'present'>
   /**
    * Delete the local copy of an object whose upload is confirmed, leaving
    * the remote store with the only one. Only stores with a remote side have

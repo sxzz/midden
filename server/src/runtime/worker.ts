@@ -168,7 +168,7 @@ export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
   every(MAINTENANCE_INTERVAL, () => {
     if (maintaining) return
     maintaining = true
-    // Jobs maintenance enqueues (thumbnails it backfills) come last.
+    // Jobs maintenance enqueues (raw uploads it sweeps) come last.
     withOrigin({ rank: RANK.maintenance, updateId: null }, () => {
       try {
         pruneSessions(db)

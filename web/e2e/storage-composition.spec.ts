@@ -12,7 +12,7 @@ const report = (job: unknown, computedAt: string) => ({
       freelist_pages: 0,
       wal_bytes: 0,
     },
-    thumbnails: { count: 0, bytes: 0 },
+    thumbnails: { count: 0, bytes: 0, local_count: 0, local_bytes: 0 },
     deploy_backups: { files: 0, bytes: 0 },
     disk: { free_bytes: 100 * GiB, total_bytes: 400 * GiB },
   },

@@ -199,8 +199,9 @@ function mark(
       width: number | null
       height: number | null
       size: number | null
+      remote_at: number | null
     }>(sql`
-      SELECT key, mime, width, height, size FROM blob_thumbnails
+      SELECT key, mime, width, height, size, remote_at FROM blob_thumbnails
       WHERE state = 'ready' AND key IS NOT NULL
         AND blob_id IN (SELECT value FROM json_each(${list(blobIds)}))
       LIMIT 1`)
@@ -213,6 +214,8 @@ function mark(
         thumbnailWidth: thumbnail?.width ?? null,
         thumbnailHeight: thumbnail?.height ?? null,
         thumbnailSize: thumbnail?.size ?? null,
+        thumbnailRemoteAt:
+          thumbnail?.remote_at == null ? null : new Date(thumbnail.remote_at),
       })
       .onConflictDoUpdate({
         target: removedMedia.mediaKey,
@@ -222,6 +225,7 @@ function mark(
           thumbnailWidth: sql`coalesce(${removedMedia.thumbnailWidth}, excluded.thumbnail_width)`,
           thumbnailHeight: sql`coalesce(${removedMedia.thumbnailHeight}, excluded.thumbnail_height)`,
           thumbnailSize: sql`coalesce(${removedMedia.thumbnailSize}, excluded.thumbnail_size)`,
+          thumbnailRemoteAt: sql`CASE WHEN ${removedMedia.thumbnailKey} IS NULL THEN excluded.thumbnail_remote_at ELSE ${removedMedia.thumbnailRemoteAt} END`,
         },
       })
       .run()

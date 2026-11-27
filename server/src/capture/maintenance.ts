@@ -40,6 +40,7 @@ import { HEADER_BYTES, imageSize } from './image-size.ts'
 import { failCapture } from './lifecycle.ts'
 import { dropAllSummaries } from './record-summaries.ts'
 import { pruneStaging } from './staging.ts'
+import { moveThumbnails } from './thumbnail-remote.ts'
 import type { Transaction } from '#db/client.ts'
 
 const STALE_CAPTURE = 60 * 60_000
@@ -97,6 +98,10 @@ export async function runMaintenance(
   if (slim) await step('raw garbage', () => collectRawGarbage(ctx))
   await step('raw uploads', () => sweepRawUploads(ctx))
   if (slim) await step('thumbnail sizes', () => backfillThumbnailSizes(ctx))
+  if (slim)
+    await step('thumbnails to the remote store', () =>
+      moveThumbnails(ctx, () => ctx.queue.status().idle),
+    )
   if (slim) await step('free pages', () => releaseFreePages(ctx))
   if (errors.length) throw new AggregateError(errors, 'maintenance failed')
 }

@@ -1,6 +1,11 @@
 import { and, asc, count, eq, gt, isNotNull, isNull } from 'drizzle-orm'
 import { blobs } from '#db/schema.ts'
-import { storedProblem, type BucketBlobStore } from './bucket-store.ts'
+import {
+  checksumVerdict,
+  storedProblem,
+  type BucketBlobStore,
+  type Verification,
+} from './bucket-store.ts'
 import { digestFile, digestStream, type Digest } from './digest.ts'
 import { localCopyHold } from './local-copy.ts'
 import { hexToBase64, type ObjectHead } from './s3.ts'
@@ -8,14 +13,6 @@ import { IMMUTABLE, isNotFound, objectPath } from './store.ts'
 import type { Database } from '#db/client.ts'
 
 type Blob = typeof blobs.$inferSelect
-
-/**
- * How an object already in the bucket was found to hold the right bytes:
- * its SHA-256 checksum, its ETag (the MD5 of an object stored in one part),
- * the MD5 rclone records in metadata for multipart uploads, or a download.
- * The size alone is not enough: once recorded, the local file goes.
- */
-export type Verification = 'sha256' | 'etag' | 'rclone-md5' | 'download'
 
 export interface MediaToolOptions {
   dryRun?: boolean
@@ -62,31 +59,7 @@ export interface MigrateSummary {
 }
 
 const PAGE = 200
-const PLAIN_MD5 = /^[0-9a-f]{32}$/
 const PROGRESS_MS = 5000
-
-/**
- * What an object's checksums say about holding `digest`: the first that
- * matches, false when any contradicts it, undefined when it carries none.
- */
-export function checksumVerdict(
-  head: ObjectHead,
-  digest: Digest,
-): Verification | false | undefined {
-  const verdicts: [Verification, boolean][] = []
-  if (head.checksumSha256)
-    verdicts.push([
-      'sha256',
-      head.checksumSha256 === hexToBase64(digest.sha256),
-    ])
-  // A multipart ETag ends in `-<parts>` and says nothing about the bytes.
-  if (head.etag && PLAIN_MD5.test(head.etag))
-    verdicts.push(['etag', head.etag === digest.md5])
-  const rclone = head.metadata.md5chksum
-  if (rclone) verdicts.push(['rclone-md5', rclone === hexToBase64(digest.md5)])
-  if (verdicts.some(([, ok]) => !ok)) return false
-  return verdicts[0]?.[0]
-}
 
 function countBlobs(db: Database, remote: boolean): number {
   return db
@@ -185,7 +158,7 @@ async function localDigest(
  * It runs beside the server, in another process, so the server's media
  * lock does not reach it. It deletes a local file only after recording the
  * blob itself, as the upload job does, and the server's readers fall back
- * to the bucket (see `withSource`); a download of the same bytes in between
+ * to the bucket; a download of the same bytes in between
  * at worst leaves a local copy behind, which `media-prune-local` removes.
  */
 export async function migrateMedia(

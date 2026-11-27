@@ -175,6 +175,8 @@ interface AssetRow {
   remote: number | null
   thumb_key: string | null
   thumb_mime: string | null
+  /** The thumbnail's upload to the remote store is confirmed. */
+  thumb_remote: number
   thumb_width: number | null
   thumb_height: number | null
   width: number | null
@@ -192,6 +194,8 @@ function assetRows(r: Reader, where: SQL): AssetRow[] {
       b.remote_at IS NOT NULL AS remote,
       coalesce(t.key, rm.thumbnail_key) AS thumb_key,
       coalesce(t.mime, rm.thumbnail_mime) AS thumb_mime,
+      coalesce(t.remote_at, rm.thumbnail_remote_at) IS NOT NULL
+        AS thumb_remote,
       coalesce(t.width, rm.thumbnail_width) AS thumb_width,
       coalesce(t.height, rm.thumbnail_height) AS thumb_height,
       a.width, a.height,
@@ -277,6 +281,7 @@ function assetView(r: Reader, row: AssetRow): AssetView {
       ? {
           thumbnail_url: r.blobs.url(row.thumb_key!, {
             contentType: row.thumb_mime!,
+            remote: !!row.thumb_remote,
           }),
         }
       : {}),
