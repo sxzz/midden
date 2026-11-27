@@ -73,6 +73,7 @@ import AppLink from './ui/AppLink.vue'
 import BackLink from './ui/BackLink.vue'
 import PageTabs from './ui/PageTabs.vue'
 import RefreshButton from './ui/RefreshButton.vue'
+import SensitiveButton from './ui/SensitiveButton.vue'
 import UpdateSheet from './UpdateSheet.vue'
 import WatchSheet from './WatchSheet.vue'
 // Remembered in this browser, so a reload does not cover the media again.
@@ -254,6 +255,11 @@ const title = computed(() => {
   return titles[String(route.name)] || '收藏库'
 })
 watch(title, (value) => setDocumentTitle(value), { immediate: true })
+/**
+ * 收藏库 and 采集 say what they are by their tabs: no header, its actions at
+ * the tabs' right, the title only for screen readers and the window.
+ */
+const untitled = computed(() => home.value || capturesTab.value)
 /** Settings and 采集 have no media to cover. */
 const sensitiveShown = computed(
   () =>
@@ -764,8 +770,9 @@ const viewProps = computed(() => {
 
 <template>
   <SideRail v-if="wide" />
-  <main class="page" :class="{ roomy }">
-    <header v-if="!settingsSplit" class="bar" :class="{ spaced: !home }">
+  <main class="page" :class="{ roomy, untitled }">
+    <h1 v-if="untitled" class="visually-hidden">{{ title }}</h1>
+    <header v-else-if="!settingsSplit" class="bar" :class="{ spaced: !home }">
       <!-- On a desktop an arrow, as X's header has it. -->
       <BackLink
         v-if="nested && standalone && wide"
@@ -823,34 +830,21 @@ const viewProps = computed(() => {
           <circle cx="18.5" cy="12" r="1.6" />
         </svg>
       </button>
-      <button
+      <SensitiveButton
         v-if="sensitiveShown"
-        type="button"
         class="icon-button sensitive-toggle"
-        aria-label="显示敏感内容"
-        :aria-pressed="showSensitive"
-        :title="showSensitive ? '隐藏敏感内容' : '显示敏感内容'"
-        @click="showSensitive = !showSensitive"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          width="22"
-          height="22"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
-          <circle cx="12" cy="12" r="3" />
-          <path v-if="!showSensitive" d="m3 3 18 18" />
-        </svg>
-      </button>
+        :pressed="showSensitive"
+        @toggle="showSensitive = !showSensitive"
+      />
     </header>
     <PageTabs v-if="capturesTab" label="采集" :tabs="captureTabs">
       <template #end>
+        <RefreshButton
+          v-if="headerRefresh"
+          class="tabs-end tabs-refresh"
+          :busy="headerRefresh.busy"
+          @refresh="headerRefresh.refresh()"
+        />
         <AppLink
           class="tabs-end"
           :to="accountsLink"
@@ -876,7 +870,22 @@ const viewProps = computed(() => {
         </AppLink>
       </template>
     </PageTabs>
-    <PageTabs v-if="home" label="类型" :tabs="homeTabs" />
+    <PageTabs v-if="home" label="类型" :tabs="homeTabs">
+      <template #end>
+        <RefreshButton
+          v-if="headerRefresh"
+          class="tabs-end tabs-refresh"
+          :busy="headerRefresh.busy"
+          @refresh="headerRefresh.refresh()"
+        />
+        <SensitiveButton
+          v-if="sensitiveShown"
+          class="tabs-end sensitive-toggle"
+          :pressed="showSensitive"
+          @toggle="showSensitive = !showSensitive"
+        />
+      </template>
+    </PageTabs>
     <FolderStrip v-if="home" :folders="folders" />
     <PageTabs
       v-if="folderId && folderKindsShown.length > 1"
@@ -1050,13 +1059,37 @@ const viewProps = computed(() => {
   margin: 0 12px 0 -10px;
   color: var(--text);
 }
-/* 采集账号, at the right of 采集's tabs where X has its +. */
+/* No header (收藏库, 采集): the tabs stick at the top. */
+.page.untitled {
+  --page-header-height: 0px;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* The header's actions on a page without one, and 采集账号: at the right of
+   the tabs, where X has its +. */
 .tabs-end {
   display: grid;
   flex: none;
   place-items: center;
   width: 53px;
   color: var(--text);
+}
+.sensitive-toggle.tabs-end {
+  color: var(--subtle);
+}
+/* RefreshButton's own round 34px gives way to the tabs' square. */
+.tabs-end.tabs-refresh {
+  display: grid;
+  width: 53px;
+  height: auto;
+  border-radius: 0;
+  color: var(--subtle);
 }
 .tabs-end:hover {
   background: color-mix(in srgb, var(--text) 6%, transparent);

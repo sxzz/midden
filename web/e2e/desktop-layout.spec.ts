@@ -41,8 +41,12 @@ test.describe('from 700px', () => {
     await expect(item(page, '探索').locator('.label')).toBeHidden()
     await expect(sidebar(page)).toHaveCount(0)
     await expect(item(page, '探索')).toHaveAttribute('aria-current', 'page')
-    // Without a sidebar the header says how many the list holds.
-    await expect(page.locator('.subtitle')).toHaveText('1,280条')
+    // Without a sidebar the list's own toolbar says how many it holds; 收藏库
+    // has no header to say it.
+    await expect(
+      page.locator('main').getByText('1,280条', { exact: true }),
+    ).toBeVisible()
+    await expect(page.locator('.subtitle')).toHaveCount(0)
     await expect(rail(page).getByRole('button', { name: '抓取' })).toHaveCount(
       0,
     )
