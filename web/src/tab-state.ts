@@ -177,6 +177,18 @@ function update(next: TabStates) {
 
 /** The history entry state the bar's links carry, see `Move`. */
 export const SWITCH_STATE = { tabSwitch: true }
+/**
+ * The state of the open tab's own link, which resets the tab: its root with
+ * nothing in the address (no query, filters, folder or sort), at the top.
+ */
+export const RESET_STATE = { tabReset: true }
+
+/**
+ * Whether the page shown was just reached by resetting its tab, rather
+ * than by going back or forward to that entry later.
+ */
+let reset = false
+export const arrivedByReset = () => reset
 
 /** Whether the shown history entry was reached through the bar. */
 const switched = (router: Router) =>
@@ -230,6 +242,7 @@ export function trackTabs(router: Router) {
     const pop = popped
     popped = undefined
     const tab = tabOf(to.name)
+    reset = !failure && !pop && router.options.history.state.tabReset === true
     if (failure || !tab) return
     const first = !from.matched.length
     const state = router.options.history.state
@@ -253,6 +266,9 @@ export function trackTabs(router: Router) {
           : { tab: tabOf(from.name), path: from.fullPath },
       }),
     )
+    // A reset starts at the top. A view that puts back its own position
+    // when shown (the library) asks `arrivedByReset` instead.
+    if (reset) window.scrollTo(0, 0)
   })
   // A reload or a closed tab: keep how far the page was scrolled.
   const hide = () => saveScroll(router.currentRoute.value)

@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { createRouter, createWebHashHistory, type Router } from 'vue-router'
 import { backRoute, goBack } from './navigation'
 import {
+  arrivedByReset,
   backTarget,
   emptyStates,
   forget,
@@ -10,6 +11,7 @@ import {
   leave,
   leftScroll,
   readStates,
+  RESET_STATE,
   SWITCH_STATE,
   tabStates,
   trackTabs,
@@ -211,6 +213,26 @@ describe('following the router', () => {
         resolve()
       })
     })
+
+  it('resets a tab to its plain root, at the top', async () => {
+    const scrollTo = vi
+      .spyOn(globalThis, 'scrollTo')
+      .mockImplementation(() => {})
+    await start('/?q=cat')
+    await router.push('/collection/a')
+    expect(arrivedByReset()).toBe(false)
+    await router.push({ path: '/', state: RESET_STATE })
+    expect(arrivedByReset()).toBe(true)
+    expect(scrollTo).toHaveBeenCalledWith(0, 0)
+    expect(tabStates.value.explore).toMatchObject({ root: '/', stack: ['/'] })
+    // Coming back to that entry later is not a reset.
+    await router.push('/collection/b')
+    const back = arrived('/')
+    goBack(router)
+    await back
+    expect(arrivedByReset()).toBe(false)
+    scrollTo.mockRestore()
+  })
 
   it('returns to the tab as it was left, and 返回 within it', async () => {
     await start('/')

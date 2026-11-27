@@ -50,7 +50,13 @@ import { listQuery } from '../reads'
 import { isProfileEntity } from '../relations'
 import { restoreScroll } from '../scroll-restore'
 import { findEntry, findSection } from '../settings-sections'
-import { forgetPages, lastPage, leftScroll, tabStates } from '../tab-state'
+import {
+  arrivedByReset,
+  forgetPages,
+  lastPage,
+  leftScroll,
+  tabStates,
+} from '../tab-state'
 import { tabOf as barTabOf, tabs as barTabs, isTabRoot } from '../tabbar'
 import { detailTitle, kindOf, setDocumentTitle } from '../titles'
 import AccountsDialog from './AccountsDialog.vue'
@@ -100,6 +106,8 @@ const createList = (path: string) => ({
   collection: useCollection(),
   /** Where the tab was left, filters included. */
   path,
+  /** Its address with no filters, which resetting 探索 returns it to. */
+  start: path,
   query: shallowRef(''),
   loadedQuery: undefined as string | undefined,
 })
@@ -402,7 +410,11 @@ watch(
     // refreshes them, filtering within it does not.
     const arrived = key !== shownKey
     shownKey = key
-    const left = leftAt.get(key)
+    // 探索 tapped again: its lists forget their filters, and the page starts
+    // at the top rather than where the list was left.
+    const reset = arrivedByReset()
+    if (reset) for (const list of Object.values(lists)) list.path = list.start
+    const left = reset ? 0 : leftAt.get(key)
     leftAt.delete(key)
     if (home.value) {
       if (arrived) void loadFolders()

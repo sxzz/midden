@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createVaporApp, nextTick } from 'vue'
-import { emptyStates, SWITCH_STATE, tabStates } from '../tab-state'
+import { emptyStates, RESET_STATE, SWITCH_STATE, tabStates } from '../tab-state'
 import { suppressTabBar } from '../tabbar'
 import TabBar from './TabBar.vue'
 
@@ -114,11 +114,11 @@ it('links each other tab to the page it was left on, as a real link', async () =
   }
   await nextTick()
   expect(tab(el, '设置').getAttribute('href')).toBe('/settings?a=1')
-  // The open tab leads to its root, as tapping it does.
-  expect(tab(el, '关系').getAttribute('href')).toBe(CENTRE)
+  // The open tab leads to its plain root, as tapping it does.
+  expect(tab(el, '关系').getAttribute('href')).toBe('/relations')
   at('collection', '/collection/1')
   await nextTick()
-  expect(tab(el, '探索').getAttribute('href')).toBe(ACCOUNTS)
+  expect(tab(el, '探索').getAttribute('href')).toBe('/')
   expect(tab(el, '关系').getAttribute('href')).toBe(CENTRE)
   expect(el.querySelector('nav')?.getAttribute('aria-label')).toBe('主导航')
 })
@@ -150,14 +150,32 @@ it('scrolls to the top when the open tab is tapped on its root', () => {
   expect(router.push).not.toHaveBeenCalled()
 })
 
-it('goes to the tab’s root when tapped below it', async () => {
+it('resets the open tab to its plain root when tapped elsewhere in it', async () => {
   leftOn()
   const el = mount()
   at('collection', '/collection/1')
   await nextTick()
   click(tab(el, '探索'))
   expect(window.scrollTo).not.toHaveBeenCalled()
-  expect(router.push).toHaveBeenCalledWith(ACCOUNTS)
+  expect(router.push).toHaveBeenCalledWith({ path: '/', state: RESET_STATE })
+  // On the root itself, but filtered: the filters go too.
+  at('collections', ACCOUNTS)
+  await nextTick()
+  const event = click(tab(el, '探索'))
+  expect(event.defaultPrevented).toBe(true)
+  expect(router.push).toHaveBeenLastCalledWith({
+    path: '/',
+    state: RESET_STATE,
+  })
+  // 采集's other tab, with its dialog open, goes back to 采集记录.
+  at('captures-watches', '/captures/watches?dialog=accounts')
+  await nextTick()
+  click(tab(el, '采集'))
+  expect(router.push).toHaveBeenLastCalledWith({
+    path: '/captures',
+    state: RESET_STATE,
+  })
+  expect(window.scrollTo).not.toHaveBeenCalled()
   // Another tab returns to where it was left, marked as the bar's.
   click(tab(el, '设置'))
   expect(router.push).toHaveBeenLastCalledWith({
