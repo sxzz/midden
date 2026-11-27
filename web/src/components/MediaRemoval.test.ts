@@ -513,14 +513,21 @@ describe('the profile detail', () => {
       return found!
     })
     buttons(sheet, '删除')[0]!.click()
-    await vi.waitFor(() => expect(buttons(el, '正在删除视频…')).toHaveLength(1))
+    // In the card's ⋯ menu, where it was chosen.
+    await vi.waitFor(() =>
+      expect(
+        [...el.querySelectorAll('button')].some((b) =>
+          b.textContent?.includes('正在删除视频'),
+        ),
+      ).toBe(true),
+    )
     expect(sheet.open).toBe(false)
     // Followed while it runs, with how far it got.
     await vi.waitFor(
       () =>
         expect(
           [...el.querySelectorAll('button')].some((b) =>
-            b.textContent?.includes('正在删除视频…3 / 7'),
+            b.textContent?.includes('正在删除视频（3 / 7）'),
           ),
         ).toBe(true),
       { timeout: 3000 },

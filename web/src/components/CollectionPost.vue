@@ -219,6 +219,10 @@ const warnings = computed(() =>
       >
         {{ captured ? '最新资料' : '抓取时资料' }}
       </button>
+      <!-- The page's buttons for it, in the card's top right corner. -->
+      <div v-if="$slots.actions" class="card-actions">
+        <slot name="actions" />
+      </div>
     </header>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
     <p v-if="view.body" class="body" :lang="view.lang">
@@ -366,6 +370,21 @@ const warnings = computed(() =>
   flex-direction: column;
   align-items: stretch;
   gap: 8px;
+}
+.card-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  margin-left: auto;
+}
+/* Under the banner, across from the avatar, as X places them. */
+.with-cover .author {
+  position: relative;
+}
+.with-cover .card-actions {
+  position: absolute;
+  top: 10px;
+  right: 0;
 }
 .with-cover .avatar {
   width: 72px;

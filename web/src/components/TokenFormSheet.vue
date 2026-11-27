@@ -1,6 +1,5 @@
 <script setup vapor lang="ts">
-import { shallowRef, useId, useTemplateRef, watch } from 'vue'
-import { showSheet } from '../sheet-focus'
+import { computed, shallowRef, useId, watch } from 'vue'
 import {
   DEFAULT_EXPIRY_MS,
   expiryPresets,
@@ -9,6 +8,7 @@ import {
   permissionLabels,
   type TokenForm,
 } from '../tokens'
+import SheetDialog from './ui/SheetDialog.vue'
 import type { ApiToken } from '../api'
 
 // Making a token, or editing one: its name and expiry (a time, or never);
@@ -21,8 +21,7 @@ const props = defineProps<{
   error?: string
 }>()
 const emit = defineEmits<{ submit: [form: TokenForm]; cancel: [] }>()
-const titleId = useId()
-const dialog = useTemplateRef<HTMLDialogElement>('sheet')
+const formId = useId()
 const label = shallowRef('')
 const permission = shallowRef<ApiToken['permission']>('ro')
 const expires = shallowRef('')
@@ -31,10 +30,7 @@ const problem = shallowRef('')
 watch(
   () => props.open,
   (open) => {
-    if (!open) {
-      dialog.value?.close()
-      return
-    }
+    if (!open) return
     const token = props.token
     label.value = token?.label ?? ''
     permission.value = token?.permission ?? 'ro'
@@ -45,15 +41,17 @@ watch(
         : Date.now() + DEFAULT_EXPIRY_MS,
     )
     problem.value = ''
-    showSheet(dialog.value)
+    initial = snapshot()
   },
 )
+/** The form as it opened, to tell unsaved edits. */
+let initial = ''
+const snapshot = () =>
+  JSON.stringify([label.value, permission.value, expires.value, never.value])
+const dirty = computed(() => props.open && snapshot() !== initial)
 function preset(ms: number) {
   never.value = false
   expires.value = localInput(Date.now() + ms)
-}
-function backdrop(event: MouseEvent) {
-  if (event.target === dialog.value && !props.busy) emit('cancel')
 }
 function submit() {
   const name = label.value.trim()
@@ -73,113 +71,81 @@ function submit() {
 </script>
 
 <template>
-  <dialog
-    ref="sheet"
-    class="sheet"
-    :aria-labelledby="titleId"
-    @click="backdrop"
-    @cancel.prevent="busy || emit('cancel')"
+  <SheetDialog
+    :open="open"
+    :title="token ? '编辑令牌' : '创建令牌'"
+    :busy="busy"
+    :dirty="dirty"
+    form
+    wide
+    @cancel="emit('cancel')"
+    @submit="submit"
   >
-    <form class="group" @submit.prevent="submit">
-      <p :id="titleId" class="title">{{ token ? '编辑令牌' : '创建令牌' }}</p>
-      <label class="field">
-        <span class="name">名称</span>
-        <input
-          v-model="label"
-          maxlength="64"
-          autocomplete="off"
-          placeholder="名称"
-          enterkeyhint="done"
-        />
-      </label>
-      <fieldset v-if="!token" class="field">
-        <legend class="name">权限</legend>
-        <div class="segments">
-          <label
-            v-for="(text, value) in permissionLabels"
-            :key="value"
-            class="segment"
-            :class="{ chosen: permission === value }"
-          >
-            <input v-model="permission" type="radio" :value="value" />
-            {{ text }}
-          </label>
-        </div>
-      </fieldset>
-      <div class="field">
-        <label class="name" :for="`${titleId}-expires`">过期时间</label>
-        <input
-          :id="`${titleId}-expires`"
-          v-model="expires"
-          type="datetime-local"
-          :disabled="never"
-          aria-label="过期时间"
-        />
-        <div class="presets">
-          <button
-            v-for="p in expiryPresets"
-            :key="p.label"
-            type="button"
-            class="preset"
-            @click="preset(p.ms)"
-          >
-            {{ p.label }}
-          </button>
-          <label class="never">
-            <input v-model="never" type="checkbox" />
-            永不过期
-          </label>
-        </div>
+    <label class="field">
+      <span class="name">名称</span>
+      <input
+        v-model="label"
+        maxlength="64"
+        autocomplete="off"
+        placeholder="名称"
+        enterkeyhint="done"
+      />
+    </label>
+    <fieldset v-if="!token" class="field">
+      <legend class="name">权限</legend>
+      <div class="segments">
+        <label
+          v-for="(text, value) in permissionLabels"
+          :key="value"
+          class="segment"
+          :class="{ chosen: permission === value }"
+        >
+          <input v-model="permission" type="radio" :value="value" />
+          {{ text }}
+        </label>
       </div>
-      <p v-if="problem || error" class="error" role="alert">
-        {{ problem || error }}
-      </p>
-      <button type="submit" class="action" :disabled="busy || !label.trim()">
+    </fieldset>
+    <div class="field">
+      <label class="name" :for="`${formId}-expires`">过期时间</label>
+      <input
+        :id="`${formId}-expires`"
+        v-model="expires"
+        type="datetime-local"
+        :disabled="never"
+        aria-label="过期时间"
+      />
+      <div class="presets">
+        <button
+          v-for="p in expiryPresets"
+          :key="p.label"
+          type="button"
+          class="preset"
+          @click="preset(p.ms)"
+        >
+          {{ p.label }}
+        </button>
+        <label class="never">
+          <input v-model="never" type="checkbox" />
+          永不过期
+        </label>
+      </div>
+    </div>
+    <p v-if="problem || error" class="error" role="alert">
+      {{ problem || error }}
+    </p>
+    <template #actions>
+      <button
+        type="submit"
+        class="action primary"
+        :disabled="busy || !label.trim()"
+      >
         {{ token ? '保存' : '创建' }}
       </button>
-    </form>
-    <button
-      type="button"
-      class="group action cancel"
-      :disabled="busy"
-      @click="emit('cancel')"
-    >
-      取消
-    </button>
-  </dialog>
+    </template>
+  </SheetDialog>
 </template>
 
 <style scoped>
-.sheet {
-  width: 100%;
-  max-width: 480px;
-  margin: auto auto 0;
-  padding: 0 8px max(8px, env(safe-area-inset-bottom));
-  border: 0;
-  background: none;
-  color: var(--text);
-}
-.sheet:not([open]) {
-  display: none;
-}
-.sheet::backdrop {
-  background: rgba(0, 0, 0, 0.4);
-}
-.group {
-  width: 100%;
-  margin: 8px 0 0;
-  border-radius: 14px;
-  background: var(--card);
-  overflow: hidden;
-}
-.title {
-  margin: 0;
-  padding: 16px 16px 4px;
-  text-align: center;
-  font-size: 16px;
-  font-weight: 700;
-  line-height: 1.5;
-}
 .field {
   display: block;
   margin: 0;
@@ -268,23 +234,5 @@ input::placeholder {
   font-size: 14px;
   line-height: 1.5;
   color: var(--destructive);
-}
-.action {
-  display: block;
-  width: 100%;
-  min-height: 52px;
-  margin-top: 16px;
-  font-size: 17px;
-  text-align: center;
-  color: var(--link);
-  box-shadow: inset 0 1px 0 var(--separator);
-}
-.action:disabled {
-  color: var(--subtle);
-}
-.cancel {
-  margin-top: 8px;
-  font-weight: 600;
-  box-shadow: none;
 }
 </style>

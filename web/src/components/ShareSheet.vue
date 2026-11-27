@@ -3,7 +3,7 @@ import { computed, shallowRef, useId, useTemplateRef, watch } from 'vue'
 import { call, client, errorText, type Share } from '../api'
 import { toast } from '../composables/useToast'
 import { shareURL } from '../share'
-import { showSheet } from '../sheet-focus'
+import SheetDialog from './ui/SheetDialog.vue'
 const props = defineProps<{
   open: boolean
   target: 'folder' | 'collection'
@@ -11,10 +11,8 @@ const props = defineProps<{
   title: string
 }>()
 const emit = defineEmits<{ changed: []; cancel: [] }>()
-const titleId = useId()
 const slugId = useId()
 const slugHintId = useId()
-const dialog = useTemplateRef<HTMLDialogElement>('sheet')
 const field = useTemplateRef<HTMLInputElement>('field')
 const share = shallowRef<Share>()
 const loading = shallowRef(false)
@@ -89,10 +87,7 @@ async function load() {
 watch(
   () => props.open,
   (open) => {
-    if (open) {
-      void load()
-      showSheet(dialog.value)
-    } else dialog.value?.close()
+    if (open) void load()
   },
 )
 async function create() {
@@ -135,67 +130,73 @@ async function copy() {
     toast('请手动复制链接')
   }
 }
-function backdrop(event: MouseEvent) {
-  if (event.target === dialog.value && !busy.value) emit('cancel')
-}
+/** A custom link typed and not saved yet. */
+const dirty = computed(
+  () => draft.value !== (custom.value ? share.value!.slug : ''),
+)
 </script>
 
 <template>
-  <dialog
-    ref="sheet"
-    class="sheet"
-    :aria-labelledby="titleId"
-    @click="backdrop"
-    @cancel.prevent="busy || emit('cancel')"
+  <SheetDialog
+    :open="open"
+    :title="title"
+    description="任何拿到链接的人都能查看，无需登录。"
+    :busy="busy"
+    :dirty="dirty"
+    cancel-label="完成"
+    wide
+    @cancel="emit('cancel')"
   >
-    <div class="group">
-      <p class="head">
-        <strong :id="titleId">{{ title }}</strong><span
-          >任何拿到链接的人都能查看，无需登录。</span
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <template v-if="share">
+      <div class="field">
+        <input
+          ref="field"
+          :value="link"
+          aria-label="公开链接"
+          readonly
+          @focus="($event.target as HTMLInputElement).select()"
+        />
+      </div>
+      <form class="field custom" @submit.prevent="savable && setSlug(draft)">
+        <label class="label" :for="slugId">自定义链接</label>
+        <span class="slug"
+          ><span class="prefix" aria-hidden="true">/s/</span
+          ><input
+            :id="slugId"
+            v-model.trim="draft"
+            :placeholder="custom ? '' : '例如 my-picks'"
+            autocapitalize="off"
+            autocomplete="off"
+            spellcheck="false"
+            maxlength="80"
+            :aria-invalid="!!(problem || slugError)"
+            :aria-describedby="slugHintId"
+          /><button type="submit" class="save" :disabled="!savable">
+            保存
+          </button></span
         >
-      </p>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
+        <span
+          :id="slugHintId"
+          class="hint"
+          :class="{ invalid: problem || slugError }"
+          :role="problem || slugError ? 'alert' : undefined"
+          >{{
+            problem ||
+            slugError ||
+            '小写字母、数字和 -，3 到 64 个字符；改动后旧链接立即失效。'
+          }}</span
+        >
+      </form>
+    </template>
+    <template #actions>
       <template v-if="share">
-        <div class="field">
-          <input
-            ref="field"
-            :value="link"
-            aria-label="公开链接"
-            readonly
-            @focus="($event.target as HTMLInputElement).select()"
-          />
-        </div>
-        <form class="field custom" @submit.prevent="savable && setSlug(draft)">
-          <label class="label" :for="slugId">自定义链接</label>
-          <span class="slug"
-            ><span class="prefix" aria-hidden="true">/s/</span
-            ><input
-              :id="slugId"
-              v-model.trim="draft"
-              :placeholder="custom ? '' : '例如 my-picks'"
-              autocapitalize="off"
-              autocomplete="off"
-              spellcheck="false"
-              maxlength="80"
-              :aria-invalid="!!(problem || slugError)"
-              :aria-describedby="slugHintId"
-            /><button type="submit" class="save" :disabled="!savable">
-              保存
-            </button></span
-          >
-          <span
-            :id="slugHintId"
-            class="hint"
-            :class="{ invalid: problem || slugError }"
-            :role="problem || slugError ? 'alert' : undefined"
-            >{{
-              problem ||
-              slugError ||
-              '小写字母、数字和 -，3 到 64 个字符；改动后旧链接立即失效。'
-            }}</span
-          >
-        </form>
-        <button type="button" class="action" :disabled="busy" @click="copy">
+        <button
+          type="button"
+          class="action primary"
+          :disabled="busy"
+          @click="copy"
+        >
           复制链接
         </button>
         <button
@@ -219,62 +220,17 @@ function backdrop(event: MouseEvent) {
       <button
         v-else
         type="button"
-        class="action"
+        class="action primary"
         :disabled="busy || loading"
         @click="create"
       >
         创建公开链接
       </button>
-    </div>
-    <button
-      type="button"
-      class="group action cancel"
-      :disabled="busy"
-      @click="emit('cancel')"
-    >
-      完成
-    </button>
-  </dialog>
+    </template>
+  </SheetDialog>
 </template>
 
 <style scoped>
-.sheet {
-  width: 100%;
-  max-width: 480px;
-  margin: auto auto 0;
-  padding: 0 8px max(8px, env(safe-area-inset-bottom));
-  border: 0;
-  background: none;
-  color: var(--text);
-}
-.sheet:not([open]) {
-  display: none;
-}
-.sheet::backdrop {
-  background: rgba(0, 0, 0, 0.4);
-}
-.group {
-  width: 100%;
-  margin-top: 8px;
-  border-radius: 14px;
-  background: var(--card);
-  overflow: hidden;
-}
-.head {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  padding: 16px;
-  text-align: center;
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--subtle);
-  overflow-wrap: anywhere;
-}
-.head strong {
-  font-size: 16px;
-  color: var(--text);
-}
 .field {
   display: block;
   padding: 0 16px 16px;
@@ -339,24 +295,5 @@ function backdrop(event: MouseEvent) {
   line-height: 1.5;
   text-align: center;
   color: var(--destructive);
-}
-.action {
-  display: block;
-  width: 100%;
-  min-height: 52px;
-  font-size: 17px;
-  text-align: center;
-  color: var(--link);
-  box-shadow: inset 0 1px 0 var(--separator);
-}
-.action:disabled {
-  color: var(--subtle);
-}
-.destructive {
-  color: var(--destructive);
-}
-.cancel {
-  font-weight: 600;
-  box-shadow: none;
 }
 </style>

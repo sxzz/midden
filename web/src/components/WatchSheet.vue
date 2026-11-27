@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { computed, shallowRef, useId, useTemplateRef, watch } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import {
   call,
   client,
@@ -17,7 +17,6 @@ import {
   type Options,
 } from '../capture-options'
 import { toast } from '../composables/useToast'
-import { showSheet } from '../sheet-focus'
 import {
   DEFAULT_EVERY,
   fitCount,
@@ -29,6 +28,7 @@ import {
 import CaptureOptions from './CaptureOptions.vue'
 import AppLink from './ui/AppLink.vue'
 import ChevronIcon from './ui/ChevronIcon.vue'
+import SheetDialog from './ui/SheetDialog.vue'
 import SkeletonBox from './ui/SkeletonBox.vue'
 /**
  * 定期更新 of a profile or a folder: how often, and the options each run
@@ -47,8 +47,6 @@ const emit = defineEmits<{
   navigate: []
   cancel: []
 }>()
-const titleId = useId()
-const dialog = useTemplateRef<HTMLDialogElement>('sheet')
 const current = shallowRef<Watch>()
 const preview = shallowRef<UpdatePreview>()
 const loaded = shallowRef(false)
@@ -57,6 +55,11 @@ const error = shallowRef('')
 const every = shallowRef<WatchEvery>(DEFAULT_EVERY)
 const options = shallowRef<Options>(defaultOptions())
 let request = 0
+/** The form as loaded or last saved, to tell unsaved edits. */
+const saved = shallowRef('')
+const snapshot = () =>
+  JSON.stringify({ every: every.value, options: options.value })
+const dirty = computed(() => loaded.value && snapshot() !== saved.value)
 
 async function load() {
   const n = ++request
@@ -86,17 +89,13 @@ async function load() {
   }
   if (covers.status === 'fulfilled') preview.value = covers.value
   loaded.value = found.status === 'fulfilled'
+  saved.value = snapshot()
 }
 watch(
   () => props.open,
   (open) => {
-    if (open) {
-      void load()
-      showSheet(dialog.value)
-    } else {
-      ++request
-      dialog.value?.close()
-    }
+    if (open) void load()
+    else ++request
   },
 )
 const title = computed(() =>
@@ -120,7 +119,7 @@ async function save() {
   busy.value = true
   error.value = ''
   try {
-    const saved = await call(
+    const written = await call(
       client.watches.$put({
         json: {
           ...props.target,
@@ -138,8 +137,9 @@ async function save() {
       }),
     )
     toast(current.value ? '已保存' : '已开启定期更新')
-    current.value = saved
-    emit('changed', saved)
+    current.value = written
+    saved.value = snapshot()
+    emit('changed', written)
   } catch (e) {
     error.value = errorText(e)
   } finally {
@@ -161,9 +161,6 @@ async function remove() {
   } finally {
     busy.value = false
   }
-}
-function backdrop(event: MouseEvent) {
-  if (event.target === dialog.value) emit('cancel')
 }
 /** The number typed, made one the server takes for the unit. */
 function setCount(event: Event) {
@@ -189,84 +186,83 @@ function setUnit(event: Event) {
 </script>
 
 <template>
-  <dialog
-    ref="sheet"
-    class="sheet"
-    :aria-labelledby="titleId"
-    @click="backdrop"
-    @cancel.prevent="emit('cancel')"
+  <SheetDialog
+    :open="open"
+    :title="title"
+    :dirty="dirty"
+    wide
+    @cancel="emit('cancel')"
   >
-    <div class="group">
-      <p :id="titleId" class="head">{{ title }}</p>
-      <div
-        v-if="!loaded && !error"
-        class="note note-skeleton"
-        role="status"
-        aria-busy="true"
-        aria-label="正在读取定期更新"
-      >
-        <SkeletonBox height="13px" width="58%" />
-        <SkeletonBox height="13px" width="40%" />
-      </div>
-      <template v-if="loaded">
-        <div v-if="current" class="facts">
-          <p class="fact">{{ status }}</p>
-          <p v-if="current.last_run" class="fact">
-            <AppLink
-              class="link"
-              :to="{ name: 'capture', params: { id: current.last_run.id } }"
-              @navigate="emit('navigate')"
-              >{{ last }}</AppLink
-            >
-          </p>
-          <p v-if="current.error" class="fact failed">
-            上次未开始：{{ current.error }}
-          </p>
-        </div>
-        <div class="row every" role="group" aria-label="频率">
-          <span
-            >频率<small class="hint"
-              >最短 5 分钟；上一次还没结束时跳过这一次</small
-            ></span
+    <div
+      v-if="!loaded && !error"
+      class="note note-skeleton"
+      role="status"
+      aria-busy="true"
+      aria-label="正在读取定期更新"
+    >
+      <SkeletonBox height="13px" width="58%" />
+      <SkeletonBox height="13px" width="40%" />
+    </div>
+    <template v-if="loaded">
+      <div v-if="current" class="facts">
+        <p class="fact">{{ status }}</p>
+        <p v-if="current.last_run" class="fact">
+          <AppLink
+            class="link"
+            :to="{ name: 'capture', params: { id: current.last_run.id } }"
+            @navigate="emit('navigate')"
+            >{{ last }}</AppLink
           >
-          <span class="interval"
-            >每<input
-              class="value count"
-              type="number"
-              inputmode="numeric"
-              min="1"
-              :max="MAX_COUNT"
-              step="1"
-              aria-label="间隔"
-              :value="every.count"
+        </p>
+        <p v-if="current.error" class="fact failed">
+          上次未开始：{{ current.error }}
+        </p>
+      </div>
+      <div class="row every" role="group" aria-label="频率">
+        <span
+          >频率<small class="hint"
+            >最短 5 分钟；上一次还没结束时跳过这一次</small
+          ></span
+        >
+        <span class="interval"
+          >每<input
+            class="value count"
+            type="number"
+            inputmode="numeric"
+            min="1"
+            :max="MAX_COUNT"
+            step="1"
+            aria-label="间隔"
+            :value="every.count"
+            :disabled="busy"
+            @input="typeCount"
+            @change="setCount" /><span class="select"
+            ><select
+              class="value"
+              aria-label="单位"
+              :value="every.unit"
               :disabled="busy"
-              @input="typeCount"
-              @change="setCount" /><span class="select"
-              ><select
-                class="value"
-                aria-label="单位"
-                :value="every.unit"
-                :disabled="busy"
-                @change="setUnit"
-              >
-                <option v-for="u in units" :key="u.value" :value="u.value">
-                  {{ u.label }}
-                </option></select
-              ><ChevronIcon class="select-chevron" /></span
-          ></span>
-        </div>
-        <CaptureOptions
-          v-model="options"
-          :profiles="profiles"
-          :posts="posts"
-          :relations="listable"
-          :disabled="busy"
-        />
-      </template>
-      <p v-if="error" class="note failed" role="alert">{{ error }}</p>
+              @change="setUnit"
+            >
+              <option v-for="u in units" :key="u.value" :value="u.value">
+                {{ u.label }}
+              </option></select
+            ><ChevronIcon class="select-chevron" /></span
+        ></span>
+      </div>
+      <CaptureOptions
+        v-model="options"
+        :profiles="profiles"
+        :posts="posts"
+        :relations="listable"
+        :disabled="busy"
+      />
+    </template>
+    <p v-if="error" class="note failed" role="alert">{{ error }}</p>
+    <template #actions>
       <button
         type="button"
-        class="action strong"
+        class="action primary"
         :disabled="busy || !loaded"
         @click="save"
       >
@@ -281,11 +277,8 @@ function setUnit(event: Event) {
       >
         取消定期更新
       </button>
-    </div>
-    <button type="button" class="group action cancel" @click="emit('cancel')">
-      取消
-    </button>
-  </dialog>
+    </template>
+  </SheetDialog>
 </template>
 
 <style scoped>
@@ -296,38 +289,11 @@ function setUnit(event: Event) {
   padding-top: 12px;
   padding-bottom: 12px;
 }
-.sheet {
-  width: 100%;
-  max-width: 480px;
-  max-height: calc(100dvh - 16px);
-  margin: auto auto 0;
-  padding: 0 8px max(8px, env(safe-area-inset-bottom));
-  border: 0;
-  background: none;
-  color: var(--text);
-  overflow-y: auto;
-}
-.sheet:not([open]) {
-  display: none;
-}
-.sheet::backdrop {
-  background: rgba(0, 0, 0, 0.4);
-}
-.group {
-  width: 100%;
-  margin-top: 8px;
-  border-radius: 14px;
-  background: var(--card);
-  overflow: hidden;
-}
-.head {
-  margin: 0;
-  padding: 16px;
-  text-align: center;
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
+/* Rows start a little under the title, behind their own hairline. */
+.note-skeleton,
+.facts,
+.every:first-child {
+  margin-top: 12px;
 }
 .facts {
   padding: 10px var(--inset);
@@ -406,27 +372,5 @@ select.value {
   right: 4px;
   top: calc(50% - 12px);
   pointer-events: none;
-}
-.action {
-  display: block;
-  width: 100%;
-  min-height: 52px;
-  font-size: 17px;
-  text-align: center;
-  color: var(--link);
-  box-shadow: inset 0 1px 0 var(--separator);
-}
-.action:disabled {
-  color: var(--subtle);
-}
-.strong {
-  font-weight: 600;
-}
-.destructive {
-  color: var(--destructive);
-}
-.cancel {
-  color: var(--link);
-  box-shadow: none;
 }
 </style>

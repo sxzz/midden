@@ -40,6 +40,8 @@ export function useCollectionDetail(
   updated: (collection: Collection) => void,
 ) {
   const available = shallowRef(false)
+  /** Whether `available` has been asked of the server for this one yet. */
+  const availabilityKnown = shallowRef(false)
   const error = shallowRef('')
   const busy = shallowRef(false)
   /**
@@ -81,9 +83,11 @@ export function useCollectionDetail(
   async function checkAvailability() {
     try {
       available.value = await availability(id(), controller.signal)
+      availabilityKnown.value = true
     } catch (e) {
       if (!controller.signal.aborted) {
         available.value = false
+        availabilityKnown.value = true
         report(e)
       }
     }
@@ -116,6 +120,7 @@ export function useCollectionDetail(
       error.value = ''
       busy.value = false
       available.value = false
+      availabilityKnown.value = false
       confirmDelete.value = false
       trendable.value = false
       changeable.value = false
@@ -133,9 +138,13 @@ export function useCollectionDetail(
         if (!shareSlug.value) {
           void checkUpdate()
           available.value = await availability(id, signal)
+          availabilityKnown.value = true
         }
       } catch (e) {
-        if (!signal.aborted) error.value = errorText(e)
+        if (!signal.aborted) {
+          error.value = errorText(e)
+          availabilityKnown.value = true
+        }
       }
     },
     { immediate: true },
@@ -338,6 +347,7 @@ export function useCollectionDetail(
     loadingPoint: history.loadingPoint,
     confirmDelete,
     available,
+    availabilityKnown,
     trendable,
     changeable,
     follows,

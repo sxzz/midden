@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
-import { shallowRef, useId, useTemplateRef, watch } from 'vue'
-import { showSheet } from '../sheet-focus'
+import { shallowRef, watch } from 'vue'
+import SheetDialog from './ui/SheetDialog.vue'
 const props = defineProps<{
   open: boolean
   title: string
@@ -21,21 +21,13 @@ const props = defineProps<{
   error?: string
 }>()
 const emit = defineEmits<{ submit: [name: string]; cancel: [] }>()
-const titleId = useId()
-const dialog = useTemplateRef<HTMLDialogElement>('sheet')
 const value = shallowRef('')
 watch(
   () => props.open,
   (open) => {
-    if (open) {
-      value.value = props.name ?? ''
-      showSheet(dialog.value)
-    } else dialog.value?.close()
+    if (open) value.value = props.name ?? ''
   },
 )
-function backdrop(event: MouseEvent) {
-  if (event.target === dialog.value && !props.busy) emit('cancel')
-}
 function submit() {
   const name = value.value.trim()
   if (name && !props.busy) emit('submit', name)
@@ -43,77 +35,44 @@ function submit() {
 </script>
 
 <template>
-  <dialog
-    ref="sheet"
-    class="sheet"
-    :aria-labelledby="titleId"
-    @click="backdrop"
-    @cancel.prevent="busy || emit('cancel')"
+  <SheetDialog
+    :open="open"
+    :title="title"
+    :busy="busy"
+    :dirty="value.trim() !== (name ?? '').trim()"
+    form
+    @cancel="emit('cancel')"
+    @submit="submit"
   >
-    <form class="group" @submit.prevent="submit">
-      <p :id="titleId" class="title">{{ title }}</p>
-      <label class="field">
-        <span class="visually-hidden">{{ label ?? '名称' }}</span>
-        <input
-          v-model="value"
-          :maxlength="maxlength ?? 64"
-          autocomplete="off"
-          :inputmode="
-            url ? 'url' : numeric ? 'numeric' : decimal ? 'decimal' : undefined
-          "
-          :autocapitalize="url ? 'off' : undefined"
-          :spellcheck="url ? false : undefined"
-          :placeholder="placeholder ?? '收藏夹名称'"
-          enterkeyhint="done"
-        />
-      </label>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <button type="submit" class="action" :disabled="busy || !value.trim()">
+    <label class="field">
+      <span class="visually-hidden">{{ label ?? '名称' }}</span>
+      <input
+        v-model="value"
+        :maxlength="maxlength ?? 64"
+        autocomplete="off"
+        :inputmode="
+          url ? 'url' : numeric ? 'numeric' : decimal ? 'decimal' : undefined
+        "
+        :autocapitalize="url ? 'off' : undefined"
+        :spellcheck="url ? false : undefined"
+        :placeholder="placeholder ?? '收藏夹名称'"
+        enterkeyhint="done"
+      />
+    </label>
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <template #actions>
+      <button
+        type="submit"
+        class="action primary"
+        :disabled="busy || !value.trim()"
+      >
         {{ confirmLabel }}
       </button>
-    </form>
-    <button
-      type="button"
-      class="group action cancel"
-      :disabled="busy"
-      @click="emit('cancel')"
-    >
-      取消
-    </button>
-  </dialog>
+    </template>
+  </SheetDialog>
 </template>
 
 <style scoped>
-.sheet {
-  width: 100%;
-  max-width: 480px;
-  margin: auto auto 0;
-  padding: 0 8px max(8px, env(safe-area-inset-bottom));
-  border: 0;
-  background: none;
-  color: var(--text);
-}
-.sheet:not([open]) {
-  display: none;
-}
-.sheet::backdrop {
-  background: rgba(0, 0, 0, 0.4);
-}
-.group {
-  width: 100%;
-  margin: 8px 0 0;
-  border-radius: 14px;
-  background: var(--card);
-  overflow: hidden;
-}
-.title {
-  margin: 0;
-  padding: 16px 16px 4px;
-  text-align: center;
-  font-size: 16px;
-  font-weight: 700;
-  line-height: 1.5;
-}
 .field {
   display: block;
   padding: 12px 16px 0;
@@ -145,23 +104,5 @@ input::placeholder {
   font-size: 14px;
   line-height: 1.5;
   color: var(--destructive);
-}
-.action {
-  display: block;
-  width: 100%;
-  min-height: 52px;
-  margin-top: 16px;
-  font-size: 17px;
-  text-align: center;
-  color: var(--link);
-  box-shadow: inset 0 1px 0 var(--separator);
-}
-.action:disabled {
-  color: var(--subtle);
-}
-.cancel {
-  margin-top: 8px;
-  font-weight: 600;
-  box-shadow: none;
 }
 </style>

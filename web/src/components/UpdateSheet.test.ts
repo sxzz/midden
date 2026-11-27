@@ -47,7 +47,7 @@ async function mount(target: UpdateTarget, preview: UpdatePreview) {
   open.value = true
   await nextTick()
   await vi.waitFor(() =>
-    expect(el.querySelector('.action.strong')?.hasAttribute('disabled')).toBe(
+    expect(el.querySelector('.action.primary')?.hasAttribute('disabled')).toBe(
       false,
     ),
   )
@@ -60,7 +60,7 @@ async function mount(target: UpdateTarget, preview: UpdatePreview) {
     await nextTick()
   }
   const start = async () => {
-    el.querySelector<HTMLButtonElement>('.action.strong')!.click()
+    el.querySelector<HTMLButtonElement>('.action.primary')!.click()
     await vi.waitFor(() => expect(started).toHaveLength(1))
   }
   return { el, sent, started, label, toggle, start }
@@ -80,7 +80,7 @@ it('a folder: what it covers as the title, every option when it has profiles', a
     { target: 'folder', id: 'folder' },
     { posts: 340, profiles: 12, listable: 12, name: '猫' },
   )
-  expect(el.querySelector('.head')?.textContent).toBe(
+  expect(el.querySelector('.sheet-title')?.textContent).toBe(
     '更新 12 个账号、340 条帖子',
   )
   // The link form's options, with the same defaults.
@@ -123,7 +123,9 @@ it('posts alone have only their references; profiles without lists no 抓关系�
     { target: 'many', ids: ['a', 'b'] },
     { posts: 2, profiles: 0, listable: 0 },
   )
-  expect(posts.el.querySelector('.head')?.textContent).toBe('更新 2 条帖子')
+  expect(posts.el.querySelector('.sheet-title')?.textContent).toBe(
+    '更新 2 条帖子',
+  )
   expect(posts.label('抓帖子')).toBeUndefined()
   expect(posts.label('抓关系网')).toBeUndefined()
   await posts.toggle('采集引用、转发的原帖')

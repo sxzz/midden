@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import * as v from 'valibot'
 import { bothExtras } from '#agent/query.ts'
 import { AppError } from '#errors.ts'
+import { aggregateList } from '#agent/aggregate.ts'
 import { authorTerms } from '#library/author-terms.ts'
 import { CHANGES_WINDOW, listProfileChanges } from '#library/changes.ts'
 import { compareRelations, compareSides } from '#library/compare.ts'
@@ -45,6 +46,13 @@ const text = v.optional(v.string())
 const ListFilters = v.object({ ...FilterQuery.entries, folder: text })
 /** ... and the page to read. */
 const Filters = v.object({ ...ListFilters.entries, cursor: text })
+
+/** The list's filters, and what to count its posts by. */
+const AggregateQuery = v.object({
+  ...FilterQuery.entries,
+  by: v.string(),
+  limit: text,
+})
 
 const AuthorFilters = v.object({
   q: text,
@@ -259,6 +267,16 @@ export function libraryRoutes(ctx: AccountsContext) {
           return c.json({ items: suggest(readCtx(ctx, c), kind, prefix) })
         },
       )
+
+      // What the list holds, in buckets (the agent API's aggregate over the
+      // list's own filter): the library's sidebar shows the top hashtags
+      // and authors of the list beside it.
+      .get('/collections/aggregate', query(AggregateQuery), (c) => {
+        const { by, limit, ...input } = c.req.valid('query')
+        return c.json(
+          aggregateList(ctx.db, collectionFilter(input), { by, limit }),
+        )
+      })
 
       // Each with the term the query box writes for it (`from:@alice`)
       // when one names it alone.

@@ -604,6 +604,18 @@ describe('api', () => {
     ).toEqual({ count: 1, types: { 'fake.post': 1 } })
     for (const query of ['sort=nonsense', 'saved_within=0d'])
       expect((await call(`/collections/count?${query}`)).status).toBe(400)
+    // The list's posts in buckets, over the same filter.
+    const top = (await (
+      await call('/collections/aggregate?by=type&entity_type=fake.post')
+    ).json()) as { by: string; total: number; buckets: { key: string }[] }
+    expect(top).toMatchObject({ by: 'type', total: 1 })
+    expect(top.buckets.map((b) => b.key)).toEqual(['original'])
+    for (const query of [
+      'by=nonsense',
+      'by=author&limit=0',
+      'by=author&sort=x',
+    ])
+      expect((await call(`/collections/aggregate?${query}`)).status).toBe(400)
 
     const renamed = await send('PATCH', `/folders/${folder.id}`, {
       name: '全部帖子',

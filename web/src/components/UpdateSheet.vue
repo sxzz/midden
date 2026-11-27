@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { computed, shallowRef, useId, useTemplateRef, watch } from 'vue'
+import { computed, shallowRef, watch } from 'vue'
 import {
   call,
   client,
@@ -10,8 +10,8 @@ import {
 import { defaultOptions, optionsBody, type Options } from '../capture-options'
 import { countText, coverText } from '../captures'
 import { toast } from '../composables/useToast'
-import { showSheet } from '../sheet-focus'
 import CaptureOptions from './CaptureOptions.vue'
+import SheetDialog from './ui/SheetDialog.vue'
 import SkeletonBox from './ui/SkeletonBox.vue'
 const props = defineProps<{
   open: boolean
@@ -26,8 +26,6 @@ const emit = defineEmits<{
 }>()
 /** A list longer than this is skipped by the server (抓关系网). */
 const RELATION_LIMIT = 5000
-const titleId = useId()
-const dialog = useTemplateRef<HTMLDialogElement>('sheet')
 const preview = shallowRef<UpdatePreview>()
 const loading = shallowRef(false)
 const busy = shallowRef(false)
@@ -57,11 +55,7 @@ watch(
     if (open) {
       options.value = defaultOptions()
       void load()
-      showSheet(dialog.value)
-    } else {
-      ++request
-      dialog.value?.close()
-    }
+    } else ++request
   },
 )
 const title = computed(() => {
@@ -118,34 +112,33 @@ async function start() {
     busy.value = false
   }
 }
-function backdrop(event: MouseEvent) {
-  if (event.target === dialog.value) emit('cancel')
-}
+/** Options changed from the defaults it opened with. */
+const dirty = computed(
+  () => JSON.stringify(options.value) !== JSON.stringify(defaultOptions()),
+)
 </script>
 
 <template>
-  <dialog
-    ref="sheet"
-    class="sheet"
-    :aria-labelledby="titleId"
-    @click="backdrop"
-    @cancel.prevent="emit('cancel')"
+  <SheetDialog
+    :open="open"
+    :title="title"
+    :dirty="dirty"
+    wide
+    @cancel="emit('cancel')"
   >
-    <div class="group">
-      <p :id="titleId" class="head">{{ title }}</p>
-      <div
-        v-if="loading"
-        class="note note-skeleton"
-        role="status"
-        aria-busy="true"
-        aria-label="正在读取要更新的内容"
-      >
-        <SkeletonBox height="13px" width="64%" />
-        <SkeletonBox height="13px" width="48%" />
-        <SkeletonBox height="13px" width="56%" />
-      </div>
+    <div
+      v-if="loading"
+      class="note note-skeleton"
+      role="status"
+      aria-busy="true"
+      aria-label="正在读取要更新的内容"
+    >
+      <SkeletonBox height="13px" width="64%" />
+      <SkeletonBox height="13px" width="48%" />
+      <SkeletonBox height="13px" width="56%" />
+    </div>
+    <div v-if="preview" class="options">
       <CaptureOptions
-        v-if="preview"
         v-model="options"
         :profiles="profiles"
         :posts="posts"
@@ -153,20 +146,19 @@ function backdrop(event: MouseEvent) {
         :relations-hint="counts"
         :disabled="busy"
       />
-      <p v-if="error" class="note failed" role="alert">{{ error }}</p>
+    </div>
+    <p v-if="error" class="note failed" role="alert">{{ error }}</p>
+    <template #actions>
       <button
         type="button"
-        class="action strong"
+        class="action primary"
         :disabled="busy || !preview"
         @click="start"
       >
         {{ busy ? '正在开始…' : '开始更新' }}
       </button>
-    </div>
-    <button type="button" class="group action cancel" @click="emit('cancel')">
-      取消
-    </button>
-  </dialog>
+    </template>
+  </SheetDialog>
 </template>
 
 <style scoped>
@@ -177,38 +169,10 @@ function backdrop(event: MouseEvent) {
   padding-top: 12px;
   padding-bottom: 12px;
 }
-.sheet {
-  width: 100%;
-  max-width: 480px;
-  max-height: calc(100dvh - 16px);
-  margin: auto auto 0;
-  padding: 0 8px max(8px, env(safe-area-inset-bottom));
-  border: 0;
-  background: none;
-  color: var(--text);
-  overflow-y: auto;
-}
-.sheet:not([open]) {
-  display: none;
-}
-.sheet::backdrop {
-  background: rgba(0, 0, 0, 0.4);
-}
-.group {
-  width: 100%;
-  margin-top: 8px;
-  border-radius: 14px;
-  background: var(--card);
-  overflow: hidden;
-}
-.head {
-  margin: 0;
-  padding: 16px;
-  text-align: center;
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
+/* Rows start a little under the title, behind their own hairline. */
+.note-skeleton,
+.options {
+  margin-top: 12px;
 }
 .note {
   margin: 0;
@@ -220,24 +184,5 @@ function backdrop(event: MouseEvent) {
 }
 .note.failed {
   color: var(--destructive);
-}
-.action {
-  display: block;
-  width: 100%;
-  min-height: 52px;
-  font-size: 17px;
-  text-align: center;
-  color: var(--link);
-  box-shadow: inset 0 1px 0 var(--separator);
-}
-.action:disabled {
-  color: var(--subtle);
-}
-.strong {
-  font-weight: 600;
-}
-.cancel {
-  color: var(--link);
-  box-shadow: none;
 }
 </style>

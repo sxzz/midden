@@ -97,4 +97,10 @@ async function confirm() {
   height: 20px;
   accent-color: var(--destructive);
 }
+@media (min-width: 700px) {
+  .option {
+    justify-content: flex-start;
+    padding: 4px 16px;
+  }
+}
 </style>

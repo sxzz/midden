@@ -4,7 +4,13 @@
 // shape of a set before reading any of it. Runs on a read thread in the
 // agent lane like every read, with its timeout.
 import { sql, type SQL } from 'drizzle-orm'
-import { authorKey, postTypeSQL, wholeSelection } from '#library/list.ts'
+import { AppError } from '#errors.ts'
+import {
+  authorKey,
+  postTypeSQL,
+  wholeSelection,
+  type CollectionFilter,
+} from '#library/list.ts'
 import { list } from '#library/views.ts'
 import { parseQuery, usesKey, type QueryNode } from '#query/ast.ts'
 import { compileQuery } from '#query/compile.ts'
@@ -13,6 +19,10 @@ import { describeQuery } from '#reads/slow.ts'
 import { sees } from '#users/principal.ts'
 import { invalid } from './errors.ts'
 import { checkKeys, type AgentReader, type Params } from './query.ts'
+import type { Database } from '#db/client.ts'
+
+/** What counting needs: only the database. */
+type Counter = Pick<AgentReader, 'db'>
 
 export const AGGREGATE_BY = [
   'author',
@@ -63,7 +73,7 @@ interface Bucket {
  * `at`: one offset, or one per stretch between the zone's transitions over
  * the archive's publication times.
  */
-function offsetSQL(r: AgentReader, zone: string): SQL {
+function offsetSQL(r: Counter, zone: string): SQL {
   const span = r.db.get<{ min: number | null; max: number | null }>(
     sql`SELECT min(published_at) AS min, max(published_at) AS max FROM catalog`,
   )
@@ -168,6 +178,50 @@ export function aggregate(r: AgentReader, input: { params: Params }) {
     undefined,
     compiled?.extra,
   )
+  return {
+    parsed,
+    by,
+    ...(TIME.has(by) ? { tz: zone } : {}),
+    ...countBuckets(r, selection, by, zone, limit),
+  }
+}
+
+/**
+ * `GET /v1/collections/aggregate`: the same buckets over a list's own
+ * filter, as the web's list asks for its posts (热门话题, 常见作者 in the
+ * library's sidebar). The filter says the entity types; nothing is implied.
+ */
+export function aggregateList(
+  db: Database,
+  filter: CollectionFilter,
+  input: { by: string; limit?: string },
+) {
+  const by = input.by as AggregateBy
+  const limit =
+    input.limit === undefined ? AGGREGATE_LIMIT : Number(input.limit)
+  const zone = zoneOf(filter.timeZone ?? 'UTC')
+  if (
+    !AGGREGATE_BY.includes(by) ||
+    !LIMIT.test(input.limit ?? '1') ||
+    limit < 1 ||
+    limit > AGGREGATE_LIMIT_MAX ||
+    !zone
+  )
+    throw new AppError('invalid_request')
+  return {
+    by,
+    ...countBuckets({ db }, wholeSelection(db, filter), by, zone, limit),
+  }
+}
+
+/** What a selection holds, counted in buckets by `by`. */
+function countBuckets(
+  r: Counter,
+  selection: ReturnType<typeof wholeSelection>,
+  by: AggregateBy,
+  zone: string,
+  limit: number,
+) {
   const local = sql`(m.at + ${TIME.has(by) ? offsetSQL(r, zone) : sql`0`}) / 1000`
   // What each matched item counts under: one key, or several (tags…).
   const keyed: SQL = (() => {
@@ -293,9 +347,6 @@ export function aggregate(r: AgentReader, input: { params: Params }) {
     samples: JSON.parse(row.samples) as string[],
   }))
   return {
-    parsed,
-    by,
-    ...(TIME.has(by) ? { tz: zone } : {}),
     total,
     buckets,
     truncated: (rows[0]?.buckets ?? 0) > rows.length,
@@ -304,7 +355,7 @@ export function aggregate(r: AgentReader, input: { params: Params }) {
 
 /** Keys that are ids, as something to read: accounts and tags. */
 function labelsOf(
-  r: AgentReader,
+  r: Counter,
   by: AggregateBy,
   keys: (string | number | null)[],
 ): Map<string | number | null, { key: string | number | null }> {

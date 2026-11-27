@@ -126,6 +126,29 @@ function submit() {
   color: var(--subtle);
   font-variant-numeric: tabular-nums;
 }
+/* How far an update is, as the records' list draws it. */
+.aside-progress {
+  display: block;
+  width: 100%;
+  height: 4px;
+  margin-top: 8px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--fill);
+  accent-color: var(--link);
+  appearance: none;
+  overflow: hidden;
+}
+.aside-progress::-webkit-progress-bar {
+  background: var(--fill);
+}
+.aside-progress::-webkit-progress-value {
+  background: var(--link);
+  transition: width 300ms ease;
+}
+.aside-progress::-moz-progress-bar {
+  background: var(--link);
+}
 .aside-footer {
   display: flex;
   flex-wrap: wrap;

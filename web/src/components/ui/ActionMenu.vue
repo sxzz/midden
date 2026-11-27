@@ -14,8 +14,9 @@ import { showSheet } from '../../sheet-focus'
  * action sheet with `label` as its title. The default slot holds the
  * actions, each with the class `action` (and `destructive` for red ones)
  * and the slot's `item` bound on it, which makes it a `menuitem` in the
- * dropdown. A choice closes the dropdown at once, before its own handler
- * runs; the owner closes the sheet.
+ * dropdown; an `<hr class="separator">` parts groups of them. A choice
+ * closes the dropdown at once, before its own handler runs; the owner
+ * closes the sheet.
  */
 const props = defineProps<{
   open: boolean
@@ -315,6 +316,17 @@ function chose(event: MouseEvent) {
 .sheet :deep(.destructive),
 .dropdown :deep(.destructive) {
   color: var(--destructive);
+}
+/* A hairline between groups of actions (`<hr class="separator">`); the
+   sheet's rows are apart already. */
+.dropdown :deep(.separator) {
+  height: 1px;
+  margin: 4px 0;
+  border: 0;
+  background: var(--separator);
+}
+.sheet :deep(.separator) {
+  display: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .dropdown :deep(.action) {

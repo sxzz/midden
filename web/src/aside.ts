@@ -21,6 +21,18 @@ export interface DetailAside {
   pages: { stats: boolean; changes: boolean; follows: boolean }
   /** A profile's 定期更新: how often, and when it runs next. */
   watch?: { label: string; hint?: string }
+  /** 已公开, or the shares it is public through; the owner's only. */
+  exposure?: string
+  /**
+   * What the owner can do from the sidebar, in the page's own sheets: start
+   * an update, edit a profile's 定期更新. None behind a public link.
+   */
+  actions?: {
+    update: () => void
+    editWatch?: () => void
+    /** The update cannot start now (busy, or no capture service). */
+    disabled: boolean
+  }
 }
 
 /** The shown page's context; pages kept alive but hidden have none here. */

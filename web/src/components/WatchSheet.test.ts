@@ -91,7 +91,7 @@ async function mountSheet(target: WatchTarget, existing?: Watch) {
   open.value = true
   await nextTick()
   await vi.waitFor(() =>
-    expect(el.querySelector('.action.strong')?.hasAttribute('disabled')).toBe(
+    expect(el.querySelector('.action.primary')?.hasAttribute('disabled')).toBe(
       false,
     ),
   )
@@ -127,7 +127,7 @@ it('watches a profile every so many of a unit, with the 更新 options', async (
       target: 'collection',
       id: 'p',
     })
-  expect(el.querySelector('.head')?.textContent).toBe('定期更新 @cat')
+  expect(el.querySelector('.sheet-title')?.textContent).toBe('定期更新 @cat')
   // Every day, with the defaults of 更新.
   expect(count().value).toBe('1')
   expect(unit().value).toBe('day')
@@ -152,7 +152,7 @@ it('watches a profile every so many of a unit, with the 更新 options', async (
   await choose('帖子范围', 'until_existing')
   label('抓关系网')!.querySelector('input')!.click()
   await nextTick()
-  const save = el.querySelector<HTMLButtonElement>('.action.strong')!
+  const save = el.querySelector<HTMLButtonElement>('.action.primary')!
   expect(save.textContent?.trim()).toBe('开启定期更新')
   save.click()
   await vi.waitFor(() => expect(changed).toHaveLength(1))
@@ -200,7 +200,7 @@ it('shows and edits a watch: next run, last run, removal', async () => {
   expect(el.querySelector('.fact a')?.getAttribute('href')).toBe(
     '/captures/run',
   )
-  expect(el.querySelector('.action.strong')?.textContent?.trim()).toBe('保存')
+  expect(el.querySelector('.action.primary')?.textContent?.trim()).toBe('保存')
   el.querySelector<HTMLButtonElement>('.action.destructive')!.click()
   await vi.waitFor(() => expect(changed).toEqual([undefined]))
   expect(sent).toEqual([{ method: 'DELETE', path: '/watches/w' }])

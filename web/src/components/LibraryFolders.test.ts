@@ -279,7 +279,7 @@ it('updates the open folder from its menu, then links to the progress', async ()
   expect(el.textContent).not.toContain('查看更新进度')
   button(el, '更新收藏夹').click()
   await vi.waitFor(() =>
-    expect(el.querySelector('dialog[open] .head')?.textContent).toBe(
+    expect(el.querySelector('dialog[open] .sheet-title')?.textContent).toBe(
       '更新 3 条帖子',
     ),
   )

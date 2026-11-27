@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
-import { computed } from 'vue'
-import { safeURL, type Entity } from '../api'
+import { computed, onUnmounted, shallowRef, watch } from 'vue'
+import { call, client, safeURL, type CaptureRecord, type Entity } from '../api'
+import { recordCounts, recordProgress } from '../captures'
 import { date, storageSize } from '../presentation'
 import { accountKey, relationQuery, type Rel } from '../relation-filter'
 import {
@@ -14,8 +15,9 @@ import { collectionRoute, shareSlug } from '../share'
 import AppLink from './ui/AppLink.vue'
 import type { DetailAside } from '../aside'
 // The sidebar beside a collection's page: what the page loaded, as a
-// summary with links. A profile's relations and captures, a post's capture
-// and the posts and accounts it links to.
+// summary with links, and for the owner the update (the page's own sheets
+// open from here). A profile's relations, a post's author and the posts
+// and accounts it links to, the captures, then the pages of records.
 const props = defineProps<{ detail: DetailAside }>()
 const collection = computed(() => props.detail.collection)
 const root = computed(() =>
@@ -32,6 +34,9 @@ const followRows = [
 // Behind a public link the counts stay plain numbers and the owner's update
 // records stay out, as on the page itself.
 const shared = computed(() => !!shareSlug.value)
+const actions = computed(() =>
+  shared.value ? undefined : props.detail.actions,
+)
 const relationLink = (rel: Rel) => {
   const entity = root.value
   return !shared.value && entity && isProfileEntity(entity)
@@ -55,6 +60,10 @@ const author = computed(() => {
   if (!graph || profile.value) return undefined
   return authorIdentity(authoredBy(graph, graph.root))
 })
+const records = computed(
+  () =>
+    props.detail.pages.stats || (profile.value && props.detail.pages.changes),
+)
 const asText = (value: unknown) =>
   typeof value === 'string' && value.trim() ? value.trim() : ''
 /** A related post or account in one line, by its text or its name. */
@@ -110,6 +119,47 @@ const related = computed(() => {
   )
   return [...out, ...incoming]
 })
+
+/**
+ * The running update's record, read every few seconds for its progress
+ * while it runs; the page itself only knows that it runs.
+ */
+const running = shallowRef<CaptureRecord>()
+let timer: ReturnType<typeof setTimeout> | undefined
+let reading = 0
+async function follow() {
+  clearTimeout(timer)
+  const n = ++reading
+  const id =
+    actions.value && props.detail.updating ? props.detail.record : undefined
+  if (!id) {
+    running.value = undefined
+    return
+  }
+  if (running.value?.id !== id) running.value = undefined
+  try {
+    const found = await call(client.captures[':id'].$get({ param: { id } }))
+    if (n === reading) running.value = found
+  } catch {
+    // The bar waits for the next reading; the link still leads to it.
+  }
+  if (n === reading && !running.value?.done) timer = setTimeout(follow, 3000)
+}
+watch(
+  () => [props.detail.record, props.detail.updating, !!actions.value],
+  follow,
+  { immediate: true },
+)
+onUnmounted(() => {
+  ++reading
+  clearTimeout(timer)
+})
+const progress = computed(() =>
+  running.value ? recordProgress(running.value) : undefined,
+)
+const progressText = computed(() =>
+  running.value ? recordCounts(running.value) : '',
+)
 </script>
 
 <template>
@@ -134,14 +184,14 @@ const related = computed(() => {
           <span>{{ row.label }}</span>
         </component>
       </div>
-      <AppLink class="aside-more" :to="collectionRoute(detail.id, 'graph')"
-        >关系图谱</AppLink
-      >
       <AppLink
         v-if="detail.pages.follows"
         class="aside-more"
         :to="collectionRoute(detail.id, 'follows')"
         >关注变化</AppLink
+      >
+      <AppLink class="aside-more" :to="collectionRoute(detail.id, 'graph')"
+        >关系图谱</AppLink
       >
     </section>
     <section v-if="!profile && author" class="aside-box" aria-label="相关">
@@ -168,6 +218,32 @@ const related = computed(() => {
     </section>
     <section class="aside-box" aria-label="采集信息">
       <h2>采集</h2>
+      <!-- The owner's update: the button, then how far the running one is. -->
+      <div v-if="actions" class="update">
+        <button
+          type="button"
+          class="update-button"
+          :disabled="actions.disabled || detail.updating"
+          @click="actions.update()"
+        >
+          {{ detail.updating ? '正在更新…' : '更新' }}
+        </button>
+        <template v-if="detail.updating">
+          <progress
+            class="aside-progress"
+            :value="progress"
+            max="1"
+            aria-label="更新进度"
+          />
+          <p v-if="progressText" class="update-counts">{{ progressText }}</p>
+        </template>
+      </div>
+      <AppLink
+        v-if="detail.record && actions"
+        class="aside-more"
+        :to="{ name: 'capture', params: { id: detail.record } }"
+        >{{ detail.updating ? '查看进度' : '最近一次更新' }}</AppLink
+      >
       <dl class="facts">
         <div v-if="detail.savedAt">
           <dt>保存于</dt>
@@ -181,7 +257,26 @@ const related = computed(() => {
           <dt>占用空间</dt>
           <dd>{{ storage }}</dd>
         </div>
-        <div v-if="profile && detail.watch">
+        <!-- The owner edits it here; behind a share it is not shown. -->
+        <div v-if="profile && actions?.editWatch" class="editable">
+          <dt>定期更新</dt>
+          <dd>
+            <button
+              type="button"
+              class="edit"
+              aria-label="编辑定期更新"
+              @click="actions.editWatch()"
+            >
+              <span class="edit-text"
+                >{{ detail.watch?.label ?? '未开启'
+                }}<template v-if="detail.watch?.hint">
+                  · {{ detail.watch.hint }}</template
+                ></span
+              ><span class="edit-chevron" aria-hidden="true">›</span>
+            </button>
+          </dd>
+        </div>
+        <div v-else-if="profile && detail.watch">
           <dt>定期更新</dt>
           <dd>
             {{ detail.watch.label
@@ -189,6 +284,10 @@ const related = computed(() => {
               · {{ detail.watch.hint }}</template
             >
           </dd>
+        </div>
+        <div v-if="detail.exposure && actions">
+          <dt>公开</dt>
+          <dd :title="detail.exposure">{{ detail.exposure }}</dd>
         </div>
         <div v-if="source">
           <dt>来源</dt>
@@ -202,23 +301,27 @@ const related = computed(() => {
           {{ date(point.observed_at) }}
         </li>
       </ol>
+      <!-- Behind a share the latest update stays the owner's. -->
       <AppLink
-        v-if="detail.record && !shared"
+        v-if="detail.record && !actions && !shared"
         class="aside-more"
         :to="{ name: 'capture', params: { id: detail.record } }"
         >{{ detail.updating ? '更新中，查看进度' : '最近一次更新' }}</AppLink
       >
-      <AppLink
-        v-if="detail.pages.changes"
-        class="aside-more"
-        :to="collectionRoute(detail.id, 'changes')"
-        >资料修改记录</AppLink
-      >
+    </section>
+    <section v-if="records" class="aside-box" aria-label="记录">
+      <h2>记录</h2>
       <AppLink
         v-if="detail.pages.stats"
         class="aside-more"
         :to="collectionRoute(detail.id, 'stats')"
         >统计趋势</AppLink
+      >
+      <AppLink
+        v-if="profile && detail.pages.changes"
+        class="aside-more"
+        :to="collectionRoute(detail.id, 'changes')"
+        >资料修改记录</AppLink
       >
     </section>
   </template>
@@ -271,6 +374,29 @@ a.row:hover {
   -webkit-line-clamp: 2;
   line-clamp: 2;
 }
+.update {
+  padding: 4px 16px 8px;
+}
+/* The sidebar's one filled button, as X's 关注. */
+.update-button {
+  width: 100%;
+  min-height: 36px;
+  border-radius: 999px;
+  background: var(--primary-fill);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+.update-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary-fill) 88%, #000);
+}
+.update-counts {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--subtle);
+  font-variant-numeric: tabular-nums;
+}
 .facts {
   margin: 0;
   padding: 0 16px 8px;
@@ -283,6 +409,7 @@ a.row:hover {
   padding: 5px 0;
 }
 .facts dt {
+  flex: none;
   color: var(--subtle);
 }
 .facts dd {
@@ -293,6 +420,39 @@ a.row:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+/* 定期更新: the whole row opens its sheet. */
+.facts .editable {
+  position: relative;
+  margin: 0 -8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+}
+.facts .editable:hover {
+  background: var(--fill);
+}
+.edit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  color: var(--link);
+}
+/* The row is the button's target. */
+.edit::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+.edit-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.edit-chevron {
+  flex: none;
+  color: var(--subtle);
 }
 .points {
   margin: 0;

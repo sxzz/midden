@@ -10,6 +10,15 @@
   --link: #3390ec;
   --destructive: #df3f40;
   --separator: rgba(0, 0, 0, 0.11);
+  /* Dialogs from 700px (ui/SheetDialog.vue): a surface raised over the page
+     without dimming it, and the filled buttons in them. */
+  --raised: #ffffff;
+  --raised-fill: #ececf1;
+  --raised-border: rgba(0, 0, 0, 0.14);
+  --raised-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.18), 0 4px 14px rgba(0, 0, 0, 0.1);
+  --primary-fill: #2f80e4;
+  --destructive-fill: #d9363e;
   --radius: 10px;
   --inset: 16px;
   --gutter: 16px;
@@ -34,6 +43,13 @@
     --link: #6ab7ff;
     --destructive: #ff6a6a;
     --separator: rgba(255, 255, 255, 0.1);
+    --raised: #2a2a2d;
+    --raised-fill: #3a3a3e;
+    --raised-border: rgba(255, 255, 255, 0.16);
+    --raised-shadow:
+      0 24px 64px rgba(0, 0, 0, 0.7), 0 4px 14px rgba(0, 0, 0, 0.5);
+    --primary-fill: #2f80e4;
+    --destructive-fill: #d9363e;
     color-scheme: dark;
   }
 }
@@ -46,6 +62,11 @@
   --link: #6ab7ff;
   --destructive: #ff6a6a;
   --separator: rgba(255, 255, 255, 0.1);
+  --raised: #2a2a2d;
+  --raised-fill: #3a3a3e;
+  --raised-border: rgba(255, 255, 255, 0.16);
+  --raised-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.7), 0 4px 14px rgba(0, 0, 0, 0.5);
   color-scheme: dark;
 }
 @media (max-width: 360px) {
