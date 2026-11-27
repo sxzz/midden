@@ -254,7 +254,7 @@ test('marks the graph by a viewer account, and starts a comparison from it', asy
   // The profile itself is not offered.
   await expect(options).toHaveText(['我 @me', '别人 @other'])
   await options.filter({ hasText: '@me' }).click()
-  await page.getByRole('link', { name: '对比 2 个账号' }).click()
+  await page.getByRole('link', { name: '对比2个账号' }).click()
   await expect(page).toHaveURL(/\/compare\?/)
   const address = new URLSearchParams(page.url().split('?', 2)[1])
   expect(address.getAll('rel_of')).toEqual(['x/x.profile/100', OWN])

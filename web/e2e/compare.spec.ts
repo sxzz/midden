@@ -224,7 +224,7 @@ test('compares accounts: who follows whom, shared accounts by subset, the thresh
     })
     .toEqual([[A, B, C], 'followers', '3'])
   await expect(page.locator('.filter-summary')).toHaveText(
-    '关注 @alpha、@beta、@gamma 中至少 3 人的',
+    '关注 @alpha、@beta、@gamma 中至少3人的',
   )
 })
 
