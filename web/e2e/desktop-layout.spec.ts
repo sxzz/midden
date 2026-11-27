@@ -426,3 +426,46 @@ test.describe('a public link', () => {
     for (const href of links) expect(href).toMatch(/^\/s\//)
   })
 })
+
+/** The card's corner, by each button's or link's name, left to right. */
+const corner = (page: Page) =>
+  page
+    .locator('.card-actions > *')
+    .evaluateAll((items) =>
+      items.map(
+        (item) => item.getAttribute('aria-label') || item.textContent?.trim(),
+      ),
+    )
+
+for (const width of [390, 800])
+  test(`at ${width}px the card has 更新, 打开原文 and ⋯, 公开分享 in its menu`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockDesktop(page)
+    await page.goto(`/app/collection/${PROFILE_ID}`)
+    await expect
+      .poll(() => corner(page))
+      .toEqual(['更新', '打开原文', '更多操作'])
+    await expect(page.getByRole('link', { name: '打开原文' })).toHaveCount(1)
+    await page.getByRole('button', { name: '更多操作' }).click()
+    await expect(
+      page.getByRole('menuitem', { name: /^公开分享/ }),
+    ).toBeVisible()
+  })
+
+test('at 1280px the card has 打开原文 and ⋯, the sidebar 更新', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await mockDesktop(page)
+  await page.goto(`/app/collection/${PROFILE_ID}`)
+  await expect.poll(() => corner(page)).toEqual(['打开原文', '更多操作'])
+  await expect(
+    sidebar(page)
+      .getByRole('region', { name: '采集信息' })
+      .getByRole('button', { name: '更新', exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole('link', { name: '打开原文' })).toHaveCount(1)
+  await expect(page.getByText('打开原文 ↗')).toHaveCount(0)
+})

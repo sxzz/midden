@@ -64,8 +64,14 @@ test('charts a profile’s counts from its detail and returns to it', async ({
     return route.fulfill({ json })
   })
   await page.goto(`/collection/${profileId}`)
-  // An account with counts alone: its 历史 opens on 数据.
+  // 历史 opens on 资料, which says it has none yet; the counts are 数据.
   await page.getByRole('link', { name: '历史' }).click()
+  await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/history$`))
+  await expect(page.getByText('还没有资料变化')).toBeVisible()
+  await page
+    .getByRole('navigation', { name: '历史' })
+    .getByRole('link', { name: '数据' })
+    .click()
   await expect(page).toHaveURL(
     new RegExp(`/collection/${profileId}/history/data$`),
   )
@@ -108,6 +114,9 @@ test('charts a profile’s counts from its detail and returns to it', async ({
   await page.locator('.summary').click()
   await expect(followers.locator('.value')).toHaveText('1,300')
 
+  // Back to 资料, then to the account.
+  await page.getByRole('link', { name: '返回', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/history$`))
   await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
   await expect(page.locator('h1')).toHaveText('账号')

@@ -43,6 +43,7 @@ import AppLink from './ui/AppLink.vue'
 import CollectionSkeleton from './ui/CollectionSkeleton.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
+import Spinner from './ui/Spinner.vue'
 import UpdateSheet from './UpdateSheet.vue'
 import VideoRemovalSheet from './VideoRemovalSheet.vue'
 import WatchSheet from './WatchSheet.vue'
@@ -155,24 +156,16 @@ const changesPage = computed(
   () => isProfile.value && (changeable.value || points.value.length > 1),
 )
 /**
- * Where 历史 opens (CollectionHistory): an account on the first of its tabs
- * with anything to show, a post on its counts. None when it has nothing.
+ * Where 历史 opens (CollectionHistory): an account always on 资料, which says
+ * when it has no changes yet; a post on its counts. None when it has nothing.
  */
 const history = computed(() => {
-  if (isProfile.value && changesPage.value) return 'history'
-  if (trendable.value) return 'history-data'
-  if (isProfile.value && followChangeable.value) return 'history-follows'
-  return undefined
+  if (isProfile.value)
+    return changesPage.value || trendable.value || followChangeable.value
+      ? 'history'
+      : undefined
+  return trendable.value ? 'history-data' : undefined
 })
-/** Whether the first group lists anything; behind a share it may not. */
-const pages = computed(
-  () =>
-    trendable.value ||
-    changesPage.value ||
-    followChangeable.value ||
-    !!follows.value ||
-    !!link.value,
-)
 // Behind a public link the page only reads: no capture, notes or deletion.
 const shared = computed(() => !!shareSlug.value)
 /**
@@ -396,7 +389,7 @@ const version = computed(() =>
         </button>
       </p>
     </ListSection>
-    <ListSection :footnote="aside ? version : undefined">
+    <ListSection :footnote="version">
       <!-- The collection stays on screen while the timeline fetches a
            point, so what changed between the two reads as a change. -->
       <CollectionPost
@@ -408,9 +401,44 @@ const version = computed(() =>
         :facts-aside="sidebarShown"
         @restore="restore"
       >
-        <template v-if="!shared" #actions>
+        <!-- The card's corner at every width: 更新 when no sidebar holds it
+             (the owner's), 打开原文 (on public pages too), then ⋯. -->
+        <template #actions>
+          <template v-if="!shared && !aside">
+            <AppLink
+              v-if="updating && record"
+              class="card-pill"
+              :to="{ name: 'capture', params: { id: record } }"
+              title="更新中，查看进度"
+              aria-label="更新中，查看进度"
+              ><Spinner label="正在更新" /><span>更新中</span></AppLink
+            >
+            <button
+              v-else
+              type="button"
+              class="card-pill"
+              :disabled="busy || updating || loadingPoint || !available"
+              @click="startUpdate"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M20 11a8 8 0 0 0-14.6-4.5M4 4v4h4" />
+                <path d="M4 13a8 8 0 0 0 14.6 4.5M20 20v-4h-4" />
+              </svg>
+              <span>{{ updating ? '正在更新…' : '更新' }}</span>
+            </button>
+          </template>
           <AppLink
-            v-if="aside && link"
+            v-if="link"
             class="card-button"
             :href="link"
             aria-label="打开原文"
@@ -432,6 +460,7 @@ const version = computed(() =>
               /></svg
           ></AppLink>
           <button
+            v-if="!shared"
             type="button"
             class="card-button"
             aria-label="更多操作"
@@ -488,17 +517,16 @@ const version = computed(() =>
       />
     </ListSection>
     <template v-if="!aside">
-      <!-- The update in a group of its own, first: the button that starts
-           it and the progress of the running or latest one, over the date
-           of the version on screen. -->
-      <ListSection v-if="!shared" class="update" :footnote="version">
+      <!-- What is left of the old list: 定期更新, and 重试 when the capture
+           service is out of reach; then the pages about it. 更新, 打开原文
+           and 公开分享 are on the card. -->
+      <ListSection
+        v-if="!shared && (isProfile || !available || (record && !updating))"
+        class="update"
+      >
+        <!-- While it runs the card's 更新 leads to it; after, this does. -->
         <ListButton
-          :label="updating ? '正在更新…' : '更新'"
-          :disabled="busy || updating || loadingPoint || !available"
-          @select="startUpdate"
-        />
-        <ListButton
-          v-if="record"
+          v-if="record && !updating"
           label="查看进度"
           chevron
           :to="{ name: 'capture', params: { id: record } }"
@@ -517,11 +545,7 @@ const version = computed(() =>
           @select="checkAvailability"
         />
       </ListSection>
-      <!-- Behind a public link there is no update, so the date goes here. -->
-      <ListSection
-        v-if="pages || !shared"
-        :footnote="shared ? version : undefined"
-      >
+      <ListSection v-if="history || follows">
         <ListButton
           v-if="history"
           :label="isProfile ? '历史' : '统计趋势'"
@@ -534,14 +558,6 @@ const version = computed(() =>
           chevron
           :to="collectionRoute(id, 'graph')"
         />
-        <ListButton v-if="link" label="打开原文" :href="link" />
-        <ListButton
-          v-if="!shared"
-          label="公开分享"
-          :hint="exposureHint"
-          :trailing="sharedDirectly ? '已公开' : undefined"
-          @select="sharing = true"
-        />
       </ListSection>
     </template>
     <!-- The reader's own notes, folded. -->
@@ -552,8 +568,8 @@ const version = computed(() =>
         @saved="emit('annotationsSaved')"
       />
     </ListSection>
-    <!-- The card's ⋯: sharing beside the sidebar (the list has it
-         narrower), then the deletions, red and last. -->
+    <!-- The card's ⋯: 公开分享 (with how it is public), then the
+         deletions, red and last. -->
     <ActionMenu
       v-if="!shared"
       v-slot="{ item }"
@@ -562,17 +578,17 @@ const version = computed(() =>
       :label="isProfile ? '账号操作' : '帖子操作'"
       @cancel="menuOpen = false"
     >
-      <template v-if="aside">
-        <button
-          type="button"
-          class="action"
-          v-bind="item"
-          @click="choose(() => (sharing = true))"
-        >
-          公开分享
-        </button>
-        <hr class="separator" />
-      </template>
+      <button
+        type="button"
+        class="action"
+        v-bind="item"
+        @click="choose(() => (sharing = true))"
+      >
+        公开分享<small v-if="exposureText" class="menu-hint">{{
+          exposureText
+        }}</small>
+      </button>
+      <hr class="separator" />
       <button
         v-if="removable"
         type="button"
@@ -742,6 +758,33 @@ const version = computed(() =>
   background: var(--fill);
 }
 /* The card's corner, as X has its buttons beside a post or a profile. */
+.card-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--primary-fill);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.card-pill:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary-fill) 88%, #000);
+}
+a.card-pill {
+  border: 1px solid var(--separator);
+  background: var(--card);
+  color: var(--link);
+}
+.menu-hint {
+  display: block;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--subtle);
+}
 .card-button {
   display: grid;
   place-items: center;

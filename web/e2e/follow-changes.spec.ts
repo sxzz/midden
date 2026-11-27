@@ -208,7 +208,11 @@ test('updates a profile with its lists and lists its follow changes', async ({
   await expect(update).not.toContainText('打开原文')
   await expect(update).not.toContainText('删除这条收藏')
   await expect(update).not.toContainText('查看进度')
-  await update.getByRole('button', { name: '更新', exact: true }).click()
+  // 更新 is on the card, left of 打开原文.
+  await page
+    .locator('.card-actions')
+    .getByRole('button', { name: '更新', exact: true })
+    .click()
   const sheet = page.getByRole('dialog', { name: '更新 @owner' })
   const lists = sheet.getByRole('switch', { name: /抓关系网/ })
   await expect(lists).not.toBeChecked()
@@ -232,7 +236,7 @@ test('updates a profile with its lists and lists its follow changes', async ({
     },
   ])
   // How each part went is on the update's record.
-  await update.getByRole('link', { name: '查看进度' }).click()
+  await page.getByRole('link', { name: /查看进度/ }).click()
   await expect(page).toHaveURL(new RegExp(`/captures/${recordId}$`))
   await expect(page.locator('.summary .title')).toHaveText('更新 @owner')
   // No new posts: 账号 is the first tab, open.
@@ -270,6 +274,9 @@ test('updates a profile with its lists and lists its follow changes', async ({
   await expect.poll(() => referers.length).toBeGreaterThan(0)
   expect(referers.every((referer) => !referer)).toBe(true)
 
+  // Back through 资料 to the account.
+  await page.getByRole('link', { name: '返回', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/history$`))
   await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
 })

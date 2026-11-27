@@ -263,6 +263,7 @@ function open(line: ImageLine, asset: Asset) {
         </li>
       </ol>
     </section>
+    <p v-if="changes && !days.length" class="footnote empty">还没有资料变化</p>
     <p v-if="changes?.truncated" class="footnote">
       只比较了最近1000个版本，更早的修改未列出。
     </p>
@@ -486,6 +487,10 @@ span.post-link {
   place-items: center;
   background: rgba(0, 0, 0, 0.25);
   color: #fff;
+}
+.footnote.empty {
+  padding: 24px 4px;
+  text-align: center;
 }
 .footnote {
   margin: 0;

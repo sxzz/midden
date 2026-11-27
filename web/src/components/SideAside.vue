@@ -86,7 +86,8 @@ watch(
 const number = (n: number) => n.toLocaleString('zh-CN')
 const figures = computed(() => {
   const s = stats.data.value
-  if (!s) return []
+  // An answer without the figures (an older server) shows none.
+  if (typeof s?.posts !== 'number') return []
   return [
     { label: '帖子', value: number(s.posts) },
     { label: '账号', value: number(s.accounts) },
@@ -150,7 +151,7 @@ onUnmounted(() => {
             </div>
           </dl>
           <p class="aside-facts">
-            已用空间 {{ storageSize(stats.data.value!.used_bytes) }}
+            已用空间 {{ storageSize(stats.data.value!.used_bytes ?? 0) }}
           </p>
         </template>
       </section>

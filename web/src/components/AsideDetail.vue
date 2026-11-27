@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, onUnmounted, shallowRef, watch } from 'vue'
-import { call, client, safeURL, type CaptureRecord, type Entity } from '../api'
+import { call, client, type CaptureRecord, type Entity } from '../api'
 import { recordCounts, recordProgress } from '../captures'
 import { date, present, storageSize } from '../presentation'
 import { accountKey, relationQuery, type Rel } from '../relation-filter'
@@ -59,7 +59,6 @@ const storage = computed(() =>
     ? ''
     : storageSize(collection.value.storage_bytes),
 )
-const source = computed(() => collection.value && safeURL(collection.value.url))
 const author = computed(() => {
   const graph = collection.value?.graph
   if (!graph || profile.value) return undefined
@@ -317,12 +316,6 @@ const progressText = computed(() =>
         <div v-if="detail.exposure && actions">
           <dt>公开</dt>
           <dd :title="detail.exposure">{{ detail.exposure }}</dd>
-        </div>
-        <div v-if="source">
-          <dt>来源</dt>
-          <dd>
-            <AppLink :href="source">打开原文 ↗</AppLink>
-          </dd>
         </div>
         <div
           v-for="key in ['uid', 'uuid']"

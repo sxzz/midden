@@ -135,12 +135,10 @@ test('lists a profile’s changes from its detail and returns to it', async ({
   // page of changes.
   await expect(page.locator('.post .name')).toHaveText('合成账号')
   await expect(page.getByRole('slider')).toHaveCount(0)
-  // 更新 comes before the pages about the profile, with the date of the
-  // version under it.
+  // 定期更新 comes before the pages about the profile; the date of the
+  // version is under the card.
   const update = page.locator('.section.update')
-  await expect(update.locator('.section-footnote')).toHaveText(
-    /^最新版本抓取于 /,
-  )
+  await expect(page.locator('.section-footnote')).toHaveText(/^最新版本抓取于 /)
   await expect(
     update.locator('xpath=following-sibling::section[1]'),
   ).toContainText('历史')

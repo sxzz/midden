@@ -128,20 +128,31 @@ const button = (root: Element, text: string) =>
     (b) => b.textContent?.trim() === text,
   )!
 
-it('puts 更新 and 查看进度 in a group of their own; 更新 opens the sheet', async () => {
+/** The card's corner, by each button's name. */
+const corner = (el: HTMLElement) =>
+  [...(el.querySelector('.card-actions')?.children ?? [])].map(
+    (b) => b.getAttribute('aria-label') || b.textContent?.trim(),
+  )
+
+it("puts 更新, 打开原文 and ⋯ in the card's corner; 更新 opens the sheet", async () => {
   const { el, sent } = await mount()
   await vi.waitFor(() =>
-    expect(groups(el)).toContainEqual(['更新', '定期更新']),
+    expect(corner(el)).toEqual(['更新', '打开原文', '更多操作']),
   )
-  // Opening the original, sharing and deleting are elsewhere, and the lists
-  // are an option of the sheet, not of the page.
-  const update = el.querySelector<HTMLElement>('.update .section-body')!
-  for (const other of ['打开原文', '公开分享', '删除这条收藏']) {
-    expect(update.textContent).not.toContain(other)
-    expect(el.textContent).toContain(other)
-  }
+  // The list keeps 定期更新 and the pages; 打开原文 is once, on the card,
+  // and 公开分享 and the deletions are in its ⋯ menu.
+  expect(groups(el)).toContainEqual(['定期更新'])
+  const rows = groups(el).flat()
+  for (const other of ['更新', '打开原文', '公开分享', '删除这条收藏'])
+    expect(rows).not.toContain(other)
+  expect(el.querySelectorAll('[aria-label="打开原文"]')).toHaveLength(1)
+  const menu = [...el.querySelectorAll('button')].map((b) =>
+    b.textContent?.trim(),
+  )
+  expect(menu).toContain('公开分享')
+  expect(menu).toContain('删除这条收藏')
   expect(el.textContent).not.toContain('抓关系网')
-  button(update, '更新').click()
+  button(el.querySelector('.card-actions')!, '更新').click()
   const sheet = await vi.waitFor(() => {
     const open = el.querySelector<HTMLDialogElement>('dialog.sheet[open]')
     expect(open).not.toBeNull()
@@ -160,10 +171,13 @@ it('puts 更新 and 查看进度 in a group of their own; 更新 opens the sheet
     },
   ])
   button(sheet, '开始更新').click()
-  // The update's progress joins the same group; the button says it runs.
+  // While it runs, the button is a link to its progress.
   await vi.waitFor(() =>
-    expect(groups(el)).toContainEqual(['正在更新…', '查看进度', '定期更新']),
+    expect(corner(el)).toEqual(['更新中，查看进度', '打开原文', '更多操作']),
   )
+  expect(
+    el.querySelector('.card-actions a.card-pill')?.getAttribute('href'),
+  ).toMatch(/^\/app\/captures\//)
   expect(sent.at(-1)).toEqual({
     path: '/updates',
     body: {
@@ -182,9 +196,9 @@ it('puts 更新 and 查看进度 in a group of their own; 更新 opens the sheet
 
 it('a post opens the sheet with its references alone', async () => {
   const { el, sent } = await mount(post)
-  const update = el.querySelector<HTMLElement>('.update .section-body')!
-  await vi.waitFor(() => expect(button(update, '更新').disabled).toBe(false))
-  button(update, '更新').click()
+  const actions = () => el.querySelector<HTMLElement>('.card-actions')!
+  await vi.waitFor(() => expect(button(actions(), '更新').disabled).toBe(false))
+  button(actions(), '更新').click()
   const sheet = await vi.waitFor(() => {
     const open = el.querySelector<HTMLDialogElement>('dialog.sheet[open]')
     expect(open).not.toBeNull()
@@ -196,35 +210,22 @@ it('a post opens the sheet with its references alone', async () => {
   expect(sheet.textContent).not.toContain('抓帖子')
   expect(sheet.textContent).not.toContain('抓关系网')
   button(sheet, '开始更新').click()
-  await vi.waitFor(() =>
-    expect(groups(el)).toContainEqual(['正在更新…', '查看进度']),
-  )
+  await vi.waitFor(() => expect(corner(el)[0]).toBe('更新中，查看进度'))
   expect(sent.at(-1)).toMatchObject({
     path: '/updates',
     body: { options: { capture_references: true } },
   })
 })
 
-it('puts the update group first, the date of the version under it', async () => {
+it('puts the date of the version under the card, once', async () => {
   const { el } = await mount()
-  await vi.waitFor(() =>
-    expect(groups(el)).toContainEqual(['更新', '定期更新']),
+  await vi.waitFor(() => expect(groups(el)).toContainEqual(['定期更新']))
+  const footnotes = [...el.querySelectorAll('.section-footnote')]
+  expect(footnotes).toHaveLength(1)
+  expect(footnotes[0]!.textContent).toMatch(/^最新版本抓取于 /)
+  expect(footnotes[0]!.parentElement?.querySelector('.card-actions')).not.toBe(
+    null,
   )
-  const list = groups(el)
-  const update = list.findIndex((rows) => rows[0] === '更新')
-  const pages = list.findIndex((rows) =>
-    rows.some((row) => row?.startsWith('公开分享')),
-  )
-  expect(update).toBeGreaterThanOrEqual(0)
-  expect(pages).toBe(update + 1)
-  const sections = [...el.querySelectorAll('.section')]
-  const footnotes = sections.map((section) =>
-    section.querySelector('.section-footnote')?.textContent?.trim(),
-  )
-  expect(footnotes[sections.indexOf(el.querySelector('.update')!)]).toMatch(
-    /^最新版本抓取于 /,
-  )
-  expect(footnotes.filter(Boolean)).toHaveLength(1)
 })
 
 it('a watched profile says how often and when next; the row opens its sheet', async () => {
@@ -276,20 +277,19 @@ it('a watched profile says how often and when next; the row opens its sheet', as
 
 it('a post has no 定期更新', async () => {
   const { el } = await mount(post)
-  await vi.waitFor(() => expect(groups(el)).toContainEqual(['更新']))
+  await vi.waitFor(() => expect(corner(el)[0]).toBe('更新'))
   expect(el.textContent).not.toContain('定期更新')
 })
 
-it('shows no update group behind a public link', async () => {
+it('shows no update behind a public link, only 打开原文 on the card', async () => {
   shareSlug.value = 's'
   const { el } = await mount()
   expect(el.querySelector('.update')).toBeNull()
   expect(el.textContent).not.toContain('查看进度')
-  expect(el.textContent).toContain('打开原文')
-  // The date of the version stays, under the group of pages.
+  expect(corner(el)).toEqual(['打开原文'])
+  // The date of the version stays, under the card.
   const footnote = el.querySelector('.section-footnote')
   expect(footnote?.textContent).toMatch(/^最新版本抓取于 /)
-  expect(footnote?.parentElement?.textContent).toContain('打开原文')
 })
 
 it('links each follow count to the library under the 关系 filter', async () => {
