@@ -39,7 +39,11 @@ import {
 } from '../folders'
 import { backButton, host } from '../host'
 import { RAIL, SIDEBAR, useMedia } from '../layout'
-import { mediaRemovals } from '../media-removals'
+import {
+  mediaRemovals,
+  mediaRemoved,
+  withRemovedMedia,
+} from '../media-removals'
 import { listsProfiles, present, storageSize } from '../presentation'
 import { listQuery } from '../reads'
 import { isProfileEntity } from '../relations'
@@ -497,6 +501,26 @@ watch(mediaRemovals, () => {
     void shown.collection.load(query)
   }
   loadUsage()
+})
+// One media item removed from the viewer: it shows as removed where the lists
+// hold it, and the storage used is less. The lists are not loaded again, so
+// the page does not flash or move under the viewer.
+watch(mediaRemoved, (change) => {
+  if (!change) return
+  for (const { collection } of all)
+    collection.items.value = collection.items.value.map((item) =>
+      item.id === change.collection
+        ? withRemovedMedia(item, change.asset, change.effect)
+        : item,
+    )
+  if (usage.value)
+    usage.value = {
+      ...usage.value,
+      used_bytes: Math.max(
+        0,
+        usage.value.used_bytes - change.effect.freed_bytes,
+      ),
+    }
 })
 // Captures change what the lists hold.
 function saved() {

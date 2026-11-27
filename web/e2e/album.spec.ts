@@ -8,6 +8,9 @@ const asset = (id: string, mime = 'image/png', sensitive = false) => ({
   mime,
   sensitive,
   state: 'ready',
+  ...(mime.startsWith('video/')
+    ? { thumbnail: true, thumbnail_url: `/v1/assets/${id}-poster` }
+    : {}),
 })
 const item = (id: string, assets: ReturnType<typeof asset>[]) => ({
   id,
@@ -92,10 +95,10 @@ test('album keeps layout through filter changes and excludes other resource type
   await page.goto('/app/?layout=album&media_type=video')
   await expect(page.locator('.album button')).toHaveCount(1)
   const tile = page.locator('.album button')
-  await expect(tile.locator('video')).toHaveCSS('filter', 'blur(16px)')
+  await expect(tile.locator('img')).toHaveCSS('filter', 'blur(16px)')
   await tile.click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(tile.locator('video')).toHaveCSS('filter', 'none')
+  await expect(tile.locator('img')).toHaveCSS('filter', 'none')
   await tile.click()
   await expect(page.getByRole('dialog')).toBeVisible()
   await page.getByRole('button', { name: '关闭视频' }).click()

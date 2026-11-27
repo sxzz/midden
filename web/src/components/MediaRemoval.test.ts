@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, createVaporApp, nextTick, vaporInteropPlugin } from 'vue'
 import { toastState } from '../composables/useToast'
-import { mediaRemovals } from '../media-removals'
+import { mediaRemovals, mediaRemoved } from '../media-removals'
 import { removalEffectText } from '../presentation'
 import { shareSlug } from '../share'
 import { asset, collection, mockApi, type Request } from '../testing/api'
@@ -171,6 +171,7 @@ describe('removed media', () => {
       return { media: 1, freed_bytes: 1024, shared: 0 }
     })
     const removals = mediaRemovals.value
+    mediaRemoved.value = undefined
     const el = mountVue(MediaGallery, { assets: [photo], collection: post })
     el.querySelector<HTMLButtonElement>('.frame')!.click()
     await nextTick()
@@ -191,7 +192,14 @@ describe('removed media', () => {
         body: { collection: 'post', asset: 'p' },
       }),
     )
-    await vi.waitFor(() => expect(mediaRemovals.value).toBe(removals + 1))
+    // The pages behind it are told which item went, not to load again.
+    await vi.waitFor(() =>
+      expect(mediaRemoved.value).toMatchObject({
+        collection: 'post',
+        asset: 'p',
+      }),
+    )
+    expect(mediaRemovals.value).toBe(removals)
   })
 
   it('the viewer offers no removal without a collection or behind a link', async () => {

@@ -652,6 +652,8 @@ test('list media loads only near the viewport and leaves the API ahead', async (
       {
         id: `video-${i}`,
         url: `/v1/assets/video-${i}?inline=1`,
+        thumbnail: true,
+        thumbnail_url: `/v1/assets/poster-${i}?inline=1`,
         state: 'ready',
         mime: 'video/mp4',
         sensitive: false,
@@ -679,13 +681,15 @@ test('list media loads only near the viewport and leaves the API ahead', async (
   })
   await page.goto('/app/')
   await expect(page.locator('.row')).toHaveCount(20)
-  await expect.poll(() => requested.has('video-0')).toBe(true)
-  // Far below the fold, neither images nor videos have started.
-  expect(requested.has('video-19')).toBe(false)
+  await expect.poll(() => requested.has('poster-0')).toBe(true)
+  // Far below the fold, neither images nor posters have started.
+  expect(requested.has('poster-19')).toBe(false)
   expect(requested.has('image-19')).toBe(false)
   await page.locator('.row').last().scrollIntoViewIfNeeded()
-  await expect.poll(() => requested.has('video-19')).toBe(true)
+  await expect.poll(() => requested.has('poster-19')).toBe(true)
   await expect.poll(() => requested.has('image-19')).toBe(true)
+  // A video's file is for the viewer: no list asks for one.
+  expect([...requested].filter((name) => name.startsWith('video-'))).toEqual([])
 })
 
 test('lists show thumbnails; the open post loads the originals', async ({
@@ -757,5 +761,6 @@ test('lists show thumbnails; the open post loads the originals', async ({
   await page.locator('.row .head').click()
   await expect(page.locator('.post')).toBeVisible()
   await expect.poll(() => requested.includes('photo')).toBe(true)
-  await expect.poll(() => requested.includes('clip')).toBe(true)
+  // The post shows the clip by its poster too; its file waits for the viewer.
+  expect(requested.includes('clip')).toBe(false)
 })

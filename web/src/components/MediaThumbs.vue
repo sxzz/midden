@@ -36,9 +36,7 @@ function measure(event: Event) {
   const ratio =
     target instanceof HTMLImageElement
       ? ratioOf({ width: target.naturalWidth, height: target.naturalHeight })
-      : target instanceof HTMLVideoElement
-        ? ratioOf({ width: target.videoWidth, height: target.videoHeight })
-        : undefined
+      : undefined
   if (id && ratio && measured.value[id] !== ratio)
     measured.value = { ...measured.value, [id]: ratio }
 }
@@ -85,8 +83,10 @@ function view(asset: Asset) {
   if (hidden(asset)) reveal(asset.id)
   else selected.value = asset
 }
+// The viewer closes itself when the media it shows changes, but keeps open
+// when only what it removed is gone from them.
 watch(
-  () => [props.assets, props.showSensitive],
+  () => props.showSensitive,
   () => {
     selected.value = undefined
   },
@@ -129,7 +129,6 @@ const overflow = computed(() => media.value.length - tiles.value.length)
     ]"
     :style="{ '--preview-ratio': shape?.ratio ?? 2 }"
     @load.capture="measure"
-    @loadedmetadata.capture="measure"
   >
     <!-- While one veil covers the group, nothing beneath it may be tabbed to. -->
     <span
@@ -296,8 +295,7 @@ const overflow = computed(() => media.value.length - tiles.value.length)
   overflow: hidden;
   background: var(--fill);
 }
-.tile :deep(.image-shell),
-.tile :deep(video) {
+.tile :deep(.image-shell) {
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -305,8 +303,7 @@ const overflow = computed(() => media.value.length - tiles.value.length)
 .tile :deep(.image-shell) {
   min-height: 0;
 }
-.tile.blurred :deep(img),
-.tile.blurred :deep(video) {
+.tile.blurred :deep(img) {
   filter: blur(8px);
   transform: scale(1.2);
 }

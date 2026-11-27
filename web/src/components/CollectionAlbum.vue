@@ -9,7 +9,7 @@ import {
 } from '../relations'
 import AlbumGrid from './AlbumGrid.vue'
 import MediaViewer from './MediaViewer.vue'
-import type { Asset, Collection } from '../api'
+import type { Collection } from '../api'
 const props = defineProps<{
   items: Collection[]
   mediaTypes: string
@@ -18,6 +18,7 @@ const props = defineProps<{
   next: string
   error: string
 }>()
+const emit = defineEmits<{ more: [] }>()
 const entries = computed(() =>
   props.items.flatMap((collection) =>
     (collection.assets || [])
@@ -89,12 +90,15 @@ const tiles = computed(() =>
       !revealed.value.includes(entry.key),
   })),
 )
-// Snapshot the preview session so fetching another page doesn't interrupt it.
-const preview = shallowRef<{
-  assets: Asset[]
-  collectionIds: Record<string, string>
-  initialId: string
-}>()
+// The viewer follows the album: a page fetched while it is open adds to its
+// items, and it asks for the next one near their end.
+const preview = shallowRef<{ initialId: string }>()
+const previewAssets = computed(() => entries.value.map((entry) => entry.asset))
+const previewCollections = computed(() =>
+  Object.fromEntries(
+    entries.value.map((entry) => [entry.asset.id, entry.collectionId]),
+  ),
+)
 function select(key: string) {
   const tile = tiles.value.find((entry) => entry.key === key)
   if (!tile) return
@@ -108,13 +112,7 @@ function select(key: string) {
     revealed.value = [...new Set([...revealed.value, ...keys])]
     return
   }
-  preview.value = {
-    assets: entries.value.map((entry) => entry.asset),
-    collectionIds: Object.fromEntries(
-      entries.value.map((entry) => [entry.asset.id, entry.collectionId]),
-    ),
-    initialId: tile.asset.id,
-  }
+  preview.value = { initialId: tile.asset.id }
 }
 watch(
   () => props.showSensitive,
@@ -137,10 +135,13 @@ onDeactivated(() => {
   <AlbumGrid :tiles="tiles" :loading="loading" @select="select" />
   <MediaViewer
     v-if="preview"
-    :assets="preview?.assets || []"
+    :assets="previewAssets"
     :initial-id="preview?.initialId || ''"
-    :collection-ids="preview?.collectionIds"
+    :collection-ids="previewCollections"
     :collections="items"
+    :more="!!next"
+    :loading-more="loading"
+    @more="emit('more')"
     @close="preview = undefined"
   />
 </template>

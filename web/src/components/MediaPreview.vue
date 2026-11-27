@@ -15,10 +15,8 @@ const props = withDefaults(
   { fit: 'cover' },
 )
 const root = useTemplateRef<HTMLElement>('root')
-const video = useTemplateRef<HTMLVideoElement>('video')
 // Media shares the visitor's bandwidth with API requests, so it starts only
-// close to the viewport. Native lazy loading begins far earlier, and video
-// has no lazy loading at all: `preload` alone starts every one at once.
+// close to the viewport. Native lazy loading begins far earlier.
 const near = shallowRef(
   props.eager || typeof IntersectionObserver === 'undefined',
 )
@@ -35,21 +33,25 @@ onMounted(() => {
   )
   observer.observe(root.value)
 })
-onBeforeUnmount(() => {
-  observer?.disconnect()
-  // A removed video keeps downloading until its source is dropped.
-  const element = video.value
-  if (element) {
-    element.removeAttribute('src')
-    element.load()
-  }
-})
+onBeforeUnmount(() => observer?.disconnect())
 </script>
 
 <template>
   <span ref="root" class="media-preview" :style="{ '--media-fit': fit }">
     <span v-if="!near" class="pending" aria-hidden="true" />
-    <!-- A video's thumbnail is a still frame, so no video is fetched for it. -->
+    <!-- A video is never fetched for a preview: each one would pull the whole
+         file from storage. Its poster stands for it, or a plain box until the
+         viewer, which plays it, is opened. -->
+    <LoadingImage
+      v-else-if="asset.mime?.startsWith('video/') && asset.thumbnail_url"
+      :src="asset.thumbnail_url"
+      :alt="alt || ''"
+    />
+    <span
+      v-else-if="asset.mime?.startsWith('video/')"
+      class="pending"
+      aria-hidden="true"
+    />
     <LoadingImage
       v-else-if="thumbnail && asset.thumbnail"
       :src="previewURL(asset)"
@@ -59,15 +61,6 @@ onBeforeUnmount(() => {
       v-else-if="asset.mime?.startsWith('image/')"
       :src="assetURL(asset)"
       :alt="alt || ''"
-    />
-    <video
-      v-else-if="asset.mime?.startsWith('video/')"
-      ref="video"
-      :src="`${assetURL(asset)}#t=0.1`"
-      muted
-      playsinline
-      preload="metadata"
-      aria-hidden="true"
     />
   </span>
 </template>
@@ -80,8 +73,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   border-radius: inherit;
 }
-.media-preview :deep(.image-shell),
-.media-preview video {
+.media-preview :deep(.image-shell) {
   display: block;
   width: 100%;
   height: var(--media-height, 100%);

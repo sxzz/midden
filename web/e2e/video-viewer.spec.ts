@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { expect, test } from './test'
 import { thumb } from './viewer'
+import type { Locator, Page } from '@playwright/test'
 
 const collection = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -111,6 +112,103 @@ test('video errors remain closable and can navigate to images', async ({
   await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
+/** The key that makes an arrow switch items on a video: ⌘ on a Mac. */
+const chord = async (page: Page) =>
+  (await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.userAgent)))
+    ? 'Meta'
+    : 'Control'
+
+/**
+ * Counts the arrow keys that reach a video element, which is what its native
+ * controls seek on, and those and the seeks it made. (`currentTime` is no
+ * witness: a video that is left starts over.)
+ */
+async function watchKeys(video: Locator) {
+  await video.evaluate((v: HTMLVideoElement) => {
+    const w = globalThis as unknown as { reached: number; seeks: number }
+    w.reached = 0
+    w.seeks = 0
+    v.addEventListener('keydown', (e) => {
+      if (e.key.startsWith('Arrow')) w.reached++
+    })
+    v.addEventListener('seeking', () => w.seeks++)
+  })
+  return () =>
+    video.evaluate(() => {
+      const w = globalThis as unknown as { reached: number; seeks: number }
+      return [w.reached, w.seeks]
+    })
+}
+
+test('plain arrows switch items unless the video has focus, the chord always does', async ({
+  page,
+}) => {
+  await page.getByRole('button', { name: '播放视频' }).click()
+  const dialog = page.locator('dialog.viewer')
+  const counter = dialog.locator('.counter')
+  const video = dialog.locator('.stage video')
+  await expect(counter).toHaveText('1 / 2')
+  await expect(thumb(page, 2)).toBeEnabled()
+  await expect
+    .poll(() => video.evaluate((v: HTMLVideoElement) => v.paused))
+    .toBe(false)
+  const reached = await watchKeys(video)
+  const focusedVideo = () =>
+    page.evaluate(() => document.activeElement instanceof HTMLVideoElement)
+  // Opening does not give the video focus, so a plain arrow switches.
+  expect(await focusedVideo()).toBe(false)
+  await page.keyboard.press('ArrowRight')
+  await expect(counter).toHaveText('2 / 2')
+  await page.keyboard.press('ArrowLeft')
+  await expect(counter).toHaveText('1 / 2')
+  await expect
+    .poll(() => video.evaluate((v: HTMLVideoElement) => v.paused))
+    .toBe(false)
+  // (Both keys went by the video's own handlers without being its.)
+  expect((await reached())[1]).toBe(0)
+  // With focus on the video, a plain arrow is the player's: it reaches it,
+  // and the viewer stays.
+  await video.focus()
+  const before = (await reached())[0]!
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(async () => (await reached())[0]).toBe(before + 1)
+  await expect(counter).toHaveText('1 / 2')
+  // The chord switches all the same, and never reaches the video.
+  await page.keyboard.press(`${await chord(page)}+ArrowRight`)
+  await expect(counter).toHaveText('2 / 2')
+  expect((await reached())[0]).toBe(before + 1)
+  expect((await reached())[1]).toBe(0)
+  // The video does not keep focus for the slide that follows.
+  expect(await focusedVideo()).toBe(false)
+  await page.keyboard.press(`${await chord(page)}+ArrowLeft`)
+  await expect(counter).toHaveText('1 / 2')
+  // Over a video that has not been focused, the chord switches too.
+  await page.keyboard.press(`${await chord(page)}+ArrowRight`)
+  await expect(counter).toHaveText('2 / 2')
+  expect((await reached())[0]).toBe(before + 1)
+})
+
+test('Escape takes focus back from the video before it closes the viewer', async ({
+  page,
+}) => {
+  await page.getByRole('button', { name: '播放视频' }).click()
+  const dialog = page.locator('dialog.viewer')
+  const video = dialog.locator('.stage video')
+  await expect(thumb(page, 2)).toBeEnabled()
+  await video.focus()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeVisible()
+  expect(
+    await page.evaluate(
+      () => document.activeElement instanceof HTMLVideoElement,
+    ),
+  ).toBe(false)
+  await page.keyboard.press('ArrowRight')
+  await expect(dialog.locator('.counter')).toHaveText('2 / 2')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
 test('a clip taller than the viewer is contained and follows the viewport', async ({
   page,
 }) => {
@@ -154,9 +252,7 @@ test('detail image and video thumbnails have equal rows with uncropped media', a
     expect(Math.abs(boxes[0]!.height - boxes[1]!.height)).toBeLessThan(1)
     expect(Math.abs(boxes[0]!.top - boxes[1]!.top)).toBeLessThan(1)
     await expect(page.locator('.media img')).toHaveCSS('object-fit', 'contain')
-    await expect(page.locator('.media video')).toHaveCSS(
-      'object-fit',
-      'contain',
-    )
+    // A video shows as a box until played in the viewer, never as an element.
+    await expect(page.locator('.media video')).toHaveCount(0)
   }
 })

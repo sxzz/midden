@@ -146,8 +146,7 @@ const placeholders = 12
 .quote-author {
   font-weight: 600;
 }
-.tile :deep(.image-shell),
-.tile :deep(video) {
+.tile :deep(.image-shell) {
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -163,16 +162,13 @@ const placeholders = 12
   outline-offset: -3px;
   border-radius: 0;
 }
-.tile:active :deep(.image-shell),
-.tile:active :deep(video) {
+.tile:active :deep(.image-shell) {
   transform: scale(0.97);
 }
-.tile :deep(.image-shell),
-.tile :deep(video) {
+.tile :deep(.image-shell) {
   transition: transform 180ms cubic-bezier(0.32, 0.72, 0, 1);
 }
-.tile.blurred :deep(img),
-.tile.blurred :deep(video) {
+.tile.blurred :deep(img) {
   filter: blur(16px);
   transform: scale(1.25);
 }
@@ -203,8 +199,7 @@ const placeholders = 12
   pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .tile:active :deep(.image-shell),
-  .tile:active :deep(video) {
+  .tile:active :deep(.image-shell) {
     transform: none;
   }
 }

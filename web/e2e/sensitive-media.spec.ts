@@ -133,9 +133,15 @@ test('showing sensitive media globally covers the group again when turned off', 
 test('sensitive video thumbnails blur until revealed', async ({ page }) => {
   await serve(
     page,
-    [1, 2, 3].map((n) => ({ ...image(n, true), mime: 'video/mp4' })),
+    [1, 2, 3].map((n) => ({
+      ...image(n, true),
+      mime: 'video/mp4',
+      thumbnail: true,
+      thumbnail_url: `/v1/assets/poster-${n}`,
+    })),
   )
-  const videos = page.locator('.thumbs video')
+  // A video shows by its poster; no video element is made for a tile.
+  const videos = page.locator('.thumbs img')
   await expect(videos).toHaveCount(3)
   for (const video of await videos.all())
     await expect(video).toHaveCSS('filter', 'blur(8px)')

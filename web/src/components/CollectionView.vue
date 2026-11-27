@@ -216,6 +216,7 @@ const storage = computed(() =>
     :loading="loading"
     :next="next"
     :error="error"
+    @more="emit('more')"
   />
   <template v-else>
     <ListSection

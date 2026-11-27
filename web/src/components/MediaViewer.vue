@@ -2,6 +2,7 @@
 import PhotoSwipe from 'photoswipe'
 import {
   computed,
+  nextTick,
   onBeforeUnmount,
   onMounted,
   shallowRef,
@@ -27,7 +28,7 @@ import {
   mediaInsets,
   type Chrome,
 } from '../media-fit'
-import { mediaRemovals } from '../media-removals'
+import { mediaRemoved } from '../media-removals'
 import { navigatesHere } from '../navigation'
 import { isRemoved, present } from '../presentation'
 import { collectionHref, shareSlug } from '../share'
@@ -42,6 +43,9 @@ import 'photoswipe/style.css'
 const naturalSizes = new Map<string, { width: number; height: number }>()
 const props = defineProps<{
   assets: Asset[]
+  /** Another page of media follows `assets`; `more` asks for it. */
+  more?: boolean
+  loadingMore?: boolean
   collection?: Collection
   collections?: Collection[]
   initialId: string
@@ -49,14 +53,18 @@ const props = defineProps<{
   collectionId?: string
   collectionIds?: Record<string, string>
 }>()
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; more: [] }>()
+// What the viewer shows: the media it was given less what it removed, which
+// the parent may not yet know to have gone.
+const list = shallowRef<Asset[]>([...props.assets])
+const removedHere = new Set<string>()
 const index = shallowRef(
   Math.max(
     0,
     props.assets.findIndex((image) => image.id === props.initialId),
   ),
 )
-const selected = computed(() => props.assets[index.value])
+const selected = computed(() => list.value[index.value])
 const selectedCollection = computed(
   () =>
     selected.value &&
@@ -79,11 +87,35 @@ function askRemove() {
   menuOpen.value = false
   removing.value = true
 }
+/**
+ * The item is gone: the viewer stays on the next one (the previous one after
+ * the last), and closes only when none is left. Pages behind it show the item
+ * as removed without loading again.
+ */
 function removed(effect: RemovalEffect) {
   removing.value = false
   toast(`已删除 ${effect.media} 个媒体`)
-  mediaRemovals.value++
-  emit('close')
+  const asset = selected.value
+  const collection = selectedCollection.value
+  const slot = index.value
+  if (asset && collection) {
+    removedHere.add(asset.id)
+    mediaRemoved.value = { collection, asset: asset.id, effect }
+  }
+  const rest = list.value.filter((_, at) => at !== slot)
+  if (!rest.length || !stage.value) {
+    emit('close')
+    return
+  }
+  list.value = rest
+  index.value = Math.min(slot, rest.length - 1)
+  // Captions were measured by position.
+  captionHeights.clear()
+  rebuild(stage.value)
+  wantMore()
+  // The confirmation, and the menu that opened it, are gone: focus would be
+  // left on nothing, where keys do not reach the viewer.
+  void nextTick(() => stage.value?.focus({ preventScroll: true }))
 }
 // A slide shown before the opening animation ends never gets activated, and
 // stays blank; moving waits for the viewer to be open.
@@ -144,7 +176,7 @@ function save() {
  * travels with the media when the slides move. It is one link to the post.
  */
 function captionOf(slot: number) {
-  const item = props.assets[slot]
+  const item = list.value[slot]
   if (!item) return
   const id = props.collectionIds?.[item.id] || props.collectionId
   const source =
@@ -251,7 +283,7 @@ function stripScrolled() {
   const step = pitch()
   if (!step) return
   const slot = Math.min(
-    props.assets.length - 1,
+    list.value.length - 1,
     Math.max(0, Math.round(strip.value.scrollLeft / step)),
   )
   if (slot !== index.value) photoSwipe?.goTo(slot)
@@ -304,6 +336,18 @@ let relayout = 0
 let previousOverflow = ''
 let opener: HTMLElement | null = null
 let disposed = false
+// A viewer being replaced by another over the same media is not closing. It
+// is told apart by instance, as PhotoSwipe ends one a moment after it is told
+// to.
+const replaced = new WeakSet<PhotoSwipe>()
+function rebuild(el: HTMLElement) {
+  if (photoSwipe) {
+    replaced.add(photoSwipe)
+    photoSwipe.destroy()
+  }
+  build(el, index.value, false)
+  followStrip(false)
+}
 function close() {
   if (menuOpen.value) {
     menuOpen.value = false
@@ -319,8 +363,32 @@ function move(delta: number) {
     !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   )
 }
+// ⌘ on a Mac, Ctrl elsewhere, where ⌘ is the system's key.
+const mac = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent)
+/**
+ * ⌘←/⌘→ (Ctrl elsewhere) move to the previous or next item, on a video as
+ * well. It runs in the capture phase, ahead of the video's own controls,
+ * which would seek, and is consumed so the browser does not take it for going
+ * back in its history.
+ */
+function chord(event: KeyboardEvent) {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+  if (event.altKey || event.shiftKey) return
+  if (mac ? !event.metaKey || event.ctrlKey : !event.ctrlKey || event.metaKey)
+    return
+  event.preventDefault()
+  event.stopPropagation()
+  if (!removing.value) move(event.key === 'ArrowLeft' ? -1 : 1)
+}
 function keydown(event: KeyboardEvent) {
-  if (event.target instanceof HTMLVideoElement) return
+  if (event.target instanceof HTMLVideoElement) {
+    // Escape leaves the player's keys, a second one closes the viewer.
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      stage.value?.focus({ preventScroll: true })
+    }
+    return
+  }
   if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
     event.preventDefault()
     move(event.key === 'ArrowLeft' ? -1 : 1)
@@ -360,43 +428,95 @@ function measure(el: HTMLElement) {
   chrome = next
   return changed
 }
-onMounted(() => {
-  if (!stage.value) return
-  opener =
-    document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null
-  previousOverflow = document.body.style.overflow
-  document.body.style.overflow = 'hidden'
-  showSheet(dialog.value)
-  stage.value.addEventListener('click', captionClick)
-  // A tap anywhere but the menu and its button puts the menu away.
-  dialog.value?.addEventListener(
-    'pointerdown',
-    (event) => {
-      if (menuOpen.value && !(event.target as Element).closest('.menu, .more'))
-        menuOpen.value = false
-    },
-    true,
-  )
-  const el = stage.value
-  const assets = props.assets
-  measure(el)
-  // Slide geometry is decided in `calcSlideSize` below; these dimensions only
+/**
+ * A video holds its connection for as long as it has a source, paused or not,
+ * so only the slide on screen has one; the others show the poster.
+ */
+function startVideo(video: HTMLVideoElement) {
+  if (!video.hasAttribute('src') && video.dataset.src)
+    video.src = video.dataset.src
+}
+function stopVideo(video: HTMLVideoElement) {
+  video.pause()
+  if (!video.hasAttribute('src')) return
+  // Dropping the source and loading again is what ends the request.
+  video.removeAttribute('src')
+  video.load()
+}
+type Slide = {
+  src: string
+  type: string
+  poster?: string
+  alt: string
+  width: number
+  height: number
+}
+// What PhotoSwipe reads its slides from: one per item, then one that stands
+// for the next page while there is one.
+let source: Slide[] = []
+function slidesOf(el: HTMLElement) {
+  // Slide geometry is decided in `calcSlideSize`; these dimensions only
   // have to be non-zero for PhotoSwipe to treat the item as sized.
-  const dataSource = assets.map((image) => {
+  const width = el.clientWidth || window.innerWidth
+  const height = el.clientHeight || window.innerHeight
+  const slides: Slide[] = list.value.map((image) => {
     const video = image.mime?.startsWith('video/')
     return {
       src: assetURL(image),
       type: video ? 'video' : 'image',
+      poster: video ? image.thumbnail_url : undefined,
       alt: image.alt_text || (video ? '收藏视频' : '收藏图片'),
-      width: el.clientWidth || window.innerWidth,
-      height: el.clientHeight || window.innerHeight,
+      width,
+      height,
     }
   })
+  if (props.more) slides.push({ src: '', type: 'more', alt: '', width, height })
+  return slides
+}
+/** The next page is asked for a few items before the viewer reaches it. */
+const AHEAD = 3
+function wantMore() {
+  if (
+    props.more &&
+    !props.loadingMore &&
+    index.value >= list.value.length - 1 - AHEAD
+  )
+    emit('more')
+}
+/**
+ * The items grew, or the last page came: the slides follow without building
+ * the viewer again, so a video playing is not restarted.
+ */
+function syncSlides() {
+  const pswp = photoSwipe
+  const el = stage.value
+  if (!pswp || !el) return
+  const sentinel = source.at(-1)?.type === 'more'
+  const real = sentinel ? source.length - 1 : source.length
+  if (real === list.value.length && sentinel === !!props.more) return
+  const fresh = slidesOf(el)
+  source.length = real
+  source.push(...fresh.slice(real))
+  // The viewer waited on a page that proved to be empty.
+  if (index.value >= fresh.length) {
+    index.value = Math.max(0, fresh.length - 1)
+    rebuild(el)
+    return
+  }
+  for (const slot of [real, real + 1]) pswp.refreshSlideContent(slot)
+  wantMore()
+}
+/**
+ * The viewer over `list`, opened at `start`. Built again, without the opening
+ * animation, when a slide is removed, as PhotoSwipe keeps its slides by
+ * position and has none to take one out.
+ */
+function build(el: HTMLElement, start: number, animate: boolean) {
+  const dataSource = slidesOf(el)
+  source = dataSource
   const pswp = new PhotoSwipe({
     dataSource,
-    index: index.value,
+    index: start,
     appendToEl: el,
     // The stage is the viewport, not the window: inside a host webview the two
     // can disagree, and the stage can change size without a window resize.
@@ -418,7 +538,7 @@ onMounted(() => {
     escKey: false,
     arrowKeys: false,
     showHideAnimationType: 'fade',
-    showAnimationDuration: 180,
+    showAnimationDuration: animate ? 180 : 0,
     hideAnimationDuration: 180,
     imageClickAction: 'zoom',
     tapAction: false,
@@ -443,7 +563,7 @@ onMounted(() => {
   // for a video, the slide fills the free area and object-fit contains the
   // media inside it, so nothing is ever shown at a guessed aspect ratio.
   pswp.on('calcSlideSize', ({ slide }) => {
-    const asset = assets[slide.index]
+    const asset = list.value[slide.index]
     const size =
       slide.data.type === 'video'
         ? undefined
@@ -452,32 +572,27 @@ onMounted(() => {
     slide.height = size?.height || slide.panAreaSize.y
     slide.zoomLevels.update(slide.width, slide.height, slide.panAreaSize)
   })
-  if (typeof ResizeObserver !== 'undefined') {
-    // The stage follows the window, the host viewport and rotation; the bars
-    // follow the text shown. Either one moves the free area.
-    // Laying out again resizes what is observed (the bars follow the text
-    // lines, the slides the bars), so it waits for the next frame: inside
-    // the callback it ends the observer's loop with undelivered
-    // notifications, which the browser reports as an error.
-    resizeObserver = new ResizeObserver(() => {
-      if (relayout || disposed) return
-      relayout = requestAnimationFrame(() => {
-        relayout = 0
-        if (!disposed) pswp.updateSize(measure(el))
-      })
-    })
-    resizeObserver.observe(el)
-    if (topBar.value) resizeObserver.observe(topBar.value)
-    if (bottomBar.value) resizeObserver.observe(bottomBar.value)
-  }
   pswp.on('contentLoad', (event) => {
     const { content } = event
+    if (content.data.type === 'more') {
+      // The next page is on its way: the slide is a skeleton until it is in.
+      event.preventDefault()
+      const pending = document.createElement('div')
+      pending.className = 'more-slide skeleton'
+      pending.setAttribute('role', 'status')
+      pending.setAttribute('aria-label', '正在加载更多')
+      content.element = pending
+      content.state = 'loaded'
+      return
+    }
     if (content.data.type !== 'video') return
     event.preventDefault()
     const container = document.createElement('div')
     container.className = 'video-slide'
     const video = document.createElement('video')
-    video.src = content.data.src || ''
+    // The source is set when the slide is shown (`startVideo`).
+    video.dataset.src = content.data.src || ''
+    if (content.data.poster) video.poster = content.data.poster
     video.controls = true
     video.playsInline = true
     video.preload = 'metadata'
@@ -509,8 +624,10 @@ onMounted(() => {
   })
   pswp.on('contentActivate', ({ content }) => {
     const video = content.element?.querySelector('video')
+    if (!video) return
+    startVideo(video)
     // Only the active slide plays; native controls remain available if blocked.
-    if (video) void video.play().catch(() => {})
+    void video.play().catch(() => {})
   })
   // The caption is a child of the slide's holder, so it moves with it.
   pswp.on('afterSetContent', ({ slide }) => {
@@ -524,18 +641,17 @@ onMounted(() => {
     slide.holderElement?.querySelector(':scope > .slide-caption')?.remove()
   })
   pswp.on('contentDeactivate', ({ content }) => {
-    content.element?.querySelector('video')?.pause()
+    const video = content.element?.querySelector('video')
+    if (video) stopVideo(video)
   })
   pswp.on('contentDestroy', ({ content }) => {
     const video = content.element?.querySelector('video')
     if (!video) return
-    video.pause()
-    video.removeAttribute('src')
-    video.load()
+    stopVideo(video)
     videos.delete(video)
   })
   pswp.on('close', () => {
-    for (const video of videos) video.pause()
+    for (const video of videos) stopVideo(video)
   })
   pswp.on('openingAnimationEnd', () => {
     if (disposed) pswp.destroy()
@@ -544,6 +660,11 @@ onMounted(() => {
   pswp.on('change', () => {
     index.value = pswp.currIndex
     followStrip(true)
+    // A video focused for its controls gives arrow keys to its player, and
+    // must not keep them for a slide that is no longer shown.
+    if (document.activeElement instanceof HTMLVideoElement)
+      stage.value?.focus({ preventScroll: true })
+    wantMore()
   })
   pswp.on('afterInit', () => {
     pswp.element?.removeAttribute('role')
@@ -563,7 +684,7 @@ onMounted(() => {
   }
   pswp.on('contentLoadImage', ({ content }) => {
     const image = content.element
-    const id = assets[content.index]?.id
+    const id = list.value[content.index]?.id
     if (!(image instanceof HTMLImageElement) || !id) return
     const resolveSize = () => {
       if (disposed || !image.naturalWidth) return
@@ -592,9 +713,57 @@ onMounted(() => {
     for (const index of indices) resizeSlide(index)
   })
   pswp.on('destroy', () => {
-    if (!disposed) emit('close')
+    if (!disposed && !replaced.has(pswp)) emit('close')
   })
   pswp.init()
+}
+onMounted(() => {
+  if (!stage.value) return
+  opener =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+  previousOverflow = document.body.style.overflow
+  document.body.style.overflow = 'hidden'
+  showSheet(dialog.value)
+  stage.value.addEventListener('click', captionClick)
+  dialog.value?.addEventListener('keydown', chord, true)
+  // A tap anywhere but the menu and its button puts the menu away.
+  dialog.value?.addEventListener(
+    'pointerdown',
+    (event) => {
+      if (menuOpen.value && !(event.target as Element).closest('.menu, .more'))
+        menuOpen.value = false
+      // A click away from the player takes the arrow keys back from it.
+      if (
+        document.activeElement instanceof HTMLVideoElement &&
+        !(event.target as Element).closest('video')
+      )
+        stage.value?.focus({ preventScroll: true })
+    },
+    true,
+  )
+  const el = stage.value
+  measure(el)
+  build(el, index.value, true)
+  if (typeof ResizeObserver !== 'undefined') {
+    // The stage follows the window, the host viewport and rotation; the bars
+    // follow the text shown. Either one moves the free area.
+    // Laying out again resizes what is observed (the bars follow the text
+    // lines, the slides the bars), so it waits for the next frame: inside
+    // the callback it ends the observer's loop with undelivered
+    // notifications, which the browser reports as an error.
+    resizeObserver = new ResizeObserver(() => {
+      if (relayout || disposed) return
+      relayout = requestAnimationFrame(() => {
+        relayout = 0
+        if (!disposed) photoSwipe?.updateSize(measure(el))
+      })
+    })
+    resizeObserver.observe(el)
+    if (topBar.value) resizeObserver.observe(topBar.value)
+    if (bottomBar.value) resizeObserver.observe(bottomBar.value)
+  }
   followStrip(false)
 })
 onBeforeUnmount(() => {
@@ -612,9 +781,24 @@ onBeforeUnmount(() => {
   document.body.style.overflow = previousOverflow
   if (opener?.isConnected) opener.focus({ preventScroll: true })
 })
+// More media than were given, or less by what this viewer removed, goes on;
+// other media close it.
 watch(
-  () => props.assets,
-  () => emit('close'),
+  () => [props.assets, props.more] as const,
+  ([next]) => {
+    const kept = next.filter((asset) => !removedHere.has(asset.id))
+    if (
+      kept.length < list.value.length ||
+      !list.value.every((asset, at) => asset.id === kept[at]!.id)
+    ) {
+      emit('close')
+      return
+    }
+    if (kept.length > list.value.length) list.value = kept
+    syncSlides()
+    // A page without media of the kinds shown leaves the end as near as before.
+    wantMore()
+  },
 )
 </script>
 
@@ -652,12 +836,12 @@ watch(
         </svg>
       </button>
       <p
-        v-if="assets.length > 1"
+        v-if="list.length > 1"
         class="glass counter"
         role="status"
         aria-live="polite"
       >
-        {{ index + 1 }} / {{ assets.length }}
+        {{ Math.min(index + 1, list.length) }} / {{ list.length }}
       </p>
       <!-- One capsule of icon buttons, as in the iOS toolbar. -->
       <div class="glass actions" role="toolbar" aria-label="操作">
@@ -743,7 +927,7 @@ watch(
          thumbnails when there are several items, else just the safe area. -->
     <div ref="bottomBar" class="chrome chrome-bottom">
       <div
-        v-if="assets.length > 1"
+        v-if="list.length > 1"
         ref="strip"
         class="strip"
         role="group"
@@ -759,13 +943,13 @@ watch(
         @pointercancel="dragEnd"
       >
         <button
-          v-for="(item, slot) in assets"
+          v-for="(item, slot) in list"
           :key="item.id"
           type="button"
           class="thumb"
           :class="{ on: slot === index, removed: isRemoved(item) }"
           :disabled="!opened"
-          :aria-label="`第 ${slot + 1} 项，共 ${assets.length} 项`"
+          :aria-label="`第 ${slot + 1} 项，共 ${list.length} 项`"
           :aria-current="slot === index || undefined"
           @click="jump(slot)"
         >
@@ -855,6 +1039,10 @@ watch(
   place-items: center;
   color: var(--subtle);
 }
+.stage :deep(.more-slide) {
+  width: 100%;
+  height: 100%;
+}
 .stage :deep(.video-slide video) {
   width: 100%;
   height: 100%;
@@ -929,8 +1117,7 @@ watch(
 .thumb :deep(.media-preview) {
   height: 100%;
 }
-.thumb :deep(img),
-.thumb :deep(video) {
+.thumb :deep(img) {
   width: 100%;
   height: 100%;
   object-fit: cover;

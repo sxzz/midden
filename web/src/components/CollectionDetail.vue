@@ -19,7 +19,11 @@ import { useCollectionDetail } from '../composables/useCollectionDetail'
 import { toast } from '../composables/useToast'
 import { useVideoRemoval } from '../composables/useVideoRemoval'
 import { useWatch } from '../composables/useWatch'
-import { mediaRemovals } from '../media-removals'
+import {
+  mediaRemovals,
+  mediaRemoved,
+  withRemovedMedia,
+} from '../media-removals'
 import { date, isRemoved, present } from '../presentation'
 import { accountKey, relationQuery, type Rel } from '../relation-filter'
 import { isProfileEntity } from '../relations'
@@ -289,6 +293,12 @@ function videoRemovalStarted(removal: VideoRemoval) {
 // Media removed from the viewer, opened here or from a list.
 watch(mediaRemovals, () => {
   void reload()
+})
+// One media item removed from the viewer shows as removed in place.
+watch(mediaRemoved, (change) => {
+  const shown = collection.value
+  if (change && shown?.id === change.collection)
+    collection.value = withRemovedMedia(shown, change.asset, change.effect)
 })
 function removed(effect: RemovalEffect) {
   removal.value = undefined

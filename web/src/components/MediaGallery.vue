@@ -52,9 +52,7 @@ function measure(event: Event) {
   const ratio =
     target instanceof HTMLImageElement
       ? ratioOf({ width: target.naturalWidth, height: target.naturalHeight })
-      : target instanceof HTMLVideoElement
-        ? ratioOf({ width: target.videoWidth, height: target.videoHeight })
-        : undefined
+      : undefined
   if (id && ratio && measured.value[id] !== ratio)
     measured.value = { ...measured.value, [id]: ratio }
 }
@@ -100,12 +98,6 @@ watch(
     if (!show && selected.value?.sensitive) selected.value = undefined
   },
 )
-watch(
-  () => props.assets,
-  () => {
-    selected.value = undefined
-  },
-)
 </script>
 
 <template>
@@ -121,7 +113,6 @@ watch(
       :class="{ many: assets.length > 4 }"
       :inert="covered || undefined"
       @load.capture="measure"
-      @loadedmetadata.capture="measure"
     >
       <div
         v-for="row in rows"
@@ -313,8 +304,7 @@ watch(
 .frame .blurred {
   transform: scale(1.12);
 }
-.frame :deep(.blurred img),
-.frame :deep(.blurred video) {
+.frame :deep(.blurred img) {
   filter: blur(18px);
 }
 .play,
