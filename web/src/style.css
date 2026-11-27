@@ -145,6 +145,11 @@ blockquote,
 figcaption {
   text-wrap: pretty;
 }
+/* Japanese breaks between phrases (文節), not inside them, where the
+   browser can (Chrome 119+); archived text carries its detected lang. */
+:lang(ja) {
+  word-break: auto-phrase;
+}
 button {
   margin: 0;
   padding: 0;

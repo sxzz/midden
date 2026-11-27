@@ -83,8 +83,11 @@ test('a Japanese post and a Chinese bio carry their languages', async ({
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')
   const japanese = page.locator('.preview', { hasText: '今日は猫の日です' })
   await expect(japanese).toHaveAttribute('lang', 'ja')
+  // Japanese breaks between phrases; Chinese keeps the browser's default.
+  await expect(japanese).toHaveCSS('word-break', 'auto-phrase')
   const bio = page.locator('.preview', { hasText: '画画的' })
   await expect(bio).toHaveAttribute('lang', 'zh-Hans')
+  await expect(bio).toHaveCSS('word-break', 'normal')
   await expect(
     page.locator('.name', { hasText: '小明' }).first(),
   ).toHaveAttribute('lang', 'zh-Hans')
