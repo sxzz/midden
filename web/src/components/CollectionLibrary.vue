@@ -1152,16 +1152,16 @@ h1 {
 .folder-status button:active:not(:disabled) {
   opacity: 0.7;
 }
-/* The desktop layout (layout.ts), X's: the rail, a 600px column between
+/* The desktop layout (layout.ts), X's: the rail, the column between
    thin lines, the sidebar, centred together (App's .shell). The column's
    header stays at the top as the page scrolls. */
 @media (min-width: 700px) {
   .page {
     /* Where what sticks under the header (PageTabs) stops. */
     --page-header-height: 53px;
-    flex: 0 1 600px;
+    flex: 0 1 var(--column-width);
     min-width: 0;
-    max-width: 600px;
+    max-width: var(--column-width);
     margin: 0;
     box-shadow:
       -1px 0 0 var(--separator),
@@ -1169,8 +1169,8 @@ h1 {
   }
   /* A graph takes the sidebar's room as well. */
   .page.roomy {
-    flex-basis: 980px;
-    max-width: 980px;
+    flex-basis: var(--column-roomy-width);
+    max-width: var(--column-roomy-width);
   }
   .bar {
     position: sticky;

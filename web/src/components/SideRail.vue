@@ -60,7 +60,8 @@ const { active, links, tap } = useTabLinks()
 </template>
 
 <style scoped>
-/* The rail's widths are layout.ts's: 88px of icons, 275px with labels. */
+/* The rail's widths are layout.ts's (--rail-width): 88px of icons, 200px
+   with labels. */
 /* The rail itself sticks: it is the row's item, which the whole page's
    height can carry; a sticky element inside it could only move within the
    rail's own height. Above the column's sticky header, for the account
@@ -71,7 +72,7 @@ const { active, links, tap } = useTabLinks()
   z-index: 20;
   flex: none;
   align-self: flex-start;
-  width: 88px;
+  width: var(--rail-width);
 }
 .sticky {
   display: flex;
@@ -125,9 +126,6 @@ const { active, links, tap } = useTabLinks()
   border-radius: 999px;
 }
 @media (min-width: 1280px) {
-  .rail {
-    width: 275px;
-  }
   .sticky {
     align-items: stretch;
   }

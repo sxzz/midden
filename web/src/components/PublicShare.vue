@@ -52,7 +52,7 @@ const nested = computed(() => route.name !== 'share')
 watch(nested, (value) => backButton(value), { immediate: true })
 const standalone = !host()?.initData
 /**
- * From 700px the page is a 600px column between thin lines, and from 1000px
+ * From 700px the page is the column between thin lines, and from 1000px
  * the share's sidebar sits beside it (layout.ts); a visitor has no rail. A
  * graph takes the sidebar's room instead.
  */
@@ -246,17 +246,17 @@ h1 {
    sidebar by App's .shell. */
 @media (min-width: 700px) {
   .page {
-    flex: 0 1 600px;
+    flex: 0 1 var(--column-width);
     min-width: 0;
-    max-width: 600px;
+    max-width: var(--column-width);
     margin: 0;
     box-shadow:
       -1px 0 0 var(--separator),
       1px 0 0 var(--separator);
   }
   .page.roomy {
-    flex-basis: 980px;
-    max-width: 980px;
+    flex-basis: var(--column-roomy-width);
+    max-width: var(--column-roomy-width);
   }
   .bar {
     position: sticky;

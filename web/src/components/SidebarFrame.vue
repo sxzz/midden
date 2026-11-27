@@ -173,21 +173,15 @@ function submit() {
 
 <style scoped>
 /* 350px wide, 30px from the column, as X's; narrower until 1100px, so the
-   rail, the column and it fit from 1000px (layout.ts). */
+   rail, the column and it fit from 1000px (layout.ts, style.css). */
 /* Sticky as the row's item, as the rail (see SideRail). */
 .aside {
   position: sticky;
   top: 0;
   flex: none;
   align-self: flex-start;
-  width: 290px;
-  margin-left: 16px;
-}
-@media (min-width: 1100px) {
-  .aside {
-    width: 350px;
-    margin-left: 30px;
-  }
+  width: var(--sidebar-width);
+  margin-left: var(--sidebar-gap);
 }
 /* A long sidebar scrolls on its own, and only up and down. */
 .sticky {

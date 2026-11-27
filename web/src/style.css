@@ -81,6 +81,34 @@
     --gutter: 10px;
   }
 }
+/* The desktop layout's widths, in one place (the breakpoints are layout.ts's;
+   media queries cannot read variables). From 700px the rail of icons and
+   the column; from 1000px the sidebar beside them, narrower and closer
+   until 1100px so all three fit a 1000px window; from 1280px the rail has
+   labels, as narrow as they allow, and the column takes what that frees. */
+:root {
+  --rail-width: 88px;
+  --column-width: 600px;
+  --sidebar-width: 290px;
+  --sidebar-gap: 16px;
+  /* A page without the sidebar (the graph's) takes its room too, so the
+     rail stays where it is on every page. */
+  --column-roomy-width: calc(
+    var(--column-width) + var(--sidebar-gap) + var(--sidebar-width)
+  );
+}
+@media (min-width: 1100px) {
+  :root {
+    --sidebar-width: 350px;
+    --sidebar-gap: 30px;
+  }
+}
+@media (min-width: 1280px) {
+  :root {
+    --rail-width: 200px;
+    --column-width: 680px;
+  }
+}
 * {
   box-sizing: border-box;
 }

@@ -73,8 +73,8 @@ test('restores sort controls and opens author links in a new tab', async ({
     .toBeCloseTo(180, 0)
   await expect(page.locator('.avatar-link')).toHaveCSS('height', '40px')
   await expect(sort).toHaveValue('published')
-  // The desktop column, between the rail and the sidebar.
-  expect(await page.locator('.page').evaluate((el) => el.clientWidth)).toBe(600)
+  // The desktop column, between the rail and the sidebar: wider from 1280px.
+  expect(await page.locator('.page').evaluate((el) => el.clientWidth)).toBe(680)
   await page.screenshot({
     path: 'test-results/library-desktop.png',
     fullPage: true,

@@ -13,6 +13,9 @@ const item = (page: Page, name: string) =>
   nav(page).getByRole('link', { name, exact: true })
 const sidebar = (page: Page) =>
   page.getByRole('complementary', { name: '侧栏' })
+/** The rail with labels and the column from 1280px (style.css). */
+const RAIL = 200
+const COLUMN = 680
 /** Nothing sticks out past the window's right edge. */
 const fits = (page: Page) =>
   page.evaluate(
@@ -163,13 +166,55 @@ test.describe('from 1280px', () => {
     await expect(captures).toContainText('3次')
     await expect(captures).toContainText('173.6 MB')
     await expect(captures).toContainText(/定期更新\s*每天 · 下次/)
-    // A graph has the sidebar's room instead.
+    // A graph has the sidebar's room instead, so the rail stays put.
+    const railAt = (await rail(page).boundingBox())!.x
     await relations.getByRole('link', { name: '关系图谱' }).click()
     await expect(page.locator('h1')).toHaveText('关系图谱')
     await expect(sidebar(page)).toHaveCount(0)
     const column = await page.locator('main.page').boundingBox()
-    expect(Math.round(column!.width)).toBe(980)
+    expect(Math.round(column!.width)).toBe(COLUMN + 30 + 350)
+    expect((await rail(page).boundingBox())!.x).toBe(railAt)
   })
+})
+
+// From 1280px the rail is only as wide as its labels need, and the column
+// takes the room: the block of rail, column and sidebar stays centred.
+test.describe('the widths from 1280px', () => {
+  for (const width of [1280, 1366, 1440, 1600]) {
+    test(`at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await mockDesktop(page)
+      await page.goto('/app/')
+      await expect(sidebar(page)).toBeVisible()
+      expect(await fits(page)).toBe(true)
+      const [r, c, s] = await Promise.all(
+        [rail(page), page.locator('main.page'), sidebar(page)].map(
+          async (part) => (await part.boundingBox())!,
+        ),
+      )
+      expect(Math.round(r.width)).toBe(RAIL)
+      expect(Math.round(c.width)).toBe(COLUMN)
+      expect(Math.round(s.width)).toBe(350)
+      expect(Math.round(s.x - (c.x + c.width))).toBe(30)
+      // Centred: as much room on the left as on the right.
+      const right = await page.evaluate(
+        () => document.documentElement.clientWidth,
+      )
+      expect(Math.abs(r.x - (right - s.x - s.width))).toBeLessThanOrEqual(1)
+      // The rail's words fit it, the signed-in row cut short if need be.
+      for (const label of ['Midden', '探索', '采集', '关系', '设置'])
+        await expect(rail(page).getByText(label, { exact: true })).toBeVisible()
+      const overflow = await rail(page).evaluate(
+        (el) =>
+          [...el.querySelectorAll<HTMLElement>('.label, .lines')].filter(
+            (part) =>
+              part.getBoundingClientRect().right >
+              el.getBoundingClientRect().right,
+          ).length,
+      )
+      expect(overflow).toBe(0)
+    })
+  }
 })
 
 test.describe('at 1280px, scrolled', () => {
