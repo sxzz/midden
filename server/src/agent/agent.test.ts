@@ -419,6 +419,61 @@ describe('query language', () => {
   })
 })
 
+describe('aggregate', () => {
+  test('buckets with counts, first and last, and samples', async () => {
+    const f = await setup()
+    const { status, json } = await f.call(
+      `/aggregate?by=author&q=${encodeURIComponent('type:post')}`,
+    )
+    expect(status).toBe(200)
+    expect(json.parsed).toBe('type:post')
+    expect(json.total).toBe(4)
+    expect(json.truncated).toBe(false)
+    expect(json.buckets).toEqual([
+      {
+        key: 'fake/fake.profile/7',
+        handle: 'alice',
+        name: 'Alice',
+        count: 2,
+        first: expect.any(String),
+        last: expect.any(String),
+        samples: expect.arrayContaining([f.ids.p1, f.ids.p2]),
+      },
+      {
+        key: 'fake/fake.profile/8',
+        handle: 'bob',
+        name: 'Bob',
+        count: 2,
+        first: expect.any(String),
+        last: expect.any(String),
+        samples: expect.arrayContaining([f.ids.p3, f.ids.p4]),
+      },
+    ])
+    const types = await f.call('/aggregate?by=type&limit=1')
+    expect(types.json.total).toBe(6)
+    expect(types.json.buckets).toHaveLength(1)
+    expect(types.json.buckets[0]).toMatchObject({ key: 'original', count: 3 })
+    expect(types.json.truncated).toBe(true)
+    const months = await f.call('/aggregate?by=month&tz=Asia/Tokyo')
+    expect(months.json.tz).toBe('Asia/Tokyo')
+    expect(months.json.buckets[0].key).toMatch(/^\d{4}-\d{2}$/)
+    expect(
+      months.json.buckets.reduce(
+        (n: number, b: { count: number }) => n + b.count,
+        0,
+      ),
+    ).toBe(6)
+    for (const [path, error] of [
+      ['/aggregate', 'invalid_request'],
+      ['/aggregate?by=colour', 'invalid_request'],
+      ['/aggregate?by=day&tz=Mars/Base', 'invalid_request'],
+      ['/aggregate?by=day&limit=0', 'invalid_request'],
+      [`/aggregate?by=day&q=${encodeURIComponent('a OR')}`, 'query_invalid'],
+    ])
+      expect((await f.call(path)).json.error, path).toBe(error)
+  })
+})
+
 describe('around an account', () => {
   /** Alice follows Bob, and stopped following Carol (not saved). */
   function follows(f: AgentFixture) {

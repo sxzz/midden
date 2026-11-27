@@ -28,6 +28,7 @@ import { followCounts, listFollowChanges } from '#library/follows.ts'
 import { authorKey, listCollections } from '#library/list.ts'
 import { collectionsById, isUUID, listCounts } from '#library/read.ts'
 import { listShares } from '#library/shares.ts'
+import { aggregate } from './aggregate.ts'
 import { invalid, notFound } from './errors.ts'
 import {
   checkKeys,
@@ -662,6 +663,7 @@ function captureAccountsOf(r: AgentReader) {
 /** Every read, by name. */
 export const READS = {
   search,
+  aggregate,
   get,
   context,
   history,

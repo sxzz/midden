@@ -42,7 +42,7 @@ Anything the archive does not have is reported as `not_found` (single reads) or 
 
 ## 4. Recommended workflows
 
-1. **Search compact, read full.** Search with `GET /posts` or `GET /accounts` (compact view, 20 a page); `q` takes the query language of section 6. Pick what matters, then read it with `POST /posts/batch` (full view) before you quote or cite it. Cite posts by their `url`.
+1. **Aggregate first, then search compact, then read full.** Write the question as a query (section 6) and ask `GET /aggregate` how its results fall by month, author, hashtag…: you learn the size and shape of the set from one request. Then search with the same `q`, narrowed to what matters, with `GET /posts` or `GET /accounts` (compact view, 20 a page). Pick what matters, and read it with `POST /posts/batch` (full view) before you quote or cite it. Cite posts by their `url`.
 2. **Use folders as scopes.** `GET /folders` lists the owner's saved filters (收藏夹). Add `folder=<id>` to a search to stay inside one, and narrow it with more parameters.
 3. **An account over time.** `GET /accounts/{id}` for the profile now, `/history` for what changed in it (name, handle, bio, avatar, pinned posts, suspensions), `/metrics` for follower and post counts over time, `/relation-changes` for follows and unfollows.
 4. **Who follows whom.** `GET /accounts/{id}/relations?rel=following|followers|mutual`, then `rel_of` in a search to find posts by those accounts. Check `lists` first: relation lists may be incomplete.
@@ -165,6 +165,49 @@ Search accounts: the same parameters as `GET /posts` (no `post_type`), plus `sor
 ```
 
 Full accounts add `likes`, `media_count`, `location`, `website`, `joined`, `avatar_url`, `banner_url` and `pinned_posts` (platform ids). Counts are those of the newest capture.
+
+### GET /agent/v1/aggregate
+
+How what a query selects falls into buckets: `q` (section 6; without it, the whole archive, posts and accounts), `by` (below), `tz` (an IANA zone for the time buckets and the query's dates, default `UTC`) and `limit` (buckets, 1–1000, default 100).
+
+```
+GET /agent/v1/aggregate?by=month&tz=Asia/Tokyo&q=%23猫%20type:post%20since:2026-01-01
+```
+
+```json
+{
+  "parsed": "#猫 type:post since:2026-01-01",
+  "by": "month",
+  "tz": "Asia/Tokyo",
+  "total": 812,
+  "buckets": [
+    {
+      "key": "2026-11",
+      "count": 120,
+      "first": "2026-10-31T15:02:11.000Z",
+      "last": "2026-11-26T09:40:00.000Z",
+      "samples": ["01a2…", "01a3…", "01a7…"]
+    }
+  ],
+  "truncated": false
+}
+```
+
+| `by`                           | Bucket `key`                                                                             |
+| ------------------------------ | ---------------------------------------------------------------------------------------- |
+| `author`                       | The account key (with `handle` and `name`); an account counts under itself.              |
+| `day`, `week`, `month`         | `2026-11-26`, the Monday a week starts (`2026-11-23`), `2026-11`; in `tz`. Newest first. |
+| `hour`, `weekday`              | `0`–`23`; `1` (Monday) – `7` (Sunday); in `tz`. In that order.                           |
+| `type`                         | `original`, `quote`, `repost`, `profile` (an account).                                   |
+| `media`                        | `image`, `video`, `image+video`, `other`, `none`.                                        |
+| `tag`                          | The owner's tag name (with `id`); an account's tag counts for its posts.                 |
+| `hashtag`, `mention`, `domain` | `猫`, `x:alice`, `youtube.com`, as `#`, `mentions:` and `domain:` match them.            |
+| `lang`, `platform`             | The detected language (`und` when unknown); `x` or `instagram`.                          |
+
+- Buckets other than times are ordered by `count`, most first. `limit` keeps the first ones; `truncated` is `true` when there were more.
+- `first` and `last` are the earliest and latest publication times in the bucket (an account's is when it was captured); `samples` are up to 3 ids, newest first, to read with `POST /posts/batch` or `/accounts/batch`.
+- `total` counts what `q` selects. An item with two hashtags (tags, mentions, domains) is in two buckets, and one with none is in no bucket, so the counts need not add up to it.
+- It reads every match: on a large set, narrow `q` (dates, `from:`, a folder) if it answers `503 query_timeout`.
 
 ### GET /agent/v1/posts/{id}
 
@@ -445,7 +488,7 @@ The platform accounts the archive captures with (采集账号), never their cred
 
 ## 6. Query language
 
-`q` on `GET /posts` and `GET /accounts` is a query: bare words search the text, as plain keyword search always did, and terms such as `#tag`, `from:@alice` or `since:2026-01-01` say the rest. The other parameters (section 7) still work, and must hold too: they are ANDed with `q`. Every answer echoes `parsed`, the query as it was read, in canonical form; a cursor only continues the same `parsed` query.
+`q` on `GET /posts`, `GET /accounts` and `GET /aggregate` is a query: bare words search the text, as plain keyword search always did, and terms such as `#tag`, `from:@alice` or `since:2026-01-01` say the rest. The other parameters (section 7) still work, and must hold too: they are ANDed with `q`. Every answer echoes `parsed`, the query as it was read, in canonical form; a cursor only continues the same `parsed` query.
 
 Syntax:
 
@@ -471,13 +514,13 @@ Syntax:
 | `domain:youtube.com`                                        | Posts linking to the site: its registrable domain, so `music.youtube.com` and `www.youtube.com` are `youtube.com`.                                                                                                                              |
 | `lang:ja`                                                   | The language detected from the text: `ja`, `zh`, `ko`, `en`, `es`, `fr`, `de`, `pt`, `it`, `id`, `nl`, `tr`, `ru`, `uk`, `ar`, `fa`, `he`, `el`, `th`, `hi`. Latin-script languages are told by their small words; short posts often have none. |
 | `platform:x` `platform:instagram`                           | As `platform`.                                                                                                                                                                                                                                  |
-| `since:2026-01-01` `until:2026-02-01`                       | Published from that day on, or before that day (so these two are January), in `time_zone`, UTC by default.                                                                                                                 |
+| `since:2026-01-01` `until:2026-02-01`                       | Published from that day on, or before that day (so these two are January), in `time_zone` (`tz` for aggregate), UTC by default.                                                                                                                 |
 | `within:30d` `within:12h`                                   | Published in the last 30 days (today included) or 12 hours.                                                                                                                                                                                     |
 | `saved:2026-11-01` `saved:7d` `saved-since:` `saved-until:` | Saved by the owner on that day, in the last 7 days (or hours: `12h`), from that day on, or before it.                                                                                                                                           |
 | `tag:<name or id>`                                          | The owner's tags; an account's tag counts for its posts.                                                                                                                                                                                        |
 | `folder:<id or name>`                                       | What the folder selects. Alone at the top level, the search starts from it, as `folder=` does.                                                                                                                                                  |
 | `state:deleted` `state:suspended`                           | As `source_state`.                                                                                                                                                                                                                              |
-| `type:post` `type:profile`                                  | Posts or accounts (`/posts` and `/accounts` hold one kind already).                                                                                                                                                       |
+| `type:post` `type:profile`                                  | Posts or accounts (for `GET /aggregate`; `/posts` and `/accounts` hold one kind already).                                                                                                                                                       |
 | `sensitive:yes` `sensitive:no`                              | As `sensitive`.                                                                                                                                                                                                                                 |
 
 Limits, so that one query cannot read everything many times over: at most 16 terms; operators (AND, OR, `-`) nested at most 4 deep; at most 8 alternatives in one `OR`; values of at most 64 characters. A query of nothing but exclusions (`-#ad`) needs something to start from: a term that is not excluded, or the `author`, `tag`, `folder`, `saved_*`, `rel_of` or `related_to` parameters.

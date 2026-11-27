@@ -162,6 +162,9 @@ export function createAgentApi(o: AgentOptions) {
       return c.json(items[0])
     })
   }
+  app.get('/aggregate', async (c) =>
+    c.json(await reads.run('aggregate', { params: queries(c) })),
+  )
   app.get('/posts/:id/context', async (c) =>
     c.json(
       await reads.run('context', {

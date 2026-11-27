@@ -47,7 +47,7 @@ flowchart LR
 | `server/src/http/`      | Hono 路由与认证，`GET` 请求转到读取线程（`offload.ts`）                                                    |
 | `server/src/reads/`     | 读取线程：网页的 `GET /v1` 与 Agent API 共用的 `worker_threads` 池，各有只读连接                           |
 | `server/src/tokens/`    | API 令牌：权限、过期、轮换、撤销、按天与接口的用量计数，CLI 的 `token create`                              |
-| `server/src/agent/`     | Agent API（`/agent/v1`）：读取、并发闸门、参数与筛选、读写路由、`/agent.md`                                |
+| `server/src/agent/`     | Agent API（`/agent/v1`）：读取、并发闸门、参数与筛选、聚合、读写路由、`/agent.md`                          |
 | `server/src/query/`     | Agent API 的查询语言：Peggy 语法与生成的解析器、值与成本限制、规范形式、编译成列表的 SQL                   |
 | `server/src/usage/`     | 存储用量：R2 分析数据、本月费用、本机与数据库组成、每天的记录、提醒                                        |
 | `server/src/telegram/`  | Bot：命令、消息渲染与分段、投递、媒体发送                                                                  |
@@ -135,6 +135,10 @@ Agent API 的 `q` 是一种查询语言（语法与各项见 `docs/agent.md` 第
 - 编译（`query/compile.ts`）：只有一套引擎。列表自己的筛选（`CollectionFilter`）能表达的部分就交给它：顶层的词（和短语的词）成为 `q`，关键词搜索照旧排序和分层；`from:` 成为作者，`tag:`、`-tag:` 成为标签条件，`has:image`、`is:quote`、`saved:7d`、`rel:following:@a`、`platform:` 等也都写进筛选；所以只用这些的查询与对应的结构化参数是同一条 SQL、同一个计划（测试逐项比较两者的筛选，并核对没有多出的 SQL）。顶层单独的 `folder:` 与 `folder=` 一样作为起点，其余只能缩小它。其余的成为对 `k`（catalog）和 `l`（library）的条件，全部参数化，加在筛选的条件后面：能由索引给出一组 catalog id 的项（旁表、`from:`、标签、关注、搜索的词、`quotes:`）写成 `k.id IN (…)`，`OR` 的几项都是这样时合成 `UNION`，括号里的 AND 合成 `INTERSECT`；关于行本身的（媒体、语言、日期）是对这一行的判断；AND 中先放索引集合，再放便宜的判断，最后是昂贵的（帖子类型、收藏夹的子查询）。`-` 是 `NOT`（集合为 `NOT IN`），空值算不成立。`OR` 和 `-` 下的词是搜索命中的集合，只取前三层，不加模糊匹配。筛选拒绝的组合（同一个标签既要求又排除）整个改用 SQL 表达。
 - 翻页位置和计数缓存的键都包含规范形式（`parsed`）：Agent API 的位置在查询的指纹中加入它，列表自己的指纹也加入它。用到相对时间（`within:`、`saved:12h`）的查询不缓存计数。
 - 测试：随机生成的查询（嵌套、OR、排除、每种键）在用真实流程采集的小库上与一个逐行判断的求值器比较结果和计数；读出→打印→读出得到同一个查询；每类项的 `EXPLAIN QUERY PLAN` 用到它的索引。解析器由 Peggy（开发依赖）从 `query/grammar.peggy` 生成为 `parser.generated.ts` 并提交（`pnpm --filter @midden/server gen:query`），测试在内存中重新生成并与提交的文件比较。
+
+### 聚合
+
+`GET /agent/v1/aggregate?q=&by=&tz=&limit=`（`agent/aggregate.ts`）在读取线程的 agent 通道中运行，与其他读取一样 5 秒超时。查询的结果先物化一次，按 `by` 取每行的键（作者、日、周、月、小时、星期、类型、媒体、标签、话题、提及、域名、语言、平台；话题等一行可有几个键），分组得到数量、最早与最晚的发布时间，再用窗口函数为留下的桶各取最新的 3 个 id，一条语句。时间按 `tz` 换算：取库中发布时间的范围内这个时区的每次偏移变化，写成一个 `CASE`，所以夏令时也对。
 
 ## 删除媒体
 
