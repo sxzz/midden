@@ -27,6 +27,7 @@ test.describe('on a wide window', () => {
     await expect(
       list(page).getByRole('link', { name: /账号/ }),
     ).toHaveAttribute('aria-current', 'page')
+    await expect(pane(page, '账号')).toContainText('在这个Midden显示的昵称。')
     await expect(
       pane(page, '账号').getByRole('button', { name: /^昵称/ }),
     ).toBeVisible()

@@ -329,7 +329,7 @@ test.describe('the admin', () => {
     // From the account's menu.
     await page.goto('/settings/admin')
     await expect(
-      page.getByRole('link', { name: '用户', exact: true }),
+      page.getByRole('link', { name: /^用户\s*查看者、邀请与备注/ }),
     ).toBeVisible()
     await page.getByRole('button', { name: '账号菜单' }).click()
     await expect(page.getByRole('menuitem')).toHaveText([

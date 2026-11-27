@@ -13,15 +13,13 @@ export interface SettingsSection {
   value: string
   label: string
   hint: string
-  /** What a search finds it by besides its label and hint, never shown. */
-  keywords?: string
   entries?: readonly SettingsEntry[]
   /** The admin's alone (`can.admin`): a viewer has no such section. */
   admin?: boolean
 }
 
 export const settingsSections: readonly SettingsSection[] = [
-  { value: 'account', label: '账号', hint: '', keywords: '昵称' },
+  { value: 'account', label: '账号', hint: '在这个Midden显示的昵称。' },
   {
     value: 'passkeys',
     label: '通行密钥',
@@ -49,7 +47,7 @@ export const settingsSections: readonly SettingsSection[] = [
       {
         value: 'users',
         label: '用户',
-        hint: '',
+        hint: '查看者、邀请与备注',
         icon: 'users',
       },
       {
@@ -110,11 +108,10 @@ export function searchSettings(
   sections: readonly SettingsSection[] = settingsSections,
 ) {
   const q = query.trim().toLowerCase()
-  const has = (item: { label: string; hint: string; keywords?: string }) =>
+  const has = (item: { label: string; hint: string }) =>
     !q ||
     item.label.toLowerCase().includes(q) ||
-    item.hint.toLowerCase().includes(q) ||
-    !!item.keywords?.toLowerCase().includes(q)
+    item.hint.toLowerCase().includes(q)
   return {
     sections: sections.filter(has),
     entries: q

@@ -109,6 +109,7 @@ describe('设置', () => {
     await settle()
     expect(el.textContent).toContain('整个服务的设置。')
     expect(links(el)).toMatchObject({
+      '用户查看者、邀请与备注›': '/settings/admin/users',
       '域名可以打开网页、用通行密钥登录的地址›': '/settings/admin/origins',
       '存储用量媒体、原始响应与数据库占用的空间›': '/settings/admin/storage',
       '后台任务队列、暂停与限流›': '/settings/admin/jobs',
