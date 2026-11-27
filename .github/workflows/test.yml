@@ -15,6 +15,7 @@ jobs:
       - run: node scripts/prepare-web-assets.ts
         env:
           MIDDEN_MEDIA_URL: https://media.example.com
+          MIDDEN_WEB_HOSTNAME: web.example.com
       - run: pnpm --filter @midden/web exec wrangler deploy --dry-run
   e2e:
     runs-on: ubuntu-24.04

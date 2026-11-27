@@ -3,6 +3,11 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vitest/config'
+import {
+  PROFILE_PATH,
+  PROFILE_TYPE,
+  webClipProfile,
+} from '../scripts/web-clip.ts'
 import type { Plugin } from 'vite'
 const require = createRequire(import.meta.url)
 const vueRequire = createRequire(require.resolve('vue/package.json'))
@@ -60,9 +65,25 @@ function agentDoc(): Plugin {
     },
   }
 }
+// iOS's home screen profile (scripts/web-clip.ts), for the address the dev
+// server is opened at, so 添加到桌面 can be tried from a phone. The deploy
+// writes its own for the web app's host (scripts/prepare-web-assets.ts).
+function webClip(): Plugin {
+  return {
+    name: 'midden:web-clip',
+    configureServer(server) {
+      server.middlewares.use(PROFILE_PATH, (req, res) => {
+        const proto =
+          req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http'
+        res.setHeader('Content-Type', PROFILE_TYPE)
+        res.end(webClipProfile(`${proto}://${req.headers.host}`))
+      })
+    },
+  }
+}
 
 export default defineConfig({
-  plugins: [vue(), agentDoc()],
+  plugins: [vue(), agentDoc(), webClip()],
   optimizeDeps: {
     // The dev server's scan starts from index.html and never reaches a
     // worker's imports. Found later, they make Vite re-bundle and reload

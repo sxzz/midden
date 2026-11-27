@@ -2,6 +2,7 @@
 import { computed, shallowRef } from 'vue'
 import { useRoute } from 'vue-router'
 import { call, client, errorText } from '../api'
+import { PROFILE_PATH, useInstall } from '../composables/useInstall'
 import { toast } from '../composables/useToast'
 import { host } from '../host'
 import { RAIL, SIDEBAR, useMedia } from '../layout'
@@ -70,6 +71,9 @@ const about = buildFacts(__BUILD_VERSION__, __BUILD_TIME__)
 const browser = !host()?.initData
 const busy = shallowRef(false)
 const naming = shallowRef(false)
+// Chrome's install prompt, or iOS Safari's home screen profile.
+const { way: installWay, install } = useInstall()
+const INSTALL_HINT = '在桌面或主屏幕上放一个Midden图标'
 async function logout() {
   busy.value = true
   try {
@@ -309,6 +313,29 @@ async function logout() {
             <span class="value">{{ currentUser().name }}</span>
             <span class="chevron" aria-hidden="true">›</span>
           </button>
+          <button
+            v-if="installWay === 'prompt'"
+            type="button"
+            class="fact"
+            @click="install"
+          >
+            <span class="name"
+              >添加到桌面<small class="fact-hint">{{
+                INSTALL_HINT
+              }}</small></span
+            >
+          </button>
+          <a
+            v-else-if="installWay === 'profile'"
+            class="fact"
+            :href="PROFILE_PATH"
+          >
+            <span class="name"
+              >添加到桌面<small class="fact-hint">{{
+                INSTALL_HINT
+              }}</small></span
+            >
+          </a>
         </ListSection>
         <PasskeyList v-else-if="section.value === 'passkeys'" bare />
         <ApiTokens v-else-if="section.value === 'tokens'" bare />
@@ -562,6 +589,13 @@ mark {
 .name {
   flex: 1;
   min-width: 0;
+}
+.fact-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--subtle);
 }
 .value {
   flex-shrink: 0;

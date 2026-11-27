@@ -7,6 +7,7 @@ it('writes route paths under the app and reads them back', () => {
   expect(appPath('/settings/admin?x=1')).toBe('/settings/admin?x=1')
   expect(appPath('https://example.test/')).toBeUndefined()
   expect(appPath('/agent.md')).toBeUndefined()
+  expect(appPath('/midden.mobileconfig')).toBeUndefined()
 })
 
 it('leaves the server’s own paths and other sites to the browser', () => {

@@ -10,9 +10,11 @@ const LEADING_SLASH = /^\//
 const OLD_PASSKEY = /^\/passkey\/([\w-]+)$/
 /**
  * Paths under the base that are not the app's: the API's, when it shares the
- * app's host, and the agent guide; `//host` is another site.
+ * app's host, the agent guide and iOS's home screen profile; `//host` is
+ * another site.
  */
-const NOT_APP = /^\/(?:\/|(?:v1|agent|media)(?:[/?#]|$)|agent\.md(?:[?#]|$))/
+const NOT_APP =
+  /^\/(?:\/|(?:v1|agent|media)(?:[/?#]|$)|(?:agent\.md|midden\.mobileconfig)(?:[?#]|$))/
 
 /** The address of a route path (`/captures`), as a link writes it. */
 export function appHref(path: string) {
