@@ -52,7 +52,7 @@ for (const width of [1000, 1440]) {
   test.describe(`a small icon button at ${width}px`, () => {
     test.use({ viewport: { width, height: 800 } })
 
-    test('beside the account, not set as a tab', async ({ page }) => {
+    test('above the account, not set as a tab', async ({ page }) => {
       await mockDesktop(page)
       await page.goto('/')
       const toggle = rail(page).getByRole('button', {
@@ -66,17 +66,13 @@ for (const width of [1000, 1440]) {
       const tab = (await rail(page)
         .getByRole('link', { name: '设置' })
         .boundingBox())!
-      // Below the tabs, in the account's corner: above the avatar while
-      // the rail is icons only, level with it once the rail has labels.
+      // Below the tabs, on its own line directly above the avatar and
+      // centred on it, at every rail width: the account row keeps its width.
       expect(box.y).toBeGreaterThan(tab.y + tab.height)
-      if (width >= 1280) {
-        expect(
-          Math.abs(box.y + box.height / 2 - (avatar.y + avatar.height / 2)),
-        ).toBeLessThan(2)
-        expect(box.x).toBeGreaterThan(avatar.x + avatar.width)
-      } else {
-        expect(box.y + box.height).toBeLessThanOrEqual(avatar.y)
-      }
+      expect(box.y + box.height).toBeLessThanOrEqual(avatar.y)
+      expect(
+        Math.abs(box.x + box.width / 2 - (avatar.x + avatar.width / 2)),
+      ).toBeLessThan(2)
     })
   })
 }

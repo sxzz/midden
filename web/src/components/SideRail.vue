@@ -139,9 +139,9 @@ const theme = computed(() => {
   margin: 2px 0 4px;
 }
 /* Who is signed in, at the rail's foot, with the theme as a small icon
-   button: above the avatar while the rail is icons only, at the end of
-   the account row once it has labels. A secondary control, so not set as
-   the tabs. */
+   button on its own line above the avatar, at every rail width, so the
+   account row keeps its whole width for the name. A secondary control, so
+   not set as the tabs. */
 .foot {
   display: flex;
   flex-direction: column;
@@ -204,12 +204,17 @@ const theme = computed(() => {
     align-items: flex-start;
   }
   .foot {
-    flex-direction: row-reverse;
+    align-items: stretch;
     align-self: stretch;
   }
   .foot > :deep(.who) {
-    flex: 1;
     min-width: 0;
+  }
+  /* Centred on the avatar's column: RailUser's 10px padding plus half its
+     40px avatar, less half of this 36px button. */
+  .theme {
+    align-self: flex-start;
+    margin-left: 12px;
   }
   .logo,
   .item {
