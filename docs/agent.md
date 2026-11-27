@@ -591,6 +591,8 @@ Capture a link: `{"url": "https://x.com/alice/status/1861…", "options": {"capt
 }
 ```
 
+An X profile link by handle (`https://x.com/alice`) is saved under the account's numeric id: when the archive does not know whose the handle is yet, it is identified first, and until then the answer has no `collection_id` and the record (same `record_id` throughout) is `queued`; one no lookup identifies ends `failed`.
+
 `400 invalid_request` for an unsupported link; `422 unprocessable` when the platform needs a capture account the owner has not added.
 
 ### POST /agent/v1/updates
