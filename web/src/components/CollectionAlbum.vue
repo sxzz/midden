@@ -17,8 +17,10 @@ const props = defineProps<{
   loading: boolean
   next: string
   error: string
+  /** Selected posts while the album is selecting; tiles then toggle them. */
+  selected?: string[]
 }>()
-const emit = defineEmits<{ more: [] }>()
+const emit = defineEmits<{ more: []; toggle: [id: string] }>()
 const entries = computed(() =>
   props.items.flatMap((collection) =>
     (collection.assets || [])
@@ -97,6 +99,7 @@ const tiles = computed(() =>
       !!entry.asset.sensitive &&
       !props.showSensitive &&
       !revealed.value.includes(entry.key),
+    selected: props.selected?.includes(entry.collectionId),
   })),
 )
 // The viewer follows the album: a page fetched while it is open adds to its
@@ -111,6 +114,10 @@ const previewCollections = computed(() =>
 function select(key: string) {
   const tile = tiles.value.find((entry) => entry.key === key)
   if (!tile) return
+  if (props.selected) {
+    emit('toggle', tile.collectionId)
+    return
+  }
   if (tile.hidden) {
     const group = entries.value.filter(
       (entry) => entry.collectionId === tile.collectionId,

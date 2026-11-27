@@ -1,4 +1,4 @@
-import { expect, test } from './test'
+import { expect, test, type Page } from './test'
 const item = (n: number) => ({
   id: `11111111-1111-4111-8111-11111111111${n}`,
   url: `https://example.test/post/${n}`,
@@ -149,4 +149,66 @@ test("delete a selection, with the accounts' posts only when asked", async ({
     { ids, with_posts: true, preview: true },
     { ids, with_posts: true, preview: false },
   ])
+})
+
+async function mockList(page: Page) {
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path === '/v1/session') return r.fulfill({ json: {} })
+    if (path === '/v1/usage') return r.fulfill({ json: { used_bytes: 0 } })
+    if (path === '/v1/collections') return r.fulfill({ json: { items } })
+    return r.fulfill({ json: { items: [] } })
+  })
+}
+
+test('Esc leaves 多选, but the query box and the ⋯ menu keep their own', async ({
+  page,
+}) => {
+  await mockList(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: '多选' }).click()
+  const bar = page.getByRole('region', { name: '多选' })
+  await page.getByRole('checkbox', { name: /作者1/ }).click()
+  await page.getByRole('checkbox', { name: /作者2/ }).click()
+  await expect(bar.getByText('已选2项')).toBeVisible()
+  // The ⋯ menu, opened with a mouse, drops down; Esc closes it alone.
+  await bar.getByRole('button', { name: '更多操作' }).click()
+  const menu = page.getByRole('menu', { name: '已选2项' })
+  await expect(menu).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(menu).toBeHidden()
+  await expect(bar.getByText('已选2项')).toBeVisible()
+  // In the query box, Esc is the box's.
+  const box = page.getByRole('combobox', { name: '搜索或筛选' })
+  await box.focus()
+  await box.press('Escape')
+  await expect(bar.getByText('已选2项')).toBeVisible()
+  await box.blur()
+  await page.keyboard.press('Escape')
+  await expect(bar).toHaveCount(0)
+  await expect(page.getByRole('checkbox')).toHaveCount(0)
+  // The next 多选 starts empty.
+  await page.getByRole('button', { name: '多选' }).click()
+  await expect(bar.getByText('已选0项')).toBeVisible()
+})
+
+test.describe('by touch', () => {
+  test.use({ hasTouch: true })
+
+  test('Esc on the ⋯ sheet closes only the sheet', async ({ page }) => {
+    await mockList(page)
+    await page.goto('/')
+    await page.getByRole('button', { name: '多选' }).tap()
+    const bar = page.getByRole('region', { name: '多选' })
+    await page.getByRole('checkbox', { name: /作者1/ }).tap()
+    await bar.getByRole('button', { name: '更多操作' }).tap()
+    const sheet = page.getByRole('dialog')
+    await expect(sheet).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(sheet).toHaveCount(0)
+    await expect(bar.getByText('已选1项')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(bar).toHaveCount(0)
+  })
 })

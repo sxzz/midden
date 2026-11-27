@@ -7,6 +7,8 @@ export type AlbumTile = {
   key: string
   asset: Asset
   hidden: boolean
+  /** Set while the album is selecting: the tile's post is selected. */
+  selected?: boolean
   caption?: {
     labels: string
     text: string
@@ -22,6 +24,9 @@ defineProps<{ tiles: AlbumTile[]; loading?: boolean }>()
 const emit = defineEmits<{ select: [key: string] }>()
 const isVideo = (asset: Asset) => !!asset.mime?.startsWith('video/')
 function label(tile: AlbumTile) {
+  // A checkbox's name says what it is; its state says the rest.
+  if (tile.selected !== undefined)
+    return tile.hidden ? '敏感内容' : isVideo(tile.asset) ? '视频' : '图片'
   if (tile.hidden) return '敏感内容，点按显示'
   return isVideo(tile.asset) ? '播放视频' : '放大图片'
 }
@@ -36,8 +41,14 @@ const placeholders = 12
       :key="tile.key"
       type="button"
       class="tile"
-      :class="{ blurred: tile.hidden }"
+      :class="{
+        blurred: tile.hidden,
+        selectable: tile.selected !== undefined,
+        selected: tile.selected,
+      }"
       :data-key="tile.key"
+      :role="tile.selected !== undefined ? 'checkbox' : undefined"
+      :aria-checked="tile.selected"
       :aria-label="label(tile)"
       @click="emit('select', tile.key)"
     >
@@ -51,6 +62,20 @@ const placeholders = 12
         <span v-if="tile.hidden" class="veil" aria-hidden="true"
           ><EyeIcon
         /></span>
+        <span
+          v-if="tile.selected !== undefined"
+          class="check"
+          aria-hidden="true"
+          ><svg v-if="tile.selected" viewBox="0 0 24 24" width="14" height="14">
+            <path
+              d="m5 12.5 4.5 4.5L19 7.5"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            /></svg
+        ></span>
       </span>
       <span
         v-if="tile.caption"
@@ -210,6 +235,27 @@ const placeholders = 12
 .play svg {
   width: 100%;
   height: 100%;
+}
+/* The feed row's check (CollectionRow), with a ring and shade that hold on
+   any media. */
+.check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.2);
+  box-shadow:
+    inset 0 0 0 1.5px #fff,
+    0 1px 3px rgba(0, 0, 0, 0.35);
+  color: #fff;
+  pointer-events: none;
+}
+.selected .check {
+  background: var(--link);
 }
 .veil {
   position: absolute;

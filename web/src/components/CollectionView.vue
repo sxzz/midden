@@ -85,8 +85,9 @@ function changeLayout(value: 'feed' | 'album') {
   else q.delete('layout')
   emit('search', q.toString())
 }
-// Selection is a mode of the feed: rows toggle instead of opening. The batch
-// bar outlasts it, to link to the batch once started.
+// Selection is a mode of the list, in either layout: rows and tiles toggle
+// instead of opening. The batch bar outlasts it, to link to the batch once
+// started.
 const selecting = shallowRef(false)
 const batch = shallowRef(0)
 const selected = shallowRef<string[]>([])
@@ -105,12 +106,42 @@ function startSelecting() {
   selected.value = []
   selecting.value = true
   batch.value++
-  if (layout.value === 'album') changeLayout('feed')
 }
 function closeBatch() {
   selecting.value = false
   batch.value = 0
+  selected.value = []
 }
+// Esc leaves 多选 as 取消 does, unless something on top or a text field
+// takes it: menus and sheets close themselves, the query box its list.
+function escape(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || event.defaultPrevented || !batch.value) return
+  const target = event.target
+  if (
+    target instanceof HTMLElement &&
+    (target.isContentEditable ||
+      target.matches(
+        'textarea, select, input:not([type="checkbox"], [type="radio"], [type="button"], [type="submit"], [type="reset"])',
+      ))
+  )
+    return
+  // Closed dropdowns and dialogs stay in the page, unrendered.
+  const layers = document.querySelectorAll(
+    'dialog, [popover], [role="menu"], [role="dialog"]',
+  )
+  if ([...layers].some((el) => el.getClientRects().length)) return
+  closeBatch()
+}
+// On window, after what listens on the document (menus, popovers) had it;
+// only while the bar shows on the page in view.
+function listenEscape(on: boolean) {
+  if (on) addEventListener('keydown', escape)
+  else removeEventListener('keydown', escape)
+}
+watch(batch, (shown) => listenEscape(!!shown))
+onActivated(() => listenEscape(!!batch.value))
+onDeactivated(() => listenEscape(false))
+onUnmounted(() => listenEscape(false))
 // The 多选 bar takes the bottom bar's place while it shows, on this page.
 const barKey = `selection:${useId()}`
 watch(batch, (shown) => suppressTabBar(barKey, !!shown))
@@ -241,7 +272,9 @@ const storage = computed(() =>
     :loading="loading"
     :next="next"
     :error="error"
+    :selected="selecting ? selected : undefined"
     @more="emit('more')"
+    @toggle="toggle"
   />
   <template v-else>
     <ListSection
