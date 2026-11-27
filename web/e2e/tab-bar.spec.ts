@@ -133,7 +133,7 @@ test('moves between the three tabs, lighting the one shown', async ({
   await expect(page).toHaveURL(/\/app\/relations\?of=x\/x\.profile\/1$/)
   await expect(tab(page, '关系')).toHaveAttribute('aria-current', 'page')
   await expect(page.getByRole('button', { name: /互关/ })).toBeVisible()
-  expect(graphs).toEqual([OWN])
+  await expect.poll(() => graphs).toEqual([OWN])
   // Another centre from the picker.
   await page.getByRole('group', { name: '显示方式' }).waitFor()
   await page.locator('summary', { hasText: '中心' }).click()
@@ -243,7 +243,7 @@ test('关系 shows only the picker without relation data', async ({ page }) => {
   await expect(page.locator('summary', { hasText: '中心' })).toBeVisible()
   await expect(page).toHaveURL(/\/app\/relations$/)
   await expect(page.locator('.graph-page')).toHaveCount(0)
-  expect(graphs).toEqual([])
+  await expect.poll(() => graphs).toEqual([])
 })
 
 test('a public link has no bottom bar', async ({ page }) => {
