@@ -109,21 +109,47 @@ describe('removed media', () => {
     expect(restore).toHaveBeenCalledWith(removedVideo)
   })
 
-  it('offers no restore on a public page, nor once restored', () => {
-    let el = mountVue(MediaGallery, {
+  it('offers no restore on a public page', () => {
+    const el = mountVue(MediaGallery, {
       assets: [{ ...removedVideo, kind: 'image' }],
       collection: post,
     })
     expect(el.textContent).toContain('图片已移除')
-    expect(buttons(el, '恢复下载')).toHaveLength(0)
-    unmount()
-    el = mountVue(MediaGallery, {
-      assets: [{ ...removedVideo, download_again: true }],
+    expect(el.querySelectorAll('button.restore')).toHaveLength(0)
+  })
+
+  it('names the restore by whether the original is still stored', () => {
+    const el = mountVue(MediaGallery, {
+      assets: [
+        { ...removedVideo, recoverable: true },
+        { ...removedVideo, id: 'w' },
+        { ...removedVideo, id: 'x', download_again: true },
+        { ...removedVideo, id: 'y', restore_error: '媒体服务器拒绝了请求' },
+      ],
       collection: post,
       editable: true,
     })
-    expect(buttons(el, '恢复下载')).toHaveLength(0)
-    expect(el.textContent).toContain('下次更新时重新下载')
+    expect(
+      [...el.querySelectorAll('button.restore')].map((b) =>
+        b.textContent?.trim(),
+      ),
+    ).toEqual(['恢复', '恢复下载', '恢复下载', '恢复下载'])
+    expect(el.textContent).toContain('无法重新下载：媒体服务器拒绝了请求')
+    expect(el.textContent).not.toContain('下次更新时重新下载')
+  })
+
+  it('shows 下载中 over the kept thumbnail while it downloads again', () => {
+    const el = mountVue(MediaGallery, {
+      assets: [{ ...removedVideo, state: 'pending', restoring: true }],
+      collection: post,
+      editable: true,
+    })
+    expect(el.querySelector('.removed img')?.getAttribute('src')).toBe(
+      '/media/thumb',
+    )
+    expect(el.querySelector('[role="status"]')?.textContent).toBe('下载中')
+    expect(el.querySelectorAll('button.restore')).toHaveLength(0)
+    expect(el.textContent).not.toContain('媒体保存中')
   })
 
   it('stays in list thumbnails, linking to the collection', async () => {
@@ -192,23 +218,28 @@ describe('removed media', () => {
   })
 })
 
-/** The detail page against an API that records what it is sent. */
-async function mountDetail(shown: Collection) {
+/**
+ * The detail page against an API that records what it is sent; `shown`
+ * answers each read of the collection.
+ */
+async function mountDetail(shown: Collection | (() => Collection)) {
   const sent: { path: string; body?: unknown }[] = []
+  const read = typeof shown === 'function' ? shown : () => shown
+  let restored: unknown
   mockApi((path, request: Request) => {
     if (request.method === 'POST')
       sent.push({
         path,
         ...(request.body ? { body: JSON.parse(request.body) } : {}),
       })
-    if (path === '/collections/post') return shown
+    if (path === '/collections/post') return read()
     if (path.endsWith('/availability')) return { available: true }
     if (path === '/collections/post/update') return { older: false }
     if (path === '/media-removals/preview')
       return { media: 2, freed_bytes: 3 * 1024 * 1024, shared: 0 }
     if (path === '/media-removals')
       return { media: 2, freed_bytes: 3 * 1024 * 1024, shared: 0 }
-    if (path === '/media-removals/restore') return
+    if (path === '/media-removals/restore') return restored
     if (path === '/updates') return { id: 'record' }
     if (path.startsWith('/shares')) return []
     if (path.endsWith('/annotation')) return { tags: [], note: '' }
@@ -224,7 +255,12 @@ async function mountDetail(shown: Collection) {
   app.mount(el)
   unmount = () => app.unmount()
   await vi.waitFor(() => expect(el.textContent).toContain('合成帖子'))
-  return { el, sent }
+  return {
+    el,
+    sent,
+    /** What a restore answers. */
+    restores: (answer: unknown) => (restored = answer),
+  }
 }
 
 describe('the post detail', () => {
@@ -252,17 +288,56 @@ describe('the post detail', () => {
     expect(buttons(el, '删除此帖所有媒体')).toHaveLength(0)
   })
 
-  it('restores a removed item and updates the post at once', async () => {
-    const { el, sent } = await mountDetail(post)
+  it('restores an item still stored at once, capturing nothing', async () => {
+    let restored = false
+    const { el, sent, restores } = await mountDetail(() =>
+      restored
+        ? { ...post, assets: [{ ...photo, id: 'v' }, photo] }
+        : { ...post, assets: [{ ...removedVideo, recoverable: true }, photo] },
+    )
+    restores({ state: 'ready' })
+    restored = true
+    buttons(el, '恢复')[0]!.click()
+    await vi.waitFor(() => expect(el.querySelector('.removed')).toBeNull())
+    expect(sent).toEqual([
+      {
+        path: '/media-removals/restore',
+        body: { collection: 'post', asset: 'v' },
+      },
+    ])
+    expect(toastState.value?.text).not.toBe('已恢复下载')
+  })
+
+  it('shows an item downloading again until it is in', async () => {
+    let reads = 0
+    let restored = false
+    const restoring = {
+      ...post,
+      assets: [
+        { ...removedVideo, state: 'pending', restoring: true as const },
+        photo,
+      ],
+    }
+    const ready = { ...post, assets: [{ ...photo, id: 'v' }, photo] }
+    const { el, sent, restores } = await mountDetail(() => {
+      if (!restored) return post
+      // Read again after the restore, it is still downloading.
+      return ++reads > 1 ? ready : restoring
+    })
+    restores({ state: 'downloading', job: 7 })
+    restored = true
     buttons(el, '恢复下载')[0]!.click()
     await vi.waitFor(() =>
-      expect(sent.map((s) => s.path)).toEqual([
-        '/media-removals/restore',
-        '/updates',
-      ]),
+      expect(el.querySelector('[role="status"]')?.textContent).toBe('下载中'),
     )
-    expect(sent[0]!.body).toEqual({ collection: 'post', asset: 'v' })
-  })
+    expect(el.querySelector('.removed img')?.getAttribute('src')).toBe(
+      '/media/thumb',
+    )
+    await vi.waitFor(() => expect(el.querySelector('.removed')).toBeNull(), {
+      timeout: 5000,
+    })
+    expect(sent.map((s) => s.path)).toEqual(['/media-removals/restore'])
+  }, 10_000)
 })
 
 describe('the profile detail', () => {
@@ -291,6 +366,38 @@ describe('the profile detail', () => {
     kept: { listed: 0, saved: 2, annotated: 1, quoted: 0 },
     elsewhere: 0,
   }
+
+  it('restores its media as a post does, with no update to wait for', async () => {
+    const sent: string[] = []
+    mockApi((path, request: Request) => {
+      if (request.method === 'POST') sent.push(path)
+      if (path === '/collections/profile')
+        return { ...profile, assets: [removedVideo] }
+      if (path.endsWith('/availability')) return { available: true }
+      if (path === '/collections/profile/update') return { older: false }
+      if (path === '/collections/profile/video-removal') return {}
+      if (path === '/media-removals/restore')
+        return { state: 'downloading', job: 1 }
+      if (path.startsWith('/shares')) return []
+      if (path.endsWith('/annotation')) return { tags: [], note: '' }
+      if (path.startsWith('/tags')) return []
+      if (path.includes('/collections?') || path.includes('/history'))
+        return { items: [] }
+      return {}
+    })
+    toastState.value = undefined
+    const el = document.createElement('div')
+    document.body.append(el)
+    const app = createVaporApp(CollectionDetail, { id: 'profile' })
+    app.mount(el)
+    unmount = () => app.unmount()
+    await vi.waitFor(() => expect(buttons(el, '恢复下载')).toHaveLength(1))
+    buttons(el, '恢复下载')[0]!.click()
+    await vi.waitFor(() => expect(sent).toEqual(['/media-removals/restore']))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(sent).toEqual(['/media-removals/restore'])
+    expect(toastState.value).toBeUndefined()
+  })
 
   it('removes all of its videos as a job, stating the counts first', async () => {
     const sent: string[] = []

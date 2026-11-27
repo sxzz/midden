@@ -436,6 +436,14 @@ export function removedLabel(asset: Asset) {
 }
 /** Removed media, shown by the thumbnail its removal kept. */
 export const isRemoved = (asset: Asset) => asset.state === 'removed'
+/**
+ * Media a restore downloads again (恢复下载), shown meanwhile by the
+ * removal's thumbnail, as removed media is.
+ */
+export const isRestoring = (asset: Asset) => !!asset.restoring
+/** What a restore of removed media is called: 恢复 links the kept original back. */
+export const restoreLabel = (asset: Asset) =>
+  asset.recoverable ? '恢复' : '恢复下载'
 /** Media state in words. Storage states never reach the reader. */
 export function mediaNotice(asset: Asset) {
   if (asset.state === 'pending') return '媒体保存中'

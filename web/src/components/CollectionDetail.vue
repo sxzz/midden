@@ -296,8 +296,10 @@ function removed(effect: RemovalEffect) {
   void reload()
 }
 /**
- * 恢复下载: clear the mark, then capture a post again at once, which brings
- * the media back; a profile gets it with its next update.
+ * 恢复 / 恢复下载: the original comes back as it was, linked back at once or
+ * downloaded again from its own address, never by capturing the post or
+ * profile again. Read again, the item shows, or shows 下载中 over its kept
+ * thumbnail until the download is in (followed by `useCollectionDetail`).
  */
 async function restore(asset: Asset) {
   try {
@@ -311,8 +313,6 @@ async function restore(asset: Asset) {
     return
   }
   void reload()
-  if (!isProfile.value && available.value && !updating.value) void update()
-  else toast('已恢复下载')
 }
 const version = computed(() =>
   collection.value

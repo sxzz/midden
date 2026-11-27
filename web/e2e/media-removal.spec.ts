@@ -3,93 +3,83 @@ import { expect, test } from './test'
 const PIXEL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
 const id = '22222222-2222-4222-8222-222222222222'
-const post = (removed: boolean) => ({
-  id,
-  url: 'https://x.com/synthetic/status/2',
-  external_id: '2',
-  provider_id: 'x',
-  revision_id: 'r',
-  text: '带视频的帖子',
-  text_kind: 'plain',
-  adapter_version: '1',
-  author_name: '作者',
-  warnings: [],
-  saved_at: '2026-09-29T10:00:00Z',
-  observed_at: '2026-09-29T10:00:00Z',
-  created_at: '2026-09-29T10:00:00Z',
-  storage_bytes: removed ? 1000 : 5_000_000,
-  assets: [
-    removed
-      ? {
-          id: 'video',
-          position: 0,
-          state: 'removed',
-          kind: 'video',
-          sensitive: false,
-          size: 0,
-          thumbnail: true,
-          thumbnail_url: PIXEL,
-        }
-      : {
-          id: 'video',
-          position: 0,
-          state: 'ready',
-          kind: 'video',
-          sensitive: false,
-          size: 5_000_000,
-          mime: 'video/mp4',
-          url: '/media/video',
-        },
-  ],
-  graph: {
-    root: 'post',
-    relations: [],
-    entities: [
-      {
-        key: 'post',
-        type: 'x.post',
-        external_id: '2',
-        data: {},
-        resource_indices: [0],
-      },
+type Shown = 'ready' | 'removed' | 'restoring'
+const post = (shown: Shown | boolean, extra: object = {}) => {
+  const state: Shown =
+    shown === true ? 'removed' : shown === false ? 'ready' : shown
+  const removed = state !== 'ready'
+  return {
+    id,
+    url: 'https://x.com/synthetic/status/2',
+    external_id: '2',
+    provider_id: 'x',
+    revision_id: 'r',
+    text: '带视频的帖子',
+    text_kind: 'plain',
+    adapter_version: '1',
+    author_name: '作者',
+    warnings: [],
+    saved_at: '2026-09-29T10:00:00Z',
+    observed_at: '2026-09-29T10:00:00Z',
+    created_at: '2026-09-29T10:00:00Z',
+    storage_bytes: removed ? 1000 : 5_000_000,
+    assets: [
+      removed
+        ? {
+            id: 'video',
+            position: 0,
+            state: state === 'restoring' ? 'pending' : 'removed',
+            kind: 'video',
+            sensitive: false,
+            size: 0,
+            thumbnail: true,
+            thumbnail_url: PIXEL,
+            ...(state === 'restoring' ? { restoring: true } : {}),
+            ...extra,
+          }
+        : {
+            id: 'video',
+            position: 0,
+            state: 'ready',
+            kind: 'video',
+            sensitive: false,
+            size: 5_000_000,
+            mime: 'video/mp4',
+            url: '/media/video',
+          },
     ],
-  },
-})
+    graph: {
+      root: 'post',
+      relations: [],
+      entities: [
+        {
+          key: 'post',
+          type: 'x.post',
+          external_id: '2',
+          data: {},
+          resource_indices: [0],
+        },
+      ],
+    },
+  }
+}
 
-test('remove a post’s media, then see it as removed and restore it', async ({
-  page,
-}) => {
-  let removed = false
-  const sent: { path: string; body: unknown }[] = []
-  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
-  await page.route('**/media/video', (r) => r.fulfill({ body: '' }))
-  await page.route('**/v1/**', (r) => {
+/** Routes the detail page reads, with `shown()` as the post. */
+function detailRoutes(
+  shown: () => ReturnType<typeof post>,
+  handle: (path: string) => object | undefined,
+) {
+  return (r: import('@playwright/test').Route) => {
     const path = new URL(r.request().url()).pathname
-    if (r.request().method() === 'POST')
-      sent.push({ path, body: r.request().postDataJSON() })
+    const answer = handle(path)
+    if (answer) return r.fulfill({ json: answer })
     if (path === '/v1/session') return r.fulfill({ json: {} })
     if (path === '/v1/usage') return r.fulfill({ json: { used_bytes: 0 } })
     if (path === '/v1/collections')
-      return r.fulfill({ json: { items: [post(removed)] } })
-    if (path === `/v1/collections/${id}`)
-      return r.fulfill({ json: post(removed) })
+      return r.fulfill({ json: { items: [shown()] } })
+    if (path === `/v1/collections/${id}`) return r.fulfill({ json: shown() })
     if (path.endsWith('/availability'))
       return r.fulfill({ json: { available: true } })
-    if (path === '/v1/media-removals/preview')
-      return r.fulfill({
-        json: { media: 1, freed_bytes: 5_000_000, shared: 0 },
-      })
-    if (path === '/v1/media-removals') {
-      removed = true
-      return r.fulfill({
-        json: { media: 1, freed_bytes: 5_000_000, shared: 0 },
-      })
-    }
-    if (path === '/v1/media-removals/restore') {
-      removed = false
-      return r.fulfill({ status: 204 })
-    }
-    if (path === '/v1/updates') return r.fulfill({ json: { id: 'record' } })
     if (path === '/v1/shares') return r.fulfill({ json: [] })
     if (path.endsWith('/annotation'))
       return r.fulfill({ json: { tags: [], note: '' } })
@@ -97,6 +87,36 @@ test('remove a post’s media, then see it as removed and restore it', async ({
     if (path.endsWith('/history') || path === '/v1/folders')
       return r.fulfill({ json: path.endsWith('/history') ? { items: [] } : [] })
     return r.fulfill({ json: {} })
+  }
+}
+
+test('remove a post’s media, then see it as removed and restore it', async ({
+  page,
+}) => {
+  let shown: Shown = 'ready'
+  const sent: { path: string; body: unknown }[] = []
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/media/video', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    if (r.request().method() === 'POST')
+      sent.push({
+        path: new URL(r.request().url()).pathname,
+        body: r.request().postDataJSON(),
+      })
+    return detailRoutes(
+      () => post(shown, shown === 'removed' ? { recoverable: true } : {}),
+      (path) => {
+        if (path === '/v1/media-removals/preview')
+          return { media: 1, freed_bytes: 5_000_000, shared: 0 }
+        if (path === '/v1/media-removals') {
+          shown = 'removed'
+          return { media: 1, freed_bytes: 5_000_000, shared: 0 }
+        }
+        if (path !== '/v1/media-removals/restore') return
+        shown = 'ready'
+        return { state: 'ready' }
+      },
+    )(r)
   })
   await page.goto(`/app/collection/${id}`)
   await expect(page.getByText('带视频的帖子')).toBeVisible()
@@ -110,17 +130,51 @@ test('remove a post’s media, then see it as removed and restore it', async ({
   await expect(
     page.getByRole('button', { name: '删除此帖所有媒体' }),
   ).toHaveCount(0)
-  // Restoring captures the post again at once.
-  await page.getByRole('button', { name: '恢复下载' }).click()
+  // Still stored: 恢复 links it back at once, capturing nothing.
+  await page.getByRole('button', { name: '恢复', exact: true }).click()
+  await expect(page.getByRole('button', { name: '播放视频' })).toBeVisible()
   expect(sent[1]).toEqual({ path: '/v1/media-removals', body: { ids: [id] } })
-  await expect
-    .poll(() => sent.map((s) => s.path))
-    .toEqual([
-      '/v1/media-removals/preview',
-      '/v1/media-removals',
-      '/v1/media-removals/restore',
-      '/v1/updates',
-    ])
+  expect(sent.map((s) => s.path)).toEqual([
+    '/v1/media-removals/preview',
+    '/v1/media-removals',
+    '/v1/media-removals/restore',
+  ])
+})
+
+test('restore media past the grace period: 下载中 until it is in', async ({
+  page,
+}) => {
+  let shown: Shown = 'removed'
+  let looks = 0
+  const sent: string[] = []
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/media/video', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    if (r.request().method() === 'POST')
+      sent.push(new URL(r.request().url()).pathname)
+    return detailRoutes(
+      () => {
+        // Read again after the restore it is downloading; the first look
+        // a few seconds later finds it in.
+        if (shown === 'restoring' && ++looks > 1) shown = 'ready'
+        return post(shown)
+      },
+      (path) => {
+        if (path !== '/v1/media-removals/restore') return
+        shown = 'restoring'
+        return { state: 'downloading', job: 7 }
+      },
+    )(r)
+  })
+  await page.goto(`/app/collection/${id}`)
+  await expect(page.getByText('带视频的帖子')).toBeVisible()
+  await page.getByRole('button', { name: '恢复下载' }).click()
+  await expect(page.getByRole('status').getByText('下载中')).toBeVisible()
+  await expect(page.getByRole('button', { name: '播放视频' })).toBeVisible({
+    timeout: 10_000,
+  })
+  await expect(page.getByText('下载中')).toHaveCount(0)
+  expect(sent).toEqual(['/v1/media-removals/restore'])
 })
 
 test('remove the media of a selection from the 多选 bar', async ({ page }) => {

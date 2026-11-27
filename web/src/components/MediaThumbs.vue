@@ -2,7 +2,12 @@
 import { computed, shallowRef, watch } from 'vue'
 import { useSensitiveMedia } from '../composables/useSensitiveMedia'
 import { layoutMedia, ratioOf, track } from '../media-layout'
-import { isRemoved, readyMedia, removedLabel } from '../presentation'
+import {
+  isRemoved,
+  isRestoring,
+  readyMedia,
+  removedLabel,
+} from '../presentation'
 import { collectionHref } from '../share'
 import { detailTitles, kindOf } from '../titles'
 import MediaPreview from './MediaPreview.vue'
@@ -38,11 +43,13 @@ function measure(event: Event) {
     measured.value = { ...measured.value, [id]: ratio }
 }
 const LIMIT = 4
-// Removed media still shows, by the thumbnail its removal kept.
+// Removed media still shows, by the thumbnail its removal kept, as does
+// media a restore downloads again.
+const kept = (asset: Asset) => isRemoved(asset) || isRestoring(asset)
 const media = computed(() =>
   props.assets.filter(
     (asset) =>
-      asset.state === 'ready' || (isRemoved(asset) && !!asset.thumbnail_url),
+      asset.state === 'ready' || (kept(asset) && !!asset.thumbnail_url),
   ),
 )
 // Whether the group is uniformly sensitive is a property of the whole row, not
@@ -60,7 +67,7 @@ const previews = computed(() =>
   ),
 )
 const viewable = (asset: Asset) =>
-  !isRemoved(asset) &&
+  !kept(asset) &&
   (!!asset.mime?.startsWith('image/') || !!asset.mime?.startsWith('video/'))
 /** What the tiles' link opens, named as that page is. */
 const detailLabel = computed(
@@ -143,25 +150,29 @@ const overflow = computed(() => media.value.length - tiles.value.length)
         :href="tileLink(asset)"
         class="tile"
         :aria-label="
-          isRemoved(asset)
-            ? `${removedLabel(asset)}，${detailLabel}`
-            : asset.mime?.startsWith('image/')
-              ? hidden(asset) && !covered
-                ? '敏感内容，点按显示'
-                : '放大图片'
-              : asset.mime?.startsWith('video/')
+          isRestoring(asset)
+            ? `下载中，${detailLabel}`
+            : isRemoved(asset)
+              ? `${removedLabel(asset)}，${detailLabel}`
+              : asset.mime?.startsWith('image/')
                 ? hidden(asset) && !covered
                   ? '敏感内容，点按显示'
-                  : '播放视频'
-                : detailLabel
+                  : '放大图片'
+                : asset.mime?.startsWith('video/')
+                  ? hidden(asset) && !covered
+                    ? '敏感内容，点按显示'
+                    : '播放视频'
+                  : detailLabel
         "
         :class="{ blurred: hidden(asset) }"
         :data-asset="asset.id"
         @click.stop="view(asset)"
       >
-        <template v-if="isRemoved(asset)">
+        <template v-if="kept(asset)">
           <LoadingImage :src="asset.thumbnail_url!" alt="" />
-          <span class="removed">已移除</span>
+          <span class="removed">{{
+            isRestoring(asset) ? '下载中' : '已移除'
+          }}</span>
         </template>
         <MediaPreview
           v-else-if="

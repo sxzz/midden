@@ -10,7 +10,13 @@ import {
   track,
   type LayoutItem,
 } from '../media-layout'
-import { isRemoved, mediaNotice, removedLabel } from '../presentation'
+import {
+  isRemoved,
+  isRestoring,
+  mediaNotice,
+  removedLabel,
+  restoreLabel,
+} from '../presentation'
 import MediaPreview from './MediaPreview.vue'
 import MediaViewer from './MediaViewer.vue'
 import EyeIcon from './ui/EyeIcon.vue'
@@ -59,7 +65,8 @@ interface Slot extends LayoutItem {
 const rows = computed(() =>
   layoutMedia(
     props.assets.map((asset): Slot => {
-      const removed = isRemoved(asset)
+      // Restoring media is shown as removed media is, by its thumbnail.
+      const removed = isRemoved(asset) || isRestoring(asset)
       const ratio = ratioOf(asset) ?? measured.value[asset.id]
       return {
         asset,
@@ -141,7 +148,7 @@ watch(
           :data-asset="item.asset.id"
         >
           <div
-            v-if="isRemoved(item.asset)"
+            v-if="isRemoved(item.asset) || isRestoring(item.asset)"
             class="frame removed"
             :class="{ blurred: hidden(item.asset) }"
           >
@@ -150,7 +157,10 @@ watch(
               :src="item.asset.thumbnail_url"
               :alt="item.asset.alt_text || ''"
             />
-            <span class="removed-label">
+            <span v-if="isRestoring(item.asset)" class="removed-label">
+              <span role="status">下载中</span>
+            </span>
+            <span v-else class="removed-label">
               <a
                 v-if="source"
                 :href="source"
@@ -159,16 +169,15 @@ watch(
                 >{{ removedLabel(item.asset) }} · 在原站查看 ›</a
               ><span v-else>{{ removedLabel(item.asset) }}</span>
               <template v-if="editable">
-                <small v-if="item.asset.download_again"
-                  >下次更新时重新下载</small
+                <small v-if="item.asset.restore_error"
+                  >无法重新下载：{{ item.asset.restore_error }}</small
                 >
                 <button
-                  v-else
                   type="button"
                   class="restore"
                   @click="emit('restore', item.asset)"
                 >
-                  恢复下载
+                  {{ restoreLabel(item.asset) }}
                 </button>
               </template>
             </span>

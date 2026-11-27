@@ -20,6 +20,15 @@ import { useHistory } from './useHistory'
 import { toast } from './useToast'
 const collections = client.collections[':id']
 const getCollection = readCollection
+/** How often media a restore downloads again is looked at. */
+const RESTORE_POLL = 3000
+/** Some of its media is downloading again after a restore (恢复下载). */
+const restoring = (collection?: Collection) =>
+  !!collection &&
+  (collection.assets.some((asset) => asset.restoring) ||
+    !!collection.graph?.entities.some((entity) =>
+      entity.assets?.some((asset) => asset.restoring),
+    ))
 const availability = async (id: string, signal: AbortSignal) =>
   (
     await call(
@@ -59,6 +68,8 @@ export function useCollectionDetail(
   let controller = new AbortController()
   /** Polls the running update; only while the page is shown. */
   let updateTimer: ReturnType<typeof setTimeout> | undefined
+  /** Polls media a restore downloads again; only while the page is shown. */
+  let restoreTimer: ReturnType<typeof setTimeout> | undefined
   let active = true
   // Once the collection is on screen, a failed action must not replace it or
   // land in a banner out of view: say so where the reader is looking.
@@ -101,6 +112,7 @@ export function useCollectionDetail(
       updating.value = false
       older.value = false
       clearTimeout(updateTimer)
+      clearTimeout(restoreTimer)
       error.value = ''
       busy.value = false
       available.value = false
@@ -131,15 +143,44 @@ export function useCollectionDetail(
   onUnmounted(() => {
     controller.abort()
     clearTimeout(updateTimer)
+    clearTimeout(restoreTimer)
   })
   onActivated(() => {
     active = true
     if (updating.value) void checkUpdate()
+    followRestore()
   })
   onDeactivated(() => {
     active = false
     clearTimeout(updateTimer)
+    clearTimeout(restoreTimer)
   })
+  /**
+   * Media a restore downloads again shows its kept thumbnail meanwhile: the
+   * collection is looked at every few seconds, and read again in place (as
+   * after an update) once none of it is downloading any more.
+   */
+  function followRestore() {
+    clearTimeout(restoreTimer)
+    if (active && !shareSlug.value && restoring(collection.value))
+      restoreTimer = setTimeout(checkRestore, RESTORE_POLL)
+  }
+  async function checkRestore() {
+    const signal = controller.signal
+    try {
+      const result = await getCollection(id(), signal)
+      if (signal.aborted) return
+      if (!restoring(result)) {
+        void reload()
+        return
+      }
+    } catch {
+      // Looked at again next time; nothing else depends on it.
+      if (signal.aborted) return
+    }
+    if (active) restoreTimer = setTimeout(checkRestore, RESTORE_POLL)
+  }
+  watch(collection, followRestore)
   /**
    * The update of this collection to follow, polled while it runs. Once it
    * ends the collection is read again, so the page shows what it saved.
@@ -244,9 +285,9 @@ export function useCollectionDetail(
     }
   }
   /**
-   * Update the collection right away with the default options: a post whose
-   * media came back, or a profile's older posts (`older`). Other updates
-   * start from the sheet, which calls `started`.
+   * Update the collection right away with the default options: a profile's
+   * older posts (`older`). Other updates start from the sheet, which calls
+   * `started`.
    */
   async function update(body: { older?: boolean } = {}) {
     if (busy.value) return
