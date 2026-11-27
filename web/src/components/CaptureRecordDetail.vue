@@ -18,10 +18,11 @@ import {
 } from '../api'
 import { optionsSummary } from '../capture-options'
 import {
+  accountTitle,
   canContinue,
-  linkTitle,
   mediaLabel,
   mediaStates,
+  memberTitle,
   profileHandle,
   profilePartText,
   recordAdditions,
@@ -436,12 +437,6 @@ async function stop() {
     busy.value = false
   }
 }
-/** A member's line: its link, or the profile list it stands for. */
-function memberTitle(m: CaptureMember) {
-  // A skipped item whose collection is gone has no link left to name it.
-  if (!m.list) return m.url ? linkTitle(m.url) : '已删除的收藏'
-  return `${profileHandle(m.url, m.handle)} ${m.list === 'following' ? '关注' : '粉丝'}名单`
-}
 const retryLabel = computed(() => {
   if (record.value?.update) return '再次更新'
   return record.value?.state === 'failed' ? '重试' : '重新采集'
@@ -451,8 +446,17 @@ const collectionPage = (id: string) => ({
   name: 'collection',
   params: { id },
 })
-/** Whether a member has a page to link to: saved, and not a profile list. */
-const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
+/**
+ * Where a member's line goes: the saved collection showing it (for a profile
+ * saved by its handle, maybe the one its account is saved under), else a
+ * profile's page on the platform. A profile list has its own retry only.
+ */
+function memberLink(m: CaptureMember) {
+  if (m.list) return undefined
+  if (m.library_id) return { to: collectionPage(m.library_id) }
+  if (m.kind === 'profile' && m.url) return { href: m.url }
+  return undefined
+}
 </script>
 
 <template>
@@ -641,7 +645,7 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
         <template v-for="p in record.profiles" :key="p.collection_id">
           <AppLink class="line profile" :to="collectionPage(p.collection_id)">
             <span class="line-text"
-              >{{ profileHandle(p.url, p.handle)
+              >{{ accountTitle(p.url, p.handle, p.name)
               }}<small class="hint">{{ profilePartText(p) }}</small
               ><small v-if="p.error" class="hint">{{ p.error }}</small></span
             >
@@ -676,9 +680,9 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
         <ListSection :title="heading">
           <div v-for="m in members" :key="m.job_id" class="member">
             <component
-              :is="linked(m) ? AppLink : 'span'"
+              :is="memberLink(m) ? AppLink : 'span'"
               class="member-main"
-              :to="linked(m) ? collectionPage(m.collection_id) : undefined"
+              v-bind="memberLink(m)"
             >
               <span class="line-text"
                 >{{ memberTitle(m)

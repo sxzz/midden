@@ -1,11 +1,13 @@
 import { expect, test } from 'vitest'
 import {
+  accountTitle,
   countText,
   coverText,
   extractLinks,
   groupRecords,
   linkTitle,
   mediaLabel,
+  memberTitle,
   profileHandle,
   profilePartText,
   recordAdditions,
@@ -392,4 +394,57 @@ test('a capture that saw its source gone again reads as that, not as a failure',
     label: '原站已删除',
     tone: 'ok',
   })
+  expect(
+    profilePartText({
+      collection_id: 'p',
+      url: 'https://x.com/i/user/1',
+      state: 'failed',
+      source_state: 'suspended',
+    }),
+  ).toBe('资料 账号已被封禁')
+})
+
+test('members and records name an account by its stored name and handle, not its link', () => {
+  const byId = 'https://x.com/i/user/1546010181070249984'
+  expect(
+    memberTitle({
+      url: byId,
+      kind: 'profile',
+      handle: 'Raffel12310',
+      name: 'Harel',
+    }),
+  ).toBe('Harel @Raffel12310')
+  // Nothing stored: the handle its link names, else the link.
+  expect(memberTitle({ url: 'https://x.com/VueUse', kind: 'profile' })).toBe(
+    '@VueUse',
+  )
+  expect(memberTitle({ url: byId, kind: 'profile' })).toBe(
+    'x.com/i/user/1546010181070249984',
+  )
+  expect(
+    memberTitle({ url: byId, kind: 'profile', handle: 'cat', name: 'cat' }),
+  ).toBe('@cat')
+  expect(memberTitle({ url: 'https://x.com/a/status/1/', kind: 'post' })).toBe(
+    'x.com/a/status/1',
+  )
+  expect(
+    memberTitle({
+      url: byId,
+      handle: 'Raffel12310',
+      name: 'Harel',
+      list: 'followers',
+    }),
+  ).toBe('Harel @Raffel12310 粉丝名单')
+  expect(memberTitle({ url: '', kind: 'profile' })).toBe('已删除的收藏')
+  expect(
+    recordTitle(
+      record({
+        url: byId,
+        kind: 'profile',
+        handle: 'Raffel12310',
+        name: 'Harel',
+      }),
+    ),
+  ).toBe('Harel @Raffel12310')
+  expect(accountTitle(byId, 'Raffel12310')).toBe('@Raffel12310')
 })

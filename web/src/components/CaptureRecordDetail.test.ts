@@ -44,6 +44,8 @@ const member = (
   saved: true,
   url: `https://x.com/fixture/status/${id}`,
   state,
+  // Saved with content, so it has a page to open.
+  ...(state === 'complete' || state === 'partial' ? { library_id: id } : {}),
   ...(waiting ? { waiting } : {}),
   reasons: [],
   gone: false,
@@ -53,7 +55,7 @@ const member = (
 /** Mount a record whose members are listed by state filter. */
 function mount(
   record: () => ReturnType<typeof detail>,
-  lists: Record<string, ReturnType<typeof member>[]>,
+  lists: Record<string, object[]>,
 ) {
   const queried: string[] = []
   mockApi((path) => {
@@ -555,6 +557,7 @@ it("lists an update's skipped items one by one, each with why, among the problem
     ...member(id, 'skipped'),
     job_id: `skipped:${id}`,
     saved,
+    ...(saved ? { library_id: id } : {}),
     error,
   })
   const { el, tabs } = mount(
@@ -604,6 +607,49 @@ it("lists an update's skipped items one by one, each with why, among the problem
       link: true,
       retry: false,
     },
+  ])
+})
+
+it('names profile members by their stored name and handle, linked to the library or else the platform', async () => {
+  const account = (id: string, patch: Record<string, unknown> = {}) => ({
+    ...member(id),
+    kind: 'profile',
+    url: `https://x.com/i/user/${id}`,
+    ...patch,
+  })
+  const { el } = mount(() => detail({ complete: 3, partial: 0, failed: 0 }), {
+    '': [
+      account('1546010181070249984', {
+        handle: 'Raffel12310',
+        name: 'Harel',
+      }),
+      // Saved by its handle, its account under its id: that one opens.
+      account('2', {
+        url: 'https://x.com/VueUse',
+        handle: 'VueUse',
+        name: 'VueUse',
+        library_id: 'by-id',
+      }),
+      account('3', {
+        state: 'failed',
+        handle: 'cat',
+        name: 'Cat',
+        library_id: undefined,
+      }),
+    ],
+  })
+  await vi.waitFor(() => expect(el.textContent).toContain('Harel'))
+  const rows = [...el.querySelectorAll('.member')].map((row) => ({
+    text: row.querySelector('.line-text')!.firstChild!.textContent,
+    href: row.querySelector('a')?.getAttribute('href'),
+  }))
+  expect(rows).toEqual([
+    {
+      text: 'Harel @Raffel12310',
+      href: expect.stringMatching(/1546010181070249984$/),
+    },
+    { text: '@VueUse', href: expect.stringMatching(/by-id$/) },
+    { text: 'Cat @cat', href: 'https://x.com/i/user/3' },
   ])
 })
 

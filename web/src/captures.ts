@@ -1,6 +1,11 @@
 import { relationsDone, type ListProgress } from './follows'
 import { groupLabel } from './presentation'
-import type { CaptureMedia, CaptureRecord, ProfilePart } from './api'
+import type {
+  CaptureMedia,
+  CaptureMember,
+  CaptureRecord,
+  ProfilePart,
+} from './api'
 
 const LINK_SEPARATOR = /[\s<>"'，。；、（）]+/
 const TRAILING_PUNCTUATION = /[),.;!?]+$/
@@ -229,6 +234,30 @@ export function profileHandle(url: string, username?: string) {
   return linkTitle(url)
 }
 
+/**
+ * An account as its stored name and handle say, `Harel @Raffel12310`; else
+ * as `profileHandle` does. A profile saved by its id has only
+ * `x.com/i/user/<id>` for a link, which says nothing.
+ */
+export function accountTitle(url: string, username?: string, name?: string) {
+  const handle = profileHandle(url, username)
+  return name && username && name !== username ? `${name} ${handle}` : handle
+}
+
+/** What a record member is: a profile by name, anything else by its link. */
+export function memberTitle(
+  m: Pick<CaptureMember, 'url' | 'kind' | 'handle' | 'name' | 'list'>,
+) {
+  // A skipped item whose collection is gone has no link left to name it.
+  if (!m.url) return '已删除的收藏'
+  const account =
+    m.kind === 'profile' || m.list
+      ? accountTitle(m.url, m.handle, m.name)
+      : linkTitle(m.url)
+  if (!m.list) return account
+  return `${account} ${m.list === 'following' ? '关注' : '粉丝'}名单`
+}
+
 /** A count the way the sheet reads it: 2.1 万 rather than 21000. */
 export function countText(n: number) {
   if (n < 10_000) return String(n)
@@ -238,7 +267,10 @@ export function countText(n: number) {
 /** What a record is about: its link, or what its update covers. */
 export function recordTitle(r: CaptureRecord) {
   const u = r.update
-  if (!u) return linkTitle(r.url)
+  if (!u)
+    return r.kind === 'profile'
+      ? accountTitle(r.url, r.handle, r.name)
+      : linkTitle(r.url)
   // A watch's run (定期更新) says so.
   const update = u.watch ? '定期更新' : '更新'
   if (u.target === 'folder') return `${update}收藏夹「${u.name ?? ''}」`
@@ -289,7 +321,9 @@ export const canContinue = (p: PartSummary) => !!p.posts?.done && p.posts.capped
  * 资料 ✓ · 帖子 34/100 · 关注 ✓ · 粉丝 跳过.
  */
 export function profilePartText(p: PartSummary) {
-  const parts = [`资料 ${partMarks[p.state] ?? '进行中'}`]
+  const parts = [
+    `资料 ${p.source_state ? sourceStateLabels[p.source_state] : (partMarks[p.state] ?? '进行中')}`,
+  ]
   if (p.posts && canContinue(p))
     parts.push(`帖子 ${p.posts.finished}（未到已有数据）`)
   else if (p.posts)

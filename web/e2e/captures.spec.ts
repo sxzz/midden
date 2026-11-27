@@ -216,6 +216,26 @@ test('shows collection progress, member failures, stop and retry', async ({
         url: 'https://x.com/fixture/status/3',
         state: 'complete',
         error: undefined,
+        retryable: undefined,
+        library_id: collection,
+      }
+      // Profiles saved by their id: named by what is stored, linked to
+      // the library when it holds them, else to the platform.
+      const account = {
+        ...complete,
+        job_id: 'member-account',
+        kind: 'profile',
+        url: 'https://x.com/i/user/1546010181070249984',
+        handle: 'Raffel12310',
+        name: 'Harel',
+      }
+      const unsaved = {
+        ...account,
+        job_id: 'member-unsaved',
+        url: 'https://x.com/i/user/1',
+        handle: 'cat',
+        name: 'Cat',
+        library_id: undefined,
       }
       // The source reported this one deleted, so it cannot be retried.
       const gone = {
@@ -227,7 +247,9 @@ test('shows collection progress, member failures, stop and retry', async ({
       }
       return r.fulfill({
         json: {
-          items: state ? [failed, gone] : [failed, complete, gone],
+          items: state
+            ? [failed, gone]
+            : [failed, complete, gone, account, unsaved],
         },
       })
     }
@@ -286,6 +308,16 @@ test('shows collection progress, member failures, stop and retry', async ({
   await expect(all).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('tab', { name: /^新增记录/ })).toHaveCount(0)
   await expect(page.getByText('x.com/fixture/status/3')).toBeVisible()
+  await expect(
+    page.getByRole('link', { name: /^x\.com\/fixture\/status\/3/ }),
+  ).toHaveAttribute('href', new RegExp(`/collection/${collection}$`))
+  await expect(
+    page.getByRole('link', { name: /^Harel @Raffel12310/ }),
+  ).toHaveAttribute('href', new RegExp(`/collection/${collection}$`))
+  await expect(page.getByRole('link', { name: /^Cat @cat/ })).toHaveAttribute(
+    'href',
+    'https://x.com/i/user/1',
+  )
   await page.getByRole('tab', { name: '异常记录 1' }).click()
   await expect(page.getByText('x.com/fixture/status/3')).toHaveCount(0)
   await all.click()
