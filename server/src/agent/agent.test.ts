@@ -760,6 +760,16 @@ describe('writes', () => {
       `/posts?q=${encodeURIComponent(`folder:"${made.json.name}" cat`)}`,
     )
     expect(ids(nested.json.items)).toEqual([f.ids.p1, f.ids.p2])
+    // As written: what the folder holds is not said.
+    expect(nested.json.parsed).toBe('folder:Alice cat')
+    // Only an order: a query of everything.
+    const ordered = await f.call('/folders', {
+      body: { name: 'Newest', query: '', sort: 'saved' },
+    })
+    expect(ordered.json).toMatchObject({ query: '', sort: 'saved' })
+    expect((await f.call('/folders', { body: { name: 'None' } })).status).toBe(
+      400,
+    )
 
     const renamed = await f.call(`/folders/${made.json.id}`, {
       method: 'PATCH',
