@@ -75,6 +75,12 @@ function submit() {
   background: var(--card);
   overflow: hidden;
 }
+/* The box clips what runs edge to edge in it, and the sidebar clips at its
+   sides: rows and links there are ringed inside. */
+.aside-box > :focus-visible,
+.aside-box :is(.aside-row, .aside-more):focus-visible {
+  outline-offset: -2px;
+}
 .aside-box > h2 {
   margin: 0;
   padding: 12px 16px 6px;

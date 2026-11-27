@@ -1035,6 +1035,11 @@ const viewProps = computed(() => {
 .tabs-end:hover {
   background: color-mix(in srgb, var(--text) 6%, transparent);
 }
+/* At the column's edge, which clips: ringed inside, square as the tabs. */
+.tabs-end:focus-visible {
+  outline-offset: -2px;
+  border-radius: 0;
+}
 .sensitive-toggle[aria-pressed='true'] {
   color: var(--link);
 }

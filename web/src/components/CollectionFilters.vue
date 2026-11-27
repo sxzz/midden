@@ -624,7 +624,7 @@ const tagSummary = computed(() => {
 <template>
   <form class="filters" @submit.prevent="search">
     <QueryBox v-if="!shared" v-model="boxText" @submit="submitQuery" />
-    <div v-else class="bar">
+    <div v-else class="bar ring-within">
       <svg
         class="glass"
         viewBox="0 0 24 24"
@@ -922,7 +922,6 @@ const tagSummary = computed(() => {
   border: 0;
   background: none;
   font-size: 16px;
-  outline-offset: -2px;
 }
 .field::placeholder {
   color: var(--subtle);

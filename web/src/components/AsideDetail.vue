@@ -456,6 +456,15 @@ a.row:hover {
 .facts .editable:hover {
   background: var(--fill);
 }
+/* The row is the control's shape, so the ring goes round it rather than
+   round the words (whose cell would clip it). */
+.facts .editable:has(.edit:focus-visible) {
+  outline: 2px solid var(--link);
+  outline-offset: 0;
+}
+.edit:focus-visible {
+  outline: none;
+}
 .edit {
   display: flex;
   align-items: center;

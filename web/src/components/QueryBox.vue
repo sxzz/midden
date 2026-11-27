@@ -187,7 +187,7 @@ const help = shallowRef(false)
 
 <template>
   <div class="query" role="search">
-    <div class="bar">
+    <div class="bar ring-within">
       <svg
         class="glass"
         viewBox="0 0 24 24"
@@ -300,7 +300,6 @@ const help = shallowRef(false)
   border: 0;
   background: none;
   font-size: 16px;
-  outline-offset: -2px;
 }
 .field::placeholder {
   color: var(--subtle);

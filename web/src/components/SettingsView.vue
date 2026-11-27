@@ -382,6 +382,10 @@ async function logout() {
   font-size: 15px;
   text-align: left;
 }
+/* Rows run edge to edge of a column that clips them: ringed inside. */
+.row:focus-visible {
+  outline-offset: -2px;
+}
 .row:hover {
   background: var(--fill);
 }

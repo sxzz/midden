@@ -272,7 +272,7 @@ async function saveNote() {
             multiple
             @update:model-value="editTags"
           />
-          <div class="create">
+          <div class="create ring-within">
             <svg
               class="plus"
               viewBox="0 0 24 24"
@@ -343,6 +343,11 @@ async function saveNote() {
   color: var(--text);
   font-size: 16px;
   text-align: left;
+}
+/* A row of the card, which clips it: ringed inside, as round as the card. */
+.toggle:focus-visible {
+  outline-offset: -2px;
+  border-radius: var(--radius);
 }
 .toggle:active {
   background: var(--fill);
@@ -478,12 +483,10 @@ textarea::placeholder {
   min-width: 0;
   min-height: 40px;
   border: 0;
-  /* No border or fill of its own; the radius only shapes the focus ring, which
-     is pulled inward so it cannot spill past the pill. */
-  border-radius: 999px;
+  /* No border or fill of its own: the pill around it is the control, and
+     rings while it has focus (.ring-within). */
   background: none;
   font: inherit;
-  outline-offset: -2px;
 }
 .create-field::placeholder {
   color: var(--subtle);

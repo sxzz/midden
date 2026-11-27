@@ -168,7 +168,24 @@ video {
 :focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 2px;
+}
+/* The ring follows the control's own corners: a round button gets a round
+   ring, a pill a pill. Only a control with square corners (a link, a bare
+   icon) is rounded a little while it has focus. */
+:where(:focus-visible) {
   border-radius: 6px;
+}
+/* A composite field (an icon, the field and buttons in one shape, such as
+   the search box or the pill for a new tag) rings the whole shape while
+   its field has focus, and the field draws none of its own. The buttons in
+   it keep their own ring, from the keyboard only, so a click on one rings
+   nothing; hence not :focus-within. */
+.ring-within:has(:is(input, textarea):focus-visible) {
+  outline: 2px solid var(--link);
+  outline-offset: 2px;
+}
+.ring-within :is(input, textarea):focus-visible {
+  outline: none;
 }
 /* A sheet holding focus itself (sheet-focus.ts) is not a control to ring. */
 dialog:focus {

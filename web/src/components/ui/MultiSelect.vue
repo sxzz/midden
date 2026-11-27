@@ -188,6 +188,11 @@ summary {
 summary::-webkit-details-marker {
   display: none;
 }
+/* A row of the card it sits in, which clips it: ringed inside. */
+summary:focus-visible {
+  outline-offset: -2px;
+  border-radius: var(--radius);
+}
 /* The value ends where a select's does, 2px before its chevron. */
 summary > .chevron {
   margin-left: -10px;
@@ -218,7 +223,10 @@ input {
   gap: 8px;
   max-height: 220px;
   overflow-y: auto;
-  padding: 8px 0 2px;
+  /* The scroller would clip the pills' rings: room for them all round,
+     paid back sideways so the pills stay where they were. */
+  margin-inline: calc(-1 * var(--ring-room));
+  padding: 8px var(--ring-room) var(--ring-room);
 }
 .tag {
   max-width: 100%;
