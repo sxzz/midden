@@ -110,6 +110,11 @@ export interface EntityView {
   /** For a post kept by reference: what its saved collection says now. */
   saved_summary?: string
   saved_text?: string
+  /**
+   * The saved collection's language (`CollectionView.lang`): a post's
+   * text's, an account's bio's, which also stands for its name.
+   */
+  saved_lang?: string
   saved_author?: EntityView
   /** An author's newest complete version, when it differs from this one. */
   current?: EntityVersionView
@@ -148,6 +153,12 @@ export interface CollectionView {
   source_state?: 'deleted' | 'suspended'
   source_state_at?: string
   saved_at?: string
+  /**
+   * The language of the text (an account's bio), a BCP 47 tag as
+   * `catalog.lang` stores it (`ja`, `zh-Hans`); absent when unknown. An
+   * older revision (a history point) has its newest revision's.
+   */
+  lang?: string
   storage_bytes?: number
   relation_types?: string[]
   incoming_relations?: IncomingRelation[]

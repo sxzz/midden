@@ -299,7 +299,12 @@ test('pinned posts: set, changed, removed, and not known', async () => {
     capture_id: c.id,
     revision_id: c.revisionId,
   })
-  const one = { id: '1', collection_id: saved.collectionId, text: 'post 1' }
+  const one = {
+    id: '1',
+    collection_id: saved.collectionId,
+    text: 'post 1',
+    lang: 'en',
+  }
   expect(listProfileChanges(ctx, id).items).toEqual([
     {
       ...at(removed),

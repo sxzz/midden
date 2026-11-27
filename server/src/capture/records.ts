@@ -611,6 +611,8 @@ export interface CaptureRecord {
   /** A profile's username and display name, when a stored version has them. */
   handle?: string
   name?: string
+  /** Its saved profile's language (`MemberAccount.lang`). */
+  lang?: string
   input: string
   platform: string
   kind: string
@@ -744,7 +746,7 @@ export function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
       .map((row) => row.collection.id),
   )
   return rows.map(({ submission, capture, collection, saved }) => {
-    const { handle, name } = accounts.get(collection.id) ?? {}
+    const { handle, name, lang } = accounts.get(collection.id) ?? {}
     const record: CaptureRecord = {
       id: submission.id,
       jobId: capture.id,
@@ -753,6 +755,7 @@ export function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
       url: collection.url,
       ...(handle ? { handle } : {}),
       ...(name ? { name } : {}),
+      ...(lang ? { lang } : {}),
       input: submission.input,
       platform: collection.platform,
       kind: collection.kind,
@@ -1010,6 +1013,8 @@ export interface CaptureMember {
   handle?: string
   /** A profile's display name. */
   name?: string
+  /** Its saved profile's language (`MemberAccount.lang`). */
+  lang?: string
   /** The saved collection with content to open for it (`memberAccounts`). */
   libraryId?: string
 }
@@ -1017,10 +1022,11 @@ export interface CaptureMember {
 /** A member's name and link, leaving out what is unknown. */
 export function accountFields(
   account: MemberAccount | undefined,
-): Pick<CaptureMember, 'handle' | 'name' | 'libraryId'> {
+): Pick<CaptureMember, 'handle' | 'name' | 'lang' | 'libraryId'> {
   return {
     ...(account?.handle ? { handle: account.handle } : {}),
     ...(account?.name ? { name: account.name } : {}),
+    ...(account?.lang ? { lang: account.lang } : {}),
     ...(account?.libraryId ? { libraryId: account.libraryId } : {}),
   }
 }

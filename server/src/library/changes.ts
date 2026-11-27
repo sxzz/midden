@@ -40,8 +40,9 @@ export interface PinnedPost {
   url?: string
   /** Its collection, when it is saved. */
   collection_id?: string
-  /** What its saved collection says now. */
+  /** What its saved collection says now, and in which language. */
   text?: string
+  lang?: string
 }
 
 /** The pinned posts, in the order listed; empty when none was pinned. */
@@ -406,10 +407,12 @@ function pinnedPosts(
     post: string
     collection: string
     text: string | null
+    lang: string | null
   }>(sql`
     SELECT c.external_id AS post, c.id AS collection,
       coalesce(nullif(rv.payload ->> '$.text', ''), rv.payload ->> '$.summary')
-        AS text
+        AS text,
+      (SELECT k.lang FROM catalog k WHERE k.collection_id = c.id) AS lang
     FROM collections c
     JOIN library l ON l.collection_id = c.id
     JOIN revisions rv ON rv.id = ${sql.raw(head('c.id'))}
@@ -422,6 +425,7 @@ function pinnedPosts(
     post.collection_id = row.collection
     const text = row.text?.trim()
     if (text) post.text = text
+    if (row.lang) post.lang = row.lang
   }
   return posts
 }

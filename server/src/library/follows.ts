@@ -30,6 +30,8 @@ export interface FollowAccount {
   external_id: string
   name?: string
   username?: string
+  /** The saved profile's language (its bio's), for the name too. */
+  lang?: string
   /** The account's saved profile. */
   collection_id?: string
   avatar?: AssetView
@@ -200,6 +202,7 @@ export function listFollowChanges(
     data: string | null
     collection_id: string | null
     avatar: string | null
+    lang: string | null
   }>(sql`
     WITH events AS (
       SELECT 'follow' AS type, followee_id AS other, first_seen_at AS at,
@@ -226,7 +229,8 @@ export function listFollowChanges(
         WHERE v.entity_id = e.id ORDER BY v.created_at DESC, v.id DESC
         LIMIT 1)) AS data,
       c.id AS collection_id,
-      ${sql.raw(avatarOf('rv', 're.entity_key'))} AS avatar
+      ${sql.raw(avatarOf('rv', 're.entity_key'))} AS avatar,
+      (SELECT k.lang FROM catalog k WHERE k.collection_id = c.id) AS lang
     FROM events ev
     JOIN entities e ON e.id = ev.other
     LEFT JOIN collections c ON c.platform = e.platform
@@ -267,6 +271,7 @@ export function listFollowChanges(
           ...(typeof data.username === 'string' && data.username
             ? { username: data.username }
             : {}),
+          ...(row.lang ? { lang: row.lang } : {}),
           ...(row.collection_id ? { collection_id: row.collection_id } : {}),
           ...(avatar ? { avatar } : {}),
         },

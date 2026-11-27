@@ -125,8 +125,12 @@ export function getPublicShare(ctx: ReadContext, slug: string): PublicShare {
 function linkWithin(entity: EntityView, linkable: Set<string>): void {
   delete entity.id
   delete entity.version_id
-  if (entity.saved_collection_id && !linkable.has(entity.saved_collection_id))
+  if (entity.saved_collection_id && !linkable.has(entity.saved_collection_id)) {
     delete entity.saved_collection_id
+    // The language of a saved text shown anyway stays; an account's, read
+    // from a bio the share does not show, goes.
+    if (!entity.saved_text) delete entity.saved_lang
+  }
   if (entity.current) delete (entity.current as Partial<EntityVersionView>).id
   if (entity.saved_author) linkWithin(entity.saved_author, linkable)
 }
@@ -353,6 +357,7 @@ export function listPublicProfileChanges(
     if (post.collection_id && !linkable.has(post.collection_id)) {
       delete post.collection_id
       delete post.text
+      delete post.lang
     }
   return changes
 }
@@ -386,8 +391,11 @@ export function listPublicFollowChanges(
     ),
   ])
   for (const { account } of changes.items)
-    if (account.collection_id && !linkable.has(account.collection_id))
+    if (account.collection_id && !linkable.has(account.collection_id)) {
       delete account.collection_id
+      // Its name stays; the language of a bio the share does not show goes.
+      delete account.lang
+    }
   return changes
 }
 
@@ -416,7 +424,9 @@ export function getPublicFollowGraph(
     ),
   ])
   for (const node of graph.nodes)
-    if (node.collection_id && !linkable.has(node.collection_id))
+    if (node.collection_id && !linkable.has(node.collection_id)) {
       delete node.collection_id
+      delete node.lang
+    }
   return graph
 }

@@ -73,12 +73,17 @@ interface RevisionRow {
   revision_id: string
   payload: string
   capture_id: string
+  lang: string | null
 }
 
+// The language is the newest revision's (`catalog.lang`), also for an older
+// one: the catalog keeps no other, and a post or bio seldom changes
+// language.
 const REVISION_COLUMNS = `a.id, a.url, a.external_id, a.provider_id,
   a.observed_at, a.created_at, a.source_state, a.source_state_at,
   l.created_at AS saved_at, r.id AS revision_id,
-  r.payload, r.capture_id`
+  r.payload, r.capture_id,
+  (SELECT k.lang FROM catalog k WHERE k.collection_id = a.id) AS lang`
 
 function view(
   row: RevisionRow,
@@ -103,6 +108,7 @@ function view(
         }
       : {}),
     ...(row.saved_at === null ? {} : { saved_at: iso(row.saved_at) }),
+    ...(row.lang ? { lang: row.lang } : {}),
   }
 }
 

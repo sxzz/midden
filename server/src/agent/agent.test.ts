@@ -259,6 +259,7 @@ describe('posts and accounts', () => {
         name: 'Alice',
       },
       text: 'A cat on the mat',
+      lang: 'en',
     })
   })
 
@@ -277,6 +278,7 @@ describe('posts and accounts', () => {
       handle: 'alice',
       name: 'Alice',
       bio: 'Alice draws cats.',
+      lang: 'en',
       followers: 120,
       following: 5,
       saved_at: expect.any(String),
@@ -432,6 +434,21 @@ describe('query language', () => {
       })
       expect(json.message).toContain(message)
     }
+  })
+})
+
+describe('languages', () => {
+  test('posts, the posts they quote and accounts carry the detected language', async () => {
+    const f = await setup()
+    const quoting = await f.call(`/posts/${f.ids.p2}`)
+    expect(quoting.json.lang).toBe('en')
+    expect(quoting.json.quoted).toMatchObject({ id: f.ids.p1, lang: 'en' })
+    const account = await f.call(`/accounts/${f.ids['7']}`)
+    expect(account.json).toMatchObject({ bio: 'Alice draws cats.', lang: 'en' })
+    const langs = await f.call('/aggregate?by=lang')
+    expect(langs.json.buckets.map((b: { key: string }) => b.key)).toContain(
+      'en',
+    )
   })
 })
 

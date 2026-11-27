@@ -734,6 +734,56 @@ describe('entity links', () => {
     expect(unsaved.assets).toBeUndefined()
   })
 
+  test('languages: the collection’s, and saved posts’ and accounts’ it links', async () => {
+    const { ctx } = setup({
+      7: () => ({
+        text: 'Alice',
+        graph: graph([
+          entity('root', 'fake.profile', '7', {
+            username: 'alice',
+            name: 'アリス',
+            metadata: { description: '絵を描いています。ご依頼はDMまで' },
+          }),
+        ]),
+      }),
+      2: () => ({
+        text: 'The cat sat on the mat all afternoon',
+        graph: graph([entity('root', 'fake.post', '2')]),
+      }),
+      1: () => ({
+        text: '今天天气很好，我们去公园散步吧',
+        graph: graph(
+          [
+            entity('root', 'fake.post', '1'),
+            entity('author', 'fake.profile', '7', { username: 'alice' }),
+            entity('quote', 'fake.post', '2'),
+          ],
+          ['root', 'authored_by', 'author'],
+          ['root', 'quoted', 'quote'],
+        ),
+      }),
+    })
+    const account = await capture(ctx, profile('7'))
+    await capture(ctx, post('2'))
+    const quoting = await capture(ctx, post('1'))
+    const view = getCollection(ctx, quoting.collectionId)
+    expect(view.lang).toBe('zh-Hans')
+    expect(find(view, 'quote').saved_lang).toBe('en')
+    expect(find(view, 'author').saved_lang).toBe('ja')
+    expect(getCollection(ctx, account.collectionId).lang).toBe('ja')
+    const listed = listCollections(ctx, {}).items
+    expect(listed.map((c) => c.lang).toSorted()).toEqual([
+      'en',
+      'ja',
+      'zh-Hans',
+    ])
+    // A history point has the newest revision's.
+    const [point] = listHistory(ctx, quoting.collectionId).items
+    expect(
+      getHistoryPoint(ctx, quoting.collectionId, point!.capture_id).lang,
+    ).toBe('zh-Hans')
+  })
+
   test('authors read their current version; gone sources are marked', async () => {
     let name = 'first name'
     let gone = false

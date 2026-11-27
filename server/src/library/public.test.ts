@@ -303,7 +303,12 @@ describe('public shares', () => {
               field: 'pinned',
               before: [],
               after: [
-                { id: 'a1', collection_id: ids.a1, text: 'by five' },
+                {
+                  id: 'a1',
+                  collection_id: ids.a1,
+                  text: 'by five',
+                  lang: 'en',
+                },
                 { id: 'x1' },
               ],
             },

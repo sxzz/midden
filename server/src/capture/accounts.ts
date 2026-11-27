@@ -17,6 +17,8 @@ export interface MemberAccount extends AccountName {
    * by its id). Absent when the library holds nothing of it.
    */
   libraryId?: string
+  /** That collection's language (its bio's), for the name too. */
+  lang?: string
 }
 
 interface Row {
@@ -143,6 +145,24 @@ export function memberAccounts(
       ...name(named),
       ...(libraryId ? { libraryId } : {}),
     })
+  }
+  const linked = [...found.values()].flatMap((a) =>
+    a.libraryId ? [a.libraryId] : [],
+  )
+  if (linked.length) {
+    const langs = new Map(
+      db
+        .all<{ id: string; lang: string }>(
+          sql`SELECT collection_id AS id, lang FROM catalog
+            WHERE collection_id IN (SELECT value FROM json_each(${JSON.stringify([...new Set(linked)])}))
+              AND lang IS NOT NULL`,
+        )
+        .map((row) => [row.id, row.lang]),
+    )
+    for (const account of found.values()) {
+      const lang = account.libraryId && langs.get(account.libraryId)
+      if (lang) account.lang = lang
+    }
   }
   return found
 }

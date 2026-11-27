@@ -183,6 +183,7 @@ function referenced(c: CollectionView, e: EntityView, o: ShapeOptions): Data {
     ...(author ? { author: accountRef(author) } : {}),
     ...(shown ? { text: shown } : {}),
     ...(truncated ? { text_truncated: true } : {}),
+    ...(shown && e.saved_lang ? { lang: e.saved_lang } : {}),
     ...(o.view === 'full'
       ? media.length
         ? { media: media.map((a) => mediaItem(o.origin, a)) }
@@ -246,6 +247,7 @@ export function shapePost(c: CollectionView, o: ShapeOptions) {
     author: author && author !== root ? accountRef(author) : null,
     text: body,
     ...(truncated ? { text_truncated: true } : {}),
+    ...(c.lang ? { lang: c.lang } : {}),
     ...(c.published_at ? { published_at: c.published_at } : {}),
     ...(full && text(data.edited_at)
       ? { edited_at: text(data.edited_at) }
@@ -310,6 +312,7 @@ export function shapeAccount(c: CollectionView, o: ShapeOptions) {
     ...(name ? { name } : {}),
     ...(bio ? { bio } : {}),
     ...(truncated ? { bio_truncated: true } : {}),
+    ...(c.lang ? { lang: c.lang } : {}),
     ...(count(metadata.followers) === undefined
       ? {}
       : { followers: count(metadata.followers) }),

@@ -28,6 +28,8 @@ export interface GraphNode {
   external_id: string
   name?: string
   username?: string
+  /** The saved profile's language (its bio's), for the name too. */
+  lang?: string
   avatar?: AssetView
   /** The profile's own counts, as its newest capture read them. */
   followers?: number
@@ -51,6 +53,7 @@ export interface GraphViewer {
   key: string
   name?: string
   username?: string
+  lang?: string
   lists: { following: GraphList; followers: GraphList }
 }
 
@@ -122,12 +125,13 @@ export function viewerRelations(
         row.o && row.i ? 'mutual' : row.o ? 'following' : 'follower',
       )
   const shown = shownAccounts(ctx, [id])
-  const { name, username } = accountLabel(shown.get(id), new Map())
+  const { name, username, lang } = accountLabel(shown.get(id), new Map())
   return {
     viewer: {
       key,
       ...(name ? { name } : {}),
       ...(username ? { username } : {}),
+      ...(lang ? { lang } : {}),
       lists: listsOf(ctx, id),
     },
     relations,
@@ -225,6 +229,7 @@ interface Shown {
   id: string
   data: string | null
   avatar: string | null
+  lang: string | null
 }
 
 /** Names and avatars of the accounts shown, as their saved profiles read. */
@@ -237,7 +242,8 @@ export function shownAccounts(
       coalesce(own.data, (SELECT v.data FROM entity_versions v
         WHERE v.entity_id = e.id ORDER BY v.created_at DESC, v.id DESC
         LIMIT 1)) AS data,
-      ${sql.raw(avatarOf('rv', 're.entity_key'))} AS avatar
+      ${sql.raw(avatarOf('rv', 're.entity_key'))} AS avatar,
+      (SELECT k.lang FROM catalog k WHERE k.collection_id = c.id) AS lang
     FROM json_each(${list(ids)}) wanted
     JOIN entities e ON e.id = wanted.value
     LEFT JOIN collections c ON c.platform = e.platform
@@ -290,7 +296,7 @@ export function listsOf(r: Reader, subject: string): FollowGraph['lists'] {
 export function accountLabel(
   account: Shown | undefined,
   avatars: Map<string, AssetView>,
-): Pick<GraphNode, 'name' | 'username' | 'avatar'> {
+): Pick<GraphNode, 'name' | 'username' | 'lang' | 'avatar'> {
   const data = account?.data
     ? parseJson<Record<string, unknown>>(account.data)
     : {}
@@ -300,6 +306,7 @@ export function accountLabel(
     ...(typeof data.username === 'string' && data.username
       ? { username: data.username }
       : {}),
+    ...(account?.lang ? { lang: account.lang } : {}),
     ...(avatar ? { avatar } : {}),
   }
 }

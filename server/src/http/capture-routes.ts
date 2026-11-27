@@ -113,6 +113,7 @@ function profilePartJson(p: ProfilePart) {
     url: p.url,
     ...(p.handle ? { handle: p.handle } : {}),
     ...(p.name ? { name: p.name } : {}),
+    ...(p.lang ? { lang: p.lang } : {}),
     state: p.state,
     ...(p.error ? { error: p.error } : {}),
     ...(p.sourceState ? { source_state: p.sourceState } : {}),
@@ -145,6 +146,7 @@ function recordJson(r: CaptureRecord | UpdateRecord) {
     url: r.url,
     ...('handle' in r && r.handle ? { handle: r.handle } : {}),
     ...('name' in r && r.name ? { name: r.name } : {}),
+    ...('lang' in r && r.lang ? { lang: r.lang } : {}),
     input: r.input,
     platform: r.platform,
     kind: r.kind,
@@ -224,6 +226,7 @@ function memberJson(m: CaptureMember) {
     ...(m.kind ? { kind: m.kind } : {}),
     ...(m.handle ? { handle: m.handle } : {}),
     ...(m.name ? { name: m.name } : {}),
+    ...(m.lang ? { lang: m.lang } : {}),
     ...(m.libraryId ? { library_id: m.libraryId } : {}),
     created_at: m.createdAt.toISOString(),
   }

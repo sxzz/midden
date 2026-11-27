@@ -518,6 +518,8 @@ export interface ProfilePart {
   /** Its username and display name, when a stored version has them. */
   handle: string
   name: string
+  /** Its saved profile's language (`MemberAccount.lang`). */
+  lang?: string
   /** The profile's own capture; `waiting` before its turn, `skipped` if none. */
   state: string
   error: string
@@ -1067,13 +1069,14 @@ function profileParts(db: Executor, g: Gathered): ProfilePart[] {
     const item = byPosition.get(position)
     const url = kinds.get(id)!.url
     const skip = skips.get(position)
-    const { handle = '', name = '' } = names.get(id) ?? {}
+    const { handle = '', name = '', lang } = names.get(id) ?? {}
     if (!item)
       return {
         collectionId: id,
         url,
         handle,
         name,
+        ...(lang ? { lang } : {}),
         state: position < update.position ? 'skipped' : 'waiting',
         error: skip ? SKIP_TEXT[skip.reason] : '',
         jobId: '',
@@ -1088,6 +1091,7 @@ function profileParts(db: Executor, g: Gathered): ProfilePart[] {
       url,
       handle,
       name,
+      ...(lang ? { lang } : {}),
       state: item.capture.state,
       // Saying again what the source is known to be is no failure.
       error: sourceState ? '' : item.capture.error,
@@ -1145,8 +1149,11 @@ export function recordProfiles(
       ? undefined
       : collectionProgress(db, record.id)
   const options = storedOptions(row.submission.captureOptions)
-  const { handle = '', name = '' } =
-    memberAccounts(db, [row.collection.id]).get(row.collection.id) ?? {}
+  const {
+    handle = '',
+    name = '',
+    lang,
+  } = memberAccounts(db, [row.collection.id]).get(row.collection.id) ?? {}
   const sourceState = knownStates(db, [row.capture.id]).get(row.capture.id)
   return [
     {
@@ -1154,6 +1161,7 @@ export function recordProfiles(
       url: row.collection.url,
       handle,
       name,
+      ...(lang ? { lang } : {}),
       state: row.capture.state,
       error: sourceState ? '' : row.capture.error,
       ...(sourceState ? { sourceState } : {}),

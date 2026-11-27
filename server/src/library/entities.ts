@@ -134,9 +134,21 @@ export function linkSavedEntities(
   const links = new Map<string, string>()
   for (const c of candidates)
     if (!links.has(c.entity)) links.set(c.entity, c.collection)
+  const langs = new Map(
+    r.db
+      .all<{ id: string; lang: string }>(
+        sql`SELECT collection_id AS id, lang FROM catalog
+          WHERE collection_id IN (SELECT value FROM json_each(${list([...new Set(links.values())])}))
+            AND lang IS NOT NULL`,
+      )
+      .map((row) => [row.id, row.lang]),
+  )
   for (const entity of graphEntities(views)) {
     const link = entity.id && links.get(entity.id)
-    if (link) entity.saved_collection_id = link
+    if (!link) continue
+    entity.saved_collection_id = link
+    const lang = langs.get(link)
+    if (lang) entity.saved_lang = lang
   }
   attachSavedAvatars(r, views)
   attachSavedSummaries(r, views)
