@@ -81,13 +81,23 @@ async function rename(name: string) {
   }
 }
 const last = computed(() => items.value?.length === 1)
+// Losing a passkey may mean it was lost: by default the browsers it signed
+// in go too, every one but this.
+const signOutOthers = shallowRef(true)
+function openRemove(p: Passkey) {
+  signOutOthers.value = true
+  removing.value = p
+}
 async function remove() {
   const p = removing.value
   if (!p || busy.value) return
   busy.value = true
   try {
     await call(
-      client.passkeys[':id'].$delete({ param: { id: p.id }, query: {} }),
+      client.passkeys[':id'].$delete({
+        param: { id: p.id },
+        query: signOutOthers.value ? { sign_out_others: 'true' } : {},
+      }),
     )
     removing.value = undefined
     await load()
@@ -128,7 +138,7 @@ async function remove() {
         class="action remove"
         :aria-label="`删除 ${p.name}`"
         :disabled="busy"
-        @click="removing = p"
+        @click="openRemove(p)"
       >
         删除
       </button>
@@ -161,7 +171,13 @@ async function remove() {
     :busy="busy"
     @confirm="remove"
     @cancel="removing = undefined"
-  />
+  >
+    <label class="option"
+      ><input v-model="signOutOthers" type="checkbox" :disabled="busy" /><span
+        >同时退出所有其他设备</span
+      ></label
+    >
+  </ConfirmSheet>
 </template>
 
 <style scoped>
@@ -214,5 +230,18 @@ async function remove() {
 }
 .remove {
   color: var(--destructive);
+}
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px 16px;
+  font-size: 15px;
+}
+.option input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--destructive);
 }
 </style>

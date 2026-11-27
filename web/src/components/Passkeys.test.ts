@@ -178,7 +178,7 @@ describe('passkey management', () => {
         passkeys = [...passkeys, added]
         return added
       }
-      const id = path.slice('/passkeys/'.length)
+      const id = path.slice('/passkeys/'.length).split('?', 1)[0]
       if (request.method === 'DELETE') {
         passkeys = passkeys.filter((p) => p.id !== id)
         return
@@ -256,6 +256,37 @@ describe('passkey management', () => {
     await vi.waitFor(() =>
       expect(el.querySelectorAll('.passkey')).toHaveLength(0),
     )
+  })
+
+  it('signs the other devices out too, unless unchecked', async () => {
+    const el = mount(PasskeyList)
+    await vi.waitFor(() => expect(el.textContent).toContain('iPhone'))
+    const sheet = () => el.querySelector('dialog[open]')
+    const option = () =>
+      sheet()!.querySelector<HTMLInputElement>('input[type=checkbox]')!
+    const deleted = () =>
+      api.mock.calls
+        .filter(([, r]) => r.method === 'DELETE')
+        .map(([path]) => path)
+    button(el, '删除 iPhone').click()
+    await vi.waitFor(() => expect(sheet()).not.toBeNull())
+    expect(sheet()!.textContent).toContain('同时退出所有其他设备')
+    expect(option().checked).toBe(true)
+    button(el, '删除通行密钥').click()
+    await vi.waitFor(() =>
+      expect(el.querySelectorAll('.passkey')).toHaveLength(1),
+    )
+    // Unchecked once; the next sheet starts checked again.
+    button(el, '删除 Mac Safari · midden.test').click()
+    await vi.waitFor(() => expect(sheet()).not.toBeNull())
+    expect(option().checked).toBe(true)
+    option().click()
+    button(el, '删除通行密钥').click()
+    await vi.waitFor(() => expect(deleted()).toHaveLength(2))
+    expect(deleted()).toEqual([
+      '/passkeys/b?sign_out_others=true',
+      '/passkeys/a',
+    ])
   })
 })
 

@@ -7,7 +7,7 @@ export interface SettingsEntry {
   value: string
   label: string
   hint: string
-  icon: 'globe' | 'disk' | 'queue' | 'backup'
+  icon: 'globe' | 'disk' | 'queue' | 'backup' | 'devices'
 }
 export interface SettingsSection {
   value: string
@@ -21,6 +21,14 @@ export const settingsSections: readonly SettingsSection[] = [
     value: 'passkeys',
     label: '通行密钥',
     hint: '在浏览器中登录用的通行密钥。',
+    entries: [
+      {
+        value: 'sessions',
+        label: '已登录的设备',
+        hint: '登录着的浏览器与 Mini App',
+        icon: 'devices',
+      },
+    ],
   },
   {
     value: 'tokens',

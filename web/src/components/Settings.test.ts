@@ -115,6 +115,38 @@ describe('设置', () => {
     })
   })
 
+  it('has 已登录的设备 under 通行密钥', async () => {
+    route.params = { section: 'passkeys' }
+    mockApi((path) => {
+      if (path === '/passkeys') return []
+      if (path === '/sessions')
+        return [
+          {
+            id: 's1',
+            current: true,
+            method: 'passkey',
+            origin: 'https://midden.test',
+            device: 'Safari · macOS',
+            created_at: '2026-11-01T08:00:00.000Z',
+            last_used_at: '2026-11-01T08:00:00.000Z',
+            expires_at: '2026-12-01T08:00:00.000Z',
+          },
+        ]
+      return
+    })
+    const el = mount(SettingsView)
+    await settle()
+    expect(links(el)).toMatchObject({
+      '已登录的设备登录着的浏览器与MiniApp›': '/app/settings/passkeys/sessions',
+    })
+    unmount()
+    route.params = { section: 'passkeys', entry: 'sessions' }
+    const entry = mount(SettingsView)
+    await vi.waitFor(() => expect(entry.textContent).toContain('当前设备'))
+    expect(entry.textContent).toContain('Safari · macOS')
+    expect(entry.textContent).not.toContain('添加通行密钥')
+  })
+
   it('shows 关于: the build and the source', () => {
     route.params = { section: 'about' }
     mockApi()

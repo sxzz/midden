@@ -16,6 +16,7 @@ import {
 import AdminView from './AdminView.vue'
 import ApiTokens from './ApiTokens.vue'
 import PasskeyList from './PasskeyList.vue'
+import SessionList from './SessionList.vue'
 import AppLink from './ui/AppLink.vue'
 import ListSection from './ui/ListSection.vue'
 
@@ -206,6 +207,7 @@ async function logout() {
           :entry="entry.value"
           @cleared="emit('cleared')"
         />
+        <SessionList v-else-if="entry.value === 'sessions'" />
       </template>
       <template v-else>
         <nav
@@ -242,6 +244,11 @@ async function logout() {
                 <path
                   d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"
                 />
+              </template>
+              <template v-else-if="item.icon === 'devices'">
+                <rect x="2.5" y="4.5" width="14" height="10" rx="1.5" />
+                <path d="M1.5 18h11" />
+                <rect x="15.5" y="9" width="7" height="11.5" rx="1.5" />
               </template>
               <template v-else-if="item.icon === 'queue'">
                 <path d="M8 6h12M8 12h12M8 18h12" />

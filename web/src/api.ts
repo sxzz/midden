@@ -133,6 +133,8 @@ export interface TagChange {
 }
 export type Folder = Ok<typeof client.folders.$get>[number]
 export type Passkey = Ok<typeof client.passkeys.$get>[number]
+/** A browser or Mini App signed in (已登录的设备). */
+export type WebSession = Ok<typeof client.sessions.$get>[number]
 /** An API token (API 令牌), with its use over the last 30 days. */
 export type ApiToken = Ok<typeof client.tokens.$get>[number]
 export type ApiTokenUsage = Ok<(typeof client.tokens)[':id']['usage']['$get']>

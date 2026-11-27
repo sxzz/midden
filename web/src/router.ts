@@ -14,6 +14,7 @@ import ProfileChanges from './components/ProfileChanges.vue'
 import PublicHome from './components/PublicHome.vue'
 import SettingsView from './components/SettingsView.vue'
 import WatchesView from './components/WatchesView.vue'
+import { settingsSections } from './settings-sections'
 
 // The graph page brings sigma and graphology: loaded only when opened.
 const RelationGraph = () => import('./components/RelationGraph.vue')
@@ -21,6 +22,16 @@ const RelationCompare = () => import('./components/RelationCompare.vue')
 const RelationsView = () => import('./components/RelationsView.vue')
 
 const SHARE = String.raw`/s/:slug([\w-]+)`
+// 设置's entries, by the sections that have them; SettingsView shows the
+// section for an entry of another.
+const ENTRY_SECTIONS = settingsSections
+  .filter((s) => s.entries)
+  .map((s) => s.value)
+  .join('|')
+const ENTRIES = settingsSections
+  .flatMap((s) => s.entries ?? [])
+  .map((e) => e.value)
+  .join('|')
 // Pages inside a share take the collection; the slug is the share's own.
 const idOnly = (route: RouteLocationNormalized) => ({
   id: String(route.params.id),
@@ -81,7 +92,7 @@ export const router = createRouter({
       component: SettingsView,
     },
     {
-      path: '/settings/:section(admin)/:entry(origins|storage|jobs|backup)',
+      path: `/settings/:section(${ENTRY_SECTIONS})/:entry(${ENTRIES})`,
       name: 'settings-entry',
       component: SettingsView,
     },
