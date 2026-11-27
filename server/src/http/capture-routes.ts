@@ -18,21 +18,20 @@ import {
 import { stopCollection } from '#capture/related.ts'
 import { captureRelations, type RelationProgress } from '#capture/relations.ts'
 import { retryRecordFailed } from '#capture/retries.ts'
+import { repeatOf, startPlannedUpdate } from '#capture/update-start.ts'
 import {
   collectionUpdate,
   continueTimeline,
+  haltUpdate,
   isUpdate,
   listRecords,
   pauseUpdate,
   previewUpdate,
   recordProfiles,
-  repeatUpdate,
   resumeUpdate,
-  startUpdate,
-  stopUpdate,
+  stopParts,
   updateDetail,
   updateMembers,
-  updateRecord,
   type ProfilePart,
   type UpdateInfo,
   type UpdateRecord,
@@ -43,7 +42,7 @@ import { captures, collections, library, submissions } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { deleteAll } from '#library/delete.ts'
 import { ownerOnly } from './auth.ts'
-import { inline } from './offload.ts'
+import { inline, readOnly, type NamedRead } from './offload.ts'
 import { Cursor, json, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { Job } from '#capture/submit.ts'
@@ -282,8 +281,13 @@ const idempotencyKey = (c: {
 
 export function captureRoutes(
   ctx: AccountsContext,
+  read: NamedRead,
   { dev = false }: { dev?: boolean } = {},
 ) {
+  // An update's record as a read thread counts it, once written.
+  const recordOf = async (id: string) =>
+    recordJson(await read('updateRecord', { id }))
+  const plan = (input: UpdateTargetInput) => read('updatePlan', input)
   return (
     new Hono<Env>()
       .post(
@@ -359,28 +363,33 @@ export function captureRoutes(
       )
 
       // A new record capturing the same again; its id, to open it.
-      .post('/captures/:id/retry', (c) => {
+      .post('/captures/:id/retry', async (c) => {
         const id = c.req.param('id')
+        if (!isUpdate(ctx.db, id))
+          return c.json({
+            record_id: retryRecord(ctx, id, idempotencyKey(c)).submissionId,
+          })
+        const { input, options } = repeatOf(ctx.db, id)
         return c.json({
-          record_id: isUpdate(ctx.db, id)
-            ? repeatUpdate(ctx, id)
-            : retryRecord(ctx, id, idempotencyKey(c)).submissionId,
+          record_id: await startPlannedUpdate(ctx, input, options, plan),
         })
       })
 
       // Fetch again what failed, all of it or the part `id` names: a
-      // member's job id, a list's or page's id, a profile's posts.
+      // member's job id, a list's or page's id, a profile's posts. What
+      // failed is found on a read thread, and checked again here.
       .post(
         '/captures/:id/retry-failed',
         json(v.strictObject({ id: v.optional(v.string()) })),
-        (c) =>
-          c.json({
-            count: retryRecordFailed(
-              ctx,
-              c.req.param('id'),
-              c.req.valid('json').id,
-            ),
-          }),
+        async (c) => {
+          const id = c.req.param('id')
+          const target = c.req.valid('json').id
+          const plan = await read('retryPlan', {
+            id,
+            ...(target === undefined ? {} : { target }),
+          })
+          return c.json({ count: retryRecordFailed(ctx, id, target, plan) })
+        },
       )
 
       .post(
@@ -397,21 +406,29 @@ export function captureRoutes(
         },
       )
 
-      .post('/captures/:id/stop', (c) => {
+      // An update stops taking items here, then what its items still read
+      // is found on a read thread and stopped here.
+      .post('/captures/:id/stop', async (c) => {
         const id = c.req.param('id')
-        if (isUpdate(ctx.db, id)) stopUpdate(ctx, id)
-        else stopCollection(ctx, id)
+        if (isUpdate(ctx.db, id)) {
+          haltUpdate(ctx, id)
+          stopParts(ctx, await read('stopPlan', { id }))
+        } else {
+          stopCollection(ctx, id)
+        }
         return c.body(null, 204)
       })
 
       // Pause or resume an update: its waiting jobs wait until it resumes.
-      .post('/updates/:id/pause', (c) => {
-        pauseUpdate(ctx, c.req.param('id'))
-        return c.json(recordJson(updateRecord(ctx.db, c.req.param('id'))))
+      // Whether it is done, and its record, are counted on a read thread.
+      .post('/updates/:id/pause', async (c) => {
+        const id = c.req.param('id')
+        pauseUpdate(ctx, id, await read('updateRecord', { id }))
+        return c.json(await recordOf(id))
       })
-      .post('/updates/:id/resume', (c) => {
+      .post('/updates/:id/resume', async (c) => {
         resumeUpdate(ctx, c.req.param('id'))
-        return c.json(recordJson(updateRecord(ctx.db, c.req.param('id'))))
+        return c.json(await recordOf(c.req.param('id')))
       })
 
       .get('/jobs/:id', (c) => c.json(jobJson(ctx, { id: c.req.param('id') })))
@@ -426,14 +443,21 @@ export function captureRoutes(
             older: v.optional(v.boolean()),
           }),
         ),
-        (c) => {
+        // What the target holds is read on a read thread, and the update
+        // written here; its record is counted there again.
+        async (c) => {
           const input = c.req.valid('json')
-          const id = startUpdate(ctx, targetInput(input.target), {
-            options: resolveOptions(input.options),
-            older: input.older,
-            key: idempotencyKey(c),
-          })
-          return c.json(recordJson(updateRecord(ctx.db, id)))
+          const id = await startPlannedUpdate(
+            ctx,
+            targetInput(input.target),
+            {
+              options: resolveOptions(input.options),
+              older: input.older,
+              key: idempotencyKey(c),
+            },
+            plan,
+          )
+          return c.json(await recordOf(id))
         },
       )
 
@@ -441,12 +465,12 @@ export function captureRoutes(
       .post(
         '/updates/:id/continue',
         json(v.strictObject({ collection_id: v.string() })),
-        (c) => {
-          continueTimeline(
-            ctx,
-            c.req.param('id'),
-            c.req.valid('json').collection_id,
-          )
+        // Its last page is found on a read thread.
+        async (c) => {
+          const id = c.req.param('id')
+          const collection = c.req.valid('json').collection_id
+          const plan = await read('continuePlan', { id, collection })
+          continueTimeline(ctx, id, collection, plan)
           return c.body(null, 204)
         },
       )
@@ -454,6 +478,7 @@ export function captureRoutes(
       // What an update would cover, for the sheet that starts it.
       .post(
         '/updates/preview',
+        readOnly,
         json(v.strictObject({ target: UpdateTargetBody })),
         (c) => {
           const p = previewUpdate(ctx, targetInput(c.req.valid('json').target))

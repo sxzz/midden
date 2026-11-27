@@ -6,7 +6,7 @@ import { startUpdate } from '#capture/updates.ts'
 import { collections, library, shares } from '#db/schema.ts'
 import { capture, entity, graph, libraryContext } from '#testing/library.ts'
 import { updateAnnotation } from './annotations.ts'
-import { deleteCollection, deleteCollections } from './delete.ts'
+import { deleteCollection, deleteCollections, planDeletion } from './delete.ts'
 import { createShare } from './shares.ts'
 import type { CaptureContext } from '#capture/context.ts'
 import type { FetchResponse } from '#platforms/protocol.ts'
@@ -249,5 +249,46 @@ describe('deleting collections', () => {
     )
     deleteCollection(c.db, ids[1]!)
     expect(saved(c)).toEqual({})
+  })
+
+  test('planned before it is written, it is planned again if that changed', async () => {
+    /** Account 1 with posts a and b, and its deletion with them planned. */
+    const planned = async () => {
+      await ctx?.queue.stop()
+      const c = setup(
+        { 1: { wrote: ['a', 'b'], reposted: [] } },
+        { a: { author: '1' }, b: { author: '1' } },
+      )
+      await capture(c, profile('1'))
+      const ids = saved(c)
+      const plan = planDeletion(c.db, [ids[1]!], { withPosts: true })
+      expect(plan.counts).toMatchObject({ profiles: 1, related: 2 })
+      expect(plan.posts.toSorted()).toEqual([ids.a!, ids.b!].toSorted())
+      const remove = () =>
+        deleteCollections(c.db, [ids[1]!], { withPosts: true, plan })
+      return { c, ids, plan, remove }
+    }
+    // As it was: written as planned (here a plan that names only post a).
+    let { c, ids, plan } = await planned()
+    expect(
+      deleteCollections(c.db, [ids[1]!], {
+        withPosts: true,
+        plan: { ...plan, posts: [ids.a!] },
+      }),
+    ).toEqual(plan.counts)
+    expect(Object.keys(saved(c))).toEqual(['b'])
+    // A note, a tag, or post b saved on its own since: b stays.
+    const changes = [
+      () => updateAnnotation(c.db, ids.b!, { note: 'mine' }),
+      () => updateAnnotation(c.db, ids.b!, { tagNames: ['keep'] }),
+      () => capture(c, post('b')),
+    ]
+    for (const change of changes) {
+      let remove: () => unknown
+      ;({ c, ids, remove } = await planned())
+      await change()
+      expect(remove()).toMatchObject({ related: 1 })
+      expect(Object.keys(saved(c))).toEqual(['b'])
+    }
   })
 })

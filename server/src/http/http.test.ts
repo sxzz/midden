@@ -205,7 +205,10 @@ describe('api', () => {
       related: 0,
       kept: { listed: 0, saved: 0, annotated: 0, quoted: 0 },
     }
-    const dry = await remove({ ids: [collectionId], dry_run: true })
+    const dry = await call('/collections/delete/preview', {
+      method: 'POST',
+      body: JSON.stringify({ ids: [collectionId], with_posts: true }),
+    })
     expect(await dry.json()).toEqual(counts)
     expect((await remove({ ids: [] })).status).toBe(400)
     expect(

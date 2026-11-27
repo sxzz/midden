@@ -40,8 +40,11 @@ export interface OpenOptions {
    */
   exclusive?: boolean
   /**
-   * Only read, as the agent API's read threads do: the file must exist and
-   * be migrated; nothing is set up, and `query_only` refuses any write.
+   * Only read, as the read threads do: the file must exist and be migrated;
+   * nothing is set up, and the file is opened read-only, so any write to the
+   * database fails. Temporary tables (the connection's own scratch space,
+   * which some reads collect ids in) still work: `query_only` would refuse
+   * them too.
    */
   readOnly?: boolean
 }
@@ -54,7 +57,6 @@ export function openDatabase(file: string, options: OpenOptions = {}) {
       readOnly: true,
       timeout: busyTimeout,
     })
-    client.exec('PRAGMA query_only = 1')
     searchFunctions(client)
     return immediateWrites(drizzle({ client }))
   }

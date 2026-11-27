@@ -102,13 +102,11 @@ test("delete a selection, with the accounts' posts only when asked", async ({
     if (path === '/v1/usage') return r.fulfill({ json: { used_bytes: 0 } })
     if (path === '/v1/collections')
       return r.fulfill({ json: { items: listed } })
-    if (path === '/v1/collections/delete') {
-      const body = r.request().postDataJSON() as {
-        ids: string[]
-        dry_run: boolean
-      }
-      sent.push(body)
-      if (!body.dry_run)
+    if (path.startsWith('/v1/collections/delete')) {
+      const preview = path === '/v1/collections/delete/preview'
+      const body = r.request().postDataJSON() as { ids: string[] }
+      sent.push({ ...body, preview })
+      if (!preview)
         listed = listed.filter((item) => !body.ids.includes(item.id))
       return r.fulfill({
         json: {
@@ -148,7 +146,7 @@ test("delete a selection, with the accounts' posts only when asked", async ({
   await expect(page.getByRole('checkbox')).toHaveCount(0)
   const ids = [items[0].id, items[1].id]
   expect(sent).toEqual([
-    { ids, with_posts: true, dry_run: true },
-    { ids, with_posts: true, dry_run: false },
+    { ids, with_posts: true, preview: true },
+    { ids, with_posts: true, preview: false },
   ])
 })

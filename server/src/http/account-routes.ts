@@ -14,11 +14,15 @@ import {
   readAnnotation,
   updateAnnotation,
 } from '#library/annotations.ts'
-import { deleteCollection, deleteCollections } from '#library/delete.ts'
+import {
+  deleteCollection,
+  deleteCollections,
+  planDeletion,
+} from '#library/delete.ts'
 import { storageUsed } from '#library/read.ts'
 import { deleteTag, renameTag } from '#library/tags.ts'
 import { ownerOnly } from './auth.ts'
-import { inline } from './offload.ts'
+import { inline, readOnly, type NamedRead } from './offload.ts'
 import { json, type Env } from './validate.ts'
 
 const accountJson = (
@@ -32,7 +36,13 @@ const accountJson = (
   selected: a.selected,
 })
 
-export function accountRoutes(ctx: AccountsContext) {
+/** What deleting a selection takes: its collections, and their posts. */
+const Deletion = v.strictObject({
+  ids: v.pipe(v.array(v.string()), v.minLength(1)),
+  with_posts: v.optional(v.boolean()),
+})
+
+export function accountRoutes(ctx: AccountsContext, read: NamedRead) {
   const accounts = () => {
     const { platforms, accounts } = listAccounts(ctx)
     return {
@@ -135,26 +145,25 @@ export function accountRoutes(ctx: AccountsContext) {
         return c.body(null, 204)
       })
 
-      .post(
-        '/collections/delete',
-        ownerOnly,
-        json(
-          v.strictObject({
-            ids: v.pipe(v.array(v.string()), v.minLength(1)),
-            with_posts: v.optional(v.boolean()),
-            dry_run: v.optional(v.boolean()),
+      // The dry run the confirmation states its counts from.
+      .post('/collections/delete/preview', readOnly, json(Deletion), (c) => {
+        const input = c.req.valid('json')
+        return c.json(
+          planDeletion(ctx.db, input.ids, { withPosts: input.with_posts })
+            .counts,
+        )
+      })
+      // Planned on a read thread; written as planned unless that changed.
+      .post('/collections/delete', ownerOnly, json(Deletion), async (c) => {
+        const input = c.req.valid('json')
+        const withPosts = !!input.with_posts
+        return c.json(
+          deleteCollections(ctx.db, input.ids, {
+            withPosts,
+            plan: await read('deletionPlan', { ids: input.ids, withPosts }),
           }),
-        ),
-        (c) => {
-          const input = c.req.valid('json')
-          return c.json(
-            deleteCollections(ctx.db, input.ids, {
-              withPosts: input.with_posts,
-              dryRun: input.dry_run,
-            }),
-          )
-        },
-      )
+        )
+      })
 
       .get('/usage', (c) => c.json({ used_bytes: storageUsed(ctx.db) }))
   )

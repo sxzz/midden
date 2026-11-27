@@ -19,12 +19,14 @@ const error = shallowRef('')
 const busy = shallowRef(false)
 /** Unchecked on every opening: removing posts is the larger step. */
 const withPosts = shallowRef(false)
-const request = (posts: boolean, dryRun: boolean) =>
-  call(
-    client.collections.delete.$post({
-      json: { ids: props.ids, with_posts: posts, dry_run: dryRun },
-    }),
+const request = (posts: boolean, dryRun: boolean) => {
+  const json = { ids: props.ids, with_posts: posts }
+  return call(
+    dryRun
+      ? client.collections.delete.preview.$post({ json })
+      : client.collections.delete.$post({ json }),
   )
+}
 let opened = 0
 watch(
   () => props.open,

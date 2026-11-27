@@ -8,7 +8,8 @@ import * as v from 'valibot'
 import { revokeAccount, type AccountsContext } from '#accounts/accounts.ts'
 import { OptionsBody, resolveOptions } from '#capture/options.ts'
 import { captureURL } from '#capture/records.ts'
-import { pauseUpdate, resumeUpdate, startUpdate } from '#capture/updates.ts'
+import { startPlannedUpdate } from '#capture/update-start.ts'
+import { pauseUpdate, resumeUpdate } from '#capture/updates.ts'
 import { EveryBody } from '#capture/watch-schedule.ts'
 import { editWatch, setWatch } from '#capture/watches.ts'
 import { connections } from '#db/schema.ts'
@@ -208,7 +209,9 @@ export function writeRoutes(
       }),
     )
     const t = input.target
-    const id = startUpdate(
+    // What the target holds is read on a read thread; the update is
+    // written here, and its status read there again.
+    const id = await startPlannedUpdate(
       ctx,
       'post' in t
         ? { target: 'collection', id: savedPost(reader, t.post) }
@@ -225,23 +228,27 @@ export function writeRoutes(
         older: input.older,
         key: idempotencyKey(c),
       },
+      (target) => reads.run('updatePlan', target),
     )
     return c.json(
       {
         update_id: id,
         status_url: statusUrl(id),
-        ...(runRead(reader, 'status', { id }) as object),
+        ...(await reads.run('status', { id })),
       },
       202,
     )
   })
 
   for (const op of ['pause', 'resume'] as const)
-    app.post(`/updates/:id/${op}`, writes, (c) => {
-      const id = c.req.param('id')
-      if (!isUUID(id)) throw notFound()
-      ;(op === 'pause' ? pauseUpdate : resumeUpdate)(ctx, id.toLowerCase())
-      return c.json(runRead(reader, 'status', { id }))
+    app.post(`/updates/:id/${op}`, writes, async (c) => {
+      const raw = c.req.param('id')
+      if (!isUUID(raw)) throw notFound()
+      const id = raw.toLowerCase()
+      if (op === 'pause')
+        pauseUpdate(ctx, id, await reads.run('updateRecord', { id }))
+      else resumeUpdate(ctx, id)
+      return c.json(await reads.run('status', { id }))
     })
 
   // All background work, or some job types (管理员面板 → 后台任务).

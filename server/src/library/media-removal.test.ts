@@ -26,7 +26,7 @@ import { fakePlatform, postGraph } from '#testing/fake-platform.ts'
 import { expectCatalogFresh } from '#testing/library.ts'
 import { deleteCollection } from './delete.ts'
 import { listCollections } from './list.ts'
-import { previewRemoval, removeMedia } from './media-removal.ts'
+import { planRemoval, previewRemoval, removeMedia } from './media-removal.ts'
 import { restoreMedia } from './media-restore.ts'
 import { getCollection, storageUsed } from './read.ts'
 import type { FsBlobStore } from '#blob/fs-store.ts'
@@ -186,7 +186,7 @@ describe('media removal', () => {
       freed_bytes: VIDEO.length,
       shared: 0,
     })
-    expect(removeMedia(c, target)).toEqual(preview)
+    expect(await removeMedia(c, target)).toEqual(preview)
     const states = assetsOf(c, id)
     expect(states).toHaveLength(4)
     // Both captures' video went; both photos stay.
@@ -216,7 +216,7 @@ describe('media removal', () => {
     }
     const preview = previewRemoval(c, target)
     expect(preview).toEqual({ media: 1, freed_bytes: 0, shared: 1 })
-    expect(removeMedia(c, target)).toEqual(preview)
+    expect(await removeMedia(c, target)).toEqual(preview)
     expect(c.db.select().from(blobs).all()).toHaveLength(1)
     expect(assetsOf(c, two.collectionId)[0]).toMatchObject({
       state: 'ready',
@@ -239,7 +239,7 @@ describe('media removal', () => {
     const one = await capture('1')
     const blob = c.db.select().from(blobs).get()!
     await addThumbnail(c, blob.id)
-    removeMedia(c, { ids: [one.collectionId] })
+    await removeMedia(c, { ids: [one.collectionId] })
     expect(c.db.select().from(removedMedia).get()).toMatchObject({
       kind: 'video',
       thumbnailKey: THUMB_KEY,
@@ -272,7 +272,7 @@ describe('media removal', () => {
     const { c, media, requests, capture } = setup()
     media['1'] = [video]
     const one = await capture('1')
-    removeMedia(c, { ids: [one.collectionId] })
+    await removeMedia(c, { ids: [one.collectionId] })
     const fetched = requests.length
     const again = await capture('1')
     expect(requests).toHaveLength(fetched)
@@ -290,7 +290,7 @@ describe('media removal', () => {
     media['1'] = [video]
     const one = await capture('1')
     await addThumbnail(c, c.db.select().from(blobs).get()!.id)
-    removeMedia(c, { ids: [one.collectionId] })
+    await removeMedia(c, { ids: [one.collectionId] })
     const fetched = requests.length
     // A quote listing the same video under another address.
     media['2'] = [{ ...video, url: 'https://m.test/other.mp4' }, photo]
@@ -322,7 +322,9 @@ describe('media removal', () => {
     await until(() => c.db.select().from(assets).all().length === 2)
     const collectionOf = (id: string) =>
       c.db.select().from(captures).where(eq(captures.id, id)).get()!
-    const result = removeMedia(c, { ids: [collectionOf(two.id).collectionId] })
+    const result = await removeMedia(c, {
+      ids: [collectionOf(two.id).collectionId],
+    })
     expect(result).toEqual({ media: 1, freed_bytes: 0, shared: 0 })
     gate.open()
     await Promise.all([drained, drainedToo])
@@ -346,7 +348,7 @@ describe('media removal', () => {
       listCollections(c, {}).items.find((i) => i.id === one.collectionId)!
         .storage_bytes!
     const before = listed()
-    const { freed_bytes } = removeMedia(c, { ids: [one.collectionId] })
+    const { freed_bytes } = await removeMedia(c, { ids: [one.collectionId] })
     expect(freed_bytes).toBe(VIDEO.length + JPEG.length)
     expect(storageUsed(c.db)).toBe(used - freed_bytes)
     expect(listed()).toBe(before - freed_bytes)
@@ -364,7 +366,7 @@ describe('media removal', () => {
     const preview = previewRemoval(c, { ids })
     // The video is shared with post 3, so only the photo is freed.
     expect(preview).toEqual({ media: 2, freed_bytes: JPEG.length, shared: 1 })
-    expect(removeMedia(c, { ids })).toEqual(preview)
+    expect(await removeMedia(c, { ids })).toEqual(preview)
     for (const id of ids)
       expect(assetsOf(c, id).every((a) => a.state === 'removed')).toBe(true)
     expect(assetsOf(c, three.collectionId)[0]!.state).toBe('ready')
@@ -375,6 +377,75 @@ describe('media removal', () => {
       freed_bytes: 0,
       shared: 0,
     })
+  })
+
+  test('written a few items at a time, it does what one write would', async () => {
+    const { c, media, capture } = setup()
+    const other = { ...photo, url: 'https://m.test/b.jpg', immutableKey: 'b' }
+    media['1'] = [video, photo]
+    media['2'] = [video, other]
+    media['3'] = [video]
+    const posts = [await capture('1'), await capture('2'), await capture('3')]
+    const ids = posts.slice(0, 2).map((p) => p.collectionId)
+    const used = storageUsed(c.db)
+    const preview = previewRemoval(c, { ids })
+    // Post 3 keeps the video, which posts 1 and 2 share; the two photos are
+    // one file, freed once both are gone.
+    expect(preview).toEqual({
+      media: 3,
+      freed_bytes: JPEG.length,
+      shared: 1,
+    })
+    // One item per write: the video of both posts goes in the same one,
+    // the photos' file with the second of them.
+    const plan = planRemoval(c.db, { ids })
+    expect(plan.keys).toHaveLength(3)
+    expect(await removeMedia(c, { ids }, { plan, batch: 1 })).toEqual(preview)
+    for (const id of ids)
+      expect(assetsOf(c, id).every((a) => a.state === 'removed')).toBe(true)
+    expect(assetsOf(c, posts[2]!.collectionId)[0]!.state).toBe('ready')
+    expect(c.db.select().from(removedMedia).all()).toHaveLength(3)
+    expect(storageUsed(c.db)).toBe(used - preview.freed_bytes)
+    expectCatalogFresh(c)
+  })
+
+  test('what changed between its plan and its write is read again', async () => {
+    const { c, media, texts, capture } = setup()
+    media['1'] = [video]
+    const one = await capture('1')
+    const target = { ids: [one.collectionId] }
+    const plan = planRemoval(c.db, target)
+    expect(plan.effect).toEqual({
+      media: 1,
+      freed_bytes: VIDEO.length,
+      shared: 0,
+    })
+    // Captured again meanwhile, with a photo now: the video's new asset
+    // goes too; the photo, which the owner was not asked about, stays.
+    media['1'] = [video, photo]
+    texts['1'] = 'edited'
+    await capture('1')
+    expect(await removeMedia(c, target, { plan })).toEqual(plan.effect)
+    const states = c.db
+      .select({ kind: assets.kind, state: assets.state })
+      .from(assets)
+      .all()
+      .map((a) => [a.kind, a.state])
+    expect(states.toSorted()).toEqual([
+      ['image', 'ready'],
+      ['video', 'removed'],
+      ['video', 'removed'],
+    ])
+    // Removed meanwhile by another request: nothing is left to write, and
+    // the item stays marked once.
+    const again = planRemoval(c.db, { ids: [one.collectionId] })
+    await removeMedia(c, { ids: [one.collectionId] })
+    expect(await removeMedia(c, target, { plan: again })).toEqual(again.effect)
+    expect(c.db.select().from(removedMedia).all()).toHaveLength(2)
+    expect(
+      assetsOf(c, one.collectionId).every((a) => a.state === 'removed'),
+    ).toBe(true)
+    expectCatalogFresh(c)
   })
 
   test('the media key ignores the rendition Instagram picked', () => {
@@ -426,7 +497,7 @@ describe('media restore', () => {
     const blob = c.db.select().from(blobs).get()!
     await addThumbnail(c, blob.id)
     const before = { storage: storageOf(c, id), used: storageUsed(c.db) }
-    removeMedia(c, { ids: [id] })
+    await removeMedia(c, { ids: [id] })
     expect(c.db.select().from(removedMedia).get()).toMatchObject({
       blobHash: blob.hash,
       blobSize: VIDEO.length,
@@ -476,7 +547,7 @@ describe('media restore', () => {
     const one = await capture('1')
     await capture('2')
     const blob = c.db.select().from(blobs).get()!
-    removeMedia(c, { ids: [one.collectionId] })
+    await removeMedia(c, { ids: [one.collectionId] })
     const asset = assetsOf(c, one.collectionId)[0]!
     expect(await restoreMedia(c, one.collectionId, asset.id)).toEqual({
       state: 'ready',
@@ -494,7 +565,7 @@ describe('media restore', () => {
     const one = await capture('1')
     const id = one.collectionId
     const hash = c.db.select().from(blobs).get()!.hash
-    removeMedia(c, { ids: [id] })
+    await removeMedia(c, { ids: [id] })
     clock.now += 25 * HOUR
     // The worker's collection is deleting the file when the web process,
     // which shares no lock with it, restores the media.
@@ -526,7 +597,7 @@ describe('media restore', () => {
     const one = await capture('1')
     const id = one.collectionId
     const hash = c.db.select().from(blobs).get()!.hash
-    removeMedia(c, { ids: [id] })
+    await removeMedia(c, { ids: [id] })
     clock.now += 25 * HOUR
     const { release, started } = holdDeletes(c)
     const collected = collectMedia(c)
@@ -546,7 +617,7 @@ describe('media restore', () => {
     const one = await capture('1')
     const id = one.collectionId
     const hash = c.db.select().from(blobs).get()!.hash
-    removeMedia(c, { ids: [id] })
+    await removeMedia(c, { ids: [id] })
     clock.now += 25 * HOUR
     const restored = restoreMedia(c, id, assetsOf(c, id)[0]!.id)
     const collected = collectMedia(c)
@@ -566,7 +637,7 @@ describe('media restore', () => {
     const blob = c.db.select().from(blobs).get()!
     await addThumbnail(c, blob.id)
     const before = storageOf(c, id)
-    removeMedia(c, { ids: [id] })
+    await removeMedia(c, { ids: [id] })
     clock.now += 25 * HOUR
     expect(await collectMedia(c)).toBe(1)
     expect(await c.blobs.stat(blob.hash)).toBeUndefined()
@@ -627,7 +698,7 @@ describe('media restore', () => {
     const blob = c.db.select().from(blobs).get()!
     // The mark kept another thumbnail than the one the blob has now.
     const kept = sha256Hex(Buffer.from('kept'))
-    removeMedia(c, { ids: [one.collectionId] })
+    await removeMedia(c, { ids: [one.collectionId] })
     c.db
       .update(removedMedia)
       .set({ thumbnailKey: kept, thumbnailMime: 'image/jpeg' })
@@ -647,7 +718,7 @@ describe('media restore', () => {
     const one = await capture('1')
     const id = one.collectionId
     await addThumbnail(c, c.db.select().from(blobs).get()!.id)
-    removeMedia(c, { ids: [id] })
+    await removeMedia(c, { ids: [id] })
     clock.now += 25 * HOUR
     await collectMedia(c)
     delete files[video.url]
@@ -700,7 +771,7 @@ describe('media restore', () => {
       .from(assets)
       .where(eq(assets.captureId, one.id))
       .get()!
-    removeMedia(c, { collection: id, asset: old.id })
+    await removeMedia(c, { collection: id, asset: old.id })
     clock.now += 25 * HOUR
     await collectMedia(c)
     const fetched = requests.length
@@ -721,7 +792,7 @@ describe('media restore', () => {
     media['1'] = [video]
     const one = await capture('1')
     const id = one.collectionId
-    removeMedia(c, { ids: [id] })
+    await removeMedia(c, { ids: [id] })
     c.db
       .update(removedMedia)
       .set({ blobHash: null, blobSize: null, blobMime: null })
@@ -741,7 +812,7 @@ describe('media restore', () => {
     media['1'] = [video]
     const one = await capture('1')
     const id = one.collectionId
-    removeMedia(c, { ids: [id] })
+    await removeMedia(c, { ids: [id] })
     // Restores used to clear the mark only.
     c.db.delete(removedMedia).run()
     const asset = assetsOf(c, id)[0]!
@@ -757,13 +828,13 @@ describe('media restore', () => {
     media['1'] = [video]
     const one = await capture('1')
     const id = one.collectionId
-    removeMedia(c, { ids: [id] })
+    await removeMedia(c, { ids: [id] })
     clock.now += 25 * HOUR
     await collectMedia(c)
     let release!: () => void
     holds.set(video.url, new Promise((resolve) => (release = resolve)))
     await restoreMedia(c, id, assetsOf(c, id)[0]!.id)
-    removeMedia(c, { ids: [id] })
+    await removeMedia(c, { ids: [id] })
     expect(c.db.select().from(removedMedia).get()).toMatchObject({
       restore: null,
     })

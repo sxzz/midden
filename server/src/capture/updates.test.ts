@@ -15,6 +15,7 @@ import { captureURL } from './records.ts'
 import { retryRecordFailed } from './retries.ts'
 import {
   collectionUpdate,
+  continuePlan,
   continueTimeline,
   listRecords,
   pauseUpdate,
@@ -210,8 +211,14 @@ describe('更新', () => {
 
     // From the cursor, by the same rules: 17–20 holds the saved 18, then
     // one page more.
-    continueTimeline(ctx, update, id)
+    // Planned twice alike (on a read thread), written one after the other:
+    // the second finds the page continued already.
+    const plan = continuePlan(ctx.db, update, id)
+    continueTimeline(ctx, update, id, plan)
     expect(updateRecord(ctx.db, update).done).toBe(false)
+    expect(() => continueTimeline(ctx, update, id, plan)).toThrow(
+      expect.objectContaining({ kind: 'unsupported' }),
+    )
     expect(() => continueTimeline(ctx, update, id)).toThrow()
     await ctx.queue.drain()
     expect(pages().slice(3)).toEqual(['12', '16', '20'])
@@ -523,6 +530,21 @@ describe('更新', () => {
     const update = startUpdate(ctx, { target: 'collection', id })
     await ctx.queue.drain()
     expect(() => pauseUpdate(ctx, update)).toThrow()
+  })
+
+  test('an update stopped since its record was read does not pause', async () => {
+    const { ctx } = setup()
+    const id = await save(ctx, 'https://fake.test/p/1')
+    const update = startUpdate(ctx, { target: 'collection', id })
+    // Counted on a read thread while it ran; stopped before the write.
+    const record = updateRecord(ctx.db, update)
+    expect(record.done).toBe(false)
+    stopUpdate(ctx, update)
+    expect(() => pauseUpdate(ctx, update, record)).toThrow(
+      expect.objectContaining({ kind: 'unsupported' }),
+    )
+    expect(ctx.db.select().from(updates).get()!.pausedAt).toBeNull()
+    await ctx.queue.drain()
   })
 
   test('targets must be saved', () => {

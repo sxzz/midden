@@ -1,17 +1,19 @@
 import { Buffer } from 'node:buffer'
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
+import { library, updates } from '#db/schema.ts'
 import {
   listTags,
   readAnnotation,
   updateAnnotation,
 } from '#library/annotations.ts'
-import { createFolder } from '#library/folders.ts'
+import { createFolder, deleteFolder, updateFolder } from '#library/folders.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, fakeProfile, postGraph } from '#testing/fake-platform.ts'
 import { captureHandlers } from './handlers.ts'
 import { resolveOptions } from './options.ts'
 import { captureURL } from './records.ts'
+import { planUpdate, type UpdateTargetInput } from './update-start.ts'
 import { previewUpdate, startUpdate, updateRecord } from './updates.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
@@ -193,5 +195,103 @@ describe('更新收藏夹', () => {
     // Everything matches on its own merits.
     expect(covers('')).toMatchObject({ posts: 5, profiles: 2 })
     expect(covers('q=post')).toMatchObject({ posts: 5, profiles: 0 })
+  })
+})
+
+describe('更新收藏夹, planned on a read thread', () => {
+  /** The update's row, without what tells two apart. */
+  const row = (c: AccountsContext, id: string) => {
+    const {
+      id: _,
+      createdAt: __,
+      ...rest
+    } = c.db.select().from(updates).where(eq(updates.id, id)).get()!
+    return rest
+  }
+
+  test('starts the same update as one read where it is written', async () => {
+    const { c, tag, ids } = await setup()
+    const id = tag('混合', '100', '2', '5')
+    const folder = createFolder(c.db, { name: 'mixed', filter: `tag=${id}` })
+    const input = { target: 'folder', id: folder.id } as const
+    const options = { options: resolveOptions({ posts: 'none' }) }
+    const planned = startUpdate(c, input, {
+      ...options,
+      plan: planUpdate(c.db, input),
+    })
+    const read = startUpdate(c, input, options)
+    expect(row(c, planned)).toEqual(row(c, read))
+    expect(row(c, planned).collectionIds.toSorted()).toEqual(
+      [ids['100']!, ids['2']!, ids['5']!].toSorted(),
+    )
+    await c.queue.drain()
+    const { id: _, createdAt: __, ...record } = updateRecord(c.db, planned)
+    expect(record).toMatchObject({ state: 'complete', members: { total: 3 } })
+    const { id: ___, createdAt: ____, ...again } = updateRecord(c.db, read)
+    expect(record).toEqual({ ...again, finishedAt: record.finishedAt })
+    // A selection and a single collection alike.
+    const others: UpdateTargetInput[] = [
+      { target: 'many', ids: [ids['1']!, ids['5']!] },
+      { target: 'collection', id: ids['200']! },
+    ]
+    for (const other of others) {
+      const first = startUpdate(c, other, { plan: planUpdate(c.db, other) })
+      expect(row(c, first)).toEqual(row(c, startUpdate(c, other)))
+    }
+  })
+
+  test('the plan is written while the folder is as it was', async () => {
+    const { c, tag, ids } = await setup()
+    const id = tag('帖子', '1', '3')
+    const folder = createFolder(c.db, { name: 'posts', filter: `tag=${id}` })
+    const input = { target: 'folder', id: folder.id } as const
+    const plan = planUpdate(c.db, input)
+    // A post tagged meanwhile is left out, as one tagged just after the
+    // update started; one taken out of the library meanwhile is skipped
+    // at its turn, as one taken out while the update runs.
+    tag('帖子', '5')
+    c.db.delete(library).where(eq(library.collectionId, ids['3']!)).run()
+    const update = startUpdate(c, input, {
+      plan,
+      options: resolveOptions({ posts: 'none' }),
+    })
+    expect(row(c, update).collectionIds).toEqual(plan.collectionIds)
+    await c.queue.drain()
+    expect(updateRecord(c.db, update)).toMatchObject({
+      state: 'partial',
+      update: { posts: 1, skipped: 1 },
+    })
+  })
+
+  test('a folder changed or gone since its plan is read again', async () => {
+    const { c, tag, ids } = await setup()
+    const id = tag('帖子', '1', '3')
+    const folder = createFolder(c.db, { name: 'posts', filter: `tag=${id}` })
+    const input = { target: 'folder', id: folder.id } as const
+    let plan = planUpdate(c.db, input)
+    updateFolder(c.db, folder.id, { filter: `tag=${id}&${author('100')}` })
+    expect(row(c, startUpdate(c, input, { plan })).collectionIds).toEqual([
+      ids['1']!,
+    ])
+    // Renamed: the record names the folder as it is.
+    plan = planUpdate(c.db, input)
+    updateFolder(c.db, folder.id, { name: 'renamed' })
+    expect(row(c, startUpdate(c, input, { plan })).name).toBe('renamed')
+    // Deleted: there is nothing to update.
+    plan = planUpdate(c.db, input)
+    deleteFolder(c.db, folder.id)
+    expect(() => startUpdate(c, input, { plan })).toThrow(
+      expect.objectContaining({ kind: 'not_found' }),
+    )
+    // A selection with an item taken out of the library is not started.
+    const many: UpdateTargetInput = {
+      target: 'many',
+      ids: [ids['1']!, ids['5']!],
+    }
+    plan = planUpdate(c.db, many)
+    c.db.delete(library).where(eq(library.collectionId, ids['5']!)).run()
+    expect(() => startUpdate(c, many, { plan })).toThrow(
+      expect.objectContaining({ kind: 'not_found' }),
+    )
   })
 })

@@ -8,7 +8,14 @@ import {
   recordNotes,
   type CaptureRecord,
 } from '#capture/records.ts'
-import { isUpdate, updateRecord } from '#capture/updates.ts'
+import { retryPlan } from '#capture/retries.ts'
+import { planUpdate, type UpdateTargetInput } from '#capture/update-start.ts'
+import {
+  continuePlan,
+  isUpdate,
+  stopPlan,
+  updateRecord,
+} from '#capture/updates.ts'
 import { listWatches, type WatchView } from '#capture/watches.ts'
 import { accountSelections, connections, jobs } from '#db/schema.ts'
 import { readJobControl } from '#jobs/control.ts'
@@ -19,6 +26,7 @@ import {
   type ProfileFieldChange,
 } from '#library/changes.ts'
 import { narrowedCounts } from '#library/counts.ts'
+import { planDeletion } from '#library/delete.ts'
 import { attachIncomingRelations } from '#library/entities.ts'
 import { parseFilterQuery } from '#library/filter-query.ts'
 import { countFolder } from '#library/folder-counts.ts'
@@ -26,6 +34,7 @@ import { listFolders } from '#library/folders.ts'
 import { listsOf } from '#library/follow-graph.ts'
 import { followCounts, listFollowChanges } from '#library/follows.ts'
 import { authorKey, listCollections } from '#library/list.ts'
+import { planRemoval, type RemovalTarget } from '#library/media-removal.ts'
 import { collectionsById, isUUID, listCounts } from '#library/read.ts'
 import { listShares } from '#library/shares.ts'
 import { aggregate } from './aggregate.ts'
@@ -680,9 +689,26 @@ export const READS = {
   relationChanges,
   metrics,
   folders: foldersOf,
+  // What writes of the web app and of this API read first, or answer with
+  // once written: on a read thread, not on the web process's own.
   // A folder just made or changed, counted for the write that did it.
   folderCounts: (r: AgentReader, input: { id: string }) =>
     countFolder(r.db, input.id) ?? null,
+  updatePlan: (r: AgentReader, input: UpdateTargetInput) =>
+    planUpdate(r.db, input),
+  updateRecord: (r: AgentReader, input: { id: string }) =>
+    updateRecord(r.db, input.id),
+  stopPlan: (r: AgentReader, input: { id: string }) => stopPlan(r.db, input.id),
+  continuePlan: (r: AgentReader, input: { id: string; collection: string }) =>
+    continuePlan(r.db, input.id, input.collection),
+  retryPlan: (r: AgentReader, input: { id: string; target?: string }) =>
+    retryPlan(r.db, input.id, input.target),
+  removalPlan: (r: AgentReader, input: RemovalTarget) =>
+    planRemoval(r.db, input),
+  deletionPlan: (
+    r: AgentReader,
+    input: { ids: string[]; withPosts: boolean },
+  ) => planDeletion(r.db, input.ids, { withPosts: input.withPosts }),
   tags: tagsOf,
   status,
   queue,

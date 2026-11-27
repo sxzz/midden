@@ -131,6 +131,7 @@ describe('sliding expiry', () => {
         headers: [['content-type', 'application/json']],
         body: new TextEncoder().encode('{"thread":true}').buffer as ArrayBuffer,
       }),
+      read: () => Promise.reject(new Error('no reads by name here')),
     })
     const cookie = createSession(db, undefined, clock.now())
     clock.advance(2 * DAY)

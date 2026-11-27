@@ -16,10 +16,14 @@ const items = [1, 2, 3].map((n) =>
 let listed = items
 let counts: DeleteCounts
 let api: ReturnType<typeof mockApi>
+/** What was asked of the deletion, `preview` marking its dry runs. */
 const deletes = () =>
   api.mock.calls
-    .filter(([path]) => path === '/collections/delete')
-    .map(([, request]) => JSON.parse((request as Request).body!))
+    .filter(([path]) => path.startsWith('/collections/delete'))
+    .map(([path, request]) => ({
+      ...JSON.parse((request as Request).body!),
+      preview: path === '/collections/delete/preview',
+    }))
 
 beforeEach(() => {
   vi.spyOn(globalThis, 'scrollTo').mockImplementation(() => {})
@@ -39,10 +43,10 @@ beforeEach(() => {
     kept: { listed: 2, saved: 1, annotated: 0, quoted: 0 },
   }
   api = mockApi((path, request) => {
+    if (path === '/collections/delete/preview') return counts
     if (path === '/collections/delete') {
       const body = JSON.parse(request.body!)
-      if (!body.dry_run)
-        listed = listed.filter((item) => !body.ids.includes(item.id))
+      listed = listed.filter((item) => !body.ids.includes(item.id))
       return counts
     }
     if (path.startsWith('/collections?')) return { items: listed }
@@ -116,8 +120,8 @@ it('多选 shows a bar to update or delete the selection', async () => {
   button(sheet()!, '删除')!.click()
   await vi.waitFor(() => expect(el.textContent).not.toContain('第 3 条'))
   expect(deletes()).toEqual([
-    { ids: [items[0]!.id, items[2]!.id], with_posts: true, dry_run: true },
-    { ids: [items[0]!.id, items[2]!.id], with_posts: true, dry_run: false },
+    { ids: [items[0]!.id, items[2]!.id], with_posts: true, preview: true },
+    { ids: [items[0]!.id, items[2]!.id], with_posts: true, preview: false },
   ])
   expect(el.textContent).toContain('第 2 条')
   expect(el.querySelector('[aria-label="多选"]')).toBeNull()
@@ -144,6 +148,6 @@ it('a single post offers no option for posts', async () => {
   expect(deletes().at(-1)).toEqual({
     ids: [items[1]!.id],
     with_posts: false,
-    dry_run: false,
+    preview: false,
   })
 })

@@ -11,16 +11,21 @@ import {
 import { ownerOnly } from './auth.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
-import type { WebReads } from './offload.ts'
+import type { NamedRead } from './offload.ts'
 
 /**
  * Saved library filters (收藏夹). The list answers the counts the worker
  * stored (`library/folder-counts.ts`); a folder made or given a new filter
  * is counted once on a read thread before the write answers.
  */
-export function folderRoutes(ctx: AccountsContext, reads?: WebReads) {
+export function folderRoutes(ctx: AccountsContext, read: NamedRead) {
   const counted = async (id: string) => {
-    await countWrittenFolder(ctx.db, id, reads?.countFolder, ctx.logger)
+    await countWrittenFolder(
+      ctx.db,
+      id,
+      (folderId) => read('folderCounts', { id: folderId }),
+      ctx.logger,
+    )
     return folderView(ctx.db, id)
   }
   return new Hono<Env>()

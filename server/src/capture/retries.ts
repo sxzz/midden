@@ -219,11 +219,20 @@ export function retryRecordFailed(
   ctx: CaptureContext,
   id: string,
   target?: string,
+  /** What `retryPlan` found beforehand (on a read thread). */
+  plan?: RetryPlan,
 ): number {
   // An update's retried work is the update's: its rank, and paused with it.
   try {
     return withOrigin({ updateId: isUpdate(ctx.db, id) ? id : null }, () =>
-      retryUnits(ctx, id, target),
+      retryUnits(
+        ctx,
+        id,
+        target,
+        plan
+          ? plan.flatMap((unit) => current(ctx.db, unit) ?? [])
+          : retryPlan(ctx.db, id, target),
+      ),
     )
   } finally {
     // After the work, so a summary written meanwhile does not outlive it.
@@ -231,14 +240,73 @@ export function retryRecordFailed(
   }
 }
 
+/**
+ * What retrying a record's failures (or the part `target` names) would
+ * fetch again. Read over all its members, so the web process reads it on a
+ * read thread first; each unit is checked again where it is retried.
+ */
+export type RetryPlan = Placed[]
+
+export function retryPlan(
+  db: Executor,
+  id: string,
+  target: string | undefined,
+): RetryPlan {
+  return recordUnits(db, id).filter((unit) => !target || names(unit, target))
+}
+
+/**
+ * A planned unit as it is now, or undefined when it no longer failed or is
+ * being retried already (another request retried it since the plan): what
+ * retrying changes first is checked, a freed key or a page pending again.
+ * Media and lists check that themselves when retried.
+ */
+function current(db: Executor, unit: Placed): Placed | undefined {
+  const listing = (id: string) =>
+    db
+      .select({ submission: submissions, capture: captures })
+      .from(submissions)
+      .innerJoin(captures, eq(captures.id, submissions.captureId))
+      .where(eq(submissions.id, id))
+      .get()
+  switch (unit.kind) {
+    case 'media':
+    case 'list':
+      return unit
+    case 'item': {
+      const now = listing(unit.item.id)
+      return now?.capture.state === 'failed' &&
+        now.submission.idemKey === unit.item.idemKey
+        ? { ...unit, item: now.submission }
+        : undefined
+    }
+    case 'member': {
+      const now = listing(unit.listing)
+      return now?.capture.state === 'failed' &&
+        !now.submission.idemKey.startsWith('retried:')
+        ? unit
+        : undefined
+    }
+    case 'related':
+      return listing(unit.page)?.submission.relatedState === 'failed'
+        ? unit
+        : undefined
+    case 'fetch': {
+      const now = listing(unit.page.submission.id)
+      return now?.capture.state === 'failed' &&
+        now.submission.idemKey === unit.page.submission.idemKey
+        ? { ...unit, page: { ...unit.page, ...now } }
+        : undefined
+    }
+  }
+}
+
 function retryUnits(
   ctx: CaptureContext,
   id: string,
   target: string | undefined,
+  units: Placed[],
 ): number {
-  const units = recordUnits(ctx.db, id).filter(
-    (unit) => !target || names(unit, target),
-  )
   let count = 0
   const media = new Set<string>()
   const update = units.some((u) => u.kind === 'item')

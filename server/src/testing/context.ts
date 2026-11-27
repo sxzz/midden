@@ -26,6 +26,8 @@ export function testContext(
     fetch?: typeof fetch
     logger?: Logger
     timelineCap?: number
+    /** A database file to open instead, for read threads to read too. */
+    file?: string
     /** The raw response bucket. */
     raw?: CaptureContext['raw']
     /** Another media store over the same directory and signer. */
@@ -36,7 +38,7 @@ export function testContext(
     }) => CaptureContext['blobs']
   } = {},
 ): AccountsContext {
-  const db = openDatabase(':memory:')
+  const db = openDatabase(options.file ?? ':memory:')
   const vault = new Vault(new Uint8Array(32).fill(7))
   const logger = options.logger ?? pino({ level: 'silent' })
   const dir = mkdtempSync(path.join(tmpdir(), 'midden-test-'))

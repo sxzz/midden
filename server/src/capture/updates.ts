@@ -1,16 +1,10 @@
 import { and, desc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm'
-import { newId } from '#db/id.ts'
 import {
   assets,
-  captureMetrics,
   captures,
   collections,
-  entities,
-  entityVersions,
-  folders,
   library,
   relationFetches,
-  revisionEntities,
   revisions,
   submissions,
   updates,
@@ -27,17 +21,9 @@ import {
   withOrigin,
   type Job as QueueJob,
 } from '#jobs/queue.ts'
-import { parseFilterQuery } from '#library/filter-query.ts'
-import { updateSelection } from '#library/list.ts'
 import { memberAccounts } from './accounts.ts'
 import { identityRecords } from './identity.ts'
-import {
-  budget,
-  checkOptions,
-  DEFAULT_OPTIONS,
-  storedOptions,
-  type CaptureOptions,
-} from './options.ts'
+import { budget, storedOptions } from './options.ts'
 import { keptCounts, readyProgress, verifyMembers } from './progress.ts'
 import { keepRecord, keptRecord } from './record-cache.ts'
 import { detailKey, dropSummaries, loadSummaries } from './record-summaries.ts'
@@ -84,14 +70,21 @@ import {
 } from './retry-units.ts'
 import { knownGoneSQL, type SourceState } from './source-state.ts'
 import { submit, type Job } from './submit.ts'
+import { hasOlder, itemKinds, lastPage, savedIds } from './update-start.ts'
 import type { Executor } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
 import type { Payload } from './payload.ts'
 
-/** A library selection updates at most this many collections. */
-const MAX_SELECTION = 500
-/** A folder updates at most this many. */
-const MAX_FOLDER = 10_000
+export {
+  previewUpdate,
+  repeatUpdate,
+  savedIds,
+  startUpdate,
+  type UpdateOptions,
+  type UpdatePreview,
+  type UpdateTargetInput,
+} from './update-start.ts'
+
 /**
  * Items in flight at once: their capture runs or their timeline is still
  * being submitted. The rest wait their turn, so a large folder does not fill
@@ -103,114 +96,10 @@ const FEED_WAIT_MS = 3000
 const RECENT_MS = 24 * 60 * 60_000
 /** Profiles the record details part by part; a folder may hold thousands. */
 const MAX_PROFILES = 200
-const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
 
 type Update = typeof updates.$inferSelect
 type Submission = typeof submissions.$inferSelect
 type Capture = typeof captures.$inferSelect
-
-export type UpdateTargetInput =
-  | { target: 'collection'; id: string }
-  | { target: 'folder'; id: string }
-  | { target: 'many'; ids: string[] }
-
-export interface UpdateOptions {
-  /** What each item captures; the defaults when absent. */
-  options?: CaptureOptions
-  /** Profiles read on from the page after their last one. */
-  older?: boolean
-  /** Idempotency key: a repeat returns the update it started. */
-  key?: string
-  /** The watch (定期更新) starting it; its work ranks below manual work. */
-  watchId?: string
-}
-
-// --- Targets ----------------------------------------------------------------
-
-interface Resolved {
-  target: UpdateTarget
-  targetId: string
-  name: string
-  collectionIds: string[]
-}
-
-export function savedIds(db: Executor, ids: string[]): Set<string> {
-  return new Set(
-    ids.length
-      ? db
-          .select({ id: library.collectionId })
-          .from(library)
-          .where(inJson(library.collectionId, ids))
-          .all()
-          .map((row) => row.id)
-      : [],
-  )
-}
-
-/** What a target holds now, each collection once. */
-function resolveTarget(db: Executor, input: UpdateTargetInput): Resolved {
-  if (input.target === 'collection') {
-    if (!UUID.test(input.id) || !savedIds(db, [input.id]).size)
-      throw new AppError('not_found')
-    return {
-      target: 'collection',
-      targetId: input.id,
-      name: '',
-      collectionIds: [input.id],
-    }
-  }
-  if (input.target === 'folder') {
-    const folder = UUID.test(input.id)
-      ? db.select().from(folders).where(eq(folders.id, input.id)).get()
-      : undefined
-    if (!folder) throw new AppError('not_found')
-    // Posts there only through an account the update covers come with it.
-    const ids = updateSelection(
-      db,
-      parseFilterQuery(folder.filter).filter,
-      MAX_FOLDER + 1,
-    )
-    if (ids.length > MAX_FOLDER)
-      throw new AppError(
-        'invalid_request',
-        `收藏夹内容过多，一次最多更新 ${MAX_FOLDER} 项`,
-      )
-    if (!ids.length) throw new AppError('invalid_request', '收藏夹是空的')
-    return {
-      target: 'folder',
-      targetId: folder.id,
-      name: folder.name,
-      collectionIds: ids,
-    }
-  }
-  if (input.ids.some((id) => !UUID.test(id))) throw new AppError('unsupported')
-  const unique = [...new Set(input.ids)]
-  if (unique.length === 0 || unique.length > MAX_SELECTION)
-    throw new AppError('unsupported')
-  if (savedIds(db, unique).size !== unique.length)
-    throw new AppError('not_found')
-  return { target: 'many', targetId: '', name: '', collectionIds: unique }
-}
-
-/** Collection kinds (`post`, `profile`) and adapters, by id. */
-function itemKinds(db: Executor, ids: string[]) {
-  return new Map(
-    (ids.length
-      ? db
-          .select({
-            id: collections.id,
-            kind: collections.kind,
-            url: collections.url,
-            adapterId: library.adapterId,
-          })
-          .from(collections)
-          .innerJoin(library, eq(library.collectionId, collections.id))
-          .where(inJson(collections.id, ids))
-          .all()
-      : []
-    ).map((row) => [row.id, row]),
-  )
-}
 
 /**
  * Profiles' usernames by id: as their current version says, else as their
@@ -223,177 +112,7 @@ export function handles(db: Executor, ids: string[]): Map<string, string> {
   return found
 }
 
-/** The newest finished page of a profile, whose next cursor reads on. */
-function lastPage(db: Executor, collectionId: string) {
-  return db
-    .select()
-    .from(captures)
-    .where(
-      and(
-        eq(captures.collectionId, collectionId),
-        eq(captures.isCollection, true),
-        inArray(captures.state, ['complete', 'partial']),
-      ),
-    )
-    .orderBy(desc(captures.createdAt), desc(captures.id))
-    .limit(1)
-    .get()
-}
-
-/** Whether a profile has older posts to read after its last page. */
-function hasOlder(db: Executor, collectionId: string): boolean {
-  return !!lastPage(db, collectionId)?.nextPageCursor
-}
-
-/**
- * A profile's following and followers counts as its newest capture read
- * them, for the sheet to tell which lists an update would skip.
- */
-function profileCounts(
-  ctx: CaptureContext,
-  collectionId: string,
-  adapterId: string,
-): { following?: number; followers?: number } {
-  const relations = ctx.platforms.byId(adapterId).relations
-  if (!relations) return {}
-  const row = ctx.db
-    .select({
-      metrics: captureMetrics.metrics,
-      type: entities.kind,
-      externalId: entities.externalId,
-    })
-    .from(collections)
-    .innerJoin(revisions, eq(revisions.id, collections.currentRevision))
-    .leftJoin(captureMetrics, eq(captureMetrics.captureId, revisions.captureId))
-    .innerJoin(revisionEntities, eq(revisionEntities.revisionId, revisions.id))
-    .innerJoin(
-      entityVersions,
-      eq(entityVersions.id, revisionEntities.entityVersionId),
-    )
-    .innerJoin(entities, eq(entities.id, entityVersions.entityId))
-    .where(
-      and(eq(collections.id, collectionId), eq(revisionEntities.isRoot, true)),
-    )
-    .get()
-  const counts = row?.metrics?.[`${row?.type}/${row?.externalId}`]
-  const read = (pointer: string) => {
-    const value = counts?.[pointer]
-    return typeof value === 'number' && Number.isSafeInteger(value)
-      ? value
-      : undefined
-  }
-  const following = read(relations.counts.following)
-  const followers = read(relations.counts.followers)
-  return {
-    ...(following === undefined ? {} : { following }),
-    ...(followers === undefined ? {} : { followers }),
-  }
-}
-
-export interface UpdatePreview {
-  posts: number
-  profiles: number
-  /** Profiles whose platform can list who they follow (抓关系网). */
-  listable: number
-  /** The folder's name. */
-  name: string
-  /** A single profile: its list sizes as last captured. */
-  counts?: { following?: number; followers?: number }
-  /** A single profile: whether there are older posts to read. */
-  older?: boolean
-}
-
-/** What an update of a target would cover, for the sheet that starts it. */
-export function previewUpdate(
-  ctx: CaptureContext,
-  input: UpdateTargetInput,
-): UpdatePreview {
-  const resolved = resolveTarget(ctx.db, input)
-  const kinds = itemKinds(ctx.db, resolved.collectionIds)
-  let posts = 0
-  let profiles = 0
-  let listable = 0
-  for (const item of kinds.values()) {
-    if (item.kind !== 'profile') {
-      posts++
-      continue
-    }
-    profiles++
-    if (ctx.platforms.byId(item.adapterId).relations) listable++
-  }
-  const preview: UpdatePreview = {
-    posts,
-    profiles,
-    listable,
-    name: resolved.name,
-  }
-  const only = kinds.get(resolved.collectionIds[0]!)
-  if (resolved.target === 'collection' && only?.kind === 'profile') {
-    preview.counts = profileCounts(ctx, only.id, only.adapterId)
-    preview.older = hasOlder(ctx.db, only.id)
-  }
-  return preview
-}
-
 // --- Running ----------------------------------------------------------------
-
-/**
- * Update a target: capture each collection it holds again, as one record.
- * Each is captured as a link submission with the same options would be;
- * `older` reads profiles on from their last page. Returns the update's id.
- */
-export function startUpdate(
-  ctx: CaptureContext,
-  input: UpdateTargetInput,
-  options: UpdateOptions = {},
-): string {
-  if (options.key && options.key.length > 200)
-    throw new AppError('invalid_request', '请求标识过长')
-  const captureOptions = options.options ?? DEFAULT_OPTIONS
-  checkOptions(captureOptions)
-  return ctx.db.transaction((tx) => {
-    if (options.key) {
-      const existing = tx
-        .select({ id: updates.id })
-        .from(updates)
-        .where(eq(updates.idemKey, options.key))
-        .get()
-      if (existing) return existing.id
-    }
-    const resolved = resolveTarget(tx, input)
-    if (options.older) {
-      const only = itemKinds(tx, resolved.collectionIds).get(
-        resolved.collectionIds[0]!,
-      )
-      if (
-        resolved.target !== 'collection' ||
-        only?.kind !== 'profile' ||
-        captureOptions.posts === 'none'
-      )
-        throw new AppError('unsupported')
-      if (!hasOlder(tx, only.id)) throw new AppError('no_more_pages')
-    }
-    const id = newId()
-    tx.insert(updates)
-      .values({
-        id,
-        target: resolved.target,
-        targetId: resolved.targetId,
-        name: resolved.name,
-        collectionIds: resolved.collectionIds,
-        options: captureOptions,
-        older: options.older ?? false,
-        idemKey: options.key ?? null,
-        ...(options.watchId
-          ? { origin: 'watch' as const, watchId: options.watchId }
-          : {}),
-        createdAt: new Date(ctx.now?.() ?? Date.now()),
-      })
-      .run()
-    ctx.queue.enqueue(tx, 'update', id, { updateId: id })
-    return id
-  })
-}
 
 /** Submit one item of an update; undefined when it cannot be captured. */
 function submitItem(
@@ -586,6 +305,12 @@ const positionOf = (submission: Submission) =>
  * lists not read yet are left. Captures already queued still finish.
  */
 export function stopUpdate(ctx: CaptureContext, id: string): void {
+  haltUpdate(ctx, id)
+  stopParts(ctx, stopPlan(ctx.db, id))
+}
+
+/** The first step of stopping an update: it submits nothing further. */
+export function haltUpdate(ctx: CaptureContext, id: string): void {
   loadUpdate(ctx.db, id)
   ctx.db.transaction((tx) => {
     tx.update(updates)
@@ -600,24 +325,51 @@ export function stopUpdate(ctx: CaptureContext, id: string): void {
     // What was queued finishes, as when it was not paused.
     setUpdateJobsPaused(tx, id, false)
   })
-  const items = itemRows(ctx.db, [id])
-  for (const { submission, capture } of items)
-    if (capture.isCollection && !submission.collectionStopped)
-      stopCollection(ctx, submission.id)
-  for (const fetch of ctx.db
-    .select({ id: relationFetches.id })
-    .from(relationFetches)
-    .where(
-      and(
-        inJson(
-          relationFetches.submissionId,
-          items.map((item) => item.submission.id),
+}
+
+/**
+ * What else stopping a halted update stops: its profiles' timelines still
+ * read on, and its lists still waiting or read. Read over all its items, so
+ * on a read thread in the web process; read after `haltUpdate`, so no item
+ * comes after it.
+ */
+export interface StopPlan {
+  timelines: string[]
+  lists: string[]
+}
+
+export function stopPlan(db: Executor, id: string): StopPlan {
+  const items = itemRows(db, [id])
+  return {
+    timelines: items.flatMap(({ submission, capture }) =>
+      capture.isCollection && !submission.collectionStopped
+        ? [submission.id]
+        : [],
+    ),
+    lists: db
+      .select({ id: relationFetches.id })
+      .from(relationFetches)
+      .where(
+        and(
+          inJson(
+            relationFetches.submissionId,
+            items.map((item) => item.submission.id),
+          ),
+          inArray(relationFetches.state, ['waiting', 'running']),
         ),
-        inArray(relationFetches.state, ['waiting', 'running']),
-      ),
-    )
-    .all())
-    failRelations(ctx, fetch.id, '已中止')
+      )
+      .all()
+      .map((row) => row.id),
+  }
+}
+
+/**
+ * Stop what the plan names, each in its own short write that looks at it
+ * again: a timeline stopped or a list settled meanwhile stays as it is.
+ */
+export function stopParts(ctx: CaptureContext, plan: StopPlan): void {
+  for (const submission of plan.timelines) stopCollection(ctx, submission)
+  for (const fetch of plan.lists) failRelations(ctx, fetch, '已中止')
 }
 
 /**
@@ -625,15 +377,32 @@ export function stopUpdate(ctx: CaptureContext, id: string): void {
  * captures, pages, downloads it queued) are not taken until it resumes.
  * Jobs already running finish. A finished or stopped update cannot pause.
  */
-export function pauseUpdate(ctx: CaptureContext, id: string): void {
+export function pauseUpdate(
+  ctx: CaptureContext,
+  id: string,
+  /**
+   * Its record, counted beforehand (on a read thread): whether it is done
+   * takes counting every member.
+   */
+  record?: Pick<UpdateRecord, 'done'>,
+): void {
   const update = loadUpdate(ctx.db, id)
   if (update.pausedAt) return
   if (
     !['running', 'complete'].includes(update.state) ||
-    updateRecord(ctx.db, id).done
+    (record ?? updateRecord(ctx.db, id)).done
   )
     throw new AppError('unsupported')
   ctx.db.transaction((tx) => {
+    // Stopped since it was read: a stopped update does not pause.
+    const now = tx
+      .select({ state: updates.state, pausedAt: updates.pausedAt })
+      .from(updates)
+      .where(eq(updates.id, id))
+      .get()
+    if (!now || now.pausedAt) return
+    if (!['running', 'complete'].includes(now.state))
+      throw new AppError('unsupported')
     tx.update(updates)
       .set({ pausedAt: new Date(ctx.now?.() ?? Date.now()) })
       .where(eq(updates.id, id))
@@ -649,26 +418,6 @@ export function resumeUpdate(ctx: CaptureContext, id: string): void {
     tx.update(updates).set({ pausedAt: null }).where(eq(updates.id, id)).run()
     setUpdateJobsPaused(tx, id, false)
   })
-}
-
-/** Start the same update again, as a new record. */
-export function repeatUpdate(ctx: CaptureContext, id: string): string {
-  const update = loadUpdate(ctx.db, id)
-  const options = { options: update.options, older: update.older }
-  if (update.target === 'many')
-    return startUpdate(
-      ctx,
-      {
-        target: 'many',
-        ids: [...savedIds(ctx.db, update.collectionIds)],
-      },
-      options,
-    )
-  return startUpdate(
-    ctx,
-    { target: update.target, id: update.targetId },
-    options,
-  )
 }
 
 /**
@@ -701,9 +450,36 @@ export function continueTimeline(
   ctx: CaptureContext,
   id: string,
   collectionId: string,
+  /** `continuePlan`, read beforehand (on a read thread). */
+  plan?: ContinuePlan,
 ): void {
-  const update = loadUpdate(ctx.db, id)
-  const [g] = gather(ctx.db, [update])
+  const { page } = plan ?? continuePlan(ctx.db, id, collectionId)
+  // As they are now: stopped since, or the page continued since.
+  const last = ctx.db
+    .select({ submission: submissions, capture: captures })
+    .from(submissions)
+    .innerJoin(captures, eq(captures.id, submissions.captureId))
+    .where(eq(submissions.id, page))
+    .get()
+  if (loadUpdate(ctx.db, id).state === 'stopped' || !last)
+    throw new AppError('unsupported')
+  withOrigin({ updateId: id }, () => continuePages(ctx, last))
+  dropSummaries(ctx.db, [id])
+}
+
+/** The last page of a profile's timeline in an update, to continue from. */
+export interface ContinuePlan {
+  page: string
+}
+
+/** Read over all the update's items: on a read thread in the web process. */
+export function continuePlan(
+  db: Executor,
+  id: string,
+  collectionId: string,
+): ContinuePlan {
+  const update = loadUpdate(db, id)
+  const [g] = gather(db, [update])
   const root = g!.items.find(
     (i) =>
       i.capture.collectionId === collectionId &&
@@ -712,8 +488,7 @@ export function continueTimeline(
   if (!root) throw new AppError('not_found')
   const last = g!.pages.get(root.submission.id)?.at(-1)
   if (update.state === 'stopped' || !last) throw new AppError('unsupported')
-  withOrigin({ updateId: id }, () => continuePages(ctx, last))
-  dropSummaries(ctx.db, [id])
+  return { page: last.submission.id }
 }
 
 // --- Records ----------------------------------------------------------------

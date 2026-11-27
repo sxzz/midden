@@ -18,6 +18,11 @@ export interface DeleteOptions {
   withPosts?: boolean
   /** Count only; nothing changes. */
   dryRun?: boolean
+  /**
+   * What `planDeletion` read beforehand (on a read thread): written as
+   * planned while it still holds, else planned again in the write.
+   */
+  plan?: DeletePlan
 }
 
 /** What a deletion removes, or would. */
@@ -289,47 +294,127 @@ export function deleteCollections(
   ids: readonly string[],
   options: DeleteOptions = {},
 ): DeleteCounts {
+  if (options.dryRun) return planDeletion(db, ids, options).counts
   return db.transaction((tx) => {
-    select(tx, ids)
-    const profiles = count(
-      tx,
-      sql`SELECT 1 FROM ${sql.raw(SELECTED)} WHERE profile`,
-    )
-    const others = count(
-      tx,
-      sql`SELECT 1 FROM ${sql.raw(SELECTED)} WHERE NOT profile`,
-    )
-    if (!profiles && !others) {
-      dropTemp(tx)
-      throw new AppError('not_found')
-    }
-    const kept = { listed: 0, saved: 0, annotated: 0, quoted: 0 }
-    let related = 0
-    const withPosts = !!options.withPosts && profiles > 0
-    if (withPosts) {
-      collectRelated(tx)
-      for (const row of tx.all<{ reason: string | null; n: number }>(
-        sql`SELECT reason, count(*) AS n FROM ${sql.raw(RELATED)} GROUP BY reason`,
-      )) {
-        if (row.reason) kept[row.reason as keyof typeof kept] = row.n
-        else related = row.n
-      }
-    }
-    if (!options.dryRun) {
-      const removed = sql`
-        SELECT id FROM ${sql.raw(SELECTED)}
-        ${withPosts ? sql`UNION ALL SELECT id FROM ${sql.raw(RELATED)} WHERE reason IS NULL` : sql``}`
-      tx.run(sql`DELETE FROM library WHERE collection_id IN (${removed})`)
-      // Records counted over them (what a retry would fetch again) change.
-      dropAllSummaries(tx)
-      pruneTags(tx)
-      revokeOrphanedShares(tx)
-      tx.run(sql`UPDATE collections SET unreferenced_at = ${Date.now()}
-        WHERE id IN (${removed}) AND unreferenced_at IS NULL`)
-    }
-    dropTemp(tx)
-    return { profiles, posts: others, related, kept }
+    const plan =
+      options.plan && holds(tx, options.plan)
+        ? options.plan
+        : planIn(tx, ids, options)
+    remove(tx, [...plan.selected, ...plan.posts])
+    return plan.counts
   })
+}
+
+/**
+ * A deletion as read before anything is written (on a read thread in the
+ * web process): what it counts, the collections that go, and what its reads
+ * depended on (`stamp`).
+ */
+export interface DeletePlan {
+  counts: DeleteCounts
+  /** The selected collections that are saved. */
+  selected: string[]
+  /** With `withPosts`, the accounts' posts that go with them. */
+  posts: string[]
+  stamp: string
+}
+
+/** Plan a deletion, changing nothing; its dry run answers `counts`. */
+export function planDeletion(
+  db: Database,
+  ids: readonly string[],
+  options: Pick<DeleteOptions, 'withPosts'> = {},
+): DeletePlan {
+  return db.transaction((tx) => planIn(tx, ids, options), {
+    behavior: 'deferred',
+  })
+}
+
+function planIn(
+  tx: Transaction,
+  ids: readonly string[],
+  options: Pick<DeleteOptions, 'withPosts'>,
+): DeletePlan {
+  const stamp = deletionStamp(tx)
+  select(tx, ids)
+  const profiles = count(
+    tx,
+    sql`SELECT 1 FROM ${sql.raw(SELECTED)} WHERE profile`,
+  )
+  const others = count(
+    tx,
+    sql`SELECT 1 FROM ${sql.raw(SELECTED)} WHERE NOT profile`,
+  )
+  if (!profiles && !others) {
+    dropTemp(tx)
+    throw new AppError('not_found')
+  }
+  const kept = { listed: 0, saved: 0, annotated: 0, quoted: 0 }
+  let related = 0
+  const withPosts = !!options.withPosts && profiles > 0
+  if (withPosts) {
+    collectRelated(tx)
+    for (const row of tx.all<{ reason: string | null; n: number }>(
+      sql`SELECT reason, count(*) AS n FROM ${sql.raw(RELATED)} GROUP BY reason`,
+    )) {
+      if (row.reason) kept[row.reason as keyof typeof kept] = row.n
+      else related = row.n
+    }
+  }
+  const column = (query: SQL) =>
+    tx.all<{ id: string }>(query).map((row) => row.id)
+  const selected = column(sql`SELECT id FROM ${sql.raw(SELECTED)}`)
+  const posts = withPosts
+    ? column(sql`SELECT id FROM ${sql.raw(RELATED)} WHERE reason IS NULL`)
+    : []
+  dropTemp(tx)
+  return {
+    counts: { profiles, posts: others, related, kept },
+    selected,
+    posts,
+    stamp,
+  }
+}
+
+/**
+ * What the posts that go with an account depend on and the library's
+ * version does not count: requests (saved on its own), revisions (what a
+ * post quotes or lists), and other identities of accounts. Each moves with
+ * any row added; a note added to a post is checked on its own (`holds`).
+ */
+function deletionStamp(tx: Transaction): string {
+  const row = tx.get<Record<string, number | null>>(sql`
+    SELECT (SELECT n FROM library_version WHERE id = 1) AS version,
+      (SELECT max(rowid) FROM submissions) AS submissions,
+      (SELECT max(rowid) FROM revisions) AS revisions,
+      (SELECT count(*) FROM collection_identity_aliases) AS aliases`)
+  return JSON.stringify(row)
+}
+
+/**
+ * Whether a plan still holds where the deletion is written: nothing it
+ * read moved since (`deletionStamp`), and nothing that goes carries a note
+ * now (a note changes no version). Otherwise it is planned again there.
+ */
+function holds(tx: Transaction, plan: DeletePlan): boolean {
+  if (deletionStamp(tx) !== plan.stamp) return false
+  return !tx.get(sql`
+    SELECT 1 FROM library
+    WHERE collection_id IN (SELECT value FROM json_each(${list(plan.posts)}))
+      AND note <> ''
+    LIMIT 1`)
+}
+
+/** Remove these collections from the library, in the open transaction. */
+function remove(tx: Transaction, ids: readonly string[]): void {
+  const removed = sql`SELECT value FROM json_each(${list(ids)})`
+  tx.run(sql`DELETE FROM library WHERE collection_id IN (${removed})`)
+  // Records counted over them (what a retry would fetch again) change.
+  dropAllSummaries(tx)
+  pruneTags(tx)
+  revokeOrphanedShares(tx)
+  tx.run(sql`UPDATE collections SET unreferenced_at = ${Date.now()}
+    WHERE id IN (${removed}) AND unreferenced_at IS NULL`)
 }
 
 /**

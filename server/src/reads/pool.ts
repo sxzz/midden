@@ -1,4 +1,5 @@
 import { Worker, type Transferable } from 'node:worker_threads'
+import type { ErrorKind } from '#errors.ts'
 import type { Logger } from '#log.ts'
 import type { SlowQuery } from './slow.ts'
 
@@ -61,8 +62,23 @@ export type PoolResponse =
   | { log: string }
   | { slow: SlowQuery }
   | { id: number; ok: true; value: unknown }
-  /** `error`: what the caller answers; `cause`: an unexpected error's stack. */
-  | { id: number; ok: false; error: unknown; cause?: string }
+  /**
+   * `error`: what the caller answers; `app`: the `AppError` it was, for the
+   * web process to throw again; `cause`: an unexpected error's stack.
+   */
+  | {
+      id: number
+      ok: false
+      error: unknown
+      app?: ThreadAppError
+      cause?: string
+    }
+
+/** An `AppError` thrown on a thread, as it crosses back. */
+export interface ThreadAppError {
+  kind: ErrorKind
+  message: string
+}
 
 /** Why the pool could not run a read. */
 export type PoolErrorCode = 'busy' | 'timeout' | 'lost'
@@ -82,9 +98,11 @@ export class PoolError extends Error {
 export class ThreadError extends Error {
   override name = 'ThreadError'
   readonly body: unknown
-  constructor(body: unknown) {
+  readonly app?: ThreadAppError
+  constructor(body: unknown, app?: ThreadAppError) {
     super('read failed')
     this.body = body
+    if (app) this.app = app
   }
 }
 
@@ -285,7 +303,7 @@ export class QueryPool {
             { op: task.op, cause: response.cause },
             'read failed',
           )
-        task.reject(new ThreadError(response.error))
+        task.reject(new ThreadError(response.error, response.app))
       }
       this.#dispatch()
     })

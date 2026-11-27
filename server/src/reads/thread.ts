@@ -1,8 +1,9 @@
 // A read thread (`pool.ts`): its own read-only connection to the database,
 // and media links signed as the web process signs them. It answers the web
-// app's `GET /v1` requests (`http`, through the same API as the web process,
-// `#http/offload.ts`) and the agent API's reads (`#agent/reads.ts`), one at a
-// time. Started by path.
+// app's `GET /v1` requests and its dry runs (`http`, through the same API as
+// the web process, `#http/offload.ts`), and reads by name (`#agent/reads.ts`):
+// the agent API's, and those the writes of both run first. One at a time.
+// Started by path.
 import { Writable } from 'node:stream'
 import { parentPort, workerData } from 'node:worker_threads'
 import { Hono } from 'hono'
@@ -15,6 +16,7 @@ import { MediaSigner } from '#blob/signer.ts'
 import { readOnlyProgress } from '#capture/progress.ts'
 import { forgetRecords, keepFinishedRecords } from '#capture/record-cache.ts'
 import { openDatabase } from '#db/client.ts'
+import { isAppError } from '#errors.ts'
 import { createApi, type ForwardedEnv } from '#http/app.ts'
 import { threadContext } from './context.ts'
 import { inScope, SLOW_QUERY_MS, watchStatements } from './slow.ts'
@@ -90,7 +92,11 @@ export function threadApi(
       },
     }
     const response = await app.fetch(
-      new Request(request.url, { headers: request.headers }),
+      new Request(request.url, {
+        method: request.method,
+        headers: request.headers,
+        ...(request.body ? { body: request.body } : {}),
+      }),
       env,
     )
     return {
@@ -114,8 +120,9 @@ function scopeOf(request: PoolRequest): [route: string, query: string] {
       .map(([key, value]) => `${key}=${value}`)
       .join('&')
   if (request.op === 'http') {
-    const url = new URL((request.input as ForwardedRequest).url)
-    return [`GET ${url.pathname}`, queryOf(url.searchParams)]
+    const forwarded = request.input as ForwardedRequest
+    const url = new URL(forwarded.url)
+    return [`${forwarded.method} ${url.pathname}`, queryOf(url.searchParams)]
   }
   const input = request.input as {
     kind?: string
@@ -182,6 +189,9 @@ if (parentPort) {
         id: request.id,
         ok: false,
         error: body,
+        ...(isAppError(error)
+          ? { app: { kind: error.kind, message: error.message } }
+          : {}),
         ...(body.error === 'internal' && error instanceof Error
           ? { cause: error.stack ?? error.message }
           : {}),

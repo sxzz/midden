@@ -122,6 +122,7 @@ describe('web load', () => {
           body: new ArrayBuffer(0),
         })
       },
+      read: () => Promise.reject(new Error('no reads by name here')),
     }
     const app = new Hono<Env>()
       .use(load.middleware())

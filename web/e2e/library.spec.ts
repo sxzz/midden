@@ -63,8 +63,9 @@ test('browse, filter, history, refresh and remove a saved post', async ({
         body = { posts: 1, profiles: 0, listable: 0 }
         break
       }
+      case '/v1/collections/delete/preview':
       case '/v1/collections/delete': {
-        if (!r.request().postDataJSON().dry_run) deleted = true
+        if (path === '/v1/collections/delete') deleted = true
         body = {
           profiles: 0,
           posts: 1,

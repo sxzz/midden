@@ -28,7 +28,7 @@ import {
   recordDetail,
   recordMembers,
 } from './records.ts'
-import { retryRecordFailed } from './retries.ts'
+import { retryPlan, retryRecordFailed } from './retries.ts'
 import {
   pauseUpdate,
   recordProfiles,
@@ -479,6 +479,36 @@ describe('retrying what failed in a record', () => {
     expect(list(ctx).state).toBe('complete')
   })
 
+  test('planned beforehand, a part retried since is not retried again', async () => {
+    const { ctx, world } = setup()
+    world.brokenMedia.add(media('1'))
+    world.brokenPosts.add('2')
+    world.brokenPages.add('1')
+    world.listFail = (req) =>
+      req.cursor === '2'
+        ? new FakeFailure(status.FAILED_PRECONDITION, '关注列表读取失败')
+        : undefined
+    const record = await captureProfile(ctx, true)
+    world.brokenMedia.clear()
+    world.brokenPosts.clear()
+    world.brokenPages.clear()
+    world.listFail = undefined
+    reset(world)
+    // Two requests planned alike, written one after the other.
+    const plan = retryPlan(ctx.db, record, undefined)
+    const same = retryPlan(ctx.db, record, undefined)
+    expect(same).toEqual(plan)
+    expect(retryRecordFailed(ctx, record, undefined, plan)).toBe(4)
+    expect(retryRecordFailed(ctx, record, undefined, same)).toBe(0)
+    await ctx.queue.drain()
+    expect(world.fetched.toSorted()).toEqual(['2', '3', '4', 'page:1'])
+    expect(world.listed.map((r) => r.cursor)).toEqual(['2'])
+    expect(recordDetail(ctx.db, record)).toMatchObject({
+      done: true,
+      retryable: 0,
+    })
+  })
+
   test("an update's items, their posts and lists are retried in the update", async () => {
     const { ctx, world } = setup()
     // Posts listed again reuse what was saved, missing image and all.
@@ -535,7 +565,11 @@ describe('retrying what failed in a record', () => {
     expect(retryRecordFailed(ctx, update, part!.posts!.retryId)).toBe(1)
     // What a retry queues is the update's work: paused with it.
     pauseUpdate(ctx, update)
+    const stale = retryPlan(ctx.db, update, undefined)
+    expect(stale.map((unit) => unit.kind).toSorted()).toEqual(['item', 'list'])
     expect(retryRecordFailed(ctx, update)).toBe(2)
+    // Planned before that: the item and the list are retried already.
+    expect(retryRecordFailed(ctx, update, undefined, stale)).toBe(0)
     const queued = ctx.db
       .select({ updateId: jobs.updateId, state: jobs.state })
       .from(jobs)

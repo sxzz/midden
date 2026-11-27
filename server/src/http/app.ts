@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { Hono } from 'hono'
 import { deleteCookie, getCookie } from 'hono/cookie'
 import * as v from 'valibot'
+import { typeCatalog } from '#agent/runner.ts'
 import { HEARTBEAT_TIMEOUT, setHeartbeatTimeoutMinutes } from '#settings.ts'
 import { authenticate, bearer } from '#tokens/tokens.ts'
 import { TokenUsage } from '#tokens/usage.ts'
@@ -15,7 +16,9 @@ import { libraryRoutes } from './library-routes.ts'
 import { mediaRoutes } from './media-routes.ts'
 import {
   inline,
+  namedReads,
   offload,
+  onlyReads,
   type ForwardedRequest,
   type WebReads,
 } from './offload.ts'
@@ -72,8 +75,9 @@ export interface HttpOptions {
   /** Counts requests per API token; one is made when absent (tests). */
   tokenUsage?: TokenUsage
   /**
-   * Where `GET` requests run (`offload.ts`): the read threads in the web
-   * process; in place when absent (tests, and the threads themselves).
+   * Where `GET` requests and dry runs run, and what writes read first
+   * (`offload.ts`): the read threads in the web process; in place when
+   * absent (tests, and the threads themselves).
    */
   reads?: WebReads
   /**
@@ -81,7 +85,7 @@ export interface HttpOptions {
    * the login and passes what it found (`forwarded` in the request's env).
    */
   trusted?: boolean
-  /** After every request that may have written (not `GET`). */
+  /** After every request that may have written (not a `GET` or dry run). */
   onWrite?: () => void
 }
 
@@ -94,7 +98,7 @@ export interface ForwardedEnv {
  * The `/v1` API: passkey or Mini App login for the owner, then everything
  * else behind a token or the owner's session. Its type is the web app's API
  * client. `GET` requests run on the read threads (`offload.ts`) unless their
- * route says `inline`.
+ * route says `inline`, and so do dry runs whose route says `readOnly`.
  */
 export function createApi(options: HttpOptions) {
   const { ctx } = options
@@ -105,6 +109,12 @@ export function createApi(options: HttpOptions) {
   const fromWeb = (origin: string | undefined) =>
     !!origin && origins().includes(origin)
   const toThreads = offload(options.reads)
+  // What writes read first or answer with: on the threads, or here.
+  const read = namedReads(options.reads, () => ({
+    db: ctx.db,
+    blobs: ctx.blobs,
+    types: typeCatalog(ctx.platforms),
+  }))
   const passkeys = {
     ctx,
     store: {
@@ -124,7 +134,7 @@ export function createApi(options: HttpOptions) {
           await next()
         } finally {
           // What the read threads keep may be out of date now.
-          if (!READS.has(c.req.method)) options.onWrite?.()
+          if (!onlyReads(c)) options.onWrite?.()
         }
         c.header('Cache-Control', 'no-store')
       })
@@ -197,7 +207,7 @@ export function createApi(options: HttpOptions) {
               401,
             )
           const { token } = auth
-          if (token.permission === 'ro' && !READS.has(c.req.method)) {
+          if (token.permission === 'ro' && !onlyReads(c)) {
             usage.record(token.id, endpointOf(c))
             return c.json({ error: '只读令牌不能修改内容' }, 403)
           }
@@ -287,10 +297,10 @@ export function createApi(options: HttpOptions) {
           ctx.now,
         ),
       )
-      .route('/', captureRoutes(ctx, { dev: !!options.dev }))
-      .route('/', accountRoutes(ctx))
+      .route('/', captureRoutes(ctx, read, { dev: !!options.dev }))
+      .route('/', accountRoutes(ctx, read))
       .route('/', libraryRoutes(ctx))
-      .route('/', folderRoutes(ctx, options.reads))
+      .route('/', folderRoutes(ctx, read))
       .route('/', watchRoutes(ctx))
       .route('/', shareRoutes(ctx))
       .route('/passkeys', passkeyRoutes(passkeys))
@@ -300,7 +310,7 @@ export function createApi(options: HttpOptions) {
         '/origins',
         originRoutes({ ctx, webAppUrl, notify: options.notify, now }),
       )
-      .route('/', mediaRoutes(ctx))
+      .route('/', mediaRoutes(ctx, read))
   )
 }
 
