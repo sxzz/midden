@@ -132,13 +132,13 @@ test('lists tokens with their expiry and use, and makes one shown once', async (
   const origin = new URL(page.url()).origin
   const handoff = [
     `说明：${origin}/agent.md`,
-    `API 地址：${origin}`,
+    `API地址：${origin}`,
     '令牌：mdn_rw_first-secret',
   ].join('\n')
   await expect(
-    sheet(page).getByRole('textbox', { name: '给 AI agent' }),
+    sheet(page).getByRole('textbox', { name: '给AI agent' }),
   ).toHaveValue(handoff)
-  await sheet(page).getByRole('button', { name: '复制给 AI agent' }).click()
+  await sheet(page).getByRole('button', { name: '复制给AI agent' }).click()
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
     handoff,
   )

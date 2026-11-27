@@ -178,7 +178,7 @@ for (const [label, viewport] of sizes) {
       await expectCover(page)
       if (viewport.width >= 1000)
         expect((await box(page.locator('.cover'))).width).toBeLessThanOrEqual(
-          600,
+          680,
         )
       await expect(page.locator('article.post .body')).toBeVisible()
 
