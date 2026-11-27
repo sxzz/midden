@@ -57,20 +57,28 @@ const nameIs = (folded: string) =>
 const phraseIn = (folded: string) =>
   sql`(instr(k.search_name, ${folded}) > 0 OR instr(k.search_text, ${folded}) > 0)`
 
-/** Rows holding every term the indexes can find, with a bm25 score. */
-function candidatesSQL(query: SearchQuery): SQL {
+/** Rows the CJK index finds for the query's short CJK words, scored. */
+const pairsSQL = (query: SearchQuery) =>
+  sql`SELECT p.rowid AS rowid, bm25(p.catalog_cjk, ${WEIGHTS}) AS score
+    FROM catalog_cjk p WHERE p.catalog_cjk MATCH ${query.words}`
+
+/**
+ * Rows holding every term the indexes can find, with a bm25 score. With
+ * terms for both indexes, the CJK side is read once into `pairs` (a
+ * `WITH` item of its own) and joined by rowid: joined directly, SQLite
+ * asks the index again for every row the other side finds, and a common
+ * word on each side (`music 正文`) took seconds.
+ */
+function candidatesSQL(query: SearchQuery, pairs: string): SQL {
   const trigrams = query.trigrams
     ? sql`SELECT f.rowid AS rowid, bm25(f.catalog_fts, ${WEIGHTS}) AS score
         FROM catalog_fts f WHERE f.catalog_fts MATCH ${query.trigrams}`
     : undefined
-  const pairs = query.words
-    ? sql`SELECT p.rowid AS rowid, bm25(p.catalog_cjk, ${WEIGHTS}) AS score
-        FROM catalog_cjk p WHERE p.catalog_cjk MATCH ${query.words}`
-    : undefined
-  if (trigrams && pairs)
+  if (trigrams && query.words)
     return sql`SELECT t.rowid, t.score + p.score AS score
-      FROM (${trigrams}) t JOIN (${pairs}) p ON p.rowid = t.rowid`
-  if (trigrams ?? pairs) return (trigrams ?? pairs)!
+      FROM (${trigrams}) t JOIN ${sql.raw(pairs)} p ON p.rowid = t.rowid`
+  if (trigrams) return trigrams
+  if (query.words) return pairsSQL(query)
   // Nothing either index can find: every row is a candidate, scored by the
   // columns that hold the query.
   return sql`SELECT k.id AS rowid, -(
@@ -82,14 +90,14 @@ function candidatesSQL(query: SearchQuery): SQL {
 }
 
 /** Tiers 1 to 3. */
-function strictSQL(query: SearchQuery): SQL {
+function strictSQL(query: SearchQuery, pairs: string): SQL {
   const short = query.short.map((term) => holds(term))
   return sql`
     SELECT c.rowid AS rowid,
       CASE WHEN ${nameIs(query.folded)} THEN 1
         WHEN ${phraseIn(query.folded)} THEN 2 ELSE 3 END AS tier,
       c.score AS score
-    FROM (${candidatesSQL(query)}) c
+    FROM (${candidatesSQL(query, pairs)}) c
     CROSS JOIN catalog k ON k.id = c.rowid
     ${short.length ? sql`WHERE ${sql.join(short, sql` AND `)}` : sql``}`
 }
@@ -159,7 +167,16 @@ export function searchHits(
   const query = parseSearch(q)
   if (!query) return undefined
   const strict = `${name}_strict`
-  const strictCTE = sql`${sql.raw(strict)} AS MATERIALIZED (${strictSQL(query)})`
+  const pairs = `${name}_pairs`
+  const strictCTE = sql.join(
+    [
+      ...(query.trigrams && query.words
+        ? [sql`${sql.raw(pairs)} AS MATERIALIZED (${pairsSQL(query)})`]
+        : []),
+      sql`${sql.raw(strict)} AS MATERIALIZED (${strictSQL(query, pairs)})`,
+    ],
+    sql`, `,
+  )
   // Whether the strict tiers find few enough is settled first, so a list
   // and its count agree on it.
   const fuzzy =
