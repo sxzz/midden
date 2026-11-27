@@ -22,8 +22,9 @@ const RelationCompare = () => import('./components/RelationCompare.vue')
 const RelationsView = () => import('./components/RelationsView.vue')
 
 const SHARE = String.raw`/s/:slug([\w-]+)`
-// 设置's entries, by the sections that have them; SettingsView shows the
-// section for an entry of another.
+// 设置's sections, and its entries by the sections that have them;
+// SettingsView shows the section for an entry of another.
+const SECTIONS = settingsSections.map((s) => s.value).join('|')
 const ENTRY_SECTIONS = settingsSections
   .filter((s) => s.entries)
   .map((s) => s.value)
@@ -94,7 +95,7 @@ export const router = createRouter({
     // beside what is chosen; on a narrow one each is a page below the last.
     { path: '/settings', name: 'settings', component: SettingsView },
     {
-      path: '/settings/:section(passkeys|tokens|admin|about)',
+      path: `/settings/:section(${SECTIONS})`,
       name: 'settings-section',
       component: SettingsView,
     },
