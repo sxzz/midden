@@ -5,6 +5,7 @@ import {
   Resource,
   type FetchResponse,
 } from '../protocol.ts'
+import { avatarThumbnail } from './thumbnails.ts'
 
 function timestamp(value: unknown): string {
   if (typeof value !== 'string' && typeof value !== 'number') return ''
@@ -148,6 +149,7 @@ export function attachEntities(
           kind: 'image',
           purpose: 'avatar',
           immutableKey: avatarImmutableKey(author.avatar_url),
+          thumbnailUrl: avatarThumbnail(author.avatar_url),
         }),
       )
     }

@@ -10,6 +10,7 @@ import {
 import { Metadata, status } from '../rpc.ts'
 import { upstream } from '../upstream.ts'
 import { attachEntities } from './entities.ts'
+import { mediaThumbnail } from './thumbnails.ts'
 
 export class ProviderError extends Error {
   metadata = new Metadata()
@@ -166,6 +167,12 @@ export async function readJSON(
     throw new ProviderError(status.UNAVAILABLE, '平台返回的数据无效')
   }
 }
+/** A pixel count the platform gave, or 0. */
+function dimension(value: unknown): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : 0
+}
 export function normalize(
   post: any,
   id: string,
@@ -237,10 +244,23 @@ export function normalize(
       }
       if (seen.has(url)) continue
       seen.add(url)
+      const size = {
+        width: dimension(item.width),
+        height: dimension(item.height),
+      }
+      // A video's or GIF's still is its poster (`media_url_https`).
+      const thumbnailUrl =
+        kind === 'image'
+          ? mediaThumbnail(url, size)
+          : typeof item.thumbnail_url === 'string' && item.thumbnail_url
+            ? mediaThumbnail(item.thumbnail_url, size, true)
+            : undefined
       result.resources.push({
         url,
         kind,
         purpose: '',
+        ...(size.width && size.height ? size : {}),
+        ...(thumbnailUrl ? { thumbnailUrl } : {}),
         immutableKey: item.id
           ? `x:media:${kind}:${item.id}`
           : `x:media:${kind}:url:${parsed.href}`,

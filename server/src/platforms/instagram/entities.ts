@@ -15,6 +15,7 @@ import { status } from '../rpc.ts'
 import { mediaId, type Node } from './client.ts'
 import { ProviderError } from './errors.ts'
 import { handlePattern, shortcodeFromPk } from './resolve.ts'
+import { avatarThumbnail, mediaThumbnail } from './thumbnails.ts'
 
 export const version = '0.1.0'
 const nonnegative = { type: 'integer', minimum: 0 }
@@ -127,6 +128,7 @@ export function attachProfile(
         kind: 'image',
         purpose: 'avatar',
         immutableKey: `instagram:avatar:${avatar}`,
+        thumbnailUrl: avatarThumbnail(user, avatar),
       }),
     )
   }
@@ -277,11 +279,22 @@ export function postResult(
     const media = normalized?.media?.all?.[0]
     if (!media?.url) continue
     const id = mediaId(slide)
+    const kind = media.type === 'video' ? 'video' : 'image'
+    const dimensions = selected.dimensions ?? media
+    const width = Number(dimensions.width) || 0
+    const height = Number(dimensions.height) || 0
     result.graph!.entities[0]!.resourceIndices.push(result.resources.length)
     result.resources.push(
       Resource.fromPartial({
         url: media.url,
-        kind: media.type === 'video' ? 'video' : 'image',
+        kind,
+        width,
+        height,
+        thumbnailUrl: mediaThumbnail(slide, kind, {
+          url: media.url,
+          width,
+          height,
+        }),
         immutableKey: `instagram:media:${id || `${requested}:${index}`}:${media.type}:${media.width}x${media.height}:${selected.video_versions?.[0]?.bandwidth ?? selected.video_versions?.[0]?.bitrate ?? selected.video_versions?.[0]?.type ?? ''}`,
         altText:
           typeof slide.accessibility_caption === 'string'

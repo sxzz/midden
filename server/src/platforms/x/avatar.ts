@@ -1,4 +1,5 @@
 import { avatarImmutableKey } from './entities.ts'
+import { avatarThumbnail } from './thumbnails.ts'
 import type { FetchResponse } from '../protocol.ts'
 
 // Probe only X's image CDN. Keep the upstream metadata and raw response intact.
@@ -49,5 +50,8 @@ export async function preferOriginalAvatars(
     }
     resource.url = resolved.get(original)!
     resource.immutableKey = avatarImmutableKey(resource.url)
+    const thumbnail = avatarThumbnail(resource.url)
+    if (thumbnail) resource.thumbnailUrl = thumbnail
+    else delete resource.thumbnailUrl
   }
 }

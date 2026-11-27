@@ -34,6 +34,7 @@ import {
   upstreamError,
 } from './provider.ts'
 import { accountTransport } from './session.ts'
+import { bannerThumbnail } from './thumbnails.ts'
 import type { SessionCredential } from './credential.ts'
 import type { TwitterBuildHost } from '@fxembed/atmosphere/providers/twitter/build-host'
 
@@ -126,6 +127,7 @@ export function normalizeProfile(
   }
   entity.dataJson = Buffer.from(JSON.stringify(data))
   if (typeof user.banner_url === 'string' && user.banner_url) {
+    const banner = bannerThumbnail(user.banner_url)
     entity.resourceIndices.push(result.resources.length)
     result.resources.push({
       url: user.banner_url,
@@ -134,6 +136,7 @@ export function normalizeProfile(
       immutableKey: `x:banner:${user.banner_url}`,
       altText: '',
       sensitive: false,
+      ...(banner ? { thumbnailUrl: banner } : {}),
     })
   }
   attachMentions(

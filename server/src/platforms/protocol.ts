@@ -82,6 +82,15 @@ export interface Resource {
   sensitive: boolean
   /** Adapter-defined role. Empty resources appear in the generic presentation. */
   purpose: string
+  /** Pixel size of the media as the platform describes it; absent or 0 when unknown. */
+  width?: number
+  height?: number
+  /**
+   * A smaller rendition of the platform's to show in lists: a smaller size of
+   * an image, a video's poster. Absent when there is none, in which case an
+   * image stands for itself and a video has no still.
+   */
+  thumbnailUrl?: string
 }
 
 /** Adapter-owned JSON Schema (2020-12), bundled and self-contained. */
@@ -379,6 +388,9 @@ export const Resource = {
     message.altText = object.altText ?? ''
     message.sensitive = object.sensitive ?? false
     message.purpose = object.purpose ?? ''
+    if (object.width) message.width = object.width
+    if (object.height) message.height = object.height
+    if (object.thumbnailUrl) message.thumbnailUrl = object.thumbnailUrl
     return message
   },
 }
