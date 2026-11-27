@@ -37,6 +37,7 @@ import {
   type Kind,
   type ListTab,
 } from '../folders'
+import { headerRefresh } from '../header-actions'
 import { backButton, host } from '../host'
 import { RAIL, SIDEBAR, useMedia } from '../layout'
 import {
@@ -70,6 +71,7 @@ import TabBar from './TabBar.vue'
 import AppLink from './ui/AppLink.vue'
 import BackLink from './ui/BackLink.vue'
 import PageTabs from './ui/PageTabs.vue'
+import RefreshButton from './ui/RefreshButton.vue'
 import UpdateSheet from './UpdateSheet.vue'
 import WatchSheet from './WatchSheet.vue'
 // Remembered in this browser, so a reload does not cover the media again.
@@ -399,8 +401,6 @@ function folderTabLink(kind: Kind) {
   q.set('tab', kind)
   return `/folder/${folderId.value}?${q}`
 }
-let shownKey = ''
-watch(
 /** 帖子 and 账号 as X's tabs, each to its list as it was left. */
 const homeTabs = computed(() =>
   tabs.map((option) => ({
@@ -416,6 +416,8 @@ const folderTabs = computed(() =>
     on: folderKind.value === kind,
   })),
 )
+let shownKey = ''
+watch(
   () => route.fullPath,
   async () => {
     backButton(nested.value)
@@ -677,9 +679,9 @@ function listProps(list: ReturnType<typeof createList>, error = '') {
     next: collection.next.value,
     total: collection.total.value,
     usage: usage.value,
+    asideFilters: true,
     onSearch: search,
     onRefresh: () => {
-    asideFilters: true,
       if (list.loadedQuery !== undefined) void collection.refresh()
     },
     onTagsChanged: tagsChanged,
@@ -784,6 +786,12 @@ const viewProps = computed(() => {
         <p v-if="subtitle" class="subtitle">{{ subtitle }}</p>
       </div>
       <h1 v-else>{{ title }}</h1>
+      <RefreshButton
+        v-if="headerRefresh"
+        class="header-refresh"
+        :busy="headerRefresh.busy"
+        @refresh="headerRefresh.refresh()"
+      />
       <button
         v-if="folder"
         type="button"
@@ -1003,6 +1011,13 @@ const viewProps = computed(() => {
    the bar. */
 .bar.spaced {
   padding-bottom: 12px;
+}
+/* 刷新 for a page with no toolbar of its own (header-actions.ts), as the
+   header's other icons. */
+.bar > .header-refresh {
+  width: 44px;
+  height: 44px;
+  color: var(--subtle);
 }
 /* Header actions sit at the trailing edge whichever of them are shown. */
 .bar > h1,

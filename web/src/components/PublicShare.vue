@@ -8,6 +8,7 @@ import {
   type RouteLocationNormalized,
 } from 'vue-router'
 import { APIError, errorText, type PublicShareInfo } from '../api'
+import { headerRefresh } from '../header-actions'
 import { backButton, host } from '../host'
 import { SIDEBAR, useMedia } from '../layout'
 import { readShare } from '../reads'
@@ -15,6 +16,7 @@ import { detailTitle, kindOf, setDocumentTitle } from '../titles'
 import ShareAside from './ShareAside.vue'
 import BackLink from './ui/BackLink.vue'
 import ListSection from './ui/ListSection.vue'
+import RefreshButton from './ui/RefreshButton.vue'
 // The frame of a public link (分享): what the share opens, then pages of
 // what it reaches, read without login. Sensitive media starts covered on
 // every visit.
@@ -131,6 +133,12 @@ const viewProps = computed(() =>
         <span class="chevron" aria-hidden="true">‹</span>返回
       </BackLink>
       <h1>{{ title }}</h1>
+      <RefreshButton
+        v-if="headerRefresh"
+        class="header-refresh"
+        :busy="headerRefresh.busy"
+        @refresh="headerRefresh.refresh()"
+      />
       <button
         v-if="!counts"
         type="button"
@@ -201,6 +209,13 @@ const viewProps = computed(() =>
 .bar > h1 {
   margin-right: auto;
 }
+/* 刷新 for a page with no toolbar of its own (header-actions.ts), as the
+   header's other icons. */
+.bar > .header-refresh {
+  width: 44px;
+  height: 44px;
+  color: var(--subtle);
+}
 .icon-button {
   display: grid;
   place-items: center;
@@ -246,6 +261,8 @@ h1 {
    sidebar by App's .shell. */
 @media (min-width: 700px) {
   .page {
+    /* Where what sticks under the header (PageTabs) stops. */
+    --page-header-height: 53px;
     flex: 0 1 var(--column-width);
     min-width: 0;
     max-width: var(--column-width);
@@ -261,8 +278,6 @@ h1 {
   .bar {
     position: sticky;
     top: 0;
-    /* Where what sticks under the header (PageTabs) stops. */
-    --page-header-height: 53px;
     z-index: 10;
     min-height: 53px;
     margin-bottom: 8px;

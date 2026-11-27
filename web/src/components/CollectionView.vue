@@ -9,6 +9,7 @@ import {
   useSlots,
   watch,
 } from 'vue'
+import { useHeaderRefresh } from '../header-actions'
 import {
   groupCollections,
   listSort,
@@ -53,9 +54,9 @@ const props = defineProps<{
   repostedBy?: string
   /** A refresh (`refresh`) is reading the list again. */
   refreshing?: boolean
-}>()
   /** From 1000px its filters go to the sidebar (CollectionFilters). */
   asideFilters?: boolean
+}>()
 /** `actions`: more buttons for the toolbar, styled like 多选. */
 const slots = useSlots()
 const emit = defineEmits<{
@@ -166,6 +167,19 @@ const totalText = computed(() =>
     ? ''
     : `${props.total.toLocaleString('zh-CN')}${listsProfiles(props.query) ? '个账号' : '条'}`,
 )
+/** What the toolbar holds besides 刷新; with nothing, 刷新 goes to the header. */
+const toolbar = computed(
+  () =>
+    !!totalText.value ||
+    (!selecting.value && !!props.items.length && !shared.value) ||
+    albums.value ||
+    !!slots.actions,
+)
+useHeaderRefresh(() =>
+  props.hideFilters || toolbar.value
+    ? undefined
+    : { busy: !!props.refreshing, refresh: () => emit('refresh') },
+)
 const storage = computed(() =>
   props.usage ? `已用${storageSize(props.usage.used_bytes)}` : '',
 )
@@ -178,22 +192,13 @@ const storage = computed(() =>
     :query="query"
     :within-profile="withinProfile"
     :folder="folder"
+    :aside="asideFilters"
+    :total="totalText"
     @search="(value, replace) => emit('search', value, replace)"
     @tags-changed="(change) => emit('tagsChanged', change)"
   />
-  <div
-    v-if="
-      totalText ||
-      (!selecting && items.length) ||
-      albums ||
-      slots.actions ||
-      !hideFilters
-    "
-    class="layout-bar"
-  >
+  <div v-if="toolbar" class="layout-bar">
     <span v-if="totalText" class="total">{{ totalText }}</span>
-    :aside="asideFilters"
-    :total="totalText"
     <slot name="actions" />
     <button
       v-if="!selecting && items.length && !shared"
