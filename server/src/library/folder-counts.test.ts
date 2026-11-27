@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { createApi, SESSION_COOKIE } from '#http/app.ts'
-import { createSession } from '#http/auth.ts'
+import { createSession } from '#http/sessions.ts'
 import { capture, entity, graph, libraryContext } from '#testing/library.ts'
 import { BUSY_DEBOUNCE, DEBOUNCE, FolderCountSweep } from './folder-counts.ts'
 import { createFolder, listFolders, updateFolder } from './folders.ts'

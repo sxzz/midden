@@ -5,9 +5,13 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 /**
  * `session`: the owner's web session, which alone may delete (`ownerOnly`);
+ * `sessionId`: that session's public id, when a cookie signed the request
+ * in (not on a read thread, nor a development token standing in for it);
  * `token`: the API token the request came with, if any.
  */
-export type Env = { Variables: { session: boolean; token?: TokenInfo } }
+export type Env = {
+  Variables: { session: boolean; sessionId?: string; token?: TokenInfo }
+}
 
 const invalid = (
   result: { success: boolean },

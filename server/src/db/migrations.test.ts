@@ -1,6 +1,10 @@
 import { Buffer } from 'node:buffer'
+import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'vitest'
+import { createApi } from '#http/app.ts'
+import { SESSION_COOKIE, SESSION_TTL } from '#http/sessions.ts'
 import { checkSearchIndexes, intact } from '#library/search-index.ts'
+import { testContext } from '#testing/context.ts'
 import { insertRow, migratedBefore, migrateRest } from '#testing/migrations.ts'
 import { openDatabase, type Database } from './client.ts'
 
@@ -309,5 +313,56 @@ describe('platform_thumbnails', () => {
     expect(columns(db, 'assets')).toEqual(
       expect.arrayContaining(['width', 'height', 'thumbnail_url']),
     )
+  })
+})
+
+describe('web_session_devices', () => {
+  test('sessions stay signed in: an id, used and made now, their expiry kept', async () => {
+    const db = migratedBefore('web_session_devices')
+    const digest = (value: string) =>
+      createHash('sha256').update(value).digest('hex')
+    const soon = Date.now() + 6 * 3_600_000
+    insertRow(db, 'web_sessions', { digest: digest('a'), expires_at: soon })
+    insertRow(db, 'web_sessions', {
+      digest: digest('b'),
+      expires_at: soon + 1,
+    })
+    const before = Date.now()
+
+    migrateRest(db)
+
+    const rows = db.$client
+      .prepare('SELECT * FROM web_sessions ORDER BY expires_at')
+      .all()
+    expect(rows).toEqual([
+      expect.objectContaining({ digest: digest('a'), expires_at: soon }),
+      expect.objectContaining({ digest: digest('b'), expires_at: soon + 1 }),
+    ])
+    for (const row of rows) {
+      expect(row.id).toMatch(/^[\da-f]{32}$/)
+      expect(row.created_at).toBe(row.last_used_at)
+      expect(Number(row.created_at)).toBeGreaterThanOrEqual(before - 1000)
+      expect(Number(row.created_at)).toBeLessThanOrEqual(Date.now())
+      expect([row.method, row.origin, row.device]).toEqual([null, null, null])
+    }
+    expect(rows[0]!.id).not.toBe(rows[1]!.id)
+    expect(indexes(db, 'web_sessions')).toEqual(['web_sessions_expires'])
+
+    // Their next request renews them, to a full 30 days.
+    const ctx = { ...testContext(), db }
+    const response = await createApi({ ctx }).request('/session', {
+      headers: { Cookie: `${SESSION_COOKIE}=a` },
+    })
+    expect(response.status).toBe(204)
+    expect(response.headers.get('set-cookie')).toContain(
+      `Max-Age=${SESSION_TTL}`,
+    )
+    const renewed = db.$client
+      .prepare('SELECT expires_at FROM web_sessions WHERE digest = ?')
+      .get(digest('a'))!
+    expect(Number(renewed.expires_at)).toBeGreaterThan(
+      Date.now() + SESSION_TTL * 1000 - 60_000,
+    )
+    await ctx.queue.stop()
   })
 })

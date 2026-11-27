@@ -1253,12 +1253,28 @@ export const accountSelections = sqliteTable('account_selections', {
   connectionId: text(),
 })
 
-/** Browser sessions, by the SHA-256 of the cookie value. */
+/**
+ * Browser sessions, by the SHA-256 of the cookie value. `id` names one in
+ * 设置 and the API, so the digest never leaves the server. The expiry
+ * slides (`#http/sessions.ts`): a request more than a day after the last
+ * renewal pushes it and `lastUsedAt` forward, so `lastUsedAt` is a day
+ * coarse. Sessions from before the device list have no method, origin or
+ * device.
+ */
 export const webSessions = sqliteTable(
   'web_sessions',
   {
     digest: text().primaryKey(),
+    id: text().notNull().unique(),
     expiresAt: timestamp().notNull(),
+    createdAt: createdAt(),
+    lastUsedAt: timestamp().notNull(),
+    /** How it signed in. */
+    method: text({ enum: ['passkey', 'telegram'] }),
+    /** The web origin it signed in on; the cookie is that host's only. */
+    origin: text(),
+    /** Browser and system from the user agent, as `Safari · macOS`. */
+    device: text(),
   },
   (t) => [index('web_sessions_expires').on(t.expiresAt)],
 )

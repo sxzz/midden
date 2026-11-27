@@ -3,7 +3,7 @@ import { testContext } from '#testing/context.ts'
 import { tokenSecret } from '#testing/tokens.ts'
 import { TokenUsage } from '#tokens/usage.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
-import { createSession } from './auth.ts'
+import { createSession } from './sessions.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
 const WEB = 'https://midden.test/app/'

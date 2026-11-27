@@ -12,13 +12,13 @@ import { agentFixture, type AgentFixture } from '#testing/agent.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform } from '#testing/fake-platform.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
-import { createSession } from './auth.ts'
 import {
   inline as inlineRoute,
   pooledWebReads,
   type ForwardedRequest,
   type WebReads,
 } from './offload.ts'
+import { createSession } from './sessions.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { ReadThreadData } from '#reads/thread.ts'
 

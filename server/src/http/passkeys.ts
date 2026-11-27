@@ -12,7 +12,7 @@ import { and, asc, eq, lt } from 'drizzle-orm'
 import { HTTPException } from 'hono/http-exception'
 import { newId } from '#db/id.ts'
 import { passkeys, passkeyTokens } from '#db/schema.ts'
-import type { Database } from '#db/client.ts'
+import type { Database, Executor } from '#db/client.ts'
 import type { Challenges } from './challenges.ts'
 
 /** How long a /passkey link stays good. */
@@ -319,7 +319,7 @@ export function renamePasskey(
 }
 
 export function deletePasskey(
-  db: Database,
+  db: Executor,
   id: string,
 ): PasskeyView | undefined {
   const row = db.delete(passkeys).where(eq(passkeys.id, id)).returning().get()

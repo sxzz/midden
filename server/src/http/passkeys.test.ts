@@ -479,6 +479,63 @@ describe('passkey management', () => {
     expect((await signIn(authenticator)).status).toBe(400)
   })
 
+  test('deleting a passkey can sign out every other session', async () => {
+    const s = await signedIn()
+    const { call, signIn, authenticator, cookieOf } = s
+    const sessionsOf = async () =>
+      ((await (await call('/sessions')).json()) as { current: boolean }[])
+        .length
+    // The link signed in too, and two more browsers.
+    const second = cookieOf(await signIn(authenticator))!
+    cookieOf(await signIn(authenticator))
+    expect(await sessionsOf()).toBe(4)
+    const [passkey] = (await (await call('/passkeys')).json()) as {
+      id: string
+    }[]
+    expect(
+      (
+        await call(`/passkeys/${passkey!.id}?sign_out_others=yes`, {
+          method: 'DELETE',
+        })
+      ).status,
+    ).toBe(400)
+    expect(
+      (
+        await call(`/passkeys/${passkey!.id}?sign_out_others=true`, {
+          method: 'DELETE',
+        })
+      ).status,
+    ).toBe(204)
+    const left = (await (await call('/sessions')).json()) as {
+      current: boolean
+      method: string
+    }[]
+    expect(left).toEqual([
+      expect.objectContaining({ current: true, method: 'passkey' }),
+    ])
+    expect(
+      (await s.app.request('/session', { headers: { Cookie: second } })).status,
+    ).toBe(401)
+    // Without the option, other sessions stay.
+    const other = softAuthenticator()
+    const options = (await (
+      await call('/passkeys/options', { method: 'POST' })
+    ).json()) as PublicKeyCredentialCreationOptionsJSON
+    const added = (await (
+      await call('/passkeys', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: '手机',
+          response: other.create(options, MAIN),
+        }),
+      })
+    ).json()) as { id: string }
+    cookieOf(await signIn(other))
+    expect(await sessionsOf()).toBe(2)
+    await call(`/passkeys/${added.id}`, { method: 'DELETE' })
+    expect(await sessionsOf()).toBe(2)
+  })
+
   test('adds a passkey for the current domain without a link', async () => {
     const { call, notices } = await signedIn()
     const authenticator = softAuthenticator()

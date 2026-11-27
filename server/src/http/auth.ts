@@ -1,27 +1,12 @@
 import { Buffer } from 'node:buffer'
-import {
-  createHash,
-  createHmac,
-  randomBytes,
-  timingSafeEqual,
-} from 'node:crypto'
-import { eq, lt } from 'drizzle-orm'
-import { setCookie } from 'hono/cookie'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import { matchedRoutes } from 'hono/route'
-import { webSessions } from '#db/schema.ts'
-import type { Database } from '#db/client.ts'
 import type { Env } from './validate.ts'
 import type { Context, MiddlewareHandler } from 'hono'
 
 const INIT_DATA_MAX_AGE = 300
 const CLOCK_SKEW = 30
-export const SESSION_TTL = 12 * 60 * 60
-/** Host-only, so each of the app's domains keeps its own session. */
-export const SESSION_COOKIE = '__Host-midden'
 const HEX_HASH = /^[\da-f]{64}$/i
-
-const digest = (value: string) =>
-  createHash('sha256').update(value).digest('hex')
 
 function signatureMatches(expected: Buffer, hash: string | undefined): boolean {
   if (!hash || !HEX_HASH.test(hash)) return false
@@ -66,61 +51,11 @@ export function initDataUser(
   }
 }
 
-export function createSession(db: Database, now = Date.now()): string {
-  const value = randomBytes(32).toString('hex')
-  db.insert(webSessions)
-    .values({
-      digest: digest(value),
-      expiresAt: new Date(now + SESSION_TTL * 1000),
-    })
-    .run()
-  return value
-}
-
-/**
- * Sign the browser in. SameSite=None lets the Mini App keep its session
- * inside Telegram's web client, which frames it from another site.
- */
-export function startSession(c: Context, db: Database, now = Date.now()) {
-  setCookie(c, SESSION_COOKIE, createSession(db, now), {
-    path: '/',
-    secure: true,
-    httpOnly: true,
-    sameSite: 'None',
-    maxAge: SESSION_TTL,
-  })
-}
-
-export function sessionValid(
-  db: Database,
-  value: string,
-  now = Date.now(),
-): boolean {
-  const row = db
-    .select()
-    .from(webSessions)
-    .where(eq(webSessions.digest, digest(value)))
-    .get()
-  return !!row && row.expiresAt.getTime() > now
-}
-
-export function deleteSession(db: Database, value: string): void {
-  db.delete(webSessions)
-    .where(eq(webSessions.digest, digest(value)))
-    .run()
-}
-
-export function pruneSessions(db: Database, now = Date.now()): void {
-  db.delete(webSessions)
-    .where(lt(webSessions.expiresAt, new Date(now)))
-    .run()
-}
-
 /**
  * Routes that delete (收藏, 媒体, 所有视频, 标签, 收藏夹, 定期更新, 通行密钥,
- * 域名) or manage API tokens: the owner's web session only, never
- * an API token, whatever its permission. `createApi` decides what is a
- * session.
+ * 域名) or manage API tokens and web sessions: the owner's web session
+ * only, never an API token, whatever its permission. `createApi` decides
+ * what is a session.
  */
 export const ownerOnly: MiddlewareHandler<Env> = async (c, next) => {
   if (!c.get('session'))

@@ -6,7 +6,7 @@ import { testContext } from '#testing/context.ts'
 import { fakePlatform, fakeProfile, postGraph } from '#testing/fake-platform.ts'
 import { tokenSecret } from '#testing/tokens.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
-import { createSession } from './auth.ts'
+import { createSession } from './sessions.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
 const BOT = '123:secret-token'

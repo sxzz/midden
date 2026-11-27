@@ -6,14 +6,7 @@ import { HEARTBEAT_TIMEOUT, setHeartbeatTimeoutMinutes } from '#settings.ts'
 import { authenticate, bearer } from '#tokens/tokens.ts'
 import { TokenUsage } from '#tokens/usage.ts'
 import { accountRoutes } from './account-routes.ts'
-import {
-  deleteSession,
-  endpointOf,
-  initDataUser,
-  SESSION_COOKIE,
-  sessionValid,
-  startSession,
-} from './auth.ts'
+import { endpointOf, initDataUser } from './auth.ts'
 import { captureRoutes } from './capture-routes.ts'
 import { Challenges } from './challenges.ts'
 import { errorResponse } from './errors.ts'
@@ -31,6 +24,15 @@ import { allowedOrigins } from './origins.ts'
 import { passkeyAuthRoutes, passkeyRoutes } from './passkey-routes.ts'
 import { publicRoutes } from './public-routes.ts'
 import { queueRoutes, type QueueInfo } from './queue-routes.ts'
+import { sessionRoutes } from './session-routes.ts'
+import {
+  checkSession,
+  deleteSession,
+  replaceMiniAppSession,
+  SESSION_COOKIE,
+  setSessionCookie,
+  type SessionStart,
+} from './sessions.ts'
 import { shareRoutes } from './share-routes.ts'
 import { storageRoutes } from './storage-routes.ts'
 import { tokenRoutes } from './token-routes.ts'
@@ -149,7 +151,22 @@ export function createApi(options: HttpOptions) {
             return c.json({ error: '会话已失效，请从 Telegram 重新打开' }, 401)
           if (user !== telegram.owner)
             return c.json({ error: '只有所有者可以登录' }, 403)
-          startSession(c, ctx.db, now())
+          const start: SessionStart = {
+            method: 'telegram',
+            origin: c.req.header('Origin')!,
+            userAgent: c.req.header('User-Agent'),
+          }
+          // One Mini App session per domain and device, however often it
+          // signs in again.
+          setSessionCookie(
+            c,
+            replaceMiniAppSession(
+              ctx.db,
+              start,
+              getCookie(c, SESSION_COOKIE),
+              now(),
+            ),
+          )
           return c.json({})
         },
       )
@@ -200,12 +217,20 @@ export function createApi(options: HttpOptions) {
         }
         const cookie = getCookie(c, SESSION_COOKIE)
         if (!cookie) return c.json({ error: '需要登录' }, 401)
-        if (!sessionValid(ctx.db, cookie, now()))
-          return c.json({ error: '登录已失效或令牌无效' }, 401)
+        const session = checkSession(ctx.db, cookie, now())
+        if (!session) return c.json({ error: '登录已失效或令牌无效' }, 401)
         if (!READS.has(c.req.method) && !fromWeb(c.req.header('Origin')))
           return c.json({ error: '请求来源无效' }, 403)
         c.set('session', true)
+        c.set('sessionId', session.id)
         await next()
+        // Renewed: the browser keeps the cookie as long as the server. Set
+        // on the response made (which may come from a read thread), unless
+        // the request signed this session out.
+        const ended = c.res.headers
+          .getSetCookie()
+          .some((line) => line.startsWith(`${SESSION_COOKIE}=`))
+        if (session.renewed && !ended) setSessionCookie(c, cookie)
       })
       .use(toThreads)
       // Answers only whether the request is signed in.
@@ -270,6 +295,7 @@ export function createApi(options: HttpOptions) {
       .route('/', shareRoutes(ctx))
       .route('/passkeys', passkeyRoutes(passkeys))
       .route('/tokens', tokenRoutes(ctx.db, usage, now))
+      .route('/sessions', sessionRoutes(ctx.db, now))
       .route(
         '/origins',
         originRoutes({ ctx, webAppUrl, notify: options.notify, now }),

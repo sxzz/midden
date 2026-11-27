@@ -86,7 +86,9 @@ async function remove() {
   if (!p || busy.value) return
   busy.value = true
   try {
-    await call(client.passkeys[':id'].$delete({ param: { id: p.id } }))
+    await call(
+      client.passkeys[':id'].$delete({ param: { id: p.id }, query: {} }),
+    )
     removing.value = undefined
     await load()
   } catch (e) {

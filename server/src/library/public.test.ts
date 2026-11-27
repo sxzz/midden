@@ -2,7 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import { afterEach, describe, expect, onTestFinished, test } from 'vitest'
 import { collections } from '#db/schema.ts'
 import { createApi } from '#http/app.ts'
-import { createSession, SESSION_COOKIE } from '#http/auth.ts'
+import { createSession, SESSION_COOKIE } from '#http/sessions.ts'
 import {
   capture,
   entity,
