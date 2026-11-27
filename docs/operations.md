@@ -74,7 +74,7 @@ docker compose pull && docker compose up -d    # 更新（自动部署见下）
 
 服务在第 2 步到第 4 步之间停止，通常不到一分钟，启用 Litestream 时多约 15 秒。部署不会让 Litestream 重新上传整个数据库；回滚会（换回的数据库与它的位置对不上）。
 
-结果通过 Bot 发给 `DEPLOY_NOTIFY_CHAT_ID`（默认 `OWNER_TELEGRAM_ID`），日志在 `.local/deploy-webhook/`。也可以手动运行：
+结果通过 Bot 发给 `DEPLOY_NOTIFY_CHAT_ID`（默认 `OWNER_TELEGRAM_ID`），日志在 `.local/deploy-webhook/`。每次发送超时 10 秒；网络错误、超时、429（按 `retry_after` 等待，最长 60 秒）和 5xx 最多重试 3 次，间隔 2、5、15 秒；其他 4xx 不重试。每次失败在 webhook 的 stderr 写一行带 ISO 时间的记录（错误、`cause.code`、`cause.message`、HTTP 状态与 Telegram 的 `description`，不含 token 和 chat id），最终结果（`notification sent` 或 `notification failed after N attempts: …`）也写入该次部署的日志文件。webhook 启动时设置 `dns.setDefaultResultOrder('ipv4first')`：部署机到 api.telegram.org 的 IPv6 不通，让 IPv4 地址排在前面；只改变顺序，没有 IPv4 的主机仍可连接。也可以手动运行：
 
 ```sh
 node scripts/deploy.ts --check   # 只检查，不改动
@@ -87,7 +87,7 @@ node scripts/deploy.ts
 node scripts/install-deploy-webhook.ts --dir ~/midden
 ```
 
-GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<域名>/hooks/deploy`，密钥与 `.local/deploy-webhook.secret` 相同；隧道把该路径转发到 18090 端口。升级 Node 后重新运行安装命令。
+GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<域名>/hooks/deploy`，密钥与 `.local/deploy-webhook.secret` 相同；隧道把该路径转发到 18090 端口。升级 Node 后重新运行安装命令。修改 `scripts/deploy-webhook.ts` 后同样要重新运行安装命令：安装的是副本，安装脚本会 `bootout` 再 `bootstrap` LaunchAgent `org.midden.deploy-webhook`，即重启它。
 
 ## 媒体存储（Cloudflare R2）
 

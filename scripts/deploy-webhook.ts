@@ -3,9 +3,11 @@
 // the image, succeeds for a push to main. The payload is only a trigger:
 // deploy.ts, taken from origin/main at that moment, resolves the release.
 // Installed outside the checkout by install-deploy-webhook.ts.
+/* eslint-disable unicorn/no-exports-in-scripts -- for deploy-webhook.test.ts */
 import { Buffer } from 'node:buffer'
 import { spawn } from 'node:child_process'
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { setDefaultResultOrder } from 'node:dns'
 import {
   createWriteStream,
   mkdirSync,
@@ -86,7 +88,9 @@ function createDeployer(deploy: () => Promise<void>): () => void {
     else
       loop().catch((error: unknown) => {
         running = false
-        console.error('deployment crashed', error)
+        warn(
+          `deployment crashed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+        )
       })
   }
 }
@@ -198,11 +202,103 @@ function linkCommits(
   return { text: out + text.slice(last), entities }
 }
 
+const ATTEMPT_TIMEOUT = 10_000
+// Waits before the 2nd, 3rd and 4th attempt.
+const BACKOFF = [2000, 5000, 15_000]
+// A longer retry_after than this is not worth holding the deployment for.
+const MAX_RETRY_AFTER = 60_000
+
+export interface TelegramDeps {
+  fetch: typeof fetch
+  sleep: (ms: number) => Promise<void>
+  /** Called with a line for every failed attempt; never contains secrets. */
+  log: (line: string) => void
+  timeout?: number
+}
+
+/** stderr line with an ISO timestamp, for the service's log. */
+export function warn(line: string): void {
+  console.error(`${new Date().toISOString()} ${line}`)
+}
+
+/** `fetch failed` hides the reason in `cause`; spell it out. */
+function describeError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error)
+  const parts = [`${error.name}: ${error.message}`]
+  const cause = error.cause as
+    | (Error & { code?: string; errors?: (Error & { code?: string })[] })
+    | undefined
+  if (cause) {
+    parts.push(
+      `cause.code=${cause.code ?? 'none'}`,
+      `cause.message=${cause.message ?? String(cause)}`,
+    )
+    // Dual-stack connect failures are an AggregateError, one per address.
+    for (const inner of cause.errors ?? [])
+      parts.push(`[${inner.code ?? inner.name}: ${inner.message}]`)
+  }
+  return parts.join(' ')
+}
+
+/**
+ * Post to Telegram's sendMessage. Network errors, timeouts, 429 and 5xx are
+ * retried after 2, 5 and 15 seconds; other 4xx fail at once. Returns the
+ * outcome for the caller's log instead of throwing.
+ */
+export async function sendTelegram(
+  token: string,
+  chat: string,
+  message: { text: string; entities: TextLink[] },
+  deps: TelegramDeps,
+): Promise<{ ok: boolean; attempts: number; error?: string }> {
+  // The URL holds the token; make sure neither it nor the chat id is logged,
+  // whatever a failure message contains.
+  const redact = (text: string) =>
+    text.replaceAll(token, '<token>').replaceAll(chat, '<chat>')
+  const body = JSON.stringify({ chat_id: chat, ...message })
+  const max = BACKOFF.length + 1
+  let error = ''
+  for (let attempt = 1; attempt <= max; attempt++) {
+    let wait = BACKOFF[attempt - 1] ?? 0
+    let retry = true
+    try {
+      const response = await deps.fetch(
+        `https://api.telegram.org/bot${token}/sendMessage`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          signal: AbortSignal.timeout(deps.timeout ?? ATTEMPT_TIMEOUT),
+        },
+      )
+      if (response.ok) return { ok: true, attempts: attempt }
+      const data = (await response.json().catch(() => ({}))) as {
+        description?: string
+        parameters?: { retry_after?: number }
+      }
+      error = `HTTP ${response.status} description=${data.description ?? 'none'}`
+      const retryAfter = data.parameters?.retry_after
+      if (response.status === 429 && typeof retryAfter === 'number')
+        wait = Math.min(retryAfter * 1000, MAX_RETRY_AFTER)
+      retry = response.status === 429 || response.status >= 500
+    } catch (caught) {
+      error = describeError(caught)
+    }
+    error = redact(error)
+    deps.log(`attempt ${attempt}/${max} failed: ${error}`)
+    if (!retry || attempt === max)
+      return { ok: false, attempts: attempt, error }
+    await deps.sleep(wait)
+  }
+  return { ok: false, attempts: max, error }
+}
+
 /** Message the owner through the service's own bot, when configured. */
 async function notify(
   dir: string,
   repository: string,
   text: string,
+  log?: WriteStream,
 ): Promise<void> {
   let env: Record<string, string | undefined> = {}
   try {
@@ -211,24 +307,23 @@ async function notify(
   const token = env.TELEGRAM_BOT_TOKEN
   const chat = env.DEPLOY_NOTIFY_CHAT_ID || env.OWNER_TELEGRAM_ID
   if (!token || !chat) return
-  try {
-    const response = await fetch(
-      `https://api.telegram.org/bot${token}/sendMessage`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chat,
-          // Cut before linking: shortening never moves a link past the end.
-          ...linkCommits(text.slice(0, 4000), repository),
-        }),
+  const result = await sendTelegram(
+    token,
+    chat,
+    // Cut before linking: shortening never moves a link past the end.
+    linkCommits(text.slice(0, 4000), repository),
+    {
+      fetch,
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      log: (line) => {
+        warn(`deployment notification ${line}`)
       },
-    )
-    if (!response.ok)
-      console.error(`deployment notification failed: HTTP ${response.status}`)
-  } catch (error) {
-    console.error(`deployment notification failed: ${(error as Error).message}`)
-  }
+    },
+  )
+  const line = result.ok
+    ? 'notification sent'
+    : `notification failed after ${result.attempts} attempts: ${result.error}`
+  log?.write(`${new Date().toISOString()} ${line}\n`)
 }
 
 /**
@@ -277,6 +372,7 @@ async function deployLatest(
       outcome.startsWith('deployed')
         ? `✅ midden ${outcome}`
         : `❌ midden 部署失败\n${tail}`,
+      log,
     )
   } catch (error) {
     log.write(`${(error as Error).message}\n`)
@@ -285,6 +381,7 @@ async function deployLatest(
         dir,
         repository,
         `❌ midden 部署未开始\n${(error as Error).message}`,
+        log,
       )
   } finally {
     rmSync(script, { force: true })
@@ -293,6 +390,11 @@ async function deployLatest(
 }
 
 if (import.meta.main) {
+  // The deployment host reaches api.telegram.org over IPv4 only; its IPv6
+  // route fails. Resolve A records first so a connect never starts on the
+  // broken path. Only the order changes, so an IPv6-only host still works,
+  // and it needs no per-request dispatcher.
+  setDefaultResultOrder('ipv4first')
   const dir = path.resolve(
     process.env.MIDDEN_DIR || path.join(homedir(), 'midden'),
   )
