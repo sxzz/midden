@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { isAppError } from '#errors.ts'
-import { capture, entity, graph, libraryContext } from '#testing/library.ts'
+import {
+  capture,
+  countedFolders,
+  entity,
+  graph,
+  libraryContext,
+} from '#testing/library.ts'
 import { listTags, readAnnotation, updateAnnotation } from './annotations.ts'
 import { filterCounts } from './counts.ts'
-import { createFolder, listFolders } from './folders.ts'
+import { createFolder } from './folders.ts'
 import { deleteTag, renameTag } from './tags.ts'
 import type { CaptureContext } from '#capture/context.ts'
 
@@ -53,7 +59,7 @@ describe('tags', () => {
     })
     expect(listTags(c.db)).toEqual([{ id: tag.id, name: '猫猫' }])
     expect(names(c, ids[0]!)).toEqual(['猫猫'])
-    expect((await listFolders(c.db))[0]).toMatchObject({
+    expect((await countedFolders(c.db))[0]).toMatchObject({
       filter: folder.filter,
       count: 1,
     })
@@ -84,7 +90,7 @@ describe('tags', () => {
     expect(listTags(c.db)).toEqual([kept])
     for (const id of ids) expect(names(c, id)).toEqual(['新'])
     expect(filterCounts(c.db, `tag=${kept.id}`).count).toBe(3)
-    const saved = await listFolders(c.db)
+    const saved = await countedFolders(c.db)
     expect(saved.find((f) => f.id === folder.id)).toMatchObject({
       filter: `q=post&sort=saved&tag=${kept.id}`,
       count: 3,
@@ -99,7 +105,7 @@ describe('tags', () => {
     updateAnnotation(c.db, ids[0]!, { tagIds: [] })
     const kept = updateAnnotation(c.db, ids[1]!, { tagNames: ['新'] }).tags[0]!
     expect(renameTag(c.db, old.id, '新')).toMatchObject({ moved: 0 })
-    expect((await listFolders(c.db))[0]!.filter).toBe(`tag=${kept.id}`)
+    expect((await countedFolders(c.db))[0]!.filter).toBe(`tag=${kept.id}`)
   })
 
   test('reject names the way creating a tag does', async () => {
@@ -138,7 +144,7 @@ describe('tags', () => {
     expect(names(c, ids[1]!)).toEqual([])
     expect(listTags(c.db)).toEqual([dog])
     const filters = Object.fromEntries(
-      (await listFolders(c.db)).map((f) => [f.id, f.filter]),
+      (await countedFolders(c.db)).map((f) => [f.id, f.filter]),
     )
     // An emptied list goes, and how its tags matched with it.
     expect(filters[only.id]).toBe('')
@@ -171,7 +177,7 @@ describe('tags', () => {
 
     expect(renameTag(c.db, a, '乙').merged).toBe(true)
     const filters = Object.fromEntries(
-      (await listFolders(c.db)).map((f) => [f.id, f.filter]),
+      (await countedFolders(c.db)).map((f) => [f.id, f.filter]),
     )
     // The two became one: a single tag needs no mode.
     expect(filters[both.id]).toBe(`tag=${b}`)

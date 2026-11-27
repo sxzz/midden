@@ -352,7 +352,8 @@ async function show(
 /** The kinds a folder filter's results hold. */
 async function kindsFor(filter: string, saved: Folder): Promise<Kind[]> {
   // The folders were just loaded with their own counts.
-  if (filter === saved.filter) return folderKinds(saved.types)
+  // Not counted yet: both tabs, as with an unknown count.
+  if (filter === saved.filter) return folderKinds(saved.types ?? undefined)
   if (counted?.filter !== filter) {
     const q = new URLSearchParams(filter)
     try {

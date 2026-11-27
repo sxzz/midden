@@ -1,17 +1,19 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { isAppError } from '#errors.ts'
-import { capture, entity, graph, libraryContext } from '#testing/library.ts'
+import {
+  capture,
+  countedFolder,
+  countedFolders,
+  entity,
+  graph,
+  libraryContext,
+} from '#testing/library.ts'
 import { listTags, updateAnnotation } from './annotations.ts'
 import { filterCounts } from './counts.ts'
 import { deleteCollection } from './delete.ts'
 import { parseFilterQuery } from './filter-query.ts'
-import {
-  createFolder,
-  deleteFolder,
-  listFolders,
-  updateFolder,
-} from './folders.ts'
+import { createFolder, deleteFolder, updateFolder } from './folders.ts'
 import { listCollections } from './list.ts'
 import type { CaptureContext } from '#capture/context.ts'
 
@@ -86,11 +88,11 @@ describe('folders', () => {
     for (const [i, filter] of queries.entries())
       createFolder(c.db, { name: `f${i}`, filter })
     const counts = async () =>
-      (await listFolders(c.db)).map((folder) => folder.count)
+      (await countedFolders(c.db)).map((folder) => folder.count)
     expect(await counts()).toEqual(queries.map((q) => listed(c, q)))
     expect(await counts()).toEqual([3, 3, 1, 1, 2, 3, 0, 0])
-    expect((await listFolders(c.db))[0]!.types).toEqual({ 'fake.post': 3 })
-    expect((await listFolders(c.db))[6]!.types).toEqual({})
+    expect((await countedFolders(c.db))[0]!.types).toEqual({ 'fake.post': 3 })
+    expect((await countedFolders(c.db))[6]!.types).toEqual({})
 
     // New saves and deletions show up without touching the folders.
     const a3 = (await capture(c, post('a3'))).collectionId
@@ -169,7 +171,7 @@ describe('folders', () => {
     expect(queries.length).toBeGreaterThan(10)
     for (const [i, filter] of queries.entries())
       createFolder(c.db, { name: `f${i}`, filter })
-    const folders = await listFolders(c.db)
+    const folders = await countedFolders(c.db)
     expect(folders.map((folder) => folder.count)).toEqual(
       queries.map((q) => listed(c, q)),
     )
@@ -192,7 +194,9 @@ describe('folders', () => {
       name: '合集',
       filter:
         'author=fake%2Fu%2F1&author=fake%2Fu%2F2&entity_type=fake.post%2Cfake.profile&order=asc&sort=saved',
-      count: 0,
+      // Counted by whoever made it, or by the worker.
+      count: null,
+      stale: true,
     })
     expect(
       updateFolder(c.db, folder.id, {
@@ -250,7 +254,8 @@ describe('folders', () => {
     const c = setup()
     await capture(c, post('a1'))
     const filter = 'saved_within=1d&time_zone=Asia%2FShanghai'
-    expect(createFolder(c.db, { name: '今天', filter })).toMatchObject({
+    const today = createFolder(c.db, { name: '今天', filter })
+    expect(await countedFolder(c.db, today.id)).toMatchObject({
       filter,
       count: 1,
       types: { 'fake.post': 1 },
@@ -260,7 +265,7 @@ describe('folders', () => {
       // Nothing was written, yet a later day selects nothing.
       vi.setSystemTime(Date.now() + 2 * 86_400_000)
       expect(filterCounts(c.db, filter).count).toBe(0)
-      expect((await listFolders(c.db))[0]!.count).toBe(0)
+      expect((await countedFolders(c.db))[0]!.count).toBe(0)
       expect(
         filterCounts(c.db, 'saved_within=3d&time_zone=Asia/Shanghai'),
       ).toEqual({ count: 1, types: { 'fake.post': 1 } })
@@ -269,7 +274,7 @@ describe('folders', () => {
     }
     // A zone only belongs to a relative date.
     expect(
-      updateFolder(c.db, (await listFolders(c.db))[0]!.id, {
+      updateFolder(c.db, (await countedFolders(c.db))[0]!.id, {
         filter: 'time_zone=UTC&q=a&saved_within=',
       }).filter,
     ).toBe('q=a')
@@ -327,9 +332,9 @@ describe('folders', () => {
     const folder = createFolder(c.db, { name: 'f', filter: `tag=${kept.id}` })
     updateAnnotation(c.db, a1, { tagIds: [] })
     expect(listTags(c.db)).toEqual([kept])
-    expect((await listFolders(c.db))[0]!.count).toBe(0)
+    expect((await countedFolders(c.db))[0]!.count).toBe(0)
     updateAnnotation(c.db, a1, { tagIds: [kept.id] })
-    expect((await listFolders(c.db))[0]!.count).toBe(1)
+    expect((await countedFolders(c.db))[0]!.count).toBe(1)
 
     updateAnnotation(c.db, a1, { tagIds: [] })
     updateFolder(c.db, folder.id, { filter: '' })
@@ -341,6 +346,6 @@ describe('folders', () => {
     expect(listTags(c.db)).toEqual([other])
     deleteFolder(c.db, folder.id)
     expect(listTags(c.db)).toEqual([])
-    expect(await listFolders(c.db)).toEqual([])
+    expect(await countedFolders(c.db)).toEqual([])
   })
 })

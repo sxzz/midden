@@ -326,12 +326,16 @@ The owner's folders (收藏夹), each a saved filter in the terms of section 6:
       "filter": { "q": "猫", "media_type": ["image"] },
       "posts": 812,
       "accounts": 14,
+      "counted_at": "…",
+      "stale": false,
       "created_at": "…",
       "updated_at": "…"
     }
   ]
 }
 ```
+
+`posts` and `accounts` are counted in the background, not when you ask: `counted_at` says when, and `stale` is `true` when the archive or the folder's filter changed since (a new count follows within seconds, or within half a minute while an update runs). Before a folder's first count both are `null`. For an exact number now, search with `folder=<id>`: its `total` is counted on the spot.
 
 ### GET /agent/v1/tags
 

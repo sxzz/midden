@@ -17,6 +17,7 @@ import {
 import { narrowedCounts } from '#library/counts.ts'
 import { attachIncomingRelations } from '#library/entities.ts'
 import { parseFilterQuery } from '#library/filter-query.ts'
+import { countFolder } from '#library/folder-counts.ts'
 import { listFolders } from '#library/folders.ts'
 import { listsOf } from '#library/follow-graph.ts'
 import { followCounts, listFollowChanges } from '#library/follows.ts'
@@ -415,9 +416,11 @@ function metrics(
 
 // --- The rest -----------------------------------------------------------------
 
-async function foldersOf(r: AgentReader) {
-  const all = await listFolders(r.db)
-  const kinds = (types: Record<string, number>, kind: Kind) =>
+function foldersOf(r: AgentReader) {
+  const all = listFolders(r.db)
+  // Null before the folder's first count.
+  const kinds = (types: Record<string, number> | null, kind: Kind) =>
+    types &&
     Object.entries(types)
       .filter(([type]) => r.types[kind].includes(type))
       .reduce((sum, [, n]) => sum + n, 0)
@@ -434,6 +437,8 @@ async function foldersOf(r: AgentReader) {
         },
         posts: kinds(f.types, 'posts'),
         accounts: kinds(f.types, 'accounts'),
+        counted_at: f.counted_at,
+        stale: f.stale,
         created_at: f.created_at,
         updated_at: f.updated_at,
       }
@@ -650,6 +655,9 @@ export const READS = {
   relationChanges,
   metrics,
   folders: foldersOf,
+  // A folder just made or changed, counted for the write that did it.
+  folderCounts: (r: AgentReader, input: { id: string }) =>
+    countFolder(r.db, input.id) ?? null,
   tags: tagsOf,
   status,
   queue,

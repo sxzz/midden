@@ -43,7 +43,7 @@ function cache(db: Database): Cache {
  * The order does not change what a filter selects; the day a relative save
  * date starts on does, so a new day counts again.
  */
-function countKey(canonical: string): string {
+export function countKey(canonical: string): string {
   const params = new URLSearchParams(canonical)
   params.delete('sort')
   params.delete('order')

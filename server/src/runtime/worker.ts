@@ -9,6 +9,7 @@ import { optimize, unknownMigrations } from '#db/client.ts'
 import { pruneSessions } from '#http/auth.ts'
 import { prunePasskeys } from '#http/passkeys.ts'
 import { currentJob, RANK, withOrigin } from '#jobs/queue.ts'
+import { FolderCountSweep } from '#library/folder-counts.ts'
 import { StorageUsage } from '#usage/storage.ts'
 import { writeStatus, type WorkerReport } from './status-file.ts'
 import type { WebLoadSignal } from '#jobs/throttle.ts'
@@ -30,6 +31,9 @@ const WATCH_INTERVAL = 60_000
 const COMPOSITION_POLL = 5000
 // Finished capture records are counted and written down (`summary-sweep.ts`).
 const SUMMARY_INTERVAL = 10_000
+// Folders are counted in the background (`library/folder-counts.ts`): new
+// and edited ones within this, the rest as the sweep's debounce allows.
+const FOLDER_POLL = 2000
 const OPTIMIZE_INTERVAL = 6 * 60 * 60_000
 const THROTTLE_STEP = 1000
 const STATUS_EVERY = 2000
@@ -185,6 +189,18 @@ export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
     } catch (error) {
       logger.warn({ err: error }, 'composition request check failed')
     }
+  })
+  const folderCounts = new FolderCountSweep(db)
+  let counting = false
+  every(FOLDER_POLL, () => {
+    if (counting || ctx.queue.status().held) return
+    counting = true
+    folderCounts
+      .run({ busy: !ctx.queue.status().idle })
+      .catch((error: unknown) =>
+        logger.warn({ err: error }, 'counting folders failed'),
+      )
+      .finally(() => (counting = false))
   })
   every(SUMMARY_INTERVAL, () => {
     if (ctx.queue.status().held) return

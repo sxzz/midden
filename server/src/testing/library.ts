@@ -7,6 +7,8 @@ import { captureHandlers } from '#capture/handlers.ts'
 import { submit, type SubmitInput } from '#capture/submit.ts'
 import { captures, catalog } from '#db/schema.ts'
 import { catalogMissing } from '#library/catalog.ts'
+import { FolderCountSweep } from '#library/folder-counts.ts'
+import { listFolders } from '#library/folders.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, type FakeFetch } from '#testing/fake-platform.ts'
 import type { CaptureContext } from '#capture/context.ts'
@@ -154,4 +156,15 @@ export function expectCatalogFresh(ctx: CaptureContext) {
   expect(rows()).toEqual(kept)
   const rebuilt = searchIndexes(ctx.db)
   expect(rebuilt.kept).toEqual(rebuilt.fresh)
+}
+
+/** The folders as listed once the worker has counted what is out of date. */
+export async function countedFolders(db: Database) {
+  await new FolderCountSweep(db).run()
+  return listFolders(db)
+}
+
+/** One folder, counted as the worker would. */
+export async function countedFolder(db: Database, id: string) {
+  return (await countedFolders(db)).find((folder) => folder.id === id)!
 }

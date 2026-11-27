@@ -554,6 +554,8 @@ describe('writes', () => {
       filter: { author: ['fake/fake.profile/7'], sort: 'published' },
       posts: 2,
       accounts: 0,
+      counted_at: expect.any(String),
+      stale: false,
       created_at: expect.any(String),
       updated_at: expect.any(String),
     })

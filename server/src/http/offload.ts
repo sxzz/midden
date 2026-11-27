@@ -8,6 +8,7 @@ import { performance } from 'node:perf_hooks'
 import { HTTPException } from 'hono/http-exception'
 import { basePath, matchedRoutes } from 'hono/route'
 import { PoolError, type QueryPool } from '#reads/pool.ts'
+import type { CountedFolder } from '#library/folder-counts.ts'
 import type { TokenInfo } from '#tokens/tokens.ts'
 import type { Env } from './validate.ts'
 import type { Context, MiddlewareHandler } from 'hono'
@@ -42,11 +43,15 @@ export interface WebReads {
     request: ForwardedRequest,
     onStart?: () => void,
   ) => Promise<ForwardedResponse>
+  /** Count one folder there, for a write that made or changed it. */
+  countFolder?: (id: string) => Promise<CountedFolder | null>
 }
 
 /** On the read threads of the pool, in its `web` lane. */
 export function pooledWebReads(pool: QueryPool): WebReads {
   return {
+    countFolder: (id) =>
+      pool.run('web', 'folderCounts', { id }) as Promise<CountedFolder | null>,
     run: (request, onStart) =>
       pool.run(
         'web',

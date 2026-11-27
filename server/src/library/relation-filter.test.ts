@@ -3,7 +3,13 @@ import { afterEach, beforeAll, describe, expect, test } from 'vitest'
 import { connections, relationFetches } from '#db/schema.ts'
 import { isAppError } from '#errors.ts'
 import { threadContext } from '#reads/context.ts'
-import { capture, entity, graph, libraryContext } from '#testing/library.ts'
+import {
+  capture,
+  countedFolder,
+  entity,
+  graph,
+  libraryContext,
+} from '#testing/library.ts'
 import { updateAnnotation } from './annotations.ts'
 import { compareRelations } from './compare.ts'
 import { filterCounts } from './counts.ts'
@@ -212,7 +218,7 @@ for (const name of VIEWS)
           filter: `rel=mutual&rel_of=${pat}&entity_type=fake.profile`,
         })
         // Alice and her post: a folder keeps the platform, not the kind.
-        expect(folder).toMatchObject({
+        expect(await countedFolder(c.db, folder.id)).toMatchObject({
           filter: `entity_type=fake.post%2Cfake.profile&rel=mutual&rel_of=${pat}`,
           count: 2,
         })
@@ -441,7 +447,7 @@ for (const name of VIEWS)
           name: '共同关注',
           filter: `rel_of=${pat}&rel_of=${alice}&rel=following`,
         })
-        expect(folder).toMatchObject({
+        expect(await countedFolder(c.db, folder.id)).toMatchObject({
           filter: `rel=following&rel_of=${alice}&rel_of=${pat}`,
           count: 2,
         })

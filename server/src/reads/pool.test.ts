@@ -168,5 +168,7 @@ describe('read threads', () => {
     expect(missing).toMatchObject({ code: 'not_found' })
     // Its connection only reads.
     expect(await pooled.run('folders', undefined)).toEqual({ items: [] })
+    // A folder the web process just wrote is counted there.
+    expect(await pool.run('web', 'folderCounts', { id: 'none' })).toBeNull()
   }, 30_000)
 })

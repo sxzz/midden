@@ -265,7 +265,7 @@ export function createApi(options: HttpOptions) {
       .route('/', captureRoutes(ctx, { dev: !!options.dev }))
       .route('/', accountRoutes(ctx))
       .route('/', libraryRoutes(ctx))
-      .route('/', folderRoutes(ctx))
+      .route('/', folderRoutes(ctx, options.reads))
       .route('/', watchRoutes(ctx))
       .route('/', shareRoutes(ctx))
       .route('/passkeys', passkeyRoutes(passkeys))

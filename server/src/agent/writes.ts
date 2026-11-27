@@ -21,7 +21,13 @@ import {
   updateAnnotation,
   type Annotation,
 } from '#library/annotations.ts'
-import { createFolder, updateFolder, type Folder } from '#library/folders.ts'
+import { countWrittenFolder } from '#library/folder-counts.ts'
+import {
+  createFolder,
+  folderView,
+  updateFolder,
+  type Folder,
+} from '#library/folders.ts'
 import { isUUID } from '#library/read.ts'
 import { revokeShare } from '#library/shares.ts'
 import { renameTag } from '#library/tags.ts'
@@ -97,7 +103,9 @@ function folderFilter(r: AgentReader, raw: v.InferOutput<typeof FilterBody>) {
 
 function folderJson(r: AgentReader, f: Folder) {
   const { filter } = findFolder(r.db, f.id)
+  // Null before the folder's first count.
   const kinds = (kind: Kind) =>
+    f.types &&
     Object.entries(f.types)
       .filter(([type]) => r.types[kind].includes(type))
       .reduce((sum, [, n]) => sum + n, 0)
@@ -111,6 +119,8 @@ function folderJson(r: AgentReader, f: Folder) {
     },
     posts: kinds('posts'),
     accounts: kinds('accounts'),
+    counted_at: f.counted_at,
+    stale: f.stale,
     created_at: f.created_at,
     updated_at: f.updated_at,
   }
@@ -145,7 +155,7 @@ export function writeRoutes(
   app: Hono<AgentEnv, BlankSchema, '/agent/v1'>,
   o: { ctx: AccountsContext; reader: AgentReader; reads: Reads },
 ) {
-  const { ctx, reader } = o
+  const { ctx, reader, reads } = o
   const parse = body
   const target = (kind: Kind, ref: string, platform?: string) =>
     kind === 'posts'
@@ -395,16 +405,26 @@ export function writeRoutes(
   }
 
   // --- Folders ----------------------------------------------------------
+  // A folder made or given a new filter is counted once on a read thread.
+  const counted = async (id: string) => {
+    await countWrittenFolder(
+      ctx.db,
+      id,
+      (folderId) => reads.run('folderCounts', { id: folderId }),
+      ctx.logger,
+    )
+    return folderView(ctx.db, id)
+  }
   app.post('/folders', writes, async (c) => {
     const input = await parse(
       c,
       v.strictObject({ name: v.string(), filter: FilterBody }),
     )
-    const folder = createFolder(ctx.db, {
+    const { id } = createFolder(ctx.db, {
       name: input.name,
       filter: folderFilter(reader, input.filter),
     })
-    return c.json(folderJson(reader, folder), 201)
+    return c.json(folderJson(reader, await counted(id)), 201)
   })
 
   app.patch('/folders/:id', writes, async (c) => {
@@ -420,6 +440,11 @@ export function writeRoutes(
       name: input.name,
       filter: input.filter && folderFilter(reader, input.filter),
     })
-    return c.json(folderJson(reader, folder))
+    return c.json(
+      folderJson(
+        reader,
+        input.filter === undefined ? folder : await counted(id),
+      ),
+    )
   })
 }

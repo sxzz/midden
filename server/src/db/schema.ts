@@ -1089,6 +1089,23 @@ export const folders = sqliteTable('folders', {
 })
 
 /**
+ * Each folder's counts as the worker last counted them (`library/folder-counts.ts`):
+ * `/v1/folders` reads them rather than counting. `key` is what was counted
+ * (the filter, with a relative save date resolved to its day), `version` the
+ * `library_version` it was counted at; either moving makes the row stale.
+ */
+export const folderCounts = sqliteTable('folder_counts', {
+  folderId: text()
+    .primaryKey()
+    .references(() => folders.id, { onDelete: 'cascade' }),
+  key: text().notNull(),
+  version: integer().notNull(),
+  count: integer().notNull(),
+  types: text({ mode: 'json' }).$type<Record<string, number>>().notNull(),
+  countedAt: timestamp().notNull(),
+})
+
+/**
  * Public links (分享). The slug is random unless the owner sets one; whoever
  * has it reads what the target holds at that moment, a folder by its filter
  * or one saved collection. A slug is unique among live links only: once its

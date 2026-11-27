@@ -13,6 +13,8 @@ const folder = (fields: Partial<Folder>): Folder => ({
   filter: 'media_type=image',
   count: 3,
   types: { 'x.post': 3 },
+  counted_at: '2026-11-01T00:00:00.000Z',
+  stale: false,
   created_at: '2026-11-01T00:00:00.000Z',
   updated_at: '2026-11-01T00:00:00.000Z',
   ...fields,

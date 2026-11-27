@@ -62,7 +62,7 @@ const facts = computed(() =>
         >
           <span class="aside-row-name">{{ folder.name }}</span>
           <span class="aside-row-count">{{
-            folder.count.toLocaleString('zh-CN')
+            folder.count?.toLocaleString('zh-CN')
           }}</span>
         </AppLink>
       </section>

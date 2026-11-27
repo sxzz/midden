@@ -3,21 +3,28 @@ import { newId } from '#db/id.ts'
 import { folders } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { pruneTags } from './annotations.ts'
-import { filterCounts, filterCountsOf } from './counts.ts'
 import { parseFilterQuery } from './filter-query.ts'
-import { checkFilter, type FilterCounts } from './list.ts'
+import { storedCounts, type StoredCounts } from './folder-counts.ts'
+import { checkFilter } from './list.ts'
 import { revokeOrphanedShares } from './shares.ts'
 import type { Database, Executor } from '#db/client.ts'
 
-/** A saved library filter (收藏夹) and how many saved items it selects. */
+/**
+ * A saved library filter (收藏夹) and how many saved items it selects, as
+ * last counted (`folder-counts.ts`): null before the first count.
+ */
 export interface Folder {
   id: string
   name: string
   /** The list's query string, without a page cursor. */
   filter: string
-  count: number
+  count: number | null
   /** The count by the root's entity type, without the empty ones. */
-  types: Record<string, number>
+  types: Record<string, number> | null
+  /** When it was counted. */
+  counted_at: string | null
+  /** The library or the filter changed since: a new count is coming. */
+  stale: boolean
   created_at: string
   updated_at: string
 }
@@ -72,13 +79,15 @@ function canonicalFilter(raw: string): string {
 
 type Row = typeof folders.$inferSelect
 
-function view(row: Row, { count, types }: FilterCounts): Folder {
+function view(row: Row, stored: StoredCounts | undefined): Folder {
   return {
     id: row.id,
     name: row.name,
     filter: row.filter,
-    count,
-    types,
+    count: stored?.counts.count ?? null,
+    types: stored?.counts.types ?? null,
+    counted_at: stored?.countedAt.toISOString() ?? null,
+    stale: stored?.stale ?? true,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
   }
@@ -96,21 +105,24 @@ function sameName(db: Executor, name: string, except?: string): boolean {
 const duplicate = () => new AppError('conflict', '已有同名的收藏夹')
 
 /**
- * Every folder in the order they were made, with their counts. The folders
- * not counted yet are counted together, eight at a time, with a turn for
- * other requests between.
+ * Every folder in the order they were made, with their counts as last
+ * counted. Nothing is counted here.
  */
-export async function listFolders(db: Database): Promise<Folder[]> {
+export function listFolders(db: Executor): Folder[] {
   const rows = db
     .select()
     .from(folders)
     .orderBy(asc(folders.createdAt), asc(folders.id))
     .all()
-  const counts = await filterCountsOf(
-    db,
-    rows.map((row) => row.filter),
-  )
-  return rows.map((row, i) => view(row, counts[i]!))
+  const stored = storedCounts(db, rows)
+  return rows.map((row) => view(row, stored.get(row.id)))
+}
+
+/** One folder as `listFolders` lists it. */
+export function folderView(db: Executor, id: string): Folder {
+  const row = db.select().from(folders).where(eq(folders.id, id)).get()
+  if (!row) throw new AppError('not_found')
+  return view(row, storedCounts(db, [row]).get(row.id))
 }
 
 export function createFolder(
@@ -128,10 +140,13 @@ export function createFolder(
       .returning()
       .get()
   })
-  return view(row, filterCounts(db, row.filter))
+  return view(row, undefined)
 }
 
-/** Rename a folder and/or replace its filter. */
+/**
+ * Rename a folder and/or replace its filter. Its stored counts stand until
+ * it is counted again, stale when the filter changed.
+ */
 export function updateFolder(
   db: Database,
   id: string,
@@ -153,7 +168,7 @@ export function updateFolder(
     if (filter !== undefined) pruneTags(tx)
     return updated
   })
-  return view(row, filterCounts(db, row.filter))
+  return view(row, storedCounts(db, [row]).get(row.id))
 }
 
 export function deleteFolder(db: Database, id: string): void {
