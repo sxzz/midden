@@ -33,6 +33,7 @@ import {
   releaseFreePages,
 } from './maintenance.ts'
 import { submit } from './submit.ts'
+import type { FsBlobStore } from '#blob/fs-store.ts'
 import type { CaptureContext } from './context.ts'
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2])
@@ -99,7 +100,7 @@ describe('maintenance', () => {
     const put = async (key: string, bytes: Buffer) => {
       const file = path.join(dir, key)
       writeFileSync(file, bytes)
-      await c.blobs.putFile(key, file)
+      await (c.blobs as FsBlobStore).putFile(key, file)
     }
     await put('a'.repeat(64), webpOf(1200, 200))
     await put('b'.repeat(64), webpOf(300, 400))
@@ -171,13 +172,13 @@ describe('maintenance', () => {
       'f',
     )
     writeFileSync(file, webpOf(450, 800))
-    await c.blobs.putFile('e'.repeat(64), file)
+    await (c.blobs as FsBlobStore).putFile('e'.repeat(64), file)
     const rows = Array.from({ length: 900 }, (_, i) => `blob-${i}`)
     // One file per thumbnail, as stored; here they are all the same bytes.
     for (const [i] of rows.entries()) {
       const copy = path.join(path.dirname(file), `c${i}`)
       writeFileSync(copy, webpOf(450, 800))
-      await c.blobs.putFile(String(i).padStart(64, 'e'), copy)
+      await (c.blobs as FsBlobStore).putFile(String(i).padStart(64, 'e'), copy)
     }
     c.db
       .insert(blobs)

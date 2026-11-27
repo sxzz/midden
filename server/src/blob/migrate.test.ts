@@ -40,7 +40,7 @@ async function addBlob(
   const hash = sha256(body)
   const file = path.join(mkdtempSync(path.join(tmpdir(), 'blob-')), 'f')
   writeFileSync(file, options.bytes ?? body)
-  await store.putFile(hash, file)
+  await store.local.putFile(hash, file)
   const id = newId()
   ctx.db
     .insert(blobs)

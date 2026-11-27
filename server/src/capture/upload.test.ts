@@ -1,13 +1,21 @@
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
-import { rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { buffer } from 'node:stream/consumers'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import {
+  INCOMING,
+  PART_BYTES,
+  type BucketBlobStore,
+} from '#blob/bucket-store.ts'
 import { FsBlobStore } from '#blob/fs-store.ts'
 import { mediaRoutes } from '#blob/route.ts'
 import { S3_ATTEMPTS } from '#blob/s3.ts'
 import { IMMUTABLE, objectPath } from '#blob/store.ts'
+import { newId } from '#db/id.ts'
 import { assets, blobs, blobThumbnails, captures, jobs } from '#db/schema.ts'
 import { deleteCollection } from '#library/delete.ts'
 import { removeMedia } from '#library/media-removal.ts'
@@ -20,9 +28,8 @@ import { recordingLogger } from '#testing/logs.ts'
 import { captureHandlers } from './handlers.ts'
 import { collectCollections, collectMedia } from './maintenance.ts'
 import { submit } from './submit.ts'
-import { moveThumbnails } from './thumbnail-remote.ts'
 import { regenerateThumbnail } from './thumbnail.ts'
-import type { BucketBlobStore } from '#blob/bucket-store.ts'
+import { enqueueUpload } from './upload.ts'
 import type { MediaSigner } from '#blob/signer.ts'
 import type { Resource } from '#platforms/protocol.ts'
 import type { CaptureContext } from './context.ts'
@@ -131,115 +138,153 @@ function loseThumbnails(c: CaptureContext) {
 const sha256 = (bytes: Buffer) =>
   createHash('sha256').update(bytes).digest('hex')
 
+/** A blob downloaded before downloads streamed into the bucket. */
+async function legacyBlob(c: CaptureContext, bytes: Buffer) {
+  const hash = sha256(bytes)
+  const file = path.join(mkdtempSync(path.join(tmpdir(), 'legacy-')), 'f')
+  writeFileSync(file, bytes)
+  await (c.blobs as BucketBlobStore).local.putFile(hash, file)
+  const id = newId()
+  c.db
+    .insert(blobs)
+    .values({ id, hash, size: bytes.length, mime: 'image/jpeg' })
+    .run()
+  enqueueUpload(c, c.db, id)
+  return { id, hash }
+}
+
+const remoteAt = (c: CaptureContext, id: string) =>
+  c.db.select().from(blobs).where(eq(blobs.id, id)).get()!.remoteAt
+
 const uploads = (c: CaptureContext) =>
   c.db.select().from(jobs).where(eq(jobs.type, 'upload')).all()
 
 describe('media in R2', () => {
-  test('a download is local first; once the upload is confirmed the web gets the public URL and the local original goes', async () => {
-    const { c, media, store } = setup()
+  test('a download streams into the bucket: recorded there from the start, with no local file and no upload', async () => {
+    const { c, media, store, capture } = setup()
     media['1'] = [{ url: 'https://m.test/a.jpg' }]
-    let release!: () => void
-    s3.gate = new Promise((resolve) => (release = resolve))
-    const job = submit(c, { url: 'https://fake.test/p/1' })
-    await vi.waitFor(() =>
-      expect(
-        c.db.select().from(captures).where(eq(captures.id, job.id)).get()
-          ?.state,
-      ).toBe('complete'),
-    )
+    const done = await capture('1')
+    expect(done.state).toBe('complete')
     const blob = c.db.select().from(blobs).get()!
-    // Saved and shown from here while the upload waits.
-    expect(await store.local.stat(blob.hash)).toBe(JPEG.length)
-    expect(blob.remoteAt).toBeNull()
-    const pending = getCollection(
-      c,
-      c.db.select().from(captures).get()!.collectionId,
-    ).assets[0]!
-    expect(pending.url).toMatch(new RegExp(String.raw`^/media/${blob.hash}\?`))
-    expect(s3.objects.size).toBe(0)
-
-    release()
-    s3.gate = undefined
-    await c.queue.drain()
-    const uploaded = c.db.select().from(blobs).get()!
-    expect(uploaded.remoteAt).toBeInstanceOf(Date)
-    const object = s3.objects.get(objectPath(blob.hash))!
-    expect(object).toMatchObject({
+    expect(blob.remoteAt).toBeInstanceOf(Date)
+    expect(s3.objects.get(objectPath(blob.hash))).toMatchObject({
+      body: JPEG,
       contentType: 'image/jpeg',
       cacheControl: IMMUTABLE,
     })
-    const view = getCollection(
-      c,
-      c.db.select().from(captures).get()!.collectionId,
-    ).assets[0]!
+    // One PUT straight to the hash, checked by MD5 and SHA-256.
+    const put = s3.requests.find((r) => r.method === 'PUT')!
+    expect(put.key).toBe(objectPath(blob.hash))
+    expect(put.headers['x-amz-content-sha256']).toBe(blob.hash)
+    expect(await store.local.stat(blob.hash)).toBeUndefined()
+    expect(uploads(c)).toEqual([])
+    const view = getCollection(c, done.collectionId).assets[0]!
     expect(view.url).toBe(`${FAKE_PUBLIC}/${objectPath(blob.hash)}`)
     // Downloads keep their name, so they go through the server.
     expect(view.download_url).toMatch(
       new RegExp(String.raw`^/media/${blob.hash}\?`),
     )
-    // The bucket has the only copy now, and reads go there.
-    expect(await store.local.stat(blob.hash)).toBeUndefined()
     expect(await buffer(await store.read(blob.hash))).toEqual(JPEG)
-    expect(uploads(c)).toEqual([])
   })
 
-  test('a failed upload is retried later and logged; the media stays local meanwhile', async () => {
-    const { c, clock, media, logs, store, capture } = setup()
-    media['1'] = [{ url: 'https://m.test/a.jpg' }]
-    // Every try of the request.
-    s3.failNext = S3_ATTEMPTS
-    const done = await capture('1')
-    expect(done.state).toBe('complete')
-    const { hash } = c.db.select().from(blobs).get()!
-    expect(c.db.select().from(blobs).get()!.remoteAt).toBeNull()
-    expect(await store.local.stat(hash)).toBe(JPEG.length)
-    const waiting = c.db
-      .select()
-      .from(jobs)
-      .where(eq(jobs.type, 'upload'))
-      .get()!
-    expect(waiting).toMatchObject({ attempt: 1, maxAttempts: 12 })
-    expect(waiting.runAt.getTime() - clock.now).toBe(30_000)
-    expect(logs.entries).toContainEqual(
-      expect.objectContaining({ msg: 'job will retry', jobType: 'upload' }),
-    )
-    clock.now += 31_000
-    await c.queue.drain()
-    expect(c.db.select().from(blobs).get()!.remoteAt).toBeInstanceOf(Date)
-    expect(await store.local.stat(hash)).toBeUndefined()
-    expect(c.db.select().from(jobs).all()).toEqual([])
-  })
-
-  test('an upload that reads back wrong is not recorded, and the local file stays', async () => {
-    const { c, clock, media, store, capture } = setup()
-    media['1'] = [{ url: 'https://m.test/a.jpg' }]
-    s3.overwrite = { cacheControl: 'no-store' }
-    await capture('1')
+  test('a file larger than a part goes up in parts under a temporary key, then is copied to its hash', async () => {
+    const { c, media, files, capture } = setup()
+    const big = Buffer.concat([VIDEO, Buffer.alloc(PART_BYTES + 1234, 3)])
+    files['https://m.test/big.mp4'] = big
+    media['1'] = [
+      { url: 'https://m.test/big.mp4', kind: 'video', immutableKey: 'x:v:9' },
+    ]
+    expect((await capture('1')).state).toBe('complete')
     const blob = c.db.select().from(blobs).get()!
-    expect(blob.remoteAt).toBeNull()
-    expect(await store.local.stat(blob.hash)).toBe(JPEG.length)
-    const waiting = uploads(c)[0]!
-    expect(waiting).toMatchObject({ type: 'upload', attempt: 1 })
-    expect(waiting.lastError).toMatch(
+    expect(blob).toMatchObject({ hash: sha256(big), size: big.length })
+    expect(blob.remoteAt).toBeInstanceOf(Date)
+    expect(s3.objects.get(objectPath(blob.hash))).toMatchObject({
+      body: big,
+      contentType: 'video/mp4',
+      cacheControl: IMMUTABLE,
+      metadata: { sha256: blob.hash },
+    })
+    // The temporary object and the upload are gone.
+    expect([...s3.objects.keys()]).toEqual([objectPath(blob.hash)])
+    expect(s3.uploads.size).toBe(0)
+    const parts = s3.requests.filter(
+      (r) => r.method === 'PUT' && r.key.startsWith(`${INCOMING}/`),
+    )
+    expect(parts).toHaveLength(2)
+
+    // The same bytes again: kept as they are, nothing copied.
+    files['https://m.test/big.mp4?again'] = big
+    media['2'] = [{ url: 'https://m.test/big.mp4?again', kind: 'video' }]
+    s3.requests.length = 0
+    expect((await capture('2')).state).toBe('complete')
+    expect(s3.requests.filter((r) => r.headers['x-amz-copy-source'])).toEqual(
+      [],
+    )
+    expect([...s3.objects.keys()]).toEqual([objectPath(blob.hash)])
+    expect(c.db.select().from(blobs).all()).toHaveLength(1)
+  })
+
+  test('a download cut off midway leaves nothing behind, and the job tries again', async () => {
+    const { c, clock, media, files, logs, capture } = setup()
+    const big = Buffer.concat([VIDEO, Buffer.alloc(PART_BYTES + 10, 4)])
+    let cut = true
+    media['1'] = [{ url: 'https://m.test/cut.mp4', kind: 'video' }]
+    files['https://m.test/cut.mp4'] = big
+    c.fetch = async (input) => {
+      const body = files[String(input)]!
+      if (!cut) return new Response(body)
+      // A first part, then the connection drops.
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(body.subarray(0, PART_BYTES + 5))
+          controller.error(new Error('connection reset'))
+        },
+      })
+      return new Response(stream)
+    }
+    const done = await capture('1')
+    expect(done.state).not.toBe('complete')
+    expect(s3.objects.size).toBe(0)
+    expect(s3.uploads.size).toBe(0)
+    expect(logs.entries).toContainEqual(
+      expect.objectContaining({ msg: 'job will retry', jobType: 'download' }),
+    )
+    cut = false
+    clock.now += 60_000
+    await c.queue.drain()
+    expect(c.db.select().from(assets).get()!.state).toBe('ready')
+    expect([...s3.objects.keys()]).toHaveLength(1)
+  })
+
+  test('a write to the bucket that keeps failing, or reads back wrong, fails the attempt; the retry writes it', async () => {
+    const { c, clock, media, capture } = setup()
+    media['1'] = [{ url: 'https://m.test/a.jpg' }]
+    // Every try of the one request.
+    s3.failNext = S3_ATTEMPTS
+    await capture('1')
+    expect(c.db.select().from(blobs).all()).toEqual([])
+    expect(c.db.select().from(assets).get()!.state).toBe('pending')
+    s3.overwrite = { cacheControl: 'no-store' }
+    clock.now += 60_000
+    await c.queue.drain()
+    expect(c.db.select().from(blobs).all()).toEqual([])
+    expect(c.db.select().from(jobs).get()!.lastError).toMatch(
       /reads back wrong: Cache-Control no-store/,
     )
-
     s3.overwrite = undefined
-    clock.now += 31_000
+    clock.now += 60_000
     await c.queue.drain()
     expect(c.db.select().from(blobs).get()!.remoteAt).toBeInstanceOf(Date)
-    expect(await store.local.stat(blob.hash)).toBeUndefined()
   })
 
-  test('a failed deletion of the local copy is retried; the blob stays recorded in the bucket', async () => {
-    const { c, clock, media, logs, store, capture } = setup()
-    media['1'] = [{ url: 'https://m.test/a.jpg' }]
+  test('a local original from before is uploaded by its job, then its local copy goes; a failed deletion is retried', async () => {
+    const { c, clock, logs, store } = setup()
+    const blob = await legacyBlob(c, JPEG)
     const deleteLocal = vi
       .spyOn(store, 'deleteLocal')
       .mockRejectedValueOnce(new Error('EBUSY: resource busy'))
-    await capture('1')
-    const blob = c.db.select().from(blobs).get()!
-    expect(blob.remoteAt).toBeInstanceOf(Date)
+    await c.queue.drain()
+    expect(remoteAt(c, blob.id)).toBeInstanceOf(Date)
     expect(await store.local.stat(blob.hash)).toBe(JPEG.length)
     const waiting = uploads(c)[0]!
     expect(waiting).toMatchObject({ type: 'upload', attempt: 1 })
@@ -247,17 +292,16 @@ describe('media in R2', () => {
     expect(logs.entries).toContainEqual(
       expect.objectContaining({ msg: 'job will retry', jobType: 'upload' }),
     )
-    // Recorded once; the retry only deletes.
     const puts = s3.requests.filter((r) => r.method === 'PUT').length
     clock.now += 31_000
     await c.queue.drain()
     expect(deleteLocal).toHaveBeenCalledTimes(2)
     expect(await store.local.stat(blob.hash)).toBeUndefined()
-    expect(c.db.select().from(blobs).get()!.remoteAt).toEqual(blob.remoteAt)
     expect(s3.requests.filter((r) => r.method === 'PUT')).toHaveLength(puts)
+    expect(uploads(c)).toEqual([])
   })
 
-  test('the poster of a video is its thumbnail, moved to the bucket as the original is', async () => {
+  test('the poster of a video is its thumbnail, streamed into the bucket as the original is', async () => {
     const { c, media, store, capture } = setup()
     media['1'] = [
       {
@@ -271,7 +315,6 @@ describe('media in R2', () => {
     ]
     const done = await capture('1')
     expect(done.state).toBe('complete')
-    const blob = c.db.select().from(blobs).get()!
     const thumbnail = c.db.select().from(blobThumbnails).get()!
     expect(thumbnail).toMatchObject({
       state: 'ready',
@@ -281,8 +324,6 @@ describe('media in R2', () => {
       height: 225,
     })
     expect(thumbnail.remoteAt).toBeInstanceOf(Date)
-    expect(blob.remoteAt).toBeInstanceOf(Date)
-    expect(await store.local.stat(blob.hash)).toBeUndefined()
     expect(await store.local.stat(thumbnail.key!)).toBeUndefined()
     expect(s3.objects.get(objectPath(thumbnail.key!))).toMatchObject({
       contentType: 'image/jpeg',
@@ -294,50 +335,11 @@ describe('media in R2', () => {
     )
   })
 
-  test('a thumbnail whose upload fails stays local and is served from here until maintenance moves it', async () => {
-    const { c, media, store, capture } = setup()
-    media['1'] = [
-      {
-        url: 'https://m.test/a.jpg',
-        thumbnailUrl: 'https://m.test/a-small.jpg',
-      },
-    ]
-    const upload = store.upload.bind(store)
-    const spy = vi
-      .spyOn(store, 'upload')
-      .mockImplementation((key, ...rest) =>
-        key === sha256(SMALL)
-          ? Promise.reject(new Error('bucket down'))
-          : upload(key, ...rest),
-      )
-    const done = await capture('1')
-    const thumbnail = c.db.select().from(blobThumbnails).get()!
-    expect(thumbnail.remoteAt).toBeNull()
-    expect(await store.local.stat(thumbnail.key!)).toBe(SMALL.length)
-    expect(
-      getCollection(c, done.collectionId).assets[0]!.thumbnail_url,
-    ).toMatch(new RegExp(String.raw`^/media/${thumbnail.key}\?`))
-    spy.mockRestore()
-    expect(await moveThumbnails(c)).toBe(1)
-    expect(await store.local.stat(thumbnail.key!)).toBeUndefined()
-    expect(getCollection(c, done.collectionId).assets[0]!.thumbnail_url).toBe(
-      `${FAKE_PUBLIC}/${objectPath(thumbnail.key!)}`,
-    )
-  })
-
-  test('a read open while the local copy goes keeps reading it; later reads use the bucket', async () => {
-    const { c, media, store } = setup()
-    media['1'] = [{ url: 'https://m.test/a.jpg' }]
+  test('a read open while a local copy from before goes keeps reading it; later reads use the bucket', async () => {
+    const { c, store } = setup()
     let release!: () => void
     s3.gate = new Promise((resolve) => (release = resolve))
-    const job = submit(c, { url: 'https://fake.test/p/1' })
-    await vi.waitFor(() =>
-      expect(
-        c.db.select().from(captures).where(eq(captures.id, job.id)).get()
-          ?.state,
-      ).toBe('complete'),
-    )
-    const { hash } = c.db.select().from(blobs).get()!
+    const { hash } = await legacyBlob(c, JPEG)
     // What a Telegram send hands grammY's InputFile to read.
     const sending = await c.blobs.read(hash)
     release()
@@ -346,11 +348,7 @@ describe('media in R2', () => {
     expect(await store.local.stat(hash)).toBeUndefined()
     expect(s3.requests.filter((r) => r.method === 'GET')).toEqual([])
     expect(await buffer(sending)).toEqual(JPEG)
-
     expect(await buffer(await c.blobs.read(hash))).toEqual(JPEG)
-    expect(
-      s3.requests.filter((r) => r.method === 'GET' && !r.presigned),
-    ).toHaveLength(1)
   })
 
   test('downloading bytes already in the bucket writes no local copy', async () => {

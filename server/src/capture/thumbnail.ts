@@ -8,12 +8,11 @@ import {
   removedMedia,
 } from '#db/schema.ts'
 import { PermanentError } from '#jobs/queue.ts'
-import { HEADER_BYTES, imageSize } from './image-size.ts'
-import { fetchMedia, mediaURL, readHead } from './media-fetch.ts'
+import { imageSize } from './image-size.ts'
+import { fetchMedia, mediaURL } from './media-fetch.ts'
 import { thumbnailDue } from './media-reuse.ts'
 import { acceptsMediaType, sniffMediaType } from './media-type.ts'
-import { moveNewThumbnail } from './thumbnail-remote.ts'
-import type { StagedFile } from '#blob/staging.ts'
+import type { Incoming } from '#blob/store.ts'
 import type { Executor } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
 
@@ -21,8 +20,8 @@ import type { CaptureContext } from './context.ts'
 // `platforms/x/thumbnails.ts`, `platforms/instagram/thumbnails.ts`), named
 // by the asset's `thumbnail_url` when it is listed and downloaded right
 // after the original, by the same job (`download.ts`). They are stored by
-// content hash like any media, and with a remote store (R2) moved there
-// as originals are (`thumbnail-remote.ts`). An image the
+// content hash like any media, streamed straight into the bucket with R2;
+// those made before that are moved there (`thumbnail-remote.ts`). An image the
 // platform has no smaller size of has no thumbnail: the web shows the
 // original, which is no larger. A video without a poster has none either.
 
@@ -46,15 +45,15 @@ export function failThumbnail(
 }
 
 interface Fetched {
-  staged: StagedFile
+  incoming: Incoming
   mime: string
   width: number
   height: number
 }
 
 /**
- * Fetch a thumbnail into the staging directory, with its size read from
- * the file. Rejects with a `PermanentError` for what will not change by
+ * Fetch a thumbnail into the media store, not yet kept, with its size read
+ * from its first bytes. Rejects with a `PermanentError` for what will not change by
  * asking again: a refused request, something not an image.
  */
 async function fetchThumbnail(
@@ -62,36 +61,38 @@ async function fetchThumbnail(
   address: string,
   signal: AbortSignal,
 ): Promise<Fetched> {
-  const staged = await fetchMedia(
+  const incoming = await fetchMedia(
     ctx,
     mediaURL(address),
     AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT)]),
   )
   try {
-    if (staged.size === 0) throw new PermanentError('媒体文件为空')
-    const head = await readHead(staged.path, HEADER_BYTES)
-    const mime = sniffMediaType(head)
+    if (incoming.size === 0) throw new PermanentError('媒体文件为空')
+    const mime = sniffMediaType(incoming.head)
     if (!acceptsMediaType('image', mime))
       throw new PermanentError('不支持的媒体格式')
-    const size = imageSize(head) ?? { width: 0, height: 0 }
-    return { staged, mime, ...size }
+    const size = imageSize(incoming.head) ?? { width: 0, height: 0 }
+    return { incoming, mime, ...size }
   } catch (error) {
-    await staged.discard()
+    await incoming.discard()
     throw error
   }
 }
 
-/** Store a fetched thumbnail's file, claiming it back from garbage. */
+/**
+ * Keep a fetched thumbnail under its hash, claiming the key back from
+ * garbage first; `then` records it, told whether the bucket holds it.
+ */
 async function storeFile(
   ctx: CaptureContext,
   fetched: Fetched,
-  then: () => void,
+  then: (remoteAt: Date | null) => void,
 ): Promise<void> {
-  const { staged } = fetched
-  await ctx.mediaLocks.run(staged.hash, async () => {
-    ctx.db.delete(mediaGarbage).where(eq(mediaGarbage.key, staged.hash)).run()
-    await ctx.blobs.putFile(staged.hash, staged.path)
-    then()
+  const { incoming, mime } = fetched
+  await ctx.mediaLocks.run(incoming.hash, async () => {
+    ctx.db.delete(mediaGarbage).where(eq(mediaGarbage.key, incoming.hash)).run()
+    const { remote } = await incoming.keep(mime)
+    then(remote ? new Date(ctx.now?.() ?? Date.now()) : null)
   })
 }
 
@@ -126,17 +127,13 @@ export async function downloadThumbnail(
       return
     }
     try {
-      // The platform sent the original itself: it stands for itself, and
-      // recording it as a thumbnail would keep its local copy for good.
-      if (fetched.staged.hash === blob.hash) return
-      let attached = false
-      await storeFile(ctx, fetched, () => {
-        attached = attachThumbnail(ctx, blob, fetched)
-      })
-      if (attached)
-        await moveNewThumbnail(ctx, fetched.staged.hash, fetched.mime)
+      // The platform sent the original itself: it stands for itself.
+      if (fetched.incoming.hash === blob.hash) return
+      await storeFile(ctx, fetched, (remoteAt) =>
+        attachThumbnail(ctx, blob, fetched, remoteAt),
+      )
     } finally {
-      await fetched.staged.discard()
+      await fetched.incoming.discard()
     }
   })
 }
@@ -144,9 +141,10 @@ export async function downloadThumbnail(
 function attachThumbnail(
   ctx: CaptureContext,
   blob: Blob,
-  { staged, mime, width, height }: Fetched,
-): boolean {
-  return ctx.db.transaction((tx) => {
+  { incoming, mime, width, height }: Fetched,
+  remoteAt: Date | null,
+): void {
+  ctx.db.transaction((tx) => {
     const attached =
       !!tx.select().from(blobs).where(eq(blobs.id, blob.id)).get() &&
       tx
@@ -154,21 +152,21 @@ function attachThumbnail(
         .values({
           blobId: blob.id,
           state: 'ready',
-          key: staged.hash,
-          size: staged.size,
+          key: incoming.hash,
+          size: incoming.size,
           mime,
           width,
           height,
+          remoteAt,
         })
         .onConflictDoNothing()
         .run().changes > 0
     // The blob went away meanwhile; the file is garbage unless shared.
     if (!attached)
       tx.insert(mediaGarbage)
-        .values({ key: staged.hash })
+        .values({ key: incoming.hash })
         .onConflictDoNothing()
         .run()
-    return attached
   })
 }
 
@@ -238,31 +236,42 @@ async function refetch(
     return original
   }
   try {
-    const { staged, mime, width, height } = fetched
-    if (staged.hash === blob.hash) return original
-    await storeFile(ctx, fetched, () => {
-      if (staged.hash === key) return
+    const { incoming, mime, width, height } = fetched
+    if (incoming.hash === blob.hash) return original
+    await storeFile(ctx, fetched, (remoteAt) => {
       ctx.db.transaction((tx) => {
+        if (incoming.hash === key) {
+          // The same bytes again, back where they were lost.
+          tx.update(blobThumbnails)
+            .set({ remoteAt })
+            .where(eq(blobThumbnails.key, key))
+            .run()
+          tx.update(removedMedia)
+            .set({ thumbnailRemoteAt: remoteAt })
+            .where(eq(removedMedia.thumbnailKey, key))
+            .run()
+          return
+        }
         // Whatever showed the lost file shows the new one.
         tx.update(blobThumbnails)
           .set({
-            key: staged.hash,
-            size: staged.size,
+            key: incoming.hash,
+            size: incoming.size,
             mime,
             width,
             height,
-            remoteAt: null,
+            remoteAt,
           })
           .where(eq(blobThumbnails.key, key))
           .run()
         tx.update(removedMedia)
           .set({
-            thumbnailKey: staged.hash,
+            thumbnailKey: incoming.hash,
             thumbnailMime: mime,
             thumbnailWidth: width,
             thumbnailHeight: height,
-            thumbnailSize: staged.size,
-            thumbnailRemoteAt: null,
+            thumbnailSize: incoming.size,
+            thumbnailRemoteAt: remoteAt,
           })
           .where(eq(removedMedia.thumbnailKey, key))
           .run()
@@ -270,11 +279,12 @@ async function refetch(
         tx.insert(mediaGarbage).values({ key }).onConflictDoNothing().run()
       })
     })
-    // Into the remote store again, which lost it too if the row said so.
-    await moveNewThumbnail(ctx, staged.hash, mime)
-    ctx.logger.info({ key, regenerated: staged.hash }, 'thumbnail regenerated')
-    return { key: staged.hash, contentType: mime }
+    ctx.logger.info(
+      { key, regenerated: incoming.hash },
+      'thumbnail regenerated',
+    )
+    return { key: incoming.hash, contentType: mime }
   } finally {
-    await fetched.staged.discard()
+    await fetched.incoming.discard()
   }
 }

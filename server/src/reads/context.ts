@@ -45,7 +45,6 @@ export function threadContext(
     openCredential: () => {
       throw new Error('credentials are not on a read thread')
     },
-    stagingDir: '',
     mediaLocks: new KeyedLock(),
   }
 }

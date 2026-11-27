@@ -111,6 +111,7 @@ const REQUEST_TIMEOUT = 60_000
 const META = 'x-amz-meta-'
 const TRAILING_SLASHES = /\/+$/
 const XML_CODE = /<Code>([^<]{1,100})<\/Code>/
+const UPLOAD_ID = /<UploadId>([^<]+)<\/UploadId>/
 
 /**
  * The few S3 calls the media store makes, signed with SigV4 and sent with
@@ -148,9 +149,15 @@ export class S3Bucket {
     method: string,
     key: string,
     headers: Record<string, string> = {},
-    options: { query?: boolean; expires?: number } = {},
+    options: {
+      query?: boolean
+      expires?: number
+      params?: Record<string, string>
+    } = {},
   ) {
     const url = this.#url(key)
+    for (const [name, value] of Object.entries(options.params ?? {}))
+      url.searchParams.set(name, value)
     if (options.expires)
       url.searchParams.set('X-Amz-Expires', String(options.expires))
     const signer = new AwsV4Signer({
@@ -180,11 +187,15 @@ export class S3Bucket {
       signal?: AbortSignal
       timeout?: number | false
       ok?: (status: number) => boolean
+      /** Query parameters, such as a multipart upload's. */
+      params?: Record<string, string>
     } = {},
   ): Promise<Response> {
     let lastError: unknown
     for (let attempt = 1; attempt <= S3_ATTEMPTS; attempt++) {
-      const signed = await this.#sign(method, key, headers)
+      const signed = await this.#sign(method, key, headers, {
+        params: init.params,
+      })
       const signals = [init.signal].filter((s) => s !== undefined)
       if (init.timeout !== false)
         signals.push(AbortSignal.timeout(init.timeout ?? REQUEST_TIMEOUT))
@@ -317,7 +328,7 @@ export class S3Bucket {
    * Replace the object's headers by copying it onto itself on the server:
    * no bytes travel. Other user metadata is kept as given.
    */
-  async replaceHeaders(
+  replaceHeaders(
     key: string,
     headers: {
       contentType: string
@@ -325,17 +336,122 @@ export class S3Bucket {
       metadata?: Record<string, string>
     },
   ): Promise<void> {
-    const response = await this.#send('CopyObject', 'PUT', key, {
+    return this.copy(key, key, headers)
+  }
+
+  /**
+   * Copy an object to another key on the server, with new headers: no
+   * bytes travel through this process.
+   */
+  async copy(
+    from: string,
+    to: string,
+    headers: {
+      contentType: string
+      cacheControl: string
+      metadata?: Record<string, string>
+    },
+  ): Promise<void> {
+    const response = await this.#send('CopyObject', 'PUT', to, {
       ...metaHeaders(headers.metadata),
       'Content-Type': headers.contentType,
       'Cache-Control': headers.cacheControl,
-      'x-amz-copy-source': `/${this.#bucket}/${key}`,
+      'x-amz-copy-source': `/${this.#bucket}/${from}`,
       'x-amz-metadata-directive': 'REPLACE',
     })
     // S3 can report a failed copy in a 200 body.
     const body = await response.text()
     if (body.includes('<Error>'))
       throw new S3Error('CopyObject', response.status, xmlCode(body))
+  }
+
+  /** Start a multipart upload; its id. */
+  async createMultipart(key: string, signal?: AbortSignal): Promise<string> {
+    const response = await this.#send(
+      'CreateMultipartUpload',
+      'POST',
+      key,
+      {},
+      { params: { uploads: '' }, signal },
+    )
+    const id = UPLOAD_ID.exec(await response.text())?.[1]
+    if (!id) throw new S3Error('CreateMultipartUpload', response.status, '')
+    return id
+  }
+
+  /**
+   * Upload one part from memory, checked by the service against its MD5
+   * and SHA-256 as a whole object is; its ETag.
+   */
+  async uploadPart(
+    key: string,
+    uploadId: string,
+    part: number,
+    bytes: Uint8Array,
+    checks: { md5: string; sha256: string; signal?: AbortSignal },
+  ): Promise<string> {
+    const response = await this.#send(
+      'UploadPart',
+      'PUT',
+      key,
+      {
+        'Content-Length': String(bytes.length),
+        'Content-MD5': checks.md5,
+        'X-Amz-Content-Sha256': checks.sha256,
+      },
+      {
+        params: { partNumber: String(part), uploadId },
+        body: () => bytes,
+        signal: checks.signal,
+        timeout: false,
+      },
+    )
+    await response.body?.cancel()
+    const etag = response.headers.get('etag')?.replaceAll('"', '')
+    if (!etag) throw new S3Error('UploadPart', response.status, '')
+    return etag
+  }
+
+  async completeMultipart(
+    key: string,
+    uploadId: string,
+    parts: { part: number; etag: string }[],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const body = Buffer.from(
+      `<CompleteMultipartUpload>${parts
+        .map(
+          (p) =>
+            `<Part><PartNumber>${p.part}</PartNumber><ETag>"${p.etag}"</ETag></Part>`,
+        )
+        .join('')}</CompleteMultipartUpload>`,
+    )
+    const response = await this.#send(
+      'CompleteMultipartUpload',
+      'POST',
+      key,
+      { 'Content-Type': 'application/xml' },
+      { params: { uploadId }, body: () => body, signal },
+    )
+    const text = await response.text()
+    if (text.includes('<Error>'))
+      throw new S3Error(
+        'CompleteMultipartUpload',
+        response.status,
+        xmlCode(text),
+      )
+  }
+
+  /** Abandoning an upload that is gone already succeeds. */
+  async abortMultipart(key: string, uploadId: string): Promise<void> {
+    const response = await this.#send(
+      'AbortMultipartUpload',
+      'DELETE',
+      key,
+      {},
+      { params: { uploadId }, ok: (status) => status === 404 },
+    )
+    await response.body?.cancel()
   }
 
   /** A GET URL that works without credentials until it expires. */

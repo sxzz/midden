@@ -26,6 +26,7 @@ import { deleteCollection } from './delete.ts'
 import { listCollections } from './list.ts'
 import { previewRemoval, removeMedia, restoreMedia } from './media-removal.ts'
 import { getCollection, storageUsed } from './read.ts'
+import type { FsBlobStore } from '#blob/fs-store.ts'
 import type { CaptureContext } from '#capture/context.ts'
 import type { Resource } from '#platforms/protocol.ts'
 
@@ -147,7 +148,7 @@ const storageOf = (c: CaptureContext, id: string) =>
 async function addThumbnail(c: CaptureContext, blobId: string) {
   const file = path.join(mkdtempSync(path.join(tmpdir(), 'thumb-')), 'f')
   writeFileSync(file, THUMB)
-  await c.blobs.putFile(THUMB_KEY, file)
+  await (c.blobs as FsBlobStore).putFile(THUMB_KEY, file)
   c.db
     .insert(blobThumbnails)
     .values({

@@ -80,7 +80,6 @@ function context(fetch: FakeFetch): AccountsContext {
     logger,
     platforms: new Platforms([fakePlatform({ current: fetch })]),
     blobs: new FsBlobStore(path.join(dir, 'media'), signer),
-    stagingDir: path.join(dir, 'tmp'),
     vault,
     openCredential: (ref) => vault.open(db, ref),
     mediaLocks: new KeyedLock(),

@@ -51,6 +51,12 @@ const xml = (code: string) =>
 
 export class FakeS3 {
   readonly objects = new Map<string, FakeObject>()
+  /** Multipart uploads in progress, by id. */
+  readonly uploads = new Map<
+    string,
+    { key: string; parts: Map<number, Buffer> }
+  >()
+  #nextUpload = 1
   readonly requests: FakeRequest[] = []
   readonly purged: string[] = []
   /** Token verify requests answered. */
@@ -266,6 +272,10 @@ export class FakeS3 {
       this.rateLimitNext--
       return this.#limit()
     }
+    const uploadId = url.searchParams.get('uploadId')
+    if (req.method === 'POST' && url.searchParams.has('uploads'))
+      return this.#createMultipart(key)
+    if (uploadId) return this.#multipart(req, url, key, uploadId, body)
     switch (req.method) {
       case 'PUT':
         return req.headers['x-amz-copy-source']
@@ -326,6 +336,66 @@ export class FakeS3 {
       ...this.overwrite,
     })
     return { status: 200, headers: { ETag: `"${digest.toString('hex')}"` } }
+  }
+
+  #createMultipart(key: string) {
+    const id = `upload-${this.#nextUpload++}`
+    this.uploads.set(id, { key, parts: new Map() })
+    return {
+      status: 200,
+      body: `<InitiateMultipartUploadResult><UploadId>${id}</UploadId></InitiateMultipartUploadResult>`,
+    }
+  }
+
+  /** UploadPart, CompleteMultipartUpload and AbortMultipartUpload. */
+  #multipart(
+    req: IncomingMessage,
+    url: URL,
+    key: string,
+    id: string,
+    body: Buffer,
+  ) {
+    const upload = this.uploads.get(id)
+    if (!upload || upload.key !== key)
+      return { status: 404, body: xml('NoSuchUpload') }
+    if (req.method === 'DELETE') {
+      this.uploads.delete(id)
+      return { status: 204 }
+    }
+    if (req.method === 'PUT') {
+      const digest = md5(body)
+      if (req.headers['content-md5'] !== digest.toString('base64'))
+        return { status: 400, body: xml('BadDigest') }
+      const sha256 = createHash('sha256').update(body).digest('hex')
+      if (req.headers['x-amz-content-sha256'] !== sha256)
+        return { status: 400, body: xml('XAmzContentSHA256Mismatch') }
+      upload.parts.set(Number(url.searchParams.get('partNumber')), body)
+      return { status: 200, headers: { ETag: `"${digest.toString('hex')}"` } }
+    }
+    // Complete: the parts in order, all but the last at least 5 MiB.
+    const numbers = [...body.toString().matchAll(/<PartNumber>(\d+)</g)].map(
+      (m) => Number(m[1]),
+    )
+    const parts = numbers.map((n) => upload.parts.get(n))
+    if (
+      !parts.length ||
+      parts.some(
+        (part, i) =>
+          !part || (i < parts.length - 1 && part.length < 5 * 2 ** 20),
+      )
+    )
+      return { status: 400, body: xml('InvalidPart') }
+    const etag = `${md5(Buffer.concat(parts.map((part) => md5(part!)))).toString('hex')}-${parts.length}`
+    this.objects.set(key, {
+      body: Buffer.concat(parts as Buffer[]),
+      etag,
+      metadata: {},
+    })
+    this.uploads.delete(id)
+    return {
+      status: 200,
+      body: `<CompleteMultipartUploadResult><ETag>"${etag}"</ETag></CompleteMultipartUploadResult>`,
+    }
   }
 
   #copy(key: string, req: IncomingMessage) {

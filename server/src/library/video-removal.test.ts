@@ -32,6 +32,7 @@ import {
   startVideoRemoval,
   VIDEO_BATCH,
 } from './video-removal.ts'
+import type { FsBlobStore } from '#blob/fs-store.ts'
 import type { CaptureContext } from '#capture/context.ts'
 import type { FetchResponse, Resource } from '#platforms/protocol.ts'
 
@@ -459,7 +460,7 @@ async function addThumbnail(c: CaptureContext, file: string) {
   const key = sha256Hex(bytes)
   const staged = path.join(mkdtempSync(path.join(tmpdir(), 'thumb-')), 'f')
   writeFileSync(staged, bytes)
-  await c.blobs.putFile(key, staged)
+  await (c.blobs as FsBlobStore).putFile(key, staged)
   c.db
     .insert(blobThumbnails)
     .values({

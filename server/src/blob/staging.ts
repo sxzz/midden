@@ -1,16 +1,21 @@
+import { Buffer } from 'node:buffer'
 import { createHash, randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { mkdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { Transform, type Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import type { Buffer } from 'node:buffer'
+
+/** How much of the start of a file is kept in memory as `head`. */
+export const HEAD_BYTES = 64 * 1024
 
 export interface StagedFile {
   path: string
   /** SHA-256, lowercase hex: the blob key. */
   hash: string
   size: number
+  /** The first `HEAD_BYTES` (fewer for a smaller file). */
+  head: Buffer
   discard: () => Promise<void>
 }
 
@@ -30,6 +35,8 @@ export async function stage(
   await mkdir(dir, { recursive: true })
   const file = path.join(dir, `${randomUUID()}.part`)
   const hash = createHash('sha256')
+  const head: Buffer[] = []
+  let headBytes = 0
   let size = 0
   const meter = new Transform({
     transform(chunk: Buffer, _encoding, callback) {
@@ -39,6 +46,11 @@ export async function stage(
         return
       }
       hash.update(chunk)
+      if (headBytes < HEAD_BYTES) {
+        const part = chunk.subarray(0, HEAD_BYTES - headBytes)
+        head.push(Buffer.from(part))
+        headBytes += part.length
+      }
       callback(null, chunk)
     },
   })
@@ -54,6 +66,7 @@ export async function stage(
     path: file,
     hash: hash.digest('hex'),
     size,
+    head: Buffer.concat(head),
     discard: () => rm(file, { force: true }),
   }
 }

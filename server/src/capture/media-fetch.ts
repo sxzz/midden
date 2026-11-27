@@ -1,13 +1,12 @@
-import { Buffer } from 'node:buffer'
-import { open } from 'node:fs/promises'
 import { Readable } from 'node:stream'
-import { stage, type StagedFile } from '#blob/staging.ts'
 import { PermanentError, RetryError } from '#jobs/queue.ts'
+import type { Incoming } from '#blob/store.ts'
 import type { CaptureContext } from './context.ts'
 
 // What a download of an original (`download.ts`) and of a thumbnail
 // (`thumbnail.ts`) share: one request to the platform's media server, its
-// body staged in a local file.
+// body streamed into the media store (`BlobStore.receive`): straight into
+// the bucket with R2, through a staging file into the directory without.
 
 const SECONDS = /^\d+$/
 
@@ -36,15 +35,16 @@ export function mediaURL(value: string): URL {
 }
 
 /**
- * Fetch a media file into the staging directory. Errors say whether trying
- * again could help: a server that is busy or down may come back (and says
- * when, with `Retry-After`); one that refuses the request will not.
+ * Fetch a media file into the media store, not yet kept under its hash.
+ * Errors say whether trying again could help: a server that is busy or down
+ * may come back (and says when, with `Retry-After`); one that refuses the
+ * request will not.
  */
 export async function fetchMedia(
   ctx: CaptureContext,
   url: URL,
   signal: AbortSignal,
-): Promise<StagedFile> {
+): Promise<Incoming> {
   let response: Response
   try {
     response = await (ctx.fetch ?? fetch)(url, { signal })
@@ -64,22 +64,8 @@ export async function fetchMedia(
     throw new PermanentError('媒体服务器拒绝了请求')
   }
   try {
-    return await stage(ctx.stagingDir, Readable.fromWeb(response.body), {
-      signal,
-    })
+    return await ctx.blobs.receive(Readable.fromWeb(response.body), { signal })
   } catch (error) {
     throw new Error('媒体下载被中断', { cause: error })
-  }
-}
-
-/** The first `bytes` of a staged file. */
-export async function readHead(file: string, bytes = 512): Promise<Buffer> {
-  const handle = await open(file, 'r')
-  try {
-    const head = Buffer.alloc(bytes)
-    const { bytesRead } = await handle.read(head, 0, bytes, 0)
-    return head.subarray(0, bytesRead)
-  } finally {
-    await handle.close()
   }
 }

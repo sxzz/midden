@@ -4,7 +4,7 @@ import { newId } from '#db/id.ts'
 import { assets, blobs, captures, mediaGarbage } from '#db/schema.ts'
 import { PermanentError, SnoozeError, type Job } from '#jobs/queue.ts'
 import { finalizeSettled, validateExecution } from './lifecycle.ts'
-import { fetchMedia, mediaURL, readHead } from './media-fetch.ts'
+import { fetchMedia, mediaURL } from './media-fetch.ts'
 import { isRemoved } from './media-key.ts'
 import { cachedBlob, reuseKey } from './media-reuse.ts'
 import { acceptsMediaType, sniffMediaType } from './media-type.ts'
@@ -132,47 +132,66 @@ async function download(ctx: CaptureContext, job: Job): Promise<void> {
     job.signal,
     AbortSignal.timeout(REQUEST_TIMEOUT),
   ])
-  const staged = await fetchMedia(ctx, url, signal)
+  const incoming = await fetchMedia(ctx, url, signal)
   try {
-    if (staged.size === 0) throw new PermanentError('媒体文件为空')
-    const mime = sniffMediaType(await readHead(staged.path))
+    if (incoming.size === 0) throw new PermanentError('媒体文件为空')
+    const mime = sniffMediaType(incoming.head)
     if (!acceptsMediaType(asset.kind, mime))
       throw new PermanentError('不支持的媒体格式')
-    await ctx.mediaLocks.run(staged.hash, async () => {
+    const { hash } = incoming
+    await ctx.mediaLocks.run(hash, async () => {
       // Claim the key back from garbage collection before writing it.
-      ctx.db.delete(mediaGarbage).where(eq(mediaGarbage.key, staged.hash)).run()
-      // The bucket holds these bytes already, and they need no local copy
-      // (see `upload.ts`). Nothing is awaited from this check on, so the
-      // blob is still there when the transaction below attaches it.
-      const inBucket =
-        !!ctx.blobs.deleteLocal &&
-        !!ctx.db
-          .select({ remoteAt: blobs.remoteAt })
-          .from(blobs)
-          .where(eq(blobs.hash, staged.hash))
-          .get()?.remoteAt
-      if (!inBucket) await ctx.blobs.putFile(staged.hash, staged.path)
+      ctx.db.delete(mediaGarbage).where(eq(mediaGarbage.key, hash)).run()
+      // The bucket holds these bytes already: nothing to write. Nothing is
+      // awaited from this check on but the write, so the blob is still
+      // there when the transaction below attaches it.
+      const before = ctx.db
+        .select({ remoteAt: blobs.remoteAt })
+        .from(blobs)
+        .where(eq(blobs.hash, hash))
+        .get()
+      const remote = before?.remoteAt
+        ? true
+        : (await incoming.keep(mime)).remote
+      const at = new Date(ctx.now?.() ?? Date.now())
       ctx.db.transaction((tx) => {
         const current = loadAsset(tx, asset.id)
         if (current?.asset.state !== 'pending') {
           // Settled meanwhile (removed, say): the file stays only if shared.
-          if (!tx.select().from(blobs).where(eq(blobs.hash, staged.hash)).get())
+          if (!tx.select().from(blobs).where(eq(blobs.hash, hash)).get())
             tx.insert(mediaGarbage)
-              .values({ key: staged.hash })
+              .values({ key: hash })
               .onConflictDoNothing()
               .run()
           return
         }
         validateExecution(tx, current.capture)
-        let blobId = tx
-          .select({ id: blobs.id })
+        const stored = tx
+          .select({ id: blobs.id, remoteAt: blobs.remoteAt })
           .from(blobs)
-          .where(eq(blobs.hash, staged.hash))
-          .get()?.id
+          .where(eq(blobs.hash, hash))
+          .get()
+        let blobId = stored?.id
         if (!blobId) {
           blobId = newId()
+          // Streamed into the bucket and confirmed there: recorded so from
+          // the start, with no local copy and no upload to make.
           tx.insert(blobs)
-            .values({ id: blobId, hash: staged.hash, size: staged.size, mime })
+            .values({
+              id: blobId,
+              hash,
+              size: incoming.size,
+              mime,
+              remoteAt: remote ? at : null,
+            })
+            .run()
+          if (!remote) enqueueUpload(ctx, tx, blobId)
+        } else if (remote && !stored?.remoteAt) {
+          // A local original from before: the bucket has it now, and the
+          // upload job only deletes the local copy.
+          tx.update(blobs)
+            .set({ remoteAt: at })
+            .where(eq(blobs.id, blobId))
             .run()
           enqueueUpload(ctx, tx, blobId)
         }
@@ -180,7 +199,7 @@ async function download(ctx: CaptureContext, job: Job): Promise<void> {
       })
     })
   } finally {
-    await staged.discard()
+    await incoming.discard()
   }
 }
 

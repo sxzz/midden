@@ -73,7 +73,6 @@ export function testContext(
     blobs:
       options.blobs?.({ dir: path.join(dir, 'media'), signer, logger }) ??
       new FsBlobStore(path.join(dir, 'media'), signer),
-    stagingDir: path.join(dir, 'tmp'),
     vault,
     openCredential: (ref) => vault.open(db, ref),
     now: options.now,

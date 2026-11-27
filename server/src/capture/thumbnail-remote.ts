@@ -8,11 +8,11 @@ import {
 } from '#db/schema.ts'
 import { pace, type CaptureContext } from './context.ts'
 
-// Thumbnails live in the remote store (R2) like originals: each is uploaded
-// right after it is stored locally, and once the upload is confirmed the
-// web gets its public URL and the local file goes. Those that were only
-// local (all before this, and any whose upload failed) are moved by a
-// maintenance step, `moveThumbnails`.
+// Thumbnails live in the remote store (R2) like originals: new ones are
+// streamed straight into it (`BlobStore.receive`). Those stored only
+// locally before are moved by a maintenance step, `moveThumbnails`: once
+// an upload is confirmed the web gets the public URL and the local file
+// goes.
 
 const BATCH = 50
 const CONCURRENCY = 4
@@ -94,25 +94,6 @@ export async function moveThumbnail(
   if (!record(ctx, key)) return false
   await deleteLocal(ctx, key)
   return true
-}
-
-/**
- * Move a thumbnail just stored; a failure leaves it local, served as
- * before, for `moveThumbnails` to try again.
- */
-export async function moveNewThumbnail(
-  ctx: CaptureContext,
-  key: string,
-  contentType: string,
-): Promise<void> {
-  try {
-    await moveThumbnail(ctx, key, contentType)
-  } catch (error) {
-    ctx.logger.warn(
-      { err: error, key },
-      'thumbnail upload failed; maintenance moves it later',
-    )
-  }
 }
 
 interface Sweep {

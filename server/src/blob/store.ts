@@ -1,3 +1,4 @@
+import type { Buffer } from 'node:buffer'
 import type { Readable } from 'node:stream'
 
 export interface ByteRange {
@@ -23,8 +24,15 @@ export interface MediaUrlOptions {
  * (see `staging.ts`), which lets every backend upload with a known size.
  */
 export interface BlobStore {
-  /** Store the staged file under `key`, consuming it. */
-  putFile: (key: string, file: string) => Promise<void>
+  /**
+   * Take in a stream of bytes, hashing them as they come, and hold them
+   * until `keep` stores them under their hash or `discard` drops them.
+   * Rejects with `TooLargeError` past `maxBytes`, leaving nothing behind.
+   */
+  receive: (
+    body: AsyncIterable<Uint8Array>,
+    options?: { signal?: AbortSignal; maxBytes?: number },
+  ) => Promise<Incoming>
   /** Size in bytes, or undefined when the object does not exist. */
   stat: (key: string) => Promise<number | undefined>
   read: (key: string, range?: ByteRange) => Promise<Readable>
@@ -47,6 +55,23 @@ export interface BlobStore {
    * it.
    */
   deleteLocal?: (key: string) => Promise<void>
+}
+
+/** Bytes a store has taken in (`BlobStore.receive`) and not yet kept. */
+export interface Incoming {
+  /** SHA-256 in hex: the key `keep` stores them under. */
+  hash: string
+  size: number
+  /** The first bytes (up to 64 KiB), to tell the media type and size by. */
+  head: Buffer
+  /**
+   * Store the bytes under `hash`, unless the store holds them already.
+   * `remote`: the remote store holds them, confirmed, so they are recorded
+   * there from the start (`blobs.remote_at`) and need no upload.
+   */
+  keep: (contentType: string) => Promise<{ remote: boolean }>
+  /** Drop whatever `keep` did not take; harmless after it. */
+  discard: () => Promise<void>
 }
 
 const KEY = /^[0-9a-f]{64}$/

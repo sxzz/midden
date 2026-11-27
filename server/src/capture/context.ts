@@ -13,8 +13,6 @@ export interface CaptureContext {
   platforms: Platforms
   blobs: BlobStore
   logger: Logger
-  /** Where downloads are staged before they enter the media store. */
-  stagingDir: string
   /** Decrypt a stored credential. */
   openCredential: (ref: string) => Uint8Array
   now?: () => number

@@ -163,9 +163,11 @@ Renovate（账号级安装的 GitHub App）按 `.github/renovate.json5` 每周�
 
 默认 `MEDIA_STORE=local`：媒体只在数据目录的 `media/` 中，网页通过本服务的签名链接 `/media/…` 读取。设为 `r2` 后：
 
-- 原文件（图片、视频）另存到 R2 存储桶，对象键与本地路径相同：`ab/cd/<sha256>`。浏览器直接从公开域名读取 `MEDIA_PUBLIC_URL/ab/cd/<sha256>`（`https://midden-media.sxzz.moe/ab/cd/<sha256>`），由 Cloudflare 边缘缓存；每个对象都带 `Content-Type` 与 `Cache-Control: public, max-age=31536000, immutable`。
-- 新下载先写入本地 `media/`，再由后台任务 `upload` 上传。上传带 `Content-MD5` 和签名的 SHA-256，R2 收到的内容不符会拒绝；上传后读回大小、ETag（即 MD5）和两个响应头，确认后才在 `blobs.remote_at` 记下，接口从此给出公开地址，之前仍给本地签名链接。上传失败从 30 秒起翻倍重试、最长间隔 1 小时，共 12 次（约 7 小时），每次记 `job will retry`，放弃时记 `media upload gave up; the file stays local`，这些媒体由 `media-migrate` 补传。
-- 上传确认、记下 `remote_at` 后，同一个 `upload` 任务立即删除本地原文件，此后 R2 中是唯一的一份（没有其他备份，见「R2 的保护」）。删除在这个媒体的键的锁内进行（下载写入、回收删除同一个键时也取这个锁），并在锁内再次确认 `remote_at` 仍在。这个键同时是某个还没移到 R2 的缩略图的文件时不删除（它从本地提供，移走后再删）；缩略图从平台下载，不读原文件，所以不必等它。
+- 原文件（图片、视频）存到 R2 存储桶，对象键与本地路径相同：`ab/cd/<sha256>`。浏览器直接从公开域名读取 `MEDIA_PUBLIC_URL/ab/cd/<sha256>`（`https://midden-media.sxzz.moe/ab/cd/<sha256>`），由 Cloudflare 边缘缓存；每个对象都带 `Content-Type` 与 `Cache-Control: public, max-age=31536000, immutable`。
+- 新下载直接流式写入 R2，不写本地文件（8 MiB 以内一次 PUT，更大的分段上传到 `incoming/<uuid>` 再在服务端复制到哈希键，见[架构](architecture.md#媒体链接)）；读回确认后记下 `remote_at`，接口立即给出公开地址。写入失败时这次下载失败，由下载任务重试（`job will retry`，`jobType: download`），不留下临时对象。
+- 生命周期规则（一次性设置）：在「R2 → midden → Settings → Object lifecycle rules」加一条，前缀 `incoming/`，删除 1 天以前的对象，并中止 1 天以前未完成的分段上传（R2 默认 7 天）。只在进程在分段上传或复制的中途退出时才会留下这些，正常的失败会自己清理。
+- 这一版之前下载、仍在本地 `media/` 的原文件由后台任务 `upload` 上传。上传带 `Content-MD5` 和签名的 SHA-256，R2 收到的内容不符会拒绝；R2 中已有相同字节的对象时不再上传；上传后读回大小、ETag（即 MD5）和两个响应头，确认后才在 `blobs.remote_at` 记下，接口从此给出公开地址，之前仍给本地签名链接。上传失败从 30 秒起翻倍重试、最长间隔 1 小时，共 12 次（约 7 小时），每次记 `job will retry`，放弃时记 `media upload gave up; the file stays local`，这些媒体由 `media-migrate` 补传。
+- 上传确认、记下 `remote_at` 后，同一个 `upload` 任务立即删除本地原文件（这一版之前下载的），此后 R2 中是唯一的一份（没有其他备份，见「R2 的保护」）。删除在这个媒体的键的锁内进行（下载写入、回收删除同一个键时也取这个锁），并在锁内再次确认 `remote_at` 仍在。这个键同时是某个还没移到 R2 的缩略图的文件时不删除（它从本地提供，移走后再删）；缩略图从平台下载，不读原文件，所以不必等它。
 
   删除失败时任务按上传的间隔重试（记 `job will retry`），`remote_at` 不会被清除；重试用完时记 `deleting the local copy of uploaded media gave up; media-prune-local removes it`。
 
@@ -268,7 +270,7 @@ rclone copy ~/midden/data/media r2:midden \
 ### 步骤
 
 1. 在部署目录的 `.env` 中设置上面的变量（`MEDIA_STORE=r2`、R2 的变量、`CF_API_TOKEN` 与 `CF_ZONE_ID`）。
-2. 部署：`docker compose up -d --force-recreate`（或推送后自动部署），日志中 `media store` 的 `store` 应为 `r2`。此后新下载的媒体会自动上传，确认后删除本地原文件；从这一步起不能再改回 `local`（见上）。
+2. 部署：`docker compose up -d --force-recreate`（或推送后自动部署），日志中 `media store` 的 `store` 应为 `r2`。此后新下载的媒体直接写入 R2，已有的本地原文件由上传任务上传后删除；从这一步起不能再改回 `local`（见上）。
 3. 迁移：
 
    ```sh

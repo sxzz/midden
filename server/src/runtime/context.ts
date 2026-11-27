@@ -1,4 +1,3 @@
-import path from 'node:path'
 import { Vault } from '#accounts/vault.ts'
 import { KeyedLock } from '#blob/locks.ts'
 import { openMediaStore } from '#blob/open.ts'
@@ -117,7 +116,6 @@ export async function openRuntime(
       overrides.platforms ??
       new Platforms([createXPlatform(), createInstagramPlatform()]),
     blobs,
-    stagingDir: path.join(config.dataDir, 'tmp'),
     vault,
     openCredential: (ref) => vault.open(db, ref),
     mediaLocks: new KeyedLock(),

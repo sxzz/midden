@@ -8,10 +8,11 @@ import { pino } from 'pino'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { FAKE_PUBLIC, FakeS3 } from '#testing/fake-s3.ts'
 import { recordingLogger } from '#testing/logs.ts'
+import { PART_BYTES, type BucketBlobStore } from './bucket-store.ts'
 import { mediaRoutes } from './route.ts'
 import { MediaSigner } from './signer.ts'
+import { TooLargeError } from './staging.ts'
 import { IMMUTABLE, objectPath } from './store.ts'
-import type { BucketBlobStore } from './bucket-store.ts'
 
 const BODY = Buffer.from('a media file, as bytes')
 const KEY = createHash('sha256').update(BODY).digest('hex')
@@ -32,7 +33,7 @@ afterEach(() => s3.stop())
 async function putLocal(body = BODY, key = KEY) {
   const file = path.join(dir, `staged-${key}`)
   writeFileSync(file, body)
-  await store.putFile(key, file)
+  await store.local.putFile(key, file)
 }
 
 describe('bucket store', () => {
@@ -197,5 +198,59 @@ describe('bucket store', () => {
     expect(await store.local.stat(KEY)).toBeUndefined()
     expect(s3.objects.has(objectPath(KEY))).toBe(true)
     expect(await text(await store.read(KEY))).toBe(BODY.toString())
+  })
+})
+
+describe('receiving into the bucket', () => {
+  async function* chunks(...parts: Buffer[]) {
+    for (const part of parts) yield part
+  }
+
+  test('holds a small file in memory until kept, then puts it once; the same bytes again write nothing', async () => {
+    const incoming = await store.receive(
+      chunks(BODY.subarray(0, 5), BODY.subarray(5)),
+    )
+    expect(incoming).toMatchObject({ hash: KEY, size: BODY.length })
+    expect(incoming.head.equals(BODY)).toBe(true)
+    expect(s3.requests).toEqual([])
+    expect(await incoming.keep('image/jpeg')).toEqual({ remote: true })
+    expect(s3.objects.get(objectPath(KEY))!.body.equals(BODY)).toBe(true)
+    await incoming.discard()
+
+    s3.requests.length = 0
+    const again = await store.receive(chunks(BODY))
+    await again.keep('image/jpeg')
+    expect(s3.requests.map((r) => r.method)).toEqual(['HEAD', 'HEAD'])
+  })
+
+  test('past the limit nothing is left behind, in memory or in parts', async () => {
+    const part = Buffer.alloc(PART_BYTES + 10, 1)
+    // A part is up before the limit is passed.
+    await expect(
+      store.receive(chunks(part, part), { maxBytes: PART_BYTES * 2 }),
+    ).rejects.toBeInstanceOf(TooLargeError)
+    expect(s3.requests.map((r) => r.method)).toEqual(['POST', 'PUT', 'DELETE'])
+    expect(s3.objects.size).toBe(0)
+    expect(s3.uploads.size).toBe(0)
+  })
+
+  test('a part the service refuses fails the receive and abandons the upload', async () => {
+    const big = Buffer.alloc(PART_BYTES * 2 + 10, 2)
+    // Fail every try of the second part.
+    let parts = 0
+    const original = s3.failNext
+    const receiving = store.receive(
+      (async function* () {
+        yield big.subarray(0, PART_BYTES)
+        parts++
+        s3.failNext = 5
+        yield big.subarray(PART_BYTES)
+      })(),
+    )
+    await expect(receiving).rejects.toThrow(/UploadPart failed: 500/)
+    s3.failNext = original
+    expect(parts).toBe(1)
+    expect(s3.uploads.size).toBe(0)
+    expect(s3.objects.size).toBe(0)
   })
 })

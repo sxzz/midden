@@ -2,24 +2,32 @@ import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { copyFile, mkdir, open, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
+import { stage } from './staging.ts'
 import {
   assertBlobKey,
   objectPath,
   type BlobStore,
   type ByteRange,
+  type Incoming,
   type MediaUrlOptions,
 } from './store.ts'
 import type { MediaSigner } from './signer.ts'
 import type { Readable } from 'node:stream'
 
-/** Media in a local directory, served by this process through signed URLs. */
+/**
+ * Media in a local directory, served by this process through signed URLs.
+ * Bytes come in through a staging directory beside it (`tmp`, so that
+ * publishing is a rename on the same file system).
+ */
 export class FsBlobStore implements BlobStore {
   readonly #root: string
   readonly #signer: MediaSigner
+  readonly #staging: string
 
-  constructor(root: string, signer: MediaSigner) {
+  constructor(root: string, signer: MediaSigner, staging?: string) {
     this.#root = root
     this.#signer = signer
+    this.#staging = staging ?? path.join(path.dirname(root), 'tmp')
   }
 
   /** The object's file, whether or not it exists. */
@@ -27,6 +35,24 @@ export class FsBlobStore implements BlobStore {
     return path.join(this.#root, objectPath(key))
   }
 
+  async receive(
+    body: AsyncIterable<Uint8Array>,
+    options: { signal?: AbortSignal; maxBytes?: number } = {},
+  ): Promise<Incoming> {
+    const staged = await stage(this.#staging, body, options)
+    return {
+      hash: staged.hash,
+      size: staged.size,
+      head: staged.head,
+      keep: async () => {
+        await this.putFile(staged.hash, staged.path)
+        return { remote: false }
+      },
+      discard: staged.discard,
+    }
+  }
+
+  /** Store a file under `key`, moving it in. */
   async putFile(key: string, file: string): Promise<void> {
     const target = this.path(key)
     // Content-addressed: an existing object already holds these bytes.

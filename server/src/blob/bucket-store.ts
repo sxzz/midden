@@ -1,11 +1,15 @@
+import { Buffer } from 'node:buffer'
+import { createHash, randomUUID } from 'node:crypto'
 import { digestFile, digestStream, type Digest } from './digest.ts'
 import { hexToBase64, type ObjectHead, type S3Bucket } from './s3.ts'
+import { HEAD_BYTES, TooLargeError } from './staging.ts'
 import {
   IMMUTABLE,
   isNotFound,
   objectPath,
   type BlobStore,
   type ByteRange,
+  type Incoming,
   type MediaUrlOptions,
 } from './store.ts'
 import type { FsBlobStore } from './fs-store.ts'
@@ -32,6 +36,13 @@ export class UploadMismatchError extends Error {
 }
 
 const PLAIN_MD5 = /^[0-9a-f]{32}$/
+/**
+ * Multipart parts: what stays in memory per download, and above which a
+ * file goes up in parts. R2 wants parts of at least 5 MiB but the last.
+ */
+export const PART_BYTES = 8 * 2 ** 20
+/** Where multipart uploads land before they are copied to their hash. */
+export const INCOMING = 'incoming'
 const TRAILING_SLASHES = /\/+$/
 
 /**
@@ -115,8 +126,157 @@ export class BucketBlobStore implements BlobStore {
     return `${this.#publicUrl}/${objectPath(key)}`
   }
 
-  putFile(key: string, file: string): Promise<void> {
-    return this.local.putFile(key, file)
+  /**
+   * Stream bytes into the bucket, hashing them on the way, with no local
+   * file. Up to one part (8 MiB: most images) they stay in memory and
+   * `keep` puts them under their hash in one request, checked by MD5 and
+   * SHA-256. Anything larger goes up as a multipart upload under a
+   * temporary key (`incoming/<uuid>`), each 8 MiB part checked the same
+   * way and the whole confirmed by its multipart ETag; `keep` then copies
+   * it to its hash on the server (CopyObject: no bytes travel) and
+   * `discard` deletes the temporary object. Either way an object already
+   * under the hash that holds the same bytes is kept and nothing written:
+   * that is how the same media downloaded twice is stored once.
+   */
+  async receive(
+    body: AsyncIterable<Uint8Array>,
+    options: { signal?: AbortSignal; maxBytes?: number } = {},
+  ): Promise<Incoming> {
+    const { signal } = options
+    const sha256 = createHash('sha256')
+    const md5 = createHash('md5')
+    const head: Buffer[] = []
+    let headBytes = 0
+    let size = 0
+    let pending: Buffer[] = []
+    let pendingBytes = 0
+    let upload:
+      | {
+          key: string
+          id: string
+          parts: { part: number; etag: string; md5: Buffer }[]
+          complete: boolean
+        }
+      | undefined
+    const bucket = this.bucket
+    const sendPart = async (bytes: Buffer) => {
+      if (!upload) {
+        const key = `${INCOMING}/${randomUUID()}`
+        upload = {
+          key,
+          id: await bucket.createMultipart(key, signal),
+          parts: [],
+          complete: false,
+        }
+      }
+      const part = upload.parts.length + 1
+      const digest = createHash('md5').update(bytes).digest()
+      const etag = await bucket.uploadPart(upload.key, upload.id, part, bytes, {
+        md5: digest.toString('base64'),
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        signal,
+      })
+      upload.parts.push({ part, etag, md5: digest })
+    }
+    const discard = async () => {
+      const current = upload
+      upload = undefined
+      if (!current) return
+      if (current.complete) await bucket.delete(current.key)
+      else await bucket.abortMultipart(current.key, current.id)
+    }
+    try {
+      for await (const chunk of body) {
+        signal?.throwIfAborted()
+        const bytes = Buffer.from(chunk)
+        size += bytes.length
+        if (options.maxBytes !== undefined && size > options.maxBytes)
+          throw new TooLargeError(`exceeds ${options.maxBytes} bytes`)
+        sha256.update(bytes)
+        md5.update(bytes)
+        if (headBytes < HEAD_BYTES) {
+          const part = bytes.subarray(0, HEAD_BYTES - headBytes)
+          head.push(part)
+          headBytes += part.length
+        }
+        pending.push(bytes)
+        pendingBytes += bytes.length
+        while (pendingBytes >= PART_BYTES) {
+          const all = Buffer.concat(pending)
+          await sendPart(all.subarray(0, PART_BYTES))
+          pending = [all.subarray(PART_BYTES)]
+          pendingBytes = all.length - PART_BYTES
+        }
+      }
+      if (upload) {
+        if (pendingBytes) await sendPart(Buffer.concat(pending))
+        pending = []
+        const { key, id, parts } = upload as NonNullable<typeof upload>
+        await bucket.completeMultipart(key, id, parts, signal)
+        upload!.complete = true
+        // The ETag of a multipart object is the MD5 of its parts' MD5s.
+        const expected = `${createHash('md5')
+          .update(Buffer.concat(parts.map((p) => p.md5)))
+          .digest('hex')}-${parts.length}`
+        const found = await bucket.head(key)
+        if (found?.size !== size || found.etag !== expected)
+          throw new UploadMismatchError(
+            `incoming upload reads back wrong: size ${found?.size}, ETag ${found?.etag}`,
+          )
+      }
+    } catch (error) {
+      await discard().catch(() => {})
+      throw error
+    }
+    const digest: Digest = {
+      size,
+      sha256: sha256.digest('hex'),
+      md5: md5.digest('hex'),
+    }
+    const memory = upload ? undefined : Buffer.concat(pending)
+    const temporary = upload?.key
+    return {
+      hash: digest.sha256,
+      size,
+      head: Buffer.concat(head),
+      keep: async (contentType) => {
+        const path = objectPath(digest.sha256)
+        const found = await bucket.head(path)
+        if (found && found.size === size && checksumVerdict(found, digest)) {
+          await this.#keep(path, found, contentType)
+        } else if (memory) {
+          await bucket.put(path, memory, {
+            size,
+            contentType,
+            cacheControl: IMMUTABLE,
+            sha256: digest.sha256,
+            md5: hexToBase64(digest.md5),
+            signal,
+          })
+        } else {
+          // The copy's own ETag says nothing of the parts: the SHA-256
+          // goes along as metadata, for checks of the object later.
+          await bucket.copy(temporary!, path, {
+            contentType,
+            cacheControl: IMMUTABLE,
+            metadata: { sha256: digest.sha256 },
+          })
+        }
+        const stored = await bucket.head(path)
+        const problem = storedProblem(stored, {
+          size,
+          contentType,
+          // A copy of a multipart object carries no plain MD5 to compare.
+          ...(memory ? { md5: digest.md5 } : {}),
+        })
+        if (problem)
+          throw new UploadMismatchError(
+            `${digest.sha256} reads back wrong: ${problem}`,
+          )
+        return { remote: true }
+      },
+      discard,
+    }
   }
 
   async stat(key: string): Promise<number | undefined> {

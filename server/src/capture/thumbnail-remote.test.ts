@@ -46,7 +46,7 @@ async function putLocal(bytes: Buffer): Promise<string> {
   const key = sha256(bytes)
   const file = path.join(mkdtempSync(path.join(tmpdir(), 'thumb-')), 'f')
   writeFileSync(file, bytes)
-  await store.putFile(key, file)
+  await store.local.putFile(key, file)
   return key
 }
 
