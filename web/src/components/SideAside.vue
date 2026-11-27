@@ -169,7 +169,7 @@ onUnmounted(() => {
             :to="refine('q', row.tag)"
             :title="`在当前列表中搜索 ${row.tag}`"
           >
-            <span class="aside-row-name">{{ row.tag }}</span>
+            <span class="aside-row-name hashtag">{{ row.tag }}</span>
             <span class="aside-row-count">{{
               row.count.toLocaleString('zh-CN')
             }}</span>
@@ -236,6 +236,10 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* A hashtag is one word: no gap after its # before the script. */
+.hashtag {
+  text-autospace: no-autospace;
+}
 .skeleton-rows {
   display: grid;
   gap: 14px;
