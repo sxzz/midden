@@ -2,7 +2,7 @@
 
 ## 部署结构
 
-生产环境使用 `compose.yaml` 运行同一个镜像的两个容器，镜像内含 Node.js 26 与 ffmpeg（用于缩略图和视频尺寸探测）：`midden` 是网页进程（`MIDDEN_ROLE=web`：HTTP、Telegram Bot、Litestream 心跳），`midden-worker` 运行任务队列和定时的维护（`MIDDEN_ROLE=worker`），见[架构](architecture.md#进程)。两个容器读同一个 `.env`，以非 root 用户运行，数据目录都挂载到 `/data`。`midden-worker` 等 `midden` 健康后才启动（迁移由网页进程应用），它的健康检查是容器内 `127.0.0.1:8082/healthz`，不对外发布端口。可选的第三个容器 `litestream` 把数据库持续复制到 R2，见「Litestream」。
+生产环境使用 `compose.yaml` 运行同一个镜像的两个容器，镜像内含 Node.js 26，不含其他程序（缩略图与媒体尺寸来自平台，见[架构](architecture.md#缩略图)）：`midden` 是网页进程（`MIDDEN_ROLE=web`：HTTP、Telegram Bot、Litestream 心跳），`midden-worker` 运行任务队列和定时的维护（`MIDDEN_ROLE=worker`），见[架构](architecture.md#进程)。两个容器读同一个 `.env`，以非 root 用户运行，数据目录都挂载到 `/data`。`midden-worker` 等 `midden` 健康后才启动（迁移由网页进程应用），它的健康检查是容器内 `127.0.0.1:8082/healthz`，不对外发布端口。可选的第三个容器 `litestream` 把数据库持续复制到 R2，见「Litestream」。
 
 对外访问需要 HTTPS 反向代理（例如 Cloudflare Tunnel），把整个域名转发到服务端口，至少包括 `/app/`、`/v1/`、`/media/`，给 AI agent 用时还有 `/agent/v1/` 与 `/agent.md`。Mini App 与通行密钥都要求 HTTPS。
 
@@ -54,7 +54,7 @@ docker compose pull && docker compose up -d    # 更新（自动部署见下）
 
 手动 `docker compose up -d` 先换网页进程（它应用迁移），再换 worker；其间旧的 worker 若发现数据库有它不认识的迁移，就停止取任务，等被换掉。自动部署先停 worker，见下。
 
-暂停后台任务（例如在数据库上做别的事之前）：网页「设置 → 管理员面板 → 后台任务」的「暂停全部」，或只暂停缩略图、上传、原始响应移出；采集记录页可以暂停单次更新。暂停存在数据库中，重启和部署后仍然有效，要手动「继续」。`docker compose stop midden-worker` 也能停下全部任务（正在运行的回到队列），网页照常服务，新的任务排队等它回来。
+暂停后台任务（例如在数据库上做别的事之前）：网页「设置 → 管理员面板 → 后台任务」的「暂停全部」，或只暂停上传、原始响应移出；采集记录页可以暂停单次更新。暂停存在数据库中，重启和部署后仍然有效，要手动「继续」。`docker compose stop midden-worker` 也能停下全部任务（正在运行的回到队列），网页照常服务，新的任务排队等它回来。
 
 服务启动的顺序见 [架构](architecture.md#启动顺序)：先监听 HTTP，Telegram Bot 在后台启动，Telegram 慢或不可用不影响 `/healthz`。`compose.yaml` 的健康检查超时 10 秒，启动后 2 分钟内（`start_period`）的失败不计入；两个容器都一样。
 
@@ -95,16 +95,14 @@ GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<域名>/hooks/
 
 - 原文件（图片、视频）另存到 R2 存储桶，对象键与本地路径相同：`ab/cd/<sha256>`。浏览器直接从公开域名读取 `MEDIA_PUBLIC_URL/ab/cd/<sha256>`（`https://midden-media.sxzz.moe/ab/cd/<sha256>`），由 Cloudflare 边缘缓存；每个对象都带 `Content-Type` 与 `Cache-Control: public, max-age=31536000, immutable`。
 - 新下载先写入本地 `media/`，再由后台任务 `upload` 上传。上传带 `Content-MD5` 和签名的 SHA-256，R2 收到的内容不符会拒绝；上传后读回大小、ETag（即 MD5）和两个响应头，确认后才在 `blobs.remote_at` 记下，接口从此给出公开地址，之前仍给本地签名链接。上传失败从 30 秒起翻倍重试、最长间隔 1 小时，共 12 次（约 7 小时），每次记 `job will retry`，放弃时记 `media upload gave up; the file stays local`，这些媒体由 `media-migrate` 补传。
-- 上传确认、记下 `remote_at` 后，同一个 `upload` 任务立即删除本地原文件，此后 R2 中是唯一的一份（没有其他备份，见「R2 的保护」）。删除在这个媒体的键的锁内进行（下载写入、回收删除同一个键时也取这个锁），并在锁内再次确认 `remote_at` 仍在。以下情况暂不删除：
-  - 这个媒体的缩略图任务还没结束：缩略图要从本地文件生成。缩略图任务结束（生成成功或失败）后会再排一个 `upload` 任务，那时删除；
-  - 这个键同时是某个缩略图的文件（缩略图只存本地）。
+- 上传确认、记下 `remote_at` 后，同一个 `upload` 任务立即删除本地原文件，此后 R2 中是唯一的一份（没有其他备份，见「R2 的保护」）。删除在这个媒体的键的锁内进行（下载写入、回收删除同一个键时也取这个锁），并在锁内再次确认 `remote_at` 仍在。这个键同时是某个缩略图的文件时不删除（缩略图只存本地）；缩略图从平台下载，不读原文件，所以不必等它。
 
   删除失败时任务按上传的间隔重试（记 `job will retry`），`remote_at` 不会被清除；重试用完时记 `deleting the local copy of uploaded media gave up; media-prune-local removes it`。
 
-- 删除时正在读这个文件的地方不受影响：Telegram 发送、带文件名的下载和 `/media/…` 都先打开文件再读，已打开的文件删除后仍能读完；打开前已删除时改从 R2 读。ffmpeg、ffprobe 拿到的是本地路径，若在它们打开之前文件被删，就改用预签名 URL 再运行一次。之后再下载到相同内容（已在 R2 中的媒体）时不再写本地文件。
-- 缩略图只存本地，作为缓存，经本服务提供，响应头为 `Cache-Control: public, max-age=31536000, immutable`（图片同样；视频和带文件名的下载仍为 `private`，不进 CDN）。缩略图文件丢失时，请求它的 `/media/…` 当场从原文件重新生成：原文件在本地就读本地，否则 ffmpeg 通过预签名 URL 只读取需要的字节范围。生成的字节不同（例如换了 ffmpeg）时记在新的键下，并把请求重定向过去。
-- 带文件名的下载经本服务从本地或 R2 流式返回，带 `Content-Disposition`。服务端的读取（Telegram 发送、缩略图、下载）都先读本地，没有时通过 S3 API 读 R2，不经公开域名。
-- 不另设本地原文件缓存：缩略图在删除本地原文件之前从本地文件生成；Telegram 按 `file_id` 复用已上传的文件；其余读取（第一次发送到 Telegram、缩略图丢失、带文件名的下载）在本地原文件删除后都读 R2，视频只读部分字节。
+- 删除时正在读这个文件的地方不受影响：Telegram 发送、带文件名的下载和 `/media/…` 都先打开文件再读，已打开的文件删除后仍能读完；打开前已删除时改从 R2 读。之后再下载到相同内容（已在 R2 中的媒体）时不再写本地文件。
+- 缩略图只存本地，作为缓存，经本服务提供，响应头为 `Cache-Control: public, max-age=31536000, immutable`（图片同样；视频和带文件名的下载仍为 `private`，不进 CDN）。缩略图文件丢失时，请求它的 `/media/…` 当场从平台再下载一次（资产记下的 `thumbnail_url`）；字节不同时记在新的键下，并把请求重定向过去。平台不再提供时（Instagram 的地址会过期、帖子已删除），图片重定向到原文件，视频返回 404。
+- 带文件名的下载经本服务从本地或 R2 流式返回，带 `Content-Disposition`。服务端的读取（Telegram 发送、下载）都先读本地，没有时通过 S3 API 读 R2，不经公开域名。
+- 不另设本地原文件缓存：缩略图从平台下载，不读原文件；Telegram 按 `file_id` 复用已上传的文件；其余读取（第一次发送到 Telegram、带文件名的下载）在本地原文件删除后都读 R2。
 - 设为 `r2` 并运行后，不能再改回 `local`：本地实现不读 R2，已删除本地原文件的媒体会缺失。要回退，先把存储桶下载回 `media/`（如 `rclone copy r2:midden ~/midden/data/media`）再改。
 - 删除：不再被引用的媒体（删除收藏、删除媒体）24 小时后删除本地文件（还在时）；R2 中有对象时先清除其公开地址的边缘缓存（`purge_cache`），再删除对象。清除失败时对象保留，稍后重试；没有设置 `CF_ZONE_ID` 时记 `cache purge skipped: no CF_ZONE_ID configured` 并跳过清除。
 - 存储类别为存储桶默认的 Standard。
@@ -152,11 +150,11 @@ S3 密钥由 `CF_API_TOKEN` 派生（[Cloudflare 文档](https://developers.clou
    - 大小相同：用对象带的校验值与本地比较，依次是 `x-amz-checksum-sha256`、ETag（单段上传时即 MD5；分段上传的 ETag 带 `-<段数>`，不能用）、rclone 为分段上传记下的 `x-amz-meta-md5chksum`。有一项不符就重新上传；都相符则保留，不重新传输。一项都没有时重新上传（记 `replacing <哈希>: no checksum to compare`，计入 `replaced`），因为记下后本地文件随即删除，只按大小认定不够；加 `--verify-download` 则改为下载并计算 SHA-256，相符就保留。
    - 保留的对象 `Content-Type` 或 `Cache-Control` 不对时，在服务端把对象复制到自身（`CopyObject`，`x-amz-metadata-directive: REPLACE`）改正，其他元数据照旧，不重新传输，再读回确认。
 3. 在 `blobs.remote_at` 记下，网页从此使用公开地址。
-4. 删除本地原文件，规则与上传任务相同：缩略图任务还没结束的、同时是缩略图文件的保留（汇总中计入 `kept … for thumbnails`），之后由缩略图任务或 `media-prune-local` 删除。
+4. 删除本地原文件，规则与上传任务相同：同时是缩略图文件的保留（汇总中计入 `kept … for thumbnails`）。
 
 本地文件缺失时，只有加 `--verify-download` 且 R2 中的对象哈希相符才记下，否则报告 `missing locally`。命令与服务同时运行：服务的上传任务在此期间已记下（并删除本地文件）的媒体计入 `by the server meanwhile`，不算问题。可以随时中断，再次运行时跳过已记下的，其余重新检查，已上传但未记下的按校验值保留；中断在记下与删除之间、或删除失败（计入 `failed`）时，本地文件留给 `media-prune-local`。`--dry-run` 不上传、不写入、不删除，汇总中的 `would delete N local files` 是会删除的本地原文件数与大小。`--concurrency N`（默认 4）同时处理的数量，`--limit N` 只处理前 N 个。每 5 秒输出一次进度，结束时输出汇总，并给出一个已记下媒体的公开地址；有失败、哈希不符或缺失时退出码为 1。R2 中不属于任何媒体的对象（如 rclone 一并复制的缩略图）不会被读取或修改；它们的键以后被回收时随之删除。
 
-`media-prune-local` 删除已记为在 R2 中、且再次确认过的本地原文件：对象存在，大小、`Content-Type`、`Cache-Control` 正确，并且上述校验值之一与本地文件相符（或加 `--verify-download` 后下载比较）。没有校验值的对象保留本地文件并列出；对象不对时保留本地文件、清除 `remote_at`（网页改回本地链接，下次 `media-migrate` 重新上传）。缩略图（包括同时是缩略图的原文件）一律保留，缩略图任务还没结束的原文件也暂时保留。上传任务和 `media-migrate` 已经自动删除本地原文件，这个命令只处理剩下的：在自动删除之前就已记下的、当时因缩略图保留而缩略图任务之后没有删掉的、删除失败或中断留下的。
+`media-prune-local` 删除已记为在 R2 中、且再次确认过的本地原文件：对象存在，大小、`Content-Type`、`Cache-Control` 正确，并且上述校验值之一与本地文件相符（或加 `--verify-download` 后下载比较）。没有校验值的对象保留本地文件并列出；对象不对时保留本地文件、清除 `remote_at`（网页改回本地链接，下次 `media-migrate` 重新上传）。缩略图（包括同时是缩略图的原文件）一律保留。上传任务和 `media-migrate` 已经自动删除本地原文件，这个命令只处理剩下的：在自动删除之前就已记下的、以前为等缩略图生成而保留的、删除失败或中断留下的。
 
 预先用 rclone 复制（可选，代码上线前即可进行）。rclone 不会自己派生密钥，先在 macOS 的终端算出这一对（`jq` 用 `brew install jq` 安装；Linux 上把 `shasum -a 256` 换成 `sha256sum`）：
 
@@ -488,7 +486,7 @@ Litestream 的恢复在一个临时的 `litestream` 容器中运行（`docker co
 
 部署前的快照（`data/backups/deploy/`）同样按第 3 步换上，把 `mv data/restore/midden.db* data/` 换成 `cp data/backups/deploy/<文件> data/midden.db`（有同名的 `-wal` 时也复制为 `data/midden.db-wal`）。
 
-使用 R2 时，回收不再引用的媒体会同时删除 R2 中的对象，所以恢复较早的数据库后，在那之后删除的媒体不能再显示。`MEDIA_STORE=local` 时数据库与媒体分别备份，可能有少量新媒体在数据库备份中尚未出现（无害），或数据库引用了刚被回收的旧媒体，后者在维护时会被清理；需要严格一致时，先 `docker compose stop` 再备份。缩略图在请求时重新生成。
+使用 R2 时，回收不再引用的媒体会同时删除 R2 中的对象，所以恢复较早的数据库后，在那之后删除的媒体不能再显示。`MEDIA_STORE=local` 时数据库与媒体分别备份，可能有少量新媒体在数据库备份中尚未出现（无害），或数据库引用了刚被回收的旧媒体，后者在维护时会被清理；需要严格一致时，先 `docker compose stop` 再备份。缩略图丢失时在请求时从平台重新下载（见「媒体存储（Cloudflare R2）」）。
 
 ### 旧的每日备份
 
@@ -600,7 +598,7 @@ worker 每分钟运行一次维护。标 _空闲时_ 的步骤只为腾出空间
 - 不再有任何原始响应使用的存储桶对象 24 小时后删除（见「原始响应（R2）」，_空闲时_）；
 - 设置了 `RAW_R2_BUCKET` 时，为一小时以前仍在数据库中、没有上传任务的原始响应排上传任务，同时等待的最多 500 个（见「原始响应（R2）」）；
 - 删除抓取结束一天以上仍留着的暂存数据（`capture_staging`，没能提交的列表目标的预取）；
-- 为缺少缩略图的媒体补做缩略图；
+- 为缩略图补记文件头中的宽高（记下尺寸之前生成的缩略图，_空闲时_）；
 - 清理过期的网页会话、通行密钥挑战与 `/passkey` 链接；
 - 每 15 分钟读取存储用量并检查提醒，每天一次以及数据库变动后统计数据库组成（见「存储用量」，worker 自己发起的统计在 _空闲时_）；
 - 把空闲页面还给文件系统（_空闲时_）：空闲页面达到 1024 页（4 MiB）时运行 `PRAGMA incremental_vacuum(4096)`，每次最多 16 MiB，两次之间至少 15 分钟，所以积压最多每小时释放 64 MiB；日志 `released free database pages` 给出这次释放的页数、剩余空闲页数（`free`）和总页数（`pages`）。这要求数据库是 `auto_vacuum = INCREMENTAL`：新建的数据库默认如此，已有的数据库要 `VACUUM` 一次才能切换（生产环境已于 2026-11-25 切换；`cli.ts maintain --vacuum` 也会切换），否则这一步什么也不做。
@@ -703,6 +701,6 @@ docker compose up -d --wait midden && docker compose up -d --wait midden-worker
   grep -h xiaomouzovo data/logs/worker.log* | grep -E '"level":(40|50)'
   ```
 
-- 找不到 ffmpeg 时启动日志会提示，缩略图停用；之后装上 ffmpeg，维护任务会补做缩略图。
+- 缩略图下载失败记 `thumbnail download failed`（warn，带 `assetId`、`blobId`），不影响原文件和抓取；服务器忙时随下载任务重试（`job will retry`）。
 - Cloudflare：`cloudflare token verification failed` 表示启动时 `CF_API_TOKEN` 没有通过验证，服务随即退出（见「配置」）；`storage analytics unavailable` 表示存储用量读不到分析数据，页面只显示本机部分。
 - Litestream：`litestream heartbeat missing` 表示超过「备份心跳超时」（默认 20 分钟）没有收到它的心跳，看 `docker compose logs litestream` 中的 `monitor error`、`sync error`（如 token 错误时的 403、网络错误）；`litestream heartbeat listener failed` 表示服务没能监听 8081 端口。见「Litestream」。

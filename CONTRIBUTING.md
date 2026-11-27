@@ -2,7 +2,7 @@
 
 ## 环境
 
-工具链由 mise 按根目录 `mise.toml` 提供（`mise trust && mise install`）：Node.js 与 pnpm 的版本只写在 `package.json` 的 `devEngines` 中，由 mise 读取；ffmpeg 的版本写在 `mise.toml`。不用 mise 时需自备 pnpm，它会按 `devEngines` 自动下载 Node.js。缩略图相关测试需要 ffmpeg，通过环境变量 `FFMPEG` 指定路径（用 mise 时为 `FFMPEG=ffmpeg`），未设置时跳过。
+工具链由 mise 按根目录 `mise.toml` 提供（`mise trust && mise install`）：Node.js 与 pnpm 的版本只写在 `package.json` 的 `devEngines` 中，由 mise 读取。不用 mise 时需自备 pnpm，它会按 `devEngines` 自动下载 Node.js。不需要其他程序：缩略图从平台下载，服务端不运行外部程序。
 
 ```sh
 pnpm install
@@ -47,11 +47,11 @@ Drizzle 使用 Node 内置的 `node:sqlite`，查询与事务都是同步的，�
 
 采集相关测试使用 `server/src/testing/` 中的内存数据库上下文与假平台（`fake.test`），通过真实的任务队列驱动抓取，不访问网络。Telegram 测试使用记录调用的假 API。
 
-负载测试：`server/scripts/bench-load.ts` 在数据库副本上做一次大批更新（假平台每页 100 条帖子，每条有图片、一成有视频，媒体上传到假的 R2，原始响应移到假的存储桶，缩略图用 ffmpeg），同时从外面每 100 毫秒请求 `/healthz`、每 500 毫秒请求一页收藏、每秒改一次备注，最后给出各自的 p50 / p95 / p99 / 最长、`database is locked` 的次数等，存在数据目录的 `bench/result.json`。可以一并运行 Litestream（`litestream=<可执行文件>`，复制到本地目录，用 `litestream.yml` 的检查点设置）和一个持续若干秒的读事务（`pin=60`，模拟备份）：
+负载测试：`server/scripts/bench-load.ts` 在数据库副本上做一次大批更新（假平台每页 100 条帖子，每条有图片、一成有视频，媒体上传到假的 R2，原始响应移到假的存储桶，每个媒体另下载一个缩略图），同时从外面每 100 毫秒请求 `/healthz`、每 500 毫秒请求一页收藏、每秒改一次备注，最后给出各自的 p50 / p95 / p99 / 最长、`database is locked` 的次数等，存在数据目录的 `bench/result.json`。可以一并运行 Litestream（`litestream=<可执行文件>`，复制到本地目录，用 `litestream.yml` 的检查点设置）和一个持续若干秒的读事务（`pin=60`，模拟备份）：
 
 ```sh
 cp server/data/midden.db /tmp/bench/ && cd server
-FFMPEG=ffmpeg node scripts/bench-load.ts /tmp/bench split profiles=10 count=300 litestream=/path/to/litestream pin=60
+node scripts/bench-load.ts /tmp/bench split profiles=10 count=300 litestream=/path/to/litestream pin=60
 ```
 
 `split` 是两个进程，`all` 是一个进程；`entry=<文件>` 运行另一个版本的单进程入口（它要接受 `scripts/bench-load/fakes.ts` 的假对象），用来和旧版本比较。
@@ -59,7 +59,7 @@ FFMPEG=ffmpeg node scripts/bench-load.ts /tmp/bench split profiles=10 count=300 
 WAL 的写入量：`all wal=1` 关闭检查点，记下每个写事务提交后 WAL 的长度和开始它的代码（`scripts/bench-load/wal-meter.ts`），更新及其留下的任务（上传、缩略图、原始响应）全部做完后读 WAL 的每一帧，按代码和按表或索引（`dbstat`，运行中每 5 秒记一次各页面属于谁）汇总，写到 `bench/wal.txt`：总量、每次抓取多少 KiB、每 10 秒窗口内不同的页面（Litestream 的 L0 文件大致就是这些）。`rounds=2` 先做一次不计入的更新，计入的那次再抓取已保存、内容未变的帖子，接近生产环境中的更新：
 
 ```sh
-FFMPEG=ffmpeg node scripts/bench-load.ts /tmp/bench all wal=1 profiles=10 count=300 rounds=2
+node scripts/bench-load.ts /tmp/bench all wal=1 profiles=10 count=300 rounds=2
 ```
 
 `scripts/` 的测试（`scripts/*.test.ts`）用 Node 自带的 `node --test` 运行，`pnpm test` 包含它们。`deploy.test.ts` 与 `maintain.test.ts` 用记录调用的假命令代替 docker、git 与 curl，数据目录是临时目录。

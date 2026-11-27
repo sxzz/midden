@@ -65,6 +65,17 @@ flowchart LR
 - 置顶帖子：Profile 实体的 `metadata.pinned_posts` 是置顶帖子的平台 id（按时间线列出的顺序，没有置顶时为空数组），是资料的一部分。只有能判断时才记下：X 用采集账号读时间线（UserTweets）的第一页，置顶帖子是单独的 `TimelinePinEntry` 指令，没有这条指令就是没有置顶；Instagram 时间线的第一页以置顶帖子开头（`timeline_pinned_user_ids` 含该账号），后面跟着非置顶的帖子或时间线已结束时才算列全。X 公开接口（FxTwitter 的资料和时间线）不标置顶，续页、自动刷新、不抓帖子的采集也不知道，这些抓取不写这个字段，视为未知而不是没有置顶：比较版本时，不知道置顶的抓取在两边都去掉这个字段，所以不会因此产生新版本；知道置顶而上一个版本不知道时，与此前最后一次知道的值比较。
 - 实体（帖子、账号）按平台身份共享，`entity_versions` 按内容去重。
 - 媒体按 SHA-256 存在 `media/ab/cd/<哈希>`，`blobs` 记录类型与大小，缩略图同样按内容存放。使用 R2 时原文件上传到存储桶的同名键，`blobs.remote_at` 记下上传得到确认的时间，之后删除本地原文件，见「媒体链接」。
+- 缩略图与尺寸来自平台，见「缩略图」。服务端不运行任何外部程序（没有 ffmpeg），`server/src/no-subprocess.test.ts` 检查这一点。
+
+## 缩略图
+
+- 平台在列出媒体时给出原文件的像素尺寸，和一个更小的版本（`Resource.width`、`height`、`thumbnailUrl`），抓取时记在资产上（`assets.width`、`height`、`thumbnail_url`）。下载任务（`capture/download.ts`）下载原文件、资产就绪之后，再下载这个地址作为 blob 的缩略图（`capture/thumbnail.ts`），存在本地媒体目录（按内容哈希，与原文件相同），写一行 `blob_thumbnails`，宽高从文件头读出（WebP、JPEG、PNG）。
+- X（`platforms/x/thumbnails.ts`，在 pbs.twimg.com 上核对过）：图片的 `name` 可取 thumb（150 的方形裁切）、tiny（64）、240x240、360x360、small（680）、900x900、medium（1200）、large（2048）、orig，除 thumb 外都是放进这个方框、不放大。取 `small`，它是长边至少 400 的最小一档；`format=webp` 时约是 JPEG 的三分之一、PNG 的二十分之一。`name` 和 `format` 只在路径不带扩展名时生效（视频封面写成 `.jpg?name=small` 得到的是原尺寸），所以地址写成 `…/<id>?format=webp&name=small`。长边不超过 680 的图片没有更小的版本。视频与 GIF 的缩略图是封面（FxTwitter 的 `thumbnail_url`，即 `media_url_https`）的 `small`。头像取 `_200x200`（原图或 `_400x400` 时；页面中头像最大 96 px），主页封面取 `/600x200`。尺寸是 `original_info`（FxTwitter 的 `width`、`height`）。
+- Instagram（`platforms/instagram/thumbnails.ts`）：`image_versions2.candidates`（或网页的 `display_resources`）列出同一图片的几种宽度，取比例与原图相同（相差 2% 以内，去掉为个人主页裁成方形或 4:5 的版本）、宽度至少 400 的最窄一档；没有比原图窄的就没有。视频的这些候选是封面，取同样的一档，没有时取最大的一个，比例都不同时也用。头像取 `hd_profile_pic_versions` 中宽度至少 200、比所选头像窄的最窄一档，没有时取 150 的 `profile_pic_url`。地址带签名、会过期，所以在抓取时就随原文件下载。尺寸是所选版本的宽高。
+- 没有更小的版本时：图片没有缩略图，网页显示原文件（R2 中的原文件是 CDN 的公开地址），不复制一份；视频没有封面时也没有缩略图，网页的视频占位框按平台给的比例。平台返回的内容与原文件完全相同时也不记缩略图（否则它的本地副本会一直保留，见「媒体链接」）。
+- 接口的 `width`、`height` 是缩略图的尺寸（从文件读出），没有缩略图时是平台给的原文件尺寸，只用来按比例留出位置；都没有时网页等图片加载后再按实际比例排版。Telegram 发视频时同样用这个尺寸。
+- 失败：缩略图下载失败不影响原文件和抓取，抓取在原文件就绪时即可完成。服务器拒绝（4xx）、不是图片时记为失败（`blob_thumbnails.state = 'failed'`），不再尝试；服务器忙或连接中断时下载任务按普通的重试再试，重试时原文件已就绪，只下载缩略图；次数用完时同样记为失败。之后的抓取列出这个媒体时，blob 还没有 `blob_thumbnails` 行而这次给出了缩略图地址，就为它排一个下载任务，只下载缩略图；已移除的媒体不下载。
+- 以前的缩略图由 ffmpeg 生成（短边 400、长边不超过 1200 的 WebP），原样保留；迁移 `platform_thumbnails` 删去还在排队的 `thumbnail` 任务和对这个类型的暂停。没有记下尺寸的旧缩略图由维护任务从文件头读出（`backfillThumbnailSizes`）；没有缩略图、在这一版之前保存的资产没有平台尺寸，按图片加载后的比例排版。
 - 删除收藏后，维护任务在没有进行中的抓取时删除其内容；不再被引用的媒体文件 24 小时后删除。
 - 存储用量（`server/src/usage/`）：worker 每 15 分钟从 Cloudflare 的 GraphQL Analytics API 读取 R2 各存储桶每天的存储与操作次数，与本机的数据库、缩略图、可用磁盘一起记在 `storage_snapshots`（每个 UTC 日一行），本月费用由其中本月的行按 R2 标准存储的价格算出；数据库组成由 worker 在线程中用 `dbstat` 读出（它在一个读事务中读遍每一页，其间 WAL 不能从头开始，所以 worker 自己发起的只在空闲时读），存在 `settings` 表：每天一次，数据库变动后（迁移不同、文件大小变了 10% 以上、离线维护做了标记）尽快，以及网页点「重新统计」时——网页进程只在 `settings` 写一个请求（一条语句，已有则不重复），worker 每 5 秒取一次，网页进程从不运行 `dbstat`；越过阈值和回落时由 Bot 告诉所有者。见运维文档的「存储用量」。
 - 数据库可由单独的 `litestream` 容器（compose 的 `litestream` profile，`litestream.yml`）持续复制到 R2 的私有存储桶 `midden-backup`。它一直持有一个读事务，由它的检查点让 WAL 重新开始；worker 只用 SQLite 默认的 PASSIVE 自动检查点，网页进程关闭了自动检查点（请求中不复制 WAL），都不做 RESTART、TRUNCATE 检查点和 `VACUUM`（整理数据库在服务全部停止时由 `cli.ts maintain` 做，见运维文档「数据库整理」）；`litestream.yml` 把它强制 TRUNCATE 检查点的阈值提高到约 3.8 GiB（见运维文档）。删除留下的空闲页面由维护任务用 `incremental_vacuum` 分批还给文件系统，这是普通的写事务（数据库为 `auto_vacuum = INCREMENTAL`，新建的数据库默认如此）。设置了 `LITESTREAM_ACCESS_KEY_ID` 时，网页进程在只供容器之间访问的 8081 端口接收它的心跳，超过「备份心跳超时」（管理员设置，存在 `settings` 表，默认 20 分钟）没有收到就由 Bot 告诉所有者，管理员面板和 `GET /v1/instance` 显示上次心跳（`server/src/litestream.ts`）。见运维文档的「Litestream」。
@@ -100,7 +111,7 @@ flowchart LR
 - 复用已存的媒体按版本（清晰度）认：`assets.cache_key` 是平台与整个不可变键的哈希，只在与 `media_key` 不同时才存（Instagram），相同时为 NULL（X，以及没有清晰度段的），所以同一个哈希不存两遍；复用用的键是 `coalesce(cache_key, media_key)`，先在部分索引 `assets_cache`（`state = 'ready' AND cache_key <> ''`，只含自己的键）中找，再按 `assets_media` 找 `cache_key IS NULL` 的行。`cache_key` 为空字符串表示没有不可变键（`media_key` 是 `url:<地址>`），这样的资源永不复用：它有媒体键，却不能当作复用键用。
 - 「已移除」标记是 `removed_media(media_key, kind, thumbnail_key, thumbnail_mime, thumbnail_size)`，按媒体身份，不属于某条收藏。之后任何收藏的抓取（这条帖子的更新，或转发、引用了同一媒体的其他帖子）列出这个媒体时，资产直接记为 `removed`、不排下载任务；标记之前已排队的下载在开始前（等待同一媒体的下载锁之后）再查一次，同样记为 `removed`；已经在下载的照常完成，但资产已不是 `pending` 时文件只在有别的 blob 使用时保留，否则进入 `media_garbage`。`removed` 不算缺失：抓取仍为 `complete`，也不使它成为「没有可保存的内容」。资产不带 blob，所以与删除时一致，删除后再抓取不产生新版本。
 - 删除（`POST /v1/media-removals`，`{ ids }` 为若干收藏的全部媒体，最多 500 条；`{ collection, asset }` 为一条收藏中的一个媒体，按这条收藏所有抓取中同一 `media_key` 的资产）在一个事务内：记下标记，把这些资产改为 `removed` 并去掉 `blob_id`，等待它们的下载中抓取重新判断是否可以完成，再释放不再有资产引用的 blob（与删除收藏时的维护相同，`releaseBlobs`：删除 `blobs` 行，文件和缩略图的键进入 `media_garbage`，24 小时后删除；R2 中的对象同时删除，并先清除其公开地址的边缘缓存），并更新这些收藏的 `catalog`（`storage_bytes` 随之减少，列表的占用合计、`/v1/usage` 同样）。媒体种类筛选仍按平台列出的媒体，删除后帖子仍算有视频。
-- 缩略图：`blob_thumbnails` 以 `blob_id` 为键、随 blob 级联删除，所以删除时把这个媒体已有的缩略图的键、类型和大小复制到标记上（存储用量的缩略图据此仍计入它，见运维文档）；维护删除 `media_garbage` 中的键之前，除了 `blobs`、`blob_thumbnails`，也检查是否仍是某个标记的缩略图，是则保留文件。没有缩略图（未配置 ffmpeg 或尚未生成）时标记不带缩略图。
+- 缩略图：`blob_thumbnails` 以 `blob_id` 为键、随 blob 级联删除，所以删除时把这个媒体已有的缩略图的键、类型和大小复制到标记上（存储用量的缩略图据此仍计入它，见运维文档）；维护删除 `media_garbage` 中的键之前，除了 `blobs`、`blob_thumbnails`，也检查是否仍是某个标记的缩略图，是则保留文件。没有缩略图（平台没有更小的版本、视频没有封面，或尚未下载）时标记不带缩略图；原文件代替缩略图的图片删除后不再显示图片。
 - 试算：`POST /v1/media-removals/preview` 用同一个查询算出删除会做什么：`media`（媒体数，按 `media_key`）、`freed_bytes`（只被这次删除的资产引用的 blob 的大小之和）、`shared`（其 blob 还被其他资产引用、不会释放空间的媒体数）。删除的响应是同样的数字。
 - 恢复下载：`POST /v1/media-removals/restore`（`{ collection, asset }`）删除标记，保留的缩略图进入 `media_garbage`；已删除的资产保持 `removed`，下一次抓取重新下载，内容因此不同而产生新版本。
 - 接口中删除的媒体 `state` 为 `removed`，带 `kind`，缩略图来自标记（`thumbnail_url`），没有原文件的链接；标记已清除时带 `download_again`。公开接口同样给出。
@@ -254,7 +265,7 @@ flowchart LR
 | 角色          | 内容                                                                                                                                                                                                                                                                               |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `web`         | HTTP（API、Agent API、两者共用的读取线程、媒体、网页，`/healthz`）、Telegram Bot（长轮询、命令、`telegram_deliveries` 的发送）、Litestream 心跳（8081 端口）与它的提醒。应用迁移、补齐 `catalog`。把任务写进 `jobs`，自己不运行任务。                                              |
-| `worker`      | 任务队列（采集、下载、缩略图、上传、原始响应、related 展开、关系网列表、更新、finalize、删除账号的所有视频）和定时的工作：维护（每分钟）、定期更新（每分钟看哪些到时间）、存储用量与数据库组成、`PRAGMA optimize`（每 6 小时）、清理过期的会话与 `/passkey` 链接。自己的健康检查。 |
+| `worker`      | 任务队列（采集、下载媒体与缩略图、上传、原始响应、related 展开、关系网列表、更新、finalize、删除账号的所有视频）和定时的工作：维护（每分钟）、定期更新（每分钟看哪些到时间）、存储用量与数据库组成、`PRAGMA optimize`（每 6 小时）、清理过期的会话与 `/passkey` 链接。自己的健康检查。 |
 | `all`（默认） | 以上全部，在一个进程中。`pnpm dev` 与测试用它。                                                                                                                                                                                                                                    |
 
 生产环境（`compose.yaml`）是两个容器：`midden`（`web`）和 `midden-worker`（`worker`），同一个镜像、同一个数据目录和 `.env`。这样任务的数据库写入、CPU 和同步等待（node:sqlite 等锁时整个进程停住）都不在响应请求的进程中。
@@ -306,9 +317,9 @@ node:sqlite 是同步的：查询在网页进程的事件循环上运行时整�
 
 ## 任务
 
-任务保存在 `jobs` 表，按队列限制并发：`capture` 4、`download` 8（缩略图共用，优先级较低）、`control` 4、`upload` 4（上传到 R2，重试另有间隔，见运维文档）、`raw` 4（原始响应移到私有存储桶，见「原始响应」；只在空闲时）。失败按 2、4、8… 秒退避，最多 3 次；平台给出的 `retry-after` 优先；无法通过重试解决的错误直接失败；限流不算失败（见「限流」）。worker 启动时，运行中的任务回到队列。
+任务保存在 `jobs` 表，按队列限制并发：`capture` 4、`download` 8（每个任务下载原文件，再下载它的缩略图）、`control` 4、`upload` 4（上传到 R2，重试另有间隔，见运维文档）、`raw` 4（原始响应移到私有存储桶，见「原始响应」；只在空闲时）。失败按 2、4、8… 秒退避，最多 3 次；平台给出的 `retry-after` 优先；无法通过重试解决的错误直接失败；限流不算失败（见「限流」）。worker 启动时，运行中的任务回到队列。
 
-- 优先级：同一队列中先按任务类型自己的优先级，再加上来源的级别：所有者直接要求的（采集链接、Bot、网页的操作）0，手动开始的更新 1，定期更新 2，维护 3。任务继承创建它的任务的来源和所属更新（`jobs.update_id`，经 AsyncLocalStorage），所以一次更新的抓取、下载、缩略图、related 展开都属于这次更新，排在手动采集之后。属于一次更新的任务至少是这次更新的级别（由 `updates.origin` 决定），即使是在网页上排的（如重试）。迁移 `watches` 把已排队的维护任务从 2 移到 3。
+- 优先级：同一队列中先按任务类型自己的优先级，再加上来源的级别：所有者直接要求的（采集链接、Bot、网页的操作）0，手动开始的更新 1，定期更新 2，维护 3。任务继承创建它的任务的来源和所属更新（`jobs.update_id`，经 AsyncLocalStorage），所以一次更新的抓取、下载、related 展开都属于这次更新，排在手动采集之后。属于一次更新的任务至少是这次更新的级别（由 `updates.origin` 决定），即使是在网页上排的（如重试）。迁移 `watches` 把已排队的维护任务从 2 移到 3。
 - 只在空闲时：`raw` 队列（原始响应移到存储桶）只在其他队列 10 秒内都没有在运行的任务、且节流处于平静时运行；维护中只为腾出空间的步骤（删除已删除收藏的内容、过期的原始响应、原始响应的回收、归还空闲页面）和 worker 自己发起的数据库组成也一样（网页上点「重新统计」的不等）。大批更新期间它们等到更新结束。
 - 节流（`jobs/throttle.ts`）：worker 每秒读一次，看三样：网页进程最近 5 秒每一秒的事件循环延迟 p99 和主线程上的慢请求（`run/web.json`）、自己这一秒等写锁的最长时间、持有写锁的时间占比。
   - 高：5 秒内有 2 秒停顿（p99 达到 200 毫秒），或主线程上有 2 个慢请求，或等锁 500 毫秒，或持锁六成；较高：只有 1 秒停顿、2 秒达到 100 毫秒、1 个慢请求、等锁 150 毫秒或持锁四成。一次停顿或一个慢请求（一次 GC、一个重的读）只算较高。读线程上的慢请求不算。
@@ -323,7 +334,7 @@ node:sqlite 是同步的：查询在网页进程的事件循环上运行时整�
 ### 暂停
 
 - 全部暂停：`settings` 表的 `jobs_control`（`paused`）。worker 每次查找任务时读它，暂停期间不取任何任务；新任务照常写入。正在运行的任务做完。网页「设置 → 管理员面板 → 后台任务」的「暂停全部」/「继续」，接口 `PUT /v1/queue/control`（`{ paused }`）。
-- 按类型暂停：同一行的 `types`，只能是 `thumbnail`、`upload`、`raw-upload`（它们的优先级在各自队列中不与别的类型重叠，取任务时直接跳过这些优先级，仍走索引）。例如暂停缩略图和原始响应，采集照常。
+- 按类型暂停：同一行的 `types`，只能是 `upload`、`raw-upload`（它们的优先级在各自队列中不与别的类型重叠，取任务时直接跳过这些优先级，仍走索引）。例如暂停上传和原始响应，采集照常。
 - 一次更新：采集记录页「中止」旁的「暂停」/「继续」（`POST /v1/updates/:id/pause`、`/resume`）。`updates.paused_at` 记下暂停；这次更新在 `jobs` 中等待的任务改为 `paused`，worker 只取 `available` 的；暂停期间它的任务（包括正在运行的任务新排的）直接写成 `paused`，推迟或失败后等待重试的也回到 `paused`。更新本身不再提交新的项（`update` 任务也属于它），继续后从原来的位置接着做。中止一个暂停中的更新时，它的任务回到 `available`，已经排队的抓取照常完成（与中止的含义相同）。已结束的更新不能暂停。
 - 都存在数据库中，重启和部署后仍然有效；暂停的任务不算失败，不用掉次数。记录与 Bot 的 `/status`、进度消息显示「已暂停」。
 - `GET /v1/queue`：暂停状态、可按类型暂停的类型、各类型等待 / 运行 / 暂停的任务数、worker 的报告（并发比例、是否空闲、是否停止取任务，`run/worker.json` 超过 15 秒没有更新时为 `null`）和网页进程最近一分钟的响应。
@@ -353,10 +364,10 @@ API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…
 存储由 `BlobStore` 接口抽象，`MEDIA_STORE` 选择实现：
 
 - `local`（`blob/fs-store.ts`）：只有本地目录，所有链接都是上面的签名链接。
-- `r2`（`blob/bucket-store.ts`，S3 通用，经 `blob/s3.ts` 用 SigV4 调用；密钥在启动时由 `CF_API_TOKEN` 派生，`cloudflare.ts`）：本地目录在前，R2 存储桶在后。下载先写本地，新 blob 排一个 `upload` 任务（`capture/upload.ts`，`upload` 队列 4 个并发），上传后读回确认，再写 `blobs.remote_at`。`url()` 只对 `remote_at` 已有、且不带文件名的原文件给出公开地址 `MEDIA_PUBLIC_URL/ab/cd/<哈希>`；缩略图（只存本地）、尚未确认的原文件和带文件名的下载（需要 `Content-Disposition`）仍是签名链接。读取（`read`、`stat`）先本地后 R2；`source()` 给 ffmpeg/ffprobe 一个本地路径，或 R2 的预签名 URL（1 小时），让它们只读需要的字节范围。`delete()` 删除本地文件，R2 中有对象时先清除边缘缓存再删对象。
-- 删除本地原文件：同一个 `upload` 任务在写下 `remote_at` 之后，在 `mediaLocks` 这个键的锁内（下载写入和回收删除同一个键时也取它）再次确认 `remote_at`，调用 `deleteLocal()` 删除本地文件，此后 R2 中是唯一的一份。`blob/local-copy.ts` 的 `localCopyHold` 决定暂不删除的情况：这个键同时是缩略图的文件（`blob_thumbnails.key` 或 `removed_media.thumbnail_key`），或这个 blob 还没有 `blob_thumbnails` 行而 `jobs` 中有它的 `thumbnail` 任务。缩略图任务结束（`runThumbnail` 返回或 `failThumbnail`）时调用 `thumbnailDone`，blob 已有 `remote_at` 就再排一个 `upload` 任务，它跳过上传、只删除。两边都是先写自己的结果再查对方的，所以总有一边会删。删除失败由任务重试，不清除 `remote_at`。下载在同一个锁内发现相同内容的 blob 已有 `remote_at` 时不写本地文件。
-- 删除时的读取：`read()` 等文件打开（`open` 事件）才返回流，打开后文件被删仍能读完，打开前被删则改读 R2，所以 Telegram 发送（grammY 的 `InputFile` 调用 `read()`）和 `/media/` 路由不受影响。ffmpeg、ffprobe 经 `withSource()`（`blob/store.ts`）运行：给的是本地路径而运行失败、此时 `source()` 已变为别处（本地文件被删）时，用新的来源再运行一次。`media-migrate` 在另一个进程中运行，锁管不到它：它只在自己写下 `remote_at` 之后删除，依靠的是同样的回退；其间同内容的下载最多留下一个本地副本，由 `media-prune-local` 清理。
-- `/media/` 路由在 `r2` 时让图片和缩略图可被 CDN 缓存（`public, max-age=31536000, immutable`），视频和下载仍为 `private`；签名有效但文件不存在时，若它是某个 blob 的缩略图，就从原文件重新生成（`regenerateThumbnail`，同一个键的并发请求只生成一次），生成的字节不同则记到新键并 307 重定向。
+- `r2`（`blob/bucket-store.ts`，S3 通用，经 `blob/s3.ts` 用 SigV4 调用；密钥在启动时由 `CF_API_TOKEN` 派生，`cloudflare.ts`）：本地目录在前，R2 存储桶在后。下载先写本地，新 blob 排一个 `upload` 任务（`capture/upload.ts`，`upload` 队列 4 个并发），上传后读回确认，再写 `blobs.remote_at`。`url()` 只对 `remote_at` 已有、且不带文件名的原文件给出公开地址 `MEDIA_PUBLIC_URL/ab/cd/<哈希>`；缩略图（只存本地）、尚未确认的原文件和带文件名的下载（需要 `Content-Disposition`）仍是签名链接。读取（`read`、`stat`）先本地后 R2。`delete()` 删除本地文件，R2 中有对象时先清除边缘缓存再删对象。
+- 删除本地原文件：同一个 `upload` 任务在写下 `remote_at` 之后，在 `mediaLocks` 这个键的锁内（下载写入和回收删除同一个键时也取它）再次确认 `remote_at`，调用 `deleteLocal()` 删除本地文件，此后 R2 中是唯一的一份。`blob/local-copy.ts` 的 `localCopyHold` 决定不删除的情况：这个键同时是缩略图的文件（`blob_thumbnails.key` 或 `removed_media.thumbnail_key`）。缩略图从平台下载，不读原文件，所以删除不等它。删除失败由任务重试，不清除 `remote_at`。下载在同一个锁内发现相同内容的 blob 已有 `remote_at` 时不写本地文件。
+- 删除时的读取：`read()` 等文件打开（`open` 事件）才返回流，打开后文件被删仍能读完，打开前被删则改读 R2，所以 Telegram 发送（grammY 的 `InputFile` 调用 `read()`）和 `/media/` 路由不受影响。`media-migrate` 在另一个进程中运行，锁管不到它：它只在自己写下 `remote_at` 之后删除，依靠的是同样的回退；其间同内容的下载最多留下一个本地副本，由 `media-prune-local` 清理。
+- `/media/` 路由在 `r2` 时让图片和缩略图可被 CDN 缓存（`public, max-age=31536000, immutable`），视频和下载仍为 `private`；签名有效但文件不存在时，若它是某个 blob 的缩略图，就从平台再下载一次（`regenerateThumbnail`：这个 blob 最近一个资产的 `thumbnail_url`，同一个键的并发请求只下载一次），字节不同则记到新键并 307 重定向；下载不到时，图片 307 重定向到原文件，视频返回 404。
 - 迁移与清理：`blob/migrate.ts`（CLI 的 `media-migrate`、`media-prune-local`），见运维文档。`media-migrate` 记下后按 `localCopyHold` 删除本地原文件；只按大小相符的对象不算确认，重新上传。`media-prune-local` 处理之前留下的本地原文件。
 
 关系图谱用 WebGL 绘制头像，sigma 以 `crossOrigin="anonymous"` 加载图片；R2 的公开域名对所有响应（包括缓存命中）都返回 `Access-Control-Allow-Origin: *`，所以同一页中普通 `<img>` 与 CORS 方式加载同一地址不会因浏览器缓存冲突（Chromium 中已验证两种先后顺序），不需要给其他图片加 `crossorigin`。网页的 CSP（`scripts/prepare-web-assets.ts`）在 `img-src` 与 `media-src` 中允许 `https://midden-media.sxzz.moe`。
@@ -424,7 +435,7 @@ API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…
 `server/src/runtime/run.ts`（每个进程都一样，按角色省去不属于它的部分）：
 
 1. 读取配置、创建日志，随即注册 SIGTERM/SIGINT 的处理。之后每启动一样东西就登记它的关闭方法，关闭时按相反顺序执行，所以启动的任何阶段收到信号都会正常退出（退出码 0）。容器中 Node 是 PID 1，没有处理函数的 SIGTERM 会被忽略，等到被强制结束（137）；`compose.yaml` 另外设了 `init: true`。
-2. 打开数据库：网页进程应用迁移、补齐 `catalog`；worker 等待迁移（见「进程」）。检测 ffmpeg。没有要做的事时这一步不需要写锁：`auto_vacuum` 只在新建的数据库上设置，`journal_mode` 已是 WAL 时不再设置，启动时的 `PRAGMA optimize` 拿不到锁就跳过（6 小时后再做），所以 Litestream 的检查点或别的写入持有写锁时也能启动。
+2. 打开数据库：网页进程应用迁移、补齐 `catalog`；worker 等待迁移（见「进程」）。没有要做的事时这一步不需要写锁：`auto_vacuum` 只在新建的数据库上设置，`journal_mode` 已是 WAL 时不再设置，启动时的 `PRAGMA optimize` 拿不到锁就跳过（6 小时后再做），所以 Litestream 的检查点或别的写入持有写锁时也能启动。
 3. 有意阻塞启动的检查：`MEDIA_STORE=r2` 或设置了 `RAW_R2_BUCKET` 时验证 `CF_API_TOKEN`（每次请求 10 秒超时，共 3 次，最多约 33 秒）。失败就退出，`/healthz` 不响应，自动部署回滚。
 4. 网页进程：Litestream 心跳监听、存储用量与路由，开始监听 HTTP（日志 `listening`）；在后台启动 Telegram Bot（`telegram/launch.ts`），不阻塞上面任何一步。
 5. worker：启动任务队列和定时器，在 127.0.0.1 的 `WORKER_HEALTH_PORT`（默认 8082）上回答 `/healthz`（日志 `worker listening`），容器的健康检查用它。
