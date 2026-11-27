@@ -373,7 +373,7 @@ function countColumn(checked: Checked, asc: boolean): string | undefined {
 }
 
 /** The root is an entity of one of these types. */
-const rootTypeSQL = (types: string[]) =>
+export const rootTypeSQL = (types: string[]) =>
   sql`k.root_kind IN (SELECT value FROM json_each(${list(types)}))`
 
 /**
@@ -399,7 +399,7 @@ function visibilitySQL(visibility: string, whole: boolean): SQL {
     : sql`${sql.raw(newest('k.subject_entity_id'))} = ${protectedAs}`
 }
 
-function mediaSQL(kinds: string[]): SQL {
+export function mediaSQL(kinds: string[]): SQL {
   const any: string[] = []
   if (kinds.includes('text')) any.push('NOT k.has_media')
   if (kinds.includes('image')) any.push('k.has_image')
@@ -413,7 +413,7 @@ function mediaSQL(kinds: string[]): SQL {
  * `collection_tags` index, so SQLite starts from the few tagged rows
  * instead of testing every saved collection.
  */
-const taggedSQL = (tags: string[]) => sql`(
+export const taggedSQL = (tags: string[]) => sql`(
   SELECT ct.collection_id FROM collection_tags ct
   WHERE ct.tag_id IN (SELECT value FROM json_each(${list(tags)}))
   UNION
@@ -549,7 +549,7 @@ const relatedSQL = (requested: string) => sql`
  * otherwise any saved repost edge into the root makes it one. A quote has
  * its own text plus an outgoing quoted edge.
  */
-const postTypeSQL = (related: boolean) => sql`CASE
+export const postTypeSQL = (related: boolean) => sql`CASE
   WHEN ${
     related
       ? sql`EXISTS (SELECT 1 FROM json_each(related.kinds) WHERE value = 'reposted')`
@@ -572,10 +572,29 @@ const SAVED = `catalog k JOIN library l ON l.collection_id = k.collection_id`
 const RELATED = `related CROSS JOIN catalog k ON k.collection_id = related.collection_id
   JOIN library l ON l.collection_id = k.collection_id`
 
+/**
+ * Conditions of a query (`#query/compile.ts`) that the filter cannot
+ * express, added to the filter's: SQL over `k` and `l`, the `WITH` items
+ * it needs, and what it is, for cursors and cached counts.
+ */
+export interface QueryExtra {
+  ctes: SQL[]
+  where: SQL
+  /** The canonical query: part of the cursor's fingerprint and count keys. */
+  key: string
+  /**
+   * Its counts may change without `library_version` moving (it reads the
+   * facets while maintenance still fills them), so they are not kept.
+   */
+  volatile?: boolean
+}
+
 interface Selection {
   checked: Checked
   /** The `WITH` clause the source needs, if any. */
   ctes: SQL
+  /** Its items, for a statement that adds its own. */
+  items: SQL[]
   /**
    * Saved collections as `k` and `l`, maybe narrowed to related ones; with
    * a search, only what it finds, with its tier and score as `hits`.
@@ -664,17 +683,19 @@ function select(
   input: CollectionFilter,
   narrow?: Narrowing,
   whole = false,
+  extra?: QueryExtra,
 ): Selection {
   const checked = check(input)
   const related = checked.filter.relatedTo
   const conditions = conditionsOf(checked, !!related, whole)
   if (narrow) {
-    const extra = check(narrow)
-    const { relatedTo, tag, tagMode, notTag, relOf, rel, relMin } = extra.filter
+    const narrowed = check(narrow)
+    const { relatedTo, tag, tagMode, notTag, relOf, rel, relMin } =
+      narrowed.filter
     if (relatedTo || tag || tagMode || notTag || relOf.length || rel || relMin)
       throw invalid()
-    conditions.push(...conditionsOf(extra, !!related, whole))
-    checked.narrow = extra.filter
+    conditions.push(...conditionsOf(narrowed, !!related, whole))
+    checked.narrow = narrowed.filter
   }
   const searches = [checked.filter.q, checked.narrow?.q ?? '']
     .map((q, i) => searchHits(db, q, `hits_${i}`))
@@ -682,10 +703,12 @@ function select(
   const ranked = searches.pop()
   for (const other of searches)
     conditions.push(sql`k.id IN (SELECT rowid FROM ${sql.raw(other.name)})`)
+  if (extra) conditions.push(extra.where)
   const ctes = [
     ...(related ? [relatedSQL(related)] : []),
     ...searches.map((s) => s.ctes),
     ...(ranked ? [ranked.ctes] : []),
+    ...(extra?.ctes ?? []),
   ]
   // A search drives: SQLite starts from the few rows it finds.
   const source = ranked
@@ -699,6 +722,7 @@ function select(
   return {
     checked,
     ctes: ctes.length ? sql`WITH ${sql.join(ctes, sql`, `)}` : sql``,
+    items: ctes,
     source,
     where: conditions.length ? sql.join(conditions, sql` AND `) : sql`1 = 1`,
     ranked: !!ranked,
@@ -725,8 +749,23 @@ export function countCollections(
   db: Executor,
   input: CollectionFilter = {},
   narrow?: Narrowing,
+  extra?: QueryExtra,
 ): FilterCounts {
-  return countSelection(db, select(db, input, narrow, true))
+  return countSelection(db, select(db, input, narrow, true, extra))
+}
+
+/**
+ * Every saved collection a filter (and query) selects, unordered, as SQL
+ * pieces over `k` and `l`: what aggregation groups.
+ */
+export function wholeSelection(
+  db: Executor,
+  input: CollectionFilter,
+  narrow?: Narrowing,
+  extra?: QueryExtra,
+): { ctes: SQL; items: SQL[]; source: string; where: SQL } {
+  const { ctes, items, source, where } = select(db, input, narrow, true, extra)
+  return { ctes, items, source, where }
 }
 
 function countSelection(
@@ -886,11 +925,26 @@ export function listCollections(
   cursor?: string,
   narrow?: Narrowing,
   size = PAGE,
+  extra?: QueryExtra,
 ): Page<CollectionView> {
-  const { checked, ctes, source, where, ranked } = select(ctx.db, input, narrow)
+  const { checked, ctes, source, where, ranked } = select(
+    ctx.db,
+    input,
+    narrow,
+    false,
+    extra,
+  )
   const { filter } = checked
   const fingerprint = sha256Hex(
-    canonicalJson(checked.narrow ? { filter, narrow: checked.narrow } : filter),
+    canonicalJson(
+      checked.narrow || extra
+        ? {
+            filter,
+            ...(checked.narrow ? { narrow: checked.narrow } : {}),
+            ...(extra ? { query: extra.key } : {}),
+          }
+        : filter,
+    ),
   )
   const after = cursor ? decodeCursor(cursor, fingerprint, ranked) : undefined
   const related = filter.relatedTo

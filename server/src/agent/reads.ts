@@ -100,7 +100,7 @@ export interface SearchInput {
 function search(r: AgentReader, input: SearchInput) {
   const s = readSearch(r, input.kind, input.params)
   const inner = s.cursor ? decodeCursor(s.bound, s.cursor) : undefined
-  const page = listCollections(r, s.filter, inner, s.narrow, s.size)
+  const page = listCollections(r, s.filter, inner, s.narrow, s.size, s.extra)
   const toItem = shaper(
     r,
     s.view,
@@ -108,12 +108,15 @@ function search(r: AgentReader, input: SearchInput) {
     page.items.map((c) => c.id),
   )
   return {
+    ...(s.parsed === undefined ? {} : { parsed: s.parsed }),
     applied: s.applied,
     items: page.items.map(toItem),
     // Counting reads every match; only the first page pays for it.
     ...(s.cursor
       ? {}
-      : { total: narrowedCounts(r.db, s.filter, s.narrow ?? {}).count }),
+      : {
+          total: narrowedCounts(r.db, s.filter, s.narrow ?? {}, s.extra).count,
+        }),
     has_more: !!page.next_cursor,
     ...(page.next_cursor
       ? { next_cursor: encodeCursor(s.bound, page.next_cursor) }

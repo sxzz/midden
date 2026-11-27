@@ -22,7 +22,7 @@ export interface Reads {
 function agentError(error: unknown): unknown {
   if (error instanceof ThreadError) {
     const body = error.body as ErrorBody
-    return new AgentError(body.error, body.message, body.detail)
+    return new AgentError(body.error, body.message, body.detail, body.position)
   }
   if (!(error instanceof PoolError)) return error
   switch (error.code) {

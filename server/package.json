@@ -24,7 +24,8 @@
     "typecheck": "tsrs --fast",
     "test": "vitest run --passWithNoTests",
     "db:generate": "drizzle-kit generate",
-    "cli": "node --env-file-if-exists=../.env src/cli.ts"
+    "cli": "node --env-file-if-exists=../.env src/cli.ts",
+    "gen:query": "node src/query/generate.ts"
   },
   "dependencies": {
     "@fxembed/atmosphere": "workspace:*",
@@ -43,6 +44,7 @@
   },
   "devDependencies": {
     "drizzle-kit": "^1.0.0-rc.6",
+    "peggy": "^5.1.1",
     "vitest": "^5.1.1"
   }
 }

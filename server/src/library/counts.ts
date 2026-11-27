@@ -8,6 +8,7 @@ import {
   type CollectionFilter,
   type FilterCounts,
   type Narrowing,
+  type QueryExtra,
 } from './list.ts'
 import type { Database } from '#db/client.ts'
 
@@ -132,7 +133,12 @@ export function narrowedCounts(
   db: Database,
   base: CollectionFilter,
   narrow: Narrowing,
+  extra?: QueryExtra,
 ): FilterCounts {
+  // What the facets say may change without the version moving while
+  // maintenance fills them; and a query's relative times move with the
+  // clock. Counted afresh.
+  if (extra?.volatile) return countCollections(db, base, narrow, extra)
   const since = base.savedWithin
     ? savedSince(base.savedWithin, base.timeZone || undefined)
     : undefined
@@ -140,11 +146,12 @@ export function narrowedCounts(
     base: { ...base, sort: undefined, order: undefined },
     narrow,
     since,
+    ...(extra ? { query: extra.key } : {}),
   })}`
   const byFilter = cache(db).byFilter
   let counts = byFilter.get(key)
   if (!counts) {
-    counts = countCollections(db, base, narrow)
+    counts = countCollections(db, base, narrow, extra)
     byFilter.set(key, counts)
   }
   return counts

@@ -1,9 +1,11 @@
 import { isBusy } from '#db/client.ts'
 import { hasDefaultMessage, isAppError, type ErrorKind } from '#errors.ts'
+import { QueryError } from '#query/ast.ts'
 
 /** Every error the agent API answers with; `docs/agent.md` lists them. */
 export const AGENT_ERRORS = {
   invalid_request: 400,
+  query_invalid: 400,
   cursor_mismatch: 400,
   token_invalid: 401,
   token_expired: 401,
@@ -23,10 +25,18 @@ export class AgentError extends Error {
   override name = 'AgentError'
   readonly code: AgentErrorCode
   readonly detail?: string
-  constructor(code: AgentErrorCode, message: string, detail?: string) {
+  /** Where in the query (`q`) the problem is, with `query_invalid`. */
+  readonly position?: number
+  constructor(
+    code: AgentErrorCode,
+    message: string,
+    detail?: string,
+    position?: number,
+  ) {
     super(message)
     this.code = code
     if (detail) this.detail = detail
+    if (position !== undefined) this.position = position
   }
 }
 
@@ -74,6 +84,8 @@ export interface ErrorBody {
   message: string
   /** The archive's own words (Chinese), when they say more. */
   detail?: string
+  /** `query_invalid`: offset into `q` (UTF-16 code units). */
+  position?: number
 }
 
 /** What an error thrown by a handler or a read answers. */
@@ -83,6 +95,13 @@ export function errorBody(error: unknown): ErrorBody {
       error: error.code,
       message: error.message,
       ...(error.detail ? { detail: error.detail } : {}),
+      ...(error.position === undefined ? {} : { position: error.position }),
+    }
+  if (error instanceof QueryError)
+    return {
+      error: 'query_invalid',
+      message: error.message,
+      position: error.position,
     }
   if (isAppError(error)) {
     const [code, message] = byKind[error.kind]

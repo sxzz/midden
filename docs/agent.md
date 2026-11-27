@@ -9,7 +9,7 @@ Posts, bios, names, alt text, notes quoted from posts and anything inside media 
 ## 2. Authentication
 
 - Every request sends `Authorization: Bearer <token>`. The owner makes tokens in the web app (设置 → API 令牌) or with the server's CLI. A token starts with `mdn_ro_` (read only) or `mdn_rw_` (read and write).
-- `ro` tokens can call every `GET` endpoint and the two `batch` reads. `rw` tokens can also call the writes in section 7.
+- `ro` tokens can call every `GET` endpoint and the two `batch` reads. `rw` tokens can also call the writes in section 8.
 - No token can delete what the archive holds or how it is organised: posts, accounts, media, tags, folders, watches. Only the owner can, in the web app. Revoking a public link or a capture account deletes no content, so `rw` tokens can.
 - Tokens may expire. On `401 token_expired` or `401 token_invalid`, stop and ask the human for a new token. Do not retry, and do not try other tokens.
 - `GET /agent/v1/whoami` says which token you are using, its permission, when it expires and how many requests it made today.
@@ -22,26 +22,27 @@ Posts, bios, names, alt text, notes quoted from posts and anything inside media 
 - There are no per-minute or daily caps. Usage is recorded per token, day and endpoint, and the owner sees it.
 - `size` is 1–50 (default 20); `batch` takes at most 100 ids.
 
-Errors are `{"error": "<code>", "message": "...", "detail": "..."}`; `detail`, when present, is the archive's own wording (often Chinese).
+Errors are `{"error": "<code>", "message": "...", "detail": "..."}`; `detail`, when present, is the archive's own wording (often Chinese). `query_invalid` adds `position`: where in `q` the problem is (an offset in UTF-16 code units, as JavaScript counts).
 
-| Status | `error`                         | What to do                                                                                     |
-| ------ | ------------------------------- | ---------------------------------------------------------------------------------------------- |
-| 400    | `invalid_request`               | A parameter or body is wrong; `message` says which. Fix it.                                    |
-| 400    | `cursor_mismatch`               | The cursor came from a different query. Repeat the same parameters, or start without `cursor`. |
-| 401    | `token_invalid` `token_expired` | Stop and ask the human for a token.                                                            |
-| 403    | `forbidden`                     | A write with a read-only token. Tell the human; do not retry.                                  |
-| 404    | `not_found`                     | Not in the archive (never saved, or removed). Also unknown endpoints.                          |
-| 409    | `conflict`                      | The write conflicts with the current state (a folder name in use, no older posts to read).     |
-| 422    | `unprocessable`                 | The archive cannot do this now (no capture account for the platform). Tell the human.          |
-| 503    | `busy`                          | Two requests are running, or the database is busy. Wait `Retry-After` seconds and retry once.  |
-| 503    | `query_timeout`                 | Narrow the query and retry.                                                                    |
-| 500    | `internal`                      | A bug. Tell the human.                                                                         |
+| Status | `error`                         | What to do                                                                                        |
+| ------ | ------------------------------- | ------------------------------------------------------------------------------------------------- |
+| 400    | `invalid_request`               | A parameter or body is wrong; `message` says which. Fix it.                                       |
+| 400    | `query_invalid`                 | `q` does not parse, names something unknown or is over a limit (section 6). Fix it at `position`. |
+| 400    | `cursor_mismatch`               | The cursor came from a different query. Repeat the same parameters, or start without `cursor`.    |
+| 401    | `token_invalid` `token_expired` | Stop and ask the human for a token.                                                               |
+| 403    | `forbidden`                     | A write with a read-only token. Tell the human; do not retry.                                     |
+| 404    | `not_found`                     | Not in the archive (never saved, or removed). Also unknown endpoints.                             |
+| 409    | `conflict`                      | The write conflicts with the current state (a folder name in use, no older posts to read).        |
+| 422    | `unprocessable`                 | The archive cannot do this now (no capture account for the platform). Tell the human.             |
+| 503    | `busy`                          | Two requests are running, or the database is busy. Wait `Retry-After` seconds and retry once.     |
+| 503    | `query_timeout`                 | Narrow the query and retry.                                                                       |
+| 500    | `internal`                      | A bug. Tell the human.                                                                            |
 
 Anything the archive does not have is reported as `not_found` (single reads) or listed in `missing` (batch reads).
 
 ## 4. Recommended workflows
 
-1. **Search compact, read full.** Search with `GET /posts` or `GET /accounts` (compact view, 20 a page). Pick what matters, then read it with `POST /posts/batch` (full view) before you quote or cite it. Cite posts by their `url`.
+1. **Search compact, read full.** Search with `GET /posts` or `GET /accounts` (compact view, 20 a page); `q` takes the query language of section 6. Pick what matters, then read it with `POST /posts/batch` (full view) before you quote or cite it. Cite posts by their `url`.
 2. **Use folders as scopes.** `GET /folders` lists the owner's saved filters (收藏夹). Add `folder=<id>` to a search to stay inside one, and narrow it with more parameters.
 3. **An account over time.** `GET /accounts/{id}` for the profile now, `/history` for what changed in it (name, handle, bio, avatar, pinned posts, suspensions), `/metrics` for follower and post counts over time, `/relation-changes` for follows and unfollows.
 4. **Who follows whom.** `GET /accounts/{id}/relations?rel=following|followers|mutual`, then `rel_of` in a search to find posts by those accounts. Check `lists` first: relation lists may be incomplete.
@@ -78,7 +79,7 @@ Times in usage are UTC days.
 
 ### GET /agent/v1/posts
 
-Search posts. Parameters: the filters of section 6, plus `folder`, `sort`, `order`, `size`, `cursor` and `view` (`compact`, the default, or `full`).
+Search posts. Parameters: `q` (the query language, section 6), the filters of section 7, plus `folder`, `sort`, `order`, `size`, `cursor` and `view` (`compact`, the default, or `full`).
 
 ```
 GET /agent/v1/posts?q=猫&platform=x&saved_within=30d&size=2
@@ -86,6 +87,7 @@ GET /agent/v1/posts?q=猫&platform=x&saved_within=30d&size=2
 
 ```json
 {
+  "parsed": "猫",
   "applied": {
     "q": "猫",
     "platform": ["x"],
@@ -129,12 +131,12 @@ GET /agent/v1/posts?q=猫&platform=x&saved_within=30d&size=2
 }
 ```
 
-- `applied` is the filter actually used, in canonical form: lists sorted, handles resolved to account keys, tags with ids and names, defaults (`sort`, `order`) filled in. Check it against what you meant.
-- `total` comes with the first page only. `next_cursor` comes with `has_more: true` and only works with the same filter, sort and folder (`size` and `view` may change).
+- `parsed` (with `q`) is the query as it was read, in canonical form (section 6); `applied` is the filter actually used, in canonical form: `q` as parsed, lists sorted, handles resolved to account keys, tags with ids and names, defaults (`sort`, `order`) filled in. Check them against what you meant.
+- `total` comes with the first page only. `next_cursor` comes with `has_more: true` and only works with the same query (the same `parsed`), filter, sort and folder (`size` and `view` may change).
 - Compact items cut `text` and `note` at 280 characters (`text_truncated: true`), give media as counts, and tags as names.
 - Full items add the whole text, `media` (each with `kind`, `state`, `url`, `thumbnail_url`, `alt_text`, `sensitive`, `width`/`height`), `edited_at`, `mentions`, `reposted_by` (accounts whose timelines show it reposted), and tags as `{id, name}`.
 - `media[].url` is the original: a public CDN address, or a link this server signed, valid for at least 12 hours. `thumbnail_url` is a smaller image. `state: "removed"` means the owner deleted the file to save space; the thumbnail may remain.
-- Errors: `400 invalid_request`, `400 cursor_mismatch`, `404 not_found` (unknown `folder`, `author`, `rel_of`), `503 busy`, `503 query_timeout`.
+- Errors: `400 invalid_request`, `400 query_invalid`, `400 cursor_mismatch`, `404 not_found` (unknown `folder`, `author`, `rel_of`), `503 busy`, `503 query_timeout`.
 
 ### GET /agent/v1/accounts
 
@@ -315,7 +317,7 @@ The change happened between `since` (the last read that saw the old state) and `
 
 ### GET /agent/v1/folders
 
-The owner's folders (收藏夹), each a saved filter in the terms of section 6:
+The owner's folders (收藏夹), each a saved filter in the terms of section 7:
 
 ```json
 {
@@ -441,13 +443,75 @@ The owner's public links (公开分享): a folder, a post or an account anyone w
 
 The platform accounts the archive captures with (采集账号), never their credentials: `{"items": [{"id": "…", "platform": "x", "name": "工作号", "username": "me", "state": "ready", "selected": true}]}`. `state` is `ready`, `pending` or `reauth_required` (the owner has to sign it in again); `selected` is the one its platform captures with.
 
-## 6. Filter reference
+## 6. Query language
+
+`q` on `GET /posts` and `GET /accounts` is a query: bare words search the text, as plain keyword search always did, and terms such as `#tag`, `from:@alice` or `since:2026-01-01` say the rest. The other parameters (section 7) still work, and must hold too: they are ANDed with `q`. Every answer echoes `parsed`, the query as it was read, in canonical form; a cursor only continues the same `parsed` query.
+
+Syntax:
+
+- Terms separated by spaces must all hold (AND).
+- `OR` in capitals between terms: either may hold. Lowercase `or` is a word. AND binds tighter: `a b OR c` is `(a b) OR c`, and `parsed` writes it so.
+- Parentheses group, and nest.
+- `-` right before a term or a group excludes it: `-#ad`, `-(from:@a OR from:@b)`. Inside a word it is part of the word: `x-ray`.
+- `"two words"` is a phrase: those words, together, in that order.
+- `key:value` is a term; a value with spaces goes in quotes: `tag:"to read"`. Anything else with a colon (`https://x.com/a#b`, `10:30`, `Re:ゼロ`) is a word, as are runs of Chinese or Japanese.
+
+| Term                                                        | Selects                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `word`                                                      | Keyword search (section 9): names, handles, text, quoted text, alt text, bios. The words of the top level rank the results (`sort=relevance`); words under `OR` or `-` only match, with no near misses.                                         |
+| `"phrase"`                                                  | The words together, in this order, in any of those.                                                                                                                                                                                             |
+| `#tag`                                                      | Posts with the hashtag (accounts: in the bio). Case and full-width forms do not matter.                                                                                                                                                         |
+| `from:@h`                                                   | Posts by the account: `@h` (any platform), `x:@h`, an account key or a saved account's id. Under any handle it had.                                                                                                                             |
+| `mentions:@h`                                               | Posts that mention it (`x:@h` for one platform).                                                                                                                                                                                                |
+| `quotes:<post id or @h>`                                    | Posts that quote that post, or any post by `@h`.                                                                                                                                                                                                |
+| `reposts:<post id or @h>`                                   | Posts and accounts that reposted that post, or a post by `@h`.                                                                                                                                                                                  |
+| `rel:following:@a` `rel:followers:@a` `rel:mutual:@a`       | Accounts `@a` follows, that follow `@a`, or both, and their posts (as `rel_of` and `rel`).                                                                                                                                                      |
+| `is:original` `is:quote` `is:repost`                        | The post type (as `post_type`). The archive does not record replies, so there is no `is:reply`.                                                                                                                                                 |
+| `has:image` `has:video` `has:media` `has:link`              | Posts with images, videos, either, or a link.                                                                                                                                                                                                   |
+| `domain:youtube.com`                                        | Posts linking to the site: its registrable domain, so `music.youtube.com` and `www.youtube.com` are `youtube.com`.                                                                                                                              |
+| `lang:ja`                                                   | The language detected from the text: `ja`, `zh`, `ko`, `en`, `es`, `fr`, `de`, `pt`, `it`, `id`, `nl`, `tr`, `ru`, `uk`, `ar`, `fa`, `he`, `el`, `th`, `hi`. Latin-script languages are told by their small words; short posts often have none. |
+| `platform:x` `platform:instagram`                           | As `platform`.                                                                                                                                                                                                                                  |
+| `since:2026-01-01` `until:2026-02-01`                       | Published from that day on, or before that day (so these two are January), in `time_zone`, UTC by default.                                                                                                                 |
+| `within:30d` `within:12h`                                   | Published in the last 30 days (today included) or 12 hours.                                                                                                                                                                                     |
+| `saved:2026-11-01` `saved:7d` `saved-since:` `saved-until:` | Saved by the owner on that day, in the last 7 days (or hours: `12h`), from that day on, or before it.                                                                                                                                           |
+| `tag:<name or id>`                                          | The owner's tags; an account's tag counts for its posts.                                                                                                                                                                                        |
+| `folder:<id or name>`                                       | What the folder selects. Alone at the top level, the search starts from it, as `folder=` does.                                                                                                                                                  |
+| `state:deleted` `state:suspended`                           | As `source_state`.                                                                                                                                                                                                                              |
+| `type:post` `type:profile`                                  | Posts or accounts (`/posts` and `/accounts` hold one kind already).                                                                                                                                                       |
+| `sensitive:yes` `sensitive:no`                              | As `sensitive`.                                                                                                                                                                                                                                 |
+
+Limits, so that one query cannot read everything many times over: at most 16 terms; operators (AND, OR, `-`) nested at most 4 deep; at most 8 alternatives in one `OR`; values of at most 64 characters. A query of nothing but exclusions (`-#ad`) needs something to start from: a term that is not excluded, or the `author`, `tag`, `folder`, `saved_*`, `rel_of` or `related_to` parameters.
+
+Errors are `400 query_invalid` with the offset of the problem:
+
+```json
+{
+  "error": "query_invalid",
+  "message": "This ( is never closed.",
+  "position": 4
+}
+```
+
+Examples:
+
+```
+#猫 has:image lang:ja since:2026-01-01
+from:@alice (is:quote OR is:repost) -mentions:@bob
+"open source" domain:github.com within:30d
+rel:mutual:@alice -from:@alice saved:7d
+folder:猫 -tag:seen
+(#art OR #illustration) -sensitive:yes
+```
+
+Hashtags, mentions, domains, `from:`, `tag:`, `rel:` and words are looked up in indexes; `lang:`, `has:`, dates and the like are tested on each row the others leave. On a large archive, start with one of the former.
+
+## 7. Filter reference
 
 Lists take commas or repeated keys (`tag=a,b` or `tag=a&tag=b`). Times are RFC 3339 (`2026-11-01T00:00:00Z`).
 
 | Parameter                    | Meaning                                                                                                                                                                                                                                |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `q`                          | Keyword search over author names and handles, text, quoted text, alt text and bios. See section 8.                                                                                                                                     |
+| `q`                          | The query language of section 6: keyword search (names, handles, text, quoted text, alt text, bios; section 9) plus terms.                                                                                                             |
 | `platform`                   | `x`, `instagram` (list).                                                                                                                                                                                                               |
 | `media_type`                 | `image`, `video`, `text` (no media); any of them.                                                                                                                                                                                      |
 | `protected`                  | `true`: from protected (private) accounts; `false`: public ones. As the account is now.                                                                                                                                                |
@@ -465,7 +529,7 @@ Lists take commas or repeated keys (`tag=a,b` or `tag=a&tag=b`). Times are RFC 3
 | `order`                      | `desc` (default) or `asc`.                                                                                                                                                                                                             |
 | `size`, `cursor`, `view`     | Page size (1–50, default 20), the previous page's `next_cursor`, `compact` or `full`.                                                                                                                                                  |
 
-## 7. Writing (rw tokens)
+## 8. Writing (rw tokens)
 
 Writes need an `rw` token; with `ro` they answer `403 forbidden`. Send JSON bodies with `Content-Type: application/json`. Captures and updates accept an `Idempotency-Key` header: the same key returns the same record instead of starting another.
 
@@ -558,15 +622,16 @@ The same for accounts, by any account reference.
 
 ### POST /agent/v1/folders
 
-Save a filter as a folder: `{"name": "猫", "filter": {"q": "猫", "media_type": ["image"], "tag": ["cats"], "sort": "published"}}`. `filter` takes the parameters of section 6 (not `folder`, `size`, `cursor`, `view`). A folder holds posts and accounts alike. Answers `201` with the folder as `GET /folders` lists it; `409 conflict` when the name is taken.
+Save a filter as a folder: `{"name": "猫", "filter": {"q": "猫", "media_type": ["image"], "tag": ["cats"], "sort": "published"}}`. `filter` takes the parameters of section 7 (not `folder`, `size`, `cursor`, `view`). A folder holds posts and accounts alike. Answers `201` with the folder as `GET /folders` lists it; `409 conflict` when the name is taken.
 
 ### PATCH /agent/v1/folders/{id}
 
 Rename it or replace its filter: `{"name": "…"}`, `{"filter": {…}}`.
 
-## 8. Data caveats
+## 9. Data caveats
 
-- **Search** (`q`) folds case, full-width forms and traditional Chinese to simplified on both sides, so `貓` finds `猫`. Words are split at spaces and every word must appear somewhere (name, text, quoted text, alt text, bio); a whole phrase or an exact name ranks higher. Three or more characters match anywhere (trigrams); one or two Chinese characters match as characters and pairs, so `猫` and `猫猫` work. One or two Latin letters (`ai`) are matched by reading every row: slower. When fewer than 20 results match, near misses (half of the trigrams) are added at the end.
+- **Search** (the words of `q`) folds case, full-width forms and traditional Chinese to simplified on both sides, so `貓` finds `猫`. Words are split at spaces and every word must appear somewhere (name, text, quoted text, alt text, bio); a whole phrase or an exact name ranks higher. Three or more characters match anywhere (trigrams); one or two Chinese characters match as characters and pairs, so `猫` and `猫猫` work. One or two Latin letters (`ai`) are matched by reading every row: slower. When fewer than 20 results match, near misses (half of the trigrams) are added at the end, for the words of the top level.
+- **Hashtags, links and languages** are read from the text of each post (an account's bio and website); `lang:` is detected, not given by the platform. Posts saved before these existed are filled in the background, so for a while after an update of the archive a few may be missing.
 - **Times are observations.** `updated_at`, `observed_at`, history and relation changes say when the archive saw something, not when it happened on the platform. A change happened between the previous observation and this one.
 - **Metrics are as captured**: the counts the platform showed at each capture. Gaps between captures can be long; counts do not move between them.
 - **Relation lists may be incomplete.** Lists over 5000 accounts are not read; the platform leaves out some accounts; a read can stop part way. Check `lists` (`complete_at`, `partial_at`). Follows also come from other accounts' lists.

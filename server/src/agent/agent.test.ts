@@ -343,6 +343,82 @@ describe('posts and accounts', () => {
   })
 })
 
+describe('query language', () => {
+  test('q takes the language, echoes it canonically, and ANDs with the rest', async () => {
+    const f = await setup()
+    const q = (query: string, rest = '') =>
+      f.call(`/posts?q=${encodeURIComponent(query)}${rest}`)
+    const either = await q('dog  OR   cat')
+    expect(either.status).toBe(200)
+    expect(either.json.parsed).toBe('dog OR cat')
+    expect(either.json.applied.q).toBe('dog OR cat')
+    expect(ids(either.json.items).toSorted()).toEqual(
+      [f.ids.p1, f.ids.p2, f.ids.p3, f.ids.p4].toSorted(),
+    )
+    const alice = await q('-from:@bob since:2020-01-01')
+    expect(ids(alice.json.items).toSorted()).toEqual(
+      [f.ids.p1, f.ids.p2].toSorted(),
+    )
+    expect(alice.json.total).toBe(2)
+    // With the structured parameters: both hold.
+    const both = await q('dog OR cat', '&author=fake:@bob')
+    expect(ids(both.json.items).toSorted()).toEqual(
+      [f.ids.p3, f.ids.p4].toSorted(),
+    )
+    expect(both.json.total).toBe(2)
+    const accounts = await f.call(
+      `/accounts?q=${encodeURIComponent('cats OR dogs')}`,
+    )
+    expect(ids(accounts.json.items).toSorted()).toEqual(
+      [f.ids['7'], f.ids['8']].toSorted(),
+    )
+  })
+
+  test('a cursor is bound to the canonical query', async () => {
+    const f = await setup()
+    const first = await f.call(
+      `/posts?size=1&q=${encodeURIComponent('dog OR cat')}`,
+    )
+    expect(first.json.has_more).toBe(true)
+    const same = await f.call(
+      `/posts?size=1&q=${encodeURIComponent('dog   OR cat')}&cursor=${first.json.next_cursor}`,
+    )
+    expect(same.status).toBe(200)
+    const other = await f.call(
+      `/posts?size=1&q=${encodeURIComponent('cat OR dog')}&cursor=${first.json.next_cursor}`,
+    )
+    expect(other.json.error).toBe('cursor_mismatch')
+  })
+
+  test('a query that cannot run is query_invalid, with where', async () => {
+    const f = await setup()
+    const cases: [string, number, string][] = [
+      ['cat (dog', 4, 'never closed'],
+      ['cat since:soon', 4, 'YYYY-MM-DD'],
+      ['-#ad', 0, 'only exclusions'],
+      ['tag:nope', 0, 'Unknown tag nope'],
+      ['folder:nope', 0, 'No folder nope'],
+    ]
+    for (const [query, position, message] of cases) {
+      const { status, json } = await f.call(
+        `/posts?q=${encodeURIComponent(query)}`,
+      )
+      expect({
+        query,
+        status,
+        error: json.error,
+        position: json.position,
+      }).toEqual({
+        query,
+        status: 400,
+        error: 'query_invalid',
+        position,
+      })
+      expect(json.message).toContain(message)
+    }
+  })
+})
+
 describe('around an account', () => {
   /** Alice follows Bob, and stopped following Carol (not saved). */
   function follows(f: AgentFixture) {

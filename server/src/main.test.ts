@@ -131,6 +131,7 @@ describe('agent API', () => {
     const posts = await fetch(`${base}/agent/v1/posts?q=cat`, auth)
     expect(posts.status).toBe(200)
     expect(await posts.json()).toEqual({
+      parsed: 'cat',
       applied: { q: 'cat', sort: 'relevance' },
       items: [],
       total: 0,

@@ -158,11 +158,14 @@ function fuzzySQL(
 /**
  * The catalog rows a query finds, as the `WITH` clause items that define
  * `name(rowid, tier, score)`; undefined when the query folds to nothing.
+ * Without `fuzzy`, only the first three tiers: what a term of the query
+ * language means under OR or `-`, where near misses would only blur it.
  */
 export function searchHits(
   db: Executor,
   q: string,
   name: string,
+  options: { fuzzy?: boolean } = {},
 ): SearchHits | undefined {
   const query = parseSearch(q)
   if (!query) return undefined
@@ -180,6 +183,7 @@ export function searchHits(
   // Whether the strict tiers find few enough is settled first, so a list
   // and its count agree on it.
   const fuzzy =
+    options.fuzzy !== false &&
     query.fuzzy &&
     (db.get<{ n: number }>(sql`
       WITH ${strictCTE} SELECT count(*) AS n FROM ${sql.raw(strict)}`)?.n ??

@@ -12,8 +12,15 @@ export default sxzz(
   },
   [
     // Vendored upstream sources keep their own formatting for easier diffs;
-    // migrations are generated and maintained by drizzle-kit.
-    { ignores: ['third_party/**', 'server/drizzle/**'] },
+    // migrations are generated and maintained by drizzle-kit, the query
+    // parser by Peggy (`gen:query`).
+    {
+      ignores: [
+        'third_party/**',
+        'server/drizzle/**',
+        'server/src/query/parser.generated.ts',
+      ],
+    },
     {
       files: ['web/**'],
       rules: {

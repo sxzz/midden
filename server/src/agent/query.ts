@@ -14,9 +14,11 @@ import {
   type CollectionFilter,
   type Identity,
   type Narrowing,
+  type QueryExtra,
 } from '#library/list.ts'
 import { isUUID } from '#library/read.ts'
 import { fold } from '#library/search-text.ts'
+import { compileQuery } from '#query/compile.ts'
 import { AgentError, invalid, notFound } from './errors.ts'
 import { VIEWS, type View } from './shape.ts'
 import type { Executor } from '#db/client.ts'
@@ -510,6 +512,10 @@ export interface Search {
   filter: CollectionFilter
   /** With a folder, the request's own conditions, which only narrow it. */
   narrow?: Narrowing
+  /** What the query (`q`) says that the filter cannot. */
+  extra?: QueryExtra
+  /** The query in its canonical form. */
+  parsed?: string
   applied: Record<string, unknown>
   /** What a cursor is bound to. */
   bound: string
@@ -536,22 +542,48 @@ export function findFolder(db: Executor, id: string): FolderRef {
   }
 }
 
+/** Parameters that scope a search the way `since:` or `from:` would. */
+const SCOPES = [
+  'saved_from',
+  'saved_before',
+  'saved_within',
+  'author',
+  'folder',
+  'tag',
+  'rel_of',
+  'related_to',
+]
+
 /** Read a search of `kind` from its parameters. */
 export function readSearch(r: AgentReader, kind: Kind, params: Params): Search {
   checkKeys(params, searchKeys(kind))
   const size = pageSize(params)
   const view = viewOf(params)
   const folderId = single(params, 'folder')
-  if (folderId) {
-    const widening = NOT_NARROWING.filter((key) => values(params, key).length)
-    if (widening.length)
-      throw invalid(
-        `With folder, other conditions only narrow it; ${widening.join(', ')} cannot be added. Save a folder with them instead.`,
-      )
-  }
-  const own = filterOf(r, kind, params)
-  const folder = folderId ? findFolder(r.db, folderId) : undefined
-  let filter = own
+  const widening = NOT_NARROWING.filter((key) => values(params, key).length)
+  if (folderId && widening.length)
+    throw invalid(
+      `With folder, other conditions only narrow it; ${widening.join(', ')} cannot be added. Save a folder with them instead.`,
+    )
+  // `q` is the query language; the rest the list's own filter.
+  const { q: _, ...structured } = params
+  const q = single(params, 'q')
+  const own = filterOf(r, kind, structured)
+  const compiled = q
+    ? compileQuery(q, {
+        db: r.db,
+        types: r.types,
+        kind,
+        filter: own,
+        folder: !!folderId,
+        canScope: !widening.length,
+        scoped: SCOPES.some((key) => values(params, key).length),
+        ...(own.timeZone ? { timeZone: own.timeZone } : {}),
+      })
+    : undefined
+  const lowered = compiled?.filter ?? own
+  const folder = folderId ? findFolder(r.db, folderId) : compiled?.folder
+  let filter = lowered
   let narrow: Narrowing | undefined
   if (folder) {
     const {
@@ -565,7 +597,7 @@ export function readSearch(r: AgentReader, kind: Kind, params: Params): Search {
       rel,
       relMin,
       ...rest
-    } = own
+    } = lowered
     narrow = rest
     filter = {
       ...folder.filter,
@@ -579,15 +611,20 @@ export function readSearch(r: AgentReader, kind: Kind, params: Params): Search {
   if (!sort || sort === 'relevance') sort = searching ? 'relevance' : 'updated'
   const applied = {
     ...describe(r, own, kind),
+    ...(compiled ? { q: compiled.parsed } : {}),
     ...(folder ? { folder: { id: folder.id, name: folder.name } } : {}),
     sort,
     ...(sort === 'relevance' ? {} : { order: filter.order || 'desc' }),
   }
-  const bound = sha256Hex(canonicalJson({ kind, filter, narrow })).slice(0, 24)
+  const bound = sha256Hex(
+    canonicalJson({ kind, filter, narrow, query: compiled?.parsed }),
+  ).slice(0, 24)
   const cursor = single(params, 'cursor')
   return {
     filter,
     narrow,
+    ...(compiled?.extra ? { extra: compiled.extra } : {}),
+    ...(compiled ? { parsed: compiled.parsed } : {}),
     applied,
     bound,
     size,
