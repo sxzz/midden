@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { AppError } from '#errors.ts'
+import { sees, type Seeing } from '#users/principal.ts'
 import { authorKey, parseAuthorKey } from './list.ts'
 import { iso, list, type Page, type Reader } from './views.ts'
 
@@ -91,7 +92,7 @@ function listFetch(complete: number | null, partial: number | null) {
  * were read, for the filter's note on how complete it is.
  */
 export function listPerspectives(
-  r: Reader,
+  r: Reader & Seeing,
   input: PerspectiveFilter = {},
 ): Page<Perspective> {
   const q = (input.q ?? '').trim().toLocaleLowerCase()
@@ -145,7 +146,10 @@ export function listPerspectives(
       FROM relation_fetches WHERE entity_id IS NOT NULL GROUP BY entity_id
     ),
     ranked AS (
-      SELECT named.*, named.id IN (${OWN}) AS own, fetched.at AS fetched_at,
+      SELECT named.*, ${
+        // The capture accounts are the admin's: a viewer is not told which.
+        sees(r.principal).captureAccounts ? sql`named.id IN (${OWN})` : sql`0`
+      } AS own, fetched.at AS fetched_at,
         (SELECT count(*) FROM follow_edges f
           WHERE f.follower_id = named.id AND f.ended_at IS NULL)
         + (SELECT count(*) FROM follow_edges f

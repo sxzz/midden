@@ -1,15 +1,14 @@
 import { Hono } from 'hono'
 import * as v from 'valibot'
+import { bothExtras } from '#agent/query.ts'
+import { AppError } from '#errors.ts'
 import { authorTerms } from '#library/author-terms.ts'
 import { CHANGES_WINDOW, listProfileChanges } from '#library/changes.ts'
 import { compareRelations, compareSides } from '#library/compare.ts'
 import { selectionCounts, type Selection } from '#library/counts.ts'
 import { getEntity } from '#library/entities.ts'
-import {
-  collectionFilter,
-  FilterQuery,
-  type FilterParams,
-} from '#library/filter-query.ts'
+import { collectionFilter, FilterQuery } from '#library/filter-query.ts'
+import { visibleFolder } from '#library/folders.ts'
 import {
   accountGraph,
   followGraph,
@@ -34,14 +33,18 @@ import {
 import { suggest, SUGGEST_KINDS } from '#library/suggest.ts'
 import { OWNER_LIMITS } from '#query/ast.ts'
 import { compileQuery } from '#query/compile.ts'
-import { readCtx } from './auth.ts'
+import { sees } from '#users/principal.ts'
+import { readCtx, viewers } from './auth.ts'
 import { Cursor, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
+import type { ReadContext } from '#library/views.ts'
 
 const text = v.optional(v.string())
 
-/** The list's filters and the page to read. */
-const Filters = v.object({ ...FilterQuery.entries, cursor: text })
+/** The list's filters, and a folder it starts from (`folder=<id>`). */
+const ListFilters = v.object({ ...FilterQuery.entries, folder: text })
+/** ... and the page to read. */
+const Filters = v.object({ ...ListFilters.entries, cursor: text })
 
 const AuthorFilters = v.object({
   q: text,
@@ -159,37 +162,70 @@ export const CompareQuery = v.object({
 })
 
 /**
- * What a list request selects: its filters, and its `q`, a query of the
- * query language (the owner's limits) adding to them.
+ * What a list request selects: its filters, a folder it starts from
+ * (`folder=<id>`: the folder's query holds and the rest only narrows it,
+ * as the agent API's `folder`), and its `q`, a query of the query
+ * language (the owner's limits) adding to them. Read in the sight of who
+ * asks: a viewer has no tags, so a tag parameter is refused whether the
+ * tag exists or not, and only a publicly shared folder is found; a folder's
+ * own query is the admin's, compiled as theirs.
  */
-function listQuery(ctx: AccountsContext, input: FilterParams): Selection {
-  const filter = collectionFilter({ ...input, q: undefined })
-  const compiled = input.q?.trim()
-    ? compileQuery(input.q, {
-        db: ctx.db,
-        types: ctx.platforms.types(),
+function listQuery(
+  r: ReadContext,
+  input: v.InferOutput<typeof ListFilters>,
+): Selection {
+  if (!sees(r.principal).tags && (input.tag || input.tag_mode || input.not_tag))
+    throw new AppError('invalid_filter')
+  const own = collectionFilter({ ...input, q: undefined })
+  const types = r.platforms.types()
+  const timeZone = own.timeZone ? { timeZone: own.timeZone } : {}
+  const folder = input.folder ? visibleFolder(r, input.folder) : undefined
+  if (input.folder && !folder) throw new AppError('not_found', '收藏夹不存在')
+  const inFolder = folder
+    ? compileQuery(`folder:${folder.id}`, {
+        db: r.db,
+        types,
+        principal: r.principal,
         kind: 'all',
-        filter,
+        filter: own,
         scoped: true,
         limits: OWNER_LIMITS,
-        ...(filter.timeZone ? { timeZone: filter.timeZone } : {}),
+        prefix: 'folder',
+        ...timeZone,
       })
     : undefined
-  return compiled
-    ? {
-        filter: compiled.filter,
-        ...(compiled.extra ? { extra: compiled.extra } : {}),
-      }
-    : { filter }
+  const base = inFolder?.filter ?? own
+  const compiled = input.q?.trim()
+    ? compileQuery(input.q, {
+        db: r.db,
+        types,
+        principal: r.principal,
+        kind: 'all',
+        filter: base,
+        scoped: true,
+        limits: OWNER_LIMITS,
+        ...timeZone,
+      })
+    : undefined
+  const extra = bothExtras(inFolder?.extra, compiled?.extra)
+  return {
+    filter: {
+      ...(compiled?.filter ?? base),
+      // The folder's order unless the request gives one.
+      ...(folder && !own.sort && folder.sort ? { sort: folder.sort } : {}),
+      ...(folder && !own.order && folder.order ? { order: folder.order } : {}),
+    },
+    ...(extra ? { extra } : {}),
+  }
 }
 
 /** Reading the library: collections, their history, and entities. */
 export function libraryRoutes(ctx: AccountsContext) {
   return (
     new Hono<Env>()
-      .get('/collections', query(Filters), (c) => {
+      .get('/collections', viewers, query(Filters), (c) => {
         const input = c.req.valid('query')
-        const { filter, extra } = listQuery(ctx, input)
+        const { filter, extra } = listQuery(readCtx(ctx, c), input)
         return c.json(
           listCollections(
             ctx,
@@ -204,23 +240,29 @@ export function libraryRoutes(ctx: AccountsContext) {
 
       // Cached like the folders' counts; the web asks before splitting a
       // folder into post and account tabs.
-      .get('/collections/count', query(FilterQuery), (c) =>
-        c.json(selectionCounts(ctx.db, listQuery(ctx, c.req.valid('query')))),
+      .get('/collections/count', viewers, query(ListFilters), (c) =>
+        c.json(
+          selectionCounts(
+            ctx.db,
+            listQuery(readCtx(ctx, c), c.req.valid('query')),
+          ),
+        ),
       )
 
       // What the query box offers for the value being typed.
       .get(
         '/query/suggest',
+        viewers,
         query(v.object({ kind: v.picklist(SUGGEST_KINDS), prefix: text })),
         (c) => {
           const { kind, prefix } = c.req.valid('query')
-          return c.json({ items: suggest(ctx.db, kind, prefix) })
+          return c.json({ items: suggest(readCtx(ctx, c), kind, prefix) })
         },
       )
 
       // Each with the term the query box writes for it (`from:@alice`)
       // when one names it alone.
-      .get('/collections/authors', query(AuthorFilters), (c) => {
+      .get('/collections/authors', viewers, query(AuthorFilters), (c) => {
         const input = c.req.valid('query')
         const author = input.author ?? []
         const page = listAuthors(ctx, {
@@ -239,23 +281,30 @@ export function libraryRoutes(ctx: AccountsContext) {
         })
       })
 
-      // Accounts the 「关系」 filter can look from; owner only, since it
+      // Accounts the 「关系」 filter can look from; signed in only, since it
       // names accounts no share reaches.
-      .get('/collections/perspectives', query(PerspectiveFilters), (c) => {
-        const input = c.req.valid('query')
-        return c.json(
-          listPerspectives(ctx, {
-            q: input.q || undefined,
-            cursor: input.cursor || undefined,
-            relOf:
-              typeof input.rel_of === 'string' ? [input.rel_of] : input.rel_of,
-          }),
-        )
-      })
+      .get(
+        '/collections/perspectives',
+        viewers,
+        query(PerspectiveFilters),
+        (c) => {
+          const input = c.req.valid('query')
+          return c.json(
+            listPerspectives(readCtx(ctx, c), {
+              q: input.q || undefined,
+              cursor: input.cursor || undefined,
+              relOf:
+                typeof input.rel_of === 'string'
+                  ? [input.rel_of]
+                  : input.rel_of,
+            }),
+          )
+        },
+      )
 
       // Several accounts' follows side by side; owner only, like the
       // perspectives it compares.
-      .get('/collections/compare', query(CompareQuery), (c) => {
+      .get('/collections/compare', viewers, query(CompareQuery), (c) => {
         const input = c.req.valid('query')
         return c.json(
           compareRelations(readCtx(ctx, c), {
@@ -271,7 +320,7 @@ export function libraryRoutes(ctx: AccountsContext) {
 
       // 关系 opens on an account, saved or not; owner only, like the
       // perspectives it is picked from.
-      .get('/collections/graph', query(AccountGraphQuery), (c) => {
+      .get('/collections/graph', viewers, query(AccountGraphQuery), (c) => {
         const { of, viewer, ...input } = c.req.valid('query')
         return c.json(
           accountGraph(readCtx(ctx, c), of, {
@@ -281,11 +330,11 @@ export function libraryRoutes(ctx: AccountsContext) {
         )
       })
 
-      .get('/collections/:id', (c) =>
+      .get('/collections/:id', viewers, (c) =>
         c.json(getCollection(ctx, c.req.param('id'))),
       )
 
-      .get('/collections/:id/history', query(Cursor), (c) =>
+      .get('/collections/:id/history', viewers, query(Cursor), (c) =>
         c.json(
           listHistory(
             ctx,
@@ -295,31 +344,43 @@ export function libraryRoutes(ctx: AccountsContext) {
         ),
       )
 
-      .get('/collections/:id/counts', query(CountsQuery), (c) =>
+      .get('/collections/:id/counts', viewers, query(CountsQuery), (c) =>
         c.json(listCounts(ctx, c.req.param('id'), c.req.valid('query').limit)),
       )
 
-      .get('/collections/:id/profile-changes', query(ChangesQuery), (c) =>
-        c.json(
-          listProfileChanges(
-            ctx,
-            c.req.param('id'),
-            c.req.valid('query').limit,
+      .get(
+        '/collections/:id/profile-changes',
+        viewers,
+        query(ChangesQuery),
+        (c) =>
+          c.json(
+            listProfileChanges(
+              ctx,
+              c.req.param('id'),
+              c.req.valid('query').limit,
+            ),
           ),
-        ),
       )
 
-      .get('/collections/:id/follows', (c) =>
+      .get('/collections/:id/follows', viewers, (c) =>
         c.json(followCounts(ctx, c.req.param('id'))),
       )
 
-      .get('/collections/:id/follow-changes', query(FollowChangesQuery), (c) =>
-        c.json(
-          listFollowChanges(ctx, c.req.param('id'), c.req.valid('query').limit),
-        ),
+      .get(
+        '/collections/:id/follow-changes',
+        viewers,
+        query(FollowChangesQuery),
+        (c) =>
+          c.json(
+            listFollowChanges(
+              ctx,
+              c.req.param('id'),
+              c.req.valid('query').limit,
+            ),
+          ),
       )
 
-      .get('/collections/:id/graph', query(OwnGraphQuery), (c) =>
+      .get('/collections/:id/graph', viewers, query(OwnGraphQuery), (c) =>
         c.json(
           followGraph(readCtx(ctx, c), c.req.param('id'), {
             ...c.req.valid('query'),
@@ -328,10 +389,12 @@ export function libraryRoutes(ctx: AccountsContext) {
         ),
       )
 
-      .get('/collections/:id/history/:capture', (c) =>
+      .get('/collections/:id/history/:capture', viewers, (c) =>
         c.json(getHistoryPoint(ctx, c.req.param('id'), c.req.param('capture'))),
       )
 
-      .get('/entities/:id', (c) => c.json(getEntity(ctx, c.req.param('id'))))
+      .get('/entities/:id', viewers, (c) =>
+        c.json(getEntity(ctx, c.req.param('id'))),
+      )
   )
 }

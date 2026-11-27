@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, notInArray, sql } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import { collectionTags, folders, library, tags } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
+import { sees, type Seeing } from '#users/principal.ts'
 import { tagIdsOf } from './folder-query.ts'
 import type { Database, Executor, Transaction } from '#db/client.ts'
 
@@ -39,8 +40,10 @@ export function checkTagName(
   return name
 }
 
-export function listTags(db: Executor): Tag[] {
-  return db
+/** The tags whoever asks has: a viewer has none. */
+export function listTags(r: Seeing): Tag[] {
+  if (!sees(r.principal).tags) return []
+  return r.db
     .select({ id: tags.id, name: tags.name })
     .from(tags)
     .orderBy(asc(tags.name), asc(tags.id))

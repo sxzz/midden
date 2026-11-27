@@ -5,7 +5,8 @@
 // the query they came from.
 import { eq, sql } from 'drizzle-orm'
 import { canonicalJson, sha256Hex } from '#capture/json.ts'
-import { folders, tags } from '#db/schema.ts'
+import { tags } from '#db/schema.ts'
+import { visibleFolder } from '#library/folders.ts'
 import {
   authorKey,
   defaultRelMin,
@@ -19,11 +20,11 @@ import { fold } from '#library/search-text.ts'
 import { OWNER_LIMITS } from '#query/ast.ts'
 import { compileQuery, resolveAccounts } from '#query/compile.ts'
 import { describeQuery } from '#reads/slow.ts'
+import { sees, type Principal, type Seeing } from '#users/principal.ts'
 import { AgentError, invalid, notFound } from './errors.ts'
 import { VIEWS, type View } from './shape.ts'
 import type { Executor } from '#db/client.ts'
 import type { Reader } from '#library/views.ts'
-import type { Principal } from '#users/principal.ts'
 
 /** The entity types the archive's platforms keep, by kind. */
 export interface TypeCatalog {
@@ -267,25 +268,36 @@ export function savedAccount(
   return found.collectionId
 }
 
-/** Tags by id or exact name. */
+/**
+ * Tags by id or exact name. A viewer has none: every name is unknown to
+ * them, answered as an unknown one is, so nothing tells the two apart.
+ */
 export function findTags(
-  db: Executor,
+  r: Seeing,
   refs: readonly string[],
 ): { id: string; name: string }[] {
+  const visible = sees(r.principal).tags
   return refs.map((ref) => {
-    const found = db
-      .select({ id: tags.id, name: tags.name })
-      .from(tags)
-      .where(isUUID(ref) ? eq(tags.id, ref.toLowerCase()) : eq(tags.name, ref))
-      .get()
+    const found = visible
+      ? r.db
+          .select({ id: tags.id, name: tags.name })
+          .from(tags)
+          .where(
+            isUUID(ref) ? eq(tags.id, ref.toLowerCase()) : eq(tags.name, ref),
+          )
+          .get()
+      : undefined
     if (!found)
       throw invalid(`Unknown tag: ${ref}. GET /agent/v1/tags lists them.`)
     return found
   })
 }
 
-function tagNames(db: Executor, ids: string): { id: string; name: string }[] {
+function tagNames(r: Seeing, ids: string): { id: string; name: string }[] {
   if (!ids) return []
+  // A viewer's filter never has any: theirs are refused (`findTags`).
+  if (!sees(r.principal).tags) throw new Error('a viewer’s filter has tags')
+  const { db } = r
   return ids.split(',').map((id) => ({
     id,
     name:
@@ -374,6 +386,9 @@ export function filterOf(
   const isProtected = boolean(params, 'protected')
   const sensitive = boolean(params, 'sensitive')
   const tagMode = single(params, 'tag_mode')
+  // Without tags of their own, a viewer has nothing for it to say.
+  if (tagMode && !sees(r.principal).tags)
+    throw invalid('Unknown parameter: tag_mode. See /agent.md.')
   if (tagMode) oneOf('tag_mode', tagMode, ['any', 'all'])
   const postType = single(params, 'post_type')
   if (postType) oneOf('post_type', postType, ['post', 'quote', 'repost'])
@@ -422,11 +437,11 @@ export function filterOf(
     savedWithin: single(params, 'saved_within'),
     timeZone,
     authors: authorKeys(r, values(params, 'author'), platform, unknown),
-    tag: findTags(r.db, values(params, 'tag'))
+    tag: findTags(r, values(params, 'tag'))
       .map((t) => t.id)
       .join(','),
     tagMode,
-    notTag: findTags(r.db, values(params, 'not_tag'))
+    notTag: findTags(r, values(params, 'not_tag'))
       .map((t) => t.id)
       .join(','),
     postType,
@@ -462,7 +477,7 @@ export function describe(
     : !types.length
   const tagList = (ids: string | undefined) =>
     tagNames(
-      r.db,
+      r,
       [...new Set((ids ?? '').split(',').filter(Boolean))].toSorted().join(','),
     )
   const tag = tagList(filter.tag)
@@ -536,16 +551,18 @@ export interface FolderRef {
   order: string
 }
 
-export function findFolder(db: Executor, id: string): FolderRef {
-  const row = isUUID(id)
-    ? db.select().from(folders).where(eq(folders.id, id.toLowerCase())).get()
-    : undefined
+/**
+ * A folder by id. A viewer sees only the publicly shared ones; the others
+ * are not found, as a folder that does not exist.
+ */
+export function findFolder(r: Seeing, id: string): FolderRef {
+  const row = visibleFolder(r, id)
   if (!row) throw notFound(`No folder has the id ${id}.`)
   return { id: row.id, name: row.name, sort: row.sort, order: row.order }
 }
 
 /** Two queries' SQL in one statement (their `WITH` names apart). */
-function bothExtras(
+export function bothExtras(
   a: QueryExtra | undefined,
   b: QueryExtra | undefined,
 ): QueryExtra | undefined {
@@ -585,13 +602,14 @@ export function readSearch(r: AgentReader, kind: Kind, params: Params): Search {
   const q = single(params, 'q')
   const unknown: string[] = []
   const own = filterOf(r, kind, structured, unknown)
-  const folder = folderId ? findFolder(r.db, folderId) : undefined
+  const folder = folderId ? findFolder(r, folderId) : undefined
   const timeZone = own.timeZone ? { timeZone: own.timeZone } : {}
   // The folder first, as the owner saved it; then the agent's query.
   const inFolder = folder
     ? compileQuery(`folder:${folder.id}`, {
         db: r.db,
         types: r.types,
+        principal: r.principal,
         kind,
         filter: own,
         scoped: true,
@@ -605,6 +623,7 @@ export function readSearch(r: AgentReader, kind: Kind, params: Params): Search {
     ? compileQuery(q, {
         db: r.db,
         types: r.types,
+        principal: r.principal,
         kind,
         filter: base,
         scoped: !!folder || SCOPES.some((key) => values(params, key).length),

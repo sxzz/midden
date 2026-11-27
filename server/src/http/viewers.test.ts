@@ -18,10 +18,35 @@ const WEB = 'https://midden.test/app/'
 const ORIGIN = new URL(WEB).origin
 const ID = '01234567-89ab-cdef-0123-456789abcdef'
 
-/** `/v1` routes a viewer may call, with their session only. */
+/**
+ * `/v1` routes a viewer may call, with their session only. What the
+ * library reads give them is filtered at its source by who asks
+ * (`viewer-leaks.test.ts`).
+ */
 const V1_FOR_VIEWERS = [
   'GET /session',
   'DELETE /session',
+  // The library: lists, counts, searches and what the query box offers,
+  // with tag parameters refused and only shared folders.
+  'GET /collections',
+  'GET /collections/count',
+  'GET /query/suggest',
+  'GET /collections/authors',
+  'GET /collections/perspectives',
+  'GET /usage',
+  'GET /folders',
+  // Relations, a collection and its history.
+  'GET /collections/compare',
+  'GET /collections/graph',
+  'GET /collections/:id',
+  'GET /collections/:id/history',
+  'GET /collections/:id/history/:capture',
+  'GET /collections/:id/counts',
+  'GET /collections/:id/profile-changes',
+  'GET /collections/:id/follows',
+  'GET /collections/:id/follow-changes',
+  'GET /collections/:id/graph',
+  'GET /entities/:id',
   // Their own passkeys, sessions and tokens.
   'GET /passkeys',
   'POST /passkeys/options',
@@ -39,8 +64,24 @@ const V1_FOR_VIEWERS = [
   'DELETE /tokens/:id',
 ]
 
-/** Agent API routes a viewer's token may call. */
-const AGENT_FOR_VIEWERS = ['GET /whoami']
+/** Agent API routes a viewer's token may call: reads, filtered alike. */
+const AGENT_FOR_VIEWERS = [
+  'GET /whoami',
+  'GET /posts',
+  'GET /accounts',
+  'POST /posts/batch',
+  'POST /accounts/batch',
+  'GET /posts/:id',
+  'GET /accounts/:id',
+  'GET /posts/:id/metrics',
+  'GET /accounts/:id/metrics',
+  'GET /posts/:id/context',
+  'GET /accounts/:id/history',
+  'GET /accounts/:id/relations',
+  'GET /accounts/:id/relation-changes',
+  'GET /aggregate',
+  'GET /folders',
+]
 
 /** What needs no login, viewer or not. */
 const OPEN = /^\/(?:auth|public)\//
@@ -177,7 +218,11 @@ describe('routes open to viewers', () => {
           ...(method === 'GET' ? {} : { body: {} }),
         })
         if (AGENT_FOR_VIEWERS.includes(route))
-          expect([route, response.status]).toEqual([route, 200])
+          expect([
+            route,
+            response.status !== 403,
+            response.status < 500,
+          ]).toEqual([route, true, true])
         else
           expect([route, response.status, response.json.error]).toEqual([
             route,
@@ -208,8 +253,9 @@ describe('routes open to viewers', () => {
       via: 'session',
     }
     const them: Principal = { userId: viewer, role: 'viewer', via: 'session' }
-    expect((await asked(admin, '/collections')).status).toBe(200)
-    const refused = await asked(them, '/collections')
+    expect((await asked(admin, '/captures')).status).toBe(200)
+    expect((await asked(them, '/collections')).status).toBe(200)
+    const refused = await asked(them, '/captures')
     expect(refused.status).toBe(403)
     expect(JSON.parse(new TextDecoder().decode(refused.body))).toEqual({
       error: '没有权限进行此操作',

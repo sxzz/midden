@@ -7,6 +7,7 @@ import {
   graph,
   libraryContext,
 } from '#testing/library.ts'
+import { SYSTEM } from '#users/principal.ts'
 import { listTags, readAnnotation, updateAnnotation } from './annotations.ts'
 import { filterCounts } from './counts.ts'
 import { createFolder } from './folders.ts'
@@ -57,7 +58,9 @@ describe('tags', () => {
       merged: false,
       moved: 0,
     })
-    expect(listTags(c.db)).toEqual([{ id: tag.id, name: '猫猫' }])
+    expect(listTags({ db: c.db, principal: SYSTEM })).toEqual([
+      { id: tag.id, name: '猫猫' },
+    ])
     expect(names(c, ids[0]!)).toEqual(['猫猫'])
     expect((await countedFolders(c.db))[0]).toMatchObject({
       filter: folder.filter,
@@ -87,7 +90,7 @@ describe('tags', () => {
       merged: true,
       moved: 1,
     })
-    expect(listTags(c.db)).toEqual([kept])
+    expect(listTags({ db: c.db, principal: SYSTEM })).toEqual([kept])
     for (const id of ids) expect(names(c, id)).toEqual(['新'])
     expect(filterCounts(c.db, `tag=${kept.id}`).count).toBe(3)
     const saved = await countedFolders(c.db)
@@ -142,7 +145,7 @@ describe('tags', () => {
     deleteTag(c.db, cat.id)
     expect(names(c, ids[0]!)).toEqual(['狗'])
     expect(names(c, ids[1]!)).toEqual([])
-    expect(listTags(c.db)).toEqual([dog])
+    expect(listTags({ db: c.db, principal: SYSTEM })).toEqual([dog])
     const filters = Object.fromEntries(
       (await countedFolders(c.db)).map((f) => [f.id, f.filter]),
     )
@@ -210,7 +213,7 @@ describe('tags', () => {
     createFolder(c.db, { name: 'h', filter: `not_tag=${b}` })
     updateAnnotation(c.db, ids[0]!, { tagIds: [] })
     expect(
-      listTags(c.db)
+      listTags({ db: c.db, principal: SYSTEM })
         .map((t) => t.id)
         .toSorted(),
     ).toEqual([a, b])

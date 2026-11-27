@@ -3,6 +3,7 @@
 // owner's tags and folders, hashtags and link domains of saved posts. Most
 // used first; at most a handful, read on a read thread like any list.
 import { sql } from 'drizzle-orm'
+import { sees, type Seeing } from '#users/principal.ts'
 import { foldHashtag } from './facet-values.ts'
 import { fold } from './search-text.ts'
 import type { Executor } from '#db/client.ts'
@@ -123,16 +124,19 @@ function named<T extends { name: string }>(rows: T[], prefix: string) {
   return [...starts, ...holds].slice(0, LIMIT)
 }
 
-export function suggest(
-  db: Executor,
-  kind: SuggestKind,
-  raw = '',
-): Suggestion[] {
+/**
+ * Suggestions for whoever asks: a viewer has no tags, and of the folders
+ * only the publicly shared ones.
+ */
+export function suggest(r: Seeing, kind: SuggestKind, raw = ''): Suggestion[] {
+  const { db } = r
+  const sight = sees(r.principal)
   const prefix = [...raw.trim()].slice(0, MAX_PREFIX).join('')
   switch (kind) {
     case 'handle':
       return prefix.replace(AT, '') ? handles(db, prefix) : topAuthors(db)
     case 'tag':
+      if (!sight.tags) return []
       return named(
         db.all<{ name: string; count: number }>(sql`
           SELECT t.name, count(ct.collection_id) AS count FROM tags t
@@ -142,7 +146,15 @@ export function suggest(
       ).map((t) => ({ value: t.name, count: t.count }))
     case 'folder':
       return named(
-        db.all<{ name: string }>(sql`SELECT name FROM folders ORDER BY name`),
+        db.all<{ name: string }>(sql`SELECT name FROM folders f
+          WHERE ${
+            sight.allFolders
+              ? sql`1`
+              : sql`EXISTS (SELECT 1 FROM shares s
+                  WHERE s.target_kind = 'folder' AND s.target_id = f.id
+                    AND s.revoked_at IS NULL)`
+          }
+          ORDER BY name`),
         prefix,
       ).map((f) => ({ value: f.name }))
     case 'hashtag':

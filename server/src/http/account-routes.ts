@@ -21,7 +21,7 @@ import {
 } from '#library/delete.ts'
 import { storageUsed } from '#library/read.ts'
 import { deleteTag, renameTag } from '#library/tags.ts'
-import { adminSession } from './auth.ts'
+import { adminSession, readCtx, viewers } from './auth.ts'
 import { inline, readOnly, type NamedRead } from './offload.ts'
 import { json, type Env } from './validate.ts'
 
@@ -104,7 +104,7 @@ export function accountRoutes(ctx: AccountsContext, read: NamedRead) {
         return c.body(null, 204)
       })
 
-      .get('/tags', (c) => c.json(listTags(ctx.db)))
+      .get('/tags', (c) => c.json(listTags(readCtx(ctx, c))))
 
       .patch('/tags/:id', json(v.strictObject({ name: v.string() })), (c) =>
         c.json(renameTag(ctx.db, c.req.param('id'), c.req.valid('json').name)),
@@ -168,6 +168,9 @@ export function accountRoutes(ctx: AccountsContext, read: NamedRead) {
         )
       })
 
-      .get('/usage', (c) => c.json({ used_bytes: storageUsed(ctx.db) }))
+      // 已用空间: the library's, which viewers see too.
+      .get('/usage', viewers, (c) =>
+        c.json({ used_bytes: storageUsed(ctx.db) }),
+      )
   )
 }

@@ -2,6 +2,7 @@
 // §2.1), and what that lets it see. Reads that differ by who asks take it
 // from their context (`ReadContext.principal`, `AgentReader.principal`), so
 // a read that could not say whom it is for does not type-check.
+import type { Executor } from '#db/client.ts'
 import type { UserRole } from '#db/schema.ts'
 import type { Permission } from '#tokens/tokens.ts'
 
@@ -41,6 +42,12 @@ export interface Sight {
   captureAccounts: boolean
   /** Folders that are not publicly shared, and what any folder selects by. */
   allFolders: boolean
+}
+
+/** A read that differs by whom it is for: the database, and who asks. */
+export interface Seeing {
+  db: Executor
+  principal: Principal
 }
 
 export function sees(principal: Principal): Sight {

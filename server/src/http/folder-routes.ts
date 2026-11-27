@@ -4,12 +4,13 @@ import { countWrittenFolder } from '#library/folder-counts.ts'
 import {
   createFolder,
   deleteFolder,
+  foldersFor,
   folderView,
-  listFolders,
   updateFolder,
+  type Folder,
 } from '#library/folders.ts'
 import { SYSTEM } from '#users/principal.ts'
-import { adminSession } from './auth.ts'
+import { adminSession, readCtx, viewers } from './auth.ts'
 import { json, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { NamedRead } from './offload.ts'
@@ -44,39 +45,48 @@ export function folderRoutes(ctx: AccountsContext, read: NamedRead) {
     )
     return folderView(ctx.db, id, types())
   }
-  return new Hono<Env>()
-    .get('/folders', (c) => c.json(listFolders(ctx.db, types())))
+  return (
+    new Hono<Env>()
+      // A viewer gets the publicly shared ones, without their queries. The
+      // web app's type is the admin's; it shows a viewer's folders by `can`.
+      .get('/folders', viewers, (c) => {
+        const seen = foldersFor(readCtx(ctx, c), types())
+        return c.json('all' in seen ? seen.all : (seen.shared as Folder[]))
+      })
 
-    .post(
-      '/folders',
-      // A new folder says what it holds, as a query or a list filter.
-      json(
-        v.pipe(
-          v.strictObject({ name: v.string(), ...FolderBody }),
-          v.check((b) => b.query !== undefined || b.filter !== undefined),
+      .post(
+        '/folders',
+        // A new folder says what it holds, as a query or a list filter.
+        json(
+          v.pipe(
+            v.strictObject({ name: v.string(), ...FolderBody }),
+            v.check((b) => b.query !== undefined || b.filter !== undefined),
+          ),
         ),
-      ),
-      async (c) =>
-        c.json(
-          await counted(createFolder(ctx.db, c.req.valid('json'), types()).id),
-        ),
-    )
+        async (c) =>
+          c.json(
+            await counted(
+              createFolder(ctx.db, c.req.valid('json'), types()).id,
+            ),
+          ),
+      )
 
-    .patch(
-      '/folders/:id',
-      json(v.strictObject({ name: v.optional(v.string()), ...FolderBody })),
-      async (c) => {
-        const input = c.req.valid('json')
-        const folder = updateFolder(ctx.db, c.req.param('id'), input, types())
-        const changed = [input.query, input.filter, input.tz].some(
-          (x) => x !== undefined,
-        )
-        return c.json(changed ? await counted(folder.id) : folder)
-      },
-    )
+      .patch(
+        '/folders/:id',
+        json(v.strictObject({ name: v.optional(v.string()), ...FolderBody })),
+        async (c) => {
+          const input = c.req.valid('json')
+          const folder = updateFolder(ctx.db, c.req.param('id'), input, types())
+          const changed = [input.query, input.filter, input.tz].some(
+            (x) => x !== undefined,
+          )
+          return c.json(changed ? await counted(folder.id) : folder)
+        },
+      )
 
-    .delete('/folders/:id', adminSession, (c) => {
-      deleteFolder(ctx.db, c.req.param('id'))
-      return c.body(null, 204)
-    })
+      .delete('/folders/:id', adminSession, (c) => {
+        deleteFolder(ctx.db, c.req.param('id'))
+        return c.body(null, 204)
+      })
+  )
 }

@@ -1,9 +1,11 @@
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, sql } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
-import { folders } from '#db/schema.ts'
+import { folders, shares } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { OWNER_LIMITS, parseQuery } from '#query/ast.ts'
+import { sharedFolder, type Types } from '#query/compile.ts'
 import { filterToQuery } from '#query/convert.ts'
+import { sees, type Seeing } from '#users/principal.ts'
 import { pruneTags } from './annotations.ts'
 import { parseFilterQuery } from './filter-query.ts'
 import { storedCounts, type StoredCounts } from './folder-counts.ts'
@@ -15,9 +17,9 @@ import {
   storedQuery,
 } from './folder-query.ts'
 import { checkFilter, zoneOf } from './list.ts'
+import { isUUID } from './read.ts'
 import { revokeOrphanedShares } from './shares.ts'
 import type { Database, Executor } from '#db/client.ts'
-import type { Types } from '#query/compile.ts'
 
 /**
  * A saved query (收藏夹) and how many saved items it selects, as last
@@ -212,6 +214,76 @@ export function listFolders(
     .all()
   const counts = storedCounts(db, rows)
   return rows.map((row) => view(db, types, row, counts.get(row.id)))
+}
+
+/**
+ * A folder as a viewer sees it: what it is called, how much it holds and
+ * when, never what it selects by (its query names tags and other folders).
+ */
+export type SharedFolder = Pick<
+  Folder,
+  | 'id'
+  | 'name'
+  | 'count'
+  | 'types'
+  | 'counted_at'
+  | 'stale'
+  | 'created_at'
+  | 'updated_at'
+>
+
+/** The folders publicly shared now, as a viewer sees them. */
+export function sharedFolders(db: Executor): SharedFolder[] {
+  const rows = db
+    .select()
+    .from(folders)
+    .where(
+      sql`EXISTS (SELECT 1 FROM ${shares} s WHERE s.target_kind = 'folder'
+        AND s.target_id = ${folders.id} AND s.revoked_at IS NULL)`,
+    )
+    .orderBy(asc(folders.createdAt), asc(folders.id))
+    .all()
+  const counts = storedCounts(db, rows)
+  return rows.map((row) => {
+    const stored = counts.get(row.id)
+    return {
+      id: row.id,
+      name: row.name,
+      count: stored?.counts.count ?? null,
+      types: stored?.counts.types ?? null,
+      counted_at: stored?.countedAt.toISOString() ?? null,
+      stale: stored?.stale ?? true,
+      created_at: row.createdAt.toISOString(),
+      updated_at: row.updatedAt.toISOString(),
+    }
+  })
+}
+
+/**
+ * The folders whoever asks may see: all of them for the admin, the
+ * publicly shared ones for a viewer, without what they select by.
+ */
+export function foldersFor(
+  r: Seeing,
+  types: Types,
+): { all: Folder[] } | { shared: SharedFolder[] } {
+  return sees(r.principal).allFolders
+    ? { all: listFolders(r.db, types) }
+    : { shared: sharedFolders(r.db) }
+}
+
+/**
+ * A folder by id that whoever asks may see: for a viewer, only one that is
+ * publicly shared; any other is as good as none.
+ */
+export function visibleFolder(r: Seeing, id: string): Row | undefined {
+  const row = isUUID(id)
+    ? r.db.select().from(folders).where(eq(folders.id, id.toLowerCase())).get()
+    : undefined
+  if (!row) return undefined
+  if (!sees(r.principal).allFolders && !sharedFolder(r.db, row.id))
+    return undefined
+  return row
 }
 
 /** One folder as `listFolders` lists it. */

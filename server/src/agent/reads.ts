@@ -29,7 +29,7 @@ import { selectionCounts } from '#library/counts.ts'
 import { planDeletion } from '#library/delete.ts'
 import { attachIncomingRelations } from '#library/entities.ts'
 import { countFolder } from '#library/folder-counts.ts'
-import { listFolders, type Folder } from '#library/folders.ts'
+import { foldersFor, type Folder, type SharedFolder } from '#library/folders.ts'
 import { listsOf } from '#library/follow-graph.ts'
 import { followCounts, listFollowChanges } from '#library/follows.ts'
 import { authorKey, listCollections } from '#library/list.ts'
@@ -92,7 +92,7 @@ function shaper(r: AgentReader, view: View, origin: string, ids: string[]) {
   const o: ShapeOptions = {
     view,
     origin,
-    annotations: annotationsOf(r.db, ids),
+    annotations: annotationsOf(r, ids),
   }
   return (c: CollectionView) => shape(c, o)
 }
@@ -443,8 +443,11 @@ function metrics(
 
 // --- The rest -----------------------------------------------------------------
 
-/** A folder as the agent API shows it: its query, order and counts. */
-export function folderJson(r: AgentReader, f: Folder) {
+/**
+ * A folder as the agent API shows it: its query, order and counts; for a
+ * viewer only what it is called and holds (`SharedFolder`).
+ */
+export function folderJson(r: AgentReader, f: Folder | SharedFolder) {
   // Null before the folder's first count.
   const kinds = (kind: Kind) =>
     f.types &&
@@ -454,10 +457,14 @@ export function folderJson(r: AgentReader, f: Folder) {
   return {
     id: f.id,
     name: f.name,
-    query: f.query,
-    ...(f.sort ? { sort: f.sort } : {}),
-    ...(f.order ? { order: f.order } : {}),
-    ...(f.tz ? { tz: f.tz } : {}),
+    ...('query' in f
+      ? {
+          query: f.query,
+          ...(f.sort ? { sort: f.sort } : {}),
+          ...(f.order ? { order: f.order } : {}),
+          ...(f.tz ? { tz: f.tz } : {}),
+        }
+      : {}),
     posts: kinds('posts'),
     accounts: kinds('accounts'),
     counted_at: f.counted_at,
@@ -468,7 +475,12 @@ export function folderJson(r: AgentReader, f: Folder) {
 }
 
 function foldersOf(r: AgentReader) {
-  return { items: listFolders(r.db, r.types).map((f) => folderJson(r, f)) }
+  const seen = foldersFor(r, r.types)
+  return {
+    items: ('all' in seen ? seen.all : seen.shared).map((f) =>
+      folderJson(r, f),
+    ),
+  }
 }
 
 function tagsOf(r: AgentReader) {
@@ -480,7 +492,7 @@ function tagsOf(r: AgentReader) {
       .map((row) => [row.id, row.n]),
   )
   return {
-    items: listTags(r.db).map((t) => ({
+    items: listTags(r).map((t) => ({
       id: t.id,
       name: t.name,
       collections: counts.get(t.id) ?? 0,

@@ -131,7 +131,7 @@ export function createAgentApi(o: AgentOptions) {
 
   // --- Posts and accounts ---------------------------------------------------
   for (const kind of ['posts', 'accounts'] as const) {
-    app.get(`/${kind}`, async (c) =>
+    app.get(`/${kind}`, viewers, async (c) =>
       c.json(
         await reads.run(c.get('principal'), 'search', {
           kind,
@@ -140,7 +140,7 @@ export function createAgentApi(o: AgentOptions) {
         }),
       ),
     )
-    app.post(`/${kind}/batch`, async (c) => {
+    app.post(`/${kind}/batch`, viewers, async (c) => {
       const input = await body(c, Batch)
       return c.json(
         await reads.run(c.get('principal'), 'get', {
@@ -152,7 +152,7 @@ export function createAgentApi(o: AgentOptions) {
         }),
       )
     })
-    app.get(`/${kind}/:id/metrics`, async (c) =>
+    app.get(`/${kind}/:id/metrics`, viewers, async (c) =>
       c.json(
         await reads.run(c.get('principal'), 'metrics', {
           kind,
@@ -161,7 +161,7 @@ export function createAgentApi(o: AgentOptions) {
         }),
       ),
     )
-    app.get(`/${kind}/:id`, async (c) => {
+    app.get(`/${kind}/:id`, viewers, async (c) => {
       const ref = c.req.param('id')
       const { items } = await reads.run(c.get('principal'), 'get', {
         kind,
@@ -176,14 +176,14 @@ export function createAgentApi(o: AgentOptions) {
       return c.json(items[0])
     })
   }
-  app.get('/aggregate', async (c) =>
+  app.get('/aggregate', viewers, async (c) =>
     c.json(
       await reads.run(c.get('principal'), 'aggregate', {
         params: queries(c),
       }),
     ),
   )
-  app.get('/posts/:id/context', async (c) =>
+  app.get('/posts/:id/context', viewers, async (c) =>
     c.json(
       await reads.run(c.get('principal'), 'context', {
         id: c.req.param('id'),
@@ -200,12 +200,16 @@ export function createAgentApi(o: AgentOptions) {
           origin: originOf(c),
         }),
       )
-  app.get('/accounts/:id/history', accountRead('history'))
-  app.get('/accounts/:id/relations', accountRead('relations'))
-  app.get('/accounts/:id/relation-changes', accountRead('relationChanges'))
+  app.get('/accounts/:id/history', viewers, accountRead('history'))
+  app.get('/accounts/:id/relations', viewers, accountRead('relations'))
+  app.get(
+    '/accounts/:id/relation-changes',
+    viewers,
+    accountRead('relationChanges'),
+  )
 
   // --- Folders, tags, captures --------------------------------------------
-  app.get('/folders', async (c) =>
+  app.get('/folders', viewers, async (c) =>
     c.json(await reads.run(c.get('principal'), 'folders', undefined)),
   )
   app.get('/tags', async (c) =>

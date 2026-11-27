@@ -10,6 +10,7 @@ import {
 import { createFolder, deleteFolder, updateFolder } from '#library/folders.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, fakeProfile, postGraph } from '#testing/fake-platform.ts'
+import { SYSTEM } from '#users/principal.ts'
 import { captureHandlers } from './handlers.ts'
 import { resolveOptions } from './options.ts'
 import { captureURL } from './records.ts'
@@ -92,7 +93,9 @@ async function setup() {
       const names = readAnnotation(c.db, ids[item]!).tags.map((t) => t.name)
       updateAnnotation(c.db, ids[item]!, { tagNames: [...names, name] })
     }
-    return listTags(c.db).find((t) => t.name === name)!.id
+    return listTags({ db: c.db, principal: SYSTEM }).find(
+      (t) => t.name === name,
+    )!.id
   }
   /** What updating a folder with this filter covers. */
   let made = 0

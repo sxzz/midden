@@ -103,6 +103,7 @@ A 不做：
 | `GET /v1/collections/count`                                                                                               | 允许   | 过滤 ★ | 参数的处理同上                                                                       |
 | `GET /v1/collections/aggregate`（桌面界面）                                                                               | 允许   | 过滤 ★ | 同上，另外 `by=tag` 答 400                                                           |
 | `GET /v1/collections/authors`                                                                                             | 允许   | 允许   |                                                                                      |
+| `GET /v1/query/suggest`（查询框的补全，本文写成后新加）                                                                   | 允许   | 过滤 ★ | `kind=tag` 为空，`kind=folder` 只有公开中的收藏夹                                    |
 | `GET /v1/collections/perspectives`                                                                                        | 允许   | 过滤 ★ | 不标 `own`，采集账号也不排在最前                                                     |
 | `GET /v1/collections/compare`、`GET /v1/collections/graph`、`GET /v1/collections/:id/graph`                               | 允许   | 允许   | `viewer` 参数照常；网页对查看者不默认标记任何账号                                    |
 | `GET /v1/collections/:id`                                                                                                 | 允许   | 允许   | 包括占用空间与保存时间                                                               |
@@ -571,6 +572,10 @@ Playwright 测试：
 7. `docs`：架构的「认证」「Agent API」「网页导航」，运维的「网页登录」「API 令牌」。
 
 按惯例合并成一两次推送：1 到 4 一次，5 到 7 一次，或者全部一次。
+
+`GET /v1/collections/aggregate` 在源头过滤的提交时还不存在（桌面界面）。加上时它要经由 `/v1` 列表的 `listQuery`（拒绝标签参数、只认公开的 `folder=`），`by=tag` 对查看者答 400，并写进 `viewers.test.ts` 的表。
+
+查看者在 Agent API 上给 `tag_mode` 时答 400（`Unknown parameter: tag_mode`）：他没有标签，`tag_mode` 无从说起，也不泄露什么。
 
 实际的服务端分成五个提交，顺序与上面略有不同：数据模型与迁移；主体、守卫与 `viewers` 标记；邀请与用户管理；源头过滤；Agent API。邀请比源头过滤先上线，所以 `viewers` 标记在第 2 个提交中只加在 `/v1/session` 和自己的凭据（以及 Agent API 的 `whoami`）上，收藏库的读取等到源头过滤的提交才对查看者开放：中间部署的版本里，查看者即使已经注册，也读不到收藏库。
 

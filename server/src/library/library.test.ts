@@ -4,6 +4,7 @@ import { submit } from '#capture/submit.ts'
 import { collections, library, submissions, tags } from '#db/schema.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform } from '#testing/fake-platform.ts'
+import { SYSTEM } from '#users/principal.ts'
 import { listTags, readAnnotation, updateAnnotation } from './annotations.ts'
 import { deleteAll, deleteCollection } from './delete.ts'
 
@@ -29,7 +30,7 @@ describe('annotations', () => {
       note: 'remember',
       tags: [],
     })
-    expect(listTags(ctx.db)).toEqual([])
+    expect(listTags({ db: ctx.db, principal: SYSTEM })).toEqual([])
   })
 
   test('rejects bad input and unknown tags without changing anything', () => {

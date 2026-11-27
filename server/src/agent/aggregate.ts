@@ -10,6 +10,7 @@ import { parseQuery, usesKey, type QueryNode } from '#query/ast.ts'
 import { compileQuery } from '#query/compile.ts'
 import { printQuery } from '#query/print.ts'
 import { describeQuery } from '#reads/slow.ts'
+import { sees } from '#users/principal.ts'
 import { invalid } from './errors.ts'
 import { checkKeys, type AgentReader, type Params } from './query.ts'
 
@@ -128,9 +129,13 @@ const one = (params: Params, key: string) => {
 export function aggregate(r: AgentReader, input: { params: Params }) {
   const { params } = input
   checkKeys(params, ['q', 'by', 'tz', 'limit'])
+  // A viewer has no tags to count by: for them there is no such `by`.
+  const allowed: readonly AggregateBy[] = sees(r.principal).tags
+    ? AGGREGATE_BY
+    : AGGREGATE_BY.filter((b) => b !== 'tag')
   const by = one(params, 'by') as AggregateBy | undefined
-  if (!by || !AGGREGATE_BY.includes(by))
-    throw invalid(`by must be one of: ${AGGREGATE_BY.join(', ')}.`)
+  if (!by || !allowed.includes(by))
+    throw invalid(`by must be one of: ${allowed.join(', ')}.`)
   const tz = one(params, 'tz') ?? 'UTC'
   const zone = zoneOf(tz)
   if (!zone) throw invalid(`tz must be an IANA time zone, as Asia/Tokyo.`)
@@ -149,6 +154,7 @@ export function aggregate(r: AgentReader, input: { params: Params }) {
     ? compileQuery(q, {
         db: r.db,
         types: r.types,
+        principal: r.principal,
         kind: 'all',
         filter: scope,
         timeZone: zone,

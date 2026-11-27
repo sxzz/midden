@@ -177,7 +177,7 @@ export function writeRoutes(
               id: savedAccount(as(c), t.account, t.platform),
             }
           : 'folder' in t
-            ? { target: 'folder', id: findFolder(ctx.db, t.folder).id }
+            ? { target: 'folder', id: findFolder(as(c), t.folder).id }
             : { target: 'many', ids: t.ids.map((ref) => ref.toLowerCase()) },
       {
         options: resolveOptions(input.options),
@@ -258,7 +258,7 @@ export function writeRoutes(
     const id = setWatch(
       ctx,
       'folder' in t
-        ? { target: 'folder', id: findFolder(ctx.db, t.folder).id }
+        ? { target: 'folder', id: findFolder(as(c), t.folder).id }
         : {
             target: 'collection',
             id: savedAccount(as(c), t.account, t.platform),
@@ -323,13 +323,13 @@ export function writeRoutes(
   // Renaming to another tag's name merges the two.
   app.patch('/tags/:id', writes, async (c) => {
     const { name } = await parse(c, v.strictObject({ name: v.string() }))
-    const [tag] = findTags(ctx.db, [c.req.param('id')])
+    const [tag] = findTags(as(c), [c.req.param('id')])
     return c.json(renameTag(ctx.db, tag!.id, name))
   })
 
   app.post('/tags/:id/merge', writes, async (c) => {
     const { into } = await parse(c, v.strictObject({ into: v.string() }))
-    const [from, to] = findTags(ctx.db, [c.req.param('id'), into])
+    const [from, to] = findTags(as(c), [c.req.param('id'), into])
     if (from!.id === to!.id) throw invalid('A tag cannot merge into itself.')
     return c.json(renameTag(ctx.db, from!.id, to!.name))
   })
@@ -352,7 +352,7 @@ export function writeRoutes(
     })
     app.delete(`/${kind}/:id/tags/:tag`, writes, (c) => {
       const id = target(c, kind, c.req.param('id'), c.req.query('platform'))
-      const [tag] = findTags(ctx.db, [c.req.param('tag')])
+      const [tag] = findTags(as(c), [c.req.param('tag')])
       return c.json(annotationJson(id, removeTag(ctx.db, id, tag!.id)))
     })
     app.put(`/${kind}/:id/note`, writes, async (c) => {
@@ -399,7 +399,7 @@ export function writeRoutes(
       c,
       v.strictObject({ name: v.optional(v.string()), ...FolderBody }),
     )
-    const { id } = findFolder(ctx.db, c.req.param('id'))
+    const { id } = findFolder(as(c), c.req.param('id'))
     const folder = updateFolder(ctx.db, id, input, types)
     const changed = [input.query, input.tz].some((x) => x !== undefined)
     return c.json(folderJson(as(c), changed ? await counted(id) : folder))

@@ -17,7 +17,7 @@
 // negated, are one search as the `q` filter runs it, ranked; words under OR
 // or `-` are sets of what they find, without the fuzzy tier.
 import { eq, sql, type SQL } from 'drizzle-orm'
-import { folders, tags } from '#db/schema.ts'
+import { folders, shares, tags } from '#db/schema.ts'
 import { followSetSQL, type FollowSet } from '#library/follows.ts'
 import {
   authorKey,
@@ -37,6 +37,7 @@ import { isUUID } from '#library/read.ts'
 import { fold } from '#library/search-text.ts'
 import { searchHits } from '#library/search.ts'
 import { list } from '#library/views.ts'
+import { sees, type Principal } from '#users/principal.ts'
 import {
   LIMITS,
   onlyNegative,
@@ -92,6 +93,13 @@ export interface CompileOptions {
   prefix?: string
   /** The folder this query is saved as: it may not name itself. */
   within?: string
+  /**
+   * Whom it is compiled for. What they write is read in their sight: a
+   * viewer has no tags and only the publicly shared folders, and what they
+   * cannot see answers as what does not exist. A folder's own saved query
+   * is the admin's, compiled as theirs (`SYSTEM` for a folder alone).
+   */
+  principal: Principal
 }
 
 export interface CompiledQuery {
@@ -218,6 +226,76 @@ export function resolveAccounts(
       AND e.platform IN (SELECT value FROM json_each(${list(platforms)}))`)
 }
 
+const unknownTag = (name: string, at: number) =>
+  new QueryError(
+    `Unknown tag ${name}. GET /agent/v1/tags lists them.`,
+    at,
+    'unknown_tag',
+    { value: name },
+  )
+
+const unknownFolder = (ref: string, at: number) =>
+  new QueryError(
+    `No folder ${ref}. GET /agent/v1/folders lists them.`,
+    at,
+    'unknown_folder',
+    { value: ref },
+  )
+
+/** A folder by id or name. */
+function findFolderRow(db: Executor, ref: string) {
+  return db
+    .select({ id: folders.id, query: folders.query })
+    .from(folders)
+    .where(
+      isUUID(ref) ? eq(folders.id, ref.toLowerCase()) : eq(folders.name, ref),
+    )
+    .get()
+}
+
+/** Whether a folder is publicly shared now: what a viewer may name. */
+export function sharedFolder(db: Executor, id: string): boolean {
+  return !!db
+    .select({ id: shares.id })
+    .from(shares)
+    .where(
+      sql`${shares.targetKind} = 'folder' AND ${shares.targetId} = ${id}
+        AND ${shares.revokedAt} IS NULL`,
+    )
+    .get()
+}
+
+/**
+ * What the query's author wrote, read in their sight: a tag they cannot
+ * see, or a folder they cannot see, answers exactly as one that does not
+ * exist, so nothing tells the two apart. What a shared folder's own query
+ * holds (tags, other folders) is not theirs and is not checked: it is
+ * compiled as the admin saved it.
+ */
+function checkSight(node: QueryNode, o: CompileOptions): void {
+  const sight = sees(o.principal)
+  if (sight.tags && sight.allFolders) return
+  const walk = (n: QueryNode): void => {
+    switch (n.type) {
+      case 'and':
+      case 'or':
+        for (const item of n.items) walk(item)
+        return
+      case 'not':
+        walk(n.item)
+        return
+      case 'atom':
+        if (n.key === 'tag' && !sight.tags) throw unknownTag(n.value, n.start)
+        if (n.key === 'folder' && !sight.allFolders) {
+          const row = findFolderRow(o.db, n.value)
+          if (!row || !sharedFolder(o.db, row.id))
+            throw unknownFolder(n.value, n.start)
+        }
+    }
+  }
+  walk(node)
+}
+
 class Compiler {
   readonly ctes: SQL[] = []
   /** The folders the query's `folder:` terms read, with their queries. */
@@ -253,31 +331,13 @@ class Compiler {
         isUUID(name) ? eq(tags.id, name.toLowerCase()) : eq(tags.name, name),
       )
       .get()
-    if (!row)
-      throw new QueryError(
-        `Unknown tag ${name}. GET /agent/v1/tags lists them.`,
-        at,
-        'unknown_tag',
-        { value: name },
-      )
+    if (!row) throw unknownTag(name, at)
     return row.id
   }
 
   folderRow(ref: string, at: number) {
-    const row = this.o.db
-      .select({ id: folders.id, query: folders.query })
-      .from(folders)
-      .where(
-        isUUID(ref) ? eq(folders.id, ref.toLowerCase()) : eq(folders.name, ref),
-      )
-      .get()
-    if (!row)
-      throw new QueryError(
-        `No folder ${ref}. GET /agent/v1/folders lists them.`,
-        at,
-        'unknown_folder',
-        { value: ref },
-      )
+    const row = findFolderRow(this.o.db, ref)
+    if (!row) throw unknownFolder(ref, at)
     return row
   }
 
@@ -742,6 +802,7 @@ export function compileQuery(
       node.start,
       'only_exclusions',
     )
+  checkSight(node, o)
   const compiled = compileNode(node, parsed, o, true)
   // Said in the filter's terms, some combinations are ones the filter
   // refuses (a tag both wanted and not, saved after it was saved until):

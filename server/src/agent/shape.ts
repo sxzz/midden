@@ -10,7 +10,7 @@ import {
   type EntityView,
 } from '#library/views.ts'
 import { authorEntity, isProfile, profileURL } from '#telegram/presentation.ts'
-import type { Executor } from '#db/client.ts'
+import { sees, type Seeing } from '#users/principal.ts'
 
 export type View = 'compact' | 'full'
 export const VIEWS: readonly View[] = ['compact', 'full']
@@ -26,13 +26,19 @@ export interface Annotations {
   tags: { id: string; name: string }[]
 }
 
-/** Notes and tags (我的整理) of saved collections. */
+/**
+ * Notes and tags (我的整理) of saved collections, for whoever may see them:
+ * none for a viewer, so their items carry neither.
+ */
 export function annotationsOf(
-  db: Executor,
+  r: Seeing,
   ids: readonly string[],
 ): Map<string, Annotations> {
   const out = new Map<string, Annotations>()
   if (!ids.length) return out
+  const sight = sees(r.principal)
+  if (!sight.tags || !sight.notes) return out
+  const { db } = r
   for (const row of db.all<{ id: string; note: string }>(
     sql`SELECT collection_id AS id, note FROM library
       WHERE collection_id IN (SELECT value FROM json_each(${list(ids)}))`,

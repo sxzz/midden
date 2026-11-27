@@ -332,6 +332,21 @@ for (const name of VIEWS)
           following: {},
           followers: { complete_at: '2026-11-20T00:00:00.000Z' },
         })
+        // A viewer is not told which are the capture accounts: none is
+        // marked, none goes first.
+        const seen = listPerspectives({
+          ...c,
+          principal: { userId: 'v', role: 'viewer', via: 'session' },
+        }).items
+        expect(seen.map((item) => item.username)).toEqual([
+          'eve',
+          'bob',
+          'pat',
+          'alice',
+          'carol',
+          'dan',
+        ])
+        expect(seen.filter((item) => 'own' in item)).toEqual([])
       })
 
       test('search, pages and a chosen one', async () => {

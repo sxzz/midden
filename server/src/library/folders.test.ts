@@ -10,6 +10,7 @@ import {
   libraryContext,
 } from '#testing/library.ts'
 import { migratedBefore } from '#testing/migrations.ts'
+import { SYSTEM } from '#users/principal.ts'
 import { listTags, updateAnnotation } from './annotations.ts'
 import { filterCounts } from './counts.ts'
 import { deleteCollection } from './delete.ts'
@@ -349,21 +350,21 @@ describe('folders', () => {
     const kept = updateAnnotation(c.db, a1, { tagNames: ['kept'] }).tags[0]!
     const folder = createFolder(c.db, { name: 'f', filter: `tag=${kept.id}` })
     updateAnnotation(c.db, a1, { tagIds: [] })
-    expect(listTags(c.db)).toEqual([kept])
+    expect(listTags({ db: c.db, principal: SYSTEM })).toEqual([kept])
     expect((await countedFolders(c.db))[0]!.count).toBe(0)
     updateAnnotation(c.db, a1, { tagIds: [kept.id] })
     expect((await countedFolders(c.db))[0]!.count).toBe(1)
 
     updateAnnotation(c.db, a1, { tagIds: [] })
     updateFolder(c.db, folder.id, { filter: '' })
-    expect(listTags(c.db)).toEqual([])
+    expect(listTags({ db: c.db, principal: SYSTEM })).toEqual([])
 
     const other = updateAnnotation(c.db, a1, { tagNames: ['other'] }).tags[0]!
     updateFolder(c.db, folder.id, { filter: `tag=${other.id}` })
     updateAnnotation(c.db, a1, { tagIds: [] })
-    expect(listTags(c.db)).toEqual([other])
+    expect(listTags({ db: c.db, principal: SYSTEM })).toEqual([other])
     deleteFolder(c.db, folder.id)
-    expect(listTags(c.db)).toEqual([])
+    expect(listTags({ db: c.db, principal: SYSTEM })).toEqual([])
     expect(await countedFolders(c.db)).toEqual([])
   })
 })

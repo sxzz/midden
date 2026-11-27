@@ -17,6 +17,7 @@ import {
 import { compileQuery, type Types } from '#query/compile.ts'
 import { wordTerm } from '#query/convert.ts'
 import { printQuery } from '#query/print.ts'
+import { SYSTEM } from '#users/principal.ts'
 import { filterString, parseFilterQuery } from './filter-query.ts'
 import { savedSince, type CollectionFilter, type QueryExtra } from './list.ts'
 import { isUUID } from './read.ts'
@@ -69,6 +70,8 @@ function compileOwned(
     db,
     types,
     kind: 'all',
+    // A folder's query is the admin's, whoever reads what it selects.
+    principal: SYSTEM,
     filter: {},
     // A folder may be everything but something.
     scoped: true,

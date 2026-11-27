@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'vitest'
 import { createApi } from '#http/app.ts'
 import { createSession, SESSION_COOKIE } from '#http/sessions.ts'
 import { capture, entity, graph, libraryContext } from '#testing/library.ts'
+import { SYSTEM } from '#users/principal.ts'
 import { adminId } from '#users/users.ts'
 import { updateAnnotation } from './annotations.ts'
 import { createFolder } from './folders.ts'
@@ -56,32 +57,33 @@ test('offers what the library holds, most used first', async () => {
   updateAnnotation(c.db, ids.p2!, { tagNames: ['to read'] })
   createFolder(c.db, { name: '猫', query: '#cats' })
   createFolder(c.db, { name: 'art folder', query: 'tag:art' })
+  const admin = { db: c.db, principal: SYSTEM }
 
-  expect(suggest(c.db, 'handle', '@al')).toEqual([
+  expect(suggest(admin, 'handle', '@al')).toEqual([
     { value: '@alice', label: 'Alice', count: 2 },
     { value: '@albert', label: 'Albert', count: 1 },
   ])
   // One or two letters are read row by row, and find the same.
-  expect(suggest(c.db, 'handle', 'b').map((s) => s.value)).toEqual(['@bob'])
+  expect(suggest(admin, 'handle', 'b').map((s) => s.value)).toEqual(['@bob'])
   // Nothing typed yet: the authors with the most posts.
-  expect(suggest(c.db, 'handle', '')[0]).toEqual({
+  expect(suggest(admin, 'handle', '')[0]).toEqual({
     value: '@alice',
     label: 'Alice',
     count: 2,
   })
-  expect(suggest(c.db, 'hashtag', 'CAT')).toEqual([
+  expect(suggest(admin, 'hashtag', 'CAT')).toEqual([
     { value: 'catnip', count: 2 },
     { value: 'cats', count: 2 },
   ])
-  expect(suggest(c.db, 'domain', 'a')).toEqual([{ value: 'a.test', count: 2 }])
-  expect(suggest(c.db, 'tag', 'a')).toEqual([
+  expect(suggest(admin, 'domain', 'a')).toEqual([{ value: 'a.test', count: 2 }])
+  expect(suggest(admin, 'tag', 'a')).toEqual([
     // Starts with it first, then holds it.
     { value: 'art', count: 1 },
     { value: 'to read', count: 2 },
   ])
-  expect(suggest(c.db, 'tag', 'to')).toEqual([{ value: 'to read', count: 2 }])
-  expect(suggest(c.db, 'folder', 'ART')).toEqual([{ value: 'art folder' }])
-  expect(suggest(c.db, 'hashtag', 'zzz')).toEqual([])
+  expect(suggest(admin, 'tag', 'to')).toEqual([{ value: 'to read', count: 2 }])
+  expect(suggest(admin, 'folder', 'ART')).toEqual([{ value: 'art folder' }])
+  expect(suggest(admin, 'hashtag', 'zzz')).toEqual([])
 })
 
 test('the owner asks for them; nobody else', async () => {

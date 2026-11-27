@@ -94,7 +94,9 @@ export const viewers: MiddlewareHandler = (_c, next) => next()
  */
 export function openToViewers(c: Context): boolean {
   const { role } = c.get('principal') as Principal
-  return role === 'admin' || routeHas(c, viewers)
+  if (role === 'admin' || routeHas(c, viewers)) return true
+  // No route at all: the request goes on to be not found.
+  return matchedRoutes(c).every((r) => r.method === 'ALL')
 }
 
 /** What a viewer gets from a route not open to them. */

@@ -563,6 +563,7 @@ describe('random queries', () => {
         db: ctx.db,
         types: reader.types,
         kind: 'all',
+        principal: SYSTEM,
         filter: {},
         scoped: true,
       }
@@ -632,6 +633,7 @@ function plan(text: string): string {
     db: ctx.db,
     types: reader.types,
     kind: 'posts',
+    principal: SYSTEM,
     filter: { entityType: reader.types.posts.join(',') },
     scoped: true,
   })!
@@ -693,6 +695,7 @@ describe('languages', () => {
         db: ctx.db,
         types: reader.types,
         kind: 'all',
+        principal: SYSTEM,
         filter: {},
         scoped: true,
       })!
@@ -959,6 +962,7 @@ describe('folders as queries', () => {
             db: ctx.db,
             types: reader.types,
             kind: 'all',
+            principal: SYSTEM,
             filter: { ...parseFilterQuery(filterShown!).filter, q: undefined },
             scoped: true,
           })?.filter ?? parseFilterQuery(filterShown!).filter,
@@ -989,6 +993,7 @@ describe('folders as queries', () => {
       db: ctx.db,
       types: reader.types,
       kind: 'all',
+      principal: SYSTEM,
       filter: {},
       scoped: true,
     })!
