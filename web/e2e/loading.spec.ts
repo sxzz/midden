@@ -40,14 +40,14 @@ test('后台任务: a skeleton first, then the same page on every read', async (
   await expect(skeleton).toHaveCSS('animation-delay', '0.18s')
   release()
   await expect(page.getByText('暂停全部')).toBeVisible()
-  await expect(page.getByText('等待 1 · 进行中 1')).toBeVisible()
+  await expect(page.getByText('等待1 · 进行中1')).toBeVisible()
   await expect(page.getByRole('status', { name: /^正在读取/ })).toHaveCount(0)
 
   const before = await height(page)
   // Read again every 5 seconds: the numbers change in place.
   for (const n of [2, 3, 4]) {
     await page.clock.runFor(5000)
-    await expect(page.getByText(`等待 ${n} · 进行中 1`)).toBeVisible()
+    await expect(page.getByText(`等待${n} · 进行中1`)).toBeVisible()
     await expect(page.getByRole('status', { name: /^正在读取/ })).toHaveCount(0)
     await expect(page.getByText(/加载中/)).toHaveCount(0)
     expect(Math.abs((await height(page)) - before)).toBeLessThanOrEqual(2)
@@ -68,13 +68,13 @@ test('后台任务: a failed read keeps the last answer, under why', async ({
       : r.fulfill({ json: queue(reads) })
   })
   await page.goto('/settings/admin/jobs')
-  await expect(page.getByText('等待 1 · 进行中 1')).toBeVisible()
+  await expect(page.getByText('等待1 · 进行中1')).toBeVisible()
   await page.clock.runFor(5000)
   await expect(page.getByRole('alert')).toHaveText('服务暂时不可用')
-  await expect(page.getByText('等待 1 · 进行中 1')).toBeVisible()
+  await expect(page.getByText('等待1 · 进行中1')).toBeVisible()
   await page.clock.runFor(5000)
   await expect(page.getByRole('alert')).toHaveCount(0)
-  await expect(page.getByText('等待 3 · 进行中 1')).toBeVisible()
+  await expect(page.getByText('等待3 · 进行中1')).toBeVisible()
 })
 
 test('lists read for the first time show their skeleton, not words', async ({

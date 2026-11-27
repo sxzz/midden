@@ -231,7 +231,7 @@ test('marks the graph by a viewer account, and starts a comparison from it', asy
   await page.locator('.list .viewer-mark').first().click()
   await expect(
     page.getByRole('region', { name: '账号' }).locator('.viewer'),
-  ).toHaveText(/^(与 @me 互关|@me 关注了 TA|TA 关注了 @me)$/)
+  ).toHaveText(/^(与 @me 互关|@me 关注了TA|TA关注了 @me)$/)
   await page.getByRole('button', { name: '关闭' }).click()
   await modes.nth(0).click()
   await page.waitForTimeout(500)

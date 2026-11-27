@@ -39,10 +39,10 @@ test('select collections and update them as one record', async ({ page }) => {
   await page.getByRole('checkbox', { name: /作者3/ }).click()
   await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(2)
   await expect(page).toHaveURL(/:\d+\/$/)
-  await expect(bar.getByText('已选 2 项')).toBeVisible()
+  await expect(bar.getByText('已选2项')).toBeVisible()
   await page.getByRole('button', { name: '更新', exact: true }).click()
   // The sheet says what the update covers; posts have only their own.
-  const sheet = page.getByRole('dialog', { name: '更新 2 条帖子' })
+  const sheet = page.getByRole('dialog', { name: '更新2条帖子' })
   await expect(sheet).toBeVisible()
   await expect(sheet.getByText('抓帖子')).toHaveCount(0)
   await expect(sheet.getByText('抓关系网')).toHaveCount(0)
@@ -50,7 +50,7 @@ test('select collections and update them as one record', async ({ page }) => {
   await sheet.getByRole('button', { name: '开始更新' }).click()
   // Selection ends; the bar confirms and links to the update's one record.
   await expect(page.getByRole('checkbox')).toHaveCount(0)
-  await expect(page.getByText('已开始更新 2 项')).toBeVisible()
+  await expect(page.getByText('已开始更新2项')).toBeVisible()
   await expect(page.getByRole('button', { name: '多选' })).toBeVisible()
   expect(started).toEqual({
     target: { target: 'many', ids: [items[0].id, items[2].id] },
@@ -79,9 +79,9 @@ test('select all toggles every listed collection', async ({ page }) => {
   await page.getByRole('button', { name: '多选' }).click()
   const bar = page.getByRole('region', { name: '多选' })
   await page.getByRole('button', { name: '全选' }).click()
-  await expect(bar.getByText('已选 3 项')).toBeVisible()
+  await expect(bar.getByText('已选3项')).toBeVisible()
   await page.getByRole('button', { name: '取消全选' }).click()
-  await expect(bar.getByText('已选 0 项')).toBeVisible()
+  await expect(bar.getByText('已选0项')).toBeVisible()
   await expect(
     page.getByRole('button', { name: '更新', exact: true }),
   ).toBeDisabled()
@@ -126,18 +126,18 @@ test("delete a selection, with the accounts' posts only when asked", async ({
   await page.getByRole('checkbox', { name: /作者1/ }).click()
   await page.getByRole('checkbox', { name: /作者2/ }).click()
   await more.click()
-  const menu = page.getByRole('menu', { name: '已选 2 项' })
+  const menu = page.getByRole('menu', { name: '已选2项' })
   await menu.getByRole('menuitem', { name: '删除', exact: true }).click()
   await expect(menu).toBeHidden()
-  const sheet = page.getByRole('dialog', { name: '删除 2 项收藏？' })
-  await expect(sheet.getByText('将删除 1 个账号、1 条帖子')).toBeVisible()
+  const sheet = page.getByRole('dialog', { name: '删除2项收藏？' })
+  await expect(sheet.getByText('将删除1个账号、1条帖子')).toBeVisible()
   // The accounts' posts stay unless asked for.
   const option = sheet.getByRole('checkbox', { name: '同时删除关联的帖子' })
   await expect(option).not.toBeChecked()
   await option.check()
   await expect(
     sheet.getByText(
-      '将删除 1 个账号、411 条帖子（保留 37 条：其他账号也关联 12 条、单独收藏 20 条、已整理 5 条）',
+      '将删除1个账号、411条帖子（保留37条：其他账号也关联12条、单独收藏20条、已整理5条）',
     ),
   ).toBeVisible()
   await sheet.getByRole('button', { name: '删除', exact: true }).click()

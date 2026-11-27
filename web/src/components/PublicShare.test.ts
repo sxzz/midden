@@ -138,7 +138,7 @@ it('opens a shared folder without login, with a tab per kind it holds', async ()
   expect(el.querySelector('h1')?.textContent).toBe('精选')
   // Counted within the share, for the tab shown.
   await vi.waitFor(() =>
-    expect(el.querySelector('.total')?.textContent).toBe('1,234 条'),
+    expect(el.querySelector('.total')?.textContent).toBe('1,234条'),
   )
   // Items open inside the share.
   expect(
@@ -154,7 +154,7 @@ it('opens a shared folder without login, with a tab per kind it holds', async ()
   tab.click()
   await vi.waitFor(() => expect(el.textContent).toContain('账号简介'))
   await vi.waitFor(() =>
-    expect(el.querySelector('.total')?.textContent).toBe('56 个账号'),
+    expect(el.querySelector('.total')?.textContent).toBe('56个账号'),
   )
   // The tab is in the address, so it can be linked.
   expect(router.currentRoute.value.query.entity_type).toBe(

@@ -113,7 +113,7 @@ test('a public link opens a folder and its items without login', async ({
   await page.goto(`/s/${slug}`)
   await expect(page.locator('h1')).toHaveText('公开收藏夹')
   await expect(page.getByText('公开的帖子')).toBeVisible()
-  await expect(page.locator('.total')).toHaveText('1 条')
+  await expect(page.locator('.total')).toHaveText('1条')
   await expect(page.getByRole('button', { name: '多选' })).toHaveCount(0)
   // Sensitive media starts covered for a visitor.
   await expect(

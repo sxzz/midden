@@ -199,7 +199,7 @@ test('capture options are submitted with links, summed up while folded', async (
   await page.goto('/captures')
   await page.getByLabel('链接', { exact: true }).fill('https://x.com/example')
   const options = page.locator('.capture-options')
-  await expect(options.locator('summary')).toContainText('最新 100 条')
+  await expect(options.locator('summary')).toContainText('最新100条')
   await options.locator('summary').click()
   await page.getByLabel('仅采集含图片或视频的帖子').check()
   await page.getByLabel('包含引用转帖和纯转发').uncheck()
@@ -216,7 +216,7 @@ test('capture options are submitted with links, summed up while folded', async (
   await expect(page.getByLabel('帖子范围')).toHaveValue('max')
   await options.locator('summary').click()
   await expect(options.locator('summary')).toContainText(
-    '最多 42 条 · 仅媒体 · 不含转帖 · 不抓原帖 · 最近 7 天 · 抓关系网',
+    '最多42条 · 仅媒体 · 不含转帖 · 不抓原帖 · 最近7天 · 抓关系网',
   )
   await page.getByRole('button', { name: '采集', exact: true }).click()
   await expect.poll(() => body?.options?.count).toBe(42)

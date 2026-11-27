@@ -331,7 +331,7 @@ test('deleting everything shows what goes and needs the phrase typed', async ({
     .click()
   const sheet = page.getByRole('dialog', { name: '删除全部收藏和采集记录？' })
   await expect(sheet).toContainText(
-    '12 条收藏、30 条采集记录（2 条进行中），无法恢复。',
+    '12条收藏、30条采集记录（2条进行中），无法恢复。',
   )
   const confirm = sheet.getByRole('button', { name: '永久删除' })
   await expect(confirm).toBeDisabled()
@@ -346,9 +346,7 @@ test('deleting everything shows what goes and needs the phrase typed', async ({
   expect(deleted).toBeUndefined()
   await sheet.getByLabel('输入「删除全部」以确认').fill('删除全部')
   await confirm.click()
-  await expect(
-    page.getByText('已删除 12 条收藏和 30 条采集记录。'),
-  ).toBeVisible()
+  await expect(page.getByText('已删除12条收藏和30条采集记录。')).toBeVisible()
   expect(deleted).toEqual({ confirm: 'delete all' })
   await page
     .getByRole('navigation', { name: '主导航' })

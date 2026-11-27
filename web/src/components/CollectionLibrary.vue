@@ -269,7 +269,7 @@ const shownTotal = computed(() => {
   const total = list.collection.total.value
   return total === undefined
     ? ''
-    : `${total.toLocaleString('zh-CN')} ${listsProfiles(list.query.value) ? '个账号' : '条'}`
+    : `${total.toLocaleString('zh-CN')}${listsProfiles(list.query.value) ? '个账号' : '条'}`
 })
 const usedText = computed(() =>
   usage.value ? `已用${storageSize(usage.value.used_bytes)}` : '',

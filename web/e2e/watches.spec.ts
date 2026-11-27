@@ -105,7 +105,7 @@ test('watch a profile from its detail, then edit the watch', async ({
   // The 更新 sheet's options, with its defaults, and how often.
   await expect(sheet.getByLabel('间隔')).toHaveValue('1')
   await expect(sheet.getByLabel('单位')).toHaveValue('day')
-  await expect(sheet.getByText('最短 5 分钟')).toBeVisible()
+  await expect(sheet.getByText('最短5分钟')).toBeVisible()
   await expect(sheet.getByLabel('抓帖子')).toBeChecked()
   await expect(sheet.getByLabel('抓关系网')).not.toBeChecked()
   // A custom interval: every 6 hours.
@@ -138,7 +138,7 @@ test('watch a profile from its detail, then edit the watch', async ({
     },
   ])
   // The row says how often and when next, in local time.
-  await expect(row).toContainText('每 6 小时')
+  await expect(row).toContainText('每6小时')
   await expect(row).toContainText('下次 今天 23:05')
 
   // Editing keeps what was chosen; the last run links to its record.
@@ -163,7 +163,7 @@ test('watch a profile from its detail, then edit the watch', async ({
   await sheet.getByLabel('间隔').fill('2')
   await sheet.getByRole('button', { name: '保存' }).click()
   await expect(sheet).toBeHidden()
-  await expect(row).toContainText('每 2 个月')
+  await expect(row).toContainText('每2个月')
   expect(sent.at(-1)).toMatchObject({
     method: 'PUT',
     body: { every: { count: 2, unit: 'month' }, options: { relations: true } },
@@ -194,7 +194,7 @@ test('采集 lists the watches; one can be turned off', async ({ page }) => {
   await expect(page.locator('h1')).toHaveText('采集')
   const item = page.locator('.watch')
   await expect(item.getByRole('link', { name: '@owner' })).toBeVisible()
-  await expect(item).toContainText('每天 · 最新 100 条')
+  await expect(item).toContainText('每天 · 最新100条')
   await expect(item).toContainText('下次 今天 23:05')
   await page.getByRole('switch', { name: '开启 @owner 的定期更新' }).click()
   await expect(item).toContainText('已关闭')
@@ -212,7 +212,7 @@ test('采集 lists the watches; one can be turned off', async ({ page }) => {
   await sheet.getByLabel('单位').selectOption('week')
   await sheet.getByRole('button', { name: '保存' }).click()
   await expect(sheet).toBeHidden()
-  await expect(item).toContainText('每 2 周 · 最新 100 条')
+  await expect(item).toContainText('每2周 · 最新100条')
 })
 
 test('watch a folder from its menu', async ({ page }) => {

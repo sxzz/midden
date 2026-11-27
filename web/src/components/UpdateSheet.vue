@@ -62,7 +62,7 @@ const title = computed(() => {
   const p = preview.value
   if (props.label) return `更新 ${props.label}`
   if (!p) return '更新'
-  return `更新 ${coverText(p.posts, p.profiles)}`
+  return `更新${coverText(p.posts, p.profiles)}`
 })
 /** A single profile's list sizes, and which lists would be skipped. */
 const counts = computed(() => {

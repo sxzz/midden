@@ -117,7 +117,9 @@ test.describe('with a mouse', () => {
       name: `删除收藏夹「${folder.name}」`,
     })
     await expect(confirm).toBeVisible()
-    await confirm.getByRole('button', { name: '取消' }).click()
+    // A desktop dialog: ✕ in 取消's place, the confirmation a red button.
+    await expect(confirm.getByRole('button', { name: '取消' })).toBeHidden()
+    await confirm.getByRole('button', { name: '关闭' }).click()
     await expect(confirm).toBeHidden()
     expect(deletes).toEqual([])
     // Focus is back where the menu was opened.
@@ -133,7 +135,7 @@ test.describe('with a mouse', () => {
     await page.getByRole('checkbox').first().click()
     const more = page.getByRole('button', { name: '更多操作' })
     await more.click()
-    const menu = page.getByRole('menu', { name: '已选 1 项' })
+    const menu = page.getByRole('menu', { name: '已选1项' })
     await expect(menu).toBeVisible()
     const button = (await more.boundingBox())!
     const box = (await menu.boundingBox())!
@@ -174,7 +176,7 @@ test.describe('with touch', () => {
     await page.getByRole('button', { name: '多选' }).tap()
     await page.getByRole('checkbox').first().tap()
     await page.getByRole('button', { name: '更多操作' }).tap()
-    const selection = page.getByRole('dialog', { name: '已选 1 项' })
+    const selection = page.getByRole('dialog', { name: '已选1项' })
     await expect(
       selection.getByRole('button', { name: '删除', exact: true }),
     ).toBeVisible()

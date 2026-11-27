@@ -144,7 +144,7 @@ test('a /passkey link adds a passkey, which then signs in', async ({
   session = false
   await page.goto(APP)
   await expect(
-    page.getByText('首次使用请在 Telegram 中发送 /passkey'),
+    page.getByText('首次使用请在Telegram中发送 /passkey'),
   ).toBeVisible()
   await page.screenshot({ path: 'test-results/passkey-login.png' })
   await page.getByRole('button', { name: '使用通行密钥登录' }).click()
@@ -317,7 +317,7 @@ test('the settings page adds a domain and removes it with its passkeys', async (
   await page.goto(`${APP}settings/admin/origins`)
   const domains = page.getByRole('region', { name: '域名' })
   await expect(domains).toContainText('midden.test')
-  await expect(domains).toContainText('Mini App 地址')
+  await expect(domains).toContainText('Mini App地址')
   await expect(
     domains.getByRole('button', { name: '删除 midden.test' }),
   ).toHaveCount(0)
@@ -329,9 +329,9 @@ test('the settings page adds a domain and removes it with its passkeys', async (
   await expect(domains).toContainText('archive.example')
   expect(added).toEqual([{ origin: 'https://archive.example/' }])
 
-  await domains.getByRole('button', { name: '删除 archive.example' }).click()
-  const confirm = page.getByRole('dialog', { name: '删除 archive.example？' })
-  await expect(confirm).toContainText('将同时删除此域名的 1 个通行密钥')
+  await domains.getByRole('button', { name: '删除archive.example' }).click()
+  const confirm = page.getByRole('dialog', { name: '删除archive.example？' })
+  await expect(confirm).toContainText('将同时删除此域名的1个通行密钥')
   await confirm.getByRole('button', { name: '删除域名' }).click()
   await expect(domains).not.toContainText('archive.example')
   // The passkeys page reads them again when it is opened.

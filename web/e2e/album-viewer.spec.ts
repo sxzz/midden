@@ -108,7 +108,7 @@ test('deleting in the viewer keeps it open on the next item, and the list where 
   // The next item takes its place; the viewer is still open.
   await expect(viewer(page).locator('.counter')).toHaveText('11 / 39')
   expect(await current(page)).toContain('/img-12')
-  await expect(page.getByText('已删除 1 个媒体')).toBeVisible()
+  await expect(page.getByText('已删除1个媒体')).toBeVisible()
   expect(seen.removals).toEqual([{ collection: recordId(11), asset: 'img-11' }])
   // The tile behind it is gone, with no list loaded again and no skeleton.
   await expect(tiles(page)).toHaveCount(39)

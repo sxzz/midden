@@ -71,7 +71,7 @@ test('charts a profile’s counts from its detail and returns to it', async ({
   )
   await expect(page.locator('h1')).toHaveText('历史')
   await expect(page.locator('.summary')).toHaveText(
-    '4 次抓取 · 11月1日 – 11月5日',
+    '4次抓取 · 11月1日 – 11月5日',
   )
   const charts = page.locator('.trend')
   await expect(charts.locator('.label')).toHaveText([

@@ -4,4 +4,4 @@ import type { Page } from '@playwright/test'
 export const thumb = (page: Page, n: number) =>
   page
     .getByRole('dialog')
-    .getByRole('button', { name: new RegExp(`^第 ${n} 项`) })
+    .getByRole('button', { name: new RegExp(`^第${n}项`) })

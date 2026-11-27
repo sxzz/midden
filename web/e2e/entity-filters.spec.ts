@@ -195,7 +195,7 @@ test('Chinese filters support multiple media, date bounds and storage order', as
   expect(query.get('tz')).toBeTruthy()
   expect(query.get('saved_from')).toBeNull()
   expect(query.get('saved_before')).toBeNull()
-  await expect(page.locator('.filter-summary')).toContainText('最近 7 天')
+  await expect(page.locator('.filter-summary')).toContainText('最近7天')
   await range.selectOption('custom')
   // The fields start at the days the quick range covered.
   await expect(page.getByLabel('收藏开始日期')).not.toHaveValue('')

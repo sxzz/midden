@@ -162,7 +162,7 @@ const empty = computed(
 const totalText = computed(() =>
   props.total === undefined
     ? ''
-    : `${props.total.toLocaleString('zh-CN')} ${listsProfiles(props.query) ? '个账号' : '条'}`,
+    : `${props.total.toLocaleString('zh-CN')}${listsProfiles(props.query) ? '个账号' : '条'}`,
 )
 const storage = computed(() =>
   props.usage ? `已用${storageSize(props.usage.used_bytes)}` : '',

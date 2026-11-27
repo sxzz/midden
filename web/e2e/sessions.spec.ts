@@ -86,7 +86,7 @@ test('lists the signed-in devices, this one marked, and signs others out', async
   await expect(here.getByRole('button')).toHaveCount(0)
   await expect(rows(page).nth(1)).toContainText('Telegram · iOS')
   await expect(rows(page).nth(1)).toContainText(
-    'midden.test · Telegram Mini App · 最近使用：3 天前',
+    'midden.test · Telegram Mini App · 最近使用：3天前',
   )
   await expect(rows(page).nth(2)).toContainText('未知设备')
   await expect(rows(page).nth(2)).toContainText('最近使用：昨天')
@@ -103,7 +103,7 @@ test('lists the signed-in devices, this one marked, and signs others out', async
 
   // Every other one.
   await page.getByRole('button', { name: '退出其他所有设备' }).click()
-  await expect(sheet(page)).toContainText('退出其他 1 个设备？')
+  await expect(sheet(page)).toContainText('退出其他1个设备？')
   await sheet(page).getByRole('button', { name: '退出其他所有设备' }).click()
   await expect(page.getByText('已退出其他所有设备')).toBeVisible()
   await expect(rows(page)).toHaveCount(1)

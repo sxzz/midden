@@ -90,7 +90,7 @@ test('the 关系 filter picks an account, then whose follows to list', async ({
   }
   await expect.poll(several).toEqual([[FRIEND, OWNER], 'mutual', null])
   await expect(page.locator('.filter-summary')).toHaveText(
-    '与 @friend、@owner 中至少 2 人互关',
+    '与 @friend、@owner 中至少2人互关',
   )
   const stepper = page.getByRole('group', { name: '至少几人' })
   await expect(stepper.locator('output')).toHaveText('2')

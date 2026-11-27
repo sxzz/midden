@@ -120,16 +120,20 @@ test('remove a post’s media, then see it as removed and restore it', async ({
   })
   await page.goto(`/collection/${id}`)
   await expect(page.getByText('带视频的帖子')).toBeVisible()
-  await page.getByRole('button', { name: '删除此帖所有媒体' }).click()
+  // In the card's ⋯ menu.
+  await page.getByRole('button', { name: '更多操作' }).click()
+  await page.getByRole('menuitem', { name: '删除此帖所有媒体' }).click()
   const sheet = page.getByRole('dialog', { name: '删除此帖所有媒体？' })
-  await expect(sheet.getByText('可释放 4.8 MB')).toBeVisible()
+  await expect(sheet.getByText('可释放4.8 MB')).toBeVisible()
   await sheet.getByRole('button', { name: '删除', exact: true }).click()
   // The kept thumbnail, linking to the post on the platform.
   const link = page.getByRole('link', { name: '视频已移除 · 在原站查看 ›' })
   await expect(link).toHaveAttribute('href', 'https://x.com/synthetic/status/2')
+  await page.getByRole('button', { name: '更多操作' }).click()
   await expect(
-    page.getByRole('button', { name: '删除此帖所有媒体' }),
+    page.getByRole('menuitem', { name: '删除此帖所有媒体' }),
   ).toHaveCount(0)
+  await page.keyboard.press('Escape')
   // Still stored: 恢复 links it back at once, capturing nothing.
   await page.getByRole('button', { name: '恢复', exact: true }).click()
   await expect(page.getByRole('button', { name: '播放视频' })).toBeVisible()
@@ -198,13 +202,13 @@ test('remove the media of a selection from the 多选 bar', async ({ page }) => 
   await page.getByRole('checkbox', { name: /作者/ }).click()
   await page.getByRole('button', { name: '更多操作' }).click()
   await page
-    .getByRole('menu', { name: '已选 1 项' })
+    .getByRole('menu', { name: '已选1项' })
     .getByRole('menuitem', { name: '删除媒体' })
     .click()
-  const sheet = page.getByRole('dialog', { name: '删除 1 项的媒体？' })
+  const sheet = page.getByRole('dialog', { name: '删除1项的媒体？' })
   await expect(sheet.getByText('其他收藏仍在使用，不会释放空间')).toBeVisible()
   await sheet.getByRole('button', { name: '删除', exact: true }).click()
-  await expect(page.getByText('已删除 1 个媒体')).toBeVisible()
+  await expect(page.getByText('已删除1个媒体')).toBeVisible()
   expect(sent.slice(0, 2)).toEqual([
     { path: '/v1/media-removals/preview', body: { ids: [id] } },
     { path: '/v1/media-removals', body: { ids: [id] } },
@@ -298,20 +302,27 @@ test('remove all videos of a profile, stated first and run as a job', async ({
   })
   await page.goto(`/collection/${profileId}`)
   await expect(page.getByText('合成账号简介')).toBeVisible()
-  await page.getByRole('button', { name: '删除所有视频' }).click()
+  // In the card's ⋯ menu.
+  await page.getByRole('button', { name: '更多操作' }).click()
+  await page.getByRole('menuitem', { name: '删除所有视频' }).click()
   const sheet = page.getByRole('dialog', { name: '删除所有视频？' })
   await expect(
     sheet.getByText(
-      '将删除 12 条帖子的 15 个视频，可释放 238.4 MB（保留 3 条帖子的视频：其他账号也关联 2 条、单独收藏 1 条；另有 1 个视频其他收藏也有，保留）',
+      '将删除12条帖子的15个视频，可释放238.4 MB（保留3条帖子的视频：其他账号也关联2条、单独收藏1条；另有1个视频其他收藏也有，保留）',
     ),
   ).toBeVisible()
   await sheet.getByRole('button', { name: '删除', exact: true }).click()
   await expect(sheet).toBeHidden()
+  await page.getByRole('button', { name: '更多操作' }).click()
   await expect(
-    page.getByRole('button', { name: '正在删除视频…' }),
-  ).toBeVisible()
-  await expect(page.getByText('已删除 15 个视频')).toBeVisible()
-  await expect(page.getByRole('button', { name: '删除所有视频' })).toBeEnabled()
+    page.getByRole('menuitem', { name: /^正在删除视频/ }),
+  ).toBeDisabled()
+  await page.keyboard.press('Escape')
+  await expect(page.getByText('已删除15个视频')).toBeVisible()
+  await page.getByRole('button', { name: '更多操作' }).click()
+  await expect(
+    page.getByRole('menuitem', { name: '删除所有视频' }),
+  ).toBeEnabled()
   expect(sent).toEqual([
     `/v1/collections/${profileId}/video-removal/preview`,
     `/v1/collections/${profileId}/video-removal`,

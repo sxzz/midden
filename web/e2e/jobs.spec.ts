@@ -40,7 +40,7 @@ test('后台任务 lists rate limits and ends one early', async ({ page }) => {
   await page.goto('/settings/admin/jobs')
   const row = page.getByRole('button', { name: /X @owner · UserTweets/ })
   const time = `${until.getHours()}:${String(until.getMinutes()).padStart(2, '0')}`
-  await expect(row).toContainText(`${time} 恢复，还有 13 分钟 · 等待 3`)
+  await expect(row).toContainText(`${time} 恢复，还有13分钟 · 等待3`)
   await expect(row).toContainText('解除')
   await row.click()
   await expect(row).toHaveCount(0)
@@ -81,10 +81,10 @@ test('后台任务 lists the slow queries, newest first', async ({ page }) => {
     return r.fulfill({ json: { items: [] } })
   })
   await page.goto('/settings/admin/jobs')
-  await expect(page.getByText('慢查询（300 ms 以上）')).toBeVisible()
+  await expect(page.getByText('慢查询（300 ms以上）')).toBeVisible()
   const first = page.locator('.slow').first()
   await expect(first).toContainText('GET /agent/v1/posts')
-  await expect(first).toContainText('1,234 ms · 21 行')
+  await expect(first).toContainText('1,234 ms · 21行')
   await expect(first).toContainText('{"q":"#猫 lang:ja","sort":"updated"}')
   // Without a query, its SQL.
   await expect(page.locator('.slow').nth(1)).toContainText(

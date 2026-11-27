@@ -116,7 +116,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
     page.locator('.head').filter({ hasText: '测试作者' }).first().click()
   await page.goto('/')
   await expect(page.getByText(collection.text)).toBeVisible()
-  await expect(page.locator('.total')).toHaveText('1 条')
+  await expect(page.locator('.total')).toHaveText('1条')
   await page.screenshot({
     path: 'test-results/library-mobile.png',
     fullPage: true,
@@ -140,7 +140,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await expect(page.locator('.timeline .when')).toContainText('最新版本')
   // A post's sheet has its references alone.
   await page.getByRole('button', { name: '更新', exact: true }).click()
-  const updateSheet = page.getByRole('dialog', { name: '更新 1 条帖子' })
+  const updateSheet = page.getByRole('dialog', { name: '更新1条帖子' })
   await expect(updateSheet.getByLabel('采集引用、转发的原帖')).toBeChecked()
   await expect(updateSheet.getByText('抓帖子')).toHaveCount(0)
   await updateSheet.getByRole('button', { name: '开始更新' }).click()
@@ -163,7 +163,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await page.getByRole('combobox', { name: '搜索或筛选' }).fill('不存在')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await expect(page.getByText('没有匹配的收藏', { exact: true })).toBeVisible()
-  await expect(page.locator('.total')).toHaveText('0 条')
+  await expect(page.locator('.total')).toHaveText('0条')
   // A search is ordered by relevance; the other orders still apply within it.
   const order = page.getByRole('combobox', { name: '排序', exact: true })
   await expect(order).toHaveValue('relevance')
@@ -179,10 +179,12 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await page.getByRole('combobox', { name: '搜索或筛选' }).fill('')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await openRow()
-  await page.getByRole('button', { name: '删除这条收藏' }).click()
+  // In the card's ⋯ menu.
+  await page.getByRole('button', { name: '更多操作' }).click()
+  await page.getByRole('menuitem', { name: '删除这条收藏' }).click()
   const sheet = page.getByRole('dialog', { name: '删除这条收藏？' })
   // A post has no posts of its own to offer.
-  await expect(sheet.getByText('将删除 1 条帖子')).toBeVisible()
+  await expect(sheet.getByText('将删除1条帖子')).toBeVisible()
   await expect(sheet.getByRole('checkbox')).toHaveCount(0)
   await sheet.getByRole('button', { name: '删除', exact: true }).click()
   await expect(page.locator('h1')).toHaveText('我的收藏')
@@ -418,7 +420,7 @@ test('scroll loads the next page and retries without losing existing items', asy
   })
   await page.goto('/')
   await expect(page.getByText('收藏编号 1', { exact: true })).toBeVisible()
-  await expect(page.getByText('已用 1.0 MB', { exact: true })).toBeInViewport()
+  await expect(page.getByText('已用1.0 MB', { exact: true })).toBeInViewport()
   expect(cursors).toEqual([null])
   await page.getByText('收藏编号 20', { exact: true }).scrollIntoViewIfNeeded()
   await expect(page.getByRole('button', { name: '重试加载' })).toBeVisible()
@@ -510,7 +512,7 @@ test('a failed update says why every time it is tried', async ({ page }) => {
   await page.goto(`/collection/${id}`)
   await expect(page.getByText(collection.text)).toBeVisible()
   await page.getByRole('button', { name: '更新', exact: true }).click()
-  const sheet = page.getByRole('dialog', { name: '更新 1 条帖子' })
+  const sheet = page.getByRole('dialog', { name: '更新1条帖子' })
   for (let i = 1; i <= 2; i++) {
     await sheet.getByRole('button', { name: '开始更新' }).click()
     await expect.poll(() => attempts).toBe(i)

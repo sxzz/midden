@@ -306,14 +306,14 @@ it('shows the total beside the list, counted per filter and not per page', async
   expect(el.querySelector('.total')).toBeNull()
   answer({ count: 1234, types: { 'x.post': 1234 } })
   await vi.waitFor(() =>
-    expect(el.querySelector('.total')?.textContent).toBe('1,234 条'),
+    expect(el.querySelector('.total')?.textContent).toBe('1,234条'),
   )
 
   await nextTick()
   intersect()
   await vi.waitFor(() => expect(el.textContent).toContain('第二页'))
   expect(counts()).toHaveLength(1)
-  expect(el.querySelector('.total')?.textContent).toBe('1,234 条')
+  expect(el.querySelector('.total')?.textContent).toBe('1,234条')
 
   const input = el.querySelector<HTMLInputElement>(
     'input[aria-label="搜索或筛选"]',
@@ -329,6 +329,6 @@ it('shows the total beside the list, counted per filter and not per page', async
   expect(el.querySelector('.total')).toBeNull()
   answer({ count: 0, types: {} })
   await vi.waitFor(() =>
-    expect(el.querySelector('.total')?.textContent).toBe('0 条'),
+    expect(el.querySelector('.total')?.textContent).toBe('0条'),
   )
 })

@@ -280,7 +280,7 @@ it('updates the open folder from its menu, then links to the progress', async ()
   button(el, '更新收藏夹').click()
   await vi.waitFor(() =>
     expect(el.querySelector('dialog[open] .sheet-title')?.textContent).toBe(
-      '更新 3条帖子',
+      '更新3条帖子',
     ),
   )
   await vi.waitFor(() => expect(button(el, '开始更新').disabled).toBe(false))
@@ -402,10 +402,10 @@ it("shows each tab's own total, counted again for other filters", async () => {
       .filter((path) => path.startsWith('/collections/count?'))
       .map((path) => new URLSearchParams(path.split('?', 2)[1]))
   const el = await mount('/')
-  await vi.waitFor(() => expect(total(el)).toBe('1,235 条'))
+  await vi.waitFor(() => expect(total(el)).toBe('1,235条'))
 
   el.querySelectorAll<HTMLAnchorElement>('[role="tab"]')[1]!.click()
-  await vi.waitFor(() => expect(total(el)).toBe('56 个账号'))
+  await vi.waitFor(() => expect(total(el)).toBe('56个账号'))
   expect(totals().at(-1)?.get('entity_type')).toBe(
     'x.profile,instagram.profile',
   )
@@ -413,12 +413,12 @@ it("shows each tab's own total, counted again for other filters", async () => {
   // Back on a tab already shown: neither its list nor its total is asked again.
   const asked = totals().length
   el.querySelectorAll<HTMLAnchorElement>('[role="tab"]')[0]!.click()
-  await vi.waitFor(() => expect(total(el)).toBe('1,235 条'))
+  await vi.waitFor(() => expect(total(el)).toBe('1,235条'))
   expect(totals()).toHaveLength(asked)
 
   counts = { 'x.post': 3 }
   await router.push('/?q=cat')
-  await vi.waitFor(() => expect(total(el)).toBe('3 条'))
+  await vi.waitFor(() => expect(total(el)).toBe('3条'))
   expect(totals().at(-1)?.get('q')).toBe('cat')
 
   // A folder's tab counts its own kind.
@@ -433,7 +433,7 @@ it("shows each tab's own total, counted again for other filters", async () => {
     }),
   )
   await router.push(`/folder/${MIXED}?visibility=private&tab=profile`)
-  await vi.waitFor(() => expect(total(el)).toBe('2 个账号'))
+  await vi.waitFor(() => expect(total(el)).toBe('2个账号'))
   expect(totals().at(-1)?.get('visibility')).toBe('private')
 })
 

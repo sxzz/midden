@@ -39,7 +39,7 @@ test.describe('from 700px', () => {
     await expect(sidebar(page)).toHaveCount(0)
     await expect(item(page, '探索')).toHaveAttribute('aria-current', 'page')
     // Without a sidebar the header says how many the list holds.
-    await expect(page.locator('.subtitle')).toHaveText('1,280 条')
+    await expect(page.locator('.subtitle')).toHaveText('1,280条')
     await expect(rail(page).getByRole('button', { name: '抓取' })).toHaveCount(
       0,
     )
@@ -90,7 +90,7 @@ test.describe('from 1000px', () => {
     await expect(sidebar(page)).toBeVisible()
     await expect(item(page, '探索').locator('.label')).toBeHidden()
     // The count is the sidebar's now, said once.
-    await expect(sidebar(page)).toContainText('1,280 条')
+    await expect(sidebar(page)).toContainText('1,280条')
     await expect(page.locator('.subtitle')).toHaveCount(0)
     expect(await fits(page)).toBe(true)
     for (const width of [1024, 1100, 1279]) {
@@ -117,7 +117,7 @@ test.describe('from 1280px', () => {
     await expect(
       sidebar(page).getByRole('link', { name: /风景摄影/ }),
     ).toHaveAttribute('href', /\/folder\//)
-    await expect(sidebar(page)).toContainText('1,280 条')
+    await expect(sidebar(page)).toContainText('1,280条')
     // Who is signed in to Midden (one owner for now), and the instance's
     // menu; the capture accounts are 采集's.
     await expect(rail(page)).toContainText('管理员')
@@ -160,7 +160,7 @@ test.describe('from 1280px', () => {
       /rel=followers/,
     )
     const captures = sidebar(page).getByRole('region', { name: '采集信息' })
-    await expect(captures).toContainText('3 次')
+    await expect(captures).toContainText('3次')
     await expect(captures).toContainText('173.6 MB')
     await expect(captures).toContainText(/定期更新\s*每天 · 下次/)
     // A graph has the sidebar's room instead.
@@ -388,7 +388,7 @@ test.describe('a public link', () => {
     await expect(nav(page)).toHaveCount(0)
     const shared = sidebar(page).getByRole('region', { name: '公开分享' })
     await expect(shared).toContainText('公开的风景')
-    await expect(shared).toContainText('128 条帖子')
+    await expect(shared).toContainText('128条帖子')
     // The folder's list has its own search box; below it, the sidebar's.
     await expect(sidebar(page).getByRole('searchbox')).toHaveCount(0)
     await page.locator('.row').first().locator('.head').click()

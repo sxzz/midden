@@ -102,6 +102,6 @@ test('a folder shows posts and accounts in tabs, and updates as expanded', async
   await page.getByRole('button', { name: '管理收藏夹' }).click()
   await page.getByRole('menuitem', { name: '更新收藏夹' }).click()
   await expect(
-    page.getByRole('dialog', { name: '更新 1 个账号、1 条帖子' }),
+    page.getByRole('dialog', { name: '更新1个账号、1条帖子' }),
   ).toBeVisible()
 })

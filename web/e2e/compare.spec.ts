@@ -159,7 +159,7 @@ test('compares accounts: who follows whom, shared accounts by subset, the thresh
   // Two in common by default: four subsets, the largest first.
   const rows = page.locator('.combos .row')
   await expect(rows).toHaveCount(4)
-  await expect(page.locator('.total')).toContainText('52 个账号')
+  await expect(page.locator('.total')).toContainText('52个账号')
   await expect(page.locator('.grid .person')).toHaveCount(52)
   await expect(page.locator('.notes li')).toHaveText([
     /^@alpha 关注 11-2\d 完整$/,
@@ -179,7 +179,7 @@ test('compares accounts: who follows whom, shared accounts by subset, the thresh
   await rows.nth(1).click()
   await expect.poll(() => last()?.get('only')).toMatch(/^\d(,\d)+$/)
   await expect(rows.nth(1)).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.locator('.total')).toContainText('13 个账号')
+  await expect(page.locator('.total')).toContainText('13个账号')
   await expect(page).toHaveURL(/only=/)
   await page.locator('.only').click()
   await expect.poll(() => last()?.get('only')).toBeNull()
@@ -196,7 +196,7 @@ test('compares accounts: who follows whom, shared accounts by subset, the thresh
   // A tapped account says which of them it relates to.
   await page.locator('.grid .person').first().click()
   const card = page.getByRole('region', { name: '账号' })
-  await expect(card.locator('.why')).toHaveText('甲、乙、丙 关注了 TA')
+  await expect(card.locator('.why')).toHaveText('甲、乙、丙 关注了TA')
   await expect(card.locator('.viewer')).toHaveText('与 @me 互关')
   await card.getByRole('button', { name: '关闭' }).click()
 

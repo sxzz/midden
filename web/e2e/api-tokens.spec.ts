@@ -101,12 +101,12 @@ test('lists tokens with their expiry and use, and makes one shown once', async (
   await page.goto('/settings/tokens')
   const listed = row(page, '研究')
   await expect(listed).toContainText('只读')
-  await expect(listed).toContainText('过期 · 剩 6 天')
+  await expect(listed).toContainText('过期 · 剩6天')
   await expect(listed).toContainText('上次使用')
-  await expect(listed).toContainText('30 天 5 次')
+  await expect(listed).toContainText('30天5次')
   await expect(listed.getByRole('img')).toHaveAttribute(
     'aria-label',
-    '最近 30 天 5 次',
+    '最近30天5次',
   )
 
   await page.getByRole('button', { name: '创建令牌' }).click()
@@ -114,7 +114,7 @@ test('lists tokens with their expiry and use, and makes one shown once', async (
   await sheet(page).getByPlaceholder('名称').fill('同步')
   await sheet(page).getByText('读写').click()
   const before = Date.now()
-  await sheet(page).getByRole('button', { name: '1 天' }).click()
+  await sheet(page).getByRole('button', { name: '1天' }).click()
   await sheet(page).getByRole('button', { name: '创建', exact: true }).click()
 
   await expect(sheet(page)).toContainText('已创建 同步')
@@ -165,7 +165,7 @@ test('edits, rolls and revokes a token', async ({ page }) => {
   const sent = await mock(page)
   await page.goto('/settings/tokens')
   await row(page, '研究').click()
-  await expect(sheet(page)).toContainText('最近 30 天 5 次')
+  await expect(sheet(page)).toContainText('最近30天5次')
   await expect(sheet(page)).toContainText('GET /agent/v1/posts')
   await expect(sheet(page)).toContainText('只读')
 

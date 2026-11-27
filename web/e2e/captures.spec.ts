@@ -103,10 +103,10 @@ test('submits links and follows the record until it finishes', async ({
     .fill(
       'fxtwitter.com/fixture/status/1 和 https://unsupported.test/a 两条链接',
     )
-  await expect(submit).toHaveText('采集 2 条')
+  await expect(submit).toHaveText('采集2条')
   await submit.click()
   await expect(page.getByRole('alert')).toHaveText(
-    '已提交 1 条，1 条未提交：不支持的链接',
+    '已提交1条，1条未提交：不支持的链接',
   )
   // The defaults, the same as an update's.
   const options = {
@@ -128,11 +128,11 @@ test('submits links and follows the record until it finishes', async ({
 
   const row = page.getByRole('link', { name: /x\.com\/fixture\/status\/1/ })
   await expect(row).toContainText('正在保存媒体')
-  await expect(row).toContainText('媒体 1/4')
+  await expect(row).toContainText('媒体1/4')
   await expect(row.getByRole('progressbar')).toHaveAttribute('value', '0.25')
   // Polling picks up the finished capture without a reload.
   await expect(row).toContainText('部分缺失')
-  await expect(row).toContainText('媒体 3/4 · 失败 1')
+  await expect(row).toContainText('媒体3/4 · 失败1')
   await expect(row.getByRole('progressbar')).toHaveCount(0)
 
   await row.click()
@@ -145,10 +145,10 @@ test('submits links and follows the record until it finishes', async ({
   const media = page.locator('section').filter({
     has: page.getByRole('heading', { name: '未保存的媒体', exact: true }),
   })
-  await expect(media).toContainText('视频 2')
-  await expect(media).not.toContainText('图片 1')
-  await media.getByRole('button', { name: '显示全部 2 项' }).click()
-  await expect(page.getByText('图片 1')).toBeVisible()
+  await expect(media).toContainText('视频2')
+  await expect(media).not.toContainText('图片1')
+  await media.getByRole('button', { name: '显示全部2项' }).click()
+  await expect(page.getByText('图片1')).toBeVisible()
 
   // Finished captures changed the library, so its list loads again.
   await page.getByRole('link', { name: '返回' }).click()
@@ -289,11 +289,11 @@ test('shows collection progress, member failures, stop and retry', async ({
   await page.goto(`/captures/${profile}`)
   // The toast region is a status too; this is the record's own line.
   const status = page.locator('p[role=status]')
-  await expect(status).toContainText('正在保存帖子 · 帖子 2/3 · 失败 1')
+  await expect(status).toContainText('正在保存帖子 · 帖子2/3 · 失败1')
   await expect(page.getByRole('progressbar')).toBeVisible()
   // Saved media are only counted; there is nothing missing to list.
-  await expect(status).toContainText('帖子 2/3')
-  await expect(page.getByText('已保存 2/2，失败 0')).toBeVisible()
+  await expect(status).toContainText('帖子2/3')
+  await expect(page.getByText('已保存2/2，失败0')).toBeVisible()
   await expect(page.getByRole('heading', { name: /媒体/ })).toHaveCount(0)
   await expect(page.getByText('帖子不存在或已删除').first()).toBeVisible()
 
@@ -348,7 +348,7 @@ test('shows collection progress, member failures, stop and retry', async ({
     page.getByRole('button', { name: '重试 x.com/fixture/status/4' }),
   ).toHaveCount(0)
   await page.getByRole('button', { name: '全部重试', exact: true }).click()
-  await expect(page.getByText('正在重试 1 项。')).toBeVisible()
+  await expect(page.getByText('正在重试1项。')).toBeVisible()
   await expect(
     page.getByRole('button', { name: '全部重试', exact: true }),
   ).toHaveCount(0)
@@ -422,9 +422,9 @@ test('a finished profile record fetches more pages as its own record', async ({
   })
   await page.goto(`/captures/${profile}`)
   await expect(page.locator('p[role=status]')).toContainText(
-    '已完成 · 帖子 100/100 · 新增 40 · 更新 60',
+    '已完成 · 帖子100/100 · 新增40 · 更新60',
   )
-  await expect(page.getByText('新增 40，更新 60')).toBeVisible()
+  await expect(page.getByText('新增40，更新60')).toBeVisible()
   // Posts are split by what this record did to the library.
   await expect(page.getByRole('tab', { name: '新增记录 40' })).toHaveAttribute(
     'aria-selected',
@@ -435,7 +435,7 @@ test('a finished profile record fetches more pages as its own record', async ({
   await expect(page.getByRole('tab', { name: /^异常记录/ })).toHaveCount(0)
   expect(memberQueries).toEqual(['added'])
   await expect(page.getByRole('button', { name: '重试本页' })).toHaveCount(0)
-  await page.getByRole('button', { name: '抓取 1000 条' }).click()
+  await page.getByRole('button', { name: '抓取1000条' }).click()
   await expect(page.getByText('没有更多帖子了')).toBeVisible()
   await page.getByRole('button', { name: '抓取更多' }).click()
   await expect(page).toHaveURL(new RegExp(`/captures/${next}$`))
@@ -562,14 +562,14 @@ test('an update reads as one record in the list', async ({ page }) => {
   await page.goto('/captures')
   const running = page.getByRole('link', { name: /更新收藏夹「猫」/ })
   await expect(running).toContainText('正在更新')
-  await expect(running).toContainText('新增 3 · 更新 6 · 异常 1 · 进行中 4')
+  await expect(running).toContainText('新增3 · 更新6 · 异常1 · 进行中4')
   await expect(running.getByRole('progressbar')).toHaveAttribute(
     'value',
     String(10 / 14),
   )
-  const done = page.getByRole('link', { name: /更新 3 项/ })
+  const done = page.getByRole('link', { name: /更新3项/ })
   await expect(done).toContainText('已完成')
-  await expect(done).toContainText('更新 3')
+  await expect(done).toContainText('更新3')
 })
 
 test("an update's profile stopped by the post cap reads on in the same record", async ({
@@ -655,10 +655,10 @@ test("an update's profile stopped by the post cap reads on in the same record", 
   ])
   await page.getByRole('tab', { name: '账号 1' }).click()
   const profiles = page.locator('body')
-  await expect(profiles).toContainText('资料 ✓ · 帖子 1000（未到已有数据）')
+  await expect(profiles).toContainText('资料 ✓ · 帖子1000（未到已有数据）')
   await page.getByRole('button', { name: '继续抓取' }).click()
   // The same record, now reading on.
-  await expect(profiles).toContainText('资料 ✓ · 帖子 1000/1100')
+  await expect(profiles).toContainText('资料 ✓ · 帖子1000/1100')
   await expect(page).toHaveURL(new RegExp(`/captures/${retried}$`))
   await expect(page.getByRole('button', { name: '继续抓取' })).toHaveCount(0)
   expect(sent).toEqual([{ collection_id: profile }])
@@ -789,8 +789,8 @@ test("an update's failed parts are retried one at a time or all at once", async 
     page.getByRole('button', { name, exact: true })
   await expect(retry('重试 @cat 资料')).toBeVisible()
   await expect(page.getByText('时间线读取失败')).toBeVisible()
-  await retry('重试 @cat 帖子第 2 页').click()
-  await expect(retry('重试 @cat 帖子第 2 页')).toHaveCount(0)
+  await retry('重试 @cat 帖子第2页').click()
+  await expect(retry('重试 @cat 帖子第2页')).toHaveCount(0)
   await retry('重试 @cat 关注名单').click()
   await expect(retry('重试 @cat 关注名单')).toHaveCount(0)
   // The rest at once: the profile and the failed post.

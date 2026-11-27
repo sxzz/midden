@@ -213,7 +213,7 @@ test('updates a profile with its lists and lists its follow changes', async ({
   const lists = sheet.getByRole('switch', { name: /抓关系网/ })
   await expect(lists).not.toBeChecked()
   await expect(sheet).toContainText(
-    '关注 2 · 粉丝 2 万（超过 5000，将跳过粉丝名单）',
+    '关注2 · 粉丝2万（超过5000，将跳过粉丝名单）',
   )
   await lists.check()
   await sheet.getByRole('button', { name: '开始更新' }).click()
@@ -241,7 +241,7 @@ test('updates a profile with its lists and lists its follow changes', async ({
     'true',
   )
   await expect(page.locator('.profile')).toContainText(
-    '资料 ✓ · 帖子 0 · 关注 ✓ · 粉丝 跳过',
+    '资料 ✓ · 帖子0 · 关注 ✓ · 粉丝 跳过',
   )
   await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))

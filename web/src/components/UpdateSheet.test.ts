@@ -81,7 +81,7 @@ it('a folder: what it covers as the title, every option when it has profiles', a
     { posts: 340, profiles: 12, listable: 12, name: '猫' },
   )
   expect(el.querySelector('.sheet-title')?.textContent).toBe(
-    '更新 12个账号、340条帖子',
+    '更新12个账号、340条帖子',
   )
   // The link form's options, with the same defaults.
   expect(label('抓帖子')!.querySelector('input')!.checked).toBe(true)
@@ -124,7 +124,7 @@ it('posts alone have only their references; profiles without lists no 抓关系�
     { posts: 2, profiles: 0, listable: 0 },
   )
   expect(posts.el.querySelector('.sheet-title')?.textContent).toBe(
-    '更新 2条帖子',
+    '更新2条帖子',
   )
   expect(posts.label('抓帖子')).toBeUndefined()
   expect(posts.label('抓关系网')).toBeUndefined()

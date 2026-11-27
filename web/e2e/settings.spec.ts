@@ -19,7 +19,7 @@ test.describe('on a wide window', () => {
     ).toBeVisible()
     await expect(list(page).getByRole('link')).toHaveText([
       /通行密钥/,
-      /API 令牌/,
+      /API令牌/,
       /管理员面板/,
       /关于/,
     ])
