@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { finalizeSettled } from '#capture/lifecycle.ts'
 import { releaseBlobs } from '#capture/maintenance.ts'
+import { dropAllSummaries } from '#capture/record-summaries.ts'
 import { assets, mediaGarbage, removedMedia } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError } from '#errors.ts'
@@ -131,7 +132,11 @@ export function removeMedia(
   return ctx.db.transaction((tx) => {
     const rows = plan(tx, target)
     const result = removalEffect(tx, rows)
-    if (rows.length) removeRows(ctx, tx, rows)
+    if (rows.length) {
+      removeRows(ctx, tx, rows)
+      // Media a record counted as failed or missing is gone from it.
+      dropAllSummaries(tx)
+    }
     // One item already removed everywhere here is marked again, as asked.
     else if ('asset' in target) mark(tx, rows, target)
     return result
@@ -234,6 +239,7 @@ export function restoreMedia(
   assetId: string,
 ): void {
   ctx.db.transaction((tx) => {
+    dropAllSummaries(tx)
     const named = tx.get<{ media_key: string }>(sql`
       SELECT a.media_key FROM assets a
       JOIN captures c ON c.id = a.capture_id

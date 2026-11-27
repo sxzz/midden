@@ -35,6 +35,7 @@ import {
   type CaptureOptions,
 } from './options.ts'
 import { keepRecord, keptRecord } from './record-cache.ts'
+import { detailKey, dropSummaries, loadSummaries } from './record-summaries.ts'
 import { continuePages, type StoredTarget } from './related.ts'
 import {
   relationProgresses,
@@ -636,7 +637,7 @@ export function recordFilterSQL(items = false) {
   )
 }
 
-function recordRows(
+export function recordRows(
   db: Executor,
   where: ReturnType<typeof and>,
   limit: number,
@@ -664,7 +665,7 @@ function recordRows(
 type RecordRow = ReturnType<typeof recordRows>[number]
 
 /** Records for rows, with a fixed number of queries for any number of rows. */
-function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
+export function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
   const media = new Map(
     (rows.length
       ? db
@@ -807,28 +808,45 @@ export function requestRecords(
       : undefined,
     limit,
   )
-  // Finished records kept on a read thread are not counted again.
-  const kept = new Map<string, CaptureRecord>()
+  return recordsOf(db, rows)
+}
+
+/**
+ * Records for rows. Finished records are written down
+ * (`record-summaries.ts`); those kept on a read thread are not counted
+ * again either.
+ */
+function recordsOf(db: Executor, rows: RecordRow[]): CaptureRecord[] {
+  const found = new Map<string, CaptureRecord>()
+  const summaries = loadSummaries(
+    db,
+    rows.map((row) => row.submission.id),
+  )
   for (const row of rows) {
-    const record = keptRecord<CaptureRecord>(row.submission.id, rowStamp(row))
-    if (record) kept.set(row.submission.id, record)
+    const id = row.submission.id
+    const written = summaries.get(id)
+    const record =
+      written?.stamp === rowStamp(row)
+        ? written.record
+        : keptRecord<CaptureRecord>(id, rowStamp(row))
+    if (record) found.set(id, record)
   }
   const counted = new Map(
     toRecords(
       db,
-      rows.filter((row) => !kept.has(row.submission.id)),
+      rows.filter((row) => !found.has(row.submission.id)),
     ).map((record) => [record.id, record]),
   )
   return rows.map((row) => {
     const id = row.submission.id
-    const record = kept.get(id) ?? counted.get(id)!
-    if (record.done && !kept.has(id)) keepRecord(id, rowStamp(row), record)
+    const record = found.get(id) ?? counted.get(id)!
+    if (!found.has(id)) keepRecord(id, rowStamp(row), record, !record.done)
     return record
   })
 }
 
 /** What of a record's own rows a kept record must still match. */
-const rowStamp = (row: RecordRow) =>
+export const rowStamp = (row: RecordRow) =>
   JSON.stringify([
     row.capture.state,
     row.capture.finishedAt?.getTime(),
@@ -857,7 +875,22 @@ export interface CaptureRecordDetail extends CaptureRecord {
 
 export function recordDetail(db: Executor, id: string): CaptureRecordDetail {
   const row = recordRow(db, id)
-  const record = toRecord(db, row)
+  // A finished record's detail is written down with it.
+  const written = loadSummaries<CaptureRecordDetail>(db, [detailKey(id)]).get(
+    detailKey(id),
+  )
+  if (written?.stamp === rowStamp(row)) return written.record
+  return countRecordDetail(db, row)
+}
+
+/** A record's detail counted now. */
+export function countRecordDetail(
+  db: Executor,
+  row: RecordRow,
+  known?: CaptureRecord,
+): CaptureRecordDetail {
+  const id = row.submission.id
+  const record = known ?? recordsOf(db, [row])[0]!
   const revision = row.capture.revisionId
     ? db
         .select({ payload: revisions.payload })
@@ -1204,6 +1237,21 @@ export function retryRecord(
  * more gives the same job.
  */
 export function recordPage(
+  ctx: CaptureContext,
+  id: string,
+  op: string,
+  key?: string,
+): Job {
+  try {
+    return recordPageOp(ctx, id, op, key)
+  } finally {
+    // What this fetches joins the record: it is counted again. Dropped after
+    // the work, so a summary written meanwhile does not outlive it.
+    dropSummaries(ctx.db, [id])
+  }
+}
+
+function recordPageOp(
   ctx: CaptureContext,
   id: string,
   op: string,

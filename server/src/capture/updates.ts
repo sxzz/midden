@@ -37,6 +37,7 @@ import {
   type CaptureOptions,
 } from './options.ts'
 import { keepRecord, keptRecord } from './record-cache.ts'
+import { detailKey, dropSummaries, loadSummaries } from './record-summaries.ts'
 import {
   captureWaits,
   collectionProgress,
@@ -729,6 +730,7 @@ export function continueTimeline(
   const last = g!.pages.get(root.submission.id)?.at(-1)
   if (update.state === 'stopped' || !last) throw new AppError('unsupported')
   withOrigin({ updateId: id }, () => continuePages(ctx, last))
+  dropSummaries(ctx.db, [id])
 }
 
 // --- Records ----------------------------------------------------------------
@@ -1122,33 +1124,96 @@ function toUpdateRecord(db: Executor, g: Gathered): UpdateRecord {
   }
 }
 
-/** What of an update's own row a kept record must still match. */
-const updateStamp = (row: Update) =>
+/**
+ * What a kept record must still match: of an update's own row, and whether
+ * its target is saved. While in progress (`running`) not its position,
+ * which moves with every item: its numbers may lag by `RUNNING_TTL`.
+ */
+export const updateStamp = (
+  row: Pick<Update, 'state' | 'position' | 'skipped' | 'error' | 'pausedAt'>,
+  saved: boolean,
+  running = false,
+) =>
   JSON.stringify([
     row.state,
-    row.position,
+    ...(running ? [] : [row.position]),
     row.skipped,
     row.error,
     row.pausedAt?.getTime(),
+    saved,
   ])
 
-export function updateRecords(db: Executor, rows: Update[]): UpdateRecord[] {
-  // Finished updates kept on a read thread are not counted again.
-  const kept = new Map<string, UpdateRecord>()
+/** Updates' records counted now, whatever is kept (and not kept). */
+export function countUpdates(db: Executor, rows: Update[]): UpdateRecord[] {
+  return gather(db, rows).map((g) => toUpdateRecord(db, g))
+}
+
+/** Whether each update's target is saved, by update id. */
+export function savedTargets(
+  db: Executor,
+  rows: Pick<Update, 'id' | 'target' | 'targetId'>[],
+): Set<string> {
+  const saved = savedIds(
+    db,
+    rows.flatMap((row) => (row.target === 'collection' ? [row.targetId] : [])),
+  )
+  return new Set(
+    rows.flatMap((row) =>
+      row.target === 'collection' && saved.has(row.targetId) ? [row.id] : [],
+    ),
+  )
+}
+
+/** The records of these updates already counted: written down, or kept. */
+function countedUpdates(
+  db: Executor,
+  rows: Update[],
+  saved: Set<string>,
+): Map<string, UpdateRecord> {
+  const summaries = loadSummaries<UpdateRecord>(
+    db,
+    rows.map((row) => row.id),
+  )
+  const found = new Map<string, UpdateRecord>()
   for (const row of rows) {
-    const record = keptRecord<UpdateRecord>(row.id, updateStamp(row))
-    if (record) kept.set(row.id, record)
+    const stamp = updateStamp(row, saved.has(row.id))
+    const written = summaries.get(row.id)
+    if (written?.stamp === stamp) {
+      found.set(row.id, written.record)
+      continue
+    }
+    const kept = keptRecord<UpdateRecord>(
+      row.id,
+      stamp,
+      updateStamp(row, saved.has(row.id), true),
+    )
+    if (kept) found.set(row.id, kept)
   }
+  return found
+}
+
+/** Keep an update's record just counted: for a minute, or while in progress. */
+function keepUpdate(row: Update, saved: boolean, record: UpdateRecord) {
+  keepRecord(
+    row.id,
+    updateStamp(row, saved, !record.done),
+    record,
+    !record.done,
+  )
+}
+
+export function updateRecords(db: Executor, rows: Update[]): UpdateRecord[] {
+  const saved = savedTargets(db, rows)
+  const found = countedUpdates(db, rows, saved)
   const counted = new Map(
-    gather(
+    countUpdates(
       db,
-      rows.filter((row) => !kept.has(row.id)),
-    ).map((g) => [g.update.id, toUpdateRecord(db, g)]),
+      rows.filter((row) => !found.has(row.id)),
+    ).map((record) => [record.id, record]),
   )
   return rows.map((row) => {
-    const record = kept.get(row.id) ?? counted.get(row.id)!
-    if (record.done && !kept.has(row.id))
-      keepRecord(row.id, updateStamp(row), record)
+    const record = found.get(row.id) ?? counted.get(row.id)!
+    if (!found.has(row.id)) keepUpdate(row, saved.has(row.id), record)
     return record
   })
 }
@@ -1290,8 +1355,31 @@ export function recordProfiles(
 }
 
 export function updateDetail(db: Executor, id: string): UpdateRecordDetail {
-  const [g] = gather(db, [loadUpdate(db, id)])
-  const record = toUpdateRecord(db, g!)
+  const row = loadUpdate(db, id)
+  const saved = savedTargets(db, [row])
+  // A finished update's detail is written down with its record.
+  const written = loadSummaries<UpdateRecordDetail>(db, [detailKey(id)]).get(
+    detailKey(id),
+  )
+  if (written?.stamp === updateStamp(row, saved.has(id))) return written.record
+  return countUpdateDetail(db, row, saved.has(id))
+}
+
+/** An update's detail counted now; `known` is its record, if counted. */
+export function countUpdateDetail(
+  db: Executor,
+  row: Update,
+  saved: boolean,
+  known?: UpdateRecord,
+): UpdateRecordDetail {
+  const id = row.id
+  const [g] = gather(db, [row])
+  let record =
+    known ?? countedUpdates(db, [row], new Set(saved ? [id] : [])).get(id)
+  if (!record) {
+    record = toUpdateRecord(db, g!)
+    keepUpdate(row, saved, record)
+  }
   const pages = allPages(g!)
   // A single post's record shows its media, like a capture's.
   const lone =

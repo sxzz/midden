@@ -1,4 +1,5 @@
 import { and, isNull, lte, sql, type SQL } from 'drizzle-orm'
+import { dropAllSummaries } from '#capture/record-summaries.ts'
 import { recordFilterSQL } from '#capture/records.ts'
 import { collections, library, submissions, updates } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
@@ -319,6 +320,8 @@ export function deleteCollections(
         SELECT id FROM ${sql.raw(SELECTED)}
         ${withPosts ? sql`UNION ALL SELECT id FROM ${sql.raw(RELATED)} WHERE reason IS NULL` : sql``}`
       tx.run(sql`DELETE FROM library WHERE collection_id IN (${removed})`)
+      // Records counted over them (what a retry would fetch again) change.
+      dropAllSummaries(tx)
       pruneTags(tx)
       revokeOrphanedShares(tx)
       tx.run(sql`UPDATE collections SET unreferenced_at = ${Date.now()}
@@ -378,6 +381,7 @@ export function deleteAll(
         ),
       )
       .run()
+    dropAllSummaries(tx)
     tx.delete(submissions).where(lte(submissions.createdAt, before)).run()
     tx.delete(updates).where(lte(updates.createdAt, before)).run()
     return { collections: saved.length, records }

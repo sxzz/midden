@@ -954,6 +954,22 @@ export const updates = sqliteTable(
   ],
 )
 
+/**
+ * The counted view of a capture record (an update, or a request's record)
+ * that has finished, kept so reading the list does not count its members
+ * again (`capture/record-summaries.ts`). Written by the worker only; a row
+ * is dropped when something changes the record, and is used only while its
+ * `stamp` matches the record's own rows.
+ */
+export const recordSummaries = sqliteTable('record_summaries', {
+  // The update's or the request's id.
+  id: text().primaryKey(),
+  stamp: text().notNull(),
+  // The record as the list shows it.
+  summary: text({ mode: 'json' }).notNull(),
+  computedAt: createdAt(),
+})
+
 export const updateSkipReasons = [
   // No longer in the library.
   'removed',

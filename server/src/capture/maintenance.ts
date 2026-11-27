@@ -38,6 +38,7 @@ import { collectRawGarbage, sweepRawUploads } from '#raw/upload.ts'
 import { pace, type CaptureContext } from './context.ts'
 import { HEADER_BYTES, imageSize } from './image-size.ts'
 import { failCapture } from './lifecycle.ts'
+import { dropAllSummaries } from './record-summaries.ts'
 import { pruneStaging } from './staging.ts'
 import type { Transaction } from '#db/client.ts'
 
@@ -159,6 +160,8 @@ function collectBatch(tx: Transaction, at: Date): number {
     .all()
     .map((row) => row.id)
   if (!candidates.length) return 0
+  // Records counted over what is removed here are counted again.
+  dropAllSummaries(tx)
   const captureIds = tx
     .select({ id: captures.id })
     .from(captures)

@@ -3,6 +3,7 @@ import { performance } from 'node:perf_hooks'
 import process from 'node:process'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { runMaintenance } from '#capture/maintenance.ts'
+import { refreshSummaries } from '#capture/summary-sweep.ts'
 import { runWatches } from '#capture/watches.ts'
 import { optimize, unknownMigrations } from '#db/client.ts'
 import { pruneSessions } from '#http/auth.ts'
@@ -27,6 +28,8 @@ export interface WorkerHandle {
 const MAINTENANCE_INTERVAL = 60_000
 const WATCH_INTERVAL = 60_000
 const COMPOSITION_POLL = 5000
+// Finished capture records are counted and written down (`summary-sweep.ts`).
+const SUMMARY_INTERVAL = 10_000
 const OPTIMIZE_INTERVAL = 6 * 60 * 60_000
 const THROTTLE_STEP = 1000
 const STATUS_EVERY = 2000
@@ -181,6 +184,14 @@ export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
       storage.poll()
     } catch (error) {
       logger.warn({ err: error }, 'composition request check failed')
+    }
+  })
+  every(SUMMARY_INTERVAL, () => {
+    if (ctx.queue.status().held) return
+    try {
+      refreshSummaries(ctx)
+    } catch (error) {
+      logger.warn({ err: error }, 'writing down finished records failed')
     }
   })
   // 定期更新: start the runs of watches that are due. Not while held: a

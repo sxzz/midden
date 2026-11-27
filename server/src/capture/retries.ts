@@ -12,6 +12,7 @@ import { AppError, isAppError } from '#errors.ts'
 import { withOrigin } from '#jobs/queue.ts'
 import { loadCapture } from './lifecycle.ts'
 import { storedOptions } from './options.ts'
+import { dropSummaries } from './record-summaries.ts'
 import {
   memberSubmissions,
   pageChains,
@@ -220,9 +221,14 @@ export function retryRecordFailed(
   target?: string,
 ): number {
   // An update's retried work is the update's: its rank, and paused with it.
-  return withOrigin({ updateId: isUpdate(ctx.db, id) ? id : null }, () =>
-    retryUnits(ctx, id, target),
-  )
+  try {
+    return withOrigin({ updateId: isUpdate(ctx.db, id) ? id : null }, () =>
+      retryUnits(ctx, id, target),
+    )
+  } finally {
+    // After the work, so a summary written meanwhile does not outlive it.
+    dropSummaries(ctx.db, [id])
+  }
 }
 
 function retryUnits(
