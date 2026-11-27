@@ -57,7 +57,7 @@ test('存储用量 says when the database was counted and counts again', async (
     if (path === '/v1/origins') return r.fulfill({ json: [] })
     return r.fulfill({ json: { items: [] } })
   })
-  await page.goto('/app/#/settings/admin/storage')
+  await page.goto('/#/settings/admin/storage')
   await expect(page.getByText(/统计于3 小时前/)).toBeVisible()
   await page.getByRole('button', { name: '重新统计' }).click()
   await expect(page.getByRole('button', { name: '统计中…' })).toBeDisabled()

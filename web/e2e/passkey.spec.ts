@@ -6,7 +6,7 @@ import { expect, test, type Page } from './test'
 // rather than the configured 127.0.0.1.
 // The config exports the port it picked for this worktree.
 const HOST = `localhost:${process.env.E2E_PORT}`
-const APP = `http://${HOST}/app/`
+const APP = `http://${HOST}/`
 const TOKEN = 'T'.repeat(43)
 const challenge = (n: number) =>
   Buffer.from(`challenge-${n}-${'x'.repeat(20)}`).toString('base64url')
@@ -324,10 +324,10 @@ test('the settings page adds a domain and removes it with its passkeys', async (
 
   await domains.getByRole('button', { name: '添加域名' }).click()
   const sheet = page.getByRole('dialog', { name: '添加域名' })
-  await sheet.getByLabel('地址').fill('https://archive.example/app/')
+  await sheet.getByLabel('地址').fill('https://archive.example/')
   await sheet.getByRole('button', { name: '添加', exact: true }).click()
   await expect(domains).toContainText('archive.example')
-  expect(added).toEqual([{ origin: 'https://archive.example/app/' }])
+  expect(added).toEqual([{ origin: 'https://archive.example/' }])
 
   await domains.getByRole('button', { name: '删除 archive.example' }).click()
   const confirm = page.getByRole('dialog', { name: '删除 archive.example？' })

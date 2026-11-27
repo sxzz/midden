@@ -14,7 +14,7 @@ import { createSession } from './sessions.ts'
 import type { Database } from '#db/client.ts'
 import type { Principal } from '#users/principal.ts'
 
-const WEB = 'https://midden.test/app/'
+const WEB = 'https://midden.test/'
 const ORIGIN = new URL(WEB).origin
 const ID = '01234567-89ab-cdef-0123-456789abcdef'
 

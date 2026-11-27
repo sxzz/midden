@@ -1,7 +1,7 @@
 import type { RouteLocationRaw } from 'vue-router'
 
 // Tests that mock vue-router still render links: `resolveHref` stands in for
-// `router.resolve(to).href`, giving the hash address of the app's routes.
+// `router.resolve(to).href`, giving the address of the app's routes.
 
 const PATHS: Record<string, string> = {
   collections: '/',
@@ -28,7 +28,7 @@ const PATHS: Record<string, string> = {
 }
 
 export function resolveHref(to: RouteLocationRaw): string {
-  if (typeof to === 'string') return `/app${to}`
+  if (typeof to === 'string') return to
   const named = to as {
     name?: string
     path?: string
@@ -47,7 +47,7 @@ export function resolveHref(to: RouteLocationRaw): string {
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(named.query ?? {}))
     for (const item of [value ?? []].flat()) query.append(key, item)
-  return `/app${path}${query.size ? `?${query}` : ''}`
+  return `${path}${query.size ? `?${query}` : ''}`
 }
 
 /** `router.resolve` of the mocked router. */

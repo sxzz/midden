@@ -105,7 +105,7 @@ describe('folder counts', () => {
     await capture(c, post('2'))
     const api = createApi({
       ctx: c as AccountsContext,
-      webAppUrl: 'https://midden.test/app/',
+      webAppUrl: 'https://midden.test/',
     })
     const session = createSession(c.db, adminId(c.db))
     const call = (path: string, init: RequestInit = {}) =>

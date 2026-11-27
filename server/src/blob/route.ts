@@ -9,6 +9,7 @@ import {
 import type { MediaSigner } from './signer.ts'
 
 const RANGE = /^bytes=(\d*)-(\d*)$/
+const ANY_ORIGIN = '*'
 
 /**
  * Parse a single-range `Range` header. Returns undefined to serve the whole
@@ -63,6 +64,10 @@ export function mediaRoutes(
 ): Hono {
   const app = new Hono()
   app.get('/media/:key', async (c) => {
+    // The web app is on another origin and draws avatars into WebGL (the
+    // relation graph), which needs CORS, on redirects too. The signed URL is
+    // the only key, so any origin may read what it names, as from R2's.
+    c.header('Access-Control-Allow-Origin', ANY_ORIGIN)
     const key = c.req.param('key')
     const media = isBlobKey(key)
       ? signer.verify(key, new URL(c.req.url).searchParams)
@@ -95,6 +100,7 @@ export function mediaRoutes(
         ? IMMUTABLE
         : `private, max-age=${Math.max(Math.floor((media.expiresAt - Date.now()) / 1000), 0)}, immutable`,
       'X-Content-Type-Options': 'nosniff',
+      'Access-Control-Allow-Origin': ANY_ORIGIN,
     })
     if (media.filename)
       headers.set('Content-Disposition', contentDisposition(media.filename))

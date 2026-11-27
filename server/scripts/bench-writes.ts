@@ -228,7 +228,7 @@ const pool = new QueryPool({
     mediaKey: key,
     types,
     countPointers: platforms.countPointers(),
-    webAppUrl: 'https://midden.test/app/',
+    webAppUrl: 'https://midden.test/',
   } satisfies ReadThreadData,
 })
 pool.warm(4)
@@ -236,7 +236,7 @@ const forget = () => pool.broadcast('forget')
 const usage = new TokenUsage({ db })
 const api = createApi({
   ctx,
-  webAppUrl: 'https://midden.test/app/',
+  webAppUrl: 'https://midden.test/',
   reads: pooledWebReads(pool),
   tokenUsage: usage,
   onWrite: forget,

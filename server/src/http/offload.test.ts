@@ -95,7 +95,7 @@ describe('GET requests on the read threads', () => {
     ctx = testContext()
     const { reads, forwarded } = echoReads(ctx)
     const call = signedIn(
-      createApi({ ctx, reads, webAppUrl: 'https://midden.test/app/' }),
+      createApi({ ctx, reads, webAppUrl: 'https://midden.test/' }),
       ctx.db,
     )
 
@@ -131,7 +131,7 @@ describe('GET requests on the read threads', () => {
     )
     outer.route(
       '/v1',
-      createApi({ ctx, reads, webAppUrl: 'https://midden.test/app/' }),
+      createApi({ ctx, reads, webAppUrl: 'https://midden.test/' }),
     )
     const session = createSession(ctx.db, adminId(ctx.db))
     const mounted = (route: string) =>
@@ -163,7 +163,7 @@ describe('GET requests on the read threads', () => {
     const api = createApi({
       ctx,
       reads,
-      webAppUrl: 'https://midden.test/app/',
+      webAppUrl: 'https://midden.test/',
       onWrite: () => writes++,
     })
     const call = signedIn(api, ctx.db)
@@ -249,7 +249,7 @@ describe('GET requests on the read threads', () => {
     const call = signedIn(
       createApi({
         ctx,
-        webAppUrl: 'https://midden.test/app/',
+        webAppUrl: 'https://midden.test/',
         onWrite: () => writes++,
       }),
       ctx.db,
@@ -501,7 +501,7 @@ describe('GET requests on the read threads', () => {
       createApi({
         ctx,
         reads: pooledWebReads(pool),
-        webAppUrl: 'https://midden.test/app/',
+        webAppUrl: 'https://midden.test/',
       }),
       ctx.db,
     )

@@ -127,7 +127,7 @@ export function checkKeys(params: Params, allowed: readonly string[]): void {
   const unknown = Object.keys(params).filter((key) => !allowed.includes(key))
   if (unknown.length)
     throw invalid(
-      `Unknown parameter${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}. See /agent.md.`,
+      `Unknown parameter${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}. See agent.md.`,
     )
 }
 
@@ -388,7 +388,7 @@ export function filterOf(
   const tagMode = single(params, 'tag_mode')
   // Without tags of their own, a viewer has nothing for it to say.
   if (tagMode && !sees(r.principal).tags)
-    throw invalid('Unknown parameter: tag_mode. See /agent.md.')
+    throw invalid('Unknown parameter: tag_mode. See agent.md.')
   if (tagMode) oneOf('tag_mode', tagMode, ['any', 'all'])
   const postType = single(params, 'post_type')
   if (postType) oneOf('post_type', postType, ['post', 'quote', 'repost'])

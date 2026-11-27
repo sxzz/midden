@@ -40,7 +40,7 @@ test('first list preview fits the image after dimensions arrive during opening',
             : { items: [collection] },
     })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await page.getByRole('button', { name: '放大图片', exact: true }).click()
   const image = page
     .getByRole('dialog')

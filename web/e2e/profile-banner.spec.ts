@@ -168,7 +168,7 @@ for (const [label, viewport] of sizes) {
       page,
     }) => {
       await serve(page, profile(saved))
-      await page.goto(`/app/collection/${id}`)
+      await page.goto(`/collection/${id}`)
       const cover = page.getByRole('button', { name: '查看山野记录的主页封面' })
       await expect(cover.locator('img')).toHaveAttribute(
         'src',
@@ -205,7 +205,7 @@ for (const [label, viewport] of sizes) {
       const { promise: slowThumbnail, resolve: release } =
         Promise.withResolvers<void>()
       await serve(page, profile(saved), { slowThumbnail })
-      await page.goto(`/app/collection/${id}`)
+      await page.goto(`/collection/${id}`)
       await expect(page.locator('.cover .skeleton')).toBeVisible()
       const before = await box(page.locator('.section-body').first())
       expect(
@@ -226,7 +226,7 @@ for (const [label, viewport] of sizes) {
     }) => {
       const remoteRequests: string[] = []
       await serve(page, profile(remote), { remoteRequests })
-      await page.goto(`/app/collection/${id}`)
+      await page.goto(`/collection/${id}`)
       await expect(page.locator('.cover img')).toHaveAttribute('src', REMOTE)
       await expect(page.locator('.cover img')).toHaveCSS('opacity', '1')
       await expect(page.locator('.cover button')).toHaveCount(0)
@@ -238,7 +238,7 @@ for (const [label, viewport] of sizes) {
       page,
     }) => {
       await serve(page, profile())
-      await page.goto(`/app/collection/${id}`)
+      await page.goto(`/collection/${id}`)
       await expect(page.locator('article.post .identity .name')).toHaveText(
         '山野记录',
       )
@@ -253,7 +253,7 @@ for (const [label, viewport] of sizes) {
       page,
     }) => {
       await serve(page, profile({ ...saved, sensitive: true }))
-      await page.goto(`/app/collection/${id}`)
+      await page.goto(`/collection/${id}`)
       await expect(page.locator('article.post .identity .name')).toHaveText(
         '山野记录',
       )
@@ -298,7 +298,7 @@ for (const [label, viewport] of sizes) {
           ? r.fulfill({ status: 404, json: { error: '内容不存在' } })
           : r.fulfill({ json })
       })
-      await page.goto(`/app/s/${slug}`)
+      await page.goto(`/s/${slug}`)
       const cover = page.getByRole('button', { name: '查看山野记录的主页封面' })
       await expect(cover.locator('img')).toHaveAttribute(
         'src',

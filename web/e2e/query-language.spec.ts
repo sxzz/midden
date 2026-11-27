@@ -137,7 +137,7 @@ test('a query filters the list, and the controls show what they can say', async 
   page,
 }) => {
   const seen = await mock(page)
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.getByText('第 1 只猫')).toBeVisible()
 
   await box(page).fill('has:image #猫 cat')
@@ -176,7 +176,7 @@ test('a query it cannot read says why and where, and is not run', async ({
   page,
 }) => {
   const seen = await mock(page)
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.getByText('第 1 只猫')).toBeVisible()
   const before = seen.lists.length
   await box(page).fill('cat (dog')
@@ -213,7 +213,7 @@ test('terms are completed: keys, values and handles the library knows', async ({
   page,
 }) => {
   const seen = await mock(page)
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.getByText('第 1 只猫')).toBeVisible()
   // The list and its count are in, so nothing rewrites the box meanwhile.
   await expect(page.locator('.total')).toHaveText('3 条')
@@ -258,7 +258,7 @@ test('any query saves as a folder, which opens by its query', async ({
   page,
 }) => {
   const seen = await mock(page)
-  await page.goto('/app/')
+  await page.goto('/')
   await box(page).fill('domain:a.test')
   await box(page).press('Enter')
   await expect.poll(() => seen.lists.at(-1)?.get('q')).toBe('domain:a.test')
@@ -276,7 +276,7 @@ test('刷新 reads the list again with its filters, keeping it and the scroll', 
   page,
 }) => {
   const seen = await mock(page, 40)
-  await page.goto('/app/?media_type=image')
+  await page.goto('/?media_type=image')
   await expect(page.getByText('第 1 只猫')).toBeVisible()
   await page.mouse.wheel(0, 600)
   await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(300)
@@ -319,7 +319,7 @@ test('behind a share the box is a keyword search, and 刷新 is there too', asyn
     }
     return route.fulfill({ json: answers[rest] ?? { items: [] } })
   })
-  await page.goto('/app/s/cats-share')
+  await page.goto('/s/cats-share')
   await expect(page.getByText('第 1 只猫')).toBeVisible()
   await expect(box(page)).toHaveCount(0)
   await expect(page.getByRole('button', { name: '查询语法' })).toHaveCount(0)
@@ -338,7 +338,7 @@ test('an author picked in the controls is @handle in the box, its key in the lis
   page,
 }) => {
   const seen = await mock(page)
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.getByText('第 1 只猫')).toBeVisible()
   await page.getByRole('button', { name: '筛选' }).click()
   await page.locator('summary[aria-label="作者"]').click()

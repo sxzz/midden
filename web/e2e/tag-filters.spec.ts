@@ -20,7 +20,7 @@ test('tags are wanted, matched together and excluded from the filter panel', asy
     if (url.pathname === '/v1/collections') queries.push(url.searchParams)
     return r.fulfill({ json: { items: [] } })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await page.getByRole('button', { name: /^筛选/ }).click()
   const chips = page.getByRole('group', { name: '标签筛选' })
   const query = () => {

@@ -182,7 +182,7 @@ test('updates a profile with its lists and lists its follow changes', async ({
       })
     return route.fulfill({ json: fixed[path] ?? {} })
   })
-  await page.goto(`/app/collection/${profileId}`)
+  await page.goto(`/collection/${profileId}`)
 
   // What stored follows say, shown only because there are some.
   const counts = page.locator('dl.follows')
@@ -193,7 +193,7 @@ test('updates a profile with its lists and lists its follow changes', async ({
   const href = await counts
     .getByRole('link', { name: '互关 1，在收藏库中查看' })
     .getAttribute('href')
-  expect(href).toMatch(/^\/app\/\?/)
+  expect(href).toMatch(/^\/\?/)
   expect(
     Object.fromEntries(new URLSearchParams(href!.split('?', 2)[1])),
   ).toEqual({

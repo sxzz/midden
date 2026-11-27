@@ -85,7 +85,7 @@ test('Instagram and X choose their accounts independently', async ({
       })
     return r.fulfill({ json: path === '/v1/accounts' ? state : { items: [] } })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await openAccounts(page)
   await expect(
     page.getByText('Instagram 需要先添加并选择一个账号才能采集。'),
@@ -207,7 +207,7 @@ test('adds, selects and deletes an X account', async ({ page }) => {
       })
     return r.fulfill({ json: { items: [] } })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await page
     .getByRole('navigation', { name: '主导航' })
     .getByRole('link', { name: '设置' })
@@ -277,7 +277,7 @@ test('adds, selects and deletes an X account', async ({ page }) => {
     .getByRole('dialog', { name: '采集账号' })
     .getByRole('button', { name: '关闭' })
     .click()
-  await expect(page).toHaveURL(/\/app\/captures$/)
+  await expect(page).toHaveURL(/\/captures$/)
   await expect(page.getByRole('dialog', { name: '采集账号' })).toBeHidden()
 })
 
@@ -323,7 +323,7 @@ test('deleting everything shows what goes and needs the phrase typed', async ({
       return r.fulfill({ json: { dev: true, litestream: { enabled: false } } })
     return r.fulfill({ json: {} })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.getByText('要删除的收藏')).toBeVisible()
   await openSettings(page, '管理员面板')
   await page
@@ -376,7 +376,7 @@ test('deleting everything is not offered outside development', async ({
     if (path === '/v1/library/delete-all') asked = true
     return r.fulfill({ json: { items: [] } })
   })
-  await page.goto('/app/settings/admin')
+  await page.goto('/settings/admin')
   await expect(page.locator('h1')).toHaveText('管理员面板')
   await expect(page.getByRole('link', { name: /^域名/ })).toBeVisible()
   await expect(page.getByText('删除全部收藏和采集记录')).toHaveCount(0)
@@ -401,6 +401,6 @@ async function openAccounts(page: Page) {
     .getByRole('link', { name: '采集' })
     .click()
   await page.getByRole('link', { name: '采集账号' }).click()
-  await expect(page).toHaveURL(/\/app\/captures\?dialog=accounts$/)
+  await expect(page).toHaveURL(/\/captures\?dialog=accounts$/)
   await expect(page.getByRole('dialog', { name: '采集账号' })).toBeVisible()
 }

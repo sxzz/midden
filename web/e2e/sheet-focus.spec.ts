@@ -16,7 +16,7 @@ test.describe('with touch', () => {
     page,
   }) => {
     await mockDesktop(page)
-    await page.goto(`/app/folder/${folder.id}`)
+    await page.goto(`/folder/${folder.id}`)
     await page.getByRole('button', { name: '管理收藏夹' }).tap()
     await page
       .getByRole('dialog', { name: folder.name })
@@ -45,7 +45,7 @@ test.describe('with the keyboard', () => {
 
   test('the confirmation starts on its first button', async ({ page }) => {
     await mockDesktop(page)
-    await page.goto(`/app/folder/${folder.id}`)
+    await page.goto(`/folder/${folder.id}`)
     await page.getByRole('button', { name: '管理收藏夹' }).focus()
     await page.keyboard.press('Enter')
     await page.keyboard.press('End')

@@ -3,7 +3,6 @@ import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { createAgentApi } from '#agent/app.ts'
-import { agentDocRoutes } from '#agent/doc.ts'
 import { pooledReads, typeCatalog } from '#agent/runner.ts'
 import { mediaRoutes } from '#blob/route.ts'
 import { regenerateThumbnail } from '#capture/thumbnail.ts'
@@ -38,8 +37,16 @@ export interface WebHandle {
   load: WebLoad
 }
 
-const APP_PREFIX = /^\/app/
+const OLD_APP = /^\/app(?=\/|$)/
+// What the API answers itself; never the web app's pages.
+const API_PATH = /^\/(?:v1|agent|media)(?:\/|$)|^\/healthz$/
 const STATUS_EVERY = 2000
+
+/** The same address, path and query, without the old /app prefix. */
+function withoutOldPrefix(href: string) {
+  const url = new URL(href)
+  return `${url.pathname.replace(OLD_APP, '') || '/'}${url.search}`
+}
 
 /**
  * The web process: HTTP (the API, media, the web app), the Telegram bot and
@@ -124,6 +131,7 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
   })
   const agent = createAgentApi({
     ctx,
+    webAppUrl: config.webAppUrl,
     reads: pooledReads(pool),
     reader: { db, blobs: ctx.blobs, types },
     usage: tokenUsage,
@@ -142,9 +150,8 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
     return c.text('ok')
   })
   app.route('/v1', api)
-  // For AI agents and scripts; its guide is public.
+  // For AI agents and scripts; its guide is the web app's /agent.md.
   app.route('/', agent)
-  app.route('/', agentDocRoutes())
   // With R2, this serves thumbnails (a local cache, fetched again when
   // lost), downloads, and originals until their upload is confirmed.
   app.route(
@@ -160,21 +167,25 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
         : {},
     ),
   )
-  // The built web app; unknown paths under /app/ load the app itself. Public
-  // links open inside it, and neither it nor they belong in search results.
-  app.use('/app/*', async (c, next) => {
+  // The built web app at the root, for a server whose host is also the web
+  // app's (built with VITE_API_URL empty): unknown paths load the app
+  // itself. Public links open inside it, and neither it nor they belong in
+  // search results. Old addresses under /app/ moved to the root.
+  app.get('/app/*', (c) => c.redirect(withoutOldPrefix(c.req.url), 301))
+  app.get('/app', (c) => c.redirect(withoutOldPrefix(c.req.url), 301))
+  const assets = serveStatic({ root: config.webDir })
+  const page = serveStatic({ root: config.webDir, path: 'index.html' })
+  app.use('*', async (c, next) => {
+    if (API_PATH.test(c.req.path)) return next()
     await next()
     c.header('X-Robots-Tag', 'noindex, nofollow')
   })
-  app.use(
-    '/app/*',
-    serveStatic({
-      root: config.webDir,
-      rewriteRequestPath: (path) => path.replace(APP_PREFIX, ''),
-    }),
+  app.use('*', (c, next) =>
+    API_PATH.test(c.req.path) ? next() : assets(c, next),
   )
-  app.get('/app/*', serveStatic({ root: config.webDir, path: 'index.html' }))
-  app.get('/', (c) => c.redirect('/app/'))
+  app.get('*', (c, next) =>
+    API_PATH.test(c.req.path) ? next() : page(c, next),
+  )
 
   const server = serve(
     { fetch: app.fetch, port: config.port, hostname: config.host },

@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { Hono } from 'hono'
 import { deleteCookie, getCookie } from 'hono/cookie'
+import { cors } from 'hono/cors'
 import * as v from 'valibot'
 import { typeCatalog } from '#agent/runner.ts'
 import { HEARTBEAT_TIMEOUT, setHeartbeatTimeoutMinutes } from '#settings.ts'
@@ -139,9 +140,19 @@ export function createApi(options: HttpOptions) {
   }
   const admin = userRoutes({ db: ctx.db, webAppUrl, now })
 
+  // The web app calls from its own origins, with the session cookie. A
+  // preflight is answered here, before any login check, and cached.
+  const crossOrigin = cors({
+    origin: (origin) => (fromWeb(origin) ? origin : null),
+    credentials: true,
+    allowMethods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    maxAge: CORS_MAX_AGE,
+  })
+
   return (
     new Hono<Env>()
       .onError((error, c) => errorResponse(c, error, ctx.logger))
+      .use((c, next) => (options.trusted ? next() : crossOrigin(c, next)))
       .use(async (c, next) => {
         try {
           await next()
@@ -366,3 +377,5 @@ export function createApi(options: HttpOptions) {
 export type Api = ReturnType<typeof createApi>
 
 const READS = new Set(['GET', 'HEAD'])
+/** Seconds a browser keeps a preflight's answer. */
+const CORS_MAX_AGE = 7200

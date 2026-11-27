@@ -160,7 +160,7 @@ describe('removed media', () => {
     const tile = el.querySelector<HTMLAnchorElement>('a.tile')!
     expect(tile.getAttribute('aria-label')).toBe('视频已移除，查看帖子')
     expect(tile.textContent).toContain('已移除')
-    expect(tile.getAttribute('href')).toBe('/app/collection/post')
+    expect(tile.getAttribute('href')).toBe('/collection/post')
   })
 
   it('removes one item from the viewer (删除此媒体)', async () => {

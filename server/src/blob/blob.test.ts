@@ -129,6 +129,8 @@ describe('mediaRoutes', () => {
     const whole = await app.request(url)
     expect(whole.status).toBe(200)
     expect(whole.headers.get('content-type')).toBe('video/mp4')
+    // The web app on another origin draws images into WebGL.
+    expect(whole.headers.get('access-control-allow-origin')).toBe('*')
     expect(await whole.text()).toBe('0123456789')
 
     const part = await app.request(url, { headers: { Range: 'bytes=2-5' } })

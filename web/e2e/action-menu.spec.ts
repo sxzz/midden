@@ -14,7 +14,7 @@ test.describe('with a mouse', () => {
     page,
   }) => {
     await mockDesktop(page)
-    await page.goto(`/app/folder/${folder.id}`)
+    await page.goto(`/folder/${folder.id}`)
     await trigger(page).click()
     const menu = page.getByRole('menu', { name: folder.name })
     await expect(menu).toBeVisible()
@@ -68,7 +68,7 @@ test.describe('with a mouse', () => {
 
   test('the menu is worked from the keyboard', async ({ page }) => {
     await mockDesktop(page)
-    await page.goto(`/app/folder/${folder.id}`)
+    await page.goto(`/folder/${folder.id}`)
     await trigger(page).focus()
     await page.keyboard.press('Enter')
     const menu = page.getByRole('menu', { name: folder.name })
@@ -109,7 +109,7 @@ test.describe('with a mouse', () => {
     page.on('request', (request) => {
       if (request.method() === 'DELETE') deletes.push(request.url())
     })
-    await page.goto(`/app/folder/${folder.id}`)
+    await page.goto(`/folder/${folder.id}`)
     await trigger(page).click()
     await page.getByRole('menuitem', { name: '删除收藏夹' }).click()
     await expect(page.getByRole('menu')).toHaveCount(0)
@@ -128,7 +128,7 @@ test.describe('with a mouse', () => {
     page,
   }) => {
     await mockDesktop(page)
-    await page.goto('/app/')
+    await page.goto('/')
     await page.getByRole('button', { name: '多选' }).click()
     await page.getByRole('checkbox').first().click()
     const more = page.getByRole('button', { name: '更多操作' })
@@ -154,7 +154,7 @@ test.describe('with touch', () => {
     page,
   }) => {
     await mockDesktop(page)
-    await page.goto(`/app/folder/${folder.id}`)
+    await page.goto(`/folder/${folder.id}`)
     await trigger(page).tap()
     const sheet = page.getByRole('dialog', { name: folder.name })
     await expect(sheet).toBeVisible()
@@ -170,7 +170,7 @@ test.describe('with touch', () => {
     await expect(sheet).toBeHidden()
 
     // The 多选 bar's menu too.
-    await page.goto('/app/')
+    await page.goto('/')
     await page.getByRole('button', { name: '多选' }).tap()
     await page.getByRole('checkbox').first().tap()
     await page.getByRole('button', { name: '更多操作' }).tap()

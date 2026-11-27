@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Install deploy-webhook.ts as a macOS LaunchAgent, copied outside the
 // checkout that deployments switch between revisions. The GitHub webhook
-// (workflow runs, to https://<host>/hooks/deploy) and the tunnel route to the
+// (workflow runs, to https://<API host>/hooks/deploy) and the tunnel route to the
 // port are configured separately.
 //
 //   node scripts/install-deploy-webhook.ts [--dir ~/midden] [--port 18090] [--print]

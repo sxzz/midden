@@ -71,7 +71,7 @@ it('compares the selected accounts that have relation data, saying how many are 
   // A link to the comparison, which closes the sheet as it navigates.
   const link = button(el, '比较关系')!
   expect(link.getAttribute('href')).toBe(
-    `/app/compare?${[keys[0]!, keys[2]!].map((k) => `rel_of=${encodeURIComponent(k)}`).join('&')}`,
+    `/compare?${[keys[0]!, keys[2]!].map((k) => `rel_of=${encodeURIComponent(k)}`).join('&')}`,
   )
   link.click()
   expect(navigate).toHaveBeenCalled()

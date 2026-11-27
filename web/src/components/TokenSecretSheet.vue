@@ -1,5 +1,6 @@
 <script setup vapor lang="ts">
-import { useId, useTemplateRef, watch } from 'vue'
+import { computed, useId, useTemplateRef, watch } from 'vue'
+import { apiAddress } from '../api'
 import { toast } from '../composables/useToast'
 import { showSheet } from '../sheet-focus'
 
@@ -10,6 +11,12 @@ const emit = defineEmits<{ done: [] }>()
 const titleId = useId()
 const dialog = useTemplateRef<HTMLDialogElement>('sheet')
 const field = useTemplateRef<HTMLInputElement>('field')
+const handoffField = useTemplateRef<HTMLTextAreaElement>('handoffField')
+// What an AI agent needs, in one paste: its guide, the API and the token.
+const handoff = computed(
+  () =>
+    `说明：${location.origin}/agent.md\nAPI 地址：${apiAddress()}\n令牌：${props.secret}`,
+)
 watch(
   () => props.open,
   (open) => {
@@ -17,14 +24,18 @@ watch(
     else dialog.value?.close()
   },
 )
-async function copy() {
+async function copy(
+  text: string,
+  into: HTMLInputElement | HTMLTextAreaElement | null,
+  what = '',
+) {
   try {
-    await navigator.clipboard.writeText(props.secret)
-    toast('已复制令牌')
+    await navigator.clipboard.writeText(text)
+    toast(`已复制${what}`)
   } catch {
     // Some web views refuse the clipboard; leave it selected instead.
-    field.value?.select()
-    toast('请手动复制令牌')
+    into?.select()
+    toast(`请手动复制${what}`)
   }
 }
 </script>
@@ -50,7 +61,25 @@ async function copy() {
           @focus="field?.select()"
         />
       </label>
-      <button type="button" class="action" @click="copy">复制</button>
+      <button type="button" class="action" @click="copy(secret, field, '令牌')">
+        复制
+      </button>
+    </div>
+    <div class="group">
+      <label class="field">
+        <span class="visually-hidden">给 AI agent</span>
+        <textarea
+          ref="handoffField"
+          :value="handoff"
+          readonly
+          rows="3"
+          spellcheck="false"
+          @focus="handoffField?.select()"
+        />
+      </label>
+      <button type="button" class="action" @click="copy(handoff, handoffField)">
+        复制给 AI agent
+      </button>
     </div>
     <button type="button" class="group action done" @click="emit('done')">
       完成
@@ -108,7 +137,8 @@ async function copy() {
   clip-path: inset(50%);
   white-space: nowrap;
 }
-input {
+input,
+textarea {
   display: block;
   width: 100%;
   padding: 11px 13px;
@@ -119,6 +149,10 @@ input {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 14px;
   line-height: 1.55;
+}
+textarea {
+  resize: none;
+  overflow-wrap: anywhere;
 }
 .action {
   display: block;

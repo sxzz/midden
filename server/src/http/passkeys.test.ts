@@ -36,12 +36,12 @@ function setup() {
     advance: (ms: number) => (time += ms),
     start,
   }
-  addOrigin(ctx.db, `${MAIN}/app/`, OTHER)
+  addOrigin(ctx.db, `${MAIN}/`, OTHER)
   const notices: string[] = []
   const app = createApi({
     ctx,
     telegram: { token: '1:x', owner: '42' },
-    webAppUrl: `${MAIN}/app/`,
+    webAppUrl: `${MAIN}/`,
     notify: (text) => notices.push(text),
     now: clock.now,
   })
@@ -65,7 +65,7 @@ function setup() {
     const reply = handle(
       {
         ctx: ctx!,
-        webAppUrl: `${MAIN}/app/`,
+        webAppUrl: `${MAIN}/`,
         version: 'dev',
         now: clock.now,
       },
@@ -85,10 +85,7 @@ function setup() {
     return {
       reply,
       tokens: Object.fromEntries(
-        urls.map((url) => [
-          new URL(url).origin,
-          url.split('/app/passkey#', 2)[1]!,
-        ]),
+        urls.map((url) => [new URL(url).origin, url.split('/passkey#', 2)[1]!]),
       ),
     }
   }
@@ -183,7 +180,7 @@ describe('/passkey links', () => {
     ).toBe(false)
     const { ctx } = setup()
     expect(
-      handle({ ctx, webAppUrl: `${MAIN}/app/`, version: 'dev' }, {
+      handle({ ctx, webAppUrl: `${MAIN}/`, version: 'dev' }, {
         command: 'passkey',
         group: true,
       } as Request).text,
@@ -682,7 +679,7 @@ describe('passkey management', () => {
     ])
     const add = (origin: string) =>
       call('/origins', { method: 'POST', body: JSON.stringify({ origin }) })
-    const added = await add('  https://New.Example/app/?x=1#y ')
+    const added = await add('  https://New.Example/?x=1#y ')
     expect(await added.json()).toMatchObject({
       origin: 'https://new.example',
       passkeys: 0,

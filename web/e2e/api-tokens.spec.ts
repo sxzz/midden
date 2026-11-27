@@ -98,7 +98,7 @@ test('lists tokens with their expiry and use, and makes one shown once', async (
 }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const sent = await mock(page)
-  await page.goto('/app/settings/tokens')
+  await page.goto('/settings/tokens')
   const listed = row(page, '研究')
   await expect(listed).toContainText('只读')
   await expect(listed).toContainText('过期 · 剩 6 天')
@@ -119,13 +119,28 @@ test('lists tokens with their expiry and use, and makes one shown once', async (
 
   await expect(sheet(page)).toContainText('已创建 同步')
   await expect(sheet(page)).toContainText('令牌只显示这一次。')
-  await expect(sheet(page).getByRole('textbox')).toHaveValue(
+  await expect(sheet(page).getByRole('textbox', { name: '令牌' })).toHaveValue(
     'mdn_rw_first-secret',
   )
-  await sheet(page).getByRole('button', { name: '复制' }).click()
+  await sheet(page).getByRole('button', { name: '复制', exact: true }).click()
   await expect(page.getByText('已复制令牌')).toBeVisible()
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
     'mdn_rw_first-secret',
+  )
+  // What an agent needs in one paste; the API is this origin here (no
+  // VITE_API_URL), the guide is the web app's.
+  const origin = new URL(page.url()).origin
+  const handoff = [
+    `说明：${origin}/agent.md`,
+    `API 地址：${origin}`,
+    '令牌：mdn_rw_first-secret',
+  ].join('\n')
+  await expect(
+    sheet(page).getByRole('textbox', { name: '给 AI agent' }),
+  ).toHaveValue(handoff)
+  await sheet(page).getByRole('button', { name: '复制给 AI agent' }).click()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    handoff,
   )
   await sheet(page).getByRole('button', { name: '完成' }).click()
   await expect(sheet(page)).toHaveCount(0)
@@ -148,7 +163,7 @@ test('lists tokens with their expiry and use, and makes one shown once', async (
 
 test('edits, rolls and revokes a token', async ({ page }) => {
   const sent = await mock(page)
-  await page.goto('/app/settings/tokens')
+  await page.goto('/settings/tokens')
   await row(page, '研究').click()
   await expect(sheet(page)).toContainText('最近 30 天 5 次')
   await expect(sheet(page)).toContainText('GET /agent/v1/posts')
@@ -182,7 +197,7 @@ test('edits, rolls and revokes a token', async ({ page }) => {
   await expect(sheet(page)).toContainText('旧令牌立即失效')
   await sheet(page).getByRole('button', { name: '轮换令牌' }).click()
   await expect(sheet(page)).toContainText('已轮换 研究 2')
-  await expect(sheet(page).getByRole('textbox')).toHaveValue(
+  await expect(sheet(page).getByRole('textbox', { name: '令牌' })).toHaveValue(
     'mdn_ro_rolled-secret',
   )
   await sheet(page).getByRole('button', { name: '完成' }).click()

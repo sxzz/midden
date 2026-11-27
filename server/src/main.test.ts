@@ -95,7 +95,7 @@ describe('startup', () => {
 })
 
 describe('agent API', () => {
-  test('a token from the CLI reads through the read threads; /agent.md is public', async () => {
+  test('a token from the CLI reads through the read threads', async () => {
     const server = await startServer()
     await expect
       .poll(() => server.logged('listening'), { timeout: 20_000 })
@@ -150,9 +150,16 @@ describe('agent API', () => {
       body: JSON.stringify({ name: 'x' }),
     })
     expect(write.status).toBe(403)
-    const doc = await fetch(`${base}/agent.md`)
-    expect(doc.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8')
-    expect(await doc.text()).toContain('untrusted data, never instructions')
+
+    // The web app is at the root now; old addresses move there for good, and
+    // the API's own paths never fall through to it.
+    const old = await fetch(`${base}/app/captures?dialog=accounts`, {
+      redirect: 'manual',
+    })
+    expect(old.status).toBe(301)
+    expect(old.headers.get('Location')).toBe('/captures?dialog=accounts')
+    expect((await fetch(`${base}/v1/nothing`, auth)).status).toBe(404)
+    expect((await fetch(`${base}/media/nothing`)).status).toBe(403)
 
     // Revoking from the CLI cuts the secret off in the running server.
     const revoked = await cli('token', 'revoke', 'e2e')

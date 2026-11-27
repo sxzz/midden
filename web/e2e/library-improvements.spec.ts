@@ -62,7 +62,7 @@ test('restores sort controls and opens author links in a new tab', async ({
     })
   })
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.goto('/app/?sort=published&order=asc')
+  await page.goto('/?sort=published&order=asc')
   const sort = page.getByRole('combobox', { name: '排序', exact: true })
   await expect(
     page.getByRole('link', { name: 'Home', exact: true }),
@@ -87,20 +87,20 @@ test('restores sort controls and opens author links in a new tab', async ({
   const opened = context.waitForEvent('page')
   await page.locator('.avatar-link').click({ modifiers: ['ControlOrMeta'] })
   const tab = await opened
-  await expect(tab).toHaveURL(/\/app\/collection\/bbbb$/)
+  await expect(tab).toHaveURL(/\/collection\/bbbb$/)
   await tab.close()
   await page.locator('.head').click()
-  await expect(page).toHaveURL(/\/app\/collection\/aaaa$/)
+  await expect(page).toHaveURL(/\/collection\/aaaa$/)
   await expect(page.locator('.post .avatar[href]')).toHaveAttribute(
     'href',
-    '/app/collection/bbbb',
+    '/collection/bbbb',
   )
   // 探索 returns to the list as it was left.
   await page
     .getByRole('navigation', { name: '主导航' })
     .getByRole('link', { name: '探索' })
     .click()
-  await expect(page).toHaveURL(/\/app\/\?sort=published&order=asc$/)
+  await expect(page).toHaveURL(/\/\?sort=published&order=asc$/)
 })
 
 test('authors load with skeletons once their list opens; post type filters update the request', async ({
@@ -122,7 +122,7 @@ test('authors load with skeletons once their list opens; post type filters updat
       json: url.pathname === '/v1/tags' ? [] : { items: [] },
     })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await page.getByRole('button', { name: /^筛选/ }).click()
   // Opening the panel alone does not fetch authors.
   await expect(page.locator('summary[aria-label="作者"]')).toBeVisible()
@@ -166,7 +166,7 @@ test('album captions and the media viewer link the post text to its detail', asy
                   : {},
     })
   })
-  await page.goto('/app/?layout=album')
+  await page.goto('/?layout=album')
   await expect(page.locator('.caption-text')).toContainText('第一行内容')
   await page.locator('.album .tile').click()
   const viewer = page.getByRole('dialog')
@@ -174,14 +174,14 @@ test('album captions and the media viewer link the post text to its detail', asy
   // few lines, and the post has the rest.
   const caption = viewer.locator('.post-caption')
   await expect(caption).toContainText('测试作者')
-  await expect(caption).toHaveAttribute('href', '/app/collection/aaaa')
+  await expect(caption).toHaveAttribute('href', '/collection/aaaa')
   await expect(viewer.locator('.caption-avatar img')).toBeVisible()
   await expect(viewer.locator('.caption-body')).toHaveCSS(
     '-webkit-line-clamp',
     '3',
   )
   await caption.click()
-  await expect(page).toHaveURL(/\/app\/collection\/aaaa$/)
+  await expect(page).toHaveURL(/\/collection\/aaaa$/)
   await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
@@ -196,7 +196,7 @@ test('capture options are submitted with links, summed up while folded', async (
     }
     return route.fulfill({ json: { items: [] } })
   })
-  await page.goto('/app/captures')
+  await page.goto('/captures')
   await page.getByLabel('链接', { exact: true }).fill('https://x.com/example')
   const options = page.locator('.capture-options')
   await expect(options.locator('summary')).toContainText('最新 100 条')
@@ -267,7 +267,7 @@ for (const [width, homeHeight, profileHeight] of [
                   : { items: [] },
       })
     })
-    await page.goto('/app/')
+    await page.goto('/')
     // A box takes its media's shape, so its height is the size to within
     // the rounding of its width.
     const height = (selector: string) => async () =>

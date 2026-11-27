@@ -9,12 +9,46 @@ import { host } from './host'
 import { queryErrorText } from './query-errors'
 import type { Api } from '@midden/server/api'
 
+const TRAILING_SLASHES = /\/+$/
+// A path on the same origin: one slash, not `//host`.
+const SERVER_RELATIVE = /^\/(?!\/)/
+
+/**
+ * Where the API is, without a trailing slash: `VITE_API_URL` at build time
+ * (`https://midden-api.example.com`), or empty for the page's own origin
+ * (the dev server's proxy, a server that serves the app itself).
+ */
+export const API_URL: string = (import.meta.env.VITE_API_URL ?? '').replace(
+  TRAILING_SLASHES,
+  '',
+)
+/** The API's address as an agent is given it: always absolute. */
+export const apiAddress = () => API_URL || location.origin
+
 /** The server's `/v1` API, typed from its route definitions. */
-export const client = hc<Api>('/v1', {
+export const client = hc<Api>(`${API_URL}/v1`, {
   fetch: (input: RequestInfo | URL, init?: RequestInit) =>
-    // Ahead of images and video, which share the same connection.
-    fetch(input, { priority: 'high', ...init, credentials: 'same-origin' }),
+    // Ahead of images and video, which share the same connection. The
+    // session cookie is the API host's, sent to it from this origin too.
+    fetch(input, {
+      priority: 'high',
+      ...init,
+      credentials: API_URL ? 'include' : 'same-origin',
+    }),
 })
+
+/**
+ * The server's own links (signed media, `/media/…`) are relative to the
+ * API, which may be on another origin than this page: they get its origin.
+ */
+function onAPI(key: string, value: unknown) {
+  return API_URL &&
+    typeof value === 'string' &&
+    key.endsWith('url') &&
+    SERVER_RELATIVE.test(value)
+    ? API_URL + value
+    : value
+}
 
 export class APIError extends Error {
   status: number
@@ -47,7 +81,10 @@ export async function call<T extends ClientResponse<unknown>>(
       )
     throw new APIError(response.status, body.error || '服务暂时不可用')
   }
-  return (response.status === 204 ? undefined : await response.json()) as never
+  if (response.status === 204) return undefined as never
+  return (
+    API_URL ? JSON.parse(await response.text(), onAPI) : await response.json()
+  ) as never
 }
 
 type Ok<T> = InferResponseType<T, 200>

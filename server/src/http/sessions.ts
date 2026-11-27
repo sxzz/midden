@@ -23,7 +23,12 @@ export const SESSION_TTL = 30 * DAY
  */
 export const SESSION_RENEW_AFTER = DAY
 
-/** Host-only, so each of the app's domains keeps its own session. */
+/**
+ * Host-only: the API's host keeps it, and the web app's origins send it
+ * with `credentials: 'include'`. They must be the same site as the API
+ * (as midden.example.com and midden-api.example.com are), or browsers
+ * that block third-party cookies never send it.
+ */
 export const SESSION_COOKIE = '__Host-midden'
 
 export type SignIn = NonNullable<(typeof webSessions.$inferSelect)['method']>

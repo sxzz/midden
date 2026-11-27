@@ -219,7 +219,7 @@ describe('存储用量', () => {
     const largest = [...el.querySelectorAll('a')].find((a) =>
       a.textContent?.includes('按占用空间排列收藏'),
     )!
-    expect(largest.getAttribute('href')).toBe('/app/?sort=storage')
+    expect(largest.getAttribute('href')).toBe('/?sort=storage')
     // Each bucket's storage, the day's operations and the local figures.
     expect(
       [...el.querySelectorAll('.trend h3')].map((h) => h.textContent),

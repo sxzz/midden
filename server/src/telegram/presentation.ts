@@ -88,8 +88,8 @@ export function webRoute(
 
 /**
  * The address of a route of the web app (`/captures?dialog=accounts`): a
- * path under the app's own (`WEB_APP_URL`, ending in /app/), which keeps
- * that address's query, such as a cache-buster for the Mini App.
+ * path under the app's own (`WEB_APP_URL`), which keeps that address's
+ * query, such as a cache-buster for the Mini App.
  */
 export function appURL(webAppUrl: string, route: string): URL {
   const app = new URL(webAppUrl)

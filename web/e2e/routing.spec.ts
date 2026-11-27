@@ -43,7 +43,7 @@ for (const back of ['button', 'history'] as const) {
             : items.find((item) => path === `/v1/collections/${item.id}`) || {},
       })
     })
-    await page.goto('/app/?q=test')
+    await page.goto('/?q=test')
     const row = page.locator('.row').nth(15)
     await row.scrollIntoViewIfNeeded()
     const img = row.locator('img')
@@ -57,7 +57,7 @@ for (const back of ['button', 'history'] as const) {
       await page.getByRole('link', { name: '返回' }).click()
     else await page.goBack()
     await expect(page.locator('h1')).toHaveText('我的收藏')
-    await expect(page).toHaveURL(/\/app\/\?q=test$/)
+    await expect(page).toHaveURL(/\/\?q=test$/)
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scroll)
     expect(await img.evaluate((node, saved) => node === saved, original)).toBe(
       true,
@@ -120,11 +120,11 @@ test('Telegram back from a directly opened collection returns home', async ({
                 : {},
     })
   })
-  await page.goto(`/app/collection/${items[0]!.id}`)
+  await page.goto(`/collection/${items[0]!.id}`)
   await expect(page.locator('h1')).toHaveText('帖子')
   await page.evaluate(() =>
     (globalThis as unknown as { telegramBack: () => void }).telegramBack(),
   )
   await expect(page.locator('h1')).toHaveText('我的收藏')
-  await expect(page).toHaveURL(/\/app\/$/)
+  await expect(page).toHaveURL(/:\d+\/$/)
 })

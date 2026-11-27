@@ -104,7 +104,7 @@ describe('text', () => {
 describe('presentation', () => {
   test('a post message: id in code, author linked, body quoted', () => {
     const message = collectionMessage(collection(), 'complete', {
-      webAppUrl: 'https://midden.test/app/?v=1#old',
+      webAppUrl: 'https://midden.test/?v=1#old',
     })
     const id = collection().id
     expect(message.text).toBe(`${id}\n\nAuthor：\nhello`)
@@ -121,7 +121,7 @@ describe('presentation', () => {
     expect(message.keyboard.at(-1)).toEqual([
       {
         text: '在小程序中打开',
-        web_app: { url: `https://midden.test/app/collection/${id}?v=1` },
+        web_app: { url: `https://midden.test/collection/${id}?v=1` },
       },
     ])
   })
@@ -141,7 +141,7 @@ describe('presentation', () => {
   })
 
   test('mini app buttons need https and never appear in groups', () => {
-    expect(webRoute('http://x.test/app/', 'a', '/b')).toBeUndefined()
+    expect(webRoute('http://x.test/', 'a', '/b')).toBeUndefined()
     expect(
       groupKeyboard([
         [{ text: 'list', callback_data: '/list' }],
@@ -274,25 +274,21 @@ describe('video sizes', () => {
 
 describe('the web app’s addresses', () => {
   test('are plain paths under the app, with no fragment', () => {
-    expect(appURL('https://midden.test/app/', '/captures/x').href).toBe(
-      'https://midden.test/app/captures/x',
+    expect(appURL('https://midden.test/', '/captures/x').href).toBe(
+      'https://midden.test/captures/x',
     )
-    expect(appURL('https://midden.test/app', '/settings/admin').href).toBe(
-      'https://midden.test/app/settings/admin',
+    expect(appURL('https://midden.test', '/settings/admin').href).toBe(
+      'https://midden.test/settings/admin',
     )
     // The route's query, then the app address's own (a cache-buster).
     expect(
-      appURL('https://midden.test/app/?v=2', '/captures?dialog=accounts').href,
-    ).toBe('https://midden.test/app/captures?dialog=accounts&v=2')
+      appURL('https://midden.test/?v=2', '/captures?dialog=accounts').href,
+    ).toBe('https://midden.test/captures?dialog=accounts&v=2')
     expect(
-      webRoute(
-        'https://midden.test/app/',
-        '添加账号',
-        '/captures?dialog=accounts',
-      ),
+      webRoute('https://midden.test/', '添加账号', '/captures?dialog=accounts'),
     ).toEqual({
       text: '添加账号',
-      web_app: { url: 'https://midden.test/app/captures?dialog=accounts' },
+      web_app: { url: 'https://midden.test/captures?dialog=accounts' },
     })
   })
 })

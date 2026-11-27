@@ -633,7 +633,11 @@ function watchesOf(r: AgentReader, input: { id?: string } = {}) {
  * Public links (公开分享), all of them or those that make a post or account
  * public (`of`): its own, a folder holding it, a shared account listing it.
  */
-function sharesOf(r: AgentReader, input: { of?: string; origin: string }) {
+function sharesOf(
+  r: AgentReader,
+  // `origin` is the web app's: public links open there.
+  input: { of?: string; origin: string },
+) {
   const shares = listShares(r.db, input.of?.toLowerCase())
   const kinds = new Map(
     r.db
@@ -648,7 +652,7 @@ function sharesOf(r: AgentReader, input: { of?: string; origin: string }) {
   return {
     items: shares.map((share) => ({
       id: share.id,
-      url: `${input.origin}/app/s/${share.slug}`,
+      url: `${input.origin}/s/${share.slug}`,
       target:
         share.target === 'folder'
           ? 'folder'

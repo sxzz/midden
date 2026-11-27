@@ -93,7 +93,7 @@ test('deleting in the viewer keeps it open on the next item, and the list where 
   page,
 }) => {
   const seen = await setup(page, [range(1, 41)])
-  await page.goto('/app/?layout=album')
+  await page.goto('/?layout=album')
   await expect(tiles(page)).toHaveCount(40)
   await page.evaluate(() => window.scrollTo(0, 500))
   const scrolled = await page.evaluate(() => window.scrollY)
@@ -130,7 +130,7 @@ test('deleting the last item moves back to the one before it, and the last one c
   page,
 }) => {
   const seen = await setup(page, [range(1, 4)])
-  await page.goto('/app/?layout=album')
+  await page.goto('/?layout=album')
   await expect(tiles(page)).toHaveCount(3)
   await tiles(page).nth(2).click()
   await expect(viewer(page).locator('.counter')).toHaveText('3 / 3')
@@ -155,7 +155,7 @@ test('the viewer asks for the next page near the end and goes on into it', async
 }) => {
   const seen = await setup(page, [range(1, 91), range(91, 101)])
   seen.hold()
-  await page.goto('/app/?layout=album')
+  await page.goto('/?layout=album')
   await expect(tiles(page)).toHaveCount(90)
   await page.evaluate(() => window.scrollTo(0, 500))
   const scrolled = await page.evaluate(() => window.scrollY)
@@ -190,7 +190,7 @@ test('the viewer asks for the next page near the end and goes on into it', async
 
 test('at the true end next does nothing', async ({ page }) => {
   const seen = await setup(page, [range(1, 91), range(91, 94)])
-  await page.goto('/app/?layout=album')
+  await page.goto('/?layout=album')
   await expect(tiles(page)).toHaveCount(90)
   await page.evaluate(() => window.scrollTo(0, 500))
   await tiles(page).nth(10).click()
@@ -243,7 +243,7 @@ test('deleting in the viewer from a post keeps it open, and the post shows the m
           : {},
     })
   })
-  await page.goto(`/app/collection/${id}`)
+  await page.goto(`/collection/${id}`)
   await page.getByRole('button', { name: '放大图片' }).nth(1).click()
   await expect(viewer(page).locator('.counter')).toHaveText('2 / 3')
   await expect(thumb(page, 1)).toBeEnabled()

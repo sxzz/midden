@@ -88,7 +88,7 @@ test('offers what the library holds, most used first', async () => {
 
 test('the owner asks for them; nobody else', async () => {
   const { c } = await setup()
-  const app = createApi({ ctx: c, webAppUrl: 'https://midden.test/app/' })
+  const app = createApi({ ctx: c, webAppUrl: 'https://midden.test/' })
   const session = createSession(c.db, adminId(c.db))
   const ask = (query: string, signedIn = true) =>
     app.request(`/query/suggest?${query}`, {

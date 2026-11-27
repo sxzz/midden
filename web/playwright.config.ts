@@ -23,7 +23,7 @@ export default defineConfig({
   webServer: {
     // Run Vite directly: pnpm can exit before its child and leave teardown hanging.
     command: `node node_modules/vite/bin/vite.js --host 127.0.0.1 --port ${port} --strictPort`,
-    url: `${origin}/app/`,
+    url: `${origin}/`,
     // Reusing is opt-in: a server already on the port may belong to another worktree.
     reuseExistingServer: !!process.env.E2E_REUSE_SERVER,
   },

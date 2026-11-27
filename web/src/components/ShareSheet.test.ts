@@ -9,7 +9,7 @@ const ID = '00000000-0000-7000-8000-000000000001'
 const FOLDER = '00000000-0000-7000-8000-00000000000f'
 const SHARE = '00000000-0000-7000-8000-0000000000aa'
 const SLUG = 'AbCdEfGhIjKlMnOpQrStUv_-'
-// The app's own address with the share's route: /app/ when built.
+// The app's own address with the share's route: / when built.
 const LINK = `${location.origin}${import.meta.env.BASE_URL}s/${SLUG}`
 const RANDOM = 'ZyXwVuTsRqPoNmLkJiHgFeDc'
 const linkTo = (slug: string) =>

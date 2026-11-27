@@ -358,7 +358,7 @@ describe('domains', () => {
         '请输入 https 开头的地址',
       ),
     )
-    input.value = 'https://new.example/app/'
+    input.value = 'https://new.example/'
     input.dispatchEvent(new Event('input'))
     button(el, '添加').click()
     await vi.waitFor(() =>
@@ -366,7 +366,7 @@ describe('domains', () => {
     )
     expect(bodies(api, '/origins')).toEqual([
       { origin: 'http://plain.test' },
-      { origin: 'https://new.example/app/' },
+      { origin: 'https://new.example/' },
     ])
   })
 

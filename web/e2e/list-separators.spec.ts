@@ -75,7 +75,7 @@ for (const scheme of ['light', 'dark'] as const) {
         if (path === '/v1/folders') return r.fulfill({ json: [] })
         return r.fulfill({ json: {} })
       })
-      await page.goto(`/app/collection/${id}`)
+      await page.goto(`/collection/${id}`)
       const toggle = page.getByRole('button', { name: /我的整理/ })
       await expect(toggle).toBeVisible()
       await toggle.scrollIntoViewIfNeeded()

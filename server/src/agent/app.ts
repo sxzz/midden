@@ -36,6 +36,11 @@ export interface AgentOptions {
   now?: () => number
   /** After every request that may have written (not `GET`). */
   onWrite?: () => void
+  /**
+   * The web app's address (WEB_APP_URL), for public links; without it the
+   * web app is taken to be on the API's own host.
+   */
+  webAppUrl?: string
 }
 
 const Batch = v.strictObject({
@@ -101,7 +106,7 @@ export function createAgentApi(o: AgentOptions) {
       if (!openToViewers(c))
         throw new AgentError(
           'forbidden',
-          'This endpoint is for the admin only. See /agent.md.',
+          'This endpoint is for the admin only. See agent.md.',
         )
       const leave =
         token.role === 'admin'
@@ -247,7 +252,7 @@ export function createAgentApi(o: AgentOptions) {
     return c.json(
       await reads.run(c.get('principal'), 'shares', {
         ...(of ? { of } : {}),
-        origin: originOf(c),
+        origin: o.webAppUrl ? new URL(o.webAppUrl).origin : originOf(c),
       }),
     )
   })
@@ -258,7 +263,7 @@ export function createAgentApi(o: AgentOptions) {
   writeRoutes(app, { ctx, reader: o.reader, reads })
 
   app.all('*', () => {
-    throw notFound('No such endpoint. See /agent.md.')
+    throw notFound('No such endpoint. See agent.md.')
   })
   return app
 }

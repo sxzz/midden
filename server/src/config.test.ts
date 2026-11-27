@@ -118,6 +118,24 @@ describe('media store configuration', () => {
   })
 })
 
+test('WEB_APP_URL is an https origin, kept with a trailing slash', () => {
+  expect(
+    loadConfig({ SECRET_KEY, WEB_APP_URL: 'https://midden.example' }).webAppUrl,
+  ).toBe('https://midden.example/')
+  expect(
+    loadConfig({ SECRET_KEY, WEB_APP_URL: 'https://midden.example/' })
+      .webAppUrl,
+  ).toBe('https://midden.example/')
+  for (const url of [
+    'https://midden.example/app/',
+    'http://midden.example/',
+    'https://midden.example/?v=1',
+  ])
+    expect(() => loadConfig({ SECRET_KEY, WEB_APP_URL: url })).toThrow(
+      /WEB_APP_URL/,
+    )
+})
+
 test('the Litestream heartbeat watch follows its access key', () => {
   expect(loadConfig({ SECRET_KEY }).litestream).toBe(false)
   expect(

@@ -5,10 +5,13 @@ import { intervalUnits } from '#db/schema.ts'
 import { viewers } from '#http/auth.ts'
 import { isMarked } from '#http/markers.ts'
 import { agentFixture, type AgentFixture } from '#testing/agent.ts'
-import { AGENT_DOC, agentDocRoutes } from './doc.ts'
 import { AGENT_ERRORS } from './errors.ts'
 
-const doc = readFileSync(AGENT_DOC, 'utf8')
+// The web app serves it as /agent.md (web/vite.config.ts).
+const doc = readFileSync(
+  new URL('../../../docs/agent.md', import.meta.url),
+  'utf8',
+)
 
 let fixture: AgentFixture | undefined
 afterEach(async () => {
@@ -16,14 +19,14 @@ afterEach(async () => {
   fixture = undefined
 })
 
-describe('/agent.md', () => {
-  test('is served as it is in the repository, to anyone', async () => {
-    const response = await agentDocRoutes().request('/agent.md')
-    expect(response.status).toBe(200)
-    expect(response.headers.get('Content-Type')).toBe(
-      'text/markdown; charset=utf-8',
+describe('docs/agent.md', () => {
+  test('names no host of its own: the API is where the user says', () => {
+    const hosts = new Set(
+      [...doc.matchAll(/https?:\/\/([^/\s)"`]+)/g)].map((m) => m[1]),
     )
-    expect(await response.text()).toBe(doc)
+    // Platforms' addresses, and `…` for any other.
+    expect([...hosts].toSorted()).toEqual(['x.com', '…'])
+    expect(doc).toContain('ask the user for it')
   })
 
   test('documents every endpoint, and only those', async () => {

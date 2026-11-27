@@ -199,44 +199,44 @@ test('library items, folders and records open in a new tab', async ({
   page,
 }) => {
   await mock(page)
-  await page.goto('/app/')
+  await page.goto('/')
   const row = page.locator('.row', { hasText: '一条帖子' })
-  await opensInNewTab(page, row.locator('.head'), /\/app\/collection\/5{8}-/)
+  await opensInNewTab(page, row.locator('.head'), /\/collection\/5{8}-/)
   await opensInNewTab(
     page,
     row.locator('.head'),
-    new RegExp(`/app/collection/${postId}$`),
+    new RegExp(`/collection/${postId}$`),
     'middle',
   )
   // The row's whole surface is the link.
   await expect(row.locator('.head')).toHaveAttribute(
     'href',
-    `/app/collection/${postId}`,
+    `/collection/${postId}`,
   )
   await opensInNewTab(
     page,
     page.getByRole('navigation', { name: '收藏夹' }).getByRole('link'),
-    new RegExp(String.raw`/app/folder/${folderId}\?`),
+    new RegExp(String.raw`/folder/${folderId}\?`),
   )
   await opensInNewTab(
     page,
     page.getByRole('link', { name: '采集', exact: true }),
-    /\/app\/captures$/,
+    /\/captures$/,
   )
 
-  await page.goto('/app/captures')
+  await page.goto('/captures')
   await opensInNewTab(
     page,
     page.locator('a.record'),
-    new RegExp(`/app/captures/${recordId}$`),
+    new RegExp(`/captures/${recordId}$`),
   )
   // A plain click still navigates here.
   await page.locator('a.record').click()
-  await expect(page).toHaveURL(new RegExp(`/app/captures/${recordId}$`))
+  await expect(page).toHaveURL(new RegExp(`/captures/${recordId}$`))
   await opensInNewTab(
     page,
     page.getByRole('link', { name: '查看收藏' }),
-    new RegExp(`/app/collection/${postId}$`),
+    new RegExp(`/collection/${postId}$`),
   )
 })
 
@@ -244,21 +244,21 @@ test('the detail page opens its pages and relation counts in a new tab', async (
   page,
 }) => {
   await mock(page)
-  await page.goto(`/app/collection/${profileId}`)
+  await page.goto(`/collection/${profileId}`)
   await opensInNewTab(
     page,
     page.getByRole('link', { name: '统计趋势' }),
-    new RegExp(`/app/collection/${profileId}/stats$`),
+    new RegExp(`/collection/${profileId}/stats$`),
   )
   await opensInNewTab(
     page,
     page.getByRole('link', { name: '关系图谱' }),
-    new RegExp(`/app/collection/${profileId}/graph$`),
+    new RegExp(`/collection/${profileId}/graph$`),
   )
   await opensInNewTab(
     page,
     page.getByRole('link', { name: /^粉丝 4，在收藏库中查看/ }),
-    /\/app\/\?.*rel=followers/,
+    /\/\?.*rel=followers/,
   )
   await page.getByRole('link', { name: '关系图谱' }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/graph$`))
@@ -266,7 +266,7 @@ test('the detail page opens its pages and relation counts in a new tab', async (
   await opensInNewTab(
     page,
     page.getByRole('link', { name: '返回', exact: true }),
-    new RegExp(`/app/collection/${profileId}$`),
+    new RegExp(`/collection/${profileId}$`),
   )
 })
 
@@ -274,46 +274,46 @@ test('the graph card and the compare page open in a new tab', async ({
   page,
 }) => {
   await mock(page)
-  await page.goto(`/app/collection/${profileId}/graph`)
+  await page.goto(`/collection/${profileId}/graph`)
   await page
     .getByRole('group', { name: '显示方式' })
     .getByRole('button', { name: '列表' })
     .click()
   // Cmd-click on an entry opens its page; a plain one, its card.
   const friend = page.locator('.person', { hasText: '朋友' })
-  await opensInNewTab(page, friend, new RegExp(`/app/collection/${friendId}$`))
+  await opensInNewTab(page, friend, new RegExp(`/collection/${friendId}$`))
   await friend.click()
   const card = page.getByRole('region', { name: '账号' })
   await opensInNewTab(
     page,
     card.getByRole('link', { name: '以他为中心' }),
-    new RegExp(`/app/collection/${friendId}/graph$`),
+    new RegExp(`/collection/${friendId}/graph$`),
   )
   await opensInNewTab(
     page,
     card.getByRole('link', { name: '打开详情' }),
-    new RegExp(`/app/collection/${friendId}$`),
+    new RegExp(`/collection/${friendId}$`),
   )
   const original = card.getByRole('link', { name: '打开原文' })
   await expect(original).toHaveAttribute('href', 'https://x.com/friend')
   await expect(original).toHaveAttribute('target', '_blank')
   await expect(original).toHaveAttribute('rel', 'noopener noreferrer')
 
-  await page.goto(`/app/compare?rel_of=${KEY}&rel_of=${FRIEND}`)
+  await page.goto(`/compare?rel_of=${KEY}&rel_of=${FRIEND}`)
   await opensInNewTab(
     page,
     page.getByRole('link', { name: '在收藏库中查看' }),
-    /\/app\/\?.*rel_of=/,
+    /\/\?.*rel_of=/,
   )
   const shared = page.locator('.person', { hasText: '共同关注' })
-  await opensInNewTab(page, shared, new RegExp(`/app/collection/${postId}$`))
+  await opensInNewTab(page, shared, new RegExp(`/collection/${postId}$`))
   await shared.click()
   await opensInNewTab(
     page,
     page.getByRole('region', { name: '账号' }).getByRole('link', {
       name: '打开详情',
     }),
-    new RegExp(`/app/collection/${postId}$`),
+    new RegExp(`/collection/${postId}$`),
   )
 })
 
@@ -343,7 +343,7 @@ test('the Mini App follows a modified click in place', async ({ page }) => {
   await mock(page)
   const tabs: Page[] = []
   page.context().on('page', (tab) => tabs.push(tab))
-  await page.goto(`/app/collection/${profileId}`)
+  await page.goto(`/collection/${profileId}`)
   await page
     .getByRole('link', { name: '统计趋势' })
     .click({ modifiers: ['ControlOrMeta'] })

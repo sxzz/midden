@@ -149,7 +149,7 @@ function passkey(c: CommandContext): Reply {
   return {
     text: '添加通行密钥，10 分钟内有效。',
     keyboard: links.map(({ origin, token }) => [
-      { text: new URL(origin).host, url: `${origin}/app/passkey#${token}` },
+      { text: new URL(origin).host, url: `${origin}/passkey#${token}` },
     ]),
     newMessage: true,
   }

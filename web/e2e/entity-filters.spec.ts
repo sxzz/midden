@@ -41,7 +41,7 @@ test('platform filter merges Instagram and X and preserves legacy X links', asyn
     if (url.pathname === '/v1/collections') query = url.searchParams
     return r.fulfill({ json: { items: [] } })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await expect
     .poll(() => query.get('entity_type'))
     .toBe('x.post,instagram.post')
@@ -63,10 +63,10 @@ test('platform filter merges Instagram and X and preserves legacy X links', asyn
   await page.getByRole('button', { name: /^筛选/ }).click()
   await page.getByLabel('平台', { exact: true }).selectOption('instagram')
   await expect.poll(() => query.get('entity_type')).toBe('instagram.profile')
-  await page.goto('/app/?entity_type=x.post')
+  await page.goto('/?entity_type=x.post')
   await expect.poll(() => query.get('entity_type')).toBe('x.post')
   await expect(page.getByLabel('平台', { exact: true })).toHaveValue('x')
-  await page.goto('/app/?entity_type=x.profile')
+  await page.goto('/?entity_type=x.profile')
   await expect.poll(() => query.get('entity_type')).toBe('x.profile')
   await expect(
     page.getByRole('tab', { name: '账号', exact: true }),
@@ -91,7 +91,7 @@ test('entity tabs keep their own filters and mobile statistic layout', async ({
     })
   })
   const type = () => queries.at(-1)?.get('entity_type')
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(
     page.locator('.head').filter({ hasText: '测试账号' }),
   ).toBeVisible()
@@ -180,7 +180,7 @@ test('Chinese filters support multiple media, date bounds and storage order', as
       json: { items: [{ ...profile, storage_bytes: 2097152 }] },
     })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.locator('.row .storage')).toContainText('2.0 MB')
   await page.getByRole('button', { name: /^筛选/ }).click()
   await page.locator('summary[aria-label="媒体类型"]').click()
@@ -262,7 +262,7 @@ test('author dropdown searches names but filters by stable identity', async ({
     if (url.pathname === '/v1/collections') query = url.searchParams
     return r.fulfill({ json: { items: [profile] } })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await page.getByRole('button', { name: /^筛选/ }).click()
   await page.locator('summary[aria-label="作者"]').click()
   await page.getByRole('option', { name: '作者甲', exact: true }).click()
@@ -304,7 +304,7 @@ test('sensitive filter applies immediately and clears', async ({ page }) => {
     if (url.pathname === '/v1/collections') query = url.searchParams
     return r.fulfill({ json: { items: [profile] } })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   const panel = page.getByRole('button', { name: /^筛选/ })
   await panel.click()
   const select = page.getByLabel('敏感内容', { exact: true })

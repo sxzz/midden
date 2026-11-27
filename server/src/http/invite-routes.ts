@@ -30,7 +30,7 @@ const digestOf = (token: string) =>
 const bindingOf = (digest: string) => `invite:${digest}`
 
 /**
- * Registering with an invite (`/app/invite#<token>`), without a session:
+ * Registering with an invite (`/invite#<token>`), without a session:
  * the options, then the registration, which makes a viewer with the
  * invite's WebAuthn handle, keeps their passkey and signs them in, in one
  * transaction that uses the invite up. Only on WEB_APP_URL's origin, the one

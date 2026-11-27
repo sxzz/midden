@@ -70,7 +70,7 @@ test.beforeEach(async ({ page }) => {
               : {},
     })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.locator('.row .head')).toBeVisible()
   await page.locator('.row .head').click()
   await page.getByRole('button', { name: '放大图片' }).first().click()

@@ -43,7 +43,7 @@ test('the 关系 filter picks an account, then whose follows to list', async ({
     if (url.pathname === '/v1/collections') queries.push(url.searchParams)
     return r.fulfill({ json: { items: [] } })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await page.getByRole('button', { name: /^筛选/ }).click()
   const picker = page.locator('summary[aria-label="关系"]')
   await expect(picker).toContainText('全部')

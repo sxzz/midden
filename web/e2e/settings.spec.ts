@@ -12,7 +12,7 @@ test.describe('on a wide window', () => {
 
   test('shows the list beside the chosen section', async ({ page }) => {
     await mockDesktop(page)
-    await page.goto('/app/settings')
+    await page.goto('/settings')
     // The first section is chosen until another is.
     await expect(
       page.getByRole('heading', { name: '设置', exact: true }),
@@ -35,7 +35,7 @@ test.describe('on a wide window', () => {
     await list(page)
       .getByRole('link', { name: /管理员面板/ })
       .click()
-    await expect(page).toHaveURL(/\/app\/settings\/admin$/)
+    await expect(page).toHaveURL(/\/settings\/admin$/)
     const admin = pane(page, '管理员面板')
     await expect(admin).toContainText('整个服务的设置。')
     await expect(admin.getByRole('link', { name: /^后台任务/ })).toContainText(
@@ -43,24 +43,24 @@ test.describe('on a wide window', () => {
     )
     // An entry shows in the same place, with a way back to its section.
     await admin.getByRole('link', { name: /^后台任务/ }).click()
-    await expect(page).toHaveURL(/\/app\/settings\/admin\/jobs$/)
+    await expect(page).toHaveURL(/\/settings\/admin\/jobs$/)
     const jobs = pane(page, '后台任务')
     await expect(jobs).toContainText('暂停全部')
     await expect(
       list(page).getByRole('link', { name: /管理员面板/ }),
     ).toHaveAttribute('aria-current', 'page')
     await jobs.getByRole('link', { name: '返回管理员面板' }).click()
-    await expect(page).toHaveURL(/\/app\/settings\/admin$/)
+    await expect(page).toHaveURL(/\/settings\/admin$/)
   })
 
   test('opens what a link names', async ({ page }) => {
     await mockDesktop(page)
-    await page.goto('/app/settings/admin/origins')
+    await page.goto('/settings/admin/origins')
     await expect(pane(page, '域名')).toContainText('添加域名')
     await expect(
       list(page).getByRole('link', { name: /管理员面板/ }),
     ).toHaveAttribute('aria-current', 'page')
-    await page.goto('/app/settings/about')
+    await page.goto('/settings/about')
     await expect(pane(page, '关于')).toContainText('构建时间')
     await expect(
       pane(page, '关于').getByRole('link', { name: /源代码/ }),
@@ -69,7 +69,7 @@ test.describe('on a wide window', () => {
 
   test('searches its sections and entries', async ({ page }) => {
     await mockDesktop(page)
-    await page.goto('/app/settings')
+    await page.goto('/settings')
     const search = page.getByRole('searchbox', { name: '搜索设置' })
     await search.fill('空间')
     // Found by the line under it, under the section it belongs to.
@@ -90,14 +90,14 @@ test.describe('on a wide window', () => {
     page.on('request', (request) => {
       if (new URL(request.url()).pathname === '/v1/queue') polls++
     })
-    await page.goto('/app/settings/admin/jobs')
+    await page.goto('/settings/admin/jobs')
     await expect(pane(page, '后台任务')).toContainText('暂停全部')
     await expect.poll(() => polls).toBeGreaterThan(0)
     await page
       .getByRole('region', { name: '后台任务' })
       .getByRole('link', { name: '返回管理员面板' })
       .click()
-    await expect(page).toHaveURL(/\/app\/settings\/admin$/)
+    await expect(page).toHaveURL(/\/settings\/admin$/)
     const after = polls
     // It reads again every 5 seconds while open.
     await page.waitForTimeout(6000)
@@ -107,17 +107,17 @@ test.describe('on a wide window', () => {
 
 test('on a phone, each level is a page of its own', async ({ page }) => {
   await mockDesktop(page)
-  await page.goto('/app/settings')
+  await page.goto('/settings')
   await expect(page.locator('h1')).toHaveText('设置')
   await expect(page.getByRole('region', { name: '管理员面板' })).toHaveCount(0)
   await list(page)
     .getByRole('link', { name: /管理员面板/ })
     .click()
-  await expect(page).toHaveURL(/\/app\/settings\/admin$/)
+  await expect(page).toHaveURL(/\/settings\/admin$/)
   await expect(page.locator('h1')).toHaveText('管理员面板')
   await expect(list(page)).toHaveCount(0)
   await pane(page, '管理员面板').getByRole('link', { name: /^域名/ }).click()
-  await expect(page).toHaveURL(/\/app\/settings\/admin\/origins$/)
+  await expect(page).toHaveURL(/\/settings\/admin\/origins$/)
   await expect(page.locator('h1')).toHaveText('域名')
   await expect(pane(page, '域名')).toContainText('添加域名')
   // 返回 climbs back one level at a time.

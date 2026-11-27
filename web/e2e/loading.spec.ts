@@ -32,7 +32,7 @@ test('后台任务: a skeleton first, then the same page on every read', async (
     if (reads === 1) await first
     await r.fulfill({ json: queue(reads) })
   })
-  await page.goto('/app/settings/admin/jobs')
+  await page.goto('/settings/admin/jobs')
   const skeleton = page.getByRole('status', { name: '正在读取后台任务' })
   await expect(skeleton).toBeVisible()
   await expect(page.getByText(/加载中/)).toHaveCount(0)
@@ -67,7 +67,7 @@ test('后台任务: a failed read keeps the last answer, under why', async ({
       ? r.fulfill({ status: 503, json: { error: '服务暂时不可用' } })
       : r.fulfill({ json: queue(reads) })
   })
-  await page.goto('/app/settings/admin/jobs')
+  await page.goto('/settings/admin/jobs')
   await expect(page.getByText('等待 1 · 进行中 1')).toBeVisible()
   await page.clock.runFor(5000)
   await expect(page.getByRole('alert')).toHaveText('服务暂时不可用')
@@ -87,7 +87,7 @@ test('lists read for the first time show their skeleton, not words', async ({
     await answered
     await r.fulfill({ json: [] })
   })
-  await page.goto('/app/settings/passkeys')
+  await page.goto('/settings/passkeys')
   await expect(
     page.getByRole('status', { name: '正在读取通行密钥' }),
   ).toBeVisible()

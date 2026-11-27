@@ -72,9 +72,9 @@ test('lists the signed-in devices, this one marked, and signs others out', async
   page,
 }) => {
   const { sent } = await mock(page)
-  await page.goto('/app/settings/passkeys')
+  await page.goto('/settings/passkeys')
   await page.getByRole('link', { name: /已登录的设备/ }).click()
-  await expect(page).toHaveURL(/\/app\/settings\/passkeys\/sessions$/)
+  await expect(page).toHaveURL(/\/settings\/passkeys\/sessions$/)
   await expect(rows(page)).toHaveCount(3)
   await page.screenshot({ path: 'test-results/sessions.png' })
 
@@ -116,7 +116,7 @@ test('lists the signed-in devices, this one marked, and signs others out', async
 
 test('holds the rows with a skeleton while reading', async ({ page }) => {
   const { release } = await mock(page, { slow: true })
-  await page.goto('/app/settings/passkeys/sessions')
+  await page.goto('/settings/passkeys/sessions')
   const skeleton = page.getByRole('status', { name: '正在读取已登录的设备' })
   await expect(skeleton).toBeVisible()
   release()

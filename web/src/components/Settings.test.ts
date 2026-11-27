@@ -73,10 +73,10 @@ describe('设置', () => {
     mockApi()
     const el = mount(SettingsView)
     expect(links(el)).toEqual({
-      '通行密钥›': '/app/settings/passkeys',
-      'API令牌›': '/app/settings/tokens',
-      '管理员面板›': '/app/settings/admin',
-      '关于›': '/app/settings/about',
+      '通行密钥›': '/settings/passkeys',
+      'API令牌›': '/settings/tokens',
+      '管理员面板›': '/settings/admin',
+      '关于›': '/settings/about',
     })
     // 采集账号 and 定期更新 are 采集's now.
     expect(el.textContent).not.toContain('采集账号')
@@ -92,7 +92,7 @@ describe('设置', () => {
     input.value = '任务'
     input.dispatchEvent(new Event('input'))
     await settle()
-    expect(Object.values(links(el))).toEqual(['/app/settings/admin/jobs'])
+    expect(Object.values(links(el))).toEqual(['/settings/admin/jobs'])
     expect(el.querySelector('mark')?.textContent).toBe('任务')
     expect(el.textContent).not.toContain('退出登录')
     input.value = '没有这一项'
@@ -108,10 +108,9 @@ describe('设置', () => {
     await settle()
     expect(el.textContent).toContain('整个服务的设置。')
     expect(links(el)).toMatchObject({
-      '域名可以打开网页、用通行密钥登录的地址›': '/app/settings/admin/origins',
-      '存储用量媒体、原始响应与数据库占用的空间›':
-        '/app/settings/admin/storage',
-      '后台任务队列、暂停与限流›': '/app/settings/admin/jobs',
+      '域名可以打开网页、用通行密钥登录的地址›': '/settings/admin/origins',
+      '存储用量媒体、原始响应与数据库占用的空间›': '/settings/admin/storage',
+      '后台任务队列、暂停与限流›': '/settings/admin/jobs',
     })
   })
 
@@ -137,7 +136,7 @@ describe('设置', () => {
     const el = mount(SettingsView)
     await settle()
     expect(links(el)).toMatchObject({
-      '已登录的设备登录着的浏览器与MiniApp›': '/app/settings/passkeys/sessions',
+      '已登录的设备登录着的浏览器与MiniApp›': '/settings/passkeys/sessions',
     })
     unmount()
     route.params = { section: 'passkeys', entry: 'sessions' }

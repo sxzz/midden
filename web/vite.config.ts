@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vitest/config'
+import type { Plugin } from 'vite'
 const require = createRequire(import.meta.url)
 const vueRequire = createRequire(require.resolve('vue/package.json'))
 // Vapor is only shipped in the bundler runtime. Keep one reactive runtime in tests.
@@ -37,9 +39,30 @@ function buildVersion() {
     return 'dev'
   }
 }
+// The agent API's guide, served by the web app as /agent.md: an agent is
+// pointed at it, and at the API's own address separately.
+const AGENT_DOC = new URL('../docs/agent.md', import.meta.url)
+function agentDoc(): Plugin {
+  return {
+    name: 'midden:agent-doc',
+    configureServer(server) {
+      server.middlewares.use('/agent.md', (_req, res) => {
+        res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
+        res.end(readFileSync(AGENT_DOC))
+      })
+    },
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'agent.md',
+        source: readFileSync(AGENT_DOC, 'utf8'),
+      })
+    },
+  }
+}
+
 export default defineConfig({
-  base: '/app/',
-  plugins: [vue()],
+  plugins: [vue(), agentDoc()],
   optimizeDeps: {
     // The dev server's scan starts from index.html and never reaches a
     // worker's imports. Found later, they make Vite re-bundle and reload
@@ -63,7 +86,6 @@ export default defineConfig({
     alias: testAliases,
     server: { deps: { inline: ['vue-router'] } },
     environment: 'jsdom',
-    setupFiles: ['src/testing/setup.ts'],
     include: ['src/**/*.test.ts'],
   },
 })

@@ -154,7 +154,7 @@ async function setup() {
   ids.bob = (await capture(c, profile('600'))).collectionId
   for (const id of ['a1', 'm1', 'r1', 'x1', 'q1', 'e3'])
     ids[id] = (await capture(c, post(id))).collectionId
-  const app = createApi({ ctx: c, webAppUrl: 'https://midden.test/app/' })
+  const app = createApi({ ctx: c, webAppUrl: 'https://midden.test/' })
   // The owner, signed in to the web app: revoking a share is theirs alone.
   const session = createSession(c.db, adminId(c.db))
   const owner = (path: string, init: RequestInit = {}) =>

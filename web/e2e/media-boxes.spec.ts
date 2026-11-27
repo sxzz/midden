@@ -67,7 +67,7 @@ async function detail(page: Page, assets: unknown[]) {
   await page.goto('about:blank')
   await page.unrouteAll()
   await serve(page, assets)
-  await page.goto(`/app/collection/${id}`)
+  await page.goto(`/collection/${id}`)
   await expect(page.locator('.media .frame').first()).toBeVisible()
 }
 
@@ -157,7 +157,7 @@ for (const [vw, vh] of screens)
     }) => {
       await page.setViewportSize({ width: vw, height: vh })
       await serve(page, [image(1, w, h)])
-      await page.goto('/app/')
+      await page.goto('/')
       const tile = page.locator('.thumbs .tile')
       await expect(tile).toBeVisible()
       const rect = await box(tile)
@@ -183,7 +183,7 @@ for (const [vw, vh] of screens)
     await page.goto('about:blank')
     await page.unrouteAll()
     await serve(page, [image(1, 450, 800, false)])
-    await page.goto('/app/')
+    await page.goto('/')
     const tile = page.locator('.thumbs .tile')
     await expect
       .poll(async () => (await box(tile)).ratio)
@@ -235,7 +235,7 @@ test('the box is reserved before the image arrives', async ({ page }) => {
   await serve(page, [image(1, 1200, 200)])
   // Hold the file back: the box must already be its final size.
   await page.route('**/v1/assets/**', () => {})
-  await page.goto(`/app/collection/${id}`)
+  await page.goto(`/collection/${id}`)
   const frame = page.locator('.media .frame')
   await expect(frame).toBeVisible()
   expect((await box(frame)).ratio).toBeCloseTo(6, 0)
@@ -271,7 +271,7 @@ test('two wide images are stacked; an ordinary pair shares a height', async ({
 
 test('a list row boxes a single wide image by its shape', async ({ page }) => {
   await serve(page, [image(1, 1200, 200)])
-  await page.goto('/app/')
+  await page.goto('/')
   const tile = page.locator('.thumbs .tile')
   await expect(tile).toBeVisible()
   const rect = await box(tile)
@@ -287,7 +287,7 @@ test('an image with no smaller size boxes by the size the platform gave and show
   // thumbnail, the original's size as the platform described it.
   const { thumbnail: _, ...plain } = image(1, 1200, 300)
   await serve(page, [{ ...plain, width: 1200, height: 300 }])
-  await page.goto('/app/')
+  await page.goto('/')
   const tile = page.locator('.thumbs .tile')
   await expect(tile.locator('img')).toHaveAttribute('src', plain.url)
   expect((await box(tile)).ratio).toBeCloseTo(4, 0)
@@ -307,7 +307,7 @@ test('a video with no poster keeps its placeholder in the shape the platform gav
     height: 1920,
   }
   await serve(page, [video])
-  await page.goto('/app/')
+  await page.goto('/')
   const tile = page.locator('.thumbs .tile')
   await expect(tile).toBeVisible()
   await expect(tile.locator('img')).toHaveCount(0)
@@ -336,7 +336,7 @@ for (const [vw, vh] of screens)
     }) => {
       await page.setViewportSize({ width: vw, height: vh })
       await serve(page, [sensitiveVideo(450, 800, sized)])
-      await page.goto('/app/')
+      await page.goto('/')
       const tile = page.locator('.thumbs .tile')
       await expect(tile).toBeVisible()
       await expect(tile.locator('img')).toBeVisible()

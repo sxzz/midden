@@ -55,7 +55,7 @@ async function serve(page: import('@playwright/test').Page, assets: unknown[]) {
                   : { items: [item] }
     return r.fulfill({ json: body })
   })
-  await page.goto('/app/')
+  await page.goto('/')
 }
 
 /** The group's own veil, distinct from a single resource's veil in a mixed group. */
@@ -80,7 +80,7 @@ test('a wholly sensitive group is covered once in the list and the detail', asyn
   await groupVeil(page).click()
   // Revealing must not open the viewer, nor navigate into the collection.
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page).toHaveURL(/\/app\/$/)
+  await expect(page).toHaveURL(/:\d+\/$/)
   await expect(groupVeil(page)).toHaveCount(0)
   await page.getByRole('button', { name: '放大图片' }).first().click()
   const dialog = page.getByRole('dialog')

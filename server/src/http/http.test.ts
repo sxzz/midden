@@ -12,7 +12,7 @@ import type { AccountsContext } from '#accounts/accounts.ts'
 
 const BOT = '123:secret-token'
 const OWNER = '42'
-const WEB = 'https://midden.test/app/'
+const WEB = 'https://midden.test/'
 
 const NO_LITESTREAM = {
   enabled: false,
@@ -117,6 +117,44 @@ describe('api', () => {
         })
       ).status,
     ).toBe(401)
+  })
+
+  test('answers the web app’s origins with CORS, preflights before login', async () => {
+    const { app, call } = setup()
+    const web = new URL(WEB).origin
+    const preflight = (origin: string) =>
+      app.request('/captures', {
+        method: 'OPTIONS',
+        headers: {
+          Origin: origin,
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'content-type',
+        },
+      })
+    // No cookie and no token: a preflight never reaches the login check.
+    const allowed = await preflight(web)
+    expect(allowed.status).toBe(204)
+    expect(allowed.headers.get('Access-Control-Allow-Origin')).toBe(web)
+    expect(allowed.headers.get('Access-Control-Allow-Credentials')).toBe('true')
+    expect(allowed.headers.get('Access-Control-Max-Age')).toBe('7200')
+    expect(allowed.headers.get('Access-Control-Allow-Methods')).toContain(
+      'DELETE',
+    )
+    expect(
+      (await preflight('https://elsewhere.test')).headers.get(
+        'Access-Control-Allow-Origin',
+      ),
+    ).toBeNull()
+
+    // Answers and errors alike, so the web app can read either.
+    const read = await call('/captures')
+    expect(read.status).toBe(200)
+    expect(read.headers.get('Access-Control-Allow-Origin')).toBe(web)
+    expect(read.headers.get('Vary')).toContain('Origin')
+    const refused = await app.request('/captures', { headers: { Origin: web } })
+    expect(refused.status).toBe(401)
+    expect(refused.headers.get('Access-Control-Allow-Origin')).toBe(web)
+    expect(refused.headers.get('Access-Control-Allow-Credentials')).toBe('true')
   })
 
   test('submits, lists and tracks captures', async () => {

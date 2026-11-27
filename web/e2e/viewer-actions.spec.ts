@@ -90,17 +90,17 @@ test('the owner’s viewer has the same actions from the list, the album and the
 }) => {
   await mock(page)
   // The list.
-  await page.goto('/app/')
+  await page.goto('/')
   await page.getByRole('button', { name: '放大图片' }).first().click()
   expect(await actions(page)).toEqual(owner)
   await page.keyboard.press('Escape')
   // The album.
-  await page.goto('/app/?layout=album')
+  await page.goto('/?layout=album')
   await page.locator('.album .tile').first().click()
   expect(await actions(page)).toEqual(owner)
   await page.keyboard.press('Escape')
   // The post's own page.
-  await page.goto(`/app/collection/${id}`)
+  await page.goto(`/collection/${id}`)
   await page.getByRole('button', { name: '放大图片' }).first().click()
   expect(await actions(page)).toEqual(owner)
   // The menu holds the removal, and the same one from here as anywhere.
@@ -112,11 +112,11 @@ test('a visitor’s viewer has the same reduced actions on a shared list and pos
   page,
 }) => {
   await mock(page)
-  await page.goto(`/app/s/${slug}`)
+  await page.goto(`/s/${slug}`)
   await page.getByRole('button', { name: '放大图片' }).first().click()
   expect(await actions(page)).toEqual(visitor)
   await page.keyboard.press('Escape')
-  await page.goto(`/app/s/${slug}/collection/${id}`)
+  await page.goto(`/s/${slug}/collection/${id}`)
   await page.getByRole('button', { name: '放大图片' }).first().click()
   expect(await actions(page)).toEqual(visitor)
 })

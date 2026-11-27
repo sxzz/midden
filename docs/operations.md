@@ -4,7 +4,7 @@
 
 生产环境使用 `compose.yaml` 运行同一个镜像的两个容器，镜像内含 Node.js 26，不含其他程序（缩略图与媒体尺寸来自平台，见[架构](architecture.md#缩略图)）：`midden` 是网页进程（`MIDDEN_ROLE=web`：HTTP、Telegram Bot、Litestream 心跳），`midden-worker` 运行任务队列和定时的维护（`MIDDEN_ROLE=worker`），见[架构](architecture.md#进程)。两个容器读同一个 `.env`，以非 root 用户运行，数据目录都挂载到 `/data`。`midden-worker` 等 `midden` 健康后才启动（迁移由网页进程应用），它的健康检查是容器内 `127.0.0.1:8082/healthz`，不对外发布端口。可选的第三个容器 `litestream` 把数据库持续复制到 R2，见「Litestream」。
 
-对外访问需要 HTTPS 反向代理（例如 Cloudflare Tunnel），把整个域名转发到服务端口，至少包括 `/app/`、`/v1/`、`/media/`，给 AI agent 用时还有 `/agent/v1/` 与 `/agent.md`。Mini App 与通行密钥都要求 HTTPS。
+对外访问需要 HTTPS 反向代理（例如 Cloudflare Tunnel），把一个域名整个转发到服务端口。网页与 API 可以在同一个域名：本服务在 `/` 提供网页（构建时不设 `VITE_API_URL`），在 `/v1/`、`/media/`、`/agent/v1/`、`/healthz` 提供 API，网页的 `/agent.md` 是给 AI agent 的说明。也可以分开（见下面的「网页单独部署」）。Mini App 与通行密钥都要求 HTTPS。
 
 ## 网页登录
 
@@ -17,11 +17,19 @@
 - 新增域名：在已登录的域名上打开「设置 → 管理员面板 → 域名」，输入新域名的 https 地址添加；然后在 Telegram 发送 `/passkey`，点开新域名的按钮，在那里创建它的第一个通行密钥。
 - 删除域名：同时删除这个域名的通行密钥，之前发出的这个域名的 `/passkey` 链接失效。`WEB_APP_URL` 的域名不能删除。添加和删除域名时 Bot 给所有者发一条消息。
 
-网页也可以继续单独部署在 Cloudflare 静态托管（`pnpm --filter @midden/web run deploy`），此时代理需把同域的 `/v1/` 与 `/media/` 转发到本服务。网页的地址是 `/app/` 下的普通路径（如 `/app/settings/admin/jobs`），不是文件的路径都要返回 `index.html`：本服务自己这样回答；Cloudflare 上由 `web/wrangler.json` 的 `not_found_handling: "single-page-application"` 回答（资源根目录的 `index.html`，由 `scripts/prepare-web-assets.ts` 放入），随部署生效，不需要在控制台另外设置。其他反向代理或静态托管也需要同样的回退，且不能改写 `/v1`、`/media`、`/agent`、`/agent.md`、`/healthz`。
+### 网页单独部署
+
+生产环境的网页在 Cloudflare 静态托管（`pnpm --filter @midden/web run deploy`，`https://midden.sxzz.moe/`），API 在另一个域名（`https://midden-api.sxzz.moe`，隧道转发到本服务）：
+
+- 构建时 `VITE_API_URL` 设为 API 的来源，网页的请求都发到那里，带上 API 域名的会话 Cookie（`credentials: 'include'`）；`scripts/prepare-web-assets.ts` 把它加进 CSP 的 `connect-src`、`img-src`、`media-src`。
+- `WEB_APP_URL` 是网页的地址（`https://midden.sxzz.moe/`）：API 只对它和「域名」中添加的来源回答 CORS。网页的域名与 API 必须是同一个站点（同一个注册域名，如这里的 `sxzz.moe`），否则阻止第三方 Cookie 的浏览器（Safari 等）不会把 Cookie 发给 API，网页无法登录。
+- 网页的地址是根下的普通路径（如 `/settings/admin/jobs`），不是文件的路径都返回 `index.html`：Cloudflare 上由 `web/wrangler.json` 的 `not_found_handling: "single-page-application"` 回答，随部署生效，不需要在控制台另外设置。其他静态托管也需要同样的回退。
+- 以前的 `/app/…` 地址由 `_redirects`（`scripts/prepare-web-assets.ts`）永久重定向到根下同样的路径。网页域名上旧的 API 路径（`/v1/` 等）不再转发也不重定向：重定向到另一个来源时客户端会去掉 `Authorization`，调用的地方要改成 API 的域名。
+- 会话 Cookie 只属于 API 的域名，所以网页或 API 换了域名后要重新登录一次；通行密钥属于网页的域名（RP ID），网页域名不变就照常可用。
 
 ## API 令牌
 
-脚本和 AI agent 用 API 令牌访问 `/v1` 与 `/agent/v1`（见[架构](architecture.md#agent-api)；给 agent 的说明在 `https://<域名>/agent.md`，把这个地址和令牌交给它即可）。
+脚本和 AI agent 用 API 令牌访问 `/v1` 与 `/agent/v1`（见[架构](architecture.md#agent-api)；给 agent 的说明在网页的 `/agent.md`，把它的地址、API 的地址和令牌交给它；网页创建或轮换令牌后给出这三行，一次复制）。
 
 - 网页「设置 → API 令牌」：创建（名称、只读或读写、过期时间或永不过期），令牌只显示一次；之后可改名称和过期时间、轮换、撤销，并看到上次使用时间和最近 30 天的请求次数。只有登录网页的所有者能管理令牌，令牌自己不能。
 - 命令行：`midden token create | list | revoke | expires`，见下一节「命令行」。
@@ -97,14 +105,14 @@ midden token revoke sync
 
 ```sh
 SECRET=$(docker compose exec -T midden midden token create --ro --label smoke --expires 1h)
-curl -fsS -H "Authorization: Bearer $SECRET" https://<域名>/agent/v1/whoami
+curl -fsS -H "Authorization: Bearer $SECRET" https://<API 的域名>/agent/v1/whoami
 docker compose exec -T midden midden token revoke smoke
 ```
 
 ## 发布
 
 - 镜像：`main` 上每次推送，`test` 工作流的 `image` 任务与检查、浏览器测试同时在 arm64 运行器上构建 arm64 镜像（生产环境是 Apple 芯片的 Mac，只发布 arm64），立即推送 `ghcr.io/sxzz/midden:sha-<提交>`；三者都通过后，`publish` 任务把 `ghcr.io/sxzz/midden:latest` 指向它（在镜像仓库中复制清单，不重新构建）。部署读的是 `latest`，所以没通过检查的提交不会部署。其他分支与 PR 只构建并做健康检查，不发布。服务器上用 `docker compose pull && docker compose up -d` 更新。
-- 网页：`test` 在 `main` 上通过后，`web` 工作流把网页部署到 Cloudflare 静态托管（仓库变量 `MIDDEN_WEB_HOSTNAME` 指定域名，路由 `<域名>/app/*`）。
+- 网页：`test` 在 `main` 上通过后，`web` 工作流把网页部署到 Cloudflare 静态托管（仓库变量 `MIDDEN_WEB_HOSTNAME` 指定域名，路由 `<域名>/*`；仓库变量 `MIDDEN_API_URL` 是构建进网页的 API 地址，没有设置时部署失败）。
 
 ## 日常操作
 
@@ -151,7 +159,7 @@ node scripts/deploy.ts
 node scripts/install-deploy-webhook.ts --dir ~/midden
 ```
 
-GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<域名>/hooks/deploy`，密钥与 `.local/deploy-webhook.secret` 相同；隧道把该路径转发到 18090 端口。升级 Node 后重新运行安装命令。修改 `scripts/deploy-webhook.ts` 后同样要重新运行安装命令：安装的是副本，安装脚本会 `bootout` 再 `bootstrap` LaunchAgent `org.midden.deploy-webhook`，即重启它。
+GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<API 的域名>/hooks/deploy`，密钥与 `.local/deploy-webhook.secret` 相同；隧道把该路径转发到 18090 端口。网页的域名整个由 Cloudflare 静态托管回答，不能用它。升级 Node 后重新运行安装命令。修改 `scripts/deploy-webhook.ts` 后同样要重新运行安装命令：安装的是副本，安装脚本会 `bootout` 再 `bootstrap` LaunchAgent `org.midden.deploy-webhook`，即重启它。
 
 ## 依赖更新
 
@@ -591,7 +599,7 @@ rm ~/Library/LaunchAgents/org.midden.backup.plist
 
 - R2：每个存储桶的存储（最近一天的最大值，载荷加元数据）、对象数、本月的 Class A 与 Class B 次数，以及读取分析数据的时间；「刷新」立即重读（距上次不到 1 分钟时不重读）。
 - 本月费用：存储、Class A、Class B 各自的已用量、免费额度、已用比例和金额，以及合计（见「费用」）。
-- 本机：可用磁盘与总容量、数据库文件（空闲页与 WAL）、缩略图、媒体目录（每天统计）、部署前的数据库备份，以及「按占用空间排列收藏」（收藏库按占用空间排序，`/app/?sort=storage`）。
+- 本机：可用磁盘与总容量、数据库文件（空闲页与 WAL）、缩略图、媒体目录（每天统计）、部署前的数据库备份，以及「按占用空间排列收藏」（收藏库按占用空间排序，`/?sort=storage`）。
 - 数据库：最大的 15 个表和索引及占比、其余合计、总计和统计时间。
 - 趋势：每天一点的折线图（与「统计趋势」同一个图表），30 天、90 天或全部：每个存储桶的存储、每天的 Class A 与 Class B 次数、数据库文件、缩略图、可用磁盘。少于两天读数的不画。
 - 提醒阈值：见「提醒」。

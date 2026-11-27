@@ -307,7 +307,7 @@ it('updates the open folder from its menu, then links to the progress', async ()
   const progress = [...el.querySelectorAll('a')].find(
     (a) => a.textContent?.trim() === '查看更新进度',
   )!
-  expect(progress.getAttribute('href')).toBe('/app/captures/record')
+  expect(progress.getAttribute('href')).toBe('/captures/record')
   progress.click()
   await vi.waitFor(() =>
     expect(router.currentRoute.value).toMatchObject({

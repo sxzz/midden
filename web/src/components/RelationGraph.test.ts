@@ -200,8 +200,8 @@ it('opens a card for the tapped account and goes from it', async () => {
   const links = [...card.querySelectorAll('.actions a')]
   expect(links.map(text)).toEqual(['以他为中心', '打开详情', '打开原文'])
   expect(links.map((a) => a.getAttribute('href'))).toEqual([
-    '/app/collection/mc/graph',
-    '/app/collection/mc',
+    '/collection/mc/graph',
+    '/collection/mc',
     'https://x.com/kobayashi',
   ])
   expect(links[2]!.getAttribute('target')).toBe('_blank')
@@ -234,8 +234,8 @@ it("opens an account's page in a new tab on a modified or middle click", async (
   canvas.onOpen!('m', new MouseEvent('click', { metaKey: true }))
   canvas.onOpen!('m', new MouseEvent('auxclick', { button: 1 }))
   expect(open.mock.calls).toEqual([
-    ['/app/collection/mc', '_blank', 'noopener'],
-    ['/app/collection/mc', '_blank', 'noopener'],
+    ['/collection/mc', '_blank', 'noopener'],
+    ['/collection/mc', '_blank', 'noopener'],
   ])
   await settle()
   expect(el.querySelector('.card')).toBeNull()
@@ -485,7 +485,7 @@ it('compares the profile with accounts picked', async () => {
   const go = el.querySelector<HTMLAnchorElement>('a.compare-go')!
   expect(text(go)).toBe('对比 2 个账号')
   expect(go.getAttribute('href')).toBe(
-    `/app/compare?rel_of=c&rel_of=${encodeURIComponent('x/x.profile/7')}`,
+    `/compare?rel_of=c&rel_of=${encodeURIComponent('x/x.profile/7')}`,
   )
   go.click()
   expect(push).toHaveBeenLastCalledWith({

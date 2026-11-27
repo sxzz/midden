@@ -77,7 +77,7 @@ test.beforeEach(async ({ page }) => {
                 : { items: [collection] }
     return r.fulfill({ json: body })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await page.locator('.head').filter({ hasText: '相册测试' }).click()
   await page.getByRole('button', { name: '放大图片' }).first().click()
 })

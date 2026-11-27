@@ -4,7 +4,7 @@ import { useRouter, type RouteLocationRaw } from 'vue-router'
 import { appPath } from '../../app-path'
 import { navigatesHere } from '../../navigation'
 /**
- * A link: to a route of the app (`to`, or an `href` under `/app/`), or
+ * A link: to a route of the app (`to`, or an `href` under `/`), or
  * to another site (`href`), which opens in a new tab. A plain click on an
  * app link navigates through the router; any other click is the browser's,
  * so Cmd/Ctrl-click, the middle button and the context menu open it in a new

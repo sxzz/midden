@@ -6,7 +6,7 @@ test.fail('an uncaught error in the page fails the test', async ({ page }) => {
   await page.route('**/v1/**', (route) =>
     route.fulfill({ json: { items: [] } }),
   )
-  await page.goto('/app/')
+  await page.goto('/')
   const thrown = page.waitForEvent('pageerror')
   await page.evaluate(() => {
     setTimeout(() => {

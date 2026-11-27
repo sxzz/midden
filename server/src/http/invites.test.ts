@@ -37,12 +37,12 @@ function setup() {
   ctx = testContext()
   let time = Date.now()
   const clock = { now: () => time, advance: (ms: number) => (time += ms) }
-  addOrigin(ctx.db, `${MAIN}/app/`, OTHER)
+  addOrigin(ctx.db, `${MAIN}/`, OTHER)
   const notices: string[] = []
   const app = createApi({
     ctx,
     telegram: { token: '1:x', owner: '42' },
-    webAppUrl: `${MAIN}/app/`,
+    webAppUrl: `${MAIN}/`,
     notify: (text) => notices.push(text),
     now: clock.now,
   })
@@ -75,7 +75,7 @@ function setup() {
       invite: { id: string }
       url: string
     }
-    expect(url).toMatch(new RegExp(String.raw`^${MAIN}/app/invite#[\w-]{43}$`))
+    expect(url).toMatch(new RegExp(String.raw`^${MAIN}/invite#[\w-]{43}$`))
     return { id: invite.id, token: url.split('#', 2)[1]! }
   }
   async function options(token: string, origin = MAIN, name?: string) {
@@ -305,7 +305,7 @@ describe('invites', () => {
     const reply = handle(
       {
         ctx: s.ctx,
-        webAppUrl: `${MAIN}/app/`,
+        webAppUrl: `${MAIN}/`,
         version: 'dev',
         now: s.clock.now,
       },
@@ -371,7 +371,7 @@ describe('invites', () => {
     const reply = handle(
       {
         ctx: s.ctx,
-        webAppUrl: `${MAIN}/app/`,
+        webAppUrl: `${MAIN}/`,
         version: 'dev',
         now: s.clock.now,
       },
@@ -446,11 +446,11 @@ describe('invites', () => {
   })
 
   test('the link is the web app’s invite page under WEB_APP_URL, wherever that is', () => {
-    expect(inviteLink('https://midden.test/app/', 'T')).toBe(
-      'https://midden.test/app/invite#T',
+    expect(inviteLink('https://midden.test', 'T')).toBe(
+      'https://midden.test/invite#T',
     )
-    expect(inviteLink('https://midden.test/app?v=3', 'T')).toBe(
-      'https://midden.test/app/invite#T',
+    expect(inviteLink('https://midden.test/?v=3', 'T')).toBe(
+      'https://midden.test/invite#T',
     )
     expect(inviteLink('https://midden.test/', 'T')).toBe(
       'https://midden.test/invite#T',

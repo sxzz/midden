@@ -30,7 +30,7 @@ test('select collections and update them as one record', async ({ page }) => {
     }
     return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.getByText('第 1 条收藏')).toBeVisible()
   await page.getByRole('button', { name: '多选' }).click()
   const bar = page.getByRole('region', { name: '多选' })
@@ -38,7 +38,7 @@ test('select collections and update them as one record', async ({ page }) => {
   await page.getByRole('checkbox', { name: /作者1/ }).click()
   await page.getByRole('checkbox', { name: /作者3/ }).click()
   await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(2)
-  await expect(page).toHaveURL(/\/app\/$/)
+  await expect(page).toHaveURL(/:\d+\/$/)
   await expect(bar.getByText('已选 2 项')).toBeVisible()
   await page.getByRole('button', { name: '更新', exact: true }).click()
   // The sheet says what the update covers; posts have only their own.
@@ -64,7 +64,7 @@ test('select collections and update them as one record', async ({ page }) => {
     },
   })
   await page.getByRole('link', { name: '查看进度' }).click()
-  await expect(page).toHaveURL(/\/app\/captures\/record$/)
+  await expect(page).toHaveURL(/\/captures\/record$/)
 })
 
 test('select all toggles every listed collection', async ({ page }) => {
@@ -75,7 +75,7 @@ test('select all toggles every listed collection', async ({ page }) => {
     if (path === '/v1/collections') return r.fulfill({ json: { items } })
     return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await page.getByRole('button', { name: '多选' }).click()
   const bar = page.getByRole('region', { name: '多选' })
   await page.getByRole('button', { name: '全选' }).click()
@@ -119,7 +119,7 @@ test("delete a selection, with the accounts' posts only when asked", async ({
     }
     return r.fulfill({ status: 404, json: { error: '内容不存在或已删除' } })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await page.getByRole('button', { name: '多选' }).click()
   const more = page.getByRole('button', { name: '更多操作' })
   await expect(more).toBeDisabled()

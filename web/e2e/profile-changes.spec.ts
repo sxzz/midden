@@ -130,7 +130,7 @@ test('lists a profile’s changes from its detail and returns to it', async ({
     else if (path === `/v1/collections/${profileId}`) json = profile
     return route.fulfill({ json })
   })
-  await page.goto(`/app/collection/${profileId}`)
+  await page.goto(`/collection/${profileId}`)
   // The detail shows the profile as it is now; its versions are read on the
   // page of changes.
   await expect(page.locator('.post .name')).toHaveText('合成账号')
@@ -173,7 +173,7 @@ test('lists a profile’s changes from its detail and returns to it', async ({
   await expect(entries.nth(1).locator('ins')).toHaveText('合成简介')
   // A newly pinned post links to its collection.
   const pinned = entries.nth(1).getByRole('link', { name: '置顶的合成帖子' })
-  await expect(pinned).toHaveAttribute('href', `/app/collection/${postId}`)
+  await expect(pinned).toHaveAttribute('href', `/collection/${postId}`)
 
   // The sensitive new avatar is covered; a tap uncovers it, the next opens it.
   const covered = latest.getByRole('button', { name: '敏感内容，点按显示' })

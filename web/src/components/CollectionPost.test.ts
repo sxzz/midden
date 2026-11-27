@@ -190,7 +190,7 @@ describe('Vapor collection rendering', () => {
       },
     })
     const link = el.querySelector<HTMLAnchorElement>('.profile-link')!
-    expect(link.getAttribute('href')).toBe('/app/collection/saved-profile')
+    expect(link.getAttribute('href')).toBe('/collection/saved-profile')
     expect(link.textContent).toContain('测试作者')
     expect(link.textContent).toContain('@handle')
     expect(el.querySelector('.record')?.textContent).toContain('占用')

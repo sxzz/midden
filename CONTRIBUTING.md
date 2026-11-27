@@ -8,7 +8,7 @@
 pnpm install
 pnpm build          # 构建 Atmosphere 与网页
 SECRET_KEY=$(openssl rand -base64 48) pnpm dev   # 启动服务端，数据在 server/data
-pnpm --filter @midden/web dev                     # 网页开发服务器（/app/ 下的路径都回到网页），代理 /v1 到 8080
+pnpm --filter @midden/web dev                     # 网页开发服务器（不是文件的路径都回到网页），代理 /v1 与 /media 到 8080
 ```
 
 `pnpm dev` 在一个进程中运行全部（`MIDDEN_ROLE` 默认 `all`），测试也是这样。生产环境分成网页进程和 worker 两个进程（见 `docs/architecture.md`「进程」），本地要试时在两个终端分别运行 `MIDDEN_ROLE=web pnpm dev` 与 `MIDDEN_ROLE=worker pnpm dev`，数据目录相同；worker 的健康检查端口是 `WORKER_HEALTH_PORT`（默认 8082）。
@@ -29,7 +29,7 @@ pnpm test
 
 lint 在根目录对整个仓库运行，只有一份配置；`third_party/` 是上游代码，`server/drizzle/` 是生成的迁移，均不参与。`scripts/` 下的脚本使用 `.ts`。e2e 测试：`pnpm --filter @midden/web test:e2e`。
 
-e2e 默认由 Playwright 启动自己的 Vite，端口由当前工作目录路径的哈希决定（20000–39999），不同 worktree 同时运行互不干扰；端口已被占用时直接报错，不会复用。可用 `E2E_PORT` 指定端口。要对手动启动的服务器运行，设置 `E2E_REUSE_SERVER=1` 并让 `E2E_PORT` 指向它（服务器需提供 `/app/`），此时需自行确认它来自当前 worktree。CI 不受影响。
+e2e 默认由 Playwright 启动自己的 Vite，端口由当前工作目录路径的哈希决定（20000–39999），不同 worktree 同时运行互不干扰；端口已被占用时直接报错，不会复用。可用 `E2E_PORT` 指定端口。要对手动启动的服务器运行，设置 `E2E_REUSE_SERVER=1` 并让 `E2E_PORT` 指向它（服务器需在 `/` 提供网页），此时需自行确认它来自当前 worktree。CI 不受影响。
 
 Playwright 自带的浏览器在某些环境中启动不了（如缺少系统库）时，可以连接一个已在运行、开放了 CDP 的 Chromium：`E2E_CDP=http://localhost:9222 pnpm --filter @midden/web test:e2e`。测试在其中各自新建上下文，结束后只断开连接，不关闭这个浏览器。它要能访问 e2e 的 Vite 所在的 `127.0.0.1:<端口>`。不设置时照常启动 Playwright 自己的浏览器，CI 不设置。没有 WebGL2 的浏览器中关系图谱与关系对比的测试会失败。
 

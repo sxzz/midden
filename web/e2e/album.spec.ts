@@ -57,7 +57,7 @@ test('album reuses loaded data and opens the currently previewed collection', as
   page,
 }) => {
   const queries = await setup(page)
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.locator('.row')).toHaveCount(2)
   await page.getByRole('button', { name: '相册', exact: true }).click()
   await expect(page).toHaveURL(/layout=album/)
@@ -92,7 +92,7 @@ test('album keeps layout through filter changes and excludes other resource type
   page,
 }) => {
   const queries = await setup(page)
-  await page.goto('/app/?layout=album&media_type=video')
+  await page.goto('/?layout=album&media_type=video')
   await expect(page.locator('.album button')).toHaveCount(1)
   const tile = page.locator('.album button')
   await expect(tile.locator('img')).toHaveCSS('filter', 'blur(16px)')
@@ -115,7 +115,7 @@ test('album keeps paging when the first page has no media', async ({
   page,
 }) => {
   const queries = await setup(page, true)
-  await page.goto('/app/?layout=album')
+  await page.goto('/?layout=album')
   await expect(page.locator('.album button')).toHaveCount(3)
   expect(queries.some((q) => q.get('cursor') === 'page2')).toBe(true)
 })
@@ -124,7 +124,7 @@ test('feed preview can open its collection and return to the feed', async ({
   page,
 }) => {
   await setup(page)
-  await page.goto('/app/')
+  await page.goto('/')
   await page
     .locator('.row')
     .first()
@@ -162,7 +162,7 @@ test('captionless Instagram posts show media without summary or placeholder text
       },
     }),
   )
-  await page.goto(`/app/collection/${first}`)
+  await page.goto(`/collection/${first}`)
   await expect(page.locator('.post .name')).toHaveText('作者')
   await expect(page.locator('.post .body')).toHaveCount(0)
   await expect(
@@ -189,7 +189,7 @@ test('album retains loaded tiles and appends skeletons while paging', async ({
       json: { items: [item(first, [asset('one')])], next_cursor: 'page2' },
     })
   })
-  await page.goto('/app/?layout=album')
+  await page.goto('/?layout=album')
   await expect(page.locator('.album button')).toHaveCount(1)
   await expect(page.locator('.album > .skeleton')).toHaveCount(12)
   resolve()
@@ -217,7 +217,7 @@ test('feed preserves single photo proportions and arranges three photos as a mos
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"><rect width="300" height="400" fill="#678"/></svg>',
     }),
   )
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.locator('.count-1')).toHaveCSS('width', '90px')
   await expect(page.locator('.count-1 img')).toHaveCSS('object-fit', 'contain')
   await expect(page.locator('.count-3 .tile').first()).toHaveCSS(

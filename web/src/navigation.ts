@@ -72,7 +72,7 @@ export function openInNewTab(router: Router, to: RouteLocationRaw) {
 }
 
 /**
- * Route clicks on the app's own links (`/app/…`) through the router.
+ * Route clicks on the app's own links (`/…`) through the router.
  * RouterLink already does this for itself; plain anchors with an address of
  * the app rely on it. Clicks the browser should open elsewhere are left alone, except in the
  * Mini App, where they navigate in place. Listen to both `click` and

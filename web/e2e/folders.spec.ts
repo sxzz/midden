@@ -84,7 +84,7 @@ test('a folder shows posts and accounts in tabs, and updates as expanded', async
     })()
     return route.fulfill({ json })
   })
-  await page.goto(`/app/folder/${folderId}`)
+  await page.goto(`/folder/${folderId}`)
   const tabs = page.getByRole('tablist', { name: '类型' })
   await expect(tabs.getByRole('tab', { name: '帖子' })).toHaveAttribute(
     'aria-selected',

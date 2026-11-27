@@ -26,4 +26,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           MIDDEN_WEB_HOSTNAME: ${{ vars.MIDDEN_WEB_HOSTNAME }}
-        run: pnpm --filter @midden/web run deploy --routes "${MIDDEN_WEB_HOSTNAME}/app/*"
+          # The API's own origin (https://midden-api.…): built into the app
+          # and its CSP. The web host has no API, so the deploy needs it.
+          VITE_API_URL: ${{ vars.MIDDEN_API_URL }}
+        run: |
+          : "${VITE_API_URL:?Set the repository variable MIDDEN_API_URL}"
+          pnpm --filter @midden/web run deploy --routes "${MIDDEN_WEB_HOSTNAME}/*"

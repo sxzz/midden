@@ -270,13 +270,13 @@ describe('telegram commands', () => {
     ).toBe('账号已删除。')
     // Accounts are added on the web, in 采集 → 采集账号.
     const add = handle(
-      { ...c, webAppUrl: 'https://midden.test/app/' },
+      { ...c, webAppUrl: 'https://midden.test/' },
       request({ command: 'account_add' }),
     )
     expect(add.keyboard![0]).toEqual([
       {
         text: '添加账号',
-        web_app: { url: 'https://midden.test/app/captures?dialog=accounts' },
+        web_app: { url: 'https://midden.test/captures?dialog=accounts' },
       },
     ])
   })

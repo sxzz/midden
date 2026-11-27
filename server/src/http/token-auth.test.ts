@@ -7,7 +7,7 @@ import { createApi, SESSION_COOKIE } from './app.ts'
 import { createSession } from './sessions.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
-const WEB = 'https://midden.test/app/'
+const WEB = 'https://midden.test/'
 const ORIGIN = new URL(WEB).origin
 const ID = '01234567-89ab-cdef-0123-456789abcdef'
 

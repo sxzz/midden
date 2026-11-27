@@ -114,7 +114,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   })
   const openRow = () =>
     page.locator('.head').filter({ hasText: '测试作者' }).first().click()
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.getByText(collection.text)).toBeVisible()
   await expect(page.locator('.total')).toHaveText('1 条')
   await page.screenshot({
@@ -224,7 +224,7 @@ test('the Mini App signs in with the launch data in its address', async ({
     if (path === '/v1/collections') return r.fulfill({ json: { items: [] } })
     return r.fulfill({ json: {} })
   })
-  await page.goto('/app/#tgWebAppData=user%3D42%26hash%3Dabc')
+  await page.goto('/#tgWebAppData=user%3D42%26hash%3Dabc')
   await expect(page.locator('h1')).toHaveText('我的收藏')
   expect(logins).toEqual([{ init_data: 'user=42&hash=abc' }])
   // Its theme is applied from the start.
@@ -274,7 +274,7 @@ test('sensitive image stays blurred until revealed and opens inside the page', a
               : { items: [sensitive] }
     await r.fulfill({ json: body })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   // Sensitive thumbnails and detail previews must remain blurred until revealed.
   await expect(page.locator('.thumbs img')).toBeVisible()
   await expect(page.locator('.thumbs img')).toHaveCSS('filter', 'blur(8px)')
@@ -344,7 +344,7 @@ test('loading skeletons, one revision and touch image navigation', async ({
                 : { items: [media] }
     await r.fulfill({ json: body })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   const history = page.waitForResponse((r) =>
     new URL(r.url()).pathname.endsWith('/history'),
   )
@@ -416,7 +416,7 @@ test('scroll loads the next page and retries without losing existing items', asy
       })
     }
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.getByText('收藏编号 1', { exact: true })).toBeVisible()
   await expect(page.getByText('已用 1.0 MB', { exact: true })).toBeInViewport()
   expect(cursors).toEqual([null])
@@ -458,7 +458,7 @@ test('sort selection resets pagination and carries into subsequent pages', async
     })
   })
   // Posts list by publication time until asked otherwise.
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.getByText('发帖排序 1', { exact: true })).toBeVisible()
   await page
     .getByRole('combobox', { name: '排序', exact: true })
@@ -507,7 +507,7 @@ test('a failed update says why every time it is tried', async ({ page }) => {
     if (path === '/v1/tags') return r.fulfill({ json: [] })
     return r.fulfill({ json: {} })
   })
-  await page.goto(`/app/collection/${id}`)
+  await page.goto(`/collection/${id}`)
   await expect(page.getByText(collection.text)).toBeVisible()
   await page.getByRole('button', { name: '更新', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: '更新 1 条帖子' })
@@ -560,7 +560,7 @@ test('a private collection shows a lock beside the name, not a detail line', asy
     if (path === '/v1/tags') return r.fulfill({ json: [] })
     return r.fulfill({ json: {} })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   const rows = page.locator('.row')
   await expect(rows).toHaveCount(2)
   // The lock stays visible even when the name has to be truncated.
@@ -624,7 +624,7 @@ test('a post reads its author as last seen and notes when it was deleted', async
     if (path === '/v1/tags') return r.fulfill({ json: [] })
     return r.fulfill({ json: {} })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   const row = page.locator('.row')
   await expect(row.locator('.name')).toHaveText('新名字')
   await expect(row.getByRole('img', { name: '私密' })).toBeVisible()
@@ -680,7 +680,7 @@ test('list media loads only near the viewport and leaves the API ahead', async (
     if (path === '/v1/collections') return r.fulfill({ json: { items: rows } })
     return r.fulfill({ json: {} })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.locator('.row')).toHaveCount(20)
   await expect.poll(() => requested.has('poster-0')).toBe(true)
   // Far below the fold, neither images nor posters have started.
@@ -750,7 +750,7 @@ test('lists show thumbnails; the open post loads the originals', async ({
       return r.fulfill({ json: { note: '', tags: [] } })
     return r.fulfill({ json: [] })
   })
-  await page.goto('/app/')
+  await page.goto('/')
   const thumbs = page.locator('.row .thumbs')
   await expect(thumbs.locator('img')).toHaveCount(3)
   // The video tile is a still image with its play mark, not a video element.

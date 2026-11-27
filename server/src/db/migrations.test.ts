@@ -738,7 +738,7 @@ describe('users', () => {
 
     // The cookie, the passkey, the token and the link all work.
     const ctx = { ...testContext(), db }
-    const app = createApi({ ctx, webAppUrl: `${ORIGIN}/app/` })
+    const app = createApi({ ctx, webAppUrl: `${ORIGIN}/` })
     const post = (path: string, body: unknown) =>
       app.request(path, {
         method: 'POST',

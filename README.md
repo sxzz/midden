@@ -24,8 +24,9 @@ docker compose up -d
 
 | 路径 | 用途 |
 | --- | --- |
-| `/app/` | 网页 |
+| `/` | 网页，`/agent.md` 是给 AI agent 的说明 |
 | `/v1/` | REST API |
+| `/agent/v1/` | 给 AI agent 与脚本的 API |
 | `/media/` | 签名的媒体链接 |
 | `/healthz` | 健康检查：HTTP 服务与数据库可用，与 Telegram 无关 |
 
@@ -37,7 +38,7 @@ docker compose up -d
 | --- | --- |
 | `SECRET_KEY` | 必填，见上 |
 | `TELEGRAM_BOT_TOKEN`、`OWNER_TELEGRAM_ID` | Telegram Bot 的 token 与所有者的用户 ID，需同时设置；不设置则不启动 Bot，也无法添加第一个通行密钥 |
-| `WEB_APP_URL` | 网页的公开 HTTPS 地址，以 `/app/` 结尾，也是 Mini App 的地址；设置后才能登录网页。网页的其他域名在「设置 → 管理员面板 → 域名」中添加 |
+| `WEB_APP_URL` | 网页的公开 HTTPS 地址，只写域名（如 `https://midden.example.com/`），也是 Mini App 的地址；设置后才能登录网页。网页的其他域名在「设置 → 管理员面板 → 域名」中添加 |
 | `DATA_PATH` | 宿主机上的数据目录，默认 `./data` |
 | `PORT` | 宿主机端口，默认 `8080` |
 | `LOG_LEVEL` | 日志级别，默认 `info` |
@@ -49,7 +50,7 @@ docker compose up -d
 
 1. 通过 BotFather 创建 Bot，取得 token；通过 [@userinfobot](https://t.me/userinfobot) 等方式查到自己的用户 ID。
 2. 填入 `TELEGRAM_BOT_TOKEN` 和 `OWNER_TELEGRAM_ID`，重新启动：`docker compose up -d`。
-3. 网页需通过 HTTPS 对外提供（例如 Cloudflare Tunnel，把整个域名转发到本服务），并设置 `WEB_APP_URL`。
+3. 网页需通过 HTTPS 对外提供（例如 Cloudflare Tunnel，把整个域名转发到本服务），并设置 `WEB_APP_URL`。网页也可以单独部署、API 用另一个域名，见 [运维](docs/operations.md#网页单独部署)。
 4. 浏览器用通行密钥登录。第一次在 Telegram 私聊 Bot 发送 `/passkey`，点开链接创建通行密钥，见 [运维](docs/operations.md#网页登录)。
 
 Bot 只回应所有者：私聊中直接发送链接或命令；群聊中需 @Bot 或使用 `/命令@Bot`，其他成员的消息和按钮一律忽略。命令菜单会在启动时自动同步，`/help` 查看说明。

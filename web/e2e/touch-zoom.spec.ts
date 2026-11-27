@@ -28,12 +28,12 @@ test('fields are at least 16px on a touch screen, so focusing one never zooms', 
             Number(getComputedStyle(field).fontSize.replace('px', '')),
           ),
       )
-  await page.goto('/app/')
+  await page.goto('/')
   await page.getByRole('button', { name: '筛选' }).click()
   const library = await smallest()
   expect(library.length).toBeGreaterThan(1)
   expect(Math.min(...library)).toBeGreaterThanOrEqual(16)
-  await page.goto('/app/captures')
+  await page.goto('/captures')
   await expect(page.getByLabel('链接', { exact: true })).toBeVisible()
   const captures = await smallest()
   expect(captures.length).toBeGreaterThan(0)
@@ -44,7 +44,7 @@ test('fields are at least 16px on a touch screen, so focusing one never zooms', 
 })
 
 test('a double tap is not a zoom', async ({ page }) => {
-  await page.goto('/app/')
+  await page.goto('/')
   expect(
     await page.evaluate(
       () => getComputedStyle(document.documentElement).touchAction,

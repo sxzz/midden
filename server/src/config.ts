@@ -25,12 +25,22 @@ const Env = v.object({
   TELEGRAM_BOT_TOKEN: v.optional(v.pipe(v.string(), v.regex(/^\d+:[\w-]+$/))),
   // The only Telegram user allowed in.
   OWNER_TELEGRAM_ID: v.optional(v.pipe(v.string(), v.regex(/^\d+$/))),
-  // Public HTTPS address of the web app (ending in /app/), opened as the
-  // Mini App; enables cookie sessions.
+  // Public HTTPS address of the web app, its origin's root, opened as the
+  // Mini App; enables cookie sessions and is the origin the API answers
+  // with CORS.
   WEB_APP_URL: v.optional(
-    v.pipe(v.string(), v.url(), v.regex(/^https:\/\/[^/?#]+\/app\/$/)),
+    v.pipe(
+      v.string(),
+      v.url(),
+      v.regex(
+        /^https:\/\/[^/?#]+\/?$/,
+        "WEB_APP_URL must be the web app's https origin, e.g. https://midden.example.com/",
+      ),
+      v.transform((url) => `${new URL(url).origin}/`),
+    ),
   ),
-  // The built web app served under /app/.
+  // The built web app, served at the root when the API's host is also the
+  // web app's (VITE_API_URL empty).
   WEB_DIR: v.optional(v.pipe(v.string(), v.nonEmpty())),
   // Docker sets it to production; the dev server leaves it unset.
   NODE_ENV: v.optional(v.string()),

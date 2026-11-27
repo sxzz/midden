@@ -27,7 +27,7 @@ import { createSession } from './sessions.ts'
 import type { ReadThreadData } from '#reads/thread.ts'
 import type { Principal } from '#users/principal.ts'
 
-const WEB = 'https://midden.test/app/'
+const WEB = 'https://midden.test/'
 const ORIGIN = new URL(WEB).origin
 const MISSING = '0193a0b0-0000-7000-8000-000000000000'
 

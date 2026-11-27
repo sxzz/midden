@@ -6,7 +6,7 @@ import { followShare } from './share'
 import { trackInput } from './sheet-focus'
 import { trackTabs } from './tab-state'
 import './style.css'
-// An old address (`/app/#/captures`, from a bookmark, an old share link or
+// An old address (`/#/captures`, from a bookmark, an old share link or
 // an old bot message) becomes the address it means now, before anything
 // reads it. Any other fragment is left alone: Telegram's launch data.
 const legacy = legacyAddress(location.hash)

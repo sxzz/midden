@@ -151,7 +151,7 @@ test('Instagram profile queries Instagram posts and links dotted mentions', asyn
                 : { items: [], available: true },
     })
   })
-  await page.goto(`/app/collection/${profileId}`)
+  await page.goto(`/collection/${profileId}`)
   const related = page.getByRole('region', { name: '关联的收藏' })
   await expect(related.locator('.row')).toHaveCount(1)
   expect(query.get('entity_type')).toBe('instagram.post')
@@ -160,14 +160,14 @@ test('Instagram profile queries Instagram posts and links dotted mentions', asyn
     page
       .locator('.post .body')
       .getByRole('link', { name: '@friend.name', exact: true }),
-  ).toHaveAttribute('href', `/app/collection/${mentionedId}`)
+  ).toHaveAttribute('href', `/collection/${mentionedId}`)
   await related.locator('.row').click()
   await expect(page).toHaveURL(new RegExp(`/collection/${postId}$`))
   await expect(
     page
       .locator('.post .body')
       .getByRole('link', { name: '@friend.name', exact: true }),
-  ).toHaveAttribute('href', `/app/collection/${mentionedId}`)
+  ).toHaveAttribute('href', `/collection/${mentionedId}`)
   await page.screenshot({ path: 'test-results/instagram-post-mobile.png' })
 })
 
@@ -206,7 +206,7 @@ test('profile shows related collection rows and total storage, with internal bio
         ) || {}
     return route.fulfill({ json })
   })
-  await page.goto(`/app/collection/${profileId}`)
+  await page.goto(`/collection/${profileId}`)
   const related = page.getByRole('region', { name: '关联的收藏' })
   await expect(related.getByText('帖子占用总量 2.0 MB')).toBeVisible()
   await expect(related.locator('.row')).toHaveCount(1)
@@ -242,7 +242,7 @@ test('profile shows related collection rows and total storage, with internal bio
     .click()
   await expect(page).toHaveURL(new RegExp(`/collection/${mentionedId}$`))
   await expect(page.locator('.post .body')).toHaveText('朋友的简介')
-  await page.goto(`/app/collection/${profileId}`)
+  await page.goto(`/collection/${profileId}`)
   await page
     .locator('.post .body')
     .getByRole('link', { name: '@friend', exact: true })
@@ -310,7 +310,7 @@ test('profile update links to its record and shows new posts on return', async (
     }
     return route.fulfill({ json })
   })
-  await page.goto(`/app/collection/${profileId}`)
+  await page.goto(`/collection/${profileId}`)
   const related = page.getByRole('region', { name: '关联的收藏' })
   // The posts, without the button below them.
   const rows = related.locator('.row').filter({ hasNotText: '抓取更早的帖子' })

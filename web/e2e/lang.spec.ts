@@ -79,7 +79,7 @@ test.beforeEach(async ({ page }) => {
 test('a Japanese post and a Chinese bio carry their languages', async ({
   page,
 }) => {
-  await page.goto('/app/')
+  await page.goto('/')
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN')
   const japanese = page.locator('.preview', { hasText: '今日は猫の日です' })
   await expect(japanese).toHaveAttribute('lang', 'ja')
@@ -89,7 +89,7 @@ test('a Japanese post and a Chinese bio carry their languages', async ({
     page.locator('.name', { hasText: '小明' }).first(),
   ).toHaveAttribute('lang', 'zh-Hans')
   // The post's page: its text, and its author by the author's language.
-  await page.goto(`/app/collection/${post.id}`)
+  await page.goto(`/collection/${post.id}`)
   await expect(page.locator('.body').first()).toHaveAttribute('lang', 'ja')
   await expect(
     page.locator('.author .name', { hasText: 'ねこ' }).first(),

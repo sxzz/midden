@@ -37,7 +37,7 @@ test('后台任务 lists rate limits and ends one early', async ({ page }) => {
     if (path === '/v1/queue') return r.fulfill({ json: view(limits) })
     return r.fulfill({ json: { items: [] } })
   })
-  await page.goto('/app/settings/admin/jobs')
+  await page.goto('/settings/admin/jobs')
   const row = page.getByRole('button', { name: /X @owner · UserTweets/ })
   const time = `${until.getHours()}:${String(until.getMinutes()).padStart(2, '0')}`
   await expect(row).toContainText(`${time} 恢复，还有 13 分钟 · 等待 3`)
@@ -80,7 +80,7 @@ test('后台任务 lists the slow queries, newest first', async ({ page }) => {
       return r.fulfill({ json: { items: slow } })
     return r.fulfill({ json: { items: [] } })
   })
-  await page.goto('/app/settings/admin/jobs')
+  await page.goto('/settings/admin/jobs')
   await expect(page.getByText('慢查询（300 ms 以上）')).toBeVisible()
   const first = page.locator('.slow').first()
   await expect(first).toContainText('GET /agent/v1/posts')

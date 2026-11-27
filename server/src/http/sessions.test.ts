@@ -41,7 +41,7 @@ function setup(reads?: WebReads) {
   const app = createApi({
     ctx,
     telegram: { token: BOT, owner: '42' },
-    webAppUrl: `${WEB}/app/`,
+    webAppUrl: `${WEB}/`,
     now: clock.now,
     reads,
   })
@@ -306,7 +306,7 @@ describe('the Mini App', () => {
 
     // Another kind of device, or another domain, keeps its own.
     await login(MAC_SAFARI)
-    addOrigin(db, `${WEB}/app/`, OTHER_ORIGIN)
+    addOrigin(db, `${WEB}/`, OTHER_ORIGIN)
     await login(IPHONE, undefined, OTHER_ORIGIN)
     // And a passkey session on the same domain stays.
     createSession(db, adminId(db), {

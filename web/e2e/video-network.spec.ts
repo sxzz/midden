@@ -95,9 +95,9 @@ test('no list, album or post page requests a video, and the viewer only the one 
   try {
     // Each page shows the posters, three of them, and asks for no video.
     for (const [path, tiles] of [
-      ['/app/', '.row .thumbs img'],
-      ['/app/?layout=album', '.album img'],
-      [`/app/collection/${id}`, '.media img'],
+      ['/', '.row .thumbs img'],
+      ['/?layout=album', '.album img'],
+      [`/collection/${id}`, '.media img'],
     ] as const) {
       await page.goto(path)
       await expect(page.locator(tiles)).toHaveCount(3)
@@ -129,7 +129,7 @@ test('leaving a video stops its download, and coming back starts it again', asyn
   const media = await serve()
   const seen = await mock(page, media.origin)
   try {
-    await page.goto(`/app/collection/${id}`)
+    await page.goto(`/collection/${id}`)
     await page.getByRole('button', { name: '播放视频' }).first().click()
     const counter = page.locator('dialog.viewer .counter')
     await expect(counter).toHaveText('1 / 3')
