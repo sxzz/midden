@@ -149,6 +149,7 @@ describe('read threads', () => {
         // The test context signs media with this key.
         mediaKey: new TextEncoder().encode('test'),
         types: fixture.reader.types,
+        countPointers: fixture.ctx.platforms.countPointers(),
       } satisfies ReadThreadData,
     })
     const pooled = pooledReads(pool)

@@ -20,6 +20,7 @@ import type { AccountsContext } from '#accounts/accounts.ts'
 import type { AgentReader, TypeCatalog } from '#agent/query.ts'
 import type { ForwardedRequest, ForwardedResponse } from '#http/offload.ts'
 import type { Logger } from '#log.ts'
+import type { CountPointers, Platforms } from '#platforms/registry.ts'
 import type { PoolRequest, PoolResponse } from './pool.ts'
 
 export interface ReadThreadData {
@@ -30,6 +31,8 @@ export interface ReadThreadData {
   /** The media bucket's public address, with R2. */
   publicUrl?: string
   types: TypeCatalog
+  /** `Platforms.countPointers()`: what reads need of the platforms. */
+  countPointers: CountPointers
   /** What the web process's API is made with (`createApi`). */
   webAppUrl?: string
   dev?: boolean
@@ -60,12 +63,13 @@ export function threadReader(data: ReadThreadData): AgentReader {
 }
 
 /**
- * What a read thread lacks: using it means the route belongs on the web
- * process's thread (`inline`).
+ * What a read thread lacks, but for the plain parts in `present`: using the
+ * rest means the route belongs on the web process's thread (`inline`).
  */
-function absent<T extends object>(what: string): T {
-  return new Proxy({} as T, {
-    get(_, key) {
+function absent<T extends object>(what: string, present: Partial<T> = {}): T {
+  return new Proxy(present as T, {
+    get(target, key) {
+      if (Object.hasOwn(target, key)) return target[key as keyof T]
       throw new Error(
         `${what} (${String(key)}) is not on a read thread; mark the route inline`,
       )
@@ -76,6 +80,7 @@ function absent<T extends object>(what: string): T {
 /** The context the web process's API reads with, on this thread. */
 export function threadContext(
   reader: AgentReader,
+  data: Pick<ReadThreadData, 'countPointers'>,
   logger: Logger,
 ): AccountsContext {
   return {
@@ -83,7 +88,9 @@ export function threadContext(
     blobs: reader.blobs,
     logger,
     queue: absent('the job queue'),
-    platforms: absent('the platforms'),
+    platforms: absent<Platforms>('the platforms', {
+      countPointers: () => data.countPointers,
+    }),
     vault: absent('the credential vault'),
     openCredential: () => {
       throw new Error('credentials are not on a read thread')
@@ -143,7 +150,7 @@ if (parentPort) {
     }),
   )
   const reader = threadReader(data)
-  const web = threadApi(threadContext(reader, logger), data)
+  const web = threadApi(threadContext(reader, data, logger), data)
   keepFinishedRecords()
   port.on('message', async (request: PoolRequest) => {
     if (request.op === 'forget') {

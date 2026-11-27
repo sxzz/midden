@@ -1,5 +1,9 @@
 import { AppError } from '#errors.ts'
-import { isProviderFailure, type Platform } from './platform.ts'
+import {
+  isProviderFailure,
+  type Platform,
+  type RelationList,
+} from './platform.ts'
 import { status } from './rpc.ts'
 import type { Provider, ResolveResponse } from './protocol.ts'
 
@@ -7,22 +11,35 @@ export function supports(provider: Provider, name: string, major = 1): boolean {
   return provider.capabilities.some((c) => c.name === name && c.major === major)
 }
 
+/**
+ * Pointers into each platform's profile data at the size of each list, by
+ * adapter id. Plain data, so the read threads, which have no platforms, are
+ * given it.
+ */
+export type CountPointers = Record<string, Record<RelationList, string>>
+
 /** The platforms this server captures from, routed by URL host. */
 export class Platforms {
   readonly #byId = new Map<string, Platform>()
   readonly #byHost = new Map<string, Platform>()
+  readonly #counts: CountPointers = {}
 
   constructor(platforms: Platform[]) {
     for (const platform of platforms) {
       const id = platform.description.adapterId
       if (this.#byId.has(id)) throw new Error(`duplicate platform ${id}`)
       this.#byId.set(id, platform)
+      if (platform.relations) this.#counts[id] = platform.relations.counts
       for (const host of platform.description.hosts) {
         const key = host.toLowerCase()
         if (this.#byHost.has(key)) throw new Error(`ambiguous host ${host}`)
         this.#byHost.set(key, platform)
       }
     }
+  }
+
+  countPointers(): CountPointers {
+    return this.#counts
   }
 
   all(): Platform[] {

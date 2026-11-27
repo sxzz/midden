@@ -6,12 +6,15 @@ import { Hono } from 'hono'
 import { afterEach, describe, expect, test } from 'vitest'
 import { createFolder } from '#library/folders.ts'
 import { createShare } from '#library/shares.ts'
+import { Platforms } from '#platforms/registry.ts'
 import { QueryPool, READ_THREAD } from '#reads/pool.ts'
 import { agentFixture, type AgentFixture } from '#testing/agent.ts'
 import { testContext } from '#testing/context.ts'
+import { fakePlatform } from '#testing/fake-platform.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
 import { createSession } from './auth.ts'
 import {
+  inline as inlineRoute,
   pooledWebReads,
   type ForwardedRequest,
   type WebReads,
@@ -162,12 +165,52 @@ describe('GET requests on the read threads', () => {
 
   test('a thread answers them from its own connection, as this process would', async () => {
     fixture = await agentFixture()
-    const source = fixture.ctx
+    // A platform that reads follows, as X does: the relation views look up
+    // where its profiles keep their counts.
+    const source: AccountsContext = {
+      ...fixture.ctx,
+      platforms: new Platforms([
+        fakePlatform(
+          { current: () => ({}) },
+          { current: () => ({ accounts: [], nextCursor: '' }) },
+        ),
+      ]),
+    }
     createFolder(source.db, { name: 'Cats', filter: 'q=cat' })
     const share = createShare(source.db, {
       target: 'collection',
       id: fixture.ids.p1!,
     })
+    const profile = fixture.ids['7']!
+    const profileShare = createShare(source.db, {
+      target: 'collection',
+      id: profile,
+    })
+    // Alice (7) and Bob (8) follow each other; Alice follows Carol (9), who
+    // is not saved, and Bob followed her once.
+    const db = source.db.$client
+    const entityOf = (external: string) =>
+      (
+        db
+          .prepare(
+            `SELECT id FROM entities
+            WHERE kind = 'fake.profile' AND external_id = ?`,
+          )
+          .get(external) as { id: string }
+      ).id
+    db.prepare(
+      `INSERT INTO entities (id, platform, kind, external_id)
+      VALUES ('carol', 'fake', 'fake.profile', '9')`,
+    ).run()
+    const follow = db.prepare(
+      `INSERT INTO follow_edges
+      (follower_id, followee_id, first_seen_at, last_seen_at, ended_at)
+      VALUES (?, ?, 1000, 2000, ?)`,
+    )
+    follow.run(entityOf('7'), entityOf('8'), null)
+    follow.run(entityOf('8'), entityOf('7'), null)
+    follow.run(entityOf('7'), 'carol', null)
+    follow.run(entityOf('8'), 'carol', 3000)
     const file = path.join(
       mkdtempSync(path.join(tmpdir(), 'midden-offload-')),
       'db',
@@ -181,6 +224,7 @@ describe('GET requests on the read threads', () => {
         // The test context signs media with this key.
         mediaKey: new TextEncoder().encode('test'),
         types: fixture.reader.types,
+        countPointers: source.platforms.countPointers(),
       } satisfies ReadThreadData,
     })
     // This process's database is empty: what comes back was read there.
@@ -193,6 +237,8 @@ describe('GET requests on the read threads', () => {
     const record = (await (await inline('/captures')).json()) as {
       items: { id: string }[]
     }
+    const alice = encodeURIComponent('fake/fake.profile/7')
+    const bob = encodeURIComponent('fake/fake.profile/8')
     const routes = [
       '/collections',
       '/collections?q=cat',
@@ -209,39 +255,89 @@ describe('GET requests on the read threads', () => {
       '/usage',
       '/shares',
       `/public/${share.slug}`,
+      // The relation views, over follows.
+      `/collections/graph?of=${alice}&kinds=following%2Cfollowers&limit=300`,
+      `/collections/graph?of=${alice}&viewer=${bob}`,
+      `/collections/${profile}/graph?kinds=mutual`,
+      `/collections/${profile}/follows`,
+      `/collections/${profile}/follow-changes`,
+      `/collections/${profile}/counts`,
+      `/collections/${profile}/profile-changes`,
+      `/collections/compare?rel_of=${alice}&rel_of=${bob}`,
+      `/collections/compare?rel_of=${alice}&rel_of=${bob}&rel=followers&rel_min=1`,
+      '/collections/perspectives',
+      `/collections/perspectives?rel_of=${alice}`,
+      `/collections?rel_of=${alice}&rel=following`,
+      `/collections/authors?rel_of=${alice}&rel=mutual`,
+      `/public/${profileShare.slug}/collections/${profile}/graph`,
+      `/public/${profileShare.slug}/collections/${profile}/follows`,
+      `/public/${profileShare.slug}/collections/${profile}/follow-changes`,
     ]
     for (const route of routes) {
       const there = await pooled(route)
       const here = await inline(route)
+      expect([route, here.status]).toEqual([route, 200])
       expect([route, there.status]).toEqual([route, here.status])
       expect([route, await there.json()]).toEqual([route, await here.json()])
     }
+    // The graph found the follows, and the counts the profiles keep.
+    const graph = (await (
+      await pooled(`/collections/graph?of=${alice}`)
+    ).json()) as { nodes: { key: string; followers?: number }[] }
+    expect(graph.nodes.map((n) => [n.key, n.followers])).toEqual([
+      ['fake/fake.profile/7', 120],
+      ['fake/fake.profile/8', 30],
+      ['fake/fake.profile/9', undefined],
+    ])
     expect((await pooled('/collections')).headers.get('Cache-Control')).toBe(
       'no-store',
     )
     // An error is answered as here.
     expect((await pooled('/collections/nope')).status).toBe(404)
 
-    // Every GET route works there: none needs what only this process has.
-    const capture = (
-      source.db.$client
-        .prepare('SELECT id FROM captures WHERE collection_id = ?')
-        .get(fixture.ids.p1!) as { id: string }
-    ).id
-    const params: Record<string, string> = {
-      id: fixture.ids.p1!,
-      slug: share.slug,
-      capture,
+    // Every GET route works there, as here: none needs what only this
+    // process has. Each is read for a post and for a profile with follows,
+    // with the parameters it requires.
+    const captureOf = (id: string) =>
+      (
+        db
+          .prepare('SELECT id FROM captures WHERE collection_id = ?')
+          .get(id) as { id: string }
+      ).id
+    const required: Record<string, string> = {
+      '/collections/graph': `?of=${alice}`,
+      '/collections/compare': `?rel_of=${alice}&rel_of=${bob}`,
     }
-    const gets = createApi({ ctx: source })
-      .routes.filter((r) => r.method === 'GET' && !r.path.includes('*'))
-      .map((r) =>
-        r.path.replaceAll(/:(\w+)/g, (_, name: string) => params[name]!),
-      )
+    const all = createApi({ ctx: source }).routes
+    // Those answered here read this process's empty database.
+    const here = new Set(
+      all.filter((r) => r.handler === inlineRoute).map((r) => r.path),
+    )
+    const gets = all.filter(
+      (r) => r.method === 'GET' && !r.path.includes('*') && !here.has(r.path),
+    )
     expect(gets.length).toBeGreaterThan(40)
-    for (const route of new Set(gets)) {
-      const response = await pooled(route)
-      expect([route, response.status < 500]).toEqual([route, true])
+    for (const params of [
+      { id: fixture.ids.p1!, slug: share.slug },
+      { id: profile, slug: profileShare.slug },
+    ]) {
+      const values: Record<string, string> = {
+        ...params,
+        capture: captureOf(params.id),
+      }
+      const urls = gets.map(
+        (r) =>
+          r.path.replaceAll(/:(\w+)/g, (_, name: string) => values[name]!) +
+          (required[r.path] ?? ''),
+      )
+      for (const route of new Set(urls)) {
+        const there = await pooled(route)
+        expect([route, there.status < 500]).toEqual([route, true])
+        expect([route, there.status]).toEqual([
+          route,
+          (await inline(route)).status,
+        ])
+      }
     }
   }, 30_000)
 })

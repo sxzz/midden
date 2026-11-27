@@ -85,6 +85,7 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
         ? { publicUrl: config.media.r2.publicUrl }
         : {}),
       types,
+      countPointers: ctx.platforms.countPointers(),
       webAppUrl: config.webAppUrl,
       dev: config.dev,
       logLevel: logger.level,

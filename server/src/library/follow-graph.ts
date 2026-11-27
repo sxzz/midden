@@ -12,6 +12,7 @@ import {
   type Reader,
 } from './views.ts'
 import type { CaptureContext } from '#capture/context.ts'
+import type { Platforms } from '#platforms/registry.ts'
 
 /**
  * How an account relates to the center now: it follows the center back
@@ -144,12 +145,10 @@ export const GRAPH_MAX = 10_000
  * platform, so the center's platform tells.
  */
 export function countPaths(
-  ctx: Pick<CaptureContext, 'platforms'>,
+  ctx: { platforms: Pick<Platforms, 'countPointers'> },
   platform: string,
 ) {
-  const counts = ctx.platforms
-    .all()
-    .find((p) => p.description.adapterId === platform)?.relations?.counts
+  const counts = ctx.platforms.countPointers()[platform]
   return (
     counts && {
       followers: `."${counts.followers}"`,
