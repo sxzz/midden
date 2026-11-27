@@ -56,11 +56,16 @@ const routes: Record<string, () => Partial<FetchResponse>> = {
       ['root', 'reposted', 'post'],
     ),
   }),
-  // Its avatar could not be saved: shown from the platform instead.
+  // Its avatar and banner could not be saved: shown from the platform instead.
   600: () => ({
     text: 'profile bob',
-    resources: [image('missing/bob.jpg', { purpose: 'avatar' })],
-    graph: graph([entity('root', 'fake.profile', '600', { name: 'Bob' }, [0])]),
+    resources: [
+      image('missing/bob.jpg', { purpose: 'avatar' }),
+      image('missing/bob-banner.jpg', { purpose: 'banner' }),
+    ],
+    graph: graph([
+      entity('root', 'fake.profile', '600', { name: 'Bob' }, [0, 1]),
+    ]),
   }),
   // Written by the profile, with an image.
   a1: () => ({
@@ -541,7 +546,8 @@ describe('public shares', () => {
     expect((linked.body as Changes).items[0]!.account.collection_id).toBe(
       ids.bob,
     )
-    // In scope, bob's own page shows the platform's avatar like a saved one.
+    // In scope, bob's own page shows the platform's avatar and banner like
+    // saved ones.
     const page = await read(both, `/collections/${ids.bob}`)
     expect(page.status).toBe(200)
     expect(
@@ -551,6 +557,10 @@ describe('public shares', () => {
       expect.objectContaining({
         purpose: 'avatar',
         remote_url: 'https://m.test/missing/bob.jpg',
+      }),
+      expect.objectContaining({
+        purpose: 'banner',
+        remote_url: 'https://m.test/missing/bob-banner.jpg',
       }),
     ])
   })

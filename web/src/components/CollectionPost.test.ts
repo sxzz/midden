@@ -3,7 +3,7 @@ import { createVaporApp, nextTick } from 'vue'
 import { asset, collection, entity } from '../testing/api'
 import CollectionPost from './CollectionPost.vue'
 import CollectionRow from './CollectionRow.vue'
-import type { Collection, Entity } from '../api'
+import type { Asset, Collection, Entity } from '../api'
 vi.mock('vue-router', async () => {
   const { resolve } = await import('../testing/router')
   return { useRouter: () => ({ push: vi.fn(), resolve }) }
@@ -29,10 +29,14 @@ const fixture = collection({
 })
 let unmount = () => {}
 type Mountable = Parameters<typeof createVaporApp>[0]
-function mount(component: Mountable, collection: Collection) {
+function mount(
+  component: Mountable,
+  collection: Collection,
+  props: { showSensitive?: boolean } = {},
+) {
   const el = document.createElement('div')
   document.body.append(el)
-  const app = createVaporApp(component, { collection })
+  const app = createVaporApp(component, { collection, ...props })
   app.mount(el)
   unmount = () => app.unmount()
   return el
@@ -247,5 +251,118 @@ describe('Vapor collection rendering', () => {
     })
     expect(el.querySelector('script')).toBeNull()
     expect(el.textContent).toContain('<script>alert(1)</script>')
+  })
+  describe('a profile banner', () => {
+    const banner = (fields: Partial<Asset> = {}) =>
+      asset({
+        id: 'banner',
+        purpose: 'banner',
+        position: 1,
+        url: '/media/banner',
+        thumbnail_url: '/media/banner-600x200',
+        mime: 'image/jpeg',
+        width: 600,
+        height: 200,
+        ...fields,
+      })
+    const profile = (
+      type: string,
+      assets: Asset[],
+      props: { showSensitive?: boolean } = {},
+    ) =>
+      mount(
+        CollectionPost,
+        {
+          ...fixture,
+          assets: [],
+          graph: {
+            root: 'root',
+            relations: [],
+            entities: [
+              entity({
+                key: 'root',
+                type,
+                data: { name: '山野记录', metadata: { description: '简介' } },
+                assets: [
+                  asset({ id: 'avatar', purpose: 'avatar', url: '/media/a' }),
+                  ...assets,
+                ],
+              }),
+            ],
+          },
+        },
+        props,
+      )
+    it('shows the thumbnail in a 3:1 box above the avatar and name', () => {
+      const el = profile('x.profile', [banner()])
+      const cover = el.querySelector('.cover')!
+      expect(cover.querySelector('img')?.getAttribute('src')).toBe(
+        '/media/banner-600x200',
+      )
+      // The banner comes first, and the saved one opens in the viewer.
+      expect(el.querySelector('article')?.firstElementChild).toBe(cover)
+      expect(cover.querySelector('button')?.getAttribute('aria-label')).toBe(
+        '查看山野记录的主页封面',
+      )
+      expect(el.querySelector('article.with-cover')).not.toBeNull()
+    })
+    it("falls back to the platform's own address, which does not open", () => {
+      const el = profile('x.profile', [
+        banner({
+          state: 'failed',
+          url: undefined,
+          thumbnail_url: undefined,
+          remote_url: 'https://pbs.twimg.com/profile_banners/7/1/1500x500',
+        }),
+      ])
+      expect(el.querySelector('.cover img')?.getAttribute('src')).toBe(
+        'https://pbs.twimg.com/profile_banners/7/1/1500x500',
+      )
+      expect(el.querySelector('.cover button')).toBeNull()
+    })
+    it('collapses without a banner, or one that was removed', () => {
+      let el = profile('x.profile', [])
+      expect(el.querySelector('.cover')).toBeNull()
+      expect(el.querySelector('article.with-cover')).toBeNull()
+      expect(el.textContent).toContain('山野记录')
+      unmount()
+      // Removed media keeps a thumbnail, which must not stand in for it.
+      el = profile('x.profile', [banner({ state: 'removed', url: undefined })])
+      expect(el.querySelector('.cover')).toBeNull()
+    })
+    it('leaves a sensitive banner out until sensitive media is shown', () => {
+      const sensitive = banner({ sensitive: true })
+      let el = profile('x.profile', [sensitive])
+      expect(el.querySelector('.cover')).toBeNull()
+      unmount()
+      el = profile('x.profile', [sensitive], { showSensitive: true })
+      expect(el.querySelector('.cover img')).not.toBeNull()
+    })
+    it('is only for a profile, and Instagram has none to show', () => {
+      expect(
+        profile('instagram.profile', []).querySelector('.cover'),
+      ).toBeNull()
+      unmount()
+      // A banner on a post's author belongs to the profile page, not the post.
+      const el = mount(CollectionPost, {
+        ...fixture,
+        assets: [],
+        graph: {
+          root: 'post',
+          relations: [
+            { source: 'post', target: 'author', type: 'authored_by' },
+          ],
+          entities: [
+            entity({ key: 'post', type: 'x.post' }),
+            entity({
+              key: 'author',
+              type: 'x.profile',
+              assets: [banner()],
+            }),
+          ],
+        },
+      })
+      expect(el.querySelector('.cover')).toBeNull()
+    })
   })
 })

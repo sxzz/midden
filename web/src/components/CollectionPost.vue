@@ -77,13 +77,51 @@ const viewable = computed(() => avatarAssets.value[0]?.state === 'ready')
 watch(avatarAssets, () => {
   previewAvatar.value = false
 })
+// The banner follows the avatar's rules: a sensitive one is left out until
+// sensitive media is shown, and only one saved here opens in the viewer.
+// Without one there is no band at all: an empty grey slab 3:1 tall says
+// nothing and pushes the bio down, so the header stays as a post's.
+const previewBanner = shallowRef(false)
+const bannerAssets = computed(() =>
+  view.value.banner && (!view.value.banner.sensitive || props.showSensitive)
+    ? [view.value.banner]
+    : [],
+)
+const bannerViewable = computed(() => bannerAssets.value[0]?.state === 'ready')
+watch(bannerAssets, () => {
+  previewBanner.value = false
+})
 const warnings = computed(() =>
   props.history ? [] : warningList(props.collection.warnings),
 )
 </script>
 
 <template>
-  <article class="post">
+  <article class="post" :class="{ 'with-cover': bannerAssets.length }">
+    <!-- The box keeps the platform's 3:1 before the image arrives. -->
+    <div v-if="bannerAssets.length" class="cover">
+      <button
+        v-if="bannerViewable"
+        type="button"
+        class="cover-button"
+        :aria-label="`查看${view.name}的主页封面`"
+        @click="previewBanner = true"
+      >
+        <LoadingImage
+          class="cover-image"
+          :src="previewURL(bannerAssets[0]!)"
+          alt=""
+          loading="eager"
+        />
+      </button>
+      <LoadingImage
+        v-else
+        class="cover-image"
+        :src="previewURL(bannerAssets[0]!)"
+        alt=""
+        loading="eager"
+      />
+    </div>
     <header class="author">
       <AppLink
         v-if="view.bio === undefined && view.profileHref"
@@ -199,6 +237,12 @@ const warnings = computed(() =>
       :collection-id="view.profileCollectionId"
       @close="previewAvatar = false"
     />
+    <MediaViewer
+      v-if="previewBanner && bannerAssets.length"
+      :assets="bannerAssets"
+      :initial-id="bannerAssets[0]!.id"
+      @close="previewBanner = false"
+    />
   </article>
 </template>
 
@@ -224,6 +268,50 @@ const warnings = computed(() =>
 }
 .avatar-button {
   padding: 0;
+}
+/* The banner runs edge to edge over the card's padding, and the avatar
+   sits half on it, ringed in the card's colour, with the name below. */
+.with-cover {
+  padding-top: 0;
+}
+.cover {
+  margin: 0 calc(-1 * var(--inset));
+  aspect-ratio: 3 / 1;
+  background: var(--fill);
+}
+.cover-button {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+}
+.cover-button:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: -2px;
+}
+.image-shell.cover-image {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border-radius: 0;
+  object-fit: cover;
+}
+.with-cover .author {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.with-cover .avatar {
+  width: 72px;
+  height: 72px;
+}
+.with-cover .author > .avatar {
+  position: relative;
+  margin-top: -36px;
+  box-shadow: 0 0 0 3px var(--card);
+}
+.with-cover .avatar.initials {
+  font-size: 28px;
 }
 .avatar-button:focus-visible {
   outline: 2px solid var(--link);

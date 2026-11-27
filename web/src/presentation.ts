@@ -1,5 +1,6 @@
 import {
   avatarOf,
+  bannerOf,
   collectionProfilesDiffer,
   isPostEntity,
   isProfileEntity,
@@ -52,6 +53,8 @@ export interface Presentation {
   name: string
   handle?: string
   avatar?: Asset
+  /** A profile's cover image; posts and Instagram profiles have none. */
+  banner?: Asset
   /** Shown as a lock beside the name. */
   locked: boolean
   /**
@@ -211,6 +214,7 @@ const social: Presenter = (a, root, options = {}) => {
           }),
     handle: asText(profile?.data.username),
     avatar: avatarOf(profile),
+    banner: isProfile ? bannerOf(profile) : undefined,
     // Counts come from the entity the collection is about, and only that one.
     stats: isProfile
       ? group('账号统计', metadata(profile), countFields(root?.type))

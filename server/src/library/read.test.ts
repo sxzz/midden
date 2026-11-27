@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
 import { randomUUIDv7 } from 'node:crypto'
 import { eq } from 'drizzle-orm'
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, onTestFinished, test } from 'vitest'
 import { assets, blobs, blobThumbnails, revisions } from '#db/schema.ts'
 import { status } from '#platforms/rpc.ts'
 import { FakeFailure } from '#testing/fake-platform.ts'
@@ -22,9 +22,9 @@ import {
   listCounts,
   listHistory,
 } from './read.ts'
+import { REMOTE_IMAGES, type CollectionView, type EntityView } from './views.ts'
 import type { CaptureContext } from '#capture/context.ts'
 import type { FetchResponse } from '#platforms/protocol.ts'
-import type { CollectionView, EntityView } from './views.ts'
 
 let ctx: CaptureContext | undefined
 afterEach(async () => {
@@ -613,6 +613,86 @@ describe('entity links', () => {
     expect(
       avatarOf(find(getCollection(ctx, quoting.collectionId), 'author')),
     ).toBeUndefined()
+  })
+
+  test("a profile's page carries its banner: saved with its thumbnail, or the platform's", async () => {
+    // The fake platform stands in for X, whose image addresses last.
+    REMOTE_IMAGES.add('fake')
+    onTestFinished(() => {
+      REMOTE_IMAGES.delete('fake')
+    })
+    const { ctx } = setup({
+      1: () => ({
+        text: 'saved banner',
+        resources: [
+          image('avatar.jpg', { purpose: 'avatar' }),
+          image('banner.jpg', { purpose: 'banner' }),
+        ],
+        graph: graph([
+          entity('root', 'fake.profile', '1', { name: 'One' }, [0, 1]),
+        ]),
+      }),
+      2: () => ({
+        text: 'banner only the platform has',
+        resources: [image('missing/banner.jpg', { purpose: 'banner' })],
+        graph: graph([
+          entity('root', 'fake.profile', '2', { name: 'Two' }, [0]),
+        ]),
+      }),
+      3: () => ({
+        text: 'no banner',
+        resources: [image('avatar.jpg', { purpose: 'avatar' })],
+        graph: graph([
+          entity('root', 'fake.profile', '3', { name: 'Three' }, [0]),
+        ]),
+      }),
+    })
+    const saved = await capture(ctx, profile('1'))
+    const banner = ctx.db
+      .select()
+      .from(assets)
+      .where(eq(assets.purpose, 'banner'))
+      .get()!
+    ctx.db
+      .insert(blobThumbnails)
+      .values({
+        blobId: banner.blobId!,
+        state: 'ready',
+        key: 'e'.repeat(64),
+        size: 3,
+        mime: 'image/webp',
+        width: 600,
+        height: 200,
+      })
+      .run()
+    const bannerOf = (collectionId: string) =>
+      find(getCollection(ctx, collectionId), 'root').assets?.find(
+        (a) => a.purpose === 'banner',
+      )
+
+    // Saved: the thumbnail to show, the original to open, the ratio to reserve.
+    expect(bannerOf(saved.collectionId)).toMatchObject({
+      id: banner.id,
+      state: 'ready',
+      thumbnail: true,
+      width: 600,
+      height: 200,
+      url: expect.stringMatching(/^\/media\/[\da-f]{64}\?/),
+      thumbnail_url: expect.stringMatching(/^\/media\/e{64}\?/),
+    })
+    expect(bannerOf(saved.collectionId)).not.toHaveProperty('remote_url')
+
+    // Not saved: only the platform's address, and no original here.
+    const remote = await capture(ctx, profile('2'))
+    expect(bannerOf(remote.collectionId)).toMatchObject({
+      state: 'failed',
+      remote_url: 'https://m.test/missing/banner.jpg',
+    })
+    expect(bannerOf(remote.collectionId)).not.toHaveProperty('url')
+
+    // Without one the page has no banner at all.
+    const none = await capture(ctx, profile('3'))
+    expect(bannerOf(none.collectionId)).toBeUndefined()
   })
 
   test('a referenced post reads its saved summary, author and media', async () => {

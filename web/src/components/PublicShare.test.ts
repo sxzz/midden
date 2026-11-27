@@ -41,6 +41,14 @@ const profile = collection({
         type: 'x.profile',
         external_id: '2',
         data: { name: '作者', username: 'writer' },
+        assets: [
+          asset({
+            id: 'banner',
+            purpose: 'banner',
+            url: '/media/banner',
+            thumbnail_url: '/media/banner-600x200',
+          }),
+        ],
       }),
     ],
     relations: [],
@@ -304,6 +312,19 @@ it('shows a shared post read-only, its links kept inside the share', async () =>
   expect(el.querySelector('h1')?.textContent).toBe('关注变化')
   expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
   await nextTick()
+})
+
+it("shows a shared profile's banner, to open like the owner's", async () => {
+  share = { target: 'collection', collection_id: PROFILE }
+  const el = await mount(`/s/${SLUG}`)
+  await vi.waitFor(() => expect(el.textContent).toContain('账号简介'))
+  expect(el.querySelector('.cover img')?.getAttribute('src')).toBe(
+    '/media/banner-600x200',
+  )
+  expect(el.querySelector('.cover button')?.getAttribute('aria-label')).toBe(
+    '查看作者的主页封面',
+  )
+  expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
 })
 
 it('says so when the link is gone', async () => {

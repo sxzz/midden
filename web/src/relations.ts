@@ -62,6 +62,17 @@ export function avatarOf(entity?: Entity): Asset | undefined {
     avatars?.find((asset) => asset.remote_url)
   )
 }
+/**
+ * A profile's banner (主页封面), picked like the avatar: one saved here wins,
+ * else the platform's own address (X only; see `remote_url`).
+ */
+export function bannerOf(entity?: Entity): Asset | undefined {
+  const banners = entity?.assets?.filter((asset) => asset.purpose === 'banner')
+  return (
+    banners?.find((asset) => asset.state === 'ready') ??
+    banners?.find((asset) => asset.remote_url)
+  )
+}
 /** The avatar a header may show: saved or remote, and not sensitive. */
 const shownAvatar = (entity?: Entity) => {
   const avatar = avatarOf(entity)
