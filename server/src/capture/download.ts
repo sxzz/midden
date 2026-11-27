@@ -8,6 +8,7 @@ import { fetchMedia, mediaURL } from './media-fetch.ts'
 import { isRemoved } from './media-key.ts'
 import { cachedBlob, reuseKey } from './media-reuse.ts'
 import { acceptsMediaType, sniffMediaType } from './media-type.ts'
+import { failRestored, settleRestored } from './restored-media.ts'
 import { downloadThumbnail, failThumbnail } from './thumbnail.ts'
 import { enqueueUpload } from './upload.ts'
 import type { Transaction } from '#db/client.ts'
@@ -35,10 +36,12 @@ function attach(
   asset: Asset,
   blobId: string,
 ): void {
-  tx.update(assets)
+  const changed = tx
+    .update(assets)
     .set({ state: 'ready', blobId, error: '' })
     .where(and(eq(assets.id, asset.id), eq(assets.state, 'pending')))
-    .run()
+    .run().changes
+  if (changed) settleRestored(tx, asset, blobId)
   finalizeSettled(ctx, tx, asset.captureId)
 }
 
@@ -217,6 +220,8 @@ export function failDownload(
     if (row?.asset.state === 'ready' && row.asset.thumbnailUrl)
       failThumbnail(tx, row.asset.blobId, message)
     if (row?.asset.state !== 'pending') return
+    // A restore's download: removed again, saying why.
+    if (failRestored(tx, row.asset, message)) return
     tx.update(assets)
       .set({ state: 'failed', error: message })
       .where(eq(assets.id, assetId))

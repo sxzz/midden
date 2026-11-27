@@ -307,7 +307,31 @@ export function pruneSourceResponses(ctx: CaptureContext): number {
   return superseded.length
 }
 
-/** Delete media files that stayed unreferenced past the grace period. */
+/** Whether a media store key is in use, so its file stays. */
+function keyUsed(tx: Transaction, key: string): boolean {
+  return !!(
+    tx.select({ id: blobs.id }).from(blobs).where(eq(blobs.hash, key)).get() ??
+    tx
+      .select({ id: blobThumbnails.blobId })
+      .from(blobThumbnails)
+      .where(eq(blobThumbnails.key, key))
+      .get() ??
+    // The thumbnail a removed media item (已移除) is still shown by.
+    tx
+      .select({ id: removedMedia.mediaKey })
+      .from(removedMedia)
+      .where(eq(removedMedia.thumbnailKey, key))
+      .get()
+  )
+}
+
+/**
+ * Delete media files that stayed unreferenced past the grace period. A key
+ * is claimed (`claimed_at`) in the transaction that finds it unused, before
+ * its file is deleted: a restore in the web process, which holds no lock of
+ * the worker's, links a file back only while its key is unclaimed
+ * (`library/media-restore.ts`).
+ */
 export async function collectMedia(ctx: CaptureContext): Promise<number> {
   const at = now(ctx)
   const due = ctx.db
@@ -328,43 +352,42 @@ export async function collectMedia(ctx: CaptureContext): Promise<number> {
   const failures: unknown[] = []
   for (const garbage of due) {
     await ctx.mediaLocks.run(garbage.key, async () => {
-      const used =
-        ctx.db
-          .select({ id: blobs.id })
-          .from(blobs)
-          .where(eq(blobs.hash, garbage.key))
-          .get() ??
-        ctx.db
-          .select({ id: blobThumbnails.blobId })
-          .from(blobThumbnails)
-          .where(eq(blobThumbnails.key, garbage.key))
-          .get() ??
-        // The thumbnail a removed media item (已移除) is still shown by.
-        ctx.db
-          .select({ id: removedMedia.mediaKey })
-          .from(removedMedia)
-          .where(eq(removedMedia.thumbnailKey, garbage.key))
+      const claimed = ctx.db.transaction((tx) => {
+        // Taken back meanwhile: restored, or downloaded again.
+        const row = tx
+          .select({ key: mediaGarbage.key })
+          .from(mediaGarbage)
+          .where(eq(mediaGarbage.key, garbage.key))
           .get()
-      if (!used) {
-        try {
-          await ctx.blobs.delete(garbage.key)
-          deleted++
-        } catch (error) {
-          failures.push(new Error(`media ${garbage.key}: ${String(error)}`))
-          const delay = Math.min(
-            60_000 * 2 ** garbage.attempts,
-            24 * 60 * 60_000,
-          )
-          ctx.db
-            .update(mediaGarbage)
-            .set({
-              attempts: garbage.attempts + 1,
-              retryAt: new Date(at + delay),
-            })
-            .where(eq(mediaGarbage.key, garbage.key))
-            .run()
-          return
+        if (!row) return false
+        if (keyUsed(tx, garbage.key)) {
+          tx.delete(mediaGarbage).where(eq(mediaGarbage.key, garbage.key)).run()
+          return false
         }
+        tx.update(mediaGarbage)
+          .set({ claimedAt: new Date(at) })
+          .where(eq(mediaGarbage.key, garbage.key))
+          .run()
+        return true
+      })
+      if (!claimed) return
+      try {
+        await ctx.blobs.delete(garbage.key)
+        deleted++
+      } catch (error) {
+        failures.push(new Error(`media ${garbage.key}: ${String(error)}`))
+        const delay = Math.min(60_000 * 2 ** garbage.attempts, 24 * 60 * 60_000)
+        // Still there: it may be restored until the next try.
+        ctx.db
+          .update(mediaGarbage)
+          .set({
+            attempts: garbage.attempts + 1,
+            retryAt: new Date(at + delay),
+            claimedAt: null,
+          })
+          .where(eq(mediaGarbage.key, garbage.key))
+          .run()
+        return
       }
       ctx.db.delete(mediaGarbage).where(eq(mediaGarbage.key, garbage.key)).run()
     })

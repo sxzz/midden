@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull, ne, or } from 'drizzle-orm'
 import { removedMedia } from '#db/schema.ts'
 import { canonicalJson, sha256Hex } from './json.ts'
 import type { Executor } from '#db/client.ts'
@@ -42,11 +42,22 @@ export function cacheKey(
   return own === key ? null : own
 }
 
-/** Whether the owner removed this media (已移除), so it is not fetched. */
+/**
+ * Whether the owner removed this media (已移除), so it is not fetched: not
+ * while a restore downloads it again (恢复下载), and again once that failed.
+ */
 export function isRemoved(db: Executor, key: string): boolean {
   return !!db
     .select({ key: removedMedia.mediaKey })
     .from(removedMedia)
-    .where(eq(removedMedia.mediaKey, key))
+    .where(
+      and(
+        eq(removedMedia.mediaKey, key),
+        or(
+          isNull(removedMedia.restore),
+          ne(removedMedia.restore, 'downloading'),
+        ),
+      ),
+    )
     .get()
 }

@@ -55,9 +55,23 @@ export interface AssetView {
   kind: string
   /**
    * Removed (`state` is `removed`, 已移除) and no longer marked so: the
-   * next capture downloads it again (恢复下载).
+   * next capture downloads it again. Marks are cleared so only by restores
+   * before they downloaded the media themselves.
    */
   download_again?: true
+  /**
+   * Removed, and its original still stored (within the grace period after
+   * the removal): a restore (恢复) links it back without a download.
+   */
+  recoverable?: true
+  /**
+   * Restored and its original downloading again (恢复下载): `state` is
+   * `pending` (or `removed` for the collection's other captures listing it)
+   * and the removal's thumbnail stands in until it is in.
+   */
+  restoring?: true
+  /** Removed, and the download a restore started failed for good: why. */
+  restore_error?: string
   /**
    * The platform's own address of an avatar or banner that was never
    * downloaded (an account known only from a follow list, say), for the
@@ -177,6 +191,9 @@ interface AssetRow {
   thumb_mime: string | null
   /** The thumbnail's upload to the remote store is confirmed. */
   thumb_remote: number
+  restore: 'downloading' | 'failed' | null
+  restore_error: string | null
+  recoverable: number
   thumb_width: number | null
   thumb_height: number | null
   width: number | null
@@ -199,15 +216,23 @@ function assetRows(r: Reader, where: SQL): AssetRow[] {
       coalesce(t.width, rm.thumbnail_width) AS thumb_width,
       coalesce(t.height, rm.thumbnail_height) AS thumb_height,
       a.width, a.height,
-      rm.media_key IS NOT NULL AS marked, co.platform
+      rm.media_key IS NOT NULL AS marked, rm.restore, rm.restore_error,
+      a.state = 'removed' AND rm.blob_hash IS NOT NULL AND (
+        EXISTS (SELECT 1 FROM blobs ob WHERE ob.hash = rm.blob_hash)
+        OR EXISTS (SELECT 1 FROM media_garbage g
+          WHERE g.key = rm.blob_hash AND g.claimed_at IS NULL)
+      ) AS recoverable,
+      co.platform
     FROM assets a
     JOIN captures ca ON ca.id = a.capture_id
     JOIN collections co ON co.id = ca.collection_id
     LEFT JOIN blobs b ON b.id = a.blob_id
     LEFT JOIN blob_thumbnails t ON t.blob_id = a.blob_id AND t.state = 'ready'
-    -- Removed media is shown by the thumbnail its mark kept.
+    -- Removed media, and media a restore downloads again, is shown by the
+    -- thumbnail its mark kept.
     LEFT JOIN removed_media rm
-      ON a.state = 'removed' AND rm.media_key = a.media_key
+      ON rm.media_key = a.media_key AND (a.state = 'removed'
+        OR (a.state = 'pending' AND rm.restore = 'downloading'))
     WHERE ${where}
     ORDER BY a.capture_id, a.position`)
 }
@@ -242,6 +267,7 @@ function remoteURL(row: AssetRow): string | undefined {
 function assetView(r: Reader, row: AssetRow): AssetView {
   const ready = row.state === 'ready' && !!row.hash
   const removed = row.state === 'removed'
+  const restoring = row.restore === 'downloading'
   const remote = ready || removed ? undefined : remoteURL(row)
   const thumbnail = !!row.thumb_key && !!row.thumb_mime
   const fileName = `${row.id}.${EXTENSIONS[row.mime ?? ''] ?? 'bin'}`
@@ -252,6 +278,13 @@ function assetView(r: Reader, row: AssetRow): AssetView {
     state: row.state,
     kind: row.kind,
     ...(removed && !row.marked ? { download_again: true as const } : {}),
+    ...(removed && row.recoverable && !restoring
+      ? { recoverable: true as const }
+      : {}),
+    ...(restoring ? { restoring: true as const } : {}),
+    ...(removed && row.restore === 'failed'
+      ? { restore_error: row.restore_error || '下载失败' }
+      : {}),
     ...(row.error ? { error: row.error } : {}),
     ...(row.alt_text ? { alt_text: row.alt_text } : {}),
     sensitive: !!row.sensitive,
@@ -277,7 +310,7 @@ function assetView(r: Reader, row: AssetRow): AssetView {
           file_name: fileName,
         }
       : {}),
-    ...((ready || removed) && thumbnail
+    ...((ready || removed || restoring) && thumbnail
       ? {
           thumbnail_url: r.blobs.url(row.thumb_key!, {
             contentType: row.thumb_mime!,

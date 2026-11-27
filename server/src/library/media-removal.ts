@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm'
 import { finalizeSettled } from '#capture/lifecycle.ts'
 import { releaseBlobs } from '#capture/maintenance.ts'
 import { dropAllSummaries } from '#capture/record-summaries.ts'
-import { assets, mediaGarbage, removedMedia } from '#db/schema.ts'
+import { assets, removedMedia } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError } from '#errors.ts'
 import { catalogCollections } from './catalog.ts'
@@ -172,8 +172,9 @@ export function removeRows(
 }
 
 /**
- * Record the marks, each with a thumbnail of the media where one exists;
- * with nothing left to remove, the one item `target` names.
+ * Record the marks, each with a thumbnail of the media where one exists and
+ * the original's blob; with nothing left to remove, the one item `target`
+ * names.
  */
 function mark(
   tx: Transaction,
@@ -205,10 +206,24 @@ function mark(
       WHERE state = 'ready' AND key IS NOT NULL
         AND blob_id IN (SELECT value FROM json_each(${list(blobIds)}))
       LIMIT 1`)
+    // The original as it was, to link back if restored in time.
+    const blob = tx.get<{
+      hash: string
+      size: number
+      mime: string
+      remote_at: number | null
+    }>(sql`
+      SELECT hash, size, mime, remote_at FROM blobs
+      WHERE id IN (SELECT value FROM json_each(${list(blobIds)}))
+      LIMIT 1`)
     tx.insert(removedMedia)
       .values({
         mediaKey: key,
         kind,
+        blobHash: blob?.hash ?? null,
+        blobSize: blob?.size ?? null,
+        blobMime: blob?.mime ?? null,
+        blobRemoteAt: blob?.remote_at == null ? null : new Date(blob.remote_at),
         thumbnailKey: thumbnail?.key ?? null,
         thumbnailMime: thumbnail?.mime ?? null,
         thumbnailWidth: thumbnail?.width ?? null,
@@ -226,38 +241,16 @@ function mark(
           thumbnailHeight: sql`coalesce(${removedMedia.thumbnailHeight}, excluded.thumbnail_height)`,
           thumbnailSize: sql`coalesce(${removedMedia.thumbnailSize}, excluded.thumbnail_size)`,
           thumbnailRemoteAt: sql`CASE WHEN ${removedMedia.thumbnailKey} IS NULL THEN excluded.thumbnail_remote_at ELSE ${removedMedia.thumbnailRemoteAt} END`,
+          blobHash: sql`coalesce(excluded.blob_hash, ${removedMedia.blobHash})`,
+          blobSize: sql`CASE WHEN excluded.blob_hash IS NULL THEN ${removedMedia.blobSize} ELSE excluded.blob_size END`,
+          blobMime: sql`CASE WHEN excluded.blob_hash IS NULL THEN ${removedMedia.blobMime} ELSE excluded.blob_mime END`,
+          blobRemoteAt: sql`CASE WHEN excluded.blob_hash IS NULL THEN ${removedMedia.blobRemoteAt} ELSE excluded.blob_remote_at END`,
+          // Removed again while or after being restored: removed, plainly.
+          restore: null,
+          restoreAsset: null,
+          restoreError: null,
         },
       })
       .run()
   }
-}
-
-/**
- * Clear the mark of one removed media item (恢复下载): the next capture
- * listing it downloads it again. Its kept thumbnail becomes garbage unless
- * something else still uses it.
- */
-export function restoreMedia(
-  ctx: Pick<CaptureContext, 'db'>,
-  collectionId: string,
-  assetId: string,
-): void {
-  ctx.db.transaction((tx) => {
-    dropAllSummaries(tx)
-    const named = tx.get<{ media_key: string }>(sql`
-      SELECT a.media_key FROM assets a
-      JOIN captures c ON c.id = a.capture_id
-      WHERE a.id = ${assetId} AND c.collection_id = ${collectionId}`)
-    if (!named) throw new AppError('not_found')
-    const cleared = tx
-      .delete(removedMedia)
-      .where(sql`${removedMedia.mediaKey} = ${named.media_key}`)
-      .returning({ thumbnail: removedMedia.thumbnailKey })
-      .get()
-    if (cleared?.thumbnail)
-      tx.insert(mediaGarbage)
-        .values({ key: cleared.thumbnail })
-        .onConflictDoNothing()
-        .run()
-  })
 }

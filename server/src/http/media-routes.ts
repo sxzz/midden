@@ -4,8 +4,8 @@ import {
   previewRemoval,
   REMOVAL_MAX,
   removeMedia,
-  restoreMedia,
 } from '#library/media-removal.ts'
+import { restoreMedia } from '#library/media-restore.ts'
 import {
   latestVideoRemoval,
   previewVideoRemoval,
@@ -25,7 +25,7 @@ const Target = v.union([
 
 const Item = v.strictObject({ collection: v.string(), asset: v.string() })
 
-/** Removing media to save space (删除媒体) and taking it back (恢复下载). */
+/** Removing media to save space (删除媒体) and taking it back (恢复). */
 export function mediaRoutes(ctx: AccountsContext) {
   return (
     new Hono<Env>()
@@ -36,10 +36,10 @@ export function mediaRoutes(ctx: AccountsContext) {
       .post('/media-removals', ownerOnly, json(Target), (c) =>
         c.json(removeMedia(ctx, c.req.valid('json'))),
       )
-      .post('/media-removals/restore', json(Item), (c) => {
+      // Linked back at once, or the download job that brings it back.
+      .post('/media-removals/restore', json(Item), async (c) => {
         const input = c.req.valid('json')
-        restoreMedia(ctx, input.collection, input.asset)
-        return c.body(null, 204)
+        return c.json(await restoreMedia(ctx, input.collection, input.asset))
       })
       // 删除所有视频 of a profile: the dry run, the job, and the newest one
       // to follow while it runs.

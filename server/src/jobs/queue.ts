@@ -252,13 +252,14 @@ export class JobQueue {
    * Add a job. Pass the open transaction when the job belongs to a write, so
    * the job exists exactly when the write commits. It belongs to the update
    * the running job (or `withOrigin`) belongs to, unless `updateId` says.
+   * Returns the job's id.
    */
   enqueue(
     executor: Executor,
     type: string,
     ref: string,
     options: { delayMs?: number } & JobOrigin = {},
-  ): void {
+  ): number {
     const handler = this.#handlers[type]
     if (!handler) throw new Error(`Unknown job type ${type}`)
     const current = scope.getStore()
@@ -274,7 +275,7 @@ export class JobQueue {
       update?.rank ?? RANK.manual,
     )
     const now = this.#now()
-    executor
+    const { id } = executor
       .insert(jobs)
       .values({
         type,
@@ -287,9 +288,11 @@ export class JobQueue {
         createdAt: new Date(now),
         updateId,
       })
-      .run()
+      .returning({ id: jobs.id })
+      .get()!
     // After the caller's transaction commits; a rolled-back job is not found.
     if (this.#started) queueMicrotask(() => this.#pump(handler.queue))
+    return id
   }
 
   start(): void {

@@ -696,9 +696,13 @@ export const assets = sqliteTable(
 
 /**
  * Media the owner removed to save space (已移除), by media identity: every
- * capture that lists it, of any collection, skips downloading it until the
- * mark is cleared (恢复下载). The mark holds the removed media's thumbnail so
- * posts still show it; media garbage spares a key still named here.
+ * capture that lists it, of any collection, skips downloading it until it
+ * is restored (恢复). The mark holds the removed media's thumbnail so posts
+ * still show it; media garbage spares a key still named here. It also
+ * remembers the original's blob, so a restore within the grace period links
+ * the file back without a download (`library/media-restore.ts`). A restore
+ * after that downloads the original again; the row stays, `restore` set,
+ * as the thumbnail shown meanwhile, and goes once the download succeeds.
  */
 export const removedMedia = sqliteTable(
   'removed_media',
@@ -715,6 +719,21 @@ export const removedMedia = sqliteTable(
     // When the thumbnail's upload to the remote store was confirmed, as in
     // `blobThumbnails`.
     thumbnailRemoteAt: timestamp(),
+    // The original's blob as it was removed, to link it back while its file
+    // is still there; null for marks made before these were kept, and when
+    // nothing was downloaded.
+    blobHash: text(),
+    blobSize: integer(),
+    blobMime: text(),
+    blobRemoteAt: timestamp(),
+    // Null while removed. `downloading`: restored, its original downloading
+    // again (no longer skipped by captures); `failed`: that download failed
+    // for good (`restoreError`), skipped again until the next restore.
+    restore: text({ enum: ['downloading', 'failed'] }),
+    // The asset whose download restores it, and so the collection whose
+    // assets of this media come back with it.
+    restoreAsset: text(),
+    restoreError: text(),
     createdAt: createdAt(),
   },
   (t) => [
@@ -799,6 +818,10 @@ export const mediaGarbage = sqliteTable('media_garbage', {
   since: createdAt(),
   attempts: integer().notNull().default(0),
   retryAt: timestamp(),
+  // Set by the worker's collection once it found the key unused and is
+  // deleting the file: a restore in the web process (which shares no lock
+  // with the worker) links a file back only while this is null.
+  claimedAt: timestamp(),
 })
 
 /**
