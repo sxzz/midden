@@ -13,6 +13,7 @@ import {
   type Leaf,
   type QueryNode,
 } from '@midden/server/query'
+import { queryErrorText } from './query-errors'
 
 export { KEYS, printQuery, type QueryNode } from '@midden/server/query'
 
@@ -23,7 +24,10 @@ export interface ReadQuery {
   error?: { message: string; position: number }
 }
 
-/** A query as the server reads it, with the owner's limits. */
+/**
+ * A query as the server reads it, with the owner's limits; why it cannot
+ * be read in the app's words (`query-errors.ts`).
+ */
 export function readQuery(text: string): ReadQuery {
   try {
     const node = parseQuery(text, OWNER_LIMITS)
@@ -32,7 +36,10 @@ export function readQuery(text: string): ReadQuery {
     if (error instanceof QueryError)
       return {
         parsed: '',
-        error: { message: error.message, position: error.position },
+        error: {
+          message: queryErrorText(error.kind, error.detail, error.message),
+          position: error.position,
+        },
       }
     throw error
   }
@@ -149,16 +156,27 @@ function addDays(day: string, days: number) {
   return date.toISOString().slice(0, 10)
 }
 
-/** The controls as query terms; tags by name where `tagName` knows it. */
+/** How the box names tags and authors: by name and handle where known. */
+export interface Names {
+  tagName: (id: string) => string | undefined
+  /** `@alice` for an author key, where that names it alone. */
+  authorTerm?: (key: string) => string | undefined
+}
+
+/** The controls as query terms; tags by name, authors by handle, if known. */
 export function controlTerms(
   c: Controls,
-  tagName: (id: string) => string | undefined,
+  { tagName, authorTerm }: Names,
 ): string[] {
   const tag = (id: string) => `tag:${quoteValue(tagName(id) ?? id)}`
   const terms: string[] = []
   if (c.platform) terms.push(`platform:${c.platform}`)
   if (c.authors.length)
-    terms.push(anyOf(c.authors.toSorted().map((key) => `from:${key}`)))
+    terms.push(
+      anyOf(
+        c.authors.toSorted().map((key) => `from:${authorTerm?.(key) ?? key}`),
+      ),
+    )
   if (c.media.length)
     terms.push(anyOf(c.media.map((m) => MEDIA_TERMS[m] ?? `has:${m}`)))
   if (c.postType) terms.push(POST_TYPE_TERMS[c.postType] ?? '')
@@ -188,16 +206,12 @@ export function controlTerms(
 }
 
 /** The whole query the box shows: the search's own part, then the controls'. */
-export function composeQuery(
-  q: string,
-  c: Controls,
-  tagName: (id: string) => string | undefined,
-): string {
+export function composeQuery(q: string, c: Controls, names: Names): string {
   const own = q.trim()
   const { node, error } = readQuery(own)
   // An OR binds looser than the terms after it.
   const first = !error && node?.type === 'or' ? `(${own})` : own
-  return [first, ...controlTerms(c, tagName)].filter(Boolean).join(' ')
+  return [first, ...controlTerms(c, names)].filter(Boolean).join(' ')
 }
 
 const ACCOUNT_KEY = /^[^/\s:@]+\/[^/\s]+\/[^/\s]+$/
@@ -211,11 +225,13 @@ const atomOf = (n: QueryNode, key: string) =>
 /**
  * Split a query into what the controls show and the rest (`q`): each
  * top-level term a control says exactly, once, goes to it. `tagId` knows
- * the tags by name or id.
+ * the tags by name or id; `authorKey` the authors by the terms the box
+ * wrote for them (a key is one already).
  */
 export function splitQuery(
   node: QueryNode | undefined,
   tagId: (ref: string) => string | undefined,
+  authorKey: (term: string) => string | undefined = () => undefined,
 ): { controls: Partial<Controls>; q: string } {
   const c: Partial<Controls> = {}
   const rest: QueryNode[] = []
@@ -242,10 +258,14 @@ export function splitQuery(
       c.media = media
       continue
     }
-    // Authors by key: the author control's own values.
-    const authors = items.map((i) => atomOf(i, 'from')?.value ?? '')
-    if (!c.authors && authors.every((a) => ACCOUNT_KEY.test(a))) {
-      c.authors = [...new Set(authors)]
+    // Authors by key, the author control's own values, or by the handle
+    // the box wrote for one.
+    const authors = items.map((i) => {
+      const value = atomOf(i, 'from')?.value ?? ''
+      return ACCOUNT_KEY.test(value) ? value : authorKey(value)
+    })
+    if (!c.authors && authors.every(Boolean)) {
+      c.authors = [...new Set(authors as string[])]
       continue
     }
     // Tags: all of several, or any of them, not both.

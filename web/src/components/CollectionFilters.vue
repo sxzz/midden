@@ -340,7 +340,15 @@ function search() {
 const tagName = (id: string) => tags.value.find((tag) => tag.id === id)?.name
 const tagId = (ref: string) =>
   tags.value.find((tag) => tag.id === ref.toLowerCase() || tag.name === ref)?.id
-const compose = () => composeQuery(form.q, form, tagName)
+/** The terms the box writes for authors (`from:@alice`), by key. */
+const authorTerms = shallowRef<Record<string, string>>({})
+const authorKeyOf = (term: string) =>
+  Object.entries(authorTerms.value).find(([, t]) => t === term)?.[0]
+const compose = () =>
+  composeQuery(form.q, form, {
+    tagName,
+    authorTerm: (key) => authorTerms.value[key],
+  })
 const boxText = shallowRef(compose())
 /** What the box was last given; anything else there is being typed. */
 let composed = boxText.value
@@ -348,8 +356,9 @@ function recompose() {
   composed = compose()
   boxText.value = composed
 }
-// Tags read by name once they are known, unless the box is being edited.
-watch(tags, () => {
+// Tags read by name and authors by handle once they are known, unless the
+// box is being edited.
+watch([tags, authorTerms], () => {
   if (boxText.value === composed) recompose()
 })
 const NO_CONTROLS = {
@@ -374,7 +383,7 @@ const NO_CONTROLS = {
 function submitQuery(text: string) {
   const { node, error } = readQuery(text)
   if (error) return
-  const { controls, q } = splitQuery(node, tagId)
+  const { controls, q } = splitQuery(node, tagId, authorKeyOf)
   Object.assign(form, structuredClone(NO_CONTROLS), controls, { q })
   customRange.value = !form.within && !!(form.from || form.to)
   search()
@@ -388,7 +397,7 @@ function absorb() {
   if (shared || props.folder) return
   const { node, error } = readQuery(form.q)
   if (error || !node) return
-  const { controls, q } = splitQuery(node, tagId)
+  const { controls, q } = splitQuery(node, tagId, authorKeyOf)
   const fields = Object.keys(controls) as (keyof typeof controls)[]
   if (!fields.length) return
   // Only into controls the address leaves empty.
@@ -483,6 +492,14 @@ const wantsAuthors = () => posts.value && !props.withinProfile
 const controller = new AbortController()
 onUnmounted(() => controller.abort())
 function remember(items: Author[]) {
+  const terms = items.filter(
+    (a) => a.term && authorTerms.value[a.id] !== a.term,
+  )
+  if (terms.length)
+    authorTerms.value = {
+      ...authorTerms.value,
+      ...Object.fromEntries(terms.map((a) => [a.id, a.term!])),
+    }
   const fresh = items.filter((a) => authorNames.value[a.id] !== a.name)
   if (fresh.length)
     authorNames.value = {

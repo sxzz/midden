@@ -6,6 +6,8 @@ import { expect, test, type Page } from './test'
 // place.
 
 const TAG = '0193b6e0-0000-7000-8000-00000000000a'
+const CAT = 'x/x.profile/100'
+const TWIN = 'x/x.profile/200'
 const FOLDER = '00000000-0000-7000-8000-0000000000d1'
 
 function post(i: number) {
@@ -78,8 +80,28 @@ async function mock(page: Page, size = 3): Promise<Mock> {
           return [{ id: TAG, name: '猫', collections: 2 }]
         case '/v1/collections':
           seen.lists.push(url.searchParams)
+          // A tag the archive does not have, as the server answers it.
+          if (url.searchParams.get('q')?.includes('tag:nope'))
+            return {
+              status: 400,
+              body: {
+                error: 'Unknown tag nope. GET /agent/v1/tags lists them.',
+                code: 'query_invalid',
+                kind: 'unknown_tag',
+                detail: { value: 'nope' },
+                position: 0,
+              },
+            }
           return {
             items: Array.from({ length: size }, (_, i) => post(i + 1)),
+          }
+        case '/v1/collections/authors':
+          return {
+            items: [
+              { id: CAT, name: '猫咪账号', count: 3, term: '@cat' },
+              // No handle names it alone: its key does.
+              { id: TWIN, name: '双胞胎', count: 1 },
+            ],
           }
         case '/v1/collections/count':
           return { count: size, types: { 'x.post': size } }
@@ -99,6 +121,11 @@ async function mock(page: Page, size = 3): Promise<Mock> {
           return url.pathname.endsWith('s') ? [] : { items: [] }
       }
     })()
+    if (json && typeof json === 'object' && 'status' in json)
+      return route.fulfill({
+        status: (json as { status: number }).status,
+        json: (json as { body: unknown }).body,
+      })
     return route.fulfill({ json })
   })
   return seen
@@ -154,7 +181,7 @@ test('a query it cannot read says why and where, and is not run', async ({
   const before = seen.lists.length
   await box(page).fill('cat (dog')
   const alert = page.getByRole('alert')
-  await expect(alert).toContainText('This ( is never closed.')
+  await expect(alert).toContainText('这个 ( 没有闭合')
   await expect(alert.locator('mark')).toHaveText('(')
   await expect(box(page)).toHaveAttribute('aria-invalid', 'true')
   await box(page).press('Enter')
@@ -163,6 +190,11 @@ test('a query it cannot read says why and where, and is not run', async ({
     await box(page).evaluate((el: HTMLInputElement) => el.selectionStart),
   ).toBe(4)
   expect(seen.lists.length).toBe(before)
+
+  // What only the server knows, said the same way.
+  await box(page).fill('tag:nope')
+  await box(page).press('Enter')
+  await expect(page.getByText('没有标签「nope」')).toBeVisible()
 
   // A query read otherwise than written says how.
   await box(page).fill('a  b OR c')
@@ -183,25 +215,41 @@ test('terms are completed: keys, values and handles the library knows', async ({
   const seen = await mock(page)
   await page.goto('/app/')
   await expect(page.getByText('第 1 只猫')).toBeVisible()
+  // The list and its count are in, so nothing rewrites the box meanwhile.
+  await expect(page.locator('.total')).toHaveText('3 条')
   await box(page).click()
-  await box(page).pressSequentially('cat ha')
+  await page.keyboard.type('cat ha')
+  await expect(box(page)).toHaveValue('cat ha')
   const options = page.getByRole('listbox', { name: '补全' })
-  await expect(options.getByRole('option', { name: 'has:' })).toBeVisible()
-  await box(page).press('Enter')
+  const option = (name: string | RegExp) =>
+    options.getByRole('option', { name })
+  // Each step waits for the option it takes to be the chosen one.
+  await expect(option('has:')).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('Enter')
   await expect(box(page)).toHaveValue('cat has:')
-  await expect(options.getByRole('option', { name: 'image' })).toBeVisible()
-  await box(page).press('ArrowDown')
-  await box(page).press('Enter')
+  await expect(option('image')).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('ArrowDown')
+  await expect(option('video')).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('Enter')
   await expect(box(page)).toHaveValue('cat has:video ')
 
-  await box(page).pressSequentially('from:@al')
-  await expect(options.getByRole('option', { name: /@alice/ })).toBeVisible()
-  await expect(options.getByRole('option', { name: /@albert/ })).toBeVisible()
-  await box(page).press('Tab')
+  // Handles come from the server, after a pause in typing. Typed on with
+  // the keyboard alone: focusing the field again would put the caret at
+  // its start when another page of the browser has the focus.
+  const answered = page.waitForResponse(
+    (r) =>
+      r.url().includes('/v1/query/suggest') && r.url().includes('prefix=al'),
+  )
+  await page.keyboard.type('from:@al')
+  await expect(box(page)).toHaveValue('cat has:video from:@al')
+  await answered
+  await expect(option(/@alice/)).toHaveAttribute('aria-selected', 'true')
+  await expect(option(/@albert/)).toBeVisible()
+  await page.keyboard.press('Tab')
   await expect(box(page)).toHaveValue('cat has:video from:@alice ')
   // Nothing left to complete: Enter runs it.
   await expect(options).toBeHidden()
-  await box(page).press('Enter')
+  await page.keyboard.press('Enter')
   await expect.poll(() => seen.lists.at(-1)?.get('q')).toBe('cat from:@alice')
   expect(seen.lists.at(-1)?.get('media_type')).toBe('video')
 })
@@ -284,4 +332,30 @@ test('behind a share the box is a keyword search, and 刷新 is there too', asyn
   await expect.poll(() => lists.length).toBeGreaterThan(count)
   expect(lists.at(-1)?.get('q')).toBe('tag:猫 from:@a')
   expect([...lists.at(-1)!.keys()]).not.toContain('tag')
+})
+
+test('an author picked in the controls is @handle in the box, its key in the list', async ({
+  page,
+}) => {
+  const seen = await mock(page)
+  await page.goto('/app/')
+  await expect(page.getByText('第 1 只猫')).toBeVisible()
+  await page.getByRole('button', { name: '筛选' }).click()
+  await page.locator('summary[aria-label="作者"]').click()
+  const authors = page.getByRole('listbox', { name: '作者' })
+  await authors.getByRole('option', { name: /猫咪账号/ }).click()
+  await expect.poll(() => seen.lists.at(-1)?.getAll('author')).toEqual([CAT])
+  await expect(box(page)).toHaveValue('from:@cat')
+  // One with no handle of its own is written by its key.
+  await authors.getByRole('option', { name: /双胞胎/ }).click()
+  await expect(box(page)).toHaveValue(`(from:@cat OR from:${TWIN})`)
+  await expect
+    .poll(() => seen.lists.at(-1)?.getAll('author').toSorted())
+    .toEqual([CAT, TWIN])
+  // Typed back, the handle is the control's again, not the query's.
+  await box(page).fill('cat from:@cat')
+  await box(page).press('Enter')
+  await expect.poll(() => seen.lists.at(-1)?.getAll('author')).toEqual([CAT])
+  expect(seen.lists.at(-1)?.get('q')).toBe('cat')
+  await expect(box(page)).toHaveValue('cat from:@cat')
 })

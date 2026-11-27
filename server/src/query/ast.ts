@@ -10,14 +10,63 @@ import { parse, SyntaxError as PeggySyntaxError } from './parser.generated.ts'
 const ENDS_IN_OR = /\bOR\s*$/
 const EMPTY_GROUP = /^\(\s*\)/
 
+/**
+ * Why a query cannot be run, as a word the web app says in its own
+ * language (`web/src/query.ts`); the message says it in English.
+ */
+export const QUERY_ERROR_KINDS = [
+  // Reading
+  'unopened',
+  'unclosed',
+  'unclosed_quote',
+  'ends_early',
+  'ends_in_or',
+  'bare_minus',
+  'or_sides',
+  'empty_group',
+  'unexpected',
+  'no_value',
+  'empty_phrase',
+  'bad_hashtag',
+  'bad_value',
+  'no_replies',
+  // Limits
+  'too_many_terms',
+  'value_too_long',
+  'too_deep',
+  'too_many_alternatives',
+  // What the archive holds
+  'unknown_platform',
+  'unknown_tag',
+  'unknown_folder',
+  'folder_self',
+  'folder_cycle',
+  'unknown_account',
+  'ambiguous_account',
+  'only_exclusions',
+] as const
+export type QueryErrorKind = (typeof QUERY_ERROR_KINDS)[number]
+
+/** What an error's words need: the key, the value, a limit. */
+export type QueryErrorDetail = Record<string, string | number>
+
 /** A query that cannot be run, with where in it the problem is. */
 export class QueryError extends Error {
   override name = 'QueryError'
   /** Offset into the query, in UTF-16 code units. */
   readonly position: number
-  constructor(message: string, position: number) {
+  readonly kind: QueryErrorKind
+  readonly detail: QueryErrorDetail
+  constructor(
+    message: string,
+    position: number,
+    kind: QueryErrorKind,
+    detail: QueryErrorDetail = {},
+  ) {
     super(message)
     this.position = position
+    this.kind = kind
+    this.detail = detail
   }
 }
 
@@ -104,7 +153,7 @@ function checkBalance(text: string): void {
       }
       case ')': {
         if (!open.length)
-          throw new QueryError('This ) closes no parenthesis.', i)
+          throw new QueryError('This ) closes no parenthesis.', i, 'unopened')
         open.pop()
 
         break
@@ -112,29 +161,46 @@ function checkBalance(text: string): void {
       // No default
     }
   }
-  if (quote >= 0) throw new QueryError('This " is never closed.', quote)
-  if (open.length) throw new QueryError('This ( is never closed.', open.at(-1)!)
+  if (quote >= 0)
+    throw new QueryError('This " is never closed.', quote, 'unclosed_quote')
+  if (open.length)
+    throw new QueryError('This ( is never closed.', open.at(-1)!, 'unclosed')
 }
 
 function syntaxError(text: string, error: PeggySyntaxErrorShape): QueryError {
   const at = error.location?.start.offset ?? 0
   const found = error.found
-  if (found === null || found === undefined)
+  if (found === null || found === undefined) {
+    const or = ENDS_IN_OR.test(text)
     return new QueryError(
-      `The query ends too early: ${ENDS_IN_OR.test(text) ? 'OR needs a term after it' : 'a term is missing at the end'}.`,
+      `The query ends too early: ${or ? 'OR needs a term after it' : 'a term is missing at the end'}.`,
       at,
+      or ? 'ends_in_or' : 'ends_early',
     )
+  }
   if (found === '-' || text.slice(at).startsWith('-'))
     return new QueryError(
       '- must be followed by a term, with no space between (-#ad, -from:@a).',
       at,
+      'bare_minus',
     )
   if (text.startsWith('OR', at))
-    return new QueryError('OR needs a term on each side.', at)
+    return new QueryError('OR needs a term on each side.', at, 'or_sides')
   const empty = EMPTY_GROUP.exec(text.slice(at))
   if (empty)
-    return new QueryError('Empty parentheses.', at + empty[0].length - 1)
-  return new QueryError(`Unexpected ${JSON.stringify(found)}.`, at)
+    return new QueryError(
+      'Empty parentheses.',
+      at + empty[0].length - 1,
+      'empty_group',
+    )
+  return new QueryError(
+    `Unexpected ${JSON.stringify(found)}.`,
+    at,
+    'unexpected',
+    {
+      found,
+    },
+  )
 }
 
 interface PeggySyntaxErrorShape {
@@ -197,10 +263,17 @@ function account(value: string): string | undefined {
   return undefined
 }
 
+/** Why a value is not one: in English, and as a kind (`bad_value` if none). */
+interface BadValue {
+  error: string
+  kind?: QueryErrorKind
+  detail?: QueryErrorDetail
+}
+
 /** The canonical value of `key:value`, or why it is not one. */
-function canonicalValue(key: Key, raw: string): string | { error: string } {
+function canonicalValue(key: Key, raw: string): string | BadValue {
   const value = raw.trim()
-  if (!value) return { error: `${key}: needs a value.` }
+  if (!value) return { error: `${key}: needs a value.`, kind: 'no_value' }
   switch (key) {
     case 'from':
     case 'reposted-by':
@@ -297,19 +370,22 @@ function canonicalValue(key: Key, raw: string): string | { error: string } {
   }
 }
 
-function choose(key: Key, value: string): string | { error: string } {
+function choose(key: Key, value: string): string | BadValue {
   switch (key) {
     default: {
       if (key === 'is' && value.toLowerCase() === 'reply')
         return {
           error:
             'is:reply: the archive does not record which posts are replies.',
+          kind: 'no_replies',
         }
       const allowed = choices[key]!
       const found = allowed[value.toLowerCase()]
+      const values = [...new Set(Object.values(allowed))].join(', ')
       return (
         found ?? {
-          error: `${key}: takes ${[...new Set(Object.values(allowed))].join(', ')}.`,
+          error: `${key}: takes ${values}.`,
+          detail: { key, value, allowed: values },
         }
       )
     }
@@ -347,12 +423,14 @@ function build(raw: Exclude<Raw, { type: 'empty' }>): QueryNode {
         throw new QueryError(
           `${bare[1]}: needs a value, written right after the colon.`,
           raw.start,
+          'no_value',
+          { key: bare[1]! },
         )
       return { type: 'word', value: raw.value, ...span }
     }
     case 'phrase':
       if (!raw.value.trim())
-        throw new QueryError('An empty phrase ("").', raw.start)
+        throw new QueryError('An empty phrase ("").', raw.start, 'empty_phrase')
       return { type: 'phrase', value: raw.value.trim(), ...span }
     case 'hashtag': {
       const value = foldHashtag(raw.value)
@@ -360,13 +438,20 @@ function build(raw: Exclude<Raw, { type: 'empty' }>): QueryNode {
         throw new QueryError(
           `#${raw.value} is not a hashtag: letters, digits and _ only.`,
           raw.start,
+          'bad_hashtag',
+          { value: raw.value },
         )
       return { type: 'hashtag', value, ...span }
     }
     case 'atom': {
       const value = canonicalValue(raw.key, raw.value)
       if (typeof value === 'object')
-        throw new QueryError(value.error, raw.start)
+        throw new QueryError(
+          value.error,
+          raw.start,
+          value.kind ?? 'bad_value',
+          value.detail ?? { key: raw.key, value: raw.value.trim() },
+        )
       return { type: 'atom', key: raw.key, value, ...span }
     }
   }
@@ -394,12 +479,16 @@ function checkLimits(node: QueryNode, limits: Limits): void {
     throw new QueryError(
       `At most ${limits.atoms} terms in a query; this one has ${all.length}.`,
       all[limits.atoms]!.leaf.start,
+      'too_many_terms',
+      { max: limits.atoms, count: all.length },
     )
   for (const { leaf } of all)
     if (runes(leaf.value) > limits.value)
       throw new QueryError(
         `A value is at most ${limits.value} characters.`,
         leaf.start,
+        'value_too_long',
+        { max: limits.value },
       )
   // Each operator (AND, OR, -) on a path is one level.
   const walk = (n: QueryNode, above: number) => {
@@ -408,11 +497,15 @@ function checkLimits(node: QueryNode, limits: Limits): void {
       throw new QueryError(
         `Parentheses, OR and - nest at most ${limits.depth} deep.`,
         n.start,
+        'too_deep',
+        { max: limits.depth },
       )
     if (n.type === 'or' && n.items.length > limits.alternatives)
       throw new QueryError(
         `At most ${limits.alternatives} alternatives in one OR.`,
         n.items[limits.alternatives]!.start,
+        'too_many_alternatives',
+        { max: limits.alternatives },
       )
     for (const item of n.type === 'not' ? [n.item] : n.items)
       walk(item, above + 1)

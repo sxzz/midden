@@ -42,8 +42,7 @@ const split = (text: string) => splitQuery(readQuery(text).node, tagId)
 it('reads a query as the server does, with where it cannot', () => {
   expect(readQuery('a  OR b c').parsed).toBe('a OR (b c)')
   expect(readQuery('cats since:yesterday').error).toEqual({
-    message:
-      'since: takes a date, YYYY-MM-DD, or a moment (2026-11-01T00:00:00+09:00).',
+    message: 'since: 要写日期（YYYY-MM-DD）或时刻',
     position: 5,
   })
   expect(readQuery('a (b').error?.position).toBe(2)
@@ -61,7 +60,7 @@ it('shows the controls as terms after the search’s own', () => {
     visibility: 'private',
     within: '7d',
   }
-  expect(composeQuery('cat OR dog', controls, tagName)).toBe(
+  expect(composeQuery('cat OR dog', controls, { tagName })).toBe(
     '(cat OR dog) platform:x (from:x/x.profile/1 OR from:x/x.profile/2) (has:image OR -has:media) is:quote (tag:猫 OR tag:"to read") protected:yes saved:7d',
   )
   expect(
@@ -74,7 +73,7 @@ it('shows the controls as terms after the search’s own', () => {
         from: '2026-11-01',
         to: '2026-11-05',
       },
-      tagName,
+      { tagName },
     ),
   ).toBe('tag:猫 -tag:"to read" saved-since:2026-11-01 saved-until:2026-11-06')
 })
@@ -133,7 +132,7 @@ it('reads back what it showed', () => {
     within: '30d',
     sensitive: 'contains',
   }
-  const shown = composeQuery('"two words" -spam', controls, tagName)
+  const shown = composeQuery('"two words" -spam', controls, { tagName })
   const back = split(shown)
   expect(back.q).toBe('"two words" -spam')
   expect({ ...NONE, ...back.controls }).toEqual(controls)
@@ -198,4 +197,28 @@ it('completes keys, values and what the library holds', () => {
   expect(at('cat')).toBeUndefined()
   // The term the caret is in, up to its end.
   expect(at('from:@al cat', 7)).toMatchObject({ start: 0, end: 8 })
+})
+
+it('names authors by the handle that names them alone, and reads it back', () => {
+  const terms: Record<string, string> = { 'x/x.profile/1': '@alice' }
+  const names = {
+    tagName,
+    authorTerm: (key: string) => terms[key],
+  }
+  const controls = {
+    ...NONE,
+    authors: ['x/x.profile/2', 'x/x.profile/1'],
+  }
+  // A key with no handle that names it alone stays a key.
+  const shown = composeQuery('', controls, names)
+  expect(shown).toBe('(from:@alice OR from:x/x.profile/2)')
+  const back = splitQuery(readQuery(shown).node, tagId, (term) =>
+    Object.keys(terms).find((key) => terms[key] === term),
+  )
+  expect(back).toEqual({
+    controls: { authors: ['x/x.profile/1', 'x/x.profile/2'] },
+    q: '',
+  })
+  // A handle the box did not write is the query's.
+  expect(split('from:@bob')).toEqual({ controls: {}, q: 'from:@bob' })
 })

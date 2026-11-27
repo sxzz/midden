@@ -6,6 +6,7 @@ import {
   type parseResponse,
 } from 'hono/client'
 import { host } from './host'
+import { queryErrorText } from './query-errors'
 import type { Api } from '@midden/server/api'
 
 /** The server's `/v1` API, typed from its route definitions. */
@@ -34,7 +35,16 @@ export async function call<T extends ClientResponse<unknown>>(
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as {
       error?: string
+      code?: string
+      kind?: string
+      detail?: Record<string, string | number>
     }
+    // A query it cannot run, in the app's words.
+    if (body.code === 'query_invalid' && body.kind)
+      throw new APIError(
+        response.status,
+        queryErrorText(body.kind, body.detail, body.error),
+      )
     throw new APIError(response.status, body.error || '服务暂时不可用')
   }
   return (response.status === 204 ? undefined : await response.json()) as never
@@ -46,7 +56,11 @@ export type Collection = Ok<(typeof client.collections)[':id']['$get']>
 export type CollectionPage = Ok<typeof client.collections.$get>
 export type Asset = Collection['assets'][number]
 export type Entity = NonNullable<Collection['graph']>['entities'][number]
-export type Author = Ok<typeof client.collections.authors.$get>['items'][number]
+/** An author of the list; the owner's say how the query box names them. */
+export type Author = Omit<
+  Ok<typeof client.collections.authors.$get>['items'][number],
+  'term'
+> & { term?: string }
 export type Perspective = Ok<
   typeof client.collections.perspectives.$get
 >['items'][number]

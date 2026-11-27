@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import * as v from 'valibot'
+import { authorTerms } from '#library/author-terms.ts'
 import { CHANGES_WINDOW, listProfileChanges } from '#library/changes.ts'
 import { compareRelations, compareSides } from '#library/compare.ts'
 import { selectionCounts, type Selection } from '#library/counts.ts'
@@ -216,16 +217,25 @@ export function libraryRoutes(ctx: AccountsContext) {
         },
       )
 
+      // Each with the term the query box writes for it (`from:@alice`)
+      // when one names it alone.
       .get('/collections/authors', query(AuthorFilters), (c) => {
         const input = c.req.valid('query')
         const author = input.author ?? []
-        return c.json(
-          listAuthors(ctx, {
-            q: input.q || undefined,
-            cursor: input.cursor || undefined,
-            authors: typeof author === 'string' ? [author] : author,
-          }),
+        const page = listAuthors(ctx, {
+          q: input.q || undefined,
+          cursor: input.cursor || undefined,
+          authors: typeof author === 'string' ? [author] : author,
+        })
+        const terms = authorTerms(
+          ctx.db,
+          ctx.platforms.types(),
+          page.items.map((a) => a.id),
         )
+        return c.json({
+          ...page,
+          items: page.items.map((a) => ({ ...a, term: terms.get(a.id) })),
+        })
       })
 
       // Accounts the 「关系」 filter can look from; owner only, since it

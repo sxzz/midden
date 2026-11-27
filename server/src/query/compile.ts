@@ -166,6 +166,8 @@ function platformsOf(types: Types, value: string, at: number): string[] {
     throw new QueryError(
       `Unknown platform ${colon[1]}; the archive has ${types.platforms.join(', ')}.`,
       at,
+      'unknown_platform',
+      { value: colon[1]!, platforms: types.platforms.join(', ') },
     )
   return [colon[1]!]
 }
@@ -255,6 +257,8 @@ class Compiler {
       throw new QueryError(
         `Unknown tag ${name}. GET /agent/v1/tags lists them.`,
         at,
+        'unknown_tag',
+        { value: name },
       )
     return row.id
   }
@@ -271,6 +275,8 @@ class Compiler {
       throw new QueryError(
         `No folder ${ref}. GET /agent/v1/folders lists them.`,
         at,
+        'unknown_folder',
+        { value: ref },
       )
     return row
   }
@@ -297,6 +303,8 @@ class Compiler {
       throw new QueryError(
         `Unknown platform ${platform}; the archive has ${this.o.types.platforms.join(', ')}.`,
         at,
+        'unknown_platform',
+        { value: platform, platforms: this.o.types.platforms.join(', ') },
       )
     return [...this.o.types.posts, ...this.o.types.accounts].filter((t) =>
       t.startsWith(`${platform}.`),
@@ -604,6 +612,8 @@ class Compiler {
           throw new QueryError(
             `Folders include each other: ${node.value} again.`,
             node.start,
+            'folder_cycle',
+            { value: node.value },
           )
         this.folders.push({ id: folder.id, query: folder.query })
         const inner = parseQuery(folder.query, OWNER_LIMITS)
@@ -626,6 +636,8 @@ class Compiler {
           ? `rel: ${value} names ${found.length} accounts; give one as x:@handle or by its key.`
           : `rel: no account ${value} is in the archive.`,
         at,
+        found.length ? 'ambiguous_account' : 'unknown_account',
+        { value, count: found.length },
       )
     return found[0]!
   }
@@ -728,6 +740,7 @@ export function compileQuery(
     throw new QueryError(
       'A query of only exclusions (-) needs something to start from: since:, until:, within:, saved:, from:, folder: or tag:, or the author, tag or folder parameters.',
       node.start,
+      'only_exclusions',
     )
   const compiled = compileNode(node, parsed, o, true)
   // Said in the filter's terms, some combinations are ones the filter

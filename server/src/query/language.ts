@@ -7,9 +7,12 @@ export {
   LIMITS,
   OWNER_LIMITS,
   parseQuery,
+  QUERY_ERROR_KINDS,
   QueryError,
   type Leaf,
   type Limits,
+  type QueryErrorDetail,
+  type QueryErrorKind,
   type QueryNode,
 } from './ast.ts'
 export { filterToQuery, wordTerm } from './convert.ts'

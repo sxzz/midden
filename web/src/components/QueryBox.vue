@@ -58,8 +58,9 @@ onUnmounted(() => clearTimeout(timer))
 function complete() {
   const el = input.value
   if (!el || document.activeElement !== el) return close()
-  const caret = el.selectionStart ?? text.value.length
-  target = completing(text.value, caret, KEYS)
+  // The field itself: the model follows it a render later.
+  const caret = el.selectionStart ?? el.value.length
+  target = completing(el.value, caret, KEYS)
   clearTimeout(timer)
   const c = target
   if (!c) return close()
@@ -106,6 +107,8 @@ function complete() {
   })
   const known = cache.get(key)
   if (known) return show(known)
+  // Until they come, offer nothing: the last values were for another prefix.
+  close()
   const version = ++asked
   timer = setTimeout(async () => {
     try {
@@ -132,16 +135,18 @@ function accept(option: Option) {
   const c = target
   const el = input.value
   if (!c || !el) return
-  text.value =
-    text.value.slice(0, c.start) + option.insert + text.value.slice(c.end)
+  const value =
+    el.value.slice(0, c.start) + option.insert + el.value.slice(c.end)
   const caret = c.start + option.insert.length
+  // In the field at once, caret and all, so keys typed right after land
+  // after it; the model follows.
+  el.value = value
+  el.setSelectionRange(caret, caret)
+  text.value = value
   close()
-  // After the value is in, the next term may be completed in turn.
-  requestAnimationFrame(() => {
-    el.focus()
-    el.setSelectionRange(caret, caret)
-    complete()
-  })
+  if (document.activeElement !== el) el.focus()
+  // The next term may be completed in turn.
+  complete()
 }
 function keydown(event: KeyboardEvent) {
   const open = options.value.length > 0
@@ -175,7 +180,7 @@ function submit() {
     input.value?.setSelectionRange(problem.position, problem.position + 1)
     return
   }
-  emit('submit', text.value.trim())
+  emit('submit', (input.value?.value ?? text.value).trim())
 }
 const help = shallowRef(false)
 </script>

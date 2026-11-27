@@ -366,7 +366,13 @@ export function storedQuery(
             : eq(tags.name, leaf.value),
         )
         .get()
-      if (!row) throw new QueryError(`Unknown tag ${leaf.value}.`, leaf.start)
+      if (!row)
+        throw new QueryError(
+          `Unknown tag ${leaf.value}.`,
+          leaf.start,
+          'unknown_tag',
+          { value: leaf.value },
+        )
       return { ...leaf, value: row.id }
     }
     if (leaf.key === 'folder') {
@@ -379,9 +385,19 @@ export function storedQuery(
             : eq(folders.name, leaf.value),
         )
         .get()
-      if (!row) throw new QueryError(`No folder ${leaf.value}.`, leaf.start)
+      if (!row)
+        throw new QueryError(
+          `No folder ${leaf.value}.`,
+          leaf.start,
+          'unknown_folder',
+          { value: leaf.value },
+        )
       if (row.id === self)
-        throw new QueryError('A folder cannot include itself.', leaf.start)
+        throw new QueryError(
+          'A folder cannot include itself.',
+          leaf.start,
+          'folder_self',
+        )
       return { ...leaf, value: row.id }
     }
     return leaf

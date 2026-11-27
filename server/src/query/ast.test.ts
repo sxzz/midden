@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'vitest'
-import { LIMITS, parseQuery, QueryError, type QueryNode } from './ast.ts'
+import {
+  LIMITS,
+  parseQuery,
+  QUERY_ERROR_KINDS,
+  QueryError,
+  type QueryErrorKind,
+  type QueryNode,
+} from './ast.ts'
 import { printQuery } from './print.ts'
 
 /** A query's tree without where its parts were. */
@@ -31,6 +38,82 @@ function error(text: string): { message: string; position: number } {
   }
   throw new Error(`${text} parsed`)
 }
+
+/** A query that fails reading for each reason, with what its words need. */
+const PARSE_ERRORS: Partial<
+  Record<QueryErrorKind, [string, Record<string, string | number>]>
+> = {
+  unopened: ['a)', {}],
+  unclosed: ['a (b', {}],
+  unclosed_quote: ['say "hi', {}],
+  ends_in_or: ['a OR', {}],
+  bare_minus: ['a - b', {}],
+  or_sides: ['x OR OR y', {}],
+  empty_group: ['()', {}],
+  unexpected: ['(a OR)', { found: '(' }],
+  no_value: ['from:', { key: 'from' }],
+  empty_phrase: ['a ""', {}],
+  bad_hashtag: ['#ａ（ｂ）', { value: 'ａ（ｂ）' }],
+  bad_value: ['since:yesterday', { key: 'since', value: 'yesterday' }],
+  no_replies: ['is:reply', { key: 'is', value: 'reply' }],
+  too_many_terms: [
+    Array.from({ length: LIMITS.atoms + 1 }, (_, i) => `w${i}`).join(' '),
+    { max: LIMITS.atoms, count: LIMITS.atoms + 1 },
+  ],
+  value_too_long: ['x'.repeat(LIMITS.value + 1), { max: LIMITS.value }],
+  too_deep: ['a OR (b (c OR (d (e OR f))))', { max: LIMITS.depth }],
+  too_many_alternatives: [
+    Array.from({ length: LIMITS.alternatives + 1 }, (_, i) => `w${i}`).join(
+      ' OR ',
+    ),
+    { max: LIMITS.alternatives },
+  ],
+}
+
+describe('errors', () => {
+  test('each says why by its kind, with what its words need', () => {
+    for (const [kind, [text, detail]] of Object.entries(PARSE_ERRORS)) {
+      let thrown: unknown
+      try {
+        parseQuery(text)
+      } catch (error_) {
+        thrown = error_
+      }
+      expect(thrown, text).toBeInstanceOf(QueryError)
+      expect((thrown as QueryError).kind, text).toBe(kind)
+      expect((thrown as QueryError).detail, text).toEqual(detail)
+    }
+    // A choice says what it takes.
+    try {
+      parseQuery('has:gif')
+    } catch (error_) {
+      expect((error_ as QueryError).detail).toEqual({
+        key: 'has',
+        value: 'gif',
+        allowed: 'image, video, media, link',
+      })
+    }
+  })
+
+  test('the kinds are those reading makes, and those of the archive', () => {
+    const archive: QueryErrorKind[] = [
+      'unknown_platform',
+      'unknown_tag',
+      'unknown_folder',
+      'folder_self',
+      'folder_cycle',
+      'unknown_account',
+      'ambiguous_account',
+      'only_exclusions',
+    ]
+    // The parser's end of input outside an OR: kept, though no query found
+    // so far reaches it.
+    const unreached: QueryErrorKind[] = ['ends_early']
+    expect(
+      [...Object.keys(PARSE_ERRORS), ...archive, ...unreached].toSorted(),
+    ).toEqual([...QUERY_ERROR_KINDS].toSorted())
+  })
+})
 
 describe('reading', () => {
   test('terms, AND by space, OR in capitals, - before a term', () => {

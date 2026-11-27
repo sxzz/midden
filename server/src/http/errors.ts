@@ -42,10 +42,17 @@ export function errorResponse(c: Context, error: unknown, logger: Logger) {
   }
   if (isAppError(error))
     return c.json({ error: error.message }, statuses[error.kind])
-  // A query the language cannot read: what, and where in it.
+  // A query the language cannot read: what, and where in it; the web app
+  // says it in its own words by `kind` and `detail`.
   if (error instanceof QueryError)
     return c.json(
-      { error: error.message, code: 'query_invalid', position: error.position },
+      {
+        error: error.message,
+        code: 'query_invalid',
+        kind: error.kind,
+        detail: error.detail,
+        position: error.position,
+      },
       400,
     )
   if (
