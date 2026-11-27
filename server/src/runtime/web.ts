@@ -136,7 +136,7 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
   // For AI agents and scripts; its guide is public.
   app.route('/', agent)
   app.route('/', agentDocRoutes())
-  // With R2, this serves thumbnails (a local cache, rendered again when
+  // With R2, this serves thumbnails (a local cache, fetched again when
   // lost), downloads, and originals until their upload is confirmed.
   app.route(
     '/',
@@ -198,7 +198,6 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
       owner: config.telegram.owner,
       webAppUrl: config.webAppUrl,
       version: process.env.BUILD_REVISION || 'dev',
-      ffmpeg: config.ffmpeg,
       onWrite: forget,
       // Only main.test.ts sets this, to point the bot at a fake Telegram.
       ...(process.env.MIDDEN_TEST_TELEGRAM_API_ROOT

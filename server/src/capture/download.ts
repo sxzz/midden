@@ -1,28 +1,20 @@
-import { Buffer } from 'node:buffer'
-import { open } from 'node:fs/promises'
-import { Readable } from 'node:stream'
 import { and, eq } from 'drizzle-orm'
 import { KeyedLock } from '#blob/locks.ts'
-import { stage, type StagedFile } from '#blob/staging.ts'
 import { newId } from '#db/id.ts'
 import { assets, blobs, captures, mediaGarbage } from '#db/schema.ts'
-import {
-  PermanentError,
-  RetryError,
-  SnoozeError,
-  type Job,
-} from '#jobs/queue.ts'
+import { PermanentError, SnoozeError, type Job } from '#jobs/queue.ts'
 import { finalizeSettled, validateExecution } from './lifecycle.ts'
+import { fetchMedia, mediaURL, readHead } from './media-fetch.ts'
 import { isRemoved } from './media-key.ts'
-import { cachedBlob, enqueueThumbnail, reuseKey } from './media-reuse.ts'
+import { cachedBlob, reuseKey } from './media-reuse.ts'
 import { acceptsMediaType, sniffMediaType } from './media-type.ts'
+import { downloadThumbnail, failThumbnail } from './thumbnail.ts'
 import { enqueueUpload } from './upload.ts'
 import type { Transaction } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
 
 const REQUEST_TIMEOUT = 5 * 60_000
 const CACHE_WAIT = 2000
-const SECONDS = /^\d+$/
 const assetLocks = new KeyedLock()
 const cacheLocks = new KeyedLock()
 
@@ -47,7 +39,6 @@ function attach(
     .set({ state: 'ready', blobId, error: '' })
     .where(and(eq(assets.id, asset.id), eq(assets.state, 'pending')))
     .run()
-  enqueueThumbnail(ctx, tx, blobId)
   finalizeSettled(ctx, tx, asset.captureId)
 }
 
@@ -77,13 +68,6 @@ async function waitFor(lock: KeyedLock, key: string): Promise<boolean> {
   return true
 }
 
-function retryAfterMs(header: string | null): number {
-  if (!header) return 0
-  if (SECONDS.test(header)) return Number(header) * 1000
-  const at = Date.parse(header)
-  return Number.isNaN(at) ? 0 : Math.max(at - Date.now(), 0)
-}
-
 /**
  * Media the owner removed after this asset was listed (in this collection
  * or another one listing the same media) settles as removed, unfetched.
@@ -102,7 +86,14 @@ function skipRemoved(ctx: CaptureContext, assetId: string): boolean {
   })
 }
 
-/** Download one asset into the media store. */
+/**
+ * Download one asset into the media store, then its blob's thumbnail. The
+ * asset is ready (and its capture may finish) before the thumbnail is
+ * fetched, so a thumbnail that fails fails nothing else: the job is tried
+ * again for the thumbnail alone, and `failDownload` records it as failed in
+ * the end. A capture finding media stored before without a thumbnail also
+ * queues this job, for the thumbnail.
+ */
 export async function runDownload(
   ctx: CaptureContext,
   job: Job,
@@ -110,19 +101,20 @@ export async function runDownload(
   if (assetLocks.isHeld(job.ref)) throw new SnoozeError(1000)
   await assetLocks.run(job.ref, async () => {
     const row = ctx.db.transaction((tx) => loadAsset(tx, job.ref))
-    if (row?.asset.state !== 'pending') return
-    const key = reuseKey(row.asset)
-    if (!key) {
-      if (!skipRemoved(ctx, job.ref)) await download(ctx, job)
-      return
+    if (row?.asset.state === 'pending') {
+      const key = reuseKey(row.asset)
+      if (key) {
+        // Identical renditions wait for the first download instead of
+        // repeating it.
+        if (!(await waitFor(cacheLocks, key))) throw new SnoozeError(1000)
+        await cacheLocks.run(key, async () => {
+          // Checked only now: the media may have been removed while waiting.
+          if (skipRemoved(ctx, job.ref)) return
+          if (!reuseMedia(ctx, job.ref)) await download(ctx, job)
+        })
+      } else if (!skipRemoved(ctx, job.ref)) await download(ctx, job)
     }
-    // Identical renditions wait for the first download instead of repeating it.
-    if (!(await waitFor(cacheLocks, key))) throw new SnoozeError(1000)
-    await cacheLocks.run(key, async () => {
-      // Checked only now: the media may have been removed while waiting.
-      if (skipRemoved(ctx, job.ref)) return
-      if (!reuseMedia(ctx, job.ref)) await download(ctx, job)
-    })
+    await downloadThumbnail(ctx, job.ref, job.signal)
   })
 }
 
@@ -135,50 +127,12 @@ async function download(ctx: CaptureContext, job: Job): Promise<void> {
   })
   if (!row) return
   const { asset } = row
-  let url: URL
-  try {
-    url = new URL(asset.sourceUrl)
-  } catch {
-    throw new PermanentError('媒体地址无效')
-  }
-  if (
-    !['http:', 'https:'].includes(url.protocol) ||
-    url.username ||
-    url.password
-  )
-    throw new PermanentError('媒体地址无效')
-
+  const url = mediaURL(asset.sourceUrl)
   const signal = AbortSignal.any([
     job.signal,
     AbortSignal.timeout(REQUEST_TIMEOUT),
   ])
-  let response: Response
-  try {
-    response = await (ctx.fetch ?? fetch)(url, { signal })
-  } catch (error) {
-    throw new Error(`媒体请求失败：${(error as Error).message}`, {
-      cause: error,
-    })
-  }
-  if (response.status === 429 || response.status >= 500) {
-    await response.body?.cancel()
-    const after = retryAfterMs(response.headers.get('retry-after'))
-    if (after > 0) throw new RetryError('媒体服务器暂时不可用', after)
-    throw new Error('媒体服务器暂时不可用')
-  }
-  if (response.status !== 200 || !response.body) {
-    await response.body?.cancel()
-    throw new PermanentError('媒体服务器拒绝了请求')
-  }
-
-  let staged: StagedFile
-  try {
-    staged = await stage(ctx.stagingDir, Readable.fromWeb(response.body), {
-      signal,
-    })
-  } catch (error) {
-    throw new Error('媒体下载被中断', { cause: error })
-  }
+  const staged = await fetchMedia(ctx, url, signal)
   try {
     if (staged.size === 0) throw new PermanentError('媒体文件为空')
     const mime = sniffMediaType(await readHead(staged.path))
@@ -230,18 +184,10 @@ async function download(ctx: CaptureContext, job: Job): Promise<void> {
   }
 }
 
-async function readHead(file: string): Promise<Buffer> {
-  const handle = await open(file, 'r')
-  try {
-    const head = Buffer.alloc(512)
-    const { bytesRead } = await handle.read(head, 0, 512, 0)
-    return head.subarray(0, bytesRead)
-  } finally {
-    await handle.close()
-  }
-}
-
-/** A download failed for good: settle the asset as failed. */
+/**
+ * A download failed for good: settle the asset as failed, or, when only its
+ * thumbnail was left, record that as failed.
+ */
 export function failDownload(
   ctx: CaptureContext,
   assetId: string,
@@ -249,6 +195,8 @@ export function failDownload(
 ): void {
   ctx.db.transaction((tx) => {
     const row = loadAsset(tx, assetId)
+    if (row?.asset.state === 'ready' && row.asset.thumbnailUrl)
+      failThumbnail(tx, row.asset.blobId, message)
     if (row?.asset.state !== 'pending') return
     tx.update(assets)
       .set({ state: 'failed', error: message })

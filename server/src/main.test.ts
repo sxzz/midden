@@ -51,7 +51,6 @@ async function startServer(env: Record<string, string> = {}) {
       PORT: String(port),
       SECRET_KEY: 'k'.repeat(48),
       NODE_ENV: 'production',
-      FFMPEG: path.join(dir, 'no-ffmpeg'),
       TELEGRAM_BOT_TOKEN: '1:test',
       OWNER_TELEGRAM_ID: '7',
       MIDDEN_TEST_TELEGRAM_API_ROOT: telegram.apiRoot,

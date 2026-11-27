@@ -11,11 +11,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm build
       - run: pnpm typecheck
-      # Thumbnail tests call ffmpeg and ffprobe: mise installs a prebuilt
-      # conda-forge build, cached between runs, instead of apt.
       - run: pnpm test
-        env:
-          FFMPEG: ffmpeg
       - run: node scripts/prepare-web-assets.ts
       - run: pnpm --filter @midden/web exec wrangler deploy --dry-run
   e2e:

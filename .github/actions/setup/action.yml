@@ -3,8 +3,8 @@ description: Install the toolchain from mise.toml and restore the pnpm store.
 runs:
   using: composite
   steps:
-    # Node and pnpm versions come from devEngines in package.json, ffmpeg's
-    # from mise.toml. mise caches the installed tools between runs.
+    # Node and pnpm versions come from devEngines in package.json; mise
+    # caches the installed tools between runs.
     - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
     - id: pnpm-store
       shell: bash

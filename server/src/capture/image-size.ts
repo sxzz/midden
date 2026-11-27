@@ -5,7 +5,7 @@ export interface ImageSize {
   height: number
 }
 
-/** Enough of a file's start to read the size of a WebP or a plain JPEG. */
+/** Enough of a file's start to read the size of a WebP, PNG or plain JPEG. */
 export const HEADER_BYTES = 64 * 1024
 
 function webp(b: Buffer): ImageSize | undefined {
@@ -25,6 +25,13 @@ function webp(b: Buffer): ImageSize | undefined {
       width: b.readUIntLE(24, 3) + 1,
       height: b.readUIntLE(27, 3) + 1,
     }
+}
+
+function png(b: Buffer): ImageSize | undefined {
+  // The signature, then the IHDR chunk's length and type, width, height.
+  if (b.length < 24 || b.readUInt32BE(0) !== 0x89504e47) return
+  if (b.toString('ascii', 12, 16) !== 'IHDR') return
+  return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) }
 }
 
 function jpeg(b: Buffer): ImageSize | undefined {
@@ -51,11 +58,10 @@ function jpeg(b: Buffer): ImageSize | undefined {
 }
 
 /**
- * The pixel size of a thumbnail from the start of its file: the two formats
- * the thumbnailer writes. Undefined for anything else or a damaged header,
- * so ffprobe is not needed for something ffmpeg just produced.
+ * The pixel size of an image from the start of its file, for the formats
+ * thumbnails come in. Undefined for anything else or a damaged header.
  */
 export function imageSize(header: Buffer): ImageSize | undefined {
-  const size = webp(header) ?? jpeg(header)
+  const size = webp(header) ?? png(header) ?? jpeg(header)
   return size && size.width > 0 && size.height > 0 ? size : undefined
 }

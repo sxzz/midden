@@ -1,8 +1,6 @@
 import { and, eq, isNull, ne } from 'drizzle-orm'
 import { assets, blobThumbnails } from '#db/schema.ts'
-import { thumbnailsEnabled } from './thumbnail.ts'
-import type { Transaction } from '#db/client.ts'
-import type { CaptureContext } from './context.ts'
+import type { Executor, Transaction } from '#db/client.ts'
 
 // What a capture's fetch (`fetch.ts`) and a download (`download.ts`) share
 // when an asset takes a blob already stored. Kept apart from the download,
@@ -52,17 +50,32 @@ export function cachedBlob(tx: Transaction, key: string): string | undefined {
   )
 }
 
-/** A ready asset makes its blob's thumbnail due. */
-export function enqueueThumbnail(
-  ctx: CaptureContext,
-  tx: Transaction,
-  blobId: string,
-): void {
-  if (!thumbnailsEnabled(ctx)) return
-  const done = tx
-    .select({ id: blobThumbnails.blobId })
-    .from(blobThumbnails)
-    .where(eq(blobThumbnails.blobId, blobId))
-    .get()
-  if (!done) ctx.queue.enqueue(tx, 'thumbnail', blobId)
+/**
+ * The pixel size a resource gives, as the asset columns keep it: both
+ * sides or neither.
+ */
+export function mediaSize(resource: { width?: number; height?: number }): {
+  width: number | null
+  height: number | null
+} {
+  const { width, height } = resource
+  return width && height && width > 0 && height > 0
+    ? { width: Math.round(width), height: Math.round(height) }
+    : { width: null, height: null }
+}
+
+/** A blob with a thumbnail to fetch for it, and none recorded yet. */
+export function thumbnailDue(
+  db: Executor,
+  asset: { blobId: string | null; thumbnailUrl: string | null },
+): boolean {
+  return (
+    !!asset.blobId &&
+    !!asset.thumbnailUrl &&
+    !db
+      .select({ id: blobThumbnails.blobId })
+      .from(blobThumbnails)
+      .where(eq(blobThumbnails.blobId, asset.blobId))
+      .get()
+  )
 }

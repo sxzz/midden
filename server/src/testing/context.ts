@@ -24,7 +24,6 @@ export function testContext(
     handlers?: (ctx: () => CaptureContext) => Record<string, JobHandler>
     now?: () => number
     fetch?: typeof fetch
-    thumbnailer?: CaptureContext['thumbnailer']
     logger?: Logger
     timelineCap?: number
     /** The raw response bucket. */
@@ -47,7 +46,6 @@ export function testContext(
   const handlers = {
     capture: { ...noop, queue: 'capture' },
     download: { ...noop, queue: 'download' },
-    thumbnail: { ...noop, queue: 'download', priority: 4 },
     upload: { ...noop, queue: 'upload' },
     'raw-upload': { ...noop, queue: 'raw' },
     finalize: noop,
@@ -82,7 +80,6 @@ export function testContext(
     mediaLocks: new KeyedLock(),
     raw: options.raw,
     fetch: options.fetch,
-    thumbnailer: options.thumbnailer,
     timelineCap: options.timelineCap,
   }
   return ctx

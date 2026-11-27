@@ -666,6 +666,14 @@ export const assets = sqliteTable(
       .default('pending'),
     error: text().notNull().default(''),
     blobId: text().references(() => blobs.id),
+    // Pixel size of the media as the platform describes it, what the web
+    // boxes it by before it loads; null when the platform did not say.
+    width: integer(),
+    height: integer(),
+    // The platform's smaller rendition (an image's smaller size, a video's
+    // poster) that the download stores as the blob's thumbnail; null when
+    // there is none (an image then stands for itself).
+    thumbnailUrl: text(),
   },
   (t) => [
     uniqueIndex('assets_position').on(t.captureId, t.position),
@@ -732,7 +740,10 @@ export const videoRemovals = sqliteTable(
   (t) => [index('video_removals_collection').on(t.collectionId, t.createdAt)],
 )
 
-/** One thumbnail attempt per blob; a failure is final. */
+/**
+ * A blob's thumbnail, downloaded from the platform with the original (see
+ * `capture/thumbnail.ts`): one per blob; a failure is final.
+ */
 export const blobThumbnails = sqliteTable(
   'blob_thumbnails',
   {
@@ -745,8 +756,9 @@ export const blobThumbnails = sqliteTable(
     size: integer(),
     mime: text(),
     // Pixel size of the thumbnail, in the original's proportions: what the
-    // web reserves a box by before the media loads. Null until read; 0 when
-    // the file cannot be read.
+    // web reserves a box by before the media loads. Read from the file; null
+    // for thumbnails made before sizes were kept, until read; 0 when the
+    // file cannot be read.
     width: integer(),
     height: integer(),
     error: text().notNull().default(''),

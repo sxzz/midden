@@ -280,6 +280,46 @@ test('a list row boxes a single wide image by its shape', async ({ page }) => {
   expect(img.height).toBeCloseTo(rect.height, 0)
 })
 
+test('an image with no smaller size boxes by the size the platform gave and shows the original', async ({
+  page,
+}) => {
+  // What the server gives for an image that stands for itself: no
+  // thumbnail, the original's size as the platform described it.
+  const { thumbnail: _, ...plain } = image(1, 1200, 300)
+  await serve(page, [{ ...plain, width: 1200, height: 300 }])
+  await page.goto('/app/')
+  const tile = page.locator('.thumbs .tile')
+  await expect(tile.locator('img')).toHaveAttribute('src', plain.url)
+  expect((await box(tile)).ratio).toBeCloseTo(4, 0)
+})
+
+test('a video with no poster keeps its placeholder in the shape the platform gave', async ({
+  page,
+}) => {
+  const video = {
+    id: 'clip-1',
+    url: '/v1/assets/no-such-clip',
+    state: 'ready',
+    mime: 'video/mp4',
+    kind: 'video',
+    sensitive: false,
+    width: 1080,
+    height: 1920,
+  }
+  await serve(page, [video])
+  await page.goto('/app/')
+  const tile = page.locator('.thumbs .tile')
+  await expect(tile).toBeVisible()
+  await expect(tile.locator('img')).toHaveCount(0)
+  // Boxed at once, though the video never loads.
+  expect((await box(tile)).ratio).toBeCloseTo(1080 / 1920, 1)
+  await detail(page, [video])
+  expect((await box(page.locator('.media .frame').first())).ratio).toBeCloseTo(
+    1080 / 1920,
+    1,
+  )
+})
+
 const sensitiveVideo = (width: number, height: number, sized = true) => ({
   ...image(1, width, height, sized),
   mime: 'video/mp4',

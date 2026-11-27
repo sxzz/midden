@@ -498,7 +498,7 @@ Resume it.
 
 ### PATCH /agent/v1/jobs
 
-Pause or resume all background work, or some job types: `{"paused": true}`, `{"paused_types": ["thumbnail", "upload"]}`. Answers as `GET /jobs`.
+Pause or resume all background work, or some job types: `{"paused": true}`, `{"paused_types": ["upload", "raw-upload"]}`. Answers as `GET /jobs`.
 
 ### PUT /agent/v1/watches
 

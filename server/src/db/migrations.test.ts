@@ -179,9 +179,9 @@ describe('watches', () => {
       ['capture', 0],
       ['capture', 1],
       ['capture', 2],
-      ['thumbnail', 4],
-      ['thumbnail', 5],
-      ['thumbnail', 6],
+      ['upload', 4],
+      ['upload', 5],
+      ['upload', 6],
     ]
     for (const [i, [type, priority]] of jobs.entries())
       insertRow(db, 'jobs', { id: i + 1, type, ref: `r${i}`, priority })
@@ -198,9 +198,10 @@ describe('watches', () => {
       ['capture', 0],
       ['capture', 1],
       ['capture', 3],
-      ['thumbnail', 4],
-      ['thumbnail', 5],
-      ['thumbnail', 7],
+      // Only thumbnail renders had a priority of their own; they are gone.
+      ['upload', 4],
+      ['upload', 5],
+      ['upload', 6],
     ])
     // Updates so far were all started by hand.
     expect(
@@ -272,5 +273,41 @@ describe('watch_intervals', () => {
       'watches_folder',
     ])
     expect(db.$client.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+  })
+})
+
+describe('platform_thumbnails', () => {
+  test('renders still queued and the pause of their type go', () => {
+    const db = migratedBefore('platform_thumbnails')
+    const jobs: [string, string][] = [
+      ['thumbnail', 'blob-1'],
+      ['download', 'asset-1'],
+      ['thumbnail', 'blob-2'],
+    ]
+    for (const [i, [type, ref]] of jobs.entries())
+      insertRow(db, 'jobs', { id: i + 1, type, ref, queue: 'download' })
+    insertRow(db, 'settings', {
+      key: 'jobs_control',
+      value: JSON.stringify({
+        paused: true,
+        types: ['raw-upload', 'thumbnail'],
+      }),
+    })
+
+    migrateRest(db)
+
+    expect(
+      db.$client.prepare('SELECT type, ref FROM jobs ORDER BY id').all(),
+    ).toEqual([{ type: 'download', ref: 'asset-1' }])
+    const control = db.$client
+      .prepare(`SELECT value FROM settings WHERE key = 'jobs_control'`)
+      .get()!
+    expect(JSON.parse(String(control.value))).toEqual({
+      paused: true,
+      types: ['raw-upload'],
+    })
+    expect(columns(db, 'assets')).toEqual(
+      expect.arrayContaining(['width', 'height', 'thumbnail_url']),
+    )
   })
 })

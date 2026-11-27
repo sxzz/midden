@@ -4,7 +4,7 @@
 // the media and raw buckets on the orchestrator's fake S3 servers.
 //
 // Environment: BENCH_S3_MEDIA, BENCH_S3_RAW (fake S3 endpoints), BENCH_IMAGE,
-// BENCH_VIDEO (sample files), BENCH_PAGE_MS, BENCH_FETCH_MS, BENCH_MEDIA_MS
+// BENCH_THUMBNAIL, BENCH_VIDEO (sample files), BENCH_PAGE_MS, BENCH_FETCH_MS, BENCH_MEDIA_MS
 // (upstream latency of a timeline page, a post without prefetch, a media
 // file).
 import { Buffer } from 'node:buffer'
@@ -130,6 +130,9 @@ function respond(
       url: `${media}/img/${id}.jpg`,
       kind: 'image',
       immutableKey: `img:${id}`,
+      width: 1280,
+      height: 960,
+      thumbnailUrl: `${media}/thumb/img/${id}.jpg`,
       altText: '',
       sensitive: false,
       purpose: '',
@@ -140,6 +143,9 @@ function respond(
             url: `${media}/vid/${id}.mp4`,
             kind: 'video',
             immutableKey: `vid:${id}`,
+            width: 640,
+            height: 360,
+            thumbnailUrl: `${media}/thumb/vid/${id}.jpg`,
             altText: '',
             sensitive: false,
             purpose: '',
@@ -200,6 +206,7 @@ export function benchOverrides(
   const mediaEndpoint = env('BENCH_S3_MEDIA')
   const media = 'https://media.bench'
   const image = readFileSync(env('BENCH_IMAGE'))
+  const thumbnail = readFileSync(env('BENCH_THUMBNAIL'))
   const video = readFileSync(env('BENCH_VIDEO'))
   const mediaMs = Number(env('BENCH_MEDIA_MS', '60'))
   const signer = new MediaSigner({
@@ -226,11 +233,17 @@ export function benchOverrides(
     fetch: async (input: string | URL | Request) => {
       const url = String(input instanceof Request ? input.url : input)
       await sleep(mediaMs)
-      const video_ = url.includes('/vid/')
+      const kind = url.includes('/thumb/')
+        ? 'thumbnail'
+        : url.includes('/vid/')
+          ? 'video'
+          : 'image'
       return new Response(
-        Buffer.concat([video_ ? video : image, Buffer.from(url)]),
+        Buffer.concat([{ image, thumbnail, video }[kind], Buffer.from(url)]),
         {
-          headers: { 'content-type': video_ ? 'video/mp4' : 'image/jpeg' },
+          headers: {
+            'content-type': kind === 'video' ? 'video/mp4' : 'image/jpeg',
+          },
         },
       )
     },

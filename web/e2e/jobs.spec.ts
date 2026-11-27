@@ -2,7 +2,7 @@ import { expect, test } from './test'
 
 const view = (limits: unknown[]) => ({
   control: { paused: false, types: [] },
-  pausable: ['thumbnail', 'upload', 'raw-upload'],
+  pausable: ['upload', 'raw-upload'],
   backlog: [{ type: 'capture', waiting: 3, running: 0, paused: 0 }],
   rate_limits: limits,
   worker: null,

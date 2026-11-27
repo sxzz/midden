@@ -32,11 +32,6 @@ export interface BlobStore {
   /** A URL the browser can fetch directly for a limited time. */
   url: (key: string, options: MediaUrlOptions) => string
   /**
-   * Where a program such as ffmpeg can read the object: a local path, or a
-   * URL it may fetch by byte ranges. Rejects when the object is missing.
-   */
-  source: (key: string) => Promise<string>
-  /**
    * Copy the local object to the remote store and confirm it arrived
    * intact. Only stores with a remote side have it.
    */
@@ -51,30 +46,6 @@ export interface BlobStore {
    * it.
    */
   deleteLocal?: (key: string) => Promise<void>
-}
-
-const URL_SOURCE = /^https?:/
-
-/**
- * Run a program on the object (see `BlobStore.source`). A local file can be
- * deleted between being found and the program opening it, once its upload
- * is confirmed (see `capture/upload.ts`); then the program runs once more,
- * on the remote copy. A file the program has opened stays readable.
- */
-export async function withSource<T>(
-  store: BlobStore,
-  key: string,
-  use: (input: string) => Promise<T>,
-): Promise<T> {
-  const input = await store.source(key)
-  try {
-    return await use(input)
-  } catch (error) {
-    if (URL_SOURCE.test(input)) throw error
-    const again = await store.source(key).catch(() => input)
-    if (again === input) throw error
-    return use(again)
-  }
 }
 
 const KEY = /^[0-9a-f]{64}$/

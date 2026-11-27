@@ -1,9 +1,4 @@
 import { Buffer } from 'node:buffer'
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
-import process from 'node:process'
 import { describe, expect, test } from 'vitest'
 import { imageSize } from './image-size.ts'
 
@@ -50,39 +45,21 @@ describe('imageSize', () => {
     expect(imageSize(jpeg)).toEqual({ width: 1800, height: 300 })
   })
 
+  test('reads a PNG header', () => {
+    const png = Buffer.alloc(33)
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png)
+    png.writeUInt32BE(13, 8)
+    png.write('IHDR', 12)
+    png.writeUInt32BE(622, 16)
+    png.writeUInt32BE(680, 20)
+    expect(imageSize(png)).toEqual({ width: 622, height: 680 })
+  })
+
   test('is undefined for other formats and truncated files', () => {
     expect(imageSize(Buffer.from('GIF89a....................'))).toBeUndefined()
     expect(
       imageSize(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2])),
     ).toBeUndefined()
     expect(imageSize(Buffer.alloc(0))).toBeUndefined()
-  })
-
-  const ffmpeg = process.env.FFMPEG
-  test.runIf(ffmpeg)('agrees with what ffmpeg encodes', () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'midden-size-'))
-    for (const [file, args] of [
-      ['a.webp', ['-c:v', 'libwebp', '-quality', '75']],
-      ['b.webp', ['-c:v', 'libwebp', '-lossless', '1']],
-      ['c.jpg', ['-c:v', 'mjpeg', '-q:v', '5', '-pix_fmt', 'yuvj420p']],
-    ] as const) {
-      const out = path.join(dir, file)
-      execFileSync(ffmpeg!, [
-        '-v',
-        'error',
-        '-f',
-        'lavfi',
-        '-i',
-        'color=red:s=1200x202',
-        '-frames:v',
-        '1',
-        ...args,
-        out,
-      ])
-      expect(imageSize(readFileSync(out)), file).toEqual({
-        width: 1200,
-        height: 202,
-      })
-    }
   })
 })

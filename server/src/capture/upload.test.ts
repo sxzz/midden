@@ -12,9 +12,9 @@ import { deleteCollection } from '#library/delete.ts'
 import { removeMedia } from '#library/media-removal.ts'
 import { getCollection } from '#library/read.ts'
 import { testContext } from '#testing/context.ts'
-import { fakeFfmpeg } from '#testing/fake-ffmpeg.ts'
 import { fakePlatform, postGraph } from '#testing/fake-platform.ts'
 import { FAKE_PUBLIC, FakeS3 } from '#testing/fake-s3.ts'
+import { jpegOf } from '#testing/images.ts'
 import { recordingLogger } from '#testing/logs.ts'
 import { captureHandlers } from './handlers.ts'
 import { collectCollections, collectMedia } from './maintenance.ts'
@@ -23,7 +23,7 @@ import { regenerateThumbnail } from './thumbnail.ts'
 import type { BucketBlobStore } from '#blob/bucket-store.ts'
 import type { MediaSigner } from '#blob/signer.ts'
 import type { Resource } from '#platforms/protocol.ts'
-import type { CaptureContext, Thumbnailer } from './context.ts'
+import type { CaptureContext } from './context.ts'
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4])
 const VIDEO = Buffer.concat([
@@ -31,6 +31,8 @@ const VIDEO = Buffer.concat([
   Buffer.from('ftypmp42'),
   Buffer.alloc(200, 7),
 ])
+const POSTER = jpegOf(400, 225, 'poster')
+const SMALL = jpegOf(400, 300, 'small')
 const HOUR = 60 * 60_000
 
 let s3: FakeS3
@@ -48,20 +50,21 @@ afterEach(async () => {
  * A capture context whose media store is the fake bucket, or with `local`
  * the media directory alone.
  */
-function setup(options: { thumbnailer?: Thumbnailer; local?: boolean } = {}) {
+function setup(options: { local?: boolean } = {}) {
   const clock = { now: Date.now() }
   const media: Record<string, Partial<Resource>[]> = {}
   const files: Record<string, Buffer> = {
     'https://m.test/a.jpg': JPEG,
     'https://m.test/a.jpg?copy': JPEG,
     'https://m.test/v.mp4': VIDEO,
+    'https://m.test/v.jpg': POSTER,
+    'https://m.test/a-small.jpg': SMALL,
   }
   const logs = recordingLogger()
   let signer!: MediaSigner
   const c = testContext({
     now: () => clock.now,
     logger: logs.logger,
-    thumbnailer: options.thumbnailer,
     handlers: captureHandlers,
     platforms: [
       fakePlatform({
@@ -108,7 +111,7 @@ function setup(options: { thumbnailer?: Thumbnailer; local?: boolean } = {}) {
     sharedCache: true,
     regenerate: (key) => regenerateThumbnail(c, key),
   })
-  return { c, clock, media, logs, store, capture, route }
+  return { c, clock, media, files, logs, store, capture, route }
 }
 
 const uploads = (c: CaptureContext) =>
@@ -237,32 +240,33 @@ describe('media in R2', () => {
     expect(s3.requests.filter((r) => r.method === 'PUT')).toHaveLength(puts)
   })
 
-  test('the thumbnail is rendered from the local file before the file goes', async () => {
-    const ffmpeg = fakeFfmpeg()
-    const { c, media, store } = setup({ thumbnailer: ffmpeg.thumbnailer })
+  test('the poster of a video is its thumbnail: kept locally, never uploaded, and the original still goes', async () => {
+    const { c, media, store, capture } = setup()
     media['1'] = [
-      { url: 'https://m.test/v.mp4', kind: 'video', immutableKey: 'x:v:1' },
+      {
+        url: 'https://m.test/v.mp4',
+        kind: 'video',
+        immutableKey: 'x:v:1',
+        width: 1920,
+        height: 1080,
+        thumbnailUrl: 'https://m.test/v.jpg',
+      },
     ]
-    // ffmpeg has its path but has not opened it when the upload is confirmed.
-    ffmpeg.hold()
-    submit(c, { url: 'https://fake.test/p/1' })
-    await vi.waitFor(() => {
-      expect(ffmpeg.calls()).toHaveLength(1)
-      expect(c.db.select().from(blobs).get()?.remoteAt).toBeInstanceOf(Date)
-    })
+    const done = await capture('1')
+    expect(done.state).toBe('complete')
     const blob = c.db.select().from(blobs).get()!
-    await vi.waitFor(async () => expect(uploads(c)).toEqual([]))
-    expect(await store.local.stat(blob.hash)).toBe(VIDEO.length)
-
-    ffmpeg.release()
-    await c.queue.drain()
     const thumbnail = c.db.select().from(blobThumbnails).get()!
-    expect(thumbnail.state).toBe('ready')
-    const input = ffmpeg.calls()[0]!
-    expect(input[input.indexOf('-i') + 1]).toBe(store.local.path(blob.hash))
-    // Then the original went; the thumbnail stays local.
+    expect(thumbnail).toMatchObject({
+      state: 'ready',
+      mime: 'image/jpeg',
+      size: POSTER.length,
+      width: 400,
+      height: 225,
+    })
+    expect(blob.remoteAt).toBeInstanceOf(Date)
     expect(await store.local.stat(blob.hash)).toBeUndefined()
-    expect(await store.local.stat(thumbnail.key!)).toBe(thumbnail.size)
+    expect(await store.local.stat(thumbnail.key!)).toBe(POSTER.length)
+    expect(s3.objects.has(objectPath(thumbnail.key!))).toBe(false)
     expect(s3.requests.some((r) => r.presigned)).toBe(false)
   })
 
@@ -348,56 +352,34 @@ describe('media in R2', () => {
     expect(s3.purged).toEqual([`${FAKE_PUBLIC}/${key}`])
   })
 
-  test('a lost thumbnail is rendered again from the original in R2, video by byte ranges', async () => {
-    const ffmpeg = fakeFfmpeg()
-    const { c, media, store, route } = setup({
-      thumbnailer: ffmpeg.thumbnailer,
-    })
+  test('a lost thumbnail is fetched again from the platform, under a new key if its bytes changed', async () => {
+    const { c, media, files, store, route, capture } = setup()
     media['1'] = [
-      { url: 'https://m.test/v.mp4', kind: 'video', immutableKey: 'x:v:1' },
+      {
+        url: 'https://m.test/v.mp4',
+        kind: 'video',
+        immutableKey: 'x:v:1',
+        thumbnailUrl: 'https://m.test/v.jpg',
+      },
     ]
-    const done = await capture()
-    async function capture() {
-      const job = submit(c, { url: 'https://fake.test/p/1' })
-      await c.queue.drain()
-      return c.db.select().from(captures).where(eq(captures.id, job.id)).get()!
-    }
-    const blob = c.db.select().from(blobs).get()!
+    const done = await capture('1')
     const thumbnail = c.db.select().from(blobThumbnails).get()!
-    expect(thumbnail.state).toBe('ready')
-    // Rendered from the local file at download time.
-    expect(ffmpeg.calls()[0]).toContain(store.local.path(blob.hash))
-    expect(blob.remoteAt).toBeInstanceOf(Date)
-    // The thumbnail was never uploaded.
-    expect(s3.objects.has(objectPath(thumbnail.key!))).toBe(false)
-
-    // The local original went after the upload; now the thumbnail goes too.
-    expect(await store.local.stat(blob.hash)).toBeUndefined()
     await rm(store.local.path(thumbnail.key!))
     const url = getCollection(c, done.collectionId).assets[0]!.thumbnail_url!
-    s3.requests.length = 0
     const response = await route.request(url)
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe(IMMUTABLE)
-    const bytes = Buffer.from(await response.arrayBuffer())
-    expect(bytes.subarray(4).equals(VIDEO.subarray(0, 16))).toBe(true)
-    const input = ffmpeg.calls().at(-1)!
-    const source = input[input.indexOf('-i') + 1]!
-    expect(source).toMatch(/^http:.*X-Amz-Signature=/)
-    // Only ranges of the video were read, through the presigned URL.
-    const reads = s3.requests.filter((r) => r.method === 'GET')
-    expect(reads.map((r) => [r.range, r.presigned])).toEqual([
-      ['bytes=0-15', true],
-      ['bytes=-4', true],
-    ])
-    expect(await store.local.stat(thumbnail.key!)).toBe(bytes.length)
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(POSTER)
+    expect(await store.local.stat(thumbnail.key!)).toBe(POSTER.length)
 
-    // A different ffmpeg renders other bytes: recorded under their own key.
-    ffmpeg.setVersion('2')
+    // The platform sends other bytes now: recorded under their own key.
+    const other = jpegOf(400, 225, 'poster, again')
+    files['https://m.test/v.jpg'] = other
     await rm(store.local.path(thumbnail.key!))
     const moved = await route.request(url)
     expect(moved.status).toBe(307)
     const now = c.db.select().from(blobThumbnails).get()!
+    expect(now).toMatchObject({ size: other.length, width: 400 })
     expect(now.key).not.toBe(thumbnail.key)
     expect(moved.headers.get('location')).toMatch(
       new RegExp(String.raw`^/media/${now.key}\?`),
@@ -409,8 +391,38 @@ describe('media in R2', () => {
     )
   })
 
+  test('a lost image thumbnail the platform no longer serves stands in by its original; a lost video thumbnail does not', async () => {
+    const { c, media, files, store, route, capture } = setup()
+    media['1'] = [
+      {
+        url: 'https://m.test/a.jpg',
+        thumbnailUrl: 'https://m.test/a-small.jpg',
+      },
+      {
+        url: 'https://m.test/v.mp4',
+        kind: 'video',
+        immutableKey: 'x:v:1',
+        thumbnailUrl: 'https://m.test/v.jpg',
+      },
+    ]
+    const done = await capture('1')
+    delete files['https://m.test/a-small.jpg']
+    delete files['https://m.test/v.jpg']
+    const [image, video] = getCollection(c, done.collectionId).assets
+    for (const row of c.db.select().from(blobThumbnails).all())
+      await rm(store.local.path(row.key!))
+    const original = await route.request(image!.thumbnail_url!)
+    expect(original.status).toBe(307)
+    expect(original.headers.get('location')).toMatch(
+      new RegExp(String.raw`^/media/${image!.sha256}\?`),
+    )
+    const followed = await route.request(original.headers.get('location')!)
+    expect(Buffer.from(await followed.arrayBuffer())).toEqual(JPEG)
+    expect((await route.request(video!.thumbnail_url!)).status).toBe(404)
+  })
+
   test('a missing key that is no thumbnail stays missing', async () => {
-    const { route, store } = setup({ thumbnailer: fakeFfmpeg().thumbnailer })
+    const { route, store } = setup()
     const key = 'a'.repeat(64)
     const response = await route.request(
       store.url(key, { contentType: 'image/jpeg' }),
@@ -421,15 +433,21 @@ describe('media in R2', () => {
 
 describe('media in the local directory only', () => {
   test('nothing is uploaded and the local original stays', async () => {
-    const ffmpeg = fakeFfmpeg()
-    const { c, media, capture } = setup({
-      local: true,
-      thumbnailer: ffmpeg.thumbnailer,
-    })
+    const { c, media, capture } = setup({ local: true })
     media['1'] = [
-      { url: 'https://m.test/v.mp4', kind: 'video', immutableKey: 'x:v:1' },
+      {
+        url: 'https://m.test/v.mp4',
+        kind: 'video',
+        immutableKey: 'x:v:1',
+        thumbnailUrl: 'https://m.test/v.jpg',
+      },
     ]
-    media['2'] = [{ url: 'https://m.test/a.jpg' }]
+    media['2'] = [
+      {
+        url: 'https://m.test/a.jpg',
+        thumbnailUrl: 'https://m.test/a-small.jpg',
+      },
+    ]
     media['3'] = [{ url: 'https://m.test/a.jpg?copy' }]
     for (const id of ['1', '2', '3'])
       expect((await capture(id)).state).toBe('complete')

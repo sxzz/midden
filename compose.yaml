@@ -52,8 +52,8 @@ services:
       interval: 30s
       timeout: 10s
       start_period: 2m
-    # Stopping hands running jobs back to the queue; a download or ffmpeg
-    # may take a moment to notice.
+    # Stopping hands running jobs back to the queue; a download may take a
+    # moment to notice.
     stop_grace_period: 30s
 
   # Continuous copy of the database to R2 (litestream.yml). Off unless .env

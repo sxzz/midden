@@ -45,7 +45,7 @@ import { validateGraph } from './graph.ts'
 import { sha256Hex } from './json.ts'
 import { finalizeSettled, loadCapture, validateExecution } from './lifecycle.ts'
 import { cacheKey, isRemoved, mediaKey } from './media-key.ts'
-import { cachedBlob, enqueueThumbnail, reuseKey } from './media-reuse.ts'
+import { cachedBlob, mediaSize, reuseKey, thumbnailDue } from './media-reuse.ts'
 import { storedOptions } from './options.ts'
 import { rateGate, rateLimitWait } from './rate-limits.ts'
 import { resolveCaptureScope } from './scope.ts'
@@ -526,10 +526,21 @@ function commit(
           altText: resource.altText,
           sensitive: resource.sensitive,
           purpose: resource.purpose,
+          ...mediaSize(resource),
+          thumbnailUrl: resource.thumbnailUrl || null,
         })
         .run()
-      if (reused) enqueueThumbnail(ctx, tx, reused)
-      else if (!removed) ctx.queue.enqueue(tx, 'download', assetId)
+      // Media stored before its thumbnail could be had gets it now.
+      if (
+        removed ||
+        (reused &&
+          !thumbnailDue(tx, {
+            blobId: reused,
+            thumbnailUrl: resource.thumbnailUrl || null,
+          }))
+      )
+        continue
+      ctx.queue.enqueue(tx, 'download', assetId)
     }
     finalizeSettled(ctx, tx, captureId)
   })

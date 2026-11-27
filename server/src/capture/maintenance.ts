@@ -46,7 +46,6 @@ const STALE_CAPTURE = 60 * 60_000
 const RAW_KEEP = 3 * 24 * 60 * 60_000
 const MEDIA_GRACE = 24 * 60 * 60_000
 const BATCH = 100
-const THUMBNAIL_BACKFILL = 2000
 const PRUNE_BATCH = 500
 
 // Free pages go back to the file system 16 MiB at a time, at most every 15
@@ -66,7 +65,6 @@ const SIZE_BATCH = 400
 const SIZE_READS = 8
 const SIZE_BUDGET = 20_000
 
-const thumbnailsCaughtUp = new WeakSet<CaptureContext>()
 const sizesCaughtUp = new WeakSet<CaptureContext>()
 const vacuumedAt = new WeakMap<CaptureContext, number>()
 const BUDGET = 30_000
@@ -98,7 +96,6 @@ export async function runMaintenance(
   await step('media', () => collectMedia(ctx))
   if (slim) await step('raw garbage', () => collectRawGarbage(ctx))
   await step('raw uploads', () => sweepRawUploads(ctx))
-  await step('thumbnails', () => backfillThumbnails(ctx))
   if (slim) await step('thumbnail sizes', () => backfillThumbnailSizes(ctx))
   if (slim) await step('free pages', () => releaseFreePages(ctx))
   if (errors.length) throw new AggregateError(errors, 'maintenance failed')
@@ -369,30 +366,6 @@ export async function collectMedia(ctx: CaptureContext): Promise<number> {
   }
   if (failures.length) throw new AggregateError(failures, 'garbage media')
   return deleted
-}
-
-/** Blobs stored before thumbnails were possible get one now. */
-export function backfillThumbnails(ctx: CaptureContext): number {
-  // New media get thumbnails as they are downloaded; only what predates the
-  // thumbnailer (it is detected at start) is missing, so stop once caught up
-  // instead of scanning every blob each minute.
-  if (!ctx.thumbnailer || thumbnailsCaughtUp.has(ctx)) return 0
-  const missing = ctx.db
-    .select({ id: blobs.id })
-    .from(blobs)
-    .where(
-      and(
-        sql`NOT EXISTS (SELECT 1 FROM ${blobThumbnails} WHERE ${blobThumbnails.blobId} = ${blobs.id})`,
-        sql`NOT EXISTS (SELECT 1 FROM ${jobs} WHERE ${jobs.type} = 'thumbnail' AND ${jobs.ref} = ${blobs.id})`,
-      ),
-    )
-    .limit(THUMBNAIL_BACKFILL)
-    .all()
-  ctx.db.transaction((tx) => {
-    for (const { id } of missing) ctx.queue.enqueue(tx, 'thumbnail', id)
-  })
-  if (missing.length < THUMBNAIL_BACKFILL) thumbnailsCaughtUp.add(ctx)
-  return missing.length
 }
 
 /** A thumbnail's pixel size from the start of its file; 0 when unreadable. */

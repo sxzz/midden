@@ -1,4 +1,3 @@
-import path from 'node:path'
 import { Bot, type ApiClientOptions, type Context } from 'grammy'
 import { handle, type Reply, type Request } from './commands.ts'
 import {
@@ -19,7 +18,6 @@ export interface BotOptions {
   owner: string
   webAppUrl?: string
   version: string
-  ffmpeg: string
   /** grammY's API client options; tests point `apiRoot` at a fake. */
   client?: ApiClientOptions
   /** After each message or button handled, which may have written. */
@@ -108,10 +106,6 @@ export async function startBot(
     db: ctx.db,
     blobs: ctx.blobs,
     botId: String(bot.botInfo.id),
-    // ffprobe ships beside ffmpeg; a bare name is looked up on PATH.
-    ffprobe: options.ffmpeg.includes(path.sep)
-      ? path.join(path.dirname(options.ffmpeg), 'ffprobe')
-      : 'ffprobe',
   })
   const worker = new DeliveryWorker({
     ctx,

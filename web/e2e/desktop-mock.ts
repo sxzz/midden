@@ -276,7 +276,7 @@ export async function mockDesktop(page: Page) {
     if (path === '/v1/queue')
       return json({
         control: { paused: false, types: [] },
-        pausable: ['thumbnail', 'upload', 'raw-upload'],
+        pausable: ['upload', 'raw-upload'],
         backlog: [{ type: 'capture', waiting: 3, running: 1, paused: 0 }],
         rate_limits: [],
         worker: null,

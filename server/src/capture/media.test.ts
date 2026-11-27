@@ -1,10 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
-import process from 'node:process'
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
   assets,
@@ -13,14 +8,15 @@ import {
   captures,
   revisions,
 } from '#db/schema.ts'
+import { getCollection } from '#library/read.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, postGraph } from '#testing/fake-platform.ts'
+import { jpegOf } from '#testing/images.ts'
 import { captureHandlers } from './handlers.ts'
 import { cachedBlob } from './media-reuse.ts'
 import { submit } from './submit.ts'
-import { detectThumbnailer } from './thumbnail.ts'
 import type { Resource } from '#platforms/protocol.ts'
-import type { CaptureContext, Thumbnailer } from './context.ts'
+import type { CaptureContext } from './context.ts'
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4])
 const JPEG2 = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 9, 9, 9, 9])
@@ -35,10 +31,11 @@ afterEach(async () => {
 function setup(
   resources: () => Partial<Resource>[],
   files: Record<string, Buffer | number>,
-  thumbnailer?: Thumbnailer,
 ) {
   const requests: string[] = []
+  const clock = { now: Date.now() }
   ctx = testContext({
+    now: () => clock.now,
     platforms: [
       fakePlatform({
         current: (req) => ({
@@ -59,7 +56,6 @@ function setup(
       }),
     ],
     handlers: captureHandlers,
-    thumbnailer,
     fetch: async (input) => {
       const url = String(input)
       requests.push(url)
@@ -69,7 +65,7 @@ function setup(
     },
   })
   ctx.queue.start()
-  return { ctx, requests }
+  return { ctx, requests, clock }
 }
 
 async function capture(c: CaptureContext, id: string) {
@@ -261,59 +257,195 @@ describe('media', () => {
     // A graph is content, so this capture completes.
     expect((await capture(ctx, '1')).state).toBe('complete')
   })
+})
 
-  const ffmpeg = process.env.FFMPEG
-  test.runIf(ffmpeg)('renders a bounded thumbnail per blob', async () => {
-    const thumbnailer = (await detectThumbnailer(ffmpeg))!
-    const dir = mkdtempSync(path.join(tmpdir(), 'midden-frame-'))
-    const frame = path.join(dir, 'frame.png')
-    execFileSync(ffmpeg!, [
-      '-v',
-      'error',
-      '-f',
-      'lavfi',
-      '-i',
-      'color=red:s=2000x1000',
-      '-frames:v',
-      '1',
-      frame,
+describe('thumbnails from the platform', () => {
+  const ORIGINAL = jpegOf(2000, 1000, 'original')
+  const SMALL = jpegOf(680, 340, 'small')
+  const POSTER = jpegOf(680, 383, 'poster')
+  const files = {
+    'https://m.test/a.jpg': ORIGINAL,
+    'https://m.test/a-small.jpg': SMALL,
+    'https://m.test/v.mp4': Buffer.concat([
+      Buffer.from([0, 0, 0, 0x18]),
+      Buffer.from('ftypmp42'),
+      Buffer.alloc(32, 7),
+    ]),
+    'https://m.test/v.jpg': POSTER,
+  }
+  const image: Partial<Resource> = {
+    url: 'https://m.test/a.jpg',
+    immutableKey: 'x:media:image:1',
+    width: 2000,
+    height: 1000,
+    thumbnailUrl: 'https://m.test/a-small.jpg',
+  }
+  const thumbnails = (c: CaptureContext) =>
+    c.db.select().from(blobThumbnails).all()
+  const view = (c: CaptureContext, done: { collectionId: string }) =>
+    getCollection(c, done.collectionId).assets
+
+  test('an image downloads its smaller size as the thumbnail, sized from the file', async () => {
+    const { ctx, requests } = setup(() => [image], files)
+    const done = await capture(ctx, '1')
+    expect(done.state).toBe('complete')
+    expect(requests).toEqual([
+      'https://m.test/a.jpg',
+      'https://m.test/a-small.jpg',
     ])
+    expect(ctx.db.select().from(assets).get()).toMatchObject({
+      width: 2000,
+      height: 1000,
+      thumbnailUrl: 'https://m.test/a-small.jpg',
+    })
+    const [row] = thumbnails(ctx)
+    expect(row).toMatchObject({
+      state: 'ready',
+      mime: 'image/jpeg',
+      size: SMALL.length,
+      width: 680,
+      height: 340,
+    })
+    expect(await ctx.blobs.stat(row!.key!)).toBe(SMALL.length)
+    expect(view(ctx, done)[0]).toMatchObject({
+      thumbnail: true,
+      width: 680,
+      height: 340,
+    })
+  })
+
+  test('an image with no smaller size stands for itself, sized by the platform', async () => {
+    const { ctx, requests } = setup(
+      () => [{ ...image, thumbnailUrl: undefined }],
+      files,
+    )
+    const done = await capture(ctx, '1')
+    expect(requests).toEqual(['https://m.test/a.jpg'])
+    expect(thumbnails(ctx)).toEqual([])
+    const [asset] = view(ctx, done)
+    expect(asset).toMatchObject({ width: 2000, height: 1000 })
+    expect(asset!.thumbnail).toBeUndefined()
+    expect(asset!.thumbnail_url).toBeUndefined()
+    // The web then shows the original, from the CDN where it is public.
+    expect(asset!.url).toBeTruthy()
+  })
+
+  test('a video downloads its poster; one without a poster has no thumbnail but its shape', async () => {
+    let poster: string | undefined = 'https://m.test/v.jpg'
     const { ctx } = setup(
-      () => [{ url: 'https://m.test/a.png' }, { url: 'https://m.test/b.png' }],
-      {
-        'https://m.test/a.png': readFileSync(frame),
-        'https://m.test/b.png': readFileSync(frame),
-      },
-      thumbnailer,
+      () => [
+        {
+          url: 'https://m.test/v.mp4',
+          kind: 'video',
+          immutableKey: `x:media:video:${poster ? 1 : 2}`,
+          width: 1920,
+          height: 1080,
+          thumbnailUrl: poster,
+        },
+      ],
+      files,
+    )
+    const first = await capture(ctx, '1')
+    expect(view(ctx, first)[0]).toMatchObject({
+      thumbnail: true,
+      width: 680,
+      height: 383,
+    })
+    poster = undefined
+    ctx.db.delete(blobThumbnails).run()
+    const second = await capture(ctx, '2')
+    expect(thumbnails(ctx)).toEqual([])
+    const [asset] = view(ctx, second)
+    expect(asset).toMatchObject({ width: 1920, height: 1080 })
+    expect(asset!.thumbnail_url).toBeUndefined()
+  })
+
+  test('a refused thumbnail fails only itself, at once', async () => {
+    const { ctx, requests } = setup(() => [image], {
+      ...files,
+      'https://m.test/a-small.jpg': 404,
+    })
+    const done = await capture(ctx, '1')
+    expect(done.state).toBe('complete')
+    expect(ctx.db.select().from(assets).get()!.state).toBe('ready')
+    expect(requests.filter((r) => r.endsWith('small.jpg'))).toHaveLength(1)
+    expect(thumbnails(ctx)).toMatchObject([
+      { state: 'failed', error: '媒体服务器拒绝了请求' },
+    ])
+    // Not asked again by the next capture.
+    await capture(ctx, '2')
+    expect(requests.filter((r) => r.endsWith('small.jpg'))).toHaveLength(1)
+  })
+
+  test('a thumbnail on a busy server is tried again without the original, and recorded failed in the end', async () => {
+    const busy = { ...files, 'https://m.test/a-small.jpg': 503 }
+    const { ctx, requests, clock } = setup(() => [image], busy)
+    const done = await capture(ctx, '1')
+    // The capture does not wait for it.
+    expect(done.state).toBe('complete')
+    expect(thumbnails(ctx)).toEqual([])
+    for (let i = 0; i < 3; i++) {
+      clock.now += 60_000
+      await ctx.queue.drain()
+    }
+    expect(requests.filter((r) => r === 'https://m.test/a.jpg')).toHaveLength(1)
+    expect(requests.filter((r) => r.endsWith('small.jpg'))).toHaveLength(3)
+    expect(thumbnails(ctx)).toMatchObject([{ state: 'failed' }])
+    expect(ctx.db.select().from(assets).get()!.state).toBe('ready')
+  })
+
+  test('a thumbnail that works on the next try is kept', async () => {
+    const answers: Record<string, Buffer | number> = {
+      ...files,
+      'https://m.test/a-small.jpg': 503,
+    }
+    const { ctx, clock } = setup(() => [image], answers)
+    await capture(ctx, '1')
+    answers['https://m.test/a-small.jpg'] = SMALL
+    clock.now += 60_000
+    await ctx.queue.drain()
+    expect(thumbnails(ctx)).toMatchObject([{ state: 'ready', width: 680 }])
+  })
+
+  test('media stored before without a thumbnail gets one from the next capture listing it', async () => {
+    let thumbnailUrl: string | undefined
+    const { ctx, requests } = setup(() => [{ ...image, thumbnailUrl }], files)
+    await capture(ctx, '1')
+    expect(thumbnails(ctx)).toEqual([])
+    thumbnailUrl = 'https://m.test/a-small.jpg'
+    const enqueue = vi.spyOn(ctx.queue, 'enqueue')
+    await capture(ctx, '2')
+    expect(requests).toEqual([
+      'https://m.test/a.jpg',
+      'https://m.test/a-small.jpg',
+    ])
+    expect(thumbnails(ctx)).toMatchObject([{ state: 'ready' }])
+    // Once it has one, a capture listing the media queues nothing for it.
+    enqueue.mockClear()
+    await capture(ctx, '3')
+    expect(enqueue.mock.calls.map((call) => call[1])).not.toContain('download')
+  })
+
+  test('a thumbnail of the very same bytes as the original is not recorded', async () => {
+    const { ctx } = setup(
+      () => [{ ...image, thumbnailUrl: 'https://m.test/a.jpg?again' }],
+      { ...files, 'https://m.test/a.jpg?again': ORIGINAL },
     )
     await capture(ctx, '1')
-    const thumbnails = ctx.db.select().from(blobThumbnails).all()
-    expect(thumbnails).toHaveLength(1)
-    expect(thumbnails[0]).toMatchObject({
-      state: 'ready',
-      width: 800,
-      height: 400,
-    })
-    const out = path.join(dir, 'thumb')
-    const { pipeline } = await import('node:stream/promises')
-    const { createWriteStream } = await import('node:fs')
-    await pipeline(
-      await ctx.blobs.read(thumbnails[0]!.key!),
-      createWriteStream(out),
+    expect(thumbnails(ctx)).toEqual([])
+  })
+
+  test('something not an image is no thumbnail', async () => {
+    const { ctx } = setup(
+      () => [{ ...image, thumbnailUrl: 'https://m.test/v.mp4' }],
+      files,
     )
-    const probe = execFileSync(
-      path.join(path.dirname(ffmpeg!), 'ffprobe'),
-      [
-        '-v',
-        'error',
-        '-show_entries',
-        'stream=width,height',
-        '-of',
-        'csv=p=0',
-        out,
-      ],
-      { encoding: 'utf8' },
-    )
-    expect(probe.trim()).toBe('800,400')
+    await capture(ctx, '1')
+    expect(thumbnails(ctx)).toMatchObject([
+      { state: 'failed', error: '不支持的媒体格式' },
+    ])
+    expect(
+      ctx.db.select().from(assets).where(eq(assets.state, 'ready')).all(),
+    ).toHaveLength(1)
   })
 })

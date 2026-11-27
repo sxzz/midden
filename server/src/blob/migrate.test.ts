@@ -158,11 +158,9 @@ describe('media-migrate', () => {
     )
   })
 
-  test('keeps the local file of a blob whose thumbnail is still to be made, or that is a thumbnail', async () => {
-    const due = await addBlob('due')
+  test('keeps the local file of a blob that is a thumbnail', async () => {
     const thumbnail = await addBlob('thumbnail')
     const plain = await addBlob('plain')
-    ctx.queue.enqueue(ctx.db, 'thumbnail', due.id)
     ctx.db
       .insert(blobThumbnails)
       .values({
@@ -174,13 +172,12 @@ describe('media-migrate', () => {
       })
       .run()
     const dry = await migrateMedia(ctx.db, store, { print, dryRun: true })
-    expect(dry).toMatchObject({ localDeleted: 1, localKept: 2 })
+    expect(dry).toMatchObject({ localDeleted: 1, localKept: 1 })
     const summary = await migrateMedia(ctx.db, store, { print })
-    expect(summary).toMatchObject({ marked: 3, localDeleted: 1, localKept: 2 })
+    expect(summary).toMatchObject({ marked: 2, localDeleted: 1, localKept: 1 })
     expect(await store.local.stat(plain.hash)).toBeUndefined()
-    for (const kept of [due, thumbnail])
-      expect(await store.local.stat(kept.hash)).toBe(kept.body.length)
-    expect(remoteAt(due.id)).toBeInstanceOf(Date)
+    expect(await store.local.stat(thumbnail.hash)).toBe(thumbnail.body.length)
+    expect(remoteAt(thumbnail.id)).toBeInstanceOf(Date)
   })
 
   test('a blob the server uploads while it runs is no problem', async () => {
@@ -359,10 +356,9 @@ describe('media-prune-local', () => {
     const wrong = await addBlob('wrong')
     const bare = await addBlob('bare')
     const shared = await addBlob('also a thumbnail')
-    const due = await addBlob('thumbnail due')
     // Recorded with their local files kept, as before local files went
     // with the upload.
-    for (const blob of [confirmed, wrong, bare, shared, due]) {
+    for (const blob of [confirmed, wrong, bare, shared]) {
       await store.upload(blob.hash, 'image/jpeg')
       ctx.db
         .update(blobs)
@@ -370,7 +366,6 @@ describe('media-prune-local', () => {
         .where(eq(blobs.id, blob.id))
         .run()
     }
-    ctx.queue.enqueue(ctx.db, 'thumbnail', due.id)
     // Changed in the bucket since: the ETag no longer matches.
     s3.objects.get(wrong.key)!.etag = '0'.repeat(32)
     // Without a checksum to compare.
@@ -391,22 +386,22 @@ describe('media-prune-local', () => {
       deleted: 1,
       mismatched: 1,
       unverified: 1,
-      thumbnails: 2,
+      thumbnails: 1,
     })
     expect(await store.local.stat(confirmed.hash)).toBeDefined()
     expect(remoteAt(wrong.id)).toBeInstanceOf(Date)
 
     const summary = await pruneLocalMedia(ctx.db, store, { print })
     expect(summary).toMatchObject({
-      blobs: 5,
+      blobs: 4,
       deleted: 1,
       bytes: confirmed.body.length,
       mismatched: 1,
       unverified: 1,
-      thumbnails: 2,
+      thumbnails: 1,
     })
     expect(await store.local.stat(confirmed.hash)).toBeUndefined()
-    for (const kept of [pending, wrong, bare, shared, due])
+    for (const kept of [pending, wrong, bare, shared])
       expect(await store.local.stat(kept.hash)).toBeDefined()
     // The wrong copy is no longer handed out; the next migration redoes it.
     expect(remoteAt(wrong.id)).toBeNull()

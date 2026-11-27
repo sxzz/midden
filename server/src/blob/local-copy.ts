@@ -1,19 +1,16 @@
-import { and, eq } from 'drizzle-orm'
-import { blobThumbnails, jobs, removedMedia } from '#db/schema.ts'
+import { eq } from 'drizzle-orm'
+import { blobThumbnails, removedMedia } from '#db/schema.ts'
 import type { Executor } from '#db/client.ts'
 
 /**
- * Why the local original of a blob the bucket holds has to stay for now,
- * or undefined when it can go:
- * - `thumbnail`: its key is also a thumbnail's file, and thumbnails live
- *   only locally;
- * - `thumbnail-due`: its thumbnail job has not finished, and renders from
- *   the local file. That job asks for the deletion again once done.
+ * Why the local original of a blob the bucket holds has to stay, or
+ * undefined when it can go: `thumbnail` when its key is also a thumbnail's
+ * file, as thumbnails live only locally.
  */
 export function localCopyHold(
   db: Executor,
-  blob: { id: string; hash: string },
-): 'thumbnail' | 'thumbnail-due' | undefined {
+  blob: { hash: string },
+): 'thumbnail' | undefined {
   const thumbnail =
     db
       .select({ id: blobThumbnails.blobId })
@@ -26,16 +23,4 @@ export function localCopyHold(
       .where(eq(removedMedia.thumbnailKey, blob.hash))
       .get()
   if (thumbnail) return 'thumbnail'
-  const settled = db
-    .select({ id: blobThumbnails.blobId })
-    .from(blobThumbnails)
-    .where(eq(blobThumbnails.blobId, blob.id))
-    .get()
-  if (settled) return
-  const due = db
-    .select({ id: jobs.id })
-    .from(jobs)
-    .where(and(eq(jobs.type, 'thumbnail'), eq(jobs.ref, blob.id)))
-    .get()
-  if (due) return 'thumbnail-due'
 }

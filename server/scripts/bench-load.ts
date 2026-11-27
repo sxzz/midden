@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 // Load test: a heavy update on a copy of a database, with the web process
 // measured from outside meanwhile (/healthz and a list request).
 //
@@ -25,9 +26,9 @@
 // (bench/lag.json); the result gives its distribution during the update.
 //
 // Every post has an image, one in ten a video too; media upload to a fake
-// R2 bucket, raw responses to a fake raw bucket, thumbnails go through
-// ffmpeg (FFMPEG, default `ffmpeg`).
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+// R2 bucket, raw responses to a fake raw bucket, and each has a thumbnail
+// to download, as from X.
+import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -39,10 +40,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { FakeS3 } from '#testing/fake-s3.ts'
+import { jpegOf } from '#testing/images.ts'
 import { PageOwners, walReport } from './bench-load/wal-report.ts'
 import type { Sample } from './bench-load/probe.ts'
 import type { WalLog } from './bench-load/wal-meter.ts'
-import type { Buffer } from 'node:buffer'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const [dataArg, mode, ...rest] = process.argv.slice(2)
@@ -60,7 +61,6 @@ const COUNT = Number(options.count ?? 300)
 const SECONDS = Number(options.seconds ?? 900)
 const DATA = path.resolve(dataArg)
 const DB = path.join(DATA, 'midden.db')
-const FFMPEG = process.env.FFMPEG || 'ffmpeg'
 const SECRET = 's'.repeat(48)
 const WAL_LOG = options.wal ? path.join(DATA, 'bench', 'wal-log.json') : ''
 const LAG_LOG = path.join(DATA, 'bench', 'lag.json')
@@ -77,26 +77,28 @@ async function freePort(): Promise<number> {
   return port
 }
 
+/**
+ * Sample files the size of what X serves: an image, its thumbnail and a
+ * short video. Only their first bytes are real; the rest is filler.
+ */
 function samples() {
   const dir = path.join(DATA, 'bench')
   mkdirSync(dir, { recursive: true })
-  const image = path.join(dir, 'sample.jpg')
-  const video = path.join(dir, 'sample.mp4')
-  const run = (args: string[]) => {
-    const result = spawnSync(FFMPEG, ['-y', '-loglevel', 'error', ...args])
-    if (result.status !== 0) throw new Error(String(result.stderr))
+  const write = (name: string, head: Buffer, size: number) => {
+    const file = path.join(dir, name)
+    writeFileSync(file, Buffer.concat([head, Buffer.alloc(size - head.length)]))
+    return file
   }
-  run(['-f', 'lavfi', '-i', 'testsrc=size=1280x960', '-frames:v', '1', image])
-  run([
-    '-f',
-    'lavfi',
-    '-i',
-    'testsrc=duration=3:size=640x360:rate=24',
-    '-pix_fmt',
-    'yuv420p',
-    video,
+  const mp4 = Buffer.concat([
+    Buffer.from([0, 0, 0, 0x18]),
+    Buffer.from('ftypmp42'),
+    Buffer.alloc(12),
   ])
-  return { image, video }
+  return {
+    image: write('sample.jpg', jpegOf(1280, 960), 160_000),
+    thumbnail: write('sample-small.jpg', jpegOf(680, 510), 40_000),
+    video: write('sample.mp4', mp4, 400_000),
+  }
 }
 
 /** An API token, written straight into the copy (no migration runs). */
@@ -178,7 +180,7 @@ function stats(list: Sample[]) {
   }
 }
 
-const media = await samples()
+const media = samples()
 const s3Media = await new FakeS3({ bucket: 'media' }).start()
 const s3Raw = await new FakeS3({ bucket: 'raw' }).start()
 const apiToken = token()
@@ -192,10 +194,10 @@ const env = {
   SECRET_KEY: SECRET,
   NODE_ENV: 'production',
   LOG_LEVEL: 'info',
-  FFMPEG,
   BENCH_S3_MEDIA: s3Media.endpoint,
   BENCH_S3_RAW: s3Raw.endpoint,
   BENCH_IMAGE: media.image,
+  BENCH_THUMBNAIL: media.thumbnail,
   BENCH_VIDEO: media.video,
   BENCH_LAG_LOG: LAG_LOG,
   ...(WAL_LOG ? { BENCH_WAL_LOG: WAL_LOG } : {}),

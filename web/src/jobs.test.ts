@@ -20,7 +20,7 @@ const worker: NonNullable<QueueState['worker']> = {
 }
 const state = (over: Partial<QueueState> = {}): QueueState => ({
   control: { paused: false, types: [] },
-  pausable: ['thumbnail', 'upload', 'raw-upload'],
+  pausable: ['upload', 'raw-upload'],
   backlog: [],
   rate_limits: [],
   worker,

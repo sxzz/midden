@@ -83,7 +83,6 @@ function setup(images: number) {
       db: ctx.db,
       blobs: ctx.blobs,
       botId: '1',
-      ffprobe: 'ffprobe',
     }),
   })
   return { ctx, worker, calls }

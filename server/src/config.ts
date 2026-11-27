@@ -32,7 +32,6 @@ const Env = v.object({
   ),
   // The built web app served under /app/.
   WEB_DIR: v.optional(v.pipe(v.string(), v.nonEmpty())),
-  FFMPEG: v.optional(v.pipe(v.string(), v.nonEmpty()), 'ffmpeg'),
   // Docker sets it to production; the dev server leaves it unset.
   NODE_ENV: v.optional(v.string()),
   SECRET_KEY: v.pipe(
@@ -177,7 +176,6 @@ export interface Config {
   port: number
   logLevel: v.InferOutput<typeof Env>['LOG_LEVEL']
   secretKey: string
-  ffmpeg: string
   webDir: string
   telegram?: { token: string; owner: string }
   webAppUrl?: string
@@ -232,7 +230,6 @@ export function loadConfig(
     port: parsed.PORT,
     logLevel: parsed.LOG_LEVEL,
     secretKey: parsed.SECRET_KEY,
-    ffmpeg: parsed.FFMPEG,
     webDir: path.resolve(
       parsed.WEB_DIR ??
         fileURLToPath(new URL('../../web/dist', import.meta.url)),

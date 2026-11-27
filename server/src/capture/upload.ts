@@ -13,10 +13,7 @@ export const UPLOAD_ATTEMPTS = 12
 const FIRST_RETRY = 30_000
 const LONGEST_RETRY = 60 * 60_000
 
-/**
- * A new blob is uploaded once its file is in the local store; an uploaded
- * one whose local original waited (for its thumbnail) has it deleted.
- */
+/** A new blob is uploaded once its file is in the local store. */
 export function enqueueUpload(
   ctx: CaptureContext,
   executor: Executor,
@@ -96,17 +93,6 @@ async function deleteLocalOriginal(
     if (!current?.remoteAt || localCopyHold(ctx.db, current)) return
     await ctx.blobs.deleteLocal?.(current.hash)
   })
-}
-
-/**
- * A blob's thumbnail job is done, so its local original no longer has to
- * wait for it: when the bucket holds the blob, an upload job deletes it.
- * Checked after the thumbnail is recorded, as the upload job records the
- * blob before checking the thumbnail: one of the two sees the other done.
- */
-export function thumbnailDone(ctx: CaptureContext, blobId: string): void {
-  if (!ctx.blobs.deleteLocal) return
-  if (loadBlob(ctx, blobId)?.remoteAt) enqueueUpload(ctx, ctx.db, blobId)
 }
 
 export function failUpload(

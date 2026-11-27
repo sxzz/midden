@@ -771,10 +771,10 @@ describe('writes', () => {
     const f = await setup()
     const paused = await f.call('/jobs', {
       method: 'PATCH',
-      body: { paused: true, paused_types: ['thumbnail'] },
+      body: { paused: true, paused_types: ['upload'] },
     })
     expect(paused.json).toEqual(
-      expect.objectContaining({ paused: true, paused_types: ['thumbnail'] }),
+      expect.objectContaining({ paused: true, paused_types: ['upload'] }),
     )
     expect(
       (await f.call('/jobs', { method: 'PATCH', body: { paused: false } })).json

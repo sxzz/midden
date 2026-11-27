@@ -23,7 +23,6 @@ function launch(options: Partial<LaunchOptions> = {}) {
     token: '1:test',
     owner: '7',
     version: 'test',
-    ffmpeg: 'ffmpeg',
     client: { apiRoot: telegram.apiRoot },
     requestTimeoutMs: 100,
     retryDelayMs: 10,

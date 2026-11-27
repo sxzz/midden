@@ -3,7 +3,6 @@ import { hexToBase64, type ObjectHead, type S3Bucket } from './s3.ts'
 import {
   IMMUTABLE,
   isNotFound,
-  notFound,
   objectPath,
   type BlobStore,
   type ByteRange,
@@ -21,9 +20,6 @@ export interface BucketStoreOptions {
   publicUrl: string
   purge: Purge
 }
-
-// Long enough for ffmpeg to read what it needs.
-const PRESIGN_SECONDS = 60 * 60
 
 /** The local file no longer holds the bytes its key names. */
 export class CorruptBlobError extends Error {
@@ -129,13 +125,6 @@ export class BucketBlobStore implements BlobStore {
     // per request: it streams through this process.
     if (options.remote && !options.filename) return this.publicUrl(key)
     return this.local.url(key, options)
-  }
-
-  async source(key: string): Promise<string> {
-    if ((await this.local.stat(key)) !== undefined) return this.local.path(key)
-    const path = objectPath(key)
-    if (!(await this.bucket.head(path))) throw notFound(key)
-    return this.bucket.presign(path, PRESIGN_SECONDS)
   }
 
   async upload(

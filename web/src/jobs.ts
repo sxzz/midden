@@ -5,7 +5,6 @@ import type { QueueState } from './api'
 const TYPE_LABELS: Record<string, string> = {
   capture: '抓取',
   download: '下载媒体',
-  thumbnail: '缩略图',
   upload: '上传媒体到 R2',
   'raw-upload': '原始响应移到存储桶',
   related: '展开时间线',

@@ -4,7 +4,6 @@ import { copyFile, mkdir, open, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import {
   assertBlobKey,
-  notFound,
   objectPath,
   type BlobStore,
   type ByteRange,
@@ -81,10 +80,5 @@ export class FsBlobStore implements BlobStore {
       contentType: options.contentType,
       ...(options.filename ? { filename: options.filename } : {}),
     })
-  }
-
-  async source(key: string): Promise<string> {
-    if ((await this.stat(key)) === undefined) throw notFound(key)
-    return this.path(key)
   }
 }

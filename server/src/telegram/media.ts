@@ -1,15 +1,10 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { and, eq } from 'drizzle-orm'
 import { GrammyError, InputFile, type Api } from 'grammy'
-import { withSource, type BlobStore } from '#blob/store.ts'
 import { telegramMedia } from '#db/schema.ts'
+import type { BlobStore } from '#blob/store.ts'
 import type { Database } from '#db/client.ts'
 import type { AssetView } from '#library/views.ts'
 import type { InlineKeyboardMarkup, Message, MessageEntity } from 'grammy/types'
-
-const run = promisify(execFile)
-const PROBE_TIMEOUT = 15_000
 
 type Representation = 'photo' | 'video' | 'document'
 
@@ -18,8 +13,6 @@ export interface MediaSender {
   db: Database
   blobs: BlobStore
   botId: string
-  /** ffprobe executable, for video dimensions. */
-  ffprobe: string
 }
 
 export interface Target {
@@ -62,23 +55,15 @@ function isInvalidFileId(error: unknown): boolean {
 const isBadRequest = (error: unknown) =>
   error instanceof GrammyError && error.error_code === 400
 
-class ProbeError extends Error {
-  override name = 'ProbeError'
-}
-
-/** Display size of a video, honoring pixel aspect ratio and rotation. */
-export function displaySize(probe: {
-  width?: number
-  height?: number
-  sample_aspect_ratio?: string
-  rotation?: number
-}): { width: number; height: number } | undefined {
-  let width = probe.width ?? 0
-  let height = probe.height ?? 0
-  const [num, den] = (probe.sample_aspect_ratio ?? '').split(':').map(Number)
-  if (num && den && num > 0 && den > 0) width = Math.round((width * num) / den)
-  if (Math.abs(probe.rotation ?? 0) % 180 === 90)
-    [width, height] = [height, width]
+/**
+ * A video's size for Telegram, which otherwise shows it square until it
+ * plays: what the platform said of it (or its thumbnail's, in the same
+ * proportions). Undefined when unknown or past Telegram's limits.
+ */
+export function videoSize(
+  asset: Pick<AssetView, 'width' | 'height'>,
+): { width: number; height: number } | undefined {
+  const { width, height } = asset
   if (!width || !height || width > 65_535 || height > 65_535) return undefined
   return { width, height }
 }
@@ -139,50 +124,13 @@ export class Media {
     return new InputFile(() => blobs.read(asset.sha256!), name)
   }
 
-  async #probe(asset: AssetView) {
-    try {
-      // A local path, or a URL ffprobe reads only the ranges it needs from.
-      const { stdout } = await withSource(
-        this.#s.blobs,
-        asset.sha256!,
-        (input) =>
-          run(
-            this.#s.ffprobe,
-            [
-              '-v',
-              'error',
-              '-select_streams',
-              'v:0',
-              '-show_entries',
-              'stream=width,height,sample_aspect_ratio:stream_side_data=rotation',
-              '-of',
-              'json',
-              input,
-            ],
-            { timeout: PROBE_TIMEOUT },
-          ),
-      )
-      const stream = JSON.parse(stdout).streams?.[0] ?? {}
-      const rotation = stream.side_data_list?.find(
-        (d: { rotation?: number }) => typeof d.rotation === 'number',
-      )?.rotation
-      const size = displaySize({ ...stream, rotation })
-      if (!size) throw new ProbeError('unusable video size')
-      return size
-    } catch (error) {
-      throw error instanceof ProbeError ? error : new ProbeError(String(error))
-    }
-  }
-
   /** One media message input, from the cache or as an upload. */
-  async #input(asset: AssetView, kind: Representation, useCache: boolean) {
+  #input(asset: AssetView, kind: Representation, useCache: boolean) {
     const cached = useCache ? this.#cached(asset.sha256!, kind) : undefined
     const media = cached ?? this.#file(asset)
     const spoiler = asset.sensitive && kind !== 'document'
     if (kind === 'video') {
-      const size: { width?: number; height?: number } = cached
-        ? {}
-        : await this.#probe(asset)
+      const size = cached ? undefined : videoSize(asset)
       return {
         type: 'video' as const,
         media,
@@ -221,7 +169,7 @@ export class Media {
     keyboard: InlineKeyboardMarkup | undefined,
     useCache: boolean,
   ): Promise<Message> {
-    const input = await this.#input(asset, kind, useCache)
+    const input = this.#input(asset, kind, useCache)
     const common = {
       caption: caption.text || undefined,
       caption_entities: caption.text ? caption.entities : undefined,
@@ -266,10 +214,7 @@ export class Media {
     try {
       return await this.#sendOne(target, asset, kind, caption, undefined, true)
     } catch (error) {
-      if (
-        kind !== 'document' &&
-        (isBadRequest(error) || error instanceof ProbeError)
-      )
+      if (kind !== 'document' && isBadRequest(error))
         return this.#sendOne(
           target,
           asset,
@@ -288,8 +233,8 @@ export class Media {
     kinds: Representation[],
     useCache: boolean,
   ): Promise<Message[]> {
-    const inputs = await Promise.all(
-      assets.map((asset, i) => this.#input(asset, kinds[i]!, useCache)),
+    const inputs = assets.map((asset, i) =>
+      this.#input(asset, kinds[i]!, useCache),
     )
     try {
       const messages = await this.#s.api.sendMediaGroup(
@@ -321,7 +266,7 @@ export class Media {
     try {
       return await this.#sendGroup(target, assets, kinds, true)
     } catch (error) {
-      if (!webm && (isBadRequest(error) || error instanceof ProbeError))
+      if (!webm && isBadRequest(error))
         return this.#sendGroup(
           target,
           assets,

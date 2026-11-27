@@ -1,7 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { mkdtempSync, writeFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { text } from 'node:stream/consumers'
@@ -11,7 +10,7 @@ import { FAKE_PUBLIC, FakeS3 } from '#testing/fake-s3.ts'
 import { recordingLogger } from '#testing/logs.ts'
 import { mediaRoutes } from './route.ts'
 import { MediaSigner } from './signer.ts'
-import { IMMUTABLE, objectPath, withSource } from './store.ts'
+import { IMMUTABLE, objectPath } from './store.ts'
 import type { BucketBlobStore } from './bucket-store.ts'
 
 const BODY = Buffer.from('a media file, as bytes')
@@ -95,25 +94,6 @@ describe('bucket store', () => {
     expect(await text(await store.read(KEY))).toBe(BODY.toString())
     expect(s3.requests).toEqual([])
     await expect(store.read('0'.repeat(64))).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-  })
-
-  test('ffmpeg reads a local file by path, else a presigned URL', async () => {
-    s3.seed(objectPath(KEY), BODY)
-    const url = await store.source(KEY)
-    expect(url).toMatch(
-      new RegExp(String.raw`^${s3.endpoint}/media/${objectPath(KEY)}\?`),
-    )
-    const params = new URL(url).searchParams
-    expect(params.get('X-Amz-Expires')).toBe('3600')
-    expect(params.get('X-Amz-Signature')).toBeTruthy()
-    expect(url).not.toContain('test-secret')
-    const response = await fetch(url, { headers: { Range: 'bytes=0-0' } })
-    expect(response.status).toBe(206)
-    await putLocal()
-    expect(await store.source(KEY)).toBe(store.local.path(KEY))
-    await expect(store.source('0'.repeat(64))).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })
@@ -217,34 +197,5 @@ describe('bucket store', () => {
     expect(await store.local.stat(KEY)).toBeUndefined()
     expect(s3.objects.has(objectPath(KEY))).toBe(true)
     expect(await text(await store.read(KEY))).toBe(BODY.toString())
-  })
-
-  test('a program given the local path that goes before it opens it runs again on the bucket', async () => {
-    await putLocal()
-    await store.upload(KEY, 'image/jpeg')
-    const inputs: string[] = []
-    const read = await withSource(store, KEY, async (input) => {
-      inputs.push(input)
-      // Deleted after `source` found it, before the program opened it.
-      if (inputs.length === 1) await store.deleteLocal(KEY)
-      return input.startsWith('http')
-        ? (await fetch(input)).text()
-        : readFile(input, 'utf8')
-    })
-    expect(read).toBe(BODY.toString())
-    expect(inputs[0]).toBe(store.local.path(KEY))
-    expect(inputs[1]).toMatch(/X-Amz-Signature=/)
-
-    // Failures with the file still there, or of a URL, are not retried.
-    await putLocal()
-    let calls = 0
-    const fail = () => {
-      calls++
-      return Promise.reject(new Error('unreadable'))
-    }
-    await expect(withSource(store, KEY, fail)).rejects.toThrow('unreadable')
-    await store.deleteLocal(KEY)
-    await expect(withSource(store, KEY, fail)).rejects.toThrow('unreadable')
-    expect(calls).toBe(2)
   })
 })

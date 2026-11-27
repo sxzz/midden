@@ -5,7 +5,6 @@ import { openMediaStore } from '#blob/open.ts'
 import { MediaSigner } from '#blob/signer.ts'
 import { isPermanent } from '#capture/errors.ts'
 import { captureHandlers } from '#capture/handlers.ts'
-import { detectThumbnailer } from '#capture/thumbnail.ts'
 import { deriveKey } from '#crypto.ts'
 import { openDatabase, waitForMigrations, type Database } from '#db/client.ts'
 import { JobQueue } from '#jobs/queue.ts'
@@ -86,8 +85,6 @@ export async function openRuntime(
     secret: deriveKey(config.secretKey, 'media-url'),
   })
   const vault = new Vault(deriveKey(config.secretKey, 'credentials'))
-  const thumbnailer = await detectThumbnailer(config.ffmpeg)
-  if (!thumbnailer) logger.warn('ffmpeg not found; thumbnails are disabled')
   logger.info({ store: config.media.store }, 'media store')
   // Before anything listens: without working R2 credentials this throws and
   // the process exits, as with any invalid configuration, so /healthz never
@@ -126,7 +123,6 @@ export async function openRuntime(
     mediaLocks: new KeyedLock(),
     ...(raw ? { raw } : {}),
     ...(overrides.fetch ? { fetch: overrides.fetch } : {}),
-    thumbnailer,
   }
   return { config, logger, db, ctx, signer, throttle, cleanups }
 }

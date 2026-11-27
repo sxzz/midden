@@ -11,7 +11,6 @@ import { failCapture, isActive, loadCapture } from './lifecycle.ts'
 import { failRelated, runRelated } from './related.ts'
 import { failRelations, runRelations } from './relations.ts'
 import { runSourceCheck } from './source-state.ts'
-import { failThumbnail, runThumbnail } from './thumbnail.ts'
 import { failUpdate, runUpdate } from './updates.ts'
 import { failUpload, runUpload, UPLOAD_ATTEMPTS } from './upload.ts'
 import type { Job, JobHandler } from '#jobs/queue.ts'
@@ -70,13 +69,6 @@ export function captureHandlers(
       queue: 'download',
       run: (job) => runDownload(context(), job),
       fail: (job, error) => failDownload(context(), job.ref, safeError(error)),
-    },
-    thumbnail: {
-      // Shares the download workers but yields to media someone waits for.
-      queue: 'download',
-      priority: 4,
-      run: (job) => runThumbnail(context(), job),
-      fail: (job, error) => failThumbnail(context(), job.ref, safeError(error)),
     },
     // Copies a new blob to the remote media store, if there is one.
     upload: {

@@ -30,7 +30,7 @@ FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS node
 # is taken from the Node image, leaving out npm, Yarn and Corepack. The node
 # user keeps the official image's IDs, which own existing data volumes.
 FROM alpine:${ALPINE_VERSION}
-RUN apk add --no-cache ffmpeg libstdc++ && \
+RUN apk add --no-cache libstdc++ && \
   addgroup -g 1000 node && adduser -u 1000 -G node -s /bin/sh -D node
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 WORKDIR /srv

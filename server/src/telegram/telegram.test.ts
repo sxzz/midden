@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest'
+import { videoSize } from './media.ts'
 import { deliveryParts } from './parts.ts'
 import {
   appURL,
@@ -257,6 +258,17 @@ describe('deliveryParts', () => {
         entities: [],
       },
     ])
+  })
+})
+
+describe('video sizes', () => {
+  test('come from the asset, with nothing run on the file', () => {
+    expect(videoSize(asset('v', { width: 1920, height: 1080 }))).toEqual({
+      width: 1920,
+      height: 1080,
+    })
+    expect(videoSize(asset('v'))).toBeUndefined()
+    expect(videoSize(asset('v', { width: 70_000, height: 10 }))).toBeUndefined()
   })
 })
 

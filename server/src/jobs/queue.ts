@@ -173,7 +173,7 @@ const RESCUE_EVERY = 5000
 const FINISH_DELAY = 50
 const IDLE_AFTER = 10_000
 /** Types whose priorities no other type in their queue shares. */
-export const PAUSABLE_TYPES = ['thumbnail', 'upload', 'raw-upload'] as const
+export const PAUSABLE_TYPES = ['upload', 'raw-upload'] as const
 
 /** Exponential backoff from 2 s, capped at about four minutes. */
 export function backoff(attempt: number): number {
