@@ -64,13 +64,15 @@ export function avatarOf(entity?: Entity): Asset | undefined {
 }
 /**
  * A profile's banner (主页封面), picked like the avatar: one saved here wins,
- * else the platform's own address (X only; see `remote_url`).
+ * else the platform's own address (X only; see `remote_url`), else one the
+ * owner removed (已移除) or is restoring, shown by its kept thumbnail.
  */
 export function bannerOf(entity?: Entity): Asset | undefined {
   const banners = entity?.assets?.filter((asset) => asset.purpose === 'banner')
   return (
     banners?.find((asset) => asset.state === 'ready') ??
-    banners?.find((asset) => asset.remote_url)
+    banners?.find((asset) => asset.remote_url) ??
+    banners?.find((asset) => asset.state === 'removed' || asset.restoring)
   )
 }
 /** The avatar a header may show: saved or remote, and not sensitive. */

@@ -320,15 +320,19 @@ describe('Vapor collection rendering', () => {
       )
       expect(el.querySelector('.cover button')).toBeNull()
     })
-    it('collapses without a banner, or one that was removed', () => {
-      let el = profile('x.profile', [])
+    it('collapses without a banner', () => {
+      const el = profile('x.profile', [])
       expect(el.querySelector('.cover')).toBeNull()
       expect(el.querySelector('article.with-cover')).toBeNull()
       expect(el.textContent).toContain('山野记录')
-      unmount()
-      // Removed media keeps a thumbnail, which must not stand in for it.
-      el = profile('x.profile', [banner({ state: 'removed', url: undefined })])
-      expect(el.querySelector('.cover')).toBeNull()
+    })
+    it('shows a removed banner as removed, never as the banner itself', () => {
+      const el = profile('x.profile', [
+        banner({ state: 'removed', url: undefined }),
+      ])
+      // Its kept thumbnail, under 已移除, opening nothing.
+      expect(el.querySelector('.cover-kept')?.textContent).toContain('已移除')
+      expect(el.querySelector('.cover-button')).toBeNull()
     })
     it('leaves a sensitive banner out until sensitive media is shown', () => {
       const sensitive = banner({ sensitive: true })

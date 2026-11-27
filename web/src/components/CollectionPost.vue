@@ -3,8 +3,11 @@ import { computed, shallowRef, watch } from 'vue'
 import { previewURL, type Asset, type Collection } from '../api'
 import {
   date,
+  isRemoved,
+  isRestoring,
   mentionParts,
   present,
+  restoreLabel,
   sourceStateNotice,
   storageSize,
   warningList,
@@ -88,6 +91,13 @@ const bannerAssets = computed(() =>
     : [],
 )
 const bannerViewable = computed(() => bannerAssets.value[0]?.state === 'ready')
+/** A removed banner (or one downloading again) keeps its box, as media does. */
+const bannerKept = computed(() => {
+  const banner = bannerAssets.value[0]
+  return banner && (isRemoved(banner) || isRestoring(banner))
+    ? banner
+    : undefined
+})
 watch(bannerAssets, () => {
   previewBanner.value = false
 })
@@ -114,6 +124,29 @@ const warnings = computed(() =>
           loading="eager"
         />
       </button>
+      <div v-else-if="bannerKept" class="cover-kept">
+        <LoadingImage
+          v-if="bannerKept.thumbnail_url"
+          class="cover-image"
+          :src="bannerKept.thumbnail_url"
+          alt=""
+          loading="eager"
+        />
+        <span v-if="isRestoring(bannerKept)" class="cover-label" role="status"
+          >下载中</span
+        >
+        <span v-else class="cover-label">
+          已移除
+          <button
+            v-if="editable"
+            type="button"
+            class="cover-restore"
+            @click="emit('restore', bannerKept)"
+          >
+            {{ restoreLabel(bannerKept) }}
+          </button>
+        </span>
+      </div>
       <LoadingImage
         v-else
         class="cover-image"
@@ -288,6 +321,35 @@ const warnings = computed(() =>
 .cover-button:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: -2px;
+}
+/* A removed banner: its kept thumbnail, dimmed under a small label. */
+.cover-kept {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 100%;
+}
+.cover-kept .cover-image {
+  position: absolute;
+  inset: 0;
+  opacity: 0.45;
+}
+.cover-label {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 13px;
+}
+.cover-restore {
+  padding: 0;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
 }
 .image-shell.cover-image {
   width: 100%;

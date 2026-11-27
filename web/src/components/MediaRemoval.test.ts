@@ -399,6 +399,59 @@ describe('the profile detail', () => {
     expect(toastState.value).toBeUndefined()
   })
 
+  it('shows a removed banner in its box, with the restore', async () => {
+    const sent: { path: string; body?: unknown }[] = []
+    const banner = {
+      ...removedVideo,
+      id: 'b',
+      kind: 'image',
+      purpose: 'banner',
+      recoverable: true as const,
+    }
+    const withBanner = {
+      ...profile,
+      graph: {
+        ...profile.graph!,
+        entities: [{ ...profile.graph!.entities[0]!, assets: [banner] }],
+      },
+    }
+    mockApi((path, request: Request) => {
+      if (request.method === 'POST')
+        sent.push({ path, body: JSON.parse(request.body ?? 'null') })
+      if (path === '/collections/profile') return withBanner
+      if (path.endsWith('/availability')) return { available: true }
+      if (path === '/collections/profile/update') return { older: false }
+      if (path === '/media-removals/restore') return { state: 'ready' }
+      if (path.startsWith('/shares')) return []
+      if (path.endsWith('/annotation')) return { tags: [], note: '' }
+      if (path.startsWith('/tags')) return []
+      if (path.includes('/collections?') || path.includes('/history'))
+        return { items: [] }
+      return {}
+    })
+    const el = document.createElement('div')
+    document.body.append(el)
+    const app = createVaporApp(CollectionDetail, { id: 'profile' })
+    app.mount(el)
+    unmount = () => app.unmount()
+    const cover = await vi.waitFor(() => {
+      const found = el.querySelector('.cover-kept')
+      expect(found).not.toBeNull()
+      return found!
+    })
+    expect(cover.querySelector('img')?.getAttribute('src')).toBe('/media/thumb')
+    expect(cover.textContent).toContain('已移除')
+    buttons(cover, '恢复')[0]!.click()
+    await vi.waitFor(() =>
+      expect(sent).toEqual([
+        {
+          path: '/media-removals/restore',
+          body: { collection: 'profile', asset: 'b' },
+        },
+      ]),
+    )
+  })
+
   it('removes all of its videos as a job, stating the counts first', async () => {
     const sent: string[] = []
     const removal = {
