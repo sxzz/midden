@@ -216,7 +216,7 @@ test('terms are completed: keys, values and handles the library knows', async ({
   await page.goto('/')
   await expect(page.getByText('第 1 只猫')).toBeVisible()
   // The list and its count are in, so nothing rewrites the box meanwhile.
-  await expect(page.locator('.total')).toHaveText('3 条')
+  await expect(page.locator('.total')).toHaveText('3条')
   await box(page).click()
   await page.keyboard.type('cat ha')
   await expect(box(page)).toHaveValue('cat ha')
