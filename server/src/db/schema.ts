@@ -535,6 +535,8 @@ export const entityVersions = sqliteTable(
     index('entity_versions_username')
       .on(sql`lower(${t.data} ->> '$.username')`)
       .where(sql`${t.data} ->> '$.username' IS NOT NULL`),
+    // An entity's newest version, one seek (`capture/identity.ts`).
+    index('entity_versions_newest').on(t.entityId, t.createdAt, t.id),
   ],
 )
 

@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, gte, isNotNull, lt, sql } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import {
   captures,
@@ -13,8 +13,10 @@ import { isAppError } from '#errors.ts'
 import { SnoozeError, type Job } from '#jobs/queue.ts'
 import { isProviderFailure, type Platform } from '#platforms/platform.ts'
 import { traceUpstream } from '#platforms/upstream.ts'
+import { pace, type CaptureContext } from './context.ts'
 import { classifyFailure, isPermanent, safeError } from './errors.ts'
 import { holdConnection } from './fetch.ts'
+import { chunks } from './finalize.ts'
 import { failRequest, HANDLE, knownAccount, loadRequest } from './identity.ts'
 import { failCapture } from './lifecycle.ts'
 import { rateGate, rateLimitWait } from './rate-limits.ts'
@@ -23,7 +25,6 @@ import { selectedConnection } from './records.ts'
 import { submit, upsertCollection } from './submit.ts'
 import type { Transaction } from '#db/client.ts'
 import type { Credential } from '#platforms/protocol.ts'
-import type { CaptureContext } from './context.ts'
 
 const IDENTIFY_DEADLINE = 45_000
 
@@ -312,6 +313,10 @@ export const FOLD_SPACING_MS = 60 * 60_000
 /** Lookups per pass, one a second. */
 const FOLD_BUDGET = 30
 const FOLD_PACE_MS = 1000
+/** Folds per write transaction, so the write lock is never held long. */
+export const FOLD_BATCH = 20
+/** Set once the worker's first local pass has run (`runtime/worker.ts`). */
+export const FOLDED_KEY = 'handle_profiles_folded'
 
 export interface SettleResult {
   /** Folded by what the library knows. */
@@ -324,15 +329,23 @@ export interface SettleResult {
   failed: number
 }
 
+type FoldRequest = typeof identityRequests.$inferSelect
+interface Unknown {
+  collection: Collection
+  request?: FoldRequest
+}
+
 /**
  * Profiles saved by handle on platforms that keep profiles by id
- * (`identity`): fold each into its account's collection. What the library
- * knows needs no request; with `network`, up to FOLD_BUDGET others are
- * looked up, one a second and each at most every FOLD_SPACING_MS. One
- * still unknown after FOLD_ATTEMPTS lookups (or told outright there is no
- * such account) is logged and left as a failed request of its link, and
- * the collection leaves the library (maintenance removes it with its
- * captures). Ones with content are skipped and logged.
+ * (`identity`): fold each into its account's collection. Which account
+ * each is, as the library knows, is read first, outside any write; the
+ * folds then go FOLD_BATCH to a transaction, pacing between. With
+ * `network`, up to FOLD_BUDGET others are looked up, one a second and each
+ * at most every FOLD_SPACING_MS. One still unknown after FOLD_ATTEMPTS
+ * lookups (or told outright there is no such account) is logged and left
+ * as a failed request of its link, and the collection leaves the library
+ * (maintenance removes it with its captures). Ones with content are
+ * skipped and logged.
  */
 export async function settleHandleProfiles(
   ctx: CaptureContext,
@@ -348,10 +361,15 @@ export async function settleHandleProfiles(
     failed: 0,
   }
   const now = () => ctx.now?.() ?? Date.now()
-  const lookups: { request: string; collection: Collection }[] = []
+  const known: {
+    collection: Collection
+    target: { url: string; externalId: string }
+  }[] = []
+  const unknown: Unknown[] = []
   for (const platform of ctx.platforms.all()) {
     if (!platform.identity) continue
     const adapterId = platform.description.adapterId
+    // A range of `collections_identity`, not a scan.
     const rows = ctx.db
       .select()
       .from(collections)
@@ -359,12 +377,37 @@ export async function settleHandleProfiles(
         and(
           eq(collections.platform, adapterId),
           eq(collections.kind, 'profile'),
-          sql`${collections.externalId} LIKE ${`${HANDLE}%`}`,
+          eq(collections.objectScope, ''),
+          gte(collections.externalId, HANDLE),
+          lt(collections.externalId, `${HANDLE.slice(0, -1)};`),
         ),
       )
       .all()
+    if (!rows.length) continue
+    const requests = new Map(
+      ctx.db
+        .select()
+        .from(identityRequests)
+        .where(isNotNull(identityRequests.collectionId))
+        .all()
+        .map((row) => [row.collectionId!, row]),
+    )
+    // Given up on: a failed request until maintenance removes the collection.
+    const failed = new Set(
+      ctx.db
+        .select({ key: identityRequests.idemKey })
+        .from(identityRequests)
+        .where(
+          and(
+            gte(identityRequests.idemKey, 'fold:'),
+            lt(identityRequests.idemKey, 'fold;'),
+            eq(identityRequests.state, 'failed'),
+          ),
+        )
+        .all()
+        .map((row) => row.key),
+    )
     for (const collection of rows) {
-      const handle = collection.externalId.slice(HANDLE.length)
       if (collection.currentRevision) {
         ctx.logger.warn(
           { collectionId: collection.id, externalId: collection.externalId },
@@ -372,47 +415,74 @@ export async function settleHandleProfiles(
         )
         continue
       }
-      const account = knownAccount(ctx.db, adapterId, handle)
-      if (account) {
-        ctx.db.transaction((tx) => {
-          foldProfile(
-            ctx,
-            tx,
-            collection,
-            platform.identity!.target(account),
-            handle,
-          )
-          tx.delete(identityRequests)
-            .where(eq(identityRequests.collectionId, collection.id))
-            .run()
-        })
-        result.local++
-        continue
-      }
-      const request = pendingFold(ctx, collection, handle)
-      if (!request) continue
+      const request = requests.get(collection.id)
+      if (failed.has(`fold:${collection.id}`)) continue
       if (
-        request.attempts > 0 &&
+        request?.attempts &&
         now() - (request.finishedAt?.getTime() ?? 0) < FOLD_SPACING_MS
       ) {
         result.waiting++
         continue
       }
-      lookups.push({ request: request.id, collection })
+      const handle = collection.externalId.slice(HANDLE.length)
+      const account = knownAccount(ctx.db, adapterId, handle)
+      if (account)
+        known.push({ collection, target: platform.identity.target(account) })
+      else unknown.push({ collection, ...(request ? { request } : {}) })
     }
   }
+  for (const [index, batch] of [...chunks(known, FOLD_BATCH)].entries()) {
+    if (index) await pace(ctx)
+    ctx.db.transaction((tx) => {
+      for (const { collection, target } of batch) {
+        foldProfile(
+          ctx,
+          tx,
+          collection,
+          target,
+          collection.externalId.slice(HANDLE.length),
+        )
+        tx.delete(identityRequests)
+          .where(eq(identityRequests.collectionId, collection.id))
+          .run()
+      }
+    })
+    result.local += batch.length
+  }
+  // A request for each of the others, made once, to count its lookups.
+  const missing = unknown.filter((u) => !u.request)
+  for (const batch of chunks(missing, FOLD_BATCH))
+    ctx.db.transaction((tx) => {
+      for (const item of batch)
+        item.request = tx
+          .insert(identityRequests)
+          .values({
+            id: newId(),
+            idemKey: `fold:${item.collection.id}`,
+            adapterId: item.collection.platform,
+            url: item.collection.url,
+            handle: item.collection.externalId.slice(HANDLE.length),
+            // Not a record until it is given up on.
+            input: '',
+            request: {},
+            collectionId: item.collection.id,
+            createdAt: new Date(now()),
+          })
+          .returning()
+          .get()
+    })
   if (!network) {
-    result.waiting += lookups.length
+    result.waiting += unknown.length
     return result
   }
-  for (const [index, { request, collection }] of lookups.entries()) {
+  for (const [index, { request, collection }] of unknown.entries()) {
     if (index >= FOLD_BUDGET) {
       result.waiting++
       continue
     }
     if (index) await wait(FOLD_PACE_MS)
     const platform = ctx.platforms.byId(collection.platform)
-    const row = loadRequest(ctx.db, request)!
+    const row = request!
     let account: string
     try {
       account = await identifyAccount(
@@ -425,7 +495,7 @@ export async function settleHandleProfiles(
     } catch (error) {
       // A rate limit ends this pass; the next one goes on.
       if (!isProviderFailure(error) && !isPermanent(error)) {
-        result.waiting += lookups.length - index
+        result.waiting += unknown.length - index
         break
       }
       const attempts = row.attempts + 1
@@ -450,38 +520,6 @@ export async function settleHandleProfiles(
     result.identified++
   }
   return result
-}
-
-/** The request that identifies a profile saved by handle, made once. */
-function pendingFold(
-  ctx: CaptureContext,
-  collection: Collection,
-  handle: string,
-) {
-  // Given up on, it stays a failed request until maintenance removes it.
-  const found = ctx.db
-    .select()
-    .from(identityRequests)
-    .where(eq(identityRequests.idemKey, `fold:${collection.id}`))
-    .get()
-  if (found)
-    return found.state === 'pending' && found.collectionId ? found : undefined
-  return ctx.db
-    .insert(identityRequests)
-    .values({
-      id: newId(),
-      idemKey: `fold:${collection.id}`,
-      adapterId: collection.platform,
-      url: collection.url,
-      handle,
-      // Not a record until it is given up on.
-      input: '',
-      request: {},
-      collectionId: collection.id,
-      createdAt: new Date(ctx.now?.() ?? Date.now()),
-    })
-    .returning()
-    .get()
 }
 
 /**

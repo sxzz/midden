@@ -28,6 +28,7 @@ import { testContext } from '#testing/context.ts'
 import { captureHandlers } from './handlers.ts'
 import {
   FOLD_ATTEMPTS,
+  FOLD_BATCH,
   FOLD_SPACING_MS,
   settleHandleProfiles,
 } from './identify.ts'
@@ -425,6 +426,23 @@ describe('profiles saved by handle before', () => {
         .map((row) => row.externalId)
         .toSorted(),
     ).toEqual(['handle:alice', 'handle:vueuse'])
+  })
+
+  test('folds go a batch to a write transaction, pacing between', async () => {
+    const { ctx } = setup(() => notFound)
+    for (let i = 0; i < FOLD_BATCH * 2 + 5; i++) {
+      listed(ctx, String(100 + i), `user${i}`)
+      saved(ctx, `h${i}`, `user${i}`)
+    }
+    let paced = 0
+    ctx.pace = async () => {
+      paced++
+    }
+    expect(await settleHandleProfiles(ctx)).toMatchObject({
+      local: FOLD_BATCH * 2 + 5,
+    })
+    expect(paced).toBe(2)
+    expect(handleKeyed(ctx)).toEqual([])
   })
 
   test('one with content is left alone', async () => {

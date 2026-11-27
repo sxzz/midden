@@ -42,6 +42,9 @@ export function accountByHandle(
   platform: string,
   handle: string,
 ): string {
+  // Every version that went by the handle (`entity_versions_username`, the
+  // expression exactly as indexed), kept when it is its account's newest
+  // (`entity_versions_newest`, one seek each).
   const rows = db.all<{ id: string }>(sql`
     SELECT DISTINCT e.external_id AS id FROM entity_versions v
     JOIN entities e ON e.id = v.entity_id
@@ -49,10 +52,9 @@ export function accountByHandle(
       AND v.data ->> '$.username' IS NOT NULL
       AND e.platform = ${platform} AND e.kind = ${`${platform}.profile`}
       AND e.external_id NOT LIKE ${`${HANDLE}%`}
-      AND NOT EXISTS (
-        SELECT 1 FROM entity_versions n WHERE n.entity_id = v.entity_id
-          AND (n.created_at > v.created_at
-            OR (n.created_at = v.created_at AND n.id > v.id)))
+      AND v.id = (
+        SELECT n.id FROM entity_versions n WHERE n.entity_id = v.entity_id
+        ORDER BY n.created_at DESC, n.id DESC LIMIT 1)
     LIMIT 2`)
   return rows.length === 1 ? rows[0]!.id : ''
 }

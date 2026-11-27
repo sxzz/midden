@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "d2cdee82-c088-4f92-ab37-5a44ff256c47",
+  "id": "6e173e70-0e27-4e81-8e78-065443ce95d5",
   "prevIds": [
-    "88ac183a-31b0-4bb0-ada9-8f92239e5e07"
+    "cb0f3353-aaa1-4fda-b7eb-6dae47080052"
   ],
   "ddl": [
     {
@@ -131,6 +131,18 @@
       "entityType": "tables"
     },
     {
+      "name": "post_domains",
+      "entityType": "tables"
+    },
+    {
+      "name": "post_hashtags",
+      "entityType": "tables"
+    },
+    {
+      "name": "post_mentions",
+      "entityType": "tables"
+    },
+    {
       "name": "rate_limits",
       "entityType": "tables"
     },
@@ -168,6 +180,10 @@
     },
     {
       "name": "shares",
+      "entityType": "tables"
+    },
+    {
+      "name": "slow_queries",
       "entityType": "tables"
     },
     {
@@ -1218,6 +1234,16 @@
       "table": "catalog",
       "name": "following_count",
       "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "catalog",
+      "name": "lang",
+      "type": "text",
       "notNull": false,
       "autoincrement": false,
       "default": null,
@@ -2357,6 +2383,16 @@
       "entityType": "columns"
     },
     {
+      "table": "media_garbage",
+      "name": "claimed_at",
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
       "table": "member_events",
       "name": "id",
       "type": "integer",
@@ -2501,6 +2537,66 @@
       "name": "last_used_at",
       "type": "integer",
       "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "post_domains",
+      "name": "catalog_id",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "post_domains",
+      "name": "value",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "post_hashtags",
+      "name": "catalog_id",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "post_hashtags",
+      "name": "value",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "post_mentions",
+      "name": "catalog_id",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "post_mentions",
+      "name": "value",
+      "type": "text",
+      "notNull": true,
       "autoincrement": false,
       "default": null,
       "generated": null,
@@ -2908,6 +3004,76 @@
     },
     {
       "table": "removed_media",
+      "name": "blob_hash",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "removed_media",
+      "name": "blob_size",
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "removed_media",
+      "name": "blob_mime",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "removed_media",
+      "name": "blob_remote_at",
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "removed_media",
+      "name": "restore",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "removed_media",
+      "name": "restore_asset",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "removed_media",
+      "name": "restore_error",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "removed_media",
       "name": "created_at",
       "type": "integer",
       "notNull": true,
@@ -3111,6 +3277,86 @@
       "name": "revoked_at",
       "type": "integer",
       "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "slow_queries",
+      "name": "id",
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "slow_queries",
+      "name": "at",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "slow_queries",
+      "name": "route",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "slow_queries",
+      "name": "query",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "slow_queries",
+      "name": "sql",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "slow_queries",
+      "name": "params",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "slow_queries",
+      "name": "ms",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "slow_queries",
+      "name": "rows",
+      "type": "integer",
+      "notNull": true,
       "autoincrement": false,
       "default": null,
       "generated": null,
@@ -4933,6 +5179,28 @@
       "entityType": "indexes"
     },
     {
+      "table": "entity_versions",
+      "name": "entity_versions_newest",
+      "columns": [
+        {
+          "value": "entity_id",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        },
+        {
+          "value": "id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
       "table": "follow_edges",
       "name": "follow_edges_open",
       "columns": [
@@ -5150,6 +5418,48 @@
       "columns": [
         {
           "value": "rp_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
+      "table": "post_domains",
+      "name": "post_domains_catalog",
+      "columns": [
+        {
+          "value": "catalog_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
+      "table": "post_hashtags",
+      "name": "post_hashtags_catalog",
+      "columns": [
+        {
+          "value": "catalog_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
+      "table": "post_mentions",
+      "name": "post_mentions_catalog",
+      "columns": [
+        {
+          "value": "catalog_id",
           "isExpression": false
         }
       ],
@@ -5900,6 +6210,51 @@
       "entityType": "fks"
     },
     {
+      "table": "post_domains",
+      "name": "fk_post_domains_catalog_id_catalog_id_fk",
+      "columns": [
+        "catalog_id"
+      ],
+      "tableTo": "catalog",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "entityType": "fks"
+    },
+    {
+      "table": "post_hashtags",
+      "name": "fk_post_hashtags_catalog_id_catalog_id_fk",
+      "columns": [
+        "catalog_id"
+      ],
+      "tableTo": "catalog",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "entityType": "fks"
+    },
+    {
+      "table": "post_mentions",
+      "name": "fk_post_mentions_catalog_id_catalog_id_fk",
+      "columns": [
+        "catalog_id"
+      ],
+      "tableTo": "catalog",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "entityType": "fks"
+    },
+    {
       "table": "raw_upload_failures",
       "name": "fk_raw_upload_failures_response_id_source_responses_id_fk",
       "columns": [
@@ -6165,6 +6520,36 @@
         "source_key",
         "kind",
         "target_key"
+      ],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "table": "post_domains",
+      "name": "post_domains_pk",
+      "columns": [
+        "value",
+        "catalog_id"
+      ],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "table": "post_hashtags",
+      "name": "post_hashtags_pk",
+      "columns": [
+        "value",
+        "catalog_id"
+      ],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "table": "post_mentions",
+      "name": "post_mentions_pk",
+      "columns": [
+        "value",
+        "catalog_id"
       ],
       "nameExplicit": false,
       "entityType": "pks"
@@ -6528,6 +6913,15 @@
     {
       "table": "shares",
       "name": "shares_pk",
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "table": "slow_queries",
+      "name": "slow_queries_pk",
       "columns": [
         "id"
       ],

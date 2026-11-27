@@ -16,5 +16,6 @@ CREATE TABLE `identity_requests` (
 	`finished_at` integer
 );
 --> statement-breakpoint
+CREATE INDEX `entity_versions_newest` ON `entity_versions` (`entity_id`,`created_at`,`id`);--> statement-breakpoint
 CREATE INDEX `identity_requests_records` ON `identity_requests` (`created_at`,`id`) WHERE "identity_requests"."parent_submission" IS NULL AND "identity_requests"."input" <> '';--> statement-breakpoint
 CREATE INDEX `identity_requests_collection` ON `identity_requests` (`collection_id`) WHERE "identity_requests"."collection_id" IS NOT NULL;
