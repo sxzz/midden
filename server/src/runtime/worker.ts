@@ -15,6 +15,7 @@ import { currentJob, RANK, withOrigin } from '#jobs/queue.ts'
 import { FolderCountSweep } from '#library/folder-counts.ts'
 import { readSetting, writeSetting } from '#settings.ts'
 import { StorageUsage } from '#usage/storage.ts'
+import { pruneInvites } from '#users/invites.ts'
 import { writeStatus, type WorkerReport } from './status-file.ts'
 import type { WebLoadSignal } from '#jobs/throttle.ts'
 import type { Runtime } from './context.ts'
@@ -191,6 +192,7 @@ export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
       try {
         pruneSessions(db)
         prunePasskeys(db)
+        pruneInvites(db)
       } catch (error) {
         logger.error({ err: error }, 'pruning sessions failed')
       }

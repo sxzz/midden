@@ -21,9 +21,6 @@ export const TOKEN_TTL = 10 * 60 * 1000
 /** What the browser waits for the authenticator. */
 const CEREMONY_TIMEOUT = 2 * 60 * 1000
 const RP_NAME = 'Midden'
-// One user owns every passkey, so they all carry the same user handle; an
-// authenticator then keeps one passkey per domain for this app.
-const USER_ID = new TextEncoder().encode('midden-owner')
 export const NAME_MAX = 64
 
 const digest = (value: string) =>
@@ -118,30 +115,57 @@ function tokenDigest(
 // --- Registration --------------------------------------------------------------
 
 /**
- * Options to create a passkey on this origin: with a /passkey link's token,
- * or signed in as `caller`. The challenge is bound to either.
+ * Whom a passkey is made for. Each user has their own WebAuthn user handle:
+ * an authenticator keeps one passkey per RP ID and handle, so a shared one
+ * would let a second user's passkey replace the admin's on a synced
+ * keychain. The admin's is `midden-owner`, which every earlier passkey has.
  */
-export function registrationOptions(
+export interface PasskeyUser {
+  /** The user's id; empty for an invite's user, who does not exist yet. */
+  id: string
+  /** Their handle, base64url. */
+  webauthnId: string
+  /** What an authenticator's account picker shows. */
+  name: string
+}
+
+/** A user as a passkey is made for them. */
+export function passkeyUser(db: Executor, id: string): PasskeyUser {
+  const row = db
+    .select({ id: users.id, webauthnId: users.webauthnId, name: users.name })
+    .from(users)
+    .where(eq(users.id, id))
+    .get()
+  if (!row) throw fail(403, '用户不存在')
+  return row
+}
+
+/**
+ * Options to create a passkey on this origin for `user`, the challenge
+ * bound to `binding` (a /passkey link, a signed-in caller, an invite). It
+ * excludes only that user's passkeys there: an authenticator holding the
+ * admin's would otherwise refuse to make one for another user.
+ */
+export function creationOptions(
   { db, challenges }: PasskeyStore,
   origin: string,
-  by: { token: string } | { caller: string },
+  user: PasskeyUser,
+  binding: string,
   now = Date.now(),
 ) {
-  const binding =
-    'token' in by
-      ? `link:${tokenDigest(db, by.token, origin, now)}`
-      : `caller:${by.caller}`
   const rpID = rpIdOf(origin)
-  const existing = db
-    .select()
-    .from(passkeys)
-    .where(eq(passkeys.rpId, rpID))
-    .all()
+  const existing = user.id
+    ? db
+        .select()
+        .from(passkeys)
+        .where(and(eq(passkeys.rpId, rpID), eq(passkeys.userId, user.id)))
+        .all()
+    : []
   return generateRegistrationOptions({
     rpName: RP_NAME,
     rpID,
-    userID: USER_ID,
-    userName: RP_NAME,
+    userID: Buffer.from(user.webauthnId, 'base64url'),
+    userName: user.name,
     challenge: challenges.issue({ purpose: 'register', origin, binding }, now),
     timeout: CEREMONY_TIMEOUT,
     attestationType: 'none',
@@ -157,26 +181,45 @@ export function registrationOptions(
 }
 
 /**
- * Check a new passkey against its challenge and keep it. The challenge must
- * have come from the same link or caller; a link is then used up.
+ * Options to create a passkey on this origin: with a /passkey link's token
+ * (one of the admin's), or signed in as `caller`, for `user`. The challenge
+ * is bound to either.
  */
-export async function register(
-  { db, challenges }: PasskeyStore,
+export function registrationOptions(
+  store: PasskeyStore,
   origin: string,
-  input: {
-    response: RegistrationResponseJSON
-    name: string
-  } & ({ token: string } | { caller: string; user: string }),
+  by: { token: string } | { caller: string; user: string },
   now = Date.now(),
-): Promise<PasskeyView> {
-  const rpID = rpIdOf(origin)
-  const linked = 'token' in input ? digest(input.token) : undefined
-  const binding = 'token' in input ? `link:${linked}` : `caller:${input.caller}`
+) {
+  const { db } = store
+  const binding =
+    'token' in by
+      ? `link:${tokenDigest(db, by.token, origin, now)}`
+      : `caller:${by.caller}`
+  const user = passkeyUser(db, 'token' in by ? adminId(db) : by.user)
+  return creationOptions(store, origin, user, binding, now)
+}
+
+/** A new passkey the authenticator made, checked against its challenge. */
+export type NewCredential = NonNullable<
+  Awaited<ReturnType<typeof verifyRegistrationResponse>>['registrationInfo']
+>['credential']
+
+/**
+ * Check a registration against a challenge issued on this origin for
+ * `binding`; the challenge is used up.
+ */
+export async function verifyCreation(
+  { challenges }: PasskeyStore,
+  origin: string,
+  binding: string,
+  response: RegistrationResponseJSON,
+  now = Date.now(),
+): Promise<NewCredential> {
   let taken = false
-  let info
   try {
     const result = await verifyRegistrationResponse({
-      response: input.response,
+      response,
       expectedChallenge: (challenge) =>
         (taken = challenges.take(
           challenge,
@@ -184,17 +227,79 @@ export async function register(
           now,
         )),
       expectedOrigin: origin,
-      expectedRPID: rpID,
+      expectedRPID: rpIdOf(origin),
       requireUserPresence: true,
       requireUserVerification: true,
     })
     if (!result.verified) throw new Error('not verified')
-    info = result.registrationInfo
+    return result.registrationInfo.credential
   } catch {
     throw fail(400, taken ? '通行密钥验证失败' : '验证已过期，请重试')
   }
-  const { credential } = info
-  return db.transaction((tx) => {
+}
+
+/** Keep a checked passkey of `user`'s, in the registration's transaction. */
+export function keepPasskey(
+  tx: Executor,
+  input: {
+    user: string
+    origin: string
+    name: string
+    credential: NewCredential
+  },
+  now = Date.now(),
+): PasskeyView {
+  const { credential } = input
+  if (
+    tx
+      .select({ id: passkeys.id })
+      .from(passkeys)
+      .where(eq(passkeys.credentialId, credential.id))
+      .get()
+  )
+    throw fail(409, '这个通行密钥已经添加过了')
+  const row = tx
+    .insert(passkeys)
+    .values({
+      id: newId(),
+      credentialId: credential.id,
+      userId: input.user,
+      rpId: rpIdOf(input.origin),
+      name: input.name,
+      publicKey: Buffer.from(credential.publicKey),
+      counter: credential.counter,
+      transports: JSON.stringify(credential.transports ?? []),
+      createdAt: new Date(now),
+    })
+    .returning()
+    .get()
+  return view(row)
+}
+
+/**
+ * Check a new passkey against its challenge and keep it. The challenge must
+ * have come from the same link or caller; a link is then used up, and adds
+ * one of the admin's.
+ */
+export async function register(
+  store: PasskeyStore,
+  origin: string,
+  input: {
+    response: RegistrationResponseJSON
+    name: string
+  } & ({ token: string } | { caller: string; user: string }),
+  now = Date.now(),
+): Promise<PasskeyView> {
+  const linked = 'token' in input ? digest(input.token) : undefined
+  const binding = 'token' in input ? `link:${linked}` : `caller:${input.caller}`
+  const credential = await verifyCreation(
+    store,
+    origin,
+    binding,
+    input.response,
+    now,
+  )
+  return store.db.transaction((tx) => {
     if (linked !== undefined) {
       // The link is good once: whoever registers first uses it up.
       const used = tx
@@ -210,31 +315,16 @@ export async function register(
       if (!used || used.expiresAt.getTime() <= now)
         throw fail(403, '链接已失效，请在 Telegram 中重新发送 /passkey')
     }
-    if (
-      tx
-        .select({ id: passkeys.id })
-        .from(passkeys)
-        .where(eq(passkeys.credentialId, credential.id))
-        .get()
-    )
-      throw fail(409, '这个通行密钥已经添加过了')
-    const row = tx
-      .insert(passkeys)
-      .values({
-        id: newId(),
-        credentialId: credential.id,
-        // A link adds one of the admin's.
-        userId: 'token' in input ? adminId(tx) : input.user,
-        rpId: rpID,
+    return keepPasskey(
+      tx,
+      {
+        user: 'token' in input ? adminId(tx) : input.user,
+        origin,
         name: input.name,
-        publicKey: Buffer.from(credential.publicKey),
-        counter: credential.counter,
-        transports: JSON.stringify(credential.transports ?? []),
-        createdAt: new Date(now),
-      })
-      .returning()
-      .get()
-    return view(row)
+        credential,
+      },
+      now,
+    )
   })
 }
 

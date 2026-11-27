@@ -57,6 +57,14 @@ const ADMIN_SESSION: [string, string, unknown?][] = [
   ['DELETE', `/watches/${ID}`],
   ['POST', '/library/delete-all', { confirm: 'delete all' }],
   ['POST', '/origins', { origin: 'https://new.test' }],
+  // Users and invites: a token cannot make a link that registers.
+  ['GET', '/users'],
+  ['PATCH', `/users/${ID}`, { name: 'x' }],
+  ['POST', `/users/${ID}/revoke`],
+  ['DELETE', `/users/${ID}`],
+  ['GET', '/invites'],
+  ['POST', '/invites', { label: 'x' }],
+  ['DELETE', `/invites/${ID}`],
 ]
 
 /**

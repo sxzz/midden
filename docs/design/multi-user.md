@@ -291,16 +291,16 @@ sequenceDiagram
     participant S as 服务端
     participant F as 朋友的设备
     A->>S: POST /v1/invites {label}
-    S-->>A: <WEB_APP_URL 的来源>/app/invite#<令牌>（只显示一次）
+    S-->>A: <WEB_APP_URL>invite#<令牌>（只显示一次）
     A-->>F: 用别的渠道发送链接
-    F->>S: POST /v1/auth/invite/options {token}
+    F->>S: POST /v1/auth/invite/options {token, name}
     S-->>F: 注册选项（新用户的 handle，excludeCredentials 为空）
-    F->>S: POST /v1/auth/invite {token, name, display_name, response}
+    F->>S: POST /v1/auth/invite {token, name, passkey_name, response}
     S-->>F: 新用户（查看者）+ 通行密钥 + 会话 Cookie
 ```
 
-1. 管理员在「用户」页点「邀请」，填备注。`POST /v1/invites` 生成令牌，回答一次链接，链接总是 `WEB_APP_URL` 的来源。链接只显示这一次，与 API 令牌一样。
-2. 朋友打开 `/app/invite#<令牌>`。页面不需要登录，填名字和通行密钥名称（默认是设备与浏览器）。
+1. 管理员在「用户」页点「邀请」，填备注（1 到 32 字，也是新用户默认的名字）。`POST /v1/invites` 生成令牌，回答一次链接：`WEB_APP_URL` 下的 `invite` 页，由 `WEB_APP_URL` 拼出，不写死路径。链接只显示这一次，与 API 令牌一样。
+2. 朋友打开 `invite#<令牌>`。页面不需要登录，填名字和通行密钥名称（默认是设备与浏览器）。取选项时带上名字（`name`，不带时用邀请的备注），注册时名字是 `name`，通行密钥名称是 `passkey_name`。
 3. 取选项时，服务端确认两件事：Origin 是 `WEB_APP_URL` 的来源；邀请未用、未撤销、未过期。选项中：
    - `user.id` 是邀请上的 `webauthn_id`；
    - `userName` 是填写的名字，同一台设备的账号选择器因此分得清；

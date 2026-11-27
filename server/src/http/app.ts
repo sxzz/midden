@@ -20,6 +20,7 @@ import { captureRoutes } from './capture-routes.ts'
 import { Challenges } from './challenges.ts'
 import { errorResponse } from './errors.ts'
 import { folderRoutes } from './folder-routes.ts'
+import { inviteAuthRoutes } from './invite-routes.ts'
 import { libraryRoutes } from './library-routes.ts'
 import { mediaRoutes } from './media-routes.ts'
 import {
@@ -47,6 +48,7 @@ import {
 import { shareRoutes } from './share-routes.ts'
 import { storageRoutes } from './storage-routes.ts'
 import { tokenRoutes } from './token-routes.ts'
+import { userRoutes } from './user-routes.ts'
 import { json, type Env } from './validate.ts'
 import { watchRoutes } from './watch-routes.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -135,6 +137,7 @@ export function createApi(options: HttpOptions) {
     notify: options.notify,
     now,
   }
+  const admin = userRoutes({ db: ctx.db, webAppUrl, now })
 
   return (
     new Hono<Env>()
@@ -192,6 +195,11 @@ export function createApi(options: HttpOptions) {
         },
       )
       .route('/auth/passkey', passkeyAuthRoutes(passkeys))
+      // A friend's invite registers them as a viewer.
+      .route(
+        '/auth/invite',
+        inviteAuthRoutes({ store: passkeys.store, webAppUrl, now }),
+      )
       // Public links need no login; they read only what was shared.
       .use('/public/*', toThreads)
       .route('/public', publicRoutes(ctx))
@@ -345,6 +353,8 @@ export function createApi(options: HttpOptions) {
       .route('/passkeys', passkeyRoutes(passkeys))
       .route('/tokens', tokenRoutes(ctx.db, usage, now))
       .route('/sessions', sessionRoutes(ctx.db, now))
+      .route('/users', admin.users)
+      .route('/invites', admin.invites)
       .route(
         '/origins',
         originRoutes({ ctx, webAppUrl, notify: options.notify, now }),

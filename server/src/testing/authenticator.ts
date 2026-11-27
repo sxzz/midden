@@ -29,6 +29,8 @@ export function softAuthenticator(options: { userVerified?: boolean } = {}) {
   const id = b64(credentialId)
   let counter = 0
   let rpId = ''
+  // The user handle it was made for; passkeys from before users had `midden-owner`.
+  let userHandle = b64(new TextEncoder().encode('midden-owner'))
   const flags = options.userVerified === false ? 0x01 : UP_UV
   const cose = new Map<number, number | Uint8Array>([
     [1, 2],
@@ -54,6 +56,10 @@ export function softAuthenticator(options: { userVerified?: boolean } = {}) {
     id,
     /** The public key as a server stores it (COSE). */
     publicKey: Buffer.from(isoCBOR.encode(cose)),
+    /** The user handle it holds the passkey under, base64url. */
+    get handle() {
+      return userHandle
+    },
     get counter() {
       return counter
     },
@@ -65,6 +71,7 @@ export function softAuthenticator(options: { userVerified?: boolean } = {}) {
       origin: string,
     ): RegistrationResponseJSON {
       rpId = creation.rp.id!
+      userHandle = creation.user.id
       const length = Buffer.alloc(2)
       length.writeUInt16BE(credentialId.length)
       const authData = Buffer.concat([
@@ -117,7 +124,7 @@ export function softAuthenticator(options: { userVerified?: boolean } = {}) {
           clientDataJSON: b64(json),
           authenticatorData: b64(authData),
           signature: b64(signature),
-          userHandle: b64(new TextEncoder().encode('midden-owner')),
+          userHandle,
         },
         clientExtensionResults: {},
       }

@@ -40,8 +40,13 @@ export interface PasskeyOptions {
   now: () => number
 }
 
-const TOKEN = v.pipe(v.string(), v.regex(/^[\w-]{43}$/))
-const NAME = v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(NAME_MAX))
+export const TOKEN = v.pipe(v.string(), v.regex(/^[\w-]{43}$/))
+export const NAME = v.pipe(
+  v.string(),
+  v.trim(),
+  v.minLength(1),
+  v.maxLength(NAME_MAX),
+)
 
 // The library checks the fields in depth; this only keeps junk out.
 const credential = (value: unknown) =>
@@ -50,7 +55,7 @@ const credential = (value: unknown) =>
   typeof (value as { id?: unknown }).id === 'string' &&
   (value as { id: string }).id.length <= 1024 &&
   typeof (value as { response?: unknown }).response === 'object'
-const Registration = v.custom<RegistrationResponseJSON>(credential)
+export const Registration = v.custom<RegistrationResponseJSON>(credential)
 const Authentication = v.custom<AuthenticationResponseJSON>(credential)
 
 /** The request's origin when it is one of the app's; refused otherwise. */
@@ -163,7 +168,7 @@ export function passkeyRoutes(o: PasskeyOptions) {
           await registrationOptions(
             store,
             originOf(c, o.origins()),
-            { caller: callerOf(c) },
+            { caller: callerOf(c), user: c.get('principal').userId },
             o.now(),
           ),
         ),
