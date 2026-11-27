@@ -38,11 +38,11 @@ it('reads a query in the app’s words, where it cannot', () => {
     ['a (b', '这个 ( 没有闭合', 2],
     ['a)', '这个 ) 前面没有 (', 1],
     ['say "hi', '这个 " 没有闭合', 4],
-    ['a OR', 'OR 后面缺少条件', 4],
+    ['a OR', 'OR后面缺少条件', 4],
     ['a - b', '- 后面要紧跟条件，中间不留空格', 2],
     ['()', '括号里是空的', 1],
     ['from:', 'from: 后面缺少值', 0],
-    ['is:reply', '收藏库不记录哪些帖子是回复，没有 is:reply', 0],
+    ['is:reply', '收藏库不记录哪些帖子是回复，没有is:reply', 0],
     ['cats has:gif', 'has: 只能是 image、video、media、link', 5],
   ] as const)
     expect(readQuery(text).error, text).toEqual({ message, position })
