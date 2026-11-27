@@ -288,6 +288,19 @@ test('刷新 reads the list again with its filters, keeping it and the scroll', 
     await route.fallback()
   })
   const refresh = page.getByRole('button', { name: '刷新' })
+  // An icon alone, named by its label and tooltip, right of the layout
+  // switcher.
+  await expect(refresh).toHaveText('')
+  await expect(refresh).toHaveAttribute('title', '刷新')
+  await expect(refresh.locator('svg')).toBeVisible()
+  const switcher = await page
+    .getByRole('group', { name: '列表样式' })
+    .boundingBox()
+  const icon = await refresh.boundingBox()
+  expect(icon!.x).toBeGreaterThanOrEqual(switcher!.x + switcher!.width)
+  expect(
+    Math.abs(icon!.y + icon!.height / 2 - switcher!.y - switcher!.height / 2),
+  ).toBeLessThan(2)
   await refresh.evaluate((el: HTMLElement) => el.click())
   await expect(refresh).toHaveAttribute('aria-busy', 'true')
   await expect(page.getByText('第 1 只猫')).toBeAttached()

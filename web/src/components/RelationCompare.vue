@@ -359,12 +359,6 @@ const libraryRoute = computed(() => ({
 
     <div ref="controls" class="controls">
       <div class="row">
-        <RefreshButton
-          v-if="keys.length"
-          class="refresh"
-          :busy="loading && !!data"
-          @refresh="load"
-        />
         <div class="segments" role="group" aria-label="对比方向">
           <button
             v-for="option in SIDES"
@@ -405,6 +399,12 @@ const libraryRoute = computed(() => ({
           </button>
           <span class="min-label">人</span>
         </div>
+        <RefreshButton
+          v-if="keys.length"
+          class="refresh"
+          :busy="loading && !!data"
+          @refresh="load"
+        />
       </div>
       <CompareCombos
         v-if="data && data.combos.length"
@@ -764,6 +764,10 @@ const libraryRoute = computed(() => ({
 }
 .modes button:disabled {
   opacity: 0.4;
+}
+/* 刷新 keeps to the row's trailing end. */
+.refresh {
+  margin-left: auto;
 }
 .min {
   display: flex;

@@ -186,7 +186,6 @@ const compareRoute = computed(() => ({
           </button>
           <Spinner v-if="loading && graph" label="正在加载" class="busy" />
         </div>
-        <RefreshButton :busy="loading && !!graph" @refresh="load" />
         <div class="modes" role="group" aria-label="显示方式">
           <button
             v-for="option in modes"
@@ -200,6 +199,7 @@ const compareRoute = computed(() => ({
             {{ option.label }}
           </button>
         </div>
+        <RefreshButton :busy="loading && !!graph" @refresh="load" />
       </div>
       <p v-if="lists" class="lists">{{ lists }}</p>
       <template v-if="!shared">

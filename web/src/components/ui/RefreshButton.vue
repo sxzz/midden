@@ -1,7 +1,9 @@
 <script setup vapor lang="ts">
 // 刷新: read what a view shows again, with the filters it has. What is on
 // screen stays while the new read runs (stale-while-revalidate); only the
-// button turns, so nothing flashes and the scroll position holds.
+// button turns, so nothing flashes and the scroll position holds. An icon
+// alone (its name in aria-label and the tooltip), last in its toolbar:
+// right of the layout switcher where there is one.
 const props = defineProps<{ busy?: boolean }>()
 const emit = defineEmits<{ refresh: [] }>()
 function click() {
@@ -16,6 +18,7 @@ function click() {
     aria-label="刷新"
     title="刷新"
     :aria-busy="busy ? 'true' : 'false'"
+    :aria-disabled="busy ? 'true' : undefined"
     @click="click"
   >
     <svg
@@ -42,10 +45,17 @@ function click() {
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
   color: var(--link);
+  transition: background 120ms ease;
 }
+.refresh:hover:not([aria-busy='true']) {
+  background: var(--fill);
+}
+/* Busy: grey and not clickable. Not `disabled`, which would drop the focus
+   of a keyboard that pressed it. Without motion this is all it shows. */
 .refresh[aria-busy='true'] {
   color: var(--subtle);
   cursor: progress;
@@ -61,6 +71,9 @@ function click() {
 @media (prefers-reduced-motion: reduce) {
   .turning {
     animation: none;
+  }
+  .refresh {
+    transition: none;
   }
 }
 </style>

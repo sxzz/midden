@@ -190,11 +190,6 @@ const storage = computed(() =>
     class="layout-bar"
   >
     <span v-if="totalText" class="total">{{ totalText }}</span>
-    <RefreshButton
-      v-if="!hideFilters"
-      :busy="refreshing"
-      @refresh="emit('refresh')"
-    />
     <slot name="actions" />
     <button
       v-if="!selecting && items.length && !shared"
@@ -208,6 +203,11 @@ const storage = computed(() =>
       v-if="albums"
       :model-value="layout"
       @update:model-value="changeLayout"
+    />
+    <RefreshButton
+      v-if="!hideFilters"
+      :busy="refreshing"
+      @refresh="emit('refresh')"
     />
   </div>
   <ListSection v-if="error && !items.length">
