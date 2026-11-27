@@ -478,7 +478,9 @@ function insert(snippet: string, caret: number) {
 }
 .bar:focus-within {
   outline: 2px solid var(--link);
-  outline-offset: 0;
+  /* Inside the box, so no scroller it sits in (the sidebar's, a sticky
+     header) can cut it: whole and even on every side, with its corners. */
+  outline-offset: -2px;
 }
 .glass {
   display: block;

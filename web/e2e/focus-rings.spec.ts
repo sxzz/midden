@@ -127,4 +127,23 @@ test.describe('a composite field', () => {
     await field.blur()
     expect((await ringOf(bar)).width).toBe(0)
   })
+
+  for (const scheme of ['light', 'dark'] as const)
+    test(`the sidebar’s search box keeps its whole ring (${scheme})`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: scheme })
+      await mockDesktop(page)
+      await page.goto('/app/captures')
+      const field = page
+        .getByRole('complementary', { name: '侧栏' })
+        .getByRole('combobox', { name: '搜索收藏' })
+      await field.focus()
+      const { width, ring, clip } = await ringAndClip(field.locator('xpath=..'))
+      expect(width).toBeGreaterThan(0)
+      expect(ring.top).toBeGreaterThanOrEqual(clip.top)
+      expect(ring.left).toBeGreaterThanOrEqual(clip.left)
+      expect(ring.right).toBeLessThanOrEqual(clip.right)
+      expect(ring.bottom).toBeLessThanOrEqual(clip.bottom)
+    })
 })
