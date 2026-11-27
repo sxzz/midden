@@ -135,6 +135,7 @@ const latency = computed(() => state.value?.web && webLatency(state.value.web))
     <ListSection v-if="latency" title="网页响应（最近 1 分钟）">
       <p class="line">{{ latency.requests }}</p>
       <p class="line">{{ latency.lag }}</p>
+      <p v-if="latency.slow" class="line">{{ latency.slow }}</p>
     </ListSection>
   </template>
 </template>

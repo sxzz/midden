@@ -23,17 +23,37 @@ export interface QueueStatusText {
   tone: 'ok' | 'active' | 'failed'
 }
 
-/** One line: paused, stopped, slowed down, or running. */
+type Cause = NonNullable<NonNullable<QueueState['worker']>['cause']>
+
+/** Why the worker lowered its concurrency, in a few words. */
+export function throttleCause(cause: Cause): string {
+  switch (cause.signal) {
+    case 'web_lag':
+      return `网页进程停顿 ${cause.value} ms`
+    case 'web_slow':
+      return `网页进程主线程上有 ${cause.value} 个慢请求`
+    case 'lock_wait':
+      return `等待数据库写锁 ${cause.value} ms`
+    case 'write_duty':
+      return `后台写入占用写锁 ${cause.value}% 的时间`
+  }
+}
+
+/** One line: paused, stopped, slowed down (and why), or running. */
 export function queueStatus(state: QueueState): QueueStatusText {
   if (state.control.paused) return { label: '已暂停', tone: 'active' }
   const { worker } = state
   if (!worker) return { label: '后台进程没有响应', tone: 'failed' }
   if (worker.held) return { label: '已停止领取任务', tone: 'failed' }
-  if (worker.factor < 1)
+  if (worker.factor < 1) {
+    const lowered = `运行中 · 已降低并发（${Math.round(worker.factor * 100)}%）`
     return {
-      label: `运行中 · 已降低并发（${Math.round(worker.factor * 100)}%）`,
+      label: worker.cause
+        ? `${lowered}：${throttleCause(worker.cause)}`
+        : lowered,
       tone: 'active',
     }
+  }
   return { label: worker.idle ? '空闲' : '运行中', tone: 'ok' }
 }
 
@@ -70,7 +90,11 @@ export function rateLimitEnd(limit: RateLimit, now = new Date()): string {
   return `${at} 恢复，还有 ${left}`
 }
 
-/** The web process's last minute, as two lines. */
+/**
+ * The web process's last minute: its requests, its event loop, and slow
+ * requests by where they ran (only those on the main thread held up the
+ * others; the read threads' never slow the worker down).
+ */
 export function webLatency(web: NonNullable<QueueState['web']>) {
   const { requests } = web
   return {
@@ -78,5 +102,10 @@ export function webLatency(web: NonNullable<QueueState['web']>) {
       ? `${requests.count} 个请求 · 中位 ${requests.p50_ms} ms · p95 ${requests.p95_ms} ms · 最长 ${requests.max_ms} ms`
       : '没有请求',
     lag: `事件循环最长停顿 ${web.lag_max_ms} ms`,
+    ...(requests.slow || requests.slow_thread
+      ? {
+          slow: `超过 500 ms：主线程 ${requests.slow} 个，读线程 ${requests.slow_thread} 个`,
+        }
+      : {}),
   }
 }

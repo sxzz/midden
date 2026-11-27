@@ -1,4 +1,5 @@
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks'
+import { threadTiming, type ThreadTiming } from './offload.ts'
 import type { WebLoadSignal } from '#jobs/throttle.ts'
 import type { Logger } from '#log.ts'
 import type { MiddlewareHandler } from 'hono'
@@ -15,8 +16,13 @@ export interface WebLoadReport {
     p50_ms: number | null
     p95_ms: number | null
     max_ms: number | null
-    /** At or over the slow-request threshold. */
+    /**
+     * At or over the slow-request threshold, on this process's own thread:
+     * they held up every other request meanwhile.
+     */
     slow: number
+    /** Slow, but on a read thread (`offload.ts`): nothing else waited. */
+    slow_thread: number
   }
 }
 
@@ -29,6 +35,8 @@ interface LagSample {
 interface RequestSample {
   at: number
   ms: number
+  /** It ran on a read thread. */
+  thread: boolean
 }
 
 const WINDOW = 60_000
@@ -72,7 +80,9 @@ function percentile(sorted: number[], p: number): number | null {
  * Watches the web process: requests over `slowRequestMs` and event-loop
  * stalls over `lagMs` are logged (at most one line of each kind every 10 s,
  * with a count of the rest), and the last minute is kept for the admin page
- * and the worker's throttle.
+ * and the worker's throttle. A slow request that ran on a read thread is
+ * counted apart: the web process went on meanwhile, so it says nothing
+ * about how busy this process is and does not reach the throttle.
  */
 export class WebLoad {
   readonly #logger: Logger
@@ -84,6 +94,9 @@ export class WebLoad {
   #histogram: ReturnType<typeof monitorEventLoopDelay> | undefined
   #timer: NodeJS.Timeout | undefined
   readonly #slowLog = new Sparse(LOG_EVERY)
+  // Its own, so that slow reads on the threads (frequent while an update
+  // runs) cannot hide one that held this process.
+  readonly #threadSlowLog = new Sparse(LOG_EVERY)
   readonly #lagLog = new Sparse(LOG_EVERY)
 
   constructor(options: {
@@ -136,13 +149,17 @@ export class WebLoad {
     )
   }
 
-  /** One request's duration, from first byte in to the response. */
+  /**
+   * One request's duration, from first byte in to the response; `thread`
+   * when it ran on a read thread, with its wait for one and its run.
+   */
   recordRequest(
     ms: number,
     request: { method: string; path: string; status: number },
+    thread?: ThreadTiming,
   ): void {
     const now = this.#now()
-    this.#requests.push({ at: now, ms })
+    this.#requests.push({ at: now, ms, thread: !!thread })
     let old = 0
     while (
       old < this.#requests.length &&
@@ -154,9 +171,20 @@ export class WebLoad {
         Math.max(old, this.#requests.length - MAX_REQUESTS),
       )
     if (ms < this.#slowRequestMs) return
-    const skipped = this.#slowLog.take(now)
+    const skipped = (thread ? this.#threadSlowLog : this.#slowLog).take(now)
     if (skipped === undefined) return
-    this.#logger.warn({ ...request, ms: round(ms), skipped }, 'slow request')
+    this.#logger.warn(
+      {
+        ...request,
+        ms: round(ms),
+        thread: !!thread,
+        ...(thread
+          ? { waitMs: round(thread.waitMs), runMs: round(thread.runMs) }
+          : {}),
+        skipped,
+      },
+      'slow request',
+    )
   }
 
   middleware(): MiddlewareHandler {
@@ -165,11 +193,11 @@ export class WebLoad {
       try {
         await next()
       } finally {
-        this.recordRequest(performance.now() - started, {
-          method: c.req.method,
-          path: c.req.path,
-          status: c.res.status,
-        })
+        this.recordRequest(
+          performance.now() - started,
+          { method: c.req.method, path: c.req.path, status: c.res.status },
+          threadTiming(c.req.raw),
+        )
       }
     }
   }
@@ -178,12 +206,15 @@ export class WebLoad {
   signal(): WebLoadSignal {
     const since = this.#now() - SIGNAL_WINDOW
     const lag = this.#lag.filter((s) => s.at > since)
+    const slow = this.#requests.filter(
+      (s) => s.at > since && s.ms >= this.#slowRequestMs,
+    )
     return {
+      lagSeconds: lag.map((s) => round(s.p99)),
       lagP99Ms: round(Math.max(0, ...lag.map((s) => s.p99))),
       lagMaxMs: round(Math.max(0, ...lag.map((s) => s.max))),
-      slowRequests: this.#requests.filter(
-        (s) => s.at > since && s.ms >= this.#slowRequestMs,
-      ).length,
+      slowRequests: slow.filter((s) => !s.thread).length,
+      threadSlowRequests: slow.filter((s) => s.thread).length,
     }
   }
 
@@ -191,10 +222,9 @@ export class WebLoad {
   report(): WebLoadReport {
     const since = this.#now() - WINDOW
     const lag = this.#lag.filter((s) => s.at > since)
-    const durations = this.#requests
-      .filter((s) => s.at > since)
-      .map((s) => s.ms)
-      .toSorted((a, b) => a - b)
+    const recent = this.#requests.filter((s) => s.at > since)
+    const durations = recent.map((s) => s.ms).toSorted((a, b) => a - b)
+    const slow = recent.filter((s) => s.ms >= this.#slowRequestMs)
     const ms = (value: number | null) => (value === null ? null : round(value))
     return {
       window_s: WINDOW / 1000,
@@ -205,7 +235,8 @@ export class WebLoad {
         p50_ms: ms(percentile(durations, 0.5)),
         p95_ms: ms(percentile(durations, 0.95)),
         max_ms: ms(durations.at(-1) ?? null),
-        slow: durations.filter((d) => d >= this.#slowRequestMs).length,
+        slow: slow.filter((s) => !s.thread).length,
+        slow_thread: slow.filter((s) => s.thread).length,
       },
     }
   }

@@ -103,7 +103,8 @@ export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
         {
           factor: state.factor,
           pressure: state.pressure,
-          reason: state.reason,
+          // Slowing down: what halved it; speeding up: what still shows.
+          reason: state.factor < factor ? state.cause?.reason : state.reason,
         },
         state.factor < factor ? 'worker slowing down' : 'worker speeding up',
       )

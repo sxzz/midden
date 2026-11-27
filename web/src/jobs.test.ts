@@ -4,6 +4,7 @@ import {
   queueStatus,
   rateLimitEnd,
   rateLimitName,
+  throttleCause,
   webLatency,
   type RateLimit,
 } from './jobs'
@@ -39,10 +40,34 @@ describe('后台任务', () => {
     expect(
       queueStatus(state({ worker: { ...worker, factor: 0.5 } })).label,
     ).toBe('运行中 · 已降低并发（50%）')
+    // And why.
+    expect(
+      queueStatus(
+        state({
+          worker: {
+            ...worker,
+            factor: 0.25,
+            cause: { signal: 'lock_wait', value: 820 },
+          },
+        }),
+      ).label,
+    ).toBe('运行中 · 已降低并发（25%）：等待数据库写锁 820 ms')
     expect(queueStatus(state()).label).toBe('运行中')
     expect(
       queueStatus(state({ worker: { ...worker, idle: true } })).label,
     ).toBe('空闲')
+  })
+
+  test('each reason for slowing down has words', () => {
+    expect(throttleCause({ signal: 'web_lag', value: 310 })).toBe(
+      '网页进程停顿 310 ms',
+    )
+    expect(throttleCause({ signal: 'web_slow', value: 2 })).toBe(
+      '网页进程主线程上有 2 个慢请求',
+    )
+    expect(throttleCause({ signal: 'write_duty', value: 70 })).toBe(
+      '后台写入占用写锁 70% 的时间',
+    )
   })
 
   test('job types have names; unknown ones show as they are', () => {
@@ -81,17 +106,29 @@ describe('后台任务', () => {
     )
   })
 
-  test('the web latency reads as two lines', () => {
-    expect(
-      webLatency({
-        window_s: 60,
-        lag_p99_ms: 12,
-        lag_max_ms: 40,
-        requests: { count: 30, p50_ms: 3, p95_ms: 20, max_ms: 80, slow: 0 },
-      }),
-    ).toEqual({
+  test('the web latency reads as two lines, three with slow requests', () => {
+    const web = {
+      window_s: 60,
+      lag_p99_ms: 12,
+      lag_max_ms: 40,
+      requests: {
+        count: 30,
+        p50_ms: 3,
+        p95_ms: 20,
+        max_ms: 80,
+        slow: 0,
+        slow_thread: 0,
+      },
+    }
+    expect(webLatency(web)).toEqual({
       requests: '30 个请求 · 中位 3 ms · p95 20 ms · 最长 80 ms',
       lag: '事件循环最长停顿 40 ms',
     })
+    expect(
+      webLatency({
+        ...web,
+        requests: { ...web.requests, max_ms: 7700, slow_thread: 3 },
+      }).slow,
+    ).toBe('超过 500 ms：主线程 0 个，读线程 3 个')
   })
 })

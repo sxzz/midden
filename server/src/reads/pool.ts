@@ -91,6 +91,7 @@ interface Task {
   op: string
   input: unknown
   transfer?: Transferable[]
+  onStart?: () => void
   resolve: (value: unknown) => void
   reject: (error: Error) => void
   timer: ReturnType<typeof setTimeout>
@@ -150,11 +151,16 @@ export class QueryPool {
       this.#spawn()
   }
 
+  /**
+   * Run `op` on a thread. `onStart` is called when a thread takes it, so the
+   * caller can tell the wait for a thread from the read itself.
+   */
   run(
     lane: Lane,
     op: string,
     input: unknown,
     transfer?: Transferable[],
+    onStart?: () => void,
   ): Promise<unknown> {
     if (this.#closed)
       return Promise.reject(new PoolError('busy', 'The server is stopping.'))
@@ -165,6 +171,7 @@ export class QueryPool {
         op,
         input,
         transfer,
+        onStart,
         resolve,
         reject,
         timer: setTimeout(() => this.#unserved(task), this.lanes[lane].waitMs),
@@ -230,6 +237,7 @@ export class QueryPool {
       thread.task = task
       task.thread = thread
       // The read's own time starts now.
+      task.onStart?.()
       clearTimeout(task.timer)
       task.timer = setTimeout(
         () => this.#timeout(task),

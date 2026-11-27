@@ -100,6 +100,15 @@ export function queueRoutes(
             ...(worker.throttle.reason
               ? { reason: worker.throttle.reason }
               : {}),
+            // Why the factor is below 1: the reading that last halved it.
+            ...(worker.throttle.cause
+              ? {
+                  cause: {
+                    signal: worker.throttle.cause.signal,
+                    value: worker.throttle.cause.value,
+                  },
+                }
+              : {}),
             running: worker.queue.running,
             limits: worker.queue.limits,
             idle: worker.queue.idle,
