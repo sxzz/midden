@@ -57,7 +57,7 @@ describe('tokens', () => {
     expect(expired.status).toBe(401)
     expect(expired.json).toEqual({
       error: 'token_expired',
-      message: expect.stringContaining('ask the owner'),
+      message: expect.stringContaining('ask the human'),
     })
   })
 
@@ -81,6 +81,7 @@ describe('tokens', () => {
     await f.call('/tags', { token })
     const { json } = await f.call('/whoami', { token })
     expect(json).toEqual({
+      user: { id: adminId(f.ctx.db), name: '管理员', role: 'admin' },
       token: {
         id: expect.any(String),
         label: 'ro',
@@ -91,6 +92,7 @@ describe('tokens', () => {
       usage: { today: 2 },
       limits: {
         in_flight: 2,
+        lane_in_flight: 2,
         page_size_max: 50,
         batch_max: 100,
         query_timeout_ms: 5000,

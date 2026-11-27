@@ -9,7 +9,7 @@ import { adminId } from '#users/users.ts'
 import { fakeProfile } from './fake-platform.ts'
 import { capture, entity, graph, image, libraryContext } from './library.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
-import type { Gate } from '#agent/gate.ts'
+import type { Gate, ViewerGates } from '#agent/gate.ts'
 import type { ReadBase } from '#agent/query.ts'
 import type { FetchResponse } from '#platforms/protocol.ts'
 
@@ -93,7 +93,11 @@ export interface AgentFixture {
 }
 
 export async function agentFixture(
-  options: { reads?: (reader: ReadBase) => Reads; gate?: Gate } = {},
+  options: {
+    reads?: (reader: ReadBase) => Reads
+    gate?: Gate
+    viewerGates?: ViewerGates
+  } = {},
 ): Promise<AgentFixture> {
   const { ctx } = libraryContext((req) => {
     const route = ROUTES[req.externalId]
@@ -117,6 +121,7 @@ export async function agentFixture(
     reader,
     usage,
     ...(options.gate ? { gate: options.gate } : {}),
+    ...(options.viewerGates ? { viewerGates: options.viewerGates } : {}),
   })
   const rw = createToken(ctx.db, {
     user: adminId(ctx.db),

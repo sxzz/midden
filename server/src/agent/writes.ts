@@ -48,7 +48,7 @@ const writes: MiddlewareHandler<AgentEnv> = async (c, next) => {
   if (!canWrite(c.get('principal')))
     throw new AgentError(
       'forbidden',
-      'This token only reads. Writing needs a read and write (rw) token from the owner.',
+      'This token only reads. Writing needs a read and write (rw) token of the admin’s.',
     )
   await next()
 }

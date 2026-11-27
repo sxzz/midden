@@ -7,11 +7,17 @@ import type { SlowQuery } from './slow.ts'
 export const READ_THREAD = new URL('thread.ts', import.meta.url)
 
 /**
- * Who a read is for. `web`: the web app's own `GET /v1` requests; `agent`:
- * the agent API's reads. Each has its own deadlines, and the agent's may
- * hold only some of the threads, so the web app always has some left.
+ * Who a read is for. `web`: the web app's own `GET /v1` requests, viewers'
+ * too (a person clicking); `agent`: the agent API's reads with the
+ * admin's tokens; `viewer`: those with viewers' tokens. Each has its own
+ * deadlines, and the agent API's may hold only some of the threads, so the
+ * web app always has some left and viewers' scripts never take the
+ * admin's.
  */
-export type Lane = 'web' | 'agent'
+export type Lane = 'web' | 'agent' | 'viewer'
+
+/** The lanes after the web app's, in the order a free thread serves them. */
+const SCRIPT_LANES = ['agent', 'viewer'] as const
 
 export interface LaneLimits {
   /** How long a read may run. */
@@ -23,9 +29,10 @@ export interface LaneLimits {
 }
 
 /**
- * Four threads: the agent API's two requests at a time (its gate) each
- * hold one, so at least two are always free for the web app, which polls
- * a few lists at once while an update runs. More would only compete for
+ * Four threads: the admin's agent API requests (two at a time, its gate)
+ * hold at most two and viewers' at most one, so at least one is always
+ * free for the web app, which polls a few lists at once while an update
+ * runs, and two when no viewer's script runs. More would only compete for
  * the CPU with the worker process; each thread also keeps a connection and
  * its page cache.
  */
@@ -36,6 +43,7 @@ export const LANES: Record<Lane, LaneLimits> = {
   web: { timeoutMs: 30_000, waitMs: 30_000 },
   // The agent API promises its callers this (`query_timeout`).
   agent: { timeoutMs: 5000, waitMs: 5000, max: 2 },
+  viewer: { timeoutMs: 5000, waitMs: 5000, max: 1 },
 }
 
 /**
@@ -149,7 +157,7 @@ export class QueryPool {
   readonly lanes: Record<Lane, LaneLimits>
   readonly #options: PoolOptions
   #threads: Thread[] = []
-  #queues: Record<Lane, Task[]> = { web: [], agent: [] }
+  #queues: Record<Lane, Task[]> = { web: [], agent: [], viewer: [] }
   #retiring = 0
   #next = 1
   #closed = false
@@ -160,6 +168,7 @@ export class QueryPool {
     this.lanes = {
       web: { ...LANES.web, ...options.lanes?.web },
       agent: { ...LANES.agent, ...options.lanes?.agent },
+      viewer: { ...LANES.viewer, ...options.lanes?.viewer },
     }
   }
 
@@ -222,6 +231,7 @@ export class QueryPool {
     for (const task of [
       ...this.#queues.web.splice(0),
       ...this.#queues.agent.splice(0),
+      ...this.#queues.viewer.splice(0),
     ]) {
       clearTimeout(task.timer)
       task.reject(new PoolError('busy', 'The server is stopping.'))
@@ -234,10 +244,13 @@ export class QueryPool {
   /** The lane whose read runs next: the web app's first, within limits. */
   #nextLane(): Lane | undefined {
     if (this.#queues.web.length) return 'web'
-    if (!this.#queues.agent.length) return
-    const max = this.lanes.agent.max ?? this.size
-    const running = this.#threads.filter((t) => t.task?.lane === 'agent')
-    return running.length < max ? 'agent' : undefined
+    for (const lane of SCRIPT_LANES) {
+      if (!this.#queues[lane].length) continue
+      const max = this.lanes[lane].max ?? this.size
+      const running = this.#threads.filter((t) => t.task?.lane === lane)
+      if (running.length < max) return lane
+    }
+    return undefined
   }
 
   #dispatch(): void {
@@ -247,7 +260,10 @@ export class QueryPool {
       const thread = this.#threads.find((t) => t.ready && !t.task)
       if (!thread) {
         const starting = this.#threads.filter((t) => !t.ready).length
-        const queued = this.#queues.web.length + this.#queues.agent.length
+        const queued = Object.values(this.#queues).reduce(
+          (sum, queue) => sum + queue.length,
+          0,
+        )
         if (
           starting < queued &&
           this.#threads.length < this.size &&

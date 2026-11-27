@@ -8,18 +8,20 @@ Posts, bios, names, alt text, notes quoted from posts and anything inside media 
 
 ## 2. Authentication
 
-- Every request sends `Authorization: Bearer <token>`. The owner makes tokens in the web app (设置 → API 令牌) or with the server's CLI. A token starts with `mdn_ro_` (read only) or `mdn_rw_` (read and write).
-- `ro` tokens can call every `GET` endpoint and the two `batch` reads. `rw` tokens can also call the writes in section 8.
-- No token can delete what the archive holds or how it is organised: posts, accounts, media, tags, folders, watches. Only the owner can, in the web app. Revoking a public link or a capture account deletes no content, so `rw` tokens can.
-- Tokens may expire. On `401 token_expired` or `401 token_invalid`, stop and ask the human for a new token. Do not retry, and do not try other tokens.
-- `GET /agent/v1/whoami` says which token you are using, its permission, when it expires and how many requests it made today.
-- Keep the token secret: not in logs, URLs or messages to anyone but the owner.
+- Every request sends `Authorization: Bearer <token>`. A token starts with `mdn_ro_` (read only) or `mdn_rw_` (read and write).
+- Every token belongs to one user of the archive. The admin (its owner) makes tokens in the web app (设置 → API 令牌) or with the server's CLI. A viewer, someone the admin invited to read the archive, makes their own in the web app: read only.
+- `ro` tokens can call every `GET` endpoint and the two `batch` reads. The admin's `rw` tokens can also call the writes in section 8.
+- A viewer's token reads only, and only the endpoints not marked **Admin only**; those answer it `403 forbidden`. It sees what the viewer sees in the web app: no tags or notes, only the folders that are shared publicly. It works on this API only.
+- No token can delete what the archive holds or how it is organised: posts, accounts, media, tags, folders, watches. Only the admin can, in the web app. Revoking a public link or a capture account deletes no content, so the admin's `rw` tokens can.
+- Tokens may expire, and a viewer's stop when the admin revokes them. On `401 token_expired` or `401 token_invalid`, stop and ask the human for a new token. Do not retry, and do not try other tokens.
+- `GET /agent/v1/whoami` says whose token you are using, its permission, when it expires, how many requests it made today and your limits.
+- Keep the token secret: not in logs, URLs or messages to anyone but the human who gave it to you.
 
 ## 3. Limits and errors
 
-- At most **2 requests in flight** across all of the owner's tokens. Send requests one at a time. A request beyond the two waits up to 3 seconds for a turn, then gets `503 busy` with `Retry-After`: wait that many seconds and retry.
+- At most **2 requests in flight** across all of the admin's tokens. A viewer's tokens have their own lane: **1 request in flight** per viewer, 2 across all viewers, never taking the admin's. `whoami` says yours (`limits.in_flight`) and your lane's (`limits.lane_in_flight`). Send requests one at a time. A request beyond the limit waits up to 3 seconds for a turn, then gets `503 busy` with `Retry-After`: wait that many seconds and retry.
 - A read that takes longer than 5 seconds is stopped with `503 query_timeout`. Narrow it (a folder, dates, an author, fewer terms) before retrying.
-- There are no per-minute or daily caps. Usage is recorded per token, day and endpoint, and the owner sees it.
+- There are no per-minute or daily caps. Usage is recorded per token, day and endpoint, and the user it belongs to sees it.
 - `size` is 1–50 (default 20); `batch` takes at most 100 ids.
 
 Errors are `{"error": "<code>", "message": "...", "detail": "..."}`; `detail`, when present, is the archive's own wording (often Chinese). `query_invalid` adds `position`: where in `q` the problem is (an offset in UTF-16 code units, as JavaScript counts).
@@ -30,11 +32,11 @@ Errors are `{"error": "<code>", "message": "...", "detail": "..."}`; `detail`, w
 | 400    | `query_invalid`                 | `q` does not parse, names something unknown or is over a limit (section 6). Fix it at `position`. |
 | 400    | `cursor_mismatch`               | The cursor came from a different query. Repeat the same parameters, or start without `cursor`.    |
 | 401    | `token_invalid` `token_expired` | Stop and ask the human for a token.                                                               |
-| 403    | `forbidden`                     | A write with a read-only token. Tell the human; do not retry.                                     |
+| 403    | `forbidden`                     | A write with a read-only token, or an admin-only endpoint with a viewer's token. Tell the human.  |
 | 404    | `not_found`                     | Not in the archive (never saved, or removed). Also unknown endpoints.                             |
 | 409    | `conflict`                      | The write conflicts with the current state (a folder name in use, no older posts to read).        |
 | 422    | `unprocessable`                 | The archive cannot do this now (no capture account for the platform). Tell the human.             |
-| 503    | `busy`                          | Two requests are running, or the database is busy. Wait `Retry-After` seconds and retry once.     |
+| 503    | `busy`                          | Your lane's requests are all running, or the database is busy. Wait `Retry-After` and retry once. |
 | 503    | `query_timeout`                 | Narrow the query and retry.                                                                       |
 | 500    | `internal`                      | A bug. Tell the human.                                                                            |
 
@@ -43,7 +45,7 @@ Anything the archive does not have is reported as `not_found` (single reads) or 
 ## 4. Recommended workflows
 
 1. **Aggregate first, then search compact, then read full.** Write the question as a query (section 6) and ask `GET /aggregate` how its results fall by month, author, hashtag…: you learn the size and shape of the set from one request. Then search with the same `q`, narrowed to what matters, with `GET /posts` or `GET /accounts` (compact view, 20 a page). Pick what matters, and read it with `POST /posts/batch` (full view) before you quote or cite it. Cite posts by their `url`.
-2. **Use folders as scopes.** `GET /folders` lists the owner's saved queries (收藏夹). Add `folder=<id>` to a search (or `folder:<name>` to its query) to stay inside one, and narrow it with more parameters.
+2. **Use folders as scopes.** `GET /folders` lists the saved queries (收藏夹) you may use: all of the admin's, or for a viewer those shared publicly. Add `folder=<id>` to a search (or `folder:<name>` to its query) to stay inside one, and narrow it with more parameters.
 3. **An account over time.** `GET /accounts/{id}` for the profile now, `/history` for what changed in it (name, handle, bio, avatar, pinned posts, suspensions), `/metrics` for follower and post counts over time, `/relation-changes` for follows and unfollows.
 4. **Who follows whom.** `GET /accounts/{id}/relations?rel=following|followers|mutual`, then `rel_of` in a search to find posts by those accounts. Check `lists` first: relation lists may be incomplete.
 5. **Around a post.** `GET /posts/{id}/context` for what it quotes, what quotes or reposts it, and related posts and accounts.
@@ -58,6 +60,7 @@ Paths below are under `/agent/v1`. `{id}` of a post is its archive id (a UUID). 
 
 ```json
 {
+  "user": { "id": "…", "name": "管理员", "role": "admin" },
   "token": {
     "id": "…",
     "label": "research",
@@ -68,6 +71,7 @@ Paths below are under `/agent/v1`. `{id}` of a post is its archive id (a UUID). 
   "usage": { "today": 41 },
   "limits": {
     "in_flight": 2,
+    "lane_in_flight": 2,
     "page_size_max": 50,
     "batch_max": 100,
     "query_timeout_ms": 5000
@@ -75,7 +79,7 @@ Paths below are under `/agent/v1`. `{id}` of a post is its archive id (a UUID). 
 }
 ```
 
-Times in usage are UTC days.
+`user.role` is `admin` or `viewer`. A viewer's `permission` is always `ro`, and their `in_flight` is 1 (`lane_in_flight` is what all viewers share). Times in usage are UTC days.
 
 ### GET /agent/v1/posts
 
@@ -134,10 +138,11 @@ GET /agent/v1/posts?q=猫&platform=x&saved_within=30d&size=2
 
 - `parsed` (with `q`) is the query as it was read, in canonical form (section 6); `applied` is the filter actually used, in canonical form: `q` as parsed, lists sorted, handles resolved to account keys, tags with ids and names, defaults (`sort`, `order`) filled in. Check them against what you meant.
 - `total` comes with the first page only. `next_cursor` comes with `has_more: true` and only works with the same query (the same `parsed`), filter, sort and folder (`size` and `view` may change).
+- `tags` and `note` (我的整理) are the admin's: they come with the admin's tokens only, and a viewer's items have neither.
 - Compact items cut `text` and `note` at 280 characters (`text_truncated: true`), give media as counts, and tags as names.
 - `lang` is the language detected from the text (section 9), as `lang:` takes it; absent when unknown. A quoted or reposted post has one when it is saved.
 - Full items add the whole text, `media` (each with `kind`, `state`, `url`, `thumbnail_url`, `alt_text`, `sensitive`, `width`/`height`), `edited_at`, `mentions`, `reposted_by` (accounts whose timelines show it reposted), and tags as `{id, name}`.
-- `media[].url` is the original: a public CDN address, or a link this server signed, valid for at least 12 hours. `thumbnail_url` is a smaller image. `state: "removed"` means the owner deleted the file to save space; the thumbnail may remain.
+- `media[].url` is the original: a public CDN address, or a link this server signed, valid for at least 12 hours. `thumbnail_url` is a smaller image. `state: "removed"` means the admin deleted the file to save space; the thumbnail may remain.
 - Errors: `400 invalid_request`, `400 query_invalid`, `400 cursor_mismatch`, `404 not_found` (unknown `folder`, `rel_of`); an `author` the archive has no account for selects nothing, `503 busy`, `503 query_timeout`.
 
 ### GET /agent/v1/accounts
@@ -205,7 +210,7 @@ Without a `type:` term the query counts posts: `type:post` is implied, and `pars
 | `hour`, `weekday`              | `0`–`23`; `1` (Monday) – `7` (Sunday); in `tz`. In that order.                           |
 | `type`                         | `original`, `quote`, `repost`; `profile` (an account) with `type:profile`.               |
 | `media`                        | `image`, `video`, `image+video`, `other`, `none`.                                        |
-| `tag`                          | The owner's tag name (with `id`); an account's tag counts for its posts.                 |
+| `tag`                          | The admin's tag name (with `id`); an account's tag counts for its posts. Admin only.     |
 | `hashtag`, `mention`, `domain` | `猫`, `x:alice`, `youtube.com`, as `#`, `mentions:` and `domain:` match them.            |
 | `lang`, `platform`             | The detected language (`zh-Hans`, `ja`; `und` when unknown); `x` or `instagram`.         |
 
@@ -365,7 +370,7 @@ The change happened between `since` (the last read that saw the old state) and `
 
 ### GET /agent/v1/folders
 
-The owner's folders (收藏夹), each a saved query of section 6, with tags and folders by name, and its order (`sort`, `order`) and the zone of its relative dates (`tz`) when it has them:
+The admin's folders (收藏夹), each a saved query of section 6, with tags and folders by name, and its order (`sort`, `order`) and the zone of its relative dates (`tz`) when it has them. A viewer gets only the folders shared publicly, with `id`, `name`, the counts and times, but no `query`, `sort`, `order` or `tz`: what they select by is the admin's.
 
 ```json
 {
@@ -390,15 +395,16 @@ The owner's folders (收藏夹), each a saved query of section 6, with tags and 
 
 ### GET /agent/v1/tags
 
-```json
+**Admin only.** ```json
 { "items": [{ "id": "01c0…", "name": "artists", "collections": 52 }] }
-```
+
+````
 
 `collections` counts posts and accounts tagged directly.
 
 ### GET /agent/v1/updates/{id}
 
-Progress of a capture or an update (the `record_id` or `update_id` a write returned):
+**Admin only.** Progress of a capture or an update (the `record_id` or `update_id` a write returned):
 
 ```json
 {
@@ -425,19 +431,19 @@ Progress of a capture or an update (the `record_id` or `update_id` a write retur
     "skipped": 0
   }
 }
-```
+````
 
-Poll it every 10 seconds or more until `done` is true. `paused` or `paused_all` mean the owner (or you) paused it.
+Poll it every 10 seconds or more until `done` is true. `paused` or `paused_all` mean the admin (or you) paused it.
 
 `notes` (`[{"url": "…", "text": "…"}]`, when there are any) are accounts captured completely but with a remark, counted as `complete`: a protected account whose posts the capture account may not see says `锁推账号，采集账号无权查看帖子（未关注或请求未通过）`. That is no failure and is not retried by itself; an update after the account may see them reads the posts.
 
 ### GET /agent/v1/jobs
 
-Background work: `paused` (everything), `paused_types`, `pausable_types` and the backlog of jobs per type.
+**Admin only.** Background work: `paused` (everything), `paused_types`, `pausable_types` and the backlog of jobs per type.
 
 ### GET /agent/v1/watches
 
-Scheduled updates (定期更新): accounts and folders the archive updates by itself.
+**Admin only.** Scheduled updates (定期更新): accounts and folders the archive updates by itself.
 
 ```json
 {
@@ -469,7 +475,7 @@ A folder's watch has `"target": "folder"` and the folder's `name`. `last_run.upd
 
 ### GET /agent/v1/shares
 
-The owner's public links (公开分享): a folder, a post or an account anyone with the link can read. `?of=<post or account id>` lists only the links that make it public: its own, a folder holding it, a shared account listing it.
+**Admin only.** The admin's public links (公开分享): a folder, a post or an account anyone with the link can read. `?of=<post or account id>` lists only the links that make it public: its own, a folder holding it, a shared account listing it.
 
 ```json
 {
@@ -490,7 +496,7 @@ The owner's public links (公开分享): a folder, a post or an account anyone w
 
 ### GET /agent/v1/capture-accounts
 
-The platform accounts the archive captures with (采集账号), never their credentials: `{"items": [{"id": "…", "platform": "x", "name": "工作号", "username": "me", "state": "ready", "selected": true}]}`. `state` is `ready`, `pending` or `reauth_required` (the owner has to sign it in again); `selected` is the one its platform captures with.
+**Admin only.** The platform accounts the archive captures with (采集账号), never their credentials: `{"items": [{"id": "…", "platform": "x", "name": "工作号", "username": "me", "state": "ready", "selected": true}]}`. `state` is `ready`, `pending` or `reauth_required` (the admin has to sign it in again); `selected` is the one its platform captures with.
 
 ## 6. Query language
 
@@ -505,32 +511,32 @@ Syntax:
 - `"two words"` is a phrase: those words, together, in that order. One word in quotes is that word: quotes keep `"OR"`, `"-x"`, `"#x"` or `"from:x"` from reading as syntax. A `"` inside quotes is written twice: `"say ""hi"""`.
 - `key:value` is a term; a value with spaces goes in quotes: `tag:"to read"`. Anything else with a colon (`https://x.com/a#b`, `10:30`, `Re:ゼロ`) is a word, as are runs of Chinese or Japanese.
 
-| Term                                                        | Selects                                                                                                                                                                                                                                         |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `word`                                                      | Keyword search (section 9): names, handles, text, quoted text, alt text, bios. The words of the top level rank the results (`sort=relevance`); words under `OR` or `-` only match, with no near misses.                                         |
-| `"phrase"`                                                  | The words together, in this order, in any of those.                                                                                                                                                                                             |
-| `#tag`                                                      | Posts with the hashtag (accounts: in the bio). Case and full-width forms do not matter.                                                                                                                                                         |
-| `from:@h`                                                   | Posts by the account: `@h` (any platform), `x:@h`, an account key or a saved account's id. Under any handle it had.                                                                                                                             |
-| `mentions:@h`                                               | Posts that mention it (`x:@h` for one platform).                                                                                                                                                                                                |
-| `quotes:<post id or @h>`                                    | Posts that quote that post, or any post by `@h`.                                                                                                                                                                                                |
-| `reposts:<post id or @h>`                                   | Posts and accounts that reposted that post, or a post by `@h`.                                                                                                                                                                                  |
-| `reposted-by:@h`                                            | Posts `@h` reposted: on its timeline, or by a repost of its own. `@h` as for `from:`.                                                                                                                                                           |
-| `rel:following:@a` `rel:followers:@a` `rel:mutual:@a`       | Accounts `@a` follows, that follow `@a`, or both, and their posts (as `rel_of` and `rel`). Several accounts: `rel:following:@a,@b` (both of them, as `rel_min`'s default), `rel:following:1:@a,@b` (at least one).                              |
-| `is:original` `is:quote` `is:repost`                        | The post type (as `post_type`). The archive does not record replies, so there is no `is:reply`.                                                                                                                                                 |
-| `has:image` `has:video` `has:media` `has:link`              | Posts with images, videos, either, or a link.                                                                                                                                                                                                   |
-| `domain:youtube.com`                                        | Posts linking to the site: its registrable domain, so `music.youtube.com` and `www.youtube.com` are `youtube.com`.                                                                                                                              |
+| Term                                                        | Selects                                                                                                                                                                                                                                   |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `word`                                                      | Keyword search (section 9): names, handles, text, quoted text, alt text, bios. The words of the top level rank the results (`sort=relevance`); words under `OR` or `-` only match, with no near misses.                                   |
+| `"phrase"`                                                  | The words together, in this order, in any of those.                                                                                                                                                                                       |
+| `#tag`                                                      | Posts with the hashtag (accounts: in the bio). Case and full-width forms do not matter.                                                                                                                                                   |
+| `from:@h`                                                   | Posts by the account: `@h` (any platform), `x:@h`, an account key or a saved account's id. Under any handle it had.                                                                                                                       |
+| `mentions:@h`                                               | Posts that mention it (`x:@h` for one platform).                                                                                                                                                                                          |
+| `quotes:<post id or @h>`                                    | Posts that quote that post, or any post by `@h`.                                                                                                                                                                                          |
+| `reposts:<post id or @h>`                                   | Posts and accounts that reposted that post, or a post by `@h`.                                                                                                                                                                            |
+| `reposted-by:@h`                                            | Posts `@h` reposted: on its timeline, or by a repost of its own. `@h` as for `from:`.                                                                                                                                                     |
+| `rel:following:@a` `rel:followers:@a` `rel:mutual:@a`       | Accounts `@a` follows, that follow `@a`, or both, and their posts (as `rel_of` and `rel`). Several accounts: `rel:following:@a,@b` (both of them, as `rel_min`'s default), `rel:following:1:@a,@b` (at least one).                        |
+| `is:original` `is:quote` `is:repost`                        | The post type (as `post_type`). The archive does not record replies, so there is no `is:reply`.                                                                                                                                           |
+| `has:image` `has:video` `has:media` `has:link`              | Posts with images, videos, either, or a link.                                                                                                                                                                                             |
+| `domain:youtube.com`                                        | Posts linking to the site: its registrable domain, so `music.youtube.com` and `www.youtube.com` are `youtube.com`.                                                                                                                        |
 | `lang:ja`                                                   | The language detected from the text (section 9): a code such as `ja`, `en`, `ko`, `es`, with the script for Chinese (`zh-Hans`, `zh-Hant`; `zh` when no character tells). `lang:zh` takes all three. Short and mixed text often has none. |
-| `platform:x` `platform:instagram`                           | As `platform`.                                                                                                                                                                                                                                  |
-| `since:2026-01-01` `until:2026-02-01`                       | Published from that day on, or before that day (so these two are January), in `tz`, UTC by default. A moment works too: `since:2026-01-01T09:00:00+09:00`.                                                                                     |
-| `within:30d` `within:12h`                                   | Published in the last 30 days (today included) or 12 hours.                                                                                                                                                                                     |
-| `saved:2026-11-01` `saved:7d` `saved-since:` `saved-until:` | Saved by the owner on that day, in the last 7 days (or hours: `12h`), from that day (or moment) on, or before it.                                                                                                                               |
-| `tag:<name or id>`                                          | The owner's tags; an account's tag counts for its posts.                                                                                                                                                                                        |
-| `folder:<id or name>`                                       | What the folder's query selects, as if written here (`folder=` does the same); `parsed` keeps `folder:` as written. A folder may name other folders, never itself.                                                                             |
-| `protected:yes` `protected:no`                              | As `protected`: by protected accounts, or not.                                                                                                                                                                                                  |
-| `related:<id>`                                              | As `related_to`.                                                                                                                                                                                                                                |
-| `state:deleted` `state:suspended`                           | As `source_state`.                                                                                                                                                                                                                              |
-| `type:post` `type:profile`                                  | Posts or accounts. `GET /aggregate` counts posts unless its query names a type; `/posts` and `/accounts` hold one kind already.                                                                                                                 |
-| `sensitive:yes` `sensitive:no`                              | As `sensitive`.                                                                                                                                                                                                                                 |
+| `platform:x` `platform:instagram`                           | As `platform`.                                                                                                                                                                                                                            |
+| `since:2026-01-01` `until:2026-02-01`                       | Published from that day on, or before that day (so these two are January), in `tz`, UTC by default. A moment works too: `since:2026-01-01T09:00:00+09:00`.                                                                                |
+| `within:30d` `within:12h`                                   | Published in the last 30 days (today included) or 12 hours.                                                                                                                                                                               |
+| `saved:2026-11-01` `saved:7d` `saved-since:` `saved-until:` | Saved by the admin on that day, in the last 7 days (or hours: `12h`), from that day (or moment) on, or before it.                                                                                                                         |
+| `tag:<name or id>`                                          | The admin's tags; an account's tag counts for its posts. Admin only: for a viewer every tag is unknown, `400 query_invalid` as for one that does not exist.                                                                               |
+| `folder:<id or name>`                                       | What the folder's query selects, as if written here (`folder=` does the same); `parsed` keeps `folder:` as written. A folder may name other folders, never itself. A viewer may name the folders shared publicly; any other is unknown.   |
+| `protected:yes` `protected:no`                              | As `protected`: by protected accounts, or not.                                                                                                                                                                                            |
+| `related:<id>`                                              | As `related_to`.                                                                                                                                                                                                                          |
+| `state:deleted` `state:suspended`                           | As `source_state`.                                                                                                                                                                                                                        |
+| `type:post` `type:profile`                                  | Posts or accounts. `GET /aggregate` counts posts unless its query names a type; `/posts` and `/accounts` hold one kind already.                                                                                                           |
+| `sensitive:yes` `sensitive:no`                              | As `sensitive`.                                                                                                                                                                                                                           |
 
 Limits, so that one query cannot read everything many times over: at most 16 terms; operators (AND, OR, `-`) nested at most 4 deep; at most 8 alternatives in one `OR`; values of at most 64 characters. A query of nothing but exclusions (`-#ad`) needs something to start from: a term that is not excluded, or the `author`, `tag`, `folder`, `saved_*`, `rel_of` or `related_to` parameters.
 
@@ -561,29 +567,29 @@ Hashtags, mentions, domains, `from:`, `tag:`, `rel:` and words are looked up in 
 
 Lists take commas or repeated keys (`tag=a,b` or `tag=a&tag=b`). Times are RFC 3339 (`2026-11-01T00:00:00Z`).
 
-| Parameter                    | Meaning                                                                                                                                                                                                                                |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `q`                          | The query language of section 6: keyword search (names, handles, text, quoted text, alt text, bios; section 9) plus terms.                                                                                                             |
-| `platform`                   | `x`, `instagram` (list).                                                                                                                                                                                                               |
-| `media_type`                 | `image`, `video`, `text` (no media); any of them.                                                                                                                                                                                      |
-| `protected`                  | `true`: from protected (private) accounts; `false`: public ones. As the account is now.                                                                                                                                                |
-| `sensitive`                  | `true`: has media marked sensitive; `false`: has none.                                                                                                                                                                                 |
-| `saved_from`, `saved_before` | When the owner saved it: from (inclusive), before (exclusive).                                                                                                                                                                         |
-| `saved_within`, `tz`         | `7d`: saved on one of the last 7 days, today included, counted in `tz` (IANA, default `UTC`); `tz` is also where the dates of `q` are counted. Not with `saved_from` / `saved_before`.                                                 |
-| `author`                     | Posts by these accounts (list of account references, section 5), found as `from:` finds them; one the archive has no account for selects nothing.                                                                                      |
-| `related_to`                 | Posts and accounts directly related to this one: for an account, its posts, reposts and mentions; for a post, what it quotes and what quotes it.                                                                                       |
-| `tag`, `tag_mode`, `not_tag` | Tags by id or exact name: any of `tag` (or all, with `tag_mode=all`), none of `not_tag`. An account's tags also count for its posts. Give a name with a comma by its id.                                                               |
-| `post_type`                  | `post`, `quote` or `repost` (posts only).                                                                                                                                                                                              |
-| `source_state`               | `deleted` (deleted on the platform) or `suspended` (account, or post author, suspended), as last confirmed. Archived content stays.                                                                                                    |
-| `rel_of`, `rel`, `rel_min`   | Accounts that `rel_of` (list) follow (`rel=following`), that follow them (`followers`) or both (`mutual`), and posts by those accounts. With several `rel_of`, at least `rel_min` of them (default 2).                                 |
-| `folder`                     | Only what the folder's query selects (as `folder:<id>` in `q`); the other parameters narrow it. Its order is the default `sort` and `order`.                                                                                             |
-| `sort`                       | `relevance` (default with `q`), `updated` (newest capture, default otherwise), `published`, `saved`, `storage`; accounts also `followers`, `following`. With `q`, results come in relevance tiers first and the sort orders each tier. |
-| `order`                      | `desc` (default) or `asc`.                                                                                                                                                                                                             |
-| `size`, `cursor`, `view`     | Page size (1–50, default 20), the previous page's `next_cursor`, `compact` or `full`.                                                                                                                                                  |
+| Parameter                    | Meaning                                                                                                                                                                                                                                                                                              |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `q`                          | The query language of section 6: keyword search (names, handles, text, quoted text, alt text, bios; section 9) plus terms.                                                                                                                                                                           |
+| `platform`                   | `x`, `instagram` (list).                                                                                                                                                                                                                                                                             |
+| `media_type`                 | `image`, `video`, `text` (no media); any of them.                                                                                                                                                                                                                                                    |
+| `protected`                  | `true`: from protected (private) accounts; `false`: public ones. As the account is now.                                                                                                                                                                                                              |
+| `sensitive`                  | `true`: has media marked sensitive; `false`: has none.                                                                                                                                                                                                                                               |
+| `saved_from`, `saved_before` | When the admin saved it: from (inclusive), before (exclusive).                                                                                                                                                                                                                                       |
+| `saved_within`, `tz`         | `7d`: saved on one of the last 7 days, today included, counted in `tz` (IANA, default `UTC`); `tz` is also where the dates of `q` are counted. Not with `saved_from` / `saved_before`.                                                                                                               |
+| `author`                     | Posts by these accounts (list of account references, section 5), found as `from:` finds them; one the archive has no account for selects nothing.                                                                                                                                                    |
+| `related_to`                 | Posts and accounts directly related to this one: for an account, its posts, reposts and mentions; for a post, what it quotes and what quotes it.                                                                                                                                                     |
+| `tag`, `tag_mode`, `not_tag` | Tags by id or exact name: any of `tag` (or all, with `tag_mode=all`), none of `not_tag`. An account's tags also count for its posts. Give a name with a comma by its id. Admin only: a viewer's `tag` and `not_tag` answer `400 invalid_request` as for a tag that does not exist, `tag_mode` `400`. |
+| `post_type`                  | `post`, `quote` or `repost` (posts only).                                                                                                                                                                                                                                                            |
+| `source_state`               | `deleted` (deleted on the platform) or `suspended` (account, or post author, suspended), as last confirmed. Archived content stays.                                                                                                                                                                  |
+| `rel_of`, `rel`, `rel_min`   | Accounts that `rel_of` (list) follow (`rel=following`), that follow them (`followers`) or both (`mutual`), and posts by those accounts. With several `rel_of`, at least `rel_min` of them (default 2).                                                                                               |
+| `folder`                     | Only what the folder's query selects (as `folder:<id>` in `q`); the other parameters narrow it. Its order is the default `sort` and `order`. A viewer may use the folders shared publicly; any other is `404 not_found`.                                                                             |
+| `sort`                       | `relevance` (default with `q`), `updated` (newest capture, default otherwise), `published`, `saved`, `storage`; accounts also `followers`, `following`. With `q`, results come in relevance tiers first and the sort orders each tier.                                                               |
+| `order`                      | `desc` (default) or `asc`.                                                                                                                                                                                                                                                                           |
+| `size`, `cursor`, `view`     | Page size (1–50, default 20), the previous page's `next_cursor`, `compact` or `full`.                                                                                                                                                                                                                |
 
-## 8. Writing (rw tokens)
+## 8. Writing (rw tokens, admin only)
 
-Writes need an `rw` token; with `ro` they answer `403 forbidden`. Send JSON bodies with `Content-Type: application/json`. Captures and updates accept an `Idempotency-Key` header: the same key returns the same record instead of starting another.
+Writes need the admin's `rw` token; with `ro`, or a viewer's token, they answer `403 forbidden`. Send JSON bodies with `Content-Type: application/json`. Captures and updates accept an `Idempotency-Key` header: the same key returns the same record instead of starting another.
 
 Capture options (`options`, all optional, the same as the web app's 更新 sheet): `posts` (`latest` with `count`, `until_existing`, `max` with optional `count`, or `none`), `since_days` (1, 7, 30, 90 or 365), `media_only`, `include_shared`, `capture_references`, `relations` (also read following and followers lists).
 
@@ -602,7 +608,7 @@ Capture a link: `{"url": "https://x.com/alice/status/1861…", "options": {"capt
 
 An X profile link by handle (`https://x.com/alice`) is saved under the account's numeric id: when the archive does not know whose the handle is yet, it is identified first, and until then the answer has no `collection_id` and the record (same `record_id` throughout) is `queued`; one no lookup identifies ends `failed`.
 
-`400 invalid_request` for an unsupported link; `422 unprocessable` when the platform needs a capture account the owner has not added.
+`400 invalid_request` for an unsupported link; `422 unprocessable` when the platform needs a capture account the admin has not added.
 
 ### POST /agent/v1/updates
 
@@ -622,11 +628,11 @@ Pause or resume all background work, or some job types: `{"paused": true}`, `{"p
 
 ### PUT /agent/v1/watches
 
-Watch an account or a folder, or change its watch (there is one per target): `{"target": {"account": "x:@alice"}, "every": {"count": 6, "unit": "hour"}, "options": {"posts": "until_existing"}}`. `target` is `{"account": ref}` (a saved account) or `{"folder": id}`; `every` is a whole `count` from 1 to 1000 of a `unit`: `minute`, `hour`, `day`, `week`, `month` or `year`, at least 5 minutes (shorter is `invalid_request`); `time_zone` (an IANA zone, default `UTC`) is where months and years are counted, from the day the interval is set (31 January, then the last of February); `options` as for updates. A run that takes longer than its interval skips the slots that pass meanwhile. Each run is an ordinary update, ranked below the owner's own work. Answers the watch as `GET /watches` lists it.
+Watch an account or a folder, or change its watch (there is one per target): `{"target": {"account": "x:@alice"}, "every": {"count": 6, "unit": "hour"}, "options": {"posts": "until_existing"}}`. `target` is `{"account": ref}` (a saved account) or `{"folder": id}`; `every` is a whole `count` from 1 to 1000 of a `unit`: `minute`, `hour`, `day`, `week`, `month` or `year`, at least 5 minutes (shorter is `invalid_request`); `time_zone` (an IANA zone, default `UTC`) is where months and years are counted, from the day the interval is set (31 January, then the last of February); `options` as for updates. A run that takes longer than its interval skips the slots that pass meanwhile. Each run is an ordinary update, ranked below the admin's own work. Answers the watch as `GET /watches` lists it.
 
 ### PATCH /agent/v1/watches/{id}
 
-Change a watch's `every`, `time_zone` or `options`, or turn it off and on: `{"enabled": false}`. A new interval starts from its next slot. Only the owner deletes watches.
+Change a watch's `every`, `time_zone` or `options`, or turn it off and on: `{"enabled": false}`. A new interval starts from its next slot. Only the admin deletes watches.
 
 ### POST /agent/v1/shares/{id}/revoke
 
@@ -634,7 +640,7 @@ Stop a public link: its address stops working at once and never works again (sha
 
 ### POST /agent/v1/capture-accounts/{id}/revoke
 
-Remove a capture account: its stored credential is deleted and captures stop using it; what it captured stays. Answers `{"id": "…", "revoked": true}`. Captures on a platform that needs an account then answer `422 unprocessable` until the owner adds one.
+Remove a capture account: its stored credential is deleted and captures stop using it; what it captured stays. Answers `{"id": "…", "revoked": true}`. Captures on a platform that needs an account then answer `422 unprocessable` until the admin adds one.
 
 ### POST /agent/v1/tags
 
@@ -676,7 +682,7 @@ The same for accounts, by any account reference.
 
 ### POST /agent/v1/folders
 
-Save a query as a folder: `{"name": "猫", "query": "猫 has:image tag:cats", "sort": "published"}`. `query` is required: the language of section 6, or `""` for everything (a folder may be only an order), with the owner's limits, not the agent's (up to 1024 terms); tags and folders it names must exist. `sort` and `order` are the list's order, `tz` the zone of its relative dates (`saved:7d`, `since:`). A folder holds posts and accounts alike. Answers `201` with the folder as `GET /folders` lists it; `400 query_invalid` (with `position`) for a query it cannot read; `409 conflict` when the name is taken.
+Save a query as a folder: `{"name": "猫", "query": "猫 has:image tag:cats", "sort": "published"}`. `query` is required: the language of section 6, or `""` for everything (a folder may be only an order), with the admin's limits, not the agent's (up to 1024 terms); tags and folders it names must exist. `sort` and `order` are the list's order, `tz` the zone of its relative dates (`saved:7d`, `since:`). A folder holds posts and accounts alike. Answers `201` with the folder as `GET /folders` lists it; `400 query_invalid` (with `position`) for a query it cannot read; `409 conflict` when the name is taken.
 
 ### PATCH /agent/v1/folders/{id}
 
@@ -690,5 +696,5 @@ Rename it or replace its query, order or zone: `{"name": "…"}`, `{"query": "�
 - **Metrics are as captured**: the counts the platform showed at each capture. Gaps between captures can be long; counts do not move between them.
 - **Relation lists may be incomplete.** Lists over 5000 accounts are not read; the platform leaves out some accounts; a read can stop part way. Check `lists` (`complete_at`, `partial_at`). Follows also come from other accounts' lists.
 - **Deleted and suspended** content stays in the archive with `source_state`; `source_state_since` is when it was first seen so.
-- **Removed media**: the owner may delete media files to save space (`state: "removed"`); the post and its thumbnail stay.
-- Notes and tags are the owner's own (我的整理), in Chinese or anything else; they are not from the platform.
+- **Removed media**: the admin may delete media files to save space (`state: "removed"`); the post and its thumbnail stay.
+- Notes and tags are the admin's own (我的整理; viewers never see them), in Chinese or anything else; they are not from the platform.

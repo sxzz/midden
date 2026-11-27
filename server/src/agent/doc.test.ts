@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, test } from 'vitest'
 import { MAX_COUNT } from '#capture/watch-schedule.ts'
 import { intervalUnits } from '#db/schema.ts'
+import { viewers } from '#http/auth.ts'
+import { isMarked } from '#http/markers.ts'
 import { agentFixture, type AgentFixture } from '#testing/agent.ts'
 import { AGENT_DOC, agentDocRoutes } from './doc.ts'
 import { AGENT_ERRORS } from './errors.ts'
@@ -33,6 +35,27 @@ describe('/agent.md', () => {
       (m) => m[1],
     )
     expect(documented.toSorted()).toEqual([...new Set(routes)].toSorted())
+  })
+
+  test('marks every endpoint a viewer’s token cannot call admin only, and no other', async () => {
+    fixture = await agentFixture()
+    const name = (r: { method: string; path: string }) =>
+      `${r.method} ${r.path.replaceAll(/:(\w+)/g, '{$1}')}`
+    const routes = fixture.app.routes.filter((r) => r.method !== 'ALL')
+    const open = new Set(
+      routes.filter((r) => isMarked(r.handler, viewers)).map(name),
+    )
+    const writing = doc.indexOf('## 8. Writing')
+    expect(doc.slice(writing, doc.indexOf('\n', writing))).toContain(
+      'admin only',
+    )
+    for (const endpoint of new Set(routes.map(name))) {
+      const at = doc.indexOf(`### ${endpoint}\n`)
+      const end = doc.indexOf('\n#', at + 1)
+      const section = doc.slice(at, end === -1 ? undefined : end)
+      const marked = section.includes('**Admin only.**') || at > writing
+      expect([endpoint, marked]).toEqual([endpoint, !open.has(endpoint)])
+    }
   })
 
   test('begins with the untrusted-content rule and lists every error', () => {

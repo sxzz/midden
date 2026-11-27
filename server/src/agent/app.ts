@@ -3,8 +3,10 @@ import * as v from 'valibot'
 import { endpointOf, openToViewers, viewers } from '#http/auth.ts'
 import { LANES } from '#reads/pool.ts'
 import { authenticate, bearer } from '#tokens/tokens.ts'
+import { writes } from '#users/principal.ts'
+import { userView } from '#users/users.ts'
 import { AgentError, errorBody, invalid, notFound } from './errors.ts'
-import { Gate } from './gate.ts'
+import { Gate, ViewerGates } from './gate.ts'
 import {
   body,
   errorResponse,
@@ -14,11 +16,11 @@ import {
 } from './http.ts'
 import { MAX_PAGE_SIZE, type ReadBase } from './query.ts'
 import { BATCH_MAX } from './reads.ts'
+import { laneOf, type Reads } from './runner.ts'
 import { VIEWS, type View } from './shape.ts'
 import { writeRoutes } from './writes.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { TokenUsage } from '#tokens/usage.ts'
-import type { Reads } from './runner.ts'
 
 export interface AgentOptions {
   ctx: AccountsContext
@@ -27,7 +29,10 @@ export interface AgentOptions {
   /** Reads on this thread, for what writes look up and answer. */
   reader: ReadBase
   usage: TokenUsage
+  /** The admin's tokens' turns. */
   gate?: Gate
+  /** Viewers' tokens' turns, apart from the admin's. */
+  viewerGates?: ViewerGates
   now?: () => number
   /** After every request that may have written (not `GET`). */
   onWrite?: () => void
@@ -60,6 +65,7 @@ export function createAgentApi(o: AgentOptions) {
   const { ctx, reads, usage } = o
   const now = o.now ?? Date.now
   const gate = o.gate ?? new Gate()
+  const viewerGates = o.viewerGates ?? new ViewerGates()
   const app = new Hono<AgentEnv>().basePath('/agent/v1')
   app.onError((error, c) => {
     if (!(error instanceof AgentError) && errorBody(error).error === 'internal')
@@ -72,15 +78,15 @@ export function createAgentApi(o: AgentOptions) {
     if (header === undefined)
       throw new AgentError(
         'token_invalid',
-        'Send Authorization: Bearer <token>. Ask the owner for a token.',
+        'Send Authorization: Bearer <token>. Ask the human who runs you for a token.',
       )
     const auth = authenticate(ctx.db, bearer(header), now())
     if (!auth.ok)
       throw new AgentError(
         auth.error,
         auth.error === 'token_expired'
-          ? 'This token has expired. Stop and ask the owner for a new one.'
-          : 'This token is not valid (revoked, rolled or mistyped). Stop and ask the owner for a new one.',
+          ? 'This token has expired. Stop and ask the human for a new one.'
+          : 'This token is not valid (revoked, rolled or mistyped). Stop and ask the human for a new one.',
       )
     const { token } = auth
     c.set('token', token)
@@ -97,7 +103,10 @@ export function createAgentApi(o: AgentOptions) {
           'forbidden',
           'This endpoint is for the admin only. See /agent.md.',
         )
-      const leave = await gate.enter()
+      const leave =
+        token.role === 'admin'
+          ? await gate.enter()
+          : await viewerGates.enter(token.userId)
       try {
         await next()
       } finally {
@@ -109,22 +118,29 @@ export function createAgentApi(o: AgentOptions) {
     }
   })
 
+  // Whose token, what it may do, and the limits of the lane it runs in:
+  // the admin's tokens share theirs; viewers have one of their own.
   app.get('/whoami', viewers, (c) => {
     const token = c.get('token')
+    const principal = c.get('principal')
+    const admin = principal.role === 'admin'
     return c.json({
+      user: userView(ctx.db, token.userId),
       token: {
         id: token.id,
         label: token.label,
-        permission: token.permission,
+        // What it may do: a viewer's reads only, whatever it was made as.
+        permission: writes(principal) ? token.permission : ('ro' as const),
         created_at: token.createdAt.toISOString(),
         expires_at: token.expiresAt?.toISOString() ?? null,
       },
       usage: { today: usage.today(ctx.db, token.id) },
       limits: {
-        in_flight: gate.limit,
+        in_flight: admin ? gate.limit : viewerGates.perUser,
+        lane_in_flight: admin ? gate.limit : viewerGates.shared.limit,
         page_size_max: MAX_PAGE_SIZE,
         batch_max: BATCH_MAX,
-        query_timeout_ms: LANES.agent.timeoutMs,
+        query_timeout_ms: LANES[laneOf(principal)].timeoutMs,
       },
     })
   })

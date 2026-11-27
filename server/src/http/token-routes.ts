@@ -9,6 +9,7 @@ import {
   updateToken,
   type TokenView,
 } from '#tokens/tokens.ts'
+import { writes } from '#users/principal.ts'
 import { sessionOnly, viewers } from './auth.ts'
 import { inline } from './offload.ts'
 import { json, type Env } from './validate.ts'
@@ -71,6 +72,9 @@ export function tokenRoutes(
         ),
         (c) => {
           const input = c.req.valid('json')
+          // A viewer's tokens read the agent API only.
+          if (input.permission !== 'ro' && !writes(c.get('principal')))
+            return c.json({ error: '查看者只能创建只读令牌' }, 403)
           const issued = createToken(
             db,
             {

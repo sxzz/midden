@@ -1,4 +1,9 @@
-import { PoolError, ThreadError, type QueryPool } from '#reads/pool.ts'
+import {
+  PoolError,
+  ThreadError,
+  type Lane,
+  type QueryPool,
+} from '#reads/pool.ts'
 import { AgentError, type ErrorBody } from './errors.ts'
 import {
   runRead,
@@ -41,6 +46,10 @@ function agentError(error: unknown): unknown {
   }
 }
 
+/** Viewers' scripts have a lane of their own, apart from the admin's. */
+export const laneOf = (principal: Principal): Lane =>
+  principal.role === 'admin' ? 'agent' : 'viewer'
+
 /**
  * On the read threads of the pool the web app shares: what the web process
  * uses. The pool closes with the web process, not with the agent API.
@@ -49,7 +58,10 @@ export function pooledReads(pool: QueryPool): Reads {
   return {
     run: (principal, name, input) =>
       pool
-        .run('agent', name, { principal, input } satisfies NamedReadRequest)
+        .run(laneOf(principal), name, {
+          principal,
+          input,
+        } satisfies NamedReadRequest)
         .catch((error: unknown) => {
           throw agentError(error)
         }) as Promise<never>,

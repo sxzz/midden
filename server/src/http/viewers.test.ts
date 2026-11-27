@@ -369,6 +369,34 @@ describe('users and their own credentials', () => {
     expect(await listed(adminCookie, '/tokens')).toEqual(['agent', 'admin’s'])
   })
 
+  test('a viewer makes read-only tokens of their own, for the agent API', async () => {
+    const { ctx, viewer, request, call } = await setup()
+    const cookie = createSession(ctx.db, viewer)
+    const asked = (permission: string) =>
+      request(
+        'POST',
+        '/tokens',
+        { cookie },
+        { label: 'script', permission, expires_at: null },
+      )
+    const refused = await asked('rw')
+    expect([refused.status, await refused.json()]).toEqual([
+      403,
+      { error: '查看者只能创建只读令牌' },
+    ])
+    const made = await asked('ro')
+    expect(made.status).toBe(200)
+    const { secret } = (await made.json()) as { secret: string }
+    expect(secret).toMatch(/^mdn_ro_/)
+    expect(await call('/whoami', { token: secret })).toMatchObject({
+      status: 200,
+      json: { user: { id: viewer, role: 'viewer' } },
+    })
+    expect(
+      (await request('GET', '/collections', { token: secret })).status,
+    ).toBe(403)
+  })
+
   test('a revoked user’s session and tokens answer 401', async () => {
     const { ctx, viewer, request, viewerToken, call } = await setup()
     const cookie = createSession(ctx.db, viewer)

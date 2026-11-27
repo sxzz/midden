@@ -101,6 +101,30 @@ describe('read threads', () => {
     )
   })
 
+  test('viewers’ scripts hold one thread of their own, never the admin’s share nor the last one', async () => {
+    pool = new QueryPool({ script: SLOW, workerData: null })
+    pool.warm()
+    await Promise.all([1, 2, 3, 4].map(() => pool!.run('web', 'echo', 0)))
+    const ended: string[] = []
+    const run = (lane: 'web' | 'agent' | 'viewer', name: string, ms: number) =>
+      pool!.run(lane, 'slow', { ms }).then(() => ended.push(name))
+    const started = performance.now()
+    // The admin's two and a viewer's one run at once; a viewer's second
+    // waits though a thread is free, which the web app gets at once.
+    const held = [
+      run('agent', 'a1', 300),
+      run('agent', 'a2', 300),
+      run('viewer', 'v1', 300),
+    ]
+    const second = run('viewer', 'v2', 50)
+    await run('web', 'w1', 50)
+    expect(performance.now() - started).toBeLessThan(250)
+    expect(ended).toEqual(['w1'])
+    await Promise.all([...held, second])
+    expect(ended.indexOf('v2')).toBeGreaterThan(ended.indexOf('v1'))
+    expect(pool.threads.live).toBe(4)
+  })
+
   test('past its timeout a read fails; a new thread takes over', async () => {
     pool = new QueryPool({
       script: SLOW,

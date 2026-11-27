@@ -70,11 +70,11 @@ const byKind: Record<ErrorKind, [AgentErrorCode, string]> = {
   collection_stopped: ['conflict', 'The capture was stopped.'],
   account_required: [
     'unprocessable',
-    'This platform needs a capture account; the owner has to add one.',
+    'This platform needs a capture account; the admin has to add one.',
   ],
   connection: [
     'unprocessable',
-    'The capture account cannot be used; the owner has to fix it.',
+    'The capture account cannot be used; the admin has to fix it.',
   ],
   unsupported: ['unprocessable', 'The platform does not support this.'],
 }
