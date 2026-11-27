@@ -1388,8 +1388,13 @@ export const users = sqliteTable(
   'users',
   {
     id: text().primaryKey(),
-    /** Shown in the app; 1 to 32 characters. */
+    /** Their nickname, which they set themselves; 1 to 32 characters. */
     name: text().notNull(),
+    /**
+     * The admin's note on them, which only the admin sets and sees: the
+     * invite's label when they register. The admin has none.
+     */
+    note: text(),
     role: text({ enum: userRoles }).notNull(),
     /**
      * The WebAuthn user handle, base64url. An authenticator keeps one
@@ -1410,8 +1415,10 @@ export const users = sqliteTable(
 )
 
 /**
- * One-time links that register a new viewer, by the SHA-256 of their
- * token, which is shown once. The new user's WebAuthn handle is made with
+ * One-time links that register a new viewer, looked up by the SHA-256 of
+ * their token. The token itself is kept sealed (`#users/invites.ts`) while
+ * the invite is still good, so the admin can show its link again; using or
+ * revoking it drops the token. The new user's WebAuthn handle is made with
  * the invite, so the options and the registration agree on it.
  */
 export const invites = sqliteTable(
@@ -1419,8 +1426,14 @@ export const invites = sqliteTable(
   {
     id: text().primaryKey(),
     digest: text().notNull().unique(),
+    /**
+     * The token, AES-256-GCM with a key derived from SECRET_KEY, bound to
+     * the row's id. Null once used or revoked, and for invites made before
+     * it was kept, whose link cannot be shown until made again.
+     */
+    sealedToken: blob({ mode: 'buffer' }).$type<Buffer>(),
     webauthnId: text().notNull().unique(),
-    /** Who it is for; the admin's note. */
+    /** Who it is for; the admin's note, and the new user's note. */
     label: text().notNull(),
     createdAt: createdAt(),
     expiresAt: timestamp().notNull(),

@@ -42,6 +42,11 @@ export async function loadSession() {
   setSession((await call(client.session.$get())) ?? undefined)
 }
 
+/** Set the signed-in user's own nickname; throws as the request does. */
+export async function saveNickname(name: string) {
+  setSession(await call(client.session.$patch({ json: { name } })))
+}
+
 /**
  * Who is signed in to this Midden: a user of the platform, not one of the
  * capture accounts (those are 采集's). The rail (RailUser) shows it.

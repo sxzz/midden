@@ -20,8 +20,10 @@ import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 import SkeletonRows from './ui/SkeletonRows.vue'
 
-// 设置 → 管理员面板 → 用户: who may sign in, renaming, revoking and
-// deleting them, and invites. The admin's web session alone.
+// 设置 → 管理员面板 → 用户: who may sign in, by their own nicknames with
+// the admin's notes beside them, noting, revoking and deleting them, and
+// invites, whose links show again until used. The admin's web session
+// alone.
 const users = shallowRef<AppUser[]>()
 const invites = shallowRef<Invite[]>([])
 const error = shallowRef('')
@@ -50,7 +52,7 @@ function openMenu(user: AppUser, event: MouseEvent) {
   opener.value = menuOpener(event)
   chosen.value = user
 }
-type Step = 'rename' | 'revoke' | 'delete'
+type Step = 'note' | 'revoke' | 'delete'
 const step = shallowRef<{ step: Step; user: AppUser }>()
 const stepError = shallowRef('')
 function choose(value: Step) {
@@ -69,7 +71,7 @@ async function act(request: () => Promise<unknown>, done: string) {
     toast(done)
     await load()
   } catch (e) {
-    if (step.value?.step === 'rename') stepError.value = errorText(e)
+    if (step.value?.step === 'note') stepError.value = errorText(e)
     else {
       step.value = undefined
       toast(errorText(e))
@@ -78,15 +80,15 @@ async function act(request: () => Promise<unknown>, done: string) {
     busy.value = false
   }
 }
-function rename(name: string) {
+function saveNote(note: string) {
   const user = step.value?.user
   if (!user) return
   void act(
     () =>
       call(
-        client.users[':id'].$patch({ param: { id: user.id }, json: { name } }),
+        client.users[':id'].$patch({ param: { id: user.id }, json: { note } }),
       ),
-    '已改名',
+    '已保存备注',
   )
 }
 function revoke() {
@@ -106,10 +108,16 @@ function remove() {
   )
 }
 
-/** Inviting: the label first, then the link, shown once. */
+/** Inviting: the label first, then the link. */
 const inviting = shallowRef(false)
 const inviteError = shallowRef('')
-const link = shallowRef<{ title: string; url: string }>()
+/** The invite whose link shows. */
+const link = shallowRef<{ id: string; title: string; url: string | null }>()
+const linkOf = (invite: Pick<Invite, 'id' | 'label'>, url: string | null) => ({
+  id: invite.id,
+  title: `邀请${invite.label}`,
+  url,
+})
 function invite() {
   inviteError.value = ''
   inviting.value = true
@@ -120,10 +128,35 @@ async function createInvite(label: string) {
   try {
     const made = await call(client.invites.$post({ json: { label } }))
     inviting.value = false
-    link.value = { title: `邀请${made.invite.label}`, url: made.url }
+    link.value = linkOf(made.invite, made.url)
     await load()
   } catch (e) {
     inviteError.value = errorText(e)
+  } finally {
+    busy.value = false
+  }
+}
+/** Making a link again, once confirmed: the old one stops working. */
+const regenerating = shallowRef<{ id: string; title: string }>()
+function askRegenerate() {
+  const shown = link.value
+  link.value = undefined
+  if (shown) regenerating.value = shown
+}
+async function regenerate() {
+  const pending = regenerating.value
+  if (!pending || busy.value) return
+  busy.value = true
+  try {
+    const made = await call(
+      client.invites[':id'].regenerate.$post({ param: { id: pending.id } }),
+    )
+    regenerating.value = undefined
+    link.value = linkOf(made.invite, made.url)
+    await load()
+  } catch (e) {
+    regenerating.value = undefined
+    toast(errorText(e))
   } finally {
     busy.value = false
   }
@@ -161,8 +194,8 @@ async function revokeInvite() {
       @click="u.role === 'admin' ? undefined : openMenu(u, $event)"
     >
       <span class="label"
-        >{{ u.name
-        }}<span class="badge">{{
+        >{{ u.name }}<span v-if="u.note" class="note">{{ u.note }}</span
+        ><span class="badge">{{
           u.revoked_at ? '已撤销' : roleLabels[u.role]
         }}</span
         ><small class="hint"
@@ -174,9 +207,16 @@ async function revokeInvite() {
   </ListSection>
   <ListSection v-if="invites.length" title="邀请">
     <div v-for="i in invites" :key="i.id" class="invite">
-      <span class="label"
-        >{{ i.label }}<small class="hint">{{ inviteLeft(i) }}</small></span
+      <button
+        type="button"
+        class="open"
+        aria-haspopup="dialog"
+        @click="link = linkOf(i, i.url)"
       >
+        <span class="label"
+          >{{ i.label }}<small class="hint">{{ inviteLeft(i) }}</small></span
+        >
+      </button>
       <button
         type="button"
         class="revoke"
@@ -195,13 +235,8 @@ async function revokeInvite() {
     :label="chosen?.name ?? ''"
     @cancel="chosen = undefined"
   >
-    <button
-      type="button"
-      class="action"
-      v-bind="item"
-      @click="choose('rename')"
-    >
-      改名
+    <button type="button" class="action" v-bind="item" @click="choose('note')">
+      备注
     </button>
     <button
       v-if="!chosen?.revoked_at"
@@ -222,16 +257,17 @@ async function revokeInvite() {
     </button>
   </ActionMenu>
   <FolderNameSheet
-    :open="step?.step === 'rename'"
-    title="改名"
+    :open="step?.step === 'note'"
+    title="备注"
     confirm-label="保存"
-    label="名字"
-    placeholder="名字"
+    label="备注"
+    placeholder="备注"
     :maxlength="32"
-    :name="step?.user.name"
+    :name="step?.user.note ?? ''"
+    optional
     :busy="busy"
     :error="stepError"
-    @submit="rename"
+    @submit="saveNote"
     @cancel="step = undefined"
   />
   <ConfirmSheet
@@ -267,8 +303,18 @@ async function revokeInvite() {
   <InviteLinkSheet
     :open="!!link"
     :title="link?.title ?? ''"
-    :url="link?.url ?? ''"
+    :url="link?.url ?? null"
     @done="link = undefined"
+    @regenerate="askRegenerate"
+  />
+  <ConfirmSheet
+    :open="!!regenerating"
+    title="重新生成链接？"
+    description="原链接立即失效。"
+    confirm-label="重新生成"
+    :busy="busy"
+    @confirm="regenerate"
+    @cancel="regenerating = undefined"
   />
   <ConfirmSheet
     :open="!!revokingInvite"
@@ -323,6 +369,23 @@ button.user:active {
   padding: 10px 0;
   font-size: 16px;
   overflow-wrap: anywhere;
+}
+.open {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  align-items: center;
+  text-align: left;
+  color: var(--text);
+}
+.open:active {
+  background: var(--fill);
+}
+.note {
+  margin-left: 6px;
+  font-size: 14px;
+  color: var(--subtle);
 }
 .badge {
   margin-left: 6px;

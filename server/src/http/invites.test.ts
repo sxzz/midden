@@ -1,9 +1,10 @@
 // Invites and users (docs/design/multi-user.md §4, §8.4, §8.5): the admin
-// invites a friend, who registers a passkey and becomes a viewer; the
-// admin renames, revokes and deletes them.
+// invites a friend, who registers a passkey and becomes a viewer with a
+// nickname of their own; the admin notes, revokes and deletes them.
 import { Buffer } from 'node:buffer'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
+import { deriveKey, unseal } from '#crypto.ts'
 import { apiTokens, invites, passkeys, users, webSessions } from '#db/schema.ts'
 import { handle } from '#telegram/commands.ts'
 import { softAuthenticator } from '#testing/authenticator.ts'
@@ -39,10 +40,12 @@ function setup() {
   const clock = { now: () => time, advance: (ms: number) => (time += ms) }
   addOrigin(ctx.db, `${MAIN}/`, OTHER)
   const notices: string[] = []
+  const inviteKey = deriveKey('test-secret', 'invite-links')
   const app = createApi({
     ctx,
     telegram: { token: '1:x', owner: '42' },
     webAppUrl: `${MAIN}/`,
+    inviteKey,
     notify: (text) => notices.push(text),
     now: clock.now,
   })
@@ -78,13 +81,8 @@ function setup() {
     expect(url).toMatch(new RegExp(String.raw`^${MAIN}/invite#[\w-]{43}$`))
     return { id: invite.id, token: url.split('#', 2)[1]! }
   }
-  async function options(token: string, origin = MAIN, name?: string) {
-    return call(
-      'POST',
-      '/auth/invite/options',
-      { token, ...(name ? { name } : {}) },
-      { origin },
-    )
+  async function options(token: string, origin = MAIN, name = '小明') {
+    return call('POST', '/auth/invite/options', { token, name }, { origin })
   }
   /** Register with an invite: its options, then the passkey. */
   async function accept(
@@ -123,11 +121,21 @@ function setup() {
   }
   const cookieOf = (response: Response) =>
     response.headers.get('set-cookie')?.split(';', 1)[0]?.split('=', 2)[1]
+  /** The pending invites as the admin's 用户 page lists them. */
+  const listed = async () =>
+    (await (await asAdmin('GET', '/invites')).json()) as {
+      id: string
+      label: string
+      expires_at: string
+      url: string | null
+    }[]
   return {
     ctx,
     app,
     clock,
     notices,
+    inviteKey,
+    listed,
     admin,
     adminCookie,
     call,
@@ -143,22 +151,20 @@ function setup() {
 describe('invites', () => {
   test('register a viewer, signed in, with a handle of their own; the invite is used up and listed no more', async () => {
     const s = setup()
-    const { id, token } = await s.invite('小明')
-    expect(await (await s.asAdmin('GET', '/invites')).json()).toEqual([
+    const { id, token } = await s.invite('同事')
+    expect(await s.listed()).toEqual([
       {
         id,
-        label: '小明',
+        label: '同事',
         created_at: expect.any(String),
         expires_at: new Date(s.clock.now() + INVITE_TTL).toISOString(),
+        url: `${MAIN}/invite#${token}`,
       },
     ])
-    // Only the digest is kept.
-    expect(JSON.stringify(s.ctx.db.select().from(invites).all())).not.toContain(
-      token,
-    )
     const { response, creation, authenticator } = await s.accept(token)
     expect(response.status).toBe(200)
     const body = (await response.json()) as { user: { id: string } }
+    // Their own nickname; the label is the admin's note, never theirs.
     expect(body).toEqual({
       user: { id: expect.any(String), name: '小明', role: 'viewer' },
     })
@@ -169,6 +175,7 @@ describe('invites', () => {
       .where(eq(users.id, body.user.id))
       .get()!
     expect(creation!.user).toMatchObject({ id: row.webauthnId, name: '小明' })
+    expect(row).toMatchObject({ name: '小明', note: '同事' })
     expect(row.webauthnId).not.toBe('bWlkZGVuLW93bmVy')
     expect(Buffer.from(row.webauthnId, 'base64url')).toHaveLength(32)
     expect(creation!.excludeCredentials).toEqual([])
@@ -185,10 +192,11 @@ describe('invites', () => {
         .where(eq(webSessions.userId, body.user.id))
         .get(),
     ).toMatchObject({ method: 'passkey', origin: MAIN })
-    // Used up, by them.
+    // Used up, by them, its token no longer kept.
     expect(s.ctx.db.select().from(invites).get()).toMatchObject({
       usedBy: body.user.id,
       usedAt: new Date(s.clock.now()),
+      sealedToken: null,
     })
     expect(await (await s.asAdmin('GET', '/invites')).json()).toEqual([])
     // They sign in again with it.
@@ -445,6 +453,168 @@ describe('invites', () => {
     expect(s.notices).toEqual(['已添加通行密钥：Mac（midden.test）'])
   })
 
+  test('a pending invite’s link shows again, its token sealed at rest: no row holds it in plain text', async () => {
+    const s = setup()
+    const a = await s.invite('a')
+    const b = await s.invite('b')
+    const urls = (await s.listed()).map((i) => i.url)
+    expect(urls).toEqual([
+      `${MAIN}/invite#${a.token}`,
+      `${MAIN}/invite#${b.token}`,
+    ])
+    expect((await s.listed()).map((i) => i.url)).toEqual(urls)
+    // Whatever the encoding, the database has the digest, not the token.
+    const raw = s.ctx.db.$client.prepare('SELECT * FROM invites').all()
+    const dump = JSON.stringify(raw, (_key, value: unknown) =>
+      value instanceof Uint8Array
+        ? Buffer.from(value).toString('latin1')
+        : value,
+    )
+    for (const { token } of [a, b])
+      for (const encoded of [
+        token,
+        Buffer.from(token, 'base64url').toString('hex'),
+        Buffer.from(token, 'base64url').toString('base64'),
+        Buffer.from(token, 'base64url').toString('latin1'),
+      ])
+        expect(dump).not.toContain(encoded)
+    // It opens with the key derived for invites, bound to its own row.
+    const row = s.ctx.db
+      .select()
+      .from(invites)
+      .where(eq(invites.id, a.id))
+      .get()!
+    expect(
+      unseal(s.inviteKey, `invite:${a.id}`, row.sealedToken!).toString(),
+    ).toBe(a.token)
+    expect(() =>
+      unseal(s.inviteKey, `invite:${b.id}`, row.sealedToken!),
+    ).toThrow()
+    // Copied to another row it opens nowhere: that invite shows no link.
+    s.ctx.db
+      .update(invites)
+      .set({ sealedToken: row.sealedToken })
+      .where(eq(invites.id, b.id))
+      .run()
+    expect((await s.listed()).map((i) => i.url)).toEqual([urls[0], null])
+    // With another key (SECRET_KEY changed) none shows, and the links still work.
+    const other = createApi({
+      ctx: s.ctx,
+      webAppUrl: `${MAIN}/`,
+      inviteKey: deriveKey('another-secret', 'invite-links'),
+      now: s.clock.now,
+    })
+    const elsewhere = await other.request('/invites', {
+      headers: { Cookie: `${SESSION_COOKIE}=${s.adminCookie}` },
+    })
+    expect(
+      ((await elsewhere.json()) as { url: unknown }[]).map((i) => i.url),
+    ).toEqual([null, null])
+    expect((await s.accept(a.token)).response.status).toBe(200)
+  })
+
+  test('making a link again: the same invite and label, 7 days from now, and the old link stops at once', async () => {
+    const s = setup()
+    const { id, token: old } = await s.invite('小红')
+    s.clock.advance(3 * 24 * HOUR)
+    // Options asked with the old link, before it is replaced.
+    const before = (await (
+      await s.options(old)
+    ).json()) as PublicKeyCredentialCreationOptionsJSON
+    const made = await s.asAdmin('POST', `/invites/${id}/regenerate`)
+    expect(made.status).toBe(200)
+    const { invite, url } = (await made.json()) as {
+      invite: { id: string; label: string; expires_at: string }
+      url: string
+    }
+    const token = url.split('#', 2)[1]!
+    expect(token).not.toBe(old)
+    expect(invite).toMatchObject({
+      id,
+      label: '小红',
+      expires_at: new Date(s.clock.now() + INVITE_TTL).toISOString(),
+    })
+    expect((await s.listed()).map((i) => [i.id, i.url])).toEqual([[id, url]])
+    // The old link: refused, also with the options it already had.
+    expect(
+      (await s.call('POST', '/auth/invite/check', { token: old })).status,
+    ).toBe(403)
+    expect((await s.options(old)).status).toBe(403)
+    const authenticator = softAuthenticator()
+    const register = (t: string) =>
+      s.call('POST', '/auth/invite', {
+        token: t,
+        name: '小红',
+        passkey_name: 'x',
+        response: authenticator.create(before, MAIN),
+      })
+    expect((await register(old)).status).toBe(403)
+    // Nor does the old link's challenge answer for the new one.
+    expect((await register(token)).status).toBe(400)
+    // Good past the first 7 days, from when it was made again.
+    s.clock.advance(INVITE_TTL - HOUR)
+    expect((await s.accept(token)).response.status).toBe(200)
+    // Used up, it is made again no more; nor one revoked, expired or unknown.
+    const revoked = await s.invite('r')
+    await s.asAdmin('DELETE', `/invites/${revoked.id}`)
+    const expired = await s.invite('e')
+    s.clock.advance(INVITE_TTL + 1)
+    for (const gone of [id, revoked.id, expired.id, 'nope'])
+      expect(
+        await (await s.asAdmin('POST', `/invites/${gone}/regenerate`)).json(),
+      ).toEqual({ error: '邀请不存在或已失效' })
+    expect(await s.listed()).toEqual([])
+  })
+
+  test('an invite whose token was not kept shows no link until made again; revoked or used, none is kept', async () => {
+    const s = setup()
+    const { id, token } = await s.invite('旧')
+    // As the migration leaves invites made before tokens were kept.
+    s.ctx.db
+      .update(invites)
+      .set({ sealedToken: null })
+      .where(eq(invites.id, id))
+      .run()
+    expect((await s.listed()).map((i) => i.url)).toEqual([null])
+    expect((await s.options(token)).status).toBe(200)
+    const made = (await (
+      await s.asAdmin('POST', `/invites/${id}/regenerate`)
+    ).json()) as { url: string }
+    expect((await s.listed()).map((i) => i.url)).toEqual([made.url])
+    await s.asAdmin('DELETE', `/invites/${id}`)
+    expect(
+      s.ctx.db.select().from(invites).where(eq(invites.id, id)).get(),
+    ).toMatchObject({ sealedToken: null, revokedAt: expect.any(Date) })
+  })
+
+  test('the invite page checks its link and learns nothing of the label', async () => {
+    const s = setup()
+    const { token } = await s.invite('只给管理员看的备注')
+    const check = await s.call('POST', '/auth/invite/check', { token })
+    expect([check.status, await check.text()]).toEqual([204, ''])
+    // Options need the nickname they chose: the label never stands in.
+    expect(
+      (await s.call('POST', '/auth/invite/options', { token })).status,
+    ).toBe(400)
+    const asked = await s.options(token, MAIN, '小明')
+    expect(await asked.text()).not.toContain('只给管理员看的备注')
+    for (const [t, origin] of [
+      [token, OTHER],
+      ['x'.repeat(43), MAIN],
+    ] as const) {
+      const refused = await s.call(
+        'POST',
+        '/auth/invite/check',
+        { token: t },
+        { origin },
+      )
+      expect([refused.status, await refused.json()]).toEqual([
+        403,
+        { error: '邀请链接已失效' },
+      ])
+    }
+  })
+
   test('the link is the web app’s invite page under WEB_APP_URL, wherever that is', () => {
     expect(inviteLink('https://midden.test', 'T')).toBe(
       'https://midden.test/invite#T',
@@ -477,7 +647,7 @@ describe('invites', () => {
 describe('users', () => {
   async function withViewer() {
     const s = setup()
-    const { token } = await s.invite('小明')
+    const { token } = await s.invite('同事小明')
     const joined = await s.accept(token)
     const cookie = s.cookieOf(joined.response)!
     const { user } = (await joined.response.json()) as {
@@ -498,6 +668,7 @@ describe('users', () => {
       {
         id: s.admin,
         name: '管理员',
+        note: null,
         role: 'admin',
         created_at: expect.any(String),
         revoked_at: null,
@@ -508,6 +679,7 @@ describe('users', () => {
       {
         id: s.viewer,
         name: '小明',
+        note: '同事小明',
         role: 'viewer',
         created_at: new Date(s.clock.now()).toISOString(),
         revoked_at: null,
@@ -516,26 +688,80 @@ describe('users', () => {
         tokens: 1,
       },
     ])
-    const renamed = await s.asAdmin('PATCH', `/users/${s.viewer}`, {
-      name: ' 明明 ',
+    // The admin's note changes, their nickname does not; empty clears it.
+    const noted = await s.asAdmin('PATCH', `/users/${s.viewer}`, {
+      note: ' 大学同学 ',
     })
-    expect(await renamed.json()).toMatchObject({ name: '明明' })
+    expect(await noted.json()).toMatchObject({ name: '小明', note: '大学同学' })
     expect(
-      (
-        await s.asAdmin('PATCH', `/users/${s.viewer}`, {
-          name: 'x'.repeat(33),
-        })
-      ).status,
-    ).toBe(400)
-    // No role to change.
+      await (
+        await s.asAdmin('PATCH', `/users/${s.viewer}`, { note: ' ' })
+      ).json(),
+    ).toMatchObject({ name: '小明', note: null })
+    for (const body of [
+      { note: 'x'.repeat(33) },
+      // The nickname is theirs, and there is no role to change.
+      { name: 'x' },
+      { note: 'x', role: 'admin' },
+    ])
+      expect(
+        (await s.asAdmin('PATCH', `/users/${s.viewer}`, body)).status,
+      ).toBe(400)
+  })
+
+  test('each sets their own nickname with their session; no token, nobody else’s', async () => {
+    const s = await withViewer()
+    const asViewer = (method: string, path: string, body?: unknown) =>
+      s.call(method, path, body, { cookie: s.cookie })
+    const set = await asViewer('PATCH', '/session', { name: ' 明 ' })
+    expect(await set.json()).toEqual({
+      user: { id: s.viewer, name: '明', role: 'viewer' },
+      can: {
+        capture: false,
+        organize: false,
+        share: false,
+        delete: false,
+        admin: false,
+      },
+    })
+    expect(await (await asViewer('GET', '/session')).json()).toMatchObject({
+      user: { name: '明' },
+    })
+    // The admin sees it, their note untouched.
     expect(
-      (
-        await s.asAdmin('PATCH', `/users/${s.viewer}`, {
-          name: 'x',
-          role: 'admin',
-        })
-      ).status,
-    ).toBe(400)
+      ((await (await s.asAdmin('GET', '/users')).json()) as object[])[1],
+    ).toMatchObject({ name: '明', note: '同事小明' })
+    // The admin has one too, and no note.
+    expect(
+      await (await s.asAdmin('PATCH', '/session', { name: '阿管' })).json(),
+    ).toMatchObject({ user: { id: s.admin, name: '阿管', role: 'admin' } })
+    for (const body of [{ name: ' ' }, { name: 'x'.repeat(33) }, { note: 'x' }])
+      expect((await asViewer('PATCH', '/session', body)).status).toBe(400)
+    // A token, the admin's read and write one included, is never a session.
+    const rw = createToken(s.ctx.db, {
+      user: s.admin,
+      label: 'rw',
+      permission: 'rw',
+    }).secret
+    for (const token of [rw, s.viewerToken])
+      expect(
+        (await s.call('PATCH', '/session', { name: 'x' }, { token })).status,
+      ).toBe(403)
+    // A viewer reaches no one's note, their own included.
+    for (const [method, path, body] of [
+      ['GET', '/users'],
+      ['PATCH', `/users/${s.viewer}`, { note: 'x' }],
+      ['PATCH', `/users/${s.admin}`, { note: 'x' }],
+    ] as const)
+      expect((await asViewer(method, path, body)).status).toBe(403)
+    expect(
+      s.ctx.db.select({ name: users.name, note: users.note }).from(users).all(),
+    ).toEqual(
+      expect.arrayContaining([
+        { name: '阿管', note: null },
+        { name: '明', note: '同事小明' },
+      ]),
+    )
   })
 
   test('revoking signs them out at once and leaves the row, revoked', async () => {
@@ -599,10 +825,10 @@ describe('users', () => {
     expect((await s.asAdmin('DELETE', `/users/${s.viewer}`)).status).toBe(404)
   })
 
-  test('the admin cannot be renamed, revoked or deleted; viewers and tokens reach none of it', async () => {
+  test('the admin cannot be noted, revoked or deleted; viewers and tokens reach none of it', async () => {
     const s = await withViewer()
     for (const [method, path, body] of [
-      ['PATCH', `/users/${s.admin}`, { name: 'x' }],
+      ['PATCH', `/users/${s.admin}`, { note: 'x' }],
       ['POST', `/users/${s.admin}/revoke`],
       ['DELETE', `/users/${s.admin}`],
     ] as const) {
@@ -624,6 +850,7 @@ describe('users', () => {
         ['POST', `/users/${s.viewer}/revoke`],
         ['GET', '/invites'],
         ['POST', '/invites'],
+        ['POST', `/invites/${s.viewer}/regenerate`],
       ] as const) {
         const response = await s.call(
           method,

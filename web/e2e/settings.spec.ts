@@ -18,14 +18,21 @@ test.describe('on a wide window', () => {
       page.getByRole('heading', { name: '设置', exact: true }),
     ).toBeVisible()
     await expect(list(page).getByRole('link')).toHaveText([
+      /账号/,
       /通行密钥/,
       /API令牌/,
       /管理员面板/,
       /关于/,
     ])
     await expect(
-      list(page).getByRole('link', { name: /通行密钥/ }),
+      list(page).getByRole('link', { name: /账号/ }),
     ).toHaveAttribute('aria-current', 'page')
+    await expect(
+      pane(page, '账号').getByRole('button', { name: /^昵称/ }),
+    ).toBeVisible()
+    await list(page)
+      .getByRole('link', { name: /通行密钥/ })
+      .click()
     await expect(pane(page, '通行密钥')).toContainText(
       '在浏览器中登录用的通行密钥。',
     )
@@ -78,10 +85,13 @@ test.describe('on a wide window', () => {
     await search.fill('令牌')
     await expect(list(page).getByRole('link')).toHaveCount(1)
     await expect(list(page).locator('mark')).toHaveText('令牌')
+    // 账号 by what it holds.
+    await search.fill('昵称')
+    await expect(list(page).getByRole('link')).toHaveText([/^账号/])
     await search.fill('没有这一项')
     await expect(list(page)).toContainText('没有找到「没有这一项」')
     await search.fill('')
-    await expect(list(page).getByRole('link')).toHaveCount(4)
+    await expect(list(page).getByRole('link')).toHaveCount(5)
   })
 
   test('reads 后台任务 only while it is shown', async ({ page }) => {

@@ -1,12 +1,16 @@
 // Invites (邀请, docs/design/multi-user.md §4.1): one-time links the admin
 // makes for a friend, good for 7 days and one registration, on
-// WEB_APP_URL's origin only. Registering makes a viewer. Only the SHA-256
-// of the link's token is kept, as for /passkey links and API tokens.
+// WEB_APP_URL's origin only. Registering makes a viewer. They are looked
+// up by the SHA-256 of the link's token, as /passkey links and API tokens
+// are; while an invite is still good its token is also kept sealed, so the
+// admin can show the link again.
+import { Buffer } from 'node:buffer'
 import { createHash, randomBytes } from 'node:crypto'
 import { and, asc, eq, gt, isNull, lt, or } from 'drizzle-orm'
+import { seal, unseal } from '#crypto.ts'
 import { newId } from '#db/id.ts'
 import { invites } from '#db/schema.ts'
-import { checkName, newHandle } from './users.ts'
+import { checkLabel, newHandle } from './users.ts'
 import type { Database, Executor } from '#db/client.ts'
 
 const DAY = 24 * 60 * 60 * 1000
@@ -22,8 +26,38 @@ export interface InviteView {
   expires_at: string
 }
 
+/** An invite still good, and its token when it was kept. */
+export interface PendingInvite extends InviteView {
+  token: string | null
+}
+
 const digestOf = (token: string) =>
   createHash('sha256').update(token).digest('hex')
+
+const newToken = () => randomBytes(32).toString('base64url')
+
+/** What a sealed token is bound to: its row, so it opens nowhere else. */
+const aadOf = (id: string) => `invite:${id}`
+
+const sealToken = (key: Uint8Array, id: string, token: string) =>
+  seal(key, aadOf(id), Buffer.from(token))
+
+/**
+ * The token a row keeps, if it opens with this key and is the one the row
+ * is looked up by; null otherwise (none kept, or SECRET_KEY changed).
+ */
+function tokenOf(
+  key: Uint8Array,
+  row: typeof invites.$inferSelect,
+): string | null {
+  if (!row.sealedToken) return null
+  try {
+    const token = unseal(key, aadOf(row.id), row.sealedToken).toString()
+    return digestOf(token) === row.digest ? token : null
+  } catch {
+    return null
+  }
+}
 
 const view = (row: typeof invites.$inferSelect): InviteView => ({
   id: row.id,
@@ -41,24 +75,27 @@ const open = (now: number) =>
   )
 
 /**
- * A new invite for whom `label` says, which is also the new user's name
- * until they give their own. The token is shown this once, in the link.
+ * A new invite for whom `label` says, which becomes the admin's note on the
+ * new user. `key` seals its token, which the link carries.
  */
 export function createInvite(
   db: Database,
+  key: Uint8Array,
   label: string,
   now = Date.now(),
 ): { invite: InviteView; token: string } {
-  const token = randomBytes(32).toString('base64url')
+  const id = newId()
+  const token = newToken()
   const row = db
     .insert(invites)
     .values({
-      id: newId(),
+      id,
       digest: digestOf(token),
+      sealedToken: sealToken(key, id, token),
       // The new user's handle, fixed now: the options and the registration
       // must agree on it, and the registration does not carry it.
       webauthnId: newHandle(),
-      label: checkName(label),
+      label: checkLabel(label),
       createdAt: new Date(now),
       expiresAt: new Date(now + INVITE_TTL),
     })
@@ -67,15 +104,43 @@ export function createInvite(
   return { invite: view(row), token }
 }
 
-/** The invites still good, oldest first. */
-export function listInvites(db: Database, now = Date.now()): InviteView[] {
+/**
+ * The same invite with a new token and 7 days from now: the old link stops
+ * working at once. Undefined when it is no longer good.
+ */
+export function regenerateInvite(
+  db: Database,
+  key: Uint8Array,
+  id: string,
+  now = Date.now(),
+): { invite: InviteView; token: string } | undefined {
+  const token = newToken()
+  const row = db
+    .update(invites)
+    .set({
+      digest: digestOf(token),
+      sealedToken: sealToken(key, id, token),
+      expiresAt: new Date(now + INVITE_TTL),
+    })
+    .where(and(eq(invites.id, id), open(now)))
+    .returning()
+    .get()
+  return row && { invite: view(row), token }
+}
+
+/** The invites still good, oldest first, with their tokens where kept. */
+export function listInvites(
+  db: Database,
+  key: Uint8Array,
+  now = Date.now(),
+): PendingInvite[] {
   return db
     .select()
     .from(invites)
     .where(open(now))
     .orderBy(asc(invites.createdAt), asc(invites.id))
     .all()
-    .map(view)
+    .map((row) => ({ ...view(row), token: tokenOf(key, row) }))
 }
 
 /** Revoke an invite still good; false when there is none such. */
@@ -86,7 +151,7 @@ export function revokeInvite(
 ): boolean {
   const row = db
     .update(invites)
-    .set({ revokedAt: new Date(now) })
+    .set({ revokedAt: new Date(now), sealedToken: null })
     .where(and(eq(invites.id, id), open(now)))
     .returning()
     .get()
@@ -123,7 +188,7 @@ export function openInvite(
 /**
  * Use the invite up for `user`, in the registration's transaction: false
  * when it is no longer good, so of two registrations at once only one
- * gets it.
+ * gets it. Its token is no longer kept.
  */
 export function useInvite(
   tx: Executor,
@@ -133,7 +198,7 @@ export function useInvite(
 ): boolean {
   const row = tx
     .update(invites)
-    .set({ usedAt: new Date(now), usedBy: user })
+    .set({ usedAt: new Date(now), usedBy: user, sealedToken: null })
     .where(and(eq(invites.digest, digest), open(now)))
     .returning({ id: invites.id })
     .get()

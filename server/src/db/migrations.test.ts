@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'vitest'
 import { createApi } from '#http/app.ts'
-import { SESSION_COOKIE, SESSION_TTL } from '#http/sessions.ts'
+import { createSession, SESSION_COOKIE, SESSION_TTL } from '#http/sessions.ts'
 import { checkSearchIndexes, intact } from '#library/search-index.ts'
 import { softAuthenticator } from '#testing/authenticator.ts'
 import { testContext } from '#testing/context.ts'
@@ -686,6 +686,7 @@ describe('users', () => {
         webauthn_id: Buffer.from('midden-owner').toString('base64url'),
         created_at: earliest,
         revoked_at: null,
+        note: null,
       },
     ])
     const admin = users[0]!.id
@@ -771,6 +772,80 @@ describe('users', () => {
       (await post('/auth/passkey/register/options', { token: 'L'.repeat(43) }))
         .status,
     ).toBe(200)
+    await ctx.queue.stop()
+  })
+
+  test('user_notes: a viewer’s note is the label of the invite they used; pending invites keep working, with no link to show', async () => {
+    const db = migratedBefore('user_notes')
+    const now = Date.now()
+    const admin = db.$client
+      .prepare(`SELECT id FROM users WHERE role = 'admin'`)
+      .get()!.id as string
+    for (const [id, name] of [
+      ['v1', '小明'],
+      ['v2', '小红'],
+    ])
+      insertRow(db, 'users', {
+        id,
+        name,
+        role: 'viewer',
+        webauthn_id: `h-${id}`,
+        created_at: now,
+      })
+    insertRow(db, 'invites', {
+      id: 'i1',
+      digest: sha('used'),
+      webauthn_id: 'h-v1',
+      label: '同事',
+      created_at: now - 1000,
+      expires_at: now + 86_400_000,
+      used_at: now,
+      used_by: 'v1',
+    })
+    const token = 'P'.repeat(43)
+    insertRow(db, 'invites', {
+      id: 'i2',
+      digest: sha(token),
+      webauthn_id: 'h-new',
+      label: '还没来',
+      created_at: now,
+      expires_at: now + 86_400_000,
+    })
+
+    migrateRest(db)
+
+    expect(
+      db.$client
+        .prepare('SELECT id, name, note FROM users ORDER BY role, id')
+        .all(),
+    ).toEqual([
+      { id: admin, name: '管理员', note: null },
+      { id: 'v1', name: '小明', note: '同事' },
+      // Their invite already pruned: no note.
+      { id: 'v2', name: '小红', note: null },
+    ])
+    expect(
+      db.$client.prepare('SELECT id, sealed_token FROM invites').all(),
+    ).toEqual([
+      { id: 'i1', sealed_token: null },
+      { id: 'i2', sealed_token: null },
+    ])
+    const ctx = { ...testContext(), db }
+    const app = createApi({ ctx, webAppUrl: `${ORIGIN}/` })
+    const asAdmin = createSession(db, admin)
+    const listed = await app.request('/invites', {
+      headers: { Cookie: `${SESSION_COOKIE}=${asAdmin}` },
+    })
+    expect(await listed.json()).toMatchObject([{ id: 'i2', url: null }])
+    expect(
+      (
+        await app.request('/auth/invite/check', {
+          method: 'POST',
+          headers: { Origin: ORIGIN, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        })
+      ).status,
+    ).toBe(204)
     await ctx.queue.stop()
   })
 

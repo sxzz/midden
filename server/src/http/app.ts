@@ -8,13 +8,14 @@ import { HEARTBEAT_TIMEOUT, setHeartbeatTimeoutMinutes } from '#settings.ts'
 import { authenticate, bearer } from '#tokens/tokens.ts'
 import { TokenUsage } from '#tokens/usage.ts'
 import { abilities } from '#users/principal.ts'
-import { adminId, userView } from '#users/users.ts'
+import { adminId, setNickname, userView } from '#users/users.ts'
 import { accountRoutes } from './account-routes.ts'
 import {
   endpointOf,
   initDataUser,
   NOT_FOR_VIEWERS,
   openToViewers,
+  sessionOnly,
   viewers,
 } from './auth.ts'
 import { captureRoutes } from './capture-routes.ts'
@@ -70,6 +71,8 @@ export interface HttpOptions {
   webAppUrl?: string
   /** Signs WebAuthn challenges; derived from SECRET_KEY. */
   challengeKey?: Buffer
+  /** Seals invite tokens at rest; derived from SECRET_KEY. */
+  inviteKey?: Buffer
   /** Tell the owner, through the bot, that a passkey or domain came or went. */
   notify?: (text: string) => void
   now?: () => number
@@ -138,7 +141,13 @@ export function createApi(options: HttpOptions) {
     notify: options.notify,
     now,
   }
-  const admin = userRoutes({ db: ctx.db, webAppUrl, now })
+  const admin = userRoutes({
+    db: ctx.db,
+    webAppUrl,
+    // Without one (tests), links made by this process show only in it.
+    inviteKey: options.inviteKey ?? randomBytes(32),
+    now,
+  })
 
   // The web app calls from its own origins, with the session cookie. A
   // preflight is answered here, before any login check, and cached.
@@ -311,6 +320,24 @@ export function createApi(options: HttpOptions) {
           can: abilities(principal),
         })
       })
+      // Their own nickname, the admin's too; a viewer's session can.
+      .patch(
+        '/session',
+        sessionOnly,
+        viewers,
+        json(v.strictObject({ name: v.pipe(v.string(), v.maxLength(256)) })),
+        (c) => {
+          const principal = c.get('principal')
+          return c.json({
+            user: setNickname(
+              ctx.db,
+              principal.userId,
+              c.req.valid('json').name,
+            ),
+            can: abilities(principal),
+          })
+        },
+      )
       .delete('/session', viewers, (c) => {
         const cookie = getCookie(c, SESSION_COOKIE)
         if (cookie) deleteSession(ctx.db, cookie)

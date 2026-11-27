@@ -59,11 +59,12 @@ const ADMIN_SESSION: [string, string, unknown?][] = [
   ['POST', '/origins', { origin: 'https://new.test' }],
   // Users and invites: a token cannot make a link that registers.
   ['GET', '/users'],
-  ['PATCH', `/users/${ID}`, { name: 'x' }],
+  ['PATCH', `/users/${ID}`, { note: 'x' }],
   ['POST', `/users/${ID}/revoke`],
   ['DELETE', `/users/${ID}`],
   ['GET', '/invites'],
   ['POST', '/invites', { label: 'x' }],
+  ['POST', `/invites/${ID}/regenerate`],
   ['DELETE', `/invites/${ID}`],
 ]
 

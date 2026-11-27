@@ -4,6 +4,7 @@ import { call, client, errorText } from '../api'
 import { toast } from '../composables/useToast'
 import { host } from '../host'
 import { can, type PlatformUser } from '../user'
+import NicknameSheet from './NicknameSheet.vue'
 import AppLink from './ui/AppLink.vue'
 // The foot of the rail: who is signed in to Midden (see user.ts), with a
 // menu of what concerns the whole instance.
@@ -14,6 +15,11 @@ const initial = computed(() => props.user.name.slice(0, 1).toUpperCase())
 const browser = !host()?.initData
 const menu = shallowRef(false)
 const busy = shallowRef(false)
+const naming = shallowRef(false)
+function rename() {
+  menu.value = false
+  naming.value = true
+}
 async function logout() {
   busy.value = true
   try {
@@ -64,6 +70,9 @@ onUnmounted(() => {
     </button>
     <div v-if="menu" class="menu" role="menu">
       <p class="menu-host">{{ user.name }} · {{ user.detail }}</p>
+      <button type="button" class="menu-item" role="menuitem" @click="rename">
+        修改昵称
+      </button>
       <template v-if="can.admin">
         <AppLink
           class="menu-item"
@@ -94,6 +103,7 @@ onUnmounted(() => {
         退出登录
       </button>
     </div>
+    <NicknameSheet :open="naming" @done="naming = false" />
   </div>
 </template>
 

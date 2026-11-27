@@ -15,6 +15,7 @@ import { can, currentUser, setSession } from '../user'
 import BatchRefresh from './BatchRefresh.vue'
 import CollectionDetail from './CollectionDetail.vue'
 import FolderMenuSheet from './FolderMenuSheet.vue'
+import NicknameSheet from './NicknameSheet.vue'
 import TokenFormSheet from './TokenFormSheet.vue'
 import type { SessionInfo } from '../api'
 
@@ -104,6 +105,7 @@ describe('the session', () => {
     setSession(VIEWER)
     expect(shownTabs().map((t) => t.label)).toEqual(['探索', '关系', '设置'])
     expect(shownSections(can.admin).map((s) => s.label)).toEqual([
+      '账号',
       '通行密钥',
       'API令牌',
       '关于',
@@ -291,5 +293,44 @@ describe('menus and forms', () => {
     expect(submitted).toHaveBeenCalledWith(
       expect.objectContaining({ label: '脚本', permission: 'ro' }),
     )
+  })
+})
+
+describe('their own nickname', () => {
+  it('a viewer sets it, and the rail shows it at once', async () => {
+    setSession(VIEWER)
+    const sent: { method: string; path: string; body?: string }[] = []
+    mockApi((path, request) => {
+      sent.push({ method: request.method, path, body: request.body })
+      return {
+        ...VIEWER,
+        user: { ...VIEWER.user, name: '明明' },
+      }
+    })
+    const open = shallowRef(false)
+    const el = mount({
+      setup: () => () =>
+        h(NicknameSheet, {
+          open: open.value,
+          onDone: () => (open.value = false),
+        }),
+    })
+    open.value = true
+    await settle()
+    const sheet = document.querySelector<HTMLDialogElement>('dialog[open]')!
+    expect(sheet.textContent).toContain('昵称')
+    const input = sheet.querySelector('input')!
+    expect(input.value).toBe('小明')
+    input.value = '明明'
+    input.dispatchEvent(new Event('input'))
+    await settle()
+    sheet.querySelector<HTMLButtonElement>('button[type=submit]')!.click()
+    await vi.waitFor(() => expect(open.value).toBe(false))
+    expect(sent).toEqual([
+      { method: 'PATCH', path: '/session', body: '{"name":"明明"}' },
+    ])
+    expect(currentUser().name).toBe('明明')
+    expect({ ...can }).toEqual(VIEWER.can)
+    expect(el).toBeTruthy()
   })
 })

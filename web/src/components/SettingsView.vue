@@ -8,9 +8,10 @@ import { RAIL, SIDEBAR, useMedia } from '../layout'
 import { buildFacts, REPOSITORY } from '../settings'
 import { searchSettings, shownSections, splitMatch } from '../settings-sections'
 import { darkTheme } from '../theme'
-import { can } from '../user'
+import { can, currentUser } from '../user'
 import AdminView from './AdminView.vue'
 import ApiTokens from './ApiTokens.vue'
+import NicknameSheet from './NicknameSheet.vue'
 import PasskeyList from './PasskeyList.vue'
 import SessionList from './SessionList.vue'
 import AppLink from './ui/AppLink.vue'
@@ -68,6 +69,7 @@ const about = buildFacts(__BUILD_VERSION__, __BUILD_TIME__)
 // session is worth ending by hand.
 const browser = !host()?.initData
 const busy = shallowRef(false)
+const naming = shallowRef(false)
 async function logout() {
   busy.value = true
   try {
@@ -301,7 +303,14 @@ async function logout() {
             <span class="chevron" aria-hidden="true">›</span>
           </AppLink>
         </nav>
-        <PasskeyList v-if="section.value === 'passkeys'" bare />
+        <ListSection v-if="section.value === 'account'">
+          <button type="button" class="fact" @click="naming = true">
+            <span class="name">昵称</span>
+            <span class="value">{{ currentUser().name }}</span>
+            <span class="chevron" aria-hidden="true">›</span>
+          </button>
+        </ListSection>
+        <PasskeyList v-else-if="section.value === 'passkeys'" bare />
         <ApiTokens v-else-if="section.value === 'tokens'" bare />
         <AdminView
           v-else-if="section.value === 'admin'"
@@ -329,6 +338,7 @@ async function logout() {
         </ListSection>
       </template>
     </section>
+    <NicknameSheet :open="naming" @done="naming = false" />
   </div>
 </template>
 
@@ -562,7 +572,12 @@ a.value,
 .link {
   color: var(--link);
 }
-a.fact:active {
+button.fact {
+  width: 100%;
+  text-align: left;
+}
+a.fact:active,
+button.fact:active {
   background: var(--fill);
 }
 code {

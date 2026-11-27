@@ -17,6 +17,8 @@ const props = defineProps<{
   numeric?: boolean
   /** For a number with decimals. */
   decimal?: boolean
+  /** May be left empty, which clears it (an admin's note). */
+  optional?: boolean
   busy?: boolean
   error?: string
 }>()
@@ -30,7 +32,7 @@ watch(
 )
 function submit() {
   const name = value.value.trim()
-  if (name && !props.busy) emit('submit', name)
+  if ((name || props.optional) && !props.busy) emit('submit', name)
 }
 </script>
 
@@ -64,7 +66,7 @@ function submit() {
       <button
         type="submit"
         class="action primary"
-        :disabled="busy || !value.trim()"
+        :disabled="busy || (!optional && !value.trim())"
       >
         {{ confirmLabel }}
       </button>

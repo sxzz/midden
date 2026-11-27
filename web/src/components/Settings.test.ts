@@ -73,6 +73,7 @@ describe('设置', () => {
     mockApi()
     const el = mount(SettingsView)
     expect(links(el)).toEqual({
+      '账号›': '/settings/account',
       '通行密钥›': '/settings/passkeys',
       'API令牌›': '/settings/tokens',
       '管理员面板›': '/settings/admin',

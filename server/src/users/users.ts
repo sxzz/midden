@@ -50,21 +50,43 @@ export function userView(db: Executor, id: string): UserView {
   return row
 }
 
-/** A name as stored: trimmed, 1 to 32 characters. */
+/** Trimmed, at most 32 characters; empty when nothing is left. */
+function trimmed(raw: string, what: string): string {
+  const text = raw.trim()
+  if ([...text].length > NAME_MAX || text.includes('\0'))
+    throw new AppError('invalid_request', `${what}最多${NAME_MAX}字`)
+  return text
+}
+
+/** A nickname as stored: trimmed, 1 to 32 characters. */
 export function checkName(raw: string): string {
-  const name = raw.trim()
-  if (!name || [...name].length > NAME_MAX || name.includes('\0'))
-    throw new AppError('invalid_request', `名字不能为空，最多 ${NAME_MAX} 字`)
+  const name = trimmed(raw, '昵称')
+  if (!name) throw new AppError('invalid_request', '昵称不能为空')
   return name
+}
+
+/** An invite's label as stored: trimmed, 1 to 32 characters. */
+export function checkLabel(raw: string): string {
+  const label = trimmed(raw, '备注')
+  if (!label) throw new AppError('invalid_request', '备注不能为空')
+  return label
+}
+
+/** The admin's note on a user as stored: up to 32 characters, null if none. */
+export function checkNote(raw: string): string | null {
+  return trimmed(raw, '备注') || null
 }
 
 /** A new WebAuthn user handle: 32 random bytes, base64url. */
 export const newHandle = () => randomBytes(32).toString('base64url')
 
-/** Make a viewer, as an invite registers them; their id. */
+/**
+ * Make a viewer, as an invite registers them: their own nickname, and the
+ * invite's label as the admin's note; their id.
+ */
 export function createViewer(
   db: Executor,
-  input: { name: string; webauthnId: string },
+  input: { name: string; note: string; webauthnId: string },
   now = Date.now(),
 ): string {
   const id = newId()
@@ -72,6 +94,7 @@ export function createViewer(
     .values({
       id,
       name: checkName(input.name),
+      note: checkNote(input.note),
       role: 'viewer',
       webauthnId: input.webauthnId,
       createdAt: new Date(now),
@@ -80,8 +103,12 @@ export function createViewer(
   return id
 }
 
-/** A user in the admin's 用户 page: how many ways in they have, no activity. */
+/**
+ * A user in the admin's 用户 page: the admin's note on them, how many ways
+ * in they have, no activity.
+ */
 export interface UserListing extends UserView {
+  note: string | null
   created_at: string
   /** Revoked: shown as 已撤销, with no ways in left. */
   revoked_at: string | null
@@ -102,6 +129,7 @@ export function listUsers(db: Database, now = Date.now()): UserListing[] {
     .select({
       id: users.id,
       name: users.name,
+      note: users.note,
       role: users.role,
       createdAt: users.createdAt,
       revokedAt: users.revokedAt,
@@ -115,6 +143,7 @@ export function listUsers(db: Database, now = Date.now()): UserListing[] {
     .map((row) => ({
       id: row.id,
       name: row.name,
+      note: row.note,
       role: row.role,
       created_at: row.createdAt.toISOString(),
       revoked_at: row.revokedAt?.toISOString() ?? null,
@@ -125,8 +154,8 @@ export function listUsers(db: Database, now = Date.now()): UserListing[] {
 }
 
 /**
- * A user the admin may rename, revoke or delete: anyone but the admin. In
- * A no one changes role, and the admin cannot be removed.
+ * A user the admin may note, revoke or delete: anyone but the admin. In A
+ * no one changes role, and the admin cannot be removed.
  */
 function other(db: Executor, id: string) {
   const row = db.select().from(users).where(eq(users.id, id)).get()
@@ -140,16 +169,24 @@ function listed(db: Database, id: string, now: number): UserListing {
   return listUsers(db, now).find((u) => u.id === id)!
 }
 
-export function renameUser(
+/** The admin's note on a user; empty clears it. Only the admin sees it. */
+export function setNote(
   db: Database,
   id: string,
-  name: string,
+  note: string,
   now = Date.now(),
 ): UserListing {
-  const checked = checkName(name)
+  const checked = checkNote(note)
   other(db, id)
-  db.update(users).set({ name: checked }).where(eq(users.id, id)).run()
+  db.update(users).set({ note: checked }).where(eq(users.id, id)).run()
   return listed(db, id, now)
+}
+
+/** A user's own nickname, as they set it; the admin's too. */
+export function setNickname(db: Executor, id: string, name: string): UserView {
+  const checked = checkName(name)
+  db.update(users).set({ name: checked }).where(eq(users.id, id)).run()
+  return userView(db, id)
 }
 
 /**

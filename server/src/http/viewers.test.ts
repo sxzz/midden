@@ -25,6 +25,7 @@ const ID = '01234567-89ab-cdef-0123-456789abcdef'
  */
 const V1_FOR_VIEWERS = [
   'GET /session',
+  'PATCH /session',
   'DELETE /session',
   // The library: lists, counts, searches and what the query box offers,
   // with tag parameters refused and only shared folders.

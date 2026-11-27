@@ -13,6 +13,7 @@ vi.mock('vue-router', async () => {
 const admin: AppUser = {
   id: 'admin',
   name: '管理员',
+  note: null,
   role: 'admin',
   created_at: '2026-01-01T00:00:00Z',
   revoked_at: null,
@@ -23,6 +24,7 @@ const admin: AppUser = {
 const friend: AppUser = {
   id: 'friend',
   name: '小明',
+  note: '同事',
   role: 'viewer',
   created_at: '2026-11-20T00:00:00Z',
   revoked_at: null,
@@ -35,6 +37,7 @@ const pending: Invite = {
   label: '小红',
   created_at: '2026-11-27T00:00:00Z',
   expires_at: new Date(Date.now() + 6 * 86_400_000 + 3_600_000).toISOString(),
+  url: 'https://midden.test/invite#kept',
 }
 
 let unmount = () => {}
@@ -94,6 +97,7 @@ it('lists the users and invites; the admin has no actions', async () => {
           ...friend,
           id: 'old',
           name: '旧',
+          note: null,
           revoked_at: '2026-11-25T00:00:00Z',
         },
       ]
@@ -109,7 +113,9 @@ it('lists the users and invites; the admin has no actions', async () => {
   expect(rows[0]).toMatchObject({ tag: 'DIV' })
   expect(rows[0]!.text).toContain('管理员管理员')
   expect(rows[1]).toMatchObject({ tag: 'BUTTON' })
-  expect(rows[1]!.text).toContain('小明查看者')
+  // Their nickname, the admin's note beside it.
+  expect(rows[1]!.text).toContain('小明同事查看者')
+  expect(el.querySelector('.user .note')?.textContent).toBe('同事')
   expect(rows[1]!.text).toContain('2个通行密钥、3个登录、1个令牌')
   expect(rows[2]!.text).toContain('旧已撤销')
   expect(el.querySelector('.user.revoked')).not.toBeNull()
@@ -189,9 +195,85 @@ it('makes an invite with a label and shows its link once', async () => {
       'https://midden.test/invite#secret',
     ),
   )
-  expect(openSheet().textContent).toContain('链接只显示这一次')
+  expect(openSheet().textContent).toContain('7天内有效，只能用一次。')
+  expect(openSheet().textContent).not.toContain('只显示')
   // The pending invite is listed below the users.
   await vi.waitFor(() =>
     expect(el.querySelector('.invite')?.textContent).toContain('小红'),
   )
+})
+
+it('notes a user: the nickname stays theirs, an empty note clears it', async () => {
+  const sent: { path: string; body?: string }[] = []
+  mockApi((path, request) => {
+    if (request.method === 'PATCH') sent.push({ path, body: request.body })
+    if (path === '/users') return [admin, friend]
+    if (path === '/invites') return []
+    return friend
+  })
+  const el = mount()
+  await vi.waitFor(() => expect(el.textContent).toContain('小明'))
+  el.querySelector<HTMLButtonElement>('button.user')!.click()
+  await settle()
+  expect(button(document.body, '改名')).toBeUndefined()
+  button(document.body, '备注').click()
+  await settle()
+  const form = openSheet()
+  const input = form.querySelector('input')!
+  expect(input.value).toBe('同事')
+  input.value = ''
+  input.dispatchEvent(new Event('input'))
+  await settle()
+  expect(button(form, '保存').disabled).toBe(false)
+  button(form, '保存').click()
+  await vi.waitFor(() =>
+    expect(sent).toEqual([{ path: '/users/friend', body: '{"note":""}' }]),
+  )
+})
+
+it('shows a pending invite’s link again, and makes it again once confirmed', async () => {
+  const sent: string[] = []
+  let invites: Invite[] = [
+    pending,
+    { ...pending, id: 'old', label: '旧', url: null },
+  ]
+  mockApi((path, request) => {
+    if (request.method !== 'GET') sent.push(`${request.method} ${path}`)
+    if (path === '/invites/old/regenerate') {
+      const made = { ...invites[1]!, url: 'https://midden.test/invite#new' }
+      invites = [pending, made]
+      return { invite: made, url: made.url }
+    }
+    if (path === '/users') return [admin]
+    if (path === '/invites') return invites
+    return
+  })
+  const el = mount()
+  await vi.waitFor(() => expect(el.querySelectorAll('.invite')).toHaveLength(2))
+  const open = (i: number) =>
+    el.querySelectorAll<HTMLButtonElement>('.invite button.open')[i]!.click()
+  open(0)
+  await settle()
+  expect(openSheet().textContent).toContain('邀请小红')
+  expect(openSheet().querySelector('input')?.value).toBe(
+    'https://midden.test/invite#kept',
+  )
+  button(openSheet(), '完成').click()
+  await settle()
+  // One whose token was not kept: no link, nothing said of it.
+  open(1)
+  await settle()
+  expect(openSheet().querySelector('input')).toBeNull()
+  expect(button(openSheet(), '复制链接')).toBeUndefined()
+  button(openSheet(), '重新生成').click()
+  await settle()
+  expect(openSheet().textContent).toContain('重新生成链接？')
+  expect(openSheet().textContent).toContain('原链接立即失效。')
+  button(openSheet(), '重新生成').click()
+  await vi.waitFor(() =>
+    expect(openSheet()?.querySelector('input')?.value).toBe(
+      'https://midden.test/invite#new',
+    ),
+  )
+  expect(sent).toEqual(['POST /invites/old/regenerate'])
 })

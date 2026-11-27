@@ -1,17 +1,21 @@
 // What viewers read (docs/design/multi-user.md §5, §8.2, §8.3): the routes
 // open to them, asked with many parameters over an archive whose tags,
-// notes, private folders, capture accounts and records carry unique
-// strings, never answer with any of them; a tag or a private folder
+// notes, private folders, capture accounts, records, the admin's notes on
+// users and invite labels carry unique strings, never answer with any of
+// them; a tag or a private folder
 // answers exactly as one that does not exist; and what the read caches
 // keep never mixes the admin's answers with a viewer's.
 import { Buffer } from 'node:buffer'
+import { randomBytes } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { backup } from 'node:sqlite'
+import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
 import { addAccount } from '#accounts/accounts.ts'
 import { pooledReads } from '#agent/runner.ts'
+import { users } from '#db/schema.ts'
 import { updateAnnotation } from '#library/annotations.ts'
 import { createFolder } from '#library/folders.ts'
 import { createShare } from '#library/shares.ts'
@@ -20,6 +24,7 @@ import { agentFixture, type AgentFixture } from '#testing/agent.ts'
 import { countedFolders } from '#testing/library.ts'
 import { addViewer } from '#testing/users.ts'
 import { createToken } from '#tokens/tokens.ts'
+import { createInvite } from '#users/invites.ts'
 import { adminId } from '#users/users.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
 import { pooledWebReads } from './offload.ts'
@@ -43,8 +48,9 @@ afterEach(async () => {
 /**
  * The agent fixture's archive, and what only the admin may see: a tag on a
  * post and on an account (which covers its posts), notes, a folder kept
- * private (selecting by the tag), a capture account, and a shared folder
- * whose own query names the tag and the private folder.
+ * private (selecting by the tag), a capture account, a shared folder
+ * whose own query names the tag and the private folder, the admin's notes
+ * on the viewer and on another, and a pending invite's label.
  */
 async function canaries() {
   fixture = await agentFixture()
@@ -85,6 +91,15 @@ async function canaries() {
   }
   expect(hidden.ids.length).toBeGreaterThan(6)
   const viewer = addViewer(db)
+  const another = addViewer(db, '另一位')
+  const notes = {
+    [viewer]: 'CANARY-USERNOTE-i9j0',
+    [another]: 'CANARY-USERNOTE-k1l2',
+  }
+  for (const [id, note] of Object.entries(notes))
+    db.update(users).set({ note }).where(eq(users.id, id)).run()
+  createInvite(db, randomBytes(32), 'CANARY-INVITE-m3n4')
+  hidden.strings.push(...Object.values(notes), 'CANARY-INVITE-m3n4')
   const api = createApi({ ctx, webAppUrl: WEB })
   const cookie = createSession(db, viewer)
   const adminCookie = createSession(db, adminId(db))
@@ -262,6 +277,12 @@ describe('what viewers read', () => {
     // The admin sees them, so the canaries are where a leak would show.
     const own = await w.web('/folders', w.adminCookie)
     expect(own.text).toContain('CANARY-FOLDER-a5b6')
+    const listed = await w.web('/users', w.adminCookie)
+    expect(listed.text).toContain('CANARY-USERNOTE-i9j0')
+    expect(listed.text).toContain('CANARY-USERNOTE-k1l2')
+    expect((await w.web('/invites', w.adminCookie)).text).toContain(
+      'CANARY-INVITE-m3n4',
+    )
     const admin = createToken(w.db, {
       user: adminId(w.db),
       label: 'admin',
@@ -270,6 +291,42 @@ describe('what viewers read', () => {
     expect(
       (await w.agent(`/posts/${w.ids.p1}`, undefined, admin)).text,
     ).toContain(w.tag)
+  })
+
+  test('the admin’s notes never reach a viewer: not by setting their nickname, nor by the admin’s routes', async () => {
+    const w = await canaries()
+    const asViewer = (method: string, route: string, body?: unknown) =>
+      w.api.request(route, {
+        method,
+        headers: {
+          Cookie: `${SESSION_COOKIE}=${w.cookie}`,
+          Origin: ORIGIN,
+          'Content-Type': 'application/json',
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+    const set = await asViewer('PATCH', '/session', { name: '新昵称' })
+    const text = await set.text()
+    expect([set.status, leaks(w, text)]).toEqual([200, []])
+    expect(JSON.parse(text)).toMatchObject({ user: { name: '新昵称' } })
+    expect(text).not.toContain('note')
+    for (const [method, route, body] of [
+      ['GET', '/users'],
+      ['GET', '/invites'],
+      ['PATCH', `/users/${w.viewer}`, { note: 'x' }],
+    ] as const) {
+      const refused = await asViewer(method, route, body)
+      const answer = await refused.text()
+      expect([route, refused.status, leaks(w, answer)]).toEqual([
+        route,
+        403,
+        [],
+      ])
+    }
+    // Their note stays as the admin left it.
+    expect(
+      w.db.select().from(users).where(eq(users.id, w.viewer)).get(),
+    ).toMatchObject({ name: '新昵称', note: 'CANARY-USERNOTE-i9j0' })
   })
 
   test('the shared folder: listed by name and count alone, its query holds and is never said', async () => {

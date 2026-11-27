@@ -53,10 +53,18 @@ export function inviteAuthRoutes(o: {
   }
   return (
     new Hono<Env>()
-      // `name`: what the account picker shows; the invite's label if none.
+      // Whether the link is still good, before anything is filled in. The
+      // invite's label is the admin's note: nothing here says it.
+      .post('/check', json(v.strictObject({ token: TOKEN })), (c) => {
+        originOf(c)
+        if (!openInvite(db, c.req.valid('json').token, now()))
+          throw new HTTPException(403, { message: GONE })
+        return c.body(null, 204)
+      })
+      // `name`: their nickname, which the account picker shows.
       .post(
         '/options',
-        json(v.strictObject({ token: TOKEN, name: v.optional(Username) })),
+        json(v.strictObject({ token: TOKEN, name: Username })),
         async (c) => {
           const origin = originOf(c)
           const input = c.req.valid('json')
@@ -70,7 +78,7 @@ export function inviteAuthRoutes(o: {
               {
                 id: '',
                 webauthnId: invite.webauthnId,
-                name: input.name ?? invite.label,
+                name: input.name,
               },
               bindingOf(invite.digest),
               now(),
@@ -108,7 +116,11 @@ export function inviteAuthRoutes(o: {
             if (!invite) throw new HTTPException(403, { message: GONE })
             const id = createViewer(
               tx,
-              { name: input.name, webauthnId: invite.webauthnId },
+              {
+                name: input.name,
+                note: invite.label,
+                webauthnId: invite.webauthnId,
+              },
               at,
             )
             if (!useInvite(tx, digest, id, at))

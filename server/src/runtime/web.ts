@@ -123,6 +123,7 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
     storage,
     queue: { worker: options.worker, web: () => load.report() },
     challengeKey: deriveKey(config.secretKey, 'passkey-challenge'),
+    inviteKey: deriveKey(config.secretKey, 'invite-links'),
     notify,
     tokenUsage,
     reads: pooledWebReads(pool),

@@ -4,10 +4,11 @@ import { useTemplateRef } from 'vue'
 import { toast } from '../composables/useToast'
 import SheetDialog from './ui/SheetDialog.vue'
 
-// A new invite's link: the server keeps only its token's digest, so this
-// is the one time it shows.
-defineProps<{ open: boolean; title: string; url: string }>()
-const emit = defineEmits<{ done: [] }>()
+// An invite still good: its link, shown again whenever asked, and making
+// it again. `url` is null for an invite whose token the server did not
+// keep (made before it kept them); making it again gives one.
+defineProps<{ open: boolean; title: string; url: string | null }>()
+const emit = defineEmits<{ done: []; regenerate: [] }>()
 const field = useTemplateRef<HTMLInputElement>('field')
 const { copy: write, copied } = useClipboard()
 async function copy(url: string) {
@@ -21,16 +22,14 @@ async function copy(url: string) {
 </script>
 
 <template>
-  <!-- The link shows this once: only 完成 or Esc closes it. -->
   <SheetDialog
     :open="open"
     :title="title"
-    description="链接只显示这一次。7天内有效，只能用一次。"
+    description="7天内有效，只能用一次。"
     cancel-label="完成"
-    dirty
     @cancel="emit('done')"
   >
-    <label class="field">
+    <label v-if="url" class="field">
       <span class="visually-hidden">邀请链接</span>
       <input
         ref="field"
@@ -42,8 +41,16 @@ async function copy(url: string) {
       />
     </label>
     <template #actions>
-      <button type="button" class="action primary" @click="copy(url)">
+      <button
+        v-if="url"
+        type="button"
+        class="action primary"
+        @click="copy(url)"
+      >
         复制链接
+      </button>
+      <button type="button" class="action" @click="emit('regenerate')">
+        重新生成
       </button>
     </template>
   </SheetDialog>

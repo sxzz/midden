@@ -1,14 +1,15 @@
 <script setup vapor lang="ts">
 import { onMounted, shallowRef } from 'vue'
 import {
+  checkInvite,
   defaultPasskeyName,
-  inviteName,
   joinWithInvite,
   passkeyError,
 } from '../passkey'
 import ListSection from './ui/ListSection.vue'
 // An invite's link (`/invite#<token>`, the token from the fragment): a
-// name and a passkey make a viewer, who is then signed in.
+// nickname of their own and a passkey make a viewer, who is then signed
+// in. The invite's label is the admin's note, never shown here.
 const props = defineProps<{ token: string }>()
 const emit = defineEmits<{ done: [] }>()
 const name = shallowRef('')
@@ -19,7 +20,7 @@ const error = shallowRef('')
 const gone = shallowRef(false)
 onMounted(async () => {
   try {
-    name.value = await inviteName(props.token)
+    await checkInvite(props.token)
   } catch (e) {
     error.value = passkeyError(e)
     gone.value = true
@@ -52,13 +53,8 @@ async function join() {
     <h1>加入Midden</h1>
     <ListSection v-if="!gone">
       <label class="field">
-        <span class="name">名字</span>
-        <input
-          v-model="name"
-          maxlength="32"
-          autocomplete="nickname"
-          :disabled="busy && !name"
-        />
+        <span class="name">昵称</span>
+        <input v-model="name" maxlength="32" autocomplete="nickname" />
       </label>
       <label class="field">
         <span class="name">通行密钥名称</span>

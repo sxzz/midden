@@ -61,20 +61,14 @@ export async function createPasskey(
   return call(client.passkeys.$post({ json: { name, response } }))
 }
 
-/**
- * The name an invite gives the new user (its label), read from its
- * options; throws the server's error when the invite is no longer good.
- */
-export async function inviteName(token: string): Promise<string> {
-  const options = creation(
-    await call(client.auth.invite.options.$post({ json: { token } })),
-  )
-  return options.user.name
+/** Throws the server's error when an invite is no longer good. */
+export async function checkInvite(token: string): Promise<void> {
+  await call(client.auth.invite.check.$post({ json: { token } }))
 }
 
 /**
  * Register with an invite (`/invite#<token>`): a passkey for this domain
- * under `name`, which makes a viewer and signs them in.
+ * under `name`, their nickname, which makes a viewer and signs them in.
  */
 export async function joinWithInvite(
   token: string,
