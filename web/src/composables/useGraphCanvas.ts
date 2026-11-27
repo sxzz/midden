@@ -70,7 +70,6 @@ export function useGraphCanvas(options: {
     typeof ResizeObserver === 'undefined'
       ? undefined
       : new ResizeObserver(() => fitHeight())
-  const scheme = globalThis.matchMedia?.('(prefers-color-scheme: dark)')
   onMounted(async () => {
     fitHeight()
     window.addEventListener('resize', fitHeight)
@@ -85,13 +84,13 @@ export function useGraphCanvas(options: {
       })
       canvas.value = created
       const retheme = () => created.setTheme(readTheme())
-      // Telegram sets its colours on the root's style; the app its data-theme.
+      // The theme is the root's class `dark` (theme.ts, host.ts), and
+      // Telegram's colours its style: either changing redraws.
       observer = new MutationObserver(retheme)
       observer.observe(document.documentElement, {
         attributes: true,
-        attributeFilter: ['style', 'data-theme'],
+        attributeFilter: ['style', 'class'],
       })
-      scheme?.addEventListener('change', retheme)
       created.setDim(!!options.dim?.value)
       created.show(options.model.value)
       created.select(options.selected.value)

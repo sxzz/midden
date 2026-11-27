@@ -1,4 +1,5 @@
 import { appHref } from './app-path'
+import { startTheme } from './theme'
 interface Telegram {
   isVersionAtLeast?: (version: string) => boolean
   downloadFile?: (
@@ -96,7 +97,7 @@ export function applyTheme(
   if (!background && !scheme) return
   const base = background ? parse(background) : undefined
   const dark = base ? brightness(base) < 0.5 : scheme === 'dark'
-  root.dataset.theme = dark ? 'dark' : 'light'
+  root.classList.toggle('dark', dark)
   const text = pick('text_color')
   set('--text', text)
   set('--subtle', pick('subtitle_text_color', 'hint_color'))
@@ -126,7 +127,11 @@ export function setupHost(back: () => void = () => history.back()) {
   const forced = new URLSearchParams(location.search).get('theme')
   if (forced === 'dark' || forced === 'light') applyTheme({}, forced)
   const tg = host()
-  if (!tg?.initData) return () => {}
+  if (!tg?.initData) {
+    // A browser: the reader's own choice, unless a review forces one.
+    if (forced !== 'dark' && forced !== 'light') startTheme()
+    return () => {}
+  }
   const theme = () => applyTheme(tg.themeParams, tg.colorScheme)
   theme()
   tg.ready()

@@ -40,16 +40,8 @@ defineProps<{ relation: ViewerRelation }>()
   background: var(--mark);
   box-shadow: 0 0 0 2px var(--card);
 }
-@media (prefers-color-scheme: dark) {
-  .viewer-mark {
-    --mark: #ff6b9a;
-  }
-}
-:root[data-theme='dark'] .viewer-mark {
+:root.dark .viewer-mark {
   --mark: #ff6b9a;
-}
-:root[data-theme='light'] .viewer-mark {
-  --mark: #d6336c;
 }
 .viewer-mark.follower {
   background: var(--card);

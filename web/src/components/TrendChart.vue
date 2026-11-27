@@ -180,13 +180,8 @@ function key(event: KeyboardEvent) {
   border-radius: var(--radius);
   min-width: 0;
 }
-:root[data-theme='dark'] .trend {
+:root.dark .trend {
   --series: #3987e5;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) .trend {
-    --series: #3987e5;
-  }
 }
 .head {
   display: grid;

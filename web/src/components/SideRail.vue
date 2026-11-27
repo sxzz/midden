@@ -1,6 +1,8 @@
 <script setup vapor lang="ts">
+import { computed } from 'vue'
 import { useTabLinks } from '../composables/useTabLinks'
 import { tabs } from '../tabbar'
+import { darkTheme, toggleTheme } from '../theme'
 import { currentUser } from '../user'
 import RailUser from './RailUser.vue'
 import AppLink from './ui/AppLink.vue'
@@ -9,6 +11,14 @@ import TabIcon from './ui/TabIcon.vue'
 // tabs, and who is signed in. Icons only until 1280px,
 // labels beside them from there.
 const { active, links, tap } = useTabLinks()
+/** Light or dark, named by what it switches to; none inside Telegram. */
+const theme = computed(() => {
+  const dark = darkTheme.value
+  if (!dark) return undefined
+  return dark.value
+    ? { dark: true, label: '切换到浅色模式', short: '浅色模式' }
+    : { dark: false, label: '切换到深色模式', short: '深色模式' }
+})
 </script>
 
 <template>
@@ -54,7 +64,38 @@ const { active, links, tap } = useTabLinks()
           <span class="label">{{ tab.label }}</span>
         </AppLink>
       </nav>
-      <RailUser :user="currentUser()" />
+      <div class="bottom">
+        <button
+          v-if="theme"
+          type="button"
+          class="item theme"
+          :aria-label="theme.label"
+          :title="theme.label"
+          @click="toggleTheme"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="26"
+            height="26"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <template v-if="theme.dark">
+              <circle cx="12" cy="12" r="4" />
+              <path
+                d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"
+              />
+            </template>
+            <path v-else d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" />
+          </svg>
+          <span class="label">{{ theme.short }}</span>
+        </button>
+        <RailUser :user="currentUser()" />
+      </div>
     </div>
   </header>
 </template>
@@ -98,6 +139,23 @@ const { active, links, tap } = useTabLinks()
 .logo {
   margin: 2px 0 4px;
 }
+/* The theme and who is signed in, at the rail's foot. */
+.bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+}
+.theme {
+  /* A button, but set as the links beside it: no browser's own button
+     font, the same size, weight and line as 设置. */
+  font: inherit;
+  font-size: 19px;
+  font-weight: 400;
+  line-height: 24px;
+  color: var(--text);
+}
 .name {
   font-size: 20px;
   font-weight: 700;
@@ -134,6 +192,10 @@ const { active, links, tap } = useTabLinks()
   }
   .items {
     align-items: flex-start;
+  }
+  .bottom {
+    align-self: stretch;
+    align-items: stretch;
   }
   .logo,
   .item {

@@ -230,7 +230,7 @@ test('the Mini App signs in with the launch data in its address', async ({
   await expect(page.locator('h1')).toHaveText('收藏库')
   expect(logins).toEqual([{ init_data: 'user=42&hash=abc' }])
   // Its theme is applied from the start.
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await expect(page.locator('html')).toHaveClass(/\bdark\b/)
 })
 
 test('sensitive image stays blurred until revealed and opens inside the page', async ({

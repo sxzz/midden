@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import { call, client, errorText } from '../api'
 import { toast } from '../composables/useToast'
 import { host } from '../host'
-import { SIDEBAR, useMedia } from '../layout'
+import { RAIL, SIDEBAR, useMedia } from '../layout'
 import { buildFacts, REPOSITORY } from '../settings'
 import {
   findEntry,
@@ -13,6 +13,7 @@ import {
   settingsSections,
   splitMatch,
 } from '../settings-sections'
+import { darkTheme } from '../theme'
 import AdminView from './AdminView.vue'
 import ApiTokens from './ApiTokens.vue'
 import PasskeyList from './PasskeyList.vue'
@@ -31,6 +32,14 @@ const emit = defineEmits<{
 }>()
 const route = useRoute()
 const split = useMedia(SIDEBAR)
+/** From 700px the rail has the theme's button; on a phone it is here. */
+const rail = useMedia(RAIL)
+const themeShown = computed(() => !rail.value && !!darkTheme.value)
+const dark = computed(() => !!darkTheme.value?.value)
+function setDark(event: Event) {
+  const theme = darkTheme.value
+  if (theme) theme.value = (event.target as HTMLInputElement).checked
+}
 const section = computed(() =>
   findSection(
     String(
@@ -158,6 +167,16 @@ async function logout() {
         >
           没有找到「{{ query.trim() }}」
         </p>
+        <label v-if="themeShown && !query" class="row theme-row">
+          <span class="row-text"><span class="row-label">深色模式</span></span>
+          <input
+            type="checkbox"
+            role="switch"
+            class="switch"
+            :checked="dark"
+            @change="setDark"
+          />
+        </label>
         <button
           v-if="browser && !query"
           type="button"
@@ -428,6 +447,57 @@ mark {
   border-radius: 3px;
   background: color-mix(in srgb, var(--link) 30%, transparent);
   color: inherit;
+}
+/* 深色模式: a switch, as iOS's settings have it. */
+.theme-row {
+  margin-top: 8px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 var(--separator);
+}
+.theme-row .row-text {
+  flex: 1;
+}
+.switch {
+  position: relative;
+  flex: none;
+  width: 46px;
+  height: 28px;
+  margin: 0;
+  border-radius: 14px;
+  background: var(--fill);
+  appearance: none;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 160ms ease;
+}
+.switch:checked {
+  background: #34c759;
+}
+.switch:checked::after {
+  transform: translateX(18px);
+}
+.switch:focus-visible {
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .switch,
+  .switch::after {
+    transition: none;
+  }
+}
+.theme-row + .logout {
+  margin-top: 0;
 }
 .logout {
   margin-top: 8px;

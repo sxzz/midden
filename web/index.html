@@ -7,16 +7,25 @@
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
     <meta name="color-scheme" content="light dark" />
-    <meta
-      name="theme-color"
-      content="#efeff4"
-      media="(prefers-color-scheme: light)"
-    />
-    <meta
-      name="theme-color"
-      content="#121212"
-      media="(prefers-color-scheme: dark)"
-    />
+    <meta name="theme-color" content="#efeff4" />
+    <script>
+      // Before the first paint, so a dark page never flashes light: the
+      // theme chosen in this browser (theme.ts, as useDark stores it), else
+      // the system's. Telegram's own theme is applied over it (host.ts).
+      try {
+        var chosen = localStorage.getItem('midden.theme')
+        var dark =
+          chosen === 'dark' ||
+          (chosen !== 'light' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches)
+        if (dark) {
+          document.documentElement.classList.add('dark')
+          document
+            .querySelector('meta[name="theme-color"]')
+            .setAttribute('content', '#121212')
+        }
+      } catch (error) {}
+    </script>
     <meta name="robots" content="noindex, nofollow" />
     <meta name="referrer" content="no-referrer" />
     <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />

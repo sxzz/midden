@@ -1,6 +1,6 @@
 /* Telegram grouped-list tokens. host.ts overrides these from themeParams;
-   without Telegram we fall back to the system colour scheme, whose dark
-   palette is neutral grey (no blue tint). */
+   without Telegram the dark set below applies with the class `dark`
+   (theme.ts), whose palette is neutral grey (no blue tint). */
 :root {
   --page: #efeff4;
   --card: #ffffff;
@@ -38,28 +38,9 @@
   font-synthesis: none;
   -webkit-text-size-adjust: 100%;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) {
-    --page: #121212;
-    --card: #1e1e1e;
-    --fill: #2a2a2a;
-    --text: #f5f5f5;
-    --subtle: #9b9b9b;
-    --link: #6ab7ff;
-    --destructive: #ff6a6a;
-    --separator: rgba(255, 255, 255, 0.1);
-    --raised: #2a2a2d;
-    --raised-fill: #3a3a3e;
-    --raised-border: rgba(255, 255, 255, 0.16);
-    --raised-shadow:
-      0 24px 64px rgba(0, 0, 0, 0.7), 0 4px 14px rgba(0, 0, 0, 0.5);
-    --primary-fill: #2f80e4;
-    --destructive-fill: #d9363e;
-    --media-edge: rgba(255, 255, 255, 0.14);
-    color-scheme: dark;
-  }
-}
-:root[data-theme='dark'] {
+/* Dark: the class theme.ts (the reader's choice, or the system's) or host.ts
+   (Telegram's theme) sets; index.html sets it before the first paint. */
+:root.dark {
   --page: #121212;
   --card: #1e1e1e;
   --fill: #2a2a2a;
