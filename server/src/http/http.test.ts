@@ -140,11 +140,15 @@ describe('api', () => {
     expect(allowed.headers.get('Access-Control-Allow-Methods')).toContain(
       'DELETE',
     )
-    expect(
-      (await preflight('https://elsewhere.test')).headers.get(
-        'Access-Control-Allow-Origin',
-      ),
-    ).toBeNull()
+    // Another origin: no CORS headers at all, and no preflight answer.
+    const elsewhere = await preflight('https://elsewhere.test')
+    expect(elsewhere.headers.get('Access-Control-Allow-Origin')).toBeNull()
+    expect(elsewhere.headers.get('Access-Control-Allow-Credentials')).toBeNull()
+    expect(elsewhere.headers.get('Vary')).toContain('Origin')
+    const stranger = await app.request('/captures', {
+      headers: { Origin: 'https://elsewhere.test' },
+    })
+    expect(stranger.headers.get('Access-Control-Allow-Credentials')).toBeNull()
 
     // Answers and errors alike, so the web app can read either.
     const read = await call('/captures')

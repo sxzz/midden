@@ -152,7 +152,15 @@ export function createApi(options: HttpOptions) {
   return (
     new Hono<Env>()
       .onError((error, c) => errorResponse(c, error, ctx.logger))
-      .use((c, next) => (options.trusted ? next() : crossOrigin(c, next)))
+      .use((c, next) => {
+        if (options.trusted) return next()
+        const origin = c.req.header('Origin')
+        if (origin && fromWeb(origin)) return crossOrigin(c, next)
+        // Any other origin gets no CORS headers at all, not even
+        // Allow-Credentials (Hono's cors sets that for every origin).
+        c.header('Vary', 'Origin', { append: true })
+        return next()
+      })
       .use(async (c, next) => {
         try {
           await next()
