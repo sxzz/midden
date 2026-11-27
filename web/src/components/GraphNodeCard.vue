@@ -57,12 +57,12 @@ const counts = computed(() => {
     <div class="who">
       <span class="avatar" :class="{ blurred }">
         <LoadingImage v-if="avatar" :src="avatar" alt="" />
-        <span v-else class="initial" aria-hidden="true">{{
+        <span v-else class="initial" aria-hidden="true" :lang="view.lang">{{
           view.initial
         }}</span>
       </span>
       <span class="names">
-        <span class="name">{{ view.label }}</span>
+        <span class="name" :lang="view.lang">{{ view.label }}</span>
         <span v-if="node.name && node.username" class="handle"
           >@{{ node.username }}</span
         >

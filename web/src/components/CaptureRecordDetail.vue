@@ -33,6 +33,7 @@ import {
   recordTitle,
   retryParts,
   stateStatus,
+  titleLang,
 } from '../captures'
 import { toast } from '../composables/useToast'
 import { relationsText } from '../follows'
@@ -472,7 +473,9 @@ function memberLink(m: CaptureMember) {
   <template v-else-if="record">
     <ListSection>
       <div class="summary">
-        <p class="title">{{ recordTitle(record) }}</p>
+        <p class="title" :lang="titleLang(record)">
+          {{ recordTitle(record) }}
+        </p>
         <p class="state" :class="status?.tone" role="status">
           {{ status?.label }}<template v-if="counts"> · {{ counts }}</template>
         </p>
@@ -645,8 +648,10 @@ function memberLink(m: CaptureMember) {
         <template v-for="p in record.profiles" :key="p.collection_id">
           <AppLink class="line profile" :to="collectionPage(p.collection_id)">
             <span class="line-text"
-              >{{ accountTitle(p.url, p.handle, p.name)
-              }}<small class="hint">{{ profilePartText(p) }}</small
+              ><span :lang="p.name ? p.lang : undefined">{{
+                accountTitle(p.url, p.handle, p.name)
+              }}</span
+              ><small class="hint">{{ profilePartText(p) }}</small
               ><small v-if="p.error" class="hint">{{ p.error }}</small></span
             >
             <span class="chevron" aria-hidden="true">›</span>
@@ -685,8 +690,8 @@ function memberLink(m: CaptureMember) {
               v-bind="memberLink(m)"
             >
               <span class="line-text"
-                >{{ memberTitle(m)
-                }}<small
+                ><span :lang="titleLang(m)">{{ memberTitle(m) }}</span
+                ><small
                   v-for="reason in m.source_state
                     ? []
                     : m.error

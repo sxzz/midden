@@ -133,15 +133,19 @@ const storage = computed(() =>
           :src="previewURL(view.avatar)"
           alt=""
           loading="lazy"
-        /><span v-else class="avatar initials" aria-hidden="true">{{
-          view.name.slice(0, 1)
-        }}</span></AppLink
+        /><span
+          v-else
+          class="avatar initials"
+          aria-hidden="true"
+          :lang="view.nameLang"
+          >{{ view.name.slice(0, 1) }}</span
+        ></AppLink
       >
       <span class="content">
         <!-- The whole row is this link; see .head::after. -->
         <AppLink :to="collectionRoute(collection.id)" class="head">
           <span class="identity"
-            ><strong class="name">{{ view.name }}</strong
+            ><strong class="name" :lang="view.nameLang">{{ view.name }}</strong
             ><LockIcon v-if="view.locked" class="lock" /><span
               v-if="view.handle"
               class="handle"
@@ -149,7 +153,10 @@ const storage = computed(() =>
             ></span
           ><span class="when">{{ when }}</span>
         </AppLink>
-        <span v-if="preview.length && preview[0]!.text" class="preview"
+        <span
+          v-if="preview.length && preview[0]!.text"
+          class="preview"
+          :lang="view.lang"
           ><template v-for="(part, i) in preview" :key="i"
             ><mark v-if="part.mark">{{ part.text }}</mark
             ><template v-else>{{ part.text }}</template></template

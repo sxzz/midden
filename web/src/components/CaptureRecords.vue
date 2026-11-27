@@ -17,6 +17,7 @@ import {
   recordRowTime,
   recordStatus,
   recordTitle,
+  titleLang,
 } from '../captures'
 import CaptureOptions from './CaptureOptions.vue'
 import InfiniteLoader from './ui/InfiniteLoader.vue'
@@ -213,7 +214,7 @@ async function submit() {
       :href="appHref(`/captures/${r.id}`)"
     >
       <span class="main">
-        <span class="title">{{ recordTitle(r) }}</span>
+        <span class="title" :lang="titleLang(r)">{{ recordTitle(r) }}</span>
         <span class="meta">
           {{ recordRowTime(r.created_at)
           }}<template v-if="recordCounts(r)"> · {{ recordCounts(r) }}</template>

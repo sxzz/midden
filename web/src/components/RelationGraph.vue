@@ -283,7 +283,7 @@ const compareRoute = computed(() => ({
                   }}</span>
                   <ViewerMark v-if="view.viewer" :relation="view.viewer" />
                 </span>
-                <span class="name">{{ view.label }}</span>
+                <span class="name" :lang="view.lang">{{ view.label }}</span>
                 <span v-if="view.node.followers !== undefined" class="followers"
                   >粉丝 {{ formatCount(view.node.followers) }}</span
                 >

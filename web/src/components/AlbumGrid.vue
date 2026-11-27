@@ -9,8 +9,12 @@ export type AlbumTile = {
   caption?: {
     labels: string
     text: string
+    /** Languages, where known, for `lang`. */
+    lang?: string
     quote: string
+    quoteLang?: string
     quoteAuthor?: string
+    quoteAuthorLang?: string
   }
 }
 defineProps<{ tiles: AlbumTile[]; loading?: boolean }>()
@@ -65,12 +69,19 @@ const placeholders = 12
         <span v-if="tile.caption.labels" class="relation-label">{{
           tile.caption.labels
         }}</span>
-        <span class="caption-text">{{ tile.caption.text }}</span>
+        <span class="caption-text" :lang="tile.caption.lang">{{
+          tile.caption.text
+        }}</span>
         <span v-if="tile.caption.quote" class="quote"
           ><span class="quote-label">引用的帖子</span
-          ><span v-if="tile.caption.quoteAuthor" class="quote-author"
+          ><span
+            v-if="tile.caption.quoteAuthor"
+            class="quote-author"
+            :lang="tile.caption.quoteAuthorLang"
             >{{ tile.caption.quoteAuthor }}：</span
-          >{{ tile.caption.quote }}</span
+          ><span :lang="tile.caption.quoteLang">{{
+            tile.caption.quote
+          }}</span></span
         >
       </span>
     </button>

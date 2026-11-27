@@ -198,12 +198,16 @@ function captionOf(slot: number) {
       image.draggable = false
       image.src = previewURL(view.avatar)
       avatar.append(image)
-    } else avatar.textContent = view.name.slice(0, 1)
+    } else {
+      avatar.textContent = view.name.slice(0, 1)
+      if (view.nameLang) avatar.lang = view.nameLang
+    }
     const content = document.createElement('span')
     content.className = 'caption-content'
     const author = document.createElement('strong')
     author.className = 'caption-author'
     author.textContent = view.name
+    if (view.nameLang) author.lang = view.nameLang
     if (view.handle) {
       const handle = document.createElement('span')
       handle.textContent = ` @${view.handle}`
@@ -214,6 +218,7 @@ function captionOf(slot: number) {
       const body = document.createElement('span')
       body.className = 'caption-body'
       body.textContent = view.body
+      if (view.lang) body.lang = view.lang
       content.append(body)
     }
     post.append(avatar, content)

@@ -65,6 +65,13 @@ export interface Presentation {
   body: string
   /** A profile's own bio, empty when it has none. */
   bio?: string
+  /**
+   * The language of the body (or bio), for its `lang` attribute; absent
+   * when unknown, so the page's applies.
+   */
+  lang?: string
+  /** The name's: its account's, as the bio's language stands for both. */
+  nameLang?: string
   /** Counts the source recorded for whatever the collection is about. */
   stats?: StatGroup
   /** What the source recorded about the item itself, read after the body. */
@@ -101,6 +108,7 @@ const generic: Presenter = (a) => ({
   name: a.author_name || '已保存的内容',
   locked: false,
   body: a.text || a.summary || '',
+  ...(a.lang ? { lang: a.lang } : {}),
   details: details(a),
 })
 /** A count the source actually recorded. Zero is a reading; anything else is not. */
@@ -198,6 +206,7 @@ const social: Presenter = (a, root, options = {}) => {
     name: asText(profile?.data.name) || generic(a).name,
     body: bio ?? body,
     bio,
+    nameLang: isProfile ? a.lang : profile?.saved_lang,
     profileChanged: collectionProfilesDiffer(a),
     // The lock follows the author's profile as last seen.
     locked: isProtected(profile) ?? false,

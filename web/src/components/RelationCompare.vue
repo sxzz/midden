@@ -267,7 +267,7 @@ const libraryRoute = computed(() => ({
                 v-if="account.viewer"
                 :relation="account.viewer"
             /></span>
-            <span class="name">{{ account.label }}</span>
+            <span class="name" :lang="account.lang">{{ account.label }}</span>
           </button>
           <button
             v-if="accounts.length > 1"
@@ -304,7 +304,7 @@ const libraryRoute = computed(() => ({
             <tr>
               <th v-for="account in accounts" :key="account.key" scope="col">
                 <MiniAvatar :view="account" :size="22" />
-                <span class="sr">{{ account.label }}</span>
+                <span class="sr" :lang="account.lang">{{ account.label }}</span>
               </th>
             </tr>
           </thead>
@@ -320,7 +320,9 @@ const libraryRoute = computed(() => ({
               </th>
               <th scope="row">
                 <MiniAvatar :view="accounts[a]!" :size="22" />
-                <span class="sr">{{ accounts[a]!.label }}</span>
+                <span class="sr" :lang="accounts[a]!.lang">{{
+                  accounts[a]!.label
+                }}</span>
               </th>
               <td
                 v-for="(cell, b) in row"
@@ -475,7 +477,7 @@ const libraryRoute = computed(() => ({
                   v-if="item.viewer"
                   :relation="item.viewer"
               /></span>
-              <span class="name">{{ item.label }}</span>
+              <span class="name" :lang="item.lang">{{ item.label }}</span>
               <span class="badges" :aria-label="labels(item.of)">
                 <MiniAvatar
                   v-for="i in item.of.slice(0, BADGES)"

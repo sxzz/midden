@@ -6,6 +6,7 @@ import {
   lineNote,
   postLabel,
   type ImageLine,
+  type PinnedPost,
   type PostsLine,
 } from '../changes'
 import { useHistory } from '../composables/useHistory'
@@ -99,6 +100,12 @@ onUnmounted(() => {
   historyController.abort()
 })
 const days = computed(() => changeDays(changes.value))
+// The name and bio read in the profile's language (its bio's); the rest
+// (the handle) has none of its own.
+const textLang = (line: { key: string }) =>
+  line.key === 'name' || line.key === 'bio' ? shown.value?.lang : undefined
+// A pinned post's language goes with its own text, not its address.
+const postLang = (post: PinnedPost) => (post.text ? post.lang : undefined)
 
 // Sensitive images stay covered until tapped, unless all are shown.
 const revealed = shallowRef<string[]>([])
@@ -187,11 +194,11 @@ function open(line: ImageLine, asset: Asset) {
                 <template v-if="line.kind === 'text'">
                   <p v-if="line.before" class="value before">
                     <span class="mark" aria-hidden="true">原</span
-                    ><del>{{ line.before }}</del>
+                    ><del :lang="textLang(line)">{{ line.before }}</del>
                   </p>
                   <p v-if="line.after" class="value after">
                     <span class="mark" aria-hidden="true">新</span
-                    ><ins>{{ line.after }}</ins>
+                    ><ins :lang="textLang(line)">{{ line.after }}</ins>
                   </p>
                 </template>
                 <template v-else-if="line.kind === 'posts'">
@@ -209,15 +216,20 @@ function open(line: ImageLine, asset: Asset) {
                       v-if="post.post.collection_id"
                       :to="collectionRoute(post.post.collection_id)"
                       class="post-link"
+                      :lang="postLang(post.post)"
                       >{{ postLabel(post.post) }}</AppLink
                     ><AppLink
                       v-else-if="post.post.url"
                       :href="post.post.url"
                       class="post-link"
+                      :lang="postLang(post.post)"
                       >{{ postLabel(post.post) }}</AppLink
-                    ><span v-else class="post-link">{{
-                      postLabel(post.post)
-                    }}</span>
+                    ><span
+                      v-else
+                      class="post-link"
+                      :lang="postLang(post.post)"
+                      >{{ postLabel(post.post) }}</span
+                    >
                   </p>
                 </template>
                 <div v-else class="images" :class="line.shape">

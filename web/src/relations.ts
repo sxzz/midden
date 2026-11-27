@@ -18,6 +18,8 @@ export interface RelationAuthor {
   /** Only profiles saved in the library become internal links. */
   href?: string
   protected?: boolean
+  /** The saved profile's language, for the name. */
+  lang?: string
 }
 const asText = (value: unknown) =>
   typeof value === 'string' && value.trim() ? value.trim() : undefined
@@ -150,6 +152,7 @@ export function authorIdentity(
       ? collectionHref(entity.saved_collection_id)
       : undefined,
     protected: isProtected(entity),
+    ...(entity.saved_lang ? { lang: entity.saved_lang } : {}),
   }
 }
 /** One line of attribution for places that cannot render a link. */

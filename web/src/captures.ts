@@ -258,6 +258,20 @@ export function memberTitle(
   return `${account} ${m.list === 'following' ? '关注' : '粉丝'}名单`
 }
 
+/**
+ * The language of a profile's title, when it carries the profile's own
+ * name: its saved profile's (its bio's), for `lang`.
+ */
+export function titleLang(
+  item: Pick<CaptureMember, 'kind' | 'name' | 'lang' | 'list'> & {
+    update?: unknown
+  },
+) {
+  return item.kind === 'profile' && item.name && !item.list && !item.update
+    ? item.lang
+    : undefined
+}
+
 /** A count the way the sheet reads it: 2.1 万 rather than 21000. */
 export function countText(n: number) {
   if (n < 10_000) return String(n)

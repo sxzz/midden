@@ -119,6 +119,7 @@ function view(
     ...(node.viewer ? { viewer: node.viewer } : {}),
     initial: initialOf(node),
     label,
+    ...(node.name && node.lang ? { lang: node.lang } : {}),
     caption: caption(label),
     ...extra,
   }

@@ -49,20 +49,24 @@ function caption(collection: Collection) {
         (entity) => entity.key === relation.target && isPostEntity(entity),
       )
       if (!target) return []
+      // A quoted post is kept by reference; its saved collection says what
+      // it is.
+      const own =
+        typeof target.data.text === 'string' && target.data.text.trim()
+          ? excerpt(target.data.text, 100)
+          : target.saved_text
+            ? excerpt(target.saved_text, 100)
+            : target.saved_summary
+              ? excerpt(target.saved_summary, 100)
+              : ''
+      const author = authorIdentity(authoredBy(graph, target.key))
       return [
         {
-          // A quoted post is kept by reference; its saved collection says
-          // what it is.
-          text:
-            (typeof target.data.text === 'string' && target.data.text.trim()
-              ? excerpt(target.data.text, 100)
-              : target.saved_text
-                ? excerpt(target.saved_text, 100)
-                : target.saved_summary
-                  ? excerpt(target.saved_summary, 100)
-                  : '') || '查看引用的帖子',
+          text: own || '查看引用的帖子',
+          lang: own ? target.saved_lang : undefined,
           // A tile is a button, so attribution stays plain text here.
-          author: authorLabel(authorIdentity(authoredBy(graph, target.key))),
+          author: authorLabel(author),
+          authorLang: author?.lang,
         },
       ]
     }) ?? []
@@ -72,12 +76,17 @@ function caption(collection: Collection) {
   ]
     .filter(Boolean)
     .join(' · ')
+  const view = present(collection)
+  const single = quoted.length === 1 ? quoted[0] : undefined
   return {
     labels,
-    text: excerpt(present(collection).body, 80),
+    text: excerpt(view.body, 80),
+    lang: view.lang,
     quote: quoted.map((entry) => entry.text).join('；'),
+    quoteLang: single?.lang,
     // Attribution only stays unambiguous while there is a single quote.
-    quoteAuthor: quoted.length === 1 ? quoted[0]!.author : '',
+    quoteAuthor: single?.author ?? '',
+    quoteAuthorLang: single?.authorLang,
   }
 }
 const revealed = shallowRef<string[]>([])

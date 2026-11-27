@@ -370,3 +370,87 @@ describe('Vapor collection rendering', () => {
     })
   })
 })
+
+describe('lang attributes', () => {
+  // A Japanese post by an account whose bio is in Chinese, quoting a saved
+  // English post.
+  const post = collection({
+    ...fixture,
+    assets: [],
+    text: '今日は猫の日です',
+    lang: 'ja',
+    graph: {
+      root: 'post',
+      relations: [
+        { source: 'post', target: 'author', type: 'authored_by' },
+        { source: 'post', target: 'quote', type: 'quoted' },
+      ],
+      entities: [
+        entity({ key: 'post', type: 'x.post', data: {} }),
+        entity({
+          key: 'author',
+          type: 'x.profile',
+          data: { name: '小明', username: 'ming' },
+          saved_collection_id: 'author-saved',
+          saved_lang: 'zh-Hans',
+        }),
+        entity({
+          key: 'quote',
+          type: 'x.post',
+          external_id: '9',
+          data: { text: 'The cat sat on the mat' },
+          saved_collection_id: 'quote-saved',
+          saved_lang: 'en',
+        }),
+      ],
+    },
+  })
+  it('marks the text, the author and a quoted post with their languages', () => {
+    let el = mount(CollectionPost, post)
+    expect(el.querySelector('.body')?.getAttribute('lang')).toBe('ja')
+    expect(el.querySelector('.name')?.getAttribute('lang')).toBe('zh-Hans')
+    expect(el.querySelector('.relation .text')?.getAttribute('lang')).toBe('en')
+    unmount()
+    el = mount(CollectionRow, post)
+    expect(el.querySelector('.preview')?.getAttribute('lang')).toBe('ja')
+    expect(el.querySelector('.name')?.getAttribute('lang')).toBe('zh-Hans')
+  })
+  it('leaves the attribute out where the language is unknown', () => {
+    const el = mount(CollectionPost, {
+      ...fixture,
+      graph: {
+        root: 'post',
+        relations: [{ source: 'post', target: 'author', type: 'authored_by' }],
+        entities: [
+          entity({ key: 'post', type: 'x.post', data: {} }),
+          entity({ key: 'author', type: 'x.profile', data: { name: '某人' } }),
+        ],
+      },
+    })
+    expect(el.querySelector('.body')).not.toBeNull()
+    expect(el.querySelector('[lang]')).toBeNull()
+  })
+  it("gives a profile's name and bio the bio's language", () => {
+    const el = mount(CollectionPost, {
+      ...fixture,
+      lang: 'zh-Hant',
+      graph: {
+        root: 'p',
+        relations: [],
+        entities: [
+          entity({
+            key: 'p',
+            type: 'x.profile',
+            data: {
+              name: '小美',
+              username: 'mei',
+              metadata: { description: '台灣插畫家' },
+            },
+          }),
+        ],
+      },
+    })
+    expect(el.querySelector('.body')?.getAttribute('lang')).toBe('zh-Hant')
+    expect(el.querySelector('.name')?.getAttribute('lang')).toBe('zh-Hant')
+  })
+})

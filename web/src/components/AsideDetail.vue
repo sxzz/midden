@@ -64,6 +64,13 @@ function line(entity: Entity) {
   const username = asText(entity.data.username)
   return [name, username && `@${username}`].filter(Boolean).join(' ') || '账号'
 }
+/** The line's language: its saved collection's, unless the line is ours. */
+function lineLang(entity: Entity) {
+  const own = isPostEntity(entity)
+    ? asText(entity.data.text)
+    : asText(entity.data.name) || asText(entity.data.username)
+  return own ? entity.saved_lang : undefined
+}
 const labels: Record<string, string> = {
   quoted: '引用',
   reposted: '转发',
@@ -83,6 +90,7 @@ const related = computed(() => {
             label: labels[relation.type]!,
             id: entity.saved_collection_id,
             text: line(entity),
+            lang: lineLang(entity),
           },
         ]
       : []
@@ -95,6 +103,7 @@ const related = computed(() => {
             label: relation.type === 'reposted' ? '转发了它' : '引用了它',
             id: relation.entity.saved_collection_id,
             text: line(relation.entity),
+            lang: lineLang(relation.entity),
           },
         ]
       : [],
@@ -143,7 +152,9 @@ const related = computed(() => {
         :href="author.href"
       >
         <span class="row-label">作者</span>
-        <span class="row-text">{{ authorLabel(author) }}</span>
+        <span class="row-text" :lang="author.lang">{{
+          authorLabel(author)
+        }}</span>
       </component>
       <AppLink
         v-for="item in related"
@@ -152,7 +163,7 @@ const related = computed(() => {
         :to="collectionRoute(item.id)"
       >
         <span class="row-label">{{ item.label }}</span>
-        <span class="row-text">{{ item.text }}</span>
+        <span class="row-text" :lang="item.lang">{{ item.text }}</span>
       </AppLink>
     </section>
     <section class="aside-box" aria-label="采集信息">

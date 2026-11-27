@@ -166,7 +166,7 @@ const warnings = computed(() =>
           class="avatar"
           :src="previewURL(avatarAssets[0]!)"
           alt=""
-        /><span v-else class="avatar initials">{{
+        /><span v-else class="avatar initials" :lang="view.nameLang">{{
           view.name.slice(0, 1)
         }}</span></AppLink
       >
@@ -187,21 +187,25 @@ const warnings = computed(() =>
         class="avatar"
         :src="previewURL(avatarAssets[0]!)"
         alt=""
-      /><span v-else class="avatar initials" aria-hidden="true">{{
-        view.name.slice(0, 1)
-      }}</span>
+      /><span
+        v-else
+        class="avatar initials"
+        aria-hidden="true"
+        :lang="view.nameLang"
+        >{{ view.name.slice(0, 1) }}</span
+      >
       <a
         v-if="view.profileCollectionId"
         class="identity profile-link"
         :href="collectionHref(view.profileCollectionId)"
       >
-        <strong class="name"
+        <strong class="name" :lang="view.nameLang"
           >{{ view.name }}<LockIcon v-if="view.locked" class="lock"
         /></strong>
         <small v-if="view.handle" class="handle">@{{ view.handle }}</small>
       </a>
       <div v-else class="identity">
-        <strong class="name"
+        <strong class="name" :lang="view.nameLang"
           >{{ view.name }}<LockIcon v-if="view.locked" class="lock"
         /></strong>
         <small v-if="view.handle" class="handle">@{{ view.handle }}</small>
@@ -217,7 +221,7 @@ const warnings = computed(() =>
       </button>
     </header>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
-    <p v-if="view.body" class="body">
+    <p v-if="view.body" class="body" :lang="view.lang">
       <template v-for="(part, index) in bodyParts" :key="index"
         ><a v-if="part.href" :href="part.href" class="mention">{{
           part.text

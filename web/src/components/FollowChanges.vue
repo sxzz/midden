@@ -98,7 +98,11 @@ const blurred = (account: FollowAccount) =>
                       />
                     </span>
                     <span class="names">
-                      <span class="name">{{ accountName(account) }}</span>
+                      <span
+                        class="name"
+                        :lang="account.name ? account.lang : undefined"
+                        >{{ accountName(account) }}</span
+                      >
                       <span
                         v-if="account.name && account.username"
                         class="handle"
@@ -115,7 +119,11 @@ const blurred = (account: FollowAccount) =>
                       />
                     </span>
                     <span class="names">
-                      <span class="name">{{ accountName(account) }}</span>
+                      <span
+                        class="name"
+                        :lang="account.name ? account.lang : undefined"
+                        >{{ accountName(account) }}</span
+                      >
                       <span
                         v-if="account.name && account.username"
                         class="handle"

@@ -56,6 +56,7 @@ const shared = computed(() => {
   const shown = own && present(own)
   return {
     name: shown?.name || detailTitle(id),
+    lang: shown?.name ? shown.nameLang : undefined,
     facts: [detailTitle(id), shown?.handle && `@${shown.handle}`],
   }
 })
@@ -64,7 +65,7 @@ const shared = computed(() => {
 <template>
   <SidebarFrame :search="search" @search="find">
     <section v-if="shared" class="aside-box" aria-label="公开分享">
-      <h2>{{ shared.name }}</h2>
+      <h2 :lang="shared.lang">{{ shared.name }}</h2>
       <p class="aside-facts">
         {{ shared.facts.filter(Boolean).join(' · ') }}
       </p>

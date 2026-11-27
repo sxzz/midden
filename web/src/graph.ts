@@ -43,6 +43,8 @@ export interface GraphNodeView {
   initial: string
   /** The name in the card and the list. */
   label: string
+  /** Its language, when the label is the account's own name. */
+  lang?: string
   /** The name under the avatar, cut to about an avatar's width. */
   caption: string
 }
@@ -135,6 +137,7 @@ export function graphModel(
         : {}),
       initial: initialOf(node),
       label,
+      ...(node.name && node.lang ? { lang: node.lang } : {}),
       caption: caption(label),
     }
   })

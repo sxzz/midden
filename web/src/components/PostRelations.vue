@@ -26,6 +26,7 @@ function fillAccount(first?: RelationAuthor, second?: RelationAuthor) {
     avatar: first.avatar ?? second.avatar,
     href: first.href ?? second.href,
     protected: first.protected || second.protected,
+    lang: first.lang ?? second.lang,
   }
 }
 const props = defineProps<{
@@ -83,6 +84,8 @@ const relations = computed(() => {
       icon: string
       label: string
       text: string
+      /** The text's language, when it is the saved post's own. */
+      lang?: string
       href: string
       external: boolean
       author?: RelationAuthor
@@ -177,6 +180,7 @@ const relations = computed(() => {
       text: postLink
         ? text || `帖子 ${externalId}`
         : name || (handle ? `@${handle}` : `账号 ${externalId}`),
+      lang: postLink && text ? entity.saved_lang : undefined,
       href,
       external,
     })
@@ -243,9 +247,14 @@ const groups = computed(() => {
               loading="lazy"
               referrerpolicy="no-referrer"
             />
-            <span v-if="relation.author.name" class="author-name">{{
-              relation.author.name
-            }}</span><LockIcon v-if="relation.author.protected" class="lock" />
+            <span
+              v-if="relation.author.name"
+              class="author-name"
+              :lang="relation.author.lang"
+              >{{ relation.author.name }}</span><LockIcon
+              v-if="relation.author.protected"
+              class="lock"
+            />
             <span v-if="relation.author.handle" class="author-handle"
               >@{{ relation.author.handle }}</span
             >
@@ -273,14 +282,21 @@ const groups = computed(() => {
               loading="lazy"
               referrerpolicy="no-referrer"
             />
-            <span v-if="relation.account.name" class="author-name">{{
-              relation.account.name
-            }}</span><LockIcon v-if="relation.account.protected" class="lock" />
+            <span
+              v-if="relation.account.name"
+              class="author-name"
+              :lang="relation.account.lang"
+              >{{ relation.account.name }}</span><LockIcon
+              v-if="relation.account.protected"
+              class="lock"
+            />
             <span v-if="relation.account.handle" class="author-handle"
               >@{{ relation.account.handle }}</span
             >
           </span>
-          <span v-else class="text">{{ relation.text }}</span>
+          <span v-else class="text" :lang="relation.lang">{{
+            relation.text
+          }}</span>
         </a>
         <MediaThumbs
           v-if="relation.assets.length"
