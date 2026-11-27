@@ -507,6 +507,49 @@ it('opens 账号 when it is the first tab, and heads it when it is the only one'
   expect(only.el.querySelector('h2')?.textContent).toBe('账号')
 })
 
+it('says why a protected account has no posts, as a note rather than a failure, and keeps 重试本页', async () => {
+  const note = '锁推账号，采集账号无权查看帖子（未关注或请求未通过）'
+  const { el, tabs } = mount(
+    () =>
+      ({
+        ...detail({ total: 0, complete: 0, partial: 0, failed: 0 }),
+        error: note,
+        pages: { more: false, more_1000: false, capped: false, failed: true },
+        profiles: [
+          {
+            collection_id: 'profile',
+            url: 'https://x.com/i/user/1',
+            handle: 'Hang_Seng_Bank',
+            state: 'complete',
+            error: note,
+            posts: {
+              total: 0,
+              finished: 0,
+              pending: 0,
+              done: true,
+              capped: false,
+              retryable: 0,
+              retry_id: 'posts:record',
+              pages: [],
+            },
+          },
+        ],
+      }) as never,
+    {},
+  )
+  await vi.waitFor(() => expect(el.textContent).toContain(note))
+  expect(tabs()).toEqual([])
+  expect(el.textContent).toContain('@Hang_Seng_Bank资料 ✓ · 帖子 0')
+  expect(el.querySelector('.state')?.textContent).toContain('已完成')
+  expect(el.textContent).not.toContain('失败原因')
+  expect(el.textContent).not.toContain('帖子获取中断')
+  const labels = [...el.querySelectorAll('button')].map((b) =>
+    b.textContent!.trim(),
+  )
+  expect(labels).toContain('重试本页')
+  expect(labels).toContain('重新采集')
+})
+
 it("lists an update's skipped items one by one, each with why, among the problems", async () => {
   const skipped = (id: string, error: string, saved: boolean) => ({
     ...member(id, 'skipped'),

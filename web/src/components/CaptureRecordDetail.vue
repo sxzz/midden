@@ -148,8 +148,10 @@ const reasons = computed(() => {
     const text = reason?.trim()
     if (text) found.set(text, (found.get(text) || 0) + count)
   }
-  // Saying again what the source is known to be is no failure.
-  if (!r.source_state) add(r.error)
+  // Saying again what the source is known to be is no failure, nor is a
+  // complete capture's note (a protected account's posts it may not see),
+  // which its profile shows.
+  if (!r.source_state && r.state !== 'complete') add(r.error)
   // A collection's reasons already count its members' media and warnings.
   if (r.members) for (const item of r.reasons) add(item.reason, item.count)
   else {
