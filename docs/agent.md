@@ -109,6 +109,7 @@ GET /agent/v1/posts?q=猫&platform=x&saved_within=30d&size=2
         "name": "Alice"
       },
       "text": "猫が…",
+      "lang": "ja",
       "published_at": "2026-11-20T10:00:00.000Z",
       "saved_at": "…",
       "updated_at": "…",
@@ -134,6 +135,7 @@ GET /agent/v1/posts?q=猫&platform=x&saved_within=30d&size=2
 - `parsed` (with `q`) is the query as it was read, in canonical form (section 6); `applied` is the filter actually used, in canonical form: `q` as parsed, lists sorted, handles resolved to account keys, tags with ids and names, defaults (`sort`, `order`) filled in. Check them against what you meant.
 - `total` comes with the first page only. `next_cursor` comes with `has_more: true` and only works with the same query (the same `parsed`), filter, sort and folder (`size` and `view` may change).
 - Compact items cut `text` and `note` at 280 characters (`text_truncated: true`), give media as counts, and tags as names.
+- `lang` is the language detected from the text (section 9), as `lang:` takes it; absent when unknown. A quoted or reposted post has one when it is saved.
 - Full items add the whole text, `media` (each with `kind`, `state`, `url`, `thumbnail_url`, `alt_text`, `sensitive`, `width`/`height`), `edited_at`, `mentions`, `reposted_by` (accounts whose timelines show it reposted), and tags as `{id, name}`.
 - `media[].url` is the original: a public CDN address, or a link this server signed, valid for at least 12 hours. `thumbnail_url` is a smaller image. `state: "removed"` means the owner deleted the file to save space; the thumbnail may remain.
 - Errors: `400 invalid_request`, `400 query_invalid`, `400 cursor_mismatch`, `404 not_found` (unknown `folder`, `rel_of`); an `author` the archive has no account for selects nothing, `503 busy`, `503 query_timeout`.
@@ -153,6 +155,7 @@ Search accounts: the same parameters as `GET /posts` (no `post_type`), plus `sor
   "handle": "alice",
   "name": "Alice",
   "bio": "…",
+  "lang": "en",
   "followers": 1200,
   "following": 300,
   "posts": 5400,
@@ -164,7 +167,7 @@ Search accounts: the same parameters as `GET /posts` (no `post_type`), plus `sor
 }
 ```
 
-Full accounts add `likes`, `media_count`, `location`, `website`, `joined`, `avatar_url`, `banner_url` and `pinned_posts` (platform ids). Counts are those of the newest capture.
+`lang` is the bio's language (absent when unknown or there is none). Full accounts add `likes`, `media_count`, `location`, `website`, `joined`, `avatar_url`, `banner_url` and `pinned_posts` (platform ids). Counts are those of the newest capture.
 
 ### GET /agent/v1/aggregate
 
@@ -204,7 +207,7 @@ Without a `type:` term the query counts posts: `type:post` is implied, and `pars
 | `media`                        | `image`, `video`, `image+video`, `other`, `none`.                                        |
 | `tag`                          | The owner's tag name (with `id`); an account's tag counts for its posts.                 |
 | `hashtag`, `mention`, `domain` | `猫`, `x:alice`, `youtube.com`, as `#`, `mentions:` and `domain:` match them.            |
-| `lang`, `platform`             | The detected language (`und` when unknown); `x` or `instagram`.                          |
+| `lang`, `platform`             | The detected language (`zh-Hans`, `ja`; `und` when unknown); `x` or `instagram`.         |
 
 - Buckets other than times are ordered by `count`, most first. `limit` keeps the first ones; `truncated` is `true` when there were more.
 - `first` and `last` are the earliest and latest publication times in the bucket (an account's is when it was captured); `samples` are up to 3 ids, newest first, to read with `POST /posts/batch` or `/accounts/batch`.
@@ -501,30 +504,30 @@ Syntax:
 - `"two words"` is a phrase: those words, together, in that order.
 - `key:value` is a term; a value with spaces goes in quotes: `tag:"to read"`. Anything else with a colon (`https://x.com/a#b`, `10:30`, `Re:ゼロ`) is a word, as are runs of Chinese or Japanese.
 
-| Term                                                        | Selects                                                                                                                                                                                                                                         |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `word`                                                      | Keyword search (section 9): names, handles, text, quoted text, alt text, bios. The words of the top level rank the results (`sort=relevance`); words under `OR` or `-` only match, with no near misses.                                         |
-| `"phrase"`                                                  | The words together, in this order, in any of those.                                                                                                                                                                                             |
-| `#tag`                                                      | Posts with the hashtag (accounts: in the bio). Case and full-width forms do not matter.                                                                                                                                                         |
-| `from:@h`                                                   | Posts by the account: `@h` (any platform), `x:@h`, an account key or a saved account's id. Under any handle it had.                                                                                                                             |
-| `mentions:@h`                                               | Posts that mention it (`x:@h` for one platform).                                                                                                                                                                                                |
-| `quotes:<post id or @h>`                                    | Posts that quote that post, or any post by `@h`.                                                                                                                                                                                                |
-| `reposts:<post id or @h>`                                   | Posts and accounts that reposted that post, or a post by `@h`.                                                                                                                                                                                  |
-| `reposted-by:@h`                                            | Posts `@h` reposted: on its timeline, or by a repost of its own. `@h` as for `from:`.                                                                                                                                                           |
-| `rel:following:@a` `rel:followers:@a` `rel:mutual:@a`       | Accounts `@a` follows, that follow `@a`, or both, and their posts (as `rel_of` and `rel`).                                                                                                                                                      |
-| `is:original` `is:quote` `is:repost`                        | The post type (as `post_type`). The archive does not record replies, so there is no `is:reply`.                                                                                                                                                 |
-| `has:image` `has:video` `has:media` `has:link`              | Posts with images, videos, either, or a link.                                                                                                                                                                                                   |
-| `domain:youtube.com`                                        | Posts linking to the site: its registrable domain, so `music.youtube.com` and `www.youtube.com` are `youtube.com`.                                                                                                                              |
-| `lang:ja`                                                   | The language detected from the text: `ja`, `zh`, `ko`, `en`, `es`, `fr`, `de`, `pt`, `it`, `id`, `nl`, `tr`, `ru`, `uk`, `ar`, `fa`, `he`, `el`, `th`, `hi`. Latin-script languages are told by their small words; short posts often have none. |
-| `platform:x` `platform:instagram`                           | As `platform`.                                                                                                                                                                                                                                  |
-| `since:2026-01-01` `until:2026-02-01`                       | Published from that day on, or before that day (so these two are January), in `tz`, UTC by default.                                                                                                                                             |
-| `within:30d` `within:12h`                                   | Published in the last 30 days (today included) or 12 hours.                                                                                                                                                                                     |
-| `saved:2026-11-01` `saved:7d` `saved-since:` `saved-until:` | Saved by the owner on that day, in the last 7 days (or hours: `12h`), from that day on, or before it.                                                                                                                                           |
-| `tag:<name or id>`                                          | The owner's tags; an account's tag counts for its posts.                                                                                                                                                                                        |
-| `folder:<id or name>`                                       | What the folder selects. Alone at the top level, the search starts from it, as `folder=` does.                                                                                                                                                  |
-| `state:deleted` `state:suspended`                           | As `source_state`.                                                                                                                                                                                                                              |
-| `type:post` `type:profile`                                  | Posts or accounts. `GET /aggregate` counts posts unless its query names a type; `/posts` and `/accounts` hold one kind already.                                                                                                                 |
-| `sensitive:yes` `sensitive:no`                              | As `sensitive`.                                                                                                                                                                                                                                 |
+| Term                                                        | Selects                                                                                                                                                                                                                                   |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `word`                                                      | Keyword search (section 9): names, handles, text, quoted text, alt text, bios. The words of the top level rank the results (`sort=relevance`); words under `OR` or `-` only match, with no near misses.                                   |
+| `"phrase"`                                                  | The words together, in this order, in any of those.                                                                                                                                                                                       |
+| `#tag`                                                      | Posts with the hashtag (accounts: in the bio). Case and full-width forms do not matter.                                                                                                                                                   |
+| `from:@h`                                                   | Posts by the account: `@h` (any platform), `x:@h`, an account key or a saved account's id. Under any handle it had.                                                                                                                       |
+| `mentions:@h`                                               | Posts that mention it (`x:@h` for one platform).                                                                                                                                                                                          |
+| `quotes:<post id or @h>`                                    | Posts that quote that post, or any post by `@h`.                                                                                                                                                                                          |
+| `reposts:<post id or @h>`                                   | Posts and accounts that reposted that post, or a post by `@h`.                                                                                                                                                                            |
+| `reposted-by:@h`                                            | Posts `@h` reposted: on its timeline, or by a repost of its own. `@h` as for `from:`.                                                                                                                                                     |
+| `rel:following:@a` `rel:followers:@a` `rel:mutual:@a`       | Accounts `@a` follows, that follow `@a`, or both, and their posts (as `rel_of` and `rel`).                                                                                                                                                |
+| `is:original` `is:quote` `is:repost`                        | The post type (as `post_type`). The archive does not record replies, so there is no `is:reply`.                                                                                                                                           |
+| `has:image` `has:video` `has:media` `has:link`              | Posts with images, videos, either, or a link.                                                                                                                                                                                             |
+| `domain:youtube.com`                                        | Posts linking to the site: its registrable domain, so `music.youtube.com` and `www.youtube.com` are `youtube.com`.                                                                                                                        |
+| `lang:ja`                                                   | The language detected from the text (section 9): a code such as `ja`, `en`, `ko`, `es`, with the script for Chinese (`zh-Hans`, `zh-Hant`; `zh` when no character tells). `lang:zh` takes all three. Short and mixed text often has none. |
+| `platform:x` `platform:instagram`                           | As `platform`.                                                                                                                                                                                                                            |
+| `since:2026-01-01` `until:2026-02-01`                       | Published from that day on, or before that day (so these two are January), in `tz`, UTC by default.                                                                                                                                       |
+| `within:30d` `within:12h`                                   | Published in the last 30 days (today included) or 12 hours.                                                                                                                                                                               |
+| `saved:2026-11-01` `saved:7d` `saved-since:` `saved-until:` | Saved by the owner on that day, in the last 7 days (or hours: `12h`), from that day on, or before it.                                                                                                                                     |
+| `tag:<name or id>`                                          | The owner's tags; an account's tag counts for its posts.                                                                                                                                                                                  |
+| `folder:<id or name>`                                       | What the folder selects. Alone at the top level, the search starts from it, as `folder=` does.                                                                                                                                            |
+| `state:deleted` `state:suspended`                           | As `source_state`.                                                                                                                                                                                                                        |
+| `type:post` `type:profile`                                  | Posts or accounts. `GET /aggregate` counts posts unless its query names a type; `/posts` and `/accounts` hold one kind already.                                                                                                           |
+| `sensitive:yes` `sensitive:no`                              | As `sensitive`.                                                                                                                                                                                                                           |
 
 Limits, so that one query cannot read everything many times over: at most 16 terms; operators (AND, OR, `-`) nested at most 4 deep; at most 8 alternatives in one `OR`; values of at most 64 characters. A query of nothing but exclusions (`-#ad`) needs something to start from: a term that is not excluded, or the `author`, `tag`, `folder`, `saved_*`, `rel_of` or `related_to` parameters.
 
@@ -679,7 +682,7 @@ Rename it or replace its filter: `{"name": "…"}`, `{"filter": {…}}`.
 ## 9. Data caveats
 
 - **Search** (the words of `q`) folds case, full-width forms and traditional Chinese to simplified on both sides, so `貓` finds `猫`. Words are split at spaces and every word must appear somewhere (name, text, quoted text, alt text, bio); a whole phrase or an exact name ranks higher. Three or more characters match anywhere (trigrams); one or two Chinese characters match as characters and pairs, so `猫` and `猫猫` work. One or two Latin letters (`ai`) are matched by reading every row: slower. When fewer than 20 results match, near misses (half of the trigrams) are added at the end, for the words of the top level.
-- **Hashtags, links and languages** are read from the text of each post (an account's bio and website); `lang:` is detected, not given by the platform. Posts saved before these existed are filled in the background, so for a while after an update of the archive a few may be missing.
+- **Hashtags, links and languages** are read from the text of each post (an account's bio and website); `lang:` is detected, not given by the platform: kana is Japanese, Hangul Korean, Han characters alone Chinese, and the rest goes to a language identification model (fastText, 176 languages). Text under a few letters, or that the model is unsure of, has none. Posts saved before these existed (or before the detection last changed) are filled in the background, so for a while after an update of the archive a few may be missing or old.
 - **Times are observations.** `updated_at`, `observed_at`, history and relation changes say when the archive saw something, not when it happened on the platform. A change happened between the previous observation and this one.
 - **Metrics are as captured**: the counts the platform showed at each capture. Gaps between captures can be long; counts do not move between them.
 - **Relation lists may be incomplete.** Lists over 5000 accounts are not read; the platform leaves out some accounts; a read can stop part way. Check `lists` (`complete_at`, `partial_at`). Follows also come from other accounts' lists.
