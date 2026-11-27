@@ -201,12 +201,12 @@ function submit() {
   background: var(--page);
   color: var(--subtle);
 }
-.search svg {
+.search:not(.query-search) > svg {
   position: absolute;
   left: 16px;
   pointer-events: none;
 }
-.search input {
+.search:not(.query-search) input {
   width: 100%;
   height: 42px;
   padding: 0 16px 0 44px;
@@ -216,12 +216,12 @@ function submit() {
   color: var(--text);
   font-size: 15px;
 }
-.search input:focus {
+.search:not(.query-search) input:focus {
   outline: none;
   border-color: var(--link);
   background: var(--page);
 }
-.search input::placeholder {
+.search:not(.query-search) input::placeholder {
   color: var(--subtle);
 }
 .content {

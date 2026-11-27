@@ -4,6 +4,7 @@ import {
   composeQuery,
   hasDates,
   hasTerms,
+  highlight,
   KEYS,
   readQuery,
   searchesWords,
@@ -221,4 +222,38 @@ it('names authors by the handle that names them alone, and reads it back', () =>
   })
   // A handle the box did not write is the query's.
   expect(split('from:@bob')).toEqual({ controls: {}, q: 'from:@bob' })
+})
+
+it('colours a query by its grammar, and a term still being typed by its shape', () => {
+  const kinds = (text: string) =>
+    highlight(text).map((t) => `${t.kind}:${t.text}`)
+  expect(kinds('-(from:@alice OR #猫) "两个 词" cat')).toEqual([
+    'op:-',
+    'op:(',
+    'key:from:',
+    'value:@alice',
+    'space: ',
+    'op:OR',
+    'space: ',
+    'key:#',
+    'value:猫',
+    'op:)',
+    'space: ',
+    'word:"两个 词"',
+    'space: ',
+    'word:cat',
+  ])
+  expect(kinds('tag:"to read" has:')).toEqual([
+    'key:tag:',
+    'value:"to read"',
+    'space: ',
+    'key:has:',
+  ])
+  // Every piece is there, in order.
+  for (const text of ['a OR (b', 'from:@al', 'x - y', '#ta g'])
+    expect(
+      highlight(text)
+        .map((t) => t.text)
+        .join(''),
+    ).toBe(text)
 })

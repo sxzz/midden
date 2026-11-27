@@ -116,9 +116,7 @@ test.describe('a composite field', () => {
     })
   }
 
-  test('the search box rings as one, its buttons from the keyboard only', async ({
-    page,
-  }) => {
+  test('the search box rings as one', async ({ page }) => {
     await mockDesktop(page)
     await page.goto('/app/')
     const field = page.locator('main .query .field')
@@ -126,10 +124,7 @@ test.describe('a composite field', () => {
     const bar = field.locator('xpath=..')
     expect((await ringOf(field)).width).toBe(0)
     expect((await ringOf(bar)).width).toBeGreaterThan(0)
-    // A click on 搜索 rings neither it nor the box.
-    const submit = bar.getByRole('button', { name: '搜索' })
-    await submit.click()
+    await field.blur()
     expect((await ringOf(bar)).width).toBe(0)
-    expect((await ringOf(submit)).width).toBe(0)
   })
 })

@@ -42,7 +42,7 @@ async function choose(el: HTMLElement, label: string, value: string) {
   await nextTick()
 }
 const ACCOUNTS = 'entity_type=x.profile%2Cinstagram.profile'
-/** Type a query into the owner's box and press 搜索. */
+/** Type a query into the owner's box and press Enter. */
 async function searchFor(el: HTMLElement, q: string) {
   const input = el.querySelector<HTMLInputElement>(
     'input[aria-label="搜索或筛选"]',
@@ -50,7 +50,9 @@ async function searchFor(el: HTMLElement, q: string) {
   input.value = q
   input.dispatchEvent(new Event('input', { bubbles: true }))
   await nextTick()
-  el.querySelector<HTMLButtonElement>('.query .submit')!.click()
+  input.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+  )
   await nextTick()
 }
 

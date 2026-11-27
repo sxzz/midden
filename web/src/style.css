@@ -276,3 +276,23 @@ dialog:focus {
     margin: auto;
   }
 }
+
+/* A card that floats over the page, under the box it belongs to: the
+   query box's completions and its terms (`popover`, placed by
+   useAnchoredPopover). */
+.query-card {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 4px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--separator);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--text);
+  box-shadow:
+    0 8px 24px color-mix(in srgb, var(--text) 16%, transparent),
+    0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+}

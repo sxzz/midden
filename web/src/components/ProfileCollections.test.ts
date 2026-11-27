@@ -321,7 +321,9 @@ it('shows the total beside the list, counted per filter and not per page', async
   input.value = 'cat'
   input.dispatchEvent(new Event('input', { bubbles: true }))
   await nextTick()
-  el.querySelector<HTMLButtonElement>('.query .submit')!.click()
+  input.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+  )
   await vi.waitFor(() => expect(counts()).toHaveLength(2))
   expect(counts()[1]!.get('q')).toBe('cat')
   expect(counts()[1]!.has('cursor')).toBe(false)

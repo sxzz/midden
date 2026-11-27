@@ -373,6 +373,97 @@ export function splitQuery(
   return { controls: c, q }
 }
 
+// --- Highlighting -------------------------------------------------------------
+
+/** A piece of a query as it is shown: what part of the grammar it is. */
+export interface Token {
+  text: string
+  /** `key`: `from:`, `#`; `value`: what follows; `op`: OR, -, ( ) and quotes. */
+  kind: 'key' | 'value' | 'op' | 'word' | 'space'
+}
+
+const OPERATOR = /^(?:OR\b|[-()])/
+const SPACE_RUN = /^\s+/
+const LEX =
+  /(\s+)|(OR\b|[-()])|("(?:[^"]|"")*"?)|([#＃])([^\s()]*)|([a-z][a-z-]*:)("(?:[^"]|"")*"?|[^\s()]*)|([^\s()]+)/gy
+
+/** Tokens by the shapes of the grammar, for text the parser cannot read. */
+function lex(text: string): Token[] {
+  const out: Token[] = []
+  LEX.lastIndex = 0
+  let m: RegExpExecArray | null
+  while (LEX.lastIndex < text.length && (m = LEX.exec(text))) {
+    if (m[1]) out.push({ text: m[1], kind: 'space' })
+    else if (m[2]) out.push({ text: m[2], kind: 'op' })
+    else if (m[3]) out.push({ text: m[3], kind: 'word' })
+    else if (m[4]) {
+      out.push({ text: m[4], kind: 'key' })
+      if (m[5]) out.push({ text: m[5], kind: 'value' })
+    } else if (m[6]) {
+      out.push({ text: m[6], kind: 'key' })
+      if (m[7]) out.push({ text: m[7], kind: 'value' })
+    } else if (m[8]) out.push({ text: m[8], kind: 'word' })
+  }
+  if (LEX.lastIndex < text.length)
+    out.push({ text: text.slice(LEX.lastIndex), kind: 'word' })
+  return out
+}
+
+/**
+ * A query in pieces to colour: by the parser's own terms where it reads
+ * (each term's span, its key up to the colon), and by their shapes where
+ * it does not (a term still being typed).
+ */
+export function highlight(text: string): Token[] {
+  const { node, error } = readQuery(text)
+  if (error || !node) return lex(text)
+  const out: Token[] = []
+  let at = 0
+  /** What lies between terms: spaces and operators. */
+  const between = (end: number) => {
+    while (at < end) {
+      const rest = text.slice(at, end)
+      const space = SPACE_RUN.exec(rest)
+      const op = OPERATOR.exec(rest)
+      const piece = space?.[0] ?? op?.[0] ?? rest[0]!
+      out.push({ text: piece, kind: space ? 'space' : 'op' })
+      at += piece.length
+    }
+  }
+  for (const leaf of leavesOf(node).toSorted((a, b) => a.start - b.start)) {
+    between(leaf.start)
+    const term = text.slice(leaf.start, leaf.end)
+    switch (leaf.type) {
+      case 'atom': {
+        const colon = term.indexOf(':') + 1
+        out.push({ text: term.slice(0, colon), kind: 'key' })
+        if (term.length > colon)
+          out.push({ text: term.slice(colon), kind: 'value' })
+
+        break
+      }
+      case 'hashtag': {
+        out.push(
+          { text: term.slice(0, 1), kind: 'key' },
+          { text: term.slice(1), kind: 'value' },
+        )
+
+        break
+      }
+      case 'phrase': {
+        out.push({ text: term, kind: 'word' })
+
+        break
+      }
+      default:
+        out.push({ text: term, kind: 'word' })
+    }
+    at = leaf.end
+  }
+  between(text.length)
+  return out
+}
+
 // --- Completion ---------------------------------------------------------------
 
 /** Values a key takes from a short list, as the help lists them. */

@@ -365,10 +365,201 @@ test('an author picked in the controls is @handle in the box, its key in the lis
   await expect
     .poll(() => seen.lists.at(-1)?.getAll('author').toSorted())
     .toEqual([CAT, TWIN])
-  // Typed back, the handle is the control's again, not the query's.
+  // Typed back, the handle is the control's again, not the query's. The
+  // handles offered meanwhile are put away first: Enter would take one.
   await box(page).fill('cat from:@cat')
+  await expect(
+    page.getByRole('listbox', { name: '补全' }).getByRole('option').first(),
+  ).toBeVisible()
+  await box(page).press('Escape')
+  await expect(page.getByRole('listbox', { name: '补全' })).toBeHidden()
   await box(page).press('Enter')
   await expect.poll(() => seen.lists.at(-1)?.getAll('author')).toEqual([CAT])
   expect(seen.lists.at(-1)?.get('q')).toBe('cat')
   await expect(box(page)).toHaveValue('cat from:@cat')
 })
+
+/** Whether a box lies inside the window. */
+function inWindow(
+  page: Page,
+  box: { x: number; y: number; width: number; height: number },
+) {
+  const { width, height } = page.viewportSize()!
+  return (
+    box.x >= 0 &&
+    box.y >= 0 &&
+    box.x + box.width <= width + 0.5 &&
+    box.y + box.height <= height + 0.5
+  )
+}
+
+/** A card's own surface: a background and a 1 px border. */
+const card = (el: Element) => {
+  const style = getComputedStyle(el)
+  return {
+    background: style.backgroundColor !== 'rgba(0, 0, 0, 0)',
+    border: style.borderTopWidth,
+    radius: style.borderTopLeftRadius,
+  }
+}
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`the terms open as a card under the box, and put one in (${scheme})`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: scheme })
+    await mock(page)
+    await page.goto('/app/')
+    await expect(page.getByText('第 1 只猫')).toBeVisible()
+    await box(page).fill('cat')
+    const toggle = page.getByRole('button', { name: '查询语法' })
+    await toggle.click()
+    const help = page.getByRole('dialog', { name: '查询语法' })
+    await expect(help).toBeVisible()
+    expect(inWindow(page, (await help.boundingBox())!)).toBe(true)
+    expect(await help.evaluate(card)).toEqual({
+      background: true,
+      border: '1px',
+      radius: '12px',
+    })
+    // Under the box, by group, each example on one line.
+    const bar = (await page.locator('.query .bar').boundingBox())!
+    expect((await help.boundingBox())!.y).toBeGreaterThanOrEqual(
+      bar.y + bar.height,
+    )
+    await expect(help.getByRole('heading')).toHaveText([
+      '组合',
+      '人和关系',
+      '内容',
+      '时间',
+      '整理和状态',
+    ])
+    const row = help.getByRole('button', { name: /^rel:following:@alice/ })
+    const line = await row.evaluate((el) => el.getBoundingClientRect().height)
+    expect(line).toBeLessThan(40)
+    // Keys tinted, values grey as the descriptions, operators apart.
+    const colours = await help.evaluate((el) => {
+      const colour = (selector: string) =>
+        getComputedStyle(el.querySelector(selector)!).color
+      return {
+        key: colour('.token-key'),
+        value: colour('.token-value'),
+        op: colour('.token-op'),
+        meaning: colour('.meaning'),
+      }
+    })
+    expect(colours.value).toBe(colours.meaning)
+    expect(new Set(Object.values(colours)).size).toBe(3)
+    // It scrolls inside, not the page.
+    const scrolled = await help.evaluate((el) => {
+      el.scrollTop = 10_000
+      return { top: el.scrollTop, more: el.scrollHeight > el.clientHeight }
+    })
+    expect(scrolled.more).toBe(true)
+    expect(scrolled.top).toBeGreaterThan(0)
+    // Esc closes it, and so does its button.
+    await page.keyboard.press('Escape')
+    await expect(help).toBeHidden()
+    await toggle.click()
+    await expect(help).toBeVisible()
+    await toggle.click()
+    await expect(help).toBeHidden()
+
+    // A row puts its key in at the caret, and its values are offered.
+    await toggle.click()
+    const offered = page.waitForResponse((r) =>
+      r.url().includes('/v1/query/suggest'),
+    )
+    await help.getByRole('button', { name: /^from:@alice/ }).click()
+    await expect(help).toBeHidden()
+    await expect(box(page)).toHaveValue('cat from:')
+    // The field has the caret (by the document's own record: the window
+    // may not be the browser's focused one).
+    await expect
+      .poll(() => box(page).evaluate((el) => document.activeElement === el))
+      .toBe(true)
+    await offered
+    await expect(
+      page.getByRole('listbox', { name: '补全' }).getByRole('option', {
+        name: /@alice/,
+      }),
+    ).toBeVisible()
+  })
+
+  test(`completions come as a card under the text, with what each means (${scheme})`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: scheme })
+    await mock(page)
+    await page.goto('/app/')
+    await expect(page.getByText('第 1 只猫')).toBeVisible()
+    await box(page).click()
+    await page.keyboard.type('ta')
+    const options = page.getByRole('listbox', { name: '补全' })
+    const tag = options.getByRole('option', { name: /^tag:/ })
+    await expect(tag).toBeVisible()
+    await expect(tag.locator('.option-detail')).toHaveText('标签')
+    expect(await options.evaluate(card)).toEqual({
+      background: true,
+      border: '1px',
+      radius: '12px',
+    })
+    expect(inWindow(page, (await options.boundingBox())!)).toBe(true)
+    // Lined up with the text, not the whole row.
+    const field = (await box(page).boundingBox())!
+    expect(Math.abs((await options.boundingBox())!.x - field.x)).toBeLessThan(2)
+    // The keyboard moves through them.
+    await page.keyboard.press('Backspace')
+    await page.keyboard.press('Backspace')
+    await page.keyboard.type('s')
+    const first = options.getByRole('option').first()
+    await expect(first).toHaveAttribute('aria-selected', 'true')
+    await page.keyboard.press('ArrowDown')
+    await expect(first).toHaveAttribute('aria-selected', 'false')
+    await expect(options.getByRole('option').nth(1)).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    const chosen = await options
+      .getByRole('option')
+      .nth(1)
+      .locator('.option-term')
+      .textContent()
+    await page.keyboard.press('Enter')
+    await expect(box(page)).toHaveValue(chosen!)
+  })
+
+  test(`the focus ring is the whole box (${scheme})`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme })
+    await mock(page)
+    await page.goto('/app/')
+    await box(page).fill('cat')
+    await box(page).focus()
+    const bar = page.locator('.query .bar')
+    const ring = await bar.evaluate((el) => {
+      const style = getComputedStyle(el)
+      return [
+        el.matches(':focus-within'),
+        style.outlineStyle,
+        style.outlineWidth,
+      ]
+    })
+    expect(ring).toEqual([true, 'solid', '2px'])
+    expect(
+      await box(page).evaluate((el) => getComputedStyle(el).outlineStyle),
+    ).toBe('none')
+    // Its buttons are the same size, centred in it.
+    const centre = (r: { y: number; height: number }) => r.y + r.height / 2
+    const barBox = (await bar.boundingBox())!
+    for (const name of ['清空搜索框', '查询语法']) {
+      const button = (await bar.getByRole('button', { name }).boundingBox())!
+      expect([button.width, button.height]).toEqual([32, 32])
+      expect(Math.abs(centre(button) - centre(barBox))).toBeLessThan(1)
+    }
+    await bar.getByRole('button', { name: '清空搜索框' }).click()
+    await expect(box(page)).toHaveValue('')
+    await expect
+      .poll(() => box(page).evaluate((el) => document.activeElement === el))
+      .toBe(true)
+  })
+}

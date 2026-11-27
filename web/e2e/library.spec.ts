@@ -161,7 +161,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await expect(page).toHaveURL(new RegExp(`/collection/${id}$`))
   await page.getByRole('link', { name: '返回' }).click()
   await page.getByRole('combobox', { name: '搜索或筛选' }).fill('不存在')
-  await page.getByRole('button', { name: '搜索', exact: true }).click()
+  await page.getByRole('combobox', { name: '搜索或筛选' }).press('Enter')
   await expect(page.getByText('没有匹配的收藏', { exact: true })).toBeVisible()
   await expect(page.locator('.total')).toHaveText('0条')
   // A search is ordered by relevance; the other orders still apply within it.
@@ -177,7 +177,7 @@ test('browse, filter, history, refresh and remove a saved post', async ({
   await order.selectOption('relevance')
   await expect(page).not.toHaveURL(/sort=/)
   await page.getByRole('combobox', { name: '搜索或筛选' }).fill('')
-  await page.getByRole('button', { name: '搜索', exact: true }).click()
+  await page.getByRole('combobox', { name: '搜索或筛选' }).press('Enter')
   await openRow()
   // In the card's ⋯ menu.
   await page.getByRole('button', { name: '更多操作' }).click()
