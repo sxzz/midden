@@ -1,8 +1,8 @@
 import { sql } from 'drizzle-orm'
-import { parseFilterQuery } from './filter-query.ts'
 import { selectedAmong, type CollectionFilter } from './list.ts'
 import { list } from './views.ts'
 import type { Executor } from '#db/client.ts'
+import type { FolderSelection } from './folder-query.ts'
 
 /** What a share makes public, decided anew on every request. */
 export interface ShareScope {
@@ -116,25 +116,29 @@ export function collectionScope(db: Executor, id: string): ShareScope {
 }
 
 /**
- * What a folder's filter selects now, and the attached posts of every
+ * What a folder's query selects now, and the attached posts of every
  * profile among them, as each profile's page lists them.
  */
-export function folderScope(db: Executor, filter: string): ShareScope {
-  const selected = parseFilterQuery(filter).filter
+export function folderScope(
+  db: Executor,
+  selection: FolderSelection,
+): ShareScope {
+  const among = (ids: readonly string[]) =>
+    selectedAmong(db, selection.filter, ids, selection.extra)
   const profilePosts = (id: string) => {
     const kind = rootKinds(db, [id]).get(id)
-    return isProfile(kind) && selectedAmong(db, selected, [id]).has(id)
+    return isProfile(kind) && among([id]).has(id)
       ? postsOf(kind!, id)
       : undefined
   }
   return {
     contains(ids) {
-      const found = selectedAmong(db, selected, ids)
+      const found = among(ids)
       let rest = ids.filter((id) => !found.has(id))
       if (!rest.length) return found
       const candidates = profileCandidates(db, rest)
       const kinds = rootKinds(db, candidates)
-      for (const profile of selectedAmong(db, selected, candidates)) {
+      for (const profile of among(candidates)) {
         const kind = kinds.get(profile)
         if (!isProfile(kind)) continue
         for (const id of selectedAmong(db, postsOf(kind!, profile), rest))

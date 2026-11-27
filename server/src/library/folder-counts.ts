@@ -4,17 +4,23 @@
 // when that is out of date (`stale`).
 //
 // The worker (`FolderCountSweep`) looks every few seconds. A folder never
-// counted, whose filter changed, or whose relative save date reached a new day
-// is counted at once. Folders counted at an older `library_version` (the
+// counted, whose query (or a folder it names) changed, or whose relative
+// dates reached a new day is counted at once (`folderKey`). Folders counted at an older `library_version` (the
 // library changed since) are counted again at most every `DEBOUNCE`, or
 // `BUSY_DEBOUNCE` while the worker runs jobs: during an update the version
 // moves with nearly every saved post. Creating or editing a folder counts it
 // once on a read thread (`countFolder`) and stores that.
 import { eq, sql } from 'drizzle-orm'
 import { folderCounts, folders } from '#db/schema.ts'
-import { countKey, filterCounts, filterCountsOf } from './counts.ts'
-import { parseFilterQuery } from './filter-query.ts'
+import { selectionCounts, selectionCountsOf } from './counts.ts'
+import {
+  catalogTypes,
+  folderKey,
+  folderSelection,
+  type FolderQuery,
+} from './folder-query.ts'
 import type { Database, Executor } from '#db/client.ts'
+import type { Types } from '#query/compile.ts'
 import type { FilterCounts } from './list.ts'
 
 /** Between recounts of folders the library changed under. */
@@ -24,7 +30,7 @@ export const BUSY_DEBOUNCE = 30_000
 /** A folder's counts, as stored or just counted. */
 export interface CountedFolder {
   folderId: string
-  /** What was counted: the filter, its relative save date resolved. */
+  /** What was counted: the query, its relative dates resolved. */
   key: string
   /** `library_version` when counting started. */
   version: number
@@ -46,14 +52,10 @@ export function libraryVersion(db: Executor): number {
   return row?.n ?? 0
 }
 
-/** What a filter's counts are keyed by now. */
-export const keyOf = (filter: string) =>
-  countKey(parseFilterQuery(filter).canonical)
-
 /** Stored counts by folder id, each with whether it is out of date. */
 export function storedCounts(
   db: Executor,
-  rows: { id: string; filter: string }[],
+  rows: ({ id: string } & FolderQuery)[],
 ): Map<string, StoredCounts> {
   const version = libraryVersion(db)
   const stored = new Map(
@@ -64,13 +66,13 @@ export function storedCounts(
       .map((row) => [row.folderId, row]),
   )
   const out = new Map<string, StoredCounts>()
-  for (const { id, filter } of rows) {
-    const row = stored.get(id)
+  for (const folder of rows) {
+    const row = stored.get(folder.id)
     if (!row) continue
-    out.set(id, {
+    out.set(folder.id, {
       counts: { count: row.count, types: row.types },
       countedAt: row.countedAt,
-      stale: row.version !== version || row.key !== keyOf(filter),
+      stale: row.version !== version || row.key !== folderKey(db, folder),
     })
   }
   return out
@@ -81,19 +83,16 @@ export function countFolder(
   db: Database,
   folderId: string,
   now = Date.now(),
+  types: Types = catalogTypes(db),
 ): CountedFolder | undefined {
   const version = libraryVersion(db)
-  const row = db
-    .select({ filter: folders.filter })
-    .from(folders)
-    .where(eq(folders.id, folderId))
-    .get()
+  const row = db.select().from(folders).where(eq(folders.id, folderId)).get()
   if (!row) return
   return {
     folderId,
-    key: keyOf(row.filter),
+    key: folderKey(db, row, now),
     version,
-    counts: filterCounts(db, row.filter),
+    counts: selectionCounts(db, folderSelection(db, types, row, now)),
     countedAt: now,
   }
 }
@@ -126,11 +125,16 @@ export function storeFolderCounts(
  */
 export class FolderCountSweep {
   readonly #db: Database
+  readonly #types: Types
   readonly #now: () => number
   #recounted = -Infinity
 
-  constructor(db: Database, options: { now?: () => number } = {}) {
+  constructor(
+    db: Database,
+    options: { now?: () => number; types?: Types } = {},
+  ) {
     this.#db = db
+    this.#types = options.types ?? catalogTypes(db)
     this.#now = options.now ?? Date.now
   }
 
@@ -139,10 +143,7 @@ export class FolderCountSweep {
     const db = this.#db
     const now = this.#now()
     const version = libraryVersion(db)
-    const rows = db
-      .select({ id: folders.id, filter: folders.filter })
-      .from(folders)
-      .all()
+    const rows = db.select().from(folders).all()
     const stored = new Map(
       db
         .select({
@@ -154,7 +155,7 @@ export class FolderCountSweep {
         .all()
         .map((row) => [row.id, row]),
     )
-    const keys = new Map(rows.map((row) => [row.id, keyOf(row.filter)]))
+    const keys = new Map(rows.map((row) => [row.id, folderKey(db, row, now)]))
     const fresh = rows.filter(
       (row) => stored.get(row.id)?.key !== keys.get(row.id),
     )
@@ -169,14 +170,23 @@ export class FolderCountSweep {
     if (due) this.#recounted = now
     const todo = [...fresh, ...(due ? stale : [])]
     if (!todo.length) return 0
-    const counts = await filterCountsOf(
+    // A folder whose query no longer runs (it names what is gone) keeps
+    // its last count, out of date.
+    const runs = todo.flatMap((row) => {
+      try {
+        return [{ row, selection: folderSelection(db, this.#types, row, now) }]
+      } catch {
+        return []
+      }
+    })
+    const counts = await selectionCountsOf(
       db,
-      todo.map((row) => row.filter),
+      runs.map((r) => r.selection),
     )
     db.transaction((tx) =>
       storeFolderCounts(
         tx,
-        todo.map((row, i) => ({
+        runs.map(({ row }, i) => ({
           folderId: row.id,
           key: keys.get(row.id)!,
           version,
@@ -199,11 +209,12 @@ export async function countWrittenFolder(
   folderId: string,
   count: ((id: string) => Promise<CountedFolder | null>) | undefined,
   logger?: { warn: (fields: object, message: string) => void },
+  types?: Types,
 ): Promise<void> {
   try {
     const counted = count
       ? await count(folderId)
-      : (countFolder(db, folderId) ?? null)
+      : (countFolder(db, folderId, undefined, types) ?? null)
     if (counted) storeFolderCounts(db, [counted])
   } catch (error) {
     logger?.warn({ err: error, folderId }, 'folder not counted')

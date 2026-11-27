@@ -3,9 +3,15 @@ import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import { folders, library, shares } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
+import {
+  catalogTypes,
+  folderSelection,
+  type FolderSelection,
+} from './folder-query.ts'
 import { isUUID } from './read.ts'
 import { collectionScope, folderScope, type ShareScope } from './share-scope.ts'
 import type { Database, Executor } from '#db/client.ts'
+import type { Types } from '#query/compile.ts'
 
 export type ShareTarget = 'folder' | 'collection'
 
@@ -157,13 +163,18 @@ function activeShares(db: Executor): Share[] {
  * Live links, or only those that make this collection public: its own,
  * a folder that holds it, a shared profile listing it.
  */
-export function listShares(db: Executor, collection?: string): Share[] {
+export function listShares(
+  db: Executor,
+  collection?: string,
+  types: Types = catalogTypes(db),
+): Share[] {
   const all = activeShares(db)
   if (collection === undefined) return all
   if (!isUUID(collection)) return []
   return all.filter(
     (share) =>
-      scopeOf(db, share.target, share.target_id)?.contains([collection]).size,
+      scopeOf(db, share.target, share.target_id, types)?.contains([collection])
+        .size,
   )
 }
 
@@ -239,19 +250,23 @@ function scopeOf(
   db: Executor,
   target: ShareTarget,
   id: string,
+  types: Types,
 ): ShareScope | undefined {
   if (target === 'collection') return collectionScope(db, id)
   const folder = folderRow(db, id)
-  return folder ? folderScope(db, folder.filter) : undefined
+  return folder
+    ? folderScope(db, folderSelection(db, types, folder))
+    : undefined
 }
 
 /** A live link as the public reads it. */
 export interface OpenShare {
   target: ShareTarget
   target_id: string
-  /** The folder's name and filter, for a folder. */
+  /** The folder's name, for a folder. */
   name?: string
-  filter?: string
+  /** What the folder's query selects, for a folder. */
+  selection?: FolderSelection
   scope: ShareScope
 }
 
@@ -259,7 +274,11 @@ export interface OpenShare {
  * The live link behind a slug. A malformed, unknown or revoked slug, or one
  * whose target is gone, is simply not found.
  */
-export function openShare(db: Executor, slug: string): OpenShare {
+export function openShare(
+  db: Executor,
+  slug: string,
+  types: Types = catalogTypes(db),
+): OpenShare {
   const row = isSlug(slug)
     ? db
         .select()
@@ -270,13 +289,13 @@ export function openShare(db: Executor, slug: string): OpenShare {
   if (!row || !targetExists(db, row)) throw new AppError('not_found')
   const folder =
     row.targetKind === 'folder' ? folderRow(db, row.targetId) : undefined
+  const selection = folder ? folderSelection(db, types, folder) : undefined
   return {
     target: row.targetKind,
     target_id: row.targetId,
-    ...(folder ? { name: folder.name, filter: folder.filter } : {}),
-    scope:
-      row.targetKind === 'folder'
-        ? folderScope(db, folder!.filter)
-        : collectionScope(db, row.targetId),
+    ...(folder ? { name: folder.name, selection } : {}),
+    scope: selection
+      ? folderScope(db, selection)
+      : collectionScope(db, row.targetId),
   }
 }

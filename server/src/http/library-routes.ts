@@ -2,9 +2,13 @@ import { Hono } from 'hono'
 import * as v from 'valibot'
 import { CHANGES_WINDOW, listProfileChanges } from '#library/changes.ts'
 import { compareRelations, compareSides } from '#library/compare.ts'
-import { filterCounts } from '#library/counts.ts'
+import { selectionCounts, type Selection } from '#library/counts.ts'
 import { getEntity } from '#library/entities.ts'
-import { collectionFilter, FilterQuery } from '#library/filter-query.ts'
+import {
+  collectionFilter,
+  FilterQuery,
+  type FilterParams,
+} from '#library/filter-query.ts'
 import {
   accountGraph,
   followGraph,
@@ -26,6 +30,8 @@ import {
   listCounts,
   listHistory,
 } from '#library/read.ts'
+import { OWNER_LIMITS } from '#query/ast.ts'
+import { compileQuery } from '#query/compile.ts'
 import { Cursor, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
@@ -149,17 +155,46 @@ export const CompareQuery = v.object({
   viewer: text,
 })
 
+/**
+ * What a list request selects: its filters, and its `q`, a query of the
+ * query language (the owner's limits) adding to them.
+ */
+function listQuery(ctx: AccountsContext, input: FilterParams): Selection {
+  const filter = collectionFilter({ ...input, q: undefined })
+  const compiled = input.q?.trim()
+    ? compileQuery(input.q, {
+        db: ctx.db,
+        types: ctx.platforms.types(),
+        kind: 'all',
+        filter,
+        scoped: true,
+        limits: OWNER_LIMITS,
+        ...(filter.timeZone ? { timeZone: filter.timeZone } : {}),
+      })
+    : undefined
+  return compiled
+    ? {
+        filter: compiled.filter,
+        ...(compiled.extra ? { extra: compiled.extra } : {}),
+      }
+    : { filter }
+}
+
 /** Reading the library: collections, their history, and entities. */
 export function libraryRoutes(ctx: AccountsContext) {
   return (
     new Hono<Env>()
       .get('/collections', query(Filters), (c) => {
         const input = c.req.valid('query')
+        const { filter, extra } = listQuery(ctx, input)
         return c.json(
           listCollections(
             ctx,
-            collectionFilter(input),
+            filter,
             input.cursor || undefined,
+            undefined,
+            undefined,
+            extra,
           ),
         )
       })
@@ -167,7 +202,7 @@ export function libraryRoutes(ctx: AccountsContext) {
       // Cached like the folders' counts; the web asks before splitting a
       // folder into post and account tabs.
       .get('/collections/count', query(FilterQuery), (c) =>
-        c.json(filterCounts(ctx.db, new URL(c.req.url).search)),
+        c.json(selectionCounts(ctx.db, listQuery(ctx, c.req.valid('query')))),
       )
 
       .get('/collections/authors', query(AuthorFilters), (c) => {

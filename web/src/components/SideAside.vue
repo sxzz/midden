@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { pageAside } from '../aside'
-import { folderQuery } from '../folders'
+import { folderLink } from '../folders'
 import { buildFacts, REPOSITORY } from '../settings'
 import AsideDetail from './AsideDetail.vue'
 import SidebarFrame from './SidebarFrame.vue'
@@ -25,10 +25,6 @@ const lists = computed(
 )
 function search(q: string) {
   void router.push({ name: 'collections', query: { q } })
-}
-const folderLink = (folder: Folder) => {
-  const query = folderQuery(folder.filter)
-  return `/folder/${folder.id}${query ? `?${query}` : ''}`
 }
 const detail = computed(() =>
   route.name === 'collection' && pageAside.value?.id === route.params.id

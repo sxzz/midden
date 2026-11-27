@@ -133,7 +133,7 @@ test("a folder's profiles bring exactly the posts their page lists", async () =>
   expect(listed.length).toBe(4)
   const all = Object.values(saved)
   for (const scope of [
-    folderScope(ctx.db, 'entity_type=fake.profile'),
+    folderScope(ctx.db, { filter: { entityType: 'fake.profile' } }),
     collectionScope(ctx.db, owner),
   ]) {
     expect([...scope.contains(all)].toSorted()).toEqual(listed.toSorted())

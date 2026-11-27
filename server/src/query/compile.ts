@@ -18,8 +18,6 @@
 // or `-` are sets of what they find, without the fuzzy tier.
 import { eq, sql, type SQL } from 'drizzle-orm'
 import { folders, tags } from '#db/schema.ts'
-import { facetsComplete } from '#library/facets.ts'
-import { parseFilterQuery } from '#library/filter-query.ts'
 import { followSetSQL, type FollowSet } from '#library/follows.ts'
 import {
   authorKey,
@@ -27,10 +25,10 @@ import {
   mediaSQL,
   parseAuthorKey,
   postTypeSQL,
+  relatedEdgesSQL,
   rootTypeSQL,
   savedSince,
   taggedSQL,
-  wholeSelection,
   type CollectionFilter,
   type Identity,
   type QueryExtra,
@@ -40,49 +38,60 @@ import { fold } from '#library/search-text.ts'
 import { searchHits } from '#library/search.ts'
 import { list } from '#library/views.ts'
 import {
+  LIMITS,
   onlyNegative,
+  OWNER_LIMITS,
   parseQuery,
   QueryError,
   type Leaf,
+  type Limits,
   type QueryNode,
 } from './ast.ts'
 import { printQuery } from './print.ts'
-import type { Database, Executor } from '#db/client.ts'
+import type { Executor } from '#db/client.ts'
+
+const DIGITS = /^\d+$/
+const SPACE = /\s/
+
+/**
+ * A phrase of one word is that word: its quotes only keep it from reading
+ * as syntax (`"OR"`, `"-x"`, `"#x"`, `"from:x"`).
+ */
+const oneWord = (phrase: string) => !SPACE.test(fold(phrase).trim())
 
 /** The entity types of the archive's platforms. */
 export interface Types {
+  /**
+   * Read from the catalog rather than the platforms (tests, scripts): a
+   * platform it has no rows of yet is taken to have posts and profiles.
+   */
+  open?: boolean
   platforms: string[]
   posts: string[]
   accounts: string[]
 }
 
 export interface CompileOptions {
-  db: Database
+  db: Executor
   types: Types
   /** Posts, accounts, or both (aggregation). */
   kind: 'posts' | 'accounts' | 'all'
   /** The filter the request's other parameters give; the query adds to it. */
   filter: CollectionFilter
-  /** The request starts from a folder already (`folder=`). */
-  folder?: boolean
-  /**
-   * A lone `folder:` may be where the list starts, the rest narrowing it:
-   * not when the other parameters name what a narrowing cannot (tags,
-   * follows, related items).
-   */
-  canScope?: boolean
   /** The other parameters scope it (dates, author, folder, tag, follows). */
   scoped?: boolean
   /** IANA zone of the query's dates; UTC by default. */
   timeZone?: string
   now?: number
-}
-
-/** A folder a query starts from: `folder:` alone at its top level. */
-export interface QueryFolder {
-  id: string
-  name: string
-  filter: CollectionFilter
+  /** An agent's limits (the default), or the owner's (`OWNER_LIMITS`). */
+  limits?: Limits
+  /**
+   * Names the query's `WITH` items start with, so that two compiled
+   * queries can share a statement.
+   */
+  prefix?: string
+  /** The folder this query is saved as: it may not name itself. */
+  within?: string
 }
 
 export interface CompiledQuery {
@@ -91,9 +100,20 @@ export interface CompiledQuery {
   parsed: string
   /** The request's filter with what the query could say in its terms. */
   filter: CollectionFilter
-  folder?: QueryFolder
   extra?: QueryExtra
 }
+
+/**
+ * Inside the compiler only: what a folder whose query is empty selects
+ * (everything), and its negation. Never printed.
+ */
+type Constant = { type: 'all' | 'none'; start: number; end: number }
+type Expanded = QueryNode | Constant
+const isConstant = (node: Expanded): node is Constant =>
+  node.type === 'all' || node.type === 'none'
+
+/** Folders that include folders, at most this deep. */
+const FOLDER_DEPTH = 8
 
 /** SQL for one term: a test on `k`/`l`, or a set of catalog ids, or both. */
 interface Part {
@@ -142,7 +162,7 @@ const holds = (alias: string, folded: string) =>
 function platformsOf(types: Types, value: string, at: number): string[] {
   const colon = PLATFORM_PREFIX.exec(value)
   if (!colon) return types.platforms
-  if (!types.platforms.includes(colon[1]!))
+  if (!types.platforms.includes(colon[1]!) && !types.open)
     throw new QueryError(
       `Unknown platform ${colon[1]}; the archive has ${types.platforms.join(', ')}.`,
       at,
@@ -198,6 +218,8 @@ export function resolveAccounts(
 
 class Compiler {
   readonly ctes: SQL[] = []
+  /** The folders the query's `folder:` terms read, with their queries. */
+  readonly folders: { id: string; query: string }[] = []
   #searches = 0
   facets = false
   relative = false
@@ -237,9 +259,9 @@ class Compiler {
     return row.id
   }
 
-  folder(ref: string, at: number): QueryFolder {
+  folderRow(ref: string, at: number) {
     const row = this.o.db
-      .select()
+      .select({ id: folders.id, query: folders.query })
       .from(folders)
       .where(
         isUUID(ref) ? eq(folders.id, ref.toLowerCase()) : eq(folders.name, ref),
@@ -250,11 +272,7 @@ class Compiler {
         `No folder ${ref}. GET /agent/v1/folders lists them.`,
         at,
       )
-    return {
-      id: row.id,
-      name: row.name,
-      filter: parseFilterQuery(row.filter).filter,
-    }
+    return row
   }
 
   /** Start of a date in the query's zone. */
@@ -273,6 +291,8 @@ class Compiler {
   }
 
   typesOf(platform: string, at: number): string[] {
+    if (this.o.types.open && !this.o.types.platforms.includes(platform))
+      return [`${platform}.post`, `${platform}.profile`]
     if (!this.o.types.platforms.includes(platform))
       throw new QueryError(
         `Unknown platform ${platform}; the archive has ${this.o.types.platforms.join(', ')}.`,
@@ -287,11 +307,11 @@ class Compiler {
 
   /** Catalog rows a search finds, strictly: a set. */
   search(text: string, phrase: boolean): Part {
-    const name = `query_${this.#searches++}`
+    const name = `${this.o.prefix ?? 'query'}_${this.#searches++}`
     const hits = searchHits(this.o.db, text, name, { fuzzy: false })
     if (!hits) return TRUE
     this.ctes.push(hits.ctes)
-    if (!phrase)
+    if (!phrase || oneWord(text))
       return { set: sql`SELECT rowid FROM ${sql.raw(name)}`, cost: 3 }
     return {
       set: sql`SELECT p.rowid FROM ${sql.raw(name)} p
@@ -412,14 +432,29 @@ class Compiler {
           cost: 2,
         }
       case 'rel': {
-        const [set, ...rest] = value.split(':')
-        const of = this.perspective(rest.join(':'), at)
+        const { set, min, accounts } = this.follows(value, at)
         return {
           set: sql`SELECT id FROM catalog
-            WHERE subject_entity_id IN ${followSetSQL([of], set as FollowSet)}`,
+            WHERE subject_entity_id IN ${followSetSQL(accounts, set, min)}`,
           cost: 2,
         }
       }
+      case 'protected': {
+        // As the list's visibility: the account as it is now.
+        return {
+          where: sql`(SELECT s.subject_protected FROM catalog s
+            WHERE s.subject_entity_id = k.subject_entity_id
+            ORDER BY s.revision_at DESC, s.revision_id DESC LIMIT 1) = ${value === 'yes' ? 1 : 0}`,
+          cost: 5,
+        }
+      }
+      case 'related':
+        return {
+          where: sql`k.collection_id IN (SELECT r.collection_id FROM (WITH ${relatedEdgesSQL(sql`SELECT ${value} AS id`)}
+            SELECT collection_id FROM related_edges
+            WHERE collection_id <> requested_id) r)`,
+          cost: 7,
+        }
       case 'state':
         return {
           where: sql`k.collection_id IN (SELECT id FROM collections
@@ -435,16 +470,9 @@ class Compiler {
         if (!accounts.length) return FALSE
         return this.repostedBy(this.entityIds(accounts))
       }
-      case 'folder': {
-        const folder = this.folder(value, at)
-        const inner = wholeSelection(this.o.db, folder.filter)
-        return {
-          where: sql`k.collection_id IN (${inner.ctes}
-            SELECT k.collection_id FROM ${sql.raw(inner.source)}
-            WHERE ${inner.where})`,
-          cost: 7,
-        }
-      }
+      case 'folder':
+        // Replaced by what the folder says before any SQL is made.
+        throw new Error('folder: was not expanded')
       case 'has':
         if (value === 'link') {
           this.facets = true
@@ -490,21 +518,18 @@ class Compiler {
           cost: 6,
         }
       case 'since':
-        return {
-          where: sql`k.published_at >= ${this.dayStart(value)}`,
-          cost: 4,
-        }
+        return { where: sql`k.published_at >= ${this.moment(value)}`, cost: 4 }
       case 'until':
-        return { where: sql`k.published_at < ${this.dayStart(value)}`, cost: 4 }
+        return { where: sql`k.published_at < ${this.moment(value)}`, cost: 4 }
       case 'within':
         return {
           where: sql`k.published_at >= ${this.spanStart(value)}`,
           cost: 4,
         }
       case 'saved-since':
-        return { where: sql`l.created_at >= ${this.dayStart(value)}`, cost: 4 }
+        return { where: sql`l.created_at >= ${this.moment(value)}`, cost: 4 }
       case 'saved-until':
-        return { where: sql`l.created_at < ${this.dayStart(value)}`, cost: 4 }
+        return { where: sql`l.created_at < ${this.moment(value)}`, cost: 4 }
       case 'saved':
         return {
           where: DATE.test(value)
@@ -513,6 +538,82 @@ class Compiler {
             : sql`l.created_at >= ${this.spanStart(value)}`,
           cost: 4,
         }
+    }
+  }
+
+  /** `following:2:@a,@b,@c`: the set, the threshold and the accounts. */
+  follows(value: string, at: number) {
+    const [set, ...rest] = value.split(':')
+    let min: number | undefined
+    if (DIGITS.test(rest[0] ?? '') && rest.length > 1)
+      min = Number(rest.shift())
+    const accounts = rest
+      .join(':')
+      .split(',')
+      .map((ref) => this.perspective(ref, at))
+    return {
+      set: set as FollowSet,
+      min: min ?? Math.min(2, accounts.length),
+      accounts,
+    }
+  }
+
+  /** A date's start in the query's zone, or a moment as given. */
+  moment(value: string): number {
+    return value.includes('T') ? Date.parse(value) : this.dayStart(value)
+  }
+
+  /**
+   * `folder:` replaced by what the folder's query says (a folder whose
+   * query is empty selects everything), folders inside folders too, and
+   * AND and OR flattened again around them. The folders read are kept:
+   * what they say is part of what the query is.
+   */
+  expand(node: QueryNode, seen: string[] = []): Expanded {
+    const span = { start: node.start, end: node.end }
+    switch (node.type) {
+      case 'and':
+      case 'or': {
+        const items: QueryNode[] = []
+        for (const item of node.items) {
+          const expanded = this.expand(item, seen)
+          if (isConstant(expanded)) {
+            // AND with everything, OR with nothing: no difference.
+            if ((expanded.type === 'all') === (node.type === 'and')) continue
+            return { type: expanded.type, ...span }
+          }
+          if (expanded.type === node.type) items.push(...expanded.items)
+          else items.push(expanded)
+        }
+        if (!items.length)
+          return { type: node.type === 'and' ? 'all' : 'none', ...span }
+        return items.length === 1
+          ? items[0]!
+          : { type: node.type, items, ...span }
+      }
+      case 'not': {
+        const item = this.expand(node.item, seen)
+        if (isConstant(item))
+          return { type: item.type === 'all' ? 'none' : 'all', ...span }
+        return item.type === 'not' ? item.item : { type: 'not', item, ...span }
+      }
+      case 'atom': {
+        if (node.key !== 'folder') return node
+        const folder = this.folderRow(node.value, node.start)
+        if (seen.includes(folder.id) || seen.length >= FOLDER_DEPTH)
+          throw new QueryError(
+            `Folders include each other: ${node.value} again.`,
+            node.start,
+          )
+        this.folders.push({ id: folder.id, query: folder.query })
+        const inner = parseQuery(folder.query, OWNER_LIMITS)
+        if (!inner) return { type: 'all', ...span }
+        // Where a problem inside it is, is this term.
+        const placed = respan(inner, span)
+        return this.expand(placed, [...seen, folder.id])
+      }
+      default:
+        return node
     }
   }
 
@@ -529,7 +630,8 @@ class Compiler {
     return found[0]!
   }
 
-  node(node: QueryNode): Part {
+  node(node: Expanded): Part {
+    if (isConstant(node)) return node.type === 'all' ? TRUE : FALSE
     switch (node.type) {
       case 'and': {
         const parts = node.items
@@ -576,12 +678,40 @@ class Compiler {
   }
 }
 
+/** A tree with every span set to one (a folder's, where it was named). */
+function respan(
+  node: QueryNode,
+  span: { start: number; end: number },
+): QueryNode {
+  switch (node.type) {
+    case 'and':
+    case 'or':
+      return { ...node, ...span, items: node.items.map((i) => respan(i, span)) }
+    case 'not':
+      return { ...node, ...span, item: respan(node.item, span) }
+    default:
+      return { ...node, ...span }
+  }
+}
+
 /** The top level's terms: an AND's, or the one. */
-const conjuncts = (node: QueryNode) =>
+const conjuncts = (node: Expanded): Expanded[] =>
   node.type === 'and' ? node.items : [node]
 
-const atom = (node: QueryNode, key?: string) =>
+const atom = (node: Expanded, key?: string) =>
   node.type === 'atom' && (!key || node.key === key) ? node : undefined
+
+/** `has:image`, `has:video` and `-has:media`, as the list's media types. */
+function mediaKind(node: Expanded): string | undefined {
+  const has = atom(node, 'has') as Leaf | undefined
+  if (has && (has.value === 'image' || has.value === 'video')) return has.value
+  if (
+    node.type === 'not' &&
+    (atom(node.item, 'has') as Leaf)?.value === 'media'
+  )
+    return 'text'
+  return undefined
+}
 
 /**
  * Compile a query: its canonical form, the filter with what it says in the
@@ -591,7 +721,7 @@ export function compileQuery(
   text: string,
   o: CompileOptions,
 ): CompiledQuery | undefined {
-  const node = parseQuery(text)
+  const node = parseQuery(text, o.limits ?? LIMITS)
   if (!node) return undefined
   const parsed = printQuery(node)
   if (onlyNegative(node) && !o.scoped)
@@ -604,8 +734,7 @@ export function compileQuery(
   // refuses (a tag both wanted and not, saved after it was saved until):
   // then everything but the keyword search is said in SQL.
   try {
-    checkFilter(compiled.folder ? compiled.folder.filter : compiled.filter)
-    if (compiled.folder) checkFilter(compiled.filter)
+    checkFilter(compiled.filter)
     return compiled
   } catch {
     return compileNode(node, parsed, o, false)
@@ -620,22 +749,33 @@ function compileNode(
 ): CompiledQuery {
   const c = new Compiler(o)
   const filter: CollectionFilter = { ...o.filter }
-  const rest: QueryNode[] = []
+  const rest: Expanded[] = []
   const words: string[] = []
   const phrases: string[] = []
-  let folder: QueryFolder | undefined
-  const items = conjuncts(node)
-  // A lone `folder:` at the top level is where the list starts, as
-  // `folder=` is; then the rest may only narrow it.
-  const folders = items.filter((item) => atom(item, 'folder'))
-  if (lowering && !o.folder && o.canScope !== false && folders.length === 1) {
-    const f = folders[0] as Leaf
-    folder = c.folder(f.value, f.start)
-  }
-  const scoped = !!(o.folder || folder)
   const tagsWanted: string[] = []
   const tagsExcluded: string[] = []
-  const lower = (item: QueryNode): boolean => {
+  const types = () =>
+    filter.entityType
+      ? filter.entityType.split(',')
+      : [...o.types.posts, ...o.types.accounts]
+  /** Narrow the filter's types to these; false when none would be left. */
+  const narrowTypes = (wanted: string[]) => {
+    // Nothing narrowed yet: these.
+    if (!filter.entityType) {
+      filter.entityType = [...new Set(wanted)].toSorted().join(',')
+      return true
+    }
+    const both = types()
+      .filter((t) => wanted.includes(t))
+      .toSorted()
+    // None left would read as no condition at all.
+    if (!both.length) return false
+    filter.entityType = both.join(',')
+    return true
+  }
+  const lower = (item: Expanded): boolean => {
+    if (item.type === 'all') return true
+    if (item.type === 'none') return false
     if (!lowering && item.type !== 'word' && item.type !== 'phrase')
       return false
     if (item.type === 'word') {
@@ -644,13 +784,17 @@ function compileNode(
     }
     if (item.type === 'phrase') {
       words.push(item.value)
-      phrases.push(item.value)
+      if (!oneWord(item.value)) phrases.push(item.value)
       return true
     }
     if (item.type === 'not') {
       const tag = atom(item.item, 'tag') as Leaf | undefined
-      if (tag && !scoped && !filter.notTag?.length) {
+      if (tag && !filter.notTag?.length) {
         tagsExcluded.push(c.tagId(tag.value, tag.start))
+        return true
+      }
+      if (mediaKind(item) && !filter.mediaType) {
+        filter.mediaType = 'text'
         return true
       }
       return false
@@ -668,7 +812,6 @@ function compileNode(
       }
       if (
         item.items.every((i) => atom(i, 'tag')) &&
-        !scoped &&
         !filter.tag &&
         !tagsWanted.length
       ) {
@@ -677,13 +820,24 @@ function compileNode(
           .join(',')
         return true
       }
+      const media = item.items.map((i) => mediaKind(i))
+      if (
+        media.every(Boolean) &&
+        new Set(media).size === media.length &&
+        !filter.mediaType
+      ) {
+        filter.mediaType = (media as string[]).toSorted().join(',')
+        return true
+      }
+      if (item.items.every((i) => atom(i, 'platform')))
+        return narrowTypes(
+          item.items.flatMap((i) => c.typesOf((i as Leaf).value, i.start)),
+        )
       return false
     }
     if (item.type !== 'atom') return false
     const v = item.value
     switch (item.key) {
-      case 'folder':
-        return !!folder && v === (folders[0] as Leaf).value
       case 'from': {
         if (filter.authors?.length) return false
         const found = c.accounts(v, item.start)
@@ -692,36 +846,32 @@ function compileNode(
         return true
       }
       case 'tag':
-        if (scoped || filter.tag) return false
+        if (filter.tag) return false
         tagsWanted.push(c.tagId(v, item.start))
         return true
       case 'rel': {
-        if (scoped || filter.relOf?.length) return false
-        const [set, ...ref] = v.split(':')
-        filter.relOf = [authorKey(c.perspective(ref.join(':'), item.start))]
+        if (filter.relOf?.length) return false
+        const { set, min, accounts } = c.follows(v, item.start)
+        filter.relOf = accounts.map((a) => authorKey(a))
         filter.rel = set
+        if (min !== Math.min(2, accounts.length)) filter.relMin = String(min)
         return true
       }
       case 'platform':
-      case 'type': {
-        const types =
-          item.key === 'platform'
-            ? c.typesOf(v, item.start)
-            : v === 'profile'
-              ? o.types.accounts
-              : o.types.posts
-        const current = filter.entityType
-          ? filter.entityType.split(',')
-          : [...o.types.posts, ...o.types.accounts]
-        const both = current.filter((t) => types.includes(t)).toSorted()
-        // None left would read as no condition at all.
-        if (!both.length) return false
-        filter.entityType = both.join(',')
-        return true
-      }
+        return narrowTypes(c.typesOf(v, item.start))
+      case 'type':
+        return narrowTypes(v === 'profile' ? o.types.accounts : o.types.posts)
       case 'has':
         if (filter.mediaType || (v !== 'image' && v !== 'video')) return false
         filter.mediaType = v
+        return true
+      case 'protected':
+        if (filter.visibility) return false
+        filter.visibility = v === 'yes' ? 'private' : 'public'
+        return true
+      case 'related':
+        if (filter.relatedTo) return false
+        filter.relatedTo = v
         return true
       case 'sensitive':
         if (filter.sensitive) return false
@@ -737,11 +887,11 @@ function compileNode(
         return true
       case 'saved-since':
         if (filter.savedFrom || filter.savedWithin) return false
-        filter.savedFrom = new Date(c.dayStart(v)).toISOString()
+        filter.savedFrom = new Date(c.moment(v)).toISOString()
         return true
       case 'saved-until':
         if (filter.savedBefore || filter.savedWithin) return false
-        filter.savedBefore = new Date(c.dayStart(v)).toISOString()
+        filter.savedBefore = new Date(c.moment(v)).toISOString()
         return true
       case 'saved':
         if (filter.savedFrom || filter.savedBefore || filter.savedWithin)
@@ -759,7 +909,8 @@ function compileNode(
         return false
     }
   }
-  for (const item of items) if (!lower(item)) rest.push(item)
+  const expanded = c.expand(node, o.within ? [o.within] : [])
+  for (const item of conjuncts(expanded)) if (!lower(item)) rest.push(item)
   if (tagsWanted.length) {
     filter.tag = tagsWanted.join(',')
     if (tagsWanted.length > 1) filter.tagMode = 'all'
@@ -771,22 +922,22 @@ function compileNode(
     parts.push({ where: holds('k', fold(phrase)), cost: 5 })
   // Only what the filter cannot say makes SQL of its own: a query the
   // filter says all of runs as the filter does.
-  if (!parts.length)
-    return { node, parsed, filter, ...(folder ? { folder } : {}) }
-  const volatile = c.relative || (c.facets && !facetsComplete(o.db))
+  if (!parts.length) return { node, parsed, filter }
   return {
     node,
     parsed,
     filter,
-    ...(folder ? { folder } : {}),
     extra: {
       ctes: c.ctes,
       where: sql.join(
         parts.toSorted((a, b) => a.cost - b.cost).map(whereOf),
         sql` AND `,
       ),
-      key: parsed,
-      ...(volatile ? { volatile } : {}),
+      // What the folders it names say is part of what it is.
+      key: c.folders.length
+        ? `${parsed}\n${JSON.stringify(c.folders)}`
+        : parsed,
+      ...(c.relative ? { volatile: true } : {}),
     },
   }
 }

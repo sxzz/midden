@@ -9,6 +9,7 @@ import { readMigrationFiles } from 'drizzle-orm/migrator'
 import { drizzle } from 'drizzle-orm/node-sqlite'
 import { migrate } from 'drizzle-orm/node-sqlite/migrator'
 import { cjkWords, fold, searchName } from '#library/search-text.ts'
+import { filterToQuery } from '#query/convert.ts'
 import { WriteStats } from './writes.ts'
 
 const MIGRATIONS = fileURLToPath(new URL('../../drizzle', import.meta.url))
@@ -188,6 +189,10 @@ function searchFunctions(client: DatabaseSync): void {
     searchName(text(name), text(handle)),
   )
   client.function('search_words', options, (value) => cjkWords(text(value)))
+  // A folder's old filter as a query (migration `folder_queries`).
+  client.function('folder_query', options, (value) =>
+    JSON.stringify(filterToQuery(text(value))),
+  )
 }
 
 /**

@@ -22,12 +22,14 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { performance } from 'node:perf_hooks'
 import process from 'node:process'
+import { sql } from 'drizzle-orm'
 import { runRead } from '#agent/reads.ts'
 import { FsBlobStore } from '#blob/fs-store.ts'
 import { MediaSigner } from '#blob/signer.ts'
 import { openDatabase, type Database } from '#db/client.ts'
-import { filterCountsOf } from '#library/counts.ts'
+import { selectionCountsOf } from '#library/counts.ts'
 import { backfillBatch } from '#library/facets.ts'
+import { folderSelection } from '#library/folder-query.ts'
 import { createFolder, listFolders } from '#library/folders.ts'
 import {
   authorKey,
@@ -379,11 +381,22 @@ function cases(db: Database): Case[] {
       name: 'folders all',
       group: 'folders',
       fresh: true,
-      run: () =>
-        filterCountsOf(
+      // As `/v1/folders` lists them and the worker counts them: each
+      // folder's query compiled, those the filter says counted together.
+      run: () => {
+        listFolders(db, reader.types)
+        return selectionCountsOf(
           db,
-          listFolders(db).map((f) => f.filter),
-        ),
+          db
+            .all<{
+              query: string
+              sort: string
+              order: string
+              tz: string
+            }>(sql`SELECT query, sort, "order", tz FROM folders`)
+            .map((row) => folderSelection(db, reader.types, row)),
+        )
+      },
     },
     agent('agent newest', 'posts', {}),
     agent('agent q', 'posts', { q: ['猫'] }),

@@ -19,7 +19,11 @@ import {
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError } from '#errors.ts'
-import { parseFilterQuery } from '#library/filter-query.ts'
+import {
+  catalogTypes,
+  folderKey,
+  folderSelection,
+} from '#library/folder-query.ts'
 import { updateSelection } from '#library/list.ts'
 import {
   checkOptions,
@@ -28,6 +32,7 @@ import {
 } from './options.ts'
 import type { Executor } from '#db/client.ts'
 import type { ReadContext } from '#library/views.ts'
+import type { Types } from '#query/compile.ts'
 import type { CaptureContext } from './context.ts'
 
 /** A library selection updates at most this many collections. */
@@ -62,8 +67,8 @@ export interface UpdatePlan {
   targetId: string
   name: string
   collectionIds: string[]
-  /** A folder's filter as it selected them. */
-  filter?: string
+  /** What a folder's query selected them by (`folderKey`). */
+  key?: string
 }
 
 export function savedIds(db: Executor, ids: string[]): Set<string> {
@@ -80,7 +85,11 @@ export function savedIds(db: Executor, ids: string[]): Set<string> {
 }
 
 /** What a target holds now, each collection once. */
-export function planUpdate(db: Executor, input: UpdateTargetInput): UpdatePlan {
+export function planUpdate(
+  db: Executor,
+  input: UpdateTargetInput,
+  types: Types = catalogTypes(db),
+): UpdatePlan {
   if (input.target === 'collection') {
     if (!UUID.test(input.id) || !savedIds(db, [input.id]).size)
       throw new AppError('not_found')
@@ -97,11 +106,8 @@ export function planUpdate(db: Executor, input: UpdateTargetInput): UpdatePlan {
       : undefined
     if (!folder) throw new AppError('not_found')
     // Posts there only through an account the update covers come with it.
-    const ids = updateSelection(
-      db,
-      parseFilterQuery(folder.filter).filter,
-      MAX_FOLDER + 1,
-    )
+    const { filter, extra } = folderSelection(db, types, folder)
+    const ids = updateSelection(db, filter, MAX_FOLDER + 1, extra)
     if (ids.length > MAX_FOLDER)
       throw new AppError(
         'invalid_request',
@@ -113,7 +119,7 @@ export function planUpdate(db: Executor, input: UpdateTargetInput): UpdatePlan {
       targetId: folder.id,
       name: folder.name,
       collectionIds: ids,
-      filter: folder.filter,
+      key: folderKey(db, folder),
     }
   }
   if (input.ids.some((id) => !UUID.test(id))) throw new AppError('unsupported')
@@ -127,7 +133,8 @@ export function planUpdate(db: Executor, input: UpdateTargetInput): UpdatePlan {
 
 /**
  * The plan, if it still holds where the update is written: its folder is
- * there under the same name and filter; a selection's collections (at most
+ * there under the same name and query (and the folders it names say the
+ * same); a selection's collections (at most
  * 500, so read again) are all still saved. A folder's members are not read
  * again: one removed from the library since is skipped at its turn, as one
  * removed while the update runs is; one saved since is left out, as one
@@ -141,14 +148,14 @@ function holds(tx: Executor, input: UpdateTargetInput, plan?: UpdatePlan) {
       savedIds(tx, plan.collectionIds).size === plan.collectionIds.length
     )
   const folder = tx
-    .select({ name: folders.name, filter: folders.filter })
+    .select({ name: folders.name, query: folders.query, tz: folders.tz })
     .from(folders)
     .where(eq(folders.id, input.id))
     .get()
   return (
     plan.targetId === input.id &&
     folder?.name === plan.name &&
-    folder.filter === plan.filter
+    folderKey(tx, folder) === plan.key
   )
 }
 
@@ -261,7 +268,7 @@ export function previewUpdate(
   ctx: Pick<ReadContext, 'db' | 'platforms'>,
   input: UpdateTargetInput,
 ): UpdatePreview {
-  const resolved = planUpdate(ctx.db, input)
+  const resolved = planUpdate(ctx.db, input, ctx.platforms.types())
   const kinds = itemKinds(ctx.db, resolved.collectionIds)
   const listing = ctx.platforms.countPointers()
   let posts = 0
@@ -324,7 +331,7 @@ export function startUpdate(
     }
     const resolved = holds(tx, input, options.plan)
       ? options.plan!
-      : planUpdate(tx, input)
+      : planUpdate(tx, input, ctx.platforms.types())
     if (options.older) {
       const only = itemKinds(tx, resolved.collectionIds).get(
         resolved.collectionIds[0]!,

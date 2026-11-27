@@ -56,10 +56,12 @@ export function useFolders() {
   }
   /**
    * A tag merged into another or deleted: the server rewrote the folders
-   * filtering on it, so they read the same here until the next load does.
+   * filtering on it, so their filters read the same here until the next
+   * load does (which brings their queries).
    */
   function retag(from: string, to?: string) {
     folders.value = folders.value.map((folder) => {
+      if (folder.filter === null) return folder
       const filter = retagQuery(folder.filter, from, to)
       return filter === folder.filter ? folder : { ...folder, filter }
     })

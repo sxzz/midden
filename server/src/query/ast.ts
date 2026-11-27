@@ -4,6 +4,7 @@
 // name in the archive (accounts, tags, folders) is looked up when it is
 // compiled (`compile.ts`).
 import { domainOf, foldHashtag } from '#library/facets.ts'
+import { KEYS, type Key } from './keys.ts'
 import { parse, SyntaxError as PeggySyntaxError } from './parser.generated.ts'
 
 const ENDS_IN_OR = /\bOR\s*$/
@@ -20,32 +21,7 @@ export class QueryError extends Error {
   }
 }
 
-export const KEYS = [
-  'from',
-  'mentions',
-  'quotes',
-  'reposts',
-  'reposted-by',
-  'rel',
-  'is',
-  'has',
-  'domain',
-  'lang',
-  'platform',
-  'since',
-  'until',
-  'within',
-  'saved',
-  'saved-since',
-  'saved-until',
-  'tag',
-  'folder',
-  'state',
-  'type',
-  'sensitive',
-] as const
-
-export type Key = (typeof KEYS)[number]
+export { KEYS, type Key } from './keys.ts'
 
 interface Span {
   start: number
@@ -69,13 +45,31 @@ export type Leaf = Extract<
   { type: 'word' | 'phrase' | 'hashtag' | 'atom' }
 >
 
-/** Cost limits: what one query may ask for. */
-export const LIMITS = {
+export interface Limits {
+  atoms: number
+  depth: number
+  alternatives: number
+  value: number
+}
+
+/** Cost limits: what one query of an agent's may ask for. */
+export const LIMITS: Limits = {
   atoms: 16,
   depth: 4,
   alternatives: 8,
   value: 64,
-} as const
+}
+
+/**
+ * The owner's (the web app, folders): as much as the list's filter could
+ * say (100 authors, 100 tags, 500 characters of search), and then some.
+ */
+export const OWNER_LIMITS: Limits = {
+  atoms: 1024,
+  depth: 16,
+  alternatives: 128,
+  value: 4096,
+}
 
 type Raw =
   | ({ type: 'empty' } & Span)
@@ -93,7 +87,8 @@ const runes = (text: string) => [...text].length
 function checkBalance(text: string): void {
   const open: number[] = []
   let quote = -1
-  for (const [i, c] of [...text].entries()) {
+  // UTF-16 offsets, as `position` counts.
+  for (const [i, c] of text.split('').entries()) {
     if (quote >= 0) {
       if (c === '"') quote = -1
       continue
@@ -153,7 +148,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/
 const SPAN = /^[1-9]\d{0,3}[dh]$/
 const HANDLE = /^@[\w.]{1,64}$/
 const PLATFORM_HANDLE = /^[a-z][\w-]*:@[\w.]{1,64}$/
-const ACCOUNT_KEY = /^[^/\s]+\/[^/\s]+\.profile\/[^/\s]+$/
+const ACCOUNT_KEY = /^[^/\s]+\/[^/\s]+\/[^/\s]+$/
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
 // A language, optionally with its script (`zh-Hant`), as `catalog.lang`
 // stores them.
@@ -166,6 +161,7 @@ const choices: Partial<Record<Key, Record<string, string>>> = {
   state: { deleted: 'deleted', suspended: 'suspended' },
   type: { post: 'post', profile: 'profile', account: 'profile' },
   sensitive: { yes: 'yes', no: 'no', true: 'yes', false: 'no' },
+  protected: { yes: 'yes', no: 'no', true: 'yes', false: 'no' },
 }
 
 function validDate(value: string): boolean {
@@ -176,6 +172,18 @@ function validDate(value: string): boolean {
   } catch {
     return false
   }
+}
+
+const INSTANT =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/i
+const MIN = /^[1-9]\d{0,5}$/
+const FOLLOW_SETS = new Set(['following', 'followers', 'mutual'])
+
+/** A moment as RFC 3339 gives it, in UTC; undefined if it is none. */
+function instant(value: string): string | undefined {
+  if (!INSTANT.test(value)) return undefined
+  const at = Date.parse(value)
+  return Number.isNaN(at) ? undefined : new Date(at).toISOString()
 }
 
 /** An account as `from:` and `rel:` take one. */
@@ -213,14 +221,32 @@ function canonicalValue(key: Key, raw: string): string | { error: string } {
         ? value.toLowerCase()
         : { error: `${key}: takes a post id or @handle, not ${value}.` }
     case 'rel': {
+      // `following:@a`, or several accounts and how many of them:
+      // `following:2:@a,@b,@c` (at least 2; 2 of several by default).
       const [set, ...rest] = value.split(':')
-      const of = account(rest.join(':'))
-      if (!['following', 'followers', 'mutual'].includes(set!) || !of)
-        return {
-          error: `rel: takes following:, followers: or mutual: and an account, as rel:following:@alice.`,
-        }
-      return `${set}:${of}`
+      let min: string | undefined
+      if (MIN.test(rest[0] ?? '') && rest.length > 1) min = rest.shift()
+      const accounts = rest
+        .join(':')
+        .split(',')
+        .map((a) => account(a.trim()))
+      const error = {
+        error: `rel: takes following:, followers: or mutual: and an account, as rel:following:@alice, or several and how many of them, as rel:following:2:@a,@b,@c.`,
+      }
+      if (!FOLLOW_SETS.has(set!) || accounts.some((a) => !a)) return error
+      const all = [...new Set(accounts as string[])].toSorted()
+      const least = min ? Number(min) : Math.min(2, all.length)
+      if (least > all.length) return error
+      return least === Math.min(2, all.length)
+        ? `${set}:${all.join(',')}`
+        : `${set}:${least}:${all.join(',')}`
     }
+    case 'protected':
+      return choose(key, value)
+    case 'related':
+      return UUID.test(value)
+        ? value.toLowerCase()
+        : { error: `related: takes the id of a saved post or account.` }
     case 'domain': {
       const domain = domainOf(value)
       return domain ?? { error: `domain: takes a domain such as x.com.` }
@@ -247,7 +273,9 @@ function canonicalValue(key: Key, raw: string): string | { error: string } {
     case 'saved-until':
       return validDate(value)
         ? value
-        : { error: `${key}: takes a date, YYYY-MM-DD.` }
+        : (instant(value) ?? {
+            error: `${key}: takes a date, YYYY-MM-DD, or a moment (2026-11-01T00:00:00+09:00).`,
+          })
     case 'within':
       return SPAN.test(value.toLowerCase())
         ? value.toLowerCase()
@@ -262,6 +290,13 @@ function canonicalValue(key: Key, raw: string): string | { error: string } {
     case 'tag':
     case 'folder':
       return value
+    default:
+      return choose(key, value)
+  }
+}
+
+function choose(key: Key, value: string): string | { error: string } {
+  switch (key) {
     default: {
       if (key === 'is' && value.toLowerCase() === 'reply')
         return {
@@ -351,31 +386,31 @@ export function leaves(
   }
 }
 
-function checkLimits(node: QueryNode): void {
+function checkLimits(node: QueryNode, limits: Limits): void {
   const all = leaves(node)
-  if (all.length > LIMITS.atoms)
+  if (all.length > limits.atoms)
     throw new QueryError(
-      `At most ${LIMITS.atoms} terms in a query; this one has ${all.length}.`,
-      all[LIMITS.atoms]!.leaf.start,
+      `At most ${limits.atoms} terms in a query; this one has ${all.length}.`,
+      all[limits.atoms]!.leaf.start,
     )
   for (const { leaf } of all)
-    if (runes(leaf.value) > LIMITS.value)
+    if (runes(leaf.value) > limits.value)
       throw new QueryError(
-        `A value is at most ${LIMITS.value} characters.`,
+        `A value is at most ${limits.value} characters.`,
         leaf.start,
       )
   // Each operator (AND, OR, -) on a path is one level.
   const walk = (n: QueryNode, above: number) => {
     if (n.type !== 'and' && n.type !== 'or' && n.type !== 'not') return
-    if (above + 1 > LIMITS.depth)
+    if (above + 1 > limits.depth)
       throw new QueryError(
-        `Parentheses, OR and - nest at most ${LIMITS.depth} deep.`,
+        `Parentheses, OR and - nest at most ${limits.depth} deep.`,
         n.start,
       )
-    if (n.type === 'or' && n.items.length > LIMITS.alternatives)
+    if (n.type === 'or' && n.items.length > limits.alternatives)
       throw new QueryError(
-        `At most ${LIMITS.alternatives} alternatives in one OR.`,
-        n.items[LIMITS.alternatives]!.start,
+        `At most ${limits.alternatives} alternatives in one OR.`,
+        n.items[limits.alternatives]!.start,
       )
     for (const item of n.type === 'not' ? [n.item] : n.items)
       walk(item, above + 1)
@@ -387,7 +422,10 @@ function checkLimits(node: QueryNode): void {
  * Read a query: undefined when it is empty. Throws `QueryError` for one
  * that does not parse, names an unknown value or is over a limit.
  */
-export function parseQuery(text: string): QueryNode | undefined {
+export function parseQuery(
+  text: string,
+  limits: Limits = LIMITS,
+): QueryNode | undefined {
   checkBalance(text)
   let raw: Raw
   try {
@@ -399,7 +437,7 @@ export function parseQuery(text: string): QueryNode | undefined {
   }
   if (raw.type === 'empty') return undefined
   const node = build(raw)
-  checkLimits(node)
+  checkLimits(node, limits)
   return node
 }
 

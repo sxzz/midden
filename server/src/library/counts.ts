@@ -135,9 +135,7 @@ export function narrowedCounts(
   narrow: Narrowing,
   extra?: QueryExtra,
 ): FilterCounts {
-  // What the facets say may change without the version moving while
-  // maintenance fills them; and a query's relative times move with the
-  // clock. Counted afresh.
+  // A query's relative times move with the clock: counted afresh.
   if (extra?.volatile) return countCollections(db, base, narrow, extra)
   const since = base.savedWithin
     ? savedSince(base.savedWithin, base.timeZone || undefined)
@@ -155,4 +153,94 @@ export function narrowedCounts(
     byFilter.set(key, counts)
   }
   return counts
+}
+
+/** What a list selects: its filter and what a query adds to it. */
+export interface Selection {
+  filter: CollectionFilter
+  extra?: QueryExtra
+}
+
+/** A selection's counts' key: no order, its relative date resolved. */
+function selectionKey({ filter, extra }: Selection): string {
+  const since = filter.savedWithin
+    ? savedSince(filter.savedWithin, filter.timeZone || undefined)
+    : undefined
+  return `query:${canonicalJson({
+    filter: { ...filter, sort: undefined, order: undefined },
+    since,
+    ...(extra ? { query: extra.key } : {}),
+  })}`
+}
+
+/**
+ * What a selection holds, in total and by entity type, kept until the
+ * library changes (but a query of relative times, counted afresh).
+ */
+export function selectionCounts(
+  db: Database,
+  selection: Selection,
+): FilterCounts {
+  if (selection.extra?.volatile)
+    return countCollections(db, selection.filter, undefined, selection.extra)
+  const key = selectionKey(selection)
+  const byFilter = cache(db).byFilter
+  let counts = byFilter.get(key)
+  if (!counts) {
+    counts = countCollections(db, selection.filter, undefined, selection.extra)
+    byFilter.set(key, counts)
+  }
+  return counts
+}
+
+/**
+ * `selectionCounts` for several: those of a filter alone that tests every
+ * saved collection are counted together, a few to a pass, the rest one by
+ * one, with a turn for other work between passes (see `filterCountsOf`).
+ */
+export async function selectionCountsOf(
+  db: Database,
+  selections: readonly Selection[],
+): Promise<FilterCounts[]> {
+  const result = new Map<string, FilterCounts>()
+  const shared = new Map<string, CollectionFilter>()
+  const alone = new Map<string, Selection>()
+  const keys = selections.map((s) => selectionKey(s))
+  const byFilter = cache(db).byFilter
+  for (const [i, selection] of selections.entries()) {
+    const key = keys[i]!
+    const counts = selection.extra?.volatile ? undefined : byFilter.get(key)
+    if (counts) result.set(key, counts)
+    else if (!selection.extra && sharesCountPass(selection.filter))
+      shared.set(key, selection.filter)
+    else alone.set(key, selection)
+  }
+  let first = true
+  const turn = async () => {
+    if (!first) await new Promise((resolve) => setImmediate(resolve))
+    first = false
+  }
+  const keep = (key: string, counts: FilterCounts, volatile?: boolean) => {
+    result.set(key, counts)
+    if (!volatile) cache(db).byFilter.set(key, counts)
+  }
+  const together = [...shared.keys()]
+  for (let at = 0; at < together.length; at += TOGETHER) {
+    await turn()
+    const chunk = together.slice(at, at + TOGETHER)
+    const counted = countCollectionsTogether(
+      db,
+      chunk.map((key) => shared.get(key)!),
+    )
+    for (const [i, key] of chunk.entries()) keep(key, counted[i]!)
+  }
+  for (const [key, selection] of alone) {
+    await turn()
+    keep(
+      key,
+      countCollections(db, selection.filter, undefined, selection.extra),
+      selection.extra?.volatile,
+    )
+  }
+  return keys.map((key) => result.get(key)!)
 }

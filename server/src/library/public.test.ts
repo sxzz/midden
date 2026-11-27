@@ -436,6 +436,50 @@ describe('public shares', () => {
     ).toMatchObject(NOT_FOUND)
   })
 
+  test('a folder whose query the filter cannot say: the same rules', async () => {
+    const { c, ids, read } = await setup()
+    const tag = updateAnnotation(c.db, ids.x1!, { tagNames: ['公开'] }).tags[0]!
+    const folder = createFolder(c.db, {
+      name: '查询',
+      query: 'tag:公开 OR "quotes a1"',
+    })
+    expect(folder.filter).toBeNull()
+    const slug = share(c, 'folder', folder.id)
+    const shown = await read(slug)
+    expect(shown.body).toEqual({
+      target: 'folder',
+      name: '查询',
+      posts: 2,
+      profiles: 0,
+    })
+    const idsAt = async (path: string) =>
+      ((await read(slug, path)).body as { items: { id: string }[] }).items
+        .map((i) => i.id)
+        .toSorted()
+    expect(await idsAt('/collections')).toEqual([ids.q1, ids.x1].toSorted())
+    expect((await read(slug, `/collections/${ids.q1}`)).status).toBe(200)
+    expect(await read(slug, `/collections/${ids.a1}`)).toMatchObject(NOT_FOUND)
+    // Nothing of the query reaches the visitor: not its tag, not its text.
+    const listed = await read(slug, '/collections')
+    for (const body of [shown.body, listed.body]) {
+      expect(keys(body)).not.toContain('query')
+      expect(keys(body)).not.toContain('tags')
+      expect(JSON.stringify(body)).not.toContain('公开')
+    }
+    // The visitor's q is a keyword search within it, never the language.
+    expect(await idsAt('/collections?q=tag%3A%E5%85%AC%E5%BC%80')).toEqual([])
+    expect(await idsAt('/collections?sensitive=contains')).toEqual([ids.x1])
+    expect(await idsAt('/collections?q=quotes')).toEqual([ids.q1])
+    expect((await read(slug, `/collections?tag=${tag.id}`)).status).toBe(400)
+    expect(
+      (
+        (await read(slug, '/collections/count')).body as {
+          count: number
+        }
+      ).count,
+    ).toBe(2)
+  })
+
   test('media of items outside the share are never issued', async () => {
     const { c, ids, read } = await setup()
     const hidden = getCollection(c, ids.x1!).assets[0]!.sha256!

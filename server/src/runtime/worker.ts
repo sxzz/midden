@@ -214,7 +214,9 @@ export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
       logger.warn({ err: error }, 'composition request check failed')
     }
   })
-  const folderCounts = new FolderCountSweep(db)
+  const folderCounts = new FolderCountSweep(db, {
+    types: ctx.platforms.types(),
+  })
   let counting = false
   every(FOLDER_POLL, () => {
     if (counting || ctx.queue.status().held) return

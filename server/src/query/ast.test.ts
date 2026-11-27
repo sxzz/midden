@@ -79,6 +79,33 @@ describe('reading', () => {
     expect(read('since:2026-01-31 within:30D saved:7d')).toEqual({
       and: ['since:2026-01-31', 'within:30d', 'saved:7d'],
     })
+    // What folders saved as list filters say: moments, in UTC; accounts,
+    // a post's relatives, several perspectives and how many must agree.
+    expect(
+      read('saved-since:2026-11-01T09:00:00+09:00 until:2026-11-02T00:00:00Z'),
+    ).toEqual({
+      and: [
+        'saved-since:2026-11-01T00:00:00.000Z',
+        'until:2026-11-02T00:00:00.000Z',
+      ],
+    })
+    expect(
+      read(
+        'protected:Yes related:0193B6E0-0000-7000-8000-000000000001 from:x/x.profile/42',
+      ),
+    ).toEqual({
+      and: [
+        'protected:yes',
+        'related:0193b6e0-0000-7000-8000-000000000001',
+        'from:x/x.profile/42',
+      ],
+    })
+    expect(read('rel:following:x:@b,@A')).toBe('rel:following:@a,x:@b')
+    expect(read('rel:following:2:@b,@a')).toBe('rel:following:@a,@b')
+    expect(read('rel:mutual:1:@b,@a,@c')).toBe('rel:mutual:1:@a,@b,@c')
+    // A quote in quotes is written twice.
+    expect(read('"say ""hi"""')).toBe('phrase say "hi"')
+    expect(read('tag:"a ""b"""')).toBe('tag:a "b"')
   })
 
   test('printed canonically, and read back the same', () => {
@@ -92,6 +119,8 @@ describe('reading', () => {
       '(a b) OR c',
       '-(a OR b) #x tag:"my tag"',
       'from:@a (is:quote OR is:repost) -lang:ja since:2026-01-01',
+      '"say ""hi""" tag:"a ""b"""',
+      'rel:followers:1:@a,@b protected:no',
     ])
       expect(canonical(canonical(text))).toBe(canonical(text))
   })
@@ -111,7 +140,8 @@ describe('reading', () => {
     expect(error('()')).toMatchObject({ position: 1 })
     expect(error('from:')).toMatchObject({ position: 0 })
     expect(error('cats since:yesterday')).toEqual({
-      message: 'since: takes a date, YYYY-MM-DD.',
+      message:
+        'since: takes a date, YYYY-MM-DD, or a moment (2026-11-01T00:00:00+09:00).',
       position: 5,
     })
     expect(error('since:2026-02-30').message).toContain('YYYY-MM-DD')
@@ -120,6 +150,9 @@ describe('reading', () => {
       'has: takes image, video, media, link.',
     )
     expect(error('#ａ（ｂ）').position).toBe(0)
+    expect(error('rel:following:3:@a,@b').position).toBe(0)
+    expect(error('related:p1').position).toBe(0)
+    expect(error('protected:maybe').position).toBe(0)
   })
 
   test('limits: terms, depth, alternatives, value length', () => {

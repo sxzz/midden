@@ -10,6 +10,7 @@ import {
   listTab,
   localZone,
   retagQuery,
+  savedFilter,
 } from './folders'
 import { listSort, listsProfiles } from './presentation'
 
@@ -150,6 +151,16 @@ it('moves folder filters along with a merged or deleted tag', () => {
   expect(retagQuery('tag=b&not_tag=a', 'a', 'b')).toBe('tag=b')
   expect(retagQuery('not_tag=a&q=x', 'a')).toBe('q=x')
   expect(retagQuery('tag=a%2Cc&tag_mode=all', 'a')).toBe('tag=c')
+})
+
+it('shows a folder by its filter, or by its query when it has none', () => {
+  const saved = { query: 'has:image', sort: 'saved', order: '', tz: '' }
+  expect(savedFilter({ ...saved, filter: 'media_type=image&sort=saved' })).toBe(
+    'media_type=image&sort=saved',
+  )
+  expect(
+    savedFilter({ ...saved, query: 'domain:a.test OR #cats', filter: null }),
+  ).toBe('q=domain%3Aa.test+OR+%23cats&sort=saved')
 })
 
 it('saves perspectives as a set, the default threshold left out', () => {

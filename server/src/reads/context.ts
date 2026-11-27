@@ -4,7 +4,11 @@ import { KeyedLock } from '#blob/locks.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { ReadContext } from '#library/views.ts'
 import type { Logger } from '#log.ts'
-import type { CountPointers, Platforms } from '#platforms/registry.ts'
+import type {
+  CountPointers,
+  Platforms,
+  TypeCatalog,
+} from '#platforms/registry.ts'
 
 /**
  * What a read thread lacks, but for the plain parts in `present`: using the
@@ -30,11 +34,12 @@ export function threadContext(
   reader: Pick<ReadContext, 'db' | 'blobs'>,
   countPointers: CountPointers,
   logger: Logger,
+  types: TypeCatalog,
 ): AccountsContext {
   const read: ReadContext = {
     db: reader.db,
     blobs: reader.blobs,
-    platforms: { countPointers: () => countPointers },
+    platforms: { countPointers: () => countPointers, types: () => types },
   }
   return {
     ...read,

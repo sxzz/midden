@@ -10,7 +10,11 @@ const FOLDER = '00000000-0000-7000-8000-00000000000f'
 const folder = (fields: Partial<Folder>): Folder => ({
   id: FOLDER,
   name: '图片',
+  query: 'has:image',
   filter: 'media_type=image',
+  sort: '',
+  order: '',
+  tz: '',
   count: 3,
   types: { 'x.post': 3 },
   counted_at: '2026-11-01T00:00:00.000Z',
@@ -517,7 +521,7 @@ it('follows a tag merged away in the open folder, still unmodified', async () =>
       tags = tags.filter((t) => t.id !== from)
       folders = folders.map((f) => ({
         ...f,
-        filter: f.filter.replace(from, into),
+        filter: f.filter?.replace(from, into) ?? null,
       }))
       return { tag: tags[0], merged: true, moved: 1 }
     }

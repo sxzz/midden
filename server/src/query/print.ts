@@ -9,8 +9,11 @@ import type { QueryNode } from './ast.ts'
 /** A value that would not read back as one bare value. */
 const NEEDS_QUOTES = /[\s()"]/u
 
+/** Inside quotes, a `"` is written twice. */
+const quoted = (raw: string) => `"${raw.replaceAll('"', '""')}"`
+
 function value(raw: string): string {
-  return NEEDS_QUOTES.test(raw) || !raw ? `"${raw}"` : raw
+  return NEEDS_QUOTES.test(raw) || !raw ? quoted(raw) : raw
 }
 
 export function printQuery(node: QueryNode | undefined): string {
@@ -37,7 +40,7 @@ export function printQuery(node: QueryNode | undefined): string {
     case 'word':
       return node.value
     case 'phrase':
-      return `"${node.value}"`
+      return quoted(node.value)
     case 'hashtag':
       return `#${node.value}`
     case 'atom':

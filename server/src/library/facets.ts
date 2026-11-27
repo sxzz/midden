@@ -16,13 +16,12 @@
 // tables are filled by maintenance (`backfillFacets`), a batch at a time
 // while the worker is idle.
 //
-// `library_version`: none of this moves it. What a folder selects cannot
-// depend on these values yet, since folders store list filters, not
-// queries. When they can (folders storing queries), nothing new is needed
-// for captures: values change only with `catalog.revision_id`, whose
-// trigger already moves the version in the same transaction. Only the
-// backfill writes them on its own, so it would move the version once per
-// batch that changed anything.
+// `library_version`: folders store queries, so what one selects may depend
+// on these values, and its count is kept until the version moves. Captures
+// need nothing more: values change only with `catalog.revision_id`, whose
+// trigger already moves the version in the same transaction. The backfill
+// writes them on its own, so it moves the version once per batch that
+// changed anything.
 import { sql } from 'drizzle-orm'
 import { detectLang } from '#lang/detect.ts'
 import { readSetting } from '#settings.ts'
@@ -312,9 +311,6 @@ export function backfillState(db: Database): BackfillState {
   return { version: FACETS_VERSION, after: 0, done: false }
 }
 
-/** Whether every row's facets are filled, so counts over them may be kept. */
-export const facetsComplete = (db: Database) => backfillState(db).done
-
 /**
  * The next batch of rows catalogued before the facets existed, in one write
  * transaction with the progress it makes; false when there were none left.
@@ -328,7 +324,11 @@ export function backfillBatch(db: Database, size = 500): boolean {
         sql`SELECT id FROM catalog WHERE id > ${state.after} ORDER BY id LIMIT ${size}`,
       )
       .map((row) => row.id)
-    indexFacets(tx, ids)
+    // Folders may select by these values (`#tag`, `lang:`…), and their
+    // counts are kept until `library_version` moves: a batch that wrote
+    // any moves it, as a capture's new revision does.
+    if (indexFacets(tx, ids))
+      tx.run(sql`UPDATE library_version SET n = n + 1 WHERE id = 1`)
     const next: BackfillState = {
       version: FACETS_VERSION,
       after: ids.at(-1) ?? state.after,

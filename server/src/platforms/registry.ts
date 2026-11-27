@@ -18,8 +18,15 @@ export function supports(provider: Provider, name: string, major = 1): boolean {
  */
 export type CountPointers = Record<string, Record<RelationList, string>>
 
+/** The entity types of the platforms: which are posts, which accounts. */
+export interface TypeCatalog {
+  platforms: string[]
+  posts: string[]
+  accounts: string[]
+}
+
 /** What the read threads know of the platforms. */
-export type PlatformFacts = Pick<Platforms, 'countPointers'>
+export type PlatformFacts = Pick<Platforms, 'countPointers' | 'types'>
 
 /** The platforms this server captures from, routed by URL host. */
 export class Platforms {
@@ -43,6 +50,19 @@ export class Platforms {
 
   countPointers(): CountPointers {
     return this.#counts
+  }
+
+  /** Their entity types, as lists of posts and accounts read them. */
+  types(): TypeCatalog {
+    const all = this.all()
+    const names = all.flatMap((p) =>
+      p.description.entityTypes.map((t) => t.name),
+    )
+    return {
+      platforms: all.map((p) => p.description.adapterId).toSorted(),
+      posts: names.filter((n) => !n.endsWith('.profile')).toSorted(),
+      accounts: names.filter((n) => n.endsWith('.profile')).toSorted(),
+    }
   }
 
   all(): Platform[] {

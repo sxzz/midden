@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, notInArray, sql } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import { collectionTags, folders, library, tags } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
+import { tagIdsOf } from './folder-query.ts'
 import type { Database, Executor, Transaction } from '#db/client.ts'
 
 export interface Tag {
@@ -53,15 +54,10 @@ export function listTags(db: Executor): Tag[] {
  */
 export function pruneTags(tx: Transaction): void {
   const kept = tx
-    .select({ filter: folders.filter })
+    .select({ query: folders.query })
     .from(folders)
     .all()
-    .flatMap((folder) => {
-      const filter = new URLSearchParams(folder.filter)
-      return [filter.get('tag'), filter.get('not_tag')]
-        .filter((list): list is string => !!list)
-        .flatMap((list) => list.split(','))
-    })
+    .flatMap((folder) => tagIdsOf(folder.query))
   tx.delete(tags)
     .where(
       and(

@@ -1,7 +1,9 @@
-// A folder (收藏夹) stores the library list's API query, the one the list
-// requests, without the kind: it shows posts and accounts in tabs of their
-// own. The address keeps the list's own form of it (local dates, the tab's
-// entity types left out). These convert between the two.
+// A folder (收藏夹) is a saved query. When the list's own filter says what
+// it holds, the server gives that filter too: the library list's API query,
+// without the kind (it shows posts and accounts in tabs of their own);
+// otherwise the list shows it by its query, as `q`. The address keeps the
+// list's own form of it (local dates, the tab's entity types left out).
+// These convert between the two.
 
 import { defaultRelMin } from './relation-filter'
 
@@ -204,6 +206,35 @@ export function folderFilter(raw: string) {
     a < b ? -1 : a > b ? 1 : x < y ? -1 : x > y ? 1 : 0,
   )
   return new URLSearchParams(entries).toString()
+}
+
+/** A folder as the server answers it: what the list needs to show it. */
+interface SavedFolder {
+  id: string
+  query: string
+  filter: string | null
+  sort: string
+  order: string
+  tz: string
+}
+
+/**
+ * The list filter that shows a folder: the server's, when the list's own
+ * filter says what it holds; else its query as `q`, with its order.
+ */
+export function savedFilter(folder: Omit<SavedFolder, 'id'>) {
+  if (folder.filter !== null) return folder.filter
+  const q = new URLSearchParams()
+  if (folder.query) q.set('q', folder.query)
+  if (folder.sort) q.set('sort', folder.sort)
+  if (folder.order) q.set('order', folder.order)
+  return folderFilter(q.toString())
+}
+
+/** Where a folder's list is. */
+export function folderLink(folder: SavedFolder) {
+  const query = folderQuery(savedFilter(folder))
+  return `/folder/${folder.id}${query ? `?${query}` : ''}`
 }
 
 /** The address query that shows a folder's filter. */

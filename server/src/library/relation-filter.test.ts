@@ -119,7 +119,12 @@ async function setup() {
       .toSorted()
   const read: CaptureContext =
     view === 'read thread'
-      ? threadContext(c, c.platforms.countPointers(), c.logger)
+      ? threadContext(
+          c,
+          c.platforms.countPointers(),
+          c.logger,
+          c.platforms.types(),
+        )
       : c
   const list = (filter: CollectionFilter) =>
     named(listCollections(read, filter).items)

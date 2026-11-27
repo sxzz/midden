@@ -284,7 +284,7 @@ describe('library search', () => {
       filter: 'q=  Whale \t ',
     })
     expect(folder.filter).toBe('q=Whale')
-    expect(filterCounts(ctx.db, folder.filter).count).toBe(2)
+    expect(filterCounts(ctx.db, folder.filter!).count).toBe(2)
     expect(filterCounts(ctx.db, 'q=whale').count).toBe(2)
     expect(all({ q: 'Whale' })).toEqual(['c', 'a'])
 

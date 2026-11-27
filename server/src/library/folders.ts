@@ -2,40 +2,76 @@ import { asc, eq } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import { folders } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
+import { OWNER_LIMITS, parseQuery } from '#query/ast.ts'
+import { filterToQuery } from '#query/convert.ts'
 import { pruneTags } from './annotations.ts'
 import { parseFilterQuery } from './filter-query.ts'
 import { storedCounts, type StoredCounts } from './folder-counts.ts'
-import { checkFilter } from './list.ts'
+import {
+  catalogTypes,
+  displayQuery,
+  folderFilter,
+  rewriteFolderQueries,
+  storedQuery,
+} from './folder-query.ts'
+import { checkFilter, zoneOf } from './list.ts'
 import { revokeOrphanedShares } from './shares.ts'
 import type { Database, Executor } from '#db/client.ts'
+import type { Types } from '#query/compile.ts'
 
 /**
- * A saved library filter (收藏夹) and how many saved items it selects, as
- * last counted (`folder-counts.ts`): null before the first count.
+ * A saved query (收藏夹) and how many saved items it selects, as last
+ * counted (`folder-counts.ts`): null before the first count.
  */
 export interface Folder {
   id: string
   name: string
-  /** The list's query string, without a page cursor. */
-  filter: string
+  /** Its query, tags and folders by name. */
+  query: string
+  /**
+   * The list's query string when the list's filter alone says what the
+   * query does (what the web's filter controls can show); null otherwise.
+   */
+  filter: string | null
+  sort: string
+  order: string
+  tz: string
   count: number | null
   /** The count by the root's entity type, without the empty ones. */
   types: Record<string, number> | null
   /** When it was counted. */
   counted_at: string | null
-  /** The library or the filter changed since: a new count is coming. */
+  /** The library or the query changed since: a new count is coming. */
   stale: boolean
   created_at: string
   updated_at: string
 }
 
-export interface FolderUpdate {
+/**
+ * What a folder is made of: a query (tags and folders by name or id), or a
+ * list filter, which is written as the query that says the same; with its
+ * order and the zone of its relative dates.
+ */
+export interface FolderInput {
   name?: string
+  query?: string
   filter?: string
+  sort?: string
+  order?: string
+  tz?: string
 }
 
 const MAX_NAME = 64
-const MAX_FILTER = 16_384
+const MAX_QUERY = 16_384
+const SORTS = new Set([
+  'relevance',
+  'saved',
+  'updated',
+  'published',
+  'storage',
+  'followers',
+  'following',
+])
 
 const runes = (value: string) => [...value].length
 
@@ -48,8 +84,8 @@ function checkName(raw: string): string {
 
 /**
  * A folder holds posts and accounts alike, and its list shows each kind in a
- * tab of its own, so its entity types only name platforms: whichever kind a
- * type names, the folder keeps both kinds of that platform.
+ * tab of its own, so a filter's entity types only name platforms: whichever
+ * kind a type names, the folder keeps both kinds of that platform.
  */
 function platformsOnly(raw: string): string {
   const params = new URLSearchParams(raw)
@@ -69,25 +105,76 @@ function platformsOnly(raw: string): string {
   return params.toString()
 }
 
-/** The canonical query string, if the list accepts the filter. */
-function canonicalFilter(raw: string): string {
-  if (raw.length > MAX_FILTER) throw new AppError('invalid_filter')
-  const { filter, canonical } = parseFilterQuery(platformsOnly(raw))
-  checkFilter(filter)
-  return canonical
+/** What a folder keeps of its input; absent parts stay as they are. */
+function stored(
+  db: Executor,
+  types: Types,
+  input: FolderInput,
+  self?: string,
+): Partial<{ query: string; sort: string; order: string; tz: string }> {
+  if (input.filter !== undefined) {
+    if (input.filter.length > MAX_QUERY) throw new AppError('invalid_filter')
+    const { filter, canonical } = parseFilterQuery(platformsOnly(input.filter))
+    checkFilter({ ...filter, q: undefined })
+    // The list reads its `q` as a query; the rest says what it always did.
+    const rest = new URLSearchParams(canonical)
+    rest.delete('q')
+    const converted = filterToQuery(rest.toString())
+    const q = filter.q?.trim()
+    if (q) parseQuery(q, OWNER_LIMITS)
+    const query = q ? `(${q}) ${converted.query}`.trim() : converted.query
+    return {
+      ...converted,
+      query: storedQuery(db, types, query, converted.tz, self),
+    }
+  }
+  const out: Partial<{
+    query: string
+    sort: string
+    order: string
+    tz: string
+  }> = {}
+  if (input.tz !== undefined) {
+    if (input.tz && !zoneOf(input.tz)) throw new AppError('invalid_filter')
+    out.tz = input.tz
+  }
+  if (input.sort !== undefined) {
+    if (input.sort && !SORTS.has(input.sort))
+      throw new AppError('invalid_filter')
+    out.sort = input.sort
+  }
+  if (input.order !== undefined) {
+    if (input.order && !['asc', 'desc'].includes(input.order))
+      throw new AppError('invalid_filter')
+    out.order = input.order
+  }
+  if (input.query !== undefined) {
+    if (input.query.length > MAX_QUERY) throw new AppError('invalid_filter')
+    out.query = storedQuery(db, types, input.query, out.tz ?? '', self)
+  }
+  return out
 }
 
 type Row = typeof folders.$inferSelect
 
-function view(row: Row, stored: StoredCounts | undefined): Folder {
+function view(
+  db: Executor,
+  types: Types,
+  row: Row,
+  counts: StoredCounts | undefined,
+): Folder {
   return {
     id: row.id,
     name: row.name,
-    filter: row.filter,
-    count: stored?.counts.count ?? null,
-    types: stored?.counts.types ?? null,
-    counted_at: stored?.countedAt.toISOString() ?? null,
-    stale: stored?.stale ?? true,
+    query: displayQuery(db, row.query),
+    filter: folderFilter(db, types, row),
+    sort: row.sort,
+    order: row.order,
+    tz: row.tz,
+    count: counts?.counts.count ?? null,
+    types: counts?.counts.types ?? null,
+    counted_at: counts?.countedAt.toISOString() ?? null,
+    stale: counts?.stale ?? true,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
   }
@@ -108,73 +195,91 @@ const duplicate = () => new AppError('conflict', '已有同名的收藏夹')
  * Every folder in the order they were made, with their counts as last
  * counted. Nothing is counted here.
  */
-export function listFolders(db: Executor): Folder[] {
+export function listFolders(
+  db: Executor,
+  types: Types = catalogTypes(db),
+): Folder[] {
   const rows = db
     .select()
     .from(folders)
     .orderBy(asc(folders.createdAt), asc(folders.id))
     .all()
-  const stored = storedCounts(db, rows)
-  return rows.map((row) => view(row, stored.get(row.id)))
+  const counts = storedCounts(db, rows)
+  return rows.map((row) => view(db, types, row, counts.get(row.id)))
 }
 
 /** One folder as `listFolders` lists it. */
-export function folderView(db: Executor, id: string): Folder {
+export function folderView(
+  db: Executor,
+  id: string,
+  types: Types = catalogTypes(db),
+): Folder {
   const row = db.select().from(folders).where(eq(folders.id, id)).get()
   if (!row) throw new AppError('not_found')
-  return view(row, storedCounts(db, [row]).get(row.id))
+  return view(db, types, row, storedCounts(db, [row]).get(row.id))
 }
 
 export function createFolder(
   db: Database,
-  input: { name: string; filter: string },
+  input: FolderInput & { name: string },
+  types: Types = catalogTypes(db),
 ): Folder {
   const name = checkName(input.name)
-  const filter = canonicalFilter(input.filter)
   const row = db.transaction((tx) => {
     if (sameName(tx, name)) throw duplicate()
+    const values = stored(tx, types, input)
     const now = new Date()
     return tx
       .insert(folders)
-      .values({ id: newId(), name, filter, createdAt: now, updatedAt: now })
+      .values({ id: newId(), name, ...values, createdAt: now, updatedAt: now })
       .returning()
       .get()
   })
-  return view(row, undefined)
+  return view(db, types, row, undefined)
 }
 
 /**
- * Rename a folder and/or replace its filter. Its stored counts stand until
- * it is counted again, stale when the filter changed.
+ * Rename a folder and/or replace its query, order or zone. Its stored
+ * counts stand until it is counted again, stale when the query changed.
  */
 export function updateFolder(
   db: Database,
   id: string,
-  update: FolderUpdate,
+  update: FolderInput,
+  types: Types = catalogTypes(db),
 ): Folder {
   const name = update.name === undefined ? undefined : checkName(update.name)
-  const filter =
-    update.filter === undefined ? undefined : canonicalFilter(update.filter)
   const row = db.transaction((tx) => {
     if (name !== undefined && sameName(tx, name, id)) throw duplicate()
+    const current = tx.select().from(folders).where(eq(folders.id, id)).get()
+    if (!current) throw new AppError('not_found')
+    const values = stored(tx, types, { tz: current.tz, ...update }, id)
     const updated = tx
       .update(folders)
-      .set({ name, filter, updatedAt: new Date() })
+      .set({ name, ...values, updatedAt: new Date() })
       .where(eq(folders.id, id))
       .returning()
-      .get()
-    if (!updated) throw new AppError('not_found')
-    // A tag kept only for the old filter can go now.
-    if (filter !== undefined) pruneTags(tx)
+      .get()!
+    // A tag kept only for the old query can go now.
+    if (values.query !== undefined) pruneTags(tx)
     return updated
   })
-  return view(row, storedCounts(db, [row]).get(row.id))
+  return view(db, types, row, storedCounts(db, [row]).get(row.id))
 }
 
+/**
+ * Delete a folder; folders that named it (`folder:`) no longer do, as a
+ * folder whose tag was deleted no longer filters on it.
+ */
 export function deleteFolder(db: Database, id: string): void {
   db.transaction((tx) => {
     const row = tx.delete(folders).where(eq(folders.id, id)).returning().get()
     if (!row) throw new AppError('not_found')
+    rewriteFolderQueries(tx, (leaf) =>
+      leaf.type === 'atom' && leaf.key === 'folder' && leaf.value === id
+        ? null
+        : undefined,
+    )
     pruneTags(tx)
     revokeOrphanedShares(tx)
   })

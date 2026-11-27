@@ -115,3 +115,33 @@ export function parseFilterQuery(query: string): {
     canonical: canonical.toString(),
   }
 }
+
+/** The list's query string for a filter (not yet canonical). */
+export function filterString(filter: CollectionFilter): string {
+  const params = new URLSearchParams()
+  const set = (key: string, value: string | undefined) => {
+    if (value) params.set(key, value)
+  }
+  set('q', filter.q)
+  set('entity_type', filter.entityType)
+  set('media_type', filter.mediaType)
+  set('visibility', filter.visibility)
+  set('saved_from', filter.savedFrom)
+  set('saved_before', filter.savedBefore)
+  set('saved_within', filter.savedWithin)
+  set('tz', filter.timeZone)
+  set('sort', filter.sort)
+  set('order', filter.order)
+  for (const author of filter.authors ?? []) params.append('author', author)
+  set('sensitive', filter.sensitive)
+  set('tag', filter.tag)
+  set('tag_mode', filter.tagMode)
+  set('not_tag', filter.notTag)
+  set('related_to', filter.relatedTo)
+  set('post_type', filter.postType)
+  set('source_state', filter.sourceState)
+  for (const key of filter.relOf ?? []) params.append('rel_of', key)
+  set('rel', filter.rel)
+  set('rel_min', filter.relMin)
+  return params.toString()
+}

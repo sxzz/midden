@@ -1,11 +1,7 @@
 import { AppError } from '#errors.ts'
 import { listProfileChanges, type ProfileChanges } from './changes.ts'
-import { filterCounts, narrowedCounts } from './counts.ts'
-import {
-  collectionFilter,
-  parseFilterQuery,
-  type FilterParams,
-} from './filter-query.ts'
+import { narrowedCounts, selectionCounts, type Selection } from './counts.ts'
+import { collectionFilter, type FilterParams } from './filter-query.ts'
 import {
   followGraph,
   type FollowGraph,
@@ -97,18 +93,21 @@ export interface PublicListQuery extends Omit<
  */
 const PUBLIC_SORT = 'published'
 
-function folderFilter(share: OpenShare) {
+function folderSelectionOf(share: OpenShare): Selection {
   if (share.target !== 'folder') throw new AppError('not_found')
-  return parseFilterQuery(share.filter!).filter
+  return share.selection!
 }
 
+/** The share behind a slug, its folder's query read with the platforms'. */
+const open = (ctx: ReadContext, slug: string) =>
+  openShare(ctx.db, slug, ctx.platforms.types())
+
 export function getPublicShare(ctx: ReadContext, slug: string): PublicShare {
-  const share = openShare(ctx.db, slug)
+  const share = open(ctx, slug)
   if (share.target === 'collection')
     return { target: 'collection', collection_id: share.target_id }
-  folderFilter(share)
   // The same cached counts the folder list shows, by root type.
-  const { types } = filterCounts(ctx.db, share.filter!)
+  const { types } = selectionCounts(ctx.db, folderSelectionOf(share))
   const count = (kind: 'post' | 'profile') =>
     Object.entries(types)
       .filter(([type]) => type.endsWith(`.${kind}`))
@@ -208,7 +207,7 @@ function publicViews(
 
 /** The share, if it reaches this collection. */
 function within(ctx: ReadContext, slug: string, id: string): OpenShare {
-  const share = openShare(ctx.db, slug)
+  const share = open(ctx, slug)
   if (!share.scope.contains([id]).has(id)) throw new AppError('not_found')
   return share
 }
@@ -217,11 +216,11 @@ function within(ctx: ReadContext, slug: string, id: string): OpenShare {
  * What a public list starts from: a profile's attached posts when the share
  * shows that profile, else the shared folder's filter.
  */
-function listedBy(share: OpenShare, relatedTo: string | undefined) {
-  if (!relatedTo) return folderFilter(share)
+function listedBy(share: OpenShare, relatedTo: string | undefined): Selection {
+  if (!relatedTo) return folderSelectionOf(share)
   const posts = share.scope.profilePosts(relatedTo)
   if (!posts) throw new AppError('not_found')
-  return posts
+  return { filter: posts }
 }
 
 /**
@@ -232,7 +231,7 @@ function listedBy(share: OpenShare, relatedTo: string | undefined) {
  */
 function publicSelection(share: OpenShare, query: PublicListQuery) {
   const { related_to: relatedTo, cursor, ...params } = query
-  const base = listedBy(share, relatedTo || undefined)
+  const { filter: base, extra } = listedBy(share, relatedTo || undefined)
   const visitor = collectionFilter(params)
   const narrow: Narrowing = {
     q: visitor.q,
@@ -252,6 +251,7 @@ function publicSelection(share: OpenShare, query: PublicListQuery) {
       order: visitor.order ?? 'desc',
     },
     narrow,
+    extra,
     cursor: cursor || undefined,
   }
 }
@@ -262,9 +262,9 @@ export function listPublicCollections(
   slug: string,
   query: PublicListQuery,
 ): Page<CollectionView> {
-  const share = openShare(ctx.db, slug)
-  const { base, narrow, cursor } = publicSelection(share, query)
-  const page = listCollections(ctx, base, cursor, narrow)
+  const share = open(ctx, slug)
+  const { base, narrow, extra, cursor } = publicSelection(share, query)
+  const page = listCollections(ctx, base, cursor, narrow, undefined, extra)
   return {
     items: publicViews(share, page.items),
     ...(page.next_cursor ? { next_cursor: page.next_cursor } : {}),
@@ -277,9 +277,9 @@ export function countPublicCollections(
   slug: string,
   query: PublicListQuery,
 ): FilterCounts {
-  const share = openShare(ctx.db, slug)
-  const { base, narrow } = publicSelection(share, query)
-  return narrowedCounts(ctx.db, base, narrow)
+  const share = open(ctx, slug)
+  const { base, narrow, extra } = publicSelection(share, query)
+  return narrowedCounts(ctx.db, base, narrow, extra)
 }
 
 /**
@@ -291,9 +291,10 @@ export function listPublicAuthors(
   slug: string,
   input: AuthorFilter & { related_to?: string },
 ): Page<Author> {
-  const share = openShare(ctx.db, slug)
+  const share = open(ctx, slug)
   const { related_to: relatedTo, ...filter } = input
-  return listAuthors(ctx, filter, listedBy(share, relatedTo || undefined))
+  const listed = listedBy(share, relatedTo || undefined)
+  return listAuthors(ctx, filter, listed.filter, listed.extra)
 }
 
 export function getPublicCollection(

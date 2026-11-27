@@ -3,6 +3,7 @@ import { isBusy } from '#db/client.ts'
 import { isAppError, type ErrorKind } from '#errors.ts'
 import { isProviderFailure } from '#platforms/platform.ts'
 import { status } from '#platforms/rpc.ts'
+import { QueryError } from '#query/ast.ts'
 import type { Logger } from '#log.ts'
 import type { Context } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
@@ -41,6 +42,12 @@ export function errorResponse(c: Context, error: unknown, logger: Logger) {
   }
   if (isAppError(error))
     return c.json({ error: error.message }, statuses[error.kind])
+  // A query the language cannot read: what, and where in it.
+  if (error instanceof QueryError)
+    return c.json(
+      { error: error.message, code: 'query_invalid', position: error.position },
+      400,
+    )
   if (
     isProviderFailure(error) &&
     (error.code === status.UNAVAILABLE ||

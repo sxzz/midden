@@ -9,6 +9,7 @@ import {
   graph,
   libraryContext,
 } from '#testing/library.ts'
+import { migratedBefore } from '#testing/migrations.ts'
 import { listTags, updateAnnotation } from './annotations.ts'
 import { filterCounts } from './counts.ts'
 import { deleteCollection } from './delete.ts'
@@ -177,7 +178,7 @@ describe('folders', () => {
     )
     for (const folder of folders)
       expect({ count: folder.count, types: folder.types }).toEqual(
-        filterCounts(c.db, folder.filter),
+        filterCounts(c.db, folder.filter!),
       )
   })
 
@@ -209,7 +210,7 @@ describe('folders', () => {
   })
 
   test('the migration leaves the kind out of saved filters', () => {
-    const c = setup()
+    const db = migratedBefore('folder_kindless_filters')
     const before = [
       'entity_type=x.post%2Cinstagram.post',
       'author=a&entity_type=x.profile%2Cinstagram.profile&q=b',
@@ -219,7 +220,7 @@ describe('folders', () => {
       'q=x.post',
       '',
     ]
-    const insert = c.db.$client.prepare(
+    const insert = db.$client.prepare(
       `INSERT INTO folders (id, name, filter, created_at, updated_at)
         VALUES (?, ?, ?, 0, 0)`,
     )
@@ -229,10 +230,10 @@ describe('folders', () => {
     const name = readdirSync(folder).find((n) =>
       n.endsWith('_folder_kindless_filters'),
     )
-    c.db.$client.exec(
+    db.$client.exec(
       readFileSync(new URL(`${name}/migration.sql`, folder), 'utf8'),
     )
-    const after = c.db.$client
+    const after = db.$client
       .prepare('SELECT filter FROM folders ORDER BY id')
       .all()
       .map((row) => row.filter as string)
@@ -281,6 +282,23 @@ describe('folders', () => {
     ).toBe('q=a')
   })
 
+  test('saved from a list filter, whose q is a query', () => {
+    const c = setup()
+    const folder = createFolder(c.db, {
+      name: 'q',
+      filter: 'q=cat+OR+-dog&media_type=image&sort=saved',
+    })
+    expect(folder.query).toBe('(cat OR -dog) has:image')
+    expect(folder.sort).toBe('saved')
+    expect(folder.filter).toBeNull()
+    const words = createFolder(c.db, { name: 'w', filter: 'q=cat+%22OR%22' })
+    expect(words.query).toBe('cat "OR"')
+    expect(words.filter).toBe('q=cat+%22OR%22')
+    expect(() => createFolder(c.db, { name: 'bad', filter: 'q=(cat' })).toThrow(
+      /never closed/,
+    )
+  })
+
   test('reject what the list rejects, and bad names', () => {
     const c = setup()
     for (const filter of [
@@ -293,7 +311,6 @@ describe('folders', () => {
       'saved_within=7d&tz=Nowhere%2FCity',
       'saved_within=7d&saved_from=2026-01-01T00:00:00Z',
       'media_type=audio',
-      `q=${'x'.repeat(501)}`,
       'x'.repeat(20_000),
     ])
       fails(() => createFolder(c.db, { name: 'f', filter }), 'invalid_filter')

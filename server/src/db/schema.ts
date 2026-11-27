@@ -1279,14 +1279,18 @@ export const collectionTags = sqliteTable(
 )
 
 /**
- * Saved library filters (收藏夹). The filter is the list's own query string
- * (`GET /v1/collections` without the cursor), in the canonical form of
- * `library/filter-query.ts`, so new filters need no new columns.
+ * Saved queries (收藏夹): a query of the query language (`#query/`) in its
+ * canonical form, naming tags and folders by id so that renaming them
+ * changes nothing (`library/folders.ts`); empty selects everything. With
+ * the order its list keeps and the zone its relative dates count in.
  */
 export const folders = sqliteTable('folders', {
   id: text().primaryKey(),
   name: text().notNull().unique(),
-  filter: text().notNull(),
+  query: text().notNull().default(''),
+  sort: text().notNull().default(''),
+  order: text().notNull().default(''),
+  tz: text().notNull().default(''),
   createdAt: createdAt(),
   updatedAt: createdAt(),
 })

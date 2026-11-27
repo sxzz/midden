@@ -159,7 +159,10 @@ if (parentPort) {
     (slow) => port.postMessage({ slow } satisfies PoolResponse),
     data.slowQueryMs ?? SLOW_QUERY_MS,
   )
-  const web = threadApi(threadContext(reader, data.countPointers, logger), data)
+  const web = threadApi(
+    threadContext(reader, data.countPointers, logger, data.types),
+    data,
+  )
   keepFinishedRecords()
   // Its connection reads only: the progress of updates is what the worker
   // settled last (`capture/progress.ts`).

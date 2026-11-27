@@ -6,18 +6,17 @@
 import { eq, sql } from 'drizzle-orm'
 import { canonicalJson, sha256Hex } from '#capture/json.ts'
 import { folders, tags } from '#db/schema.ts'
-import { parseFilterQuery } from '#library/filter-query.ts'
 import {
   authorKey,
   defaultRelMin,
   parseAuthorKey,
   type CollectionFilter,
   type Identity,
-  type Narrowing,
   type QueryExtra,
 } from '#library/list.ts'
 import { isUUID } from '#library/read.ts'
 import { fold } from '#library/search-text.ts'
+import { OWNER_LIMITS } from '#query/ast.ts'
 import { compileQuery, resolveAccounts } from '#query/compile.ts'
 import { describeQuery } from '#reads/slow.ts'
 import { AgentError, invalid, notFound } from './errors.ts'
@@ -76,16 +75,6 @@ const LIST_KEYS = new Set([
   'not_tag',
   'rel_of',
 ])
-/** What a folder's filter cannot be narrowed by: it would widen it. */
-const NOT_NARROWING = [
-  'tag',
-  'tag_mode',
-  'not_tag',
-  'related_to',
-  'rel_of',
-  'rel',
-  'rel_min',
-]
 const SORTS: Record<Kind, string[]> = {
   posts: ['relevance', 'published', 'saved', 'updated', 'storage'],
   accounts: [
@@ -303,20 +292,11 @@ function tagNames(db: Executor, ids: string): { id: string; name: string }[] {
 
 /**
  * The types a list of `kind` reads: those of the given platforms, or of
- * every platform. A folder (`folder`) keeps both kinds of each platform it
- * names, or leaves types out.
+ * every platform.
  */
-function typesOf(
-  r: AgentReader,
-  kind: Kind | 'folder',
-  platforms: string[],
-): string | undefined {
+function typesOf(r: AgentReader, kind: Kind, platforms: string[]): string {
   const on = (type: string) =>
     !platforms.length || platforms.includes(type.split('.', 1)[0]!)
-  if (kind === 'folder')
-    return platforms.length
-      ? [...r.types.posts, ...r.types.accounts].filter(on).toSorted().join(',')
-      : undefined
   return r.types[kind].filter(on).toSorted().join(',')
 }
 
@@ -372,7 +352,7 @@ function authorKeys(
  */
 export function filterOf(
   r: AgentReader,
-  kind: Kind | 'folder',
+  kind: Kind,
   params: Params,
   unknown?: string[],
 ): CollectionFilter {
@@ -407,7 +387,7 @@ export function filterOf(
       )
   }
   const sort = single(params, 'sort')
-  if (sort && kind !== 'folder') oneOf('sort', sort, SORTS[kind])
+  if (sort) oneOf('sort', sort, SORTS[kind])
   const order = single(params, 'order')
   if (order) oneOf('order', order, ['desc', 'asc'])
   const relatedTo = single(params, 'related_to')
@@ -524,43 +504,11 @@ export function describe(
   return out
 }
 
-/** The library's query string for a filter, as folders store it. */
-export function filterQueryString(filter: CollectionFilter): string {
-  const params = new URLSearchParams()
-  const set = (key: string, value: string | undefined) => {
-    if (value) params.set(key, value)
-  }
-  set('q', filter.q)
-  set('entity_type', filter.entityType)
-  set('media_type', filter.mediaType)
-  set('visibility', filter.visibility)
-  set('saved_from', filter.savedFrom)
-  set('saved_before', filter.savedBefore)
-  set('saved_within', filter.savedWithin)
-  set('tz', filter.timeZone)
-  set('sort', filter.sort)
-  set('order', filter.order)
-  for (const author of filter.authors ?? []) params.append('author', author)
-  set('sensitive', filter.sensitive)
-  set('tag', filter.tag)
-  set('tag_mode', filter.tagMode)
-  set('not_tag', filter.notTag)
-  set('related_to', filter.relatedTo)
-  set('post_type', filter.postType)
-  set('source_state', filter.sourceState)
-  for (const key of filter.relOf ?? []) params.append('rel_of', key)
-  set('rel', filter.rel)
-  set('rel_min', filter.relMin)
-  return params.toString()
-}
-
 // --- Searches ---------------------------------------------------------------
 
 export interface Search {
-  /** The filter the list starts from: the folder's, or the request's. */
+  /** The filter the list reads: the request's, the folder's and the query's. */
   filter: CollectionFilter
-  /** With a folder, the request's own conditions, which only narrow it. */
-  narrow?: Narrowing
   /** What the query (`q`) says that the filter cannot. */
   extra?: QueryExtra
   /** The query in its canonical form. */
@@ -578,7 +526,8 @@ export interface Search {
 export interface FolderRef {
   id: string
   name: string
-  filter: CollectionFilter
+  sort: string
+  order: string
 }
 
 export function findFolder(db: Executor, id: string): FolderRef {
@@ -586,10 +535,20 @@ export function findFolder(db: Executor, id: string): FolderRef {
     ? db.select().from(folders).where(eq(folders.id, id.toLowerCase())).get()
     : undefined
   if (!row) throw notFound(`No folder has the id ${id}.`)
+  return { id: row.id, name: row.name, sort: row.sort, order: row.order }
+}
+
+/** Two queries' SQL in one statement (their `WITH` names apart). */
+function bothExtras(
+  a: QueryExtra | undefined,
+  b: QueryExtra | undefined,
+): QueryExtra | undefined {
+  if (!a || !b) return a ?? b
   return {
-    id: row.id,
-    name: row.name,
-    filter: parseFilterQuery(row.filter).filter,
+    ctes: [...a.ctes, ...b.ctes],
+    where: sql`${a.where} AND ${b.where}`,
+    key: `${a.key}\n${b.key}`,
+    ...(a.volatile || b.volatile ? { volatile: true } : {}),
   }
 }
 
@@ -605,59 +564,55 @@ const SCOPES = [
   'related_to',
 ]
 
-/** Read a search of `kind` from its parameters. */
+/**
+ * Read a search of `kind` from its parameters: the structured filters,
+ * the query (`q`) adding to them, and a folder (`folder=`) whose query
+ * holds too, as `folder:` in the query would.
+ */
 export function readSearch(r: AgentReader, kind: Kind, params: Params): Search {
   checkKeys(params, searchKeys(kind))
   const size = pageSize(params)
   const view = viewOf(params)
   const folderId = single(params, 'folder')
-  const widening = NOT_NARROWING.filter((key) => values(params, key).length)
-  if (folderId && widening.length)
-    throw invalid(
-      `With folder, other conditions only narrow it; ${widening.join(', ')} cannot be added. Save a folder with them instead.`,
-    )
   // `q` is the query language; the rest the list's own filter.
   const { q: _, ...structured } = params
   const q = single(params, 'q')
   const unknown: string[] = []
   const own = filterOf(r, kind, structured, unknown)
+  const folder = folderId ? findFolder(r.db, folderId) : undefined
+  const timeZone = own.timeZone ? { timeZone: own.timeZone } : {}
+  // The folder first, as the owner saved it; then the agent's query.
+  const inFolder = folder
+    ? compileQuery(`folder:${folder.id}`, {
+        db: r.db,
+        types: r.types,
+        kind,
+        filter: own,
+        scoped: true,
+        limits: OWNER_LIMITS,
+        prefix: 'folder',
+        ...timeZone,
+      })
+    : undefined
+  const base = inFolder?.filter ?? own
   const compiled = q
     ? compileQuery(q, {
         db: r.db,
         types: r.types,
         kind,
-        filter: own,
-        folder: !!folderId,
-        canScope: !widening.length,
-        scoped: SCOPES.some((key) => values(params, key).length),
-        ...(own.timeZone ? { timeZone: own.timeZone } : {}),
+        filter: base,
+        scoped: !!folder || SCOPES.some((key) => values(params, key).length),
+        ...timeZone,
       })
     : undefined
-  const lowered = compiled?.filter ?? own
-  const folder = folderId ? findFolder(r.db, folderId) : compiled?.folder
-  let filter = lowered
-  let narrow: Narrowing | undefined
-  if (folder) {
-    const {
-      sort,
-      order,
-      relatedTo,
-      tag,
-      tagMode,
-      notTag,
-      relOf,
-      rel,
-      relMin,
-      ...rest
-    } = lowered
-    narrow = rest
-    filter = {
-      ...folder.filter,
-      ...(sort ? { sort } : {}),
-      ...(order ? { order } : {}),
-    }
+  const filter: CollectionFilter = {
+    ...(compiled?.filter ?? base),
+    // The folder's order unless the request gives one.
+    ...(folder && !own.sort && folder.sort ? { sort: folder.sort } : {}),
+    ...(folder && !own.order && folder.order ? { order: folder.order } : {}),
   }
-  const searching = !!(filter.q?.trim() || narrow?.q?.trim())
+  const extra = bothExtras(inFolder?.extra, compiled?.extra)
+  const searching = !!filter.q?.trim()
   let sort = filter.sort || ''
   if (!SORTS[kind].includes(sort)) sort = ''
   if (!sort || sort === 'relevance') sort = searching ? 'relevance' : 'updated'
@@ -677,14 +632,13 @@ export function readSearch(r: AgentReader, kind: Kind, params: Params): Search {
     ...(sort === 'relevance' ? {} : { order: filter.order || 'desc' }),
   }
   const bound = sha256Hex(
-    canonicalJson({ kind, filter, narrow, query: compiled?.parsed }),
+    canonicalJson({ kind, filter, query: extra?.key ?? compiled?.parsed }),
   ).slice(0, 24)
   describeQuery(JSON.stringify(applied))
   const cursor = single(params, 'cursor')
   return {
     filter,
-    narrow,
-    ...(compiled?.extra ? { extra: compiled.extra } : {}),
+    ...(extra ? { extra } : {}),
     ...(compiled ? { parsed: compiled.parsed } : {}),
     ...(unknown.length && !own.authors?.length ? { empty: true } : {}),
     applied,

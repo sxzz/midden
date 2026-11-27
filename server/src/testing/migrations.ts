@@ -8,12 +8,8 @@ import { openDatabase, type Database } from '#db/client.ts'
 const MIGRATIONS = fileURLToPath(new URL('../../drizzle', import.meta.url))
 const INTEGER = /INT/i
 
-/**
- * A database with the migrations up to the one named `before`, without it:
- * the schema a deployed database had before it, to fill with rows of that
- * shape. `migrateRest` applies the others.
- */
-export function migratedBefore(before: string, file = ':memory:'): Database {
+/** A folder of the migrations up to the one named `before`, without it. */
+function migrationsBefore(before: string): string {
   const all = readdirSync(MIGRATIONS).toSorted()
   const index = all.findIndex((name) => name.endsWith(`_${before}`))
   if (index === -1) throw new Error(`no migration ${before}`)
@@ -22,13 +18,25 @@ export function migratedBefore(before: string, file = ':memory:'): Database {
     cpSync(path.join(MIGRATIONS, name), path.join(dir, name), {
       recursive: true,
     })
+  return dir
+}
+
+/**
+ * A database with the migrations up to the one named `before`, without it:
+ * the schema a deployed database had before it, to fill with rows of that
+ * shape. `migrateRest` applies the others.
+ */
+export function migratedBefore(before: string, file = ':memory:'): Database {
   const db = openDatabase(file, { migrate: false })
-  migrate(db, { migrationsFolder: dir })
+  migrate(db, { migrationsFolder: migrationsBefore(before) })
   return db
 }
 
-export function migrateRest(db: Database): void {
-  migrate(db, { migrationsFolder: MIGRATIONS })
+/** The other migrations; with `before`, only those up to that one. */
+export function migrateRest(db: Database, before?: string): void {
+  migrate(db, {
+    migrationsFolder: before ? migrationsBefore(before) : MIGRATIONS,
+  })
 }
 
 interface Column {

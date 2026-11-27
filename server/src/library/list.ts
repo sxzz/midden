@@ -140,7 +140,7 @@ const REL_MIN = /^[1-9]\d{0,5}$/
 const WITHIN = /^([1-9]\d{0,3})d$/
 
 /** A time zone Temporal knows, or undefined. */
-function zoneOf(raw: string): string | undefined {
+export function zoneOf(raw: string): string | undefined {
   if (raw.length > 64) return undefined
   try {
     return Temporal.Now.zonedDateTimeISO(raw).timeZoneId
@@ -838,9 +838,10 @@ export function selectedAmong(
   db: Executor,
   input: CollectionFilter,
   ids: readonly string[],
+  extra?: QueryExtra,
 ): Set<string> {
   if (!ids.length) return new Set()
-  const { ctes, source, where } = select(db, input)
+  const { ctes, source, where } = select(db, input, undefined, false, extra)
   return new Set(
     db
       .all<{ id: string }>(
@@ -892,8 +893,15 @@ export function updateSelection(
   db: Executor,
   input: CollectionFilter,
   limit: number,
+  extra?: QueryExtra,
 ): string[] {
-  const { checked, ctes, source, where } = select(db, input)
+  const { checked, ctes, source, where } = select(
+    db,
+    input,
+    undefined,
+    false,
+    extra,
+  )
   return db
     .all<{ id: string }>(
       sql`
@@ -1048,6 +1056,7 @@ export function listAuthors(
   ctx: Reader,
   input: AuthorFilter = {},
   within: CollectionFilter = {},
+  extra?: QueryExtra,
 ): Page<Author> {
   const q = (input.q ?? '').trim().toLocaleLowerCase()
   const wanted = input.authors ?? []
@@ -1061,7 +1070,13 @@ export function listAuthors(
     (input.cursor && String(offset) !== input.cursor)
   )
     throw invalid()
-  const { ctes, source, where } = select(ctx.db, within)
+  const { ctes, source, where } = select(
+    ctx.db,
+    within,
+    undefined,
+    false,
+    extra,
+  )
   // One row per author, labelled by its newest captured name: the name rides
   // at the end of the key max() picks, which prefers a name, then the newest
   // revision. A unit separator ends the revision id.

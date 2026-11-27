@@ -156,11 +156,12 @@ export function aggregate(r: AgentReader, input: { params: Params }) {
     : undefined
   const parsed = typed ? compiled!.parsed : printQuery(impliedPosts(node))
   describeQuery(JSON.stringify({ q: parsed, by, tz: zone, limit }))
-  const base = compiled?.folder
-    ? compiled.folder.filter
-    : (compiled?.filter ?? scope)
-  const narrow = compiled?.folder ? compiled.filter : undefined
-  const selection = wholeSelection(r.db, base, narrow, compiled?.extra)
+  const selection = wholeSelection(
+    r.db,
+    compiled?.filter ?? scope,
+    undefined,
+    compiled?.extra,
+  )
   const local = sql`(m.at + ${TIME.has(by) ? offsetSQL(r, zone) : sql`0`}) / 1000`
   // What each matched item counts under: one key, or several (tags…).
   const keyed: SQL = (() => {

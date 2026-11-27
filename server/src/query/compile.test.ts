@@ -10,12 +10,20 @@ import { typeCatalog } from '#agent/runner.ts'
 import { detectLang, langMatches } from '#lang/detect.ts'
 import { updateAnnotation } from '#library/annotations.ts'
 import { domainsOf, hashtagsOf } from '#library/facets.ts'
-import { createFolder } from '#library/folders.ts'
+import { filterString, parseFilterQuery } from '#library/filter-query.ts'
+import {
+  folderFilter,
+  folderSelection,
+  storedQuery,
+} from '#library/folder-query.ts'
+import { createFolder, updateFolder } from '#library/folders.ts'
 import {
   countCollections,
   listCollections,
   savedSince,
   wholeSelection,
+  type CollectionFilter,
+  type QueryExtra,
 } from '#library/list.ts'
 import { fold } from '#library/search-text.ts'
 import {
@@ -27,6 +35,7 @@ import {
 } from '#testing/library.ts'
 import { parseQuery, QueryError, type Leaf, type QueryNode } from './ast.ts'
 import { compileQuery, type CompileOptions } from './compile.ts'
+import { filterToQuery, wordTerm } from './convert.ts'
 import type { CaptureContext } from '#capture/context.ts'
 import type { FetchResponse } from '#platforms/protocol.ts'
 
@@ -408,6 +417,11 @@ function matches(row: Row, node: QueryNode, all: Row[]): boolean {
       const profile = v === 'profile'
       return row.profile === profile
     }
+    case 'protected':
+      // No account here says whether it is protected.
+      return false
+    case 'related':
+      throw new Error('related: is not generated')
     case 'sensitive': {
       const yes = v === 'yes'
       return row.sensitive === yes
@@ -555,8 +569,8 @@ describe('random queries', () => {
         throw new Error(`${text}: ${String(error)}`, { cause: error })
       }
       if (!compiled) continue
-      const base = compiled.folder ? compiled.folder.filter : compiled.filter
-      const narrow = compiled.folder ? compiled.filter : undefined
+      const base = compiled.filter
+      const narrow = undefined
       const { ctes, source, where } = wholeSelection(
         ctx.db,
         base,
@@ -781,16 +795,16 @@ describe('what the filter can say', () => {
       )
       expect(a!.extra, q).toBeUndefined()
       expect(a!.filter, q).toEqual(b!.filter)
-      expect(a!.narrow, q).toEqual(b!.narrow)
     }
   })
 
-  test('a lone folder: is where the list starts, as folder= is', () => {
+  test('folder: in the query reads as folder= does', () => {
     const folder = ctx.db.get<{ id: string }>(sql`SELECT id FROM folders`)!.id
     const a = readSearch(reader, 'posts', { q: ['folder:imgs cat'] })
     const b = readSearch(reader, 'posts', { folder: [folder], q: ['cat'] })
     expect(a.extra).toBeUndefined()
-    expect([a.filter, a.narrow]).toEqual([b.filter, b.narrow])
+    expect(b.extra).toBeUndefined()
+    expect(a.filter).toEqual(b.filter)
   })
 
   test('only exclusions need a scope', () => {
@@ -803,5 +817,188 @@ describe('what the filter can say', () => {
     expect(() =>
       readSearch(reader, 'posts', { q: ['-#cats'], tag: ['red'] }),
     ).not.toThrow()
+  })
+})
+
+// --- Folders -----------------------------------------------------------------
+
+/** The collections a selection holds, as the list reads it. */
+function members(filter: CollectionFilter, extra?: QueryExtra): string[] {
+  const { ctes, source, where } = wholeSelection(
+    ctx.db,
+    filter,
+    undefined,
+    extra,
+  )
+  return ctx.db
+    .all<{ id: string }>(
+      sql`${ctes} SELECT k.collection_id AS id
+      FROM ${sql.raw(source)} WHERE ${where}`,
+    )
+    .map((r) => r.id)
+    .toSorted()
+}
+
+describe('folders as queries', () => {
+  test('a list filter, converted, selects what it did, as that filter', () => {
+    const tag = (name: string) =>
+      ctx.db.get<{ id: string }>(sql`SELECT id FROM tags WHERE name = ${name}`)!
+        .id
+    const [red, blue] = [tag('red'), tag('blue')]
+    const [alice, bob, carol] = ['1', '2', '3'].map(
+      (id) => `fake/fake.profile/${id}`,
+    ) as [string, string, string]
+    const saved = ctx.db.all<{ at: number }>(
+      sql`SELECT created_at AS at FROM library ORDER BY created_at`,
+    )
+    const middle = saved[Math.floor(saved.length / 2)]!.at
+    // As the web wrote them: in UTC, and in a zone.
+    const utc = new Date(middle).toISOString()
+    const zoned = `${new Date(middle + 9 * 3_600_000).toISOString().slice(0, 19)}+09:00`
+    const filters = [
+      '',
+      'q=cat',
+      'q=the+cat',
+      'q=%E7%8C%AB+sun',
+      'q=%23cats',
+      'q=OR',
+      'q=from%3Aalice',
+      'q=-dog',
+      'q=%22sun%22',
+      'entity_type=fake.post',
+      'entity_type=fake.profile',
+      'entity_type=fake.post%2Cfake.profile',
+      'media_type=image',
+      'media_type=image%2Cvideo',
+      'media_type=text',
+      'media_type=image%2Ctext',
+      'media_type=image%2Ctext%2Cvideo',
+      'visibility=public',
+      'visibility=private',
+      'sensitive=contains',
+      'sensitive=not_contains',
+      `author=${alice}`,
+      `author=${alice}&author=${carol}`,
+      `tag=${red}`,
+      `tag=${red}%2C${blue}`,
+      `tag=${red}%2C${blue}&tag_mode=all`,
+      `not_tag=${red}`,
+      `not_tag=${blue}%2C${red}`,
+      `not_tag=${red}&tag=${blue}`,
+      `related_to=${ids.p0}`,
+      'post_type=post',
+      'post_type=quote',
+      'post_type=repost',
+      'source_state=deleted',
+      `rel=following&rel_of=${alice}`,
+      `rel=followers&rel_of=${alice}&rel_of=${carol}`,
+      `rel=followers&rel_min=1&rel_of=${alice}&rel_of=${carol}`,
+      `rel=mutual&rel_of=${alice}&rel_of=${bob}&rel_of=${carol}`,
+      `saved_from=${encodeURIComponent(utc)}`,
+      `saved_before=${encodeURIComponent(zoned)}`,
+      `saved_from=${encodeURIComponent(zoned)}&saved_before=${encodeURIComponent(utc)}`,
+      'saved_within=30d',
+      'saved_within=7d&tz=Asia%2FTokyo',
+      'order=asc&sort=saved',
+      `entity_type=fake.post&media_type=image&q=cat&sort=published&author=${alice}&author=${bob}&not_tag=${red}`,
+      `entity_type=fake.profile&tag=${blue}&visibility=public`,
+    ]
+    /**
+     * The filter as the folder gives it back: its moments in UTC, its
+     * words as query text (the list reads `q` as a query).
+     */
+    const shown = (raw: string) => {
+      const params = new URLSearchParams(raw)
+      for (const key of ['saved_from', 'saved_before']) {
+        const at = params.get(key)
+        if (at) params.set(key, new Date(at).toISOString())
+      }
+      const q = params.get('q')
+      if (q)
+        params.set(
+          'q',
+          q
+            .split(' ')
+            .map((word) => wordTerm(word))
+            .join(' '),
+        )
+      return parseFilterQuery(params.toString()).canonical
+    }
+    for (const raw of filters) {
+      const { filter } = parseFilterQuery(raw)
+      const converted = filterToQuery(raw)
+      const folder = {
+        ...converted,
+        query: storedQuery(ctx.db, reader.types, converted.query, converted.tz),
+      }
+      const selection = folderSelection(ctx.db, reader.types, folder)
+      const label = `${raw} → ${folder.query}`
+      expect(members(selection.filter, selection.extra), label).toEqual(
+        members(filter),
+      )
+      expect(
+        countCollections(ctx.db, selection.filter, undefined, selection.extra),
+        label,
+      ).toEqual(countCollections(ctx.db, filter))
+      // The same filter, so the same statements and plans; and the filter
+      // controls show it.
+      expect(selection.extra, label).toBeUndefined()
+      const filterShown = folderFilter(ctx.db, reader.types, folder)
+      expect(filterShown, label).toBe(shown(raw))
+      // Which the list reads as the folder.
+      const again = filterToQuery(filterShown!)
+      expect(
+        members(
+          compileQuery(new URLSearchParams(filterShown!).get('q') ?? '', {
+            db: ctx.db,
+            types: reader.types,
+            kind: 'all',
+            filter: { ...parseFilterQuery(filterShown!).filter, q: undefined },
+            scoped: true,
+          })?.filter ?? parseFilterQuery(filterShown!).filter,
+        ),
+        label,
+      ).toEqual(members(filter))
+      expect(again.sort).toBe(converted.sort)
+    }
+  })
+
+  test('include other folders, never themselves', () => {
+    const imgs = ctx.db.get<{ id: string }>(
+      sql`SELECT id FROM folders WHERE name = 'imgs'`,
+    )!.id
+    const cats = createFolder(
+      ctx.db,
+      { name: 'cats', query: 'folder:imgs cat' },
+      reader.types,
+    )
+    const fewer = createFolder(
+      ctx.db,
+      { name: 'fewer', query: 'folder:cats -tag:red' },
+      reader.types,
+    )
+    expect(fewer.query).toBe('folder:cats -tag:red')
+    const whole = folderSelection(ctx.db, reader.types, fewer)
+    const plain = compileQuery('has:image cat -tag:red', {
+      db: ctx.db,
+      types: reader.types,
+      kind: 'all',
+      filter: {},
+      scoped: true,
+    })!
+    expect(members(whole.filter, whole.extra)).toEqual(
+      members(plain.filter, plain.extra),
+    )
+    expect(members(whole.filter, whole.extra).length).toBeGreaterThan(0)
+    // As the list reads it: one filter, no SQL of its own.
+    expect(whole.extra).toBeUndefined()
+    expect(filterString(whole.filter)).toBe(filterString(plain.filter))
+    for (const query of ['folder:fewer', 'cat OR folder:cats'])
+      expect(() => updateFolder(ctx.db, imgs, { query }, reader.types)).toThrow(
+        /include each other/,
+      )
+    expect(() =>
+      updateFolder(ctx.db, cats.id, { query: 'folder:cats' }, reader.types),
+    ).toThrow(/cannot include itself/)
   })
 })

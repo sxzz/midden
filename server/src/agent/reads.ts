@@ -25,12 +25,11 @@ import {
   listProfileChanges,
   type ProfileFieldChange,
 } from '#library/changes.ts'
-import { narrowedCounts } from '#library/counts.ts'
+import { selectionCounts } from '#library/counts.ts'
 import { planDeletion } from '#library/delete.ts'
 import { attachIncomingRelations } from '#library/entities.ts'
-import { parseFilterQuery } from '#library/filter-query.ts'
 import { countFolder } from '#library/folder-counts.ts'
-import { listFolders } from '#library/folders.ts'
+import { listFolders, type Folder } from '#library/folders.ts'
 import { listsOf } from '#library/follow-graph.ts'
 import { followCounts, listFollowChanges } from '#library/follows.ts'
 import { authorKey, listCollections } from '#library/list.ts'
@@ -42,7 +41,6 @@ import { invalid, notFound } from './errors.ts'
 import {
   checkKeys,
   decodeCursor,
-  describe,
   encodeCursor,
   findAccount,
   readSearch,
@@ -119,7 +117,7 @@ function search(r: AgentReader, input: SearchInput) {
       has_more: false,
     }
   const inner = s.cursor ? decodeCursor(s.bound, s.cursor) : undefined
-  const page = listCollections(r, s.filter, inner, s.narrow, s.size, s.extra)
+  const page = listCollections(r, s.filter, inner, undefined, s.size, s.extra)
   const toItem = shaper(
     r,
     s.view,
@@ -134,7 +132,10 @@ function search(r: AgentReader, input: SearchInput) {
     ...(s.cursor
       ? {}
       : {
-          total: narrowedCounts(r.db, s.filter, s.narrow ?? {}, s.extra).count,
+          total: selectionCounts(r.db, {
+            filter: s.filter,
+            ...(s.extra ? { extra: s.extra } : {}),
+          }).count,
         }),
     has_more: !!page.next_cursor,
     ...(page.next_cursor
@@ -442,34 +443,32 @@ function metrics(
 
 // --- The rest -----------------------------------------------------------------
 
-function foldersOf(r: AgentReader) {
-  const all = listFolders(r.db)
+/** A folder as the agent API shows it: its query, order and counts. */
+export function folderJson(r: AgentReader, f: Folder) {
   // Null before the folder's first count.
-  const kinds = (types: Record<string, number> | null, kind: Kind) =>
-    types &&
-    Object.entries(types)
+  const kinds = (kind: Kind) =>
+    f.types &&
+    Object.entries(f.types)
       .filter(([type]) => r.types[kind].includes(type))
       .reduce((sum, [, n]) => sum + n, 0)
   return {
-    items: all.map((f) => {
-      const { filter } = parseFilterQuery(f.filter)
-      return {
-        id: f.id,
-        name: f.name,
-        filter: {
-          ...describe(r, filter),
-          ...(filter.sort ? { sort: filter.sort } : {}),
-          ...(filter.order ? { order: filter.order } : {}),
-        },
-        posts: kinds(f.types, 'posts'),
-        accounts: kinds(f.types, 'accounts'),
-        counted_at: f.counted_at,
-        stale: f.stale,
-        created_at: f.created_at,
-        updated_at: f.updated_at,
-      }
-    }),
+    id: f.id,
+    name: f.name,
+    query: f.query,
+    ...(f.sort ? { sort: f.sort } : {}),
+    ...(f.order ? { order: f.order } : {}),
+    ...(f.tz ? { tz: f.tz } : {}),
+    posts: kinds('posts'),
+    accounts: kinds('accounts'),
+    counted_at: f.counted_at,
+    stale: f.stale,
+    created_at: f.created_at,
+    updated_at: f.updated_at,
   }
+}
+
+function foldersOf(r: AgentReader) {
+  return { items: listFolders(r.db, r.types).map((f) => folderJson(r, f)) }
 }
 
 function tagsOf(r: AgentReader) {
@@ -693,9 +692,9 @@ export const READS = {
   // once written: on a read thread, not on the web process's own.
   // A folder just made or changed, counted for the write that did it.
   folderCounts: (r: AgentReader, input: { id: string }) =>
-    countFolder(r.db, input.id) ?? null,
+    countFolder(r.db, input.id, undefined, r.types) ?? null,
   updatePlan: (r: AgentReader, input: UpdateTargetInput) =>
-    planUpdate(r.db, input),
+    planUpdate(r.db, input, r.types),
   updateRecord: (r: AgentReader, input: { id: string }) =>
     updateRecord(r.db, input.id),
   stopPlan: (r: AgentReader, input: { id: string }) => stopPlan(r.db, input.id),

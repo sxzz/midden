@@ -12,8 +12,8 @@
 {{
   // Keys longest first, so that `saved` does not take `saved-since`.
   const KEYS = [
-    'reposted-by', 'saved-since', 'saved-until', 'sensitive', 'mentions',
-    'platform',
+    'reposted-by', 'saved-since', 'saved-until', 'sensitive', 'protected',
+    'mentions', 'platform', 'related',
     'reposts', 'quotes', 'domain', 'folder', 'within', 'saved', 'since',
     'until', 'state', 'from', 'lang', 'type', 'has', 'rel', 'tag', 'is',
   ]
@@ -51,8 +51,9 @@ Primary
   / Atom
   / Word
 
+// Inside quotes, `""` is one `"`.
 Phrase "quoted phrase"
-  = '"' value:$[^"]* '"' {
+  = '"' value:Quoted '"' {
       return { type: 'phrase', value, start: range().start, end: range().end }
     }
 
@@ -78,7 +79,10 @@ Atom "key:value"
     }
 
 QuotedValue
-  = '"' value:$[^"]* '"' { return { value } }
+  = '"' value:Quoted '"' { return { value } }
+
+Quoted
+  = chars:('""' { return '"' } / [^"])* { return chars.join('') }
 
 Word "word"
   = !OrKeyword !"-" value:$WordChar+ {

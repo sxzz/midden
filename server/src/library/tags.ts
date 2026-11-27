@@ -1,8 +1,8 @@
 import { and, eq, ne, sql } from 'drizzle-orm'
-import { collectionTags, folders, tags } from '#db/schema.ts'
+import { collectionTags, tags } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { checkTagName, type Tag } from './annotations.ts'
-import { parseFilterQuery } from './filter-query.ts'
+import { dropExcludedWanted, rewriteFolderQueries } from './folder-query.ts'
 import type { Database, Transaction } from '#db/client.ts'
 
 export interface TagRename {
@@ -24,31 +24,18 @@ function find(tx: Transaction, id: string): Tag {
   return tag
 }
 
-const ids = (raw: string | null) => (raw ? raw.split(',') : [])
-
 /**
- * Point every folder filter that names the tag at `into` instead, or drop
- * it when there is none, then write the filter canonically again. A list
- * left empty goes, and with it how its tags match. When a merge leaves one
- * tag both wanted and excluded, wanting it wins: the folder was about it.
+ * Point every folder query that names the tag at `into` instead, or drop
+ * it when there is none (from its AND, its OR, its `-`).
  */
 function rewriteFolders(tx: Transaction, id: string, into?: string) {
-  for (const folder of tx.select().from(folders).all()) {
-    const params = new URLSearchParams(folder.filter)
-    const wanted = ids(params.get('tag'))
-    const excluded = ids(params.get('not_tag'))
-    if (!wanted.includes(id) && !excluded.includes(id)) continue
-    const swap = (list: string[]) =>
-      list.flatMap((tag) => (tag === id ? (into ? [into] : []) : [tag]))
-    const tag = swap(wanted)
-    const notTag = swap(excluded).filter((t) => !tag.includes(t))
-    params.set('tag', tag.join(','))
-    params.set('not_tag', notTag.join(','))
-    tx.update(folders)
-      .set({ filter: parseFilterQuery(params.toString()).canonical })
-      .where(eq(folders.id, folder.id))
-      .run()
-  }
+  rewriteFolderQueries(tx, (leaf) => {
+    if (leaf.type !== 'atom' || leaf.key !== 'tag' || leaf.value !== id) return
+    return into ? { ...leaf, value: into } : null
+  })
+  // A merge that leaves a tag both wanted and excluded: wanting it wins,
+  // the folder was about it.
+  if (into) dropExcludedWanted(tx, into)
 }
 
 /**

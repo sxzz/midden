@@ -33,6 +33,7 @@ import {
   hasFilters,
   KINDS,
   listTab,
+  savedFilter,
   tabKind,
   type Kind,
   type ListTab,
@@ -357,7 +358,8 @@ async function show(
 async function kindsFor(filter: string, saved: Folder): Promise<Kind[]> {
   // The folders were just loaded with their own counts.
   // Not counted yet: both tabs, as with an unknown count.
-  if (filter === saved.filter) return folderKinds(saved.types ?? undefined)
+  if (filter === savedFilter(saved))
+    return folderKinds(saved.types ?? undefined)
   if (counted?.filter !== filter) {
     const q = new URLSearchParams(filter)
     try {
@@ -424,7 +426,7 @@ watch(
       query.delete('layout')
       query.delete('tab')
       if (!query.size) {
-        const target = new URLSearchParams(folderQuery(saved.filter))
+        const target = new URLSearchParams(folderQuery(savedFilter(saved)))
         if (layout) target.set('layout', layout)
         if (shownTab) target.set('tab', shownTab)
         void router.replace(`/folder/${saved.id}?${target}`)
@@ -541,7 +543,7 @@ const modified = computed(
   () =>
     !!folder.value &&
     !!folderList.query.value &&
-    folderModified(folderList.query.value, folder.value.filter),
+    folderModified(folderList.query.value, savedFilter(folder.value)),
 )
 const canSave = computed(() => home.value && hasFilters(shownQuery.value))
 type Sheet =
@@ -580,7 +582,7 @@ async function saveFolder(name: string) {
     const created = await createFolder(name, folderFilter(query))
     sheet.value = ''
     toast('已存为收藏夹')
-    const address = new URLSearchParams(folderQuery(created.filter))
+    const address = new URLSearchParams(folderQuery(savedFilter(created)))
     const layout = new URLSearchParams(query).get('layout')
     if (layout) address.set('layout', layout)
     address.set('tab', kind)

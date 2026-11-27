@@ -506,7 +506,7 @@ describe('folder_filter_tz', () => {
         created_at: 1,
         updated_at: 1,
       })
-    migrateRest(db)
+    migrateRest(db, 'folder_queries')
     expect(
       Object.fromEntries(
         db.$client
@@ -520,5 +520,101 @@ describe('folder_filter_tz', () => {
       words: 'q=time_zone%3DUTC',
       plain: 'media_type=image',
     })
+  })
+})
+
+describe('folder_queries', () => {
+  test('every folder’s filter becomes the query that says the same', () => {
+    const db = migratedBefore('folder_queries')
+    const red = '0193b6e0-0000-7000-8000-00000000000a'
+    const blue = '0193b6e0-0000-7000-8000-00000000000b'
+    const post = '0193b6e0-0000-7000-8000-00000000000c'
+    const filters = {
+      empty: '',
+      words: 'q=cat+OR+-dog+%23cats+from%3Ax+say%22hi%22',
+      kinds:
+        'entity_type=x.post%2Cx.profile%2Cinstagram.post&media_type=image%2Ctext',
+      mine: `author=x%2Fx.profile%2F1&author=x%2Fx.profile%2F2&tag=${red}%2C${blue}&tag_mode=all&not_tag=${post}`,
+      some: `tag=${red}%2C${blue}&visibility=private&sensitive=not_contains&post_type=quote&source_state=deleted&related_to=${post}`,
+      follows:
+        'rel=mutual&rel_of=x%2Fx.profile%2F2&rel_of=x%2Fx.profile%2F1&rel_min=1',
+      dates:
+        'saved_from=2026-11-01T00%3A00%3A00%2B09%3A00&saved_before=2026-11-02T00%3A00%3A00.000Z&order=asc&sort=saved',
+      recent: 'saved_within=7d&tz=Asia%2FTokyo&sort=published',
+      // A zone without a relative date meant nothing.
+      zoneless: 'tz=Asia%2FTokyo',
+    }
+    for (const [id, filter] of Object.entries(filters))
+      insertRow(db, 'folders', {
+        id,
+        name: id,
+        filter,
+        created_at: 1,
+        updated_at: 1,
+      })
+    migrateRest(db)
+    expect(columns(db, 'folders')).toEqual([
+      'id',
+      'name',
+      'created_at',
+      'updated_at',
+      'query',
+      'sort',
+      'order',
+      'tz',
+    ])
+    const rows = db.$client
+      .prepare('SELECT id, query, sort, "order", tz FROM folders')
+      .all()
+    expect(Object.fromEntries(rows.map(({ id, ...row }) => [id, row]))).toEqual(
+      {
+        empty: { query: '', sort: '', order: '', tz: '' },
+        words: {
+          query: 'cat "OR" "-dog" "#cats" "from:x" "say""hi"""',
+          sort: '',
+          order: '',
+          tz: '',
+        },
+        kinds: {
+          query:
+            '((platform:instagram type:post) OR platform:x) (has:image OR -has:media)',
+          sort: '',
+          order: '',
+          tz: '',
+        },
+        mine: {
+          query: `(from:x/x.profile/1 OR from:x/x.profile/2) tag:${red} tag:${blue} -tag:${post}`,
+          sort: '',
+          order: '',
+          tz: '',
+        },
+        some: {
+          query: `protected:yes sensitive:no (tag:${red} OR tag:${blue}) related:${post} is:quote state:deleted`,
+          sort: '',
+          order: '',
+          tz: '',
+        },
+        follows: {
+          query: 'rel:mutual:1:x/x.profile/1,x/x.profile/2',
+          sort: '',
+          order: '',
+          tz: '',
+        },
+        dates: {
+          query:
+            'saved-since:2026-10-31T15:00:00.000Z saved-until:2026-11-02T00:00:00.000Z',
+          sort: 'saved',
+          order: 'asc',
+          tz: '',
+        },
+        recent: {
+          query: 'saved:7d',
+          sort: 'published',
+          order: '',
+          tz: 'Asia/Tokyo',
+        },
+        zoneless: { query: '', sort: '', order: '', tz: '' },
+      },
+    )
   })
 })

@@ -66,11 +66,5 @@ export function inlineReads(reader: AgentReader): Reads {
 
 /** The entity types of the platforms, as lists of posts and accounts read. */
 export function typeCatalog(platforms: Platforms): TypeCatalog {
-  const all = platforms.all()
-  const names = all.flatMap((p) => p.description.entityTypes.map((t) => t.name))
-  return {
-    platforms: all.map((p) => p.description.adapterId).toSorted(),
-    posts: names.filter((n) => !n.endsWith('.profile')).toSorted(),
-    accounts: names.filter((n) => n.endsWith('.profile')).toSorted(),
-  }
+  return platforms.types()
 }

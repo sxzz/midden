@@ -725,16 +725,14 @@ describe('writes', () => {
   test('folders are saved from the search’s terms and scope searches', async () => {
     const f = await setup()
     const made = await f.call('/folders', {
-      body: {
-        name: 'Alice',
-        filter: { author: 'fake:@alice', sort: 'published' },
-      },
+      body: { name: 'Alice', query: 'from:fake:@ALICE', sort: 'published' },
     })
     expect(made.status).toBe(201)
     expect(made.json).toEqual({
       id: expect.any(String),
       name: 'Alice',
-      filter: { author: ['fake/fake.profile/7'], sort: 'published' },
+      query: 'from:fake:@alice',
+      sort: 'published',
       posts: 2,
       accounts: 0,
       counted_at: expect.any(String),
@@ -754,20 +752,38 @@ describe('writes', () => {
       order: 'desc',
     })
     expect(scoped.json.total).toBe(2)
-    const widening = await f.call(`/posts?folder=${made.json.id}&tag=x`)
-    expect(widening.json.message).toContain('only narrow')
+    // Any other parameter narrows it further, tags too.
+    await f.call(`/posts/${f.ids.p1}/tags`, { body: { tag: 'cats' } })
+    const tagged = await f.call(`/posts?folder=${made.json.id}&tag=cats`)
+    expect(ids(tagged.json.items)).toEqual([f.ids.p1])
+    const nested = await f.call(
+      `/posts?q=${encodeURIComponent(`folder:"${made.json.name}" cat`)}`,
+    )
+    expect(ids(nested.json.items)).toEqual([f.ids.p1, f.ids.p2])
 
     const renamed = await f.call(`/folders/${made.json.id}`, {
       method: 'PATCH',
-      body: { name: 'Bob', filter: { author: ['fake:@bob'] } },
+      body: { name: 'Bob', query: 'from:fake:@bob' },
     })
-    expect(renamed.json.filter).toEqual({ author: ['fake/fake.profile/8'] })
+    expect(renamed.json.query).toBe('from:fake:@bob')
     expect(renamed.json.posts).toBe(2)
     const taken = await f.call('/folders', {
-      body: { name: 'Bob', filter: {} },
+      body: { name: 'Bob', query: '' },
     })
     expect(taken.status).toBe(409)
     expect(taken.json.error).toBe('conflict')
+    const invalid = await f.call('/folders', {
+      body: { name: 'Bad', query: 'from:' },
+    })
+    expect(invalid.status).toBe(400)
+    expect(invalid.json).toEqual(
+      expect.objectContaining({ error: 'query_invalid', position: 0 }),
+    )
+    const self = await f.call(`/folders/${made.json.id}`, {
+      method: 'PATCH',
+      body: { query: 'folder:Bob' },
+    })
+    expect(self.status).toBe(400)
   })
 
   test('captures and updates answer with where to follow them', async () => {
@@ -851,7 +867,7 @@ describe('writes', () => {
     expect(off.json.enabled).toBe(false)
     expect((await f.call('/watches')).json.items).toEqual([off.json])
     const folder = (
-      await f.call('/folders', { body: { name: 'Cats', filter: { q: 'cat' } } })
+      await f.call('/folders', { body: { name: 'Cats', query: 'cat' } })
     ).json
     expect(
       (

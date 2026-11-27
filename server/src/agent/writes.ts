@@ -23,31 +23,20 @@ import {
   type Annotation,
 } from '#library/annotations.ts'
 import { countWrittenFolder } from '#library/folder-counts.ts'
-import {
-  createFolder,
-  folderView,
-  updateFolder,
-  type Folder,
-} from '#library/folders.ts'
+import { createFolder, folderView, updateFolder } from '#library/folders.ts'
 import { isUUID } from '#library/read.ts'
 import { revokeShare } from '#library/shares.ts'
 import { renameTag } from '#library/tags.ts'
 import { AgentError, invalid, notFound } from './errors.ts'
 import { body, type AgentEnv } from './http.ts'
 import {
-  checkKeys,
-  describe,
-  filterOf,
-  filterQueryString,
   findFolder,
   findTags,
-  FOLDER_FILTER_KEYS,
   savedAccount,
   type AgentReader,
   type Kind,
-  type Params,
 } from './query.ts'
-import { runRead } from './reads.ts'
+import { folderJson, runRead } from './reads.ts'
 import type { Reads } from './runner.ts'
 import type { Context, Hono, MiddlewareHandler } from 'hono'
 import type { BlankSchema } from 'hono/types'
@@ -62,69 +51,23 @@ const writes: MiddlewareHandler<AgentEnv> = async (c, next) => {
   await next()
 }
 
-/** A filter as an object of the search's parameters. */
-const FilterBody = v.record(
-  v.string(),
-  v.union([
-    v.string(),
-    v.number(),
-    v.boolean(),
-    v.array(v.union([v.string(), v.number()])),
-  ]),
-)
-
-function paramsOf(filter: v.InferOutput<typeof FilterBody>): Params {
-  return Object.fromEntries(
-    Object.entries(filter).map(([key, value]) => [
-      key,
-      Array.isArray(value) ? value.map(String) : [String(value)],
+/** A folder's query, its order and the zone its relative dates count in. */
+const FolderBody = {
+  query: v.optional(v.pipe(v.string(), v.maxLength(16_384))),
+  sort: v.optional(
+    v.picklist([
+      '',
+      'relevance',
+      'published',
+      'saved',
+      'updated',
+      'storage',
+      'followers',
+      'following',
     ]),
-  )
-}
-
-const SORTS = [
-  'relevance',
-  'published',
-  'saved',
-  'updated',
-  'storage',
-  'followers',
-  'following',
-]
-
-/** A folder's filter from the API's terms to the library's query string. */
-function folderFilter(r: AgentReader, raw: v.InferOutput<typeof FilterBody>) {
-  const params = paramsOf(raw)
-  checkKeys(params, [...FOLDER_FILTER_KEYS, 'sort', 'order'])
-  const sort = params.sort?.[0]
-  if (sort && !SORTS.includes(sort))
-    throw invalid(`sort must be one of: ${SORTS.join(', ')}.`)
-  return filterQueryString(filterOf(r, 'folder', params))
-}
-
-function folderJson(r: AgentReader, f: Folder) {
-  const { filter } = findFolder(r.db, f.id)
-  // Null before the folder's first count.
-  const kinds = (kind: Kind) =>
-    f.types &&
-    Object.entries(f.types)
-      .filter(([type]) => r.types[kind].includes(type))
-      .reduce((sum, [, n]) => sum + n, 0)
-  return {
-    id: f.id,
-    name: f.name,
-    filter: {
-      ...describe(r, filter),
-      ...(filter.sort ? { sort: filter.sort } : {}),
-      ...(filter.order ? { order: filter.order } : {}),
-    },
-    posts: kinds('posts'),
-    accounts: kinds('accounts'),
-    counted_at: f.counted_at,
-    stale: f.stale,
-    created_at: f.created_at,
-    updated_at: f.updated_at,
-  }
+  ),
+  order: v.optional(v.picklist(['', 'asc', 'desc'])),
+  tz: v.optional(v.pipe(v.string(), v.maxLength(64))),
 }
 
 const annotationJson = (id: string, a: Annotation) => ({
@@ -412,46 +355,38 @@ export function writeRoutes(
   }
 
   // --- Folders ----------------------------------------------------------
-  // A folder made or given a new filter is counted once on a read thread.
+  // A folder made or given a new query is counted once on a read thread.
   const counted = async (id: string) => {
     await countWrittenFolder(
       ctx.db,
       id,
       (folderId) => reads.run('folderCounts', { id: folderId }),
       ctx.logger,
+      reader.types,
     )
-    return folderView(ctx.db, id)
+    return folderView(ctx.db, id, reader.types)
   }
   app.post('/folders', writes, async (c) => {
     const input = await parse(
       c,
-      v.strictObject({ name: v.string(), filter: FilterBody }),
+      v.strictObject({
+        name: v.string(),
+        ...FolderBody,
+        query: FolderBody.query.wrapped,
+      }),
     )
-    const { id } = createFolder(ctx.db, {
-      name: input.name,
-      filter: folderFilter(reader, input.filter),
-    })
+    const { id } = createFolder(ctx.db, input, reader.types)
     return c.json(folderJson(reader, await counted(id)), 201)
   })
 
   app.patch('/folders/:id', writes, async (c) => {
     const input = await parse(
       c,
-      v.strictObject({
-        name: v.optional(v.string()),
-        filter: v.optional(FilterBody),
-      }),
+      v.strictObject({ name: v.optional(v.string()), ...FolderBody }),
     )
     const { id } = findFolder(ctx.db, c.req.param('id'))
-    const folder = updateFolder(ctx.db, id, {
-      name: input.name,
-      filter: input.filter && folderFilter(reader, input.filter),
-    })
-    return c.json(
-      folderJson(
-        reader,
-        input.filter === undefined ? folder : await counted(id),
-      ),
-    )
+    const folder = updateFolder(ctx.db, id, input, reader.types)
+    const changed = [input.query, input.tz].some((x) => x !== undefined)
+    return c.json(folderJson(reader, changed ? await counted(id) : folder))
   })
 }

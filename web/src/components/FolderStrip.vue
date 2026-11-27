@@ -1,12 +1,8 @@
 <script setup vapor lang="ts">
 import { RouterLink } from 'vue-router'
-import { folderQuery } from '../folders'
+import { folderLink as link } from '../folders'
 import type { Folder } from '../api'
 defineProps<{ folders: Folder[] }>()
-const link = (folder: Folder) => {
-  const query = folderQuery(folder.filter)
-  return `/folder/${folder.id}${query ? `?${query}` : ''}`
-}
 </script>
 
 <template>
