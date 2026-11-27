@@ -16,8 +16,8 @@ const theme = computed(() => {
   const dark = darkTheme.value
   if (!dark) return undefined
   return dark.value
-    ? { dark: true, label: '切换到浅色模式', short: '浅色模式' }
-    : { dark: false, label: '切换到深色模式', short: '深色模式' }
+    ? { dark: true, label: '切换到浅色模式' }
+    : { dark: false, label: '切换到深色模式' }
 })
 </script>
 
@@ -64,19 +64,19 @@ const theme = computed(() => {
           <span class="label">{{ tab.label }}</span>
         </AppLink>
       </nav>
-      <div class="bottom">
+      <div class="foot">
         <button
           v-if="theme"
           type="button"
-          class="item theme"
+          class="theme"
           :aria-label="theme.label"
           :title="theme.label"
           @click="toggleTheme"
         >
           <svg
             viewBox="0 0 24 24"
-            width="26"
-            height="26"
+            width="20"
+            height="20"
             fill="none"
             stroke="currentColor"
             stroke-width="1.8"
@@ -92,7 +92,6 @@ const theme = computed(() => {
             </template>
             <path v-else d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" />
           </svg>
-          <span class="label">{{ theme.short }}</span>
         </button>
         <RailUser :user="currentUser()" />
       </div>
@@ -139,8 +138,11 @@ const theme = computed(() => {
 .logo {
   margin: 2px 0 4px;
 }
-/* The theme and who is signed in, at the rail's foot. */
-.bottom {
+/* Who is signed in, at the rail's foot, with the theme as a small icon
+   button: above the avatar while the rail is icons only, at the end of
+   the account row once it has labels. A secondary control, so not set as
+   the tabs. */
+.foot {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -148,13 +150,21 @@ const theme = computed(() => {
   margin-top: auto;
 }
 .theme {
-  /* A button, but set as the links beside it: no browser's own button
-     font, the same size, weight and line as 设置. */
-  font: inherit;
-  font-size: 19px;
-  font-weight: 400;
-  line-height: 24px;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--subtle);
+  transition: background 120ms ease;
+}
+.theme:hover {
+  background: var(--fill);
   color: var(--text);
+}
+.theme:focus-visible {
+  outline-offset: -2px;
 }
 .name {
   font-size: 20px;
@@ -193,9 +203,13 @@ const theme = computed(() => {
   .items {
     align-items: flex-start;
   }
-  .bottom {
+  .foot {
+    flex-direction: row-reverse;
     align-self: stretch;
-    align-items: stretch;
+  }
+  .foot > :deep(.who) {
+    flex: 1;
+    min-width: 0;
   }
   .logo,
   .item {
@@ -205,7 +219,8 @@ const theme = computed(() => {
 }
 @media (prefers-reduced-motion: reduce) {
   .logo,
-  .item {
+  .item,
+  .theme {
     transition: none;
   }
 }

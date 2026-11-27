@@ -48,31 +48,38 @@ test.describe('on a desktop', () => {
   })
 })
 
-test.describe('sized as its neighbours', () => {
-  test.use({ viewport: { width: 1440, height: 800 } })
+for (const width of [1000, 1440]) {
+  test.describe(`a small icon button at ${width}px`, () => {
+    test.use({ viewport: { width, height: 800 } })
 
-  test('the rail’s toggle is set as 设置', async ({ page }) => {
-    await mockDesktop(page)
-    await page.goto('/app/')
-    const look = (name: string) =>
-      rail(page)
-        .getByRole(name === '设置' ? 'link' : 'button', { name })
-        .evaluate((el) => {
-          const style = getComputedStyle(el)
-          const label = getComputedStyle(el.querySelector('.label')!)
-          const icon = el.querySelector('svg')!.getBoundingClientRect()
-          return [
-            style.fontSize,
-            style.fontWeight,
-            style.lineHeight,
-            label.fontSize,
-            icon.width,
-            el.getBoundingClientRect().height,
-          ]
-        })
-    expect(await look('切换到深色模式')).toEqual(await look('设置'))
+    test('beside the account, not set as a tab', async ({ page }) => {
+      await mockDesktop(page)
+      await page.goto('/app/')
+      const toggle = rail(page).getByRole('button', {
+        name: '切换到深色模式',
+      })
+      await expect(toggle).toHaveText('')
+      const box = (await toggle.boundingBox())!
+      expect(box.width).toBeLessThanOrEqual(36)
+      expect(box.height).toBeLessThanOrEqual(36)
+      const avatar = (await rail(page).locator('.avatar').boundingBox())!
+      const tab = (await rail(page)
+        .getByRole('link', { name: '设置' })
+        .boundingBox())!
+      // Below the tabs, in the account's corner: above the avatar while
+      // the rail is icons only, level with it once the rail has labels.
+      expect(box.y).toBeGreaterThan(tab.y + tab.height)
+      if (width >= 1280) {
+        expect(
+          Math.abs(box.y + box.height / 2 - (avatar.y + avatar.height / 2)),
+        ).toBeLessThan(2)
+        expect(box.x).toBeGreaterThan(avatar.x + avatar.width)
+      } else {
+        expect(box.y + box.height).toBeLessThanOrEqual(avatar.y)
+      }
+    })
   })
-})
+}
 
 test('on a phone 设置 has 深色模式', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' })
