@@ -7,6 +7,7 @@ import {
   useRouter,
   type RouteLocationNormalized,
 } from 'vue-router'
+import { menuOpener, type MenuOpener } from '../action-menu'
 import {
   call,
   client,
@@ -527,6 +528,12 @@ function openSheet(value: Sheet) {
   sheetError.value = ''
   sheet.value = value
 }
+/** How the folder's menu was last opened (see action-menu.ts). */
+const folderMenu = shallowRef<MenuOpener>()
+function openFolderMenu(event: MouseEvent) {
+  folderMenu.value = menuOpener(event)
+  openSheet('menu')
+}
 /** Records of the folder updates started here, by folder. */
 const folderRecords = shallowRef<Record<string, string>>({})
 function folderUpdated(recordId: string) {
@@ -728,7 +735,9 @@ const viewProps = computed(() => {
         class="icon-button"
         aria-label="管理收藏夹"
         title="管理收藏夹"
-        @click="openSheet('menu')"
+        aria-haspopup="menu"
+        :aria-expanded="sheet === 'menu'"
+        @click="openFolderMenu"
       >
         <svg
           viewBox="0 0 24 24"
@@ -876,6 +885,7 @@ const viewProps = computed(() => {
     <FolderMenuSheet
       v-if="folder"
       :open="sheet === 'menu'"
+      :opener="folderMenu"
       :name="folder.name"
       :progress="folderRecords[folder.id]"
       :watching="watchTrailing"

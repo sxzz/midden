@@ -144,8 +144,8 @@ test('remove the media of a selection from the 多选 bar', async ({ page }) => 
   await page.getByRole('checkbox', { name: /作者/ }).click()
   await page.getByRole('button', { name: '更多操作' }).click()
   await page
-    .getByRole('dialog', { name: '已选 1 项' })
-    .getByRole('button', { name: '删除媒体' })
+    .getByRole('menu', { name: '已选 1 项' })
+    .getByRole('menuitem', { name: '删除媒体' })
     .click()
   const sheet = page.getByRole('dialog', { name: '删除 1 项的媒体？' })
   await expect(sheet.getByText('其他收藏仍在使用，不会释放空间')).toBeVisible()

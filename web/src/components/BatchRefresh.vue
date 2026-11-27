@@ -1,5 +1,6 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef } from 'vue'
+import { menuOpener, type MenuOpener } from '../action-menu'
 import { toast } from '../composables/useToast'
 import MediaRemovalSheet from './MediaRemovalSheet.vue'
 import SelectionMenuSheet from './SelectionMenuSheet.vue'
@@ -26,6 +27,12 @@ const emit = defineEmits<{
 const sheet = shallowRef(false)
 const removing = shallowRef(false)
 const menu = shallowRef(false)
+/** How the ⋯ menu was last opened (see action-menu.ts). */
+const opener = shallowRef<MenuOpener>()
+function openMenu(event: MouseEvent) {
+  opener.value = menuOpener(event)
+  menu.value = true
+}
 // The menu closes first: each choice is confirmed by its own sheet.
 function openFromMenu(choice: 'media' | 'delete') {
   menu.value = false
@@ -92,7 +99,9 @@ function onStarted(record: string) {
         aria-label="更多操作"
         title="更多操作"
         :disabled="!selected.length"
-        @click="menu = true"
+        aria-haspopup="menu"
+        :aria-expanded="menu"
+        @click="openMenu"
       >
         <svg
           viewBox="0 0 24 24"
@@ -116,6 +125,7 @@ function onStarted(record: string) {
   />
   <SelectionMenuSheet
     :open="menu"
+    :opener="opener"
     :count="selected.length"
     :profiles="profiles"
     @navigate="menu = false"

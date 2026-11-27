@@ -277,7 +277,7 @@ test('watch a folder from its menu', async ({ page }) => {
   })
   await page.goto(`/app/folder/${folderId}`)
   await page.getByRole('button', { name: '管理收藏夹' }).click()
-  await page.getByRole('button', { name: '定期更新', exact: true }).click()
+  await page.getByRole('menuitem', { name: '定期更新', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: '定期更新 收藏夹「猫」' })
   await expect(sheet.getByLabel('单位')).toHaveValue('day')
   await sheet.getByLabel('单位').selectOption('week')
@@ -291,6 +291,6 @@ test('watch a folder from its menu', async ({ page }) => {
   })
   await page.getByRole('button', { name: '管理收藏夹' }).click()
   await expect(
-    page.getByRole('button', { name: '定期更新 · 每周' }),
+    page.getByRole('menuitem', { name: '定期更新 · 每周' }),
   ).toBeVisible()
 })
