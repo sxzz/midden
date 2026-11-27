@@ -7,6 +7,7 @@ import { failDownload, runDownload } from './download.ts'
 import { errorCode, safeError } from './errors.ts'
 import { runCapture } from './fetch.ts'
 import { runFinalize } from './finalize.ts'
+import { failIdentify, runIdentify } from './identify.ts'
 import { failCapture, isActive, loadCapture } from './lifecycle.ts'
 import { failRelated, runRelated } from './related.ts'
 import { failRelations, runRelations } from './relations.ts'
@@ -64,6 +65,12 @@ export function captureHandlers(
       queue: 'capture',
       run: (job) => runCapture(context(), job),
       fail: failCaptureJob,
+    },
+    // Whose a profile named by its handle is, before anything is saved.
+    identify: {
+      queue: 'capture',
+      run: (job) => runIdentify(context(), job),
+      fail: (job, error) => failIdentify(context(), job, error),
     },
     download: {
       queue: 'download',

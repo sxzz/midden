@@ -2,6 +2,7 @@ import { createServer } from 'node:http'
 import { performance } from 'node:perf_hooks'
 import process from 'node:process'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { settleHandleProfiles } from '#capture/identify.ts'
 import { runMaintenance } from '#capture/maintenance.ts'
 import { checkProgress } from '#capture/progress-check.ts'
 import { adoptUpdates, settleProgress } from '#capture/progress.ts'
@@ -124,6 +125,17 @@ export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
     factor = state.factor
   })
 
+  // Profiles saved by handle whose account the library knows move to it
+  // before any job runs (without the network this finishes synchronously);
+  // maintenance looks up the rest while idle.
+  settleHandleProfiles(ctx).then(
+    (settled) => {
+      if (settled.local || settled.waiting)
+        logger.info(settled, 'profiles saved by handle settled')
+    },
+    (error: unknown) =>
+      logger.error({ err: error }, 'settling profiles saved by handle failed'),
+  )
   ctx.queue.start()
 
   // A newer version migrated the database (it started while this one still

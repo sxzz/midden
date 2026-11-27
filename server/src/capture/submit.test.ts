@@ -15,7 +15,7 @@ import { submit } from './submit.ts'
 import type { CaptureContext } from './context.ts'
 
 const post = 'https://twitter.com/someone/status/123?s=20'
-const profile = 'https://x.com/someone'
+const profile = 'https://x.com/i/user/7'
 
 function queued(ctx: CaptureContext) {
   return ctx.db.select({ type: jobs.type, ref: jobs.ref }).from(jobs).all()

@@ -23,6 +23,31 @@ export interface Platform {
   ) => Promise<CheckConnectionResponse>
   /** Reading who an account follows and who follows it, when supported. */
   relations?: Relations
+  /**
+   * Profiles kept by their stable id only: a link naming one by its handle
+   * (`ResolveResponse.handle`) is identified before anything is saved.
+   */
+  identity?: Identity
+}
+
+export interface Identity {
+  /** The provider whose account may be asked when the public answer fails. */
+  providerId: string
+  /** The target of the profile with this stable id. */
+  target: (id: string) => ResolveResponse
+  /**
+   * The stable id of the account that goes by `handle` now. A failure the
+   * platform states outright (no such account) is FAILED_PRECONDITION; one
+   * that says nothing (a lookup that may fail for an existing account) is
+   * UNAVAILABLE, to ask again later. The account is asked only when the
+   * public answer fails.
+   */
+  identify: (
+    handle: string,
+    signal: AbortSignal,
+    /** The account of `providerId`, lent only when called; may be none. */
+    account?: () => Credential | undefined,
+  ) => Promise<string>
 }
 
 /** Who an account follows, or who follows it. */

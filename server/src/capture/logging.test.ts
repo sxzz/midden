@@ -31,9 +31,9 @@ function setup(fetcher: typeof fetch) {
   return { ctx, entries }
 }
 
-const url = 'https://x.com/xiaomouzovo'
-// Not found by id: a by-handle 404 proves nothing and is retried.
-const byId = 'https://x.com/i/user/1546010181070249984'
+// Profiles are read by id only.
+const url = 'https://x.com/i/user/1546010181070249984'
+const byId = url
 
 describe('capture failure logs', () => {
   test('a permanent upstream failure is logged with the request and the job', async () => {

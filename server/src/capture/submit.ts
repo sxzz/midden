@@ -16,6 +16,7 @@ import {
   supports,
 } from '#platforms/registry.ts'
 import { RELATED_FALLBACK_MS, type CaptureContext } from './context.ts'
+import { knownAccount, requestIdentity } from './identity.ts'
 import { canonicalJson, sha256Hex } from './json.ts'
 import {
   budget,
@@ -63,6 +64,12 @@ export interface SubmitInput {
   options?: StoredOptions
   /** The update (更新) this request is an item of. */
   updateId?: string
+  /**
+   * The submission's id and time, given by an identity request becoming
+   * its submission (`identify.ts`): its record keeps both.
+   */
+  submissionId?: string
+  createdAt?: Date
 }
 
 export interface Job {
@@ -128,7 +135,9 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
     input.connectionId = saved.connectionId ?? undefined
   }
   if (!input.url) throw new AppError('invalid_target')
-  const { platform, target } = ctx.platforms.resolve(input.url)
+  const resolved = ctx.platforms.resolve(input.url)
+  const { platform } = resolved
+  let { target } = resolved
   const adapterId = platform.description.adapterId
 
   if (input.connectionId) {
@@ -158,6 +167,20 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
   const anonymous = policy.authentication === 'none'
   if (Boolean(input.connectionId) === anonymous)
     throw new AppError('connection')
+
+  // A profile named by its handle is saved under its account's id only:
+  // known here, or asked of the platform first.
+  if (!target.externalId) {
+    const known = knownAccount(db, adapterId, target.handle!)
+    if (!known)
+      return requestIdentity(ctx, platform, target, {
+        ...request,
+        url: input.url,
+        providerId: input.providerId,
+        key: input.key || newId(),
+      })
+    target = platform.identity!.target(known)
+  }
 
   // A profile's first page starts the run its options budget.
   if (
@@ -351,10 +374,11 @@ export function submit(ctx: CaptureContext, request: SubmitInput): Job {
       ctx.queue.enqueue(tx, 'capture', captureId)
     }
 
-    const submissionId = newId()
+    const submissionId = input.submissionId || newId()
     tx.insert(submissions)
       .values({
         id: submissionId,
+        ...(input.createdAt ? { createdAt: input.createdAt } : {}),
         captureId,
         idemKey: key,
         fingerprint,

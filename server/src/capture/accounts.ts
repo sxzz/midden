@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { knownStableId } from './stable-id.ts'
+import { HANDLE, knownAccount } from './identity.ts'
 import type { Executor } from '#db/client.ts'
 
 /** How an account is named where the app lists it. */
@@ -62,8 +62,8 @@ export function memberAccounts(
   const accounts = new Map<string, string>()
   for (const row of rows) {
     if (row.kind !== 'profile') continue
-    const account = row.externalId.startsWith('handle:')
-      ? knownStableId(db, row)
+    const account = row.externalId.startsWith(HANDLE)
+      ? knownAccount(db, row.platform, row.externalId.slice(HANDLE.length))
       : row.externalId
     if (account) accounts.set(row.id, `${row.platform}/${account}`)
   }

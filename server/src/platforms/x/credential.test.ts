@@ -58,10 +58,7 @@ test('adapter owns X target identity', () => {
     'https://g.fixupx.com/fixture/status/123/zh-CN/',
   ])
     assert.equal(resolveTarget(input).url, 'https://x.com/fixture/status/123')
-  assert.equal(
-    resolveTarget('https://fxtwitter.com/Fixture').externalId,
-    'handle:fixture',
-  )
+  assert.equal(resolveTarget('https://fxtwitter.com/Fixture').handle, 'Fixture')
   for (const input of [
     'https://x.com/fixture/status/123/en',
     'https://api.fxtwitter.com/fixture/status/123',

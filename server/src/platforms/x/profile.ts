@@ -81,7 +81,7 @@ export function normalizeProfile(
     !/^\d+$/.test(user.id) ||
     typeof user.screen_name !== 'string' ||
     typeof user.name !== 'string' ||
-    (!requested.startsWith('handle:') && requested !== user.id)
+    requested !== user.id
   )
     throw new ProviderError(status.UNAVAILABLE, '平台返回的账号资料无效')
   const result = FetchResponse.fromPartial({
@@ -402,36 +402,22 @@ export async function fetchPublicProfile(
 ): Promise<FetchResponse> {
   const responses: SourceResponse[] = []
   const get = (url: string) => publicJSON(url, signal, responses, fetcher)
-  const byHandle = id.startsWith('handle:')
-  const handle = byHandle ? id.slice(7) : `id:${id}`
   let data: any
   try {
+    // Always by id: by handle FxTwitter fails for some existing accounts.
     data = await get(
-      `${endpoint}/${encodeURIComponent(handle)}?about_account=1`,
+      `${endpoint}/${encodeURIComponent(`id:${id}`)}?about_account=1`,
     )
   } catch (error) {
+    // Asked by its id, an account not found no longer exists (deactivated
+    // or deleted).
     if (
       error instanceof ProviderError &&
       error.notFound &&
       !sourceState(error)
     ) {
-      // Asked by its id, an account not found no longer exists (deactivated
-      // or deleted).
-      if (!byHandle) {
-        error.message = '账号已不存在'
-        error.metadata.set(sourceStateKey, 'deleted')
-        throw error
-      }
-      // By handle, FxTwitter also answers a bare 404 for accounts that exist
-      // and are public: slowly (about 2 s against well under that for a real
-      // answer), for some handles only in one letter case. It proves nothing,
-      // so it is a transient failure, never a missing account.
-      const miss = new ProviderError(
-        status.UNAVAILABLE,
-        '暂时无法读取（平台按用户名查询失败）',
-      )
-      miss.handleMiss = true
-      throw miss
+      error.message = '账号已不存在'
+      error.metadata.set(sourceStateKey, 'deleted')
     }
     throw error
   }

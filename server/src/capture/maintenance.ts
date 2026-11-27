@@ -37,6 +37,7 @@ import { backfillBatch } from '#library/facets.ts'
 import { deleteSourceResponses } from '#raw/responses.ts'
 import { collectRawGarbage, sweepRawUploads } from '#raw/upload.ts'
 import { pace, type CaptureContext } from './context.ts'
+import { settleHandleProfiles } from './identify.ts'
 import { HEADER_BYTES, imageSize } from './image-size.ts'
 import { failCapture } from './lifecycle.ts'
 import { dropAllSummaries } from './record-summaries.ts'
@@ -115,6 +116,12 @@ export async function runMaintenance(
     await step('thumbnails to the remote store', () =>
       moveThumbnails(ctx, () => ctx.queue.status().idle),
     )
+  if (slim)
+    await step('profiles saved by handle', async () => {
+      const settled = await settleHandleProfiles(ctx, { network: true })
+      if (settled.local || settled.identified || settled.failed)
+        ctx.logger.info(settled, 'profiles saved by handle settled')
+    })
   if (slim) await step('free pages', () => releaseFreePages(ctx))
   if (errors.length) throw new AggregateError(errors, 'maintenance failed')
 }

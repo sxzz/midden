@@ -2,13 +2,11 @@ import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
 import {
   captures,
-  collectionIdentityAliases,
   collections,
   collectionStates,
   entities,
   entityVersions,
   jobs,
-  library,
 } from '#db/schema.ts'
 import { createXPlatform } from '#platforms/x/index.ts'
 import {
@@ -33,7 +31,6 @@ afterEach(async () => {
   ctx = undefined
 })
 
-const VUEUSE = '1375391728614604800'
 const HOUR = 60 * 60_000
 
 /**
@@ -116,62 +113,6 @@ function listed(c: CaptureContext, id: string, username: string, name = '') {
 }
 
 describe('profile lookups', () => {
-  test('a profile saved by its handle is asked for by the id the library knows, and takes that id', async () => {
-    const { ctx, asked } = setup((path) =>
-      path.startsWith(`/id:${VUEUSE}`) ? user(VUEUSE, 'VueUse') : notFound,
-    )
-    listed(ctx, VUEUSE, 'VueUse')
-    const done = await capture(ctx, { url: 'https://x.com/vueuse' })
-    expect(done.state).toBe('complete')
-    expect(asked).toEqual([`/id:${VUEUSE}`])
-    // The collection itself takes the id: no second one, still saved.
-    expect(ctx.db.select().from(collections).all()).toMatchObject([
-      {
-        id: done.collectionId,
-        externalId: VUEUSE,
-        url: `https://x.com/i/user/${VUEUSE}`,
-      },
-    ])
-    expect(ctx.db.select().from(library).all()).toMatchObject([
-      { collectionId: done.collectionId },
-    ])
-    expect(ctx.db.select().from(collectionIdentityAliases).all()).toMatchObject(
-      [{ externalId: 'handle:vueuse', collectionId: done.collectionId }],
-    )
-    // Its handle again is the same account, asked for by id.
-    const again = await capture(ctx, {
-      url: 'https://x.com/VueUse',
-      key: 'again',
-    })
-    expect(again.collectionId).toBe(done.collectionId)
-    expect(asked).toEqual([`/id:${VUEUSE}`, `/id:${VUEUSE}`])
-  })
-
-  test('a handle not found without a reason is retried, keeps its case, and marks nothing', async () => {
-    const { ctx, asked } = setup(() => notFound)
-    const job = await capture(ctx, { url: 'https://x.com/VueUse' })
-    expect(asked).toEqual(['/VueUse'])
-    // Waiting for its next attempt; not gone.
-    expect(job.state).toBe('queued')
-    expect(
-      ctx.db
-        .select({ attempt: jobs.attempt, error: jobs.lastError })
-        .from(jobs)
-        .where(eq(jobs.ref, job.id))
-        .get(),
-    ).toMatchObject({
-      attempt: 1,
-      error: expect.stringContaining('暂时无法读取（平台按用户名查询失败）'),
-    })
-    expect(ctx.db.select().from(collectionStates).all()).toEqual([])
-    expect(
-      ctx.db.select({ state: collections.sourceState }).from(collections).get(),
-    ).toEqual({ state: null })
-    expect(
-      ctx.db.select().from(jobs).where(eq(jobs.type, 'source-check')).all(),
-    ).toEqual([])
-  })
-
   test('not found by id waits for a second answer, as a missing account', async () => {
     const { ctx } = setup(() => notFound)
     const job = await capture(ctx, { url: 'https://x.com/i/user/42' })

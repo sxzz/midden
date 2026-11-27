@@ -180,7 +180,7 @@ export function writeRoutes(
     return c.json(
       {
         record_id: job.submissionId,
-        collection_id: job.collectionId,
+        ...(job.collectionId ? { collection_id: job.collectionId } : {}),
         state: job.state,
         status_url: statusUrl(job.submissionId),
       },

@@ -30,6 +30,7 @@ import {
 import { parseFilterQuery } from '#library/filter-query.ts'
 import { updateSelection } from '#library/list.ts'
 import { memberAccounts } from './accounts.ts'
+import { identityRecords } from './identity.ts'
 import {
   budget,
   checkOptions,
@@ -1360,7 +1361,8 @@ export function recordProfiles(
   db: Executor,
   record: CaptureRecord,
 ): ProfilePart[] {
-  if (record.kind !== 'profile') return []
+  // A request still being identified has no profile yet.
+  if (record.kind !== 'profile' || !record.collectionId) return []
   const row = recordRow(db, record.id)
   if (!row.capture.isCollection) return []
   const progress =
@@ -1651,7 +1653,10 @@ export function listRecords(
 ): { items: (CaptureRecord | UpdateRecord)[]; next?: string } {
   const after = cursor ? decodeCursor(cursor, 'captures') : undefined
   const limit = RECORD_PAGE_SIZE + 1
-  const requests = requestRecords(db, after, limit)
+  const requests = [
+    ...requestRecords(db, after, limit),
+    ...identityRecords(db, after, limit),
+  ]
   const rows = db
     .select()
     .from(updates)

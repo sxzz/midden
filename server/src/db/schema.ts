@@ -10,6 +10,7 @@ import {
   uniqueIndex,
   type AnySQLiteColumn,
 } from 'drizzle-orm/sqlite-core'
+import type { IdentityInput } from '#capture/identity.ts'
 import type { CaptureOptions, StoredOptions } from '#capture/options.ts'
 import type { Metrics, Payload } from '#capture/payload.ts'
 import type { StoredTarget } from '#capture/related.ts'
@@ -993,6 +994,50 @@ export const submissions = sqliteTable(
     index('submissions_parent')
       .on(t.parentSubmission)
       .where(sql`${t.parentSubmission} IS NOT NULL`),
+  ],
+)
+
+/**
+ * A request for a profile its link names only by its handle (X): nothing
+ * is saved under a handle, so the platform first says whose it is (the
+ * `identify` job). Identified, it becomes the submission with the same id
+ * and the row goes; until then it is a record of its own, pending or
+ * failed. With `collection_id`, it identifies a profile saved by its handle
+ * before that rule, which maintenance folds into its account's
+ * (`capture/identity.ts`).
+ */
+export const identityRequests = sqliteTable(
+  'identity_requests',
+  {
+    id: text().primaryKey(),
+    idemKey: text().notNull().unique(),
+    adapterId: text().notNull(),
+    // The link as resolved, with the handle as written.
+    url: text().notNull(),
+    handle: text().notNull(),
+    input: text().notNull(),
+    // What to submit once identified, but the link.
+    request: text({ mode: 'json' }).$type<IdentityInput>().notNull(),
+    parentSubmission: text(),
+    updateId: text(),
+    // Not a reference: the collection goes once folded.
+    collectionId: text(),
+    state: text({ enum: ['pending', 'failed'] })
+      .notNull()
+      .default('pending'),
+    error: text().notNull().default(''),
+    // Lookups made for a saved profile, which maintenance spaces out.
+    attempts: integer().notNull().default(0),
+    createdAt: createdAt(),
+    finishedAt: timestamp(),
+  },
+  (t) => [
+    index('identity_requests_records')
+      .on(t.createdAt, t.id)
+      .where(sql`${t.parentSubmission} IS NULL AND ${t.input} <> ''`),
+    index('identity_requests_collection')
+      .on(t.collectionId)
+      .where(sql`${t.collectionId} IS NOT NULL`),
   ],
 )
 

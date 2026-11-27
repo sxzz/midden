@@ -1,11 +1,12 @@
 import { guard, type Platform } from '../platform.ts'
-import { Visibility, type FetchRequest } from '../protocol.ts'
+import { ResolveResponse, Visibility, type FetchRequest } from '../protocol.ts'
 import { status } from '../rpc.ts'
 import { decodeCredential, prepareCredential } from './credential.ts'
 import { entityTypes } from './entity-schemas.ts'
+import { identifyHandle } from './identify.ts'
 import { ProviderError } from './provider.ts'
 import { listRelations } from './relations.ts'
-import { hosts, resolveTarget } from './resolve.ts'
+import { hosts, profileTarget, resolveTarget } from './resolve.ts'
 import { checkSession } from './session.ts'
 import { CaptureStrategy } from './strategy.ts'
 
@@ -30,10 +31,12 @@ export function createXPlatform(
   strategy = new CaptureStrategy(),
   connectionCheck = checkSession,
   relationsList = listRelations,
+  identify = identifyHandle,
 ): Platform {
   function validate(req: FetchRequest) {
     const target = resolveTarget(req.url)
     if (
+      !target.externalId ||
       target.externalId !== req.externalId ||
       target.platform !== req.platform ||
       target.kind !== req.kind ||
@@ -118,6 +121,18 @@ export function createXPlatform(
       },
       list: (req, signal) =>
         guard(signal, failure, (signal) => relationsList(req, signal)),
+    },
+    // Profiles are kept by their numeric user id only.
+    identity: {
+      providerId: 'x-session',
+      target: (id) => ResolveResponse.fromPartial(profileTarget(id)),
+      identify: (handle, signal, account) =>
+        guard(signal, failure, (signal) =>
+          identify(handle, signal, () => {
+            const credential = account?.()
+            return credential ? decodeCredential(credential) : undefined
+          }),
+        ),
     },
     checkConnection: (providerId, credential, signal) =>
       guard(signal, failure, (signal) => {

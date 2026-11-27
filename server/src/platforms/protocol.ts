@@ -71,14 +71,6 @@ export interface FetchRequest {
    * still returning the real next cursor.
    */
   since: string
-  /**
-   * The stable id the app already knows for a target saved under another
-   * name (a profile saved by its handle): from an earlier capture, or an
-   * account a list or post showed under that handle. The adapter may look
-   * the object up by it; the answer is still for `externalId`. Empty when
-   * none is known.
-   */
-  stableId: string
 }
 
 export interface Resource {
@@ -233,6 +225,12 @@ export interface ResolveResponse {
   collection: boolean
   /** Explicit submissions always observe this target again. */
   refreshOnSubmit: boolean
+  /**
+   * A profile a link names only by its handle, as written: `externalId` is
+   * empty until the platform's `identity` says whose it is. Nothing is
+   * saved under a handle.
+   */
+  handle?: string
 }
 
 export interface CheckConnectionResponse {
@@ -347,7 +345,6 @@ function createBaseFetchRequest(): FetchRequest {
     prefetch: Buffer.alloc(0),
     credentialDeferred: false,
     since: '',
-    stableId: '',
   }
 }
 
@@ -373,7 +370,6 @@ export const FetchRequest = {
     message.prefetch = object.prefetch ?? Buffer.alloc(0)
     message.credentialDeferred = object.credentialDeferred ?? false
     message.since = object.since ?? ''
-    message.stableId = object.stableId ?? ''
     return message
   },
 }
@@ -632,6 +628,7 @@ export const ResolveResponse = {
     message.externalId = object.externalId ?? ''
     message.collection = object.collection ?? false
     message.refreshOnSubmit = object.refreshOnSubmit ?? false
+    if (object.handle) message.handle = object.handle
     return message
   },
 }

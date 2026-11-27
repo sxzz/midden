@@ -84,7 +84,9 @@ export class Platforms {
       !URL.canParse(target.url) ||
       !target.platform ||
       !target.kind ||
-      !target.externalId
+      (!target.externalId && (!target.handle || !platform.identity)) ||
+      // A platform that identifies handles keeps nothing under one.
+      (platform.identity && target.externalId.startsWith('handle:'))
     )
       throw new Error('平台返回的链接无效')
     return { platform, target }

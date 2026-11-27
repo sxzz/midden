@@ -1,5 +1,6 @@
 import { status } from '../rpc.ts'
 import { ProviderError } from './provider.ts'
+import type { ResolveResponse } from '../protocol.ts'
 // FxEmbed mirrors X paths on its own domains. A subdomain only picks how the
 // embed is rendered (direct media, gallery, text), never another object.
 const mirrors = ['fxtwitter.com', 'fixupx.com']
@@ -15,7 +16,7 @@ export const hosts = [
     ...mirrorModes.map((mode) => `${mode}.${host}`),
   ]),
 ]
-export function resolveTarget(raw: string) {
+export function resolveTarget(raw: string): ResolveResponse {
   try {
     const url = new URL(raw.trim())
     const mirror = mirrors.some(
@@ -49,8 +50,10 @@ export function resolveTarget(raw: string) {
         collection: false,
       }
     const id = url.pathname.match(/^\/i\/user\/(\d+)\/?$/)
-    // The identity is the handle in lower case; the link keeps it as written,
-    // since FxTwitter finds some accounts only in their own letter case.
+    if (id) return profileTarget(id[1]!)
+    // A handle names no profile by itself: the core identifies it first. It
+    // is kept as written, since FxTwitter finds some accounts only in their
+    // own letter case.
     const spelled = url.pathname.match(/^\/(\w{1,15})\/?$/)?.[1]
     const handle = spelled?.toLowerCase()
     const reserved = new Set([
@@ -73,18 +76,27 @@ export function resolveTarget(raw: string) {
       'jobs',
       'download',
     ])
-    if (id || (handle && !reserved.has(handle)))
+    if (spelled && handle && !reserved.has(handle))
       return {
-        url: id ? `https://x.com/i/user/${id[1]}` : `https://x.com/${spelled}`,
-        platform: 'x',
-        kind: 'profile',
-        objectScope: '',
-        externalId: id ? id[1] : `handle:${handle}`,
-        refreshOnSubmit: true,
-        collection: true,
+        ...profileTarget(''),
+        url: `https://x.com/${spelled}`,
+        handle: spelled,
       }
     throw new Error()
   } catch {
     throw new ProviderError(status.INVALID_ARGUMENT, '不支持的 X 链接')
+  }
+}
+
+/** The profile of the account with this id. */
+export function profileTarget(id: string): ResolveResponse {
+  return {
+    url: `https://x.com/i/user/${id}`,
+    platform: 'x',
+    kind: 'profile',
+    objectScope: '',
+    externalId: id,
+    refreshOnSubmit: true,
+    collection: true,
   }
 }

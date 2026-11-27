@@ -24,6 +24,8 @@ export class ProviderError extends Error {
    * It answers so for accounts that exist too (see `fetchPublicProfile`).
    */
   handleMiss = false
+  /** The public API answered with a protected author's post it may not keep. */
+  protectedPost = false
   /**
    * What the source said beyond the message, for the logs only: a GraphQL
    * `__typename`, its error codes.
@@ -352,11 +354,14 @@ export function publicPost(
 ): FetchResponse {
   // A quoted or reposted post is kept by reference, so only the post's own
   // author decides whether the public provider may save it.
-  if (post?.author?.protected)
-    throw new ProviderError(
+  if (post?.author?.protected) {
+    const error = new ProviderError(
       status.FAILED_PRECONDITION,
       '公共来源无法保存受保护的帖子',
     )
+    error.protectedPost = true
+    throw error
+  }
   // A repost's link answers with the reposted post, which is what is saved.
   const original =
     post?.id !== id && post?.reposted_by && /^\d+$/.test(String(post?.id))

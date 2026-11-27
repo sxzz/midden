@@ -301,7 +301,8 @@ function save(c: CommandContext, request: Request): Reply {
         target.platform,
         target.kind,
         target.objectScope,
-        target.externalId,
+        // A profile named by handle is the same request in any letter case.
+        target.externalId || `@${target.handle!.toLowerCase()}`,
       ].join('|')
     } catch {
       continue

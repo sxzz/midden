@@ -302,6 +302,14 @@ export function captureRoutes(
             idempotencyKey(c),
             resolveOptions(input.options),
           )
+          // A profile named by its handle is identified first: no capture
+          // yet, only the record it will be.
+          if (!job.collectionId)
+            return c.json({
+              id: job.id,
+              state: job.state,
+              record_id: job.submissionId,
+            })
           // The record this request made, so a client can open its progress.
           return c.json({ ...jobJson(ctx, job), record_id: job.submissionId })
         },

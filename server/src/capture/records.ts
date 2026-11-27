@@ -30,6 +30,12 @@ import { AppError } from '#errors.ts'
 import { readJobControl } from '#jobs/control.ts'
 import { memberAccounts, type MemberAccount } from './accounts.ts'
 import {
+  identityDetail,
+  identityJob,
+  loadRequest,
+  retryIdentity,
+} from './identity.ts'
+import {
   DEFAULT_OPTIONS,
   publicOptions,
   storedOptions,
@@ -906,7 +912,13 @@ export interface CaptureRecordDetail extends CaptureRecord {
 }
 
 export function recordDetail(db: Executor, id: string): CaptureRecordDetail {
-  const row = recordRow(db, id)
+  const [row] = recordRows(db, eq(submissions.id, id), 1, true)
+  if (!row) {
+    // Still being identified: the record of the submission it will be.
+    const pending = identityDetail(db, id)
+    if (pending) return pending
+    throw new AppError('not_found')
+  }
   // A finished record's detail is written down with it.
   const written = loadSummaries<CaptureRecordDetail>(db, [detailKey(id)]).get(
     detailKey(id),
@@ -1301,7 +1313,13 @@ export function retryRecord(
   id: string,
   key?: string,
 ): Job {
-  const row = recordRow(ctx.db, id)
+  const [row] = recordRows(ctx.db, eq(submissions.id, id), 1, true)
+  // A request no one could identify is asked again, as the same record.
+  if (!row && identityDetail(ctx.db, id)) {
+    retryIdentity(ctx, id)
+    return identityJob(loadRequest(ctx.db, id)!)
+  }
+  if (!row) throw new AppError('not_found')
   // The same options, with the date range counted from now.
   const options = publicOptions(storedOptions(row.submission.captureOptions))
   // Deleted from the library since: saving it again is all that is left.

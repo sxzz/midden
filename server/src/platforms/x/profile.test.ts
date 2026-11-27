@@ -22,10 +22,17 @@ const user = {
 }
 
 test('profile URLs resolve separately, refreshing on explicit submission', () => {
-  assert.equal(
-    resolveTarget('https://twitter.com/FiXtUrE?lang=en').externalId,
-    'handle:fixture',
-  )
+  // A handle names no profile until it is identified; it keeps its case.
+  assert.deepEqual(resolveTarget('https://twitter.com/FiXtUrE?lang=en'), {
+    url: 'https://x.com/FiXtUrE',
+    platform: 'x',
+    kind: 'profile',
+    objectScope: '',
+    externalId: '',
+    refreshOnSubmit: true,
+    collection: true,
+    handle: 'FiXtUrE',
+  })
   assert.equal(resolveTarget('https://x.com/i/user/123').externalId, '123')
   assert.equal(resolveTarget('https://x.com/fixture').refreshOnSubmit, true)
   for (const path of [
@@ -56,7 +63,7 @@ test('profile captures exact API responses and the entire first page, never foll
     })
   }
   const r = await fetchPublicProfile(
-    'handle:fixture',
+    user.id,
     true,
     new AbortController().signal,
     'https://provider.test/profile',
@@ -325,7 +332,7 @@ test("timeline targets carry each post's latest known change", () => {
   )
 })
 
-test('profile failures name suspension and missing accounts, and a handle lookup proves nothing', async () => {
+test('profile failures name suspension and missing accounts without blocking retries', async () => {
   const profile = (status: number, body: unknown, id = user.id) =>
     fetchPublicProfile(
       id,
@@ -350,16 +357,6 @@ test('profile failures name suspension and missing accounts, and a handle lookup
       e.metadata.get('source-state-explicit')[0] === '1',
   )
   await assert.rejects(
-    profile(
-      404,
-      { code: 404, message: 'User is suspended', reason: 'suspended' },
-      'handle:fixture',
-    ),
-    (e: any) =>
-      failure('账号已被封禁，解封后可重新抓取')(e) &&
-      e.metadata.get('source-state-explicit')[0] === '1',
-  )
-  await assert.rejects(
     profile(200, {
       code: 404,
       message: 'User is suspended',
@@ -375,23 +372,6 @@ test('profile failures name suspension and missing accounts, and a handle lookup
       e.metadata.get('source-state')[0] === 'deleted' &&
       !e.metadata.get('source-state-explicit').length,
   )
-  // By a handle, FxTwitter answers so for accounts that exist too: a
-  // transient failure the job retries, saying nothing of the account.
-  const miss = (e: any) =>
-    e.message === '暂时无法读取（平台按用户名查询失败）' &&
-    e.code === status.UNAVAILABLE &&
-    e.handleMiss &&
-    !e.notFound &&
-    !e.metadata.get('source-state').length
-  await assert.rejects(
-    profile(404, { code: 404, message: 'User not found' }, 'handle:fixture'),
-    miss,
-  )
-  await assert.rejects(
-    profile(200, { code: 404, message: 'User not found' }, 'handle:fixture'),
-    miss,
-  )
-  await assert.rejects(profile(404, 'not json', 'handle:fixture'), miss)
   await assert.rejects(
     profile(410, { code: 410 }),
     failure('无法获取该账号资料'),

@@ -1,5 +1,6 @@
 import { and, asc, eq, isNotNull, lte } from 'drizzle-orm'
 import { GrammyError, type Api } from 'grammy'
+import { loadRequest } from '#capture/identity.ts'
 import {
   captureWaits,
   collectionProgress,
@@ -367,8 +368,24 @@ export class DeliveryWorker {
       .innerJoin(collections, eq(collections.id, captures.collectionId))
       .where(eq(submissions.id, submissionId))
       .get()
-    // Deleted meanwhile (e.g. delete all): nothing left to say.
-    if (!row) return false
+    if (!row) {
+      // A profile named by its handle, still being identified.
+      const pending = loadRequest(db, submissionId)
+      if (pending?.state === 'pending') {
+        await this.#status(delivery, {
+          text: `正在识别账号…\n${pending.input}`,
+          entities: [],
+        })
+        return true
+      }
+      if (pending)
+        await this.#status(delivery, {
+          text: `收藏失败\n输入：${pending.input}\n${pending.error}`,
+          entities: [],
+        })
+      // Deleted meanwhile (e.g. delete all): nothing left to say.
+      return false
+    }
     const { submission, capture } = row
     if (capture.isCollection && submission.relatedState !== 'none') {
       const progress = collectionProgress(db, submission.id)
