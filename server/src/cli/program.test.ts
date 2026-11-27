@@ -266,15 +266,29 @@ describe('token revoke', () => {
     expect(authenticate(db, keep.secret, NOW).ok).toBe(true)
   })
 
-  test('by id prefix, and --json says what was revoked', async () => {
+  test('by the id prefix `token list` prints, and --json says what was revoked', async () => {
     const { db, out, run } = setup()
-    const a = createToken(db, { label: 'a', permission: 'ro' }, NOW)
-    createToken(db, { label: 'b', permission: 'ro' }, NOW)
-    expect(
-      await run('token', 'revoke', a.token.id.slice(0, 16), '--json'),
-    ).toBe(0)
+    // Made back to back, so often in the same millisecond: their ids share a
+    // long prefix, and only the one `token list` prints tells them apart.
+    for (const label of ['a', 'b', 'c'])
+      createToken(db, { label, permission: 'ro' }, NOW)
+    await run('token', 'list', '--json')
+    const listed = JSON.parse(out.pop()!) as { id: string; label: string }[]
+    const a = listed.find((t) => t.label === 'a')!
+    expect(await run('token', 'revoke', a.id, '--json')).toBe(0)
     expect(out).toEqual(['{"revoked":"a"}'])
-    expect(secrets(db).map((t) => t.label)).toEqual(['b'])
+    expect(secrets(db).map((t) => t.label)).toEqual(['b', 'c'])
+  })
+
+  test('a prefix that fits several tokens is refused, and nothing is revoked', async () => {
+    const { db, err, run } = setup()
+    for (const label of ['a', 'b'])
+      createToken(db, { label, permission: 'ro' }, NOW)
+    // The first 8 characters are the timestamp's start: the same for both.
+    const shared = secrets(db)[0]!.id.slice(0, 8)
+    expect(await run('token', 'revoke', shared)).toBe(1)
+    expect(err[0]).toContain('2 tokens match')
+    expect(secrets(db)).toHaveLength(2)
   })
 
   test('a label shared by several tokens is refused, with the candidates listed', async () => {
