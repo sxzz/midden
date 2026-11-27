@@ -19,7 +19,6 @@
 // the web process and the worker). Read threads never detect anything and
 // never load it. Detecting without it throws rather than storing a
 // language a later capture would never correct.
-import { getLIDModel, type FastTextModel } from 'fasttext.wasm.js'
 import {
   CJK_WEIGHT,
   cleanText,
@@ -30,6 +29,7 @@ import {
   scriptRule,
   withScript,
 } from './text.ts'
+import type { FastTextModel } from 'fasttext.wasm.js'
 
 export interface Detected {
   lang: string | null
@@ -50,6 +50,9 @@ let loading: Promise<void> | undefined
 /** Load the model once per thread; later calls wait for the same load. */
 export function loadLangModel(): Promise<void> {
   loading ??= (async () => {
+    // Imported here, so read threads, which import this module through the
+    // query compiler, never load the binding either.
+    const { getLIDModel } = await import('fasttext.wasm.js')
     model = await (await getLIDModel()).load()
   })()
   return loading
