@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
 import MediaPreview from './MediaPreview.vue'
 import EyeIcon from './ui/EyeIcon.vue'
+import TightText from './ui/TightText.vue'
 import type { Asset } from '../api'
 export type AlbumTile = {
   key: string
@@ -69,9 +70,9 @@ const placeholders = 12
         <span v-if="tile.caption.labels" class="relation-label">{{
           tile.caption.labels
         }}</span>
-        <span class="caption-text" :lang="tile.caption.lang">{{
-          tile.caption.text
-        }}</span>
+        <span class="caption-text" :lang="tile.caption.lang"
+          ><TightText :text="tile.caption.text"
+        /></span>
         <span v-if="tile.caption.quote" class="quote"
           ><span class="quote-label">引用的帖子</span
           ><span

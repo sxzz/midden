@@ -405,6 +405,7 @@ const version = computed(() =>
         :saved-at="savedAt"
         :show-sensitive="showSensitive"
         :editable="!shared"
+        :facts-aside="sidebarShown"
         @restore="restore"
       >
         <template v-if="!shared" #actions>

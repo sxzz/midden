@@ -6,7 +6,7 @@ import { pageAside } from '../aside'
 import { recordProgress, recordTitle } from '../captures'
 import { useStale } from '../composables/useStale'
 import { folderLink } from '../folders'
-import { listQuery } from '../reads'
+import { storageSize } from '../presentation'
 import { buildFacts, REPOSITORY } from '../settings'
 import AsideDetail from './AsideDetail.vue'
 import SidebarFrame from './SidebarFrame.vue'
@@ -17,16 +17,8 @@ import SkeletonBox from './ui/SkeletonBox.vue'
 // all in the column), then the small print.
 const props = defineProps<{
   folders: Folder[]
-  /** The list's count and the space used, on the library's lists. */
+  /** The list's count, on the library's lists. */
   total?: string
-  storage?: string
-  /**
-   * The shown list's API query while it lists posts: its top hashtags and
-   * authors are counted over it.
-   */
-  posts?: string
-  /** The list's address with a hashtag or an author added to its filter. */
-  refine?: (key: 'q' | 'author', value: string) => string
 }>()
 const route = useRoute()
 const router = useRouter()
@@ -45,49 +37,6 @@ const detail = computed(() =>
 const about = buildFacts(__BUILD_VERSION__, __BUILD_TIME__)
 const folderShown = computed(() =>
   route.name === 'folder' ? String(route.params.id) : '',
-)
-const facts = computed(() =>
-  [props.total, props.storage].filter(Boolean).join(' · '),
-)
-
-/** The top 10 of the list's posts by `by`, as the agent API counts them. */
-const TOP = '10'
-const aggregate = (by: 'hashtag' | 'author') =>
-  call(
-    client.collections.aggregate.$get({
-      query: {
-        ...listQuery(new URLSearchParams(props.posts)),
-        by,
-        limit: TOP,
-      },
-    }),
-  )
-const hashtags = useStale(() => aggregate('hashtag'))
-const authors = useStale(() => aggregate('author'))
-watch(
-  () => props.posts,
-  (query) => {
-    if (query === undefined) return
-    void hashtags.load()
-    void authors.load()
-  },
-  { immediate: true },
-)
-type Bucket = Awaited<ReturnType<typeof aggregate>>['buckets'][number]
-const tagRows = computed(() =>
-  (hashtags.data.value?.buckets ?? []).flatMap((b: Bucket) =>
-    typeof b.key === 'string' ? [{ tag: `#${b.key}`, count: b.count }] : [],
-  ),
-)
-const authorRows = computed(() =>
-  (authors.data.value?.buckets ?? []).flatMap((b: Bucket) => {
-    if (typeof b.key !== 'string') return []
-    const name = typeof b.name === 'string' ? b.name : ''
-    const handle = typeof b.handle === 'string' ? `@${b.handle}` : ''
-    return [
-      { key: b.key, name: name || handle || '账号', handle, count: b.count },
-    ]
-  }),
 )
 
 /**
@@ -117,6 +66,38 @@ async function readRunning() {
     )
 }
 watch(lists, readRunning, { immediate: true })
+
+/**
+ * 全站统计: the archive as a whole (GET /v1/library/stats), read when a list
+ * is shown and again when its count changes; the server keeps the figures
+ * for a minute while nothing is saved or deleted.
+ */
+const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+const stats = useStale(() =>
+  call(client.library.stats.$get({ query: { tz: zone } })),
+)
+watch(
+  () => (lists.value ? (props.total ?? '') : undefined),
+  (shown) => {
+    if (shown !== undefined) void stats.load()
+  },
+  { immediate: true },
+)
+const number = (n: number) => n.toLocaleString('zh-CN')
+const figures = computed(() => {
+  const s = stats.data.value
+  if (!s) return []
+  return [
+    { label: '帖子', value: number(s.posts) },
+    { label: '账号', value: number(s.accounts) },
+    { label: '含图片的帖子', value: number(s.with_images) },
+    { label: '含视频的帖子', value: number(s.with_videos) },
+    { label: '今天新增', value: number(s.saved_today) },
+    { label: '本周新增', value: number(s.saved_this_week) },
+    { label: '今天采集', value: number(s.captures_today) },
+    { label: '今天更新', value: number(s.updates_today) },
+  ]
+})
 onUnmounted(() => {
   ++reading
   clearTimeout(timer)
@@ -126,9 +107,9 @@ onUnmounted(() => {
 <template>
   <SidebarFrame :search="lists ? undefined : '搜索收藏'" query @search="search">
     <template v-if="lists">
-      <section v-if="facts" class="aside-box" aria-label="结果">
+      <section v-if="total" class="aside-box" aria-label="结果">
         <h2>结果</h2>
-        <p class="aside-facts">{{ facts }}</p>
+        <p class="aside-facts">{{ total }}</p>
       </section>
       <section
         v-if="running.length"
@@ -151,62 +132,28 @@ onUnmounted(() => {
           />
         </AppLink>
       </section>
-      <template v-if="posts !== undefined && refine">
-        <section
-          v-if="hashtags.pending.value || tagRows.length"
-          class="aside-box"
-          aria-label="热门话题"
-          :aria-busy="hashtags.pending.value"
-        >
-          <h2>热门话题</h2>
-          <div v-if="hashtags.pending.value" class="skeleton-rows">
-            <SkeletonBox v-for="n in 4" :key="n" height="14px" width="60%" />
-          </div>
-          <AppLink
-            v-for="row in tagRows"
-            :key="row.tag"
-            class="aside-row"
-            :to="refine('q', row.tag)"
-            :title="`在当前列表中搜索 ${row.tag}`"
-          >
-            <span class="aside-row-name hashtag">{{ row.tag }}</span>
-            <span class="aside-row-count">{{
-              row.count.toLocaleString('zh-CN')
-            }}</span>
-          </AppLink>
-        </section>
-        <section
-          v-if="authors.pending.value || authorRows.length"
-          class="aside-box"
-          aria-label="常见作者"
-          :aria-busy="authors.pending.value"
-        >
-          <h2>常见作者</h2>
-          <div v-if="authors.pending.value" class="skeleton-rows">
-            <SkeletonBox v-for="n in 4" :key="n" height="14px" width="70%" />
-          </div>
-          <AppLink
-            v-for="row in authorRows"
-            :key="row.key"
-            class="aside-row"
-            :to="refine('author', row.key)"
-            :title="`只看${row.name}的帖子`"
-          >
-            <span class="aside-row-name"
-              >{{ row.name
-              }}<small
-                v-if="row.handle && row.handle !== row.name"
-                class="handle"
-              >
-                {{ row.handle }}</small
-              ></span
-            >
-            <span class="aside-row-count">{{
-              row.count.toLocaleString('zh-CN')
-            }}</span>
-          </AppLink>
-        </section>
-      </template>
+      <section
+        v-if="stats.pending.value || figures.length"
+        class="aside-box"
+        aria-label="全站统计"
+        :aria-busy="stats.pending.value"
+      >
+        <h2>全站统计</h2>
+        <div v-if="stats.pending.value" class="stats">
+          <SkeletonBox v-for="n in 8" :key="n" height="38px" />
+        </div>
+        <template v-else>
+          <dl class="stats">
+            <div v-for="f in figures" :key="f.label" class="stat">
+              <dt>{{ f.label }}</dt>
+              <dd>{{ f.value }}</dd>
+            </div>
+          </dl>
+          <p class="aside-facts">
+            已用空间 {{ storageSize(stats.data.value!.used_bytes) }}
+          </p>
+        </template>
+      </section>
       <section v-if="folders.length" class="aside-box" aria-label="收藏夹">
         <h2>收藏夹</h2>
         <AppLink
@@ -236,19 +183,28 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* A hashtag is one word: no gap after its # before the script. */
-.hashtag {
-  text-autospace: no-autospace;
-}
-.skeleton-rows {
+/* Two figures to a line, each a number over its label. */
+.stats {
   display: grid;
-  gap: 14px;
-  padding: 10px 16px 12px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+  padding: 4px 16px 8px;
 }
-.handle {
-  margin-left: 4px;
+.stat {
+  display: flex;
+  flex-direction: column-reverse;
+  padding: 4px 0;
+}
+.stat dt {
   font-size: 13px;
   color: var(--subtle);
+}
+.stat dd {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 /* A running update: its title over its bar. */
 .running {

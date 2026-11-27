@@ -19,6 +19,7 @@ import PostRelations from './PostRelations.vue'
 import AppLink from './ui/AppLink.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 import LockIcon from './ui/LockIcon.vue'
+import TightText from './ui/TightText.vue'
 const props = defineProps<{
   collection: Collection
   /** When the viewer already knows it, so revisions never drop the date. */
@@ -32,6 +33,11 @@ const props = defineProps<{
    * current state or the capture's warnings.
    */
   history?: boolean
+  /**
+   * The sidebar beside the page lists the record's facts (发布于, 保存于,
+   * UID, UUID, 占用), so the card leaves them out (AsideDetail).
+   */
+  factsAside?: boolean
 }>()
 const emit = defineEmits<{ restore: [asset: Asset] }>()
 // Authors read as their newest profile unless asked for the captured one.
@@ -48,7 +54,7 @@ const bodyParts = computed(() =>
 /** "Saved at" belongs with the other timestamps, right after the source's
     own publication date, rather than in a separate footnote. */
 const details = computed(() => {
-  if (props.history) return []
+  if (props.history || props.factsAside) return []
   const list = [...view.value.details]
   if (props.collection.storage_bytes !== undefined)
     list.push({
@@ -230,8 +236,8 @@ const warnings = computed(() =>
         ><a v-if="part.href" :href="part.href" class="mention">{{
           part.text
         }}</a
-        ><template v-else>{{ part.text }}</template></template
-      >
+        ><TightText v-else :text="part.text"
+      /></template>
     </p>
     <MediaGallery
       :assets="collection.assets || []"

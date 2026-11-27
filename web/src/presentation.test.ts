@@ -17,6 +17,7 @@ import {
   searchTerms,
   shortDate,
   sourceStateNotice,
+  tightParts,
   warningList,
 } from './presentation'
 import { shareSlug } from './share'
@@ -595,4 +596,15 @@ it("shows an account's avatar from the platform until one is saved here", () => 
   // Neither saved nor known to the platform: no avatar at all.
   const lost = asset({ id: 'lost', purpose: 'avatar', state: 'failed' })
   expect(present(profile([lost])).avatar).toBeUndefined()
+})
+
+it('keeps hashtags and mentions tight, the rest as it is', () => {
+  expect(tightParts('看 #明日方舟 和 @someone，2026年11月')).toEqual([
+    { text: '看 ' },
+    { text: '#明日方舟', tight: true },
+    { text: ' 和 ' },
+    { text: '@someone', tight: true },
+    { text: '，2026年11月' },
+  ])
+  expect(tightParts('')).toEqual([{ text: '' }])
 })

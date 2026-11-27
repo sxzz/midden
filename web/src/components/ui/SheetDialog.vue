@@ -6,7 +6,7 @@ import { showSheet } from '../../sheet-focus'
  * menu). Below 700px a sheet rising from the bottom: the title over the
  * content, the actions as full-width rows, and 取消 in a group of its own.
  * From 700px (layout.ts) a dialog in the middle of the window, as a desktop
- * app has it: a raised surface over the page left as it is, the title on
+ * app has it: a raised surface over the dimmed page, the title on
  * the left with a ✕ on the right in 取消's place, and the actions as
  * buttons at the bottom right.
  *
@@ -240,9 +240,9 @@ dialog.sheet-page {
   z-index: 2;
 }
 
-/* From the rail's width up: a dialog in the middle of the window. The page
-   under it stays as it is, neither dimmed nor blurred, so the surface is
-   set apart by its own colour, a hairline and a shadow. */
+/* From the rail's width up: a dialog in the middle of the window, over the
+   same dimmed page as the sheet, set apart besides by its own colour, a
+   hairline and a shadow. */
 @media (min-width: 700px) {
   dialog.sheet-dialog {
     --card: var(--raised);
@@ -265,9 +265,6 @@ dialog.sheet-page {
   dialog.sheet-wide,
   dialog.sheet-page {
     max-width: 560px;
-  }
-  dialog.sheet-dialog::backdrop {
-    background: transparent;
   }
   .sheet-panel {
     position: relative;

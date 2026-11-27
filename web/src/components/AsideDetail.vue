@@ -2,7 +2,7 @@
 import { computed, onUnmounted, shallowRef, watch } from 'vue'
 import { call, client, safeURL, type CaptureRecord, type Entity } from '../api'
 import { recordCounts, recordProgress } from '../captures'
-import { date, storageSize } from '../presentation'
+import { date, present, storageSize } from '../presentation'
 import { accountKey, relationQuery, type Rel } from '../relation-filter'
 import {
   authoredBy,
@@ -13,6 +13,7 @@ import {
 } from '../relations'
 import { collectionRoute, shareSlug } from '../share'
 import AppLink from './ui/AppLink.vue'
+import TightText from './ui/TightText.vue'
 import type { DetailAside } from '../aside'
 // The sidebar beside a collection's page: what the page loaded, as a
 // summary with links, and for the owner the update (the page's own sheets
@@ -48,7 +49,11 @@ const captures = computed(() => {
   if (!count) return ''
   return props.detail.morePoints ? `${count}+次` : `${count}次`
 })
-const recent = computed(() => props.detail.points.slice(0, 5))
+/** The record's own facts, which the card leaves to the sidebar. */
+const facts = computed(() =>
+  collection.value ? present(collection.value).details : [],
+)
+const fact = (key: string) => facts.value.find((f) => f.key === key)
 const storage = computed(() =>
   collection.value?.storage_bytes === undefined
     ? ''
@@ -62,9 +67,28 @@ const author = computed(() => {
 })
 const asText = (value: unknown) =>
   typeof value === 'string' && value.trim() ? value.trim() : ''
-/** A related post or account in one line, by its text or its name. */
-function line(entity: Entity) {
-  if (isPostEntity(entity)) return asText(entity.data.text) || '帖子'
+/**
+ * A related post or account in one line. A post reads as its author and its
+ * text: its own, or, kept by reference, its saved copy's (`saved_text`);
+ * without any text, what it holds (图片帖子, 视频帖子). An account reads as
+ * its name and handle.
+ */
+function line(entity: Entity, author?: ReturnType<typeof authorIdentity>) {
+  if (isPostEntity(entity)) {
+    const who = author?.name || (author?.handle ? `@${author.handle}` : '')
+    const text =
+      asText(entity.data.text) ||
+      asText(entity.saved_text) ||
+      asText(entity.saved_summary)
+    if (text) return who ? `${who}：${text}` : text
+    const kinds = new Set(entity.assets?.map((asset) => asset.kind))
+    const held = kinds.has('video')
+      ? '视频帖子'
+      : kinds.has('image')
+        ? '图片帖子'
+        : '没有文字的帖子'
+    return who ? `${who}的${held}` : held
+  }
   const name = asText(entity.data.name)
   const username = asText(entity.data.username)
   return [name, username && `@${username}`].filter(Boolean).join(' ') || '账号'
@@ -94,7 +118,7 @@ const related = computed(() => {
             key: `out:${relation.type}:${entity.key}`,
             label: labels[relation.type]!,
             id: entity.saved_collection_id,
-            text: line(entity),
+            text: line(entity, authorIdentity(authoredBy(graph, entity.key))),
             lang: lineLang(entity),
           },
         ]
@@ -107,7 +131,10 @@ const related = computed(() => {
             key: `in:${relation.type}:${relation.entity.key}`,
             label: relation.type === 'reposted' ? '转发了它' : '引用了它',
             id: relation.entity.saved_collection_id,
-            text: line(relation.entity),
+            text: line(
+              relation.entity,
+              authorIdentity(relation.entity.saved_author),
+            ),
             lang: lineLang(relation.entity),
           },
         ]
@@ -203,7 +230,9 @@ const progressText = computed(() =>
         :to="collectionRoute(item.id)"
       >
         <span class="row-label">{{ item.label }}</span>
-        <span class="row-text" :lang="item.lang">{{ item.text }}</span>
+        <span class="row-text" :lang="item.lang"
+          ><TightText :text="item.text"
+        /></span>
       </AppLink>
     </section>
     <section class="aside-box" aria-label="采集信息">
@@ -235,6 +264,16 @@ const progressText = computed(() =>
         >{{ detail.updating ? '查看进度' : '最近一次更新' }}</AppLink
       >
       <dl class="facts">
+        <div
+          v-for="key in ['published', 'edited']"
+          v-show="fact(key)"
+          :key="key"
+        >
+          <dt>{{ fact(key)?.label }}</dt>
+          <dd>
+            <time :datetime="fact(key)?.datetime">{{ fact(key)?.value }}</time>
+          </dd>
+        </div>
         <div v-if="detail.savedAt">
           <dt>保存于</dt>
           <dd>{{ date(detail.savedAt) }}</dd>
@@ -285,12 +324,16 @@ const progressText = computed(() =>
             <AppLink :href="source">打开原文 ↗</AppLink>
           </dd>
         </div>
+        <div
+          v-for="key in ['uid', 'uuid']"
+          v-show="fact(key)"
+          :key="key"
+          class="identifier"
+        >
+          <dt>{{ fact(key)?.label }}</dt>
+          <dd :title="fact(key)?.value">{{ fact(key)?.value }}</dd>
+        </div>
       </dl>
-      <ol v-if="recent.length" class="points" aria-label="最近的采集">
-        <li v-for="point in recent" :key="point.capture_id">
-          {{ date(point.observed_at) }}
-        </li>
-      </ol>
       <!-- Behind a share the latest update stays the owner's. -->
       <AppLink
         v-if="detail.record && !actions && !shared"
@@ -299,13 +342,18 @@ const progressText = computed(() =>
         >{{ detail.updating ? '更新中，查看进度' : '最近一次更新' }}</AppLink
       >
     </section>
-    <section v-if="detail.history" class="aside-box" aria-label="记录">
-      <h2>记录</h2>
-      <!-- An account's 资料, 数据 and 关注 are the tabs of its 历史. -->
+    <!-- One entry, no heading: an account's 资料, 数据 and 关注 are the tabs
+         of its 历史; a post has its 统计趋势. -->
+    <section
+      v-if="detail.history"
+      class="aside-box history"
+      :aria-label="profile ? '历史' : '统计趋势'"
+    >
       <AppLink
-        class="aside-more"
+        class="aside-row"
         :to="collectionRoute(detail.id, detail.history)"
-        >{{ profile ? '历史' : '统计趋势' }}</AppLink
+        ><span class="aside-row-name">{{ profile ? '历史' : '统计趋势' }}</span
+        ><span class="aside-row-count" aria-hidden="true">›</span></AppLink
       >
     </section>
   </template>
@@ -438,12 +486,11 @@ a.row:hover {
   flex: none;
   color: var(--subtle);
 }
-.points {
-  margin: 0;
-  padding: 4px 16px 8px 34px;
-  font-size: 13px;
-  line-height: 1.8;
-  color: var(--subtle);
-  font-variant-numeric: tabular-nums;
+.history {
+  padding: 4px 0;
+}
+.identifier dd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
 }
 </style>

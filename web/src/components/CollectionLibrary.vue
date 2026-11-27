@@ -45,7 +45,7 @@ import {
   mediaRemoved,
   withRemovedMedia,
 } from '../media-removals'
-import { listsProfiles, present, storageSize } from '../presentation'
+import { listsProfiles, present } from '../presentation'
 import { listQuery } from '../reads'
 import { isProfileEntity } from '../relations'
 import { restoreScroll } from '../scroll-restore'
@@ -69,7 +69,6 @@ import UpdateSheet from './UpdateSheet.vue'
 import WatchSheet from './WatchSheet.vue'
 // Remembered in this browser, so a reload does not cover the media again.
 const SENSITIVE_KEY = 'midden.showSensitive'
-const SPACES = /\s+/
 const showSensitive = shallowRef(readFlag(SENSITIVE_KEY))
 watch(showSensitive, (on) => writeFlag(SENSITIVE_KEY, on))
 function readFlag(key: string) {
@@ -271,9 +270,6 @@ const shownTotal = computed(() => {
     ? ''
     : `${total.toLocaleString('zh-CN')}${listsProfiles(list.query.value) ? '个账号' : '条'}`
 })
-const usedText = computed(() =>
-  usage.value ? `已用${storageSize(usage.value.used_bytes)}` : '',
-)
 /**
  * Under the title on a desktop, as X's header gives a count or a handle.
  * The count only while there is no sidebar, whose 结果 says it.
@@ -548,36 +544,6 @@ const modified = computed(
     folderModified(folderList.query.value, savedFilter(folder.value)),
 )
 const canSave = computed(() => home.value && hasFilters(shownQuery.value))
-/**
- * The shown list's API query while it lists posts, for the sidebar's top
- * hashtags and authors over the same filter.
- */
-const sidebarPosts = computed(() => {
-  if (!sidebar.value) return undefined
-  if (home.value && tab.value === 'x.post')
-    return apiQuery(lists['x.post'].query.value, 'post')
-  if (folderId.value && folderKind.value === 'post' && folderList.query.value)
-    return apiQuery(folderList.query.value, 'post')
-  return undefined
-})
-/**
- * The shown list's address with a term added to its filter, the way the
- * filters themselves write it: a hashtag joins the search, an author the
- * authors.
- */
-function refined(key: 'q' | 'author', value: string) {
-  const q = new URLSearchParams(shownQuery.value)
-  if (key === 'author') {
-    if (!q.getAll('author').includes(value)) q.append('author', value)
-  } else {
-    const text = q.get('q')?.trim() ?? ''
-    if (!text.split(SPACES).includes(value))
-      q.set('q', text ? `${text} ${value}` : value)
-  }
-  return folderId.value
-    ? `/folder/${folderId.value}?${folderAddress(q.toString())}`
-    : `/?${q}`
-}
 type Sheet =
   '' | 'create' | 'menu' | 'rename' | 'delete' | 'share' | 'update' | 'watch'
 const sheet = shallowRef<Sheet>('')
@@ -1000,14 +966,7 @@ const viewProps = computed(() => {
     />
     <TabBar v-if="!wide" />
   </main>
-  <SideAside
-    v-if="sidebar"
-    :folders="folders"
-    :total="shownTotal"
-    :storage="usedText"
-    :posts="sidebarPosts"
-    :refine="refined"
-  />
+  <SideAside v-if="sidebar" :folders="folders" :total="shownTotal" />
 </template>
 
 <style scoped>

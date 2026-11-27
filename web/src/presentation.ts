@@ -584,3 +584,25 @@ export function mentionParts(collection: Collection, text: string): BodyPart[] {
   if (offset < text.length) parts.push({ text: text.slice(offset) })
   return parts
 }
+
+/** A hashtag or a mention: # or @ and the word after it. */
+const TIGHT = /[#＃@][\p{L}\p{M}\p{N}_]+/gu
+
+/**
+ * Text split around its hashtags and mentions, which are kept tight: the
+ * browser's autospace would put a gap between # or @ and a Chinese or
+ * Japanese word after it (TightText, `.tight` in style.css).
+ */
+export function tightParts(text: string): { text: string; tight?: boolean }[] {
+  const parts: { text: string; tight?: boolean }[] = []
+  let offset = 0
+  for (const match of text.matchAll(TIGHT)) {
+    if (match.index > offset)
+      parts.push({ text: text.slice(offset, match.index) })
+    parts.push({ text: match[0], tight: true })
+    offset = match.index + match[0].length
+  }
+  if (offset < text.length || !parts.length)
+    parts.push({ text: text.slice(offset) })
+  return parts
+}

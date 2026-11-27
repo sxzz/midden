@@ -345,8 +345,7 @@ describe('GET requests on the read threads', () => {
       '/collections',
       '/collections?q=cat',
       '/collections/count?q=cat',
-      '/collections/aggregate?by=author&entity_type=fake.post',
-      '/collections/aggregate?by=hashtag&limit=10&q=cat',
+      '/library/stats?tz=Asia%2FTokyo',
       '/collections/authors',
       `/collections/${fixture.ids.p2}`,
       `/collections/${fixture.ids['7']}/history`,
@@ -411,7 +410,6 @@ describe('GET requests on the read threads', () => {
     const required: Record<string, string> = {
       '/collections/graph': `?of=${alice}`,
       '/collections/compare': `?rel_of=${alice}&rel_of=${bob}`,
-      '/collections/aggregate': '?by=author',
     }
     const all = createApi({ ctx: source }).routes
     // Those answered here read this process's empty database.

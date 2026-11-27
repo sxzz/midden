@@ -111,6 +111,12 @@ html {
   touch-action: manipulation;
   text-autospace: normal;
 }
+/* A hashtag or a mention is one word: no gap after its # or @ (TightText).
+   Dates keep theirs. */
+.tight,
+.mention {
+  text-autospace: no-autospace;
+}
 /* Headings and card titles break into even lines; running text (post
    bodies and bios, captions, descriptions and footnotes) avoids a lone
    last word. Buttons, chips and one-line labels are left as they are. */

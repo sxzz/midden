@@ -11,6 +11,7 @@ import {
 import { collectionHref } from '../share'
 import MediaThumbs from './MediaThumbs.vue'
 import LockIcon from './ui/LockIcon.vue'
+import TightText from './ui/TightText.vue'
 import type { Asset, Collection } from '../api'
 
 const INSTAGRAM_SHORTCODE = /^[\w-]{1,20}$/
@@ -294,9 +295,9 @@ const groups = computed(() => {
               >@{{ relation.account.handle }}</span
             >
           </span>
-          <span v-else class="text" :lang="relation.lang">{{
-            relation.text
-          }}</span>
+          <span v-else class="text" :lang="relation.lang"
+            ><TightText :text="relation.text"
+          /></span>
         </a>
         <MediaThumbs
           v-if="relation.assets.length"

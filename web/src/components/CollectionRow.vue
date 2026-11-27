@@ -16,6 +16,7 @@ import PostRelations from './PostRelations.vue'
 import AppLink from './ui/AppLink.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 import LockIcon from './ui/LockIcon.vue'
+import TightText from './ui/TightText.vue'
 const props = defineProps<{
   enlargedMedia?: boolean
   collection: Collection
@@ -158,10 +159,9 @@ const storage = computed(() =>
           class="preview"
           :lang="view.lang"
           ><template v-for="(part, i) in preview" :key="i"
-            ><mark v-if="part.mark">{{ part.text }}</mark
-            ><template v-else>{{ part.text }}</template></template
-          ></span
-        >
+            ><mark v-if="part.mark"><TightText :text="part.text" /></mark
+            ><TightText v-else :text="part.text" /></template
+        ></span>
         <span v-if="meta" class="meta">{{ meta }}</span>
         <PostRelations
           :collection="collection"
