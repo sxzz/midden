@@ -39,6 +39,10 @@ COPY --from=build /src/web/dist web/dist
 # The agent API's guide, served at /agent.md (server/src/agent/doc.ts).
 COPY docs/agent.md docs/agent.md
 COPY LICENSE /usr/share/licenses/midden/LICENSE
+# `midden <command>` is the admin CLI (server/src/cli.ts), so `docker compose
+# exec -T midden midden token list` works; the long `node` form works too.
+RUN printf '#!/bin/sh\nexec node /srv/server/src/cli.ts "$@"\n' > /usr/local/bin/midden && \
+  chmod +x /usr/local/bin/midden
 ENV DATA_DIR=/data WEB_DIR=/srv/web/dist NODE_ENV=production
 RUN mkdir /data && chown node:node /data
 USER node

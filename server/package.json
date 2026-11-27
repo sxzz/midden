@@ -8,6 +8,9 @@
   "exports": {
     "./api": "./src/http/app.ts"
   },
+  "bin": {
+    "midden": "./src/cli.ts"
+  },
   "files": [
     "drizzle",
     "src"
@@ -31,6 +34,7 @@
     "@simplewebauthn/server": "^14.1.0",
     "@standard-schema/spec": "^1.1.0",
     "aws4fetch": "^1.0.20",
+    "cac": "^7.1.1",
     "drizzle-orm": "^1.0.0-rc.6",
     "grammy": "^1.48.0",
     "hono": "^4.13.21",

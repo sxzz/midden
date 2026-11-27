@@ -3,7 +3,6 @@ import { describe, expect, test } from 'vitest'
 import { openDatabase } from '#db/client.ts'
 import { apiTokens } from '#db/schema.ts'
 import { insertRow, migratedBefore, migrateRest } from '#testing/migrations.ts'
-import { tokenCreate } from './cli.ts'
 import {
   authenticate,
   createToken,
@@ -134,48 +133,6 @@ describe('tokens', () => {
     )
     for (const bad of ['0d', 'soon', '2020-01-01', '7w', '-1d'])
       expect(() => parseExpiry(bad, NOW)).toThrow()
-  })
-})
-
-describe('the CLI', () => {
-  test('token create prints the secret alone and what it is aside', () => {
-    const db = openDatabase(':memory:')
-    const out: string[] = []
-    const err: string[] = []
-    const print = {
-      out: (l: string) => out.push(l),
-      err: (l: string) => err.push(l),
-    }
-    expect(
-      tokenCreate(
-        db,
-        ['--ro', '--label', 'notes', '--expires', '7d'],
-        print,
-        NOW,
-      ),
-    ).toBe(0)
-    expect(out).toEqual([expect.stringMatching(/^mdn_ro_/)])
-    expect(err).toEqual([
-      `notes · ro · expires ${new Date(NOW + 7 * 24 * HOUR).toISOString()}`,
-    ])
-    expect(authenticate(db, out[0]!, NOW).ok).toBe(true)
-
-    expect(tokenCreate(db, ['--rw'], print, NOW)).toBe(0)
-    expect(listTokens(db, NOW).at(-1)).toEqual(
-      expect.objectContaining({
-        label: 'cli',
-        permission: 'rw',
-        expires_at: null,
-      }),
-    )
-    for (const args of [
-      [],
-      ['--ro', '--rw'],
-      ['--ro', '--expires', 'yesterday'],
-      ['--ro', '--colour'],
-    ])
-      expect(tokenCreate(db, args, print, NOW)).toBe(1)
-    expect(listTokens(db, NOW)).toHaveLength(2)
   })
 })
 

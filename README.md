@@ -59,10 +59,10 @@ Bot 只回应所有者：私聊中直接发送链接或命令；群聊中需 @Bo
 REST API 使用 Bearer token：
 
 ```sh
-docker compose exec midden node server/src/cli.ts token create 脚本名称
+docker compose exec -T midden midden token create --rw --label 脚本名称
 ```
 
-token 只显示这一次。例如保存一个链接：
+token 只显示这一次；`midden token list` 查看、`midden token revoke` 撤销，见[运维文档](docs/operations.md#命令行)。例如保存一个链接：
 
 ```sh
 curl -H "Authorization: Bearer <token>" -H 'Content-Type: application/json' \
@@ -78,7 +78,7 @@ docker compose pull && docker compose up -d
 数据库可以由可选的 `litestream` 容器持续复制到 R2，能恢复到最近 7 天内的任一时刻；也可以手动备份（服务运行中即可）：
 
 ```sh
-docker compose exec midden node server/src/cli.ts backup /data/backups
+docker compose exec -T midden midden backup /data/backups
 ```
 
 媒体文件写入后不再修改，用 `rsync` 等工具增量复制 `data/media/` 即可；使用 R2 时原文件只在 R2 中，不需要复制。`.env` 自己另存一份。详见 [运维文档](docs/operations.md#备份与恢复)。

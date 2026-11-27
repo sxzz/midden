@@ -12,20 +12,40 @@ export async function rawGetCommand(
   raw: RawStore | undefined,
   captureId: string,
   position: number | undefined,
-  out: { print: (line: string) => void; write: (bytes: Buffer) => void },
+  out: {
+    /** The listing: data, for stdout. */
+    print: (line: string) => void
+    /** Why nothing was found: for stderr. */
+    error: (line: string) => void
+    write: (bytes: Buffer) => void
+  },
+  options: { json?: boolean } = {},
 ): Promise<number> {
   const rows = captureResponses(db, captureId)
   if (position === undefined) {
-    if (!rows.length) out.print(`no raw responses for capture ${captureId}`)
-    for (const row of rows)
+    if (!rows.length) out.error(`no raw responses for capture ${captureId}`)
+    if (options.json)
       out.print(
-        `${row.position}\t${row.local ? 'database' : 'bucket'}\t${row.size}\t${row.contentType}\t${row.sourceUrl}`,
+        JSON.stringify(
+          rows.map((row) => ({
+            position: row.position,
+            location: row.local ? 'database' : 'bucket',
+            size: row.size,
+            content_type: row.contentType,
+            source_url: row.sourceUrl,
+          })),
+        ),
       )
+    else
+      for (const row of rows)
+        out.print(
+          `${row.position}\t${row.local ? 'database' : 'bucket'}\t${row.size}\t${row.contentType}\t${row.sourceUrl}`,
+        )
     return rows.length ? 0 : 1
   }
   const row = rows.find((r) => r.position === position)
   if (!row) {
-    out.print(`no raw response ${position} for capture ${captureId}`)
+    out.error(`no raw response ${position} for capture ${captureId}`)
     return 1
   }
   out.write(await sourceBody(db, raw, row))

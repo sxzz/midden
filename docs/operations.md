@@ -24,18 +24,82 @@
 脚本和 AI agent 用 API 令牌访问 `/v1` 与 `/agent/v1`（见[架构](architecture.md#agent-api)；给 agent 的说明在 `https://<域名>/agent.md`，把这个地址和令牌交给它即可）。
 
 - 网页「设置 → API 令牌」：创建（名称、只读或读写、过期时间或永不过期），令牌只显示一次；之后可改名称和过期时间、轮换、撤销，并看到上次使用时间和最近 30 天的请求次数。只有登录网页的所有者能管理令牌，令牌自己不能。
-- 命令行（在部署目录；本地开发用 `pnpm --filter @midden/server cli token create …`）：
-
-  ```sh
-  docker compose exec midden node server/src/cli.ts token create --ro --label research --expires 7d
-  docker compose exec midden node server/src/cli.ts token create --rw --label sync --expires 2027-01-01T00:00:00Z
-  ```
-
-  `--ro` 或 `--rw` 必须给一个；`--label` 默认 `cli`；`--expires` 是 ISO 时间、`30m`/`12h`/`7d` 这样从现在算起的时长，或 `never`（默认）。标准输出只有令牌本身，名称、权限和过期时间写在标准错误。
+- 命令行：`midden token create | list | revoke | expires`，见下一节「命令行」。
 
 - 令牌不能删除收藏、媒体、标签、收藏夹、定期更新等，只读令牌不能写入；读写令牌可以取消公开分享、移除采集账号（不删除内容）。agent 接口所有令牌合计同时最多 2 个请求。
 - 这个版本之前创建的令牌迁移为读写、永不过期，原来的名字成为名称，原令牌照常可用。
 - 本地开发服务器（`.local/dev.sh`）的 Vite 代理用 `.local/dev-token` 中的令牌替网页登录。它迁移为读写令牌后照常可用；开发模式（不设 `NODE_ENV=production`）下读写令牌在 `/v1` 上等同网页会话，所以开发服务器上的删除和令牌管理也照常可用。生产环境没有这个例外。
+
+## 命令行
+
+管理命令在容器里运行，镜像里有 `midden` 这个命令（`/usr/local/bin/midden`，等价于 `node server/src/cli.ts`，后一种写法照常可用）：
+
+```sh
+docker compose exec -T midden midden --help               # 全部命令
+docker compose exec -T midden midden token create --help  # 某个命令的选项
+docker compose exec -T midden midden --version            # 镜像的提交（本地开发为 dev）
+```
+
+本地开发用 `pnpm --filter @midden/server cli <命令>`（读取仓库根目录的 `.env`）。下面的示例省略 `docker compose exec -T midden`。
+
+约定，方便脚本和 AI agent 使用：
+
+- 标准输出只有数据（令牌、列表、JSON、文件路径、原始字节），说明和错误写在标准错误；没有输出数据时不输出空行。
+- 退出码：0 成功；1 操作失败（找不到令牌、过期时间无效、MEDIA_STORE 不是 r2 等）；2 命令行写错（未知命令或选项、缺少参数），原因和用法提示在标准错误。
+- 列表类命令有 `--json`：输出一行 JSON，字段名固定（下表）。
+- `--help` 和 `--version` 不需要配置（`SECRET_KEY` 等）；其余命令按 `.env` 读取配置，数据库在 `DATA_DIR` 下。
+
+| 命令                                                                          | 作用                                                                                                                                                                                                                                    |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `token create --ro\|--rw [--label 名称] [--expires 时间]`                     | 创建令牌。`--ro` 或 `--rw` 必须给一个；`--label` 默认 `cli`（1 到 64 字）；`--expires` 是 ISO 时间、`30m`/`12h`/`7d` 这样从现在算起的时长，或 `never`（默认）。标准输出只有令牌本身，名称、权限和过期时间写在标准错误。令牌只显示这一次 |
+| `token list [--json]`                                                         | 列出令牌，最早创建的在前：名称、权限、id 前缀、创建时间、过期时间（已过期的标注）、上次使用时间、今天（UTC）的请求数。不会也不可能输出令牌本身，因为数据库里只有它的摘要；id 只显示足以区分的前缀                                       |
+| `token revoke <id或名称> [--json]`                                            | 撤销令牌：令牌和它的用量记录立即删除，原来的令牌值马上失效。名称对应多个令牌时不撤销，在标准错误列出它们的 id 前缀，用前缀再来一次                                                                                                      |
+| `token expires <id或名称> <时间> [--json]`                                    | 改过期时间，写法同 `--expires`（可提前、延后或 `never`；已过期的令牌设一个更晚的时间即恢复可用）。名称对应多个令牌时同样拒绝                                                                                                            |
+| `backup <目录> [--json]`                                                      | 在线备份数据库（服务运行中即可）到 `<目录>/midden-<时间>.db`，标准输出是文件路径                                                                                                                                                        |
+| `media-migrate [--dry-run] [--concurrency N] [--verify-download] [--limit N]` | 把本地媒体原文件上传到 R2，见「迁移现有媒体」。需要 `MEDIA_STORE=r2`                                                                                                                                                                    |
+| `media-prune-local [--dry-run] [--concurrency N] [--verify-download]`         | 删除 R2 里已有可验证副本的本地原文件。需要 `MEDIA_STORE=r2`                                                                                                                                                                             |
+| `raw-get <抓取 id> [序号] [--json]`                                           | 列出一次抓取的原始响应；给序号则把那一条的原始字节写到标准输出                                                                                                                                                                          |
+| `maintain [--vacuum] [--rebuild-search]`                                      | 离线整理数据库，网页进程、worker 和 Litestream 都停止时才能运行，见「数据库整理」                                                                                                                                                       |
+
+`token list --json` 的每个元素：
+
+```json
+{
+  "id": "01a21bb2-ad",
+  "label": "research",
+  "permission": "ro",
+  "created_at": "2026-11-27T06:30:24.392Z",
+  "expires_at": "2026-11-27T07:30:24.392Z",
+  "expired": false,
+  "last_used_at": null,
+  "requests_today": 0
+}
+```
+
+`expires_at` 和 `last_used_at` 为 `null` 表示永不过期、从未使用；`id` 是前缀，可直接用于 `token revoke` 和 `token expires`。`raw-get --json` 是 `[{"position","location","size","content_type","source_url"}]`；`backup --json` 是 `{"file"}`；`token revoke --json` 是 `{"revoked": 名称}`；`token expires --json` 是 `{"label","expires_at"}`。`media-*` 和 `maintain` 的报告是给人看的文本，写在标准输出。
+
+示例：
+
+```sh
+# 给 agent 一个读写令牌，7 天后过期
+midden token create --rw --label sync --expires 7d
+# 看有哪些令牌、谁在用
+midden token list
+midden token list --json | jq '.[] | select(.requests_today > 0) | .label'
+# 延长 / 取消过期
+midden token expires sync 30d
+midden token expires sync never
+# 撤销
+midden token revoke sync
+```
+
+冒烟测试（部署后确认 agent 接口可用），令牌 1 小时后自动过期，用完立即撤销：
+
+```sh
+SECRET=$(docker compose exec -T midden midden token create --ro --label smoke --expires 1h)
+curl -fsS -H "Authorization: Bearer $SECRET" https://<域名>/agent/v1/whoami
+docker compose exec -T midden midden token revoke smoke
+```
 
 ## 发布
 
@@ -208,9 +272,9 @@ rclone copy ~/midden/data/media r2:midden \
 3. 迁移：
 
    ```sh
-   docker compose exec midden node server/src/cli.ts media-migrate --dry-run
-   docker compose exec midden node server/src/cli.ts media-migrate --limit 20
-   docker compose exec midden node server/src/cli.ts media-migrate --concurrency 8
+   docker compose exec -T midden midden media-migrate --dry-run
+   docker compose exec -T midden midden media-migrate --limit 20
+   docker compose exec -T midden midden media-migrate --concurrency 8
    ```
 
    先试运行看汇总（会读取所有本地文件并对每个对象做 HEAD，不写入、不删除，列出会删除的本地文件数），再迁移少量抽查，最后全部迁移。每个媒体记下后即删除本地原文件。中断后重新运行即可。
@@ -227,8 +291,8 @@ rclone copy ~/midden/data/media r2:midden \
 6. 不需要单独删除本地原文件：新上传的媒体由上传任务删除，迁移的由 `media-migrate` 删除。`media-prune-local` 只处理剩下的（见上），可以在迁移之后运行一次，以后偶尔再运行：
 
    ```sh
-   docker compose exec midden node server/src/cli.ts media-prune-local --dry-run
-   docker compose exec midden node server/src/cli.ts media-prune-local
+   docker compose exec -T midden midden media-prune-local --dry-run
+   docker compose exec -T midden midden media-prune-local
    ```
 
 7. 原来的每日备份脚本已删除，它留下的媒体镜像确认 R2 无误后手动删除，见「旧的每日备份」。
@@ -294,7 +358,7 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 - 存储桶必须是私有的（不绑定域名、不开公开访问）：原始响应中有平台给登录账号看的内容。用 `midden-backup` 时，它的生命周期规则不能删除 `raw/` 下的对象（那是原始响应唯一的一份；Litestream 自己管理 `db/` 下的文件）。中止未完成分段上传的规则（见「Litestream」）不删除对象，不受影响；原始响应都是一次上传，不用分段。
 - 不需要新的密钥：S3 密钥由 `CF_API_TOKEN` 派生，它要对这个存储桶有读写权限。R2 的密钥不能限定前缀，所以它也能读写 `db/`。
 - 费用：按 4 倍压缩，现有的约 180 MB，存储每月约 $0.003；移走已有的约 13 万条用了同样多的 PUT 和 HEAD，在每月免费额度内。之后每条新的原始响应一次 PUT、一次 HEAD，删除时一次 DELETE。「存储用量」中 `midden-backup` 的存储和操作次数包括 `raw/`。
-- 读取一条：`docker compose exec midden node server/src/cli.ts raw-get <抓取 id>` 列出这次抓取的原始响应（序号、`bucket` 或 `database`、大小、类型、地址），加上序号输出那一条的原始字节。
+- 读取一条：`docker compose exec -T midden midden raw-get <抓取 id>` 列出这次抓取的原始响应（序号、`bucket` 或 `database`、大小、类型、地址），加上序号输出那一条的原始字节。
 - 关闭：删去 `RAW_R2_BUCKET` 即可，之后新的原始响应留在数据库中；已在存储桶中的仍在那里，读取它们（`raw-get`）和回收删除都需要这个存储桶，所以只在不再需要它们时关闭。
 
 ### 启用
@@ -314,8 +378,8 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
       SELECT retry_at IS NULL, count(*) FROM raw_upload_failures GROUP BY 1;
       SELECT capture_id FROM source_responses
         WHERE id NOT IN (SELECT response_id FROM source_response_bodies) LIMIT 1;"
-   docker compose exec midden node server/src/cli.ts raw-get <抓取 id>
-   docker compose exec midden node server/src/cli.ts raw-get <抓取 id> 0 | head -c 300
+   docker compose exec -T midden midden raw-get <抓取 id>
+   docker compose exec -T midden midden raw-get <抓取 id> 0 | head -c 300
    ```
 
    第一条给出仍在数据库中（`0`）和已在存储桶中（`1`）的条数与原始大小，积压移走后前者只剩最近的、正在等待重试的和与哈希不符的；第二条是等待重试（`0`）和与哈希不符（`1`）的条数；第三条是一个已移走的抓取 id，`raw-get` 列出它的原始响应（应为 `bucket`），再输出第一条，应是原始的 JSON。
@@ -331,7 +395,7 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 - 数据库：Litestream 持续复制到 R2 的私有存储桶 `midden-backup`，可以恢复到最近 7 天内的任一时刻，见「Litestream」。不启用时，自己定期做在线备份（服务运行中即可）：
 
   ```sh
-  docker compose exec midden node server/src/cli.ts backup /data/backups
+  docker compose exec -T midden midden backup /data/backups
   ```
 
   这个命令也用于一次性的副本，例如改动数据之前。

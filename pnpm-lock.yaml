@@ -236,6 +236,9 @@ importers:
       aws4fetch:
         specifier: ^1.0.20
         version: 1.0.20
+      cac:
+        specifier: ^7.1.1
+        version: 7.1.1
       drizzle-orm:
         specifier: ^1.0.0-rc.6
         version: 1.0.0-rc.6(valibot@1.5.0(typescript@6.0.3))(zod@4.6.7)
@@ -1678,6 +1681,10 @@ packages:
   builtin-modules@5.5.0:
     resolution: {integrity: sha512-2uhx+Lkzc2fnAcNEpzbJziSzwdv6cJjxxsi9oByBhSuy2wffAPzmazVDiWJk2xDKULFONl5gNOEOLOupQ8gsPg==}
     engines: {node: '>=18.20'}
+
+  cac@7.1.1:
+    resolution: {integrity: sha512-8zc+h51HxpodKsA7L4PpBNd+9qlrfuUcyUDE5a793BJfN4NZgwk7v9NmrY3ptZ+Sk0+ToigxSzkb47AsEgyizw==}
+    engines: {node: '>=20.19.0'}
 
   cacheable@2.5.0:
     resolution: {integrity: sha512-60cyAOytib/OzBw1JNSoSV/boK1AtHryDIjvVBk7XbN4ugfkM3+Sry7fEjNgPMGgOjuaZPAp8ruZ0Cxafwyq9g==}
@@ -5114,6 +5121,8 @@ snapshots:
       update-browserslist-db: 1.4.0(browserslist@4.29.6)
 
   builtin-modules@5.5.0: {}
+
+  cac@7.1.1: {}
 
   cacheable@2.5.0:
     dependencies:

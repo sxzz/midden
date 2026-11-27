@@ -432,6 +432,7 @@ describe('raw-get', () => {
     const written: Buffer[] = []
     const out = {
       print: (line: string) => printed.push(line),
+      error: (line: string) => printed.push(`error: ${line}`),
       write: (bytes: Buffer) => written.push(bytes),
     }
     expect(
@@ -453,6 +454,7 @@ describe('raw-get', () => {
     const written: Buffer[] = []
     const out = {
       print: (line: string) => printed.push(line),
+      error: (line: string) => printed.push(`error: ${line}`),
       write: (bytes: Buffer) => written.push(bytes),
     }
     expect(

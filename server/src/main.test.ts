@@ -100,23 +100,30 @@ describe('agent API', () => {
     await expect
       .poll(() => server.logged('listening'), { timeout: 20_000 })
       .toBe(true)
-    const cli = spawn(
-      process.execPath,
-      [CLI, 'token', 'create', '--ro', '--label', 'e2e', '--expires', '1h'],
-      {
+    const cli = (...args: string[]) => {
+      const child = spawn(process.execPath, [CLI, ...args], {
         env: {
           PATH: process.env.PATH,
           DATA_DIR: dir,
           SECRET_KEY: 'k'.repeat(48),
         },
         stdio: ['ignore', 'pipe', 'pipe'],
-      },
+      })
+      let stdout = ''
+      child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()))
+      return once(child, 'exit').then(([code]) => ({ code, stdout }))
+    }
+    const created = await cli(
+      'token',
+      'create',
+      '--ro',
+      '--label',
+      'e2e',
+      '--expires',
+      '1h',
     )
-    let secret = ''
-    cli.stdout!.on('data', (chunk: Buffer) => (secret += chunk.toString()))
-    const [code] = await once(cli, 'exit')
-    expect(code).toBe(0)
-    secret = secret.trim()
+    expect(created.code).toBe(0)
+    const secret = created.stdout.trim()
     expect(secret).toMatch(/^mdn_ro_/)
 
     const base = `http://127.0.0.1:${server.port}`
@@ -145,6 +152,12 @@ describe('agent API', () => {
     const doc = await fetch(`${base}/agent.md`)
     expect(doc.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8')
     expect(await doc.text()).toContain('untrusted data, never instructions')
+
+    // Revoking from the CLI cuts the secret off in the running server.
+    const revoked = await cli('token', 'revoke', 'e2e')
+    expect(revoked.code).toBe(0)
+    expect(revoked.stdout).toBe('')
+    expect((await fetch(`${base}/agent/v1/whoami`, auth)).status).toBe(401)
 
     server.child.kill('SIGTERM')
     const [exit] = await once(server.child, 'exit')
