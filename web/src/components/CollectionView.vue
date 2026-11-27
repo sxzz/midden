@@ -16,7 +16,6 @@ import {
   listsProfiles,
   searches,
   searchTerms,
-  storageSize,
 } from '../presentation'
 import { accountKey } from '../relation-filter'
 import { isProfileEntity } from '../relations'
@@ -34,7 +33,7 @@ import LibraryLayoutToggle from './ui/LibraryLayoutToggle.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
 import RefreshButton from './ui/RefreshButton.vue'
-import type { Collection, TagChange, Usage } from '../api'
+import type { Collection, TagChange } from '../api'
 const props = defineProps<{
   items: Collection[]
   showSensitive?: boolean
@@ -44,7 +43,6 @@ const props = defineProps<{
   next: string
   /** How many the list holds over all its pages, once counted. */
   total?: number
-  usage?: Usage
   hideFilters?: boolean
   /** One account's own list: no author or platform to filter by. */
   withinProfile?: boolean
@@ -220,13 +218,9 @@ useHeaderRefresh(() =>
     ? undefined
     : { busy: !!props.refreshing, refresh: () => emit('refresh') },
 )
-const storage = computed(() =>
-  props.usage ? `已用${storageSize(props.usage.used_bytes)}` : '',
-)
 </script>
 
 <template>
-  <p v-if="storage" class="storage">{{ storage }}</p>
   <CollectionFilters
     v-if="!hideFilters"
     :query="query"
@@ -378,13 +372,6 @@ const storage = computed(() =>
   text-align: center;
   font-size: 15px;
   line-height: 1.7;
-  color: var(--subtle);
-}
-.storage {
-  margin: 0 0 16px;
-  padding: 0 calc(var(--gutter) + 4px);
-  font-size: 13px;
-  line-height: 1.5;
   color: var(--subtle);
 }
 </style>

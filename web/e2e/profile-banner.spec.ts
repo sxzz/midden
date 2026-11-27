@@ -123,11 +123,9 @@ async function serve(page: Page, collection: object, options: Options = {}) {
               ? { points: [] }
               : path.endsWith('/availability')
                 ? { available: true }
-                : path === '/v1/usage'
-                  ? { used_bytes: 0 }
-                  : path === '/v1/tags'
-                    ? []
-                    : { items: [collection] }
+                : path === '/v1/tags'
+                  ? []
+                  : { items: [collection] }
     return r.fulfill({ json: body })
   })
 }

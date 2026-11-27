@@ -48,11 +48,7 @@ async function serve(page: import('@playwright/test').Page, assets: unknown[]) {
               }
             : path === `/v1/collections/${id}`
               ? item
-              : path === '/v1/collections/authors'
-                ? { items: [] }
-                : path === '/v1/usage'
-                  ? { used_bytes: 0 }
-                  : { items: [item] }
+              : { items: path === '/v1/collections/authors' ? [] : [item] }
     return r.fulfill({ json: body })
   })
   await page.goto('/')

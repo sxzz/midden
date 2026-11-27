@@ -34,7 +34,7 @@ const V1_FOR_VIEWERS = [
   'GET /query/suggest',
   'GET /collections/authors',
   'GET /collections/perspectives',
-  'GET /usage',
+  'GET /library/stats',
   'GET /folders',
   // Relations, a collection and its history.
   'GET /collections/compare',

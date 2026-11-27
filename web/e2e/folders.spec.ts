@@ -76,8 +76,6 @@ test('a folder shows posts and accounts in tabs, and updates as expanded', async
         case '/v1/updates/preview':
           // The server leaves out posts there only through an account.
           return { posts: 1, profiles: 1, listable: 1, name: '猫' }
-        case '/v1/usage':
-          return { used_bytes: 0 }
         default:
           return url.pathname.endsWith('s') ? [] : { items: [] }
       }

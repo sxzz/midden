@@ -103,7 +103,7 @@ beforeEach(() => {
       return { posts: 3, profiles: 0, listable: 0, name: '图片' }
     if (path === '/updates') return { id: 'record' }
     if (path.startsWith('/captures/')) throw new APIError(404, '不存在')
-    return { used_bytes: 0 }
+    return {}
   })
 })
 let unmount = () => {}

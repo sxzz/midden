@@ -1,12 +1,15 @@
 // `GET /v1/library/stats`: the archive as a whole, for the library's
 // sidebar (全站统计): posts and accounts, how many posts carry images or
 // videos, the space used, what was saved today and this week, and the
-// captures and updates started today. A handful of small reads (about 60 ms
+// captures and updates started today. Only counts of the whole archive,
+// nobody's tags, notes or capture accounts; a viewer gets no counts of
+// capture records (`statsFor`). A handful of small reads (about 60 ms
 // together on a copy of 60 000 collections), kept for a minute per read
 // thread and time zone while the library does not change, so the sidebar
 // adds next to nothing to a list's own reads.
 import { sql } from 'drizzle-orm'
 import { AppError } from '#errors.ts'
+import { sees, type Principal } from '#users/principal.ts'
 import { libraryVersion } from './folder-counts.ts'
 import { storageUsed } from './read.ts'
 import type { Executor } from '#db/client.ts'
@@ -102,4 +105,21 @@ export function libraryStats(
   }
   zones.set(zone, { at: now, version, stats })
   return stats
+}
+
+/**
+ * The figures as `principal` sees them: the archive's counts for anyone;
+ * the captures and updates started today only for whoever sees capture
+ * records (the admin), null for a viewer. What is kept is everyone's, so
+ * it is taken out here, after the cache.
+ */
+export function statsFor(
+  stats: LibraryStats,
+  principal: Principal,
+): Omit<LibraryStats, 'captures_today' | 'updates_today'> & {
+  captures_today: number | null
+  updates_today: number | null
+} {
+  if (sees(principal).records) return stats
+  return { ...stats, captures_today: null, updates_today: null }
 }

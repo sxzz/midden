@@ -61,7 +61,6 @@ for (const scheme of ['light', 'dark'] as const) {
       await page.route('**/v1/**', (r) => {
         const path = new URL(r.request().url()).pathname
         if (path === '/v1/session') return r.fulfill({ json: {} })
-        if (path === '/v1/usage') return r.fulfill({ json: { used_bytes: 0 } })
         if (path === '/v1/collections')
           return r.fulfill({ json: { items: [post] } })
         if (path === `/v1/collections/${id}`) return r.fulfill({ json: post })

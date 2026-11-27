@@ -34,10 +34,6 @@ test('browse, filter, history, refresh and remove a saved post', async ({
         body = {}
         break
       }
-      case '/v1/usage': {
-        body = { used_bytes: 1048576 }
-        break
-      }
       case '/v1/collections': {
         sorts.push(u.searchParams.get('sort') ?? '')
         body = {
@@ -267,13 +263,11 @@ test('sensitive image stays blurred until revealed and opens inside the page', a
     const body =
       path === '/v1/session'
         ? {}
-        : path === '/v1/usage'
-          ? { used_bytes: 0 }
-          : path.endsWith('/availability')
-            ? { available: true }
-            : path === `/v1/collections/${id}`
-              ? sensitive
-              : { items: [sensitive] }
+        : path.endsWith('/availability')
+          ? { available: true }
+          : path === `/v1/collections/${id}`
+            ? sensitive
+            : { items: [sensitive] }
     await r.fulfill({ json: body })
   })
   await page.goto('/')
@@ -341,9 +335,7 @@ test('loading skeletons, one revision and touch image navigation', async ({
               }
             : path === `/v1/collections/${id}`
               ? media
-              : path === '/v1/usage'
-                ? { used_bytes: 0 }
-                : { items: [media] }
+              : { items: [media] }
     await r.fulfill({ json: body })
   })
   await page.goto('/')
@@ -414,13 +406,12 @@ test('scroll loads the next page and retries without losing existing items', asy
       }
     } else {
       await r.fulfill({
-        json: url.pathname === '/v1/usage' ? { used_bytes: 1048576 } : {},
+        json: {},
       })
     }
   })
   await page.goto('/')
   await expect(page.getByText('收藏编号 1', { exact: true })).toBeVisible()
-  await expect(page.getByText('已用1.0 MB', { exact: true })).toBeInViewport()
   expect(cursors).toEqual([null])
   await page.getByText('收藏编号 20', { exact: true }).scrollIntoViewIfNeeded()
   await expect(page.getByRole('button', { name: '重试加载' })).toBeVisible()

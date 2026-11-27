@@ -115,8 +115,6 @@ async function mock(page: Page, size = 3): Promise<Mock> {
                   ]
                 : [],
           }
-        case '/v1/usage':
-          return { used_bytes: 0 }
         default:
           return url.pathname.endsWith('s') ? [] : { items: [] }
       }

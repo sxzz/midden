@@ -191,7 +191,6 @@ export async function mockDesktop(page: Page) {
     if (path === '/v1/collections/count')
       return json({ count: 1280, types: { 'x.post': 1280 } })
     if (path === '/v1/folders') return json(folders)
-    if (path === '/v1/usage') return json({ used_bytes: 12_800_000_000 })
     if (path === '/v1/library/stats')
       return json({
         posts: 1280,

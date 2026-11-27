@@ -26,7 +26,7 @@ mockApi((path) => {
   if (path.endsWith('/history')) return { items: [] }
   if (path.endsWith('/availability')) return { available: true }
   if (path.startsWith('/collections/')) return collection
-  return { used_bytes: 0 }
+  return {}
 })
 let unmount = () => {}
 afterEach(() => {

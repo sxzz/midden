@@ -17,10 +17,6 @@ test('select collections and update them as one record', async ({ page }) => {
   await page.route('**/v1/**', (r) => {
     const path = new URL(r.request().url()).pathname
     if (path === '/v1/session') return r.fulfill({ json: {} })
-    if (path === '/v1/usage')
-      return r.fulfill({
-        json: { used_bytes: 0 },
-      })
     if (path === '/v1/collections') return r.fulfill({ json: { items } })
     if (path === '/v1/updates/preview')
       return r.fulfill({ json: { posts: 2, profiles: 0, listable: 0 } })
@@ -99,7 +95,6 @@ test("delete a selection, with the accounts' posts only when asked", async ({
   await page.route('**/v1/**', (r) => {
     const path = new URL(r.request().url()).pathname
     if (path === '/v1/session') return r.fulfill({ json: {} })
-    if (path === '/v1/usage') return r.fulfill({ json: { used_bytes: 0 } })
     if (path === '/v1/collections')
       return r.fulfill({ json: { items: listed } })
     if (path.startsWith('/v1/collections/delete')) {
@@ -156,7 +151,6 @@ async function mockList(page: Page) {
   await page.route('**/v1/**', (r) => {
     const path = new URL(r.request().url()).pathname
     if (path === '/v1/session') return r.fulfill({ json: {} })
-    if (path === '/v1/usage') return r.fulfill({ json: { used_bytes: 0 } })
     if (path === '/v1/collections') return r.fulfill({ json: { items } })
     return r.fulfill({ json: { items: [] } })
   })

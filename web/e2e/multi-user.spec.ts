@@ -36,7 +36,7 @@ const FOR_VIEWERS = [
   /^(GET|PATCH|DELETE) \/session$/,
   /^GET \/collections(\/count|\/authors|\/perspectives|\/compare|\/graph)?$/,
   /^GET \/query\/suggest$/,
-  /^GET \/(usage|folders)$/,
+  /^GET \/(folders|library\/stats)$/,
   /^GET \/collections\/[\w-]+(\/history(\/[\w-]+)?|\/counts|\/profile-changes|\/follows|\/follow-changes|\/graph)?$/,
   /^GET \/entities\/[\w-]+$/,
   /^(GET|POST|PATCH|DELETE) \/(passkeys|sessions|tokens)(\/.*)?$/,
@@ -75,6 +75,21 @@ async function asViewer(page: Page) {
         })),
       })
     if (path === '/tokens') return r.fulfill({ json: [] })
+    // The archive's counts, without the capture records' ones.
+    if (path === '/library/stats')
+      return r.fulfill({
+        json: {
+          posts: 1280,
+          accounts: 42,
+          with_images: 900,
+          with_videos: 120,
+          used_bytes: 12_800_000_000,
+          saved_today: 3,
+          saved_this_week: 17,
+          captures_today: null,
+          updates_today: null,
+        },
+      })
     return r.fallback()
   })
   return { refused, nicknames }
@@ -152,6 +167,27 @@ test.describe('a viewer', () => {
     await expect.poll(() => asked.length).toBeGreaterThan(0)
     expect(new URLSearchParams(asked[0]).get('folder')).toBe(folders[0]!.id)
     expect(new URL(page.url()).search).toBe('')
+    expect(refused).toEqual([])
+  })
+
+  test('sees 全站统计 without the captures and updates of today', async ({
+    page,
+  }) => {
+    const { refused } = await asViewer(page)
+    await page.goto('/')
+    const stats = page.getByRole('region', { name: '全站统计' })
+    await expect(stats.locator('dt')).toHaveText([
+      '帖子',
+      '账号',
+      '含图片的帖子',
+      '含视频的帖子',
+      '今天新增',
+      '本周新增',
+    ])
+    await expect(stats).toContainText('1,280')
+    await expect(stats).toContainText('已用空间')
+    // No 已用 line over the list: 全站统计 says it.
+    await expect(page.locator('main').getByText(/^已用/)).toHaveCount(0)
     expect(refused).toEqual([])
   })
 
@@ -343,6 +379,12 @@ test.describe('the admin', () => {
     const pane = page.getByRole('region', { name: '用户' })
     await expect(pane.locator('.user')).toHaveCount(2)
     await expect(pane.locator('.user').first()).toContainText('管理员')
+    // The admin's 全站统计 has today's captures and updates.
+    await page.goto('/')
+    await expect(
+      page.getByRole('region', { name: '全站统计' }).locator('dt'),
+    ).toContainText(['今天采集', '今天更新'])
+    await page.goto('/settings/admin/users')
     // The admin's own row is no button: nothing to do to them.
     await expect(pane.locator('button.user')).toHaveCount(1)
     await expect(pane.locator('button.user')).toContainText(

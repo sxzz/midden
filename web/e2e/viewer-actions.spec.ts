@@ -52,7 +52,6 @@ async function mock(page: Page) {
     const answers: Record<string, unknown> = {
       '': { target: 'folder', name: '公开收藏夹', posts: 1, profiles: 0 },
       '/v1/session': {},
-      '/v1/usage': { used_bytes: 0 },
       '/v1/tags': [],
       '/v1/folders': [],
       '/collections': { items: [post] },

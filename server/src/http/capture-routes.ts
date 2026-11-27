@@ -41,8 +41,8 @@ import {
 import { captures, collections, library, submissions } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { deleteAll } from '#library/delete.ts'
-import { libraryStats } from '#library/stats.ts'
-import { adminSession } from './auth.ts'
+import { libraryStats, statsFor } from '#library/stats.ts'
+import { adminSession, viewers } from './auth.ts'
 import { inline, readOnly, type NamedRead } from './offload.ts'
 import { Cursor, json, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -542,11 +542,19 @@ export function captureRoutes(
       .get('/library', (c) => c.json(librarySize(ctx.db)))
 
       // The archive as a whole, for the library's sidebar (全站统计), with
-      // today and this week in the owner's time zone; kept for a minute.
+      // today and this week in the asker's time zone; kept for a minute.
+      // Viewers see it too, without the capture records' counts.
       .get(
         '/library/stats',
+        viewers,
         query(v.object({ tz: v.optional(v.string()) })),
-        (c) => c.json(libraryStats(ctx.db, c.req.valid('query'))),
+        (c) =>
+          c.json(
+            statsFor(
+              libraryStats(ctx.db, c.req.valid('query')),
+              c.get('principal'),
+            ),
+          ),
       )
 
       .post(

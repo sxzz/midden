@@ -72,9 +72,7 @@ test.beforeEach(async ({ page }) => {
               }
             : path === `/v1/collections/${collection.id}`
               ? collection
-              : path === '/v1/usage'
-                ? { used_bytes: 0 }
-                : { items: [collection] }
+              : { items: [collection] }
     return r.fulfill({ json: body })
   })
   await page.goto('/')

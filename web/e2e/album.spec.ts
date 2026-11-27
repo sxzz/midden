@@ -46,9 +46,7 @@ async function setup(page: Page, paginated = false) {
     }
     const record = records.find((a) => u.pathname === `/v1/collections/${a.id}`)
     return r.fulfill({
-      json:
-        record ||
-        (u.pathname === '/v1/usage' ? { used_bytes: 0 } : { items: [] }),
+      json: record || { items: [] },
     })
   })
   return queries

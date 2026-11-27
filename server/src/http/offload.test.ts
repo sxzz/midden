@@ -355,7 +355,6 @@ describe('GET requests on the read threads', () => {
       `/captures/${record.items[0]!.id}/members`,
       '/library',
       '/tags',
-      '/usage',
       '/shares',
       `/public/${share.slug}`,
       // The relation views, over follows.

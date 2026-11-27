@@ -246,10 +246,6 @@ test('watch a folder from its menu', async ({ page }) => {
         json = { posts: 0, profiles: 1, listable: 1, name: '猫' }
         break
       }
-      case '/v1/usage': {
-        json = { used_bytes: 0 }
-        break
-      }
       case '/v1/tags': {
         json = []
         break

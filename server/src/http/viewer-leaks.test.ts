@@ -180,7 +180,8 @@ function routes(w: World) {
     `/collections/compare?rel_of=${alice}&rel_of=${bob}`,
     `/collections/graph?of=${alice}`,
     `/collections/graph?of=${alice}&viewer=${bob}`,
-    '/usage',
+    '/library/stats',
+    '/library/stats?tz=Asia%2FTokyo',
     '/folders',
     '/session',
     '/tokens',
@@ -291,6 +292,29 @@ describe('what viewers read', () => {
     expect(
       (await w.agent(`/posts/${w.ids.p1}`, undefined, admin)).text,
     ).toContain(w.tag)
+  })
+
+  test('全站统计: a viewer reads the archive’s counts, as the admin does, without the capture records’ ones', async () => {
+    const w = await canaries()
+    const route = '/library/stats?tz=Asia%2FTokyo'
+    const asViewer = await w.web(route)
+    const asAdmin = await w.web(route, w.adminCookie)
+    expect([asViewer.status, asAdmin.status]).toEqual([200, 200])
+    expect(leaks(w, asViewer.text)).toEqual([])
+    const theirs = JSON.parse(asViewer.text) as Record<string, unknown>
+    const admins = JSON.parse(asAdmin.text) as Record<string, unknown>
+    expect(admins.captures_today).toBeGreaterThan(0)
+    expect(theirs).toEqual({
+      ...admins,
+      captures_today: null,
+      updates_today: null,
+    })
+    expect(
+      Object.values(theirs).every((n) => n === null || typeof n === 'number'),
+    ).toBe(true)
+    // Asked again, each still gets their own: what is kept is not theirs.
+    expect((await w.web(route)).text).toBe(asViewer.text)
+    expect((await w.web(route, w.adminCookie)).text).toBe(asAdmin.text)
   })
 
   test('the admin’s notes never reach a viewer: not by setting their nickname, nor by the admin’s routes', async () => {

@@ -19,9 +19,8 @@ import {
   deleteCollections,
   planDeletion,
 } from '#library/delete.ts'
-import { storageUsed } from '#library/read.ts'
 import { deleteTag, renameTag } from '#library/tags.ts'
-import { adminSession, readCtx, viewers } from './auth.ts'
+import { adminSession, readCtx } from './auth.ts'
 import { inline, readOnly, type NamedRead } from './offload.ts'
 import { json, type Env } from './validate.ts'
 
@@ -167,10 +166,5 @@ export function accountRoutes(ctx: AccountsContext, read: NamedRead) {
           }),
         )
       })
-
-      // 已用空间: the library's, which viewers see too.
-      .get('/usage', viewers, (c) =>
-        c.json({ used_bytes: storageUsed(ctx.db) }),
-      )
   )
 }

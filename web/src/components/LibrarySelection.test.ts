@@ -52,7 +52,7 @@ beforeEach(() => {
     if (path.startsWith('/collections?')) return { items: listed }
     if (path.startsWith('/collections/count')) return { count: 0, types: {} }
     if (path === '/folders' || path === '/tags') return []
-    return { used_bytes: 0 }
+    return {}
   })
 })
 let unmount = () => {}

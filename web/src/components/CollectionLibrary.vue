@@ -15,7 +15,6 @@ import {
   type Collection,
   type LibraryFolder,
   type TagChange,
-  type Usage,
   type Watch,
 } from '../api'
 import { pageAside } from '../aside'
@@ -97,7 +96,6 @@ function writeFlag(key: string, on: boolean) {
 }
 const route = useRoute()
 const router = useRouter()
-const usage = shallowRef<Usage>()
 // Posts and accounts are separate lists: each tab keeps its own filters,
 // results and paging, so switching between them costs nothing.
 const tabs = [
@@ -494,14 +492,6 @@ watch(
   },
   { immediate: true },
 )
-async function loadUsage() {
-  try {
-    usage.value = await call(client.usage.$get())
-  } catch {
-    usage.value = undefined
-  }
-}
-loadUsage()
 const removeGuard = router.beforeEach((_to, from) => {
   if (from.name) scrolls.set(viewKey(from), window.scrollY)
 })
@@ -513,7 +503,6 @@ function updated(collection: Collection) {
     list.items.value = list.items.value.map((a) =>
       a.id === collection.id ? { ...collection, saved_at: a.saved_at } : a,
     )
-  loadUsage()
 }
 /**
  * Collections are gone. Their accounts' posts may have gone with them, and
@@ -526,7 +515,6 @@ function forget(ids: string[], withPosts: boolean) {
   for (const id of ids) scrolls.delete(id)
   forgetPages((path) => ids.some((id) => path.startsWith(`/collection/${id}`)))
   if (withPosts) stale()
-  loadUsage()
 }
 function deleted(id: string, withPosts: boolean) {
   forget([id], withPosts)
@@ -558,10 +546,9 @@ watch(mediaRemovals, () => {
     shown.loadedQuery = query
     void shown.collection.load(query)
   }
-  loadUsage()
 })
 // One media item removed from the viewer: it shows as removed where the lists
-// hold it, and the storage used is less. The lists are not loaded again, so
+// hold it, its post's size less. The lists are not loaded again, so
 // the page does not flash or move under the viewer.
 watch(mediaRemoved, (change) => {
   if (!change) return
@@ -571,19 +558,10 @@ watch(mediaRemoved, (change) => {
         ? withRemovedMedia(item, change.asset, change.effect)
         : item,
     )
-  if (usage.value)
-    usage.value = {
-      ...usage.value,
-      used_bytes: Math.max(
-        0,
-        usage.value.used_bytes - change.effect.freed_bytes,
-      ),
-    }
 })
 // Captures change what the lists hold.
 function saved() {
   stale()
-  loadUsage()
 }
 /** Lists filtered on an edited tag hold other items now. */
 function tagsChanged(change: TagChange) {
@@ -711,7 +689,6 @@ function listProps(list: ReturnType<typeof createList>, error = '') {
     error: error || collection.error.value,
     next: collection.next.value,
     total: collection.total.value,
-    usage: usage.value,
     asideFilters: true,
     onSearch: search,
     onRefresh: () => {
@@ -733,7 +710,6 @@ function listProps(list: ReturnType<typeof createList>, error = '') {
     // Sizes changed, and sorting by them may reorder the list.
     onMediaRemoved: () => {
       if (list.loadedQuery !== undefined) void collection.load(list.loadedQuery)
-      loadUsage()
     },
   }
 }

@@ -99,7 +99,7 @@ beforeEach(() => {
       ]
     if (path === '/tags') return []
     if (path.startsWith('/collections')) return { items: [] }
-    return { used_bytes: 0 }
+    return {}
   })
 })
 let unmount = () => {}

@@ -84,10 +84,6 @@ async function setup(page: Page) {
     if (path.endsWith('/annotation'))
       return route.fulfill({ json: { note: '', tags: [] } })
     if (path === '/v1/tags') return route.fulfill({ json: [] })
-    if (path === '/v1/usage')
-      return route.fulfill({
-        json: { used_bytes: 0 },
-      })
     return route.fulfill({
       json: details.find((item) => path === `/v1/collections/${item.id}`) || {},
     })

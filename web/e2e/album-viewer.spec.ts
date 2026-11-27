@@ -32,7 +32,6 @@ const range = (from: number, to: number) =>
  */
 async function setup(page: Page, pages: ReturnType<typeof record>[][]) {
   const lists: string[] = []
-  const usage: string[] = []
   const removals: unknown[] = []
   const gate = Promise.withResolvers<void>()
   let hold = false
@@ -59,17 +58,12 @@ async function setup(page: Page, pages: ReturnType<typeof record>[][]) {
       removals.push(r.request().postDataJSON())
       return r.fulfill({ json: { media: 1, freed_bytes: 10, shared: 0 } })
     }
-    if (u.pathname === '/v1/usage') {
-      usage.push(u.pathname)
-      return r.fulfill({ json: { used_bytes: 1000 } })
-    }
     return r.fulfill({
       json: u.pathname.endsWith('/count') ? { count: 0 } : {},
     })
   })
   return {
     lists,
-    usage,
     removals,
     hold: () => (hold = true),
     release: () => gate.resolve(),
@@ -99,7 +93,6 @@ test('deleting in the viewer keeps it open on the next item, and the list where 
   const scrolled = await page.evaluate(() => window.scrollY)
   expect(scrolled).toBeGreaterThan(0)
   const lists = seen.lists.length
-  const usage = seen.usage.length
   await tiles(page).nth(10).click()
   await expect(viewer(page).locator('.counter')).toHaveText('11 / 40')
   await expect(thumb(page, 11)).toBeEnabled()
@@ -114,7 +107,6 @@ test('deleting in the viewer keeps it open on the next item, and the list where 
   await expect(tiles(page)).toHaveCount(39)
   await expect(page.locator('.album > .skeleton')).toHaveCount(0)
   expect(seen.lists).toHaveLength(lists)
-  expect(seen.usage).toHaveLength(usage)
   expect(await page.evaluate(() => window.scrollY)).toBe(before)
   // The viewer goes on: the item after is the one that was twelfth.
   await page.keyboard.press('ArrowRight')

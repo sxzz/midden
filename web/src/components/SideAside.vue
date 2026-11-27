@@ -72,7 +72,8 @@ watch(lists, readRunning, { immediate: true })
 /**
  * 全站统计: the archive as a whole (GET /v1/library/stats), read when a list
  * is shown and again when its count changes; the server keeps the figures
- * for a minute while nothing is saved or deleted.
+ * for a minute while nothing is saved or deleted. Viewers see it too; the
+ * captures and updates of today are the admin's (null for a viewer).
  */
 const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
 const stats = useStale(() =>
@@ -81,8 +82,7 @@ const stats = useStale(() =>
 watch(
   () => (lists.value ? (props.total ?? '') : undefined),
   (shown) => {
-    // The archive's figures are the admin's, with its captures.
-    if (shown !== undefined && can.capture) void stats.load()
+    if (shown !== undefined) void stats.load()
   },
   { immediate: true },
 )
@@ -92,15 +92,17 @@ const figures = computed(() => {
   // An answer without the figures (an older server) shows none.
   if (typeof s?.posts !== 'number') return []
   return [
-    { label: '帖子', value: number(s.posts) },
-    { label: '账号', value: number(s.accounts) },
-    { label: '含图片的帖子', value: number(s.with_images) },
-    { label: '含视频的帖子', value: number(s.with_videos) },
-    { label: '今天新增', value: number(s.saved_today) },
-    { label: '本周新增', value: number(s.saved_this_week) },
-    { label: '今天采集', value: number(s.captures_today) },
-    { label: '今天更新', value: number(s.updates_today) },
-  ]
+    { label: '帖子', value: s.posts },
+    { label: '账号', value: s.accounts },
+    { label: '含图片的帖子', value: s.with_images },
+    { label: '含视频的帖子', value: s.with_videos },
+    { label: '今天新增', value: s.saved_today },
+    { label: '本周新增', value: s.saved_this_week },
+    { label: '今天采集', value: s.captures_today },
+    { label: '今天更新', value: s.updates_today },
+  ].flatMap(({ label, value }): { label: string; value: string }[] =>
+    typeof value === 'number' ? [{ label, value: number(value) }] : [],
+  )
 })
 onUnmounted(() => {
   ++reading
@@ -147,7 +149,7 @@ onUnmounted(() => {
         </AppLink>
       </section>
       <section
-        v-if="can.capture && (stats.pending.value || figures.length)"
+        v-if="stats.pending.value || figures.length"
         class="aside-box"
         aria-label="全站统计"
         :aria-busy="stats.pending.value"

@@ -201,10 +201,6 @@ test('adds, selects and deletes an X account', async ({ page }) => {
       return r.fulfill({
         json: [{ origin: 'https://midden.test', passkeys: 0 }],
       })
-    if (path === '/v1/usage')
-      return r.fulfill({
-        json: { used_bytes: 0 },
-      })
     return r.fulfill({ json: { items: [] } })
   })
   await page.goto('/')
