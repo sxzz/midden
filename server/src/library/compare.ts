@@ -14,8 +14,7 @@ import {
   type GraphViewer,
 } from './follow-graph.ts'
 import { authorKey, defaultRelMin, parseAuthorKey } from './list.ts'
-import { list, type Reader } from './views.ts'
-import type { CaptureContext } from '#capture/context.ts'
+import { list, type ReadContext } from './views.ts'
 
 /** Which side of the accounts compared: whom they follow, or who follows them. */
 export const compareSides = ['following', 'followers'] as const
@@ -91,7 +90,7 @@ interface Counted {
  * looked up by index.
  */
 function countedAccounts(
-  ctx: Reader & Pick<CaptureContext, 'platforms'>,
+  ctx: ReadContext,
   ids: readonly string[],
 ): Map<string, Counted> {
   const found = new Map<string, Counted>()
@@ -148,7 +147,7 @@ const subsetKey = (of: readonly number[]) => of.join(',')
  * Lists are never fetched for this: what is stored is what counts.
  */
 export function compareRelations(
-  ctx: Reader & Pick<CaptureContext, 'platforms'>,
+  ctx: ReadContext,
   query: CompareQuery,
 ): RelationCompare {
   const keys = [...new Set(query.relOf)]

@@ -9,10 +9,9 @@ import {
   list,
   parseJson,
   type AssetView,
+  type ReadContext,
   type Reader,
 } from './views.ts'
-import type { CaptureContext } from '#capture/context.ts'
-import type { Platforms } from '#platforms/registry.ts'
 
 /**
  * How an account relates to the center now: it follows the center back
@@ -145,7 +144,7 @@ export const GRAPH_MAX = 10_000
  * platform, so the center's platform tells.
  */
 export function countPaths(
-  ctx: { platforms: Pick<Platforms, 'countPointers'> },
+  ctx: Pick<ReadContext, 'platforms'>,
   platform: string,
 ) {
   const counts = ctx.platforms.countPointers()[platform]
@@ -325,7 +324,7 @@ const byFollowers = (a: Ranked, b: Ranked) =>
  * for what is not a profile, nothing.
  */
 export function followGraph(
-  ctx: Reader & Pick<CaptureContext, 'platforms'>,
+  ctx: ReadContext,
   id: string,
   query: GraphQuery = {},
 ): FollowGraph {
@@ -338,7 +337,7 @@ export function followGraph(
  * An account never stored is the empty graph.
  */
 export function accountGraph(
-  ctx: Reader & Pick<CaptureContext, 'platforms'>,
+  ctx: ReadContext,
   key: string,
   query: GraphQuery = {},
 ): FollowGraph {
@@ -352,7 +351,7 @@ export function accountGraph(
 }
 
 function graphOf(
-  ctx: Reader & Pick<CaptureContext, 'platforms'>,
+  ctx: ReadContext,
   subject: string | undefined,
   query: GraphQuery,
 ): FollowGraph {

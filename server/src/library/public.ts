@@ -34,13 +34,13 @@ import {
   type HistoryPoint,
 } from './read.ts'
 import { openShare, type OpenShare, type ShareTarget } from './shares.ts'
-import type { AccountsContext } from '#accounts/accounts.ts'
 import type {
   CollectionView,
   EntityVersionView,
   EntityView,
   IncomingRelation,
   Page,
+  ReadContext,
 } from './views.ts'
 
 /**
@@ -102,10 +102,7 @@ function folderFilter(share: OpenShare) {
   return parseFilterQuery(share.filter!).filter
 }
 
-export function getPublicShare(
-  ctx: AccountsContext,
-  slug: string,
-): PublicShare {
+export function getPublicShare(ctx: ReadContext, slug: string): PublicShare {
   const share = openShare(ctx.db, slug)
   if (share.target === 'collection')
     return { target: 'collection', collection_id: share.target_id }
@@ -206,7 +203,7 @@ function publicViews(
 }
 
 /** The share, if it reaches this collection. */
-function within(ctx: AccountsContext, slug: string, id: string): OpenShare {
+function within(ctx: ReadContext, slug: string, id: string): OpenShare {
   const share = openShare(ctx.db, slug)
   if (!share.scope.contains([id]).has(id)) throw new AppError('not_found')
   return share
@@ -257,7 +254,7 @@ function publicSelection(share: OpenShare, query: PublicListQuery) {
 
 /** A shared folder's list, or the attached posts of a profile the share shows. */
 export function listPublicCollections(
-  ctx: AccountsContext,
+  ctx: ReadContext,
   slug: string,
   query: PublicListQuery,
 ): Page<CollectionView> {
@@ -272,7 +269,7 @@ export function listPublicCollections(
 
 /** How much a public list holds over all its pages, by root type. */
 export function countPublicCollections(
-  ctx: AccountsContext,
+  ctx: ReadContext,
   slug: string,
   query: PublicListQuery,
 ): FilterCounts {
@@ -286,7 +283,7 @@ export function countPublicCollections(
  * author picker of a shared folder or profile, which names no one else.
  */
 export function listPublicAuthors(
-  ctx: AccountsContext,
+  ctx: ReadContext,
   slug: string,
   input: AuthorFilter & { related_to?: string },
 ): Page<Author> {
@@ -296,7 +293,7 @@ export function listPublicAuthors(
 }
 
 export function getPublicCollection(
-  ctx: AccountsContext,
+  ctx: ReadContext,
   slug: string,
   id: string,
 ): CollectionView {
@@ -305,7 +302,7 @@ export function getPublicCollection(
 }
 
 export function listPublicHistory(
-  ctx: AccountsContext,
+  ctx: ReadContext,
   slug: string,
   id: string,
   cursor?: string,
@@ -315,7 +312,7 @@ export function listPublicHistory(
 }
 
 export function getPublicHistoryPoint(
-  ctx: AccountsContext,
+  ctx: ReadContext,
   slug: string,
   id: string,
   captureId: string,
@@ -325,7 +322,7 @@ export function getPublicHistoryPoint(
 }
 
 export function listPublicCounts(
-  ctx: AccountsContext,
+  ctx: ReadContext,
   slug: string,
   id: string,
   limit?: number,
@@ -335,7 +332,7 @@ export function listPublicCounts(
 }
 
 export function listPublicProfileChanges(
-  ctx: AccountsContext,
+  ctx: ReadContext,
   slug: string,
   id: string,
   limit?: number,
@@ -361,7 +358,7 @@ export function listPublicProfileChanges(
 }
 
 export function getPublicFollowCounts(
-  ctx: AccountsContext,
+  ctx: ReadContext,
   slug: string,
   id: string,
 ): FollowCounts {
@@ -374,7 +371,7 @@ export function getPublicFollowCounts(
  * avatar; only those the share reaches link to their saved profile.
  */
 export function listPublicFollowChanges(
-  ctx: AccountsContext,
+  ctx: ReadContext,
   slug: string,
   id: string,
   limit?: number,
@@ -400,7 +397,7 @@ export function listPublicFollowChanges(
  * link to their saved profile.
  */
 export function getPublicFollowGraph(
-  ctx: AccountsContext,
+  ctx: ReadContext,
   slug: string,
   id: string,
   query?: GraphQuery,

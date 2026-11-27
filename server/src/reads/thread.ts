@@ -11,16 +11,15 @@ import { errorBody } from '#agent/errors.ts'
 import { runRead } from '#agent/reads.ts'
 import { BucketBlobStore } from '#blob/bucket-store.ts'
 import { FsBlobStore } from '#blob/fs-store.ts'
-import { KeyedLock } from '#blob/locks.ts'
 import { MediaSigner } from '#blob/signer.ts'
 import { forgetRecords, keepFinishedRecords } from '#capture/record-cache.ts'
 import { openDatabase } from '#db/client.ts'
 import { createApi, type ForwardedEnv } from '#http/app.ts'
+import { threadContext } from './context.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { AgentReader, TypeCatalog } from '#agent/query.ts'
 import type { ForwardedRequest, ForwardedResponse } from '#http/offload.ts'
-import type { Logger } from '#log.ts'
-import type { CountPointers, Platforms } from '#platforms/registry.ts'
+import type { CountPointers } from '#platforms/registry.ts'
 import type { PoolRequest, PoolResponse } from './pool.ts'
 
 export interface ReadThreadData {
@@ -60,44 +59,6 @@ export function threadReader(data: ReadThreadData): AgentReader {
       })
     : local
   return { db, blobs, types: data.types }
-}
-
-/**
- * What a read thread lacks, but for the plain parts in `present`: using the
- * rest means the route belongs on the web process's thread (`inline`).
- */
-function absent<T extends object>(what: string, present: Partial<T> = {}): T {
-  return new Proxy(present as T, {
-    get(target, key) {
-      if (Object.hasOwn(target, key)) return target[key as keyof T]
-      throw new Error(
-        `${what} (${String(key)}) is not on a read thread; mark the route inline`,
-      )
-    },
-  })
-}
-
-/** The context the web process's API reads with, on this thread. */
-export function threadContext(
-  reader: AgentReader,
-  data: Pick<ReadThreadData, 'countPointers'>,
-  logger: Logger,
-): AccountsContext {
-  return {
-    db: reader.db,
-    blobs: reader.blobs,
-    logger,
-    queue: absent('the job queue'),
-    platforms: absent<Platforms>('the platforms', {
-      countPointers: () => data.countPointers,
-    }),
-    vault: absent('the credential vault'),
-    openCredential: () => {
-      throw new Error('credentials are not on a read thread')
-    },
-    stagingDir: '',
-    mediaLocks: new KeyedLock(),
-  }
 }
 
 /** Answers forwarded requests with the web process's API, by mount point. */
@@ -150,7 +111,7 @@ if (parentPort) {
     }),
   )
   const reader = threadReader(data)
-  const web = threadApi(threadContext(reader, data, logger), data)
+  const web = threadApi(threadContext(reader, data.countPointers, logger), data)
   keepFinishedRecords()
   port.on('message', async (request: PoolRequest) => {
     if (request.op === 'forget') {

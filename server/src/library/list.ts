@@ -6,8 +6,7 @@ import { AppError } from '#errors.ts'
 import { FOLLOW_SETS, followSetSQL, type FollowSet } from './follows.ts'
 import { collectionsById, isUUID } from './read.ts'
 import { searchHits, type SearchHits } from './search.ts'
-import { list, type CollectionView, type Page } from './views.ts'
-import type { CaptureContext } from '#capture/context.ts'
+import { list, type CollectionView, type Page, type Reader } from './views.ts'
 import type { Executor } from '#db/client.ts'
 
 /** Library filters, as given in the query string. Empty means unset. */
@@ -882,7 +881,7 @@ export function updateSelection(
  * narrowing, only what it selects too.
  */
 export function listCollections(
-  ctx: Pick<CaptureContext, 'db' | 'blobs'>,
+  ctx: Reader,
   input: CollectionFilter = {},
   cursor?: string,
   narrow?: Narrowing,
@@ -992,7 +991,7 @@ export interface AuthorFilter {
  * listed.
  */
 export function listAuthors(
-  ctx: CaptureContext,
+  ctx: Reader,
   input: AuthorFilter = {},
   within: CollectionFilter = {},
 ): Page<Author> {

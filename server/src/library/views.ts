@@ -9,9 +9,20 @@ import {
 } from '#capture/payload.ts'
 import type { CaptureContext } from '#capture/context.ts'
 import type { Executor } from '#db/client.ts'
+import type { PlatformFacts } from '#platforms/registry.ts'
 
 /** What reads need from the capture context. */
 export type Reader = Pick<CaptureContext, 'db' | 'blobs'>
+
+/**
+ * All a `GET` route may read with: it runs on a read thread
+ * (`#reads/thread.ts`), which has the database and media links, and of the
+ * platforms only their plain facts; no platform calls, job queue or
+ * credentials. Typing a read with this keeps it from reaching them.
+ */
+export interface ReadContext extends Reader {
+  platforms: PlatformFacts
+}
 
 /** A media item as the web shows it, with signed URLs to fetch it. */
 export interface AssetView {

@@ -1486,7 +1486,7 @@ export function updateMembers(
  * started, and whether its profile has older posts to read.
  */
 export function collectionUpdate(
-  ctx: CaptureContext,
+  ctx: Pick<CaptureContext, 'db' | 'now'>,
   collectionId: string,
 ): { record?: { id: string; done: boolean }; older: boolean } {
   const { db } = ctx

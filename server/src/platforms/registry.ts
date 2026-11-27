@@ -18,6 +18,9 @@ export function supports(provider: Provider, name: string, major = 1): boolean {
  */
 export type CountPointers = Record<string, Record<RelationList, string>>
 
+/** What the read threads know of the platforms. */
+export type PlatformFacts = Pick<Platforms, 'countPointers'>
+
 /** The platforms this server captures from, routed by URL host. */
 export class Platforms {
   readonly #byId = new Map<string, Platform>()

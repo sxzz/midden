@@ -15,7 +15,6 @@ import {
   type Page,
   type Reader,
 } from './views.ts'
-import type { CaptureContext } from '#capture/context.ts'
 import type { Metrics, Payload } from '#capture/payload.ts'
 import type { Executor } from '#db/client.ts'
 
@@ -158,7 +157,7 @@ export function assertSaved(r: Reader, id: string): number {
 }
 
 /** A saved collection at its head revision, with everything shown on it. */
-export function getCollection(ctx: CaptureContext, id: string): CollectionView {
+export function getCollection(ctx: Reader, id: string): CollectionView {
   assertSaved(ctx, id)
   const collection = collectionsById(ctx, [id]).get(id)
   if (!collection) throw new AppError('not_found')
@@ -172,7 +171,7 @@ export function getCollection(ctx: CaptureContext, id: string): CollectionView {
  * saw (or, failing that, those of the capture behind the revision).
  */
 export function getCaptureCollection(
-  ctx: CaptureContext,
+  ctx: Reader,
   captureId: string,
 ): CollectionView {
   const row = isUUID(captureId)
@@ -250,7 +249,7 @@ const SHOWN_COUNTS = `(SELECT json_group_array(
  * change.
  */
 export function listHistory(
-  ctx: CaptureContext,
+  ctx: Reader,
   id: string,
   cursor?: string,
 ): Page<HistoryPoint> {
@@ -314,7 +313,7 @@ export function listHistory(
  * same content media.
  */
 export function getHistoryPoint(
-  ctx: CaptureContext,
+  ctx: Reader,
   id: string,
   captureId: string,
 ): CollectionView {
