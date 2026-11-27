@@ -136,6 +136,26 @@ video {
   background-size: 240% 100%;
   animation: skeleton-shimmer 1.5s ease-in-out infinite;
 }
+/* A skeleton takes its place at once, so nothing moves, but shows only after
+   a moment: an answer quicker than that flashes nothing. The delay holds
+   with reduced motion, which only shortens the animation itself. */
+.skeleton-delayed {
+  animation: skeleton-appear 1ms linear 180ms both;
+}
+.skeleton-delayed .skeleton,
+.skeleton.skeleton-delayed {
+  animation:
+    skeleton-appear 1ms linear 180ms both,
+    skeleton-shimmer 1.5s ease-in-out 180ms infinite;
+}
+@keyframes skeleton-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
 @keyframes skeleton-shimmer {
   from {
     background-position: 100% 0;

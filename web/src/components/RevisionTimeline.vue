@@ -90,9 +90,11 @@ function settle() {
         type="button"
         class="older"
         :disabled="loading"
+        :aria-busy="loading"
         @click="emit('more')"
       >
-        {{ loading ? '正在加载…' : '更早的记录' }}
+        <!-- The label stays while it reads, so the line does not move. -->
+        更早的记录
       </button>
       <span v-else>{{ date(ordered[0]?.observed_at) }}</span>
       <span>最新</span>

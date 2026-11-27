@@ -8,6 +8,7 @@ import ConfirmSheet from './ConfirmSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
+import SkeletonRows from './ui/SkeletonRows.vue'
 /** Under a heading of its own (设置's entry), without its title. */
 defineProps<{ bare?: boolean }>()
 
@@ -86,6 +87,13 @@ async function remove() {
 </script>
 
 <template>
+  <SkeletonRows
+    v-if="!items && !error"
+    :title="!bare"
+    :rows="2"
+    hint
+    label="正在读取域名"
+  />
   <ListSection v-if="items || error" :title="bare ? undefined : '域名'">
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
     <div v-for="o in items" :key="o.origin" class="origin">

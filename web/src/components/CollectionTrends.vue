@@ -6,7 +6,7 @@ import { readCounts } from '../reads'
 import { axisDate, tableRows, trends } from '../trends'
 import TrendChart from './TrendChart.vue'
 import ChevronIcon from './ui/ChevronIcon.vue'
-import Spinner from './ui/Spinner.vue'
+import SkeletonBox from './ui/SkeletonBox.vue'
 const props = defineProps<{ id: string }>()
 const series = shallowRef<CountsSeries>()
 const error = shallowRef('')
@@ -72,9 +72,17 @@ function release(event: PointerEvent) {
 <template>
   <div class="trends" @pointerdown="release">
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
-    <p v-if="!series && loading" class="loading">
-      <Spinner label="正在加载" />
-    </p>
+    <div
+      v-if="!series && loading"
+      role="status"
+      aria-busy="true"
+      aria-label="正在读取统计趋势"
+    >
+      <SkeletonBox class="summary-bar" height="14px" width="55%" />
+      <div class="grid">
+        <SkeletonBox v-for="i in 4" :key="i" height="196px" />
+      </div>
+    </div>
     <template v-if="list.length">
       <p class="summary">{{ summary }}</p>
       <div class="grid" :class="{ fetching: loading }">
@@ -139,11 +147,9 @@ function release(event: PointerEvent) {
   font-size: 15px;
   line-height: 1.5;
 }
-.loading {
-  margin: 0;
-  padding-top: 32px;
-  text-align: center;
-  color: var(--subtle);
+/* The skeleton's bar stands where the summary line will be. */
+.summary-bar {
+  margin: 2px 4px 10px;
 }
 .summary {
   margin: 0 0 8px;

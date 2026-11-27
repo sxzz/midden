@@ -3,7 +3,12 @@ withDefaults(defineProps<{ detail?: boolean; rows?: number }>(), { rows: 3 })
 </script>
 
 <template>
-  <div role="status" aria-label="正在加载收藏" aria-busy="true">
+  <div
+    class="skeleton-delayed"
+    role="status"
+    aria-label="正在加载收藏"
+    aria-busy="true"
+  >
     <div
       v-for="i in detail ? 1 : rows"
       :key="i"

@@ -11,6 +11,7 @@ import { defaultOptions, type Options } from '../capture-options'
 import { countText, coverText } from '../captures'
 import { toast } from '../composables/useToast'
 import CaptureOptions from './CaptureOptions.vue'
+import SkeletonBox from './ui/SkeletonBox.vue'
 const props = defineProps<{
   open: boolean
   target: UpdateTarget
@@ -131,7 +132,17 @@ function backdrop(event: MouseEvent) {
   >
     <div class="group">
       <p :id="titleId" class="head">{{ title }}</p>
-      <p v-if="loading" class="note" role="status">加载中…</p>
+      <div
+        v-if="loading"
+        class="note note-skeleton"
+        role="status"
+        aria-busy="true"
+        aria-label="正在读取要更新的内容"
+      >
+        <SkeletonBox height="13px" width="64%" />
+        <SkeletonBox height="13px" width="48%" />
+        <SkeletonBox height="13px" width="56%" />
+      </div>
       <CaptureOptions
         v-if="preview"
         v-model="options"
@@ -158,6 +169,13 @@ function backdrop(event: MouseEvent) {
 </template>
 
 <style scoped>
+/* While the facts load, bars where their lines will be. */
+.note-skeleton {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
 .sheet {
   width: 100%;
   max-width: 480px;

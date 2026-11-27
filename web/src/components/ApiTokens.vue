@@ -12,6 +12,7 @@ import TokenSecretSheet from './TokenSecretSheet.vue'
 import AppLink from './ui/AppLink.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
+import SkeletonRows from './ui/SkeletonRows.vue'
 import UsageBars from './UsageBars.vue'
 /** Under a heading of its own (设置's section), without its title. */
 defineProps<{ bare?: boolean }>()
@@ -112,6 +113,13 @@ async function confirm() {
 </script>
 
 <template>
+  <SkeletonRows
+    v-if="!items && !error"
+    :title="!bare"
+    :rows="2"
+    hint
+    label="正在读取 API 令牌"
+  />
   <ListSection v-if="items || error" :title="bare ? undefined : 'API 令牌'">
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
     <button

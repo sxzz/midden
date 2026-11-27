@@ -19,7 +19,7 @@ import AppLink from './ui/AppLink.vue'
 import EyeIcon from './ui/EyeIcon.vue'
 import LoadingImage from './ui/LoadingImage.vue'
 import LockIcon from './ui/LockIcon.vue'
-import Spinner from './ui/Spinner.vue'
+import SkeletonRows from './ui/SkeletonRows.vue'
 const props = defineProps<{ id: string; showSensitive?: boolean }>()
 const changes = shallowRef<ProfileChanges>()
 const error = shallowRef('')
@@ -134,9 +134,10 @@ function open(line: ImageLine, asset: Asset) {
 <template>
   <div class="changes">
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
-    <p v-if="!changes && loading" class="loading">
-      <Spinner label="正在加载" />
-    </p>
+    <template v-if="!changes && loading">
+      <SkeletonRows title :rows="3" avatar hint label="正在读取变化" />
+      <SkeletonRows title :rows="2" avatar hint />
+    </template>
     <!-- The profile at the point the timeline rests on. -->
     <section v-if="shown && points.length > 1" class="versions">
       <h2 class="heading">资料版本</h2>
@@ -274,12 +275,6 @@ function open(line: ImageLine, asset: Asset) {
   background: var(--card);
   font-size: 15px;
   line-height: 1.5;
-}
-.loading {
-  margin: 0;
-  padding-top: 32px;
-  text-align: center;
-  color: var(--subtle);
 }
 .day {
   margin: 0 0 18px;

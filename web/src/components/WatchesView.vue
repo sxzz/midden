@@ -6,6 +6,7 @@ import { lastRunText, nextRunText, watchSummary, watchTitle } from '../watches'
 import ConfirmSheet from './ConfirmSheet.vue'
 import AppLink from './ui/AppLink.vue'
 import ListSection from './ui/ListSection.vue'
+import SkeletonRows from './ui/SkeletonRows.vue'
 import WatchSheet from './WatchSheet.vue'
 
 // 采集 → 定期更新: every watched profile and folder.
@@ -82,6 +83,12 @@ const checked = (event: Event) => (event.target as HTMLInputElement).checked
 
 <template>
   <!-- Under 采集's 定期更新 tab, which names it already. -->
+  <SkeletonRows
+    v-if="!items && !error"
+    :rows="3"
+    hint
+    label="正在读取定期更新"
+  />
   <ListSection v-if="items || error">
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
     <p v-else-if="!items?.length" class="banner empty">没有定期更新</p>

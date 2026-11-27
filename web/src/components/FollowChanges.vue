@@ -11,7 +11,7 @@ import { readFollowChanges } from '../reads'
 import { collectionRoute } from '../share'
 import AppLink from './ui/AppLink.vue'
 import LoadingImage from './ui/LoadingImage.vue'
-import Spinner from './ui/Spinner.vue'
+import SkeletonRows from './ui/SkeletonRows.vue'
 const props = defineProps<{ id: string; showSensitive?: boolean }>()
 const changes = shallowRef<FollowChanges>()
 const error = shallowRef('')
@@ -57,9 +57,10 @@ const blurred = (account: FollowAccount) =>
 <template>
   <div class="changes">
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
-    <p v-if="!changes && loading" class="loading">
-      <Spinner label="正在加载" />
-    </p>
+    <template v-if="!changes && loading">
+      <SkeletonRows title :rows="3" avatar hint label="正在读取变化" />
+      <SkeletonRows title :rows="2" avatar hint />
+    </template>
     <section
       v-for="day in days"
       :key="day.label"
@@ -144,12 +145,6 @@ const blurred = (account: FollowAccount) =>
   background: var(--card);
   font-size: 15px;
   line-height: 1.5;
-}
-.loading {
-  margin: 0;
-  padding-top: 32px;
-  text-align: center;
-  color: var(--subtle);
 }
 .day {
   margin: 0 0 18px;

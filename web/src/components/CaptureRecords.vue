@@ -22,6 +22,7 @@ import CaptureOptions from './CaptureOptions.vue'
 import InfiniteLoader from './ui/InfiniteLoader.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
+import SkeletonRows from './ui/SkeletonRows.vue'
 const emit = defineEmits<{
   /** A capture finished, so saved content changed. */
   saved: []
@@ -232,14 +233,15 @@ async function submit() {
       <span class="chevron" aria-hidden="true">›</span>
     </a>
   </ListSection>
-  <!-- An empty list once loaded says nothing; only loading is worth a word. -->
-  <p
-    v-if="(items.length || !loaded) && loading && !error"
-    class="status"
-    role="status"
-  >
-    加载中…
-  </p>
+  <!-- The first read holds the records' place; reading more is
+       InfiniteLoader's, and an empty list once read says nothing. -->
+  <SkeletonRows
+    v-if="!loaded && loading && !error"
+    title
+    :rows="4"
+    hint
+    label="正在读取采集记录"
+  />
   <InfiniteLoader
     v-if="next && items.length"
     :loading="loading"
@@ -311,14 +313,6 @@ textarea::placeholder {
   padding: 14px var(--inset);
   font-size: 15px;
   line-height: 1.5;
-}
-.status {
-  margin: 0;
-  padding: 48px 32px;
-  text-align: center;
-  font-size: 15px;
-  line-height: 1.6;
-  color: var(--subtle);
 }
 .record {
   color: inherit;

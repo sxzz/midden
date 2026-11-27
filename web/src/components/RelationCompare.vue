@@ -31,6 +31,7 @@ import GraphNodeCard from './GraphNodeCard.vue'
 import MiniAvatar from './MiniAvatar.vue'
 import PerspectivePicker from './PerspectivePicker.vue'
 import AppLink from './ui/AppLink.vue'
+import SkeletonBox from './ui/SkeletonBox.vue'
 import Spinner from './ui/Spinner.vue'
 import ViewerBar from './ViewerBar.vue'
 import ViewerMark from './ViewerMark.vue'
@@ -490,9 +491,13 @@ const libraryRoute = computed(() => ({
           </li>
         </ul>
       </div>
-      <p v-if="!data && loading" class="loading">
-        <Spinner label="正在加载" />
-      </p>
+      <SkeletonBox
+        v-if="!data && loading"
+        class="stage-skeleton"
+        height="100%"
+        role="status"
+        aria-label="正在读取关系"
+      />
       <div
         v-if="mode === 'graph' && data && !canvasError"
         class="zoom"
@@ -899,13 +904,11 @@ button:focus-visible {
   color: var(--subtle);
   font-size: 11px;
 }
-.loading {
+/* The first read fills the stage it will draw on. */
+.stage-skeleton {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
-  margin: 0;
-  color: var(--subtle);
+  border-radius: 0;
 }
 .zoom {
   position: absolute;

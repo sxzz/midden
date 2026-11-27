@@ -78,7 +78,7 @@ const placeholders = 12
       <span
         v-for="i in placeholders"
         :key="`loading-${i}`"
-        class="tile skeleton"
+        class="tile skeleton skeleton-delayed"
         :role="i === 1 ? 'status' : undefined"
         :aria-label="i === 1 ? '正在加载收藏' : undefined"
         :aria-hidden="i !== 1 || undefined"

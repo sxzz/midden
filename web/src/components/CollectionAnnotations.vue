@@ -220,7 +220,7 @@ async function saveNote() {
     >
       <div
         v-if="loading"
-        class="placeholder"
+        class="placeholder skeleton-delayed"
         role="status"
         aria-label="正在加载备注和标签"
         aria-busy="true"

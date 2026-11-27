@@ -14,6 +14,7 @@ import ConfirmSheet from './ConfirmSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
+import SkeletonRows from './ui/SkeletonRows.vue'
 /** Under a heading of its own (设置's section), without its title. */
 defineProps<{ bare?: boolean }>()
 
@@ -98,6 +99,13 @@ async function remove() {
 </script>
 
 <template>
+  <SkeletonRows
+    v-if="!items && !error"
+    :title="!bare"
+    :rows="2"
+    hint
+    label="正在读取通行密钥"
+  />
   <ListSection v-if="items || error" :title="bare ? undefined : '通行密钥'">
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
     <div v-for="p in items" :key="p.id" class="passkey">

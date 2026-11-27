@@ -1,7 +1,8 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef } from 'vue'
-import { call, client, errorText, type QueueState } from '../api'
+import { call, client, errorText } from '../api'
 import { onShown } from '../composables/useShown'
+import { useStale } from '../composables/useStale'
 import { toast } from '../composables/useToast'
 import {
   jobTypeLabel,
@@ -12,26 +13,28 @@ import {
 } from '../jobs'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
+import SkeletonRows from './ui/SkeletonRows.vue'
 
 // 设置 → 管理员面板 → 后台任务: what the worker is doing and how far behind
 // it is; pausing all of it, or the job types that only tidy up; the APIs
 // that rate-limited us, whose jobs wait for the end; how fast the web
 // process has answered lately. Read again every few seconds while open.
 const REFRESH = 5000
-const state = shallowRef<QueueState>()
 const now = shallowRef(new Date())
-const error = shallowRef('')
 const busy = shallowRef(false)
 let timer: ReturnType<typeof setInterval> | undefined
-
+// Each read every few seconds replaces the last in place; until the first
+// answer a skeleton holds its place, and a failed read keeps the last one
+// on screen with a line saying why.
+const {
+  data: state,
+  error,
+  pending,
+  load: read,
+} = useStale(() => call(client.queue.$get()))
 async function load() {
-  try {
-    state.value = await call(client.queue.$get())
-    now.value = new Date()
-    error.value = ''
-  } catch (e) {
-    error.value = errorText(e)
-  }
+  await read()
+  now.value = new Date()
 }
 onShown(
   () => {
@@ -89,8 +92,12 @@ const latency = computed(() => state.value?.web && webLatency(state.value.web))
   <ListSection v-if="error" plain>
     <p class="banner" role="alert">{{ error }}</p>
   </ListSection>
-  <p v-else-if="!state" class="status" role="status">加载中…</p>
-  <template v-else>
+  <template v-if="pending">
+    <SkeletonRows :rows="2" label="正在读取后台任务" />
+    <SkeletonRows title :rows="3" />
+    <SkeletonRows title :rows="2" />
+  </template>
+  <template v-else-if="state">
     <ListSection>
       <p class="state" :class="status?.tone" role="status">
         {{ status?.label }}
@@ -141,10 +148,6 @@ const latency = computed(() => state.value?.web && webLatency(state.value.web))
 </template>
 
 <style scoped>
-.status {
-  margin: 24px var(--inset);
-  color: var(--subtle);
-}
 .banner {
   margin: 0;
   color: var(--destructive);

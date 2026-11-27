@@ -39,6 +39,8 @@ import AppLink from './ui/AppLink.vue'
 import InfiniteLoader from './ui/InfiniteLoader.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
+import SkeletonBox from './ui/SkeletonBox.vue'
+import SkeletonRows from './ui/SkeletonRows.vue'
 const props = defineProps<{ id: string }>()
 const emit = defineEmits<{
   /** A capture finished, so saved content changed. */
@@ -455,8 +457,13 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
   <ListSection v-if="error" plain>
     <p class="banner" role="alert">{{ error }}</p>
   </ListSection>
-  <p v-else-if="!record" class="status" role="status">加载中…</p>
-  <template v-else>
+  <!-- A failed read keeps the record it read last on screen, under the line
+       saying why. -->
+  <template v-if="!record && !error">
+    <SkeletonRows :rows="2" hint label="正在读取采集记录" />
+    <SkeletonRows title :rows="4" hint />
+  </template>
+  <template v-else-if="record">
     <ListSection>
       <div class="summary">
         <p class="title">{{ recordTitle(record) }}</p>
@@ -703,9 +710,20 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
               重试
             </button>
           </div>
-          <p v-if="!members.length && membersLoading" class="line muted">
-            加载中…
-          </p>
+          <div
+            v-if="!members.length && membersLoading"
+            class="members-skeleton"
+            role="status"
+            aria-busy="true"
+            aria-label="正在读取成员"
+          >
+            <SkeletonBox
+              v-for="i in 3"
+              :key="i"
+              height="13px"
+              :width="['58%', '44%', '52%'][i - 1]"
+            />
+          </div>
         </ListSection>
         <InfiniteLoader
           v-if="membersNext || membersError"
@@ -719,18 +737,17 @@ const linked = (m: CaptureMember) => m.saved && m.state !== 'failed' && !m.list
 </template>
 
 <style scoped>
+/* Bars where the first members will be listed. */
+.members-skeleton {
+  display: grid;
+  gap: 22px;
+  padding: 16px var(--inset);
+}
 .banner {
   margin: 0;
   padding: 14px calc(var(--gutter) + 4px);
   font-size: 15px;
   line-height: 1.5;
-}
-.status {
-  margin: 0;
-  padding: 48px 32px;
-  text-align: center;
-  font-size: 15px;
-  color: var(--subtle);
 }
 .summary {
   padding: 14px var(--inset) 12px;

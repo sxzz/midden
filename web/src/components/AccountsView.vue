@@ -13,6 +13,7 @@ import AddAccountSheet from './AddAccountSheet.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
+import SkeletonRows from './ui/SkeletonRows.vue'
 
 // 采集 → 采集账号: the accounts each platform captures with, in a dialog
 // (AccountsDialog).
@@ -109,7 +110,10 @@ async function remove() {
 </script>
 
 <template>
-  <p v-if="loading && !data" class="status" role="status">加载中…</p>
+  <template v-if="loading && !data">
+    <SkeletonRows title :rows="2" label="正在读取采集账号" />
+    <SkeletonRows title :rows="2" />
+  </template>
   <ListSection v-else-if="error && !data">
     <p class="banner" role="alert">{{ error }}</p>
     <ListButton label="重试" @select="load" />

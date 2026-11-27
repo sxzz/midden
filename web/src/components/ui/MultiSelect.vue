@@ -153,9 +153,10 @@ function navigate(event: KeyboardEvent) {
           type="button"
           class="more"
           :disabled="loading"
+          :aria-busy="loading"
           @click="emit('more')"
         >
-          {{ loading ? '正在加载…' : '加载更多' }}
+          加载更多
         </button>
       </div>
       <div

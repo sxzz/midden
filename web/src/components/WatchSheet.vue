@@ -23,6 +23,7 @@ import {
 import CaptureOptions from './CaptureOptions.vue'
 import AppLink from './ui/AppLink.vue'
 import ChevronIcon from './ui/ChevronIcon.vue'
+import SkeletonBox from './ui/SkeletonBox.vue'
 /**
  * 定期更新 of a profile or a folder: how often, and the options each run
  * uses, as the 更新 sheet has them. Also where its watch is removed.
@@ -192,7 +193,16 @@ function setUnit(event: Event) {
   >
     <div class="group">
       <p :id="titleId" class="head">{{ title }}</p>
-      <p v-if="!loaded && !error" class="note" role="status">加载中…</p>
+      <div
+        v-if="!loaded && !error"
+        class="note note-skeleton"
+        role="status"
+        aria-busy="true"
+        aria-label="正在读取定期更新"
+      >
+        <SkeletonBox height="13px" width="58%" />
+        <SkeletonBox height="13px" width="40%" />
+      </div>
       <template v-if="loaded">
         <div v-if="current" class="facts">
           <p class="fact">{{ status }}</p>
@@ -274,6 +284,13 @@ function setUnit(event: Event) {
 </template>
 
 <style scoped>
+/* While the facts load, bars where their lines will be. */
+.note-skeleton {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
 .sheet {
   width: 100%;
   max-width: 480px;

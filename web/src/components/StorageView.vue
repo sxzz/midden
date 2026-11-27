@@ -26,7 +26,7 @@ import FolderNameSheet from './FolderNameSheet.vue'
 import TrendChart from './TrendChart.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
-import Spinner from './ui/Spinner.vue'
+import SkeletonRows from './ui/SkeletonRows.vue'
 
 // 设置 → 管理员面板 → 存储用量: R2 from Cloudflare's analytics with the
 // month's bill, this machine's disk, the database's make-up, the daily
@@ -210,9 +210,10 @@ async function save(text: string) {
 <template>
   <div class="storage" @pointerdown="release">
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
-    <p v-if="!report && loading" class="loading">
-      <Spinner label="正在加载" />
-    </p>
+    <template v-if="!report && loading">
+      <SkeletonRows title :rows="3" hint label="正在读取存储用量" />
+      <SkeletonRows title :rows="3" />
+    </template>
     <template v-if="report && local">
       <ListSection
         v-if="r2"
@@ -430,12 +431,6 @@ async function save(text: string) {
   background: var(--card);
   font-size: 15px;
   line-height: 1.5;
-}
-.loading {
-  margin: 0;
-  padding-top: 32px;
-  text-align: center;
-  color: var(--subtle);
 }
 .bucket {
   position: relative;
