@@ -8,13 +8,13 @@ import { describe, expect, test } from 'vitest'
 import { loadConfig } from './config.ts'
 
 const SECRET_KEY = 'k'.repeat(32)
-const ACCOUNT = '9183b1c394e4cd2f0a7d3c978bc53a29'
+const ACCOUNT = '0123456789abcdef0123456789abcdef'
 const R2 = {
   MEDIA_STORE: 'r2',
   R2_ACCOUNT_ID: ACCOUNT,
   R2_BUCKET: 'midden',
   CF_API_TOKEN: 'very-secret-value',
-  MEDIA_PUBLIC_URL: 'https://midden-media.sxzz.moe/',
+  MEDIA_PUBLIC_URL: 'https://media.example.com/',
 }
 
 describe('media store configuration', () => {
@@ -31,7 +31,7 @@ describe('media store configuration', () => {
       r2: {
         endpoint: `https://${ACCOUNT}.r2.cloudflarestorage.com`,
         bucket: 'midden',
-        publicUrl: 'https://midden-media.sxzz.moe',
+        publicUrl: 'https://media.example.com',
       },
     })
     expect(loadConfig({ SECRET_KEY, ...R2 }).cloudflare).toEqual({
@@ -88,12 +88,12 @@ describe('media store configuration', () => {
     ['R2_BUCKET', 'Bad_Bucket', 'R2_BUCKET must be a bucket name'],
     [
       'MEDIA_PUBLIC_URL',
-      'http://midden-media.sxzz.moe',
+      'http://media.example.com',
       'MEDIA_PUBLIC_URL must be an https URL without query',
     ],
     [
       'MEDIA_PUBLIC_URL',
-      'https://midden-media.sxzz.moe/?a=1',
+      'https://media.example.com/?a=1',
       'MEDIA_PUBLIC_URL must be an https URL without query',
     ],
     ['CF_ZONE_ID', 'zone', 'CF_ZONE_ID must be 32 hex digits'],
@@ -169,7 +169,7 @@ test('the server exits before listening when r2 lacks CF_API_TOKEN', () => {
 })
 
 describe('raw response bucket configuration', () => {
-  const RAW = { R2_ACCOUNT_ID: ACCOUNT, RAW_R2_BUCKET: 'midden-backup' }
+  const RAW = { R2_ACCOUNT_ID: ACCOUNT, RAW_R2_BUCKET: 'backup-bucket' }
   const endpoint = `https://${ACCOUNT}.r2.cloudflarestorage.com`
 
   test('raw responses stay in the database without it', () => {
@@ -178,7 +178,7 @@ describe('raw response bucket configuration', () => {
   })
 
   test("R2's keys from the API token, with media in R2 or not", () => {
-    const raw = { endpoint, bucket: 'midden-backup' }
+    const raw = { endpoint, bucket: 'backup-bucket' }
     expect(
       loadConfig({ SECRET_KEY, ...RAW, CF_API_TOKEN: 'token' }).raw,
     ).toEqual(raw)

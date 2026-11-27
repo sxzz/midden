@@ -1,7 +1,9 @@
-# Litestream copies the database to the private R2 bucket midden-backup as
+# Litestream copies the database to the private R2 bucket LITESTREAM_BUCKET as
 # it changes. It runs as the `litestream` service in compose.yaml, enabled by
 # COMPOSE_PROFILES=litestream; it reads the bucket's token from
-# LITESTREAM_ACCESS_KEY_ID and LITESTREAM_SECRET_ACCESS_KEY. Restart it after
+# LITESTREAM_ACCESS_KEY_ID and LITESTREAM_SECRET_ACCESS_KEY, and the bucket
+# and the account of its S3 endpoint from LITESTREAM_BUCKET and R2_ACCOUNT_ID
+# (Litestream expands ${VAR} in this file). Restart it after
 # changing this file. Intervals and costs: docs/operations.md.
 dbs:
   - path: /data/midden.db
@@ -25,8 +27,8 @@ dbs:
     # it off: since 0.5.16 it means the default.
     truncate-page-n: 1000000
     replica:
-      url: s3://midden-backup/db
-      endpoint: https://9183b1c394e4cd2f0a7d3c978bc53a29.r2.cloudflarestorage.com
+      url: s3://${LITESTREAM_BUCKET}/db
+      endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
       region: auto
       # Upload each file as soon as it is written.
       sync-interval: 1s

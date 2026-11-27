@@ -1,12 +1,12 @@
 # Telegram bot: behavioral specification of the Go implementation
 
-This spec describes how the old Go Telegram bot (`/home/paseo/workspace/midden-go`, branch `golang`) behaves. It is detailed enough to reimplement the bot in grammY without reading the Go code again. Capture internals (Submit, related expansion, continuation pages, refresh batches) live in `.ai/capture-spec.md`; this file covers only what the bot sends, receives and decides. Where the rewrite decided to differ, the difference is stated; open questions are marked **Decide**.
+This spec describes how the old Go Telegram bot (`<old Go checkout>`, branch `golang`) behaves. It is detailed enough to reimplement the bot in grammY without reading the Go code again. Capture internals (Submit, related expansion, continuation pages, refresh batches) live in `.ai/capture-spec.md`; this file covers only what the bot sends, receives and decides. Where the rewrite decided to differ, the difference is stated; open questions are marked **Decide**.
 
 ## 0. Conventions and scope
 
 ### Citations
 
-Paths are relative to `/home/paseo/workspace/midden-go`.
+Paths are relative to `<old Go checkout>`.
 
 | short    | file                         |
 | -------- | ---------------------------- |

@@ -94,7 +94,7 @@ const day = (d: string, bytes: number) => ({
   day: d,
   r2: {
     midden: { bytes, objects: 100, class_a: 10, class_b: 20 },
-    'midden-backup': { bytes: bytes / 2, objects: 5, class_a: 3, class_b: 0 },
+    'private-bucket': { bytes: bytes / 2, objects: 5, class_a: 3, class_b: 0 },
   },
   db_bytes: 2 * GiB,
   thumbnail_bytes: GiB,
@@ -114,7 +114,7 @@ const FULL: StorageReport = {
         class_b: 234_567,
       },
       {
-        name: 'midden-backup',
+        name: 'private-bucket',
         day: today,
         bytes: 11 * GiB,
         objects: 300,
@@ -201,7 +201,7 @@ describe('存储用量', () => {
     const page = text(el)
     expect(page).toContain('midden 存储 40.0 GB 对象 45,678')
     expect(page).toContain('本月Class A操作 12,345次')
-    expect(page).toContain('midden-backup 存储 11.0 GB')
+    expect(page).toContain('private-bucket 存储 11.0 GB')
     expect(page).toContain('存储 20 GB·月，免费额度 10 GB·月，已用 200% $0.15')
     expect(page).toContain(
       'Class A操作 1,500,000次，免费额度 100万次，已用 150% $2.25',
@@ -225,7 +225,7 @@ describe('存储用量', () => {
       [...el.querySelectorAll('.trend h3')].map((h) => h.textContent),
     ).toEqual([
       'R2存储 · midden',
-      'R2存储 · midden-backup',
+      'R2存储 · private-bucket',
       'R2 Class A操作（每天）',
       'R2 Class B操作（每天）',
       '数据库文件',

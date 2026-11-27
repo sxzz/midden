@@ -27,10 +27,10 @@
 
 ### 网页单独部署
 
-生产环境的网页在 Cloudflare 静态托管（`pnpm --filter @midden/web run deploy`，`https://midden.sxzz.moe/`），API 在另一个域名（`https://midden-api.sxzz.moe`，隧道转发到本服务）：
+生产环境的网页在 Cloudflare 静态托管（`pnpm --filter @midden/web run deploy`，`https://web.example.com/`），API 在另一个域名（`https://api.example.com`，隧道转发到本服务）：
 
-- 构建时 `VITE_API_URL` 设为 API 的来源，网页的请求都发到那里，带上 API 域名的会话 Cookie（`credentials: 'include'`）；`scripts/prepare-web-assets.ts` 把它加进 CSP 的 `connect-src`、`img-src`、`media-src`。
-- `WEB_APP_URL` 是网页的地址（`https://midden.sxzz.moe/`）：API 只对它和「域名」中添加的来源回答 CORS。网页的域名与 API 必须是同一个站点（同一个注册域名，如这里的 `sxzz.moe`），否则阻止第三方 Cookie 的浏览器（Safari 等）不会把 Cookie 发给 API，网页无法登录。
+- 构建时 `VITE_API_URL` 设为 API 的来源，网页的请求都发到那里，带上 API 域名的会话 Cookie（`credentials: 'include'`）；`scripts/prepare-web-assets.ts` 把它加进 CSP 的 `connect-src`、`img-src`、`media-src`；构建时还要设 `MIDDEN_MEDIA_URL` 为媒体的公开域名（`MEDIA_PUBLIC_URL` 的来源），没有设置时构建失败。
+- `WEB_APP_URL` 是网页的地址（`https://web.example.com/`）：API 只对它和「域名」中添加的来源回答 CORS。网页的域名与 API 必须是同一个站点（同一个注册域名，如这里的 `example.com`），否则阻止第三方 Cookie 的浏览器（Safari 等）不会把 Cookie 发给 API，网页无法登录。
 - 网页的地址是根下的普通路径（如 `/settings/admin/jobs`），不是文件的路径都返回 `index.html`：Cloudflare 上由 `web/wrangler.json` 的 `not_found_handling: "single-page-application"` 回答，随部署生效，不需要在控制台另外设置。其他静态托管也需要同样的回退。
 - 以前的 `/app/…` 地址由 `_redirects`（`scripts/prepare-web-assets.ts`）永久重定向到根下同样的路径。网页域名上旧的 API 路径（`/v1/` 等）不再转发也不重定向：重定向到另一个来源时客户端会去掉 `Authorization`，调用的地方要改成 API 的域名。
 - 会话 Cookie 只属于 API 的域名，所以网页或 API 换了域名后要重新登录一次；通行密钥属于网页的域名（RP ID），网页域名不变就照常可用。
@@ -121,7 +121,7 @@ docker compose exec -T midden midden token revoke smoke
 ## 发布
 
 - 镜像：`main` 上每次推送，`test` 工作流的 `image` 任务与检查、浏览器测试同时在 arm64 运行器上构建 arm64 镜像（生产环境是 Apple 芯片的 Mac，只发布 arm64），立即推送 `ghcr.io/sxzz/midden:sha-<提交>`；三者都通过后，`publish` 任务把 `ghcr.io/sxzz/midden:latest` 指向它（在镜像仓库中复制清单，不重新构建）。部署读的是 `latest`，所以没通过检查的提交不会部署。其他分支与 PR 只构建并做健康检查，不发布。服务器上用 `docker compose pull && docker compose up -d` 更新。
-- 网页：`test` 在 `main` 上通过后，`web` 工作流把网页部署到 Cloudflare 静态托管（仓库变量 `MIDDEN_WEB_HOSTNAME` 指定域名，路由 `<域名>/*`；仓库变量 `MIDDEN_API_URL` 是构建进网页的 API 地址，没有设置时部署失败）。
+- 网页：`test` 在 `main` 上通过后，`web` 工作流把网页部署到 Cloudflare 静态托管（仓库变量 `MIDDEN_WEB_HOSTNAME` 指定域名，路由 `<域名>/*`；仓库变量 `MIDDEN_API_URL` 是构建进网页的 API 地址，`MIDDEN_MEDIA_URL` 是媒体的公开域名（与服务的 `MEDIA_PUBLIC_URL` 相同，写进网页的 CSP），任一没有设置时部署失败）。
 
 ## 日常操作
 
@@ -180,7 +180,7 @@ Renovate（账号级安装的 GitHub App）按 `.github/renovate.json5` 每周�
 
 默认 `MEDIA_STORE=local`：媒体只在数据目录的 `media/` 中，网页通过本服务的签名链接 `/media/…` 读取。设为 `r2` 后：
 
-- 原文件（图片、视频）存到 R2 存储桶，对象键与本地路径相同：`ab/cd/<sha256>`。浏览器直接从公开域名读取 `MEDIA_PUBLIC_URL/ab/cd/<sha256>`（`https://midden-media.sxzz.moe/ab/cd/<sha256>`），由 Cloudflare 边缘缓存；每个对象都带 `Content-Type` 与 `Cache-Control: public, max-age=31536000, immutable`。
+- 原文件（图片、视频）存到 R2 存储桶，对象键与本地路径相同：`ab/cd/<sha256>`。浏览器直接从公开域名读取 `MEDIA_PUBLIC_URL/ab/cd/<sha256>`（`https://media.example.com/ab/cd/<sha256>`），由 Cloudflare 边缘缓存；每个对象都带 `Content-Type` 与 `Cache-Control: public, max-age=31536000, immutable`。
 - 新下载直接流式写入 R2，不写本地文件（8 MiB 以内一次 PUT，更大的分段上传到 `incoming/<uuid>` 再在服务端复制到哈希键，见[架构](architecture.md#媒体链接)）；读回确认后记下 `remote_at`，接口立即给出公开地址。写入失败时这次下载失败，由下载任务重试（`job will retry`，`jobType: download`），不留下临时对象。
 - 生命周期规则（一次性设置）：在「R2 → midden → Settings → Object lifecycle rules」加一条，前缀 `incoming/`，删除 1 天以前的对象，并中止 1 天以前未完成的分段上传（R2 默认 7 天）。只在进程在分段上传或复制的中途退出时才会留下这些，正常的失败会自己清理。
 - 这一版之前下载、仍在本地 `media/` 的原文件由后台任务 `upload` 上传。上传带 `Content-MD5` 和签名的 SHA-256，R2 收到的内容不符会拒绝；R2 中已有相同字节的对象时不再上传；上传后读回大小、ETag（即 MD5）和两个响应头，确认后才在 `blobs.remote_at` 记下，接口从此给出公开地址，之前仍给本地签名链接。上传失败从 30 秒起翻倍重试、最长间隔 1 小时，共 12 次（约 7 小时），每次记 `job will retry`，放弃时记 `media upload gave up; the file stays local`，这些媒体由 `media-migrate` 补传。
@@ -192,7 +192,7 @@ Renovate（账号级安装的 GitHub App）按 `.github/renovate.json5` 每周�
 - 缩略图同样存到 R2（同名键），确认后删除本地文件，浏览器从公开域名读取（原因见[架构](architecture.md#缩略图)）。下载时随即上传，失败的和这一版之前只在本地的缩略图由维护任务在 worker 空闲时移走（见「维护任务」），日志 `moved thumbnails to the remote store`（`moved` 个数）；R2 中已有相同字节的对象（以前 rclone 复制过去的）直接沿用，不再上传。还没移走的缩略图经本服务提供，响应头为 `Cache-Control: public, max-age=31536000, immutable`（视频和带文件名的下载仍为 `private`，不进 CDN）。本地和 R2 中都找不到缩略图文件时，请求它的 `/media/…` 当场从平台再下载一次（资产记下的 `thumbnail_url`）并移到 R2；字节不同时记在新的键下，并把请求重定向过去。平台不再提供时（Instagram 的地址会过期、帖子已删除），图片重定向到原文件，视频返回 404。
 - 带文件名的下载经本服务从本地或 R2 流式返回，带 `Content-Disposition`。服务端的读取（Telegram 发送、下载）都先读本地，没有时通过 S3 API 读 R2，不经公开域名。
 - 不另设本地原文件缓存：缩略图从平台下载，不读原文件；Telegram 按 `file_id` 复用已上传的文件；其余读取（第一次发送到 Telegram、带文件名的下载）在本地原文件删除后都读 R2。
-- 设为 `r2` 并运行后，不能再改回 `local`：本地实现不读 R2，已删除本地原文件的媒体会缺失。要回退，先把存储桶下载回 `media/`（如 `rclone copy r2:midden ~/midden/data/media`）再改。
+- 设为 `r2` 并运行后，不能再改回 `local`：本地实现不读 R2，已删除本地原文件的媒体会缺失。要回退，先把存储桶下载回 `media/`（如 `rclone copy r2:<bucket> ~/midden/data/media`）再改。
 - 删除：不再被引用的媒体（删除收藏、删除媒体）24 小时后删除本地文件（还在时）；R2 中有对象时先清除其公开地址的边缘缓存（`purge_cache`），再删除对象。清除失败时对象保留，稍后重试；没有设置 `CF_ZONE_ID` 时记 `cache purge skipped: no CF_ZONE_ID configured` 并跳过清除。
 - 存储类别为存储桶默认的 Standard。
 
@@ -202,8 +202,8 @@ Renovate（账号级安装的 GitHub App）按 `.github/renovate.json5` 每周�
 | ------------------ | -------------------------------------------------------------------------------------------- |
 | `MEDIA_STORE`      | `local`（默认）或 `r2`                                                                       |
 | `R2_ACCOUNT_ID`    | Cloudflare 账户 ID（32 位十六进制）；S3 端点为 `https://<ID>.r2.cloudflarestorage.com`       |
-| `R2_BUCKET`        | 存储桶名，如 `midden`                                                                        |
-| `MEDIA_PUBLIC_URL` | 存储桶的公开域名，如 `https://midden-media.sxzz.moe`                                         |
+| `R2_BUCKET`        | 存储桶名，如 `<bucket>`                                                                      |
+| `MEDIA_PUBLIC_URL` | 存储桶的公开域名，如 `https://media.example.com`                                         |
 | `CF_API_TOKEN`     | Cloudflare 账户 API token（见下）：R2 的 S3 密钥由它派生，清除缓存与存储用量的分析数据也用它 |
 | `CF_ZONE_ID`       | 公开域名所在 zone 的 ID；不设置则删除时不清除边缘缓存                                        |
 
@@ -215,14 +215,14 @@ S3 密钥由 `CF_API_TOKEN` 派生（[Cloudflare 文档](https://developers.clou
 
 ### Cloudflare
 
-已配置：存储桶 `midden` 绑定自定义域名 `midden-media.sxzz.moe`；该域名的 Cache Rule（Edge TTL 忽略源站、1 年，300–526 不缓存，Browser TTL 遵循源站，缓存键忽略查询串）；Response Header Transform Rule 给所有响应（包括缓存命中）加 `Access-Control-Allow-Origin: *`。
+需要配置：存储桶 `<bucket>` 绑定自定义域名（如 `media.example.com`）；该域名的 Cache Rule（Edge TTL 忽略源站、1 年，300–526 不缓存，Browser TTL 遵循源站，缓存键忽略查询串）；Response Header Transform Rule 给所有响应（包括缓存命中）加 `Access-Control-Allow-Origin: *`。
 
 还需要：
 
-1. Smart Tiered Cache：`sxzz.moe` zone →「Caching → Tiered Cache」，选 Smart Tiered Caching。边缘未命中时先问上层节点，减少回源 R2 的读取次数。
+1. Smart Tiered Cache：`<zone>` zone →「Caching → Tiered Cache」，选 Smart Tiered Caching。边缘未命中时先问上层节点，减少回源 R2 的读取次数。
 2. 一个账户 API token（Account API Tokens 中自定义创建），权限：
-   - **Workers R2 Storage Bucket Item Write**，存储桶 `midden` 与 `midden-backup`；
-   - Zone → **Cache Purge**，zone `sxzz.moe`；
+   - **Workers R2 Storage Bucket Item Write**，存储桶 `<bucket>` 与备份存储桶；
+   - Zone → **Cache Purge**，zone `<zone>`；
    - **Account Analytics Read**。
 
    token 值填入 `CF_API_TOKEN`；zone 的 Overview 页右侧的 Zone ID 填入 `CF_ZONE_ID`。rclone 用由它派生的 S3 密钥，见「迁移现有媒体」。
@@ -249,7 +249,7 @@ S3 密钥由 `CF_API_TOKEN` 派生（[Cloudflare 文档](https://developers.clou
 
 ```sh
 read -rs TOKEN    # 粘贴 CF_API_TOKEN 后回车，不显示、不进 shell 历史
-ACCOUNT=9183b1c394e4cd2f0a7d3c978bc53a29
+ACCOUNT=0123456789abcdef0123456789abcdef
 # access_key_id：token 的 id
 curl -s -H "Authorization: Bearer $TOKEN" \
   "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/tokens/verify" | jq -r .result.id
@@ -267,13 +267,13 @@ type = s3
 provider = Cloudflare
 access_key_id = <token 的 id>
 secret_access_key = <token 值的 SHA-256>
-endpoint = https://9183b1c394e4cd2f0a7d3c978bc53a29.r2.cloudflarestorage.com
+endpoint = https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com
 region = auto
 no_check_bucket = true
 ```
 
 ```sh
-rclone copy ~/midden/data/media r2:midden \
+rclone copy ~/midden/data/media r2:<bucket> \
   --header-upload "Cache-Control: public, max-age=31536000, immutable" \
   --s3-upload-cutoff 4Gi --checksum \
   --transfers 16 --checkers 32 --progress
@@ -301,7 +301,7 @@ rclone copy ~/midden/data/media r2:midden \
 4. 抽查汇总中给出的地址（或网页中任一原图的地址），连续请求两次：
 
    ```sh
-   curl -s -o /dev/null -D - https://midden-media.sxzz.moe/ab/cd/<sha256>
+   curl -s -o /dev/null -D - https://media.example.com/ab/cd/<sha256>
    ```
 
    应看到 `content-type` 为媒体类型、`cache-control: public, max-age=31536000, immutable`、`access-control-allow-origin: *`，第二次 `cf-cache-status: HIT`。带 `Range: bytes=0-1` 请求视频应返回 206。
@@ -334,13 +334,13 @@ rclone copy ~/midden/data/media r2:midden \
 
 2. 推送到 `main`。自动部署用新镜像重建容器（同时读入新的 `.env`），日志中应有 `cloudflare token verified` 和 `listening`。没有 `CF_API_TOKEN` 或验证失败时新版本退出，`/healthz` 不响应，部署回滚到旧版本，Bot 发来 `rolled back …`；改好 `.env` 后在部署目录运行 `node scripts/deploy.ts` 重新部署。
 3. 验证：
-   - 上传：采集一个带图片的帖子。上传任务先 PUT 再读回（HEAD）确认，所以几秒后网页中这张图的地址变为 `https://midden-media.sxzz.moe/…` 就说明写和读都可用；失败时日志有 `jobType` 为 `upload` 的 `job will retry`，带 `S3 PutObject failed: 403` 之类的原因。
+   - 上传：采集一个带图片的帖子。上传任务先 PUT 再读回（HEAD）确认，所以几秒后网页中这张图的地址变为 `https://media.example.com/…` 就说明写和读都可用；失败时日志有 `jobType` 为 `upload` 的 `job will retry`，带 `S3 PutObject failed: 403` 之类的原因。
    - 清除缓存：用同一个 token 直接请求一次（清除一个不存在的地址无害）：
 
      ```sh
      ZONE=$(grep '^CF_ZONE_ID=' .env | cut -d= -f2-)
      curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-       -d '{"files":["https://midden-media.sxzz.moe/cutover-check"]}' \
+       -d '{"files":["https://media.example.com/cutover-check"]}' \
        "https://api.cloudflare.com/client/v4/zones/$ZONE/purge_cache" | jq .success
      ```
 
@@ -349,11 +349,11 @@ rclone copy ~/midden/data/media r2:midden \
    - 分析数据：「设置 → 管理员面板 → 存储用量」显示 R2 的两个存储桶和「本月费用」；日志中没有 `storage analytics unavailable`。
 
 4. 从 `.env` 删去 `R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`CF_PURGE_TOKEN`（服务已不读它们，不必重启），`unset TOKEN`。rclone 的配置改用派生的一对（见「迁移现有媒体」）。
-5. 在 Cloudflare 撤销旧 token：「R2 → Manage API tokens」中媒体用的那个（`midden` 的 Object Read & Write），以及「My Profile → API Tokens」中清除缓存的那个。Litestream 的 token 保留：它仍用自己的密钥（见「Litestream」）；只有把 `LITESTREAM_*` 改成由 `CF_API_TOKEN` 派生的一对、`docker compose up -d litestream` 之后心跳正常，才可以撤销它。
+5. 在 Cloudflare 撤销旧 token：「R2 → Manage API tokens」中媒体用的那个（`<bucket>` 的 Object Read & Write），以及「My Profile → API Tokens」中清除缓存的那个。Litestream 的 token 保留：它仍用自己的密钥（见「Litestream」）；只有把 `LITESTREAM_*` 改成由 `CF_API_TOKEN` 派生的一对、`docker compose up -d litestream` 之后心跳正常，才可以撤销它。
 
 ### R2 的保护
 
-R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没有其他媒体备份。R2 提供存储桶锁（Bucket locks），可以作为一个选项，媒体的存储桶 `midden` 目前没有配置（`midden-backup` 的快照有一条，见「Litestream」）：一条规则让某个前缀（或整个存储桶）下的对象在一段时间内（按对象存在的时长、到某个日期或无限期）不能被删除或覆盖，对现有和以后的对象都生效，优先于生命周期规则。在 Cloudflare 的「R2 → 存储桶 → Settings → Bucket lock rules」中添加，或用 `npx wrangler r2 bucket lock add <存储桶>`。
+R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没有其他媒体备份。R2 提供存储桶锁（Bucket locks），可以作为一个选项，媒体的存储桶可以不配置（备份存储桶的快照建议配置一条，见「Litestream」）：一条规则让某个前缀（或整个存储桶）下的对象在一段时间内（按对象存在的时长、到某个日期或无限期）不能被删除或覆盖，对现有和以后的对象都生效，优先于生命周期规则。在 Cloudflare 的「R2 → 存储桶 → Settings → Bucket lock rules」中添加，或用 `npx wrangler r2 bucket lock add <存储桶>`。
 
 启用前要知道：
 
@@ -367,22 +367,22 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
 | 变量                            | 说明                                                                                                                            |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `RAW_R2_BUCKET`                 | 私有存储桶，如 `midden-backup`（与 Litestream 的 `db/` 共用，各在自己的前缀下）                                                 |
-| `R2_ACCOUNT_ID`、`CF_API_TOKEN` | 与媒体共用：S3 密钥由 token 派生（见「媒体存储」的「配置」），token 要有这个存储桶的写权限，上面的 token 已包括 `midden-backup` |
+| `RAW_R2_BUCKET`                 | 私有存储桶，如 `<backup-bucket>`（与 Litestream 的 `db/` 共用，各在自己的前缀下）                                                 |
+| `R2_ACCOUNT_ID`、`CF_API_TOKEN` | 与媒体共用：S3 密钥由 token 派生（见「媒体存储」的「配置」），token 要有这个存储桶的写权限，上面的 token 已包括 `<backup-bucket>` |
 
 部署这一版本时的迁移给 `source_responses` 加 `remote_at` 列和按 `sha256` 的索引，与是否设置这些变量无关；建索引要读一遍整张表，在 128,844 条、757 MB 的合成副本上约 2.3 秒。
 
 设置了 `RAW_R2_BUCKET` 才启用；还需要 `R2_ACCOUNT_ID` 和 `CF_API_TOKEN`，缺少时启动失败并列出缺少的变量；`RAW_R2_BUCKET` 不能是公开的媒体存储桶 `R2_BUCKET`。服务在开始监听之前验证 `CF_API_TOKEN`（与媒体相同），验证失败就不启动，自动部署因此回滚。启动日志 `raw responses store` 的 `store` 为 `r2`（未启用时为 `database`）。`raw-get` 同样先验证。
 
-- 存储桶必须是私有的（不绑定域名、不开公开访问）：原始响应中有平台给登录账号看的内容。用 `midden-backup` 时，它的生命周期规则不能删除 `raw/` 下的对象（那是原始响应唯一的一份；Litestream 自己管理 `db/` 下的文件）。中止未完成分段上传的规则（见「Litestream」）不删除对象，不受影响；原始响应都是一次上传，不用分段。
+- 存储桶必须是私有的（不绑定域名、不开公开访问）：原始响应中有平台给登录账号看的内容。用 `<backup-bucket>` 时，它的生命周期规则不能删除 `raw/` 下的对象（那是原始响应唯一的一份；Litestream 自己管理 `db/` 下的文件）。中止未完成分段上传的规则（见「Litestream」）不删除对象，不受影响；原始响应都是一次上传，不用分段。
 - 不需要新的密钥：S3 密钥由 `CF_API_TOKEN` 派生，它要对这个存储桶有读写权限。R2 的密钥不能限定前缀，所以它也能读写 `db/`。
-- 费用：按 4 倍压缩，现有的约 180 MB，存储每月约 $0.003；移走已有的约 13 万条用了同样多的 PUT 和 HEAD，在每月免费额度内。之后每条新的原始响应一次 PUT、一次 HEAD，删除时一次 DELETE。「存储用量」中 `midden-backup` 的存储和操作次数包括 `raw/`。
+- 费用：按 4 倍压缩，现有的约 180 MB，存储每月约 $0.003；移走已有的约 13 万条用了同样多的 PUT 和 HEAD，在每月免费额度内。之后每条新的原始响应一次 PUT、一次 HEAD，删除时一次 DELETE。「存储用量」中 `<backup-bucket>` 的存储和操作次数包括 `raw/`。
 - 读取一条：`docker compose exec -T midden midden raw-get <抓取 id>` 列出这次抓取的原始响应（序号、`bucket` 或 `database`、大小、类型、地址），加上序号输出那一条的原始字节。
 - 关闭：删去 `RAW_R2_BUCKET` 即可，之后新的原始响应留在数据库中；已在存储桶中的仍在那里，读取它们（`raw-get`）和回收删除都需要这个存储桶，所以只在不再需要它们时关闭。
 
 ### 启用
 
-1. 在部署目录的 `.env` 中加上 `RAW_R2_BUCKET=midden-backup`（已设置 `R2_ACCOUNT_ID` 与 `CF_API_TOKEN` 时只需这一行）。
+1. 在部署目录的 `.env` 中加上 `RAW_R2_BUCKET=<backup-bucket>`（已设置 `R2_ACCOUNT_ID` 与 `CF_API_TOKEN` 时只需这一行）。
 2. `docker compose up -d`（或推送后自动部署），日志中 `raw responses store` 的 `store` 应为 `r2`。此后完成的抓取由 worker 的 `raw-upload` 任务移走。
 3. 已在数据库中的原始响应不需要手动处理。worker 的维护任务每分钟找出一小时以前、仍在数据库中、没有上传任务的原始响应，按抓取排 `raw-upload` 任务，同时等待的最多 500 个；它们在 `raw` 队列中只在 worker 空闲时运行，受节流，优先级与维护相同，所以积压逐步移走，不挤占采集。这一步从只含仍在数据库中的正文的 `source_response_bodies` 查起，全部移走后几乎不花时间。排了任务时记 `queued raw responses still in the database for upload`（`captures` 为这次排的抓取数）。
    - 同样内容（同一个 SHA-256）的原始响应共用一个对象：任务在这个键的锁内存储，然后把仍在数据库中、内容相同的所有行一起记下并删去正文，所以每个内容只上传一次，同一个键不会同时写入（R2 对同一个键的写入每秒约一次，更快的回答 429）。
@@ -411,7 +411,7 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
 需要备份的是数据库、媒体与 `.env`（原始响应移到存储桶后只在那里，见「原始响应（R2）」）：
 
-- 数据库：Litestream 持续复制到 R2 的私有存储桶 `midden-backup`，可以恢复到最近 7 天内的任一时刻，见「Litestream」。不启用时，自己定期做在线备份（服务运行中即可）：
+- 数据库：Litestream 持续复制到 R2 的私有存储桶 `<backup-bucket>`，可以恢复到最近 7 天内的任一时刻，见「Litestream」。不启用时，自己定期做在线备份（服务运行中即可）：
 
   ```sh
   docker compose exec -T midden midden backup /data/backups
@@ -429,13 +429,13 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
 ### Litestream
 
-`compose.yaml` 中的 `litestream` 服务运行官方镜像 `litestream/litestream`（版本和摘要固定），与服务共用数据目录，按仓库根目录的 `litestream.yml` 把 `data/midden.db` 的改动持续复制到 `s3://midden-backup/db`（R2 的 S3 端点）。它是单独的容器：出问题时服务照常运行，部署也不等它。以 midden 的用户（1000）运行，它在数据库旁边建的文件服务也能写。
+`compose.yaml` 中的 `litestream` 服务运行官方镜像 `litestream/litestream`（版本和摘要固定），与服务共用数据目录，按仓库根目录的 `litestream.yml` 把 `data/midden.db` 的改动持续复制到 `s3://<backup-bucket>/db`（R2 的 S3 端点）。它是单独的容器：出问题时服务照常运行，部署也不等它。以 midden 的用户（1000）运行，它在数据库旁边建的文件服务也能写。
 
 启用：
 
-1. Cloudflare「R2」中建私有存储桶 `midden-backup`（不绑定域名、不开公开访问）；「R2 → Manage API tokens → Create API token」，权限 **Object Read & Write**，范围只选 `midden-backup`。
+1. Cloudflare「R2」中建私有存储桶 `<backup-bucket>`（不绑定域名、不开公开访问）；「R2 → Manage API tokens → Create API token」，权限 **Object Read & Write**，范围只选 `<backup-bucket>`。
 
-   Litestream 只认 S3 的一对密钥，不能像服务那样由 `CF_API_TOKEN` 派生，所以它有自己的两个变量。值可以是这个 R2 token 的 Access Key ID 与 Secret Access Key，也可以是由 `CF_API_TOKEN` 派生的一对（那个 token 也有 `midden-backup` 的权限，算法见「迁移现有媒体」）；用后者时 `CF_API_TOKEN` 轮换后要一并更新，否则 Litestream 上传失败、心跳停止。
+   Litestream 只认 S3 的一对密钥，不能像服务那样由 `CF_API_TOKEN` 派生，所以它有自己的两个变量。值可以是这个 R2 token 的 Access Key ID 与 Secret Access Key，也可以是由 `CF_API_TOKEN` 派生的一对（那个 token 也有 `<backup-bucket>` 的权限，算法见「迁移现有媒体」）；用后者时 `CF_API_TOKEN` 轮换后要一并更新，否则 Litestream 上传失败、心跳停止。
 
 2. 部署目录的 `.env`：
 
@@ -443,9 +443,11 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
    COMPOSE_PROFILES=litestream
    LITESTREAM_ACCESS_KEY_ID=<Access Key ID>
    LITESTREAM_SECRET_ACCESS_KEY=<Secret Access Key>
+   LITESTREAM_BUCKET=<backup-bucket>
+   R2_ACCOUNT_ID=<账户 ID>
    ```
 
-   `COMPOSE_PROFILES` 让 compose 启动 `litestream` 服务，没有它就没有这个容器；服务读到 `LITESTREAM_ACCESS_KEY_ID` 就等待 Litestream 的心跳（见「监控」）。两个密钥只传给 Litestream 的容器和服务（`.env` 整个传给服务），不写入日志。
+   `COMPOSE_PROFILES` 让 compose 启动 `litestream` 服务，没有它就没有这个容器；服务读到 `LITESTREAM_ACCESS_KEY_ID` 就等待 Litestream 的心跳（见「监控」）。`litestream.yml` 用 `LITESTREAM_BUCKET` 与 `R2_ACCOUNT_ID` 拼出存储桶和 S3 端点。两个密钥只传给 Litestream 的容器和服务（`.env` 整个传给服务），不写入日志。
 
 3. `docker compose up -d`：创建 `litestream` 容器，并重建服务的容器以读入新变量。Litestream 第一次启动时上传整个数据库，日志中有 `snapshot complete`。
 4. 检查（见「检查复制」），几天后按「恢复」试一次。
@@ -471,7 +473,7 @@ Litestream 0.5 把 WAL 中新提交的页面写成 LTX 文件（按页 LZ4 压�
 
 恢复点：最近 5 分钟到 1 小时内（L0 文件还在）约每 10 秒一个，更早的每分钟一个（L1 的边界），8 天前的不能恢复。没有写入的时段没有文件。恢复时下载最近的一份快照和它之后的 L1 文件，最多约一天的 1,440 个。
 
-存储桶锁：`midden-backup` 有一条存储桶锁规则（2026-11-25 设置），`db/0009/`（快照）下的对象存在 7 天内不能删除或覆盖，误删或被盗用的密钥也删不掉最近的快照。这个时长必须不超过 `snapshot` 的 `retention`（现在 192 小时，7 天是 168 小时）：否则 Litestream 删除过期快照时收到 409（`ObjectLockedByBucketPolicy`），日志记 `retention enforcement failed`，旧快照和更早的 L1 文件都留下。锁同样挡住中止分段上传：`db/0009/` 下没传完的分段上传在锁到期之前不能中止。存储桶另有一条生命周期规则（2026-11-26 设置），分段上传开始 1 天后仍未完成的，自动中止 `db/` 下的这些上传。它只删除没传完的分段，从不删除对象，所以不影响任何快照或 L1 文件；`db/0009/` 下没传完的分段上传在 7 天的存储桶锁到期之前仍不能中止。
+存储桶锁：`<backup-bucket>` 建议配置一条存储桶锁规则，`db/0009/`（快照）下的对象存在 7 天内不能删除或覆盖，误删或被盗用的密钥也删不掉最近的快照。这个时长必须不超过 `snapshot` 的 `retention`（现在 192 小时，7 天是 168 小时）：否则 Litestream 删除过期快照时收到 409（`ObjectLockedByBucketPolicy`），日志记 `retention enforcement failed`，旧快照和更早的 L1 文件都留下。锁同样挡住中止分段上传：`db/0009/` 下没传完的分段上传在锁到期之前不能中止。存储桶另建议配一条生命周期规则，分段上传开始 1 天后仍未完成的，自动中止 `db/` 下的这些上传。它只删除没传完的分段，从不删除对象，所以不影响任何快照或 L1 文件；`db/0009/` 下没传完的分段上传在 7 天的存储桶锁到期之前仍不能中止。
 
 #### 检查点
 
@@ -593,7 +595,7 @@ rm ~/Library/LaunchAgents/org.midden.backup.plist
 3. 可选，逐个核对镜像中的文件在 R2 中的内容（单段上传的对象按 MD5 比较）：
 
    ```sh
-   rclone check ~/backups/midden/auto/media r2:midden --one-way
+   rclone check ~/backups/midden/auto/media r2:<bucket> --one-way
    ```
 
    不应有内容不同（`differences`）的文件；R2 中缺少的只应是还没移走的缩略图和已被回收删除的媒体。

@@ -1,12 +1,12 @@
 # Capture pipeline: behavioral specification of the Go implementation
 
-This spec describes how the old Go service (`/home/paseo/workspace/midden-go`, branch `golang`) captures content. It is detailed enough to reimplement the pipeline without reading the Go code again. Where the TypeScript rewrite has already decided to differ, the difference is pointed out but not resolved here.
+This spec describes how the old Go service (`<old Go checkout>`, branch `golang`) captures content. It is detailed enough to reimplement the pipeline without reading the Go code again. Where the TypeScript rewrite has already decided to differ, the difference is pointed out but not resolved here.
 
 ## 0. Conventions and scope
 
 ### Citations
 
-- Paths are relative to `/home/paseo/workspace/midden-go`.
+- Paths are relative to `<old Go checkout>`.
 - `app/` means `internal/app/`. `adapter/` means `internal/adapter/`. `x/` means `adapters/x/src/`. `ig/` means `adapters/instagram/src/`.
 - Migration citations use short keys. Each key stands for `internal/store/migrations/<file>`:
 

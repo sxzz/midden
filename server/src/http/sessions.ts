@@ -26,7 +26,7 @@ export const SESSION_RENEW_AFTER = DAY
 /**
  * Host-only: the API's host keeps it, and the web app's origins send it
  * with `credentials: 'include'`. They must be the same site as the API
- * (as midden.example.com and midden-api.example.com are), or browsers
+ * (as web.example.com and api.example.com are), or browsers
  * that block third-party cookies never send it.
  */
 export const SESSION_COOKIE = '__Host-midden'

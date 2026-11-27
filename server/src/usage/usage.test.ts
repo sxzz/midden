@@ -182,7 +182,7 @@ describe('the analytics client', () => {
     const { fetch, requests } = fakeGraphQL({
       storage: [
         storageRow('2026-11-25', 'midden', 1000),
-        storageRow('2026-11-25', 'midden-backup', 500),
+        storageRow('2026-11-25', 'backup-bucket', 500),
         storageRow('2026-11-26', 'midden', 1200),
       ],
       operations: [
@@ -190,7 +190,7 @@ describe('the analytics client', () => {
         opRow('2026-11-25', 'midden', 'ListObjects', 2),
         opRow('2026-11-25', 'midden', 'GetObject', 7),
         opRow('2026-11-25', 'midden', 'DeleteObject', 99),
-        opRow('2026-11-26', 'midden-backup', 'PutObject', 3),
+        opRow('2026-11-26', 'backup-bucket', 'PutObject', 3),
       ],
     })
     const now = at('2026-11-26T08:00:00Z')
@@ -198,11 +198,11 @@ describe('the analytics client', () => {
     expect(Object.fromEntries(usage.days)).toEqual({
       '2026-11-25': {
         midden: { bytes: 1010, objects: 10, class_a: 12, class_b: 7 },
-        'midden-backup': { bytes: 510, objects: 5, class_a: 0, class_b: 0 },
+        'backup-bucket': { bytes: 510, objects: 5, class_a: 0, class_b: 0 },
       },
       '2026-11-26': {
         midden: { bytes: 1210, objects: 12, class_a: 0, class_b: 0 },
-        'midden-backup': {
+        'backup-bucket': {
           bytes: null,
           objects: null,
           class_a: 3,

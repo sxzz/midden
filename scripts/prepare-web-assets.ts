@@ -2,8 +2,16 @@
 import { cp, mkdir, rm, writeFile } from 'node:fs/promises'
 import process from 'node:process'
 
-// Originals and videos come from the R2 bucket's public domain.
-const MEDIA = 'https://midden-media.sxzz.moe'
+// Originals and videos come from the R2 bucket's public domain, the same
+// as the server's MEDIA_PUBLIC_URL. It belongs to the deployment, so the
+// build must be given it.
+const mediaUrl = process.env.MIDDEN_MEDIA_URL
+if (!mediaUrl) {
+  throw new Error(
+    "MIDDEN_MEDIA_URL is not set: the origin of the R2 bucket's public domain (https://media.example.com), allowed in the web app's CSP",
+  )
+}
+const MEDIA = new URL(mediaUrl).origin
 // The API the build calls (`VITE_API_URL`, web/src/api.ts): its JSON, and
 // the thumbnails and downloads it signs. Empty when it is this origin.
 const API = process.env.VITE_API_URL

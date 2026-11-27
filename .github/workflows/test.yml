@@ -13,6 +13,8 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: node scripts/prepare-web-assets.ts
+        env:
+          MIDDEN_MEDIA_URL: https://media.example.com
       - run: pnpm --filter @midden/web exec wrangler deploy --dry-run
   e2e:
     runs-on: ubuntu-24.04

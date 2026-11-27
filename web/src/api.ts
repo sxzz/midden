@@ -15,7 +15,7 @@ const SERVER_RELATIVE = /^\/(?!\/)/
 
 /**
  * Where the API is, without a trailing slash: `VITE_API_URL` at build time
- * (`https://midden-api.example.com`), or empty for the page's own origin
+ * (`https://api.example.com`), or empty for the page's own origin
  * (the dev server's proxy, a server that serves the app itself).
  */
 export const API_URL: string = (import.meta.env.VITE_API_URL ?? '').replace(
