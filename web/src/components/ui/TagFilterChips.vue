@@ -68,7 +68,7 @@ const stateNames = { include: '包含', exclude: '排除', '': '不限' }
       :aria-label="`${tag.name}：${stateNames[state(tag.id)]}`"
       @click="cycle(tag.id)"
     >
-      {{ state(tag.id) === 'exclude' ? `非 ${tag.name}` : tag.name }}
+      {{ tag.name }}
     </button>
   </div>
 </template>
@@ -109,12 +109,15 @@ const stateNames = { include: '包含', exclude: '排除', '': '不限' }
   color: var(--link);
   font-weight: 600;
 }
-/* Excluded reads in the destructive colour, apart from the chosen ones. */
+/* Excluded: struck through in the destructive colour, so the name alone
+   says it without a word before it. */
 .chip.exclude {
   background: color-mix(in srgb, var(--destructive) 12%, transparent);
   box-shadow: inset 0 0 0 1.5px var(--destructive);
   color: var(--destructive);
   font-weight: 600;
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
 }
 .chip:focus-visible {
   outline: 2px solid var(--link);

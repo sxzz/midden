@@ -36,12 +36,12 @@ test('tags are wanted, matched together and excluded from the filter panel', asy
   await expect.poll(query).toEqual([`${A},${B}`, 'all', null])
   await expect(page.locator('.filter-summary')).toHaveText('猫 且 狗')
 
-  // A second tap excludes the tag; the chip says so.
+  // A second tap excludes the tag: the name alone, struck through in red.
   await chips.getByRole('button', { name: '狗：包含' }).click()
   await expect.poll(query).toEqual([A, null, B])
-  await expect(chips.getByRole('button', { name: '狗：排除' })).toHaveText(
-    '非 狗',
-  )
+  const excluded = chips.getByRole('button', { name: '狗：排除' })
+  await expect(excluded).toHaveText('狗')
+  await expect(excluded).toHaveCSS('text-decoration-line', 'line-through')
   await expect(mode).toHaveCount(0)
   await expect(page.locator('.filter-summary')).toHaveText('猫、非 狗')
   await page.screenshot({ path: 'test-results/tag-filters.png' })

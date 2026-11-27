@@ -230,7 +230,8 @@ it('wants several tags, any or all of them, and excludes some', async () => {
   await vi.waitFor(() =>
     expect(last(search)).toEqual({ tag: 'a', not_tag: 'b' }),
   )
-  expect(chip('乙').textContent?.trim()).toBe('非 乙')
+  expect(chip('乙').textContent?.trim()).toBe('乙')
+  expect(chip('乙').classList.contains('exclude')).toBe(true)
   expect(chip('乙').getAttribute('aria-label')).toBe('乙：排除')
   expect(summary()).toBe('甲、非 乙')
   expect(mode()).toBeNull()
