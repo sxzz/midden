@@ -699,7 +699,9 @@ describe('languages', () => {
   })
 
   test('aggregate by=lang: a bucket per stored value', () => {
-    const result = aggregate(reader, { params: { by: ['lang'] } })
+    const result = aggregate(reader, {
+      params: { by: ['lang'], q: ['type:post OR type:profile'] },
+    })
     expect(
       Object.fromEntries(result.buckets.map((b) => [b.key, b.count])),
     ).toEqual(langs())
