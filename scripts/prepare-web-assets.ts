@@ -25,7 +25,7 @@ function webOrigin() {
   const hostname = process.env.MIDDEN_WEB_HOSTNAME
   if (!hostname) {
     throw new Error(
-      "MIDDEN_WEB_HOSTNAME is not set: the web app's host (midden.example.com), opened by the iOS home screen profile",
+      "MIDDEN_WEB_HOSTNAME is not set: the web app's host (web.example.com), opened by the iOS home screen profile",
     )
   }
   return `https://${hostname}`
