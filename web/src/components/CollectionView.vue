@@ -22,6 +22,7 @@ import { accountKey } from '../relation-filter'
 import { isProfileEntity } from '../relations'
 import { shareSlug } from '../share'
 import { suppressTabBar } from '../tabbar'
+import { can } from '../user'
 import BatchRefresh from './BatchRefresh.vue'
 import CollectionAlbum from './CollectionAlbum.vue'
 import CollectionFilters from './CollectionFilters.vue'
@@ -72,6 +73,14 @@ const emit = defineEmits<{
 }>()
 // A public link has no selection; its filters leave out the owner's tags.
 const shared = computed(() => !!shareSlug.value)
+/**
+ * 多选 updates, deletes or compares accounts: a viewer, who only compares,
+ * has it on lists of accounts alone.
+ */
+const selectable = computed(
+  () =>
+    !shared.value && (can.capture || can.delete || listsProfiles(props.query)),
+)
 // An album shows posts' media; accounts have none to show.
 const albums = computed(() => !listsProfiles(props.query))
 const layout = computed(() =>
@@ -202,7 +211,7 @@ const totalText = computed(() =>
 const toolbar = computed(
   () =>
     !!totalText.value ||
-    (!selecting.value && !!props.items.length && !shared.value) ||
+    (!selecting.value && !!props.items.length && selectable.value) ||
     albums.value ||
     !!slots.actions,
 )
@@ -232,7 +241,7 @@ const storage = computed(() =>
     <span v-if="totalText" class="total">{{ totalText }}</span>
     <slot name="actions" />
     <button
-      v-if="!selecting && items.length && !shared"
+      v-if="!selecting && items.length && selectable"
       type="button"
       class="batch"
       @click="startSelecting"
@@ -317,7 +326,7 @@ const storage = computed(() =>
     @media-removed="emit('mediaRemoved')"
   />
   <DeleteSheet
-    v-if="batch"
+    v-if="batch && can.delete"
     :open="deleting"
     :ids="selected"
     :title="`删除${selected.length}项收藏？`"

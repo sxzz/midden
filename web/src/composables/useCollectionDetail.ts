@@ -16,6 +16,7 @@ import {
 import { isProfileEntity } from '../relations'
 import { shareSlug } from '../share'
 import { trends } from '../trends'
+import { can } from '../user'
 import { useHistory } from './useHistory'
 import { toast } from './useToast'
 const collections = client.collections[':id']
@@ -134,8 +135,8 @@ export function useCollectionDetail(
         void checkTrends()
         void checkChanges(result)
         void checkFollows(result)
-        // A public page offers no capture to check for.
-        if (!shareSlug.value) {
+        // A public page offers no capture to check for, nor does a viewer's.
+        if (!shareSlug.value && can.capture) {
           void checkUpdate()
           available.value = await availability(id, signal)
           availabilityKnown.value = true
@@ -196,7 +197,7 @@ export function useCollectionDetail(
    */
   async function checkUpdate() {
     clearTimeout(updateTimer)
-    if (shareSlug.value) return
+    if (shareSlug.value || !can.capture) return
     const signal = controller.signal
     const was = updating.value
     try {

@@ -1,8 +1,8 @@
 <script setup vapor lang="ts">
 import { RouterLink } from 'vue-router'
 import { folderLink as link } from '../folders'
-import type { Folder } from '../api'
-defineProps<{ folders: Folder[] }>()
+import type { LibraryFolder } from '../api'
+defineProps<{ folders: LibraryFolder[] }>()
 </script>
 
 <template>

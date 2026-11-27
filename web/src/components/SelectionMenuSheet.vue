@@ -1,6 +1,7 @@
 <script setup vapor lang="ts">
 import { computed, shallowRef, watch } from 'vue'
 import { call, client } from '../api'
+import { can } from '../user'
 import ActionMenu from './ui/ActionMenu.vue'
 import AppLink from './ui/AppLink.vue'
 import type { MenuOpener } from '../action-menu'
@@ -76,6 +77,7 @@ watch(
       >
     </AppLink>
     <button
+      v-if="can.delete"
       type="button"
       class="action"
       v-bind="item"
@@ -84,6 +86,7 @@ watch(
       删除媒体
     </button>
     <button
+      v-if="can.delete"
       type="button"
       class="action destructive"
       v-bind="item"

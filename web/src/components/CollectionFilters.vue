@@ -28,6 +28,7 @@ import { composeQuery, hasTerms, readQuery, splitQuery } from '../query'
 import { readAuthors } from '../reads'
 import { defaultRelMin, isRel, relMinOf, type Rel } from '../relation-filter'
 import { shareSlug } from '../share'
+import { can } from '../user'
 import FilterCard from './FilterCard.vue'
 import QueryBox from './QueryBox.vue'
 import RelationFilter from './RelationFilter.vue'
@@ -42,7 +43,8 @@ const tagError = shallowRef('')
 // Nor follows (关系): their accounts reach beyond the share.
 const shared = !!shareSlug.value
 async function loadTags() {
-  if (shared) return
+  // Tags are the admin's alone: a viewer is given none.
+  if (shared || !can.organize) return
   try {
     tags.value = await call(client.tags.$get())
     tagError.value = ''

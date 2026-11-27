@@ -8,6 +8,7 @@ import {
   permissionLabels,
   type TokenForm,
 } from '../tokens'
+import { can } from '../user'
 import SheetDialog from './ui/SheetDialog.vue'
 import type { ApiToken } from '../api'
 
@@ -91,7 +92,12 @@ function submit() {
         enterkeyhint="done"
       />
     </label>
-    <fieldset v-if="!token" class="field">
+    <!-- A viewer's tokens only read, and only the agent API. -->
+    <div v-if="!token && !can.admin" class="field">
+      <span class="name">权限</span>
+      <p class="fixed">只读，只能用于Agent API</p>
+    </div>
+    <fieldset v-else-if="!token" class="field">
       <legend class="name">权限</legend>
       <div class="segments">
         <label
@@ -175,6 +181,12 @@ input:not([type='radio'], [type='checkbox']) {
 }
 input:disabled {
   color: var(--subtle);
+}
+.fixed {
+  clear: both;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
 }
 input::placeholder {
   color: var(--subtle);

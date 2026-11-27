@@ -3,8 +3,8 @@ import { computed, onMounted, onUnmounted, shallowRef } from 'vue'
 import { call, client, errorText } from '../api'
 import { toast } from '../composables/useToast'
 import { host } from '../host'
+import { can, type PlatformUser } from '../user'
 import AppLink from './ui/AppLink.vue'
-import type { PlatformUser } from '../user'
 // The foot of the rail: who is signed in to Midden (see user.ts), with a
 // menu of what concerns the whole instance.
 const props = defineProps<{ user: PlatformUser }>()
@@ -64,13 +64,25 @@ onUnmounted(() => {
     </button>
     <div v-if="menu" class="menu" role="menu">
       <p class="menu-host">{{ user.name }} · {{ user.detail }}</p>
-      <AppLink
-        class="menu-item"
-        role="menuitem"
-        :to="{ name: 'settings-section', params: { section: 'admin' } }"
-        @navigate="menu = false"
-        >管理员面板</AppLink
-      >
+      <template v-if="can.admin">
+        <AppLink
+          class="menu-item"
+          role="menuitem"
+          :to="{ name: 'settings-section', params: { section: 'admin' } }"
+          @navigate="menu = false"
+          >管理员面板</AppLink
+        >
+        <AppLink
+          class="menu-item"
+          role="menuitem"
+          :to="{
+            name: 'settings-entry',
+            params: { section: 'admin', entry: 'users' },
+          }"
+          @navigate="menu = false"
+          >用户</AppLink
+        >
+      </template>
       <button
         v-if="browser"
         type="button"

@@ -7,13 +7,15 @@ export interface SettingsEntry {
   value: string
   label: string
   hint: string
-  icon: 'globe' | 'disk' | 'queue' | 'backup' | 'devices'
+  icon: 'globe' | 'disk' | 'queue' | 'backup' | 'devices' | 'users'
 }
 export interface SettingsSection {
   value: string
   label: string
   hint: string
   entries?: readonly SettingsEntry[]
+  /** The admin's alone (`can.admin`): a viewer has no such section. */
+  admin?: boolean
 }
 
 export const settingsSections: readonly SettingsSection[] = [
@@ -39,7 +41,14 @@ export const settingsSections: readonly SettingsSection[] = [
     value: 'admin',
     label: '管理员面板',
     hint: '整个服务的设置。',
+    admin: true,
     entries: [
+      {
+        value: 'users',
+        label: '用户',
+        hint: '查看者与邀请',
+        icon: 'users',
+      },
       {
         value: 'origins',
         label: '域名',
@@ -78,19 +87,37 @@ export function findEntry(section: string, value: string) {
 }
 
 /**
+ * The sections a user has: a viewer (`admin` false) has none of the
+ * admin's, and their tokens only read.
+ */
+export function shownSections(admin: boolean): readonly SettingsSection[] {
+  if (admin) return settingsSections
+  return settingsSections
+    .filter((s) => !s.admin)
+    .map((s) =>
+      s.value === 'tokens'
+        ? { ...s, hint: '脚本与AI代理读取收藏用的令牌。' }
+        : s,
+    )
+}
+
+/**
  * The sections and entries a search of 设置 finds, by their names and the
  * lines under them. Empty finds everything (the plain list).
  */
-export function searchSettings(query: string) {
+export function searchSettings(
+  query: string,
+  sections: readonly SettingsSection[] = settingsSections,
+) {
   const q = query.trim().toLowerCase()
   const has = (item: { label: string; hint: string }) =>
     !q ||
     item.label.toLowerCase().includes(q) ||
     item.hint.toLowerCase().includes(q)
   return {
-    sections: settingsSections.filter(has),
+    sections: sections.filter(has),
     entries: q
-      ? settingsSections.flatMap((section) =>
+      ? sections.flatMap((section) =>
           (section.entries ?? [])
             .filter(has)
             .map((entry) => ({ section, entry })),

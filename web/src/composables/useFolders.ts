@@ -1,10 +1,21 @@
 import { shallowRef } from 'vue'
-import { call, client, errorText, type Folder } from '../api'
+import {
+  call,
+  client,
+  errorText,
+  isSaved,
+  type Folder,
+  type LibraryFolder,
+} from '../api'
 import { retagQuery } from '../folders'
 
-/** The saved folders (收藏夹) with their counts, and changes to them. */
+/**
+ * The saved folders (收藏夹) with their counts, and changes to them. A
+ * viewer has the publicly shared ones alone, without their queries
+ * (`SharedFolder`), and changes none.
+ */
 export function useFolders() {
-  const folders = shallowRef<Folder[]>([])
+  const folders = shallowRef<LibraryFolder[]>([])
   /** Whether a load has finished, successfully or not. */
   const loaded = shallowRef(false)
   const error = shallowRef('')
@@ -61,7 +72,7 @@ export function useFolders() {
    */
   function retag(from: string, to?: string) {
     folders.value = folders.value.map((folder) => {
-      if (folder.filter === null) return folder
+      if (!isSaved(folder) || folder.filter === null) return folder
       const filter = retagQuery(folder.filter, from, to)
       return filter === folder.filter ? folder : { ...folder, filter }
     })

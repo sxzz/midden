@@ -8,8 +8,8 @@ import {
   nextScroll,
   scrollStart,
   settleBar,
+  shownTabs,
   tabBarSuppressed,
-  tabs,
 } from '../tabbar'
 import AppLink from './ui/AppLink.vue'
 import TabIcon from './ui/TabIcon.vue'
@@ -98,7 +98,7 @@ onUnmounted(() => {
   >
     <div class="items">
       <AppLink
-        v-for="tab in tabs"
+        v-for="tab in shownTabs()"
         :key="tab.value"
         class="item"
         :class="{ on: active === tab.value }"

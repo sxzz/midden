@@ -6,20 +6,16 @@ import { toast } from '../composables/useToast'
 import { host } from '../host'
 import { RAIL, SIDEBAR, useMedia } from '../layout'
 import { buildFacts, REPOSITORY } from '../settings'
-import {
-  findEntry,
-  findSection,
-  searchSettings,
-  settingsSections,
-  splitMatch,
-} from '../settings-sections'
+import { searchSettings, shownSections, splitMatch } from '../settings-sections'
 import { darkTheme } from '../theme'
+import { can } from '../user'
 import AdminView from './AdminView.vue'
 import ApiTokens from './ApiTokens.vue'
 import PasskeyList from './PasskeyList.vue'
 import SessionList from './SessionList.vue'
 import AppLink from './ui/AppLink.vue'
 import ListSection from './ui/ListSection.vue'
+import UsersView from './UsersView.vue'
 
 // 设置, laid out as X's: the list of sections, then the chosen section (its
 // line and its entries), then an entry, at most two levels. From 1000px
@@ -40,24 +36,25 @@ function setDark(event: Event) {
   const theme = darkTheme.value
   if (theme) theme.value = (event.target as HTMLInputElement).checked
 }
-const section = computed(() =>
-  findSection(
-    String(
-      route.params.section || (split.value ? settingsSections[0]!.value : ''),
-    ),
-  ),
-)
+/** This user's sections: a viewer has none of the admin's (user.ts). */
+const sections = shownSections(can.admin)
+const section = computed(() => {
+  const value = String(
+    route.params.section || (split.value ? sections[0]!.value : ''),
+  )
+  return sections.find((s) => s.value === value)
+})
 const entry = computed(() =>
-  section.value
-    ? findEntry(section.value.value, String(route.params.entry || ''))
-    : undefined,
+  section.value?.entries?.find(
+    (e) => e.value === String(route.params.entry || ''),
+  ),
 )
 /** What the narrow layout shows: one level at a time. */
 const level = computed(() =>
   entry.value ? 'entry' : section.value ? 'section' : 'list',
 )
 const query = shallowRef('')
-const found = computed(() => searchSettings(query.value))
+const found = computed(() => searchSettings(query.value, sections))
 const sectionLink = (value: string) => ({
   name: 'settings-section',
   params: { section: value },
@@ -221,8 +218,9 @@ async function logout() {
       </header>
       <p class="pane-hint">{{ entry?.hint ?? section.hint }}</p>
       <template v-if="entry">
+        <UsersView v-if="entry.value === 'users'" />
         <AdminView
-          v-if="section.value === 'admin'"
+          v-else-if="section.value === 'admin'"
           :entry="entry.value"
           @cleared="emit('cleared')"
         />
@@ -268,6 +266,13 @@ async function logout() {
                 <rect x="2.5" y="4.5" width="14" height="10" rx="1.5" />
                 <path d="M1.5 18h11" />
                 <rect x="15.5" y="9" width="7" height="11.5" rx="1.5" />
+              </template>
+              <template v-else-if="item.icon === 'users'">
+                <circle cx="9" cy="8" r="3.5" />
+                <path d="M2.5 20c.6-3.6 3.2-6 6.5-6s5.9 2.4 6.5 6" />
+                <path
+                  d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.4c1.6.9 2.7 2.9 3 5.6"
+                />
               </template>
               <template v-else-if="item.icon === 'queue'">
                 <path d="M8 6h12M8 12h12M8 18h12" />

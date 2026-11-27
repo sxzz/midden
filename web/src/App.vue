@@ -1,8 +1,10 @@
 <script setup vapor lang="ts">
 import { computed, onMounted, onUnmounted, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { guardPages } from './access'
 import { call, client, errorText } from './api'
 import CollectionLibrary from './components/CollectionLibrary.vue'
+import InviteSetup from './components/InviteSetup.vue'
 import PasskeyLogin from './components/PasskeyLogin.vue'
 import PasskeySetup from './components/PasskeySetup.vue'
 import PublicShare from './components/PublicShare.vue'
@@ -10,13 +12,16 @@ import AppToast from './components/ui/AppToast.vue'
 import CollectionSkeleton from './components/ui/CollectionSkeleton.vue'
 import { host, loadHost, setupHost } from './host'
 import { followInternalLink, goBack } from './navigation'
+import { loadSession } from './user'
 const router = useRouter()
 const route = useRoute()
 // A public link is read without logging in; the library asks for it only
 // once one of its own pages is shown.
 const shared = computed(() => !!route.meta.public)
-// A /passkey link adds a passkey first, which also signs in.
+// A /passkey link adds a passkey first, which also signs in; an invite
+// registers a viewer, which signs them in too.
 const setup = computed(() => !!route.meta.setup)
+const invite = computed(() => route.meta.setup === 'invite')
 const ready = shallowRef(false)
 const error = shallowRef('')
 const loading = shallowRef(true)
@@ -44,19 +49,27 @@ onMounted(() => {
     { immediate: true },
   )
 })
+/**
+ * Signed in: who it is and what they may do (user.ts), their pages only
+ * (access.ts), then the library.
+ */
+async function enter() {
+  await loadSession()
+  await guardPages(router)
+  ready.value = true
+}
 async function signIn() {
   // Opened on a public link first, the Mini App script is not loaded yet.
   await loadHost()
   try {
-    await call(client.session.$get())
-    ready.value = true
+    await enter()
   } catch {
     const data = host()?.initData
     if (!data) browserLogin.value = true
     else {
       try {
         await call(client.auth.telegram.$post({ json: { init_data: data } }))
-        ready.value = true
+        await enter()
       } catch (e) {
         error.value = errorText(e)
       }
@@ -65,9 +78,16 @@ async function signIn() {
     loading.value = false
   }
 }
-function signedIn() {
+async function signedIn() {
   browserLogin.value = false
-  ready.value = true
+  loading.value = true
+  try {
+    await enter()
+  } catch (e) {
+    error.value = errorText(e)
+  } finally {
+    loading.value = false
+  }
 }
 // The link is used up: leave its address, and the library takes over.
 function passkeyAdded() {
@@ -79,7 +99,12 @@ onUnmounted(() => cleanup())
 <template>
   <div v-if="shared" class="shell"><PublicShare /></div>
   <main v-else-if="setup" class="gate">
-    <PasskeySetup :token="route.hash.slice(1)" @done="passkeyAdded" />
+    <InviteSetup
+      v-if="invite"
+      :token="route.hash.slice(1)"
+      @done="passkeyAdded"
+    />
+    <PasskeySetup v-else :token="route.hash.slice(1)" @done="passkeyAdded" />
   </main>
   <!-- From 700px the library's rail, column and sidebar sit side by side,
        centred together (CollectionLibrary, layout.ts); a public link's

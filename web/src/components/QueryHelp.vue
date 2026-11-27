@@ -4,6 +4,7 @@
 // its key (or operator) into the box at the caret.
 import { onMounted, onUnmounted, useTemplateRef } from 'vue'
 import { useAnchoredPopover } from '../composables/useAnchoredPopover'
+import { can } from '../user'
 import QueryTerm from './QueryTerm.vue'
 import type { Box } from '../action-menu'
 
@@ -101,7 +102,10 @@ const GROUPS: { title: string; rows: Row[] }[] = [
   {
     title: '整理和状态',
     rows: [
-      { example: 'tag:研究', text: '标签', insert: 'tag:' },
+      // Tags are the admin's: a viewer has none to name.
+      ...(can.organize
+        ? [{ example: 'tag:研究', text: '标签', insert: 'tag:' }]
+        : []),
       { example: 'folder:猫', text: '收藏夹', insert: 'folder:' },
       {
         example: 'state:deleted',

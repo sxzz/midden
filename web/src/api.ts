@@ -182,7 +182,24 @@ export interface TagChange {
   /** The tag it now is: itself renamed, or the one it merged into. */
   to?: Tag
 }
-export type Folder = Ok<typeof client.folders.$get>[number]
+/** A folder as the admin has it: what it selects by, too. */
+export type Folder = Ok<typeof client.folders.$post>
+/**
+ * A publicly shared folder as a viewer has it (`GET /v1/folders`, whose
+ * type is the fields both have): no query or filter.
+ */
+export type SharedFolder = Ok<typeof client.folders.$get>[number]
+/** A folder as `GET /v1/folders` lists it, for whoever asks. */
+export type LibraryFolder = Folder | SharedFolder
+/** Whether a listed folder says what it selects by (the admin's). */
+export const isSaved = (folder: LibraryFolder): folder is Folder =>
+  'filter' in folder
+/** Who is signed in, and what the app may offer them. */
+export type SessionInfo = Ok<typeof client.session.$get>
+/** A user in 设置's 用户 (the admin's). */
+export type AppUser = Ok<typeof client.users.$get>[number]
+/** An invite still good. */
+export type Invite = Ok<typeof client.invites.$get>[number]
 export type Passkey = Ok<typeof client.passkeys.$get>[number]
 /** A browser or Mini App signed in (已登录的设备). */
 export type WebSession = Ok<typeof client.sessions.$get>[number]

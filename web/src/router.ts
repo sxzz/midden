@@ -8,6 +8,7 @@ import CaptureRecords from './components/CaptureRecords.vue'
 import CollectionDetail from './components/CollectionDetail.vue'
 import CollectionHistory from './components/CollectionHistory.vue'
 import CollectionView from './components/CollectionView.vue'
+import InviteSetup from './components/InviteSetup.vue'
 import PasskeySetup from './components/PasskeySetup.vue'
 import PublicHome from './components/PublicHome.vue'
 import SettingsView from './components/SettingsView.vue'
@@ -167,7 +168,15 @@ export const router = createRouter({
       path: '/passkey',
       name: 'passkey',
       component: PasskeySetup,
-      meta: { setup: true },
+      meta: { setup: 'passkey' },
+    },
+    // An invite (inviteLink on the server): a friend registers as a viewer,
+    // which signs them in. The token is in the fragment, as above.
+    {
+      path: '/invite',
+      name: 'invite',
+      component: InviteSetup,
+      meta: { setup: 'invite' },
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

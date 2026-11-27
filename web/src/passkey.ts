@@ -61,6 +61,37 @@ export async function createPasskey(
   return call(client.passkeys.$post({ json: { name, response } }))
 }
 
+/**
+ * The name an invite gives the new user (its label), read from its
+ * options; throws the server's error when the invite is no longer good.
+ */
+export async function inviteName(token: string): Promise<string> {
+  const options = creation(
+    await call(client.auth.invite.options.$post({ json: { token } })),
+  )
+  return options.user.name
+}
+
+/**
+ * Register with an invite (`/invite#<token>`): a passkey for this domain
+ * under `name`, which makes a viewer and signs them in.
+ */
+export async function joinWithInvite(
+  token: string,
+  name: string,
+  passkeyName: string,
+) {
+  const options = await call(
+    client.auth.invite.options.$post({ json: { token, name } }),
+  )
+  const response = await startRegistration({ optionsJSON: creation(options) })
+  return call(
+    client.auth.invite.$post({
+      json: { token, name, passkey_name: passkeyName, response },
+    }),
+  )
+}
+
 const DEVICES: [RegExp, string][] = [
   [/iPhone/, 'iPhone'],
   [/iPad/, 'iPad'],

@@ -31,6 +31,7 @@ import { accountKey, relationQuery, type Rel } from '../relation-filter'
 import { isProfileEntity } from '../relations'
 import { collectionRoute, shareSlug } from '../share'
 import { rememberKind } from '../titles'
+import { can } from '../user'
 import CollectionAnnotations from './CollectionAnnotations.vue'
 import CollectionPost from './CollectionPost.vue'
 import DeleteSheet from './DeleteSheet.vue'
@@ -168,6 +169,13 @@ const history = computed(() => {
 })
 // Behind a public link the page only reads: no capture, notes or deletion.
 const shared = computed(() => !!shareSlug.value)
+// What the signed-in user may do here (user.ts): a viewer only reads too.
+const updatable = computed(() => !shared.value && can.capture)
+const annotatable = computed(() => !shared.value && can.organize)
+const shareable = computed(() => !shared.value && can.share)
+const deletable = computed(() => !shared.value && can.delete)
+/** The card's ⋯ holds sharing and the deletions: none, no menu. */
+const menuShown = computed(() => shareable.value || deletable.value)
 /**
  * From 1000px the sidebar beside the page (AsideDetail) holds the update,
  * the follows and the pages of records, so the column keeps the content;
@@ -195,7 +203,7 @@ function choose(action: () => void) {
 const exposure = shallowRef<Share[]>([])
 const sharing = shallowRef(false)
 async function loadExposure() {
-  if (shared.value) return
+  if (!shareable.value) return
   const id = props.id
   try {
     const found = await call(client.shares.$get({ query: { collection: id } }))
@@ -255,7 +263,7 @@ const {
   hint: watchHint,
   changed: watchSaved,
 } = useWatch(() =>
-  isProfile.value && !shared.value
+  isProfile.value && updatable.value
     ? { target: 'collection', id: props.id }
     : undefined,
 )
@@ -278,8 +286,8 @@ useAside(() => ({
   watch: watchTrailing.value
     ? { label: watchTrailing.value, hint: watchHint.value }
     : undefined,
-  exposure: shared.value ? undefined : exposureText.value || undefined,
-  actions: shared.value
+  exposure: shareable.value ? exposureText.value || undefined : undefined,
+  actions: !updatable.value
     ? undefined
     : {
         update: startUpdate,
@@ -318,7 +326,7 @@ watch(
   () => (videoSheet.value = false),
 )
 const videoRemoval = useVideoRemoval(() =>
-  isProfile.value && !shared.value ? props.id : undefined,
+  isProfile.value && deletable.value ? props.id : undefined,
 )
 const videoProgress = computed(() => {
   const running = videoRemoval.running.value
@@ -381,7 +389,10 @@ const version = computed(() =>
   <template v-if="collection">
     <!-- Beside the sidebar the update is there; only a capture service out
          of reach says so here, over the content. -->
-    <ListSection v-if="aside && availabilityKnown && !available" plain>
+    <ListSection
+      v-if="updatable && aside && availabilityKnown && !available"
+      plain
+    >
       <p class="banner unavailable" role="status">
         <span>采集服务暂时连不上，现在不能更新。</span
         ><button type="button" class="retry" @click="checkAvailability">
@@ -397,14 +408,14 @@ const version = computed(() =>
         :collection="collection"
         :saved-at="savedAt"
         :show-sensitive="showSensitive"
-        :editable="!shared"
+        :editable="updatable"
         :facts-aside="sidebarShown"
         @restore="restore"
       >
         <!-- The card's corner at every width: 更新 when no sidebar holds it
              (the owner's), 打开原文 (on public pages too), then ⋯. -->
         <template #actions>
-          <template v-if="!shared && !aside">
+          <template v-if="updatable && !aside">
             <AppLink
               v-if="updating && record"
               class="card-pill"
@@ -460,7 +471,7 @@ const version = computed(() =>
               /></svg
           ></AppLink>
           <button
-            v-if="!shared"
+            v-if="menuShown"
             type="button"
             class="card-button"
             aria-label="更多操作"
@@ -521,7 +532,7 @@ const version = computed(() =>
            service is out of reach; then the pages about it. 更新, 打开原文
            and 公开分享 are on the card. -->
       <ListSection
-        v-if="!shared && (isProfile || !available || (record && !updating))"
+        v-if="updatable && (isProfile || !available || (record && !updating))"
         class="update"
       >
         <!-- While it runs the card's 更新 leads to it; after, this does. -->
@@ -561,7 +572,7 @@ const version = computed(() =>
       </ListSection>
     </template>
     <!-- The reader's own notes, folded. -->
-    <ListSection v-if="!shared">
+    <ListSection v-if="annotatable">
       <CollectionAnnotations
         :id="id"
         :key="id"
@@ -571,26 +582,28 @@ const version = computed(() =>
     <!-- The card's ⋯: 公开分享 (with how it is public), then the
          deletions, red and last. -->
     <ActionMenu
-      v-if="!shared"
+      v-if="menuShown"
       v-slot="{ item }"
       :open="menuOpen"
       :opener="menu"
       :label="isProfile ? '账号操作' : '帖子操作'"
       @cancel="menuOpen = false"
     >
+      <template v-if="shareable">
+        <button
+          type="button"
+          class="action"
+          v-bind="item"
+          @click="choose(() => (sharing = true))"
+        >
+          公开分享<small v-if="exposureText" class="menu-hint">{{
+            exposureText
+          }}</small>
+        </button>
+        <hr v-if="deletable" class="separator" />
+      </template>
       <button
-        type="button"
-        class="action"
-        v-bind="item"
-        @click="choose(() => (sharing = true))"
-      >
-        公开分享<small v-if="exposureText" class="menu-hint">{{
-          exposureText
-        }}</small>
-      </button>
-      <hr class="separator" />
-      <button
-        v-if="removable"
+        v-if="deletable && removable"
         type="button"
         class="action destructive"
         v-bind="item"
@@ -600,7 +613,7 @@ const version = computed(() =>
         删除此帖所有媒体
       </button>
       <button
-        v-if="isProfile"
+        v-if="deletable && isProfile"
         type="button"
         class="action destructive"
         v-bind="item"
@@ -616,6 +629,7 @@ const version = computed(() =>
         }}
       </button>
       <button
+        v-if="deletable"
         type="button"
         class="action destructive"
         v-bind="item"
@@ -639,13 +653,13 @@ const version = computed(() =>
       :members-version="membersVersion"
       :show-sensitive="showSensitive"
       :reposted-by="profileName"
-      :older="older && !shared"
+      :older="older && updatable"
       :older-busy="busy || updating || !available"
       @older="update({ older: true })"
       @deleted="(ids, withPosts) => emit('removed', ids, withPosts)"
     />
     <UpdateSheet
-      v-if="!shared"
+      v-if="updatable"
       :open="updateSheet"
       :target="{ target: 'collection', id }"
       :label="isProfile ? handle : undefined"
@@ -653,7 +667,7 @@ const version = computed(() =>
       @cancel="updateSheet = false"
     />
     <WatchSheet
-      v-if="!shared && isProfile"
+      v-if="updatable && isProfile"
       :open="watchSheet"
       :target="{ target: 'collection', id }"
       :label="handle"
@@ -662,7 +676,7 @@ const version = computed(() =>
       @cancel="watchSheet = false"
     />
     <ShareSheet
-      v-if="!shared"
+      v-if="shareable"
       :id="id"
       :open="sharing"
       target="collection"
@@ -671,7 +685,7 @@ const version = computed(() =>
       @cancel="sharing = false"
     />
     <MediaRemovalSheet
-      v-if="!shared"
+      v-if="deletable"
       :open="!!removal"
       :target="removal?.target ?? { ids: [id] }"
       :title="removal?.title ?? ''"
@@ -679,14 +693,14 @@ const version = computed(() =>
       @cancel="removal = undefined"
     />
     <VideoRemovalSheet
-      v-if="!shared && isProfile"
+      v-if="deletable && isProfile"
       :id="id"
       :open="videoSheet"
       @started="videoRemovalStarted"
       @cancel="videoSheet = false"
     />
     <DeleteSheet
-      v-if="!shared"
+      v-if="deletable"
       :open="confirmDelete"
       :ids="[id]"
       :title="isProfile ? '删除这个账号？' : '删除这条收藏？'"

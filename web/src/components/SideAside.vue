@@ -1,13 +1,14 @@
 <script setup vapor lang="ts">
 import { computed, onUnmounted, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { call, client, type CaptureRecord, type Folder } from '../api'
+import { call, client, type CaptureRecord, type LibraryFolder } from '../api'
 import { filterCardShown, pageAside } from '../aside'
 import { recordProgress, recordTitle } from '../captures'
 import { useStale } from '../composables/useStale'
 import { folderLink } from '../folders'
 import { storageSize } from '../presentation'
 import { buildFacts, REPOSITORY } from '../settings'
+import { can } from '../user'
 import AsideDetail from './AsideDetail.vue'
 import SidebarFrame from './SidebarFrame.vue'
 import AppLink from './ui/AppLink.vue'
@@ -16,7 +17,7 @@ import SkeletonBox from './ui/SkeletonBox.vue'
 // then what goes with the page shown (nothing on 设置, whose sections are
 // all in the column), then the small print.
 const props = defineProps<{
-  folders: Folder[]
+  folders: LibraryFolder[]
   /** The list's count, on the library's lists. */
   total?: string
 }>()
@@ -51,7 +52,8 @@ let reading = 0
 async function readRunning() {
   clearTimeout(timer)
   const n = ++reading
-  if (!lists.value) return
+  // Captures are the admin's: a viewer has none running to show.
+  if (!lists.value || !can.capture) return
   try {
     const page = await call(client.captures.$get({ query: {} }))
     if (n === reading)
@@ -79,7 +81,8 @@ const stats = useStale(() =>
 watch(
   () => (lists.value ? (props.total ?? '') : undefined),
   (shown) => {
-    if (shown !== undefined) void stats.load()
+    // The archive's figures are the admin's, with its captures.
+    if (shown !== undefined && can.capture) void stats.load()
   },
   { immediate: true },
 )
@@ -144,7 +147,7 @@ onUnmounted(() => {
         </AppLink>
       </section>
       <section
-        v-if="stats.pending.value || figures.length"
+        v-if="can.capture && (stats.pending.value || figures.length)"
         class="aside-box"
         aria-label="全站统计"
         :aria-busy="stats.pending.value"

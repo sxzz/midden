@@ -34,6 +34,7 @@ import { isRemoved, present } from '../presentation'
 import { collectionHref, shareSlug } from '../share'
 import { showSheet } from '../sheet-focus'
 import { kindOf } from '../titles'
+import { can } from '../user'
 import MediaPreview from './MediaPreview.vue'
 import MediaRemovalSheet from './MediaRemovalSheet.vue'
 import ViewerDetailButton from './ui/ViewerDetailButton.vue'
@@ -79,6 +80,7 @@ const removing = shallowRef(false)
 const canRemove = computed(
   () =>
     !shareSlug.value &&
+    can.delete &&
     !!selectedCollection.value &&
     !!selected.value &&
     (!selected.value.purpose || selected.value.purpose === 'banner'),

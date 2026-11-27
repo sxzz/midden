@@ -1,4 +1,5 @@
 import { shallowRef } from 'vue'
+import { can } from './user'
 import type { RouteLocationRaw, RouteRecordNameGeneric } from 'vue-router'
 
 /** The app's destinations, as the bottom bar and the rail list them. */
@@ -16,6 +17,10 @@ export const tabs: readonly {
   { value: 'relations', label: '关系', root: 'relations', path: '/relations' },
   { value: 'settings', label: '设置', root: 'settings', path: '/settings' },
 ]
+
+/** The tabs this user has: 采集 is the admin's (`can.capture`). */
+export const shownTabs = () =>
+  tabs.filter((tab) => tab.value !== 'captures' || can.capture)
 
 /**
  * Which tab a page belongs to, by its route alone: the same page always

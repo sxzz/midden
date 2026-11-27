@@ -233,8 +233,12 @@ export function savedFilter(folder: Omit<SavedFolder, 'id'>) {
   return folderFilter(q.toString())
 }
 
-/** Where a folder's list is. */
-export function folderLink(folder: SavedFolder) {
+/**
+ * Where a folder's list is. A viewer's (no query of its own to show) opens
+ * bare, the server starting from the folder (`folder=<id>`).
+ */
+export function folderLink(folder: { id: string } | SavedFolder) {
+  if (!('filter' in folder)) return `/folder/${folder.id}`
   const query = folderQuery(savedFilter(folder))
   return `/folder/${folder.id}${query ? `?${query}` : ''}`
 }

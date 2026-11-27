@@ -2,6 +2,7 @@
 import { computed, shallowRef } from 'vue'
 import { menuOpener, type MenuOpener } from '../action-menu'
 import { toast } from '../composables/useToast'
+import { can } from '../user'
 import MediaRemovalSheet from './MediaRemovalSheet.vue'
 import SelectionMenuSheet from './SelectionMenuSheet.vue'
 import AppLink from './ui/AppLink.vue'
@@ -44,6 +45,8 @@ function removed(effect: RemovalEffect) {
   toast(`已删除${effect.media}个媒体`)
   emit('mediaRemoved')
 }
+/** Without the deletions, the menu has the comparison alone. */
+const comparing = computed(() => (props.profiles?.length ?? 0) > 1)
 /** The started update's record and how many it covers. */
 const started = shallowRef<{ record: string; count: number }>()
 const allSelected = computed(
@@ -86,6 +89,7 @@ function onStarted(record: string) {
         </button>
       </p>
       <button
+        v-if="can.capture"
         type="button"
         class="action strong"
         :disabled="!selected.length"
@@ -98,7 +102,7 @@ function onStarted(record: string) {
         class="action more"
         aria-label="更多操作"
         title="更多操作"
-        :disabled="!selected.length"
+        :disabled="!selected.length || (!can.delete && !comparing)"
         aria-haspopup="menu"
         :aria-expanded="menu"
         @click="openMenu"
@@ -118,6 +122,7 @@ function onStarted(record: string) {
     </template>
   </div>
   <UpdateSheet
+    v-if="can.capture"
     :open="sheet"
     :target="{ target: 'many', ids: selected }"
     @started="onStarted"
@@ -134,6 +139,7 @@ function onStarted(record: string) {
     @cancel="menu = false"
   />
   <MediaRemovalSheet
+    v-if="can.delete"
     :open="removing"
     :target="{ ids: selected }"
     :title="`删除${selected.length}项的媒体？`"

@@ -1,7 +1,7 @@
 <script setup vapor lang="ts">
 import { computed } from 'vue'
 import { useTabLinks } from '../composables/useTabLinks'
-import { tabs } from '../tabbar'
+import { shownTabs } from '../tabbar'
 import { darkTheme, toggleTheme } from '../theme'
 import { currentUser } from '../user'
 import RailUser from './RailUser.vue'
@@ -46,7 +46,7 @@ const theme = computed(() => {
       </AppLink>
       <nav class="items" aria-label="主导航" @click.capture="tap">
         <AppLink
-          v-for="tab in tabs"
+          v-for="tab in shownTabs()"
           :key="tab.value"
           class="item"
           :class="{ on: active === tab.value }"

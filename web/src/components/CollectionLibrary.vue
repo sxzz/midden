@@ -11,8 +11,9 @@ import {
   call,
   client,
   errorText,
+  isSaved,
   type Collection,
-  type Folder,
+  type LibraryFolder,
   type TagChange,
   type Usage,
   type Watch,
@@ -59,6 +60,7 @@ import {
 } from '../tab-state'
 import { tabOf as barTabOf, tabs as barTabs, isTabRoot } from '../tabbar'
 import { detailTitle, kindOf, setDocumentTitle } from '../titles'
+import { can } from '../user'
 import AccountsDialog from './AccountsDialog.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
 import FolderMenuSheet from './FolderMenuSheet.vue'
@@ -204,9 +206,21 @@ const {
 const folder = computed(() =>
   folders.value.find((f) => f.id === folderId.value),
 )
+/** The open folder as the admin has it, which they may change. */
+const savedFolder = computed(() =>
+  folder.value && isSaved(folder.value) ? folder.value : undefined,
+)
+/** Whether the folder's ⋯ has anything for this user. */
+const folderMenuShown = computed(
+  () =>
+    !!savedFolder.value &&
+    (can.capture || can.share || can.organize || can.delete),
+)
 /** The open folder's 定期更新, named in its menu. */
 const { trailing: watchTrailing, changed: watchSaved } = useWatch(() =>
-  folderId.value ? { target: 'folder', id: folderId.value } : undefined,
+  folderId.value && can.capture
+    ? { target: 'folder', id: folderId.value }
+    : undefined,
 )
 function watchChanged(w: Watch | undefined) {
   watchSaved(w)
@@ -359,14 +373,24 @@ async function show(
     await list.collection.load(effectiveQuery)
   }
 }
+/**
+ * The API query of a folder's list: a viewer's starts from the folder on
+ * the server (`folder=<id>`), the address holding only their own filters.
+ */
+function inFolder(query: string, saved: LibraryFolder) {
+  if (isSaved(saved)) return query
+  const q = new URLSearchParams(query)
+  q.set('folder', saved.id)
+  return q.toString()
+}
 /** The kinds a folder filter's results hold. */
-async function kindsFor(filter: string, saved: Folder): Promise<Kind[]> {
+async function kindsFor(filter: string, saved: LibraryFolder): Promise<Kind[]> {
   // The folders were just loaded with their own counts.
   // Not counted yet: both tabs, as with an unknown count.
-  if (filter === savedFilter(saved))
+  if (filter === (isSaved(saved) ? savedFilter(saved) : folderFilter('')))
     return folderKinds(saved.types ?? undefined)
   if (counted?.filter !== filter) {
-    const q = new URLSearchParams(filter)
+    const q = new URLSearchParams(inFolder(filter, saved))
     try {
       const { types } = await call(
         client.collections.count.$get({
@@ -382,7 +406,7 @@ async function kindsFor(filter: string, saved: Folder): Promise<Kind[]> {
   return folderKinds(counted.types)
 }
 /** Show the open folder's list for the address, on the tab it asks for. */
-async function showFolder(saved: Folder, key: string) {
+async function showFolder(saved: LibraryFolder, key: string) {
   const address = queryOf(route)
   const kinds = await kindsFor(folderFilter(address), saved)
   if (viewKey(route) !== key || queryOf(route) !== address) return false
@@ -393,7 +417,12 @@ async function showFolder(saved: Folder, key: string) {
   // The view and the filters read the kind from the query they are given.
   const shown = new URLSearchParams(address)
   shown.set('tab', kind)
-  await show(folderList, key, shown.toString(), apiQuery(address, kind))
+  await show(
+    folderList,
+    key,
+    shown.toString(),
+    inFolder(apiQuery(address, kind), saved),
+  )
   return true
 }
 function folderTabLink(kind: Kind) {
@@ -443,13 +472,14 @@ watch(
       if (arrived || !foldersLoaded.value) await loadFolders()
       const saved = folder.value
       if (!saved || viewKey(route) !== key) return
-      // A bare folder address (a bookmark) shows the folder's filter.
+      // A bare folder address (a bookmark) shows the folder's filter; a
+      // viewer's has none to show.
       const query = new URLSearchParams(queryOf(route))
       const layout = query.get('layout')
       const shownTab = query.get('tab')
       query.delete('layout')
       query.delete('tab')
-      if (!query.size) {
+      if (!query.size && isSaved(saved)) {
         const target = new URLSearchParams(folderQuery(savedFilter(saved)))
         if (layout) target.set('layout', layout)
         if (shownTab) target.set('tab', shownTab)
@@ -567,11 +597,14 @@ const shownQuery = computed(() =>
 )
 const modified = computed(
   () =>
-    !!folder.value &&
+    !!savedFolder.value &&
+    can.organize &&
     !!folderList.query.value &&
-    folderModified(folderList.query.value, savedFilter(folder.value)),
+    folderModified(folderList.query.value, savedFilter(savedFolder.value)),
 )
-const canSave = computed(() => home.value && hasFilters(shownQuery.value))
+const canSave = computed(
+  () => home.value && can.organize && hasFilters(shownQuery.value),
+)
 type Sheet =
   '' | 'create' | 'menu' | 'rename' | 'delete' | 'share' | 'update' | 'watch'
 const sheet = shallowRef<Sheet>('')
@@ -590,7 +623,7 @@ function openFolderMenu(event: MouseEvent) {
 /** Records of the folder updates started here, by folder. */
 const folderRecords = shallowRef<Record<string, string>>({})
 function folderUpdated(recordId: string) {
-  const current = folder.value
+  const current = savedFolder.value
   sheet.value = ''
   if (current)
     folderRecords.value = { ...folderRecords.value, [current.id]: recordId }
@@ -622,7 +655,7 @@ async function saveFolder(name: string) {
   }
 }
 async function updateFilter() {
-  const current = folder.value
+  const current = savedFolder.value
   if (!current || busy.value) return
   busy.value = true
   try {
@@ -637,7 +670,7 @@ async function updateFilter() {
   }
 }
 async function rename(name: string) {
-  const current = folder.value
+  const current = savedFolder.value
   if (!current) return
   busy.value = true
   sheetError.value = ''
@@ -651,7 +684,7 @@ async function rename(name: string) {
   }
 }
 async function deleteFolder() {
-  const current = folder.value
+  const current = savedFolder.value
   if (!current) return
   busy.value = true
   try {
@@ -793,7 +826,7 @@ const viewProps = computed(() => {
         @refresh="headerRefresh.refresh()"
       />
       <button
-        v-if="folder"
+        v-if="folderMenuShown"
         type="button"
         class="icon-button"
         aria-label="管理收藏夹"
@@ -910,22 +943,22 @@ const viewProps = computed(() => {
       @cancel="sheet = ''"
     />
     <FolderNameSheet
-      v-if="folder"
+      v-if="savedFolder"
       :open="sheet === 'rename'"
       title="重命名收藏夹"
       confirm-label="保存"
-      :name="folder.name"
+      :name="savedFolder.name"
       :busy="busy"
       :error="sheetError"
       @submit="rename"
       @cancel="sheet = ''"
     />
     <FolderMenuSheet
-      v-if="folder"
+      v-if="savedFolder"
       :open="sheet === 'menu'"
       :opener="folderMenu"
-      :name="folder.name"
-      :progress="folderRecords[folder.id]"
+      :name="savedFolder.name"
+      :progress="folderRecords[savedFolder.id]"
       :watching="watchTrailing"
       @update="openSheet('update')"
       @watch="openSheet('watch')"
@@ -936,33 +969,33 @@ const viewProps = computed(() => {
       @cancel="sheet = ''"
     />
     <UpdateSheet
-      v-if="folder"
+      v-if="savedFolder"
       :open="sheet === 'update'"
-      :target="{ target: 'folder', id: folder.id }"
+      :target="{ target: 'folder', id: savedFolder.id }"
       @started="folderUpdated"
       @cancel="sheet = ''"
     />
     <WatchSheet
-      v-if="folder"
+      v-if="savedFolder"
       :open="sheet === 'watch'"
-      :target="{ target: 'folder', id: folder.id }"
-      :label="`收藏夹「${folder.name}」`"
+      :target="{ target: 'folder', id: savedFolder.id }"
+      :label="`收藏夹「${savedFolder.name}」`"
       @changed="watchChanged"
       @navigate="sheet = ''"
       @cancel="sheet = ''"
     />
     <ShareSheet
-      v-if="folder"
-      :id="folder.id"
+      v-if="savedFolder"
+      :id="savedFolder.id"
       :open="sheet === 'share'"
       target="folder"
-      :title="`公开分享收藏夹「${folder.name}」`"
+      :title="`公开分享收藏夹「${savedFolder.name}」`"
       @cancel="sheet = ''"
     />
     <ConfirmSheet
-      v-if="folder"
+      v-if="savedFolder"
       :open="sheet === 'delete'"
-      :title="`删除收藏夹「${folder.name}」`"
+      :title="`删除收藏夹「${savedFolder.name}」`"
       description="收藏夹中的收藏不会被删除。"
       confirm-label="删除收藏夹"
       :busy="busy"

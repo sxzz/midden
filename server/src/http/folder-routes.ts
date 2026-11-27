@@ -7,7 +7,6 @@ import {
   foldersFor,
   folderView,
   updateFolder,
-  type Folder,
 } from '#library/folders.ts'
 import { SYSTEM } from '#users/principal.ts'
 import { adminSession, readCtx, viewers } from './auth.ts'
@@ -47,11 +46,11 @@ export function folderRoutes(ctx: AccountsContext, read: NamedRead) {
   }
   return (
     new Hono<Env>()
-      // A viewer gets the publicly shared ones, without their queries. The
-      // web app's type is the admin's; it shows a viewer's folders by `can`.
+      // A viewer gets the publicly shared ones, without their queries
+      // (`SharedFolder`), which is how the web app tells them apart.
       .get('/folders', viewers, (c) => {
         const seen = foldersFor(readCtx(ctx, c), types())
-        return c.json('all' in seen ? seen.all : (seen.shared as Folder[]))
+        return c.json('all' in seen ? seen.all : seen.shared)
       })
 
       .post(

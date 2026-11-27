@@ -1,4 +1,5 @@
 <script setup vapor lang="ts">
+import { can } from '../user'
 import ActionMenu from './ui/ActionMenu.vue'
 import AppLink from './ui/AppLink.vue'
 import type { MenuOpener } from '../action-menu'
@@ -32,28 +33,48 @@ const emit = defineEmits<{
     :label="name"
     @cancel="emit('cancel')"
   >
-    <button type="button" class="action" v-bind="item" @click="emit('update')">
-      更新收藏夹
-    </button>
-    <AppLink
-      v-if="progress"
+    <template v-if="can.capture">
+      <button
+        type="button"
+        class="action"
+        v-bind="item"
+        @click="emit('update')"
+      >
+        更新收藏夹
+      </button>
+      <AppLink
+        v-if="progress"
+        class="action"
+        v-bind="item"
+        :to="{ name: 'capture', params: { id: progress } }"
+        @navigate="emit('navigate')"
+      >
+        查看更新进度
+      </AppLink>
+      <button type="button" class="action" v-bind="item" @click="emit('watch')">
+        {{ watching ? `定期更新 · ${watching}` : '定期更新' }}
+      </button>
+    </template>
+    <button
+      v-if="can.share"
+      type="button"
       class="action"
       v-bind="item"
-      :to="{ name: 'capture', params: { id: progress } }"
-      @navigate="emit('navigate')"
+      @click="emit('share')"
     >
-      查看更新进度
-    </AppLink>
-    <button type="button" class="action" v-bind="item" @click="emit('watch')">
-      {{ watching ? `定期更新 · ${watching}` : '定期更新' }}
-    </button>
-    <button type="button" class="action" v-bind="item" @click="emit('share')">
       公开分享
     </button>
-    <button type="button" class="action" v-bind="item" @click="emit('rename')">
+    <button
+      v-if="can.organize"
+      type="button"
+      class="action"
+      v-bind="item"
+      @click="emit('rename')"
+    >
       重命名
     </button>
     <button
+      v-if="can.delete"
       type="button"
       class="action destructive"
       v-bind="item"

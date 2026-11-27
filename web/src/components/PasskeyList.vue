@@ -10,6 +10,7 @@ import {
   passkeysSupported,
 } from '../passkey'
 import { date } from '../presentation'
+import { can } from '../user'
 import ConfirmSheet from './ConfirmSheet.vue'
 import FolderNameSheet from './FolderNameSheet.vue'
 import ListButton from './ui/ListButton.vue'
@@ -165,7 +166,9 @@ async function remove() {
     :open="!!removing"
     :title="`删除 ${removing?.name ?? ''}？`"
     :description="
-      last ? '可以在Telegram中发送 /passkey 添加新的通行密钥。' : undefined
+      last && can.admin
+        ? '可以在Telegram中发送 /passkey 添加新的通行密钥。'
+        : undefined
     "
     confirm-label="删除通行密钥"
     :busy="busy"
