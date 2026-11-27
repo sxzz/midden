@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { passkeyTokens } from '#db/schema.ts'
+import { passkeys, passkeyTokens } from '#db/schema.ts'
 import { fromOwner } from '#telegram/bot.ts'
 import { handle, type Request } from '#telegram/commands.ts'
 import { COMMANDS } from '#telegram/presentation.ts'
@@ -566,7 +566,8 @@ describe('passkey management', () => {
   })
 
   test('a signed-in challenge does not register through a link, or the other way', async () => {
-    const { call, post, links, app } = await signedIn()
+    const { call, post, links, app, signIn, authenticator, cookieOf } =
+      await signedIn()
     const signedInOptions = (await (
       await call('/passkeys/options', { method: 'POST' })
     ).json()) as PublicKeyCredentialCreationOptionsJSON
@@ -594,12 +595,12 @@ describe('passkey management', () => {
         })
       ).status,
     ).toBe(400)
-    // Nor through another caller's session.
-    const other = tokenSecret(ctx!.db)
+    // Nor through another session.
+    const other = cookieOf(await signIn(authenticator))!
     const response = await app.request('/passkeys', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${other}`,
+        Cookie: other,
         Origin: MAIN,
         'Content-Type': 'application/json',
       },
@@ -611,17 +612,55 @@ describe('passkey management', () => {
     expect(response.status).toBe(400)
   })
 
-  test('needs a session or token', async () => {
-    const { app, ctx } = setup()
+  test('needs the web session: no API token adds a passkey to sign in with', async () => {
+    const { app, ctx, links, registerWithLink, signIn } = setup()
     expect((await app.request('/passkeys')).status).toBe(401)
-    const token = tokenSecret(ctx.db)
-    expect(
-      (
-        await app.request('/passkeys', {
-          headers: { Authorization: `Bearer ${token}` },
+    const attacker = softAuthenticator()
+    for (const permission of ['rw', 'ro'] as const) {
+      const as = (path: string, method = 'GET', body?: unknown) =>
+        app.request(path, {
+          method,
+          headers: {
+            Authorization: `Bearer ${tokenSecret(ctx.db, permission)}`,
+            Origin: MAIN,
+            'Content-Type': 'application/json',
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         })
-      ).status,
-    ).toBe(200)
+      expect((await as('/passkeys')).status).toBe(403)
+      const options = await as('/passkeys/options', 'POST')
+      expect(options.status).toBe(403)
+      expect(await options.json()).toEqual({
+        error:
+          permission === 'rw'
+            ? '只能在网页中登录后进行此操作'
+            : '只读令牌不能修改内容',
+      })
+      const challenge = Buffer.from('not issued').toString('base64url')
+      const made = attacker.create(
+        {
+          challenge,
+          rp: { id: 'midden.test', name: 'Midden' },
+          user: { id: 'eA', name: 'x', displayName: 'x' },
+          pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+        },
+        MAIN,
+      )
+      expect(
+        (await as('/passkeys', 'POST', { name: 'x', response: made })).status,
+      ).toBe(403)
+      expect((await as('/passkeys/nope', 'PATCH', { name: 'x' })).status).toBe(
+        403,
+      )
+    }
+    expect(ctx.db.select().from(passkeys).all()).toEqual([])
+    expect((await signIn(attacker)).status).toBe(400)
+    // A /passkey link still makes one, which signs in.
+    const { response, authenticator } = await registerWithLink(
+      links().tokens[MAIN]!,
+    )
+    expect(response.status).toBe(200)
+    expect((await signIn(authenticator)).status).toBe(204)
   })
 
   test('domains: lists, adds normalized https origins, refuses others', async () => {

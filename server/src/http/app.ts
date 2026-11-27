@@ -211,8 +211,9 @@ export function createApi(options: HttpOptions) {
             usage.record(token.id, endpointOf(c))
             return c.json({ error: '只读令牌不能修改内容' }, 403)
           }
-          // A token is never the owner's session, so it cannot delete
-          // (`ownerOnly`). The one exception is a development server, whose
+          // A token is never the owner's session, so it cannot delete, nor
+          // make or change a token, session, passkey or domain (`ownerOnly`):
+          // it can never become a session. The one exception is a development server, whose
           // local proxy signs the web app in with a token: there a read and
           // write token stands in for the session. Production
           // (NODE_ENV=production) never does this.

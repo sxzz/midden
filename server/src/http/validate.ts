@@ -4,7 +4,8 @@ import type { TokenInfo } from '#tokens/tokens.ts'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 /**
- * `session`: the owner's web session, which alone may delete (`ownerOnly`);
+ * `session`: the owner's web session, which alone may delete and manage
+ * tokens, sessions, passkeys and domains (`ownerOnly`);
  * `sessionId`: that session's public id, when a cookie signed the request
  * in (not on a read thread, nor a development token standing in for it);
  * `token`: the API token the request came with, if any.

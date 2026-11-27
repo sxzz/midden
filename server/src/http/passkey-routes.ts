@@ -69,7 +69,10 @@ const passkeySession = (c: Context, origin: string): SessionStart => ({
   userAgent: c.req.header('User-Agent'),
 })
 
-/** The signed-in caller, by its session cookie or API token. */
+/**
+ * The signed-in caller: its session cookie, or on a development server the
+ * read and write token standing in for the session (`ownerOnly`).
+ */
 const callerOf = (c: Context) =>
   createHash('sha256')
     .update(c.req.header('Authorization') ?? getCookie(c, SESSION_COOKIE) ?? '')
@@ -128,11 +131,16 @@ export function passkeyAuthRoutes(o: PasskeyOptions) {
     )
 }
 
-/** The owner's passkeys, signed in: list, add on this domain, rename, delete. */
+/**
+ * The owner's passkeys, signed in: list, add on this domain, rename, delete.
+ * Only the web session, never an API token: a passkey signs in, so a token
+ * that could add one could make itself a session (`ownerOnly`).
+ */
 export function passkeyRoutes(o: PasskeyOptions) {
   const { ctx, store } = o
   return (
     new Hono<Env>()
+      .use(ownerOnly)
       .get('/', (c) => c.json(listPasskeys(ctx.db)))
       .post('/options', async (c) =>
         c.json(
@@ -170,7 +178,6 @@ export function passkeyRoutes(o: PasskeyOptions) {
       // `sign_out_others`: and end every other session, as the sheet offers.
       .delete(
         '/:id',
-        ownerOnly,
         query(v.object({ sign_out_others: v.optional(v.literal('true')) })),
         (c) => {
           const others = !!c.req.valid('query').sign_out_others

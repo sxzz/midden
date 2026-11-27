@@ -40,7 +40,10 @@ function setup({ dev = false } = {}) {
   return { ctx, app, usage, request }
 }
 
-/** Every route that deletes, and token management: the session's alone. */
+/**
+ * Every route that deletes, and every one that makes or changes a way in
+ * (tokens, sessions, passkeys, domains): the session's alone.
+ */
 const OWNER_ONLY: [string, string, unknown?][] = [
   ['DELETE', `/collections/${ID}`],
   ['POST', '/collections/delete', { ids: [ID] }],
@@ -58,7 +61,27 @@ const OWNER_ONLY: [string, string, unknown?][] = [
   ['POST', `/tokens/${ID}/roll`],
   ['GET', `/tokens/${ID}/usage`],
   ['DELETE', `/tokens/${ID}`],
+  ['GET', '/sessions'],
+  ['POST', '/sessions/revoke-others'],
+  ['DELETE', `/sessions/${ID}`],
+  // A token that could add a passkey could sign in with it, and so make
+  // itself a session.
+  ['GET', '/passkeys'],
+  ['POST', '/passkeys/options'],
+  ['POST', '/passkeys', { name: 'x', response: { id: 'x', response: {} } }],
+  ['PATCH', `/passkeys/${ID}`, { name: 'x' }],
+  // A domain is where cookie sessions write from and passkeys are made.
+  ['POST', '/origins', { origin: 'https://new.test' }],
 ]
+
+/**
+ * Where tokens, sessions, passkeys and domains (and, later, users and
+ * invites) are managed. A new route here must join `OWNER_ONLY`.
+ */
+const CREDENTIALS =
+  /^\/(?:tokens|sessions|passkeys|origins|users|invites)(?:\/|$)/
+/** The one such route a token may call: it changes nothing, shows no secret. */
+const TOKEN_ALLOWED = new Set(['GET /origins'])
 
 describe('API tokens on /v1', () => {
   test('a read-only token reads; a read and write token writes', async () => {
@@ -81,7 +104,7 @@ describe('API tokens on /v1', () => {
     expect((await write(rw)).status).toBe(200)
   })
 
-  test('no token can delete or manage tokens; the session can', async () => {
+  test('no token can delete or manage tokens, sessions, passkeys or domains; the session can', async () => {
     const { request } = setup()
     const rw = tokenSecret(ctx!.db, 'rw')
     const ro = tokenSecret(ctx!.db, 'ro')
@@ -101,6 +124,39 @@ describe('API tokens on /v1', () => {
         path,
         guarded: path === '/library/delete-all',
       })
+    }
+  })
+
+  test('every route that manages tokens, sessions, passkeys or domains is for the session alone', async () => {
+    const { app, request } = setup()
+    const listed = new Set(
+      OWNER_ONLY.map(
+        ([method, path]) => `${method} ${path.replaceAll(ID, ':id')}`,
+      ),
+    )
+    const routes = [
+      ...new Set(
+        app.routes
+          .filter((r) => r.method !== 'ALL' && CREDENTIALS.test(r.path))
+          .map((r) => `${r.method} ${r.path}`),
+      ),
+    ]
+    expect(routes.length).toBeGreaterThan(15)
+    for (const route of routes)
+      expect([route, listed.has(route) || TOKEN_ALLOWED.has(route)]).toEqual([
+        route,
+        true,
+      ])
+    // And the guard comes first: a token is refused before the body is read.
+    const rw = tokenSecret(ctx!.db, 'rw')
+    for (const route of routes.filter((r) => !TOKEN_ALLOWED.has(r))) {
+      const [method, path] = route.split(' ') as [string, string]
+      const response = await request(
+        path.replaceAll(/:\w+/g, ID),
+        { token: rw },
+        { method },
+      )
+      expect([route, response.status]).toEqual([route, 403])
     }
   })
 
@@ -145,6 +201,7 @@ describe('API tokens on /v1', () => {
     const rw = tokenSecret(ctx!.db, 'rw')
     const ro = tokenSecret(ctx!.db, 'ro')
     expect((await request('/tokens', { token: rw })).status).toBe(200)
+    expect((await request('/passkeys', { token: rw })).status).toBe(200)
     expect(
       (
         await request(

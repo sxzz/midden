@@ -7,7 +7,12 @@ import type { AccountsContext } from '#accounts/accounts.ts'
 
 const hostOf = (origin: string) => new URL(origin).host
 
-/** The web app's domains, signed in: list, add, remove. */
+/**
+ * The web app's domains, signed in: list, add, remove. Adding and removing
+ * are the web session's alone (`ownerOnly`): a domain is where cookie
+ * sessions write from (SameSite=None, so the Origin check is what stops
+ * another site) and where passkeys are made and /passkey links point.
+ */
 export function originRoutes(o: {
   ctx: AccountsContext
   webAppUrl?: string
@@ -19,6 +24,7 @@ export function originRoutes(o: {
     .get('/', (c) => c.json(listOrigins(db, o.webAppUrl)))
     .post(
       '/',
+      ownerOnly,
       json(v.strictObject({ origin: v.pipe(v.string(), v.maxLength(2048)) })),
       (c) => {
         const added = addOrigin(

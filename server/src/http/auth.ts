@@ -52,10 +52,11 @@ export function initDataUser(
 }
 
 /**
- * Routes that delete (收藏, 媒体, 所有视频, 标签, 收藏夹, 定期更新, 通行密钥,
- * 域名) or manage API tokens and web sessions: the owner's web session
- * only, never an API token, whatever its permission. `createApi` decides
- * what is a session.
+ * Routes that delete (收藏, 媒体, 所有视频, 标签, 收藏夹, 定期更新), and every
+ * one that makes or changes a way in: API tokens, web sessions, passkeys
+ * and domains. The owner's web session only, never an API token, whatever
+ * its permission, so a token cannot turn itself into a session.
+ * `createApi` decides what is a session.
  */
 export const ownerOnly: MiddlewareHandler<Env> = async (c, next) => {
   if (!c.get('session'))

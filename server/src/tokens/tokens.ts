@@ -5,7 +5,10 @@ import { apiTokens } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import type { Database, Executor } from '#db/client.ts'
 
-/** `ro` reads; `rw` reads and writes, but never deletes (see `ownerOnly`). */
+/**
+ * `ro` reads; `rw` reads and writes, but never deletes, nor manages tokens,
+ * sessions, passkeys or domains (see `ownerOnly`).
+ */
 export type Permission = 'ro' | 'rw'
 export const PERMISSIONS: readonly Permission[] = ['ro', 'rw']
 
