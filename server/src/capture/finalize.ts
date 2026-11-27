@@ -99,6 +99,19 @@ export function ignoredPaths(
 }
 
 /**
+ * A complete capture's warnings are notes: they say what the source keeps
+ * from the capture account (posts of a protected account it may not see),
+ * not what went missing, since every warning of a shortfall makes the
+ * capture partial. The note goes to the capture's `error`, which records,
+ * members and the bot show; the capture still counts as complete.
+ */
+function noted(payload: Payload, partial: boolean): { error?: string } {
+  return !partial && payload.warnings.length
+    ? { error: [...new Set(payload.warnings)].join('；') }
+    : {}
+}
+
+/**
  * What decides whether a capture is a new revision. Context entities (such
  * as a post's author) count only by identity, with their media; observed
  * counts, values the platform reports inconsistently, and local key
@@ -482,6 +495,7 @@ export function runFinalize(ctx: CaptureContext, job: Job): void {
         state: partial ? 'partial' : 'complete',
         finishedAt: now,
         revisionId,
+        ...noted(payload, partial),
       })
       .where(eq(captures.id, capture.id))
       .run()
@@ -576,7 +590,11 @@ function settleRetriedMedia(
     catalogCollections(tx, [collection.id])
   }
   tx.update(captures)
-    .set({ state: partial ? 'partial' : 'complete', finishedAt: now })
+    .set({
+      state: partial ? 'partial' : 'complete',
+      finishedAt: now,
+      ...(payload ? noted(payload, partial) : {}),
+    })
     .where(eq(captures.id, capture.id))
     .run()
   deliveries(ctx, tx, capture.id)

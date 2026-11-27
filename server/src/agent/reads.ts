@@ -3,7 +3,11 @@
 // run them in place (`inlineReads`). Inputs and results are plain JSON.
 import { asc, ne, sql } from 'drizzle-orm'
 import { optionsJson } from '#capture/options.ts'
-import { recordDetail, type CaptureRecord } from '#capture/records.ts'
+import {
+  recordDetail,
+  recordNotes,
+  type CaptureRecord,
+} from '#capture/records.ts'
 import { isUpdate, updateRecord } from '#capture/updates.ts'
 import { listWatches, type WatchView } from '#capture/watches.ts'
 import { accountSelections, connections, jobs } from '#db/schema.ts'
@@ -463,7 +467,10 @@ function tagsOf(r: AgentReader) {
   }
 }
 
-function recordJson(r: CaptureRecord & { update?: unknown }) {
+function recordJson(
+  r: CaptureRecord & { update?: unknown },
+  notes: { url: string; note: string }[],
+) {
   return {
     id: r.id,
     kind: 'update' in r ? 'update' : 'capture',
@@ -474,7 +481,11 @@ function recordJson(r: CaptureRecord & { update?: unknown }) {
     created_at: r.createdAt.toISOString(),
     ...(r.finishedAt ? { finished_at: r.finishedAt.toISOString() } : {}),
     ...(r.waiting ? { waiting: r.waiting } : {}),
-    ...(r.error ? { error: r.error } : {}),
+    // A complete capture's error is a note, listed with the others.
+    ...(r.error && r.state !== 'complete' ? { error: r.error } : {}),
+    ...(notes.length
+      ? { notes: notes.map((n) => ({ url: n.url, text: n.note })) }
+      : {}),
     ...(r.stopped ? { stopped: true } : {}),
     ...(r.paused ? { paused: true } : {}),
     ...(r.pausedAll ? { paused_all: true } : {}),
@@ -513,7 +524,7 @@ function status(r: AgentReader, input: { id: string }) {
   if (isUpdate(r.db, id)) {
     const u = updateRecord(r.db, id)
     return {
-      ...recordJson(u),
+      ...recordJson(u, recordNotes(r.db, id, true)),
       update: {
         target: u.update.target,
         ...(u.update.targetId ? { target_id: u.update.targetId } : {}),
@@ -524,7 +535,7 @@ function status(r: AgentReader, input: { id: string }) {
       },
     }
   }
-  return recordJson(recordDetail(r.db, id))
+  return recordJson(recordDetail(r.db, id), recordNotes(r.db, id, false))
 }
 
 function queue(r: AgentReader) {

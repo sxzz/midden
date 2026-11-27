@@ -3,10 +3,13 @@ import { Buffer } from 'node:buffer'
 import { readFileSync } from 'node:fs'
 import { test } from 'vitest'
 import { FetchRequest, FetchResponse, Visibility } from '../protocol.ts'
+import { traceUpstream } from '../upstream.ts'
+import { recordingLogger } from '#testing/logs.ts'
 import {
   fetchPublicTimeline,
   fetchSessionTimeline,
   normalizeProfile,
+  protectedPostsNote,
 } from './profile.ts'
 import { parseSessionResult } from './session.ts'
 import { CaptureStrategy } from './strategy.ts'
@@ -924,4 +927,177 @@ test("a post listed by an account's timeline needs neither its own request nor t
     strategy.fetch(listed(rawTweet('42')), AbortSignal.timeout(1000)),
     (error: any) => error.metadata.get('credential-required')[0] === '1',
   )
+})
+
+// What X answers for an account the capture account may not see.
+const unavailable =
+  '{"data":{"user":{"result":{"__typename":"UserUnavailable"}}}}'
+const respond = (body: string, status = 200) =>
+  new Response(body, {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
+/** A platform call, traced as the core traces a capture; what it logged. */
+async function traced(run: () => Promise<unknown>) {
+  const { logger, entries } = recordingLogger()
+  await traceUpstream({ logger, classify: () => undefined }, run)
+  return entries.filter((e) => e.msg === 'platform call went on past an error')
+}
+test('a protected account whose posts X withholds from the account: complete, with a note, the profile and its media kept', async () => {
+  const protectedUser = {
+    ...user,
+    protected: true,
+    avatar_url: 'https://pbs.twimg.com/profile_images/1/a_400x400.jpg',
+    banner_url: 'https://pbs.twimg.com/profile_banners/123/1',
+  }
+  const strategy = new CaptureStrategy(
+    undefined,
+    async (id) => normalizeProfile(protectedUser, id, 'fxtwitter'),
+    undefined,
+    (result, account, signal, _fetcher, cursor, pageSize) =>
+      fetchSessionTimeline(
+        result,
+        account,
+        signal,
+        async () => respond(unavailable),
+        cursor,
+        pageSize,
+      ),
+  )
+  let r!: FetchResponse
+  const logged = await traced(async () => {
+    r = await strategy.fetch(
+      request('profile'),
+      AbortSignal.timeout(2000),
+      credential,
+    )
+  })
+  assert.equal(r.incomplete, false)
+  assert.deepEqual(r.warnings, [protectedPostsNote])
+  assert.deepEqual(r.resources.map((x) => x.purpose).toSorted(), [
+    'avatar',
+    'banner',
+  ])
+  assert.equal(r.relatedTargets.length, 0)
+  assert.equal(r.nextPageCursor, '')
+  // What X said is kept, privately, like any account response.
+  assert.ok(
+    r.sourceResponses.some(
+      (s) =>
+        Buffer.from(s.body).toString() === unavailable &&
+        s.visibility === Visibility.VISIBILITY_PRIVATE,
+    ),
+  )
+  assert.equal(logged.length, 1)
+  assert.equal(logged[0]!.errorCode, 'UNAVAILABLE')
+  assert.deepEqual(logged[0]!.errorDetails, { typename: 'UserUnavailable' })
+  assert.equal(logged[0]!.upstream.status, 200)
+  assert.equal(logged[0]!.upstream.body, unavailable)
+})
+test('an unavailable timeline is an interruption that says and logs why: an account not protected, posts read before, a transport error', async () => {
+  // Not protected: X's answer is no note, only a cause.
+  const open = normalizeProfile(user, '123', 'fxtwitter')
+  const logged = await traced(() =>
+    fetchSessionTimeline(
+      open,
+      credential,
+      AbortSignal.timeout(2000),
+      async () => respond(unavailable),
+    ),
+  )
+  assert.equal(open.incomplete, true)
+  assert.deepEqual(open.warnings, ['帖子获取中断：平台返回的时间线无效。'])
+  assert.deepEqual(logged[0]!.errorDetails, { typename: 'UserUnavailable' })
+
+  // Protected, but posts came first: what is missing is missing.
+  const read = normalizeProfile(
+    { ...user, protected: true },
+    '123',
+    'fxtwitter',
+  )
+  let pages = 0
+  await fetchSessionTimeline(
+    read,
+    credential,
+    AbortSignal.timeout(2000),
+    async () => {
+      if (pages++) return respond(unavailable)
+      return Response.json({
+        data: {
+          user: {
+            result: {
+              timeline: {
+                timeline: {
+                  instructions: [
+                    {
+                      type: 'TimelineAddEntries',
+                      entries: [
+                        {
+                          content: {
+                            itemContent: {
+                              __typename: 'TimelineTweet',
+                              tweet_results: { result: rawTweet('40') },
+                            },
+                          },
+                        },
+                        {
+                          content: {
+                            __typename: 'TimelineTimelineCursor',
+                            cursorType: 'Bottom',
+                            value: 'next',
+                          },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      })
+    },
+  )
+  assert.equal(pages, 2)
+  assert.equal(read.incomplete, true)
+  assert.deepEqual(read.warnings, ['帖子获取中断：平台返回的时间线无效。'])
+
+  // The account's own error is the cause, not the empty answer.
+  const limited = normalizeProfile(
+    { ...user, protected: true },
+    '123',
+    'fxtwitter',
+  )
+  const limits = await traced(() =>
+    fetchSessionTimeline(
+      limited,
+      credential,
+      AbortSignal.timeout(2000),
+      async () =>
+        Response.json(
+          { errors: [{ code: 88, message: 'Rate limit exceeded' }] },
+          { status: 429, headers: { 'retry-after': '60' } },
+        ),
+    ),
+  )
+  assert.equal(limited.incomplete, true)
+  assert.deepEqual(limited.warnings, ['帖子获取中断：来源平台限流。'])
+  assert.equal(limits[0]!.errorCode, 'UNAVAILABLE')
+  assert.equal(limits[0]!.upstream.status, 429)
+})
+test("the public timeline's interruption says and logs why", async () => {
+  const r = normalizeProfile(user, '123', 'fxtwitter')
+  const logged = await traced(() =>
+    fetchPublicTimeline(r, AbortSignal.timeout(2000), async () =>
+      Response.json({ code: 500, message: 'oops' }, { status: 500 }),
+    ),
+  )
+  assert.equal(r.incomplete, true)
+  assert.deepEqual(r.warnings, [
+    '帖子获取中断：来源平台暂时不可用，请稍后重试。',
+  ])
+  assert.equal(logged.length, 1)
+  assert.equal(logged[0]!.errorCode, 'UNAVAILABLE')
+  assert.equal(logged[0]!.upstream.provider, 'fxtwitter')
+  assert.equal(logged[0]!.upstream.status, 500)
 })

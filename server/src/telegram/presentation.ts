@@ -296,6 +296,7 @@ export interface ProgressInput {
   url: string
   input: string
   rootState: string
+  /** Why the first page failed, or its note when it is complete. */
   rootError: string
   total: number
   complete: number
@@ -366,6 +367,9 @@ export function progressMessage(
       body += `\n其中新增 ${p.added} · 更新 ${p.updated ?? 0}`
   }
   if (p.pageError) body += '\n部分页面获取失败。'
+  // A complete profile's note: why it has no posts (a protected account the
+  // capture account may not see). No failure, so no reason below.
+  if (p.rootState !== 'failed' && p.rootError) body += `\n\n${p.rootError}`
   if (p.reasons.length) {
     body += '\n\n未完整保存原因：'
     for (const { reason, count } of p.reasons.slice(0, MAX_REASONS))
@@ -386,7 +390,10 @@ export function progressMessage(
   }
   if (
     finished &&
-    (p.pageError || p.rootState === 'failed' || p.rootState === 'partial')
+    (p.pageError ||
+      p.rootState === 'failed' ||
+      p.rootState === 'partial' ||
+      !!p.rootError)
   )
     keyboard.push([
       { text: '重试本页', callback_data: `/page_retry ${p.submissionId}` },

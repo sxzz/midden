@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { performance } from 'node:perf_hooks'
+import { statusName } from './rpc.ts'
 import type { Logger } from '#log.ts'
 
 /**
@@ -27,6 +28,8 @@ export interface Exchange {
 interface Trace {
   exchanges: Exchange[]
   gate?: RateGate
+  /** Errors the call went on past (`recovered`), with the request before each. */
+  recovered: { error: unknown; last?: Exchange }[]
 }
 
 /** How a failed platform call is treated, for the log entry. */
@@ -337,6 +340,46 @@ export async function upstream(
   return response
 }
 
+/**
+ * Note an error platform code went on past: it kept what it had and said so
+ * in its result (a warning), so the call still succeeds. The trace logs it
+ * as a warning when the call ends, with the request just before it, which is
+ * usually the one that answered it. Outside a trace nothing is recorded.
+ */
+export function recovered(error: unknown): void {
+  const trace = traces.getStore()
+  trace?.recovered.push({ error, last: trace.exchanges.at(-1) })
+}
+
+const MAX_MESSAGE = 300
+
+/**
+ * An error as the logs give it: its platform status (or name), its message
+ * and what upstream said beyond it (`details`: a GraphQL `__typename`, error
+ * codes). Only messages of platform errors are ours to log whole; others are
+ * cut and masked, as they may quote upstream.
+ */
+export function errorFields(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) return { errorCode: 'unknown' }
+  const code = (error as { code?: unknown }).code
+  const details = (error as { details?: unknown }).details
+  const platform = typeof code === 'number'
+  const message = platform
+    ? error.message
+    : redactText(
+        error.message.length > MAX_MESSAGE
+          ? `${error.message.slice(0, MAX_MESSAGE)}…`
+          : error.message,
+      )
+  return {
+    errorCode: platform ? statusName(code) : error.name,
+    errorMessage: message,
+    ...(details && typeof details === 'object' && Object.keys(details).length
+      ? { errorDetails: details }
+      : {}),
+  }
+}
+
 const failed = (e: Exchange) =>
   e.error !== undefined || e.status === undefined || e.status >= 300
 
@@ -350,7 +393,14 @@ export async function traceUpstream<T>(
   options: TraceOptions,
   run: () => Promise<T>,
 ): Promise<T> {
-  const trace: Trace = { exchanges: [], gate: options.gate }
+  const trace: Trace = { exchanges: [], gate: options.gate, recovered: [] }
+  const went = () => {
+    for (const { error, last } of trace.recovered)
+      options.logger.warn(
+        { ...errorFields(error), ...(last ? { upstream: last } : {}) },
+        'platform call went on past an error',
+      )
+  }
   try {
     const result = await traces.run(trace, run)
     for (const exchange of trace.exchanges.filter(failed))
@@ -358,15 +408,22 @@ export async function traceUpstream<T>(
         { upstream: exchange },
         'upstream request failed; the call recovered',
       )
+    went()
     return result
   } catch (error) {
+    went()
     const classification = options.classify(error)
     if (classification) {
       const last = trace.exchanges.at(-1)
       const logged = trace.exchanges.filter((e) => failed(e) || e === last)
+      // A retried or rate-limited failure carries the platform's as its cause.
+      const details =
+        errorFields(error).errorDetails ??
+        errorFields((error as { cause?: unknown }).cause).errorDetails
       const fields = {
         errorCode: classification.code,
         errorMessage: classification.message,
+        ...(details ? { errorDetails: details } : {}),
         retryable: classification.retryable,
         final: classification.final,
       }

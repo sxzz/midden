@@ -3,6 +3,8 @@ import { Buffer } from 'node:buffer'
 import { test } from 'vitest'
 import { FetchRequest, Visibility, type FetchResponse } from '../protocol.ts'
 import { status } from '../rpc.ts'
+import { traceUpstream } from '../upstream.ts'
+import { levels, recordingLogger } from '#testing/logs.ts'
 import { InstagramClient, type Node } from './client.ts'
 import { decodeCredential, prepareCredential } from './credential.ts'
 import { postResult } from './entities.ts'
@@ -466,12 +468,23 @@ test('private profiles use their selected account for timelines and retain parti
       })
     }),
   )
-  const result = await strategy.fetch(request('profile'), signal(), session)
+  // Traced as the core traces a capture: the cause goes to the logs.
+  const { logger, entries } = recordingLogger()
+  const result = await traceUpstream(
+    { logger, classify: () => undefined },
+    () => strategy.fetch(request('profile'), signal(), session),
+  )
   assert.equal(result.visibility, Visibility.VISIBILITY_PRIVATE)
   assert.equal(result.relatedTargets.length, 1)
   assert.equal(result.incomplete, true)
   assert.equal(JSON.parse(result.nextPageCursor).cursor, 'second')
   assert.match(result.warnings[0]!, /登录已失效/)
+  const logged = entries.find(
+    (e) => e.msg === 'platform call went on past an error',
+  )
+  assert.equal(logged?.level, levels.warn)
+  assert.equal(logged?.errorCode, 'UNAUTHENTICATED')
+  assert.match(logged?.errorMessage, /登录已失效/)
 })
 
 test('classifies expired sessions, verification, limits, redirects and identity mismatch without anonymous retries', async () => {

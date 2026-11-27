@@ -9,6 +9,7 @@ import {
   type FetchRequest,
 } from '../protocol.ts'
 import { status } from '../rpc.ts'
+import { recovered } from '../upstream.ts'
 import { InstagramClient, mediaId, type Node } from './client.ts'
 import {
   attachMentions,
@@ -186,13 +187,14 @@ export class CaptureStrategy {
               profile.graph!.entities[0]!.resourceIndices.map((i) => i + offset)
             result.resources.push(...profile.resources)
           }
-        } catch {
+        } catch (error) {
           if (signal.aborted)
             throw new ProviderError(
               status.DEADLINE_EXCEEDED,
               'Instagram 请求被中断',
             )
           // Keep the post's captured author when separate account metadata is unavailable.
+          recovered(error)
         }
       }
     } else {
@@ -343,6 +345,7 @@ export class CaptureStrategy {
             ? error.message
             : 'Instagram 时间线读取失败。',
         )
+        recovered(error)
         break
       }
     }

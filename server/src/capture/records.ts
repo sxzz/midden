@@ -756,10 +756,13 @@ export function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
           more: !!next,
           more1000: !!next && maxBatch >= 1000,
           capped: !!pages.at(-1)?.submission.timelineCapped,
+          // 重试本页 also reads again a page that came with a note (a
+          // protected account's posts it may not see), once it may.
           failed:
             error === 'partial_pages' ||
             capture.state === 'failed' ||
-            capture.state === 'partial',
+            capture.state === 'partial' ||
+            !!capture.error,
         }
     } else if (
       (capture.state === 'complete' || capture.state === 'partial') &&
@@ -1077,6 +1080,25 @@ export function memberPage(
       ? { next: encodeCursor(last.createdAt, last.id, filter) }
       : {}),
   }
+}
+
+/**
+ * The notes of a record's complete captures (see `noted` in finalize): of
+ * an update's items, or of the record's own capture, with their links.
+ */
+export function recordNotes(
+  db: Executor,
+  id: string,
+  update: boolean,
+): { url: string; note: string }[] {
+  return db.all<{ url: string; note: string }>(sql`
+    SELECT a.url, c.error AS note FROM submissions s
+    JOIN captures c ON c.id = s.capture_id
+    JOIN collections a ON a.id = c.collection_id
+    WHERE ${update ? sql`s.update_id = ${id}` : sql`s.id = ${id}`}
+      AND c.state = 'complete' AND c.error <> ''
+    ORDER BY s.created_at, s.id
+    LIMIT 50`)
 }
 
 /** Of these failed captures, the ones that only saw a known state again. */

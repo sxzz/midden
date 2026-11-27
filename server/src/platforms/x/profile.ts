@@ -16,7 +16,7 @@ import {
   type SourceResponse,
 } from '../protocol.ts'
 import { status } from '../rpc.ts'
-import { upstream } from '../upstream.ts'
+import { recovered, upstream } from '../upstream.ts'
 import {
   addRelation,
   attachEntities,
@@ -342,6 +342,23 @@ export async function collectTimeline(
   }
 }
 
+/**
+ * The posts were not read to the end: the capture is incomplete and says
+ * why in a few words; the logs get the rest (`recovered`).
+ */
+function interrupted(result: FetchResponse, error: unknown): void {
+  result.incomplete = true
+  const why =
+    error instanceof ProviderError
+      ? error.message.replace(/。$/, '')
+      : error instanceof Error &&
+          (error.name === 'TimeoutError' || error.name === 'AbortError')
+        ? '请求超时'
+        : ''
+  result.warnings.push(why ? `帖子获取中断：${why}。` : '帖子获取中断。')
+  recovered(error)
+}
+
 export async function fetchPublicTimeline(
   result: FetchResponse,
   signal: AbortSignal,
@@ -371,9 +388,8 @@ export async function fetchPublicTimeline(
       pageSize,
       since,
     )
-  } catch {
-    result.incomplete = true
-    result.warnings.push('帖子获取中断。')
+  } catch (error) {
+    interrupted(result, error)
   }
 }
 
@@ -413,9 +429,8 @@ export async function fetchPublicProfile(
         result,
         await get(`${endpoint}/id:${data.user.id}/statuses?count=100`),
       )
-    } catch {
-      result.incomplete = true
-      result.warnings.push('帖子获取中断。')
+    } catch (error) {
+      interrupted(result, error)
     }
   }
   result.sourceResponses = responses
@@ -467,6 +482,42 @@ function isoTime(value: unknown): string {
   const time = typeof value === 'string' ? Date.parse(value) : NaN
   return Number.isFinite(time) ? new Date(time).toISOString() : ''
 }
+/**
+ * Why a timeline page was not read. The orchestrator drops both the error
+ * the account's transport threw (expired session, rate limit, a GraphQL
+ * error) and an answer that is no timeline, so they are caught on the way:
+ * the transport's error is the cause; otherwise the answer's `__typename`
+ * (`UserUnavailable` for an account the capture account may not see) goes
+ * to the logs.
+ */
+function timelineError(failure: unknown, answer: any): ProviderError {
+  if (failure instanceof ProviderError) return failure
+  if (failure instanceof Error) {
+    const error = new ProviderError(
+      status.UNAVAILABLE,
+      failure.name === 'TimeoutError' || failure.name === 'AbortError'
+        ? '请求超时'
+        : '平台请求失败',
+    )
+    error.details.cause = failure.name
+    return error
+  }
+  const error = new ProviderError(status.UNAVAILABLE, '平台返回的时间线无效')
+  const typename = answer?.data?.user?.result?.__typename
+  if (typeof typename === 'string') error.details.typename = typename
+  return error
+}
+/** X answered that the capture account may not see this account. */
+const userUnavailable = (error: unknown) =>
+  error instanceof ProviderError && error.details.typename === 'UserUnavailable'
+/**
+ * What a capture of a protected account says when X does not show its posts
+ * to the capture account. X does not tell whether the account does not
+ * follow it, has a request pending or is blocked, so neither does this.
+ */
+export const protectedPostsNote =
+  '锁推账号，采集账号无权查看帖子（未关注或请求未通过）'
+
 // UserTweets lists posts in the same shape as the single-post response, so the
 // raw nodes can stand in for it. ProfileTimeline uses another shape.
 async function sessionTimelinePage(
@@ -475,23 +526,40 @@ async function sessionTimelinePage(
   cursor: string | null,
   host: TwitterBuildHost,
 ) {
-  const response = await graphQLOrchestrator(host, [
+  let failure: unknown
+  let answer: unknown
+  const proxy = host.twitterProxy!
+  const response = await graphQLOrchestrator(
     {
-      key: 'tweets',
-      required: true,
-      methods: [
-        {
-          name: 'UserTweets',
-          query: UserTweetsQuery,
-          weight: 1,
-          validator: validateUserTweetsTimeline,
-        },
-      ],
-      variables: { userId, count, cursor },
+      ...host,
+      twitterProxy: {
+        fetch: (input, init) =>
+          proxy.fetch(input, init).catch((error: unknown) => {
+            failure = error
+            throw error
+          }),
+      },
     },
-  ])
-  if (!response.tweets?.success)
-    throw new ProviderError(status.UNAVAILABLE, '平台返回的时间线无效')
+    [
+      {
+        key: 'tweets',
+        required: true,
+        methods: [
+          {
+            name: 'UserTweets',
+            query: UserTweetsQuery,
+            weight: 1,
+            validator: (data) => {
+              answer = data
+              return validateUserTweetsTimeline(data)
+            },
+          },
+        ],
+        variables: { userId, count, cursor },
+      },
+    ],
+  )
+  if (!response.tweets?.success) throw timelineError(failure, answer)
   const instructions =
     getProfileStatusesTimelineInstructions(response.tweets.data) ?? []
   const results: any[] = []
@@ -509,7 +577,11 @@ async function sessionTimelinePage(
       null,
       false,
       false,
-    ).catch(() => null)
+    ).catch((error: unknown) => {
+      // Left out of the listing; its own capture would fail the same way.
+      recovered(error)
+      return null
+    })
     if (!status || isTombstone(status) || status.status) continue
     const original = tweet.legacy?.retweeted_status_result?.result ?? node
     if ((original.tweet ?? original).rest_id === status.id)
@@ -532,6 +604,16 @@ async function sessionTimelinePage(
     listings,
     pins,
   }
+}
+
+/** The profile just fetched says the account is protected. */
+function isProtected(result: FetchResponse): boolean {
+  const root = result.graph?.entities.find((e) => e.key === result.graph!.root)
+  return (
+    !!root &&
+    JSON.parse(Buffer.from(root.dataJson).toString()).metadata?.protected ===
+      true
+  )
 }
 
 export async function fetchSessionTimeline(
@@ -583,9 +665,18 @@ export async function fetchSessionTimeline(
       pageSize,
       since,
     )
-  } catch {
-    result.incomplete = true
-    result.warnings.push('帖子获取中断。')
+  } catch (error) {
+    // A protected account the capture account may not see: nothing is
+    // missing that it could read, so the capture is complete and says why
+    // there are no posts. Read again once it may see them.
+    if (
+      userUnavailable(error) &&
+      isProtected(result) &&
+      result.relatedTargets.every((t) => !t.url.includes('/status/'))
+    ) {
+      result.warnings.push(protectedPostsNote)
+      recovered(error)
+    } else interrupted(result, error)
   }
   if (pins) recordPinnedPosts(result, pins)
   result.sourceResponses.push(...responses)

@@ -19,6 +19,11 @@ export class ProviderError extends Error {
   rateLimited = false
   /** The source answered 404 for the thing asked about. */
   notFound = false
+  /**
+   * What the source said beyond the message, for the logs only: a GraphQL
+   * `__typename`, its error codes.
+   */
+  details: Record<string, unknown> = {}
   constructor(code: status, message: string, retrySeconds = 0) {
     super(message)
     this.code = code

@@ -25,6 +25,13 @@ export const status = {
 // eslint-disable-next-line @typescript-eslint/no-redeclare -- a value and its type share the name
 export type status = (typeof status)[keyof typeof status]
 
+const statusNames = new Map<number, string>(
+  Object.entries(status).map(([name, code]) => [code, name]),
+)
+/** A status code's name, as the logs give it: `UNAVAILABLE` for 14. */
+export const statusName = (code: number): string =>
+  statusNames.get(code) ?? String(code)
+
 /** String key/value trailers attached to an error. */
 export class Metadata {
   readonly #values = new Map<string, string[]>()

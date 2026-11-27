@@ -200,13 +200,17 @@ export function accountTransport(
       })
       if (Array.isArray(data.errors) && data.errors.length) {
         const codes = data.errors.map((e: any) => e.code)
-        if (codes.some((c: number) => [32, 89, 135, 215, 326].includes(c)))
-          throw responseError(401, null, target)
-        if (codes.includes(88))
-          throw responseError(429, retryHeader(response), target)
-        if (codes.some((c: number) => [63, 179, 200].includes(c)))
-          throw responseError(403, null, target)
-        throw new ProviderError(status.UNAVAILABLE, '账号接口返回错误')
+        const error = codes.some((c: number) =>
+          [32, 89, 135, 215, 326].includes(c),
+        )
+          ? responseError(401, null, target)
+          : codes.includes(88)
+            ? responseError(429, retryHeader(response), target)
+            : codes.some((c: number) => [63, 179, 200].includes(c))
+              ? responseError(403, null, target)
+              : new ProviderError(status.UNAVAILABLE, '账号接口返回错误')
+        error.details.graphqlErrors = codes
+        throw error
       }
       return Response.json(data)
     },
