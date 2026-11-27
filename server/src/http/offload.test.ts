@@ -13,6 +13,7 @@ import { agentFixture, type AgentFixture } from '#testing/agent.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform } from '#testing/fake-platform.ts'
 import { createToken } from '#tokens/tokens.ts'
+import { adminId } from '#users/users.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
 import {
   inline as inlineRoute,
@@ -45,7 +46,7 @@ function signedIn(
   api: ReturnType<typeof createApi>,
   db: AccountsContext['db'],
 ) {
-  const session = createSession(db)
+  const session = createSession(db, adminId(db))
   return (route: string, init: RequestInit = {}) =>
     api.request(route, {
       ...init,
@@ -127,7 +128,7 @@ describe('GET requests on the read threads', () => {
       '/v1',
       createApi({ ctx, reads, webAppUrl: 'https://midden.test/app/' }),
     )
-    const session = createSession(ctx.db)
+    const session = createSession(ctx.db, adminId(ctx.db))
     const mounted = (route: string) =>
       outer.request(route, {
         headers: { Cookie: `${SESSION_COOKIE}=${session}` },
@@ -189,7 +190,11 @@ describe('GET requests on the read threads', () => {
     // None is a write the threads hear of.
     expect(writes).toBe(0)
     // A read-only token may run them, and no write.
-    const ro = createToken(ctx.db, { label: 'ro', permission: 'ro' }).secret
+    const ro = createToken(ctx.db, {
+      user: adminId(ctx.db),
+      label: 'ro',
+      permission: 'ro',
+    }).secret
     const asToken = (route: string, body: unknown) =>
       api.request(route, {
         method: 'POST',

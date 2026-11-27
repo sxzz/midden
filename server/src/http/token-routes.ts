@@ -9,6 +9,7 @@ import {
   updateToken,
   type TokenView,
 } from '#tokens/tokens.ts'
+import { adminId } from '#users/users.ts'
 import { ownerOnly } from './auth.ts'
 import { inline } from './offload.ts'
 import { json, type Env } from './validate.ts'
@@ -70,6 +71,7 @@ export function tokenRoutes(
           const issued = createToken(
             db,
             {
+              user: adminId(db),
               label: input.label,
               permission: input.permission,
               expiresAt: input.expires_at,

@@ -6,6 +6,7 @@ import { typeCatalog } from '#agent/runner.ts'
 import { HEARTBEAT_TIMEOUT, setHeartbeatTimeoutMinutes } from '#settings.ts'
 import { authenticate, bearer } from '#tokens/tokens.ts'
 import { TokenUsage } from '#tokens/usage.ts'
+import { adminId } from '#users/users.ts'
 import { accountRoutes } from './account-routes.ts'
 import { endpointOf, initDataUser } from './auth.ts'
 import { captureRoutes } from './capture-routes.ts'
@@ -166,12 +167,13 @@ export function createApi(options: HttpOptions) {
             origin: c.req.header('Origin')!,
             userAgent: c.req.header('User-Agent'),
           }
-          // One Mini App session per domain and device, however often it
-          // signs in again.
+          // The Mini App is the admin's alone. One Mini App session per
+          // domain and device, however often it signs in again.
           setSessionCookie(
             c,
             replaceMiniAppSession(
               ctx.db,
+              adminId(ctx.db),
               start,
               getCookie(c, SESSION_COOKIE),
               now(),

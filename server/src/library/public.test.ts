@@ -10,6 +10,7 @@ import {
   image,
   libraryContext,
 } from '#testing/library.ts'
+import { adminId } from '#users/users.ts'
 import { updateAnnotation } from './annotations.ts'
 import { deleteCollection } from './delete.ts'
 import { createFolder, deleteFolder, updateFolder } from './folders.ts'
@@ -155,7 +156,7 @@ async function setup() {
     ids[id] = (await capture(c, post(id))).collectionId
   const app = createApi({ ctx: c, webAppUrl: 'https://midden.test/app/' })
   // The owner, signed in to the web app: revoking a share is theirs alone.
-  const session = createSession(c.db)
+  const session = createSession(c.db, adminId(c.db))
   const owner = (path: string, init: RequestInit = {}) =>
     app.request(path, {
       ...init,

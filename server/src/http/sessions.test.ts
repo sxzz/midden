@@ -4,6 +4,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { webSessions } from '#db/schema.ts'
 import { testContext } from '#testing/context.ts'
 import { tokenSecret } from '#testing/tokens.ts'
+import { adminId } from '#users/users.ts'
 import { createApi } from './app.ts'
 import { addOrigin } from './origins.ts'
 import {
@@ -89,7 +90,7 @@ describe('sliding expiry', () => {
 
   test('renews once a day: 30 more days, a fresh cookie, one write', async () => {
     const { db, clock, request, row, changes } = setup()
-    const cookie = createSession(db, undefined, clock.now())
+    const cookie = createSession(db, adminId(db), undefined, clock.now())
     const signedIn = clock.now()
     expect(row()!.expiresAt.getTime()).toBe(signedIn + 30 * DAY)
 
@@ -133,7 +134,7 @@ describe('sliding expiry', () => {
       }),
       read: () => Promise.reject(new Error('no reads by name here')),
     })
-    const cookie = createSession(db, undefined, clock.now())
+    const cookie = createSession(db, adminId(db), undefined, clock.now())
     clock.advance(2 * DAY)
     const response = await request(cookie, '/collections')
     expect(await response.json()).toEqual({ thread: true })
@@ -142,7 +143,7 @@ describe('sliding expiry', () => {
 
   test('used within 30 days it stays; after 30 idle days it is gone', async () => {
     const { db, clock, request } = setup()
-    const cookie = createSession(db, undefined, clock.now())
+    const cookie = createSession(db, adminId(db), undefined, clock.now())
     // Used every 20 days for 100 days.
     for (let i = 0; i < 5; i++) {
       clock.advance(20 * DAY)
@@ -159,7 +160,7 @@ describe('sliding expiry', () => {
 
   test('signing out does not hand the cookie back, even when due', async () => {
     const { db, clock, request } = setup()
-    const cookie = createSession(db, undefined, clock.now())
+    const cookie = createSession(db, adminId(db), undefined, clock.now())
     clock.advance(2 * DAY)
     const out = await request(cookie, '/session', { method: 'DELETE' })
     expect(out.status).toBe(204)
@@ -176,6 +177,7 @@ describe('session management', () => {
     const login = (userAgent: string) =>
       createSession(
         s.db,
+        adminId(s.db),
         { method: 'passkey', origin: WEB, userAgent },
         s.clock.now(),
       )
@@ -183,7 +185,7 @@ describe('session management', () => {
     s.clock.advance(HOUR)
     const phone = login(IPHONE)
     s.clock.advance(HOUR)
-    const old = createSession(s.db, undefined, s.clock.now())
+    const old = createSession(s.db, adminId(s.db), undefined, s.clock.now())
     return { ...s, here, phone, old }
   }
   type Listed = {
@@ -307,7 +309,11 @@ describe('the Mini App', () => {
     addOrigin(db, `${WEB}/app/`, OTHER_ORIGIN)
     await login(IPHONE, undefined, OTHER_ORIGIN)
     // And a passkey session on the same domain stays.
-    createSession(db, { method: 'passkey', origin: WEB, userAgent: IPHONE })
+    createSession(db, adminId(db), {
+      method: 'passkey',
+      origin: WEB,
+      userAgent: IPHONE,
+    })
     await login(IPHONE)
     expect(
       db

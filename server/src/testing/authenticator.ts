@@ -30,6 +30,13 @@ export function softAuthenticator(options: { userVerified?: boolean } = {}) {
   let counter = 0
   let rpId = ''
   const flags = options.userVerified === false ? 0x01 : UP_UV
+  const cose = new Map<number, number | Uint8Array>([
+    [1, 2],
+    [3, -7],
+    [-1, 1],
+    [-2, Buffer.from(jwk.x!, 'base64url')],
+    [-3, Buffer.from(jwk.y!, 'base64url')],
+  ])
 
   const clientData = (type: string, challenge: string, origin: string) =>
     Buffer.from(JSON.stringify({ type, challenge, origin, crossOrigin: false }))
@@ -45,6 +52,8 @@ export function softAuthenticator(options: { userVerified?: boolean } = {}) {
 
   return {
     id,
+    /** The public key as a server stores it (COSE). */
+    publicKey: Buffer.from(isoCBOR.encode(cose)),
     get counter() {
       return counter
     },
@@ -56,13 +65,6 @@ export function softAuthenticator(options: { userVerified?: boolean } = {}) {
       origin: string,
     ): RegistrationResponseJSON {
       rpId = creation.rp.id!
-      const cose = new Map<number, number | Uint8Array>([
-        [1, 2],
-        [3, -7],
-        [-1, 1],
-        [-2, Buffer.from(jwk.x!, 'base64url')],
-        [-3, Buffer.from(jwk.y!, 'base64url')],
-      ])
       const length = Buffer.alloc(2)
       length.writeUInt16BE(credentialId.length)
       const authData = Buffer.concat([

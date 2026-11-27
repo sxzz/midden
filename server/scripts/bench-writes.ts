@@ -40,6 +40,7 @@ import { QueryPool, READ_THREAD } from '#reads/pool.ts'
 import { fakePlatform } from '#testing/fake-platform.ts'
 import { createToken } from '#tokens/tokens.ts'
 import { TokenUsage } from '#tokens/usage.ts'
+import { adminId } from '#users/users.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { ReadThreadData } from '#reads/thread.ts'
 
@@ -247,8 +248,12 @@ const agent = createAgentApi({
   usage,
   onWrite: forget,
 })
-const session = createSession(db)
-const { secret } = createToken(db, { label: 'bench', permission: 'rw' })
+const session = createSession(db, adminId(db))
+const { secret } = createToken(db, {
+  user: adminId(db),
+  label: 'bench',
+  permission: 'rw',
+})
 
 interface Call {
   name: string

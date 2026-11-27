@@ -12,6 +12,7 @@ import { and, asc, eq, lt } from 'drizzle-orm'
 import { HTTPException } from 'hono/http-exception'
 import { newId } from '#db/id.ts'
 import { passkeys, passkeyTokens } from '#db/schema.ts'
+import { adminId } from '#users/users.ts'
 import type { Database, Executor } from '#db/client.ts'
 import type { Challenges } from './challenges.ts'
 
@@ -165,7 +166,7 @@ export async function register(
   input: {
     response: RegistrationResponseJSON
     name: string
-  } & ({ token: string } | { caller: string }),
+  } & ({ token: string } | { caller: string; user: string }),
   now = Date.now(),
 ): Promise<PasskeyView> {
   const rpID = rpIdOf(origin)
@@ -222,6 +223,8 @@ export async function register(
       .values({
         id: newId(),
         credentialId: credential.id,
+        // A link adds one of the admin's.
+        userId: 'token' in input ? adminId(tx) : input.user,
         rpId: rpID,
         name: input.name,
         publicKey: Buffer.from(credential.publicKey),
@@ -251,13 +254,16 @@ export function loginOptions(
   })
 }
 
-/** Check a sign-in; only a passkey made for this origin's RP ID counts. */
+/**
+ * Check a sign-in; only a passkey made for this origin's RP ID counts.
+ * Returns the user it signs in.
+ */
 export async function login(
   { db, challenges }: PasskeyStore,
   origin: string,
   response: AuthenticationResponseJSON,
   now = Date.now(),
-): Promise<void> {
+): Promise<string> {
   const rpID = rpIdOf(origin)
   const row = db
     .select()
@@ -291,6 +297,7 @@ export async function login(
     .set({ counter: info.newCounter, lastUsedAt: new Date(now) })
     .where(eq(passkeys.id, row.id))
     .run()
+  return row.userId
 }
 
 // --- Management ----------------------------------------------------------------

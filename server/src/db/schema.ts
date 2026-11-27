@@ -1375,6 +1375,67 @@ export const accountSelections = sqliteTable('account_selections', {
   connectionId: text(),
 })
 
+export const userRoles = ['admin', 'viewer'] as const
+export type UserRole = (typeof userRoles)[number]
+
+/**
+ * Who signs in (docs/design/multi-user.md). The admin is the owner, made
+ * from the single-user setup by the `users` migration, and there is only
+ * one (`users_admin`); viewers come by invite and only read. Sessions,
+ * passkeys and API tokens each belong to one user and go with them.
+ */
+export const users = sqliteTable(
+  'users',
+  {
+    id: text().primaryKey(),
+    /** Shown in the app; 1 to 32 characters. */
+    name: text().notNull(),
+    role: text({ enum: userRoles }).notNull(),
+    /**
+     * The WebAuthn user handle, base64url. An authenticator keeps one
+     * passkey per RP ID and handle, so each user has their own: a shared
+     * one would let a second user's passkey replace the admin's on a
+     * synced keychain. The admin keeps `midden-owner`'s.
+     */
+    webauthnId: text().notNull().unique(),
+    createdAt: createdAt(),
+    /** Revoked: their credentials are gone and they cannot sign in. */
+    revokedAt: timestamp(),
+  },
+  (t) => [
+    uniqueIndex('users_admin')
+      .on(t.role)
+      .where(sql`${t.role} = 'admin'`),
+  ],
+)
+
+/**
+ * One-time links that register a new viewer, by the SHA-256 of their
+ * token, which is shown once. The new user's WebAuthn handle is made with
+ * the invite, so the options and the registration agree on it.
+ */
+export const invites = sqliteTable(
+  'invites',
+  {
+    id: text().primaryKey(),
+    digest: text().notNull().unique(),
+    webauthnId: text().notNull().unique(),
+    /** Who it is for; the admin's note. */
+    label: text().notNull(),
+    createdAt: createdAt(),
+    expiresAt: timestamp().notNull(),
+    usedAt: timestamp(),
+    usedBy: text().references(() => users.id, { onDelete: 'set null' }),
+    revokedAt: timestamp(),
+  },
+  (t) => [index('invites_expires').on(t.expiresAt)],
+)
+
+const userId = () =>
+  text()
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' })
+
 /**
  * Browser sessions, by the SHA-256 of the cookie value. `id` names one in
  * 设置 and the API, so the digest never leaves the server. The expiry
@@ -1388,6 +1449,7 @@ export const webSessions = sqliteTable(
   {
     digest: text().primaryKey(),
     id: text().notNull().unique(),
+    userId: userId(),
     expiresAt: timestamp().notNull(),
     createdAt: createdAt(),
     lastUsedAt: timestamp().notNull(),
@@ -1398,7 +1460,10 @@ export const webSessions = sqliteTable(
     /** Browser and system from the user agent, as `Safari · macOS`. */
     device: text(),
   },
-  (t) => [index('web_sessions_expires').on(t.expiresAt)],
+  (t) => [
+    index('web_sessions_expires').on(t.expiresAt),
+    index('web_sessions_user').on(t.userId),
+  ],
 )
 
 /**
@@ -1406,20 +1471,25 @@ export const webSessions = sqliteTable(
  * Rolling one replaces the digest and keeps the row, so its label,
  * permission and usage stay.
  */
-export const apiTokens = sqliteTable('api_tokens', {
-  id: text().primaryKey(),
-  digest: text().notNull().unique(),
-  label: text().notNull(),
-  /** `ro` reads; `rw` also writes, except what deletes (owner session only). */
-  permission: text({ enum: ['ro', 'rw'] })
-    .notNull()
-    .default('rw'),
-  createdAt: createdAt(),
-  /** Null: never expires. */
-  expiresAt: timestamp(),
-  /** Kept in memory and written with the usage counts, a minute late at most. */
-  lastUsedAt: timestamp(),
-})
+export const apiTokens = sqliteTable(
+  'api_tokens',
+  {
+    id: text().primaryKey(),
+    digest: text().notNull().unique(),
+    userId: userId(),
+    label: text().notNull(),
+    /** `ro` reads; `rw` also writes, except what deletes (owner session only). */
+    permission: text({ enum: ['ro', 'rw'] })
+      .notNull()
+      .default('rw'),
+    createdAt: createdAt(),
+    /** Null: never expires. */
+    expiresAt: timestamp(),
+    /** Kept in memory and written with the usage counts, a minute late at most. */
+    lastUsedAt: timestamp(),
+  },
+  (t) => [index('api_tokens_user').on(t.userId)],
+)
 
 /**
  * Requests made with each token, per UTC day (YYYY-MM-DD) and endpoint
@@ -1440,7 +1510,7 @@ export const apiTokenUsage = sqliteTable(
 )
 
 /**
- * The owner's passkeys. Each is bound to the RP ID (the host name) of the
+ * Each user's passkeys. Each is bound to the RP ID (the host name) of the
  * domain it was created on and signs in only there.
  */
 export const passkeys = sqliteTable(
@@ -1449,6 +1519,7 @@ export const passkeys = sqliteTable(
     id: text().primaryKey(),
     // The credential id, base64url.
     credentialId: text().notNull().unique(),
+    userId: userId(),
     rpId: text().notNull(),
     name: text().notNull(),
     publicKey: blob({ mode: 'buffer' }).$type<Buffer>().notNull(),
@@ -1458,7 +1529,7 @@ export const passkeys = sqliteTable(
     createdAt: createdAt(),
     lastUsedAt: timestamp(),
   },
-  (t) => [index('passkeys_rp').on(t.rpId)],
+  (t) => [index('passkeys_rp').on(t.rpId), index('passkeys_user').on(t.userId)],
 )
 
 /**

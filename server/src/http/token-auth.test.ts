@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'vitest'
 import { testContext } from '#testing/context.ts'
 import { tokenSecret } from '#testing/tokens.ts'
 import { TokenUsage } from '#tokens/usage.ts'
+import { adminId } from '#users/users.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
 import { createSession } from './sessions.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -20,7 +21,7 @@ function setup({ dev = false } = {}) {
   ctx = testContext()
   const usage = new TokenUsage({ db: ctx.db })
   const app = createApi({ ctx, webAppUrl: WEB, dev, tokenUsage: usage })
-  const session = createSession(ctx.db)
+  const session = createSession(ctx.db, adminId(ctx.db))
   const request = (
     path: string,
     auth: { token?: string; session?: boolean },

@@ -118,10 +118,18 @@ function find(db: Executor, id: string): Row {
   return row
 }
 
-/** Make a token; only the digest of its secret is kept, so show it once. */
+/**
+ * Make a token of `user`'s; only the digest of its secret is kept, so show
+ * it once.
+ */
 export function createToken(
   db: Database,
-  input: { label: string; permission: Permission; expiresAt?: Date | null },
+  input: {
+    user: string
+    label: string
+    permission: Permission
+    expiresAt?: Date | null
+  },
   now = Date.now(),
 ): IssuedToken {
   const label = checkLabel(input.label)
@@ -132,6 +140,7 @@ export function createToken(
     .values({
       id: newId(),
       digest: tokenDigest(secret),
+      userId: input.user,
       label,
       permission: input.permission,
       createdAt: new Date(now),

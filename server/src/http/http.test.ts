@@ -5,6 +5,7 @@ import { watchLitestream, type LitestreamWatch } from '#litestream.ts'
 import { testContext } from '#testing/context.ts'
 import { fakePlatform, fakeProfile, postGraph } from '#testing/fake-platform.ts'
 import { tokenSecret } from '#testing/tokens.ts'
+import { adminId } from '#users/users.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
 import { createSession } from './sessions.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -62,7 +63,7 @@ function setup({
     litestream: watch,
   })
   // The owner in the web app, signed in: what most of the API is for.
-  const session = createSession(ctx.db)
+  const session = createSession(ctx.db, adminId(ctx.db))
   const call = (path: string, init: RequestInit = {}) =>
     app.request(path, {
       ...init,

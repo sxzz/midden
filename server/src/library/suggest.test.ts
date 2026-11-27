@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'vitest'
 import { createApi } from '#http/app.ts'
 import { createSession, SESSION_COOKIE } from '#http/sessions.ts'
 import { capture, entity, graph, libraryContext } from '#testing/library.ts'
+import { adminId } from '#users/users.ts'
 import { updateAnnotation } from './annotations.ts'
 import { createFolder } from './folders.ts'
 import { suggest } from './suggest.ts'
@@ -86,7 +87,7 @@ test('offers what the library holds, most used first', async () => {
 test('the owner asks for them; nobody else', async () => {
   const { c } = await setup()
   const app = createApi({ ctx: c, webAppUrl: 'https://midden.test/app/' })
-  const session = createSession(c.db)
+  const session = createSession(c.db, adminId(c.db))
   const ask = (query: string, signedIn = true) =>
     app.request(`/query/suggest?${query}`, {
       headers: signedIn ? { Cookie: `${SESSION_COOKIE}=${session}` } : {},

@@ -3,6 +3,7 @@ import { Hono, type Context } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { HTTPException } from 'hono/http-exception'
 import * as v from 'valibot'
+import { adminId } from '#users/users.ts'
 import { ownerOnly } from './auth.ts'
 import {
   deletePasskey,
@@ -93,8 +94,13 @@ export function passkeyAuthRoutes(o: PasskeyOptions) {
       json(v.strictObject({ response: Authentication })),
       async (c) => {
         const origin = originOf(c, o.origins())
-        await login(store, origin, c.req.valid('json').response, o.now())
-        startSession(c, ctx.db, passkeySession(c, origin), o.now())
+        const user = await login(
+          store,
+          origin,
+          c.req.valid('json').response,
+          o.now(),
+        )
+        startSession(c, ctx.db, user, passkeySession(c, origin), o.now())
         return c.body(null, 204)
       },
     )
@@ -125,7 +131,14 @@ export function passkeyAuthRoutes(o: PasskeyOptions) {
           o.now(),
         )
         o.notify?.(`已添加通行密钥：${describe(passkey)}`)
-        startSession(c, ctx.db, passkeySession(c, origin), o.now())
+        // A link adds a passkey of the admin's, who is now signed in.
+        startSession(
+          c,
+          ctx.db,
+          adminId(ctx.db),
+          passkeySession(c, origin),
+          o.now(),
+        )
         return c.json(passkey)
       },
     )
@@ -159,7 +172,11 @@ export function passkeyRoutes(o: PasskeyOptions) {
           const passkey = await register(
             store,
             originOf(c, o.origins()),
-            { ...c.req.valid('json'), caller: callerOf(c) },
+            {
+              ...c.req.valid('json'),
+              caller: callerOf(c),
+              user: adminId(ctx.db),
+            },
             o.now(),
           )
           o.notify?.(`已添加通行密钥：${describe(passkey)}`)

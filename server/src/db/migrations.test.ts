@@ -4,9 +4,11 @@ import { describe, expect, test } from 'vitest'
 import { createApi } from '#http/app.ts'
 import { SESSION_COOKIE, SESSION_TTL } from '#http/sessions.ts'
 import { checkSearchIndexes, intact } from '#library/search-index.ts'
+import { softAuthenticator } from '#testing/authenticator.ts'
 import { testContext } from '#testing/context.ts'
 import { insertRow, migratedBefore, migrateRest } from '#testing/migrations.ts'
 import { openDatabase, type Database } from './client.ts'
+import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/server'
 
 const columns = (db: Database, table: string) =>
   db.$client
@@ -346,7 +348,10 @@ describe('web_session_devices', () => {
       expect([row.method, row.origin, row.device]).toEqual([null, null, null])
     }
     expect(rows[0]!.id).not.toBe(rows[1]!.id)
-    expect(indexes(db, 'web_sessions')).toEqual(['web_sessions_expires'])
+    expect(indexes(db, 'web_sessions')).toEqual([
+      'web_sessions_expires',
+      'web_sessions_user',
+    ])
 
     // Their next request renews them, to a full 30 days.
     const ctx = { ...testContext(), db }
@@ -616,5 +621,170 @@ describe('folder_queries', () => {
         zoneless: { query: '', sort: '', order: '', tz: '' },
       },
     )
+  })
+})
+
+describe('users', () => {
+  const ORIGIN = 'https://midden.test'
+  const sha = (value: string) =>
+    createHash('sha256').update(value).digest('hex')
+  const UUID7 =
+    /^[\da-f]{8}-[\da-f]{4}-7[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/
+
+  test('the owner becomes the one admin, and every session, passkey and token is theirs and still works', async () => {
+    const db = migratedBefore('users')
+    const now = Date.now()
+    const earliest = now - 10 * 86_400_000
+    insertRow(db, 'web_sessions', {
+      digest: sha('cookie'),
+      id: 's1',
+      expires_at: now + 86_400_000,
+      created_at: earliest + 1000,
+      last_used_at: now,
+      method: 'passkey',
+      origin: ORIGIN,
+      device: 'Safari · macOS',
+    })
+    const authenticator = softAuthenticator()
+    insertRow(db, 'passkeys', {
+      id: 'p1',
+      credential_id: authenticator.id,
+      rp_id: 'midden.test',
+      name: 'Mac',
+      public_key: authenticator.publicKey,
+      transports: '["internal"]',
+      created_at: earliest,
+    })
+    insertRow(db, 'api_tokens', {
+      id: 't1',
+      digest: sha('mdn_ro_old'),
+      label: 'dev',
+      permission: 'ro',
+      created_at: earliest + 2000,
+    })
+    insertRow(db, 'api_token_usage', {
+      token_id: 't1',
+      day: '2026-11-20',
+      endpoint: 'GET /agent/v1/posts',
+      count: 7,
+    })
+    insertRow(db, 'passkey_tokens', {
+      digest: sha('L'.repeat(43)),
+      origin: ORIGIN,
+      expires_at: now + 600_000,
+    })
+
+    migrateRest(db)
+
+    const users = db.$client.prepare('SELECT * FROM users').all()
+    expect(users).toEqual([
+      {
+        id: expect.stringMatching(UUID7),
+        name: '管理员',
+        role: 'admin',
+        // `midden-owner`, the handle every passkey so far was made with.
+        webauthn_id: Buffer.from('midden-owner').toString('base64url'),
+        created_at: earliest,
+        revoked_at: null,
+      },
+    ])
+    const admin = users[0]!.id
+    for (const table of ['web_sessions', 'passkeys', 'api_tokens'])
+      expect([
+        table,
+        db.$client.prepare(`SELECT user_id FROM ${table}`).all(),
+      ]).toEqual([table, [{ user_id: admin }]])
+    expect(
+      db.$client.prepare('SELECT * FROM web_sessions').get(),
+    ).toMatchObject({
+      digest: sha('cookie'),
+      id: 's1',
+      method: 'passkey',
+      device: 'Safari · macOS',
+    })
+    expect(db.$client.prepare('SELECT * FROM api_token_usage').all()).toEqual([
+      {
+        token_id: 't1',
+        day: '2026-11-20',
+        endpoint: 'GET /agent/v1/posts',
+        count: 7,
+      },
+    ])
+    expect(indexes(db, 'passkeys')).toEqual(['passkeys_rp', 'passkeys_user'])
+    expect(indexes(db, 'api_tokens')).toEqual(['api_tokens_user'])
+    expect(db.$client.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    // One admin, ever.
+    expect(() =>
+      insertRow(db, 'users', {
+        id: 'u2',
+        name: 'x',
+        role: 'admin',
+        webauthn_id: 'x',
+      }),
+    ).toThrow(/UNIQUE/)
+    // A token's usage still goes with it.
+    db.$client.exec(`DELETE FROM api_tokens WHERE id = 't1'`)
+    expect(db.$client.prepare('SELECT * FROM api_token_usage').all()).toEqual(
+      [],
+    )
+    insertRow(db, 'api_tokens', {
+      id: 't1',
+      digest: sha('mdn_ro_old'),
+      user_id: admin,
+      label: 'dev',
+      permission: 'ro',
+      created_at: earliest + 2000,
+    })
+
+    // The cookie, the passkey, the token and the link all work.
+    const ctx = { ...testContext(), db }
+    const app = createApi({ ctx, webAppUrl: `${ORIGIN}/app/` })
+    const post = (path: string, body: unknown) =>
+      app.request(path, {
+        method: 'POST',
+        headers: { Origin: ORIGIN, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    expect(
+      (
+        await app.request('/session', {
+          headers: { Cookie: `${SESSION_COOKIE}=cookie` },
+        })
+      ).status,
+    ).toBe(204)
+    expect(
+      (
+        await app.request('/tags', {
+          headers: { Authorization: 'Bearer mdn_ro_old' },
+        })
+      ).status,
+    ).toBe(200)
+    const options = (await (
+      await post('/auth/passkey/options', {})
+    ).json()) as PublicKeyCredentialRequestOptionsJSON
+    const signedIn = await post('/auth/passkey', {
+      response: authenticator.get(options, ORIGIN, 'midden.test'),
+    })
+    expect(signedIn.status).toBe(204)
+    expect(signedIn.headers.get('set-cookie')).toContain(`${SESSION_COOKIE}=`)
+    expect(
+      (await post('/auth/passkey/register/options', { token: 'L'.repeat(43) }))
+        .status,
+    ).toBe(200)
+    await ctx.queue.stop()
+  })
+
+  test('a new database has the admin alone, joined now', () => {
+    const before = Date.now()
+    const db = openDatabase(':memory:')
+    const users = db.$client.prepare('SELECT * FROM users').all()
+    expect(users).toEqual([
+      expect.objectContaining({
+        role: 'admin',
+        name: '管理员',
+        webauthn_id: 'bWlkZGVuLW93bmVy',
+      }),
+    ])
+    expect(Number(users[0]!.created_at)).toBeGreaterThanOrEqual(before - 1000)
   })
 })

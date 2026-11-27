@@ -8,6 +8,7 @@ import { testContext } from '#testing/context.ts'
 import { FakeS3 } from '#testing/fake-s3.ts'
 import { authenticate, createToken, listTokens } from '#tokens/tokens.ts'
 import { TokenUsage } from '#tokens/usage.ts'
+import { adminId } from '#users/users.ts'
 import { runCli, type CliContext } from './program.ts'
 import type { BucketBlobStore } from '#blob/bucket-store.ts'
 import type { Buffer } from 'node:buffer'
@@ -161,15 +162,29 @@ describe('token list', () => {
     const s = setup()
     const a = createToken(
       s.db,
-      { label: 'research', permission: 'ro', expiresAt: new Date(NOW + HOUR) },
+      {
+        user: adminId(s.db),
+        label: 'research',
+        permission: 'ro',
+        expiresAt: new Date(NOW + HOUR),
+      },
       NOW - 2 * HOUR,
     )
     tick()
-    const b = createToken(s.db, { label: 'sync', permission: 'rw' }, NOW - HOUR)
+    const b = createToken(
+      s.db,
+      { user: adminId(s.db), label: 'sync', permission: 'rw' },
+      NOW - HOUR,
+    )
     tick()
     const c = createToken(
       s.db,
-      { label: 'old', permission: 'ro', expiresAt: new Date(NOW - HOUR) },
+      {
+        user: adminId(s.db),
+        label: 'old',
+        permission: 'ro',
+        expiresAt: new Date(NOW - HOUR),
+      },
       NOW - 3 * HOUR,
     )
     return { ...s, a, b, c }
@@ -245,7 +260,7 @@ describe('token list', () => {
   test('tokens made at the same moment get prefixes long enough to tell apart', async () => {
     const { db, out, run } = setup()
     for (const label of ['a', 'b', 'c'])
-      createToken(db, { label, permission: 'ro' }, NOW)
+      createToken(db, { user: adminId(db), label, permission: 'ro' }, NOW)
     await run('token', 'list', '--json')
     const ids = JSON.parse(out[0]!).map((t: { id: string }) => t.id)
     expect(new Set(ids).size).toBe(3)
@@ -257,8 +272,16 @@ describe('token list', () => {
 describe('token revoke', () => {
   test('by label: the secret stops working and the token is gone', async () => {
     const { db, out, err, run } = setup()
-    const smoke = createToken(db, { label: 'smoke', permission: 'ro' }, NOW)
-    const keep = createToken(db, { label: 'keep', permission: 'rw' }, NOW)
+    const smoke = createToken(
+      db,
+      { user: adminId(db), label: 'smoke', permission: 'ro' },
+      NOW,
+    )
+    const keep = createToken(
+      db,
+      { user: adminId(db), label: 'keep', permission: 'rw' },
+      NOW,
+    )
     expect(await run('token', 'revoke', 'smoke')).toBe(0)
     expect(err).toEqual(['revoked smoke (ro)'])
     expect(out).toEqual([])
@@ -271,7 +294,7 @@ describe('token revoke', () => {
     // Made back to back, so often in the same millisecond: their ids share a
     // long prefix, and only the one `token list` prints tells them apart.
     for (const label of ['a', 'b', 'c'])
-      createToken(db, { label, permission: 'ro' }, NOW)
+      createToken(db, { user: adminId(db), label, permission: 'ro' }, NOW)
     await run('token', 'list', '--json')
     const listed = JSON.parse(out.pop()!) as { id: string; label: string }[]
     const a = listed.find((t) => t.label === 'a')!
@@ -283,7 +306,7 @@ describe('token revoke', () => {
   test('a prefix that fits several tokens is refused, and nothing is revoked', async () => {
     const { db, err, run } = setup()
     for (const label of ['a', 'b'])
-      createToken(db, { label, permission: 'ro' }, NOW)
+      createToken(db, { user: adminId(db), label, permission: 'ro' }, NOW)
     // The first 8 characters are the timestamp's start: the same for both.
     const shared = secrets(db)[0]!.id.slice(0, 8)
     expect(await run('token', 'revoke', shared)).toBe(1)
@@ -293,8 +316,12 @@ describe('token revoke', () => {
 
   test('a label shared by several tokens is refused, with the candidates listed', async () => {
     const { db, out, err, run } = setup()
-    const first = createToken(db, { label: 'dup', permission: 'ro' }, NOW)
-    createToken(db, { label: 'dup', permission: 'rw' }, NOW)
+    const first = createToken(
+      db,
+      { user: adminId(db), label: 'dup', permission: 'ro' },
+      NOW,
+    )
+    createToken(db, { user: adminId(db), label: 'dup', permission: 'rw' }, NOW)
     expect(await run('token', 'revoke', 'dup')).toBe(1)
     expect(secrets(db)).toHaveLength(2)
     expect(out).toEqual([])
@@ -320,7 +347,11 @@ describe('token revoke', () => {
 describe('token expires', () => {
   test('a duration, an ISO time and never', async () => {
     const { db, err, run } = setup()
-    createToken(db, { label: 'smoke', permission: 'ro' }, NOW)
+    createToken(
+      db,
+      { user: adminId(db), label: 'smoke', permission: 'ro' },
+      NOW,
+    )
     expect(await run('token', 'expires', 'smoke', '7d')).toBe(0)
     expect(listTokens(db, NOW)[0]!.expires_at).toBe(
       new Date(NOW + 7 * 24 * HOUR).toISOString(),
@@ -338,7 +369,12 @@ describe('token expires', () => {
     const { db, out, err, run } = setup()
     const old = createToken(
       db,
-      { label: 'old', permission: 'ro', expiresAt: new Date(NOW + HOUR) },
+      {
+        user: adminId(db),
+        label: 'old',
+        permission: 'ro',
+        expiresAt: new Date(NOW + HOUR),
+      },
       NOW,
     )
     const later = NOW + 2 * HOUR

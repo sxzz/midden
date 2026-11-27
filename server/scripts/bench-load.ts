@@ -109,7 +109,7 @@ function token(): string {
   const value = `md_bench${Date.now()}`
   const db = new DatabaseSync(DB)
   db.prepare(
-    'INSERT INTO api_tokens (id, digest, label, created_at) VALUES (?, ?, ?, ?)',
+    "INSERT INTO api_tokens (id, digest, user_id, label, created_at) VALUES (?, ?, (SELECT id FROM users WHERE role = 'admin'), ?, ?)",
   ).run(
     `bench${Date.now()}`,
     createHash('sha256').update(value).digest('hex'),

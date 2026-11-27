@@ -50,9 +50,13 @@ export interface SessionView {
 const digestOf = (value: string) =>
   createHash('sha256').update(value).digest('hex')
 
-/** Store a new session; returns the cookie value, which is not stored. */
+/**
+ * Store a new session of `user`; returns the cookie value, which is not
+ * stored.
+ */
 export function createSession(
   db: Executor,
+  user: string,
   start?: SessionStart,
   now = Date.now(),
 ): string {
@@ -61,6 +65,7 @@ export function createSession(
     .values({
       digest: digestOf(value),
       id: newId(),
+      userId: user,
       expiresAt: new Date(now + SESSION_TTL * 1000),
       createdAt: new Date(now),
       lastUsedAt: new Date(now),
@@ -87,14 +92,15 @@ export function setSessionCookie(c: Context, value: string) {
   })
 }
 
-/** Sign the browser in. */
+/** Sign the browser in as `user`. */
 export function startSession(
   c: Context,
   db: Database,
+  user: string,
   start: SessionStart,
   now = Date.now(),
 ) {
-  setSessionCookie(c, createSession(db, start, now))
+  setSessionCookie(c, createSession(db, user, start, now))
 }
 
 export interface CheckedSession {
@@ -162,6 +168,7 @@ export function pruneSessions(db: Database, now = Date.now()): void {
  */
 export function replaceMiniAppSession(
   db: Database,
+  user: string,
   start: SessionStart,
   cookie: string | undefined,
   now = Date.now(),
@@ -172,6 +179,7 @@ export function replaceMiniAppSession(
     tx.delete(webSessions)
       .where(
         and(
+          eq(webSessions.userId, user),
           eq(webSessions.method, 'telegram'),
           eq(webSessions.origin, start.origin),
           device === null
@@ -180,7 +188,7 @@ export function replaceMiniAppSession(
         ),
       )
       .run()
-    return createSession(tx, start, now)
+    return createSession(tx, user, start, now)
   })
 }
 

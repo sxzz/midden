@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest'
 import { openDatabase } from '#db/client.ts'
 import { apiTokens } from '#db/schema.ts'
 import { insertRow, migratedBefore, migrateRest } from '#testing/migrations.ts'
+import { adminId } from '#users/users.ts'
 import {
   authenticate,
   createToken,
@@ -22,8 +23,16 @@ const sha256 = (value: string) =>
 describe('tokens', () => {
   test('a secret says its permission and is kept only as a digest', () => {
     const db = openDatabase(':memory:')
-    const ro = createToken(db, { label: ' reader ', permission: 'ro' }, NOW)
-    const rw = createToken(db, { label: 'writer', permission: 'rw' }, NOW)
+    const ro = createToken(
+      db,
+      { user: adminId(db), label: ' reader ', permission: 'ro' },
+      NOW,
+    )
+    const rw = createToken(
+      db,
+      { user: adminId(db), label: 'writer', permission: 'rw' },
+      NOW,
+    )
     expect(ro.secret).toMatch(/^mdn_ro_[\w-]{43}$/)
     expect(rw.secret).toMatch(/^mdn_rw_[\w-]{43}$/)
     expect(ro.token).toEqual({
@@ -63,16 +72,26 @@ describe('tokens', () => {
     expect(() =>
       createToken(
         db,
-        { label: 'old', permission: 'ro', expiresAt: new Date(NOW - 1) },
+        {
+          user: adminId(db),
+          label: 'old',
+          permission: 'ro',
+          expiresAt: new Date(NOW - 1),
+        },
         NOW,
       ),
     ).toThrow('过期时间必须晚于现在')
     expect(() =>
-      createToken(db, { label: ' ', permission: 'ro' }, NOW),
+      createToken(db, { user: adminId(db), label: ' ', permission: 'ro' }, NOW),
     ).toThrow('名称不能为空')
     const { token, secret } = createToken(
       db,
-      { label: 'soon', permission: 'rw', expiresAt: new Date(NOW + HOUR) },
+      {
+        user: adminId(db),
+        label: 'soon',
+        permission: 'rw',
+        expiresAt: new Date(NOW + HOUR),
+      },
       NOW,
     )
     expect(token.expires_at).toBe(new Date(NOW + HOUR).toISOString())
@@ -106,7 +125,12 @@ describe('tokens', () => {
     const db = openDatabase(':memory:')
     const made = createToken(
       db,
-      { label: 'bot', permission: 'ro', expiresAt: new Date(NOW + HOUR) },
+      {
+        user: adminId(db),
+        label: 'bot',
+        permission: 'ro',
+        expiresAt: new Date(NOW + HOUR),
+      },
       NOW,
     )
     const rolled = rollToken(db, made.token.id, NOW)
@@ -141,8 +165,16 @@ describe('usage', () => {
     const db = openDatabase(':memory:')
     let now = NOW
     const usage = new TokenUsage({ db, now: () => now })
-    const a = createToken(db, { label: 'a', permission: 'ro' }, NOW).token
-    const b = createToken(db, { label: 'b', permission: 'ro' }, NOW).token
+    const a = createToken(
+      db,
+      { user: adminId(db), label: 'a', permission: 'ro' },
+      NOW,
+    ).token
+    const b = createToken(
+      db,
+      { user: adminId(db), label: 'b', permission: 'ro' },
+      NOW,
+    ).token
     usage.record(a.id, 'GET /agent/v1/posts')
     usage.record(a.id, 'GET /agent/v1/posts')
     usage.record(b.id, 'GET /agent/v1/tags')
@@ -202,7 +234,11 @@ describe('usage', () => {
   test('counts wait for the next flush while the database is locked', () => {
     const db = openDatabase(':memory:')
     const usage = new TokenUsage({ db, now: () => NOW })
-    const a = createToken(db, { label: 'a', permission: 'ro' }, NOW).token
+    const a = createToken(
+      db,
+      { user: adminId(db), label: 'a', permission: 'ro' },
+      NOW,
+    ).token
     usage.record(a.id, 'GET /agent/v1/posts')
     const transaction = db.transaction
     db.transaction = (() => {
@@ -231,6 +267,7 @@ describe('migration', () => {
       {
         id: 't1',
         digest,
+        userId: adminId(db),
         label: 'dev',
         permission: 'rw',
         createdAt: new Date(NOW),

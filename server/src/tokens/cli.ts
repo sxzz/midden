@@ -1,4 +1,5 @@
 import { isAppError } from '#errors.ts'
+import { adminId } from '#users/users.ts'
 import {
   createToken,
   listTokens,
@@ -43,6 +44,7 @@ export function tokenCreate(
     const { token, secret } = createToken(
       db,
       {
+        user: adminId(db),
         label: options.label ?? 'cli',
         permission: options.permission,
         expiresAt: parseExpiry(options.expires ?? 'never', now),
