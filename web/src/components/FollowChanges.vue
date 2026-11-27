@@ -11,6 +11,7 @@ import { readFollowChanges } from '../reads'
 import { collectionRoute } from '../share'
 import AppLink from './ui/AppLink.vue'
 import LoadingImage from './ui/LoadingImage.vue'
+import RefreshButton from './ui/RefreshButton.vue'
 import SkeletonRows from './ui/SkeletonRows.vue'
 const props = defineProps<{ id: string; showSensitive?: boolean }>()
 const changes = shallowRef<FollowChanges>()
@@ -56,6 +57,9 @@ const blurred = (account: FollowAccount) =>
 
 <template>
   <div class="changes">
+    <div class="tools">
+      <RefreshButton :busy="loading && !!changes" @refresh="load" />
+    </div>
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
     <template v-if="!changes && loading">
       <SkeletonRows title :rows="3" avatar hint label="正在读取变化" />
@@ -143,6 +147,11 @@ const blurred = (account: FollowAccount) =>
 </template>
 
 <style scoped>
+.tools {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 var(--gutter);
+}
 .changes {
   padding: 0 var(--gutter);
 }

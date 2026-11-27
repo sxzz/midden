@@ -89,7 +89,9 @@ function search(value: string) {
       :reposted-by="repostedBy"
       within-profile
       enlarged-media
+      :refreshing="refreshing"
       @search="search"
+      @refresh="refresh"
       @more="more"
       @retry="load(request)"
       @deleted="
@@ -98,17 +100,7 @@ function search(value: string) {
           emit('deleted', ids, withPosts)
         }
       "
-    >
-      <template #actions>
-        <button
-          type="button"
-          :disabled="loading || refreshing"
-          @click="refresh"
-        >
-          {{ refreshing ? '刷新中…' : '刷新' }}
-        </button>
-      </template>
-    </CollectionView>
+    />
     <!-- Below the whole list: the posts it lacks come after the last one. -->
     <ListSection v-if="older && !next && !loading && !error" class="older">
       <ListButton

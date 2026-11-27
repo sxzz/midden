@@ -6,7 +6,8 @@
     "#*": "./src/*"
   },
   "exports": {
-    "./api": "./src/http/app.ts"
+    "./api": "./src/http/app.ts",
+    "./query": "./src/query/language.ts"
   },
   "bin": {
     "midden": "./src/cli.ts"

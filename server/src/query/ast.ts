@@ -3,7 +3,7 @@
 // canonical form, and holds the query to its cost limits. What the values
 // name in the archive (accounts, tags, folders) is looked up when it is
 // compiled (`compile.ts`).
-import { domainOf, foldHashtag } from '#library/facets.ts'
+import { domainOf, foldHashtag } from '#library/facet-values.ts'
 import { KEYS, type Key } from './keys.ts'
 import { parse, SyntaxError as PeggySyntaxError } from './parser.generated.ts'
 
@@ -164,14 +164,16 @@ const choices: Partial<Record<Key, Record<string, string>>> = {
   protected: { yes: 'yes', no: 'no', true: 'yes', false: 'no' },
 }
 
+/** A real calendar day (the web reads queries too, without Temporal). */
 function validDate(value: string): boolean {
   if (!DATE.test(value)) return false
-  try {
-    Temporal.PlainDate.from(value, { overflow: 'reject' })
-    return true
-  } catch {
-    return false
-  }
+  const [y, m, d] = value.split('-').map(Number) as [number, number, number]
+  const day = new Date(Date.UTC(y, m - 1, d))
+  return (
+    day.getUTCFullYear() === y &&
+    day.getUTCMonth() === m - 1 &&
+    day.getUTCDate() === d
+  )
 }
 
 const INSTANT =

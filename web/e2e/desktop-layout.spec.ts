@@ -139,7 +139,7 @@ test.describe('from 1280px', () => {
   test('the sidebar searches the library', async ({ page }) => {
     const { searches } = await mockDesktop(page)
     await page.goto('/app/captures')
-    const box = sidebar(page).getByRole('searchbox', { name: '搜索收藏' })
+    const box = sidebar(page).getByRole('combobox', { name: '搜索收藏' })
     await box.fill('云海')
     await box.press('Enter')
     await expect(page.locator('h1')).toHaveText('我的收藏')

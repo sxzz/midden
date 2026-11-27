@@ -2,6 +2,7 @@ import { onUnmounted, shallowRef } from 'vue'
 import { errorText, type Collection } from '../api'
 import { localZone } from '../folders'
 import { listSort } from '../presentation'
+import { hasDates } from '../query'
 import { readCount, readList } from '../reads'
 /** The list's API query for a route query. */
 function request(params: string) {
@@ -22,8 +23,9 @@ function request(params: string) {
     if (local === 'to_date') date.setDate(date.getDate() + 1)
     q.set(apiKey, date.toISOString())
   }
-  // A relative save date counts days where the reader is.
-  if (q.get('saved_within') && !q.get('tz')) q.set('tz', localZone())
+  // Save dates and the query's own dates count days where the reader is.
+  if ((q.get('saved_within') || hasDates(q.get('q'))) && !q.get('tz'))
+    q.set('tz', localZone())
   q.set('q', q.get('q') || '')
   return q
 }

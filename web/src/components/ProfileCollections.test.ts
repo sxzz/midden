@@ -316,13 +316,12 @@ it('shows the total beside the list, counted per filter and not per page', async
   expect(el.querySelector('.total')?.textContent).toBe('1,234 条')
 
   const input = el.querySelector<HTMLInputElement>(
-    'input[aria-label="搜索正文或作者"]',
+    'input[aria-label="搜索或筛选"]',
   )!
   input.value = 'cat'
   input.dispatchEvent(new Event('input', { bubbles: true }))
-  el.querySelector('form')!.dispatchEvent(
-    new Event('submit', { bubbles: true, cancelable: true }),
-  )
+  await nextTick()
+  el.querySelector<HTMLButtonElement>('.query .submit')!.click()
   await vi.waitFor(() => expect(counts()).toHaveLength(2))
   expect(counts()[1]!.get('q')).toBe('cat')
   expect(counts()[1]!.has('cursor')).toBe(false)

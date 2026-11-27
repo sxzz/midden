@@ -1,10 +1,11 @@
 <script setup vapor lang="ts">
 import { shallowRef } from 'vue'
+import QueryBox from './QueryBox.vue'
 // The desktop sidebar's frame, as X has it beside the column: a search box
 // at the top while `search` names what it searches, the page's boxes, then
 // the small print. The owner's app (SideAside) and a public link
-// (ShareAside) fill it.
-defineProps<{ search?: string }>()
+// (ShareAside) fill it; the owner's box takes the query language (`query`).
+defineProps<{ search?: string; query?: boolean }>()
 const emit = defineEmits<{ search: [q: string] }>()
 const text = shallowRef('')
 function submit() {
@@ -18,7 +19,20 @@ function submit() {
 <template>
   <aside class="aside" aria-label="侧栏">
     <div class="sticky">
-      <form v-if="search" class="search" role="search" @submit.prevent="submit">
+      <div v-if="search && query" class="search query-search">
+        <QueryBox
+          v-model="text"
+          :placeholder="search"
+          :label="search"
+          @submit="submit"
+        />
+      </div>
+      <form
+        v-else-if="search"
+        class="search"
+        role="search"
+        @submit.prevent="submit"
+      >
         <svg
           viewBox="0 0 24 24"
           width="18"
@@ -192,5 +206,8 @@ function submit() {
 }
 .search + .content {
   padding-top: 0;
+}
+.query-search {
+  display: block;
 }
 </style>

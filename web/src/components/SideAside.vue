@@ -41,7 +41,7 @@ const facts = computed(() =>
 </script>
 
 <template>
-  <SidebarFrame :search="lists ? undefined : '搜索收藏'" @search="search">
+  <SidebarFrame :search="lists ? undefined : '搜索收藏'" query @search="search">
     <template v-if="lists">
       <section v-if="facts" class="aside-box" aria-label="结果">
         <h2>结果</h2>

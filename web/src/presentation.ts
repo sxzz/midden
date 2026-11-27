@@ -1,3 +1,4 @@
+import { searchesWords, wordsOf } from './query'
 import {
   avatarOf,
   bannerOf,
@@ -354,9 +355,15 @@ const PUBLIC_SORTS = new Set([
   'updated',
   ...COUNT_SORTS,
 ])
-/** Whether a list query searches. */
-export const searches = (query: string | URLSearchParams) =>
-  !!new URLSearchParams(query).get('q')?.trim()
+/**
+ * Whether a list query searches for words, which rank by relevance. Behind
+ * a share `q` is only words; the owner's is a query, whose other terms
+ * (`has:image`, `#tag`) select without ranking.
+ */
+export const searches = (query: string | URLSearchParams) => {
+  const q = new URLSearchParams(query).get('q')
+  return shareSlug.value ? !!q?.trim() : searchesWords(q)
+}
 /**
  * The order of a list: search results by relevance (相关度, which the server
  * orders in tiers, each by the order chosen), otherwise posts by when they
@@ -476,7 +483,9 @@ const foldChar = (c: string) => c.normalize('NFKC').toLowerCase()
 /** The terms of a list query's search, longest first, to mark in results. */
 export function searchTerms(query: string | URLSearchParams): string[] {
   const q = new URLSearchParams(query).get('q') || ''
-  const terms = [...q].map(foldChar).join('').split(SPACES).filter(Boolean)
+  // The owner's q is a query: only its words are searched for.
+  const words = shareSlug.value ? q : wordsOf(q).join(' ')
+  const terms = [...words].map(foldChar).join('').split(SPACES).filter(Boolean)
   return [...new Set(terms)].toSorted((a, b) => b.length - a.length)
 }
 

@@ -478,14 +478,16 @@ function deleted(id: string, withPosts: boolean) {
   forget([id], withPosts)
   void router.push(listRoute)
 }
-function search(q: string) {
+/** `replace`: the same list said another way, not a step back can undo. */
+function search(q: string, replace = false) {
   let target = `/${q ? `?${q}` : ''}`
   if (folderId.value) target = `/folder/${folderId.value}?${folderAddress(q)}`
   if (route.fullPath === target) {
     const list = folderId.value ? folderList : lists[tab.value]
     if (list.loadedQuery !== undefined)
       void list.collection.load(list.loadedQuery)
-  } else void router.push(target)
+  } else if (replace) void router.replace(target)
+  else void router.push(target)
 }
 /** What the lists hold changed; reload them when they are next shown. */
 function stale() {
@@ -648,11 +650,15 @@ function listProps(list: ReturnType<typeof createList>, error = '') {
     showSensitive: showSensitive.value,
     query: query.value,
     loading: collection.loading.value,
+    refreshing: collection.refreshing.value,
     error: error || collection.error.value,
     next: collection.next.value,
     total: collection.total.value,
     usage: usage.value,
     onSearch: search,
+    onRefresh: () => {
+      if (list.loadedQuery !== undefined) void collection.refresh()
+    },
     onTagsChanged: tagsChanged,
     onMore: collection.more,
     onRetry: () => {

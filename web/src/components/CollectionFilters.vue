@@ -18,9 +18,11 @@ import {
 } from '../api'
 import { kindOf, KINDS, localDay, type Kind } from '../folders'
 import { listSort, listsProfiles, searches } from '../presentation'
+import { composeQuery, hasTerms, readQuery, splitQuery } from '../query'
 import { readAuthors } from '../reads'
 import { defaultRelMin, isRel, relMinOf, type Rel } from '../relation-filter'
 import { shareSlug } from '../share'
+import QueryBox from './QueryBox.vue'
 import RelationFilter from './RelationFilter.vue'
 import TagEditSheet from './TagEditSheet.vue'
 import ChevronIcon from './ui/ChevronIcon.vue'
@@ -41,7 +43,10 @@ async function loadTags() {
     tagError.value = errorText(e)
   }
 }
-onMounted(loadTags)
+onMounted(async () => {
+  await loadTags()
+  absorb()
+})
 onActivated(loadTags)
 const props = defineProps<{
   query: string
@@ -55,7 +60,8 @@ const props = defineProps<{
   folder?: boolean
 }>()
 const emit = defineEmits<{
-  search: [query: string]
+  /** `replace`: the same list, said by the controls where they can. */
+  search: [query: string, replace?: boolean]
   /** A tag was renamed, merged into another or deleted. */
   tagsChanged: [change: TagChange]
 }>()
@@ -259,6 +265,8 @@ const active = computed(() =>
           : form.to
             ? `${form.to} 前`
             : ''),
+    // Terms of the query no control shows.
+    !shared && hasTerms(form.q) ? '自定义' : '',
   ]
     .filter(Boolean)
     .join(' · '),
@@ -318,9 +326,82 @@ function search() {
     form.sort = defaultSort(form)
   const query = build()
   searching.value = searches(query)
+  recompose()
   if (query === settled) return
   settled = query
   emit('search', query)
+}
+
+// --- The query box ----------------------------------------------------------
+// The owner's box shows the whole query: the search's own terms (`q`) and
+// the controls' as terms. Submitted, each term a control says goes to it
+// and the rest stays the search's, so the box and the controls are one
+// list either way. Behind a share the box is a plain keyword search.
+const tagName = (id: string) => tags.value.find((tag) => tag.id === id)?.name
+const tagId = (ref: string) =>
+  tags.value.find((tag) => tag.id === ref.toLowerCase() || tag.name === ref)?.id
+const compose = () => composeQuery(form.q, form, tagName)
+const boxText = shallowRef(compose())
+/** What the box was last given; anything else there is being typed. */
+let composed = boxText.value
+function recompose() {
+  composed = compose()
+  boxText.value = composed
+}
+// Tags read by name once they are known, unless the box is being edited.
+watch(tags, () => {
+  if (boxText.value === composed) recompose()
+})
+const NO_CONTROLS = {
+  platform: '',
+  tag: [],
+  tagMode: '',
+  notTag: [],
+  relOf: [],
+  rel: '',
+  relMin: 0,
+  postType: '',
+  authors: [],
+  media: [],
+  visibility: '',
+  sensitive: '',
+  sourceState: '',
+  from: '',
+  to: '',
+  within: '',
+  zone: '',
+} as const
+function submitQuery(text: string) {
+  const { node, error } = readQuery(text)
+  if (error) return
+  const { controls, q } = splitQuery(node, tagId)
+  Object.assign(form, structuredClone(NO_CONTROLS), controls, { q })
+  customRange.value = !form.within && !!(form.from || form.to)
+  search()
+}
+/**
+ * A query that arrives whole (from the sidebar, a link) moves its terms to
+ * the controls that say them, in place of the address it came with. Not in
+ * a folder, whose saved query is shown as it was saved.
+ */
+function absorb() {
+  if (shared || props.folder) return
+  const { node, error } = readQuery(form.q)
+  if (error || !node) return
+  const { controls, q } = splitQuery(node, tagId)
+  const fields = Object.keys(controls) as (keyof typeof controls)[]
+  if (!fields.length) return
+  // Only into controls the address leaves empty.
+  const empty = (value: unknown) =>
+    Array.isArray(value) ? !value.length : !value
+  if (!fields.every((field) => empty(form[field]))) return
+  Object.assign(form, controls, { q })
+  if (form.from || form.to) customRange.value = true
+  const query = build()
+  settled = query
+  searching.value = searches(query)
+  recompose()
+  emit('search', query, true)
 }
 function clear() {
   const { layout, entity, tab } = form
@@ -334,6 +415,7 @@ function clear() {
   customRange.value = false
   settled = build()
   searching.value = false
+  recompose()
   emit('search', q.toString())
 }
 /** The tab, the layout and the account a list belongs to are not filters:
@@ -383,6 +465,8 @@ watch(
     Object.assign(form, incoming)
     if (incoming.within || (!incoming.from && !incoming.to))
       customRange.value = false
+    recompose()
+    absorb()
   },
 )
 // Authors come a page at a time, most saved posts first, and the search runs
@@ -505,7 +589,6 @@ async function tagChanged(change: TagChange) {
 }
 /** The 关系 filter in words, from its section, which knows the names. */
 const relationSummary = shallowRef('')
-const tagName = (id: string) => tags.value.find((tag) => tag.id === id)?.name
 /** Tags read by name; one no longer listed has none to show. */
 const tagSummary = computed(() => {
   const wanted = form.tag.map(tagName).filter(Boolean)
@@ -523,7 +606,8 @@ const tagSummary = computed(() => {
 
 <template>
   <form class="filters" @submit.prevent="search">
-    <div class="bar">
+    <QueryBox v-if="!shared" v-model="boxText" @submit="submitQuery" />
+    <div v-else class="bar">
       <svg
         class="glass"
         viewBox="0 0 24 24"

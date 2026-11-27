@@ -31,6 +31,7 @@ import GraphNodeCard from './GraphNodeCard.vue'
 import MiniAvatar from './MiniAvatar.vue'
 import PerspectivePicker from './PerspectivePicker.vue'
 import AppLink from './ui/AppLink.vue'
+import RefreshButton from './ui/RefreshButton.vue'
 import SkeletonBox from './ui/SkeletonBox.vue'
 import Spinner from './ui/Spinner.vue'
 import ViewerBar from './ViewerBar.vue'
@@ -358,6 +359,12 @@ const libraryRoute = computed(() => ({
 
     <div ref="controls" class="controls">
       <div class="row">
+        <RefreshButton
+          v-if="keys.length"
+          class="refresh"
+          :busy="loading && !!data"
+          @refresh="load"
+        />
         <div class="segments" role="group" aria-label="对比方向">
           <button
             v-for="option in SIDES"

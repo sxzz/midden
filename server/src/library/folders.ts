@@ -123,9 +123,15 @@ function stored(
     const q = filter.q?.trim()
     if (q) parseQuery(q, OWNER_LIMITS)
     const query = q ? `(${q}) ${converted.query}`.trim() : converted.query
+    // The query's own dates (`since:`, `saved:7d`) count days where the
+    // list did: its zone.
+    const zone = new URLSearchParams(input.filter).get('tz') ?? ''
+    if (zone && !zoneOf(zone)) throw new AppError('invalid_filter')
+    const tz = converted.tz || (q ? zone : '')
     return {
       ...converted,
-      query: storedQuery(db, types, query, converted.tz, self),
+      tz,
+      query: storedQuery(db, types, query, tz, self),
     }
   }
   const out: Partial<{

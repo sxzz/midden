@@ -5,6 +5,7 @@
 // list's own form of it (local dates, the tab's entity types left out).
 // These convert between the two.
 
+import { hasDates } from './query'
 import { defaultRelMin } from './relation-filter'
 
 /** The list tab a query belongs to. */
@@ -125,7 +126,7 @@ export function apiQuery(raw: string, kind?: Kind) {
       q.set('saved_before', d.toISOString())
     }
   }
-  if (!q.get('saved_within')) q.delete('tz')
+  if (!q.get('saved_within') && !hasDates(q.get('q'))) q.delete('tz')
   else if (!q.get('tz')) q.set('tz', localZone())
   return q.toString()
 }
@@ -228,6 +229,7 @@ export function savedFilter(folder: Omit<SavedFolder, 'id'>) {
   if (folder.query) q.set('q', folder.query)
   if (folder.sort) q.set('sort', folder.sort)
   if (folder.order) q.set('order', folder.order)
+  if (folder.tz) q.set('tz', folder.tz)
   return folderFilter(q.toString())
 }
 

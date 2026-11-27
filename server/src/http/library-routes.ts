@@ -30,6 +30,7 @@ import {
   listCounts,
   listHistory,
 } from '#library/read.ts'
+import { suggest, SUGGEST_KINDS } from '#library/suggest.ts'
 import { OWNER_LIMITS } from '#query/ast.ts'
 import { compileQuery } from '#query/compile.ts'
 import { Cursor, query, type Env } from './validate.ts'
@@ -203,6 +204,16 @@ export function libraryRoutes(ctx: AccountsContext) {
       // folder into post and account tabs.
       .get('/collections/count', query(FilterQuery), (c) =>
         c.json(selectionCounts(ctx.db, listQuery(ctx, c.req.valid('query')))),
+      )
+
+      // What the query box offers for the value being typed.
+      .get(
+        '/query/suggest',
+        query(v.object({ kind: v.picklist(SUGGEST_KINDS), prefix: text })),
+        (c) => {
+          const { kind, prefix } = c.req.valid('query')
+          return c.json({ items: suggest(ctx.db, kind, prefix) })
+        },
       )
 
       .get('/collections/authors', query(AuthorFilters), (c) => {

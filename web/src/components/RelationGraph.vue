@@ -20,6 +20,7 @@ import { formatCount } from '../trends'
 import GraphNodeCard from './GraphNodeCard.vue'
 import PerspectivePicker from './PerspectivePicker.vue'
 import AppLink from './ui/AppLink.vue'
+import RefreshButton from './ui/RefreshButton.vue'
 import SkeletonBox from './ui/SkeletonBox.vue'
 import Spinner from './ui/Spinner.vue'
 import ViewerBar from './ViewerBar.vue'
@@ -185,6 +186,7 @@ const compareRoute = computed(() => ({
           </button>
           <Spinner v-if="loading && graph" label="正在加载" class="busy" />
         </div>
+        <RefreshButton :busy="loading && !!graph" @refresh="load" />
         <div class="modes" role="group" aria-label="显示方式">
           <button
             v-for="option in modes"

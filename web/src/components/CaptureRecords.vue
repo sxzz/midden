@@ -23,6 +23,7 @@ import CaptureOptions from './CaptureOptions.vue'
 import InfiniteLoader from './ui/InfiniteLoader.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
+import RefreshButton from './ui/RefreshButton.vue'
 import SkeletonRows from './ui/SkeletonRows.vue'
 const emit = defineEmits<{
   /** A capture finished, so saved content changed. */
@@ -86,6 +87,16 @@ async function refresh() {
       loading.value = false
       schedule()
     }
+  }
+}
+/** 刷新: the same as the timer does, with the button turning meanwhile. */
+const refreshing = shallowRef(false)
+async function refreshNow() {
+  refreshing.value = true
+  try {
+    await refresh()
+  } finally {
+    refreshing.value = false
   }
 }
 async function more() {
@@ -202,6 +213,9 @@ async function submit() {
       </button>
     </form>
   </ListSection>
+  <div v-if="loaded" class="tools">
+    <RefreshButton :busy="refreshing" @refresh="refreshNow" />
+  </div>
   <ListSection v-if="error && !items.length">
     <p class="banner" role="alert">{{ error }}</p>
     <ListButton label="重试" @select="refresh" />
@@ -252,6 +266,11 @@ async function submit() {
 </template>
 
 <style scoped>
+.tools {
+  display: flex;
+  justify-content: flex-end;
+  margin: -8px var(--gutter) -8px;
+}
 .form {
   margin: 0;
 }

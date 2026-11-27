@@ -31,6 +31,7 @@ import InfiniteLoader from './ui/InfiniteLoader.vue'
 import LibraryLayoutToggle from './ui/LibraryLayoutToggle.vue'
 import ListButton from './ui/ListButton.vue'
 import ListSection from './ui/ListSection.vue'
+import RefreshButton from './ui/RefreshButton.vue'
 import type { Collection, TagChange, Usage } from '../api'
 const props = defineProps<{
   items: Collection[]
@@ -50,11 +51,15 @@ const props = defineProps<{
   enlargedMedia?: boolean
   /** Display name of the account this list belongs to, for its reposts. */
   repostedBy?: string
+  /** A refresh (`refresh`) is reading the list again. */
+  refreshing?: boolean
 }>()
 /** `actions`: more buttons for the toolbar, styled like 多选. */
 const slots = useSlots()
 const emit = defineEmits<{
-  search: [query: string]
+  search: [query: string, replace?: boolean]
+  /** Read the list again as it is, keeping what is shown meanwhile. */
+  refresh: []
   more: []
   retry: []
   tagsChanged: [change: TagChange]
@@ -171,14 +176,25 @@ const storage = computed(() =>
     :query="query"
     :within-profile="withinProfile"
     :folder="folder"
-    @search="(value) => emit('search', value)"
+    @search="(value, replace) => emit('search', value, replace)"
     @tags-changed="(change) => emit('tagsChanged', change)"
   />
   <div
-    v-if="totalText || (!selecting && items.length) || albums || slots.actions"
+    v-if="
+      totalText ||
+      (!selecting && items.length) ||
+      albums ||
+      slots.actions ||
+      !hideFilters
+    "
     class="layout-bar"
   >
     <span v-if="totalText" class="total">{{ totalText }}</span>
+    <RefreshButton
+      v-if="!hideFilters"
+      :busy="refreshing"
+      @refresh="emit('refresh')"
+    />
     <slot name="actions" />
     <button
       v-if="!selecting && items.length && !shared"
