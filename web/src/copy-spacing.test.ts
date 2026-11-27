@@ -18,6 +18,13 @@ const ALLOWED: Record<string, string> = {
   '发送 /passkey 添加': 'the /passkey command stands apart',
 }
 
+/** Files left out, each with why. */
+const SKIPPED: Record<string, string> = {
+  // Query examples are typed as written (`猫 OR 狗`); the help is restyled
+  // elsewhere, its copy with it.
+  'components/QueryHelp.vue': 'query syntax, spaced as typed',
+}
+
 // Tests run from the web package (its vitest config).
 const root = join(process.cwd(), 'src')
 function files(dir: string): string[] {
@@ -41,7 +48,7 @@ function withoutComments(text: string) {
 it('puts no space between Chinese and Latin letters or digits in copy', () => {
   const found = files(root).flatMap((path) => {
     const name = relative(root, path)
-    if (name === 'testing' || name.startsWith('testing/')) return []
+    if (name.startsWith('testing/') || SKIPPED[name]) return []
     return withoutComments(readFileSync(path, 'utf8'))
       .split('\n')
       .filter(
