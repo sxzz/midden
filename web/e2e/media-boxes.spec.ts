@@ -259,6 +259,13 @@ test('two wide images are stacked; an ordinary pair shares a height', async ({
   const b = await box(two!)
   expect(a.width).toBeCloseTo(b.width, 0)
   expect(b.y).toBeGreaterThan(a.y + a.height - 1)
+  // Apart: a gap between the tiles, and each its own edge, so two dark
+  // images never read as one.
+  expect(b.y - (a.y + a.height)).toBeGreaterThanOrEqual(2)
+  for (const frame of [one!, two!])
+    expect(
+      await frame.evaluate((el) => getComputedStyle(el, '::after').boxShadow),
+    ).toMatch(/inset/)
 
   await detail(page, [image(1, 800, 800), image(2, 1200, 600)])
   const [left, right] = await page.locator('.media .frame').all()
@@ -267,6 +274,7 @@ test('two wide images are stacked; an ordinary pair shares a height', async ({
   expect(l.height).toBeCloseTo(r.height, 0)
   expect(r.x).toBeGreaterThan(l.x + l.width - 1)
   expect(r.width / l.width).toBeCloseTo(2, 0)
+  expect(r.x - (l.x + l.width)).toBeGreaterThanOrEqual(2)
 })
 
 test('a list row boxes a single wide image by its shape', async ({ page }) => {
@@ -278,6 +286,23 @@ test('a list row boxes a single wide image by its shape', async ({ page }) => {
   expect(rect.ratio).toBeCloseTo(6, 0)
   const img = await box(tile.locator('img'))
   expect(img.height).toBeCloseTo(rect.height, 0)
+})
+
+test('a list row keeps a gap and an edge between two tiles', async ({
+  page,
+}) => {
+  await serve(page, [image(1, 1200, 200), image(2, 1200, 240)])
+  await page.goto('/app/')
+  const tiles = page.locator('.thumbs .tile')
+  await expect(tiles).toHaveCount(2)
+  const a = await box(tiles.nth(0))
+  const b = await box(tiles.nth(1))
+  expect(b.y - (a.y + a.height)).toBeGreaterThanOrEqual(2)
+  expect(
+    await tiles
+      .nth(0)
+      .evaluate((el) => getComputedStyle(el, '::after').boxShadow),
+  ).toMatch(/inset/)
 })
 
 test('an image with no smaller size boxes by the size the platform gave and shows the original', async ({

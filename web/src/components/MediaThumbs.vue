@@ -283,6 +283,16 @@ const overflow = computed(() => media.value.length - tiles.value.length)
 .count-3 .tile:first-child {
   grid-row: span 2;
 }
+/* A hairline inside each tile's own rounded edge, so dark media stays apart
+   from a dark page and from its neighbour across the gap. */
+.tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--media-edge);
+  pointer-events: none;
+}
 .tile {
   position: relative;
   display: grid;

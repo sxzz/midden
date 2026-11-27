@@ -114,6 +114,16 @@ const placeholders = 12
   overflow: hidden;
   background: var(--fill);
 }
+/* A hairline inside each tile's own rounded edge, so dark media stays apart
+   from a dark page and from its neighbour across the gap. */
+.tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--media-edge);
+  pointer-events: none;
+}
 .tile.skeleton {
   aspect-ratio: 1;
   border-radius: 0;

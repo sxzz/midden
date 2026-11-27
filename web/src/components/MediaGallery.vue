@@ -301,6 +301,16 @@ watch(
   border-radius: 8px;
   background: var(--fill);
 }
+/* A hairline inside each tile's own rounded edge, so dark media stays apart
+   from a dark page and from its neighbour across the gap. */
+.frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--media-edge);
+  pointer-events: none;
+}
 .frame .blurred {
   transform: scale(1.12);
 }

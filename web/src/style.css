@@ -19,6 +19,8 @@
     0 24px 64px rgba(0, 0, 0, 0.18), 0 4px 14px rgba(0, 0, 0, 0.1);
   --primary-fill: #2f80e4;
   --destructive-fill: #d9363e;
+  /* The edge of a media tile (see MediaGallery). */
+  --media-edge: rgba(0, 0, 0, 0.1);
   --radius: 10px;
   --inset: 16px;
   --gutter: 16px;
@@ -50,6 +52,7 @@
       0 24px 64px rgba(0, 0, 0, 0.7), 0 4px 14px rgba(0, 0, 0, 0.5);
     --primary-fill: #2f80e4;
     --destructive-fill: #d9363e;
+    --media-edge: rgba(255, 255, 255, 0.14);
     color-scheme: dark;
   }
 }
@@ -67,6 +70,7 @@
   --raised-border: rgba(255, 255, 255, 0.16);
   --raised-shadow:
     0 24px 64px rgba(0, 0, 0, 0.7), 0 4px 14px rgba(0, 0, 0, 0.5);
+  --media-edge: rgba(255, 255, 255, 0.14);
   color-scheme: dark;
 }
 @media (max-width: 360px) {

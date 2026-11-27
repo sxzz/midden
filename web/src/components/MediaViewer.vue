@@ -1095,6 +1095,15 @@ watch(
 .strip::-webkit-scrollbar {
   display: none;
 }
+/* The viewer is dark whatever the theme: a light hairline. */
+.thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  pointer-events: none;
+}
 .thumb {
   position: relative;
   flex: none;
