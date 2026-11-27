@@ -17,7 +17,7 @@ import type { DetailAside } from '../aside'
 // The sidebar beside a collection's page: what the page loaded, as a
 // summary with links, and for the owner the update (the page's own sheets
 // open from here). A profile's relations, a post's author and the posts
-// and accounts it links to, the captures, then the pages of records.
+// and accounts it links to, the captures, then its 历史.
 const props = defineProps<{ detail: DetailAside }>()
 const collection = computed(() => props.detail.collection)
 const root = computed(() =>
@@ -60,10 +60,6 @@ const author = computed(() => {
   if (!graph || profile.value) return undefined
   return authorIdentity(authoredBy(graph, graph.root))
 })
-const records = computed(
-  () =>
-    props.detail.pages.stats || (profile.value && props.detail.pages.changes),
-)
 const asText = (value: unknown) =>
   typeof value === 'string' && value.trim() ? value.trim() : ''
 /** A related post or account in one line, by its text or its name. */
@@ -184,12 +180,6 @@ const progressText = computed(() =>
           <span>{{ row.label }}</span>
         </component>
       </div>
-      <AppLink
-        v-if="detail.pages.follows"
-        class="aside-more"
-        :to="collectionRoute(detail.id, 'follows')"
-        >关注变化</AppLink
-      >
       <AppLink class="aside-more" :to="collectionRoute(detail.id, 'graph')"
         >关系图谱</AppLink
       >
@@ -309,19 +299,13 @@ const progressText = computed(() =>
         >{{ detail.updating ? '更新中，查看进度' : '最近一次更新' }}</AppLink
       >
     </section>
-    <section v-if="records" class="aside-box" aria-label="记录">
+    <section v-if="detail.history" class="aside-box" aria-label="记录">
       <h2>记录</h2>
+      <!-- An account's 资料, 数据 and 关注 are the tabs of its 历史. -->
       <AppLink
-        v-if="detail.pages.stats"
         class="aside-more"
-        :to="collectionRoute(detail.id, 'stats')"
-        >统计趋势</AppLink
-      >
-      <AppLink
-        v-if="profile && detail.pages.changes"
-        class="aside-more"
-        :to="collectionRoute(detail.id, 'changes')"
-        >资料修改记录</AppLink
+        :to="collectionRoute(detail.id, detail.history)"
+        >{{ profile ? '历史' : '统计趋势' }}</AppLink
       >
     </section>
   </template>

@@ -247,8 +247,8 @@ test('the detail page opens its pages and relation counts in a new tab', async (
   await page.goto(`/collection/${profileId}`)
   await opensInNewTab(
     page,
-    page.getByRole('link', { name: '统计趋势' }),
-    new RegExp(`/collection/${profileId}/stats$`),
+    page.getByRole('link', { name: '历史' }),
+    new RegExp(String.raw`/collection/${profileId}/history(/\w+)?$`),
   )
   await opensInNewTab(
     page,
@@ -345,9 +345,11 @@ test('the Mini App follows a modified click in place', async ({ page }) => {
   page.context().on('page', (tab) => tabs.push(tab))
   await page.goto(`/collection/${profileId}`)
   await page
-    .getByRole('link', { name: '统计趋势' })
+    .getByRole('link', { name: '历史' })
     .click({ modifiers: ['ControlOrMeta'] })
-  await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/stats$`))
+  await expect(page).toHaveURL(
+    new RegExp(String.raw`/collection/${profileId}/history(/\w+)?$`),
+  )
   await page.goBack()
   await page.getByRole('link', { name: '关系图谱' }).click({ button: 'middle' })
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/graph$`))

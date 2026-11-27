@@ -17,8 +17,11 @@ export interface DetailAside {
   /** The latest update's record, while it runs or after it ended. */
   record: string
   updating: boolean
-  /** Which of the collection's own pages have anything to show. */
-  pages: { stats: boolean; changes: boolean; follows: boolean }
+  /**
+   * Where its 历史 opens (an account's first tab with anything to show, a
+   * post's counts), or none when there is nothing.
+   */
+  history?: 'history' | 'history-data' | 'history-follows'
   /** A profile's 定期更新: how often, and when it runs next. */
   watch?: { label: string; hint?: string }
   /** 已公开, or the shares it is public through; the owner's only. */

@@ -18,9 +18,9 @@ describe('which tab a page belongs to', () => {
       'collections',
       'folder',
       'collection',
-      'collection-stats',
-      'collection-changes',
-      'collection-follows',
+      'collection-history',
+      'collection-history-data',
+      'collection-history-follows',
     ])
       expect(tabOf(name)).toBe('explore')
     // 采集 is a tab of its own: leaving 探索 from it does not leave 探索 there.

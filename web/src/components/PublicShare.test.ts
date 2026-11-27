@@ -298,18 +298,36 @@ it('shows a shared post read-only, its links kept inside the share', async () =>
   )
   // Its follows are shared with it, and their page stays in the share.
   await vi.waitFor(() => expect(el.textContent).toContain('关系网'))
-  const follows = [...el.querySelectorAll('a')].find((a) =>
-    a.textContent?.trim().startsWith('关注变化'),
-  )!
-  expect(follows.getAttribute('href')).toBe(
-    `/s/${SLUG}/collection/${PROFILE}/follows`,
+  // One entry, 历史, whose 关注 tab stays in the share.
+  const history = await vi.waitFor(() => {
+    const found = [...el.querySelectorAll('a')].find((a) =>
+      a.textContent?.trim().startsWith('历史'),
+    )
+    expect(found).toBeDefined()
+    return found!
+  })
+  expect(history.getAttribute('href')).toMatch(
+    new RegExp(`^/s/${SLUG}/collection/${PROFILE}/history`),
   )
-  follows.click()
+  history.click()
+  const tab = await vi.waitFor(() => {
+    const found = [...el.querySelectorAll<HTMLAnchorElement>('nav a')].find(
+      (a) => a.textContent?.trim() === '关注',
+    )
+    expect(found).toBeDefined()
+    return found!
+  })
+  expect(tab.getAttribute('href')).toBe(
+    `/app/s/${SLUG}/collection/${PROFILE}/history/follows`,
+  )
+  tab.click()
   await vi.waitFor(() =>
-    expect(router.currentRoute.value.name).toBe('share-collection-follows'),
+    expect(router.currentRoute.value.name).toBe(
+      'share-collection-history-follows',
+    ),
   )
   await vi.waitFor(() => expect(el.textContent).toContain('别人'))
-  expect(el.querySelector('h1')?.textContent).toBe('关注变化')
+  expect(el.querySelector('h1')?.textContent).toBe('历史')
   expect(paths().every((path) => path.startsWith('/public/'))).toBe(true)
   await nextTick()
 })

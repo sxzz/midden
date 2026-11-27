@@ -128,16 +128,16 @@ it('renders a list row as a link with `to`, another site with `href`, an action 
   const el = mount(ListButton, {
     label: '统计趋势',
     chevron: true,
-    to: { name: 'collection-stats', params: { id: 'c1' } },
+    to: { name: 'collection-history-data', params: { id: 'c1' } },
     onNavigate: navigate,
   })
   const row = el.querySelector('a.row')!
-  expect(row.getAttribute('href')).toBe('/collection/c1/stats')
+  expect(row.getAttribute('href')).toBe('/collection/c1/history/data')
   expect(row.textContent).toContain('统计趋势')
   expect(row.querySelector('.chevron')).not.toBeNull()
   click(row)
   expect(router.push).toHaveBeenCalledWith({
-    name: 'collection-stats',
+    name: 'collection-history-data',
     params: { id: 'c1' },
   })
   expect(navigate).toHaveBeenCalledOnce()

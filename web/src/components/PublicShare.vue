@@ -11,7 +11,7 @@ import { APIError, errorText, type PublicShareInfo } from '../api'
 import { backButton, host } from '../host'
 import { SIDEBAR, useMedia } from '../layout'
 import { readShare } from '../reads'
-import { detailTitle, setDocumentTitle } from '../titles'
+import { detailTitle, kindOf, setDocumentTitle } from '../titles'
 import ShareAside from './ShareAside.vue'
 import BackLink from './ui/BackLink.vue'
 import ListSection from './ui/ListSection.vue'
@@ -59,10 +59,15 @@ const standalone = !host()?.initData
 const graph = computed(() => route.name === 'share-collection-graph')
 const sidebarRoom = useMedia(SIDEBAR)
 const sidebar = computed(() => sidebarRoom.value && !graph.value)
+const history = computed(() =>
+  String(route.name ?? '').startsWith('share-collection-history'),
+)
+/** 数据, the counts, has no media to cover. */
+const counts = computed(() => route.name === 'share-collection-history-data')
 const title = computed(() => {
-  if (route.name === 'share-collection-stats') return '统计趋势'
-  if (route.name === 'share-collection-changes') return '资料修改记录'
-  if (route.name === 'share-collection-follows') return '关注变化'
+  // An account's 历史; a post's is its counts alone (CollectionHistory).
+  if (history.value)
+    return kindOf(String(route.params.id)) === 'post' ? '统计趋势' : '历史'
   if (route.name === 'share-collection-graph') return '关系图谱'
   if (nested.value) return detailTitle(String(route.params.id))
   if (share.value?.target === 'collection')
@@ -92,9 +97,7 @@ watch(
 const viewProps = computed(() =>
   route.name === 'share'
     ? { share: share.value, showSensitive: showSensitive.value }
-    : route.name === 'share-collection-stats'
-      ? {}
-      : { showSensitive: showSensitive.value },
+    : { showSensitive: showSensitive.value },
 )
 </script>
 
@@ -129,7 +132,7 @@ const viewProps = computed(() =>
       </BackLink>
       <h1>{{ title }}</h1>
       <button
-        v-if="route.name !== 'share-collection-stats'"
+        v-if="!counts"
         type="button"
         class="icon-button sensitive-toggle"
         aria-label="显示敏感内容"

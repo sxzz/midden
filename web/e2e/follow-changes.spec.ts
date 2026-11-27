@@ -246,9 +246,16 @@ test('updates a profile with its lists and lists its follow changes', async ({
   await page.getByRole('link', { name: '返回', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/collection/${profileId}$`))
 
-  await page.getByRole('link', { name: '关注变化' }).click()
-  await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/follows$`))
-  await expect(page.locator('h1')).toHaveText('关注变化')
+  // 关注变化 is the 关注 tab of the account's 历史.
+  await page.getByRole('link', { name: '历史' }).click()
+  await page
+    .getByRole('navigation', { name: '历史' })
+    .getByRole('link', { name: '关注' })
+    .click()
+  await expect(page).toHaveURL(
+    new RegExp(`/collection/${profileId}/history/follows$`),
+  )
+  await expect(page.locator('h1')).toHaveText('历史')
   const entry = page.locator('.entry')
   await expect(entry).toHaveCount(1)
   await expect(entry.locator('.note')).toHaveText([/之后$/, /之后$/])

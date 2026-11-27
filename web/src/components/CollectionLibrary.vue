@@ -52,7 +52,7 @@ import { restoreScroll } from '../scroll-restore'
 import { findEntry, findSection } from '../settings-sections'
 import { forgetPages, lastPage, leftScroll, tabStates } from '../tab-state'
 import { tabOf as barTabOf, tabs as barTabs, isTabRoot } from '../tabbar'
-import { detailTitle, setDocumentTitle } from '../titles'
+import { detailTitle, kindOf, setDocumentTitle } from '../titles'
 import AccountsDialog from './AccountsDialog.vue'
 import ConfirmSheet from './ConfirmSheet.vue'
 import FolderMenuSheet from './FolderMenuSheet.vue'
@@ -170,9 +170,11 @@ function closeAccounts() {
   else void router.replace(under)
 }
 const capture = computed(() => route.name === 'capture')
-const stats = computed(() => route.name === 'collection-stats')
-const changes = computed(() => route.name === 'collection-changes')
-const follows = computed(() => route.name === 'collection-follows')
+/** An account's 历史, on one of its tabs; 数据 alone has no media. */
+const historyPage = computed(() =>
+  String(route.name ?? '').startsWith('collection-history'),
+)
+const stats = computed(() => route.name === 'collection-history-data')
 const graphPage = computed(() => route.name === 'collection-graph')
 const comparePage = computed(() => route.name === 'compare')
 const relationsPage = computed(() => route.name === 'relations')
@@ -207,9 +209,6 @@ const titles: Record<string, string> = {
   captures: '采集',
   'captures-watches': '采集',
   capture: '采集记录',
-  'collection-stats': '统计趋势',
-  'collection-changes': '资料修改记录',
-  'collection-follows': '关注变化',
   'collection-graph': '关系图谱',
   compare: '关系对比',
   relations: '关系',
@@ -229,6 +228,9 @@ const title = computed(() => {
       .label
   if (route.name === 'settings-section')
     return findSection(String(route.params.section))!.label
+  // A post's 历史 is its counts alone (CollectionHistory).
+  if (historyPage.value)
+    return kindOf(String(route.params.id)) === 'post' ? '统计趋势' : '历史'
   return titles[String(route.name)] || '我的收藏'
 })
 watch(title, (value) => setDocumentTitle(value), { immediate: true })
@@ -315,12 +317,9 @@ function viewKey(target: ViewRoute) {
   // 设置's list, sections and entries are one view, which shows them.
   if (barTabOf(target.name ?? undefined) === 'settings') return 'settings'
   if (target.name === 'capture') return `capture:${String(target.params.id)}`
-  if (target.name === 'collection-stats')
-    return `stats:${String(target.params.id)}`
-  if (target.name === 'collection-changes')
-    return `changes:${String(target.params.id)}`
-  if (target.name === 'collection-follows')
-    return `follows:${String(target.params.id)}`
+  // Each tab of 历史 is a view of its own, as 采集's are.
+  if (String(target.name ?? '').startsWith('collection-history'))
+    return `${String(target.name)}:${String(target.params.id)}`
   if (target.name === 'collection-graph')
     return `graph:${String(target.params.id)}`
   if (target.name === 'compare') return 'compare'
@@ -719,10 +718,9 @@ const viewProps = computed(() => {
       },
     }
   if (captures.value || capture.value) return { onSaved: saved }
-  if (stats.value || route.name === 'captures-watches') return {}
+  if (route.name === 'captures-watches') return {}
   if (
-    changes.value ||
-    follows.value ||
+    historyPage.value ||
     graphPage.value ||
     comparePage.value ||
     relationsPage.value

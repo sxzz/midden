@@ -6,15 +6,14 @@ import {
 import CaptureRecordDetail from './components/CaptureRecordDetail.vue'
 import CaptureRecords from './components/CaptureRecords.vue'
 import CollectionDetail from './components/CollectionDetail.vue'
-import CollectionTrends from './components/CollectionTrends.vue'
+import CollectionHistory from './components/CollectionHistory.vue'
 import CollectionView from './components/CollectionView.vue'
-import FollowChanges from './components/FollowChanges.vue'
 import PasskeySetup from './components/PasskeySetup.vue'
-import ProfileChanges from './components/ProfileChanges.vue'
 import PublicHome from './components/PublicHome.vue'
 import SettingsView from './components/SettingsView.vue'
 import WatchesView from './components/WatchesView.vue'
 import { settingsSections } from './settings-sections'
+import type { HistoryTab } from './share'
 
 // The graph page brings sigma and graphology: loaded only when opened.
 const RelationGraph = () => import('./components/RelationGraph.vue')
@@ -36,6 +35,11 @@ const ENTRIES = settingsSections
 const idOnly = (route: RouteLocationNormalized) => ({
   id: String(route.params.id),
 })
+/** A tab of 历史: the collection, and which tab the address opens. */
+const historyTab = (tab: HistoryTab) => (route: RouteLocationNormalized) => ({
+  id: String(route.params.id),
+  tab,
+})
 
 export const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -54,23 +58,25 @@ export const router = createRouter({
       component: CollectionDetail,
       props: true,
     },
+    // 历史 of an account, one tab per address (CollectionHistory): 资料,
+    // 数据 and 关注; a post has 数据 alone.
     {
-      path: '/collection/:id([a-f0-9-]+)/stats',
-      name: 'collection-stats',
-      component: CollectionTrends,
-      props: true,
+      path: '/collection/:id([a-f0-9-]+)/history',
+      name: 'collection-history',
+      component: CollectionHistory,
+      props: historyTab('profile'),
     },
     {
-      path: '/collection/:id([a-f0-9-]+)/changes',
-      name: 'collection-changes',
-      component: ProfileChanges,
-      props: true,
+      path: '/collection/:id([a-f0-9-]+)/history/data',
+      name: 'collection-history-data',
+      component: CollectionHistory,
+      props: historyTab('data'),
     },
     {
-      path: '/collection/:id([a-f0-9-]+)/follows',
-      name: 'collection-follows',
-      component: FollowChanges,
-      props: true,
+      path: '/collection/:id([a-f0-9-]+)/history/follows',
+      name: 'collection-history-follows',
+      component: CollectionHistory,
+      props: historyTab('follows'),
     },
     {
       path: '/collection/:id([a-f0-9-]+)/graph',
@@ -126,30 +132,30 @@ export const router = createRouter({
       meta: { public: true },
     },
     {
-      path: `${SHARE}/collection/:id([a-f0-9-]+)/stats`,
-      name: 'share-collection-stats',
-      component: CollectionTrends,
-      props: idOnly,
+      path: `${SHARE}/collection/:id([a-f0-9-]+)/history`,
+      name: 'share-collection-history',
+      component: CollectionHistory,
+      props: historyTab('profile'),
       meta: { public: true },
     },
     {
-      path: `${SHARE}/collection/:id([a-f0-9-]+)/follows`,
-      name: 'share-collection-follows',
-      component: FollowChanges,
-      props: idOnly,
+      path: `${SHARE}/collection/:id([a-f0-9-]+)/history/data`,
+      name: 'share-collection-history-data',
+      component: CollectionHistory,
+      props: historyTab('data'),
+      meta: { public: true },
+    },
+    {
+      path: `${SHARE}/collection/:id([a-f0-9-]+)/history/follows`,
+      name: 'share-collection-history-follows',
+      component: CollectionHistory,
+      props: historyTab('follows'),
       meta: { public: true },
     },
     {
       path: `${SHARE}/collection/:id([a-f0-9-]+)/graph`,
       name: 'share-collection-graph',
       component: RelationGraph,
-      props: idOnly,
-      meta: { public: true },
-    },
-    {
-      path: `${SHARE}/collection/:id([a-f0-9-]+)/changes`,
-      name: 'share-collection-changes',
-      component: ProfileChanges,
       props: idOnly,
       meta: { public: true },
     },

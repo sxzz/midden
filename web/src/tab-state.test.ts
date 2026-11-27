@@ -148,10 +148,13 @@ describe('recording each tab', () => {
       'collections',
       '/',
     ])
-    states = go(states, 'collection-stats', '/collection/a/stats', 'push', [
-      'collection',
-      '/collection/a',
-    ])
+    states = go(
+      states,
+      'collection-history-data',
+      '/collection/a/history/data',
+      'push',
+      ['collection', '/collection/a'],
+    )
     states = forget(states, (path) => path.startsWith('/collection/a'))
     expect(states.explore.stack).toEqual(['/'])
   })

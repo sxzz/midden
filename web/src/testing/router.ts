@@ -7,9 +7,9 @@ const PATHS: Record<string, string> = {
   collections: '/',
   folder: '/folder/:id',
   collection: '/collection/:id',
-  'collection-stats': '/collection/:id/stats',
-  'collection-changes': '/collection/:id/changes',
-  'collection-follows': '/collection/:id/follows',
+  'collection-history': '/collection/:id/history',
+  'collection-history-data': '/collection/:id/history/data',
+  'collection-history-follows': '/collection/:id/history/follows',
   'collection-graph': '/collection/:id/graph',
   compare: '/compare',
   relations: '/relations',
@@ -21,10 +21,10 @@ const PATHS: Record<string, string> = {
   capture: '/captures/:id',
   share: '/s/:slug',
   'share-collection': '/s/:slug/collection/:id',
-  'share-collection-stats': '/s/:slug/collection/:id/stats',
-  'share-collection-follows': '/s/:slug/collection/:id/follows',
+  'share-collection-history': '/s/:slug/collection/:id/history',
+  'share-collection-history-data': '/s/:slug/collection/:id/history/data',
+  'share-collection-history-follows': '/s/:slug/collection/:id/history/follows',
   'share-collection-graph': '/s/:slug/collection/:id/graph',
-  'share-collection-changes': '/s/:slug/collection/:id/changes',
 }
 
 export function resolveHref(to: RouteLocationRaw): string {

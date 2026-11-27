@@ -143,10 +143,13 @@ test('lists a profile’s changes from its detail and returns to it', async ({
   )
   await expect(
     update.locator('xpath=following-sibling::section[1]'),
-  ).toContainText('资料修改记录')
-  await page.getByRole('link', { name: '资料修改记录' }).click()
-  await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/changes$`))
-  await expect(page.locator('h1')).toHaveText('资料修改记录')
+  ).toContainText('历史')
+  await page.getByRole('link', { name: '历史' }).click()
+  await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/history$`))
+  await expect(page.locator('h1')).toHaveText('历史')
+  await expect(
+    page.getByRole('navigation', { name: '历史' }).getByRole('link'),
+  ).toHaveText(['资料', '数据', '关注'])
 
   const versions = page.locator('.versions')
   await expect(versions.locator('.name')).toHaveText('合成账号')

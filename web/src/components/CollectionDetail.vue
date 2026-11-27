@@ -148,12 +148,22 @@ const handle = computed(() =>
     : '',
 )
 /**
- * A profile's history is read on its 资料修改记录 page, with the timeline
+ * A profile's history is read on the 资料 tab of its 历史, with the timeline
  * through its versions; the page is there once either has anything.
  */
 const changesPage = computed(
   () => isProfile.value && (changeable.value || points.value.length > 1),
 )
+/**
+ * Where 历史 opens (CollectionHistory): an account on the first of its tabs
+ * with anything to show, a post on its counts. None when it has nothing.
+ */
+const history = computed(() => {
+  if (isProfile.value && changesPage.value) return 'history'
+  if (trendable.value) return 'history-data'
+  if (isProfile.value && followChangeable.value) return 'history-follows'
+  return undefined
+})
 /** Whether the first group lists anything; behind a share it may not. */
 const pages = computed(
   () =>
@@ -271,11 +281,7 @@ useAside(() => ({
   morePoints: !!next.value,
   record: record.value,
   updating: updating.value,
-  pages: {
-    stats: trendable.value,
-    changes: !!changesPage.value,
-    follows: followChangeable.value,
-  },
+  history: history.value,
   watch: watchTrailing.value
     ? { label: watchTrailing.value, hint: watchHint.value }
     : undefined,
@@ -467,7 +473,7 @@ const version = computed(() =>
         </div>
       </dl>
     </ListSection>
-    <!-- A profile's timeline is on its 资料修改记录 page. -->
+    <!-- A profile's timeline is on the 资料 tab of its 历史. -->
     <ListSection v-if="!isProfile && points.length > 1" title="内容变化">
       <RevisionTimeline
         :points="points"
@@ -516,22 +522,10 @@ const version = computed(() =>
         :footnote="shared ? version : undefined"
       >
         <ListButton
-          v-if="trendable"
-          label="统计趋势"
+          v-if="history"
+          :label="isProfile ? '历史' : '统计趋势'"
           chevron
-          :to="collectionRoute(id, 'stats')"
-        />
-        <ListButton
-          v-if="changesPage"
-          label="资料修改记录"
-          chevron
-          :to="collectionRoute(id, 'changes')"
-        />
-        <ListButton
-          v-if="followChangeable"
-          label="关注变化"
-          chevron
-          :to="collectionRoute(id, 'follows')"
+          :to="collectionRoute(id, history)"
         />
         <ListButton
           v-if="follows"

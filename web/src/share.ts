@@ -22,10 +22,13 @@ export function collectionHref(id: string) {
   return appHref(shareSlug.value ? `/s/${shareSlug.value}${path}` : path)
 }
 
+/** The tabs of an account's 历史 (CollectionHistory): 资料, 数据, 关注. */
+export type HistoryTab = 'profile' | 'data' | 'follows'
+
 /** A collection's page, or one of its own pages, as a route. */
 export function collectionRoute(
   id: string,
-  page?: 'stats' | 'changes' | 'follows' | 'graph',
+  page?: 'history' | 'history-data' | 'history-follows' | 'graph',
 ): RouteLocationRaw {
   const name = page ? `collection-${page}` : 'collection'
   return shareSlug.value

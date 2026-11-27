@@ -334,7 +334,7 @@ it('keeps the follow counts plain behind a public link', async () => {
   ).toEqual(['2', '3', '1'])
 })
 
-it("moves a profile's timeline to its 资料修改记录 page; a post keeps its own", async () => {
+it("moves a profile's timeline to the 资料 tab of its 历史; a post keeps its own", async () => {
   history = ['c2', 'c1'].map((id) => ({
     capture_id: id,
     revision_id: id,
@@ -344,12 +344,12 @@ it("moves a profile's timeline to its 资料修改记录 page; a post keeps its 
   // Two versions are enough for the page, with no change listed yet.
   const link = await vi.waitFor(() => {
     const found = [...el.querySelectorAll('a')].find(
-      (a) => a.textContent?.trim().replace(/›$/, '').trim() === '资料修改记录',
+      (a) => a.textContent?.trim().replace(/›$/, '').trim() === '历史',
     )
     expect(found).toBeDefined()
     return found!
   })
-  expect(link.getAttribute('href')).toBe('/collection/profile/changes')
+  expect(link.getAttribute('href')).toBe('/collection/profile/history')
   expect(el.querySelector('input[type="range"]')).toBeNull()
   expect(el.textContent).not.toContain('资料变化')
   unmount()
@@ -359,5 +359,5 @@ it("moves a profile's timeline to its 资料修改记录 page; a post keeps its 
     expect(shown.el.querySelector('input[type="range"]')).not.toBeNull(),
   )
   expect(shown.el.textContent).toContain('内容变化')
-  expect(shown.el.textContent).not.toContain('资料修改记录')
+  expect(shown.el.textContent).not.toContain('历史')
 })

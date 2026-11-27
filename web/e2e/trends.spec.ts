@@ -64,9 +64,12 @@ test('charts a profile’s counts from its detail and returns to it', async ({
     return route.fulfill({ json })
   })
   await page.goto(`/collection/${profileId}`)
-  await page.getByRole('link', { name: '统计趋势' }).click()
-  await expect(page).toHaveURL(new RegExp(`/collection/${profileId}/stats$`))
-  await expect(page.locator('h1')).toHaveText('统计趋势')
+  // An account with counts alone: its 历史 opens on 数据.
+  await page.getByRole('link', { name: '历史' }).click()
+  await expect(page).toHaveURL(
+    new RegExp(`/collection/${profileId}/history/data$`),
+  )
+  await expect(page.locator('h1')).toHaveText('历史')
   await expect(page.locator('.summary')).toHaveText(
     '4 次抓取 · 11月1日 – 11月5日',
   )
