@@ -9,6 +9,7 @@ import {
   queueStatus,
   rateLimitEnd,
   rateLimitName,
+  slowQueryText,
   webLatency,
 } from '../jobs'
 import ListButton from './ui/ListButton.vue'
@@ -18,7 +19,8 @@ import SkeletonRows from './ui/SkeletonRows.vue'
 // 设置 → 管理员面板 → 后台任务: what the worker is doing and how far behind
 // it is; pausing all of it, or the job types that only tidy up; the APIs
 // that rate-limited us, whose jobs wait for the end; how fast the web
-// process has answered lately. Read again every few seconds while open.
+// process has answered lately, and the read queries that were slow. Read
+// again every few seconds while open.
 const REFRESH = 5000
 const now = shallowRef(new Date())
 const busy = shallowRef(false)
@@ -32,8 +34,15 @@ const {
   pending,
   load: read,
 } = useStale(() => call(client.queue.$get()))
+// Slow queries, read alongside and kept the same way: the list stays as it
+// was while the next read runs or if it fails.
+const {
+  data: slow,
+  pending: slowPending,
+  load: readSlow,
+} = useStale(() => call(client.queue['slow-queries'].$get()))
 async function load() {
-  await read()
+  await Promise.all([read(), readSlow()])
   now.value = new Date()
 }
 onShown(
@@ -85,6 +94,12 @@ function toggleType(type: string) {
 }
 
 const status = computed(() => state.value && queueStatus(state.value))
+const slowQueries = computed(() =>
+  (slow.value?.items ?? []).map((q) => ({
+    id: q.id,
+    ...slowQueryText(q, now.value),
+  })),
+)
 const latency = computed(() => state.value?.web && webLatency(state.value.web))
 </script>
 
@@ -145,6 +160,17 @@ const latency = computed(() => state.value?.web && webLatency(state.value.web))
       <p v-if="latency.slow" class="line">{{ latency.slow }}</p>
     </ListSection>
   </template>
+  <SkeletonRows v-if="slowPending" title :rows="2" />
+  <ListSection v-else-if="slow" title="慢查询（300 ms 以上）">
+    <p v-if="!slowQueries.length" class="line">无</p>
+    <div v-for="q in slowQueries" :key="q.id" class="slow">
+      <p class="slow-head">
+        <span>{{ q.title }}</span>
+        <span class="figures">{{ q.figures }}</span>
+      </p>
+      <p class="slow-query">{{ q.query }}</p>
+    </div>
+  </ListSection>
 </template>
 
 <style scoped>
@@ -179,5 +205,29 @@ const latency = computed(() => state.value?.web && webLatency(state.value.web))
   color: var(--subtle);
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+.slow {
+  margin: 0 0 0 var(--inset);
+  padding: 10px var(--inset) 10px 0;
+  box-shadow: inset 0 1px 0 var(--separator);
+}
+.slow:first-child {
+  box-shadow: none;
+}
+.slow-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  font-size: 15px;
+}
+.slow-query {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--subtle);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

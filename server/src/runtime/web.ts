@@ -13,13 +13,14 @@ import { WebLoad } from '#http/load.ts'
 import { pooledWebReads } from '#http/offload.ts'
 import { watchLitestream } from '#litestream.ts'
 import { QueryPool, READ_THREAD } from '#reads/pool.ts'
+import { SlowQueryLog } from '#reads/slow-log.ts'
 import { launchBot, type BotHandle } from '#telegram/launch.ts'
 import { TokenUsage } from '#tokens/usage.ts'
 import { StorageUsage } from '#usage/storage.ts'
+import { WEB_BUSY_TIMEOUT, type Runtime } from './context.ts'
 import { writeStatus, type Stamped, type WorkerReport } from './status-file.ts'
 import type { WebLoadSignal } from '#jobs/throttle.ts'
 import type { ReadThreadData } from '#reads/thread.ts'
-import type { Runtime } from './context.ts'
 
 /** The web process's status file: its recent load, for the throttle. */
 export interface WebStatus extends Stamped {
@@ -75,6 +76,13 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
   // Reads run on threads with connections of their own (`reads/pool.ts`):
   // the web app's `GET /v1` requests and the agent API's reads.
   const types = typeCatalog(ctx.platforms)
+  // Their slow statements: logged, and the last few hundred kept.
+  const slowQueries = new SlowQueryLog({
+    db,
+    logger,
+    busyTimeoutMs: WEB_BUSY_TIMEOUT,
+  })
+  cleanups.push(() => slowQueries.stop())
   const pool = new QueryPool({
     script: READ_THREAD,
     workerData: {
@@ -91,6 +99,7 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
       logLevel: logger.level,
     } satisfies ReadThreadData,
     logger,
+    onSlow: (query) => slowQueries.record(query),
   })
   cleanups.push(() => pool.close())
   // The web app's first requests need not wait for threads to start.

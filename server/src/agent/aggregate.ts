@@ -7,6 +7,7 @@ import { sql, type SQL } from 'drizzle-orm'
 import { authorKey, postTypeSQL, wholeSelection } from '#library/list.ts'
 import { list } from '#library/views.ts'
 import { compileQuery } from '#query/compile.ts'
+import { describeQuery } from '#reads/slow.ts'
 import { invalid } from './errors.ts'
 import { checkKeys, type AgentReader, type Params } from './query.ts'
 
@@ -129,6 +130,9 @@ export function aggregate(r: AgentReader, input: { params: Params }) {
         timeZone: zone,
       })
     : undefined
+  describeQuery(
+    JSON.stringify({ q: compiled?.parsed ?? '', by, tz: zone, limit }),
+  )
   const base = compiled?.folder
     ? compiled.folder.filter
     : (compiled?.filter ?? {})

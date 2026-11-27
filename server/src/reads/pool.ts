@@ -1,5 +1,6 @@
 import { Worker, type Transferable } from 'node:worker_threads'
 import type { Logger } from '#log.ts'
+import type { SlowQuery } from './slow.ts'
 
 /** The read threads' module (`thread.ts`). */
 export const READ_THREAD = new URL('thread.ts', import.meta.url)
@@ -52,11 +53,13 @@ export interface PoolRequest {
 
 /**
  * What a read thread sends: first that it is ready, then the answer to each
- * request, and log lines meanwhile (`log`, pino's JSON).
+ * request, and log lines (`log`, pino's JSON) and slow queries (`slow`)
+ * meanwhile.
  */
 export type PoolResponse =
   | { ready: true }
   | { log: string }
+  | { slow: SlowQuery }
   | { id: number; ok: true; value: unknown }
   /** `error`: what the caller answers; `cause`: an unexpected error's stack. */
   | { id: number; ok: false; error: unknown; cause?: string }
@@ -112,6 +115,8 @@ export interface PoolOptions {
   size?: number
   lanes?: Partial<Record<Lane, Partial<LaneLimits>>>
   logger?: Logger
+  /** A thread's statement was slow (`slow.ts`). */
+  onSlow?: (query: SlowQuery) => void
 }
 
 /**
@@ -258,6 +263,10 @@ export class QueryPool {
     worker.on('message', (response: PoolResponse) => {
       if ('log' in response) {
         this.#relay(response.log)
+        return
+      }
+      if ('slow' in response) {
+        this.#options.onSlow?.(response.slow)
         return
       }
       if ('ready' in response) {

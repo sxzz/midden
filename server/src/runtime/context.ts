@@ -51,7 +51,7 @@ export const CONCURRENCY = {
 const WORKER_POLL = 250
 // The web process stays snappy: a write waits at most this long for the
 // lock. The worker can wait; its jobs only take longer.
-const WEB_BUSY_TIMEOUT = 2000
+export const WEB_BUSY_TIMEOUT = 2000
 const WORKER_BUSY_TIMEOUT = 10_000
 
 export async function openRuntime(

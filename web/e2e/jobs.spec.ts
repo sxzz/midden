@@ -46,3 +46,48 @@ test('后台任务 lists rate limits and ends one early', async ({ page }) => {
   await expect(row).toHaveCount(0)
   expect(cleared).toEqual([{ scope: 'x:session:a:UserTweets' }])
 })
+
+test('后台任务 lists the slow queries, newest first', async ({ page }) => {
+  const at = new Date()
+  const slow = [
+    {
+      id: 2,
+      at: at.toISOString(),
+      route: 'GET /agent/v1/posts',
+      query: '{"q":"#猫 lang:ja","sort":"updated"}',
+      sql: 'SELECT …',
+      params: '[]',
+      ms: 1234,
+      rows: 21,
+    },
+    {
+      id: 1,
+      at: new Date(+at - 60_000).toISOString(),
+      route: 'GET /v1/collections',
+      query: '',
+      sql: 'SELECT count(*) FROM catalog',
+      params: '[]',
+      ms: 310,
+      rows: 1,
+    },
+  ]
+  await page.route('https://telegram.org/**', (r) => r.fulfill({ body: '' }))
+  await page.route('**/v1/**', (r) => {
+    const path = new URL(r.request().url()).pathname
+    if (path === '/v1/session') return r.fulfill({ json: {} })
+    if (path === '/v1/queue') return r.fulfill({ json: view([]) })
+    if (path === '/v1/queue/slow-queries')
+      return r.fulfill({ json: { items: slow } })
+    return r.fulfill({ json: { items: [] } })
+  })
+  await page.goto('/app/settings/admin/jobs')
+  await expect(page.getByText('慢查询（300 ms 以上）')).toBeVisible()
+  const first = page.locator('.slow').first()
+  await expect(first).toContainText('GET /agent/v1/posts')
+  await expect(first).toContainText('1,234 ms · 21 行')
+  await expect(first).toContainText('{"q":"#猫 lang:ja","sort":"updated"}')
+  // Without a query, its SQL.
+  await expect(page.locator('.slow').nth(1)).toContainText(
+    'SELECT count(*) FROM catalog',
+  )
+})

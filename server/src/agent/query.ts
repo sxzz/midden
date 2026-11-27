@@ -19,6 +19,7 @@ import {
 import { isUUID } from '#library/read.ts'
 import { fold } from '#library/search-text.ts'
 import { compileQuery } from '#query/compile.ts'
+import { describeQuery } from '#reads/slow.ts'
 import { AgentError, invalid, notFound } from './errors.ts'
 import { VIEWS, type View } from './shape.ts'
 import type { Executor } from '#db/client.ts'
@@ -619,6 +620,7 @@ export function readSearch(r: AgentReader, kind: Kind, params: Params): Search {
   const bound = sha256Hex(
     canonicalJson({ kind, filter, narrow, query: compiled?.parsed }),
   ).slice(0, 24)
+  describeQuery(JSON.stringify(applied))
   const cursor = single(params, 'cursor')
   return {
     filter,

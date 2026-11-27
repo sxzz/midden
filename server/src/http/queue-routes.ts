@@ -5,6 +5,7 @@ import { connections, jobs } from '#db/schema.ts'
 import { readJobControl, writeJobControl } from '#jobs/control.ts'
 import { PAUSABLE_TYPES } from '#jobs/queue.ts'
 import { activeRateLimits, clearRateLimit } from '#jobs/rate-limits.ts'
+import { listSlowQueries } from '#reads/slow-log.ts'
 import { inline } from './offload.ts'
 import { json, type Env } from './validate.ts'
 import type { Database } from '#db/client.ts'
@@ -122,6 +123,8 @@ export function queueRoutes(
     new Hono<Env>()
       // With the worker's report and this process's load: answered here.
       .get('/', inline, (c) => c.json(view()))
+      // The newest read-thread queries that took 300 ms or more.
+      .get('/slow-queries', (c) => c.json({ items: listSlowQueries(db) }))
       .put(
         '/control',
         json(

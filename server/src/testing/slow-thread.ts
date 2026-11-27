@@ -4,11 +4,16 @@
 import { DatabaseSync } from 'node:sqlite'
 import { parentPort } from 'node:worker_threads'
 import { errorBody } from '#agent/errors.ts'
+import { inScope, watchStatements } from '#reads/slow.ts'
 import type { PoolRequest, PoolResponse } from '#reads/pool.ts'
 
 if (parentPort) {
   const port = parentPort
   const db = new DatabaseSync(':memory:')
+  // Slow statements are reported as the read threads report theirs.
+  watchStatements(db, (slow) =>
+    port.postMessage({ slow } satisfies PoolResponse),
+  )
   // The deadline is checked every 10,000 rows; the rest is SQLite alone.
   db.function('now_ms', { deterministic: false }, () => Date.now())
   const slow = db.prepare(`WITH RECURSIVE c(x) AS (
@@ -23,7 +28,9 @@ if (parentPort) {
         response = {
           id: request.id,
           ok: true,
-          value: slow.get(Date.now() + (input.ms ?? 0)),
+          value: inScope('GET /slow', `ms=${input.ms}`, () =>
+            slow.get(Date.now() + (input.ms ?? 0)),
+          ),
         }
       else if (request.op === 'echo')
         response = { id: request.id, ok: true, value: request.input }

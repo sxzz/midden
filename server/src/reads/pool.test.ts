@@ -8,6 +8,7 @@ import { AgentError } from '#agent/errors.ts'
 import { inlineReads, pooledReads } from '#agent/runner.ts'
 import { agentFixture, type AgentFixture } from '#testing/agent.ts'
 import { PoolError, QueryPool, READ_THREAD } from './pool.ts'
+import type { SlowQuery } from './slow.ts'
 import type { ReadThreadData } from './thread.ts'
 
 const SLOW = new URL('../testing/slow-thread.ts', import.meta.url)
@@ -141,6 +142,7 @@ describe('read threads', () => {
       'db',
     )
     await backup(fixture.ctx.db.$client, file)
+    const slow: SlowQuery[] = []
     pool = new QueryPool({
       script: READ_THREAD,
       workerData: {
@@ -150,7 +152,10 @@ describe('read threads', () => {
         mediaKey: new TextEncoder().encode('test'),
         types: fixture.reader.types,
         countPointers: fixture.ctx.platforms.countPointers(),
+        // Every statement counts as slow here.
+        slowQueryMs: 0,
       } satisfies ReadThreadData,
+      onSlow: (query) => slow.push(query),
     })
     const pooled = pooledReads(pool)
     const inline = inlineReads(fixture.reader)
@@ -162,6 +167,15 @@ describe('read threads', () => {
     const answer = await pooled.run('search', input)
     expect(answer.items.length).toBe(2)
     expect(answer).toEqual(await inline.run('search', input))
+    // Its statements are timed and reported with the request they ran for,
+    // named by its canonical query.
+    expect(slow.length).toBeGreaterThan(0)
+    expect(slow[0]).toMatchObject({
+      route: 'GET /agent/v1/posts',
+      query: expect.stringContaining('"q":"cat"'),
+      sql: expect.any(String),
+      ms: expect.any(Number),
+    })
     const missing = await pooled
       .run('context', { id: fixture.ids['7']!, origin: '' })
       .catch((e: unknown) => e)

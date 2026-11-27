@@ -1424,6 +1424,22 @@ export const webOrigins = sqliteTable('web_origins', {
  * values the server itself keeps across restarts. Values are text; the code
  * that reads a key parses it (`#settings.ts`).
  */
+/**
+ * Read-thread statements that took `SLOW_QUERY_MS` or longer
+ * (`reads/slow.ts`), the newest `KEEP` of them: only slow ones are written,
+ * and each write drops what is past the last `KEEP`.
+ */
+export const slowQueries = sqliteTable('slow_queries', {
+  id: integer().primaryKey(),
+  at: timestamp().notNull(),
+  route: text().notNull(),
+  query: text().notNull(),
+  sql: text().notNull(),
+  params: text().notNull(),
+  ms: integer().notNull(),
+  rows: integer().notNull(),
+})
+
 export const settings = sqliteTable('settings', {
   key: text().primaryKey(),
   value: text().notNull(),

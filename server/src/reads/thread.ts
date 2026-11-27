@@ -17,6 +17,7 @@ import { forgetRecords, keepFinishedRecords } from '#capture/record-cache.ts'
 import { openDatabase } from '#db/client.ts'
 import { createApi, type ForwardedEnv } from '#http/app.ts'
 import { threadContext } from './context.ts'
+import { inScope, SLOW_QUERY_MS, watchStatements } from './slow.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { AgentReader, TypeCatalog } from '#agent/query.ts'
 import type { ForwardedRequest, ForwardedResponse } from '#http/offload.ts'
@@ -37,6 +38,8 @@ export interface ReadThreadData {
   webAppUrl?: string
   dev?: boolean
   logLevel?: string
+  /** Statements this slow are reported (`slow.ts`); tests lower it. */
+  slowQueryMs?: number
 }
 
 /** The reader a thread works with. */
@@ -98,6 +101,38 @@ export function threadApi(
   }
 }
 
+/**
+ * What a request is, for its slow queries: the route, and its query string
+ * without the page cursor (an agent read may name its query better once it
+ * is read, `describeQuery`).
+ */
+function scopeOf(request: PoolRequest): [route: string, query: string] {
+  // Readable rather than encoded: `q=猫 photo`, not `q=%E7%8C%AB+photo`.
+  const queryOf = (params: URLSearchParams) =>
+    [...params]
+      .filter(([key]) => key !== 'cursor')
+      .map(([key, value]) => `${key}=${value}`)
+      .join('&')
+  if (request.op === 'http') {
+    const url = new URL((request.input as ForwardedRequest).url)
+    return [`GET ${url.pathname}`, queryOf(url.searchParams)]
+  }
+  const input = request.input as {
+    kind?: string
+    params?: Record<string, string[]>
+  } | null
+  const route =
+    request.op === 'search'
+      ? `GET /agent/v1/${input?.kind ?? ''}`
+      : request.op === 'aggregate'
+        ? 'GET /agent/v1/aggregate'
+        : `agent ${request.op}`
+  const params = new URLSearchParams()
+  for (const [key, values] of Object.entries(input?.params ?? {}))
+    for (const value of values) params.append(key, value)
+  return [route, queryOf(params)]
+}
+
 if (parentPort) {
   const port = parentPort
   const data = workerData as ReadThreadData
@@ -112,6 +147,11 @@ if (parentPort) {
     }),
   )
   const reader = threadReader(data)
+  watchStatements(
+    reader.db.$client,
+    (slow) => port.postMessage({ slow } satisfies PoolResponse),
+    data.slowQueryMs ?? SLOW_QUERY_MS,
+  )
   const web = threadApi(threadContext(reader, data.countPointers, logger), data)
   keepFinishedRecords()
   // Its connection reads only: the progress of updates is what the worker
@@ -125,14 +165,17 @@ if (parentPort) {
     let response: PoolResponse
     let transfer: ArrayBuffer[] = []
     try {
-      if (request.op === 'http') {
-        const value = await web(request.input as ForwardedRequest)
-        transfer = [value.body]
-        response = { id: request.id, ok: true, value }
-      } else {
-        const value = await runRead(reader, request.op, request.input)
-        response = { id: request.id, ok: true, value }
-      }
+      const [route, query] = scopeOf(request)
+      await inScope(route, query, async () => {
+        if (request.op === 'http') {
+          const value = await web(request.input as ForwardedRequest)
+          transfer = [value.body]
+          response = { id: request.id, ok: true, value }
+        } else {
+          const value = await runRead(reader, request.op, request.input)
+          response = { id: request.id, ok: true, value }
+        }
+      })
     } catch (error) {
       const body = errorBody(error)
       response = {
@@ -144,7 +187,7 @@ if (parentPort) {
           : {}),
       }
     }
-    port.postMessage(response, transfer)
+    port.postMessage(response!, transfer)
   })
   port.postMessage({ ready: true } satisfies PoolResponse)
 }

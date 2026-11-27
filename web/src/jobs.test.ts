@@ -4,6 +4,7 @@ import {
   queueStatus,
   rateLimitEnd,
   rateLimitName,
+  slowQueryText,
   throttleCause,
   webLatency,
   type RateLimit,
@@ -130,5 +131,32 @@ describe('后台任务', () => {
         requests: { ...web.requests, max_ms: 7700, slow_thread: 3 },
       }).slow,
     ).toBe('超过 500 ms：主线程 0 个，读线程 3 个')
+  })
+})
+
+describe('慢查询', () => {
+  const query = {
+    id: 1,
+    at: new Date(2026, 10, 27, 20, 15, 3).toISOString(),
+    route: 'GET /agent/v1/posts',
+    query: '{"q":"#猫 lang:ja"}',
+    sql: 'SELECT …',
+    params: '[]',
+    ms: 1234,
+    rows: 21,
+  }
+  test('when, where, how long, and the query it ran for', () => {
+    expect(slowQueryText(query, new Date(2026, 10, 27, 21))).toEqual({
+      title: '20:15:03 · GET /agent/v1/posts',
+      figures: '1,234 ms · 21 行',
+      query: '{"q":"#猫 lang:ja"}',
+    })
+    // Another day says which; without a query, the SQL.
+    expect(
+      slowQueryText({ ...query, query: '' }, new Date(2026, 10, 28, 9)),
+    ).toMatchObject({
+      title: '11-27 20:15:03 · GET /agent/v1/posts',
+      query: 'SELECT …',
+    })
   })
 })

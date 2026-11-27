@@ -17,6 +17,7 @@ import { MediaSigner } from '#blob/signer.ts'
 import { openDatabase } from '#db/client.ts'
 import { backfillBatch } from '#library/facets.ts'
 import { authorKey } from '#library/list.ts'
+import { watchStatements } from '#reads/slow.ts'
 import type { AgentReader, Params } from '#agent/query.ts'
 
 const [file, runsArg = '20'] = process.argv.slice(2)
@@ -48,6 +49,7 @@ if (count('post_hashtags') < 1000) {
 console.info(
   `hashtags ${count('post_hashtags')}, mentions ${count('post_mentions')}, domains ${count('post_domains')}`,
 )
+watchStatements(db.$client, () => {})
 
 const reader: AgentReader = {
   db,

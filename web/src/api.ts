@@ -144,6 +144,9 @@ export type StorageReport = Ok<typeof client.storage.$get>
 export type StorageAlerts = StorageReport['alerts']
 export type StorageDay = StorageReport['history'][number]
 export type QueueState = Ok<typeof client.queue.$get>
+export type SlowQuery = Ok<
+  (typeof client.queue)['slow-queries']['$get']
+>['items'][number]
 export type WebOrigin = Ok<typeof client.origins.$get>[number]
 export type Share = Ok<typeof client.shares.$get>[number]
 export type PublicShareInfo = Ok<(typeof client.public)[':slug']['$get']>

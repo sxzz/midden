@@ -35,6 +35,7 @@ import {
   listCollections,
   type CollectionFilter,
 } from '#library/list.ts'
+import { watchStatements } from '#reads/slow.ts'
 import type { AgentReader, Params } from '#agent/query.ts'
 
 const [command, ...args] = process.argv.slice(2)
@@ -407,6 +408,8 @@ const percentile = (sorted: number[], p: number) =>
 
 async function run(file: string, out?: string, runs = 40) {
   const db = openDatabase(file)
+  // As on a read thread: every statement timed for the slow-query log.
+  watchStatements(db.$client, () => {})
   const { record, plan } = recorder(db)
   const bump = db.$client.prepare(
     'UPDATE library_version SET n = n + 1 WHERE id = 1',

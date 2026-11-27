@@ -1,4 +1,4 @@
-import type { QueueState } from './api'
+import type { QueueState, SlowQuery } from './api'
 
 // 后台任务 (管理员面板): the words for the worker's job types and its state.
 
@@ -106,5 +106,25 @@ export function webLatency(web: NonNullable<QueueState['web']>) {
           slow: `超过 500 ms：主线程 ${requests.slow} 个，读线程 ${requests.slow_thread} 个`,
         }
       : {}),
+  }
+}
+
+/**
+ * A slow query in one line and its query below: when (11-27 20:15:03, the
+ * date left out today), the route, how long, the rows; the query or filter
+ * it ran for, or its SQL when it has none.
+ */
+export function slowQueryText(query: SlowQuery, now = new Date()) {
+  const at = new Date(query.at)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`
+  const when =
+    at.toDateString() === now.toDateString()
+      ? time
+      : `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${time}`
+  return {
+    title: `${when} · ${query.route}`,
+    figures: `${query.ms.toLocaleString('en-US')} ms · ${query.rows.toLocaleString('en-US')} 行`,
+    query: query.query || query.sql,
   }
 }
