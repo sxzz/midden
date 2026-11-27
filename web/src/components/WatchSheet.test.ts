@@ -49,7 +49,8 @@ const watch = (patch: Partial<Watch> = {}): Watch => ({
   target_id: 'p',
   handle: 'cat',
   url: 'https://x.com/cat',
-  frequency: 'daily',
+  every: { count: 1, unit: 'day' },
+  time_zone: 'UTC',
   options: defaults,
   enabled: true,
   next_run_at: new Date(Date.now() + 3_600_000).toISOString(),
@@ -104,21 +105,50 @@ async function mountSheet(target: WatchTarget, existing?: Watch) {
     select.dispatchEvent(new Event('change'))
     await nextTick()
   }
-  return { el, sent, changed, label, choose }
+  const count = () =>
+    el.querySelector<HTMLInputElement>('input[aria-label="间隔"]')!
+  const unit = () =>
+    el.querySelector<HTMLSelectElement>('select[aria-label="单位"]')!
+  const setEvery = async (n: string, u?: string) => {
+    if (u) {
+      unit().value = u
+      unit().dispatchEvent(new Event('change'))
+    }
+    count().value = n
+    count().dispatchEvent(new Event('change'))
+    await nextTick()
+  }
+  return { el, sent, changed, label, choose, count, unit, setEvery }
 }
 
-it('watches a profile with a frequency and the 更新 options', async () => {
-  const { el, sent, changed, label, choose } = await mountSheet({
-    target: 'collection',
-    id: 'p',
-  })
+it('watches a profile every so many of a unit, with the 更新 options', async () => {
+  const { el, sent, changed, label, choose, count, unit, setEvery } =
+    await mountSheet({
+      target: 'collection',
+      id: 'p',
+    })
   expect(el.querySelector('.head')?.textContent).toBe('定期更新 @cat')
-  // Daily, with the defaults of 更新.
-  expect(label('频率')!.querySelector('select')!.value).toBe('daily')
+  // Every day, with the defaults of 更新.
+  expect(count().value).toBe('1')
+  expect(unit().value).toBe('day')
+  expect([...unit().options].map((o) => o.text.trim())).toEqual([
+    '分钟',
+    '小时',
+    '天',
+    '周',
+    '月',
+    '年',
+  ])
+  expect(el.querySelector('.every')?.textContent).toContain('最短 5 分钟')
   expect(label('抓帖子')!.querySelector('input')!.checked).toBe(true)
   expect(label('抓关系网')!.querySelector('input')!.checked).toBe(false)
   expect(el.querySelector('.action.destructive')).toBeNull()
-  await choose('频率', '6h')
+  // Fewer than 5 minutes is made 5; more than 1000 is made 1000.
+  await setEvery('2', 'minute')
+  expect(count().value).toBe('5')
+  await setEvery('5000')
+  expect(count().value).toBe('1000')
+  await setEvery('6', 'hour')
   await choose('帖子范围', 'until_existing')
   label('抓关系网')!.querySelector('input')!.click()
   await nextTick()
@@ -133,7 +163,8 @@ it('watches a profile with a frequency and the 更新 options', async () => {
       body: {
         target: 'collection',
         id: 'p',
-        frequency: '6h',
+        every: { count: 6, unit: 'hour' },
+        time_zone: new Intl.DateTimeFormat().resolvedOptions().timeZone,
         options: {
           ...defaults,
           posts: 'until_existing',
@@ -147,7 +178,7 @@ it('watches a profile with a frequency and the 更新 options', async () => {
 
 it('shows and edits a watch: next run, last run, removal', async () => {
   const existing = watch({
-    frequency: 'weekly',
+    every: { count: 2, unit: 'month' },
     options: { ...defaults, count: 20 },
     last_run: {
       id: 'run',
@@ -156,11 +187,12 @@ it('shows and edits a watch: next run, last run, removal', async () => {
       created_at: new Date().toISOString(),
     },
   })
-  const { el, sent, changed, label } = await mountSheet(
+  const { el, sent, changed, label, count, unit } = await mountSheet(
     { target: 'collection', id: 'p' },
     existing,
   )
-  expect(label('频率')!.querySelector('select')!.value).toBe('weekly')
+  expect(count().value).toBe('2')
+  expect(unit().value).toBe('month')
   expect(label('条数')!.querySelector('input')!.value).toBe('20')
   const facts = [...el.querySelectorAll('.fact')].map((p) => p.textContent)
   expect(facts[0]).toMatch(/^下次 (今天|明天) \d+:\d\d$/)
@@ -196,7 +228,7 @@ it('settings list every watch, and turn one off or remove it', async () => {
       name: '猫',
       handle: undefined,
       url: undefined,
-      frequency: '6h',
+      every: { count: 6, unit: 'hour' },
       enabled: false,
       error: '收藏夹是空的',
     }),

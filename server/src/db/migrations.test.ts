@@ -209,3 +209,68 @@ describe('watches', () => {
     expect(db.$client.prepare('PRAGMA foreign_key_check').all()).toEqual([])
   })
 })
+
+describe('watch_intervals', () => {
+  test('the fixed choices become a number and a unit, keeping their slots and runs', () => {
+    const db = migratedBefore('watch_intervals')
+    insertRow(db, 'folders', { id: 'f1', name: 'a', filter: '' })
+    insertRow(db, 'folders', { id: 'f2', name: 'b', filter: '' })
+    insertRow(db, 'folders', { id: 'f3', name: 'c', filter: '' })
+    for (const [id, folder, frequency] of [
+      ['w1', 'f1', '6h'],
+      ['w2', 'f2', 'daily'],
+      ['w3', 'f3', 'weekly'],
+    ])
+      insertRow(db, 'watches', {
+        id,
+        folder_id: folder,
+        frequency,
+        options: '{}',
+        enabled: 1,
+        next_run_at: 5000,
+        error: '',
+        created_at: 1234,
+      })
+    insertRow(db, 'updates', {
+      id: 'u1',
+      collection_ids: '[]',
+      options: '{}',
+      origin: 'watch',
+      watch_id: 'w2',
+    })
+
+    migrateRest(db)
+
+    expect(
+      db.$client
+        .prepare(
+          'SELECT id, every_count, every_unit, time_zone, anchor_at, next_run_at FROM watches ORDER BY id',
+        )
+        .all(),
+    ).toEqual(
+      [
+        ['w1', 6, 'hour'],
+        ['w2', 1, 'day'],
+        ['w3', 1, 'week'],
+      ].map(([id, count, unit]) => ({
+        id,
+        every_count: count,
+        every_unit: unit,
+        time_zone: 'UTC',
+        anchor_at: 1234,
+        next_run_at: 5000,
+      })),
+    )
+    expect(columns(db, 'watches')).not.toContain('frequency')
+    // The run still names its watch.
+    expect(db.$client.prepare('SELECT watch_id FROM updates').all()).toEqual([
+      { watch_id: 'w2' },
+    ])
+    expect(indexes(db, 'watches')).toEqual([
+      'watches_collection',
+      'watches_due',
+      'watches_folder',
+    ])
+    expect(db.$client.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+  })
+})

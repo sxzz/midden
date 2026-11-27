@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { and, asc, eq, lte, sql } from 'drizzle-orm'
 import { newId } from '#db/id.ts'
 import {
@@ -8,7 +7,6 @@ import {
   library,
   updates,
   watches,
-  type WatchFrequency,
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { AppError, isAppError } from '#errors.ts'
@@ -19,6 +17,12 @@ import {
   updateRecords,
   type UpdateTargetInput,
 } from './updates.ts'
+import {
+  checkInterval,
+  checkTimeZone,
+  nextSlot,
+  type Interval,
+} from './watch-schedule.ts'
 import type { Executor } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
 
@@ -27,20 +31,15 @@ import type { CaptureContext } from './context.ts'
  * ordinary update with the watch's options, marked as the watch's, so it is
  * one capture record like any other and its jobs rank below manual work.
  *
- * Each watch runs at slots its frequency apart, from an offset of its own
- * within the interval (from its id), so watches added together do not all
- * start at once. A slot that passes while the worker is down runs once when
+ * Each watch runs at slots its interval apart (`watch-schedule.ts`), from an
+ * offset of its own (from its id), so watches added together do not all
+ * start at once. A run that takes longer than its interval skips the slots
+ * that come meanwhile. A slot that passes while the worker is down runs once when
  * it is back, and the next slot is the next one after that moment: no run
  * per missed slot. A slot finding the watch's last run still going (or
  * paused) is skipped. At most `MAX_RUNS` watch runs go at a time; a due
  * watch beyond them waits, still due, for one to end.
  */
-
-export const INTERVALS: Record<WatchFrequency, number> = {
-  '6h': 6 * 60 * 60_000,
-  daily: 24 * 60 * 60_000,
-  weekly: 7 * 24 * 60 * 60_000,
-}
 
 /** Watch runs going at once; others wait their turn. */
 export const MAX_RUNS = 2
@@ -49,25 +48,6 @@ type Watch = typeof watches.$inferSelect
 export type WatchTarget = { target: 'collection' | 'folder'; id: string }
 
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
-
-/** Where in each interval a watch's slots fall: fixed by its id. */
-export function slotOffset(id: string, frequency: WatchFrequency): number {
-  // Ids made at about the same time share most of their characters: a
-  // cryptographic hash spreads them evenly anyway.
-  const hash = createHash('sha256').update(id).digest().readUInt32BE(0)
-  return Math.floor((hash / 2 ** 32) * INTERVALS[frequency])
-}
-
-/** The watch's first slot after `now`. */
-export function nextSlot(
-  id: string,
-  frequency: WatchFrequency,
-  now: number,
-): number {
-  const interval = INTERVALS[frequency]
-  const offset = slotOffset(id, frequency)
-  return offset + (Math.floor((now - offset) / interval) + 1) * interval
-}
 
 const clock = (ctx: CaptureContext) => ctx.now?.() ?? Date.now()
 
@@ -101,79 +81,137 @@ const targetWhere = (target: WatchTarget) =>
     target.id,
   )
 
+const everyOf = (watch: Watch): Interval => ({
+  count: watch.everyCount,
+  unit: watch.everyUnit,
+})
+
+/** When a watch runs next, after `now`. */
+export const watchNextRun = (watch: Watch, now: number) =>
+  nextSlot(
+    {
+      id: watch.id,
+      every: everyOf(watch),
+      timeZone: watch.timeZone,
+      anchorAt: watch.anchorAt.getTime(),
+    },
+    now,
+  )
+
+const sameEvery = (watch: Watch, every: Interval, timeZone: string) =>
+  watch.everyCount === every.count &&
+  watch.everyUnit === every.unit &&
+  watch.timeZone === timeZone
+
+/**
+ * The columns of a new interval: it counts from now, and starts from its
+ * next slot rather than from one long past.
+ */
+function restarted(
+  watch: Watch,
+  every: Interval,
+  timeZone: string,
+  now: number,
+) {
+  const changed = {
+    ...watch,
+    everyCount: every.count,
+    everyUnit: every.unit,
+    timeZone,
+    anchorAt: new Date(now),
+  }
+  return {
+    everyCount: every.count,
+    everyUnit: every.unit,
+    timeZone,
+    anchorAt: changed.anchorAt,
+    nextRunAt: new Date(watchNextRun(changed, now)),
+    error: '',
+  }
+}
+
 /**
  * Watch a target, or change how its watch runs: one watch per target. A new
- * frequency starts from its next slot.
+ * interval (or time zone) starts from its next slot. `timeZone` is the
+ * owner's, for months and years; UTC when not given.
  */
 export function setWatch(
   ctx: CaptureContext,
   target: WatchTarget,
-  input: { frequency: WatchFrequency; options: CaptureOptions },
+  input: { every: Interval; options: CaptureOptions; timeZone?: string },
 ): string {
   checkOptions(input.options)
+  checkInterval(input.every)
   const now = clock(ctx)
   return ctx.db.transaction((tx) => {
     checkTarget(tx, target)
     const existing = tx.select().from(watches).where(targetWhere(target)).get()
+    const timeZone = input.timeZone
+      ? checkTimeZone(input.timeZone)
+      : (existing?.timeZone ?? 'UTC')
     if (existing) {
       tx.update(watches)
         .set({
-          frequency: input.frequency,
           options: input.options,
-          ...(existing.frequency === input.frequency
+          ...(sameEvery(existing, input.every, timeZone)
             ? {}
-            : {
-                nextRunAt: new Date(
-                  nextSlot(existing.id, input.frequency, now),
-                ),
-              }),
+            : restarted(existing, input.every, timeZone, now)),
         })
         .where(eq(watches.id, existing.id))
         .run()
       return existing.id
     }
-    const id = newId()
-    tx.insert(watches)
-      .values({
-        id,
-        collectionId: target.target === 'collection' ? target.id : null,
-        folderId: target.target === 'folder' ? target.id : null,
-        frequency: input.frequency,
-        options: input.options,
-        nextRunAt: new Date(nextSlot(id, input.frequency, now)),
-        createdAt: new Date(now),
-      })
-      .run()
-    return id
+    const row: Watch = {
+      id: newId(),
+      collectionId: target.target === 'collection' ? target.id : null,
+      folderId: target.target === 'folder' ? target.id : null,
+      everyCount: input.every.count,
+      everyUnit: input.every.unit,
+      timeZone,
+      anchorAt: new Date(now),
+      options: input.options,
+      enabled: true,
+      nextRunAt: new Date(0),
+      error: '',
+      createdAt: new Date(now),
+    }
+    row.nextRunAt = new Date(watchNextRun(row, now))
+    tx.insert(watches).values(row).run()
+    return row.id
   })
 }
 
-/** Change a watch: its frequency, options, or whether it runs. */
+/** Change a watch: its interval, options, or whether it runs. */
 export function editWatch(
   ctx: CaptureContext,
   id: string,
   input: {
-    frequency?: WatchFrequency
+    every?: Interval
+    timeZone?: string
     options?: CaptureOptions
     enabled?: boolean
   },
 ): void {
   if (input.options) checkOptions(input.options)
+  if (input.every) checkInterval(input.every)
   const now = clock(ctx)
   ctx.db.transaction((tx) => {
     const watch = tx.select().from(watches).where(eq(watches.id, id)).get()
     if (!watch) throw new AppError('not_found')
-    const frequency = input.frequency ?? watch.frequency
-    // From the next slot, not from one long past.
-    const restart =
-      frequency !== watch.frequency || (input.enabled && !watch.enabled)
+    const every = input.every ?? everyOf(watch)
+    const timeZone = input.timeZone
+      ? checkTimeZone(input.timeZone)
+      : watch.timeZone
+    const changed = !sameEvery(watch, every, timeZone)
+    // Turned on again: from the next slot, not from one long past.
+    const resumed = input.enabled && !watch.enabled
     tx.update(watches)
       .set({
-        frequency,
         ...(input.options ? { options: input.options } : {}),
         ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
-        ...(restart
-          ? { nextRunAt: new Date(nextSlot(id, frequency, now)), error: '' }
+        ...(changed ? restarted(watch, every, timeZone, now) : {}),
+        ...(resumed && !changed
+          ? { nextRunAt: new Date(watchNextRun(watch, now)), error: '' }
           : {}),
       })
       .where(eq(watches.id, id))
@@ -257,7 +295,7 @@ export function runWatches(ctx: CaptureContext): WatchTick {
     db
       .update(watches)
       .set({
-        nextRunAt: new Date(nextSlot(watch.id, watch.frequency, now)),
+        nextRunAt: new Date(watchNextRun(watch, now)),
         error,
       })
       .where(eq(watches.id, watch.id))
@@ -311,7 +349,8 @@ export interface WatchView {
   /** The profile's username and link. */
   handle: string
   url: string
-  frequency: WatchFrequency
+  every: Interval
+  timeZone: string
   options: CaptureOptions
   enabled: boolean
   nextRunAt: Date
@@ -370,7 +409,8 @@ export function listWatches(
       name: folder ?? '',
       handle: watch.collectionId ? (names.get(watch.collectionId) ?? '') : '',
       url: url ?? '',
-      frequency: watch.frequency,
+      every: everyOf(watch),
+      timeZone: watch.timeZone,
       options: watch.options,
       enabled: watch.enabled,
       nextRunAt: watch.nextRunAt,

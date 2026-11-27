@@ -93,7 +93,9 @@ export type UpdateTarget = InferRequestType<
 export type UpdatePreview = Ok<typeof client.updates.preview.$post>
 /** 定期更新: a profile or a folder updated on a schedule. */
 export type Watch = Ok<typeof client.watches.$get>['items'][number]
-export type WatchFrequency = Watch['frequency']
+/** Every `count` `unit`s. */
+export type WatchEvery = Watch['every']
+export type IntervalUnit = WatchEvery['unit']
 export type WatchTarget = Pick<
   InferRequestType<typeof client.watches.$put>['json'],
   'target' | 'id'

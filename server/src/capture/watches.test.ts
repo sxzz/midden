@@ -18,18 +18,20 @@ import { captureURL } from './records.ts'
 import { pauseUpdate, resumeUpdate, updateRecord } from './updates.ts'
 import {
   editWatch,
-  INTERVALS,
   listWatches,
   MAX_RUNS,
-  nextSlot,
   runWatches,
   setWatch,
-  slotOffset,
+  watchNextRun,
 } from './watches.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { FetchRequest } from '#platforms/protocol.ts'
 
 const HOUR = 60 * 60_000
+const DAY = 24 * HOUR
+const SIX_HOURS = { count: 6, unit: 'hour' } as const
+const DAILY = { count: 1, unit: 'day' } as const
+const WEEKLY = { count: 1, unit: 'week' } as const
 const START = Date.parse('2026-11-26T00:00:00Z')
 
 let ctx: AccountsContext | undefined
@@ -103,40 +105,6 @@ const watchRow = (c: AccountsContext, id: string) =>
 const watchRuns = (c: AccountsContext) =>
   c.db.select().from(updates).where(eq(updates.origin, 'watch')).all()
 
-describe('slots', () => {
-  test('a watch keeps its own offset, and its slots are its interval apart', () => {
-    const id = '0b8f3d4e-6f1a-4c55-9d1e-2f7a8b9c0d11'
-    for (const frequency of ['6h', 'daily', 'weekly'] as const) {
-      const interval = INTERVALS[frequency]
-      const offset = slotOffset(id, frequency)
-      expect(offset).toBe(slotOffset(id, frequency))
-      expect(offset).toBeGreaterThanOrEqual(0)
-      expect(offset).toBeLessThan(interval)
-      const first = nextSlot(id, frequency, START)
-      expect(first).toBeGreaterThan(START)
-      expect(first - START).toBeLessThanOrEqual(interval)
-      expect((first - offset) % interval).toBe(0)
-      // Exactly at a slot, the next one is a whole interval on.
-      expect(nextSlot(id, frequency, first)).toBe(first + interval)
-      expect(nextSlot(id, frequency, first - 1)).toBe(first)
-    }
-  })
-
-  test('watches spread over the interval rather than start together', () => {
-    const ids = Array.from(
-      { length: 40 },
-      (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
-    )
-    const hours = new Set(
-      ids.map((id) => Math.floor(slotOffset(id, '6h') / HOUR)),
-    )
-    // Forty watches land in every hour of the six.
-    expect(hours.size).toBe(6)
-    const offsets = new Set(ids.map((id) => slotOffset(id, 'daily')))
-    expect(offsets.size).toBe(ids.length)
-  })
-})
-
 describe('定期更新', () => {
   test('a profile or a folder; one watch per target', async () => {
     const { ctx } = setup()
@@ -147,35 +115,36 @@ describe('定期更新', () => {
     const id = setWatch(
       ctx,
       { target: 'collection', id: profile },
-      { frequency: 'daily', options },
+      { every: DAILY, options },
     )
     expect(watchRow(ctx, id).nextRunAt.getTime()).toBe(
-      nextSlot(id, 'daily', START),
+      watchNextRun(watchRow(ctx, id), START),
     )
     expect(() =>
       setWatch(
         ctx!,
         { target: 'collection', id: post },
-        { frequency: 'daily', options },
+        { every: DAILY, options },
       ),
     ).toThrow('只能定期更新账号或收藏夹')
     setWatch(
       ctx,
       { target: 'folder', id: folder.id },
-      { frequency: 'weekly', options },
+      { every: WEEKLY, options },
     )
-    // Watching again edits the same watch, from the new frequency's slot.
+    // Watching again edits the same watch, from the new interval's slot.
     expect(
       setWatch(
         ctx,
         { target: 'collection', id: profile },
-        { frequency: '6h', options: resolveOptions({ relations: true }) },
+        { every: SIX_HOURS, options: resolveOptions({ relations: true }) },
       ),
     ).toBe(id)
     expect(watchRow(ctx, id)).toMatchObject({
-      frequency: '6h',
+      everyCount: 6,
+      everyUnit: 'hour',
       options: { relations: true },
-      nextRunAt: new Date(nextSlot(id, '6h', START)),
+      nextRunAt: new Date(watchNextRun(watchRow(ctx, id), START)),
     })
     expect(
       listWatches(ctx.db).map((w) => [w.target, w.name || w.handle]),
@@ -192,7 +161,7 @@ describe('定期更新', () => {
       ctx,
       { target: 'collection', id: profile },
       {
-        frequency: 'daily',
+        every: DAILY,
         options: resolveOptions({ count: 3, include_shared: false }),
       },
     )
@@ -233,7 +202,7 @@ describe('定期更新', () => {
     ).toEqual(['1', '2', '3'])
     expect(ctx.db.select().from(telegramDeliveries).all()).toEqual([])
     expect(listWatches(ctx.db)[0]).toMatchObject({
-      nextRunAt: new Date(ranAt + INTERVALS.daily),
+      nextRunAt: new Date(ranAt + DAY),
       lastRun: { id: run, state: 'complete', done: true },
     })
   })
@@ -244,23 +213,21 @@ describe('定期更新', () => {
     const id = setWatch(
       ctx,
       { target: 'collection', id: profile },
-      { frequency: '6h', options: resolveOptions({}) },
+      { every: SIX_HOURS, options: resolveOptions({}) },
     )
     clock.now = watchRow(ctx, id).nextRunAt.getTime()
     const [first] = runWatches(ctx).started
     pauseUpdate(ctx, first!.updateId)
 
-    clock.now += INTERVALS['6h']
+    clock.now += 6 * HOUR
     expect(runWatches(ctx)).toMatchObject({ started: [], skipped: [id] })
     expect(watchRuns(ctx)).toHaveLength(1)
-    expect(watchRow(ctx, id).nextRunAt.getTime()).toBe(
-      clock.now + INTERVALS['6h'],
-    )
+    expect(watchRow(ctx, id).nextRunAt.getTime()).toBe(clock.now + 6 * HOUR)
 
     // Over, the next slot runs again.
     resumeUpdate(ctx, first!.updateId)
     await settle(ctx, clock)
-    clock.now += INTERVALS['6h']
+    clock.now += 6 * HOUR
     expect(runWatches(ctx).started).toHaveLength(1)
     expect(watchRuns(ctx)).toHaveLength(2)
   })
@@ -271,7 +238,7 @@ describe('定期更新', () => {
     const id = setWatch(
       ctx,
       { target: 'collection', id: profile },
-      { frequency: '6h', options: resolveOptions({}) },
+      { every: SIX_HOURS, options: resolveOptions({}) },
     )
     // Ten days down: forty slots passed.
     clock.now = watchRow(ctx, id).nextRunAt.getTime() + 10 * 24 * HOUR + 1234
@@ -280,8 +247,8 @@ describe('定期更新', () => {
     expect(runWatches(ctx).started).toEqual([])
     expect(watchRuns(ctx)).toHaveLength(1)
     const next = watchRow(ctx, id).nextRunAt.getTime()
-    expect(next).toBe(nextSlot(id, '6h', clock.now))
-    expect(next - clock.now).toBeLessThanOrEqual(INTERVALS['6h'])
+    expect(next).toBe(watchNextRun(watchRow(ctx, id), clock.now))
+    expect(next - clock.now).toBeLessThanOrEqual(6 * HOUR)
   })
 
   test(`at most ${MAX_RUNS} watch runs go at once; the others wait, still due`, async () => {
@@ -293,12 +260,12 @@ describe('定期更新', () => {
         setWatch(
           ctx,
           { target: 'collection', id: profile },
-          { frequency: 'daily', options: resolveOptions({}) },
+          { every: DAILY, options: resolveOptions({}) },
         ),
       )
     }
     await ctx.queue.stop()
-    clock.now += INTERVALS.daily
+    clock.now += DAY
     const tick = runWatches(ctx)
     expect(tick.started).toHaveLength(MAX_RUNS)
     expect(tick.waiting).toHaveLength(1)
@@ -318,11 +285,11 @@ describe('定期更新', () => {
         setWatch(
           ctx,
           { target: 'collection', id: profile },
-          { frequency: 'daily', options: resolveOptions({}) },
+          { every: DAILY, options: resolveOptions({}) },
         ),
       )
     }
-    clock.now += INTERVALS.daily
+    clock.now += DAY
     const { waiting } = runWatches(ctx)
     await settle(ctx, clock)
     clock.now += 60_000
@@ -335,13 +302,13 @@ describe('定期更新', () => {
     const id = setWatch(
       ctx,
       { target: 'folder', id: folder.id },
-      { frequency: 'daily', options: resolveOptions({}) },
+      { every: DAILY, options: resolveOptions({}) },
     )
     clock.now = watchRow(ctx, id).nextRunAt.getTime()
     expect(runWatches(ctx).failed).toEqual([id])
     expect(watchRow(ctx, id)).toMatchObject({
       error: '收藏夹是空的',
-      nextRunAt: new Date(clock.now + INTERVALS.daily),
+      nextRunAt: new Date(clock.now + DAY),
     })
   })
 
@@ -351,14 +318,14 @@ describe('定期更新', () => {
     const id = setWatch(
       ctx,
       { target: 'collection', id: profile },
-      { frequency: 'daily', options: resolveOptions({}) },
+      { every: DAILY, options: resolveOptions({}) },
     )
     editWatch(ctx, id, { enabled: false })
-    clock.now += 3 * INTERVALS.daily
+    clock.now += 3 * DAY
     expect(runWatches(ctx).started).toEqual([])
     editWatch(ctx, id, { enabled: true })
     expect(watchRow(ctx, id).nextRunAt.getTime()).toBe(
-      nextSlot(id, 'daily', clock.now),
+      watchNextRun(watchRow(ctx, id), clock.now),
     )
     expect(runWatches(ctx).started).toEqual([])
   })
@@ -370,12 +337,12 @@ describe('定期更新', () => {
     const onProfile = setWatch(
       ctx,
       { target: 'collection', id: profile },
-      { frequency: 'daily', options: resolveOptions({}) },
+      { every: DAILY, options: resolveOptions({}) },
     )
     setWatch(
       ctx,
       { target: 'folder', id: folder.id },
-      { frequency: 'daily', options: resolveOptions({}) },
+      { every: DAILY, options: resolveOptions({}) },
     )
     clock.now = watchRow(ctx, onProfile).nextRunAt.getTime()
     const run = runWatches(ctx).started.find((s) => s.watchId === onProfile)

@@ -4,18 +4,21 @@ import {
   call,
   client,
   errorText,
+  type IntervalUnit,
   type UpdatePreview,
   type Watch,
-  type WatchFrequency,
+  type WatchEvery,
   type WatchTarget,
 } from '../api'
 import { defaultOptions, type Options } from '../capture-options'
 import { toast } from '../composables/useToast'
 import {
-  DEFAULT_FREQUENCY,
-  frequencies,
+  DEFAULT_EVERY,
+  fitCount,
   lastRunText,
+  MAX_COUNT,
   nextRunText,
+  units,
 } from '../watches'
 import CaptureOptions from './CaptureOptions.vue'
 import AppLink from './ui/AppLink.vue'
@@ -44,7 +47,7 @@ const preview = shallowRef<UpdatePreview>()
 const loaded = shallowRef(false)
 const busy = shallowRef(false)
 const error = shallowRef('')
-const frequency = shallowRef<WatchFrequency>(DEFAULT_FREQUENCY)
+const every = shallowRef<WatchEvery>(DEFAULT_EVERY)
 const options = shallowRef<Options>(defaultOptions())
 let request = 0
 
@@ -54,7 +57,7 @@ async function load() {
   error.value = ''
   current.value = undefined
   preview.value = undefined
-  frequency.value = DEFAULT_FREQUENCY
+  every.value = DEFAULT_EVERY
   options.value = defaultOptions()
   const target = props.target
   const [found, covers] = await Promise.allSettled([
@@ -70,7 +73,7 @@ async function load() {
     const w = found.value.items[0]
     current.value = w
     if (w) {
-      frequency.value = w.frequency
+      every.value = w.every
       const restored: Options = { ...defaultOptions(), ...w.options }
       options.value = restored
     }
@@ -115,7 +118,12 @@ async function save() {
       client.watches.$put({
         json: {
           ...props.target,
-          frequency: frequency.value,
+          every: {
+            unit: every.value.unit,
+            count: fitCount(every.value.count, every.value.unit),
+          },
+          // Months and years count in the owner's zone: this browser's.
+          time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           options: {
             ...options.value,
             relations: listable.value && options.value.relations,
@@ -151,8 +159,27 @@ async function remove() {
 function backdrop(event: MouseEvent) {
   if (event.target === dialog.value) emit('cancel')
 }
-const chosen = (event: Event) =>
-  (event.target as HTMLSelectElement).value as WatchFrequency
+/** The number typed, made one the server takes for the unit. */
+function setCount(event: Event) {
+  const input = event.target as HTMLInputElement
+  const count = fitCount(Number(input.value), every.value.unit)
+  input.value = String(count)
+  every.value = { ...every.value, count }
+}
+/**
+ * What is typed counts at once, so choosing a unit right after typing
+ * keeps the number; it is made one the server takes on leaving the field.
+ */
+function typeCount(event: Event) {
+  const input = event.target as HTMLInputElement
+  const count = Number(input.value)
+  if (input.value && Number.isFinite(count))
+    every.value = { ...every.value, count }
+}
+function setUnit(event: Event) {
+  const unit = (event.target as HTMLSelectElement).value as IntervalUnit
+  every.value = { unit, count: fitCount(every.value.count, unit) }
+}
 </script>
 
 <template>
@@ -181,21 +208,38 @@ const chosen = (event: Event) =>
             上次未开始：{{ current.error }}
           </p>
         </div>
-        <label class="row"
-          ><span>频率</span
-          ><span class="select"
-            ><select
-              class="value"
-              aria-label="频率"
-              :value="frequency"
+        <div class="row every" role="group" aria-label="频率">
+          <span
+            >频率<small class="hint"
+              >最短 5 分钟；上一次还没结束时跳过这一次</small
+            ></span
+          >
+          <span class="interval"
+            >每<input
+              class="value count"
+              type="number"
+              inputmode="numeric"
+              min="1"
+              :max="MAX_COUNT"
+              step="1"
+              aria-label="间隔"
+              :value="every.count"
               :disabled="busy"
-              @change="frequency = chosen($event)"
-            >
-              <option v-for="f in frequencies" :key="f.value" :value="f.value">
-                {{ f.label }}
-              </option></select
-            ><ChevronIcon class="select-chevron" /></span
-        ></label>
+              @input="typeCount"
+              @change="setCount" /><span class="select"
+              ><select
+                class="value"
+                aria-label="单位"
+                :value="every.unit"
+                :disabled="busy"
+                @change="setUnit"
+              >
+                <option v-for="u in units" :key="u.value" :value="u.value">
+                  {{ u.label }}
+                </option></select
+              ><ChevronIcon class="select-chevron" /></span
+          ></span>
+        </div>
         <CaptureOptions
           v-model="options"
           :profiles="profiles"
@@ -309,6 +353,22 @@ const chosen = (event: Event) =>
 .value:focus-visible {
   outline: 2px solid var(--link);
   outline-offset: 2px;
+}
+.hint {
+  display: block;
+  font-size: 13px;
+  color: var(--subtle);
+}
+.interval {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+input.count {
+  width: 72px;
+  padding: 4px 10px;
+  text-align: right;
 }
 .select {
   position: relative;

@@ -237,7 +237,8 @@ it('a watched profile says how often and when next; the row opens its sheet', as
       target_id: 'profile',
       handle: 'synthetic',
       url: 'https://x.com/i/user/1',
-      frequency: '6h',
+      every: { count: 6, unit: 'hour' },
+      time_zone: 'UTC',
       options: {
         posts: 'latest',
         count: 100,
@@ -265,7 +266,12 @@ it('a watched profile says how often and when next; the row opens its sheet', as
     return open!
   })
   await vi.waitFor(() => expect(sheet.textContent).toContain('取消定期更新'))
-  expect(sheet.querySelector('select')?.value).toBe('6h')
+  expect(
+    sheet.querySelector<HTMLInputElement>('input[aria-label="间隔"]')?.value,
+  ).toBe('6')
+  expect(
+    sheet.querySelector<HTMLSelectElement>('select[aria-label="单位"]')?.value,
+  ).toBe('hour')
 })
 
 it('a post has no 定期更新', async () => {

@@ -391,7 +391,8 @@ Scheduled updates (定期更新): accounts and folders the archive updates by it
       "target_id": "01a1…",
       "handle": "alice",
       "url": "https://x.com/alice",
-      "frequency": "daily",
+      "every": { "count": 1, "unit": "day" },
+      "time_zone": "Asia/Tokyo",
       "options": { "posts": "until_existing", "relations": false, "…": "…" },
       "enabled": true,
       "next_run_at": "2026-11-27T03:12:00.000Z",
@@ -497,11 +498,11 @@ Pause or resume all background work, or some job types: `{"paused": true}`, `{"p
 
 ### PUT /agent/v1/watches
 
-Watch an account or a folder, or change its watch (there is one per target): `{"target": {"account": "x:@alice"}, "frequency": "daily", "options": {"posts": "until_existing"}}`. `target` is `{"account": ref}` (a saved account) or `{"folder": id}`; `frequency` is `6h`, `daily` or `weekly`; `options` as for updates. Each run is an ordinary update, ranked below the owner's own work. Answers the watch as `GET /watches` lists it.
+Watch an account or a folder, or change its watch (there is one per target): `{"target": {"account": "x:@alice"}, "every": {"count": 6, "unit": "hour"}, "options": {"posts": "until_existing"}}`. `target` is `{"account": ref}` (a saved account) or `{"folder": id}`; `every` is a whole `count` from 1 to 1000 of a `unit`: `minute`, `hour`, `day`, `week`, `month` or `year`, at least 5 minutes (shorter is `invalid_request`); `time_zone` (an IANA zone, default `UTC`) is where months and years are counted, from the day the interval is set (31 January, then the last of February); `options` as for updates. A run that takes longer than its interval skips the slots that pass meanwhile. Each run is an ordinary update, ranked below the owner's own work. Answers the watch as `GET /watches` lists it.
 
 ### PATCH /agent/v1/watches/{id}
 
-Change a watch's `frequency` or `options`, or turn it off and on: `{"enabled": false}`. Only the owner deletes watches.
+Change a watch's `every`, `time_zone` or `options`, or turn it off and on: `{"enabled": false}`. A new interval starts from its next slot. Only the owner deletes watches.
 
 ### POST /agent/v1/shares/{id}/revoke
 

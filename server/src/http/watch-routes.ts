@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import * as v from 'valibot'
 import { OptionsBody, optionsJson, resolveOptions } from '#capture/options.ts'
+import { EveryBody } from '#capture/watch-schedule.ts'
 import {
   deleteWatch,
   editWatch,
@@ -8,14 +9,12 @@ import {
   setWatch,
   type WatchView,
 } from '#capture/watches.ts'
-import { watchFrequencies } from '#db/schema.ts'
 import { AppError } from '#errors.ts'
 import { ownerOnly } from './auth.ts'
 import { json, query, type Env } from './validate.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 
 const Target = v.picklist(['collection', 'folder'])
-const Frequency = v.picklist(watchFrequencies)
 
 function watchJson(w: WatchView) {
   return {
@@ -25,7 +24,8 @@ function watchJson(w: WatchView) {
     ...(w.name ? { name: w.name } : {}),
     ...(w.handle ? { handle: w.handle } : {}),
     ...(w.url ? { url: w.url } : {}),
-    frequency: w.frequency,
+    every: { count: w.every.count, unit: w.every.unit },
+    time_zone: w.timeZone,
     options: optionsJson(w.options),
     enabled: w.enabled,
     next_run_at: w.nextRunAt.toISOString(),
@@ -78,7 +78,9 @@ export function watchRoutes(ctx: AccountsContext) {
           v.strictObject({
             target: Target,
             id: v.string(),
-            frequency: Frequency,
+            every: EveryBody,
+            /** The owner's, for months and years; the browser's. */
+            time_zone: v.optional(v.string()),
             options: v.optional(OptionsBody),
           }),
         ),
@@ -88,7 +90,8 @@ export function watchRoutes(ctx: AccountsContext) {
             ctx,
             { target: body.target, id: body.id },
             {
-              frequency: body.frequency,
+              every: body.every,
+              timeZone: body.time_zone,
               options: resolveOptions(body.options),
             },
           )
@@ -100,7 +103,8 @@ export function watchRoutes(ctx: AccountsContext) {
         '/watches/:id',
         json(
           v.strictObject({
-            frequency: v.optional(Frequency),
+            every: v.optional(EveryBody),
+            time_zone: v.optional(v.string()),
             options: v.optional(OptionsBody),
             enabled: v.optional(v.boolean()),
           }),
@@ -109,7 +113,8 @@ export function watchRoutes(ctx: AccountsContext) {
           const body = c.req.valid('json')
           const id = c.req.param('id')
           editWatch(ctx, id, {
-            frequency: body.frequency,
+            every: body.every,
+            timeZone: body.time_zone,
             options: body.options && resolveOptions(body.options),
             enabled: body.enabled,
           })

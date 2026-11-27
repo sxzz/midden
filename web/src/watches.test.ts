@@ -1,5 +1,7 @@
 import { expect, test } from 'vitest'
 import {
+  everyText,
+  fitCount,
   lastRunText,
   nextRunText,
   runTime,
@@ -14,7 +16,8 @@ const watch = (patch: Partial<Watch> = {}): Watch => ({
   target_id: 'c',
   handle: 'cat',
   url: 'https://x.com/cat',
-  frequency: 'daily',
+  every: { count: 1, unit: 'day' },
+  time_zone: 'Asia/Tokyo',
   options: {
     posts: 'latest',
     count: 100,
@@ -48,7 +51,7 @@ test('a watch says what, how often and with what', () => {
   expect(
     watchSummary(
       watch({
-        frequency: '6h',
+        every: { count: 6, unit: 'hour' },
         options: {
           ...watch().options,
           posts: 'until_existing',
@@ -61,11 +64,53 @@ test('a watch says what, how often and with what', () => {
     watchSummary(
       watch({
         target: 'folder',
-        frequency: 'weekly',
+        every: { count: 1, unit: 'week' },
         options: { ...watch().options, capture_references: false },
       }),
     ),
   ).toBe('每周 · 不抓原帖')
+})
+
+test('an interval reads as said: one of a unit, or a number of them', () => {
+  expect(
+    (
+      [
+        [1, 'hour'],
+        [6, 'hour'],
+        [30, 'minute'],
+        [1, 'day'],
+        [3, 'day'],
+        [1, 'week'],
+        [2, 'week'],
+        [1, 'month'],
+        [3, 'month'],
+        [1, 'year'],
+        [2, 'year'],
+      ] as const
+    ).map(([count, unit]) => everyText({ count, unit })),
+  ).toEqual([
+    '每小时',
+    '每 6 小时',
+    '每 30 分钟',
+    '每天',
+    '每 3 天',
+    '每周',
+    '每 2 周',
+    '每月',
+    '每 3 个月',
+    '每年',
+    '每 2 年',
+  ])
+})
+
+test('a typed count is made one the server takes', () => {
+  expect(fitCount(0, 'day')).toBe(1)
+  expect(fitCount(2.6, 'week')).toBe(3)
+  expect(fitCount(5000, 'hour')).toBe(1000)
+  expect(fitCount(NaN, 'month')).toBe(1)
+  // At least 5 minutes.
+  expect(fitCount(1, 'minute')).toBe(5)
+  expect(fitCount(15, 'minute')).toBe(15)
 })
 
 test('its next and last run', () => {

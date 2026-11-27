@@ -629,14 +629,18 @@ describe('writes', () => {
     const f = await setup()
     const made = await f.call('/watches', {
       method: 'PUT',
-      body: { target: { account: 'fake:@alice' }, frequency: 'daily' },
+      body: {
+        target: { account: 'fake:@alice' },
+        every: { count: 1, unit: 'day' },
+      },
     })
     expect(made.status).toBe(200)
     expect(made.json).toEqual(
       expect.objectContaining({
         target: 'account',
         target_id: f.ids['7'],
-        frequency: 'daily',
+        every: { count: 1, unit: 'day' },
+        time_zone: 'UTC',
         enabled: true,
         next_run_at: expect.any(String),
       }),
@@ -646,12 +650,14 @@ describe('writes', () => {
       method: 'PUT',
       body: {
         target: { account: f.ids['7'] },
-        frequency: 'weekly',
+        every: { count: 2, unit: 'week' },
+        time_zone: 'Europe/Berlin',
         options: { posts: 'none' },
       },
     })
     expect(again.json.id).toBe(made.json.id)
-    expect(again.json.frequency).toBe('weekly')
+    expect(again.json.every).toEqual({ count: 2, unit: 'week' })
+    expect(again.json.time_zone).toBe('Europe/Berlin')
     expect(again.json.options.posts).toBe('none')
     const off = await f.call(`/watches/${made.json.id}`, {
       method: 'PATCH',
@@ -666,21 +672,27 @@ describe('writes', () => {
       (
         await f.call('/watches', {
           method: 'PUT',
-          body: { target: { folder: folder.id }, frequency: '6h' },
+          body: {
+            target: { folder: folder.id },
+            every: { count: 6, unit: 'hour' },
+          },
         })
       ).json,
     ).toEqual(
       expect.objectContaining({
         target: 'folder',
         name: 'Cats',
-        frequency: '6h',
+        every: { count: 6, unit: 'hour' },
       }),
     )
     expect(
       (
         await f.call('/watches', {
           method: 'PUT',
-          body: { target: { account: 'fake:@carol' }, frequency: 'daily' },
+          body: {
+            target: { account: 'fake:@carol' },
+            every: { count: 1, unit: 'day' },
+          },
         })
       ).status,
     ).toBe(404)

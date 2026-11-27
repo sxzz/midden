@@ -1,18 +1,52 @@
 import { optionsSummary } from './capture-options'
 import { profileHandle, stateStatus, type RecordStatus } from './captures'
-import type { Watch, WatchFrequency } from './api'
+import type { IntervalUnit, Watch, WatchEvery } from './api'
 
-/** 定期更新: how often, in the order the menu lists them. */
-export const frequencies: { value: WatchFrequency; label: string }[] = [
-  { value: '6h', label: '每 6 小时' },
-  { value: 'daily', label: '每天' },
-  { value: 'weekly', label: '每周' },
+/** 定期更新's units, in the order the menu lists them. */
+export const units: { value: IntervalUnit; label: string }[] = [
+  { value: 'minute', label: '分钟' },
+  { value: 'hour', label: '小时' },
+  { value: 'day', label: '天' },
+  { value: 'week', label: '周' },
+  { value: 'month', label: '月' },
+  { value: 'year', label: '年' },
 ]
 
-export const DEFAULT_FREQUENCY: WatchFrequency = 'daily'
+export const DEFAULT_EVERY: WatchEvery = { count: 1, unit: 'day' }
+/** The server's limits: at most this many of a unit, at least 5 minutes. */
+export const MAX_COUNT = 1000
+export const MIN_MINUTES = 5
 
-export const frequencyLabel = (f: WatchFrequency) =>
-  frequencies.find((item) => item.value === f)?.label ?? f
+/** One of a unit: 每小时, 每天, 每月. */
+const single: Record<IntervalUnit, string> = {
+  minute: '每分钟',
+  hour: '每小时',
+  day: '每天',
+  week: '每周',
+  month: '每月',
+  year: '每年',
+}
+/** Several: 每 6 小时, 每 2 周, 每 3 个月. */
+const several: Record<IntervalUnit, string> = {
+  minute: '分钟',
+  hour: '小时',
+  day: '天',
+  week: '周',
+  month: '个月',
+  year: '年',
+}
+
+/** How often, as it reads: 每天, 每 6 小时, 每 2 个月. */
+export function everyText(e: WatchEvery) {
+  return e.count === 1 ? single[e.unit] : `每 ${e.count} ${several[e.unit]}`
+}
+
+/** A count the server takes for the unit: 1–1000, minutes from 5. */
+export function fitCount(count: number, unit: IntervalUnit) {
+  const whole = Number.isFinite(count) ? Math.round(count) : 1
+  const min = unit === 'minute' ? MIN_MINUTES : 1
+  return Math.min(Math.max(whole, min), MAX_COUNT)
+}
 
 const day = (d: Date) =>
   new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
@@ -41,7 +75,7 @@ export function watchTitle(w: Watch) {
 /** How often and with what, e.g. 每天 · 抓到已有数据为止 · 抓关系网. */
 export function watchSummary(w: Watch) {
   return [
-    frequencyLabel(w.frequency),
+    everyText(w.every),
     optionsSummary(w.options, {
       profiles: true,
       posts: w.target === 'folder',

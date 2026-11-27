@@ -60,7 +60,8 @@ async function serve(page: Page) {
           target_id: body.id,
           handle: 'owner',
           url: profile.url,
-          frequency: body.frequency,
+          every: body.every,
+          time_zone: body.time_zone,
           options: body.options,
           enabled: true,
           next_run_at: next.toISOString(),
@@ -102,10 +103,14 @@ test('watch a profile from its detail, then edit the watch', async ({
   const sheet = page.getByRole('dialog', { name: '定期更新 @owner' })
   await expect(sheet).toBeVisible()
   // The 更新 sheet's options, with its defaults, and how often.
-  await expect(sheet.getByLabel('频率')).toHaveValue('daily')
+  await expect(sheet.getByLabel('间隔')).toHaveValue('1')
+  await expect(sheet.getByLabel('单位')).toHaveValue('day')
+  await expect(sheet.getByText('最短 5 分钟')).toBeVisible()
   await expect(sheet.getByLabel('抓帖子')).toBeChecked()
   await expect(sheet.getByLabel('抓关系网')).not.toBeChecked()
-  await sheet.getByLabel('频率').selectOption('6h')
+  // A custom interval: every 6 hours.
+  await sheet.getByLabel('间隔').fill('6')
+  await sheet.getByLabel('单位').selectOption('hour')
   await sheet.getByLabel('帖子范围').selectOption('until_existing')
   await sheet.getByLabel('抓关系网').check()
   await sheet.getByRole('button', { name: '开启定期更新' }).click()
@@ -119,7 +124,10 @@ test('watch a profile from its detail, then edit the watch', async ({
       body: {
         target: 'collection',
         id: profileId,
-        frequency: '6h',
+        every: { count: 6, unit: 'hour' },
+        time_zone: await page.evaluate(
+          () => new Intl.DateTimeFormat().resolvedOptions().timeZone,
+        ),
         options: {
           ...defaults,
           posts: 'until_existing',
@@ -141,17 +149,24 @@ test('watch a profile from its detail, then edit the watch', async ({
     created_at: new Date().toISOString(),
   })
   await row.click()
-  await expect(sheet.getByLabel('频率')).toHaveValue('6h')
+  await expect(sheet.getByLabel('间隔')).toHaveValue('6')
+  await expect(sheet.getByLabel('单位')).toHaveValue('hour')
   await expect(sheet.getByLabel('帖子范围')).toHaveValue('until_existing')
   await expect(sheet.getByLabel('抓关系网')).toBeChecked()
   await expect(sheet.getByText('下次 今天 23:05')).toBeVisible()
-  await sheet.getByLabel('频率').selectOption('weekly')
+  // Every 2 months; too few minutes would be made 5.
+  await sheet.getByLabel('单位').selectOption('minute')
+  await sheet.getByLabel('间隔').fill('3')
+  await sheet.getByLabel('间隔').blur()
+  await expect(sheet.getByLabel('间隔')).toHaveValue('5')
+  await sheet.getByLabel('单位').selectOption('month')
+  await sheet.getByLabel('间隔').fill('2')
   await sheet.getByRole('button', { name: '保存' }).click()
   await expect(sheet).toBeHidden()
-  await expect(row).toContainText('每周')
+  await expect(row).toContainText('每 2 个月')
   expect(sent.at(-1)).toMatchObject({
     method: 'PUT',
-    body: { frequency: 'weekly', options: { relations: true } },
+    body: { every: { count: 2, unit: 'month' }, options: { relations: true } },
   })
   await row.click()
   await expect(
@@ -191,11 +206,13 @@ test('采集 lists the watches; one can be turned off', async ({ page }) => {
   // 编辑 opens the same sheet as the profile's page.
   await page.getByRole('button', { name: '编辑 @owner 的定期更新' }).click()
   const sheet = page.getByRole('dialog', { name: '定期更新 @owner' })
-  await expect(sheet.getByLabel('频率')).toHaveValue('daily')
-  await sheet.getByLabel('频率').selectOption('weekly')
+  await expect(sheet.getByLabel('间隔')).toHaveValue('1')
+  await expect(sheet.getByLabel('单位')).toHaveValue('day')
+  await sheet.getByLabel('间隔').fill('2')
+  await sheet.getByLabel('单位').selectOption('week')
   await sheet.getByRole('button', { name: '保存' }).click()
   await expect(sheet).toBeHidden()
-  await expect(item).toContainText('每周 · 最新 100 条')
+  await expect(item).toContainText('每 2 周 · 最新 100 条')
 })
 
 test('watch a folder from its menu', async ({ page }) => {
@@ -245,7 +262,8 @@ test('watch a folder from its menu', async ({ page }) => {
             target: 'folder',
             target_id: folderId,
             name: '猫',
-            frequency: (sent as { frequency: string }).frequency,
+            every: (sent as { every: object }).every,
+            time_zone: 'UTC',
             options: (sent as { options: object }).options,
             enabled: true,
             next_run_at: new Date().toISOString(),
@@ -261,14 +279,14 @@ test('watch a folder from its menu', async ({ page }) => {
   await page.getByRole('button', { name: '管理收藏夹' }).click()
   await page.getByRole('button', { name: '定期更新', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: '定期更新 收藏夹「猫」' })
-  await expect(sheet.getByLabel('频率')).toHaveValue('daily')
-  await sheet.getByLabel('频率').selectOption('weekly')
+  await expect(sheet.getByLabel('单位')).toHaveValue('day')
+  await sheet.getByLabel('单位').selectOption('week')
   await sheet.getByRole('button', { name: '开启定期更新' }).click()
   await expect(sheet).toBeHidden()
   expect(sent).toMatchObject({
     target: 'folder',
     id: folderId,
-    frequency: 'weekly',
+    every: { count: 1, unit: 'week' },
     options: { posts: 'latest', count: 100, relations: false },
   })
   await page.getByRole('button', { name: '管理收藏夹' }).click()

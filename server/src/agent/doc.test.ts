@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, test } from 'vitest'
+import { MAX_COUNT } from '#capture/watch-schedule.ts'
+import { intervalUnits } from '#db/schema.ts'
 import { agentFixture, type AgentFixture } from '#testing/agent.ts'
 import { AGENT_DOC, agentDocRoutes } from './doc.ts'
 import { AGENT_ERRORS } from './errors.ts'
@@ -40,5 +42,15 @@ describe('/agent.md', () => {
     )
     for (const code of Object.keys(AGENT_ERRORS))
       expect(doc).toContain(`\`${code}\``)
+  })
+
+  test("states a watch's interval as the API takes it", () => {
+    const section = doc.slice(doc.indexOf('### PUT /agent/v1/watches'))
+    const put = section.slice(0, section.indexOf('\n### ', 1))
+    expect(put).toContain('"every": {"count": 6, "unit": "hour"}')
+    for (const unit of intervalUnits) expect(put).toContain(`\`${unit}\``)
+    expect(put).toContain(`from 1 to ${MAX_COUNT}`)
+    expect(put).toContain('at least 5 minutes')
+    expect(doc).not.toContain('frequency')
   })
 })

@@ -987,8 +987,16 @@ export const updateSkips = sqliteTable(
   (t) => [primaryKey({ columns: [t.updateId, t.position] })],
 )
 
-export const watchFrequencies = ['6h', 'daily', 'weekly'] as const
-export type WatchFrequency = (typeof watchFrequencies)[number]
+/** What a watch's interval counts: every `count` of these. */
+export const intervalUnits = [
+  'minute',
+  'hour',
+  'day',
+  'week',
+  'month',
+  'year',
+] as const
+export type IntervalUnit = (typeof intervalUnits)[number]
 
 /**
  * 定期更新: a saved profile or a folder updated on a schedule, with options
@@ -1002,11 +1010,17 @@ export const watches = sqliteTable(
       onDelete: 'cascade',
     }),
     folderId: text().references(() => folders.id, { onDelete: 'cascade' }),
-    frequency: text({ enum: watchFrequencies }).notNull(),
+    // Every `every_count` `every_unit`s (`capture/watch-schedule.ts`).
+    everyCount: integer().notNull(),
+    everyUnit: text({ enum: intervalUnits }).notNull(),
+    // Months and years count in this zone (IANA), from the local day of
+    // `anchor_at`: when the interval was last set.
+    timeZone: text().notNull().default('UTC'),
+    anchorAt: timestamp().notNull(),
     // What each run captures, as an update started by hand would.
     options: text({ mode: 'json' }).$type<CaptureOptions>().notNull(),
     enabled: bool().notNull().default(true),
-    // The next slot: its frequency from a fixed offset of its own, so
+    // The next slot: its interval from a fixed offset of its own, so
     // watches do not all start at once (`capture/watches.ts`).
     nextRunAt: timestamp().notNull(),
     // Why the last slot started nothing (the folder was empty, say).

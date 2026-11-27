@@ -621,7 +621,8 @@ describe('api', () => {
     const created = await send('PUT', '/watches', {
       target: 'collection',
       id: profile,
-      frequency: 'daily',
+      every: { count: 1, unit: 'day' },
+      time_zone: 'Asia/Tokyo',
       options: { posts: 'until_existing', relations: true },
     })
     expect(created.status).toBe(200)
@@ -630,7 +631,8 @@ describe('api', () => {
       target: 'collection',
       target_id: profile,
       url: 'https://fake.test/u/100',
-      frequency: 'daily',
+      every: { count: 1, unit: 'day' },
+      time_zone: 'Asia/Tokyo',
       enabled: true,
       options: { posts: 'until_existing', relations: true, media_only: false },
       next_run_at: expect.any(String),
@@ -647,24 +649,41 @@ describe('api', () => {
       await (
         await send('PATCH', `/watches/${watch.id}`, {
           enabled: false,
-          frequency: 'weekly',
+          every: { count: 2, unit: 'month' },
           options: { posts: 'latest', count: 20 },
         })
       ).json(),
     ).toMatchObject({
       enabled: false,
-      frequency: 'weekly',
+      every: { count: 2, unit: 'month' },
+      time_zone: 'Asia/Tokyo',
       options: { posts: 'latest', count: 20, relations: false },
     })
+    // The old fixed choices, an unknown unit, too many, too often, a zone
+    // that is none.
+    for (const bad of [
+      { frequency: 'daily' },
+      { every: { count: 1, unit: 'fortnight' } },
+      { every: { count: 1001, unit: 'day' } },
+      { every: { count: 4, unit: 'minute' } },
+      { every: { count: 1, unit: 'day' }, time_zone: 'Mars/Olympus' },
+    ]) {
+      const refused = await send('PUT', '/watches', {
+        target: 'collection',
+        id: profile,
+        ...bad,
+      })
+      expect(refused.status).toBe(400)
+    }
     expect(
-      (
+      await (
         await send('PUT', '/watches', {
           target: 'collection',
           id: profile,
-          frequency: 'hourly',
+          every: { count: 3, unit: 'minute' },
         })
-      ).status,
-    ).toBe(400)
+      ).json(),
+    ).toEqual({ error: '间隔最短 5 分钟' })
     expect((await send('DELETE', `/watches/${watch.id}`)).status).toBe(204)
     expect((await send('DELETE', `/watches/${watch.id}`)).status).toBe(404)
     expect(await (await call('/watches')).json()).toEqual({ items: [] })

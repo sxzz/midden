@@ -9,8 +9,9 @@ import { revokeAccount, type AccountsContext } from '#accounts/accounts.ts'
 import { OptionsBody, resolveOptions } from '#capture/options.ts'
 import { captureURL } from '#capture/records.ts'
 import { pauseUpdate, resumeUpdate, startUpdate } from '#capture/updates.ts'
+import { EveryBody } from '#capture/watch-schedule.ts'
 import { editWatch, setWatch } from '#capture/watches.ts'
-import { connections, watchFrequencies } from '#db/schema.ts'
+import { connections } from '#db/schema.ts'
 import { readJobControl, writeJobControl } from '#jobs/control.ts'
 import { PAUSABLE_TYPES } from '#jobs/queue.ts'
 import {
@@ -274,7 +275,8 @@ export function writeRoutes(
           }),
           v.strictObject({ folder: v.string() }),
         ]),
-        frequency: v.picklist(watchFrequencies),
+        every: EveryBody,
+        time_zone: v.optional(v.string()),
         options: v.optional(OptionsBody),
       }),
     )
@@ -288,7 +290,8 @@ export function writeRoutes(
             id: savedAccount(reader, t.account, t.platform),
           },
       {
-        frequency: input.frequency,
+        every: input.every,
+        timeZone: input.time_zone,
         options: resolveOptions(input.options),
       },
     )
@@ -298,7 +301,8 @@ export function writeRoutes(
     const input = await parse(
       c,
       v.strictObject({
-        frequency: v.optional(v.picklist(watchFrequencies)),
+        every: v.optional(EveryBody),
+        time_zone: v.optional(v.string()),
         options: v.optional(OptionsBody),
         enabled: v.optional(v.boolean()),
       }),
@@ -306,7 +310,8 @@ export function writeRoutes(
     const id = c.req.param('id')
     if (!isUUID(id)) throw notFound()
     editWatch(ctx, id.toLowerCase(), {
-      frequency: input.frequency,
+      every: input.every,
+      timeZone: input.time_zone,
       options: input.options && resolveOptions(input.options),
       enabled: input.enabled,
     })

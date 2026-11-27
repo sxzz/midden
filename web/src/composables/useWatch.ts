@@ -1,6 +1,6 @@
 import { computed, onActivated, shallowRef, watch as watchSource } from 'vue'
 import { call, client, type Watch, type WatchTarget } from '../api'
-import { frequencyLabel, nextRunText } from '../watches'
+import { everyText, nextRunText } from '../watches'
 
 /**
  * A profile's or a folder's watch (定期更新), for the row that opens its
@@ -30,7 +30,7 @@ export function useWatch(target: () => WatchTarget | undefined) {
   const trailing = computed(() => {
     const w = current.value
     if (!w) return
-    return w.enabled ? frequencyLabel(w.frequency) : '已关闭'
+    return w.enabled ? everyText(w.every) : '已关闭'
   })
   /** When it runs next. */
   const hint = computed(() =>
