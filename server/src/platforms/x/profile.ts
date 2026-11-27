@@ -402,23 +402,36 @@ export async function fetchPublicProfile(
 ): Promise<FetchResponse> {
   const responses: SourceResponse[] = []
   const get = (url: string) => publicJSON(url, signal, responses, fetcher)
-  const handle = id.startsWith('handle:') ? id.slice(7) : `id:${id}`
+  const byHandle = id.startsWith('handle:')
+  const handle = byHandle ? id.slice(7) : `id:${id}`
   let data: any
   try {
     data = await get(
       `${endpoint}/${encodeURIComponent(handle)}?about_account=1`,
     )
   } catch (error) {
-    // Asked by its id, an account not found no longer exists (deactivated
-    // or deleted); a handle may only have been renamed.
     if (
-      !id.startsWith('handle:') &&
       error instanceof ProviderError &&
       error.notFound &&
       !sourceState(error)
     ) {
-      error.message = '账号已不存在'
-      error.metadata.set(sourceStateKey, 'deleted')
+      // Asked by its id, an account not found no longer exists (deactivated
+      // or deleted).
+      if (!byHandle) {
+        error.message = '账号已不存在'
+        error.metadata.set(sourceStateKey, 'deleted')
+        throw error
+      }
+      // By handle, FxTwitter also answers a bare 404 for accounts that exist
+      // and are public: slowly (about 2 s against well under that for a real
+      // answer), for some handles only in one letter case. It proves nothing,
+      // so it is a transient failure, never a missing account.
+      const miss = new ProviderError(
+        status.UNAVAILABLE,
+        '暂时无法读取（平台按用户名查询失败）',
+      )
+      miss.handleMiss = true
+      throw miss
     }
     throw error
   }

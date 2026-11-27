@@ -49,7 +49,10 @@ export function resolveTarget(raw: string) {
         collection: false,
       }
     const id = url.pathname.match(/^\/i\/user\/(\d+)\/?$/)
-    const handle = url.pathname.match(/^\/(\w{1,15})\/?$/)?.[1].toLowerCase()
+    // The identity is the handle in lower case; the link keeps it as written,
+    // since FxTwitter finds some accounts only in their own letter case.
+    const spelled = url.pathname.match(/^\/(\w{1,15})\/?$/)?.[1]
+    const handle = spelled?.toLowerCase()
     const reserved = new Set([
       'home',
       'explore',
@@ -72,7 +75,7 @@ export function resolveTarget(raw: string) {
     ])
     if (id || (handle && !reserved.has(handle)))
       return {
-        url: id ? `https://x.com/i/user/${id[1]}` : `https://x.com/${handle}`,
+        url: id ? `https://x.com/i/user/${id[1]}` : `https://x.com/${spelled}`,
         platform: 'x',
         kind: 'profile',
         objectScope: '',

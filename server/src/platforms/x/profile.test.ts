@@ -295,7 +295,7 @@ test('timeline retains repost relations across pages and still collects original
     ],
   )
   assert.ok(profile.graph!.relations.some((r) => r.type === 'mentions'))
-  assert.ok(profile.relatedTargets.some((t) => t.url === 'https://x.com/other'))
+  assert.ok(profile.relatedTargets.some((t) => t.url === 'https://x.com/Other'))
   for (const id of ['1', '2'])
     assert.ok(
       profile.relatedTargets.some(
@@ -325,7 +325,7 @@ test("timeline targets carry each post's latest known change", () => {
   )
 })
 
-test('profile failures name suspension and missing accounts without blocking retries', async () => {
+test('profile failures name suspension and missing accounts, and a handle lookup proves nothing', async () => {
   const profile = (status: number, body: unknown, id = user.id) =>
     fetchPublicProfile(
       id,
@@ -336,13 +336,28 @@ test('profile failures name suspension and missing accounts without blocking ret
     )
   const failure = (message: string) => (e: any) =>
     e.message === message && e.code === status.FAILED_PRECONDITION
+  // X's own reason, passed on: explicit, so it needs no second answer.
   await assert.rejects(
     profile(404, {
       code: 404,
       message: 'User is suspended',
       reason: 'suspended',
+      id: user.id,
     }),
-    failure('账号已被封禁，解封后可重新抓取'),
+    (e: any) =>
+      failure('账号已被封禁，解封后可重新抓取')(e) &&
+      e.metadata.get('source-state')[0] === 'suspended' &&
+      e.metadata.get('source-state-explicit')[0] === '1',
+  )
+  await assert.rejects(
+    profile(
+      404,
+      { code: 404, message: 'User is suspended', reason: 'suspended' },
+      'handle:fixture',
+    ),
+    (e: any) =>
+      failure('账号已被封禁，解封后可重新抓取')(e) &&
+      e.metadata.get('source-state-explicit')[0] === '1',
   )
   await assert.rejects(
     profile(200, {
@@ -352,8 +367,7 @@ test('profile failures name suspension and missing accounts without blocking ret
     }),
     failure('账号已被封禁，解封后可重新抓取'),
   )
-  // Asked by its id, an account not found is gone; by a handle it may only
-  // have been renamed.
+  // Asked by its id, an account not found is gone (once confirmed).
   await assert.rejects(
     profile(404, { code: 404, message: 'User not found' }),
     (e: any) =>
@@ -361,16 +375,23 @@ test('profile failures name suspension and missing accounts without blocking ret
       e.metadata.get('source-state')[0] === 'deleted' &&
       !e.metadata.get('source-state-explicit').length,
   )
+  // By a handle, FxTwitter answers so for accounts that exist too: a
+  // transient failure the job retries, saying nothing of the account.
+  const miss = (e: any) =>
+    e.message === '暂时无法读取（平台按用户名查询失败）' &&
+    e.code === status.UNAVAILABLE &&
+    e.handleMiss &&
+    !e.notFound &&
+    !e.metadata.get('source-state').length
   await assert.rejects(
     profile(404, { code: 404, message: 'User not found' }, 'handle:fixture'),
-    (e: any) =>
-      failure('账号不存在或已改名')(e) &&
-      !e.metadata.get('source-state').length,
+    miss,
   )
   await assert.rejects(
-    profile(404, 'not json', 'handle:fixture'),
-    failure('账号不存在或已改名'),
+    profile(200, { code: 404, message: 'User not found' }, 'handle:fixture'),
+    miss,
   )
+  await assert.rejects(profile(404, 'not json', 'handle:fixture'), miss)
   await assert.rejects(
     profile(410, { code: 410 }),
     failure('无法获取该账号资料'),

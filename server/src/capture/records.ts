@@ -28,6 +28,7 @@ import {
 import { inJson } from '#db/sql.ts'
 import { AppError } from '#errors.ts'
 import { readJobControl } from '#jobs/control.ts'
+import { memberAccounts, type MemberAccount } from './accounts.ts'
 import {
   DEFAULT_OPTIONS,
   publicOptions,
@@ -464,8 +465,11 @@ export function failureReasons(
         AND s.idem_key LIKE 'related:%'
     ),
     reasons(reason, capture) AS (
+      -- Saying again what the source is known to be is no failure.
       SELECT c.error, c.id FROM ids JOIN captures c ON c.id = ids.id
+      JOIN collections a ON a.id = c.collection_id
       WHERE c.state = 'failed'
+        AND NOT coalesce(${sql.raw(knownGoneSQL('c', 'a'))}, 0)
       UNION ALL
       SELECT a.error, a.capture_id FROM ids JOIN assets a ON a.capture_id = ids.id
       WHERE a.state = 'failed'
@@ -492,10 +496,23 @@ export function collectionReasons(db: Executor, pages: Page[]) {
     db,
     pages.map((p) => p.capture.id),
     pages.map((p) => p.submission.id),
-    pages
-      .filter((p) => p.submission.relatedState === 'failed')
-      .map((p) => p.submission.relatedError),
+    listingErrors(db, pages),
   )
+}
+
+/**
+ * Why pages could not list their members; not for a page whose capture
+ * only saw a known state again, which is no failure.
+ */
+export function listingErrors(db: Executor, pages: Page[]): string[] {
+  const failed = pages.filter((p) => p.submission.relatedState === 'failed')
+  const known = knownCaptures(
+    db,
+    failed.map((p) => p.capture.id),
+  )
+  return failed
+    .filter((p) => !known.has(p.capture.id))
+    .map((p) => p.submission.relatedError)
 }
 
 // --- Waiting --------------------------------------------------------------
@@ -585,6 +602,9 @@ export interface CaptureRecord {
   collectionId: string
   saved: boolean
   url: string
+  /** A profile's username and display name, when a stored version has them. */
+  handle?: string
+  name?: string
   input: string
   platform: string
   kind: string
@@ -711,13 +731,22 @@ export function toRecords(db: Executor, rows: RecordRow[]): CaptureRecord[] {
     db,
     rows.map((row) => row.submission.id),
   )
+  const accounts = memberAccounts(
+    db,
+    rows
+      .filter((row) => row.collection.kind === 'profile')
+      .map((row) => row.collection.id),
+  )
   return rows.map(({ submission, capture, collection, saved }) => {
+    const { handle, name } = accounts.get(collection.id) ?? {}
     const record: CaptureRecord = {
       id: submission.id,
       jobId: capture.id,
       collectionId: collection.id,
       saved: !!saved,
       url: collection.url,
+      ...(handle ? { handle } : {}),
+      ...(name ? { name } : {}),
       input: submission.input,
       platform: collection.platform,
       kind: collection.kind,
@@ -963,8 +992,25 @@ export interface CaptureMember {
   retryable: boolean
   /** A profile's following or followers list rather than a capture. */
   list?: RelationList
-  /** That profile's username. */
+  /** The collection's kind: `post` or `profile`. */
+  kind?: string
+  /** A profile's (or the list's profile's) username, without `@`. */
   handle?: string
+  /** A profile's display name. */
+  name?: string
+  /** The saved collection with content to open for it (`memberAccounts`). */
+  libraryId?: string
+}
+
+/** A member's name and link, leaving out what is unknown. */
+export function accountFields(
+  account: MemberAccount | undefined,
+): Pick<CaptureMember, 'handle' | 'name' | 'libraryId'> {
+  return {
+    ...(account?.handle ? { handle: account.handle } : {}),
+    ...(account?.name ? { name: account.name } : {}),
+    ...(account?.libraryId ? { libraryId: account.libraryId } : {}),
+  }
 }
 
 export function recordMembers(
@@ -1103,17 +1149,25 @@ export function recordNotes(
 
 /** Of these failed captures, the ones that only saw a known state again. */
 export function knownCaptures(db: Executor, ids: string[]): Set<string> {
-  if (!ids.length) return new Set()
-  return new Set(
+  return new Set(knownStates(db, ids).keys())
+}
+
+/** Of these failed captures, the known state each only saw again. */
+export function knownStates(
+  db: Executor,
+  ids: string[],
+): Map<string, SourceState> {
+  if (!ids.length) return new Map()
+  return new Map(
     db
-      .all<{ id: string }>(
+      .all<{ id: string; state: SourceState }>(
         sql`
-        SELECT c.id FROM captures c
+        SELECT c.id, a.source_state AS state FROM captures c
         JOIN collections a ON a.id = c.collection_id
         WHERE c.id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
           AND ${sql.raw(knownGoneSQL('c', 'a'))}`,
       )
-      .map((row) => row.id),
+      .map((row) => [row.id, row.state]),
   )
 }
 
@@ -1130,6 +1184,7 @@ function memberViews(
           .select({
             id: collections.id,
             url: collections.url,
+            kind: collections.kind,
             sourceState: collections.sourceState,
             sourceStateAt: collections.sourceStateAt,
             saved:
@@ -1163,6 +1218,7 @@ function memberViews(
       reasons.get(row.capture)!.add(row.reason)
   const waits = captureWaits(db, queuedIds(page))
   const missing = missingMedia(db, ids)
+  const accounts = memberAccounts(db, [...targets.keys()])
   return page.map((capture): CaptureMember => {
     const collection = targets.get(capture.collectionId)!
     const waiting = waits.get(capture.id)
@@ -1173,6 +1229,8 @@ function memberViews(
       collectionId: collection.id,
       saved: collection.saved,
       url: collection.url,
+      kind: collection.kind,
+      ...accountFields(accounts.get(collection.id)),
       state: capture.state,
       ...(waiting ? { waiting } : {}),
       error: capture.error,

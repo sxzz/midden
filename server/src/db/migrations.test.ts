@@ -366,3 +366,124 @@ describe('web_session_devices', () => {
     await ctx.queue.stop()
   })
 })
+
+describe('handle_profiles', () => {
+  test('X profiles saved by their handle take the id the library knows for them', () => {
+    const db = migratedBefore('handle_profiles')
+    let n = 0
+    /** An account and its versions' usernames, oldest first. */
+    const account = (id: string, ...usernames: string[]) => {
+      insertRow(db, 'entities', {
+        id: `e${id}`,
+        platform: 'x',
+        kind: 'x.profile',
+        external_id: id,
+      })
+      for (const username of usernames)
+        insertRow(db, 'entity_versions', {
+          id: `v${id}-${username}`,
+          entity_id: `e${id}`,
+          content_hash: `h${++n}`,
+          data: JSON.stringify({ username, name: username }),
+          created_at: n,
+        })
+    }
+    /** A saved profile, with a version rooted at `root` (a version id). */
+    const profile = (id: string, externalId: string, root?: string) => {
+      insertRow(db, 'collections', {
+        id,
+        platform: 'x',
+        kind: 'profile',
+        external_id: externalId,
+        url: `https://x.com/${externalId.replace('handle:', '')}`,
+        created_at: ++n,
+      })
+      insertRow(db, 'library', { collection_id: id })
+      if (!root) return
+      insertRow(db, 'captures', { id: `k${id}`, collection_id: id })
+      insertRow(db, 'revisions', {
+        id: `r${id}`,
+        collection_id: id,
+        capture_id: `k${id}`,
+        payload: '{}',
+      })
+      insertRow(db, 'revision_entities', {
+        revision_id: `r${id}`,
+        entity_key: 'author',
+        entity_version_id: root,
+        is_root: 1,
+      })
+      db.$client
+        .prepare('UPDATE collections SET current_revision = ? WHERE id = ?')
+        .run(`r${id}`, id)
+    }
+    // Known from a list, in its own letter case.
+    account('1375391728614604800', 'VueUse')
+    profile('stub', 'handle:vueuse')
+    // Its own version shows the account.
+    account('555', 'legacy')
+    profile('own', 'handle:legacy', 'v555-legacy')
+    // A version rooted at an account known by handle only: as without one.
+    account('handle:old', 'old')
+    account('321', 'Old')
+    profile('rooted', 'handle:old', 'vhandle:old-old')
+    // Another collection has the id already: left for the next capture.
+    account('99', 'dup')
+    profile('dup', 'handle:dup')
+    profile('dup-id', '99')
+    // Two accounts go by it, or it went by another name since.
+    account('1', 'twice')
+    account('2', 'twice')
+    profile('ambiguous', 'handle:twice')
+    account('777', 'renamed', 'newname')
+    profile('renamed', 'handle:renamed')
+    // Two handles of one account: the older one takes the id.
+    account('888', 'first')
+    profile('older', 'handle:first', 'v888-first')
+    profile('newer', 'handle:second', 'v888-first')
+
+    migrateRest(db)
+
+    const rows = Object.fromEntries(
+      db.$client
+        .prepare('SELECT id, external_id, url FROM collections ORDER BY id')
+        .all()
+        .map((row) => [row.id, `${row.external_id} ${row.url}`]),
+    )
+    expect(rows).toEqual({
+      stub: '1375391728614604800 https://x.com/i/user/1375391728614604800',
+      own: '555 https://x.com/i/user/555',
+      dup: 'handle:dup https://x.com/dup',
+      'dup-id': '99 https://x.com/99',
+      ambiguous: 'handle:twice https://x.com/twice',
+      renamed: 'handle:renamed https://x.com/renamed',
+      rooted: '321 https://x.com/i/user/321',
+      older: '888 https://x.com/i/user/888',
+      newer: 'handle:second https://x.com/second',
+    })
+    expect(
+      db.$client
+        .prepare(
+          'SELECT external_id, collection_id FROM collection_identity_aliases ORDER BY external_id',
+        )
+        .all(),
+    ).toEqual([
+      { external_id: 'handle:first', collection_id: 'older' },
+      { external_id: 'handle:legacy', collection_id: 'own' },
+      { external_id: 'handle:old', collection_id: 'rooted' },
+      { external_id: 'handle:vueuse', collection_id: 'stub' },
+    ])
+    // Which account went by a handle is read through the index.
+    expect(
+      db.$client
+        .prepare(
+          `EXPLAIN QUERY PLAN SELECT v.entity_id FROM entity_versions v
+           WHERE lower(v.data ->> '$.username') = ?
+             AND v.data ->> '$.username' IS NOT NULL`,
+        )
+        .all('vueuse')
+        .map((row) => String(row.detail))
+        .join('\n'),
+    ).toContain('entity_versions_username')
+  })
+})

@@ -487,7 +487,14 @@ export const entityVersions = sqliteTable(
     data: text({ mode: 'json' }).notNull(),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('entity_versions_content').on(t.entityId, t.contentHash)],
+  (t) => [
+    uniqueIndex('entity_versions_content').on(t.entityId, t.contentHash),
+    // Which account went by a handle (`capture/stable-id.ts`); only accounts
+    // have one, so posts' versions stay out of it.
+    index('entity_versions_username')
+      .on(sql`lower(${t.data} ->> '$.username')`)
+      .where(sql`${t.data} ->> '$.username' IS NOT NULL`),
+  ],
 )
 
 export const revisionEntities = sqliteTable(

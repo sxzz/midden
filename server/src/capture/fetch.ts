@@ -50,6 +50,7 @@ import { storedOptions } from './options.ts'
 import { rateGate, rateLimitWait } from './rate-limits.ts'
 import { resolveCaptureScope } from './scope.ts'
 import { observeSourceState } from './source-state.ts'
+import { knownStableId } from './stable-id.ts'
 import { loadStaging, stageResult } from './staging.ts'
 import type { Payload } from './payload.ts'
 
@@ -156,6 +157,7 @@ export async function runCapture(ctx: CaptureContext, job: Job): Promise<void> {
       automatic: capture.automatic,
       prefetch: loadStaging(db, capture.id)?.prefetch ?? Buffer.alloc(0),
       since: capture.isCollection ? pageCutoff(ctx, capture.id) : '',
+      stableId: knownStableId(db, collection),
     })
     const logger = ctx.logger.child({
       jobId: job.id,
@@ -170,6 +172,7 @@ export async function runCapture(ctx: CaptureContext, job: Job): Promise<void> {
         kind: collection.kind,
         externalId: collection.externalId,
         url: collection.url,
+        ...(request.stableId ? { stableId: request.stableId } : {}),
       },
     })
     const gate = rateGate(ctx, capture.connectionId)

@@ -50,6 +50,11 @@ export function resolveCaptureScope(
         .run()
     return
   }
+  if (
+    (!capture.refreshFrom || capture.refreshFrom === old.id) &&
+    renameInPlace(tx, old, canonical)
+  )
+    return
   const savedSource = capture.refreshFrom ?? old.id
   // Requests that saved the staging collection as new: the object may have
   // been saved under its stable identity all along.
@@ -157,6 +162,70 @@ export function resolveCaptureScope(
       .where(eq(collections.id, target))
       .run()
   markUnreferenced(tx, target, now)
+}
+
+/**
+ * A profile saved by its handle takes its stable id itself when no other
+ * collection has it yet: it keeps its library entry, tags, note, watch and
+ * versions, and later captures ask for the account by id rather than by a
+ * name that can fail to resolve. Not when its current version shows
+ * another account, which held the handle before: that stays where it is.
+ */
+function renameInPlace(
+  tx: Transaction,
+  old: typeof collections.$inferSelect,
+  canonical: ResolveResponse,
+): boolean {
+  if (old.kind !== 'profile' || !old.externalId.startsWith('handle:'))
+    return false
+  const taken = tx
+    .select({ id: collections.id })
+    .from(collections)
+    .where(
+      and(
+        eq(collections.platform, old.platform),
+        eq(collections.kind, old.kind),
+        eq(collections.objectScope, old.objectScope),
+        eq(collections.externalId, canonical.externalId),
+      ),
+    )
+    .get()
+  if (taken) return false
+  const shown = tx.get<{ id: string }>(sql`
+    SELECT e.external_id AS id FROM revision_entities re
+    JOIN entity_versions v ON v.id = re.entity_version_id
+    JOIN entities e ON e.id = v.entity_id
+    WHERE re.revision_id = ${old.currentRevision} AND re.is_root = 1`)
+  // A version rooted at an account known by its handle only shows none.
+  if (
+    shown &&
+    !shown.id.startsWith('handle:') &&
+    shown.id !== canonical.externalId
+  )
+    return false
+  tx.update(collections)
+    .set({ externalId: canonical.externalId, url: canonical.url })
+    .where(eq(collections.id, old.id))
+    .run()
+  tx.insert(collectionIdentityAliases)
+    .values({
+      platform: old.platform,
+      kind: old.kind,
+      objectScope: old.objectScope,
+      externalId: old.externalId,
+      collectionId: old.id,
+    })
+    .onConflictDoUpdate({
+      target: [
+        collectionIdentityAliases.platform,
+        collectionIdentityAliases.kind,
+        collectionIdentityAliases.objectScope,
+        collectionIdentityAliases.externalId,
+      ],
+      set: { collectionId: old.id },
+    })
+    .run()
+  return true
 }
 
 /** Drop a staging collection from the library; one with content stays. */

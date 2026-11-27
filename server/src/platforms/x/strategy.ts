@@ -24,6 +24,7 @@ import {
   ProviderError,
   publicPost,
   sourceState,
+  sourceStateExplicitKey,
 } from './provider.ts'
 import {
   accountTransport,
@@ -37,8 +38,31 @@ const profileTTL = 60_000
 const maxCachedProfiles = 1000
 // A listed post stands in for the post's own response while it is this fresh.
 const prefetchTTL = 60 * 60_000
+/** The cache key of a profile lookup: an id, or a handle in lower case. */
+const profileKey = (lookup: string) =>
+  lookup.startsWith('handle:') ? lookup.toLowerCase() : lookup
+/**
+ * How to ask for a profile target: by the id the app knows for it, else by
+ * its handle as its link spells it. FxTwitter's handle lookups fail for some
+ * accounts in one letter case only, so the case is kept when known.
+ */
+export function profileLookup(
+  req: Pick<FetchRequest, 'externalId' | 'url' | 'stableId'>,
+): string {
+  if (!req.externalId.startsWith('handle:')) return req.externalId
+  if (/^\d+$/.test(req.stableId)) return req.stableId
+  let spelled: string | undefined
+  try {
+    spelled = new URL(req.url).pathname.match(/^\/(\w{1,15})\/?$/)?.[1]
+  } catch {}
+  return spelled && `handle:${spelled.toLowerCase()}` === req.externalId
+    ? `handle:${spelled}`
+    : req.externalId
+}
 export class CaptureStrategy {
   private profiles = new Map<string, { at: number; value: FetchResponse }>()
+  /** Ids of the handles profiles were last read under, in lower case. */
+  private ids = new Map<string, string>()
   private pending = new Map<string, Promise<FetchResponse>>()
   private publicPost: typeof fetchPublic
   private publicProfile: typeof fetchPublicProfile
@@ -61,18 +85,20 @@ export class CaptureStrategy {
 
   private remember(value: FetchResponse) {
     const user = this.user(value)
-    for (const key of [
-      value.canonicalTarget!.externalId,
-      `handle:${user.screen_name.toLowerCase()}`,
-    ]) {
+    const handle = `handle:${user.screen_name.toLowerCase()}`
+    for (const key of [value.canonicalTarget!.externalId, handle]) {
       this.profiles.delete(key)
       this.profiles.set(key, {
         at: this.now(),
         value: FetchResponse.fromPartial(value),
       })
     }
+    this.ids.delete(handle)
+    this.ids.set(handle, value.canonicalTarget!.externalId)
     while (this.profiles.size > maxCachedProfiles)
       this.profiles.delete(this.profiles.keys().next().value!)
+    while (this.ids.size > maxCachedProfiles)
+      this.ids.delete(this.ids.keys().next().value!)
   }
   private user(profile: FetchResponse): any {
     return JSON.parse(
@@ -82,18 +108,21 @@ export class CaptureStrategy {
       ).toString(),
     ).metadata
   }
+  /** A profile by `lookup`: an id, or `handle:` and the handle. */
   private async profile(
-    id: string,
+    lookup: string,
     force: boolean,
     signal: AbortSignal,
   ): Promise<FetchResponse> {
+    const id = profileKey(lookup)
     const cached = this.profiles.get(id)
     if (!force && cached && this.now() - cached.at < profileTTL)
       return FetchResponse.fromPartial(cached.value)
     const key = `${force ? 'explicit' : 'automatic'}:${id}`
     let promise = this.pending.get(key)
     if (!promise) {
-      promise = this.publicProfile(id, false, signal)
+      promise = this.publicProfile(lookup, false, signal)
+        .catch((error) => this.byKnownId(id, error, signal))
         .catch((error) => {
           if (
             error instanceof ProviderError &&
@@ -110,6 +139,30 @@ export class CaptureStrategy {
       this.pending.set(key, promise)
     }
     return FetchResponse.fromPartial(await promise)
+  }
+  /**
+   * A handle FxTwitter could not find may still be the account read under it
+   * lately: ask once by that id. Only what the platform states outright
+   * replaces the failure, which otherwise stays transient.
+   */
+  private async byKnownId(
+    key: string,
+    error: unknown,
+    signal: AbortSignal,
+  ): Promise<FetchResponse> {
+    const id = this.ids.get(key)
+    if (!(error instanceof ProviderError) || !error.handleMiss || !id)
+      throw error
+    try {
+      return await this.publicProfile(id, false, signal)
+    } catch (retry) {
+      if (
+        retry instanceof ProviderError &&
+        retry.metadata.get(sourceStateExplicitKey)[0] === '1'
+      )
+        throw retry
+      throw error
+    }
   }
   // Only a capture its listing created settles for what the listing showed;
   // an explicit one asks upstream. Async so validation failures reject.
@@ -245,7 +298,7 @@ export class CaptureStrategy {
       return credential
     }
     if (req.kind === 'profile') {
-      result = await this.profile(req.externalId, !req.automatic, signal)
+      result = await this.profile(profileLookup(req), !req.automatic, signal)
       result.externalId = req.externalId
       if (!req.automatic) {
         const mode = this.protected(result) ? 'private' : 'public'
@@ -311,20 +364,19 @@ export class CaptureStrategy {
       let profile: FetchResponse | undefined
       let discovered: FetchResponse | undefined
       if (author && author !== 'i')
-        profile = await this.profile(
-          `handle:${author.toLowerCase()}`,
-          false,
-          signal,
-        ).catch((error: unknown): undefined => {
-          // The handle in a saved link may since have been renamed or
-          // suspended; the post itself tells which, so look it up by ID.
-          if (
-            error instanceof ProviderError &&
-            error.code === status.FAILED_PRECONDITION
-          )
-            return
-          throw error
-        })
+        profile = await this.profile(`handle:${author}`, false, signal).catch(
+          (error: unknown): undefined => {
+            // The handle in a saved link may since have been renamed or
+            // suspended, or FxTwitter may not find it by name; the post
+            // itself tells whose it is, so look it up by ID.
+            if (
+              error instanceof ProviderError &&
+              (error.code === status.FAILED_PRECONDITION || error.handleMiss)
+            )
+              return
+            throw error
+          },
+        )
       if (!profile) {
         // An ID-only link has no author. Discover it once before selecting the final source.
         try {

@@ -281,7 +281,7 @@ export function attachProfileReference(
   if (entity.key === result.graph.root) return entity.key
   const url = /^\d+$/.test(entity.externalId)
     ? `https://x.com/i/user/${entity.externalId}`
-    : `https://x.com/${username.toLowerCase()}`
+    : `https://x.com/${username}`
   if (result.relatedTargets.every((target) => target.url !== url))
     result.relatedTargets.push(
       RelatedTarget.fromPartial({ url, refreshAfterSeconds: 3600 }),

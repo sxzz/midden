@@ -32,13 +32,15 @@ function setup(fetcher: typeof fetch) {
 }
 
 const url = 'https://x.com/xiaomouzovo'
+// Not found by id: a by-handle 404 proves nothing and is retried.
+const byId = 'https://x.com/i/user/1546010181070249984'
 
 describe('capture failure logs', () => {
   test('a permanent upstream failure is logged with the request and the job', async () => {
     const { ctx, entries } = setup(async () =>
       Response.json({ code: 404, message: 'User not found' }, { status: 404 }),
     )
-    const job = submit(ctx, { url })
+    const job = submit(ctx, { url: byId })
     await ctx.queue.drain()
     const capture = ctx.db
       .select()
@@ -56,16 +58,16 @@ describe('capture failure logs', () => {
       maxAttempts: 3,
       platform: 'x',
       providerId: 'fxtwitter',
-      target: { kind: 'profile', url },
+      target: { kind: 'profile', url: byId },
       errorCode: 'FAILED_PRECONDITION',
-      errorMessage: '账号不存在或已改名',
+      errorMessage: '账号已不存在',
       retryable: false,
       final: true,
       upstream: {
         provider: 'fxtwitter',
         operation: 'profile',
         status: 404,
-        url: 'https://api.fxtwitter.com/2/profile/xiaomouzovo?about_account=1',
+        url: 'https://api.fxtwitter.com/2/profile/id%3A1546010181070249984?about_account=1',
         body: '{"code":404,"message":"User not found"}',
       },
     })
@@ -84,7 +86,7 @@ describe('capture failure logs', () => {
         msg: 'capture failed',
         captureId: capture.id,
         errorCode: 'FAILED_PRECONDITION',
-        target: expect.objectContaining({ url }),
+        target: expect.objectContaining({ url: byId }),
       }),
     )
   })

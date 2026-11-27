@@ -172,7 +172,7 @@ test('post and author bio mentions keep graph identities and schedule profile ca
     [
       'https://x.com/i/user/123',
       'https://x.com/i/user/456',
-      'https://x.com/bio',
+      'https://x.com/Bio',
       'https://x.com/i/user/789',
     ],
   )

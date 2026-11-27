@@ -29,6 +29,7 @@ import {
 } from '#jobs/queue.ts'
 import { parseFilterQuery } from '#library/filter-query.ts'
 import { updateSelection } from '#library/list.ts'
+import { memberAccounts } from './accounts.ts'
 import {
   budget,
   checkOptions,
@@ -40,6 +41,7 @@ import { keptCounts, readyProgress, verifyMembers } from './progress.ts'
 import { keepRecord, keptRecord } from './record-cache.ts'
 import { detailKey, dropSummaries, loadSummaries } from './record-summaries.ts'
 import {
+  accountFields,
   captureWaits,
   collectionProgress,
   collectionProgresses,
@@ -48,6 +50,8 @@ import {
   failureReasons,
   isPending,
   knownCaptures,
+  knownStates,
+  listingErrors,
   memberPage,
   memberSubmissions,
   pageChains,
@@ -77,7 +81,7 @@ import {
   missingMediaSQL,
   pagesMissingMedia,
 } from './retry-units.ts'
-import { knownGoneSQL } from './source-state.ts'
+import { knownGoneSQL, type SourceState } from './source-state.ts'
 import { submit, type Job } from './submit.ts'
 import type { Executor } from '#db/client.ts'
 import type { CaptureContext } from './context.ts'
@@ -207,37 +211,14 @@ function itemKinds(db: Executor, ids: string[]) {
   )
 }
 
-/** Saved profiles' usernames as their current version says, by id. */
+/**
+ * Profiles' usernames by id: as their current version says, else as their
+ * account's newest version anywhere does (`memberAccounts`).
+ */
 export function handles(db: Executor, ids: string[]): Map<string, string> {
-  if (!ids.length) return new Map()
-  const rows = db
-    .select({ id: collections.id, data: entityVersions.data })
-    .from(collections)
-    .innerJoin(
-      revisionEntities,
-      and(
-        eq(revisionEntities.revisionId, collections.currentRevision),
-        eq(revisionEntities.isRoot, true),
-      ),
-    )
-    .innerJoin(
-      entityVersions,
-      eq(entityVersions.id, revisionEntities.entityVersionId),
-    )
-    .where(and(inJson(collections.id, ids), eq(collections.kind, 'profile')))
-    .all()
   const found = new Map<string, string>()
-  for (const row of rows) {
-    let data: unknown = row.data
-    if (typeof data === 'string')
-      try {
-        data = JSON.parse(data)
-      } catch {
-        continue
-      }
-    const username = (data as { username?: unknown } | null)?.username
-    if (typeof username === 'string' && username) found.set(row.id, username)
-  }
+  for (const [id, account] of memberAccounts(db, ids))
+    if (account.handle) found.set(id, account.handle)
   return found
 }
 
@@ -758,11 +739,14 @@ export interface UpdateInfo {
 export interface ProfilePart {
   collectionId: string
   url: string
-  /** Its username, when its saved version has one. */
+  /** Its username and display name, when a stored version has them. */
   handle: string
+  name: string
   /** The profile's own capture; `waiting` before its turn, `skipped` if none. */
   state: string
   error: string
+  /** Its failed capture only said again what its source is known to be. */
+  sourceState?: SourceState
   /** That capture, '' when there is none. */
   jobId: string
   /** Whether a retry would fetch it again, or its missing media. */
@@ -1269,7 +1253,7 @@ function profileParts(db: Executor, g: Gathered): ProfilePart[] {
     .map((id, position) => ({ id, position }))
     .filter(({ id }) => kinds.get(id)?.kind === 'profile')
     .slice(0, MAX_PROFILES)
-  const names = handles(
+  const names = memberAccounts(
     db,
     positions.map(({ id }) => id),
   )
@@ -1299,15 +1283,21 @@ function profileParts(db: Executor, g: Gathered): ProfilePart[] {
     db,
     failed.map((i) => i.capture.collectionId),
   )
+  const known = knownStates(
+    db,
+    failed.map((i) => i.capture.id),
+  )
   return positions.map(({ id, position }) => {
     const item = byPosition.get(position)
     const url = kinds.get(id)!.url
     const skip = skips.get(position)
+    const { handle = '', name = '' } = names.get(id) ?? {}
     if (!item)
       return {
         collectionId: id,
         url,
-        handle: names.get(id) ?? '',
+        handle,
+        name,
         state: position < update.position ? 'skipped' : 'waiting',
         error: skip ? SKIP_TEXT[skip.reason] : '',
         jobId: '',
@@ -1316,12 +1306,16 @@ function profileParts(db: Executor, g: Gathered): ProfilePart[] {
     const progress = progresses.get(item.submission.id)
     const relations = g.relations.get(item.submission.id)
     const collection = item.capture.collectionId
+    const sourceState = known.get(item.capture.id)
     return {
       collectionId: collection,
       url,
-      handle: names.get(id) ?? '',
+      handle,
+      name,
       state: item.capture.state,
-      error: item.capture.error,
+      // Saying again what the source is known to be is no failure.
+      error: sourceState ? '' : item.capture.error,
+      ...(sourceState ? { sourceState } : {}),
       jobId: item.capture.id,
       retryable:
         missing.has(item.capture.id) ||
@@ -1374,13 +1368,18 @@ export function recordProfiles(
       ? undefined
       : collectionProgress(db, record.id)
   const options = storedOptions(row.submission.captureOptions)
+  const { handle = '', name = '' } =
+    memberAccounts(db, [row.collection.id]).get(row.collection.id) ?? {}
+  const sourceState = knownStates(db, [row.capture.id]).get(row.capture.id)
   return [
     {
       collectionId: row.collection.id,
       url: row.collection.url,
-      handle: handles(db, [row.collection.id]).get(row.collection.id) ?? '',
+      handle,
+      name,
       state: row.capture.state,
-      error: row.capture.error,
+      error: sourceState ? '' : row.capture.error,
+      ...(sourceState ? { sourceState } : {}),
       jobId: row.capture.id,
       retryable: record.mediaRetryable,
       ...(options.posts !== 'none' && progress
@@ -1455,9 +1454,7 @@ export function countUpdateDetail(
       db,
       g!.items.map((i) => i.capture.id),
       pages.map((p) => p.submission.id),
-      pages
-        .filter((p) => p.submission.relatedState === 'failed')
-        .map((p) => p.submission.relatedError),
+      listingErrors(db, pages),
     ),
     profiles,
     moreProfiles: profileCount - profiles.length,
@@ -1544,10 +1541,11 @@ export function updateMembers(
         .all()
     : []
   const captureOf = new Map(g!.items.map((i) => [i.submission.id, i.capture]))
-  const names = handles(
-    db,
-    g!.items.map((i) => i.capture.collectionId),
-  )
+  const skipped = skipRows(db, id)
+  const names = memberAccounts(db, [
+    ...g!.items.map((i) => i.capture.collectionId),
+    ...skipped.map((s) => s.collectionId),
+  ])
   const lists = fetches.map(({ fetch, submission }): CaptureMember => {
     const capture = captureOf.get(fetch.submissionId!)!
     let listState = 'complete'
@@ -1569,14 +1567,11 @@ export function updateMembers(
         stopped: submission.collectionStopped,
       }),
       list: fetch.list,
-      ...(names.has(capture.collectionId)
-        ? { handle: names.get(capture.collectionId) }
-        : {}),
+      ...accountFields(names.get(capture.collectionId)),
     }
   })
   // Items skipped when their turn came, each with why; one still saved
   // links to its page.
-  const skipped = skipRows(db, id)
   const stillSaved = savedIds(
     db,
     skipped.map((s) => s.collectionId),
@@ -1586,6 +1581,7 @@ export function updateMembers(
     collectionId: skip.collectionId,
     saved: stillSaved.has(skip.collectionId),
     url: skip.url,
+    ...accountFields(names.get(skip.collectionId)),
     state: 'skipped',
     error: SKIP_TEXT[skip.reason],
     createdAt: skip.createdAt,

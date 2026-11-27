@@ -472,8 +472,8 @@ test('full author hydration preserves post mentions and captures mentions from t
     new Set(result.relatedTargets.map((target) => target.url)),
     new Set([
       'https://x.com/i/user/123',
-      'https://x.com/mentioned',
-      'https://x.com/biofriend',
+      'https://x.com/Mentioned',
+      'https://x.com/BioFriend',
     ]),
   )
   assert.equal(
@@ -1100,4 +1100,136 @@ test("the public timeline's interruption says and logs why", async () => {
   assert.equal(logged[0]!.errorCode, 'UNAVAILABLE')
   assert.equal(logged[0]!.upstream.provider, 'fxtwitter')
   assert.equal(logged[0]!.upstream.status, 500)
+})
+
+test('a profile saved by its handle is asked for by the id the app knows, else by the handle as its link spells it', async () => {
+  const asked: string[] = []
+  const lookup = async (id: string) => {
+    asked.push(id)
+    return normalizeProfile(
+      { ...user, id: '1375391728614604800', screen_name: 'VueUse' },
+      id,
+      'fxtwitter',
+    )
+  }
+  const profile = (url: string, stableId = '') =>
+    new CaptureStrategy(undefined, lookup).fetch(
+      FetchRequest.fromPartial({
+        url,
+        externalId: 'handle:vueuse',
+        platform: 'x',
+        kind: 'profile',
+        providerId: 'fxtwitter',
+        automatic: true,
+        stableId,
+      }),
+      AbortSignal.timeout(1000),
+    )
+  const byId = await profile('https://x.com/vueuse', '1375391728614604800')
+  // Still the answer for the handle; the core moves it to the id.
+  assert.equal(byId.externalId, 'handle:vueuse')
+  assert.equal(byId.canonicalTarget?.externalId, '1375391728614604800')
+  await profile('https://x.com/VueUse')
+  await profile('https://x.com/vueuse')
+  assert.deepEqual(asked, [
+    '1375391728614604800',
+    'handle:VueUse',
+    'handle:vueuse',
+  ])
+})
+
+test('a handle FxTwitter cannot find is asked once by the id it was read under, else fails as transient', async () => {
+  const { ProviderError, responseError, sourceState } =
+    await import('./provider.ts')
+  const { status } = await import('../rpc.ts')
+  const miss = () => {
+    const error = new ProviderError(
+      status.UNAVAILABLE,
+      '暂时无法读取（平台按用户名查询失败）',
+    )
+    error.handleMiss = true
+    return error
+  }
+  let now = 0
+  const asked: string[] = []
+  let byId: () => FetchResponse = () =>
+    normalizeProfile(user, user.id, 'fxtwitter')
+  let found = true
+  const strategy = new CaptureStrategy(
+    undefined,
+    async (id) => {
+      asked.push(id)
+      if (!id.startsWith('handle:')) return byId()
+      if (!found) throw miss()
+      return normalizeProfile(user, id, 'fxtwitter')
+    },
+    undefined,
+    undefined,
+    () => now,
+  )
+  const fetch = () =>
+    strategy.fetch(
+      FetchRequest.fromPartial({
+        ...request('profile', 'fxtwitter'),
+        automatic: true,
+      }),
+      AbortSignal.timeout(1000),
+    )
+  const failure = () =>
+    fetch().then(
+      () => assert.fail('expected a failure'),
+      (e) => e,
+    )
+  // Read once by the handle: its id is known from then on.
+  await fetch()
+  found = false
+  now += 120_000
+  const again = await fetch()
+  assert.equal(again.canonicalTarget?.externalId, '123')
+  assert.deepEqual(asked, ['handle:fixture', 'handle:fixture', '123'])
+  // Not found by id either: still transient, nothing said of the account.
+  now += 120_000
+  byId = () => {
+    const error = responseError(404, null, 'profile')
+    error.metadata.set('source-state', 'deleted')
+    throw error
+  }
+  const failed = await failure()
+  assert.equal(failed.message, '暂时无法读取（平台按用户名查询失败）')
+  assert.equal(sourceState(failed), undefined)
+  // What X states outright stands.
+  now += 120_000
+  byId = () => {
+    throw responseError(404, null, 'profile', 'suspended')
+  }
+  assert.equal(sourceState(await failure()), 'suspended')
+
+  // A post whose author's handle is not found is looked up through the post.
+  const calls: string[] = []
+  const posts = new CaptureStrategy(
+    async () => {
+      calls.push('public-post')
+      return post('fxtwitter')
+    },
+    async (id) => {
+      calls.push(`profile:${id}`)
+      if (id.startsWith('handle:')) throw miss()
+      return normalizeProfile(user, id, 'fxtwitter')
+    },
+  )
+  await posts.fetch(
+    FetchRequest.fromPartial({
+      url: 'https://x.com/FixTure/status/42',
+      externalId: '42',
+      platform: 'x',
+      kind: 'post',
+      providerId: 'fxtwitter',
+    }),
+    AbortSignal.timeout(1000),
+  )
+  assert.deepEqual(calls, [
+    'profile:handle:FixTure',
+    'public-post',
+    'profile:123',
+  ])
 })

@@ -113,8 +113,10 @@ function profilePartJson(p: ProfilePart) {
     collection_id: p.collectionId,
     url: p.url,
     ...(p.handle ? { handle: p.handle } : {}),
+    ...(p.name ? { name: p.name } : {}),
     state: p.state,
     ...(p.error ? { error: p.error } : {}),
+    ...(p.sourceState ? { source_state: p.sourceState } : {}),
     ...(p.jobId ? { job_id: p.jobId } : {}),
     ...(p.retryable ? { retryable: true } : {}),
     ...(p.posts
@@ -142,6 +144,8 @@ function recordJson(r: CaptureRecord | UpdateRecord) {
     collection_id: r.collectionId,
     saved: r.saved,
     url: r.url,
+    ...('handle' in r && r.handle ? { handle: r.handle } : {}),
+    ...('name' in r && r.name ? { name: r.name } : {}),
     input: r.input,
     platform: r.platform,
     kind: r.kind,
@@ -218,7 +222,10 @@ function memberJson(m: CaptureMember) {
     ...(m.retryable ? { retryable: true } : {}),
     ...(m.sourceState ? { source_state: m.sourceState } : {}),
     ...(m.list ? { list: m.list } : {}),
+    ...(m.kind ? { kind: m.kind } : {}),
     ...(m.handle ? { handle: m.handle } : {}),
+    ...(m.name ? { name: m.name } : {}),
+    ...(m.libraryId ? { library_id: m.libraryId } : {}),
     created_at: m.createdAt.toISOString(),
   }
 }

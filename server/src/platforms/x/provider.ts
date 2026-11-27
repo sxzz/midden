@@ -20,6 +20,11 @@ export class ProviderError extends Error {
   /** The source answered 404 for the thing asked about. */
   notFound = false
   /**
+   * Asked by handle, FxTwitter found no such account and said nothing more.
+   * It answers so for accounts that exist too (see `fetchPublicProfile`).
+   */
+  handleMiss = false
+  /**
    * What the source said beyond the message, for the logs only: a GraphQL
    * `__typename`, its error codes.
    */
@@ -95,13 +100,17 @@ export function responseError(
     return error
   }
   // Not retried within this job, but nothing is blocked: a suspension can be
-  // lifted, and a later refresh or profile capture asks upstream again.
+  // lifted, and a later refresh or profile capture asks upstream again. The
+  // reason is X's own (`UserUnavailable` or `TweetUnavailable` saying
+  // Suspended), which FxTwitter passes on only when X gave it, so it needs
+  // no second answer.
   if (code === 404 && reason === 'suspended') {
     const error = new ProviderError(
       status.FAILED_PRECONDITION,
       '账号已被封禁，解封后可重新抓取',
     )
     error.metadata.set(sourceStateKey, 'suspended')
+    error.metadata.set(sourceStateExplicitKey, '1')
     return error
   }
   if (code === 404) {
@@ -120,15 +129,24 @@ export function responseError(
 }
 // Only the public post API answers 404 for a post that no longer exists; it
 // answers 401 for one that exists but is protected. A 404 from the GraphQL
-// endpoints means a stale query, so they never mark a post as gone.
+// endpoints means a stale query, so they never mark a post as gone. A bare
+// 404 may be the instance's own failed lookup and waits for a second answer;
+// a tombstone's `deleted` is X's `TweetUnavailable` reason and needs none.
+// Its other reasons (private, blocked, unavailable) name a post that exists.
 function publicPostError(
   code: number,
   retry: string | null,
   reason: unknown,
 ): ProviderError {
+  if (code === 404 && typeof reason === 'string' && reason !== 'deleted')
+    return reason === 'suspended'
+      ? responseError(code, retry, 'post', reason)
+      : new ProviderError(status.FAILED_PRECONDITION, failed.post)
   const error = responseError(code, retry, 'post', reason)
-  if (code === 404 && reason !== 'suspended')
+  if (code === 404) {
     error.metadata.set(sourceStateKey, 'deleted')
+    if (reason === 'deleted') error.metadata.set(sourceStateExplicitKey, '1')
+  }
   return error
 }
 // FxTwitter v2 nests a tombstone's reason under `status`.

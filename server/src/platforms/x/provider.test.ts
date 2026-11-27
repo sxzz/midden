@@ -608,6 +608,23 @@ test('the public post API marks a missing post deleted and a suspended one suspe
     const suspended = await failure()
     assert.equal(sourceState(suspended), 'suspended')
     assert.equal(suspended.message, '账号已被封禁，解封后可重新抓取')
+    // X's own reasons, passed on: no second answer needed. A bare 404 may
+    // be the instance's own failure and waits for one.
+    const explicit = (e: any) => e.metadata.get('source-state-explicit')[0]
+    assert.equal(explicit(suspended), '1')
+    body = { code: 404, status: { type: 'tombstone', reason: 'deleted' } }
+    const deleted = await failure()
+    assert.equal(sourceState(deleted), 'deleted')
+    assert.equal(explicit(deleted), '1')
+    // Other reasons name a post that exists.
+    for (const reason of ['private', 'blocked', 'unavailable']) {
+      body = { code: 404, status: { type: 'tombstone', reason } }
+      const error = await failure()
+      assert.equal(sourceState(error), undefined)
+      assert.equal(error.message, '无法获取该帖子')
+    }
+    body = { code: 404, message: 'NOT_FOUND' }
+    assert.equal(explicit(await failure()), undefined)
     // A protected post exists; only the account cannot read it.
     body = { code: 401, message: 'PRIVATE_TWEET' }
     assert.equal(sourceState(await failure()), undefined)
