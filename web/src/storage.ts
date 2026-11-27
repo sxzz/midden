@@ -4,8 +4,8 @@ import type { StorageDay } from './api'
 /** How far back 趋势 looks. */
 export type HistoryRange = '30' | '90' | 'all'
 export const HISTORY_RANGES: { value: HistoryRange; label: string }[] = [
-  { value: '30', label: '30 天' },
-  { value: '90', label: '90 天' },
+  { value: '30', label: '30天' },
+  { value: '90', label: '90天' },
   { value: 'all', label: '全部' },
 ]
 
@@ -64,16 +64,16 @@ export function storageTrends(
           ...buckets.flatMap((bucket) =>
             series(
               `r2:${bucket}`,
-              `R2 存储 · ${bucket}`,
+              `R2存储 · ${bucket}`,
               days,
               (d) => d.r2?.[bucket]?.bytes,
               'bytes',
             ),
           ),
-          ...series('class-a', 'R2 Class A 操作（每天）', days, (d) =>
+          ...series('class-a', 'R2 Class A操作（每天）', days, (d) =>
             sum(d, 'class_a'),
           ),
-          ...series('class-b', 'R2 Class B 操作（每天）', days, (d) =>
+          ...series('class-b', 'R2 Class B操作（每天）', days, (d) =>
             sum(d, 'class_b'),
           ),
         ]
@@ -85,10 +85,10 @@ export function storageTrends(
 }
 
 export const usd = (value: number) => `$${value.toFixed(2)}`
-export const times = (value: number) => `${formatCount(value)} 次`
+export const times = (value: number) => `${formatCount(value)}次`
 /** Operations in 万: 100 万次 rather than 1,000,000 次. */
 export const tenThousands = (value: number) =>
-  `${formatCount(value / 10_000)} 万次`
+  `${formatCount(value / 10_000)}万次`
 export const gbMonths = (value: number) =>
   `${value.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} GB·月`
 /** What share of the free tier is used. */

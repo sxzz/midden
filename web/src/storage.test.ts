@@ -52,9 +52,9 @@ describe('storage history', () => {
       true,
     )
     expect(trends.map((t) => [t.label, t.points.length])).toEqual([
-      ['R2 存储 · midden', 2],
-      ['R2 Class A 操作（每天）', 3],
-      ['R2 Class B 操作（每天）', 3],
+      ['R2存储 · midden', 2],
+      ['R2 Class A操作（每天）', 3],
+      ['R2 Class B操作（每天）', 3],
       ['数据库文件', 2],
     ])
     expect(trends[1]!.points.map((p) => p.value)).toEqual([4, 2, 2])

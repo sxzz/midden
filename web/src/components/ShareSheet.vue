@@ -36,8 +36,8 @@ const problem = computed(() => {
   const value = draft.value
   if (!value) return ''
   if (OTHER_CHARS.test(value)) return '只能用小写字母、数字和 -'
-  if (value.length < 3) return '至少 3 个字符'
-  if (value.length > 64) return '最多 64 个字符'
+  if (value.length < 3) return '至少3个字符'
+  if (value.length > 64) return '最多64个字符'
   if (value.startsWith('-') || value.endsWith('-')) return '不能以 - 开头或结尾'
   return ''
 })
@@ -165,7 +165,7 @@ const dirty = computed(
           ><input
             :id="slugId"
             v-model.trim="draft"
-            :placeholder="custom ? '' : '例如 my-picks'"
+            :placeholder="custom ? '' : '例如my-picks'"
             autocapitalize="off"
             autocomplete="off"
             spellcheck="false"
@@ -184,7 +184,7 @@ const dirty = computed(
           >{{
             problem ||
             slugError ||
-            '小写字母、数字和 -，3 到 64 个字符；改动后旧链接立即失效。'
+            '小写字母、数字和 -，3到64个字符；改动后旧链接立即失效。'
           }}</span
         >
       </form>

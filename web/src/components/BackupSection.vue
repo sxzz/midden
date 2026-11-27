@@ -23,7 +23,7 @@ const error = shallowRef('')
 
 const state = computed(() => {
   const { stale, last_heartbeat_at, stale_after_minutes } = props.status
-  if (stale) return `超过 ${stale_after_minutes} 分钟没有心跳`
+  if (stale) return `超过${stale_after_minutes}分钟没有心跳`
   return last_heartbeat_at
     ? `上次心跳 ${ago(last_heartbeat_at)}`
     : '还没有收到心跳'
@@ -37,7 +37,7 @@ async function save(text: string) {
   if (busy.value) return
   const minutes = Number(text)
   if (!Number.isInteger(minutes) || minutes < MIN || minutes > MAX) {
-    error.value = `分钟数为 ${MIN} 到 ${MAX} 的整数`
+    error.value = `分钟数为${MIN}到${MAX}的整数`
     return
   }
   busy.value = true
@@ -60,12 +60,12 @@ async function save(text: string) {
 <template>
   <ListSection
     :title="bare ? undefined : '数据库备份'"
-    footnote="Litestream 每 5 分钟发一次心跳。"
+    footnote="Litestream每5分钟发一次心跳。"
   >
     <p class="state" :class="{ stale: status.stale }">{{ state }}</p>
     <ListButton
       label="备份心跳超时"
-      :trailing="`${status.stale_after_minutes} 分钟`"
+      :trailing="`${status.stale_after_minutes}分钟`"
       chevron
       @select="open"
     />

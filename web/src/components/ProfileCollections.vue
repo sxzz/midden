@@ -76,7 +76,7 @@ function search(value: string) {
   <section class="related" aria-label="关联的收藏">
     <h2 class="title">关联的收藏</h2>
     <p v-if="totalStorageBytes !== undefined" class="storage">
-      帖子占用总量 {{ storageSize(totalStorageBytes) }}
+      帖子占用总量{{ storageSize(totalStorageBytes) }}
     </p>
     <CollectionView
       :items="items"

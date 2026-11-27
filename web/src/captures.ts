@@ -129,21 +129,21 @@ export function recordCounts(r: CaptureRecord) {
   const m = r.members
   if (r.update && m)
     return [
-      m.added && `新增 ${m.added}`,
-      m.updated && `更新 ${m.updated}`,
-      m.failed + m.partial && `异常 ${m.failed + m.partial}`,
-      m.pending + r.update.queued && `进行中 ${m.pending + r.update.queued}`,
+      m.added && `新增${m.added}`,
+      m.updated && `更新${m.updated}`,
+      m.failed + m.partial && `异常${m.failed + m.partial}`,
+      m.pending + r.update.queued && `进行中${m.pending + r.update.queued}`,
     ]
       .filter(Boolean)
       .join(' · ')
   if (m) {
     if (!m.total) return r.done ? '没有帖子' : ''
     return [
-      `帖子 ${m.total - m.pending}/${m.total}`,
-      m.added && `新增 ${m.added}`,
-      m.updated && `更新 ${m.updated}`,
-      m.partial && `不完整 ${m.partial}`,
-      m.failed && `失败 ${m.failed}`,
+      `帖子${m.total - m.pending}/${m.total}`,
+      m.added && `新增${m.added}`,
+      m.updated && `更新${m.updated}`,
+      m.partial && `不完整${m.partial}`,
+      m.failed && `失败${m.failed}`,
     ]
       .filter(Boolean)
       .join(' · ')
@@ -152,8 +152,8 @@ export function recordCounts(r: CaptureRecord) {
   if (!r.media.total) return added
   return [
     added,
-    `媒体 ${r.media.ready}/${r.media.total}`,
-    r.media.failed && `失败 ${r.media.failed}`,
+    `媒体${r.media.ready}/${r.media.total}`,
+    r.media.failed && `失败${r.media.failed}`,
   ]
     .filter(Boolean)
     .join(' · ')
@@ -167,7 +167,7 @@ export function recordAdditions(r: CaptureRecord) {
   const m = r.members
   if (m) {
     if (!m.added && !m.updated) return ''
-    return `新增 ${m.added ?? 0}，更新 ${m.updated ?? 0}`
+    return `新增${m.added ?? 0}，更新${m.updated ?? 0}`
   }
   if (r.added === undefined) return ''
   return r.added ? '新增到收藏' : '更新了已有收藏'
@@ -180,7 +180,7 @@ const purposes: Record<string, string> = {
 export function mediaLabel(m: CaptureMedia) {
   if (m.purpose && purposes[m.purpose]) return purposes[m.purpose]
   const kind = m.kind === 'video' ? '视频' : '图片'
-  return m.purpose ? `${kind}（${m.purpose}）` : `${kind} ${m.position + 1}`
+  return m.purpose ? `${kind}（${m.purpose}）` : `${kind}${m.position + 1}`
 }
 export const mediaStates: Record<CaptureMedia['state'], RecordStatus> = {
   pending: { label: '等待中', tone: 'active' },
@@ -275,7 +275,7 @@ export function titleLang(
 /** A count the way the sheet reads it: 2.1 万 rather than 21000. */
 export function countText(n: number) {
   if (n < 10_000) return String(n)
-  return `${(Math.floor(n / 1000) / 10).toFixed(1).replace(WHOLE, '')} 万`
+  return `${(Math.floor(n / 1000) / 10).toFixed(1).replace(WHOLE, '')}万`
 }
 
 /** What a record is about: its link, or what its update covers. */
@@ -288,7 +288,7 @@ export function recordTitle(r: CaptureRecord) {
   // A watch's run (定期更新) says so.
   const update = u.watch ? '定期更新' : '更新'
   if (u.target === 'folder') return `${update}收藏夹「${u.name ?? ''}」`
-  if (u.target === 'many') return `${update} ${u.posts + u.profiles} 项`
+  if (u.target === 'many') return `${update}${u.posts + u.profiles}项`
   if (!r.url) return update
   if (r.kind !== 'profile') return `${update} ${linkTitle(r.url)}`
   const handle = profileHandle(r.url, u.handle)
@@ -297,7 +297,7 @@ export function recordTitle(r: CaptureRecord) {
 
 /** What an update covers, e.g. 12 个账号、340 条帖子. */
 export function coverText(posts: number, profiles: number) {
-  return [profiles && `${profiles} 个账号`, posts && `${posts} 条帖子`]
+  return [profiles && `${profiles}个账号`, posts && `${posts}条帖子`]
     .filter(Boolean)
     .join('、')
 }
@@ -339,12 +339,12 @@ export function profilePartText(p: PartSummary) {
     `资料 ${p.source_state ? sourceStateLabels[p.source_state] : (partMarks[p.state] ?? '进行中')}`,
   ]
   if (p.posts && canContinue(p))
-    parts.push(`帖子 ${p.posts.finished}（未到已有数据）`)
+    parts.push(`帖子${p.posts.finished}（未到已有数据）`)
   else if (p.posts)
     parts.push(
       p.posts.done
-        ? `帖子 ${p.posts.total}`
-        : `帖子 ${p.posts.finished}/${p.posts.total}`,
+        ? `帖子${p.posts.total}`
+        : `帖子${p.posts.finished}/${p.posts.total}`,
     )
   for (const list of p.relations ?? []) parts.push(listPart(list))
   return parts.join(' · ')
@@ -374,7 +374,7 @@ export function retryParts(p: ProfilePart): RetryPart[] {
   for (const page of pages)
     parts.push({
       id: page.id,
-      label: `帖子第 ${page.number} 页`,
+      label: `帖子第${page.number}页`,
       detail: page.error || '失败',
     })
   const rest = (p.posts?.retryable ?? 0) - pages.length
@@ -382,7 +382,7 @@ export function retryParts(p: ProfilePart): RetryPart[] {
     parts.push({
       id: p.posts.retry_id,
       label: '帖子',
-      detail: `失败或不完整 ${rest} 项`,
+      detail: `失败或不完整${rest}项`,
     })
   for (const list of p.relations ?? [])
     if (list.retryable)

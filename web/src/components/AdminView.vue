@@ -52,7 +52,7 @@ const clearing = shallowRef(false)
 const clearDescription = computed(() => {
   const v = library.value
   if (!v) return ''
-  return `${v.collections} 条收藏、${v.records} 条采集记录${v.running ? `（${v.running} 条进行中）` : ''}，无法恢复。`
+  return `${v.collections}条收藏、${v.records}条采集记录${v.running ? `（${v.running}条进行中）` : ''}，无法恢复。`
 })
 async function askClear() {
   if (busy.value) return
@@ -74,7 +74,7 @@ async function clearAll() {
       client.library['delete-all'].$post({ json: { confirm: 'delete all' } }),
     )
     clearing.value = false
-    toast(`已删除 ${v.collections} 条收藏和 ${v.records} 条采集记录。`)
+    toast(`已删除${v.collections}条收藏和${v.records}条采集记录。`)
     emit('cleared')
   } catch (e) {
     toast(errorText(e))
@@ -95,7 +95,7 @@ async function clearAll() {
       bare
       @saved="litestream = $event"
     />
-    <p v-else class="none">没有配置 Litestream。</p>
+    <p v-else class="none">没有配置Litestream。</p>
   </template>
   <ListSection v-else-if="dev" title="开发模式">
     <ListButton

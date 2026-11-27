@@ -97,7 +97,7 @@ function removeOthers() {
   />
   <ConfirmSheet
     :open="removingOthers"
-    :title="`退出其他 ${others.length} 个设备？`"
+    :title="`退出其他${others.length}个设备？`"
     confirm-label="退出其他所有设备"
     :busy="busy"
     @confirm="removeOthers"

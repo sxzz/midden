@@ -362,7 +362,7 @@ async function retryFailed(id?: string) {
         json: id ? { id } : {},
       }),
     )
-    toast(count ? `正在重试 ${count} 项。` : '没有可重试的项目。')
+    toast(count ? `正在重试${count}项。` : '没有可重试的项目。')
     cache.clear()
     await Promise.all([load(), loadMembers()])
   } catch (e) {
@@ -503,7 +503,7 @@ function memberLink(m: CaptureMember) {
             <dt>帖子</dt>
             <dd>
               {{
-                `已保存 ${record.members.complete}，不完整 ${record.members.partial}，失败 ${record.members.failed}，进行中 ${record.members.pending}`
+                `已保存${record.members.complete}，不完整${record.members.partial}，失败${record.members.failed}，进行中${record.members.pending}`
               }}
             </dd>
           </div>
@@ -513,7 +513,7 @@ function memberLink(m: CaptureMember) {
           </div>
           <div v-if="record.update?.skipped">
             <dt>跳过</dt>
-            <dd>{{ record.update.skipped }} 项</dd>
+            <dd>{{ record.update.skipped }}项</dd>
           </div>
           <div v-if="additions">
             <dt>收藏</dt>
@@ -523,7 +523,7 @@ function memberLink(m: CaptureMember) {
             <dt>媒体</dt>
             <dd>
               {{
-                `已保存 ${record.media.ready}/${record.media.total}，失败 ${record.media.failed}`
+                `已保存${record.media.ready}/${record.media.total}，失败${record.media.failed}`
               }}
             </dd>
           </div>
@@ -563,7 +563,7 @@ function memberLink(m: CaptureMember) {
       />
       <ListButton
         v-if="record.pages?.more_1000"
-        label="抓取 1000 条"
+        label="抓取1000条"
         :disabled="busy"
         @select="page('more1000')"
       />
@@ -590,7 +590,7 @@ function memberLink(m: CaptureMember) {
       <p v-for="reason in reasons" :key="reason.text" class="line">
         <span class="line-text">{{ reason.text }}</span>
         <span v-if="reason.count > 1" class="line-trailing"
-          >{{ reason.count }} 项</span
+          >{{ reason.count }}项</span
         >
       </p>
     </ListSection>
@@ -610,7 +610,7 @@ function memberLink(m: CaptureMember) {
       </p>
       <ListButton
         v-if="!showAllMedia && failedMedia.length < record.media_items.length"
-        :label="`显示全部 ${record.media_items.length} 项`"
+        :label="`显示全部${record.media_items.length}项`"
         @select="showAllMedia = true"
       />
       <ListButton
@@ -640,9 +640,7 @@ function memberLink(m: CaptureMember) {
         v-if="filter === 'profiles'"
         :title="heading"
         :footnote="
-          record.more_profiles
-            ? `另有 ${record.more_profiles} 个账号`
-            : undefined
+          record.more_profiles ? `另有${record.more_profiles}个账号` : undefined
         "
       >
         <template v-for="p in record.profiles" :key="p.collection_id">

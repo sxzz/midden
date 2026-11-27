@@ -138,7 +138,7 @@ const latency = computed(() => state.value?.web && webLatency(state.value.web))
         v-for="limit in state.rate_limits"
         :key="limit.scope"
         :label="rateLimitName(limit)"
-        :hint="`${rateLimitEnd(limit, now)} · 等待 ${limit.waiting}`"
+        :hint="`${rateLimitEnd(limit, now)} · 等待${limit.waiting}`"
         trailing="解除"
         :disabled="busy"
         @select="clearLimit(limit.scope)"
@@ -148,20 +148,20 @@ const latency = computed(() => state.value?.web && webLatency(state.value.web))
       <div v-for="row in state.backlog" :key="row.type" class="line">
         <span>{{ jobTypeLabel(row.type) }}</span>
         <span class="figures"
-          >等待 {{ row.waiting
-          }}<template v-if="row.running"> · 进行中 {{ row.running }}</template
-          ><template v-if="row.paused"> · 暂停 {{ row.paused }}</template></span
+          >等待{{ row.waiting
+          }}<template v-if="row.running"> · 进行中{{ row.running }}</template
+          ><template v-if="row.paused"> · 暂停{{ row.paused }}</template></span
         >
       </div>
     </ListSection>
-    <ListSection v-if="latency" title="网页响应（最近 1 分钟）">
+    <ListSection v-if="latency" title="网页响应（最近1分钟）">
       <p class="line">{{ latency.requests }}</p>
       <p class="line">{{ latency.lag }}</p>
       <p v-if="latency.slow" class="line">{{ latency.slow }}</p>
     </ListSection>
   </template>
   <SkeletonRows v-if="slowPending" title :rows="2" />
-  <ListSection v-else-if="slow" title="慢查询（300 ms 以上）">
+  <ListSection v-else-if="slow" title="慢查询（300 ms以上）">
     <p v-if="!slowQueries.length" class="line">无</p>
     <div v-for="q in slowQueries" :key="q.id" class="slow">
       <p class="slow-head">

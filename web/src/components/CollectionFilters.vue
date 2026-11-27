@@ -193,7 +193,7 @@ const WITHIN = /^(\d+)d$/
 const withinDays = (within: string) => Number(WITHIN.exec(within)?.[1])
 const withinLabel = (within: string) => {
   const days = withinDays(within)
-  return days === 1 ? '今天' : days > 1 ? `最近 ${days} 天` : ''
+  return days === 1 ? '今天' : days > 1 ? `最近${days}天` : ''
 }
 // Relative: the server counts the days again on every visit, so a folder
 // saved with one keeps showing the latest days.
@@ -259,11 +259,11 @@ const active = computed(() =>
     sourceStateNames.value[form.sourceState],
     withinLabel(form.within) ||
       (form.from && form.to
-        ? `${form.from} 至 ${form.to}`
+        ? `${form.from}至${form.to}`
         : form.from
-          ? `${form.from} 起`
+          ? `${form.from}起`
           : form.to
-            ? `${form.to} 前`
+            ? `${form.to}前`
             : ''),
     // Terms of the query no control shows.
     !shared && hasTerms(form.q) ? '自定义' : '',

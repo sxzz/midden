@@ -349,7 +349,7 @@ watch(mediaRemoved, (change) => {
 })
 function removed(effect: RemovalEffect) {
   removal.value = undefined
-  toast(`已删除 ${effect.media} 个媒体`)
+  toast(`已删除${effect.media}个媒体`)
   void reload()
 }
 /**

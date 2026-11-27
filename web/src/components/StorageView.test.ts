@@ -182,7 +182,7 @@ describe('存储用量', () => {
     const el = mount(StorageView)
     await settle()
     expect(text(el)).toContain(
-      '缩略图 34,567 个，本机 1,000 个（30.0 MB），其余在 R2 1.2 GB',
+      '缩略图 34,567个，本机1,000个（30.0 MB），其余在R2 1.2 GB',
     )
   })
 
@@ -200,21 +200,21 @@ describe('存储用量', () => {
     ])
     const page = text(el)
     expect(page).toContain('midden 存储 40.0 GB 对象 45,678')
-    expect(page).toContain('本月 Class A 操作 12,345 次')
+    expect(page).toContain('本月Class A操作 12,345次')
     expect(page).toContain('midden-backup 存储 11.0 GB')
     expect(page).toContain('存储 20 GB·月，免费额度 10 GB·月，已用 200% $0.15')
     expect(page).toContain(
-      'Class A 操作 1,500,000 次，免费额度 100 万次，已用 150% $2.25',
+      'Class A操作 1,500,000次，免费额度 100万次，已用 150% $2.25',
     )
-    expect(page).toContain('免费额度 1,000 万次，已用 20% $0.00')
+    expect(page).toContain('免费额度 1,000万次，已用 20% $0.00')
     expect(page).toContain('合计 $2.40')
-    expect(page).toContain('可用磁盘 共 460.0 GB 120.0 GB')
-    expect(page).toContain('缩略图 34,567 个 1.2 GB')
-    expect(page).toContain('部署前的数据库备份 1 个文件 2.3 GB')
+    expect(page).toContain('可用磁盘 共460.0 GB 120.0 GB')
+    expect(page).toContain('缩略图 34,567个 1.2 GB')
+    expect(page).toContain('部署前的数据库备份 1个文件 2.3 GB')
     expect(page).toContain('revisions 表 1.0 GB 43%')
     expect(page).toContain('catalog_search 索引 · catalog 512.0 MB')
-    expect(page).toContain('其余 40 个')
-    expect(page).toContain('用时 18.2 秒')
+    expect(page).toContain('其余40个')
+    expect(page).toContain('用时18.2秒')
     // The largest collections are the library sorted by storage.
     const largest = [...el.querySelectorAll('a')].find((a) =>
       a.textContent?.includes('按占用空间排列收藏'),
@@ -224,17 +224,17 @@ describe('存储用量', () => {
     expect(
       [...el.querySelectorAll('.trend h3')].map((h) => h.textContent),
     ).toEqual([
-      'R2 存储 · midden',
-      'R2 存储 · midden-backup',
-      'R2 Class A 操作（每天）',
-      'R2 Class B 操作（每天）',
+      'R2存储 · midden',
+      'R2存储 · midden-backup',
+      'R2 Class A操作（每天）',
+      'R2 Class B操作（每天）',
       '数据库文件',
       '缩略图',
       '可用磁盘',
     ])
     expect(
       [...el.querySelectorAll('.segments span')].map((s) => s.textContent),
-    ).toEqual(['30 天', '90 天', '全部'])
+    ).toEqual(['30天', '90天', '全部'])
   })
 
   it('edits the thresholds', async () => {
@@ -245,12 +245,12 @@ describe('存储用量', () => {
       .find((s) => s.querySelector('h2')?.textContent === '提醒阈值')!
       .querySelectorAll('button')
     expect([...rows].map(text)).toEqual([
-      '本月 R2 费用超过 $5',
-      'R2 操作次数超过免费额度的 80%',
+      '本月R2费用超过 $5',
+      'R2操作次数超过免费额度的 80%',
       '可用磁盘低于 10 GB',
       '数据库文件超过 5 GB',
     ])
-    button(el, '本月 R2 费用超过').click()
+    button(el, '本月R2费用超过').click()
     await settle()
     const input = el.querySelector<HTMLInputElement>('dialog[open] input')!
     expect(input.value).toBe('5')
@@ -260,7 +260,7 @@ describe('存储用量', () => {
     el.querySelector<HTMLFormElement>('dialog[open] form')!.requestSubmit()
     await settle()
     expect(text(el.querySelector('dialog[open]')!)).toContain(
-      '数值，0.01 到 10,000',
+      '数值，0.01到10,000',
     )
     input.value = '7.5'
     input.dispatchEvent(new Event('input'))
@@ -274,7 +274,7 @@ describe('存储用量', () => {
       }),
     )
     expect(el.querySelector('dialog[open]')).toBeNull()
-    expect(text(button(el, '本月 R2 费用超过'))).toContain('$7.5')
+    expect(text(button(el, '本月R2费用超过'))).toContain('$7.5')
 
     button(el, '超过免费额度的').click()
     await settle()
@@ -284,7 +284,7 @@ describe('存储用量', () => {
     percent.dispatchEvent(new Event('input'))
     el.querySelector<HTMLFormElement>('dialog[open] form')!.requestSubmit()
     await settle()
-    expect(text(el.querySelector('dialog[open]')!)).toContain('整数，1 到 100')
+    expect(text(el.querySelector('dialog[open]')!)).toContain('整数，1到100')
   })
 
   it('shows only the local parts without the analytics', async () => {
@@ -346,7 +346,7 @@ describe('存储用量', () => {
     const el = mount(StorageView)
     await settle()
     // Three hours after the reading.
-    expect(text(el)).toContain('统计于3 小时前')
+    expect(text(el)).toContain('统计于3小时前')
     expect(button(el, '重新统计').disabled).toBe(false)
 
     button(el, '重新统计').click()
@@ -379,8 +379,8 @@ describe('存储用量', () => {
     await vi.advanceTimersByTimeAsync(2000)
     await settle()
     expect(button(el, '重新统计').disabled).toBe(false)
-    expect(text(el)).toContain('统计于不到 1 分钟前')
-    expect(text(el)).toContain('用时 1.5 秒')
+    expect(text(el)).toContain('统计于不到1分钟前')
+    expect(text(el)).toContain('用时1.5秒')
     const reads = calls.mock.calls.length
     await vi.advanceTimersByTimeAsync(10_000)
     expect(calls.mock.calls.length).toBe(reads)

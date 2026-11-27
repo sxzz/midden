@@ -59,8 +59,8 @@ const summary = computed(() => {
   const span = last - first
   const range = `${axisDate(first, span)} – ${axisDate(last, span)}`
   return series.value?.truncated
-    ? `最近 ${points.length} 次抓取 · ${range}`
-    : `${points.length} 次抓取 · ${range}`
+    ? `最近${points.length}次抓取 · ${range}`
+    : `${points.length}次抓取 · ${range}`
 })
 // A tap anywhere but a chart puts the charts back on their newest readings.
 function release(event: PointerEvent) {
@@ -105,7 +105,7 @@ function release(event: PointerEvent) {
           @click="tableOpen = !tableOpen"
         >
           <span class="title">数据表</span>
-          <span class="rows">{{ rows.length }} 行</span>
+          <span class="rows">{{ rows.length }}行</span>
           <ChevronIcon :open="tableOpen" />
         </button>
         <div v-show="tableOpen" :id="`trends-table-${id}`" class="sheet">

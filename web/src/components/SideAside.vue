@@ -226,9 +226,9 @@ onUnmounted(() => {
     <AsideDetail v-else-if="detail" :detail="detail" />
     <template #footer>
       <AppLink v-if="about.commitURL" :href="about.commitURL"
-        >版本 {{ about.version }}</AppLink
+        >版本{{ about.version }}</AppLink
       >
-      <span v-else>版本 {{ about.version }}</span>
+      <span v-else>版本{{ about.version }}</span>
       <AppLink :href="REPOSITORY">源代码</AppLink>
       <AppLink :to="{ name: 'settings' }">设置</AppLink>
     </template>

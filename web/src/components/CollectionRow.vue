@@ -349,6 +349,7 @@ const storage = computed(() =>
   color: var(--subtle);
 }
 .preview {
+  text-wrap: pretty;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   line-clamp: 2;

@@ -46,7 +46,7 @@ const relationLink = (rel: Rel) => {
 const captures = computed(() => {
   const count = props.detail.points.length
   if (!count) return ''
-  return props.detail.morePoints ? `${count}+ 次` : `${count} 次`
+  return props.detail.morePoints ? `${count}+次` : `${count}次`
 })
 const recent = computed(() => props.detail.points.slice(0, 5))
 const storage = computed(() =>

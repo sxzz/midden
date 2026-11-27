@@ -145,7 +145,7 @@ async function remove() {
   </SheetDialog>
   <ConfirmSheet
     :open="step === 'merge'"
-    :title="`已有标签「${name.trim()}」，将合并 ${count} 条收藏`"
+    :title="`已有标签「${name.trim()}」，将合并${count}条收藏`"
     confirm-label="合并"
     :busy="busy"
     @confirm="rename"
@@ -154,7 +154,7 @@ async function remove() {
   <ConfirmSheet
     :open="step === 'delete'"
     :title="`删除标签「${tag?.name ?? ''}」？`"
-    :description="count ? `将从 ${count} 条收藏上移除` : undefined"
+    :description="count ? `将从${count}条收藏上移除` : undefined"
     confirm-label="删除标签"
     :busy="busy"
     @confirm="remove"

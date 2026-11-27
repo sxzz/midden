@@ -62,7 +62,7 @@ test('a post reports its own capture and media', () => {
   })
   expect(recordStatus(downloading).label).toBe('正在保存媒体')
   expect(recordProgress(downloading)).toBe(0.5)
-  expect(recordCounts(downloading)).toBe('媒体 1/4 · 失败 1')
+  expect(recordCounts(downloading)).toBe('媒体1/4 · 失败1')
   expect(recordProgress(record({}))).toBeUndefined()
   // Queued until the fetch is stored, so only `waiting` means it waits.
   expect(recordStatus(record({})).label).toBe('正在采集')
@@ -90,7 +90,7 @@ test('a collection follows its members after its own capture ends', () => {
     tone: 'active',
   })
   expect(recordProgress(running)).toBe(0.6)
-  expect(recordCounts(running)).toBe('帖子 6/10 · 不完整 1 · 失败 2')
+  expect(recordCounts(running)).toBe('帖子6/10 · 不完整1 · 失败2')
   const finished = record({
     kind: 'profile',
     state: 'complete',
@@ -135,18 +135,16 @@ test('says which saved posts were new to the library', () => {
       members: { ...members, ...patch },
     })
   const known = profile({ added: 30, updated: 90 })
-  expect(recordCounts(known)).toBe(
-    '帖子 120/120 · 新增 30 · 更新 90 · 不完整 2',
-  )
-  expect(recordAdditions(known)).toBe('新增 30，更新 90')
+  expect(recordCounts(known)).toBe('帖子120/120 · 新增30 · 更新90 · 不完整2')
+  expect(recordAdditions(known)).toBe('新增30，更新90')
   expect(recordCounts(profile({ added: 0, updated: 120 }))).toBe(
-    '帖子 120/120 · 更新 120 · 不完整 2',
+    '帖子120/120 · 更新120 · 不完整2',
   )
   expect(recordAdditions(profile({ added: 0, updated: 120 }))).toBe(
-    '新增 0，更新 120',
+    '新增0，更新120',
   )
   // Older records do not know: nothing rather than a guess.
-  expect(recordCounts(profile({}))).toBe('帖子 120/120 · 不完整 2')
+  expect(recordCounts(profile({}))).toBe('帖子120/120 · 不完整2')
   expect(recordAdditions(profile({}))).toBe('')
 
   const post = record({
@@ -154,7 +152,7 @@ test('says which saved posts were new to the library', () => {
     done: true,
     media: { total: 2, ready: 2, failed: 0 },
   })
-  expect(recordCounts({ ...post, added: true })).toBe('新增 · 媒体 2/2')
+  expect(recordCounts({ ...post, added: true })).toBe('新增 · 媒体2/2')
   expect(
     recordCounts({
       ...post,
@@ -163,7 +161,7 @@ test('says which saved posts were new to the library', () => {
     }),
   ).toBe('更新')
   expect(recordAdditions({ ...post, added: false })).toBe('更新了已有收藏')
-  expect(recordCounts(post)).toBe('媒体 2/2')
+  expect(recordCounts(post)).toBe('媒体2/2')
   expect(recordAdditions(post)).toBe('')
 })
 
@@ -173,8 +171,8 @@ test('names profile images by what they are', () => {
   expect(mediaLabel({ ...media, position: 1, purpose: 'banner' })).toBe(
     '主页封面',
   )
-  expect(mediaLabel({ ...media, position: 2 })).toBe('图片 3')
-  expect(mediaLabel({ ...media, position: 3, kind: 'video' })).toBe('视频 4')
+  expect(mediaLabel({ ...media, position: 2 })).toBe('图片3')
+  expect(mediaLabel({ ...media, position: 3, kind: 'video' })).toBe('视频4')
 })
 
 test('groups records by day like the library, with times under them', () => {
@@ -279,7 +277,7 @@ test('an update is titled by what it covers', () => {
         update: update({ target: 'many', posts: 9, profiles: 3 }),
       }),
     ),
-  ).toBe('更新 12 项')
+  ).toBe('更新12项')
   // A watch's run (定期更新).
   expect(
     recordTitle({ ...profile, update: update({ handle: 'cat', watch: true }) }),
@@ -293,11 +291,11 @@ test('an update is titled by what it covers', () => {
     ),
   ).toBe('定期更新收藏夹「猫」')
   expect(profileHandle('https://www.instagram.com/dog/')).toBe('@dog')
-  expect(coverText(340, 12)).toBe('12 个账号、340 条帖子')
-  expect(coverText(1, 0)).toBe('1 条帖子')
+  expect(coverText(340, 12)).toBe('12个账号、340条帖子')
+  expect(coverText(1, 0)).toBe('1条帖子')
   expect(countText(320)).toBe('320')
-  expect(countText(21_000)).toBe('2.1 万')
-  expect(countText(10_049)).toBe('1 万')
+  expect(countText(21_000)).toBe('2.1万')
+  expect(countText(10_049)).toBe('1万')
 })
 
 test('an update counts every member, waiting items as running', () => {
@@ -315,7 +313,7 @@ test('an update counts every member, waiting items as running', () => {
     },
   })
   expect(recordStatus(running)).toEqual({ label: '正在更新', tone: 'active' })
-  expect(recordCounts(running)).toBe('新增 3 · 更新 2 · 异常 2 · 进行中 4')
+  expect(recordCounts(running)).toBe('新增3 · 更新2 · 异常2 · 进行中4')
   expect(recordProgress(running)).toBe(0.6)
   expect(recordStatus({ ...running, done: true, state: 'partial' })).toEqual({
     label: '部分缺失',
@@ -345,9 +343,7 @@ test('a profile of an update tells how each part went', () => {
       },
     ],
   }
-  expect(profilePartText(part)).toBe(
-    '资料 ✓ · 帖子 34/100 · 关注 ✓ · 粉丝 跳过',
-  )
+  expect(profilePartText(part)).toBe('资料 ✓ · 帖子34/100 · 关注 ✓ · 粉丝 跳过')
   expect(
     profilePartText({
       ...part,
@@ -358,7 +354,7 @@ test('a profile of an update tells how each part went', () => {
         { list: 'followers', state: 'failed', fetched: 0 },
       ],
     }),
-  ).toBe('资料 进行中 · 帖子 0/0 · 关注 进行中 · 粉丝 失败')
+  ).toBe('资料 进行中 · 帖子0/0 · 关注 进行中 · 粉丝 失败')
   expect(
     profilePartText({
       collection_id: 'p',
@@ -366,7 +362,7 @@ test('a profile of an update tells how each part went', () => {
       state: 'complete',
       posts: { total: 40, finished: 40, pending: 0, done: true, capped: false },
     }),
-  ).toBe('资料 ✓ · 帖子 40')
+  ).toBe('资料 ✓ · 帖子40')
   // Stopped by the post cap: what it read, and that saved posts are ahead.
   expect(
     profilePartText({
@@ -381,7 +377,7 @@ test('a profile of an update tells how each part went', () => {
         capped: true,
       },
     }),
-  ).toBe('资料 ✓ · 帖子 1000（未到已有数据）')
+  ).toBe('资料 ✓ · 帖子1000（未到已有数据）')
 })
 
 test('a capture that saw its source gone again reads as that, not as a failure', () => {

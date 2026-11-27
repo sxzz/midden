@@ -164,10 +164,10 @@ async function submit() {
   const sent = targets.length - failed.length
   notice.value = failed.length
     ? {
-        text: `${sent ? `已提交 ${sent} 条，` : ''}${failed.length} 条未提交：${reason}`,
+        text: `${sent ? `已提交${sent}条，` : ''}${failed.length}条未提交：${reason}`,
         failed: true,
       }
-    : { text: `已提交 ${sent} 条。` }
+    : { text: `已提交${sent}条。` }
   submitting.value = false
   await refresh()
 }
@@ -207,7 +207,7 @@ async function submit() {
           submitting
             ? '正在提交…'
             : links.length > 1
-              ? `采集 ${links.length} 条`
+              ? `采集${links.length}条`
               : '采集'
         }}
       </button>

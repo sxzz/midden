@@ -175,11 +175,11 @@ const relations = computed(() => {
       icon,
       // Where the link leads belongs with its kind, not in a footer of its own.
       label: external
-        ? `${kind} · 在 ${entity.type.startsWith('instagram.') ? 'Instagram' : 'X'}`
+        ? `${kind} · 在${entity.type.startsWith('instagram.') ? 'Instagram' : 'X'}`
         : kind,
       text: postLink
-        ? text || `帖子 ${externalId}`
-        : name || (handle ? `@${handle}` : `账号 ${externalId}`),
+        ? text || `帖子${externalId}`
+        : name || (handle ? `@${handle}` : `账号${externalId}`),
       lang: postLink && text ? entity.saved_lang : undefined,
       href,
       external,
@@ -369,6 +369,7 @@ const groups = computed(() => {
   font-weight: 400;
 }
 .text {
+  text-wrap: pretty;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;

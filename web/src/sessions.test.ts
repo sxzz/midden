@@ -15,7 +15,7 @@ describe('已登录的设备', () => {
       '昨天',
     )
     expect(lastUsed(new Date(at('2026-11-24T12:00')).toISOString(), now)).toBe(
-      '3 天前',
+      '3天前',
     )
   })
 
@@ -33,7 +33,7 @@ describe('已登录的设备', () => {
     }
     expect(deviceName(session)).toBe('Telegram · iOS')
     expect(sessionDetails(session, now)).toBe(
-      `midden.test · Telegram Mini App · 最近使用：2 天前 · 登录于 ${date(session.created_at)}`,
+      `midden.test · Telegram Mini App · 最近使用：2天前 · 登录于 ${date(session.created_at)}`,
     )
     // This one is in use now; from before the device list, nothing known.
     expect(

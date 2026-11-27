@@ -45,9 +45,9 @@ const viewerText = computed(() =>
 const counts = computed(() => {
   const parts: string[] = []
   if (node.value.following !== undefined)
-    parts.push(`关注 ${formatCount(node.value.following)}`)
+    parts.push(`关注${formatCount(node.value.following)}`)
   if (node.value.followers !== undefined)
-    parts.push(`粉丝 ${formatCount(node.value.followers)}`)
+    parts.push(`粉丝${formatCount(node.value.followers)}`)
   return parts
 })
 </script>

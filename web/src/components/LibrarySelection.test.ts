@@ -90,7 +90,7 @@ it('多选 shows a bar to update or delete the selection', async () => {
   rows[0]!.click()
   rows[2]!.click()
   await nextTick()
-  expect(bar.textContent).toContain('已选 2 项')
+  expect(bar.textContent).toContain('已选2项')
   expect(button(bar, '更新')!.disabled).toBe(false)
   expect(more.disabled).toBe(false)
 
@@ -104,9 +104,9 @@ it('多选 shows a bar to update or delete the selection', async () => {
   expect(menu.open).toBe(false)
   const sheet = () => el.querySelector<HTMLElement>('dialog[open]')
   await vi.waitFor(() =>
-    expect(sheet()?.textContent).toContain('将删除 1 个账号、1 条帖子'),
+    expect(sheet()?.textContent).toContain('将删除1个账号、1条帖子'),
   )
-  expect(sheet()!.textContent).toContain('删除 2 项收藏？')
+  expect(sheet()!.textContent).toContain('删除2项收藏？')
   // Counted once with the accounts' posts, which are not deleted by default.
   const option = sheet()!.querySelector<HTMLInputElement>(
     'input[type="checkbox"]',
@@ -115,7 +115,7 @@ it('多选 shows a bar to update or delete the selection', async () => {
   option.click()
   await nextTick()
   expect(sheet()!.textContent).toContain(
-    '将删除 1 个账号、41 条帖子（保留 3 条：其他账号也关联 2 条、单独收藏 1 条）',
+    '将删除1个账号、41条帖子（保留3条：其他账号也关联2条、单独收藏1条）',
   )
   button(sheet()!, '删除')!.click()
   await vi.waitFor(() => expect(el.textContent).not.toContain('第 3 条'))
@@ -141,7 +141,7 @@ it('a single post offers no option for posts', async () => {
   })
   app.mount(el)
   unmount = () => app.unmount()
-  await vi.waitFor(() => expect(el.textContent).toContain('将删除 1 条帖子'))
+  await vi.waitFor(() => expect(el.textContent).toContain('将删除1条帖子'))
   expect(el.querySelector('input[type="checkbox"]')).toBeNull()
   button(el, '删除')!.click()
   await vi.waitFor(() => expect(deleted).toEqual([false]))

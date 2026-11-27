@@ -194,7 +194,7 @@ it('shows sensitive images when the reader shows them everywhere', async () => {
 it('says when older revisions were not compared, and reports failures', async () => {
   const { el } = await mount(() => ({ ...changes, truncated: true }))
   expect(text(el.querySelector('.footnote'))).toBe(
-    '只比较了最近 1000 个版本，更早的修改未列出。',
+    '只比较了最近1000个版本，更早的修改未列出。',
   )
   unmount()
   document.body.replaceChildren()

@@ -39,11 +39,11 @@ const details = (o: WebOrigin) =>
   o.created_at
     ? [
         `添加于 ${date(o.created_at)}`,
-        o.passkeys ? `${o.passkeys} 个通行密钥` : '',
+        o.passkeys ? `${o.passkeys}个通行密钥` : '',
       ]
         .filter(Boolean)
         .join(' · ')
-    : 'Mini App 地址'
+    : 'Mini App地址'
 
 function openAdd() {
   addError.value = ''
@@ -55,7 +55,7 @@ async function add(origin: string) {
   try {
     const added = await call(client.origins.$post({ json: { origin } }))
     adding.value = false
-    toast(`已添加 ${new URL(added.origin).host}。`)
+    toast(`已添加${new URL(added.origin).host}。`)
     await load()
   } catch (e) {
     addError.value = errorText(e)
@@ -66,7 +66,7 @@ async function add(origin: string) {
 
 const removal = computed(() => {
   const n = removing.value?.passkeys ?? 0
-  return n ? `将同时删除此域名的 ${n} 个通行密钥` : undefined
+  return n ? `将同时删除此域名的${n}个通行密钥` : undefined
 })
 async function remove() {
   const o = removing.value
@@ -104,7 +104,7 @@ async function remove() {
         v-if="o.id"
         type="button"
         class="action remove"
-        :aria-label="`删除 ${hostOf(o)}`"
+        :aria-label="`删除${hostOf(o)}`"
         :disabled="busy"
         @click="removing = o"
       >
@@ -133,7 +133,7 @@ async function remove() {
   />
   <ConfirmSheet
     :open="!!removing"
-    :title="`删除 ${removing ? hostOf(removing) : ''}？`"
+    :title="`删除${removing ? hostOf(removing) : ''}？`"
     :description="removal"
     confirm-label="删除域名"
     :busy="busy"

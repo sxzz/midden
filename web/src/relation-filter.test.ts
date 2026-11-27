@@ -60,13 +60,13 @@ it('notes how far the lists behind a mode were read', () => {
 
 it('names several accounts and how many of them', () => {
   expect(relationChip('following', ['@a', '@b', '@c'], 2)).toBe(
-    '@a、@b、@c 中至少 2 人关注的',
+    '@a、@b、@c 中至少2人关注的',
   )
   expect(relationChip('followers', ['@a', '@b'], 2)).toBe(
-    '关注 @a、@b 中至少 2 人的',
+    '关注 @a、@b 中至少2人的',
   )
   expect(relationChip('mutual', ['@a', '@b'], 1)).toBe(
-    '与 @a、@b 中至少 1 人互关',
+    '与 @a、@b 中至少1人互关',
   )
   expect(relMinOf('3', 3)).toBe(3)
   expect(relMinOf('4', 3)).toBe(2)

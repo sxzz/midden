@@ -71,7 +71,7 @@ watch(
         </div>
       </dl>
       <div class="usage">
-        <p class="usage-title">最近 30 天 {{ token.usage.total }} 次</p>
+        <p class="usage-title">最近30天{{ token.usage.total }}次</p>
         <UsageBars :days="token.usage.days" :width="300" :height="56" />
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <ol v-else-if="usage?.endpoints.length" class="endpoints">

@@ -219,8 +219,8 @@ const why = computed(() => {
   const of = selectedOf.value
   if (!of) return ''
   return side.value === 'following'
-    ? `${labels(of)} 关注了 TA`
-    : `TA 关注了 ${labels(of)}`
+    ? `${labels(of)} 关注了TA`
+    : `TA关注了 ${labels(of)}`
 })
 const onlyText = computed(() => (only.value ? `仅 ${labels(only.value)}` : ''))
 const BADGES = 4
@@ -423,7 +423,7 @@ const libraryRoute = computed(() => ({
       <div class="row result">
         <p class="total">
           <template v-if="data"
-            >{{ formatCount(data.total) }} 个账号<button
+            >{{ formatCount(data.total) }}个账号<button
               v-if="onlyText"
               type="button"
               class="only"

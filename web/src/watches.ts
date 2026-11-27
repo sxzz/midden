@@ -38,7 +38,7 @@ const several: Record<IntervalUnit, string> = {
 
 /** How often, as it reads: 每天, 每 6 小时, 每 2 个月. */
 export function everyText(e: WatchEvery) {
-  return e.count === 1 ? single[e.unit] : `每 ${e.count} ${several[e.unit]}`
+  return e.count === 1 ? single[e.unit] : `每${e.count}${several[e.unit]}`
 }
 
 /** A count the server takes for the unit: 1–1000, minutes from 5. */

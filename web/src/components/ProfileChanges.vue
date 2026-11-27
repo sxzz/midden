@@ -264,7 +264,7 @@ function open(line: ImageLine, asset: Asset) {
       </ol>
     </section>
     <p v-if="changes?.truncated" class="footnote">
-      只比较了最近 1000 个版本，更早的修改未列出。
+      只比较了最近1000个版本，更早的修改未列出。
     </p>
     <MediaViewer
       v-if="viewing"

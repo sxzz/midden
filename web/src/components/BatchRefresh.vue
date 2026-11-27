@@ -41,7 +41,7 @@ function openFromMenu(choice: 'media' | 'delete') {
 }
 function removed(effect: RemovalEffect) {
   removing.value = false
-  toast(`已删除 ${effect.media} 个媒体`)
+  toast(`已删除${effect.media}个媒体`)
   emit('mediaRemoved')
 }
 /** The started update's record and how many it covers. */
@@ -62,7 +62,7 @@ function onStarted(record: string) {
 <template>
   <div class="toolbar" role="region" aria-label="多选">
     <template v-if="started">
-      <p class="status" role="status">已开始更新 {{ started.count }} 项</p>
+      <p class="status" role="status">已开始更新{{ started.count }}项</p>
       <button type="button" class="action" @click="emit('close')">关闭</button>
       <AppLink
         class="action strong"
@@ -75,7 +75,7 @@ function onStarted(record: string) {
     <template v-else>
       <button type="button" class="action" @click="emit('close')">取消</button>
       <p class="status selection">
-        <span class="count">已选 {{ selected.length }} 项</span>
+        <span class="count">已选{{ selected.length }}项</span>
         <button
           type="button"
           class="select-all"
@@ -136,7 +136,7 @@ function onStarted(record: string) {
   <MediaRemovalSheet
     :open="removing"
     :target="{ ids: selected }"
-    :title="`删除 ${selected.length} 项的媒体？`"
+    :title="`删除${selected.length}项的媒体？`"
     @removed="removed"
     @cancel="removing = false"
   />

@@ -90,7 +90,7 @@ describe('list fetches', () => {
         { list: 'following', state: 'complete', expected: 3, fetched: 3 },
         { list: 'followers', state: 'partial', expected: 30, fetched: 2 },
       ]),
-    ).toBe('关注 3 人 · 粉丝 2/30，不完整')
+    ).toBe('关注 3人 · 粉丝 2/30，不完整')
     expect(
       relationsText([
         { list: 'following', state: 'failed', fetched: 0, error: '账号不可用' },

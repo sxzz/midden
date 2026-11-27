@@ -139,7 +139,7 @@ it('watches a profile every so many of a unit, with the 更新 options', async (
     '月',
     '年',
   ])
-  expect(el.querySelector('.every')?.textContent).toContain('最短 5 分钟')
+  expect(el.querySelector('.every')?.textContent).toContain('最短5分钟')
   expect(label('抓帖子')!.querySelector('input')!.checked).toBe(true)
   expect(label('抓关系网')!.querySelector('input')!.checked).toBe(false)
   expect(el.querySelector('.action.destructive')).toBeNull()
@@ -256,9 +256,9 @@ it('settings list every watch, and turn one off or remove it', async () => {
   expect(rows[0]!.querySelector('.name')?.getAttribute('href')).toBe(
     '/collection/p',
   )
-  expect(rows[0]!.textContent).toContain('每天 · 最新 100 条')
+  expect(rows[0]!.textContent).toContain('每天 · 最新100条')
   expect(rows[1]!.querySelector('.name')?.textContent).toBe('收藏夹「猫」')
-  expect(rows[1]!.textContent).toContain('每 6 小时')
+  expect(rows[1]!.textContent).toContain('每6小时')
   expect(rows[1]!.textContent).toContain('已关闭')
   expect(rows[1]!.textContent).toContain('上次未开始：收藏夹是空的')
 

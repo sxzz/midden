@@ -94,7 +94,7 @@ function askRemove() {
  */
 function removed(effect: RemovalEffect) {
   removing.value = false
-  toast(`已删除 ${effect.media} 个媒体`)
+  toast(`已删除${effect.media}个媒体`)
   const asset = selected.value
   const collection = selectedCollection.value
   const slot = index.value
@@ -954,7 +954,7 @@ watch(
           class="thumb"
           :class="{ on: slot === index, removed: isRemoved(item) }"
           :disabled="!opened"
-          :aria-label="`第 ${slot + 1} 项，共 ${list.length} 项`"
+          :aria-label="`第${slot + 1}项，共${list.length}项`"
           :aria-current="slot === index || undefined"
           @click="jump(slot)"
         >

@@ -218,9 +218,9 @@ it('sets a custom link, checking it as typed, and goes back to random', async ()
 
   for (const [value, message] of [
     ['My-Picks', '只能用小写字母、数字和 -'],
-    ['ab', '至少 3 个字符'],
+    ['ab', '至少3个字符'],
     ['-picks', '不能以 - 开头或结尾'],
-    ['x'.repeat(65), '最多 64 个字符'],
+    ['x'.repeat(65), '最多64个字符'],
   ] as const) {
     await type(value)
     expect(hint()).toBe(message)

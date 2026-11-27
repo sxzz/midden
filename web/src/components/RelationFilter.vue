@@ -102,7 +102,7 @@ watch(
         >
           +
         </button>
-        <span class="min-label">人 / 共 {{ relOf.length }} 人</span>
+        <span class="min-label">人 / 共{{ relOf.length }}人</span>
       </div>
       <ul v-if="notes.length" class="note">
         <li v-for="note in notes" :key="note">{{ note }}</li>

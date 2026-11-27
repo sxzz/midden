@@ -69,8 +69,8 @@ const counts = computed(() => {
   const c = preview.value?.counts
   if (!c) return ''
   const sizes = [
-    c.following !== undefined && `关注 ${countText(c.following)}`,
-    c.followers !== undefined && `粉丝 ${countText(c.followers)}`,
+    c.following !== undefined && `关注${countText(c.following)}`,
+    c.followers !== undefined && `粉丝${countText(c.followers)}`,
   ]
     .filter(Boolean)
     .join(' · ')
@@ -79,7 +79,7 @@ const counts = computed(() => {
     (c.followers ?? 0) > RELATION_LIMIT && '粉丝',
   ].filter(Boolean)
   return skipped.length
-    ? `${sizes}（超过 ${RELATION_LIMIT}，将跳过${skipped.join('和')}名单）`
+    ? `${sizes}（超过${RELATION_LIMIT}，将跳过${skipped.join('和')}名单）`
     : sizes
 })
 const posts = computed(() => (preview.value?.posts ?? 0) > 0)

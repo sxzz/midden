@@ -24,7 +24,7 @@ export function lastUsed(at: string, now = Date.now()): string {
   )
   if (days === 0) return '今天'
   if (days === 1) return '昨天'
-  return `${days} 天前`
+  return `${days}天前`
 }
 
 /** The line under its name: domain, how, last used, signed in. */

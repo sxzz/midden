@@ -70,7 +70,7 @@ it('charts each count with its newest value and its change over the captures', a
     signal: expect.any(AbortSignal),
   })
   expect(el.querySelector('.summary')?.textContent).toBe(
-    '3 次抓取 · 11月1日 – 11月5日',
+    '3次抓取 · 11月1日 – 11月5日',
   )
   expect(charts()).toEqual([
     { label: '关注者', value: '12,345', meta: '期间 +345' },
@@ -124,7 +124,7 @@ it('folds the data table behind a row that says how long it is', async () => {
   const sheet = el.querySelector<HTMLElement>('.table-view .sheet')!
   expect(el.querySelector('details')).toBeNull()
   expect(toggle.querySelector('.title')?.textContent).toBe('数据表')
-  expect(toggle.querySelector('.rows')?.textContent).toBe('3 行')
+  expect(toggle.querySelector('.rows')?.textContent).toBe('3行')
   expect(toggle.querySelector('.chevron')).not.toBeNull()
   expect(toggle.getAttribute('aria-controls')).toBe(sheet.id)
   expect(toggle.getAttribute('aria-expanded')).toBe('false')

@@ -25,15 +25,15 @@ export const settingsSections: readonly SettingsSection[] = [
       {
         value: 'sessions',
         label: '已登录的设备',
-        hint: '登录着的浏览器与 Mini App',
+        hint: '登录着的浏览器与Mini App',
         icon: 'devices',
       },
     ],
   },
   {
     value: 'tokens',
-    label: 'API 令牌',
-    hint: '脚本与 AI 代理读写收藏用的令牌。',
+    label: 'API令牌',
+    hint: '脚本与AI代理读写收藏用的令牌。',
   },
   {
     value: 'admin',
@@ -61,12 +61,12 @@ export const settingsSections: readonly SettingsSection[] = [
       {
         value: 'backup',
         label: '数据库备份',
-        hint: 'Litestream 的复制与心跳',
+        hint: 'Litestream的复制与心跳',
         icon: 'backup',
       },
     ],
   },
-  { value: 'about', label: '关于', hint: '这个 Midden 的版本与源代码。' },
+  { value: 'about', label: '关于', hint: '这个Midden的版本与源代码。' },
 ]
 
 export function findSection(value: string) {

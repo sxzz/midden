@@ -142,7 +142,7 @@ const blurred = (account: FollowAccount) =>
         </li>
       </ol>
     </section>
-    <p v-if="changes?.truncated" class="footnote">只列出最近 1000 条变化。</p>
+    <p v-if="changes?.truncated" class="footnote">只列出最近1000条变化。</p>
   </div>
 </template>
 

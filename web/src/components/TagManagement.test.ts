@@ -134,7 +134,7 @@ it('asks before merging into a tag that has the name, then follows it', async ()
   await edit(el, '甲')
   await rename('乙')
   await vi.waitFor(() =>
-    expect(sheet().textContent).toContain('已有标签「乙」，将合并 3 条收藏'),
+    expect(sheet().textContent).toContain('已有标签「乙」，将合并3条收藏'),
   )
   expect(writes()).toEqual([])
   // Backing out returns to the name, still unsaved.
@@ -164,7 +164,7 @@ it('asks before deleting a tag and drops the filter on it', async () => {
   await vi.waitFor(() =>
     expect(sheet().textContent).toContain('删除标签「甲」？'),
   )
-  expect(sheet().textContent).toContain('将从 3 条收藏上移除')
+  expect(sheet().textContent).toContain('将从3条收藏上移除')
   button(sheet() as HTMLElement, '删除标签').click()
   await vi.waitFor(() => expect(search).toHaveBeenCalledWith(''))
   expect(writes()).toEqual([['DELETE', '/tags/a', undefined]])

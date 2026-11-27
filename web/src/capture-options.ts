@@ -65,10 +65,10 @@ export function withScope(o: Options, scope: Scope): Options {
 }
 
 export const ranges: { value: SinceDays; label: string }[] = [
-  { value: 1, label: '最近 1 天' },
-  { value: 7, label: '最近 7 天' },
-  { value: 30, label: '最近 30 天' },
-  { value: 90, label: '最近 90 天' },
+  { value: 1, label: '最近1天' },
+  { value: 7, label: '最近7天' },
+  { value: 30, label: '最近30天' },
+  { value: 90, label: '最近90天' },
   { value: 365, label: '最近一年' },
 ]
 
@@ -85,9 +85,9 @@ function postsText(o: CaptureOptions) {
     case 'until_existing':
       return '抓到已有数据为止'
     case 'max':
-      return o.count === undefined ? '全部帖子' : `最多 ${o.count} 条`
+      return o.count === undefined ? '全部帖子' : `最多${o.count}条`
     default:
-      return `最新 ${o.count ?? DEFAULT_COUNT} 条`
+      return `最新${o.count ?? DEFAULT_COUNT}条`
   }
 }
 

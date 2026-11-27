@@ -99,9 +99,29 @@ textarea {
   }
 }
 /* A double tap is a tap, not a zoom. Pinching the page still works, and the
-   media viewer does its own double-tap and pinch zoom. */
+   media viewer does its own double-tap and pinch zoom. The copy puts no
+   space between Chinese and Latin letters or digits (copy-spacing.test.ts):
+   the browser adds the gap itself (Chrome 140+, Safari 18.4+; elsewhere the
+   text is simply tight). */
 html {
   touch-action: manipulation;
+  text-autospace: normal;
+}
+/* Headings and card titles break into even lines; running text (post
+   bodies and bios, captions, descriptions and footnotes) avoids a lone
+   last word. Buttons, chips and one-line labels are left as they are. */
+h1,
+h2,
+h3,
+.sheet-title {
+  text-wrap: balance;
+}
+p,
+li,
+dd,
+blockquote,
+figcaption {
+  text-wrap: pretty;
 }
 button {
   margin: 0;

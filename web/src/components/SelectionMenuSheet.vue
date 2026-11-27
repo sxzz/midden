@@ -61,7 +61,7 @@ watch(
     v-slot="{ item }"
     :open="open"
     :opener="opener"
-    :label="`已选 ${count} 项`"
+    :label="`已选${count}项`"
     @cancel="emit('cancel')"
   >
     <AppLink
@@ -72,7 +72,7 @@ watch(
       @navigate="emit('navigate')"
     >
       比较关系<span v-if="left" class="detail"
-        >{{ comparable.length }} 个账号，{{ left }} 个没有关系数据</span
+        >{{ comparable.length }}个账号，{{ left }}个没有关系数据</span
       >
     </AppLink>
     <button

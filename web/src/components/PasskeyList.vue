@@ -165,7 +165,7 @@ async function remove() {
     :open="!!removing"
     :title="`删除 ${removing?.name ?? ''}？`"
     :description="
-      last ? '可以在 Telegram 中发送 /passkey 添加新的通行密钥。' : undefined
+      last ? '可以在Telegram中发送 /passkey 添加新的通行密钥。' : undefined
     "
     confirm-label="删除通行密钥"
     :busy="busy"

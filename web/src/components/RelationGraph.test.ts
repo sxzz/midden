@@ -191,7 +191,7 @@ it('opens a card for the tapped account and goes from it', async () => {
   const card = el.querySelector('.card')!
   expect(text(card.querySelector('.name'))).toBe('小林')
   expect(text(card.querySelector('.handle'))).toBe('@kobayashi')
-  expect(text(card.querySelector('.meta'))).toBe('互关关注 67粉丝 12,345')
+  expect(text(card.querySelector('.meta'))).toBe('互关关注67粉丝12,345')
   expect(card.querySelector('img')?.getAttribute('referrerpolicy')).toBe(
     'no-referrer',
   )
@@ -316,7 +316,7 @@ it('lists the same accounts by kind, and opens the same card from the list', asy
     ['小林', '小号'],
     ['大号', '@outside'],
   ])
-  expect(text(sections[0]!.querySelector('.followers'))).toBe('粉丝 12,345')
+  expect(text(sections[0]!.querySelector('.followers'))).toBe('粉丝12,345')
   // A sensitive or missing avatar is its initial.
   expect(text(sections[1]!.querySelectorAll('.initial')[1])).toBe('O')
   ;(sections[1]!.querySelector('.person') as HTMLButtonElement).click()
@@ -483,7 +483,7 @@ it('compares the profile with accounts picked', async () => {
   await settle()
   // Once accounts are picked, a link to the comparison.
   const go = el.querySelector<HTMLAnchorElement>('a.compare-go')!
-  expect(text(go)).toBe('对比 2 个账号')
+  expect(text(go)).toBe('对比2个账号')
   expect(go.getAttribute('href')).toBe(
     `/compare?rel_of=c&rel_of=${encodeURIComponent('x/x.profile/7')}`,
   )

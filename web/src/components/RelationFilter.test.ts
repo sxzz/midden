@@ -142,7 +142,7 @@ it('picks accounts, then a mode, and how many of them', async () => {
   )
   expect(lastQuery(search).has('rel_min')).toBe(false)
   await vi.waitFor(() =>
-    expect(summary(el)).toBe('与 @friend、@owner 中至少 2 人互关'),
+    expect(summary(el)).toBe('与 @friend、@owner 中至少2人互关'),
   )
   const stepper = el.querySelector('[aria-label="至少几人"]')!
   expect(stepper.textContent).toContain('2')
@@ -158,7 +158,7 @@ it('picks accounts, then a mode, and how many of them', async () => {
   ).toBe(true)
   stepper.querySelector<HTMLButtonElement>('[aria-label="减少"]')!.click()
   await vi.waitFor(() => expect(lastQuery(search).get('rel_min')).toBe('1'))
-  expect(summary(el)).toBe('与 @friend、@owner 中至少 1 人互关')
+  expect(summary(el)).toBe('与 @friend、@owner 中至少1人互关')
 
   // Letting one go drops the threshold with it.
   options()[0]!.click()
@@ -178,7 +178,7 @@ it('reads several accounts and a threshold from the address', async () => {
     `rel_of=${encodeURIComponent(OWNER)}&rel_of=${encodeURIComponent(FRIEND)}&rel=following&rel_min=1`,
   )
   await vi.waitFor(() =>
-    expect(summary(el)).toBe('@owner、@friend 中至少 1 人关注的'),
+    expect(summary(el)).toBe('@owner、@friend 中至少1人关注的'),
   )
   // Both are looked up at once.
   expect(perspectiveCalls().map(([path]) => path)).toEqual([

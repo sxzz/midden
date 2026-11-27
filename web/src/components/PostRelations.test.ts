@@ -53,7 +53,7 @@ it('shows the quoted post as an internal collection link with its text', () => {
   expect(link.getAttribute('href')).toBe('/collection/saved-quote')
   expect(link.getAttribute('target')).toBeNull()
   // A saved quote is an indented aside, not a card with its own footer.
-  expect(link.textContent).not.toContain('在 X')
+  expect(link.textContent).not.toContain('在X')
   expect(el.querySelector('.destination')).toBeNull()
 })
 it('shows a quoted post kept by reference with its saved summary, or as an X link', () => {
@@ -83,8 +83,8 @@ it('shows a quoted post kept by reference with its saved summary, or as an X lin
   unmount()
   document.body.replaceChildren()
   const unsaved = quote(false)
-  expect(document.querySelector('.context')?.textContent).toContain('在 X')
-  expect(unsaved.textContent).toContain('帖子 456')
+  expect(document.querySelector('.context')?.textContent).toContain('在X')
+  expect(unsaved.textContent).toContain('帖子456')
   expect(unsaved.getAttribute('href')).toBe('https://x.com/i/web/status/456')
 })
 it('heads a quoted post kept by reference with its saved author', () => {
@@ -131,9 +131,9 @@ it('links an unsaved repost to its X status without using untrusted payload URLs
   })
   const link = el.querySelector<HTMLAnchorElement>('.relation')!
   expect(el.querySelector('.context')?.textContent).toContain(
-    '转发了这条帖子 · 在 X',
+    '转发了这条帖子 · 在X',
   )
-  expect(link.textContent).not.toContain('在 X')
+  expect(link.textContent).not.toContain('在X')
   expect(link.getAttribute('href')).toBe('https://x.com/i/web/status/456')
   expect(link.getAttribute('target')).toBe('_blank')
   expect(link.getAttribute('rel')).toBe('noopener noreferrer')

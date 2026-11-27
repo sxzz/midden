@@ -59,7 +59,7 @@ function settle() {
     <p class="when">
       <strong>{{ date(at?.observed_at) }}</strong>
       <span class="where">{{
-        latest ? '最新版本' : `第 ${index + 1} / ${last + 1} 次`
+        latest ? '最新版本' : `第${index + 1} / ${last + 1}次`
       }}</span>
     </p>
     <div class="track">

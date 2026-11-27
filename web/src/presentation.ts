@@ -293,10 +293,10 @@ export function ago(value?: string, now = new Date()) {
   const d = parseDate(value)
   if (!d) return ''
   const minutes = Math.max(0, Math.floor((+now - +d) / 60000))
-  if (minutes < 1) return '不到 1 分钟前'
-  if (minutes < 60) return `${minutes} 分钟前`
-  if (minutes < 1440) return `${Math.floor(minutes / 60)} 小时前`
-  return `${Math.floor(minutes / 1440)} 天前`
+  if (minutes < 1) return '不到1分钟前'
+  if (minutes < 60) return `${minutes}分钟前`
+  if (minutes < 1440) return `${Math.floor(minutes / 60)}小时前`
+  return `${Math.floor(minutes / 1440)}天前`
 }
 const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
 function daysAgo(d: Date, now: Date) {
@@ -440,11 +440,11 @@ export function removalEffectText(effect: {
 }) {
   if (!effect.media) return '没有可删除的媒体'
   const freed = effect.freed_bytes
-    ? `可释放 ${storageSize(effect.freed_bytes)}`
+    ? `可释放${storageSize(effect.freed_bytes)}`
     : ''
   if (!effect.shared) return freed || '这些媒体未保存，不占用空间'
   if (!freed) return '其他收藏仍在使用，不会释放空间'
-  return `${freed}；其中 ${effect.shared} 个媒体其他收藏仍在使用，不会释放空间`
+  return `${freed}；其中${effect.shared}个媒体其他收藏仍在使用，不会释放空间`
 }
 /** What a removed media item (已移除) says over its kept thumbnail. */
 export function removedLabel(asset: Asset) {

@@ -272,7 +272,7 @@ const shownTotal = computed(() => {
     : `${total.toLocaleString('zh-CN')} ${listsProfiles(list.query.value) ? '个账号' : '条'}`
 })
 const usedText = computed(() =>
-  usage.value ? `已用 ${storageSize(usage.value.used_bytes)}` : '',
+  usage.value ? `已用${storageSize(usage.value.used_bytes)}` : '',
 )
 /**
  * Under the title on a desktop, as X's header gives a count or a handle.

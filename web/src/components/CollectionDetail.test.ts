@@ -151,7 +151,7 @@ it('puts 更新 and 查看进度 in a group of their own; 更新 opens the sheet
   expect(sheet.textContent).toContain('更新 @synthetic')
   expect(sheet.textContent).toContain('帖子范围')
   expect(sheet.textContent).toContain(
-    '关注 320 · 粉丝 2.1 万（超过 5000，将跳过粉丝名单）',
+    '关注320 · 粉丝2.1万（超过5000，将跳过粉丝名单）',
   )
   expect(sent).toEqual([
     {
@@ -255,7 +255,7 @@ it('a watched profile says how often and when next; the row opens its sheet', as
   const { el } = await mount()
   const update = el.querySelector<HTMLElement>('.update .section-body')!
   await vi.waitFor(() =>
-    expect(update.textContent).toContain('定期更新下次 今天 23:05每 6 小时'),
+    expect(update.textContent).toContain('定期更新下次 今天 23:05每6小时'),
   )
   ;[...update.querySelectorAll('button')]
     .find((b) => b.textContent?.startsWith('定期更新'))!

@@ -281,9 +281,7 @@ it('an update: its target as the title, its profiles part by part, its lists as 
     ],
   })
   await vi.waitFor(() => expect(el.textContent).toContain('更新收藏夹「猫」'))
-  expect(el.textContent).toContain(
-    '正在更新 · 新增 1 · 更新 2 · 异常 1 · 进行中 2',
-  )
+  expect(el.textContent).toContain('正在更新 · 新增1 · 更新2 · 异常1 · 进行中2')
   expect(Number(el.querySelector('progress')?.value)).toBeCloseTo(4 / 6)
   // A folder has no link of its own.
   expect(el.textContent).not.toContain('打开原链接')
@@ -299,7 +297,7 @@ it('an update: its target as the title, its profiles part by part, its lists as 
   click('账号')
   await vi.waitFor(() =>
     expect(el.textContent).toContain(
-      '资料 ✓ · 帖子 34/100 · 关注 ✓ · 粉丝 跳过',
+      '资料 ✓ · 帖子34/100 · 关注 ✓ · 粉丝 跳过',
     ),
   )
   expect(el.textContent).toContain('@cat')
@@ -374,7 +372,7 @@ it('continues a profile the post cap stopped, inside the same record', async () 
     .find((tab) => tab.textContent!.startsWith('账号'))!
     .click()
   await vi.waitFor(() =>
-    expect(el.textContent).toContain('资料 ✓ · 帖子 1000（未到已有数据）'),
+    expect(el.textContent).toContain('资料 ✓ · 帖子1000（未到已有数据）'),
   )
   // What the update ran with stays visible.
   expect(el.textContent).toContain('选项抓到已有数据为止 · 仅媒体')
@@ -382,7 +380,7 @@ it('continues a profile the post cap stopped, inside the same record', async () 
     (b) => b.textContent?.trim() === '继续抓取',
   )!
   button.click()
-  await vi.waitFor(() => expect(el.textContent).toContain('帖子 1000/1100'))
+  await vi.waitFor(() => expect(el.textContent).toContain('帖子1000/1100'))
   expect(sent).toEqual([{ collection_id: 'p1' }])
   expect(el.textContent).not.toContain('继续抓取')
 })
@@ -424,7 +422,7 @@ it('shows the options a link ran with, and continues it where the cap stopped', 
   unmount = () => app.unmount()
   await vi.waitFor(() =>
     expect(el.textContent).toContain(
-      '选项抓到已有数据为止 · 不抓原帖 · 最近 30 天 · 抓关系网',
+      '选项抓到已有数据为止 · 不抓原帖 · 最近30天 · 抓关系网',
     ),
   )
   const button = [...el.querySelectorAll('button')].find(
@@ -541,7 +539,7 @@ it('says why a protected account has no posts, as a note rather than a failure, 
   )
   await vi.waitFor(() => expect(el.textContent).toContain(note))
   expect(tabs()).toEqual([])
-  expect(el.textContent).toContain('@Hang_Seng_Bank资料 ✓ · 帖子 0')
+  expect(el.textContent).toContain('@Hang_Seng_Bank资料 ✓ · 帖子0')
   expect(el.querySelector('.state')?.textContent).toContain('已完成')
   expect(el.textContent).not.toContain('失败原因')
   expect(el.textContent).not.toContain('帖子获取中断')
@@ -587,7 +585,7 @@ it("lists an update's skipped items one by one, each with why, among the problem
     { name: '异常记录 2', selected: false },
   ])
   // Only a count up top: no summary of reasons.
-  expect(el.textContent).toContain('跳过2 项')
+  expect(el.textContent).toContain('跳过2项')
   expect(el.textContent).not.toContain('已移出收藏库')
   ;[...el.querySelectorAll<HTMLElement>('[role=tab]')].at(-1)!.click()
   await vi.waitFor(() => expect(el.textContent).toContain('status/3'))
@@ -739,12 +737,12 @@ it('offers a retry next to each failed or incomplete part, and all at once', asy
       .click()
   await vi.waitFor(() => expect(el.querySelector('[role=tab]')).not.toBeNull())
   tab('账号')
-  await vi.waitFor(() => expect(el.textContent).toContain('帖子第 2 页'))
+  await vi.waitFor(() => expect(el.textContent).toContain('帖子第2页'))
   expect(buttons()).toEqual(
     expect.arrayContaining([
       '全部重试',
       '重试 @cat 资料',
-      '重试 @cat 帖子第 2 页',
+      '重试 @cat 帖子第2页',
       '重试 @cat 帖子',
       '重试 @cat 关注名单',
     ]),
@@ -758,8 +756,8 @@ it('offers a retry next to each failed or incomplete part, and all at once', asy
   expect(buttons()).not.toContain('重试 x.com/fixture/status/gone')
 
   tab('账号')
-  await vi.waitFor(() => expect(el.textContent).toContain('帖子第 2 页'))
-  el.querySelector<HTMLElement>('[aria-label="重试 @cat 帖子第 2 页"]')!.click()
+  await vi.waitFor(() => expect(el.textContent).toContain('帖子第2页'))
+  el.querySelector<HTMLElement>('[aria-label="重试 @cat 帖子第2页"]')!.click()
   await vi.waitFor(() => expect(sent).toEqual([{ id: 'page-2' }]))
   // Retries under way show as running, with nothing left to retry.
   await vi.waitFor(() => expect(buttons()).not.toContain('全部重试'))

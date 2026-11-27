@@ -229,10 +229,10 @@ const compareRoute = computed(() => ({
               />
             </div>
             <AppLink v-if="others.length" class="compare-go" :to="compareRoute">
-              对比 {{ others.length + 1 }} 个账号
+              对比{{ others.length + 1 }}个账号
             </AppLink>
             <button v-else type="button" class="compare-go" disabled>
-              对比 1 个账号
+              对比1个账号
             </button>
             <button
               type="button"
@@ -287,7 +287,7 @@ const compareRoute = computed(() => ({
                 </span>
                 <span class="name" :lang="view.lang">{{ view.label }}</span>
                 <span v-if="view.node.followers !== undefined" class="followers"
-                  >粉丝 {{ formatCount(view.node.followers) }}</span
+                  >粉丝{{ formatCount(view.node.followers) }}</span
                 >
               </button>
             </li>

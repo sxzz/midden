@@ -16,13 +16,11 @@ const at = (ms: number) => new Date(NOW + ms).toISOString()
 
 describe('API 令牌', () => {
   it('says how long a token has left, in its two largest units', () => {
-    expect(remaining(at(6 * DAY + 3 * HOUR + 5 * MINUTE), NOW)).toBe(
-      '6 天 3 小时',
-    )
-    expect(remaining(at(2 * DAY + 30 * MINUTE), NOW)).toBe('2 天')
-    expect(remaining(at(5 * HOUR + 20 * MINUTE), NOW)).toBe('5 小时 20 分钟')
-    expect(remaining(at(45 * MINUTE + 10_000), NOW)).toBe('45 分钟')
-    expect(remaining(at(20_000), NOW)).toBe('不到 1 分钟')
+    expect(remaining(at(6 * DAY + 3 * HOUR + 5 * MINUTE), NOW)).toBe('6天3小时')
+    expect(remaining(at(2 * DAY + 30 * MINUTE), NOW)).toBe('2天')
+    expect(remaining(at(5 * HOUR + 20 * MINUTE), NOW)).toBe('5小时20分钟')
+    expect(remaining(at(45 * MINUTE + 10_000), NOW)).toBe('45分钟')
+    expect(remaining(at(20_000), NOW)).toBe('不到1分钟')
     expect(remaining(at(0), NOW)).toBe('已过期')
     expect(remaining(at(-DAY), NOW)).toBe('已过期')
   })
@@ -30,7 +28,7 @@ describe('API 令牌', () => {
   it('writes the expiry in local time with what is left', () => {
     expect(expiryText({ expires_at: null }, NOW)).toBe('永不过期')
     expect(expiryText({ expires_at: at(DAY) }, NOW)).toMatch(
-      /^2026年11月27日 .+ 过期 · 剩 1 天$/,
+      /^2026年11月27日 .+ 过期 · 剩1天$/,
     )
     expect(expiryText({ expires_at: at(-HOUR) }, NOW)).toMatch(/ 已过期$/)
   })

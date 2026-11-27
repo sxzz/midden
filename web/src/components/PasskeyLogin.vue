@@ -23,7 +23,7 @@ async function signIn() {
 <template>
   <section class="login" aria-label="登录">
     <h1>Midden</h1>
-    <ListSection footnote="首次使用请在 Telegram 中发送 /passkey">
+    <ListSection footnote="首次使用请在Telegram中发送 /passkey">
       <button
         type="button"
         class="action strong"

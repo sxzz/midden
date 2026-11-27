@@ -165,7 +165,7 @@ const totalText = computed(() =>
     : `${props.total.toLocaleString('zh-CN')} ${listsProfiles(props.query) ? '个账号' : '条'}`,
 )
 const storage = computed(() =>
-  props.usage ? `已用 ${storageSize(props.usage.used_bytes)}` : '',
+  props.usage ? `已用${storageSize(props.usage.used_bytes)}` : '',
 )
 </script>
 
@@ -278,7 +278,7 @@ const storage = computed(() =>
     v-if="batch"
     :open="deleting"
     :ids="selected"
-    :title="`删除 ${selected.length} 项收藏？`"
+    :title="`删除${selected.length}项收藏？`"
     @deleted="deleted"
     @cancel="deleting = false"
   />

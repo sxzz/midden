@@ -60,7 +60,7 @@ const names = (of: number[]) =>
       class="all"
       @click="all = true"
     >
-      显示全部 {{ rows.length }} 种组合
+      显示全部{{ rows.length }}种组合
     </button>
   </section>
 </template>

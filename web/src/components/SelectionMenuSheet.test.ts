@@ -66,7 +66,7 @@ it('compares the selected accounts that have relation data, saying how many are 
     `/collections/perspectives?${keys.map((k) => `rel_of=${encodeURIComponent(k)}`).join('&')}`,
   )
   expect(button(el, '比较关系')!.textContent).toContain(
-    '2 个账号，1 个没有关系数据',
+    '2个账号，1个没有关系数据',
   )
   // A link to the comparison, which closes the sheet as it navigates.
   const link = button(el, '比较关系')!

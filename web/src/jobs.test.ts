@@ -52,7 +52,7 @@ describe('后台任务', () => {
           },
         }),
       ).label,
-    ).toBe('运行中 · 已降低并发（25%）：等待数据库写锁 820 ms')
+    ).toBe('运行中 · 已降低并发（25%）：等待数据库写锁820 ms')
     expect(queueStatus(state()).label).toBe('运行中')
     expect(
       queueStatus(state({ worker: { ...worker, idle: true } })).label,
@@ -61,13 +61,13 @@ describe('后台任务', () => {
 
   test('each reason for slowing down has words', () => {
     expect(throttleCause({ signal: 'web_lag', value: 310 })).toBe(
-      '网页进程停顿 310 ms',
+      '网页进程停顿310 ms',
     )
     expect(throttleCause({ signal: 'web_slow', value: 2 })).toBe(
-      '网页进程主线程上有 2 个慢请求',
+      '网页进程主线程上有2个慢请求',
     )
     expect(throttleCause({ signal: 'write_duty', value: 70 })).toBe(
-      '后台写入占用写锁 70% 的时间',
+      '后台写入占用写锁70%的时间',
     )
   })
 
@@ -87,7 +87,7 @@ describe('后台任务', () => {
       waiting: 2,
       ...over,
     })
-    expect(rateLimitName(limit({}))).toBe('FxTwitter 公共接口')
+    expect(rateLimitName(limit({}))).toBe('FxTwitter公共接口')
     expect(
       rateLimitName(
         limit({ platform: 'x', account: '@me', endpoint: 'UserTweets' }),
@@ -97,13 +97,13 @@ describe('后台任务', () => {
       rateLimitName(limit({ platform: 'instagram', account: '@me' })),
     ).toBe('Instagram @me')
     expect(rateLimitEnd(limit({}), new Date(2026, 10, 26, 15, 18))).toBe(
-      '15:30 恢复，还有 12 分钟',
+      '15:30 恢复，还有12分钟',
     )
     expect(rateLimitEnd(limit({}), new Date(2026, 10, 26, 15, 29, 30))).toBe(
-      '15:30 恢复，不到 1 分钟',
+      '15:30 恢复，不到1分钟',
     )
     expect(rateLimitEnd(limit({}), new Date(2026, 10, 25, 14, 0))).toBe(
-      '11月26日 15:30 恢复，还有 25 小时 30 分钟',
+      '11月26日 15:30 恢复，还有25小时30分钟',
     )
   })
 
@@ -122,15 +122,15 @@ describe('后台任务', () => {
       },
     }
     expect(webLatency(web)).toEqual({
-      requests: '30 个请求 · 中位 3 ms · p95 20 ms · 最长 80 ms',
-      lag: '事件循环最长停顿 40 ms',
+      requests: '30个请求 · 中位3 ms · p95 20 ms · 最长80 ms',
+      lag: '事件循环最长停顿40 ms',
     })
     expect(
       webLatency({
         ...web,
         requests: { ...web.requests, max_ms: 7700, slow_thread: 3 },
       }).slow,
-    ).toBe('超过 500 ms：主线程 0 个，读线程 3 个')
+    ).toBe('超过500 ms：主线程0个，读线程3个')
   })
 })
 
@@ -148,7 +148,7 @@ describe('慢查询', () => {
   test('when, where, how long, and the query it ran for', () => {
     expect(slowQueryText(query, new Date(2026, 10, 27, 21))).toEqual({
       title: '20:15:03 · GET /agent/v1/posts',
-      figures: '1,234 ms · 21 行',
+      figures: '1,234 ms · 21行',
       query: '{"q":"#猫 lang:ja"}',
     })
     // Another day says which; without a query, the SQL.

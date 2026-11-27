@@ -222,7 +222,7 @@ describe('管理员面板', () => {
     )!
     button.click()
     await settle()
-    expect(el.textContent).toContain('3 条收藏、2 条采集记录，无法恢复。')
+    expect(el.textContent).toContain('3条收藏、2条采集记录，无法恢复。')
     const input = el.querySelector<HTMLInputElement>('dialog[open] input')!
     input.value = '删除全部'
     input.dispatchEvent(new Event('input'))
@@ -245,7 +245,7 @@ describe('管理员面板', () => {
     api(false)
     const el = mount(AdminView, { entry: 'backup' })
     await settle()
-    expect(el.textContent).toContain('没有配置 Litestream。')
+    expect(el.textContent).toContain('没有配置Litestream。')
   })
 
   it('says when the last heartbeat arrived', async () => {
@@ -258,8 +258,8 @@ describe('管理员面板', () => {
     const el = mount(AdminView, { entry: 'backup' })
     await settle()
     expect(titles(el)).toEqual([])
-    expect(el.textContent).toContain('上次心跳 3 分钟前')
-    expect(el.textContent).toContain('20 分钟')
+    expect(el.textContent).toContain('上次心跳 3分钟前')
+    expect(el.textContent).toContain('20分钟')
   })
 
   it('says how long there has been no heartbeat', async () => {
@@ -271,7 +271,7 @@ describe('管理员面板', () => {
     })
     const el = mount(AdminView, { entry: 'backup' })
     await settle()
-    expect(el.textContent).toContain('超过 20 分钟没有心跳')
+    expect(el.textContent).toContain('超过20分钟没有心跳')
   })
 
   it('edits the heartbeat timeout', async () => {
@@ -298,7 +298,7 @@ describe('管理员面板', () => {
     await settle()
     expect(
       el.querySelector('dialog[open] [role=alert]')?.textContent,
-    ).toContain('1 到 1440')
+    ).toContain('1到1440')
     expect(calls.mock.calls.some(([p]) => p === '/instance/litestream')).toBe(
       false,
     )
@@ -310,7 +310,7 @@ describe('管理员面板', () => {
     await settle()
     const put = calls.mock.calls.find(([p]) => p === '/instance/litestream')!
     expect(JSON.parse(put[1].body!)).toEqual({ stale_after_minutes: 5 })
-    expect(el.textContent).toContain('5 分钟')
+    expect(el.textContent).toContain('5分钟')
     expect(el.querySelector('dialog[open]')).toBeNull()
   })
 })

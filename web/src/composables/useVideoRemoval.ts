@@ -33,7 +33,7 @@ export function useVideoRemoval(id: () => string | undefined) {
     if (!was || !found || found.id !== was.id) return
     toast(
       found.state === 'complete'
-        ? `已删除 ${found.removed} 个视频`
+        ? `已删除${found.removed}个视频`
         : `删除视频失败：${found.error ?? ''}`,
     )
     mediaRemovals.value++

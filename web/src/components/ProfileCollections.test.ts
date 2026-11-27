@@ -60,7 +60,7 @@ it('shows related posts using the library and the total across all pages', async
   app.mount(el)
   unmount = () => app.unmount()
   await vi.waitFor(() => expect(el.textContent).toContain('关联帖子'))
-  expect(el.textContent).toContain('帖子占用总量 4.0 KB')
+  expect(el.textContent).toContain('帖子占用总量4.0 KB')
   expect(
     request.mock.calls.filter(([path]) =>
       String(path).startsWith('/collections?'),

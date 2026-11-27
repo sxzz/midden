@@ -118,9 +118,9 @@ async function confirm() {
     :title="!bare"
     :rows="2"
     hint
-    label="正在读取 API 令牌"
+    label="正在读取API令牌"
   />
-  <ListSection v-if="items || error" :title="bare ? undefined : 'API 令牌'">
+  <ListSection v-if="items || error" :title="bare ? undefined : 'API令牌'">
     <p v-if="error" class="banner" role="alert">{{ error }}</p>
     <button
       v-for="t in items"
@@ -142,7 +142,7 @@ async function confirm() {
       >
       <span class="usage">
         <UsageBars :days="t.usage.days" :width="60" :height="18" />
-        <small>30 天 {{ t.usage.total }} 次</small>
+        <small>30天{{ t.usage.total }}次</small>
       </span>
     </button>
     <ListButton
@@ -153,7 +153,7 @@ async function confirm() {
     />
   </ListSection>
   <p v-if="items" class="doc">
-    给 AI agent 的说明：<AppLink :href="doc">{{ doc }}</AppLink>
+    给AI agent的说明：<AppLink :href="doc">{{ doc }}</AppLink>
   </p>
   <TokenFormSheet
     :open="form"

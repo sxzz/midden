@@ -221,7 +221,7 @@ function setUnit(event: Event) {
       <div class="row every" role="group" aria-label="频率">
         <span
           >频率<small class="hint"
-            >最短 5 分钟；上一次还没结束时跳过这一次</small
+            >最短5分钟；上一次还没结束时跳过这一次</small
           ></span
         >
         <span class="interval"

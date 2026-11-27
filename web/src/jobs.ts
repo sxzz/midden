@@ -5,7 +5,7 @@ import type { QueueState, SlowQuery } from './api'
 const TYPE_LABELS: Record<string, string> = {
   capture: '抓取',
   download: '下载媒体',
-  upload: '上传媒体到 R2',
+  upload: '上传媒体到R2',
   'raw-upload': '原始响应移到存储桶',
   related: '展开时间线',
   relations: '关系网名单',
@@ -28,13 +28,13 @@ type Cause = NonNullable<NonNullable<QueueState['worker']>['cause']>
 export function throttleCause(cause: Cause): string {
   switch (cause.signal) {
     case 'web_lag':
-      return `网页进程停顿 ${cause.value} ms`
+      return `网页进程停顿${cause.value} ms`
     case 'web_slow':
-      return `网页进程主线程上有 ${cause.value} 个慢请求`
+      return `网页进程主线程上有${cause.value}个慢请求`
     case 'lock_wait':
-      return `等待数据库写锁 ${cause.value} ms`
+      return `等待数据库写锁${cause.value} ms`
     case 'write_duty':
-      return `后台写入占用写锁 ${cause.value}% 的时间`
+      return `后台写入占用写锁${cause.value}%的时间`
   }
 }
 
@@ -59,7 +59,7 @@ export function queueStatus(state: QueueState): QueueStatusText {
 export type RateLimit = QueueState['rate_limits'][number]
 
 const PLATFORMS: Record<string, string> = {
-  fxtwitter: 'FxTwitter 公共接口',
+  fxtwitter: 'FxTwitter公共接口',
   x: 'X',
   instagram: 'Instagram',
 }
@@ -81,12 +81,12 @@ export function rateLimitEnd(limit: RateLimit, now = new Date()): string {
       : `${until.getMonth() + 1}月${until.getDate()}日 ${time}`
   const minutes = Math.ceil((+until - +now) / 60_000)
   const hours = Math.floor(minutes / 60)
-  if (minutes <= 1) return `${at} 恢复，不到 1 分钟`
+  if (minutes <= 1) return `${at} 恢复，不到1分钟`
   const left =
     minutes < 60
-      ? `${minutes} 分钟`
-      : `${hours} 小时${minutes % 60 ? ` ${minutes % 60} 分钟` : ''}`
-  return `${at} 恢复，还有 ${left}`
+      ? `${minutes}分钟`
+      : `${hours}小时${minutes % 60 ? `${minutes % 60}分钟` : ''}`
+  return `${at} 恢复，还有${left}`
 }
 
 /**
@@ -98,12 +98,12 @@ export function webLatency(web: NonNullable<QueueState['web']>) {
   const { requests } = web
   return {
     requests: requests.count
-      ? `${requests.count} 个请求 · 中位 ${requests.p50_ms} ms · p95 ${requests.p95_ms} ms · 最长 ${requests.max_ms} ms`
+      ? `${requests.count}个请求 · 中位${requests.p50_ms} ms · p95 ${requests.p95_ms} ms · 最长${requests.max_ms} ms`
       : '没有请求',
-    lag: `事件循环最长停顿 ${web.lag_max_ms} ms`,
+    lag: `事件循环最长停顿${web.lag_max_ms} ms`,
     ...(requests.slow || requests.slow_thread
       ? {
-          slow: `超过 500 ms：主线程 ${requests.slow} 个，读线程 ${requests.slow_thread} 个`,
+          slow: `超过500 ms：主线程${requests.slow}个，读线程${requests.slow_thread}个`,
         }
       : {}),
   }
@@ -124,7 +124,7 @@ export function slowQueryText(query: SlowQuery, now = new Date()) {
       : `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${time}`
   return {
     title: `${when} · ${query.route}`,
-    figures: `${query.ms.toLocaleString('en-US')} ms · ${query.rows.toLocaleString('en-US')} 行`,
+    figures: `${query.ms.toLocaleString('en-US')} ms · ${query.rows.toLocaleString('en-US')}行`,
     query: query.query || query.sql,
   }
 }

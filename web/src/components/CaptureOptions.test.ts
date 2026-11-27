@@ -54,11 +54,11 @@ describe('on the link form', () => {
     const { el, model, toggle, choose } = mount({ collapsible: true })
     const summary = () => el.querySelector('.summary')?.textContent
     expect(el.querySelector('details')).not.toBeNull()
-    expect(summary()).toBe('最新 100 条')
+    expect(summary()).toBe('最新100条')
     await toggle('仅采集含图片或视频的帖子')
     await choose('发帖日期', '7')
     await toggle('抓关系网')
-    expect(summary()).toBe('仅媒体 · 最近 7 天 · 抓关系网')
+    expect(summary()).toBe('仅媒体 · 最近7天 · 抓关系网')
     expect(model.value).toEqual({
       ...defaultOptions(),
       media_only: true,
@@ -67,7 +67,7 @@ describe('on the link form', () => {
     })
     await choose('帖子范围', 'until_existing')
     expect(model.value).not.toHaveProperty('count')
-    expect(summary()).toBe('抓到已有数据为止 · 仅媒体 · 最近 7 天 · 抓关系网')
+    expect(summary()).toBe('抓到已有数据为止 · 仅媒体 · 最近7天 · 抓关系网')
   })
 
   it('a number for the newest and at most; all needs none', async () => {
@@ -79,7 +79,7 @@ describe('on the link form', () => {
     count()!.dispatchEvent(new Event('change'))
     await nextTick()
     expect(model.value).toMatchObject({ posts: 'max', count: 250 })
-    expect(el.querySelector('.summary')?.textContent).toBe('最多 250 条')
+    expect(el.querySelector('.summary')?.textContent).toBe('最多250条')
     await choose('帖子范围', 'all')
     expect(count()).toBeUndefined()
     expect(model.value.posts).toBe('max')
@@ -155,6 +155,6 @@ describe('summary', () => {
         { ...defaultOptions(), include_shared: false, count: 20 },
         all,
       ),
-    ).toBe('最新 20 条 · 不含转帖')
+    ).toBe('最新20条 · 不含转帖')
   })
 })

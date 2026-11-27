@@ -105,7 +105,7 @@ const costMonth = computed(() => {
   const c = cost.value
   if (!c) return ''
   const [year, month] = c.month.split('-').map(Number)
-  return `${year}年${month}月，${c.days} 天的数据，按 R2 标准存储的价格。`
+  return `${year}年${month}月，${c.days}天的数据，按R2标准存储的价格。`
 })
 
 const range = shallowRef<HistoryRange>('30')
@@ -134,7 +134,7 @@ const ALERTS: Record<
   }
 > = {
   cost_usd: {
-    label: '本月 R2 费用超过',
+    label: '本月R2费用超过',
     format: (v) => `$${v}`,
     min: 0.01,
     max: 10_000,
@@ -142,7 +142,7 @@ const ALERTS: Record<
     r2: true,
   },
   ops_percent: {
-    label: 'R2 操作次数超过免费额度的',
+    label: 'R2操作次数超过免费额度的',
     format: (v) => `${v}%`,
     min: 1,
     max: 100,
@@ -189,7 +189,7 @@ async function save(text: string) {
     value > max ||
     (whole && !Number.isInteger(value))
   ) {
-    editError.value = `${whole ? '整数' : '数值'}，${min} 到 ${formatCount(max)}`
+    editError.value = `${whole ? '整数' : '数值'}，${min}到${formatCount(max)}`
     return
   }
   busy.value = true
@@ -218,7 +218,7 @@ async function save(text: string) {
       <ListSection
         v-if="r2"
         title="R2"
-        :footnote="`Cloudflare 分析数据，${ago(r2.fetched_at)}读取。`"
+        :footnote="`Cloudflare分析数据，${ago(r2.fetched_at)}读取。`"
       >
         <template v-for="bucket in r2.buckets" :key="bucket.name">
           <p class="bucket">{{ bucket.name }}</p>
@@ -231,11 +231,11 @@ async function save(text: string) {
             <span class="value">{{ formatCount(bucket.objects) }}</span>
           </div>
           <div class="fact">
-            <span class="name">本月 Class A 操作</span>
+            <span class="name">本月Class A操作</span>
             <span class="value">{{ times(bucket.class_a) }}</span>
           </div>
           <div class="fact">
-            <span class="name">本月 Class B 操作</span>
+            <span class="name">本月Class B操作</span>
             <span class="value">{{ times(bucket.class_b) }}</span>
           </div>
         </template>
@@ -255,7 +255,7 @@ async function save(text: string) {
         </div>
         <div class="fact">
           <span class="name"
-            >Class A 操作<small class="hint"
+            >Class A操作<small class="hint"
               >{{ times(cost.class_a.used) }}，免费额度
               {{ tenThousands(cost.class_a.free) }}，已用
               {{ share(cost.class_a.used, cost.class_a.free) }}</small
@@ -265,7 +265,7 @@ async function save(text: string) {
         </div>
         <div class="fact">
           <span class="name"
-            >Class B 操作<small class="hint"
+            >Class B操作<small class="hint"
               >{{ times(cost.class_b.used) }}，免费额度
               {{ tenThousands(cost.class_b.free) }}，已用
               {{ share(cost.class_b.used, cost.class_b.free) }}</small
@@ -283,7 +283,7 @@ async function save(text: string) {
         <div class="fact">
           <span class="name"
             >可用磁盘<small class="hint"
-              >共 {{ storageSize(local.disk.total_bytes) }}</small
+              >共{{ storageSize(local.disk.total_bytes) }}</small
             ></span
           >
           <span class="value">{{ storageSize(local.disk.free_bytes) }}</span>
@@ -291,7 +291,7 @@ async function save(text: string) {
         <div class="fact">
           <span class="name"
             >数据库文件<small class="hint"
-              >空闲页 {{ formatCount(local.database.freelist_pages) }}（{{
+              >空闲页{{ formatCount(local.database.freelist_pages) }}（{{
                 storageSize(
                   local.database.freelist_pages * local.database.page_size,
                 )
@@ -303,9 +303,9 @@ async function save(text: string) {
         <div class="fact">
           <span class="name"
             >缩略图<small class="hint"
-              >{{ formatCount(local.thumbnails.count) }} 个{{
+              >{{ formatCount(local.thumbnails.count) }}个{{
                 local.thumbnails.local_count < local.thumbnails.count
-                  ? `，本机 ${formatCount(local.thumbnails.local_count)} 个（${storageSize(local.thumbnails.local_bytes)}），其余在 R2`
+                  ? `，本机${formatCount(local.thumbnails.local_count)}个（${storageSize(local.thumbnails.local_bytes)}），其余在R2`
                   : ''
               }}</small
             ></span
@@ -315,7 +315,7 @@ async function save(text: string) {
         <div v-if="composition" class="fact">
           <span class="name"
             >媒体目录<small class="hint"
-              >{{ formatCount(composition.media.files) }} 个文件，{{
+              >{{ formatCount(composition.media.files) }}个文件，{{
                 date(composition.computed_at)
               }}
               统计</small
@@ -326,7 +326,7 @@ async function save(text: string) {
         <div class="fact">
           <span class="name"
             >部署前的数据库备份<small class="hint"
-              >{{ local.deploy_backups.files }} 个文件</small
+              >{{ local.deploy_backups.files }}个文件</small
             ></span
           >
           <span class="value">{{
@@ -343,7 +343,7 @@ async function save(text: string) {
       <ListSection
         v-if="composition"
         title="数据库"
-        :footnote="`统计于${ago(composition.computed_at)}（${date(composition.computed_at)}），用时 ${composition.seconds} 秒。`"
+        :footnote="`统计于${ago(composition.computed_at)}（${date(composition.computed_at)}），用时${composition.seconds}秒。`"
       >
         <div v-for="item in composition.items" :key="item.name" class="fact">
           <span class="name"
@@ -360,7 +360,7 @@ async function save(text: string) {
           >
         </div>
         <div v-if="composition.rest.count" class="fact">
-          <span class="name">其余 {{ composition.rest.count }} 个</span>
+          <span class="name">其余{{ composition.rest.count }}个</span>
           <span class="value">{{ storageSize(composition.rest.bytes) }}</span>
         </div>
         <div class="fact total">
@@ -397,7 +397,7 @@ async function save(text: string) {
 
       <ListSection
         title="提醒阈值"
-        footnote="越过阈值和回落时，Bot 各发一条消息。"
+        footnote="越过阈值和回落时，Bot各发一条消息。"
       >
         <ListButton
           v-for="name in alertRows"

@@ -24,7 +24,7 @@ const bars = computed(() => {
       y: props.height - h,
       w,
       h,
-      label: `${dayLabel(d.day)} ${d.count} 次`,
+      label: `${dayLabel(d.day)} ${d.count}次`,
     }
   })
 })
@@ -39,7 +39,7 @@ const total = computed(() => props.days.reduce((n, d) => n + d.count, 0))
     :viewBox="`0 0 ${width} ${height}`"
     preserveAspectRatio="none"
     role="img"
-    :aria-label="`最近 ${days.length} 天 ${total} 次`"
+    :aria-label="`最近${days.length}天${total}次`"
   >
     <rect
       v-for="b in bars"

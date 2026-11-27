@@ -46,8 +46,8 @@ const shared = computed(() => {
       name: share.name ?? '',
       facts: [
         '收藏夹',
-        share.posts && `${share.posts.toLocaleString('zh-CN')} 条帖子`,
-        share.profiles && `${share.profiles.toLocaleString('zh-CN')} 个账号`,
+        share.posts && `${share.posts.toLocaleString('zh-CN')}条帖子`,
+        share.profiles && `${share.profiles.toLocaleString('zh-CN')}个账号`,
       ],
     }
   const id = share.collection_id ?? ''

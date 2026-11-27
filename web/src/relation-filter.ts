@@ -79,7 +79,7 @@ export function relationChip(
     if (rel === 'followers') return `关注 ${name} 的`
     return `${name} 互关`
   }
-  const who = `${list.join('、')} 中至少 ${min} 人`
+  const who = `${list.join('、')} 中至少${min}人`
   if (rel === 'following') return `${who}关注的`
   if (rel === 'followers') return `关注 ${who}的`
   return `与 ${who}互关`

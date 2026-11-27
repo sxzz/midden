@@ -21,9 +21,9 @@ export interface TokenForm {
 
 /** Quick picks that fill the expiry picker: from now. */
 export const expiryPresets = [
-  { label: '1 小时', ms: HOUR },
-  { label: '1 天', ms: DAY },
-  { label: '30 天', ms: 30 * DAY },
+  { label: '1小时', ms: HOUR },
+  { label: '1天', ms: DAY },
+  { label: '30天', ms: 30 * DAY },
 ] as const
 
 /** What a new token's picker starts at. */
@@ -33,13 +33,13 @@ export const DEFAULT_EXPIRY_MS = 30 * DAY
 export function remaining(expiresAt: string, now = Date.now()): string {
   const left = Date.parse(expiresAt) - now
   if (!(left > 0)) return '已过期'
-  if (left < MINUTE) return '不到 1 分钟'
+  if (left < MINUTE) return '不到1分钟'
   const days = Math.floor(left / DAY)
   const hours = Math.floor((left % DAY) / HOUR)
-  if (days) return hours ? `${days} 天 ${hours} 小时` : `${days} 天`
+  if (days) return hours ? `${days}天${hours}小时` : `${days}天`
   const minutes = Math.floor((left % HOUR) / MINUTE)
-  if (hours) return minutes ? `${hours} 小时 ${minutes} 分钟` : `${hours} 小时`
-  return `${minutes} 分钟`
+  if (hours) return minutes ? `${hours}小时${minutes}分钟` : `${hours}小时`
+  return `${minutes}分钟`
 }
 
 /** The expiry in local time and what is left: 12月3日 14:00 过期 · 剩 7 天. */
@@ -51,7 +51,7 @@ export function expiryText(
   const left = remaining(token.expires_at, now)
   return left === '已过期'
     ? `${date(token.expires_at)} 已过期`
-    : `${date(token.expires_at)} 过期 · 剩 ${left}`
+    : `${date(token.expires_at)} 过期 · 剩${left}`
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')

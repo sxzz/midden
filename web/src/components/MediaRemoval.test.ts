@@ -77,13 +77,13 @@ describe('the effect a removal states', () => {
     const MB = 1024 * 1024
     expect(
       removalEffectText({ media: 2, freed_bytes: 120 * MB, shared: 0 }),
-    ).toBe('可释放 120.0 MB')
+    ).toBe('可释放120.0 MB')
     expect(removalEffectText({ media: 1, freed_bytes: 0, shared: 1 })).toBe(
       '其他收藏仍在使用，不会释放空间',
     )
     expect(
       removalEffectText({ media: 3, freed_bytes: 2 * MB, shared: 1 }),
-    ).toBe('可释放 2.0 MB；其中 1 个媒体其他收藏仍在使用，不会释放空间')
+    ).toBe('可释放2.0 MB；其中1个媒体其他收藏仍在使用，不会释放空间')
     expect(removalEffectText({ media: 0, freed_bytes: 0, shared: 0 })).toBe(
       '没有可删除的媒体',
     )
@@ -279,7 +279,7 @@ describe('the post detail', () => {
       const found = [...document.querySelectorAll('dialog')].find(
         (d) => d.open && d.textContent?.includes('删除此帖所有媒体？'),
       )
-      expect(found?.textContent).toContain('可释放 3.0 MB')
+      expect(found?.textContent).toContain('可释放3.0 MB')
       return found!
     })
     buttons(sheet, '删除')[0]!.click()
@@ -508,7 +508,7 @@ describe('the profile detail', () => {
         (d) => d.open && d.textContent?.includes('删除所有视频？'),
       )
       expect(found?.textContent).toContain(
-        '将删除 5 条帖子的 7 个视频，可释放 3.0 MB（保留 3 条帖子的视频：单独收藏 2 条、已整理 1 条）',
+        '将删除5条帖子的7个视频，可释放3.0 MB（保留3条帖子的视频：单独收藏2条、已整理1条）',
       )
       return found!
     })
@@ -536,7 +536,7 @@ describe('the profile detail', () => {
       () => expect(buttons(el, '删除所有视频')).toHaveLength(1),
       { timeout: 3000 },
     )
-    expect(toastState.value?.text).toBe('已删除 7 个视频')
+    expect(toastState.value?.text).toBe('已删除7个视频')
     // The pages listing the media load again.
     expect(mediaRemovals.value).toBe(before + 1)
     expect(sent).toEqual([
@@ -562,12 +562,12 @@ describe('the batch bar', () => {
     el.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!.click()
     await nextTick()
     const menu = el.querySelector<HTMLDialogElement>('dialog[open]')!
-    expect(menu.textContent).toContain('已选 2 项')
+    expect(menu.textContent).toContain('已选2项')
     buttons(menu, '删除媒体')[0]!.click()
     await nextTick()
     expect(menu.open).toBe(false)
     const sheet = [...document.querySelectorAll('dialog')].find((d) =>
-      d.textContent?.includes('删除 2 项的媒体？'),
+      d.textContent?.includes('删除2项的媒体？'),
     )!
     await vi.waitFor(() =>
       expect(sheet.textContent).toContain('其他收藏仍在使用，不会释放空间'),

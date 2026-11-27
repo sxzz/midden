@@ -47,7 +47,7 @@ test('a watch says what, how often and with what', () => {
   expect(
     watchTitle(watch({ target: 'folder', name: '猫', url: undefined })),
   ).toBe('收藏夹「猫」')
-  expect(watchSummary(watch())).toBe('每天 · 最新 100 条')
+  expect(watchSummary(watch())).toBe('每天 · 最新100条')
   expect(
     watchSummary(
       watch({
@@ -59,7 +59,7 @@ test('a watch says what, how often and with what', () => {
         },
       }),
     ),
-  ).toBe('每 6 小时 · 抓到已有数据为止 · 抓关系网')
+  ).toBe('每6小时 · 抓到已有数据为止 · 抓关系网')
   expect(
     watchSummary(
       watch({
@@ -90,16 +90,16 @@ test('an interval reads as said: one of a unit, or a number of them', () => {
     ).map(([count, unit]) => everyText({ count, unit })),
   ).toEqual([
     '每小时',
-    '每 6 小时',
-    '每 30 分钟',
+    '每6小时',
+    '每30分钟',
     '每天',
-    '每 3 天',
+    '每3天',
     '每周',
-    '每 2 周',
+    '每2周',
     '每月',
-    '每 3 个月',
+    '每3个月',
     '每年',
-    '每 2 年',
+    '每2年',
   ])
 })
 

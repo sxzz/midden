@@ -280,7 +280,7 @@ it('updates the open folder from its menu, then links to the progress', async ()
   button(el, '更新收藏夹').click()
   await vi.waitFor(() =>
     expect(el.querySelector('dialog[open] .sheet-title')?.textContent).toBe(
-      '更新 3 条帖子',
+      '更新 3条帖子',
     ),
   )
   await vi.waitFor(() => expect(button(el, '开始更新').disabled).toBe(false))
@@ -466,8 +466,8 @@ it('saves a quick save-date range as a relative one', async () => {
   expect([...range.options].map((o) => o.textContent?.trim())).toEqual([
     '全部',
     '今天',
-    '最近 7 天',
-    '最近 30 天',
+    '最近7天',
+    '最近30天',
     '自定义',
   ])
   range.value = '7d'
@@ -479,7 +479,7 @@ it('saves a quick save-date range as a relative one', async () => {
   expect(listQueries().at(-1)?.has('saved_from')).toBe(false)
   expect(router.currentRoute.value.query.saved_within).toBe('7d')
   await vi.waitFor(() =>
-    expect(el.querySelector('.filter-summary')?.textContent).toBe('最近 7 天'),
+    expect(el.querySelector('.filter-summary')?.textContent).toBe('最近7天'),
   )
 
   button(el, '存为收藏夹').click()

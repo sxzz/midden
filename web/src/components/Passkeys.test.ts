@@ -77,7 +77,7 @@ describe('login page', () => {
     )
     const done = vi.fn()
     const el = mount(PasskeyLogin, { onDone: done })
-    expect(el.textContent).toContain('首次使用请在 Telegram 中发送 /passkey')
+    expect(el.textContent).toContain('首次使用请在Telegram中发送 /passkey')
     button(el, '使用通行密钥登录').click()
     await vi.waitFor(() => expect(done).toHaveBeenCalled())
     expect(browser.startAuthentication).toHaveBeenCalledWith({
@@ -250,7 +250,7 @@ describe('passkey management', () => {
     button(el, '删除 Mac Safari · midden.test').click()
     await vi.waitFor(() => expect(sheet()?.textContent).toContain('/passkey'))
     expect(sheet()!.textContent).toContain(
-      '可以在 Telegram 中发送 /passkey 添加新的通行密钥。',
+      '可以在Telegram中发送 /passkey 添加新的通行密钥。',
     )
     button(el, '删除通行密钥').click()
     await vi.waitFor(() =>
@@ -332,10 +332,10 @@ describe('domains', () => {
     )
     const rows = [...el.querySelectorAll('.origin')]
     expect(rows[0]!.textContent).toContain('midden.test')
-    expect(rows[0]!.textContent).toContain('Mini App 地址')
+    expect(rows[0]!.textContent).toContain('Mini App地址')
     expect(rows[0]!.querySelector('button')).toBeNull()
-    expect(rows[1]!.textContent).toContain('2 个通行密钥')
-    expect(() => button(el, '删除 archive.example')).not.toThrow()
+    expect(rows[1]!.textContent).toContain('2个通行密钥')
+    expect(() => button(el, '删除archive.example')).not.toThrow()
   })
 
   it('adds a domain, showing what the server refuses', async () => {
@@ -376,10 +376,10 @@ describe('domains', () => {
     await vi.waitFor(() =>
       expect(el.querySelectorAll('.origin')).toHaveLength(2),
     )
-    button(el, '删除 archive.example').click()
+    button(el, '删除archive.example').click()
     const sheet = () => el.querySelector('dialog[open]')
     await vi.waitFor(() => expect(sheet()).not.toBeNull())
-    expect(sheet()!.textContent).toContain('将同时删除此域名的 2 个通行密钥')
+    expect(sheet()!.textContent).toContain('将同时删除此域名的2个通行密钥')
     expect(api.mock.calls.some(([, r]) => r.method === 'DELETE')).toBe(false)
     button(el, '删除域名').click()
     await vi.waitFor(() =>

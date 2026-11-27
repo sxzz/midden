@@ -213,7 +213,7 @@ export type CaptureOptions = NonNullable<
 export function errorText(e: unknown) {
   if (e instanceof APIError && e.status === 401)
     return host()?.initData
-      ? '会话已失效，请从 Telegram 重新打开。'
+      ? '会话已失效，请从Telegram重新打开。'
       : '登录已失效，请刷新页面重新登录。'
   return e instanceof Error ? e.message : '加载失败。'
 }

@@ -124,7 +124,7 @@ function listText(item: ListProgress): string {
     case 'running':
       return `${item.fetched}${total}${item.rate_limited ? '，限流中' : ''}`
     case 'complete':
-      return `${item.fetched} 人`
+      return `${item.fetched}人`
     case 'partial':
       return `${item.fetched}${total}，不完整`
     case 'skipped':

@@ -55,14 +55,14 @@ it('runs from the oldest point on the left to the newest', async () => {
   // Each point passed is asked for once, even two on the same revision;
   // resting on one repeats nothing.
   expect(selected).toEqual(['c1', 'c2'])
-  expect(el.textContent).toContain('第 2 / 3 次')
+  expect(el.textContent).toContain('第2 / 3次')
   expect(el.textContent).toContain(date(points[1]!.observed_at))
 })
 
 it('starts at the point shown', () => {
   const { el, range } = mount({ selectedId: 'c1' })
   expect(range.value).toBe('0')
-  expect(el.textContent).toContain('第 1 / 3 次')
+  expect(el.textContent).toContain('第1 / 3次')
 })
 
 it('asks for older points when resting on the oldest one loaded', () => {

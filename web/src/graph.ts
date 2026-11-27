@@ -255,8 +255,8 @@ export const nodeOpacity = (state: {
  */
 export function viewerLine(relation: ViewerRelation, name: string): string {
   if (relation === 'mutual') return `与 ${name} 互关`
-  if (relation === 'following') return `${name} 关注了 TA`
-  return `TA 关注了 ${name}`
+  if (relation === 'following') return `${name} 关注了TA`
+  return `TA关注了 ${name}`
 }
 
 /** An account's page on its platform, by the entity type in its key. */
