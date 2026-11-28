@@ -20,10 +20,10 @@ import type { CaptureContext } from './context.ts'
 // `platforms/x/thumbnails.ts`, `platforms/instagram/thumbnails.ts`), named
 // by the asset's `thumbnail_url` when it is listed and downloaded right
 // after the original, by the same job (`download.ts`). They are stored by
-// content hash like any media, streamed straight into the bucket with R2;
-// those made before that are moved there (`thumbnail-remote.ts`). An image the
-// platform has no smaller size of has no thumbnail: the web shows the
-// original, which is no larger. A video without a poster has none either.
+// content hash like any media, streamed straight into the bucket with R2.
+// An image the platform has no smaller size of has no thumbnail: the web
+// shows the original, which is no larger. A video without a poster has none
+// either.
 
 const REQUEST_TIMEOUT = 60_000
 const blobLocks = new KeyedLock()

@@ -12,19 +12,20 @@
 // Writes: a row's values follow its revision, so `catalogCollections` asks
 // for them again only for rows whose revision changed (or that are new), and
 // only values that differ are written. Capturing an item again unchanged
-// keeps its revision and writes nothing here. Rows catalogued before these
-// tables are filled by maintenance (`backfillFacets`), a batch at a time
-// while the worker is idle.
+// keeps its revision and writes nothing here. Each row records the
+// `FACETS_VERSION` its values were worked out by (`catalog.facets_version`):
+// when what is extracted changes, the version goes up and maintenance works
+// out the rows below it again (`refreshFacets`), a batch at a time while the
+// worker is idle.
 //
 // `library_version`: folders store queries, so what one selects may depend
 // on these values, and its count is kept until the version moves. Captures
 // need nothing more: values change only with `catalog.revision_id`, whose
-// trigger already moves the version in the same transaction. The backfill
+// trigger already moves the version in the same transaction. The refresh
 // writes them on its own, so it moves the version once per batch that
 // changed anything.
 import { sql } from 'drizzle-orm'
 import { detectLang } from '#lang/detect.ts'
-import { readSetting } from '#settings.ts'
 import { domainOf, foldHashtag } from './facet-values.ts'
 import { list } from './views.ts'
 import type { Database, Executor } from '#db/client.ts'
@@ -177,6 +178,9 @@ export function facetsOf(
 export function indexFacets(db: Executor, ids: readonly number[]): number {
   if (!ids.length) return 0
   const next = facetsOf(db, ids)
+  db.run(sql`UPDATE catalog SET facets_version = ${FACETS_VERSION}
+    WHERE id IN (SELECT value FROM json_each(${list(ids)}))
+      AND facets_version <> ${FACETS_VERSION}`)
   let written = 0
   const langs = db.all<{ id: number; lang: string | null }>(
     sql`SELECT id, lang FROM catalog WHERE id IN (SELECT value FROM json_each(${list(ids)}))`,
@@ -219,44 +223,31 @@ export function indexFacets(db: Executor, ids: readonly number[]): number {
   return written
 }
 
-// --- Backfill -------------------------------------------------------------
+// --- Versions -------------------------------------------------------------
 
 /**
- * Bumped when what is extracted changes, so the backfill goes over every
- * row again: 2 detects languages with fastText and tells simplified from
+ * Bumped when what is extracted changes, so that every row is worked out
+ * again: 2 detects languages with fastText and tells simplified from
  * traditional Chinese.
  */
 export const FACETS_VERSION = 2
-export const BACKFILL_KEY = 'facets_backfill'
-
-export interface BackfillState {
-  version: number
-  /** The highest catalog id done. */
-  after: number
-  done: boolean
-}
-
-export function backfillState(db: Database): BackfillState {
-  try {
-    const state = JSON.parse(
-      readSetting(db, BACKFILL_KEY) ?? '',
-    ) as BackfillState
-    if (state.version === FACETS_VERSION) return state
-  } catch {}
-  return { version: FACETS_VERSION, after: 0, done: false }
-}
 
 /**
- * The next batch of rows catalogued before the facets existed, in one write
- * transaction with the progress it makes; false when there were none left.
+ * Work out again the next batch of rows (by id, after `after`) whose facets
+ * are of an older version, in one write transaction; the last id done, or
+ * undefined when none were left.
  */
-export function backfillBatch(db: Database, size = 500): boolean {
+export function refreshFacetsBatch(
+  db: Database,
+  after = 0,
+  size = 500,
+): number | undefined {
   return db.transaction((tx) => {
-    const state = backfillState(db)
-    if (state.done) return false
     const ids = tx
       .all<{ id: number }>(
-        sql`SELECT id FROM catalog WHERE id > ${state.after} ORDER BY id LIMIT ${size}`,
+        sql`SELECT id FROM catalog
+          WHERE id > ${after} AND facets_version < ${FACETS_VERSION}
+          ORDER BY id LIMIT ${size}`,
       )
       .map((row) => row.id)
     // Folders may select by these values (`#tag`, `lang:`…), and their
@@ -264,13 +255,6 @@ export function backfillBatch(db: Database, size = 500): boolean {
     // any moves it, as a capture's new revision does.
     if (indexFacets(tx, ids))
       tx.run(sql`UPDATE library_version SET n = n + 1 WHERE id = 1`)
-    const next: BackfillState = {
-      version: FACETS_VERSION,
-      after: ids.at(-1) ?? state.after,
-      done: ids.length < size,
-    }
-    tx.run(sql`INSERT INTO settings (key, value) VALUES (${BACKFILL_KEY}, ${JSON.stringify(next)})
-      ON CONFLICT (key) DO UPDATE SET value = excluded.value`)
-    return !next.done
+    return ids.at(-1)
   })
 }

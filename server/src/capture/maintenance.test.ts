@@ -1,21 +1,19 @@
 import { Buffer } from 'node:buffer'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { eq, isNull } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { pino } from 'pino'
 import { afterEach, describe, expect, test } from 'vitest'
 import { openDatabase } from '#db/client.ts'
 import {
   blobs,
-  blobThumbnails,
   captures,
   collections,
   entities,
   jobs,
   mediaGarbage,
-  removedMedia,
   revisions,
   sourceResponses,
 } from '#db/schema.ts'
@@ -25,7 +23,6 @@ import { fakePlatform, postGraph } from '#testing/fake-platform.ts'
 import { expectCatalogFresh } from '#testing/library.ts'
 import { captureHandlers } from './handlers.ts'
 import {
-  backfillThumbnailSizes,
   collectCollections,
   collectMedia,
   failStaleCaptures,
@@ -33,7 +30,6 @@ import {
   releaseFreePages,
 } from './maintenance.ts'
 import { submit } from './submit.ts'
-import type { FsBlobStore } from '#blob/fs-store.ts'
 import type { CaptureContext } from './context.ts'
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2])
@@ -81,141 +77,7 @@ function setup(clock: { now: number }, text = () => 'post') {
   return ctx
 }
 
-/** A WebP header of the extended kind, `width` by `height` pixels. */
-function webpOf(width: number, height: number) {
-  const b = Buffer.alloc(30)
-  b.write('RIFF', 0)
-  b.write('WEBP', 8)
-  b.write('VP8X', 12)
-  b.writeUIntLE(width - 1, 24, 3)
-  b.writeUIntLE(height - 1, 27, 3)
-  return b
-}
-
 describe('maintenance', () => {
-  test('thumbnails stored before sizes were recorded are measured once', async () => {
-    const c = setup({ now: Date.now() })
-    await c.queue.drain()
-    const dir = mkdtempSync(path.join(tmpdir(), 'midden-sizes-'))
-    const put = async (key: string, bytes: Buffer) => {
-      const file = path.join(dir, key)
-      writeFileSync(file, bytes)
-      await (c.blobs as FsBlobStore).putFile(key, file)
-    }
-    await put('a'.repeat(64), webpOf(1200, 200))
-    await put('b'.repeat(64), webpOf(300, 400))
-    await put('c'.repeat(64), Buffer.from('not an image at all, just text....'))
-    const blob = (id: string) => ({
-      id,
-      hash: id.repeat(64),
-      size: 1,
-      mime: 'image/jpeg',
-    })
-    for (const id of ['a', 'c']) c.db.insert(blobs).values(blob(id)).run()
-    c.db
-      .insert(blobThumbnails)
-      .values([
-        {
-          blobId: 'a',
-          state: 'ready',
-          key: 'a'.repeat(64),
-          mime: 'image/webp',
-        },
-        {
-          blobId: 'c',
-          state: 'ready',
-          key: 'c'.repeat(64),
-          mime: 'image/webp',
-        },
-      ])
-      .run()
-    c.db
-      .insert(removedMedia)
-      .values([
-        { mediaKey: 'm1', kind: 'image', thumbnailKey: 'b'.repeat(64) },
-        { mediaKey: 'm2', kind: 'image', thumbnailKey: 'd'.repeat(64) },
-      ])
-      .run()
-    expect(await backfillThumbnailSizes(c)).toBe(4)
-    expect(
-      c.db
-        .select({ w: blobThumbnails.width, h: blobThumbnails.height })
-        .from(blobThumbnails)
-        .orderBy(blobThumbnails.blobId)
-        .all(),
-    ).toEqual([
-      { w: 1200, h: 200 },
-      // Unreadable: marked, so it is not read again.
-      { w: 0, h: 0 },
-    ])
-    expect(
-      c.db
-        .select({
-          w: removedMedia.thumbnailWidth,
-          h: removedMedia.thumbnailHeight,
-        })
-        .from(removedMedia)
-        .orderBy(removedMedia.mediaKey)
-        .all(),
-    ).toEqual([
-      { w: 300, h: 400 },
-      { w: 0, h: 0 },
-    ])
-    expect(await backfillThumbnailSizes(c)).toBe(0)
-  })
-
-  test('a backlog of thumbnail sizes is read in one pass, batch after batch', async () => {
-    const c = setup({ now: Date.now() })
-    await c.queue.drain()
-    const file = path.join(
-      mkdtempSync(path.join(tmpdir(), 'midden-sizes-')),
-      'f',
-    )
-    writeFileSync(file, webpOf(450, 800))
-    await (c.blobs as FsBlobStore).putFile('e'.repeat(64), file)
-    const rows = Array.from({ length: 900 }, (_, i) => `blob-${i}`)
-    // One file per thumbnail, as stored; here they are all the same bytes.
-    for (const [i] of rows.entries()) {
-      const copy = path.join(path.dirname(file), `c${i}`)
-      writeFileSync(copy, webpOf(450, 800))
-      await (c.blobs as FsBlobStore).putFile(String(i).padStart(64, 'e'), copy)
-    }
-    c.db
-      .insert(blobs)
-      .values(
-        rows.map((id, i) => ({
-          id,
-          hash: String(i).padStart(64, '0'),
-          size: 1,
-          mime: 'image/jpeg',
-        })),
-      )
-      .run()
-    c.db
-      .insert(blobThumbnails)
-      .values(
-        rows.map((blobId) => ({
-          blobId,
-          state: 'ready' as const,
-          key: String(rows.indexOf(blobId)).padStart(64, 'e'),
-          mime: 'image/webp',
-        })),
-      )
-      .run()
-    expect(await backfillThumbnailSizes(c)).toBe(900)
-    expect(
-      c.db
-        .select({ w: blobThumbnails.width, h: blobThumbnails.height })
-        .from(blobThumbnails)
-        .where(isNull(blobThumbnails.width))
-        .all(),
-    ).toEqual([])
-    expect(c.db.select().from(blobThumbnails).get()).toMatchObject({
-      width: 450,
-      height: 800,
-    })
-  })
-
   test('a deleted collection is removed with what only it used', async () => {
     const clock = { now: Date.now() }
     const c = setup(clock)

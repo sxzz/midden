@@ -277,9 +277,15 @@ export const catalog = sqliteTable(
      * `lang/detect.ts` detects it, a BCP 47 tag: `ja`, `en`, `zh-Hans`,
      * `zh-Hant`, `zh` (Chinese of no telling script)…; null when it cannot
      * tell. Written with the side tables below, only when the revision
-     * changes, and filled for older rows by maintenance.
+     * changes or the row's facets are of an older version.
      */
     lang: text(),
+    /**
+     * The `FACETS_VERSION` (`library/facets.ts`) that `lang` and the side
+     * tables below were worked out by; maintenance works out again the rows
+     * below the current one. No index: only that sweep reads it, in id order.
+     */
+    facetsVersion: integer().notNull().default(0),
     // The counts as the list orders them, unknown last either way: below
     // every count from the top, above every count from the bottom. Real
     // columns rather than expression indexes, which SQLite cannot seek a
@@ -829,14 +835,14 @@ export const blobThumbnails = sqliteTable(
     size: integer(),
     mime: text(),
     // Pixel size of the thumbnail, in the original's proportions: what the
-    // web reserves a box by before the media loads. Read from the file; null
-    // for thumbnails made before sizes were kept, until read; 0 when the
-    // file cannot be read.
+    // web reserves a box by before the media loads. Read from the file's
+    // first bytes when it is stored; null for a failed one.
     width: integer(),
     height: integer(),
     // When the file's upload to the remote store (R2) was confirmed: from
     // then on the web gets its public URL and the local file is gone, as
-    // for originals (`blobs.remoteAt`). Null while it is only local.
+    // for originals (`blobs.remoteAt`). Null when the media store has no
+    // remote side.
     remoteAt: timestamp(),
     error: text().notNull().default(''),
     createdAt: createdAt(),
@@ -846,10 +852,6 @@ export const blobThumbnails = sqliteTable(
     index('blob_thumbnails_key')
       .on(t.key)
       .where(sql`${t.key} IS NOT NULL`),
-    // Thumbnails still to move to the remote store: none, once all have.
-    index('blob_thumbnails_local')
-      .on(t.key)
-      .where(sql`${t.key} IS NOT NULL AND ${t.remoteAt} IS NULL`),
   ],
 )
 
@@ -1005,9 +1007,7 @@ export const submissions = sqliteTable(
  * is saved under a handle, so the platform first says whose it is (the
  * `identify` job). Identified, it becomes the submission with the same id
  * and the row goes; until then it is a record of its own, pending or
- * failed. With `collection_id`, it identifies a profile saved by its handle
- * before that rule, which maintenance folds into its account's
- * (`capture/identity.ts`).
+ * failed (`capture/identity.ts`).
  */
 export const identityRequests = sqliteTable(
   'identity_requests',
@@ -1023,14 +1023,10 @@ export const identityRequests = sqliteTable(
     request: text({ mode: 'json' }).$type<IdentityInput>().notNull(),
     parentSubmission: text(),
     updateId: text(),
-    // Not a reference: the collection goes once folded.
-    collectionId: text(),
     state: text({ enum: ['pending', 'failed'] })
       .notNull()
       .default('pending'),
     error: text().notNull().default(''),
-    // Lookups made for a saved profile, which maintenance spaces out.
-    attempts: integer().notNull().default(0),
     createdAt: createdAt(),
     finishedAt: timestamp(),
   },
@@ -1038,9 +1034,6 @@ export const identityRequests = sqliteTable(
     index('identity_requests_records')
       .on(t.createdAt, t.id)
       .where(sql`${t.parentSubmission} IS NULL AND ${t.input} <> ''`),
-    index('identity_requests_collection')
-      .on(t.collectionId)
-      .where(sql`${t.collectionId} IS NOT NULL`),
   ],
 )
 

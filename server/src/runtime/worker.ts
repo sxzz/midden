@@ -2,7 +2,6 @@ import { createServer } from 'node:http'
 import { performance } from 'node:perf_hooks'
 import process from 'node:process'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { FOLDED_KEY, settleHandleProfiles } from '#capture/identify.ts'
 import { runMaintenance } from '#capture/maintenance.ts'
 import { checkProgress } from '#capture/progress-check.ts'
 import { adoptUpdates, settleProgress } from '#capture/progress.ts'
@@ -13,7 +12,6 @@ import { prunePasskeys } from '#http/passkeys.ts'
 import { pruneSessions } from '#http/sessions.ts'
 import { currentJob, RANK, withOrigin } from '#jobs/queue.ts'
 import { FolderCountSweep } from '#library/folder-counts.ts'
-import { readSetting, writeSetting } from '#settings.ts'
 import { StorageUsage } from '#usage/storage.ts'
 import { pruneInvites } from '#users/invites.ts'
 import { writeStatus, type WorkerReport } from './status-file.ts'
@@ -127,23 +125,7 @@ export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
     factor = state.factor
   })
 
-  // Once: profiles saved by handle whose account the library knows move to
-  // it before any job runs (a capture of one would only fail); maintenance
-  // looks up the rest while idle. Later handles never make a collection.
-  const settling = readSetting(db, FOLDED_KEY)
-    ? Promise.resolve()
-    : settleHandleProfiles(ctx).then(
-        (settled) => {
-          writeSetting(db, FOLDED_KEY, new Date().toISOString())
-          logger.info(settled, 'profiles saved by handle settled')
-        },
-        (error: unknown) =>
-          logger.error(
-            { err: error },
-            'settling profiles saved by handle failed',
-          ),
-      )
-  settling.finally(() => ctx.queue.start())
+  ctx.queue.start()
 
   // A newer version migrated the database (it started while this one still
   // runs): stop taking jobs rather than write to a schema this code does not
@@ -234,7 +216,8 @@ export function startWorker(rt: Runtime, options: WorkerOptions): WorkerHandle {
     if (ctx.queue.status().held) return
     try {
       settleProgress(db)
-      // Updates from before it was kept wait for the worker to be idle.
+      // A new update starts without its progress kept; finished ones that
+      // lost it wait for the worker to be idle.
       adoptUpdates(db, 2, !ctx.queue.status().idle)
     } catch (error) {
       logger.warn({ err: error }, 'keeping the progress of updates failed')

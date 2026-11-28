@@ -245,7 +245,7 @@ export function identityDetail(
   id: string,
 ): CaptureRecordDetail | undefined {
   const row = loadRequest(db, id)
-  if (!row || (row.collectionId && !row.input)) return
+  if (!row) return
   return {
     ...identityRecord(db, row),
     warnings: [],

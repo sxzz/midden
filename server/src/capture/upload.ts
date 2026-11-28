@@ -1,6 +1,5 @@
 import { and, eq, isNull } from 'drizzle-orm'
 import { CorruptBlobError } from '#blob/bucket-store.ts'
-import { localCopyHold } from '#blob/local-copy.ts'
 import { isNotFound } from '#blob/store.ts'
 import { blobs } from '#db/schema.ts'
 import { PermanentError, RetryError, type Job } from '#jobs/queue.ts'
@@ -80,7 +79,7 @@ export async function runUpload(ctx: CaptureContext, job: Job): Promise<void> {
  * again there: a download of the same bytes then finds the blob in the
  * bucket and writes no local copy, and collection finds nothing left to
  * delete locally. Readers already reading the file keep reading it; later
- * ones read the bucket. Kept while `localCopyHold` says so.
+ * ones read the bucket.
  */
 async function deleteLocalOriginal(
   ctx: CaptureContext,
@@ -90,7 +89,7 @@ async function deleteLocalOriginal(
   if (!blob?.remoteAt || !ctx.blobs.deleteLocal) return
   await ctx.mediaLocks.run(blob.hash, async () => {
     const current = loadBlob(ctx, blobId)
-    if (!current?.remoteAt || localCopyHold(ctx.db, current)) return
+    if (!current?.remoteAt) return
     await ctx.blobs.deleteLocal?.(current.hash)
   })
 }

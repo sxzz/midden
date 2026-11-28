@@ -5,7 +5,7 @@
 //   node scripts/bench-search.ts seed <db>
 //   node scripts/bench-search.ts run <db> [out.json] [runs=40]
 //   node scripts/bench-search.ts compare <before.json> <after.json>
-//   node scripts/bench-search.ts backfill <db>
+//   node scripts/bench-search.ts facets <db>
 //
 // `seed` adds what a development copy lacks: a dozen folders and follows of
 // five accounts (2000 each way, some mutual), once. `run` opens the copy
@@ -13,11 +13,11 @@
 // counts are counted again), times each case `runs` times after a warm-up,
 // and records the plan (`EXPLAIN QUERY PLAN`) of every statement a case
 // ran. `compare` prints both side by side, flags a class more than 10%
-// slower at p50 or p95, and any plan that changed. `backfill` fills the
-// facets of every row as maintenance would (`library/facets.ts`), timing
-// each batch.
+// slower at p50 or p95, and any plan that changed. `facets` works out the
+// facets of every row again as maintenance does after a version bump
+// (`library/facets.ts`), timing each batch.
 //
-// Point it at a copy: `seed` and `run` write to it.
+// Point it at a copy: `seed`, `run` and `facets` write to it.
 import { readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { performance } from 'node:perf_hooks'
@@ -28,7 +28,7 @@ import { FsBlobStore } from '#blob/fs-store.ts'
 import { MediaSigner } from '#blob/signer.ts'
 import { openDatabase, type Database } from '#db/client.ts'
 import { selectionCountsOf } from '#library/counts.ts'
-import { backfillBatch } from '#library/facets.ts'
+import { refreshFacetsBatch } from '#library/facets.ts'
 import { folderSelection } from '#library/folder-query.ts'
 import { createFolder, listFolders } from '#library/folders.ts'
 import {
@@ -523,13 +523,15 @@ function compare(beforeFile: string, afterFile: string) {
   console.info(`${slower} slower, ${changed} with another plan`)
 }
 
-function backfill(file: string) {
+function facets(file: string) {
   const db = openDatabase(file)
+  // As if the version had just moved.
+  db.$client.exec('UPDATE catalog SET facets_version = 0')
   const times: number[] = []
   const started = performance.now()
-  for (let more = true; more;) {
+  for (let after: number | undefined = 0; after !== undefined;) {
     const at = performance.now()
-    more = backfillBatch(db)
+    after = refreshFacetsBatch(db, after)
     times.push(performance.now() - at)
   }
   times.sort((a, b) => a - b)
@@ -550,13 +552,13 @@ function backfill(file: string) {
 }
 
 if (command === 'seed' && args[0]) seed(args[0])
-else if (command === 'backfill' && args[0]) backfill(args[0])
+else if (command === 'facets' && args[0]) facets(args[0])
 else if (command === 'run' && args[0])
   await run(args[0], args[1], Number(args[2] ?? 40))
 else if (command === 'compare' && args[0] && args[1]) compare(args[0], args[1])
 else {
   console.error(
-    'usage: bench-search.ts seed <db> | run <db> [out.json] [runs] | compare <before.json> <after.json>',
+    'usage: bench-search.ts seed <db> | run <db> [out.json] [runs] | compare <before.json> <after.json> | facets <db>',
   )
   process.exit(2)
 }

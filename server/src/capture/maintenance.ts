@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer'
 import {
   and,
   asc,
@@ -33,16 +32,13 @@ import {
 } from '#db/schema.ts'
 import { inJson } from '#db/sql.ts'
 import { catalogCollections } from '#library/catalog.ts'
-import { backfillBatch } from '#library/facets.ts'
+import { refreshFacetsBatch } from '#library/facets.ts'
 import { deleteSourceResponses } from '#raw/responses.ts'
 import { collectRawGarbage, sweepRawUploads } from '#raw/upload.ts'
 import { pace, type CaptureContext } from './context.ts'
-import { settleHandleProfiles } from './identify.ts'
-import { HEADER_BYTES, imageSize } from './image-size.ts'
 import { failCapture } from './lifecycle.ts'
 import { dropAllSummaries } from './record-summaries.ts'
 import { pruneStaging } from './staging.ts'
-import { moveThumbnails } from './thumbnail-remote.ts'
 import type { Transaction } from '#db/client.ts'
 
 const STALE_CAPTURE = 60 * 60_000
@@ -61,21 +57,15 @@ const VACUUM_MIN_FREE = 1024
 /** SQLite's `auto_vacuum` value for INCREMENTAL. */
 const INCREMENTAL = 2
 
-// Sizes are read from the first 64 KiB of each thumbnail, several at a time
-// (from the remote store, a request each). A pass runs batches for up to
-// SIZE_BUDGET, so a backlog of 100,000 clears in an hour or two, not a day.
-const SIZE_BATCH = 400
-const SIZE_READS = 8
-const SIZE_BUDGET = 20_000
-
-// Facets (`library/facets.ts`) of rows catalogued before them: 500 rows a
-// write transaction, for up to FACETS_BUDGET a pass while the worker stays
-// idle. On a copy of the development database (60,000 rows) a batch takes
-// 11 ms at the median, 35 ms at most, and the whole backfill 1.5 s.
+// Facets (`library/facets.ts`) of an older version: 500 rows a write
+// transaction, for up to FACETS_BUDGET a pass while the worker stays idle.
+// On a copy of the development database (60,000 rows) a batch takes about
+// 10 ms at the median, 35 ms at most, and all of them 1.5 s.
 const FACETS_BATCH = 500
 const FACETS_BUDGET = 20_000
 
-const sizesCaughtUp = new WeakSet<CaptureContext>()
+/** Where the facets sweep got to; caught up, it stops until a restart. */
+const facetsAfter = new WeakMap<CaptureContext, number>()
 const facetsCaughtUp = new WeakSet<CaptureContext>()
 const vacuumedAt = new WeakMap<CaptureContext, number>()
 const BUDGET = 30_000
@@ -107,21 +97,10 @@ export async function runMaintenance(
   await step('media', () => collectMedia(ctx))
   if (slim) await step('raw garbage', () => collectRawGarbage(ctx))
   await step('raw uploads', () => sweepRawUploads(ctx))
-  if (slim) await step('thumbnail sizes', () => backfillThumbnailSizes(ctx))
   if (slim)
     await step('facets', () =>
-      backfillFacets(ctx, () => ctx.queue.status().idle),
+      refreshFacets(ctx, () => ctx.queue.status().idle),
     )
-  if (slim)
-    await step('thumbnails to the remote store', () =>
-      moveThumbnails(ctx, () => ctx.queue.status().idle),
-    )
-  if (slim)
-    await step('profiles saved by handle', async () => {
-      const settled = await settleHandleProfiles(ctx, { network: true })
-      if (settled.local || settled.identified || settled.failed)
-        ctx.logger.info(settled, 'profiles saved by handle settled')
-    })
   if (slim) await step('free pages', () => releaseFreePages(ctx))
   if (errors.length) throw new AggregateError(errors, 'maintenance failed')
 }
@@ -416,102 +395,14 @@ export async function collectMedia(ctx: CaptureContext): Promise<number> {
   return deleted
 }
 
-/** A thumbnail's pixel size from the start of its file; 0 when unreadable. */
-async function sizeOf(ctx: CaptureContext, key: string) {
-  try {
-    const chunks: Buffer[] = []
-    for await (const chunk of await ctx.blobs.read(key, {
-      start: 0,
-      end: HEADER_BYTES - 1,
-    }))
-      chunks.push(chunk as Buffer)
-    return imageSize(Buffer.concat(chunks)) ?? { width: 0, height: 0 }
-  } catch {
-    return { width: 0, height: 0 }
-  }
-}
-
 /**
- * Thumbnails made before their size was recorded get it now, read from the
- * file: batch after batch while the pass has time, a few at once. A file that
- * cannot be read is marked 0 by 0, as the web shows it without a size; a
- * regenerated thumbnail records its own.
+ * Work out again the facets of rows whose version is older than
+ * `FACETS_VERSION`, a batch at a time while the worker has nothing else to
+ * do, from where the last pass stopped. Captures write the current version,
+ * so once caught up there is nothing until a new version starts. Returns
+ * the batches written.
  */
-export async function backfillThumbnailSizes(
-  ctx: CaptureContext,
-): Promise<number> {
-  const started = Date.now()
-  let done = 0
-  while (!sizesCaughtUp.has(ctx)) {
-    const plain = ctx.db
-      .select({ key: blobThumbnails.key })
-      .from(blobThumbnails)
-      .where(
-        and(
-          eq(blobThumbnails.state, 'ready'),
-          isNotNull(blobThumbnails.key),
-          isNull(blobThumbnails.width),
-        ),
-      )
-      .limit(SIZE_BATCH)
-      .all()
-      .map((row) => row.key!)
-    const removed = ctx.db
-      .select({ key: removedMedia.thumbnailKey })
-      .from(removedMedia)
-      .where(
-        and(
-          isNotNull(removedMedia.thumbnailKey),
-          isNull(removedMedia.thumbnailWidth),
-        ),
-      )
-      .limit(SIZE_BATCH)
-      .all()
-      .map((row) => row.key!)
-    const sizes = new Map<string, { width: number; height: number }>()
-    const keys = [...new Set([...plain, ...removed])]
-    for (let i = 0; i < keys.length; i += SIZE_READS)
-      await Promise.all(
-        keys.slice(i, i + SIZE_READS).map(async (key) => {
-          sizes.set(key, await sizeOf(ctx, key))
-        }),
-      )
-    ctx.db.transaction((tx) => {
-      for (const key of plain)
-        tx.update(blobThumbnails)
-          .set(sizes.get(key)!)
-          .where(and(eq(blobThumbnails.key, key), isNull(blobThumbnails.width)))
-          .run()
-      for (const key of removed) {
-        const size = sizes.get(key)!
-        tx.update(removedMedia)
-          .set({ thumbnailWidth: size.width, thumbnailHeight: size.height })
-          .where(
-            and(
-              eq(removedMedia.thumbnailKey, key),
-              isNull(removedMedia.thumbnailWidth),
-            ),
-          )
-          .run()
-      }
-    })
-    done += plain.length + removed.length
-    if (plain.length < SIZE_BATCH && removed.length < SIZE_BATCH)
-      sizesCaughtUp.add(ctx)
-    else if (Date.now() - started > SIZE_BUDGET) break
-    // Batch after batch would keep the write lock from the web process.
-    else await pace(ctx)
-  }
-  return done
-}
-
-/**
- * Fill the facets of rows catalogued before they existed, a batch at a
- * time, resuming where the last pass stopped (the progress is kept in
- * `settings` with each batch), while the worker has nothing else to do.
- * Returns the batches written.
- */
-export async function backfillFacets(
+export async function refreshFacets(
   ctx: CaptureContext,
   idle: () => boolean = () => true,
   size = FACETS_BATCH,
@@ -523,12 +414,14 @@ export async function backfillFacets(
     idle() &&
     Date.now() - started < FACETS_BUDGET
   ) {
-    batches++
-    if (!backfillBatch(ctx.db, size)) {
+    const after = refreshFacetsBatch(ctx.db, facetsAfter.get(ctx), size)
+    if (after === undefined) {
       facetsCaughtUp.add(ctx)
-      ctx.logger.info({ batches }, 'facets filled')
+      if (batches) ctx.logger.info({ batches }, 'facets refreshed')
       break
     }
+    batches++
+    facetsAfter.set(ctx, after)
     // Batch after batch would keep the write lock from the web process.
     await pace(ctx)
   }

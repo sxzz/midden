@@ -5,9 +5,6 @@ export interface ImageSize {
   height: number
 }
 
-/** Enough of a file's start to read the size of a WebP, PNG or plain JPEG. */
-export const HEADER_BYTES = 64 * 1024
-
 function webp(b: Buffer): ImageSize | undefined {
   if (b.length < 30 || b.toString('ascii', 8, 12) !== 'WEBP') return
   const kind = b.toString('ascii', 12, 16)

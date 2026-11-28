@@ -3,17 +3,13 @@ import { readFileSync } from 'node:fs'
 import { eq, sql } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
 import {
-  captures,
   collectionIdentityAliases,
   collections,
-  collectionTags,
   entities,
   entityVersions,
   identityRequests,
   jobs,
-  library,
   submissions,
-  tags,
 } from '#db/schema.ts'
 import { Visibility } from '#platforms/protocol.ts'
 import { identifyHandle } from '#platforms/x/identify.ts'
@@ -26,12 +22,6 @@ import { publicPost } from '#platforms/x/provider.ts'
 import { CaptureStrategy } from '#platforms/x/strategy.ts'
 import { testContext } from '#testing/context.ts'
 import { captureHandlers } from './handlers.ts'
-import {
-  FOLD_ATTEMPTS,
-  FOLD_BATCH,
-  FOLD_SPACING_MS,
-  settleHandleProfiles,
-} from './identify.ts'
 import { recordDetail, retryRecord } from './records.ts'
 import { submit } from './submit.ts'
 import { listRecords } from './updates.ts'
@@ -333,184 +323,5 @@ describe('submitting a profile by its handle', () => {
     expect(
       ctx.db.select().from(jobs).where(eq(jobs.type, 'identify')).all(),
     ).toEqual([])
-  })
-})
-
-describe('profiles saved by handle before', () => {
-  /** A profile saved by handle, as the rule before allowed. */
-  function saved(c: CaptureContext, id: string, handle: string) {
-    c.db
-      .insert(collections)
-      .values({
-        id,
-        platform: 'x',
-        kind: 'profile',
-        externalId: `handle:${handle}`,
-        url: `https://x.com/${handle}`,
-        providerId: 'fxtwitter',
-      })
-      .run()
-    c.db
-      .insert(library)
-      .values({
-        collectionId: id,
-        providerId: 'fxtwitter',
-        adapterId: 'x',
-        note: 'mine',
-      })
-      .run()
-    c.db
-      .insert(captures)
-      .values({
-        id: `k${id}`,
-        collectionId: id,
-        providerId: 'fxtwitter',
-        adapterId: 'x',
-        scope: 'public',
-        state: 'failed',
-        error: '账号不存在或已改名',
-      })
-      .run()
-  }
-
-  test('folds into its account by what the library knows, keeping its records, tags and note', async () => {
-    const { ctx } = setup(() => notFound)
-    listed(ctx, VUEUSE, 'VueUse')
-    listed(ctx, '7', 'alice')
-    saved(ctx, 'h1', 'vueuse')
-    saved(ctx, 'h2', 'alice')
-    // The account is saved already under its id for one of them.
-    ctx.db
-      .insert(collections)
-      .values({
-        id: 'u7',
-        platform: 'x',
-        kind: 'profile',
-        externalId: '7',
-        url: 'https://x.com/i/user/7',
-        providerId: 'fxtwitter',
-      })
-      .run()
-    ctx.db.insert(tags).values({ id: 't', name: 'tag' }).run()
-    ctx.db
-      .insert(collectionTags)
-      .values({ collectionId: 'h2', tagId: 't' })
-      .run()
-    expect(await settleHandleProfiles(ctx)).toMatchObject({
-      local: 2,
-      waiting: 0,
-    })
-    expect(handleKeyed(ctx)).toEqual([])
-    const vue = ctx.db
-      .select()
-      .from(collections)
-      .where(eq(collections.externalId, VUEUSE))
-      .get()!
-    expect(
-      ctx.db.select().from(captures).where(eq(captures.id, 'kh1')).get(),
-    ).toMatchObject({ collectionId: vue.id })
-    expect(ctx.db.select().from(library).all()).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ collectionId: vue.id, note: 'mine' }),
-        expect.objectContaining({ collectionId: 'u7', note: 'mine' }),
-      ]),
-    )
-    expect(ctx.db.select().from(collectionTags).all()).toEqual([
-      { collectionId: 'u7', tagId: 't' },
-    ])
-    expect(
-      ctx.db
-        .select({ externalId: collectionIdentityAliases.externalId })
-        .from(collectionIdentityAliases)
-        .all()
-        .map((row) => row.externalId)
-        .toSorted(),
-    ).toEqual(['handle:alice', 'handle:vueuse'])
-  })
-
-  test('folds go a batch to a write transaction, pacing between', async () => {
-    const { ctx } = setup(() => notFound)
-    for (let i = 0; i < FOLD_BATCH * 2 + 5; i++) {
-      listed(ctx, String(100 + i), `user${i}`)
-      saved(ctx, `h${i}`, `user${i}`)
-    }
-    let paced = 0
-    ctx.pace = async () => {
-      paced++
-    }
-    expect(await settleHandleProfiles(ctx)).toMatchObject({
-      local: FOLD_BATCH * 2 + 5,
-    })
-    expect(paced).toBe(2)
-    expect(handleKeyed(ctx)).toEqual([])
-  })
-
-  test('one with content is left alone', async () => {
-    const { ctx } = setup(() => notFound)
-    listed(ctx, VUEUSE, 'VueUse')
-    saved(ctx, 'h1', 'vueuse')
-    ctx.db
-      .update(collections)
-      .set({ currentRevision: 'r' })
-      .where(eq(collections.id, 'h1'))
-      .run()
-    expect(await settleHandleProfiles(ctx, { network: true })).toMatchObject({
-      local: 0,
-      identified: 0,
-    })
-    expect(handleKeyed(ctx)).toHaveLength(1)
-  })
-
-  test('the others are looked up while idle, spaced out, and given up on as failed requests', async () => {
-    let known = false
-    const { ctx, asked, advance } = setup((path) =>
-      path === '/found' && known ? user('9', 'found') : notFound,
-    )
-    saved(ctx, 'h1', 'found')
-    saved(ctx, 'h2', 'lost')
-    const waits: number[] = []
-    const settle = () =>
-      settleHandleProfiles(ctx, {
-        network: true,
-        wait: async (ms) => waits.push(ms),
-      })
-    // Without the network, only what the library knows.
-    expect(await settleHandleProfiles(ctx)).toMatchObject({ waiting: 2 })
-    expect(asked).toEqual([])
-    expect(await settle()).toMatchObject({ identified: 0, waiting: 2 })
-    expect(asked).toEqual(['/found', '/lost'])
-    // One a second.
-    expect(waits).toEqual([1000])
-    // Not again before the spacing.
-    expect(await settle()).toMatchObject({ waiting: 2 })
-    expect(asked).toHaveLength(2)
-    known = true
-    advance(FOLD_SPACING_MS)
-    expect(await settle()).toMatchObject({ identified: 1, waiting: 1 })
-    expect(
-      ctx.db.select().from(captures).where(eq(captures.id, 'kh1')).get(),
-    ).toMatchObject({ collectionId: expect.not.stringMatching('h1') })
-    for (let i = 3; i < FOLD_ATTEMPTS; i++) {
-      advance(FOLD_SPACING_MS)
-      await settle()
-    }
-    advance(FOLD_SPACING_MS)
-    expect(await settle()).toMatchObject({ failed: 1 })
-    // A failed request of its link; the collection leaves the library.
-    expect(listRecords(ctx.db).items).toMatchObject([
-      {
-        url: 'https://x.com/lost',
-        input: 'https://x.com/lost',
-        state: 'failed',
-        error: '暂时无法读取（平台按用户名查询失败）',
-      },
-    ])
-    expect(
-      ctx.db.select().from(library).where(eq(library.collectionId, 'h2')).get(),
-    ).toBeUndefined()
-    expect(
-      ctx.db.select().from(collections).where(eq(collections.id, 'h2')).get()
-        ?.unreferencedAt,
-    ).toBeInstanceOf(Date)
   })
 })

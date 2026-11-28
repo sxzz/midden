@@ -384,9 +384,12 @@ describe('library search', () => {
       ).split('--> statement-breakpoint'))
         client.exec(statement)
     expect(performance.now() - started).toBeLessThan(1000)
-    // The later migration that adds the language, filled as maintenance
-    // fills it.
+    // The later migrations that add the language and the version of the
+    // facets, filled as maintenance fills them.
     client.exec('ALTER TABLE catalog ADD lang text')
+    client.exec(
+      'ALTER TABLE catalog ADD facets_version integer DEFAULT 0 NOT NULL',
+    )
     indexFacets(
       ctx.db,
       ctx.db

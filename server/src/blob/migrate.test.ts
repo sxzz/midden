@@ -6,7 +6,7 @@ import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { newId } from '#db/id.ts'
-import { blobs, blobThumbnails } from '#db/schema.ts'
+import { blobs } from '#db/schema.ts'
 import { testContext } from '#testing/context.ts'
 import { FAKE_PUBLIC, FakeS3 } from '#testing/fake-s3.ts'
 import { mediaCommand, migrateMedia, pruneLocalMedia } from './migrate.ts'
@@ -152,32 +152,10 @@ describe('media-migrate', () => {
         'uploaded 1 (1 B), replaced 0',
         'already in the bucket 0, headers fixed 0',
         `recorded in the bucket 1, e.g. ${FAKE_PUBLIC}/${a.key}`,
-        'deleted 1 local files (1 B), kept 0 for thumbnails',
+        'deleted 1 local files (1 B)',
         'missing locally 0, hash mismatch 0, failed 0',
       ].join('\n'),
     )
-  })
-
-  test('keeps the local file of a blob that is a thumbnail', async () => {
-    const thumbnail = await addBlob('thumbnail')
-    const plain = await addBlob('plain')
-    ctx.db
-      .insert(blobThumbnails)
-      .values({
-        blobId: plain.id,
-        state: 'ready',
-        key: thumbnail.hash,
-        size: 1,
-        mime: 'image/jpeg',
-      })
-      .run()
-    const dry = await migrateMedia(ctx.db, store, { print, dryRun: true })
-    expect(dry).toMatchObject({ localDeleted: 1, localKept: 1 })
-    const summary = await migrateMedia(ctx.db, store, { print })
-    expect(summary).toMatchObject({ marked: 2, localDeleted: 1, localKept: 1 })
-    expect(await store.local.stat(plain.hash)).toBeUndefined()
-    expect(await store.local.stat(thumbnail.hash)).toBe(thumbnail.body.length)
-    expect(remoteAt(thumbnail.id)).toBeInstanceOf(Date)
   })
 
   test('a blob the server uploads while it runs is no problem', async () => {
@@ -350,15 +328,14 @@ describe('media-migrate', () => {
 })
 
 describe('media-prune-local', () => {
-  test('deletes only local originals confirmed in the bucket, and keeps thumbnails', async () => {
+  test('deletes only local originals confirmed in the bucket', async () => {
     const confirmed = await addBlob('confirmed')
     const pending = await addBlob('pending')
     const wrong = await addBlob('wrong')
     const bare = await addBlob('bare')
-    const shared = await addBlob('also a thumbnail')
     // Recorded with their local files kept, as before local files went
     // with the upload.
-    for (const blob of [confirmed, wrong, bare, shared]) {
+    for (const blob of [confirmed, wrong, bare]) {
       await store.upload(blob.hash, 'image/jpeg')
       ctx.db
         .update(blobs)
@@ -370,38 +347,26 @@ describe('media-prune-local', () => {
     s3.objects.get(wrong.key)!.etag = '0'.repeat(32)
     // Without a checksum to compare.
     s3.objects.get(bare.key)!.etag = 'z-2'
-    ctx.db
-      .insert(blobThumbnails)
-      .values({
-        blobId: confirmed.id,
-        state: 'ready',
-        key: shared.hash,
-        size: 1,
-        mime: 'image/jpeg',
-      })
-      .run()
 
     const dry = await pruneLocalMedia(ctx.db, store, { dryRun: true, print })
     expect(dry).toMatchObject({
       deleted: 1,
       mismatched: 1,
       unverified: 1,
-      thumbnails: 1,
     })
     expect(await store.local.stat(confirmed.hash)).toBeDefined()
     expect(remoteAt(wrong.id)).toBeInstanceOf(Date)
 
     const summary = await pruneLocalMedia(ctx.db, store, { print })
     expect(summary).toMatchObject({
-      blobs: 4,
+      blobs: 3,
       deleted: 1,
       bytes: confirmed.body.length,
       mismatched: 1,
       unverified: 1,
-      thumbnails: 1,
     })
     expect(await store.local.stat(confirmed.hash)).toBeUndefined()
-    for (const kept of [pending, wrong, bare, shared])
+    for (const kept of [pending, wrong, bare])
       expect(await store.local.stat(kept.hash)).toBeDefined()
     // The wrong copy is no longer handed out; the next migration redoes it.
     expect(remoteAt(wrong.id)).toBeNull()

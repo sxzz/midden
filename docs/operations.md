@@ -75,7 +75,7 @@ docker compose exec -T midden midden --version            # 镜像的提交（�
 | `token revoke <id或名称> [--json]`                                            | 撤销令牌：令牌和它的用量记录立即删除，原来的令牌值马上失效。名称对应多个令牌时不撤销，在标准错误列出它们的 id 前缀，用前缀再来一次                                                                                                      |
 | `token expires <id或名称> <时间> [--json]`                                    | 改过期时间，写法同 `--expires`（可提前、延后或 `never`；已过期的令牌设一个更晚的时间即恢复可用）。名称对应多个令牌时同样拒绝                                                                                                            |
 | `backup <目录> [--json]`                                                      | 在线备份数据库（服务运行中即可）到 `<目录>/midden-<时间>.db`，标准输出是文件路径                                                                                                                                                        |
-| `media-migrate [--dry-run] [--concurrency N] [--verify-download] [--limit N]` | 把本地媒体原文件上传到 R2，见「迁移现有媒体」。需要 `MEDIA_STORE=r2`                                                                                                                                                                    |
+| `media-migrate [--dry-run] [--concurrency N] [--verify-download] [--limit N]` | 把本地媒体原文件上传到 R2，见「补传与清理」。需要 `MEDIA_STORE=r2`                                                                                                                                                                      |
 | `media-prune-local [--dry-run] [--concurrency N] [--verify-download]`         | 删除 R2 里已有可验证副本的本地原文件。需要 `MEDIA_STORE=r2`                                                                                                                                                                             |
 | `raw-get <抓取 id> [序号] [--json]`                                           | 列出一次抓取的原始响应；给序号则把那一条的原始字节写到标准输出                                                                                                                                                                          |
 | `maintain [--vacuum] [--rebuild-search]`                                      | 离线整理数据库，网页进程、worker 和 Litestream 都停止时才能运行，见「数据库整理」                                                                                                                                                       |
@@ -187,12 +187,12 @@ Renovate（账号级安装的 GitHub App）按 `.github/renovate.json5` 每周�
 - 新下载直接流式写入 R2，不写本地文件（8 MiB 以内一次 PUT，更大的分段上传到 `incoming/<uuid>` 再在服务端复制到哈希键，见[架构](architecture.md#媒体链接)）；读回确认后记下 `remote_at`，接口立即给出公开地址。写入失败时这次下载失败，由下载任务重试（`job will retry`，`jobType: download`），不留下临时对象。
 - 生命周期规则（一次性设置）：在「R2 → midden → Settings → Object lifecycle rules」加一条，前缀 `incoming/`，删除 1 天以前的对象，并中止 1 天以前未完成的分段上传（R2 默认 7 天）。只在进程在分段上传或复制的中途退出时才会留下这些，正常的失败会自己清理。
 - 这一版之前下载、仍在本地 `media/` 的原文件由后台任务 `upload` 上传。上传带 `Content-MD5` 和签名的 SHA-256，R2 收到的内容不符会拒绝；R2 中已有相同字节的对象时不再上传；上传后读回大小、ETag（即 MD5）和两个响应头，确认后才在 `blobs.remote_at` 记下，接口从此给出公开地址，之前仍给本地签名链接。上传失败从 30 秒起翻倍重试、最长间隔 1 小时，共 12 次（约 7 小时），每次记 `job will retry`，放弃时记 `media upload gave up; the file stays local`，这些媒体由 `media-migrate` 补传。
-- 上传确认、记下 `remote_at` 后，同一个 `upload` 任务立即删除本地原文件（这一版之前下载的），此后 R2 中是唯一的一份（没有其他备份，见「R2 的保护」）。删除在这个媒体的键的锁内进行（下载写入、回收删除同一个键时也取这个锁），并在锁内再次确认 `remote_at` 仍在。这个键同时是某个还没移到 R2 的缩略图的文件时不删除（它从本地提供，移走后再删）；缩略图从平台下载，不读原文件，所以不必等它。
+- 上传确认、记下 `remote_at` 后，同一个 `upload` 任务立即删除本地原文件（这一版之前下载的），此后 R2 中是唯一的一份（没有其他备份，见「R2 的保护」）。删除在这个媒体的键的锁内进行（下载写入、回收删除同一个键时也取这个锁），并在锁内再次确认 `remote_at` 仍在。缩略图从平台下载，不读原文件，所以不必等它。
 
   删除失败时任务按上传的间隔重试（记 `job will retry`），`remote_at` 不会被清除；重试用完时记 `deleting the local copy of uploaded media gave up; media-prune-local removes it`。
 
 - 删除时正在读这个文件的地方不受影响：Telegram 发送、带文件名的下载和 `/media/…` 都先打开文件再读，已打开的文件删除后仍能读完；打开前已删除时改从 R2 读。之后再下载到相同内容（已在 R2 中的媒体）时不再写本地文件。
-- 缩略图同样存到 R2（同名键），确认后删除本地文件，浏览器从公开域名读取（原因见[架构](architecture.md#缩略图)）。下载时随即上传，失败的和这一版之前只在本地的缩略图由维护任务在 worker 空闲时移走（见「维护任务」），日志 `moved thumbnails to the remote store`（`moved` 个数）；R2 中已有相同字节的对象（以前 rclone 复制过去的）直接沿用，不再上传。还没移走的缩略图经本服务提供，响应头为 `Cache-Control: public, max-age=31536000, immutable`（视频和带文件名的下载仍为 `private`，不进 CDN）。本地和 R2 中都找不到缩略图文件时，请求它的 `/media/…` 当场从平台再下载一次（资产记下的 `thumbnail_url`）并移到 R2；字节不同时记在新的键下，并把请求重定向过去。平台不再提供时（Instagram 的地址会过期、帖子已删除），图片重定向到原文件，视频返回 404。
+- 缩略图同样存到 R2（同名键），下载时直接写入，浏览器从公开域名读取（原因见[架构](architecture.md#缩略图)）；R2 中已有相同字节的对象直接沿用。改用 `r2` 之前生成、只在本地的缩略图留在本地，经本服务提供，响应头为 `Cache-Control: public, max-age=31536000, immutable`（视频和带文件名的下载仍为 `private`，不进 CDN）。本地和 R2 中都找不到缩略图文件时，请求它的 `/media/…` 当场从平台再下载一次（资产记下的 `thumbnail_url`）并移到 R2；字节不同时记在新的键下，并把请求重定向过去。平台不再提供时（Instagram 的地址会过期、帖子已删除），图片重定向到原文件，视频返回 404。
 - 带文件名的下载经本服务从本地或 R2 流式返回，带 `Content-Disposition`。服务端的读取（Telegram 发送、下载）都先读本地，没有时通过 S3 API 读 R2，不经公开域名。
 - 不另设本地原文件缓存：缩略图从平台下载，不读原文件；Telegram 按 `file_id` 复用已上传的文件；其余读取（第一次发送到 Telegram、带文件名的下载）在本地原文件删除后都读 R2。
 - 设为 `r2` 并运行后，不能再改回 `local`：本地实现不读 R2，已删除本地原文件的媒体会缺失。要回退，先把存储桶下载回 `media/`（如 `rclone copy r2:<bucket> ~/midden/data/media`）再改。
@@ -206,7 +206,7 @@ Renovate（账号级安装的 GitHub App）按 `.github/renovate.json5` 每周�
 | `MEDIA_STORE`      | `local`（默认）或 `r2`                                                                       |
 | `R2_ACCOUNT_ID`    | Cloudflare 账户 ID（32 位十六进制）；S3 端点为 `https://<ID>.r2.cloudflarestorage.com`       |
 | `R2_BUCKET`        | 存储桶名，如 `<bucket>`                                                                      |
-| `MEDIA_PUBLIC_URL` | 存储桶的公开域名，如 `https://media.example.com`                                         |
+| `MEDIA_PUBLIC_URL` | 存储桶的公开域名，如 `https://media.example.com`                                             |
 | `CF_API_TOKEN`     | Cloudflare 账户 API token（见下）：R2 的 S3 密钥由它派生，清除缓存与存储用量的分析数据也用它 |
 | `CF_ZONE_ID`       | 公开域名所在 zone 的 ID；不设置则删除时不清除边缘缓存                                        |
 
@@ -228,13 +228,13 @@ S3 密钥由 `CF_API_TOKEN` 派生（[Cloudflare 文档](https://developers.clou
    - Zone → **Cache Purge**，zone `<zone>`；
    - **Account Analytics Read**。
 
-   token 值填入 `CF_API_TOKEN`；zone 的 Overview 页右侧的 Zone ID 填入 `CF_ZONE_ID`。rclone 用由它派生的 S3 密钥，见「迁移现有媒体」。
+   token 值填入 `CF_API_TOKEN`；zone 的 Overview 页右侧的 Zone ID 填入 `CF_ZONE_ID`。
 
-3. 缩略图的边缘缓存（可选，只用于还没移到 R2 的旧缩略图，全部移走后可删）：在应用所在域名加一条 Cache Rule，匹配路径以 `/media/` 开头，Eligible for cache，Edge TTL 选「Use cache-control header if present」，这样 `private` 的视频与下载不进缓存；缓存键保留查询串（签名在其中）。
+3. 缩略图的边缘缓存（可选，只用于改用 `r2` 之前生成、只在本地的缩略图）：在应用所在域名加一条 Cache Rule，匹配路径以 `/media/` 开头，Eligible for cache，Edge TTL 选「Use cache-control header if present」，这样 `private` 的视频与下载不进缓存；缓存键保留查询串（签名在其中）。
 
-### 迁移现有媒体
+### 补传与清理
 
-`media-migrate` 处理所有尚未记为在 R2 中的媒体（`blobs` 中的原文件，不含缩略图）：
+`media-migrate` 处理所有尚未记为在 R2 中的媒体（`blobs` 中的原文件，不含缩略图）：改用 `r2` 之前下载的，和上传任务放弃的（`media upload gave up; the file stays local`）。
 
 1. 计算本地文件的 SHA-256 与 MD5，SHA-256 与键不符时报告 `hash mismatch` 并跳过，不上传。
 2. 读取 R2 中同键对象的大小和响应头（HEAD）：
@@ -242,50 +242,11 @@ S3 密钥由 `CF_API_TOKEN` 派生（[Cloudflare 文档](https://developers.clou
    - 大小相同：用对象带的校验值与本地比较，依次是 `x-amz-checksum-sha256`、ETag（单段上传时即 MD5；分段上传的 ETag 带 `-<段数>`，不能用）、rclone 为分段上传记下的 `x-amz-meta-md5chksum`。有一项不符就重新上传；都相符则保留，不重新传输。一项都没有时重新上传（记 `replacing <哈希>: no checksum to compare`，计入 `replaced`），因为记下后本地文件随即删除，只按大小认定不够；加 `--verify-download` 则改为下载并计算 SHA-256，相符就保留。
    - 保留的对象 `Content-Type` 或 `Cache-Control` 不对时，在服务端把对象复制到自身（`CopyObject`，`x-amz-metadata-directive: REPLACE`）改正，其他元数据照旧，不重新传输，再读回确认。
 3. 在 `blobs.remote_at` 记下，网页从此使用公开地址。
-4. 删除本地原文件，规则与上传任务相同：同时是缩略图文件的保留（汇总中计入 `kept … for thumbnails`）。
+4. 删除本地原文件，规则与上传任务相同。
 
-本地文件缺失时，只有加 `--verify-download` 且 R2 中的对象哈希相符才记下，否则报告 `missing locally`。命令与服务同时运行：服务的上传任务在此期间已记下（并删除本地文件）的媒体计入 `by the server meanwhile`，不算问题。可以随时中断，再次运行时跳过已记下的，其余重新检查，已上传但未记下的按校验值保留；中断在记下与删除之间、或删除失败（计入 `failed`）时，本地文件留给 `media-prune-local`。`--dry-run` 不上传、不写入、不删除，汇总中的 `would delete N local files` 是会删除的本地原文件数与大小。`--concurrency N`（默认 4）同时处理的数量，`--limit N` 只处理前 N 个。每 5 秒输出一次进度，结束时输出汇总，并给出一个已记下媒体的公开地址；有失败、哈希不符或缺失时退出码为 1。R2 中不属于任何媒体的对象（如 rclone 一并复制的缩略图）不会被读取或修改；它们的键以后被回收时随之删除。
+本地文件缺失时，只有加 `--verify-download` 且 R2 中的对象哈希相符才记下，否则报告 `missing locally`。命令与服务同时运行：服务的上传任务在此期间已记下（并删除本地文件）的媒体计入 `by the server meanwhile`，不算问题。可以随时中断，再次运行时跳过已记下的，其余重新检查，已上传但未记下的按校验值保留；中断在记下与删除之间、或删除失败（计入 `failed`）时，本地文件留给 `media-prune-local`。`--dry-run` 不上传、不写入、不删除，汇总中的 `would delete N local files` 是会删除的本地原文件数与大小。`--concurrency N`（默认 4）同时处理的数量，`--limit N` 只处理前 N 个。每 5 秒输出一次进度，结束时输出汇总，并给出一个已记下媒体的公开地址；有失败、哈希不符或缺失时退出码为 1。R2 中不属于任何媒体的对象不会被读取或修改；它们的键以后被回收时随之删除。
 
-`media-prune-local` 删除已记为在 R2 中、且再次确认过的本地原文件：对象存在，大小、`Content-Type`、`Cache-Control` 正确，并且上述校验值之一与本地文件相符（或加 `--verify-download` 后下载比较）。没有校验值的对象保留本地文件并列出；对象不对时保留本地文件、清除 `remote_at`（网页改回本地链接，下次 `media-migrate` 重新上传）。还没移到 R2 的缩略图（包括同时是这种缩略图的原文件）保留。上传任务和 `media-migrate` 已经自动删除本地原文件，这个命令只处理剩下的：在自动删除之前就已记下的、以前为等缩略图生成而保留的、删除失败或中断留下的。
-
-预先用 rclone 复制（可选，代码上线前即可进行）。rclone 不会自己派生密钥，先在 macOS 的终端算出这一对（`jq` 用 `brew install jq` 安装；Linux 上把 `shasum -a 256` 换成 `sha256sum`）：
-
-```sh
-read -rs TOKEN    # 粘贴 CF_API_TOKEN 后回车，不显示、不进 shell 历史
-ACCOUNT=0123456789abcdef0123456789abcdef
-# access_key_id：token 的 id
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/tokens/verify" | jq -r .result.id
-# secret_access_key：token 值的 SHA-256
-printf %s "$TOKEN" | shasum -a 256 | cut -d' ' -f1
-unset TOKEN
-```
-
-`printf %s` 不带换行；用 `echo` 会多一个换行，算出的值就不对。`CF_API_TOKEN` 换了（轮换或重新创建）之后这一对随之改变，要重新计算。
-
-```ini
-# ~/.config/rclone/rclone.conf
-[r2]
-type = s3
-provider = Cloudflare
-access_key_id = <token 的 id>
-secret_access_key = <token 值的 SHA-256>
-endpoint = https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com
-region = auto
-no_check_bucket = true
-```
-
-```sh
-rclone copy ~/midden/data/media r2:<bucket> \
-  --header-upload "Cache-Control: public, max-age=31536000, immutable" \
-  --s3-upload-cutoff 4Gi --checksum \
-  --transfers 16 --checkers 32 --progress
-```
-
-- 必须是 `media/` 目录本身对应存储桶根目录，键才是 `ab/cd/<sha256>`；用 `copy`，不要用 `sync`。
-- `--s3-upload-cutoff 4Gi`：4 GiB 以下单段上传，ETag 就是 MD5，`media-migrate` 不必下载即可核对内容。不要加 `--s3-disable-checksum`，否则分段上传的文件没有 `md5chksum`。
-- `--checksum`：rclone 按 MD5 判断是否已复制，重复运行只补缺的；上传后 rclone 也会比对 MD5。
-- 文件没有扩展名，rclone 给的 `Content-Type` 是 `application/octet-stream`，由 `media-migrate` 按数据库中的类型改正。
+`media-prune-local` 删除已记为在 R2 中、且再次确认过的本地原文件：对象存在，大小、`Content-Type`、`Cache-Control` 正确，并且上述校验值之一与本地文件相符（或加 `--verify-download` 后下载比较）。没有校验值的对象保留本地文件并列出；对象不对时保留本地文件、清除 `remote_at`（网页改回本地链接，下次 `media-migrate` 重新上传）。上传任务和 `media-migrate` 已经自动删除本地原文件，这个命令只处理剩下的：删除失败（`deleting the local copy of uploaded media gave up; media-prune-local removes it`）或中断留下的。
 
 ### 步骤
 
@@ -351,7 +312,7 @@ rclone copy ~/midden/data/media r2:<bucket> \
 
    - 分析数据：「设置 → 管理员面板 → 存储用量」显示 R2 的两个存储桶和「本月费用」；日志中没有 `storage analytics unavailable`。
 
-4. 从 `.env` 删去 `R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`CF_PURGE_TOKEN`（服务已不读它们，不必重启），`unset TOKEN`。rclone 的配置改用派生的一对（见「迁移现有媒体」）。
+4. 从 `.env` 删去 `R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`CF_PURGE_TOKEN`（服务已不读它们，不必重启），`unset TOKEN`。
 5. 在 Cloudflare 撤销旧 token：「R2 → Manage API tokens」中媒体用的那个（`<bucket>` 的 Object Read & Write），以及「My Profile → API Tokens」中清除缓存的那个。Litestream 的 token 保留：它仍用自己的密钥（见「Litestream」）；只有把 `LITESTREAM_*` 改成由 `CF_API_TOKEN` 派生的一对、`docker compose up -d litestream` 之后心跳正常，才可以撤销它。
 
 ### R2 的保护
@@ -368,8 +329,8 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
 默认原始响应在数据库中（正文在 `source_response_bodies`，元数据在 `source_responses`）。设置 `RAW_R2_BUCKET` 后，每次抓取完成即把原始响应移到这个私有存储桶的 `raw/` 下（zstd 压缩，按内容的 SHA-256 命名），数据库只留下 `source_responses` 中的元数据，正文行随之删去，见架构文档「原始响应」。移走之前它们占数据库的大部分（2026-11-25：`source_responses` 878 MB，其中正文 732 MB，128,844 条）。
 
-| 变量                            | 说明                                                                                                                            |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 变量                            | 说明                                                                                                                              |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `RAW_R2_BUCKET`                 | 私有存储桶，如 `<backup-bucket>`（与 Litestream 的 `db/` 共用，各在自己的前缀下）                                                 |
 | `R2_ACCOUNT_ID`、`CF_API_TOKEN` | 与媒体共用：S3 密钥由 token 派生（见「媒体存储」的「配置」），token 要有这个存储桶的写权限，上面的 token 已包括 `<backup-bucket>` |
 
@@ -422,7 +383,7 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
   这个命令也用于一次性的副本，例如改动数据之前。
 
-- 媒体：使用 R2 时原文件只在 R2 中（见「R2 的保护」），本地只剩正在上传的原文件和还没移到 R2 的缩略图，不复制。`MEDIA_STORE=local` 时 `media/` 中的文件写入后不再修改，增量复制即可：
+- 媒体：使用 R2 时原文件只在 R2 中（见「R2 的保护」），本地只剩正在上传的原文件和改用 `r2` 之前生成的缩略图，不复制。`MEDIA_STORE=local` 时 `media/` 中的文件写入后不再修改，增量复制即可：
 
   ```sh
   rsync -a data/media/ <备份位置>/media/
@@ -438,7 +399,7 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
 1. Cloudflare「R2」中建私有存储桶 `<backup-bucket>`（不绑定域名、不开公开访问）；「R2 → Manage API tokens → Create API token」，权限 **Object Read & Write**，范围只选 `<backup-bucket>`。
 
-   Litestream 只认 S3 的一对密钥，不能像服务那样由 `CF_API_TOKEN` 派生，所以它有自己的两个变量。值可以是这个 R2 token 的 Access Key ID 与 Secret Access Key，也可以是由 `CF_API_TOKEN` 派生的一对（那个 token 也有 `<backup-bucket>` 的权限，算法见「迁移现有媒体」）；用后者时 `CF_API_TOKEN` 轮换后要一并更新，否则 Litestream 上传失败、心跳停止。
+   Litestream 只认 S3 的一对密钥，不能像服务那样由 `CF_API_TOKEN` 派生，所以它有自己的两个变量。值可以是这个 R2 token 的 Access Key ID 与 Secret Access Key，也可以是由 `CF_API_TOKEN` 派生的一对（那个 token 也有 `<backup-bucket>` 的权限，算法见「配置」）；用后者时 `CF_API_TOKEN` 轮换后要一并更新，否则 Litestream 上传失败、心跳停止。
 
 2. 部署目录的 `.env`：
 
@@ -601,7 +562,7 @@ rm ~/Library/LaunchAgents/org.midden.backup.plist
    rclone check ~/backups/midden/auto/media r2:<bucket> --one-way
    ```
 
-   不应有内容不同（`differences`）的文件；R2 中缺少的只应是还没移走的缩略图和已被回收删除的媒体。
+   不应有内容不同（`differences`）的文件；R2 中缺少的只应是改用 `r2` 之前生成、只在本地的缩略图和已被回收删除的媒体。
 
 4. 删除：`rm -rf ~/backups/midden/auto/media`。
 
@@ -645,7 +606,7 @@ Cloudflare 的 GraphQL Analytics API（`POST https://api.cloudflare.com/client/v
 
 - 数据库文件：`PRAGMA page_count × page_size`，空闲页 `freelist_count`，以及 `midden.db-wal` 的大小。
 - 缩略图：`blob_thumbnails` 中已生成的个数与 `size` 之和，加上已移除的媒体保留的缩略图（`removed_media` 的 `thumbnail_key`，同一个文件只算一次，不在 `blob_thumbnails` 中的才算；大小是标记记下的 `thumbnail_size`，记下大小之前的标记只计个数）。其中还没移到 R2 的单独给出（`local_count`、`local_bytes`），网页写成「缩略图 N 个，本机 M 个（大小），其余在 R2」，全部移走后只写个数；移走的缩略图在 R2 的存储中也计入一次。
-- 媒体目录：随每次数据库组成在 worker 线程中遍历 `media/`，统计文件数与大小（使用 R2 时就是还没移走的缩略图和尚未上传完的原文件）。
+- 媒体目录：随每次数据库组成在 worker 线程中遍历 `media/`，统计文件数与大小（使用 R2 时就是改用 `r2` 之前生成的缩略图和尚未上传完的原文件）。
 - 部署前的数据库备份：`data/backups/deploy/` 中的文件。
 - 可用磁盘：数据目录所在卷的 `statfs`（容器内看到的卷；GB 为 2^30 字节，与网页中其他大小相同）。
 
@@ -692,9 +653,7 @@ worker 每分钟运行一次维护。标 _空闲时_ 的步骤只为腾出空间
 - 不再有任何原始响应使用的存储桶对象 24 小时后删除（见「原始响应（R2）」，_空闲时_）；
 - 设置了 `RAW_R2_BUCKET` 时，为一小时以前仍在数据库中、没有上传任务的原始响应排上传任务，同时等待的最多 500 个（见「原始响应（R2）」）；
 - 删除抓取结束一天以上仍留着的暂存数据（`capture_staging`，没能提交的列表目标的预取）；
-- 为缩略图补记文件头中的宽高（记下尺寸之前生成的缩略图，_空闲时_）；
-- 为查询语言补齐旧收藏的话题标签、提及、链接域名与语言（_空闲时_；每批 500 行，进度存在 `settings` 的 `facets_backfill`，做完记 `facets filled`；见[架构](architecture.md#查询语言)）；
-- 使用 R2 时，把还只在本地的缩略图移到 R2（_空闲时_，每次最多 20 秒，受节流；见[架构](architecture.md#缩略图)）；
+- 查询语言用的话题标签、提及、链接域名与语言的抽取规则变了（`FACETS_VERSION` 提高）后，重新计算版本更低的行（_空闲时_；每批 500 行，做完记 `facets refreshed`；见[架构](architecture.md#查询语言)）；
 - 清理过期的网页会话、通行密钥挑战与 `/passkey` 链接；
 - 每 15 分钟读取存储用量并检查提醒，每天一次以及数据库变动后统计数据库组成（见「存储用量」，worker 自己发起的统计在 _空闲时_）；
 - 把空闲页面还给文件系统（_空闲时_）：空闲页面达到 1024 页（4 MiB）时运行 `PRAGMA incremental_vacuum(4096)`，每次最多 16 MiB，两次之间至少 15 分钟，所以积压最多每小时释放 64 MiB；日志 `released free database pages` 给出这次释放的页数、剩余空闲页数（`free`）和总页数（`pages`）。这要求数据库是 `auto_vacuum = INCREMENTAL`：新建的数据库默认如此，已有的数据库要 `VACUUM` 一次才能切换（生产环境已于 2026-11-25 切换；`cli.ts maintain --vacuum` 也会切换），否则这一步什么也不做。

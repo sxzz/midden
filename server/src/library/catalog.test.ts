@@ -8,11 +8,12 @@ describe('catalog', () => {
     expect(new Set(grouped).size).toBe(grouped.length)
     expect(grouped.toSorted()).toEqual(COLUMNS.slice(1).toSorted())
     const db = openDatabase(':memory:')
-    // But the id, which SQLite assigns, and the language, which follows the
-    // revision with the other facets (facets.ts).
+    // But the id, which SQLite assigns, and the language with the version
+    // of the facets, which follow the revision with the other facets
+    // (facets.ts).
     const stored = db.$client
       .prepare(
-        `SELECT name FROM pragma_table_info(?) WHERE name NOT IN ('id', 'lang')`,
+        `SELECT name FROM pragma_table_info(?) WHERE name NOT IN ('id', 'lang', 'facets_version')`,
       )
       .all('catalog')
       .map((row) => row.name)

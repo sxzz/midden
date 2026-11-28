@@ -4,7 +4,7 @@
 //   node scripts/bench-query.ts <db> [runs=20]
 //
 // With PLANS=1, the plan of each search's page query is printed too.
-// The copy is migrated and its facets filled first (as maintenance would).
+// The copy is migrated and its older facets worked out first.
 // A development copy has few hashtags, mentions and links, so where there
 // are fewer than a thousand, synthetic ones are added: a hashtag on every
 // third row (200 of them), a mention on every fifth (300 handles), a link
@@ -15,7 +15,7 @@ import { runRead } from '#agent/reads.ts'
 import { FsBlobStore } from '#blob/fs-store.ts'
 import { MediaSigner } from '#blob/signer.ts'
 import { openDatabase } from '#db/client.ts'
-import { backfillBatch } from '#library/facets.ts'
+import { refreshFacetsBatch } from '#library/facets.ts'
 import { authorKey } from '#library/list.ts'
 import { watchStatements } from '#reads/slow.ts'
 import type { AgentReader, Params } from '#agent/query.ts'
@@ -27,7 +27,8 @@ if (!file) {
 }
 const runs = Number(runsArg)
 const db = openDatabase(file)
-while (backfillBatch(db));
+for (let after = refreshFacetsBatch(db); after !== undefined;)
+  after = refreshFacetsBatch(db, after)
 const count = (table: string) =>
   (
     db.$client.prepare(`SELECT count(*) AS n FROM ${table}`).get() as {

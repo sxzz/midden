@@ -7,7 +7,6 @@ import {
   type Verification,
 } from './bucket-store.ts'
 import { digestFile, digestStream, type Digest } from './digest.ts'
-import { localCopyHold } from './local-copy.ts'
 import { hexToBase64, type ObjectHead } from './s3.ts'
 import { IMMUTABLE, isNotFound, objectPath } from './store.ts'
 import type { Database } from '#db/client.ts'
@@ -49,8 +48,6 @@ export interface MigrateSummary {
   /** Local originals deleted once recorded (or, in a dry run, that would be). */
   localDeleted: number
   localBytes: number
-  /** Local originals kept once recorded, for thumbnails (`localCopyHold`). */
-  localKept: number
   /** No local file and no verified copy in the bucket. */
   missing: number
   /** The local file does not hash to its key. */
@@ -147,8 +144,8 @@ async function localDigest(
 }
 
 /**
- * Upload every blob not yet recorded in the bucket (`media-migrate`):
- * hash the local file first, keep an object already there (copied with
+ * Upload every blob not yet recorded in the bucket (`media-migrate`), such
+ * as those the server's upload job gave up on (`capture/upload.ts`): hash the local file first, keep an object already there (copied with
  * rclone, or by an interrupted run) when its size and checksum match,
  * fixing its headers on the server, otherwise upload; then read the object
  * back, record the blob as stored and delete its local file, as the
@@ -179,7 +176,6 @@ export async function migrateMedia(
     bytesUploaded: 0,
     localDeleted: 0,
     localBytes: 0,
-    localKept: 0,
     missing: 0,
     hashMismatch: 0,
     failed: 0,
@@ -225,10 +221,6 @@ export async function migrateMedia(
   // Only after recording: a run cut off in between, or a failed deletion,
   // leaves the file to `media-prune-local`. The record stays either way.
   const deleteLocal = async (blob: Blob, size: number) => {
-    if (localCopyHold(db, blob)) {
-      summary.localKept++
-      return
-    }
     try {
       if (!dryRun) await store.deleteLocal(blob.hash)
     } catch (error) {
@@ -371,11 +363,6 @@ export interface PruneSummary {
   bytes: number
   /** Already gone locally. */
   absent: number
-  /**
-   * Also a thumbnail's file, which stays local, or its thumbnail is still
-   * to be rendered from it (see `localCopyHold`).
-   */
-  thumbnails: number
   /** The bucket's object carries no checksum; kept without a download. */
   unverified: number
   /** The bucket's object is wrong: kept, and no longer recorded there. */
@@ -387,11 +374,10 @@ export interface PruneSummary {
  * Delete local originals whose object in the bucket is confirmed
  * (`media-prune-local`): recorded there, the right size and headers, and a
  * checksum (or, with `verifyDownload`, the downloaded bytes) matching the
- * local file. Thumbnails stay. An object found wrong is no longer recorded,
- * so the web goes back to the local file and the next migration uploads it.
- * The upload job and `media-migrate` delete local originals themselves;
- * this is for what they left: recorded before they did, kept for a
- * thumbnail, or a deletion that failed.
+ * local file. An object found wrong is no longer recorded, so the web goes
+ * back to the local file and the next `media-migrate` uploads it. The
+ * upload job and `media-migrate` delete local originals themselves; this
+ * is for what they left: a deletion that failed or was cut off.
  */
 export async function pruneLocalMedia(
   db: Database,
@@ -405,7 +391,6 @@ export async function pruneLocalMedia(
     deleted: 0,
     bytes: 0,
     absent: 0,
-    thumbnails: 0,
     unverified: 0,
     mismatched: 0,
     failed: 0,
@@ -417,10 +402,6 @@ export async function pruneLocalMedia(
     `${summary.blobs}/${total} checked, ${summary.deleted} local files ${dryRun ? 'to delete' : 'deleted'} (${formatBytes(summary.bytes)})`
 
   const one = async (blob: Blob) => {
-    if (localCopyHold(db, blob)) {
-      summary.thumbnails++
-      return
-    }
     const local = await localDigest(store, blob.hash)
     if (!local) {
       summary.absent++
@@ -497,7 +478,7 @@ export async function mediaCommand(
         `uploaded ${s.uploaded} (${formatBytes(s.bytesUploaded)}), replaced ${s.replaced}`,
         `already in the bucket ${Object.values(s.present).reduce((a, b) => a + b, 0)}${present ? ` (verified ${present})` : ''}, headers fixed ${s.headersFixed}`,
         `recorded in the bucket ${s.marked}${s.uploadedMeanwhile ? ` (and ${s.uploadedMeanwhile} by the server meanwhile)` : ''}${s.sample ? `, e.g. ${s.sample}` : ''}`,
-        `${options.dryRun ? 'would delete' : 'deleted'} ${s.localDeleted} local files (${formatBytes(s.localBytes)}), kept ${s.localKept} for thumbnails`,
+        `${options.dryRun ? 'would delete' : 'deleted'} ${s.localDeleted} local files (${formatBytes(s.localBytes)})`,
         `missing locally ${s.missing}, hash mismatch ${s.hashMismatch}, failed ${s.failed}`,
       ].join('\n'),
     )
@@ -508,7 +489,7 @@ export async function mediaCommand(
     [
       `${prefix}checked ${s.blobs} blobs`,
       `${options.dryRun ? 'would delete' : 'deleted'} ${s.deleted} local files (${formatBytes(s.bytes)})`,
-      `already gone ${s.absent}, kept for thumbnails ${s.thumbnails}`,
+      `already gone ${s.absent}`,
       `kept unverified ${s.unverified}, kept as wrong in the bucket ${s.mismatched}, failed ${s.failed}`,
     ].join('\n'),
   )

@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, test } from 'vitest'
-import { backfillFacets } from '#capture/maintenance.ts'
+import { refreshFacets } from '#capture/maintenance.ts'
 import { capture, entity, graph, libraryContext } from '#testing/library.ts'
 import {
-  BACKFILL_KEY,
-  backfillState,
   domainOf,
   FACETS_VERSION,
   hashtagsOf,
@@ -204,7 +202,7 @@ describe('facets of captured items', () => {
     })
   })
 
-  test('are filled for older rows by maintenance, resuming where it stopped', async () => {
+  test('of an older version are worked out again by maintenance, resuming where it stopped', async () => {
     const routes: Record<string, () => Partial<FetchResponse>> = {}
     for (let i = 0; i < 5; i++)
       routes[`p${i}`] = post(`p${i}`, `#tag${i} 今日は猫の日`, [`u${i}`])
@@ -212,43 +210,44 @@ describe('facets of captured items', () => {
     for (let i = 0; i < 5; i++) await capture(c, `https://fake.test/p/p${i}`)
     const filled = facetRows(c)
     expect(filled.hashtags).toHaveLength(5)
-    // As before the tables existed.
+    expect(older(c)).toBe(0)
+    // As an older version left them: none.
     c.db.$client.exec(`
       DELETE FROM post_hashtags; DELETE FROM post_mentions;
-      DELETE FROM post_domains; UPDATE catalog SET lang = NULL;
-      DELETE FROM settings WHERE key = 'facets_backfill'`)
+      DELETE FROM post_domains;
+      UPDATE catalog SET lang = NULL, facets_version = ${FACETS_VERSION - 1}`)
     // Not idle: nothing.
-    expect(await backfillFacets(c, () => false)).toBe(0)
-    expect(backfillState(c.db).after).toBe(0)
+    expect(await refreshFacets(c, () => false)).toBe(0)
+    expect(older(c)).toBe(5)
     // One batch of two, then the worker is busy.
     let turns = 1
-    expect(await backfillFacets(c, () => turns-- > 0, 2)).toBe(1)
-    expect(backfillState(c.db)).toMatchObject({ done: false })
+    expect(await refreshFacets(c, () => turns-- > 0, 2)).toBe(1)
+    expect(older(c)).toBe(3)
     expect(facetRows(c).hashtags).toEqual(['tag0', 'tag1'])
-    expect(await backfillFacets(c, () => true, 2)).toBe(2)
-    expect(backfillState(c.db).done).toBe(true)
+    expect(await refreshFacets(c, () => true, 2)).toBe(2)
+    expect(older(c)).toBe(0)
     expect(facetRows(c)).toEqual(filled)
   })
 
-  test('are filled again from the start when the version moves', async () => {
+  test('a version bump replaces values the older version got wrong', async () => {
     const c = setup({ p1: post('p1', '今天天气很好，我们去公园散步吧') })
     await capture(c, 'https://fake.test/p/p1')
     expect(facetRows(c).lang).toEqual(['zh-Hans'])
-    // As the previous version left it: done, with its own language.
-    c.db.$client.exec("UPDATE catalog SET lang = 'zh'")
-    c.db.$client
-      .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
-      .run(
-        BACKFILL_KEY,
-        JSON.stringify({ version: FACETS_VERSION - 1, after: 99, done: true }),
-      )
-    expect(backfillState(c.db)).toEqual({
-      version: FACETS_VERSION,
-      after: 0,
-      done: false,
-    })
-    await backfillFacets(c)
-    expect(backfillState(c.db).done).toBe(true)
+    // As the previous version left it, with its own language.
+    c.db.$client.exec(
+      `UPDATE catalog SET lang = 'zh', facets_version = ${FACETS_VERSION - 1}`,
+    )
+    expect(await refreshFacets(c)).toBe(1)
     expect(facetRows(c).lang).toEqual(['zh-Hans'])
+    expect(older(c)).toBe(0)
   })
 })
+
+/** Rows whose facets are of an older version. */
+function older(c: CaptureContext): number {
+  return (
+    c.db.$client
+      .prepare('SELECT count(*) AS n FROM catalog WHERE facets_version < ?')
+      .get(FACETS_VERSION) as { n: number }
+  ).n
+}
