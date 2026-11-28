@@ -2,6 +2,7 @@
 // invites a friend, who registers a passkey and becomes a viewer with a
 // nickname of their own; the admin notes, revokes and deletes them.
 import { Buffer } from 'node:buffer'
+import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, test } from 'vitest'
 import { deriveKey, unseal } from '#crypto.ts'
@@ -10,7 +11,7 @@ import { handle } from '#telegram/commands.ts'
 import { softAuthenticator } from '#testing/authenticator.ts'
 import { testContext } from '#testing/context.ts'
 import { createToken } from '#tokens/tokens.ts'
-import { INVITE_TTL, pruneInvites } from '#users/invites.ts'
+import { INVITE_TTL, newToken, pruneInvites } from '#users/invites.ts'
 import { adminId } from '#users/users.ts'
 import { createApi, SESSION_COOKIE } from './app.ts'
 import { addOrigin } from './origins.ts'
@@ -78,7 +79,7 @@ function setup() {
       invite: { id: string }
       url: string
     }
-    expect(url).toMatch(new RegExp(String.raw`^${MAIN}/invite#[\w-]{43}$`))
+    expect(url).toMatch(new RegExp(String.raw`^${MAIN}/invite#[A-Za-z\d]{43}$`))
     return { id: invite.id, token: url.split('#', 2)[1]! }
   }
   async function options(token: string, origin = MAIN, name = '小明') {
@@ -529,6 +530,7 @@ describe('invites', () => {
     }
     const token = url.split('#', 2)[1]!
     expect(token).not.toBe(old)
+    expect(token).toMatch(/^[A-Z0-9]+$/i)
     expect(invite).toMatchObject({
       id,
       label: '小红',
@@ -585,6 +587,30 @@ describe('invites', () => {
     expect(
       s.ctx.db.select().from(invites).where(eq(invites.id, id)).get(),
     ).toMatchObject({ sealedToken: null, revokedAt: expect.any(Date) })
+  })
+
+  test('a token is letters and digits only, 43 of them, so a double-click selects it whole', () => {
+    for (let i = 0; i < 200; i++) expect(newToken()).toMatch(/^[A-Z0-9]{43}$/i)
+    // The extremes of 32 bytes still make 43 characters.
+    expect(newToken(new Uint8Array(32))).toBe('0'.repeat(43))
+    expect(newToken(new Uint8Array(32).fill(255))).toMatch(/^[A-Z0-9]{43}$/i)
+  })
+
+  test('a link made before, its token in base64url, still opens its invite', async () => {
+    const s = setup()
+    const { id } = await s.invite('旧链接')
+    const old = 'Ab-_'.repeat(10).concat('x-_')
+    s.ctx.db
+      .update(invites)
+      .set({
+        digest: createHash('sha256').update(old).digest('hex'),
+        sealedToken: null,
+      })
+      .where(eq(invites.id, id))
+      .run()
+    const check = await s.call('POST', '/auth/invite/check', { token: old })
+    expect(check.status).toBe(204)
+    expect((await s.options(old)).status).toBe(200)
   })
 
   test('the invite page checks its link and learns nothing of the label', async () => {

@@ -34,7 +34,23 @@ export interface PendingInvite extends InviteView {
 const digestOf = (token: string) =>
   createHash('sha256').update(token).digest('hex')
 
-const newToken = () => randomBytes(32).toString('base64url')
+const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+/**
+ * A link's token: 32 random bytes in base 62, always 43 letters and digits
+ * (62^43 > 2^256). A double-click selects all of it in the link, where
+ * base64url's `-` and `_` would end the word. Tokens made before, in
+ * base64url, are just as long and still open their invites: an invite is
+ * looked up by its token's digest, whatever the letters.
+ */
+export function newToken(bytes: Uint8Array = randomBytes(32)) {
+  let n = BigInt(`0x${Buffer.from(bytes).toString('hex')}`)
+  let token = ''
+  for (let i = 0; i < 43; i++) {
+    token = BASE62[Number(n % 62n)]! + token
+    n /= 62n
+  }
+  return token
+}
 
 /** What a sealed token is bound to: its row, so it opens nowhere else. */
 const aadOf = (id: string) => `invite:${id}`
