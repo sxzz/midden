@@ -4,7 +4,62 @@
 
 生产环境使用 `compose.yaml` 运行同一个镜像的两个容器，镜像内含 Node.js 26，不含其他程序（缩略图与媒体尺寸来自平台，见[架构](architecture.md#缩略图)）：`midden` 是网页进程（`MIDDEN_ROLE=web`：HTTP、Telegram Bot、Litestream 心跳），`midden-worker` 运行任务队列和定时的维护（`MIDDEN_ROLE=worker`），见[架构](architecture.md#进程)。两个容器读同一个 `.env`，以非 root 用户运行，数据目录都挂载到 `/data`。`midden-worker` 等 `midden` 健康后才启动（迁移由网页进程应用），它的健康检查是容器内 `127.0.0.1:8082/healthz`，不对外发布端口。可选的第三个容器 `litestream` 把数据库持续复制到 R2，见「Litestream」。
 
-对外访问需要 HTTPS 反向代理（例如 Cloudflare Tunnel），把一个域名整个转发到服务端口。网页与 API 可以在同一个域名：本服务在 `/` 提供网页（构建时不设 `VITE_API_URL`），在 `/v1/`、`/media/`、`/agent/v1/`、`/healthz` 提供 API，网页的 `/agent.md` 是给 AI agent 的说明。也可以分开（见下面的「网页单独部署」）。Mini App 与通行密钥都要求 HTTPS。
+对外访问需要 HTTPS 反向代理，把 API 的域名整个转发到服务端口（见下面的「对外访问」）。网页与 API 可以在同一个域名：本服务在 `/` 提供网页（构建时不设 `VITE_API_URL`），在 `/v1/`、`/media/`、`/agent/v1/`、`/healthz` 提供 API，网页的 `/agent.md` 是给 AI agent 的说明。也可以分开（见下面的「网页单独部署」）。Mini App 与通行密钥都要求 HTTPS。
+
+### 对外访问
+
+API 的域名（`api.example.com`）有两种接入方式：部署机有公网 IP 时用反向代理（推荐），没有时（例如在家里）用 Cloudflare Tunnel。
+
+#### 反向代理
+
+在部署机上运行 Caddy（或别的反向代理），自动申请并续期 HTTPS 证书：
+
+1. DNS：`api.example.com` 的 A / AAAA 记录指向部署机的公网地址，只做 DNS，不经 Cloudflare 代理（灰云）。
+2. 代理把 `/hooks/deploy` 转发到自动部署的 webhook（见「自动部署」），其余都转发到网页进程（`midden` 容器的 8080 端口）。
+
+```caddyfile
+api.example.com {
+	handle /hooks/deploy {
+		reverse_proxy <bridge gateway IP>:18090
+	}
+	handle {
+		reverse_proxy midden:8080
+	}
+}
+```
+
+Caddy 在容器里时，要让它够得到 midden，有两种办法：
+
+- 网页进程：在部署机上放一个 `compose.override.yaml`（不在仓库里，加进 `.git/info/exclude`），把 `midden` 服务接入代理所在的外部 Docker 网络，并给一个别名。`docker compose` 自动合并它，部署脚本照常运行。
+
+```yaml
+services:
+  midden:
+    networks:
+      default:
+      proxy:
+        aliases:
+          - midden
+
+networks:
+  proxy:
+    external: true
+    name: <proxy network>
+```
+
+- webhook：它运行在宿主机上，不在 Docker 网络里。安装时让它监听那个网络在宿主机一侧的网桥网关地址（`docker network inspect <proxy network>` 的 `Gateway`）：`node scripts/install-deploy-webhook.ts --host <bridge gateway IP>`（环境变量 `DEPLOY_WEBHOOK_HOST`），容器经这个地址访问它。该地址只在 Docker 网桥上，不对公网开放；webhook 本来就用 GitHub 的 HMAC 签名校验每个请求，不依赖网络位置。
+
+代理不在容器里时，直接转发到 `127.0.0.1:8080` 与 `127.0.0.1:18090`，不需要上面两项。
+
+部署机在机房、采集账号需要住宅地址时，用「采集账号的出口（`SESSION_PROXY`）」把带账号会话的请求经家里的代理发出，见下面同名一节。
+
+#### Cloudflare Tunnel
+
+部署机没有公网 IP 时，用 Cloudflare Tunnel（`cloudflared`）把 `api.example.com` 转发到 `http://127.0.0.1:8080`，把 `/hooks/deploy` 转发到 `http://127.0.0.1:18090`（路径更具体的规则放在前面）。DNS 记录由隧道创建，不需要公网 IP 与开放端口。
+
+#### 网页的域名
+
+网页单独部署时（见「网页单独部署」），它的域名是 Workers 的路由，由 Cloudflare 边缘回答，不经过隧道或反向代理，也没有源站。DNS 里只需有这个域名的记录且经 Cloudflare 代理（橙云）；没有真实地址时可以用占位的 AAAA 记录 `100::`。
 
 ## 网页登录
 
@@ -18,6 +73,7 @@
   ```
 
   打开 `no admin passkey yet; open this link to add one` 那一行的 `link`，创建通行密钥，创建后即已登录。这个链接不过期，每次启动都是同一个，只能用一次，只在 `WEB_APP_URL` 的域名上可用；管理员有了通行密钥后它就失效，日志中也不再出现。没有设置 `WEB_APP_URL` 时这一行只有路径（`path`），设置后重启 `midden`。部署重建容器会清空 `docker compose logs`，但新容器启动时又记一次；数据目录的 `logs/midden.log` 也有。
+
 - 也可以在 Telegram 私聊 Bot 发送 `/passkey`，点开要登录的域名对应的按钮，在打开的页面上创建通行密钥，创建后即已登录。链接 10 分钟内有效，只能用一次。
 - 通行密钥只能在创建它的域名上使用。每个域名各需要一个：在该域名上用 `/passkey` 的链接创建，或在已登录的页面「设置 → 通行密钥」中添加。
 - 通行密钥全部删除后，再发送 `/passkey` 即可添加新的；管理员的全部删除后，重启 `midden` 时日志中也有一个新的初始链接，之前的不再有效。
@@ -35,7 +91,7 @@
 
 ### 网页单独部署
 
-生产环境的网页在 Cloudflare 静态托管（`pnpm --filter @midden/web run deploy`，`https://web.example.com/`），API 在另一个域名（`https://api.example.com`，隧道转发到本服务）：
+生产环境的网页在 Cloudflare 静态托管（`pnpm --filter @midden/web run deploy`，`https://web.example.com/`），API 在另一个域名（`https://api.example.com`，反向代理或隧道转发到本服务）：
 
 - 构建时 `VITE_API_URL` 设为 API 的来源，网页的请求都发到那里，带上 API 域名的会话 Cookie（`credentials: 'include'`）；`scripts/prepare-web-assets.ts` 把它加进 CSP 的 `connect-src`、`img-src`、`media-src`；构建时还要设 `MIDDEN_MEDIA_URL` 为媒体的公开域名（`MEDIA_PUBLIC_URL` 的来源），没有设置时构建失败。
 - `WEB_APP_URL` 是网页的地址（`https://web.example.com/`）：API 只对它和「域名」中添加的来源回答 CORS。网页的域名与 API 必须是同一个站点（同一个注册域名，如这里的 `example.com`），否则阻止第三方 Cookie 的浏览器（Safari 等）不会把 Cookie 发给 API，网页无法登录。
@@ -178,7 +234,7 @@ node scripts/deploy.ts
 node scripts/install-deploy-webhook.ts --dir ~/midden
 ```
 
-GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<API 的域名>/hooks/deploy`，密钥与 `.local/deploy-webhook.secret` 相同；隧道把该路径转发到 18090 端口。网页的域名整个由 Cloudflare 静态托管回答，不能用它。升级 Node 后重新运行安装命令。修改 `scripts/deploy-webhook.ts` 后同样要重新运行安装命令：安装的是副本，安装脚本在 macOS 上 `bootout` 再 `bootstrap` LaunchAgent，在 Linux 上 `systemctl daemon-reload`、`enable` 后 `restart` 单元，都会重启它。
+GitHub 仓库的 webhook 发送 Workflow runs 事件到 `https://<API 的域名>/hooks/deploy`，密钥与 `.local/deploy-webhook.secret` 相同；代理或隧道把该路径转发到 18090 端口（反向代理的写法见「对外访问」；`--host` 改变监听的地址）。网页的域名整个由 Cloudflare 静态托管回答，不能用它。升级 Node 后重新运行安装命令。修改 `scripts/deploy-webhook.ts` 后同样要重新运行安装命令：安装的是副本，安装脚本在 macOS 上 `bootout` 再 `bootstrap` LaunchAgent，在 Linux 上 `systemctl daemon-reload`、`enable` 后 `restart` 单元，都会重启它。
 
 ### Linux 主机
 
@@ -194,7 +250,7 @@ node scripts/install-deploy-webhook.ts
 systemctl status midden-deploy-webhook
 ```
 
-root 安装的是系统单元 `/etc/systemd/system/midden-deploy-webhook.service`：`Wants=` 与 `After=` `network-online.target`、`docker.service`，`Restart=always`（间隔 10 秒），开机启动（`multi-user.target`）。环境变量与 LaunchAgent 相同（`MIDDEN_DIR`、`DEPLOY_WEBHOOK_PORT`、`PATH`），另加 `HOME`：没有 `User=` 的系统单元没有它，git 和 docker 从中读配置。stdout 与 stderr 追加到 `.local/deploy-webhook/stdout.log`、`stderr.log`（`StandardOutput=append:`），不进 journald，`journalctl -u midden-deploy-webhook` 只有启动与停止；每次部署的日志照旧在同一目录。密钥仍是 `.local/deploy-webhook.secret`，隧道仍转发到 `127.0.0.1:18090`。
+root 安装的是系统单元 `/etc/systemd/system/midden-deploy-webhook.service`：`Wants=` 与 `After=` `network-online.target`、`docker.service`，`Restart=always`（间隔 10 秒），开机启动（`multi-user.target`）。环境变量与 LaunchAgent 相同（`MIDDEN_DIR`、`DEPLOY_WEBHOOK_PORT`、`PATH`），另加 `HOME`：没有 `User=` 的系统单元没有它，git 和 docker 从中读配置。stdout 与 stderr 追加到 `.local/deploy-webhook/stdout.log`、`stderr.log`（`StandardOutput=append:`），不进 journald，`journalctl -u midden-deploy-webhook` 只有启动与停止；每次部署的日志照旧在同一目录。密钥仍是 `.local/deploy-webhook.secret`，代理或隧道仍转发到 `127.0.0.1:18090`（或 `--host` 给的地址）。
 
 其他用户安装的是用户单元 `~/.config/systemd/user/midden-deploy-webhook.service`（`systemctl --user`）：用户的 systemd 不能排在系统的 `docker.service` 之后，所以没有这些依赖；不登录时不运行，除非 `loginctl enable-linger <用户>`。
 
@@ -402,8 +458,8 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
 带采集账号会话（cookie、token）的请求可以经一个正向代理发出，让平台看到它们来自平时使用这个账号的地址，而不是机房的地址（机房地址更容易被要求验证）。设置 `SESSION_PROXY` 后，这些请求都经它发出；不设置时与以前一样直接发出。见架构文档「采集账号的出口」。
 
-| 变量            | 说明                                                                                                                       |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 变量            | 说明                                                                                                                    |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `SESSION_PROXY` | `http://<host>:<port>`（HTTP 代理，经 CONNECT 隧道）或 `socks5://<host>:<port>`。只有主机和端口，不带用户名、密码或路径 |
 
 - 经代理：X 的账号接口（GraphQL：帖子、时间线、按用户名查询、关注与粉丝列表、账号验证 `Viewer`）和账号的 `x.com/home` 页面（请求签名、账号验证），Instagram 的全部账号请求。
