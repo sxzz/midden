@@ -415,9 +415,12 @@ if (import.meta.main) {
   // DEPLOY_WEBHOOK_CHECK=1 only runs `deploy.ts --check`, for trying it out.
   const check = process.env.DEPLOY_WEBHOOK_CHECK === '1'
   const trigger = createDeployer(() => deployLatest(dir, repository, check))
+  // Loopback unless the reverse proxy in front reaches the host another way
+  // (a container's bridge gateway, e.g. 172.18.0.1).
+  const host = process.env.DEPLOY_WEBHOOK_HOST || '127.0.0.1'
   createServer(createHandler({ secret, repository, trigger })).listen(
     port,
-    '127.0.0.1',
-    () => console.info(`deploy webhook listening on 127.0.0.1:${port}${PATH}`),
+    host,
+    () => console.info(`deploy webhook listening on ${host}:${port}${PATH}`),
   )
 }

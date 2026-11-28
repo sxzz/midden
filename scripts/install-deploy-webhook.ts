@@ -5,7 +5,7 @@
 // webhook (workflow runs, to https://<API host>/hooks/deploy) and the tunnel
 // route to the port are configured separately.
 //
-//   node scripts/install-deploy-webhook.ts [--dir <checkout>] [--port 18090] [--print]
+//   node scripts/install-deploy-webhook.ts [--dir <checkout>] [--port 18090] [--host 127.0.0.1] [--print]
 /* eslint-disable unicorn/no-exports-in-scripts -- for install-deploy-webhook.test.ts */
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
@@ -34,6 +34,8 @@ export interface Setup {
   /** The deployment checkout. */
   dir: string
   port: string
+  /** The address it listens on; loopback when unset. */
+  host?: string
   /** The Node binary, process.execPath of the installer. */
   node: string
   /** The installed copy of deploy-webhook.ts. */
@@ -54,6 +56,7 @@ function environment(setup: Setup): Record<string, string> {
   return {
     MIDDEN_DIR: setup.dir,
     DEPLOY_WEBHOOK_PORT: setup.port,
+    ...(setup.host ? { DEPLOY_WEBHOOK_HOST: setup.host } : {}),
     PATH: setup.PATH,
   }
 }
@@ -179,6 +182,7 @@ if (import.meta.main) {
     options: {
       dir: { type: 'string', default: deploymentDir() },
       port: { type: 'string', default: '18090' },
+      host: { type: 'string' },
       print: { type: 'boolean', default: false },
     },
   })
@@ -200,6 +204,7 @@ if (import.meta.main) {
   const setup: Setup = {
     dir,
     port: values.port,
+    ...(values.host ? { host: values.host } : {}),
     node: process.execPath,
     script: path.join(installed, 'deploy-webhook.ts'),
     // Deployments call these; git also runs credential helpers written for
@@ -256,7 +261,7 @@ if (import.meta.main) {
       }).trim(),
     )
     console.info(
-      `Installed ${serviceName(definition)} (${definition.file}): ${setup.script}, listening on 127.0.0.1:${values.port}`,
+      `Installed ${serviceName(definition)} (${definition.file}): ${setup.script}, listening on ${values.host ?? '127.0.0.1'}:${values.port}`,
     )
     if (definition.manager === 'systemd' && definition.user)
       console.info(
