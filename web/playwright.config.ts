@@ -12,7 +12,9 @@ const origin = `http://127.0.0.1:${port}`
 
 export default defineConfig({
   testDir: 'e2e',
-  globalTimeout: 5 * 60 * 1000,
+  // The suite outgrew 5 minutes on CI's runners (311 of 319 by then); a
+  // local run stays capped, since the devbox shares its CPU.
+  globalTimeout: (process.env.CI ? 10 : 5) * 60 * 1000,
   forbidOnly: !!process.env.CI,
   reporter: 'list',
   use: {
