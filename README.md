@@ -51,7 +51,7 @@ docker compose up -d
 1. 通过 BotFather 创建 Bot，取得 token；通过 [@userinfobot](https://t.me/userinfobot) 等方式查到自己的用户 ID。
 2. 填入 `TELEGRAM_BOT_TOKEN` 和 `OWNER_TELEGRAM_ID`，重新启动：`docker compose up -d`。
 3. 网页需通过 HTTPS 对外提供（例如 Cloudflare Tunnel，把整个域名转发到本服务），并设置 `WEB_APP_URL`。网页也可以单独部署、API 用另一个域名，见 [运维](docs/operations.md#网页单独部署)。
-4. 浏览器用通行密钥登录。第一次在 Telegram 私聊 Bot 发送 `/passkey`，点开链接创建通行密钥，见 [运维](docs/operations.md#网页登录)。
+4. 浏览器用通行密钥登录。第一次打开网页进程启动日志中的初始链接（`docker compose logs midden | grep passkey`），或在 Telegram 私聊 Bot 发送 `/passkey` 点开链接，创建通行密钥，见 [运维](docs/operations.md#网页登录)。
 
 Bot 只回应所有者：私聊中直接发送链接或命令；群聊中需 @Bot 或使用 `/命令@Bot`，其他成员的消息和按钮一律忽略。命令菜单会在启动时自动同步，`/help` 查看说明。
 

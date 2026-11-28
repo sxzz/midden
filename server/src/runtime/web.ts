@@ -10,6 +10,7 @@ import { deriveKey } from '#crypto.ts'
 import { createApi } from '#http/app.ts'
 import { WebLoad } from '#http/load.ts'
 import { pooledWebReads } from '#http/offload.ts'
+import { logInitLink } from '#http/passkey-init.ts'
 import { watchLitestream } from '#litestream.ts'
 import { QueryPool, READ_THREAD } from '#reads/pool.ts'
 import { SlowQueryLog } from '#reads/slow-log.ts'
@@ -114,6 +115,8 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
   // Finished capture records the threads keep between polls may be out of
   // date after a write (`capture/record-cache.ts`).
   const forget = () => pool.broadcast('forget')
+  const passkeyInitKey = deriveKey(config.secretKey, 'passkey-init')
+  logInitLink({ db, logger, webAppUrl: config.webAppUrl }, passkeyInitKey)
   const api = createApi({
     ctx,
     telegram: config.telegram,
@@ -124,6 +127,7 @@ export function startWeb(rt: Runtime, options: WebOptions): WebHandle {
     queue: { worker: options.worker, web: () => load.report() },
     challengeKey: deriveKey(config.secretKey, 'passkey-challenge'),
     inviteKey: deriveKey(config.secretKey, 'invite-links'),
+    passkeyInitKey,
     notify,
     tokenUsage,
     reads: pooledWebReads(pool),

@@ -73,6 +73,11 @@ export interface HttpOptions {
   challengeKey?: Buffer
   /** Seals invite tokens at rest; derived from SECRET_KEY. */
   inviteKey?: Buffer
+  /**
+   * Makes the init link's token (`passkey-init.ts`); derived from
+   * SECRET_KEY. Without it the link is good nowhere.
+   */
+  passkeyInitKey?: Buffer
   /** Tell the owner, through the bot, that a passkey or domain came or went. */
   notify?: (text: string) => void
   now?: () => number
@@ -136,6 +141,15 @@ export function createApi(options: HttpOptions) {
     store: {
       db: ctx.db,
       challenges: new Challenges(options.challengeKey ?? randomBytes(32)),
+      ...(options.passkeyInitKey
+        ? {
+            init: {
+              key: options.passkeyInitKey,
+              // Where the logged link points, and the one origin it is good on.
+              origin: webAppUrl ? new URL(webAppUrl).origin : undefined,
+            },
+          }
+        : {}),
     },
     origins,
     notify: options.notify,

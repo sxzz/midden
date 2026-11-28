@@ -71,13 +71,12 @@ const bodies = (api: ReturnType<typeof mockApi>, path: string) =>
     .map(([, r]) => (r.body ? JSON.parse(r.body) : undefined))
 
 describe('login page', () => {
-  it('signs in with a passkey and says how to get the first one', async () => {
+  it('signs in with a passkey', async () => {
     const api = mockApi((path) =>
       path === '/auth/passkey/options' ? { challenge: 'c' } : undefined,
     )
     const done = vi.fn()
     const el = mount(PasskeyLogin, { onDone: done })
-    expect(el.textContent).toContain('首次使用请在Telegram中发送 /passkey')
     button(el, '使用通行密钥登录').click()
     await vi.waitFor(() => expect(done).toHaveBeenCalled())
     expect(browser.startAuthentication).toHaveBeenCalledWith({

@@ -144,7 +144,7 @@ test('a /passkey link adds a passkey, which then signs in', async ({
   session = false
   await page.goto(APP)
   await expect(
-    page.getByText('首次使用请在Telegram中发送 /passkey'),
+    page.getByRole('button', { name: '使用通行密钥登录' }),
   ).toBeVisible()
   await page.screenshot({ path: 'test-results/passkey-login.png' })
   await page.getByRole('button', { name: '使用通行密钥登录' }).click()

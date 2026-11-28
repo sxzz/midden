@@ -13,6 +13,7 @@ import { HTTPException } from 'hono/http-exception'
 import { newId } from '#db/id.ts'
 import { passkeys, passkeyTokens, users } from '#db/schema.ts'
 import { adminId } from '#users/users.ts'
+import { forgetInitLink, isInitToken, type InitLink } from './passkey-init.ts'
 import type { Database, Executor } from '#db/client.ts'
 import type { Challenges } from './challenges.ts'
 
@@ -29,10 +30,15 @@ const digest = (value: string) =>
 const fail = (status: 400 | 403 | 409, message: string) =>
   new HTTPException(status, { message })
 
+// The same for every link, so a refusal tells none from another.
+const LINK_GONE = '链接已失效，请在 Telegram 中重新发送 /passkey'
+
 /** Where the passkey ceremonies keep and check their state. */
 export interface PasskeyStore {
   db: Database
   challenges: Challenges
+  /** The init link of a fresh install; absent, it is good nowhere. */
+  init?: InitLink
 }
 
 /** A passkey is bound to the host name of the origin it was created on. */
@@ -108,8 +114,23 @@ function tokenDigest(
     .where(eq(passkeyTokens.digest, key))
     .get()
   if (!row || row.origin !== origin || row.expiresAt.getTime() <= now)
-    throw fail(403, '链接已失效，请在 Telegram 中重新发送 /passkey')
+    throw fail(403, LINK_GONE)
   return key
+}
+
+/**
+ * What a registration with a link's token is bound to: the init link, or
+ * a /passkey link still good on this origin. Neither one's challenge
+ * answers for the other.
+ */
+function linkBinding(
+  { db, init }: PasskeyStore,
+  token: string,
+  origin: string,
+  now: number,
+): string {
+  if (isInitToken(db, init, token, origin)) return `init:${digest(token)}`
+  return `link:${tokenDigest(db, token, origin, now)}`
 }
 
 // --- Registration --------------------------------------------------------------
@@ -181,9 +202,9 @@ export function creationOptions(
 }
 
 /**
- * Options to create a passkey on this origin: with a /passkey link's token
- * (one of the admin's), or signed in as `caller`, for `user`. The challenge
- * is bound to either.
+ * Options to create a passkey on this origin: with a /passkey link's or
+ * the init link's token (one of the admin's), or signed in as `caller`,
+ * for `user`. The challenge is bound to either.
  */
 export function registrationOptions(
   store: PasskeyStore,
@@ -194,7 +215,7 @@ export function registrationOptions(
   const { db } = store
   const binding =
     'token' in by
-      ? `link:${tokenDigest(db, by.token, origin, now)}`
+      ? linkBinding(store, by.token, origin, now)
       : `caller:${by.caller}`
   const user = passkeyUser(db, 'token' in by ? adminId(db) : by.user)
   return creationOptions(store, origin, user, binding, now)
@@ -250,6 +271,8 @@ export function keepPasskey(
   now = Date.now(),
 ): PasskeyView {
   const { credential } = input
+  // The init link is for the admin's first passkey; any one of theirs ends it.
+  if (input.user === adminId(tx)) forgetInitLink(tx)
   if (
     tx
       .select({ id: passkeys.id })
@@ -278,8 +301,8 @@ export function keepPasskey(
 
 /**
  * Check a new passkey against its challenge and keep it. The challenge must
- * have come from the same link or caller; a link is then used up, and adds
- * one of the admin's.
+ * have come from the same link or caller; a link (a /passkey link or the
+ * init link) is then used up, and adds one of the admin's.
  */
 export async function register(
   store: PasskeyStore,
@@ -290,8 +313,14 @@ export async function register(
   } & ({ token: string } | { caller: string; user: string }),
   now = Date.now(),
 ): Promise<PasskeyView> {
-  const linked = 'token' in input ? digest(input.token) : undefined
-  const binding = 'token' in input ? `link:${linked}` : `caller:${input.caller}`
+  const token = 'token' in input ? input.token : undefined
+  const linked = token === undefined ? undefined : digest(token)
+  const init =
+    token !== undefined && isInitToken(store.db, store.init, token, origin)
+  const binding =
+    'token' in input
+      ? `${init ? 'init' : 'link'}:${linked}`
+      : `caller:${input.caller}`
   const credential = await verifyCreation(
     store,
     origin,
@@ -300,7 +329,12 @@ export async function register(
     now,
   )
   return store.db.transaction((tx) => {
-    if (linked !== undefined) {
+    if (init) {
+      // Still good: no passkey of the admin's came meanwhile. Keeping this
+      // one ends it.
+      if (!isInitToken(tx, store.init, token!, origin))
+        throw fail(403, LINK_GONE)
+    } else if (linked !== undefined) {
       // The link is good once: whoever registers first uses it up.
       const used = tx
         .delete(passkeyTokens)
@@ -312,8 +346,7 @@ export async function register(
         )
         .returning()
         .get()
-      if (!used || used.expiresAt.getTime() <= now)
-        throw fail(403, '链接已失效，请在 Telegram 中重新发送 /passkey')
+      if (!used || used.expiresAt.getTime() <= now) throw fail(403, LINK_GONE)
     }
     return keepPasskey(
       tx,

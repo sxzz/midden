@@ -161,8 +161,9 @@ export const router = createRouter({
       props: idOnly,
       meta: { public: true },
     },
-    // A /passkey link from the bot: registers a passkey without signing in.
-    // App shows it in place of the library.
+    // A /passkey link from the bot, or the init link from the web process's
+    // log: registers a passkey without signing in. App shows it in place of
+    // the library.
     {
       // The token is in the fragment (`/passkey#<token>`), which no server
       // and no log sees.
