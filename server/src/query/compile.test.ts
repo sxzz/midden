@@ -718,7 +718,12 @@ describe('languages', () => {
       parsed: 'lang:zh-Hant',
       count: counts['zh-Hant'],
     })
+    expect(total('lang:zh-TW')).toEqual({
+      parsed: 'lang:zh-Hant',
+      count: counts['zh-Hant'],
+    })
     expect(total('lang:ja')).toEqual({ parsed: 'lang:ja', count: counts.ja })
+    expect(total('lang:ja-JP')).toEqual({ parsed: 'lang:ja', count: counts.ja })
   })
 
   test('aggregate by=lang: a bucket per stored value', () => {

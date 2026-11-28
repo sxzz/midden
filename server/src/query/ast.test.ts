@@ -208,6 +208,29 @@ describe('reading', () => {
       expect(canonical(canonical(text))).toBe(canonical(text))
   })
 
+  test('lang: a region maps to its script or is dropped', () => {
+    const cases: Record<string, string> = {
+      'zh-TW': 'zh-Hant',
+      'zh-HK': 'zh-Hant',
+      'zh-MO': 'zh-Hant',
+      'ZH-cn': 'zh-Hans',
+      'zh-SG': 'zh-Hans',
+      'zh-MY': 'zh-Hans',
+      'zh-Hant-TW': 'zh-Hant',
+      'zh-hans-CN': 'zh-Hans',
+      'zh-Hant': 'zh-Hant',
+      'en-US': 'en',
+      'ja-JP': 'ja',
+      'pt-BR': 'pt',
+      'es-419': 'es',
+      zh: 'zh',
+    }
+    for (const [input, expected] of Object.entries(cases))
+      expect(canonical(`lang:${input}`)).toBe(`lang:${expected}`)
+    expect(error('lang:zh-T').message).toContain('lang:')
+    expect(error('lang:en-USA').message).toContain('lang:')
+  })
+
   test('errors say what and where', () => {
     expect(error('a (b')).toEqual({
       message: 'This ( is never closed.',

@@ -216,9 +216,18 @@ const HANDLE = /^@[\w.]{1,64}$/
 const PLATFORM_HANDLE = /^[a-z][\w-]*:@[\w.]{1,64}$/
 const ACCOUNT_KEY = /^[^/\s]+\/[^/\s]+\/[^/\s]+$/
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
-// A language, optionally with its script (`zh-Hant`), as `catalog.lang`
-// stores them.
-const LANG = /^([a-z]{2,3})(?:-([a-z]{4}))?$/i
+// A language, optionally with its script (`zh-Hant`) as `catalog.lang`
+// stores them, and a region (`zh-TW`, `en-US`, `es-419`) that is never stored.
+const LANG = /^([a-z]{2,3})(?:-([a-z]{4}))?(?:-([a-z]{2}|\d{3}))?$/i
+// The regions that tell a Chinese script.
+const ZH_SCRIPT: Record<string, string> = {
+  TW: 'Hant',
+  HK: 'Hant',
+  MO: 'Hant',
+  CN: 'Hans',
+  SG: 'Hans',
+  MY: 'Hans',
+}
 const PLATFORM = /^[a-z][\w-]*$/
 
 const choices: Partial<Record<Key, Record<string, string>>> = {
@@ -327,14 +336,18 @@ function canonicalValue(key: Key, raw: string): string | BadValue {
       return domain ?? { error: `domain: takes a domain such as x.com.` }
     }
     case 'lang': {
-      const [, lang, script] = LANG.exec(value) ?? []
+      const [, lang, script, region] = LANG.exec(value) ?? []
       if (!lang)
         return {
-          error: `lang: takes a language code such as ja, zh, zh-Hant or en.`,
+          error: `lang: takes a language code such as ja, zh, zh-Hant, zh-TW or en.`,
         }
-      return script
-        ? `${lang.toLowerCase()}-${script[0]!.toUpperCase()}${script.slice(1).toLowerCase()}`
-        : lang.toLowerCase()
+      const code = lang.toLowerCase()
+      const regionScript =
+        code === 'zh' && region ? ZH_SCRIPT[region.toUpperCase()] : undefined
+      const named = script
+        ? `${script[0]!.toUpperCase()}${script.slice(1).toLowerCase()}`
+        : regionScript
+      return named ? `${code}-${named}` : code
     }
     case 'platform': {
       const lower = value.toLowerCase()
