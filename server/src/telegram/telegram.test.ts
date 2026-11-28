@@ -9,7 +9,13 @@ import {
   progressMessage,
   webRoute,
 } from './presentation.ts'
-import { addressedText, chunks, messageLinks, summaryLine } from './text.ts'
+import {
+  addressedText,
+  chunks,
+  messageLinks,
+  summaryLine,
+  threadLinks,
+} from './text.ts'
 import type { AssetView, CollectionView } from '#library/views.ts'
 
 const asset = (id: string, extra: Partial<AssetView> = {}): AssetView => ({
@@ -70,6 +76,39 @@ describe('text', () => {
         ],
       }),
     ).toEqual(['https://x.com/a/status/1', 'https://x.com/b'])
+  })
+
+  test('links of the replied-to message follow the own links', () => {
+    const own = {
+      text: '@OurBot https://a.test/1',
+      entities: [{ type: 'url', offset: 8, length: 16 }] as never,
+    }
+    const replied = {
+      text: 'see https://b.test/2 and https://a.test/1',
+      entities: [{ type: 'url', offset: 4, length: 16 }] as never,
+    }
+    expect(threadLinks({ ...own, reply_to_message: replied })).toEqual([
+      'https://a.test/1',
+      'https://b.test/2',
+    ])
+    expect(threadLinks(own)).toEqual(['https://a.test/1'])
+    expect(threadLinks({ text: '@OurBot', reply_to_message: replied })).toEqual(
+      ['https://b.test/2', 'https://a.test/1'],
+    )
+    expect(
+      threadLinks({
+        text: '@OurBot',
+        reply_to_message: {
+          caption: 'pic',
+          caption_entities: [
+            { type: 'text_link', offset: 0, length: 3, url: 'https://c.test' },
+          ],
+        },
+      }),
+    ).toEqual(['https://c.test'])
+    expect(
+      threadLinks({ text: '@OurBot', reply_to_message: { text: 'hi' } }),
+    ).toEqual([])
   })
 
   test('groups need an @mention of this bot', () => {

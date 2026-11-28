@@ -64,6 +64,7 @@ interface Message {
   caption?: string
   entities?: MessageEntity[]
   caption_entities?: MessageEntity[]
+  reply_to_message?: Message
 }
 
 /**
@@ -93,6 +94,21 @@ export function messageLinks(message: Message): string[] {
     }
   }
   return [...new Set(found)]
+}
+
+/**
+ * Links of a message followed by those of the message it replies to, once
+ * each. A partial `quote` doesn't matter: the full replied message is used.
+ */
+export function threadLinks(message: Message): string[] {
+  return [
+    ...new Set([
+      ...messageLinks(message),
+      ...(message.reply_to_message
+        ? messageLinks(message.reply_to_message)
+        : []),
+    ]),
+  ]
 }
 
 /**

@@ -8,7 +8,7 @@ import {
 } from './delivery.ts'
 import { Media } from './media.ts'
 import { COMMANDS, groupKeyboard } from './presentation.ts'
-import { addressedText, chunks, clipEntities, messageLinks } from './text.ts'
+import { addressedText, chunks, clipEntities, threadLinks } from './text.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
 import type { Message } from 'grammy/types'
 
@@ -200,7 +200,7 @@ export async function startBot(
       command = name
       arg = rest.join(' ').trim()
     }
-    const links = messageLinks(message).filter(validLink)
+    const links = threadLinks(message).filter(validLink)
     if (
       group &&
       command === 'save' &&
