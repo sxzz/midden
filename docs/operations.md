@@ -35,7 +35,7 @@
 - 网页的地址是根下的普通路径（如 `/settings/admin/jobs`），不是文件的路径都返回 `index.html`：Cloudflare 上由 `web/wrangler.json` 的 `not_found_handling: "single-page-application"` 回答，随部署生效，不需要在控制台另外设置。其他静态托管也需要同样的回退。
 - 以前的 `/app/…` 地址由 `_redirects`（`scripts/prepare-web-assets.ts`）永久重定向到根下同样的路径。网页域名上旧的 API 路径（`/v1/` 等）不再转发也不重定向：重定向到另一个来源时客户端会去掉 `Authorization`，调用的地方要改成 API 的域名。
 - 会话 Cookie 只属于 API 的域名，所以网页或 API 换了域名后要重新登录一次；通行密钥属于网页的域名（RP ID），网页域名不变就照常可用。
-- 添加到桌面（「设置 → 账号」）：Chrome、Edge 按 `web/public/manifest.webmanifest` 把网页安装为独立窗口的应用。iOS 的 Safari 没有安装提示，改为下载 `/midden.mobileconfig`：一个 Web Clip 描述文件，全屏打开 `https://<MIDDEN_WEB_HOSTNAME>/`，可以删除。它由 `scripts/prepare-web-assets.ts` 在构建时按环境变量 `MIDDEN_WEB_HOSTNAME`（网页的域名，如 `midden.example.com`；`web` 工作流传入同名的仓库变量，没有设置时构建失败）生成，标识符和 UUID 由域名派生，每次构建都一样，再次安装替换原来的；`_headers` 给它 `Content-Type: application/x-apple-aspen-config`。描述文件没有签名，iOS 显示「未验证」。从主屏幕打开的网页与 Safari 不共用 Cookie，第一次要再登录一次。server 自己提供网页时没有这个文件。
+- 添加到桌面（桌面导航栏底部深色模式按钮旁的图标按钮，手机上是设置列表中「深色模式」下面的一行）：Chrome、Edge 按 `web/public/manifest.webmanifest` 把网页安装为独立窗口的应用。iOS 的 Safari 没有安装提示，改为下载 `/midden.mobileconfig`：一个 Web Clip 描述文件，全屏打开 `https://<MIDDEN_WEB_HOSTNAME>/`，可以删除。它由 `scripts/prepare-web-assets.ts` 在构建时按环境变量 `MIDDEN_WEB_HOSTNAME`（网页的域名，如 `midden.example.com`；`web` 工作流传入同名的仓库变量，没有设置时构建失败）生成，标识符和 UUID 由域名派生，每次构建都一样，再次安装替换原来的；`_headers` 给它 `Content-Type: application/x-apple-aspen-config`。描述文件没有签名，iOS 显示「未验证」。从主屏幕打开的网页与 Safari 不共用 Cookie，第一次要再登录一次。server 自己提供网页时没有这个文件。
 
 ## API 令牌
 

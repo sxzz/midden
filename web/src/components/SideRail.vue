@@ -1,5 +1,6 @@
 <script setup vapor lang="ts">
 import { computed } from 'vue'
+import { PROFILE_PATH, useInstall } from '../composables/useInstall'
 import { useTabLinks } from '../composables/useTabLinks'
 import { shownTabs } from '../tabbar'
 import { darkTheme, toggleTheme } from '../theme'
@@ -19,6 +20,8 @@ const theme = computed(() => {
     ? { dark: true, label: '切换到浅色模式' }
     : { dark: false, label: '切换到深色模式' }
 })
+// 添加到桌面 beside it: Chrome's install prompt, or iOS Safari's profile.
+const { way: installWay, install } = useInstall()
 </script>
 
 <template>
@@ -65,34 +68,81 @@ const theme = computed(() => {
         </AppLink>
       </nav>
       <div class="foot">
-        <button
-          v-if="theme"
-          type="button"
-          class="theme"
-          :aria-label="theme.label"
-          :title="theme.label"
-          @click="toggleTheme"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            width="20"
-            height="20"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
+        <div v-if="theme || installWay" class="tools">
+          <button
+            v-if="theme"
+            type="button"
+            class="tool"
+            :aria-label="theme.label"
+            :title="theme.label"
+            @click="toggleTheme"
           >
-            <template v-if="theme.dark">
-              <circle cx="12" cy="12" r="4" />
-              <path
-                d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"
-              />
-            </template>
-            <path v-else d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" />
-          </svg>
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <template v-if="theme.dark">
+                <circle cx="12" cy="12" r="4" />
+                <path
+                  d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"
+                />
+              </template>
+              <path v-else d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" />
+            </svg>
+          </button>
+          <button
+            v-if="installWay === 'prompt'"
+            type="button"
+            class="tool"
+            aria-label="添加到桌面"
+            title="添加到桌面"
+            @click="install"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="4" y="4" width="16" height="16" rx="4" />
+              <path d="M12 8.5v7M8.5 12h7" />
+            </svg>
+          </button>
+          <a
+            v-else-if="installWay === 'profile'"
+            class="tool"
+            :href="PROFILE_PATH"
+            aria-label="添加到桌面"
+            title="添加到桌面"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="4" y="4" width="16" height="16" rx="4" />
+              <path d="M12 8.5v7M8.5 12h7" />
+            </svg>
+          </a>
+        </div>
         <RailUser :user="currentUser()" />
       </div>
     </div>
@@ -138,10 +188,11 @@ const theme = computed(() => {
 .logo {
   margin: 2px 0 4px;
 }
-/* Who is signed in, at the rail's foot, with the theme as a small icon
-   button on its own line above the avatar, at every rail width, so the
-   account row keeps its whole width for the name. A secondary control, so
-   not set as the tabs. */
+/* Who is signed in, at the rail's foot, with the theme and 添加到桌面 as
+   small icon buttons side by side on their own line above the avatar, at
+   every rail width, so the account row keeps its whole width for the name.
+   Secondary controls, so not set as the tabs. In the 88px rail the pair is
+   wider than its padding leaves and, centred, reaches into it. */
 .foot {
   display: flex;
   flex-direction: column;
@@ -149,7 +200,12 @@ const theme = computed(() => {
   gap: 4px;
   margin-top: auto;
 }
-.theme {
+.tools {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+.tool {
   display: grid;
   flex: none;
   place-items: center;
@@ -159,11 +215,11 @@ const theme = computed(() => {
   color: var(--subtle);
   transition: background 120ms ease;
 }
-.theme:hover {
+.tool:hover {
   background: var(--fill);
   color: var(--text);
 }
-.theme:focus-visible {
+.tool:focus-visible {
   outline-offset: -2px;
 }
 .name {
@@ -210,9 +266,9 @@ const theme = computed(() => {
   .foot > :deep(.who) {
     min-width: 0;
   }
-  /* Centred on the avatar's column: RailUser's 10px padding plus half its
-     40px avatar, less half of this 36px button. */
-  .theme {
+  /* The first button centred on the avatar's column: RailUser's 10px
+     padding plus half its 40px avatar, less half of a 36px button. */
+  .tools {
     align-self: flex-start;
     margin-left: 12px;
   }
@@ -225,7 +281,7 @@ const theme = computed(() => {
 @media (prefers-reduced-motion: reduce) {
   .logo,
   .item,
-  .theme {
+  .tool {
     transition: none;
   }
 }

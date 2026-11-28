@@ -1,12 +1,12 @@
 import { mockDesktop } from './desktop-mock'
 import { expect, test, type Page } from './test'
 
-// 设置 → 账号 → 添加到桌面: Chrome's install prompt, or Safari's home
-// screen profile on an iPhone; nothing in Telegram or an installed app.
-const account = (page: Page) =>
-  page.getByRole('region', { name: '账号', exact: true })
-const row = (page: Page) =>
-  account(page).getByRole('button', { name: /^添加到桌面/ })
+// 添加到桌面: Chrome's install prompt, or Safari's home screen profile on an
+// iPhone; on a phone a row under 设置's 深色模式, from 700px an icon button
+// beside the rail's theme button. Nothing in Telegram or an installed app.
+const list = (page: Page) =>
+  page.getByRole('navigation', { name: '设置的分区' })
+const ADD = { name: '添加到桌面', exact: true }
 
 /** Chrome's prompt, as the browser sends it, counting what it is asked. */
 async function firePrompt(page: Page) {
@@ -27,19 +27,76 @@ const prompted = (page: Page) =>
     () => (globalThis as unknown as { prompted?: number }).prompted ?? 0,
   )
 
-test("offers Chrome's install prompt once it comes", async ({ page }) => {
+test("on a phone, Chrome's prompt is a row under 深色模式", async ({
+  page,
+}) => {
   await mockDesktop(page)
-  await page.goto('/settings/account')
-  await expect(
-    account(page).getByRole('button', { name: /^昵称/ }),
-  ).toBeVisible()
-  await expect(row(page)).toHaveCount(0)
+  await page.goto('/settings')
+  await expect(list(page).getByRole('switch')).toBeVisible()
+  await expect(page.getByRole('button', ADD)).toHaveCount(0)
   await firePrompt(page)
-  await expect(row(page)).toContainText('在桌面或主屏幕上放一个Midden图标')
-  await row(page).click()
+  const row = list(page).getByRole('button', ADD)
+  await expect(row).toBeVisible()
+  // Right under 深色模式, 退出登录 under it.
+  await expect(list(page).locator('.theme-row + .install-row')).toHaveText(
+    '添加到桌面',
+  )
+  await expect(list(page).locator('.install-row + .logout')).toHaveCount(1)
+  // Not in 账号 any more.
+  await list(page).getByRole('link', { name: /账号/ }).click()
+  await expect(page.getByRole('button', { name: /^昵称/ })).toBeVisible()
+  await expect(page.getByText('添加到桌面')).toHaveCount(0)
+  await page.goBack()
+  await list(page).getByRole('button', ADD).click()
   await expect.poll(() => prompted(page)).toBe(1)
   // A prompt is shown once; dismissed, the row waits for the next.
-  await expect(row(page)).toHaveCount(0)
+  await expect(list(page).getByRole('button', ADD)).toHaveCount(0)
+})
+
+test.describe('on a wide window', () => {
+  test.use({ viewport: { width: 1440, height: 900 } })
+
+  test("Chrome's prompt is a button beside the rail's theme button", async ({
+    page,
+  }) => {
+    await mockDesktop(page)
+    await page.goto('/settings')
+    const rail = page.locator('.rail')
+    await expect(rail.getByRole('button', { name: /^切换到/ })).toBeVisible()
+    await expect(page.getByRole('button', ADD)).toHaveCount(0)
+    await firePrompt(page)
+    const button = rail.getByRole('button', ADD)
+    await expect(button).toHaveAttribute('title', '添加到桌面')
+    // Side by side, the same size.
+    const theme = (await rail
+      .getByRole('button', { name: /^切换到/ })
+      .boundingBox())!
+    const box = (await button.boundingBox())!
+    expect([box.width, box.height]).toEqual([theme.width, theme.height])
+    expect(box.y).toBe(theme.y)
+    expect(box.x).toBeGreaterThan(theme.x)
+    // Only the rail has it at this width, not 设置's list.
+    await expect(list(page).getByText('添加到桌面')).toHaveCount(0)
+    await button.click()
+    await expect.poll(() => prompted(page)).toBe(1)
+    await expect(button).toHaveCount(0)
+  })
+
+  test('it fits the rail of icons too', async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 900 })
+    await mockDesktop(page)
+    await page.goto('/settings')
+    await firePrompt(page)
+    const rail = (await page.locator('.rail').boundingBox())!
+    for (const name of [/^切换到/, /^添加到桌面$/]) {
+      const box = (await page
+        .locator('.rail')
+        .getByRole('button', { name })
+        .boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(rail.x)
+      expect(box.x + box.width).toBeLessThanOrEqual(rail.x + rail.width)
+    }
+  })
 })
 
 test('offers nothing in an installed app', async ({ page }) => {
@@ -54,12 +111,13 @@ test('offers nothing in an installed app', async ({ page }) => {
     })
   })
   await mockDesktop(page)
-  await page.goto('/settings/account')
+  await page.goto('/settings')
+  await expect(list(page).getByRole('switch')).toBeVisible()
   await firePrompt(page)
   await expect(
-    account(page).getByRole('button', { name: /^昵称/ }),
+    list(page).getByRole('button', { name: '退出登录' }),
   ).toBeVisible()
-  await expect(account(page)).not.toContainText('添加到桌面')
+  await expect(page.getByText('添加到桌面')).toHaveCount(0)
 })
 
 test('offers nothing inside Telegram', async ({ page }) => {
@@ -81,12 +139,11 @@ test('offers nothing inside Telegram', async ({ page }) => {
     })
   })
   await mockDesktop(page)
-  await page.goto('/settings/account')
+  await page.goto('/settings')
+  await expect(list(page).getByRole('link', { name: /关于/ })).toBeVisible()
   await firePrompt(page)
-  await expect(
-    account(page).getByRole('button', { name: /^昵称/ }),
-  ).toBeVisible()
-  await expect(account(page)).not.toContainText('添加到桌面')
+  await expect(list(page).getByRole('link', { name: /账号/ })).toBeVisible()
+  await expect(page.getByText('添加到桌面')).toHaveCount(0)
 })
 
 test.describe('in Safari on an iPhone', () => {
@@ -97,10 +154,10 @@ test.describe('in Safari on an iPhone', () => {
 
   test('links to the home screen profile', async ({ page }) => {
     await mockDesktop(page)
-    await page.goto('/settings/account')
-    const link = account(page).getByRole('link', { name: /^添加到桌面/ })
-    await expect(link).toContainText('在桌面或主屏幕上放一个Midden图标')
+    await page.goto('/settings')
+    const link = list(page).getByRole('link', ADD)
     await expect(link).toHaveAttribute('href', '/midden.mobileconfig')
+    await expect(list(page).locator('.theme-row + .install-row')).toHaveCount(1)
     const response = await page.request.get((await link.getAttribute('href'))!)
     expect(response.headers()['content-type']).toBe(
       'application/x-apple-aspen-config',
