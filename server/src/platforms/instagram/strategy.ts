@@ -9,6 +9,7 @@ import {
   type FetchRequest,
 } from '../protocol.ts'
 import { status } from '../rpc.ts'
+import { isSessionProxyError } from '../session-proxy.ts'
 import { recovered } from '../upstream.ts'
 import { InstagramClient, mediaId, type Node } from './client.ts'
 import {
@@ -341,7 +342,7 @@ export class CaptureStrategy {
           throw error
         result.incomplete = true
         result.warnings.push(
-          error instanceof ProviderError
+          error instanceof ProviderError || isSessionProxyError(error)
             ? error.message
             : 'Instagram 时间线读取失败。',
         )

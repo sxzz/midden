@@ -13,6 +13,7 @@ import { needsTransactionId } from '@fxembed/atmosphere/providers/twitter/proxy/
 import { ClientTransaction } from '@fxembed/atmosphere/providers/twitter/proxy/transaction/transaction'
 import { Visibility, type SourceResponse } from '../protocol.ts'
 import { status } from '../rpc.ts'
+import { isSessionProxyError, sessionFetch } from '../session-proxy.ts'
 import { upstream } from '../upstream.ts'
 import { accountBootstrap, accountUserAgent } from './bootstrap.ts'
 import { validateCredential, type SessionCredential } from './credential.ts'
@@ -144,7 +145,7 @@ export function accountTransport(
         try {
           generator = await transaction
         } catch (e) {
-          if (e instanceof ProviderError) throw e
+          if (e instanceof ProviderError || isSessionProxyError(e)) throw e
           throw new ProviderError(status.UNAVAILABLE, '采集账号请求签名不可用')
         }
         headers.set(
@@ -155,7 +156,7 @@ export function accountTransport(
           ),
         )
       }
-      const response = await upstream(fetcher, url, {
+      const response = await upstream(sessionFetch(fetcher), url, {
         ...init,
         headers,
         signal,

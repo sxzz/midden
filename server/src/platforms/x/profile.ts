@@ -16,6 +16,7 @@ import {
   type SourceResponse,
 } from '../protocol.ts'
 import { status } from '../rpc.ts'
+import { isSessionProxyError } from '../session-proxy.ts'
 import { recovered, upstream } from '../upstream.ts'
 import {
   addRelation,
@@ -349,7 +350,7 @@ export async function collectTimeline(
 function interrupted(result: FetchResponse, error: unknown): void {
   result.incomplete = true
   const why =
-    error instanceof ProviderError
+    error instanceof ProviderError || isSessionProxyError(error)
       ? error.message.replace(/。$/, '')
       : error instanceof Error &&
           (error.name === 'TimeoutError' || error.name === 'AbortError')

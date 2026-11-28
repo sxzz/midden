@@ -447,6 +447,15 @@ node:sqlite 是同步的：查询在网页进程的事件循环上运行时整�
 - 显示：`GET /v1/queue` 的 `rate_limits` 列出仍在限流中的范围（平台、账号名、接口、结束时间、开始时间、次数、原因、等待的任务数），「后台任务」页的「限流」一栏写成「X @foo · UserTweets」「15:30 恢复，还有 12 分钟 · 等待 3」，不是今天时带日期。采集记录与成员中等待限流的抓取显示「限流中」，关系网列表显示「120/300，限流中」；Telegram 的单条进度写「限流中…」，时间线进度在「进行中」后写「（限流中 3）」。
 - 日志：每次等待记 `job waits for a rate limit`（`scope`、`until`）；新遇到的限流照常记 `upstream request failed`（warn），已知的限流不发请求，不记。
 
+## 采集账号的出口
+
+设置了 `SESSION_PROXY` 时，带采集账号会话的请求经这个正向代理发出，其他请求直接发出（`platforms/session-proxy.ts`，运维见「采集账号的出口」）。
+
+- 在哪里：凭据只在三处加到请求上，`sessionFetch()` 就包在这三处：X 的 `accountTransport`（`x/session.ts`，账号的全部 GraphQL：帖子、时间线、按用户名查询、关注与粉丝列表、`Viewer`）、`accountBootstrap`（`x/bootstrap.ts`，账号的 `x.com/home`：请求签名与账号验证）、Instagram 的 `InstagramClient.request`（`instagram/client.ts`，账号的全部请求）。Atmosphere 用账号的请求都经 midden 给它的这两个出口（X 的 `twitterProxy.fetch`，Instagram `InstagramSessionProvider` 的请求回调），它自己直接发出的只有不带账号的请求（签名用的 `abs.twimg.com` 脚本、t.co 短链）。媒体、缩略图和头像的地址不需要 cookie，照常直接下载。
+- 怎样：代理在启动时装好（`runtime/context.ts` 的 `useSessionProxy`，两个进程各一个），是 undici 的 `ProxyAgent`（`http://`，`http` 目标也走 CONNECT 隧道）或 `Socks5ProxyAgent`（`socks5://`）。`sessionFetch(fetcher)` 给每个请求加上这个 dispatcher，无论调用方传入哪个 fetcher（测试的假 fetcher 忽略它）；没有设置时原样返回 fetcher。
+- 失败：连接代理本身的错误在 undici 的 connector 上做标记，再加上 CONNECT 的非 200 回答和 SOCKS5 的错误，都变成 `SessionProxyError`（`UNAVAILABLE`，`details.kind` 为 `session_proxy_unreachable`，`capture/errors.ts` 的 `errorCode` 也给出它），不改用直接连接。它是平台失败（`isProviderFailure`），`guard()` 原样传出，任务按临时失败重试；本来会把其他错误换成平台自己措辞的地方（签名、关系网列表、Instagram 的请求失败）让它原样通过。隧道建立之后的失败（平台的 TLS、超时）照旧是平台失败。
+- 启动检查：`checkSessionProxy` 经代理向 `https://x.com/` 发一次不带账号的 HEAD，只记日志。
+
 ## 媒体链接
 
 API 返回的媒体带有限时签名链接（`/media/<哈希>?e=…&t=…&s=…`），浏览器直接请求，不依赖登录 Cookie。链接在 12 小时的时间窗内保持不变，便于浏览器缓存。签名链接是相对于 API 的路径：网页构建时设了 `VITE_API_URL`（API 在另一个域名）时，`api.ts` 在解析回答时给名字以 `url` 结尾、以单个 `/` 开头的字段加上 API 的来源，组件拿到的就是完整的地址；Agent API 的回答本来就是完整的地址。

@@ -17,6 +17,7 @@ import { instagramShortcodeToPk } from '@fxembed/atmosphere/providers/instagram/
 import { rateLimitedKey } from '../platform.ts'
 import { SourceResponse, Visibility } from '../protocol.ts'
 import { status } from '../rpc.ts'
+import { isSessionProxyError, sessionFetch } from '../session-proxy.ts'
 import { upstream } from '../upstream.ts'
 import { ProviderError, responseError } from './errors.ts'
 import type { SessionCredential } from './credential.ts'
@@ -71,12 +72,13 @@ export class InstagramClient {
       )
     let response: Response
     try {
-      response = await upstream(this.fetcher, url, {
+      response = await upstream(sessionFetch(this.fetcher), url, {
         ...options,
         redirect: 'manual',
         signal: this.signal,
       })
-    } catch {
+    } catch (error) {
+      if (isSessionProxyError(error)) throw error
       throw new ProviderError(
         this.signal.aborted ? status.DEADLINE_EXCEEDED : status.UNAVAILABLE,
         'Instagram 请求失败',

@@ -24,6 +24,7 @@ import {
   type RelationsRequest,
 } from '../platform.ts'
 import { status } from '../rpc.ts'
+import { isSessionProxyError } from '../session-proxy.ts'
 import { upstream } from '../upstream.ts'
 import { decodeCredential } from './credential.ts'
 import { normalizeProfile } from './profile.ts'
@@ -259,6 +260,7 @@ async function listSession(
       limits.delete(key(q))
       break
     } catch (error) {
+      if (isSessionProxyError(error)) throw error
       if (!(error instanceof ProviderError)) {
         throw new ProviderError(status.UNAVAILABLE, '平台返回的关注列表无效')
       }

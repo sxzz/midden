@@ -11,6 +11,10 @@ const port = v.pipe(
   v.maxValue(65_535),
 )
 
+// `SESSION_PROXY`: a host name or address and a port, nothing else.
+const PROXY_URL =
+  /^(?:http|socks5):\/\/(?:[\w.-]+|\[[\da-f:.]+\]):(\d{1,5})\/?$/i
+
 const Env = v.object({
   DATA_DIR: v.optional(v.pipe(v.string(), v.nonEmpty()), 'data'),
   HOST: v.optional(v.pipe(v.string(), v.nonEmpty()), '0.0.0.0'),
@@ -107,6 +111,23 @@ const Env = v.object({
   // The Litestream sidecar's bucket token (compose.yaml); only its presence
   // matters here: the server then expects the sidecar's heartbeats.
   LITESTREAM_ACCESS_KEY_ID: v.optional(v.string()),
+  // A forward proxy every request with a capture account's session goes
+  // through (`#platforms/session-proxy.ts`), http:// (CONNECT) or socks5://,
+  // host and port only; unset, they go direct like everything else.
+  SESSION_PROXY: v.optional(
+    v.pipe(
+      v.string(),
+      v.check((url) => {
+        const match = PROXY_URL.exec(url)
+        const port = Number(match?.[1])
+        return port >= 1 && port <= 65_535 && URL.canParse(url)
+      }, 'SESSION_PROXY must be http://host:port or socks5://host:port'),
+      v.transform((url) => {
+        const parsed = new URL(url)
+        return `${parsed.protocol}//${parsed.host}`
+      }),
+    ),
+  ),
   // Which part of the server this process runs: `web` (HTTP, the bot),
   // `worker` (the job queue and timers), or `all` of it in one process.
   MIDDEN_ROLE: v.optional(
@@ -199,6 +220,8 @@ export interface Config {
   raw?: RawConfig
   /** Litestream replicates the database: watch for its heartbeats. */
   litestream: boolean
+  /** Where requests with a capture account's session go out; unset, direct. */
+  sessionProxy?: string
   /**
    * Development mode: anywhere NODE_ENV is not `production`, which the
    * image sets. Unlocks tools that would hurt real data, such as deleting
@@ -265,6 +288,7 @@ export function loadConfig(
       : {}),
     ...rawConfig(parsed),
     litestream: !!parsed.LITESTREAM_ACCESS_KEY_ID,
+    ...(parsed.SESSION_PROXY ? { sessionProxy: parsed.SESSION_PROXY } : {}),
     dev: parsed.NODE_ENV !== 'production',
   }
 }

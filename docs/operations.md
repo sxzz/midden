@@ -398,6 +398,28 @@ R2 没有对象版本，被删除或覆盖的对象不能恢复，这里也没�
 
 恢复较早的数据库（见「恢复」）时，那之后被删除的原始响应会回到数据库中，而它们在存储桶中的对象在删除 24 小时后就被回收了，读取这些原始响应会失败；其他原始响应不受影响。原始响应在存储桶中只有这一份，与 R2 中的媒体一样没有其他备份。
 
+## 采集账号的出口（`SESSION_PROXY`）
+
+带采集账号会话（cookie、token）的请求可以经一个正向代理发出，让平台看到它们来自平时使用这个账号的地址，而不是机房的地址（机房地址更容易被要求验证）。设置 `SESSION_PROXY` 后，这些请求都经它发出；不设置时与以前一样直接发出。见架构文档「采集账号的出口」。
+
+| 变量            | 说明                                                                                                                       |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `SESSION_PROXY` | `http://<host>:<port>`（HTTP 代理，经 CONNECT 隧道）或 `socks5://<host>:<port>`。只有主机和端口，不带用户名、密码或路径 |
+
+- 经代理：X 的账号接口（GraphQL：帖子、时间线、按用户名查询、关注与粉丝列表、账号验证 `Viewer`）和账号的 `x.com/home` 页面（请求签名、账号验证），Instagram 的全部账号请求。
+- 直接发出：FxTwitter 与其他公开接口、媒体原文件与缩略图、头像（平台给出的地址不需要 cookie）、X 签名用的公开脚本（`abs.twimg.com`）、t.co 短链、R2 与 Cloudflare、Telegram。
+- 代理连不上（拒绝连接、解析不到、10 秒内连不上）或拒绝隧道（CONNECT 的回答不是 200、SOCKS5 握手失败）时，请求失败，不改为直接发出：错误为「采集账号代理不可达」（`UNAVAILABLE`），任务日志的 `errorCode` 为 `session_proxy_unreachable`，与平台的临时失败一样重试；每次记 `session proxy unreachable; the session request was not sent`（warn，带 `proxy`、`host`、`reason`）。时间线读到一半时已读到的保留，记录不完整，警告「帖子获取中断：采集账号代理不可达。」；添加、验证账号时提示「账号验证失败：采集账号代理不可达」，账号不会因此标为需要重新授权。代理长时间不可用时，用到账号的任务用完重试次数后失败，恢复后在记录中「重试」。
+- 启动：两个进程各自经代理向 `https://x.com/` 发一次 HEAD（不带账号，15 秒超时），记 `session proxy reachable`（info，带 `status`）或 `session proxy unreachable at startup; session requests fail until it is back`（warn，带 `reason`）。只记日志，不影响启动。
+- SOCKS5 用的是 undici 的实验性支持，进程启动时输出一次 `ExperimentalWarning`。
+
+### 设置
+
+1. 在平时使用这些账号的机器上运行一个正向代理：支持 CONNECT 的 HTTP 代理（如 tinyproxy、Squid）或 SOCKS5 代理。只在 tailnet 的地址上监听，只允许 tailnet 内的地址连接（代理本身不做认证，所以不能对公网或局域网开放）；可以把 CONNECT 的目标限制在 443 端口。
+2. 在部署机上确认经 tailnet 连得到它：`curl -x http://<home-host>:<port> -sI https://x.com/` 应有回答（容器经部署机的网络出去）。
+3. 在部署目录的 `.env` 中加上 `SESSION_PROXY=http://<home-host>:<port>`（`<home-host>` 是那台机器在 tailnet 中的名字或地址），`docker compose up -d`（或推送后自动部署）。
+4. 看两个进程的启动日志中的 `session proxy reachable`。之后带账号的抓取照常完成，代理的访问日志中只有 X 与 Instagram 主机（`x.com`、`api.x.com`、`www.instagram.com`）的 CONNECT。
+5. 关闭：删去 `SESSION_PROXY` 后重启，带账号的请求恢复直接发出。
+
 ## 备份与恢复
 
 需要备份的是数据库、媒体与 `.env`（原始响应移到存储桶后只在那里，见「原始响应（R2）」）：

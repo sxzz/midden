@@ -220,3 +220,39 @@ describe('raw response bucket configuration', () => {
       )
   })
 })
+
+describe('session proxy configuration', () => {
+  test('direct without it', () => {
+    expect(loadConfig({ SECRET_KEY }).sessionProxy).toBeUndefined()
+  })
+
+  test('http or socks5, host and port', () => {
+    for (const [input, output] of [
+      ['http://proxy.example:3128', 'http://proxy.example:3128'],
+      ['http://proxy.example:3128/', 'http://proxy.example:3128'],
+      ['HTTP://100.64.0.1:8888', 'http://100.64.0.1:8888'],
+      ['socks5://proxy.example:1080', 'socks5://proxy.example:1080'],
+      ['http://[fd7a::1]:3128', 'http://[fd7a::1]:3128'],
+    ])
+      expect(
+        loadConfig({ SECRET_KEY, SESSION_PROXY: input }).sessionProxy,
+      ).toBe(output)
+  })
+
+  test('anything else is refused', () => {
+    for (const SESSION_PROXY of [
+      '',
+      'proxy.example:3128',
+      'http://proxy.example',
+      'https://proxy.example:3128',
+      'socks4://proxy.example:1080',
+      'http://user:pass@proxy.example:3128',
+      'http://proxy.example:3128/path',
+      'http://proxy.example:0',
+      'http://proxy.example:70000',
+    ])
+      expect(() => loadConfig({ SECRET_KEY, SESSION_PROXY })).toThrow(
+        'SESSION_PROXY must be http://host:port or socks5://host:port',
+      )
+  })
+})

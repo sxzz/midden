@@ -12,6 +12,7 @@ import { loadLangModel } from '#lang/detect.ts'
 import { catalogMissing } from '#library/catalog.ts'
 import { createInstagramPlatform } from '#platforms/instagram/index.ts'
 import { Platforms } from '#platforms/registry.ts'
+import { checkSessionProxy, useSessionProxy } from '#platforms/session-proxy.ts'
 import { createXPlatform } from '#platforms/x/index.ts'
 import { openRawStore, type RawStore } from '#raw/store.ts'
 import type { AccountsContext } from '#accounts/accounts.ts'
@@ -97,6 +98,13 @@ export async function openRuntime(
     overrides.blobs ?? (await openMediaStore(config, signer, logger))
   const raw = overrides.raw ?? (await openRawStore(config, logger))
   logger.info({ store: raw ? 'r2' : 'database' }, 'raw responses store')
+
+  if (config.sessionProxy) {
+    cleanups.push(useSessionProxy(config.sessionProxy, logger))
+    // Only logged: a proxy that is down fails session requests, which
+    // retry, until it is back.
+    checkSessionProxy(logger).catch(() => {})
+  }
 
   const throttle = role === 'web' ? undefined : new Throttle()
   let ctx!: AccountsContext

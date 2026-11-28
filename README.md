@@ -45,6 +45,7 @@ docker compose up -d
 | `MEDIA_STORE` 等 | 可选，把媒体原文件存到 Cloudflare R2，见 [运维](docs/operations.md#媒体存储cloudflare-r2) |
 | `COMPOSE_PROFILES=litestream`、`LITESTREAM_ACCESS_KEY_ID`、`LITESTREAM_SECRET_ACCESS_KEY` | 可选，用 Litestream 把数据库持续复制到 R2，见 [运维](docs/operations.md#litestream) |
 | `RAW_R2_BUCKET` | 可选，把原始响应移到 R2 的私有存储桶（密钥由 `CF_API_TOKEN` 派生），见 [运维](docs/operations.md#原始响应r2) |
+| `SESSION_PROXY` | 可选，带采集账号会话的请求经这个正向代理（`http://<host>:<port>` 或 `socks5://<host>:<port>`）发出，见 [运维](docs/operations.md#采集账号的出口session_proxy) |
 
 ### 接入 Telegram
 

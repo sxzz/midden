@@ -8,6 +8,10 @@ import {
 } from '#jobs/queue.ts'
 import { isProviderFailure } from '#platforms/platform.ts'
 import { status, statusName } from '#platforms/rpc.ts'
+import {
+  isSessionProxyError,
+  SESSION_PROXY_UNREACHABLE,
+} from '#platforms/session-proxy.ts'
 import type { Classification } from '#platforms/upstream.ts'
 
 // Platform statuses that retrying cannot fix.
@@ -91,6 +95,7 @@ export function errorCode(error: unknown): string {
     error.cause !== undefined
   )
     return errorCode(error.cause)
+  if (isSessionProxyError(error)) return SESSION_PROXY_UNREACHABLE
   if (isProviderFailure(error)) return statusName(error.code)
   if (isAppError(error)) return error.kind
   return error instanceof Error ? error.name : 'unknown'
