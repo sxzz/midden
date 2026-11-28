@@ -75,7 +75,7 @@ async function asViewer(page: Page) {
         })),
       })
     if (path === '/tokens') return r.fulfill({ json: [] })
-    // The archive's counts, without the capture records' ones.
+    // The archive's counts, today's captures and updates too.
     if (path === '/library/stats')
       return r.fulfill({
         json: {
@@ -86,8 +86,8 @@ async function asViewer(page: Page) {
           used_bytes: 12_800_000_000,
           saved_today: 3,
           saved_this_week: 17,
-          captures_today: null,
-          updates_today: null,
+          captures_today: 4,
+          updates_today: 2,
         },
       })
     return r.fallback()
@@ -170,7 +170,7 @@ test.describe('a viewer', () => {
     expect(refused).toEqual([])
   })
 
-  test('sees 全站统计 without the captures and updates of today', async ({
+  test('sees 全站统计 in full, today’s captures and updates too', async ({
     page,
   }) => {
     const { refused } = await asViewer(page)
@@ -183,6 +183,8 @@ test.describe('a viewer', () => {
       '含视频的帖子',
       '今天新增',
       '本周新增',
+      '今天采集',
+      '今天更新',
     ])
     await expect(stats).toContainText('1,280')
     await expect(stats).toContainText('已用空间')

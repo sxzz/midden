@@ -72,8 +72,7 @@ watch(lists, readRunning, { immediate: true })
 /**
  * 全站统计: the archive as a whole (GET /v1/library/stats), read when a list
  * is shown and again when its count changes; the server keeps the figures
- * for a minute while nothing is saved or deleted. Viewers see it too; the
- * captures and updates of today are the admin's (null for a viewer).
+ * for a minute while nothing is saved or deleted. Viewers see all of it.
  */
 const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
 const stats = useStale(() =>

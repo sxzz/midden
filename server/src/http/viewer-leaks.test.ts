@@ -294,7 +294,7 @@ describe('what viewers read', () => {
     ).toContain(w.tag)
   })
 
-  test('全站统计: a viewer reads the archive’s counts, as the admin does, without the capture records’ ones', async () => {
+  test('全站统计: a viewer reads the same counts as the admin, today’s captures and updates included', async () => {
     const w = await canaries()
     const route = '/library/stats?tz=Asia%2FTokyo'
     const asViewer = await w.web(route)
@@ -304,17 +304,8 @@ describe('what viewers read', () => {
     const theirs = JSON.parse(asViewer.text) as Record<string, unknown>
     const admins = JSON.parse(asAdmin.text) as Record<string, unknown>
     expect(admins.captures_today).toBeGreaterThan(0)
-    expect(theirs).toEqual({
-      ...admins,
-      captures_today: null,
-      updates_today: null,
-    })
-    expect(
-      Object.values(theirs).every((n) => n === null || typeof n === 'number'),
-    ).toBe(true)
-    // Asked again, each still gets their own: what is kept is not theirs.
-    expect((await w.web(route)).text).toBe(asViewer.text)
-    expect((await w.web(route, w.adminCookie)).text).toBe(asAdmin.text)
+    expect(theirs).toEqual(admins)
+    expect(Object.values(theirs).every((n) => typeof n === 'number')).toBe(true)
   })
 
   test('the admin’s notes never reach a viewer: not by setting their nickname, nor by the admin’s routes', async () => {
