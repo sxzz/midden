@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Deploy the newest published image to the checkout in MIDDEN_DIR (default
-// ~/midden), or with --check only report what would be deployed. A version
-// that is not healthy, or fails the smoke test of its main endpoints, is
-// rolled back. Uses Node built-ins (and curl) only: the deploy webhook runs
+// ~/midden, /opt/midden for root on Linux), or with --check only report what
+// would be deployed. A version that is not healthy, or fails the smoke test
+// of its main endpoints, is rolled back. Uses Node built-ins (and curl) only: the deploy webhook runs
 // this file as it is on origin/main.
 //
 //   node scripts/deploy.ts [--check]
@@ -50,6 +50,21 @@ const SMOKE_TIMEOUT = 15
 const SMOKE_EXPIRES = '15m'
 // What `midden token create --ro` prints on stdout, alone.
 const SECRET = /^mdn_ro_[\w-]+$/
+
+/**
+ * The deployment checkout: MIDDEN_DIR, else /opt/midden for root on Linux
+ * (a system service's home is no place for it), else ~/midden.
+ */
+export function deploymentDir(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  uid: number | undefined = process.getuid?.(),
+  home: string = homedir(),
+): string {
+  if (env.MIDDEN_DIR) return path.resolve(env.MIDDEN_DIR)
+  if (platform === 'linux' && uid === 0) return '/opt/midden'
+  return path.join(home, 'midden')
+}
 
 /** Runs a command in the checkout and returns its trimmed stdout. */
 export type Run = (
@@ -386,10 +401,11 @@ export function deploy(
 
   /**
    * With everything stopped, a copy of the database and its WAL, kept with
-   * the newest `keep` copies. Cloned (APFS, copy-on-write) where the file
-   * system can, so even a large database copies at once. No checkpoint:
-   * resetting the WAL would lose Litestream its place (see start); the two
-   * files together are consistent.
+   * the newest `keep` copies. Cloned (copy-on-write: APFS, Btrfs, XFS)
+   * where the file system can, so even a large database copies at once;
+   * elsewhere (ext4) a full copy. No checkpoint: resetting the WAL would
+   * lose Litestream its place (see start); the two files together are
+   * consistent.
    */
   function snapshot(dataDir: string, keep: number): Backup {
     const database = path.join(dataDir, 'midden.db')
@@ -700,9 +716,7 @@ export function deploy(
 
 if (import.meta.main) {
   const check = process.argv.includes('--check')
-  const dir = path.resolve(
-    process.env.MIDDEN_DIR || path.join(homedir(), 'midden'),
-  )
+  const dir = deploymentDir()
   const run: Run = (command, args, env) =>
     execFileSync(command, args, {
       cwd: dir,

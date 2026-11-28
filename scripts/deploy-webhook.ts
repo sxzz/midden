@@ -395,8 +395,13 @@ if (import.meta.main) {
   // broken path. Only the order changes, so an IPv6-only host still works,
   // and it needs no per-request dispatcher.
   setDefaultResultOrder('ipv4first')
+  // As deploy.ts's deploymentDir; this file runs alone, so it cannot import
+  // it. The installer sets MIDDEN_DIR anyway.
   const dir = path.resolve(
-    process.env.MIDDEN_DIR || path.join(homedir(), 'midden'),
+    process.env.MIDDEN_DIR ||
+      (process.platform === 'linux' && process.getuid?.() === 0
+        ? '/opt/midden'
+        : path.join(homedir(), 'midden')),
   )
   const secret = readFileSync(
     process.env.DEPLOY_WEBHOOK_SECRET_FILE ||

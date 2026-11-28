@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 // Offline maintenance of the database on the deploy host, in the checkout in
-// MIDDEN_DIR (default ~/midden): stop the running version and Litestream as
-// a deployment does, run `cli.ts maintain` in that version's image, then
-// start Litestream, the web process and the worker again in a deployment's
-// order. Holds the deploy lock meanwhile. See docs/operations.md, 数据库维护.
+// MIDDEN_DIR (default ~/midden, /opt/midden for root on Linux): stop the
+// running version and Litestream as a deployment does, run `cli.ts maintain`
+// in that version's image, then start Litestream, the web process and the
+// worker again in a deployment's order. Holds the deploy lock meanwhile.
+// See docs/operations.md, 数据库维护.
 //
 //   node scripts/maintain.ts [--no-vacuum] [--rebuild-search]
 
 /* eslint-disable unicorn/no-exports-in-scripts -- for maintain.test.ts */
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, rmdirSync, rmSync } from 'node:fs'
-import { homedir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
-import { services, type Run } from './deploy.ts'
+import { deploymentDir, services, type Run } from './deploy.ts'
 
 const IMAGE = 'ghcr.io/sxzz/midden'
 
@@ -91,9 +91,7 @@ export function maintain(
 }
 
 if (import.meta.main) {
-  const dir = path.resolve(
-    process.env.MIDDEN_DIR || path.join(homedir(), 'midden'),
-  )
+  const dir = deploymentDir()
   const run: Run = (command, args, env) =>
     execFileSync(command, args, {
       cwd: dir,
