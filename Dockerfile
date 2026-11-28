@@ -29,8 +29,9 @@ FROM node:${NODE_VERSION}-alpine${ALPINE_VERSION} AS node
 # Run: Node executes the server's TypeScript directly. Only the node binary
 # is taken from the Node image, leaving out npm, Yarn and Corepack. The node
 # user keeps the official image's IDs, which own existing data volumes.
+# Node's musl build links libstdc++, and on x86_64 also libatomic.
 FROM alpine:${ALPINE_VERSION}
-RUN apk add --no-cache libstdc++ && \
+RUN apk add --no-cache libstdc++ libatomic && \
   addgroup -g 1000 node && adduser -u 1000 -G node -s /bin/sh -D node
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 WORKDIR /srv
